@@ -2546,10 +2546,8 @@ TEST(GpuVmPipeline, DeferredTensorLoadReportsInstructionPcAtCompletion) {
     void
     onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override {
       pcs.push_back(access.pc);
-      lds_ranges.assign(access.lds_ranges.begin(), access.lds_ranges.end());
     }
     std::vector<uint64_t> pcs;
-    std::vector<amdgpu::TensorDmaLdsRange> lds_ranges;
   };
 
   TranslatedPipelineContext context;
@@ -2595,8 +2593,85 @@ TEST(GpuVmPipeline, DeferredTensorLoadReportsInstructionPcAtCompletion) {
 
   EXPECT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(observer->pcs, (std::vector<uint64_t>{kIssuePc}));
-  EXPECT_EQ(observer->lds_ranges, (std::vector<amdgpu::TensorDmaLdsRange>{
-                                      {.address = context.wf->lds_base(), .bytes = 8}}));
+}
+
+// A tensor load whose global read is unavailable is deferred: its wave waits in
+// VM_RETRY with its PC past the instruction, and the next step completes it. It
+// issues once, before any data moves, and its completion reports its own PC.
+TEST(GpuVmPipeline, DeferredTensorLoadIssuesOnceAndCompletesAtItsInstructionPc) {
+  class TensorDmaStepObserver final : public ExecutionPlugin {
+  public:
+    TensorDmaStepObserver() : ExecutionPlugin("tensor-dma-step") {}
+    bool observes_tensor_dma_issue() const override { return true; }
+    bool observes_tensor_dma_memory_access() const override { return true; }
+    void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &issue,
+                                 const amdgpu::Wavefront &) override {
+      ++issues;
+      lds_ranges.assign(issue.lds_ranges.begin(), issue.lds_ranges.end());
+      if (on_issue)
+        on_issue();
+    }
+    void
+    onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override {
+      completion_pcs.push_back(access.pc);
+    }
+    int issues = 0;
+    std::vector<amdgpu::TensorDmaLdsRange> lds_ranges;
+    std::vector<uint64_t> completion_pcs;
+    std::function<void()> on_issue;
+  };
+
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_NE(context.wf, nullptr);
+  context.wf->set_lds_base(context.cu->allocate_lds(256));
+  context.wf->set_lds_size(256);
+  auto plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<TensorDmaStepObserver>();
+  TensorDmaStepObserver *observer = plugin.get();
+  ASSERT_TRUE(plugin_group->add(std::move(plugin)));
+  context.sim.soc->set_plugin_group(plugin_group);
+
+  constexpr uint64_t kCodeAddress = 0x1000;
+  constexpr uint64_t kDataAddress = 0x2000;
+  constexpr uint32_t kValue = 0x12345678u;
+  constexpr uint32_t kSentinel = 0xa5a55a5au;
+  constexpr uint32_t kSNopGfx12 = 0xBF800000u;
+  // tensor_load_to_lds of one i32 element into LDS offset 0.
+  const std::array<uint32_t, 4> code = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u, kSNopGfx12};
+  context.external->store(kCodeAddress, code);
+  context.external->store(kDataAddress, kValue);
+  const uint32_t sgprs = context.wf->sgpr_alloc().base;
+  const std::array<uint32_t, 4> group0{1, 0, static_cast<uint32_t>(kDataAddress),
+                                       static_cast<uint32_t>(kDataAddress >> 32) | 0x80000000u};
+  const std::array<uint32_t, 8> group1{2u << 16, 1u << 16, 0, 1u << 16, 0, 0, 0, 0};
+  for (uint32_t reg = 0; reg < group0.size(); ++reg)
+    context.cu->write_sgpr(sgprs + reg, group0[reg]);
+  for (uint32_t reg = 0; reg < group1.size(); ++reg)
+    context.cu->write_sgpr(sgprs + 12 + reg, group1[reg]);
+  const uint32_t lds_address = context.wf->lds_base();
+  context.wf->lds().write32(lds_address, kSentinel);
+  bool lds_untouched_at_issue = false;
+  observer->on_issue = [&] {
+    lds_untouched_at_issue = context.wf->lds().read32(lds_address) == kSentinel;
+  };
+  context.wf->pc = kCodeAddress;
+  context.wf->set_exec(1);
+  context.external->unavailable_read_call = 2;
+
+  EXPECT_TRUE(context.cu->step());
+  EXPECT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+  EXPECT_EQ(observer->issues, 1);
+  EXPECT_TRUE(lds_untouched_at_issue);
+  EXPECT_EQ(observer->lds_ranges,
+            (std::vector<amdgpu::TensorDmaLdsRange>{{.address = lds_address, .bytes = 4}}));
+  EXPECT_EQ(context.wf->lds().read32(lds_address), kSentinel);
+  EXPECT_TRUE(observer->completion_pcs.empty());
+
+  static_cast<void>(context.cu->step());
+  EXPECT_EQ(observer->issues, 1);
+  EXPECT_EQ(context.wf->lds().read32(lds_address), kValue);
+  EXPECT_EQ(observer->completion_pcs, (std::vector<uint64_t>{kCodeAddress}));
 }
 
 TEST(GpuVmPipeline, TranslatedTensorStoreRetriesWithoutReplayingOrResnapshottingLds) {

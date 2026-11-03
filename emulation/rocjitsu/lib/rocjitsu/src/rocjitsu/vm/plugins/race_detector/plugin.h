@@ -85,7 +85,7 @@ public:
 
   bool observes_sgpr_reads() const override { return true; }
   bool observes_memory_routing() const override { return true; }
-  bool observes_tensor_dma_memory_access() const override { return true; }
+  bool observes_tensor_dma_issue() const override { return true; }
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
 
@@ -96,10 +96,9 @@ public:
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
                                   const Instruction &inst, amdgpu::Wavefront &wf) override;
 
-  using ExecutionPlugin::onAmdgpuTensorDmaMemoryAccess;
-  /// Register a tensor DMA transfer's LDS side as an event on TENSORCNT.
-  void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
-                                     const amdgpu::Wavefront &wf) override;
+  /// Register an issued tensor DMA instruction's LDS side as an event on TENSORCNT.
+  void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &issue,
+                               const amdgpu::Wavefront &wf) override;
 
   void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override;

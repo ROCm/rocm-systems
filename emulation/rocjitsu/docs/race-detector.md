@@ -204,7 +204,10 @@ races. Some examples:
   store's source before `s_wait_tensorcnt` is reported; other waves also need an
   `s_barrier`. A load covers every element of its tile, including elements
   outside the tensor, which it zero-fills; padding bytes are excluded. A store
-  covers only the elements inside the tensor.
+  covers only the elements inside the tensor. Each instruction is registered
+  when it issues, as other memory instructions are, so an instruction that
+  moves no data still occupies its `tensorcnt` slot, and a transfer that waits
+  for memory is pending from the moment it issues.
 
 Detection is at byte granularity: D16 (half-register) loads only flag races on
 the affected bytes, and LDS races are tracked per byte.
@@ -495,13 +498,6 @@ gfx1151, using absolute paths from this source tree. The original
   `wait_hazard_test.cpp` suite records this boundary. Supporting embedded waits
   requires retirement before the instruction's register accesses.
 
-- **Deferred tensor DMA transfers**: a tensor DMA transfer is registered when it
-  completes. When the emulator defers a transfer until its memory becomes
-  available, the issuing wave stalls, but other waves keep running. Their LDS
-  accesses during the delay are checked when the transfer is registered. Such a
-  race is still reported at the tensor instruction, not at the PC the wave has
-  moved on to.
-
 - **Tensor DMA scope**: only the LDS side of a transfer is tracked. Its global
   memory accesses are not checked.
 
@@ -515,14 +511,11 @@ gfx1151, using absolute paths from this source tree. The original
   racing with the tensor load. These reports are false positives, not missing
   coverage.
 
-- **False positives after tensor DMA instructions that move no data**: a
-  tensor DMA instruction that touches neither global memory nor LDS, such as a
-  store whose tile lies wholly outside the tensor or a NULL descriptor
-  (`count = 0`), still occupies a TENSORcnt slot, but the detector records no
-  event for it. A later `s_wait_tensorcnt` with a nonzero count therefore
-  retires one transfer fewer than the hardware completes: an earlier transfer
-  stays pending, and an access to its LDS bytes is reported as a race. A
-  `s_wait_tensorcnt 0` is unaffected.
+- **NULL tensor descriptors**: like the emulator, the detector counts a NULL
+  descriptor (`count = 0`) on `tensorcnt`. That is an emulator assumption:
+  hardware behavior for this encoding is not established. If hardware does not
+  count it, a nonzero `s_wait_tensorcnt` that the detector accepts can leave an
+  earlier transfer pending, so a real race would go unreported.
 
 - **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
   plugin's instruction-write lane and byte masks. DPP destinations can currently

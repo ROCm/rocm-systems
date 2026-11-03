@@ -446,10 +446,10 @@ Plugins can opt out of individual high-frequency hooks by overriding
 `observes_async_instruction_issued()`,
 `observes_memory_instruction_routing()`, `observes_vgpr_reads()`,
 `observes_vgpr_writes()`, `observes_sgpr_reads()`,
-`observes_scalar_register_writes()`, `observes_memory_routing()`, or
-`observes_tensor_dma_memory_access()`. The group samples these stable flags
-when the plugin is added and avoids both fanout and upstream observation work
-when no contained plugin consumes a hook.
+`observes_scalar_register_writes()`, `observes_memory_routing()`,
+`observes_tensor_dma_memory_access()`, or `observes_tensor_dma_issue()`. The
+group samples these stable flags when the plugin is added and avoids both
+fanout and upstream observation work when no contained plugin consumes a hook.
 
 For finer-grained selection, `observes_hot_hooks_for_wavefront(wf)` controls
 all high-frequency callbacks for one wavefront. After every plugin's
@@ -551,21 +551,30 @@ routing path. `onAmdgpuTensorDmaMemoryAccess` reports them separately after the
 instruction and any descriptor-requested atomic-barrier arrival return normally.
 Its `addresses` member is a callback-lifetime `TensorDmaAddressView` over the
 in-bounds global element bases whose requests were attempted, in execution order
-with duplicates preserved. Its `lds_ranges` member is a callback-lifetime span of
-the LDS byte runs the transfer wrote (loads) or read (stores), with adjacent
-elements merged. A load writes every element of its tile, zero-filling those
-outside the tensor, so a load whose tile lies wholly outside the tensor has LDS
-ranges but no global requests; consumers must accept an empty `addresses`. A
-store reads only in-bounds elements. Transfers with neither global requests nor
-LDS ranges, such as disabled descriptors, produce no callback. `pc` is the tensor
-instruction's PC, also when a deferred transfer completes after the wavefront
-has moved past the instruction.
-Consumers must opt in through `observes_tensor_dma_memory_access()`. A consumer
-that retains addresses must use `size()` to budget and allocate the event, then
-call `copy_to()` during the callback; a failed copy means the observation is
-malformed and must be rejected. Tensor-DMA observers that need wave-local state
-may override `onAmdgpuTensorDmaMemoryAccess(access, wf)`; its default forwards to
-the observation-only overload.
+with duplicates preserved. Empty and fully masked transfers produce no callback.
+`pc` is the tensor instruction's PC, also when a deferred transfer completes
+after the wavefront has moved past the instruction. Consumers must opt in
+through `observes_tensor_dma_memory_access()`. A consumer that retains addresses
+must use `size()` to budget and allocate the event, then call `copy_to()` during
+the callback; a failed copy means the observation is malformed and must be
+rejected. Tensor-DMA observers that need wave-local state may override
+`onAmdgpuTensorDmaMemoryAccess(access, wf)`; its default forwards to the
+observation-only overload.
+
+`onAmdgpuTensorDmaIssued(issue, wf)` is the tensor DMA counterpart of
+`onAmdgpuMemoryAccessRouted`. It fires once for every tensor DMA instruction, in
+the issuing wavefront's instruction step, after the descriptor is read and,
+unless it is NULL, validated and before any data moves. That includes an
+instruction that moves no data: a store whose tile lies wholly outside the
+tensor still completes on TENSORcnt, and the emulator also counts a NULL
+descriptor (`count = 0`) on TENSORcnt, an assumption since hardware behavior for
+that encoding is not established. A transfer that waits for memory is reported
+when it issues and not again when it resumes. Its `lds_ranges` member is a
+callback-lifetime span of the LDS byte runs the transfer will write (loads) or
+read (stores), with adjacent elements merged and padding bytes excluded. A load
+covers every element of its tile, zero-filling those outside the tensor; a store
+covers only in-bounds elements. Consumers must opt in through
+`observes_tensor_dma_issue()`.
 
 SGPR owner resolution is skipped when no contained plugin observes scalar
 register reads. Plugins that consume neither `onAmdgpuReadScalarRegister` nor
@@ -654,9 +663,9 @@ way.
    plugin consumes. Use `observes_hot_hooks_for_wavefront()` when subscription
    also depends on the dispatched wavefront; keep that predicate lock-free,
    thread-safe, and stable after dispatch. A consumer of
-   `onAmdgpuMemoryAccessRouted` or `onAmdgpuTensorDmaMemoryAccess` must explicitly
-   return `true` from the corresponding interest method because those two
-   conservative defaults are `false`.
+   `onAmdgpuMemoryAccessRouted`, `onAmdgpuTensorDmaMemoryAccess`, or
+   `onAmdgpuTensorDmaIssued` must explicitly return `true` from the corresponding
+   interest method because those conservative defaults are `false`.
 7. Enable it by adding `"myname": { ... }` to the `plugins` section of
    the config file.
 8. Return `true` from `supports_async_instructions()` only when the plugin accepts

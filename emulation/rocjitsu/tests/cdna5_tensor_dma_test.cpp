@@ -38,7 +38,6 @@ struct CapturedTensorDmaAccess {
   int64_t tensor_dim1_stride = 0;
   bool is_load = true;
   std::vector<uint64_t> addresses;
-  std::vector<amdgpu::TensorDmaLdsRange> lds_ranges;
 };
 
 class TensorDmaObservationPlugin final : public ExecutionPlugin {
@@ -70,7 +69,6 @@ public:
         .tensor_dim1_stride = access.tensor_dim1_stride,
         .is_load = access.is_load,
         .addresses = {},
-        .lds_ranges = {access.lds_ranges.begin(), access.lds_ranges.end()},
     });
     captured.addresses.resize(access.addresses.size());
     EXPECT_TRUE(access.addresses.copy_to(captured.addresses));
@@ -87,6 +85,46 @@ TensorDmaObservationPlugin &install_tensor_dma_observer(Gfx1250Sim &sim, bool wa
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto observer =
       std::make_unique<TensorDmaObservationPlugin>("tensor_dma_observation", wants_hook);
+  auto *result = observer.get();
+  EXPECT_TRUE(group->add(std::move(observer)));
+  sim.plugin_group = std::move(group);
+  sim.soc->set_plugin_group(sim.plugin_group);
+  return *result;
+}
+
+/// Records every tensor DMA issue observation, copying its LDS ranges.
+class TensorDmaIssuePlugin final : public ExecutionPlugin {
+public:
+  explicit TensorDmaIssuePlugin(std::string name = "tensor_dma_issue", bool wants_hook = true)
+      : ExecutionPlugin(std::move(name)), wants_hook_(wants_hook) {}
+
+  bool observes_tensor_dma_issue() const override { return wants_hook_; }
+
+  void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &issue,
+                               const amdgpu::Wavefront &wf) override {
+    if (inspect)
+      inspect(issue, wf);
+    issues.push_back({.is_load = issue.is_load,
+                      .element_size_bytes = issue.element_size_bytes,
+                      .lds_ranges = {issue.lds_ranges.begin(), issue.lds_ranges.end()}});
+  }
+
+  struct Captured {
+    bool is_load = true;
+    uint32_t element_size_bytes = 0;
+    std::vector<amdgpu::TensorDmaLdsRange> lds_ranges;
+  };
+
+  std::function<void(const amdgpu::TensorDmaIssueObservation &, const amdgpu::Wavefront &)> inspect;
+  std::vector<Captured> issues;
+
+private:
+  bool wants_hook_ = true;
+};
+
+TensorDmaIssuePlugin &install_tensor_dma_issue_observer(Gfx1250Sim &sim, bool wants_hook = true) {
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto observer = std::make_unique<TensorDmaIssuePlugin>("tensor_dma_issue", wants_hook);
   auto *result = observer.get();
   EXPECT_TRUE(group->add(std::move(observer)));
   sim.plugin_group = std::move(group);
@@ -662,10 +700,6 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationReportsCompletedDenseLoadAndStore
   EXPECT_TRUE(load_access.is_load);
   EXPECT_EQ(load_access.addresses, (std::vector<uint64_t>{kLoadGlobal, kLoadGlobal + 4,
                                                           kLoadGlobal + 16, kLoadGlobal + 20}));
-  // The load writes the whole tile, zero-filling the five out-of-tensor elements.
-  EXPECT_EQ(load_access.lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{
-                {.address = wf->lds_base(), .bytes = kTileCols * kTileRows * 4}}));
   EXPECT_TRUE(load_was_complete_at_callback);
 
   // The same partially out-of-bounds tile stores only its four valid elements.
@@ -702,10 +736,6 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationReportsCompletedDenseLoadAndStore
   EXPECT_FALSE(store_access.is_load);
   EXPECT_EQ(store_access.addresses, (std::vector<uint64_t>{kStoreGlobal, kStoreGlobal + 4,
                                                            kStoreGlobal + 16, kStoreGlobal + 20}));
-  // The store reads only the in-bounds elements: two of each three-element row.
-  EXPECT_EQ(store_access.lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base(), .bytes = 8},
-                                                    {.address = wf->lds_base() + 12, .bytes = 8}}));
   EXPECT_TRUE(store_was_complete_at_callback);
   EXPECT_TRUE(legacy_vm.unregister_address_space(address_space));
 }
@@ -762,7 +792,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationPreservesGatherOrderAndDuplicates
                                    kGlobal + 20}));
 }
 
-TEST(Gfx1250ExecutionTest, TensorDmaObservationIsOptInAndSkipsDisabledDescriptors) {
+TEST(Gfx1250ExecutionTest, TensorDmaObservationIsOptInAndSuppressesEmptyTransfers) {
   ExecutionPluginGroup disabled_group(PluginSinkConfig{});
   EXPECT_FALSE(disabled_group.observes_tensor_dma_memory_access());
   ASSERT_TRUE(disabled_group.add(
@@ -817,21 +847,235 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationIsOptInAndSkipsDisabledDescriptor
   EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
   EXPECT_TRUE(observer.accesses.empty());
 
-  // An active descriptor whose tensor extent masks the whole tile has no global
-  // access, but still zero-fills the tile in LDS.
+  // An active descriptor whose tensor extent masks the whole tile also has no
+  // actual global access to report.
   write_wave_sgpr(*cu, *wf, 0, 1);
   write_wave_sgpr(*cu, *wf, 13, 0);
   EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
-  ASSERT_EQ(observer.accesses.size(), 1u);
-  EXPECT_TRUE(observer.accesses[0].addresses.empty());
-  EXPECT_EQ(observer.accesses[0].lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base(), .bytes = 4}}));
+  EXPECT_TRUE(observer.accesses.empty());
 
   // Failed validation cannot produce a completed-transfer observation.
   write_wave_sgpr(*cu, *wf, 0, 2);
   write_wave_sgpr(*cu, *wf, 13, 1u << 16);
   EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).failed());
-  EXPECT_EQ(observer.accesses.size(), 1u);
+  EXPECT_TRUE(observer.accesses.empty());
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaIssueIsOptIn) {
+  ExecutionPluginGroup disabled_group(PluginSinkConfig{});
+  EXPECT_FALSE(disabled_group.observes_tensor_dma_issue());
+  ASSERT_TRUE(disabled_group.add(std::make_unique<TensorDmaIssuePlugin>("quiet", false)));
+  EXPECT_FALSE(disabled_group.observes_tensor_dma_issue());
+  // Opting in to the completion hook does not subscribe to issue.
+  ASSERT_TRUE(disabled_group.add(std::make_unique<TensorDmaObservationPlugin>("completion", true)));
+  EXPECT_FALSE(disabled_group.observes_tensor_dma_issue());
+
+  ExecutionPluginGroup enabled_group(PluginSinkConfig{});
+  ASSERT_TRUE(enabled_group.add(std::make_unique<TensorDmaIssuePlugin>("observing", true)));
+  EXPECT_TRUE(enabled_group.observes_tensor_dma_issue());
+  EXPECT_FALSE(enabled_group.observes_tensor_dma_memory_access());
+
+  // A plugin that does not opt in is not called, even in a subscribed group.
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto quiet = std::make_unique<TensorDmaIssuePlugin>("quiet", false);
+  auto *quiet_ptr = quiet.get();
+  auto observing = std::make_unique<TensorDmaIssuePlugin>("observing", true);
+  auto *observing_ptr = observing.get();
+  ASSERT_TRUE(group->add(std::move(quiet)));
+  ASSERT_TRUE(group->add(std::move(observing)));
+  sim.plugin_group = group;
+  sim.soc->set_plugin_group(sim.plugin_group);
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_lds_size(256);
+  write_tensor_dma_d0(*cu, *wf, 0, 0x186000);
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16);
+  write_wave_sgpr(*cu, *wf, 13, 1u << 16);
+  write_wave_sgpr(*cu, *wf, 14, 0);
+  write_wave_sgpr(*cu, *wf, 15, 1u << 16);
+  for (uint32_t reg = 16; reg < 20; ++reg)
+    write_wave_sgpr(*cu, *wf, reg, 0);
+  const std::array<uint32_t, 3> words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+  auto load = decode_gfx1250(words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+  EXPECT_TRUE(quiet_ptr->issues.empty());
+  EXPECT_EQ(observing_ptr->issues.size(), 1u);
+}
+
+// Every tensor DMA instruction that issues is reported once, including one that
+// moves no data and a NULL descriptor, which the emulator counts on TENSORcnt.
+// One that fails validation does not issue.
+TEST(Gfx1250ExecutionTest, TensorDmaIssueReportsEveryIssuedInstruction) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto issue_plugin = std::make_unique<TensorDmaIssuePlugin>();
+  auto &observer = *issue_plugin;
+  auto completion_plugin = std::make_unique<TensorDmaObservationPlugin>();
+  auto &completions = *completion_plugin;
+  ASSERT_TRUE(group->add(std::move(issue_plugin)));
+  ASSERT_TRUE(group->add(std::move(completion_plugin)));
+  sim.plugin_group = group;
+  sim.soc->set_plugin_group(sim.plugin_group);
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_lds_size(256);
+  write_tensor_dma_d0(*cu, *wf, 0, 0x187000);
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16); // i32 elements.
+  write_wave_sgpr(*cu, *wf, 13, 1u << 16); // tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 0);
+  write_wave_sgpr(*cu, *wf, 15, 1u << 16); // tile dim0.
+  for (uint32_t reg = 16; reg < 20; ++reg)
+    write_wave_sgpr(*cu, *wf, reg, 0);
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+  const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x7c7c0c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  auto store = decode_gfx1250(store_words, "tensor_store_from_lds");
+  ASSERT_NE(load, nullptr);
+  ASSERT_NE(store, nullptr);
+  const amdgpu::TensorDmaLdsRange first_element{.address = wf->lds_base(), .bytes = 4};
+
+  struct Case {
+    const char *name;
+    uint32_t count;
+    uint32_t tensor_dim0;
+    bool store;
+    std::vector<amdgpu::TensorDmaLdsRange> lds_ranges;
+  };
+  const Case cases[] = {
+      {"in-bounds load", 1, 1, false, {first_element}},
+      {"in-bounds store", 1, 1, true, {first_element}},
+      // A load wholly outside the tensor still zero-fills its tile.
+      {"load outside the tensor", 1, 0, false, {first_element}},
+      {"store outside the tensor", 1, 0, true, {}},
+      {"NULL load", 0, 1, false, {}},
+      {"NULL store", 0, 1, true, {}},
+  };
+  for (const Case &c : cases) {
+    SCOPED_TRACE(c.name);
+    observer.issues.clear();
+    write_wave_sgpr(*cu, *wf, 0, c.count);
+    write_wave_sgpr(*cu, *wf, 13, c.tensor_dim0 << 16);
+    Instruction &inst = c.store ? *store : *load;
+    EXPECT_TRUE(cu->execute_instruction(&inst, *wf).succeeded());
+    ASSERT_EQ(observer.issues.size(), 1u);
+    EXPECT_EQ(observer.issues[0].is_load, !c.store);
+    EXPECT_EQ(observer.issues[0].element_size_bytes, 4u);
+    EXPECT_EQ(observer.issues[0].lds_ranges, c.lds_ranges);
+  }
+  // Only the two in-bounds transfers made global requests to complete.
+  EXPECT_EQ(completions.accesses.size(), 2u);
+
+  // An unsupported count fails validation and does not issue.
+  observer.issues.clear();
+  write_wave_sgpr(*cu, *wf, 0, 2);
+  write_wave_sgpr(*cu, *wf, 13, 1u << 16);
+  EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).failed());
+  EXPECT_TRUE(observer.issues.empty());
+}
+
+// A load covers every element of its tile, zero-filling those outside the
+// tensor; a store covers only in-bounds elements. Here a 3x2 tile overhangs a
+// 2x2 tensor by one column.
+TEST(Gfx1250ExecutionTest, TensorDmaIssueCoversTheWholeLoadTileButOnlyInBoundsStoreElements) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto &observer = install_tensor_dma_issue_observer(sim);
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_lds_size(256);
+  write_tensor_dma_d0(*cu, *wf, 0, 0x188000);
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16); // i32 elements.
+  write_wave_sgpr(*cu, *wf, 13, 2u << 16); // tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 2u << 16); // tensor dim1.
+  write_wave_sgpr(*cu, *wf, 15, 3u << 16); // tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, 2u);       // tile dim1.
+  write_wave_sgpr(*cu, *wf, 17, 2u);       // tensor dim0 stride.
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  for (const bool store : {false, true}) {
+    const std::array<uint32_t, 3> words = {store ? 0xd0714001u : 0xd0710001u, 0x7c000000u,
+                                           0x7c7c0c00u};
+    auto inst = decode_gfx1250(words, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+  }
+  ASSERT_EQ(observer.issues.size(), 2u);
+  EXPECT_EQ(observer.issues[0].lds_ranges,
+            (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base(), .bytes = 24}}));
+  EXPECT_EQ(observer.issues[1].lds_ranges,
+            (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base(), .bytes = 8},
+                                                    {.address = wf->lds_base() + 12, .bytes = 8}}));
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaIssueRangesSkipPadding) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto &observer = install_tensor_dma_issue_observer(sim);
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_lds_size(256);
+  write_tensor_dma_d0(*cu, *wf, 0, 0x120000);
+  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 20)); // i32, one-dword pad every two.
+  write_wave_sgpr(*cu, *wf, 13, 4u << 16);                // tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 0);
+  write_wave_sgpr(*cu, *wf, 15, 4u << 16); // tile dim0.
+  for (uint32_t reg = 16; reg < 20; ++reg)
+    write_wave_sgpr(*cu, *wf, reg, 0);
+  const std::array<uint32_t, 3> words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+  auto load = decode_gfx1250(words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+  ASSERT_EQ(observer.issues.size(), 1u);
+  EXPECT_EQ(observer.issues[0].lds_ranges,
+            (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base(), .bytes = 8},
+                                                    {.address = wf->lds_base() + 12, .bytes = 8}}));
+}
+
+// The issue hook fires before the transfer moves data. A transfer that waits for
+// memory is covered in gpu_vm_pipeline_test.cpp.
+TEST(Gfx1250ExecutionTest, TensorDmaIssueFiresBeforeDataMoves) {
+  constexpr uint64_t kGlobal = 0x189000;
+  constexpr uint32_t kSentinel = 0x5e5e5e5eu;
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto &observer = install_tensor_dma_issue_observer(sim);
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_lds_size(256);
+  cu->lds().write32(wf->lds_base(), kSentinel);
+  write_global_u32(*sim.memory, kGlobal, 0x12345678u);
+  bool lds_untouched_at_issue = false;
+  observer.inspect = [&](const amdgpu::TensorDmaIssueObservation &, const amdgpu::Wavefront &) {
+    lds_untouched_at_issue = cu->lds().read32(wf->lds_base()) == kSentinel;
+  };
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16);
+  write_wave_sgpr(*cu, *wf, 13, 1u << 16);
+  write_wave_sgpr(*cu, *wf, 14, 0);
+  write_wave_sgpr(*cu, *wf, 15, 1u << 16);
+  for (uint32_t reg = 16; reg < 20; ++reg)
+    write_wave_sgpr(*cu, *wf, reg, 0);
+  const std::array<uint32_t, 3> words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+  auto load = decode_gfx1250(words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+  EXPECT_TRUE(lds_untouched_at_issue);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base()), 0x12345678u);
+  EXPECT_EQ(observer.issues.size(), 1u);
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaUsesWaveProcessPageTable) {
@@ -1152,36 +1396,6 @@ TEST(Gfx1250ExecutionTest, TensorDmaLoadAppliesLdsPadding) {
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 2 * 4), kSentinel);
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 3 * 4), 0x33000002u);
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 4 * 4), 0x33000003u);
-}
-
-TEST(Gfx1250ExecutionTest, TensorDmaObservationLdsRangesSkipPadding) {
-  Gfx1250Sim sim;
-  ASSERT_NO_FATAL_FAILURE(sim.initialize());
-  auto &observer = install_tensor_dma_observer(sim);
-  auto *cu = sim.cu();
-  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
-  ASSERT_NE(wf, nullptr);
-  wf->set_lds_base(cu->allocate_lds(256));
-  wf->set_lds_size(256);
-
-  constexpr uint64_t kGlobal = 0x120000;
-  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
-  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 20)); // i32, one-dword pad every two.
-  write_wave_sgpr(*cu, *wf, 13, 4u << 16);                // tensor dim0.
-  write_wave_sgpr(*cu, *wf, 14, 0);
-  write_wave_sgpr(*cu, *wf, 15, 4u << 16); // tile dim0.
-  for (uint32_t reg = 16; reg < 20; ++reg)
-    write_wave_sgpr(*cu, *wf, reg, 0);
-
-  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
-  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
-  ASSERT_NE(load, nullptr);
-  EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
-
-  ASSERT_EQ(observer.accesses.size(), 1u);
-  EXPECT_EQ(observer.accesses[0].lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base(), .bytes = 8},
-                                                    {.address = wf->lds_base() + 12, .bytes = 8}}));
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaByteLoadUsesDwordPaddingUnits) {

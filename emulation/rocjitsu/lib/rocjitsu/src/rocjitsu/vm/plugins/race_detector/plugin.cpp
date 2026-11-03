@@ -15,7 +15,7 @@
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
-#include "rocjitsu/vm/plugins/tensor_dma_memory_access_observation.h"
+#include "rocjitsu/vm/plugins/tensor_dma_issue_observation.h"
 
 #include <algorithm>
 #include <array>
@@ -511,48 +511,43 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   }
 }
 
-void RaceDetectorPlugin::onAmdgpuTensorDmaMemoryAccess(
-    const amdgpu::TensorDmaMemoryAccessObservation &access, const amdgpu::Wavefront &wf) {
-  if (access.lds_ranges.empty())
-    return;
+void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &issue,
+                                                 const amdgpu::Wavefront &wf) {
   auto *s = get_state(wf);
   assert(s && s->race_state);
-  // The callback arrives while the tensor instruction executes or, for a
-  // transfer deferred until its memory is available, when the pipeline
-  // completes it. A deferred transfer holds the wave in VM_RETRY, so the wave
-  // issues nothing else first and the newest trace entry is still the tensor
-  // instruction, although wf.pc has advanced past it.
+  // The hook fires in the tensor instruction's own step, before any data moves,
+  // as onAmdgpuMemoryAccessRouted() does for other memory instructions.
   const InstructionSnapshot &instruction = current_instruction(*s, wf);
-  if (instruction.pc() != access.pc)
-    throw std::logic_error(std::format("race detector tensor DMA access at PC {:#x} is not the "
-                                       "current instruction at PC {:#x}",
-                                       access.pc, instruction.pc()));
   auto *rs = s->race_state;
   auto *detector = rs->getDetector();
   const auto waveId = rs->getWaveId();
   constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
-  const int elementBytes = static_cast<int>(access.element_size_bytes);
+  const int elementBytes = static_cast<int>(issue.element_size_bytes);
 
   // A transfer has no lanes; its violations report lane -1. The core takes
   // its own range type, independent of the observation protocol.
   std::vector<LdsByteRange> ranges;
-  ranges.reserve(access.lds_ranges.size());
-  for (const auto &range : access.lds_ranges) {
+  ranges.reserve(issue.lds_ranges.size());
+  for (const auto &range : issue.lds_ranges) {
     ranges.push_back({.address = range.address, .bytes = range.bytes});
     const auto bytes = detector->ldsBytesInRange(range.address, range.bytes, elementBytes);
     if (bytes == 0)
       continue;
     const int addr = static_cast<int>(range.address);
-    if (access.is_load)
+    if (issue.is_load)
       detector->validateWrite(addr, waveId, -1, static_cast<int>(bytes), memoryOrder);
     else
       detector->validateRead(addr, waveId, -1, static_cast<int>(bytes), memoryOrder);
   }
 
+  // An instruction that moves no data, such as a store wholly outside the
+  // tensor, still occupies a TENSORCNT slot, so its event is registered even
+  // without LDS ranges. A NULL descriptor is registered the same way, matching
+  // the emulator's assumption that it counts on TENSORCNT.
   const std::array obligations{
       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
   rs->registerLdsRangeEvent(
-      instruction, access.is_load ? MemoryEventType::GLOBAL_TO_LDS : MemoryEventType::LDS_TO_GLOBAL,
+      instruction, issue.is_load ? MemoryEventType::GLOBAL_TO_LDS : MemoryEventType::LDS_TO_GLOBAL,
       ranges, elementBytes, obligations, memoryOrder);
 }
 
