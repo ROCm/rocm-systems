@@ -854,6 +854,8 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
   int64_t chunkSizeParam = ncclParamCeChunkSize();
   size_t ceChunkSize = chunkSizeParam > 0 ? (size_t)chunkSizeParam : 0;
   void* ceBatchHandle = NULL;
+  // Copy streams forked from stream; fail rejoins them so queued copies stay ordered before stream.
+  int forkedStreams = 0;
 
 #ifdef ENABLE_FAULT_INJECTION
   NCCLCHECK(ceFaultCheck(comm, CE_FAULT_LAUNCH_OP, "ncclCeLaunchBatchOps"));
@@ -964,6 +966,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
         for (int s = 0; s < activeStreams; s++) {
           CUDACHECKGOTO(cudaEventRecord(comm->ceColl.copyEvents[s], stream), ret, fail);
           CUDACHECKGOTO(cudaStreamWaitEvent(comm->ceColl.copyStreams[s], comm->ceColl.copyEvents[s], 0), ret, fail);
+          forkedStreams = s + 1;
         }
 
       // Distribute copies round-robin across streams
@@ -1001,6 +1004,10 @@ exit:
   ncclProfilerStopCeBatchEvent(comm, ceBatchHandle, stream);
   return ret;
 fail:
+  for (int s = 0; s < forkedStreams; s++) {
+    CUDACHECKIGNORE(cudaEventRecord(comm->ceColl.copyEvents[s], comm->ceColl.copyStreams[s]));
+    CUDACHECKIGNORE(cudaStreamWaitEvent(stream, comm->ceColl.copyEvents[s], 0));
+  }
   goto exit;
 }
 
@@ -3892,14 +3899,20 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
       break;
     }
   }
-  // As ncclLaunchKernel does: CE copies may write peer DDA scratch, so teardown's
-  // doneEvent wait and the next launch on another stream must cover them too.
-  if (ret == ncclSuccess) {
-    CUDACHECKGOTO(cudaEventRecord(comm->doneEvent, stream), ret, fail);
-    comm->lastStreamTag = ncclStreamTag(stream);
-  }
 
 exit:
+  // As ncclLaunchKernel does: CE copies may write peer DDA scratch, so teardown's
+  // doneEvent wait and the next launch on another stream must cover them too. Also
+  // on failure, since copies queued before the error may still be running.
+  if (comm->doneEvent != nullptr) {
+    cudaError_t recordErr = cudaEventRecord(comm->doneEvent, stream);
+    if (recordErr == cudaSuccess) {
+      comm->lastStreamTag = ncclStreamTag(stream);
+    } else if (ret == ncclSuccess) {
+      WARN("ncclLaunchCeColl: doneEvent record failed (%s)", cudaGetErrorString(recordErr));
+      ret = ncclUnhandledCudaError;
+    }
+  }
   // Stop CE collective profiling - always attempt if started, even on error
   ncclProfilerStopCeCollEvent(comm, args, stream);
   return ret;

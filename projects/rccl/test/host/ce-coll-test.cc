@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <climits>
 #include <cstddef>
 #include <cstdint>
@@ -149,70 +150,166 @@ TEST_F(CeCollMicrotest, LaunchAllReduceWithStaging_ReachesTheCollectiveWithoutRe
   EXPECT_TRUE(LogHas(log, "CE AllReduce: no valid chunk layout")) << log;
 }
 
-TEST_F(CeCollMicrotest, LaunchSucceeds_RecordsDoneEventAndStreamTagLast) {
-  hipStream_t const launchStream = reinterpret_cast<hipStream_t>(0x5100);
-  hipEvent_t const doneEvent = reinterpret_cast<hipEvent_t>(0x5200);
-  streams_.stream = launchStream;
-  comm_->doneEvent = doneEvent;
-  comm_->nRanks = 1;
-  comm_->devrState.lsaSize = 1;
-  comm_->devrState.lsaSelf = 0;
-  int lsaRankList[1] = {0};
-  comm_->devrState.lsaRankList = lsaRankList;
-  uint32_t syncFlags[2] = {};
-  ncclDevrWindow syncWin = {};
-  syncWin.userPtr = syncFlags;
-  comm_->ceColl.baseUCSymReadyPtr = reinterpret_cast<uint8_t*>(&syncFlags[0]);
-  comm_->ceColl.baseUCSymComplPtr = reinterpret_cast<uint8_t*>(&syncFlags[1]);
-  comm_->ceColl.ceSyncWin = &syncWin;
-  comm_->ceColl.intraBatchSyncFreq = CE_COLL_INTRA_BATCH_SYNC_FREQ;
-  comm_->ceColl.intraBatchSyncMsgThreshold = CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD;
-  float send = 1.0f, recv = 0.0f;
-  args_.func = ncclFuncAllGather;
-  args_.nElts = 1;
-  args_.eltSize = sizeof(float);
-  args_.sendBuff = reinterpret_cast<uint8_t*>(&send);
-  args_.recvBuff = reinterpret_cast<uint8_t*>(&recv);
+// A single-rank CE AllGather that reaches the copy path, logging every stream operation.
+class CeCollDoneEventMicrotest : public CeCollMicrotest {
+ protected:
+  static constexpr uintptr_t kCopyStreamBase = 0x5300;
+  static constexpr uintptr_t kCopyEventBase = 0x5400;
+  hipStream_t const launchStream_ = reinterpret_cast<hipStream_t>(0x5100);
+  hipEvent_t const doneEvent_ = reinterpret_cast<hipEvent_t>(0x5200);
+  int lsaRankList_[1] = {0};
+  uint32_t syncFlags_[2] = {};
+  ncclDevrWindow syncWin_{};
+  float send_ = 1.0f;
+  float recv_ = 0.0f;
 
-  std::vector<std::pair<hipEvent_t, hipStream_t>> records;
-  int copiesIssued = 0;
-  int streamOpsAfterRecord = 0;
-  auto afterDoneRecord = [&] { return !records.empty() && records.back().first == doneEvent; };
-  ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t stream) {
-    records.emplace_back(event, stream);
-    return hipSuccess;
-  });
-  ScopedHook copies(g_hipMemcpyAsync, [&](void*, const void*, size_t, hipMemcpyKind, hipStream_t) {
-    ++copiesIssued;
-    if (afterDoneRecord()) ++streamOpsAfterRecord;
-    return hipSuccess;
-  });
-  ScopedHook syncs(g_hipStreamBatchMemOp, [&](hipStream_t, unsigned int, hipStreamBatchMemOpParams*, unsigned int) {
-    if (afterDoneRecord()) ++streamOpsAfterRecord;
-    return hipSuccess;
-  });
+  struct StreamOp {
+    enum Kind { kCopy, kSync, kRecord, kWait } kind;
+    hipStream_t stream;
+    hipEvent_t event;
+  };
+  std::vector<StreamOp> ops_;
+  int copies_ = 0;
+  int syncs_ = 0;
+  int failCopy_ = 0;  // 1-based; 0 never fails
+  bool failSyncAfterCopy_ = false;
+  bool failDoneRecord_ = false;
+
+  ScopedHook<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)> copyHook_{
+      g_hipMemcpyAsync, [this](void*, const void*, size_t, hipMemcpyKind, hipStream_t stream) {
+        ops_.push_back({StreamOp::kCopy, stream, nullptr});
+        return ++copies_ == failCopy_ ? hipErrorInvalidValue : hipSuccess;
+      }};
+  ScopedHook<hipError_t(hipStream_t, unsigned int, hipStreamBatchMemOpParams*, unsigned int)> syncHook_{
+      g_hipStreamBatchMemOp, [this](hipStream_t stream, unsigned int, hipStreamBatchMemOpParams*, unsigned int) {
+        ops_.push_back({StreamOp::kSync, stream, nullptr});
+        ++syncs_;
+        return failSyncAfterCopy_ && copies_ > 0 ? hipErrorInvalidValue : hipSuccess;
+      }};
+  ScopedHook<hipError_t(hipEvent_t, hipStream_t)> recordHook_{
+      g_hipEventRecord, [this](hipEvent_t event, hipStream_t stream) {
+        ops_.push_back({StreamOp::kRecord, stream, event});
+        return failDoneRecord_ && event == doneEvent_ ? hipErrorInvalidValue : hipSuccess;
+      }};
+  ScopedHook<hipError_t(hipStream_t, hipEvent_t, unsigned int)> waitHook_{
+      g_hipStreamWaitEvent, [this](hipStream_t stream, hipEvent_t event, unsigned int) {
+        ops_.push_back({StreamOp::kWait, stream, event});
+        return hipSuccess;
+      }};
+
+  void SetUp() override {
+    CeCollMicrotest::SetUp();
+    streams_.stream = launchStream_;
+    comm_->planner.capturingGraph.graphId = ULLONG_MAX;  // not capturing
+    comm_->doneEvent = doneEvent_;
+    comm_->nRanks = 1;
+    comm_->devrState.lsaSize = 1;
+    comm_->devrState.lsaSelf = 0;
+    comm_->devrState.lsaRankList = lsaRankList_;
+    syncWin_.userPtr = syncFlags_;
+    comm_->ceColl.baseUCSymReadyPtr = reinterpret_cast<uint8_t*>(&syncFlags_[0]);
+    comm_->ceColl.baseUCSymComplPtr = reinterpret_cast<uint8_t*>(&syncFlags_[1]);
+    comm_->ceColl.ceSyncWin = &syncWin_;
+    comm_->ceColl.intraBatchSyncFreq = CE_COLL_INTRA_BATCH_SYNC_FREQ;
+    comm_->ceColl.intraBatchSyncMsgThreshold = CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD;
+    args_.func = ncclFuncAllGather;
+    args_.nElts = 1;
+    args_.sendBuff = reinterpret_cast<uint8_t*>(&send_);
+    args_.recvBuff = reinterpret_cast<uint8_t*>(&recv_);
+  }
+
+  int DoneRecords() const {
+    return static_cast<int>(std::count_if(ops_.begin(), ops_.end(), [this](const StreamOp& op) {
+      return op.kind == StreamOp::kRecord && op.event == doneEvent_;
+    }));
+  }
+  // doneEvent must be the last operation on the launch stream, so a wait on it covers every copy.
+  void ExpectDoneEventRecordedLast() const {
+    ASSERT_FALSE(ops_.empty());
+    EXPECT_EQ(StreamOp::kRecord, ops_.back().kind);
+    EXPECT_EQ(doneEvent_, ops_.back().event);
+    EXPECT_EQ(launchStream_, ops_.back().stream);
+    EXPECT_EQ(1, DoneRecords());
+  }
+};
+
+TEST_F(CeCollDoneEventMicrotest, LaunchSucceeds_RecordsDoneEventAndStreamTagLast) {
   std::string log;
 
   ASSERT_EQ(ncclSuccess, Launch(&log)) << log;
 
-  EXPECT_GT(copiesIssued, 0) << "the launch must reach the CE copy path";
-  ASSERT_FALSE(records.empty());
-  EXPECT_EQ(doneEvent, records.back().first);
-  EXPECT_EQ(launchStream, records.back().second);
-  EXPECT_EQ(0, streamOpsAfterRecord) << "doneEvent must be recorded after the last CE copy";
-  EXPECT_EQ(ncclStreamTag(launchStream), comm_->lastStreamTag);
+  EXPECT_GT(copies_, 0) << "the launch must reach the CE copy path";
+  ExpectDoneEventRecordedLast();
+  EXPECT_EQ(ncclStreamTag(launchStream_), comm_->lastStreamTag);
 }
 
-TEST_F(CeCollMicrotest, LaunchFails_LeavesDoneEventAndStreamTagUntouched) {
+TEST_F(CeCollDoneEventMicrotest, LaunchFailsAfterQueuingCopies_StillRecordsDoneEventLast) {
+  failSyncAfterCopy_ = true;  // the completion barrier, after the copies are queued
+  std::string log;
+
+  EXPECT_NE(ncclSuccess, Launch(&log));
+
+  EXPECT_GT(copies_, 0) << "the failure must come after the CE copies";
+  ExpectDoneEventRecordedLast();
+  EXPECT_EQ(ncclStreamTag(launchStream_), comm_->lastStreamTag);
+}
+
+TEST_F(CeCollDoneEventMicrotest, LaunchRejectedBeforeAnyCopy_StillRecordsDoneEvent) {
   args_.func = ncclFuncBroadcast;  // rejected by the dispatch default arm
-  comm_->doneEvent = reinterpret_cast<hipEvent_t>(0x5200);
-  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
   std::string log;
 
   EXPECT_EQ(ncclInvalidUsage, Launch(&log));
 
-  EXPECT_EQ(0, record.calls);
+  EXPECT_EQ(0, copies_);
+  ExpectDoneEventRecordedLast();
+}
+
+TEST_F(CeCollDoneEventMicrotest, DoneEventRecordFails_FailsTheLaunchAndKeepsTheStreamTag) {
+  failDoneRecord_ = true;
+  std::string log;
+
+  EXPECT_EQ(ncclUnhandledCudaError, Launch(&log));
+
+  EXPECT_TRUE(LogHas(log, "doneEvent record failed")) << log;
   EXPECT_EQ(0u, comm_->lastStreamTag);
+}
+
+TEST_F(CeCollDoneEventMicrotest, MultiStreamCopyFails_RejoinsForkedCopyStreamsToTheLaunchStream) {
+  constexpr int kStreams = 2;
+  comm_->ceColl.nCopyStreams = kStreams;
+  for (int s = 0; s < kStreams; ++s) {
+    comm_->ceColl.copyStreams[s] = reinterpret_cast<hipStream_t>(kCopyStreamBase + s);
+    comm_->ceColl.copyEvents[s] = reinterpret_cast<hipEvent_t>(kCopyEventBase + s);
+  }
+  uint8_t src[3] = {}, dst[3] = {};
+  void* srcs[3] = {&src[0], &src[1], &src[2]};
+  void* dsts[3] = {&dst[0], &dst[1], &dst[2]};
+  size_t sizes[3] = {1, 1, 1};
+  ncclCeBatchOpsParams params = {};
+  params.srcs = srcs;
+  params.dsts = dsts;
+  params.sizes = sizes;
+  params.numOps = 3;
+  failCopy_ = 3;  // copies 1 and 2 are already queued on both copy streams
+
+  EXPECT_NE(ncclSuccess, ncclCeLaunchBatchOps(comm_.get(), &params, launchStream_, &args_));
+
+  ASSERT_EQ(3, copies_) << "the multi-stream path must be taken";
+  auto failed = std::find_if(ops_.rbegin(), ops_.rend(), [](const StreamOp& op) {
+                  return op.kind == StreamOp::kCopy;
+                }).base();
+  for (int s = 0; s < kStreams; ++s) {
+    hipStream_t const copyStream = comm_->ceColl.copyStreams[s];
+    hipEvent_t const copyEvent = comm_->ceColl.copyEvents[s];
+    auto rec = std::find_if(failed, ops_.end(), [&](const StreamOp& op) {
+      return op.kind == StreamOp::kRecord && op.stream == copyStream && op.event == copyEvent;
+    });
+    ASSERT_NE(ops_.end(), rec) << "copy stream " << s << " is not joined after the failure";
+    auto wait = std::find_if(rec, ops_.end(), [&](const StreamOp& op) {
+      return op.kind == StreamOp::kWait && op.stream == launchStream_ && op.event == copyEvent;
+    });
+    EXPECT_NE(ops_.end(), wait) << "launch stream does not wait on copy stream " << s;
+  }
 }
 
 // The eager 2-shot path calls ncclCeAllReduce directly, bypassing ncclLaunchCeColl.
