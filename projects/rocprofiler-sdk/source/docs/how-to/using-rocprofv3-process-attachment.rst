@@ -204,10 +204,11 @@ descendant processes**. This is useful for profiling process trees in which each
 own attachable SDK session, such as multiprocess MPI jobs or launchers that start workers through
 an exec-based path.
 
-Selecting a descendant PID does not restore an inherited disabled SDK session. A child that
-continues directly after ``fork()`` cannot be attached; it must replace its process image with
-``exec()`` to initialize a fresh session. For the complete process-creation contract, see
-:ref:`rocprofiler-process-creation`.
+Selecting a descendant PID does not restore an inherited disabled SDK session. This restriction
+applies to a child that inherited a loaded core ROCprofiler-SDK. It must replace its process image
+with ``exec()`` to initialize a fresh session. A process forked before the core SDK is loaded has no
+inherited SDK session and can be attached later; attachment loads a fresh SDK session into that
+process. For the complete process-creation contract, see :ref:`rocprofiler-process-creation`.
 
 To attach to a PID and all its children (default behavior), use:
 

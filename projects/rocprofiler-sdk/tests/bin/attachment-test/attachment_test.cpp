@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include <hip/hip_runtime.h>
+#include <link.h>
 #include <rocprofiler-sdk-roctx/roctx.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -30,11 +31,36 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
 namespace
 {
+bool
+core_sdk_is_loaded()
+{
+    auto loaded = false;
+    dl_iterate_phdr(
+        [](dl_phdr_info* info, size_t, void* data) {
+            if(!info || !info->dlpi_name) return 0;
+
+            auto path = std::string_view{info->dlpi_name};
+            if(auto pos = path.find_last_of('/'); pos != std::string_view::npos)
+                path.remove_prefix(pos + 1);
+
+            constexpr auto sdk_name = std::string_view{"librocprofiler-sdk.so"};
+            if(path == sdk_name || path.rfind("librocprofiler-sdk.so.", 0) == 0)
+            {
+                *static_cast<bool*>(data) = true;
+                return 1;
+            }
+            return 0;
+        },
+        &loaded);
+    return loaded;
+}
+
 // required type for signal handlers
 volatile std::sig_atomic_t sigint_received   = 0;
 volatile std::sig_atomic_t sigwinch_received = 0;
@@ -224,11 +250,17 @@ main(int argc, char** argv)
         }
     }
 
-    // Fork a child process before HIP initialization so each process gets a
-    // clean HIP context. Used by the attach-tree test to exercise --attach-children.
+    // This plain-fork case is attachable only because neither process has loaded the core SDK.
+    // Attachment later loads a fresh SDK session into each selected process.
     pid_t child_pid = -1;
     if(fork_child)
     {
+        if(core_sdk_is_loaded())
+        {
+            std::cerr << "fork-child precondition failed: core ROCprofiler-SDK is already loaded\n";
+            return 1;
+        }
+
         child_pid = fork();
         if(child_pid < 0)
         {
