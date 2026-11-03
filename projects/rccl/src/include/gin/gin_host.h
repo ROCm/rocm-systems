@@ -82,6 +82,10 @@ struct ncclGinState {
 // ncclDevrCommCreateInternal sizes per-context resource regions with it (via
 // devrGinContextsTotal), so the two must not diverge.
 static inline int ncclGinContextCount(int nGinContextsRequested, int ginCommCount) {
+  // ginContextCount is a hint; 0 is the documented "use a default" value. A 0
+  // request would size the context table and the per-context resource regions to
+  // 0 (heap corruption), so promote it to one context per GIN connection.
+  if (nGinContextsRequested < 1) nGinContextsRequested = 1;
   return ROUNDUP(nGinContextsRequested, ginCommCount);
 }
 
