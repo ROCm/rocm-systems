@@ -1176,10 +1176,26 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
     bool succeeds;
   };
   constexpr Case kCases[] = {
-      {"zero-width tile, overlapping stride", 0, 4, 1, true},
-      {"zero-width tile, disjoint stride", 0, 4, 4, true},
-      {"all-zero tile", 0, 0, 4, true},
-      {"one-element-wide tile, overlapping stride", 1, 4, 1, false},
+      {.name = "zero-width tile, overlapping stride",
+       .tile_dim0 = 0,
+       .tile_dim1 = 4,
+       .tensor_dim0_stride = 1,
+       .succeeds = true},
+      {.name = "zero-width tile, disjoint stride",
+       .tile_dim0 = 0,
+       .tile_dim1 = 4,
+       .tensor_dim0_stride = 4,
+       .succeeds = true},
+      {.name = "all-zero tile",
+       .tile_dim0 = 0,
+       .tile_dim1 = 0,
+       .tensor_dim0_stride = 4,
+       .succeeds = true},
+      {.name = "one-element-wide tile, overlapping stride",
+       .tile_dim0 = 1,
+       .tile_dim1 = 4,
+       .tensor_dim0_stride = 1,
+       .succeeds = false},
   };
   for (const Case &c : kCases) {
     for (const bool store : {false, true}) {
