@@ -3500,7 +3500,8 @@ TEST(BinaryTranslatorE2E, DirectBranchWindowsRejectInvalidGrowthWithoutMutation)
   ASSERT_NE(branch, nullptr);
 
   auto rejects_without_mutation =
-      [&](std::vector<rocjitsu::ControlFlowWindowRequirement> requirements) {
+      [&](std::vector<rocjitsu::ControlFlowWindowRequirement> requirements,
+          rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5) {
         std::vector<uint8_t> text(sizeof(uint32_t), 0);
         rocjitsu::KernelTextLayout layout;
         layout.body_end = text.size();
@@ -3512,8 +3513,14 @@ TEST(BinaryTranslatorE2E, DirectBranchWindowsRejectInvalidGrowthWithoutMutation)
                                         .translated_words = {branch_word}});
 
         const auto original_text = text;
-        const auto result = rocjitsu::grow_control_flow_windows(text, layout, requirements,
-                                                                ROCJITSU_CODE_ARCH_CDNA5);
+        util::StringDiagnostic diagnostic;
+        const util::DiagnosticEmitter error = diagnostic.emitter();
+        const auto result =
+            rocjitsu::grow_control_flow_windows(text, layout, requirements, arch, &error);
+        if (arch == ROCJITSU_CODE_ARCH_INVALID)
+          EXPECT_FALSE(diagnostic.message().empty());
+        else
+          EXPECT_TRUE(diagnostic.message().empty());
         EXPECT_FALSE(result.has_value());
         EXPECT_EQ(text, original_text);
         EXPECT_EQ(layout.body_end, sizeof(uint32_t));
@@ -3521,6 +3528,9 @@ TEST(BinaryTranslatorE2E, DirectBranchWindowsRejectInvalidGrowthWithoutMutation)
         EXPECT_EQ(layout.branch_fixups.front().target_window_bytes, sizeof(uint32_t));
       };
 
+  rejects_without_mutation(
+      {{.source_inst_offset = 0, .required_window_bytes = 2 * sizeof(uint32_t)}},
+      ROCJITSU_CODE_ARCH_INVALID);
   rejects_without_mutation(
       {{.source_inst_offset = 0, .required_window_bytes = sizeof(uint32_t) + 1}});
   rejects_without_mutation(

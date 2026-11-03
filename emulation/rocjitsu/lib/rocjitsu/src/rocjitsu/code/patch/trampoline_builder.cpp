@@ -679,10 +679,8 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // Literal-constant scalar source code; the 32-bit literal follows the word.
   constexpr uint16_t kLiteralConstant = 0xFF;
 
-  auto report_spill_error = [error_out](std::string_view message) {
-    if (error_out != nullptr)
-      *error_out = "probe-call emission: spill bracket: " + std::string(message);
-  };
+  OptionalStringDiagnosticSink report_spill_error(error_out,
+                                                  "probe-call emission: spill bracket: ");
   const util::DiagnosticEmitter spill_error(report_spill_error);
   const util::FailureOr<SpillBracket> maybe_spill =
       build_spill_bracket(plan.vgpr_spills, plan.sgpr_spills, plan.acc_spills,

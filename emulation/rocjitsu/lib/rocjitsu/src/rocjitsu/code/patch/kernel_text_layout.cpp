@@ -531,7 +531,7 @@ void TextOffsetRebaser::rebase(uint64_t &offset) const {
 std::optional<std::vector<TextLayoutInsertion>>
 grow_control_flow_windows(std::vector<uint8_t> &text, KernelTextLayout &layout,
                           std::span<const ControlFlowWindowRequirement> requirements,
-                          rj_code_arch_t arch) {
+                          rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
   struct ValidatedGrowth {
     ControlFlowWindowKind kind = ControlFlowWindowKind::DirectBranch;
     size_t fixup_index = 0;
@@ -618,7 +618,7 @@ grow_control_flow_windows(std::vector<uint8_t> &text, KernelTextLayout &layout,
     const TextLayoutInsertion insertion = growth.insertion;
     grown_text.insert(grown_text.end(), text.begin() + static_cast<std::ptrdiff_t>(copied_until),
                       text.begin() + static_cast<std::ptrdiff_t>(insertion.offset));
-    if (append_nop_padding(grown_text, insertion.size, arch).failed())
+    if (append_nop_padding(grown_text, insertion.size, arch, error).failed())
       return std::nullopt;
     copied_until = insertion.offset;
     insertions.push_back(insertion);
@@ -797,7 +797,7 @@ append_branch_island_direct_sequence(std::vector<uint32_t> &words, const Instruc
                                      uint64_t window_bytes, uint64_t first_target,
                                      rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
   if ((inst.flags() & BRANCH) != 0) {
-    const auto simm = compute_sopp_branch_simm16(window_offset, first_target);
+    const std::optional<int16_t> simm = compute_sopp_branch_simm16(window_offset, first_target);
     if (!simm)
       return false;
     {
@@ -818,7 +818,8 @@ append_branch_island_direct_sequence(std::vector<uint32_t> &words, const Instruc
       inst, translated_word, window_offset, 2 * sizeof(uint32_t), arch, error);
   if (!inverted)
     return false;
-  const auto simm = compute_sopp_branch_simm16(window_offset + sizeof(uint32_t), first_target);
+  const std::optional<int16_t> simm =
+      compute_sopp_branch_simm16(window_offset + sizeof(uint32_t), first_target);
   if (!simm)
     return false;
 
