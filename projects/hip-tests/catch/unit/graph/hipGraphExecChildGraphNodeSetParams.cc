@@ -462,7 +462,11 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_UpdateEmbeddedNodes) {
   SECTION("Update embedded memset node with generic hipGraphExecNodeSetParams") {
     hipGraphNodeParams nodeParams{};
     nodeParams.type = hipGraphNodeTypeMemset;
-    nodeParams.memset = memsetParams;
+    nodeParams.memset.dst = B_d;
+    nodeParams.memset.elementSize = sizeof(int);
+    nodeParams.memset.width = N;
+    nodeParams.memset.height = 1;
+    nodeParams.memset.pitch = 0;
     nodeParams.memset.value = kMemsetVal2;
     HIP_CHECK(hipGraphExecNodeSetParams(graphExec, embMemset, &nodeParams));
 
