@@ -192,7 +192,8 @@ public:
   ///
   /// Reads `num_elems` elements of `elem_size` bytes for each active lane.
   /// Output layout: `dst[lane * stride + elem * elem_size]` where
-  /// `stride = num_elems * elem_size`.
+  /// `stride = num_elems * elem_size`. An element that crosses LDS capacity
+  /// reads entirely as zero.
   /// @param addrs Per-lane LDS byte addresses including the workgroup base (64 entries).
   /// @param lane_mask Bitmask of active lanes.
   /// @param elem_size Size of each element in bytes.
@@ -201,13 +202,15 @@ public:
   void vector_load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                    uint32_t num_elems, uint8_t *dst) {
     const uint32_t stride = num_elems * elem_size;
-    if (stride == 0) {
-      load_lanes(addrs, lane_mask, elem_size, num_elems, dst);
+    // Only a request without element data has a zero stride; it reads nothing,
+    // and the run scan requires a nonzero stride.
+    if (stride == 0)
       return;
-    }
-    // Copy lane-ordered contiguous runs as one block. Sorting permuted lanes
-    // costs more than the per-lane copies it would merge. Runs reaching past
-    // capacity keep the per-element path, which zero-fills each such element.
+    // A lane-ordered run is contiguous both in LDS and in the lane-major
+    // buffer, so one copy moves it; a reordered run would need a gather.
+    // Sorting permuted lanes costs more than the per-lane copies it would
+    // merge. Runs reaching past capacity keep the per-element path, which
+    // zero-fills each such element.
     const auto load_run = [&](const CoalescedLaneRun &run) __attribute__((always_inline)) {
       if (fits(run))
         read_backing(static_cast<uint32_t>(run.address), dst + run.first_lane * stride, run.size);
@@ -225,10 +228,9 @@ public:
   void vector_store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                     uint32_t num_elems, const uint8_t *src) {
     const uint32_t stride = num_elems * elem_size;
-    if (stride == 0) {
-      store_lanes(addrs, lane_mask, elem_size, num_elems, src);
+    // As in vector_load(): nothing to write, and the run scan needs a stride.
+    if (stride == 0)
       return;
-    }
     const auto store_run = [&](const CoalescedLaneRun &run) __attribute__((always_inline)) {
       if (fits(run))
         write_backing(static_cast<size_t>(run.address), src + run.first_lane * stride, run.size);
