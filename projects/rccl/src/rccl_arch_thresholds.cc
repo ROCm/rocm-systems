@@ -205,7 +205,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     16ULL*1024*1024,     // [2] AllGather       -- 128M at 8 ranks, 256M (clipped) from 16
-    8ULL*1024*1024,      // [3] ReduceScatter   -- nRanks x 8M from 8 ranks, clipped at 112M
+    15ULL*512*1024,      // [3] ReduceScatter   -- nRanks x 7.5M from 8 ranks: one 1920B slice per warp at 256 blocks
     0,                   // [4] AllReduce       -- ddaLL128Max total
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -225,17 +225,6 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   },
   .rankScaledMinRanks = 8,
   .rankScaledMaxBytes = 256ULL*1024*1024,
-  .rankScaledLL128MaxBytes = {
-    0,                   // [0] Broadcast      -- not used
-    0,                   // [1] Reduce          -- not used
-    0,                   // [2] AllGather       -- rankScaledMaxBytes
-    112ULL*1024*1024,    // [3] ReduceScatter   -- Ring LL128 beats DDA LL128 from 128M on 16 ranks
-    0,                   // [4] AllReduce       -- rankScaledMaxBytes
-    0,                   // [5] SendRecv        -- not used
-    0,                   // [6] Send            -- not used
-    0,                   // [7] Recv            -- not used
-    0,                   // [8] AlltoAll        -- rankScaledMaxBytes
-  },
   // From 32 ranks, AllReduce VMM beats LL two-shot / LL128 1.3-3.7x between 2M and nRanks x 512K.
   .ddaArVmmFirstMinRanks = 32,
   .ddaArVmmFirstMinBytes = 2ULL*1024*1024,
