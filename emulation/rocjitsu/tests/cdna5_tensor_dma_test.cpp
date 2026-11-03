@@ -1145,7 +1145,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaZeroTileDim0IsANopWhateverTheHigherTileDims)
   write_wave_sgpr(*cu, *wf, 19, 0);
 
   for (const bool store : {false, true}) {
-    SCOPED_TRACE(store);
+    SCOPED_TRACE(store ? "store" : "load");
     const std::array<uint32_t, 3> words = {store ? 0xd0714001u : 0xd0710001u, 0x7c000000u,
                                            0x7c7c0c00u};
     auto inst = decode_gfx1250(words, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
@@ -1288,7 +1288,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaGatherWithoutRowsIsANop) {
   };
   for (const EmptyGather gather : {EmptyGather{.tile_dim0 = 2, .valid_indices = 0},
                                    EmptyGather{.tile_dim0 = 0, .valid_indices = 2}}) {
-    SCOPED_TRACE(gather.tile_dim0);
+    SCOPED_TRACE(testing::Message() << "tile_dim0 = " << gather.tile_dim0
+                                    << ", valid_indices = " << gather.valid_indices);
     write_wave_sgpr(*cu, *wf, 15, gather.tile_dim0 << 16);
     write_wave_sgpr(*cu, *wf, 16, gather.valid_indices);
     EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
