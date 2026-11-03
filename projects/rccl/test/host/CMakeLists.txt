@@ -107,6 +107,8 @@ set(_rccl_cast_pins
     "transport_net_ib_p2p_fakes.cc" "return g_loadParam(\"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)<SEMI>"
   "transport/net_ib/p2p_resiliency.cc" "NCCL_PARAM(IbResiliencyPortFailover, \"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI>"
     "transport_net_ib_resiliency_fakes.cc" "return g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI>"
+  "misc/rocmwrap.cc" "NCCL_PARAM(DmaBufEnable, \"DMABUF_ENABLE\", 1)<SEMI>"
+    "rocmwrap_fakes.cc" "int64_t ncclParamDmaBufEnable() { return g_loadParam(\"DMABUF_ENABLE\", 1)<SEMI> }"
   "transport/net_ib_cast/p2p.cc" "NCCL_PARAM(IbCastArThreshold, \"IB_AR_THRESHOLD\", -2)<SEMI>"
     "net_ib_cast_p2p_fakes.cc" "return g_loadParam(\"IB_AR_THRESHOLD\", -2)<SEMI> }"
   "transport/net_ib_cast/p2p.cc" "int64_t IbCastArThreshold = 8192<SEMI>"
@@ -289,6 +291,7 @@ function(rccl_define_micro_source_lists)
     fakes/recorder_fakes.cc
     fakes/profiler_fakes.cc
     fakes/roctx_fakes.cc
+    fakes/hsa_fakes.cc                   # hsa_status_string (rocmwrap.h's HSACHECK)
     fakes/rocmwrap_fakes.cc
     fakes/topo_stubs.cc
     fakes/utils_fakes.cc
@@ -664,6 +667,7 @@ function(rccl_define_micro_source_lists)
     rma-proxy-test.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
     fakes/hip_fakes.cc
+    fakes/hsa_fakes.cc
     fakes/nccl_fakes.cc
     fakes/os_fakes.cc
     fakes/rma_fakes.cc
@@ -972,6 +976,7 @@ function(rccl_define_micro_source_lists)
     fakes/os_fakes.cc
     fakes/proxy_fakes.cc
     fakes/rccl_wrap_fakes.cc             # NET registration segment count / commit
+    fakes/hsa_fakes.cc                   # hsa_status_string (net.cc's HSACHECK)
     fakes/rocmwrap_fakes.cc
     fakes/topo_stubs.cc
     fakes/transport_net_ib_common_fakes.cc  # src/transport/net_ib/common.cc ncclNetIb
@@ -1061,20 +1066,29 @@ function(rccl_define_micro_source_lists)
   # network and GDRCopy seams.
   set(TEST_MICRO_TRANSPORT_SOURCE_FILES
     transport/net_ib/common-test.cc
+    transport/net_ib/connect-test.cc
     transport/net_ib/gdr-test.cc
+    transport/net_ib/gin-test.cc
     transport/net_ib/init-test.cc
     transport/net_ib/net-ib-gid-inspect-test.cc
+    transport/net_ib/p2p-test.cc
+    transport/net_ib/p2p-resiliency-test.cc
+    transport/net_ib/p2p-resiliency-recovery-test.cc
     transport/net_ib/reg-test.cc
+    transport/net_ib/wqe-lat-mon-test.cc
     transport/rma-socket-test.cc
     transport/rma-socket-mem-test.cc
     transport/rma-socket-progress-recver-test.cc
     transport/rma-socket-setup-test.cc
+    fakes/comm_fakes.cc                  # allocTracker, ncclGdrCopy
     fakes/env_fakes.cc
     fakes/gdr_peermem_fakes.cc
     fakes/gdr_probe_fakes.cc
     fakes/gdrwrap_fakes.cc
     fakes/hip_fakes.cc
+    fakes/hsa_fakes.cc
     fakes/ibvwrap_fakes.cc
+    fakes/libc_fakes.cc
     fakes/mlx5dvwrap_fakes.cc
     fakes/nccl_fakes.cc
     fakes/os_fakes.cc
@@ -1084,6 +1098,7 @@ function(rccl_define_micro_source_lists)
     fakes/transport_net_ib_p2p_fakes.cc
     fakes/transport_net_ib_recovery_fakes.cc
     fakes/transport_net_ib_resiliency_fakes.cc
+    fakes/transport_net_ib_wqe_lat_fakes.cc
     fakes/transport_net_socket_common_fakes.cc
     fakes/transport_net_socket_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
@@ -1104,6 +1119,7 @@ function(rccl_define_micro_source_lists)
     fakes/net_ib_cast_connect_fakes.cc
     fakes/net_ib_cast_init_fakes.cc
     fakes/net_ib_cast_p2p_resiliency_fakes.cc
+    fakes/net_ib_cast_p2p_resiliency_recovery_fakes.cc  # ncclParamIbCastResiliencyPortRecovery, for qp_sharing.cc's real ncclIbCastGetQpSharingConfig
     fakes/socket_fakes.cc
     fakes/transport_stubs.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/ibvsymbols.cc   # buildIbvSymbols, never called
@@ -1321,20 +1337,20 @@ function(rccl_standalone_setup)
     message(FATAL_ERROR "Hipified sources not found at ${RCCL_HIPIFY_DIR}. Run the RCCL build first.")
   endif()
 
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
   # csv_tuner.cc needs the embedded-tuner header. The RCCL build normally emits
   # it; generate it here so a standalone test build works against an older tree.
   if(NOT EXISTS "${RCCL_BUILD_DIR}/include/rccl_tuner_embedded_configs.h")
-    # No COMMAND_ERROR_IS_FATAL here: that needs CMake 3.19 and this project
-    # declares 3.16, so check the result explicitly or a FATAL_ERROR from the
-    # generator is swallowed and the build fails later on a missing include.
-    execute_process(COMMAND ${CMAKE_COMMAND}
-      -DTUNER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../../tuner
-      -DOUT_FILE=${RCCL_BUILD_DIR}/include/rccl_tuner_embedded_configs.h
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/GenerateEmbeddedTunerConfigs.cmake
+    execute_process(
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/../../tuner/embed_tuner_configs.py
+              ${CMAKE_CURRENT_SOURCE_DIR}/../../tuner
+              ${RCCL_BUILD_DIR}/include/rccl_tuner_embedded_configs.h
       RESULT_VARIABLE _gen_tuner_result
       ERROR_VARIABLE _gen_tuner_error)
     if(_gen_tuner_result)
-      message(FATAL_ERROR "GenerateEmbeddedTunerConfigs.cmake failed: ${_gen_tuner_error}")
+      message(FATAL_ERROR "embed_tuner_configs.py failed: ${_gen_tuner_error}")
     endif()
   endif()
   message(STATUS "CXX compiler: ${CMAKE_CXX_COMPILER}")
@@ -2451,11 +2467,18 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTransport
     ${_MICRO_MODE_DEFS}
     ENABLE_FAULT_INJECTION
     NET_IB_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/common.cc"
+    # graph/connect.cc and diagnostics/p2p.cc keep the original basenames.
+    NET_IB_CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/connect_tmp.cc"
     NET_IB_GDR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/gdr.cc"
+    NET_IB_GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/gin_tmp.cc"
     # Hipify renames this to *_tmp.cc: src/init.cc keeps the basename.
     NET_IB_INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/init_tmp.cc"
     NET_IB_GID_INSPECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/net_ib_gid_inspect.cc"
+    NET_IB_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/p2p_tmp.cc"
+    NET_IB_P2P_RESILIENCY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/p2p_resiliency.cc"
+    NET_IB_P2P_RESILIENCY_RECOVERY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/p2p_resiliency_recovery.cc"
     NET_IB_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/reg.cc"
+    NET_IB_WQE_LAT_MON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/wqe_lat_mon.cc"
     RMA_SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket.cc"
     RMA_SOCKET_MEM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_mem.cc"
     RMA_SOCKET_PROGRESS_RECVER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_progress_recver.cc"

@@ -675,6 +675,7 @@ struct PluginFixture {
   void initialize(uint32_t num_wf_slots = 10, std::string_view arch = "cdna4",
                   uint32_t wavefront_size = 64, uint32_t sgprs_per_wf = 104,
                   uint32_t vgprs_per_wf = 256, uint32_t num_cus = 1, uint32_t async_helpers = 0) {
+    util::StringDiagnostic admission_diagnostic;
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string links;
     for (uint32_t i = 0; i < num_cus; ++i) {
@@ -715,8 +716,10 @@ struct PluginFixture {
     mem = loaded.memory();
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
-    engine->create();
+    ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
   }
 
   amdgpu::ComputeUnitCore *cu(uint32_t idx = 0) {

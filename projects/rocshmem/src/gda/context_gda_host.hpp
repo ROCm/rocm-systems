@@ -111,6 +111,12 @@ class GDAHostContext : public Context {
                                         uint64_t signal, int sig_op, int pe,
                                         hipStream_t stream);
 
+  __host__ void signal_add_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                     int pe, hipStream_t stream);
+
+  __host__ void signal_set_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                     int pe, hipStream_t stream);
+
   __host__ void signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,
                                             uint64_t cmp_value,
                                             hipStream_t stream);
