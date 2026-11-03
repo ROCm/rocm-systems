@@ -108,8 +108,9 @@ extern std::function<size_t(int, bool, bool)> g_rcclHierarchicalTempBufferSize;
 extern int64_t g_rcclParamHierarchicalAllGather;
 extern int64_t g_rcclParamHierarchicalReduceScatter;
 
-// CE AllReduce staging (ncclCeEnsureAllReduceStaging, ncclCeInit in ce_coll.cc).
+// CE AllReduce / ReduceScatter staging (ncclCeEnsureAllReduceStaging, ncclCeInit in ce_coll.cc).
 extern int64_t g_rcclParamCeAllReduce;
+extern int64_t g_rcclParamCeReduceScatter;
 extern int64_t g_rcclParamCeArStagingBytes;
 
 // checkHsaEnvSetting's HSA_* scratch validation (rccl_wrap.cc). g_lastHsaScratchEnv records the
@@ -126,7 +127,7 @@ extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, 
                                   bool, struct rcclCollDecision*)>
     g_rcclSelectAllGather;
 extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, bool,
-                                  struct rcclCollDecision*)>
+                                  struct rcclCollDecision*, bool)>
     g_rcclSelectReduceScatter;
 extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t, bool,
                                   bool, struct rcclCollDecision*)>

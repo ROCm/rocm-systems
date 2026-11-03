@@ -9,7 +9,7 @@
 //! generic ownership and rollback algorithms remain shared.
 
 #[cfg(test)]
-use super::test_driver::{TestAllocation, TestDriver};
+use super::test_driver::{TestAllocation, TestDriver, TestQueue};
 use super::{
     AllocationOperations, DeviceDriverState, GpuDriverRef, GpuInstrumentationOperations,
     GpuKernelQueueOperations, GpuUserQueueOperations, KfdAllocation, KfdDriver, KfdKernelQueue,
@@ -31,7 +31,7 @@ use crate::memory::{
     Allocation, AllocationInfo, DeviceAccess, DriverAllocation, DriverVirtualAddress,
     DriverVirtualDeviceMapping, DriverVirtualHostMapping, DriverVirtualMemory, HostRegistration,
     MemoryKind, VirtualAddressInfo, VirtualMapRequest, VirtualMemory, VirtualMemoryInfo,
-    set_device_access_for,
+    VirtualMemoryOptions, set_device_access_for,
 };
 
 #[cfg(test)]
@@ -237,6 +237,24 @@ impl AllocationState {
         }
     }
 
+    pub(crate) fn host_alias_source_offset(&self) -> Option<u64> {
+        match self {
+            Self::LinuxKfd(allocation) => allocation.driver_state().host_alias_source_offset(),
+            #[cfg(test)]
+            Self::Test(_) => None,
+        }
+    }
+
+    pub(crate) fn set_host_alias_identity(&self, identity: [u64; 2]) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(allocation) => {
+                allocation.driver_state().set_host_alias_identity(identity)
+            }
+            #[cfg(test)]
+            Self::Test(_) => unsupported_memory(),
+        }
+    }
+
     pub(crate) fn remaining_backing_byte_length(&self) -> u64 {
         match self {
             Self::LinuxKfd(allocation) => allocation.driver_state().remaining_backing_byte_length(),
@@ -379,13 +397,12 @@ impl DeviceDriverState {
         &self,
         kind: MemoryKind,
         size: u64,
-        pinned: bool,
-        uncached: bool,
+        options: VirtualMemoryOptions,
     ) -> Result<VirtualMemory, Error> {
         match self {
             Self::LinuxKfd { driver, state } => {
                 let owner = Shared::try_new_uninit()?;
-                let inner = driver.create_virtual_memory(state, kind, size, pinned, uncached)?;
+                let inner = driver.create_virtual_memory(state, kind, size, options)?;
                 Ok(VirtualMemory::new(VirtualMemoryState::from_linux_kfd(
                     DriverVirtualMemory::new(driver.clone(), owner.write(inner)),
                 )))
@@ -497,6 +514,8 @@ impl GpuDriverRef<'_> {
                     driver.allocate_queue_scratch(state, size)?,
                 )))
             }
+            #[cfg(test)]
+            Self::Test { .. } => Err(super::instance::unsupported_test_gpu()),
         }
     }
 
@@ -505,6 +524,8 @@ impl GpuDriverRef<'_> {
             Self::LinuxKfd { driver, state } => Ok(Allocation::new(
                 AllocationState::from_linux_kfd(driver, driver.map_mmio_remap(state)?),
             )),
+            #[cfg(test)]
+            Self::Test { .. } => Err(super::instance::unsupported_test_gpu()),
         }
     }
 }
@@ -513,18 +534,27 @@ impl GpuDriverRef<'_> {
 pub(crate) enum QueueState {
     /// Direct queue owned by the Linux KFD backend.
     LinuxKfd(DriverQueue<KfdDriver, KfdQueue>),
+    /// Numeric-only transport owned by the test GPU backend.
+    #[cfg(test)]
+    Test(DriverQueue<TestDriver, TestQueue>),
 }
 
 impl QueueState {
     pub(crate) fn info(&self) -> QueueTransport {
         match self {
             Self::LinuxKfd(queue) => queue.info(),
+            #[cfg(test)]
+            Self::Test(queue) => queue.info(),
         }
     }
 
     pub(crate) fn map_device(&self, device: &Device) -> Result<QueueTransport, Error> {
         match (self, &device.driver_state) {
             (Self::LinuxKfd(queue), DeviceDriverState::LinuxKfd { driver, state }) => {
+                queue.map_device(driver, state)
+            }
+            #[cfg(test)]
+            (Self::Test(queue), DeviceDriverState::Test { driver, state }) => {
                 queue.map_device(driver, state)
             }
             #[cfg(test)]
@@ -538,24 +568,32 @@ impl QueueState {
     pub(crate) fn progress(&self) -> Result<(u64, u64), Error> {
         match self {
             Self::LinuxKfd(queue) => queue.progress(),
+            #[cfg(test)]
+            Self::Test(queue) => queue.progress(),
         }
     }
 
     pub(crate) fn inactivate(&mut self) -> Result<(), Error> {
         match self {
             Self::LinuxKfd(queue) => queue.inactivate(),
+            #[cfg(test)]
+            Self::Test(queue) => queue.inactivate(),
         }
     }
 
     pub(crate) fn set_priority(&mut self, priority: QueuePriority) -> Result<(), Error> {
         match self {
             Self::LinuxKfd(queue) => queue.set_priority(priority),
+            #[cfg(test)]
+            Self::Test(queue) => queue.set_priority(priority),
         }
     }
 
     pub(crate) fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error> {
         match self {
             Self::LinuxKfd(queue) => queue.set_cu_mask(mask),
+            #[cfg(test)]
+            Self::Test(queue) => queue.set_cu_mask(mask),
         }
     }
 
@@ -566,12 +604,17 @@ impl QueueState {
         match self {
             // SAFETY: The caller preserves the stopped queue and backing.
             Self::LinuxKfd(queue) => unsafe { queue.set_scratch(scratch) },
+            #[cfg(test)]
+            // SAFETY: The caller preserves the stopped queue and backing.
+            Self::Test(queue) => unsafe { queue.set_scratch(scratch) },
         }
     }
 
     pub(crate) fn check(&self) -> Result<(), Error> {
         match self {
             Self::LinuxKfd(queue) => queue.check(),
+            #[cfg(test)]
+            Self::Test(queue) => queue.check(),
         }
     }
 
@@ -582,6 +625,9 @@ impl QueueState {
         match self {
             // SAFETY: The caller has retired all queue reachability.
             Self::LinuxKfd(queue) => unsafe { queue.destroy() },
+            #[cfg(test)]
+            // SAFETY: The caller has retired all queue reachability.
+            Self::Test(queue) => unsafe { queue.destroy() },
         }
     }
 
@@ -596,6 +642,9 @@ impl QueueState {
         match self {
             // SAFETY: The caller preserves both retirement obligations.
             Self::LinuxKfd(queue) => unsafe { queue.destroy_with_retained_transport(callback) },
+            #[cfg(test)]
+            // SAFETY: The caller preserves both retirement obligations.
+            Self::Test(queue) => unsafe { queue.destroy_with_retained_transport(callback) },
         }
     }
 }
@@ -693,7 +742,17 @@ impl GpuDriverRef<'_> {
                 Ok(QueueState::LinuxKfd(DriverQueue::new(
                     (*driver).clone(),
                     inner,
-                )))
+                    desc,
+                )?))
+            }
+            #[cfg(test)]
+            Self::Test { driver, state } => {
+                let inner = driver.create_user_queue(state, desc)?;
+                Ok(QueueState::Test(DriverQueue::new(
+                    (*driver).clone(),
+                    inner,
+                    desc,
+                )?))
             }
         }
     }
@@ -710,6 +769,8 @@ impl GpuDriverRef<'_> {
                     inner,
                 )))
             }
+            #[cfg(test)]
+            Self::Test { .. } => Err(super::instance::unsupported_test_gpu()),
         }
     }
 
@@ -726,6 +787,8 @@ impl GpuDriverRef<'_> {
                     inner,
                 )))
             }
+            #[cfg(test)]
+            Self::Test { .. } => Err(super::instance::unsupported_test_gpu()),
         }
     }
 }
