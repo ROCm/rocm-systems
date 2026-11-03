@@ -38,6 +38,7 @@ test_categories:
       - "rocrtstFunc.AgentPropertiesTests"
       - "rocrtstFunc.GpuDiscoveryDeprecatedDoorbellTest"
       - "DoorbellTypeValidation.*"
+      - "BroadcastCapabilityQuery.*"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     exclude_windows: []
@@ -88,6 +89,7 @@ test_categories:
       - "rocrtstFunc.AgentPropertiesTests"
       - "rocrtstFunc.GpuDiscoveryDeprecatedDoorbellTest"
       - "DoorbellTypeValidation.*"
+      - "BroadcastCapabilityQuery.*"
       - "rocrtstFunc.GpuCoreDump_DefaultPattern"
       - "rocrtstFunc.GpuCoreDump_CustomPattern"
       - "rocrtstFunc.GpuCoreDump_DisableFlag"
@@ -192,6 +194,7 @@ test_categories:
       - "rocrtstFunc.AgentPropertiesTests"
       - "rocrtstFunc.GpuDiscoveryDeprecatedDoorbellTest"
       - "DoorbellTypeValidation.*"
+      - "BroadcastCapabilityQuery.*"
       - "rocrtstFunc.GpuCoreDump_DefaultPattern"
       - "rocrtstFunc.GpuCoreDump_CustomPattern"
       - "rocrtstFunc.GpuCoreDump_DisableFlag"
@@ -308,6 +311,7 @@ test_categories:
       - "rocrtstFunc.AgentPropertiesTests"
       - "rocrtstFunc.GpuDiscoveryDeprecatedDoorbellTest"
       - "DoorbellTypeValidation.*"
+      - "BroadcastCapabilityQuery.*"
       - "rocrtstFunc.GpuCoreDump_DefaultPattern"
       - "rocrtstFunc.GpuCoreDump_CustomPattern"
       - "rocrtstFunc.GpuCoreDump_DisableFlag"
