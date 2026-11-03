@@ -4193,10 +4193,9 @@ def describe_subprocess_exit_code(returncode: int) -> str:
 
 def op_workload_failure_due_to(
     *,
-    returncode: Optional[int],
+    returncode: int,
 ) -> str:
     """Short phrase for pytest.fail lead-in."""
-    assert returncode is not None
     if returncode < 0:
         name = signal_name(returncode)
         name_part = f", {name}" if name else ""
