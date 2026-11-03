@@ -1300,10 +1300,14 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtSVMGetAttr(void* start_addr, HSAuint64 size, unsi
     return -ENOMEM;
   }
 
+  memcpy(req->payload, attrs, nattr * sizeof(HSA_SVM_ATTRIBUTE));
+
   r = vhsakmt_execbuf_cpu(dev, &req->hdr, __FUNCTION__);
   free(req);
   if (r) return r;
   if (rsp->ret) return rsp->ret;
+
+  memcpy(attrs, rsp->payload, nattr * sizeof(HSA_SVM_ATTRIBUTE));
 
   return rsp->ret;
 }
