@@ -56,12 +56,12 @@ float ncclParamRasTimeoutFactor(void) {
 
 int64_t rasTimeoutFactorNs(int64_t baseSeconds) {
   const double scaled = (double)baseSeconds * 1000000000.0 * ncclParamRasTimeoutFactor();
-  // Guard the double->int64 conversion: an out-of-range conversion is undefined behavior. Note
-  // double(INT64_MAX) rounds up to 2^63, which is itself not representable as int64_t, so the
-  // upper bound must be a strict "< 2^63" (equivalently reject >= 2^63).
-  constexpr double kInt64Max = 9223372036854775808.0; // 2^63, exactly representable as double
-  if (!std::isfinite(scaled) || scaled >= kInt64Max) return INT64_MAX;
-  if (scaled <= -kInt64Max) return INT64_MIN;
+  // Saturate before the double->int64 conversion (out of range is undefined behavior), and well below
+  // INT64_MAX: callers add the result to clockNano() and to other timeouts (e.g. startTime + timeout +
+  // RAS_COLLECTIVE_EXTRA_TIMEOUT), and those sums must not overflow. INT64_MAX/4 ns is ~73 years.
+  constexpr int64_t kMaxTimeoutNs = INT64_MAX / 4;
+  if (std::isnan(scaled) || scaled >= (double)kMaxTimeoutNs) return kMaxTimeoutNs;
+  if (scaled <= -(double)kMaxTimeoutNs) return -kMaxTimeoutNs;
   return (int64_t)scaled;
 }
 

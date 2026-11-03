@@ -68,11 +68,14 @@ TEST_F(RasParamMicrotest, PublicAccessorsScaleAndCacheTheFactor) {
   SetMicroEnv("NCCL_RAS_TIMEOUT_FACTOR", "2.5");
   EXPECT_FLOAT_EQ(2.5f, ncclParamRasTimeoutFactor());
   EXPECT_EQ(7500000000LL, rasTimeoutFactorNs(3));
-  // Scaling baseSeconds * 1e9 * 2.5 overflows int64 once baseSeconds exceeds ~3.69e9, and the raw
-  // double->int64 conversion would be undefined behavior. Check that out-of-range inputs clamp to
-  // the int64 limits instead: 4e9 scales to 1e19 (> INT64_MAX) and its negation to -1e19.
-  EXPECT_EQ(INT64_MAX, rasTimeoutFactorNs(4000000000LL));
-  EXPECT_EQ(INT64_MIN, rasTimeoutFactorNs(-4000000000LL));
+  // Results saturate at +/-INT64_MAX/4 so callers can add them to clock values without overflow.
+  constexpr int64_t kMaxTimeoutNs = INT64_MAX / 4;
+  EXPECT_EQ(2305843007500000000LL, rasTimeoutFactorNs(922337203));
+  EXPECT_EQ(kMaxTimeoutNs, rasTimeoutFactorNs(922337204));
+  EXPECT_EQ(kMaxTimeoutNs, rasTimeoutFactorNs(4000000000LL));
+  EXPECT_EQ(kMaxTimeoutNs, rasTimeoutFactorNs(INT64_MAX));
+  EXPECT_EQ(-kMaxTimeoutNs, rasTimeoutFactorNs(-4000000000LL));
+  EXPECT_EQ(-kMaxTimeoutNs, rasTimeoutFactorNs(INT64_MIN));
   EXPECT_DOUBLE_EQ(10.0, rasTimeoutFactorSec(4));
 
   SetMicroEnv("NCCL_RAS_TIMEOUT_FACTOR", "9");
