@@ -13,7 +13,8 @@ The copyBuffer decoder uses a private ROCclr ABI and is **off by default**.
 Enable it with `ROCPROFILER_EXPERIMENTAL_GRAPH_COPYBUFFER=1`. It validates
 kernel name, argument-segment size, alignment, remainder, endpoint and workgroup
 fields before matching a captured copy. It does not implement general SDMA,
-array, 2D, batch or split-copy attribution. Runtime changes require revalidation.
+array, 2D, batch or split-copy attribution. Runtime changes require revalidation. Copy attribution is disabled for mixed graphs
+containing any node outside the recorded capture, including manually added nodes.
 Graph node ordinals and capture matching still inherit the upstream ordering
 constraints. Resolving a HIP capture call does not establish Python layer labels.
 
@@ -31,8 +32,8 @@ bash projects/rocprofiler-sdk/tests/graph-attribution-experiments/run_native.sh 
 
 The module test checks the GPU result and 18 exact capture IDs, including repeated
 module names and ext-module launches. The memcpy test checks GPU buffer contents
-and 24 dispatches covering offsets, unaligned sizes, duplicate rejection,
-mutation invalidation and fresh-exec recovery. The existing CTest graph suites
+and 30 dispatches covering offsets, unaligned sizes, duplicate rejection,
+mutation invalidation, fresh-exec recovery and manually added duplicates. The existing CTest graph suites
 also cover multi-stream replay and kernel-node mutations.
 
 ## SGLang reproduction

@@ -410,6 +410,17 @@ plan_capture(::hipGraphExec_t exec, ::hipGraph_t graph)
         kernel.name           = name;
         kernel.correlation_id = itr.correlation_id;
     }
+    // Matching only captured copies cannot exclude an identical dispatch from a
+    // manually added node (including a child graph). Fail closed for mixed graphs:
+    // every live node must belong to this capture before copy attribution is safe.
+    auto live_nodes = enqueue_order(graph);
+    if(live_nodes.empty() || std::any_of(live_nodes.begin(), live_nodes.end(), [&nodes](auto node) {
+           return std::none_of(nodes.begin(), nodes.end(), [node](const auto& captured) {
+               return captured.node == node;
+           });
+       }))
+        plan->copies.clear();
+
     if(plan->kernels.empty() && plan->copies.empty()) return;
 
     std::unique_lock lock{g_map_mutex};

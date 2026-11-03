@@ -39,5 +39,9 @@
     "copyBuffer support is opt-in and depends on a private ROCclr ABI.",
     "No general SDMA, array, 2D or split-copy attribution guarantee.",
     "Resolved IDs do not prove Python layer labels or all upstream parallel-node ordering assumptions."
-  ]
+  ],
+  "review_regression": {
+    "memcpy_dispatches": 30,
+    "case": "captured memcpy followed by an identical manually added node; mixed graphs must remain unattributed"
+  }
 }

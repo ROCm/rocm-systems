@@ -3742,7 +3742,7 @@ json_tool_pause_until_graph()
 extern "C" ROCPROFILER_PUBLIC_API void
 json_tool_finalize_idle_worker()
 {
-    auto fini = client::client_fini_func;
+    auto fini                = client::client_fini_func;
     client::client_fini_func = nullptr;
     if(fini && client::client_id) fini(*client::client_id);
 }

@@ -387,9 +387,9 @@ get_host_function_id()
     return _v;
 }
 
-using kernel_object_map_t        = std::unordered_map<uint64_t, uint64_t>;
-using kernel_name_map_t = std::unordered_map<uint64_t, std::pair<const std::string*, uint32_t>>;
-using executable_array_t         = std::vector<hsa_executable_t>;
+using kernel_object_map_t = std::unordered_map<uint64_t, uint64_t>;
+using kernel_name_map_t   = std::unordered_map<uint64_t, std::pair<const std::string*, uint32_t>>;
+using executable_array_t  = std::vector<hsa_executable_t>;
 using code_object_unload_array_t = std::vector<hsa::code_object_unload>;
 
 std::vector<hsa::code_object_unload>
