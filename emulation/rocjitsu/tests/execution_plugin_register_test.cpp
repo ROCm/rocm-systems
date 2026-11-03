@@ -2796,8 +2796,9 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAc
           for (const auto &event : plugin->events) {
             if (event.kind == HookEvent::WRITE_VGPR)
               saw_write = true;
-            if (event.kind == HookEvent::READ_VGPR)
+            if (event.kind == HookEvent::READ_VGPR) {
               EXPECT_FALSE(saw_write);
+            }
           }
         }
 }
