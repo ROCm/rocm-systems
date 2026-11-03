@@ -42,7 +42,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <future>
-#include <memory>
 #include <set>
 #include <string>
 #include <thread>
@@ -199,23 +198,24 @@ protected:
     }
 
     // Bounded ep_create: a missed num_ranks rejection would wait in init for ranks that never join.
-    void CreateBounded(const std::vector<char>& uid, int numRanks, int maxTokens, int hidden, void** out,
-                       bool* finished)
+    void CreateBounded(const std::vector<char>& uid, int rank, int numRanks, int maxTokens, int hidden,
+                       const char* caseName, void** out)
     {
-        *out      = nullptr;
-        *finished = false;
-        auto result = std::make_shared<std::promise<void*>>();
-        std::future<void*> done = result->get_future();
-        std::thread worker([result, uid, rank = rank_, numRanks, maxTokens, hidden, dev = device_]() {
-            result->set_value(ep_create(rank, numRanks, uid.data(), maxTokens, hidden, dev));
+        *out = nullptr;
+        std::promise<void*> result;
+        std::future<void*> done = result.get_future();
+        std::thread worker([&result, uid, rank, numRanks, maxTokens, hidden, dev = device_]() {
+            result.set_value(ep_create(rank, numRanks, uid.data(), maxTokens, hidden, dev));
         });
-        if (done.wait_for(std::chrono::seconds(60)) == std::future_status::ready) {
-            worker.join();
-            *finished = true;
-            *out      = done.get();
-        } else {
-            worker.detach();
+        if (done.wait_for(std::chrono::seconds(60)) != std::future_status::ready) {
+            std::fprintf(stderr, "[rank %d] ep_create timed out after 60s: %s; aborting the MPI job\n",
+                         rank_, caseName);
+            std::fflush(stderr);
+            MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+            std::_Exit(EXIT_FAILURE);
         }
+        worker.join();
+        *out = done.get();
     }
 
     // Plan, dispatch, combine with an identity expert, and check every token came back
@@ -442,9 +442,7 @@ TEST_F(RcclEpDispatchCombineTest, CreateRejectsOutOfRangeArguments)
     for (const Case& c : rejected) {
         SCOPED_TRACE(c.name);
         void* h        = nullptr;
-        bool  finished = false;
-        ASSERT_EP_STEP(CreateBounded(uid, c.numRanks, c.maxTokens, c.hidden, &h, &finished));
-        ASSERT_MPI_TRUE(finished);
+        ASSERT_EP_STEP(CreateBounded(uid, rank_, c.numRanks, c.maxTokens, c.hidden, c.name, &h));
         if (h != nullptr) ep_destroy(h);
         ASSERT_MPI_TRUE(h == nullptr);
     }
@@ -453,16 +451,16 @@ TEST_F(RcclEpDispatchCombineTest, CreateRejectsOutOfRangeArguments)
         // Valid 1-rank communicator: each rank makes its own, as rank 0 of 1.
         std::vector<char> localUid(static_cast<size_t>(ep_unique_id_size()), 0);
         ASSERT_MPI_EQ(0, ep_get_unique_id(localUid.data()));
-        void* solo = ep_create(0, 1, localUid.data(), kTokens, kHidden, device_);
+        void* solo = nullptr;
+        ASSERT_EP_STEP(CreateBounded(localUid, 0, 1, kTokens, kHidden, "valid single-rank shape", &solo));
         ASSERT_MPI_TRUE(solo != nullptr);
         ep_destroy(solo);
     }
 
     void* h        = nullptr;
-    bool  finished = false;
     ASSERT_EP_STEP(BroadcastUid(&uid));
-    ASSERT_EP_STEP(CreateBounded(uid, nRanks_, /*maxTokens=*/1, /*hidden=*/8, &h, &finished));
-    ASSERT_MPI_TRUE(finished);
+    ASSERT_EP_STEP(CreateBounded(uid, rank_, nRanks_, /*maxTokens=*/1, /*hidden=*/8,
+                                "valid minimum shape", &h));
     handle_ = h;  // TearDown destroys it
     ASSERT_MPI_TRUE(handle_ != nullptr);
 }
