@@ -2787,6 +2787,23 @@ inline float matrix_fma(float src0, float src1, float acc) {
   return std::bit_cast<float>(0xFFC00000u);
 }
 
+/// F64 form of matrix_fma, with the same NaN source priority.
+inline double matrix_fma(double src0, double src1, double acc) {
+  const double result = std::fma(src0, src1, acc);
+  if (!std::isnan(result))
+    return result;
+  auto quiet = [](double value) {
+    return std::bit_cast<double>(std::bit_cast<uint64_t>(value) | 0x0008000000000000ull);
+  };
+  if (std::isnan(src0))
+    return quiet(src0);
+  if (std::isnan(src1))
+    return quiet(src1);
+  if (std::isnan(acc))
+    return quiet(acc);
+  return std::bit_cast<double>(0xFFF8000000000000ull);
+}
+
 // Preserve the focused helper name used by the BF16F32 contract tests and by
 // callers that need the same deterministic matrix-FMA NaN behavior.
 inline float wmma_bf16f32_fma(float src0, float src1, float acc) {
@@ -5082,8 +5099,8 @@ inline void exec_f64(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, u
           for (uint32_t k = 0; k < K; ++k) {
             auto al = input_loc(M, K, B, row, k, b, 64);
             auto bl = input_loc(N, K, B, col, k, b, 64);
-            acc +=
-                apply_neg(extract_f64(cu, s0, al), 0x1u) * apply_neg(extract_f64(cu, s1, bl), 0x2u);
+            acc = matrix_fma(apply_neg(extract_f64(cu, s0, al), 0x1u),
+                             apply_neg(extract_f64(cu, s1, bl), 0x2u), acc);
           }
           uint64_t bits = std::bit_cast<uint64_t>(acc);
           results.push_back(
@@ -5155,7 +5172,7 @@ inline void exec_f64(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, u
           for (; col < N; ++col) {
             double acc = Cbuf[row * stride + col];
             for (uint32_t k = 0; k < K; ++k)
-              acc = std::fma(Abuf[row * K + k], Bbuf[k * stride + col], acc);
+              acc = matrix_fma(Abuf[row * K + k], Bbuf[k * stride + col], acc);
             Cbuf[row * stride + col] = acc;
           }
         }

@@ -43,6 +43,7 @@
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "simdojo/sim/simulation.h"
 #include "util/except.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -8657,6 +8658,47 @@ void expect_mfma_f64_neg_modifier(const std::string &arch) {
 TEST(MfmaF64Cdna3Test, NegModifier) { expect_mfma_f64_neg_modifier("cdna3"); }
 
 TEST(MfmaF64Cdna4Test, NegModifier) { expect_mfma_f64_neg_modifier("cdna4"); }
+
+// The first NaN of A, B and C propagates, quieted, with its sign after input modifiers, so only
+// that operand's NEG bit decides the result's sign. RJ_FORCE_SCALAR must not change the result.
+TEST(MfmaF64Cdna4Test, FirstNaNOperandPropagatesWithItsNegModifier) {
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4"));
+  auto *cu = f.cu();
+  auto *wf = f.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint32_t dst = vb + amdgpu::ACC_VGPR_OFFSET;
+  const uint32_t s0 = vb + 10, s1 = vb + 20, s2 = vb + 30;
+
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double signaling = std::bit_cast<double>(0x7FF0000000000001ull);
+  struct Case {
+    const char *name;
+    double a, b, c;
+    uint32_t propagated_neg_bit;
+    double propagated;
+  };
+  const bool original_force_scalar = util::force_scalar();
+  for (const Case test :
+       {Case{"A", nan, 1.0, 1.0, 0x1, nan}, Case{"B", 1.0, nan, 1.0, 0x2, nan},
+        Case{"C", 1.0, 1.0, nan, 0x4, nan}, Case{"A and B", nan, nan, 1.0, 0x1, nan},
+        Case{"A and C", nan, 1.0, nan, 0x1, nan}, Case{"B and C", 1.0, nan, nan, 0x2, nan},
+        Case{"signaling A", signaling, nan, 1.0, 0x1, signaling}})
+    for (bool force_scalar : {false, true})
+      for (uint32_t neg = 0; neg < 8; ++neg) {
+        SCOPED_TRACE(testing::Message() << "NaN in " << test.name
+                                        << " force_scalar=" << force_scalar << " neg=" << neg);
+        init_mfma_f64_neg_inputs(cu, s0, s1, s2, test.a, test.b, test.c);
+        util::set_force_scalar_for_testing(force_scalar);
+        amdgpu::exec_f64(*cu, 4, 4, 4, 4, dst, s0, s1, s2, amdgpu::ACC_FROM_VGPR, neg);
+        util::set_force_scalar_for_testing(original_force_scalar);
+        uint64_t expected = std::bit_cast<uint64_t>(test.propagated) | 0x0008000000000000ull;
+        if (neg & test.propagated_neg_bit)
+          expected ^= uint64_t{1} << 63;
+        expect_mfma_f64_outputs(cu, dst, std::bit_cast<double>(expected));
+      }
+}
 
 TEST(MfmaF64Cdna4Test, GeneratedInstructionUsesBlgpNegModifier) {
   VmFixture f;
