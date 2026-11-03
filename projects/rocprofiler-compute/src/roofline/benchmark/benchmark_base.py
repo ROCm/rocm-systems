@@ -236,13 +236,6 @@ class Bench_base(ABC):
             test for test, column in self.csv_cols_map.items() if column not in measured
         )
 
-    def get_gfx_arch(self, device: int) -> str:
-        """Retrieve the gfx architecture."""
-        arch_str = hip.hipGetDeviceProperties(device).gcnArchName
-
-        # Parse out only gfx
-        return arch_str.split(":", 1)[0]
-
     def set_cache_kernel_selector(self) -> None:
         self.cache_kernel_selector = {}
 
@@ -763,7 +756,7 @@ class Bench_base(ABC):
     def int64_benchmark(self, device: int) -> float:
         return self.flops_bench(device, "INT64", "IOP", "GOPS")
 
-    def run_benchmark(self, device: int) -> dict[str, float]:
+    def run_benchmark(self, device: int, gpu_arch: str) -> dict[str, float]:
         """
         Run the roofline tests on the specified device.
         Returns a dictionary mapping test name to its peak performance.
@@ -771,10 +764,9 @@ class Bench_base(ABC):
         with self.gpu_benchmark_lock(device):
             metrics_dict = {}
 
-            arch = self.get_gfx_arch(device)
             cus = hip.hipGetDeviceProperties(device).multiProcessorCount
 
-            print(f"GPU Device {device} ({arch}) with {cus} CUs: Profiling...")
+            print(f"GPU Device {device} ({gpu_arch}) with {cus} CUs: Profiling...")
 
             for name, func in self.tests.items():
                 if name in self.unsupported_data_types:
