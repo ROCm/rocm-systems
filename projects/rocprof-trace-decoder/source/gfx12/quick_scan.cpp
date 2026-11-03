@@ -164,7 +164,9 @@ inline uint64_t load_contents64_unchecked(const uint8_t* chunk, unsigned pos)
 }
 
 GFX12_SCAN_TARGET inline unsigned lane0(__m512i v)
-{ return static_cast<uint8_t>(_mm_cvtsi128_si32(_mm512_castsi512_si128(v))); }
+{
+    return static_cast<uint8_t>(_mm_cvtsi128_si32(_mm512_castsi512_si128(v)));
+}
 
 // AVX-512_VBMI path. Per 64-nibble (32-byte) chunk:
 //   1. Build the 64 overlapping 8-bit keys (one per nibble) with vpermb +
@@ -181,9 +183,8 @@ GFX12_SCAN_TARGET inline unsigned lane0(__m512i v)
 //
 // With `state`, the scan starts at state->pos and, when `out` fills, stops
 // right after the last captured token so a later call can resume.
-GFX12_SCAN_TARGET size_t scan_gfx12_avx512vbmi(
-    const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap, ScanState* state
-)
+GFX12_SCAN_TARGET size_t
+scan_gfx12_avx512vbmi(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap, ScanState* state)
 {
     if (!buf || !out || out_cap == 0 || size == 0)
     {

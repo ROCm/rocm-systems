@@ -107,7 +107,9 @@ const Tables& tables()
 #    define MI400_SCAN_TARGET __attribute__((target("avx512vbmi,avx512bw,avx512f,bmi2")))
 
 MI400_SCAN_TARGET inline unsigned lane0(__m512i v)
-{ return static_cast<uint8_t>(_mm_cvtsi128_si32(_mm512_castsi512_si128(v))); }
+{
+    return static_cast<uint8_t>(_mm_cvtsi128_si32(_mm512_castsi512_si128(v)));
+}
 
 // 256-entry byte LUT held in four zmm registers: vpermi2b covers 128 entries
 // using the low 7 index bits, so the two halves are blended on bit 7.
@@ -134,9 +136,8 @@ MI400_SCAN_TARGET inline __m512i lookup256(const __m512i (&lut)[4], __m512i byte
 //
 // With `state`, the scan starts at state->pos and, when `out` fills, stops
 // right after the last captured token so a later call can resume.
-MI400_SCAN_TARGET size_t scan_mi400_avx512(
-    const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap, ScanState* state
-)
+MI400_SCAN_TARGET size_t
+scan_mi400_avx512(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap, ScanState* state)
 {
     if (!buf || !out || out_cap == 0 || size == 0)
     {

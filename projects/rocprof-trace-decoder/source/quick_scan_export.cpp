@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -82,7 +83,7 @@ size_t scan_into(int gfxip, const uint8_t* buf, size_t size, std::vector<QuickTo
         size_t ntokens = scanner(buf, size, raw.data(), raw.size(), &state);
         while (!state.done)
         {
-            raw.resize(raw.size() * 2);
+            raw.resize(std::max<size_t>(raw.size() * 2, 1024));
             ntokens += scanner(buf, size, raw.data() + ntokens, raw.size() - ntokens, &state);
         }
         return ntokens;

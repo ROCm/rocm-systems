@@ -92,7 +92,9 @@ struct QuickToken
 // resumable. A scan that fills `out` stops right after the last captured
 // token and records where to continue; calling again with the same state and
 // a fresh output range picks up from there instead of rescanning the buffer.
-// `done` is set once the scan reached the end of the buffer.
+// `done` is set once the scan reached the end of the buffer. A resumed scan
+// only makes progress when out_cap > 0; callers looping on `done` must always
+// pass a non-empty output range.
 struct ScanState
 {
     uint64_t pos = 0; // next token start (nibbles for gfx12, bytes for mi400)
