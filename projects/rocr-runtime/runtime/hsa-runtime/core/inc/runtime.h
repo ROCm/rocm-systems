@@ -1088,15 +1088,17 @@ class Runtime {
   typedef void* ThunkHandle;
 
   struct AddressHandle {
-    AddressHandle() : os_addr(nullptr), size(0), use_count(0), registered(false) {}
+    AddressHandle() : os_addr(nullptr), size(0), use_count(0), registered(false), svm_attrib(false) {}
     AddressHandle(void* addr, size_t _size, bool _registered)
-        : os_addr(addr), size(_size), use_count(0), registered(_registered) {}
+        : os_addr(addr), size(_size), use_count(0), registered(_registered), svm_attrib(false) {}
 
     // Address returned by OS. May be different from user address when adjusted for alignment
     void* os_addr;
     size_t size;
     int use_count;
     bool registered;
+    // Set once hsa_amd_svm_attributes_set succeeds on any part of this reservation.
+    bool svm_attrib;
   };
   std::map<const void*, AddressHandle> reserved_address_map_;  // Indexed by VA
 
@@ -1188,6 +1190,7 @@ class Runtime {
   std::map<const void*, MappedHandle> mapped_handle_map_;  // Indexed by VA
 
   AddressHandle* VMemoryFindReservedAddressHandle(const void* va);
+  void MarkReservedAddressSvm(const void* ptr, size_t size);
   hsa_status_t VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, void* (*alloc)(size_t),
                               uint32_t* num_agents_accessible, hsa_agent_t** accessible);
 

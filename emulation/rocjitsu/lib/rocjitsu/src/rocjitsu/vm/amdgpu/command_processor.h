@@ -640,11 +640,17 @@ private:
 
   /// @brief Write back L2 and invalidate scalar, vector and instruction caches.
   /// @details Scalar and vector L1 are write-through and only need
-  /// invalidation. Dirty L2 data is published under the owning VMID. Requires
-  /// hw_queue_mutex_ and joined CU workers. CU maintenance takes each CU's
-  /// mutex to serialize with runtime snapshots, without delivering notifications
-  /// that could re-enter the CP and invalidate queue or dispatch references.
-  void flush_gpu_caches();
+  /// invalidation. A supplied address space limits L2 maintenance to its VMID;
+  /// otherwise all L2 lines are published under their owning VMIDs. If the supplied
+  /// address space cannot be looked up, returns Faulted without touching any cache.
+  /// Otherwise, returns the first incomplete L2 outcome after visiting every L2
+  /// and invalidating L1/I$.
+  /// Successful writebacks remain published; failed dirty lines remain for retry.
+  /// Requires hw_queue_mutex_ and joined CU workers. CU maintenance takes each
+  /// CU's mutex to serialize with runtime snapshots, without delivering
+  /// notifications that could re-enter the CP and invalidate queue or dispatch
+  /// references.
+  [[nodiscard]] VmAccessOutcome flush_gpu_caches(AddressSpaceHandle address_space = {});
 
   /// @brief Ask ROCr to provision scratch while leaving the head packet unconsumed.
   [[nodiscard]] AqlAdmissionResult request_dynamic_scratch(ComputeQueueRecord &queue,

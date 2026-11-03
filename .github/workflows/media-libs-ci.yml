@@ -53,7 +53,7 @@ jobs:
         with:
           repository: "amontoison/TheRock"
           path: TheRock
-          ref: c6f3105dbd248669cc52e1ed988c173c1eb49806 # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
+          ref: cf35bf12be522f7b662a0fc36fec10171b80bad0 # TEST ONLY: ROCm/TheRock#9446
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0

@@ -12,7 +12,7 @@
 # - Supports prebuilt stages to skip certain build stages
 # - Better parallelization across GPU architectures
 
-# TheRock ref: pinned to amontoison/TheRock commit c6f3105dbd248669cc52e1ed988c173c1eb49806 (TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d).
+# TheRock ref: pinned to amontoison/TheRock commit cf35bf12be522f7b662a0fc36fec10171b80bad0 (TEST ONLY: ROCm/TheRock#9446).
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching
 
 # =============================================================================
@@ -77,6 +77,10 @@ on:
         type: boolean
         default: false
         description: "Build native Linux packages and run install tests"
+      build_native_windows:
+        type: boolean
+        default: false
+        description: "Build native Windows packages (MSI)"
       baseline_repository:
         type: string
         default: ""
@@ -119,7 +123,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: amontoison/TheRock
-          ref: c6f3105dbd248669cc52e1ed988c173c1eb49806 # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
+          ref: cf35bf12be522f7b662a0fc36fec10171b80bad0 # TEST ONLY: ROCm/TheRock#9446
           path: _therock
           # _therock_utils + (cone-mode) root BUILD_TOPOLOGY.toml and
           # build_tools/project_mappings.json are needed to map changed projects
@@ -168,7 +172,7 @@ jobs:
 
   setup:
     needs: configure
-    uses: amontoison/TheRock/.github/workflows/setup_multi_arch.yml@c6f3105dbd248669cc52e1ed988c173c1eb49806 # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
+    uses: amontoison/TheRock/.github/workflows/setup_multi_arch.yml@cf35bf12be522f7b662a0fc36fec10171b80bad0 # TEST ONLY: ROCm/TheRock#9446
     with:
       build_variant: "release"
       # Limit GPU families for rocm-systems CI
@@ -188,12 +192,13 @@ jobs:
       build_pytorch: ${{ inputs.build_pytorch || false }}
       build_jax: ${{ inputs.build_jax || false }}
       build_native_linux: ${{ inputs.build_native_linux || false }}
+      build_native_windows: ${{ inputs.build_native_windows || false }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       # Enable automatic stage reuse - TheRock finds commit-compatible baselines
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
       repository: amontoison/TheRock
-      ref: c6f3105dbd248669cc52e1ed988c173c1eb49806 # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
+      ref: cf35bf12be522f7b662a0fc36fec10171b80bad0 # TEST ONLY: ROCm/TheRock#9446
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
       # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
       # NOTE: MI455 machine is down - test-runs-on set to "" until back online (was: linux-mi455-gpu-rocm)
@@ -225,7 +230,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: amontoison/TheRock/.github/workflows/multi_arch_ci_linux.yml@c6f3105dbd248669cc52e1ed988c173c1eb49806 # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
+    uses: amontoison/TheRock/.github/workflows/multi_arch_ci_linux.yml@cf35bf12be522f7b662a0fc36fec10171b80bad0 # TEST ONLY: ROCm/TheRock#9446
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -237,7 +242,7 @@ jobs:
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: amontoison/TheRock
-      ref: c6f3105dbd248669cc52e1ed988c173c1eb49806 # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
+      ref: cf35bf12be522f7b662a0fc36fec10171b80bad0 # TEST ONLY: ROCm/TheRock#9446
     permissions:
       contents: read
       id-token: write
@@ -250,7 +255,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: amontoison/TheRock/.github/workflows/multi_arch_ci_windows.yml@c6f3105dbd248669cc52e1ed988c173c1eb49806 # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
+    uses: amontoison/TheRock/.github/workflows/multi_arch_ci_windows.yml@cf35bf12be522f7b662a0fc36fec10171b80bad0 # TEST ONLY: ROCm/TheRock#9446
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
@@ -261,7 +266,7 @@ jobs:
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: amontoison/TheRock
-      ref: c6f3105dbd248669cc52e1ed988c173c1eb49806 # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
+      ref: cf35bf12be522f7b662a0fc36fec10171b80bad0 # TEST ONLY: ROCm/TheRock#9446
     permissions:
       contents: read
       id-token: write
@@ -280,7 +285,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "amontoison/TheRock"
-          ref: c6f3105dbd248669cc52e1ed988c173c1eb49806 # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
+          ref: cf35bf12be522f7b662a0fc36fec10171b80bad0 # TEST ONLY: ROCm/TheRock#9446
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

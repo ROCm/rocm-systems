@@ -103,15 +103,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
         if (dispatch_id == 0 || dispatch_id > dispatch_id_start) return; // TODO: Add debug info
 
         send_occupancy();
-        stitch.sendEvent(
-            ROCPROF_TRACE_DECODER_EVENT_DISPATCH_END,
-            time,
-            me,
-            pipe,
-            dispatch_id,
-            false,
-            true
-        );
+        stitch.sendEvent(ROCPROF_TRACE_DECODER_EVENT_DISPATCH_END, time, me, pipe, dispatch_id, false, true);
     };
 
     auto consume_launch_cluster = [&]() -> uint8_t
@@ -328,7 +320,9 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                             addr = it->second.pc;
 
                         saved_waves.erase(start.getGPULocation());
-                        running_waves[start.getGPULocation()] = {addr, dispatch_id, start.me, start.pipe};
+                        running_waves[start.getGPULocation()] = {
+                            addr, dispatch_id, static_cast<uint32_t>(start.me), static_cast<uint32_t>(start.pipe)
+                        };
 
                         occupancy.push_back(
                             {addr,
@@ -357,26 +351,26 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     });
                 }
                 auto cluster_id = consume_launch_cluster();
-                running_waves[start.getGPULocation()] = {wave_addr, dispatch_id, start.me & 1u, start.pipe};
+                running_waves[start.getGPULocation()] = {
+                    wave_addr, dispatch_id, static_cast<uint32_t>(start.me & 1u), static_cast<uint32_t>(start.pipe)
+                };
 
-                if (dispatch_id > 0)
-                    active_waves_per_pipe.at_reg(start)++;
+                if (dispatch_id > 0) active_waves_per_pipe.at_reg(start)++;
 
-                occupancy.push_back(
-                    {wave_addr,
-                     token.time,
-                     start.SACU(),
-                     start.simd,
-                     start.wid,
-                     1,
-                     (uint64_t) start.me,
-                     (uint64_t) start.pipe,
-                     start.isExt,
-                     (uint64_t) start.wgid,
-                     cluster_id,
-                     current_dispatch_id.at_reg(start),
-                    }
-                );
+                occupancy.push_back({
+                    wave_addr,
+                    token.time,
+                    start.SACU(),
+                    start.simd,
+                    start.wid,
+                    1,
+                    (uint64_t) start.me,
+                    (uint64_t) start.pipe,
+                    start.isExt,
+                    (uint64_t) start.wgid,
+                    cluster_id,
+                    current_dispatch_id.at_reg(start),
+                });
                 if (double_buffer && occupancy.size() >= MAX_ACCUM_RECORDS) send_occupancy();
 
                 if (bIsTarget)
@@ -427,9 +421,24 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     running_waves.erase(end.getGPULocation());
                 }
                 else
-                    occupancy.insert(occupancy.begin(), {pipe.pc, 0, end.SACU(), end.simd, end.wid, 1, 0, 0, 0, 0, 0, 0});
+                    occupancy.insert(
+                        occupancy.begin(), {pipe.pc, 0, end.SACU(), end.simd, end.wid, 1, 0, 0, 0, 0, 0, 0}
+                    );
 
-                occupancy.push_back({pipe.pc, token.time, end.SACU(), end.simd, end.wid, 0, pipe.me, pipe.pipe, 0, 0, 0, pipe.dispatch_id});
+                occupancy.push_back(
+                    {pipe.pc,
+                     token.time,
+                     end.SACU(),
+                     end.simd,
+                     end.wid,
+                     0,
+                     pipe.me,
+                     pipe.pipe,
+                     0,
+                     0,
+                     0,
+                     pipe.dispatch_id}
+                );
 
                 if (pipe.dispatch_id > 0)
                 {

@@ -70,7 +70,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "amontoison/TheRock"
-          ref: c6f3105dbd248669cc52e1ed988c173c1eb49806 # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
+          ref: cf35bf12be522f7b662a0fc36fec10171b80bad0 # TEST ONLY: ROCm/TheRock#9446
           sparse-checkout: build_tools
           path: "prejob"
 
@@ -88,7 +88,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "amontoison/TheRock"
-          ref: c6f3105dbd248669cc52e1ed988c173c1eb49806 # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
+          ref: cf35bf12be522f7b662a0fc36fec10171b80bad0 # TEST ONLY: ROCm/TheRock#9446
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
