@@ -870,11 +870,12 @@ struct direct_queue_t
     {
         if(!created) return true;
         auto args = kfd_ioctl_destroy_queue_args{queue_id, 0};
+
         if(kfd_ioctl(memory->kfd_fd(), AMDKFD_IOC_DESTROY_QUEUE, &args) != 0)
         {
-            ROCP_CI_LOG(ERROR) << "AMDKFD_IOC_DESTROY_QUEUE failed: " << std::strerror(errno)
-                               << ", type=" << name() << ", queue_id=" << queue_id
-                               << ", gpu_id=" << memory->gpu_id();
+            ROCP_WARNING << "AMDKFD_IOC_DESTROY_QUEUE failed: " << std::strerror(errno)
+                         << ", type=" << name() << ", queue_id=" << queue_id
+                         << ", gpu_id=" << memory->gpu_id();
             return false;
         }
         created = false;

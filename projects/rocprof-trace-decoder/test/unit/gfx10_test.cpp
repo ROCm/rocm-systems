@@ -489,3 +489,28 @@ TEST(Gfx10WaveTest, NewPcPushesEntry)
     wave.new_pc(200, 0x1000, table);
     EXPECT_GT(wave.pc_infos.size(), before);
 }
+
+// Exec popcounts with an invalid count of 127 must be ignored
+class ExecPopcountParser : public RDNASQTParser
+{
+public:
+    using RDNASQTParser::SIMD;
+    using RDNASQTParser::send_exec_popcount;
+};
+
+TEST(Gfx10ExecPopcountTest, IgnoresInvalidCount)
+{
+    ExecPopcountParser parser;
+
+    gfx10::Token start_tok{0, 0, RdnaType::WAVE_START};
+    auto& wave = parser.SIMD[3].emplace_back(0, 0, 3, pcinfo_t{100, 1}, start_tok, false);
+    wave.popcnt_va.push_back({20, 2, 0});
+
+    parser.send_exec_popcount(3, 127, true);
+    EXPECT_TRUE(wave.popcnt.empty());
+    EXPECT_EQ(wave.popcnt_va.size(), 1u);
+
+    parser.send_exec_popcount(3, 4, true);
+    ASSERT_EQ(wave.popcnt.size(), 1u);
+    EXPECT_EQ(wave.popcnt[0].count, 4u);
+}

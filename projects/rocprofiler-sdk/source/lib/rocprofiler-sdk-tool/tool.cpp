@@ -2951,13 +2951,13 @@ format_version(uint32_t version)
 // versions have a different thread trace ABI (parameters, shader data layout, callbacks) and there
 // is no query for it. The asserts below fail when that ABI changes. When they do, bump VERSION and
 // raise this minimum in the same commit so the check keeps matching the ABI, then update them.
-constexpr uint32_t thread_trace_min_core_version = ROCPROFILER_SDK_COMPUTE_VERSION(1, 5, 0);
+constexpr uint32_t thread_trace_min_core_version = ROCPROFILER_SDK_COMPUTE_VERSION(1, 5, 1);
 
 #define ROCPROFV3_THREAD_TRACE_ABI_CHANGED                                                         \
     "thread-trace ABI changed: bump VERSION and raise thread_trace_min_core_version in the same "  \
     "commit, then update this assert"
 
-static_assert(ROCPROFILER_THREAD_TRACE_PARAMETER_LAST == 11, ROCPROFV3_THREAD_TRACE_ABI_CHANGED);
+static_assert(ROCPROFILER_THREAD_TRACE_PARAMETER_LAST == 12, ROCPROFV3_THREAD_TRACE_ABI_CHANGED);
 static_assert(ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_LAST == 6,
               ROCPROFV3_THREAD_TRACE_ABI_CHANGED);
 static_assert(sizeof(rocprofiler_thread_trace_parameter_t) == 24,
