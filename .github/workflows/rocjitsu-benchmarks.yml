@@ -352,7 +352,7 @@ jobs:
           taskset -c 0-15 "${ROCJITSU_VENV}/bin/python" -m benchmarks.runner \
             --rocjitsu-source-dir "${ROCJITSU_SOURCE_DIR}" \
             --build-dir "${ROCJITSU_BUILD_DIR}" \
-            --target-config "gfx950=${ROCJITSU_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json" \
+            --target-config "gfx950=${ROCJITSU_SOURCE_DIR}/configs/gfx950_mi350x_kmd.json" \
             --target-config "gfx1250=${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json" \
             --run-wrapper "/usr/bin/python3 -E -s /usr/local/libexec/rocjitsu-benchmark-runner/benchmark_run.py -- \"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
             --manifest "${BENCHMARK_MANIFEST}" \

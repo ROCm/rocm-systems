@@ -159,7 +159,7 @@ TEST(SysfsTopologyTest, VisibleVramMatchesPciBarAndKfdBanks) {
 
 TEST(SysfsTopologyTest, ShippedCdnaKfdDefaultsAreFullyCpuVisible) {
   for (const char *config_name :
-       {"gfx942_cdna3_kmd.json", "gfx950_mi355x_kmd.json", "gfx1250_mi455x.json"}) {
+       {"gfx942_cdna3_kmd.json", "gfx950_mi350x_kmd.json", "gfx1250_mi455x.json"}) {
     SCOPED_TRACE(config_name);
     config::LoadedConfig loaded;
     ASSERT_TRUE(test::load_valid_config(std::string(CONFIG_DIR) + "/" + config_name, loaded));
@@ -186,7 +186,7 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
   };
   for (const auto &[config_name, arch, max_vgprs] :
        {Case{"gfx942_cdna3_kmd.json", ROCJITSU_CODE_ARCH_CDNA3, 256},
-        Case{"gfx950_mi355x_kmd.json", ROCJITSU_CODE_ARCH_CDNA4, 256},
+        Case{"gfx950_mi350x_kmd.json", ROCJITSU_CODE_ARCH_CDNA4, 256},
         Case{"gfx1250_mi455x.json", ROCJITSU_CODE_ARCH_CDNA5, 1024}}) {
     SCOPED_TRACE(config_name);
     config::LoadedConfig loaded;
@@ -446,7 +446,7 @@ TEST(SysfsTopologyTest, CdnaAndRdna35PublishComputeIpDiscoveryVersions) {
   };
   const Profile profiles[] = {
       {"gfx942_cdna3_kmd.json", 8, {{{11, 9, 4, 3}, {42, 4, 4, 2}, {108, 7, 9, 0}}}},
-      {"gfx950_mi355x_kmd.json", 8, {{{11, 9, 5, 0}, {42, 4, 4, 5}, {108, 7, 9, 0}}}},
+      {"gfx950_mi350x_kmd.json", 8, {{{11, 9, 5, 0}, {42, 4, 4, 5}, {108, 7, 9, 0}}}},
       {"gfx1151.json", 1, {{{11, 11, 5, 1}, {42, 6, 1, 1}, {108, 7, 11, 1}}}},
   };
   for (const auto &profile : profiles) {
@@ -825,12 +825,13 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
 
 // MI350X is harvested too: its captured KFD topology has 32 shader arrays of
 // 9 CUs (288 physical CUs), while simd_count exposes 1024 SIMDs, or 256 active
-// CUs at four SIMDs per CU. Keep every full-device gfx950 config pinned to that
-// same capture so local, KMD, and multi-GPU launch paths cannot drift apart.
+// CUs at four SIMDs per CU. Keep the canonical full-device MI350X configs
+// pinned to that capture so local, KMD, and multi-GPU launch paths cannot drift
+// apart. DeprecatedGfx950Mi355xConfigsMatchMi350x covers the legacy aliases.
 TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) {
   const std::string config_dir = CONFIG_DIR;
-  constexpr const char *kMi350xConfigs[] = {"gfx950_mi355x.json", "gfx950_mi355x_kmd.json",
-                                            "gfx950_mi355x_kmd_2gpu.json"};
+  constexpr const char *kMi350xConfigs[] = {"gfx950_mi350x.json", "gfx950_mi350x_kmd.json",
+                                            "gfx950_mi350x_kmd_2gpu.json"};
 
   for (const char *cfg : kMi350xConfigs) {
     SCOPED_TRACE(cfg);
@@ -1031,7 +1032,7 @@ TEST(SysfsTopologyDebugCapabilityTest, ConfigTopologyMatchesRealHardware) {
   // Configs whose device matches a captured real-hardware topology dump.
   constexpr const char *kConfigs[] = {
       "gfx942_cdna3.json",  // MI300X
-      "gfx950_mi355x.json", // MI350X
+      "gfx950_mi350x.json", // MI350X
       "gfx1201_r9700.json", // R9700
   };
 

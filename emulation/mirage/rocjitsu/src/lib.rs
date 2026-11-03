@@ -2083,7 +2083,7 @@ mod tests {
     #[test]
     fn missing_config_fields_name_omissions_not_zeroes() {
         let original: serde_json::Value =
-            serde_json::from_str(include_str!("../../../rocjitsu/configs/gfx950_mi355x.json"))
+            serde_json::from_str(include_str!("../../../rocjitsu/configs/gfx950_mi350x.json"))
                 .unwrap();
         let mut config = original.clone();
         assert!(missing_config_fields(&config, Some(&original)).is_empty());
@@ -2594,8 +2594,8 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rocjitsu/configs");
         for (single, multi, target, gpus) in [
             (
-                "gfx950_mi355x.json",
-                "gfx950_mi355x_kmd_2gpu.json",
+                "gfx950_mi350x.json",
+                "gfx950_mi350x_kmd_2gpu.json",
                 90500,
                 2,
             ),
