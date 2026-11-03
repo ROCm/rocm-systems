@@ -385,6 +385,22 @@ void ProfilingSignal::CacheTimingData(hsa_agent_t gpu_device, bool completed) {
 }
 
 // ================================================================================================
+void ProfilingSignal::CacheTimingFromTicks(hsa_agent_t gpu_device, uint64_t start_tick,
+                                           uint64_t end_tick) {
+  std::scoped_lock lock(lock_);
+  if (cached_timing_.valid_) {
+    return;
+  }
+  // As ROCr's TranslateTime: a use without timestamps reports zeros, and the end translates
+  // first so clock measurement jitter doesn't shorten the duration
+  if (start_tick != 0 && end_tick != 0) {
+    Hsa::profiling_convert_tick_to_system_domain(gpu_device, end_tick, &cached_timing_.end_);
+    Hsa::profiling_convert_tick_to_system_domain(gpu_device, start_tick, &cached_timing_.start_);
+  }
+  cached_timing_.valid_ = true;
+}
+
+// ================================================================================================
 // Process GPU timing for signals
 // If single_signal is nullptr, processes all signals and clears the list
 // If single_signal is provided, processes only that signal with merge enabled
@@ -408,7 +424,7 @@ void Timestamp::checkGpuTime(ProfilingSignal* single_signal, bool completed) {
     // Process either single signal or all signals
     auto process_signal = [&](ProfilingSignal* sig) {
       // Skip signals already processed
-      if (sig->flags_.done_) {
+      if (sig->flags_.timing_processed_) {
         return;
       }
 
@@ -503,7 +519,7 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
     ClPrint(amd::LOG_WARNING, amd::LOG_TS,
             "Invalid signal timing: start=%lu, end=%lu, signal=0x%lx",
             sig_start, sig_end, signal->signal_.handle);
-    signal->flags_.done_ = true;
+    signal->flags_.timing_processed_ = true;
     return;
   }
 
@@ -526,7 +542,7 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
         static_cast<uint64_t>(sig_end * ticksToTime_));
   }
 
-  signal->flags_.done_ = true;
+  signal->flags_.timing_processed_ = true;
 }
 
 // True while this thread is executing inside HsaAmdSignalHandler (the ROCr
@@ -988,10 +1004,15 @@ bool VirtualGPU::RetiringSignalTracker::ReplaceWithSpare(size_t slot) {
 
 // ================================================================================================
 void VirtualGPU::RetiringSignalTracker::RecycleParked() {
-  for (size_t idx = 0; idx < parked_signals_.size();) {
-    ProfilingSignal* signal = parked_signals_[idx];
+  // A batch's holders release together, so recycling every free signal at once stalls the
+  // submission that triggers it. A bounded number per call keeps pace with the parking, which is
+  // at most kArmBatch per Reclaim too.
+  const size_t num_scans = std::min(parked_signals_.size(), kArmBatch);
+  for (size_t scan = 0; scan < num_scans; ++scan) {
+    ProfilingSignal* signal = parked_signals_.front();
+    parked_signals_.pop_front();
     if (signal->referenceCount() > 1) {
-      ++idx;
+      parked_signals_.push_back(signal);
       continue;
     }
     ProcessSignalTiming(signal);
@@ -1005,8 +1026,6 @@ void VirtualGPU::RetiringSignalTracker::RecycleParked() {
     } else {
       spare_signals_.push_back(signal);
     }
-    parked_signals_[idx] = parked_signals_.back();
-    parked_signals_.pop_back();
   }
 }
 
@@ -1019,8 +1038,9 @@ void VirtualGPU::RetiringSignalTracker::Reclaim() {
   oldest_unretired_seq_ = IsRetired(newest) ? next_use_seq_ : newest->use_seq_;
   reclaim_stalled_ = false;
   size_t num_armed = 0;
-  size_t num_new_arms = 0;
   bool probed = false;
+  RetiredSlot retired[kArmBatch];
+  size_t num_retired = 0;
   // Walk from the oldest use toward the newest
   for (size_t offset = 1; offset < size; ++offset) {
     const size_t slot = (current_id_ + offset) % size;
@@ -1035,33 +1055,67 @@ void VirtualGPU::RetiringSignalTracker::Reclaim() {
     }
     // Checked again: the probe may have retired this use
     const bool busy = !IsRetired(signal) && LoadValue(signal) > 0;
-    if (busy || num_new_arms == kArmBatch) {
+    if (busy || num_retired == kArmBatch) {
       oldest_unretired_seq_ = std::min(oldest_unretired_seq_, signal->use_seq_);
       reclaim_stalled_ = busy;
       break;
     }
     MarkCompleted(signal);
+    retired[num_retired++] = {slot, num_armed};
+    ++num_armed;
+  }
+  // A Timestamp still listing a signal reads its timestamps, which the next use overwrites
+  CacheRetiredTiming(retired, num_retired);
+  for (size_t retired_idx = 0; retired_idx < num_retired; ++retired_idx) {
+    const size_t slot = retired[retired_idx].slot;
+    ProfilingSignal* signal = signal_list_[slot];
     // Another holder, such as an event, a pinned GPU wait or a pending async handler, may still
     // read the old use
     if (signal->referenceCount() > 1) {
       if (!ReplaceWithSpare(slot)) {
         oldest_unretired_seq_ = std::min(oldest_unretired_seq_, signal->use_seq_);
+        num_armed = retired[retired_idx].num_armed_before;
         break;
       }
     } else {
-      // A Timestamp still listing the signal reads its value and timestamps, which the arm
-      // would replace
       ProcessSignalTiming(signal);
       StoreValue(signal, kInitSignalValueOne);
       signal->armed_ = true;
     }
-    ++num_armed;
-    ++num_new_arms;
   }
   // One flush publishes every arm before any of the slots is handed to a packet
   FlushStores();
   num_armed_ahead_ = num_armed;
   ReleasePins();
+}
+
+// ================================================================================================
+void VirtualGPU::RetiringSignalTracker::CacheRetiredTiming(const RetiredSlot* retired,
+                                                           size_t num_retired) {
+  ProfilingSignal* timed[kArmBatch];
+  size_t num_timed = 0;
+  for (size_t retired_idx = 0; retired_idx < num_retired; ++retired_idx) {
+    ProfilingSignal* signal = signal_list_[retired[retired_idx].slot];
+    if (signal->ts_ != nullptr && signal->in_device_memory_ && !IsSdmaEngine(signal->engine_) &&
+        !signal->IsTimingCached()) {
+      timed[num_timed++] = signal;
+    }
+  }
+  if (num_timed == 0) {
+    return;
+  }
+  uint64_t ticks[kArmBatch][2];
+  // After the loads that proved the uses retired
+  amd::streamingLoadFence();
+  for (size_t timed_idx = 0; timed_idx < num_timed; ++timed_idx) {
+    const auto* amd_signal =
+        reinterpret_cast<const amd_signal_t*>(timed[timed_idx]->signal_.handle);
+    amd::streamingLoad16(ticks[timed_idx], &amd_signal->start_ts);
+  }
+  for (size_t timed_idx = 0; timed_idx < num_timed; ++timed_idx) {
+    timed[timed_idx]->CacheTimingFromTicks(gpu_.gpu_device(), ticks[timed_idx][0],
+                                           ticks[timed_idx][1]);
+  }
 }
 
 // ================================================================================================
@@ -1222,7 +1276,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   const bool blocking_callback = enqueHandler && ts->command().Callback() != nullptr &&
                                  ts->command().Callback()->blocking_;
   BeginUse(prof_signal, init_val, aql_slot, barrier_bit, blocking_callback);
-  prof_signal->flags_.done_ = false;
+  prof_signal->flags_.timing_processed_ = false;
   prof_signal->engine_ = engine_;
   prof_signal->ResetCachedTiming();
 
@@ -1362,9 +1416,9 @@ void VirtualGPU::HwQueueTracker::ProcessSignalTiming(ProfilingSignal* signal) {
     signal->ts_->release();
     signal->ts_ = nullptr;
   } else {
-    // No timestamp - just mark signal as done
+    // No timestamp, so no timing to read
     std::scoped_lock lock(signal->LockSignalOps());
-    signal->flags_.done_ = true;
+    signal->flags_.timing_processed_ = true;
   }
 }
 
@@ -1422,10 +1476,17 @@ void VirtualGPU::LegacySignalTracker::AcquireSlot() {
 }
 
 // ================================================================================================
-void VirtualGPU::LegacySignalTracker::BeginUse(ProfilingSignal* signal,
-                                               hsa_signal_value_t init_val,
-                                               uint64_t /*aql_slot*/, bool /*barrier_bit*/,
-                                               bool /*blocking_callback*/) {
+void VirtualGPU::HwQueueTracker::BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val,
+                                          uint64_t aql_slot, bool barrier_bit,
+                                          bool blocking_callback) {
+  signal->StartUse();
+  ArmForUse(signal, init_val, aql_slot, barrier_bit, blocking_callback);
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::ArmForUse(ProfilingSignal* signal,
+                                                hsa_signal_value_t init_val, uint64_t /*aql_slot*/,
+                                                bool /*barrier_bit*/, bool /*blocking_callback*/) {
   // Reset the signal and return
   Hsa::signal_silent_store_relaxed(signal->signal_, init_val);
 }
@@ -1461,9 +1522,9 @@ void VirtualGPU::LegacySignalTracker::ResetCurrentSignal() {
 }
 
 // ================================================================================================
-void VirtualGPU::RetiringSignalTracker::BeginUse(ProfilingSignal* signal,
-                                                 hsa_signal_value_t init_val, uint64_t aql_slot,
-                                                 bool barrier_bit, bool blocking_callback) {
+void VirtualGPU::RetiringSignalTracker::ArmForUse(ProfilingSignal* signal,
+                                                  hsa_signal_value_t init_val, uint64_t aql_slot,
+                                                  bool barrier_bit, bool blocking_callback) {
   assert(signal->armed_ && "Tracked signal handed out without arming!");
   signal->armed_ = false;
   if (init_val != kInitSignalValueOne) {
