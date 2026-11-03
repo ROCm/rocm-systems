@@ -52,9 +52,6 @@ private:
   void init_operands();
 
   Format format_ = Format::VopdXy;
-  uint32_t word0_ = 0;
-  uint32_t word1_ = 0;
-  uint32_t word2_ = 0;
   std::array<uint32_t, 3> raw_words_{};
   uint32_t literal_ = 0;
   bool has_literal_ = false;

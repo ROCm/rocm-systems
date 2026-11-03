@@ -946,7 +946,8 @@ TEST(DecodedInstructionCacheTest, VopdOwnsItsEncodingAndIsReusedAcrossIssues) {
     std::array<uint32_t, amdgpu::DecodedInstructionCache::kNumWords> words;
   };
   constexpr Case cases[] = {
-      // v_dual_cndmask_b32 v2, v1, v2 :: v_dual_mov_b32 v1, 0
+      // v_dual_cndmask_b32 v2, v1, v2 :: v_dual_mov_b32 v1, 0, followed in the fetch
+      // window by a word that is not part of the encoding.
       {"v_dual_cndmask_b32 :: v_dual_mov_b32", 8, {0xCA500501u, 0x02000080u, 0xFFFFFFFFu}},
       // v_dual_fmaak_f32 v0, v1, v2, 0x40490fdb :: v_dual_mov_b32 v3, v4
       {"v_dual_fmaak_f32 :: v_dual_mov_b32", 12, {0xC8500501u, 0x00020104u, 0x40490FDBu}},
