@@ -12,7 +12,7 @@ namespace rocprofsys::backends::hipfile
 
 /// Slots in a hipFile Level-3 snapshot. Mirrors HIPFILE_MAX_GPUS, duplicated so this
 /// header stays free of <hipfile.h>; wrapper.hpp static_asserts the two agree.
-inline constexpr std::size_t MAX_GPUS = 16;
+inline constexpr std::size_t k_max_gpus = 16;
 
 /**
  * @brief Per-GPU hipFile I/O counters, cumulative over the process lifetime.
@@ -50,7 +50,7 @@ struct gpu_stats
  */
 struct stats_snapshot
 {
-    std::array<gpu_stats, MAX_GPUS> per_gpu{};
+    std::array<gpu_stats, k_max_gpus> per_gpu{};
 };
 
 }  // namespace rocprofsys::backends::hipfile

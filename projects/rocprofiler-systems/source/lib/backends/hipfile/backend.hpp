@@ -25,7 +25,7 @@ concept wrapper_policy =
     requires { typename T::stats_l3_t; } && requires(T::stats_l3_t* out) {
         { T::get_stats_l3(out) } -> std::convertible_to<bool>;
         { T::runtime_version_supported() } -> std::convertible_to<bool>;
-        { T::MAX_GPU_SLOTS } -> std::convertible_to<std::size_t>;
+        { T::k_max_gpu_slots } -> std::convertible_to<std::size_t>;
     };
 
 /**
@@ -97,6 +97,7 @@ private:
             return out;
         }
 
+<<<<<<< HEAD
         // Success with no active GPU is not a measurement. hipFile fills the struct
         // with zeros and returns success until a GPU is in use, including for the
         // whole run when HIPFILE_STATS_LEVEL disables the statistics server.
@@ -107,6 +108,9 @@ private:
         }
 
         const auto slots = std::min<std::size_t>(Wrapper::MAX_GPU_SLOTS, MAX_GPUS);
+=======
+        const auto slots = std::min<std::size_t>(Wrapper::k_max_gpu_slots, k_max_gpus);
+>>>>>>> c2bf847c1a (chore: bulk `clang-tidy` clean up)
         for(std::size_t i = 0; i < slots; ++i)
         {
             const auto& src = raw.per_gpu_stats[i];

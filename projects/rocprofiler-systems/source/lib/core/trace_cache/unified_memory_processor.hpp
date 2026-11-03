@@ -143,6 +143,7 @@ public:
 
     void handle(const kfd_sample& sample) override;
 
+<<<<<<< HEAD
     void handle(const in_time_sample&) override {}
     void handle(const pmc_event_with_sample&) override {}
     void handle(const region_sample&) override {}
@@ -156,6 +157,21 @@ public:
     void handle(const gpu_perf_counter_sample&) override {}
     void handle(const hipfile_pmc_sample&) override {}
     void handle(const backtrace_region_sample&) override {}
+=======
+    void handle(const in_time_sample&) {}
+    void handle(const pmc_event_with_sample&) {}
+    void handle(const region_sample&) {}
+    void handle(const kernel_dispatch_sample&) {}
+    void handle(const memory_copy_sample&) {}
+    void handle(const memory_allocate_sample&) {}
+    void handle(const scratch_memory_sample&) {}
+    void handle(const gpu_pmc_sample&) {}
+    void handle(const ainic_pmc_sample&) {}
+    void handle(const cpu_pmc_sample&) {}
+    void handle(const gpu_perf_counter_sample&) {}
+    void handle(const hipfile_pmc_sample&) {}
+    void handle(const backtrace_region_sample&) {}
+>>>>>>> c2bf847c1a (chore: bulk `clang-tidy` clean up)
 
 private:
     void handle_page_migrate(const kfd_sample& sample);

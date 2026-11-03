@@ -56,6 +56,9 @@ constexpr std::size_t k_zero_gpu_slot     = 0;
 constexpr std::size_t k_adjacent_gpu_slot = 2;
 constexpr std::size_t k_far_gpu_slot      = 4;
 
+// GTest fixtures stay abstract because Test::TestBody is pure virtual. PMC
+// tests keep the CamelCase *Test name used with TEST_F.
+// NOLINTNEXTLINE(readability-identifier-naming)
 class HipFileBackendTest : public ::testing::Test
 {
 protected:
@@ -345,7 +348,7 @@ TEST_F(HipFileBackendTest, inactive_gpu_slots_are_zero_filled)
 
 TEST_F(HipFileBackendTest, all_gpu_slots_are_readable)
 {
-    for(std::size_t i = 0; i < MAX_GPUS; ++i)
+    for(std::size_t i = 0; i < k_max_gpus; ++i)
     {
         gpu(i).read_bytes = static_cast<std::uint64_t>(i) + 1;
     }
@@ -353,7 +356,7 @@ TEST_F(HipFileBackendTest, all_gpu_slots_are_readable)
     mock_backend backend{};
     const auto&  snapshot = backend.get_stats(k_ts_1);
 
-    for(std::size_t i = 0; i < MAX_GPUS; ++i)
+    for(std::size_t i = 0; i < k_max_gpus; ++i)
     {
         EXPECT_EQ(snapshot.per_gpu[i].read_bytes, static_cast<std::uint64_t>(i) + 1)
             << "GPU ordinal " << i;
