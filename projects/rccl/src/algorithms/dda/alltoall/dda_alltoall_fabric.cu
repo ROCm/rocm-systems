@@ -129,9 +129,13 @@ static bool ddaAllToAllFabricTdmEligible(ncclComm* comm, const void* sendbuff, c
       !IsArchMatch(comm->archName, "gfx1250")) {
     return false;
   }
+  // Out of place only (see ddaAllToAllFabricTdmPush); in-place calls take the vector all-peer push, where one thread
+  // moves an offset for every peer.
+  if (sendbuff == recvbuff) {
+    INFO(NCCL_COLL, "DDA fabric AllToAll: TDM push does not support in-place buffers; using the vector push");
+    return false;
+  }
   // Any alignment: the TDM transfers peel an unaligned head and tail (Aligned=false).
-  (void)sendbuff;
-  (void)recvbuff;
   (void)bytesPerRank;
   return true;
 }

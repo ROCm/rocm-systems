@@ -25,6 +25,8 @@ constexpr CachePolicy kDdaA2ATdmPolicy = createCachePolicy(TemporalHint::NT, Mem
 // peer (selfRank + k) % nRanks. A rank that drains slot s therefore sees the item index its writer used, and
 // since the grid depends only on bytesPerRank the same block owns it on both ends, so the per-block barrier
 // pairs the write with the read.
+// Out of place only: in place, the drain of item (tileIdx, nRanks - k) overwrites the sendbuff tile that item
+// (tileIdx, k) reads, and a tile's nRanks items can sit in different blocks, which that barrier does not order.
 template <int TileBytes, int UnrollPeers>
 __global__ void __launch_bounds__(kDdaA2ATdmMaxWarpsPerBlock* kDdaA2ATdmWave)
 ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __restrict__ recvbuff,
