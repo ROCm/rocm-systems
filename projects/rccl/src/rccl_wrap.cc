@@ -1956,8 +1956,16 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // gfx1250: a registered call whose symk symMaxR2 withdrew takes DDA where DDA beats the backend that runs.
     const bool symkWithdrawn =
       ddaFabricArch1250 && symkRequested && !symSuppressedByMin && symSuppressedByMax && !ginYield;
-    // In graph capture that backend is Ring (no CE).
-    const bool ddaReplacesRing = symkWithdrawn && ceCapturing && msgBytes <= rcclDdaArRegCaptureMaxBytes(comm);
+    // In graph capture that backend is Ring (no CE); re-route only where the planner picks Ring (fp8 plans Tree).
+    struct rcclCollDecision ringChoice;
+    memset(&ringChoice, 0, sizeof(ringChoice));
+    uint32_t ringThreads = 0;
+    bool ddaReplacesRing = false;
+    if (symkWithdrawn && ceCapturing && msgBytes <= rcclDdaArRegCaptureMaxBytes(comm)) {
+      NCCLCHECK(rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncAllReduce, count, datatype, /*query=*/true,
+                                 &ringChoice, &ringThreads));
+      ddaReplacesRing = ringChoice.algo == NCCL_ALGO_RING;
+    }
     // Eager it is CE-registered, which DDA LL128 replaces for rcclDdaArRegEagerShardFits shards.
     // ceAvailable already rejects sysmem windows, and ceRegInWindow implies ceRegEnabled.
     const bool ceRegRuns = ceAvailable && ceRegInWindow;
@@ -1977,11 +1985,6 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
       ddaCap.blocks = (uint32_t)std::max(ceBlocks, 1);
       ddaCap.threads = NCCL_CE_REDUCE_THREADS;
     } else if (arShouldTakeDda && ddaReplacesRing) {
-      struct rcclCollDecision ringChoice;
-      memset(&ringChoice, 0, sizeof(ringChoice));
-      uint32_t ringThreads = 0;
-      NCCLCHECK(rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncAllReduce, count, datatype, /*query=*/true,
-                                 &ringChoice, &ringThreads));
       ddaCap.blocks = std::max<uint32_t>(ringChoice.nMaxChannels, 1);
       ddaCap.threads = std::max<uint32_t>(ringThreads, 1);
     }
