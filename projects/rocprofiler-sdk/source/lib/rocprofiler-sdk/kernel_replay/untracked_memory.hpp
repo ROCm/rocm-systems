@@ -63,6 +63,7 @@ enum class kind_t
     device_other,
     locked_host,
     host_pageable,
+    unclassified,
 };
 
 // What hsa_amd_pointer_info (and, when it reports no owner, the process's writable mappings)
@@ -82,6 +83,7 @@ struct pointer_facts_t
     type_t   type                     = type_t::unknown;
     bool     owner_is_cpu             = false;
     bool     in_writable_host_mapping = false;
+    bool     pointer_info_succeeded   = false;
     bool     fine_grained             = false;
     uint64_t agent_base               = 0;  // GPU-visible base of the allocation, 0 if none
     uint64_t size                     = 0;  // extent of the allocation, 0 if unknown
@@ -150,8 +152,7 @@ region_of(kind_t kind, const pointer_facts_t& facts);
 
 // Kernarg words that point at untracked memory. `pointer_regions` holds the ranges of the segment
 // that can carry a pointer, or is null when nothing describes them and every word of the segment is
-// a candidate. Only whole aligned words inside the segment are read; a region is widened to the
-// words overlapping it, so a pointer at an offset the metadata reports as unaligned is still read.
+// a candidate. Words are read from each region's metadata offset, including unaligned regions.
 // `seen` holds values already looked up, so a buffer passed in several arguments is classified
 // once.
 std::vector<hit_t>

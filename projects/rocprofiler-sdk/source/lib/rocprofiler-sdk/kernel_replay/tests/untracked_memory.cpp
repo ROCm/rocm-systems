@@ -32,6 +32,7 @@
 #include <cstring>
 #include <fstream>
 #include <memory>
+#include <new>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -54,6 +55,7 @@ facts_of(type_t type, bool owner_is_cpu = false, bool in_host_mapping = false)
     f.type                     = type;
     f.owner_is_cpu             = owner_is_cpu;
     f.in_writable_host_mapping = in_host_mapping;
+    f.pointer_info_succeeded   = true;
     return f;
 }
 
@@ -146,6 +148,9 @@ TEST(kernel_replay_untracked_memory, classifies_memory_the_snapshot_does_not_res
               um::kind_t::host_pageable);
     EXPECT_EQ(um::classify_pointer(facts_of(type_t::unknown)), std::nullopt)
         << "not memory a kernel can reach";
+    auto unavailable_query                   = facts_of(type_t::unknown, false, true);
+    unavailable_query.pointer_info_succeeded = false;
+    EXPECT_EQ(um::classify_pointer(unavailable_query), um::kind_t::unclassified);
 }
 
 TEST(kernel_replay_untracked_memory, ignores_scalars_and_covered_memory)
@@ -195,6 +200,22 @@ TEST(kernel_replay_untracked_memory, only_what_metadata_calls_a_pointer_is_queri
     auto blind = std::unordered_set<uint64_t>{};
     EXPECT_EQ(um::scan_kernarg(kernarg.data(), kernarg.size(), nullptr, {}, facts, blind).size(),
               2u);
+}
+
+TEST(kernel_replay_untracked_memory, reads_unaligned_pointer_regions_at_their_metadata_offsets)
+{
+    auto kernarg = std::vector<uint8_t>(sizeof(uint32_t) + sizeof(uint64_t), 0);
+    std::memcpy(kernarg.data() + sizeof(uint32_t), &vmem_addr, sizeof(vmem_addr));
+    const auto regions = std::vector<co::kernarg_region_t>{{sizeof(uint32_t), sizeof(uint64_t)}};
+    const auto facts   = [](uint64_t address) {
+        return address == vmem_addr ? facts_of(type_t::vmem) : facts_of(type_t::unknown);
+    };
+
+    auto       seen = std::unordered_set<uint64_t>{};
+    const auto hits = um::scan_kernarg(kernarg.data(), kernarg.size(), &regions, {}, facts, seen);
+    ASSERT_EQ(hits.size(), 1u);
+    EXPECT_EQ(hits.front().kernarg_offset, sizeof(uint32_t));
+    EXPECT_EQ(hits.front().address, vmem_addr);
 }
 
 TEST(kernel_replay_untracked_memory, only_the_runtime_copy_and_fill_kernels_are_exempt)
@@ -299,8 +320,30 @@ TEST(kernel_replay_untracked_memory, memory_that_cannot_be_saved_runs_the_dispat
     EXPECT_TRUE(runs_once(facts_for(buf, this_agent, true), address_of(buf))) << "host-pinned";
     EXPECT_TRUE(runs_once(facts_for(buf, other_agent), address_of(buf))) << "another agent's";
     EXPECT_TRUE(runs_once(facts_for(buf), vmem_addr)) << "extent unknown";
+    const auto query_failed = [](uint64_t) {
+        auto facts                   = facts_of(type_t::unknown);
+        facts.pointer_info_succeeded = false;
+        return facts;
+    };
+    EXPECT_TRUE(runs_once(query_failed, vmem_addr)) << "pointer info query failed";
 
     auto failing = host_copy_set(false);
     EXPECT_FALSE(save(failing, {address_of(buf)}, facts_for(buf))) << "copy failed";
     EXPECT_TRUE(failing.empty());
+}
+
+TEST(kernel_replay_untracked_memory, allocation_failure_declines_replay)
+{
+    auto       saved   = host_copy_set();
+    auto       kernarg = kernarg_with({vmem_addr});
+    const auto facts   = [](uint64_t) -> um::pointer_facts_t { throw std::bad_alloc{}; };
+
+    EXPECT_FALSE(um::save_dispatch_memory(saved,
+                                          kernarg.data(),
+                                          kernarg.size(),
+                                          nullptr,
+                                          msnp::device_snapshot_t{},
+                                          this_agent,
+                                          facts));
+    EXPECT_TRUE(saved.empty());
 }
