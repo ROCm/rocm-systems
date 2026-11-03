@@ -32,11 +32,6 @@ if(GPU_TARGETS)
 endif()
 enable_language(HIP)
 
-# The migration from hip_add_executable() to enable_language(HIP) made these
-# test targets inherit the build-type debug flags (e.g. -g in ASAN builds).
-# hipcc never passed -g, so these binaries had no debug info.  Restore that
-# behaviour: the packaging toolchain's dwz cannot parse DWARF 5, which is
-# clang's default, and these test binaries do not need debug info.
 string(APPEND CMAKE_HIP_FLAGS " -g0")
 
 find_package(Clang REQUIRED CONFIG
