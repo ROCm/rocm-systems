@@ -701,6 +701,23 @@ struct FakeApiTable {
   }
 };
 
+[[nodiscard]] testing::AssertionResult create_host_node(const std::filesystem::path &host_node) {
+  std::error_code error;
+  std::filesystem::create_directories(host_node, error);
+  if (error)
+    return testing::AssertionFailure() << "Failed to create host node: " << error.message();
+  return testing::AssertionSuccess();
+}
+
+[[nodiscard]] testing::AssertionResult write_host_gpu_id(const std::filesystem::path &host_node) {
+  std::ofstream gpu_id(host_node / "gpu_id");
+  gpu_id << kResolvedHostGpuId << '\n';
+  gpu_id.close();
+  if (!gpu_id)
+    return testing::AssertionFailure() << "Failed to write host node gpu_id";
+  return testing::AssertionSuccess();
+}
+
 [[nodiscard]] testing::AssertionResult
 write_runtime_config_path(const std::string &runtime_dir, bool create_host_topology_node = true) {
   setenv("ROCJITSU_RUNTIME_DIR", runtime_dir.c_str(), 1);
@@ -713,14 +730,10 @@ write_runtime_config_path(const std::string &runtime_dir, bool create_host_topol
     return testing::AssertionFailure() << "Failed to create topology root: " << error.message();
   if (create_host_topology_node) {
     const std::filesystem::path host_node = topology_root / std::to_string(kHostNodeId);
-    std::filesystem::create_directories(host_node, error);
-    if (error)
-      return testing::AssertionFailure() << "Failed to create host node: " << error.message();
-    std::ofstream gpu_id(host_node / "gpu_id");
-    gpu_id << kResolvedHostGpuId << '\n';
-    gpu_id.close();
-    if (!gpu_id)
-      return testing::AssertionFailure() << "Failed to write host node gpu_id";
+    if (testing::AssertionResult result = create_host_node(host_node); !result)
+      return result;
+    if (testing::AssertionResult result = write_host_gpu_id(host_node); !result)
+      return result;
   }
   rj_hsa_dbt_set_topology_nodes_root_for_test(topology_root.c_str());
 
@@ -1206,8 +1219,8 @@ TEST(HsaHooksUnitTest, AgentMapperRetriesAfterUnreadableTopologyRoot) {
   EXPECT_TRUE(first.empty());
 
   const std::filesystem::path host_node = nodes / std::to_string(kHostNodeId);
-  std::filesystem::create_directories(host_node);
-  std::ofstream(host_node / "gpu_id") << kResolvedHostGpuId << '\n';
+  ASSERT_TRUE(create_host_node(host_node));
+  ASSERT_TRUE(write_host_gpu_id(host_node));
 
   std::vector<uint64_t> second;
   EXPECT_EQ(api.core.hsa_iterate_agents_fn(collect_agent_handles, &second), HSA_STATUS_SUCCESS);
@@ -1233,7 +1246,7 @@ TEST(HsaHooksUnitTest, AgentMapperRetriesAfterUnreadableTopologyNode) {
   ASSERT_TRUE(partial.initialize("rocjitsu-partial-topology-"));
   const std::filesystem::path nodes = std::filesystem::path(partial.path()) / "nodes";
   const std::filesystem::path host_node = nodes / std::to_string(kHostNodeId);
-  std::filesystem::create_directories(host_node);
+  ASSERT_TRUE(create_host_node(host_node));
   ASSERT_FALSE(std::filesystem::exists(host_node / "gpu_id"));
   rj_hsa_dbt_set_topology_nodes_root_for_test(nodes.c_str());
 
@@ -1241,7 +1254,7 @@ TEST(HsaHooksUnitTest, AgentMapperRetriesAfterUnreadableTopologyNode) {
   EXPECT_EQ(api.core.hsa_iterate_agents_fn(collect_agent_handles, &first), HSA_STATUS_SUCCESS);
   EXPECT_TRUE(first.empty());
 
-  std::ofstream(host_node / "gpu_id") << kResolvedHostGpuId << '\n';
+  ASSERT_TRUE(write_host_gpu_id(host_node));
 
   std::vector<uint64_t> second;
   EXPECT_EQ(api.core.hsa_iterate_agents_fn(collect_agent_handles, &second), HSA_STATUS_SUCCESS);

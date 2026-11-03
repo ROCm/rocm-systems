@@ -52,7 +52,14 @@ config_json_with_num_threads(std::string &json, const std::string &path, uint32_
   if (!input.is_open())
     return testing::AssertionFailure() << "Failed to open config: " + path;
 
-  json.assign((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+  json.clear();
+  std::array<char, 4096> buffer;
+  while (input.read(buffer.data(), buffer.size()))
+    json.append(buffer.data(), input.gcount());
+  json.append(buffer.data(), input.gcount());
+  if (input.bad() || !input.eof())
+    return testing::AssertionFailure() << "Failed to read config: " << path;
+
   // Shipped configs indent top-level keys by two spaces; table entries are nested.
   const std::string field = "\n  \"num_threads\":";
   const std::string replacement = field + " " + std::to_string(num_threads);
@@ -72,6 +79,16 @@ config_json_with_num_threads(std::string &json, const std::string &path, uint32_
 
   json.insert(brace_pos + 1, replacement + ",");
   return testing::AssertionSuccess();
+}
+
+TEST(PartitioningConfigTest, ReportsDirectoryReadFailure) {
+  test::ScopedTempDirectory directory;
+  ASSERT_TRUE(directory.initialize("rocjitsu-partitioning-config-"));
+  std::string json;
+  const testing::AssertionResult result = config_json_with_num_threads(json, directory.path(), 1);
+  ASSERT_FALSE(result);
+  EXPECT_NE(std::string(result.message()).find("Failed to read config: " + directory.path()),
+            std::string::npos);
 }
 
 struct PartitionedTopology {

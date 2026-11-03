@@ -4325,7 +4325,7 @@ TEST(CApiTest, InvalidTopologyLinkPreservesHandleAndEntryPointStatus) {
     ASSERT_EQ(loaded_config.extra_gpu_builds.size(), num_gpus - 1);
     test::ScopedTempFile config_file;
     ASSERT_TRUE(config_file.initialize("rocjitsu-invalid-topology-link-"));
-    std::ofstream(config_file.path()) << json;
+    ASSERT_TRUE(config_file.write(json));
     for (auto mode : {RJ_VM_MODE_DEFAULT, RJ_VM_MODE_DAEMON}) {
       SCOPED_TRACE(::testing::Message() << "mode=" << mode);
       rj_vm_t sentinel;

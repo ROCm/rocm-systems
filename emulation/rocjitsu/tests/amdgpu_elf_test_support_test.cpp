@@ -16,6 +16,10 @@ TEST(AmdGpuElfFixture, ReportsInvalidCallerExtentAndTargetWithoutThrowing) {
   const std::vector<uint32_t> text(4, 0);
   std::vector<uint8_t> image;
   EXPECT_NONFATAL_FAILURE(
+      image = test_support::make_minimal_amdgpu_elf_with_descriptor_after_text({}, 1),
+      "text function extent exceeds .text fixture");
+  EXPECT_GE(image.size(), sizeof(Elf64_Ehdr));
+  EXPECT_NONFATAL_FAILURE(
       image = test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(text, 3, 2),
       "text function extent exceeds .text fixture");
   EXPECT_GE(image.size(), sizeof(Elf64_Ehdr));

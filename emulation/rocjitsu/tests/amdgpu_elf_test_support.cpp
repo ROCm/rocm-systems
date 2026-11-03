@@ -212,7 +212,8 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
   }
   std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
 
-  std::memcpy(image.data() + text_offset, text_words.data(), text_size);
+  if (!text_words.empty())
+    std::memcpy(image.data() + text_offset, text_words.data(), text_size);
 
   const auto descriptor = make_kernel_descriptor_bytes(static_cast<int64_t>(text_vaddr) -
                                                        static_cast<int64_t>(rodata_vaddr));

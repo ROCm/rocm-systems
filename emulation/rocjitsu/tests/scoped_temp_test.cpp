@@ -42,14 +42,41 @@ TEST(ScopedTempTest, CreationFailureDoesNotRetainTheUncreatedPattern) {
   EXPECT_TRUE(directory.path().empty());
 }
 
-TEST(ScopedTempFileTest, ReportsWriteOpenAndFlushFailures) {
+TEST(ScopedTempTest, ReinitializingOwnedResourcesPreservesTheirPaths) {
+  rocjitsu::test::ScopedTempFile file;
+  rocjitsu::test::ScopedTempDirectory directory;
+  ASSERT_TRUE(file.initialize("rocjitsu-owned-file-"));
+  ASSERT_TRUE(directory.initialize("rocjitsu-owned-directory-"));
+  const std::string file_path = file.path();
+  const std::string directory_path = directory.path();
+  EXPECT_FALSE(file.initialize("rocjitsu-second-file-"));
+  EXPECT_FALSE(directory.initialize("rocjitsu-second-directory-"));
+  EXPECT_EQ(file.path(), file_path);
+  EXPECT_EQ(directory.path(), directory_path);
+  EXPECT_TRUE(std::filesystem::is_regular_file(file_path));
+  EXPECT_TRUE(std::filesystem::is_directory(directory_path));
+}
+
+TEST(ScopedTempFileTest, ReportsWriteOpenFailure) {
   rocjitsu::test::ScopedTempFile file;
   ASSERT_TRUE(file.initialize("rocjitsu-temp-write-failure-"));
   ASSERT_TRUE(std::filesystem::remove(file.path()));
   ASSERT_TRUE(std::filesystem::create_directory(file.path()));
   EXPECT_FALSE(file.write("cannot open a directory"));
+}
+
+TEST(ScopedTempFileTest, ReportsWriteFlushFailure) {
+  rocjitsu::test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-temp-flush-failure-"));
   ASSERT_TRUE(std::filesystem::remove(file.path()));
-  std::filesystem::create_symlink("/dev/full", file.path());
+  std::error_code error;
+  std::filesystem::create_symlink("/dev/full", file.path(), error);
+  ASSERT_FALSE(error) << error.message();
+  std::ofstream probe(file.path(), std::ios::binary);
+  if (!probe.is_open())
+    GTEST_SKIP() << "/dev/full is unavailable for writing";
+  probe.close();
+  ASSERT_TRUE(probe);
   EXPECT_FALSE(file.write("cannot flush to a full device"));
 }
 
