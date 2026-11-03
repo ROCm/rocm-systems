@@ -227,9 +227,12 @@ build_thread_trees(const wall_clock_settings&              settings,
         std::erase_if(open_regions,
                       [&](const auto& open) { return region->begin >= open.second; });
 
-        auto& parent = (settings.flat || open_regions.empty())
+        auto const enclosing =
+            std::find_if(open_regions.rbegin(), open_regions.rend(),
+                         [&](const auto& open) { return open.second >= region->end; });
+        auto& parent = (settings.flat || enclosing == open_regions.rend())
                            ? tree_of(region->thread_id)
-                           : *open_regions.back().first;
+                           : *enclosing->first;
         auto& entry  = parent.child(region->name, call_kind::cpu, merge);
         entry.data.add(region->end - region->begin);
         open_regions.emplace_back(&entry, region->end);

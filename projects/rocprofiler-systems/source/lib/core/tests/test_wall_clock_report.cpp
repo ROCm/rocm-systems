@@ -219,6 +219,23 @@ add_launch_with_kernel(intervals& input)
 }
 }  // namespace
 
+TEST(wall_clock_report, partially_overlapping_regions_are_siblings)
+{
+    constexpr auto k_first_end    = 10 * k_ms;
+    constexpr auto k_second_begin = 5 * k_ms;
+    constexpr auto k_second_end   = 20 * k_ms;
+
+    intervals input;
+    input.regions.push_back(interval("first", span(k_start, k_first_end)));
+    input.regions.push_back(interval("second", span(k_second_begin, k_second_end)));
+
+    auto const rows = parse_rows(make_report(input));
+    ASSERT_EQ(rows.size(), 2U);
+    expect_node(rows[0], "first", 0);
+    expect_node(rows[1], "second", 0);
+    EXPECT_EQ(rows[0].self_percent, "100.0");
+}
+
 TEST(wall_clock_report, kernel_nests_under_launch_with_same_correlation_id)
 {
     intervals input;

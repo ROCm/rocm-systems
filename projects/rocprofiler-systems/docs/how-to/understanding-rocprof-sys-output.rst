@@ -476,7 +476,8 @@ Timemory text output example
 
 The following example is the ``wall_clock`` report, which rocprof-sys generates from the
 trace cache. The ``N`` field in ``|N>>>`` numbers the threads in the order of their thread
-IDs. Each thread created by the application starts its own tree with a ``start_thread`` row,
+IDs. Each thread created by the application starts its own tree with a ``start_thread`` row
+(threads of forked child processes have no such row),
 and GPU kernels and memory copies are nested under the API call that launched them. With
 ``ROCPROFSYS_COLLAPSE_THREADS=ON`` all threads share one tree and the labels have no ``N``.
 The MPI rank is part of the file name, not of the label. ``ROCPROFSYS_TIMING_UNITS`` takes

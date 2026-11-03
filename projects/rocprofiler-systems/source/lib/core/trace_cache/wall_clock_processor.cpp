@@ -157,13 +157,14 @@ wall_clock_processor_t::add_thread_lifetimes()
 void
 wall_clock_processor_t::finalize_processing()
 {
+    add_thread_lifetimes();
     if(m_report.empty())
     {
-        LOG_DEBUG("No regions or kernels recorded for PID {}; no wall_clock report",
+        LOG_DEBUG("No regions, kernels or worker threads recorded for PID {}; no "
+                  "wall_clock report",
                   m_pid);
         return;
     }
-    add_thread_lifetimes();
 
     if(m_options.cout)
     {
