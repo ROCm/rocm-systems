@@ -3,6 +3,7 @@
 #SBATCH --exclusive
 #SBATCH -t 16:00:00
 #SBATCH -o %x-%j.out
+#SBATCH --signal=B:USR1@300
 # Host-side wrapper for the bench phases: image per node (built if missing), container $NAME on every
 # node, run $PHASES_SCRIPT (phases.sh or model_phases.sh) inside the container on the first node,
 # then remove the containers. Pass PHASES / MODEL_RUNS through the environment, NOT through
@@ -18,6 +19,19 @@ HF=$W/logs/bench/hostfile-$SLURM_JOB_ID
 printf '%s.rck.dcgpu slots=8\n' "${NODES[@]}" > $HF
 echo "job $SLURM_JOB_ID nodes: ${NODES[*]} script: ${PHASES_SCRIPT:-phases.sh} phases: ${PHASES:-} ${MODEL_RUNS:-} $(date -u)"
 
+# Containers keep the GPUs busy after the job ends unless removed: clean up on exit, scancel (TERM) and
+# 300 s before the time limit (USR1, --signal above).
+RC=0
+cleanup() {
+  trap - EXIT TERM INT USR1
+  for n in "${NODES[@]}"; do ssh $n "sudo docker rm -f $NAME >/dev/null 2>&1; echo \$(hostname -s) container removed"; done
+  echo "JOB_DONE rc=$RC $(date -u)"
+  exit $RC
+}
+trap cleanup EXIT
+trap 'RC=143; cleanup' TERM INT
+trap 'RC=124; echo "time limit close, stopping"; cleanup' USR1
+
 for n in "${NODES[@]}"; do
   ssh -o StrictHostKeyChecking=no $n "systemctl is-active -q docker || sudo systemctl start docker
     sudo docker image inspect m2n-ruby:primus-rdma61 >/dev/null 2>&1 || { cd $RB && sudo docker build --network host \
@@ -25,9 +39,9 @@ for n in "${NODES[@]}"; do
     df -h / | tail -1; NAME=$NAME bash $RB/start-m2n-container.sh 2>&1 | tail -1" &
 done
 wait
-for n in "${NODES[@]}"; do ssh $n "sudo docker ps --format '{{.Names}}' | grep -qx $NAME" || { echo "NO CONTAINER on $n"; FAIL=1; }; done
-if [[ -z ${FAIL:-} ]]; then
-  ssh $N1 "sudo docker exec -u $(id -u) -e HOME=$HOME -e PHASES='${PHASES:-}' -e MODEL_RUNS='${MODEL_RUNS:-}' -e HF=$HF $NAME bash -lc 'bash $RB/${PHASES_SCRIPT:-phases.sh}'"
+for n in "${NODES[@]}"; do ssh $n "sudo docker ps --format '{{.Names}}' | grep -qx $NAME" || { echo "NO CONTAINER on $n"; RC=1; }; done
+if (( RC == 0 )); then
+  # Background + wait so the traps fire while the phases run.
+  ssh $N1 "sudo docker exec -u $(id -u) -e HOME=$HOME -e WORK=$W -e PHASES='${PHASES:-}' -e MODEL_RUNS='${MODEL_RUNS:-}' -e HF=$HF $NAME bash -lc 'bash $RB/${PHASES_SCRIPT:-phases.sh}'" &
+  wait $! || RC=$?
 fi
-for n in "${NODES[@]}"; do ssh $n "sudo docker rm -f $NAME >/dev/null 2>&1; echo \$(hostname -s) container removed"; done
-echo "JOB_DONE $(date -u)"

@@ -52,8 +52,9 @@ for m in $MODES; do
         done
         pkill -x reshard_bench; sleep 3; pkill -9 -x reshard_bench; kill $mp 2>/dev/null; wait $mp 2>/dev/null
       else
-        wait $mp; rc=$?
-        if grep -qx '\*\*\* VALIDATION PASSED \*\*\*' $L; then res=PASS; else res="FAIL($rc)"; fi
+        wait $mp; rc=$?; echo "=== EXIT $rc" >> $L
+        # The marker is printed before the timed iterations and teardown, so the exit code must be 0 too.
+        if (( rc == 0 )) && grep -qx '\*\*\* VALIDATION PASSED \*\*\*' $L; then res=PASS; else res="FAIL($rc)"; fi
       fi
       bw=$(grep -A2 -- '--- Sources only' $L | grep -m1 'Bandwidth' | grep -oE 'Avg=[0-9.]+' | cut -d= -f2)  # per source rank
       tot=$(grep -m1 'Total data throughput' $L | grep -oE '[0-9.]+ GB/s' | cut -d' ' -f1)

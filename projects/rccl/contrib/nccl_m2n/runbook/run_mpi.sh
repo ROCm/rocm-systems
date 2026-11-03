@@ -11,7 +11,7 @@ PLACE=()
   timeout ${TMO:-3600} mpirun -np $NP "${PLACE[@]}" --map-by ppr:8:node --bind-to none \
     --mca pml ob1 --mca btl ^vader,openib \
     --mca oob_tcp_if_include $NCCL_SOCKET_IFNAME --mca btl_tcp_if_include $NCCL_SOCKET_IFNAME \
-    --mca plm_rsh_agent "ssh -p 2222 -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR" \
+    --mca plm_rsh_agent "ssh -p $SSH_PORT -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR" \
     -x PATH -x LD_LIBRARY_PATH -x NCCL_GIN_ENABLE -x NCCL_GIN_TYPE -x NCCL_CUMEM_ENABLE -x NCCL_DMABUF_ENABLE \
     -x HSA_NO_SCRATCH_RECLAIM -x NCCL_ENV_PLUGIN -x NCCL_SOCKET_IFNAME -x NCCL_DEBUG \
     $BIN/basic_api_test_mpi "$@" --gtest_color=no

@@ -16,7 +16,7 @@ ROUNDS=${ROUNDS:-4}
 PLACE=(); [[ -n $HF ]] && PLACE=(--hostfile $HF)
 MPI=(mpirun -np $NP "${PLACE[@]}" --map-by ppr:8:node --bind-to none --mca pml ob1 --mca btl ^vader,openib
   --mca oob_tcp_if_include $NCCL_SOCKET_IFNAME --mca btl_tcp_if_include $NCCL_SOCKET_IFNAME
-  --mca plm_rsh_agent "ssh -p 2222 -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+  --mca plm_rsh_agent "ssh -p $SSH_PORT -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
   -x PATH -x LD_LIBRARY_PATH -x NCCL_GIN_ENABLE -x NCCL_GIN_TYPE -x NCCL_CUMEM_ENABLE -x NCCL_DMABUF_ENABLE
   -x HSA_NO_SCRATCH_RECLAIM -x NCCL_ENV_PLUGIN -x NCCL_SOCKET_IFNAME -x NCCL_DEBUG -x NCCL_RESHARD_ALGORITHM
   -x NCCL_RESHARD_LOG_LEVEL)
@@ -43,7 +43,7 @@ cfg_args() { case $1 in
 
 cleanup_procs() {
   pkill -x reshard_bench; [[ -n $HF ]] && for h in $(awk '{print $1}' $HF); do
-    ssh -p 2222 -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR $h pkill -x reshard_bench; done
+    ssh -p $SSH_PORT -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR $h pkill -x reshard_bench; done
   sleep 3; pkill -9 -x reshard_bench; pkill -9 -x mpirun; sleep 2
 }
 
@@ -67,8 +67,10 @@ for shp in $SHAPES; do
             timeout 60 rocgdb -p $p -batch -ex "set pagination off" -ex "thread apply all bt 10" > $L.bt 2>&1; done
           cleanup_procs; wait $mp 2>/dev/null; DEAD[$key]=1
         else
-          wait $mp; rc=$?
-          if [[ -n $V ]]; then grep -qx '\*\*\* VALIDATION PASSED \*\*\*' $L && res=PASS || res=FAIL_rc$rc
+          wait $mp; rc=$?; echo "=== EXIT $rc" >> $L
+          # Markers are printed before teardown: require a zero exit as well.
+          if (( rc != 0 )); then res=FAIL_rc$rc
+          elif [[ -n $V ]]; then grep -qx '\*\*\* VALIDATION PASSED \*\*\*' $L && res=PASS || res=FAIL_rc$rc
           else grep -q 'Benchmark completed successfully' $L && res=OK || res=FAIL_rc$rc; fi
           [[ $res == FAIL* ]] && { DEAD[$key]=1; cleanup_procs; }
         fi

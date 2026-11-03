@@ -6,7 +6,7 @@
 D=$(dirname "$(readlink -f "$0")")
 . $D/env.sh
 R=$WORK/logs/bench
-SSHA="ssh -p 2222 -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+SSHA="ssh -p $SSH_PORT -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 mpi() { local np=$1 hf=$2; shift 2; local P=(); [[ $hf == 1 ]] && P=(--hostfile $HF)
   mpirun -np $np "${P[@]}" --map-by ppr:8:node --bind-to none --mca pml ob1 --mca btl ^vader,openib \
     --mca oob_tcp_if_include $NCCL_SOCKET_IFNAME --mca btl_tcp_if_include $NCCL_SOCKET_IFNAME --mca plm_rsh_agent "$SSHA" \
@@ -23,10 +23,12 @@ for ph in $PHASES; do
        NCCL_RESHARD_LOG_LEVEL=INFO \
          timeout 300 bash -c "$(declare -f mpi); HF=$HF; SSHA='$SSHA'; mpi $b $e $BIN/reshard_bench --algorithm auto --src-mesh-dims 1,$c --dst-mesh-dims 1,$d \
          --src-shard-dim 0 --dst-shard-dim 1 --tensor-dims 2048,2048,16 --iterations 10 --warmup 2 --validate" > $L 2>&1
-       echo "auto rc=$? $(grep -m1 'Algorithm setting' $L) | $(grep -m1 -oE 'copy_algo=[0-9]+' $L) | $(grep -m1 'Bandwidth' $L)" ;;
+       rc=$?; echo "=== EXIT $rc" >> $L; res=FAIL_rc$rc
+       (( rc == 0 )) && grep -qx '\*\*\* VALIDATION PASSED \*\*\*' $L && res=PASS
+       echo "auto $res $(grep -m1 'Algorithm setting' $L) | $(grep -m1 -oE 'copy_algo=[0-9]+' $L) | $(grep -m1 'Bandwidth' $L)" ;;
     a2a) mkdir -p $R/$a; L=$R/$a/alltoall.log
        timeout 1200 bash -c "$(declare -f mpi); HF=$HF; SSHA='$SSHA'; mpi $b $c $WORK/rccl-tests/build/alltoall_perf -b 64K -e 4G -f 4 -g 1 -n 20 -w 5" > $L 2>&1
-       echo "a2a rc=$?"; grep -E "^\s+[0-9]+ " $L | tail -9 ;;
+       rc=$?; echo "=== EXIT $rc" >> $L; echo "a2a rc=$rc"; grep -E "^\s+[0-9]+ " $L | tail -9 ;;
   esac
 done
 echo PHASES_DONE

@@ -291,7 +291,8 @@ were not run.
 ## 12. Beyond the container: native CI ROCm 10.1, > 4 nodes, PIPE basic matrix
 
 - Native stack: `native/env-ci-rocm-10.1.sh` (CI ROCm 10.1.0 + CI OpenMPI 5.0.9, plain ssh with the default
-  cluster key, Unix Makefiles instead of Ninja). Use it as `env.sh` in a copy of this directory.
+  cluster key on port 22, Unix Makefiles instead of Ninja). Use it as `env.sh` in a copy of this directory;
+  `build.sh` and the launchers take `MPI_HOME`, `CMAKE_GENERATOR`, `SSH_KEY` and `SSH_PORT` from it.
   Submit with `sbatch --propagate=NONE` and raise `ulimit -n` to the hard limit (the env file does it):
   Slurm hands the login node's soft `nofile` (1024) to the job, which hangs `mpi1_direct` at
   `case0064 uneven_ratio` (ranks diverge inside `ncclDevCommCreate`) and aborts 8+ node runs
@@ -306,8 +307,10 @@ were not run.
   `qwen235b-TP2CP2PP4EP16-128gpus-gb200` fit 8-GPU nodes as is; model manifests `dsv3-toy.model.json` and
   `amd-configs/generate_qwen3_235b.py` (4 of 94 layers). Pass the manifest as the 5th field of `MODEL_RUNS`.
 - PIPE in the basic matrix: `pipe_chunks.sh local|1node|2node` (one decade of cases per process, PIPE has
-  32 persistent control slots per communicator). Expected: 2 nodes 206/0/16; 1 node the 4 `uneven_ratio
-  240x240` cases (0066, 0078, 0081, 0093) hang, everything else passes (local 228, mpi1 205).
+  32 persistent control slots per communicator). The 4 single-node `uneven_ratio 240x240` cases that hang
+  (0066, 0078, 0081, 0093, `KNOWN_HANG`) run in their own processes, and a decade that still times out is
+  rerun one case per process, so a hang only loses its own case. Expected: 2 nodes 206/0/16; 1 node those 4
+  cases hang (`exit 124`), everything else passes (local 228/0/14).
 - Proxy CPU: PACK ~600% CPU per rank (main busy-wait + `ncclGinProgress` and `ncclRmaProxyProgressThread`
   per communicator, two communicators with split-comm), PIPE ~300%.
 
@@ -344,6 +347,7 @@ export NCCL_GIN_ENABLE=1 NCCL_GIN_TYPE=2 NCCL_CUMEM_ENABLE=1 NCCL_DMABUF_ENABLE=
 export NCCL_ENV_PLUGIN=none NCCL_SOCKET_IFNAME=fenic0 MASTER_ADDR=$(hostname -s) MASTER_PORT=29533
 MPI=(mpirun -np 8 --map-by ppr:8:node --bind-to none --mca pml ob1 --mca btl ^vader,openib
   --mca oob_tcp_if_include fenic0 --mca btl_tcp_if_include fenic0
+  --mca plm_rsh_agent "ssh -p 2222 -i $HOME/.ssh/id_m2n -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
   -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH -x NCCL_EXTENSIONS_ROCM -x NCCL_M2N_LIBRARY -x NCCL_M2N_RCCL_LIBRARY
   -x NCCL_GIN_ENABLE -x NCCL_GIN_TYPE -x NCCL_CUMEM_ENABLE -x NCCL_DMABUF_ENABLE -x HSA_NO_SCRATCH_RECLAIM
   -x NCCL_ENV_PLUGIN -x NCCL_SOCKET_IFNAME -x MASTER_ADDR -x MASTER_PORT

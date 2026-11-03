@@ -7,7 +7,7 @@ D=$(dirname "$(readlink -f "$0")")
 R=$WORK/logs/bench/batch; mkdir -p $R
 CSV=$R/results.csv
 [[ -f $CSV ]] || echo "label,np,src,dst,copy,num_comms,num_tensors,round,validate,result,tensor,pattern,seq_ms,con_ms,speedup,eff,seq_gbs,con_gbs,log" > $CSV
-SSHA="ssh -p 2222 -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+SSHA="ssh -p $SSH_PORT -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 NT=${NUM_TENSORS:-4}
 COMMS=${COMMS:-1 2 4}
 COPIES=${COPIES:-pack direct pipe}
@@ -33,7 +33,7 @@ for run in $BATCH_RUNS; do
         rc=$?; echo "=== EXIT $rc" >> $L
         if (( rc == 124 )); then res=HANG; pkill -9 -x reshard_batch_b
           [[ $hf == 1 ]] && for h in $(awk '{print $1}' $HF); do $SSHA $h pkill -9 -x reshard_batch_b; done
-        elif grep -q 'Benchmark completed successfully' $L && ! grep -q 'VALIDATION FAILED' $L; then res=$([[ -n $V ]] && echo PASS || echo OK)
+        elif (( rc == 0 )) && grep -q 'Benchmark completed successfully' $L && ! grep -q 'VALIDATION FAILED' $L; then res=$([[ -n $V ]] && echo PASS || echo OK)
         else res=FAIL_rc$rc; fi
         n=0
         while read -r t p sq cn sp ef sg cg; do

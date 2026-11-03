@@ -4,7 +4,7 @@ D=$(dirname "$(readlink -f "$0")")
 . $D/env.sh
 R=$WORK/logs/bench/model; mkdir -p $R
 MC=$SRC/projects/rccl/contrib/nccl_m2n/benchmarks/configs/model_configs/qwen3-32b.model.json
-SSHA="ssh -p 2222 -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+SSHA="ssh -p $SSH_PORT -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 for run in $MODEL_RUNS; do
   IFS=: read -r lab np hf sc mc <<<"$run"
   MCR=${mc:-$MC}
@@ -21,7 +21,10 @@ for run in $MODEL_RUNS; do
         -x HSA_NO_SCRATCH_RECLAIM -x NCCL_ENV_PLUGIN -x NCCL_SOCKET_IFNAME -x NCCL_DEBUG \
         $BIN/reshard_model_bench --model-config $MCR --system-config $sc --gpus-per-node 8 --iterations 10 --warmup 2 $A $V >> $L 2>&1
       rc=$?; echo "=== EXIT $rc" >> $L
-      echo "$(date -u +%T) $lab $mode r$r rc=$rc $(grep -iE -m2 'validation (passed|failed)|total' $L | tr '\n' ' ' | cut -c1-200)"
+      if (( rc == 124 )); then res=HANG; elif (( rc != 0 )); then res=FAIL_rc$rc
+      elif [[ -n $V ]]; then grep -qi 'validation passed' $L && ! grep -qi 'validation failed' $L && res=PASS || res=FAIL_val
+      else res=OK; fi
+      echo "$(date -u +%T) $lab $mode r$r $res $(grep -iE -m2 'validation (passed|failed)|total' $L | tr '\n' ' ' | cut -c1-200)"
       (( rc == 124 )) && { pkill -9 -x reshard_model_b; [[ $hf == 1 ]] && for h in $(awk '{print $1}' $HF); do $SSHA $h pkill -9 -x reshard_model_b; done; break; }
     done
   done

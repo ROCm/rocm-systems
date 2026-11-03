@@ -37,17 +37,23 @@ def nn(label):
     return -(-int(NPS.get(label, 8)) // 8)
 
 import re
-def src_bw(r):
-    f = os.path.join(root, r['dir'], r['log'])
+def log_text(r):
     try:
-        t = open(f, errors='ignore').read()
+        return open(os.path.join(root, r['dir'], r['log']), errors='ignore').read()
     except OSError:
-        return None
+        return ''
+
+def src_bw(r):
+    t = log_text(r)
     m = re.search(r'--- Sources only.*?\nTime per iteration \(ms\):\s+Min=[0-9.]+\s+Max=([0-9.]+)\nBandwidth \(GB/s\):\s+Min=[0-9.]+\s+Max=[0-9.]+\s+Avg=([0-9.]+)', t, re.S)
     return (float(m.group(2)), float(m.group(1))) if m else None
 
 for r in rows:
     NPS[r['label']] = r['np']
+    # PASS/OK markers precede teardown: a recorded nonzero exit turns the launch into a failure.
+    ex = re.search(r'=== EXIT (\d+)', log_text(r))
+    if r['result'] in ('OK', 'PASS') and ex and ex.group(1) != '0':
+        r['result'] = 'FAIL_rc' + ex.group(1)
 
 g = defaultdict(list)
 status = defaultdict(set)

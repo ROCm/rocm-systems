@@ -8,10 +8,14 @@ for f in sorted(glob.glob(os.path.join(root, '*_c*_r*.log'))):
     m = re.match(r'(.+)_(pack|direct|pipe)_c(\d+)_r(\d+)\.log', os.path.basename(f))
     lab, cp, nc, rnd = m.groups()
     t = open(f, errors='ignore').read()
-    ok = 'Benchmark completed successfully' in t and 'VALIDATION FAILED' not in t
     ex = re.search(r'=== EXIT (\d+)', t)
-    res = ('PASS' if rnd == '0' else 'OK') if ok else ('HANG' if ex and ex.group(1) == '124' else 'FAIL')
+    rc = int(ex.group(1)) if ex else None
+    # Success markers precede teardown: a launch counts only with a recorded zero exit.
+    ok = rc == 0 and 'Benchmark completed successfully' in t and 'VALIDATION FAILED' not in t
+    res = ('PASS' if rnd == '0' else 'OK') if ok else ('HANG' if rc == 124 else f'FAIL_rc{rc}')
     st[(lab, cp, nc)].add(res)
+    if not ok:
+        continue
     for line in t.splitlines():
         p = line.split()
         if len(p) == 8 and p[0].startswith('['):

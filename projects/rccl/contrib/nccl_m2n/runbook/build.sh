@@ -11,7 +11,7 @@ echo "SRC=$SRC HEAD=$(git -C $SRC rev-parse --short HEAD) ROCM_PATH=$ROCM_PATH"
 want() { [[ $WHAT == $1 || $WHAT == all ]]; }
 
 if want rccl; then
-  cmake -S $SRC/projects/rccl -B $B -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  cmake -S $SRC/projects/rccl -B $B -G "$CMAKE_GENERATOR" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_CXX_COMPILER=$ROCM_PATH/llvm/bin/amdclang++ -DCMAKE_C_COMPILER=$ROCM_PATH/llvm/bin/amdclang \
     -DROCM_PATH=$ROCM_PATH -DCMAKE_PREFIX_PATH=$ROCM_PATH \
     -DGPU_TARGETS=gfx950 -DAMDGPU_TARGETS=gfx950 -DBUILD_TESTS=OFF \
@@ -22,7 +22,7 @@ if want rccl; then
 fi
 
 MK=(make -f Makefile.rocm -j32 ROCM_PATH=$ROCM_PATH NCCL_HOME=$RCCL_INSTALL RCCL_LIBDIR=$RCCL_INSTALL/lib
-    GTEST_DIR=$WORK/googletest/googletest MPI_HOME=/opt/openmpi OFFLOAD_ARCH=gfx950 BUILDDIR=$WORK/mk)
+    GTEST_DIR=$WORK/googletest/googletest MPI_HOME=$MPI_HOME OFFLOAD_ARCH=gfx950 BUILDDIR=$WORK/mk)
 M2N_DIR=$SRC/projects/rccl/contrib/nccl_m2n
 
 if want m2n; then
@@ -43,7 +43,7 @@ fi
 if want extras; then
   # rccl-tests for the alltoall reference (links the base-image librccl, runs ours via LD_LIBRARY_PATH).
   [[ -d $WORK/rccl-tests ]] || git clone -q --depth 1 https://github.com/ROCm/rccl-tests.git $WORK/rccl-tests
-  make -C $WORK/rccl-tests -j64 MPI=1 MPI_HOME=/opt/openmpi HIP_HOME=$ROCM_PATH NCCL_HOME=$RCCL_INSTALL \
+  make -C $WORK/rccl-tests -j64 MPI=1 MPI_HOME=$MPI_HOME HIP_HOME=$ROCM_PATH NCCL_HOME=$RCCL_INSTALL \
     GPU_TARGETS=gfx950 > $WORK/logs/build_rccl_tests.log 2>&1 || { tail -30 $WORK/logs/build_rccl_tests.log; exit 1; }
   ls -l $WORK/rccl-tests/build/alltoall_perf
 fi
