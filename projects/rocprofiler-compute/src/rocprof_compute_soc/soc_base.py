@@ -249,8 +249,8 @@ class OmniSoC_Base:
         Detects the GPU model using various identifiers from 'amd-smi static'.
         Falls back through multiple methods if the primary method fails.
         """
+        gpu_model = "N/A"
         with amdsmi_interface.amdsmi_ctx():
-            gpu_model = "N/A"
             for model in mi_gpu_specs.get_all_gpu_models():
                 for amdsmi_gpu_model in amdsmi_interface.get_gpu_model():
                     if model.lower() in amdsmi_gpu_model.lower():

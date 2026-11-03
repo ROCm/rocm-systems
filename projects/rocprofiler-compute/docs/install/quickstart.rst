@@ -98,7 +98,7 @@ Ensure ROCm is installed and follow the steps:
       pip install --extra-index-url https://<stable/nightly>.repo.amd.com/rocm/whl-next/ "rocm-profiler[compute-analyze]"
 
    To check that the environment has everything analyze mode needs, run
-   ``rocprof-compute analyze --verify-deps``.
+   ``rocprof-compute analyze --debug --debug-verify-deps``.
 
    Profile your application with its own Python environment, then activate this
    environment to run analyze mode on the results. For the packaged ROCm

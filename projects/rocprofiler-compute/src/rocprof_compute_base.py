@@ -252,9 +252,10 @@ class RocProfCompute:
         self.__soc[arch] = soc_class(self.__args, self.__mspec)
 
     def parse_args(self) -> None:
-        # Detect if --experimental flag is present (for help text control)
+        # Detect feature gates for help text control.
         prelim_parser = argparse.ArgumentParser(add_help=False)
         prelim_parser.add_argument("--experimental", action="store_true", default=False)
+        prelim_parser.add_argument("--debug", action="store_true", default=False)
 
         # Parse only known args (respects -- separator)
         prelim_args, _ = prelim_parser.parse_known_args()
@@ -277,6 +278,7 @@ class RocProfCompute:
             self.__supported_archs,
             self.__version,
             experimental_requested,
+            debug_enabled=prelim_args.debug,
         )
         self.__args = self.__parser.parse_args()
 
