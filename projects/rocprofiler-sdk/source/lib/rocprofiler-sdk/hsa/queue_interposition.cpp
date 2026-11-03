@@ -43,6 +43,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/record_producer.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
@@ -734,6 +735,9 @@ release_completion_signals(const std::shared_ptr<queue_info_session_t>& session,
 void
 emit_dispatch_records(retired_batch&& batch)
 {
+    // Marked in the body: every caller writes records, including the teardown paths.
+    auto _producer = scoped_record_producer{};
+
     auto&      session      = *batch.session;
     const auto emit_records = !batch.dispatch_times.empty();
     auto*      _corr_id     = session.correlation_id;
@@ -766,6 +770,9 @@ emit_dispatch_records(retired_batch&& batch)
 void
 complete_signal_less_dispatch(kfd::signal_less_hub_t::proven&& proven)
 {
+    // Marked in the body: both the task-group and teardown callers write records.
+    auto _producer = scoped_record_producer{};
+
     auto&       _payload    = proven.payload;
     const auto* _rocp_agent = agent::get_agent(_payload.agent_id);
     auto        _hsa_agent  = agent::get_hsa_agent(_rocp_agent);

@@ -93,6 +93,60 @@ rocprofiler_status_t
 rocprofiler_context_is_valid(rocprofiler_context_id_t context_id, int* status) ROCPROFILER_API
     ROCPROFILER_NONNULL(2);
 
+/**
+ * @brief Wait until records have been written for already-submitted GPU operations.
+ *
+ * Kernel dispatch and memory copy records are built on threads owned by the HSA runtime, after the
+ * operation retires. Synchronizing on the operation itself -- with hipDeviceSynchronize or any
+ * equivalent -- does not wait for that, so a @ref ::rocprofiler_flush_buffer issued immediately
+ * afterwards can deliver nothing for work that has demonstrably finished. This function closes
+ * that gap. It is the analogue of a device synchronize for record production.
+ *
+ * Records are written, not delivered. Call @ref ::rocprofiler_flush_buffer afterwards to receive
+ * them. This function does not flush, does not stop any context, and does not prevent other
+ * threads from submitting work.
+ *
+ * @par What it costs
+ * This blocks, and the wait is open-ended by design: like a device synchronize, work submitted
+ * concurrently by other threads extends it. Callers that cannot tolerate an unbounded stall should
+ * ensure their own work has completed first, which is the intended usage. The wait is process-wide
+ * even when a subset of contexts is named, and it stalls queue creation and destruction for its
+ * duration.
+ *
+ * @par What it covers
+ * The kernel dispatch and memory copy paths, and everything emitted from the dispatch completion
+ * handler alongside them: dispatch counter collection, dispatch SPM, dispatch thread trace, the
+ * dispatch-scoped PC sampling hook, scratch memory reported with a dispatch, and correlation id
+ * retirement. API tracing records are written synchronously by the calling thread and never need
+ * this.
+ *
+ * @par What it does NOT cover
+ * Agent-scoped services -- device counter collection, device SPM and the PC sampling service
+ * threads -- scratch memory events raised independently of a dispatch, and the KFD event kinds.
+ * PC sampling internal agent buffers are drained by @ref ::rocprofiler_flush_buffer rather than
+ * here.
+ *
+ * @par Signal-less dispatch
+ * Signal-less dispatch records are covered. If the dispatch log cannot be quiesced within its
+ * internal budget, signal-less dispatch is disabled for the remainder of the process and later
+ * work takes the ordinary completion-signal path, which still produces records. Throughput of the
+ * dispatch path may change; records are not dropped.
+ *
+ * @param [in] contexts Contexts the caller is synchronizing. Validated, and reserved for scoping
+ * the wait in future revisions; the wait performed today is process-wide.
+ * @param [in] num_contexts Number of entries in @p contexts.
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Record writing is caught up for the covered kinds
+ * @retval ::ROCPROFILER_STATUS_ERROR_TIMEOUT An internal drain gave up with work still in flight.
+ * Records remain outstanding; the caller may retry.
+ * @retval ::ROCPROFILER_STATUS_ERROR_REENTRANT_CALL Invoked from a buffer or tracing callback.
+ * Those run on the threads this function waits for, so the wait could never be satisfied.
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND A context in @p contexts does not exist
+ */
+rocprofiler_status_t
+rocprofiler_synchronize_contexts(const rocprofiler_context_id_t* contexts,
+                                 size_t num_contexts) ROCPROFILER_API ROCPROFILER_NONNULL(1);
+
 /** @} */
 
 ROCPROFILER_EXTERN_C_FINI
