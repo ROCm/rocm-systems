@@ -114,6 +114,10 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   //! completed skips the value check when the caller already knows the signal completed.
   void CacheTimingData(hsa_agent_t gpu_device, bool completed = false);
 
+  //! Caches the timing of a completed compute use from the raw start and end ticks the caller
+  //! read from the signal, as CacheTimingData would
+  void CacheTimingFromTicks(hsa_agent_t gpu_device, uint64_t start_tick, uint64_t end_tick);
+
   //! Reset cached timing for signal reuse
   void ResetCachedTiming() {
     std::scoped_lock lock(lock_);
@@ -566,7 +570,7 @@ class Device : public NullDevice {
   //! A batched command keeps its completion signal until the batch completes, and replacing a
   //! device-memory signal costs a device allocation, so those queues complete batches sooner
   size_t SubmissionBatchLimit() const override {
-    constexpr size_t kDeviceSignalBatchLimit = 64;
+    constexpr size_t kDeviceSignalBatchLimit = 256;
     return (QueueDeviceSignals() && flagIsDefault(DEBUG_CLR_MAX_BATCH_SIZE))
                ? kDeviceSignalBatchLimit
                : DEBUG_CLR_MAX_BATCH_SIZE;
@@ -583,6 +587,8 @@ class Device : public NullDevice {
            !amd::activity_prof::tool_attached.load(std::memory_order_relaxed);
   }
   virtual void DestroyHwEvent(void* hw_event) const override;
+  virtual bool AcquireHwEvents(int count, std::vector<void*>& hw_events) const override;
+  virtual void ReturnHwEvents(std::vector<void*>& hw_events) const override;
   virtual void ResetHwEvents(const std::vector<void*>& hw_events) const override;
   virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
   virtual uint8_t* CreateBarrierPacket(int num_deps) const override;
@@ -803,6 +809,9 @@ class Device : public NullDevice {
   hsa_amd_memory_pool_t device_signal_pool_{0};  //!< Pool for signals in device memory, if any
   bool graph_device_signals_ = false;  //!< Graph signals live in device_signal_pool_
   bool queue_device_signals_ = false;  //!< Queue signals live in device_signal_pool_
+  //! Armed HW events that graphs take their signal sets from and give back when destroyed
+  mutable std::vector<void*> graph_hw_events_;
+  mutable std::mutex graph_hw_events_lock_;
   bool pcie_stores_need_flush_ = true;  //!< Stores to device memory come over PCIe through HDP
   hsa_signal_t prefetch_signal_;  //!< Prefetch signal, used to explicitly prefetch SVM on device
   std::atomic<int> cache_state_;  //!< State of cache, kUnknown/kFlushedToDevice/kFlushedToSystem

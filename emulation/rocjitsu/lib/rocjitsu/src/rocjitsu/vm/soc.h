@@ -76,6 +76,7 @@ public:
 
   uint32_t gpu_id() const { return gpu_id_; }
 
+  /// @brief Attach an XCD during topology construction, before its CUs can execute.
   void add_xcd(amdgpu::Xcd *xcd);
   void add_iod(amdgpu::Iod *iod);
 
