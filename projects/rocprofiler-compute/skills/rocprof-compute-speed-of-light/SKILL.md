@@ -9,8 +9,6 @@ Speed-of-Light is the first panel to read after profiling. It puts every
 headline metric next to the hardware peak for the current GPU, so one table
 says whether a kernel is near any limit at all.
 
-This skill reads an existing workload directory. It does not collect one.
-
 Run `rocprof-compute analyze --help` before choosing flags.
 
 ## 1. Get the panel

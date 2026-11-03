@@ -25,8 +25,7 @@ different questions. Choose by what the user is asking, not by difficulty.
 Counters are the default starting point because they cover the whole kernel
 cheaply. Go straight to `rocprof-compute-pc-sampling` when the user asks about instructions,
 source lines, or stall reasons, and use both when an architectural limit needs
-to be traced back to the code that causes it. A request to run `rocprofv3`
-itself is neither this skill nor `rocprof-compute-pc-sampling`.
+to be traced back to the code that causes it.
 
 ## 1. Check the environment
 
@@ -74,10 +73,9 @@ MPI. Change it with `--output-directory`, which replaces `--name` for building
 the path. Re-profiling into a non-empty directory needs `--overwrite`; prefer a
 fresh directory.
 
-Which GPU the application runs on is in
-[Selecting a GPU](../../docs/how-to/profile/mode.rst). Under Slurm, derive
-`HIP_VISIBLE_DEVICES` from `ROCR_VISIBLE_DEVICES`, not from `SLURM_STEP_GPUS`;
-the indices differ.
+To restrict which GPU the application uses, set `HIP_VISIBLE_DEVICES`. Under
+Slurm, derive it from `ROCR_VISIBLE_DEVICES`, not from `SLURM_STEP_GPUS`; the
+indices differ.
 
 See [profile mode](../../docs/how-to/profile/mode.rst) for output layout,
 filtering, and the full option list. To profile a process that is already
