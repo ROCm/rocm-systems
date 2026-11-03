@@ -3,6 +3,7 @@
 #include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
+#include "lib/common/environment.hpp"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -965,12 +966,31 @@ TEST_F(AqlProfileV2ApiTest, SpmRepeatedCreateEmitsIdenticalCommandStreams)
 
 TEST_F(AqlProfileV2ApiTest, SpmTcaProgramsOneDelayPerInstance)
 {
-    for(const char* gfxip : {"gfx942", "gfx950"})
+    using rocprofiler::common::env_config;
+    using rocprofiler::common::env_store;
+
+    struct tca_case_t
+    {
+        const char* gfxip;
+        uint32_t    se_num;
+        uint32_t    tca_count;
+    };
+
+    // SPM is disabled on gfx90a unless the agent check is overridden.
+    auto spm_override = env_store{{env_config{"AQLPROFILE_SPM_OVERRIDE_AGENT_CHECK", "1", 1}}};
+    ASSERT_TRUE(spm_override.push());
+
+    // gfx908 goes last: Mi100Factory shares its static block table with the gfx942/gfx950
+    // factories, which Pm4Factory can return from its cache without rebuilding that table.
+    for(const auto& [gfxip, se_num, tca_count] : {tca_case_t{"gfx942", 4, 2},
+                                                  tca_case_t{"gfx950", 4, 2},
+                                                  tca_case_t{"gfx90a", 8, 4},
+                                                  tca_case_t{"gfx908", 8, 4}})
     {
         aqlprofile_agent_info_v1_t info{};
         info.agent_gfxip          = gfxip;
         info.xcc_num              = 1;
-        info.se_num               = 4;
+        info.se_num               = se_num;
         info.cu_num               = 64;
         info.shader_arrays_per_se = 2;
         info.domain               = 0;
@@ -983,7 +1003,7 @@ TEST_F(AqlProfileV2ApiTest, SpmTcaProgramsOneDelayPerInstance)
 
         const auto* factory    = aql_profile::Pm4Factory::Create(agent);
         const auto* block_info = factory->GetBlockInfo(&event);
-        ASSERT_EQ(block_info->instance_count, 2u) << gfxip;
+        ASSERT_EQ(block_info->instance_count, tca_count) << gfxip;
 
         std::vector<std::vector<uint8_t>> copies{};
         aqlprofile_spm_profile_t          profile{};
