@@ -5,8 +5,8 @@
  ************************************************************************/
 
 // ROCM-33800: a grouped send+recv to self on a 1-rank comm must return from ncclGroupEnd and
-// copy the data with 256 P2P channels per peer. That is the default on single-node gfx1250;
-// the env of the second case forces it on any arch.
+// copy the data with 256 P2P channels per peer. Single-node gfx1250 picks that by default when it
+// has at least 256 CUs; the env of the second case forces it on other archs such as gfx950.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "common/ProcessIsolatedTestRunner.hpp"
+#include "common/TestChecks.hpp"
 
 namespace RcclUnitTesting
 {
@@ -33,31 +34,31 @@ constexpr size_t kCount          = 16;
 void groupedSendRecvToSelf()
 {
     int dev = 0;
-    ASSERT_EQ(hipSetDevice(dev), hipSuccess);
+    HIP_CHECK(hipSetDevice(dev));
     ncclComm_t comm;
     ASSERT_EQ(ncclCommInitAll(&comm, 1, &dev), ncclSuccess);
     hipStream_t stream;
-    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+    HIP_CHECK(hipStreamCreate(&stream));
     float* send = nullptr;
     float* recv = nullptr;
-    ASSERT_EQ(hipMalloc(&send, kCount * sizeof(float)), hipSuccess);
-    ASSERT_EQ(hipMalloc(&recv, kCount * sizeof(float)), hipSuccess);
+    HIP_CHECK(hipMalloc(&send, kCount * sizeof(float)));
+    HIP_CHECK(hipMalloc(&recv, kCount * sizeof(float)));
     std::vector<float> in(kCount), out(kCount, 0.0f);
     std::iota(in.begin(), in.end(), 1.0f);
-    ASSERT_EQ(hipMemcpy(send, in.data(), kCount * sizeof(float), hipMemcpyHostToDevice), hipSuccess);
-    ASSERT_EQ(hipMemset(recv, 0, kCount * sizeof(float)), hipSuccess);
+    HIP_CHECK(hipMemcpy(send, in.data(), kCount * sizeof(float), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemset(recv, 0, kCount * sizeof(float)));
 
     ASSERT_EQ(ncclGroupStart(), ncclSuccess);
     ASSERT_EQ(ncclSend(send, kCount, ncclFloat32, 0, comm, stream), ncclSuccess);
     ASSERT_EQ(ncclRecv(recv, kCount, ncclFloat32, 0, comm, stream), ncclSuccess);
     ASSERT_EQ(ncclGroupEnd(), ncclSuccess);
-    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    HIP_CHECK(hipStreamSynchronize(stream));
 
-    ASSERT_EQ(hipMemcpy(out.data(), recv, kCount * sizeof(float), hipMemcpyDeviceToHost), hipSuccess);
+    HIP_CHECK(hipMemcpy(out.data(), recv, kCount * sizeof(float), hipMemcpyDeviceToHost));
     EXPECT_EQ(in, out);
-    EXPECT_EQ(hipFree(send), hipSuccess);
-    EXPECT_EQ(hipFree(recv), hipSuccess);
-    EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
+    HIP_EXPECT(hipFree(send));
+    HIP_EXPECT(hipFree(recv));
+    HIP_EXPECT(hipStreamDestroy(stream));
     EXPECT_EQ(ncclCommDestroy(comm), ncclSuccess);
 }
 

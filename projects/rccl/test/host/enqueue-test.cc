@@ -5089,6 +5089,14 @@ TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_RoundDoesNotFitEmptyPlan_IsInter
   EXPECT_EQ(2, sc.bp.c()->planner.nTasksP2p);
 }
 
+TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_RoundExactlyFillsEmptyPlan_Schedules) {
+  SelfPairBudgetScene sc(/*channelsPerPeer=*/256);
+  sc.budget.inArgsBytes = 256 * kBatch;  // exactly one batch per channel
+  std::string log;
+  ASSERT_EQ(ncclSuccess, sc.Schedule(&log)) << log;
+  EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
+}
+
 TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_RoundDoesNotFitPartialPlan_DefersToNextPlan) {
   SelfPairBudgetScene sc(/*channelsPerPeer=*/256);
   sc.bp.p()->nWorkBatches = 1;  // earlier work already in this plan
