@@ -2034,6 +2034,8 @@ template <bool EnableAsync>
                                                   decoded, debugger_active, return_decoded);
   } catch (...) {
     return_decoded.discard();
+    // A failure handler that throws skips the normal clear after reporting.
+    execution_failure_detail_.clear();
     throw;
   }
 }
