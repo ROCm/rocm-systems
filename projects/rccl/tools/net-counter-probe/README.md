@@ -40,6 +40,15 @@ By default it watches:
 
 Pick your own with `--keys a,b` (ethtool names) and `--sysfs a,b`.
 
+On Broadcom Thor2 the pause-duration counters never move (seen on firmware
+232.0.219.0), so with the default keys every row reads `did not move`. Pass
+keys that do move there, for example:
+
+```bash
+./net-counter-probe --eth <netdev> --ib <rdma-dev> \
+  --keys tx_bytes,rx_bytes_pri3,tx_pfc_ena_frames_pri3,rx_pfc_ena_frames_pri3
+```
+
 ## Reading the output
 
 Illustrative output:

@@ -432,6 +432,11 @@ typedef struct __attribute__((aligned(RCCL_TELEMETRY_CACHELINE))) {
    * installed instead of being reported as bogus absolute values. */
   int snap_taken;
 
+  /* Set when a receive on a connection spread over several NICs completed:
+   * its bytes are all charged to the connection's first NIC, so this NIC's
+   * rx_bytes is not its own traffic. Sticky; written relaxed, read at flush. */
+  int rx_bytes_merged;
+
   /* Baselines for hw_counters[]/pfc_*[] — captured on first use of the device,
    * subtracted from the current values at flush so JSON reports deltas. */
   int64_t snap_init_hw_counters[RCCL_TELEMETRY_MAX_HWC];
@@ -893,6 +898,14 @@ static inline void rcclTelemetryBytes(int devIdx, int isSend, uint64_t bytes) {
   uint64_t* field = isSend ? &rcclTelemetryDevs[devIdx].tx_bytes
                            : &rcclTelemetryDevs[devIdx].rx_bytes;
   __atomic_fetch_add(field, bytes, __ATOMIC_RELAXED);
+}
+
+/** Mark a NIC whose rx_bytes is pooled with other NICs of a merged connection. */
+static inline void rcclTelemetryMarkRxMerged(int devIdx) {
+  if (!rcclTelemetryOn() || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
+  /* Load first: storing on every receive would keep dirtying a shared line. */
+  if (!__atomic_load_n(&rcclTelemetryDevs[devIdx].rx_bytes_merged, __ATOMIC_RELAXED))
+    __atomic_store_n(&rcclTelemetryDevs[devIdx].rx_bytes_merged, 1, __ATOMIC_RELAXED);
 }
 
 /**

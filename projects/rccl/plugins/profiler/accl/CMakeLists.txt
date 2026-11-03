@@ -50,6 +50,7 @@ endif()
 install(TARGETS rccl-profiler-accl
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime
 )
-install(PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/accl_report.py
+# accl_fabric_report.py imports accl_report.py, so they install side by side.
+install(PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/accl_report.py ${CMAKE_CURRENT_SOURCE_DIR}/accl_fabric_report.py
     DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl/accl COMPONENT runtime
 )

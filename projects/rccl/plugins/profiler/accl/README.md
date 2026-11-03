@@ -174,14 +174,21 @@ host's?** It joins the accl records with RCCL's network telemetry
   or proxy activity to the last.
 - `net` (only when telemetry is on and the collective went through the proxy):
   per-NIC RCCL software counters over the collective's network window, from the
-  first proxy step that moves data (a send posted, or received data landing) to
-  the last proxy op stop. Not from the first proxy op start: RCCL posts the ops
-  of every queued collective at once, so in rccl-tests those starts all bunch
-  up before any data moves: `tx_bytes`, `rx_bytes`,
+  first proxy step that moves data to the last proxy op stop. A send opens it
+  when its data is ready, just before RCCL posts it, so the window includes that
+  send. A receive can only open it once the data landed and was counted; that
+  receive's size is in `rx_bytes_before_window` (a lower bound when one
+  completion finished several grouped receives). Not from the first proxy op
+  start: RCCL posts the ops of every queued collective at once, so in
+  rccl-tests those starts all bunch up before any data moves: `tx_bytes`,
+  `rx_bytes`,
   `wqe_sent`, `recv_wqe`, `wqe_rcvd`, `wqe_completed`, `cq_errors` and
   `completion_hist` (WQE completion latency, bucket width
   `RCCL_TELEMETRY_HISTOGRAM_INTERVAL_NS`). These are read with
-  `rcclTelemetrySwCapture()`, which only loads in-memory counters.
+  `rcclTelemetrySwCapture()`, which only loads in-memory counters. Sent bytes
+  are charged to the NIC each chunk went out on. Received bytes are charged to
+  the first NIC of the connection, so on a connection spread over several NICs
+  their per-NIC split is not exact; their total is.
 
 The counters are per NIC per process, not per collective. A window is clean
 only when one collective at a time uses the NIC: one GPU per process, one
@@ -202,7 +209,7 @@ export RCCL_TELEMETRY_ENABLE=1
 export RCCL_TELEMETRY_OUTPUT_DIR=/shared/run1     # shared storage: every node's files in one place
 export RCCL_TELEMETRY_SAMPLE_MS=10                # NIC counter time series
 export NCCL_NET=IB-CAST
-mpirun ... all_reduce_perf -b 1M -e 256M -f 2 -g 1 -n 50 -w 5
+mpirun ... all_reduce_perf -b 1M -e 256M -f 2 -g 1 -n 500 -w 5   # several seconds per size
 
 python3 accl_fabric_report.py report --accl /shared/run1 --telemetry /shared/run1
 python3 accl_fabric_report.py trace  --accl /shared/run1 --telemetry /shared/run1 -o run1.json

@@ -82,7 +82,7 @@ class CollRecord:
 
 
 def load_accl(path: str, warmup: int) -> Tuple[List[CollRecord], int]:
-    """Returns (records, number skipped because the plugin predates host_ts)."""
+    """Returns (records, number skipped for lacking usable host timing)."""
     files = [os.path.join(path, f) for f in sorted(os.listdir(path)) if f.endswith(".jsonl")] \
         if os.path.isdir(path) else [path]
     out, no_ts = [], 0
@@ -100,7 +100,11 @@ def load_accl(path: str, warmup: int) -> Tuple[List[CollRecord], int]:
                 if not cp or not hdr or cp.get("coll_sn", 0) < warmup:
                     continue
                 ts = cp.get("host_ts")
-                if not ts or "host" not in hdr:
+                # No host_ts: plugin predates this report. exec_start_us 0: no
+                # kernel or network activity was seen, so the record has no
+                # span; taking it as starting at 0 would stretch the group's
+                # busy time to the machine's uptime.
+                if not ts or "host" not in hdr or not 0 < ts.get("exec_start_us", 0) < ts.get("exec_end_us", 0):
                     no_ts += 1
                     continue
                 d = cp.get("decomposition", {})
@@ -194,6 +198,7 @@ class Device:
     link_gbps: float = 0.0
     series: SeriesMap = field(default_factory=SeriesMap)
     qos: Dict = field(default_factory=dict)   # DCB settings + RCCL's traffic class (telemetry "qos")
+    rx_merged: bool = False   # RCCL rx bytes pooled across a multi-NIC connection: not this NIC's own
 
 
 @dataclass
@@ -208,10 +213,11 @@ class Telemetry:
 
 
 def _series(samples, key, idx: Optional[int] = None) -> Optional[Series]:
-    """Every series here is a cumulative counter. A single sample lower than the
-    one before is a bad read and is dropped (Thor2 sysfs bytes have returned 0
-    between good readings); a drop that persists is a counter reset, and the
-    count carries on from where it was."""
+    """Every series here is a cumulative counter. A sample lower than the one
+    before is a bad read and is dropped when the counter later climbs back to
+    where it was (Thor2 sysfs bytes have returned 0 between good readings, more
+    than once in a row); a drop it never recovers from is a counter reset, and
+    the count carries on from where it was."""
     pts = []
     for t, v in zip(samples["ts_us"], samples.get(key, ())):
         if isinstance(v, list):
@@ -219,13 +225,16 @@ def _series(samples, key, idx: Optional[int] = None) -> Optional[Series]:
         if v is None or v < 0:
             continue  # -1 = counter not available on this NIC
         pts.append((t, float(v)))
+    # later_max[i]: highest raw value after sample i, -inf past the end.
+    later_max = [-math.inf] * len(pts)
+    for i in range(len(pts) - 2, -1, -1):
+        later_max[i] = max(later_max[i + 1], pts[i + 1][1])
     ts, vals, offset, resets = [], [], 0.0, 0
     for i, (t, v) in enumerate(pts):
         if vals and v + offset < vals[-1]:
             raw_last = vals[-1] - offset
-            nxt = pts[i + 1][1] if i + 1 < len(pts) else None
-            if nxt is None or nxt >= raw_last:
-                continue
+            if i == len(pts) - 1 or later_max[i] >= raw_last:
+                continue   # bad read: the counter comes back
             offset, resets = vals[-1], resets + 1
         ts.append(t)
         vals.append(v + offset)
@@ -266,7 +275,7 @@ def load_telemetry(path: str, wanted: Optional[Dict[Tuple[str, int], set]] = Non
             m = meta.get(dev_id, {})
             tel.devices[dev_id] = Device(dev_id, m.get("roce_device") or samples[0].get("roce_device", ""),
                                          m.get("hw_type", ""), float(m.get("link_gbps") or 0),
-                                         SeriesMap(cols), m.get("qos") or {})
+                                         SeriesMap(cols), m.get("qos") or {}, bool(m.get("rx_bytes_merged")))
         by_dev.clear()
         out[(tel.host, tel.pid)] = tel
     return out
@@ -367,23 +376,39 @@ def bound(ser: Optional[Series], spans: List[Tuple[int, int]], pad_us: float,
     return Bound(lb, ub, fill)
 
 
-def refresh_us(dev: Device, interval_us: float) -> float:
-    """How often this NIC's ethtool counters really change, measured on its byte
-    counter while RCCL was sending. Some drivers refresh far slower than the
-    sampler reads; a counter that steps once a second cannot be split finer."""
-    nic, sw = dev.series.get("nic_tx_bytes"), dev.series.get("tx_bytes")
-    if nic is None or sw is None or interval_us <= 0:
-        return interval_us
+def _rccl_moving(dev: Device) -> Optional[Tuple[int, int]]:
+    """First and last sample time at which RCCL's own byte count grew."""
+    sw = dev.series.get("tx_bytes")
+    if sw is None:
+        return None
     moving = [sw.ts[i] for i in range(1, len(sw.ts)) if sw.vals[i] > sw.vals[i - 1]]
-    if len(moving) < 5:
+    return (moving[0], moving[-1]) if len(moving) >= 5 else None
+
+
+def refresh_us(dev: Device, interval_us: float, key: str = "nic_tx_bytes") -> float:
+    """How often one counter really changes, measured while RCCL was sending.
+    Counter families refresh differently (ethtool vs IB sysfs, and per driver),
+    so each is measured on its own changes. A counter cannot change faster than
+    it refreshes, so a low gap between its changes bounds the refresh from
+    above. A counter that barely moved (pause on a quiet run) cannot be
+    measured; it gets the slowest refresh of this NIC's byte counters, which
+    only widens its ranges."""
+    if interval_us <= 0:
         return interval_us
-    t0, t1 = moving[0], moving[-1]
-    changes = [nic.ts[i] for i in range(1, len(nic.ts))
-               if nic.vals[i] > nic.vals[i - 1] and t0 <= nic.ts[i] <= t1]
-    if len(changes) < 3:
-        return max(interval_us, t1 - t0)   # effectively stale while RCCL sent
-    gaps = sorted(b - a for a, b in zip(changes, changes[1:]))
-    return max(interval_us, gaps[len(gaps) // 2])
+    win = _rccl_moving(dev)
+    ser = dev.series.get(key)
+    if win is None or ser is None:
+        return interval_us
+    t0, t1 = win
+    changes = [ser.ts[i] for i in range(1, len(ser.ts))
+               if ser.vals[i] > ser.vals[i - 1] and t0 <= ser.ts[i] <= t1]
+    if len(changes) >= 3:
+        gaps = sorted(b - a for a, b in zip(changes, changes[1:]))
+        return max(interval_us, gaps[len(gaps) // 10])
+    if key in ("nic_tx_bytes", "nic_rx_bytes"):
+        return max(interval_us, t1 - t0)   # a byte counter that stood still while RCCL sent: stale
+    refs = [refresh_us(dev, interval_us, k) for k in ("nic_tx_bytes", "nic_rx_bytes") if k in dev.series]
+    return max(refs) if refs else interval_us
 
 
 # ============================================================================
@@ -404,6 +429,11 @@ class Lane:
     pfc_config: Optional[List[int]] = None   # priorities with PFC on, from the NIC settings
     seen_pause: List[int] = field(default_factory=list)   # priorities that paused at all
     warnings: List[str] = field(default_factory=list)
+    # (host, pid, device_id) -> (priority, PFC off on it), decided NIC by NIC
+    per_dev: Dict[Tuple[str, int, int], Tuple[Optional[int], bool]] = field(default_factory=dict)
+
+    def prio_for(self, host: str, pid: int, dev_id: int) -> Optional[int]:
+        return self.per_dev.get((host, pid, dev_id), (self.prio, self.no_pfc))[0]
 
 
 def _sum_prio(tels, used, key, p):
@@ -432,8 +462,9 @@ def config_prio(q: Dict, hw_type: str = "") -> Tuple[Optional[int], str]:
     if not q:
         return None, "no NIC settings recorded (older telemetry)"
     if q.get("dcb") != "ok":
-        return None, ("the NIC driver does not expose its DCB settings" if q.get("dcb") == "unsupported"
-                      else "reading the NIC's DCB settings failed")
+        return None, {"unsupported": "the NIC driver does not expose its DCB settings",
+                      "not_read": "the NIC's DCB settings were not read (RCCL never used it)"}.get(
+                          q.get("dcb"), "reading the NIC's DCB settings failed")
     tc = q.get("traffic_class", -1)
     if tc is None or tc < 0:
         return None, "RCCL's traffic class was not recorded"
@@ -457,8 +488,8 @@ def config_prio(q: Dict, hw_type: str = "") -> Tuple[Optional[int], str]:
                   f"(SL {q.get('sl', '?')}) or a driver default applies")
 
 
-def pick_lane(tels: Dict[Tuple[str, int], Telemetry], used: Dict[Tuple[str, int], List[int]],
-              override: Optional[int] = None) -> Lane:
+def _pick(tels: Dict[Tuple[str, int], Telemetry], used: Dict[Tuple[str, int], List[int]],
+          override: Optional[int] = None) -> Lane:
     nbytes = [sum(_sum_prio(tels, used, k, p)[0] for k in ("prio_tx_bytes", "prio_rx_bytes"))
               for p in range(NUM_PFC_PRIO)]
     pause, seen, seen_p = [], False, []
@@ -483,7 +514,7 @@ def pick_lane(tels: Dict[Tuple[str, int], Telemetry], used: Dict[Tuple[str, int]
     if override is not None:
         prio, source, why = override, "given", "--pfc-prio"
     elif len(cfg_prio) == 1 and None not in cfg_prio:
-        prio, source, why = cfg_prio.pop(), "config", next(iter(cfg))[1]
+        prio, source, why = cfg_prio.pop(), "config", min(w for _, w in cfg)   # stable across runs
         # Byte counters include other traffic (storage, CNPs), so the busiest
         # priority need not be RCCL's. Only a configured priority that carried
         # almost nothing is overruled.
@@ -516,6 +547,33 @@ def pick_lane(tels: Dict[Tuple[str, int], Telemetry], used: Dict[Tuple[str, int]
     return Lane(prio, source, share, other, all_zero=seen and not any(pause), no_pfc=no_pfc,
                 why=why, warnings=warnings, sent_with=sent_with, seen_pause=seen_pause,
                 pfc_config=list(pfcs.pop()) if len(pfcs) == 1 else None)
+
+
+def pick_lane(tels: Dict[Tuple[str, int], Telemetry], used: Dict[Tuple[str, int], List[int]],
+              override: Optional[int] = None) -> Lane:
+    """RCCL's PFC priority, decided per NIC: NICs can be set up differently.
+    The job-level fields hold when every NIC agrees; otherwise prio is None,
+    source is "per-nic", and lane.prio_for() gives each NIC's own."""
+    job = _pick(tels, used, override)
+    per = {(k[0], k[1], d): _pick(tels, {k: [d]}, override) for k, ds in used.items() for d in ds}
+    job.per_dev = {key: (ln.prio, ln.no_pfc) for key, ln in per.items()}
+    prios = {ln.prio for ln in per.values()}
+    if len(prios) == 1:
+        p = prios.pop()
+        first = next(iter(per.values()))
+        if p != job.prio and p is not None:
+            # The job-wide byte majority can differ from what every NIC says;
+            # recompute every job-level field for the NICs' priority.
+            per_dev = job.per_dev
+            job = _pick(tels, used, p)
+            job.per_dev, job.source, job.why = per_dev, first.source, first.why
+        job.no_pfc = all(ln.no_pfc for ln in per.values())
+    elif len(per) > 1:
+        job.prio, job.source, job.no_pfc = None, "per-nic", False
+        job.why = "; ".join(f"{h.split('.')[0]} dev {d}: " + (f"priority {ln.prio} ({ln.why})" if ln.prio is not None
+                                                               else f"unknown ({ln.why})")
+                            for (h, _, d), ln in sorted(per.items()))
+    return job
 
 
 def pause_unit(dev: Device, prio: int) -> Optional[str]:
@@ -593,6 +651,11 @@ class GroupResult:
     # collective's on the same process; their per-collective bytes are shared.
     overlap_pct: float = 0.0
     spans: List[Tuple[int, int]] = field(default_factory=list)
+    # Kept apart so sequential communicators or an algorithm/protocol switch at
+    # one size are not merged into one row.
+    comm: str = ""
+    algo: str = ""
+    proto: str = ""
 
 
 def _level(lb: float, ub: float, thr: float, strict: bool = False) -> Optional[str]:
@@ -636,16 +699,17 @@ def analyze(recs: List[CollRecord], tels: Dict[Tuple[str, int], Telemetry],
         overlapped = _overlapping_windows(proc_recs)
         groups = defaultdict(list)
         for r in proc_recs:
-            groups[(r.rec.coll, r.rec.msg_size)].append(r)
+            groups[(r.rec.coll, r.rec.msg_size, r.comm_hash, r.rec.algo, r.rec.proto)].append(r)
         interval = (tel.sample_interval_ms * 1000.0) if tel else 0.0
 
-        for (coll, size), g in sorted(groups.items()):
+        for (coll, size, comm, algo, proto), g in sorted(groups.items()):
             spans = union([(r.exec_start_us, r.exec_end_us) for r in g])
             busy = float(sum(b - a for a, b in spans))
             agg = accl_report.aggregate([r.rec for r in g])[(coll, size)]
             gr = GroupResult(host=key[0], pid=key[1], rank=g[0].rank, coll=coll, msg_size=size,
                              n=len(g), busy_us=busy, mean_busbw=agg.mean_busbw,
-                             accl_class=accl_report.classify_bottleneck(agg), nics=[], spans=spans)
+                             accl_class=accl_report.classify_bottleneck(agg), nics=[], spans=spans,
+                             comm=comm, algo=algo, proto=proto)
             with_win = [r for r in g if r.net_start_us]
             if with_win:
                 gr.overlap_pct = 100.0 * sum(id(r) in overlapped for r in with_win) / len(with_win)
@@ -657,7 +721,8 @@ def analyze(recs: List[CollRecord], tels: Dict[Tuple[str, int], Telemetry],
                 gr.nics.append(_nic_stats(tel.devices[dev_id], g, spans, busy, interval,
                                           lane, thr, tels, key[0], gr))
             gr.verdict = _rank_verdict(gr)
-            if lane.prio is None and lane.source == "unknown" and gr.verdict.startswith("CLEAN"):
+            unjudged = lane.source != "none" and any(lane.prio_for(key[0], key[1], d) is None for d in used)
+            if unjudged and gr.verdict.startswith("CLEAN"):
                 gr.verdict = gr.verdict.replace("CLEAN (", "CLEAN (pause not judged; ", 1)
             results.append(gr)
     tag_echo(results)
@@ -666,9 +731,16 @@ def analyze(recs: List[CollRecord], tels: Dict[Tuple[str, int], Telemetry],
 
 def _nic_stats(dev, g, spans, busy, interval, lane, thr, tels, host, gr) -> NicStats:
     s = dev.series
-    pad = refresh_us(dev, interval)
-    pad = pad if pad > 1.5 * interval else 0.0
-    unit = pause_unit(dev, lane.prio) if lane.prio is not None else None
+    pads: Dict[str, float] = {}
+
+    def pad_of(key: str) -> float:
+        """Window padding for one counter: its own refresh lag, if slower than sampling."""
+        if key not in pads:
+            r = refresh_us(dev, interval, key)
+            pads[key] = r if r > 1.5 * interval else 0.0
+        return pads[key]
+    prio = lane.prio_for(host, gr.pid, dev.device_id)
+    unit = pause_unit(dev, prio) if prio is not None else None
     ns = NicStats(roce=dev.roce or f"dev{dev.device_id}", unit="%" if unit else None,
                   frames_only=unit == "frames")
     busy_s = busy / 1e6
@@ -682,7 +754,8 @@ def _nic_stats(dev, g, spans, busy, interval, lane, thr, tels, host, gr) -> NicS
         max_us = PAUSE_QUANTA_BITS / (dev.link_gbps * 1e3) if dev.link_gbps else INF
         for direction, name, what in (("rx", "FABRIC-CONGESTION", "switch paused our transmit"),
                                       ("tx", "HOST-BACKPRESSURE", "our NIC paused the switch")):
-            b = bound(s.get(f"pfc_{direction}_{k}[{lane.prio}]"), spans, pad, unit == "time")
+            key = f"pfc_{direction}_{k}[{prio}]"
+            b = bound(s.get(key), spans, pad_of(key), unit == "time")
             if b is None:
                 continue
             if unit == "time":
@@ -705,7 +778,7 @@ def _nic_stats(dev, g, spans, busy, interval, lane, thr, tels, host, gr) -> NicS
     # Loss and receiver-not-ready events: any is worth reporting.
     for attr, keys, name, what in (("loss", LOSS_FABRIC, "FABRIC-LOSS", "drops/NAKs/timeouts"),
                                    ("rnr", LOSS_HOST, "HOST-RNR", "receiver-not-ready events")):
-        bs = [bound(s.get(k), spans, pad, False) for k in keys]
+        bs = [bound(s.get(k), spans, pad_of(k), False) for k in keys]
         bs = [b for b in bs if b is not None]
         if not bs:
             continue
@@ -721,12 +794,13 @@ def _nic_stats(dev, g, spans, busy, interval, lane, thr, tels, host, gr) -> NicS
     # every few tens of us, however many marks arrive, so their share of packets
     # stays far below 1% even when a flow is slowed the whole time.
     lvls = []
-    bm, bp = bound(s.get("ecn_marked_pkts"), spans, pad, False), bound(s.get("nic_rx_packets"), spans, pad, False)
+    bm = bound(s.get("ecn_marked_pkts"), spans, pad_of("ecn_marked_pkts"), False)
+    bp = bound(s.get("nic_rx_packets"), spans, pad_of("nic_rx_packets"), False)
     if bm is not None and bp is not None and bp.ub not in (0, INF):
         ns.ecn_pct = (100.0 * bm.lb / bp.ub,
-                      INF if bm.ub == INF or bp.lb == 0 else 100.0 * bm.ub / bp.lb)
+                      0.0 if bm.ub == 0 else INF if bm.ub == INF or bp.lb == 0 else 100.0 * bm.ub / bp.lb)
         lvls.append((_level(*ns.ecn_pct, thr.ecn_pct), f"{_fmt_range(ns.ecn_pct, '%')} of packets ECN-marked"))
-    bs = [b for b in (bound(s.get(k), spans, pad, False) for k in ("cnp_sent", "cnp_rcvd")) if b is not None]
+    bs = [b for b in (bound(s.get(k), spans, pad_of(k), False) for k in ("cnp_sent", "cnp_rcvd")) if b is not None]
     if bs and busy > 0:
         tot = Bound(sum(b.lb for b in bs), INF if any(b.ub == INF for b in bs) else sum(b.ub for b in bs),
                     min(b.fill for b in bs))
@@ -741,7 +815,9 @@ def _nic_stats(dev, g, spans, busy, interval, lane, thr, tels, host, gr) -> NicS
     if busy > 0:
         stale = False
         best = None
-        for d in ("tx", "rx"):
+        # RCCL's rx bytes on a multi-NIC connection all land on its first NIC,
+        # so on such NICs only the send direction can say how much was RCCL's.
+        for d in (("tx",) if dev.rx_merged else ("tx", "rx")):
             nic, sw = s.get(f"nic_{d}_bytes"), s.get(f"{d}_bytes")
             if nic is None:
                 continue
@@ -762,7 +838,8 @@ def _nic_stats(dev, g, spans, busy, interval, lane, thr, tels, host, gr) -> NicS
             if best[0] >= thr.link_busy_pct and other >= thr.link_other_pct:
                 # Rates over many counter refreshes are firm; over a few, rough.
                 ns.findings.append(Finding(
-                    "LINK-SHARED", "yes" if busy >= 5 * max(pad, interval) else "maybe",
+                    "LINK-SHARED", "yes" if busy >= 5 * max(pad_of("nic_tx_bytes"), pad_of("nic_rx_bytes"),
+                                                            interval) else "maybe",
                     f"link {best[0]:.0f}% busy, RCCL {best[1]:.0f}% of it"))
 
     # Per-collective RCCL bytes and completion latency, exact from accl.
@@ -836,10 +913,12 @@ def _pushback(gs: List[GroupResult]) -> List[Tuple[int, str, Optional[str], Tupl
             if ns.tx_pause and (ns.tx_pause[1] == INF or ns.tx_pause[1] > 0)]
 
 
-def _by_size(results: List[GroupResult]) -> Dict[Tuple[str, int], List[GroupResult]]:
+def _by_size(results: List[GroupResult]) -> Dict[Tuple[str, int, str, str, str], List[GroupResult]]:
+    """All ranks' groups of one collective instance: same size, communicator,
+    algorithm and protocol."""
     by = defaultdict(list)
     for g in results:
-        by[(g.coll, g.msg_size)].append(g)
+        by[(g.coll, g.msg_size, g.comm, g.algo, g.proto)].append(g)
     return by
 
 
@@ -997,8 +1076,8 @@ def fmt_quantile(v: Optional[float]) -> str:
 def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_nic: bool,
                  warnings: List[str]):
     hosts = {r.host for r in results}
-    ranks = {(r.host, r.rank) for r in results}
-    print(f"ACCL fabric report: {len(ranks)} rank(s) on {len(hosts)} host(s)")
+    procs = {(r.host, r.pid) for r in results}
+    print(f"ACCL fabric report: {len(procs)} process(es) on {len(hosts)} host(s)")
     if lane.sent_with:
         print(f"RCCL sends with {lane.sent_with}")
     if lane.pfc_config is not None:
@@ -1009,6 +1088,8 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
         if lane.seen_pause:
             print("  Pause was seen on priorities " + ", ".join(map(str, lane.seen_pause)) +
                   "; whether any is RCCL's is not known.")
+    elif lane.source == "per-nic":
+        print("PFC priority differs by NIC: " + lane.why)
     elif lane.prio is None:
         print("PFC: these NICs report no PFC counters")
     elif lane.source == "traffic":
@@ -1031,7 +1112,7 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
     print("  rxPause = switch paused our transmit   txPause = our NIC paused the switch")
     print("  a-b = at least a, at most b (counters are sampled, not continuous)\n")
 
-    hdr = (f"{'Coll':<12} {'Size':>5} {'Rank':>4} {'Host':<14} {'N':>4} {'wall ms':>8} "
+    hdr = (f"{'Coll':<12} {'Size':>5} {'Rank':>4} {'Host':<20} {'N':>4} {'wall ms':>8} "
            f"{'busBW':>6} {'NIC':<10} {'rxPause':>10} {'txPause':>10} {'loss':>6} {'rnr':>5} "
            f"{'ecn%':>9} {'cnp/s':>11} {'link%':>5} {'rccl%':>5} {'B/coll':>8} {'cmpl p50/p99':>13}  Verdict")
     print(hdr)
@@ -1039,7 +1120,7 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
     for g in sorted(results, key=lambda r: (r.coll, r.msg_size, r.host, r.rank)):
         nics = g.nics if per_nic else sorted(g.nics, key=lambda n: -len(n.findings))[:1]
         first = (f"{g.coll[:12]:<12} {accl_report.fmt_size(g.msg_size):>5} {g.rank:>4} "
-                 f"{g.host.split('.')[0][:14]:<14} {g.n:>4} {g.busy_us / 1000:>8.2f} {g.mean_busbw:>6.1f}")
+                 f"{g.host.split('.')[0][-20:]:<20} {g.n:>4} {g.busy_us / 1000:>8.2f} {g.mean_busbw:>6.1f}")
         if not nics:
             print(f"{first} {'-':<10}  {g.verdict}")
             continue
@@ -1058,8 +1139,15 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
                   f"{p50 + '/' + p99:>13}  {g.verdict if i == 0 else ''}")
 
     print("\nSummary per collective and size (all ranks):")
-    for (coll, size), msg in sorted(job_summary(results, lane, thr).items()):
-        print(f"  {coll} {accl_report.fmt_size(size)}: {msg}")
+    summary = job_summary(results, lane, thr)
+    variants = defaultdict(int)
+    for coll, size, *_ in summary:
+        variants[(coll, size)] += 1
+    for (coll, size, comm, algo, proto), msg in sorted(summary.items()):
+        label = f"{coll} {accl_report.fmt_size(size)}"
+        if variants[(coll, size)] > 1:   # name what tells them apart
+            label += f" ({algo}/{proto}, comm {comm})"
+        print(f"  {label}: {msg}")
 
     print("\nFindings:")
     print("  FABRIC-CONGESTION  switch paused our transmit; can be backpressure from a receiver,")
@@ -1176,7 +1264,12 @@ def write_trace(recs: List[CollRecord], tels: Dict[Tuple[str, int], Telemetry],
     for r in recs:
         if r.exec_start_us and r.exec_end_us > r.exec_start_us:
             by_proc[(r.host, r.pid)].append(r)
-    procs = sorted({(r.host, r.pid, r.rank) for r in recs})
+    # One track per process: a process in several communicators has a rank in
+    # each, so it is named by its lowest one.
+    lowest = {}
+    for r in recs:
+        lowest[(r.host, r.pid)] = min(lowest.get((r.host, r.pid), r.rank), r.rank)
+    procs = sorted((h, p, rk) for (h, p), rk in lowest.items())
     pid_of = {}
     for i, (host, pid, rank) in enumerate(procs, start=1):
         pid_of[(host, pid)] = i
@@ -1247,15 +1340,16 @@ def write_trace(recs: List[CollRecord], tels: Dict[Tuple[str, int], Telemetry],
                                        "args": {label: round(ser.delta(a, b) / (b - a) * scale, 4)
                                                 for label, ser in have}})
 
-            unit = pause_unit(dev, lane.prio) if lane.prio is not None else None
+            prio = lane.prio_for(host, pid, dev.device_id)
+            unit = pause_unit(dev, prio) if prio is not None else None
             if unit == "time":
-                rate_track(f"PFC pause % (prio {lane.prio})",
-                           [("rx: switch paused us", f"pfc_rx_pause_us[{lane.prio}]"),
-                            ("tx: we paused switch", f"pfc_tx_pause_us[{lane.prio}]")], 100.0)
+                rate_track(f"PFC pause % (prio {prio})",
+                           [("rx: switch paused us", f"pfc_rx_pause_us[{prio}]"),
+                            ("tx: we paused switch", f"pfc_tx_pause_us[{prio}]")], 100.0)
             if unit is not None:
-                rate_track(f"PFC pause frames/s (prio {lane.prio})",
-                           [("rx: from switch", f"pfc_rx_frames[{lane.prio}]"),
-                            ("tx: to switch", f"pfc_tx_frames[{lane.prio}]")], 1e6)
+                rate_track(f"PFC pause frames/s (prio {prio})",
+                           [("rx: from switch", f"pfc_rx_frames[{prio}]"),
+                            ("tx: to switch", f"pfc_tx_frames[{prio}]")], 1e6)
             rate_track("NIC GB/s (all port traffic)", [("tx", "nic_tx_bytes"), ("rx", "nic_rx_bytes")], 1e6 / 1e9)
             rate_track("RCCL GB/s", [("tx", "tx_bytes"), ("rx", "rx_bytes")], 1e6 / 1e9, hw=False)
             rate_track("ECN/CNP per ms", [("ecn marked", "ecn_marked_pkts"),
@@ -1298,8 +1392,8 @@ def load(args):
     warnings = []
     recs, no_ts = load_accl(args.accl, args.warmup)
     if no_ts:
-        warnings.append(f"{no_ts} accl record(s) have no host_ts (plugin built before this report); "
-                        "they are ignored.")
+        warnings.append(f"{no_ts} accl record(s) have no usable host timing and are ignored: either no "
+                        "host_ts (plugin built before this report) or no kernel or network activity was seen.")
     if not recs:
         sys.exit("No usable accl records found in " + args.accl)
     # Processes whose records name their NICs only need those NICs' samples.

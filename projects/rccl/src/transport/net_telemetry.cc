@@ -319,7 +319,7 @@ static double        rcclTelemetryLinkGbps[RCCL_TELEMETRY_MAX_DEVS];
  * which priority RCCL's packets ride and whether PFC protects it. */
 #define RCCL_TEL_MAX_DCB_APPS 256   /* mlx5 in DSCP trust lists all 64 DSCPs, plus others */
 typedef struct {
-  int dcb;                       /* 1 read, 0 not supported by the driver, -1 failed */
+  int dcb;                       /* 1 read, 0 not supported by the driver, -1 failed, -2 not read yet */
   int pfc_en;                    /* bit p set: PFC on priority p */
   int napp;
   int app_truncated;             /* the NIC had more app entries than fit */
@@ -357,6 +357,7 @@ typedef struct {
   enum RcclHwcSource source;       /* where to read the counter from */
   const char*        key;          /* primary source-specific identifier */
   const char*        key_fallback; /* optional fallback if primary read is N/A */
+  const char*        key_fallback2; /* IB sysfs only: a third name for drivers that renamed it again */
 } RcclHwCounterDesc;
 
 typedef struct {
@@ -394,8 +395,9 @@ typedef struct {
 } RcclHwConfig;
 
 /* Helpers for building counter tables without per-row boilerplate. */
-#define HWC(json, src, key)            { (json), (src), (key), NULL }
-#define HWC_FB(json, src, key, fb)     { (json), (src), (key), (fb) }
+#define HWC(json, src, key)            { (json), (src), (key), NULL, NULL }
+#define HWC_FB(json, src, key, fb)     { (json), (src), (key), (fb), NULL }
+#define HWC_FB2(json, key, fb, fb2)    { (json), HWC_IB_SYSFS, (key), (fb), (fb2) }
 
 #define RCCL_TEL_HW_TABLE_SIZE(tbl) ((int)(sizeof(tbl) / sizeof((tbl)[0])))
 
@@ -606,18 +608,18 @@ static const RcclHwCounterDesc rcclHwcThor2[] = {
   /* --- Canonical cross-driver counters (shared json_name, bnxt_re sysfs key) --- */
   /* ECN / congestion notification (primary congestion signals) */
   HWC_FB("ecn_marked_pkts",         HWC_IB_SYSFS, "rx_ecn_marked_pkts", "np_ecn_marked_roce_packets"),
-  HWC_FB("cnp_sent",                HWC_IB_SYSFS, "tx_cnp_pkts", "np_cnp_sent"),
+  HWC_FB2("cnp_sent",               "tx_cnp_pkts", "np_cnp_sent", "np_cnp_pkts"),
   HWC_FB("cnp_handled",             HWC_IB_SYSFS, "rx_cnp_pkts", "rp_cnp_handled"),
   HWC("cnp_ignored",                HWC_IB_SYSFS, "rp_cnp_ignored"),
   HWC_FB("out_of_buffer",           HWC_IB_SYSFS, "rx_out_of_buffer", "out_of_buffer"),
 
   /* Retransmits / timeouts / out-of-sequence (congestion under load) */
   HWC("to_retransmits",             HWC_IB_SYSFS, "to_retransmits"),
-  HWC("seq_err_naks_rcvd",          HWC_IB_SYSFS, "seq_err_naks_rcvd"),
-  HWC("rnr_retry_err",              HWC_IB_SYSFS, "rnr_naks_rcvd"),
+  HWC_FB("seq_err_naks_rcvd",       HWC_IB_SYSFS, "seq_err_naks_rcvd", "packet_seq_err"),
+  HWC_FB("rnr_retry_err",           HWC_IB_SYSFS, "rnr_naks_rcvd", "rnr_nak_retry_err"),
   HWC("max_retry_exceeded",         HWC_IB_SYSFS, "max_retry_exceeded"),
   HWC("local_ack_timeout_err",      HWC_IB_SYSFS, "local_ack_timeout_err"),
-  HWC_FB("oos_drop_count",          HWC_IB_SYSFS, "res_oos_drop_count", "oos_drop_count"),
+  HWC_FB2("oos_drop_count",         "res_oos_drop_count", "oos_drop_count", "out_of_sequence"),
   HWC("dup_req",                    HWC_IB_SYSFS, "dup_req"),
   HWC("missing_resp",               HWC_IB_SYSFS, "missing_resp"),
 
@@ -1191,9 +1193,7 @@ int rcclTelemetryRegisterDevice(int device_id, const char* roce_device, const ch
   rcclTelemetryGetDriverName(dev->roce_device, driver_name, sizeof(driver_name));
   dev->hw_config = rcclTelemetryResolveHw(driver_name);
   rcclTelemetryLinkGbps[idx] = rcclTelemetryReadLinkGbps(dev->roce_device);
-  rcclTelemetryQos[idx].dcb = rcclTelemetryReadDcb(dev->eth_device, &rcclTelemetryQos[idx].pfc_en,
-                                                    rcclTelemetryQos[idx].app, &rcclTelemetryQos[idx].napp,
-                                                    &rcclTelemetryQos[idx].app_truncated);
+  rcclTelemetryQos[idx].dcb = -2;   /* read on first use, with the baseline */
 
   /* No baseline yet — it is captured on first use (see snap_taken). Until then
    * every HW counter and delta reads as -1/N/A rather than as a value that
@@ -1382,6 +1382,10 @@ static void rcclTelemetryEnsureSnapshot(int devIdx) {
    * the write below, so every access to snap_taken goes through __atomic_*. */
   if (!__atomic_load_n(&dev->snap_taken, __ATOMIC_ACQUIRE)) {
     rcclTelemetrySnapshotInit(dev);
+    /* The PFC settings too: a netlink round trip per NIC, so only for the
+     * NICs this rank drives. */
+    RcclTelQos* q = &rcclTelemetryQos[devIdx];
+    q->dcb = rcclTelemetryReadDcb(dev->eth_device, &q->pfc_en, q->app, &q->napp, &q->app_truncated);
     /* Release store: a flush that sees the flag also sees the baseline. */
     __atomic_store_n(&dev->snap_taken, 1, __ATOMIC_RELEASE);
   }
@@ -1418,6 +1422,8 @@ static void rcclTelemetryReadCounters(RcclDeviceStats* dev, int64_t* hwc,
       int64_t v = rcclTelemetryReadHwCounter(dev->roce_device, d->key);
       if (v < 0 && d->key_fallback != NULL)
         v = rcclTelemetryReadHwCounter(dev->roce_device, d->key_fallback);
+      if (v < 0 && d->key_fallback2 != NULL)
+        v = rcclTelemetryReadHwCounter(dev->roce_device, d->key_fallback2);
       hwc[c] = v;
     }
   }
@@ -1595,6 +1601,7 @@ static int64_t rcclTelemetryReadHwCounter(const char* roce_device, const char* c
 static int64_t rcclTelemetrySampleRow(const RcclDeviceStats* dev, const RcclHwCounterDesc* d) {
   int64_t v = rcclTelemetryReadHwCounter(dev->roce_device, d->key);
   if (v < 0 && d->key_fallback != NULL) v = rcclTelemetryReadHwCounter(dev->roce_device, d->key_fallback);
+  if (v < 0 && d->key_fallback2 != NULL) v = rcclTelemetryReadHwCounter(dev->roce_device, d->key_fallback2);
   return v;
 }
 
@@ -1776,14 +1783,9 @@ static void rcclTelSamplerReadEthtool(RcclTelSamplerEthtool* e, const RcclDevice
   if (e->state == 0) rcclTelSamplerEthtoolResolve(e, dev, hw);
   if (e->state != 1) return;
 
-  unsigned int n = 0;
-  if (rcclTelSamplerEthtoolNumStats(e, dev->eth_device, &n) != 0) return;
-  if (n != e->n_stats) {
-    /* Stat set changed; indices are stale. Rebuild on the next sample. */
-    e->state = 0;
-    return;
-  }
-
+  /* One ioctl per sample. The kernel writes the driver's current stat count
+   * back into n_stats (and that many values, hence the buffer's slack), so a
+   * changed stat set shows up in the reply itself. */
   struct ifreq ifr;
   memset(&ifr, 0, sizeof(ifr));
   memcpy(ifr.ifr_name, dev->eth_device, strlen(dev->eth_device));
@@ -1791,6 +1793,11 @@ static void rcclTelSamplerReadEthtool(RcclTelSamplerEthtool* e, const RcclDevice
   e->stats->n_stats = e->n_stats;
   ifr.ifr_data = (char*)e->stats;
   if (ioctl(e->fd, SIOCETHTOOL, &ifr) != 0) return;
+  if (e->stats->n_stats != e->n_stats) {
+    /* Stat set changed; indices are stale. Rebuild on the next sample. */
+    e->state = 0;
+    return;
+  }
 
   for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++) {
     if (e->pfc_rx_idx[p] >= 0) smp->pfc_rx_pause_us[p] = (int64_t)e->stats->data[e->pfc_rx_idx[p]];
@@ -1821,7 +1828,6 @@ static void* rcclTelemetrySamplerMain(void* arg) {
   int warned[RCCL_TEL_NUM_SAMPLED] = {0};
 
   while (!__atomic_load_n(&rcclTelemetrySamplerStopFlag, __ATOMIC_ACQUIRE)) {
-    int64_t ts_us = rcclTelemetryGetNs() / 1000;
     int nd = __atomic_load_n(&rcclTelemetryNumDevs, __ATOMIC_ACQUIRE);
     if (nd > RCCL_TELEMETRY_MAX_DEVS) nd = RCCL_TELEMETRY_MAX_DEVS;
 
@@ -1841,7 +1847,8 @@ static void* rcclTelemetrySamplerMain(void* arg) {
       }
       RcclHwSample* smp = &rcclTelemetrySamples[s];
 
-      smp->ts_us    = ts_us;
+      /* Per device, not per round: reading the NICs before this one takes time. */
+      smp->ts_us    = rcclTelemetryGetNs() / 1000;
       smp->dev_idx  = i;
       smp->tx_bytes = __atomic_load_n(&dev->tx_bytes, __ATOMIC_RELAXED);
       smp->rx_bytes = __atomic_load_n(&dev->rx_bytes, __ATOMIC_RELAXED);
@@ -2071,13 +2078,16 @@ static void rcclTelemetryWriteJson(FILE* fp) {
     fprintf(fp, "      \"hw_type\": \"%s\",\n",
             dev->hw_config ? ((const RcclHwConfig*)dev->hw_config)->name : "unsupported");
     fprintf(fp, "      \"link_gbps\": %g,\n", rcclTelemetryLinkGbps[d]);
+    if (__atomic_load_n(&dev->rx_bytes_merged, __ATOMIC_RELAXED))
+      fprintf(fp, "      \"rx_bytes_merged\": true,\n");
     {
       const RcclTelQos* q = &rcclTelemetryQos[d];
       static const char* const sel[] = {"0", "ethertype", "stream", "dgram", "any", "dscp"};
       int tc, sl, mixed;
       rcclTelemetryGetTrafficClass(d, &tc, &sl, &mixed);
       fprintf(fp, "      \"qos\": {\"dcb\": \"%s\", \"traffic_class\": %d, \"sl\": %d, \"traffic_class_mixed\": %s",
-              q->dcb == 1 ? "ok" : q->dcb == 0 ? "unsupported" : "error", tc, sl, mixed ? "true" : "false");
+              q->dcb == 1 ? "ok" : q->dcb == 0 ? "unsupported" : q->dcb == -2 ? "not_read" : "error",
+              tc, sl, mixed ? "true" : "false");
       if (q->dcb == 1) {
         fprintf(fp, ", \"pfc_enabled\": [");
         for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++) fprintf(fp, "%s%d", p ? ", " : "", (q->pfc_en >> p) & 1);

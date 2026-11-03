@@ -1182,23 +1182,34 @@ static void testThor2SysfsNames(void) {
     {"np_cnp_sent", 0, 11},         {"rp_cnp_handled", 0, 12},     {"out_of_buffer", 0, 13},
     {"rx_errors", 0, 14},           {"res_mem_error", 0, 15},
   };
+  /* brcmrdma24 / FW 232.0.219.0 (ruby, 2026-11-03): renamed again. */
+  const std::vector<FakeCtr> b24 = {
+    {"np_cnp_pkts", 0, 21},         {"rp_cnp_handled", 0, 22},     {"np_ecn_marked_roce_packets", 0, 23},
+    {"packet_seq_err", 0, 24},      {"rnr_nak_retry_err", 0, 25},  {"out_of_sequence", 0, 26},
+    {"local_ack_timeout_err", 0, 27},
+  };
   const std::string hwc0 = makeFakeBnxt(r, "bnxt_re0", cur);
   const std::string hwc1 = makeFakeBnxt(r, "bnxt_re1", old);
+  const std::string hwc2 = makeFakeBnxt(r, "bnxt_re2", b24);
 
   rcclTelemetrySysRoot = root.data();
   std::snprintf(rcclTelemetryCfg.output_dir, sizeof(rcclTelemetryCfg.output_dir), "%s/out", root.data());
   rcclTelemetryCfg.hw_counter_list[0] = '\0';
   CHECK_EQ(rcclTelemetryRegisterDevice(0, "bnxt_re0", "IB-CAST"), 0);
   CHECK_EQ(rcclTelemetryRegisterDevice(1, "bnxt_re1", "IB-CAST"), 1);
+  CHECK_EQ(rcclTelemetryRegisterDevice(2, "bnxt_re2", "IB-CAST"), 2);
   CHECK(std::strcmp(rcclTelemetryDevs[0].eth_device, "telfake0") == 0);
   int numSlots = 0;
   CHECK_EQ(rcclTelemetrySetupChannel(0, 0, 1, &numSlots), 0); /* takes the baseline */
   CHECK_EQ(rcclTelemetrySetupChannel(1, 0, 1, &numSlots), 0);
+  CHECK_EQ(rcclTelemetrySetupChannel(2, 0, 1, &numSlots), 0);
   rcclTelemetryBytes(0, 1, 4096);
   rcclTelemetryBytes(1, 1, 4096);
+  rcclTelemetryBytes(2, 1, 4096);
 
   for (const FakeCtr& c : cur) writeFile(hwc0 + c.key, std::to_string(c.fin));
   for (const FakeCtr& c : old) writeFile(hwc1 + c.key, std::to_string(c.fin));
+  for (const FakeCtr& c : b24) writeFile(hwc2 + c.key, std::to_string(c.fin));
   CHECK_EQ(rcclTelemetryFlush(), 0);
 
   char host[HOST_NAME_MAX + 1];
@@ -1240,6 +1251,15 @@ static void testThor2SysfsNames(void) {
   CHECK_EQ(jsonInt(d1, "out_of_buffer"), 13);
   CHECK_EQ(jsonInt(d1, "rx_errors"), 14);
   CHECK_EQ(jsonInt(d1, "res_mem_error"), 15);
+
+  const std::string d2 = jsonDevice(json, "bnxt_re2");
+  CHECK_EQ(jsonInt(d2, "cnp_sent"), 21);               /* second fallback */
+  CHECK_EQ(jsonInt(d2, "cnp_handled"), 22);
+  CHECK_EQ(jsonInt(d2, "ecn_marked_pkts"), 23);
+  CHECK_EQ(jsonInt(d2, "seq_err_naks_rcvd"), 24);
+  CHECK_EQ(jsonInt(d2, "rnr_retry_err"), 25);
+  CHECK_EQ(jsonInt(d2, "oos_drop_count"), 26);         /* second fallback */
+  CHECK_EQ(jsonInt(d2, "local_ack_timeout_err"), 27);
   rcclTelemetrySysRoot = "/sys";
   std::filesystem::remove_all(r);
 }

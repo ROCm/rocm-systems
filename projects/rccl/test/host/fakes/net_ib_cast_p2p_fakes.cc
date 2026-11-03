@@ -22,10 +22,10 @@ int64_t rcclParamIbCastGdrFlushGpuMemNoRelaxedOrdering() {
   return g_loadParam("RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING", 1);
 }
 
-static ncclResult_t DefaultIbCastMultiSend(struct ncclIbSendComm*, int, int, int, bool, bool) {
+static ncclResult_t DefaultIbCastMultiSend(struct ncclIbSendComm*, int, int, int, bool, bool, bool) {
   FailLoudUnfaked("net_ib_cast_p2p_fakes", "IbCastMultiSend");
 }
-std::function<ncclResult_t(struct ncclIbSendComm*, int, int, int, bool, bool)> g_ibCastMultiSend =
+std::function<ncclResult_t(struct ncclIbSendComm*, int, int, int, bool, bool, bool)> g_ibCastMultiSend =
     DefaultIbCastMultiSend;
 
 static ncclResult_t DefaultIbCastPostFifo(struct ncclIbRecvComm*, struct ncclIbRequest*, int, int) {
@@ -82,8 +82,8 @@ ASSERT_HOOK_MATCHES_PROD(g_ibCastIflush, IbCastIflush);
 ASSERT_HOOK_MATCHES_PROD(g_ibCastTest, IbCastTest);
 
 ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, int startQpIndex, bool wrrSched,
-                             bool useWriteOp) {
-  return g_ibCastMultiSend(comm, slot, nqps, startQpIndex, wrrSched, useWriteOp);
+                             bool useWriteOp, bool countTx) {
+  return g_ibCastMultiSend(comm, slot, nqps, startQpIndex, wrrSched, useWriteOp, countTx);
 }
 ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* req, int slot, int n) {
   return g_ibCastPostFifo(comm, req, slot, n);

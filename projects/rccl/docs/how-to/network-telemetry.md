@@ -105,7 +105,13 @@ traffic rides.
 ```
 
 `pfc_enabled` and `app` come from one unprivileged IEEE DCB read of the netdev
-at registration, the same request `dcb pfc show` and `dcb app show` make. Up
+when RCCL first uses the NIC, the same request `dcb pfc show` and `dcb app show`
+make. `"dcb": "not_read"` means RCCL never used that NIC.
+
+A device that carried a receive on a connection spread over several NICs
+carries `"rx_bytes_merged": true`: such receives are all charged to the
+connection's first NIC, so this NIC's `rx_bytes` is not its own traffic.
+Sent bytes are always charged to the NIC that sent them. Up
 to 256 app entries are kept; `"app_truncated": true` says some were not.
 
 The top level also carries `clock` (`"CLOCK_MONOTONIC"`, the clock of every
@@ -120,14 +126,18 @@ Each `hw_samples` entry holds absolute (not delta) values for one device:
  "tx_bytes": ..., "rx_bytes": ...,                      // RCCL SW counters
  "ecn_marked_pkts": ..., "cnp_sent": ..., "cnp_rcvd": ..., ...,
  "nic_tx_bytes": ..., "nic_rx_bytes": ...,              // NIC RoCE byte counters
+ "nic_tx_packets": ..., "nic_rx_packets": ...,          // NIC RoCE packet counters
  "pfc_rx_pause_us": [p0, ..., p7],                      // switch paused our transmit
  "pfc_tx_pause_us": [p0, ..., p7],                      // we paused the switch
  "pfc_rx_frames": [p0, ..., p7],                        // pause frames received
- "pfc_tx_frames": [p0, ..., p7]}                        // pause frames sent
+ "pfc_tx_frames": [p0, ..., p7],                        // pause frames sent
+ "prio_rx_bytes": [p0, ..., p7],                        // bytes received per priority
+ "prio_tx_bytes": [p0, ..., p7]}                        // bytes sent per priority
 ```
 
-`nic_*_bytes` and `pfc_*` are filled only for devices this process drives;
-otherwise, and on a NIC that does not expose the counter, they are `-1`. The
+Only devices this process drives are sampled; other NICs have no rows. A
+counter the NIC does not expose reads `-1`. Each row's `ts_us` is taken just
+before that device is read. The
 `pfc_*_pause_us` values are cumulative pause time per priority since the NIC's
 counters were last reset, not the length of one pause: subtract two samples to
 get the pause time between them. Pause frames are sampled as well because some

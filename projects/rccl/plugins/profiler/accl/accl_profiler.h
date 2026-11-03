@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -49,6 +50,7 @@ struct acclProxyStepInfo {
   uint64_t tsStopUs;
   uint64_t lastStateTs;
   int      prevState;    // state the step is currently IN; -1 before the first transition
+  int      netTried;     // this step already tried to open its collective's network window
   // Accumulated time in each proxy step state (us)
   uint64_t gpuWaitUs;
   uint64_t peerWaitUs;
@@ -62,6 +64,7 @@ struct acclProxyStepInfo {
 struct acclProxyOpInfo {
   uint64_t type;
   void*    parentObj;    // points to acclCollInfo (the coll event handle)
+  uint64_t parentGen;    // parent coll's generation at op start
   void*    commCtx;      // owning acclCommContext (for pool free)
   int      poolIdx;      // this slot's index in ctx->proxyOpPool
   uint8_t  channelId;
@@ -90,6 +93,9 @@ struct acclCollInfo {
   int         collStopped;
   int         finalized;
   pthread_mutex_t mutex;
+  // Tenancy counter, bumped under mutex on every alloc and kept across it, as
+  // for proxy ops: a late proxy step must not touch the slot's next tenant.
+  uint64_t    generation;
 
   // Collective metadata
   const char* func;
@@ -126,6 +132,10 @@ struct acclCollInfo {
   uint64_t    tsNetStopUs;
   int         nNetDevsStart;
   int         nNetDevsStop;
+  // Bytes of the receive that opened the window: RCCL counts them before it
+  // reports the state, so they are already in netStart. Not per NIC, since a
+  // proxy step does not say which NIC it used.
+  uint64_t    netRxBeforeStart;
   RcclTelemetrySwSnapshot netStart[ACCL_NET_MAX_DEVS];
   RcclTelemetrySwSnapshot netStop[ACCL_NET_MAX_DEVS];
 
@@ -207,6 +217,7 @@ struct acclCompletedRecord {
   uint64_t    tsNetStartUs;
   uint64_t    tsNetStopUs;
   int         nNetDevs;
+  uint64_t    netRxBeforeStart;
   RcclTelemetrySwSnapshot netDelta[ACCL_NET_MAX_DEVS];
 };
 

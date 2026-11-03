@@ -70,6 +70,8 @@ extern "C" {
     pthread_mutex_unlock(&ctx->proxyOpPool.mutex);
     return n;
   }
+  // Stand in for rcclTelemetrySwCapture, which only librccl provides.
+  void test_acclSetNetCapture(acclNetCaptureFn fn) { gNetCapture = fn; }
   void test_acclWriteDummyRecord(void* ctx) {
     struct acclCompletedRecord rec;
     memset(&rec, 0, sizeof(rec));

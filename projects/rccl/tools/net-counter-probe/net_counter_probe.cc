@@ -182,12 +182,18 @@ int main(int argc, char** argv) {
     nStats = drv.n_stats;
     struct ethtool_gstrings* strs =
         (struct ethtool_gstrings*)calloc(1, sizeof(*strs) + (size_t)nStats * ETH_GSTRING_LEN);
+    if (!strs) {
+      fprintf(stderr, "out of memory for %u stat names\n", nStats);
+      return 1;
+    }
     strs->cmd = ETHTOOL_GSTRINGS;
     strs->string_set = ETH_SS_STATS;
     strs->len = nStats;
     ifr.ifr_data = (char*)strs;
     if (ioctl(fd, SIOCETHTOOL, &ifr) != 0) {
       fprintf(stderr, "ethtool GSTRINGS on %s failed: %s\n", eth, strerror(errno));
+      free(strs);
+      close(fd);
       return 1;
     }
     std::vector<std::string> wanted = split(keysArg);
@@ -207,6 +213,10 @@ int main(int argc, char** argv) {
     free(strs);
     // Slack: GSTATS writes as many values as the driver has *now*.
     stats = (struct ethtool_stats*)calloc(1, sizeof(*stats) + (size_t)(nStats + 256) * sizeof(uint64_t));
+    if (!stats) {
+      fprintf(stderr, "out of memory for %u stats\n", nStats);
+      return 1;
+    }
   }
 
   // ---- sysfs setup ----

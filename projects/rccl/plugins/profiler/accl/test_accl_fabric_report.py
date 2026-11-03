@@ -45,7 +45,8 @@ def cum(rate, t):
 def telemetry(host, pid, roce="nic0", t0=900_000, t1=1_600_000, step=10_000, prio=PRIO,
               rx_pause=None, tx_pause=None, rx_frames=None, tx_frames=None, ecn=None, oos=None, rnr=None,
               other_bpus=0.0, link_gbps=400, prio_bytes=True, time_counters=True,
-              refresh_us=None, pause_prio=None, no_pfc_prio=None, cnp=None, qos=None, hw_type="x"):
+              refresh_us=None, pause_prio=None, no_pfc_prio=None, cnp=None, qos=None, hw_type="x",
+              pause_refresh_us=None):
     """One telemetry file. Rates are {(a, b): per-us}; pause rates are a fraction
     of time. RCCL sends RCCL_BPUS; `other_bpus` is someone else's traffic on the
     same port. `refresh_us` makes the NIC's ethtool counters step that often."""
@@ -56,7 +57,8 @@ def telemetry(host, pid, roce="nic0", t0=900_000, t1=1_600_000, step=10_000, pri
         tn = t if refresh_us is None else (t // refresh_us) * refresh_us   # NIC-side value time
         z = [0] * 8
         rxp, txp, rxf, txf, pb = list(z), list(z), list(z), list(z), list(z)
-        rxp[pp] = int(cum(rx_pause, tn))
+        tp = tn if pause_refresh_us is None else (t // pause_refresh_us) * pause_refresh_us
+        rxp[pp] = int(cum(rx_pause, tp))
         txp[pp] = int(cum(tx_pause, tn))
         rxf[pp] = int(cum(rx_frames, tn))
         txf[pp] = int(cum(tx_frames, tn))
@@ -367,6 +369,17 @@ class VerdictTest(unittest.TestCase):
         self.assertEqual(one(ecn={BUSY: 0.1}).rank(0).verdict, "CONGESTION-MARKS")
         self.assertTrue(one(ecn={(BUSY[0], BUSY[0] + 1): 1.0}).rank(0).verdict.startswith("CLEAN"))
 
+    def test_no_ecn_marks_on_slow_port_counters_is_clean(self):
+        # Thor2: port counters step once a second, so a window can see 0 packets.
+        # Zero marks are 0% whatever the denominator, not "possible".
+        r = one(refresh_us=500_000)
+        g, dev = r.rank(0), r.tels[("hostA", 1)].devices[0]
+        pkts = fr.bound(dev.series.get("nic_rx_packets"), g.spans, fr.refresh_us(dev, 10_000), False)
+        self.assertEqual(pkts.lb, 0.0)              # the case: packets moved, but not provably inside
+        self.assertGreater(pkts.ub, 0.0)
+        self.assertEqual(g.nics[0].ecn_pct, (0.0, 0.0))
+        self.assertTrue(g.verdict.startswith("CLEAN"), g.verdict)
+
     def test_cnps_are_a_rate_not_a_share(self):
         # 300 CNPs/s is about 0.01% of packets here, yet a flow slowed all the time.
         g = one(cnp={BUSY: 300e-6}).rank(0)
@@ -453,17 +466,97 @@ class VerdictTest(unittest.TestCase):
         self.assertEqual((r.lane.prio, r.lane.source), (3, "config"))
         self.assertTrue(any("other traffic shares these NICs" in w for w in r.lane.warnings))
 
+    def test_each_nic_uses_its_own_priority(self):
+        # hostA's NIC puts RCCL on 3, hostB's on 1; each pauses on its own.
+        qa = self._qos([{"selector": "dscp", "protocol": 0, "priority": 3}], {3})
+        qb = self._qos([{"selector": "dscp", "protocol": 0, "priority": 1}], {1})
+        r = Run([(0, "hostA", 1, iterations(0, "hostA", 1),
+                  telemetry("hostA", 1, prio=3, rx_pause={BUSY: 0.10}, qos=qa)),
+                 (1, "hostB", 2, iterations(1, "hostB", 2),
+                  telemetry("hostB", 2, prio=1, rx_pause={BUSY: 0.10}, qos=qb))])
+        self.assertEqual((r.lane.prio, r.lane.source), (None, "per-nic"))
+        self.assertEqual(r.lane.prio_for("hostA", 1, 0), 3)
+        self.assertEqual(r.lane.prio_for("hostB", 2, 0), 1)
+        self.assertEqual(r.rank(0).verdict, "FABRIC-CONGESTION")
+        self.assertEqual(r.rank(1).verdict, "FABRIC-CONGESTION")
+        self.assertIn("PFC priority differs by NIC", r.cli("report"))
+
+    def test_switching_priority_recomputes_job_fields(self):
+        # NIC A: settings say 3, but heavy storage traffic on 0. NIC B: no DCB,
+        # all traffic on 3. Every NIC says 3; the job byte majority says 0.
+        qa = self._qos([{"selector": "dscp", "protocol": 0, "priority": 3}], {3})
+        ta = telemetry("hostA", 1, prio=3, qos=qa)
+        for smp in ta["hw_samples"]:
+            b = smp["prio_tx_bytes"][3]
+            smp["prio_tx_bytes"][0] = smp["prio_rx_bytes"][0] = 5 * b
+        r = Run([(0, "hostA", 1, iterations(0, "hostA", 1), ta),
+                 (1, "hostB", 2, iterations(1, "hostB", 2),
+                  telemetry("hostB", 2, prio=3, rx_pause={BUSY: 0.10}, qos={"dcb": "unsupported",
+                                                                         "traffic_class": 0, "sl": 0}))])
+        self.assertEqual(r.lane.prio, 3)
+        self.assertNotIn(3, r.lane.other_pause)        # RCCL's own pause is not "other"
+        self.assertLess(r.lane.share, 0.5)             # priority 3's share, not priority 0's
+
     def test_dscp_missing_from_map_is_not_guessed(self):
         q = self._qos([{"selector": "dscp", "protocol": 26, "priority": 3}], {3})
         r = one(rx_pause={BUSY: 0.10}, prio_bytes=False, qos=q)
         self.assertEqual(r.lane.prio, None)
         self.assertIn("DSCP 0 is not in the NIC's DSCP map", r.lane.why)
 
+    def test_each_counter_family_has_its_own_lag(self):
+        # Port bytes refresh every sample; the pause counter only every 150 ms.
+        r = one(rx_pause={(900_000, 1_600_000): 0.10}, pause_refresh_us=150_000)
+        dev = r.tels[("hostA", 1)].devices[0]
+        self.assertEqual(fr.refresh_us(dev, 10_000, "nic_tx_bytes"), 10_000)
+        self.assertEqual(fr.refresh_us(dev, 10_000, f"pfc_rx_pause_us[{PRIO}]"), 150_000)
+        # A counter that never moved borrows the byte counters' lag, not its own.
+        self.assertEqual(fr.refresh_us(dev, 10_000, "ecn_marked_pkts"), 10_000)
+
+    def test_pooled_rx_bytes_are_not_read_as_other_traffic(self):
+        # Second NIC of a merged connection: the port receives at full rate, but
+        # RCCL charged those rx bytes to the first NIC. Without the flag that
+        # reads as a link full of someone else's traffic.
+        tel = telemetry("hostA", 1, other_bpus=40_000.0)
+        for smp in tel["hw_samples"]:
+            smp["rx_bytes"] = 0
+            smp["nic_tx_bytes"] = int(RCCL_BPUS * smp["ts_us"])     # tx is RCCL's own, per NIC
+        self.assertIn("LINK-SHARED", one(tel=tel).rank(0).verdict)
+        tel["devices"][0]["rx_bytes_merged"] = True
+        self.assertNotIn("LINK-SHARED", one(tel=tel).rank(0).verdict)
+
+    def test_record_without_exec_start_is_skipped(self):
+        # One record with no kernel or network activity: exec_start_us 0.
+        bad = json.loads(iterations(0, "hostA", 1, n=1)[0])
+        bad["coll_perf"]["host_ts"]["exec_start_us"] = 0
+        r = one(lines=iterations(0, "hostA", 1) + [json.dumps(bad)])
+        recs, skipped = fr.load_accl(r.dirname, 0)
+        self.assertEqual(skipped, 1)
+        self.assertLess(r.rank(0).busy_us, 1_000_000)      # not stretched back to time 0
+
+    def test_repeated_bad_reads_are_not_a_reset(self):
+        # Thor2 sysfs has read 0 more than once in a row between good values.
+        ser = fr._series({"ts_us": [1, 2, 3, 4, 5, 6], "x": [100, 200, 0, 0, 400, 500]}, "x")
+        self.assertEqual((ser.total(), ser.resets), (400, 0))
+        ser = fr._series({"ts_us": [1, 2, 3, 4], "x": [100, 200, 5, 30]}, "x")   # a real reset
+        self.assertEqual((ser.total(), ser.resets), (130, 1))
+
     def test_slow_refresh_widens_windows(self):
         tel = telemetry("hostA", 1, refresh_us=100_000)
         r = one(tel=tel)
         dev = r.tels[("hostA", 1)].devices[0]
         self.assertGreaterEqual(fr.refresh_us(dev, 10_000), 90_000)
+
+    def test_sequential_communicators_are_not_merged(self):
+        # Same collective and size, two communicators one after the other; only
+        # the first ran while the switch paused us.
+        lines = iterations(0, "hostA", 1, comm="0x1") + \
+            iterations(0, "hostA", 1, start=1_400_000, n=9, comm="0x2", first_sn=100)
+        r = one(lines=lines, rx_pause={BUSY: 0.10})
+        verdicts = sorted(r.summary.values())
+        self.assertEqual(len(verdicts), 2, r.summary)
+        self.assertTrue(verdicts[0].startswith("CLEAN"), verdicts)
+        self.assertTrue(verdicts[1].startswith("FABRIC"), verdicts)
+        self.assertIn("comm 0x1", r.cli("report"))
 
     def test_overlapping_communicators_warned(self):
         lines = iterations(0, "hostA", 1, comm="0x1") + iterations(0, "hostA", 1, comm="0x2", first_sn=100)

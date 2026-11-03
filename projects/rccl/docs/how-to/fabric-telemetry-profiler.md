@@ -71,8 +71,14 @@ mpirun -np 16 -H node1:8,node2:8 \
   -x RCCL_TELEMETRY_ENABLE=1 -x RCCL_TELEMETRY_OUTPUT_DIR=$OUT \
   -x RCCL_TELEMETRY_SAMPLE_MS=10 \
   -x NCCL_NET=IB-CAST \
-  ./all_reduce_perf -b 1M -e 256M -f 2 -g 1 -n 50 -w 5
+  ./all_reduce_perf -b 1M -e 256M -f 2 -g 1 -n 500 -w 5
 ```
+
+Run each message size for at least a few seconds. NIC counters are sampled,
+and some refresh slowly: Broadcom Thor2 port counters update only once a
+second. A size that runs for less than that leaves `link%` as `stale`, so
+LINK-SHARED cannot fire, and most other findings stay INCONCLUSIVE. Raise
+`-n` until each size runs for several seconds.
 
 When the job ends, `$OUT` holds one `accl_profiler_rank*.jsonl` per rank and
 communicator, and one `rccl_telemetry_*.json` per process.
@@ -130,6 +136,10 @@ use. It never guesses. In this order:
    configured priority carried almost nothing. Either way a disagreement is
    printed as a warning.
 
+This is decided for each NIC on its own, since NICs can be set up differently.
+When they disagree, the header lists each NIC's priority and each NIC is judged
+on its own.
+
 If none of these work, the priority is UNKNOWN. Pause is then not judged, and
 the header says why and asks for `--pfc-prio`.
 
@@ -146,7 +156,9 @@ experiment. Send an incast with `ib_write_bw --tclass=<RCCL's traffic class>`
 and see which `frames_rx_pri_N` counter moves. If none moves, RCCL's traffic
 class is not on a PFC priority.
 
-Then there is one row per rank and (collective, message size):
+Then there is one row per rank and (collective, message size). Different
+communicators, algorithms or protocols at the same size get separate rows; the
+summary names them when a size has more than one:
 
 | Column | Meaning |
 |---|---|

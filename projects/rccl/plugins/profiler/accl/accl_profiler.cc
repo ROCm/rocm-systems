@@ -265,8 +265,10 @@ static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
     const size_t muOff = offsetof(struct acclCollInfo, mutex);
     const size_t muEnd = muOff + sizeof(slot->mutex);
     pthread_mutex_lock(&slot->mutex);
+    uint64_t gen = slot->generation;
     memset(slot, 0, muOff);
     memset((char*)slot + muEnd, 0, sizeof(*slot) - muEnd);
+    slot->generation = gen + 1;
     pthread_mutex_unlock(&slot->mutex);
     __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
     pthread_mutex_unlock(&ctx->collPool.mutex);
@@ -495,8 +497,9 @@ static void acclWriteRecord(struct acclCommContext* ctx,
   if (rec->tsNetStartUs != 0 && rec->tsNetStopUs != 0) {
     fprintf(ctx->outputFile,
       "\"net\":{\"source\":\"rccl_telemetry_sw\",\"window_start_us\":%lu,"
-      "\"window_end_us\":%lu,\"devices\":[",
-      (unsigned long)rec->tsNetStartUs, (unsigned long)rec->tsNetStopUs);
+      "\"window_end_us\":%lu,\"rx_bytes_before_window\":%lu,\"devices\":[",
+      (unsigned long)rec->tsNetStartUs, (unsigned long)rec->tsNetStopUs,
+      (unsigned long)rec->netRxBeforeStart);
     for (int i = 0; i < rec->nNetDevs; i++) {
       const RcclTelemetrySwSnapshot* d = &rec->netDelta[i];
       fprintf(ctx->outputFile,
@@ -705,7 +708,9 @@ static void acclFinalizeAndFree(struct acclCommContext* ctx,
 // callback RCCL handed us first, and fall back to the global scope.
 static void acclNetCaptureResolve(void) {
   const char* env = getenv("ACCL_PROFILER_NET");
-  if (env && atoi(env) == 0) return;
+  if (env && (!strcmp(env, "0") || !strcasecmp(env, "false") || !strcasecmp(env, "off") ||
+              !strcasecmp(env, "no")))
+    return;
 
   void* sym = NULL;
   Dl_info info;
@@ -727,8 +732,25 @@ static void acclNetCaptureResolve(void) {
 // Capture the SW counters of every NIC RCCL telemetry tracks. Returns the
 // number of devices written; 0 when telemetry is off (RCCL_TELEMETRY_ENABLE
 // unset) or unavailable.
+static int gNetCaptureOff = 0;
+static int gNetCaptureFullWarned = 0;
+
 static inline int acclNetCapture(RcclTelemetrySwSnapshot* out) {
-  return gNetCapture ? gNetCapture(out, ACCL_NET_MAX_DEVS) : 0;
+  if (!gNetCapture || __atomic_load_n(&gNetCaptureOff, __ATOMIC_RELAXED)) return 0;
+  // One slot more than kept, to tell "exactly full" from "some left out".
+  RcclTelemetrySwSnapshot snap[ACCL_NET_MAX_DEVS + 1];
+  int n = gNetCapture(snap, ACCL_NET_MAX_DEVS + 1);
+  // No device: telemetry is off or not on IB-CAST, and devices register at
+  // net init, before any data moves. Stop paying for captures for the run.
+  if (n == 0) __atomic_store_n(&gNetCaptureOff, 1, __ATOMIC_RELAXED);
+  if (n > ACCL_NET_MAX_DEVS) {
+    if (!__atomic_exchange_n(&gNetCaptureFullWarned, 1, __ATOMIC_RELAXED))
+      ACCL_WARN("ACCL Profiler: per-collective network counters cover the first %d NICs only; "
+                "NICs past that have no per-collective data", ACCL_NET_MAX_DEVS);
+    n = ACCL_NET_MAX_DEVS;
+  }
+  memcpy(out, snap, (size_t)n * sizeof(*out));
+  return n;
 }
 
 // rec->netDelta = stop - start for each device present in both snapshots.
@@ -738,6 +760,7 @@ static inline int acclNetCapture(RcclTelemetrySwSnapshot* out) {
 static void acclNetDiff(const struct acclCollInfo* coll, struct acclCompletedRecord* rec) {
   rec->nNetDevs = 0;
   rec->tsNetStartUs = coll->tsNetStartUs;
+  rec->netRxBeforeStart = coll->netRxBeforeStart;
   rec->tsNetStopUs = coll->tsNetStopUs;
   for (int i = 0; i < coll->nNetDevsStop; i++) {
     const RcclTelemetrySwSnapshot* b = &coll->netStop[i];
@@ -1129,6 +1152,7 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     if (parentColl) {
       pthread_mutex_lock(&parentColl->mutex);
       parentColl->nProxyOpsStarted++;
+      op->parentGen = parentColl->generation;
       pthread_mutex_unlock(&parentColl->mutex);
     }
     op->channelId = eDescr->proxyOp.channelId;
@@ -1326,28 +1350,41 @@ __hidden ncclResult_t acclPluginRecordEventState(void* eHandle,
     step->lastStateTs = now;
     step->prevState = (int)eState;
 
-    // The first step that moves data opens the collective's network window: a
-    // send posted to the NIC, or received data landing. Not the proxy op start:
-    // RCCL posts the ops of every queued collective at once, so op starts of
-    // back-to-back collectives all bunch up before any of them sends.
-    int moving = (int)eState == ncclProfilerProxyStepSendWait ||
-                 (int)eState == ncclProfilerProxyStepRecvFlushWait ||
+    // The first step that moves data opens the collective's network window. Not
+    // the proxy op start: RCCL posts the ops of every queued collective at once,
+    // so op starts of back-to-back collectives all bunch up before any of them
+    // sends. A send opens it at SendPeerWait, which RCCL reports when the GPU's
+    // data is ready and just before isend() counts the bytes (net.cc). A
+    // receive can only open it after test() counted the bytes, so their size
+    // is kept in netRxBeforeStart.
+    int isRecv = (int)eState == ncclProfilerProxyStepRecvFlushWait ||
                  (int)eState == ncclProfilerProxyStepRecvGPUWait;
+    int moving = isRecv || (int)eState == ncclProfilerProxyStepSendPeerWait_v4;
     struct acclProxyOpInfo* op = (struct acclProxyOpInfo*)step->parentObj;
     struct acclCollInfo* coll = NULL;
-    if (moving && op && gNetCapture) {
+    uint64_t collGen = 0;
+    // Once per step: later states of the same step find the window open.
+    if (moving && op && !step->netTried && gNetCapture && !__atomic_load_n(&gNetCaptureOff, __ATOMIC_RELAXED)) {
+      step->netTried = 1;
       // Same tenancy check as at step stop: the op slot may have been reissued.
       pthread_mutex_lock(&op->mutex);
-      if (op->generation == step->parentGen) coll = (struct acclCollInfo*)op->parentObj;
+      if (op->generation == step->parentGen) {
+        coll = (struct acclCollInfo*)op->parentObj;
+        collGen = op->parentGen;
+      }
       pthread_mutex_unlock(&op->mutex);
     }
-    if (coll && coll->tsNetStartUs == 0) {
+    if (coll) {
       // Captured under the lock so a concurrent finalize can never read a
-      // half-written snapshot.
+      // half-written snapshot. The generation keeps a late step off the
+      // slot's next collective.
       pthread_mutex_lock(&coll->mutex);
-      if (coll->tsNetStartUs == 0 && !coll->finalized) {
+      if (coll->generation == collGen && coll->tsNetStartUs == 0 && !coll->finalized) {
         coll->nNetDevsStart = acclNetCapture(coll->netStart);
-        if (coll->nNetDevsStart > 0) coll->tsNetStartUs = acclGetTimeUs();
+        if (coll->nNetDevsStart > 0) {
+          coll->tsNetStartUs = acclGetTimeUs();
+          coll->netRxBeforeStart = (isRecv && eStateArgs) ? eStateArgs->proxyStep.transSize : 0;
+        }
       }
       pthread_mutex_unlock(&coll->mutex);
     }
