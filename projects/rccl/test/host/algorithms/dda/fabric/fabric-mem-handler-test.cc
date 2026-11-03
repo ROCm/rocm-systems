@@ -275,7 +275,9 @@ TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_NoSelfMem_ReturnsInvalidUsageW
   EXPECT_EQ(gather.calls, 0);
 }
 
-TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_ExportFails_ReturnsCudaErrorWithoutGathering) {
+// A rank whose export fails still joins the allgather, so peers are not left
+// blocked in the collective; it then reports the export error and imports nothing.
+TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_ExportFails_StillGathersThenReturnsCudaError) {
   ncclFabricMemHandler* h = MakeRegisteredHandler();
   ScopedHook exportHook(g_hipMemExportToShareableHandle,
                         [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
@@ -284,7 +286,8 @@ TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_ExportFails_ReturnsCudaErrorWi
 
   EXPECT_EQ(h->exchangeMemPtrs(), ncclUnhandledCudaError);
 
-  EXPECT_EQ(gather.calls, 0);
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_TRUE(importedDescs_.empty());
 }
 
 TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_AllGatherFails_PropagatesErrorWithoutImporting) {
