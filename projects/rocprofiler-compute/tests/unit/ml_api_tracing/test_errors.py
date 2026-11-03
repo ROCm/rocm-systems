@@ -17,6 +17,7 @@ from ml_api_tracing.errors import (
     PassMarkerMismatchError,
     UnaccountedKernelError,
     UncorrelatedLauncherIntervalError,
+    handle_fatal_ml_api_trace_error,
 )
 
 
@@ -205,3 +206,33 @@ def test_fatal_error_tuple_preserves_existing_class_sequence():
         OverlappingMarkerRangeError,
         PassMarkerMismatchError,
     )
+
+
+def test_fatal_policy_raises_the_original_issue_without_a_collector():
+    issue = PassMarkerMismatchError("key", 0, "missing passes [1]")
+    with pytest.raises(PassMarkerMismatchError) as failure:
+        handle_fatal_ml_api_trace_error(issue)
+    assert failure.value is issue
+
+
+@pytest.mark.parametrize("initial_count", [0, 1])
+def test_fatal_policy_appends_to_an_explicit_collector(initial_count):
+    earlier = PassMarkerMismatchError("earlier", None, "counts")
+    issues = [earlier] * initial_count
+    first = PassMarkerMismatchError("key", 0, "missing passes [1]")
+    second = MarkerNotNestedError("aten::mm", "7", 20.0)
+
+    handle_fatal_ml_api_trace_error(first, issues)
+    handle_fatal_ml_api_trace_error(second, issues)
+
+    assert issues == [earlier] * initial_count + [first, second]
+
+
+@pytest.mark.parametrize("collect_errors", [False, True])
+def test_fatal_policy_rejects_coverage_issues(collect_errors):
+    collector = [] if collect_errors else None
+    issue = MissingSourceLocationError("aten::mm", "7", 20.0)
+    with pytest.raises(TypeError, match="Expected a fatal ML API trace error"):
+        handle_fatal_ml_api_trace_error(issue, collector)
+    if collector is not None:
+        assert collector == []

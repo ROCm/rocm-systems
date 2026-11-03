@@ -1,13 +1,33 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""ML API trace analysis errors and fatal-error classification."""
+"""ML API trace errors and their reporting policies.
+
+Input errors always raise. Integrity errors raise unless explicitly collected.
+Coverage issues are collected for the Workload adapter to report as warnings.
+"""
 
 from typing import List, Optional
 
 import pandas as pd
 
 _UNMATCHED_KERNEL_NAME_PREVIEW = 10
+
+
+def handle_fatal_ml_api_trace_error(
+    error: "MlApiTraceError",
+    errors: Optional[List["MlApiTraceError"]] = None,
+) -> None:
+    """Append an integrity error to an explicit collector, or raise immediately.
+
+    Input errors bypass this policy; coverage issues use separate collectors.
+    """
+    if not isinstance(error, FATAL_ML_API_TRACE_ERRORS):
+        raise TypeError("Expected a fatal ML API trace error")
+    if errors is not None:
+        errors.append(error)
+        return
+    raise error
 
 
 def _format_unmatched_kernel_message(unmatched_rows: pd.DataFrame) -> str:
@@ -30,6 +50,10 @@ def _format_unmatched_kernel_message(unmatched_rows: pd.DataFrame) -> str:
 
 class MlApiTraceError(Exception):
     """Base class for ML API trace analyze failures."""
+
+
+class MlApiTraceInputError(MlApiTraceError):
+    """Invalid trace columns, null values, or unsupported marker wire."""
 
 
 class UnaccountedKernelError(MlApiTraceError):

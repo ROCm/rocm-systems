@@ -33,6 +33,7 @@ from utils.logger import (
 from vendored import yaml
 
 # Global constants
+NS_TO_MS = 1.0 / 1_000_000.0
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
 PROFILE_OUTPUT_FORMAT = "rocpd"
