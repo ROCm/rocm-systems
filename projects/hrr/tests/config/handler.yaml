@@ -41,6 +41,7 @@ cases:
   Unit_HRR_HostBudget_HostAllocationHandlersRefuseOverBudget: {}
   Unit_HRR_HostBudget_LandingBufferChargesWholeBlock: {}
   Unit_HRR_HostBudget_LandingBufferPointerSurvivesGrowth: {}
+  Unit_HRR_HostUnregister_FailedCallKeepsBuffer: {}
   Unit_HRR_KernelArgsSignature_ArgumentsCarryReadPadding: {}
   Unit_HRR_KernelArgsSignature_GraphKernelNode: {}
   Unit_HRR_KernelArgsSignature_GraphSetParams: {}
@@ -63,5 +64,10 @@ cases:
   Unit_HRR_Refusals_LinkCreateRefusesPointerCarryingOptions: {}
   Unit_HRR_Refusals_Memcpy2DNoOpCopiesAreNotRefused: {}
   Unit_HRR_Refusals_Memcpy2DWithUnmappedEndIsRefused: {}
+  Unit_HRR_SnapshotOrder_FailedUnregisterKeepsBuffer: {}
+  Unit_HRR_SnapshotOrder_GuardReleasesTheHold: {}
+  Unit_HRR_SnapshotOrder_HostFreeWaitsForLaunch: {}
+  Unit_HRR_SnapshotOrder_LaunchHandlersTakeTheHold: {}
+  Unit_HRR_SnapshotOrder_UnregisterWaitsForLaunch: {}
   Unit_HRR_UnmappedNote_IpcCloseOfSkippedImport: {}
   Unit_HRR_UnmappedNote_MemMap: {}
