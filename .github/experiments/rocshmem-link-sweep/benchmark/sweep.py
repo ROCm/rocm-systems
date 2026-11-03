@@ -33,7 +33,7 @@ ARCHITECTURES = (
 TARGETS = {"info": ("tools/rocshmem_info",),
            "functional": ("tests/functional_tests/rocshmem_functional_tests",),
            "both": ("tools/rocshmem_info", "tests/functional_tests/rocshmem_functional_tests")}
-BLOCKED_ENV = {"CCC_OVERRIDE_OPTIONS", "CL", "_CL_", "HIPCC_VERBOSE",
+BLOCKED_ENV = {"CCC_OVERRIDE_OPTIONS", "CCC_PRINT_OPTIONS", "CL", "_CL_", "HIPCC_VERBOSE",
                "HIPCC_COMPILE_FLAGS_APPEND", "HIPCC_LINK_FLAGS_APPEND", "LD_PRELOAD",
                "LD_AUDIT", "MAKEFLAGS", "MFLAGS", "LLVM_PROFILE_FILE", "LLVM_PROFILE_VERBOSE"}
 
@@ -50,8 +50,9 @@ def sha(path):
 
 
 def guard_environment(env):
-    bad = sorted(key for key, value in env.items() if value and
-                 (key.startswith("CC_PRINT_") or key in BLOCKED_ENV))
+    # Presence-based Clang controls can activate even when exported empty.
+    bad = sorted(key for key, value in env.items()
+                 if key.startswith("CC_PRINT_") or (value and key in BLOCKED_ENV))
     if env.get("HIP_CLANG_NUM_PARALLEL_JOBS", "1") not in ("", "1"):
         bad.append("HIP_CLANG_NUM_PARALLEL_JOBS")
     if bad:

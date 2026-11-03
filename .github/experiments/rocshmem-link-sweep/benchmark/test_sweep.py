@@ -60,7 +60,9 @@ class Guards(unittest.TestCase):
                 sweep.guard_environment({name: "DO_NOT_PRINT_SECRET"})
             self.assertIn(name, str(error.exception))
             self.assertNotIn("DO_NOT_PRINT_SECRET", str(error.exception))
-        sweep.guard_environment({"CC_PRINT_PROC_STAT": "", "HIP_CLANG_NUM_PARALLEL_JOBS": "1"})
+        with self.assertRaises(ValueError):
+            sweep.guard_environment({"CC_PRINT_PROC_STAT": ""})
+        sweep.guard_environment({"HIP_CLANG_NUM_PARALLEL_JOBS": "1"})
 
     def test_serializing_flags_and_response_files_rejected(self):
         for args in (["-v"], ["-fproc-stat-report=stats.csv"], ["-###"],
