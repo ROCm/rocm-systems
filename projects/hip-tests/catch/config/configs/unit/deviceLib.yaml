@@ -657,6 +657,9 @@ deviceLib:
   Unit_coop_memcpy_async_thread_block_tile_Basic:
     <<: *level_default
     tags: [cooperative, ops]
+  Unit_coop_memcpy_async_thread_block_tile_ParentErased:
+    <<: *level_default
+    tags: [cooperative, ops]
   Unit_coop_memcpy_async_coalesced_group_Basic:
     <<: *level_default
     tags: [cooperative, ops]
@@ -667,6 +670,9 @@ deviceLib:
     <<: *level_default
     tags: [cooperative, ops]
   Unit_coop_memcpy_async_Unaligned:
+    <<: *level_default
+    tags: [cooperative, ops]
+  Unit_coop_memcpy_async_GuardedByteCopy:
     <<: *level_default
     tags: [cooperative, ops]
   Unit_coop_memcpy_async_SyncPublishesCopy:
