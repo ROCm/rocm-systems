@@ -1,0 +1,20 @@
+---
+copyEngine:
+  Unit_hipExtCopyEngineGetDeviceHandles_Negative:
+    <<: *level_2
+    unsupported:
+      targets: [amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2744 - Linux-only: kernel-side copy engines are SDMA queues the runtime creates by KFD engine id, which Windows and WSL do not expose."
+    tags: [memory]
+  Unit_hipExtCopyEngine_KernelCopies:
+    <<: *level_2
+    unsupported:
+      targets: [amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2744 - Linux-only: kernel-side copy engines are SDMA queues the runtime creates by KFD engine id, which Windows and WSL do not expose."
+    tags: [memory]
+  Unit_hipExtCopyEngine_PeerCopiesUseRecommendedEngine:
+    <<: *level_2
+    unsupported:
+      targets: [amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2744 - Linux-only: kernel-side copy engines are SDMA queues the runtime creates by KFD engine id, which Windows and WSL do not expose; the test also reads KFD topology from sysfs."
+    tags: [memory, multigpu]
