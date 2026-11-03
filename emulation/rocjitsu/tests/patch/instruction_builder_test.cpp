@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "../amdgpu_elf_test_support.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
@@ -11,6 +12,7 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -301,10 +303,47 @@ TEST(InstructionBuilder, RecoveredIndirectSequenceRetainsBuilderDiagnostic) {
         patch_recovered_indirect_fixups(text, layout, ROCJITSU_CODE_ARCH_CDNA3);
     EXPECT_FALSE(result.ok);
     EXPECT_EQ(result.source_offset, 24u);
-    EXPECT_EQ(result.message, long_transfer ? "s_getpc_b64 encoding field out of range"
-                                            : "s_call_b64 encoding field out of range");
+    EXPECT_EQ(result.message, long_transfer ? "canonical recovered indirect branch sequence: "
+                                              "s_getpc_b64 encoding field out of range"
+                                            : "canonical recovered indirect branch sequence: "
+                                              "s_call_b64 encoding field out of range");
     EXPECT_EQ(text, original);
   }
+}
+
+TEST(InstructionBuilder, DirectLongBranchRetainsBuilderDiagnostic) {
+  constexpr uint64_t kWord = sizeof(uint32_t);
+  constexpr uint64_t kTargetOffset = 140000;
+  util::FailureOr<uint32_t> maybe_branch = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_branch.succeeded());
+  const uint32_t branch_word = maybe_branch.value();
+  std::unique_ptr<Instruction> branch =
+      test_support::decode_one(branch_word, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(branch, nullptr);
+
+  std::vector<uint8_t> text(kTargetOffset + kWord, 0);
+  const std::vector<uint8_t> original = text;
+  KernelTextLayout layout;
+  layout.body_end = text.size();
+  layout.long_branch_sgpr = 128;
+  layout.blocks.push_back(
+      {.source_start = 0, .source_end = kWord, .target_start = 0, .target_end = kWord});
+  layout.blocks.push_back({.source_start = kWord,
+                           .source_end = 2 * kWord,
+                           .target_start = kTargetOffset,
+                           .target_end = kTargetOffset + kWord});
+  layout.branch_fixups.push_back({.inst = branch.get(),
+                                  .source_inst_offset = 0,
+                                  .source_target_offset = kWord,
+                                  .target_inst_offset = 0,
+                                  .target_window_bytes = 32,
+                                  .translated_words = {branch_word}});
+  const TextRelocationResult result =
+      patch_direct_branch_fixups(text, layout, ROCJITSU_CODE_ARCH_CDNA3);
+  EXPECT_FALSE(result.ok);
+  EXPECT_EQ(result.source_offset, 0u);
+  EXPECT_EQ(result.message, "direct branch long sequence: s_getpc_b64 encoding field out of range");
+  EXPECT_EQ(text, original);
 }
 
 TEST(InstructionBuilder, ScalarFrontendFieldFailureEmitsOneInstructionSpecificDiagnostic) {

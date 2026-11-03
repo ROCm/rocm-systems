@@ -791,15 +791,17 @@ allocate_branch_island_chain(uint64_t branch_pc, uint64_t target_offset,
   return chain;
 }
 
-[[nodiscard]] bool append_branch_island_direct_sequence(
-    std::vector<uint32_t> &words, const Instruction &inst, uint32_t translated_word,
-    uint64_t window_offset, uint64_t window_bytes, uint64_t first_target, rj_code_arch_t arch) {
+[[nodiscard]] bool
+append_branch_island_direct_sequence(std::vector<uint32_t> &words, const Instruction &inst,
+                                     uint32_t translated_word, uint64_t window_offset,
+                                     uint64_t window_bytes, uint64_t first_target,
+                                     rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
   if ((inst.flags() & BRANCH) != 0) {
     const auto simm = compute_sopp_branch_simm16(window_offset, first_target);
     if (!simm)
       return false;
     {
-      util::FailureOr<uint32_t> word = build_s_branch(*simm, arch);
+      util::FailureOr<uint32_t> word = build_s_branch(*simm, arch, error);
       if (word.failed())
         return false;
       words.push_back(word.value());
@@ -812,8 +814,8 @@ allocate_branch_island_chain(uint64_t branch_pc, uint64_t target_offset,
 
   if (window_bytes < 2 * sizeof(uint32_t))
     return false;
-  auto inverted = build_inverted_conditional_skip(inst, translated_word, window_offset,
-                                                  2 * sizeof(uint32_t), arch);
+  std::optional<uint32_t> inverted = build_inverted_conditional_skip(
+      inst, translated_word, window_offset, 2 * sizeof(uint32_t), arch, error);
   if (!inverted)
     return false;
   const auto simm = compute_sopp_branch_simm16(window_offset + sizeof(uint32_t), first_target);
@@ -822,7 +824,7 @@ allocate_branch_island_chain(uint64_t branch_pc, uint64_t target_offset,
 
   words.push_back(*inverted);
   {
-    util::FailureOr<uint32_t> word = build_s_branch(*simm, arch);
+    util::FailureOr<uint32_t> word = build_s_branch(*simm, arch, error);
     if (word.failed())
       return false;
     words.push_back(word.value());
@@ -851,8 +853,8 @@ allocate_branch_island_chain(uint64_t branch_pc, uint64_t target_offset,
                                    target_offset, call_sdst, error);
   }
 
-  auto inverted = build_inverted_conditional_skip(inst, translated_word, window_offset,
-                                                  window_bytes, arch, error);
+  std::optional<uint32_t> inverted = build_inverted_conditional_skip(
+      inst, translated_word, window_offset, window_bytes, arch, error);
   if (!inverted)
     return false;
   words.push_back(*inverted);
@@ -939,7 +941,7 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
         std::vector<uint32_t> island_words;
         if (!append_branch_island_direct_sequence(
                 island_words, *fixup.inst, words.front(), fixup.target_inst_offset,
-                fixup.target_window_bytes, chain->front(), arch)) {
+                fixup.target_window_bytes, chain->front(), arch, &error)) {
           const bool can_grow_conditional_source =
               (fixup.inst->flags() & COND_BRANCH) != 0 &&
               conditional_branch_can_invert(fixup.inst->mnemonic()) &&
@@ -947,7 +949,9 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
           if (!can_grow_conditional_source) {
             return relocation_error(
                 fixup.source_inst_offset,
-                "direct branch relocation cannot build SGPR-free island sequence");
+                builder_message.empty()
+                    ? "direct branch relocation cannot build SGPR-free island sequence"
+                    : "direct branch island sequence: " + builder_message);
           }
           if (!fixup.allow_window_growth) {
             return relocation_error(
@@ -987,7 +991,7 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
           return relocation_error(fixup.source_inst_offset,
                                   builder_message.empty()
                                       ? "direct branch relocation cannot build long branch sequence"
-                                      : builder_message);
+                                      : "direct branch long sequence: " + builder_message);
         }
         if (long_words.size() * sizeof(uint32_t) > fixup.target_window_bytes) {
           if (!fixup.allow_window_growth) {
@@ -1079,7 +1083,7 @@ TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
           fixup.source_call_offset,
           builder_message.empty()
               ? "target ISA cannot encode canonical recovered indirect branch sequence"
-              : builder_message,
+              : "canonical recovered indirect branch sequence: " + builder_message,
           TextLayoutFailureCategory::ResourceLimit);
     }
     if (words.size() * sizeof(uint32_t) > fixup.target_window_bytes) {
