@@ -114,8 +114,10 @@ std::optional<uint64_t> smem_calculate_address(const SmemInst &inst, amdgpu::Wav
     wf.report_undefined_behavior("negative combined scalar-memory offset");
   inst_offset &= ~0x3LL;
   reg_offset &= kDwordMask;
+  // A DWORD is in range only if all four bytes are, so round the bound down.
   if (gfx9_smem_is_buffer_op(inst.op))
-    return scalar_buffer_address(wf, inst.sbase * 2, *base, inst_offset + reg_offset, state);
+    return scalar_buffer_address(wf, inst.sbase * 2, *base, inst_offset + reg_offset, state,
+                                 /*align_mask=*/3, /*size_align_mask=*/3);
   const uint64_t addr = *base + inst_offset + reg_offset;
   util::Logger::vm([&](auto &os) {
     static thread_local uint64_t smem_count = 0;

@@ -5,6 +5,8 @@
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/addr_calc.h"
@@ -272,6 +274,83 @@ TEST(RdnaAddrCalcTest, ScalarAndVectorBuffersUseCanonicalHighAddresses) {
     EXPECT_EQ(*scalar, base + 12);
     EXPECT_EQ(vector.lane_mask, 1);
     EXPECT_EQ(vector.per_lane_addr[0], base + 12);
+  }
+}
+
+// The cases are gfx90a hardware results: a DWORD only partly inside the buffer
+// reads zero.
+TEST(Gfx9ScalarBufferTest, LoadsZeroDwordsThatEndPastTheBuffer) {
+  struct Case {
+    uint16_t opcode;
+    uint32_t offset;
+    uint32_t records;
+    std::array<uint32_t, 2> expected;
+  };
+  constexpr std::array cases{
+      Case{cdna3::kSBufferLoadDwordSmem, 12, 12, {0, 0}},
+      Case{cdna3::kSBufferLoadDwordSmem, 12, 13, {0, 0}},
+      Case{cdna3::kSBufferLoadDwordSmem, 12, 15, {0, 0}},
+      Case{cdna3::kSBufferLoadDwordSmem, 12, 16, {103, 0}},
+      Case{cdna3::kSBufferLoadDwordx2Smem, 16, 17, {0, 0}},
+      Case{cdna3::kSBufferLoadDwordx2Smem, 16, 20, {104, 0}},
+      Case{cdna3::kSBufferLoadDwordx2Smem, 16, 23, {104, 0}},
+      Case{cdna3::kSBufferLoadDwordx2Smem, 16, 24, {104, 105}},
+  };
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (bool translated : {false, true}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(translated);
+      amdgpu::GpuMemory mem("gfx9_scalar_bounds_mem");
+      amdgpu::L2Cache l2("gfx9_scalar_bounds_l2");
+      l2.set_backing_memory(&mem);
+      amdgpu::L1ScalarCache l1(&l2);
+      amdgpu::ScalarMemPipeline pipeline(&l1);
+      amdgpu::ComputeUnitCore::Config cfg{};
+      cfg.arch = arch;
+      cfg.num_wf_slots = 1;
+      cfg.sgprs_per_wf = 102;
+      cfg.vgprs_per_wf = 16;
+      cfg.lds_size_kb = 64;
+      auto cu = amdgpu::ComputeUnitCore::create("gfx9_scalar_bounds", cfg, &mem, &l2);
+      auto decoder = Decoder::create(arch);
+      auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+      ASSERT_NE(wf, nullptr);
+      amdgpu::GpuVm vm;
+      if (translated) {
+        const auto address_space =
+            vm.register_address_space(0, std::make_shared<amdgpu::IdentityAddressSpaceTranslator>(),
+                                      std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(mem));
+        ASSERT_TRUE(address_space);
+        cu->set_gpu_vm(&vm);
+        wf->set_address_space(address_space);
+      }
+      const auto sb = wf->sgpr_alloc().base;
+      constexpr uint64_t base = 0x1000;
+      for (uint32_t i = 0; i < 8; ++i)
+        mem.write32(base + 4 * i, 100 + i);
+      cu->write_sgpr(sb, base);
+      cu->write_sgpr(sb + 1, 0);
+      cu->write_sgpr(sb + 3, 0);
+      for (const auto &test_case : cases) {
+        SCOPED_TRACE(testing::Message() << "op=" << test_case.opcode << " offset="
+                                        << test_case.offset << " records=" << test_case.records);
+        cu->write_sgpr(sb + 2, test_case.records);
+        cu->write_sgpr(sb + 8, 0xdeadbeef);
+        cu->write_sgpr(sb + 9, 0xdeadbeef);
+        const auto words =
+            cdna3::build_smem(test_case.opcode, {.sdata = 8, .imm = 1, .offset = test_case.offset});
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+        ASSERT_NE(inst->data(), nullptr);
+        pipeline.issue(inst.release(), *wf);
+        const bool two_dwords = test_case.opcode == cdna3::kSBufferLoadDwordx2Smem;
+        EXPECT_EQ(cu->read_sgpr(sb + 8), test_case.expected[0]);
+        EXPECT_EQ(cu->read_sgpr(sb + 9), two_dwords ? test_case.expected[1] : 0xdeadbeefu);
+      }
+      wf->halt();
+    }
   }
 }
 
