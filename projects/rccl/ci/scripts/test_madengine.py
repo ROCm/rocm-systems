@@ -371,7 +371,7 @@ WORKLOAD_CONFIGS = {
             # phases share the nodes, so the ratio is unaffected.
             "SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK": "0",
             # A hang otherwise holds four nodes for two hours before failing.
-            "BARRIER_TIMEOUT_S": "1800",
+            "BARRIER_TIMEOUT_SECONDS": "1800",
             "IP_SYNC_TIMEOUT": "1800",
             "SMOKE": "0",
             # A point is only 2 x concurrency requests, and one pass at
@@ -451,6 +451,24 @@ def check_mad_knobs(work_dir: Path, workload_config: dict) -> None:
         raise RuntimeError(
             f"MAD pin {MAD_REF[:12]} does not read {', '.join(missing)} "
             f"({script}) -- the run would ignore it"
+        )
+
+
+def check_sglang_knobs(work_dir: Path, workload_config: dict) -> None:
+    """Fail if the pinned SGLang launcher cannot consume its timeout knob."""
+    if workload_config.get("family") != "sglang-disagg":
+        return
+    env = workload_config.get("env_vars", {})
+    knob = "BARRIER_TIMEOUT_SECONDS"
+    if env.get(knob) != "1800" or "BARRIER_TIMEOUT_S" in env:
+        raise RuntimeError(f"{workload_config['model_repo']} must set {knob}=1800")
+    script = (
+        work_dir / "scripts" / "sglang_disagg" / "sglang_disagg_mori_io_ep.sh"
+    )
+    text = script.read_text(errors="replace") if script.is_file() else ""
+    if not re.search(rf"(?<![A-Za-z0-9_]){knob}(?![A-Za-z0-9_])", text):
+        raise RuntimeError(
+            f"MAD pin {MAD_REF[:12]} does not read {knob} ({script})"
         )
 
 
@@ -695,6 +713,59 @@ def overlay_asset_identity(hashes: dict[str, str]) -> str:
         digest.update(sha256.encode())
         digest.update(b"\0")
     return digest.hexdigest()[:16]
+
+
+def build_context_tree_identity(root: Path) -> str:
+    """Full digest of names, regular bytes and symlink targets under *root*."""
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        details = path.lstat()
+        mode = f"{stat.S_IMODE(details.st_mode):04o}".encode()
+        if path.is_symlink():
+            kind = b"symlink"
+            contents = os.readlink(path).encode()
+        elif path.is_dir():
+            kind = b"directory"
+            contents = b""
+        elif path.is_file():
+            kind = b"file"
+            contents = sha256_file(path).encode()
+        else:
+            raise RuntimeError(f"unsupported build-context entry: {path}")
+        digest.update(relative.encode())
+        digest.update(b"\0")
+        digest.update(kind)
+        digest.update(b"\0")
+        digest.update(mode)
+        digest.update(b"\0")
+        digest.update(contents)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def candidate_overlay_identity(
+    candidate_asset_id: str, base_digest: str, recipe_sha256: str
+) -> str:
+    """Identity of candidate assets, immutable base and exact build recipe."""
+    digest = hashlib.sha256()
+    digest.update(candidate_asset_id.encode())
+    digest.update(b"\0")
+    digest.update(base_digest.encode())
+    digest.update(b"\0")
+    digest.update(recipe_sha256.encode())
+    return digest.hexdigest()[:16]
+
+
+def candidate_recipe_identity(
+    dockerfile_content: str, context_tree_sha256: str = ""
+) -> str:
+    """Digest of the generated recipe and any copied non-RCCL context."""
+    digest = hashlib.sha256()
+    digest.update(dockerfile_content.encode())
+    digest.update(b"\0")
+    digest.update(context_tree_sha256.encode())
+    return digest.hexdigest()
 
 
 def rccl_asset_identity(rccl_lib: Path, tuner_config: Path) -> str:
@@ -1056,7 +1127,8 @@ def candidate_provenance(
     return {
         "schema_version": 1,
         "candidate_sha": candidate_sha,
-        "overlay_asset_id": rccl_asset_identity(rccl_lib, tuner_config),
+        "candidate_asset_id": rccl_asset_identity(rccl_lib, tuner_config),
+        "overlay_asset_id": "",
         "artifact": artifact,
         "librccl": {
             "path": os.fspath(rccl_lib),
@@ -1916,12 +1988,16 @@ def stage_maxtext_baseline(
 
     dockerfile = ctx_dir / MAXTEXT_BASELINE_DOCKERFILE
     dockerfile.write_text(f"FROM {from_ref}\n\n{MAXTEXT_PRIMUS_PAYLOAD}")
+    primus_tree_sha256 = build_context_tree_identity(ctx_dir / "Primus")
 
     # A per-run tag, with the same token the candidate uses: a node holding an
     # image under a reused tag would skip the build and could pair a fresh
     # candidate with a stale baseline, breaking the one invariant this pair
     # exists to hold -- that the two differ by the RCCL swap alone.
-    tag = f"{base_image}-primus-{PRIMUS_REF}-{run_token}-{base_identity(from_ref)}"
+    tag = (
+        f"{base_image}-primus-{PRIMUS_REF}-{run_token}-"
+        f"{base_identity(from_ref)}-{primus_tree_sha256[:10]}"
+    )
     log.info("MaxText baseline (Primus, stock RCCL), built on the nodes: %s", tag)
     return tag
 
@@ -2029,14 +2105,8 @@ def stage_rccl_overlay(
     finally:
         os.close(staging_fd)
         os.close(ctx_fd)
-    asset_id = staged_assets["asset_id"]
-    tag = f"{base_image}-rccl-{gpu_target}-{rccl_commit}-{asset_id}"
-    if family in ("maxtext", "sglang-disagg") and from_ref:
-        # Same identity the baseline carries, for the same reason: the run id
-        # alone survives a re-run, so without this the candidate could hit the
-        # previous attempt's image and skip its build while the baseline was
-        # rebuilt on a base that had moved.
-        tag = f"{tag}-{base_identity(from_ref)}"
+    candidate_asset_id = staged_assets["asset_id"]
+    base_reference = from_ref or base_image
 
     # The CI RCCL is built against a newer ROCm than the base image, so it can
     # name a soname the image predates -- `libamd_smi.so.27` against its `.26` --
@@ -2064,12 +2134,14 @@ def stage_rccl_overlay(
     if has_kpack_files:
         log.info("Found %d kpack file(s): %s", len(kpack_names), kpack_names)
 
+    primus_tree_sha256 = ""
     if family == "maxtext":
         if primus_dir is None or not (primus_dir / "primus-cli").is_file():
             raise RuntimeError(
                 f"maxtext overlay needs a Primus checkout with primus-cli; got {primus_dir!r}"
             )
         _stage_primus_context(ctx_dir, primus_dir)
+        primus_tree_sha256 = build_context_tree_identity(ctx_dir / "Primus")
         # Bridge beside every copy of the library itself, not beside librccl --
         # the directory an RPATH reaches for it is usually neither.
         swap = _librccl_swap_snippet(
@@ -2083,7 +2155,7 @@ def stage_rccl_overlay(
         # The same pinned digest the baseline used. A tag here would let the
         # two images build from different versions of a mutable base and the
         # ratio would then be measuring more than RCCL.
-        dockerfile.write_text(
+        dockerfile_content = (
             f"FROM {from_ref or base_image}\n\n{MAXTEXT_PRIMUS_PAYLOAD}\n"
             f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\n"
             f"ENV NCCL_TUNER_CONFIG_FILE={CANDIDATE_TUNER_PATH}\n"
@@ -2097,7 +2169,7 @@ def stage_rccl_overlay(
             bridge=_soname_bridge_discovered(rccl_needed),
             kpack=has_kpack_files,
         )
-        dockerfile.write_text(
+        dockerfile_content = (
             f"{sglang_recipe(work_dir / 'MAD', from_ref or base_image)}\n"
             f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\n"
             f"ENV NCCL_TUNER_CONFIG_FILE={CANDIDATE_TUNER_PATH}\n"
@@ -2110,8 +2182,8 @@ def stage_rccl_overlay(
             rccl_lib.stat().st_size / 1e6,
             base_image,
         )
-        dockerfile.write_text(f"""\
-FROM {base_image}
+        dockerfile_content = f"""\
+FROM {base_reference}
 COPY rccl_libs/ /tmp/rccl_ci/
 RUN set -e; \\
     SDK_LIB="/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib"; \\
@@ -2142,14 +2214,14 @@ RUN set -e; \\
 {bridge_sdk}    rm -rf /tmp/rccl_ci
 ENV NCCL_TUNER_CONFIG_FILE={CANDIDATE_TUNER_PATH}
 ENV NCCL_DEBUG=WARN
-""")
+"""
     else:
         log.info(
             "CI-built librccl.so has embedded GPU kernels (%.1f MB)",
             rccl_lib.stat().st_size / 1e6,
         )
-        dockerfile.write_text(f"""\
-FROM {base_image}
+        dockerfile_content = f"""\
+FROM {base_reference}
 COPY rccl_libs/ /tmp/rccl_ci/
 RUN set -e; \\
     RCCL_REAL=$(readlink -f /opt/rocm/lib/librccl.so 2>/dev/null || \\
@@ -2165,8 +2237,31 @@ RUN set -e; \\
 {bridge_dep}    rm -rf /tmp/rccl_ci
 ENV NCCL_TUNER_CONFIG_FILE={CANDIDATE_TUNER_PATH}
 ENV NCCL_DEBUG=WARN
-""")
+"""
 
+    recipe_sha256 = candidate_recipe_identity(
+        dockerfile_content, primus_tree_sha256
+    )
+    overlay_id = candidate_overlay_identity(
+        candidate_asset_id, base_reference, recipe_sha256
+    )
+    identity_labels = (
+        f'LABEL rccl.candidate.base-digest="{base_reference}"\n'
+        f'LABEL rccl.candidate.overlay-id="{overlay_id}"\n'
+        f'LABEL rccl.candidate.recipe-sha256="{recipe_sha256}"\n'
+    )
+    dockerfile.write_text(f"{dockerfile_content}{identity_labels}")
+    staged_assets.update({
+        "candidate_asset_id": candidate_asset_id,
+        "base_digest": base_reference,
+        "recipe_sha256": recipe_sha256,
+        "primus_tree_sha256": primus_tree_sha256,
+        "overlay_asset_id": overlay_id,
+    })
+    tag = (
+        f"{base_image}-rccl-{gpu_target}-{rccl_commit}-{overlay_id}-"
+        f"{base_identity(base_reference)}"
+    )
     log.info("Candidate (CI RCCL), built on the nodes: %s", tag)
     return tag, staged_assets
 
@@ -2665,9 +2760,8 @@ the refs, image digests and cluster settings. The run's own numbers are in the
   mounts them.
 - To shorten a Megatron run, add `"PRIMUS_TRAIN_ITERS": "15"` to both
   `context.docker_env_vars` and `deployment_config.env_vars`.
-- `BASE_DIGEST` is what `BASE_IMAGE` pointed to when CI ran. MaxText and
-  sglang-disagg images build from that digest; Megatron ones from `BASE_IMAGE`
-  by tag, so if the base has moved since, the image differs.
+- `BASE_DIGEST` is what `BASE_IMAGE` pointed to when CI ran. Every built A/B
+  image uses that immutable digest, including the Megatron baseline.
 """
 
 
@@ -2734,7 +2828,7 @@ def write_repro_bundle(
 
 # The sglang launcher reaches every node at the address DNS gives its name and
 # binds its barrier to the node's own one, so a stale record leaves rank 0
-# waiting out BARRIER_TIMEOUT_S for a node that is up and never answers.
+# waiting out BARRIER_TIMEOUT_SECONDS for a node that is up and never answers.
 PREFLIGHT_DNS = """\
 #!/bin/bash
 h=$(hostname -s)
@@ -2803,6 +2897,8 @@ CANDIDATE_IMAGE_ID = """\
 image="$1"
 out="$2"
 expected_tuner_sha="$3"
+expected_base_digest="$4"
+expected_overlay_id="$5"
 host=$(hostname -s)
 id=$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null \\
   || sudo -n docker image inspect --format '{{.Id}}' "$image" 2>/dev/null) || {
@@ -2825,8 +2921,28 @@ if [ "$tuner_sha" != "$expected_tuner_sha" ]; then
   echo "GATE FAIL: candidate tuner hash mismatch on $host: $tuner_sha != $expected_tuner_sha"
   exit 1
 fi
-printf '%s\\t%s\\t%s\\n' "$host" "$id" "$tuner_sha" > "$out/$host"
-echo "  $host candidate image $id tuner_sha256=$tuner_sha"
+identity=$(docker image inspect \\
+  --format '{{ index .Config.Labels "rccl.candidate.base-digest" }}|{{ index .Config.Labels "rccl.candidate.overlay-id" }}' \\
+  "$image" 2>/dev/null \\
+  || sudo -n docker image inspect \\
+     --format '{{ index .Config.Labels "rccl.candidate.base-digest" }}|{{ index .Config.Labels "rccl.candidate.overlay-id" }}' \\
+     "$image" 2>/dev/null) || {
+  echo "GATE FAIL: cannot inspect candidate identity labels on $host"
+  exit 1
+}
+base_digest=${identity%%|*}
+overlay_id=${identity#*|}
+if [ "$base_digest" != "$expected_base_digest" ]; then
+  echo "GATE FAIL: candidate base digest mismatch on $host: $base_digest != $expected_base_digest"
+  exit 1
+fi
+if [ "$overlay_id" != "$expected_overlay_id" ]; then
+  echo "GATE FAIL: candidate overlay identity mismatch on $host: $overlay_id != $expected_overlay_id"
+  exit 1
+fi
+printf '%s\\t%s\\t%s\\t%s\\t%s\\n' \\
+  "$host" "$id" "$tuner_sha" "$base_digest" "$overlay_id" > "$out/$host"
+echo "  $host candidate image $id tuner_sha256=$tuner_sha base=$base_digest overlay=$overlay_id"
 """
 
 
@@ -2834,18 +2950,26 @@ def verify_image_identities(
     identity_dir: Path,
     nodes: int,
     expected_tuner_sha: str,
+    expected_base_digest: str,
+    expected_overlay_id: str,
 ) -> tuple[bool, str, str]:
     """Require one identical immutable candidate image ID from every node."""
     rows = []
     for path in sorted(identity_dir.glob("*")) if identity_dir.is_dir() else []:
         try:
-            host, image_id, tuner_sha = path.read_text().strip().split("\t", 2)
+            host, image_id, tuner_sha, base_digest, overlay_id = (
+                path.read_text().strip().split("\t", 4)
+            )
         except (OSError, ValueError):
             return False, f"unreadable candidate image identity {path}", ""
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
             return False, f"invalid candidate image identity from {host}: {image_id!r}", ""
         if tuner_sha != expected_tuner_sha:
             return False, f"candidate tuner hash mismatch from {host}: {tuner_sha!r}", ""
+        if base_digest != expected_base_digest:
+            return False, f"candidate base digest mismatch from {host}: {base_digest!r}", ""
+        if overlay_id != expected_overlay_id:
+            return False, f"candidate overlay identity mismatch from {host}: {overlay_id!r}", ""
         rows.append((host, image_id))
     if len(rows) != nodes:
         return False, f"candidate image identity found on {len(rows)}/{nodes} node(s)", ""
@@ -2968,6 +3092,8 @@ def run_ab_in_one_allocation(
     built_images: list[str] | None = None,
     candidate_image: str = "",
     candidate_tuner_sha256: str = "",
+    candidate_base_digest: str = "",
+    candidate_overlay_id: str = "",
 ) -> dict:
     """Run every phase back to back inside one SLURM allocation, on the same nodes.
 
@@ -3053,6 +3179,8 @@ def run_ab_in_one_allocation(
                 f"--overlap bash {shlex.quote(str(image_id_script))} "
                 f"{shlex.quote(candidate_image)} {shlex.quote(str(image_id_dir))} "
                 f"{shlex.quote(candidate_tuner_sha256)} "
+                f"{shlex.quote(candidate_base_digest)} "
+                f"{shlex.quote(candidate_overlay_id)} "
                 "|| echo 1 > " + shlex.quote(str(image_id_dir / "FAILED")),
             ]
     cleanup = work_dir / "ab" / "cleanup_images.sh"
@@ -3195,7 +3323,11 @@ def run_ab_in_one_allocation(
 
     if candidate_image:
         image_ok, image_msg, image_id = verify_image_identities(
-            image_id_dir, nodes, candidate_tuner_sha256
+            image_id_dir,
+            nodes,
+            candidate_tuner_sha256,
+            candidate_base_digest,
+            candidate_overlay_id,
         )
     else:
         image_ok, image_msg, image_id = True, "candidate image verification not requested", ""
@@ -3893,13 +4025,14 @@ def main() -> None:
     family = workload_config.get("family", "megatron")
     install_madengine(work_dir, family=family)
     check_mad_knobs(work_dir, workload_config)
+    check_sglang_knobs(work_dir, workload_config)
 
     primus_dir = work_dir / "MAD" / "scripts" / "Primus" if family == "maxtext" else None
 
     # Resolved once and written into both A/B Dockerfiles, so the pair cannot
     # straddle a push to the mutable base tag between the two builds.
     base_ref = ""
-    if family in ("maxtext", "sglang-disagg") and not args.skip_overlay_build:
+    if not args.skip_overlay_build:
         base_ref = resolve_base_digest(workload_config["base_image"])
 
     # Step 3: Stage the candidate image (or use pre-built). Images are built on
@@ -3921,11 +4054,11 @@ def main() -> None:
             primus_dir=primus_dir,
             from_ref=base_ref,
         )
-        if staged_overlay["asset_id"] != candidate_manifest["overlay_asset_id"]:
+        if staged_overlay["candidate_asset_id"] != candidate_manifest["candidate_asset_id"]:
             raise RuntimeError(
-                "staged candidate overlay identity differs from provenance: "
-                f"{staged_overlay['asset_id']} != "
-                f"{candidate_manifest['overlay_asset_id']}"
+                "staged candidate asset identity differs from provenance: "
+                f"{staged_overlay['candidate_asset_id']} != "
+                f"{candidate_manifest['candidate_asset_id']}"
             )
 
     # The maxtext baseline cannot be the stock tag: that image ships MaxText
@@ -3950,7 +4083,7 @@ def main() -> None:
         )
         baseline_pull_only = False
     else:
-        baseline_image = workload_config["base_image"]
+        baseline_image = base_ref or workload_config["base_image"]
         baseline_pull_only = True
 
     candidate_manifest.update({
@@ -3970,6 +4103,8 @@ def main() -> None:
         )
         candidate_manifest["tuner"]["expected_runtime_source"] = BIND_MOUNT_TUNER_PATH
     else:
+        candidate_manifest["base_digest"] = base_ref
+        candidate_manifest["overlay_asset_id"] = staged_overlay["overlay_asset_id"]
         candidate_manifest["staged_overlay"] = staged_overlay
     write_candidate_provenance(work_dir, candidate_manifest)
 
@@ -4047,6 +4182,13 @@ def main() -> None:
             overlay_image, args.skip_overlay_build
         ),
         candidate_tuner_sha256=candidate_manifest["tuner"]["source_sha256"],
+        candidate_base_digest=(
+            candidate_manifest.get("base_digest", "") if not args.skip_overlay_build else ""
+        ),
+        candidate_overlay_id=(
+            candidate_manifest.get("overlay_asset_id", "")
+            if not args.skip_overlay_build else ""
+        ),
     )
     exit_code = max(allocation["exit_codes"].values(), default=1)
     # Non-empty invalid value makes server-log selection fail closed if the

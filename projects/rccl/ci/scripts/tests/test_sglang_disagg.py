@@ -78,6 +78,8 @@ class GenerateManifestTest(TempWork):
             self.assertEqual(env["MOE_A2A_BACKEND"], "none")
             self.assertEqual(env["NCCL_DEBUG"], "INFO")
             self.assertEqual(env["NCCL_DEBUG_SUBSYS"], "INIT,NET,TUNING")
+            self.assertEqual(env["BARRIER_TIMEOUT_SECONDS"], "1800")
+            self.assertNotIn("BARRIER_TIMEOUT_S", env)
             self.assertEqual(env["SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK"], "0")
             self.assertEqual(env["OMP_NUM_THREADS"], "8")
 
@@ -131,6 +133,33 @@ class GenerateManifestTest(TempWork):
 
 
 class RecipeTest(TempWork):
+    def test_pinned_launcher_reads_effective_barrier_timeout(self):
+        launcher = (
+            self.work / "scripts" / "sglang_disagg"
+            / "sglang_disagg_mori_io_ep.sh"
+        )
+        launcher.write_text(
+            'BARRIER_TIMEOUT_SECONDS="${BARRIER_TIMEOUT_SECONDS:-3600}"\n'
+        )
+        tm.check_sglang_knobs(self.work, CONFIG)
+
+        wrong = {
+            **CONFIG,
+            "env_vars": {
+                **CONFIG["env_vars"],
+                "BARRIER_TIMEOUT_S": "1800",
+            },
+        }
+        wrong["env_vars"].pop("BARRIER_TIMEOUT_SECONDS")
+        with self.assertRaisesRegex(RuntimeError, "BARRIER_TIMEOUT_SECONDS"):
+            tm.check_sglang_knobs(self.work, wrong)
+
+        launcher.write_text(
+            'ROUTER_BARRIER_TIMEOUT_SECONDS="${ROUTER_BARRIER_TIMEOUT_SECONDS:-3600}"\n'
+        )
+        with self.assertRaisesRegex(RuntimeError, "does not read"):
+            tm.check_sglang_knobs(self.work, CONFIG)
+
     def test_base_pinned_and_patchelf_added(self):
         text = tm.sglang_recipe(self.work / "MAD", "rocm/sgl-dev@sha256:abc")
         self.assertIn("\nFROM rocm/sgl-dev@sha256:abc\n", text)

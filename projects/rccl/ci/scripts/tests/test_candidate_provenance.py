@@ -165,7 +165,8 @@ class CandidateCompositionTest(unittest.TestCase):
                 "version": f"2.40.0-develop:{SHA[:7]}",
                 "size": lib.stat().st_size,
             }
-            with mock.patch.object(tm, "_rccl_uses_kpack", return_value=False):
+            with mock.patch.object(tm, "_rccl_uses_kpack", return_value=False), \
+                    mock.patch.object(tm, "rccl_kpack_files", return_value=[]):
                 manifest = tm.candidate_provenance(SHA, artifact, tuner, lib, fp)
             self.assertEqual(manifest["candidate_sha"], SHA)
             self.assertEqual(manifest["tuner"]["source_sha256"], tm.sha256_file(tuner))
@@ -176,6 +177,7 @@ class CandidateCompositionTest(unittest.TestCase):
 
             bad = dict(fp, version=f"2.40.0-develop:{OTHER_SHA[:7]}")
             with mock.patch.object(tm, "_rccl_uses_kpack", return_value=False), \
+                    mock.patch.object(tm, "rccl_kpack_files", return_value=[]), \
                     self.assertRaisesRegex(RuntimeError, "does not match"):
                 tm.candidate_provenance(SHA, artifact, tuner, lib, bad)
 
@@ -185,6 +187,7 @@ class CandidateCompositionTest(unittest.TestCase):
                 "artifact_run_id": "123",
             }))
             with mock.patch.object(tm, "_rccl_uses_kpack", return_value=False), \
+                    mock.patch.object(tm, "rccl_kpack_files", return_value=[]), \
                     self.assertRaisesRegex(RuntimeError, "provenance mismatch"):
                 tm.candidate_provenance(SHA, artifact, tuner, lib, fp)
 
@@ -195,6 +198,7 @@ class CandidateCompositionTest(unittest.TestCase):
             }))
             dirty = dict(fp, version=f"2.40.0-develop:{SHA[:7]}+")
             with mock.patch.object(tm, "_rccl_uses_kpack", return_value=False), \
+                    mock.patch.object(tm, "rccl_kpack_files", return_value=[]), \
                     self.assertRaisesRegex(RuntimeError, "does not match"):
                 tm.candidate_provenance(SHA, artifact, tuner, lib, dirty)
 
@@ -366,6 +370,145 @@ class CandidateCompositionTest(unittest.TestCase):
             self.assertEqual(marker.read_text(), "keep\n")
             self.assertTrue((work / tm.OVERLAY_CTX).is_symlink())
 
+    def test_same_candidate_on_different_base_has_different_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            work.mkdir()
+            lib_dir = root / "artifact" / "lib"
+            lib_dir.mkdir(parents=True)
+            lib = lib_dir / "librccl.so"
+            lib.write_bytes(b"candidate")
+            tuner = root / "artifact" / "rccl_tuner_gfx950.csv"
+            tuner.write_text("tuner\n")
+            base_a = "rocm/primus@sha256:" + "a" * 64
+            base_b = "rocm/primus@sha256:" + "b" * 64
+
+            with mock.patch.object(tm, "_rccl_uses_kpack", return_value=False), \
+                    mock.patch.object(tm, "_needed_sonames", return_value=[]):
+                tag_a, staged_a = tm.stage_rccl_overlay(
+                    lib, tuner, "rocm/primus:v26.4", "gfx950", work,
+                    family="megatron", from_ref=base_a,
+                )
+                tag_b, staged_b = tm.stage_rccl_overlay(
+                    lib, tuner, "rocm/primus:v26.4", "gfx950", work,
+                    family="megatron", from_ref=base_b,
+                )
+
+            self.assertNotEqual(tag_a, tag_b)
+            self.assertNotEqual(
+                staged_a["overlay_asset_id"], staged_b["overlay_asset_id"]
+            )
+            self.assertNotEqual(
+                tm.candidate_overlay_identity("asset", base_b, "a" * 64),
+                tm.candidate_overlay_identity("asset", base_b, "b" * 64),
+            )
+            self.assertEqual(staged_b["base_digest"], base_b)
+            self.assertEqual(len(staged_b["recipe_sha256"]), 64)
+            dockerfile = (
+                work / tm.OVERLAY_CTX / tm.OVERLAY_DOCKERFILE
+            ).read_text()
+            self.assertIn(f"FROM {base_b}\n", dockerfile)
+            self.assertIn(
+                f'LABEL rccl.candidate.base-digest="{base_b}"',
+                dockerfile,
+            )
+            self.assertIn(
+                f'LABEL rccl.candidate.overlay-id="'
+                f'{staged_b["overlay_asset_id"]}"',
+                dockerfile,
+            )
+            self.assertIn(
+                f'LABEL rccl.candidate.recipe-sha256="'
+                f'{staged_b["recipe_sha256"]}"',
+                dockerfile,
+            )
+
+            (work / "scripts" / "primus_megatron-lm").mkdir(parents=True)
+            baseline_manifest = tm.generate_manifest(
+                "llama-3.1-70b-training",
+                tm.WORKLOAD_CONFIGS["llama-3.1-70b-training"],
+                tm.CLUSTER_CONFIGS["ruby"],
+                base_b,
+                2,
+                work,
+                run_dir=tm.prepare_phase_dir(work, tm.BASELINE),
+                pull_only=True,
+            )
+            baseline = json.loads(baseline_manifest.read_text())
+            self.assertEqual(
+                baseline["built_images"]["overlay"]["docker_image"], base_b
+            )
+
+    def test_maxtext_identity_records_exact_staged_primus_tree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            work.mkdir()
+            lib_dir = root / "artifact" / "lib"
+            lib_dir.mkdir(parents=True)
+            lib = lib_dir / "librccl.so"
+            lib.write_bytes(b"candidate")
+            tuner = root / "artifact" / "rccl_tuner_gfx950.csv"
+            tuner.write_text("tuner\n")
+            primus = root / "Primus"
+            primus.mkdir()
+            (primus / "primus-cli").write_text("#!/bin/sh\n")
+            (primus / "requirements-jax.txt").write_text("jax\n")
+            (primus / "payload.txt").write_text("one\n")
+            base = "rocm/jax-training@sha256:" + "a" * 64
+
+            with mock.patch.object(tm, "_rccl_uses_kpack", return_value=False), \
+                    mock.patch.object(tm, "_needed_sonames", return_value=[]):
+                _, staged = tm.stage_rccl_overlay(
+                    lib, tuner, "rocm/jax-training:maxtext-v26.6", "gfx950",
+                    work, family="maxtext", primus_dir=primus, from_ref=base,
+                )
+            staged_primus = work / tm.OVERLAY_CTX / "Primus"
+            self.assertEqual(
+                staged["primus_tree_sha256"],
+                tm.build_context_tree_identity(staged_primus),
+            )
+            dockerfile_text = (
+                work / tm.OVERLAY_CTX / tm.OVERLAY_DOCKERFILE
+            ).read_text()
+            label_free_recipe = "".join(
+                line for line in dockerfile_text.splitlines(keepends=True)
+                if not line.startswith("LABEL rccl.candidate.")
+            )
+            self.assertEqual(
+                staged["recipe_sha256"],
+                tm.candidate_recipe_identity(
+                    label_free_recipe, staged["primus_tree_sha256"]
+                ),
+            )
+            original_identity = staged["overlay_asset_id"]
+            payload = staged_primus / "payload.txt"
+            payload.chmod(0o700)
+            mode_changed_tree = tm.build_context_tree_identity(staged_primus)
+            self.assertNotEqual(
+                mode_changed_tree, staged["primus_tree_sha256"]
+            )
+            payload.chmod(0o644)
+            (staged_primus / "payload.txt").write_text("two\n")
+            changed_tree = tm.build_context_tree_identity(staged_primus)
+            self.assertNotEqual(changed_tree, staged["primus_tree_sha256"])
+            self.assertNotEqual(
+                tm.candidate_overlay_identity(
+                    staged["candidate_asset_id"],
+                    base,
+                    tm.candidate_recipe_identity(
+                        "same recipe", staged["primus_tree_sha256"]
+                    ),
+                ),
+                tm.candidate_overlay_identity(
+                    staged["candidate_asset_id"],
+                    base,
+                    tm.candidate_recipe_identity("same recipe", changed_tree),
+                ),
+            )
+            self.assertRegex(original_identity, r"^[0-9a-f]{16}$")
+
     def test_skip_overlay_bind_mounts_all_assets_and_skips_image_gate(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -446,19 +589,37 @@ class RuntimeVerificationTest(unittest.TestCase):
             root = Path(tmp)
             image_id = "sha256:" + "c" * 64
             tuner_sha = "e" * 64
+            base_digest = "rocm/primus@sha256:" + "a" * 64
+            overlay_id = "f" * 16
             for node in range(4):
                 (root / f"n{node}").write_text(
-                    f"n{node}\t{image_id}\t{tuner_sha}\n"
+                    f"n{node}\t{image_id}\t{tuner_sha}\t"
+                    f"{base_digest}\t{overlay_id}\n"
                 )
-            ok, _, got = tm.verify_image_identities(root, 4, tuner_sha)
+            ok, _, got = tm.verify_image_identities(
+                root, 4, tuner_sha, base_digest, overlay_id
+            )
             self.assertTrue(ok)
             self.assertEqual(got, image_id)
             (root / "n3").write_text(
-                "n3\tsha256:" + "d" * 64 + f"\t{tuner_sha}\n"
+                "n3\tsha256:" + "d" * 64
+                + f"\t{tuner_sha}\t{base_digest}\t{overlay_id}\n"
             )
-            ok, message, _ = tm.verify_image_identities(root, 4, tuner_sha)
+            ok, message, _ = tm.verify_image_identities(
+                root, 4, tuner_sha, base_digest, overlay_id
+            )
             self.assertFalse(ok)
             self.assertIn("mismatch", message)
+
+            (root / "n3").write_text(
+                f"n3\t{image_id}\t{tuner_sha}\t"
+                f"rocm/primus@sha256:{'b' * 64}\t{overlay_id}\n"
+            )
+            ok, message, _ = tm.verify_image_identities(
+                root, 4, tuner_sha, base_digest, overlay_id
+            )
+            self.assertFalse(ok)
+            self.assertIn("base digest mismatch", message)
 
 
 if __name__ == "__main__":
