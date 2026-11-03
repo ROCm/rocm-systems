@@ -212,15 +212,17 @@ struct TopologyBuildResult {
 ///
 ///   simdojo::SimulationEngine engine(loaded.engine_config);
 ///   engine.topology().set_root(loaded.take_root());
-///   loaded.wire_links(engine.topology());
+///   if (loaded.wire_links(engine.topology(), diagnostic.emitter()).failed())
+///     return; // report diagnostic.message()
 ///
 ///   // A multi-partition engine must have a partition policy installed before
-///   // create(), which otherwise throws.
+///   // create(), which otherwise returns failure.
 ///   if (loaded.engine_config.num_threads > 1 &&
 ///       !rocjitsu::amdgpu::partition_topology_by_xcds(
 ///           engine.topology(), soc, loaded.engine_config.num_threads))
 ///     return; // Report that multi-threaded topology requires an XCD.
-///   engine.create();
+///   if (engine.create(diagnostic.emitter()).failed())
+///     return; // report diagnostic.message()
 /// @endcode
 struct LoadedConfig {
   simdojo::SimulationEngine::Config engine_config;
@@ -277,7 +279,11 @@ struct LoadedConfig {
   std::unique_ptr<simdojo::CompositeComponent> take_root() { return std::move(build_result.root); }
 
   /// @brief Wire deferred link specs into a topology. Call after set_root().
-  void wire_links(simdojo::Topology &topo) { topo.wire_links(build_result.link_specs, exec_mode); }
+  /// @param topo Topology that owns the loaded root.
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
+  util::Result wire_links(simdojo::Topology &topo, util::DiagnosticEmitter emit_error = {}) {
+    return topo.wire_links(build_result.link_specs, exec_mode, emit_error);
+  }
 };
 
 /// @brief The identity and bus shape of the GPU a config describes.

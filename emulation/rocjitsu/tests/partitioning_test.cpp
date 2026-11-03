@@ -37,9 +37,9 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
-const std::string CONFIG_KMD_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x_kmd.json";
-const std::string CONFIG_2GPU_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x_kmd_2gpu.json";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi350x.json";
+const std::string CONFIG_KMD_PATH = std::string(CONFIG_DIR) + "/gfx950_mi350x_kmd.json";
+const std::string CONFIG_2GPU_PATH = std::string(CONFIG_DIR) + "/gfx950_mi350x_kmd_2gpu.json";
 const std::string CONFIG_1XCD_PATH = std::string(CONFIG_DIR) + "/gfx1100_w7900.json";
 const std::string CONFIG_CDNA5_PATH = std::string(CONFIG_DIR) + "/gfx1250_mi455x.json";
 const std::string CONFIG_RDNA4_PATH = std::string(CONFIG_DIR) + "/gfx1201_r9700.json";
@@ -94,9 +94,11 @@ build_partitioned_topology(uint32_t num_threads, util::DiagnosticEmitter emit_er
 
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  loaded.wire_links(engine->topology());
+  if (loaded.wire_links(engine->topology(), emit_error).failed())
+    return util::Result::failure();
   bool partitioned = amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads);
-  engine->create();
+  if (engine->create(emit_error).failed())
+    return util::Result::failure();
 
   return PartitionedTopology{std::move(loaded), soc, memory, std::move(engine), partitioned};
 }
@@ -503,7 +505,7 @@ TEST(ExecutionThreadBudgetTest, LaunchBudgetReplanesOnlyTheConfigItRewrites) {
 TEST(ExecutionThreadBudgetTest, PresetsKeepSiblingTablesConsistent) {
   util::StringDiagnostic config_diagnostic;
   for (const auto &paths :
-       {std::vector<std::string>{"gfx950_mi355x.json", "gfx950_mi355x_kmd.json"},
+       {std::vector<std::string>{"gfx950_mi350x.json", "gfx950_mi350x_kmd.json"},
         std::vector<std::string>{"gfx942_cdna3.json", "gfx942_cdna3_kmd.json"}}) {
     util::StringDiagnostic expected_diagnostic;
     auto expected_result = config::load_execution_thread_settings(
@@ -522,7 +524,7 @@ TEST(ExecutionThreadBudgetTest, PresetsKeepSiblingTablesConsistent) {
 }
 
 TEST(ExecutionThreadBudgetTest, MultiGpuPresetsKeepSerialDefaultsAndAllowDispatchOverrides) {
-  for (const auto &[name, gpus] : {std::pair{"gfx950_mi355x_kmd_2gpu.json", 2u},
+  for (const auto &[name, gpus] : {std::pair{"gfx950_mi350x_kmd_2gpu.json", 2u},
                                    std::pair{"gfx1250_mi455x_kmd_4gpu.json", 4u}}) {
     util::StringDiagnostic settings_diagnostic;
     auto settings_result = config::load_execution_thread_settings(
@@ -602,7 +604,7 @@ TEST(ExecutionThreadBudgetTest, DisablingHelpersKeepsSynchronousServerGranules) 
   struct Case {
     uint32_t budget, engines, dispatch;
   };
-  for (const auto *name : {"gfx950_mi355x.json", "gfx1250_mi455x.json"}) {
+  for (const auto *name : {"gfx950_mi350x.json", "gfx1250_mi455x.json"}) {
     const bool cdna5 = std::string_view(name) == "gfx1250_mi455x.json";
     util::StringDiagnostic settings_diagnostic;
     auto settings_result = config::load_execution_thread_settings(
@@ -627,7 +629,7 @@ TEST(ExecutionThreadBudgetTest, DisablingHelpersKeepsSynchronousServerGranules) 
 }
 
 TEST(ExecutionThreadBudgetTest, ServerPresetsAddHelpersWithoutDisplacingCpuWorkers) {
-  for (const char *name : {"gfx950_mi355x.json", "gfx950_mi355x_kmd.json", "gfx1250_mi455x.json"}) {
+  for (const char *name : {"gfx950_mi350x.json", "gfx950_mi350x_kmd.json", "gfx1250_mi455x.json"}) {
     SCOPED_TRACE(name);
     const bool cdna5 = std::string_view(name) == "gfx1250_mi455x.json";
     const uint32_t max_cpu = cdna5 ? 40 : 24;
@@ -730,12 +732,14 @@ TEST(XcdPartitioningTest, ClampPartitionCountUsesAllNonNullSocs) {
 }
 
 TEST(XcdPartitioningTest, ZeroPartitionsIsNoopWithoutManualPartitions) {
+  util::StringDiagnostic admission_diagnostic;
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   simdojo::Topology topology;
   topology.set_root(loaded.take_root());
-  loaded.wire_links(topology);
+  ASSERT_TRUE(loaded.wire_links(topology, admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   EXPECT_FALSE(amdgpu::partition_topology_by_xcds(topology, soc, 0));
   EXPECT_TRUE(topology.partitions().empty());
@@ -753,12 +757,14 @@ TEST(XcdPartitioningTest, NoXcdsIsNoopWithoutManualPartitions) {
 }
 
 TEST(XcdPartitioningTest, SinglePartitionAssignsAllComponentsToZero) {
+  util::StringDiagnostic admission_diagnostic;
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   simdojo::Topology topology;
   topology.set_root(loaded.take_root());
-  loaded.wire_links(topology);
+  ASSERT_TRUE(loaded.wire_links(topology, admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   ASSERT_TRUE(amdgpu::partition_topology_by_xcds(topology, soc, 1));
   ASSERT_EQ(topology.partitions().size(), 1u);
@@ -1012,6 +1018,7 @@ TEST(XcdPartitioningTest, LoaderResolvesZeroThreadsAcrossExtraGpuBuilds) {
 // than in a CI grep keeps every config covered as new ones are added.
 TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
   const std::set<std::string> kPinnedConfigs = {
+      "gfx950_mi350x_kmd_2gpu.json",
       "gfx950_mi355x_kmd_2gpu.json",
       "gfx1250_mi455x_kmd_4gpu.json",
       "gfx1250_mi455x_kmd_2node_net.json",
