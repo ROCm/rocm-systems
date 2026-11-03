@@ -1186,7 +1186,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
       SCOPED_TRACE(testing::Message() << c.name << (store ? ", store" : ", load"));
       Gfx1250Sim sim;
       ASSERT_NO_FATAL_FAILURE(sim.initialize());
-      auto &observer = install_tensor_dma_observer(sim);
+      auto &observer = install_tensor_dma_issue_observer(sim);
       auto *cu = sim.cu();
       auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
       ASSERT_NE(wf, nullptr);
@@ -1217,13 +1217,11 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
       ASSERT_NE(inst, nullptr);
       EXPECT_EQ(cu->execute_instruction(inst.get(), *wf).succeeded(), c.succeeds);
       if (c.succeeds) {
-        EXPECT_EQ(observer.accesses.size(), 1u);
-        for (const auto &access : observer.accesses) {
-          EXPECT_TRUE(access.addresses.empty());
-          EXPECT_TRUE(access.lds_ranges.empty());
-        }
+        EXPECT_EQ(observer.issues.size(), 1u);
+        for (const auto &issue : observer.issues)
+          EXPECT_TRUE(issue.lds_ranges.empty());
       } else {
-        EXPECT_TRUE(observer.accesses.empty());
+        EXPECT_TRUE(observer.issues.empty());
       }
       for (uint32_t i = 0; i < 16; ++i) {
         EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * 4), kSentinel) << i;
@@ -1312,7 +1310,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaNopTilesArriveAtTheirBarrierOnceAndNullTenso
     SCOPED_TRACE(c.name);
     Gfx1250Sim sim;
     ASSERT_NO_FATAL_FAILURE(sim.initialize());
-    auto &observer = install_tensor_dma_observer(sim);
+    auto &observer = install_tensor_dma_issue_observer(sim);
     auto *cu = sim.cu();
     auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
@@ -1342,9 +1340,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaNopTilesArriveAtTheirBarrierOnceAndNullTenso
 
     EXPECT_EQ(cu->lds().read64(wf->lds_base() + kBarrierLdsAddr),
               c.arrives ? kArrivedOnce : kUnarrived);
-    ASSERT_EQ(observer.accesses.size(), 1u);
-    EXPECT_TRUE(observer.accesses[0].addresses.empty());
-    EXPECT_TRUE(observer.accesses[0].lds_ranges.empty());
+    ASSERT_EQ(observer.issues.size(), 1u);
+    EXPECT_TRUE(observer.issues[0].lds_ranges.empty());
     EXPECT_EQ(cu->lds().read32(wf->lds_base()), kSentinel);
     EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), kSentinel);
   }
