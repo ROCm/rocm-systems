@@ -22,7 +22,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 120
     PRELOAD "$<TARGET_FILE:code-object-host-symbols-client>"
     PASS_REGULAR_EXPRESSION
-        "Test PASSED: Successfully verified host function id assignment!"
+        "Test PASSED: Successfully verified host function ids and subscription isolation!"
     FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}|SEGFAULT|Failed to \.*|Context is not valid|ERROR: \.*"
     )
