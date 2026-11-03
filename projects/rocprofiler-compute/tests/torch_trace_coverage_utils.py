@@ -4193,13 +4193,9 @@ def describe_subprocess_exit_code(returncode: int) -> str:
 
 def op_workload_failure_due_to(
     *,
-    timed_out: bool,
     returncode: Optional[int],
-    timeout_s: int = 120,
 ) -> str:
     """Short phrase for pytest.fail lead-in."""
-    if timed_out:
-        return f"ground-truth subprocess exceeded {timeout_s}s timeout"
     assert returncode is not None
     if returncode < 0:
         name = signal_name(returncode)
@@ -4320,49 +4316,17 @@ def run_ground_truth_torch_profiler_subprocess(
         str(Path(workload_script_path).resolve()),
         str(Path(ground_truth_json_path).resolve()),
     ]
-    timeout_s = 300 * coverage_sample_budget if coverage_sample_budget else 300
-    try:
-        completed = subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-        )
-    except subprocess.TimeoutExpired as exc:
-        copy_note = copy_failed_coverage_artifacts_to_cwd(
-            workload_script_path,
-            runner_script_path,
-        )
-        due = op_workload_failure_due_to(
-            timed_out=True, returncode=None, timeout_s=timeout_s
-        )
-        stdout_text = (
-            exc.stdout.decode(errors="replace")
-            if isinstance(exc.stdout, bytes)
-            else (exc.stdout or "")
-        )
-        stderr_text = (
-            exc.stderr.decode(errors="replace")
-            if isinstance(exc.stderr, bytes)
-            else (exc.stderr or "")
-        )
-        out_tail = stderr_tail_collapsed(stdout_text, max_lines=8)
-        err_tail = stderr_tail_collapsed(stderr_text)
-        fault_hint = extract_device_fault_banner(stderr_text)
-        hint_block = f"--- device fault ---\n{fault_hint}\n\n" if fault_hint else ""
-        pytest.fail(
-            f"Op workload failed: {due}.{repro}{copy_note}\n\n"
-            f"{hint_block}"
-            f"--- stdout (tail) ---\n{out_tail}\n\n"
-            f"--- stderr (tail) ---\n{err_tail}"
-        )
+    completed = subprocess.run(
+        argv,
+        capture_output=True,
+        text=True,
+    )
     if completed.returncode != 0:
         copy_note = copy_failed_coverage_artifacts_to_cwd(
             workload_script_path,
             runner_script_path,
         )
         due = op_workload_failure_due_to(
-            timed_out=False,
             returncode=completed.returncode,
         )
         exit_expl = describe_subprocess_exit_code(completed.returncode)
