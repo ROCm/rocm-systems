@@ -22,7 +22,6 @@ Panel Config:
           unit: Percent
       comparable: false
       cli_style: simple_bar
-      tui_style: simple_bar
   - metric_table:
       id: 1302
       title: L1I cache accesses

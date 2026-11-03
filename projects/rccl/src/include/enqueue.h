@@ -115,6 +115,27 @@ static inline bool ncclAllGatherIsInPlace(const void* sendbuff, const void* recv
   return (uintptr_t)sendbuff == (uintptr_t)recvbuff + size_t(rank) * perRankBytes;
 }
 
+// [RCCL] Whether the Tma symmetric kernels may run: input and output must sit at the same offset
+// modulo 16 within their windows. The answer must be the same on every rank, or ranks pick
+// different symmetric kernels and launch grids that never meet at the LSA barrier. Both windows
+// must therefore be symmetric: an unregistered buffer's raw address differs by rank. In-place
+// AllGather and ReduceScatter shift one side by rank * perRankBytes, so there the per-rank slice
+// must itself be 16 B aligned.
+static inline bool ncclSymAligned16B(ncclFunc_t func, int rank, const void* sendbuff, const void* recvbuff,
+                                     struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin,
+                                     size_t perRankBytes) {
+  if (sendWin == nullptr || recvWin == nullptr || !(sendWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) ||
+      !(recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
+    return false;
+  }
+  size_t inputOff = (uintptr_t)sendbuff - (uintptr_t)sendWin->userPtr;
+  size_t outputOff = (uintptr_t)recvbuff - (uintptr_t)recvWin->userPtr;
+  if (uint32_t(inputOff - outputOff) % 16 != 0) return false;
+  bool inPlace = (func == ncclFuncAllGather && ncclAllGatherIsInPlace(sendbuff, recvbuff, rank, perRankBytes)) ||
+                 (func == ncclFuncReduceScatter && ncclAllGatherIsInPlace(recvbuff, sendbuff, rank, perRankBytes));
+  return !inPlace || perRankBytes % 16 == 0;
+}
+
 ncclResult_t ncclGetCollNetSupport(struct ncclComm* comm, struct ncclTaskColl* task, int* collNetSupport);
 ncclResult_t ncclGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task, int collNetSupport, int nvlsSupport,
                              int numPipeOps, ncclSimInfo_t* simInfo = NULL);
