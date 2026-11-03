@@ -148,12 +148,6 @@ bool deviceIsFnuz() {
   return cached == 1;
 }
 
-bool isGfx1250(int device) {
-  hipDeviceProp_t prop{};
-  if (hipGetDeviceProperties(&prop, device) != hipSuccess) return false;
-  return std::string(prop.gcnArchName).rfind("gfx1250", 0) == 0;
-}
-
 // e4m3 tops out at 240.0 under FNUZ and 448.0 under OCP; e5m2 is 57344.0 in both.
 float fp8MaxFinite(bool isE5m2, bool fnuz) {
   if (isE5m2) return 57344.0f;

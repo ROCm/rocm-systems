@@ -53,11 +53,6 @@ extern std::function<ncclResult_t(ncclComm_t)> g_ncclCommDestroy;
 // rcclEnsureHierarchicalComms creates its two child communicators through this API.
 extern std::function<ncclResult_t(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*)> g_ncclCommSplit;
 
-// src/channel.cc: the fake initChannel does NOT allocate ring->userRanks/rankToIndex like the real one;
-// callers must supply storage.
-extern ncclResult_t g_initChannelResult;
-extern int g_initChannelLastId;
-
 // commCleanup() ordering oracle (init.cc:3696). The block is pure ordering + error propagation, so the
 // oracle is the call-order log, not any return code. Every teardown step appends its own name in call
 // order: "tunerFinalize" (pushed by the test's own ncclTuner_t::finalize), "tunerUnload", and "commFree"
@@ -66,6 +61,15 @@ extern int g_initChannelLastId;
 // note a failing commFree bails before free(comm), so such a test must free it itself.
 extern std::vector<std::string> g_cleanupCallOrder;
 extern ncclResult_t g_ncclCeFinalizeResult;
+
+// src/init.cc commFree records these and returns the first GIN error after the
+// sharedRes frees. ncclRmaProxyFinalize still returns immediately.
+extern ncclResult_t g_ncclGinFinalizeResult;
+extern int g_ncclGinFinalizeCalls;
+extern ncclResult_t g_ncclGinHostFinalizeResult;
+extern int g_ncclGinHostFinalizeCalls;
+extern ncclResult_t g_ncclRmaProxyFinalizeResult;
+extern int g_ncclRmaProxyFinalizeCalls;
 // src/plugin/tuner.cc: the comm commCleanup forwarded to ncclTunerPluginUnload.
 extern struct ncclComm* g_ncclTunerPluginUnloadLastComm;
 

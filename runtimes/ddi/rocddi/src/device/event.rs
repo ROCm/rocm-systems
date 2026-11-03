@@ -12,6 +12,8 @@
 use crate::Error;
 use crate::device::Device;
 use crate::driver;
+use std::thread;
+use std::time::{Duration, Instant};
 
 /// Driver-independent cause of a GPU virtual-memory fault.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -101,6 +103,7 @@ pub enum DeviceEvent {
 /// subscriber fills the finite event buffer, native polling waits until that
 /// subscriber reads or drops its backlog.
 pub struct DeviceEventSubscription {
+    /// Concrete driver observer and its independent delivery cursor.
     inner: driver::EventSubscription,
 }
 
@@ -113,6 +116,38 @@ impl DeviceEventSubscription {
     /// later poll can still retrieve an event recorded before a polling failure.
     pub fn poll(&mut self) -> Result<Option<DeviceEvent>, Error> {
         self.inner.poll()
+    }
+
+    /// Waits up to `timeout` for the next event on this subscription.
+    ///
+    /// A zero timeout observes once. `Busy` means another subscriber has
+    /// filled the retained event buffer and can clear it by reading; native
+    /// driver errors are returned to the caller without an implicit retry.
+    ///
+    /// # Errors
+    /// Reports native polling and driver-lifetime failures.
+    pub fn wait(&mut self, timeout: Duration) -> Result<Option<DeviceEvent>, Error> {
+        let started = Instant::now();
+        loop {
+            let buffer_full = match self.poll() {
+                Ok(Some(event)) => return Ok(Some(event)),
+                Ok(None) => false,
+                Err(error) if error.kind() == crate::ErrorKind::Busy => true,
+                Err(error) => return Err(error),
+            };
+            let remaining = timeout.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                return Ok(None);
+            }
+            if buffer_full {
+                // Another subscriber must drain the retained buffer. Its
+                // signaled native event would cause a busy wait here.
+                thread::sleep(remaining.min(Duration::from_millis(1)));
+            } else {
+                self.inner
+                    .wait_native(remaining.min(Duration::from_millis(10)))?;
+            }
+        }
     }
 }
 

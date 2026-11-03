@@ -28,18 +28,19 @@
 /// starts at the original entry and skips the prologue. The simulator does not
 /// check the entry's 256-byte alignment, so this cannot catch a misplaced stub.
 ///
-/// Wave size is a place they do **not** agree: the synthesized descriptor never
-/// sets ENABLE_WAVEFRONT_SIZE32, so kernel_wavefront_size() reports 64 and an
-/// RDNA target dispatches Wave64 however its patched ELF was planned. The
-/// wave_size constructor argument only says how many lanes to read back. A test
-/// whose correctness depends on the executing wave size cannot get it here.
+/// Wave size agrees only when a test asks: the synthesized descriptor sets
+/// ENABLE_WAVEFRONT_SIZE32 only after set_wave32_dispatch(). Otherwise
+/// kernel_wavefront_size() reports 64 and an RDNA target dispatches Wave64
+/// however its patched ELF was planned, and initialize()'s wave_size only says
+/// how many lanes to dispatch and read back.
 
 #pragma once
 
 #include "../aql_queue.h"
+#include "../config_test_util.h"
 #include "../halt_snapshot_plugin.h"
-#include "embedded_schema.h"
 
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -48,11 +49,7 @@
 
 #include "simdojo/sim/simulation.h"
 
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
+#include <gtest/gtest.h>
 
 #include <cstdint>
 #include <memory>
@@ -66,13 +63,15 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace test {
 
-/// @brief One-CU simulator (CDNA3, CDNA4, or RDNA4, selected by the constructor
+/// @brief One-CU simulator (CDNA3, CDNA4, or RDNA4, selected by initialize()
 ///        arch) for executing a patched DBI kernel.
 class DbiSim {
 public:
   /// @param arch Config/VM arch string: "cdna3", "cdna4", or "rdna4".
   /// @param wave_size 64 for CDNA, 32 for RDNA4.
-  DbiSim(std::string_view arch, uint32_t wave_size) : wave_size_(wave_size) {
+  void initialize(std::string_view arch, uint32_t wave_size) {
+    util::StringDiagnostic admission_diagnostic;
+    wave_size_ = wave_size;
     const std::string json =
         std::string(R"({"max_ticks":100000,"num_threads":1,"vm":{"arch":")") + std::string(arch) +
         R"("},)"
@@ -91,13 +90,15 @@ public:
         R"({"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},)"
         R"({"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10})"
         R"(]}})";
-    loaded_ = config::load_config_from_string(json, kEmbeddedSchema);
+    ASSERT_TRUE(load_valid_config_from_string(json, loaded_));
     soc_ = loaded_.soc();
     mem_ = loaded_.memory();
     engine_ = std::make_unique<simdojo::SimulationEngine>(loaded_.engine_config);
     engine_->topology().set_root(loaded_.take_root());
-    loaded_.wire_links(engine_->topology());
-    engine_->create();
+    ASSERT_TRUE(loaded_.wire_links(engine_->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine_->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     plugin_group_ = make_halt_snapshot_group(&snapshot_plugin_);
     soc_->set_plugin_group(plugin_group_);
   }
@@ -121,10 +122,10 @@ public:
   /// CP's fallback for internal test dispatches, the else branch of the enable-bit
   /// walk in CommandProcessor::init_wavefront_regs.
   /// That path writes nothing when the dispatch carries no kernarg address.
-  void set_kernarg(std::vector<uint8_t> bytes,
-                   uint32_t properties =
-                       rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
-                   uint32_t user_sgpr_count = 2) {
+  void set_kernarg(
+      std::vector<uint8_t> bytes,
+      uint32_t properties = rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+      uint32_t user_sgpr_count = 2) {
     kernarg_bytes_ = std::move(bytes);
     kernarg_properties_ = properties;
     user_sgpr_count_ = user_sgpr_count;
@@ -141,6 +142,13 @@ public:
     mem_->load_image(bytes.data(), bytes.size(), addr);
   }
 
+  /// @brief Dispatch Wave32 on an RDNA target, matching a patched descriptor
+  ///        with the Wave32 bit set. Requires an initialize() wave_size of 32.
+  void set_wave32_dispatch() {
+    EXPECT_EQ(wave_size_, 32u) << "set_wave32_dispatch() needs initialize(arch, 32)";
+    wave32_dispatch_ = true;
+  }
+
   /// @brief Offset into the code passed to run_*() that dispatch enters at, as
   ///        the patched descriptor's .text-relative entry. Defaults to 0.
   void set_entry_offset(uint64_t offset) { entry_offset_ = offset; }
@@ -152,17 +160,20 @@ public:
   /// @note The descriptor is synthesized, not the patched object's -- see the
   ///   file-level warning.
   uint64_t write_kernel(uint64_t addr, const std::vector<uint32_t> &code, uint32_t private_bytes) {
-    using namespace rocr::llvm::amdhsa;
+    using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset =
         static_cast<int64_t>(sizeof(kernel_descriptor_t) + entry_offset_);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                    ((256 / 8) - 1));
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                       ((256 / 8) - 1));
     // 104 SGPRs is ample for the probe link pair s[30:31] and envelope temps.
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                    ((104 / 8) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgpr_count_);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                       ((104 / 8) - 1));
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgpr_count_);
     kd.kernel_code_properties = kernarg_properties_;
+    if (wave32_dispatch_)
+      RJ_AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                         1);
     kd.kernarg_size = static_cast<uint32_t>(kernarg_bytes_.size());
     kd.private_segment_fixed_size = private_bytes;
 
@@ -270,6 +281,7 @@ private:
   }
 
   uint32_t wave_size_ = 64;
+  bool wave32_dispatch_ = false;
   uint32_t queue_seq_ = 0;
   uint64_t entry_offset_ = 0;
   uint32_t kernarg_properties_ = 0;

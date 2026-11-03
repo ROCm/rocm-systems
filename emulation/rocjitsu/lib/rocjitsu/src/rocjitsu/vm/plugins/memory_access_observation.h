@@ -10,7 +10,9 @@
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -23,7 +25,7 @@ namespace rocjitsu::amdgpu {
 enum class MemoryRoute : uint8_t {
   UNKNOWN, ///< Not issued to any pipeline; reported so it is not silently lost.
   SCALAR,  ///< Scalar (constant) memory.
-  GLOBAL,  ///< Global, buffer, or scratch.
+  GLOBAL,  ///< Global, buffer, scratch, or mixed-aperture FLAT.
   LOCAL,   ///< Local data share.
 };
 
@@ -73,14 +75,25 @@ constexpr const char *decoded_memory_space_name(DecodedMemorySpace space) {
   return "unknown";
 }
 
+/// @brief Bytes retained below an exclusive bound, rounded to complete elements.
+constexpr uint64_t whole_element_bytes_in_range(uint64_t address, uint64_t bytes,
+                                                uint64_t element_bytes, uint64_t end) {
+  if (element_bytes == 0)
+    return 0;
+  const uint64_t available = address < end ? end - address : 0;
+  return std::min(bytes, available / element_bytes * element_bytes);
+}
+
 /// @brief One memory instruction as the memory system will see it.
 ///
 /// @details Reported after routing rather than before, which is the whole
-/// point. A FLAT access to the shared aperture is decoded as a global
-/// instruction and issued to the local pipeline with its addresses rewritten
-/// into the workgroup's LDS allocation; an observer that looked before routing
-/// would see a global access to an address the memory system never uses, and
-/// would charge it against the wrong cache with the wrong hit rate.
+/// point. A uniform FLAT access to the shared aperture is issued to the local
+/// pipeline with its addresses rewritten into the workgroup's LDS allocation.
+/// Mixed-aperture FLAT uses the global pipeline, which separates the lanes for
+/// access to each backing store. On either route, the observation reports
+/// effective shared addresses in @ref addresses and preserves the originals
+/// in @ref pre_routing_addresses. The lanes remain identified by
+/// @ref flat_local_lane_mask and @ref flat_dds_lane_mask.
 ///
 /// Everything here is a fact, not an estimate. Where a fact is missing --
 /// a lane whose address could not be resolved, a route with no pipeline --
@@ -113,12 +126,12 @@ struct MemoryAccessObservation {
   /// an explicit SCRATCH access remains distinguishable from FLAT lanes that
   /// resolved to scratch.
   DecodedMemorySpace decoded_space = DecodedMemorySpace::UNKNOWN;
-  /// @brief Whether a FLAT access was rewritten from global into LDS.
+  /// @brief Whether FLAT selected the uniform shared-aperture local route.
   ///
-  /// @details True only for the aperture case: the instruction decoded as
-  /// global, and both its route and its addresses were changed. A consumer
-  /// counting "how much of this kernel is really LDS traffic" needs to
-  /// separate these from instructions that were LDS to begin with.
+  /// @details True only when all requesting FLAT lanes use the shared aperture.
+  /// Mixed requests leave this false even though their LDS addresses are also
+  /// normalized. Use @ref flat_local_lane_mask and @ref flat_dds_lane_mask to
+  /// account for shared-aperture traffic on either route.
   bool normalized_to_local = false;
 
   /// @brief Whether the access returns a value to registers.
@@ -136,9 +149,13 @@ struct MemoryAccessObservation {
   /// per requesting lane over-reports by the lane count.
   AtomicOp atomic_op = AtomicOp::NONE;
   Mtype mtype = Mtype::RW;
-  /// @brief The counter this access will post to, which is what an s_waitcnt
-  ///        naming that counter will wait on. Set by routing, not by decode:
-  ///        an aperture-rewritten FLAT posts to LGKMCNT, not VMCNT.
+  /// @brief The routing-selected counter for this access.
+  ///
+  /// @details Uniform shared FLAT selects its LDS counter. Mixed FLAT retains
+  /// its VMEM counter here, while @ref VectorMemState::routed_issue_info carries
+  /// both VMEM and LDS obligations. This scalar field does not describe the
+  /// complete wait requirement; for mixed FLAT, consult the routed issue's
+  /// counter_obligations().
   WaitCounterType wait_counter = WaitCounterType::VMCNT;
 
   /// @brief Lanes in the issuing wavefront; 1 for scalar, 0 when the route is
@@ -164,11 +181,11 @@ struct MemoryAccessObservation {
   /// than the incoming EXEC mask selects. It is always limited to
   /// @ref wavefront_size lanes.
   uint64_t architectural_exec_lane_mask = 0;
-  /// @brief Lanes whose address resolved to something the memory system can
-  ///        use. A lane that is active but not valid went out of bounds or
-  ///        through an unmapped aperture.
+  /// @brief Lanes whose address resolved for routing. Address-generation bounds
+  ///        can remove lanes here; later backing checks can reject bytes from
+  ///        a routed request without changing this mask.
   uint64_t valid_lane_mask = 0;
-  /// @brief Lanes that actually produce a memory request.
+  /// @brief Lanes producing a nominal pipeline request, before backing checks.
   ///
   /// @details Differs from @ref valid_lane_mask only for the wave64 transpose
   /// loads that issue through the low half -- a `WMMA_TR_B8`, or a global
@@ -182,9 +199,8 @@ struct MemoryAccessObservation {
   /// @brief Requesting FLAT lanes whose original addresses resolve to LDS.
   ///
   /// @details Computed before routing rewrites any address. This remains
-  /// meaningful when a FLAT wave mixes LDS and non-LDS lanes even though the
-  /// simulator currently selects one pipeline for the whole instruction. It
-  /// is a subset of @ref request_lane_mask, disjoint from
+  /// meaningful when a FLAT wave mixes LDS and non-LDS lanes on the global
+  /// pipeline. It is a subset of @ref request_lane_mask, disjoint from
   /// @ref scratch_lane_mask and @ref flat_dds_lane_mask, and always zero for
   /// non-FLAT instructions.
   uint64_t flat_local_lane_mask = 0;
@@ -193,11 +209,27 @@ struct MemoryAccessObservation {
   /// @details GFX1250 splits its 4-GiB shared aperture at offset bit 31: the
   /// lower half is LDS and the upper half is direct data share (DDS). FFM
   /// reports both as LDS resources, but rejects DDS stores and atomics. This
-  /// mask preserves that distinction after RocJITsu routes both halves to the
-  /// local pipeline. It is a subset of @ref request_lane_mask, disjoint from
+  /// mask preserves that distinction on either functional route. It is always
+  /// zero on other architectures, where shared-aperture lanes remain LDS.
+  /// It is a subset of @ref request_lane_mask, disjoint from
   /// @ref scratch_lane_mask and @ref flat_local_lane_mask, and always zero for
   /// non-FLAT instructions.
   uint64_t flat_dds_lane_mask = 0;
+  /// @brief Ordinary FLAT LDS requests rejected in full by allocation bounds.
+  /// @details A subset of @ref flat_local_lane_mask. The addresses and nominal
+  /// request/counter participation remain intact. RDNA4 captures this at issue;
+  /// other architectures and non-FLAT instructions leave it zero. This reports
+  /// functional rejection and makes no statement about timing or bank traffic.
+  uint64_t flat_local_oob_lane_mask = 0;
+  /// @brief Captured exclusive LDS allocation end for RDNA4 FLAT requests.
+  /// @details Effective addresses below this bound can retain a valid prefix.
+  /// Ordinary transfers retain complete memory elements (DWORDs for multiword
+  /// transfers); atomics require their complete element. The bound includes the
+  /// workgroup base and remains fixed across retries. It is the modeled
+  /// `lds_base + lds_size`, including the current 256-byte scheduler rounding;
+  /// PM4 sizes may already be 512-byte multiples before that rounding. Target
+  /// allocation and encoding granules remain unmodeled. Unset for other paths.
+  std::optional<uint64_t> flat_local_allocation_end;
   /// @brief Byte stride between consecutive elements of a scratch lane. Zero
   ///        when the access is contiguous, which every non-scratch access is.
   ///
@@ -220,16 +252,25 @@ struct MemoryAccessObservation {
   /// @brief Address each lane accesses, @ref wavefront_size entries.
   ///
   /// @details Only entries selected by @ref valid_lane_mask are meaningful.
+  /// Ordinary FLAT LDS lanes report effective allocation addresses on either
+  /// route, which can still be outside the LDS backing. CDNA5 DDS lanes also
+  /// undergo LDS-base arithmetic, but their values identify neither a DDS
+  /// backing location nor a valid LDS allocation address. DDS execution is
+  /// unsupported; use @ref flat_dds_lane_mask to distinguish those lanes.
+  /// Their original aperture addresses are in @ref pre_routing_addresses.
   std::span<const uint64_t> addresses;
-  /// @brief Addresses before routing changed them, when it did.
+  /// @brief Addresses before shared-aperture normalization, when it occurred.
   ///
-  /// @details Empty when routing preserved every address. Otherwise it has
-  /// @ref wavefront_size entries corresponding one-for-one with @ref
+  /// @details Empty when the observation required no normalization. Otherwise
+  /// it has @ref wavefront_size entries corresponding one-for-one with @ref
   /// addresses; only entries selected by @ref valid_lane_mask are meaningful.
   /// The span is borrowed for the callback just like @ref addresses. A FLAT
   /// access rewritten through the shared aperture uses this to retain the
   /// original aperture addresses while @ref addresses reports the effective
-  /// LDS allocation addresses.
+  /// LDS allocation addresses. Both uniform and mixed FLAT execution use the
+  /// same normalized addresses as the observation. CDNA5 DDS values are only
+  /// arithmetic results, not backing addresses; requesting DDS lanes cause an
+  /// unsupported-execution diagnostic and fault before any memory effects.
   std::span<const uint64_t> pre_routing_addresses;
   /// @brief Per-element lanes requesting memory traffic. Buffer bounds can
   ///        narrow later elements; block transfers can have arbitrary M0 holes.
@@ -244,8 +285,8 @@ struct MemoryAccessObservation {
   /// twice @ref bytes_per_lane().
   std::span<const uint64_t> secondary_addresses;
 
-  /// @brief Bytes each participating lane moves through one address set,
-  ///        ignoring scratch swizzling. Double it when @ref
+  /// @brief Nominal bytes each participating lane requests through one address
+  ///        set, before backing rejection. Double it when @ref
   ///        secondary_addresses is non-empty.
   uint64_t bytes_per_lane() const {
     return static_cast<uint64_t>(element_size_bytes) * elements_per_lane;

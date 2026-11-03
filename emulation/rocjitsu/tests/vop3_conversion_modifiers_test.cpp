@@ -129,8 +129,9 @@ TEST(RdnaVop3ConversionTest, FloatToHalfPreservesOverflowMode) {
           ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
           for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
             const auto &c = cases[lane % std::size(cases)];
-            const uint32_t expected =
-                exec & (1ull << lane) ? (fp16_ovfl ? c.saturated : c.normal) : 0xdeadbeefu;
+            const uint32_t expected = exec & (1ull << lane)
+                                          ? 0xdead0000u | (fp16_ovfl ? c.saturated : c.normal)
+                                          : 0xdeadbeefu;
             EXPECT_EQ(cu->read_vgpr(vb + 2, lane), expected)
                 << "arch=" << arch << " input=" << c.input << " fp16_ovfl=" << fp16_ovfl
                 << " scalar=" << force_scalar << " exec=" << exec << " lane=" << lane;
@@ -209,13 +210,74 @@ TEST_P(Vop3ConversionModifierTest, FloatToIntegerConversionAppliesSourceModifier
   }
 }
 
+TEST_P(Vop3ConversionModifierTest, FloatToDoubleConversionAppliesModifiers) {
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("cvt_f64_f32_modifier_mem");
+    amdgpu::L2Cache l2("cvt_f64_f32_modifier_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("cvt_f64_f32_modifier", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    const uint32_t vb = wf->vgpr_alloc().base;
+    constexpr uint64_t sentinel = 0xdeadbeefcafef00dull;
+
+    // VOP3 V_CVT_F64_F32 is opcode 336 on GFX9 and 400 on later encodings.
+    for (uint32_t source_modifiers = 0; source_modifiers < 4; ++source_modifiers) {
+      for (uint32_t omod = 0; omod < 4; ++omod) {
+        for (uint32_t clamp = 0; clamp < 2; ++clamp) {
+          const std::array<uint32_t, 2> words{
+              (gfx9() ? 0xd0000002u : 0xd4000002u) | ((gfx9() ? 336u : 400u) << 16) |
+                  (clamp << 15) | ((source_modifiers & 1u) << 8),
+              256u | (omod << 27) | ((source_modifiers >> 1) << 29)};
+          std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+          ASSERT_NE(inst, nullptr);
+
+          for (uint64_t exec : {wf->wf_size() == 64 ? ~0ull : 0xffffffffull, 0x55ull}) {
+            wf->set_exec(exec);
+            for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+              cu->write_vgpr(vb, lane, std::bit_cast<uint32_t>(-7.75f));
+              cu->write_vgpr(vb + 2, lane, static_cast<uint32_t>(sentinel));
+              cu->write_vgpr(vb + 3, lane, static_cast<uint32_t>(sentinel >> 32));
+            }
+
+            ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+            const bool positive = source_modifiers == 1 || source_modifiers == 2;
+            double expected_value = positive ? 7.75 : -7.75;
+            expected_value *= std::array{1.0, 2.0, 4.0, 0.5}[omod];
+            if (clamp)
+              expected_value = std::clamp(expected_value, 0.0, 1.0);
+            const uint64_t expected = std::bit_cast<uint64_t>(expected_value);
+            for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+              const uint64_t actual = static_cast<uint64_t>(cu->read_vgpr(vb + 2, lane)) |
+                                      (static_cast<uint64_t>(cu->read_vgpr(vb + 3, lane)) << 32);
+              EXPECT_EQ(actual, exec & (1ull << lane) ? expected : sentinel)
+                  << "arch=" << GetParam() << " source_modifiers=" << source_modifiers
+                  << " omod=" << omod << " clamp=" << clamp << " scalar=" << force_scalar
+                  << " exec=" << exec << " lane=" << lane;
+            }
+          }
+        }
+      }
+    }
+    wf->halt();
+  }
+}
+
 TEST_P(Vop3ConversionModifierTest, NearestRoundsTiesUpWithoutRoundingAdjacentInputs) {
   struct Case {
     uint32_t bits;
     int32_t expected;
   };
-  // Ties and adjacent representable values match physical gfx1100/gfx1201.
-  // The same rounding rule is specified for RPI on earlier RDNA and CDNA.
+  // Ties, adjacent representable values and NaNs match physical gfx1100/gfx1201.
+  // A NaN saturates by its sign bit. The same rules are applied to RPI on
+  // earlier RDNA and CDNA without hardware verification.
   constexpr Case cases[] = {
       {0xc0200001, -3},          {0xc0200000, -2},        {0xc01fffff, -2},
       {0xbfc00001, -2},          {0xbfc00000, -1},        {0xbfbfffff, -1},
@@ -228,8 +290,8 @@ TEST_P(Vop3ConversionModifierTest, NearestRoundsTiesUpWithoutRoundingAdjacentInp
       {0x4b800000, 16777216},    {0xcb800000, -16777216}, {0x4effffff, 2147483520},
       {0xceffffff, -2147483520}, {0x4f000000, INT32_MAX}, {0xcf000000, INT32_MIN},
       {0x4f000001, INT32_MAX},   {0xcf000001, INT32_MIN}, {0x7f800000, INT32_MAX},
-      {0xff800000, INT32_MIN},   {0x7fc00000, 0},         {0xffc00000, 0},
-      {0x7f800001, 0},
+      {0xff800000, INT32_MIN},   {0x7fc00000, INT32_MAX}, {0xffc00000, INT32_MIN},
+      {0x7f800001, INT32_MAX},
   };
   for (bool force_scalar : {false, true}) {
     ForceScalarGuard guard(force_scalar);
@@ -279,7 +341,8 @@ TEST_P(Vop3ConversionModifierTest, PackedRtzPreservesIndependentSourceModifiers)
     uint16_t packed;
   };
   // Explicit RTZ results include discarded mantissa bits, signed zero,
-  // a half subnormal, and finite overflow. The conversion ignores MODE rounding.
+  // a half subnormal, and finite overflow. The conversion ignores MODE rounding;
+  // as on gfx1201, the subnormal flushes when MODE disables F16 output denormals.
   constexpr Case cases[] = {{0xbf803fff, 0xbc01}, {0x40490fdb, 0x4248}, {0x80000000, 0x8000},
                             {0x477fffff, 0x7bff}, {0xb3ffffff, 0x8001}, {0x3fffffff, 0x3fff},
                             {0xc0200000, 0xc100}, {0x3f000000, 0x3800}};
@@ -306,8 +369,9 @@ TEST_P(Vop3ConversionModifierTest, PackedRtzPreservesIndependentSourceModifiers)
                                             256u | (257u << 9) | (neg_mask << 29)};
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
         ASSERT_NE(inst, nullptr);
-        for (uint32_t mode : {0u, 0xfu}) {
+        for (uint32_t mode : {0u, 0xfu, 0xf0u}) {
           wf->set_mode_raw(mode);
+          const bool flush_f16 = (mode & 0x80u) == 0;
           for (uint64_t exec : {wf->wf_size() == 64 ? ~0ull : 0xffffffffull, 0x55ull}) {
             SCOPED_TRACE(testing::Message()
                          << "scalar=" << force_scalar << " abs_mask=" << abs_mask
@@ -327,6 +391,8 @@ TEST_P(Vop3ConversionModifierTest, PackedRtzPreservesIndependentSourceModifiers)
                   half &= 0x7fff;
                 if (neg_mask & (1u << src))
                   half ^= 0x8000;
+                if (flush_f16 && (half & 0x7c00) == 0)
+                  half &= 0x8000;
                 expected |= half << (16 * src);
               }
               EXPECT_EQ(cu->read_vgpr(vb + 2, lane), exec & (1ull << lane) ? expected : 0xdeadbeefu)
@@ -618,9 +684,7 @@ TEST_P(Vop3ConversionModifierTest, UnaryNormalizedHalfRoundsOnceAndAppliesModifi
       {0x3801, 0x801f, 0x400f}, {0xb801, 0x801f, 0x400f}, {0x3c00, 0xffff, 0x7fff},
       {0xbc00, 0xffff, 0x7fff}, {0x3c01, 0xffff, 0x7fff}, {0xbc01, 0xffff, 0x7fff},
       {0x7c00, 0xffff, 0x7fff}, {0xfc00, 0xffff, 0x7fff}, {0x7e01, 0, 0}};
-  const bool early_rdna =
-      GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
-  const bool preserve_high = !gfx9() && !early_rdna;
+  const bool preserve_high = !gfx9();
   for (bool force_scalar : {false, true}) {
     ForceScalarGuard guard(force_scalar);
     amdgpu::GpuMemory memory("unary_normalized_memory");
@@ -706,6 +770,7 @@ TEST_P(Vop3ConversionModifierTest, FrexpExponentIsSignedIntegerWithoutOutputModi
   const bool early_rdna =
       GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
   const bool true16 = !gfx9() && !early_rdna;
+  const bool preserve_high = !gfx9();
   for (bool force_scalar : {false, true}) {
     ForceScalarGuard guard(force_scalar);
     amdgpu::GpuMemory memory("frexp_exponent_memory");
@@ -760,10 +825,10 @@ TEST_P(Vop3ConversionModifierTest, FrexpExponentIsSignedIntegerWithoutOutputModi
                   const bool flushed = c.subnormal && !(mode & 0x40u);
                   const int32_t exponent = flushed ? 0 : f64 ? c.f64_exponent : c.f16_exponent;
                   const uint32_t half = static_cast<uint16_t>(exponent);
-                  const uint32_t expected = f64      ? static_cast<uint32_t>(exponent)
-                                            : high   ? (half << 16) | 0xa5a5u
-                                            : true16 ? 0xa5a50000u | half
-                                                     : half;
+                  const uint32_t expected = f64             ? static_cast<uint32_t>(exponent)
+                                            : high          ? (half << 16) | 0xa5a5u
+                                            : preserve_high ? 0xa5a50000u | half
+                                                            : half;
                   EXPECT_EQ(cu->read_vgpr(vb + 4, lane),
                             exec & (1ull << lane) ? expected : 0xa5a5a5a5u)
                       << "lane=" << lane << " exponent=" << exponent;
@@ -789,9 +854,7 @@ TEST_P(Vop3ConversionModifierTest, FrexpMantissaFlushesSubnormalSourcesUnderMode
   constexpr Case cases[] = {{0x3c00, 0x3800, 0x3ff0000000000000, 0x3fe0000000000000, false},
                             {0x0001, 0x3800, 0x0000000000000001, 0x3fe0000000000000, true},
                             {0x83ff, 0xbbfe, 0x800fffffffffffff, 0xbfeffffffffffffe, true}};
-  const bool early_rdna =
-      GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
-  const bool preserve_high = !gfx9() && !early_rdna;
+  const bool preserve_high = !gfx9();
   for (bool force_scalar : {false, true}) {
     ForceScalarGuard guard(force_scalar);
     amdgpu::GpuMemory memory("frexp_mantissa_memory");
@@ -940,7 +1003,7 @@ TEST_P(Vop3ConversionModifierTest, HalfInputConversionsApplyModifiersAndMode) {
   };
   const bool early_rdna =
       GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
-  const bool preserve_half = !early_rdna && !gfx9();
+  const bool preserve_half = !gfx9();
   const bool always_quiet =
       GetParam() == ROCJITSU_CODE_ARCH_RDNA4 || GetParam() == ROCJITSU_CODE_ARCH_CDNA5;
   for (bool force_scalar : {false, true}) {

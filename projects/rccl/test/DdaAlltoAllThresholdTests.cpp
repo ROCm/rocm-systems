@@ -57,22 +57,25 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx950_AlltoAllIgnoresHighUserThreshold)
                                rcclDdaVmmThreshold(mockComm_.get(), ncclFuncAllReduce)));
 }
 
+// Exercise the rcclDdaEnabled <= boundary at a concrete 1 MiB mock threshold,
+// independent of the current gfx1250 arch table value (ddaLL128Max[AlltoAll] = 0
+// as of commit 363b197e, but the gate logic must stay correct for re-enablement).
 TEST_F(DdaAlltoAllThresholdTest, Gfx1250_ExactlyAtLL128Threshold_Enabled)
 {
     mockComm_.reset("gfx1250:sramecc+:xnack-");
-    const size_t threshold = rcclGetArchThresholds("gfx1250")->ddaLL128Max[ncclFuncAlltoAll];
-    EXPECT_TRUE(rcclDdaEnabled(mockComm_.get(), threshold, threshold));
-    EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
-        mockComm_.get(), kAlltoAllFloat32CountAt1MbLL128Threshold, ncclFloat32));
+    // Pass 1 MiB as both totalBytes and threshold: exactly at the ceiling must pass.
+    constexpr size_t totalBytes = kAlltoAllFloat32CountAt1MbLL128Threshold *
+                                  nccl_dda_detail::kDdaNranks * sizeof(float);
+    EXPECT_TRUE(rcclDdaEnabled(mockComm_.get(), totalBytes, totalBytes));
 }
 
 TEST_F(DdaAlltoAllThresholdTest, Gfx1250_OneByteOverLL128Threshold_Disabled)
 {
     mockComm_.reset("gfx1250:sramecc+:xnack-");
-    const size_t threshold = rcclGetArchThresholds("gfx1250")->ddaLL128Max[ncclFuncAlltoAll];
-    EXPECT_FALSE(rcclDdaEnabled(mockComm_.get(), threshold + 1, threshold));
-    EXPECT_FALSE(testRcclDdaAlltoAllThresholdEnabled(
-        mockComm_.get(), kAlltoAllFloat32CountAt1MbLL128Threshold + 1, ncclFloat32));
+    // One byte above the 1 MiB mock threshold must be rejected.
+    constexpr size_t totalBytes = kAlltoAllFloat32CountAt1MbLL128Threshold *
+                                  nccl_dda_detail::kDdaNranks * sizeof(float);
+    EXPECT_FALSE(rcclDdaEnabled(mockComm_.get(), totalBytes + 1, totalBytes));
 }
 
 TEST_F(DdaAlltoAllThresholdTest, UnsupportedArch_Disabled)
