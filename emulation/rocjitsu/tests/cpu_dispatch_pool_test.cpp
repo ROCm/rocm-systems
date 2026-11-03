@@ -473,7 +473,8 @@ TEST(CpuDispatchPoolTest, OneThreadFinishesBatchBeforeRethrowing) {
 TEST(CpuDispatchPoolTest, UnimplementedInstructionsHaltWithoutThrowing) {
   DispatchPoolFixture fixture(/*cu_count=*/8);
   amdgpu::CpuDispatchPool pool(/*threads=*/4);
-  fixture.memory.write32(kProgramBase, test::kUnimplementedInstruction);
+  for (size_t i = 0; i < test::kUnimplementedInstruction.size(); ++i)
+    fixture.memory.write32(kProgramBase + i * sizeof(uint32_t), test::kUnimplementedInstruction[i]);
 
   EXPECT_NO_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/4));
   for (const auto &cu : fixture.cus)

@@ -3,15 +3,19 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <format>
 #include <string>
 
 namespace rocjitsu::test {
 
-// s_rfe_restore_b64 s[0:1], s0 decodes on CDNA3/4 but has no execution implementation.
-inline constexpr uint32_t kUnimplementedInstruction = 0x95800000u;
-inline constexpr char kUnimplementedInstructionMnemonic[] = "s_rfe_restore_b64";
+// ds_add_u32 v0, v0 gds. CDNA4 reserves the DS GDS bit and the simulator does
+// not model GDS on CDNA3 either, so this decodes but never executes. A reserved
+// encoding stays unimplemented; an ordinary unimplemented instruction does not
+// once someone implements it.
+inline constexpr std::array<uint32_t, 2> kUnimplementedInstruction = {0xd8010000u, 0x00000000u};
+inline constexpr char kUnimplementedInstructionMnemonic[] = "ds_add_u32";
 inline constexpr uint32_t kUndecodableInstruction = 0xbfff0000u;
 // Formatted like the instruction words in the compute unit's decode diagnostic.
 inline const std::string kUndecodableInstructionText =
