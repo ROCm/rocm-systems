@@ -306,6 +306,17 @@ if nm -DuC "${librccl}" | grep -iE "rocshmem|envvar|IBVWrapper"; then
 fi
 echo "  OK: librccl.so leaves no rocshmem host symbol unresolved"
 
+# Also fail if librccl.so EXPORTS any rocSHMEM C++ symbol. The copied leaves
+# (anvil.cpp, provider_gda_mlx5.cpp) are compiled -fvisibility=hidden so none of
+# rocshmem::* reaches .dynsym; if that regresses, an app's own rocSHMEM loaded in
+# the same process could interpose these calls. The 'rocshmem::' namespace form is
+# matched on purpose: the intended extern "C" rocshmem_gin_* API has no '::'.
+if nm -DC --defined-only "${librccl}" | grep -E "rocshmem::"; then
+  echo "  ERROR: librccl.so exports rocSHMEM C++ symbols (expected hidden)" >&2
+  exit 1
+fi
+echo "  OK: librccl.so exports no rocSHMEM C++ symbol"
+
 # Hand the install/build locations to the run stage.
 {
   printf 'export RCCL_INSTALL_PREFIX=%q\n' "${rccl_prefix}"
