@@ -1209,24 +1209,27 @@ size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm) {
   return rcclDdaLLTwoShotThresholdTab(extAlgoArchTable(comm), comm != nullptr ? comm->nRanks : 0);
 }
 
-// Registered gfx1250 AllReduce in graph capture stays on fabric DDA up to max(32 MiB, nRanks x 2 MiB); Ring wins above.
-constexpr size_t kDdaArRegCaptureMinBytes = 32 * 1024 * 1024;
-constexpr size_t kDdaArRegCapturePerRankBytes = 2 * 1024 * 1024;
-// Eager registered AllReduce shards the DDA LL128 two-shot runs faster than CE-registered's local reduce.
-constexpr size_t kDdaArRegEagerMinShardBytes = 512 * 1024;
-constexpr size_t kDdaArRegEagerMaxShardBytes = 1024 * 1024;
-
+// Registered AllReduce in graph capture stays on fabric DDA up to the table's bound; 0 (or no table) = no re-route.
+inline size_t rcclDdaArRegCaptureMaxBytesTab(const rcclArchThresholds* table, int nRanks) {
+  if (table == nullptr) {
+    return 0;
+  }
+  return std::max(table->ddaArRegCaptureMinBytes, (size_t)std::max(nRanks, 0) * table->ddaArRegCapturePerRankBytes);
+}
 size_t rcclDdaArRegCaptureMaxBytes(const ncclComm* comm) {
-  const size_t n = comm != nullptr ? (size_t)std::max(comm->nRanks, 0) : 0;
-  return std::max(kDdaArRegCaptureMinBytes, n * kDdaArRegCapturePerRankBytes);
+  return rcclDdaArRegCaptureMaxBytesTab(extAlgoArchTable(comm), comm != nullptr ? comm->nRanks : 0);
 }
 
-bool rcclDdaArRegEagerShardFits(const ncclComm* comm, size_t bytes) {
-  if (comm == nullptr || comm->nRanks < 1 || bytes % (size_t)comm->nRanks != 0) {
+// Whole per-rank shards in the table's eager band; a 0 bound (or no table) = no re-route.
+inline bool rcclDdaArRegEagerShardFitsTab(const rcclArchThresholds* table, int nRanks, size_t bytes) {
+  if (table == nullptr || nRanks < 1 || bytes % (size_t)nRanks != 0) {
     return false;
   }
-  const size_t shard = bytes / (size_t)comm->nRanks;
-  return shard >= kDdaArRegEagerMinShardBytes && shard <= kDdaArRegEagerMaxShardBytes;
+  const size_t shard = bytes / (size_t)nRanks;
+  return rcclWindowFits(shard, table->ddaArRegEagerMinShardBytes, table->ddaArRegEagerMaxShardBytes);
+}
+bool rcclDdaArRegEagerShardFits(const ncclComm* comm, size_t bytes) {
+  return rcclDdaArRegEagerShardFitsTab(extAlgoArchTable(comm), comm != nullptr ? comm->nRanks : 0, bytes);
 }
 
 // Elements per CE-registered reduce launch: ncclCeAllReduce's chunk for the staging size ncclCeInit resolves.
@@ -1961,17 +1964,17 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     memset(&ringChoice, 0, sizeof(ringChoice));
     uint32_t ringThreads = 0;
     bool ddaReplacesRing = false;
-    if (symkWithdrawn && ceCapturing && msgBytes <= rcclDdaArRegCaptureMaxBytes(comm)) {
+    if (symkWithdrawn && ceCapturing && msgBytes <= rcclDdaArRegCaptureMaxBytesTab(archTable, comm->nRanks)) {
       NCCLCHECK(rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncAllReduce, count, datatype, /*query=*/true,
                                  &ringChoice, &ringThreads));
       ddaReplacesRing = ringChoice.algo == NCCL_ALGO_RING;
     }
-    // Eager it is CE-registered, which DDA LL128 replaces for rcclDdaArRegEagerShardFits shards within the LL128 cap.
+    // Eager it is CE-registered, which DDA LL128 replaces for the table's eager shards within the LL128 cap.
     // ceAvailable already rejects sysmem windows, and ceRegInWindow implies ceRegEnabled.
     const bool ceRegRuns = ceAvailable && ceRegInWindow;
     // Check-mode, suspended and revoked comms divert to enqueue, which runs CE only for a CE decision.
     const bool ddaReplacesCeReg = symkWithdrawn && !ceCapturing && ceRegRuns && msgBytes <= arDdaLL128Max &&
-                                  rcclDdaArRegEagerShardFits(comm, msgBytes) &&
+                                  rcclDdaArRegEagerShardFitsTab(archTable, comm->nRanks, msgBytes) &&
                                   !rcclCollectiveMustUseEnqueuePath(comm);
     const bool ddaSymEligible =
       symkRequested && !symSuppressedByMin && !ginYield && !ddaReplacesRing && !ddaReplacesCeReg;

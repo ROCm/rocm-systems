@@ -1084,6 +1084,7 @@ namespace
 {
 constexpr size_t kMiB = 1024 * 1024;
 constexpr char   kDdaArTakenNeedle[] = "AllReduce: taking DDA fabric";
+constexpr char   kRerouteOffReason[] = "the arch table keeps this re-route off (DPX or RCCL_IGNORE_ARCH_TABLE=1)";
 
 // Grid and block of the last DDA fabric AllReduce kernel launch logged in `log`; false when there is none.
 bool lastDdaArLaunchGeometry(const std::string& log, unsigned* grid, unsigned* block)
@@ -1115,8 +1116,8 @@ float registeredInput(int rank, size_t i)
  * @class DdaMPI_AllReduceRegistered
  * @brief gfx1250 registered sum AllReduce past symMinR2: symk withdraws and DDA runs within the replaced grid.
  *
- * Capture replaces Ring from symMinR2 (8 MiB) up to max(32 MiB, nRanks x 2 MiB). Eager replaces CE-registered for
- * 512 KiB to 1 MiB shards, so it needs 8+ ranks at the default thresholds.
+ * With the gfx1250 SPX table, capture replaces Ring from symMinR2 (8 MiB) up to max(32 MiB, nRanks x 2 MiB), and eager
+ * replaces CE-registered for 512 KiB to 1 MiB shards, so it needs 8+ ranks at the default thresholds.
  */
 class DdaMPI_AllReduceRegistered : public DdaAllReduceMPITest
 {
@@ -1261,7 +1262,13 @@ TEST_F(DdaMPI_AllReduceRegistered, CapturedSumsWithinRingGrid)
     {
         return;
     }
-    for(const size_t bytes : {8 * kMiB, rcclDdaArRegCaptureMaxBytes(getActiveCommunicator())})
+    const size_t      captureMax = rcclDdaArRegCaptureMaxBytes(getActiveCommunicator());
+    const std::string offSkip    = mpiCoordinatedSkipReason(captureMax < 8 * kMiB, kRerouteOffReason);
+    if(!offSkip.empty())
+    {
+        GTEST_SKIP() << offSkip;
+    }
+    for(const size_t bytes : {8 * kMiB, captureMax})
     {
         runRegistered(bytes, /*capture=*/true, "DdaMPI_AllReduceRegistered/CapturedSumsWithinRingGrid");
         if(HasFatalFailure())
@@ -1289,6 +1296,12 @@ TEST_F(DdaMPI_AllReduceRegistered, EagerSumsWithinCeGrid)
     }
     int nRanks{};
     ncclCommCount(comm, &nRanks);
+    const std::string offSkip = mpiCoordinatedSkipReason(
+        !rcclDdaArRegEagerShardFits(comm, static_cast<size_t>(nRanks) * kMiB), kRerouteOffReason);
+    if(!offSkip.empty())
+    {
+        GTEST_SKIP() << offSkip;
+    }
     runRegistered(static_cast<size_t>(nRanks) * kMiB, /*capture=*/false,
                   "DdaMPI_AllReduceRegistered/EagerSumsWithinCeGrid");
 }

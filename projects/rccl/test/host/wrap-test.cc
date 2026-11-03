@@ -1763,6 +1763,10 @@ rcclArchThresholds MakeRankScaledTable() {
   t.ddaArVmmFirstMinRanks = 32;
   t.ddaArVmmFirstMinBytes = 2 * kMiB;
   t.ddaArVmmFirstMaxPerRank = 512 * kKiB;
+  t.ddaArRegCaptureMinBytes = 32 * kMiB;
+  t.ddaArRegCapturePerRankBytes = 2 * kMiB;
+  t.ddaArRegEagerMinShardBytes = 512 * kKiB;
+  t.ddaArRegEagerMaxShardBytes = 1 * kMiB;
   t.ddaVmmBlockBudget = 2048;
   t.ddaVmmMinBlocks = 32;
   t.ddaVmmMaxBlocks = 128;
@@ -5817,6 +5821,10 @@ class RegisteredAr {
     table_.ddaLL128Max[ncclFuncAllReduce] = 256 * kMiB;
     table_.ddaLLMax[ncclFuncAllReduce] = 32 * kMiB;
     table_.ddaVmmMaxGraph[ncclFuncAllReduce] = 64 * kMiB;
+    table_.ddaArRegCaptureMinBytes = 32 * kMiB;
+    table_.ddaArRegCapturePerRankBytes = 2 * kMiB;
+    table_.ddaArRegEagerMinShardBytes = 512 * kKiB;
+    table_.ddaArRegEagerMaxShardBytes = 1 * kMiB;
     g_ceImplemented = true;
     comm_ = MakeCommWithArch(arch);
     comm_->WarpSize = 32;
@@ -6175,10 +6183,13 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureCapFollowsThePlanne
       });
 }
 
-// Eager shard band 512K..1M of a whole per-rank shard; capture keeps DDA up to max(32M, n x 2M).
+// Eager shard band 512K..1M of a whole per-rank shard; capture keeps DDA up to max(32M, n x 2M); no table, neither.
 TEST(WrapMicrotest, DdaArRegisteredWindowBounds) {
   ncclComm* comm = MakeCommWithArch("gfx1250");
   comm->nRanks = 8;
+  EXPECT_EQ(0u, rcclDdaArRegCaptureMaxBytes(comm)) << "this binary's rcclGetArchThresholds has no table";
+  EXPECT_FALSE(rcclDdaArRegEagerShardFits(comm, 8 * kMiB));
+  comm->archThresholds = Gfx1250Table();
   EXPECT_TRUE(rcclDdaArRegEagerShardFits(comm, 4 * kMiB));
   EXPECT_FALSE(rcclDdaArRegEagerShardFits(comm, 4 * kMiB - 8));
   EXPECT_TRUE(rcclDdaArRegEagerShardFits(comm, 8 * kMiB));
@@ -8153,6 +8164,52 @@ namespace real_arch_thresholds {
 // The real tables, namespaced so they do not collide with fakes/rccl_arch_thresholds_fakes.cc.
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
+
+// The registered AllReduce re-route reads its bounds from the arch table: the gfx1250 SPX table re-routes, while the
+// DPX table, no table and RCCL_IGNORE_ARCH_TABLE=1 keep the choice symk's withdrawal leaves, with no grid cap.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteFollowsTheArchTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredRerouteFollowsTheArchTable",
+      []() {
+        int64_t ignoreTable = 0;
+        g_loadParam = [&ignoreTable](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_IGNORE_ARCH_TABLE") == 0) {
+            return ignoreTable;
+          }
+          // symk withdraws, and CE AllReduce and LL128 stay on, with no table too: the re-route's table check decides.
+          if (std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0) {
+            return 256 * kMiB;
+          }
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) {
+            return 1;
+          }
+          return std::strcmp(env, "RCCL_SYM_K_MAX_BYTES") == 0 ? 0 : def;
+        };
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        RegisteredAr ar(8);
+        ar.comm_->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, ar.comm_->archThresholds);
+        rcclCollDecision d = ar.Select(8 * kMiB, /*capturing=*/false);
+        EXPECT_EQ(ll128, d.algo) << "SPX eager";
+        EXPECT_EQ(256u, d.ddaCap.threads);
+        d = ar.Select(16 * kMiB, /*capturing=*/true);
+        EXPECT_EQ(ll128, d.algo) << "SPX capture";
+        EXPECT_EQ(96u, d.ddaCap.blocks);
+        ar.comm_->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        ASSERT_NE(nullptr, ar.comm_->archThresholds);
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "DPX eager");
+        ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, "DPX capture");
+        ar.comm_->archThresholds = nullptr;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "no table, eager");
+        ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, "no table, capture");
+        ar.comm_->archThresholds = &ar.table_;
+        EXPECT_EQ(ll128, ar.Select(8 * kMiB, false).algo) << "the fixture's table re-routes";
+        ignoreTable = 1;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "RCCL_IGNORE_ARCH_TABLE=1, eager");
+        ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, "RCCL_IGNORE_ARCH_TABLE=1, capture");
+      });
+}
 
 // gfx1250 SPX symMaxR2[ReduceScatter] is 0: at and above symMinR2 (2 MiB) symk stays withdrawn even when requested.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250NeverPicksSymmetric) {
