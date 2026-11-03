@@ -3305,20 +3305,34 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_ti
     return;
   }
 
-  // Barrier packets on some hardware (e.g. gfx1171) produce unreliable
-  // timestamps — swapped or non-monotonic across signals.  Detect by small
-  // tick delta (< 8192) or swapped start/end, and translate the max tick once
-  // for both start and end to ensure cross-signal monotonicity.
-  uint64_t delta = (start > end) ? (start - end) : (end - start);
-  if (start > end || delta < 8192) {
+  // gfx117x: barrier packet timestamps use a different clock domain
+  // than GetClockCounters(), making them incompatible with TranslateTime's
+  // calibration.  Detect by checking if ticks are far beyond the calibrated
+  // range after a fresh SyncClocks.  Convert directly with wallclock_frequency_.
+  bool isGfx117X = (supported_isas()[0]->GetMajorVersion() == 11 &&
+                    supported_isas()[0]->GetMinorVersion() == 7);
+  if (isGfx117X) {
+    SyncClocks();
     uint64_t max_tick = std::max(start, end);
-    uint64_t translated = TranslateTime(max_tick);
-    time.start = translated;
-    time.end = translated;
-  } else {
-    // Normal dispatch path: translate end first to reduce jitter impact.
-    time.end = TranslateTime(end);
-    time.start = TranslateTime(start);
+    uint64_t calib_range = t1_.GPUClockCounter - t0_.GPUClockCounter;
+    if (max_tick > t1_.GPUClockCounter + 2 * calib_range && wallclock_frequency_ > 0) {
+      auto tickToNs = [this](uint64_t t) -> uint64_t {
+        return static_cast<uint64_t>(
+            (unsigned __int128)(t) * 1000000000ULL / wallclock_frequency_);
+      };
+      time.start = tickToNs(std::min(start, end));
+      time.end = tickToNs(std::max(start, end));
+      return;
+    }
+  }
+
+  // Normal path: translate end first to reduce jitter impact on duration.
+  time.end = TranslateTime(end);
+  time.start = TranslateTime(start);
+
+  // Handle swapped start/end (hardware bug on some ASICs).
+  if (time.start > time.end) {
+    time.start = time.end;
   }
 }
 
@@ -3334,18 +3348,30 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_
     return;
   }
 
-  // Apply same barrier workaround as dispatch overload.
-  uint64_t adelta = (start > end) ? (start - end) : (end - start);
-  if (start > end || adelta < 8192) {
+  // gfx117x: same foreign-clock-domain fix as dispatch overload.
+  bool isGfx117X = (supported_isas()[0]->GetMajorVersion() == 11 &&
+                    supported_isas()[0]->GetMinorVersion() == 7);
+  if (isGfx117X) {
+    SyncClocks();
     uint64_t max_tick = std::max(start, end);
-    uint64_t translated = TranslateTime(max_tick);
-    time.start = translated;
-    time.end = translated;
-  } else {
-    time.end = TranslateTime(end);
-    time.start = TranslateTime(start);
+    uint64_t calib_range = t1_.GPUClockCounter - t0_.GPUClockCounter;
+    if (max_tick > t1_.GPUClockCounter + 2 * calib_range && wallclock_frequency_ > 0) {
+      auto tickToNs = [this](uint64_t t) -> uint64_t {
+        return static_cast<uint64_t>(
+            (unsigned __int128)(t) * 1000000000ULL / wallclock_frequency_);
+      };
+      time.start = tickToNs(std::min(start, end));
+      time.end = tickToNs(std::max(start, end));
+      return;
+    }
   }
 
+  // Normal path.
+  time.end = TranslateTime(end);
+  time.start = TranslateTime(start);
+  if (time.start > time.end) {
+    time.start = time.end;
+  }
 }
 
 /*
