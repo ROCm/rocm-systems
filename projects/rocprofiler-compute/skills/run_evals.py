@@ -168,9 +168,10 @@ def run_agent(prompt: str, workspace: Path, behavioral: bool) -> tuple[str, list
         str(workspace),
     ]
     if behavioral:
-        # The agent has to build and profile the sample, so it runs commands
-        # without asking.
-        options += ["--permission-mode", "bypassPermissions"]
+        # The agent has to build and profile the sample, so these tools run
+        # without asking. Unlike bypassPermissions, this also works as root.
+        options += ["--permission-mode", "dontAsk", "--allowedTools"]
+        options += ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill"]
     else:
         # Routing only: the decision to load a skill is all we grade, so deny
         # the agent the tools that would make it start doing the work.
