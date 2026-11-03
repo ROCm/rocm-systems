@@ -2214,6 +2214,7 @@ endfunction()
 
 set(_rj_interposer_dup_tests
     ConstructorPreservesDescriptorLimit
+    ConstructorPreparesTopologyBeforeFileLimitDrops
     DupKeepsKfdRoutingAfterPrimaryClose
     FcntlDupfdKeepsKfdRouting
     Dup2OverPrimaryInvalidatesKfdIdentity

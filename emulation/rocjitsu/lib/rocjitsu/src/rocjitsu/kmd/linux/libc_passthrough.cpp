@@ -81,6 +81,7 @@ void LibcPassthrough::resolve() {
   epoll_wait = util::lookup_symbol<decltype(epoll_wait)>(handle, "epoll_wait");
   accept4 = util::lookup_symbol<decltype(accept4)>(handle, "accept4");
   getsockopt = util::lookup_symbol<decltype(getsockopt)>(handle, "getsockopt");
+  setsockopt = util::lookup_symbol<decltype(setsockopt)>(handle, "setsockopt");
   socket = util::lookup_symbol<decltype(socket)>(handle, "socket");
   connect = util::lookup_symbol<decltype(connect)>(handle, "connect");
   listen = util::lookup_symbol<decltype(listen)>(handle, "listen");
@@ -98,14 +99,14 @@ void LibcPassthrough::resolve() {
   // resolved. In release builds the asserts disappear, so the boolean must not
   // claim readiness while any later call would dereference a null function
   // pointer.
-  initialized_ = openat && close && read && write && ioctl && syscall && mmap && munmap &&
-                 mprotect && madvise && memfd_create && dup && dup2 && dup3 && fcntl && fopen &&
-                 freopen && opendir && readdir && closedir && stat && lstat && access && fstat_fn &&
-                 readlink_fn && realpath_fn && fork && getsockname && sendmsg && recvmsg &&
-                 shmget && shmat && shmdt && shmctl && getrandom && prlimit && ftruncate &&
-                 fallocate && socketpair && bind && epoll_ctl && prctl && epoll_create1 &&
-                 eventfd && epoll_wait && accept4 && getsockopt && socket && connect && listen &&
-                 execve && setsid && waitpid && poll && clone && exit_immediately;
+  initialized_ =
+      openat && close && read && write && ioctl && syscall && mmap && munmap && mprotect &&
+      madvise && memfd_create && dup && dup2 && dup3 && fcntl && fopen && freopen && opendir &&
+      readdir && closedir && stat && lstat && access && fstat_fn && readlink_fn && realpath_fn &&
+      fork && getsockname && sendmsg && recvmsg && shmget && shmat && shmdt && shmctl &&
+      getrandom && prlimit && ftruncate && fallocate && socketpair && bind && epoll_ctl && prctl &&
+      epoll_create1 && eventfd && epoll_wait && accept4 && getsockopt && setsockopt && socket &&
+      connect && listen && execve && setsid && waitpid && poll && clone && exit_immediately;
   assert(initialized_);
 }
 
