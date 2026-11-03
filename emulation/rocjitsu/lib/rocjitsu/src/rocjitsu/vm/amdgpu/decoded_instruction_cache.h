@@ -55,17 +55,13 @@ public:
     if (enabled && entries_) {
       auto &entry = entries_->slots[pc_index(pc)];
       if (entry.instruction && entry.vmid == vmid &&
-          std::equal(words.begin(), words.end(), entry.words.begin())) {
-        from_pc_slot_ = true;
+          std::equal(words.begin(), words.end(), entry.words.begin()))
         return std::move(entry.instruction);
-      }
-      from_pc_slot_ = false;
       auto &shared = entries_->slots[entries_->content_slots[content_index(words)]];
       if (shared.instruction && shared.vmid == vmid &&
           std::equal(words.begin(), words.end(), shared.words.begin()))
         return std::move(shared.instruction);
     }
-    from_pc_slot_ = false;
     return decode_miss(decoder, words, emit_error, enabled);
   }
 
@@ -83,12 +79,12 @@ public:
     ScopedReturn(DecodedInstructionCache &cache, std::unique_ptr<Instruction> &instruction,
                  uint64_t pc, uint32_t vmid, Words words, bool enabled = true)
         : cache_(cache), instruction_(instruction), pc_(pc), vmid_(vmid), words_(words),
-          enabled_(enabled), from_pc_slot_(cache.from_pc_slot_) {}
+          enabled_(enabled) {}
 
     [[gnu::always_inline]] ~ScopedReturn() {
       if (enabled_ && instruction_ && !instruction_->is_memory_op() && !instruction_->data() &&
           !borrows_fetch_buffer(*instruction_, words_))
-        cache_.put(pc_, vmid_, words_, instruction_, from_pc_slot_);
+        cache_.put(pc_, vmid_, words_, instruction_);
     }
 
     ScopedReturn(const ScopedReturn &) = delete;
@@ -104,7 +100,6 @@ public:
     uint32_t vmid_;
     Words words_;
     bool enabled_;
-    bool from_pc_slot_;
   };
 
   /// @brief Drop entries before replacing the decoder/target, or destroying this CU.
@@ -155,20 +150,19 @@ private:
   }
 
   [[gnu::always_inline]] void put(uint64_t pc, uint32_t vmid, Words words,
-                                  std::unique_ptr<Instruction> &instruction,
-                                  bool from_pc_slot = false) {
+                                  std::unique_ptr<Instruction> &instruction) {
     // A decode miss allocates the table before execution; returning an
     // instruction during stack unwinding must not allocate.
     if (!entries_)
       return;
     const auto slot = pc_index(pc);
     auto &entry = entries_->slots[slot];
-    // An instruction taken from this PC's slot goes back where its key still
-    // is, so the common return is one pointer store. The key check covers a
-    // nested issue that reused the slot meanwhile. The content hint is not
-    // refreshed: only a colliding encoding can have moved it, which loses a
-    // sharing opportunity, not correctness. Relocated hits still take it below.
-    if (from_pc_slot && !entry.instruction && entry.vmid == vmid &&
+    // An empty slot that still holds this key is the instruction's own place,
+    // including after a nested issue reused the slot, so the common return is
+    // one pointer store. The content hint is not refreshed: only a colliding
+    // encoding can have moved it, which loses a sharing opportunity, not
+    // correctness.
+    if (!entry.instruction && entry.vmid == vmid &&
         std::equal(words.begin(), words.end(), entry.words.begin())) {
       entry.instruction = std::move(instruction);
       return;
@@ -187,8 +181,6 @@ private:
   }
 
   std::unique_ptr<Table> entries_;
-  /// Set by decode() for the ScopedReturn constructed right after it.
-  bool from_pc_slot_ = false;
 };
 
 } // namespace rocjitsu::amdgpu
