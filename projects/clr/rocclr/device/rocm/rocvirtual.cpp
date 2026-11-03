@@ -8,6 +8,7 @@
 #include "device/rocm/rocdevice.hpp"
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rockernel.hpp"
+#include "device/rocm/rocaqlcapture.hpp"
 #include "utils/nontemporal.hpp"
 #include "device/rocm/rocmemory.hpp"
 #include "device/rocm/rocblit.hpp"
@@ -2189,6 +2190,26 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   AqlPacket* aql_loc = &((AqlPacket*)(gpu_queue_->base_address))[index & queueMask];
   writePacketToRingBuffer(aql_loc, packet, header, rest, index & queueMask);
 
+  // Capture everything handed to HSA for this dispatch while the staged host copy of
+  // the packet, the metadata slot and the kernarg buffer are all still valid. Only
+  // kernel dispatches stage a pending capture, so the PM4 counter path never lands here.
+  if (pending_aql_capture_.valid) {
+    AqlDispatchCaptureInput capture = {};
+    capture.queue = gpu_queue_;
+    capture.device_index = dev().index();
+    capture.priority = static_cast<int>(priority_);
+    capture.slot_index = index;
+    capture.header = header;
+    capture.rest = rest;
+    capture.ext_dispatch = std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>;
+    capture.packet = packet;
+    capture.metadata = metadata_preloader_.GetMetadataPacket(index & queueMask);
+    capture.kernel_name = pending_aql_capture_.kernel_name;
+    capture.kernarg_segment_size = pending_aql_capture_.kernarg_segment_size;
+    AqlCapture::Record(capture);
+    pending_aql_capture_.valid = false;
+  }
+
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
     if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
       // setup travels in `rest`, not in the local packet struct, so the log
@@ -2312,6 +2333,10 @@ bool VirtualGPU::dispatchAqlPacket(AqlPacket* packet, uint16_t header,
         metadata_preloader_.CaptureMetadata(packet, header, metaBuf);
       }
     }
+    // Graph capture records the packet instead of submitting it; the capture record is
+    // emitted when the graph is launched, from dispatchAqlPacketBatchFlat. Drop the
+    // staged context so it cannot leak into the next real dispatch on this vGPU.
+    pending_aql_capture_.valid = false;
     return true;
   } else {
     dispatchBlockingWait(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet));
@@ -2526,6 +2551,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   const bool needBarriersReported = amd::activity_prof::IsEnabled(OP_ID_BARRIER);
   const bool kLogBatch = IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
                          IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL);
+  // Graph dispatches never reach dispatchGenericAqlPacket, so the batch reporter is the
+  // only place they can be captured - it has to run even with tracing and logging off.
+  const bool kCaptureBatch = AqlCapture::Enabled();
 
   // All packet fields are read from the host-side flat buffer (|flatPacketData|), never
   // from the ring slot: the device-resident ring is write-combining, so reading
@@ -2574,6 +2602,29 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
               reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(hostPkt), slotIdx,
               priority_);
         }
+      }
+      if (AqlCapture::Enabled()) {
+        AqlDispatchCaptureInput capture = {};
+        capture.queue = gpu_queue_;
+        capture.device_index = dev().index();
+        capture.priority = static_cast<int>(priority_);
+        capture.slot_index = slotIdx;
+        capture.header = hdr;
+        // The flat buffer holds the full first dword, so setup/amd_format come from
+        // its upper half rather than from a separately-tracked |rest|.
+        capture.rest = static_cast<uint16_t>(validFullHeaders[i] >> 16);
+        capture.ext_dispatch = !isBaseKernelDispatch;
+        capture.packet = hostPkt;
+        // An empty vector means the captured graph had no metadata ring to stage into.
+        capture.metadata = (flatMetadataData != nullptr && !flatMetadataData->empty())
+            ? reinterpret_cast<const hsa_amd_metadata_kernel_dispatch_packet_t*>(
+                  flatMetadataData->data() + i * kMetaPktSize)
+            : nullptr;
+        capture.kernel_name = kname;
+        capture.kernarg_segment_size = kit != dev().KernelMap().end()
+            ? kit->second.KernargSegmentByteSize()
+            : 0;
+        AqlCapture::Record(capture);
       }
     } else if ((needKernelNamesReported || needBarriersReported) && packetSignal != nullptr &&
                (pktType == HSA_PACKET_TYPE_BARRIER_AND || pktType == HSA_PACKET_TYPE_BARRIER_OR ||
@@ -2673,7 +2724,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       }
 
       // Per-packet fixups: profiling signals, kernel-name printing, inline barrier logging.
-      if (timestamp_ != nullptr || needKernelNamesReported || needBarriersReported || kLogBatch) {
+      if (timestamp_ != nullptr || needKernelNamesReported || needBarriersReported ||
+          kLogBatch || kCaptureBatch) {
         for (size_t i = chunkStart; i < chunkEnd; ++i) {
           const uint64_t slotIdx = (chunkFirstIndex + (i - chunkStart)) & queueMask;
           auto* slot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
@@ -2682,7 +2734,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
           if (timestamp_ != nullptr) {
             packetSignal = attachPacketSignal(slot, i, i == numPackets - 1);
           }
-          if (needKernelNamesReported || needBarriersReported || kLogBatch) {
+          if (needKernelNamesReported || needBarriersReported || kLogBatch || kCaptureBatch) {
             reportBatchPacket(i, slotIdx, packetSignal);
           }
         }
@@ -2729,7 +2781,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         *reinterpret_cast<uint32_t*>(&stg) = hdr | (static_cast<uint32_t>(setup) << 16);
         auto* dst = queueBase + slotIdx * kPacketSize;
         amd::movdir64b_copy64(dst, &stg);
-        if (needKernelNamesReported || needBarriersReported || kLogBatch) {
+        if (needKernelNamesReported || needBarriersReported || kLogBatch || kCaptureBatch) {
           reportBatchPacket(i, slotIdx, packetSignal);
         }
       }
@@ -5870,6 +5922,15 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     metadata_preloader_.PrepareDispatch(gpuKernel.MetadataKernelDescriptor(),
                                         gpuKernel.MetadataPreloadLength(),
                                         gpuKernel.MetadataPreloadOffset());
+
+    // Stage the kernel-side context the packet itself does not carry. The demangled
+    // name is cached on the Kernel and outlives this dispatch; the capture consumes
+    // it before returning from dispatchAqlPacket.
+    if (AqlCapture::Enabled()) {
+      pending_aql_capture_.kernel_name = gpuKernel.getDemangledName().c_str();
+      pending_aql_capture_.kernarg_segment_size = gpuKernel.KernargSegmentByteSize();
+      pending_aql_capture_.valid = true;
+    }
 
     bool dispatched = extDispatchPacket
         ? dispatchAqlPacket(&dispatchPacketUnion.extKernelDispatch, aqlHeaderWithOrder, rest,

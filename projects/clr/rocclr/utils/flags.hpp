@@ -296,6 +296,15 @@ release(bool, DEBUG_CLR_GRAPH_DEV_SIGNALS, true,                              \
         "Place graph signals in device memory (large BAR only)")              \
 release(bool, DEBUG_CLR_DEV_SIGNALS, false,                                   \
         "Place queue signals in device memory (large BAR only)")              \
+release(cstring, ROC_AQL_CAPTURE_OUTPUT, "",                                  \
+        "Capture everything sent to HSA per kernel dispatch (AQL packet, "    \
+        "metadata/prefetch packet, decoded launch descriptor, kernargs) as "  \
+        "JSON Lines at this path. The PID is appended. Empty = disabled")     \
+release(uint, ROC_AQL_CAPTURE_KERNARG_BYTES, 256,                             \
+        "Max bytes of the kernarg buffer to hexdump per captured dispatch "   \
+        "(0 = do not dereference kernarg_address)")                           \
+release(uint, ROC_AQL_CAPTURE_MAX_RECORDS, 0,                                 \
+        "Stop capturing after this many dispatches (0 = unlimited)")          \
 
 namespace amd {
 

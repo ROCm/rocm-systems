@@ -1124,6 +1124,20 @@ class VirtualGPU : public device::VirtualDevice {
                                           //!< CPU caches; this local copy stays in L1/L2.
   uint32_t skippedDispatches_;  //!< Count of consecutive dispatches that skipped the doorbell flush.
   uint32_t dispatch_id_;  //!< This variable must be updated atomically.
+
+  //! Per-dispatch context for the AQL capture (ROC_AQL_CAPTURE_OUTPUT). Staged by
+  //! submitKernelInternal, the only place that still holds the roc::Kernel, and consumed
+  //! by dispatchGenericAqlPacket once the packet has been published to the ring. Staging
+  //! it also keeps the PM4 counter packets, which share dispatchGenericAqlPacket, out of
+  //! the capture. A vGPU is only ever driven by one thread at a time (execution() lock),
+  //! so a plain member is sufficient.
+  struct PendingAqlCapture {
+    const char* kernel_name = nullptr;     //!< Borrowed from Kernel::getDemangledName()
+    uint32_t kernarg_segment_size = 0;
+    bool valid = false;
+  };
+  PendingAqlCapture pending_aql_capture_;
+
   Device& roc_device_;    //!< roc device object
   PrintfDbg* printfdbg_;
   MemoryDependency memoryDependency_;  //!< Memory dependency class
