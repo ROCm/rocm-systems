@@ -4,6 +4,7 @@
 """Unit tests for utils/utils_common.py."""
 
 import builtins
+import errno
 import io
 import logging
 import os
@@ -958,6 +959,250 @@ def test_resolve_rocm_library_path(tmp_path):
     # Test case 8: No match at all, returns original path
     missing = tmp_path / "libmissing.so"
     assert resolve_rocm_library_path(str(missing)) == str(missing)
+
+
+def test_library_visibility_in_target(tmp_path, monkeypatch):
+    """Absolute paths are checked through the target process root."""
+    procfs_root = tmp_path / "proc"
+    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
+    target_library = (
+        procfs_root / "42/root/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    )
+    target_library.parent.mkdir(parents=True)
+    target_library.touch()
+    directory_library = target_library.parent / "libdirectory.so"
+    directory_library.mkdir()
+    blocked_component = procfs_root / "42/root/blocked"
+    blocked_component.touch()
+
+    assert not utils_common.is_library_missing_in_target(
+        42, "/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    )
+    assert utils_common.is_library_missing_in_target(
+        42, "/opt/rocm/lib/rocprofiler-sdk/libmissing.so"
+    )
+    assert not utils_common.is_library_missing_in_target(
+        42, "librocprofiler-sdk-tool.so"
+    )
+    assert utils_common.is_library_missing_in_target(
+        42, "/opt/rocm/lib/rocprofiler-sdk/libdirectory.so"
+    )
+    assert utils_common.is_library_missing_in_target(42, "/blocked/libmissing.so")
+
+
+def test_library_visibility_in_target_fails_open(monkeypatch):
+    """An indeterminate procfs error is not treated as confirmed absence."""
+
+    def deny_lstat(_path):
+        raise OSError(errno.EACCES, "permission denied")
+
+    monkeypatch.setattr(utils_common.os, "lstat", deny_lstat)
+
+    assert not utils_common.is_library_missing_in_target(
+        42, "/opt/rocm/librocprofiler-sdk-tool.so"
+    )
+
+
+def test_library_visibility_follows_symlink_inside_target(tmp_path, monkeypatch):
+    """An absolute symlink is resolved from the target root, not the host root."""
+    procfs_root = tmp_path / "proc"
+    target_root = procfs_root / "42/root"
+    inside = target_root / "only-inside/librocprofiler-sdk-tool.so"
+    inside.parent.mkdir(parents=True)
+    inside.touch()
+    link = target_root / "opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    link.parent.mkdir(parents=True)
+    link.symlink_to("/only-inside/librocprofiler-sdk-tool.so")
+    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
+
+    assert not utils_common.is_library_missing_in_target(
+        42, "/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    )
+
+
+def test_library_visibility_rejects_symlink_to_host_file(tmp_path, monkeypatch):
+    """A symlink whose absolute target exists only on the host is still missing."""
+    procfs_root = tmp_path / "proc"
+    target_root = procfs_root / "42/root"
+    host_only = tmp_path / "host-only.so"
+    host_only.touch()
+    link = target_root / "opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(host_only)
+    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
+
+    assert utils_common.is_library_missing_in_target(
+        42, "/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    )
+
+
+@pytest.mark.parametrize("pid", ["../1", "²", "٤٢"])
+def test_library_visibility_rejects_invalid_pid(pid):
+    """PID text cannot escape the procfs root."""
+    with pytest.raises(ValueError, match="Invalid process id"):
+        utils_common.is_library_missing_in_target(
+            pid, "/opt/rocm/librocprofiler-sdk-tool.so"
+        )
+
+
+def test_find_loaded_library_directory(tmp_path, monkeypatch):
+    """The mapped register library anchors target-side ROCm discovery."""
+    procfs_root = tmp_path / "proc"
+    maps_path = procfs_root / "42/maps"
+    maps_path.parent.mkdir(parents=True)
+    maps_path.write_text(
+        "7f00-7f10 r--p 00000000 00:00 0\n"
+        "7f10-7f20 r-xp 00000000 08:01 1 "
+        "/stale/rocm/lib/librocprofiler-register.so.1 (deleted)\n"
+        "7f10-7f20 r-xp 00000000 08:01 1 "
+        "/opt/rocm/lib/librocprofiler-register.so.1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
+
+    assert (
+        utils_common.find_loaded_library_directory(42, "librocprofiler-register.so")
+        == "/opt/rocm/lib"
+    )
+    assert utils_common.find_loaded_library_directory(42, "libmissing.so") is None
+    assert utils_common.find_loaded_library_directory(43, "libmissing.so") is None
+
+
+def test_find_target_library_from_loaded_library(tmp_path, monkeypatch):
+    """The SDK tool is returned using the path visible inside the target."""
+    procfs_root = tmp_path / "proc"
+    maps_path = procfs_root / "42/maps"
+    maps_path.parent.mkdir(parents=True)
+    maps_path.write_text(
+        "7f10-7f20 r-xp 00000000 08:01 1 /opt/rocm/lib/librocprofiler-register.so.1\n",
+        encoding="utf-8",
+    )
+    target_tool = (
+        procfs_root
+        / "42/root/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so.2"
+    )
+    target_tool.parent.mkdir(parents=True)
+    target_tool.touch()
+    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
+
+    assert utils_common.find_target_library_from_loaded_library(
+        42,
+        "librocprofiler-sdk-tool.so",
+        "librocprofiler-register.so",
+    ) == ("/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so.2")
+    assert (
+        utils_common.find_target_library_from_loaded_library(
+            42,
+            "libmissing.so",
+            "librocprofiler-register.so",
+        )
+        is None
+    )
+
+
+def test_find_target_library_rejects_path_outside_target_root(tmp_path, monkeypatch):
+    """A versioned tool symlink cannot resolve to a host-only file."""
+    procfs_root = tmp_path / "proc"
+    maps_path = procfs_root / "42/maps"
+    maps_path.parent.mkdir(parents=True)
+    maps_path.write_text(
+        "7f10-7f20 r-xp 00000000 08:01 1 /opt/rocm/lib/librocprofiler-register.so\n",
+        encoding="utf-8",
+    )
+    host_only = tmp_path / "host-only.so"
+    host_only.touch()
+    link = (
+        procfs_root / "42/root/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    )
+    link.parent.mkdir(parents=True)
+    link.symlink_to(host_only)
+    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
+
+    assert (
+        utils_common.find_target_library_from_loaded_library(
+            42,
+            "librocprofiler-sdk-tool.so",
+            "librocprofiler-register.so",
+        )
+        is None
+    )
+
+
+def test_find_target_library_follows_symlink_inside_target(tmp_path, monkeypatch):
+    """Versioned discovery accepts a symlink that stays inside the target."""
+    procfs_root = tmp_path / "proc"
+    maps_path = procfs_root / "42/maps"
+    maps_path.parent.mkdir(parents=True)
+    maps_path.write_text(
+        "7f10-7f20 r-xp 00000000 08:01 1 /opt/rocm/lib/librocprofiler-register.so\n",
+        encoding="utf-8",
+    )
+    versioned = (
+        procfs_root
+        / "42/root/only-inside/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so.2"
+    )
+    versioned.parent.mkdir(parents=True)
+    versioned.touch()
+    link = (
+        procfs_root / "42/root/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    )
+    link.parent.mkdir(parents=True)
+    link.symlink_to("/only-inside/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so.2")
+    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
+
+    assert utils_common.find_target_library_from_loaded_library(
+        42,
+        "librocprofiler-sdk-tool.so",
+        "librocprofiler-register.so",
+    ) == ("/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so")
+
+
+def test_resolve_attach_tool_library_uses_target_install(tmp_path, monkeypatch):
+    """A host-only SDK path falls back to the target process ROCm install."""
+    procfs_root = tmp_path / "proc"
+    maps_path = procfs_root / "42/maps"
+    maps_path.parent.mkdir(parents=True)
+    maps_path.write_text(
+        "7f10-7f20 r-xp 00000000 08:01 1 "
+        "/container/rocm/lib/librocprofiler-register.so\n",
+        encoding="utf-8",
+    )
+    target_tool = (
+        procfs_root / "42/root/container/rocm/lib/rocprofiler-sdk/"
+        "librocprofiler-sdk-tool.so.2"
+    )
+    target_tool.parent.mkdir(parents=True)
+    target_tool.touch()
+    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
+
+    assert utils_common.resolve_attach_tool_library(
+        42, "/host/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so.1"
+    ) == ("/container/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so.2")
+
+
+def test_resolve_attach_tool_library_skips_install_without_tool(tmp_path, monkeypatch):
+    """A later mapped ROCm install supplies the tool when an earlier one lacks it."""
+    procfs_root = tmp_path / "proc"
+    maps_path = procfs_root / "42/maps"
+    maps_path.parent.mkdir(parents=True)
+    maps_path.write_text(
+        "7f00-7f10 r-xp 00000000 08:01 1 "
+        "/first/rocm/lib/librocprofiler-register.so.1\n"
+        "7f10-7f20 r-xp 00000000 08:01 1 "
+        "/second/rocm/lib/librocprofiler-register.so.1\n",
+        encoding="utf-8",
+    )
+    target_tool = (
+        procfs_root
+        / "42/root/second/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    )
+    target_tool.parent.mkdir(parents=True)
+    target_tool.touch()
+    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
+
+    assert utils_common.resolve_attach_tool_library(
+        42, "/host/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    ) == ("/second/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so")
 
 
 # =============================================================================
