@@ -978,7 +978,9 @@ exhaustion.
 Finally, NVLS is currently not compatible with multiple ranks within the same communicator using
 the same GPU. If ``NCCL_NVLS_ENABLE`` is set to 1, communicator initialization will fail when
 multiple ranks per GPU are detected. If ``NCCL_NVLS_ENABLE`` is set to 2 (the default), NVLS will
-be silently disabled.
+be silently disabled. This applies to NCCL only. RCCL does not implement NVLS, so
+``NCCL_NVLS_ENABLE`` has no effect and multiple ranks per GPU never cause an NVLS initialization
+failure (see :ref:`env_NCCL_NVLS_ENABLE`).
 
 Disclaimer: This is currently an experimental feature, and is still being tuned. It is not
 compatible with all configurations. It may exhaust resources and lock NCCL.
@@ -1765,8 +1767,9 @@ Value accepted
 NCCL_MULTI_SEGMENT_REGISTER
 ---------------------------
 
-Register one DMA-BUF memory region per physical segment. When this is off,
-registration keeps the single-region path.
+Register one DMA-BUF memory region per physical segment. When this is off, a buffer that spans several physical segments is not registered per segment.
+
+NET registration counts segments over the whole registered buffer. With this variable set to 0, a collective on any part of a buffer whose registration spans several segments skips NET registration and stages through the internal buffers.
 
 Value accepted
 ^^^^^^^^^^^^^^
@@ -1917,6 +1920,8 @@ NCCL_DMABUF_ENABLE
 Enable GPU Direct RDMA buffer registration using the Linux dma-buf subsystem.
 
 The Linux dma-buf subsystem allows GPU Direct RDMA capable NICs to read and write CUDA buffers directly without CPU involvement.
+
+GIN registration of a window that contains host VMM memory requires this variable set to 1, because that memory is registered through a DMA-BUF memory region. With 0, registration fails with ``ncclInvalidUsage``.
 
 Value accepted
 ^^^^^^^^^^^^^^
@@ -2071,6 +2076,9 @@ NCCL_NVLS_ENABLE
 
 Enable the use of NVLink SHARP (NVLS). NVLink SHARP is available in third-generation NVSwitch systems (NVLink4) with Hopper and later GPU architectures, allowing collectives such as ``ncclAllReduce`` to be offloaded to the NVSwitch domain.
 The default value is 2.
+
+In RCCL, this variable has no effect. RCCL does not implement NVLink SHARP, so no value allocates NVLink SHARP
+resources, and communicator initialization never fails because of them. The values below describe NCCL.
 
 Values accepted
 ^^^^^^^^^^^^^^^

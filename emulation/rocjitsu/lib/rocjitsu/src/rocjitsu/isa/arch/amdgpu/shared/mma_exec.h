@@ -30,6 +30,7 @@
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/data_types.h"
 #include "util/except.h"
+#include "util/host_target.h"
 #include "util/meta_programming.h"
 #include "util/simd.h"
 
@@ -709,14 +710,22 @@ inline SwmmacIndexLoc swmmac_index_loc(uint32_t wave_size, uint32_t M, uint32_t 
 
 /// @brief Permute the A-matrix lane based on cbsz and abid fields.
 ///
-/// @details When cbsz > 0, a block of S = 64/(1<<cbsz) lanes is broadcast to
-/// all other blocks. abid selects which block is the broadcast source.
-/// cbsz=0 means no broadcast (identity).
+/// @details When cbsz > 0, the wave is divided into 1<<cbsz blocks and abid
+/// selects the source block. The source lane keeps its offset within a block.
+/// cbsz=0 is the identity. Reserved cbsz values also return the original lane,
+/// and abid is reduced modulo the block count, so decoded undefined controls
+/// can be diagnosed without causing an out-of-wave host access.
 inline uint32_t permute_a_lane(uint32_t lane, uint32_t cbsz, uint32_t abid) {
   if (cbsz == 0)
     return lane;
-  uint32_t S = 64 >> cbsz;
-  return (lane % S) + S * abid;
+  // Reserved CBSZ encodings are diagnosed from the decoded instruction flags.
+  // Keep undefined guest controls inside the wave so diagnostics never turn
+  // into host division-by-zero or out-of-range register access.
+  if (cbsz > 4)
+    return lane;
+  const uint32_t block_count = 1u << cbsz;
+  const uint32_t block_size = 64 / block_count;
+  return (lane % block_size) + block_size * (abid % block_count);
 }
 
 /// @brief Permute the B-matrix lane based on the blgp field.
@@ -3002,7 +3011,7 @@ enum class SwmmacK128Result { F32, F16 };
 /// AVX-512 fast path for gfx1250 16x16x128 FP8/BF8 SWMMAC. The sparse
 /// selectors occupy two VGPRs per lane. Snapshot both words and every matrix
 /// operand before writing D so D may alias A, B, C, or the index tuple.
-#if defined(__AVX512F__) && __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_AVX512_STDX_SIMD
 RJ_NOINLINE inline void exec_swmmac_16x16x128_8bit_fast_body(
     auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t acc_base, uint32_t index_base,
     SwmmacK128Input a_format, SwmmacK128Input b_format, SwmmacK128Result result_format,
@@ -3144,7 +3153,7 @@ template <typename ExtractA, typename ExtractB>
     uint32_t s1, uint32_t acc_base, uint32_t index_base, uint32_t index_entries, uint32_t index_key,
     ExtractA, ExtractB, SwmmacK128Result result_format, uint32_t const_acc = ACC_FROM_VGPR,
     uint32_t wave_size = WMMA_WAVE32, bool fp16_ovfl = false) {
-#if defined(__AVX512F__) && __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_AVX512_STDX_SIMD
   using A = std::remove_cvref_t<ExtractA>;
   using B = std::remove_cvref_t<ExtractB>;
   constexpr bool a_fp8 = std::is_same_v<A, ExtractFp8> || std::is_same_v<A, ExtractFp8Ocp>;
@@ -5323,7 +5332,7 @@ inline float smfmac_decode_snapshot(const uint32_t (&words)[Words], uint32_t ele
 /// publishing D: tied accumulators and overlapping A/B/index registers then
 /// have the same read-before-write behavior as the scalar helpers. Selected K
 /// positions are resolved once per row; the FMA loop retains q,s order.
-#if defined(__AVX512F__) && __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_AVX512_STDX_SIMD
 template <SmfmacLayout Layout, uint32_t M, uint32_t N, uint32_t K, typename ExtractA,
           typename ExtractB>
 RJ_NOINLINE inline void smfmac_avx512_fast_body(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
@@ -5419,7 +5428,7 @@ template <SmfmacLayout Layout, uint32_t M, uint32_t N, uint32_t K, typename Extr
 [[gnu::always_inline]] inline bool smfmac_try_avx512(auto &cu, uint32_t dst, uint32_t s0,
                                                      uint32_t s1, uint32_t idx_base, ExtractA,
                                                      ExtractB) {
-#if defined(__AVX512F__) && __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_AVX512_STDX_SIMD
   if (util::force_scalar() || cu.wf_size() != 64 || util::native<float>::size() != 16)
     return false;
 

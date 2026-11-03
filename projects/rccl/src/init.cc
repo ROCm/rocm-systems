@@ -247,6 +247,13 @@ RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
 #if ENABLE_TDM_SIMPLE
 // Off by default; the mover path is still under evaluation.
 RCCL_PARAM(TdmSimpleEnable, "TDM_SIMPLE_ENABLE", 0);
+// Independent of TDM_SIMPLE_ENABLE, which covers only copy-shaped slices.
+RCCL_PARAM(TdmSimpleReduceEnable, "TDM_SIMPLE_REDUCE_ENABLE", 0);
+#endif
+
+#if ENABLE_TDM_PRIM_LL128
+// Off by default; opt in with RCCL_TDM_LL128_ENABLE=1 on gfx1250.
+RCCL_PARAM(TdmLl128Enable, "TDM_LL128_ENABLE", 0);
 #endif
 
 /**
@@ -1099,11 +1106,16 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   tmpCommAndChans.comm.cheapPostSendFenceOff = comm->cheapPostSendFenceOff;
 #if ENABLE_TDM_SIMPLE
   tmpCommAndChans.comm.tdmSimpleEnable = comm->tdmSimpleEnable;
+  tmpCommAndChans.comm.tdmSimpleReduceEnable = comm->tdmSimpleReduceEnable;
+#endif
+#if ENABLE_TDM_PRIM_LL128
+  tmpCommAndChans.comm.tdmLl128Enable = comm->tdmLl128Enable;
 #endif
   tmpCommAndChans.comm.patSharedQps = comm->patSharedQps ? 1 : 0;
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     tmpCommAndChans.comm.buffSizes[p] = comm->buffSizes[p];
   }
+  tmpCommAndChans.comm.p2pLl128BuffSize = comm->p2pLl128BuffSize;
   tmpCommAndChans.comm.p2pChunkSize = comm->p2pChunkSize;
   tmpCommAndChans.comm.p2pChannelShiftSize = comm->p2pChannelShiftSize;
   tmpCommAndChans.comm.p2pCrossClique = comm->p2pCrossClique;
@@ -1342,6 +1354,32 @@ static void rcclSetTuningPartition(struct ncclComm* comm) {
   INFO(NCCL_INIT | NCCL_TUNING, "gfx1250 tuning table: %s", partition == RCCL_TUNING_PARTITION_DPX ? "DPX" : "SPX");
 }
 
+// [RCCL] What this rank shares with its parent goes into its AllGather1 info, so ranks of an ncclCommGrow that
+// have no parent (or none sharing resources) reach the same decisions.
+static void rcclFillSharedParentInfo(struct ncclPeerInfo* info, struct ncclComm* parent) {
+  if (parent == nullptr || !parent->shareResources) return;
+  info->ibGdrFlushFlag = info->ibGdrFlushFlag && parent->ibGdrFlushFlag;
+  info->sharedLl128BuffSize = parent->buffSizes[NCCL_PROTO_LL128];
+  info->sharedP2pLl128BuffSize = parent->p2pLl128BuffSize;
+}
+
+// Every rank sets up its net receives and picks algorithms on its own, so RCCL_IB_GDR_FLUSH_FLAG is on
+// for a comm only when every rank can use it. A net context shared with the parent keeps the parent's
+// decision; the net proxy applies this comm's decision to each of its receives.
+static void rcclSetIbGdrFlushFlag(struct ncclComm* comm, struct ncclComm* parent) {
+  int nCapable = 0;
+  for (int i = 0; i < comm->nRanks; i++) nCapable += comm->peerInfo[i].ibGdrFlushFlag;
+  comm->ibGdrFlushFlag = nCapable == comm->nRanks;
+  if (comm->ncclNet == &ncclNetIb && !(parent && comm->netContext == parent->netContext)) {
+    ncclIbSetGdrFlushFlag(comm->netContext, comm->ibGdrFlushFlag);
+  }
+  if (comm->rank == 0 && nCapable > 0 && !comm->ibGdrFlushFlag) {
+    ATTN("RCCL_IB_GDR_FLUSH_FLAG: %d of %d ranks can use it, using the RDMA read flush on every rank", nCapable,
+         comm->nRanks);
+  }
+  INFO(NCCL_INIT | NCCL_NET, "RCCL_IB_GDR_FLUSH_FLAG %s for this comm", comm->ibGdrFlushFlag ? "enabled" : "disabled");
+}
+
 static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, uint64_t commHash) {
   cudaDeviceProp prop;
   info->rank = comm->rank;
@@ -1364,6 +1402,9 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
   (void)hipGetLastError();
   CUDACHECK(cudaGetDeviceProperties(&prop, comm->cudaDev));
   info->totalGlobalMem = ROUNDUP(prop.totalGlobalMem, (1ULL << 32));
+  // The proxy writes the GDR flush flags through the CPU mapping of fine-grained VRAM (gfx942/gfx950).
+  info->ibGdrFlushFlag = comm->ncclNet == &ncclNetIb && ncclIbGdrFlushFlagLocalSupport() &&
+                         (IsArchMatch(prop.gcnArchName, "gfx942") || IsArchMatch(prop.gcnArchName, "gfx950"));
   NCCLCHECK(ncclCudaDriverVersion(&info->cudaDriverVersion));
   const char* mlopartStr = strstr(prop.name, "MLOPart");
   info->mloPart = mlopartStr ? atoi(mlopartStr + strlen("MLOPart")) : NCCL_TOPO_UNDEF;
@@ -1581,11 +1622,29 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     comm->buffSizes[p] = envs[p] != -2 ? envs[p] : defaults[p];
   }
+  comm->p2pLl128BuffSize = comm->buffSizes[NCCL_PROTO_LL128];
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  if (envs[NCCL_PROTO_LL128] == -2) rcclScaleCollLl128BuffSize(comm);
+#endif
+  // A rank sharing its parent's proxy must use the LL128 sizes that proxy sized and strides its net buffers with,
+  // and every other rank must match them: the sizes set connection strides and algorithm choices (an ncclCommGrow
+  // mixes such ranks with new ranks that have no parent). Take this rank's own, else the lowest rank's.
+  if (comm->peerInfo) {
+    const ncclPeerInfo* self = comm->peerInfo + comm->rank;
+    const ncclPeerInfo* shared = self->sharedLl128BuffSize > 0 ? self : nullptr;
+    for (int r = 0; shared == nullptr && r < comm->nRanks; r++) {
+      if (comm->peerInfo[r].sharedLl128BuffSize > 0) shared = comm->peerInfo + r;
+    }
+    if (shared) {
+      comm->buffSizes[NCCL_PROTO_LL128] = shared->sharedLl128BuffSize;
+      comm->p2pLl128BuffSize = shared->sharedP2pLl128BuffSize;
+    }
+  }
 
 #if ENABLE_TDM_SIMPLE
   // FIFO slot k sits at k*(buffSizes/NCCL_STEPS), so the step must be a RCCL_TDM_ALIGN
   // multiple for every slot to hit TDM's direct path. No-op at the 4MiB default.
-  if (comm->tdmSimpleEnable) {
+  if (comm->tdmSimpleEnable || comm->tdmSimpleReduceEnable) {
     int64_t simple = comm->buffSizes[NCCL_PROTO_SIMPLE];
     int64_t aligned = ROUNDUP(simple, (int64_t)(NCCL_STEPS * RCCL_TDM_ALIGN));
     if (simple > 0 && aligned != simple && aligned <= INT_MAX) {
@@ -1842,6 +1901,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // AllGather1 - begin
   NCCLCHECKGOTO(ncclCalloc(&comm->peerInfo, nranks + 1), ret, fail); // Extra rank to represent CollNet root
   NCCLCHECKGOTO(fillInfo(comm, comm->peerInfo + rank, comm->commHash), ret, fail);
+  rcclFillSharedParentInfo(comm->peerInfo + rank, parent);
   NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, comm->peerInfo, sizeof(struct ncclPeerInfo)), ret, fail);
   COMPILER_ATOMIC_STORE(&comm->peerInfoValid, true, std::memory_order_release);
 
@@ -1935,6 +1995,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
   rcclSetTuningPartition(comm);
+  rcclSetIbGdrFlushFlag(comm, parent);
 
   // AllGather1 - end
   timers[TIMER_INIT_ALLGATHER] = clockNano() - timers[TIMER_INIT_ALLGATHER];
@@ -2296,6 +2357,14 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->tdmSimpleEnable =
     rcclParamTdmSimpleEnable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
   if (comm->tdmSimpleEnable) INFO(NCCL_INIT, "TDM SIMPLE path enabled");
+  comm->tdmSimpleReduceEnable =
+    rcclParamTdmSimpleReduceEnable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
+  if (comm->tdmSimpleReduceEnable) INFO(NCCL_INIT, "TDM SIMPLE reduce path enabled");
+#endif
+#if ENABLE_TDM_PRIM_LL128
+  comm->tdmLl128Enable =
+    rcclParamTdmLl128Enable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
+  if (comm->tdmLl128Enable) INFO(NCCL_INIT, "TDM LL128 path enabled");
 #endif
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||

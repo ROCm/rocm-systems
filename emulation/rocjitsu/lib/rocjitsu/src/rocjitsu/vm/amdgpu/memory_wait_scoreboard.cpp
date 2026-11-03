@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
@@ -14,6 +15,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <limits>
 
 namespace rocjitsu::amdgpu {
 
@@ -621,8 +623,21 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
         access(scratch, ~uint64_t{0}, 0xf, false);
     }
   }
+  // A fork or join touches at most one branch stack entry, chosen by MODE.CSP at
+  // run time. Its implicit registers are the static superset of every entry, kept
+  // for liveness; checking them all would report unrelated pending SGPRs.
+  const bool branch_stack = inst.flags() & BRANCH_STACK;
+  std::optional<BranchStackAccess> stack_access;
+  if (branch_stack && inst.src_operand(0)) {
+    const Operand &src0 = *inst.src_operand(0);
+    stack_access = name == "s_cbranch_join" ? join_stack_access(wf, registers.read_scalar(src0))
+                                            : fork_stack_access(wf, registers.read_scalar64(src0));
+  }
+  const auto stack_entry = [&]() {
+    return RegisterRef{RegClass::SGPR, static_cast<uint16_t>(stack_access->first_wave_sgpr), 4};
+  };
   RegisterSet implicit;
-  if (!preserves_destination)
+  if (!preserves_destination && !branch_stack)
     inst.implicit_uses(implicit);
   implicit.for_each([&](RegisterRef reg) {
     // Operand-derived reads preserve their bank roles above.
@@ -632,14 +647,19 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       return;
     access(reg, reg.cls == RegClass::VGPR ? lanes : ~uint64_t{0}, 0xf, false);
   });
+  if (stack_access && !stack_access->write)
+    access(stack_entry(), ~uint64_t{0}, 0xf, false);
   if (!inst.is_memory_wait_producer()) {
     for (int i = 0; i < inst.num_dst_operands(); ++i)
       check_operand(inst.dst_operand(i), true);
     implicit = RegisterSet{};
-    inst.implicit_defs(implicit);
+    if (!branch_stack)
+      inst.implicit_defs(implicit);
     implicit.for_each([&](RegisterRef reg) {
       access(reg, reg.cls == RegClass::VGPR ? lanes : ~uint64_t{0}, 0xf, true);
     });
+    if (stack_access && stack_access->write)
+      access(stack_entry(), ~uint64_t{0}, 0xf, true);
   }
 }
 
@@ -733,6 +753,7 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
 
 void MemoryWaitScoreboard::clear() {
   events_.clear();
+  superseded_.clear();
   pending_scalar_ = false;
   may_overlap_ = false;
   pending_.reset();
@@ -746,10 +767,83 @@ void MemoryWaitScoreboard::clear() {
   translations_.clear();
 }
 
+bool MemoryWaitScoreboard::cancel_last_issue(uint64_t pc, std::span<const WaitCounterType> counters,
+                                             rj_code_arch_t arch, bool xcnt) {
+  const auto model = waitcnt_model(arch);
+  if (model.failed())
+    return false;
+  std::array<uint32_t, kCounters> units{};
+  for (const auto counter : counters)
+    ++units[static_cast<size_t>(canonical_wait_counter(counter, model.value()))];
+  if (xcnt)
+    units[static_cast<size_t>(WaitCounterKind::X)] = 1;
+  return cancel_issue_units(pc, units);
+}
+
+bool MemoryWaitScoreboard::cancel_last_issue(uint64_t pc, const IssueSnapshot &before) {
+  std::array<uint32_t, kCounters> units{};
+  for (size_t i = 0; i < kCounters; ++i) {
+    if (before[i] > issued_[i] || issued_[i] - before[i] > std::numeric_limits<uint32_t>::max())
+      return false;
+    units[i] = static_cast<uint32_t>(issued_[i] - before[i]);
+  }
+  return cancel_issue_units(pc, units);
+}
+
+bool MemoryWaitScoreboard::cancel_issue_units(uint64_t pc,
+                                              const std::array<uint32_t, kCounters> &units) {
+  const auto sequences = issued_;
+  for (size_t i = 0; i < kCounters; ++i)
+    if (units[i] > issued_[i] - retired_[i])
+      return false;
+
+  std::erase_if(events_, [&](const Event &event) {
+    const auto i = static_cast<size_t>(event.counter);
+    return units[i] && event.pc == pc && event.sequence == sequences[i];
+  });
+  for (size_t i = 0; i < kCounters; ++i) {
+    if (!units[i])
+      continue;
+    issued_[i] -= units[i];
+    if (last_order_[i] != kUnordered)
+      orders_[last_order_[i]].issued -= units[i];
+    if (issued_[i] == retired_[i]) {
+      unordered_[i] = false;
+      ordering_kinds_[i] = 0;
+    }
+  }
+  std::erase_if(translations_, [&](const auto &entry) {
+    const auto xcounter = static_cast<size_t>(WaitCounterKind::X);
+    return units[xcounter] && entry.sequence == sequences[xcounter];
+  });
+  std::erase_if(superseded_, [&](const auto &old) {
+    const auto i = static_cast<size_t>(old.replacement_counter);
+    if (!units[i] || old.replacement_sequence != sequences[i] || old.replacement_pc != pc)
+      return false;
+    const auto &event = old.event;
+    if (!completed(event.counter, event.sequence, event.order, event.order_sequence))
+      events_.push_back(event);
+    return true;
+  });
+  // Rebuild all shadow bytes so overlapping, unrelated producers survive.
+  pending_.reset();
+  pending_scalar_ = false;
+  may_overlap_ = false;
+  for (const auto &event : events_) {
+    pending_scalar_ |= event.reg.cls != RegClass::VGPR;
+    may_overlap_ |= pending_.mark(event.reg, event.counter == WaitCounterKind::X
+                                                 ? MemoryWaitShadow::kReplaySource
+                                                 : MemoryWaitShadow::kResult);
+  }
+  return true;
+}
+
 uint64_t MemoryWaitScoreboard::issue(WaitCounterKind counter, bool unordered,
                                      uint32_t ordering_kind, uint32_t units,
                                      bool backpressure_ordered) {
   auto i = static_cast<size_t>(counter);
+  std::erase_if(superseded_,
+                [counter](const auto &event) { return event.replacement_counter == counter; });
   ordering_kinds_[i] |= ordering_kind;
   unordered_[i] |= unordered || std::popcount(ordering_kinds_[i]) > 1;
   issued_[i] += units;
@@ -894,10 +988,19 @@ void MemoryWaitScoreboard::add(Event event) {
       // drains their entire X group, so its newest covering source is enough.
       const bool scalar_replay =
           xcnt_scalar_ && old.counter == WaitCounterKind::X && event.counter == WaitCounterKind::X;
-      return (ordered || scalar_replay) && old.reg.cls == event.reg.cls &&
-             event.reg.index <= old.reg.index &&
-             event.reg.index + event.reg.width >= old.reg.index + old.reg.width &&
-             (event.lanes & old.lanes) == old.lanes && (event.bytes & old.bytes) == old.bytes;
+      const bool superseded = (ordered || scalar_replay) && old.reg.cls == event.reg.cls &&
+                              event.reg.index <= old.reg.index &&
+                              event.reg.index + event.reg.width >= old.reg.index + old.reg.width &&
+                              (event.lanes & old.lanes) == old.lanes &&
+                              (event.bytes & old.bytes) == old.bytes;
+      if (superseded && old.sequence < event.sequence) {
+        std::erase_if(superseded_, [&](const auto &saved) {
+          return saved.replacement_counter == event.counter &&
+                 saved.replacement_sequence != event.sequence;
+        });
+        superseded_.push_back({old, event.counter, event.sequence, event.pc});
+      }
+      return superseded;
     });
   events_.push_back(event);
   pending_scalar_ |= event.reg.cls != RegClass::VGPR;

@@ -737,10 +737,51 @@ TEST(InterposerDupTest, DrmCloseReuseRaceNeverMisclassifiesDuplicate) {
 
 namespace {
 
-// Open the synthetic DRM render node the interposer exposes for the simulated GPU
-// (render minor 128 in the KMD test configs). Requires the KFD driver to be up, so
-// callers open /dev/kfd first.
-int open_drm_render() { return open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC); }
+// Read the configured render minor from the synthetic KFD node.
+uint32_t configured_drm_render_minor() {
+  std::string key;
+  uint32_t minor = 0;
+  {
+    std::ifstream properties("/sys/class/kfd/kfd/topology/nodes/1/properties");
+    while (properties >> key) {
+      if (key == "drm_render_minor") {
+        properties >> minor;
+        break;
+      }
+      std::string value;
+      properties >> value;
+    }
+  }
+  return minor;
+}
+
+// Require the synthetic descriptor so test ioctls cannot reach a physical GPU.
+int open_drm_render() {
+  const uint32_t minor = configured_drm_render_minor();
+  if (minor < 128 || minor >= 192) {
+    errno = ENODEV;
+    return -1;
+  }
+
+  const std::string node = "/dev/dri/renderD" + std::to_string(minor);
+  const int fd = open(node.c_str(), O_RDWR | O_CLOEXEC);
+  if (fd < 0) {
+    errno = ENODEV;
+    return -1;
+  }
+
+  const std::string fd_path = "/proc/self/fd/" + std::to_string(fd);
+  std::array<char, 128> target{};
+  const ssize_t length = readlink(fd_path.c_str(), target.data(), target.size());
+  constexpr char kSyntheticDrmFd[] = "/memfd:rocjitsu_drm (deleted)";
+  if (length != sizeof(kSyntheticDrmFd) - 1 ||
+      std::memcmp(target.data(), kSyntheticDrmFd, sizeof(kSyntheticDrmFd) - 1) != 0) {
+    close(fd);
+    errno = ENODEV;
+    return -1;
+  }
+  return fd;
+}
 
 bool query_drm_device_info(int drm_fd, drm_amdgpu_info_device *device) {
   drm_amdgpu_info query{};
@@ -1020,6 +1061,21 @@ void check_kfd_export_flags_survive_duplication(Duplicate duplicate, bool close_
   EXPECT_EQ(close(kfd), 0);
 }
 
+std::string mapping_dump_flags(void *address) {
+  std::ifstream smaps("/proc/self/smaps");
+  std::string line;
+  bool selected = false;
+  while (std::getline(smaps, line)) {
+    unsigned long begin = 0, end = 0;
+    if (std::sscanf(line.c_str(), "%lx-%lx", &begin, &end) == 2)
+      selected = reinterpret_cast<uintptr_t>(address) >= begin &&
+                 reinterpret_cast<uintptr_t>(address) < end;
+    if (selected && line.starts_with("VmFlags:"))
+      return line + " ";
+  }
+  return {};
+}
+
 } // namespace
 
 TEST(InterposerDrmTest, DeviceInfoReportsActiveCuCount) {
@@ -1034,6 +1090,41 @@ TEST(InterposerDrmTest, DeviceInfoReportsActiveCuCount) {
   ASSERT_TRUE(query_drm_device_info(drm, &device));
   EXPECT_EQ(device.device_id, 30112u);
   EXPECT_EQ(device.cu_active_number, 256u);
+
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// This test uses an explicit 256-MiB aperture, smaller than physical VRAM.
+TEST(InterposerDrmTest, PartialVramApertureLimitsCpuAccessibleQueries) {
+  constexpr uint64_t kTotalVram = 463856467968ull;
+  constexpr uint64_t kVisibleVram = 256ull << 20;
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+
+  drm_amdgpu_info_vram_gtt vram_gtt{};
+  drm_amdgpu_info query{};
+  query.query = AMDGPU_INFO_VRAM_GTT;
+  query.return_pointer = reinterpret_cast<uint64_t>(&vram_gtt);
+  query.return_size = sizeof(vram_gtt);
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_INFO, &query), 0);
+  EXPECT_EQ(vram_gtt.vram_size, kTotalVram);
+  EXPECT_EQ(vram_gtt.vram_cpu_accessible_size, kVisibleVram);
+
+  drm_amdgpu_memory_info memory{};
+  query.query = AMDGPU_INFO_MEMORY;
+  query.return_pointer = reinterpret_cast<uint64_t>(&memory);
+  query.return_size = sizeof(memory);
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_INFO, &query), 0);
+  EXPECT_EQ(memory.vram.total_heap_size, kTotalVram);
+  EXPECT_EQ(memory.vram.usable_heap_size, kTotalVram);
+  EXPECT_EQ(memory.vram.max_allocation, kTotalVram);
+  EXPECT_EQ(memory.cpu_accessible_vram.total_heap_size, kVisibleVram);
+  EXPECT_EQ(memory.cpu_accessible_vram.usable_heap_size, kVisibleVram);
+  EXPECT_EQ(memory.cpu_accessible_vram.max_allocation, kVisibleVram);
+  EXPECT_EQ(memory.cpu_accessible_vram.total_heap_size, vram_gtt.vram_cpu_accessible_size);
 
   EXPECT_EQ(close(drm), 0);
   EXPECT_EQ(close(kfd), 0);
@@ -1604,6 +1695,173 @@ TEST(InterposerDrmTest, PrimeImportRejectsADescriptorThatIsNotADmabuf) {
   ASSERT_EQ(close(render), 0);
   expect_plain_dev_null_on(render);
   EXPECT_EQ(close(importer), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// Device pages are captured by ROCr's GPU core policy, while ordinary host
+// mappings remain eligible for the host core. Check descriptor aliases and both
+// libc entry points because libdrm calls mmap64 even on a 64-bit host.
+TEST(InterposerDrmTest, DeviceMappingsFollowGpuCoreDumpPolicyAcrossDescriptorAliases) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  KfdExport buffer;
+  ASSERT_TRUE(buffer.create(kfd, kPublicVram));
+  int alias = dup(buffer.dmabuf);
+  ASSERT_GE(alias, 0);
+  ASSERT_EQ(close(buffer.dmabuf), 0);
+  buffer.dmabuf = -1;
+
+  for (bool large_file : {false, true}) {
+    void *mapped = large_file ? mmap64(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, alias, 0)
+                              : mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, alias, 0);
+    ASSERT_NE(mapped, MAP_FAILED);
+    EXPECT_NE(mapping_dump_flags(mapped).find(" dd "), std::string::npos);
+    std::ifstream maps("/proc/self/maps");
+    std::string line;
+    bool found = false;
+    while (std::getline(maps, line)) {
+      unsigned long begin = 0, end = 0;
+      if (std::sscanf(line.c_str(), "%lx-%lx", &begin, &end) == 2 &&
+          reinterpret_cast<uintptr_t>(mapped) >= begin &&
+          reinterpret_cast<uintptr_t>(mapped) < end) {
+        EXPECT_NE(line.find("/dev/dri/renderD"), std::string::npos);
+        found = true;
+      }
+    }
+    EXPECT_TRUE(found);
+    ASSERT_EQ(munmap(mapped, 4096), 0);
+  }
+  int ordinary = make_sized_memfd(4096);
+  ASSERT_GE(ordinary, 0);
+  void *host = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, ordinary, 0);
+  ASSERT_NE(host, MAP_FAILED);
+  EXPECT_FALSE(mapping_dump_flags(host).empty());
+  EXPECT_EQ(mapping_dump_flags(host).find(" dd "), std::string::npos);
+  EXPECT_EQ(munmap(host, 4096), 0);
+  EXPECT_EQ(close(ordinary), 0);
+  EXPECT_EQ(close(alias), 0);
+  buffer.release();
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, GemMappingsFollowGpuCoreDumpPolicy) {
+  constexpr rlim_t kTestNofileLimit = 8192;
+  struct rlimit limit {};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &limit), 0);
+  if (limit.rlim_max < kTestNofileLimit)
+    GTEST_SKIP() << "the driver backing descriptor range is unavailable";
+  RestoreLimit restore{limit};
+  limit.rlim_cur = std::max(limit.rlim_cur, kTestNofileLimit);
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limit), 0);
+
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  KfdExport buffer;
+  ASSERT_TRUE(buffer.create(kfd, kPublicVram));
+  const int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  drm_prime_handle imported{};
+  imported.fd = buffer.dmabuf;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_PRIME_FD_TO_HANDLE, &imported), 0);
+  drm_amdgpu_gem_mmap offset{};
+  offset.in.handle = imported.handle;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_MMAP, &offset), 0);
+  for (bool large_file : {false, true}) {
+    void *mapped = large_file ? mmap64(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, drm,
+                                       static_cast<off64_t>(offset.out.addr_ptr))
+                              : mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, drm,
+                                     static_cast<off_t>(offset.out.addr_ptr));
+    ASSERT_NE(mapped, MAP_FAILED);
+    EXPECT_NE(mapping_dump_flags(mapped).find(" dd "), std::string::npos);
+    EXPECT_EQ(munmap(mapped, 4096), 0);
+  }
+  drm_gem_close close_bo{};
+  close_bo.handle = imported.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_GEM_CLOSE, &close_bo), 0);
+  EXPECT_EQ(close(drm), 0);
+  buffer.release();
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, MappingStillSucceedsAtTheDescriptorLimit) {
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  const int file = make_sized_memfd(4096);
+  ASSERT_GE(file, 0);
+  const uint32_t marker = 0x12345678;
+  ASSERT_EQ(pwrite(file, &marker, sizeof(marker), 0), static_cast<ssize_t>(sizeof(marker)));
+  struct DescriptorLimitGuard {
+    rlimit original{};
+    std::vector<int> descriptors;
+    ~DescriptorLimitGuard() {
+      setrlimit(RLIMIT_NOFILE, &original);
+      for (int fd : descriptors)
+        syscall(SYS_close, fd);
+    }
+  } guard;
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &guard.original), 0);
+  rlimit bounded = guard.original;
+  bounded.rlim_cur = std::min<rlim_t>(bounded.rlim_cur, 64);
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &bounded), 0);
+  for (;;) {
+    const int extra = static_cast<int>(syscall(SYS_dup, file));
+    if (extra < 0)
+      break;
+    guard.descriptors.push_back(extra);
+  }
+  ASSERT_EQ(errno, EMFILE);
+  void *mapped = mmap(nullptr, 4096, PROT_READ, MAP_SHARED, file, 0);
+  ASSERT_NE(mapped, MAP_FAILED);
+  EXPECT_EQ(*static_cast<const uint32_t *>(mapped), marker);
+  EXPECT_EQ(munmap(mapped, 4096), 0);
+  EXPECT_EQ(close(file), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, DumpPolicyRetainsTheMappedFileAcrossDescriptorReuse) {
+  auto arm =
+      reinterpret_cast<void (*)(int, int)>(dlsym(RTLD_DEFAULT, "rj_test_swap_fd_after_mmap"));
+  auto swapped = reinterpret_cast<bool (*)()>(dlsym(RTLD_DEFAULT, "rj_test_mmap_swapped_fd"));
+  ASSERT_NE(arm, nullptr);
+  ASSERT_NE(swapped, nullptr);
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  KfdExport device;
+  ASSERT_TRUE(device.create(kfd, kPublicVram));
+  const int host = make_sized_memfd(4096);
+  ASSERT_GE(host, 0);
+  for (const bool map_device : {false, true}) {
+    for (const bool large_file : {false, true}) {
+      SCOPED_TRACE(map_device);
+      SCOPED_TRACE(large_file);
+      const int original = dup(map_device ? device.dmabuf : host);
+      ASSERT_GE(original, 0);
+      arm(original, map_device ? host : device.dmabuf);
+      void *mapped = large_file ? mmap64(nullptr, 4096, PROT_READ, MAP_SHARED, original, 0)
+                                : mmap(nullptr, 4096, PROT_READ, MAP_SHARED, original, 0);
+      ASSERT_NE(mapped, MAP_FAILED);
+      EXPECT_TRUE(swapped());
+      std::ifstream smaps("/proc/self/smaps");
+      std::string line;
+      bool selected = false, found = false;
+      while (std::getline(smaps, line)) {
+        unsigned long begin = 0, end = 0;
+        if (std::sscanf(line.c_str(), "%lx-%lx", &begin, &end) == 2)
+          selected = reinterpret_cast<uintptr_t>(mapped) >= begin &&
+                     reinterpret_cast<uintptr_t>(mapped) < end;
+        if (selected && line.starts_with("VmFlags:")) {
+          EXPECT_EQ((line + " ").find(" dd ") != std::string::npos, map_device);
+          found = true;
+          break;
+        }
+      }
+      EXPECT_TRUE(found);
+      EXPECT_EQ(munmap(mapped, 4096), 0);
+      EXPECT_EQ(close(original), 0);
+    }
+  }
+  EXPECT_EQ(close(host), 0);
+  device.release();
   EXPECT_EQ(close(kfd), 0);
 }
 
@@ -3798,14 +4056,14 @@ TEST(InterposerDrmTest, RenderNodePathMetadataMatchesDescriptor) {
   ASSERT_EQ(fstat(drm, &descriptor), 0);
   ASSERT_TRUE(S_ISCHR(descriptor.st_mode));
 
-  const char *path = "/dev/dri/renderD128";
+  const std::string path = "/dev/dri/renderD" + std::to_string(configured_drm_render_minor());
   for (const char *symbol : {"stat", "lstat"}) {
     SCOPED_TRACE(symbol);
     auto function =
         reinterpret_cast<int (*)(const char *, struct stat *)>(dlsym(RTLD_DEFAULT, symbol));
     ASSERT_NE(function, nullptr);
     struct stat node {};
-    ASSERT_EQ(function(path, &node), 0);
+    ASSERT_EQ(function(path.c_str(), &node), 0);
     EXPECT_TRUE(S_ISCHR(node.st_mode));
     EXPECT_EQ(node.st_rdev, descriptor.st_rdev);
     ASSERT_EQ(function("/dev/null", &node), 0);
@@ -3821,7 +4079,7 @@ TEST(InterposerDrmTest, RenderNodePathMetadataMatchesDescriptor) {
         reinterpret_cast<int (*)(const char *, struct stat64 *)>(dlsym(RTLD_DEFAULT, symbol));
     ASSERT_NE(function, nullptr);
     struct stat64 node {};
-    ASSERT_EQ(function(path, &node), 0);
+    ASSERT_EQ(function(path.c_str(), &node), 0);
     EXPECT_TRUE(S_ISCHR(node.st_mode));
     EXPECT_EQ(node.st_rdev, descriptor.st_rdev);
   }
@@ -3831,7 +4089,7 @@ TEST(InterposerDrmTest, RenderNodePathMetadataMatchesDescriptor) {
         reinterpret_cast<int (*)(int, const char *, struct stat *)>(dlsym(RTLD_DEFAULT, symbol));
     ASSERT_NE(function, nullptr);
     struct stat node {};
-    ASSERT_EQ(function(1, path, &node), 0);
+    ASSERT_EQ(function(1, path.c_str(), &node), 0);
     EXPECT_TRUE(S_ISCHR(node.st_mode));
     EXPECT_EQ(node.st_rdev, descriptor.st_rdev);
   }
@@ -3841,7 +4099,7 @@ TEST(InterposerDrmTest, RenderNodePathMetadataMatchesDescriptor) {
         reinterpret_cast<int (*)(int, const char *, struct stat64 *)>(dlsym(RTLD_DEFAULT, symbol));
     ASSERT_NE(function, nullptr);
     struct stat64 node {};
-    ASSERT_EQ(function(1, path, &node), 0);
+    ASSERT_EQ(function(1, path.c_str(), &node), 0);
     EXPECT_TRUE(S_ISCHR(node.st_mode));
     EXPECT_EQ(node.st_rdev, descriptor.st_rdev);
   }

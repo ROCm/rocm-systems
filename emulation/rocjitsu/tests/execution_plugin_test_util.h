@@ -64,9 +64,9 @@ public:
     return cu.sgpr_owner(reg_idx);
   }
 
-  static void route_memory_inst(amdgpu::ComputeUnitCore &cu, Instruction *inst,
-                                amdgpu::Wavefront &wf) {
-    cu.route_memory_inst(inst, wf);
+  static amdgpu::VmAccessOutcome route_memory_inst(amdgpu::ComputeUnitCore &cu, Instruction *inst,
+                                                   amdgpu::Wavefront &wf) {
+    return cu.route_memory_inst(inst, wf);
   }
 };
 

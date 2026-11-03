@@ -190,6 +190,51 @@ HIP_TEST_CASE(Unit_hipEventIpc_DestroyNonBlocking) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Keep two interprocess events alive at the same time and get IPC handles for both.
+ *    Each event must get its own shared object, so the second handle must not fail or alias
+ *    the first one (regression for the emulated path, whose name used to repeat on Windows).
+ *    On Linux, also verify that opening either handle in the creating process is rejected.
+ * Test source
+ * ------------------------
+ *  - unit/event/Unit_hipEventIpc.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ */
+HIP_TEST_CASE(Unit_hipEventIpc_MultipleLiveEvents) {
+  hipDeviceProp_t props;
+  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  if (!props.ipcEventSupported) {
+    HIP_SKIP_TEST("Device does not support IPC events");
+  }
+
+  constexpr int kNumEvents = 2;
+  hipEvent_t events[kNumEvents];
+  hipIpcEventHandle_t handles[kNumEvents];
+  for (int i = 0; i < kNumEvents; ++i) {
+    HIP_CHECK(hipEventCreateWithFlags(&events[i], hipEventInterprocess | hipEventDisableTiming));
+    std::memset(&handles[i], 0, sizeof(handles[i]));
+    HIP_CHECK(hipIpcGetEventHandle(&handles[i], events[i]));
+  }
+  // Both events are still alive here, so each must own a distinct IPC object.
+  REQUIRE(std::memcmp(&handles[0], &handles[1], sizeof(handles[0])) != 0);
+
+#if !HT_WIN
+  // hipIpcOpenEventHandle() should be called in a different process, hence it should fail here
+  for (int i = 0; i < kNumEvents; ++i) {
+    hipEvent_t opened = nullptr;
+    REQUIRE(hipIpcOpenEventHandle(&opened, handles[i]) == hipErrorInvalidContext);
+  }
+#endif
+
+  for (int i = 0; i < kNumEvents; ++i) {
+    HIP_CHECK(hipEventDestroy(events[i]));
+  }
+}
+
+/**
  * End doxygen group EventTest.
  * @}
  */

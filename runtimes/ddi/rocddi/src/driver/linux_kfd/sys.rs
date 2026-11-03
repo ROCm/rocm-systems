@@ -56,6 +56,7 @@ pub(super) enum Call<'a> {
     Version(&'a mut uapi::Version),
     ClockCounters(&'a mut uapi::ClockCounters),
     AvailableMemory(&'a mut uapi::AvailableMemory),
+    XnackMode(&'a mut uapi::XnackMode),
     TileConfig(&'a mut uapi::TileConfig, &'a mut [u32], &'a mut [u32]),
     Apertures(&'a mut uapi::Apertures, &'a mut [uapi::Aperture]),
     AcquireVm(&'a mut uapi::AcquireVm),
@@ -233,6 +234,7 @@ impl Kfd {
             Call::AvailableMemory(args) => {
                 (uapi::GET_AVAILABLE_MEMORY, ptr::from_mut(*args).cast())
             }
+            Call::XnackMode(args) => (uapi::SET_XNACK_MODE, ptr::from_mut(*args).cast()),
             Call::TileConfig(args, _, _) => (uapi::GET_TILE_CONFIG, ptr::from_mut(*args).cast()),
             Call::Apertures(args, entries) => {
                 args.pointer = if entries.is_empty() {
@@ -373,6 +375,16 @@ impl Kfd {
         };
         self.call(Call::ClockCounters(&mut counters))?;
         Ok(counters)
+    }
+
+    pub(super) fn xnack_enabled(&self) -> io::Result<bool> {
+        let mut mode = uapi::XnackMode { xnack_enabled: -1 };
+        self.call(Call::XnackMode(&mut mode))?;
+        match mode.xnack_enabled {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(invalid_data("KFD returned an invalid XNACK mode")),
+        }
     }
 
     pub(super) fn tile_config(&self, gpu_id: u32) -> io::Result<uapi::TileConfig> {

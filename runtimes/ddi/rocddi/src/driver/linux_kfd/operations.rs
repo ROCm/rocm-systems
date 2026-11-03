@@ -24,38 +24,41 @@ pub(super) fn device_counter_frequency_hz(info: drm::DeviceInfoPrefix) -> Option
         .then_some(u64::from(info.gpu_counter_frequency_khz) * 1000)
 }
 
-pub(super) fn query_endpoint_details(endpoint: &Endpoint) -> EndpointDetails {
-    let mut details = EndpointDetails::empty_for(endpoint);
-    let EndpointDetailsKind::Gpu {
-        asic_family_id,
-        counter_frequency_hz,
-    } = &mut details.kind
-    else {
-        return details;
-    };
+pub(super) fn populate_endpoint(endpoint: &mut Endpoint) {
     let Some(pci) = endpoint.pci else {
-        return details;
+        return;
     };
     let Some(native) = crate::topology::platform::linux::kfd_drm_info(endpoint) else {
-        return details;
+        return;
     };
     let device_info = native
         .render_minor
         .and_then(|minor| sysfs::open_render(minor).ok())
         .and_then(|render| matching_device_info(endpoint, &render));
-    if let Some(info) = device_info {
-        *asic_family_id = (info.family_id != 0).then_some(info.family_id);
-        *counter_frequency_hz = device_counter_frequency_hz(info);
+    if let (Some(device_info), crate::topology::EndpointKind::Gpu { info }) =
+        (device_info, &mut endpoint.kind)
+    {
+        info.drm_asic_family_id = (device_info.family_id != 0).then_some(device_info.family_id);
+        info.counter_frequency_hz = device_counter_frequency_hz(device_info);
     }
-    details.product_name = std::fs::metadata("/usr/share/libdrm/amdgpu.ids")
+    endpoint.product_name = std::fs::metadata("/usr/share/libdrm/amdgpu.ids")
         .ok()
         .filter(|metadata| metadata.len() <= 1024 * 1024)
         .and_then(|_| std::fs::read_to_string("/usr/share/libdrm/amdgpu.ids").ok())
         .and_then(|contents| marketing_name(&contents, pci.device_id, pci.revision_id));
-    details
 }
 
 impl GpuDriver for LinuxKfdDriver {
+    fn xnack_enabled(&self, device: &DeviceState) -> Result<bool, Error> {
+        self.ensure_open()?;
+        device.vm.check()?;
+        device
+            .vm
+            .kfd()
+            .xnack_enabled()
+            .map_err(|source| native_error("KFD XNACK mode query", source))
+    }
+
     fn available_memory(&self, device: &DeviceState) -> Result<u64, Error> {
         self.ensure_open()?;
         device
@@ -162,6 +165,16 @@ impl GpuKernelQueueOperations for LinuxKfdDriver {
 
     fn available_sdma_engines(&self, device: &DeviceState) -> Result<u32, Error> {
         self.ensure_open()?;
+        if cfg!(target_arch = "x86_64")
+            && matches!(
+                device.native.queues.gfx_target,
+                90008 | 90010 | 90402 | 90500
+            )
+            && device.native.queues.sdma_qualified
+        {
+            let count = device.native.queues.sdma_engines.min(u32::BITS);
+            return Ok(u32::MAX >> (u32::BITS - count));
+        }
         if !cfg!(target_arch = "x86_64")
             || !matches!(device.native.queues.gfx_target, 120_000 | 120_001 | 120_500)
             || !device.native.queues.sdma_qualified
@@ -498,12 +511,26 @@ impl AllocationOperations for LinuxKfdDriver {
                 "secondary KFD contexts cannot bind host-owned pages",
             ));
         }
+        if let MemoryKind::DeviceLocal {
+            coherent,
+            extended_coherent: true,
+            uncached,
+            ..
+        } = kind
+            && (!coherent || uncached)
+        {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "extended local coherence requires a cached coherent mapping",
+            ));
+        }
         let native_kind = match kind {
             MemoryKind::System => memory::BufferKind::Gtt,
             MemoryKind::OwnedHost { policy } => memory::BufferKind::OwnedUserptr { cache: policy },
             MemoryKind::DeviceLocal {
                 host_visible,
                 coherent,
+                extended_coherent,
                 uncached,
                 contiguous,
             } => {
@@ -527,6 +554,7 @@ impl AllocationOperations for LinuxKfdDriver {
                 memory::BufferKind::Vram {
                     public: host_visible,
                     coherent,
+                    extended_coherent,
                     uncached,
                     contiguous,
                 }
@@ -682,6 +710,12 @@ impl VirtualMemoryOperations for LinuxKfdDriver {
         permissions: DeviceAccess,
     ) -> Result<Owned<KfdVirtualHostMapping>, Error> {
         KfdVirtualHostMapping::create(memory, reservation, address, offset, size, permissions)
+    }
+    fn set_virtual_host_mapping_permissions(
+        mapping: &mut KfdVirtualHostMapping,
+        permissions: DeviceAccess,
+    ) -> Result<(), Error> {
+        mapping.set_permissions(permissions)
     }
     fn free_virtual_host_mapping(mapping: &mut KfdVirtualHostMapping) -> Result<(), Error> {
         mapping.free()

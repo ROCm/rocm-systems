@@ -588,7 +588,9 @@ TEST(SpillManager, IntegrationFromLiveBefore) {
     scope.push_back(b.get());
   const ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/64};
   LivenessAnalysis liveness{KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec)};
-  const RegisterSet &live = liveness.live_before(*probe);
+  auto maybe_live = liveness.live_before(*probe);
+  ASSERT_TRUE(maybe_live.succeeded());
+  const RegisterSet &live = (*maybe_live.value());
   ASSERT_FALSE(live.none()) << "expected at least one live register at probe site";
 
   // Make up the private scratch size

@@ -166,11 +166,13 @@ constexpr uint16_t kInlineZero = scalar_positive_inline_u32(0);
 
 // Copies the dword at kSource to kSource + kDestinationDelta, addressing both
 // through s[2:3] and a zero per-lane offset in v0. Without @p with_store the
-// store is replaced by s_nops of the same length.
-std::vector<uint32_t> make_copy_kernel(rj_code_arch_t arch, bool with_store) {
-  std::vector<uint32_t> code{build_s_mov_b32(2, kScalarSrcLiteral, arch),
-                             static_cast<uint32_t>(kSource), build_s_mov_b32(3, kInlineZero, arch),
-                             build_v_mov_b32_src(0, kInlineZero, arch)};
+// store is replaced by s_nops of the same length. Replaces @p code with the
+// kernel words.
+void make_copy_kernel(rj_code_arch_t arch, bool with_store, std::vector<uint32_t> &code) {
+  const auto zero = build_v_mov_b32_src(0, kInlineZero, arch);
+  ASSERT_TRUE(zero.succeeded());
+  code = {build_s_mov_b32(2, kScalarSrcLiteral, arch), static_cast<uint32_t>(kSource),
+          build_s_mov_b32(3, kInlineZero, arch), zero.value()};
   const std::vector<uint32_t> load = build_global_load_dword(1, 0, 2, 0, arch);
   code.insert(code.end(), load.begin(), load.end());
   code.push_back(build_wait_loads_complete(arch));
@@ -180,7 +182,6 @@ std::vector<uint32_t> make_copy_kernel(rj_code_arch_t arch, bool with_store) {
   else
     code.insert(code.end(), store.size(), build_s_nop(0, arch));
   code.push_back(build_s_endpgm(arch));
-  return code;
 }
 
 // Seeds kSource, runs the copy kernel, and returns the destination dword, or
@@ -193,9 +194,12 @@ std::optional<uint32_t> run_copy(const SimArch &target, bool with_store) {
   std::array<uint8_t, sizeof(kSeed)> seed{};
   std::memcpy(seed.data(), &kSeed, sizeof(kSeed));
   sim.write_memory(kSource, seed);
-  const std::optional<std::vector<uint8_t>> bytes =
-      sim.run_and_read_memory(make_copy_kernel(target.arch, with_store), /*private_bytes=*/0,
-                              kSource + kDestinationDelta, sizeof(uint32_t));
+  std::vector<uint32_t> code;
+  make_copy_kernel(target.arch, with_store, code);
+  if (testing::Test::HasFatalFailure())
+    return std::nullopt;
+  const std::optional<std::vector<uint8_t>> bytes = sim.run_and_read_memory(
+      code, /*private_bytes=*/0, kSource + kDestinationDelta, sizeof(uint32_t));
   if (!bytes)
     return std::nullopt;
   uint32_t value = 0;

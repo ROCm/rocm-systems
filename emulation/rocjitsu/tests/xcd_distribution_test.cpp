@@ -1413,7 +1413,7 @@ TEST(XcdDistributionTest, FanoutReportsOneExecutionPairWhenTheOwnerShareIsEmpty)
       << "execution end was reported before the grid's last workgroup retired";
 }
 
-TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
+TEST(XcdDistributionTest, RuntimeQueueScratchUsesItsOwnBackingWithoutSyntheticAllocation) {
   XcdDistributionFixture fx;
   ASSERT_NO_FATAL_FAILURE(fx.initialize());
   KfdProcess process(7);
@@ -1439,6 +1439,7 @@ TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
   std::unique_ptr<void, decltype(release)> reservation(mapping, release);
   const uint64_t scratch_va = reinterpret_cast<uint64_t>(reservation.get());
   std::vector<uint8_t> backing(kScratchSize);
+  process.map_pages(scratch_va, backing.data(), backing.size());
   std::atomic_uint allocations{0};
   for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
     amdgpu::CommandProcessor *cp = fx.soc->xcd(xi)->command_processor();
@@ -1481,6 +1482,12 @@ TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
   pkt.kernel_object = kKernelVa;
   amd_queue_t queue_desc{};
   queue_desc.write_dispatch_id = 1;
+  queue_desc.scratch_backing_memory_location = scratch_va;
+  // CDNA4 WAVES counts slots per XCC. Restrict residency to the backing
+  // provided by this queue; waves reuse those physical slots after completion.
+  queue_desc.compute_tmpring_size =
+      (kTotalCus / kTotalXcds) |
+      ((1024 / isa_properties(ROCJITSU_CODE_ARCH_CDNA4).compute_tmpring_wavesize_granule) << 12);
   process.map_pages(kKernelVa, &kernel, sizeof(kernel));
   process.map_pages(kRingVa, ring.data(), sizeof(ring));
   process.map_pages(kQueueVa, &queue_desc, sizeof(queue_desc));
@@ -1503,7 +1510,7 @@ TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
   fx.engine->run();
 
   EXPECT_EQ(queue_desc.read_dispatch_id, 1u);
-  EXPECT_EQ(allocations.load(std::memory_order_relaxed), 1u);
+  EXPECT_EQ(allocations.load(std::memory_order_relaxed), 0u);
   EXPECT_EQ(reporter.faults.load(std::memory_order_relaxed), 0u);
   for (uint64_t count : fx.soc->dispatched_workgroups_per_xcd())
     EXPECT_EQ(count, kTotalCus / kTotalXcds);

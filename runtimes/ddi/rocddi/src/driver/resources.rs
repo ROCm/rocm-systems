@@ -167,6 +167,12 @@ pub(crate) enum VirtualHostMappingState {
 }
 
 impl VirtualHostMappingState {
+    pub(crate) fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(mapping) => mapping.set_permissions(permissions),
+        }
+    }
+
     pub(crate) fn free(&mut self) -> Result<(), Error> {
         match self {
             Self::LinuxKfd(mapping) => mapping.free(),
@@ -228,6 +234,14 @@ impl AllocationState {
             Self::LinuxKfd(allocation) => allocation.info(),
             #[cfg(test)]
             Self::Test(allocation) => allocation.info(),
+        }
+    }
+
+    pub(crate) fn remaining_backing_byte_length(&self) -> u64 {
+        match self {
+            Self::LinuxKfd(allocation) => allocation.driver_state().remaining_backing_byte_length(),
+            #[cfg(test)]
+            Self::Test(_) => 0,
         }
     }
 

@@ -105,13 +105,10 @@ pub(crate) unsafe extern "C" fn create(
         } else {
             access.mapping_granularity
         };
-        if !granularity.is_power_of_two()
-            || granularity < page
-            || info.byte_length % granularity != 0
-        {
+        if !granularity.is_power_of_two() || granularity < page {
             return Err(INVALID);
         }
-        let slot = Owned::<Reservation>::try_new_uninit().map_err(|_| EXHAUSTED)?;
+        let slot = instance.owner_slot::<Reservation>()?;
         let native_owner =
             host::HostReservation::reserve(info.byte_length, info.minimum_alignment.max(page))
                 .map_err(|error| native(&error))?;
@@ -179,9 +176,10 @@ fn validate_update(
     let granularity = reservation.info.mapping_granularity;
     if update.byte_length == 0
         || update.target_byte_offset % granularity != 0
-        || update.byte_length % granularity != 0
         || update.target_byte_offset > reservation.info.byte_length
         || update.byte_length > reservation.info.byte_length - update.target_byte_offset
+        || (update.byte_length % granularity != 0
+            && update.byte_length != reservation.info.byte_length - update.target_byte_offset)
     {
         return Err(INVALID);
     }

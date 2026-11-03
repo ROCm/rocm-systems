@@ -9,6 +9,78 @@ use crate::driver::{self, AddressSpaceInfo, AllocationOperations, CachedInfo};
 use crate::memory::storage::TryPush;
 use crate::memory::storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
+use std::cell::Cell;
+use std::marker::PhantomData;
+use std::rc::Rc;
+
+/// Native cleanup observed while a construction call rolls back.
+///
+/// The original construction error remains the operation result. This record
+/// carries only the first independent cleanup error and a conservative
+/// allocation-owned payload charge.
+#[derive(Default)]
+pub struct RollbackReport {
+    /// First native release failure, if any.
+    pub status: Option<Error>,
+    /// Payload bytes whose native release was not established.
+    pub abandoned_byte_length: u64,
+    charge_backing: bool,
+}
+
+thread_local! {
+    static CURRENT_ROLLBACK: Cell<*mut RollbackReport> = const { Cell::new(std::ptr::null_mut()) };
+}
+
+struct RollbackScope {
+    previous: *mut RollbackReport,
+    _not_send: PhantomData<Rc<()>>,
+}
+
+impl Drop for RollbackScope {
+    fn drop(&mut self) {
+        CURRENT_ROLLBACK.with(|current| current.set(self.previous));
+    }
+}
+
+/// Captures cleanup failures from native owners discarded during construction.
+/// The scope is thread-local to the synchronous native call and never becomes
+/// instance or session state.
+pub fn with_rollback_report<R>(
+    charge_backing: bool,
+    body: impl FnOnce() -> R,
+) -> (R, RollbackReport) {
+    let mut report = RollbackReport {
+        charge_backing,
+        ..RollbackReport::default()
+    };
+    let scope = RollbackScope {
+        previous: CURRENT_ROLLBACK.with(|current| current.replace(&raw mut report)),
+        _not_send: PhantomData,
+    };
+    let result = body();
+    drop(scope);
+    (result, report)
+}
+
+#[allow(unsafe_code)]
+pub(crate) fn record_rollback(error: Error, abandoned_byte_length: u64) {
+    CURRENT_ROLLBACK.with(|current| {
+        let report = current.get();
+        if !report.is_null() {
+            // SAFETY: The pointer belongs to the active synchronous capture
+            // scope on this thread and is restored before that scope returns.
+            let report = unsafe { &mut *report };
+            if report.status.is_none() {
+                report.status = Some(error);
+            }
+            if report.charge_backing {
+                report.abandoned_byte_length = report
+                    .abandoned_byte_length
+                    .saturating_add(abandoned_byte_length);
+            }
+        }
+    });
+}
 
 /// Allocation owner and cached facts shared by drivers that can allocate
 /// device-accessible backing. The driver remains live through native cleanup.
@@ -108,9 +180,7 @@ where
                 detail: "access device belongs to another allocation session",
             });
         }
-        if allocation.is_device_local()
-            && !device.endpoint.can_access_local_memory(&origin.endpoint)
-        {
+        if allocation.is_device_local() && !device.can_access_local_memory(origin) {
             return Err(Error::Operation {
                 kind: ErrorKind::Unsupported,
                 detail: "access device has no qualified route to local memory",
@@ -145,6 +215,13 @@ impl Allocation {
     #[must_use]
     pub fn info(&self) -> AllocationInfo {
         self.inner.info()
+    }
+
+    /// Reports allocation-owned payload still tied to a native backing handle
+    /// or a live host mapping. Imported and borrowed backing reports zero.
+    #[must_use]
+    pub fn remaining_backing_byte_length(&self) -> u64 {
+        self.inner.remaining_backing_byte_length()
     }
     /// Checks native loss and whether this allocation still permits access.
     /// No mapping is added and no cached address is refreshed.
@@ -376,7 +453,7 @@ impl Device {
                     detail: "peer devices must belong to one session",
                 });
             }
-            if requires_local_route && !peer.endpoint.can_access_local_memory(&self.endpoint) {
+            if requires_local_route && !peer.can_access_local_memory(self) {
                 return Err(Error::Operation {
                     kind: ErrorKind::Unsupported,
                     detail: "peer device has no qualified route to local memory",
@@ -400,5 +477,36 @@ impl Device {
             states.try_push(peer_state)?;
         }
         Ok(states)
+    }
+}
+
+#[cfg(test)]
+mod rollback_tests {
+    use super::*;
+
+    #[test]
+    fn rollback_capture_keeps_first_error_and_charges_only_owned_payload() {
+        let failure = || Error::Operation {
+            kind: ErrorKind::Busy,
+            detail: "injected release failure",
+        };
+        let (result, report) = with_rollback_report(true, || {
+            record_rollback(failure(), 4096);
+            record_rollback(failure(), 1024);
+            7
+        });
+        assert_eq!(result, 7);
+        assert_eq!(
+            report.status.as_ref().map(Error::kind),
+            Some(ErrorKind::Busy)
+        );
+        assert_eq!(report.abandoned_byte_length, 5120);
+
+        let ((), borrowed) = with_rollback_report(false, || record_rollback(failure(), 4096));
+        assert_eq!(
+            borrowed.status.as_ref().map(Error::kind),
+            Some(ErrorKind::Busy)
+        );
+        assert_eq!(borrowed.abandoned_byte_length, 0);
     }
 }

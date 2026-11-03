@@ -844,7 +844,7 @@ inline uint32_t scale_result(const Inst &inst, const Wavefront &wf, uint32_t val
     if constexpr (Policy == OutputPolicy::FLUSH_NEAREST) {
       // The generated LOG/EXP body protects the complete instruction with
       // nearest rounding. Reuse its VOP3 finalizer, including NaN passthrough.
-      return std::bit_cast<uint32_t>(fp_mode::apply_omod_f32(std::bit_cast<float>(value), omod));
+      return std::bit_cast<uint32_t>(fp_mode::apply_omod_f32(std::bit_cast<float>(value), omod, 0));
     }
     return scale_f32(value, omod, wf.fp_round_mode_f32());
   }

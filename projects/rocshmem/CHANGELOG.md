@@ -1,11 +1,16 @@
 # Changelog for rocSHMEM
-## Unreleased - rocSHMEM 3.8.0 for ROCm 10.x
+## Unreleased - rocSHMEM 3.9.0 for ROCm 10.3
+
+## rocSHMEM 3.8.0 for ROCm 10.2
 
 ### Fixed
 * Fixed tile RMA operations (`rocshmem_tile_put`, `rocshmem_tile_get`) to correctly apply non-zero `start_coord` values to both the source and destination tensors; previously only the remote tensor was offset, causing incorrect data movement when `start_coord != 0`.
   Fully-packed column-major tiles are now also classified as `Contiguous`, enabling a single flat memcpy instead of per-column copies.
 * Fixed `rocshmem_tile_broadcast` (and `_wave`, `_wg` variants) on the IPC and GDA backends: the root PE's destination buffer was not written when `dst != src`, leaving it uninitialised while non-root PEs received the correct data via `tile_get`. The root PE now performs a local tile copy at the appropriate scope when `dst_data != src_data`, matching the nvshmem reference behaviour.
 * Fixed `rocshmem_ctx_tile_*` collective operations (allgather, broadcast, sum/max/min reduce, collective_wait) silently discarding the caller-supplied `rocshmem_ctx_t` context. The context was accepted but not forwarded to the internal bitcode layer, which always used `ROCSHMEM_CTX_DEFAULT` instead. The context is now threaded through correctly.
+
+### Added
+* Extended the tile API to support **3D and 4D tensors** (in addition to the existing 1D and 2D support) for both the IPC and GDA backends. The `TileView` internal structure now uses fixed-size arrays of `MAX_NDIM=4`, `tile_make_view` uses a generic loop over all dimensions, and `tile_memcpy_rma` includes an N-dimensional strided copy path. The `ndim > 2` guards in the IPC and GDA RMA and reduction operations have been relaxed to `ndim > TileView::MAX_NDIM`. The GDA lane-level `tile_put`/`tile_get` and the `tile_put_gda_workers`/`tile_get_gda_workers` helpers include N-dimensional element-by-element and contiguous paths for ranks 3 and 4.
 
 ### Added
 * GDA device code refactor (#7217)

@@ -314,7 +314,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
       INFO(direct << " HIP_HRR_HOST_SNAPSHOTS=" << snapshots);
       ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host"};
       hrr_capture_direct(direct, cap.path, 5, {{"HIP_HRR_HOST_SNAPSHOTS", snapshots}});
-      auto [ret, out] = hrr_playback_env(cap.path, {{"HIP_HRR_D2H_EXACT", "1"}});
+      auto [ret, out] = hrr_playback_env(cap.path, {});
       INFO("Playback exit " << ret << ", stdout:\n" << out);
       int pass = 0, fail = 0;
       REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
@@ -342,7 +342,8 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostStreamsRoundtrip) {
   INFO("Playback exit " << ret << ", output:\n" << out);
   REQUIRE(ret != kHrrWatchdogKilled);
   CHECK(ret == 0);
-  // Exact, since the tolerance takes these ints for tiny floats.
+  // Exact, since a HIP_HRR_D2H_TOL float tolerance would take these ints for
+  // tiny floats.
   CHECK(out.find("2 pass (2 exact, 0 within tol), 0 fail") != std::string::npos);
   CHECK(out.find("Pinned host snapshots: 3 restored, 0 refused, 0 skipped") !=
         std::string::npos);
@@ -362,7 +363,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostSnapshotCap) {
     INFO("manifest.json:\n" << manifest);
     CHECK((manifest.find("larger than HIP_HRR_HOST_SNAPSHOT_MAX_MB") != std::string::npos) ==
           over);
-    auto [ret, out] = hrr_playback_env(cap.path, {{"HIP_HRR_D2H_EXACT", "1"}});
+    auto [ret, out] = hrr_playback_env(cap.path, {});
     INFO("Playback exit " << ret << ", stdout:\n" << out);
     int pass = 0, fail = 0;
     REQUIRE(hrr_parse_d2h_summary(out, pass, fail));

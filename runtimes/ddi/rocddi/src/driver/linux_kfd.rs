@@ -48,7 +48,7 @@ use crate::memory::{
 };
 use crate::os::native_error;
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, EndpointDetails, EndpointDetailsKind};
+use crate::topology::Endpoint;
 use crate::{Error, ErrorKind};
 pub(crate) use allocation::LinuxAllocation;
 pub(crate) use event::KfdSignalEvent;
@@ -207,10 +207,6 @@ impl DeviceState {
     }
     pub(crate) fn address_range(&self) -> (u64, u64) {
         self.vm.address_range()
-    }
-
-    pub(crate) fn supports_system_dma_buf_import(&self) -> bool {
-        self.vm.supports_system_dma_buf_import()
     }
 
     pub(crate) fn shares_vm(&self, other: &Self) -> bool {
@@ -557,6 +553,21 @@ impl Driver for LinuxKfdDriver {
             visitor,
         )
     }
+    fn contribute_topology(
+        &self,
+        snapshot: &mut crate::topology::TopologySnapshot,
+    ) -> Result<(), Error> {
+        self.ensure_open()?;
+        sysfs::contribute_topology(
+            Self::TOPOLOGY_ROOT,
+            Self::DRM_ROOT,
+            self.driver_instance,
+            snapshot,
+        )
+    }
+    fn can_access_local_memory(&self, consumer: &Endpoint, owner: &Endpoint) -> bool {
+        sysfs::can_access_local_memory(consumer, owner)
+    }
     fn open_endpoint(&self, id: [u8; 16]) -> Result<Endpoint, Error> {
         self.ensure_open()?;
         sysfs::open_endpoint(
@@ -566,7 +577,16 @@ impl Driver for LinuxKfdDriver {
             id,
         )
     }
-    fn query_endpoint_details(&self, endpoint: &Endpoint) -> Result<EndpointDetails, Error> {
+    fn probe_endpoint(&self, id: [u8; 16]) -> Result<Option<Endpoint>, Error> {
+        self.ensure_open()?;
+        sysfs::probe_endpoint(
+            Self::TOPOLOGY_ROOT,
+            Self::DRM_ROOT,
+            self.driver_instance,
+            id,
+        )
+    }
+    fn populate_endpoint(&self, endpoint: &mut Endpoint) -> Result<(), Error> {
         self.ensure_open()?;
         if endpoint.gpu().is_none() {
             return Err(error(
@@ -574,7 +594,8 @@ impl Driver for LinuxKfdDriver {
                 "the Linux KFD driver reports only GPU endpoints",
             ));
         }
-        Ok(operations::query_endpoint_details(endpoint))
+        operations::populate_endpoint(endpoint);
+        Ok(())
     }
     fn activate(&self, endpoint: &Endpoint) -> Result<DeviceState, Error> {
         if endpoint.gpu().is_none() {
@@ -584,7 +605,7 @@ impl Driver for LinuxKfdDriver {
             ));
         }
         let current = self.open_endpoint(endpoint.id)?;
-        if &current != endpoint {
+        if !endpoint.matches_discovery(&current) {
             return Err(error(
                 ErrorKind::DeviceLost,
                 "endpoint metadata changed before activation",
@@ -597,7 +618,7 @@ impl Driver for LinuxKfdDriver {
                 "native implementation requires host pages of at least 4 KiB",
             ));
         }
-        let EndpointSelector::LinuxKfd(native) = current.selector else {
+        let EndpointSelector::LinuxKfd { native, .. } = current.selector else {
             return Err(error(
                 ErrorKind::InvalidData,
                 "KFD endpoint has a foreign selector",

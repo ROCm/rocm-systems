@@ -20,9 +20,12 @@ It also validates outputs including:
 """
 
 from __future__ import annotations
-import pytest
+
 from pathlib import Path
-from conftest import RocprofsysTest
+from conftest import RocprofsysTest, assert_resolved_settings
+from typing import ClassVar
+
+import pytest
 
 pytestmark = [
     pytest.mark.transpose,
@@ -109,7 +112,7 @@ def trace_delay_rules(validation_rules_dir: Path) -> list[Path]:
 
 @pytest.mark.mpi_optional("transpose")
 class TestTranspose(RocprofsysTest):
-    BINARY_REWRITE_ARGS = [
+    BINARY_REWRITE_ARGS: ClassVar[list[str]] = [
         "-e",
         "-v",
         "2",
@@ -117,7 +120,7 @@ class TestTranspose(RocprofsysTest):
         "-E",
         "uniform_int_distribution",
     ]
-    RUNTIME_INSTRUMENT_ARGS = [
+    RUNTIME_INSTRUMENT_ARGS: ClassVar[list[str]] = [
         "-e",
         "-v",
         "1",
@@ -129,27 +132,7 @@ class TestTranspose(RocprofsysTest):
         "-E",
         "uniform_int_distribution",
     ]
-    TWO_KERNELS_RUN_ARGS = ["1", "2", "2"]
-    LOOPS_BINARY_REWRITE_ARGS = [
-        "-e",
-        "-v",
-        "2",
-        "--label",
-        "return",
-        "args",
-        "-l",
-        "-i",
-        "8",
-        "-E",
-        "uniform_int_distribution",
-    ]
-    LOOPS_RUN_ARGS = ["2", "100", "50"]
-    SAMPLING_RUN_ARGS = ["4", "500", "100"]
-    SAMPLING_ENV = {
-        "ROCPROFSYS_SAMPLING_REALTIME": "ON",
-        "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "300",
-        "ROCPROFSYS_SAMPLING_CPUTIME": "OFF",
-    }
+    TWO_KERNELS_RUN_ARGS: ClassVar[list[str]] = ["1", "2", "2"]
 
     @pytest.mark.parametrize(
         "mode",
@@ -178,13 +161,18 @@ class TestTranspose(RocprofsysTest):
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("transpose_env")
     def test_sampling(self, transpose_env, transpose_rules):
-        env = transpose_env.copy()
-        env.update(self.SAMPLING_ENV)
+        sampling_run_args = ["4", "500", "100"]
+        env = {
+            **transpose_env,
+            "ROCPROFSYS_SAMPLING_REALTIME": "ON",
+            "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "300",
+            "ROCPROFSYS_SAMPLING_CPUTIME": "OFF",
+        }
         result = self.run_test(
             "sampling",
             target="transpose",
             env=env,
-            run_args=self.SAMPLING_RUN_ARGS,
+            run_args=sampling_run_args,
             check_target_arch=True,
             launcher="mpi",
             num_procs=2,
@@ -213,13 +201,6 @@ class TestTranspose(RocprofsysTest):
             check_target_arch=True,
         )
         self.assert_regex(result)
-
-    _LOCK_MODE_REGRESSIONS = {
-        "mutex-locks": "hung rocprof-sys-run indefinitely "
-        "(self-deadlock on buffer_storage's m_mutex)",
-        "rw-locks": "aborted rocprof-sys-run with SIGABRT "
-        "(self-deadlock on synchronized<>'s rwlock)",
-    }
 
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("transpose_env")
@@ -258,21 +239,66 @@ class TestTranspose(RocprofsysTest):
             rules_files=trace_delay_rules,
         )
 
+    @pytest.mark.timeout(120)
+    @pytest.mark.rocpd("transpose_env")
+    @pytest.mark.parametrize("mode", ["sampling"])
+    def test_trace_periods_open_window(self, mode, transpose_env, validation_rules_dir):
+        """Related to the above `test_trace_delay_gates_gpu_contexts`, but tests the
+        `--trace-periods` flag instead of `TRACE_DELAY`.
+        Same short run that should complete before the 60 second window closes.
+        This test uses the command line argument instead of the environment variable.
+        Assert that the command line argument is resolved to the expected value.
+        """
+        sampling_args = ["--trace-periods", "0:60"]
+        result = self.run_test(
+            mode,
+            "transpose",
+            env=transpose_env,
+            sampling_args=sampling_args,
+            run_args=self.TWO_KERNELS_RUN_ARGS,
+            check_target_arch=True,
+        )
+        self.assert_regex(result)
+        assert_resolved_settings(
+            result,
+            {"ROCPROFSYS_TRACE_PERIODS": "0:60"},
+        )
+        self.assert_perfetto(
+            result,
+            label_substrings=["transpose_a"],
+            subtest_name="open window recorded transpose_a",
+        )
+        self.assert_rocpd(
+            result,
+            subtest_name="open window recorded kernels in rocpd",
+            rules_files=[validation_rules_dir / "default-rules.json"],
+        )
+
     @pytest.mark.locks
     @pytest.mark.timeout(60)
     @pytest.mark.parametrize(
-        "lock_mode",
+        "lock_mode, regression",
         [
-            pytest.param("mutex-locks", id="mutex-locks"),
-            pytest.param("rw-locks", id="rw-locks"),
+            pytest.param(
+                "mutex-locks",
+                "hung rocprof-sys-run indefinitely "
+                "(self-deadlock on buffer_storage's m_mutex)",
+                id="mutex-locks",
+            ),
+            pytest.param(
+                "rw-locks",
+                "aborted rocprof-sys-run with SIGABRT "
+                "(self-deadlock on synchronized<>'s rwlock)",
+                id="rw-locks",
+            ),
         ],
     )
-    def test_locks(self, lock_mode, transpose_env):
+    def test_locks(self, lock_mode, regression, transpose_env):
         """
         Regression test: pthread_mutex_gotcha used to intercept rocprof-sys's
         own internal locks, recursively re-entering them on the same thread
         while recording the trace event for the lock acquisition itself.
-        See _LOCK_MODE_REGRESSIONS for the per-mode failure signature.
+        ``regression`` is the per-mode failure signature reported on failure.
         """
         result = self.run_test(
             "sys_run",
@@ -281,7 +307,7 @@ class TestTranspose(RocprofsysTest):
             sys_run_args=["-I", lock_mode],
             run_args=["2", "50", "10"],
             check_target_arch=True,
-            fail_message=f"Regression: {self._LOCK_MODE_REGRESSIONS[lock_mode]}",
+            fail_message=f"Regression: {regression}",
         )
         self.assert_regex(result)
 
@@ -289,12 +315,26 @@ class TestTranspose(RocprofsysTest):
     @pytest.mark.loops
     @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
     def test_loops(self, mode, transpose_env):
+        loops_binary_rewrite_args = [
+            "-e",
+            "-v",
+            "2",
+            "--label",
+            "return",
+            "args",
+            "-l",
+            "-i",
+            "8",
+            "-E",
+            "uniform_int_distribution",
+        ]
+        loops_run_args = ["2", "100", "50"]
         result = self.run_test(
             mode,
             "transpose",
             env=transpose_env,
-            binary_rewrite_args=self.LOOPS_BINARY_REWRITE_ARGS,
-            run_args=self.LOOPS_RUN_ARGS,
+            binary_rewrite_args=loops_binary_rewrite_args,
+            run_args=loops_run_args,
             check_target_arch=True,
         )
         self.assert_regex(
@@ -362,11 +402,11 @@ class TestTranspose(RocprofsysTest):
 @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
 @pytest.mark.class_name("transpose-rocprofiler")
 class TestTransposeROCProfiler(RocprofsysTest):
-    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "-E", "uniform_int_distribution"]
 
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("rocprofiler_env")
     def test(self, mode, rocprofiler_env, gpu_info, rocprofiler_rules):
+        binary_rewrite_args = ["-e", "-v", "2", "-E", "uniform_int_distribution"]
         result = self.run_test(
             mode,
             "transpose",
@@ -374,7 +414,7 @@ class TestTransposeROCProfiler(RocprofsysTest):
             check_target_arch=True,
             launcher="mpi",
             num_procs=2,
-            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            binary_rewrite_args=binary_rewrite_args,
         )
         self.assert_regex(result)
         # Counter file device ID depends on GPU topology, search across IDs 0-9

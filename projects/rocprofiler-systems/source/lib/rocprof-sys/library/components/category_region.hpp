@@ -3,14 +3,15 @@
 
 #pragma once
 
+#include "common/clocks.hpp"
 #include "common/defines.h"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/timeline.hpp"
 #include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/causal/data.hpp"
 #include "library/runtime.hpp"
@@ -30,6 +31,7 @@
 #include <timemory/mpl/types.hpp>
 #include <timemory/utility/types.hpp>
 #include <tuple>
+#include <unistd.h>
 #include <vector>
 
 #include "logger/debug.hpp"
@@ -84,9 +86,9 @@ inline constexpr std::size_t delims_to_last_record = fields_per_record + 1;
 // Each renumbered idx field can grow by a few digits
 inline constexpr std::size_t renumber_growth_slack = 16;
 
-struct wall_clock_source
+struct timeline_clock_source
 {
-    [[nodiscard]] timestamp_t now() const { return control::clocks::timeline_ns(); }
+    [[nodiscard]] timestamp_t now() const { return clocks::timeline::now_ns(); }
 };
 
 struct trace_cache_region_sink
@@ -117,13 +119,16 @@ struct thread_metadata_source
         {
             constexpr size_t UNKNOWN_TIME = 0;
             thread_id                     = extended_info->index_data->system_value;
-            rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
-                { .parent_process_id = getppid(),
-                  .process_id        = getpid(),
-                  .thread_id         = thread_id,
-                  .start             = UNKNOWN_TIME,
-                  .end               = UNKNOWN_TIME,
-                  .extdata           = "{}" });
+            rocprofsys::trace_cache::get_metadata_registry().ensure_thread(
+                thread_id, [thread_id] {
+                    return rocprofsys::trace_cache::info::thread{ .parent_process_id =
+                                                                      getppid(),
+                                                                  .process_id = getpid(),
+                                                                  .thread_id  = thread_id,
+                                                                  .start   = UNKNOWN_TIME,
+                                                                  .end     = UNKNOWN_TIME,
+                                                                  .extdata = "{}" };
+                });
         }
         return thread_id;
     }
@@ -131,7 +136,7 @@ struct thread_metadata_source
 
 struct real_region_policy
 {
-    using clock_type           = wall_clock_source;
+    using clock_type           = timeline_clock_source;
     using region_sink_type     = trace_cache_region_sink;
     using thread_metadata_type = thread_metadata_source;
 };

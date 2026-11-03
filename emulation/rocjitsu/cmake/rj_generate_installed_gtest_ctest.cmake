@@ -23,6 +23,7 @@ function(rj_generate_installed_gtest_ctest)
         INSTALLED_EXECUTABLE
         OUTPUT_FILE
         TEST_FILTER
+        TEST_PREFIX
     )
     cmake_parse_arguments(ARG "" "${oneValueArgs}" "" ${ARGN})
 
@@ -83,7 +84,7 @@ function(rj_generate_installed_gtest_ctest)
                     "${_case_name}"
                 )
             endif()
-            set(_test_name "${_suite}.${_pretty_case_name}")
+            set(_test_name "${ARG_TEST_PREFIX}${_suite}.${_pretty_case_name}")
             set(_test_filter "${_suite}.${_case_name}")
             string(REPLACE "\\" "\\\\" _escaped_name "${_test_name}")
             string(REPLACE "\"" "\\\"" _escaped_name "${_escaped_name}")
@@ -112,4 +113,5 @@ rj_generate_installed_gtest_ctest(
     INSTALLED_EXECUTABLE "${INSTALLED_EXECUTABLE}"
     OUTPUT_FILE "${OUTPUT_FILE}"
     TEST_FILTER "${TEST_FILTER}"
+    TEST_PREFIX "${TEST_PREFIX}"
 )

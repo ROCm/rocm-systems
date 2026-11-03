@@ -30,6 +30,7 @@
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/isa/target_registry.h"
+#include "util/host_target.h"
 
 #include <gtest/gtest.h>
 
@@ -44,7 +45,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -388,7 +388,7 @@ uint32_t build_s_call_b64(uint16_t sdst, int16_t simm16) {
 
 // Exercise the scalar fallback even when the production type uses AVX2.
 template <typename Set> class RegisterSetTyped : public testing::Test {};
-#if defined(__AVX2__)
+#if RJ_HOST_HAS_AVX2
 using RegisterSetTypes = testing::Types<RegisterSetT<RegisterSetWordType::StandardUint64>,
                                         RegisterSetT<RegisterSetWordType::Avx2M256>>;
 #else
@@ -1604,12 +1604,16 @@ TEST(SpecialEffectLiveness, SpecialEffectsAreAbsentFromOrdinaryLiveness) {
 
   // Liveness projects them out of every ordinary set.
   const LivenessAnalysis liveness = analyze_scope(blocks);
-  const BlockLiveness &bl = liveness.block_liveness(*entry);
+  auto maybe_block = liveness.block_liveness(*entry);
+  ASSERT_TRUE(maybe_block.succeeded());
+  const BlockLiveness &bl = (*maybe_block.value());
   EXPECT_FALSE(bl.live_in.has_specials());
   EXPECT_FALSE(bl.live_out.has_specials());
   EXPECT_FALSE(bl.gen.has_specials());
   EXPECT_FALSE(bl.kill.has_specials());
-  EXPECT_FALSE(liveness.live_before(saveexec).has_specials());
+  auto maybe_live = liveness.live_before(saveexec);
+  ASSERT_TRUE(maybe_live.succeeded());
+  EXPECT_FALSE((*maybe_live.value()).has_specials());
 }
 
 TEST(CfgAnalysis, LoopBackEdgeLinksPredecessor) {
@@ -5221,11 +5225,20 @@ TEST(CfgAnalysis, ReversePostOrderSelfLoop) {
 
 TEST(LivenessAnalysis, UnavailableQueriesFailClosed) {
   const TestInstruction instruction("query");
+  const BasicBlock block(0);
   const LivenessAnalysis liveness = LivenessAnalysis::unavailable();
 
-  EXPECT_THROW((void)liveness.has_live_before(instruction), std::logic_error);
-  EXPECT_THROW((void)liveness.live_before(instruction), std::logic_error);
-  EXPECT_THROW((void)liveness.find_globally_unused_vgpr_run(&instruction, 1), std::logic_error);
+  EXPECT_TRUE(liveness.block_liveness(block).failed());
+  EXPECT_TRUE(liveness.has_live_before(instruction).failed());
+  EXPECT_TRUE(liveness.live_before(instruction).failed());
+  EXPECT_TRUE(liveness.is_live_before(instruction, {RegClass::SGPR, 0, 1}).failed());
+  EXPECT_TRUE(liveness.vgpr_msb_bank_before(instruction, amdgpu::VgprMsbRole::Src0).failed());
+  EXPECT_TRUE(liveness.global_vgpr_usage_is_complete().failed());
+  EXPECT_TRUE(liveness.find_globally_unused_vgpr_run(&instruction, 1).failed());
+  EXPECT_TRUE(liveness.find_free_run(&instruction, 1).failed());
+  EXPECT_TRUE(liveness.find_free_sgpr_pair(&instruction).failed());
+  EXPECT_TRUE(liveness.find_free_sgpr(&instruction).failed());
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
 }
 
 TEST(LivenessAnalysis, ReportsWhetherLiveBeforeSnapshotWasMaterialized) {
@@ -5234,11 +5247,19 @@ TEST(LivenessAnalysis, ReportsWhetherLiveBeforeSnapshotWasMaterialized) {
   const TestInstruction outside_scope("outside_scope");
   const LivenessAnalysis liveness = analyze_scope(blocks);
 
-  EXPECT_TRUE(liveness.has_live_before(use));
-  EXPECT_FALSE(liveness.has_live_before(outside_scope));
-  EXPECT_TRUE(liveness.is_live_before(use, {RegClass::SGPR, 4, 1}))
+  auto maybe_has_live_use = liveness.has_live_before(use);
+  ASSERT_TRUE(maybe_has_live_use.succeeded());
+  EXPECT_TRUE(maybe_has_live_use.value());
+  auto maybe_has_live_outside_scope = liveness.has_live_before(outside_scope);
+  ASSERT_TRUE(maybe_has_live_outside_scope.succeeded());
+  EXPECT_FALSE(maybe_has_live_outside_scope.value());
+  auto maybe_is_live_use = liveness.is_live_before(use, {RegClass::SGPR, 4, 1});
+  ASSERT_TRUE(maybe_is_live_use.succeeded());
+  EXPECT_TRUE(maybe_is_live_use.value())
       << "the materialized snapshot must contain the register used here";
-  EXPECT_FALSE(liveness.is_live_before(outside_scope, {RegClass::SGPR, 4, 1}))
+  auto maybe_is_live_outside_scope = liveness.is_live_before(outside_scope, {RegClass::SGPR, 4, 1});
+  ASSERT_TRUE(maybe_is_live_outside_scope.succeeded());
+  EXPECT_FALSE(maybe_is_live_outside_scope.value())
       << "a missing snapshot reads as nothing-live, so callers must check "
          "has_live_before first";
 }
@@ -5248,9 +5269,13 @@ TEST(LivenessAnalysis, ExecMaskedVgprDefDoesNotKillInactiveLaneValue) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &def = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  auto maybe_is_live_def = liveness.is_live_before(def, {RegClass::VGPR, 0, 1});
+  ASSERT_TRUE(maybe_is_live_def.succeeded());
+  EXPECT_TRUE(maybe_is_live_def.value());
 
-  auto free_vgpr = liveness.find_free_run(&def, 1);
+  auto maybe_free_run = liveness.find_free_run(&def, 1);
+  ASSERT_TRUE(maybe_free_run.succeeded());
+  auto free_vgpr = maybe_free_run.value();
   ASSERT_TRUE(free_vgpr.has_value());
   EXPECT_NE(*free_vgpr, 0);
 }
@@ -5282,12 +5307,22 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbResolvesPhysicalRegisterBank) {
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 2);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2), 1)
+  auto maybe_src0_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0);
+  ASSERT_TRUE(maybe_src0_bank.succeeded());
+  EXPECT_EQ(maybe_src0_bank.value(), 2);
+  auto maybe_dst_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst);
+  ASSERT_TRUE(maybe_dst_bank.succeeded());
+  EXPECT_EQ(maybe_dst_bank.value(), 2);
+  auto maybe_unused_run = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2);
+  ASSERT_TRUE(maybe_unused_run.succeeded());
+  EXPECT_EQ(maybe_unused_run.value(), 1)
       << "a known bank-2 access must not make the raw low-bank tuple look used";
-  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}));
-  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}));
+  auto maybe_is_live = liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1});
+  ASSERT_TRUE(maybe_is_live.succeeded());
+  EXPECT_TRUE(maybe_is_live.value());
+  auto maybe_is_live_2 = liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1});
+  ASSERT_TRUE(maybe_is_live_2.succeeded());
+  EXPECT_FALSE(maybe_is_live_2.value());
 }
 
 TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDestinationBank) {
@@ -5319,10 +5354,16 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDestinationBank) {
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
-  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}))
+  auto maybe_dst_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst);
+  ASSERT_TRUE(maybe_dst_bank.succeeded());
+  EXPECT_EQ(maybe_dst_bank.value(), 2);
+  auto maybe_is_live = liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1});
+  ASSERT_TRUE(maybe_is_live.succeeded());
+  EXPECT_TRUE(maybe_is_live.value())
       << "implicit RMW read of the destination must resolve to the DST bank";
-  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}))
+  auto maybe_is_live_2 = liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1});
+  ASSERT_TRUE(maybe_is_live_2.succeeded());
+  EXPECT_FALSE(maybe_is_live_2.value())
       << "the low-bank alias must not be treated as the read register";
 }
 
@@ -5355,7 +5396,9 @@ TEST(LivenessAnalysis, Gfx1250SwmmacTiedCAndNarrowResultResolveDestinationBank) 
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
   ASSERT_NE(liveness.gfx1250_vgpr_msb(), nullptr);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
+  auto maybe_dst_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst);
+  ASSERT_TRUE(maybe_dst_bank.succeeded());
+  EXPECT_EQ(maybe_dst_bank.value(), 2);
 
   const InstDefUse def_use(*instruction, liveness.gfx1250_vgpr_msb());
   EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, 536, 4}));
@@ -5363,8 +5406,12 @@ TEST(LivenessAnalysis, Gfx1250SwmmacTiedCAndNarrowResultResolveDestinationBank) 
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 536, 8}));
   EXPECT_FALSE(def_use.defs.intersects({RegClass::VGPR, 24, 4}));
   EXPECT_FALSE(def_use.uses.intersects({RegClass::VGPR, 24, 8}));
-  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 536, 8}));
-  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 24, 8}));
+  auto maybe_is_live = liveness.is_live_before(*instruction, {RegClass::VGPR, 536, 8});
+  ASSERT_TRUE(maybe_is_live.succeeded());
+  EXPECT_TRUE(maybe_is_live.value());
+  auto maybe_is_live_2 = liveness.is_live_before(*instruction, {RegClass::VGPR, 24, 8});
+  ASSERT_TRUE(maybe_is_live_2.succeeded());
+  EXPECT_FALSE(maybe_is_live_2.value());
 }
 
 TEST(LivenessAnalysis, Gfx1250D16LoadDoesNotReadDestination) {
@@ -5391,10 +5438,16 @@ TEST(LivenessAnalysis, Gfx1250D16LoadDoesNotReadDestination) {
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
   ASSERT_EQ(std::string_view((*instruction).mnemonic()), "flat_load_d16_u8");
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
-  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}))
+  auto maybe_dst_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst);
+  ASSERT_TRUE(maybe_dst_bank.succeeded());
+  EXPECT_EQ(maybe_dst_bank.value(), 2);
+  auto maybe_is_live = liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1});
+  ASSERT_TRUE(maybe_is_live.succeeded());
+  EXPECT_FALSE(maybe_is_live.value())
       << "SRAM ECC zero-fills the unselected half instead of preserving it";
-  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}))
+  auto maybe_is_live_2 = liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1});
+  ASSERT_TRUE(maybe_is_live_2.succeeded());
+  EXPECT_FALSE(maybe_is_live_2.value())
       << "the low-bank alias must not be treated as a read register";
 }
 
@@ -5425,10 +5478,13 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDespiteExplicitBank0Alias) 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}))
+  auto maybe_is_live = liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1});
+  ASSERT_TRUE(maybe_is_live.succeeded());
+  EXPECT_TRUE(maybe_is_live.value())
       << "the DST-bank preserve-read must be added even though raw v1 is already an explicit use";
-  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}))
-      << "the explicit SRC0 bank-0 read of v1 is still live";
+  auto maybe_is_live_2 = liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1});
+  ASSERT_TRUE(maybe_is_live_2.succeeded());
+  EXPECT_TRUE(maybe_is_live_2.value()) << "the explicit SRC0 bank-0 read of v1 is still live";
 }
 
 TEST(LivenessAnalysis, Gfx1250SwapImplicitReadsResolvePerRole) {
@@ -5458,17 +5514,27 @@ TEST(LivenessAnalysis, Gfx1250SwapImplicitReadsResolvePerRole) {
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 1);
-  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}))
+  auto maybe_dst_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst);
+  ASSERT_TRUE(maybe_dst_bank.succeeded());
+  EXPECT_EQ(maybe_dst_bank.value(), 2);
+  auto maybe_src0_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0);
+  ASSERT_TRUE(maybe_src0_bank.succeeded());
+  EXPECT_EQ(maybe_src0_bank.value(), 1);
+  auto maybe_is_live = liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1});
+  ASSERT_TRUE(maybe_is_live.succeeded());
+  EXPECT_TRUE(maybe_is_live.value())
       << "vdst preserve-read must resolve to the DST bank (v1 -> v513)";
-  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 258, 1}))
+  auto maybe_is_live_2 = liveness.is_live_before(*instruction, {RegClass::VGPR, 258, 1});
+  ASSERT_TRUE(maybe_is_live_2.succeeded());
+  EXPECT_TRUE(maybe_is_live_2.value())
       << "src0 preserve-read must resolve to the SRC0 bank (v2 -> v258)";
   // The mixed-role signature: resolving the hook-added src0 entry with the DST
   // bank puts raw v2 at 2 + 2*256 = v514. v513/v258 above stay live either way
   // (the destination supplies v513, the explicit source supplies v258), so v514
   // is the only assertion that actually fails when the roles are conflated.
-  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 514, 1}))
+  auto maybe_is_live_3 = liveness.is_live_before(*instruction, {RegClass::VGPR, 514, 1});
+  ASSERT_TRUE(maybe_is_live_3.succeeded());
+  EXPECT_FALSE(maybe_is_live_3.value())
       << "src0 must not be mislocated to the DST bank (v2 under DST bank 2 -> v514)";
 }
 
@@ -5511,10 +5577,16 @@ TEST(LivenessAnalysis, Gfx1250DppPreserveReadResolvesToDstBank) {
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
-  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 517, 1}))
+  auto maybe_dst_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst);
+  ASSERT_TRUE(maybe_dst_bank.succeeded());
+  EXPECT_EQ(maybe_dst_bank.value(), 2);
+  auto maybe_is_live = liveness.is_live_before(*instruction, {RegClass::VGPR, 517, 1});
+  ASSERT_TRUE(maybe_is_live.succeeded());
+  EXPECT_TRUE(maybe_is_live.value())
       << "the partial-DPP preserve-read must resolve to the DST bank (v5 -> v517)";
-  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 5, 1}))
+  auto maybe_is_live_2 = liveness.is_live_before(*instruction, {RegClass::VGPR, 5, 1});
+  ASSERT_TRUE(maybe_is_live_2.succeeded());
+  EXPECT_FALSE(maybe_is_live_2.value())
       << "the unbanked raw index must not be marked live in place of v517";
 }
 
@@ -5545,11 +5617,16 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseUnknownBankReadsEveryCandidate) {
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), std::nullopt);
-  for (uint16_t bank = 0; bank < 4; ++bank)
-    EXPECT_TRUE(liveness.is_live_before(*instruction,
-                                        {RegClass::VGPR, static_cast<uint16_t>(1 + bank * 256), 1}))
+  auto maybe_dst_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst);
+  ASSERT_TRUE(maybe_dst_bank.succeeded());
+  EXPECT_EQ(maybe_dst_bank.value(), std::nullopt);
+  for (uint16_t bank = 0; bank < 4; ++bank) {
+    auto maybe_is_live = liveness.is_live_before(
+        *instruction, {RegClass::VGPR, static_cast<uint16_t>(1 + bank * 256), 1});
+    ASSERT_TRUE(maybe_is_live.succeeded());
+    EXPECT_TRUE(maybe_is_live.value())
         << "unknown-bank implicit read must may-read candidate bank " << bank;
+  }
 }
 
 TEST(LivenessAnalysis, Gfx1250UnknownBankDefMakesEveryCandidateGloballyUsed) {
@@ -5579,18 +5656,27 @@ TEST(LivenessAnalysis, Gfx1250UnknownBankDefMakesEveryCandidateGloballyUsed) {
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), std::nullopt);
+  auto maybe_dst_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst);
+  ASSERT_TRUE(maybe_dst_bank.succeeded());
+  EXPECT_EQ(maybe_dst_bank.value(), std::nullopt);
   for (uint16_t bank = 0; bank < 4; ++bank) {
     const uint16_t candidate = static_cast<uint16_t>(1 + bank * 256);
-    EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, candidate, 1,
-                                                     static_cast<uint16_t>(candidate + 1)),
-              std::nullopt)
+    auto maybe_unused_run = liveness.find_globally_unused_vgpr_run(
+        &*instruction, 1, candidate, 1, static_cast<uint16_t>(candidate + 1));
+    ASSERT_TRUE(maybe_unused_run.succeeded());
+    EXPECT_EQ(maybe_unused_run.value(), std::nullopt)
         << "unknown-bank definition must reserve candidate bank " << bank;
   }
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 0, 1, 4), 0);
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 2, 1, 4), 2);
+  auto maybe_unused_run_2 = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 0, 1, 4);
+  ASSERT_TRUE(maybe_unused_run_2.succeeded());
+  EXPECT_EQ(maybe_unused_run_2.value(), 0);
+  auto maybe_unused_run_3 = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 2, 1, 4);
+  ASSERT_TRUE(maybe_unused_run_3.succeeded());
+  EXPECT_EQ(maybe_unused_run_3.value(), 2);
 
-  const BlockLiveness &state = liveness.block_liveness(*blocks.front());
+  auto maybe_block = liveness.block_liveness(*blocks.front());
+  ASSERT_TRUE(maybe_block.succeeded());
+  const BlockLiveness &state = (*maybe_block.value());
   EXPECT_FALSE(state.kill.contains({RegClass::VGPR, 1, 1}));
   EXPECT_FALSE(state.kill.contains({RegClass::VGPR, 257, 1}));
 }
@@ -5616,7 +5702,9 @@ TEST(LivenessAnalysis, Gfx1250RelativeVgprAccessDisablesGlobalUnusedQuery) {
                             options);
 
   const Instruction &instruction = *blocks.front()->instructions().begin();
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&instruction, 1, 1, 1, 2), std::nullopt);
+  auto maybe_unused_run = liveness.find_globally_unused_vgpr_run(&instruction, 1, 1, 1, 2);
+  ASSERT_TRUE(maybe_unused_run.succeeded());
+  EXPECT_EQ(maybe_unused_run.value(), std::nullopt);
   EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
 }
 
@@ -5639,7 +5727,9 @@ TEST(LivenessAnalysis, Gfx1250SwaprelDisablesGlobalUnusedQuery) {
                             options);
 
   const Instruction &instruction = *blocks.front()->instructions().begin();
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&instruction, 1, 1, 1, 2), std::nullopt);
+  auto maybe_unused_run = liveness.find_globally_unused_vgpr_run(&instruction, 1, 1, 1, 2);
+  ASSERT_TRUE(maybe_unused_run.succeeded());
+  EXPECT_EQ(maybe_unused_run.value(), std::nullopt);
   EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
 }
 
@@ -5667,7 +5757,9 @@ TEST(LivenessAnalysis, Gfx1250DynamicModeBit27WriteDoesNotEnableGprIndexing) {
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2), 1);
+  auto maybe_unused_run = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2);
+  ASSERT_TRUE(maybe_unused_run.succeeded());
+  EXPECT_EQ(maybe_unused_run.value(), 1);
   EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
 }
 
@@ -5695,7 +5787,9 @@ TEST(LivenessAnalysis, Rdna4DynamicModeBit27WriteDoesNotEnableGprIndexing) {
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2), 1);
+  auto maybe_unused_run = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2);
+  ASSERT_TRUE(maybe_unused_run.succeeded());
+  EXPECT_EQ(maybe_unused_run.value(), 1);
   EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
 }
 
@@ -5726,7 +5820,9 @@ TEST(LivenessAnalysis, Gfx1250ImmediateModeBit27WriteDoesNotEnableGprIndexing) {
     auto instruction = blocks.front()->instructions().begin();
     ++instruction;
     ASSERT_NE(instruction, blocks.front()->instructions().end());
-    const auto unused = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2);
+    auto maybe_unused_run = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2);
+    ASSERT_TRUE(maybe_unused_run.succeeded());
+    const auto unused = maybe_unused_run.value();
     EXPECT_EQ(unused, 1);
     EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
   }
@@ -5755,7 +5851,9 @@ TEST(LivenessAnalysis, Cdna4DynamicGprIndexModeWriteDisablesGlobalUnusedQuery) {
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2), std::nullopt);
+  auto maybe_unused_run = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2);
+  ASSERT_TRUE(maybe_unused_run.succeeded());
+  EXPECT_EQ(maybe_unused_run.value(), std::nullopt);
   EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
 }
 
@@ -5785,7 +5883,9 @@ TEST(LivenessAnalysis, Cdna4ImmediateGprIndexModeWriteUsesLiteralValue) {
     auto instruction = blocks.front()->instructions().begin();
     ++instruction;
     ASSERT_NE(instruction, blocks.front()->instructions().end());
-    const auto unused = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2);
+    auto maybe_unused_run = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2);
+    ASSERT_TRUE(maybe_unused_run.succeeded());
+    const auto unused = maybe_unused_run.value();
     if (literal == 0)
       EXPECT_EQ(unused, 1);
     else
@@ -5818,13 +5918,24 @@ TEST(LivenessAnalysis, Gfx1250DynamicModeWriteConservativelyUsesEveryBank) {
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), std::nullopt);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src1), std::nullopt);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src2), std::nullopt);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), std::nullopt);
-  for (uint16_t bank = 0; bank < 4; ++bank)
-    EXPECT_TRUE(liveness.is_live_before(
-        *instruction, {RegClass::VGPR, static_cast<uint16_t>(1 + bank * 256), 1}));
+  auto maybe_src0_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0);
+  ASSERT_TRUE(maybe_src0_bank.succeeded());
+  EXPECT_EQ(maybe_src0_bank.value(), std::nullopt);
+  auto maybe_src1_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src1);
+  ASSERT_TRUE(maybe_src1_bank.succeeded());
+  EXPECT_EQ(maybe_src1_bank.value(), std::nullopt);
+  auto maybe_src2_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src2);
+  ASSERT_TRUE(maybe_src2_bank.succeeded());
+  EXPECT_EQ(maybe_src2_bank.value(), std::nullopt);
+  auto maybe_dst_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst);
+  ASSERT_TRUE(maybe_dst_bank.succeeded());
+  EXPECT_EQ(maybe_dst_bank.value(), std::nullopt);
+  for (uint16_t bank = 0; bank < 4; ++bank) {
+    auto maybe_is_live = liveness.is_live_before(
+        *instruction, {RegClass::VGPR, static_cast<uint16_t>(1 + bank * 256), 1});
+    ASSERT_TRUE(maybe_is_live.succeeded());
+    EXPECT_TRUE(maybe_is_live.value());
+  }
 }
 
 TEST(LivenessAnalysis, Gfx1250FullLiteralModeWriteRecoversKnownBank) {
@@ -5856,9 +5967,15 @@ TEST(LivenessAnalysis, Gfx1250FullLiteralModeWriteRecoversKnownBank) {
   std::advance(instruction, 2);
   ASSERT_NE(instruction, blocks.front()->instructions().end());
   EXPECT_EQ(instruction.operator*().mnemonic(), "v_mov_b32_e32");
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 2);
-  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}));
-  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}));
+  auto maybe_src0_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0);
+  ASSERT_TRUE(maybe_src0_bank.succeeded());
+  EXPECT_EQ(maybe_src0_bank.value(), 2);
+  auto maybe_is_live = liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1});
+  ASSERT_TRUE(maybe_is_live.succeeded());
+  EXPECT_TRUE(maybe_is_live.value());
+  auto maybe_is_live_2 = liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1});
+  ASSERT_TRUE(maybe_is_live_2.succeeded());
+  EXPECT_FALSE(maybe_is_live_2.value());
 }
 
 TEST(LivenessAnalysis, Gfx1250AdjacentSetVgprMsbAfterSetregModeIsIgnored) {
@@ -5891,10 +6008,16 @@ TEST(LivenessAnalysis, Gfx1250AdjacentSetVgprMsbAfterSetregModeIsIgnored) {
   std::advance(instruction, 2);
   ASSERT_NE(instruction, blocks.front()->instructions().end());
   ASSERT_EQ(std::string_view(instruction.operator*().mnemonic()), "v_mov_b32_e32");
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 1)
+  auto maybe_src0_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0);
+  ASSERT_TRUE(maybe_src0_bank.succeeded());
+  EXPECT_EQ(maybe_src0_bank.value(), 1)
       << "the adjacent s_set_vgpr_msb must not replace the bank from source bits[12:19]";
-  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 257, 1}));
-  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 769, 1}));
+  auto maybe_is_live = liveness.is_live_before(*instruction, {RegClass::VGPR, 257, 1});
+  ASSERT_TRUE(maybe_is_live.succeeded());
+  EXPECT_TRUE(maybe_is_live.value());
+  auto maybe_is_live_2 = liveness.is_live_before(*instruction, {RegClass::VGPR, 769, 1});
+  ASSERT_TRUE(maybe_is_live_2.succeeded());
+  EXPECT_FALSE(maybe_is_live_2.value());
 }
 
 TEST(LivenessAnalysis, Gfx1250AdjacentSetVgprMsbAcrossFallthroughBlockIsIgnored) {
@@ -5927,10 +6050,16 @@ TEST(LivenessAnalysis, Gfx1250AdjacentSetVgprMsbAcrossFallthroughBlockIsIgnored)
   ++instruction;
   ASSERT_NE(instruction, blocks[1]->instructions().end());
   ASSERT_EQ(std::string_view(instruction.operator*().mnemonic()), "v_mov_b32_e32");
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 1)
+  auto maybe_src0_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0);
+  ASSERT_TRUE(maybe_src0_bank.succeeded());
+  EXPECT_EQ(maybe_src0_bank.value(), 1)
       << "a fallthrough block boundary must not break physical instruction adjacency";
-  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 257, 1}));
-  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 769, 1}));
+  auto maybe_is_live = liveness.is_live_before(*instruction, {RegClass::VGPR, 257, 1});
+  ASSERT_TRUE(maybe_is_live.succeeded());
+  EXPECT_TRUE(maybe_is_live.value());
+  auto maybe_is_live_2 = liveness.is_live_before(*instruction, {RegClass::VGPR, 769, 1});
+  ASSERT_TRUE(maybe_is_live_2.succeeded());
+  EXPECT_FALSE(maybe_is_live_2.value());
 }
 
 TEST(LivenessAnalysis, Gfx1250TruncatedLiteralModeWriteMarksBanksAmbiguous) {
@@ -5973,7 +6102,9 @@ TEST(LivenessAnalysis, Gfx1250TruncatedLiteralModeWriteMarksBanksAmbiguous) {
   EXPECT_EQ(instruction.operator*().mnemonic(), "v_mov_b32_e32");
   // Bank 2 was set before the truncated mode write; because the mode write's
   // literal is unreadable, the Src0 bank must be ambiguous, not the pre-write 2.
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), std::nullopt);
+  auto maybe_src0_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0);
+  ASSERT_TRUE(maybe_src0_bank.succeeded());
+  EXPECT_EQ(maybe_src0_bank.value(), std::nullopt);
 }
 
 TEST(LivenessAnalysis, Gfx1250PartialLiteralModeWriteClobbersAllBankBits) {
@@ -6002,8 +6133,12 @@ TEST(LivenessAnalysis, Gfx1250PartialLiteralModeWriteClobbersAllBankBits) {
   std::advance(instruction, 2);
   ASSERT_NE(instruction, blocks.front()->instructions().end());
   EXPECT_EQ(instruction.operator*().mnemonic(), "v_mov_b32_e32");
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 0);
-  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}));
+  auto maybe_src0_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0);
+  ASSERT_TRUE(maybe_src0_bank.succeeded());
+  EXPECT_EQ(maybe_src0_bank.value(), 0);
+  auto maybe_is_live = liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1});
+  ASSERT_TRUE(maybe_is_live.succeeded());
+  EXPECT_TRUE(maybe_is_live.value());
 }
 
 TEST(LivenessAnalysis, Gfx1250ImmediateModeWriteClobbersBanksOutsideRequestedSlice) {
@@ -6032,7 +6167,9 @@ TEST(LivenessAnalysis, Gfx1250ImmediateModeWriteClobbersBanksOutsideRequestedSli
   auto instruction = blocks.front()->instructions().begin();
   std::advance(instruction, 2);
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 0);
+  auto maybe_src0_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0);
+  ASSERT_TRUE(maybe_src0_bank.succeeded());
+  EXPECT_EQ(maybe_src0_bank.value(), 0);
 }
 
 TEST(LivenessAnalysis, Gfx1251ImmediateModeWritePreservesBanksOutsideRequestedSlice) {
@@ -6061,7 +6198,9 @@ TEST(LivenessAnalysis, Gfx1251ImmediateModeWritePreservesBanksOutsideRequestedSl
   auto instruction = blocks.front()->instructions().begin();
   std::advance(instruction, 2);
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 1);
+  auto maybe_src0_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0);
+  ASSERT_TRUE(maybe_src0_bank.succeeded());
+  EXPECT_EQ(maybe_src0_bank.value(), 1);
 }
 
 TEST(LivenessAnalysis, Gfx1250LiteralModeWriteTracksEveryRole) {
@@ -6090,10 +6229,18 @@ TEST(LivenessAnalysis, Gfx1250LiteralModeWriteTracksEveryRole) {
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 1);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src1), 2);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src2), 3);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 0);
+  auto maybe_src0_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0);
+  ASSERT_TRUE(maybe_src0_bank.succeeded());
+  EXPECT_EQ(maybe_src0_bank.value(), 1);
+  auto maybe_src1_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src1);
+  ASSERT_TRUE(maybe_src1_bank.succeeded());
+  EXPECT_EQ(maybe_src1_bank.value(), 2);
+  auto maybe_src2_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src2);
+  ASSERT_TRUE(maybe_src2_bank.succeeded());
+  EXPECT_EQ(maybe_src2_bank.value(), 3);
+  auto maybe_dst_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst);
+  ASSERT_TRUE(maybe_dst_bank.succeeded());
+  EXPECT_EQ(maybe_dst_bank.value(), 0);
 }
 
 TEST(LivenessAnalysis, Gfx1250ImmediateNonModeWriteDoesNotChangeBanks) {
@@ -6120,10 +6267,18 @@ TEST(LivenessAnalysis, Gfx1250ImmediateNonModeWriteDoesNotChangeBanks) {
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 0);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src1), 0);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src2), 0);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 0);
+  auto maybe_src0_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0);
+  ASSERT_TRUE(maybe_src0_bank.succeeded());
+  EXPECT_EQ(maybe_src0_bank.value(), 0);
+  auto maybe_src1_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src1);
+  ASSERT_TRUE(maybe_src1_bank.succeeded());
+  EXPECT_EQ(maybe_src1_bank.value(), 0);
+  auto maybe_src2_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src2);
+  ASSERT_TRUE(maybe_src2_bank.succeeded());
+  EXPECT_EQ(maybe_src2_bank.value(), 0);
+  auto maybe_dst_bank = liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst);
+  ASSERT_TRUE(maybe_dst_bank.succeeded());
+  EXPECT_EQ(maybe_dst_bank.value(), 0);
 }
 
 TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinRequiresPredecessorsToAgree) {
@@ -6151,10 +6306,15 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinRequiresPredecessorsToAgree) {
                             options);
 
   const Instruction &joined_move = *join->instructions().begin();
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0), std::nullopt);
-  for (uint16_t bank = 0; bank < 4; ++bank)
-    EXPECT_TRUE(liveness.is_live_before(
-        joined_move, {RegClass::VGPR, static_cast<uint16_t>(1 + bank * 256), 1}));
+  auto maybe_src0_bank = liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0);
+  ASSERT_TRUE(maybe_src0_bank.succeeded());
+  EXPECT_EQ(maybe_src0_bank.value(), std::nullopt);
+  for (uint16_t bank = 0; bank < 4; ++bank) {
+    auto maybe_is_live = liveness.is_live_before(
+        joined_move, {RegClass::VGPR, static_cast<uint16_t>(1 + bank * 256), 1});
+    ASSERT_TRUE(maybe_is_live.succeeded());
+    EXPECT_TRUE(maybe_is_live.value());
+  }
 }
 
 TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinPreservesAgreeingBank) {
@@ -6181,9 +6341,15 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinPreservesAgreeingBank) {
                             options);
 
   const Instruction &joined_move = *join->instructions().begin();
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0), 2);
-  EXPECT_TRUE(liveness.is_live_before(joined_move, {RegClass::VGPR, 513, 1}));
-  EXPECT_FALSE(liveness.is_live_before(joined_move, {RegClass::VGPR, 1, 1}));
+  auto maybe_src0_bank = liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0);
+  ASSERT_TRUE(maybe_src0_bank.succeeded());
+  EXPECT_EQ(maybe_src0_bank.value(), 2);
+  auto maybe_is_live_joined_move = liveness.is_live_before(joined_move, {RegClass::VGPR, 513, 1});
+  ASSERT_TRUE(maybe_is_live_joined_move.succeeded());
+  EXPECT_TRUE(maybe_is_live_joined_move.value());
+  auto maybe_is_live_joined_move_2 = liveness.is_live_before(joined_move, {RegClass::VGPR, 1, 1});
+  ASSERT_TRUE(maybe_is_live_joined_move_2.succeeded());
+  EXPECT_FALSE(maybe_is_live_joined_move_2.value());
 }
 
 TEST(LivenessAnalysis, Gfx1250MaybeHazardPreservesOnlyPostSetAgreeingBanks) {
@@ -6225,13 +6391,24 @@ TEST(LivenessAnalysis, Gfx1250MaybeHazardPreservesOnlyPostSetAgreeingBanks) {
   ++joined;
   ASSERT_NE(joined, join->instructions().end());
   ASSERT_EQ(joined.operator*().mnemonic(), "v_add_nc_u32_e32");
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*joined, amdgpu::VgprMsbRole::Src0), 1);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*joined, amdgpu::VgprMsbRole::Src1), std::nullopt);
-  EXPECT_TRUE(liveness.is_live_before(*joined, {RegClass::VGPR, 257, 1}));
-  EXPECT_FALSE(liveness.is_live_before(*joined, {RegClass::VGPR, 1, 1}));
-  for (uint16_t bank = 0; bank < 4; ++bank)
-    EXPECT_TRUE(liveness.is_live_before(
-        *joined, {RegClass::VGPR, static_cast<uint16_t>(2 + bank * 256), 1}));
+  auto maybe_src0_bank = liveness.vgpr_msb_bank_before(*joined, amdgpu::VgprMsbRole::Src0);
+  ASSERT_TRUE(maybe_src0_bank.succeeded());
+  EXPECT_EQ(maybe_src0_bank.value(), 1);
+  auto maybe_src1_bank = liveness.vgpr_msb_bank_before(*joined, amdgpu::VgprMsbRole::Src1);
+  ASSERT_TRUE(maybe_src1_bank.succeeded());
+  EXPECT_EQ(maybe_src1_bank.value(), std::nullopt);
+  auto maybe_is_live = liveness.is_live_before(*joined, {RegClass::VGPR, 257, 1});
+  ASSERT_TRUE(maybe_is_live.succeeded());
+  EXPECT_TRUE(maybe_is_live.value());
+  auto maybe_is_live_2 = liveness.is_live_before(*joined, {RegClass::VGPR, 1, 1});
+  ASSERT_TRUE(maybe_is_live_2.succeeded());
+  EXPECT_FALSE(maybe_is_live_2.value());
+  for (uint16_t bank = 0; bank < 4; ++bank) {
+    auto maybe_is_live_3 = liveness.is_live_before(
+        *joined, {RegClass::VGPR, static_cast<uint16_t>(2 + bank * 256), 1});
+    ASSERT_TRUE(maybe_is_live_3.succeeded());
+    EXPECT_TRUE(maybe_is_live_3.value());
+  }
 }
 
 TEST(LivenessAnalysis, Gfx1250VgprMsbJoinExcludesUnreachablePredecessor) {
@@ -6275,8 +6452,12 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbJoinExcludesUnreachablePredecessor) {
     }
   }
   ASSERT_NE(joined_move, nullptr);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*joined_move, amdgpu::VgprMsbRole::Src0), 2);
-  EXPECT_TRUE(liveness.is_live_before(*joined_move, {RegClass::VGPR, 513, 1}));
+  auto maybe_src0_bank = liveness.vgpr_msb_bank_before(*joined_move, amdgpu::VgprMsbRole::Src0);
+  ASSERT_TRUE(maybe_src0_bank.succeeded());
+  EXPECT_EQ(maybe_src0_bank.value(), 2);
+  auto maybe_is_live = liveness.is_live_before(*joined_move, {RegClass::VGPR, 513, 1});
+  ASSERT_TRUE(maybe_is_live.succeeded());
+  EXPECT_TRUE(maybe_is_live.value());
 }
 
 // Collect a block's instructions in order for index-based assertions.
@@ -6326,7 +6507,9 @@ TEST(ExecFlagsRealDecode, Cdna4SMovExecAllOnesPromotesVgprDefToKill) {
   EXPECT_EQ(exec.before(def), ExecState::Full);
 
   LivenessAnalysis liveness = analyze_scope(blocks);
-  EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  auto maybe_is_live_def = liveness.is_live_before(def, {RegClass::VGPR, 0, 1});
+  ASSERT_TRUE(maybe_is_live_def.succeeded());
+  EXPECT_FALSE(maybe_is_live_def.value());
 }
 
 // Contrast: without the all-ones EXEC write, EXEC stays Unknown at the def, so
@@ -6345,7 +6528,9 @@ TEST(ExecFlagsRealDecode, Cdna4VgprDefStaysLiveWithoutFullExec) {
   EXPECT_EQ(exec.before(def), ExecState::Unknown);
 
   LivenessAnalysis liveness = analyze_scope(blocks);
-  EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  auto maybe_is_live_def = liveness.is_live_before(def, {RegClass::VGPR, 0, 1});
+  ASSERT_TRUE(maybe_is_live_def.succeeded());
+  EXPECT_TRUE(maybe_is_live_def.value());
 }
 
 // v_writelane_b32 writes a single lane, so even under Full EXEC it is a
@@ -6377,7 +6562,9 @@ TEST(ExecFlagsRealDecode, Cdna4WritelaneDestStaysLiveUnderFullExec) {
 
   // Contrast Cdna4SMovExecAllOnesPromotesVgprDefToKill: the RMW dst stays live.
   LivenessAnalysis liveness = analyze_scope(blocks);
-  EXPECT_TRUE(liveness.is_live_before(writelane, {RegClass::VGPR, 5, 1}));
+  auto maybe_is_live_writelane = liveness.is_live_before(writelane, {RegClass::VGPR, 5, 1});
+  ASSERT_TRUE(maybe_is_live_writelane.succeeded());
+  EXPECT_TRUE(maybe_is_live_writelane.value());
 }
 
 TEST(ExecMaskAnalysis, EntryIsUnknownAllOnesIsFullNarrowingIsUnknown) {
@@ -6554,7 +6741,9 @@ TEST(ExecMaskAnalysis, Wave32ExecHiZeroWritePreservesFull) {
   const ExecMaskAnalysis exec_for_liveness{KernelBlockScope(scope), /*wave_size=*/32};
   const LivenessAnalysis liveness{KernelBlockScope(scope),
                                   std::make_unique<ExecMaskAnalysis>(exec_for_liveness)};
-  EXPECT_FALSE(liveness.is_live_before(*insts[2], {RegClass::VGPR, 0, 1}));
+  auto maybe_is_live = liveness.is_live_before(*insts[2], {RegClass::VGPR, 0, 1});
+  ASSERT_TRUE(maybe_is_live.succeeded());
+  EXPECT_FALSE(maybe_is_live.value());
 }
 
 TEST(LivenessAnalysis, ExecFullPromotesVgprDefToKill) {
@@ -6565,8 +6754,12 @@ TEST(LivenessAnalysis, ExecFullPromotesVgprDefToKill) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &def = *insts_of(*blocks[0])[1];
-  EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
-  EXPECT_EQ(liveness.find_free_run(&def, 1), 0u);
+  auto maybe_is_live_def = liveness.is_live_before(def, {RegClass::VGPR, 0, 1});
+  ASSERT_TRUE(maybe_is_live_def.succeeded());
+  EXPECT_FALSE(maybe_is_live_def.value());
+  auto maybe_free_run = liveness.find_free_run(&def, 1);
+  ASSERT_TRUE(maybe_free_run.succeeded());
+  EXPECT_EQ(maybe_free_run.value(), 0u);
 }
 
 TEST(LivenessAnalysis, ExecFullViaInlineConstantPromotesVgprDefToKill) {
@@ -6578,8 +6771,12 @@ TEST(LivenessAnalysis, ExecFullViaInlineConstantPromotesVgprDefToKill) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &def = *insts_of(*blocks[0])[1];
-  EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
-  EXPECT_EQ(liveness.find_free_run(&def, 1), 0u);
+  auto maybe_is_live_def = liveness.is_live_before(def, {RegClass::VGPR, 0, 1});
+  ASSERT_TRUE(maybe_is_live_def.succeeded());
+  EXPECT_FALSE(maybe_is_live_def.value());
+  auto maybe_free_run = liveness.find_free_run(&def, 1);
+  ASSERT_TRUE(maybe_free_run.succeeded());
+  EXPECT_EQ(maybe_free_run.value(), 0u);
 }
 
 TEST(LivenessAnalysis, NarrowingExecWriteDoesNotPromoteVgprDefToKill) {
@@ -6590,9 +6787,13 @@ TEST(LivenessAnalysis, NarrowingExecWriteDoesNotPromoteVgprDefToKill) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &def = *insts_of(*blocks[0])[1];
-  EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  auto maybe_is_live_def = liveness.is_live_before(def, {RegClass::VGPR, 0, 1});
+  ASSERT_TRUE(maybe_is_live_def.succeeded());
+  EXPECT_TRUE(maybe_is_live_def.value());
 
-  auto free_vgpr = liveness.find_free_run(&def, 1);
+  auto maybe_free_run = liveness.find_free_run(&def, 1);
+  ASSERT_TRUE(maybe_free_run.succeeded());
+  auto free_vgpr = maybe_free_run.value();
   ASSERT_TRUE(free_vgpr.has_value());
   EXPECT_NE(*free_vgpr, 0u);
 }
@@ -6617,7 +6818,9 @@ TEST(ExecMaskAnalysis, CfgJoinMeetsToUnknownUnlessAllPredecessorsFull) {
   EXPECT_EQ(exec.before(def), ExecState::Unknown);
 
   LivenessAnalysis liveness = analyze_scope(blocks);
-  EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  auto maybe_is_live_def = liveness.is_live_before(def, {RegClass::VGPR, 0, 1});
+  ASSERT_TRUE(maybe_is_live_def.succeeded());
+  EXPECT_TRUE(maybe_is_live_def.value());
 }
 
 // Regression: EXEC must flow across the scoped caller->callee edge like liveness
@@ -6641,7 +6844,9 @@ TEST(ExecMaskAnalysis, CallEdgeFlowsExecFullIntoCallee) {
     ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
     EXPECT_EQ(exec.before(def), ExecState::Unknown);
     LivenessAnalysis liveness = analyze_scope(blocks);
-    EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+    auto maybe_is_live_def = liveness.is_live_before(def, {RegClass::VGPR, 0, 1});
+    ASSERT_TRUE(maybe_is_live_def.succeeded());
+    EXPECT_TRUE(maybe_is_live_def.value());
   }
 
   // Same edge in both: EXEC Full at the def, so it overwrites every lane and kills v0.
@@ -6649,7 +6854,9 @@ TEST(ExecMaskAnalysis, CallEdgeFlowsExecFullIntoCallee) {
     ExecMaskAnalysis exec{KernelBlockScope(scope), 64, edges};
     EXPECT_EQ(exec.before(def), ExecState::Full);
     LivenessAnalysis liveness = analyze_scope_with_edges(blocks, edges);
-    EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+    auto maybe_is_live_def_2 = liveness.is_live_before(def, {RegClass::VGPR, 0, 1});
+    ASSERT_TRUE(maybe_is_live_def_2.succeeded());
+    EXPECT_FALSE(maybe_is_live_def_2.value());
   }
 }
 
@@ -6679,7 +6886,9 @@ TEST(ExecMaskAnalysis, ReturnEdgeToContinuationMeetsToUnknown) {
     ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
     EXPECT_EQ(exec.before(def), ExecState::Full);
     LivenessAnalysis liveness = analyze_scope(blocks);
-    EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+    auto maybe_is_live_def = liveness.is_live_before(def, {RegClass::VGPR, 0, 1});
+    ASSERT_TRUE(maybe_is_live_def.succeeded());
+    EXPECT_FALSE(maybe_is_live_def.value());
   }
 
   // With edge: meet of the Full branch and the narrowed return path is Unknown,
@@ -6688,7 +6897,9 @@ TEST(ExecMaskAnalysis, ReturnEdgeToContinuationMeetsToUnknown) {
     ExecMaskAnalysis exec{KernelBlockScope(scope), 64, edges};
     EXPECT_EQ(exec.before(def), ExecState::Unknown);
     LivenessAnalysis liveness = analyze_scope_with_edges(blocks, edges);
-    EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+    auto maybe_is_live_def_2 = liveness.is_live_before(def, {RegClass::VGPR, 0, 1});
+    ASSERT_TRUE(maybe_is_live_def_2.succeeded());
+    EXPECT_TRUE(maybe_is_live_def_2.value());
   }
 }
 
@@ -6720,8 +6931,12 @@ TEST(LivenessAnalysis, FindsDeadSgprAfterLiveSgpr) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &use = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(use, {RegClass::SGPR, 4, 1}));
-  EXPECT_EQ(liveness.find_free_sgpr(&use, 4), 5);
+  auto maybe_is_live_use = liveness.is_live_before(use, {RegClass::SGPR, 4, 1});
+  ASSERT_TRUE(maybe_is_live_use.succeeded());
+  EXPECT_TRUE(maybe_is_live_use.value());
+  auto maybe_sgpr = liveness.find_free_sgpr(&use, 4);
+  ASSERT_TRUE(maybe_sgpr.succeeded());
+  EXPECT_EQ(maybe_sgpr.value(), 5);
 }
 
 TEST(LivenessAnalysis, FindValidSgprPair) {
@@ -6729,8 +6944,12 @@ TEST(LivenessAnalysis, FindValidSgprPair) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &use = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(use, {RegClass::SGPR, 4, 1}));
-  EXPECT_EQ(liveness.find_free_sgpr_pair(&use, 4), 6);
+  auto maybe_is_live_use = liveness.is_live_before(use, {RegClass::SGPR, 4, 1});
+  ASSERT_TRUE(maybe_is_live_use.succeeded());
+  EXPECT_TRUE(maybe_is_live_use.value());
+  auto maybe_sgpr_pair = liveness.find_free_sgpr_pair(&use, 4);
+  ASSERT_TRUE(maybe_sgpr_pair.succeeded());
+  EXPECT_EQ(maybe_sgpr_pair.value(), 6);
 }
 
 TEST(LivenessAnalysis, FindSgprPairSkipsStraddle) {
@@ -6738,7 +6957,9 @@ TEST(LivenessAnalysis, FindSgprPairSkipsStraddle) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &use = *blocks[0]->instructions().begin();
-  EXPECT_EQ(liveness.find_free_sgpr_pair(&use, 4), 8);
+  auto maybe_sgpr_pair = liveness.find_free_sgpr_pair(&use, 4);
+  ASSERT_TRUE(maybe_sgpr_pair.succeeded());
+  EXPECT_EQ(maybe_sgpr_pair.value(), 8);
 }
 
 TEST(LivenessAnalysis, NoSgprPairAvailable) {
@@ -6746,7 +6967,9 @@ TEST(LivenessAnalysis, NoSgprPairAvailable) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &use = *blocks[0]->instructions().begin();
-  EXPECT_EQ(liveness.find_free_sgpr_pair(&use, REGISTER_SET_ALLOCATABLE_SGPRS + 10), std::nullopt);
+  auto maybe_sgpr_pair = liveness.find_free_sgpr_pair(&use, REGISTER_SET_ALLOCATABLE_SGPRS + 10);
+  ASSERT_TRUE(maybe_sgpr_pair.succeeded());
+  EXPECT_EQ(maybe_sgpr_pair.value(), std::nullopt);
 }
 
 TEST(LivenessAnalysis, MinFreeVgprForcesScratchAllocationAboveFloor) {
@@ -6761,10 +6984,18 @@ TEST(LivenessAnalysis, MinFreeVgprForcesScratchAllocationAboveFloor) {
                             options);
 
   const Instruction &use = *blocks[0]->instructions().begin();
-  EXPECT_FALSE(liveness.is_live_before(use, {RegClass::VGPR, 0, 4}));
-  EXPECT_EQ(liveness.find_free_sgpr(&use, 0), 0);
-  EXPECT_EQ(liveness.find_free_run(&use, 1, 0), 4);
-  EXPECT_EQ(liveness.find_free_run(&use, 1, 7), 7);
+  auto maybe_is_live_use = liveness.is_live_before(use, {RegClass::VGPR, 0, 4});
+  ASSERT_TRUE(maybe_is_live_use.succeeded());
+  EXPECT_FALSE(maybe_is_live_use.value());
+  auto maybe_sgpr = liveness.find_free_sgpr(&use, 0);
+  ASSERT_TRUE(maybe_sgpr.succeeded());
+  EXPECT_EQ(maybe_sgpr.value(), 0);
+  auto maybe_free_run = liveness.find_free_run(&use, 1, 0);
+  ASSERT_TRUE(maybe_free_run.succeeded());
+  EXPECT_EQ(maybe_free_run.value(), 4);
+  auto maybe_free_run_2 = liveness.find_free_run(&use, 1, 7);
+  ASSERT_TRUE(maybe_free_run_2.succeeded());
+  EXPECT_EQ(maybe_free_run_2.value(), 7);
 }
 
 TEST(LivenessAnalysis, GloballyUnusedRunHonorsMinFreeVgprFloor) {
@@ -6777,8 +7008,12 @@ TEST(LivenessAnalysis, GloballyUnusedRunHonorsMinFreeVgprFloor) {
                             options);
 
   const Instruction &use = *blocks[0]->instructions().begin();
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&use, 1, 0, 1, 8), 4);
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&use, 1, 0, 1, 4), std::nullopt);
+  auto maybe_unused_run = liveness.find_globally_unused_vgpr_run(&use, 1, 0, 1, 8);
+  ASSERT_TRUE(maybe_unused_run.succeeded());
+  EXPECT_EQ(maybe_unused_run.value(), 4);
+  auto maybe_unused_run_2 = liveness.find_globally_unused_vgpr_run(&use, 1, 0, 1, 4);
+  ASSERT_TRUE(maybe_unused_run_2.succeeded());
+  EXPECT_EQ(maybe_unused_run_2.value(), std::nullopt);
   EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
 }
 
@@ -6794,17 +7029,28 @@ TEST(LivenessAnalysis, FindsGloballyUnusedRunBeforeSiteDeadFallback) {
   ASSERT_NE(instruction, blocks.front()->instructions().end());
 
   EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 0, 1, 4), 1);
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 2, 0, 2, 4), 2);
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 2, 0, 1, 1), std::nullopt);
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 0, 1, 0), std::nullopt);
+  auto maybe_unused_run = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 0, 1, 4);
+  ASSERT_TRUE(maybe_unused_run.succeeded());
+  EXPECT_EQ(maybe_unused_run.value(), 1);
+  auto maybe_unused_run_2 = liveness.find_globally_unused_vgpr_run(&*instruction, 2, 0, 2, 4);
+  ASSERT_TRUE(maybe_unused_run_2.succeeded());
+  EXPECT_EQ(maybe_unused_run_2.value(), 2);
+  auto maybe_unused_run_3 = liveness.find_globally_unused_vgpr_run(&*instruction, 2, 0, 1, 1);
+  ASSERT_TRUE(maybe_unused_run_3.succeeded());
+  EXPECT_EQ(maybe_unused_run_3.value(), std::nullopt);
+  auto maybe_unused_run_4 = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 0, 1, 0);
+  ASSERT_TRUE(maybe_unused_run_4.succeeded());
+  EXPECT_EQ(maybe_unused_run_4.value(), std::nullopt);
   EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
-  EXPECT_EQ(liveness.find_free_run(&*instruction, 1), 0)
-      << "v0 is dead at this site but is not globally unused";
+  auto maybe_free_run = liveness.find_free_run(&*instruction, 1);
+  ASSERT_TRUE(maybe_free_run.succeeded());
+  EXPECT_EQ(maybe_free_run.value(), 0) << "v0 is dead at this site but is not globally unused";
   EXPECT_TRUE(liveness.has_materialized_cfg_liveness());
 
   Instruction outside_scope("outside_scope", nullptr);
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&outside_scope, 1, 0, 1, 4), std::nullopt);
+  auto maybe_unused_run_5 = liveness.find_globally_unused_vgpr_run(&outside_scope, 1, 0, 1, 4);
+  ASSERT_TRUE(maybe_unused_run_5.succeeded());
+  EXPECT_EQ(maybe_unused_run_5.value(), std::nullopt);
 }
 
 TEST(LivenessAnalysis, FreeVgprAllocationHonorsDestinationLimit) {
@@ -6817,14 +7063,18 @@ TEST(LivenessAnalysis, FreeVgprAllocationHonorsDestinationLimit) {
   limited_options.min_free_vgpr = 256;
   LivenessAnalysis limited(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
                            limited_options);
-  EXPECT_EQ(limited.find_free_run(&use, 1), std::nullopt);
+  auto maybe_free_run = limited.find_free_run(&use, 1);
+  ASSERT_TRUE(maybe_free_run.succeeded());
+  EXPECT_EQ(maybe_free_run.value(), std::nullopt);
 
   LivenessAnalysisOptions gfx1250_options;
   gfx1250_options.min_free_vgpr = 256;
   gfx1250_options.max_free_vgpr = 1024;
   LivenessAnalysis gfx1250(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
                            gfx1250_options);
-  EXPECT_EQ(gfx1250.find_free_run(&use, 1), 256);
+  auto maybe_free_run_2 = gfx1250.find_free_run(&use, 1);
+  ASSERT_TRUE(maybe_free_run_2.succeeded());
+  EXPECT_EQ(maybe_free_run_2.value(), 256);
 }
 
 TEST(LivenessAnalysis, FreeVgprAllocationRejectsUnnameableRunWidth) {
@@ -6844,10 +7094,18 @@ TEST(LivenessAnalysis, FreeVgprAllocationRejectsUnnameableRunWidth) {
 
   // v0 is live and globally used, so the widest nameable run starts at v1. The
   // 255/256 pair is what separates the width gate from an ordinary no-fit.
-  EXPECT_EQ(liveness.find_free_run(&use, 255), 1);
-  EXPECT_EQ(liveness.find_free_run(&use, 256), std::nullopt);
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&use, 255, 0, 1, 1024), 1);
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&use, 256, 0, 1, 1024), std::nullopt);
+  auto maybe_free_run = liveness.find_free_run(&use, 255);
+  ASSERT_TRUE(maybe_free_run.succeeded());
+  EXPECT_EQ(maybe_free_run.value(), 1);
+  auto maybe_free_run_2 = liveness.find_free_run(&use, 256);
+  ASSERT_TRUE(maybe_free_run_2.succeeded());
+  EXPECT_EQ(maybe_free_run_2.value(), std::nullopt);
+  auto maybe_unused_run = liveness.find_globally_unused_vgpr_run(&use, 255, 0, 1, 1024);
+  ASSERT_TRUE(maybe_unused_run.succeeded());
+  EXPECT_EQ(maybe_unused_run.value(), 1);
+  auto maybe_unused_run_2 = liveness.find_globally_unused_vgpr_run(&use, 256, 0, 1, 1024);
+  ASSERT_TRUE(maybe_unused_run_2.succeeded());
+  EXPECT_EQ(maybe_unused_run_2.value(), std::nullopt);
 }
 
 TEST(LivenessAnalysis, FindFreeRunHonorsBaseAlignment) {
@@ -6862,8 +7120,12 @@ TEST(LivenessAnalysis, FindFreeRunHonorsBaseAlignment) {
                             options);
 
   const Instruction &use = *blocks[0]->instructions().begin();
-  EXPECT_EQ(liveness.find_free_run(&use, 4, 0, 2), 94);
-  EXPECT_EQ(liveness.find_free_run(&use, 4, 94, 4), 96);
+  auto maybe_free_run = liveness.find_free_run(&use, 4, 0, 2);
+  ASSERT_TRUE(maybe_free_run.succeeded());
+  EXPECT_EQ(maybe_free_run.value(), 94);
+  auto maybe_free_run_2 = liveness.find_free_run(&use, 4, 94, 4);
+  ASSERT_TRUE(maybe_free_run_2.succeeded());
+  EXPECT_EQ(maybe_free_run_2.value(), 96);
 }
 
 TEST(LivenessAnalysis, ReadWriteSameRegisterIsLiveBeforeInstruction) {
@@ -6871,7 +7133,9 @@ TEST(LivenessAnalysis, ReadWriteSameRegisterIsLiveBeforeInstruction) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &read_write = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(read_write, {RegClass::SGPR, 4, 1}));
+  auto maybe_is_live_read_write = liveness.is_live_before(read_write, {RegClass::SGPR, 4, 1});
+  ASSERT_TRUE(maybe_is_live_read_write.succeeded());
+  EXPECT_TRUE(maybe_is_live_read_write.value());
 }
 
 TEST(LivenessAnalysis, ReadWriteRegisterStaysLiveOutWhenUsedBySuccessor) {
@@ -6882,8 +7146,12 @@ TEST(LivenessAnalysis, ReadWriteRegisterStaysLiveOutWhenUsedBySuccessor) {
 
   ASSERT_EQ(blocks.size(), 2u);
   const Instruction &read_write = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(read_write, {RegClass::SGPR, 4, 1}));
-  EXPECT_TRUE(liveness.block_liveness(*blocks[0]).live_out.contains({RegClass::SGPR, 4, 1}));
+  auto maybe_is_live_read_write = liveness.is_live_before(read_write, {RegClass::SGPR, 4, 1});
+  ASSERT_TRUE(maybe_is_live_read_write.succeeded());
+  EXPECT_TRUE(maybe_is_live_read_write.value());
+  auto maybe_block = liveness.block_liveness(*blocks[0]);
+  ASSERT_TRUE(maybe_block.succeeded());
+  EXPECT_TRUE((*maybe_block.value()).live_out.contains({RegClass::SGPR, 4, 1}));
 }
 
 TEST(LivenessAnalysis, PartialDefKeepsRegisterLiveBeforeInstruction) {
@@ -6891,7 +7159,9 @@ TEST(LivenessAnalysis, PartialDefKeepsRegisterLiveBeforeInstruction) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &partial_def = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(partial_def, {RegClass::SGPR, 4, 1}));
+  auto maybe_is_live_partial_def = liveness.is_live_before(partial_def, {RegClass::SGPR, 4, 1});
+  ASSERT_TRUE(maybe_is_live_partial_def.succeeded());
+  EXPECT_TRUE(maybe_is_live_partial_def.value());
 }
 
 TEST(LivenessAnalysis, PartialDefRegisterStaysLiveOutWhenUsedBySuccessor) {
@@ -6902,8 +7172,12 @@ TEST(LivenessAnalysis, PartialDefRegisterStaysLiveOutWhenUsedBySuccessor) {
 
   ASSERT_EQ(blocks.size(), 2u);
   const Instruction &partial_def = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(partial_def, {RegClass::SGPR, 4, 1}));
-  EXPECT_TRUE(liveness.block_liveness(*blocks[0]).live_out.contains({RegClass::SGPR, 4, 1}));
+  auto maybe_is_live_partial_def = liveness.is_live_before(partial_def, {RegClass::SGPR, 4, 1});
+  ASSERT_TRUE(maybe_is_live_partial_def.succeeded());
+  EXPECT_TRUE(maybe_is_live_partial_def.value());
+  auto maybe_block = liveness.block_liveness(*blocks[0]);
+  ASSERT_TRUE(maybe_block.succeeded());
+  EXPECT_TRUE((*maybe_block.value()).live_out.contains({RegClass::SGPR, 4, 1}));
 }
 
 TEST(LivenessAnalysis, FullWidthDefKillsRegisterBeforeInstruction) {
@@ -6911,7 +7185,9 @@ TEST(LivenessAnalysis, FullWidthDefKillsRegisterBeforeInstruction) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &def = *blocks[0]->instructions().begin();
-  EXPECT_FALSE(liveness.is_live_before(def, {RegClass::SGPR, 4, 1}));
+  auto maybe_is_live_def = liveness.is_live_before(def, {RegClass::SGPR, 4, 1});
+  ASSERT_TRUE(maybe_is_live_def.succeeded());
+  EXPECT_FALSE(maybe_is_live_def.value());
 }
 
 TEST(LivenessAnalysis, ImplicitUseIsLiveBeforeInstruction) {
@@ -6919,7 +7195,9 @@ TEST(LivenessAnalysis, ImplicitUseIsLiveBeforeInstruction) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &implicit_use = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(implicit_use, {RegClass::SGPR, 6, 2}));
+  auto maybe_is_live_implicit_use = liveness.is_live_before(implicit_use, {RegClass::SGPR, 6, 2});
+  ASSERT_TRUE(maybe_is_live_implicit_use.succeeded());
+  EXPECT_TRUE(maybe_is_live_implicit_use.value());
 }
 
 TEST(LivenessAnalysis, PredicatedScalarDefDoesNotKillLiveOutValue) {
@@ -6928,7 +7206,9 @@ TEST(LivenessAnalysis, PredicatedScalarDefDoesNotKillLiveOutValue) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &pred_def = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(pred_def, {RegClass::SGPR, 4, 1}));
+  auto maybe_is_live_pred_def = liveness.is_live_before(pred_def, {RegClass::SGPR, 4, 1});
+  ASSERT_TRUE(maybe_is_live_pred_def.succeeded());
+  EXPECT_TRUE(maybe_is_live_pred_def.value());
 }
 
 TEST(LivenessAnalysis, LoopCarriedUseRevisitsBackEdgePredecessor) {
@@ -6940,9 +7220,15 @@ TEST(LivenessAnalysis, LoopCarriedUseRevisitsBackEdgePredecessor) {
   auto *loop = block_starting_at(blocks, 4);
   ASSERT_NE(entry, nullptr);
   ASSERT_NE(loop, nullptr);
-  EXPECT_TRUE(liveness.block_liveness(*entry).live_out.contains({RegClass::SGPR, 4, 1}));
-  EXPECT_TRUE(liveness.block_liveness(*loop).live_in.contains({RegClass::SGPR, 4, 1}));
-  EXPECT_TRUE(liveness.block_liveness(*loop).live_out.contains({RegClass::SGPR, 4, 1}));
+  auto maybe_block = liveness.block_liveness(*entry);
+  ASSERT_TRUE(maybe_block.succeeded());
+  EXPECT_TRUE((*maybe_block.value()).live_out.contains({RegClass::SGPR, 4, 1}));
+  auto maybe_block_2 = liveness.block_liveness(*loop);
+  ASSERT_TRUE(maybe_block_2.succeeded());
+  EXPECT_TRUE((*maybe_block_2.value()).live_in.contains({RegClass::SGPR, 4, 1}));
+  auto maybe_block_3 = liveness.block_liveness(*loop);
+  ASSERT_TRUE(maybe_block_3.succeeded());
+  EXPECT_TRUE((*maybe_block_3.value()).live_out.contains({RegClass::SGPR, 4, 1}));
 }
 
 TEST(LivenessAnalysis, BranchMeetKeepsValueLiveWhenOneSuccessorPreservesIt) {
@@ -6952,8 +7238,12 @@ TEST(LivenessAnalysis, BranchMeetKeepsValueLiveWhenOneSuccessorPreservesIt) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &branch = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(branch, {RegClass::SGPR, 4, 1}));
-  EXPECT_TRUE(liveness.block_liveness(*blocks[0]).live_out.contains({RegClass::SGPR, 4, 1}));
+  auto maybe_is_live_branch = liveness.is_live_before(branch, {RegClass::SGPR, 4, 1});
+  ASSERT_TRUE(maybe_is_live_branch.succeeded());
+  EXPECT_TRUE(maybe_is_live_branch.value());
+  auto maybe_block = liveness.block_liveness(*blocks[0]);
+  ASSERT_TRUE(maybe_block.succeeded());
+  EXPECT_TRUE((*maybe_block.value()).live_out.contains({RegClass::SGPR, 4, 1}));
 }
 
 TEST(LivenessAnalysis, ExplicitBlockSubsetIgnoresOutsideSuccessors) {
@@ -6969,13 +7259,17 @@ TEST(LivenessAnalysis, ExplicitBlockSubsetIgnoresOutsideSuccessors) {
 
   const Instruction &def = *kernel0->instructions().begin();
   LivenessAnalysis all_decoded_liveness = analyze_scope(blocks);
-  EXPECT_TRUE(all_decoded_liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  auto maybe_is_live_def = all_decoded_liveness.is_live_before(def, {RegClass::VGPR, 0, 1});
+  ASSERT_TRUE(maybe_is_live_def.succeeded());
+  EXPECT_TRUE(maybe_is_live_def.value());
 
   std::vector<BasicBlock *> kernel_blocks{kernel0};
   const ExecMaskAnalysis kernel_exec(KernelBlockScope(kernel_blocks), /*wave_size=*/64);
   LivenessAnalysis kernel_liveness{KernelBlockScope(kernel_blocks),
                                    std::make_unique<ExecMaskAnalysis>(kernel_exec)};
-  EXPECT_FALSE(kernel_liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  auto maybe_is_live_def_2 = kernel_liveness.is_live_before(def, {RegClass::VGPR, 0, 1});
+  ASSERT_TRUE(maybe_is_live_def_2.succeeded());
+  EXPECT_FALSE(maybe_is_live_def_2.value());
 }
 
 TEST(InstDefUse, DstOnlyVgpr) {

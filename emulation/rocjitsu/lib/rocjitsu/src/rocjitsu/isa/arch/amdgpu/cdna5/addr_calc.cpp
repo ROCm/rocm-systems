@@ -15,7 +15,6 @@
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/bit.h"
-#include "util/except.h"
 
 #include <algorithm>
 #include <array>
@@ -43,7 +42,11 @@ bool has_smem_offset(uint32_t soffset) { return soffset != OPR_SMEM_OFFSET_NULL;
 std::optional<uint32_t> read_sreg_m0_operand(amdgpu::Wavefront &wf, uint32_t operand) {
   if (operand <= amdgpu::kModernM0Selector)
     return amdgpu::try_read_scalar_selector(wf, operand);
-  throw util::UnimplementedInst("unsupported gfx1250 scalar memory offset operand");
+  // Preserve the category used by the CU's catch for the previous unsupported-
+  // operand exception. This describes simulator support, not hardware validity.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  return std::nullopt;
 }
 
 std::optional<uint64_t> read_sreg64_operand(amdgpu::Wavefront &wf, uint32_t operand) {
@@ -247,19 +250,21 @@ uint32_t async_lds_lane_address(const VglobalMachineInst &inst, const amdgpu::Wa
 
 void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d) {
+  // Scratch SGPR/VGPR offsets are signed 32-bit values. Widen before combining
+  // them, including the optional payload scaling of the VGPR operand.
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   uint64_t scratch_base = wf.scratch_base();
-  uint32_t saddr_val = 0;
+  int64_t saddr_val = 0;
   if (has_saddr(inst.saddr)) {
     auto saddr = read_sreg_m0_operand(wf, inst.saddr);
     if (!saddr) {
       amdgpu::reject_vector_memory_access(d);
       return;
     }
-    saddr_val = *saddr;
+    saddr_val = static_cast<int32_t>(*saddr);
   }
   uint32_t vbase = 0;
   uint32_t scale = 1;
@@ -281,13 +286,12 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t vaddr = 0;
+    uint64_t vaddr = 0;
     if (inst.sve) {
-      vaddr = vaddr_region->lane(0, lane);
-      vaddr *= scale;
+      const int32_t voffset = static_cast<int32_t>(vaddr_region->lane(0, lane));
+      vaddr = amdgpu::flat_vector_offset(static_cast<uint32_t>(voffset), true, scale);
     }
-    const uint64_t private_offset =
-        static_cast<uint64_t>(static_cast<int64_t>(vaddr) + saddr_val + offset);
+    const uint64_t private_offset = vaddr + saddr_val + offset;
     d.per_lane_addr[lane] =
         scratch_base + (private_offset / kScratchInterleave) * lane_count * kScratchInterleave +
         static_cast<uint64_t>(lane) * kScratchInterleave + (private_offset % kScratchInterleave);
@@ -351,6 +355,13 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   }
   if (!resource.swizzle_enabled)
     d.element_lane_masks.assign(d.num_elems, exec);
+  // Triton PR 12512 reports raw B128 crossings with 4/8 aligned bytes left
+  // that differ from CDNA5 ISA 9.4.1's exact per-DWORD check. Follow the PR's
+  // stated end + 4 <= NUM_RECORDS rule for crossing accesses, retaining all
+  // DWORDs when the whole access fits. Other widths and byte-granular bounds
+  // are model extensions awaiting gfx1250 qualification. Keep structured
+  // accesses on the documented rule until their behavior is measured.
+  constexpr uint32_t kDwordBytes = sizeof(uint32_t);
   d.lane_mask = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -379,10 +390,15 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
 
     int64_t record_offset = static_cast<int64_t>(soffset_val) + voffset + ioff;
     int64_t total_offset = static_cast<int64_t>(soffset_val) + logical_offset;
+    const bool raw_vector_crosses_bound =
+        !inst.idxen && d.elem_size == kDwordBytes && d.num_elems > 1 &&
+        byte_range_exceeds(total_offset, d.elem_size * d.num_elems, resource.num_records);
+    const uint32_t component_bound_size =
+        d.elem_size + (raw_vector_crosses_bound ? kDwordBytes : 0);
     for (uint32_t elem = 0; elem < d.num_elems; ++elem) {
       int64_t component_offset = static_cast<int64_t>(elem) * d.elem_size;
-      bool oob =
-          byte_range_exceeds(total_offset + component_offset, d.elem_size, resource.num_records);
+      bool oob = byte_range_exceeds(total_offset + component_offset, component_bound_size,
+                                    resource.num_records);
       if (resource.oob_select) {
         oob = oob ||
               byte_range_exceeds(record_offset + component_offset, d.elem_size, resource.stride);

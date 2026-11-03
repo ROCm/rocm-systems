@@ -149,8 +149,15 @@ emit_region(const typename SdkBackend::callback_tracing_record_t& record,
     auto call_stack = Externals::get_backtrace_json(backtrace_data);
 
     Externals::get_metadata_registry().add_string(Category<Externals>::k_name);
-    Externals::get_metadata_registry().add_thread_info(
-        { Externals::get_ppid(), Externals::get_pid(), record.thread_id, 0, 0, "{}" });
+    Externals::get_metadata_registry().ensure_thread(record.thread_id, [&] {
+        return
+            typename Externals::thread_info_t{ .parent_process_id = Externals::get_ppid(),
+                                               .process_id        = Externals::get_pid(),
+                                               .thread_id         = record.thread_id,
+                                               .start             = 0,
+                                               .end               = 0,
+                                               .extdata           = "{}" };
+    });
 
     const std::string args_str = get_args_string(args);
 

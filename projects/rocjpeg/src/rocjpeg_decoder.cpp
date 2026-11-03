@@ -250,17 +250,19 @@ RocJpegStatus RocJpegDecoder::Decode(RocJpegStreamHandle jpeg_stream_handle, con
         return ROCJPEG_STATUS_EXECUTION_FAILED;
     }
     auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_stream_handle);
-    const JpegStreamParameters *jpeg_stream_params = rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters();
-    if (ValidateCropRectangle(*decode_params, *jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
+    // SubmitDecode writes the crop rectangle into the parameters it is given, so decode a copy
+    // rather than the stream handle's own parameters, as DecodeAsync and DecodeBatched do.
+    JpegStreamParameters jpeg_stream_params = *rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters();
+    if (ValidateCropRectangle(*decode_params, jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
 
     VASurfaceID current_surface_id;
-    CHECK_ROCJPEG(jpeg_vaapi_decoder_.SubmitDecode(jpeg_stream_params, current_surface_id, decode_params));
+    CHECK_ROCJPEG(jpeg_vaapi_decoder_.SubmitDecode(&jpeg_stream_params, current_surface_id, decode_params));
 
     // A single image is just a batch of one.
-    RocJpegStatus rocjpeg_status = FinalizeDecodeBatched(&current_surface_id, jpeg_stream_params, decode_params, destination, 1);
+    RocJpegStatus rocjpeg_status = FinalizeDecodeBatched(&current_surface_id, &jpeg_stream_params, decode_params, destination, 1);
     if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
         jpeg_vaapi_decoder_.SetSurfaceAsIdle(current_surface_id);
     }

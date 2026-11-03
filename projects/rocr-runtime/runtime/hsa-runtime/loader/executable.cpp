@@ -1900,6 +1900,49 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
         }
       }
 
+      // External variables, such as the control scratchpad, are defined by the application with
+      // hsa_executable_agent_global_variable_define before loading, like a GPU code object's
+      // undefined symbols. Their addresses are plain stores, so they are written in here.
+      for (const auto& [name, ext] : kernel.external_symbols) {
+        const auto var_it = agent_symbols_.find(std::make_pair(name, agent));
+        if (var_it == agent_symbols_.end() || !var_it->second->IsVariable() ||
+            var_it->second->address == 0) {
+          logger_ << "LoaderError: symbol \"" << name << "\" is undefined\n";
+          return HSA_STATUS_ERROR_VARIABLE_UNDEFINED;
+        }
+        void* va = reinterpret_cast<void*>(var_it->second->address);
+
+        // The NPU reaches the variable at its agent address, so all of it must lie in one
+        // allocation the driver knows. The extent is measured from the allocation base
+        // FindDriverMemoryHandle returns: for a VMM mapping, PtrInfo reports the queried pointer
+        // as the base but the whole mapping as the size.
+        auto* runtime = core::Runtime::runtime_singleton_;
+        hsa_amd_pointer_info_t info = {};
+        info.size = sizeof(info);
+        void* alloc_base = nullptr;
+        core::DriverMemoryHandle handle{};
+        bool known = runtime->PtrInfo(va, &info, nullptr, nullptr, nullptr) == HSA_STATUS_SUCCESS;
+        known = known && info.type != HSA_EXT_POINTER_TYPE_UNKNOWN && info.agentBaseAddress;
+        known = known &&
+            runtime->FindDriverMemoryHandle(va, core_agent, &alloc_base, &handle) ==
+                HSA_STATUS_SUCCESS;
+        const auto offset_in_alloc =
+            reinterpret_cast<uintptr_t>(va) - reinterpret_cast<uintptr_t>(alloc_base);
+        if (!known || offset_in_alloc + ext.size > info.sizeInBytes) {
+          log_warning_n(10, "AIE: '%s' is not defined in %u bytes of AIE-accessible memory.\n",
+                        name.c_str(), ext.size);
+          return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+        }
+
+        const uint64_t dev_addr = reinterpret_cast<uint64_t>(info.agentBaseAddress) +
+            (reinterpret_cast<uintptr_t>(va) - reinterpret_cast<uintptr_t>(info.hostBaseAddress));
+        for (const AMD::aie_elf::PatchSite& site : ext.sites) {
+          const uint64_t value = dev_addr + site.addend;
+          std::memcpy(kernel.ctrl_code.data() + site.offset, &value, sizeof(value));
+        }
+        desc->external_variables.push_back({va, ext.size, static_cast<uint32_t>(handle.handle)});
+      }
+
       // The control code is only ever a memcpy source for a per-dispatch buffer, so it stays in
       // ordinary host memory rather than a device segment. Moved, not copied: the parsed kernel
       // is looked up once and is dead after this.

@@ -113,7 +113,8 @@ option(BUILD_NCCL4PY                           "Build the nccl4py Python binding
 # layout for diagnostics.  See cmake/linker_scripts/hip_fatbin_tail.ld.
 option(RCCL_HIP_FATBIN_AT_TAIL                 "Place .hip_fatbin at the end of librccl.so"    ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
-option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy path" OFF)
+option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy and reduce paths" OFF)
+option(ENABLE_TDM_PRIM_LL128                   "Build the experimental gfx1250 TDM LL128 user-buffer path" OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
@@ -127,6 +128,10 @@ option(RCCL_POISON_HIP_ATOMICS                 "Reject __hip_atomic_* builtins i
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
 if(ENABLE_TDM_SIMPLE)
   add_compile_definitions(ENABLE_TDM_SIMPLE=1)
+endif()
+
+if(ENABLE_TDM_PRIM_LL128)
+  add_compile_definitions(ENABLE_TDM_PRIM_LL128=1)
 endif()
 # rocSHMEM integration (mutually exclusive — enabling both causes duplicate
 # rocshmem state between librccl.so and the executable at runtime):
@@ -489,6 +494,17 @@ check_cxx_source_compiles("
     return 0;
   }
 " HIP_VMM_UNCACHED_MEMORY_AVAILABLE)
+
+### Check for host VMM location types (hipMemLocationTypeHost). Stock ROCm 7.0.2
+### shares the 7.0.2.x backport's HIP_VERSION but does not declare them.
+check_cxx_source_compiles("
+  #include <hip/hip_runtime_api.h>
+  int main() {
+    hipMemLocationType t = hipMemLocationTypeHost;
+    (void)t;
+    return 0;
+  }
+" HIP_MEM_LOCATION_TYPE_HOST)
 
 unset(CMAKE_REQUIRED_LIBRARIES)
 

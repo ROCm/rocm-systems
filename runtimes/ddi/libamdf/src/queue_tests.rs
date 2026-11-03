@@ -105,10 +105,10 @@ fn fixture_queue(environment: &Environment) -> (Owned<Queue>, Arc<Fixture>) {
     let id = amdf_queue_id_t { words: [11, 13] };
     let owner = Owned::new(Queue {
         native: NativeQueue::Fixture(fixture.clone()),
+        host_allocator: Allocator::system(),
         device: ptr::NonNull::<Device>::dangling().as_ptr(),
         device_queues: &raw const environment.queues,
         device_reset_epoch: &raw const environment.epoch,
-        _scratch_borrow: None,
         info: amdf_user_queue_info_t {
             queue_id: id,
             reset_epoch: 7,
@@ -300,6 +300,7 @@ fn native_transport() -> queue::QueueTransport {
         ring_host_address: 0x1000,
         ring_device_address: 0x1000,
         ring_size_bytes: 4096,
+        aql_control: None,
         sdma_engine_id: None,
         read_index_host_address: 0x2000,
         read_index_device_address: 0x4000,
@@ -539,8 +540,8 @@ fn failed_mapping_preserves_output_and_does_not_add_a_borrow() {
         Allocator::from_callbacks(ptr::null_mut(), Some(reject_allocation), Some(empty_free))
     }
     .unwrap();
-    let (queue, _) = fixture_queue(&environment);
-    let _scope = allocator.scope();
+    let (mut queue, _) = fixture_queue(&environment);
+    queue.host_allocator = allocator;
     let pointer = queue.into_raw().cast();
     let sentinel = ptr::NonNull::<amdf_user_queue_mapping_t>::dangling().as_ptr();
     let mut mapping = sentinel;

@@ -416,10 +416,35 @@ impl KfdVirtualMemory {
                 "virtual-memory physical extent exceeds host width",
             )
         })?;
+        if let MemoryKind::DeviceLocal {
+            coherent,
+            extended_coherent: true,
+            uncached: kind_uncached,
+            ..
+        } = kind
+            && (!coherent || kind_uncached || uncached)
+        {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "extended local coherence requires a cached coherent mapping",
+            ));
+        }
         let native_kind = match kind {
             MemoryKind::System => uapi::GTT | uapi::COHERENT,
-            MemoryKind::DeviceLocal { coherent, .. } => {
-                uapi::VRAM | if coherent { uapi::COHERENT } else { 0 }
+            MemoryKind::DeviceLocal {
+                coherent,
+                extended_coherent,
+                uncached,
+                ..
+            } => {
+                uapi::VRAM
+                    | if coherent { uapi::COHERENT } else { 0 }
+                    | if extended_coherent {
+                        uapi::EXT_COHERENT
+                    } else {
+                        0
+                    }
+                    | if uncached { uapi::UNCACHED } else { 0 }
             }
             MemoryKind::OwnedHost { .. } => {
                 return Err(error(
@@ -430,7 +455,7 @@ impl KfdVirtualMemory {
         };
         vm.check()?;
 
-        let gpu_id = vm.gpu_id();
+        let gpu_id = vm.gpu_id;
 
         let owner = Owned::try_new_uninit()?;
         let reservation =
@@ -459,7 +484,7 @@ impl KfdVirtualMemory {
             .vm
             .as_ref()
             .ok_or_else(|| error(ErrorKind::Internal, "virtual memory lost its owner VM"))?
-            .gpu_id();
+            .gpu_id;
         let mut args = uapi::AllocMemory {
             va: memory
                 .reservation
@@ -611,7 +636,7 @@ impl KfdVirtualMemory {
         vm.check()?;
         let path = format!(
             "/sys/class/drm/renderD{}/device/ualink/accel_state",
-            vm.render_minor()
+            vm.render_minor
         );
         Ok(std::fs::read_to_string(path)
             .is_ok_and(|state| matches!(state.trim(), "ready" | "active")))
@@ -639,7 +664,7 @@ impl KfdVirtualMemory {
         }
         // GEM handles are scoped to a DRM file. A dedicated file makes the
         // temporary PRIME import close even if export fails.
-        let render = super::sysfs::open_render(vm.render_minor())
+        let render = super::sysfs::open_render(vm.render_minor)
             .map_err(|source| native_error("fabric render open", source))?;
         let dma_buf = self.dma_buf()?;
         let gem = drm::import_dma_buf(&render, dma_buf.as_raw_fd())
@@ -871,6 +896,18 @@ pub(crate) struct KfdVirtualHostMapping {
 }
 
 impl KfdVirtualHostMapping {
+    pub(crate) fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
+        let Some(reservation) = &mut self.reservation else {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "virtual-memory host mapping is no longer live",
+            ));
+        };
+        reservation
+            .set_permissions(permissions.bits())
+            .map_err(|source| native_error("virtual-memory host protect", source))
+    }
+
     pub(super) fn create(
         memory: &KfdVirtualMemory,
         address_owner: &KfdVirtualAddress,
