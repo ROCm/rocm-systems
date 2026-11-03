@@ -197,9 +197,11 @@ public:
   }
 
   /// Called after one tensor DMA instruction and any descriptor-requested
-  /// atomic-barrier arrival return normally. The observation contains only
-  /// in-bounds global requests attempted, in execution order. It intentionally
-  /// does not filter memory access outcomes, matching the observer boundary.
+  /// atomic-barrier arrival return normally, when the transfer made at least one
+  /// global request, so its transfer fields come from a validated descriptor.
+  /// The observation contains only in-bounds global requests attempted, in
+  /// execution order. It intentionally does not filter memory access outcomes,
+  /// matching the observer boundary.
   /// Its deferred address view is borrowed and valid only during this callback.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
@@ -215,12 +217,14 @@ public:
 
   /// Called once when a tensor DMA instruction issues, after its descriptor is
   /// read and, unless it is NULL, validated and prepared, and before any data
-  /// moves. This is the tensor DMA
-  /// counterpart of onAmdgpuMemoryAccessRouted(): it fires in the issuing
-  /// wave's instruction step, also when the transfer later waits for memory,
-  /// and also for an instruction that moves no data. A transfer deferred until
-  /// its memory is available is not reported again when it resumes. The
-  /// observation's LDS ranges are borrowed and valid only during this callback.
+  /// moves. This is the tensor DMA counterpart of onAmdgpuMemoryAccessRouted():
+  /// it fires in the issuing wave's instruction step, also when the transfer
+  /// later waits for memory, and also for an instruction that moves no data,
+  /// such as a NULL descriptor or a store wholly outside the tensor. A transfer
+  /// deferred until its memory is available is not reported again when it
+  /// resumes. The observation's element_size_bytes is meaningful only when its
+  /// lds_ranges is nonempty; see TensorDmaIssueObservation. Its LDS ranges are
+  /// borrowed and valid only during this callback.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation & /*issue*/,

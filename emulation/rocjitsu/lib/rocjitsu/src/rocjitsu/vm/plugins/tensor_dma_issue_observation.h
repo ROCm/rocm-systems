@@ -31,14 +31,18 @@ struct TensorDmaLdsRange {
 /// will write (loads) or read (stores), in element order, with adjacent
 /// elements merged. A load writes every element of its tile, zero-filling those
 /// outside the tensor; a store reads only in-bounds elements. Padding bytes are
-/// excluded. A NULL descriptor reports no ranges; its descriptor is not
-/// validated, so its element_size_bytes need not describe a transfer.
+/// excluded.
+///
+/// element_size_bytes describes the transfer only when lds_ranges is nonempty.
+/// When lds_ranges is empty, consumers must not rely on it: the instruction
+/// may be a NULL descriptor, which is not validated, and the observation
+/// carries no field that distinguishes one.
 ///
 /// The ranges borrow execution-owned storage and are valid only for the
 /// duration of the callback.
 struct TensorDmaIssueObservation {
   bool is_load = true; ///< True for a global-to-LDS load, false for an LDS-to-global store.
-  uint32_t element_size_bytes = 0;                 ///< Descriptor element size.
+  uint32_t element_size_bytes = 0; ///< Element size; valid only when lds_ranges is nonempty.
   std::span<const TensorDmaLdsRange> lds_ranges{}; ///< LDS bytes the transfer will touch.
 };
 

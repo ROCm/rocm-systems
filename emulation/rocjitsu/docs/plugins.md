@@ -551,13 +551,14 @@ routing path. `onAmdgpuTensorDmaMemoryAccess` reports them separately after the
 instruction and any descriptor-requested atomic-barrier arrival return normally.
 Its `addresses` member is a callback-lifetime `TensorDmaAddressView` over the
 in-bounds global element bases whose requests were attempted, in execution order
-with duplicates preserved. Empty and fully masked transfers produce no callback.
-`pc` is the tensor instruction's PC, also when a deferred transfer completes
-after the wavefront has moved past the instruction. Consumers must opt in
-through `observes_tensor_dma_memory_access()`. A consumer that retains addresses
-must use `size()` to budget and allocate the event, then call `copy_to()` during
-the callback; a failed copy means the observation is malformed and must be
-rejected. Tensor-DMA observers that need wave-local state may override
+with duplicates preserved. Empty and fully masked transfers produce no callback,
+so a callback's transfer fields always come from a validated descriptor. `pc` is
+the tensor instruction's PC, also when a deferred transfer completes after the
+wavefront has moved past the instruction. Consumers must opt in through
+`observes_tensor_dma_memory_access()`. A consumer that retains addresses must
+use `size()` to budget and allocate the event, then call `copy_to()` during the
+callback; a failed copy means the observation is malformed and must be rejected.
+Tensor-DMA observers that need wave-local state may override
 `onAmdgpuTensorDmaMemoryAccess(access, wf)`; its default forwards to the
 observation-only overload.
 
@@ -573,8 +574,11 @@ when it issues and not again when it resumes. Its `lds_ranges` member is a
 callback-lifetime span of the LDS byte runs the transfer will write (loads) or
 read (stores), with adjacent elements merged and padding bytes excluded. A load
 covers every element of its tile, zero-filling those outside the tensor; a store
-covers only in-bounds elements. Consumers must opt in through
-`observes_tensor_dma_issue()`.
+covers only in-bounds elements. The observation's `element_size_bytes` describes
+the transfer only when `lds_ranges` is nonempty; when it is empty, consumers
+must not rely on it, since the instruction may be a NULL descriptor, which is
+not validated, and the observation carries no field that distinguishes one.
+Consumers must opt in through `observes_tensor_dma_issue()`.
 
 SGPR owner resolution is skipped when no contained plugin observes scalar
 register reads. Plugins that consume neither `onAmdgpuReadScalarRegister` nor

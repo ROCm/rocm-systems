@@ -66,9 +66,10 @@ private:
 /// @details The address view contains only in-bounds global element base
 /// addresses, in the exact order in which the implementation attempted them.
 /// Duplicates are preserved. The callback is emitted only after the instruction
-/// and any descriptor-requested atomic-barrier arrival return normally. Memory
-/// access outcomes are intentionally not filtered, matching the observer's
-/// boundary.
+/// and any descriptor-requested atomic-barrier arrival return normally, and only
+/// when the address view is nonempty. Its transfer fields therefore always come
+/// from a validated descriptor. Memory access outcomes are intentionally not
+/// filtered, matching the observer's boundary.
 ///
 /// The view borrows execution-owned context and is valid only for the duration
 /// of the callback. A consumer that keeps addresses must copy them during the
