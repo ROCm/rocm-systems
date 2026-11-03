@@ -80,10 +80,25 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   bool use_retired_ = true;      //!< The last use is known to be complete
   bool armed_ = false;           //!< The value holds kInitSignalValueOne, visible to the GPU
   bool in_device_memory_ = false;  //!< Host stores to the value need FlushSignalStores
+  //! Bit 0: a host check on any thread loaded the current use's value as 0, unlike use_retired_,
+  //! which only the owning tracker updates. The other bits count uses, so a check that loaded the
+  //! previous use can't mark this one. Holders keep the signal from being reused, so the value
+  //! stays 0 until the next use.
+  std::atomic<uint64_t> use_completion_{0};
+  static constexpr uint64_t kUseCompleteBit = 1;
+
+  //! Starts tracking a new use. Every path that hands the signal out for a use must call it:
+  //! HwQueueTracker::BeginUse for queue signals, ResetHwEvents for graph signals.
+  void StartUse() {
+    const uint64_t completion = use_completion_.load(std::memory_order_relaxed);
+    use_completion_.store((completion | kUseCompleteBit) + 1, std::memory_order_release);
+  }
 
   typedef union {
     struct {
-      uint32_t done_ : 1;       //!< True if signal is done
+      //! The current use's timing was read out or it has none to read. Says nothing about
+      //! whether the GPU finished the use; use_completion_ tracks that.
+      uint32_t timing_processed_ : 1;
       uint32_t interrupt_ : 1;  //!< True if the signal will trigger an interrupt
       uint32_t reserved_ : 30;
     };
@@ -103,7 +118,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   ProfilingSignal() : ts_(nullptr), engine_(HwQueueEngine::Compute) {
     signal_.handle = 0;
     flags_.data_ = 0;
-    flags_.done_ = true;
+    flags_.timing_processed_ = true;
     dispatch_slot_ = kNoDispatchSlot;
   }
 
@@ -587,6 +602,8 @@ class Device : public NullDevice {
            !amd::activity_prof::tool_attached.load(std::memory_order_relaxed);
   }
   virtual void DestroyHwEvent(void* hw_event) const override;
+  virtual bool AcquireHwEvents(int count, std::vector<void*>& hw_events) const override;
+  virtual void ReturnHwEvents(std::vector<void*>& hw_events) const override;
   virtual void ResetHwEvents(const std::vector<void*>& hw_events) const override;
   virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
   virtual uint8_t* CreateBarrierPacket(int num_deps) const override;
@@ -807,6 +824,9 @@ class Device : public NullDevice {
   hsa_amd_memory_pool_t device_signal_pool_{0};  //!< Pool for signals in device memory, if any
   bool graph_device_signals_ = false;  //!< Graph signals live in device_signal_pool_
   bool queue_device_signals_ = false;  //!< Queue signals live in device_signal_pool_
+  //! Armed HW events that graphs take their signal sets from and give back when destroyed
+  mutable std::vector<void*> graph_hw_events_;
+  mutable std::mutex graph_hw_events_lock_;
   bool pcie_stores_need_flush_ = true;  //!< Stores to device memory come over PCIe through HDP
   hsa_signal_t prefetch_signal_;  //!< Prefetch signal, used to explicitly prefetch SVM on device
   std::atomic<int> cache_state_;  //!< State of cache, kUnknown/kFlushedToDevice/kFlushedToSystem

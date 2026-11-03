@@ -424,7 +424,7 @@ void Timestamp::checkGpuTime(ProfilingSignal* single_signal, bool completed) {
     // Process either single signal or all signals
     auto process_signal = [&](ProfilingSignal* sig) {
       // Skip signals already processed
-      if (sig->flags_.done_) {
+      if (sig->flags_.timing_processed_) {
         return;
       }
 
@@ -519,7 +519,7 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
     ClPrint(amd::LOG_WARNING, amd::LOG_TS,
             "Invalid signal timing: start=%lu, end=%lu, signal=0x%lx",
             sig_start, sig_end, signal->signal_.handle);
-    signal->flags_.done_ = true;
+    signal->flags_.timing_processed_ = true;
     return;
   }
 
@@ -542,7 +542,7 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
         static_cast<uint64_t>(sig_end * ticksToTime_));
   }
 
-  signal->flags_.done_ = true;
+  signal->flags_.timing_processed_ = true;
 }
 
 // True while this thread is executing inside HsaAmdSignalHandler (the ROCr
@@ -1276,7 +1276,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   const bool blocking_callback = enqueHandler && ts->command().Callback() != nullptr &&
                                  ts->command().Callback()->blocking_;
   BeginUse(prof_signal, init_val, aql_slot, barrier_bit, blocking_callback);
-  prof_signal->flags_.done_ = false;
+  prof_signal->flags_.timing_processed_ = false;
   prof_signal->engine_ = engine_;
   prof_signal->ResetCachedTiming();
 
@@ -1416,9 +1416,9 @@ void VirtualGPU::HwQueueTracker::ProcessSignalTiming(ProfilingSignal* signal) {
     signal->ts_->release();
     signal->ts_ = nullptr;
   } else {
-    // No timestamp - just mark signal as done
+    // No timestamp, so no timing to read
     std::scoped_lock lock(signal->LockSignalOps());
-    signal->flags_.done_ = true;
+    signal->flags_.timing_processed_ = true;
   }
 }
 
@@ -1476,10 +1476,17 @@ void VirtualGPU::LegacySignalTracker::AcquireSlot() {
 }
 
 // ================================================================================================
-void VirtualGPU::LegacySignalTracker::BeginUse(ProfilingSignal* signal,
-                                               hsa_signal_value_t init_val,
-                                               uint64_t /*aql_slot*/, bool /*barrier_bit*/,
-                                               bool /*blocking_callback*/) {
+void VirtualGPU::HwQueueTracker::BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val,
+                                          uint64_t aql_slot, bool barrier_bit,
+                                          bool blocking_callback) {
+  signal->StartUse();
+  ArmForUse(signal, init_val, aql_slot, barrier_bit, blocking_callback);
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::ArmForUse(ProfilingSignal* signal,
+                                                hsa_signal_value_t init_val, uint64_t /*aql_slot*/,
+                                                bool /*barrier_bit*/, bool /*blocking_callback*/) {
   // Reset the signal and return
   Hsa::signal_silent_store_relaxed(signal->signal_, init_val);
 }
@@ -1515,9 +1522,9 @@ void VirtualGPU::LegacySignalTracker::ResetCurrentSignal() {
 }
 
 // ================================================================================================
-void VirtualGPU::RetiringSignalTracker::BeginUse(ProfilingSignal* signal,
-                                                 hsa_signal_value_t init_val, uint64_t aql_slot,
-                                                 bool barrier_bit, bool blocking_callback) {
+void VirtualGPU::RetiringSignalTracker::ArmForUse(ProfilingSignal* signal,
+                                                  hsa_signal_value_t init_val, uint64_t aql_slot,
+                                                  bool barrier_bit, bool blocking_callback) {
   assert(signal->armed_ && "Tracked signal handed out without arming!");
   signal->armed_ = false;
   if (init_val != kInitSignalValueOne) {
