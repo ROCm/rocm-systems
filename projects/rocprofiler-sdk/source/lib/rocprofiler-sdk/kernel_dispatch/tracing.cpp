@@ -42,7 +42,9 @@ namespace rocprofiler
 namespace kernel_dispatch
 {
 profiling_time
-get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_data)
+get_dispatch_time(const queue_info_session_t& session,
+                  packet_data_t&              packet_data,
+                  profiling_time*             raw_time)
 {
     const auto& callback_record = packet_data.callback_record;
     const auto* _rocp_agent     = agent::get_agent(callback_record.dispatch_info.agent_id);
@@ -50,8 +52,12 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
     auto        _signal         = packet_data.kernel_packet.kernel_dispatch.completion_signal;
     auto        _kern_id        = callback_record.dispatch_info.kernel_id;
 
-    return (_hsa_agent) ? get_dispatch_time(*_hsa_agent, _signal, _kern_id, session.enqueue_ts)
-                        : profiling_time{.status = HSA_STATUS_ERROR_INVALID_AGENT};
+    if(_hsa_agent)
+        return get_dispatch_time(*_hsa_agent, _signal, _kern_id, session.enqueue_ts, raw_time);
+
+    auto _profile_time = profiling_time{.status = HSA_STATUS_ERROR_INVALID_AGENT};
+    if(raw_time) *raw_time = _profile_time;
+    return _profile_time;
 }
 
 void

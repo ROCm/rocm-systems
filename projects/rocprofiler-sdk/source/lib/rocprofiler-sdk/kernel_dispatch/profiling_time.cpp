@@ -43,7 +43,8 @@ profiling_time
 get_dispatch_time(hsa_agent_t             _hsa_agent,
                   hsa_signal_t            _signal,
                   rocprofiler_kernel_id_t _kernel_id,
-                  std::optional<uint64_t> _baseline)  // NOLINT(performance-unnecessary-value-param)
+                  std::optional<uint64_t> _baseline,  // NOLINT(performance-unnecessary-value-param)
+                  profiling_time*         _raw_time)
 {
     auto ts                   = common::timestamp_ns();
     auto dispatch_time        = hsa_amd_profiling_dispatch_time_t{};
@@ -52,6 +53,7 @@ get_dispatch_time(hsa_agent_t             _hsa_agent,
 
     auto _profile_time =
         tracing::profiling_time{dispatch_time_status, dispatch_time.start, dispatch_time.end};
+    if(_raw_time) *_raw_time = _profile_time;
 
     if(_profile_time.status == HSA_STATUS_SUCCESS)
     {
