@@ -35,7 +35,7 @@ pub(crate) unsafe fn create_hardware_queue(
         event: Arc<QueueEventOwner>,
         host_page_size: usize,
         stop: Arc<AtomicBool>,
-        tracker: Arc<crate::runtime::InFlightTracker>,
+        health: Arc<crate::runtime::GenerationHealth>,
         _token: crate::runtime::InFlightToken,
     }
 
@@ -155,7 +155,7 @@ pub(crate) unsafe fn create_hardware_queue(
             event,
             host_page_size: runtime.host_page_size,
             stop: runtime.stop_workers.clone(),
-            tracker,
+            health: runtime.health.clone(),
             _token: token,
         }
     };
@@ -187,7 +187,7 @@ pub(crate) unsafe fn create_hardware_queue(
     let worker_alive = event_alive.clone();
     let worker_signal = inactive_signal.clone();
     let saved_cu_mask = cu_mask.unwrap_or_default();
-    let mut creation_guard = UnpublishedQueueGuard::new(&prepared.tracker);
+    let mut creation_guard = UnpublishedQueueGuard::new(&prepared.health);
     let native = match prepared.device.gpu().and_then(|gpu| {
         // SAFETY: The owner tuple retains all external GPU addresses
         // through native creation, including an ambiguous CREATE result.
@@ -306,18 +306,28 @@ pub(crate) unsafe fn create_hardware_queue(
             callback,
             callback_data: data,
             vm_faulted: false,
+            vm_fault_callback_state: VmFaultCallbackState::Unseen,
             vm_fault_address: 0,
             vm_fault_reason: 0,
             teardown_started: false,
         },
     );
     runtime.queue_state.released_counted_queues.remove(&public);
+    let observer_failed = runtime.system_event_failed.clone();
     let event_worker = thread::Builder::new()
         .name("rocddi-queue-events".into())
-        .spawn(move || queue_event_worker(&prepared.stop, &worker_alive, &worker_signal, public));
+        .spawn(move || {
+            queue_event_worker(
+                &prepared.stop,
+                &worker_alive,
+                &worker_signal,
+                &observer_failed,
+                public,
+            )
+        });
     let Ok(event_worker) = event_worker else {
         let Some(mut record) = runtime.queue_state.queues.remove(&public) else {
-            prepared.tracker.quarantine();
+            prepared.health.quarantine();
             return ERROR;
         };
         drop(guard);
@@ -329,7 +339,7 @@ pub(crate) unsafe fn create_hardware_queue(
         return OUT_OF_RESOURCES;
     };
     let Some(record) = runtime.queue_state.queues.get_mut(&public) else {
-        prepared.tracker.quarantine();
+        prepared.health.quarantine();
         return ERROR;
     };
     record.event_worker = Some(event_worker);
@@ -345,17 +355,17 @@ pub(crate) unsafe fn create_hardware_queue(
 /// Quarantines an HSA generation if native creation unwinds or leaves an
 /// unpublished queue whose cleanup cannot be proven complete.
 struct UnpublishedQueueGuard<'a> {
-    /// In-flight tracker retained until queue publication or rollback.
-    tracker: &'a crate::runtime::InFlightTracker,
+    /// Generation health retained until queue publication or rollback.
+    health: &'a crate::runtime::GenerationHealth,
     /// Whether dropping this guard must retire an unpublished queue.
     armed: bool,
 }
 
 impl<'a> UnpublishedQueueGuard<'a> {
-    /// Arms rollback for an unpublished queue and retains its tracker.
-    fn new(tracker: &'a crate::runtime::InFlightTracker) -> Self {
+    /// Arms rollback for an unpublished queue and retains its health record.
+    fn new(health: &'a crate::runtime::GenerationHealth) -> Self {
         Self {
-            tracker,
+            health,
             armed: true,
         }
     }
@@ -370,7 +380,7 @@ impl Drop for UnpublishedQueueGuard<'_> {
     /// Quarantines the native generation if publication never disarmed rollback.
     fn drop(&mut self) {
         if self.armed {
-            self.tracker.quarantine();
+            self.health.quarantine();
         }
     }
 }
@@ -410,31 +420,6 @@ fn abandon_unpublished_retained(
     }
 }
 
-/// Validates the requested SDMA engine against the queue transport.
-fn validated_sdma_engine(info: QueueTransport, size: u32) -> Option<u32> {
-    let engine_id = info.sdma_engine_id?;
-    (info.ring_size_bytes == u64::from(size)
-        && info.ring_host_address != 0
-        && info.index_unit_bytes == 1
-        && !info.read_index_wraps
-        && info.read_index_width == QueueAccessWidth::Bits64
-        && info.write_index_width == QueueAccessWidth::Bits64
-        && info.doorbell_width == QueueAccessWidth::Bits64
-        && info.read_index_host_address != 0
-        && info.read_index_host_address % std::mem::align_of::<AtomicU64>() == 0
-        && info.write_index_host_address != 0
-        && info.write_index_host_address % std::mem::align_of::<AtomicU64>() == 0
-        && info.read_index_host_address != info.write_index_host_address
-        && info.read_index_device_address != 0
-        && info.write_index_device_address != 0
-        && info.doorbell_host_address != 0
-        && info.doorbell_host_address % std::mem::align_of::<u64>() == 0
-        && info
-            .doorbell_device_address
-            .is_some_and(|address| address != 0))
-    .then_some(engine_id)
-}
-
 /// # Safety
 /// `queue` addresses writable output storage. The caller serializes native
 /// queue publication and destruction with all producers.
@@ -447,7 +432,7 @@ pub(crate) unsafe fn create_sdma_queue(
     queue: *mut *mut HsaQueue,
     created_log: &mut Option<(u64, usize, u32)>,
 ) -> Status {
-    let (generation, id, device, tracker, _token) = {
+    let (generation, id, device, health, _token) = {
         let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
@@ -483,7 +468,7 @@ pub(crate) unsafe fn create_sdma_queue(
             generation,
             id,
             runtime.gpus[index].device.clone(),
-            tracker,
+            runtime.health.clone(),
             token,
         )
     };
@@ -494,7 +479,7 @@ pub(crate) unsafe fn create_sdma_queue(
         header: [0; std::mem::size_of::<HsaQueue>()],
     });
     let mut doorbell = Box::new(AmdSignal::doorbell(0, 0));
-    let mut creation_guard = UnpublishedQueueGuard::new(&tracker);
+    let mut creation_guard = UnpublishedQueueGuard::new(&health);
     let native = match device.gpu().and_then(|gpu| {
         // SAFETY: SDMA creation passes no external GPU addresses. The queue
         // remains unpublished until its transport has been validated.
@@ -523,7 +508,7 @@ pub(crate) unsafe fn create_sdma_queue(
         }
     };
     let info = native.info();
-    let Some(engine_id) = validated_sdma_engine(info, size_bytes) else {
+    let Some(engine_id) = info.sdma_engine_id else {
         return abandon_unpublished_tracked(
             native,
             (),

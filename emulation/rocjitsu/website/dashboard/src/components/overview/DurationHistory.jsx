@@ -4,7 +4,7 @@ import { Box, Link, MenuItem, Stack, ToggleButton, ToggleButtonGroup, Typography
 import Chart from '../shared/Chart';
 import SectionCard from '../shared/SectionCard';
 import CatalogWorkloads from './CatalogWorkloads';
-import { escapeHtml, formatFullDate, formatShortDate, shortSha } from '../../utils/formatters';
+import { escapeHtml, formatDuration, formatFullDate, formatShortDate, shortSha } from '../../utils/formatters';
 import { configurationColor as colorFor } from '../../utils/chartColors';
 import { historyRanges } from '../../config/historyRanges';
 import { visuallyHiddenStyles } from '../../theme/styles';
@@ -109,7 +109,7 @@ export default function DurationHistory({ projection, catalogs, onRangeChange, o
         if (!slot?.run || !valid.length) return '';
         return `<b>Commit ${escapeHtml(shortSha(slot.run))}</b><br/>${escapeHtml(formatFullDate(commitTimestampFor(slot.run)))}<br/>` + valid.map((row) => {
           const point = row.points[index];
-          return `${escapeHtml(row.target)} ${escapeHtml(row.mode)} · <b>${point.speedup.toFixed(3)}×</b> · ${point.durationSeconds}s · ref ${row.reference.durationSeconds}s`;
+          return `${escapeHtml(row.target)} ${escapeHtml(row.mode)} · <b>${point.speedup.toFixed(3)}×</b> · ${formatDuration(point.durationSeconds)} · ref ${formatDuration(row.reference.durationSeconds)}`;
         }).join('<br/>');
       } },
     xAxis: { type: 'value',

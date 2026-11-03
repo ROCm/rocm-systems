@@ -1026,18 +1026,22 @@ static hsa_status_t SelectInterruptSignal(uint32_t num_consumers, const hsa_agen
   bool use_default = (attributes & HSA_AMD_SIGNAL_IPC) ||
       (attributes & HSA_AMD_SIGNAL_AMD_GPU_ONLY) || (!core::g_use_interrupt_wait);
 
-  if ((!use_default) && (num_consumers != 0)) {
+  // A duplicated consumer list is invalid even when the signal will not be an
+  // interrupt signal (WSL, HSA_ENABLE_INTERRUPT=0, IPC, or GPU-only).
+  if (num_consumers != 0) {
     IS_BAD_PTR(consumers);
 
-    // Check for duplicates in consumers.
     std::set<hsa_agent_t, AgentHandleCompare> consumer_set(consumers, consumers + num_consumers);
     if (consumer_set.size() != num_consumers) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
-    use_default = true;
-    for (const core::Agent* cpu_agent : core::Runtime::runtime_singleton_->cpu_agents()) {
-      use_default &= (consumer_set.find(cpu_agent->public_handle()) == consumer_set.end());
+    // An interrupt signal is only useful if some consumer is a CPU.
+    if (!use_default) {
+      use_default = true;
+      for (const core::Agent* cpu_agent : core::Runtime::runtime_singleton_->cpu_agents()) {
+        use_default &= (consumer_set.find(cpu_agent->public_handle()) == consumer_set.end());
+      }
     }
   }
 
@@ -1101,8 +1105,12 @@ hsa_status_t hsa_amd_signal_batch_create(uint32_t count,
     return static_cast<hsa_status_t>(HSA_STATUS_ERROR_INVALID_MEMORY_POOL);
   }
 
-  const bool host_access_via_hdp =
-      device_pool && static_cast<const AMD::GpuAgent*>(region->owner())->PcieStoresNeedFlush();
+  const auto* owner_gpu =
+      device_pool ? static_cast<const AMD::GpuAgent*>(region->owner()) : nullptr;
+  const bool host_access_via_hdp = device_pool && owner_gpu->PcieStoresNeedFlush();
+  // The host reaches a discrete GPU's memory across PCIe or XGMI, uncached, whether or not its
+  // stores need an HDP flush. An APU's device pool is in memory the host shares and caches.
+  const bool host_access_across_link = device_pool && !owner_gpu->properties().Integrated;
 
   bool use_interrupt;
   hsa_status_t status =
@@ -1124,7 +1132,8 @@ hsa_status_t hsa_amd_signal_batch_create(uint32_t count,
 
   core::SignalBatch* signal_batch;
   status = core::SignalBatch::Create(count, initial_values, use_interrupt, region, access_agents,
-                                     host_access_via_hdp, &signal_batch, signals);
+                                     host_access_via_hdp, host_access_across_link, &signal_batch,
+                                     signals);
   if (status != HSA_STATUS_SUCCESS) return status;
 
   *batch = core::SignalBatch::Convert(signal_batch);
@@ -1828,7 +1837,8 @@ hsa_status_t hsa_amd_register_deallocation_callback(void* ptr,
 
   if (status == HSA_STATUS_SUCCESS) {
     if (info.type == HSA_EXT_POINTER_TYPE_HSA_VMEM ||
-        info.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
+        info.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
+        info.type == HSA_EXT_POINTER_TYPE_SVM) {
       // Route to vmem registry (vmem or reserved addresses)
       hsa_status_t vmem_status = g_vmem_registry.register_dealloc_callback(ptr, callback, user_data);
       if (vmem_status != HSA_STATUS_ERROR_INVALID_ALLOCATION) {
@@ -1861,7 +1871,8 @@ hsa_status_t hsa_amd_deregister_deallocation_callback(void* ptr,
 
   if (status == HSA_STATUS_SUCCESS &&
       (info.type == HSA_EXT_POINTER_TYPE_HSA_VMEM ||
-       info.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR)) {
+       info.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
+       info.type == HSA_EXT_POINTER_TYPE_SVM)) {
     // Route to vmem registry (vmem or reserved addresses)
     hsa_status_t vmem_status = g_vmem_registry.deregister_dealloc_callback(ptr, callback);
     if (vmem_status != HSA_STATUS_ERROR_INVALID_ALLOCATION) {

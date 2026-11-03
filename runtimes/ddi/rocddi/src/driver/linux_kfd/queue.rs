@@ -23,6 +23,7 @@ use crate::device::gpu::queue::{
 use crate::memory::AllocationDesc;
 use crate::memory::DeviceAccess;
 use crate::session::DriverContextLifetime;
+use crate::topology::{GpuScratchEncoding, GpuTargetProfile};
 
 use crate::{Error, ErrorKind};
 
@@ -917,11 +918,7 @@ impl Request {
         let properties = native.queues;
         // These generations share eight-byte doorbells and the pointer
         // protocol. Context and debugger backing use reported wave geometry.
-        if native.gpu_id == 0
-            || (!matches!(properties.gfx_target, 90008 | 90010 | 90402 | 90500)
-                && !(100_100..=120_001).contains(&properties.gfx_target)
-                && properties.gfx_target != 120_500)
-        {
+        if native.gpu_id == 0 || !properties.target_profile.supports_aql() {
             return Err(error(
                 ErrorKind::Unsupported,
                 "KFD queue backing is unsupported on this GPU target",
@@ -993,7 +990,7 @@ impl Request {
             QueueParameters::Pm4 | QueueParameters::Sdma => QueueRingMemory::System,
         };
         if ring_memory == QueueRingMemory::HostVisibleLocal
-            && (properties.gfx_target != 120_001
+            && (properties.target_profile != GpuTargetProfile::Gfx1201
                 || native.public_memory_bytes < u64::from(ring_size).div_ceil(page) * page)
         {
             return Err(error(
@@ -1052,14 +1049,13 @@ fn validate_scratch(
     let Some(scratch) = scratch else {
         return Ok(None);
     };
-    let (alignment, wave_size_limit, waves_per_engine) = match properties.gfx_target {
-        90008 | 90010 | 90402 | 90500 if properties.wavefront_size == 64 => {
-            (GFX9_SCRATCH_ALIGNMENT, 0x1fff, false)
-        }
-        120_000 | 120_001 | 120_500 if properties.wavefront_size == 32 => {
-            (SCRATCH_ALIGNMENT, 0x3_ffff, true)
-        }
-        _ => {
+    let (alignment, wave_size_limit, waves_per_engine) = match properties
+        .target_profile
+        .scratch_encoding(properties.wavefront_size)
+    {
+        Some(GpuScratchEncoding::Gfx9) => (GFX9_SCRATCH_ALIGNMENT, 0x1fff, false),
+        Some(GpuScratchEncoding::Gfx12) => (SCRATCH_ALIGNMENT, 0x3_ffff, true),
+        None => {
             return Err(error(
                 ErrorKind::Unsupported,
                 "fixed AQL scratch requires a qualified GFX9 or GFX12 target",
@@ -1185,15 +1181,18 @@ fn put_u64(bytes: &mut [u8], offset: usize, value: u64) {
     bytes[offset..offset + 8].copy_from_slice(&value.to_ne_bytes());
 }
 
-fn put_aql_scratch(bytes: &mut [u8], gfx_target: u32, scratch: Option<ScratchControl>) {
-    if matches!(gfx_target, 90008 | 90010 | 90402 | 90500) {
-        let resource = offset_of!(AqlControlLayout, scratch_resource_descriptor);
-        put_u32(bytes, resource + 4, 1 << 31);
-        put_u32(bytes, resource + 12, GFX9_SCRATCH_RESOURCE_WORD3);
-    } else if matches!(gfx_target, 120_000 | 120_001 | 120_500) {
-        let resource = offset_of!(AqlControlLayout, scratch_resource_descriptor);
-        put_u32(bytes, resource + 4, 1 << 30);
-        put_u32(bytes, resource + 12, GFX12_SCRATCH_RESOURCE_WORD3);
+fn put_aql_scratch(bytes: &mut [u8], profile: GpuTargetProfile, scratch: Option<ScratchControl>) {
+    let resource = offset_of!(AqlControlLayout, scratch_resource_descriptor);
+    match profile {
+        GpuTargetProfile::Gfx9 => {
+            put_u32(bytes, resource + 4, 1 << 31);
+            put_u32(bytes, resource + 12, GFX9_SCRATCH_RESOURCE_WORD3);
+        }
+        GpuTargetProfile::Gfx1200 | GpuTargetProfile::Gfx1201 | GpuTargetProfile::Gfx1250 => {
+            put_u32(bytes, resource + 4, 1 << 30);
+            put_u32(bytes, resource + 12, GFX12_SCRATCH_RESOURCE_WORD3);
+        }
+        GpuTargetProfile::Other | GpuTargetProfile::Gfx10 | GpuTargetProfile::Gfx11 => {}
     }
     if let Some(scratch) = scratch {
         put_u32(
@@ -1308,7 +1307,7 @@ fn initialize_aql_control(
             signal,
         );
     }
-    put_aql_scratch(&mut bytes, aql.properties.gfx_target, aql.scratch);
+    put_aql_scratch(&mut bytes, aql.properties.target_profile, aql.scratch);
     storage.write_bytes(0, &bytes)
 }
 
@@ -1365,7 +1364,10 @@ fn compute_storage(properties: sysfs::KfdQueueProperties) -> Result<ComputeStora
 fn pm4_control(native: &sysfs::KfdNode) -> Option<Pm4Control> {
     let properties = native.queues;
     if !cfg!(target_arch = "x86_64")
-        || !matches!(properties.gfx_target, 120_000 | 120_001 | 120_500)
+        || !matches!(
+            properties.target_profile,
+            GpuTargetProfile::Gfx1200 | GpuTargetProfile::Gfx1201 | GpuTargetProfile::Gfx1250
+        )
         || properties.compute_queues == 0
         || properties.wavefront_size != 32
         || properties.xcc_count == 0
@@ -1392,9 +1394,7 @@ fn pm4_control(native: &sysfs::KfdNode) -> Option<Pm4Control> {
 }
 
 pub(super) fn supports_aql(native: &sysfs::KfdNode) -> bool {
-    (matches!(native.queues.gfx_target, 90008 | 90010 | 90402 | 90500)
-        || (100_100..=120_001).contains(&native.queues.gfx_target)
-        || native.queues.gfx_target == 120_500)
+    native.queues.target_profile.supports_aql()
         && native.queues.compute_queues != 0
         && compute_storage(native.queues).is_ok()
 }

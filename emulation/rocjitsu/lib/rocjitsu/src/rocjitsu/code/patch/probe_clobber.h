@@ -43,10 +43,14 @@ struct ProbeClobberSummary {
 
 /// @brief Decode @p callable's copied body and summarize what it clobbers.
 ///
+/// @p wave_size is the wave size of the kernels that call the probe, 32 or 64.
+/// A Wave32 compare writes one SGPR of the pair its encoding names.
+///
 /// Returns nullopt (and sets @p error_out) only on a structural decode failure
 /// e.g. a missing decoder for the arch, an instruction that fails to decode,
 /// or body that runs off its end. A successful decode always yields a summary
 [[nodiscard]] std::optional<ProbeClobberSummary>
-build_probe_clobber_summary(const ProbeCallable &callable, std::string *error_out = nullptr);
+build_probe_clobber_summary(const ProbeCallable &callable, uint8_t wave_size,
+                            std::string *error_out = nullptr);
 
 } // namespace rocjitsu
