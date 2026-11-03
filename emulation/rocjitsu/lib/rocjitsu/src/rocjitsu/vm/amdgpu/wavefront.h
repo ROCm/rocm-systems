@@ -487,6 +487,10 @@ public:
   /// Short for conditional stack pointer, used by fork/join instructions
   static constexpr uint32_t CSP_SHIFT = 29;
   static constexpr uint32_t CSP_MASK = 7u << CSP_SHIFT;
+  /// MODE.FP_ROUND field (bits 3:0) and MODE.FP_DENORM field (bits 7:4).
+  static constexpr uint32_t FP_ROUND_MASK = 0xFu;
+  static constexpr uint32_t FP_DENORM_SHIFT = 4;
+  static constexpr uint32_t FP_DENORM_MASK = 0xFu << FP_DENORM_SHIFT;
 
   /// STATUS.HALT. Bit 13 on every modelled architecture -- see StatusReg::HALT
   /// in each arch's isa.h, which all spell it member<13, 13>.
@@ -506,10 +510,24 @@ public:
     set_mode_raw((mode_raw_ & ~CSP_MASK) | (csp << CSP_SHIFT));
   }
 
+  /// @brief Set MODE.FP_ROUND (bits 3:0) from a packed 4-bit value,
+  /// leaving every other MODE bit unchanged.
+  /// @param val Packed rounding modes; only the lowest 4 bits are used.
+  void set_fp_round_mode(uint32_t val) {
+    set_mode_raw((mode_raw_ & ~FP_ROUND_MASK) | (val & FP_ROUND_MASK));
+  }
+
+  /// @brief Set MODE.FP_DENORM (bits 7:4) from a packed 4-bit value,
+  /// leaving every other MODE bit unchanged.
+  /// @param val Packed denorm modes; only the lowest 4 bits are used.
+  void set_fp_denorm_mode(uint32_t val) {
+    set_mode_raw((mode_raw_ & ~FP_DENORM_MASK) | ((val << FP_DENORM_SHIFT) & FP_DENORM_MASK));
+  }
+
   uint32_t fp_round_mode_f32() const { return mode_raw_ & 0x3u; }
   uint32_t fp_round_mode_f16_f64() const { return (mode_raw_ >> 2) & 0x3u; }
-  uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> 4) & 0x3u; }
-  uint32_t fp_denorm_mode_f16_f64() const { return (mode_raw_ >> 6) & 0x3u; }
+  uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> FP_DENORM_SHIFT) & 0x3u; }
+  uint32_t fp_denorm_mode_f16_f64() const { return (mode_raw_ >> (FP_DENORM_SHIFT + 2)) & 0x3u; }
   uint32_t gpr_idx_offset() const { return m0() & 0xFF; }
   uint32_t gpr_idx_mode() const { return (m0() >> 12) & 0xF; }
 
