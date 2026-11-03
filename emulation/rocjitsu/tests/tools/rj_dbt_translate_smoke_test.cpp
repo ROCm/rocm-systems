@@ -504,7 +504,8 @@ TEST(RjDbtTranslateRewriteDischarge, ReportsSyntheticResidualThroughCli) {
 }
 
 TEST(RjDbtTranslate, Smoke) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_smoke_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_smoke_"));
   const std::filesystem::path temp_path(temp_dir.path());
 
   const auto input = temp_path / "smoke_gfx950.co";
@@ -545,7 +546,8 @@ TEST(RjDbtTranslate, Smoke) {
 }
 
 TEST(RjDbtTranslate, EmptyTextSameArchWarnsAndCopiesInput) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_empty_text_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_empty_text_"));
   const std::filesystem::path temp_path(temp_dir.path());
 
   const auto input = temp_path / "data_only_gfx1250.co";
@@ -577,7 +579,8 @@ TEST(RjDbtTranslate, EmptyTextSameArchWarnsAndCopiesInput) {
 }
 
 TEST(RjDbtTranslate, DescriptorlessExecutableWarnsAndCopiesInput) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_descriptorless_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_descriptorless_"));
   const std::filesystem::path temp_path(temp_dir.path());
 
   const auto input = temp_path / "descriptorless_gfx1250.co";
@@ -610,7 +613,8 @@ TEST(RjDbtTranslate, DescriptorlessExecutableWarnsAndCopiesInput) {
 }
 
 TEST(RjDbtTranslate, RequiresRevisionsOnlyForGfx1250) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_revision_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_revision_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const auto input = temp_path / "smoke.co";
   const auto output = temp_path / "stdout.txt";
@@ -727,7 +731,8 @@ TEST(RjDbtTranslate, AppliesGfx1250RevisionContractToDefaultCdna5OutputMachine) 
 
 TEST(RjDecodeBenchmark, PreservesConcreteGfx1251Identity) {
   ASSERT_FALSE(g_decode_benchmark.empty());
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_decode_benchmark_gfx1251_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_decode_benchmark_gfx1251_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const auto input = temp_path / "gfx1251.co";
   const auto output = temp_path / "stdout.txt";
@@ -771,7 +776,8 @@ TEST(RjDecodeBenchmark, PreservesConcreteGfx1251Identity) {
 }
 
 TEST(RjDbtTranslate, RejectsStandaloneConcreteTargetMismatch) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_target_mismatch_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_target_mismatch_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const auto input = temp_path / "input.co";
   const auto output = temp_path / "stdout.txt";
@@ -803,7 +809,8 @@ TEST(RjDbtTranslate, RejectsStandaloneConcreteTargetMismatch) {
 }
 
 TEST(RjDbtTranslate, ReportsGfx1251OnlyInstructionWithConcreteDecoders) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_gfx1251_report_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_gfx1251_report_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const auto input = temp_path / "gfx1251.co";
   const auto output = temp_path / "stdout.txt";
@@ -842,7 +849,8 @@ TEST(RjDbtTranslate, ReportsGfx1251OnlyInstructionWithConcreteDecoders) {
 }
 
 TEST(RjDbtTranslate, VerifiesGfx1250B0ToA0Idempotence) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_idempotence_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_idempotence_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const std::filesystem::path input = temp_path / "smoke_gfx1250.co";
   const std::filesystem::path output = temp_path / "stdout.txt";
@@ -877,7 +885,8 @@ TEST(RjDbtTranslate, VerifiesGfx1250B0ToA0Idempotence) {
 }
 
 TEST(RjDbtTranslate, VerifiesGfx1250IdempotenceAndRewriteDischarge) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_rewrite_discharge_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_rewrite_discharge_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const std::filesystem::path input = temp_path / "smoke_gfx1250.co";
   const std::filesystem::path output = temp_path / "stdout.txt";
@@ -958,7 +967,8 @@ TEST(RjDbtTranslate, RejectsRewriteDischargeWithListCodeObjects) {
 }
 
 TEST(RjDbtTranslate, VerifiesNonGfx1250SameArchitectureTranslation) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_non_gfx_idempotence_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_non_gfx_idempotence_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const std::filesystem::path input = temp_path / "smoke_gfx950.co";
   const std::filesystem::path output = temp_path / "stdout.txt";
@@ -988,7 +998,8 @@ TEST(RjDbtTranslate, VerifiesNonGfx1250SameArchitectureTranslation) {
 }
 
 TEST(RjDbtTranslate, RejectsInvalidIdempotenceOptionCombinations) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_idempotence_options_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_idempotence_options_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const std::filesystem::path input = temp_path / "smoke_gfx950.co";
   const std::filesystem::path output = temp_path / "stdout.txt";
@@ -1031,7 +1042,8 @@ TEST(RjDbtTranslate, RejectsInvalidIdempotenceOptionCombinations) {
 }
 
 TEST(RjDbtTranslate, VerifiesGfx1250ClusterLoadIdempotence) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_cluster_load_idempotence_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_cluster_load_idempotence_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const std::filesystem::path input = temp_path / "cluster_load_gfx1250.co";
   const std::filesystem::path output = temp_path / "stdout.txt";
@@ -1071,7 +1083,8 @@ TEST(RjDbtTranslate, VerifiesGfx1250ClusterLoadIdempotence) {
 // legalization-classified rule. The MODE separation rule is the only one shaped this way, so
 // without this the label and the partition can drift while the suite stays green.
 TEST(RjDbtTranslate, ReportsUnclassifiedSemanticExpansionInTheDiff) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_unclassified_semantic_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_unclassified_semantic_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const std::filesystem::path input = temp_path / "mode_setreg_gfx1250.co";
   const std::filesystem::path output = temp_path / "stdout.txt";

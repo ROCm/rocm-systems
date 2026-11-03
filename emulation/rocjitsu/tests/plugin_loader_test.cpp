@@ -22,6 +22,7 @@ namespace {
 class PluginLoaderTest : public ::testing::Test {
 protected:
   void SetUp() override {
+    ASSERT_TRUE(trace_.initialize("rocjitsu-plugin-loader-"));
     ASSERT_EQ(setenv("ROCJITSU_PLUGIN_TEST_TRACE", trace_.path().c_str(), 1), 0);
   }
 
@@ -37,7 +38,7 @@ protected:
     return rocjitsu::PluginLoader::load_from_config(config, group, PLUGIN_LOADER_FIXTURE_DIR);
   }
 
-  rocjitsu::test::ScopedTempFile trace_{"rocjitsu-plugin-loader-"};
+  rocjitsu::test::ScopedTempFile trace_;
 };
 
 TEST_F(PluginLoaderTest, LoadsPluginAndDispatchesLifecycle) {
