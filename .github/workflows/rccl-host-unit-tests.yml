@@ -36,7 +36,10 @@ jobs:
       - name: Checkout RCCL CI scripts and tests
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: projects/rccl
+          # The MADEngine script tests also read the workflows they drive.
+          sparse-checkout: |
+            projects/rccl
+            .github/workflows
       - name: Run CI planner and driver regression tests
         run: |
           python3 -m venv "$RUNNER_TEMP/rccl-ci-tests-venv"
