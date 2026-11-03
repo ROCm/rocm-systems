@@ -3,6 +3,8 @@
 This target runs arbitrary and generated instruction streams through the
 wavefront and compute-unit execution path. Register state and mapped data
 memory come from the input, and a fixed instruction budget bounds every run.
+Every process-scoped GWS resource starts armed with a zero count, matching a
+zero-valued GWS INIT, so arbitrary streams begin from defined GWS state.
 
 An input has three parts:
 

@@ -358,7 +358,11 @@ struct PlatformCreateInfo
                                                         ///  DevDriver RgpServer.
             uint32 dontOpenPrimaryNode            :  1; ///< No primary node is needed (Linux only)
             uint32 disableDevDriver               :  1; ///< If no DevDriverMgr should be created with this Platform.
-            uint32 reserved                       : 23; ///< Reserved for future use.
+            uint32 optInForOmniCache              :  1; ///< The process is requesting to opt into OmniCache. If set
+                                                        ///  and the KMD reports OmniCache as enabled system-wide, PAL
+                                                        ///  will request OmniCache for the process' GPU memory
+                                                        ///  allocations.
+            uint32 reserved                       : 22; ///< Reserved for future use.
         };
         uint32 u32All;                                  ///< Flags packed as 32-bit uint.
     } flags;                                            ///< Platform-wide creation flags.

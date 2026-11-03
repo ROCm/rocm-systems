@@ -42,7 +42,7 @@ void expect_declared_footprint(rj_code_arch_t arch) {
   callable.abi =
       *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, kLogRecordProbeArgDwords);
   std::string err;
-  const auto summary = build_probe_clobber_summary(callable, &err);
+  const auto summary = build_probe_clobber_summary(callable, /*wave_size=*/64, &err);
   ASSERT_TRUE(summary.has_value()) << err;
   const RegisterSet &clobbers = summary->ordinary_clobbers;
   for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)

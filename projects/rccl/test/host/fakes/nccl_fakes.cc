@@ -92,6 +92,12 @@ void ncclDebugLog(ncclDebugLogLevel /*level*/,
     std::fputc('\n', stderr);
 }
 
+// src/debug.cc, same owner as the logging symbols above. A no-op rather than a
+// recorder: the name is cosmetic, so nothing a microtest asserts can depend on it.
+// Weak, like the pthread_t overload below, so a suite that wants to observe the
+// name (bootstrap_micro_fakes.cc) can define its own copy and still link.
+__attribute__((weak)) void ncclSetThreadName(std::thread& /*thread*/, const char* /*fmt*/, ...) {}
+
 // src/debug.cc's pthread_t overload; the hook gets the name as production would set it. Default: no-op,
 // like production at its NCCL_SET_THREAD_NAME=0 default. Weak so a suite with its own copy still links.
 static void DefaultSetThreadName(pthread_t, const char*) {}
@@ -105,16 +111,7 @@ __attribute__((weak)) void ncclSetThreadName(pthread_t thread, const char* fmt, 
     g_ncclSetThreadName(thread, name);
 }
 
-// Every param sits at its default. The NCCL_PARAM bodies that p2p-test.cc redirects through g_loadParam bypass this.
-int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
-  if (cache) {
-    *cache = deftVal;
-  }
-  if (noCache) {
-    *noCache = 0;
-  }
-  return deftVal;
-}
+// ncclLoadParam itself is owned solely by env_fakes.cc -- see the comment there.
 
 // Default returns deftVal verbatim -- preserves the pre-hook contract that
 // every param sits at its compile-time default.

@@ -23,7 +23,7 @@ using KD = amdhsa::kernel_descriptor_t;
 } // namespace
 
 uint32_t dbi_entry_storage_floor(KernelBlockScope blocks, const KD &desc, rj_code_arch_t arch) {
-  return std::max(explicit_ordinary_sgpr_bound(blocks),
+  return std::max(explicit_ordinary_sgpr_bound(blocks, kernel_wavefront_size(arch, desc)),
                   kernel_descriptor_initial_sgpr_count(arch, desc));
 }
 
