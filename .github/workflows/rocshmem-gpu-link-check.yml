@@ -1,0 +1,54 @@
+name: rocSHMEM GPU link comparison
+on:
+  push:
+    branches: [codex/rocshmem-gpu-link-check-01a19d9e]
+permissions:
+  contents: read
+concurrency:
+  group: rocshmem-gpu-link-check-01a19d9e
+  cancel-in-progress: false
+jobs:
+  compare:
+    runs-on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+    timeout-minutes: 360
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: >-
+        --ipc host --group-add video --device /dev/kfd --device /dev/dri
+        --group-add 110 --group-add 993 --group-add 992
+        --ulimit memlock=-1:-1 --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings --user 0:0
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/experiments/rocshmem-gpu-link
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          repository: ROCm/rocm-systems
+          ref: bccdf92e49f4a2cc25825090bc61d19a75193c51
+          path: rocshmem-source
+          persist-credentials: false
+          sparse-checkout: |
+            projects/rocshmem
+            shared
+            cmake
+      - name: Install build prerequisites
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-venv python3-pip cmake ninja-build build-essential pkg-config libnuma-dev libdrm-dev libibverbs-dev
+      - name: Build and compare on GPU
+        run: python3 .github/experiments/rocshmem-gpu-link/compare.py
+      - name: Upload logs and measurements
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rocshmem-gpu-link-${{ github.run_id }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            rocshmem-gpu-results/**/*.json
+            rocshmem-gpu-results/**/*.log
+            rocshmem-gpu-results/**/*.txt
+            rocshmem-gpu-results/**/*.csv
+            rocshmem-gpu-results/**/*.png
