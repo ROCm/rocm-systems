@@ -38,5 +38,9 @@ typedef enum rocprofiler_rocshmem_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_ROCSHMEM_API_ID_putmem_on_stream,
     ROCPROFILER_ROCSHMEM_API_ID_putmem_signal_on_stream,
     ROCPROFILER_ROCSHMEM_API_ID_signal_wait_until_on_stream,
+#if ROCSHMEM_API_TRACE_VERSION_PATCH >= 8
+    ROCPROFILER_ROCSHMEM_API_ID_signal_add_on_stream,
+    ROCPROFILER_ROCSHMEM_API_ID_signal_set_on_stream,
+#endif
     ROCPROFILER_ROCSHMEM_API_ID_LAST,
 } rocprofiler_rocshmem_api_id_t;

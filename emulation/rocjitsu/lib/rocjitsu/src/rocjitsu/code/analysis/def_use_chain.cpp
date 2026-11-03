@@ -117,6 +117,8 @@ InstDefUse::InstDefUse(const Instruction &inst, uint8_t wave_size,
   defs |= implicit_defs_set.ordinary_only();
 
   for (int i = 0; i < inst.num_src_operands(); ++i) {
+    if (!inst.tracks_explicit_source(i))
+      continue;
     const auto *op = inst.src_operand(i);
     if (op == nullptr)
       continue;

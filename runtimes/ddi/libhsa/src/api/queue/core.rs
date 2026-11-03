@@ -934,10 +934,11 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
             } else {
                 None
             };
-            let in_flight = match InFlightGeneration::enter(generation, &runtime.inflight) {
-                Ok(in_flight) => in_flight,
-                Err(status) => return status,
-            };
+            let in_flight =
+                match InFlightGeneration::enter(generation, &runtime.inflight, &runtime.health) {
+                    Ok(in_flight) => in_flight,
+                    Err(status) => return status,
+                };
             if let Some(agent) = cooperative_agent {
                 if runtime
                     .queue_state
