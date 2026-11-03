@@ -536,7 +536,7 @@ public:
     process_.map_pages(kSignalVa, signal_.data(), signal_.size() * sizeof(signal_[0]));
     process_.map_pages(kPollVa, poll_.data(), poll_.size() * sizeof(poll_[0]));
 
-    ASSERT_NO_FATAL_FAILURE(register_queue(kQueueStateVa));
+    register_queue(kQueueStateVa);
   }
 
   void register_queue(uint64_t read_ptr_va) {
@@ -678,7 +678,7 @@ public:
   void set_read_ptr_va(uint64_t va) {
     (void)sim_.soc->queue_registry().unregister_queue(queue_handle_);
     queue_handle_ = {};
-    ASSERT_NO_FATAL_FAILURE(register_queue(va));
+    register_queue(va);
   }
 
 private:
