@@ -4,6 +4,8 @@
 #include "writer_impl.hpp"
 #include "storage_impl.hpp"
 
+#include "schema/writer_support.hpp"
+
 #include <memory>
 #include <stdexcept>
 
@@ -64,7 +66,15 @@ writer_t::impl::create_writer_context(const std::unique_ptr<storage_t>& storage)
 
     ctx->validator = std::make_shared<insert_validator>(ctx->registry);
 
-    ctx->backend->initialize_schema(storage->get_storage_version());
+    // 3.0.2 and later have columns this writer does not insert. Fail here
+    // instead of writing a partial row.
+    const auto schema_version = storage->get_storage_version();
+    if(!schema::writer_supports_schema(schema_version))
+    {
+        throw std::invalid_argument(schema::unsupported_writer_reason(schema_version));
+    }
+
+    ctx->backend->initialize_schema(schema_version);
 
     return ctx;
 }

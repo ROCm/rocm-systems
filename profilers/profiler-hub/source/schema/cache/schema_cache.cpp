@@ -108,8 +108,7 @@ prepare_sql(std::string_view sql)
 }
 
 // Reads one name, quoted or not. Accepts `, ", and ' quotes.
-// Takes the text and the index to start at. pos moves past the name. Returns the name, or
-// empty.
+// Takes the text and the index to start at. pos moves past the name. Returns the name, or empty.
 [[nodiscard]] std::string
 read_name(std::string_view text, std::size_t& pos)
 {
@@ -152,8 +151,7 @@ drop_uuid_placeholder(std::string name)
 }
 
 // Finds the ')' that closes the '(' at open_at. Parentheses inside quotes do not count.
-// Takes the text and the index of '('. Returns that index, or npos if the paren never
-// closes.
+// Takes the text and the index of '('. Returns that index, or npos if the paren never closes.
 [[nodiscard]] std::size_t
 closing_paren(std::string_view text, std::size_t open_at)
 {
@@ -175,8 +173,7 @@ closing_paren(std::string_view text, std::size_t open_at)
 }
 
 // Reads the values from CHECK (... IN (...)).
-// Takes one column definition. Returns CPU, GPU for that example, or nothing if there is
-// no IN list.
+// Takes one column definition. Returns CPU, GPU for that example, or nothing if there is no IN list.
 [[nodiscard]] std::vector<std::string>
 read_allowed_values(std::string_view column_sql)
 {
@@ -206,9 +203,8 @@ read_allowed_values(std::string_view column_sql)
     return values;
 }
 
-// True for a table constraint rather than a column. Covers FOREIGN KEY, UNIQUE, and a
-// bare CHECK. Takes one piece of the column list. Returns false when the piece is a
-// column.
+// True for a table constraint rather than a column. Covers FOREIGN KEY, UNIQUE, and a bare CHECK.
+// Takes one piece of the column list. Returns false when the piece is a column.
 [[nodiscard]] bool
 is_constraint(std::string_view clause)
 {
@@ -351,8 +347,7 @@ schema_model::find_table(std::string_view table) const
 }
 
 // Parsed schema for one version. The embedded SQL is parsed on the first call.
-// Takes a version such as 3.0.5. Returns that model. Throws if the library has no such
-// version.
+// Takes a version such as 3.0.5. Returns that model. Throws if the library has no such version.
 const schema_model&
 schema_cache::get(profiler_hub::version_t version)
 {

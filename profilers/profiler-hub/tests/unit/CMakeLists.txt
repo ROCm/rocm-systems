@@ -13,6 +13,7 @@ set(UNIT_TEST_SOURCES
     reader_test.cpp
     sqlite_backend_impl_test.cpp
     schema_validation_test.cpp
+    schema_301_usage_test.cpp
 )
 
 add_executable(profiler-hub_unit_tests ${UNIT_TEST_SOURCES})

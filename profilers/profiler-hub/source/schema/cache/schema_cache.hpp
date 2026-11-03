@@ -55,8 +55,7 @@ class schema_cache
 {
 public:
     // Parsed schema for one version. The embedded SQL is parsed on the first call.
-    // Takes a version such as 3.0.5. Returns that model. Throws if the library has no
-    // such version.
+    // Takes a version such as 3.0.5. Returns that model. Throws if the library has no such version.
     [[nodiscard]] const schema_model& get(profiler_hub::version_t version);
 
     // How many versions have been parsed.

@@ -328,23 +328,49 @@ protected:
 
 TEST_F(pmc_event_write_test, skips_insert_when_validation_fails)
 {
-    auto writer = make_writer(version_t{ 3, 0, 5 });
+    auto writer = make_writer(version_t{ 3, 0, 1 });
 
     pmc_event_input_t input;
-    input.pmc_id = 1;
-    input.xcc    = 1;
+    input.pmc_id    = 1;
+    input.sample_id = 100;
 
     writer_types::pmc_event_data_t event;
     event.value = 1.5;
     const writer_types::pmc_info_unique_id_t pmc_id{ "occupancy", std::nullopt };
 
-    // The counter is not registered. insert_pmc_event_data would throw, so a
-    // successful return means the writer was not called.
+    // sample_id is not a 3.0.1 column. The counter is not registered, so
+    // insert_pmc_event_data would throw if the writer were called.
     const auto result = schema_validator::write_pmc_event(
-        *writer, input, version_t{ 3, 0, 5 }, event, pmc_id);
+        *writer, input, version_t{ 3, 0, 1 }, event, pmc_id);
 
     EXPECT_FALSE(result.success());
-    ASSERT_NE(find_error(result, "xcc"), nullptr);
+    ASSERT_NE(find_error(result, "sample_id"), nullptr);
+
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+    EXPECT_EQ(count_pmc_events(), 0);
+}
+
+TEST_F(pmc_event_write_test, skips_insert_when_writer_does_not_support_version)
+{
+    auto writer = make_writer(version_t{ 3, 0, 1 });
+    register_counter(*writer);
+
+    pmc_event_input_t input;
+    input.pmc_id = 1;
+
+    writer_types::pmc_event_data_t event;
+    event.value = 1.5;
+    const writer_types::pmc_info_unique_id_t pmc_id{ "occupancy", std::nullopt };
+
+    const auto result = schema_validator::write_pmc_event(
+        *writer, input, version_t{ 3, 0, 2 }, event, pmc_id);
+
+    EXPECT_FALSE(result.success());
+    const auto message = result.format();
+    EXPECT_NE(message.find("No writer is supported"), std::string::npos) << message;
+    EXPECT_NE(message.find("3.0.2"), std::string::npos) << message;
+    EXPECT_NE(message.find("docs/schema/3.0.2_usage.md"), std::string::npos) << message;
 
     writer->flush_in_memory_data_to_disk();
     writer.reset();
@@ -353,12 +379,12 @@ TEST_F(pmc_event_write_test, skips_insert_when_validation_fails)
 
 TEST_F(pmc_event_write_test, inserts_when_validation_succeeds)
 {
-    auto writer = make_writer(version_t{ 3, 0, 3 });
+    auto writer = make_writer(version_t{ 3, 0, 1 });
     register_counter(*writer);
 
     pmc_event_input_t input;
-    input.pmc_id    = 1;
-    input.sample_id = 100;
+    input.pmc_id = 1;
+    input.value  = 1.5;
 
     writer_types::pmc_event_data_t event;
     event.value            = 1.5;
@@ -366,7 +392,7 @@ TEST_F(pmc_event_write_test, inserts_when_validation_succeeds)
     const writer_types::pmc_info_unique_id_t pmc_id{ "occupancy", std::nullopt };
 
     const auto result = schema_validator::write_pmc_event(
-        *writer, input, version_t{ 3, 0, 3 }, event, pmc_id);
+        *writer, input, version_t{ 3, 0, 1 }, event, pmc_id);
 
     EXPECT_TRUE(result.success()) << result.format();
 

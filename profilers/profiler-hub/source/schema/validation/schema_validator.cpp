@@ -4,6 +4,7 @@
 #include "schema_validator.hpp"
 
 #include "../cache/schema_cache.hpp"
+#include "../writer_support.hpp"
 
 #include <stdexcept>
 #include <string>
@@ -181,6 +182,23 @@ write_pmc_event(profiler_hub::writer_t&                                 writer,
                 const profiler_hub::writer_types::pmc_event_data_t&     event,
                 const profiler_hub::writer_types::pmc_info_unique_id_t& pmc_unique_id)
 {
+    // The shipped writer only inserts 3.0.0 and 3.0.1. Newer schemas error
+    // here, before any row is written.
+    if(!writer_supports_schema(version))
+    {
+        validation_result result;
+        result.ok             = false;
+        result.schema_version = version.to_string();
+        result.object         = "PMCEvent";
+
+        validation_error error;
+        error.object        = result.object;
+        error.reason        = unsupported_writer_reason(version);
+        error.documentation = documentation_link(version);
+        result.errors.push_back(std::move(error));
+        return result;
+    }
+
     // Existing writer is unchanged. This only decides whether to call it.
     auto result = validate(input, version);
     if(!result.success())
