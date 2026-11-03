@@ -64,7 +64,7 @@ struct sample
 namespace rocprofsys::trace_cache::type_traits
 {
 
-// xcp_stats is cached as raw bytes: it is plain arrays of uint16_t, without padding.
+// xcp_stats is cached as raw bytes: it is plain arrays of std::uint16_t, without padding.
 static_assert(std::has_unique_object_representations_v<
                   backends::amd_smi::gpu::metrics::xcp_metrics>,
               "xcp_metrics is cached as raw bytes and must not have padding");

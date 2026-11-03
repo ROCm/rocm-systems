@@ -114,8 +114,8 @@ concept has_type_identifier = is_enum_class_v<TypeIdentifierEnum> && requires {
 };
 
 template <typename T, typename SampleType>
-concept sample_handler = requires(T& t, const SampleType& sample) {
-    { t.handle_sample(sample) } -> std::same_as<void>;
+concept sample_handler = requires(T& handler, const SampleType& sample) {
+    { handler.handle_sample(sample) } -> std::same_as<void>;
 };
 
 template <typename T, typename... SampleTypes>

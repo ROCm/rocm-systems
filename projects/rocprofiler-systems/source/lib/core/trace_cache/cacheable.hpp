@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -32,19 +33,19 @@ constexpr auto k_percentage = "%";
 
 using buffer_array_t = std::array<std::uint8_t, k_buffer_size>;
 
-const auto k_tmp_directory = std::string{ "/tmp/" };
+constexpr std::string_view k_tmp_directory = "/tmp/";
 
 namespace utility
 {
 
 const auto get_buffered_storage_filename = [](const int& ppid, const int& pid) {
-    return std::string{ k_tmp_directory + "buffered_storage_" + std::to_string(ppid) +
-                        "_" + std::to_string(pid) + ".bin" };
+    return std::string{ k_tmp_directory }.append(
+        "buffered_storage_" + std::to_string(ppid) + "_" + std::to_string(pid) + ".bin");
 };
 
 const auto get_metadata_filepath = [](const int& ppid, const int& pid) {
-    return std::string{ k_tmp_directory + "metadata_" + std::to_string(ppid) + "_" +
-                        std::to_string(pid) + ".json" };
+    return std::string{ k_tmp_directory }.append("metadata_" + std::to_string(ppid) +
+                                                 "_" + std::to_string(pid) + ".json");
 };
 
 template <typename Type>

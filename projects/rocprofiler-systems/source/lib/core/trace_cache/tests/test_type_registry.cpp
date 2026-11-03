@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "core/trace_cache/archive.hpp"
 #include "core/trace_cache/type_registry.hpp"
 #include "mocked_types.hpp"
 #include <cstdint>
@@ -37,6 +38,16 @@ dispatch_round_trip(const Registry& registry, test_type_identifier_t type_id,
         }
     });
     return received;
+}
+
+template <typename Registry>
+void
+dispatch_counting_calls(const Registry& registry, test_type_identifier_t type_id,
+                        int& calls)
+{
+    std::uint8_t  dummy_data = 0;
+    std::uint8_t* data       = &dummy_data;
+    registry.dispatch(type_id, data, [&](const auto&) { ++calls; });
 }
 }  // namespace
 
@@ -84,12 +95,10 @@ TEST_F(type_registry_test, test_dispatch_calls_visitor_once)
 
 TEST_F(type_registry_test, test_dispatch_unknown_id_throws_without_calling_visitor)
 {
-    std::uint8_t  dummy_data = 0;
-    std::uint8_t* data       = &dummy_data;
-    int           calls      = 0;
+    int calls = 0;
 
-    EXPECT_THROW(type_registry.dispatch(test_type_identifier_t::fragmented_space, data,
-                                        [&](const auto&) { ++calls; }),
+    EXPECT_THROW(dispatch_counting_calls(type_registry,
+                                         test_type_identifier_t::fragmented_space, calls),
                  std::runtime_error);
     EXPECT_EQ(calls, 0);
 }

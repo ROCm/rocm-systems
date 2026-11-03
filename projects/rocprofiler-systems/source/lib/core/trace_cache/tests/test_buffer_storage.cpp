@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/buffer_storage.hpp"
+#include "core/trace_cache/cacheable.hpp"
 #include "mocked_types.hpp"
 #include <cstdint>
 

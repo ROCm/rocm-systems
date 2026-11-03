@@ -7,6 +7,7 @@
 #include "core/config.hpp"
 #include "core/node_info.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/tracing.hpp"
 #include <cstdint>

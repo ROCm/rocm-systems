@@ -587,8 +587,8 @@ TEST_F(cacheable_test, parse_value_empty_byte_array)
 }
 TEST_F(cacheable_test, parse_value_vector_skips_a_trailing_partial_element)
 {
-    // The byte count is one whole uint32_t plus one stray byte. Only whole elements are
-    // read; the cursor still moves past the whole count.
+    // The byte count is one whole std::uint32_t plus one stray byte. Only whole elements
+    // are read; the cursor still moves past the whole count.
     constexpr std::uint64_t k_byte_count = sizeof(std::uint32_t) + 1;
     constexpr std::uint32_t k_whole      = 0xDEADBEEF;
     constexpr std::uint8_t  k_stray_byte = 0xAA;

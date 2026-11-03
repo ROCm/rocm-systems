@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <numeric>
+#include <stdexcept>
 #include <vector>
 
 class sample_processor_t

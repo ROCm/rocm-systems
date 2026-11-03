@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// NOLINTBEGIN(readability-magic-numbers)
+// NOLINTBEGIN(readability-magic-numbers, readability-identifier-naming)
 // Test values in this file are arbitrary and chosen for coverage, not domain significance
 
 #include "core/trace_cache/archive.hpp"
@@ -348,4 +348,4 @@ TEST(archive, nested_struct_serializes_itself)
 
 }  // namespace rocprofsys::trace_cache
 
-// NOLINTEND(readability-magic-numbers)
+// NOLINTEND(readability-magic-numbers, readability-identifier-naming)

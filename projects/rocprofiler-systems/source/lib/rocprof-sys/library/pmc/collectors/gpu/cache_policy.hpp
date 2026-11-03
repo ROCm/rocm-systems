@@ -5,6 +5,7 @@
 
 #include "core/config.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/pmc/collectors/gpu/sample.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"

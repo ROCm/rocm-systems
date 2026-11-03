@@ -5,6 +5,7 @@
 #include "core/agent_manager.hpp"
 #include "core/demangler.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include <cstdint>
