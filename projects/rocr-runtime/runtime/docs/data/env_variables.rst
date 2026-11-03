@@ -89,10 +89,10 @@
         | 1: Enable
 
     * - | ``HSA_OVERRIDE_CPU_AFFINITY_DEBUG``
-        | Controls whether ROCm helper threads inherit the parent process's CPU affinity mask.
+        | Controls the CPU affinity of ROCm helper threads.
       - ``1``
-      - | 0: Enable inheritance. Helper threads use the parent process's core affinity mask, which should be set with enough cores for all threads.
-        | 1: Disable inheritance. Helper threads spawn on all available cores, ignoring the parent's affinity settings, which may affect performance in certain environments.
+      - | 0: Helper threads inherit the exact CPU affinity mask of the thread that creates them, which should include enough cores for all threads.
+        | 1: Helper threads may run on every CPU of the NUMA node(s) that the creating thread is allowed to run on. If the creating thread is unrestricted, helper threads may run on all CPUs. This keeps helper threads in the same NUMA domain(s) as an application that binds itself to specific cores.
 
     * - | ``HSA_ENABLE_DEBUG``
         | Enables additional debug information and validation in the runtime.
