@@ -127,3 +127,9 @@ rocprofiler_add_unit_test(
     ENVIRONMENT
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     )
+
+# COMGR logs invalid executable data at INFO, which is expected in this negative test.
+set_property(
+    TEST unit.codeobj_library.metadata_of_unparsable_bytes_is_empty
+    APPEND
+    PROPERTY ENVIRONMENT "ROCPROFILER_LOG_LEVEL=warning")
