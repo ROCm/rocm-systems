@@ -165,8 +165,8 @@ summary names them when a size has more than one:
 | `wall ms`, `busBW` | Time those collectives ran, and their mean bus bandwidth |
 | `rxPause` | Switch paused our transmit, as % of wall time (fabric side) |
 | `txPause` | Our NIC paused the switch, as % of wall time (host side) |
-| `loss` | Out-of-sequence drops, sequence-error NAKs, ACK timeouts |
-| `rnr` | Receiver-not-ready events seen on this NIC: out of receive buffers here, or RNR NAKs from a peer |
+| `oos/nak/to` | Out-of-sequence packets / sequence-error NAKs / ACK timeouts, each on its own; `-` where the NIC does not give one |
+| `nobuf/rnr` | Times this NIC had no receive buffer posted / RNR NAKs it got from a peer |
 | `ecn%` | ECN-marked packets as % of packets received |
 | `cnp/s` | CNPs sent plus received per second of wall time |
 | `link%`, `rccl%` | How busy the link was, and how much of that was this job's RCCL traffic |
@@ -179,15 +179,18 @@ Counters are sampled, not continuous, so most values are a range: `a-b`
 means at least `a`, at most `b`. A finding is **yes** when its lower bound
 crosses the threshold, and **maybe** when only the upper bound does.
 
-Findings:
+Findings are observations: what a counter showed, not yet a cause.
 
 | Finding | Meaning |
 |---|---|
 | `FABRIC-CONGESTION` | The switch paused our transmit. Marked `(echo?)` when a NIC in the same collective pushed back, since a receiver that stops can make the switch pause its senders |
 | `HOST-BACKPRESSURE` | Our NIC paused the switch: this host could not take data in |
-| `FABRIC-LOSS` | Drops, NAKs or timeouts on the wire |
-| `HOST-RNR` | This host ran out of receive buffers |
+| `OUT-OF-SEQ` | This NIC received packets out of sequence (receiver side) |
+| `SEQ-NAK` | This NIC got sequence-error NAKs back (sender side) |
+| `ACK-TIMEOUT` | This NIC's sends timed out waiting for an ACK (sender side) |
+| `RX-NO-BUFFER` | This NIC had no receive buffer posted: this host's receiver |
 | `PEER-RNR` | A host this rank sends to was not ready to receive. The counter sits on the sender, so the faulty host is one of its peers |
+| `CQ-ERROR` | RCCL saw completion errors in these collectives (from accl, no telemetry needed) |
 | `LINK-SHARED` | The link was busy, mostly with traffic that is not this job's RCCL |
 | `CONGESTION-MARKS` | ECN marks or CNPs above their thresholds |
 | `CLEAN` | Every counter below threshold. The time went elsewhere; accl's own classification is shown |
@@ -204,8 +207,149 @@ receiver paused about as long as the senders were paused (or above the
 threshold); `FABRIC?` means it paused far less, so only part of it can be
 backpressure.
 
-**Notes** at the bottom explain anything that weakens the numbers, such as
-overlapping collectives or counters that did not refresh.
+Findings the summary does not lead with, proven or possible, are listed after
+`also:`, so the order never hides one. A drop diagnosis that points at a host
+leads right after pushback.
+
+**Drop diagnosis** comes next; see below. **Notes** at the bottom explain
+anything that weakens the numbers, such as overlapping collectives or
+counters that did not refresh.
+
+### Drop diagnosis
+
+For each collective and size the report weighs the delivery and recovery
+signals against what is known about the endpoints, and puts the result in a
+bucket with a confidence: `HOST_LIKELY`, `FABRIC_LIKELY`, `MIXED` or
+`INCONCLUSIVE` (`NONE` when no signal was seen and every one was measured).
+These are likelihoods from counters, not the failing component. Seeing these
+events also does not show that a collective was slow: pass `--baseline
+<accl dir of a healthy run>` to compare busBW against a matched run.
+
+**Signals.** Each is shown on its own, never added up: one lost packet can
+show as an out-of-sequence packet at its receiver, a sequence-error NAK at its
+sender and a retransmission, so a sum is not a count of lost packets. None of
+them alone proves a fabric fault. A timeout also follows a lost ACK on the
+way back, a long delay, or an endpoint that stopped answering.
+
+| Signal | mlx5 | Thor2 (`bnxt_re`) | AINIC (`ionic`) | Counted at |
+|---|---|---|---|---|
+| OUT-OF-SEQ | `out_of_sequence` | `res_oos_drop_count` | `resp_rx_outouf_seq` | receiver |
+| SEQ-NAK | `packet_seq_err` | `seq_err_naks_rcvd` | `req_rx_pkt_seq_err` | sender |
+| ACK-TIMEOUT | `local_ack_timeout_err` | `local_ack_timeout_err` if the driver has it, else `to_retransmits` (retransmits after a timeout, another unit; the report says so where it was used) | `tx_rdma_ack_timeout` | sender |
+| RX-NO-BUFFER | `out_of_buffer` | `rx_out_of_buffer` | `resp_rx_outof_buf` | receiver (this host) |
+| PEER-RNR | `rnr_nak_retry_err` (RNR NAKs) | `rnr_naks_rcvd` (RNR NAKs) | `req_rx_rnr_retry_err` (by its name, retry errors; unit not verified) | sender (about a peer) |
+| CQ-ERROR | RCCL completion errors from accl, per collective; overlapping windows can count one twice | | | rank |
+
+Thor2 names differ between `bnxt_re` versions; telemetry reads the first name
+the driver has, so a column can come from either. A counter a NIC does not
+give is "not measured", never 0, and the report never lets one column stand
+in for another. A rank whose accl records name NICs that telemetry did not
+sample is blind, not clean.
+
+"In window" means the lower bound is above 0: the count fell inside the
+collectives, given each counter's measured refresh lag. "Possibly in window"
+means only the upper bound is: the count may have fallen just before or after.
+A counter whose last sample came less than its refresh lag after the
+collectives may not have shown their events yet, so its upper bound there is
+open: "not measured", never 0, however short that tail. This holds for every counter, so on NICs whose
+counters refresh about once a second (Thor2) the last message size of a run
+is often `INCONCLUSIVE`; let the job run a few seconds past it. A counter that
+never moved takes the slowest refresh of the NIC's byte counters, which can
+only widen its ranges.
+Being in the window is overlap in time, not proof of cause.
+
+**Endpoint evidence.** Each is "fine" only where it was measured, covered by
+samples, and zero (pause: under the threshold, a proven small pause is shown).
+No error reported is not the same as healthy.
+
+| Evidence | From | Pressure means |
+|---|---|---|
+| Receive buffers | `out_of_buffer` on every NIC | that host's receiver had no buffer posted |
+| Peer readiness | RNR counter on every NIC | some peer of this sender was not ready (which one is not known) |
+| Backpressure | PFC tx pause on RCCL's priority | that host could not take data in. Unknown with PFC off on RCCL's priority (an overloaded receiver drops packets then, and port discards are not sampled) or with the priority unknown |
+| NIC progress | port byte counters moved both ways inside the collectives | (never pressure) unknown when they did not provably move. RCCL's own byte counts are posted work, not bytes on the wire |
+
+The report also shows the share of accl's proxy step time spent waiting on
+the GPU, as context only: several steps are in flight at once, so it is not
+wall time, and healthy runs show about half. Over 80% on some rank is listed
+as another explanation for slowness, never as drop evidence.
+
+With PFC off on RCCL's priority (RCCL's default traffic class on the OCI and
+TensorWave clusters), or the priority unknown (AINIC without `--pfc-prio`),
+backpressure is always unknown. Endpoints then never count as healthy: ACK
+timeouts alone stay `INCONCLUSIVE`, and `FABRIC_LIKELY` is at most low
+(medium with congestion marks).
+
+**Rules.** "Receiver not ready" is receive buffers or peer readiness under
+pressure; those counters are themselves drop and recovery events, and they are
+the only host cause the rules use. Pause is flow control: on a lossless
+priority it kept the paused receiver from dropping. So backpressure never
+makes a drop diagnosis or a host verdict; it only stops the endpoints from
+counting as healthy, and is listed as another explanation.
+
+| Signals in window | Endpoints | Bucket |
+|---|---|---|
+| none (or only CQ-ERROR) | receiver not ready | `HOST_LIKELY` (medium; low if a symptom is only possibly in the window or not measured) |
+| none, some only possibly in window | | `INCONCLUSIVE` |
+| none, a signal not measured somewhere | | `INCONCLUSIVE` |
+| none, everything measured | | `NONE` (high; medium when backpressure or NIC progress is unknown) |
+| only CQ-ERROR | | `INCONCLUSIVE`: completion errors have local causes too, and RCCL does not record which |
+| yes | receiver not ready, and congestion (rx pause with no pushback, ECN or CNPs) | `MIXED` (medium) |
+| yes | receiver not ready, no congestion | `HOST_LIKELY` (low) |
+| only ACK-TIMEOUT | healthy | `FABRIC_LIKELY` (low; medium with congestion) |
+| only ACK-TIMEOUT | not established | `INCONCLUSIVE` |
+| yes | receiver possibly not ready | `INCONCLUSIVE` (leaning `MIXED`) |
+| yes | no receive-buffer or RNR counter on any NIC | `INCONCLUSIVE` (leaning `FABRIC_LIKELY`) |
+| yes | healthy | `FABRIC_LIKELY` (medium; high with congestion) |
+| yes | no receiver pressure seen, health not established | `FABRIC_LIKELY` (low; medium with congestion) |
+
+Then each kind of data-quality issue lowers the confidence by one step: the
+accl file lost data, a counter reset during the collectives, a gap in the
+samples, drop counters that refresh later than a fifth of the collectives'
+time, overlapping collectives or communicators, a NIC driven by several
+processes of the job, or a NIC where less than 80% of the traffic was this
+job's RCCL. Below low the bucket is `INCONCLUSIVE`, and the rules' answer is
+kept as "leaning". For `NONE` only lost accl data and counter resets count:
+a drop counter that stayed at 0 is 0 whoever else shared the NIC, and its
+refresh lag is already in its bounds. The signals stay on show either way. A rank with no
+telemetry, or missing accl files, leaves its endpoints unknown.
+
+Each diagnosis prints the signals with their bounds, the endpoint evidence
+(including what is unknown), what was not measured, why, what else could
+explain it, the data-quality issues and the baseline comparison:
+
+From the OCI cluster (mlx5, RCCL on a priority without PFC), with incast
+traffic from a third node into one of the two hosts:
+
+```text
+  AllReduce 64M: FABRIC_LIKELY (low)
+    signals       OUT-OF-SEQ, packets received out of sequence (receiver side): in window 170034 at rank 8 (useocpm2m-097-042 mlx5_0), 170857 at rank 9 (useocpm2m-097-042 mlx5_2), 25216 at rank 10 (useocpm2m-097-042 mlx5_3) and 5 more
+                  SEQ-NAK, sequence-error NAKs received (sender side): in window 1835 at rank 0 (useocpm2m-097-030 mlx5_0), 1972 at rank 1 (useocpm2m-097-030 mlx5_2), 7490 at rank 2 (useocpm2m-097-030 mlx5_3) and 5 more
+                  ACK-TIMEOUT, ACK timeouts (sender side): none on any NIC
+                  these are separate counters: one lost packet can show in several of them, so they are not added up into a count of lost packets
+    endpoints     receive buffers: no receiver ran out of buffers
+                  peer readiness: no sender got RNR NAKs
+                  backpressure: unknown at rank 0 (useocpm2m-097-030 mlx5_0), rank 1 (useocpm2m-097-030 mlx5_2), rank 2 (useocpm2m-097-030 mlx5_3) and 13 more: PFC off on RCCL's priority: an overloaded receiver drops instead, and port discards are not sampled
+                  NIC progress: every port moved bytes both ways inside the collectives
+                  accl proxy waiting on the GPU, share of its step time (context only): send 28-52%, receive 1-5% across ranks
+    why           delivery symptoms (OUT-OF-SEQ, SEQ-NAK) with no endpoint pressure seen, but endpoint health not established (backpressure); fabric congestion seen (CONGESTION-MARKS at rank 10 (useocpm2m-097-042 mlx5_3), CONGESTION-MARKS at rank 11 (useocpm2m-097-042 mlx5_4), CONGESTION-MARKS at rank 12 (useocpm2m-097-042 mlx5_5) and 6 more)
+    could also be an endpoint fault these counters do not show (port discards, PCIe, NIC firmware)
+                  with PFC off on RCCL's priority, a receiver host that cannot keep up drops packets too, and those port discards are not sampled
+    data quality  only 70% of the traffic at rank 2 (useocpm2m-097-030 mlx5_3) was this job's RCCL
+    slowness      no matched baseline (same collective, size, algorithm, protocol and rank count); seeing these events does not by itself show the collective was slow
+```
+
+What these counters cannot tell, and would need new instrumentation:
+
+- Which peer or path a signal belongs to. Proxy steps carry no NIC or QP, and
+  the counters are per port.
+- Retries that ran out (`max_retry_exceeded`), the extra retransmit counters
+  (`roce_adp_retrans*` on mlx5) and the discard counters (AINIC
+  `hw_rx_dropped`, Thor2 `rx_discards`). They are read at start and exit but
+  not sampled during the run. mlx5 port discards (`rx_discards_phy`), where an
+  overloaded host drops packets on a lossy priority, are not read at all.
+- Per-NIC receive bytes on a multi-NIC connection. RCCL counts them all on the
+  first NIC.
 
 ### Why CNPs are a rate, not a percent
 

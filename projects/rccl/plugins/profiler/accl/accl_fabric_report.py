@@ -18,17 +18,26 @@ the time those windows spent outside the collectives is a lower bound. A
 finding is "yes" when its lower bound crosses the threshold and "maybe" when
 only its upper bound does.
 
-Findings, per NIC:
+Observations, per NIC (what a counter showed; not yet a diagnosis):
   FABRIC-CONGESTION  the switch paused our transmit (PFC frames received)
   HOST-BACKPRESSURE  our NIC paused the switch: this host could not take data in
-  FABRIC-LOSS        out-of-sequence drops, sequence-error NAKs, ACK timeouts
-  HOST-RNR           this host ran out of receive buffers
-  PEER-RNR           a host this rank sends to was not ready (RNR NAKs seen here)
+  OUT-OF-SEQ         packets this NIC received out of sequence (receiver side)
+  SEQ-NAK            sequence-error NAKs this NIC got back (sender side)
+  ACK-TIMEOUT        this NIC's sends timed out waiting for an ACK (sender side)
+  RX-NO-BUFFER       this NIC had no receive buffer posted (this host's receiver)
+  PEER-RNR           receiver-not-ready NAKs this NIC got: one of its peers was not ready
+  CQ-ERROR           RCCL saw completion errors in these collectives (from accl)
   LINK-SHARED        the link was busy and mostly with traffic that is not RCCL
   CONGESTION-MARKS   ECN-marked share of received packets, or CNPs per second, above a threshold
 Rx pause is not proof of a fabric fault: a receiver that pushes back makes
 the switch pause the senders. The per-collective summary therefore blames a
 host first when any of its NICs paused the switch.
+
+Drop diagnosis, per collective and size: the delivery/recovery signals
+(OUT-OF-SEQ, SEQ-NAK, ACK-TIMEOUT, completion errors) are weighed against
+endpoint evidence (receive buffers, peer readiness, backpressure, NIC
+progress) and land in HOST_LIKELY, FABRIC_LIKELY, MIXED or INCONCLUSIVE with
+a confidence; see diagnose_drops() for the rules.
 
 Usage:
     python3 accl_fabric_report.py report --accl DIR --telemetry DIR
@@ -52,14 +61,21 @@ PRIO_KEYS = ("pfc_rx_pause_us", "pfc_tx_pause_us", "pfc_rx_frames", "pfc_tx_fram
              "prio_rx_bytes", "prio_tx_bytes")
 SCALAR_KEYS = ("tx_bytes", "rx_bytes", "nic_tx_bytes", "nic_rx_bytes", "nic_tx_packets",
                "nic_rx_packets", "ecn_marked_pkts", "cnp_sent", "cnp_rcvd")
-# Sampled error counters, by what they point at.
-LOSS_FABRIC = ("oos_drop_count", "seq_err_naks_rcvd", "local_ack_timeout_err")
+# Delivery and recovery symptoms: (telemetry column, observation, what it counts).
+# Each is kept apart. One lost packet can show up as an out-of-sequence packet
+# at its receiver, a sequence-error NAK at its sender and a retransmission, so
+# their sum is not a count of lost packets. None of them alone proves a fabric
+# fault: a timeout also follows a lost ACK, a long delay, or an endpoint that
+# stopped answering.
+SYMPTOMS = (("oos_drop_count", "OUT-OF-SEQ", "packets received out of sequence (receiver side)"),
+            ("seq_err_naks_rcvd", "SEQ-NAK", "sequence-error NAKs received (sender side)"),
+            ("local_ack_timeout_err", "ACK-TIMEOUT", "ACK timeouts (sender side)"))
 # Receiver not ready, by where the counter sits. out_of_buffer counts on the
 # receiver that had no buffer posted: this host. rnr_retry_err counts on the
-# sender that kept getting RNR NAKs: the not-ready receiver is one of its peers.
+# sender that got RNR NAKs back: the not-ready receiver is one of its peers.
 RNR_LOCAL = ("out_of_buffer",)
 RNR_PEER = ("rnr_retry_err",)
-LOSS_HOST = RNR_LOCAL + RNR_PEER
+CONFIDENCE = ("high", "medium", "low")
 INF = math.inf
 PAUSE_QUANTA_BITS = 65535 * 512   # longest pause one PFC frame can ask for, in bit times
 COVERAGE = "telemetry samples do not cover all of these collectives"
@@ -177,8 +193,10 @@ def _accl_incomplete(summary: Optional[dict]) -> str:
 class Series:
     """A cumulative counter sampled over time; linear between samples."""
 
-    def __init__(self, ts: List[int], vals: List[float], resets: int = 0):
+    def __init__(self, ts: List[int], vals: List[float], resets: int = 0,
+                 reset_ts: Optional[List[int]] = None):
         self.ts, self.vals, self.resets = ts, vals, resets
+        self.reset_ts = reset_ts or []
 
     def at(self, t: float) -> float:
         i = bisect.bisect_left(self.ts, t)
@@ -234,6 +252,9 @@ class Device:
     series: SeriesMap = field(default_factory=SeriesMap)
     qos: Dict = field(default_factory=dict)   # DCB settings + RCCL's traffic class (telemetry "qos")
     rx_merged: bool = False   # RCCL rx bytes pooled across a multi-NIC connection: not this NIC's own
+    # The local_ack_timeout_err column was read from to_retransmits (retransmits
+    # after a timeout), the driver having no local_ack_timeout_err.
+    ack_retransmits: bool = False
 
 
 @dataclass
@@ -264,16 +285,17 @@ def _series(samples, key, idx: Optional[int] = None) -> Optional[Series]:
     later_max = [-math.inf] * len(pts)
     for i in range(len(pts) - 2, -1, -1):
         later_max[i] = max(later_max[i + 1], pts[i + 1][1])
-    ts, vals, offset, resets = [], [], 0.0, 0
+    ts, vals, offset, resets, reset_ts = [], [], 0.0, 0, []
     for i, (t, v) in enumerate(pts):
         if vals and v + offset < vals[-1]:
             raw_last = vals[-1] - offset
             if i == len(pts) - 1 or later_max[i] >= raw_last:
                 continue   # bad read: the counter comes back
             offset, resets = vals[-1], resets + 1
+            reset_ts.append(t)
         ts.append(t)
         vals.append(v + offset)
-    return Series(ts, vals, resets) if len(ts) >= 2 else None
+    return Series(ts, vals, resets, reset_ts) if len(ts) >= 2 else None
 
 
 def load_telemetry(path: str, wanted: Optional[Dict[Tuple[str, int], set]] = None
@@ -310,10 +332,20 @@ def load_telemetry(path: str, wanted: Optional[Dict[Tuple[str, int], set]] = Non
             m = meta.get(dev_id, {})
             tel.devices[dev_id] = Device(dev_id, m.get("roce_device") or samples[0].get("roce_device", ""),
                                          m.get("hw_type", ""), float(m.get("link_gbps") or 0),
-                                         SeriesMap(cols), m.get("qos") or {}, bool(m.get("rx_bytes_merged")))
+                                         SeriesMap(cols), m.get("qos") or {}, bool(m.get("rx_bytes_merged")),
+                                         _ack_from_retransmits(m.get("hw_counters")))
         by_dev.clear()
         out[(tel.host, tel.pid)] = tel
     return out
+
+
+def _ack_from_retransmits(hwc) -> bool:
+    """Whether the sampled ACK-timeout column came from to_retransmits: the
+    start/exit readings show which of the two names the driver has."""
+    if not isinstance(hwc, dict):
+        return False
+    own, alt = hwc.get("local_ack_timeout_err"), hwc.get("to_retransmits")
+    return (own is None or own < 0) and alt is not None and alt >= 0
 
 
 # ============================================================================
@@ -329,6 +361,19 @@ def union(intervals: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
         else:
             merged.append([a, b])
     return [(a, b) for a, b in merged]
+
+
+def _overlap_spans(x: List[Tuple[int, int]], y: List[Tuple[int, int]]) -> float:
+    """Total overlap of two sorted, disjoint span lists, in one pass."""
+    i = j = 0
+    tot = 0.0
+    while i < len(x) and j < len(y):
+        tot += max(0.0, min(x[i][1], y[j][1]) - max(x[i][0], y[j][0]))
+        if x[i][1] < y[j][1]:
+            i += 1
+        else:
+            j += 1
+    return tot
 
 
 def _overlap(spans: List[Tuple[int, int]], a: float, b: float) -> float:
@@ -399,7 +444,11 @@ def bound(ser: Optional[Series], spans: List[Tuple[int, int]], pad_us: float,
             gaps = (b - lo) - busy_lo_b
             inner += max(0.0, dv - gaps) if duration else dv
     sampled = _overlap(spans, ser.ts[0], ser.ts[-1])
-    uncovered = max(0.0, busy - sampled)
+    # A counter that shows events pad_us late had not yet shown, by its last
+    # sample, what happened in the pad_us before it: that time is not covered,
+    # however short, as events there could all still be unseen.
+    tail = _overlap(spans, ser.ts[-1] - pad_us, ser.ts[-1]) if pad_us else 0.0
+    uncovered = max(0.0, busy - sampled) + tail
     fill = inside / window if window > 0 else 0.0
     lb = inner
     if duration:
@@ -407,7 +456,7 @@ def bound(ser: Optional[Series], spans: List[Tuple[int, int]], pad_us: float,
             lb = max(lb, total - (window - inside))
         ub = min(total, sampled) + uncovered
     else:
-        ub = total if uncovered <= 0.01 * busy else INF
+        ub = total if uncovered <= 0.01 * busy and tail == 0 else INF
     return Bound(lb, ub, fill)
 
 
@@ -659,9 +708,20 @@ class NicStats:
     tx_paused: bool = False          # this NIC provably paused the switch at least once
     rx_pause: Optional[Tuple[float, float]] = None   # (lb, ub) in unit
     tx_pause: Optional[Tuple[float, float]] = None
-    loss: Optional[Tuple[float, float]] = None       # fabric-loss events (lb, ub)
+    # Delivery symptoms by telemetry column: (lb, ub), INF ub when the samples
+    # do not cover the collectives; a column the NIC does not give is absent.
+    symptoms: Dict[str, Tuple[float, float]] = field(default_factory=dict)
     rnr: Optional[Tuple[float, float]] = None        # this NIC had no receive buffer (lb, ub)
     rnr_peer: Optional[Tuple[float, float]] = None   # RNR NAKs this NIC got from a peer (lb, ub)
+    # Physical bytes the port moved inside the collectives, (tx lb, rx lb); None
+    # without port counters. RCCL's own byte counts are posted work, not wire.
+    port_lb: Optional[Tuple[float, float]] = None
+    resets: List[str] = field(default_factory=list)  # counters used here that reset in the run
+    sample_gap_us: float = 0.0                       # time in sampler stalls (gaps over 3 intervals) in the spans
+    lag_us: float = 0.0                              # slowest refresh lag among the drop counters
+    sharers: int = 1                                 # processes of this job driving this NIC
+    device_id: int = -1
+    ack_retransmits: bool = False                    # see Device.ack_retransmits
     ecn_pct: Optional[Tuple[float, float]] = None    # ECN-marked % of received packets (lb, ub)
     cnp_ps: Optional[Tuple[float, float]] = None     # CNPs sent + received per second (lb, ub)
     link_pct: Optional[float] = None                 # busier direction, % of link speed
@@ -698,6 +758,19 @@ class GroupResult:
     proto: str = ""
     # All bytes received per collective, every NIC: a lower bound (see analyze).
     rx_per_coll_lb: Optional[float] = None
+    n_ranks: int = 0                 # ranks in the communicator, per accl
+    other_overlap_us: float = 0.0    # time other collectives of this process (other groups) also ran
+    # Share of the proxy's step time spent waiting for this rank's GPU to produce
+    # data (send side) and to take it (receive side, with GDR flush). accl sums
+    # step times and several steps are in flight at once, so these are shares
+    # of step time, not of wall time; the network time they are set against
+    # covers both sides.
+    gpu_send_wait_pct: float = 0.0
+    gpu_recv_wait_pct: float = 0.0
+    telemetry: bool = False          # this process wrote telemetry samples
+    net_named: bool = False          # accl names NICs these collectives used
+    # RCCL completion errors in these collectives' network windows, all NICs (accl).
+    cq_errors: int = 0
 
 
 def _level(lb: float, ub: float, thr: float, strict: bool = False) -> Optional[str]:
@@ -759,13 +832,26 @@ def analyze(recs: List[CollRecord], tels: Dict[Tuple[str, int], Telemetry],
             # lower bound: one completion can finish several grouped receives,
             # and only the first one's size is recorded.
             with_rx = [r for r in g if r.net]
+            gr.net_named = bool(with_rx)
             if with_rx:
                 gr.rx_per_coll_lb = sum(sum(d.get("rx_bytes", 0) for d in r.net.values()) + r.rx_before
                                         for r in with_rx) / len(with_rx)
             with_win = [r for r in g if r.net_start_us]
             if with_win:
                 gr.overlap_pct = 100.0 * sum(id(r) in overlapped for r in with_win) / len(with_win)
-            if tel is None or interval <= 0:
+            gr.n_ranks = max(r.rec.n_ranks for r in g)
+            mine = {id(r) for r in g}
+            others = union([(r.exec_start_us, r.exec_end_us) for r in proc_recs if id(r) not in mine])
+            gr.other_overlap_us = _overlap_spans(spans, others)
+            send = agg.mean_proxy_gpu_wait_us + agg.mean_proxy_peer_wait_us + agg.mean_proxy_network_us
+            recv = agg.mean_proxy_gpu_recv_wait_us + agg.mean_proxy_flush_us + agg.mean_proxy_network_us
+            if send > 0:
+                gr.gpu_send_wait_pct = 100.0 * agg.mean_proxy_gpu_wait_us / send
+            if recv > 0:
+                gr.gpu_recv_wait_pct = 100.0 * (agg.mean_proxy_gpu_recv_wait_us + agg.mean_proxy_flush_us) / recv
+            gr.cq_errors = sum(int(d.get("cq_errors", 0)) for r in g for d in r.net.values())
+            gr.telemetry = tel is not None and interval > 0
+            if not gr.telemetry:
                 gr.inconclusive.append("no telemetry samples for this process")
             elif not used:
                 gr.inconclusive.append("no NIC of this process carried traffic in telemetry")
@@ -775,7 +861,12 @@ def analyze(recs: List[CollRecord], tels: Dict[Tuple[str, int], Telemetry],
                 # CLEAN only means something for what was measured: a counter the
                 # NIC did not give cannot be read as "nothing happened".
                 missing = [what for what, have in (
-                    ("loss counters", ns.loss is not None),
+                    ("delivery counters" + ("" if not ns.symptoms else " (" + ", ".join(
+                        name for k, name, _ in SYMPTOMS if k not in ns.symptoms) + ")"),
+                     len(ns.symptoms) == len(SYMPTOMS)),
+                    ("receiver-not-ready counters" + ("" if ns.rnr is None and ns.rnr_peer is None else
+                                                      " (RX-NO-BUFFER)" if ns.rnr is None else " (PEER-RNR)"),
+                     ns.rnr is not None and ns.rnr_peer is not None),
                     ("ECN/CNP counters", ns.ecn_pct is not None or ns.cnp_ps is not None),
                     ("link use" + (" (port counter did not refresh)" if ns.nic_stale else ""),
                      ns.link_pct is not None),
@@ -808,7 +899,7 @@ def _nic_stats(dev, g, spans, busy, interval, lane, thr, tels, host, gr) -> NicS
     prio = lane.prio_for(host, gr.pid, dev.device_id)
     unit = pause_unit(dev, prio) if prio is not None else None
     ns = NicStats(roce=dev.roce or f"dev{dev.device_id}", unit="%" if unit else None,
-                  frames_only=unit == "frames")
+                  frames_only=unit == "frames", device_id=dev.device_id, ack_retransmits=dev.ack_retransmits)
     busy_s = busy / 1e6
 
     # PFC pause on RCCL's priority
@@ -841,20 +932,43 @@ def _nic_stats(dev, g, spans, busy, interval, lane, thr, tels, host, gr) -> NicS
             if lvl:
                 ns.findings.append(Finding(name, lvl, detail))
 
-    # Loss and receiver-not-ready events: any is worth reporting.
-    for attr, keys, name, what in (("loss", LOSS_FABRIC, "FABRIC-LOSS", "drops/NAKs/timeouts"),
-                                   ("rnr", RNR_LOCAL, "HOST-RNR", "times this NIC had no receive buffer posted"),
-                                   ("rnr_peer", RNR_PEER, "PEER-RNR", "RNR NAKs from a receiver that was not ready")):
-        bs = [bound(s.get(k), spans, pad_of(k), False) for k in keys]
-        bs = [b for b in bs if b is not None]
-        if not bs:
+    # Delivery symptoms and receiver-not-ready events, each on its own: any is
+    # worth reporting, and none is added to another.
+    rows = [(k, name, what) for k, name, what in SYMPTOMS] + \
+        [(RNR_LOCAL[0], "RX-NO-BUFFER", "times this NIC had no receive buffer posted"),
+         (RNR_PEER[0], "PEER-RNR", "receiver-not-ready NAKs from a peer")]
+    for k, name, what in rows:
+        ser = s.get(k)
+        b = bound(ser, spans, pad_of(k), False)
+        if b is None:
             continue
-        lb = sum(b.lb for b in bs)
-        ub = INF if any(b.ub == INF for b in bs) else sum(b.ub for b in bs)
-        setattr(ns, attr, (lb, ub))
-        lvl = _level(lb, ub, 0.0, strict=True)
+        if any(a - pad_of(k) <= t <= b + pad_of(k) for t in ser.reset_ts for a, b in spans):
+            ns.resets.append(k)
+        ns.lag_us = max(ns.lag_us, pad_of(k))
+        r = (b.lb, b.ub)
+        if k == RNR_LOCAL[0]:
+            ns.rnr = r
+        elif k == RNR_PEER[0]:
+            ns.rnr_peer = r
+        else:
+            ns.symptoms[k] = r
+        lvl = _level(b.lb, b.ub, 0.0, strict=True)
         if lvl:
-            ns.findings.append(Finding(name, lvl, f"{_fmt_range((lb, ub), '')} {what}"))
+            ns.findings.append(Finding(name, lvl, f"{_fmt_range(r, '')} {what}"))
+    # NIC progress: bytes the port provably moved inside the collectives.
+    port = [bound(s.get(f"nic_{d}_bytes"), spans, pad_of(f"nic_{d}_bytes"), False) for d in ("tx", "rx")]
+    if all(b is not None for b in port):
+        ns.port_lb = (port[0].lb, port[1].lb)
+    # Sampler stalls: gaps well past both the setting and the sampler's own
+    # usual pace (reading many counters can make every sample slower than set).
+    ts = s["tx_bytes"].ts if "tx_bytes" in s else []
+    gaps = sorted(b - a for a, b in zip(ts, ts[1:]))
+    if gaps:
+        stall = 3 * max(interval, gaps[len(gaps) // 2])
+        ns.sample_gap_us = sum(_overlap(spans, a, b) for a, b in zip(ts, ts[1:]) if b - a > stall)
+    ns.sharers = 1 if not dev.roce else sum(1 for (h, _), t in tels.items() if h == host and any(
+        d.roce == dev.roce and "tx_bytes" in d.series and sum(d.series["tx_bytes"].delta(a, b) for a, b in spans) > 0
+        for d in t.devices.values())) or 1
 
     # ECN marks as a share of received packets: a switch marks a share of the
     # packets it queues. CNPs as a rate instead: a NIC sends at most one per flow
@@ -955,12 +1069,13 @@ def _overlapping_windows(proc_recs: List[CollRecord]) -> set:
     return out
 
 
-ORDER = ["HOST-BACKPRESSURE", "HOST-RNR", "PEER-RNR", "FABRIC-LOSS", "FABRIC-CONGESTION",
-         "LINK-SHARED", "CONGESTION-MARKS"]
+ORDER = ["HOST-BACKPRESSURE", "RX-NO-BUFFER", "PEER-RNR", "OUT-OF-SEQ", "SEQ-NAK", "ACK-TIMEOUT",
+         "CQ-ERROR", "FABRIC-CONGESTION", "LINK-SHARED", "CONGESTION-MARKS"]
+DROP_RELATED = {"RX-NO-BUFFER", "PEER-RNR", "CQ-ERROR"} | {name for _, name, _ in SYMPTOMS}
 
 
 def _rank_verdict(gr: GroupResult) -> str:
-    found = {}
+    found = {"CQ-ERROR": "yes"} if gr.cq_errors else {}
     for ns in gr.nics:
         for f in ns.findings:
             if f.name not in found or f.level == "yes":
@@ -1036,45 +1151,452 @@ def _echo_summary(gs, cong, fmt, thr: "Thresholds") -> str:
             "from there")
 
 
-def job_summary(results: List[GroupResult], lane: Lane, thr: Optional["Thresholds"] = None
-                ) -> Dict[Tuple[str, int], str]:
+# ============================================================================
+# Drop diagnosis: delivery symptoms against endpoint evidence
+# ============================================================================
+
+@dataclass
+class DropDiagnosis:
+    bucket: str                    # HOST_LIKELY | FABRIC_LIKELY | MIXED | INCONCLUSIVE | NONE
+    confidence: str = ""           # high | medium | low; "" for INCONCLUSIVE
+    leaning: str = ""              # what the rules gave before data quality took it to INCONCLUSIVE
+    signals: List[str] = field(default_factory=list)
+    endpoints: List[str] = field(default_factory=list)
+    unknown: List[str] = field(default_factory=list)
+    reasons: List[str] = field(default_factory=list)
+    competing: List[str] = field(default_factory=list)
+    quality: List[str] = field(default_factory=list)
+    slowness: str = ""
+
+    def headline(self) -> str:
+        if self.bucket == "INCONCLUSIVE":
+            return "INCONCLUSIVE" + (f" (leaning {self.leaning})" if self.leaning else "")
+        return f"{self.bucket} ({self.confidence})"
+
+
+def _where(g: GroupResult, ns: Optional[NicStats] = None) -> str:
+    return f"rank {g.rank} ({g.host.split('.')[0]}" + (f" {ns.roce})" if ns else ")")
+
+
+def _list(xs: List[str], n: int = 3) -> str:
+    return ", ".join(xs[:n]) + (f" and {len(xs) - n} more" if len(xs) > n else "")
+
+
+def _evidence(rows, what_ok, what_bad, where_bad=None):
+    """Fold one kind of endpoint evidence over every NIC of the collective.
+    rows: (place, state, detail), state one of
+      pressure  proven at or over its threshold
+      some      possibly over it: only the upper bound reaches it
+      low       proven, but under the threshold; counts as fine
+      unknown   not measured, or the samples do not cover the collectives
+      ok        measured, covered and under the threshold
+    Returns (state, text, unknown places). The state is the worst one seen,
+    but the text names every place that is not ok, so none hides another."""
+    by = defaultdict(list)
+    for place, state, detail in rows:
+        by[state].append((place, detail))
+
+    def places(state):
+        # Places that share a reason are listed under it once.
+        why = defaultdict(list)
+        for place, detail in by[state]:
+            why[detail].append(place)
+        return "; ".join(_list(ps) + (f": {w}" if w else "") for w, ps in why.items())
+    parts = []
+    if by["pressure"]:
+        parts.append(f"{what_bad} at {places('pressure')}" + (f" ({where_bad})" if where_bad else ""))
+    if by["some"]:
+        parts.append(f"possibly {what_bad} at {places('some')}")
+    if by["low"]:
+        parts.append(f"under the threshold at {places('low')}")
+    if by["unknown"]:
+        parts.append(f"unknown at {places('unknown')}")
+    fine = len(by["ok"]) + len(by["low"])
+    if by["ok"] and not parts:
+        parts.append(what_ok)
+    elif by["ok"]:
+        parts.append(f"fine at the other {len(by['ok'])} NIC(s)")
+    state = next((st for st in ("pressure", "some", "unknown") if by[st]), "ok" if fine else "unknown")
+    return state, "; ".join(parts), [f"{p}: {w}" for p, w in by["unknown"]]
+
+
+def diagnose_drops(gs: List[GroupResult], lane: Lane, thr: Thresholds,
+                   baseline: Optional[Dict[Tuple[str, int, str, str, int], float]] = None) -> DropDiagnosis:
+    """Bucket one collective and size, over all its ranks.
+
+    Signals (observations): OUT-OF-SEQ at a receiver, SEQ-NAK and ACK-TIMEOUT
+    at a sender, and RCCL completion errors. Each is shown on its own with its
+    bounds; "in window" means the lower bound is above 0 (it counted inside the
+    collectives given the counter's measured refresh lag), "possibly" that only
+    the upper bound is. Overlap in time is not cause.
+
+    Endpoint evidence, each "ok" only where measured, covered and zero (pause:
+    under the threshold):
+      receive buffers   out_of_buffer on every NIC: the receiver had buffers
+      peer readiness    rnr_retry_err on every NIC: no sender saw a not-ready
+                        peer (the peer itself is not identified)
+      backpressure      PFC tx pause on RCCL's priority; unknown with PFC off
+                        (an overloaded receiver then drops, and port discards
+                        are not sampled) or with the priority unknown
+      NIC progress      port byte counters provably moved in both directions
+                        (RCCL's own byte counts are posted work, not the wire)
+    Endpoints are healthy only when all four are ok on every rank of the
+    communicator. "No error reported" is not health: a missing counter is unknown.
+
+    Rules ("receiver not ready" = receive buffers or peer readiness under pressure):
+      no symptom in window:
+          receiver not ready                 -> HOST_LIKELY (medium); those
+                                                counters are drop/recovery events
+          a symptom or receiver-not-ready
+          count only possibly in window      -> INCONCLUSIVE
+          a signal not measured somewhere    -> INCONCLUSIVE
+          else                               -> NONE (high; medium if backpressure
+                                                or NIC progress is not known).
+                                                Pause alone is flow control, not drops
+      only completion errors                 -> INCONCLUSIVE (local and remote causes)
+      symptom and endpoint pressure (any of the three):
+          fabric corroborated (rx pause with no pushback, ECN/CNP) -> MIXED (medium)
+          else                               -> HOST_LIKELY (low)
+      symptom, no endpoint pressure:
+          only ACK timeouts:
+              endpoints healthy              -> FABRIC_LIKELY (low; medium if corroborated)
+              else                           -> INCONCLUSIVE
+          possible endpoint pressure         -> INCONCLUSIVE (leaning MIXED)
+          endpoints healthy                  -> FABRIC_LIKELY (medium; high if corroborated)
+          endpoint health unknown            -> FABRIC_LIKELY (low; medium if corroborated)
+    Then each kind of data-quality issue (accl lost data, a counter reset in
+    the window, sampling gaps, drop counters refreshing slower than a fifth of
+    the collectives' time, overlapping collectives or communicators, a NIC
+    shared with other processes or traffic) lowers the confidence one step;
+    below low the bucket becomes INCONCLUSIVE, the rules' answer kept as "leaning"."""
+    d = DropDiagnosis(bucket="INCONCLUSIVE")
+    nics = [(g, ns) for g in gs for ns in g.nics]
+    expected = max((g.n_ranks for g in gs), default=0)
+    seen = {g.rank for g in gs}
+    # Blind: no telemetry, or accl names NICs telemetry did not sample. A
+    # process with telemetry whose records name no NIC had no network traffic.
+    blind = [(_where(g), "no telemetry") for g in gs if not g.telemetry] + \
+        [(_where(g), "telemetry has no samples of the NICs accl names") for g in gs
+         if g.telemetry and not g.nics and g.net_named]
+    if expected > len(seen):
+        blind.append((f"{expected - len(seen)} of {expected} ranks", "no accl records"))
+
+    # --- signals ---------------------------------------------------------
+    definite, possible = set(), set()
+    for col, name, what in SYMPTOMS:
+        hits, maybe, unk = [], [], [f"{p}: {w}" for p, w in blind]
+        for g, ns in nics:
+            r = ns.symptoms.get(col)
+            if r is None:
+                unk.append(_where(g, ns) + ": not measured")
+            elif r[0] > 0:
+                hits.append(f"{_fmt_range(r, '')} at {_where(g, ns)}")
+            elif r[1] == INF:
+                unk.append(_where(g, ns) + ": samples do not cover the collectives (or the counter had not "
+                           "refreshed yet)")
+            elif r[1] > 0:
+                maybe.append(f"0-{r[1]:.0f} at {_where(g, ns)}")
+        text = f"{name}, {what}: "
+        if hits:
+            definite.add(name)
+            text += "in window " + _list(hits)
+        if maybe:
+            possible.add(name)
+            text += ("; " if hits else "") + "possibly in window " + _list(maybe)
+        if not hits and not maybe:
+            text += ("none where measured" if nics else "not measured anywhere") if unk else "none on any NIC"
+        alt = [_where(g, ns) for g, ns in nics if col == "local_ack_timeout_err" and ns.ack_retransmits
+               and col in ns.symptoms]
+        if alt:
+            text += f" (at {_list(alt)} this counts retransmits after a timeout: the driver has no timeout counter)"
+        d.signals.append(text)
+        if unk:
+            d.unknown.append(f"{name}: {_list(unk)}")
+    cq = [g for g in gs if g.cq_errors]
+    if cq:
+        definite.add("CQ-ERROR")
+        d.signals.append("CQ-ERROR, RCCL completion errors (accl; overlapping windows can count one twice): "
+                         + _list([f"{g.cq_errors} at {_where(g)}" for g in cq]))
+    if len(definite) + len(possible) > 1:
+        d.signals.append("these are separate counters: one lost packet can show in several of them, "
+                         "so they are not added up into a count of lost packets")
+
+    # --- endpoint evidence -----------------------------------------------
+    def rows(get):
+        out = [(p, "unknown", w) for p, w in blind]
+        for g, ns in nics:
+            r = get(ns)
+            if r is None:
+                out.append((_where(g, ns), "unknown", "no counter"))
+            elif r[0] > 0:
+                out.append((_where(g, ns), "pressure", _fmt_range(r, "")))
+            elif r[1] == INF:
+                out.append((_where(g, ns), "unknown", "samples do not cover the collectives"))
+            elif r[1] > 0:
+                out.append((_where(g, ns), "some", f"0-{r[1]:.0f}"))
+            else:
+                out.append((_where(g, ns), "ok", ""))
+        return out
+
+    ev = {}
+    ev["receive buffers"] = _evidence(rows(lambda ns: ns.rnr), "no receiver ran out of buffers",
+                                      "receive buffers ran out", "that host's own receiver")
+    ev["peer readiness"] = _evidence(rows(lambda ns: ns.rnr_peer), "no sender got RNR NAKs",
+                                     "RNR NAKs seen", "seen by the sender; the not-ready peer is not identified")
+    for name, k in (("RX-NO-BUFFER", "receive buffers"), ("PEER-RNR", "peer readiness")):
+        if ev[k][2]:
+            d.unknown.append(f"{name}: {_list(ev[k][2])}")
+    bp = [(p, "unknown", w) for p, w in blind]
+    for g, ns in nics:
+        w = _where(g, ns)
+        if ns.tx_pause is None:
+            why = ("PFC off on RCCL's priority: an overloaded receiver drops instead, and port "
+                   "discards are not sampled") if lane.no_pfc_for(g.host, g.pid, ns.device_id) else \
+                "RCCL's PFC priority unknown" if lane.prio_for(g.host, g.pid, ns.device_id) is None else \
+                "no pause counters"
+            bp.append((w, "unknown", why))
+            continue
+        # Same rule as the HOST-BACKPRESSURE finding; frames only ever bound it from above.
+        lvl = _level(ns.tx_pause[0], ns.tx_pause[1], thr.pause_pct)
+        shown = _fmt_bound(ns.tx_pause) if ns.frames_only else _fmt_range(ns.tx_pause, "%")
+        if lvl == "yes":
+            bp.append((w, "pressure", f"paused the switch {shown} of the time"))
+        elif lvl == "maybe":
+            bp.append((w, "some", f"paused the switch {shown} of the time"))
+        elif ns.tx_pause[0] > 0 or ns.tx_paused:
+            bp.append((w, "low", f"paused the switch {shown} of the time"))
+        else:
+            bp.append((w, "ok", ""))
+    ev["backpressure"] = _evidence(bp, "no NIC paused the switch", "receiver backpressure")
+    prog = [(p, "unknown", w) for p, w in blind]
+    for g, ns in nics:
+        if ns.port_lb is None:
+            prog.append((_where(g, ns), "unknown", "no port byte counters"))
+        elif min(ns.port_lb) > 0:
+            prog.append((_where(g, ns), "ok", ""))
+        else:
+            prog.append((_where(g, ns), "unknown", "port bytes did not provably move inside the collectives"
+                         " (counter lag or stale counter)"))
+    ev["NIC progress"] = _evidence(prog, "every port moved bytes both ways inside the collectives", "")
+    for k, (state, text, _) in ev.items():
+        d.endpoints.append(f"{k}: {text}")
+    # Context, not evidence: overlapping steps make these shares rough, and
+    # healthy runs already show about half.
+    snd, rcv = [g.gpu_send_wait_pct for g in gs], [g.gpu_recv_wait_pct for g in gs]
+    d.endpoints.append(f"accl proxy waiting on the GPU, share of its step time (context only): send "
+                       f"{min(snd):.0f}-{max(snd):.0f}%, receive {min(rcv):.0f}-{max(rcv):.0f}% across ranks")
+    if max(snd + rcv) > 80:
+        d.competing.append("the proxy waited on the GPU for most of its step time on some rank: the "
+                           "endpoints' compute or scheduling may set the pace, not the network")
+
+    states = {k: v[0] for k, v in ev.items()}
+    # Only a receiver that was not ready counts as a host cause of drops. Pause
+    # is flow control: on a lossless priority it kept the receiver from
+    # dropping, so it only stops the endpoints counting as healthy.
+    receiver = [k for k in ("receive buffers", "peer readiness") if states[k] == "pressure"]
+    pressure = receiver
+    some = [k for k in ("receive buffers", "peer readiness") if states[k] == "some"]
+    blind_rx = all(ns.rnr is None and ns.rnr_peer is None for _, ns in nics)    # nothing known anywhere
+    healthy = all(v == "ok" for v in states.values()) and not blind
+    not_ok = ", ".join(k for k, v in states.items() if v != "ok") or "ranks without telemetry"
+
+    # --- fabric corroboration --------------------------------------------
+    pushback = bool(_pushback(gs))
+    corr = sorted({f"{f.name} at {_where(g, ns)}" for g, ns in nics for f in ns.findings
+                   if f.level == "yes" and (f.name == "CONGESTION-MARKS" or
+                                            (f.name == "FABRIC-CONGESTION" and not pushback))})
+
+    # --- rules -----------------------------------------------------------
+    sym = definite - {"CQ-ERROR"}
+    names = ", ".join(sorted(sym))
+    sym_unknown = [u for u in d.unknown if u.split(":")[0] in {n for _, n, _ in SYMPTOMS}]
+    if not sym and receiver:
+        # Completion errors next to a receiver that was not ready are no
+        # reason for less: RNR retries running out end in completion errors.
+        open_sym = sorted(possible) + (["some not measured"] if sym_unknown else [])
+        d.bucket, d.confidence = "HOST_LIKELY", "low" if open_sym else "medium"
+        d.reasons.append(f"receiver not ready ({', '.join(receiver)}) with no other delivery symptom "
+                         "in the window" + (f" (open: {', '.join(open_sym)})" if open_sym else ""))
+    elif not definite:
+        if possible or some:
+            d.reasons.append("signals only possibly fall inside the collectives: their counters cannot "
+                             "place them inside rather than next to them")
+        elif d.unknown:
+            d.reasons.append("no delivery symptom seen, but not every signal was measured on every rank")
+        else:
+            known = states["backpressure"] != "unknown" and states["NIC progress"] != "unknown"
+            d.bucket, d.confidence = "NONE", "high" if known else "medium"
+            d.reasons.append("no delivery or recovery symptom on any NIC, every signal measured" +
+                             ("" if known else f" ({not_ok} not known)"))
+            if states["backpressure"] in ("pressure", "some"):
+                d.reasons.append("pause is flow control, not drops: see the summary line")
+    elif not sym:
+        d.reasons.append("only completion errors: they have local causes (protection, access, length) "
+                         "as well as remote ones, and RCCL does not record which")
+    elif pressure:
+        if corr:
+            d.bucket, d.confidence = "MIXED", "medium"
+            d.reasons.append(f"delivery symptoms ({names}) together with endpoint pressure "
+                             f"({', '.join(pressure)}) and fabric congestion ({_list(corr)})")
+            d.competing.append("either side alone: a receiver short of buffers also makes senders "
+                               "retransmit, and congestion can drop packets with every host healthy")
+        else:
+            d.bucket, d.confidence = "HOST_LIKELY", "low"
+            d.reasons.append(f"delivery symptoms ({names}) together with endpoint pressure "
+                             f"({', '.join(pressure)}); a receiver that is not ready also makes senders "
+                             "retransmit, and no congestion marks or unexplained rx pause were seen")
+            d.competing.append("loss in the fabric on the same paths: the symptoms alone cannot rule it out")
+    elif sym == {"ACK-TIMEOUT"} and not healthy:
+        d.reasons.append(f"only ACK timeouts, and endpoint health is not established ({not_ok})")
+    elif sym == {"ACK-TIMEOUT"}:
+        d.bucket, d.confidence = "FABRIC_LIKELY", "medium" if corr else "low"
+        d.reasons.append("only ACK timeouts, with healthy endpoints" +
+                         (f" and fabric congestion ({_list(corr)})" if corr else ""))
+    elif some:
+        d.reasons.append(f"delivery symptoms ({names}) and endpoint pressure ({', '.join(some)}) whose "
+                         "counters only possibly reach the threshold")
+        d.leaning = "MIXED"
+    elif blind_rx:
+        d.reasons.append(f"delivery symptoms ({names}), but nothing is known about the receivers' "
+                         "readiness (no receive-buffer or RNR counters)")
+        d.leaning = "FABRIC_LIKELY"
+    else:
+        base = (1 if healthy else 2) - (1 if corr else 0)
+        d.bucket, d.confidence = "FABRIC_LIKELY", CONFIDENCE[base]
+        d.reasons.append(f"delivery symptoms ({names}) with " +
+                         ("healthy endpoints" if healthy else
+                          f"no endpoint pressure seen, but endpoint health not established ({not_ok})") +
+                         (f"; fabric congestion seen ({_list(corr)})" if corr else ""))
+    if "ACK-TIMEOUT" in definite:
+        d.competing.append("a timeout also follows a lost ACK on the return path, a long delay, or an "
+                           "endpoint that stopped answering, not only a lost packet")
+    if "CQ-ERROR" in definite:
+        d.competing.append("completion errors also come from local faults (protection, access, length)")
+    if d.bucket == "FABRIC_LIKELY":
+        d.competing.append("an endpoint fault these counters do not show (port discards, PCIe, NIC firmware)")
+        if any(lane.no_pfc_for(g.host, g.pid, ns.device_id) for g, ns in nics):
+            d.competing.append("with PFC off on RCCL's priority, a receiver host that cannot keep up drops "
+                               "packets too, and those port discards are not sampled")
+    if states["backpressure"] == "pressure" and definite:
+        d.competing.append("a receiver paused the switch: a slow host, though PFC kept it from dropping; "
+                           "its pause can also echo as rx pause elsewhere")
+    elif pushback and definite:
+        d.competing.append("a receiver paused the switch: rx pause elsewhere may be its echo, not "
+                           "fabric congestion")
+
+    # --- data quality ----------------------------------------------------
+    q = {}
+    for g in gs:
+        for why in g.inconclusive:
+            if why.startswith("accl"):
+                q.setdefault("accl", f"{_where(g)}: {why}")
+        # Counters cannot split work that ran at the same time. Overlap among
+        # this group's own collectives does not matter here: it is all charged
+        # to the group.
+        if g.other_overlap_us > 0.01 * g.busy_us:
+            q.setdefault("overlap", f"other collectives ran at the same time at {_where(g)} for "
+                         f"{g.other_overlap_us / 1000:.1f} ms ({100 * g.other_overlap_us / g.busy_us:.0f}% "
+                         "of these collectives' time)")
+        for ns in g.nics:
+            if ns.resets:
+                q.setdefault("reset", f"{', '.join(ns.resets)} reset during the collectives at {_where(g, ns)}")
+            if ns.sample_gap_us > 0.1 * g.busy_us:
+                q.setdefault("gap", f"sampler stalls cover {ns.sample_gap_us / 1000:.0f} ms of "
+                             f"{g.busy_us / 1000:.0f} ms at {_where(g, ns)}")
+            if ns.lag_us > 0.2 * g.busy_us:
+                q.setdefault("lag", f"drop counters refresh ~{ns.lag_us / 1000:.0f} ms late at {_where(g, ns)} "
+                             f"against {g.busy_us / 1000:.0f} ms of collectives")
+            if ns.sharers > 1:
+                q.setdefault("procs", f"{ns.sharers} processes of this job drive {_where(g, ns)}")
+            if ns.rccl_pct is not None and ns.rccl_pct < 100 - thr.link_other_pct:
+                q.setdefault("traffic", f"only {ns.rccl_pct:.0f}% of the traffic at {_where(g, ns)} was this "
+                             "job's RCCL")
+    d.quality = list(q.values())
+    if d.bucket == "NONE":
+        # A counter that stayed at 0 is 0 whoever else used the NIC, and its
+        # lag is already in the bounds; only lost accl data or a reset can
+        # hide a count.
+        q = {k: v for k, v in q.items() if k in ("accl", "reset")}
+    if d.confidence:
+        i = CONFIDENCE.index(d.confidence) + len(q)
+        if i >= len(CONFIDENCE):
+            d.leaning, d.bucket, d.confidence = d.bucket, "INCONCLUSIVE", ""
+            d.reasons.append("data quality leaves no confidence: " + "; ".join(d.quality))
+        else:
+            d.confidence = CONFIDENCE[i]
+
+    # --- was it slow? ----------------------------------------------------
+    key = (gs[0].coll, gs[0].msg_size, gs[0].algo, gs[0].proto, expected)
+    bw = sum(g.mean_busbw for g in gs) / len(gs)
+    if baseline and baseline.get(key, 0) > 0:
+        d.slowness = (f"busBW {bw:.1f} GB/s against {baseline[key]:.1f} GB/s in the baseline run "
+                      f"({100 * (bw / baseline[key] - 1):+.0f}%)")
+    else:
+        d.slowness = "no matched baseline (same collective, size, algorithm, protocol and rank count)"
+    d.slowness += "; seeing these events does not by itself show the collective was slow"
+    return d
+
+
+def job_summary(results: List[GroupResult], lane: Lane, thr: Optional["Thresholds"] = None,
+                drops: Optional[Dict[Tuple[str, int, str, str, str], DropDiagnosis]] = None
+                ) -> Dict[Tuple[str, int, str, str, str], str]:
     """One conclusion per (collective, size) across all ranks. A NIC that paused
-    the switch can explain rx pauses elsewhere, so pushback is checked first."""
+    the switch can explain rx pauses elsewhere, so pushback is checked first,
+    then a drop diagnosis that points at a host. Every finding the headline
+    does not lead with, proven or possible, is listed after it, so the order
+    hides none."""
     thr = thr or Thresholds()
+    if drops is None:
+        drops = {k: diagnose_drops(gs, lane, thr) for k, gs in _by_size(results).items()}
     out = {}
     for k, gs in _by_size(results).items():
         def ranks(name, level="yes"):
-            return sorted({(g.rank, g.host.split(".")[0]) for g in gs for ns in g.nics
-                           for f in ns.findings if f.name == name and f.level == level})
+            hit = {(g.rank, g.host.split(".")[0]) for g in gs for ns in g.nics
+                   for f in ns.findings if f.name == name and f.level == level}
+            if name == "CQ-ERROR" and level == "yes":
+                hit |= {(g.rank, g.host.split(".")[0]) for g in gs if g.cq_errors}
+            return sorted(hit)
 
         def fmt(rs):
             return ", ".join(f"rank {r} ({h})" for r, h in rs[:4]) + (" ..." if len(rs) > 4 else "")
 
-        bp, rnr, peer_rnr = ranks("HOST-BACKPRESSURE"), ranks("HOST-RNR"), ranks("PEER-RNR")
-        loss, cong = ranks("FABRIC-LOSS"), ranks("FABRIC-CONGESTION")
+        bp, cong = ranks("HOST-BACKPRESSURE"), ranks("FABRIC-CONGESTION")
         shared, marks = ranks("LINK-SHARED"), ranks("CONGESTION-MARKS")
+        dd = drops[k]
+        host_drops = dd.bucket in ("HOST_LIKELY", "MIXED")
+        drop_seen = any(ranks(n) for n in DROP_RELATED)
+        named = set()
         if cong and _pushback(gs):
             msg = _echo_summary(gs, cong, fmt, thr)
+            named = {"FABRIC-CONGESTION", "HOST-BACKPRESSURE"}
         elif bp:
             msg = f"HOST: {fmt(bp)} paused the switch (could not take data in fast enough)"
-        elif rnr:
-            msg = f"HOST: {fmt(rnr)} ran out of receive buffers"
-        elif peer_rnr:
-            msg = (f"HOST?: {fmt(peer_rnr)} got RNR NAKs: a host they send to was not ready to receive "
-                   "(the counter sits on the sender; which peer is not known)")
-        elif loss:
-            msg = f"FABRIC: drops/NAKs/timeouts on {fmt(loss)}"
+            named = {"HOST-BACKPRESSURE"}
+        elif drop_seen and host_drops:
+            msg = f"DROPS: {dd.headline()} from " + "; ".join(
+                f"{n} on {fmt(ranks(n))}" for n in ORDER if n in DROP_RELATED and ranks(n)) + \
+                ", see the drop diagnosis"
+            named = {n for n in DROP_RELATED if ranks(n)}
         elif cong:
             msg = f"FABRIC: switch paused sending on {len(cong)} rank(s), no NIC pushed back: {fmt(cong)}"
+            named = {"FABRIC-CONGESTION"}
         elif shared:
             msg = f"LINK-SHARED: other traffic held the link on {fmt(shared)}"
+            named = {"LINK-SHARED"}
         elif marks:
             msg = f"CONGESTION-MARKS on {fmt(marks)}"
+            named = {"CONGESTION-MARKS"}
+        elif drop_seen:
+            msg = f"DROPS: {dd.headline()} from " + "; ".join(
+                f"{n} on {fmt(ranks(n))}" for n in ORDER if n in DROP_RELATED and ranks(n)) + \
+                ", see the drop diagnosis"
+            named = {n for n in DROP_RELATED if ranks(n)}
         elif any(g.verdict.startswith("INCONCLUSIVE") for g in gs):
             maybes = sorted({f.name for g in gs for ns in g.nics for f in ns.findings if f.level == "maybe"})
             reasons = sorted({x for g in gs for x in g.inconclusive})
             msg = "INCONCLUSIVE: " + "; ".join(([f"possible {', '.join(maybes)}"] if maybes else [])
                                                + reasons[:2])
+            named = set(maybes)
         else:
             msg = "CLEAN: no fabric signal in any counter"
             if lane.no_pfc:
@@ -1083,6 +1605,18 @@ def job_summary(results: List[GroupResult], lane: Lane, thr: Optional["Threshold
                 msg += " (PFC counters zero on every priority: no pauses, or PFC is disabled)"
         if lane.prio is None and lane.source == "unknown" and msg.startswith("CLEAN"):
             msg = msg.split(" (")[0] + " apart from pause, which is not judged: RCCL's priority is unknown"
+        also = []
+        for n in ORDER:
+            if n in named:
+                continue
+            if ranks(n):
+                also.append(f"{n} on {fmt(ranks(n))}")
+            elif ranks(n, "maybe"):
+                also.append(f"possible {n} on {fmt(ranks(n, 'maybe'))}")
+        if not msg.startswith("DROPS") and dd.bucket != "NONE":
+            also.append(f"drops {dd.headline()}")
+        if also:
+            msg += "; also: " + "; ".join(also)
         out[k] = msg
     return out
 
@@ -1097,13 +1631,6 @@ def _fmt_secs(sec: float) -> str:
 
 def _fmt_num(v: float, unit: Optional[str]) -> str:
     return f"{v:.1f}%" if unit == "%" else f"{v:.0f}{unit or ''}"
-
-
-def _add(a: Optional[Tuple[float, float]], b: Optional[Tuple[float, float]]) -> Optional[Tuple[float, float]]:
-    """Sum of two (lb, ub) counts; None only when both are."""
-    if a is None or b is None:
-        return a or b
-    return a[0] + b[0], INF if INF in (a[1], b[1]) else a[1] + b[1]
 
 
 def _fmt_bound(r: Optional[Tuple[float, float]]) -> str:
@@ -1148,8 +1675,13 @@ def fmt_quantile(v: Optional[float]) -> str:
     return f"{v:.0f}"
 
 
+def _fmt_counts(rs: List[Optional[Tuple[float, float]]]) -> str:
+    """Counters side by side, "-" where the NIC does not give one."""
+    return "/".join("-" if r is None else _fmt_range(r, "") for r in rs)
+
+
 def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_nic: bool,
-                 warnings: List[str]):
+                 warnings: List[str], baseline: Optional[Dict[Tuple[str, int, str, str, int], float]] = None):
     hosts = {r.host for r in results}
     procs = {(r.host, r.pid) for r in results}
     print(f"ACCL fabric report: {len(procs)} process(es) on {len(hosts)} host(s)")
@@ -1181,16 +1713,18 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
         print("  loss and CNPs, never as pause.")
     elif lane.all_zero:
         print("  Every PFC counter stayed zero: either nothing paused or PFC is disabled, so a")
-        print("  CLEAN result cannot rule out a lossy fabric on its own; check the loss columns.")
+        print("  CLEAN result cannot rule out a lossy fabric on its own; check the oos/nak/to columns.")
     print(f"Thresholds: pause {thr.pause_pct:g}% of wall time, ECN {thr.ecn_pct:g}% of packets or {thr.cnp_ps:g} CNPs/s, link busy {thr.link_busy_pct:g}% "
           f"with >= {thr.link_other_pct:g}% non-RCCL traffic")
     print("  rxPause = switch paused our transmit   txPause = our NIC paused the switch")
     print("  a-b = at least a, at most b (counters are sampled, not continuous)")
     print("  B/coll = RCCL bytes sent per collective; rxwin/coll = received inside the network window on")
-    print("  that NIC; rx/coll = all RCCL bytes received per collective, all NICs, a lower bound\n")
+    print("  that NIC; rx/coll = all RCCL bytes received per collective, all NICs, a lower bound")
+    print("  oos/nak/to = out-of-sequence packets / sequence-error NAKs / ACK timeouts, each on its own")
+    print("  nobuf/rnr = times this NIC had no receive buffer / RNR NAKs it got from a peer; - = not measured\n")
 
     hdr = (f"{'Coll':<12} {'Size':>5} {'Rank':>4} {'Host':<20} {'N':>4} {'wall ms':>8} "
-           f"{'busBW':>6} {'NIC':<10} {'rxPause':>10} {'txPause':>10} {'loss':>6} {'rnr':>5} "
+           f"{'busBW':>6} {'NIC':<10} {'rxPause':>10} {'txPause':>10} {'oos/nak/to':>15} {'nobuf/rnr':>9} "
            f"{'ecn%':>9} {'cnp/s':>11} {'link%':>5} {'rccl%':>5} {'B/coll':>8} {'rxwin/coll':>10} {'rx/coll':>9} {'cmpl p50/p99':>13}  Verdict")
     print(hdr)
     print("-" * len(hdr))
@@ -1214,13 +1748,14 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
             rxall = (">=" + accl_report.fmt_size(int(g.rx_per_coll_lb))) if i == 0 and g.rx_per_coll_lb is not None \
                 else ("-" if i == 0 else "")
             print(f"{lead} {n.roce[:10]:<10} {rxp:>10} "
-                  f"{txp:>10} {_fmt_range(n.loss, ''):>6} "
-                  f"{_fmt_range(_add(n.rnr, n.rnr_peer), ''):>5} {_fmt_range(n.ecn_pct, '%'):>9} {_fmt_range(n.cnp_ps, '/s'):>11} "
+                  f"{txp:>10} {_fmt_counts([n.symptoms.get(k) for k, _, _ in SYMPTOMS]):>15} "
+                  f"{_fmt_counts([n.rnr, n.rnr_peer]):>9} {_fmt_range(n.ecn_pct, '%'):>9} {_fmt_range(n.cnp_ps, '/s'):>11} "
                   f"{link:>5} {'-' if n.rccl_pct is None else f'{n.rccl_pct:.0f}':>5} {bpc:>8} {rxwin:>10} {rxall:>9} "
                   f"{p50 + '/' + p99:>13}  {g.verdict if i == 0 else ''}")
 
     print("\nSummary per collective and size (all ranks):")
-    summary = job_summary(results, lane, thr)
+    drops = {k: diagnose_drops(gs, lane, thr, baseline) for k, gs in _by_size(results).items()}
+    summary = job_summary(results, lane, thr, drops)
     variants = defaultdict(int)
     for coll, size, *_ in summary:
         variants[(coll, size)] += 1
@@ -1230,20 +1765,39 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
             label += f" ({algo}/{proto}, comm {comm})"
         print(f"  {label}: {msg}")
 
+    print("\nDrop diagnosis per collective and size (delivery symptoms against endpoint evidence):")
+    for (coll, size, comm, algo, proto), dd in sorted(drops.items()):
+        label = f"{coll} {accl_report.fmt_size(size)}"
+        if variants[(coll, size)] > 1:
+            label += f" ({algo}/{proto}, comm {comm})"
+        print(f"  {label}: {dd.headline()}")
+        for title, items in (("signals", dd.signals), ("endpoints", dd.endpoints),
+                             ("not measured", dd.unknown), ("why", dd.reasons),
+                             ("could also be", dd.competing), ("data quality", dd.quality),
+                             ("slowness", [dd.slowness])):
+            for i, it in enumerate(items):
+                print(f"    {title if i == 0 else '':<13} {it}")
+
     print("\nFindings:")
     print("  FABRIC-CONGESTION  switch paused our transmit; can be backpressure from a receiver,")
     print("                     marked (echo?) when a NIC of the same collective and size pushed back")
     print("  HOST-BACKPRESSURE  our NIC paused the switch: this host could not take data in")
-    print("  FABRIC-LOSS        out-of-sequence drops, sequence-error NAKs, ACK timeouts")
-    print("  HOST-RNR           this host ran out of receive buffers")
+    print("  OUT-OF-SEQ         packets this NIC received out of sequence (receiver side)")
+    print("  SEQ-NAK            sequence-error NAKs this NIC got back (sender side)")
+    print("  ACK-TIMEOUT        this NIC's sends timed out waiting for an ACK (sender side)")
+    print("  RX-NO-BUFFER       this NIC had no receive buffer posted (this host's receiver)")
     print("  PEER-RNR           a host this rank sends to was not ready (RNR NAKs seen here)")
+    print("  CQ-ERROR           RCCL saw completion errors in these collectives (from accl)")
     print("  LINK-SHARED        link busy, mostly with traffic that is not this job's RCCL")
     print("  CONGESTION-MARKS   ECN-marked share of packets, or CNPs per second, above the threshold")
     print("  CLEAN              every counter below threshold; time went elsewhere")
     print("  INCONCLUSIVE       missing samples, or only an upper bound crosses a threshold")
-    print("  Echo split (FABRIC+HOST): pause x on senders, pushback y on a receiver; y can hold")
-    print("  senders back about that long, so x - y is left to the fabric. A rule of thumb: who")
-    print("  sends to whom is not known, and hosts are matched by collective and size, not clock.")
+    print("  Drop buckets: HOST_LIKELY, FABRIC_LIKELY, MIXED or INCONCLUSIVE, with a confidence;")
+    print("  NONE = no delivery symptom, every signal measured. These are likelihoods from")
+    print("  counters, not the failing component.")
+    print("  Echo (FABRIC+HOST? / FABRIC?): senders paused while a receiver paused the switch; both")
+    print("  are shown and neither is subtracted: who sends to whom is not known, and hosts are")
+    print("  matched by collective and size, not clock.")
     notes = list(warnings)
     if any(g.overlap_pct > 10 for g in results):
         notes.append("B/coll*: more than 10% of these collectives overlapped another one's network "
@@ -1436,7 +1990,8 @@ def write_trace(recs: List[CollRecord], tels: Dict[Tuple[str, int], Telemetry],
             rate_track("RCCL GB/s", [("tx", "tx_bytes"), ("rx", "rx_bytes")], 1e6 / 1e9, hw=False)
             rate_track("ECN/CNP per ms", [("ecn marked", "ecn_marked_pkts"),
                                           ("cnp sent", "cnp_sent"), ("cnp rcvd", "cnp_rcvd")], 1e3)
-            rate_track("loss events per s", [(k, k) for k in LOSS_FABRIC + LOSS_HOST], 1e6)
+            rate_track("delivery and RNR events per s",
+                       [(k, k) for k in [c for c, _, _ in SYMPTOMS] + list(RNR_LOCAL + RNR_PEER)], 1e6)
 
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump({"traceEvents": events, "displayTimeUnit": "ms"}, f)
@@ -1522,6 +2077,30 @@ def load(args):
     return recs, tels, used, pick_lane(tels, used, args.pfc_prio), warnings
 
 
+def load_baseline(path: str, warmup: int) -> Dict[Tuple[str, int, str, str, int], float]:
+    """Mean busBW per (collective, size, algorithm, protocol, ranks) of a healthy
+    run. Only busBW is needed, so records without host timing count too."""
+    if not os.path.exists(path):
+        sys.exit(f"--baseline: {path} does not exist")
+    files = [os.path.join(path, f) for f in sorted(os.listdir(path)) if f.endswith(".jsonl")] \
+        if os.path.isdir(path) else [path]
+    by = defaultdict(list)
+    for fp in files:
+        with open(fp, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                cp, hdr = obj.get("coll_perf"), obj.get("header")
+                if cp and hdr and cp.get("coll_sn", 0) >= warmup:
+                    by[(cp.get("coll", ""), cp.get("coll_msg_size_bytes", 0), cp.get("coll_algo", ""),
+                        cp.get("coll_proto", ""), hdr.get("n_ranks", 1))].append(cp.get("coll_busbw_gbs", 0))
+    return {k: sum(v) / len(v) for k, v in by.items()}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1545,6 +2124,8 @@ def main():
             p.add_argument("--link-other-pct", type=float, default=d.link_other_pct,
                            help="non-RCCL share of the link that counts as shared (default %(default)s)")
             p.add_argument("--per-nic", action="store_true", help="one row per NIC, not just the worst")
+            p.add_argument("--baseline", default=None,
+                           help="accl JSONL of a healthy run of the same job, to compare busBW against")
         else:
             p.add_argument("-o", "--output", default="accl_fabric_trace.json")
     args = ap.parse_args()
@@ -1557,7 +2138,8 @@ def main():
         resets = sum(s.resets for t in tels.values() for d in t.devices.values() for s in d.series.built())
         if resets:
             warnings.append(f"{resets} NIC counter reset(s) during the run; counts continue across them.")
-        print_report(results, lane, thr, args.per_nic, warnings)
+        print_report(results, lane, thr, args.per_nic, warnings,
+                     load_baseline(args.baseline, args.warmup) if args.baseline else None)
     else:
         write_trace(recs, tels, used, lane, args.output)
 
