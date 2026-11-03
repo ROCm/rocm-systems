@@ -31,6 +31,23 @@ foreach(
                 set(_wave_size_options -mno-wavefrontsize64)
             endif()
         endif()
+        set(_barrier_cases)
+        if(_gpu STREQUAL "gfx1250")
+            set(_barrier_cases
+                15
+                16
+                17
+                18
+                19
+                20
+                21
+                22
+                23
+                24
+                25
+                26
+            )
+        endif()
         foreach(
             _case
             IN
@@ -48,6 +65,7 @@ foreach(
                 distant-entry
                 dense-sites
                 ${_names}
+                ${_barrier_cases}
         )
             set(_case_number ${_case})
             set(_layout_options)

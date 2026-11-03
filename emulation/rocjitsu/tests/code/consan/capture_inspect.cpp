@@ -68,7 +68,32 @@ int main(int argc, char **argv) {
                 << ",\"loss\":" << *wire::read_u32(execution.report, row + wire::kRowLoss)
                 << ",\"final_sequence\":"
                 << *wire::read_u32(execution.report, row + wire::kRowFinalSequence)
-                << ",\"records\":[";
+                << ",\"final_phase\":"
+                << *wire::read_u32(execution.report, row + wire::kRowFinalPhase)
+                << ",\"completions\":[";
+      bool first_completion = true;
+      if (!capture.header.manifest.barriers.empty())
+        for (uint32_t slot = 0; slot < kSyncCapacity; ++slot) {
+          const size_t offset =
+              row + sync_offset(capture.header.manifest.sites.size()) + slot * kSyncRecordBytes;
+          if (wire::read_u32(execution.report, offset + wire::kSyncCommit) == 0)
+            continue;
+          if (!first_completion)
+            std::cout << ',';
+          first_completion = false;
+          std::cout << "{\"commit\":"
+                    << *wire::read_u32(execution.report, offset + wire::kSyncCommit)
+                    << ",\"group\":" << *wire::read_u32(execution.report, offset + wire::kSyncGroup)
+                    << ",\"occurrence\":"
+                    << *wire::read_u32(execution.report, offset + wire::kSyncOccurrence)
+                    << ",\"participants\":"
+                    << *wire::read_u32(execution.report, offset + wire::kSyncParticipants)
+                    << ",\"sequence\":"
+                    << *wire::read_u32(execution.report, offset + wire::kSyncSequence)
+                    << ",\"phase\":" << *wire::read_u32(execution.report, offset + wire::kSyncPhase)
+                    << '}';
+        }
+      std::cout << ']' << ",\"records\":[";
       bool first_record = true;
       for (const SiteFacts &site : capture.header.manifest.sites) {
         for (uint32_t address_group = 0; address_group < kAddressGroupsPerSite; ++address_group) {

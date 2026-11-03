@@ -264,6 +264,11 @@ FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
   if (collect_original_code(blocks.value(), program, used, limits, error).failed() ||
       validate_original_registers(used, metadata.value().vgprs, program, error).failed())
     return Result::failure();
+  std::vector<BasicBlock *> scope;
+  for (const std::unique_ptr<BasicBlock> &block : blocks.value())
+    scope.push_back(block.get());
+  if (qualify_lds_race_barrier(program, scope, error).failed())
+    return Result::failure();
   program.identity = {.sha256 = digest(image), .bytes = image.size()};
   program.image.assign(image.begin(), image.end());
   return program;

@@ -4,6 +4,7 @@
 #include "target_fixture.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/code/consan/image/artifact.h"
 #include "rocjitsu/code/patch/consan/prepare.h"
@@ -75,6 +76,111 @@ TEST_P(ConSanTargetStatic, CallableArtifactsPreserveStaticSitesAndPrivateFrameAd
     corrupted.image[text->sectionOffset() + sites.front().probe_offset] ^= 1;
     corrupted.manifest.prepared.sha256 = digest(corrupted.image);
     EXPECT_TRUE(validate_prepared(original, corrupted, error).failed());
+  }
+}
+
+TEST(ConSanBarrierStatic, QualifiedGfx1250PairPreservesOriginalOperations) {
+  for (const char *fixture : {"native-15", "native-16", "native-20", "native-21", "native-24"}) {
+    SCOPED_TRACE(fixture);
+    const std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path({"gfx1250", 32}, fixture));
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    const FailureOr<PreparedArtifact> artifact =
+        prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
+    ASSERT_TRUE(artifact.succeeded()) << error.message;
+    EXPECT_EQ(artifact.value().manifest.scope, ScopeKind::NativeLdsWorkgroupBarrier);
+    EXPECT_EQ(artifact.value().manifest.sites.size(),
+              std::string_view(fixture) == "native-24" ? 3u : 2u);
+    EXPECT_EQ(artifact.value().manifest.barriers.size(),
+              std::string_view(fixture) == "native-24" ? 2u : 1u);
+    ContractError contract_error;
+    const FailureOr<std::vector<uint8_t>> encoded =
+        encode_manifest(artifact.value().manifest, &contract_error);
+    ASSERT_TRUE(encoded.succeeded()) << contract_error.message;
+    const FailureOr<Manifest> decoded = decode_manifest(encoded.value(), &contract_error);
+    ASSERT_TRUE(decoded.succeeded()) << contract_error.message;
+    EXPECT_EQ(decoded.value(), artifact.value().manifest);
+    for (const BarrierFacts &barrier : artifact.value().manifest.barriers) {
+      // The shared instrumentor leaves the signal at its original PC and moves
+      // the completing wait to the start of an AfterInst trampoline.
+      EXPECT_EQ(barrier.prepared_signal, barrier.original_signal);
+      EXPECT_EQ(barrier.completion_probe, barrier.prepared_wait + 4);
+      EXPECT_NE(barrier.prepared_wait - barrier.prepared_signal,
+                barrier.original_wait - barrier.original_signal);
+    }
+    EXPECT_TRUE(validate_prepared(original, artifact.value(), error).succeeded()) << error.message;
+  }
+}
+
+TEST(ConSanBarrierStatic, BarrierFactsRequireQualifiedMappingsScopeAndLaunch) {
+  const std::vector<uint8_t> original =
+      test::read_fixture(test::target_fixture_path({"gfx1250", 32}, "native-15"));
+  ASSERT_FALSE(original.empty());
+  InputError error;
+  const FailureOr<PreparedArtifact> artifact =
+      prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
+  ASSERT_TRUE(artifact.succeeded()) << error.message;
+  const Manifest &manifest = artifact.value().manifest;
+  ContractError contract_error;
+  EXPECT_TRUE(plan_launch(manifest, {{32, 1, 1}, {32, 1, 1}}, 128, 0, &contract_error).failed());
+  EXPECT_EQ(contract_error.code, ContractErrorCode::UnsupportedLaunch);
+  Manifest invalid = manifest;
+  invalid.barriers.front().original_signal += 4;
+  EXPECT_TRUE(validate_manifest(invalid).failed());
+  invalid = manifest;
+  invalid.scope = ScopeKind::NativeLdsNoSynchronization;
+  EXPECT_TRUE(validate_manifest(invalid).failed());
+  invalid = manifest;
+  invalid.target = 1201;
+  EXPECT_TRUE(validate_manifest(invalid).failed());
+}
+
+TEST(ConSanBarrierStatic, RejectMismatchedMissingDrainAndNonconvergentGroups) {
+  for (const char *fixture : {"native-17", "native-18", "native-19", "native-22", "native-23"}) {
+    SCOPED_TRACE(fixture);
+    const std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path({"gfx1250", 32}, fixture));
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    EXPECT_TRUE(
+        prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error).failed());
+    EXPECT_EQ(error.code, InputErrorCode::UnsupportedSynchronization) << error.message;
+  }
+}
+
+TEST(ConSanBarrierStatic, RejectUnmatchedSignalAndWaitOperations) {
+  const std::vector<uint8_t> original =
+      test::read_fixture(test::target_fixture_path({"gfx1250", 32}, "native-15"));
+  ASSERT_FALSE(original.empty());
+  const TargetProfile &target = *target_profile("gfx1250");
+  InputError error;
+  const FailureOr<InputProgram> baseline =
+      build_input_program(original, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(baseline.succeeded()) << error.message;
+  ASSERT_EQ(baseline.value().barriers.size(), 1u);
+  const BarrierFacts &barrier = baseline.value().barriers.front();
+  const uint64_t text = baseline.value().text_file_offset;
+  const uint32_t wait = *wire::read_u32(original, text + barrier.original_wait);
+  const uint32_t nop = build_s_nop(0, target.arch);
+  struct Mutation {
+    const char *name;
+    uint64_t offset;
+    uint32_t word;
+  };
+  const std::array<Mutation, 3> mutations = {{
+      {.name = "signal without wait", .offset = barrier.original_wait, .word = nop},
+      {.name = "wait without signal", .offset = barrier.original_signal, .word = nop},
+      // Replace the scalar EXEC restore immediately after the valid pair;
+      // every other instruction and its original offset remain unchanged.
+      {.name = "extra wait after pair", .offset = barrier.original_wait + 4, .word = wait},
+  }};
+  for (const Mutation &mutation : mutations) {
+    SCOPED_TRACE(mutation.name);
+    std::vector<uint8_t> changed = original;
+    ASSERT_TRUE(wire::write_u32(changed, text + mutation.offset, mutation.word));
+    EXPECT_TRUE(build_input_program(changed, target, "lds_producer_consumer", error).failed());
+    EXPECT_EQ(error.code, InputErrorCode::UnsupportedSynchronization) << error.message;
   }
 }
 
