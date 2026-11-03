@@ -56,8 +56,10 @@ for r in rows:
     k = (r['label'], r['shape'], r['size'], r['config'])
     meta[k] = (r['src'], r['dst'], r['np'])
     status[k].add(r['result'])
-    if r['result'] in ('OK', 'PASS') and r['bw_rank_avg']:
+    if r['result'] in ('OK', 'PASS'):
         sb = src_bw(r)
+        if sb is None and not r['bw_rank_avg']:
+            continue
         bw, tm = sb if sb else (float(r['bw_rank_avg']), float(r['time_ms_max'] or 0))
         g[k].append((bw, float(r['total_gbs'] or 0), tm))
 
@@ -85,7 +87,8 @@ def cell(k):
 labels = sorted({r['label'] for r in rows}, key=lambda l: (nn(l), l))
 out = []
 for lab in labels:
-    shapes = [s for s in ['same00', 'cross01', 'cross10', 'mesh2'] if any(k[0] == lab and k[1] == s for k in meta)]
+    ORDER = ['same00', 'cross01', 'cross10', 'mesh2', 'rcross01', 'rmesh']
+    shapes = sorted({k[1] for k in meta if k[0] == lab}, key=lambda x: (ORDER.index(x) if x in ORDER else 99, x))
     for shp in shapes:
         ks = [k for k in meta if k[0] == lab and k[1] == shp]
         src, dst, np_ = meta[ks[0]]

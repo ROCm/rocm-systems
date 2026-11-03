@@ -3,7 +3,9 @@
 What this runs: the `nccl_m2n` (NVIDIA M2N reshard v0.2) basic API test matrix on top of RCCL,
 single node and two nodes, GIN proxy transport (`NCCL_GIN_TYPE=2`) over the bnxt_re RoCE NICs
 (sections 0-6). Sections 7-11 add the copy-mode / deadlock check, the `reshard_bench` matrix on
-1/2/4 nodes, `reshard_batch_bench_user_window`, `reshard_model_bench` and the reference/SOL numbers; section 12 is the optional PyTorch (`nccl.m2n`) check.
+1/2/4 nodes, `reshard_batch_bench_user_window`, `reshard_model_bench` and the reference/SOL numbers. Section 12
+covers the native CI ROCm 10.1 stack, > 4 nodes and PIPE in the basic matrix; section 13 the optional PyTorch
+(`nccl.m2n`) check.
 
 Code: `ROCm/rocm-systems`, branch `users/nikitaxgusev/m2n-enabling`;
 RCCL and `nccl_m2n` are both built from it, nothing else from the monorepo is needed. The scripts live next
@@ -156,7 +158,7 @@ movement, so RING, DIRECT and AUTO give the same numbers for the same copy path.
 
 Expected: **all PASS, no HANG**. GiB/s per rank, 2 MiB / 64 MiB / 1 GiB:
 
-| Mode | same 0->0 | cross 0->1 | cross 1->0 | 1x4 -> 2x2 |
+| Mode | same 0->0 | cross 0->1 | cross 1->0 | 1x4 -> 2x2 (source ranks) |
 |---|---|---|---|---|
 | PACK | 3.7 / 39 / 51 | 3.6 / 66 / 176 | 3.7 / 68 / 176 | 2.2 / 35 / 52 |
 | DIRECT | 0.8 / 3.3 / 3.8 | 0.7 / 7.1 / 9.6 | 0.6 / 7.5 / 9.5 | 0.5 / 7.7 / 6.0 |
@@ -286,7 +288,30 @@ were not run.
   (section 8), `logs/bench/batch/`, `logs/bench/model/`, `logs/bench/<label>/alltoall.log`,
   `logs/bench/job-*.out` (one per sbatch job).
 
-## 12. Optional: PyTorch (`nccl.m2n`)
+## 12. Beyond the container: native CI ROCm 10.1, > 4 nodes, PIPE basic matrix
+
+- Native stack: `native/env-ci-rocm-10.1.sh` (CI ROCm 10.1.0 + CI OpenMPI 5.0.9, plain ssh with the default
+  cluster key, Unix Makefiles instead of Ninja). Use it as `env.sh` in a copy of this directory.
+  Submit with `sbatch --propagate=NONE` and raise `ulimit -n` to the hard limit (the env file does it):
+  Slurm hands the login node's soft `nofile` (1024) to the job, which hangs `mpi1_direct` at
+  `case0064 uneven_ratio` (ranks diverge inside `ncclDevCommCreate`) and aborts 8+ node runs
+  (`Too many open files`, then HIP `out of memory`).
+- Expected on the native stack: basic matrix identical to the table above; best launches equal to the
+  container, but 12-50% of `reshard_bench` launches show a ~21 ms per-iteration floor (0% in the container).
+- More than 16 shards per side: cross-dim and mesh change fail with `invalid argument`
+  (`validateReshardPlanLimits ... sources=32 > MAX_SOURCES=16`). Use the replicated shapes `rcross01`
+  (`S/16 x 16 -> D/16 x 16`) and `rmesh` (`S/16 x 16 -> D/8 x 8`) of `bench_matrix.sh`. PIPE `rmesh` hangs
+  on 8 and 16 nodes.
+- Model bench at 64/128 ranks: shipped `dsv3-pp-64gpus-gb200`, `dsv3-128gpus-gb200`,
+  `qwen235b-TP2CP2PP4EP16-128gpus-gb200` fit 8-GPU nodes as is; model manifests `dsv3-toy.model.json` and
+  `amd-configs/generate_qwen3_235b.py` (4 of 94 layers). Pass the manifest as the 5th field of `MODEL_RUNS`.
+- PIPE in the basic matrix: `pipe_chunks.sh local|1node|2node` (one decade of cases per process, PIPE has
+  32 persistent control slots per communicator). Expected: 2 nodes 206/0/16; 1 node the 4 `uneven_ratio
+  240x240` cases (0066, 0078, 0081, 0093) hang, everything else passes (local 228, mpi1 205).
+- Proxy CPU: PACK ~600% CPU per rank (main busy-wait + `ncclGinProgress` and `ncclRmaProxyProgressThread`
+  per communicator, two communicators with split-comm), PIPE ~300%.
+
+## 13. Optional: PyTorch (`nccl.m2n`)
 
 The Python package is not part of this tree. Take `python/` from upstream `NVIDIA/nccl-extensions` at the
 commit in `../UPSTREAM_VERSION` (the same sources as `nccl_m2n`) and apply `m2n-pytorch-rocm-shim.patch`
@@ -370,4 +395,4 @@ Only `--buffer-provider torch` is supported on ROCm.
 (sr->rs 1:3 and rs->sr 3:1, both `sd` variants) hang: the PIPE channel planner puts two RDMA peers
 of one rank on the same channel and that rank bails out of a collective setup. PIPE also keeps 32
 persistent control slots per communicator, so the matrix has to be split into chunks of at most 32
-shapes, one process each. Leave PIPE out unless you are working on that planner.
+shapes, one process each (`pipe_chunks.sh`, section 12). Leave PIPE out unless you are working on that planner.

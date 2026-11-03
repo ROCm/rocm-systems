@@ -6,7 +6,7 @@
 L=$1; NP=$2; LAY=$3; shift 3
 LOG=$WORK/logs/$L.log
 PLACE=()
-[[ $LAY == 2node ]] && PLACE=(--hostfile $WORK/hostfile)
+[[ $LAY == 2node ]] && PLACE=(--hostfile ${HF:-$WORK/hostfile})
 { echo "=== $L np=$NP $LAY host=$(hostname -s) $(date -u) args: $*"
   timeout ${TMO:-3600} mpirun -np $NP "${PLACE[@]}" --map-by ppr:8:node --bind-to none \
     --mca pml ob1 --mca btl ^vader,openib \
