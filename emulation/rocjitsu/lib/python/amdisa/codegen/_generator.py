@@ -10294,7 +10294,9 @@ class CodeGenerator:
         else:
             stride_scale = f'{esz}U'
         acc = self._acc_vgpr_expr
-        L.extend(self._ds_inline_request2(sem, is_load=False, stride_scale=stride_scale))
+        L.extend(
+            self._ds_inline_request2(sem, is_load=False, stride_scale=stride_scale)
+        )
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(
