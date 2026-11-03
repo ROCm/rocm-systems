@@ -226,6 +226,7 @@ jobs:
       - name: Fetch RCCL artifacts
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
         run: |
           # `required` does not stop an API dispatch from passing an empty string.
           if [ -z "${ARTIFACT_RUN_ID}" ]; then
@@ -237,6 +238,7 @@ jobs:
             --repository "${GITHUB_REPOSITORY}" \
             --run-id "${ARTIFACT_RUN_ID}" \
             --expected-sha "${CANDIDATE_SHA}" \
+            --artifact-group "${ARTIFACT_GROUP}" \
             --output "${WORK_DIR}/candidate-artifact-run.json"
           ARTIFACT_BUILD_SHA="$(
             python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["artifact_build_sha"])' \
@@ -249,7 +251,7 @@ jobs:
           echo "Candidate build source: ${ARTIFACT_BUILD_SHA}"
           python3 build_tools/install_rocm_from_artifacts.py \
             --run-id="${ARTIFACT_RUN_ID}" \
-            --artifact-group="${{ inputs.artifact_group }}" \
+            --artifact-group="${ARTIFACT_GROUP}" \
             --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
             --rccl
 

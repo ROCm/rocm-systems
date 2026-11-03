@@ -71,11 +71,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id || github.run_id }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
         run: |
           python3 projects/rccl/ci/scripts/candidate_provenance.py verify-run \
             --repository "${GITHUB_REPOSITORY}" \
             --run-id "${ARTIFACT_RUN_ID}" \
-            --expected-sha "${{ inputs.candidate_sha }}" \
+            --expected-sha "${CANDIDATE_SHA}" \
+            --artifact-group "${ARTIFACT_GROUP}" \
             --output "${RUNNER_TEMP}/candidate-artifact-run.json"
       - name: Select runnable suites
         id: plan

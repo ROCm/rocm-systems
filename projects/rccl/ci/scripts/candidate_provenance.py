@@ -8,12 +8,18 @@ import json
 import os
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
 FULL_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 ARTIFACT_BUCKET = "therock-ci-artifacts-external"
+ARTIFACT_GROUP_TARGETS = {
+    "gfx94X-dcgpu": ("gfx942",),
+    "gfx950-dcgpu": ("gfx950",),
+}
 
 
 class ProvenanceError(RuntimeError):
@@ -92,18 +98,59 @@ def fetch_workflow_run(repository: str, run_id: str, token: str) -> dict:
         return json.load(response)
 
 
-def fetch_artifact_manifest(repository: str, run_id: str) -> tuple[str, dict | None]:
+def artifact_prefix(repository: str, run_id: str) -> str:
     repo_prefix = repository.replace("/", "-")
-    url = (
-        f"https://{ARTIFACT_BUCKET}.s3.amazonaws.com/"
-        f"{repo_prefix}/{run_id}-linux/manifests/therock_manifest.json"
+    return f"{repo_prefix}/{run_id}-linux/"
+
+
+def artifact_object_url(repository: str, run_id: str, relative: str) -> str:
+    key = artifact_prefix(repository, run_id) + relative
+    return f"https://{ARTIFACT_BUCKET}.s3.amazonaws.com/{key}"
+
+
+def fetch_artifact_manifests(repository: str, run_id: str) -> list[dict]:
+    prefix = artifact_prefix(repository, run_id)
+    listing_url = (
+        f"https://{ARTIFACT_BUCKET}.s3.amazonaws.com/?"
+        + urllib.parse.urlencode({"list-type": "2", "prefix": prefix})
+    )
+    with urllib.request.urlopen(listing_url, timeout=60) as response:
+        root = ET.fromstring(response.read())
+    namespace = {"s3": "http://s3.amazonaws.com/doc/2006-03-01/"}
+    if root.findtext("s3:IsTruncated", namespaces=namespace) == "true":
+        raise ProvenanceError(
+            f"artifact listing for run {run_id} is truncated"
+        )
+    keys = [
+        entry.findtext("s3:Key", namespaces=namespace)
+        for entry in root.findall("s3:Contents", namespace)
+    ]
+    manifests = []
+    for key in sorted(
+        key for key in keys
+        if key and key.endswith("/therock_manifest.json")
+    ):
+        relative = key.removeprefix(prefix)
+        url = f"https://{ARTIFACT_BUCKET}.s3.amazonaws.com/{key}"
+        with urllib.request.urlopen(url, timeout=60) as response:
+            manifests.append({
+                "path": relative,
+                "url": url,
+                "manifest": json.load(response),
+            })
+    return manifests
+
+
+def artifact_object_exists(repository: str, run_id: str, relative: str) -> bool:
+    request = urllib.request.Request(
+        artifact_object_url(repository, run_id, relative), method="HEAD"
     )
     try:
-        with urllib.request.urlopen(url, timeout=60) as response:
-            return url, json.load(response)
+        with urllib.request.urlopen(request, timeout=60):
+            return True
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
-            return url, None
+            return False
         raise
 
 
@@ -127,9 +174,10 @@ def verify_artifact_run(
     expected_sha: str,
     token: str,
     run: dict | None = None,
-    artifact_manifest: dict | None = None,
+    artifact_manifests: list[dict] | None = None,
     build_commit: dict | None = None,
-    manifest_lookup: bool = True,
+    artifact_group: str = "",
+    available_objects: set[str] | None = None,
 ) -> dict:
     """Verify an artifact run's source SHA and return a durable manifest."""
     expected = exact_sha(expected_sha, "candidate_sha")
@@ -140,32 +188,42 @@ def verify_artifact_run(
             f"artifact run {run_id} source mismatch: expected {expected}, got {actual}; "
             "refusing a stale candidate"
         )
-    manifest_url, fetched_manifest = ("", artifact_manifest)
-    if artifact_manifest is None and manifest_lookup:
-        manifest_url, fetched_manifest = fetch_artifact_manifest(repository, run_id)
-    else:
-        repo_prefix = repository.replace("/", "-")
-        manifest_url = (
-            f"https://{ARTIFACT_BUCKET}.s3.amazonaws.com/"
-            f"{repo_prefix}/{run_id}-linux/manifests/therock_manifest.json"
+    event = str(data.get("event", ""))
+    workflow_path = str(data.get("path", ""))
+    direct_workflow = ".github/workflows/therock-rccl-ci.yml"
+    multiarch_workflow = ".github/workflows/therock-multi-arch-ci.yml"
+    if workflow_path not in {direct_workflow, multiarch_workflow}:
+        raise ProvenanceError(
+            f"unsupported artifact producer workflow: {workflow_path!r}"
         )
 
-    event = str(data.get("event", ""))
-    build_sha = actual
-    relationship = "direct"
-    if fetched_manifest is not None:
-        if str(fetched_manifest.get("github_run_id", "")) != str(run_id):
+    manifests = (
+        artifact_manifests
+        if artifact_manifests is not None
+        else fetch_artifact_manifests(repository, run_id)
+    )
+    the_rock_shas = set()
+    manifest_pins = set()
+    for item in manifests:
+        manifest = item.get("manifest")
+        if not isinstance(manifest, dict):
+            raise ProvenanceError("artifact manifest entry is missing its JSON object")
+        if str(manifest.get("github_run_id", "")) != str(run_id):
             raise ProvenanceError(
                 f"artifact manifest run mismatch for {run_id}: "
-                f"{fetched_manifest.get('github_run_id')!r}"
+                f"{manifest.get('github_run_id')!r}"
             )
+        the_rock_shas.add(exact_sha(
+            str(manifest.get("the_rock_commit", "")),
+            "artifact manifest TheRock SHA",
+        ))
         matches = [
-            entry for entry in fetched_manifest.get("submodules", [])
+            entry for entry in manifest.get("submodules", [])
             if entry.get("submodule_name") == "rocm-systems"
         ]
         if len(matches) != 1:
             raise ProvenanceError(
-                f"artifact manifest for run {run_id} has {len(matches)} "
+                f"artifact manifest {item.get('path')!r} has {len(matches)} "
                 "rocm-systems source entries"
             )
         if (
@@ -174,19 +232,84 @@ def verify_artifact_run(
             != "https://github.com/ROCm/rocm-systems.git"
         ):
             raise ProvenanceError(
-                f"artifact manifest for run {run_id} has a non-canonical "
-                "rocm-systems source entry"
+                f"artifact manifest {item.get('path')!r} has a non-canonical "
+                "rocm-systems entry"
             )
-        build_sha = exact_sha(
+        manifest_pins.add(exact_sha(
             str(matches[0].get("pin_sha", "")),
-            "artifact manifest rocm-systems pin_sha",
-        )
-    elif event == "pull_request":
+            "artifact manifest rocm-systems dependency pin",
+        ))
+    if len(the_rock_shas) > 1 or len(manifest_pins) > 1:
         raise ProvenanceError(
-            f"pull-request artifact run {run_id} has no TheRock source manifest"
+            "artifact manifests disagree across families: "
+            f"TheRock={sorted(the_rock_shas)}, rocm-systems={sorted(manifest_pins)}"
         )
 
+    build_sha = actual
+    relationship = "direct"
+    authority = "workflow_run_head"
+    if workflow_path == multiarch_workflow:
+        roots = [
+            item for item in manifests
+            if item.get("path") == "manifests/therock_manifest.json"
+        ]
+        if len(roots) != 1:
+            raise ProvenanceError(
+                f"multi-arch artifact run {run_id} has {len(roots)} "
+                "authoritative root manifests"
+            )
+        build_sha = next(iter(manifest_pins))
+        authority = "multiarch_root_manifest"
+    else:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", artifact_group):
+            raise ProvenanceError(
+                f"invalid artifact_group for manifest selection: {artifact_group!r}"
+            )
+        targets = ARTIFACT_GROUP_TARGETS.get(artifact_group)
+        if not targets:
+            raise ProvenanceError(
+                f"unsupported direct artifact_group: {artifact_group!r}"
+            )
+        if manifests:
+            family_path = f"manifests/{artifact_group}/therock_manifest.json"
+            matches = [item for item in manifests if item.get("path") == family_path]
+            if len(matches) != 1:
+                raise ProvenanceError(
+                    f"direct artifact run {run_id} has {len(matches)} manifests "
+                    f"for group {artifact_group!r}"
+                )
+        required_objects = {
+            "rccl_lib_generic.tar.zst",
+            "rccl_lib_generic.tar.zst.sha256sum",
+        }
+        for target in targets:
+            required_objects.update({
+                f"rccl_lib_{target}.tar.zst",
+                f"rccl_lib_{target}.tar.zst.sha256sum",
+            })
+        if available_objects is None:
+            missing_objects = sorted(
+                relative for relative in required_objects
+                if not artifact_object_exists(repository, run_id, relative)
+            )
+        else:
+            missing_objects = sorted(required_objects - available_objects)
+        if missing_objects:
+            raise ProvenanceError(
+                f"artifact run {run_id} is missing required RCCL objects: "
+                f"{missing_objects}"
+            )
+        # This workflow checks out the requested rocm-systems ref directly.
+        # Its per-family manifest reports TheRock's dependency pin, not the
+        # workspace source that produced RCCL.
+        build_sha = actual
+        authority = "direct_workflow_head"
+
     if event == "pull_request":
+        if workflow_path != multiarch_workflow:
+            raise ProvenanceError(
+                f"pull-request artifacts are unsupported from {workflow_path!r}"
+            )
         if build_sha == actual:
             raise ProvenanceError(
                 f"pull-request artifact build {build_sha} is not a distinct merge"
@@ -231,10 +354,13 @@ def verify_artifact_run(
         "artifact_source_conclusion": data.get("conclusion") or "",
         "artifact_build_sha": build_sha,
         "artifact_build_relationship": relationship,
-        "artifact_manifest_url": manifest_url if fetched_manifest is not None else "",
+        "artifact_build_authority": authority,
+        "artifact_manifest_urls": [str(item.get("url", "")) for item in manifests],
         "artifact_manifest_the_rock_sha": (
-            str(fetched_manifest.get("the_rock_commit", ""))
-            if fetched_manifest is not None else ""
+            next(iter(the_rock_shas)) if the_rock_shas else ""
+        ),
+        "artifact_manifest_rocm_systems_dependency_pin": (
+            next(iter(manifest_pins)) if manifest_pins else ""
         ),
         "verified_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -255,6 +381,7 @@ def main() -> None:
     verify.add_argument("--repository", required=True)
     verify.add_argument("--run-id", required=True)
     verify.add_argument("--expected-sha", required=True)
+    verify.add_argument("--artifact-group", default="")
     verify.add_argument("--output", type=Path, required=True)
 
     args = parser.parse_args()
@@ -279,6 +406,7 @@ def main() -> None:
             run_id=args.run_id,
             expected_sha=args.expected_sha,
             token=token,
+            artifact_group=args.artifact_group,
         )
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")

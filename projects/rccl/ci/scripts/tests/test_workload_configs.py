@@ -103,6 +103,10 @@ class WorkflowsMatchConfigs(unittest.TestCase):
         self.assertNotIn("ref", plan_checkout["with"])
         self.assertIn("verify-run", verify["run"])
         self.assertEqual(
+            verify["env"]["ARTIFACT_GROUP"], "${{ inputs.artifact_group }}"
+        )
+        self.assertNotIn("${{ inputs.artifact_group }}", verify["run"])
+        self.assertEqual(
             linux["jobs"]["test-plan"]["permissions"]["actions"], "read"
         )
         for job in linux["jobs"].values():
@@ -132,6 +136,10 @@ class WorkflowsMatchConfigs(unittest.TestCase):
         )
         self.assertIn("candidate_provenance.py", fetch["run"])
         self.assertIn("verify-run", fetch["run"])
+        self.assertEqual(
+            fetch["env"]["ARTIFACT_GROUP"], "${{ inputs.artifact_group }}"
+        )
+        self.assertNotIn("${{ inputs.artifact_group }}", fetch["run"])
         self.assertIn('["artifact_build_sha"]', fetch["run"])
         self.assertIn(
             'candidate-source checkout --detach "${ARTIFACT_BUILD_SHA}"',

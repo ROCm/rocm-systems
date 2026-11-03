@@ -14,6 +14,12 @@ import test_madengine as tm
 
 SHA = "a" * 40
 OTHER_SHA = "b" * 40
+GFX950_OBJECTS = {
+    "rccl_lib_generic.tar.zst",
+    "rccl_lib_generic.tar.zst.sha256sum",
+    "rccl_lib_gfx950.tar.zst",
+    "rccl_lib_gfx950.tar.zst.sha256sum",
+}
 
 
 class CandidateResolutionTest(unittest.TestCase):
@@ -70,6 +76,7 @@ class CandidateResolutionTest(unittest.TestCase):
             "head_sha": SHA,
             "html_url": "https://github.com/ROCm/rocm-systems/actions/runs/123",
             "event": "schedule",
+            "path": ".github/workflows/therock-rccl-ci.yml",
             "status": "completed",
             "conclusion": "failure",
         }
@@ -79,7 +86,9 @@ class CandidateResolutionTest(unittest.TestCase):
             expected_sha=SHA,
             token="unused",
             run=run,
-            manifest_lookup=False,
+            artifact_manifests=[],
+            artifact_group="gfx950-dcgpu",
+            available_objects=GFX950_OBJECTS,
         )
         self.assertEqual(manifest["artifact_source_sha"], SHA)
         self.assertEqual(manifest["artifact_build_sha"], SHA)
@@ -103,6 +112,7 @@ class CandidateResolutionTest(unittest.TestCase):
             "head_sha": SHA,
             "html_url": "https://github.com/ROCm/rocm-systems/actions/runs/123",
             "event": "pull_request",
+            "path": ".github/workflows/therock-multi-arch-ci.yml",
             "status": "completed",
             "conclusion": "success",
         }
@@ -120,13 +130,18 @@ class CandidateResolutionTest(unittest.TestCase):
             "sha": merge_sha,
             "parents": [{"sha": base_sha}, {"sha": SHA}],
         }
+        manifests = [{
+            "path": "manifests/therock_manifest.json",
+            "url": "https://example.invalid/manifests/therock_manifest.json",
+            "manifest": artifact_manifest,
+        }]
         manifest = cp.verify_artifact_run(
             repository="ROCm/rocm-systems",
             run_id="123",
             expected_sha=SHA,
             token="unused",
             run=run,
-            artifact_manifest=artifact_manifest,
+            artifact_manifests=manifests,
             build_commit=build_commit,
         )
         self.assertEqual(manifest["artifact_source_sha"], SHA)
@@ -134,7 +149,9 @@ class CandidateResolutionTest(unittest.TestCase):
         self.assertEqual(
             manifest["artifact_build_relationship"], "pull_request_merge"
         )
-        self.assertIn("therock_manifest.json", manifest["artifact_manifest_url"])
+        self.assertIn(
+            "therock_manifest.json", manifest["artifact_manifest_urls"][0]
+        )
 
         wrong_commit = {
             "sha": merge_sha,
@@ -147,17 +164,17 @@ class CandidateResolutionTest(unittest.TestCase):
                 expected_sha=SHA,
                 token="unused",
                 run=run,
-                artifact_manifest=artifact_manifest,
+                artifact_manifests=manifests,
                 build_commit=wrong_commit,
             )
-        with self.assertRaisesRegex(cp.ProvenanceError, "no TheRock source manifest"):
+        with self.assertRaisesRegex(cp.ProvenanceError, "0 authoritative root manifests"):
             cp.verify_artifact_run(
                 repository="ROCm/rocm-systems",
                 run_id="123",
                 expected_sha=SHA,
                 token="unused",
                 run=run,
-                manifest_lookup=False,
+                artifact_manifests=[],
             )
 
         direct_manifest = json.loads(json.dumps(artifact_manifest))
@@ -169,7 +186,11 @@ class CandidateResolutionTest(unittest.TestCase):
                 expected_sha=SHA,
                 token="unused",
                 run=run,
-                artifact_manifest=direct_manifest,
+                artifact_manifests=[{
+                    "path": "manifests/therock_manifest.json",
+                    "url": "https://example.invalid/manifest.json",
+                    "manifest": direct_manifest,
+                }],
             )
 
         for parents in (
@@ -185,7 +206,7 @@ class CandidateResolutionTest(unittest.TestCase):
                     expected_sha=SHA,
                     token="unused",
                     run=run,
-                    artifact_manifest=artifact_manifest,
+                    artifact_manifests=manifests,
                     build_commit={"sha": merge_sha, "parents": parents},
                 )
 
@@ -203,8 +224,125 @@ class CandidateResolutionTest(unittest.TestCase):
                 expected_sha=SHA,
                 token="unused",
                 run=run,
-                artifact_manifest=ambiguous_manifest,
+                artifact_manifests=[{
+                    "path": "manifests/therock_manifest.json",
+                    "url": "https://example.invalid/manifest.json",
+                    "manifest": ambiguous_manifest,
+                }],
                 build_commit=build_commit,
+            )
+
+    def test_direct_run_uses_head_not_per_family_dependency_pin(self):
+        run = {
+            "head_sha": SHA,
+            "html_url": "https://github.com/ROCm/rocm-systems/actions/runs/123",
+            "event": "workflow_dispatch",
+            "path": ".github/workflows/therock-rccl-ci.yml",
+            "status": "completed",
+            "conclusion": "success",
+        }
+        family_manifest = {
+            "github_run_id": "123",
+            "the_rock_commit": "c" * 40,
+            "submodules": [{
+                "submodule_name": "rocm-systems",
+                "submodule_path": "rocm-systems",
+                "submodule_url": "https://github.com/ROCm/rocm-systems.git",
+                # This is TheRock's dependency pin, not this workflow's checkout.
+                "pin_sha": OTHER_SHA,
+            }],
+        }
+        manifests = [{
+            "path": "manifests/gfx950-dcgpu/therock_manifest.json",
+            "url": "https://example.invalid/gfx950-dcgpu/therock_manifest.json",
+            "manifest": family_manifest,
+        }]
+        objects = GFX950_OBJECTS
+        verified = cp.verify_artifact_run(
+            repository="ROCm/rocm-systems",
+            run_id="123",
+            expected_sha=SHA,
+            token="unused",
+            run=run,
+            artifact_manifests=manifests,
+            artifact_group="gfx950-dcgpu",
+            available_objects=objects,
+        )
+        self.assertEqual(verified["artifact_build_sha"], SHA)
+        self.assertEqual(
+            verified["artifact_build_authority"], "direct_workflow_head"
+        )
+        self.assertEqual(
+            verified["artifact_manifest_rocm_systems_dependency_pin"], OTHER_SHA
+        )
+
+        gfx94_objects = {
+            "rccl_lib_generic.tar.zst",
+            "rccl_lib_generic.tar.zst.sha256sum",
+            "rccl_lib_gfx942.tar.zst",
+            "rccl_lib_gfx942.tar.zst.sha256sum",
+        }
+        gfx94_verified = cp.verify_artifact_run(
+            repository="ROCm/rocm-systems",
+            run_id="123",
+            expected_sha=SHA,
+            token="unused",
+            run=run,
+            artifact_manifests=[{
+                **manifests[0],
+                "path": "manifests/gfx94X-dcgpu/therock_manifest.json",
+            }],
+            artifact_group="gfx94X-dcgpu",
+            available_objects=gfx94_objects,
+        )
+        self.assertEqual(gfx94_verified["artifact_build_sha"], SHA)
+
+        with self.assertRaisesRegex(cp.ProvenanceError, "missing required RCCL"):
+            cp.verify_artifact_run(
+                repository="ROCm/rocm-systems",
+                run_id="123",
+                expected_sha=SHA,
+                token="unused",
+                run=run,
+                artifact_manifests=manifests,
+                artifact_group="gfx950-dcgpu",
+                available_objects=objects - {"rccl_lib_gfx950.tar.zst"},
+            )
+
+        disagreeing = json.loads(json.dumps(family_manifest))
+        disagreeing["submodules"][-1]["pin_sha"] = "d" * 40
+        with self.assertRaisesRegex(cp.ProvenanceError, "disagree across families"):
+            cp.verify_artifact_run(
+                repository="ROCm/rocm-systems",
+                run_id="123",
+                expected_sha=SHA,
+                token="unused",
+                run=run,
+                artifact_manifests=manifests + [{
+                    "path": "manifests/other/therock_manifest.json",
+                    "url": "https://example.invalid/other/therock_manifest.json",
+                    "manifest": disagreeing,
+                }],
+                artifact_group="gfx950-dcgpu",
+                available_objects=objects,
+            )
+
+        missing_schema = json.loads(json.dumps(family_manifest))
+        missing_schema.pop("the_rock_commit")
+        with self.assertRaisesRegex(cp.ProvenanceError, "TheRock SHA"):
+            cp.verify_artifact_run(
+                repository="ROCm/rocm-systems",
+                run_id="123",
+                expected_sha=SHA,
+                token="unused",
+                run=run,
+                artifact_manifests=[{
+                    "path": "manifests/gfx950-dcgpu/therock_manifest.json",
+                    "url": "https://example.invalid/manifest.json",
+                    "manifest": missing_schema,
+                }],
+                artifact_group="gfx950-dcgpu",
+                available_objects=objects,
             )
 
         unsupported = {**run, "event": "pull_request_target"}
@@ -215,7 +353,9 @@ class CandidateResolutionTest(unittest.TestCase):
                 expected_sha=SHA,
                 token="unused",
                 run=unsupported,
-                manifest_lookup=False,
+                artifact_manifests=[],
+                artifact_group="gfx950-dcgpu",
+                available_objects=GFX950_OBJECTS,
             )
 
 
