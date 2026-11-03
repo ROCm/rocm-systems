@@ -1,6 +1,12 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+// Keep in sync with its copies under projects/rocprofiler-compute/:
+//   skills/rocprof-compute-kernel-bottleneck/evals/files/vcopy.cpp
+//   skills/rocprof-compute-memory/evals/files/vcopy.cpp
+//   skills/rocprof-compute-roofline/evals/files/vcopy.cpp
+//   skills/rocprof-compute-speed-of-light/evals/files/vcopy.cpp
+
 #include "hip/hip_runtime.h"
 #include <assert.h>
 #include <thread>

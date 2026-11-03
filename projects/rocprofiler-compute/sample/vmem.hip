@@ -1,6 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+// Keep in sync with its copies under projects/rocprofiler-compute/:
+//   skills/rocprof-compute-kernel-bottleneck/evals/files/vmem.hip
+//   skills/rocprof-compute-pc-sampling/evals/files/vmem.hip
+
 /*
 An example to explore global/generic instructions.
 Written by Nicholas Curtis [AMD].
