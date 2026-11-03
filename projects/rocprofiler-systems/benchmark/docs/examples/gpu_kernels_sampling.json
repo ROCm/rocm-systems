@@ -1,0 +1,42 @@
+{
+    "reference": "sampling_off",
+    "run": {
+        "mode": "medium",
+        "output": "../../resource/results/examples/gpu_kernels_sampling.json"
+    },
+    "tools": [
+        {
+            "name": "sampling_off",
+            "tool": "rocprof-sys-run",
+            "tool_arguments": [
+                {
+                    "arg_name": "--output",
+                    "value": "/tmp/out"
+                }
+            ],
+            "tool_env": [
+                {
+                    "key": "ROCPROFSYS_USE_SAMPLING",
+                    "value": "OFF"
+                }
+            ]
+        },
+        {
+            "name": "sampling_on",
+            "tool": "rocprof-sys-run",
+            "tool_arguments": [
+                {
+                    "arg_name": "--output",
+                    "value": "/tmp/out"
+                }
+            ],
+            "tool_env": [
+                {
+                    "key": "ROCPROFSYS_USE_SAMPLING",
+                    "value": "ON"
+                }
+            ]
+        }
+    ],
+    "workload": "../../build/gpu_kernels"
+}

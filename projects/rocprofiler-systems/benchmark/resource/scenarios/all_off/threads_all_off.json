@@ -1,0 +1,224 @@
+{
+    "reference": "workload",
+    "run": {
+        "clean": [
+            "/tmp/rocprofsys-bench-threads_all_off"
+        ],
+        "mode": "medium",
+        "output": "../../results/all_off/threads_all_off.json",
+        "runs": 150
+    },
+    "tools": [
+        {
+            "name": "all_off",
+            "tool": "rocprof-sys-run",
+            "tool_env": [
+                {
+                    "key": "ROCPROFSYS_USE_MPI",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_OMPT",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_SHMEM",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_ROCPD",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_SAMPLING",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_PROCESS_SAMPLING",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_AMD_SMI",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_TRACE",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_PROFILE",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_CPU_FREQ_ENABLED",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_MPIP",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_CAUSAL",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_CODE_COVERAGE",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_KOKKOSP",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_RCCLP",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_AINIC",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_UCX",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_OPENSHMEM",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_FLAT_PROFILE",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_PID",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_TIME_OUTPUT",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_TEMPORARY_FILES",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_MERGE_PERFETTO_FILES",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_PERFETTO_ANNOTATIONS",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_ROCM_GROUP_BY_QUEUE",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_INCLUDE_INLINES",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_KEEP_INTERNAL",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_TRACE_THREAD_BARRIERS",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_TRACE_THREAD_JOIN",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_TRACE_THREAD_LOCKS",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_TRACE_THREAD_RW_LOCKS",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_CAUSAL_END_TO_END",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_CAUSAL_FILE_RESET",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_CAUSAL_FUNCTION_EXCLUDE_DEFAULTS",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_KOKKOSP_DEEP_COPY",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_KOKKOSP_KERNEL_LOGGER",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_TRACE_LEGACY",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_AMD_SMI_METRICS",
+                    "value": "none"
+                },
+                {
+                    "key": "ROCPROFSYS_CPU_METRICS",
+                    "value": "none"
+                },
+                {
+                    "key": "ROCPROFSYS_ROCM_DOMAINS",
+                    "value": ""
+                },
+                {
+                    "key": "ROCPROFSYS_ROCM_EVENTS",
+                    "value": ""
+                },
+                {
+                    "key": "ROCPROFSYS_GPU_PERF_COUNTERS",
+                    "value": ""
+                },
+                {
+                    "key": "ROCPROFSYS_PAPI_EVENTS",
+                    "value": ""
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_CPUS",
+                    "value": "none"
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_GPUS",
+                    "value": "none"
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_AINICS",
+                    "value": "none"
+                },
+                {
+                    "key": "ROCPROFSYS_TIMEMORY_COMPONENTS",
+                    "value": "none"
+                },
+                {
+                    "key": "ROCPROFSYS_SELECTED_REGIONS",
+                    "value": ""
+                },
+                {
+                    "key": "ROCPROFSYS_OUTPUT_PATH",
+                    "value": "/tmp/rocprofsys-bench-threads_all_off"
+                }
+            ]
+        }
+    ],
+    "workload": "../../../build/threads"
+}

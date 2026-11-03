@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bench"
+version = "0.1.0"
+description = "A/B benchmark of command overhead (wall, CPU, RSS)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["jsonschema"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+bench = "bench.cli:main"
+bench-scenario = "bench.cli:scenario_main"
+bench-snapshot = "bench.cli:snapshot_main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+bench = ["config.schema.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

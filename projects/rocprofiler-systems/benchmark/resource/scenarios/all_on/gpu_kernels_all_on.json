@@ -1,0 +1,124 @@
+{
+    "reference": "workload",
+    "run": {
+        "clean": [
+            "/tmp/rocprofsys-bench-gpu_kernels_all_on"
+        ],
+        "mode": "medium",
+        "output": "../../results/all_on/gpu_kernels_all_on.json",
+        "runs": 150
+    },
+    "tools": [
+        {
+            "name": "all_on",
+            "tool": "rocprof-sys-run",
+            "tool_env": [
+                {
+                    "key": "ROCPROFSYS_USE_ROCPD",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_TRACE",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_PROFILE",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_SAMPLING",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_PROCESS_SAMPLING",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_AMD_SMI",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_OMPT",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_CPU_FREQ_ENABLED",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_PERFETTO_ANNOTATIONS",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_INCLUDE_INLINES",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_KEEP_INTERNAL",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_TRACE_THREAD_BARRIERS",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_TRACE_THREAD_JOIN",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_TRACE_THREAD_LOCKS",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_TRACE_THREAD_RW_LOCKS",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_ROCM_GROUP_BY_QUEUE",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_TEMPORARY_FILES",
+                    "value": "true"
+                },
+                {
+                    "key": "ROCPROFSYS_AMD_SMI_METRICS",
+                    "value": "busy,temp,power,mem_usage,sdma_usage,gfx_clock,mem_clock,vcn_activity,pcie"
+                },
+                {
+                    "key": "ROCPROFSYS_CPU_METRICS",
+                    "value": "all"
+                },
+                {
+                    "key": "ROCPROFSYS_ROCM_DOMAINS",
+                    "value": "hip_api,hip_compiler_api,hip_runtime_api,hipfile_api,hsa_amd_ext_api,hsa_api,hsa_core_api,hsa_finalize_ext_api,hsa_image_ext_api,kernel_dispatch,kfd_event_dropped_events,kfd_event_page_fault,kfd_event_page_migrate,kfd_event_queue,kfd_event_unmap_from_gpu,kfd_events,kfd_page_fault,kfd_page_migrate,kfd_queue,marker_api,memory_allocation,memory_copy,ompt,rccl_api,rocdecode_api,rocjpeg_api,rocshmem_api,roctx,scratch_memory"
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_CPUS",
+                    "value": "all"
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_GPUS",
+                    "value": "all"
+                },
+                {
+                    "key": "ROCPROFSYS_TIMEMORY_COMPONENTS",
+                    "value": "wall_clock,cpu_clock,peak_rss,page_rss"
+                },
+                {
+                    "key": "ROCPROFSYS_OUTPUT_PATH",
+                    "value": "/tmp/rocprofsys-bench-gpu_kernels_all_on"
+                }
+            ]
+        }
+    ],
+    "workload": "../../../build/gpu_kernels"
+}

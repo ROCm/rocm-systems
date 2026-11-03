@@ -54,6 +54,9 @@ _toc.yml
 /.claude
 /.cursor
 /.pytest_cache
+/benchmark/.pytest_cache
+/benchmark/resource/results/
+/benchmark/resource/snapshots/results/
 
 /compile_commands.json
 /rocprof-sys-install.py
