@@ -70,11 +70,9 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - Ubuntu20
           - Ubuntu22
           - Debian10
           - SLES
-          - RHEL8
           - RHEL9
           - RHEL10
           - AzureLinux3

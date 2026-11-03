@@ -66,7 +66,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: Ubuntu20,    package_format: deb, arch_suffix: _amd64.deb }
           - { os: Ubuntu22,    package_format: deb, arch_suffix: _amd64.deb }
           # The internal registry has no debian-12/13, so these two use the
           # official images, pinned by digest. They ship no build tooling;
@@ -76,7 +75,6 @@ jobs:
           - { os: Debian13,    package_format: deb, arch_suffix: _amd64.deb,
               image: "debian:13@sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1" } # trixie, 2026-08-24
           - { os: SLES,        package_format: rpm, arch_suffix: .rpm }
-          - { os: RHEL8,       package_format: rpm, arch_suffix: .rpm }
           - { os: RHEL9,       package_format: rpm, arch_suffix: .rpm }
           - { os: RHEL10,      package_format: rpm, arch_suffix: .rpm }
           - { os: AlmaLinux8,  package_format: rpm, arch_suffix: .rpm }
