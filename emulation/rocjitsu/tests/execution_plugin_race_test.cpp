@@ -830,6 +830,8 @@ protected:
   static constexpr uint64_t kGlobal = 0x10000;
   static constexpr uint32_t kTileOffset = 0;
   static constexpr uint32_t kEmptyOffset = 64;
+  /// The descriptor's data_size encoding for eight-byte elements.
+  static constexpr uint32_t kI64DataSizeEncoding = 3;
 
   struct Descriptor {
     uint32_t lds_offset = kTileOffset;
@@ -837,7 +839,7 @@ protected:
     uint32_t tile_dim0 = 4;   ///< Zero makes the tile a NOP.
     uint32_t tile_dim1 = 0;
     uint32_t count = 1;     ///< Zero makes this a NULL tensor.
-    uint32_t data_size = 2; ///< log2 of the element size in bytes.
+    uint32_t data_size = 2; ///< D# data_size encoding: elements are 1 << data_size bytes.
   };
 
   void SetUp() override {
@@ -932,39 +934,44 @@ TEST_F(DecodedTensorDmaRaceTest, LoadStaysPendingUntilTheWaitCoversIt) {
 // An 8-byte element at offset 252 straddles the end of the 256-byte allocation:
 // the transfer moves only its first four bytes, so its LDS range ends
 // mid-element. The race detector tracks those bytes, at byte granularity.
-constexpr uint32_t kI64 = 3;
 
 TEST_F(DecodedTensorDmaRaceTest, PartialElementLoadIsAnLdsWrite) {
-  execute_decoded_tensor(0, /*is_load=*/true, {.lds_offset = 252, .tile_dim0 = 1, .data_size = kI64});
+  execute_decoded_tensor(0, /*is_load=*/true,
+                         {.lds_offset = 252, .tile_dim0 = 1, .data_size = kI64DataSizeEncoding});
   EXPECT_TRUE(ds_read(1, waves[1]->lds_base() + 252));
 }
 
 TEST_F(DecodedTensorDmaRaceTest, MergedLoadKeepsItsPartialTail) {
   // Elements at 244 and 252 merge into one range of twelve bytes.
-  execute_decoded_tensor(0, /*is_load=*/true, {.lds_offset = 244, .tile_dim0 = 2, .data_size = kI64});
+  execute_decoded_tensor(0, /*is_load=*/true,
+                         {.lds_offset = 244, .tile_dim0 = 2, .data_size = kI64DataSizeEncoding});
   EXPECT_TRUE(ds_read(1, waves[1]->lds_base() + 252));
 }
 
 TEST_F(DecodedTensorDmaRaceTest, PartialElementStoreIsAnLdsRead) {
-  execute_decoded_tensor(0, /*is_load=*/false, {.lds_offset = 252, .tile_dim0 = 1, .data_size = kI64});
+  execute_decoded_tensor(0, /*is_load=*/false,
+                         {.lds_offset = 252, .tile_dim0 = 1, .data_size = kI64DataSizeEncoding});
   EXPECT_TRUE(ds_write(1, waves[1]->lds_base() + 252));
 }
 
 TEST_F(DecodedTensorDmaRaceTest, PartialElementLoadIsCheckedAgainstAnOlderRead) {
   EXPECT_FALSE(ds_read(1, waves[1]->lds_base() + 252));
   const size_t previous = sink->str().size();
-  execute_decoded_tensor(0, /*is_load=*/true, {.lds_offset = 252, .tile_dim0 = 1, .data_size = kI64});
+  execute_decoded_tensor(0, /*is_load=*/true,
+                         {.lds_offset = 252, .tile_dim0 = 1, .data_size = kI64DataSizeEncoding});
   EXPECT_NE(sink->str().find("RACE ", previous), std::string::npos) << sink->str();
 }
 
 // Controls: whole 8-byte elements inside the allocation.
 TEST_F(DecodedTensorDmaRaceTest, WholeElementLoadIsAnLdsWrite) {
-  execute_decoded_tensor(0, /*is_load=*/true, {.lds_offset = 240, .tile_dim0 = 1, .data_size = kI64});
+  execute_decoded_tensor(0, /*is_load=*/true,
+                         {.lds_offset = 240, .tile_dim0 = 1, .data_size = kI64DataSizeEncoding});
   EXPECT_TRUE(ds_read(1, waves[1]->lds_base() + 244));
 }
 
 TEST_F(DecodedTensorDmaRaceTest, WholeElementStoreIsAnLdsRead) {
-  execute_decoded_tensor(0, /*is_load=*/false, {.lds_offset = 240, .tile_dim0 = 1, .data_size = kI64});
+  execute_decoded_tensor(0, /*is_load=*/false,
+                         {.lds_offset = 240, .tile_dim0 = 1, .data_size = kI64DataSizeEncoding});
   EXPECT_TRUE(ds_write(1, waves[1]->lds_base() + 244));
 }
 
