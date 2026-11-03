@@ -24,8 +24,7 @@ constexpr CachePolicy kDdaA2ATdmPolicy = createCachePolicy(TemporalHint::NT, Mem
 // LDS window -> the peer's scratch slot. Items are numbered item = tileIdx * nRanks + k and item k goes to
 // peer (selfRank + k) % nRanks. A rank that drains slot s therefore sees the item index its writer used, and
 // since the grid depends only on bytesPerRank the same block owns it on both ends, so the per-block barrier
-// pairs the write with the read. There is no closing barrier: the drain is local and the next kernel's
-// opening barrier covers scratch reuse.
+// pairs the write with the read.
 template <int TileBytes, int UnrollPeers>
 __global__ void __launch_bounds__(kDdaA2ATdmMaxWarpsPerBlock* kDdaA2ATdmWave)
 ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __restrict__ recvbuff,
@@ -47,7 +46,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
   const size_t selfSlot = static_cast<size_t>(selfRank) * bytesPerRank;
 
   // The previous collective's readers must be done with every scratch slot this block is about to overwrite.
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   for (size_t base = first; base < nItems; base += stride) {
 #pragma unroll
@@ -108,6 +107,8 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
     }
     tdm::tdmWait();
   }
+
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
 #else
   // Only dispatched on gfx1250; every other arch still has to compile this kernel.
   (void)peerScratch;
@@ -121,19 +122,13 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
 #endif
 }
 
-// Peer-major TDM push: the grid is nRanks * blocksPerPeer blocks, and block b works only on peer
-// k = b / blocksPerPeer (rank (selfRank + k) % nRanks), so its tiles stream to one remote GPU. Slice
-// j = b % blocksPerPeer of the group interleaves over the peer's chunk: the group's waves take UnrollPeers
-// consecutive tiles at a time, round-robin. The block drains the slot of rank (selfRank - k) % nRanks, which that
-// rank's block b wrote with the same tiles, so the two-rank handshake between block b on the destination and on the
-// source pairs the write with the read, as in ddaAllToAllFabricPushPeer. Out of place only: a block drains into
-// recvbuff slots that other blocks of this rank may still be reading from sendbuff.
-// pieces >= 1 (the host never passes 0): a wave goes through nRounds rounds of UnrollPeers tiles, and a piece is a
-// run of those rounds. Step p pushes piece p, waits for the source's piece p - 1 and drains it, then posts piece p.
-// With drain > 0, drain * (nRanks - 1) extra blocks drain the scratch (see ddaAllToAllFabricPushPeer).
-// The flags are signalWait / postPeer / waitPeer of FabricGpuBarrier. With the default epoch flags a post never waits for the previous piece to be
-// consumed, and every wave polls the flag itself. The pieces land at their place in the chunk, so the scratch needed is
-// unchanged. One piece pushes the whole share, posts, waits and drains: no overlap.
+// Peer-major TDM push: nRanks * blocksPerPeer blocks; block b pushes only to peer (selfRank + k) % nRanks with
+// k = b / blocksPerPeer, its waves taking UnrollPeers consecutive tiles round-robin over the chunk, and drains the slot
+// of rank (selfRank - k) % nRanks, which that rank's block b wrote with the same tiles. Out of place only.
+// The share is cut into pieces (>= 1) of rounds: step p pushes piece p, drains the source's piece p - 1 (postPeer /
+// waitPeer of FabricGpuBarrier), then posts p. With drain > 0, drain * (nRanks - 1) extra blocks do the draining (see
+// ddaAllToAllFabricPushPeer). Push blocks start with a two-rank handshake with their peer; at exit every block syncs
+// with the same block index on all ranks, so the scratch is not reused (e.g. by LL/LL128) before every rank is done.
 template <int TileBytes, int UnrollPeers>
 __global__ void __launch_bounds__(kDdaA2ATdmMaxWarpsPerBlock* kDdaA2ATdmWave)
 ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* __restrict__ recvbuff,
@@ -202,6 +197,7 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
                  recvbuff + fromOff, p);
       }
     }
+    barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
     barrier.epochEnd(epoch, pieces);
     return;
   }
@@ -233,6 +229,8 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
     }
     if (p < nPieces) barrier.postPeer(peer, epoch, static_cast<unsigned>(p));
   }
+
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
   barrier.epochEnd(epoch, pieces);
 #else
   // Only dispatched on gfx1250; every other arch still has to compile this kernel.

@@ -68,7 +68,7 @@ __launch_bounds__(512)
                                         const T* __restrict__ sendbuff, int selfRank, int nRanks,
                                         FabricGpuBarrier barrier) {
   // The previous collective's readers must be done with every scratch slot this block is about to overwrite.
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   const int nRanksEff = (NRANKS_CT > 0) ? NRANKS_CT : nRanks;
   constexpr int kUnroll = (NRANKS_CT > 0) ? NRANKS_CT : 8;
@@ -113,6 +113,8 @@ __launch_bounds__(512)
       *reinterpret_cast<uint4*>(&recvbuff[slotIdx]) = reinterpret_cast<const uint4*>(&selfScratch[slotIdx])[0];
     }
   }
+
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
 }
 
 // Peer-major copy loops keep this many 16 B loads in flight per thread.
@@ -202,6 +204,7 @@ __launch_bounds__(512)
         ddaA2APeerCopy<true, false>(recvbuff + fromSlot, ipcbuffs[selfRank] + fromSlot, lo, hi, stride);
       }
     }
+    barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
     barrier.epochEnd(epoch, pieces);
     return;
   }
@@ -220,23 +223,24 @@ __launch_bounds__(512)
   if (k != 0) barrier.signalWait(srcRank, peer, epoch);
 
   {
-    auto piece = [&](size_t p) { return pieceOf(begin, p); };
     // With drain blocks the push blocks (k != 0) only push and post. Group 0 pushes its own chunk into its own scratch
     // and still drains it, since no drain block serves the own slot.
     const bool drainHere = drain == 0 || k == 0;
     for (size_t p = 0; p <= nPieces; ++p) {
       if (p < nPieces) {
-         auto [lo, hi] = piece(p);
+         auto [lo, hi] = pieceOf(begin, p);
          ddaA2APeerCopy<false, false>(dst, src, lo, hi, stride);
       }
       if (p > 0 && drainHere) {
         barrier.waitPeer(srcRank, epoch, static_cast<unsigned>(p - 1));
-        auto [lo, hi] = piece(p - 1);
+        auto [lo, hi] = pieceOf(begin, p - 1);
         ddaA2APeerCopy<true, false>(recvbuff + slot, ipcbuffs[selfRank] + slot, lo, hi, stride);
       }
       if (p < nPieces) barrier.postPeer(peer, epoch, static_cast<unsigned>(p));
     }
   }
+
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
   barrier.epochEnd(epoch, pieces);
 }
 } // namespace dda::common
