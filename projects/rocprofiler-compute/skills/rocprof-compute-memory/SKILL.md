@@ -95,15 +95,7 @@ rocprof-compute profile --experimental --membw-analysis -b 3 30 \
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id>
 ```
 
-Its cutoffs and guidance text are data, not something to restate from memory.
-They live in
-[gfx950_membw_tree_spec.yaml](../../src/membw_analysis/tree_spec/gfx950_membw_tree_spec.yaml)
-and
-[gfx950_membw_guidance.yaml](../../src/membw_analysis/tree_spec/gfx950_membw_guidance.yaml).
-A ROCm install has them in
-`<rocm-path>/libexec/rocprofiler-compute/membw_analysis/tree_spec/`. Read those
-files when you need to explain a verdict, and report the guidance the tool
-produced rather than substituting your own numbers.
+Report the guidance the tool produced rather than substituting your own numbers.
 
 On any other architecture, use the Memory Chart path above.
 

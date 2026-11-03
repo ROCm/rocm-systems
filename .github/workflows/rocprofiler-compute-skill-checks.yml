@@ -4,9 +4,8 @@ on:
   pull_request:
     paths:
       - "projects/rocprofiler-compute/skills/**"
-      # The skills link to these files, so renaming one breaks a skill.
+      # The skills link to the docs, so renaming a page breaks a skill.
       - "projects/rocprofiler-compute/docs/**"
-      - "projects/rocprofiler-compute/src/membw_analysis/tree_spec/**"
       - ".github/workflows/rocprofiler-compute-skill-checks.yml"
   workflow_dispatch:
 
