@@ -903,7 +903,6 @@ if(BUILD_TESTS)
     # internal (Debug-visible) symbols normally.
     target_compile_options(rccl-UnitTestsFixturesDebug PRIVATE
       -fvisibility=hidden -fvisibility-inlines-hidden)
-    # NetDevsPolicyTests and NetDevsPolicyP2pNetTests load a topology XML fixture
     # SearchTests.cpp #includes the hipify-generated copy of src/graph/search.cc
     # directly (via #include SEARCH_CC_PATH) so it can exercise search.cc's
     # internal symbols in the same TU. Pass the absolute path as a source-scoped
@@ -913,11 +912,39 @@ if(BUILD_TESTS)
       COMPILE_DEFINITIONS
         "SEARCH_CC_PATH=\"${PROJECT_BINARY_DIR}/hipify/src/graph/search.cc\"")
 
-    # TopoEnvPolicyTests and NetDevsPolicyP2pNetTests load a topology XML fixture
-    # from the source tree (tools/topo_expl/models). Expose the test source dir
-    # so they can build the path.
-    target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
-      RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    # TopoEnvPolicyTests, NetDevsPolicyP2pNetTests and Mi350pPcieTopoTests load
+    # topology XML fixtures from tools/topo_expl/models. Copy them into
+    # rccl-test-topo-models/ beside the binary, in the build tree and in the
+    # install, so the tests never depend on a source tree being present at run
+    # time (TheRock and CoCo run the binary from an install or a separate
+    # package). common/TopoFixtures.hpp resolves the directory.
+    set(RCCL_TEST_TOPO_FIXTURE_NAMES
+      topo_8p6l_5nic.xml
+      topo_8p_ts1.xml
+      topo_8p_950_pcie.xml)
+    set(RCCL_TEST_TOPO_FIXTURE_DIR "${CMAKE_CURRENT_BINARY_DIR}/rccl-test-topo-models")
+    set(RCCL_TEST_TOPO_FIXTURES)
+    set(RCCL_TEST_TOPO_FIXTURES_STAGED)
+    foreach(fixture ${RCCL_TEST_TOPO_FIXTURE_NAMES})
+      list(APPEND RCCL_TEST_TOPO_FIXTURES "${PROJECT_SOURCE_DIR}/tools/topo_expl/models/${fixture}")
+      list(APPEND RCCL_TEST_TOPO_FIXTURES_STAGED "${RCCL_TEST_TOPO_FIXTURE_DIR}/${fixture}")
+    endforeach()
+    add_custom_command(
+      OUTPUT ${RCCL_TEST_TOPO_FIXTURES_STAGED}
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${RCCL_TEST_TOPO_FIXTURE_DIR}"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${RCCL_TEST_TOPO_FIXTURES}
+        "${RCCL_TEST_TOPO_FIXTURE_DIR}"
+      DEPENDS ${RCCL_TEST_TOPO_FIXTURES}
+      COMMENT "Staging RCCL test topology fixtures"
+      VERBATIM)
+    add_custom_target(rccl-test-topo-fixtures DEPENDS ${RCCL_TEST_TOPO_FIXTURES_STAGED})
+    add_dependencies(rccl-UnitTestsFixturesDebug rccl-test-topo-fixtures)
+    # The staged directory has to sit beside the binary.
+    set_target_properties(rccl-UnitTestsFixturesDebug PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    install(FILES ${RCCL_TEST_TOPO_FIXTURES}
+      DESTINATION ${CMAKE_INSTALL_BINDIR}/rccl-test-topo-models
+      COMPONENT tests)
 
     # GinAllReduceEligibilityTests.cpp calls ncclAllReduceGinSdmaEligible() only
     # when ENABLE_ROCSHMEM_GIN is defined (otherwise it GTEST_SKIPs). Match librccl.
