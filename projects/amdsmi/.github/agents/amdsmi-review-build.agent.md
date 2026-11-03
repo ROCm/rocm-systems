@@ -4,6 +4,8 @@ description: "Build system review subagent. Checks CMake, packaging, install tar
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, execute/runInTerminal
 model: "Claude Sonnet 5.5"
 user-invocable: false
+applyTo: "projects/amdsmi/**"
+excludeAgent: "cloud-agent"
 ---
 
 # Build System Review — amd-smi
