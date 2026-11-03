@@ -15,8 +15,10 @@
 #include "nccl.h"
 
 struct ncclArgsInfo;
+struct ncclComm;
 
 extern std::function<ncclResult_t(struct ncclArgsInfo*)> g_ncclArgsGlobalCheck;
+extern std::function<ncclResult_t(struct ncclComm*, bool*, bool*, ncclSimInfo_t*)> g_ncclPrepareTasks;
 
 void ResetCollectiveStubs();
 

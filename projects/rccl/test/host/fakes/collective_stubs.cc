@@ -34,10 +34,17 @@
 #include "signature-drift.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_ncclArgsGlobalCheck, ncclArgsGlobalCheck);
+ASSERT_HOOK_MATCHES_PROD(g_ncclPrepareTasks, ncclPrepareTasks);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // enqueue.h
-ncclResult_t ncclPrepareTasks(struct ncclComm*, bool*, bool*, ncclSimInfo_t*) { ::abort(); }
+static ncclResult_t DefaultPrepareTasks(struct ncclComm*, bool*, bool*, ncclSimInfo_t*) {
+  FailLoudUnfaked("collective_stubs", "ncclPrepareTasks");
+}
+std::function<ncclResult_t(struct ncclComm*, bool*, bool*, ncclSimInfo_t*)> g_ncclPrepareTasks = DefaultPrepareTasks;
+ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t* simInfo) {
+  return g_ncclPrepareTasks(comm, algoNeedConnect, needConnect, simInfo);
+}
 // group.cc validates every comm's launch-completion events on the happy path, so mirror
 // enqueue.cc rather than abort: at most one per communicator per group.
 ncclResult_t ncclValidateCollConfigLaunchCompletionEvents(struct ncclComm* comm) {
@@ -82,6 +89,7 @@ ncclResult_t ncclArgsGlobalCheck(struct ncclArgsInfo* info) { return g_ncclArgsG
 
 void ResetCollectiveStubs() {
   g_ncclArgsGlobalCheck = DefaultArgsGlobalCheck;
+  g_ncclPrepareTasks = DefaultPrepareTasks;
 }
 
 // transport.h -- only the connect/setup entry points group.cc references.
