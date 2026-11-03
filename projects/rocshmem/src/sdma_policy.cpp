@@ -50,8 +50,11 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank,
   sdmaEnabled = static_cast<bool>(envvar::sdma::enabled);
   sdmaThreshold = static_cast<size_t>(envvar::sdma::threshold);
   numChannels = static_cast<int>(envvar::sdma::num_channels);
-  if (numChannels < 1 || numChannels > 8) {
-    LOG_ERROR_ABORT("ROCSHMEM_SDMA_NUM_CHANNELS=%d is out of range [1, 8]", numChannels);
+  // Not aborted on here: the group agrees on it below, so a rank with a bad value does not leave
+  // its peers waiting in the exchange.
+  const bool channelsValid = numChannels >= 1 && numChannels <= 8;
+  if (!channelsValid) {
+    LOG_ERROR("ROCSHMEM_SDMA_NUM_CHANNELS=%d is out of range [1, 8]", numChannels);
   }
 
   // Get current device
@@ -60,8 +63,8 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank,
 
   wiredPeers = 0;
   uint32_t queuesBefore = 0;
-  int status = kSdmaDisabledByEnv;
-  if (sdmaEnabled) {
+  int status = channelsValid ? kSdmaDisabledByEnv : kSdmaBadChannels;
+  if (sdmaEnabled && channelsValid) {
     LOG_INFO("SDMA init with threshold=%zu, channels=%d, local_size=%d",
              sdmaThreshold, numChannels, shm_size);
 
@@ -96,6 +99,10 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank,
   const SdmaAgreement agreed = agreeSdmaStatus(statuses.data(), shm_size);
 
   switch (agreed.decision) {
+    case SdmaDecision::kAbortBadChannels:
+      LOG_ERROR_ABORT("SDMA: ROCSHMEM_SDMA_NUM_CHANNELS is out of range [1, 8] on local rank(s) "
+                      "%s of %d", agreed.ranks.c_str(), shm_size);
+      return;
     case SdmaDecision::kCommit:
       sdmaPublishHandles(deviceId, true);
       return;
