@@ -4,27 +4,11 @@
  * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
-// Wave-granularity get tests exercising memcpy_wave_tdm (copy_pipelined_deep)
-// via ipcCopy_wave.
-//
-// Requires 2 MPI ranks. PE 0 fills a symmetric buffer with a golden pattern
-// that varies both per-byte and per-tile. PE 1 launches one block whose
-// waves each call ipcCopy_wave<GetBlocking> concurrently on disjoint slices
-// pulled from PE 0, exercising the per-wave LDS slicing and the
-// copy_pipelined_deep pipeline memcpy_wave_tdm selects for gets. Because the
-// golden pattern differs from tile to tile, a bug that duplicates or
-// reorders tiles within the pipeline -- which a constant fill pattern (e.g.
-// all 'a') could not detect -- shows up as a mismatch. Mirrors
-// tdm_wave_put_gtest.hpp with the direction (and the get threshold)
-// reversed.
-//
-// The kernel registers its dynamic LDS buffer via rocshmem_set_tdm_lds(),
-// sized at launch via rocshmem_query_tdm_lds_bytes() -- the same public API
-// any user kernel would use to opt into the TDM fast path.
+// Wave-granularity get tests exercising memcpy_wave_tdm (copy_pipelined_deep).
+// Mirrors tdm_wave_put_gtest.hpp with the direction/threshold reversed.
 //
 // Build: cmake -DUSE_TDM=ON -DUSE_IPC=ON -DAMDGPU_TARGETS=gfx1250 ...
-// Run:   mpirun -n 2 ./tests/unit_tests/rocshmem_unit_tests \
-//               --gtest_filter="TdmWaveGet*"
+// Run:   mpirun -n 2 ./rocshmem_unit_tests --gtest_filter="TdmWaveGet*"
 
 #ifndef ROCSHMEM_TDM_WAVE_GET_GTEST_HPP
 #define ROCSHMEM_TDM_WAVE_GET_GTEST_HPP
@@ -50,20 +34,15 @@ namespace rocshmem {
 
 // Fixed TDM tile size for these tests
 static constexpr uint32_t TEST_TDM_WAVE_GET_TILE_BYTES = 16384;
-// Fixed get threshold: per-wave sizes below this must take the memcpy_wave
-// fallback, sizes at/above it are eligible for the TDM path. Deliberately
-// distinct from TEST_TDM_PUT_THRESHOLD (tdm_wave_put_gtest.hpp) so a bug
-// that swaps the put/get threshold fields shows up as a wrong-path
-// boundary instead of accidentally still passing.
+// Distinct from TEST_TDM_PUT_THRESHOLD so a swapped put/get field shows up
+// as a wrong-path boundary instead of silently passing.
 static constexpr size_t TEST_TDM_WAVE_GET_THRESHOLD = 1024;
 
 // ---------------------------------------------------------------------------
 // Kernel
 // ---------------------------------------------------------------------------
 
-// PE 1 puller: every wave in the block pulls its own disjoint
-// [wave_id * bytes_per_wave, (wave_id+1) * bytes_per_wave) slice from PE 0,
-// concurrently with every other wave.
+// PE 1 puller: each wave pulls its own disjoint slice from PE 0.
 template <typename IpcImplT>
 __global__
 void tdm_wave_get_kernel(IpcImplT* ipc_impl, uint8_t* local_dst,
@@ -97,13 +76,15 @@ class TdmWaveGetFixture
     assert(heap_mem_);
     mpi_ = new MPI_T(heap_mem_->get_ptr(), heap_mem_->get_size(), MPI_COMM_WORLD);
     ipc_impl_.ipcHostInit(mpi_->my_pe(), mpi_->get_heap_bases(), MPI_COMM_WORLD);
-    // Force a known tile size so the parameterized byte counts below
-    // actually land on tile/slice boundaries their comments claim.
+    // Force a known tile size so the parameterized sizes land where intended.
     uint32_t tile_bytes = TEST_TDM_WAVE_GET_TILE_BYTES;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &tile_bytes, sizeof(tile_bytes),
                                 offsetof(constmem_t, tdm_tile_bytes)));
-    // Force a known get threshold so the parameterized byte counts below
-    // actually land on either side of it, as their comments claim.
+    // Force SDMA off: this fixture never sets up an SDMA channel.
+    size_t sdma_threshold = SDMA_THRESHOLD_DISABLED;
+    CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &sdma_threshold, sizeof(sdma_threshold),
+                                offsetof(constmem_t, ipc_sdma_threshold)));
+    // Force a known get threshold so the parameterized sizes land where intended.
     size_t get_threshold = TEST_TDM_WAVE_GET_THRESHOLD;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &get_threshold, sizeof(get_threshold),
                                 offsetof(constmem_t, tdm_get_threshold)));
@@ -124,10 +105,8 @@ class TdmWaveGetFixture
     const size_t bytes = bytes_per_wave * static_cast<size_t>(num_waves);
     assert(bytes <= heap_mem_->get_size());
 
-    // Build a per-byte pattern that varies across tiles (plain i & 0xFF
-    // would repeat every 256 bytes -- a multiple of
-    // TEST_TDM_WAVE_GET_TILE_BYTES -- so every tile would be bit-identical
-    // and a reordered/duplicated tile would go undetected).
+    // Varies per tile, unlike plain iota, so reordered/duplicated tiles
+    // are detected.
     std::vector<uint8_t> host_gold(bytes);
     for (size_t i = 0; i < bytes; i++)
       host_gold[i] = static_cast<uint8_t>((i ^ (i >> 8) ^ (i >> 16)) & 0xFF);
@@ -146,7 +125,8 @@ class TdmWaveGetFixture
       auto* remote_src = reinterpret_cast<const uint8_t*>(ipc_impl_.ipc_bases[0]);
 
       const dim3 block(static_cast<unsigned>(WF_SIZE * num_waves));
-      const size_t smem = rocshmem_query_tdm_lds_bytes();
+      // Backend-free: compute LDS size from the forced tile size directly.
+      const size_t smem = tdm::lds_bytes_for_tile(TEST_TDM_WAVE_GET_TILE_BYTES);
       tdm_wave_get_kernel<IpcImplT>
           <<<dim3(1), block, smem>>>(ipc_impl_dptr_, local_dst, remote_src,
                                      bytes_per_wave);

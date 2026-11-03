@@ -4,21 +4,11 @@
  * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
-// Raw byte-array get tests exercising memcpy_wg_tdm via ipcCopy_wg.
-//
-// Requires 2 MPI ranks. PE 0 fills a symmetric buffer with a golden pattern
-// and PE 1 calls ipcCopy_wg<GetBlocking> to pull it from PE 0. When USE_TDM
-// is defined and the hardware is gfx1250, ipcCopy_wg internally calls
-// memcpy_wg_tdm; otherwise it falls back to memcpy_wg. Mirrors
-// tdm_raw_put_gtest.hpp with the direction (and the get threshold) reversed.
-//
-// The kernel registers its dynamic LDS buffer via rocshmem_set_tdm_lds(),
-// sized at launch via rocshmem_query_tdm_lds_bytes() -- the same public API
-// any user kernel would use to opt into the TDM fast path.
+// Raw byte-array get tests exercising memcpy_wg_tdm via ipcCopy_wg. Mirrors
+// tdm_raw_put_gtest.hpp with the direction and threshold reversed.
 //
 // Build: cmake -DUSE_TDM=ON -DUSE_IPC=ON -DAMDGPU_TARGETS=gfx1250 ...
-// Run:   mpirun -n 2 ./tests/unit_tests/rocshmem_unit_tests \
-//               --gtest_filter="TdmRawGet*"
+// Run:   mpirun -n 2 ./rocshmem_unit_tests --gtest_filter="TdmRawGet*"
 
 #ifndef ROCSHMEM_TDM_RAW_GET_GTEST_HPP
 #define ROCSHMEM_TDM_RAW_GET_GTEST_HPP
@@ -43,20 +33,15 @@ namespace rocshmem {
 
 // Fixed TDM tile size for these tests
 static constexpr uint32_t TEST_TDM_GET_TILE_BYTES = 16384;
-// Fixed get threshold: sizes below this must take the memcpy_wg fallback,
-// sizes at/above it are eligible for the TDM path. Deliberately distinct
-// from TEST_TDM_PUT_THRESHOLD (tdm_raw_put_gtest.hpp) so a bug that swaps
-// the put/get threshold fields shows up as a wrong-path boundary instead
-// of accidentally still passing.
+// Distinct from TEST_TDM_PUT_THRESHOLD so a swapped put/get field shows up
+// as a wrong-path boundary instead of silently passing.
 static constexpr size_t TEST_TDM_GET_THRESHOLD = 1024;
 
 // ---------------------------------------------------------------------------
 // Kernel
 // ---------------------------------------------------------------------------
 
-// PE 1 puller: registers its dynamic LDS buffer for TDM (a no-op on builds/
-// archs where TDM isn't available) and pulls bytes from PE 0's heap into its
-// own via the real library path.
+// PE 1 puller: pulls bytes from PE 0's heap via the real library path.
 template <typename IpcImplT>
 __global__
 void tdm_raw_get_kernel(IpcImplT* ipc_impl, uint8_t* local_dst,
@@ -84,13 +69,15 @@ class TdmRawGetFixture : public ::testing::TestWithParam<size_t> {
     assert(heap_mem_);
     mpi_ = new MPI_T(heap_mem_->get_ptr(), heap_mem_->get_size(), MPI_COMM_WORLD);
     ipc_impl_.ipcHostInit(mpi_->my_pe(), mpi_->get_heap_bases(), MPI_COMM_WORLD);
-    // Force a known tile size so the parameterized byte counts below
-    // actually land on the tile boundaries their comments claim.
+    // Force a known tile size so the parameterized sizes land where intended.
     uint32_t tile_bytes = TEST_TDM_GET_TILE_BYTES;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &tile_bytes, sizeof(tile_bytes),
                                 offsetof(constmem_t, tdm_tile_bytes)));
-    // Force a known get threshold so the parameterized byte counts below
-    // actually land on either side of it, as their comments claim.
+    // Force SDMA off: this fixture never sets up an SDMA channel.
+    size_t sdma_threshold = SDMA_THRESHOLD_DISABLED;
+    CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &sdma_threshold, sizeof(sdma_threshold),
+                                offsetof(constmem_t, ipc_sdma_threshold)));
+    // Force a known get threshold so the parameterized sizes land where intended.
     size_t get_threshold = TEST_TDM_GET_THRESHOLD;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &get_threshold, sizeof(get_threshold),
                                 offsetof(constmem_t, tdm_get_threshold)));
@@ -110,10 +97,8 @@ class TdmRawGetFixture : public ::testing::TestWithParam<size_t> {
   void run_get(size_t bytes) {
     assert(bytes <= heap_mem_->get_size());
 
-    // Build a per-byte pattern that varies across tiles (plain i & 0xFF
-    // would repeat every 256 bytes -- a multiple of TEST_TDM_GET_TILE_BYTES
-    // -- so every tile would be bit-identical and a reordered/duplicated
-    // tile would go undetected).
+    // Varies per tile, unlike plain iota, so reordered/duplicated tiles
+    // are detected.
     std::vector<uint8_t> host_gold(bytes);
     for (size_t i = 0; i < bytes; i++)
       host_gold[i] = static_cast<uint8_t>((i ^ (i >> 8) ^ (i >> 16)) & 0xFF);
@@ -133,7 +118,8 @@ class TdmRawGetFixture : public ::testing::TestWithParam<size_t> {
 
       // Block size: full wavefront for TDM to have at least 1 wave.
       const dim3 block(WF_SIZE);
-      const size_t smem = rocshmem_query_tdm_lds_bytes();
+      // Backend-free: compute LDS size from the forced tile size directly.
+      const size_t smem = tdm::lds_bytes_for_tile(TEST_TDM_GET_TILE_BYTES);
       tdm_raw_get_kernel<IpcImplT>
           <<<dim3(1), block, smem>>>(ipc_impl_dptr_, local_dst, remote_src, bytes);
       CHECK_HIP(hipStreamSynchronize(nullptr));

@@ -5,17 +5,10 @@
  *****************************************************************************/
 
 // Wave-granularity put tests exercising memcpy_wave_tdm via ipcCopy_wave.
-//
-// Requires 2 MPI ranks. PE 0 launches one block whose waves each call
-// ipcCopy_wave concurrently on disjoint slices of a shared symmetric
-// buffer, exercising the per-wave LDS slicing that keeps concurrent waves
-// from tiling through each other's bytes. The kernel opts in the same way
-// any user kernel would: rocshmem_set_tdm_lds() sized via
-// rocshmem_query_tdm_lds_bytes().
+// Requires 2 MPI ranks: PE 0's waves each put their own disjoint slice.
 //
 // Build: cmake -DUSE_TDM=ON -DUSE_IPC=ON -DAMDGPU_TARGETS=gfx1250 ...
-// Run:   mpirun -n 2 ./tests/unit_tests/rocshmem_unit_tests \
-//               --gtest_filter="TdmWave*"
+// Run:   mpirun -n 2 ./rocshmem_unit_tests --gtest_filter="TdmWave*"
 
 #ifndef ROCSHMEM_TDM_WAVE_PUT_GTEST_HPP
 #define ROCSHMEM_TDM_WAVE_PUT_GTEST_HPP
@@ -44,8 +37,7 @@ static constexpr uint32_t TDM_WAVE_SIGNAL_OFFSET = 67108864u;  // 64 MB
 
 // Fixed TDM tile size for these tests
 static constexpr uint32_t TEST_TDM_TILE_BYTES = 16384;
-// Fixed put threshold: per-wave sizes below this must take the memcpy_wave
-// fallback, sizes at/above it are eligible for the TDM path.
+// Below this, memcpy_wave fallback; at/above, TDM is eligible.
 static constexpr size_t TEST_TDM_PUT_THRESHOLD = 16384;
 
 // ---------------------------------------------------------------------------
@@ -73,9 +65,7 @@ void tdm_wave_validator(bool* error, const uint8_t* golden, const uint8_t* dest,
   }
 }
 
-// PE 0 sender: every wave in the block puts its own disjoint
-// [wave_id * bytes_per_wave, (wave_id+1) * bytes_per_wave) slice,
-// concurrently with every other wave.
+// PE 0 sender: each wave puts its own disjoint slice, concurrently.
 template <typename IpcImplT>
 __global__
 void tdm_wave_put_kernel(IpcImplT* ipc_impl, const uint8_t* src,
@@ -90,8 +80,7 @@ void tdm_wave_put_kernel(IpcImplT* ipc_impl, const uint8_t* src,
       remote_dst + offset, const_cast<uint8_t*>(src) + offset, bytes_per_wave,
       /*local_pe=*/0);
 
-  // Waves finish their (independently timed) TDM copies at different
-  // points; every wave must land before any lane signals PE 1.
+  // Every wave must land before any lane signals PE 1.
   __builtin_amdgcn_s_barrier();
 
   if (is_thread_zero_in_block()) {
@@ -121,13 +110,15 @@ class TdmWavePutFixture
     assert(heap_mem_);
     mpi_ = new MPI_T(heap_mem_->get_ptr(), heap_mem_->get_size(), MPI_COMM_WORLD);
     ipc_impl_.ipcHostInit(mpi_->my_pe(), mpi_->get_heap_bases(), MPI_COMM_WORLD);
-    // Force a known tile size so the parameterized byte counts below
-    // actually land on tile/slice boundaries their comments claim.
+    // Force a known tile size so the parameterized sizes land where intended.
     uint32_t tile_bytes = TEST_TDM_TILE_BYTES;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &tile_bytes, sizeof(tile_bytes),
                                 offsetof(constmem_t, tdm_tile_bytes)));
-    // Force a known put threshold so the parameterized byte counts below
-    // actually land on either side of it, as their comments claim.
+    // Force SDMA off: this fixture never sets up an SDMA channel.
+    size_t sdma_threshold = SDMA_THRESHOLD_DISABLED;
+    CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &sdma_threshold, sizeof(sdma_threshold),
+                                offsetof(constmem_t, ipc_sdma_threshold)));
+    // Force a known put threshold so the parameterized sizes land where intended.
     size_t put_threshold = TEST_TDM_PUT_THRESHOLD;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &put_threshold, sizeof(put_threshold),
                                 offsetof(constmem_t, tdm_put_threshold)));
@@ -153,10 +144,8 @@ class TdmWavePutFixture
     assert(bytes + TDM_WAVE_SIGNAL_OFFSET + sizeof(uint32_t) <=
            heap_mem_->get_size());
 
-    // Build a per-byte pattern that varies across tiles (plain i & 0xFF
-    // would repeat every 256 bytes -- a multiple of TEST_TDM_TILE_BYTES --
-    // so every tile would be bit-identical and a reordered/duplicated tile
-    // would go undetected), upload to a device buffer.
+    // Varies per tile, unlike plain iota, so reordered/duplicated tiles
+    // are detected.
     std::vector<uint8_t> host_gold(bytes);
     for (size_t i = 0; i < bytes; i++)
       host_gold[i] = static_cast<uint8_t>((i ^ (i >> 8) ^ (i >> 16)) & 0xFF);
@@ -175,7 +164,8 @@ class TdmWavePutFixture
     mpi_->barrier();
 
     const dim3 block(static_cast<unsigned>(WF_SIZE * num_waves));
-    const size_t smem = rocshmem_query_tdm_lds_bytes();
+    // Backend-free: compute LDS size from the forced tile size directly.
+    const size_t smem = tdm::lds_bytes_for_tile(TEST_TDM_TILE_BYTES);
 
     if (my_pe == 0) {
       auto* src  = reinterpret_cast<const uint8_t*>(ipc_impl_.ipc_bases[0]);
