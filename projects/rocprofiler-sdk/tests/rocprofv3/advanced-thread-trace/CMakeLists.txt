@@ -486,6 +486,8 @@ rocprofiler_add_integration_execute_test(
     DISABLED ${ATT_NO_INTERCEPT_DISABLE}
     ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    # the ATT quick-scan needs a CPU with AVX-512, rocprofv3 warns and falls back to --att
+    SKIP_REGULAR_EXPRESSION "--att-no-intercept is unavailable"
     FIXTURES_SETUP rocprofv3-test-att-no-intercept)
 
 rocprofiler_add_integration_validate_test(
@@ -499,7 +501,8 @@ rocprofiler_add_integration_validate_test(
     DISABLED ${ATT_NO_INTERCEPT_DISABLE}
     FIXTURES_REQUIRED rocprofv3-test-att-no-intercept
     ARGS --att-no-intercept-out-dir ${ATT_NO_INTERCEPT_OUT_DIR}
-    FAIL_REGULAR_EXPRESSION "AssertionError")
+    FAIL_REGULAR_EXPRESSION "AssertionError"
+    SKIP_REGULAR_EXPRESSION "SKIPPED")
 
 set(ATT_CODE_OBJECT_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-code-object-out")
 

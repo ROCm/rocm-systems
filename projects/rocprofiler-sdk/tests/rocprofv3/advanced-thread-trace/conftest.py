@@ -166,11 +166,33 @@ def att_marker_trace_out_dir_path(request):
     return output_dir_path
 
 
+def cpu_supports_att_quick_scan():
+    """The ATT quick-scan decoder needs a CPU with AVX-512 (vbmi, bw and f).
+
+    On other CPUs rocprofv3 warns and falls back to --att, so there is no
+    no-intercept output to validate. If the CPU flags cannot be read, assume
+    that quick-scan is supported and let the test run.
+    """
+    ret = True
+    required = {"avx512vbmi", "avx512bw", "avx512f"}
+    try:
+        with open("/proc/cpuinfo", "r") as cpuinfo:
+            for line in cpuinfo:
+                if line.startswith("flags"):
+                    ret = required.issubset(set(line.split(":", 1)[1].split()))
+                    break
+    except OSError:
+        pass
+    return ret
+
+
 @pytest.fixture
 def att_no_intercept_out_dir_path(request):
     output_dir_path = request.config.getoption("--att-no-intercept-out-dir")
     if not output_dir_path:
         pytest.skip("--att-no-intercept-out-dir not provided")
+    if not cpu_supports_att_quick_scan():
+        pytest.skip("ATT no-intercept quick-scan needs a CPU with AVX-512")
     return output_dir_path
 
 
