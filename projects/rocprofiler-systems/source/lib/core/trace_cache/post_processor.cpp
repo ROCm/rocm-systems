@@ -21,6 +21,8 @@
 #include "library/runtime.hpp"
 #include "logger/debug.hpp"
 
+#include <fmt/format.h>
+
 #include <sys/stat.h>
 
 #include <cstdint>
@@ -105,11 +107,15 @@ make_wall_clock_options(const data::processor_config_t& process)
     auto const shown    = settings.max_depth > 0;
     auto const files =
         shown && config::get_setting_value<bool>(env_vars::FILE_OUTPUT).value_or(true);
-    auto const suffix         = process._pid == process._ppid
-                                    ? config::get_output_process_suffix()
-                                    : std::to_string(process._pid);
-    auto const output_path_if = [&suffix](bool enabled, std::string_view extension) {
-        return enabled ? std::optional{ get_output_absolute_path("wall_clock", extension,
+    auto const is_root_process = process._pid == process._ppid;
+    auto const suffix          = is_root_process ? config::get_output_process_suffix()
+                                                 : std::to_string(process._pid);
+    // Without the suffix (ROCPROFSYS_USE_PID=OFF) child processes would share one file
+    auto const basename       = is_root_process || settings::use_output_suffix()
+                                    ? std::string{ "wall_clock" }
+                                    : fmt::format("wall_clock-{}", process._pid);
+    auto const output_path_if = [&](bool enabled, std::string_view extension) {
+        return enabled ? std::optional{ get_output_absolute_path(basename, extension,
                                                                  suffix, "") }
                        : std::nullopt;
     };
