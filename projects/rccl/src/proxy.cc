@@ -1286,8 +1286,8 @@ ncclResult_t ncclProxyConnect(struct ncclComm* comm, int transport, int send, in
 #endif
     struct ncclProxyOps* proxyOps = sharedProxyState->proxyOps + proxyConn->tpLocalRank;
     if (proxyOps->pool == NULL) {
-      NCCLCHECK(ncclShmOpen(poolPath, sizeof(poolPath), sizeof(struct ncclProxyOpsPool), (void**)(&proxyOps->pool),
-                            NULL, -1, &proxyOps->handle));
+      NCCLCHECK(ncclShmOpen(poolPath, sizeof(poolPath), ncclProxyOpsPoolSize(sharedProxyState->tpLocalnRanks),
+                            (void**)(&proxyOps->pool), NULL, -1, &proxyOps->handle));
       proxyOps->nextOps = proxyOps->nextOpsEnd = proxyOps->freeOp = -1;
     }
   }
@@ -1546,7 +1546,7 @@ fail:
 static ncclResult_t proxyProgressInit(struct ncclProxyState* proxyState) {
   struct ncclProxyProgressState* state = &proxyState->progressState;
   if (state->opsPool == NULL) {
-    int size = sizeof(struct ncclProxyOpsPool);
+    size_t size = ncclProxyOpsPoolSize(proxyState->tpLocalnRanks);
     struct ncclProxyOpsPool* pool = NULL;
 
 #if defined(NCCL_OS_LINUX)
