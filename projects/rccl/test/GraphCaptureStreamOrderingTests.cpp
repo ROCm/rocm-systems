@@ -76,8 +76,16 @@ struct Harness
 
 void initHarness(Harness& h, int nRanks)
 {
-    int devCount = 0;
-    HIP_CHECK(hipGetDeviceCount(&devCount));
+    // A machine with no usable GPU is a reason to skip, not to fail, so
+    // hipErrorNoDevice is folded into a count of zero and falls through to the
+    // guard below. Anything else is a genuine HIP failure and is reported.
+    int              devCount = 0;
+    const hipError_t countErr = hipGetDeviceCount(&devCount);
+    if(countErr == hipErrorNoDevice)
+        devCount = 0;
+    else
+        HIP_CHECK(countErr);
+
     if(devCount < nRanks)
         GTEST_SKIP() << "Requires >= " << nRanks << " GPUs; found " << devCount;
 

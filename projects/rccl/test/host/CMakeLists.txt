@@ -827,6 +827,7 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicroParam -- src/param/{param,c_api}.cc, src/misc/param.cc. Own binary: misc/param.cc
   # defines ncclGetEnv, initEnv and ncclLoadParam, which the shared fakes in rccl-UnitTestsMicro also define.
   set(TEST_MICRO_PARAM_SOURCE_FILES
+    fakes/hip_fakes.cc
     param-test.cc
     ../common/ProcessIsolatedTestRunner.cpp
     ../common/main_altrsmi.cpp
@@ -857,6 +858,7 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicroPlugin -- src/plugin/net.cc, net/net_v*.cc, plugin_open.cc. Own binary: gin-plugin-init-test.cc
   # defines ncclPluginLibPaths, ncclClosePluginLib and ncclGetNetPluginLib in rccl-UnitTestsMicro.
   set(TEST_MICRO_PLUGIN_SOURCE_FILES
+    fakes/hip_fakes.cc
     plugin-net-test.cc
     plugin-open-test.cc
     net-v6-test.cc
@@ -902,7 +904,7 @@ function(rccl_define_micro_source_lists)
     fakes/utils_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
-    
+
   # rccl-UnitTestsMicroDdaIpc -- src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu. Own binary:
   # rccl-UnitTestsMicro links fakes/dda_fakes.cc, which defines the same ncclAllReduceDdaIpc* symbols.
   set(TEST_MICRO_DDA_IPC_SOURCE_FILES
@@ -1187,6 +1189,7 @@ function(rccl_define_micro_source_lists)
 
   # src/misc/ IB verbs and direct-verbs loaders
   set(TEST_MICRO_MISC_SOURCE_FILES
+    fakes/hip_fakes.cc
     misc/gdr-peermem-test.cc
     misc/ibvsymbols-test.cc
     misc/dvsymbols-test.cc               # mlx5dvsymbols.cc + ionicdvsymbols.cc
@@ -1496,6 +1499,7 @@ function(rccl_standalone_setup)
     ${RCCL_TEST_DIR}/DdaCollCommonTests.cpp
     ${RCCL_TEST_DIR}/RomeTopoConsensusTests.cpp
     RomeTopoConsensusLogTests.cpp
+    process-isolated-runner-pool-test.cc
     ${RCCL_TEST_DIR}/MiscTests.cpp
     ${RCCL_TEST_DIR}/VersionGateTests.cpp
     ${RCCL_TEST_DIR}/TimeoutTests.cpp

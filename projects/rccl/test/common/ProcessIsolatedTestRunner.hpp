@@ -20,6 +20,42 @@ namespace RcclUnitTesting
 {
 
 /**
+ * @brief Shrinks a detected GPU pool to the number of devices HIP can open.
+ *
+ * Both pool sources over-report. KFD topology sysfs is not namespaced per
+ * container, so a partitioned CI slot still sees the host's GPUs, and an
+ * inherited HIP_VISIBLE_DEVICES may name ordinals this process cannot open.
+ * Handing out an ordinal at or above the real device count makes HIP fail the
+ * child with hipErrorNoDevice instead of running or skipping it.
+ *
+ * The pool holds absolute device ids in the pre-visibility namespace — the
+ * values written verbatim into a child's HIP_VISIBLE_DEVICES — and its order
+ * is significant: KFD sysfs yields ascending 0..n-1, while HIP_VISIBLE_DEVICES
+ * is taken in the order given and may be arbitrary ("3,1,7,5").
+ *
+ * Clamping is therefore by *length*, not by discarding ids >= the count. HIP
+ * makes visible the longest valid prefix of HIP_VISIBLE_DEVICES and reports
+ * its length, so the first @p hipDeviceCount entries are exactly the entries
+ * HIP can open (HIP_VISIBLE_DEVICES=0,5 on a 1-GPU host reports 1, and 5,0
+ * reports none). Dropping ids by value would instead empty a legitimate pool:
+ * HIP_VISIBLE_DEVICES=4,5,6,7 on an 8-GPU host reports 4 devices even though
+ * every id in it is >= 4.
+ *
+ * A non-positive @p hipDeviceCount means the probe failed or found no GPU at
+ * all; the pool is returned unchanged so that "this machine has no GPUs" stays
+ * a per-test skip rather than becoming a pool-detection failure.
+ *
+ * Exposed (rather than kept file-static in the .cpp) so the pool-sizing
+ * decision can be unit-tested without a GPU.
+ *
+ * @param pool            Pool detected from HIP_VISIBLE_DEVICES or KFD sysfs,
+ *                        in the order that source gave them.
+ * @param hipDeviceCount  Devices HIP reports, or <= 0 if unknown.
+ * @return The pool, truncated to @p hipDeviceCount when that is smaller.
+ */
+std::vector<int> clampPoolToDeviceCount(std::vector<int> pool, int hipDeviceCount);
+
+/**
  * @brief Generic thread-safe process isolated test runner
  *
  * This class provides a framework for running tests in isolated processes

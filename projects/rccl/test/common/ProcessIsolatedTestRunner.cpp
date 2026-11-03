@@ -8,7 +8,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
+#include <hip/hip_runtime_api.h>
 #include <poll.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -199,14 +201,69 @@ static std::vector<int> gpuPoolFromKfd()
     return pool;
 }
 
+// Returns the number of devices HIP can actually open, or kProbeFailed if the
+// probe could not produce an answer.
+//
+// The query runs in a short-lived forked child so the parent never initialises
+// the HIP runtime: doing so in the parent would open GPU file descriptors that
+// every subsequently forked test child would inherit, which is the same hazard
+// gpuPoolFromKfd() avoids by reading sysfs instead of a KFD device file.
+//
+// The count travels back as the child's exit status, so it is capped at
+// kProbeMaxCount; a pool larger than that is already far beyond any real node.
+static constexpr int kProbeFailed   = -1;
+static constexpr int kProbeMaxCount = 254;
+static constexpr int kProbeErrorExit = 255;
+
+static int hipDeviceCountViaChild()
+{
+    const pid_t pid = fork();
+    if(pid < 0)
+        return kProbeFailed;
+
+    if(pid == 0)
+    {
+        int count = 0;
+        if(hipGetDeviceCount(&count) != hipSuccess || count < 0)
+            _exit(kProbeErrorExit);
+        _exit(std::min(count, kProbeMaxCount));
+    }
+
+    int status = 0;
+    while(waitpid(pid, &status, 0) < 0 && errno == EINTR)
+    {
+    }
+    if(!WIFEXITED(status))
+        return kProbeFailed;
+
+    const int code = WEXITSTATUS(status);
+    return code == kProbeErrorExit ? kProbeFailed : code;
+}
+
+std::vector<int> clampPoolToDeviceCount(std::vector<int> pool, int hipDeviceCount)
+{
+    if(hipDeviceCount > 0 && static_cast<size_t>(hipDeviceCount) < pool.size())
+    {
+        TEST_INFO(
+            "GPU pool reported %zu device(s) but HIP can open only %d; "
+            "clamping pool to %d",
+            pool.size(), hipDeviceCount, hipDeviceCount
+        );
+        pool.resize(static_cast<size_t>(hipDeviceCount));
+    }
+    return pool;
+}
+
 // Detects available GPU indices: first from HIP_VISIBLE_DEVICES, then from
-// KFD sysfs. Returns empty if neither source yields a pool.
+// KFD sysfs, then clamped to the devices HIP can actually open. Returns empty
+// if neither source yields a pool.
 static std::vector<int> detectGpuPool()
 {
     auto pool = gpuPoolFromEnv();
     if(pool.empty())
         pool = gpuPoolFromKfd();
-    return pool;
+
+    return clampPoolToDeviceCount(std::move(pool), hipDeviceCountViaChild());
 }
 
 // Tracks which physical GPU device indices from a fixed pool are in use.
