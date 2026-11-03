@@ -9,6 +9,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Changed
 * On gfx1250, cuMem auto-detection (`NCCL_CUMEM_ENABLE=-2`, the default) no longer requires Linux kernel 6.8 or later; it enables cuMem whenever the ROCm version, VMM support and runtime probe checks pass. The runtime probe now also exports a DMA-BUF, so hosts that cannot export one keep cuMem off. Kernel 6.8 or later is still recommended for performance, and RCCL logs a warning when cuMem runs on an older kernel. Set `NCCL_CUMEM_ENABLE=0` to keep cuMem off.
+* gfx1250 DDA LL128 `ncclAlltoAll` (SPX table) launches 256-thread blocks, up to 64 blocks per peer and up to 2 MiB per peer chunk, and takes messages up to 8 MiB total (was 1 MiB); larger messages take per-peer Send/Recv as before. The defaults of the tuning variables change to match: `RCCL_DDA_LL128_A2A_THREADS` 1024 -> 256 and `RCCL_DDA_LL128_A2A_MAXBPP` 8 -> 64.
 
 ### Removed
 
