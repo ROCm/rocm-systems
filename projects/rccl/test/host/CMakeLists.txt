@@ -2409,6 +2409,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTopo
     CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/connect.cc"
     RINGS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rings.cc"
     TREES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/trees.cc"
+    TOPO_EXPL_MODELS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tools/topo_expl/models"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_topo.yaml")
 
 # ---------------------------------------------------------------------------
