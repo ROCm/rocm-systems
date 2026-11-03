@@ -261,7 +261,7 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
       if (!state.address_space)
         return VmAccessOutcome::Faulted;
       if (std::optional<GpuVmAccess> access = gpu_vm_.snapshot_pinned(state.address_space))
-        state.access = std::make_shared<GpuVmAccess>(std::move(*access));
+        state.access = util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(std::move(*access));
       else
         return VmAccessOutcome::Faulted;
       state.phase = QueueIdlePublicationPhase::ReadSignalHandle;
@@ -269,8 +269,8 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
 
     case QueueIdlePublicationPhase::ReadSignalHandle: {
       const uint64_t address = state.queue_desc_va + kQueueInactiveSignalOffset;
-      const VmAccessOutcome outcome =
-          read_gpu(*state.access, address, &state.signal_address, sizeof(state.signal_address));
+      const VmAccessOutcome outcome = read_gpu(state.access->value, address, &state.signal_address,
+                                               sizeof(state.signal_address));
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
       if (state.signal_address == 0) {
@@ -287,7 +287,7 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
       // Preserve ROCR's destructor sentinel: a completed mismatch still needs
       // the mailbox and event-age notification below.
       const AtomicCompareExchangeResult idle =
-          compare_exchange_gpu(*state.access, state.signal_address + kSignalValueOffset,
+          compare_exchange_gpu(state.access->value, state.signal_address + kSignalValueOffset,
                                sizeof(uint64_t), 0, kIdleStatus);
       if (idle.outcome != VmAccessOutcome::Complete)
         return idle.outcome;
@@ -297,7 +297,7 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
 
     case QueueIdlePublicationPhase::ReadMailboxPointer: {
       const VmAccessOutcome outcome =
-          read_gpu(*state.access, state.signal_address + kMailboxPointerOffset,
+          read_gpu(state.access->value, state.signal_address + kMailboxPointerOffset,
                    &state.mailbox_pointer, sizeof(state.mailbox_pointer));
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
@@ -306,8 +306,9 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
     }
 
     case QueueIdlePublicationPhase::ReadEventId: {
-      const VmAccessOutcome outcome = read_gpu(*state.access, state.signal_address + kEventIdOffset,
-                                               &state.event_id, sizeof(state.event_id));
+      const VmAccessOutcome outcome =
+          read_gpu(state.access->value, state.signal_address + kEventIdOffset, &state.event_id,
+                   sizeof(state.event_id));
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
       state.phase = QueueIdlePublicationPhase::StoreMailbox;
@@ -317,7 +318,7 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
     case QueueIdlePublicationPhase::StoreMailbox:
       if (state.mailbox_pointer != 0) {
         const VmAccessOutcome outcome = atomic_store_gpu(
-            *state.access, state.mailbox_pointer, sizeof(uint64_t), uint64_t(state.event_id));
+            state.access->value, state.mailbox_pointer, sizeof(uint64_t), uint64_t(state.event_id));
         if (outcome != VmAccessOutcome::Complete)
           return outcome;
       }
@@ -380,7 +381,7 @@ VmAccessOutcome CompletionTracker::advance_signal_publication(DispatchEntry &ent
       if (!entry.address_space)
         return VmAccessOutcome::Faulted;
       if (std::optional<GpuVmAccess> access = gpu_vm_.snapshot_pinned(entry.address_space))
-        state.access = std::make_shared<GpuVmAccess>(std::move(*access));
+        state.access = util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(std::move(*access));
       else
         return VmAccessOutcome::Faulted;
       state.start_timestamp = entry.profiling_start_timestamp;
@@ -392,7 +393,7 @@ VmAccessOutcome CompletionTracker::advance_signal_publication(DispatchEntry &ent
 
     case CompletionPublicationPhase::ReadMailboxPointer: {
       const VmAccessOutcome outcome =
-          read_gpu(*state.access, entry.completion_signal + kMailboxPointerOffset,
+          read_gpu(state.access->value, entry.completion_signal + kMailboxPointerOffset,
                    &state.mailbox_pointer, sizeof(state.mailbox_pointer));
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
@@ -402,7 +403,7 @@ VmAccessOutcome CompletionTracker::advance_signal_publication(DispatchEntry &ent
 
     case CompletionPublicationPhase::ReadEventId: {
       const VmAccessOutcome outcome =
-          read_gpu(*state.access, entry.completion_signal + kEventIdOffset, &state.event_id,
+          read_gpu(state.access->value, entry.completion_signal + kEventIdOffset, &state.event_id,
                    sizeof(state.event_id));
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
@@ -412,7 +413,7 @@ VmAccessOutcome CompletionTracker::advance_signal_publication(DispatchEntry &ent
 
     case CompletionPublicationPhase::StoreStartTimestamp: {
       const VmAccessOutcome outcome =
-          atomic_store_gpu(*state.access, entry.completion_signal + kStartTimestampOffset,
+          atomic_store_gpu(state.access->value, entry.completion_signal + kStartTimestampOffset,
                            sizeof(uint64_t), state.start_timestamp);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
@@ -422,7 +423,7 @@ VmAccessOutcome CompletionTracker::advance_signal_publication(DispatchEntry &ent
 
     case CompletionPublicationPhase::StoreEndTimestamp: {
       const VmAccessOutcome outcome =
-          atomic_store_gpu(*state.access, entry.completion_signal + kEndTimestampOffset,
+          atomic_store_gpu(state.access->value, entry.completion_signal + kEndTimestampOffset,
                            sizeof(uint64_t), state.end_timestamp);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
@@ -434,7 +435,7 @@ VmAccessOutcome CompletionTracker::advance_signal_publication(DispatchEntry &ent
       for (;;) {
         const uint64_t desired = state.compare_expected - 1;
         const AtomicCompareExchangeResult decremented =
-            compare_exchange_gpu(*state.access, entry.completion_signal + kSignalValueOffset,
+            compare_exchange_gpu(state.access->value, entry.completion_signal + kSignalValueOffset,
                                  sizeof(uint64_t), state.compare_expected, desired);
         if (decremented.outcome != VmAccessOutcome::Complete)
           return decremented.outcome;
@@ -464,7 +465,7 @@ VmAccessOutcome CompletionTracker::advance_signal_publication(DispatchEntry &ent
     case CompletionPublicationPhase::StoreMailbox:
       if (state.mailbox_pointer != 0) {
         const VmAccessOutcome outcome = atomic_store_gpu(
-            *state.access, state.mailbox_pointer, sizeof(uint64_t), uint64_t(state.event_id));
+            state.access->value, state.mailbox_pointer, sizeof(uint64_t), uint64_t(state.event_id));
         if (outcome != VmAccessOutcome::Complete)
           return outcome;
       }
