@@ -1153,6 +1153,11 @@ function(add_coll_tests)
         add_rocshmem_functional_test(NAME reducescatter_wave RANKS 2 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 1)
         add_rocshmem_functional_test(NAME reducescatter_wave RANKS 4 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 1)
         add_rocshmem_functional_test(NAME reducescatter_wave RANKS 8 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 1)
+        # Multi-wave tests (NUM_WF 4) to exercise multi-wave code paths
+        add_rocshmem_functional_test(NAME broadcast_wave RANKS 2 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 4)
+        add_rocshmem_functional_test(NAME alltoall_wave RANKS 2 WORKGROUPS 1 MAX_MSG_SIZE 512 NUM_WF 4)
+        add_rocshmem_functional_test(NAME fcollect_wave RANKS 2 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 4)
+        add_rocshmem_functional_test(NAME reduce_wave RANKS 2 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 4)
     end_test_group()
 endfunction()
 
