@@ -26,7 +26,7 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-cmd
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kernel-trace --pc-sampling-unit time
-        --pc-sampling-method host_trap --pc-sampling-interval 1 --agent-index absolute -d
+        --pc-sampling-method host_trap --pc-sampling-interval 1 --agent-index relative -d
         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input -o out --output-format csv --
         $<TARGET_FILE:transpose> ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS}
     DEPENDS transpose
@@ -46,8 +46,6 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     ARGS -k
          test_multi_agent_support
-         --agent-index
-         absolute
          --input-samples-csv
          ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_pc_sampling_host_trap.csv
          --input-kernel-trace-csv
@@ -84,8 +82,6 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     ARGS -k
          test_multi_agent_support
-         --agent-index
-         type-relative
          --input-samples-csv
          ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_pc_sampling_host_trap.csv
          --input-kernel-trace-csv
@@ -121,8 +117,6 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     ARGS -k
          test_multi_agent_support
-         --agent-index
-         relative
          --input-samples-csv
          ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_pc_sampling_host_trap.csv
          --input-kernel-trace-csv

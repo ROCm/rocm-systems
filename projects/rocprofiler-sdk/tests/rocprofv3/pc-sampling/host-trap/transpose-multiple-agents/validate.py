@@ -31,14 +31,13 @@ def test_multi_agent_support(
     input_samples_csv: pd.DataFrame,
     input_kernel_trace_csv: pd.DataFrame,
     input_agent_info_csv: pd.DataFrame,
-    agent_index: str,
 ):
     from rocprofiler_sdk.pc_sampling.transpose_multiple_agents.csv import (
         validate_all_agents_are_sampled,
     )
 
     validate_all_agents_are_sampled(
-        input_samples_csv, input_kernel_trace_csv, input_agent_info_csv, agent_index
+        input_samples_csv, input_kernel_trace_csv, input_agent_info_csv
     )
 
 

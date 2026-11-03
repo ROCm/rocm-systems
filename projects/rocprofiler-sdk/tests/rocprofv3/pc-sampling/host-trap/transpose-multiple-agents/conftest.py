@@ -46,18 +46,6 @@ def pytest_addoption(parser):
         help="Path to CSV file containing agents information.",
     )
 
-    parser.addoption(
-        "--agent-index",
-        choices=("absolute", "relative", "type-relative"),
-        default="relative",
-        help="Agent index mode used to generate the CSV files.",
-    )
-
-
-@pytest.fixture
-def agent_index(request):
-    return request.config.getoption("--agent-index")
-
 
 @pytest.fixture
 def input_samples_csv(request):

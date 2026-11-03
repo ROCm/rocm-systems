@@ -10,7 +10,7 @@
             "output_format": [
                 "csv"
             ],
-            "agent_index": "type-relative" 
+            "agent_index": "relative"
         }
     ]
 }
