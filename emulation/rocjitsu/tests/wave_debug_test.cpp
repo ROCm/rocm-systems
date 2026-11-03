@@ -7,6 +7,8 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -22,6 +24,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <map>
@@ -989,6 +992,158 @@ TEST(WaveDebugTest, ScalarAtomicX2AtPageEndChecksOnlyItsAccessWidth) {
   EXPECT_EQ(fx.cu->read_sgpr(sbase + 3), 0u);
 
   fx.gpu_mem.unregister_process(kProcessId);
+}
+
+// The probe checks only the bytes the pipeline reads for a scalar buffer access;
+// hardware faults only when an accessed DWORD is unmapped. The data page is
+// mapped and the page above it is not.
+TEST(WaveDebugTest, ScalarBufferProbeChecksOnlyAccessedDwords) {
+  constexpr uint32_t kProcessId = 9;
+  constexpr uint64_t kPageSize = amdgpu::GpuMemory::PAGE_SIZE;
+  constexpr uint64_t kDataAddr = 0x40000;
+  constexpr uint64_t kPageEnd = kDataAddr + kPageSize;
+  constexpr uint64_t kUnmapped = 0x900000;
+  constexpr uint32_t kSentinel = 0x5e5e5e5e;
+  const auto word = [](uint64_t address) {
+    return static_cast<uint32_t>(0xD0000000u | (address & 0xffff));
+  };
+  // s[8:11] receive the load or supply the atomic's data.
+  const auto cdna4_access = [](uint16_t opcode, uint32_t offset = 0) {
+    return cdna4::build_smem(opcode, {.sdata = 8, .glc = 1, .imm = 1, .offset = offset});
+  };
+  const auto rdna4_load = [](uint16_t opcode) {
+    return rdna4::build_smem(
+        opcode, {.sdata = 8, .soffset = static_cast<uint8_t>(rdna4::OPR_SMEM_OFFSET_NULL)});
+  };
+  struct Case {
+    const char *name;
+    rj_code_arch_t arch;
+    std::array<uint32_t, 2> words;
+    uint64_t base;
+    uint32_t records;
+    bool faults;
+    // s[8:11] once a non-faulting access completes.
+    std::array<uint32_t, 4> expected;
+  };
+  constexpr auto kCdna4 = ROCJITSU_CODE_ARCH_CDNA4;
+  const std::array cases{
+      // All four DWORDs are in range; the last two are unmapped.
+      Case{"in-range-unmapped",
+           kCdna4,
+           cdna4_access(cdna4::kSBufferLoadDwordx4Smem),
+           kPageEnd - 8,
+           16,
+           true,
+           {}},
+      // Only the two mapped DWORDs are in range.
+      Case{"out-of-range-unmapped",
+           kCdna4,
+           cdna4_access(cdna4::kSBufferLoadDwordx4Smem),
+           kPageEnd - 8,
+           8,
+           false,
+           {word(kPageEnd - 8), word(kPageEnd - 4), 0, 0}},
+      Case{"empty-buffer",
+           kCdna4,
+           cdna4_access(cdna4::kSBufferLoadDwordx4Smem),
+           kUnmapped,
+           0,
+           false,
+           {0, 0, 0, 0}},
+      Case{"all-mapped",
+           kCdna4,
+           cdna4_access(cdna4::kSBufferLoadDwordx4Smem),
+           kPageEnd - 16,
+           16,
+           false,
+           {word(kPageEnd - 16), word(kPageEnd - 12), word(kPageEnd - 8), word(kPageEnd - 4)}},
+      // Narrow loads read only their own bytes at the end of the mapped page.
+      Case{"byte-at-page-end",
+           ROCJITSU_CODE_ARCH_RDNA4,
+           rdna4_load(rdna4::kSBufferLoadU8Smem),
+           kPageEnd - 1,
+           1,
+           false,
+           {word(kPageEnd - 4) >> 24, kSentinel, kSentinel, kSentinel}},
+      Case{"halfword-at-page-end",
+           ROCJITSU_CODE_ARCH_RDNA4,
+           rdna4_load(rdna4::kSBufferLoadU16Smem),
+           kPageEnd - 2,
+           2,
+           false,
+           {word(kPageEnd - 4) >> 16, kSentinel, kSentinel, kSentinel}},
+      // A dropped atomic returns zero; a misaligned one still faults.
+      Case{"dropped-atomic",
+           kCdna4,
+           cdna4_access(cdna4::kSBufferAtomicIncX2Smem),
+           kUnmapped,
+           0,
+           false,
+           {0, 0, kSentinel, kSentinel}},
+      Case{"misaligned-atomic",
+           kCdna4,
+           cdna4_access(cdna4::kSBufferAtomicIncX2Smem, 4),
+           kUnmapped,
+           0,
+           true,
+           {}},
+  };
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    WaveDebugFixture fx(test_case.arch);
+    std::vector<uint8_t> kernel_page(kPageSize);
+    std::vector<uint8_t> data_page(kPageSize);
+    KfdProcess::PageTable page_table;
+    util::DistributedSharedMutex page_table_mutex;
+    page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
+                                                                amdgpu::Mtype::RW};
+    page_table[kDataAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {data_page.data(), amdgpu::Mtype::RW};
+    fx.gpu_mem.register_process(kProcessId, &page_table, &page_table_mutex);
+    for (uint64_t offset = 0; offset < kPageSize; offset += 4) {
+      const uint32_t value = word(kDataAddr + offset);
+      std::memcpy(data_page.data() + offset, &value, sizeof(value));
+    }
+
+    fx.gpu_mem.write32(kKernelAddr, test_case.words[0], kProcessId);
+    fx.gpu_mem.write32(kKernelAddr + 4, test_case.words[1], kProcessId);
+    for (uint32_t nop = 0; nop < 8; ++nop)
+      fx.gpu_mem.write32(kKernelAddr + 8 + 4 * nop, 0xBF800000u, kProcessId); // s_nop 0
+    auto *wave = fx.dispatch(kKernelAddr);
+    ASSERT_NE(wave, nullptr);
+    wave->set_process_id(kProcessId);
+    fx.cu->set_debug_active(true);
+    fx.l2.set_backing_memory(&fx.gpu_mem);
+
+    // V# in s[0:3].
+    const uint32_t sbase = wave->sgpr_alloc().base;
+    fx.cu->write_sgpr(sbase + 0, static_cast<uint32_t>(test_case.base));
+    fx.cu->write_sgpr(sbase + 1, static_cast<uint32_t>(test_case.base >> 32));
+    fx.cu->write_sgpr(sbase + 2, test_case.records);
+    fx.cu->write_sgpr(sbase + 3, 0);
+    for (uint32_t i = 0; i < 4; ++i)
+      fx.cu->write_sgpr(sbase + 8 + i, kSentinel);
+
+    unsigned violations = 0;
+    fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront &, uint64_t, bool, uint64_t) {
+      ++violations;
+      return true;
+    });
+
+    fx.cu->step();
+    EXPECT_EQ(violations, test_case.faults ? 1u : 0u);
+    if (test_case.faults) {
+      // The claimed fault skips the access.
+      for (uint32_t i = 0; i < 4; ++i)
+        EXPECT_EQ(fx.cu->read_sgpr(sbase + 8 + i), kSentinel);
+    } else {
+      for (int step = 0; step < 8 && fx.cu->read_sgpr(sbase + 8) == kSentinel; ++step)
+        fx.cu->step();
+      for (uint32_t i = 0; i < 4; ++i)
+        EXPECT_EQ(fx.cu->read_sgpr(sbase + 8 + i), test_case.expected[i]) << "dword " << i;
+    }
+
+    fx.gpu_mem.unregister_process(kProcessId);
+  }
 }
 
 // Linked gfx950 code forms helper addresses as GETPC plus a signed rel32

@@ -2337,8 +2337,15 @@ template <bool EnableAsync>
       auto &d = *inst->data_as<ScalarMemState>();
       dbg_is_atomic = d.atomic_op != AtomicOp::NONE;
       dbg_is_write = !d.is_load || dbg_is_atomic;
-      dbg_bytes = std::max(1u, dbg_is_atomic ? d.elem_size : d.num_dwords * d.elem_size);
-      dbg_addrs.push_back(d.addr);
+      const uint32_t bytes = std::max(1u, dbg_is_atomic ? d.elem_size : d.num_dwords * d.elem_size);
+      // Probe only the DWORDs the pipeline accesses. Hardware faults on a negative
+      // buffer immediate, so they start at the first one; rejecting that immediate
+      // is deferred. An empty mask accesses no memory.
+      const uint32_t accessed = d.load_dword_mask & ((1u << d.num_dwords) - 1);
+      if (accessed != 0) {
+        dbg_addrs.push_back(d.addr);
+        dbg_bytes = std::min(bytes, static_cast<uint32_t>(std::bit_width(accessed)) * 4);
+      }
     } else {
       auto &d = *inst->data_as<VectorMemState>();
       dbg_is_atomic = (d.atomic_op != AtomicOp::NONE);
