@@ -97,6 +97,10 @@ class RdcRocrBase {
   void* kernarg_buffer(void) const { return kernarg_buffer_; }
   void set_kernarg_buffer(void* buffer) { kernarg_buffer_ = buffer; }
 
+  hsa_code_object_reader_t& code_obj_rdr(void) { return code_obj_rdr_; }
+
+  hsa_executable_t& executable(void) { return executable_; }
+
   int32_t requires_profile(void) const { return requires_profile_; }
 
   char* orig_hsa_enable_interrupt() const { return orig_hsa_enable_interrupt_; }
@@ -151,6 +155,10 @@ class RdcRocrBase {
   uint32_t kernarg_align_;  ///< Alignment for kern argument memory
 
   void* kernarg_buffer_;  ///< Unaligned allocated kernel arg. buffer
+
+  hsa_code_object_reader_t code_obj_rdr_;  ///< Reader of the loaded kernel code object
+
+  hsa_executable_t executable_;  ///< Executable holding the loaded kernel
 
   hsa_profile_t profile_;  ///< Device profile.
 
