@@ -171,6 +171,200 @@ def _py_load_schema(engine, kind, options, version, variables):
     return contents
 
 
+# ---------------------------------------------------------------------------
+# Pure-python path formatting (mirrors tool::format_path and tool::output_keys in
+# source/lib/output/format_path.cpp and output_key.cpp). The %argv%, %argt%, %args%
+# and %argN% keys are intentionally not supported.
+# ---------------------------------------------------------------------------
+
+_MPI_SIZE_ENV_VARS = [
+    "MPI_SIZE",  # most generic to most runtime-specific
+    "MPI_LOCALNRANKS",
+    "MPI_NRANKS",
+    "OMPI_COMM_WORLD_SIZE",
+    "MV2_COMM_WORLD_SIZE",
+    "PMI_SIZE",
+    "SLURM_NTASKS",
+    "PBS_O_TASKNUM",
+]
+
+_MPI_RANK_ENV_VARS = [
+    "MPI_RANK",  # most generic to most runtime-specific
+    "MPI_LOCALRANKID",
+    "MPI_RANKID",
+    "OMPI_COMM_WORLD_RANK",
+    "MV2_COMM_WORLD_RANK",
+    "PMI_RANK",
+    "SLURM_PROCID",
+    "PBS_NODENUM",
+]
+
+_LAUNCH_TIME = None
+
+
+def _env_int(name, default):
+    try:
+        return int(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+def _mpi_value(selector_var, candidates, default):
+    # rocprofv3 can specify which environment variable holds the value
+    selected = os.environ.get(selector_var, "")
+    if selected:
+        if selected not in os.environ:
+            raise RuntimeError(
+                f"Environment variable {selector_var} is set to '{selected}', "
+                f"but '{selected}' is not set in the environment"
+            )
+        return _env_int(selected, default)
+
+    # variables towards the end of the list override preceding ones
+    value = default
+    for name in candidates:
+        if name:
+            value = _env_int(name, value)
+    return value
+
+
+def _mpi_size():
+    return _mpi_value("ROCPROF_MPI_SIZE_VAR", _MPI_SIZE_ENV_VARS, 0)
+
+
+def _mpi_rank():
+    return _mpi_value("ROCPROF_MPI_RANK_VAR", _MPI_RANK_ENV_VARS, 0)
+
+
+def _num_siblings():
+    ppid = os.getppid()
+    try:
+        with open(f"/proc/{ppid}/task/{ppid}/children") as f:
+            return len([x for x in f.read().split() if x.isdigit() and int(x) > 0])
+    except OSError:
+        return 0
+
+
+def _output_keys(tag):
+    """Returns ordered list of (key, value): full keys first, then shorthands."""
+    import socket
+    import time
+
+    global _LAUNCH_TIME
+    if _LAUNCH_TIME is None:
+        _LAUNCH_TIME = time.time()
+
+    mpi_size = _mpi_size()
+    mpi_rank = _mpi_rank()
+
+    dmp_size = str(mpi_size if mpi_size > 0 else 1)
+    dmp_rank = str(mpi_rank if mpi_rank > 0 else 0)
+    pid = str(os.getpid())
+    ppid = str(os.getppid())
+    hostname = socket.gethostname()
+    job_id = os.environ.get("SLURM_JOB_ID", "0")
+    slurm_proc_id = os.environ.get("SLURM_PROCID", dmp_rank)
+
+    uniq_id = pid
+    if _env_int("SLURM_PROCID", -1) >= 0:
+        uniq_id = slurm_proc_id
+    elif mpi_size > 0 or mpi_rank >= 0:
+        uniq_id = dmp_rank
+
+    def _launch(fmt_var, default_fmt):
+        fmt = os.environ.get(fmt_var, default_fmt)
+        return time.strftime(fmt, time.localtime(_LAUNCH_TIME))
+
+    full_keys = [
+        ("tag", tag),
+        ("hostname", hostname),
+        ("pid", pid),
+        ("ppid", ppid),
+        ("pgid", str(os.getpgid(0))),
+        ("psid", str(os.getsid(0))),
+        ("psize", str(_num_siblings())),
+        ("job", job_id),
+        ("rank", slurm_proc_id),
+        ("size", dmp_size),
+        ("nid", uniq_id),
+        ("cwd", os.getcwd()),
+        ("launch_date", _launch("ROCPROF_DATE_FORMAT", "%F")),
+        ("launch_time", _launch("ROCPROF_TIME_FORMAT", "%F_%H.%M")),
+    ]
+
+    keys = []
+    for key, value in full_keys:
+        keys.append(("%" + key + "%", value))
+        keys.append(("{" + key + "}", value))
+
+    # shorthands must come after the full keys, e.g. %p would otherwise match in %pgid%
+    keys += [
+        ("%h", hostname),
+        ("%p", pid),
+        ("%j", job_id),
+        ("%r", slurm_proc_id),
+        ("%s", dmp_size),
+    ]
+    return keys
+
+
+def _sanitize_env_value(value):
+    for ch in ("\t", " ", "/"):
+        value = value.lstrip(ch)
+        value = value.replace(ch, "_")
+    return value
+
+
+_ENV_PATTERNS = [
+    r"%(?:env|ENV)\{([A-Z0-9_]+)\}%",
+    r"\$(?:env|ENV)\{([A-Z0-9_]+)\}",
+    r"%q\{([A-Z0-9_]+)\}%?",
+]
+
+
+def _format_path_once(path, keys):
+    import re
+
+    for key, value in keys:
+        # a value containing its own key would be substituted forever
+        if key in value:
+            continue
+        path = path.replace(key, value)
+
+    for pattern in _ENV_PATTERNS:
+        while True:
+            matches = list(re.finditer(pattern, path))
+            if not matches:
+                break
+            m = matches[-1]
+            value = _sanitize_env_value(os.environ.get(m.group(1), ""))
+            if m.group(0) in value:
+                break
+            path = path[: m.start()] + value + path[m.end() :]
+
+    return path
+
+
+def _py_format_path(path, tag=None):
+    """Pure-python equivalent of libpyrocpd.format_path."""
+    if "%" not in path and "{" not in path and "$" not in path:
+        return path
+
+    if tag is None:
+        import sys
+
+        tag = os.path.basename(sys.executable)
+
+    keys = _output_keys(tag)
+    # native format_path repeats until the result is stable
+    for _ in range(100):
+        updated = _format_path_once(path, keys)
+        if updated == path:
+            break
+        path = updated
+    return path
+
+
 try:
     # support disabling the python bindings via environment variable
     rocpd_disable_bindings = os.environ.get("ROCPD_DISABLE_BINDINGS", None)
@@ -341,50 +535,7 @@ except ImportError:
 
     def format_path(path, tag=None):
         """Fallback for libpyrocpd.format_path: resolve output keys in filepath."""
-        import os
-        import socket
-        import re
-        import sys
-
-        if tag is None:
-            tag = os.path.basename(sys.executable)
-
-        hostname = socket.gethostname()
-        pid = str(os.getpid())
-        ppid = str(os.getppid())
-        cwd = os.getcwd()
-
-        replacements = {
-            "%hostname%": hostname,
-            "{hostname}": hostname,
-            "%h": hostname,
-            "%pid%": pid,
-            "{pid}": pid,
-            "%ppid%": ppid,
-            "{ppid}": ppid,
-            "%p": pid,
-            "%cwd%": cwd,
-            "{cwd}": cwd,
-            "%tag%": tag,
-            "{tag}": tag,
-        }
-
-        for key, value in replacements.items():
-            path = path.replace(key, value)
-
-        for pattern in [
-            r"%(env|ENV)\{([A-Z0-9_]+)\}%",
-            r"\$(env|ENV)\{([A-Z0-9_]+)\}",
-            r"%q\{([A-Z0-9_]+)\}",
-        ]:
-
-            def _env_repl(m):
-                var_name = m.group(m.lastindex)
-                return os.environ.get(var_name, "")
-
-            path = re.sub(pattern, _env_repl, path)
-
-        return path
+        return _py_format_path(path, tag)
 
     class agent_indexing(enum.IntEnum):
         node = 0

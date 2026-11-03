@@ -390,6 +390,17 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+# same comparison with SLURM job/rank variables set to exercise rank/size/job/nid keys
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-schema-fallback-parity-slurm
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/schema_fallback_parity.py
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 60
+    LABELS "integration-tests;rocpd"
+    ENVIRONMENT "${rocprofv3-rocpd-env}" "SLURM_PROCID=3" "SLURM_JOB_ID=1234"
+                "SLURM_NTASKS=8"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 #########################################################################################
 #
 # Validation
@@ -586,7 +597,6 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 60
     LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED rocprofv3-test-rocpd)
-
 
 #########################################################################################
 #
