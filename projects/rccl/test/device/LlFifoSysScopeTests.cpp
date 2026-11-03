@@ -130,8 +130,8 @@ __global__ void kernelCooperativeLineRoundtrip(uint64_t* lines, int* ok) {
 }
 
 // Reloads the lines written by kernelCooperativeLineRoundtrip and masks them.
-// Guards rcclIdentity: before ROCm 10.2, this expression on the raw builtin
-// result crashes instruction selection. It only does so when the mask is the
+// Guards rcclIdentity: this expression on the raw builtin result crashes
+// instruction selection. It only does so when the mask is the
 // load's sole use, hence a separate kernel.
 constexpr uint64_t kCoopMasked = 0xA5 + 0x5A5A;
 __global__ void kernelCooperativeLineMask(const uint64_t* lines, uint64_t* masked) {
