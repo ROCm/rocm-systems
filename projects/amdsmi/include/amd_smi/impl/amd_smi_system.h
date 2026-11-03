@@ -54,8 +54,6 @@ class AMDSmiSystem {
 
   std::vector<uint32_t> get_cpu_sockets_from_numa_node(int32_t numa_node);
 
-  const auto& get_ai_nic_info() const;
-
  private:
   friend class testing::ScopedProcessorRegistration;
 
@@ -81,7 +79,6 @@ class AMDSmiSystem {
   uint64_t init_flag_;
   AMDSmiDrm drm_;
   smi_nic_ctx_t ainic_ctx_ = nullptr;
-  std::vector<AMDSmiAINICDevice::AINICInfo> ai_nic_info_;
 #ifdef BRCM_NIC
   AMDSmiNoDrmNIC no_drm_nic_;
   AMDSmiNoDrmSwitch no_drm_switch_;
