@@ -261,11 +261,8 @@ RocJpegStatus RocJpegDecoder::Decode(RocJpegStreamHandle jpeg_stream_handle, con
     VASurfaceID current_surface_id;
     CHECK_ROCJPEG(jpeg_vaapi_decoder_.SubmitDecode(&jpeg_stream_params, current_surface_id, decode_params));
 
-    // A single image is just a batch of one.
+    // A single image is just a batch of one. FinalizeDecodeBatched releases the surface even if it fails.
     RocJpegStatus rocjpeg_status = FinalizeDecodeBatched(&current_surface_id, &jpeg_stream_params, decode_params, destination, 1);
-    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-        jpeg_vaapi_decoder_.SetSurfaceAsIdle(current_surface_id);
-    }
     FunctionExitLog(g_rocjpeg_logger);
     return rocjpeg_status;
 }
@@ -334,10 +331,9 @@ RocJpegStatus RocJpegDecoder::DecodeSync(RocJpegImage *destination) {
     }
 
     // Sync the VA surface and copy the decoded output to the destination without holding the mutex.
-    // A single image is just a batch of one.
+    // A single image is just a batch of one. FinalizeDecodeBatched releases the surface even if it fails.
     RocJpegStatus rocjpeg_status = FinalizeDecodeBatched(&state.surface_id, &state.jpeg_stream_params, &state.decode_params, destination, 1);
     if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-        jpeg_vaapi_decoder_.SetSurfaceAsIdle(state.surface_id);
         FunctionExitLog(g_rocjpeg_logger);
         return rocjpeg_status;
     }
@@ -362,6 +358,26 @@ RocJpegStatus RocJpegDecoder::FinalizeDecodeBatched(const VASurfaceID *surface_i
     // hip_stream_). A dedicated lock keeps two concurrent finalizations from interleaving
     // without holding mutex_ across the GPU work, so async submits can still proceed.
     std::lock_guard<std::mutex> finalize_lock(finalize_mutex_);
+    int num_released = 0;
+    RocJpegStatus rocjpeg_status = FinalizeSubBatches(surface_ids, jpeg_stream_params, decode_params, destinations, batch_size, num_released);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        // The failing sub-batch and every later one still hold their surfaces. Wait for any copy or kernel already
+        // queued for them, then sync each surface (later sub-batches may still be decoding) and release it, so the
+        // pool entries are not leaked and are not reused while still being read or written.
+        if (hipStreamSynchronize(hip_stream_) != hipSuccess) {
+            ErrorLog(g_rocjpeg_logger, "Failed to synchronize the HIP stream while releasing the surfaces of a failed decode!");
+        }
+        for (int k = num_released; k < batch_size; k++) {
+            jpeg_vaapi_decoder_.SyncSurface(surface_ids[k]);
+            jpeg_vaapi_decoder_.SetSurfaceAsIdle(surface_ids[k]);
+        }
+    }
+    return rocjpeg_status;
+}
+
+RocJpegStatus RocJpegDecoder::FinalizeSubBatches(const VASurfaceID *surface_ids, const JpegStreamParameters *jpeg_stream_params,
+                                                 const RocJpegDecodeParams *decode_params, RocJpegImage *destinations, int batch_size,
+                                                 int &num_released) {
     VcnJpegSpec current_vcn_jpeg_spec = jpeg_vaapi_decoder_.GetCurrentVcnJpegSpec();
     for (int i = 0; i < batch_size; i += current_vcn_jpeg_spec.num_jpeg_cores) {
         int sub_batch_end = std::min(i + static_cast<int>(current_vcn_jpeg_spec.num_jpeg_cores), batch_size);
@@ -442,6 +458,7 @@ RocJpegStatus RocJpegDecoder::FinalizeDecodeBatched(const VASurfaceID *surface_i
         for (int k = 0; k < current_sub_batch_size; k++) {
             jpeg_vaapi_decoder_.SetSurfaceAsIdle(surface_ids[i + k]);
         }
+        num_released = sub_batch_end;
     }
     return ROCJPEG_STATUS_SUCCESS;
 }
