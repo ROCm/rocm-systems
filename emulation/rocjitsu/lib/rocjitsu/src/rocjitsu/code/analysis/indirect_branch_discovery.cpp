@@ -2395,7 +2395,7 @@ public:
   }
 
   void intersect_with(const RestoredSgprFacts &other) {
-    if (!values_ || values_.get() == other.values_.get())
+    if (!values_ || values_ == other.values_)
       return;
     const auto conflicts = [&](const Entry &entry) {
       const StashedPcHalf *incoming = other.find(entry.sgpr);
@@ -2412,7 +2412,7 @@ public:
   void clear() { values_.reset(); }
 
   friend bool operator==(const RestoredSgprFacts &lhs, const RestoredSgprFacts &rhs) {
-    return lhs.values_.get() == rhs.values_.get() || lhs.values() == rhs.values();
+    return lhs.values_ == rhs.values_ || lhs.values() == rhs.values();
   }
 
 private:

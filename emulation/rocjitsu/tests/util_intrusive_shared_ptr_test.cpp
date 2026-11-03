@@ -114,6 +114,29 @@ TEST(IntrusiveSharedPtr, EmptyHandlesCanBeCopiedMovedAndReset) {
   EXPECT_EQ(empty.get(), nullptr);
 }
 
+TEST(IntrusiveSharedPtr, EqualityComparesPointerIdentity) {
+  IntPtr empty;
+  ConstIntPtr const_empty;
+  auto owner = IntPtr::make(42);
+  auto copy = owner;
+  ConstIntPtr const_owner(owner);
+  auto distinct = IntPtr::make(42);
+
+  EXPECT_EQ(empty, IntPtr{});
+  EXPECT_EQ(empty, const_empty);
+  EXPECT_EQ(const_empty, empty);
+  EXPECT_EQ(owner, copy);
+  EXPECT_EQ(owner, const_owner);
+  EXPECT_EQ(const_owner, owner);
+  EXPECT_NE(owner, distinct);
+  EXPECT_NE(const_owner, distinct);
+  EXPECT_NE(distinct, const_owner);
+  EXPECT_NE(owner, empty);
+  EXPECT_NE(const_empty, owner);
+  EXPECT_EQ(owner->ref_count(), 3u);
+  EXPECT_EQ(distinct->ref_count(), 1u);
+}
+
 TEST(IntrusiveSharedPtr, CopiesRetainUntilLastOwner) {
   std::atomic<int> destroyed{0};
   auto owner = TrackedPtr::make(destroyed);

@@ -21,8 +21,6 @@ class IntrusiveSharedPtrTestAccess;
 /// determine thread safety. Concurrent mutation of the same handle requires
 /// external synchronization. Does not provide weak ownership.
 template <typename T> class IntrusiveSharedPtr {
-  template <typename> friend class IntrusiveSharedPtr;
-
 public:
   IntrusiveSharedPtr() noexcept = default;
   IntrusiveSharedPtr(std::nullptr_t) noexcept {}
@@ -62,11 +60,19 @@ public:
   [[nodiscard]] T &operator*() const noexcept { return *ptr_; }
   [[nodiscard]] explicit operator bool() const noexcept { return ptr_ != nullptr; }
 
+  template <typename U>
+    requires std::is_same_v<std::remove_const_t<T>, std::remove_const_t<U>>
+  [[nodiscard]] bool operator==(const IntrusiveSharedPtr<U> &other) const noexcept {
+    return ptr_ == other.get();
+  }
+
   void reset() noexcept { IntrusiveSharedPtr{}.swap(*this); }
   void swap(IntrusiveSharedPtr &other) noexcept { std::swap(ptr_, other.ptr_); }
   friend void swap(IntrusiveSharedPtr &lhs, IntrusiveSharedPtr &rhs) noexcept { lhs.swap(rhs); }
 
 private:
+  template <typename> friend class IntrusiveSharedPtr;
+
   explicit IntrusiveSharedPtr(T *ptr) noexcept : ptr_(ptr) {}
 
   void retain() noexcept {

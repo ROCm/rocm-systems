@@ -908,10 +908,9 @@ private:
   ///          and page_table_mutex_; readers hold at least one of those locks,
   ///          so the counter itself does not need atomics.
   uint64_t page_table_generation_{1};
-  // Cache hits read the epoch while misses copy and release its owner.
-  // Keep the epoch off the cache line containing the reference count.
   /// @brief Retained atomic token for lockless copied-policy checks.
   /// @details Invalidate before mutation, including partially throwing updates.
+  /// Cache hits read the epoch while misses copy and release its owner.
   util::IntrusiveSharedPtr<amdgpu::VmMutationEpoch> page_table_mutation_epoch_ =
       util::IntrusiveSharedPtr<amdgpu::VmMutationEpoch>::make(1);
   std::shared_ptr<amdgpu::LegacyPageTableCacheState> page_table_cache_state_ =
