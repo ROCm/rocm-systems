@@ -602,6 +602,9 @@ inline void for_each_dense_tensor_element(const TensorDmaDescriptor &desc,
   for (uint32_t dim = 0; dim < rank; ++dim)
     element_count *= desc.tile_dims[dim];
   // Without elements there is nothing to visit, so reconstruct no origins.
+  // validate_supported_descriptor accepts an empty tile without validating its
+  // iteration inverse, so its layout may hold a zero stride, which
+  // origin_from_linear_offset would divide by.
   if (element_count == 0)
     return;
 

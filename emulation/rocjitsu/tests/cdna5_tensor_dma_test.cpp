@@ -1162,9 +1162,9 @@ TEST(Gfx1250ExecutionTest, TensorDmaZeroTileDim0IsANopWhateverTheHigherTileDims)
 
 // Pipelines drain an iterating prefetch with a zero-width tile. Such a tile
 // visits no elements, so its iteration need not describe valid origins: it
-// passes with an overlapping stride, which no transfer could invert, and with
-// every tile dimension zero, which leaves no rank to iterate over. A tile with
-// elements and the same overlapping stride is still rejected.
+// passes with an overlapping or zero stride, which no transfer could invert,
+// and with every tile dimension zero, which leaves no rank to iterate over. A
+// tile with elements and the same overlapping stride is still rejected.
 TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
   constexpr uint64_t kGlobal = 0x18c000;
   constexpr uint32_t kSentinel = 0x5e5e5e5eu;
@@ -1180,6 +1180,12 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
        .tile_dim0 = 0,
        .tile_dim1 = 4,
        .tensor_dim0_stride = 1,
+       .succeeds = true},
+      // A zero stride has no inverse; origin reconstruction would divide by it.
+      {.name = "zero-width tile, zero stride",
+       .tile_dim0 = 0,
+       .tile_dim1 = 4,
+       .tensor_dim0_stride = 0,
        .succeeds = true},
       {.name = "zero-width tile, disjoint stride",
        .tile_dim0 = 0,
