@@ -538,6 +538,20 @@ class VerdictTest(unittest.TestCase):
         tel["devices"][0]["rx_bytes_merged"] = True
         self.assertNotIn("LINK-SHARED", one(tel=tel).rank(0).verdict)
 
+    def test_receive_that_opened_the_window_is_added_once(self):
+        # Two NICs, 64 MiB received inside the window on each, and a 4096-byte
+        # receive that opened the window before either NIC's delta started.
+        lines = []
+        for l in iterations(0, "hostA", 1):
+            obj = json.loads(l)
+            net = obj["coll_perf"]["net"]
+            net["rx_bytes_before_window"] = 4096
+            net["devices"].append(dict(net["devices"][0], device_id=1))
+            lines.append(json.dumps(obj))
+        g = one(lines=lines).rank(0)
+        self.assertEqual(g.rx_per_coll_lb, 2 * 64 * MB + 4096)    # once per collective, not per NIC
+        self.assertEqual(g.nics[0].sw_rx_per_coll, 64 * MB)       # per-NIC: within the window only
+
     def test_missing_counters_are_not_clean(self):
         # Only RCCL's software bytes: nothing about loss, marks, link or pause.
         tel = telemetry("hostA", 1)

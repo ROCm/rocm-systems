@@ -171,6 +171,8 @@ summary names them when a size has more than one:
 | `cnp/s` | CNPs sent plus received per second of wall time |
 | `link%`, `rccl%` | How busy the link was, and how much of that was this job's RCCL traffic |
 | `B/coll` | RCCL bytes sent per collective on that NIC |
+| `rxwin/coll` | RCCL bytes received per collective on that NIC, inside the network window only. The receive that opened the window was counted before the window began, so it is not here |
+| `rx/coll` | RCCL bytes received per collective across all NICs, with the window-opening receive added once. A lower bound: one completion can finish several grouped receives and only the first one's size is recorded. Not used by any verdict |
 | `cmpl p50/p99` | Work-request completion latency percentiles |
 
 Counters are sampled, not continuous, so most values are a range: `a-b`

@@ -87,6 +87,9 @@ class CollRecord:
     net_end_us: int = 0
     # Why this record's file cannot be trusted to be complete, "" if it can.
     accl_incomplete: str = ""
+    # Bytes of the receive that opened the network window: counted before the
+    # start snapshot, so in no NIC's delta. One number per collective.
+    rx_before: int = 0
 
 
 def load_accl(path: str, warmup: int) -> Tuple[List[CollRecord], int]:
@@ -148,7 +151,8 @@ def load_accl(path: str, warmup: int) -> Tuple[List[CollRecord], int]:
                                       enqueue_us=ts.get("enqueue_us", 0),
                                       exec_end_us=ts.get("exec_end_us", 0), net=net,
                                       net_start_us=netobj.get("window_start_us", 0),
-                                      net_end_us=netobj.get("window_end_us", 0)))
+                                      net_end_us=netobj.get("window_end_us", 0),
+                                      rx_before=int(netobj.get("rx_bytes_before_window", 0))))
         why = _accl_incomplete(summary)
         for r in out[first:]:
             r.accl_incomplete = why
@@ -664,6 +668,7 @@ class NicStats:
     rccl_pct: Optional[float] = None                 # RCCL's share of that traffic
     nic_stale: bool = False
     sw_tx_per_coll: float = 0.0
+    sw_rx_per_coll: float = 0.0                      # received inside the window only
     cmpl_hist: List[int] = field(default_factory=list)
     findings: List[Finding] = field(default_factory=list)
 
@@ -691,6 +696,8 @@ class GroupResult:
     comm: str = ""
     algo: str = ""
     proto: str = ""
+    # All bytes received per collective, every NIC: a lower bound (see analyze).
+    rx_per_coll_lb: Optional[float] = None
 
 
 def _level(lb: float, ub: float, thr: float, strict: bool = False) -> Optional[str]:
@@ -747,6 +754,14 @@ def analyze(recs: List[CollRecord], tels: Dict[Tuple[str, int], Telemetry],
                              comm=comm, algo=algo, proto=proto)
             for why in sorted({r.accl_incomplete for r in g if r.accl_incomplete}):
                 gr.inconclusive.append(why)
+            # Per collective: every NIC's in-window receive, plus the receive that
+            # opened the window, added once (it is in no NIC's delta). Still a
+            # lower bound: one completion can finish several grouped receives,
+            # and only the first one's size is recorded.
+            with_rx = [r for r in g if r.net]
+            if with_rx:
+                gr.rx_per_coll_lb = sum(sum(d.get("rx_bytes", 0) for d in r.net.values()) + r.rx_before
+                                        for r in with_rx) / len(with_rx)
             with_win = [r for r in g if r.net_start_us]
             if with_win:
                 gr.overlap_pct = 100.0 * sum(id(r) in overlapped for r in with_win) / len(with_win)
@@ -900,12 +915,14 @@ def _nic_stats(dev, g, spans, busy, interval, lane, thr, tels, host, gr) -> NicS
     for r in with_net:
         d = r.net[dev.device_id]
         ns.sw_tx_per_coll += d.get("tx_bytes", 0)
+        ns.sw_rx_per_coll += d.get("rx_bytes", 0)
         h = d.get("completion_hist", [])
         hist += [0] * (len(h) - len(hist))
         for i, c in enumerate(h):
             hist[i] += c
     if with_net:
         ns.sw_tx_per_coll /= len(with_net)
+        ns.sw_rx_per_coll /= len(with_net)
     ns.cmpl_hist = hist
 
     # Spans the samples did not cover leave every finding open.
@@ -1168,11 +1185,13 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
     print(f"Thresholds: pause {thr.pause_pct:g}% of wall time, ECN {thr.ecn_pct:g}% of packets or {thr.cnp_ps:g} CNPs/s, link busy {thr.link_busy_pct:g}% "
           f"with >= {thr.link_other_pct:g}% non-RCCL traffic")
     print("  rxPause = switch paused our transmit   txPause = our NIC paused the switch")
-    print("  a-b = at least a, at most b (counters are sampled, not continuous)\n")
+    print("  a-b = at least a, at most b (counters are sampled, not continuous)")
+    print("  B/coll = RCCL bytes sent per collective; rxwin/coll = received inside the network window on")
+    print("  that NIC; rx/coll = all RCCL bytes received per collective, all NICs, a lower bound\n")
 
     hdr = (f"{'Coll':<12} {'Size':>5} {'Rank':>4} {'Host':<20} {'N':>4} {'wall ms':>8} "
            f"{'busBW':>6} {'NIC':<10} {'rxPause':>10} {'txPause':>10} {'loss':>6} {'rnr':>5} "
-           f"{'ecn%':>9} {'cnp/s':>11} {'link%':>5} {'rccl%':>5} {'B/coll':>8} {'cmpl p50/p99':>13}  Verdict")
+           f"{'ecn%':>9} {'cnp/s':>11} {'link%':>5} {'rccl%':>5} {'B/coll':>8} {'rxwin/coll':>10} {'rx/coll':>9} {'cmpl p50/p99':>13}  Verdict")
     print(hdr)
     print("-" * len(hdr))
     for g in sorted(results, key=lambda r: (r.coll, r.msg_size, r.host, r.rank)):
@@ -1190,10 +1209,14 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
             p99 = fmt_quantile(hist_quantile(n.cmpl_hist, 0.99, HIST_NS))
             link = "stale" if n.nic_stale else ("-" if n.link_pct is None else f"{n.link_pct:.0f}")
             bpc = accl_report.fmt_size(int(n.sw_tx_per_coll)) + ("*" if g.overlap_pct > 10 else "")
+            rxwin = accl_report.fmt_size(int(n.sw_rx_per_coll))
+            # Once per collective, all NICs: shown on the first NIC row only.
+            rxall = (">=" + accl_report.fmt_size(int(g.rx_per_coll_lb))) if i == 0 and g.rx_per_coll_lb is not None \
+                else ("-" if i == 0 else "")
             print(f"{lead} {n.roce[:10]:<10} {rxp:>10} "
                   f"{txp:>10} {_fmt_range(n.loss, ''):>6} "
                   f"{_fmt_range(_add(n.rnr, n.rnr_peer), ''):>5} {_fmt_range(n.ecn_pct, '%'):>9} {_fmt_range(n.cnp_ps, '/s'):>11} "
-                  f"{link:>5} {'-' if n.rccl_pct is None else f'{n.rccl_pct:.0f}':>5} {bpc:>8} "
+                  f"{link:>5} {'-' if n.rccl_pct is None else f'{n.rccl_pct:.0f}':>5} {bpc:>8} {rxwin:>10} {rxall:>9} "
                   f"{p50 + '/' + p99:>13}  {g.verdict if i == 0 else ''}")
 
     print("\nSummary per collective and size (all ranks):")
