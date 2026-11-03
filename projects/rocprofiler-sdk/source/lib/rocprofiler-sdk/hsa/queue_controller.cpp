@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/common/container/small_vector.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -32,6 +33,7 @@
 #include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 
+#include <fmt/ranges.h>
 #include <hsa/amd_hsa_queue.h>
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa_ext_amd.h>
@@ -39,9 +41,11 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <unistd.h>
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 
 namespace rocprofiler
 {
@@ -49,6 +53,11 @@ namespace hsa
 {
 namespace
 {
+// True once this process installs its own hsa_queue_destroy, the only path that reaches
+// QueueController::destroy_queue. Set during init, read on application threads that
+// discover queues.
+std::atomic<bool> queue_destruction_intercepted = {false};
+
 // Read AGENT's own GPU-clock counter -- the same tick domain as fw_record::ts for
 // records emitted by AGENT. Called exactly twice per queue lifetime, never
 // per dispatch. Returns 0 on any failure or on an untrustworthy sentinel; the
@@ -699,6 +708,7 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
         {
             core_table.hsa_queue_create_fn  = hsa::create_queue;
             core_table.hsa_queue_destroy_fn = hsa::destroy_queue;
+            queue_destruction_intercepted.store(true, std::memory_order_release);
 #if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
             ext_table.hsa_amd_queue_create_fn = hsa::create_amd_queue;
 #endif
@@ -946,6 +956,44 @@ get_queue_controller()
     return controller;
 }
 
+namespace
+{
+// Comma-separated names of every counter-collection, SPM and thread-trace service active
+// across the registered contexts, deduplicated so a service requested by several contexts is
+// named once. Empty when none is active.
+std::string
+describe_services_blocking_adoption()
+{
+    auto _contexts = context::get_registered_contexts([](const context::context* ctx) {
+        return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
+                ctx->dispatch_spm || ctx->device_spm || ctx->dispatch_thread_trace ||
+                ctx->device_thread_trace);
+    });
+
+    auto       _names = common::container::small_vector<const char*>{};
+    auto       _seen  = uint32_t{0};
+    const auto _add   = [&_names, &_seen](bool _active, uint32_t _bit, const char* _name) {
+        if(_active && (_seen & _bit) == 0)
+        {
+            _seen |= _bit;
+            _names.emplace_back(_name);
+        }
+    };
+
+    for(const auto* ctx : _contexts)
+    {
+        _add(ctx->dispatch_counter_collection != nullptr, 1U << 0U, "dispatch counter collection");
+        _add(ctx->device_counter_collection != nullptr, 1U << 1U, "device counter collection");
+        _add(ctx->dispatch_spm != nullptr, 1U << 2U, "dispatch SPM");
+        _add(ctx->device_spm != nullptr, 1U << 3U, "device SPM");
+        _add(ctx->dispatch_thread_trace != nullptr, 1U << 4U, "dispatch thread trace");
+        _add(ctx->device_thread_trace != nullptr, 1U << 5U, "device thread trace");
+    }
+
+    return fmt::format("{}", fmt::join(_names.begin(), _names.end(), ", "));
+}
+}  // namespace
+
 // Registers a Queue for one the application created before any dispatch-tracing context
 // existed, discovered on an application thread's first touch of its write index. Without
 // a registered Queue its packets execute uninstrumented and emit no records.
@@ -960,17 +1008,24 @@ queue_controller_adopt_existing_queue(const hsa_queue_t* queue)
     // Queue; adopt_queue admits one and disposes of the other.
     if(qc->get_queue(*queue) != nullptr) return true;
 
+    // _queues is keyed on the hsa_queue_t pointer and get_queue() dereferences those keys, so
+    // an entry must be removable when its queue is destroyed. destroy_queue() is the only
+    // eraser and it runs only from this process's hsa_queue_destroy.
+    if(!queue_destruction_intercepted.load(std::memory_order_acquire))
+    {
+        ROCP_WARNING << "[queue-intercept] not adopting pre-existing queue: queue destruction is "
+                        "not intercepted, so the registration could not be removed";
+        return false;
+    }
+
     // Counter collection, SPM and thread trace need setup a queue adopted mid-life never
     // received. Adoption covers tracing only.
-    if(!context::get_registered_contexts([](const context::context* ctx) {
-            return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
-                    ctx->dispatch_spm || ctx->device_spm || ctx->dispatch_thread_trace ||
-                    ctx->device_thread_trace);
-        }).empty())
+    if(auto _blocking = describe_services_blocking_adoption(); !_blocking.empty())
     {
-        ROCP_INFO << "[queue-intercept] not adopting pre-existing queue: an active "
-                     "profiling service requires queue setup that cannot be applied "
-                     "retroactively";
+        ROCP_WARNING << fmt::format(
+            "[queue-intercept] not adopting pre-existing queue: queue setup for {} cannot be "
+            "applied retroactively",
+            _blocking);
         return false;
     }
 
