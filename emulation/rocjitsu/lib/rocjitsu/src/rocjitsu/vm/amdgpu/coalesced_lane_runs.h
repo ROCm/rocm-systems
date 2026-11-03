@@ -253,6 +253,7 @@ RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lan
 /// @details Runs follow lane order and never sort, so lanes contiguous only out of lane
 /// order remain separate runs. Use this where a per-lane access costs less than sorting
 /// the operands. The callback returns false to stop.
+/// @returns false when the callback stopped the scan; true once every run was visited.
 template <typename F>
 bool for_each_lane_ordered_run(const uint64_t *addrs, uint64_t lane_mask, uint32_t wf_size,
                                uint32_t stride, F &&fn) {
