@@ -505,6 +505,11 @@ inline uint64_t tensor_dma_lds_allocation_end(const Wavefront &wf) {
 /// 10.11.6, "Xnack, Memviol and Out-of-Bounds Behavior"); append_copy drops the out-of-range
 /// bytes silently. That section also reports the LDS violation as a MEMVIOL after the descriptor
 /// is processed when LDS_CONFIG.ADDR_OUT_OF_RANGE_REPORTING == 1; that reporting is not modeled.
+/// The bound is the allocation rocjitsu dispatches, wf.lds_size(), which the dispatcher rounds up
+/// to 256 bytes. CDNA5 ISA 3.3.4 specifies a 2048-byte allocation granularity, so hardware likely
+/// owns bytes past this bound that are dropped here; this is inferred from the ISA, not measured on
+/// hardware. The same dispatch granularity also bounds DS and FLAT accesses and is tracked
+/// separately.
 /// Requiring the atomic-barrier cell to lie within the allocation is simulator validation, not a
 /// rule of that section. allocation_end is tensor_dma_lds_allocation_end(wf).
 inline bool validate_materialization_address_ranges(const TensorDmaDescriptor &desc,
