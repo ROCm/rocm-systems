@@ -13,7 +13,6 @@
 #include <hip_test_kernels.hh>
 #include <utils.hh>
 
-#include <cstdlib>
 #include <vector>
 
 namespace {
@@ -73,9 +72,6 @@ HIP_TEST_CASE(Unit_hipGraphStreamPool_InstantiateFootprint) {
   constexpr int kChains = 1;
   constexpr int kDepth = 2;
   constexpr size_t kMaxBytesPerGraph = 2 * 1024 * 1024;
-
-  const char* min_overlap = std::getenv("DEBUG_HIP_GRAPH_MIN_OVERLAP");
-  INFO("DEBUG_HIP_GRAPH_MIN_OVERLAP=" << (min_overlap ? min_overlap : "(default)"));
 
   int* buf = nullptr;
   HIP_CHECK(hipMalloc(&buf, kElems * sizeof(int)));

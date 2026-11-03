@@ -4,30 +4,22 @@
  * SPDX-License-Identifier: MIT
  */
 
-// End-to-end data-correctness test for the single-stream collapse heuristic.
+// End-to-end data-correctness test for small-kernel multi-stream graphs.
 //
-// The collapse heuristic (DEBUG_HIP_GRAPH_MIN_OVERLAP) can silently fold a
-// multi-stream graph onto one in-order stream. This test builds a diamond graph
-// with real cross-branch data dependencies and verifies the output is correct
-// regardless of whether collapse fires, so a dropped/mis-ordered dependency
-// would corrupt the result and fail the test (not just check liveness).
-//
-// To cover both code paths, run the binary twice:
-//   DEBUG_HIP_GRAPH_MIN_OVERLAP=0 ./GraphPerformance "Performance_Graph_CollapseCorrectness"
-//   DEBUG_HIP_GRAPH_MIN_OVERLAP=2 ./GraphPerformance "Performance_Graph_CollapseCorrectness"
-// (the flag is read once at hipGraphInstantiate, hence separate processes).
+// Builds a diamond graph with real cross-branch data dependencies and verifies
+// the output, so a dropped/mis-ordered cross-stream dependency corrupts the
+// result and fails the test (not just check liveness).
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdlib>
 #include <vector>
 
 namespace {
 
-constexpr int kN = 4096;          // small kernels so the gate may collapse them
+constexpr int kN = 4096;          // small, launch-bound kernels
 constexpr int kBlock = 256;
 constexpr int kIters = 200;       // many launches to surface nondeterministic races
 constexpr int kPoison = -1;       // a stale (pre-dependency) read yields this
@@ -72,9 +64,6 @@ hipGraphNode_t AddKernel(hipGraph_t graph, std::vector<hipGraphNode_t> deps,
  * launch, so any node running before its producer reads kPoison and fails.
  */
 TEST_CASE("Performance_Graph_CollapseCorrectness") {
-  const char* env = std::getenv("DEBUG_HIP_GRAPH_MIN_OVERLAP");
-  INFO("DEBUG_HIP_GRAPH_MIN_OVERLAP=" << (env ? env : "(default)"));
-
   const size_t bytes = static_cast<size_t>(kN) * sizeof(int);
   int *a = nullptr, *b = nullptr, *c = nullptr, *out = nullptr;
   HIP_CHECK(hipMalloc(&a, bytes));
