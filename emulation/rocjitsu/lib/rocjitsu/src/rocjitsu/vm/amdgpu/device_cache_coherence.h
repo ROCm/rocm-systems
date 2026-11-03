@@ -121,8 +121,8 @@ public:
   /// protected access has completed and the lease is destroyed.
   /// A missing backing or failed writeback returns failure with a diagnostic.
   /// Failure releases all acquired locks before diagnostic delivery and does not
-  /// advance either epoch. Failed writeback discards clean memory-side copies
-  /// of directly published bytes while retaining unpublished dirty state for retry.
+  /// advance either epoch. Failed writeback discards all clean memory-side lines
+  /// while retaining unpublished dirty state for retry.
   /// The diagnostic sink may query the hierarchy.
   /// @param emit_error Destination for failure diagnostics.
   util::FailureOr<DeviceCacheMaintenanceLease>

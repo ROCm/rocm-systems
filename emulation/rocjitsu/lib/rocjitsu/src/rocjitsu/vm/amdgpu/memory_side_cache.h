@@ -175,6 +175,7 @@ private:
   [[nodiscard]] VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid,
                                             bool fetch_on_miss = true);
   [[nodiscard]] bool can_fetch_line(uint64_t addr, uint32_t vmid) const;
+  void invalidate_clean_locked();
   [[nodiscard]] VmAccessOutcome flush_dirty_locked();
   [[nodiscard]] VmAccessOutcome flush_dirty_to_legacy_backing_locked();
   bool has_legacy_maintenance_backing() const {

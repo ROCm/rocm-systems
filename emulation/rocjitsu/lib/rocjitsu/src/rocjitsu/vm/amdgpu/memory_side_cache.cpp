@@ -367,6 +367,8 @@ VmAccessOutcome MemorySideCache::flush_dirty_locked() {
   return outcome;
 }
 
+void MemorySideCache::invalidate_clean_locked() { cache_.invalidate_clean(); }
+
 VmAccessOutcome MemorySideCache::flush_dirty_to_legacy_backing_locked() {
   assert(legacy_maintenance_memory_ != nullptr && legacy_maintenance_vm_ != nullptr);
   VmAccessOutcome outcome = VmAccessOutcome::Complete;

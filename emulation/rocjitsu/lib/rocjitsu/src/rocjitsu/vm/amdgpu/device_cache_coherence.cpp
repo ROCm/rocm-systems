@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cassert>
 #include <functional>
+#include <string_view>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -126,6 +127,18 @@ DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation,
 
   size_t locked_l2_count = 0;
   size_t locked_memory_side_count = 0;
+  const auto fail_writeback = [&](std::string_view message) -> util::Result {
+    // Direct publication bypasses the MSC. Drop all clean MSC lines while
+    // retaining dirty lines for retry. Advancing the epoch would make their
+    // next access treat them as stale, which requires them to be clean.
+    for (MemorySideCache *cache : memory_side_caches_)
+      cache->invalidate_clean_locked();
+    release_cache_locks(std::exchange(locked_l2_count, 0),
+                        std::exchange(locked_memory_side_count, 0));
+    coherence_lock.unlock();
+    atomic_lock.unlock();
+    return emit_error.emit() << message;
+  };
   try {
     for (L2Cache *cache : l2_caches_) {
       cache->maintenance_mutex_.lock();
@@ -143,15 +156,7 @@ DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation,
     if (operation == DeviceCacheOperation::WritebackInvalidate) {
       for (L2Cache *cache : l2_caches_) {
         if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete) {
-          // Direct publication bypasses the MSC. Drop its stale clean copies
-          // without advancing the epoch, which would discard dirty L2 bytes.
-          for (MemorySideCache *memory_side_cache : memory_side_caches_)
-            memory_side_cache->cache_.invalidate_clean();
-          release_cache_locks(std::exchange(locked_l2_count, 0),
-                              std::exchange(locked_memory_side_count, 0));
-          coherence_lock.unlock();
-          atomic_lock.unlock();
-          return emit_error.emit() << "L2 cache maintenance backing write failed";
+          return fail_writeback("L2 cache maintenance backing write failed");
         }
       }
     }
@@ -159,15 +164,7 @@ DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation,
     if (operation == DeviceCacheOperation::WritebackInvalidate) {
       for (MemorySideCache *cache : memory_side_caches_) {
         if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete) {
-          // Direct publication bypasses the MSC. Drop its stale clean copies
-          // without advancing the epoch, which would discard dirty L2 bytes.
-          for (MemorySideCache *memory_side_cache : memory_side_caches_)
-            memory_side_cache->cache_.invalidate_clean();
-          release_cache_locks(std::exchange(locked_l2_count, 0),
-                              std::exchange(locked_memory_side_count, 0));
-          coherence_lock.unlock();
-          atomic_lock.unlock();
-          return emit_error.emit() << "memory-side cache maintenance backing write failed";
+          return fail_writeback("memory-side cache maintenance backing write failed");
         }
       }
     }
