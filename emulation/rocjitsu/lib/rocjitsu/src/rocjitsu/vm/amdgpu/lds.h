@@ -211,7 +211,7 @@ public:
     // Sorting permuted lanes costs more than the per-lane copies it would
     // merge. Runs reaching past capacity keep the per-element path, which
     // zero-fills each such element.
-    const auto load_run = [&](const CoalescedLaneRun &run) __attribute__((always_inline)) {
+    const auto load_run = [&](const CoalescedLaneRun &run) RJ_ALWAYS_INLINE {
       if (fits(run))
         read_backing(static_cast<uint32_t>(run.address), dst + run.first_lane * stride, run.size);
       else
@@ -231,7 +231,7 @@ public:
     // As in vector_load(): nothing to write, and the run scan needs a stride.
     if (stride == 0)
       return;
-    const auto store_run = [&](const CoalescedLaneRun &run) __attribute__((always_inline)) {
+    const auto store_run = [&](const CoalescedLaneRun &run) RJ_ALWAYS_INLINE {
       if (fits(run))
         write_backing(static_cast<size_t>(run.address), src + run.first_lane * stride, run.size);
       else
@@ -275,9 +275,9 @@ private:
 
   // Share traversal while keeping the load/store callbacks visible to the optimizer.
   template <typename F>
-  __attribute__((always_inline)) void for_each_lane_element(const uint64_t *addrs,
-                                                            uint64_t lane_mask, uint32_t elem_size,
-                                                            uint32_t num_elems, F &&fn) const {
+  RJ_ALWAYS_INLINE void for_each_lane_element(const uint64_t *addrs, uint64_t lane_mask,
+                                              uint32_t elem_size, uint32_t num_elems,
+                                              F &&fn) const {
     const uint32_t stride = num_elems * elem_size;
     for (uint64_t lanes = lane_mask; lanes; lanes &= lanes - 1) {
       const uint32_t lane = std::countr_zero(lanes);

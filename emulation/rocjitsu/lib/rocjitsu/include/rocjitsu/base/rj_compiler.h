@@ -35,6 +35,17 @@
 #define RJ_NOINLINE
 #endif
 
+/// @brief Force a small helper to inline into its performance-sensitive caller.
+/// @details The GNU attribute form also applies to lambdas, where it follows the
+/// parameter list: `[&](int lane) RJ_ALWAYS_INLINE { ... }`.
+#if defined(_MSC_VER)
+#define RJ_ALWAYS_INLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+#define RJ_ALWAYS_INLINE __attribute__((always_inline))
+#else
+#define RJ_ALWAYS_INLINE
+#endif
+
 /// @brief Suppress specific compiler warnings around third-party headers.
 ///
 /// Usage:
