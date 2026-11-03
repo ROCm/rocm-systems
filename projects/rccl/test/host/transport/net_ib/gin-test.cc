@@ -21,9 +21,12 @@
 #include "HostAllocLedger.h"
 #include "IbVerbsScene.h"
 #include "ScopedHook.h"
+#include "fakes/env_fakes.h"
+#include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
 #include "fakes/socket_fakes.h"
+#include "fakes/transport_stubs.h"
 #include "gin/gin_host.h"
 #include "transport/net_ib/NetIbGlobals.h"
 #include "transport/net_ib/NetIbSupportSeams.h"
@@ -197,6 +200,7 @@ class NetIbGinMicrotest : public ::testing::Test {
     ResetNetIbSupportSeams();
     ResetSocketFakes();
     ResetNcclFakes();
+    ResetEnvFakes();
     EXPECT_TRUE(g_hostAllocs.Clean()) << "GIN unit: " << g_hostAllocs.Summary();
     for (const auto& allocation : g_hostAllocs.live) std::free(allocation.first);
     g_hostAllocs.Reset();
@@ -283,6 +287,64 @@ TEST_F(NetIbGinMicrotest, InitType_NoDevicesOrGdrReturnsErrorWithoutPublishingCo
   EXPECT_EQ(ncclGinIbInitType(&context, 0, nullptr, NCCL_GIN_TYPE_PROXY), ncclInternalError);
   EXPECT_EQ(context, nullptr);
   EXPECT_TRUE(g_hostAllocs.live.empty());
+}
+
+TEST_F(NetIbGinMicrotest, InitType_AnvilSdmaSkipsVerbsInit) {
+  ScopedHook init(g_ginInitDevices, [](ncclDebugLogger_t, ncclProfilerCallback_t) { return ncclSuccess; });
+  void* context = nullptr;
+
+  EXPECT_EQ(ncclGinIbInitType(&context, 0, nullptr, NCCL_NET_DEVICE_GIN_ANVIL_SDMA), ncclInternalError);
+  EXPECT_EQ(init.calls, 0);
+  EXPECT_EQ(context, nullptr);
+}
+
+// With NCCL_GIN_TYPE unset, verbs are skipped only on gfx1250 when NET runs
+// IB-CAST, which has already enumerated the providers. Everywhere else the IB
+// RMA proxy starts.
+TEST_F(NetIbGinMicrotest, InitType_UnsetTypeSkipsVerbsOnlyUnderIbCastOnGfx1250) {
+  struct Case {
+    const char* name;
+    int type;
+    const char* arch;
+    const char* net;
+    const char* netPlugin;
+    bool ainic;
+    bool skip;
+  };
+  const Case cases[] = {
+      {"gfx1250 AINIC default", -1, "gfx1250", nullptr, nullptr, true, true},
+      {"gfx1250 NCCL_NET=IB-CAST", -1, "gfx1250", "IB-CAST", nullptr, false, true},
+      {"gfx1250 NCCL_NET=ROCM-IB", -1, "gfx1250", "ROCM-IB", nullptr, false, true},
+      {"gfx1250 NCCL_NET_PLUGIN=none", -1, "gfx1250", nullptr, "none", true, true},
+      {"gfx1250 non-AINIC default", -1, "gfx1250", nullptr, nullptr, false, false},
+      {"gfx1250 NCCL_NET=IB on AINIC", -1, "gfx1250", "IB", nullptr, true, false},
+      {"gfx1250 external net plugin", -1, "gfx1250", nullptr, "librccl-net.so", true, false},
+      {"gfx1250 PROXY on AINIC", NCCL_GIN_TYPE_PROXY, "gfx1250", nullptr, nullptr, true, false},
+      {"gfx950 AINIC default", -1, "gfx950", nullptr, nullptr, true, false},
+      {"gfx942 NCCL_NET=IB-CAST", -1, "gfx942", "IB-CAST", nullptr, false, false},
+  };
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
+    if (c.net) SetMicroEnv("NCCL_NET", c.net);
+    else SetMicroEnvAbsent("NCCL_NET");
+    if (c.netPlugin) SetMicroEnv("NCCL_NET_PLUGIN", c.netPlugin);
+    else SetMicroEnvAbsent("NCCL_NET_PLUGIN");
+    ScopedHook ainic(g_useAinic, [&c] { return c.ainic; });
+    ScopedHook props(g_hipGetDeviceProperties, [&c](hipDeviceProp_t* prop, int) {
+      *prop = hipDeviceProp_t{};
+      std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "%s", c.arch);
+      return hipSuccess;
+    });
+    ScopedHook init(g_ginInitDevices, [](ncclDebugLogger_t, ncclProfilerCallback_t) {
+      ncclNIbDevs = 0;
+      return ncclSuccess;
+    });
+    void* context = nullptr;
+
+    EXPECT_EQ(ncclGinIbInitType(&context, 0, nullptr, c.type), ncclInternalError);
+    EXPECT_EQ(init.calls, c.skip ? 0 : 1);
+    EXPECT_EQ(context, nullptr);
+  }
 }
 
 TEST_F(NetIbGinMicrotest, ProxyInit_UsesConfiguredTypeAndPublishesContext) {

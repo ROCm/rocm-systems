@@ -3028,6 +3028,8 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbGin net_ib/gin-
     fakes/transport_net_ib_recovery_fakes.cc
     fakes/transport_net_ib_resiliency_fakes.cc
     fakes/transport_net_ib_wqe_lat_fakes.cc
+    fakes/transport_stubs.cc             # rcclUseAinic (IB-CAST verbs skip)
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real GetGcnArchName/IsArchMatch (verbs skip)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/common.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/connect_tmp.cc
