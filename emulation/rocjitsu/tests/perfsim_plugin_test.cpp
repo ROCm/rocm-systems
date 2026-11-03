@@ -1220,8 +1220,7 @@ TEST_F(PerfsimPluginTest, RejectsMalformedTensorDmaMetadataIndependently) {
     const MalformedCase &test_case = cases[index];
     SCOPED_TRACE(test_case.name);
     WaveFixture fixture;
-    if (::testing::Test::HasFatalFailure())
-      return {};
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     testing::internal::CaptureStderr();
     {
       PerfsimPlugin plugin(config.c_str());
