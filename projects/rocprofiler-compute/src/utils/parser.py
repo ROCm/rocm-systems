@@ -20,7 +20,6 @@ from utils import schema
 from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
-from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
@@ -661,11 +660,6 @@ def load_non_mertrics_table(
             )
 
     workload.dfs.update(tmp)
-
-
-def torch_operator_pattern_matches(pattern: str, operator_name: str) -> bool:
-    """Return True if *pattern* glob-matches *operator_name* hierarchy path."""
-    return fnmatch_glob_matches(pattern, operator_name)
 
 
 @demarcate

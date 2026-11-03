@@ -229,7 +229,8 @@ def test_sanitize_errors_when_operator_flag_without_trace(
     )
     errors = []
     monkeypatch.setattr(
-        f"{MODULE}.console_error", functools.partial(record_error_and_exit, errors)
+        "ml_api_tracing.analysis.console_error",
+        functools.partial(record_error_and_exit, errors),
     )
     with pytest.raises(SystemExit):
         OmniAnalyze_Base(

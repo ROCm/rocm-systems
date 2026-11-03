@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""ML API marker call-tree processing and inclusive kernel statistics."""
+"""ML API call-tree processing, inclusive statistics, and copied views."""
 
 from collections.abc import Sequence
 from typing import Dict, Iterator, List, Optional, Set, Tuple
@@ -243,6 +243,131 @@ def validate_all_markers_nested(
             )
 
 
+def clone_call_tree_node(node: CallTreeNode) -> CallTreeNode:
+    """Copy a call-tree node's payload; children start empty.
+
+    Kernel stats, invocation ids, and argument variants are new objects.
+    Callers attach already-copied children after the clone.
+    """
+    copied = CallTreeNode(
+        name=node.name,
+        kernels={
+            kernel_name: KernelStats(
+                launches=stats.launches,
+                total_duration_ns=stats.total_duration_ns,
+                min_duration_ns=stats.min_duration_ns,
+                max_duration_ns=stats.max_duration_ns,
+                kernel_id=stats.kernel_id,
+                pmc_group_keys=list(stats.pmc_group_keys),
+            )
+            for kernel_name, stats in node.kernels.items()
+        },
+        kernel_launches=node.kernel_launches,
+        total_duration_ms=node.total_duration_ms,
+        min_dispatch_ns=node.min_dispatch_ns,
+        max_dispatch_ns=node.max_dispatch_ns,
+        mean_dispatch_ns=node.mean_dispatch_ns,
+        file_name=node.file_name,
+        line_number=node.line_number,
+        backend=node.backend,
+        start_timestamp=node.start_timestamp,
+        end_timestamp=node.end_timestamp,
+        thread_id=node.thread_id,
+        launcher_thread_id=node.launcher_thread_id,
+    )
+    copied.invocation_ids = set(node.invocation_ids)
+    copied.args_invocations = {
+        args_blob: set(recorded_invocation_ids)
+        for args_blob, recorded_invocation_ids in node.args_invocations.items()
+    }
+    return copied
+
+
+def clone_call_tree_forest(forest: CallTreeForest) -> CallTreeForest:
+    """Copy every node and mutable payload without recursive descent.
+
+    Retains thread, root, and child order and existing inclusive statistics.
+    Callers can mutate the copy without changing the supplied forest.
+    """
+    copied_forest: CallTreeForest = {}
+    for thread_id, roots in forest.items():
+        copied_roots: List[CallTreeNode] = []
+        copied_forest[thread_id] = copied_roots
+        pending_nodes: List[Tuple[CallTreeNode, List[CallTreeNode]]] = [
+            (node, copied_roots) for node in reversed(roots)
+        ]
+        while pending_nodes:
+            node, destination = pending_nodes.pop()
+            copied_node = clone_call_tree_node(node)
+            destination.append(copied_node)
+            pending_nodes.extend(
+                (child, copied_node.children) for child in reversed(node.children)
+            )
+    return copied_forest
+
+
+def fold_identical_sibling_subtrees(
+    nodes: List[CallTreeNode],
+) -> List[CallTreeNode]:
+    """Merge siblings that share operator, kernel names, and child shape.
+
+    Returns new nodes sorted by total GPU duration. Does not mutate nodes.
+    """
+    if not nodes:
+        return []
+    groups: Dict[tuple, List[CallTreeNode]] = {}
+    for node in nodes:
+        groups.setdefault(_subtree_shape_key(node), []).append(node)
+    folded = [_merge_identical_sibling_group(group) for group in groups.values()]
+    folded.sort(key=lambda node: node.total_duration_ms, reverse=True)
+    return folded
+
+
+def filter_forest_by_backends(
+    forest: CallTreeForest,
+    backends: List[str],
+) -> CallTreeForest:
+    """Copy a forest, keeping nodes for the requested backends and their ancestors.
+
+    An empty backends list returns the original forest, including user.
+    Ancestors kept only as scaffolding have their own kernels cleared, so a torch parent
+    of a triton child does not contribute GPU time or kernel lines to a
+    triton listing. Inclusive stats on each copy are recomputed from the
+    kernels and children that remain.
+    """
+    if not backends:
+        return forest
+
+    filtered: CallTreeForest = {}
+    for thread_id, roots in forest.items():
+        kept_roots: List[CallTreeNode] = []
+        for root in roots:
+            copied_root = _copy_backend_view(root, backends)
+            if copied_root is not None:
+                kept_roots.append(copied_root)
+        if kept_roots:
+            filtered[thread_id] = kept_roots
+    return filtered
+
+
+def copy_matched_operator_subtree(
+    forest: CallTreeForest,
+    matched_nodes: List[CallTreeNode],
+) -> CallTreeForest:
+    """Copy matches, in-scope descendants, and ancestors needed to reach them."""
+    matched_node_ids = {id(node) for node in matched_nodes}
+    subtree: CallTreeForest = {}
+    for thread_id, roots in forest.items():
+        kept_roots: List[CallTreeNode] = []
+        for root in roots:
+            copied_root = _copy_scoped_operator_node(root, matched_node_ids, set())
+            if copied_root is not None:
+                kept_roots.append(copied_root)
+        if kept_roots:
+            subtree[thread_id] = kept_roots
+    return subtree
+
+
 def _optional_marker_file_name(value: object) -> Optional[str]:
     if value is None or value == "" or pd.isna(value):
         return None
@@ -449,3 +574,133 @@ def _nested_invocation_keys(
         for node, _path in iter_call_tree_paths(roots)
         for invocation_id in node.invocation_ids
     }
+
+
+def _subtree_shape_key(node: CallTreeNode) -> tuple:
+    line_number = "" if node.line_number is None else str(node.line_number)
+    child_keys = tuple(sorted(_subtree_shape_key(child) for child in node.children))
+    kernel_names = tuple(sorted(node.kernels))
+    return (
+        node.name,
+        node.file_name or "",
+        line_number,
+        node.backend or "",
+        kernel_names,
+        child_keys,
+    )
+
+
+def _add_kernel_stats(
+    destination: Dict[str, KernelStats], name: str, stats: KernelStats
+) -> None:
+    existing = destination.get(name)
+    if existing is None:
+        destination[name] = KernelStats(
+            launches=stats.launches,
+            total_duration_ns=stats.total_duration_ns,
+            min_duration_ns=stats.min_duration_ns,
+            max_duration_ns=stats.max_duration_ns,
+            kernel_id=stats.kernel_id,
+            pmc_group_keys=list(stats.pmc_group_keys),
+        )
+        return
+    minimum_durations = [
+        duration
+        for duration in (existing.min_duration_ns, stats.min_duration_ns)
+        if duration is not None
+    ]
+    maximum_durations = [
+        duration
+        for duration in (existing.max_duration_ns, stats.max_duration_ns)
+        if duration is not None
+    ]
+    existing.launches += stats.launches
+    existing.total_duration_ns += stats.total_duration_ns
+    existing.min_duration_ns = min(minimum_durations) if minimum_durations else None
+    existing.max_duration_ns = max(maximum_durations) if maximum_durations else None
+    if existing.kernel_id is None:
+        existing.kernel_id = stats.kernel_id
+    existing.pmc_group_keys.extend(stats.pmc_group_keys)
+
+
+def _merge_args_invocations(
+    destination: Dict[str, Set[str]], source: Dict[str, Set[str]]
+) -> None:
+    for args_blob, recorded_invocation_ids in source.items():
+        destination.setdefault(args_blob, set()).update(recorded_invocation_ids)
+
+
+def _merge_identical_sibling_group(group: List[CallTreeNode]) -> CallTreeNode:
+    first = group[0]
+    kernels: Dict[str, KernelStats] = {}
+    for node in group:
+        for kernel_name, stats in node.kernels.items():
+            _add_kernel_stats(kernels, kernel_name, stats)
+    merged = CallTreeNode(
+        name=first.name,
+        children=fold_identical_sibling_subtrees([
+            child for node in group for child in node.children
+        ]),
+        kernels=kernels,
+        file_name=first.file_name,
+        line_number=first.line_number,
+        backend=first.backend,
+        thread_id=first.thread_id,
+        launcher_thread_id=first.launcher_thread_id,
+    )
+    for node in group:
+        merged.invocation_ids.update(node.invocation_ids)
+        _merge_args_invocations(merged.args_invocations, node.args_invocations)
+    rollup_node_stats(merged)
+    return merged
+
+
+def _copy_backend_view(
+    node: CallTreeNode, backends: List[str]
+) -> Optional[CallTreeNode]:
+    """Copy one node for filter_forest_by_backends, or None when nothing is kept."""
+    kept_children: List[CallTreeNode] = []
+    for child in node.children:
+        copied_child = _copy_backend_view(child, backends)
+        if copied_child is not None:
+            kept_children.append(copied_child)
+    if node.backend not in backends and not kept_children:
+        return None
+    copied_node = clone_call_tree_node(node)
+    copied_node.children = kept_children
+    if node.backend not in backends:
+        copied_node.kernels = {}
+    rollup_node_stats(copied_node)
+    return copied_node
+
+
+def _copy_scoped_operator_node(
+    node: CallTreeNode,
+    matched_node_ids: Set[int],
+    inherited_backends: Set[str],
+) -> Optional[CallTreeNode]:
+    """Copy one node, keeping match kernels and in-scope descendant kernels."""
+    node_is_match = id(node) in matched_node_ids
+    descendant_backends = inherited_backends
+    if node_is_match and node.backend is not None:
+        descendant_backends = set(inherited_backends)
+        descendant_backends.add(node.backend)
+    kept_children: List[CallTreeNode] = []
+    for child in node.children:
+        copied_child = _copy_scoped_operator_node(
+            child,
+            matched_node_ids,
+            descendant_backends,
+        )
+        if copied_child is not None:
+            kept_children.append(copied_child)
+    backend_in_scope = node.backend is not None and node.backend in inherited_backends
+    keep_kernels = node_is_match or backend_in_scope
+    if not keep_kernels and not kept_children:
+        return None
+    copied_node = clone_call_tree_node(node)
+    copied_node.children = kept_children
+    if not keep_kernels:
+        copied_node.kernels = {}
+    rollup_node_stats(copied_node)
+    return copied_node

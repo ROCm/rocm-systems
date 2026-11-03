@@ -681,6 +681,28 @@ add_test(
 )
 
 add_test(
+    NAME test_ml_api_tracing_summary
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_ml_api_tracing_summary.xml
+        ${COV_OPTION} tests/unit/ml_api_tracing/test_summary.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_display
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_ml_api_tracing_display.xml
+        ${COV_OPTION} tests/unit/ml_api_tracing/test_display.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_selection
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_selection.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/test_selection.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_ml_api_tracing_analysis
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_ml_api_tracing_analysis.xml
@@ -1200,6 +1222,9 @@ if(${ENABLE_COVERAGE})
         test_ml_api_tracing_input
         test_ml_api_tracing_processing
         test_ml_api_tracing_call_tree
+        test_ml_api_tracing_summary
+        test_ml_api_tracing_display
+        test_ml_api_tracing_selection
         test_ml_api_tracing_analysis
         test_utils_profile
         test_common
