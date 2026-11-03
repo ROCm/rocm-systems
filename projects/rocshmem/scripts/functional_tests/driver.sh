@@ -610,10 +610,10 @@ TestRMAPut() {
   ExecTest  "wgput"            2       2            64        1048576
   ExecTest  "wgput"            2       16           64        8
 
-  ExecTest  "waveput"          2       1            64        1048576
-  ExecTest  "waveput"          2       2            64        1048576
-  ExecTest  "waveput"          2       2            128       1048576
-  ExecTest  "waveput"          2       16           128       8
+  ExecTest  "waveput"          2       1            $WAVE_SIZE          1048576
+  ExecTest  "waveput"          2       2            $WAVE_SIZE          1048576
+  ExecTest  "waveput"          2       2            $((WAVE_SIZE * 2))  1048576
+  ExecTest  "waveput"          2       16           $((WAVE_SIZE * 2))  8
 
   ################################ Non-Blocking ################################
   ExecTest  "p"                2       1            1         128
@@ -636,10 +636,10 @@ TestRMAPut() {
   ExecTest  "wgputnbi"         2       2            64        1048576
   ExecTest  "wgputnbi"         2       16           64        8
 
-  ExecTest  "waveputnbi"       2       1            64        1048576
-  ExecTest  "waveputnbi"       2       2            64        1048576
-  ExecTest  "waveputnbi"       2       2            128       1048576
-  ExecTest  "waveputnbi"       2       16           128       8
+  ExecTest  "waveputnbi"       2       1            $WAVE_SIZE          1048576
+  ExecTest  "waveputnbi"       2       2            $WAVE_SIZE          1048576
+  ExecTest  "waveputnbi"       2       2            $((WAVE_SIZE * 2))  1048576
+  ExecTest  "waveputnbi"       2       16           $((WAVE_SIZE * 2))  8
 
   ################################ User Buffer Tests ################################
   export LOCALBUFTYPE=host
@@ -687,10 +687,10 @@ TestRMAGet() {
   ExecTest  "wgget"            2       2            64        1048576
   ExecTest  "wgget"            2       16           64        8
 
-  ExecTest  "waveget"          2       1            64        1048576
-  ExecTest  "waveget"          2       2            64        1048576
-  ExecTest  "waveget"          2       2            128       1048576
-  ExecTest  "waveget"          2       16           128       8
+  ExecTest  "waveget"          2       1            $WAVE_SIZE          1048576
+  ExecTest  "waveget"          2       2            $WAVE_SIZE          1048576
+  ExecTest  "waveget"          2       2            $((WAVE_SIZE * 2))  1048576
+  ExecTest  "waveget"          2       16           $((WAVE_SIZE * 2))  8
 
   if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
   ExecTest  "g"                2       1            1         128
@@ -715,10 +715,10 @@ TestRMAGet() {
   ExecTest  "wggetnbi"         2       2            64        1048576
   ExecTest  "wggetnbi"         2       16           64        8
 
-  ExecTest  "wavegetnbi"       2       1            64        1048576
-  ExecTest  "wavegetnbi"       2       2            64        1048576
-  ExecTest  "wavegetnbi"       2       2            128       1048576
-  ExecTest  "wavegetnbi"       2       16           128       8
+  ExecTest  "wavegetnbi"       2       1            $WAVE_SIZE          1048576
+  ExecTest  "wavegetnbi"       2       2            $WAVE_SIZE          1048576
+  ExecTest  "wavegetnbi"       2       2            $((WAVE_SIZE * 2))  1048576
+  ExecTest  "wavegetnbi"       2       16           $((WAVE_SIZE * 2))  8
   else echo "Skip:   get_* (AIROCSHMEM-120: RO get tests abort)"; fi
 
   ################################ User Buffer Tests ################################
@@ -803,22 +803,22 @@ TestSigOps() {
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
-  ExecTest  "putsignal"        2       1            1         1048576
-  ExecTest  "putsignal"        2       2            32        1048576
-  ExecTest  "wgputsignal"      2       2            32        1048576
-  ExecTest  "waveputsignal"    2       1            32        1048576
-  ExecTest  "waveputsignal"    2       2            64        1048576
+  ExecTest  "putsignal"        2       1            1           1048576
+  ExecTest  "putsignal"        2       2            32          1048576
+  ExecTest  "wgputsignal"      2       2            32          1048576
+  ExecTest  "waveputsignal"    2       1            32          1048576
+  ExecTest  "waveputsignal"    2       2            $WAVE_SIZE  1048576
 
-  ExecTest  "putsignalnbi"     2       1            1         1048576
-  ExecTest  "putsignalnbi"     2       2            32        1048576
-  ExecTest  "wgputsignalnbi"   2       2            32        1048576
-  ExecTest  "waveputsignalnbi" 2       1            32        1048576
-  ExecTest  "waveputsignalnbi" 2       2            64        1048576
+  ExecTest  "putsignalnbi"     2       1            1           1048576
+  ExecTest  "putsignalnbi"     2       2            32          1048576
+  ExecTest  "wgputsignalnbi"   2       2            32          1048576
+  ExecTest  "waveputsignalnbi" 2       1            32          1048576
+  ExecTest  "waveputsignalnbi" 2       2            $WAVE_SIZE  1048576
 
   ExecTest  "signalfetch"      2       1            1
   ExecTest  "wgsignalfetch"    2       2            32
   ExecTest  "wavesignalfetch"  2       1            32
-  ExecTest  "wavesignalfetch"  2       1            64
+  ExecTest  "wavesignalfetch"  2       1            $WAVE_SIZE
 
   ExecTest  "signaladd"        2       2            32
   ExecTest  "signalset"        2       2            32
@@ -845,9 +845,9 @@ TestColl() {
   ExecTest  "teamsync"         5       16           64
 
   ExecTest  "teamwavesync"     2       1            1
-  ExecTest  "teamwavesync"     2       16           64
-  ExecTest  "teamwavesync"     2       32           256
-  ExecTest  "teamwavesync"     2       39           1024
+  ExecTest  "teamwavesync"     2       16           $WAVE_SIZE
+  ExecTest  "teamwavesync"     2       32           $((WAVE_SIZE * 4))
+  ExecTest  "teamwavesync"     2       39           $((WAVE_SIZE * 16))
 
   ExecTest  "teamwgsync"       2       1            1
   ExecTest  "teamwgsync"       2       16           64
@@ -870,9 +870,9 @@ TestColl() {
   ExecTest  "teambarrier"      5       16           64
 
   ExecTest  "teamwavebarrier"  2       1            1
-  ExecTest  "teamwavebarrier"  2       16           64
-  ExecTest  "teamwavebarrier"  2       32           256
-  ExecTest  "teamwavebarrier"  2       39           1024
+  ExecTest  "teamwavebarrier"  2       16           $WAVE_SIZE
+  ExecTest  "teamwavebarrier"  2       32           $((WAVE_SIZE * 4))
+  ExecTest  "teamwavebarrier"  2       39           $((WAVE_SIZE * 16))
 
   ExecTest  "teamwgbarrier"    2       1            1
   ExecTest  "teamwgbarrier"    2       16           64
@@ -1058,16 +1058,16 @@ TestOther() {
 
   ########################### Fence ordering tests #############################
   if [[ $TEST != ro* ]]; then #AIROCSHMEM-418: fence tests not supported on RO
-  ExecTest  "fence_putwavesignal"    2       1     64        1048576
-  ExecTest  "fence_putwavesignal"    2       8     256       1048576
-  ExecTest  "fence_putwavesignal"    2       32    1024      65536
+  ExecTest  "fence_putwavesignal"    2       1     $WAVE_SIZE           1048576
+  ExecTest  "fence_putwavesignal"    2       8     $((WAVE_SIZE * 4))   1048576
+  ExecTest  "fence_putwavesignal"    2       32    $((WAVE_SIZE * 16))  65536
   ExecTest  "fence_putlargesmall"    2       1     64        4096
   ExecTest  "fence_putlargesmall"    2       8     256       65536
   ExecTest  "fence_fanout"           2       1     64        1048576
   ExecTest  "fence_fanout"           4       4     256       65536
   ExecTest  "fence_fanout"           8       8     256       65536
-  ExecTest  "fence_putwavenbichunks" 2       1     64        1048576
-  ExecTest  "fence_putwavenbichunks" 2       8     256       65536
+  ExecTest  "fence_putwavenbichunks" 2       1     $WAVE_SIZE           1048576
+  ExecTest  "fence_putwavenbichunks" 2       8     $((WAVE_SIZE * 4))   65536
   else echo "Skip:   fence_* (AIROCSHMEM-418: fence tests not supported on RO)"; fi
 }
 
@@ -1163,18 +1163,18 @@ TestHeatMapRMA() {
   ##############################################################################
   ExecTest  "get"              2       1            1         v1048576
   ExecTest  "get"              2       32           1024      v1073741824
-  ExecTest  "waveget"          2       1            64        v1073741824
-  ExecTest  "waveget"          2       2            64        v1073741824
-  ExecTest  "waveget"          2       16           1024      v1073741824
+  ExecTest  "waveget"          2       1            $WAVE_SIZE           v1073741824
+  ExecTest  "waveget"          2       2            $WAVE_SIZE           v1073741824
+  ExecTest  "waveget"          2       16           $((WAVE_SIZE * 16))  v1073741824
   ExecTest  "wgget"            2       1            1024      v1073741824
   ExecTest  "wgget"            2       16           1024      v1073741824
   #ExecTest  "wgget"            2       32           1024      v1073741824
 
   ExecTest  "put"              2       1            1         v1048576
   ExecTest  "put"              2       32           1024      v1073741824
-  ExecTest  "waveput"          2       1            64        v1073741824
-  ExecTest  "waveput"          2       2            64        v1073741824
-  ExecTest  "waveput"          2       16           1024      v1073741824
+  ExecTest  "waveput"          2       1            $WAVE_SIZE           v1073741824
+  ExecTest  "waveput"          2       2            $WAVE_SIZE           v1073741824
+  ExecTest  "waveput"          2       16           $((WAVE_SIZE * 16))  v1073741824
   ExecTest  "wgput"            2       1            1024      v1073741824
   ExecTest  "wgput"            2       16           1024      v1073741824
   #ExecTest  "wgput"            2       32           1024      v1073741824
