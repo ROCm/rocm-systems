@@ -220,6 +220,13 @@ TEST_F(EnqueueMicrotest, TestBudget_ZeroWorkZeroBatches_Fits) {
   EXPECT_TRUE(ncclTestBudget(&b, 0, 0));  // 0 + 0 <= 0
 }
 
+TEST_F(EnqueueMicrotest, KernelArgs_DefaultStorageFitsOneBatchPerChannelPlusOneP2pWork) {
+  // ROCM-33800: a 1-rank gfx1250 comm schedules a P2P round over MAXCHANNELS parts, one batch
+  // each, so that round plus its one ncclDevWorkP2p must fit an empty plan's kernel args.
+  const ssize_t inArgs = ncclMaxKernelArgsSize() - sizeof(struct ncclDevKernelArgs);
+  EXPECT_LE(ssize_t(MAXCHANNELS * kBatch + sizeof(struct ncclDevWorkP2p)), inArgs);
+}
+
 // ===========================================================================
 // rcclShmemScratchWarpSize / rcclShmemDynamicSize (enqueue.cc:60, :72)
 // constexpr -- assert at COMPILE time. No fakes, no runtime.
@@ -5004,6 +5011,91 @@ TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_UnpairedSelfSendOrRecv_IsInvalid
                             : "Trying to recv to self without a matching send";
     EXPECT_TRUE(RcclUnitTesting::LogHas(log, warn)) << log;
   }
+}
+
+namespace {
+// Rank 0 of one with a grouped send+recv to itself, the world-size-1 all_to_all shape (ROCM-33800).
+struct SelfPairBudgetScene {
+  BatchPlanComm bp{/*nNodes=*/1, /*cudaArch=*/1250};
+  std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
+  std::vector<ncclKernelPlanner::Peer> peers{1};
+  std::vector<std::remove_pointer_t<decltype(ncclComm::p2pSchedule)>> schedule{1};
+  char sendBuf[64]{};
+  char recvBuf[64]{};
+  ncclTaskP2p sendTask{};
+  ncclTaskP2p recvTask{};
+  ncclKernelPlanBudget budget{};
+
+  explicit SelfPairBudgetScene(int channelsPerPeer, bool inPlace = false) {
+    InstallSendRecvDevFuncIds();
+    ncclComm* c = bp.c();
+    c->rank = 0;
+    c->nRanks = 1;
+    c->p2pnChannels = channelsPerPeer;
+    c->p2pnChannelsPerPeer = channelsPerPeer;
+    c->p2pChunkSize = 128 << 10;
+    c->buffSizes[NCCL_PROTO_SIMPLE] = 1 << 20;
+    c->workArgsBytes = ncclMaxKernelArgsSize();
+    c->workFifoBytes = 1 << 20;
+    SetSingleGpuArch(topo.get(), "gfx1250");
+    c->topo = topo.get();
+    c->planner.peers = peers.data();
+    schedule[0] = {0, 0};
+    c->p2pSchedule = schedule.data();
+    initTask(&sendTask, ncclFuncSend, sendBuf);
+    initTask(&recvTask, ncclFuncRecv, inPlace ? sendBuf : recvBuf);
+    ncclIntruQueueEnqueue(&peers[0].sendQueue, &sendTask);
+    ncclIntruQueueEnqueue(&peers[0].recvQueue, &recvTask);
+    c->planner.nTasksP2p = 2;
+    c->planner.nTasksP2pSend = 1;
+    c->planner.nTasksP2pRecv = 1;
+    bp.p()->kernelSpecialized = true;
+    budget.inArgsBytes = c->workArgsBytes - sizeof(struct ncclDevKernelArgs);
+    budget.outArgsBytes = c->workFifoBytes / 2;
+  }
+  static void initTask(ncclTaskP2p* task, ncclFunc_t func, char* buf) {
+    task->func = func;
+    task->collAPI = func;
+    task->buff = buf;
+    task->bytes = 64;
+  }
+  ncclResult_t Schedule(std::string* log) {
+    int epoch = 0;
+    int round = 0;
+    ncclResult_t rc = ncclSuccess;
+    *log = RcclUnitTesting::CaptureLog(
+        [&] { rc = scheduleP2pTasksToPlan(bp.c(), &epoch, &round, bp.p(), &budget); });
+    return rc;
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_SelfPair256ChannelsDefaultArgs_SchedulesInOnePlan) {
+  SelfPairBudgetScene sc(/*channelsPerPeer=*/256);
+  std::string log;
+  ASSERT_EQ(ncclSuccess, sc.Schedule(&log)) << log;
+  EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p) << "the pair must leave the planner in this plan";
+  EXPECT_EQ(ssize_t(sizeof(struct ncclDevWorkP2p)), ssize_t(sc.bp.p()->workBytes));
+  EXPECT_GE(sc.bp.p()->nWorkBatches, 1);
+  EXPECT_LE(sc.bp.p()->nWorkBatches, 256) << "at most one batch per channel part";
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_RoundDoesNotFitEmptyPlan_IsInternalError) {
+  SelfPairBudgetScene sc(/*channelsPerPeer=*/256);
+  sc.budget.inArgsBytes = 255 * kBatch;  // one batch short of a full round
+  std::string log;
+  EXPECT_EQ(ncclInternalError, sc.Schedule(&log));
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "does not fit an empty kernel plan")) << log;
+  EXPECT_EQ(2, sc.bp.c()->planner.nTasksP2p);
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_RoundDoesNotFitPartialPlan_DefersToNextPlan) {
+  SelfPairBudgetScene sc(/*channelsPerPeer=*/256);
+  sc.bp.p()->nWorkBatches = 1;  // earlier work already in this plan
+  sc.budget.inArgsBytes = 256 * kBatch;
+  std::string log;
+  EXPECT_EQ(ncclSuccess, sc.Schedule(&log)) << log;
+  EXPECT_EQ(2, sc.bp.c()->planner.nTasksP2p) << "the round waits for a fresh plan";
 }
 
 // ===========================================================================
