@@ -8412,11 +8412,8 @@ TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodeUnsetType) {
   runPutWaitRoundTrip(comm, getActiveStream(), NCCL_GIN_TYPE_PROXY);
 }
 
-// Four ranks, two per host, NCCL_GIN_TYPE unset (AICOMRCCL-3501). The world
-// comm spans both hosts and drops Anvil SDMA. Splitting it by host gives each
-// host a comm with topo->nHosts == 1, which must keep Anvil SDMA as the default
-// and complete a put/signal between its two local ranks. This fails if the drop
-// is keyed on the job or the world comm instead of the comm's own nHosts.
+// 2 ranks per host, NCCL_GIN_TYPE unset (AICOMRCCL-3501): a per-host split keeps Anvil SDMA,
+// since the drop keys on the comm's own nHosts, not the job's.
 TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodePerHostSplitKeepsAnvil) {
   if (auto reason = mixedBackendTwoNodeSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
   int ranksPerNode = 0;
