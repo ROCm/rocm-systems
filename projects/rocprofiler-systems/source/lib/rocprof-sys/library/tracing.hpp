@@ -157,9 +157,14 @@ template <typename CategoryT, typename... Args>
 inline void
 push_timemory(CategoryT, std::string_view name, Args&&... args)
 {
-    // skip if no component records regions, or the category is disabled
-    if(!has_timemory_components().load(std::memory_order_relaxed) ||
-       category_push_disabled<CategoryT>())
+    // skip if the category is disabled
+    if(category_push_disabled<CategoryT>())
+    {
+        return;
+    }
+
+    ++get_profile_stack<CategoryT>();
+    if(!has_timemory_components().load(std::memory_order_relaxed))
     {
         return;
     }
@@ -170,8 +175,6 @@ push_timemory(CategoryT, std::string_view name, Args&&... args)
         // this generates a hash for the raw string array
         auto const _hash = tim::add_hash_id(name);
         _data->construct(_hash)->start(std::forward<Args>(args)...);
-        // increment the profile stack
-        ++get_profile_stack<CategoryT>();
     }
 }
 
