@@ -1538,8 +1538,9 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
     }
     if (!exportCuMem) {
       // RCCL: HIP keeps a failed cuMem probe above as the thread's last error
-      if (ncclCuMemEnable() && ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR)
+      if (ncclCuMemEnable() && ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
         (void)cudaGetLastError();
+      }
       cudaError_t cerr = cudaIpcGetMemHandle(&mine->handle, reinterpret_cast<void*>(allocBase));
       if (cerr != cudaSuccess) {
         WARN("windowRegisterNonSym: cudaIpcGetMemHandle failed: %s", cudaGetErrorString(cerr));
