@@ -1,11 +1,14 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "core/trace_cache/archive.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/sample.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 using namespace rocprofsys::pmc::collectors::gpu_perf_counter;
@@ -85,9 +88,9 @@ TEST_F(SdkPmcSampleTest, GetSizeEmpty)
 {
     const sample test_sample{ 0, 0, {} };
 
-    // device_id(4) + timestamp(8) + num_entries(4) = 16
+    // device_id(4) + timestamp(8) + entries byte count(8) = 20
     const size_t expected =
-        sizeof(std::uint32_t) + sizeof(std::uint64_t) + sizeof(std::uint32_t);
+        sizeof(std::uint32_t) + sizeof(std::uint64_t) + sizeof(std::size_t);
     EXPECT_EQ(get_size(test_sample), expected);
 }
 
@@ -95,9 +98,9 @@ TEST_F(SdkPmcSampleTest, GetSizeSingleEntry)
 {
     const sample test_sample{ 0, 0, { counter_value{ .counter_id = 10, .value = 1.0 } } };
 
-    // header: 4 + 8 + 4 = 16
+    // header: 4 + 8 + 8 = 20
     // entry: counter_id(8) + double(8) = 16
-    const size_t expected = 16 + sizeof(counter_id_t) + sizeof(double);
+    const size_t expected = 20 + sizeof(counter_id_t) + sizeof(double);
     EXPECT_EQ(get_size(test_sample), expected);
 }
 
@@ -111,11 +114,12 @@ TEST_F(SdkPmcSampleTest, GetSizeMatchesSerializedBytes)
     const size_t computed_size = get_size(original);
     serialize(buffer.data(), original);
 
-    std::uint8_t* ptr = buffer.data();
-    deserialize<sample>(ptr);
-    const size_t bytes_consumed = static_cast<size_t>(ptr - buffer.data());
+    std::uint8_t* ptr            = buffer.data();
+    const sample  deserialized   = deserialize<sample>(ptr);
+    const size_t  bytes_consumed = static_cast<size_t>(ptr - buffer.data());
 
     EXPECT_EQ(bytes_consumed, computed_size);
+    EXPECT_EQ(deserialized.entries.size(), original.entries.size());
 }
 
 TEST_F(SdkPmcSampleTest, DeserializePreservesBufferPointerAdvancement)
