@@ -1428,7 +1428,7 @@ run_two_spi_dispatch(util::DiagnosticEmitter emit_error) {
 }
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
-  std::string json = CONFIG_DIR_PATH + "/gfx950_mi355x.json";
+  std::string json = CONFIG_DIR_PATH + "/gfx950_mi350x.json";
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config(json, loaded));
   auto *soc = loaded.soc();
@@ -1896,9 +1896,25 @@ TEST(ConfigLoaderTest, DirectCuShaderArrayGeometryRequiresMatchingCount) {
   }
 }
 
+// The gfx950_mi355x configs keep existing callers working until those names are
+// reassigned to MI355X (ROCm/rocm-systems#14644). Until then they must not drift
+// from the MI350X configs they duplicate.
+TEST(ConfigLoaderTest, DeprecatedGfx950Mi355xConfigsMatchMi350x) {
+  for (const char *variant : {"", "_kmd", "_kmd_2gpu"}) {
+    SCOPED_TRACE(variant);
+    std::string legacy_json;
+    std::string mi350x_json;
+    ASSERT_TRUE(read_config_file_valid(legacy_json,
+                                       CONFIG_DIR_PATH + "/gfx950_mi355x" + variant + ".json"));
+    ASSERT_TRUE(read_config_file_valid(mi350x_json,
+                                       CONFIG_DIR_PATH + "/gfx950_mi350x" + variant + ".json"));
+    EXPECT_EQ(legacy_json, mi350x_json);
+  }
+}
+
 TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
   config::LoadedConfig loaded;
-  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", loaded));
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi350x.json", loaded));
   auto *soc = loaded.soc();
 
   soc->set_dispatch_threads(8);
@@ -1912,7 +1928,7 @@ TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
 
 TEST(ConfigLoaderTest, SerializedHotHookPluginKeepsSharedPoolAcrossProductionTopology) {
   config::LoadedConfig loaded;
-  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", loaded));
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi350x.json", loaded));
   auto *soc = loaded.soc();
   soc->set_dispatch_threads(8);
   const auto *pool = test::SoCTestAccess::dispatch_pool(*soc);
@@ -2099,7 +2115,8 @@ TEST(ConfigLoaderTest, Gfx1151HighSgprsAndVccStayWithinTheirWave) {
   EXPECT_FALSE(cu->owns_sgpr_range(*wf, base + 106, 1));
   amdgpu::RegisterAccess registers(*wf);
   EXPECT_EQ(registers.read_sgpr(neighbor_base), 0u);
-  registers.write_sgpr(neighbor_base, 0xDEADBEEFu);
+  EXPECT_TRUE(registers.write_sgpr(neighbor_base, 0xDEADBEEFu).succeeded());
+  EXPECT_FALSE(wf->instruction_execution_failed());
   EXPECT_EQ(cu->read_sgpr(neighbor_base), sentinel);
   wf->halt();
   neighbor->halt();
