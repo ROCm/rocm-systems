@@ -31,27 +31,6 @@ defaults:
     working-directory: projects/rdc
 
 jobs:
-  # Resolve the current GPU runner label from ROCm/therock-ci-config instead of
-  # hard-coding one (labels get decommissioned). Reuses the shared resolver action.
-  ci_config:
-    if: ${{ vars.RDC_GPU_TESTS_ENABLED == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
-    name: Resolve GPU runner label
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
-    steps:
-    - name: Checkout resolve-ci-config action
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      with:
-        sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
-        set-safe-directory: true
-
-    - name: Resolve runner labels
-      id: runner
-      uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
-
   rdc_build:
     if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
     runs-on: lstt-ci-runner
@@ -306,17 +285,19 @@ jobs:
         retention-days: 30
 
   # =================================================================
-  #  GPU test job — requires AMD GPU hardware
+  #  GPU test job — runs tests/ci against a real GPU on lstt-ci-runner
+  #  (the self-hosted runners AMDSMI CI uses). rdc_test stays GPU-less.
   #  Enable by setting repo variable: RDC_GPU_TESTS_ENABLED=true
   # =================================================================
   rdc_test_gpu:
-    needs: [rdc_build, ci_config]
-    runs-on: ${{ needs.ci_config.outputs.gfx94x_runner }}
+    needs: rdc_build
+    runs-on: lstt-ci-runner
     timeout-minutes: 90
-    if: ${{ vars.RDC_GPU_TESTS_ENABLED == 'true' }}
+    # Privileged self-hosted GPU runner: never auto-run untrusted fork-PR code on it.
+    if: ${{ vars.RDC_GPU_TESTS_ENABLED == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
     container:
       image: rocm/dev-ubuntu-22.04:7.2
-      options: --device=/dev/kfd --device=/dev/dri --group-add video
+      options: --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -u root
 
     steps:
     - uses: actions/checkout@v4
