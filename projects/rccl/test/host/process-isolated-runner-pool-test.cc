@@ -6,12 +6,10 @@
 
 // Pool sizing in test/common/ProcessIsolatedTestRunner.cpp.
 //
-// The runner hands each isolated child a slice of its GPU pool via
-// HIP_VISIBLE_DEVICES. Neither pool source can be trusted to describe the
-// devices this process can open: KFD topology sysfs is not namespaced per
-// container, and an inherited HIP_VISIBLE_DEVICES is just whatever the caller
-// set. clampPoolToDeviceCount() is the one place that reconciles the detected
-// pool with the device count HIP reports, so it is pinned here.
+// clampPoolToDeviceCount() is the one place that reconciles a detected pool
+// with the device count HIP reports. Why it is needed, and why it trims by
+// length rather than by value, is documented on the declaration in
+// ProcessIsolatedTestRunner.hpp; these cases pin that contract.
 
 #include <gtest/gtest.h>
 
@@ -50,18 +48,15 @@ TEST(ProcessIsolatedRunnerPool, KeepsPoolWhenHipReportsMoreDevicesThanTheSource)
     EXPECT_EQ(clampPoolToDeviceCount(poolOf(2), 8), poolOf(2));
 }
 
-// HIP exposes the longest valid prefix of HIP_VISIBLE_DEVICES and reports its
-// length, so the kept entries are the leading ones in source order, whatever
-// ids those happen to be.
+// The kept entries are the leading ones in source order, whatever ids those
+// happen to be.
 TEST(ProcessIsolatedRunnerPool, KeepsTheLeadingSourceIdsInSourceOrder)
 {
     EXPECT_EQ(clampPoolToDeviceCount({3, 1, 7, 5}, 2), (std::vector<int>{3, 1}));
 }
 
-// The ids are absolute device numbers, not offsets into the pool, and a count
-// equal to the pool's length means every one of them is openable. Discarding
-// ids >= the count instead of trimming by length would empty this pool, which
-// is what an 8-GPU host restricted to HIP_VISIBLE_DEVICES=4,5,6,7 looks like.
+// An 8-GPU host restricted to HIP_VISIBLE_DEVICES=4,5,6,7: every id is >= the
+// reported count, yet all four are openable. Trimming by value would empty it.
 TEST(ProcessIsolatedRunnerPool, KeepsIdsAboveTheDeviceCountWhenAllOfThemAreVisible)
 {
     EXPECT_EQ(clampPoolToDeviceCount({4, 5, 6, 7}, 4), (std::vector<int>{4, 5, 6, 7}));
