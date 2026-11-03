@@ -1370,38 +1370,66 @@ TEST(Gfx1250ExecutionTest, TensorDmaNopTilesArriveAtTheirBarrierOnceAndNullTenso
 }
 
 // Because it still arrives, a NOP tile validates its barrier address: one past
-// the allocation fails the instruction. A NULL tensor ignores the address.
+// the allocation fails the instruction, while one inside it succeeds. Both NOP
+// shapes are covered: a rank-zero tile, which was already accepted, and a {0,1}
+// zero-width tile, which is accepted only as a NOP. A NULL tensor ignores the
+// address.
 TEST(Gfx1250ExecutionTest, TensorDmaNopTileValidatesItsBarrierAddressAndNullTensorDoesNot) {
-  for (const bool null_tensor : {false, true}) {
+  struct Case {
+    const char *name;
+    uint32_t count;
+    uint32_t tile_dim0;
+    uint32_t tile_dim1;
+    bool validates_barrier;
+  };
+  constexpr Case kCases[] = {
+      {.name = "rank-zero NOP",
+       .count = 1,
+       .tile_dim0 = 0,
+       .tile_dim1 = 0,
+       .validates_barrier = true},
+      {.name = "zero-width NOP",
+       .count = 1,
+       .tile_dim0 = 0,
+       .tile_dim1 = 1,
+       .validates_barrier = true},
+      {.name = "NULL", .count = 0, .tile_dim0 = 1, .tile_dim1 = 0, .validates_barrier = false},
+  };
+  for (const Case &c : kCases) {
     for (const bool store : {false, true}) {
-      SCOPED_TRACE(testing::Message()
-                   << (null_tensor ? "NULL " : "NOP ") << (store ? "store" : "load"));
-      Gfx1250Sim sim;
-      ASSERT_NO_FATAL_FAILURE(sim.initialize());
-      auto *cu = sim.cu();
-      auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
-      ASSERT_NE(wf, nullptr);
-      wf->set_lds_base(cu->allocate_lds(256));
-      wf->set_lds_size(256);
-      const uint32_t neighbour = cu->allocate_lds(256);
-      ASSERT_EQ(neighbour, wf->lds_base() + wf->lds_size());
-      cu->lds().write64(neighbour, 0);
+      for (const uint32_t barrier : {248u, 256u}) {
+        SCOPED_TRACE(testing::Message()
+                     << c.name << (store ? " store" : " load") << ", barrier at " << barrier);
+        Gfx1250Sim sim;
+        ASSERT_NO_FATAL_FAILURE(sim.initialize());
+        auto *cu = sim.cu();
+        auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+        ASSERT_NE(wf, nullptr);
+        wf->set_lds_base(cu->allocate_lds(256));
+        wf->set_lds_size(256);
+        const uint32_t neighbour = cu->allocate_lds(256);
+        ASSERT_EQ(neighbour, wf->lds_base() + wf->lds_size());
+        cu->lds().write64(neighbour, 0);
 
-      write_tensor_dma_d0(*cu, *wf, 0, 0x18b000);
-      write_wave_sgpr(*cu, *wf, 0, null_tensor ? 0u : 1u);
-      write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 18));  // i32, atomic barrier enabled.
-      write_wave_sgpr(*cu, *wf, 13, (1u << 16) | (256u >> 3)); // barrier just past the end.
-      write_wave_sgpr(*cu, *wf, 14, 0);
-      write_wave_sgpr(*cu, *wf, 15, null_tensor ? 1u << 16 : 0u); // NOP: tile dim0 = 0.
-      for (uint32_t reg = 16; reg < 20; ++reg)
-        write_wave_sgpr(*cu, *wf, reg, 0);
+        write_tensor_dma_d0(*cu, *wf, 0, 0x18b000);
+        write_wave_sgpr(*cu, *wf, 0, c.count);
+        write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 18));     // i32, atomic barrier enabled.
+        write_wave_sgpr(*cu, *wf, 13, (1u << 16) | (barrier >> 3)); // tensor dim0, barrier.
+        write_wave_sgpr(*cu, *wf, 14, 0);
+        write_wave_sgpr(*cu, *wf, 15, c.tile_dim0 << 16);
+        write_wave_sgpr(*cu, *wf, 16, c.tile_dim1);
+        for (uint32_t reg = 17; reg < 20; ++reg)
+          write_wave_sgpr(*cu, *wf, reg, 0);
 
-      const std::array<uint32_t, 3> words = {store ? 0xd0714001u : 0xd0710001u, 0x7c000000u,
-                                             0x7c7c0c00u};
-      auto inst = decode_gfx1250(words, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
-      ASSERT_NE(inst, nullptr);
-      EXPECT_EQ(cu->execute_instruction(inst.get(), *wf).succeeded(), null_tensor);
-      EXPECT_EQ(cu->lds().read64(neighbour), 0u);
+        const std::array<uint32_t, 3> words = {store ? 0xd0714001u : 0xd0710001u, 0x7c000000u,
+                                               0x7c7c0c00u};
+        auto inst = decode_gfx1250(words, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
+        ASSERT_NE(inst, nullptr);
+        const bool past_the_end = barrier + 8 > 256;
+        EXPECT_EQ(cu->execute_instruction(inst.get(), *wf).succeeded(),
+                  !(c.validates_barrier && past_the_end));
+        EXPECT_EQ(cu->lds().read64(neighbour), 0u);
+      }
     }
   }
 }
