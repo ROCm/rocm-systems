@@ -13,13 +13,13 @@ import common
 import pandas as pd
 import pytest
 
+from ml_api_tracing.marker_format import parse_marker_function
 from tests.integration import common as integration_common
 from tests.integration.common import (
     config,
     require_torch,
 )
 from utils import csv_compression
-from utils.utils_analysis import parse_marker_function
 
 MARKER_API_COLUMNS = {
     "Domain",

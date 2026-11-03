@@ -13,18 +13,17 @@ import pandas as pd
 import pytest
 
 import utils.utils_analysis as utils_analysis
-from utils import csv_compression, schema
-from utils.ml_api_trace_errors import (
+from ml_api_tracing.errors import (
     KernelSequenceLengthMismatchError,
     MissingSourceLocationError,
     OverlappingMarkerRangeError,
     UncorrelatedLauncherIntervalError,
 )
+from ml_api_tracing.marker_format import parse_marker_function
+from ml_api_tracing.models import CallTreeNode, KernelStats, NodeRollup
+from utils import csv_compression, schema
 from utils.utils_analysis import (
     COUNTER_RESULTS_COLUMNS,
-    CallTreeNode,
-    KernelStats,
-    NodeRollup,
     assign_native_ids,
     attach_unlocated_trees_by_launcher_thread,
     build_operator_summary,
@@ -36,10 +35,8 @@ from utils.utils_analysis import (
     join_native_counters,
     nest_marker_intervals,
     number_gpus_by_node,
-    parse_marker_function,
     process_ml_api_trace_output,
     rollup_node_stats,
-    split_operator_args,
 )
 
 ALL_NATIVE_KINDS = ("counters", "dispatch", "kernel_symbols", "agents")
@@ -982,27 +979,6 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_kernel_stats_defaults_min_max_to_none():
-    stats = KernelStats()
-    assert stats.min_duration_ns is None
-    assert stats.max_duration_ns is None
-
-
-def test_call_tree_node_defaults_dispatch_stats_to_none():
-    node = CallTreeNode(name="x")
-    assert node.min_dispatch_ns is None
-    assert node.max_dispatch_ns is None
-    assert node.mean_dispatch_ns is None
-
-
-def test_call_tree_node_call_count_is_property_of_invocation_ids():
-    node = CallTreeNode(name="x")
-    assert node.call_count == 0
-    node.invocation_ids.add("ctx1")
-    node.invocation_ids.add("ctx2")
-    assert node.call_count == 2
-
-
 def test_fold_identical_sibling_subtrees_empty():
     assert fold_identical_sibling_subtrees([]) == []
 
@@ -1135,17 +1111,6 @@ def test_kernel_stats_length_mismatch_records_error():
     assert any(isinstance(err, KernelSequenceLengthMismatchError) for err in errors)
 
 
-def test_split_operator_args_respects_nested_commas():
-    tokens = split_operator_args("(self=float32[2, 2], other=(1, 2), name='a,b')")
-    assert tokens == ["self=float32[2, 2]", "other=(1, 2)", "name='a,b'"]
-
-
-def test_split_operator_args_empty_blob():
-    assert split_operator_args("") == []
-    assert split_operator_args("()") == []
-    assert split_operator_args("  (  )  ") == []
-
-
 def test_format_operator_args_caps_item_count():
     args_blob = "(" + ", ".join(f"a{i}={i}" for i in range(12)) + ")"
     formatted_args = format_operator_args(args_blob, max_items=3, max_chars=200)
@@ -1162,16 +1127,6 @@ def test_format_operator_args_caps_length():
 def test_format_operator_args_empty_blob():
     assert format_operator_args("") == ""
     assert format_operator_args("()") == ""
-
-
-def test_args_variants_orders_by_call_count():
-    node = CallTreeNode(name="aten::mm")
-    node.args_invocations["(self=float32[2x2])"] = {"1"}
-    node.args_invocations["(self=float32[4x4])"] = {"2", "3"}
-    assert node.args_variants == [
-        ("(self=float32[4x4])", 2),
-        ("(self=float32[2x2])", 1),
-    ]
 
 
 def test_fold_identical_sibling_subtrees_merges_args_variants():
@@ -2956,68 +2911,6 @@ def test_assign_native_ids_numbers_dispatches_in_launch_order():
 
     assert numbered["Dispatch_ID"].tolist() == [1, 2, 3, 4]
     assert numbered["Counter_Value"].tolist() == [101, 102, 201, 202]
-
-
-def test_parse_marker_function_aten_addmm_n_a():
-    parsed = parse_marker_function(
-        "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|scope=FUNCTION|args=()|torch"
-    )
-    assert parsed["Operator_Name"] == "aten::addmm"
-    assert parsed["File_Name"] == ""
-    assert parsed["Line_Number"] is None
-    assert parsed["Backend"] == "torch"
-    assert parsed["launcher_thread_id"] == ""
-    assert parsed["args"] == "()"
-
-
-def test_parse_marker_function_autograd_keeps_inner_colon_and_space():
-    parsed = parse_marker_function(
-        "autograd::engine::evaluate_function: SumBackward0:n/a"
-        "|seqNr=n/a|tid=2|ftid=0|scope=FUNCTION|args=n/a|torch"
-    )
-    assert (
-        parsed["Operator_Name"] == "autograd::engine::evaluate_function: SumBackward0"
-    )
-    assert parsed["File_Name"] == ""
-    assert parsed["Line_Number"] is None
-
-
-def test_parse_marker_function_linear_forward_file_and_line():
-    parsed = parse_marker_function(
-        "nn.Module.Linear.forward:simple_torch_code.py:19"
-        "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=()|torch"
-    )
-    assert parsed["Operator_Name"] == "nn.Module.Linear.forward"
-    assert parsed["File_Name"] == "simple_torch_code.py"
-    assert parsed["Line_Number"] == 19
-
-
-def test_parse_marker_function_triton_backend_and_location():
-    parsed = parse_marker_function(
-        "triton.JITFunction.rmsnorm_kernel:llama_triton_layer.py:381"
-        "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=n/a|triton"
-    )
-    assert parsed["Backend"] == "triton"
-    assert parsed["File_Name"] == "llama_triton_layer.py"
-    assert parsed["Line_Number"] == 381
-
-
-def test_parse_marker_function_user_range_without_keys():
-    parsed = parse_marker_function("training_loop")
-    assert parsed["Operator_Name"] == "training_loop"
-    assert parsed["File_Name"] == ""
-    assert parsed["Line_Number"] is None
-    assert parsed["Backend"] == "user"
-
-
-def test_parse_marker_function_decodes_name_and_args():
-    parsed = parse_marker_function(
-        "aten::foo%2Fbar%25baz:n/a"
-        "|seqNr=1|tid=1|ftid=0|scope=FUNCTION"
-        "|args=a%7Cb%3Bc%0Dd%0Ae%25f|torch"
-    )
-    assert parsed["Operator_Name"] == "aten::foo/bar%baz"
-    assert parsed["args"] == "a|b;c\rd\ne%f"
 
 
 def test_stacked_marker_wire_exits(monkeypatch):

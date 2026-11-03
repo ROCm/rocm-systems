@@ -16,15 +16,11 @@ from pathlib import Path
 import common  # noqa: F401
 import pytest
 
+from ml_api_tracing.marker_format import compose_marker
 from utils.inject_roctx import core
 from utils.inject_roctx import registry as registry_pkg
 from utils.inject_roctx._backends import triton as triton_backend
-from utils.inject_roctx.core import (
-    compose_marker,
-    encode_marker_name,
-    install_global_wraps,
-)
-from utils.inject_roctx.marker_format import cap_args, encode_args
+from utils.inject_roctx.core import install_global_wraps
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -317,40 +313,6 @@ def test_extract_kernel_name_prefers_attr_then_meta_then_fn():
     )
 
 
-def test_encode_marker_name_wrap_chars():
-    assert encode_marker_name("nn.Module.Linear.forward") == "nn.Module.Linear.forward"
-    assert encode_marker_name("pkg/mod%hook") == "pkg%2Fmod%25hook"
-    assert encode_marker_name("aten::addmm") == "aten::addmm"
-
-
-def test_compose_marker_python_wrap_wire():
-    expected = (
-        "nn.Module.Linear.forward:simple_net.py:51"
-        "|seqNr=n/a|tid=n/a|ftid=n/a|ltid=n/a|scope=n/a|args=n/a|torch"
-    )
-    assert (
-        compose_marker("nn.Module.Linear.forward", "simple_net.py:51", backend="torch")
-        == expected
-    )
-    empty_backend = compose_marker(
-        "nn.Module.Linear.forward", "simple_net.py:51", backend=""
-    )
-    assert empty_backend.endswith("args=n/a")
-    assert not empty_backend.endswith("args=n/a|")
-
-
-def test_encode_args_wrap_delimiters():
-    assert "%7C" in encode_args("(float32[2x4], bias=float32[2x4]|x)")
-    assert encode_args("%|;|\r\n") == "%25%7C%3B%7C%0D%0A"
-
-
-def test_cap_args_balanced_parens():
-    assert cap_args("x" * 512) == "x" * 512
-    assert cap_args("x" * 513).endswith("...")
-    blob = "(" + "float32[2x4], " * 40 + ")"
-    assert cap_args(blob).endswith("...)")
-
-
 def test_push_scope_emits_composed_marker_and_pop_is_idempotent():
     previous = core.get_python_tier_io()
     pushes = []
@@ -359,7 +321,7 @@ def test_push_scope_emits_composed_marker_and_pop_is_idempotent():
     core._thread_local.depth = 0
     try:
         core._push_scope("aten::addmm", "n/a", backend="torch")
-        assert pushes == [core.compose_marker("aten::addmm", "n/a", backend="torch")]
+        assert pushes == [compose_marker("aten::addmm", "n/a", backend="torch")]
         core._pop_scope()
         core._pop_scope()
         assert pops == ["pop"]

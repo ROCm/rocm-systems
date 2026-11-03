@@ -10,7 +10,8 @@ and leaves call-tree construction to analysis.
 | --- | --- |
 | [torch.py](../../src/utils/inject_roctx/_backends/torch.py) | Structural Python wrappers and TorchDispatchMode fallback |
 | [torch_trace_collector.py](../../src/utils/inject_roctx/_backends/torch_trace_collector.py) | Generic-artifact discovery, runtime loading, C-interface binding, and launcher publication |
-| [core.py](../../src/utils/inject_roctx/core.py) | Python ROCTX I/O, source-location resolution, and flat marker composition |
+| [core.py](../../src/utils/inject_roctx/core.py) | Python ROCTX runtime emission and source-location resolution |
+| [marker_format.py](../../src/ml_api_tracing/marker_format.py) | Shared Python marker encoding, composition, parsing, and legacy stacked-wire detection |
 | [torch_trace_collector.cpp](../../src/lib/torch_trace_collector/torch_trace_collector.cpp) | Process-wide callback installation, range lifetime, and launcher debug info |
 | [argument_capture.cpp](../../src/lib/torch_trace_collector/argument_capture.cpp) | Bounded input rendering and schema-name lookup |
 | [wire_format.h](../../src/lib/torch_trace_collector/wire_format.h) | Native marker serialization |
@@ -143,8 +144,9 @@ the OS assigns new thread ids. The stitch key is the Function cell with
 ltid= removed: name, location, seqNr, tid, ftid, scope, args, and backend.
 function_ordinal is the 0-based occurrence of that stitch key in the pass,
 in marker order, assigned after join. Cross-pass collapse matches on stitch
-key and function_ordinal. A stacked Function first token
-(`:#` or `@`) makes current analyze exit during parse.
+key and function_ordinal. A regex match for `:#\d+@` in the first
+`|`-separated Function token identifies legacy stacked wire and makes current
+analyze exit during parse.
 
 ## Analyze path
 

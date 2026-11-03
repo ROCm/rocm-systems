@@ -11,9 +11,9 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Optional, Union
 
+from ml_api_tracing.constants import KNOWN_ML_API_BACKENDS
 from pc_sampling.pc_sampling_profile import PCSamplingProfile
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
