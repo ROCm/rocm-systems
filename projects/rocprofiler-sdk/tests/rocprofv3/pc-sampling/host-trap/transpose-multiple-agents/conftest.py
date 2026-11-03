@@ -49,7 +49,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--agent-index",
         choices=("absolute", "relative", "type-relative"),
-        required=True,
+        default="relative",
         help="Agent index mode used to generate the CSV files.",
     )
 
