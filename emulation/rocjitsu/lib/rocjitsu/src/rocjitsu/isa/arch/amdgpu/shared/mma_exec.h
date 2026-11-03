@@ -1358,29 +1358,32 @@ public:
     if (std::max({a_regs, b_regs, acc_regs}) > MfmaOperandWords::kMaxRegs)
       return;
     RegisterAccess regs(cu);
-    capture(regs, s0, a_regs, a_);
-    capture(regs, s1, b_regs, b_);
-    if (acc_regs)
-      capture(regs, s2, acc_regs, acc_);
+    failed_ = capture(regs, s0, a_regs, a_).failed() || capture(regs, s1, b_regs, b_).failed() ||
+              (acc_regs && capture(regs, s2, acc_regs, acc_).failed());
   }
 
-  [[nodiscard]] bool valid() const { return a_.valid; }
+  [[nodiscard]] bool valid() const { return a_.valid && !failed_; }
+  [[nodiscard]] bool failed() const { return failed_; }
   [[nodiscard]] const MfmaOperandWords &a() const { return a_; }
   [[nodiscard]] const MfmaOperandWords &b() const { return b_; }
   [[nodiscard]] const MfmaOperandWords &acc() const { return acc_; }
 
 private:
-  static void capture(RegisterAccess &regs, uint32_t base, uint32_t reg_count,
-                      MfmaOperandWords &operand) {
-    regs.read_vgpr_region(base, reg_count, mfma_full_lane_mask(64))
-        .copy_to({operand.words, static_cast<size_t>(reg_count) * 64});
+  static Result capture(RegisterAccess &regs, uint32_t base, uint32_t reg_count,
+                        MfmaOperandWords &operand) {
+    if (regs.read_vgpr_region(base, reg_count, mfma_full_lane_mask(64))
+            .copy_to({operand.words, static_cast<size_t>(reg_count) * 64})
+            .failed())
+      return Result::failure();
     operand.base = base;
     operand.valid = true;
+    return Result::success();
   }
 
   MfmaOperandWords a_;
   MfmaOperandWords b_;
   MfmaOperandWords acc_;
+  bool failed_ = false;
 };
 
 /// Wave64 MFMA result words staged by (register, lane) and published one VGPR at a time. Words
@@ -1446,6 +1449,9 @@ bool try_exec_mfma_regions(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_
     const MfmaOperandSnapshots snapshots(cu, s0, s1, s2, uint64_t{M} * K * B, a_bits,
                                          uint64_t{N} * K * B, b_bits, output_elements,
                                          sizeof(T) * 8, const_acc);
+    // A reported read failure ends the instruction; it must not retry through the generic path.
+    if (snapshots.failed())
+      return true;
     if (!snapshots.valid())
       return false;
     auto output = [=](uint32_t row, uint32_t col, uint32_t batch) {
