@@ -17,7 +17,7 @@
 #include <fstream>
 #include <string>
 
-#include "../common/LogCapture.hpp"
+#include "../../../common/LogCapture.hpp"
 #include "fakes/env_fakes.h"
 #include "net-ib-cast-test-common.h"
 
