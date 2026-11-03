@@ -94,9 +94,10 @@
  *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED,
  *          hsa_amd_signal_set_hints, hsa_amd_signal_get_hints (inline)
  * - 1.37 - hsa_amd_memory_async_batch_copy: HSA_AMD_MEMORY_COPY_OP_RECT
+ * - 1.38 - hsa_amd_memory_fill_bytes
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 37
+#define HSA_AMD_INTERFACE_VERSION_MINOR 38
 
 #ifdef __cplusplus
 extern "C" {
@@ -3110,6 +3111,29 @@ hsa_status_t HSA_API hsa_amd_memory_unlock(void* host_ptr);
  */
 hsa_status_t HSA_API
     hsa_amd_memory_fill(void* ptr, uint32_t value, size_t count);
+
+/**
+ * @brief Fills the first @p size bytes of the block of memory pointed by
+ * @p ptr with the specified byte @p value. This is analogous to cudaMemset.
+ *
+ * @param[in] ptr Pointer to the block of memory to fill.
+ *
+ * @param[in] value Byte value to be set (only lower 8 bits are used).
+ *
+ * @param[in] size Number of bytes to be set to the value.
+ *
+ * @retval HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT @p ptr is NULL.
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ALLOCATION if the given memory
+ * region was not allocated with HSA runtime APIs.
+ *
+ */
+hsa_status_t HSA_API hsa_amd_memory_fill_bytes(void* ptr, uint8_t value, size_t size);
 
 /**
  * @brief Maps an interop object into the HSA flat address space and establishes

@@ -251,6 +251,17 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
     return HSA_STATUS_ERROR;
   }
 
+  // @brief Fill memory with a byte value using DMA engine.
+  //
+  // @param [in] ptr Address of the memory to be set.
+  // @param [in] value The byte value that will be used to fill.
+  // @param [in] size Number of bytes to fill.
+  //
+  // @retval HSA_STATUS_SUCCESS The memory fill is finished and successful.
+  virtual hsa_status_t DmaFillBytes(void* ptr, uint8_t value, size_t size) {
+    return HSA_STATUS_ERROR;
+  }
+
   /// @brief Invoke the user provided callback for each region accessible by
   /// this agent.
   ///

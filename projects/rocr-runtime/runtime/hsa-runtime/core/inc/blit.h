@@ -101,6 +101,13 @@ class Blit {
   virtual hsa_status_t SubmitLinearFillCommand(void* ptr, uint32_t value,
                                                size_t num) = 0;
 
+  /// @brief Submit a memory fill operation with byte granularity.
+  ///
+  /// @param ptr Memory address of the fill destination.
+  /// @param value Byte value to be set.
+  /// @param size Number of bytes to fill.
+  virtual hsa_status_t SubmitLinearFillCommandBytes(void* ptr, uint8_t value, size_t size) = 0;
+
   /// @brief Enable profiling of the asynchronous copy command. The timestamp
   /// of each copy request will be stored in the completion signal structure.
   ///
