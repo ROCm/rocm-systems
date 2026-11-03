@@ -137,8 +137,7 @@ add_kr_lc_test(
     DISABLED
     ${IS_SPM_DISABLED})
 
-# PC sampling: local stop must succeed. Collection is agent-wide and currently ignores the
-# override (documented no-op).
+# PC sampling is agent-wide; the replay loop applies the local stop to the agent session.
 add_kr_lc_test(
     test-kernel-replay-local-context-pc-sampling-stop-after-0 ENVIRONMENT
     "KR_LC_SERVICES=pc-sampling;KR_LC_PASSES=4;KR_LC_STOP_PASS=1" DISABLED

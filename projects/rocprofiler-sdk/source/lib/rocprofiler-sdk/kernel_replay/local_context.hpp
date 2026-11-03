@@ -27,8 +27,8 @@
 // replay_local_enable_context / replay_local_disable_context callbacks. Those decisions are
 // recorded in a thread-local override that lives only for the loop and is never written to global
 // context state, so only the replaying thread's dispatches (this agent, serialized by the per-agent
-// replay lock) observe them. Service consumers query local_context_override() at dispatch time to
-// honor it.
+// replay lock) observe them. Dispatch-scoped consumers query local_context_override() while
+// preparing the pass; agent-wide PC sampling applies it at the pass boundary before submission.
 //
 // Two thread-local scopes are involved, both managed by the SDK (never by the tool):
 //  - loop scope (scoped_local_context_control): the override map is live for the whole replay loop,

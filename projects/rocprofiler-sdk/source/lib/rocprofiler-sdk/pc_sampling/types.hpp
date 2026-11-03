@@ -36,7 +36,9 @@
 #    include <hsa/hsa_ven_amd_pc_sampling.h>
 #endif
 
+#include <atomic>
 #include <memory>
+#include <mutex>
 
 namespace rocprofiler
 {
@@ -67,6 +69,16 @@ struct PCSAgentSession
     rocprofiler_context_id_t context_id = {.handle = 0};
     // Client index from the context (tool's id)
     uint32_t client_idx = 0;
+
+    // The context-level service flag records the tool's global start/stop intent. Kernel replay
+    // can temporarily suspend one agent's ROCr session without changing that global state.
+    // Transitions are serialized because ROCr start/stop and the stop-time flush must complete
+    // before a replay pass can use another clock-gating-sensitive service.
+    std::mutex        state_mutex{};
+    bool              transition_in_progress = false;
+    bool              transition_target      = false;
+    std::atomic<bool> active{false};
+    std::atomic<bool> replay_suspended{false};
 };
 
 // TODO static assertions

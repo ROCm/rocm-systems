@@ -78,6 +78,19 @@ configure_pc_sampling_service(context::context*                ctx,
 bool
 is_pc_sample_service_configured(rocprofiler_agent_id_t agent_id);
 
+// Effective context-level intent for the current thread: globally started and not locally stopped
+// by the current kernel-replay pass.
+bool
+is_pc_sample_service_requested(const context::context* ctx);
+
+// Apply the current replay override to one agent's hardware session before a pass, then restore
+// the globally requested state when the replay loop ends.
+rocprofiler_status_t
+sync_replay_service(rocprofiler_agent_id_t agent_id);
+
+rocprofiler_status_t
+restore_replay_service(rocprofiler_agent_id_t agent_id);
+
 PCSAgentSession*
 get_agent_session(rocprofiler_agent_id_t agent_id);
 
