@@ -127,10 +127,45 @@ class TestCpuClock(unittest.TestCase):
 
     def test_get_cpu_current_io_bandwidth(self):
         self.common.print_func_name("")
-        # IO_BW_ENCODINGS tuples are (link_name, encoding, expected); the API
-        # takes (handle, encoding, link_name).
-        # INVAL on a real CPU handle: the IO link is not wired on every platform
-        # (several IO_BW_ENCODINGS entries), so the target is absent here.
+
+        def positive(handles, failures):
+            # Link names are legal only for the platform's HSMP protocol version, so
+            # resolve the table per socket. A version with no table is skipped for
+            # that socket; a legal link returning INVAL is a real failure.
+            with self.common.status_sweep():
+                for i, cpu in enumerate(handles):
+                    try:
+                        proto_ver = amdsmi.amdsmi_get_cpu_hsmp_proto_ver(cpu)
+                    except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                        self.common.print(
+                            f"\t### amdsmi_get_cpu_hsmp_proto_ver(cpu={i}): unavailable ({e}), skipping"
+                        )
+                        continue
+                    links = self.common.io_bw_encodings_for_proto_ver(proto_ver)
+                    if not links:
+                        self.common.print(
+                            f"\t### HSMP protocol version {proto_ver} defines no IO link encodings, skipping cpu={i}"
+                        )
+                        continue
+                    for link_name, encoding, _ in links:
+                        msg = (
+                            f"\t### amdsmi_get_cpu_current_io_bandwidth(cpu={i}, "
+                            f"encoding={encoding}, link_name={link_name}):"
+                        )
+                        val = "N/A"
+                        with self.common.expect_status(msg, correct_accept):
+                            val = amdsmi.amdsmi_get_cpu_current_io_bandwidth(
+                                cpu, encoding, link_name
+                            )
+                        self.common.print(f"\t    data: {val}")
+
+        # Positive accepts only feature-absent statuses; INVAL is not accepted for a
+        # legal link ID (see positive above).
+        correct_accept = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+        ]
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_get_cpu_current_io_bandwidth,
             "amdsmi_get_cpu_current_io_bandwidth",
@@ -144,13 +179,9 @@ class TestCpuClock(unittest.TestCase):
                 amdsmi.AmdSmiStatus.NOT_FOUND,
                 amdsmi.AmdSmiStatus.INVAL,
             ],
-            correct_accept=[
-                amdsmi.AmdSmiStatus.SUCCESS,
-                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
-                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-                amdsmi.AmdSmiStatus.INVAL,
-            ],
+            correct_accept=correct_accept,
             null_accept=[amdsmi.AmdSmiStatus.INVAL],
+            positive=positive,
         )
         return
 
