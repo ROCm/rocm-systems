@@ -135,7 +135,7 @@ enum InstFlags : uint64_t {
   /// @details Kept separate from BRANCH and COND_BRANCH so CFG construction does
   /// not change. Query through writes_pc(), which combines them.
   WRITES_PC = (1ULL << 37),
-  /// @brief s_trap: the issue loop enters the trap handler instead of executing it.
+  /// @brief Software trap instruction (s_trap).
   SOFTWARE_TRAP = (1ULL << 38)
 };
 
