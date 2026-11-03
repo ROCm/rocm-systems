@@ -6750,8 +6750,9 @@ TEST(DevrGinContextsTotal, ZeroConnectionBackend_TreatedAsOne) {
 // that asks for no resources has no window to create, so its build completes.
 //
 // The rest of the devcomm build -- GIN activation, symmetric-memory window
-// creation, GIN window registration, barriers -- is not covered here beyond a
-// failed GIN activation.
+// creation, GIN window registration, barriers -- is covered here only where a
+// late-stage failure must unwind it (for example LateStageFailureFreesGinDevComm
+// drives GIN setup through to ncclGinDevCommSetup before failing the stream).
 
 class DevrCommCreateInternalTest : public NcclVersionCompatTest {
 protected:
@@ -6868,8 +6869,14 @@ TEST_F(DevrCommCreateInternalTest, LateStageFailureFreesGinDevComm) {
 
   ScopedHook streamCreate(g_hipStreamCreateWithFlags,
                           [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  // Pin that the free gets the devComm setup filled in (the 0xACE handle the
+  // setup default records), not just that the free was called -- this is the
+  // struct identity the compat temporary-buffer path depends on.
   ScopedHook ginFree(g_devrGinDevCommFree,
-                     [](struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; });
+                     [](struct ncclComm*, struct ncclDevComm const* dc) {
+                       EXPECT_EQ(dc->ginHandles[0], reinterpret_cast<void*>(0xACE));
+                       return ncclSuccess;
+                     });
 
   EXPECT_NE(Create(), ncclSuccess);
   EXPECT_EQ(ginFree.calls, 1);
@@ -6888,6 +6895,7 @@ TEST_F(DevrCommCreateInternalTest, LateStageFailureWithoutGinDoesNotFree) {
                      [](struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; });
 
   EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(streamCreate.calls, 1);  // reached the same late-stage failure as the positive test
   EXPECT_EQ(ginFree.calls, 0);
 }
 
