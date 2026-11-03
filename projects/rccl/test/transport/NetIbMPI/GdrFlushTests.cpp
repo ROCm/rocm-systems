@@ -26,13 +26,7 @@
 
 namespace {
 
-// The returned status is not the whole verdict. Helpers the burst calls --
-// AssertInitAndGetDevices and PostSendWithRetry -- assert fatally and return from
-// themselves, so the burst can reach its own "return ncclSuccess" with a fatal
-// failure already recorded. Asserting on the status alone would let the test carry
-// on and fail later on an out-parameter nobody wrote, which is what the
-// ASSERT_NO_FATAL_FAILURE this replaced used to catch. Checking HasFatalFailure
-// stops the test at the cause instead.
+// Preserve fatal failures raised by helpers inside the burst.
 #define ASSERT_RECV_FLUSH_BURST(iterations, verifyData, lastFlush)                   \
     do {                                                                             \
         std::string _burstWhy;                                                       \
@@ -103,23 +97,7 @@ protected:
         return res;
     }
 
-    // Runs `iterations` of GPU recv + flush across 2 ranks on device 0.
-    // rank 0 = receiver + flush, rank 1 = sender. Returns rank 0's last flush
-    // completion result via `rank0LastFlush` (may be null).
-    //
-    // The data buffer is plain hipMalloc, registered through RegisterGdrMemory. The
-    // exercised scratchpad is the recv comm's INTERNAL gpuFlush, which becomes
-    // dma-buf-backed purely from NCCL_CUMEM_ENABLE=1 - independent of how the data
-    // buffer is allocated or registered.
-    //
-    // Returns the setup verdict rather than asserting on it. A fatal assertion
-    // inside a void helper returns from the helper alone, so the caller carried on
-    // with the comms SetupConnectionWithGuard had already closed unless it
-    // remembered ASSERT_NO_FATAL_FAILURE -- a wrapper nothing enforced. The status
-    // is [[nodiscard]] and these sources build with -Werror=unused-result, so the
-    // call sites cannot drop it. Only the rank-agreed setup failure travels back
-    // this way; everything below stays EXPECT_, because a rank-local failure that
-    // ended the test on one rank would strand its peer at the next collective.
+    // Returns rank-agreed setup status; rank-local transfer checks remain non-fatal.
     [[nodiscard]] ncclResult_t RunRecvFlushBurst(int iterations, bool verifyData,
                                                 ncclResult_t* rank0LastFlush,
                                                 std::string* setupWhy = nullptr) {
