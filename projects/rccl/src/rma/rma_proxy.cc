@@ -80,7 +80,7 @@ static ncclResult_t getDmaBufFd(void* addr, size_t length, int* fd, bool forceNo
 // (cuMem) export when the cumem gate is enabled; otherwise fall back to the
 // ROCr portable dmabuf export.
 static ncclResult_t getDmaBufFd(void* addr, size_t length, int* fd, bool sym_buffer = false) {
-  if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
+  if (!rcclProxyDmaBufEnabled(/*cuMemMemory=*/sym_buffer)) return ncclInvalidUsage;
 #if HIP_VERSION >= 70000000
   static size_t hostPageSize = ncclOsGetPageSize();
   size_t alignedSize = length;
@@ -112,7 +112,7 @@ static ncclResult_t ncclRmaProxyRegMrSym(ncclRma_t* rmaComm, void* rmaCollComm, 
     NCCLCHECK(rmaComm->regMrSym(rmaCollComm, addr, size, type, mr_flags, mhandle));
   } else if (type == NCCL_PTR_CUDA) {
     ncclResult_t dmabufResult = ncclInvalidUsage;
-    if (ncclParamDmaBufEnable() && (props.ptrSupport & NCCL_PTR_DMABUF)) {
+    if (rcclProxyDmaBufEnabled(/*cuMemMemory=*/sym_buffer) && (props.ptrSupport & NCCL_PTR_DMABUF)) {
       int dmabufFd = -1;
       // [RCCL] sym_buffer selects the cuMem (VMM) dmabuf export used for symmetric
       // windows; plain (hipExtMalloc) allocations use the ROCr portable export.

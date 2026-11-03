@@ -1816,12 +1816,32 @@ target_compile_options(rccl-UnitTestsMicroDdaColl PRIVATE
   "SHELL:-Xclang -fcuda-include-gpubinary -Xclang ${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary")
 
 # ---------------------------------------------------------------------------
+# DMA-BUF export probe (first used by rccl-UnitTestsMicroRmaProxy; later micro binaries reuse it)
+# ---------------------------------------------------------------------------
+# In-build, RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED arrives with rccl's own compile definitions; standalone
+# repeats the top-level probe, so rocmwrap.h's NCCL_CUMEM_DMABUF_EXPORT_GATE matches what rccl compiles.
+set(_MICRO_DMABUF_EXPORT_DEF "")
+if(NOT BUILD_TESTS)
+  include(CheckCXXSymbolExists)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+  set(CMAKE_REQUIRED_DEFINITIONS -D__HIP_PLATFORM_AMD__)
+  check_cxx_symbol_exists(hipMemGetHandleForAddressRange "hip/hip_runtime_api.h"
+    _MICRO_HIP_MEM_GET_HANDLE_FOR_ADDR_RANGE)
+  unset(CMAKE_REQUIRED_DEFINITIONS)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+  if(_MICRO_HIP_MEM_GET_HANDLE_FOR_ADDR_RANGE)
+    set(_MICRO_DMABUF_EXPORT_DEF RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
+  endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroRmaProxy
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicroRmaProxy
   SOURCES ${TEST_MICRO_RMA_PROXY_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
+    ${_MICRO_DMABUF_EXPORT_DEF}
     RMA_PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rma_proxy.yaml")
 
@@ -1889,21 +1909,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicroWarpSpeed
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroGinHostProxy
 # ---------------------------------------------------------------------------
-# In-build, RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED arrives with rccl's own compile definitions; standalone
-# repeats the top-level probe, so rocmwrap.h's NCCL_CUMEM_DMABUF_EXPORT_GATE matches what rccl compiles.
-set(_MICRO_DMABUF_EXPORT_DEF "")
-if(NOT BUILD_TESTS)
-  include(CheckCXXSymbolExists)
-  set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
-  set(CMAKE_REQUIRED_DEFINITIONS -D__HIP_PLATFORM_AMD__)
-  check_cxx_symbol_exists(hipMemGetHandleForAddressRange "hip/hip_runtime_api.h"
-    _MICRO_HIP_MEM_GET_HANDLE_FOR_ADDR_RANGE)
-  unset(CMAKE_REQUIRED_DEFINITIONS)
-  set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
-  if(_MICRO_HIP_MEM_GET_HANDLE_FOR_ADDR_RANGE)
-    set(_MICRO_DMABUF_EXPORT_DEF RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
-  endif()
-endif()
 # The test redirects rocmwrap.cc's DmaBufEnable param; keep the name and default in step.
 foreach(_f "${CMAKE_CURRENT_LIST_DIR}/../../src/misc/rocmwrap.cc" "${CMAKE_CURRENT_LIST_DIR}/gin-host-proxy-test.cc")
   rccl_assert_source_line("${_f}" "NCCL_PARAM(DmaBufEnable, \"DMABUF_ENABLE\", 1)" "gin-host-proxy-test.cc")

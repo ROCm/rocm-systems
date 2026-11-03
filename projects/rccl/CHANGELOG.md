@@ -64,6 +64,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 * `RCCL_DDA_LL128_RS_THREADS` removed (was default `1024`): reduce-scatter LL128 now launches a fixed 512-thread block, one warp per slice, so the thread count is no longer a tuning knob.
 ### Resolved issues
+* Fixed GIN and RMA proxy registration of cuMem device memory with `NCCL_DMABUF_ENABLE=0`. The proxies fell back to plain `ibv_reg_mr`, which cannot register cuMem memory, so `ncclDevCommCreate` or window registration failed. They now use DMA-BUF for cuMem memory whenever cuMem is enabled, as the NET transport already does; `NCCL_DMABUF_ENABLE=0` still applies to other memory.
 * Fixed the calling thread's HIP stream-capture mode remaining relaxed when device-communicator GIN setup fails. `ncclDevCommCreate` still switches to relaxed mode while it builds the device communicator, and a failed `ncclGinDevCommSetup` now returns through the same cleanup path that restores the mode the application had set. Matches upstream NCCL 2.31.2 (PR 2229).
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 * Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.

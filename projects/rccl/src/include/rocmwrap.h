@@ -229,6 +229,13 @@ extern int ncclCuMemHostEnable();
 extern int64_t rcclParamForceEnableDMABUF();
 extern int64_t ncclParamDmaBufEnable();
 
+// [RCCL] Whether the GIN and RMA proxies may register GPU memory through DMA-BUF. cuMem (VMM) memory cannot be
+// registered with ibv_reg_mr, so it takes DMA-BUF whenever cuMem is enabled, even with NCCL_DMABUF_ENABLE=0, as the
+// NET transport does (transport/net.cc).
+inline bool rcclProxyDmaBufEnabled(bool cuMemMemory) {
+  return ncclParamDmaBufEnable() != 0 || (cuMemMemory && ncclCuMemEnable());
+}
+
 // Handle type used for cuMemCreate()
 extern CUmemAllocationHandleType ncclCuMemHandleType;
 

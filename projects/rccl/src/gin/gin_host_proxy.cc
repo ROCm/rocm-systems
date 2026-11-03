@@ -20,7 +20,6 @@
 NCCL_PARAM(GinProxyQueueSize, "GIN_PROXY_QUEUE_SIZE", -1);
 NCCL_PARAM(GinProxyPollBatch, "GIN_PROXY_POLL_BATCH", 32);
 extern int64_t ncclParamIbDataDirect();
-extern int64_t ncclParamDmaBufEnable();
 
 struct ginProxyGfdState {
   ncclGinProxyOp_t op;
@@ -87,7 +86,7 @@ struct ginProxyCtx {
 static ncclRma_t* rmaBackend;
 
 static ncclResult_t getDmaBufFd(void* addr, size_t length, int* fd, bool forceNonDataDirect = false) {
-  if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
+  if (!rcclProxyDmaBufEnabled(/*cuMemMemory=*/true)) return ncclInvalidUsage;
 
   // GIN's symmetric windows are cuMem/VMM allocations registered with the NIC via ibv_reg_dmabuf_mr.
   // the cuMem/hipMemGetHandleForAddressRange that exports the DMA-BUF FD requires this HIP version.
@@ -452,7 +451,7 @@ static ncclResult_t ncclGinProxyRegMrSym(void* ginCtx, void* addr, size_t size, 
     NCCLCHECK(rmaBackend->regMrSym(cComm->collComm, addr, size, type, mrFlags, mhandle));
   } else if (type == NCCL_PTR_CUDA) {
     ncclResult_t dmabufResult = ncclInvalidUsage;
-    if (ncclParamDmaBufEnable() && (cComm->props.ptrSupport & NCCL_PTR_DMABUF)) {
+    if (rcclProxyDmaBufEnabled(/*cuMemMemory=*/true) && (cComm->props.ptrSupport & NCCL_PTR_DMABUF)) {
       ncclResult_t registrationResult = ncclSuccess;
       int dmabufFd = -1;
       dmabufResult = getDmaBufFd(addr, size, &dmabufFd);

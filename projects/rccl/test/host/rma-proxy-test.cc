@@ -41,6 +41,7 @@
 
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
 #include <hsa/hsa.h>
 
 #include <cstdint>
@@ -115,6 +116,7 @@ struct Registration {
     size_t   size     = 0;
     int      type     = 0;
     uint64_t mrFlags  = 0;
+    int      fd       = -1;  // the DMA-BUF fd, or -1 for the plain arm
 };
 
 struct FakeRma {
@@ -138,7 +140,7 @@ struct FakeRma {
         return nullptr;
     }
 
-    ncclResult_t reg(void* data, size_t size, int type, uint64_t mrFlags, void** mhandle) {
+    ncclResult_t reg(void* data, size_t size, int type, uint64_t mrFlags, void** mhandle, int fd = -1) {
         ++regAttempts;
         if ((rejectAfterNReg >= 0 && regAttempts > rejectAfterNReg) ||
             (strictMemType && type == NCCL_PTR_CUDA && hostAddrs != nullptr &&
@@ -148,7 +150,7 @@ struct FakeRma {
             *mhandle = nullptr;
             return ncclInternalError;
         }
-        regs.push_back({data, size, type, mrFlags});
+        regs.push_back({data, size, type, mrFlags, fd});
         // Non-NULL and stable; production stores it but never dereferences it here.
         *mhandle = reinterpret_cast<void*>(regs.size());
         return ncclSuccess;
@@ -182,9 +184,9 @@ private:
         return Rma(collComm)->reg(data, size, type, mrFlags, mhandle);
     }
     static ncclResult_t TrampRegMrSymDmaBuf(void* collComm, void* data, size_t size, int type,
-                                            uint64_t /*offset*/, int /*fd*/, uint64_t mrFlags,
+                                            uint64_t /*offset*/, int fd, uint64_t mrFlags,
                                             void** mhandle) {
-        return Rma(collComm)->reg(data, size, type, mrFlags, mhandle);
+        return Rma(collComm)->reg(data, size, type, mrFlags, mhandle, fd);
     }
     static ncclResult_t TrampDeregMrSym(void* collComm, void* mhandle) {
         Rma(collComm)->deregs.push_back(mhandle);
@@ -233,9 +235,10 @@ protected:
 
         savedGdrCopy_ = ncclGdrCopy;
         ncclGdrCopy   = NULL;  // production default: GDRCopy off
-        // DMABUF_ENABLE=0 keeps ncclRmaProxyRegMrSym on its plain regMrSym arm: the
-        // DMA-BUF arm reaches hsa_amd_portable_export_dmabuf through a function
-        // pointer no host-only build can satisfy.
+        // DMABUF_ENABLE=0, with cuMem off (g_cuMemEnable below), keeps
+        // ncclRmaProxyRegMrSym on its plain regMrSym arm: the DMA-BUF arm reaches
+        // hsa_amd_portable_export_dmabuf through a function pointer no host-only
+        // build can satisfy.
         g_loadParam = [](const char* env, int64_t deftVal) {
             return std::strcmp(env, "DMABUF_ENABLE") == 0 ? 0 : deftVal;
         };
@@ -278,9 +281,9 @@ protected:
         ncclMemoryStackConstruct(&comm_->memPermanent);
 
         // A capable NIC, so no registration below can be steered by a missing
-        // capability. The DMA-BUF bit is nonetheless never consulted here:
-        // ncclRmaProxyRegMrSym tests ncclParamDmaBufEnable() first, and the
-        // fixture pins that to 0 (see DMABUF_ENABLE above).
+        // capability. The DMA-BUF bit is nonetheless not consulted by default:
+        // ncclRmaProxyRegMrSym tests rcclProxyDmaBufEnabled() first, which the
+        // fixture keeps false (DMABUF_ENABLE=0 and cuMem off, see above).
         props_.ptrSupport = NCCL_PTR_HOST | NCCL_PTR_CUDA | NCCL_PTR_DMABUF;
         // Drives maxInflightRequests and the circular-buffer queue size; 0
         // would leave production sanitizing down to a zero-length queue.
@@ -450,6 +453,48 @@ TEST_F(RmaProxyAllocGraphTest, FlushBufferStaysCudaOnBothGdrArms) {
         EXPECT_EQ(kFlushBufSize, reg->size) << "gdr=" << (void*)gdr;
     }
 }
+
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
+// Symmetric windows are cuMem, which ibv_reg_mr cannot register: with cuMem on, ncclRmaProxyRegister exports them
+// through DMA-BUF even with NCCL_DMABUF_ENABLE=0 (the fixture's setting), as the NET transport does. With cuMem off
+// the same window stays on the plain arm.
+TEST_F(RmaProxyAllocGraphTest, Register_DmaBufDisabledWithCuMemRegistersWindowThroughDmaBuf) {
+    ASSERT_EQ(ncclSuccess, CreateCtx());
+    std::vector<int> exportedFds;
+    ScopedHook<hipError_t(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long)> exportHook(
+        g_hipMemGetHandleForAddressRange,
+        [&exportedFds](void* handle, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long) {
+            int fd = open("/dev/null", O_RDONLY);
+            exportedFds.push_back(fd);
+            *static_cast<int*>(handle) = fd;
+            return hipSuccess;
+        });
+    ncclRmaProxyState* st = &comm_->rmaState.rmaProxyState;
+    st->rmaCommCount = 1;
+    st->rmaComms[0]  = &rmaNet_.collH;
+    st->props[0]     = props_;
+    alignas(4096) static char window[2 * 4096];
+    void* wins[NCCL_RMA_MAX_CONNECTIONS] = {};
+
+    g_cuMemEnable = [] { return 1; };
+    ASSERT_EQ(ncclSuccess, ncclRmaProxyRegister(comm_.get(), window, sizeof(window), wins));
+    ASSERT_EQ(1u, exportedFds.size());
+    const Registration* r = rmaNet_.find(window);
+    ASSERT_NE(nullptr, r);
+    EXPECT_EQ(NCCL_PTR_CUDA, r->type);
+    EXPECT_EQ(exportedFds[0], r->fd);
+    EXPECT_EQ(-1, fcntl(exportedFds[0], F_GETFD));  // production closed it
+
+    rmaNet_.regs.clear();
+    g_cuMemEnable = [] { return 0; };
+    ASSERT_EQ(ncclSuccess, ncclRmaProxyRegister(comm_.get(), window, sizeof(window), wins));
+    EXPECT_EQ(1u, exportedFds.size());
+    r = rmaNet_.find(window);
+    ASSERT_NE(nullptr, r);
+    EXPECT_EQ(-1, r->fd);
+    st->rmaCommCount = 0;
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // Whichever type is chosen, the proxy polls these signals from the host, so the

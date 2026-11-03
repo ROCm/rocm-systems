@@ -420,13 +420,29 @@ TEST_F(GinHostProxyRegMrMicrotest, Cuda_WithoutTheExportArmRegistersPlain) {
 }
 #endif
 
-TEST_F(GinHostProxyRegMrMicrotest, Cuda_DmaBufDisabledRegistersPlain) {
+// NCCL_DMABUF_ENABLE=0 keeps device memory on the plain arm only while cuMem is off.
+TEST_F(GinHostProxyRegMrMicrotest, Cuda_DmaBufDisabledWithoutCuMemRegistersPlain) {
   dmaBufEnable_ = 0;
+  ScopedHook<int()> cuMemOff(g_cuMemEnable, [] { return 0; });
   ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
   EXPECT_TRUE(exportSizes_.empty());
   ASSERT_EQ(1u, rma_.regs.size());
   EXPECT_EQ(-1, rma_.regs[0].fd);
 }
+
+// GIN windows are cuMem, which ibv_reg_mr cannot register, so with cuMem on the proxy registers them through DMA-BUF
+// even with NCCL_DMABUF_ENABLE=0, as the NET transport does.
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
+TEST_F(GinHostProxyRegMrMicrotest, Cuda_DmaBufDisabledWithCuMemStillRegistersThroughDmaBuf) {
+  dmaBufEnable_ = 0;
+  ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
+  ASSERT_EQ(1u, exportedFds_.size());
+  ASSERT_EQ(1u, rma_.regs.size());
+  EXPECT_EQ(exportedFds_[0], rma_.regs[0].fd);
+  EXPECT_EQ(NCCL_PTR_CUDA, rma_.regs[0].type);
+  EXPECT_FALSE(FdIsOpen(exportedFds_[0]));
+}
+#endif
 
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_PluginWithoutDmaBufSupportRegistersPlain) {
   rma_.ptrSupport = NCCL_PTR_HOST | NCCL_PTR_CUDA;
@@ -491,6 +507,8 @@ TEST_F(GinHostProxyRegMrMicrotest, PlainRegistrationFailurePropagates) {
   rma_.regMrSymResult = ncclSystemError;
   ginHandle_ = kPluginCtx;
   EXPECT_EQ(ncclSystemError, Reg(NCCL_PTR_HOST));
+  // With cuMem on, NCCL_DMABUF_ENABLE=0 alone no longer selects the plain arm for device memory.
+  ScopedHook<int()> cuMemOff(g_cuMemEnable, [] { return 0; });
   dmaBufEnable_ = 0;
   EXPECT_EQ(ncclSystemError, Reg(NCCL_PTR_CUDA));
   EXPECT_EQ(kPluginCtx, ginHandle_);
@@ -652,6 +670,22 @@ TEST_F(GinHostProxyContextMicrotest, Create_ZeroesAndRegistersSignalsStronglyOrd
     EXPECT_EQ(r.mhandle, Ctx()->hostGpuCtx[c].inlinesMhandle);
   }
 }
+
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
+// ncclDevCommCreate's own cuMem allocation, the signal buffer, takes the same DMA-BUF arm with NCCL_DMABUF_ENABLE=0.
+TEST_F(GinHostProxyContextMicrotest, Create_DmaBufDisabledWithCuMemRegistersSignalsThroughDmaBuf) {
+  rma_.ptrSupport |= NCCL_PTR_DMABUF;
+  ASSERT_EQ(ncclSuccess, Reconnect());
+  ASSERT_EQ(0, dmaBufEnable_);
+  ASSERT_EQ(ncclSuccess, Create(Config(3)));
+  ASSERT_EQ(1u, exportedFds_.size());
+  ASSERT_EQ(3u, rma_.regs.size());  // signals, then inlines per context
+  EXPECT_EQ(Ctx()->signalsDev, rma_.regs[0].addr);
+  EXPECT_EQ(exportedFds_[0], rma_.regs[0].fd);
+  EXPECT_EQ(-1, rma_.regs[1].fd);  // inlines are host memory
+  EXPECT_FALSE(FdIsOpen(exportedFds_[0]));
+}
+#endif
 
 // The fake cuMem allocation is 0xff-filled, so only the explicit memset can zero it.
 TEST_F(GinHostProxyContextMicrotest, Create_ZeroesTheSignalBuffer) {

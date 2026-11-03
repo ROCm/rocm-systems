@@ -1923,6 +1923,8 @@ The Linux dma-buf subsystem allows GPU Direct RDMA capable NICs to read and writ
 
 GIN registration of a window that contains host VMM memory requires this variable set to 1, because that memory is registered through a DMA-BUF memory region. With 0, registration fails with ``ncclInvalidUsage``.
 
+With cuMem enabled (see ``NCCL_CUMEM_ENABLE``), the GIN and RMA proxies register cuMem device memory through DMA-BUF even when this variable is 0, as the NET transport does, because that memory cannot be registered without DMA-BUF.
+
 Value accepted
 ^^^^^^^^^^^^^^
 0 or 1. Default value is 1 (enabled), but the feature is automatically disabled if the Linux kernel or the CUDA/NIC driver do not support it.
