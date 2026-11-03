@@ -421,6 +421,43 @@ TEST_F(TensorDmaLdsOutOfRangeTest, StoreElementStraddlingTheEndReadsZeroPastIt) 
       (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base() + 252, .bytes = 4}}));
 }
 
+// One i32 element at offset 254 has two bytes inside the wave's LDS. Keeping a
+// two-byte prefix distinguishes byte-prefix clipping from rounding the kept
+// length to whole DWORDs, which would keep nothing.
+TEST_F(TensorDmaLdsOutOfRangeTest, LoadI32StraddlingTheEndWritesOnlyItsTwoInRangeBytes) {
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal, 254);
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16); // i32 elements.
+  write_wave_sgpr(*cu, *wf, 13, 1u << 16);
+  write_wave_sgpr(*cu, *wf, 15, 1u << 16);
+  cu->lds().write32(wf->lds_base() + 252, 0xa3a2a1a0u);
+  write_global_u32(*sim.memory, kGlobal, 0x55667788u);
+  ASSERT_TRUE(execute(/*store=*/false));
+  // Bytes 252 and 253 are untouched; 254 and 255 take the element's low bytes.
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 252), 0x7788a1a0u);
+  EXPECT_EQ(cu->lds().read32(neighbour), kSentinel);
+  ASSERT_EQ(issue_observer->issues.size(), 1u);
+  EXPECT_EQ(
+      issue_observer->issues[0].lds_ranges,
+      (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base() + 254, .bytes = 2}}));
+}
+
+TEST_F(TensorDmaLdsOutOfRangeTest, StoreI32StraddlingTheEndReadsZeroForItsTwoOutOfRangeBytes) {
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal, 254);
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16); // i32 elements.
+  write_wave_sgpr(*cu, *wf, 13, 1u << 16);
+  write_wave_sgpr(*cu, *wf, 15, 1u << 16);
+  cu->lds().write32(wf->lds_base() + 252, 0xddcc0000u);
+  write_global_u32(*sim.memory, kGlobal, 0xffffffffu);
+  ASSERT_TRUE(execute(/*store=*/true));
+  // The two in-range bytes, then zero rather than the neighbour's sentinel.
+  EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), 0x0000ddccu);
+  EXPECT_EQ(cu->lds().read32(neighbour), kSentinel);
+  ASSERT_EQ(issue_observer->issues.size(), 1u);
+  EXPECT_EQ(
+      issue_observer->issues[0].lds_ranges,
+      (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base() + 254, .bytes = 2}}));
+}
+
 TEST_F(TensorDmaLdsOutOfRangeTest, PaddingPushesTheLastElementPastTheEnd) {
   // One dword of padding after every two places the elements at 240, 244, 252
   // and 256; the last is past the wave's LDS.
