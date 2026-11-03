@@ -17,8 +17,8 @@
 #include <functional>
 #include <string>
 
-#include "../common/LogCapture.hpp"
-#include "../common/ProcessIsolatedTestRunner.hpp"
+#include "../../../common/LogCapture.hpp"
+#include "../../../common/ProcessIsolatedTestRunner.hpp"
 #include "fakes/gdr_peermem_fakes.h"
 #include "fakes/gdr_probe_fakes.h"
 #include "fakes/ibvwrap_fakes.h"
