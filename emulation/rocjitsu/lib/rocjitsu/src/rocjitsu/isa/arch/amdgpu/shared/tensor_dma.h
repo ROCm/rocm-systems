@@ -762,13 +762,13 @@ inline std::vector<TensorDmaLdsRange> tensor_dma_lds_ranges(const TensorDmaState
   std::vector<TensorDmaLdsRange> ranges;
   ranges.reserve(state.elements.size());
   for (const TensorDmaTransferElement &element : state.elements) {
-    const uint32_t size = state.desc.elem_size - element.lds_dropped_bytes;
-    if (size == 0 || (state.store_from_lds && !element.in_bounds))
+    const uint32_t lds_bytes = state.desc.elem_size - element.lds_dropped_bytes;
+    if (lds_bytes == 0 || (state.store_from_lds && !element.in_bounds))
       continue;
     if (!ranges.empty() && ranges.back().address + ranges.back().bytes == element.lds_address)
-      ranges.back().bytes += size;
+      ranges.back().bytes += lds_bytes;
     else
-      ranges.push_back({.address = element.lds_address, .bytes = size});
+      ranges.push_back({.address = element.lds_address, .bytes = lds_bytes});
   }
   return ranges;
 }
@@ -942,7 +942,8 @@ inline VmAccessOutcome resume_tensor_dma_state(TensorDmaState &state, Wavefront 
   if (!state.completion_committed) {
     if (!state.store_from_lds) {
       for (const TensorDmaTransferElement &element : state.elements) {
-        for (uint32_t byte = 0; byte + element.lds_dropped_bytes < state.desc.elem_size; ++byte)
+        const uint32_t lds_bytes = state.desc.elem_size - element.lds_dropped_bytes;
+        for (uint32_t byte = 0; byte < lds_bytes; ++byte)
           wf.lds().write8(element.lds_address + byte, element.bytes[byte]);
       }
     }
