@@ -14,6 +14,7 @@ from rich.console import Console as RichConsole
 from rich.panel import Panel as RichPanel
 from rich.table import Table as RichTable
 from rich.text import Text as RichText
+from tabulate import tabulate
 
 import config
 from membw_analysis.models import MemBwAnalysisResult
@@ -43,7 +44,6 @@ from utils.utils_common import (
     format_table_id,
     strip_ansi,
 )
-from vendored import tabulate
 
 _GUIDANCE_PANEL_MIN_WIDTH = 100
 

@@ -60,8 +60,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * `--list-metrics` no longer takes a GPU architecture. It lists the blocks of the current GPU, or the metrics of the blocks and metrics you name, for example `rocprof-compute --list-metrics sol`. Use `--list-metrics-gfx-id <arch>` to list another GPU.
 
-* Analyze mode no longer needs the `tabulate` Python package. rocprofiler-compute now ships it.
-
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.

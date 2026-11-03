@@ -13,8 +13,7 @@ For vendoring guidelines and adding new packages, see CONTRIBUTING.md.
 
 try:
     from .pyyaml.lib import yaml
-    from .tabulate.tabulate import tabulate
 except ImportError as e:
     raise ImportError("Vendored dependencies not found.") from e
 
-__all__ = ["tabulate", "yaml"]
+__all__ = ["yaml"]

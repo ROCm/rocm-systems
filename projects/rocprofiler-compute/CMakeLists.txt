@@ -1303,45 +1303,34 @@ install(
     COMPONENT main
 )
 
-# Initialize the vendored submodule src/vendored/<name> if it is missing, then
-# install its pure-Python package at src/vendored/<package_dir>.
-function(rocprof_compute_install_vendored name package_dir)
-    if(NOT EXISTS "${PROJECT_SOURCE_DIR}/src/vendored/${package_dir}")
-        if(Git_FOUND)
-            message(STATUS "Initializing vendored/${name} submodule...")
-            execute_process(
-                COMMAND
-                    ${GIT_EXECUTABLE} submodule update --init --recursive
-                    src/vendored/${name}
-                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                RESULT_VARIABLE GIT_SUBMOD_RESULT
-            )
-            if(NOT GIT_SUBMOD_RESULT EQUAL "0")
-                message(
-                    FATAL_ERROR
-                    "git submodule update failed for src/vendored/${name}"
-                )
-            endif()
-        else()
-            message(FATAL_ERROR "vendored/${name} not found and git not available")
+# PyYAML
+if(NOT EXISTS "${PROJECT_SOURCE_DIR}/src/vendored/pyyaml/lib/yaml")
+    if(Git_FOUND)
+        message(STATUS "Initializing vendored/pyyaml submodule...")
+        execute_process(
+            COMMAND
+                ${GIT_EXECUTABLE} submodule update --init --recursive src/vendored/pyyaml
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            RESULT_VARIABLE GIT_SUBMOD_RESULT
+        )
+        if(NOT GIT_SUBMOD_RESULT EQUAL "0")
+            message(FATAL_ERROR "git submodule update failed for src/vendored/pyyaml")
         endif()
     else()
-        message(STATUS "Vendored/${name}: OK")
+        message(FATAL_ERROR "vendored/pyyaml not found and git not available")
     endif()
-    get_filename_component(package_parent "${package_dir}" DIRECTORY)
-    install(
-        DIRECTORY src/vendored/${package_dir}
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/vendored/${package_parent}
-        COMPONENT main
-        FILES_MATCHING
-        PATTERN "*.py"
-        PATTERN "__pycache__" EXCLUDE
-        PATTERN "*.pyc" EXCLUDE
-    )
-endfunction()
-
-rocprof_compute_install_vendored(pyyaml pyyaml/lib/yaml)
-rocprof_compute_install_vendored(tabulate tabulate/tabulate)
+else()
+    message(STATUS "Vendored/pyyaml: OK")
+endif()
+install(
+    DIRECTORY src/vendored/pyyaml/lib/yaml
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/vendored/pyyaml/lib
+    COMPONENT main
+    FILES_MATCHING
+    PATTERN "*.py"
+    PATTERN "__pycache__" EXCLUDE
+    PATTERN "*.pyc" EXCLUDE
+)
 
 # samples
 install(
