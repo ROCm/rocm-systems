@@ -929,10 +929,27 @@ class DropDiagnosisTest(unittest.TestCase):
         self.assertNotEqual(r.drop().bucket, "NONE")
         self.assertIn("rank 1 (hostB)", " ".join(r.drop().unknown))
 
+    def test_nic_named_by_accl_but_not_sampled_is_blind(self):
+        # Rank 1's records name NICs 0 and 1; telemetry samples only NIC 0.
+        lines = []
+        for l in iterations(1, "hostB", 2):
+            obj = json.loads(l)
+            devs = obj["coll_perf"]["net"]["devices"]
+            devs.append(dict(devs[0], device_id=1))
+            lines.append(json.dumps(obj))
+        r = self.two(lb=lines)
+        self.assertNotEqual(r.drop().bucket, "NONE")
+        self.assertIn("no samples of NIC(s) [1]", " ".join(r.drop().endpoints))
+        self.assertTrue(r.rank(1).verdict.startswith("INCONCLUSIVE"), r.rank(1).verdict)
+
     def test_ack_column_from_retransmits_is_labelled(self):
-        tel = telemetry("hostA", 1, ack_to={BUSY: self.EV})
+        tel = telemetry("hostA", 1, ack_to={BUSY: self.EV}, hw_type="thor2")
         tel["devices"][0]["hw_counters"] = {"local_ack_timeout_err": -1, "to_retransmits": 0}
         self.assertIn("counts retransmits after a timeout", one(tel=tel).drop().signals[2])
+        # AINIC's to_retransmits is its ACK-timeout counter.
+        tel = telemetry("hostA", 1, ack_to={BUSY: self.EV}, hw_type="ainic")
+        tel["devices"][0]["hw_counters"] = {"to_retransmits": 0}
+        self.assertNotIn("retransmits", one(tel=tel).drop().signals[2])
         self.assertNotIn("retransmits", one(ack_to={BUSY: self.EV}).drop().signals[2])
 
     def test_missing_delivery_column_is_not_clean(self):

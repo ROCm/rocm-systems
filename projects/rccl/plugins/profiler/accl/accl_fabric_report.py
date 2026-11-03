@@ -333,16 +333,18 @@ def load_telemetry(path: str, wanted: Optional[Dict[Tuple[str, int], set]] = Non
             tel.devices[dev_id] = Device(dev_id, m.get("roce_device") or samples[0].get("roce_device", ""),
                                          m.get("hw_type", ""), float(m.get("link_gbps") or 0),
                                          SeriesMap(cols), m.get("qos") or {}, bool(m.get("rx_bytes_merged")),
-                                         _ack_from_retransmits(m.get("hw_counters")))
+                                         _ack_from_retransmits(m.get("hw_type", ""), m.get("hw_counters")))
         by_dev.clear()
         out[(tel.host, tel.pid)] = tel
     return out
 
 
-def _ack_from_retransmits(hwc) -> bool:
-    """Whether the sampled ACK-timeout column came from to_retransmits: the
-    start/exit readings show which of the two names the driver has."""
-    if not isinstance(hwc, dict):
+def _ack_from_retransmits(hw_type: str, hwc) -> bool:
+    """Whether the sampled ACK-timeout column came from Thor2's to_retransmits
+    (retransmits after a timeout): the start/exit readings show which of the
+    two names the driver has. AINIC's to_retransmits is its ACK-timeout
+    counter (tx_rdma_ack_timeout), so only Thor2 is affected."""
+    if hw_type != "thor2" or not isinstance(hwc, dict):
         return False
     own, alt = hwc.get("local_ack_timeout_err"), hwc.get("to_retransmits")
     return (own is None or own < 0) and alt is not None and alt >= 0
@@ -768,7 +770,7 @@ class GroupResult:
     gpu_send_wait_pct: float = 0.0
     gpu_recv_wait_pct: float = 0.0
     telemetry: bool = False          # this process wrote telemetry samples
-    net_named: bool = False          # accl names NICs these collectives used
+    unsampled: List[int] = field(default_factory=list)   # of those, NICs telemetry did not sample
     # RCCL completion errors in these collectives' network windows, all NICs (accl).
     cq_errors: int = 0
 
@@ -832,7 +834,6 @@ def analyze(recs: List[CollRecord], tels: Dict[Tuple[str, int], Telemetry],
             # lower bound: one completion can finish several grouped receives,
             # and only the first one's size is recorded.
             with_rx = [r for r in g if r.net]
-            gr.net_named = bool(with_rx)
             if with_rx:
                 gr.rx_per_coll_lb = sum(sum(d.get("rx_bytes", 0) for d in r.net.values()) + r.rx_before
                                         for r in with_rx) / len(with_rx)
@@ -877,6 +878,10 @@ def analyze(recs: List[CollRecord], tels: Dict[Tuple[str, int], Telemetry],
                      or (lane.prio_for(key[0], key[1], dev_id) is None and lane.source != "none"))) if not have]
                 if missing:
                     gr.inconclusive.append(f"{ns.roce}: not measured: {', '.join(missing)}")
+            if gr.telemetry:
+                gr.unsampled = sorted({d for r in g for d in r.net} - {ns.device_id for ns in gr.nics})
+                if gr.unsampled:
+                    gr.inconclusive.append(f"accl names NIC(s) {gr.unsampled} that telemetry did not sample")
             gr.verdict = _rank_verdict(gr)
             unjudged = lane.source != "none" and any(lane.prio_for(key[0], key[1], d) is None for d in used)
             if unjudged and gr.verdict.startswith("CLEAN"):
@@ -1276,8 +1281,8 @@ def diagnose_drops(gs: List[GroupResult], lane: Lane, thr: Thresholds,
     # Blind: no telemetry, or accl names NICs telemetry did not sample. A
     # process with telemetry whose records name no NIC had no network traffic.
     blind = [(_where(g), "no telemetry") for g in gs if not g.telemetry] + \
-        [(_where(g), "telemetry has no samples of the NICs accl names") for g in gs
-         if g.telemetry and not g.nics and g.net_named]
+        [(_where(g), f"telemetry has no samples of NIC(s) {g.unsampled}, which accl names") for g in gs
+         if g.unsampled]
     if expected > len(seen):
         blind.append((f"{expected - len(seen)} of {expected} ranks", "no accl records"))
 
@@ -1465,7 +1470,8 @@ def diagnose_drops(gs: List[GroupResult], lane: Lane, thr: Thresholds,
         d.bucket, d.confidence = "FABRIC_LIKELY", CONFIDENCE[base]
         d.reasons.append(f"delivery symptoms ({names}) with " +
                          ("healthy endpoints" if healthy else
-                          f"no endpoint pressure seen, but endpoint health not established ({not_ok})") +
+                          ("no receiver short of buffers or RNR seen, but endpoint health not established "
+                           f"({not_ok})")) +
                          (f"; fabric congestion seen ({_list(corr)})" if corr else ""))
     if "ACK-TIMEOUT" in definite:
         d.competing.append("a timeout also follows a lost ACK on the return path, a long delay, or an "

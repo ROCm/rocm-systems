@@ -283,9 +283,10 @@ timeouts alone stay `INCONCLUSIVE`, and `FABRIC_LIKELY` is at most low
 **Rules.** "Receiver not ready" is receive buffers or peer readiness under
 pressure; those counters are themselves drop and recovery events, and they are
 the only host cause the rules use. Pause is flow control: on a lossless
-priority it kept the paused receiver from dropping. So backpressure never
-makes a drop diagnosis or a host verdict; it only stops the endpoints from
-counting as healthy, and is listed as another explanation.
+priority it kept the paused receiver from dropping. So in the drop diagnosis
+backpressure is never a host cause; it only stops the endpoints from counting
+as healthy, and is listed as another explanation. The summary line still
+reports it as `HOST-BACKPRESSURE`, a slow receiver.
 
 | Signals in window | Endpoints | Bucket |
 |---|---|---|
@@ -332,7 +333,7 @@ traffic from a third node into one of the two hosts:
                   backpressure: unknown at rank 0 (useocpm2m-097-030 mlx5_0), rank 1 (useocpm2m-097-030 mlx5_2), rank 2 (useocpm2m-097-030 mlx5_3) and 13 more: PFC off on RCCL's priority: an overloaded receiver drops instead, and port discards are not sampled
                   NIC progress: every port moved bytes both ways inside the collectives
                   accl proxy waiting on the GPU, share of its step time (context only): send 28-52%, receive 1-5% across ranks
-    why           delivery symptoms (OUT-OF-SEQ, SEQ-NAK) with no endpoint pressure seen, but endpoint health not established (backpressure); fabric congestion seen (CONGESTION-MARKS at rank 10 (useocpm2m-097-042 mlx5_3), CONGESTION-MARKS at rank 11 (useocpm2m-097-042 mlx5_4), CONGESTION-MARKS at rank 12 (useocpm2m-097-042 mlx5_5) and 6 more)
+    why           delivery symptoms (OUT-OF-SEQ, SEQ-NAK) with no receiver short of buffers or RNR seen, but endpoint health not established (backpressure); fabric congestion seen (CONGESTION-MARKS at rank 10 (useocpm2m-097-042 mlx5_3), CONGESTION-MARKS at rank 11 (useocpm2m-097-042 mlx5_4), CONGESTION-MARKS at rank 12 (useocpm2m-097-042 mlx5_5) and 6 more)
     could also be an endpoint fault these counters do not show (port discards, PCIe, NIC firmware)
                   with PFC off on RCCL's priority, a receiver host that cannot keep up drops packets too, and those port discards are not sampled
     data quality  only 70% of the traffic at rank 2 (useocpm2m-097-030 mlx5_3) was this job's RCCL
