@@ -740,6 +740,9 @@ class VirtualGPU : public device::VirtualDevice {
                                   bool blocking = false,
                                   const std::vector<uint8_t>* flatMetadataData = nullptr) override;
 
+  template <typename AqlPacket>  // POC: runtime contract section 11
+  bool dispatchGenericAqlPacketWithInserts(AqlPacket* packet, uint16_t header, uint16_t rest,
+                                           bool blocking, bool attach_signal, void* ins);
   template <typename AqlPacket> bool dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header,
                                                               uint16_t rest, bool blocking,
                                                               bool attach_signal = false);

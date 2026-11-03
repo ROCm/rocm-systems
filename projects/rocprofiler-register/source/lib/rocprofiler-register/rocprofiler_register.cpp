@@ -275,6 +275,7 @@ enum rocp_reg_supported_library  // NOLINT(performance-enum-size)
     ROCP_REG_ROCATTACH,
     ROCP_REG_HIPFILE,
     ROCP_REG_ROCSHMEM,
+    ROCP_REG_HIP_RUNTIME_CONTRACT,  // POC: runtime-contract RC-PKT-0a
     ROCP_REG_LAST,
 };
 
@@ -353,6 +354,11 @@ ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ROCATTACH,
                                "rocattach",
                                "rocprofiler_register_import_attach",
                                "librocprofiler-sdk-attach.so.[0-9]($|\\.[0-9\\.]+)")
+
+ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_HIP_RUNTIME_CONTRACT,  // POC: RC-PKT-0a
+                               "hip_runtime_contract",
+                               "rocprofiler_register_import_hip_runtime_contract",
+                               "libamdhip64.so.[6-9]($|\\.[0-9\\.]+)")
 
 ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_HIPFILE,
                                "hipFile",

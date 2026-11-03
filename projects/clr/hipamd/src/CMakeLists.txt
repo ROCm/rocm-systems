@@ -398,3 +398,19 @@ install(
     DESTINATION
     ${CONFIG_LANG_PACKAGE_INSTALL_DIR}/
     )
+
+# POC: TraceLogging (LTTng-UST) probes
+target_sources(amdhip64 PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/tltrace/hip_tltrace.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/tltrace/hip_rtcontract.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/tltrace/tl/src/LttngHelpers.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/tltrace/tl/src/LttngActivityHelpers.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/tltrace/tl/src/LttngNetHelpers.c)
+target_include_directories(amdhip64 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tltrace/tl/include)
+set_source_files_properties(
+  ${CMAKE_CURRENT_SOURCE_DIR}/tltrace/hip_tltrace.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/tltrace/tl/src/LttngHelpers.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/tltrace/tl/src/LttngActivityHelpers.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/tltrace/tl/src/LttngNetHelpers.c
+  PROPERTIES COMPILE_OPTIONS "-Wno-error")
+target_link_libraries(amdhip64 PRIVATE lttng-ust lttng-ust-tracepoint lttng-ust-common dl)

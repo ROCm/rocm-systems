@@ -57,6 +57,7 @@
 #include <sstream>
 #include <thread>
 #include <vector>
+#include "../../../hipamd/src/tltrace/hip_rtcontract.hpp"  // POC
 
 #define OPENCL_VERSION_STR XSTR(OPENCL_MAJOR) "." XSTR(OPENCL_MINOR)
 #define OPENCL_C_VERSION_STR XSTR(OPENCL_C_MAJOR) "." XSTR(OPENCL_C_MINOR)
@@ -3259,7 +3260,10 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy 
     bool active_wait =
         !((policy == amd::SyncPolicy::Blocking) & kHipEventBlockingSync) && ActiveWait();
     bool yield = (policy == amd::SyncPolicy::Yield);
-    return WaitForSignal(reinterpret_cast<ProfilingSignal*>(hw_event)->signal_, active_wait, yield);
+    const bool ok =
+        WaitForSignal(reinterpret_cast<ProfilingSignal*>(hw_event)->signal_, active_wait, yield);
+    rtc::Drain();  // POC: RC-PKT-17 (event sync)
+    return ok;
   }
 
   auto signal = reinterpret_cast<ProfilingSignal*>(hw_event)->signal_;

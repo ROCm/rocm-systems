@@ -941,6 +941,10 @@ hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* locati
                                    hipMemAllocationType type);
 }  // namespace hip
 
+namespace hip_tltrace {
+void InstallApiWrappers(HipDispatchTable* t);
+}
+
 namespace hip {
 namespace {
 void UpdateDispatchTable(HipCompilerDispatchTable* ptrCompilerDispatchTable) {
@@ -1525,6 +1529,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipExecutionCtxWaitEvent_fn = hip::hipExecutionCtxWaitEvent;
   ptrDispatchTable->hipMemGetDefaultMemPool_fn = hip::hipMemGetDefaultMemPool;
   ptrDispatchTable->hipInitDevice_fn = hip::hipInitDevice;
+  hip_tltrace::InstallApiWrappers(ptrDispatchTable);  // POC
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0

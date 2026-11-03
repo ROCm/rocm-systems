@@ -40,6 +40,28 @@
 #include <cstdarg>
 #include <mutex>
 
+namespace hip_tltrace {  // POC
+bool DispatchEnabled();
+void KernelDispatch(uint64_t queue_id, uint64_t ring_va, uint32_t doorbell_slot,
+                    uint64_t packet_index, uint64_t kernel_object, const char* kernel_name,
+                    const uint32_t grid[3], const uint32_t workgroup[3]);
+}
+static thread_local uint64_t t_tl_packet_index = 0;           // POC
+static thread_local hsa_queue_t* t_tl_queue = nullptr;        // POC
+#include "../../../hipamd/src/tltrace/hip_rtcontract.hpp"  // POC: runtime contract section 11
+namespace {
+struct PocInsert {                   // POC: submitKernelInternal -> multi-slot write
+  const rocm_dispatch_packets_t* pk;  // selector's packets (may be 0 + 0)
+  hsa_signal_t done_sig;              // runtime-owned signal for the last slot (RC-PKT-15)
+  hsa_signal_t dep;                   // serialization wait (RC-SER), handle 0 if none
+  bool trailing;                      // no post packets: a trailing barrier carries done_sig
+};
+thread_local PocInsert* t_poc_insert = nullptr;
+constexpr uint16_t kPocInvalidHeader = HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE;
+constexpr uint32_t kPocMaxSlots = 32;
+}  // namespace
+
+
 
 /**
  * HSA image object size in bytes (see HSA spec)
@@ -981,7 +1003,9 @@ bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
 // ================================================================================================
 bool VirtualGPU::HwQueueTracker::WaitCurrent() {
   ProfilingSignal* signal = signal_list_[current_id_];
-  return CpuWaitForSignal(signal);
+  const bool ok = CpuWaitForSignal(signal);
+  rtc::Drain();  // POC: RC-PKT-17
+  return ok;
 }
 
 // ================================================================================================
@@ -1531,6 +1555,8 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   const bool header_requested_barrier = (header & kBarrierBit) != 0;
   AqlSlotReservation reservation = ReserveAqlSlots(1);
   const uint64_t index = reservation.start_slot;
+  t_tl_packet_index = index;  // POC
+  t_tl_queue = gpu_queue_;   // POC
   adjustHeader(header);
   if (header_requested_barrier) {
     OptimizeStreamOrderingBarrier(header, reservation);
@@ -1675,6 +1701,113 @@ void VirtualGPU::dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet) {
 }
 
 // ================================================================================================
+// POC: one reservation for [serialization barrier] + pre + kernel + post [+ trailing barrier].
+// Bodies are written with INVALID headers (kernel first, so the metadata prepared for it is used by
+// its own slot), join_key is written, then headers are published last-to-first and the doorbell is
+// rung once.
+template <typename AqlPacket>
+bool VirtualGPU::dispatchGenericAqlPacketWithInserts(AqlPacket* packet, uint16_t header,
+                                                     uint16_t rest, bool blocking,
+                                                     bool attach_signal, void* insp) {
+  auto* ins = static_cast<PocInsert*>(insp);
+  const rocm_dispatch_packets_t& pk = *ins->pk;
+  const uint32_t queueMask = gpu_queue_->size - 1;
+  const uint32_t nDep = ins->dep.handle != 0 ? 1 : 0;
+  const uint32_t nPre = pk.pre_count;
+  const uint32_t nPost = pk.post_count;
+  const uint32_t nTrail = ins->trailing ? 1 : 0;
+  const uint32_t n = nDep + nPre + 1 + nPost + nTrail;
+  constexpr uint16_t kSys = (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+  constexpr uint16_t kRelMask = 3 << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE;
+  constexpr uint16_t kRelSys = HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE;
+  constexpr uint16_t kBarrierAnd =
+      (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) | kBarrierBit | kSys;
+
+  AqlSlotReservation reservation = ReserveAqlSlots(n);  // RC-PKT-3: one operation
+  const uint64_t first = reservation.start_slot;
+  const uint64_t kidx = first + nDep + nPre;
+  adjustHeader(header);
+  header |= kBarrierBit;  // RC-PKT-6
+
+  bool attachSignal = timestamp_ != nullptr || attach_signal;
+  packet->completion_signal = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, attachSignal);
+  if (blocking && packet->completion_signal.handle == 0) {
+    packet->completion_signal = Barriers().ActiveSignal();
+  }
+  WaitForQueueSlot(first + n - 1, queueMask);
+  TrackQueueProgress(*packet, kidx);
+  t_tl_packet_index = kidx;  // tracepoint (kernel_dispatch)
+  t_tl_queue = gpu_queue_;
+
+  uint16_t hdr[kPocMaxSlots];
+  uint16_t rst[kPocMaxSlots];
+  auto* ring = reinterpret_cast<uint8_t*>(gpu_queue_->base_address);
+  auto slotPtr = [&](uint64_t idx) { return ring + (idx & queueMask) * 64; };
+  auto writeBody = [&](auto* src, uint16_t finalHeader, uint16_t finalRest, uint64_t idx) {
+    using P = std::remove_pointer_t<decltype(src)>;
+    P* dst = reinterpret_cast<P*>(slotPtr(idx));
+    P tmp = *src;
+    metadata_preloader_.SetMetadata(&tmp, finalHeader, idx & queueMask, use_movdir64b_,
+                                    device_mem_ring_buf_);  // RC-PKT-8
+    tmp.header = kPocInvalidHeader;  // RC-PKT-5: INVALID until published
+    if (use_movdir64b_) {
+      amd::nontemporalStoreFence();
+      amd::nontemporalWriteAQL(dst, &tmp, kPocInvalidHeader, finalRest);
+    } else {
+      amd::nontemporalCopyAQL(dst, &tmp);
+    }
+    hdr[idx - first] = finalHeader;
+    rst[idx - first] = finalRest;
+  };
+
+  writeBody(packet, header, rest, kidx);  // kernel first (its prepared metadata)
+  if (nDep != 0) {
+    hsa_barrier_and_packet_t b{};
+    b.dep_signal[0] = ins->dep;
+    writeBody(&b, kBarrierAnd, 0, first);
+  }
+  const auto* pre = static_cast<const hsa_ext_amd_aql_pm4_packet_t*>(pk.pre);
+  for (uint32_t i = 0; i < nPre; ++i) {
+    hsa_ext_amd_aql_pm4_packet_t p = pre[i];
+    p.completion_signal = hsa_signal_t{0};
+    writeBody(&p, p.header, p.pm4_command[0], first + nDep + i);  // header as given
+  }
+  const auto* post = static_cast<const hsa_ext_amd_aql_pm4_packet_t*>(pk.post);
+  for (uint32_t i = 0; i < nPost; ++i) {
+    hsa_ext_amd_aql_pm4_packet_t p = post[i];
+    uint16_t h = static_cast<uint16_t>(p.header | kBarrierBit);
+    p.completion_signal = hsa_signal_t{0};
+    if (i + 1 == nPost && nTrail == 0) {  // RC-PKT-15: runtime signal on the last slot
+      p.completion_signal = ins->done_sig;
+      h = static_cast<uint16_t>((h & ~kRelMask) | kRelSys);
+    }
+    writeBody(&p, h, p.pm4_command[0], kidx + 1 + i);
+  }
+  if (nTrail != 0) {
+    hsa_barrier_and_packet_t b{};
+    b.completion_signal = ins->done_sig;
+    writeBody(&b, kBarrierAnd, 0, kidx + 1 + nPost);
+  }
+  amd::nontemporalStoreFence();
+  if (pk.join_key != nullptr && (nPre + nPost) != 0) *pk.join_key = kidx;  // RC-PKT-4
+
+  for (uint32_t i = 0; i < n; ++i) {
+    if (hdr[i] & kBarrierBit) RecordAqlPacketHeader(reservation, i, hdr[i]);
+  }
+  for (uint32_t i = n; i-- > 0;) {  // RC-PKT-7: last to first
+    packet_store_release(reinterpret_cast<uint32_t*>(slotPtr(first + i)), hdr[i], rst[i]);
+  }
+  CompleteAqlSubmission(reservation);
+  ringQueueDoorbell(first + n - 1);  // once
+  skippedDispatches_ = 0;
+  hasPendingDispatch_ = true;
+  if (blocking && !Barriers().WaitCurrent()) {
+    return false;
+  }
+  return true;
+}
+
 template <typename AqlPacket>
 bool VirtualGPU::dispatchAqlPacket(AqlPacket* packet, uint16_t header,
                                    uint16_t rest, bool blocking, bool attach_signal) {
@@ -1700,6 +1833,11 @@ bool VirtualGPU::dispatchAqlPacket(AqlPacket* packet, uint16_t header,
     return true;
   } else {
     dispatchBlockingWait(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet));
+    if (t_poc_insert != nullptr) {  // POC: runtime-contract section 11
+      void* ins = t_poc_insert;
+      t_poc_insert = nullptr;
+      return dispatchGenericAqlPacketWithInserts(packet, header, rest, blocking, attach_signal, ins);
+    }
     return dispatchGenericAqlPacket(packet, header, rest, blocking, attach_signal);
   }
 }
@@ -2449,6 +2587,7 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
 
 // ================================================================================================
 VirtualGPU::~VirtualGPU() {
+  rtc::DropQueue(this);  // POC: RC-PKT-17
   // Release SDMA engine assignment for this VirtualGPU
   ReleaseSdmaEngines();
 
@@ -5117,13 +5256,78 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
                                         gpuKernel.MetadataPreloadLength(),
                                         gpuKernel.MetadataPreloadOffset());
 
+    // POC: runtime-contract section 11 hook (RC-PKT-0..16, RC-SER)
+    rocm_dispatch_packets_t pocPk{};
+    PocInsert pocIns{};
+    bool pocUse = false;
+    if (const rocm_runtime_hooks_t* pocHooks = rtc::Hooks()) {
+      rtc::Drain();
+      const uint32_t gpuId = rtc::GpuId(roc_device_.getBackendDevice());
+      rocm_dispatch_info_t info{};
+      info.version = ROCM_RUNTIME_CONTRACT_VERSION;
+      info.size = sizeof(info);
+      info.gpu_id = gpuId;
+      info.flags = gpuKernel.name().rfind("__amd_rocclr", 0) == 0 ? ROCM_DISPATCH_INTERNAL : 0;
+      info.ring_va = reinterpret_cast<uint64_t>(gpu_queue_->base_address);
+      info.kernel_object = dispatchPacket.kernel_object;
+      info.kernel_name = gpuKernel.name().c_str();
+      for (size_t d = 0; d < 3; ++d) {
+        info.grid[d] = d < sizes.dimensions() ? static_cast<uint32_t>(sizes.global()[d]) : 1;
+        info.workgroup[d] = d < sizes.dimensions() ? static_cast<uint32_t>(sizes.local()[d]) : 1;
+      }
+      info.private_segment_size = dispatchPacket.private_segment_size;
+      info.group_segment_size = dispatchPacket.group_segment_size;
+      info.kernarg = reinterpret_cast<const void*>(dispatchPacket.kernarg_address);
+      pocPk.version = ROCM_RUNTIME_CONTRACT_VERSION;
+      pocPk.size = sizeof(pocPk);
+      rtc::EmitFn(pocHooks)(&info, &pocPk);  // before reserving slots (RC-PKT-1)
+      const uint32_t nIns = pocPk.pre_count + pocPk.post_count;
+      const bool badPtr = (pocPk.pre_count != 0 && pocPk.pre == nullptr) ||
+                          (pocPk.post_count != 0 && pocPk.post == nullptr);
+      const bool wantSer = (pocPk.flags & ROCM_PACKETS_SERIALIZE) != 0;
+      const bool serActive = wantSer || rtc::SerializeActive(gpuId);
+      if (badPtr || nIns + 3 > kPocMaxSlots || nIns + 3 > gpu_queue_->size / 2) {
+        rtc::ReportNow(pocPk.cookie, ROCM_DISPATCH_DROPPED);  // RC-PKT-14
+      } else if (nIns > 0 || serActive || pocPk.cookie != 0) {
+        if (rtc::AcquireSignal(&pocIns.done_sig)) {
+          pocIns.pk = &pocPk;
+          pocIns.dep = serActive ? rtc::TakeLastSignal(gpuId) : hsa_signal_t{0};
+          pocIns.trailing = pocPk.post_count == 0;
+          pocUse = true;
+          rtc::Track(this, gpuId, pocIns.done_sig, pocPk.cookie, wantSer, pocIns.dep);
+          if (serActive) rtc::SetLastSignal(gpuId, pocIns.done_sig);
+          aqlHeaderWithOrder |= (1 << HSA_PACKET_HEADER_BARRIER);  // RC-PKT-6
+        } else {
+          rtc::ReportNow(pocPk.cookie, ROCM_DISPATCH_DROPPED);  // no runtime signal left
+        }
+      }
+    }
+    if (pocUse) t_poc_insert = &pocIns;
     bool dispatched = extDispatchPacket
         ? dispatchAqlPacket(&dispatchPacketUnion.extKernelDispatch, aqlHeaderWithOrder, rest,
                             GPU_FLUSH_ON_EXECUTION, attach_signal)
         : dispatchAqlPacket(&dispatchPacket, aqlHeaderWithOrder, rest,
                             GPU_FLUSH_ON_EXECUTION, attach_signal);
+    t_poc_insert = nullptr;
     if (!dispatched) {
       return false;
+    }
+    if (hip_tltrace::DispatchEnabled() && t_tl_queue != nullptr) {  // POC
+      const auto* sig = reinterpret_cast<const amd_signal_t*>(t_tl_queue->doorbell_signal.handle);
+      uint64_t hw = 0;
+      if (sig != nullptr && (sig->kind == AMD_SIGNAL_KIND_DOORBELL ||
+                             sig->kind == AMD_SIGNAL_KIND_LEGACY_DOORBELL)) {
+        hw = reinterpret_cast<uint64_t>(sig->hardware_doorbell_ptr);
+      }
+      uint32_t grid[3] = {1, 1, 1};  // NDRange: the ext packet path leaves dispatchPacket stale
+      uint32_t wg[3] = {1, 1, 1};
+      for (size_t d = 0; d < sizes.dimensions() && d < 3; ++d) {
+        grid[d] = static_cast<uint32_t>(sizes.global()[d]);
+        wg[d] = static_cast<uint32_t>(sizes.local()[d]);
+      }
+      hip_tltrace::KernelDispatch(t_tl_queue->id, reinterpret_cast<uint64_t>(t_tl_queue->base_address),
+                                  static_cast<uint32_t>((hw & 0xFFF) >> 2), t_tl_packet_index,
+                                  dispatchPacket.kernel_object, gpuKernel.name().c_str(), grid, wg);
     }
 
   // Output printf buffer
