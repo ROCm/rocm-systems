@@ -60,6 +60,19 @@ static inline const char* benchResolvedCopyAlgorithm() {
   return copyAlgorithm != nullptr ? copyAlgorithm : "PACK";
 }
 
+// --algorithm only overrides NCCL_RESHARD_ALGORITHM when given; unset means the library default (AUTO).
+static inline void benchConfigureAlgorithm(const char* algorithm) {
+  if (algorithm != nullptr) {
+    benchSetEnv("NCCL_RESHARD_ALGORITHM", algorithm);
+  }
+}
+
+static inline const char* benchResolvedAlgorithm() {
+  // NOLINTNEXTLINE(concurrency-mt-unsafe) — benchmark configuration is resolved before worker threads start.
+  const char* algorithm = getenv("NCCL_RESHARD_ALGORITHM");
+  return algorithm != nullptr ? algorithm : "AUTO";
+}
+
 static inline bool benchArgIs(const char* value, const char* expected) {
   return value != nullptr && strcmp(value, expected) == 0;
 }
