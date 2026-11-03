@@ -109,8 +109,6 @@ public:
     rocjitsu::test::initialize_compute_unit(cu_, "shared_wait_cu", config, &memory_, &l2_);
     if (!cu_)
       return;
-    if (!cu_)
-      return;
     PluginSinkConfig sinks;
     sink_ = &sinks.emplace<StringSink>();
     plugins_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));

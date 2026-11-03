@@ -444,6 +444,7 @@ TEST(Gfx12Dot, FloatingDotDppPermutesSnapshotAndPreservesInactiveDestinations) {
   }};
   for (uint32_t width : {32u, 64u}) {
     DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4, width);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool scalar : {false, true}) {
       util::set_force_scalar_for_testing(scalar);
       for (const auto &c : cases) {
@@ -498,6 +499,7 @@ TEST(Gfx12Dot, FloatingDotDppPermutesSnapshotAndPreservesInactiveDestinations) {
 TEST(Gfx12Dot, DecodedDot4MatchesNativeFormatAndRoundingCases) {
   HostState restore;
   DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr std::array<uint16_t, 4> ops{rdna4::kVDot4F32Fp8Fp8Vop3p, rdna4::kVDot4F32Fp8Bf8Vop3p,
                                         rdna4::kVDot4F32Bf8Fp8Vop3p, rdna4::kVDot4F32Bf8Bf8Vop3p};
   for (int round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
@@ -564,6 +566,7 @@ TEST(Gfx12Dot4, AccumulatorModifiersApplyAbsBeforeNegInPlainAndDppForms) {
   HostState restore;
   for (uint32_t width : {32u, 64u}) {
     DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4, width);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool scalar : {false, true}) {
       util::set_force_scalar_for_testing(scalar);
       for (const auto &family : kFamilies) {
@@ -626,6 +629,7 @@ TEST(Gfx12Dot4, DecodedHardwareArithmeticIncludesDppAndOverlappingRegisters) {
   HostState restore;
   for (uint32_t width : {32u, 64u}) {
     DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4, width);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool scalar : {false, true}) {
       util::set_force_scalar_for_testing(scalar);
       for (const auto &family : kFamilies) {

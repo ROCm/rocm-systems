@@ -278,7 +278,9 @@ TEST(VskipAsyncTest, ExtendedMfmaSkipsBeforeAsyncSubmission) {
   config.sgprs_per_wf = 104;
   config.vgprs_per_wf = 512;
   config.async_resources = std::make_shared<matrix_coexecution::ExecutionResources>(1);
-  auto cu = ComputeUnitCore::create("vskip_async_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "vskip_async_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, kProgram, 104, 256);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(~uint64_t{0});
@@ -314,7 +316,9 @@ TEST(VskipTargetTest, ModeBitDoesNotSuppressRdnaOrCdna5) {
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
-    auto cu = ComputeUnitCore::create("vskip_other_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "vskip_other_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, kProgram, 106, 256);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(~uint64_t{0});

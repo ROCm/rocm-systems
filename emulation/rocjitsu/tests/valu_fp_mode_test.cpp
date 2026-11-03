@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -5384,8 +5385,9 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
   config.lds_size_kb = 64;
-  std::unique_ptr<amdgpu::ComputeUnitCore> cu =
-      amdgpu::ComputeUnitCore::create("valu_fp_mode", config, &memory, &cache);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "valu_fp_mode", config, &memory, &cache));
   std::unique_ptr<Decoder> decoder = Decoder::create(test.arch);
   amdgpu::Wavefront *wave = cu->dispatch_wf(0, 0, 106, 256);
   ASSERT_NE(wave, nullptr);
@@ -6400,8 +6402,9 @@ TEST_P(ValuCompareInputFlushTest, HonorsModeWithSimdEnabledAndForcedScalar) {
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
   config.lds_size_kb = 64;
-  std::unique_ptr<amdgpu::ComputeUnitCore> cu =
-      amdgpu::ComputeUnitCore::create("valu_compare", config, &memory, &cache);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "valu_compare", config, &memory, &cache));
   std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   amdgpu::Wavefront *wave = cu->dispatch_wf(0, 0, 106, 256);
   ASSERT_NE(wave, nullptr);
@@ -6523,8 +6526,9 @@ TEST_P(SaluMinmaxTest, MatchesGfx1201) {
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
   config.lds_size_kb = 64;
-  std::unique_ptr<amdgpu::ComputeUnitCore> cu =
-      amdgpu::ComputeUnitCore::create("salu_minmax", config, &memory, &cache);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "salu_minmax", config, &memory, &cache));
   std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   amdgpu::Wavefront *wave = cu->dispatch_wf(0, 0, 106, 256);
   ASSERT_NE(wave, nullptr);

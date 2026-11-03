@@ -46,6 +46,7 @@
 #include <cfenv>
 #include <cstddef>
 #include <cstdint>
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 #include <memory>
 #include <stdexcept>
@@ -387,23 +388,28 @@ TEST(AtomicSemanticsAndDecode, PackedAtomicsAcrossOlderTargets) {
 namespace {
 class AtomicPolicyExecutionTest : public testing::TestWithParam<rj_code_arch_t> {
 protected:
-  void SetUp() override {
+  void SetUp() override { initialize(GetParam(), 1); }
+
+  void initialize(rj_code_arch_t arch, uint32_t num_wf_slots) {
     amdgpu::ComputeUnitCore::Config config{};
-    config.arch = GetParam();
-    config.num_wf_slots = 1;
+    config.arch = arch;
+    config.num_wf_slots = num_wf_slots;
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
     cache_.set_backing_memory(&memory_);
     ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(compute_unit_, "atomic_policy",
                                                                     config, &memory_, &cache_));
-    decoder_ = Decoder::create(GetParam());
+    decoder_ = Decoder::create(arch);
     wave_ = compute_unit_->dispatch_wf(0, 0, 106, 256);
     wave_->set_exec(1);
     base_ = wave_->vgpr_alloc().base;
   }
 
-  void TearDown() override { wave_->halt(); }
+  void TearDown() override {
+    if (wave_)
+      wave_->halt();
+  }
 
   bool modern_policy() const {
     return GetParam() == ROCJITSU_CODE_ARCH_CDNA5 || GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
@@ -666,6 +672,32 @@ protected:
   amdgpu::Wavefront *wave_ = nullptr;
   uint32_t base_ = 0;
 };
+
+TEST(AtomicPolicyExecutionTestSetup, RejectedComputeUnitAllowsTearDown) {
+  class RejectedFixture : public AtomicPolicyExecutionTest {
+  public:
+    void TestBody() override {}
+    void SetUp() override { initialize(ROCJITSU_CODE_ARCH_CDNA3, 33); }
+    using AtomicPolicyExecutionTest::TearDown;
+
+    bool setup_stopped() const { return !compute_unit_ && !wave_; }
+  };
+
+  RejectedFixture fixture;
+  ::testing::TestPartResultArray failures;
+  {
+    ::testing::ScopedFakeTestPartResultReporter reporter(
+        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
+    fixture.SetUp();
+  }
+  EXPECT_TRUE(fixture.setup_stopped());
+  fixture.TearDown();
+  ASSERT_GE(failures.size(), 1);
+  EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
+  EXPECT_NE(std::string(failures.GetTestPartResult(0).message())
+                .find("num_wf_slots exceeds the ISA maximum of 32"),
+            std::string::npos);
+}
 
 TEST_P(AtomicPolicyExecutionTest, DirectLdsLoadConvertsAndBroadcastsToActiveQuads) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;

@@ -382,7 +382,9 @@ TEST_F(SimdCoverage, DecodedPackedFmacPreservesDirectedZeroSigns) {
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    auto target = ComputeUnitCore::create("packed_fmac_zero", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> target;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(target, "packed_fmac_zero", config, &memory, &l2));
     auto *wave = target->dispatch_wf(0, 0, 106, 256, 32);
     ASSERT_NE(wave, nullptr);
     for (uint32_t rounding = 0; rounding < 4; ++rounding) {
@@ -510,7 +512,9 @@ TEST_F(SimdCoverage, DecodedTargetPathsMatchScalar) {
         config.sgprs_per_wf = 106;
         config.vgprs_per_wf = 256;
         config.lds_size_kb = 64;
-        auto target = ComputeUnitCore::create("simd_decoded_target", config, &memory, &l2);
+        std::unique_ptr<ComputeUnitCore> target;
+        ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+            target, "simd_decoded_target", config, &memory, &l2));
         const uint32_t wave_size = test.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32;
         auto *wave = target->dispatch_wf(0, 0, 106, 256, wave_size);
         ASSERT_NE(wave, nullptr);
@@ -627,7 +631,9 @@ TEST_F(SimdCoverage, DISABLED_InstructionTimings) {
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    auto target = ComputeUnitCore::create("simd_benchmark_target", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> target;
+    ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(target, "simd_benchmark_target",
+                                                                    config, &memory, &l2));
     uint32_t wave_size = test.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32;
     auto *wave = target->dispatch_wf(0, 0, 106, 256, wave_size);
     ASSERT_NE(wave, nullptr);

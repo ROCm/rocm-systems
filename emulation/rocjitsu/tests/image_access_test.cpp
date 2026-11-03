@@ -699,7 +699,8 @@ protected:
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 32;
     cfg.vgprs_per_wf = 32;
-    cu_ = amdgpu::ComputeUnitCore::create("rdna_image_cu", cfg, &memory_, &l2_);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu_, "rdna_image_cu", cfg, &memory_, &l2_));
     wf_ = cu_->dispatch_wf(0, 0, 32, 32);
     ASSERT_NE(wf_, nullptr);
     wf_->set_exec(5); // Lane 1 must not store or receive a load result.
@@ -1350,7 +1351,9 @@ TEST(ImageAccessTest, UnsupportedArchitectureIsRejected) {
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 32;
   cfg.vgprs_per_wf = 32;
-  auto cu = amdgpu::ComputeUnitCore::create("unsupported_image_cu", cfg, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "unsupported_image_cu", cfg, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0, 32, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1);

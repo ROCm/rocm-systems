@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "gws_test_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
@@ -273,7 +274,8 @@ INSTANTIATE_TEST_SUITE_P(GwsArchitectures, DsGwsTest,
 // GFX11) against the GDS completion class.
 TEST_P(DsGwsTest, StructuralModelExecutesAndAccounts) {
   auto cfg = cu_config(1);
-  auto cu = amdgpu::ComputeUnitCore::create("ds_gws", cfg, &mem, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(cu, "ds_gws", cfg, &mem, &l2));
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
   ASSERT_NE(wf, nullptr);
   // Decode and memory-pipeline accounting are EXEC-independent on every target;
@@ -341,7 +343,9 @@ TEST_P(DsGwsTest, StructuralModelExecutesAndAccounts) {
 // invalid-instruction-encoding execution failure instead.
 TEST_P(DsGwsTest, RejectsExecutionWithoutGdsBit) {
   auto cfg = cu_config(1);
-  auto cu = amdgpu::ComputeUnitCore::create("ds_gws_nogds", cfg, &mem, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "ds_gws_nogds", cfg, &mem, &l2));
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(0x1);

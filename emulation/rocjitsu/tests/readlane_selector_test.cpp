@@ -193,7 +193,9 @@ TEST(CdnaReadlaneTest, RestoresBothVccHalvesFromInactiveSpillLanes) {
     cfg.sgprs_per_wf = 102;
     cfg.vgprs_per_wf = 128;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("readlane", cfg, &mem, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "readlane", cfg, &mem, &l2));
     auto decoder = Decoder::create(arch);
     auto *wf = cu->dispatch_wf(0, 0, 102, 128);
     ASSERT_NE(wf, nullptr);

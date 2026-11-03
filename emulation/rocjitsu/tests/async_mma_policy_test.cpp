@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
@@ -157,7 +158,9 @@ TEST(AsyncMmaPolicyTest, ScaledWmmaOffloadsVectorAndInlineScalesButKeepsScalarSc
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
   config.async_resources = std::make_shared<mc::ExecutionResources>(1);
-  auto cu = amdgpu::ComputeUnitCore::create("scaled_wmma_cu", config, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "scaled_wmma_cu", config, &memory, &l2));
   auto *wave = cu->dispatch_wf(0, 0, 106, 256);
   ASSERT_NE(wave, nullptr);
   wave->set_exec(0xffffffff);
@@ -186,7 +189,9 @@ TEST(AsyncMmaPolicyTest, UnsupportedAsyncWmmaHaltsWithoutHostException) {
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
   config.async_resources = std::make_shared<mc::ExecutionResources>(1);
-  auto cu = amdgpu::ComputeUnitCore::create("unsupported_async_wmma_cu", config, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(cu, "unsupported_async_wmma_cu",
+                                                                  config, &memory, &l2));
   const auto &production_backend = cdna5::execution_backend();
   std::vector<Instruction::ExecuteFn> callbacks(production_backend.instruction_callbacks,
                                                 production_backend.instruction_callbacks +
@@ -247,7 +252,9 @@ TEST(AsyncMmaPolicyTest, TerminalMemoryFaultDrainsPendingMmaBeforePublishingFail
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
   config.async_resources = std::make_shared<mc::ExecutionResources>(1);
-  auto cu = amdgpu::ComputeUnitCore::create("fault_drain_cu", config, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "fault_drain_cu", config, &memory, &l2));
   const auto &production_backend = cdna5::execution_backend();
   std::vector<Instruction::ExecuteFn> callbacks(production_backend.instruction_callbacks,
                                                 production_backend.instruction_callbacks +
@@ -429,7 +436,9 @@ TEST(AsyncMmaPolicyTest, Dpp16InstructionsDrainAndStopAnAsyncWindow) {
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
   config.async_resources = std::make_shared<mc::ExecutionResources>(1);
-  auto cu = amdgpu::ComputeUnitCore::create("dpp_boundary_cu", config, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "dpp_boundary_cu", config, &memory, &l2));
   auto *wave = cu->dispatch_wf(0, 0, 106, 256);
   ASSERT_NE(wave, nullptr);
   wave->set_exec(0xffffffff);
@@ -503,7 +512,9 @@ TEST(AsyncMmaPolicyTest, IndependentPlainAndDpp8InstructionsKeepTheAsyncWindowOp
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
   config.async_resources = std::make_shared<mc::ExecutionResources>(1);
-  auto cu = amdgpu::ComputeUnitCore::create("dpp_control_cu", config, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "dpp_control_cu", config, &memory, &l2));
   auto *wave = cu->dispatch_wf(0, 0, 106, 256);
   ASSERT_NE(wave, nullptr);
   wave->set_exec(0xffffffff);
@@ -546,7 +557,9 @@ TEST(AsyncMmaPolicyTest, WaitIdleDrainsBlockedMmaBeforeReturningToIssue) {
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 128;
   config.async_resources = std::make_shared<mc::ExecutionResources>(1);
-  auto cu = amdgpu::ComputeUnitCore::create("wait_idle_cu", config, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "wait_idle_cu", config, &memory, &l2));
   auto *wave = cu->dispatch_wf(0, 0, 106, 128);
   ASSERT_NE(wave, nullptr);
   wave->set_exec(0xffffffff);
