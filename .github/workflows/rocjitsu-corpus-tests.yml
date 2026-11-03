@@ -494,14 +494,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Test HIP file limits from the corpus
-        # Run after a successful build even if the ConSan gate fails.
-        if: ${{ !cancelled() && steps.build_rocjitsu.outcome == 'success' }}
-        shell: bash
-        run: |
-          ROCM_PATH="$(rocm-sdk path --root)" \
-            bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-file-limit-tests.sh"
-
       - name: Test Python API
         if: matrix.name == 'release'
         run: |
@@ -872,6 +864,16 @@ jobs:
           path: ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts/gfx1250-dbt
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Test HIP file limits from the corpus
+        # Requires the combined build and CTest step to pass, so ConSan test
+        # failures inside that step still skip this. Failures in the
+        # independent test steps between the build and here do not.
+        if: ${{ !cancelled() && steps.build_rocjitsu.outcome == 'success' }}
+        shell: bash
+        run: |
+          ROCM_PATH="$(rocm-sdk path --root)" \
+            bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-file-limit-tests.sh"
 
       # Finish existing HIP/DBT coverage before starting Vulkan-only setup.
       - name: Install Mesa RADV for Vulkan compute CTS
