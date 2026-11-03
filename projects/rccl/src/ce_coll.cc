@@ -116,10 +116,19 @@ static constexpr size_t HIER_COLL_CHUNK_ALIGN = 8 * 1024;
 static constexpr size_t HIER_COLL_AG_RING_HALF_AWARE_THRESHOLD = 128 * 1024 * 1024;
 static constexpr size_t HIER_COLL_AG_RING_MIN_HALF_AWARE_CHUNK = 8 * 1024 * 1024;
 
-// Ring is opt-in in this MR: a positive value enables it, while zero or a
-// negative value keeps the Direct path. The stacked tuning MR gives -1 its
-// automatic-selection semantics.
+// A positive value forces the Ring path and 0 forces Direct. -1 selects
+// automatically: Direct on two nodes, where the ring has a single remote peer
+// and never beats Direct, and otherwise Ring once each rank's contribution
+// reaches HIER_CE_COLL_AG_RAIL_RING_THRESHOLD. Direct posts every remote put at
+// once, so it has the lower latency, while Ring keeps each NIC on one peer and
+// wins once the transfer is bandwidth-bound. Must be set identically on all ranks.
 NCCL_PARAM(HierCeCollAgRailRingEnable, "HIER_CE_COLL_AG_RAIL_RING_ENABLE", -1);
+
+// Per-rank bytes at and above which automatic selection uses Ring on three or
+// more nodes. -1 selects the built-in default. On MI350X with eight GPUs per
+// node, the Ring/Direct crossover sits at 2 MiB per rank on 4, 8 and 16 nodes.
+NCCL_PARAM(HierCeCollAgRailRingThreshold, "HIER_CE_COLL_AG_RAIL_RING_THRESHOLD", -1);
+static constexpr int64_t HIER_COLL_AG_RAIL_RING_THRESHOLD_DEFAULT = 2 * 1024 * 1024;
 
 // Minimum per-peer transfer size (bytes) for the hierarchical CE collectives to
 // distribute their inter-node rail traffic across multiple internal RMA
@@ -2589,9 +2598,18 @@ fail:
   goto exit;
 }
 
+static bool ncclHierCeAllGatherUseRing(int nNodes, size_t perRankBytes) {
+  int64_t enable = ncclParamHierCeCollAgRailRingEnable();
+  if (enable > 0) return true;
+  if (enable == 0 || nNodes <= 2) return false;
+  int64_t threshold = ncclParamHierCeCollAgRailRingThreshold();
+  if (threshold < 0) threshold = HIER_COLL_AG_RAIL_RING_THRESHOLD_DEFAULT;
+  return perRankBytes >= (size_t)threshold;
+}
+
 ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream) {
   size_t perRankBytes = plan->ceCollArgs->nElts * plan->ceCollArgs->eltSize;
-  bool useRing = ncclParamHierCeCollAgRailRingEnable() > 0;
+  bool useRing = ncclHierCeAllGatherUseRing(comm->nNodes, perRankBytes);
   const char* railAlgo = useRing ? "Ring" : "Direct";
   if (comm->rank == 0)
     INFO(NCCL_TUNING, "AllGather [Hierarchical CE]: %zu Bytes -> Rail %s RMA proxy + CE", perRankBytes, railAlgo);
