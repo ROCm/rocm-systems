@@ -15,7 +15,8 @@ full, current flag list run `rocprof-sys-instrument --help` (use
 Keep answers short: under about 1200 characters unless the user asks for more.
 Lead with the direct answer and the command, then add only the caveats from this
 skill that apply to the question (for example: binary rewrite skips shared libraries,
-`-MR` ignores `-R`, `-l` pairs with a lower `-i`, how to list modules with
+`-MR` ignores `-R`, patterns are unanchored regular expressions, `-l` pairs with a
+lower `-i` and more detail means more overhead, how to list modules with
 `--print-available`). Do not add alternatives or background nobody asked for.
 
 ## Prerequisites
