@@ -43,7 +43,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         env::var_os("OUT_DIR")
             .ok_or_else(|| std::io::Error::other("Cargo did not provide the output directory"))?,
     );
-    let vendor = crate_dir.join("vendor/addrlib");
+    // addrlib is shared source (shared/addrlib): one copy for ROCr, CRUX
+    // and this crate, instead of three that drift apart. Override with ADDRLIB_DIR
+    // when building outside the rocm-systems layout.
+    println!("cargo:rerun-if-env-changed=ADDRLIB_DIR");
+    let vendor = match env::var_os("ADDRLIB_DIR") {
+        Some(dir) => PathBuf::from(dir),
+        None => crate_dir.join("../../../shared/addrlib"),
+    };
+    if !vendor.join("inc/addrinterface.h").exists() {
+        return Err(std::io::Error::other(format!(
+            "shared addrlib not found at {}; set ADDRLIB_DIR to \
+             <rocm-systems>/shared/addrlib",
+            vendor.display()
+        ))
+        .into());
+    }
     let include = [
         vendor.clone(),
         vendor.join("inc"),

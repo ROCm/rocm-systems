@@ -48,7 +48,7 @@
 #include "inc/hsa_ext_image.h"
 #include "resource.h"
 #include "util.h"
-#include "image/addrlib/inc/addrinterface.h"
+#include "addrlib/inc/addrinterface.h"
 
 // Forward declaration for BuildMipmapSrd(); full definition in hsakmt/hsakmttypes.h (included by the
 // image manager .cpp files). Used only by pointer here, so the declaration suffices.

@@ -326,19 +326,8 @@ if(${IMAGE_SUPPORT})
     AMD_INTERNAL_BUILD
     BRAHMA_BUILD=1 )
 
-  set ( IMAGE_SRCS image/addrlib/src/addrinterface.cpp
-                   image/addrlib/src/core/coord.cpp
-                   image/addrlib/src/core/addrlib.cpp
-                   image/addrlib/src/core/addrlib1.cpp
-                   image/addrlib/src/core/addrlib2.cpp
-                   image/addrlib/src/core/addrlib3.cpp
-                   image/addrlib/src/core/addrobject.cpp
-                   image/addrlib/src/core/addrelemlib.cpp
-                   image/addrlib/src/gfx9/gfx9addrlib.cpp
-                   image/addrlib/src/gfx10/gfx10addrlib.cpp
-                   image/addrlib/src/gfx11/gfx11addrlib.cpp
-                   image/addrlib/src/gfx12/gfx12addrlib.cpp
-                   image/device_info.cpp
+  ## addrlib is shared source (shared/addrlib), not built here.
+  set ( IMAGE_SRCS image/device_info.cpp
                    image/hsa_ext_image.cpp
                    image/image_runtime.cpp
                    image/image_manager.cpp
@@ -357,25 +346,31 @@ if(${IMAGE_SUPPORT})
 
   set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/image/blit_src/opencl_blit_objects.cpp PROPERTIES GENERATED TRUE)
 
+  ## Shared addrlib. Lives in shared/addrlib so that ROCr, CRUX and
+  ## rocaddr3 build one copy instead of three. Pulled in with add_subdirectory()
+  ## rather than find_package(): it has no dependencies, so there is no cycle.
+  ## Its include directories (public and internal) and the ADDRLIB_NAMESPACE
+  ## definition propagate from the target.
+  if(NOT DEFINED ADDRLIB_DIR)
+    get_filename_component(ADDRLIB_DIR
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/addrlib" ABSOLUTE)
+  endif()
+  if(NOT EXISTS "${ADDRLIB_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR
+      "Shared addrlib not found at '${ADDRLIB_DIR}'. It is required for image "
+      "support. Set -DADDRLIB_DIR=<rocm-systems>/shared/addrlib, or "
+      "configure with -DIMAGE_SUPPORT=OFF.")
+  endif()
+  if(NOT TARGET addrlib)
+    add_subdirectory(${ADDRLIB_DIR} ${CMAKE_CURRENT_BINARY_DIR}/addrlib)
+  endif()
+
   target_include_directories( ${CORE_RUNTIME_TARGET}
     PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/image
-    ${CMAKE_CURRENT_SOURCE_DIR}/image/addrlib/
-    ${CMAKE_CURRENT_SOURCE_DIR}/image/addrlib/inc
-    ${CMAKE_CURRENT_SOURCE_DIR}/image/addrlib/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/image/addrlib/src/core
-    ${CMAKE_CURRENT_SOURCE_DIR}/image/addrlib/src/r800
-    ${CMAKE_CURRENT_SOURCE_DIR}/image/addrlib/src/gfx9
-    ${CMAKE_CURRENT_SOURCE_DIR}/image/addrlib/src/gfx10
-    ${CMAKE_CURRENT_SOURCE_DIR}/image/addrlib/src/gfx11
-    ${CMAKE_CURRENT_SOURCE_DIR}/image/addrlib/src/gfx12
-    ${CMAKE_CURRENT_SOURCE_DIR}/image/addrlib/src/chip/r800
-    ${CMAKE_CURRENT_SOURCE_DIR}/image/addrlib/src/chip/gfx9
-    ${CMAKE_CURRENT_SOURCE_DIR}/image/addrlib/src/chip/gfx10
-    ${CMAKE_CURRENT_SOURCE_DIR}/image/addrlib/src/chip/gfx11
-    ${CMAKE_CURRENT_SOURCE_DIR}/image/addrlib/src/chip/gfx12 )
+    ${CMAKE_CURRENT_SOURCE_DIR}/image )
 
   target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${IMAGE_SRCS} )
+  target_link_libraries( ${CORE_RUNTIME_TARGET} PRIVATE rocm::addrlib )
 
   ## Depend on blit kernel target.
   add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/image/blit_src )
