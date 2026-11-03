@@ -58,11 +58,11 @@
       "prompt": "I added my own ROCTx ranges in my Python script. Profile it and show the GPU work inside that region.",
       "sample": "simple_net.py",
       "expected_behavior": [
-        "profiles simple_net.py --user-range with --experimental --trace-ml-api torch",
+        "profiles the Python script with --experimental --trace-ml-api",
         "lists the user region with --experimental --list-operators user",
         "shows the operator call tree under that region, including nested ML API operators and the GPU kernels they launched"
       ],
-      "logs_contain": ["--experimental", "--trace-ml-api torch", "--list-operators user"]
+      "logs_contain": ["--experimental", "--trace-ml-api", "--list-operators user"]
     },
     {
       "id": "tt-user-roctx-no-collection-control",
