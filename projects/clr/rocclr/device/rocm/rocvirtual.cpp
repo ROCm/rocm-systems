@@ -1470,7 +1470,7 @@ void VirtualGPU::LegacySignalTracker::AcquireSlot() {
       signal_list_[current_id_]->release();
       signal_list_[current_id_] = signal.release();
     } else {
-      assert(!"ProfilingSignal reallocation failed! Marker has a conflict with signal reuse!");
+      guarantee(false, "ProfilingSignal reallocation failed! Refusing to reset a retained signal.");
     }
   }
 }
