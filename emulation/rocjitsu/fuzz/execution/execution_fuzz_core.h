@@ -70,7 +70,9 @@ std::optional<FuzzTarget> indexed_target(uint8_t index);
 /// @details Byte zero selects a target, byte one selects execution modes, and
 /// the remaining bytes are instructions. Unassigned targets, decode rejection,
 /// unsupported execution, and the instruction budget are normal outcomes;
-/// host failures remain visible to the fuzzing runtime.
+/// host failures remain visible to the fuzzing runtime. All process-scoped GWS
+/// resources start armed with a zero count so a barrier without a guest INIT is
+/// a defined guest outcome.
 RunStats
 run_input(std::span<const uint8_t> input, std::optional<FuzzTarget> target = std::nullopt,
           std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> async_resources = nullptr,

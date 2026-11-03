@@ -117,7 +117,6 @@ class Preparation:
             PYTHONDONTWRITEBYTECODE='1',
             PYTHONNOUSERSITE='1',
             ROCISA_BACKEND='native',
-            CMAKE_BUILD_PARALLEL_LEVEL='4',
             PIP_CONFIG_FILE=os.devnull,
             PIP_NO_INPUT='1',
             PIP_DISABLE_PIP_VERSION_CHECK='1',
@@ -220,7 +219,7 @@ class Preparation:
             ('tensile', self.env['TENSILE_SOURCE'], self.env['TENSILE_SHA']),
             ('nanobind', self.env['NANOBIND_SOURCE'], self.env['NANOBIND_SHA']),
             ('corpus', self.env['CORPUS_SOURCE_DIR'], self.env['CORPUS_SHA']),
-            ('rocjitsu', self.env['ROCJITSU_SOURCE_DIR'], self.env['GITHUB_SHA']),
+            ('rocjitsu', self.env['ROCJITSU_SOURCE_DIR'], self.env['BENCHMARK_SHA']),
         ]:
             require(
                 re.fullmatch(r'[a-f0-9]{40}', revision),
@@ -398,7 +397,6 @@ class Preparation:
             'TRITON_CACHE_DIR',
             'TENSILE_HELPER_CACHE_DIR',
             'JOBLIB_TEMP_FOLDER',
-            'CMAKE_BUILD_PARALLEL_LEVEL',
             'HSA_ENABLE_SDMA_COPY_SIZE_OVERRIDE',
         ]
         with Path(self.env['GITHUB_ENV']).open('a') as output:
@@ -440,8 +438,6 @@ class Preparation:
                 'cmake',
                 '--build',
                 self.root / 'build',
-                '--parallel',
-                self.env['CMAKE_BUILD_PARALLEL_LEVEL'],
                 '--target',
                 'rocjitsu_bin',
                 'rocjitsu_shared',
@@ -453,7 +449,7 @@ class Preparation:
             True,
         )
         require(
-            f'git revision: {self.env["GITHUB_SHA"]}' in version,
+            f'git revision: {self.env["BENCHMARK_SHA"]}' in version,
             'Built runtime source attribution mismatch',
         )
         self.binary_inventory(
@@ -687,8 +683,6 @@ class Preparation:
                 'cmake',
                 '--build',
                 self.root / 'tensile-native',
-                '--parallel',
-                self.env['CMAKE_BUILD_PARALLEL_LEVEL'],
                 '--target',
                 'tensile_candidate',
                 'tensile_candidate_host_tests',

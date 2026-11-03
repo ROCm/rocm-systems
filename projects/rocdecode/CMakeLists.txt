@@ -31,12 +31,6 @@ else()
   set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
 endif()
 
-# Check if lib/rocm_sysdeps/lib exists in the ROCm path which indicates ROCm installation via TheRock
-set(USING_THE_ROCK OFF)
-if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
-  set(USING_THE_ROCK ON)
-endif()
-
 # Set AMD Clang as default compiler
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
@@ -160,39 +154,26 @@ if(_deps_met)
 
   # HIP
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
-  # LibVA - headers always needed for VA-API type definitions.
-  # On Linux TheRock builds, libva is loaded at runtime via dlopen with
+  # LibVA - headers only, needed for VA-API type definitions.
+  # On Linux, libva is loaded at runtime via dlopen with
   # RTLD_LOCAL | RTLD_DEEPBIND (see vaapi_loader.cpp) to prevent symbol
-  # collision with any system libva.so.2 in the same process; no direct
-  # link-time dependency is needed in that case.
-  # On Windows TheRock builds, rocm_sysdeps_va_win32.dll and rocm_sysdeps_va.dll
-  # are likewise loaded at runtime via LoadLibraryExW (see vaapi_loader.cpp).
-  #On non-TheRock builds, link directly as before.
+  # collision with any system libva.so.2 in the same process.
+  # On Windows, rocm_sysdeps_va_win32.dll and rocm_sysdeps_va.dll are likewise
+  # loaded at runtime via LoadLibraryExW (see vaapi_loader.cpp).
+  # No direct link-time dependency on libva is needed on either platform.
   include_directories(${LIBVA_INCLUDE_DIR})
-  if(NOT USING_THE_ROCK)
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
-    if(NOT WIN32)
-      # FindLibva only looks for va-drm on Linux. Referencing the variable on
-      # Windows would pick up a stale LIBVA_DRM_LIBRARY-NOTFOUND left in the
-      # cache by an earlier configure and pass it to the linker.
-      set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
-    endif()
-  endif()
 
   if(NOT WIN32)
     # DRM_AMDGPU
     include_directories(${LIBDRM_AMDGPU_INCLUDE_DIR})
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBDRM_AMDGPU_LIBRARY})
   else()
-    # vaon12: va_win32.lib instead of va-drm; d3d12/dxgi for CreateSharedHandle interop
+    # vaon12: va_win32.h header; d3d12/dxgi for CreateSharedHandle interop
     # FindLibva locates va/va_win32.h separately from va/va.h, so a staging
     # layout that splits them would satisfy Libva_FOUND above and then fail on
     # the include. Normally both resolve to the same directory and this is a
-    # no-op. Windows-only, for the same stale-cache reason as va-drm above.
+    # no-op.
     include_directories(${LIBVA_WIN32_INCLUDE_DIR})
-    if(NOT USING_THE_ROCK)
-      set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_WIN32_LIBRARY})
-    endif()
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} d3d12 dxgi)
   endif()
 
@@ -262,18 +243,15 @@ if(_deps_met)
     set_target_properties(${PROJECT_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
   endif()
 
-  if(USING_THE_ROCK AND NOT WIN32)
+  if(NOT WIN32)
     set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
-    if(UNIX)
-      # Enable dlopen-based VA isolation and link against libdl for dlopen/dlsym/dlclose.
-      target_compile_definitions(${PROJECT_NAME} PRIVATE ROCDECODE_USE_DLOPEN_VA)
-      target_link_libraries(${PROJECT_NAME} dl)
-    endif()
   endif()
-  if(USING_THE_ROCK AND WIN32)
-    # Load rocm_sysdeps_va_win32.dll / rocm_sysdeps_va.dll at runtime via
-    # LoadLibraryExW/GetProcAddress (kernel32, linked by default).
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ROCDECODE_USE_DLOPEN_VA)
+  # Enable runtime-loaded VA isolation.
+  target_compile_definitions(${PROJECT_NAME} PRIVATE ROCDECODE_USE_DLOPEN_VA)
+  if(NOT WIN32)
+    # Link against libdl for dlopen/dlsym/dlclose. On Windows,
+    # LoadLibraryExW/GetProcAddress come from kernel32, linked by default.
+    target_link_libraries(${PROJECT_NAME} dl)
   endif()
 
   # rocprofiler

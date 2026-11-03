@@ -1794,7 +1794,7 @@ TEST(ExecutionPluginTest, DisabledWaitCheckingPreservesRegisterHooksAcrossPlugin
     EXPECT_EQ(read.lane(0, 0), value);
     EXPECT_EQ(read.lane(1, 0), value + 1);
     const uint64_t pair = uint64_t{value} | (uint64_t{value + 1} << 32);
-    regs.write_sgpr64(sbase, pair);
+    ASSERT_TRUE(regs.write_sgpr64(sbase, pair).succeeded());
     EXPECT_EQ(regs.read_sgpr64(sbase), pair);
   };
   access(3);
@@ -1870,7 +1870,7 @@ TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
       (void)regs.read_sgpr(sbase);
       break;
     case 1:
-      regs.write_sgpr(sbase, 7);
+      ASSERT_TRUE(regs.write_sgpr(sbase, 7).succeeded());
       break;
     case 2:
       (void)regs.read_vgpr_region(vbase, 1, 1).lane(0, 0);
