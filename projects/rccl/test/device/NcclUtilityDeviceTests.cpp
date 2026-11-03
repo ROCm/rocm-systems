@@ -553,7 +553,7 @@ constexpr uint64_t kSpanStartWaitTicks = 200000000;
 
 __global__ void kernelWarpSpanSync(int* mismatches, int* roundsDone) {
   __shared__ int slot[kNumWarps];
-  __shared__ int span0Done;
+  __shared__ uint32_t span0Done;
   const int w = threadIdx.x / warpSize;
   const int lane = threadIdx.x % warpSize;
   const int spanId = w / kWarpsPerSpan;
@@ -564,15 +564,15 @@ __global__ void kernelWarpSpanSync(int* mismatches, int* roundsDone) {
   __syncthreads();
   ncclCoopWarpSpan span(/*warp0=*/kWarpsPerSpan * spanId, /*nWarps=*/kWarpsPerSpan, /*id=*/spanId);
   volatile int* vslot = slot;
-  volatile int* vdone = &span0Done;
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_block> spanStarted(span0Done);
   int bad = 0;
   // Span 1 starts once span 0 is halfway through. Span 0 only gets there if its sync() waits for span 0 alone,
   // so a CTA-wide barrier times out here and counts as a mismatch. The second half runs both spans at once,
   // so spans that share one barrier slot fail too.
   if (spanId == 1) {
     const uint64_t t0 = wall_clock64();
-    while (*vdone == 0 && wall_clock64() - t0 < kSpanStartWaitTicks) {}
-    if (*vdone == 0) bad += kSpanRounds;
+    while (spanStarted.load(cuda::memory_order_acquire) == 0 && wall_clock64() - t0 < kSpanStartWaitTicks) {}
+    if (spanStarted.load(cuda::memory_order_acquire) == 0) bad += kSpanRounds;
   }
   int rounds = 0;
   for (int r = 1; r <= kSpanRounds; ++r) {
@@ -585,9 +585,8 @@ __global__ void kernelWarpSpanSync(int* mismatches, int* roundsDone) {
     if (lane == 0 && vslot[w ^ 1] != r) ++bad;
     span.sync();
     ++rounds;
-    if (spanId == 0 && r == kSpanRounds / 2 && lane == 0) {
-      __threadfence_block();
-      *vdone = 1;
+    if (w == 0 && r == kSpanRounds / 2 && lane == 0) {
+      spanStarted.store(1u, cuda::memory_order_release);
     }
   }
   if (lane == 0) {
