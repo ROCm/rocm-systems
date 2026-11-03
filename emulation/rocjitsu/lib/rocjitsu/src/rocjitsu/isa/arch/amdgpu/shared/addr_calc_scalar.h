@@ -59,7 +59,16 @@ inline std::optional<uint64_t> scalar_buffer_address(Wavefront &wf, uint32_t sel
     return std::nullopt;
   const uint64_t stride = (base >> 48) & 0x3fff;
   scalar_buffer_load_mask(state, offset, (*records * (stride ? stride : 1)) & ~size_align_mask);
-  return buffer_virtual_address(base + offset) & ~align_mask;
+  const uint64_t address = buffer_virtual_address(base + offset) & ~align_mask;
+  if (state && state->atomic_op != AtomicOp::NONE) {
+    // An atomic accesses its whole element or nothing. Hardware checks atomic
+    // alignment before bounds, so a misaligned atomic keeps its full mask and
+    // faults in the access path.
+    const uint16_t element_mask = (1u << state->num_dwords) - 1;
+    const bool aligned = address % state->elem_size == 0;
+    state->load_dword_mask = state->load_dword_mask == element_mask || !aligned ? element_mask : 0;
+  }
+  return address;
 }
 
 /// @brief Scalar-buffer load opcode families (GFX9/RDNA through GFX11, then GFX12).

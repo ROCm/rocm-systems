@@ -569,7 +569,10 @@ coherence epoch makes stale K$ lines refetch. The old value is returned to
 SDATA when GLC is set. Supported: swap, cmpswap, add, sub, smin/umin,
 smax/umax, and, or, xor, inc, dec. Compare-swap reads the source and then
 the compare value from SDATA and returns only the old value, to the low half.
-`s_buffer_atomic_*` are not yet implemented.
+`s_buffer_atomic_*` support the same operations. Their address is the V# base
+plus the offset; stride only scales the bound. An atomic whose element is not
+wholly in range performs no access and returns zero when GLC is set. A
+misaligned `_x2` atomic faults even when out of range.
 
 **Cache management instructions:**
 

@@ -95,6 +95,8 @@ public:
   AtomicOp atomic_op = AtomicOp::NONE;
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::LGKMCNT;
+  /// In-range dwords of a buffer access: masked load dwords read zero and masked
+  /// store dwords are skipped. An atomic's mask covers its whole element or is zero.
   uint16_t load_dword_mask = 0xffff;
   uint32_t response_data[16] = {};
   uint32_t store_data[16] = {};
