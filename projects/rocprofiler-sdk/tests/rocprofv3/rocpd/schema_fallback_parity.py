@@ -102,6 +102,46 @@ def main():
                         f"schema mismatch for version={ver} kind={kind} options={opt}"
                     )
 
+    # format_path parity: every output key (full, brace, shorthand) and env pattern
+    os.environ["ROCPD_PARITY_VALUE"] = " a/b\tc"
+    templates = [
+        "%{k}%".format(k=k)
+        # launch_date/launch_time are excluded: native and python capture the launch
+        # time at different moments, which is flaky across minute/day boundaries
+        for k in "tag hostname pid ppid pgid psid psize job rank size nid cwd".split()
+    ]
+    templates += [t.replace("%", "{", 1).replace("%", "}", 1) for t in templates[:]]
+    templates += [
+        "%h",
+        "%p",
+        "%j",
+        "%r",
+        "%s",
+        "out_%pgid%_%psid%_%nid%_%rank%_%size%_%job%",
+        "%q{ROCPD_PARITY_VALUE}%",
+        "%q{ROCPD_PARITY_VALUE}",
+        "%env{ROCPD_PARITY_VALUE}%",
+        "$ENV{ROCPD_PARITY_VALUE}",
+        "%q{ROCPD_PARITY_UNSET}%/x",
+        "no-keys-here",
+    ]
+    for tmpl in templates:
+        expected = lib.format_path(tmpl, "parity")
+        actual = bindings._py_format_path(tmpl, "parity")
+        if expected != actual:
+            errors.append(
+                f"format_path mismatch for '{tmpl}': C++='{expected}' python='{actual}'"
+            )
+
+    # launch_date: compare format only (default ROCPROF_DATE_FORMAT is %F -> YYYY-MM-DD)
+    import re
+
+    if "ROCPROF_DATE_FORMAT" not in os.environ:
+        for tmpl in ("%launch_date%", "{launch_date}"):
+            actual = bindings._py_format_path(tmpl, "parity")
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", actual):
+                errors.append(f"format_path '{tmpl}' is not YYYY-MM-DD: '{actual}'")
+
     for err in errors:
         print(f"ERROR: {err}", file=sys.stderr)
     if not errors:
