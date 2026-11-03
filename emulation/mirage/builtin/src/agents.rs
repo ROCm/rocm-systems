@@ -1,4 +1,4 @@
-//! The builtin [`AgentDef`]s: one per rocjitsu config mirage ships.
+//! The builtin [`AgentDef`]s: one per distinct GPU in the rocjitsu configs.
 //!
 //! Each is the `{vm, topology}` of `rocjitsu/configs/<stem>.json`,
 //! embedded and validated at build time — see `build.rs` for which
@@ -41,12 +41,16 @@ pub fn source_config(name: &str) -> Option<serde_json::Value> {
 
 #[must_use]
 pub fn source_config_for_agent(agent: &AgentDef) -> Option<serde_json::Value> {
-    let target = agent.vm.gpu.device.gfx_target_version;
+    let device = &agent.vm.gpu.device;
     PRESETS
         .iter()
         .find(|preset| {
-            serde_json::from_str::<AgentDef>(preset.agent)
-                .is_ok_and(|preset_agent| preset_agent.vm.gpu.device.gfx_target_version == target)
+            serde_json::from_str::<AgentDef>(preset.agent).is_ok_and(|preset_agent| {
+                let candidate = &preset_agent.vm.gpu.device;
+                candidate.gfx_target_version == device.gfx_target_version
+                    && candidate.vendor_id == device.vendor_id
+                    && candidate.device_id == device.device_id
+            })
         })
         .and_then(|preset| serde_json::from_str(preset.config).ok())
 }
@@ -119,14 +123,12 @@ mod tests {
         }
     }
 
-    /// The three names that were mirage's whole builtin set are still
-    /// there: `--profile` defaults to `mi350x`, the shipped topologies
-    /// name `MI350X` and `MI300X`, and users have all three on disk.
+    /// Instinct agents keep stable short names.
     #[test]
-    fn the_established_names_survive_reading_the_whole_directory() {
+    fn instinct_agents_have_short_names() {
         let names: Vec<&str> = agents().into_iter().map(|(name, _)| name).collect();
-        for established in ["mi300x", "mi350x", "mi450x"] {
-            assert!(names.contains(&established), "{established} in {names:?}");
+        for name in ["mi300x", "mi350x", "mi355x", "mi450x"] {
+            assert!(names.contains(&name), "{name} in {names:?}");
         }
     }
 
@@ -135,10 +137,32 @@ mod tests {
     fn no_two_agents_are_the_same_device() {
         let mut seen = std::collections::BTreeMap::new();
         for (name, agent) in agents() {
-            let version = agent.vm.gpu.device.gfx_target_version;
-            if let Some(other) = seen.insert(version, name) {
-                panic!("agents {other} and {name} are both gfx_target_version {version}");
+            let device = &agent.vm.gpu.device;
+            let identity = (
+                device.gfx_target_version,
+                device.vendor_id,
+                device.device_id,
+            );
+            if let Some(other) = seen.insert(identity, name) {
+                panic!("agents {other} and {name} have the same PCI device identity {identity:?}");
             }
+        }
+    }
+
+    #[test]
+    fn gfx950_products_retain_distinct_source_configs() {
+        for (name, device_id, marketing_name) in [
+            ("mi350x", 0x75a0, "AMD Instinct MI350X"),
+            ("mi355x", 0x75a3, "AMD Instinct MI355X"),
+        ] {
+            let agent = agent(name).unwrap();
+            assert_eq!(agent.vm.gpu.device.device_id, device_id);
+            let source = source_config_for_agent(&agent).unwrap();
+            assert_eq!(source, source_config(name).unwrap());
+            assert_eq!(
+                source["vm"]["gpu"]["device"]["marketing_name"],
+                marketing_name
+            );
         }
     }
 

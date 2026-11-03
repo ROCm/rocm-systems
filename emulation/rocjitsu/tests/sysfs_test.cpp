@@ -825,14 +825,21 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
 
 // MI350X is harvested too: its captured KFD topology has 32 shader arrays of
 // 9 CUs (288 physical CUs), while simd_count exposes 1024 SIMDs, or 256 active
-// CUs at four SIMDs per CU. Keep every full-device gfx950 config pinned to that
-// same capture so local, KMD, and multi-GPU launch paths cannot drift apart.
-TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) {
+// CUs at four SIMDs per CU. The legacy gfx950_mi355x configs describe that
+// MI350X capture; the pci75a3 configs reuse it with the MI355X PCI ID. Keep every
+// full-device gfx950 config pinned to it so product, local, KMD, and multi-GPU
+// launch paths cannot drift apart.
+TEST(SysfsTopologyGeometryTest, Gfx950ProductsMatchCapturedPhysicalAndActiveCuCounts) {
   const std::string config_dir = CONFIG_DIR;
-  constexpr const char *kMi350xConfigs[] = {"gfx950_mi355x.json", "gfx950_mi355x_kmd.json",
-                                            "gfx950_mi355x_kmd_2gpu.json"};
+  constexpr std::pair<const char *, uint32_t> kGfx950Configs[] = {
+      {"gfx950_mi355x.json", 0x75a0},
+      {"gfx950_mi355x_kmd.json", 0x75a0},
+      {"gfx950_mi355x_kmd_2gpu.json", 0x75a0},
+      {"gfx950_mi355x_pci75a3.json", 0x75a3},
+      {"gfx950_mi355x_pci75a3_kmd.json", 0x75a3},
+  };
 
-  for (const char *cfg : kMi350xConfigs) {
+  for (const auto &[cfg, device_id] : kGfx950Configs) {
     SCOPED_TRACE(cfg);
     config::LoadedConfig loaded;
     ASSERT_TRUE(test::load_valid_config(config_dir + "/" + cfg, loaded));
@@ -862,7 +869,7 @@ TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) 
     EXPECT_EQ(physical_cus, 288u);
     EXPECT_EQ(active_cus, 256u);
 
-    EXPECT_EQ(loaded.device.device_id, 30112u);
+    EXPECT_EQ(loaded.device.device_id, device_id);
     EXPECT_EQ(loaded.device.local_mem_size, 309220868096ULL);
     EXPECT_EQ(loaded.device.mem_clk_max, 1900u);
     EXPECT_EQ(loaded.device.num_sdma_engines, 2u);
