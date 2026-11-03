@@ -28,9 +28,15 @@ namespace {
 class ScopedHipDevice {
 public:
     explicit ScopedHipDevice(int device_id) {
-        if (hipGetDevice(&previous_device_id_) == hipSuccess && previous_device_id_ != device_id) {
+        if (hipGetDevice(&previous_device_id_) != hipSuccess) {
+            failed_ = true;
+            ErrorLog(g_rocjpeg_logger, "Failed to query the current HIP device");
+            return;
+        }
+        if (previous_device_id_ != device_id) {
             switched_ = hipSetDevice(device_id) == hipSuccess;
             if (!switched_) {
+                failed_ = true;
                 ErrorLog(g_rocjpeg_logger, "Failed to set the current HIP device to " + ROCJPEG_TOSTR(device_id));
             }
         }
@@ -42,10 +48,13 @@ public:
     }
     ScopedHipDevice(const ScopedHipDevice &) = delete;
     ScopedHipDevice &operator=(const ScopedHipDevice &) = delete;
+    // True if device_id could not be made current, so HIP work done now could run on another device.
+    bool Failed() const { return failed_; }
 
 private:
     int previous_device_id_ = -1;
     bool switched_ = false;
+    bool failed_ = false;
 };
 }  // namespace
 
@@ -389,7 +398,12 @@ RocJpegStatus RocJpegDecoder::FinalizeDecodeBatched(const VASurfaceID *surface_i
     // device, which need not be device_id_ (for example on an application thread that never called hipSetDevice).
     ScopedHipDevice device_guard(device_id_);
     int num_released = 0;
-    RocJpegStatus rocjpeg_status = FinalizeSubBatches(surface_ids, jpeg_stream_params, decode_params, destinations, batch_size, num_released);
+    // If device_id_ could not be made current, fail rather than finish on the wrong device. Going through the
+    // failure path below, instead of returning here, still releases every surface.
+    RocJpegStatus rocjpeg_status = ROCJPEG_STATUS_EXECUTION_FAILED;
+    if (!device_guard.Failed()) {
+        rocjpeg_status = FinalizeSubBatches(surface_ids, jpeg_stream_params, decode_params, destinations, batch_size, num_released);
+    }
     if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
         // The failing sub-batch and every later one still hold their surfaces. Wait for any copy or kernel already
         // queued for them, then sync each surface (later sub-batches may still be decoding) and release it, so the
