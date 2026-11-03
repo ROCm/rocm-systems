@@ -290,6 +290,30 @@ bool rcclForceCeAllReduceEnabled(const struct ncclComm* comm);
 // RCCL_FORCE_CE=0 turns it off; otherwise NCCL_CTA_POLICY_ZERO forces it and
 // the arch table's forceCeScratch decides.
 bool rcclForceCeScratchEnabled(const struct ncclComm* comm);
+// gfx1250 in-place AllToAll. The per-peer Send/Recv decomposition is wrong in place there, so
+// every AllToAll funnel uses these helpers: rcclSelectAlltoAll, taskAppend for calls that carry no
+// decision (ncclAlltoAllConfig), and the NCCL_ENQUEUE_REARCH_ENABLE lowering.
+// - CeScratchInPlace: in place may take CE-Scratch (correct through ddaScratch) even though the
+//   arch table does not force it; RCCL_FORCE_CE=0 turns it off. Buffer-less queries are not in place.
+// - RegisteredCeRefused: in place must not take the registered-window CE AllToAll (single-node
+//   ncclCeAlltoAll or hierarchical CE). Both push each chunk into the peer's recv window while
+//   the peer may still read that region to send it, a race on user data. gfx1250 only (the same
+//   race exists upstream on every arch; other arches are left unchanged).
+// - InPlaceGuard: called where in place would otherwise reach Send/Recv; ncclInvalidUsage + WARN
+//   on gfx1250 (never wrong data), ncclSuccess otherwise. The WARN names the API (site) and why
+//   no correct path was left: capturing / registeredCe say what the caller saw; the RCCL_FORCE_CE
+//   setting and the CE scratch size are read from the comm.
+enum rcclA2aInPlaceSite {
+  rcclA2aSiteAlltoAll,         // rcclSelectAlltoAll (ncclAlltoAll)
+  rcclA2aSiteAlltoAllEnqueue,  // taskAppend, ncclAlltoAll carrying a non-CE decision
+  rcclA2aSiteAlltoAllConfig,   // taskAppend, no decision (ncclAlltoAllConfig)
+  rcclA2aSiteRearch,           // rawTaskAppend (NCCL_ENQUEUE_REARCH_ENABLE lowering)
+};
+bool rcclAlltoAllCeScratchInPlace(const struct ncclComm* comm, const void* sendbuff, const void* recvbuff);
+bool rcclAlltoAllRegisteredCeRefused(const struct ncclComm* comm, const void* sendbuff, const void* recvbuff);
+ncclResult_t rcclAlltoAllInPlaceGuard(const struct ncclComm* comm, const void* sendbuff, const void* recvbuff,
+                                      size_t totalBytes, enum rcclA2aInPlaceSite site, bool capturing,
+                                      bool registeredCe);
 // Sets ceAllReduceFastPath on each queued CE task from its receive window; no bootstrap.
 void rcclSetCeAllReduceFastPath(struct ncclComm* comm);
 RCCL_PARAM_DECLARE(CeArMaxMsgBytes);     // -1 = use ceNonRegMax[AR] (2-shot) from arch table

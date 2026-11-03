@@ -943,6 +943,11 @@ ncclResult_t pncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcou
                 from all other devices. Data to send to destination rank j is taken from
                 sendbuff+j*count and data received from source rank i is placed at
                 recvbuff+i*count.
+                In-place operation (sendbuff == recvbuff) must be the same on every rank.
+                On gfx1250 it runs only on a path that is correct in place (DDA fabric
+                LL / LL128, or Copy Engine staging through the DDA fabric scratch); a call
+                no such path takes returns ncclInvalidUsage. On other architectures
+                in-place correctness is not guaranteed; use separate buffers.
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Data array to send (contains blocks for each other rank)

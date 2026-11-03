@@ -4566,6 +4566,13 @@ static ncclResult_t rawTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
       }
     }
 
+    // AllToAll is always lowered to per-peer Send/Recv here (task_classify.cc), whatever
+    // rcclSelectAlltoAll chose, and that is wrong in place on gfx1250.
+    if (info->coll == ncclFuncAlltoAll) {
+      NCCLCHECK(rcclAlltoAllInPlaceGuard(comm, info->sendbuff, info->recvbuff,
+                                         (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype),
+                                         rcclA2aSiteRearch, /*capturing=*/false, /*registeredCe=*/false));
+    }
     NCCLCHECK(hostToDevRedOp(&opDev, info->op, info->datatype, comm));
     if (comm->nRanks == 1) {
       NCCLCHECK(ncclLaunchOneRank(info->recvbuff, info->sendbuff, info->count, opDev, info->datatype, info->stream,
@@ -4671,7 +4678,13 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // while the stream is capturing and fall through to the graph-safe
       // DDA/symmetric/kernel paths.
       bool ceCapturing, ceArGraphAllowed;
-      if (info->decisionValid) {
+      // rcclSelectAlltoAll probes capture only on the way to its CE and Direct branches. A DDA (or GIN)
+      // decision returns earlier with ceCapturing unset, and reaches here when NCCL_CHECK_MODE diverts it;
+      // in place it may then take CE-Scratch below, so probe the stream for it.
+      const bool a2aDecisionWithoutCaptureProbe =
+        info->coll == ncclFuncAlltoAll && info->decisionValid && info->decision.algo != RCCL_CE_REGISTERED &&
+        info->decision.algo != RCCL_CE_SCRATCH && info->decision.algo != RCCL_DIRECT_ALLTOALL;
+      if (info->decisionValid && !a2aDecisionWithoutCaptureProbe) {
         // Already computed by ncclAllReduce_impl(), ncclReduceScatter_impl(),
         // ncclAllGather_impl(), or ncclAlltoAll_impl() via rcclSelect*().
         ceCapturing = info->decision.ceCapturing;
@@ -4787,6 +4800,22 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
          rcclAllGatherCeRegisteredWindow(comm, recvBytes, winRegType, ceCapturing));
       const bool allGatherDecided = (info->coll == ncclFuncAllGather && info->decisionValid);
       const bool alltoAllDecided = (info->coll == ncclFuncAlltoAll && info->decisionValid);
+      // An AllToAll without a decision (ncclAlltoAllConfig) gets the same in-place CE-Scratch exception
+      // as rcclSelectAlltoAll; the Send/Recv decomposition below refuses in place on gfx1250. So does a
+      // decided one whose decision is not CE: only a DDA fabric decision diverted here by NCCL_CHECK_MODE
+      // reaches this funnel in place (a live Direct decision in place was already refused by the selector).
+      const bool a2aCeScratchInPlace =
+        info->coll == ncclFuncAlltoAll && rcclAlltoAllCeScratchInPlace(comm, info->sendbuff, info->recvbuff);
+      // The undecided symmetric-window CE arm below. In place on gfx1250 an AllToAll must not take it
+      // (rcclAlltoAllRegisteredCeRefused); CE-Scratch refuses registered recv windows, so the call
+      // reaches the in-place guard before the Send/Recv decomposition.
+      const bool symWindowCe = !allGatherDecided && !alltoAllDecided &&
+                               (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
+                               !(rcclNcclAlgoEnvIsSet() &&
+                                 (info->coll == ncclFuncAllGather || info->coll == ncclFuncReduceScatter)) &&
+                               (ceAvailable || hierCeAvailable) && !hasSysmemSegment;
+      const bool a2aRegCeSkipped = symWindowCe && info->coll == ncclFuncAlltoAll &&
+                                   rcclAlltoAllRegisteredCeRefused(comm, info->sendbuff, info->recvbuff);
       if ((info->coll == ncclFuncAllReduce || info->coll == ncclFuncReduceScatter) && info->decisionValid) {
         // Backend was already chosen once by rcclSelectAllReduce() / rcclSelectReduceScatter();
         // honor it here instead of recomputing CE eligibility.
@@ -4819,17 +4848,14 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr,
                                      comm->ddaScratch, comm->ddaPeerPtrsHost, opDev));
         }
-      } else if ((!allGatherDecided && !alltoAllDecided &&
-                  (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
-                  !(rcclNcclAlgoEnvIsSet() && (info->coll == ncclFuncAllGather || info->coll == ncclFuncReduceScatter)) &&
-                  (ceAvailable || hierCeAvailable) && !hasSysmemSegment) ||
-                 ceArSymRegistered || (!allGatherDecided && ceAgSymRegistered)) {
+      } else if ((symWindowCe && !a2aRegCeSkipped) || ceArSymRegistered || (!allGatherDecided && ceAgSymRegistered)) {
         INFO(NCCL_INIT, "Taking CE collective path with symmetric registered windows for user buffers");
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
                                    opDev));
 
-      } else if (!rcclNcclAlgoEnvIsSet() && !allGatherDecided && !alltoAllDecided &&
-                 rcclForceCeScratchEnabled(comm) && CeScratchAvailable && !hasSysmemSegment &&
+      } else if (!allGatherDecided && (!alltoAllDecided || a2aCeScratchInPlace) &&
+                 ((!rcclNcclAlgoEnvIsSet() && rcclForceCeScratchEnabled(comm)) || a2aCeScratchInPlace) &&
+                 CeScratchAvailable && !hasSysmemSegment &&
                  comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce &&
                  info->coll != ncclFuncReduceScatter) {
         INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);
@@ -4853,6 +4879,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         NCCLCHECK(ncclCudaGetCapturingGraph(&graph, info->stream, comm->config.graphUsageMode));
         captured = ncclCudaGraphValid(graph);
         if (info->coll == ncclFuncAlltoAll) {
+          NCCLCHECK(rcclAlltoAllInPlaceGuard(comm, info->sendbuff, info->recvbuff, recvBytes,
+                                             alltoAllDecided ? rcclA2aSiteAlltoAllEnqueue : rcclA2aSiteAlltoAllConfig,
+                                             ceCapturing, a2aRegCeSkipped));
           bool sendLocalValid = false;
           bool recvLocalValid = false;
           NCCLCHECK(ncclRegFind(comm, info->sendbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
