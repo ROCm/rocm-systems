@@ -44,73 +44,6 @@ protected:
   rocjitsu::test::ScopedTempFile trace_{"rocjitsu-plugin-loader-"};
 };
 
-TEST_F(PluginLoaderTest, CApiRejectsAdmissionBeforeReplacingInstalledGroup) {
-  const auto count = [](std::string_view text, std::string_view event) {
-    size_t occurrences = 0;
-    for (size_t offset = 0; (offset = text.find(event, offset)) != std::string_view::npos;
-         offset += event.size())
-      ++occurrences;
-    return occurrences;
-  };
-  const char *valid = R"({"require_all_plugins":true,"plugins":{"good":{}}})";
-  struct RejectionCase {
-    const char *config;
-    const char *reason;
-    bool partial_group;
-  };
-  const RejectionCase cases[] = {
-      {R"({"require_all_plugins":true,"plugins":{"good":{},"missing":{}}})",
-       "required plugin loading failed: loaded 1 of 2 configured plugins", true},
-      {R"({"require_all_plugins":"true","plugins":{"good":{}}})",
-       "top-level 'require_all_plugins' must be a boolean", false},
-      {R"({"require_all_plugins":true,"plugins":[]})",
-       "top-level 'plugins' must be an object when 'require_all_plugins' is true", false},
-  };
-  for (bool initially_active : {false, true}) {
-    SCOPED_TRACE(initially_active);
-    rocjitsu::SoC soc("plugin_loader_test");
-    soc.set_plugin_group(nullptr);
-    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(new rj_vm_t, rj_vm_destroy);
-    vm->soc = &soc;
-    if (initially_active) {
-      ASSERT_EQ(rj_vm_load_plugins(vm.get(), valid, PLUGIN_LOADER_FIXTURE_DIR),
-                ROCJITSU_STATUS_SUCCESS);
-    }
-    rocjitsu::ExecutionPluginGroup *installed = &soc.plugin_group();
-    for (const RejectionCase &test : cases) {
-      SCOPED_TRACE(test.config);
-      const std::string before = trace();
-      testing::internal::CaptureStderr();
-      const rj_status_t status =
-          rj_vm_load_plugins(vm.get(), test.config, PLUGIN_LOADER_FIXTURE_DIR);
-      const std::string diagnostic = testing::internal::GetCapturedStderr();
-      EXPECT_EQ(status, ROCJITSU_STATUS_ERROR);
-      const std::string warning = std::string("rj_vm_load_plugins failed: ") + test.reason;
-      EXPECT_EQ(count(diagnostic, "rj_vm_load_plugins failed:"), 1u) << diagnostic;
-      EXPECT_NE(diagnostic.find(warning), std::string::npos) << diagnostic;
-      EXPECT_EQ(&soc.plugin_group(), installed);
-      EXPECT_EQ(vm->plugin_group_active.load(), initially_active);
-      const std::string after = trace();
-      EXPECT_EQ(count(after, "good:init\n"), count(before, "good:init\n"));
-      EXPECT_EQ(count(after, "good:shutdown\n"), count(before, "good:shutdown\n"));
-      EXPECT_EQ(count(after, "good:create\n"),
-                count(before, "good:create\n") + (test.partial_group ? 1u : 0u));
-      EXPECT_EQ(count(after, "good:destroy\n"),
-                count(before, "good:destroy\n") + (test.partial_group ? 1u : 0u));
-    }
-    const std::string before_retry = trace();
-    ASSERT_EQ(rj_vm_load_plugins(vm.get(), valid, PLUGIN_LOADER_FIXTURE_DIR),
-              ROCJITSU_STATUS_SUCCESS);
-    EXPECT_TRUE(vm->plugin_group_active.load());
-    const std::string after_retry = trace();
-    EXPECT_EQ(count(after_retry, "good:init\n"), count(before_retry, "good:init\n") + 1);
-    EXPECT_EQ(count(after_retry, "good:shutdown\n"),
-              count(before_retry, "good:shutdown\n") + (initially_active ? 1u : 0u));
-    EXPECT_EQ(count(after_retry, "good:destroy\n"),
-              count(before_retry, "good:destroy\n") + (initially_active ? 1u : 0u));
-  }
-}
-
 TEST_F(PluginLoaderTest, LoadsPluginAndDispatchesLifecycle) {
   rocjitsu::ExecutionPluginGroup group(rocjitsu::PluginSinkConfig{});
   EXPECT_EQ(load("good", group), 1);
@@ -215,6 +148,85 @@ TEST_F(PluginLoaderTest, RejectsNonBooleanRequireAllPlugins) {
                   .failed());
   EXPECT_EQ(diagnostic.message(), "top-level 'require_all_plugins' must be a boolean");
   EXPECT_EQ(trace().find("good:create\n"), std::string::npos);
+}
+
+TEST_F(PluginLoaderTest, CApiRejectsAdmissionBeforeReplacingInstalledGroup) {
+  const auto count = [](std::string_view text, std::string_view event) {
+    size_t occurrences = 0;
+    for (size_t offset = 0; (offset = text.find(event, offset)) != std::string_view::npos;
+         offset += event.size())
+      ++occurrences;
+    return occurrences;
+  };
+  const char *valid = R"({"require_all_plugins":true,"plugins":{"good":{}}})";
+  struct RejectionCase {
+    const char *config;
+    const char *reason;
+    bool partial_group;
+  };
+  const RejectionCase cases[] = {
+      {R"({"require_all_plugins":true,"plugins":{"good":{}})", "invalid plugin configuration JSON",
+       false},
+      {R"({"require_all_plugins":true,"plugins":{"good":{},"missing":{}}})",
+       "required plugin loading failed: loaded 1 of 2 configured plugins", true},
+      {R"({"require_all_plugins":"true","plugins":{"good":{}}})",
+       "top-level 'require_all_plugins' must be a boolean", false},
+      {R"({"require_all_plugins":true,"plugins":[]})",
+       "top-level 'plugins' must be an object when 'require_all_plugins' is true", false},
+  };
+  for (bool initially_active : {false, true}) {
+    SCOPED_TRACE(initially_active);
+    rocjitsu::SoC soc("plugin_loader_test");
+    soc.set_plugin_group(nullptr);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(new rj_vm_t, rj_vm_destroy);
+    vm->soc = &soc;
+    if (initially_active) {
+      ASSERT_EQ(rj_vm_load_plugins(vm.get(), valid, PLUGIN_LOADER_FIXTURE_DIR),
+                ROCJITSU_STATUS_SUCCESS);
+    }
+    rocjitsu::ExecutionPluginGroup *installed = &soc.plugin_group();
+    for (const RejectionCase &test : cases) {
+      SCOPED_TRACE(test.config);
+      const std::string before = trace();
+      testing::internal::CaptureStderr();
+      const rj_status_t status =
+          rj_vm_load_plugins(vm.get(), test.config, PLUGIN_LOADER_FIXTURE_DIR);
+      const std::string diagnostic = testing::internal::GetCapturedStderr();
+      EXPECT_EQ(status, ROCJITSU_STATUS_ERROR);
+      const std::string warning = std::string("rj_vm_load_plugins failed: ") + test.reason;
+      EXPECT_EQ(count(diagnostic, "rj_vm_load_plugins failed:"), 1u) << diagnostic;
+      EXPECT_NE(diagnostic.find(warning), std::string::npos) << diagnostic;
+      EXPECT_EQ(&soc.plugin_group(), installed);
+      EXPECT_EQ(vm->plugin_group_active.load(), initially_active);
+      const std::string after = trace();
+      EXPECT_EQ(count(after, "good:init\n"), count(before, "good:init\n"));
+      EXPECT_EQ(count(after, "good:shutdown\n"), count(before, "good:shutdown\n"));
+      EXPECT_EQ(count(after, "good:create\n"),
+                count(before, "good:create\n") + (test.partial_group ? 1u : 0u));
+      EXPECT_EQ(count(after, "good:destroy\n"),
+                count(before, "good:destroy\n") + (test.partial_group ? 1u : 0u));
+    }
+    const std::string before_retry = trace();
+    ASSERT_EQ(rj_vm_load_plugins(vm.get(), valid, PLUGIN_LOADER_FIXTURE_DIR),
+              ROCJITSU_STATUS_SUCCESS);
+    EXPECT_TRUE(vm->plugin_group_active.load());
+    const std::string after_retry = trace();
+    EXPECT_EQ(count(after_retry, "good:init\n"), count(before_retry, "good:init\n") + 1);
+    EXPECT_EQ(count(after_retry, "good:shutdown\n"),
+              count(before_retry, "good:shutdown\n") + (initially_active ? 1u : 0u));
+    EXPECT_EQ(count(after_retry, "good:destroy\n"),
+              count(before_retry, "good:destroy\n") + (initially_active ? 1u : 0u));
+  }
+}
+
+TEST_F(PluginLoaderTest, EmptyInputConfiguresEmptyGroup) {
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
+      rocjitsu::PluginLoader::configure_plugin_group("", PLUGIN_LOADER_FIXTURE_DIR,
+                                                     diagnostic.emitter());
+  ASSERT_TRUE(group.succeeded());
+  EXPECT_TRUE(group.value()->empty());
+  EXPECT_TRUE(diagnostic.message().empty());
 }
 
 TEST_F(PluginLoaderTest, DestroysRejectedDuplicateBeforeUnload) {

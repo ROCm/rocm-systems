@@ -260,7 +260,10 @@ util::FailureOr<std::shared_ptr<ExecutionPluginGroup>>
 PluginLoader::configure_plugin_group(const std::string &config_json, const std::string &plugin_dir,
                                      util::DiagnosticEmitter diagnostic) {
   flexbuffers::Builder root_fbb;
-  bool parsed = flexbuffer_from_json(config_json, root_fbb);
+  const bool parsed = flexbuffer_from_json(config_json, root_fbb);
+  // Empty input intentionally configures an empty group.
+  if (!parsed && !config_json.empty())
+    return diagnostic.emit() << "invalid plugin configuration JSON";
   auto root = parsed ? flexbuffers::GetRoot(root_fbb.GetBuffer()) : flexbuffers::Reference();
 
   if (map_has_key(root, "profiled"))

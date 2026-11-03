@@ -299,7 +299,8 @@ rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char 
     group->onInit();
     vm->plugin_group_active.store(true, std::memory_order_release);
     return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::exception &) {
+  } catch (const std::exception &e) {
+    util::Logger::warn("rj_vm_load_plugins failed: ", e.what());
     return ROCJITSU_STATUS_ERROR;
   }
 }

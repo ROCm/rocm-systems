@@ -188,17 +188,21 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_string_for_node(const char *json, co
 /// config and attaches the resulting plugin group to the VM's SoC. This is the
 /// C-API equivalent of what the LD_PRELOAD interposer and the rocjitsu CLI do
 /// through the C++ PluginLoader, so a C-API host (e.g. the mirage daemon) can
-/// enable plugins without linking the simulator's C++ ABI. Call once after
-/// rj_vm_create / rj_vm_create_from_string and before rj_vm_run. A config with
+/// enable plugins without linking the simulator's C++ ABI. Call after
+/// rj_vm_create / rj_vm_create_from_string; repeated calls are allowed before
+/// the first rj_vm_step or rj_vm_run. A config with
 /// no `plugins` attaches an empty group (near-zero overhead). Plugin load
 /// failures are best-effort unless the config sets the top-level
 /// `require_all_plugins` boolean to true. This function must complete before the
 /// first rj_vm_step or rj_vm_run call and must not overlap either call; that
 /// ordering keeps plugin initialization and replacement outside the
-/// simulation-callback interval.
+/// simulation-callback interval. Admission failures preserve the installed group
+/// and its active state. Exceptions during shutdown, replacement, or initialization
+/// are translated to errors without a state-preservation guarantee.
 /// @param[in] vm VM handle from rj_vm_create / rj_vm_create_from_string.
-/// @param[in] config_json The full config-file JSON (same text used to create
-///            the VM). Never NULL.
+/// @param[in] config_json The full config-file JSON containing the plugin
+///            configuration; it may differ from the text used to create the VM.
+///            Never NULL.
 /// @param[in] plugin_dir Trusted directory to load plugin shared objects from
 ///            by explicit path — required in daemon mode, where the process is
 ///            not re-exec'd and cannot rely on a launcher-populated
