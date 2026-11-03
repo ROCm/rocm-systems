@@ -1315,9 +1315,7 @@ if (ENABLE_ROCSHMEM_GIN)
 
     # Compile rocSHMEM's mlx5 provider (provider_gda_mlx5.cpp) into librccl.so.
     # It is the only provider with out-of-line QP construction (ionic/bnxt are
-    # header-only + dlsym'd), and the last rocshmem host-symbol dependency on the
-    # GIN device path. A build-time sed rewrites its includes and ibv calls to
-    # rccl's own shims; the result follows rccl's target-wide visibility.
+    # header-only + dlsym'd).
     set(_GIN_MLX5_DIR "${PROJECT_BINARY_DIR}/gin/mlx5")
     add_custom_command(
       OUTPUT "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp"
@@ -1327,8 +1325,8 @@ if (ENABLE_ROCSHMEM_GIN)
         "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp"
       # Redirect the two rocshmem includes: ibv_wrapper.hpp (the extern IBVWrapper
       # ibv link dep) -> rccl's verbs shim; util.hpp -> the private host-utils
-      # header. util.hpp is used ONLY for the CHECK_* abort macros, which must not
-      # live in rccl's INSTALLED util.hpp (a public device header) or their generic
+      # header. gda_host_utils.hpp contains CHECK_* abort macros, which must not leak 
+      # to the INSTALLED util.hpp (a public device header) or their generic
       # names would pollute consumer TUs.
       COMMAND sed -i
         "s|#include \"gda/ibv_wrapper\\.hpp\"|#include \"gin/gin_rocshmem_gda_ibv_shim.h\"|g;s|#include \"util\\.hpp\"|#include \"gin/gin_rocshmem_gda_host_utils.h\"|g"
@@ -1352,6 +1350,12 @@ if (ENABLE_ROCSHMEM_GIN)
       DEPENDS "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp")
     add_dependencies(copy_rocshmem_headers copy_rocshmem_mlx5_provider)
     target_sources(rccl PRIVATE "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp")
+    # Keep rocshmem::mlx5dv_funcs_t::* out of librccl's dynamic symbol table (as
+    # for anvil.cpp above): under default visibility (coverage / ENABLE_MPI_TESTS /
+    # Debug test builds) librccl's internal calls could otherwise bind to an app's
+    # own rocSHMEM copy.
+    set_source_files_properties("${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp"
+      PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
   endif()
 
   # Add rule to install ibvcore.h so that it can be found by ibv_core.hpp
