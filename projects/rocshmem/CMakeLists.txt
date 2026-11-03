@@ -67,21 +67,24 @@ option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
 # Limit this control to final native executable device links. The HIP-wide
 # HIP_CLANG_NUM_PARALLEL_JOBS control also changes compilation options.
 set(ROCSHMEM_NATIVE_LINK_JOBS "31" CACHE STRING
-    "Parallel architecture groups in native executable device links")
+    "Number of parallel jobs for final executable device links (maps to --offload-jobs)")
 if(NOT ROCSHMEM_NATIVE_LINK_JOBS MATCHES "^[1-9][0-9]*$")
   message(FATAL_ERROR "ROCSHMEM_NATIVE_LINK_JOBS must be a positive integer")
 endif()
 
+set(_ROCSHMEM_NATIVE_LINK_JOBS ${ROCSHMEM_NATIVE_LINK_JOBS})
+if(_ROCSHMEM_NATIVE_LINK_JOBS GREATER 1 AND NOT HIP_CLANG_SUPPORTS_PARALLEL_JOBS)
+  message(WARNING "HIP --offload-jobs is unavailable; using one device link job")
+  set(_ROCSHMEM_NATIVE_LINK_JOBS 1)
+endif()
+
 function(_rocshmem_set_native_link_jobs target)
-  if(ROCSHMEM_NATIVE_LINK_JOBS GREATER 1)
-    if(NOT HIP_CLANG_SUPPORTS_PARALLEL_JOBS)
-      message(FATAL_ERROR "ROCSHMEM_NATIVE_LINK_JOBS requires HIP --offload-jobs support")
-    endif()
+  if(_ROCSHMEM_NATIVE_LINK_JOBS GREATER 1)
     if(DEFINED HIP_CLANG_NUM_PARALLEL_JOBS AND HIP_CLANG_NUM_PARALLEL_JOBS GREATER 1)
       message(FATAL_ERROR "Use ROCSHMEM_NATIVE_LINK_JOBS with HIP_CLANG_NUM_PARALLEL_JOBS=1")
     endif()
     target_link_options(${target} PRIVATE
-      "--offload-jobs=${ROCSHMEM_NATIVE_LINK_JOBS}")
+      "--offload-jobs=${_ROCSHMEM_NATIVE_LINK_JOBS}")
   endif()
 endfunction()
 
