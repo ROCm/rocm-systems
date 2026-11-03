@@ -6,8 +6,8 @@
 import copy
 import csv
 import json
+import sqlite3
 from contextlib import ExitStack
-from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
@@ -21,7 +21,6 @@ from sqlalchemy import text
 
 from memory_chart.loader import Layouts
 from pc_sampling import (
-    per_kernel_isa_export,
     per_source_line_export,
     source_snapshot_analysis,
 )
@@ -33,6 +32,7 @@ from rocprof_compute_analyze.analysis_db import (
     filter_dispatch_frame,
     report_evaluation_diagnostics,
 )
+from rocprof_compute_analyze.output_location import plan_run_layout
 from utils import analysis_orm as orm
 from utils import schema
 from utils.file_io import create_df_kernel_top_stats
@@ -43,14 +43,6 @@ from utils.metrics.noise_clamper import (
 
 ISA_WORKLOAD_NAME = "vector_copy"
 ISA_WORKLOAD_SUB_NAME = "run"
-
-VIEW_CSV_FILENAMES = frozenset({
-    "kernel.csv",
-    "kernel_metric.csv",
-    "pc_sampling_summary.csv",
-    "source_lines.csv",
-    "workload_metric.csv",
-})
 
 
 def drain_evaluation_diagnostics():
@@ -149,7 +141,7 @@ def make_pc_sampling_database_analyzer(
 ):
     """Build a database analyzer configured for sampling-only workloads."""
     analyzer = db_analysis(
-        SimpleNamespace(output_name=None, output_format="database"),
+        SimpleNamespace(),
         {},
     )
     analyzer._runs = {
@@ -201,7 +193,7 @@ def make_counter_backed_database_analyzer(
 ):
     """Build a counter-backed analyzer with optional sampling records."""
     analyzer = db_analysis(
-        SimpleNamespace(output_name=None, output_format="database"),
+        SimpleNamespace(),
         {},
     )
     analyzer._runs = {
@@ -242,15 +234,13 @@ def run_analysis_with_existing_database(analyzer):
     """Run analysis while preserving the test's existing database session."""
     with ExitStack() as patch_stack:
         patch_stack.enter_context(patch.object(orm.Database, "init"))
-        patch_stack.enter_context(patch.object(orm.Database, "create_views"))
-        patch_stack.enter_context(patch.object(orm.Database, "write"))
         patch_stack.enter_context(
             patch(
                 "rocprof_compute_analyze.analysis_db.get_version",
                 return_value={"version": "test", "sha": "test"},
             )
         )
-        analyzer.run_analysis()
+        analyzer.build_database()
 
 
 def query_instruction_sample_states(session):
@@ -271,10 +261,9 @@ def query_instruction_stall_reasons(session):
 
 
 def run_analysis_with_materialized_views(analyzer):
-    """Run analysis while materializing views in the existing test database."""
+    """Build the database, with its views, in the existing test database."""
     with ExitStack() as patch_stack:
         patch_stack.enter_context(patch.object(orm.Database, "init"))
-        patch_stack.enter_context(patch.object(orm.Database, "write"))
         patch_stack.enter_context(patch.object(analyzer, "run_analysis_metrics"))
         patch_stack.enter_context(
             patch(
@@ -282,7 +271,7 @@ def run_analysis_with_materialized_views(analyzer):
                 return_value={"version": "test", "sha": "test"},
             )
         )
-        analyzer.run_analysis()
+        analyzer.build_database()
 
 
 def cleanup_database() -> None:
@@ -887,6 +876,21 @@ def test_calc_pmc_df_data_skips_workload_without_results(tmp_path):
     analyzer._profiling_config = {}
 
     assert analyzer.calc_pmc_df_data() == {}
+
+
+def test_calc_roofline_ceilings_skips_an_invalid_roofline_csv(tmp_path, monkeypatch):
+    """A malformed roofline.csv gives no ceilings and a warning, not a crash."""
+    mock_warning = common.patch_console(
+        monkeypatch, "rocprof_compute_analyze.analysis_db", "warning"
+    )["warning"]
+    (tmp_path / "roofline.csv").write_text("this,is,bad,csv", encoding="utf-8")
+    analyzer = db_analysis(SimpleNamespace(), {})
+    analyzer._runs = {
+        str(tmp_path): schema.Workload(sys_info=pd.DataFrame([{"gpu_arch": "gfx90a"}]))
+    }
+
+    assert analyzer.calc_roofline_ceilings() == {}
+    assert "Skipping roofline ceilings" in mock_warning.call_args.args[0]
 
 
 def test_calc_metrics_data_exports_qualified_per_channel_names():
@@ -1577,7 +1581,7 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
         sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
     )
     analyzer = db_analysis(
-        SimpleNamespace(output_name=None, output_format="database"),
+        SimpleNamespace(),
         {},
     )
     analyzer._runs = {workload_path: workload}
@@ -1593,8 +1597,6 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
 
     with ExitStack() as patch_stack:
         patch_stack.enter_context(patch.object(orm.Database, "init"))
-        patch_stack.enter_context(patch.object(orm.Database, "create_views"))
-        patch_stack.enter_context(patch.object(orm.Database, "write"))
         patch_stack.enter_context(patch.object(analyzer, "run_analysis_metrics"))
         patch_stack.enter_context(
             patch(
@@ -1602,7 +1604,7 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
                 return_value={"version": "test", "sha": "test"},
             )
         )
-        analyzer.run_analysis()
+        analyzer.build_database()
 
     dispatches = (
         db_session
@@ -1853,9 +1855,9 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
 def test_run_analysis_exports_process_scoped_pc_sampling_csv(
     tmp_path,
 ):
-    """Export one PC sampling CSV row per process, resolvable in kernel.csv."""
+    """Export one PC-sampling summary row per process."""
     try:
-        orm.Database.init(":memory:")
+        orm.Database.init()
         database_session = orm.Database.get_session()
         assert database_session is not None
         analyzer = make_pc_sampling_only_database_analyzer(
@@ -1877,30 +1879,18 @@ def test_run_analysis_exports_process_scoped_pc_sampling_csv(
                 )
             )
         }
-        expected_kernel_mapping = {
-            kernel_uuid: dispatch_count
-            for kernel_uuid, dispatch_count in database_session.execute(
-                text(
-                    "SELECT kernel_uuid, dispatch_count "
-                    "FROM compute_kernel_view ORDER BY kernel_uuid"
-                )
-            )
-        }
+        (workload_obj,) = analyzer._workload_objs
+        summary_path = tmp_path / "pc-sampling-summary.csv"
+        orm.Database.write_analysis_csvs(
+            metrics_summary_paths={},
+            pc_sampling_summary_paths={workload_obj.workload_id: summary_path},
+            kernel_metrics_paths={},
+        )
 
-        csv_directory = tmp_path / "csv"
-        orm.Database.write_csv_dir(csv_directory)
-
-        output_filenames = {path.name for path in csv_directory.iterdir()}
-        assert output_filenames == VIEW_CSV_FILENAMES
-        assert "dispatch.csv" not in output_filenames
-
-        pc_sampling_frame = pd.read_csv(csv_directory / "pc_sampling_summary.csv")
-        kernel_frame = pd.read_csv(csv_directory / "kernel.csv")
+        pc_sampling_frame = pd.read_csv(summary_path)
         assert "pid" in pc_sampling_frame.columns
         assert "code_object_id" in pc_sampling_frame.columns
-        assert "pid" not in kernel_frame.columns
         assert list(pc_sampling_frame["kernel_name"]) == ["vecCopy", "vecCopy"]
-        assert list(kernel_frame["kernel_name"]) == ["vecCopy"]
 
         pc_sampling_csv_mapping = {
             row.pid: row.count for row in pc_sampling_frame.itertuples(index=False)
@@ -1908,15 +1898,14 @@ def test_run_analysis_exports_process_scoped_pc_sampling_csv(
         assert pc_sampling_csv_mapping == {42: 1, 99: 2}
         assert pc_sampling_csv_mapping == expected_pc_sampling_mapping
 
-        kernel_csv_mapping = {
-            row.kernel_uuid: row.dispatch_count
-            for row in kernel_frame.itertuples(index=False)
-        }
-        assert kernel_csv_mapping == expected_kernel_mapping
-        assert set(kernel_csv_mapping.values()) == {2}
-
-        # T1 regression guard: every sampling row must resolve in kernel.csv.
-        assert set(pc_sampling_frame["kernel_uuid"]) <= set(kernel_frame["kernel_uuid"])
+        # Every sampling row resolves to one kernel of the kernel view.
+        kernel_dispatch_counts = dict(
+            database_session.execute(
+                text("SELECT kernel_uuid, dispatch_count FROM compute_kernel_view")
+            ).all()
+        )
+        assert set(kernel_dispatch_counts.values()) == {2}
+        assert set(pc_sampling_frame["kernel_uuid"]) <= set(kernel_dispatch_counts)
     finally:
         cleanup_database()
 
@@ -2177,7 +2166,7 @@ def fetch_source_lines_by_workload(session):
     }
 
 
-def make_source_export_analyzer(tmp_path, output_format):
+def make_source_export_analyzer(tmp_path):
     """Build an analyzer and the source export its result folder should hold.
 
     Each workload holds one file its samples name and one it does not, so the
@@ -2201,41 +2190,53 @@ def make_source_export_analyzer(tmp_path, output_format):
                 [f"{referenced_source_path}:1"],
             )
         )
+        workload_position = len(expected_exported_files) + 1
         expected_exported_files[
-            Path(workload_name)
-            / "run"
+            Path(f"workload-{workload_position}")
+            / "kernel-1"
             / "source"
             / Path(referenced_source_path).relative_to("/")
         ] = contents.encode()
 
     analyzer = make_pc_sampling_database_analyzer(tool_data_per_workload)
-    result_path = tmp_path / f"{output_format}_analysis"
-    analyzer.get_args().output_name = str(result_path)
-    analyzer.get_args().output_format = output_format
+    result_path = tmp_path / "run"
     return analyzer, result_path, expected_exported_files
 
 
-def run_source_export_analysis(analyzer):
-    """Run source-export analysis and always clear the test database state."""
-    try:
-        with ExitStack() as patch_stack:
-            patch_stack.enter_context(patch.object(analyzer, "run_analysis_metrics"))
-            patch_stack.enter_context(
-                patch(
-                    "rocprof_compute_analyze.analysis_db.get_version",
-                    return_value={"version": "test", "sha": "test"},
-                )
+def create_run_layout(analyzer, run_folder):
+    """Create run_folder and its workload folders, as the analyze run does."""
+    layout = plan_run_layout(run_folder, list(analyzer._runs))
+    run_folder.mkdir()
+    for workload_folder in layout.workload_folders.values():
+        workload_folder.mkdir()
+    return layout
+
+
+def build_database_without_metrics(analyzer):
+    """Fill the in-memory database, skipping the metric rows."""
+    with ExitStack() as patch_stack:
+        patch_stack.enter_context(patch.object(analyzer, "run_analysis_metrics"))
+        patch_stack.enter_context(
+            patch(
+                "rocprof_compute_analyze.analysis_db.get_version",
+                return_value={"version": "test", "sha": "test"},
             )
-            analyzer.run_analysis()
+        )
+        analyzer.build_database()
+
+
+def run_source_export_analysis(analyzer, run_folder):
+    """Build the database, write it into run_folder, and clear the database state."""
+    try:
+        build_database_without_metrics(analyzer)
+        analyzer.write_outputs(create_run_layout(analyzer, run_folder))
     finally:
         cleanup_database()
 
 
 def read_exported_source_files(result_path):
     """Return the exported source files under a CSV result folder."""
-    exported_files = common.read_binary_file_tree(
-        result_path / per_kernel_isa_export.PER_KERNEL_DIRECTORY_NAME
-    )
+    exported_files = common.read_binary_file_tree(result_path)
     return {
         exported_path: contents
         for exported_path, contents in exported_files.items()
@@ -2247,100 +2248,51 @@ def read_exported_source_files(result_path):
     }
 
 
-def read_view_csv_files(result_path):
-    """Return view CSV contents keyed by filename."""
-    return {
-        csv_path.name: csv_path.read_bytes() for csv_path in result_path.glob("*.csv")
-    }
+def test_write_outputs_writes_the_database_and_the_view_csvs_together(tmp_path):
+    """One run writes root files and workload-scoped PC and metric CSVs."""
+    analyzer, result_path, _ = make_source_export_analyzer(tmp_path)
+
+    run_source_export_analysis(analyzer, result_path)
+
+    assert (result_path / "analysis.db").is_file()
+    assert not list(result_path.glob("*.csv"))
+    assert (result_path / "workload-1" / "metrics-summary.csv").is_file()
+    assert (result_path / "workload-1" / "pc-sampling-summary.csv").is_file()
+    assert (result_path / "workload-1" / "kernel-0" / "kernel-0-metrics.csv").is_file()
+    assert (result_path / "workload-1" / "kernel-1" / "source").is_dir()
+    assert (result_path / "workload-2" / "metrics-summary.csv").is_file()
+    assert (result_path / "workload-2" / "pc-sampling-summary.csv").is_file()
+    assert (result_path / "workload-2" / "kernel-1" / "source").is_dir()
 
 
-def write_view_csv_files_and_capture(
-    original_write_csv_dir,
-    captured_view_csv_files,
-    csv_directory,
-):
-    """Write view CSVs and capture their contents before source export."""
-    original_write_csv_dir(csv_directory)
-    captured_view_csv_files.update(read_view_csv_files(csv_directory))
-
-
-def test_run_analysis_per_kernel_export_is_not_created_for_db_output(tmp_path):
-    """Do not export per-kernel ISA or source snapshots for database output."""
+def test_write_outputs_closes_the_database_session(tmp_path):
+    """The session is closed once every artifact is written."""
     analyzer, result_path, _expected_exported_files = make_source_export_analyzer(
-        tmp_path,
-        "db",
+        tmp_path
     )
+    build_database_without_metrics(analyzer)
+    try:
+        analyzer.write_outputs(create_run_layout(analyzer, result_path))
 
-    with patch(
-        "rocprof_compute_analyze.analysis_db.export_source_snapshot_files"
-    ) as export_source_snapshot_files:
-        run_source_export_analysis(analyzer)
-
-    export_source_snapshot_files.assert_not_called()
-    assert Path(f"{result_path}.db").is_file()
-    assert not (result_path / per_kernel_isa_export.PER_KERNEL_DIRECTORY_NAME).exists()
+        assert orm.Database.get_session() is None
+    finally:
+        cleanup_database()
 
 
-def test_run_analysis_source_export_scopes_workloads_and_preserves_view_csvs(
+def test_run_analysis_source_export_scopes_workloads_under_numbered_folders(
     tmp_path,
 ):
-    """Isolate workload exports without changing the generated view CSVs."""
+    """Source files and per-source rows follow the -p workload order."""
     analyzer, result_path, expected_exported_files = make_source_export_analyzer(
-        tmp_path,
-        "csv",
+        tmp_path
     )
-    view_csvs_before_source_export = {}
-    original_write_csv_dir = orm.Database.write_csv_dir
-
-    with ExitStack() as patch_stack:
-        patch_stack.enter_context(
-            patch.object(
-                orm.Database,
-                "write_csv_dir",
-                side_effect=partial(
-                    write_view_csv_files_and_capture,
-                    original_write_csv_dir,
-                    view_csvs_before_source_export,
-                ),
-            )
-        )
-        export_source_snapshot_files = patch_stack.enter_context(
-            patch(
-                "rocprof_compute_analyze.analysis_db.export_source_snapshot_files",
-                wraps=source_snapshot_analysis.export_source_snapshot_files,
-            )
-        )
-        run_source_export_analysis(analyzer)
-
-    # The analyzer names each export folder, rather than the export rederiving
-    # it, so a folder cannot drift from the workload row it belongs to.
-    export_arguments = export_source_snapshot_files.call_args.kwargs
-    assert (
-        export_arguments["export_directory"] == result_path / "per_kernel_pc_sampling"
-    )
-    assert [
-        (snapshot.workload_name, snapshot.workload_sub_name)
-        for snapshot in export_arguments["workload_source_snapshots"]
-    ] == [("first", "run"), ("second", "run")]
-
-    view_csvs_after_analysis = read_view_csv_files(result_path)
-    assert set(view_csvs_before_source_export) == VIEW_CSV_FILENAMES
-    assert set(view_csvs_after_analysis) == VIEW_CSV_FILENAMES
-    assert view_csvs_after_analysis == view_csvs_before_source_export
+    run_source_export_analysis(analyzer, result_path)
 
     exported_source_files = read_exported_source_files(result_path)
     assert exported_source_files == expected_exported_files
-
-    # Every path the CSV records locates its copy by dropping the leading "/".
-    source_lines_frame = pd.read_csv(result_path / "source_lines.csv")
-    assert {
-        Path(file_path).relative_to("/")
-        for file_path in source_lines_frame["file_path"]
-    } == {
-        # The first three components name the workload and the source folder.
-        Path(*exported_path.parts[3:])
-        for exported_path in exported_source_files
-    }
+    assert not list(result_path.glob("*.csv"))
+    assert (result_path / "workload-1" / "pc-sampling-summary.csv").is_file()
+    assert (result_path / "workload-2" / "pc-sampling-summary.csv").is_file()
 
 
 def test_run_analysis_keeps_each_workloads_source_files_apart(db_session, tmp_path):
@@ -3144,25 +3096,24 @@ def test_run_analysis_aggregates_each_source_line_over_all_processes(
 def make_csv_run_analyzer(tmp_path, tool_data_per_workload, **filters):
     """Build a CSV-output analyzer over sampling-only workloads."""
     analyzer = make_pc_sampling_database_analyzer(tool_data_per_workload, **filters)
-    result_path = tmp_path / "csv_analysis"
-    analyzer.get_args().output_name = str(result_path)
-    analyzer.get_args().output_format = "csv"
+    result_path = tmp_path / "run"
     return analyzer, result_path
 
 
 def read_per_kernel_isa_file(result_path, kernel_row, code_object_id=5, pid=42):
     """Return one exported ISA file as its header and its rows.
 
-    The folder is named after the kernel's row in kernel.csv.
+    Kernel folder numbers follow descending total dispatch duration.
     """
-    export_path = (
-        result_path
-        / per_kernel_isa_export.PER_KERNEL_DIRECTORY_NAME
-        / ISA_WORKLOAD_NAME
-        / ISA_WORKLOAD_SUB_NAME
-        / f"{kernel_row['short_name']}_uuid_{kernel_row['kernel_uuid']}"
-        / f"isa_code_object_id_{code_object_id}_pid_{pid}.csv"
+    kernel_rows = read_kernel_rows(result_path)
+    kernel_position = next(
+        index
+        for index, row in enumerate(kernel_rows)
+        if row["kernel_uuid"] == kernel_row["kernel_uuid"]
     )
+    export_path = result_path / "workload-1" / f"kernel-{kernel_position}"
+    export_path /= f"{kernel_row['short_name']}_uuid_{kernel_row['kernel_uuid']}"
+    export_path /= f"isa_code_object_id_{code_object_id}_pid_{pid}.csv"
     with export_path.open(newline="", encoding="utf-8") as export_file:
         header, *rows = list(csv.reader(export_file))
     return header, rows
@@ -3174,11 +3125,45 @@ def stall_reason_columns(header):
 
 
 def per_kernel_isa_paths(result_path):
-    """Return the exported ISA files, relative to the per-kernel folder."""
-    per_kernel_directory = result_path / per_kernel_isa_export.PER_KERNEL_DIRECTORY_NAME
+    """Return the exported ISA files relative to the run folder."""
     return sorted(
-        str(export_path.relative_to(per_kernel_directory))
-        for export_path in per_kernel_directory.rglob("isa_*.csv")
+        str(export_path.relative_to(result_path))
+        for export_path in result_path.rglob("isa_*.csv")
+    )
+
+
+def read_kernel_rows(result_path):
+    """Read kernels in the Analyze top-kernel order from the database."""
+    connection = sqlite3.connect(result_path / "analysis.db")
+    try:
+        rows = connection.execute(
+            "SELECT k.kernel_uuid, k.kernel_name, k.short_name, "
+            "SUM(d.end_timestamp - d.start_timestamp) AS duration "
+            "FROM compute_kernel AS k "
+            "JOIN compute_dispatch AS d ON d.kernel_uuid = k.kernel_uuid "
+            "GROUP BY k.kernel_uuid "
+            "ORDER BY duration DESC, k.kernel_name"
+        ).fetchall()
+    finally:
+        connection.close()
+    return [
+        {
+            "kernel_uuid": row[0],
+            "kernel_name": row[1],
+            "short_name": row[2],
+        }
+        for row in rows
+    ]
+
+
+def read_sampled_kernel_row(result_path):
+    """Return the kernel named by the workload's PC summary."""
+    summary = pd.read_csv(result_path / "workload-1" / "pc-sampling-summary.csv")
+    sampled_name = summary["kernel_name"].iloc[0]
+    return next(
+        row
+        for row in read_kernel_rows(result_path)
+        if row["kernel_name"] == sampled_name
     )
 
 
@@ -3211,13 +3196,14 @@ def test_run_analysis_writes_one_isa_file_per_kernel_code_object_and_process(
             ]
         },
     )
-    run_source_export_analysis(analyzer)
+    run_source_export_analysis(analyzer, result_path)
 
-    kernel_frame = pd.read_csv(result_path / "kernel.csv")
+    kernel_rows = read_kernel_rows(result_path)
     assert per_kernel_isa_paths(result_path) == sorted(
-        f"vector_copy/run/{kernel_row.short_name}_uuid_{kernel_row.kernel_uuid}"
+        f"workload-1/kernel-{kernel_position}/"
+        f"{kernel_row['short_name']}_uuid_{kernel_row['kernel_uuid']}"
         f"/isa_code_object_id_{code_object_id}_pid_{pid}.csv"
-        for kernel_row in kernel_frame.itertuples()
+        for kernel_position, kernel_row in enumerate(kernel_rows)
         for code_object_id, pid in ((5, 42), (5, 43), (6, 44))
     )
 
@@ -3236,10 +3222,10 @@ def test_run_analysis_isa_file_carries_the_kernels_sampled_lines(
         {str(workload_path): [make_pc_sampling_tool_data()]},
         filter_gpu_ids=filter_gpu_ids,
     )
-    run_source_export_analysis(analyzer)
+    run_source_export_analysis(analyzer, result_path)
 
-    kernel_frame = pd.read_csv(result_path / "kernel.csv").set_index("kernel_name")
-    header, rows = read_per_kernel_isa_file(result_path, kernel_frame.loc["vecCopy"])
+    kernel_row = read_sampled_kernel_row(result_path)
+    header, rows = read_per_kernel_isa_file(result_path, kernel_row)
 
     assert header == [
         "Instruction line number",
@@ -3293,9 +3279,9 @@ def test_run_analysis_isa_file_carries_the_static_instruction_type(tmp_path):
         tmp_path,
         {str(workload_path): [tool_data]},
     )
-    run_source_export_analysis(analyzer)
+    run_source_export_analysis(analyzer, result_path)
 
-    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    kernel_row = read_sampled_kernel_row(result_path)
     header, rows = read_per_kernel_isa_file(result_path, kernel_row)
 
     type_column = header.index("Instruction type")
@@ -3324,9 +3310,9 @@ def test_run_analysis_isa_stall_columns_follow_the_workloads_reasons(tmp_path):
         tmp_path,
         {str(workload_path): [tool_data]},
     )
-    run_source_export_analysis(analyzer)
+    run_source_export_analysis(analyzer, result_path)
 
-    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    kernel_row = read_sampled_kernel_row(result_path)
     header, rows = read_per_kernel_isa_file(result_path, kernel_row)
 
     assert stall_reason_columns(header) == ["Stall SLEEP_WAIT", "Stall WAITCNT"]
@@ -3359,9 +3345,9 @@ def test_run_analysis_isa_carries_no_stall_columns_for_host_trap(tmp_path):
         tmp_path,
         {str(workload_path): [tool_data]},
     )
-    run_source_export_analysis(analyzer)
+    run_source_export_analysis(analyzer, result_path)
 
-    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    kernel_row = read_sampled_kernel_row(result_path)
     header, rows = read_per_kernel_isa_file(result_path, kernel_row)
 
     assert stall_reason_columns(header) == []
@@ -3391,13 +3377,12 @@ def test_run_analysis_writes_source_line_counts_beside_the_source_copy(tmp_path)
     analyzer, result_path = make_csv_run_analyzer(
         tmp_path, {str(workload_path): tool_data_records}
     )
-    run_source_export_analysis(analyzer)
+    run_source_export_analysis(analyzer, result_path)
 
     source_directory = (
         result_path
-        / per_kernel_isa_export.PER_KERNEL_DIRECTORY_NAME
-        / ISA_WORKLOAD_NAME
-        / ISA_WORKLOAD_SUB_NAME
+        / "workload-1"
+        / "kernel-0"
         / source_snapshot_analysis.SOURCE_EXPORT_DIRECTORY_NAME
         / "s"
     )
@@ -3405,9 +3390,9 @@ def test_run_analysis_writes_source_line_counts_beside_the_source_copy(tmp_path)
         "a.cpp",
         "a.cpp_pc_sampling.csv",
     ]
-    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    kernel_row = read_kernel_rows(result_path)[0]
     isa_file = (
-        f"{kernel_row.short_name}_uuid_{kernel_row.kernel_uuid}"
+        f"{kernel_row['short_name']}_uuid_{kernel_row['kernel_uuid']}"
         "/isa_code_object_id_5_pid_42.csv"
     )
     with (source_directory / "a.cpp_pc_sampling.csv").open(
@@ -3470,17 +3455,17 @@ def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
         {str(workload_path): [tool_data, other_code_object_tool_data]},
         filter_kernel_ids=[0],
     )
-    run_source_export_analysis(analyzer)
+    run_source_export_analysis(analyzer, result_path)
 
-    kernel_frame = pd.read_csv(result_path / "kernel.csv")
-    assert list(kernel_frame["kernel_name"]) == ["vecCopy"]
-    summary_frame = pd.read_csv(result_path / "pc_sampling_summary.csv")
+    kernel_rows = read_kernel_rows(result_path)
+    assert [row["kernel_name"] for row in kernel_rows] == ["vecCopy"]
+    summary_frame = pd.read_csv(result_path / "workload-1" / "pc-sampling-summary.csv")
     assert list(summary_frame["offset"]) == [0x10]
     # The second code object held only the kernel the filter dropped.
     assert set(summary_frame["code_object_id"]) == {5}
     assert per_kernel_isa_paths(result_path) == [
-        f"vector_copy/run/{kernel_frame['short_name'].iloc[0]}"
-        f"_uuid_{kernel_frame['kernel_uuid'].iloc[0]}"
+        f"workload-1/kernel-0/{kernel_rows[0]['short_name']}"
+        f"_uuid_{kernel_rows[0]['kernel_uuid']}"
         "/isa_code_object_id_5_pid_42.csv"
     ]
 
@@ -3497,13 +3482,13 @@ def test_run_analysis_dispatch_filter_reaches_a_sampling_only_workload(
         filter_dispatch_ids=filter_dispatch_ids,
     )
 
-    run_source_export_analysis(analyzer)
+    run_source_export_analysis(analyzer, result_path)
 
-    kernel_frame = pd.read_csv(result_path / "kernel.csv")
-    assert list(kernel_frame["kernel_name"]) == ["vecAdd"]
+    kernel_rows = read_kernel_rows(result_path)
+    assert [row["kernel_name"] for row in kernel_rows] == ["vecAdd"]
     assert per_kernel_isa_paths(result_path) == [
-        f"vector_copy/run/{kernel_frame['short_name'].iloc[0]}"
-        f"_uuid_{kernel_frame['kernel_uuid'].iloc[0]}"
+        f"workload-1/kernel-0/{kernel_rows[0]['short_name']}"
+        f"_uuid_{kernel_rows[0]['kernel_uuid']}"
         "/isa_code_object_id_5_pid_42.csv"
     ]
 

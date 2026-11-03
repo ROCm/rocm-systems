@@ -12,9 +12,11 @@ import pytest
 
 from rocprof_compute_analyze.analysis_cli import (
     _intersect_with_user_dispatch_filter,
+    active_operator_filters,
     cli_analysis,
     parse_operator_patterns,
 )
+from rocprof_compute_analyze.output_location import plan_run_layout
 from utils import schema
 from utils.utils_analysis import CallTreeNode, KernelStats, iter_call_tree_paths
 
@@ -89,7 +91,6 @@ def append_args_and_exit(errors, *argv, **_kwargs):
 def cli_with_two_operator_workloads(args):
     inst = cli_analysis.__new__(cli_analysis)
     inst._profiling_config = {}
-    inst._output = None
     inst._runs = {
         "/w1": workload_with_operator_forest(),
         "/w2": workload_with_operator_forest(),
@@ -98,6 +99,49 @@ def cli_with_two_operator_workloads(args):
         workload.sys_info = pd.DataFrame([{"gpu_arch": "gfx950"}])
     inst._arch_configs = {"gfx950": SimpleNamespace(dfs_expressions={})}
     inst._OmniAnalyze_Base__args = args
+    return inst
+
+
+class RecordingRoofline:
+    """Roofline stand-in that records the selected device and output path."""
+
+    instances = []
+
+    def __init__(self, **kwargs):
+        self.run_parameters = kwargs["run_parameters"]
+        self.output_path = None
+        self.__class__.instances.append(self)
+
+    def construct_plotly_figures(self, ai_data):
+        return "ops", "flops", "ops-dtypes", "flops-dtypes"
+
+    def save_html_files(self, *args, output_path):
+        self.output_path = output_path
+        return str(output_path)
+
+
+def make_roofline_cli(gpu_filter):
+    args = argparse.Namespace(
+        path=[["/workload"]],
+        gpu_id=gpu_filter,
+        gpu_kernel=None,
+        debug=False,
+    )
+    inst = cli_analysis.__new__(cli_analysis)
+    inst._OmniAnalyze_Base__args = args
+    inst._profiling_config = {}
+    inst._runs = {
+        "/workload": schema.Workload(
+            raw_pmc=pd.DataFrame({"GPU_ID": [4, 3, 2]}),
+            filter_gpu_ids=[str(gpu_id) for gpu_id in gpu_filter or []],
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx90a"}]),
+        )
+    }
+    inst._arch_configs = {"gfx90a": SimpleNamespace(dfs_expressions={})}
+    inst._OmniAnalyze_Base__socs = {
+        "gfx90a": SimpleNamespace(get_args=lambda: None, _mspec=object())
+    }
+    inst._roofline_figures = {}
     return inst
 
 
@@ -137,10 +181,15 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
         torch_list_ops=False,
         triton_list_ops=False,
         ml_api_list_ops=False,
+        list_stats=False,
     )
     inst._OmniAnalyze_Base__args = args
 
     membw_calls: list[tuple] = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.cli_analysis._build_roofline_figures",
+        lambda self: None,
+    )
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_cli.run_membw_analysis",
         lambda *a, **kw: membw_calls.append(a),
@@ -167,6 +216,95 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
     inst.pre_processing()
 
     assert len(membw_calls) == (1 if expect_called else 0)
+
+
+@pytest.mark.parametrize(
+    ("gpu_filter", "expected_gpu_id"),
+    [
+        ([3], 3),
+        ([3, 4], 3),
+        (None, 2),
+    ],
+)
+def test_roofline_uses_one_selected_gpu_for_calculation_and_filename(
+    gpu_filter, expected_gpu_id, monkeypatch, tmp_path
+):
+    """The chart input, benchmark ceilings, and HTML filename use one GPU."""
+    import rocprof_compute_analyze.analysis_cli as analysis_cli_module
+
+    RecordingRoofline.instances = []
+    inst = make_roofline_cli(gpu_filter)
+    filtered_gpu_ids = []
+    calculated_gpu_ids = []
+
+    def apply_filters(workload, debug):
+        filtered_gpu_ids.append(list(workload.filter_gpu_ids))
+        return workload.raw_pmc.loc[
+            workload
+            .raw_pmc["GPU_ID"]
+            .astype(str)
+            .isin([str(gpu_id) for gpu_id in workload.filter_gpu_ids])
+        ]
+
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.validate_roofline_csv",
+        lambda _path: (True, ""),
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.Roofline", RecordingRoofline
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.parser.apply_filters", apply_filters
+    )
+
+    def calculate_ai(workload, pmc_df, arch_config):
+        calculated_gpu_ids.extend(pmc_df["GPU_ID"].tolist())
+        return {}
+
+    monkeypatch.setattr(analysis_cli_module, "calc_ai_analyze", calculate_ai)
+
+    def construct_figures(self, ai_data):
+        return "ops", "flops", "ops-dtypes", "flops-dtypes"
+
+    monkeypatch.setattr(
+        RecordingRoofline, "construct_plotly_figures", construct_figures
+    )
+    figures = inst._build_roofline_figures_for_workload("/workload")
+
+    assert figures.device_id == expected_gpu_id
+    assert RecordingRoofline.instances[0].run_parameters["device_id"] == expected_gpu_id
+    assert filtered_gpu_ids == [[expected_gpu_id]]
+    assert calculated_gpu_ids == [expected_gpu_id]
+    assert inst._runs["/workload"].filter_gpu_ids == [
+        str(gpu_id) for gpu_id in gpu_filter or []
+    ]
+
+    inst._roofline_figures["/workload"] = figures
+    inst._write_roofline_html({"/workload": tmp_path / "workload-1"})
+    assert RecordingRoofline.instances[0].output_path == (
+        tmp_path / "workload-1" / f"roofline-gpu-{expected_gpu_id}.html"
+    )
+
+
+# -- active_operator_filters -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("torch_operator", "triton_operator", "expected"),
+    [
+        (None, None, []),
+        (["*addmm*"], None, ["torch"]),
+        (None, [], ["triton"]),
+        (["*"], ["*"], ["torch", "triton"]),
+    ],
+    ids=["none", "torch", "empty_triton", "both"],
+)
+def test_active_operator_filters(torch_operator, triton_operator, expected):
+    """A backend counts as filtered once its option is given, even empty."""
+    args = argparse.Namespace(
+        torch_operator=torch_operator, triton_operator=triton_operator
+    )
+    assert active_operator_filters(args) == expected
 
 
 # -- parse_operator_patterns (torch_operator) -------------------------------
@@ -322,7 +460,9 @@ def test_dispatch_filter_outside_operator_dispatches_errors(monkeypatch):
     )
     with pytest.raises(SystemExit):
         _intersect_with_user_dispatch_filter([1, 2, 3], ["9"], "PyTorch")
-    assert "No PyTorch dispatches matched the -d filter" in str(errors[-1])
+    assert "No PyTorch dispatches matched the --kernel-iteration-range filter" in str(
+        errors[-1]
+    )
 
 
 def test_apply_operator_filter_keeps_nodes_from_requested_backend():
@@ -395,7 +535,7 @@ def test_pre_processing_lists_operators_for_every_path(monkeypatch):
     assert listed_paths == ["/w1", "/w2"]
 
 
-def test_run_analysis_prints_matched_tree_for_every_path(monkeypatch):
+def test_write_outputs_prints_matched_tree_for_every_path(monkeypatch, tmp_path):
     args = argparse.Namespace(
         path=[["/w1"], ["/w2"]],
         torch_operator=["*addmm*"],
@@ -410,10 +550,7 @@ def test_run_analysis_prints_matched_tree_for_every_path(monkeypatch):
             if run is workload:
                 handled_paths.append(workload_path)
 
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_base.OmniAnalyze_Base.run_analysis",
-        lambda self: None,
-    )
+    inst._roofline_figures = None
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_cli.cli_analysis.handle_operator",
         capture_handle,
@@ -422,5 +559,5 @@ def test_run_analysis_prints_matched_tree_for_every_path(monkeypatch):
         "rocprof_compute_analyze.analysis_cli.tty.show_all",
         lambda *a, **kw: None,
     )
-    inst.run_analysis()
+    inst.write_outputs(plan_run_layout(tmp_path, ["/w1", "/w2"]))
     assert handled_paths == ["/w1", "/w2"]

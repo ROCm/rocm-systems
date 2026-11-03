@@ -4,6 +4,7 @@
 """Unit tests for per_source_line_export.py."""
 
 import csv
+import os
 from pathlib import Path
 
 import pytest
@@ -11,12 +12,14 @@ import pytest
 from pc_sampling.pc_sampling_csv_export import IsaLineLocation
 from pc_sampling.per_source_line_export import (
     WorkloadSourceLineExport,
+    _copy_source_snapshot,
     _format_isa_references,
     _format_number_ranges,
     _resolve_source_line_export_path,
     _write_per_source_line_files,
     export_per_source_line_files,
 )
+from pc_sampling.source_snapshot_analysis import resolve_snapshot_path
 
 COPY_ISA_FILE = Path("vecCopy_uuid_7/isa_code_object_id_5_pid_42.csv")
 OTHER_PROCESS_ISA_FILE = Path("vecCopy_uuid_7/isa_code_object_id_5_pid_43.csv")
@@ -30,6 +33,16 @@ ISA_LINE_LOCATIONS = {
     104: IsaLineLocation(OTHER_PROCESS_ISA_FILE, 2),
     105: IsaLineLocation(ADD_ISA_FILE, 3),
 }
+COPY_KERNEL_UUID = 7
+ADD_KERNEL_UUID = 8
+
+
+def make_kernel_directories(root):
+    """Return the kernel folders under root, keyed by kernel uuid."""
+    return {
+        COPY_KERNEL_UUID: root / "kernel-0",
+        ADD_KERNEL_UUID: root / "kernel-1",
+    }
 
 
 def make_source_line_row(
@@ -41,21 +54,23 @@ def make_source_line_row(
     stall_reason_counts=(),
     instruction_uuids=(100,),
     file_path="/s/a.cpp",
-    workload_name="vector_copy",
-    workload_sub_name="MI300X_A1",
+    kernel_uuid=COPY_KERNEL_UUID,
+    wave_occupancy_percent=None,
+    active_thread_percent=None,
 ):
-    """Build one row as the per-source-line select returns it."""
+    """Build one row as the per-kernel source-line select returns it."""
     return (
-        workload_name,
-        workload_sub_name,
+        "vector_copy",
+        "MI300X_A1",
+        kernel_uuid,
         file_path,
         line_number,
         content,
         total_count,
         issue_count,
         stall_count,
-        None,
-        None,
+        wave_occupancy_percent,
+        active_thread_percent,
         *stall_reason_counts,
         ",".join(str(instruction_uuid) for instruction_uuid in instruction_uuids),
     )
@@ -68,15 +83,14 @@ def read_exported_rows(export_path):
 
 
 def test_resolve_source_line_export_path_sits_beside_the_source_copy():
-    """The file is named after the exported copy of the source file."""
+    """The file is named after the exported copy, in the kernel's folder."""
     export_path = _resolve_source_line_export_path(
-        Path("/results/per_kernel_pc_sampling"),
-        ("vector_copy", "MI300X_A1", "/home/u/app/vcopy.cpp"),
+        make_kernel_directories(Path("/results/workload-1")),
+        ("vector_copy", "MI300X_A1", COPY_KERNEL_UUID, "/home/u/app/vcopy.cpp"),
     )
 
     assert export_path == Path(
-        "/results/per_kernel_pc_sampling/vector_copy/MI300X_A1"
-        "/source/home/u/app/vcopy.cpp_pc_sampling.csv"
+        "/results/workload-1/kernel-0/source/home/u/app/vcopy.cpp_pc_sampling.csv"
     )
 
 
@@ -117,7 +131,10 @@ def test_write_per_source_line_files_opens_one_file_per_source_file(tmp_path):
     ]
 
     file_count = _write_per_source_line_files(
-        tmp_path, iter(source_line_rows), [], ISA_LINE_LOCATIONS
+        iter(source_line_rows),
+        [],
+        ISA_LINE_LOCATIONS,
+        make_kernel_directories(tmp_path),
     )
 
     assert file_count == 2
@@ -125,8 +142,8 @@ def test_write_per_source_line_files_opens_one_file_per_source_file(tmp_path):
         str(export_path.relative_to(tmp_path))
         for export_path in tmp_path.rglob("*.csv")
     ) == [
-        "vector_copy/MI300X_A1/source/s/a.cpp_pc_sampling.csv",
-        "vector_copy/MI300X_A1/source/s/b.hpp_pc_sampling.csv",
+        "kernel-0/source/s/a.cpp_pc_sampling.csv",
+        "kernel-0/source/s/b.hpp_pc_sampling.csv",
     ]
 
 
@@ -142,20 +159,23 @@ def test_write_per_source_line_files_writes_header_and_rows(tmp_path):
             stall_reason_counts=(None,),
             instruction_uuids=(),
         ),
-        make_source_line_row(line_number=2, stall_reason_counts=(4,)),
+        make_source_line_row(
+            line_number=2,
+            stall_reason_counts=(4,),
+            wave_occupancy_percent=25.0,
+            active_thread_percent=80.0,
+        ),
     ]
 
     _write_per_source_line_files(
-        tmp_path, iter(source_line_rows), ["WAITCNT"], ISA_LINE_LOCATIONS
+        iter(source_line_rows),
+        ["WAITCNT"],
+        ISA_LINE_LOCATIONS,
+        make_kernel_directories(tmp_path),
     )
 
     exported_rows = read_exported_rows(
-        tmp_path
-        / "vector_copy"
-        / "MI300X_A1"
-        / "source"
-        / "s"
-        / "a.cpp_pc_sampling.csv"
+        tmp_path / "kernel-0" / "source" / "s" / "a.cpp_pc_sampling.csv"
     )
     assert exported_rows == [
         [
@@ -176,8 +196,8 @@ def test_write_per_source_line_files_writes_header_and_rows(tmp_path):
             "3",
             "2",
             "1",
-            "",
-            "",
+            "25.0",
+            "80.0",
             "4",
             "vecCopy_uuid_7/isa_code_object_id_5_pid_42.csv:1",
         ],
@@ -198,16 +218,14 @@ def test_write_per_source_line_files_keeps_only_total_count_of_unattributable_ro
     ]
 
     _write_per_source_line_files(
-        tmp_path, iter(source_line_rows), ["WAITCNT"], ISA_LINE_LOCATIONS
+        iter(source_line_rows),
+        ["WAITCNT"],
+        ISA_LINE_LOCATIONS,
+        make_kernel_directories(tmp_path),
     )
 
     exported_rows = read_exported_rows(
-        tmp_path
-        / "vector_copy"
-        / "MI300X_A1"
-        / "source"
-        / "s"
-        / "a.cpp_pc_sampling.csv"
+        tmp_path / "kernel-0" / "source" / "s" / "a.cpp_pc_sampling.csv"
     )
     assert exported_rows[1] == [
         "",
@@ -225,24 +243,29 @@ def test_write_per_source_line_files_keeps_only_total_count_of_unattributable_ro
 def test_write_per_source_line_files_writes_nothing_without_rows(tmp_path):
     """A workload without captured source files leaves no folder behind."""
     file_count = _write_per_source_line_files(
-        tmp_path / "per_kernel", iter([]), [], ISA_LINE_LOCATIONS
+        iter([]), [], ISA_LINE_LOCATIONS, make_kernel_directories(tmp_path)
     )
 
     assert file_count == 0
-    assert not (tmp_path / "per_kernel").exists()
+    assert not list(tmp_path.iterdir())
 
 
 def test_export_per_source_line_files_writes_each_workloads_files(tmp_path):
-    """The rows of each workload land under the folder of that workload."""
+    """The rows of each workload land under that workload's kernel folders."""
     export_per_source_line_files(
-        tmp_path,
         ISA_LINE_LOCATIONS,
         [
             WorkloadSourceLineExport(
-                1, [], iter([make_source_line_row(workload_name="first")])
+                1,
+                [],
+                iter([make_source_line_row()]),
+                make_kernel_directories(tmp_path / "workload-1"),
             ),
             WorkloadSourceLineExport(
-                2, [], iter([make_source_line_row(workload_name="second")])
+                2,
+                [],
+                iter([make_source_line_row(kernel_uuid=ADD_KERNEL_UUID)]),
+                make_kernel_directories(tmp_path / "workload-2"),
             ),
         ],
     )
@@ -251,6 +274,29 @@ def test_export_per_source_line_files_writes_each_workloads_files(tmp_path):
         str(export_path.relative_to(tmp_path))
         for export_path in tmp_path.rglob("*.csv")
     ) == [
-        "first/MI300X_A1/source/s/a.cpp_pc_sampling.csv",
-        "second/MI300X_A1/source/s/a.cpp_pc_sampling.csv",
+        "workload-1/kernel-0/source/s/a.cpp_pc_sampling.csv",
+        "workload-2/kernel-1/source/s/a.cpp_pc_sampling.csv",
     ]
+
+
+def test_copy_source_snapshot_leaves_the_copy_writable(tmp_path):
+    """A read-only snapshot file must not export a read-only copy.
+
+    Preserving the mode would stop a user from editing or deleting the copy.
+    """
+    workload_path = tmp_path / "workload"
+    snapshot_path = resolve_snapshot_path(workload_path, "/s/a.cpp")
+    snapshot_path.parent.mkdir(parents=True)
+    snapshot_path.write_bytes(b"int a;\n")
+    snapshot_path.chmod(0o444)
+    export_path = tmp_path / "kernel-0" / "source" / "s" / "a.cpp_pc_sampling.csv"
+
+    _copy_source_snapshot(
+        export_path,
+        ("vector_copy", "MI300X_A1", COPY_KERNEL_UUID, "/s/a.cpp"),
+        workload_path=workload_path,
+    )
+
+    source_copy = export_path.with_name("a.cpp")
+    assert source_copy.read_bytes() == b"int a;\n"
+    assert os.access(source_copy, os.W_OK)

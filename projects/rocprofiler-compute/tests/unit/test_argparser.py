@@ -166,6 +166,56 @@ def test_profile_kernel_iteration_range():
 
 
 # =============================================================================
+# analyze run folder and dispatch filter options
+# =============================================================================
+
+
+def test_analyze_run_folder_defaults():
+    """Without -d or -o the run folder is resolved from the cwd and a timestamp."""
+    args = build_args(["analyze", "-p", "/tmp/workload"])
+    assert args.output_directory is None
+    assert args.output_name is None
+    assert args.output_format is None
+
+
+@pytest.mark.parametrize("flag", ["-d", "--output-directory"])
+def test_analyze_output_directory(flag):
+    args = build_args(["analyze", "-p", "/tmp/workload", flag, "/tmp/out"])
+    assert args.output_directory == "/tmp/out"
+
+
+@pytest.mark.parametrize("flag", ["-o", "--output-name"])
+def test_analyze_output_name(flag):
+    args = build_args(["analyze", "-p", "/tmp/workload", flag, "run1"])
+    assert args.output_name == "run1"
+
+
+def test_analyze_kernel_iteration_range():
+    args = build_args([
+        "analyze",
+        "-p",
+        "/tmp/workload",
+        "--kernel-iteration-range",
+        "1",
+        "3",
+    ])
+    assert args.gpu_dispatch_id == [["1", "3"]]
+
+
+def test_analyze_removed_dispatch_option_is_rejected(capsys):
+    with pytest.raises(SystemExit) as exc:
+        build_args(["analyze", "-p", "/tmp/workload", "--dispatch", "1"])
+    assert exc.value.code == 2
+    assert "--dispatch" in capsys.readouterr().err
+
+
+def test_analyze_output_format_still_parses():
+    """The deprecated option is accepted so existing commands keep working."""
+    args = build_args(["analyze", "-p", "/tmp/workload", "--output-format", "csv"])
+    assert args.output_format == "csv"
+
+
+# =============================================================================
 # analyze --verify-deps
 # =============================================================================
 

@@ -37,14 +37,20 @@ from pc_sampling.per_source_line_export import (
 )
 from pc_sampling.source_snapshot_analysis import (
     SourceFrame,
-    WorkloadSourceSnapshot,
-    export_source_snapshot_files,
     load_source_path_map,
     parse_source_frames,
     read_source_file_digest_and_lines,
     resolve_snapshot_path,
 )
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from rocprof_compute_analyze.output_location import (
+    ANALYSIS_DB_FILE_NAME,
+    METRICS_SUMMARY_FILE_NAME,
+    PC_SAMPLING_SUMMARY_FILE_NAME,
+    RunLayout,
+    kernel_folder_name,
+    kernel_metrics_file_name,
+)
 from roofline.roofline_main import ROOFLINE_SUPPORTED
 from utils import file_io, schema
 from utils.analysis_orm import Database
@@ -91,7 +97,11 @@ from utils.utils_analysis import (
     PEAK_COL_PREFERENCE,
     VALUE_COL_PREFERENCE,
 )
-from utils.utils_common import get_uuid, get_version, normalize_filter_to_str_list
+from utils.utils_common import (
+    get_version,
+    normalize_filter_to_str_list,
+    validate_roofline_csv,
+)
 from utils.utils_counter_defs import (
     extract_counters_and_variables,
     get_build_in_vars,
@@ -187,6 +197,13 @@ class ExpressionRow(NamedTuple):
     metric_id: str
     value_name: str
     value: str
+
+
+class AnalysisOutputDirectories(NamedTuple):
+    # Keyed by workload id
+    workload_directories: dict[int, Path]
+    # Keyed by workload id, then kernel uuid
+    kernel_directories_by_workload: dict[int, dict[int, Path]]
 
 
 class SourceFrameCollector:
@@ -350,21 +367,11 @@ class db_analysis(OmniAnalyze_Base):
         report_evaluation_diagnostics()
 
     @demarcate
-    def run_analysis(self) -> None:
-        """Run CLI analysis."""
-        super().run_analysis()
-
-        # Initialize analysis database
-        # Create db uuid
-        if self.get_args().output_name:
-            db_name = f"{self.get_args().output_name}.db"
-        else:
-            db_name = f"rocprof_compute_{get_uuid()}.db"
-        Database.init(db_name)
-        console_debug(f"Initialized database: {db_name}")
+    def build_database(self) -> None:
+        """Fill the in-memory analysis database; write_outputs saves it to disk."""
+        Database.init()
 
         # Iterate over all workloads
-        workload_source_snapshots: list[WorkloadSourceSnapshot] = []
         workload_objs: list[orm.Workload] = []
         for workload_path in self._runs.keys():
             # Add workload
@@ -459,15 +466,6 @@ class db_analysis(OmniAnalyze_Base):
                 source_frames,
                 sys_info,
             )
-            workload_source_snapshots.append(
-                WorkloadSourceSnapshot(
-                    workload_path=Path(workload_path),
-                    workload_name=workload_obj.name,
-                    workload_sub_name=workload_obj.sub_name,
-                    absolute_source_paths=source_frames.captured_source_paths(),
-                )
-            )
-
             # Add metrics and values - iterate on values, create metrics as needed
             self.run_analysis_metrics(workload_path, workload_obj, kernel_objs)
 
@@ -480,39 +478,120 @@ class db_analysis(OmniAnalyze_Base):
             )
         )
 
-        if self.get_args().output_format == "csv":
-            Database.commit()
-            csv_result_folder = Path(db_name).with_suffix("")
-            # Before write_csv_dir, which closes the session these rows stream from.
-            per_kernel_isa_files = export_per_kernel_isa_files(
-                csv_result_directory=csv_result_folder,
-                workload_isa_exports=self._build_workload_isa_exports(workload_objs),
+        Database.create_views()
+        Database.commit()
+        self._workload_objs = workload_objs
+
+    @demarcate
+    def write_outputs(self, layout: RunLayout) -> None:
+        """Write the database, per-workload metrics and PC-sampling exports."""
+        super().write_outputs(layout)
+        output_directories = self._build_output_directories(layout.workload_folders)
+        sampled_workloads = Database.workload_ids_with_pc_sampling()
+        # The per-kernel exports stream rows from the open session.
+        isa_line_locations = export_per_kernel_isa_files(
+            self._build_workload_isa_exports(
+                self._workload_objs,
+                output_directories.kernel_directories_by_workload,
+                sampled_workloads,
+            ),
+        )
+        export_per_source_line_files(
+            isa_line_locations=isa_line_locations,
+            workload_source_line_exports=self._build_workload_source_line_exports(
+                self._workload_objs,
+                output_directories.kernel_directories_by_workload,
+                sampled_workloads,
+            ),
+        )
+        Database.write(layout.run_folder / ANALYSIS_DB_FILE_NAME)
+        self._write_analysis_csvs(output_directories)
+        Database.close()
+
+    @staticmethod
+    def _write_analysis_csvs(output_directories: AnalysisOutputDirectories) -> None:
+        """Write each workload's summaries and each kernel's metrics CSV."""
+        workload_directories = output_directories.workload_directories
+        Database.write_analysis_csvs(
+            metrics_summary_paths={
+                workload_id: directory / METRICS_SUMMARY_FILE_NAME
+                for workload_id, directory in workload_directories.items()
+            },
+            pc_sampling_summary_paths={
+                workload_id: directory / PC_SAMPLING_SUMMARY_FILE_NAME
+                for workload_id, directory in workload_directories.items()
+            },
+            kernel_metrics_paths={
+                kernel_uuid: directory / kernel_metrics_file_name(directory.name)
+                for kernel_directories in (
+                    output_directories.kernel_directories_by_workload.values()
+                )
+                for kernel_uuid, directory in kernel_directories.items()
+            },
+        )
+
+    def _build_output_directories(
+        self,
+        workload_folders: dict[str, Path],
+    ) -> AnalysisOutputDirectories:
+        """Key the workload folders by workload id and create the kernel folders.
+
+        Kernel folders are numbered in top-stats order.
+        """
+        workload_directories: dict[int, Path] = {}
+        kernel_directories_by_workload: dict[int, dict[int, Path]] = {}
+
+        for workload_obj, workload_path in zip(self._workload_objs, self._runs):
+            workload_directory = workload_folders[workload_path]
+            workload_directories[workload_obj.workload_id] = workload_directory
+
+            dispatch_frame = self._dispatch_data_per_workload.get(
+                workload_path, pd.DataFrame()
             )
-            export_per_source_line_files(
-                export_directory=per_kernel_isa_files.directory,
-                isa_line_locations=per_kernel_isa_files.isa_line_locations,
-                workload_source_line_exports=(
-                    self._build_workload_source_line_exports(workload_objs)
-                ),
+            ranked_dispatch_frame = dispatch_frame.rename(
+                columns={
+                    "kernel_name": "Kernel_Name",
+                    "start_timestamp": "Start_Timestamp",
+                    "end_timestamp": "End_Timestamp",
+                }
             )
-            Database.write_csv_dir(csv_result_folder)
-            export_source_snapshot_files(
-                workload_source_snapshots=workload_source_snapshots,
-                export_directory=per_kernel_isa_files.directory,
+            kernel_names = (
+                rank_kernels_by_total_duration(ranked_dispatch_frame)
+                if not ranked_dispatch_frame.empty
+                else []
             )
-        else:
-            Database.create_views()
-            Database.commit()
-            Database.write()
+            kernels_by_name = {
+                kernel.kernel_name: kernel for kernel in workload_obj.kernels
+            }
+            workload_kernel_directories = {}
+            for kernel_position, kernel_name in enumerate(kernel_names):
+                kernel = kernels_by_name[kernel_name]
+                kernel_directory = workload_directory / kernel_folder_name(
+                    kernel_position, len(kernel_names)
+                )
+                kernel_directory.mkdir()
+                workload_kernel_directories[kernel.kernel_uuid] = kernel_directory
+            kernel_directories_by_workload[workload_obj.workload_id] = (
+                workload_kernel_directories
+            )
+
+        return AnalysisOutputDirectories(
+            workload_directories,
+            kernel_directories_by_workload,
+        )
 
     @staticmethod
     def _build_workload_isa_exports(
         workload_objs: list[orm.Workload],
+        kernel_directories_by_workload: dict[int, dict[int, Path]],
+        sampled_workloads: set[int],
     ) -> list[WorkloadIsaExport]:
         """Pair each workload's stall reasons with its instruction rows."""
         stall_reasons_by_workload = Database.get_stall_reasons_by_workload()
         workload_isa_exports = []
         for workload_obj in workload_objs:
+            if workload_obj.workload_id not in sampled_workloads:
+                continue
             stall_reasons = stall_reasons_by_workload.get(workload_obj.workload_id, [])
             workload_isa_exports.append(
                 WorkloadIsaExport(
@@ -521,25 +600,40 @@ class db_analysis(OmniAnalyze_Base):
                     isa_rows=Database.stream_per_kernel_isa_rows(
                         workload_obj.workload_id, stall_reasons
                     ),
+                    kernel_directories=kernel_directories_by_workload.get(
+                        workload_obj.workload_id, {}
+                    ),
                 )
             )
         return workload_isa_exports
 
-    @staticmethod
     def _build_workload_source_line_exports(
-        workload_objs: List[orm.Workload],
+        self,
+        workload_objs: list[orm.Workload],
+        kernel_directories_by_workload: dict[int, dict[int, Path]],
+        sampled_workloads: set[int],
     ) -> List[WorkloadSourceLineExport]:
         """Pair each workload's stall reasons with its source line rows."""
         stall_reasons_by_workload = Database.get_stall_reasons_by_workload()
         workload_source_line_exports = []
+        workload_paths = {
+            workload_obj.workload_id: Path(workload_path)
+            for workload_obj, workload_path in zip(workload_objs, self._runs)
+        }
         for workload_obj in workload_objs:
+            if workload_obj.workload_id not in sampled_workloads:
+                continue
             stall_reasons = stall_reasons_by_workload.get(workload_obj.workload_id, [])
             workload_source_line_exports.append(
                 WorkloadSourceLineExport(
                     workload_id=workload_obj.workload_id,
                     stall_reasons=stall_reasons,
-                    source_line_rows=Database.stream_per_source_line_rows(
+                    source_line_rows=Database.stream_per_kernel_source_line_rows(
                         workload_obj.workload_id, stall_reasons
+                    ),
+                    workload_path=workload_paths[workload_obj.workload_id],
+                    kernel_directories=kernel_directories_by_workload.get(
+                        workload_obj.workload_id, {}
                     ),
                 )
             )
@@ -661,6 +755,12 @@ class db_analysis(OmniAnalyze_Base):
                 continue
             if not (Path(workload_path) / "roofline.csv").exists():
                 console_warning(f"Roofline ceilings not found for {workload_path}.")
+                continue
+            is_roofline_valid, roofline_error = validate_roofline_csv(workload_path)
+            if not is_roofline_valid:
+                console_warning(
+                    f"Skipping roofline ceilings for {workload_path}: {roofline_error}"
+                )
                 continue
 
             roofline_dict = (

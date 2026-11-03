@@ -81,6 +81,7 @@ def write_grouped_csv_files(
     header: List[str],
     resolve_export_path: Callable[[Row], Path],
     format_file_rows: Callable[[Row, List[Row]], Iterable[Sequence[Any]]],
+    before_write: Optional[Callable[[Path, Row], None]] = None,
 ) -> int:
     """Write rows that arrive grouped by file, and return the number of files.
 
@@ -92,6 +93,8 @@ def write_grouped_csv_files(
     for file_key, file_rows in _group_rows_by_file(rows, file_key_column_count):
         export_path = resolve_export_path(file_key)
         export_path.parent.mkdir(parents=True, exist_ok=True)
+        if before_write is not None:
+            before_write(export_path, file_key)
         with export_path.open("w", newline="", encoding="utf-8") as export_file:
             writer = csv.writer(export_file)
             writer.writerow(header)

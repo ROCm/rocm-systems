@@ -527,16 +527,18 @@ def test_combined_document_embeds_the_plotly_frame(benchmarked_roofline) -> None
 def test_save_html_files_returns_the_written_path(
     benchmarked_roofline, tmp_path: Path
 ) -> None:
-    """The returned path is the HTML document written into the workload dir."""
+    """The returned path is the HTML document written to the given output path."""
     roofline = benchmarked_roofline()
     figures = roofline.construct_plotly_figures(
         {"ai_hbm": [[0.5], [2000.0]], "kernelNames": ["slow"]}, datatypes=["FP64"]
     )
+    output_path = tmp_path / "run" / "roofline-gpu-0.html"
+    output_path.parent.mkdir()
 
-    path = roofline.save_html_files(*figures)
+    path = roofline.save_html_files(*figures, output_path=output_path)
 
-    assert path == f"{tmp_path}/empirRoof_gpu-0.html"
-    assert Path(path).is_file()
+    assert path == str(output_path)
+    assert output_path.is_file()
 
 
 @pytest.mark.parametrize("source_key", ["FLOP", "OP"])

@@ -1,6 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import sqlite3
+
 import common
 import pandas as pd
 
@@ -14,9 +16,10 @@ def get_hbm_data_transfer(analysis_workload_dir, data):
         & (bw_df["value_name"] == data["bw_value_name"])
     ]
     bw = bw_rows["value"].values[0]
-    duration_ns = pd.read_csv(f"{analysis_workload_dir}/{data['duration_csv']}")[
-        data["duration_column"]
-    ].values[0]
+    with sqlite3.connect(f"{analysis_workload_dir}/analysis.db") as connection:
+        duration_ns = connection.execute(
+            "SELECT duration_ns_sum FROM compute_kernel_view"
+        ).fetchone()[0]
     return bw * duration_ns / 1e9
 
 
@@ -29,10 +32,8 @@ def get_hbm_bandwidth_peak(analysis_workload_dir, data):
     return bw_rows["value"].values[0]
 
 
-# workload -> gfx -> metric definition. CSV references point at the per-view
-# CSVs produced by analyze: workload/kernel-level metric values live in
-# workload_metric.csv / kernel_metric.csv (filter by metric_id + value_name),
-# kernel-level dispatch durations live in kernel.csv.
+# workload -> gfx -> metric definition. Workload metric values live in the
+# numbered workload folder; kernel duration is read from analysis.db.
 VALIDATE_METRICS = {
     "memcopy": {
         "command": ["tests/memcopy"],
@@ -45,11 +46,9 @@ VALIDATE_METRICS = {
                 "tolerance": 0.10,
                 "get_actual_data": {
                     "soc": "MI200",
-                    "bw_csv": "workload_metric.csv",
+                    "bw_csv": "workload-1/metrics-summary.csv",
                     "bw_metric_id": "4.1.8",
                     "bw_value_name": "Value",
-                    "duration_csv": "kernel.csv",
-                    "duration_column": "duration_ns_sum",
                 },
             },
         ],
@@ -60,11 +59,9 @@ VALIDATE_METRICS = {
                 "tolerance": 0.10,
                 "get_actual_data": {
                     "soc": "MI300",
-                    "bw_csv": "workload_metric.csv",
+                    "bw_csv": "workload-1/metrics-summary.csv",
                     "bw_metric_id": "4.1.9",
                     "bw_value_name": "Value",
-                    "duration_csv": "kernel.csv",
-                    "duration_column": "duration_ns_sum",
                 },
             },
         ],
@@ -75,11 +72,9 @@ VALIDATE_METRICS = {
                 "tolerance": 0.10,
                 "get_actual_data": {
                     "soc": "MI350",
-                    "bw_csv": "workload_metric.csv",
+                    "bw_csv": "workload-1/metrics-summary.csv",
                     "bw_metric_id": "4.1.11",
                     "bw_value_name": "Value",
-                    "duration_csv": "kernel.csv",
-                    "duration_column": "duration_ns_sum",
                 },
             },
         ],
@@ -106,7 +101,7 @@ VALIDATE_METRICS = {
                 "tolerance": 0.10,
                 "get_actual_data": {
                     "soc": "MI300",
-                    "bw_csv": "workload_metric.csv",
+                    "bw_csv": "workload-1/metrics-summary.csv",
                     "bw_metric_id": "4.1.9",
                     "bw_value_name": "Peak (Empirical)",
                 },
@@ -153,10 +148,10 @@ def test_validate_metrics(
             # Check whether metric values are correct
             code = binary_handler_analyze_rocprof_compute([
                 "analyze",
+                "--output-directory",
+                ".",
                 "--output-name",
                 f"{analysis_workload_dir}",
-                "--output-format",
-                "csv",
                 "-b",
                 *metric_ids,
                 "--path",

@@ -16,8 +16,9 @@ Analyze with ROCm Optiq
 ROCm Optiq is a graphical application for interactively visualizing ROCm Compute
 Profiler analysis data.
 
-ROCm Compute Profiler and ROCm Optiq work together through an analysis database. First, generate an analysis database using the ``db``
-:ref:`analysis output format <analysis-output-format>`. Then, open the database in ROCm Optiq.
+ROCm Compute Profiler and ROCm Optiq work together through an analysis database. First, run
+``rocprof-compute analyze``, which writes ``analysis.db`` into its
+:ref:`run folder <analysis-output-format>`. Then, open the database in ROCm Optiq.
 For more information about the database contents, see the :ref:`analysis database schema <analysis-database>`.
 
 Before you begin, review the `ROCm Optiq system requirements`_. Also, make sure that

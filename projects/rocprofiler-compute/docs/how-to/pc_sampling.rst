@@ -201,28 +201,28 @@ rows from the workload as a whole, not ten rows per process.
 Per-kernel ISA and source in CSV output
 =======================================
 
-``--output-format csv`` writes, alongside the analysis tables, one file per
+Every analyze run writes, alongside the analysis tables, one file per
 kernel per code object per process holding that kernel's instruction lines with
 the samples collected on them, and exports the source those instructions were
 compiled from beside it:
 
 .. code-block:: none
 
-   <output_name>/
-       kernel.csv, pc_sampling_summary.csv, ...
-       per_kernel_pc_sampling/
-           <workload_name>/<workload_sub_name>/
-               source/<source path with the leading separator dropped>
-               source/<source path with the leading separator dropped>_pc_sampling.csv
-               <short_name>_uuid_<kernel_uuid>/
-                   isa_code_object_id_<code_object_id>_pid_<pid>.csv
+   <run folder>/workload-1/
+       pc-sampling-summary.csv
+       kernel-0/
+           <short_name>_uuid_<kernel_uuid>/
+               isa_code_object_id_<code_object_id>_pid_<pid>.csv
+           source/<source path with the leading separator dropped>
+           source/<source path with the leading separator dropped>_pc_sampling.csv
 
-A folder leads with the kernel's short name, the identifier its C++ signature
-demangles down to, so ``vecCopy_2(double*, double*, double*, int, int)`` is
-filed under ``vecCopy_2_uuid_7``. Overloads and template instantiations share a
-short name, so the ``kernel_uuid`` suffix keeps each folder unique. ``kernel.csv``
-carries ``kernel_uuid`` alongside ``short_name`` and ``kernel_name``, so it maps
-a folder back to the kernel it holds. One kernel has more than one file when it
+An ISA folder leads with the kernel's short name, the identifier its C++
+signature demangles down to, so ``vecCopy_2(double*, double*, double*, int,
+int)`` is filed under ``vecCopy_2_uuid_7``. Overloads and template
+instantiations share a short name, so the ``kernel_uuid`` suffix keeps each
+folder unique. The ``compute_kernel`` table in ``analysis.db`` carries
+``kernel_uuid`` alongside ``short_name`` and ``kernel_name``, so it maps a
+folder back to the kernel it holds. One kernel has more than one file when it
 was compiled into several code objects, or when several processes ran it.
 
 Each file holds one row per instruction line, ordered by code object offset:
@@ -278,7 +278,7 @@ target app was built with debug info; see the :ref:`note <pc-sampling-note>`.
 Per-source-line counts in CSV output
 ====================================
 
-Beside each exported source file, ``--output-format csv`` writes
+Beside each exported source file, analyze writes
 ``<source file name>_pc_sampling.csv``. It has one row for each line of that
 file, with the samples of every kernel and process that ran code compiled from
 that line:

@@ -11,10 +11,11 @@ in the per-kernel ISA files.
 """
 
 import itertools
+import shutil
 from collections.abc import Iterable, Iterator
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from pc_sampling.pc_sampling_csv_export import (
     IsaLineLocation,
@@ -25,8 +26,9 @@ from pc_sampling.pc_sampling_csv_export import (
 from pc_sampling.source_snapshot_analysis import (
     SOURCE_EXPORT_DIRECTORY_NAME,
     resolve_export_path,
+    resolve_snapshot_path,
 )
-from utils.analysis_orm import per_source_line_file_key_columns
+from utils.analysis_orm import per_kernel_source_line_file_key_columns
 from utils.logger import console_debug
 
 SOURCE_LINE_FILE_SUFFIX = "_pc_sampling.csv"
@@ -47,8 +49,8 @@ BASE_COLUMNS = (
 TRAILING_COLUMNS = ("ISA references",)
 
 # The leading row columns, in the order analysis_orm selects them:
-# (workload name, workload sub-name, source file path)
-FileKey = Tuple[str, str, str]
+# (workload name, workload sub-name, kernel uuid, source file path)
+FileKey = Tuple[str, str, int, str]
 
 
 class WorkloadSourceLineExport(NamedTuple):
@@ -57,10 +59,12 @@ class WorkloadSourceLineExport(NamedTuple):
     workload_id: int
     stall_reasons: List[str]
     source_line_rows: Iterator[Row]
+    # The folder each kernel's files go to, keyed by kernel uuid
+    kernel_directories: Dict[int, Path]
+    workload_path: Optional[Path] = None
 
 
 def export_per_source_line_files(
-    export_directory: Path,
     isa_line_locations: Dict[int, IsaLineLocation],
     workload_source_line_exports: Iterable[WorkloadSourceLineExport],
 ) -> None:
@@ -71,10 +75,11 @@ def export_per_source_line_files(
     """
     for workload_source_line_export in workload_source_line_exports:
         file_count = _write_per_source_line_files(
-            export_directory,
             workload_source_line_export.source_line_rows,
             workload_source_line_export.stall_reasons,
             isa_line_locations,
+            workload_source_line_export.kernel_directories,
+            workload_source_line_export.workload_path,
         )
         console_debug(
             f"Exported {file_count} per-source-line files for workload "
@@ -82,40 +87,62 @@ def export_per_source_line_files(
         )
 
 
-def _resolve_source_line_export_path(export_directory: Path, file_key: FileKey) -> Path:
-    """Return the per-source-line file of one source file.
+def _resolve_source_line_export_path(
+    kernel_directories: Dict[int, Path],
+    file_key: FileKey,
+) -> Path:
+    """Return the per-source-line file of one kernel's source file.
 
     The file is named after the exported copy of the source file, so the two
     sit side by side.
     """
-    workload_name, workload_sub_name, file_path = file_key
-    source_export_path = resolve_export_path(
-        export_directory
-        / workload_name
-        / workload_sub_name
-        / SOURCE_EXPORT_DIRECTORY_NAME,
-        file_path,
-    )
+    _, _, kernel_uuid, file_path = file_key
+    source_directory = kernel_directories[kernel_uuid] / SOURCE_EXPORT_DIRECTORY_NAME
+    source_export_path = resolve_export_path(source_directory, file_path)
     return source_export_path.with_name(
         f"{source_export_path.name}{SOURCE_LINE_FILE_SUFFIX}"
     )
 
 
 def _write_per_source_line_files(
-    export_directory: Path,
     source_line_rows: Iterator[Row],
     stall_reasons: List[str],
     isa_line_locations: Dict[int, IsaLineLocation],
+    kernel_directories: Dict[int, Path],
+    workload_path: Optional[Path] = None,
 ) -> int:
     """Write one workload's grouped source line rows, and return the file count."""
+    before_write = (
+        partial(_copy_source_snapshot, workload_path=workload_path)
+        if workload_path is not None
+        else None
+    )
     return write_grouped_csv_files(
         source_line_rows,
-        len(per_source_line_file_key_columns()),
+        len(per_kernel_source_line_file_key_columns()),
         build_header(BASE_COLUMNS, stall_reasons, TRAILING_COLUMNS),
-        partial(_resolve_source_line_export_path, export_directory),
+        partial(_resolve_source_line_export_path, kernel_directories),
         lambda file_key, file_rows: _format_source_line_rows(
             file_rows, isa_line_locations
         ),
+        before_write=before_write,
+    )
+
+
+def _copy_source_snapshot(
+    export_path: Path,
+    file_key: Tuple[Any, ...],
+    *,
+    workload_path: Path,
+) -> None:
+    """Copy the source file beside its per-kernel PC-sampling CSV."""
+    source_file_path = file_key[-1]
+    source_export_path = export_path.with_name(
+        export_path.name[: -len(SOURCE_LINE_FILE_SUFFIX)]
+    )
+    source_export_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(
+        resolve_snapshot_path(workload_path, source_file_path), source_export_path
     )
 
 
