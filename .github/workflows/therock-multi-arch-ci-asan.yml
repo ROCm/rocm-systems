@@ -57,7 +57,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: amontoison/TheRock/.github/workflows/setup_multi_arch.yml@e61a456ce69c3544652fb4be1f0650616c2890e2 # TEST ONLY: ROCm/TheRock#9446 on top of b063323d
+    uses: amontoison/TheRock/.github/workflows/setup_multi_arch.yml@5fedf5e3eaa20861f385d8f3d2133e4a7a546cac # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
     with:
       build_variant: "asan"
       # Python/PyTorch/JAX builds are not supported with ASAN yet
@@ -70,7 +70,7 @@ jobs:
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       repository: amontoison/TheRock
-      ref: e61a456ce69c3544652fb4be1f0650616c2890e2 # TEST ONLY: ROCm/TheRock#9446 on top of b063323d
+      ref: 5fedf5e3eaa20861f385d8f3d2133e4a7a546cac # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
@@ -90,7 +90,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: amontoison/TheRock/.github/workflows/multi_arch_ci_linux.yml@e61a456ce69c3544652fb4be1f0650616c2890e2 # TEST ONLY: ROCm/TheRock#9446 on top of b063323d
+    uses: amontoison/TheRock/.github/workflows/multi_arch_ci_linux.yml@5fedf5e3eaa20861f385d8f3d2133e4a7a546cac # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -100,7 +100,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: amontoison/TheRock
-      ref: e61a456ce69c3544652fb4be1f0650616c2890e2 # TEST ONLY: ROCm/TheRock#9446 on top of b063323d
+      ref: 5fedf5e3eaa20861f385d8f3d2133e4a7a546cac # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
     permissions:
       contents: read
       id-token: write
@@ -118,7 +118,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "amontoison/TheRock"
-          ref: e61a456ce69c3544652fb4be1f0650616c2890e2 # TEST ONLY: ROCm/TheRock#9446 on top of b063323d
+          ref: 5fedf5e3eaa20861f385d8f3d2133e4a7a546cac # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

@@ -98,7 +98,7 @@ jobs:
         with:
           repository: "amontoison/TheRock"
           path: "TheRock"
-          ref: e61a456ce69c3544652fb4be1f0650616c2890e2 # TEST ONLY: ROCm/TheRock#9446 on top of b063323d
+          ref: 5fedf5e3eaa20861f385d8f3d2133e4a7a546cac # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
 
       - name: Install python deps
         run: |
