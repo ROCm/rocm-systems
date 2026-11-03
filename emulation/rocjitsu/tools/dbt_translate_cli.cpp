@@ -215,7 +215,7 @@ struct DbtFlags {
 
   DbtFlags() {
     std::vector<NamedChoice<TargetInfo>> targets;
-    for (const auto &target : kTargetInfos)
+    for (const TargetInfo &target : kTargetInfos)
       targets.emplace_back(target.name, target);
     input_target = std::make_shared<ChoiceFlag<TargetInfo>>(
         cli::FlagInfo{"--input-target", {}, "Input LLVM machine, e.g. gfx950"}, targets);
