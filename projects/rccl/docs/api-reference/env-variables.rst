@@ -806,6 +806,40 @@ in the following table.
       - | ``536870912`` (512 MiB) by default, matching the CE AllReduce pool
         | ``0``: do not allocate scratch, and do not select GinScatter
 
+    * - | ``RCCL_GIN_ANVIL_FABRIC_MEM``
+        | Opts into fabric memory registration on the Anvil SDMA GIN backend
+          (``NCCL_GIN_TYPE=7``): symmetric windows are registered through
+          exported fabric VMM handles instead of the LSA window. Applies to
+          gfx1250 + MNNVL communicators with one clique covering every rank
+          and cuMem enabled, and only when the GIN team spans every rank.
+          Every rank must opt in; otherwise every rank keeps LSA
+          registration and the ranks that opted in log a warning.
+      - | Unset or ``0``: off (default). Windows are registered through LSA.
+        | ``1``: on.
+
+    * - | ``RCCL_GIN_FABRIC_LSA_A2A``
+        | ``NCCL_GIN_FABRIC_LSA_A2A``
+        | Opts into the direct LSA-flat AllToAll lane on the Anvil SDMA GIN
+          backend (``NCCL_GIN_TYPE=7``). Needs fabric registration
+          (``RCCL_GIN_ANVIL_FABRIC_MEM=1``), so it applies to the same
+          communicators, and only to device-API AllToAll (rccl-tests
+          ``-D 3``). Every rank must opt in with the same threshold; a split
+          vote leaves the lane off on all of them. At most 64 ranks.
+      - | Unset or ``0``: off (default). Device-API AllToAll uses ``gin.put``.
+        | ``1``: on. The kernel copies directly into peer receive windows
+          when the total size is at most
+          ``RCCL_GIN_FABRIC_LSA_THRESHOLD_ALLTOALL``, and uses ``gin.put``
+          above that.
+
+    * - | ``RCCL_GIN_FABRIC_LSA_THRESHOLD_ALLTOALL``
+        | ``NCCL_GIN_FABRIC_LSA_THRESHOLD_ALLTOALL``
+        | Total AllToAll size, in bytes, at or below which the LSA-flat lane
+          copies directly into peer receive windows. Larger messages use
+          ``gin.put``. Ignored unless ``RCCL_GIN_FABRIC_LSA_A2A`` is ``1``.
+          Every rank must set the same value.
+      - | Unset: ``nRanks`` x 8 MiB when the lane is enabled, otherwise 0.
+        | Non-negative integer byte count: the agreed threshold.
+
     * - | ``NCCL_RMA_PLUGIN``
         | Selects external one-sided RMA plugins, which are also the backend
           the built-in GIN proxy forwards to.
