@@ -931,13 +931,18 @@ typedef struct rocprofiler_kernel_dispatch_info_t
     /// HIP graph attribution. Meaningful only when graph_exec_id is nonzero.
     ///
     /// @var capture_correlation_id
-    /// @brief The internal correlation id of the HIP runtime API call (a kernel launch on a
-    /// capturing stream) whose stream capture created this dispatch's graph node, so a tool can
+    /// @brief The internal correlation id of the HIP runtime API call whose stream capture
+    /// created this dispatch's graph node, so a tool can
     /// join a replayed dispatch to that call's record and to the external correlation ids and
     /// ranges active when it was captured. 0 when unknown: the dispatch was not enqueued by a graph
     /// launch, its node was not created by stream capture on the capturing thread, the launching
     /// HIP call was not traced, or the dispatch's kernel does not match the next captured kernel
-    /// node of its launch (the check that keeps a changed launch order from producing a wrong id).
+    /// node of its launch. Successful graph-exec updates, kernel/child/generic node parameter
+    /// changes, or node enable-state changes invalidate capture attribution for that exec;
+    /// subsequent launches report 0 until a fresh exec is instantiated. Memcpy node parameter
+    /// updates also invalidate the plan. Experimental ROCclr copyBuffer attribution, when enabled,
+    /// may identify a memcpy call rather than a kernel launch; unsupported or ambiguous copies
+    /// remain unattributed.
     ///
     /// @var group_segment_size
     /// @brief Runtime group memory segment size. Size of  group segment memory (static + runtime)

@@ -1,0 +1,43 @@
+{
+  "upstream_prs": [
+    14204,
+    14211
+  ],
+  "upstream_head": "2e35762550e20b13efb9637619654955ca6507ff",
+  "workload": {
+    "input_tokens": 524288,
+    "output_tokens": 128,
+    "tp": 4,
+    "cuda_graph_decode": true,
+    "queue_interposition": false
+  },
+  "stages": [
+    {
+      "name": "graph mutation fix",
+      "per_rank_dispatches": 7085,
+      "per_rank_resolved": 2682
+    },
+    {
+      "name": "module naming fix",
+      "per_rank_dispatches": 6805,
+      "per_rank_resolved": 6618
+    },
+    {
+      "name": "experimental copyBuffer fix",
+      "per_rank_dispatches": 6270,
+      "per_rank_resolved": 6270,
+      "per_rank_copybuffer": 176
+    }
+  ],
+  "validation": {
+    "existing_graph_tests": 18,
+    "module_exact_id_dispatches": 18,
+    "memcpy_positive_negative_dispatches": 24
+  },
+  "limitations": [
+    "Runs have different speculative acceptance counts; not a performance comparison.",
+    "copyBuffer support is opt-in and depends on a private ROCclr ABI.",
+    "No general SDMA, array, 2D or split-copy attribution guarantee.",
+    "Resolved IDs do not prove Python layer labels or all upstream parallel-node ordering assumptions."
+  ]
+}

@@ -60,6 +60,9 @@ get_kernel_id(uint64_t kernel_object);
 const std::string*
 get_kernel_name(uint64_t kernel_id);
 
+uint32_t
+get_kernel_kernarg_size(uint64_t kernel_id);
+
 void
 iterate_loaded_code_objects(code_object_iterator_t&& func);
 

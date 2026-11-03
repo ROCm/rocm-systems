@@ -15,6 +15,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+  - Invalidate capture attribution after successful HIP graph-exec mutations. A later node running the same kernel could otherwise inherit the changed or disabled node's capture correlation. Failed mutations retain the plan; fresh instantiations rebuild it.
+
 ### Known issues
 
 ### Removed

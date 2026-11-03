@@ -41,7 +41,10 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <deque>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -74,6 +77,15 @@ struct hipStreamBeginCaptureToGraph;
 struct hipStreamEndCapture;
 struct hipStreamEndCapture_spt;
 struct hipGraphDestroy;
+struct hipGraphExecMemcpyNodeSetParams;
+struct hipGraphExecMemcpyNodeSetParams1D;
+struct hipGraphExecMemcpyNodeSetParamsFromSymbol;
+struct hipGraphExecMemcpyNodeSetParamsToSymbol;
+struct hipGraphExecUpdate;
+struct hipGraphExecKernelNodeSetParams;
+struct hipGraphExecChildGraphNodeSetParams;
+struct hipGraphExecNodeSetParams;
+struct hipGraphNodeSetEnabled;
 }  // namespace api
 
 struct capture_plan
@@ -85,6 +97,11 @@ struct capture_plan
         mutable std::atomic<uint64_t> kernel_id = {0};  // the kernel id that last matched the name
     };
 
+    struct copy_node
+    {
+        uint64_t src = 0, dst = 0, bytes = 0, correlation_id = 0;
+    };
+    std::vector<copy_node>  copies;
     std::deque<kernel_node> kernels = {};  // the graph's captured kernel nodes, in enqueue order
 };
 
@@ -107,6 +124,8 @@ struct capture_api_t
     decltype(::HipDispatchTable::hipGraphNodeGetType_fn)         node_get_type      = nullptr;
     decltype(::HipDispatchTable::hipGraphKernelNodeGetParams_fn) kernel_node_params = nullptr;
     decltype(::HipDispatchTable::hipKernelNameRefByPtr_fn)       kernel_name        = nullptr;
+    decltype(::HipDispatchTable::hipGraphMemcpyNodeGetParams_fn) memcpy_node_params = nullptr;
+    decltype(::HipDispatchTable::hipKernelNameRef_fn)            module_kernel_name = nullptr;
 };
 
 capture_api_t g_capture_api = {};
@@ -355,22 +374,43 @@ plan_capture(::hipGraphExec_t exec, ::hipGraph_t graph)
     for(const auto& itr : nodes)
     {
         auto type = hipGraphNodeTypeEmpty;
-        if(g_capture_api.node_get_type(itr.node, &type) != hipSuccess ||
-           type != hipGraphNodeTypeKernel)
+        if(g_capture_api.node_get_type(itr.node, &type) != hipSuccess) continue;
+        if(type == hipGraphNodeTypeMemcpy && g_capture_api.memcpy_node_params)
+        {
+            auto p = hipMemcpy3DParms{};
+            if(g_capture_api.memcpy_node_params(itr.node, &p) == hipSuccess && !p.srcArray &&
+               !p.dstArray && p.srcPtr.ptr && p.dstPtr.ptr && p.extent.height <= 1 &&
+               p.extent.depth <= 1 && p.extent.width > 0 && !p.srcPos.y && !p.srcPos.z &&
+               !p.dstPos.y && !p.dstPos.z)
+            {
+                auto src = reinterpret_cast<uint64_t>(p.srcPtr.ptr);
+                auto dst = reinterpret_cast<uint64_t>(p.dstPtr.ptr);
+                if(p.srcPos.x <= std::numeric_limits<uint64_t>::max() - src &&
+                   p.dstPos.x <= std::numeric_limits<uint64_t>::max() - dst)
+                    plan->copies.push_back(
+                        {src + p.srcPos.x, dst + p.dstPos.x, p.extent.width, itr.correlation_id});
+            }
             continue;
+        }
+        if(type != hipGraphNodeTypeKernel) continue;
 
         auto params = hipKernelNodeParams{};
         if(g_capture_api.kernel_node_params(itr.node, &params) != hipSuccess) continue;
 
-        // a node without a name could never match: leaving it out keeps the rest matchable
+        // Captured HIP kernel nodes store either a registered host function or a
+        // hipFunction_t from a module launch (the same distinction used by CLR's
+        // GraphKernelNode::getFunc). The host-only query cannot name the latter.
         const auto* name = g_capture_api.kernel_name(params.func, nullptr);
+        if((name == nullptr || *name == '\0') && params.func && g_capture_api.module_kernel_name)
+            name = g_capture_api.module_kernel_name(static_cast<::hipFunction_t>(params.func));
+        // A node without a name cannot be matched conservatively.
         if(name == nullptr || *name == '\0') continue;
 
         auto& kernel          = plan->kernels.emplace_back();
         kernel.name           = name;
         kernel.correlation_id = itr.correlation_id;
     }
-    if(plan->kernels.empty()) return;
+    if(plan->kernels.empty() && plan->copies.empty()) return;
 
     std::unique_lock lock{g_map_mutex};
     g_exec_capture[exec] = std::move(plan);
@@ -404,6 +444,49 @@ match_captured_kernel(launch_state& state, uint64_t kernel_id)
 
     ++state.capture_cursor;
     return node.correlation_id;
+}
+
+// Experimental ROCclr copyBuffer decoder: this is a private runtime ABI, not
+// a generic memcpy/kernel mapping. Refuse unsupported layouts and ambiguous nodes.
+uint64_t
+match_captured_copy(const launch_state& state, uint64_t kernel_id, const void* kernarg)
+{
+    static const bool enabled = [] {
+        auto* v = std::getenv("ROCPROFILER_EXPERIMENTAL_GRAPH_COPYBUFFER");
+        return v && std::strcmp(v, "1") == 0;
+    }();
+    if(!enabled || !state.capture || !kernarg || state.capture->copies.empty()) return 0;
+    auto* name = code_object::get_kernel_name(kernel_id);
+    if(!name || (*name != "__amd_rocclr_copyBuffer.kd" && *name != "__amd_rocclr_copyBuffer"))
+        return 0;
+    struct args_t
+    {
+        uint64_t src, dst, bytes;
+        uint32_t remainder, alignment;
+        uint64_t end;
+        uint32_t stride, workgroup;
+    };
+    static_assert(sizeof(args_t) == 48);
+    if(code_object::get_kernel_kernarg_size(kernel_id) < sizeof(args_t)) return 0;
+    args_t args{};
+    std::memcpy(&args, kernarg, sizeof(args));
+    if(!args.src || !args.dst || !args.bytes || (args.alignment != 4 && args.alignment != 16) ||
+       args.remainder != args.bytes % args.alignment ||
+       args.bytes > std::numeric_limits<uint64_t>::max() - args.dst ||
+       args.end != args.dst + args.bytes - args.remainder ||
+       args.workgroup != (args.alignment == 16 ? 512u : 1024u) || args.stride < args.workgroup ||
+       args.stride % args.workgroup != 0)
+        return 0;
+    const capture_plan::copy_node* match = nullptr;
+    for(const auto& node : state.capture->copies)
+    {
+        if(node.src == args.src && node.dst == args.dst && node.bytes == args.bytes)
+        {
+            if(match) return 0;  // identical copy nodes have no stable identity here
+            match = &node;
+        }
+    }
+    return match ? match->correlation_id : 0;
 }
 
 // Build the callback payload struct used by all HIP_GRAPH callback fires.
@@ -532,6 +615,26 @@ auto graph_destroy(RetT (*next)(::hipGraphExec_t))
             fire_hip_graph_none_callback(
                 ROCPROFILER_HIP_GRAPH_OPERATION_EXEC_DESTROY, exec_id, exec);
             forget_graph_exec(exec);
+        }
+        return ret;
+    };
+}
+
+// A capture plan describes the exec at instantiation. A successful mutation can
+// remove or replace its next kernel, so matching only names may give a later
+// same-name node the modified node's correlation. Preserve graph identity but
+// refuse capture attribution until the application instantiates a fresh exec.
+// Already-enqueued launches retain their immutable shared plan.
+template <typename ApiId, typename RetT, typename... Args>
+auto graph_mutate(RetT (*next)(::hipGraphExec_t, Args...))
+{
+    static auto next_func = next;
+    return +[](::hipGraphExec_t exec, Args... args) -> RetT {
+        auto ret = next_func(exec, std::forward<Args>(args)...);
+        if(ret == hipSuccess)
+        {
+            std::unique_lock lock{g_map_mutex};
+            g_exec_capture.erase(exec);
         }
         return ret;
     };
@@ -757,15 +860,16 @@ current_launch_state()
 }
 
 enqueue_identity
-next_enqueue_identity(uint64_t kernel_id)
+next_enqueue_identity(uint64_t kernel_id, const void* kernarg)
 {
     auto* state = current_launch_state();
     if(state == nullptr) return enqueue_identity{};
 
-    return enqueue_identity{
-        .graph_exec_id          = {.handle = state->graph_exec_id},
-        .graph_node_id          = {.handle = state->node_counter++},
-        .capture_correlation_id = (kernel_id != 0) ? match_captured_kernel(*state, kernel_id) : 0};
+    auto capture_id = kernel_id ? match_captured_kernel(*state, kernel_id) : 0;
+    if(!capture_id && kernel_id) capture_id = match_captured_copy(*state, kernel_id, kernarg);
+    return enqueue_identity{.graph_exec_id          = {.handle = state->graph_exec_id},
+                            .graph_node_id          = {.handle = state->node_counter++},
+                            .capture_correlation_id = capture_id};
 }
 
 bool
@@ -828,7 +932,29 @@ update_table(::HipDispatchTable* table)
                                   .get_edges          = table->hipGraphGetEdges_fn,
                                   .node_get_type      = table->hipGraphNodeGetType_fn,
                                   .kernel_node_params = table->hipGraphKernelNodeGetParams_fn,
-                                  .kernel_name        = table->hipKernelNameRefByPtr_fn};
+                                  .kernel_name        = table->hipKernelNameRefByPtr_fn,
+                                  .memcpy_node_params = table->hipGraphMemcpyNodeGetParams_fn,
+                                  .module_kernel_name = table->hipKernelNameRef_fn};
+
+    if(table->hipGraphExecMemcpyNodeSetParams_fn)
+        table->hipGraphExecMemcpyNodeSetParams_fn =
+            graph_mutate<api::hipGraphExecMemcpyNodeSetParams>(
+                table->hipGraphExecMemcpyNodeSetParams_fn);
+
+    if(table->hipGraphExecMemcpyNodeSetParams1D_fn)
+        table->hipGraphExecMemcpyNodeSetParams1D_fn =
+            graph_mutate<api::hipGraphExecMemcpyNodeSetParams1D>(
+                table->hipGraphExecMemcpyNodeSetParams1D_fn);
+
+    if(table->hipGraphExecMemcpyNodeSetParamsFromSymbol_fn)
+        table->hipGraphExecMemcpyNodeSetParamsFromSymbol_fn =
+            graph_mutate<api::hipGraphExecMemcpyNodeSetParamsFromSymbol>(
+                table->hipGraphExecMemcpyNodeSetParamsFromSymbol_fn);
+
+    if(table->hipGraphExecMemcpyNodeSetParamsToSymbol_fn)
+        table->hipGraphExecMemcpyNodeSetParamsToSymbol_fn =
+            graph_mutate<api::hipGraphExecMemcpyNodeSetParamsToSymbol>(
+                table->hipGraphExecMemcpyNodeSetParamsToSymbol_fn);
 
     if(table->hipStreamBeginCapture_fn)
         table->hipStreamBeginCapture_fn =
@@ -859,6 +985,23 @@ update_table(::HipDispatchTable* table)
         table->hipGraphInstantiateWithParams_fn =
             graph_instantiate<api::hipGraphInstantiateWithParams>(
                 table->hipGraphInstantiateWithParams_fn);
+    if(table->hipGraphExecUpdate_fn)
+        table->hipGraphExecUpdate_fn =
+            graph_mutate<api::hipGraphExecUpdate>(table->hipGraphExecUpdate_fn);
+    if(table->hipGraphExecKernelNodeSetParams_fn)
+        table->hipGraphExecKernelNodeSetParams_fn =
+            graph_mutate<api::hipGraphExecKernelNodeSetParams>(
+                table->hipGraphExecKernelNodeSetParams_fn);
+    if(table->hipGraphExecChildGraphNodeSetParams_fn)
+        table->hipGraphExecChildGraphNodeSetParams_fn =
+            graph_mutate<api::hipGraphExecChildGraphNodeSetParams>(
+                table->hipGraphExecChildGraphNodeSetParams_fn);
+    if(table->hipGraphExecNodeSetParams_fn)
+        table->hipGraphExecNodeSetParams_fn =
+            graph_mutate<api::hipGraphExecNodeSetParams>(table->hipGraphExecNodeSetParams_fn);
+    if(table->hipGraphNodeSetEnabled_fn)
+        table->hipGraphNodeSetEnabled_fn =
+            graph_mutate<api::hipGraphNodeSetEnabled>(table->hipGraphNodeSetEnabled_fn);
     if(table->hipGraphExecDestroy_fn)
         table->hipGraphExecDestroy_fn =
             graph_destroy<api::hipGraphExecDestroy>(table->hipGraphExecDestroy_fn);

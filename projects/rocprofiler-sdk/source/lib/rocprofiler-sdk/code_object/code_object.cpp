@@ -388,7 +388,7 @@ get_host_function_id()
 }
 
 using kernel_object_map_t        = std::unordered_map<uint64_t, uint64_t>;
-using kernel_name_map_t          = std::unordered_map<uint64_t, const std::string*>;
+using kernel_name_map_t = std::unordered_map<uint64_t, std::pair<const std::string*, uint32_t>>;
 using executable_array_t         = std::vector<hsa_executable_t>;
 using code_object_unload_array_t = std::vector<hsa::code_object_unload>;
 
@@ -660,11 +660,15 @@ executable_iterate_agent_symbols_load_callback(hsa_executable_t        executabl
     {
         CHECK_NOTNULL(get_kernel_name_map())
             ->wlock(
-                [](kernel_name_map_t& name_map, uint64_t _kern_id, const std::string* _name) {
-                    name_map[_kern_id] = _name;
+                [](kernel_name_map_t& name_map,
+                   uint64_t           _kern_id,
+                   const std::string* _name,
+                   uint32_t           _size) {
+                    name_map[_kern_id] = {_name, _size};
                 },
                 data.kernel_id,
-                symbol_v.name);
+                symbol_v.name,
+                data.kernarg_segment_size);
     }
 
     code_obj_v->symbols.emplace_back(std::make_unique<hsa::kernel_symbol>(std::move(symbol_v)));
@@ -1518,9 +1522,18 @@ get_kernel_name(uint64_t kernel_id)
         ->rlock(
             [](const kernel_name_map_t& name_map, uint64_t _kern_id) -> const std::string* {
                 auto itr = name_map.find(_kern_id);
-                return (itr == name_map.end()) ? nullptr : itr->second;
+                return (itr == name_map.end()) ? nullptr : itr->second.first;
             },
             kernel_id);
+}
+
+uint32_t
+get_kernel_kernarg_size(uint64_t kernel_id)
+{
+    return CHECK_NOTNULL(get_kernel_name_map())->rlock([kernel_id](const kernel_name_map_t& m) {
+        auto it = m.find(kernel_id);
+        return it == m.end() ? uint32_t{0} : it->second.second;
+    });
 }
 
 void

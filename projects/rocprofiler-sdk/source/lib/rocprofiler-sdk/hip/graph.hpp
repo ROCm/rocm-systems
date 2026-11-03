@@ -75,7 +75,7 @@ struct enqueue_identity
 /// capture correlation id of the launch's next captured kernel node, if that node's kernel is this
 /// one. Returns zeros outside a graph launch.
 enqueue_identity
-next_enqueue_identity(uint64_t kernel_id = 0);
+next_enqueue_identity(uint64_t kernel_id = 0, const void* kernarg = nullptr);
 
 /// True while a stream capture begun on this thread is active.
 bool

@@ -3622,8 +3622,8 @@ push_external_correlation(uint64_t _value)
 void
 pop_external_correlation()
 {
-    auto tid = rocprofiler_thread_id_t{};
-    ROCPROFILER_CALL(rocprofiler_get_thread_id(&tid), "get thread id");
+    // tool_init pushes on main_tid; finalization may run on a control thread.
+    auto tid = main_tid;
 
     for(auto itr : contexts)
     {
@@ -3724,6 +3724,27 @@ json_tool_start()
 {
     client::start();
     return ROCPROFILER_STATUS_SUCCESS;
+}
+
+// Keep symbol registration active while excluding model weight-loading dispatches.
+extern "C" ROCPROFILER_PUBLIC_API void
+json_tool_pause_until_graph()
+{
+    for(auto name : {"HIP_API_BUFFERED", "KERNEL_DISPATCH_BUFFERED"})
+    {
+        auto* ctx = client::contexts.at(name);
+        if(ctx && client::is_active(*ctx))
+            ROCPROFILER_CALL(rocprofiler_stop_context(*ctx), "pause loading trace");
+    }
+}
+
+// Experiment-only: flush an idle long-running worker before service teardown.
+extern "C" ROCPROFILER_PUBLIC_API void
+json_tool_finalize_idle_worker()
+{
+    auto fini = client::client_fini_func;
+    client::client_fini_func = nullptr;
+    if(fini && client::client_id) fini(*client::client_id);
 }
 
 PERFETTO_TRACK_EVENT_STATIC_STORAGE();

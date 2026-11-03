@@ -836,7 +836,9 @@ WriteInterceptor(const void* packets,
 
             // the dispatch's graph launch, its ordinal in it, and the HIP call that captured its
             // node (zeros outside a graph launch)
-            auto graph_identity = ::rocprofiler::hip::graph::next_enqueue_identity(kernel_id);
+            auto graph_identity = ::rocprofiler::hip::graph::next_enqueue_identity(
+                kernel_id,
+                is_ext_kernel_dispatch ? nullptr : _packets[i].kernel_dispatch.kernarg_address);
 
             _packet_data.callback_record = callback_record_t{
                 sizeof(callback_record_t),
