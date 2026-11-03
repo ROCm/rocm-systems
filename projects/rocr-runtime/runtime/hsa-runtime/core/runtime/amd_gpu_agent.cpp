@@ -3375,6 +3375,10 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
   // different base).  Subtract the offset before interpolation (0 until first
   // detection).  gpu_clock_offset_ is read and written under t1_lock_ to avoid
   // data races.  On native Linux (KFD) the clocks match, so no offset applies.
+  // On WSL the offset stays 0 until the first completed packet latches it in
+  // WslEpochOffset(); a hsa_amd_profiling_convert_tick_to_system_domain call on a
+  // raw tick before then translates in the wrong epoch, and a sub-t0_ tick there
+  // can seed historical_clock_ratio_ from it (pre-existing tick < t0_ path).
 #ifdef _WIN32
   tick -= gpu_clock_offset_;
 #else
@@ -3465,17 +3469,26 @@ bool GpuAgent::RawTsValid(uint64_t start, uint64_t end) {
   if (!is_wsl_dxg_)
     return (start >= t0_.GPUClockCounter) && (end >= t0_.GPUClockCounter);
   // WSL (DXG): raw AQL ticks lag the calibration epoch by a fixed offset, so
-  // compare against t0_ after removing it.
+  // compare against t0_ after removing it.  off is a negative int64_t reinterpreted
+  // as uint64_t, so "start - off" wraps to "start + |offset|" - intentional modular
+  // arithmetic, not underflow.
   const uint64_t off = uint64_t(WslEpochOffset(end));
   return (start - off >= t0_.GPUClockCounter) && (end - off >= t0_.GPUClockCounter);
 }
 
 // WSL only.  The AQL timestamp clock can lag D3DKMT's GPUClockCounter by hours,
 // so every completed packet looks older than t0_ and was reported as invalid
-// (zero duration).  An end tick that predates t0_ by more than this process could
-// have run for is an epoch offset, not an early timestamp; latch it once, taking
-// the end as "now".  That makes durations exact and leaves absolute times late
-// only by the read latency.  gpu_clock_offset_ is read and written under t1_lock_.
+// (zero duration).  An end tick that predates t0_ by more than the process uptime
+// is an epoch offset, not an early timestamp; latch it once, taking the
+// just-completed end as "now".  Durations are always exact (start and end shift
+// together).  Absolute times are biased late by the delay between the packet
+// completing and the first profiling query that reads it - microseconds for an
+// immediate read, up to seconds when events are read back in a deferred batch -
+// because the offset is anchored to t1_ sampled at query time, not at completion.
+// If the process runs longer than the lag before its first profiled packet, that
+// packet already has end >= t0_, is indistinguishable from a native tick, and the
+// offset is never latched (absolute times then run ~lag early; durations stay
+// exact).  gpu_clock_offset_ is read and written under t1_lock_.
 int64_t GpuAgent::WslEpochOffset(uint64_t end) {
   std::lock_guard<std::mutex> lock(t1_lock_);
   if (gpu_clock_offset_ != 0 || end == 0 || end >= t0_.GPUClockCounter)
