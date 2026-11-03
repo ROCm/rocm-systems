@@ -1234,8 +1234,7 @@ static struct tuningModel tuning_model_11{
       {/*LL (min/max/factor/thread_threshold)*/ {0, 16383, 1, 0},
        /*LL128 (min/max/factor/thread_threshold)*/ {16383, 16777216, 1, 0}},
       /*Broadcast*/
-      // SPX compares these against nBytes/nRanks. gfx1250 DPX replaces them with
-      // total-byte ceilings (rcclArchThresholds::bcRingLLMaxBytes).
+      // Per rank. gfx1250 DPX replaces these; see rcclArchThresholds::bcRingLLMaxBytes.
       {/*LL (min/max/factor/thread_threshold)*/ {0, 2048, 1, 0},
        /*LL128 (min/max/factor/thread_threshold)*/ {2048, 16777216, 1, 0}},
     },

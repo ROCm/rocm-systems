@@ -3059,8 +3059,7 @@ TEST(RcclDdaTierThresholds, TuningPartitionTablePerArch)
     EXPECT_EQ(dpx->arTreeLLMaxPerRank, (size_t)256 * 1024);
     EXPECT_EQ(dpx->ddaLLMax[ncclFuncAlltoAll], (size_t)2 * 1024 * 1024);
     EXPECT_NE(spx->agRingLL128MaxPerRank, dpx->agRingLL128MaxPerRank);
-    // DPX broadcast ceilings are total bytes, the same at every node count.
-    // SPX leaves them unset and keeps tuning_model_11's per-rank ranges.
+    // DPX sets total-byte broadcast ceilings. SPX leaves them 0.
     EXPECT_EQ(dpx->bcRingLLMaxBytes, (size_t)16 * 1024);
     EXPECT_EQ(dpx->bcRingLL128MaxBytes, (size_t)512 * 1024 * 1024);
     EXPECT_EQ(spx->bcRingLLMaxBytes, (size_t)0);

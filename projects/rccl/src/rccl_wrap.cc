@@ -213,8 +213,8 @@ static const rcclArchThresholds* rcclRingTreeTable(const struct ncclComm* comm, 
   return t;
 }
 
-// gfx1250 DPX broadcast ceilings are total message bytes and apply at every node
-// count. A zero LL128 ceiling keeps the tuning model's per-rank ranges.
+// Null when this comm keeps the tuning model's per-rank broadcast ranges.
+// Semantics of the ceilings live on rcclArchThresholds.
 static const rcclArchThresholds* rcclBroadcastTotalByteTable(const struct ncclComm* comm) {
   const rcclArchThresholds* t = extAlgoArchTable(comm);
   if (t == nullptr || t->bcRingLL128MaxBytes == 0) return nullptr;
@@ -267,9 +267,7 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
   const bool userProtocolInput = rcclNcclProtoEnvIsSet();
   size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
 
-  // Broadcast on a table that publishes total-byte ceilings (gfx1250 DPX). The
-  // same 16 KiB / 512 MiB cutoffs apply at every node count; Simple covers
-  // everything above 512 MiB. NCCL_PROTO still wins.
+  // Broadcast on a table with total-byte ceilings (gfx1250 DPX). NCCL_PROTO still wins.
   if (!userProtocolInput && info->func == ncclFuncBroadcast) {
     if (const rcclArchThresholds* t = rcclBroadcastTotalByteTable(comm)) {
       info->protocol = NCCL_PROTO_SIMPLE;

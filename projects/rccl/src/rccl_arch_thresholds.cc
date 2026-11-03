@@ -247,7 +247,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // CE-Scratch trails the DDA / Ring / Direct kernels it displaces between the DDA
   // ceiling and the scratch size (nRanks x 64 MiB) (AICOMRCCL-2876).
   .forceCeScratch = false,
-  // Broadcast stays on tuning_model_11's per-rank ranges. DPX replaces them below.
+  // Zero: keep tuning_model_11's per-rank broadcast ranges.
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,
 };
@@ -481,9 +481,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   // CE-Scratch trails the DDA / Ring / Direct kernels it displaces between the DDA
   // ceiling and the scratch size (nRanks x 64 MiB) (AICOMRCCL-2876).
   .forceCeScratch = false,
-  // Total message bytes, the same at 1/2/4/8 nodes (8/16/32/64 GPUs). Ring LL
-  // through 16 KiB, Ring LL128 through 512 MiB, Ring Simple above that (through
-  // 16 GiB and beyond). Not per rank, unlike tuning_model_11.
+  // Total message bytes at every node count. See rcclArchThresholds.
   .bcRingLLMaxBytes = 16ULL*1024,
   .bcRingLL128MaxBytes = 512ULL*1024*1024,
 };
