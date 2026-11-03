@@ -105,13 +105,11 @@ public:
     if (inspect)
       inspect(issue, wf);
     issues.push_back({.is_load = issue.is_load,
-                      .element_size_bytes = issue.element_size_bytes,
                       .lds_ranges = {issue.lds_ranges.begin(), issue.lds_ranges.end()}});
   }
 
   struct Captured {
     bool is_load = true;
-    uint32_t element_size_bytes = 0;
     std::vector<amdgpu::TensorDmaLdsRange> lds_ranges;
   };
 
@@ -1240,7 +1238,6 @@ TEST(Gfx1250ExecutionTest, TensorDmaIssueReportsEveryIssuedInstruction) {
     EXPECT_TRUE(cu->execute_instruction(&inst, *wf).succeeded());
     ASSERT_EQ(observer.issues.size(), 1u);
     EXPECT_EQ(observer.issues[0].is_load, !c.store);
-    EXPECT_EQ(observer.issues[0].element_size_bytes, 4u);
     EXPECT_EQ(observer.issues[0].lds_ranges, c.lds_ranges);
   }
   // Only the two in-bounds transfers made global requests to complete.

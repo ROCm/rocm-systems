@@ -558,8 +558,8 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   constexpr MemoryOrderClass ldsAccessOrder = MemoryOrderClass::UNORDERED;
   // An observed range can end mid-element: an element that straddles the end
   // of the wave's LDS allocation transfers only its leading bytes. Track the
-  // ranges at byte granularity rather than in whole elements of
-  // issue.element_size_bytes, which would drop those bytes.
+  // ranges at byte granularity; rounding them to whole elements would drop
+  // those bytes.
   constexpr int kByteGranularity = 1;
 
   // A transfer has no lanes; its violations report lane -1. The core takes

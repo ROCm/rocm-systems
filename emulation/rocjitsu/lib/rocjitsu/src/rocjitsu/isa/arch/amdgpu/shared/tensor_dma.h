@@ -779,7 +779,6 @@ inline void report_issued_tensor_dma(Wavefront &wf, const TensorDmaState &state)
   const std::vector<TensorDmaLdsRange> lds_ranges = tensor_dma_lds_ranges(state);
   wf.cu().report_tensor_dma_issue({
       .is_load = !state.store_from_lds,
-      .element_size_bytes = state.desc.elem_size,
       .lds_ranges = lds_ranges,
   });
 }

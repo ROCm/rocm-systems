@@ -511,9 +511,8 @@ protected:
     waves[wave]->pc += 16;
     record_tensor_instruction(wave, is_load);
     const size_t previous = sink->str().size();
-    fixture.plugin_group_->onAmdgpuTensorDmaIssued(
-        {.is_load = is_load, .element_size_bytes = sizeof(uint32_t), .lds_ranges = ranges},
-        *waves[wave]);
+    fixture.plugin_group_->onAmdgpuTensorDmaIssued({.is_load = is_load, .lds_ranges = ranges},
+                                                   *waves[wave]);
     return sink->str().find("RACE ", previous) != std::string::npos;
   }
 
