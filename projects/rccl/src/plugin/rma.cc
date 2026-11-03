@@ -13,6 +13,7 @@
 #include "plugin.h"
 #include "nccl_rma.h"
 #include "gin/gin_host_proxy.h"
+#include "net.h"
 
 #include <string.h>
 #include <errno.h>
@@ -225,13 +226,15 @@ static void initPluginLibsOnceFunc() {
   // Add internal ib plugin. IB-CAST uses its own RMA backend layered on the CAST
   // transport (also backs GIN over IB-CAST via the generic ncclGinProxy); all other
   // cases use the default IB RMA proxy.
+  // [RCCL] IB-CAST for the NCCL_NET values that select the IB-CAST NET plugin for the data
+  // path (plugin/net.cc): IB-CAST or its alias ROCM-IB, or NCCL_NET unset on an AINIC host.
+  // Otherwise GIN proxy traffic on AINIC runs over the generic IB backend, which lacks
+  // IB-CAST's AINIC handling (e.g. its uDMA pipeline assignment).
   {
-    const char* envNet = ncclGetEnv("NCCL_NET");
-    if (envNet && strcasecmp(envNet, "IB-CAST") == 0) {
-      pluginLibs[pluginCounter].ncclRma = &IbCastRmaIbProxy;
-    } else {
-      pluginLibs[pluginCounter].ncclRma = &ncclRmaIbProxy;
-    }
+    const char* envNet = rcclCanonicalNetName(ncclGetEnv("NCCL_NET"));
+    const bool useCast = envNet ? strcasecmp(envNet, "IB-CAST") == 0 : rcclUseAinic();
+    pluginLibs[pluginCounter].ncclRma = useCast ? &IbCastRmaIbProxy : &ncclRmaIbProxy;
+    INFO(NCCL_INIT | NCCL_NET, "RMA/Plugin: internal RMA backend %s", useCast ? "IB-CAST" : "IB");
   }
   pluginLibs[pluginCounter].state = ncclRmaPluginStateInitReady;
   pluginLibs[pluginCounter].version = ncclRmaVersion[0];

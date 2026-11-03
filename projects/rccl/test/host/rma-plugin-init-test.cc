@@ -14,6 +14,9 @@
 // and restructures the control flow onto a goto fail/exit pair, mirroring the
 // GIN plugin path covered by gin-plugin-init-test.cc.
 //
+// RmaInternalBackendTest covers initPluginLibsOnceFunc's choice of internal RMA
+// backend (IB-CAST or the generic IB proxy) for each NCCL_NET and NIC type.
+//
 // ncclRmaPluginInit is file-static, so this TU #includes the hipified plugin
 // rma.cc (RMA_PLUGIN_CC_PATH), the standard rccl-UnitTestsMicro pattern. A
 // scriptable ncclRma_t vtable stands in for the plugin; no GPU, no librccl.so,
@@ -31,7 +34,9 @@
 #include "nccl_rma.h"
 #include "plugin.h"
 
+#include "fakes/env_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/transport_stubs.h"
 
 // Externs the plugin rma.cc load path references. The tests call the file-static
 // ncclRmaPluginInit directly and never exercise these, but ncclRmaInit (compiled
@@ -273,6 +278,55 @@ TEST_F(RmaPluginInitTest, NullVtable_EnablesWithoutCallingIntoPlugin) {
   EXPECT_EQ(FakeRma::devicesCalls, 0);
   EXPECT_EQ(FakeRma::finalizeCalls, 0);
   EXPECT_EQ(comm_->rmaContext, nullptr);
+}
+
+// Which backend initPluginLibsOnceFunc puts in the internal IB slot, the one before the
+// internal socket slot (no external, GIN or NET-plugin RMA library loads here).
+class RmaInternalBackendTest : public ::testing::Test {
+ protected:
+  void TearDown() override {
+    ResetEnvFakes();
+    g_rcclUseAinicValue = false;
+    memset(pluginLibs, 0, sizeof(pluginLibs));
+    pluginCount = 0;
+  }
+
+  const ncclRma_t* InternalIb(const char* net, bool ainic) {
+    if (net) {
+      SetMicroEnv("NCCL_NET", net);
+    } else {
+      SetMicroEnvAbsent("NCCL_NET");
+    }
+    SetMicroEnv("NCCL_RMA_PLUGIN", "none");
+    g_rcclUseAinicValue = ainic;
+    initPluginLibsOnceFunc();
+    EXPECT_EQ(pluginLibs[pluginCount - 1].ncclRma, &ncclRmaSocketProxy);
+    return pluginLibs[pluginCount - 2].ncclRma;
+  }
+};
+
+// The data path picks IB-CAST on an AINIC host with NCCL_NET unset (plugin/net.cc), and
+// the generic IB backend is not AINIC-aware, so RMA (and GIN over it) takes IB-CAST too.
+TEST_F(RmaInternalBackendTest, NetUnsetOnAinicIsIbCast) {
+  EXPECT_EQ(InternalIb(nullptr, /*ainic=*/true), &IbCastRmaIbProxy);
+}
+
+TEST_F(RmaInternalBackendTest, NetUnsetWithoutAinicIsIb) {
+  EXPECT_EQ(InternalIb(nullptr, /*ainic=*/false), &ncclRmaIbProxy);
+}
+
+TEST_F(RmaInternalBackendTest, NetIbCastIsIbCast) {
+  EXPECT_EQ(InternalIb("IB-CAST", /*ainic=*/false), &IbCastRmaIbProxy);
+}
+
+// An explicit NCCL_NET=IB keeps the generic backend, on AINIC hosts too.
+TEST_F(RmaInternalBackendTest, NetIbOnAinicStaysIb) {
+  EXPECT_EQ(InternalIb("IB", /*ainic=*/true), &ncclRmaIbProxy);
+}
+
+// ROCM-IB selects the IB-CAST NET plugin (include/net.h), so RMA takes IB-CAST too.
+TEST_F(RmaInternalBackendTest, NetRocmIbIsIbCast) {
+  EXPECT_EQ(InternalIb("ROCM-IB", /*ainic=*/true), &IbCastRmaIbProxy);
 }
 
 }  // namespace
