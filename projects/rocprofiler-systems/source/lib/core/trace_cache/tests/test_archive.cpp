@@ -181,14 +181,14 @@ struct nested_record
 
 }  // namespace
 
-constexpr std::size_t k_buffer_size = 4096;
+constexpr std::size_t k_test_buffer_size = 4096;
 
 TEST(archive, scalars_match_utility_encoding)
 {
-    std::array<std::uint8_t, k_buffer_size> buffer{};
-    const std::uint32_t                     val_u32 = 12345U;
-    const std::uint64_t                     val_u64 = 98765432101234ULL;
-    const double                            val_dbl = 2.71828;
+    std::array<std::uint8_t, k_test_buffer_size> buffer{};
+    const std::uint32_t                          val_u32 = 12345U;
+    const std::uint64_t                          val_u64 = 98765432101234ULL;
+    const double                                 val_dbl = 2.71828;
 
     scalar_record orig;
     orig.val_u32 = val_u32;
@@ -209,8 +209,8 @@ TEST(archive, scalars_match_utility_encoding)
     EXPECT_EQ(size, utility::get_size(val_u32) + utility::get_size(val_u64) +
                         utility::get_size(val_dbl));
 
-    std::array<std::uint8_t, k_buffer_size> other_buffer{};
-    std::size_t                             utility_position = 0;
+    std::array<std::uint8_t, k_test_buffer_size> other_buffer{};
+    std::size_t                                  utility_position = 0;
     utility::store_value(val_u32, other_buffer.data(), utility_position);
     utility::store_value(val_u64, other_buffer.data(), utility_position);
     utility::store_value(val_dbl, other_buffer.data(), utility_position);
@@ -220,8 +220,8 @@ TEST(archive, scalars_match_utility_encoding)
 
 TEST(archive, string_view_reads_back_as_view_into_buffer)
 {
-    std::array<std::uint8_t, k_buffer_size> buffer{};
-    const std::string_view                  orig_text = "hello world";
+    std::array<std::uint8_t, k_test_buffer_size> buffer{};
+    const std::string_view                       orig_text = "hello world";
 
     string_record orig;
     orig.text = orig_text;
@@ -240,8 +240,8 @@ TEST(archive, string_view_reads_back_as_view_into_buffer)
 
 TEST(archive, vector_round_trip)
 {
-    std::array<std::uint8_t, k_buffer_size> buffer{};
-    const std::vector<std::uint8_t>         orig_data = { 10, 20, 30 };
+    std::array<std::uint8_t, k_test_buffer_size> buffer{};
+    const std::vector<std::uint8_t>              orig_data = { 10, 20, 30 };
 
     vector_record orig;
     orig.data = orig_data;
@@ -258,8 +258,8 @@ TEST(archive, vector_round_trip)
 
 TEST(archive, optional_engaged_and_empty)
 {
-    std::array<std::uint8_t, k_buffer_size> buffer{};
-    optional_record                         orig_engaged;
+    std::array<std::uint8_t, k_test_buffer_size> buffer{};
+    optional_record                              orig_engaged;
     orig_engaged.value = 9876543210LL;
 
     const std::size_t size_engaged = get_size(orig_engaged);
@@ -288,8 +288,8 @@ TEST(archive, optional_engaged_and_empty)
 
 TEST(archive, derived_record_serializes_base_first)
 {
-    std::array<std::uint8_t, k_buffer_size> buffer{};
-    derived_record                          orig;
+    std::array<std::uint8_t, k_test_buffer_size> buffer{};
+    derived_record                               orig;
     orig.base_field  = 555U;
     orig.base_value  = 3.14;
     orig.extra_field = 777ULL;
@@ -313,8 +313,8 @@ TEST(archive, derived_record_serializes_base_first)
 
 TEST(archive, nested_struct_serializes_itself)
 {
-    std::array<std::uint8_t, k_buffer_size> buffer{};
-    nested_record                           orig;
+    std::array<std::uint8_t, k_test_buffer_size> buffer{};
+    nested_record                                orig;
     orig.head        = 1111ULL;
     orig.inner.alpha = 2222U;
     orig.inner.beta  = 3.33;
@@ -336,8 +336,8 @@ TEST(archive, nested_struct_serializes_itself)
                         utility::get_size(orig.inner.beta) +
                         utility::get_size(orig.tail));
 
-    std::array<std::uint8_t, k_buffer_size> other_buffer{};
-    std::size_t                             nested_position = 0;
+    std::array<std::uint8_t, k_test_buffer_size> other_buffer{};
+    std::size_t                                  nested_position = 0;
     utility::store_value(orig.head, other_buffer.data(), nested_position);
     utility::store_value(orig.inner.alpha, other_buffer.data(), nested_position);
     utility::store_value(orig.inner.beta, other_buffer.data(), nested_position);

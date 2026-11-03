@@ -37,7 +37,7 @@ const auto k_tmp_directory = std::string{ "/tmp/" };
 namespace utility
 {
 
-const auto k_get_buffered_storage_filename = [](const int& ppid, const int& pid) {
+const auto get_buffered_storage_filename = [](const int& ppid, const int& pid) {
     return std::string{ k_tmp_directory + "buffered_storage_" + std::to_string(ppid) +
                         "_" + std::to_string(pid) + ".bin" };
 };
