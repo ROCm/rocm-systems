@@ -313,6 +313,7 @@ function(rccl_define_micro_source_lists)
     fakes/tuning_fakes.cc
     fakes/wrap_fakes.cc
     ../common/main_altrsmi.cpp
+    ../common/GpuCountProbe.cpp
     ../common/ProcessIsolatedTestRunner.cpp
     PARENT_SCOPE)
 
@@ -448,6 +449,7 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
+    ../common/GpuCountProbe.cpp
     ../common/ProcessIsolatedTestRunner.cpp
     PARENT_SCOPE)
 
@@ -829,6 +831,7 @@ function(rccl_define_micro_source_lists)
   set(TEST_MICRO_PARAM_SOURCE_FILES
     fakes/hip_fakes.cc
     param-test.cc
+    ../common/GpuCountProbe.cpp
     ../common/ProcessIsolatedTestRunner.cpp
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -871,6 +874,7 @@ function(rccl_define_micro_source_lists)
     fakes/env_fakes.cc
     fakes/nccl_fakes.cc
     fakes/transport_stubs.cc
+    ../common/GpuCountProbe.cpp
     ../common/ProcessIsolatedTestRunner.cpp
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -1183,6 +1187,7 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc             # real parser for the multiplane map
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc            # real NCCL_IB_HCA parsing, pciPathToInt64
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc  # real, off unless RCCL_TELEMETRY_ENABLE=1
+    ../common/GpuCountProbe.cpp
     ../common/ProcessIsolatedTestRunner.cpp
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -1202,6 +1207,7 @@ function(rccl_define_micro_source_lists)
     fakes/nccl_fakes.cc
     fakes/net_ib_ops_fault_fakes.cc      # ibvwrap.cc fault shims
     fakes/transport_stubs.cc             # rcclUseAinic
+    ../common/GpuCountProbe.cpp
     ../common/ProcessIsolatedTestRunner.cpp
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -1507,6 +1513,7 @@ function(rccl_standalone_setup)
     ${RCCL_TEST_DIR}/BootstrapBidirTests.cpp
     ${RCCL_TEST_DIR}/AltRsmiTests.cpp
     ${RCCL_TEST_DIR}/AcclProfilerTests.cpp
+    ${RCCL_TEST_DIR}/common/GpuCountProbe.cpp
     ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
     ${RCCL_HIPIFY_DIR}/src/misc/kernel_config.cc
     ${RCCL_HIPIFY_DIR}/src/misc/alt_rsmi.cc
