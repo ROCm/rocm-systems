@@ -35,7 +35,7 @@ constexpr uint32_t kSlots = 2;
 constexpr uint32_t kSgprs = 104;
 constexpr uint32_t kVgprs = 256;
 
-/// A two-slot CU over @p memory.
+/// Initialize the two-slot CU in @p cu over @p memory.
 void make_cu(std::unique_ptr<ComputeUnitCore> &cu, GpuMemory &memory, L2Cache &l2,
              rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
   l2.set_backing_memory(&memory);
@@ -69,7 +69,6 @@ class ClockedIssueCycleTest : public ::testing::Test {
 protected:
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(make_cu(cu, memory, l2));
-    ASSERT_NE(cu, nullptr);
     const std::array words{kMovS5, kNop, kEndpgm};
     for (size_t i = 0; i < words.size(); ++i)
       memory.write32(kProgram + i * 4, words[i]);
@@ -167,7 +166,6 @@ TEST(ClockedIssueCycleVskipTest, SkippedInstructionDoesNotIssue) {
   // VSKIP is a CDNA mode bit.
   std::unique_ptr<ComputeUnitCore> cu;
   ASSERT_NO_FATAL_FAILURE(make_cu(cu, memory, l2, ROCJITSU_CODE_ARCH_CDNA3));
-  ASSERT_NE(cu, nullptr);
   for (size_t i = 0; i < 4; ++i)
     memory.write32(kVectorProgram + i * 4, i == 0 ? kMoveVector : kNop);
   Wavefront *wave = cu->dispatch_wf(/*wg_id=*/0, kVectorProgram, kSgprs, kVgprs);

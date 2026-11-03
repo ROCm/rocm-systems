@@ -525,6 +525,7 @@ TEST_F(PerfsimPluginTest, GpuCompilerSimV13StagesUntilDispatchIsAccepted) {
 
 TEST_F(PerfsimPluginTest, CancellationRetainsFailureReasonAndReleasesWaveIdentity) {
   WaveFixture fixture(1);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   testing::internal::CaptureStderr();
   {
     auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -569,6 +570,7 @@ TEST_F(PerfsimPluginTest, CancellationRetainsFailureReasonAndReleasesWaveIdentit
 
 TEST_F(PerfsimPluginTest, SetupRollbackCanRetryTheSameLogicalWave) {
   WaveFixture fixture(1);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   testing::internal::CaptureStderr();
   {
     auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -1633,10 +1635,11 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
       {17, "flat_atomic_add", true, AtomicOp::ADD},
   }};
 
-  testing::internal::CaptureStderr();
+  std::string diagnostic;
   for (const auto &test : cases) {
     WaveFixture fixture;
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    testing::internal::CaptureStderr();
     const std::string config = plugin_config();
     PerfsimPlugin plugin(config.c_str());
     plugin.onInit();
@@ -1686,8 +1689,8 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
     plugin.onAmdgpuWavefrontHalted(wave);
     plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
     plugin.onShutdown();
+    diagnostic += testing::internal::GetCapturedStderr();
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
   EXPECT_EQ(std::ranges::count(diagnostic, '\n'), cases.size());
   EXPECT_NE(diagnostic.find("FLAT DDS store or atomic"), std::string::npos);
 

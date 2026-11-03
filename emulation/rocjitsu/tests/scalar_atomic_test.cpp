@@ -109,7 +109,6 @@ protected:
     ASSERT_NO_FATAL_FAILURE(
         rocjitsu::test::initialize_compute_unit(cu, "scalar_atomic_cu", config, &memory, &l2));
     decoder = Decoder::create(config.arch);
-    ASSERT_NE(cu, nullptr);
     ASSERT_NE(decoder, nullptr);
     wf = cu->dispatch_wf(0, kProgram, 104, 16);
     ASSERT_NE(wf, nullptr);

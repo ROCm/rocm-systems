@@ -86,7 +86,6 @@ protected:
     ASSERT_NO_FATAL_FAILURE(
         rocjitsu::test::initialize_compute_unit(cu, "pc_extension", config, &memory, &cache));
     decoder = Decoder::create(GetParam().arch);
-    ASSERT_NE(cu, nullptr);
     ASSERT_NE(decoder, nullptr);
     wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
     ASSERT_NE(wave, nullptr);

@@ -45,9 +45,10 @@ TEST(ScalarF16CompatibilityTest, Rdna35MinFormatsNumericInlineFloats) {
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 16;
   config.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("rdna35_scalar_f16", config, &memory, &cache);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "rdna35_scalar_f16", config, &memory, &cache));
   auto decoder = Decoder::create(config.arch);
-  ASSERT_NE(cu, nullptr);
   ASSERT_NE(decoder, nullptr);
   auto *wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
   ASSERT_NE(wave, nullptr);

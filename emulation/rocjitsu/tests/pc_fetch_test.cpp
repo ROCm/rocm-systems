@@ -47,7 +47,6 @@ protected:
     config.lds_size_kb = 64;
     ASSERT_NO_FATAL_FAILURE(
         rocjitsu::test::initialize_compute_unit(cu, "pc_fetch", config, &memory, &cache));
-    ASSERT_NE(cu, nullptr);
     cache.set_gpu_vm(vm.get());
     cu->set_gpu_vm(vm.get());
     wave = cu->dispatch_wf(0, kBranchPc, config.sgprs_per_wf, config.vgprs_per_wf);
