@@ -844,25 +844,14 @@ Examples:
         ),
     )
     analyze_group.add_argument(
-        "--pc-sampling-sorting-type",
-        required=False,
-        metavar="",
-        dest="pc_sampling_sorting_type",
-        default="count",
-        type=str,
-        choices=["offset", "count"],
-        help="\t\tSet the sorting type of pc sampling: "
-        "offset or count (DEFAULT: count).",
-    )
-    analyze_group.add_argument(
         "--pc-sampling-rows",
         required=False,
         metavar="",
         dest="pc_sampling_rows",
         default=10,
         type=non_negative_int,
-        help="\t\tSpecify the maximum number of rows shown in the PC "
-        "sampling table; use 0 to show all rows (DEFAULT: 10).",
+        help="\t\tMaximum number of kernels shown in the PC sampling table; "
+        "use 0 to show all kernels (Default: 10).",
     )
 
     analyze_advanced_group.add_argument(

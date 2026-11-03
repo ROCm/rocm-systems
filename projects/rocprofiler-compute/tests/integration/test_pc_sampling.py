@@ -212,16 +212,24 @@ def test_multiprocess_pc_sampling_distinct_code_objects(
     assert database_path.is_file()
     connection = sqlite3.connect(str(database_path))
     try:
-        samples = pd.read_sql_query(
-            "SELECT DISTINCT pid, code_object_id, kernel_name "
-            "FROM compute_pc_sampling_summary_view",
-            connection,
+        summary_kernel_names = pd.read_sql_query(
+            "SELECT kernel_name FROM compute_pc_sampling_summary_view", connection
+        )["kernel_name"]
+        isa_rows = integration_common.read_per_kernel_isa_rows(connection)
+        kernels = pd.read_sql_query(
+            "SELECT kernel_uuid, kernel_name FROM compute_kernel_view", connection
         )
     finally:
         connection.close()
 
+    # The summary merges both processes into one row per kernel.
+    assert sorted(
+        name for name in summary_kernel_names if name in CG_KERNEL_NAMES
+    ) == sorted(CG_KERNEL_NAMES)
+
     # The HIP runtime's own code object is sampled too; only the CG kernels are
     # the subject here.
+    samples = isa_rows[isa_rows["count"].notna()].merge(kernels, on="kernel_uuid")
     cg_samples = samples[samples["kernel_name"].isin(CG_KERNEL_NAMES)]
     assert set(cg_samples["kernel_name"]) == CG_KERNEL_NAMES
 
@@ -480,8 +488,7 @@ def test_pc_sampling_with_sol_block(
     captured = capsys.readouterr()
     assert "2.1 System Speed-of-Light" in captured.out
     assert "21. PC Sampling" in captured.out
-    # The "instruction" column header only renders when the table has rows.
-    assert "instruction" in captured.out
-    assert "instruction_type" in captured.out
+    # A PC sampling column header only renders when the table has rows.
+    assert "active_thread_percent" in captured.out
 
     common.clean_output_dir(config["cleanup"], workload_dir)
