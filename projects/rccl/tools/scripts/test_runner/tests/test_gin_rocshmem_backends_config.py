@@ -5,10 +5,8 @@
 """Guards for the 2-node mixed-backend suite in gin_rocshmem_backends_mellanox.json.
 
 Both cases skip unless NCCL_GIN_TYPE is unset (an empty value also disables
-Anvil SDMA) and the launch shape matches. MixedBackends_TwoNodeUnsetType needs
-2 ranks on 2 hosts (AICOMRCCL-3450). MixedBackends_TwoNodePerHostSplitKeepsAnvil
-needs 2 ranks on each of 2 hosts (AICOMRCCL-3501). A skip still reports green,
-so lock the launch shapes here.
+Anvil SDMA) and the launch shape matches. A skip still reports green, so lock
+the launch shapes here.
 """
 
 import unittest
