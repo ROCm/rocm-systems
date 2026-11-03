@@ -238,6 +238,15 @@ jobs:
             --run-id "${ARTIFACT_RUN_ID}" \
             --expected-sha "${CANDIDATE_SHA}" \
             --output "${WORK_DIR}/candidate-artifact-run.json"
+          ARTIFACT_BUILD_SHA="$(
+            python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["artifact_build_sha"])' \
+              "${WORK_DIR}/candidate-artifact-run.json"
+          )"
+          git -C candidate-source fetch --depth=1 origin "${ARTIFACT_BUILD_SHA}"
+          git -C candidate-source checkout --detach "${ARTIFACT_BUILD_SHA}"
+          test "$(git -C candidate-source rev-parse HEAD)" = "${ARTIFACT_BUILD_SHA}"
+          test -f candidate-source/projects/rccl/tuner/rccl_tuner_gfx950.csv
+          echo "Candidate build source: ${ARTIFACT_BUILD_SHA}"
           python3 build_tools/install_rocm_from_artifacts.py \
             --run-id="${ARTIFACT_RUN_ID}" \
             --artifact-group="${{ inputs.artifact_group }}" \

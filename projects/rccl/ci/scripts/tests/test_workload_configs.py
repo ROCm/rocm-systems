@@ -132,6 +132,11 @@ class WorkflowsMatchConfigs(unittest.TestCase):
         )
         self.assertIn("candidate_provenance.py", fetch["run"])
         self.assertIn("verify-run", fetch["run"])
+        self.assertIn('["artifact_build_sha"]', fetch["run"])
+        self.assertIn(
+            'candidate-source checkout --detach "${ARTIFACT_BUILD_SHA}"',
+            fetch["run"],
+        )
         run_step = next(
             step for step in callee["jobs"]["test_madengine"]["steps"]
             if step.get("name") == "Run MADEngine workload"

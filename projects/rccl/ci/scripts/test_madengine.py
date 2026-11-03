@@ -1108,11 +1108,15 @@ def candidate_provenance(
                 f"expected {candidate_sha}"
             )
 
+    build_sha = str(artifact.get("artifact_build_sha") or candidate_sha).lower()
+    if not FULL_COMMIT_SHA.fullmatch(build_sha):
+        raise RuntimeError(f"candidate artifact build SHA is invalid: {build_sha!r}")
     _, lib_commit, dirty = _split_rccl_version(rccl_fingerprint.get("version", ""))
-    if dirty or not lib_commit or not candidate_sha.startswith(lib_commit):
+    if dirty or not lib_commit or not build_sha.startswith(lib_commit):
         raise RuntimeError(
-            "candidate librccl version does not match the exact source SHA: "
-            f"version={rccl_fingerprint.get('version')!r}, source={candidate_sha}"
+            "candidate librccl version does not match the exact artifact build SHA: "
+            f"version={rccl_fingerprint.get('version')!r}, build={build_sha}, "
+            f"source={candidate_sha}"
         )
     if not tuner_config.is_file():
         raise RuntimeError(f"candidate tuner source is missing: {tuner_config}")
@@ -1140,7 +1144,8 @@ def candidate_provenance(
         ],
         "tuner": {
             "policy": "remove stock disk overrides and install the exact candidate CSV",
-            "source": "candidate source tree at the verified candidate SHA",
+            "source": "artifact build source tree",
+            "source_sha": build_sha,
             "source_path": os.fspath(tuner_config),
             "source_sha256": sha256_file(tuner_config),
             "expected_runtime_source": CANDIDATE_TUNER_PATH,
@@ -4014,8 +4019,12 @@ def main() -> None:
         sys.exit(1)
     write_candidate_provenance(work_dir, candidate_manifest)
     log.info(
-        "Candidate provenance verified: source=%s artifact_run=%s tuner=%s sha256=%s",
+        "Candidate provenance verified: source=%s build=%s artifact_run=%s "
+        "tuner=%s sha256=%s",
         candidate_manifest["candidate_sha"],
+        candidate_manifest["artifact"].get(
+            "artifact_build_sha", candidate_manifest["candidate_sha"]
+        ),
         candidate_manifest["artifact"].get("artifact_run_id"),
         candidate_manifest["tuner"]["expected_runtime_source"],
         candidate_manifest["tuner"]["source_sha256"],
@@ -4381,6 +4390,9 @@ def main() -> None:
         "artifact_run_id": os.environ.get("ARTIFACT_RUN_ID", ""),
         "candidate_sha": candidate_manifest["candidate_sha"],
         "artifact_source_sha": candidate_manifest["artifact"]["artifact_source_sha"],
+        "artifact_build_sha": candidate_manifest["artifact"].get(
+            "artifact_build_sha", candidate_manifest["candidate_sha"]
+        ),
         "rccl_md5": rccl_fingerprint["md5"],
         "rccl_sha256": rccl_fingerprint["sha256"],
         "candidate_image_digest": allocation["candidate_image_id"],

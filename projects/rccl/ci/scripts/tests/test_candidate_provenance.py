@@ -79,8 +79,11 @@ class CandidateResolutionTest(unittest.TestCase):
             expected_sha=SHA,
             token="unused",
             run=run,
+            manifest_lookup=False,
         )
         self.assertEqual(manifest["artifact_source_sha"], SHA)
+        self.assertEqual(manifest["artifact_build_sha"], SHA)
+        self.assertEqual(manifest["artifact_build_relationship"], "direct")
         # The overall run may fail in an unrelated matrix leg; exact artifact
         # availability is checked by the following fetch.
         self.assertEqual(manifest["artifact_source_conclusion"], "failure")
@@ -93,8 +96,162 @@ class CandidateResolutionTest(unittest.TestCase):
                 run=run,
             )
 
+    def test_pr_artifact_maps_head_to_verified_merge_build(self):
+        merge_sha = "c" * 40
+        base_sha = "d" * 40
+        run = {
+            "head_sha": SHA,
+            "html_url": "https://github.com/ROCm/rocm-systems/actions/runs/123",
+            "event": "pull_request",
+            "status": "completed",
+            "conclusion": "success",
+        }
+        artifact_manifest = {
+            "github_run_id": "123",
+            "the_rock_commit": "e" * 40,
+            "submodules": [{
+                "submodule_name": "rocm-systems",
+                "submodule_path": "rocm-systems",
+                "submodule_url": "https://github.com/ROCm/rocm-systems.git",
+                "pin_sha": merge_sha,
+            }],
+        }
+        build_commit = {
+            "sha": merge_sha,
+            "parents": [{"sha": base_sha}, {"sha": SHA}],
+        }
+        manifest = cp.verify_artifact_run(
+            repository="ROCm/rocm-systems",
+            run_id="123",
+            expected_sha=SHA,
+            token="unused",
+            run=run,
+            artifact_manifest=artifact_manifest,
+            build_commit=build_commit,
+        )
+        self.assertEqual(manifest["artifact_source_sha"], SHA)
+        self.assertEqual(manifest["artifact_build_sha"], merge_sha)
+        self.assertEqual(
+            manifest["artifact_build_relationship"], "pull_request_merge"
+        )
+        self.assertIn("therock_manifest.json", manifest["artifact_manifest_url"])
+
+        wrong_commit = {
+            "sha": merge_sha,
+            "parents": [{"sha": base_sha}, {"sha": OTHER_SHA}],
+        }
+        with self.assertRaisesRegex(cp.ProvenanceError, "not a two-parent PR merge"):
+            cp.verify_artifact_run(
+                repository="ROCm/rocm-systems",
+                run_id="123",
+                expected_sha=SHA,
+                token="unused",
+                run=run,
+                artifact_manifest=artifact_manifest,
+                build_commit=wrong_commit,
+            )
+        with self.assertRaisesRegex(cp.ProvenanceError, "no TheRock source manifest"):
+            cp.verify_artifact_run(
+                repository="ROCm/rocm-systems",
+                run_id="123",
+                expected_sha=SHA,
+                token="unused",
+                run=run,
+                manifest_lookup=False,
+            )
+
+        direct_manifest = json.loads(json.dumps(artifact_manifest))
+        direct_manifest["submodules"][0]["pin_sha"] = SHA
+        with self.assertRaisesRegex(cp.ProvenanceError, "not a distinct merge"):
+            cp.verify_artifact_run(
+                repository="ROCm/rocm-systems",
+                run_id="123",
+                expected_sha=SHA,
+                token="unused",
+                run=run,
+                artifact_manifest=direct_manifest,
+            )
+
+        for parents in (
+            [{"sha": SHA}, {"sha": base_sha}],
+            [{"sha": base_sha}, {"sha": OTHER_SHA}, {"sha": SHA}],
+        ):
+            with self.assertRaisesRegex(
+                cp.ProvenanceError, "not a two-parent PR merge"
+            ):
+                cp.verify_artifact_run(
+                    repository="ROCm/rocm-systems",
+                    run_id="123",
+                    expected_sha=SHA,
+                    token="unused",
+                    run=run,
+                    artifact_manifest=artifact_manifest,
+                    build_commit={"sha": merge_sha, "parents": parents},
+                )
+
+        ambiguous_manifest = json.loads(json.dumps(artifact_manifest))
+        ambiguous_manifest["submodules"].append({
+            "submodule_name": "rocm-systems",
+            "submodule_path": "other",
+            "submodule_url": "https://example.invalid/rocm-systems.git",
+            "pin_sha": merge_sha,
+        })
+        with self.assertRaisesRegex(cp.ProvenanceError, "2 rocm-systems"):
+            cp.verify_artifact_run(
+                repository="ROCm/rocm-systems",
+                run_id="123",
+                expected_sha=SHA,
+                token="unused",
+                run=run,
+                artifact_manifest=ambiguous_manifest,
+                build_commit=build_commit,
+            )
+
+        unsupported = {**run, "event": "pull_request_target"}
+        with self.assertRaisesRegex(cp.ProvenanceError, "unsupported"):
+            cp.verify_artifact_run(
+                repository="ROCm/rocm-systems",
+                run_id="123",
+                expected_sha=SHA,
+                token="unused",
+                run=unsupported,
+                manifest_lookup=False,
+            )
+
 
 class CandidateCompositionTest(unittest.TestCase):
+    def test_library_version_matches_verified_pr_merge_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            merge_sha = "c" * 40
+            lib = root / "librccl.so"
+            lib.write_bytes(b"candidate")
+            tuner = root / "rccl_tuner_gfx950.csv"
+            tuner.write_text("collective,minBytes\n")
+            artifact = root / "artifact.json"
+            artifact.write_text(json.dumps({
+                "candidate_sha": SHA,
+                "artifact_source_sha": SHA,
+                "artifact_build_sha": merge_sha,
+                "artifact_build_relationship": "pull_request_merge",
+                "artifact_run_id": "123",
+            }))
+            fingerprint = {
+                "md5": "m",
+                "sha256": tm.sha256_file(lib),
+                "version": f"2.40.0-HEAD:{merge_sha[:7]}",
+                "size": lib.stat().st_size,
+            }
+            with mock.patch.object(tm, "_rccl_uses_kpack", return_value=False), \
+                    mock.patch.object(tm, "rccl_kpack_files", return_value=[]):
+                manifest = tm.candidate_provenance(
+                    SHA, artifact, tuner, lib, fingerprint
+                )
+            self.assertEqual(
+                manifest["artifact"]["artifact_build_sha"], merge_sha
+            )
+            self.assertEqual(manifest["tuner"]["source_sha"], merge_sha)
+
     def test_fresh_external_work_dir_is_created_before_install(self):
         class InstallReached(Exception):
             pass
