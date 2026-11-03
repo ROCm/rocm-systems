@@ -38,6 +38,8 @@ ncclGin
       and source buffers are each specified using the window (*dstWnd*, *srcWnd*) and a byte-based offset (*dstOffset*,
       *srcOffset*).  *bytes* specifies the data transfer count in bytes. If GIN is initialized with connection
       type :c:enumerator:`NCCL_GIN_CONNECTION_RAIL <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_RAIL>`, *peer* must be within the same rail team as the local rank.
+      If the connection type is :c:enumerator:`NCCL_GIN_CONNECTION_CUSTOM_STRIDE <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_CUSTOM_STRIDE>`,
+      *peer* must be a rank separated from the local rank by a multiple of ``ginCustomStride``.
 
       Arguments beyond the first seven are optional.  *remoteAction* and *localAction* specify actions
       to undertake on the destination peer and on the local rank when the payload has been settled and the input has been
@@ -67,6 +69,8 @@ ncclGin
       and local buffers are each specified using the window (*remoteWnd*, *localWnd*) and a byte-based offset (*remoteOffset*,
       *localOffset*).  *bytes* specifies the data transfer count in bytes. If GIN is initialized with connection
       type :c:enumerator:`NCCL_GIN_CONNECTION_RAIL <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_RAIL>`, *peer* must be within the same rail team as the local rank.
+      If the connection type is :c:enumerator:`NCCL_GIN_CONNECTION_CUSTOM_STRIDE <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_CUSTOM_STRIDE>`,
+      *peer* must be a rank separated from the local rank by a multiple of ``ginCustomStride``.
       *bufType* specifies the physical memory composition of the source and destination buffers (see
       :ref:`devapi_segment_types`); it defaults to ``ncclGin_SegmentDevice``.
 
