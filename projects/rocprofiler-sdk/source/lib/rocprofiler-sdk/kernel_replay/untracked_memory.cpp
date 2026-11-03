@@ -138,16 +138,16 @@ as_pointer(uint64_t address)
     return reinterpret_cast<void*>(address);  // NOLINT(performance-no-int-to-ptr)
 }
 
-// Bytes of `offset`, `size` rounded out to whole aligned words inside the segment, so that a word
-// overlapping the range is read. Returns false when the range holds no whole word.
+// Bounds of a kernarg region that contains at least one complete pointer-sized word.
 bool
-word_range(size_t segment_size, uint64_t offset, uint64_t size, size_t& begin, size_t& end)
+region_bounds(size_t segment_size, uint64_t offset, uint64_t size, size_t& begin, size_t& end)
 {
     constexpr auto word = sizeof(uint64_t);
-    if(offset >= segment_size) return false;
-    begin = static_cast<size_t>(offset) & ~(word - 1);
-    end   = std::min(static_cast<size_t>(offset) + size + (word - 1), segment_size) & ~(word - 1);
-    return begin + word <= end;
+    if(offset > segment_size) return false;
+    begin = static_cast<size_t>(offset);
+    if(size > segment_size - begin || size < word) return false;
+    end = begin + static_cast<size_t>(size);
+    return true;
 }
 }  // namespace
 
@@ -162,6 +162,7 @@ to_string(kind_t kind)
         case kind_t::device_other: return "device memory the snapshot does not track";
         case kind_t::locked_host: return "locked host memory (hipHostRegister)";
         case kind_t::host_pageable: return "pageable host memory";
+        case kind_t::unclassified: return "memory whose pointer information is unavailable";
     }
     return "untracked memory";
 }
@@ -183,7 +184,8 @@ make_hsa_pointer_facts()
             if(ext->hsa_amd_pointer_info_fn(
                    as_pointer(address), &info, nullptr, nullptr, nullptr) == HSA_STATUS_SUCCESS)
             {
-                facts.type = convert_type(info.type);
+                facts.pointer_info_succeeded = true;
+                facts.type                   = convert_type(info.type);
                 facts.fine_grained =
                     (info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED) != 0;
                 facts.agent_base = reinterpret_cast<uint64_t>(info.agentBaseAddress);
@@ -205,7 +207,7 @@ make_hsa_pointer_facts()
         // hipHostRegister maps memory into the GPU address space even with XNACK off, so a kernel
         // can write it. vvar, vdso and vsyscall are excluded because a by-value scalar's bit
         // pattern can land in them.
-        if(facts.type == pointer_facts_t::type_t::unknown)
+        if(facts.pointer_info_succeeded && facts.type == pointer_facts_t::type_t::unknown)
         {
             if(!mappings->has_value()) *mappings = read_writable_host_mappings();
             facts.in_writable_host_mapping = in_spans(**mappings, address);
@@ -267,6 +269,7 @@ std::optional<kind_t>
 classify_pointer(const pointer_facts_t& facts)
 {
     using type_t = pointer_facts_t::type_t;
+    if(!facts.pointer_info_succeeded) return kind_t::unclassified;
     switch(facts.type)
     {
         case type_t::hsa: return facts.owner_is_cpu ? kind_t::host_pinned : kind_t::device_other;
@@ -317,8 +320,8 @@ scan_kernarg(const uint8_t*                                    kernarg,
     {
         auto begin = size_t{};
         auto end   = size_t{};
-        if(!word_range(segment_size, region.offset, region.size, begin, end)) continue;
-        for(size_t off = begin; off < end; off += sizeof(uint64_t))
+        if(!region_bounds(segment_size, region.offset, region.size, begin, end)) continue;
+        for(size_t off = begin; off <= end - sizeof(uint64_t); off += sizeof(uint64_t))
         {
             auto value = uint64_t{0};
             std::memcpy(&value, kernarg + off, sizeof(value));
@@ -397,45 +400,55 @@ save_dispatch_memory(region_set_t&                                     saved,
                      hsa_agent_t                                       agent,
                      const pointer_facts_fn_t&                         facts)
 {
-    auto seen = std::unordered_set<uint64_t>{};
-    for(const auto& hit :
-        scan_kernarg(kernarg, segment_size, pointer_regions, covered_spans(snapshot), facts, seen))
+    try
     {
-        const auto  where   = fmt::format("kernel replay: kernarg offset {} points at 0x{:x}, {}",
-                                       hit.kernarg_offset,
-                                       hit.address,
-                                       to_string(hit.region.kind));
-        const bool  foreign = hit.region.size != 0 && hit.region.owner != agent.handle;
-        const char* why     = nullptr;
-        switch(foreign ? region_set_t::save_status_t::not_restorable : saved.save(hit.region))
+        auto seen = std::unordered_set<uint64_t>{};
+        for(const auto& hit : scan_kernarg(
+                kernarg, segment_size, pointer_regions, covered_spans(snapshot), facts, seen))
         {
-            case region_set_t::save_status_t::saved:
-                ROCP_INFO << fmt::format(
-                    "{}; saved {} bytes at 0x{:x}", where, hit.region.size, hit.region.base);
-                continue;
-            case region_set_t::save_status_t::already_saved: continue;
-            case region_set_t::save_status_t::not_restorable:
-                if(foreign)
-                    why = "it belongs to another agent";
-                else if(hit.region.kind == kind_t::virtual_mem ||
-                        hit.region.kind == kind_t::host_pageable)
-                    why = "its extent is not known";
-                else
-                    why = "it is not device memory of this agent";
-                break;
-            case region_set_t::save_status_t::too_large:
-                why = "saving it would exceed the per-dispatch limit";
-                break;
-            case region_set_t::save_status_t::copy_failed: why = "copying it failed"; break;
+            const auto  where = fmt::format("kernel replay: kernarg offset {} points at 0x{:x}, {}",
+                                           hit.kernarg_offset,
+                                           hit.address,
+                                           to_string(hit.region.kind));
+            const bool  foreign = hit.region.size != 0 && hit.region.owner != agent.handle;
+            const char* why     = nullptr;
+            switch(foreign ? region_set_t::save_status_t::not_restorable : saved.save(hit.region))
+            {
+                case region_set_t::save_status_t::saved:
+                    ROCP_INFO << fmt::format(
+                        "{}; saved {} bytes at 0x{:x}", where, hit.region.size, hit.region.base);
+                    continue;
+                case region_set_t::save_status_t::already_saved: continue;
+                case region_set_t::save_status_t::not_restorable:
+                    if(foreign)
+                        why = "it belongs to another agent";
+                    else if(hit.region.kind == kind_t::virtual_mem ||
+                            hit.region.kind == kind_t::host_pageable)
+                        why = "its extent is not known";
+                    else if(hit.region.kind == kind_t::unclassified)
+                        why = "its pointer information could not be queried";
+                    else
+                        why = "it is not device memory of this agent";
+                    break;
+                case region_set_t::save_status_t::too_large:
+                    why = "saving it would exceed the per-dispatch limit";
+                    break;
+                case region_set_t::save_status_t::copy_failed: why = "copying it failed"; break;
+            }
+            LOG_FIRST_N(WARNING, 1) << fmt::format("{}, which the snapshot does not restore and "
+                                                   "{}; running this dispatch once without "
+                                                   "replay",
+                                                   where,
+                                                   why);
+            return false;
         }
-        LOG_FIRST_N(WARNING, 1) << fmt::format(
-            "{}, which the snapshot does not restore and {}; running this dispatch once without "
-            "replay",
-            where,
-            why);
+        return true;
+    } catch(const std::bad_alloc&)
+    {
+        LOG_FIRST_N(WARNING, 1) << "kernel replay: could not allocate memory for the untracked "
+                                   "memory check; running this dispatch once without replay";
         return false;
     }
-    return true;
 }
 
 bool
@@ -444,36 +457,47 @@ save_dispatch_memory(region_set_t&                             saved,
                      const memory_snapshot::device_snapshot_t& snapshot,
                      hsa_agent_t                               agent)
 {
-    const auto kernel = code_object::locate_kernel(packet.kernel_object);
-    if(!kernel)
+    try
     {
-        LOG_FIRST_N(WARNING, 1) << "kernel replay: the dispatched kernel is not in the code "
-                                   "object registry, so the memory its arguments point at cannot "
-                                   "be checked; running this dispatch once without replay";
+        const auto kernel = code_object::locate_kernel(packet.kernel_object);
+        if(!kernel)
+        {
+            LOG_FIRST_N(WARNING, 1)
+                << "kernel replay: the dispatched kernel is not in the code "
+                   "object registry, so the memory its arguments point at cannot "
+                   "be checked; running this dispatch once without replay";
+            return false;
+        }
+
+        if(kernel->name != nullptr && is_idempotent_runtime_kernel(*kernel->name)) return true;
+
+        // Without metadata every word of the segment is a candidate, including the runtime's hidden
+        // arguments -- its hostcall and printf buffers, its heap -- which point at memory the
+        // snapshot does not restore, so such a dispatch may run once for that alone.
+        const auto* regions = kernel->pointer_regions.get();
+        if(regions == nullptr)
+            LOG_FIRST_N(WARNING, 1)
+                << fmt::format("kernel replay: no argument metadata for {} (kernarg segment {} "
+                               "bytes), so every word "
+                               "of it is checked for pointers including the runtime's hidden "
+                               "arguments; a dispatch of "
+                               "this kernel may run once without replay",
+                               kernel->name != nullptr ? kernel->name->c_str() : "<unnamed kernel>",
+                               kernel->segment_size);
+
+        return save_dispatch_memory(saved,
+                                    static_cast<const uint8_t*>(packet.kernarg_address),
+                                    kernel->segment_size,
+                                    regions,
+                                    snapshot,
+                                    agent,
+                                    make_hsa_pointer_facts());
+    } catch(const std::bad_alloc&)
+    {
+        LOG_FIRST_N(WARNING, 1) << "kernel replay: could not allocate memory for the untracked "
+                                   "memory check; running this dispatch once without replay";
         return false;
     }
-
-    if(kernel->name != nullptr && is_idempotent_runtime_kernel(*kernel->name)) return true;
-
-    // Without metadata every word of the segment is a candidate, including the runtime's hidden
-    // arguments -- its hostcall and printf buffers, its heap -- which point at memory the snapshot
-    // does not restore, so such a dispatch may run once for that alone.
-    const auto* regions = kernel->pointer_regions.get();
-    if(regions == nullptr)
-        LOG_FIRST_N(WARNING, 1) << fmt::format(
-            "kernel replay: no argument metadata for {} (kernarg segment {} bytes), so every word "
-            "of it is checked for pointers including the runtime's hidden arguments; a dispatch of "
-            "this kernel may run once without replay",
-            kernel->name != nullptr ? kernel->name->c_str() : "<unnamed kernel>",
-            kernel->segment_size);
-
-    return save_dispatch_memory(saved,
-                                static_cast<const uint8_t*>(packet.kernarg_address),
-                                kernel->segment_size,
-                                regions,
-                                snapshot,
-                                agent,
-                                make_hsa_pointer_facts());
 }
 }  // namespace untracked_memory
 }  // namespace kernel_replay
