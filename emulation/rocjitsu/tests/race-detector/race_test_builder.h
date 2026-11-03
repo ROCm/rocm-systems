@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <memory>

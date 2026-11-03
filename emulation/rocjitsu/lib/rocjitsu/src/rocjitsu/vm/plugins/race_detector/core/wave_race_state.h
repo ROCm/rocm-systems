@@ -41,10 +41,10 @@ struct CounterCapacities {
 /// event allocation and lifecycle transitions.
 ///
 /// Every event registration method (registerEvent, registerScalarLoad,
-/// registerLdsEvent and registerDualOffsetLdsEvent) takes the producing
-/// instruction as an InstructionSnapshot; the event's PC comes from the
-/// snapshot. The encoding is decoded only if a plugin report needs its
-/// disassembly.
+/// registerLdsEvent, registerLdsRangeEvent and registerDualOffsetLdsEvent)
+/// takes the producing instruction as an InstructionSnapshot; the event's PC
+/// comes from the snapshot. The encoding is decoded only if a plugin report
+/// needs its disassembly.
 class WaveRaceState {
 public:
   WaveRaceState(int vgprCount, int sgprCount, WaveId, RaceDetector *, CounterCapacities);
