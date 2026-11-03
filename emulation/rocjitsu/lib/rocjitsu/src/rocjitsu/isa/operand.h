@@ -411,7 +411,7 @@ public:
   /// cannot be skipped on exceptions or early returns.
   Operand *delegate() const { return delegate_; }
 
-  /// @brief Whether this operand and its read delegate have execution callbacks.
+  /// @brief Whether this operand and its read delegate support value access.
   /// @details Generated execution callbacks check this when delegates are active,
   /// before reading any values. Decoded operands otherwise retain the backend
   /// captured alongside their instruction callback and must not be replaced.

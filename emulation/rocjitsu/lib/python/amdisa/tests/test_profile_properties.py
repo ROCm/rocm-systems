@@ -1631,7 +1631,9 @@ def test_operand_errors_are_retained_and_execution_checks_backends(
 
 
 @pytest.mark.parametrize('profile_type', [CdnaProfile, Rdna4Profile])
-def test_unsplit_operand_write_rejections_retain_failure(tmp_path, profile_type):
+def test_unsplit_operand_retains_write_errors_and_checks_delegates(
+    tmp_path, profile_type
+):
     class UnsplitProfile(profile_type):
         @property
         def split_execution_sources(self):
@@ -1650,6 +1652,16 @@ def test_unsplit_operand_write_rejections_retain_failure(tmp_path, profile_type)
     )
     generator.gen_operand()
     source = (tmp_path / 'test' / 'operand.cpp').read_text()
+    header = (tmp_path / 'test' / 'operand.h').read_text()
+    assert 'bool execution_backend_available() const override;' in header
+    availability = source.split(
+        'bool Operand::execution_backend_available() const {', 1
+    )[1].split('}', 1)[0]
+    assert (
+        'return !delegate() || delegate()->execution_backend_available();'
+        in availability
+    )
+    assert 'execution_backend_ != nullptr' not in availability
     assert 'util/except.h' not in source
     for method in ('write_lane', 'write_lane64'):
         body = source.split(f'Operand::{method}(', 1)[1].split(

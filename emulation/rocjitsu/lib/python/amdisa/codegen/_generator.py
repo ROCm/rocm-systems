@@ -16420,7 +16420,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         )
         simd_public_decl = ''
         simd_private_decl = ''
-        execution_backend_public_decl = ''
+        execution_backend_public_decl = (
+            '  bool execution_backend_available() const override;\n'
+        )
         packed_16bit_field = ''
         if uses_packed_16bit_sources or self.isa_spec.profile.split_execution_sources:
             simd_public_decl = '  bool simd_capable() const override;\n'
@@ -16975,6 +16977,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                               execution_backend_ ? execution_backend_->simd_notify_write64_mut
                                                  : nullptr)
                         (this->*callback)(wf, lane_mask, byte_mask);
+                    }
+                    ''')))
+        else:
+            class_impl.model.append(cgen.Line(textwrap.dedent('''\
+                    bool Operand::execution_backend_available() const {
+                      return !delegate() || delegate()->execution_backend_available();
                     }
                     ''')))
 
