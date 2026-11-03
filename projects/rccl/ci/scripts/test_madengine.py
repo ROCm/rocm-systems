@@ -825,46 +825,92 @@ def write_candidate_provenance(work_dir: Path, manifest: dict) -> None:
 _LOG_SPAM_RE = re.compile(rb"NCCL WARN Please note that (\w+) is deprecated")
 
 
-def _trusted_server_log_dir(run_dir: Path, slurm_job_id: str) -> Path | None:
-    """The launcher's exact job directory, never a symlink or wildcard match."""
+def _trusted_container_uids() -> set[int]:
+    """UIDs under which container root can appear on local/NFS storage."""
+    trusted = {0, (1 << 32) - 2}
+    for account in ("nobody", "nfsnobody"):
+        try:
+            trusted.add(pwd.getpwnam(account).pw_uid)
+        except KeyError:
+            pass
+    return trusted
+
+
+def _open_trusted_server_log_dir(
+    run_dir: Path, slurm_job_id: str
+) -> tuple[Path, int] | None:
+    """Open the exact job directory through no-follow directory descriptors."""
     if not re.fullmatch(r"[1-9][0-9]*", slurm_job_id):
         return None
     run_logs = run_dir / "slurm_output" / "run_logs"
-    if run_logs.is_symlink() or not run_logs.is_dir():
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | cloexec
+    try:
+        run_logs_fd = os.open(run_logs, directory_flags)
+    except OSError:
         return None
-    private_roots = sorted(
-        path for path in run_logs.iterdir()
-        if re.fullmatch(r"run-[0-9a-f]{32}", path.name)
-        and path.is_dir() and not path.is_symlink()
-    )
-    # Unit/local fixtures from before the private mount root use run_logs
-    # directly. CI always has exactly one random root created by the runner.
-    if len(private_roots) > 1:
-        return None
-    mount_root = private_roots[0] if private_roots else run_logs
-    job_logs = mount_root / slurm_job_id
-    if job_logs.is_symlink() or not job_logs.is_dir():
-        return None
-    if private_roots:
-        # Docker root may appear as root (no_root_squash), the local nobody or
-        # nfsnobody account, or NFSv4's unmapped anonymous UID. Normal cluster
-        # users cannot own any of these; accept the platform variants without
-        # weakening the unlistable random-root and exact-job checks.
-        trusted_uids = {0, (1 << 32) - 2}
-        for account in ("nobody", "nfsnobody"):
-            try:
-                trusted_uids.add(pwd.getpwnam(account).pw_uid)
-            except KeyError:
-                pass
-        owner_uid = job_logs.stat(follow_symlinks=False).st_uid
-        if owner_uid not in trusted_uids:
-            log.warning(
-                "Rejecting server log directory %s owned by untrusted uid %d",
-                job_logs,
-                owner_uid,
+    mount_root_fd = -1
+    private_root_fds: list[tuple[str, int]] = []
+    try:
+        with os.scandir(run_logs_fd) as entries:
+            private_names = sorted(
+                entry.name for entry in entries
+                if re.fullmatch(r"run-[0-9a-f]{32}", entry.name)
             )
+        for name in private_names:
+            try:
+                private_root_fds.append(
+                    (name, os.open(name, directory_flags, dir_fd=run_logs_fd))
+                )
+            except OSError:
+                continue
+        # Unit/local fixtures from before the private mount root use run_logs
+        # directly. CI always has exactly one random root created by the runner.
+        if len(private_root_fds) > 1:
             return None
-    return job_logs
+        private_layout = bool(private_root_fds)
+        if private_layout:
+            mount_name, mount_root_fd = private_root_fds.pop()
+            job_logs = run_logs / mount_name / slurm_job_id
+        else:
+            mount_root_fd = os.dup(run_logs_fd)
+            job_logs = run_logs / slurm_job_id
+        try:
+            job_logs_fd = os.open(
+                slurm_job_id, directory_flags, dir_fd=mount_root_fd
+            )
+        except OSError:
+            return None
+        try:
+            job_stat = os.fstat(job_logs_fd)
+            if private_layout and job_stat.st_uid not in _trusted_container_uids():
+                log.warning(
+                    "Rejecting server log directory %s owned by untrusted uid %d",
+                    job_logs,
+                    job_stat.st_uid,
+                )
+                os.close(job_logs_fd)
+                return None
+        except BaseException:
+            os.close(job_logs_fd)
+            raise
+        return job_logs, job_logs_fd
+    finally:
+        for _, fd in private_root_fds:
+            os.close(fd)
+        if mount_root_fd >= 0:
+            os.close(mount_root_fd)
+        os.close(run_logs_fd)
+
+
+def _trusted_server_log_dir(run_dir: Path, slurm_job_id: str) -> Path | None:
+    """The launcher's exact job directory, never a symlink or wildcard match."""
+    opened = _open_trusted_server_log_dir(run_dir, slurm_job_id)
+    if opened is None:
+        return None
+    path, fd = opened
+    os.close(fd)
+    return path
 
 
 def squash_log_spam(run_dir: Path, slurm_job_id: str = "") -> int:
@@ -933,40 +979,64 @@ def squash_log_spam(run_dir: Path, slurm_job_id: str = "") -> int:
 
 def snapshot_server_logs(run_dir: Path, slurm_job_id: str) -> Path | None:
     """Copy regular logs from the exact Slurm job into a runner-owned artifact dir."""
-    source = _trusted_server_log_dir(run_dir, slurm_job_id)
-    if source is None:
+    opened_source = _open_trusted_server_log_dir(run_dir, slurm_job_id)
+    if opened_source is None:
         return None
-    destination = run_dir / "verified_run_logs"
-    if destination.exists():
-        shutil.rmtree(destination)
-    destination.mkdir(mode=0o700)
-    for path in sorted(source.rglob("*.log")):
-        try:
-            src_fd = os.open(
-                path,
-                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+    source, source_fd = opened_source
+    try:
+        destination = run_dir / "verified_run_logs"
+        if destination.exists():
+            shutil.rmtree(destination)
+        destination.mkdir(mode=0o700)
+        cloexec = getattr(os, "O_CLOEXEC", 0)
+        source_stat = os.fstat(source_fd)
+        if not stat.S_ISDIR(source_stat.st_mode):
+            return None
+        allowed_source_uids = _trusted_container_uids()
+        # Flat layout is retained for local/manual compatibility.
+        if source.parent.name == "run_logs":
+            allowed_source_uids.add(os.geteuid())
+        if source_stat.st_uid not in allowed_source_uids:
+            return None
+        with os.scandir(source_fd) as entries:
+            names = sorted(
+                entry.name for entry in entries
+                if entry.name.endswith(".log") and "/" not in entry.name
             )
-        except OSError:
-            continue
-        try:
-            if not stat.S_ISREG(os.fstat(src_fd).st_mode):
-                continue
-            target = destination / path.relative_to(source)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            dst_fd = os.open(
-                target,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600,
-            )
+        for name in names:
             try:
-                with os.fdopen(src_fd, "rb", closefd=False) as src, \
-                        os.fdopen(dst_fd, "wb", closefd=False) as dst:
-                    shutil.copyfileobj(src, dst)
+                src_fd = os.open(
+                    name,
+                    os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | cloexec,
+                    dir_fd=source_fd,
+                )
+            except OSError:
+                continue
+            try:
+                source_file_stat = os.fstat(src_fd)
+                if (
+                    not stat.S_ISREG(source_file_stat.st_mode)
+                    or source_file_stat.st_uid != source_stat.st_uid
+                    or source_file_stat.st_nlink != 1
+                ):
+                    continue
+                target = destination / name
+                dst_fd = os.open(
+                    target,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | cloexec,
+                    0o600,
+                )
+                try:
+                    with os.fdopen(src_fd, "rb", closefd=False) as src, \
+                            os.fdopen(dst_fd, "wb", closefd=False) as dst:
+                        shutil.copyfileobj(src, dst)
+                finally:
+                    os.close(dst_fd)
             finally:
-                os.close(dst_fd)
-        finally:
-            os.close(src_fd)
-    return destination
+                os.close(src_fd)
+        return destination
+    finally:
+        os.close(source_fd)
 
 
 def rccl_banner_logs(work_dir: Path, slurm_job_id: str = "") -> list[Path]:
@@ -980,15 +1050,12 @@ def rccl_banner_logs(work_dir: Path, slurm_job_id: str = "") -> list[Path]:
     if not log_dir.is_dir():
         return []
     snapshot = work_dir / "verified_run_logs"
-    exact_dir = _trusted_server_log_dir(work_dir, slurm_job_id)
     if (
         slurm_job_id
         and snapshot.is_dir()
         and not snapshot.is_symlink()
     ):
         candidates = snapshot.rglob("*_NODE*.log")
-    elif exact_dir is not None:
-        candidates = exact_dir.glob("*_NODE*.log")
     elif slurm_job_id:
         candidates = ()
     else:
@@ -2532,6 +2599,97 @@ def candidate_image_verification_target(overlay_image: str, skip_overlay_build: 
     return "" if skip_overlay_build else overlay_image
 
 
+def reset_candidate_image_identity_dir(work_dir: Path) -> Path:
+    """Recreate this allocation's identity directory without following links."""
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | cloexec
+    try:
+        work_fd = os.open(work_dir, directory_flags)
+    except OSError as exc:
+        raise RuntimeError(f"untrusted work directory: {work_dir}") from exc
+    parent = work_dir / "ab"
+    identity_dir = parent / "candidate-image-ids"
+    parent_fd = -1
+    try:
+        work_stat = os.fstat(work_fd)
+        if (
+            not stat.S_ISDIR(work_stat.st_mode)
+            or work_stat.st_uid != os.geteuid()
+        ):
+            raise RuntimeError(f"untrusted work directory owner: {work_dir}")
+        try:
+            os.mkdir("ab", mode=0o755, dir_fd=work_fd)
+        except FileExistsError:
+            pass
+        try:
+            parent_fd = os.open("ab", directory_flags, dir_fd=work_fd)
+        except OSError as exc:
+            raise RuntimeError(
+                f"untrusted candidate image identity parent: {parent}"
+            ) from exc
+        parent_stat = os.fstat(parent_fd)
+        if (
+            not stat.S_ISDIR(parent_stat.st_mode)
+            or parent_stat.st_uid != os.geteuid()
+        ):
+            raise RuntimeError(f"untrusted candidate image identity parent: {parent}")
+        os.fchmod(parent_fd, 0o755)
+
+        try:
+            identity_fd = os.open(
+                "candidate-image-ids", directory_flags, dir_fd=parent_fd
+            )
+        except FileNotFoundError:
+            identity_fd = -1
+        except OSError as exc:
+            raise RuntimeError(
+                f"untrusted candidate image identity path: {identity_dir}"
+            ) from exc
+        if identity_fd >= 0:
+            try:
+                opened_stat = os.fstat(identity_fd)
+                if (
+                    not stat.S_ISDIR(opened_stat.st_mode)
+                    or opened_stat.st_uid != os.geteuid()
+                ):
+                    raise RuntimeError(
+                        f"untrusted opened candidate image identity path: {identity_dir}"
+                    )
+                with os.scandir(identity_fd) as entries:
+                    names = [entry.name for entry in entries]
+                for name in names:
+                    entry_stat = os.stat(
+                        name, dir_fd=identity_fd, follow_symlinks=False
+                    )
+                    if stat.S_ISDIR(entry_stat.st_mode):
+                        raise RuntimeError(
+                            f"unexpected directory in candidate image identities: "
+                            f"{identity_dir / name}"
+                        )
+                    os.unlink(name, dir_fd=identity_fd)
+            finally:
+                os.close(identity_fd)
+            os.rmdir("candidate-image-ids", dir_fd=parent_fd)
+        os.mkdir("candidate-image-ids", mode=0o700, dir_fd=parent_fd)
+        identity_fd = os.open(
+            "candidate-image-ids", directory_flags, dir_fd=parent_fd
+        )
+        try:
+            os.fchmod(identity_fd, 0o700)
+            created_stat = os.fstat(identity_fd)
+            if created_stat.st_uid != os.geteuid():
+                raise RuntimeError(
+                    f"foreign-owned candidate image identity path: {identity_dir}"
+                )
+        finally:
+            os.close(identity_fd)
+        return identity_dir
+    finally:
+        if parent_fd >= 0:
+            os.close(parent_fd)
+        os.close(work_fd)
+
+
 def _raise_on_term(signum, frame):  # noqa: ARG001 - signal handler signature
     """Make SIGTERM unwind the stack the way SIGINT already does."""
     raise KeyboardInterrupt(f"signal {signum}")
@@ -2611,8 +2769,7 @@ def run_ab_in_one_allocation(
         ]
         release_memory = work_dir / "ab" / "release_host_memory.sh"
         release_memory.write_text(RELEASE_HOST_MEMORY)
-    image_id_dir = work_dir / "ab" / "candidate-image-ids"
-    image_id_dir.mkdir(parents=True, exist_ok=True)
+    image_id_dir = reset_candidate_image_identity_dir(work_dir)
     image_id_script = work_dir / "ab" / "candidate_image_id.sh"
     image_id_script.write_text(CANDIDATE_IMAGE_ID)
     for phase, run_dir in phases:

@@ -175,6 +175,19 @@ class CollectResultsTest(unittest.TestCase):
 
 
 class BannerLogsTest(unittest.TestCase):
+    def test_trusted_container_uids_include_root_squash_variants(self):
+        accounts = {
+            "nobody": mock.Mock(pw_uid=65534),
+            "nfsnobody": mock.Mock(pw_uid=65533),
+        }
+        with mock.patch.object(
+            tm.pwd, "getpwnam", side_effect=lambda name: accounts[name]
+        ):
+            self.assertEqual(
+                tm._trusted_container_uids(),
+                {0, 65533, 65534, (1 << 32) - 2},
+            )
+
     def test_server_logs_preferred_and_verified(self):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp)
@@ -190,14 +203,17 @@ class BannerLogsTest(unittest.TestCase):
             self.assertEqual([p.name for p in tm.rccl_banner_logs(run_dir)],
                              ["decode_NODE2.log", "decode_NODE3.log",
                               "prefill_NODE0.log", "prefill_NODE1.log"])
+            tm.snapshot_server_logs(run_dir, "79405")
             ok, msg = tm.verify_rccl_replacement(
                 run_dir, {"version": "2.32.3-develop:2b88119"}, 4, "79405")
             self.assertTrue(ok, msg)
             (logs / "decode_NODE3.log").write_text("died before init\n")
+            tm.snapshot_server_logs(run_dir, "79405")
             ok, _ = tm.verify_rccl_replacement(
                 run_dir, {"version": "2.32.3-develop:2b88119"}, 4, "79405")
             self.assertFalse(ok)
             (logs / "decode_NODE3.log").unlink()
+            tm.snapshot_server_logs(run_dir, "79405")
             ok, msg = tm.verify_rccl_replacement(
                 run_dir, {"version": "2.32.3-develop:2b88119"}, 4, "79405")
             self.assertFalse(ok)
@@ -217,19 +233,83 @@ class BannerLogsTest(unittest.TestCase):
                 (rogue / f"prefill_NODE{node}.log").write_text("forged " + banner)
             (exact / "decode_NODE9.log").symlink_to(rogue / "prefill_NODE0.log")
             os.mkfifo(exact / "blocked.log")
+            nested = exact / "nested"
+            nested.mkdir()
+            (nested / "private.log").write_text("nested\n")
+            (exact / "nested-link").symlink_to(nested, target_is_directory=True)
+            hardlink = exact / "hardlink.log"
+            hardlink.write_text("linked\n")
+            os.link(hardlink, exact / "hardlink-alias.log")
 
-            logs = tm.rccl_banner_logs(run_dir, "42")
-            self.assertEqual(len(logs), 4)
-            self.assertTrue(all(path.parent == exact for path in logs))
             snapshot = tm.snapshot_server_logs(run_dir, "42")
             self.assertIsNotNone(snapshot)
             copied = sorted(snapshot.rglob("*.log"))
             self.assertEqual(len(copied), 4)
             self.assertTrue(all(not path.is_symlink() for path in copied))
+            logs = tm.rccl_banner_logs(run_dir, "42")
+            self.assertEqual(len(logs), 4)
+            self.assertTrue(all(path.parent == snapshot for path in logs))
             (exact / "prefill_NODE0.log").write_text("changed after snapshot\n")
             verified = tm.rccl_banner_logs(run_dir, "42")
             self.assertTrue(all(path.is_relative_to(snapshot) for path in verified))
             self.assertNotIn("changed after snapshot", verified[0].read_text())
+
+    def test_snapshot_rejects_parent_symlink_and_wrong_file_owner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            exact = run_dir / "slurm_output" / "run_logs" / "42"
+            exact.mkdir(parents=True)
+            (exact / "prefill_NODE0.log").write_text("banner\n")
+
+            real_fstat = tm.os.fstat
+
+            def wrong_file_owner(fd):
+                details = real_fstat(fd)
+                if stat.S_ISREG(details.st_mode):
+                    values = list(details)
+                    values[4] = details.st_uid + 1
+                    return os.stat_result(values)
+                return details
+
+            with mock.patch.object(tm.os, "fstat", side_effect=wrong_file_owner):
+                snapshot = tm.snapshot_server_logs(run_dir, "42")
+            self.assertEqual(list(snapshot.glob("*.log")), [])
+
+            alternate = run_dir / "alternate"
+            alternate.mkdir()
+            (alternate / "prefill_NODE0.log").write_text("private\n")
+            (exact / "prefill_NODE0.log").unlink()
+            exact.rmdir()
+            exact.symlink_to(alternate, target_is_directory=True)
+            self.assertIsNone(tm.snapshot_server_logs(run_dir, "42"))
+
+    def test_snapshot_accepts_direct_trusted_root_squash_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            exact = (
+                run_dir / "slurm_output" / "run_logs"
+                / ("run-" + "a" * 32) / "42"
+            )
+            exact.mkdir(parents=True)
+            expected = exact / "prefill_NODE0.log"
+            expected.write_text("trusted\n")
+            real_fstat = tm.os.fstat
+
+            def as_root_squash(fd):
+                details = real_fstat(fd)
+                values = list(details)
+                values[4] = 65534
+                return os.stat_result(values)
+
+            with mock.patch.object(tm.os, "fstat", side_effect=as_root_squash), \
+                    mock.patch.object(
+                        tm, "_trusted_container_uids", return_value={65534}
+                    ):
+                snapshot = tm.snapshot_server_logs(run_dir, "42")
+            self.assertEqual(
+                (snapshot / expected.name).read_text(),
+                "trusted\n",
+            )
 
     def test_private_root_accepts_exact_nobody_job_and_rejects_two_roots(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -318,6 +398,52 @@ class AllocationScriptTest(TempWork):
         cleanup = next(line for line in script.splitlines() if "cleanup_images.sh" in line)
         self.assertTrue(cleanup.endswith(
             "cleanup_images.sh " + tm.WORKLOAD_CONFIGS[WORKLOAD]["base_image"] + " || true"))
+
+    def test_candidate_image_identities_are_reset_for_reused_work_dir(self):
+        identity_dir = self.work / "ab" / "candidate-image-ids"
+        identity_dir.mkdir(parents=True)
+        identity_dir.parent.chmod(0o777)
+        (identity_dir / "FAILED").write_text("stale\n")
+        (identity_dir / "old-host").write_text(
+            "old-host\tsha256:" + "a" * 64 + "\t" + "b" * 64 + "\n"
+        )
+        victim = self.work / "victim"
+        victim.write_text("keep\n")
+        (identity_dir / "stale-link").symlink_to(victim)
+
+        self.run_allocation(WORKLOAD, {})
+
+        self.assertEqual(list(identity_dir.iterdir()), [])
+        self.assertEqual(stat.S_IMODE(identity_dir.parent.stat().st_mode), 0o755)
+        self.assertEqual(stat.S_IMODE(identity_dir.stat().st_mode), 0o700)
+        self.assertEqual(victim.read_text(), "keep\n")
+
+        (identity_dir / "FAILED").write_text("stale again\n")
+        self.run_allocation(WORKLOAD, {})
+        self.assertEqual(list(identity_dir.iterdir()), [])
+
+    def test_candidate_image_identity_path_must_not_be_a_symlink(self):
+        parent = self.work / "ab"
+        parent.mkdir(parents=True)
+        outside = self.work / "outside"
+        outside.mkdir()
+        (parent / "candidate-image-ids").symlink_to(
+            outside, target_is_directory=True
+        )
+        with self.assertRaisesRegex(RuntimeError, "untrusted candidate image"):
+            self.run_allocation(WORKLOAD, {})
+
+    def test_candidate_image_identity_parent_must_not_be_a_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            work.mkdir()
+            outside = root / "outside"
+            outside.mkdir()
+            (work / "ab").symlink_to(outside, target_is_directory=True)
+            with self.assertRaisesRegex(RuntimeError, "identity parent"):
+                tm.reset_candidate_image_identity_dir(work)
+            self.assertEqual(list(outside.iterdir()), [])
 
     def test_dns_preflight_for_sglang_only(self):
         _, script = self.run_allocation(WORKLOAD, {})
