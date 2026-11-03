@@ -3444,8 +3444,15 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
     if (int64_t(system_tick) > now) {
       gpu_clock_offset_ = int64_t(double(int64_t(system_tick) - now) / ratio);
       // Re-translate this first event with the corrected offset.
-      elapsed = int64_t(ratio * double((int64_t(tick) - gpu_clock_offset_) - int64_t(t1_.GPUClockCounter)));
-      system_tick = uint64_t(elapsed) + t1_.SystemClockCounter;
+      uint64_t corrected_tick = uint64_t(int64_t(tick) - gpu_clock_offset_);
+      uint64_t sysdelta = t1_.SystemClockCounter - t0_.SystemClockCounter;
+      uint64_t gpudelta = t1_.GPUClockCounter - t0_.GPUClockCounter;
+      if (gpudelta > 0) {
+        int64_t offtick = int64_t(corrected_tick - t1_.GPUClockCounter);
+        __int128 num = __int128(sysdelta) * __int128(offtick) +
+                       __int128(gpudelta) * __int128(t1_.SystemClockCounter);
+        system_tick = uint64_t(num / __int128(gpudelta));
+      }
     }
   }
 #endif
