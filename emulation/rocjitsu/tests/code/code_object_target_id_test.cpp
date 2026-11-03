@@ -372,44 +372,41 @@ TEST(GfxCodeObjectTargets, CApiDecoderCacheKeepsGfx1250AndGfx1251Distinct) {
   // for gfx1250.
   {
     rj_status_t status = ROCJITSU_STATUS_ERROR;
-    ASSERT_NO_FATAL_FAILURE(c_api_instruction_list_status(
-        status, EF_AMDGPU_MACH_AMDGCN_GFX1251, ROCJITSU_CODE_TARGET_GFX1251, kGfx1251PackedAdd));
+    c_api_instruction_list_status(status, EF_AMDGPU_MACH_AMDGCN_GFX1251,
+                                  ROCJITSU_CODE_TARGET_GFX1251, kGfx1251PackedAdd);
     EXPECT_EQ(status, ROCJITSU_STATUS_SUCCESS);
   }
   {
     rj_status_t status = ROCJITSU_STATUS_ERROR;
-    ASSERT_NO_FATAL_FAILURE(c_api_instruction_list_status(
-        status, EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_TARGET_GFX1250, kGfx1251PackedAdd));
+    c_api_instruction_list_status(status, EF_AMDGPU_MACH_AMDGCN_GFX1250,
+                                  ROCJITSU_CODE_TARGET_GFX1250, kGfx1251PackedAdd);
     EXPECT_EQ(status, ROCJITSU_STATUS_ERROR);
   }
 }
 
 TEST(GfxCodeObjectTargets, CApiRejectsConcreteTargetMismatchForBothListBuilders) {
   CApiListStatuses gfx1250_as_gfx1251{};
-  ASSERT_NO_FATAL_FAILURE(c_api_list_statuses(gfx1250_as_gfx1251, EF_AMDGPU_MACH_AMDGCN_GFX1250,
-                                              ROCJITSU_CODE_TARGET_GFX1250,
-                                              ROCJITSU_CODE_TARGET_GFX1251));
+  c_api_list_statuses(gfx1250_as_gfx1251, EF_AMDGPU_MACH_AMDGCN_GFX1250,
+                      ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_TARGET_GFX1251);
   EXPECT_EQ(gfx1250_as_gfx1251.instructions, ROCJITSU_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(gfx1250_as_gfx1251.basic_blocks, ROCJITSU_STATUS_INVALID_ARGUMENT);
 
   CApiListStatuses gfx1251_as_gfx1250{};
-  ASSERT_NO_FATAL_FAILURE(c_api_list_statuses(gfx1251_as_gfx1250, EF_AMDGPU_MACH_AMDGCN_GFX1251,
-                                              ROCJITSU_CODE_TARGET_GFX1251,
-                                              ROCJITSU_CODE_TARGET_GFX1250));
+  c_api_list_statuses(gfx1251_as_gfx1250, EF_AMDGPU_MACH_AMDGCN_GFX1251,
+                      ROCJITSU_CODE_TARGET_GFX1251, ROCJITSU_CODE_TARGET_GFX1250);
   EXPECT_EQ(gfx1251_as_gfx1250.instructions, ROCJITSU_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(gfx1251_as_gfx1250.basic_blocks, ROCJITSU_STATUS_INVALID_ARGUMENT);
 
   CApiListStatuses matching{};
-  ASSERT_NO_FATAL_FAILURE(c_api_list_statuses(matching, EF_AMDGPU_MACH_AMDGCN_GFX1251,
-                                              ROCJITSU_CODE_TARGET_GFX1251,
-                                              ROCJITSU_CODE_TARGET_GFX1251));
+  c_api_list_statuses(matching, EF_AMDGPU_MACH_AMDGCN_GFX1251, ROCJITSU_CODE_TARGET_GFX1251,
+                      ROCJITSU_CODE_TARGET_GFX1251);
   EXPECT_EQ(matching.instructions, ROCJITSU_STATUS_SUCCESS);
   EXPECT_EQ(matching.basic_blocks, ROCJITSU_STATUS_SUCCESS);
 
   CApiListStatuses legacy_fallback{};
-  ASSERT_NO_FATAL_FAILURE(c_api_list_statuses(legacy_fallback,
-                                              /*mach_flag=*/0x1234, ROCJITSU_CODE_TARGET_INVALID,
-                                              ROCJITSU_CODE_TARGET_GFX1250));
+  c_api_list_statuses(legacy_fallback,
+                      /*mach_flag=*/0x1234, ROCJITSU_CODE_TARGET_INVALID,
+                      ROCJITSU_CODE_TARGET_GFX1250);
   EXPECT_EQ(legacy_fallback.instructions, ROCJITSU_STATUS_SUCCESS);
   EXPECT_EQ(legacy_fallback.basic_blocks, ROCJITSU_STATUS_SUCCESS);
 }

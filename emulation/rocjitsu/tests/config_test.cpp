@@ -3778,8 +3778,7 @@ TEST(ConfigLoaderTest, RejectsMissingOrInvalidArchitecture) {
   const std::array<const char *, 3> configs{R"({})", R"({"vm":{}})",
                                             R"({"vm":{"arch":"invalid"}})"};
   for (const char *json : configs)
-    ASSERT_NO_FATAL_FAILURE(
-        expect_config_target_failure(json, "Missing or invalid 'arch' in vm configuration"));
+    expect_config_target_failure(json, "Missing or invalid 'arch' in vm configuration");
 }
 
 TEST(ConfigLoaderTest, RejectsInvalidTarget) {
@@ -3817,8 +3816,7 @@ TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
       replace_exactly_once(mismatches[0], R"("target": "gfx1251")", R"("target": "gfx1250")"));
   ASSERT_TRUE(replace_exactly_once(mismatches[1], "120501", "120500"));
   for (const std::string &json : mismatches)
-    ASSERT_NO_FATAL_FAILURE(
-        expect_config_target_failure(json, "vm target does not match device.gfx_target_version"));
+    expect_config_target_failure(json, "vm target does not match device.gfx_target_version");
 }
 
 TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
