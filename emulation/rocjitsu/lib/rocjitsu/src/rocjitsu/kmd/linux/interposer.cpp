@@ -2358,8 +2358,12 @@ public:
       return false;
     }
 
-    std::string config_json = read_file_passthrough(config_path.c_str());
-    if (rj_vm_load_plugins(local_vm_.get(), config_json.c_str(), nullptr) !=
+    util::FailureOr<std::string> config_json = read_file_passthrough(config_path.c_str());
+    if (config_json.failed()) {
+      local_vm_.reset();
+      return false;
+    }
+    if (rj_vm_load_plugins(local_vm_.get(), config_json.value().c_str(), nullptr) !=
         ROCJITSU_STATUS_SUCCESS) {
       util::Logger::debug_print("rocjitsu: failed to configure execution plugins");
       local_vm_.reset();
@@ -3625,16 +3629,22 @@ public:
   /// close), retrying on EINTR.
   /// @details Used during driver construction where re-entering our interposed
   /// I/O path could recurse. Read errors (other than EINTR) are reported and
-  /// yield an empty string, distinct from a successfully read empty file.
-  static std::string read_file_passthrough(const char *path) {
-    if (!real().ready())
-      return {};
+  /// return failure, distinct from a successfully read empty file.
+  static util::FailureOr<std::string> read_file_passthrough(const char *path) {
+    if (!real().ready()) {
+      util::Logger::warn(
+          "rocjitsu: cannot reread plugin configuration: libc passthrough is unavailable");
+      return util::Result::failure();
+    }
     int fd;
     do {
       fd = real().openat(AT_FDCWD, path, O_RDONLY, 0);
     } while (fd < 0 && errno == EINTR);
-    if (fd < 0)
-      return {};
+    if (fd < 0) {
+      util::Logger::warn("rocjitsu: cannot open plugin configuration '", path,
+                         "': ", std::strerror(errno));
+      return util::Result::failure();
+    }
     std::string out;
     char buf[4096] = {};
     for (;;) {
@@ -3644,7 +3654,7 @@ public:
           continue;
         util::Logger::warn("rocjitsu: read error on '", path, "': ", std::strerror(errno));
         real().close(fd);
-        return {};
+        return util::Result::failure();
       }
       if (n == 0)
         break; // EOF.

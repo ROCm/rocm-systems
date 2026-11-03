@@ -29,7 +29,10 @@ protected:
     ASSERT_EQ(setenv("ROCJITSU_PLUGIN_TEST_TRACE", trace_.path().c_str(), 1), 0);
   }
 
-  void TearDown() override { unsetenv("ROCJITSU_PLUGIN_TEST_TRACE"); }
+  void TearDown() override {
+    unsetenv("ROCJITSU_PLUGIN_TEST_THROW_INIT");
+    unsetenv("ROCJITSU_PLUGIN_TEST_TRACE");
+  }
 
   std::string trace() const {
     std::ifstream input(trace_.path());
@@ -113,6 +116,16 @@ TEST_F(PluginLoaderTest, RequiringAllPluginsAllowsNoPlugins) {
   EXPECT_TRUE(group.value()->empty());
 }
 
+TEST_F(PluginLoaderTest, EmptyInputConfiguresEmptyGroup) {
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
+      rocjitsu::PluginLoader::configure_plugin_group("", PLUGIN_LOADER_FIXTURE_DIR,
+                                                     diagnostic.emitter());
+  ASSERT_TRUE(group.succeeded());
+  EXPECT_TRUE(group.value()->empty());
+  EXPECT_TRUE(diagnostic.message().empty());
+}
+
 TEST_F(PluginLoaderTest, RequiringAllPluginsRejectsNonObjectPlugins) {
   for (const char *plugins : {"[]", "null", R"("good")"}) {
     SCOPED_TRACE(plugins);
@@ -165,6 +178,9 @@ TEST_F(PluginLoaderTest, CApiRejectsAdmissionBeforeReplacingInstalledGroup) {
     bool partial_group;
   };
   const RejectionCase cases[] = {
+      {"{} true", "invalid plugin configuration JSON", false},
+      {"[]", "plugin configuration must be an object", false},
+      {"42", "plugin configuration must be an object", false},
       {R"({"require_all_plugins":true,"plugins":{"good":{}})", "invalid plugin configuration JSON",
        false},
       {R"({"require_all_plugins":true,"plugins":{"good":{},"missing":{}}})",
@@ -192,7 +208,7 @@ TEST_F(PluginLoaderTest, CApiRejectsAdmissionBeforeReplacingInstalledGroup) {
       const rj_status_t status =
           rj_vm_load_plugins(vm.get(), test.config, PLUGIN_LOADER_FIXTURE_DIR);
       const std::string diagnostic = testing::internal::GetCapturedStderr();
-      EXPECT_EQ(status, ROCJITSU_STATUS_ERROR);
+      EXPECT_EQ(status, ROCJITSU_STATUS_INVALID_ARGUMENT);
       const std::string warning = std::string("rj_vm_load_plugins failed: ") + test.reason;
       EXPECT_EQ(count(diagnostic, "rj_vm_load_plugins failed:"), 1u) << diagnostic;
       EXPECT_NE(diagnostic.find(warning), std::string::npos) << diagnostic;
@@ -207,8 +223,10 @@ TEST_F(PluginLoaderTest, CApiRejectsAdmissionBeforeReplacingInstalledGroup) {
                 count(before, "good:destroy\n") + (test.partial_group ? 1u : 0u));
     }
     const std::string before_retry = trace();
-    ASSERT_EQ(rj_vm_load_plugins(vm.get(), valid, PLUGIN_LOADER_FIXTURE_DIR),
-              ROCJITSU_STATUS_SUCCESS);
+    const std::string valid_with_whitespace = std::string(valid) + " \t\r\n";
+    ASSERT_EQ(
+        rj_vm_load_plugins(vm.get(), valid_with_whitespace.c_str(), PLUGIN_LOADER_FIXTURE_DIR),
+        ROCJITSU_STATUS_SUCCESS);
     EXPECT_TRUE(vm->plugin_group_active.load());
     const std::string after_retry = trace();
     EXPECT_EQ(count(after_retry, "good:init\n"), count(before_retry, "good:init\n") + 1);
@@ -219,14 +237,55 @@ TEST_F(PluginLoaderTest, CApiRejectsAdmissionBeforeReplacingInstalledGroup) {
   }
 }
 
-TEST_F(PluginLoaderTest, EmptyInputConfiguresEmptyGroup) {
+TEST_F(PluginLoaderTest, ReportsParserErrorDetails) {
   util::StringDiagnostic diagnostic;
-  util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
-      rocjitsu::PluginLoader::configure_plugin_group("", PLUGIN_LOADER_FIXTURE_DIR,
-                                                     diagnostic.emitter());
-  ASSERT_TRUE(group.succeeded());
-  EXPECT_TRUE(group.value()->empty());
-  EXPECT_TRUE(diagnostic.message().empty());
+  EXPECT_TRUE(rocjitsu::PluginLoader::configure_plugin_group(R"({"execution_backend":hardware})",
+                                                             PLUGIN_LOADER_FIXTURE_DIR,
+                                                             diagnostic.emitter())
+                  .failed());
+  EXPECT_NE(diagnostic.message().find("invalid plugin configuration JSON:"), std::string::npos);
+  EXPECT_NE(diagnostic.message().find("1:"), std::string::npos);
+  EXPECT_NE(diagnostic.message().find("hardware"), std::string::npos);
+}
+
+TEST_F(PluginLoaderTest, CApiTranslatesForeignInitializationExceptions) {
+  for (const char *failure : {"standard", "nonstandard"}) {
+    SCOPED_TRACE(failure);
+    rocjitsu::SoC soc("plugin_loader_test");
+    soc.set_plugin_group(nullptr);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(new rj_vm_t, rj_vm_destroy);
+    vm->soc = &soc;
+    const char *config = R"({"require_all_plugins":true,"plugins":{"good":{}}})";
+    ASSERT_EQ(rj_vm_load_plugins(vm.get(), config, PLUGIN_LOADER_FIXTURE_DIR),
+              ROCJITSU_STATUS_SUCCESS);
+    rocjitsu::ExecutionPluginGroup *installed = &soc.plugin_group();
+    ASSERT_EQ(setenv("ROCJITSU_PLUGIN_TEST_THROW_INIT", failure, 1), 0);
+    testing::internal::CaptureStderr();
+    rj_status_t status = ROCJITSU_STATUS_SUCCESS;
+    EXPECT_NO_THROW(status = rj_vm_load_plugins(vm.get(), config, PLUGIN_LOADER_FIXTURE_DIR));
+    const std::string diagnostic = testing::internal::GetCapturedStderr();
+    unsetenv("ROCJITSU_PLUGIN_TEST_THROW_INIT");
+    EXPECT_EQ(status, ROCJITSU_STATUS_ERROR);
+    EXPECT_NE(&soc.plugin_group(), installed);
+    EXPECT_FALSE(vm->plugin_group_active.load());
+    EXPECT_NE(diagnostic.find(std::string_view(failure) == "standard"
+                                  ? "fixture initialization failed"
+                                  : "unknown plugin exception"),
+              std::string::npos);
+  }
+}
+
+TEST_F(PluginLoaderTest, CApiEmptyInputRemovesInstalledPlugins) {
+  rocjitsu::SoC soc("plugin_loader_test");
+  soc.set_plugin_group(nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(new rj_vm_t, rj_vm_destroy);
+  vm->soc = &soc;
+  ASSERT_EQ(rj_vm_load_plugins(vm.get(), R"({"plugins":{"good":{}}})", PLUGIN_LOADER_FIXTURE_DIR),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_EQ(rj_vm_load_plugins(vm.get(), "", PLUGIN_LOADER_FIXTURE_DIR), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_TRUE(soc.plugin_group().empty());
+  EXPECT_NE(trace().find("good:shutdown\n"), std::string::npos);
+  EXPECT_NE(trace().find("good:destroy\n"), std::string::npos);
 }
 
 TEST_F(PluginLoaderTest, DestroysRejectedDuplicateBeforeUnload) {

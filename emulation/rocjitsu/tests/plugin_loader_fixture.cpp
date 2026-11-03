@@ -5,6 +5,8 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
+#include <string_view>
 
 #ifndef PLUGIN_FIXTURE_NAME
 #error "PLUGIN_FIXTURE_NAME must be defined"
@@ -31,6 +33,11 @@ public:
 
   void onInit() override {
     trace("init");
+    if (const char *failure = std::getenv("ROCJITSU_PLUGIN_TEST_THROW_INIT")) {
+      if (std::string_view(failure) == "standard")
+        throw std::runtime_error("fixture initialization failed");
+      throw 42;
+    }
     sink().write("boundary:init\n");
   }
 };

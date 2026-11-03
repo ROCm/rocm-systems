@@ -11,6 +11,7 @@
 #include "util/log.h"
 
 #include "flatbuffers/flexbuffers.h"
+#include "flatbuffers/idl.h"
 
 #include <array>
 #include <filesystem>
@@ -48,19 +49,19 @@ bool map_has_key(const flexbuffers::Reference &root, std::string_view key) {
 }
 
 util::FailureOr<bool> parse_require_all_plugins(const flexbuffers::Reference &root,
-                                                util::DiagnosticEmitter diagnostic) {
+                                                util::DiagnosticEmitter emit_error) {
   if (!map_has_key(root, "require_all_plugins"))
     return false;
 
   auto value = root.AsMap()["require_all_plugins"];
   if (!value.IsBool())
-    return diagnostic.emit() << "top-level 'require_all_plugins' must be a boolean";
+    return emit_error.emit() << "top-level 'require_all_plugins' must be a boolean";
   return value.AsBool();
 }
 
 util::FailureOr<size_t> configured_plugin_count(const flexbuffers::Reference &root,
                                                 bool require_all_plugins,
-                                                util::DiagnosticEmitter diagnostic) {
+                                                util::DiagnosticEmitter emit_error) {
   if (!root.IsMap())
     return 0;
   if (!map_has_key(root, "plugins"))
@@ -69,7 +70,7 @@ util::FailureOr<size_t> configured_plugin_count(const flexbuffers::Reference &ro
   auto plugins = root.AsMap()["plugins"];
   if (!plugins.IsMap()) {
     if (require_all_plugins)
-      return diagnostic.emit()
+      return emit_error.emit()
              << "top-level 'plugins' must be an object when 'require_all_plugins' is true";
     return 0;
   }
@@ -258,30 +259,41 @@ int PluginLoader::load_from_config(const std::string &config_json, ExecutionPlug
 
 util::FailureOr<std::shared_ptr<ExecutionPluginGroup>>
 PluginLoader::configure_plugin_group(const std::string &config_json, const std::string &plugin_dir,
-                                     util::DiagnosticEmitter diagnostic) {
+                                     util::DiagnosticEmitter emit_error) {
   flexbuffers::Builder root_fbb;
-  const bool parsed = flexbuffer_from_json(config_json, root_fbb);
+  flatbuffers::Parser parser;
+  bool parsed =
+      !config_json.empty() && parser.ParseFlexBuffer(config_json.c_str(), nullptr, &root_fbb);
+  // ParseFlexBuffer accepts a single value without checking the following token.
+  if (parsed &&
+      config_json.find_first_not_of(" \t\r\n", parser.BytesConsumed()) != std::string::npos) {
+    (void)parser.Error("unexpected content after plugin configuration").Check();
+    parsed = false;
+  }
   // Empty input intentionally configures an empty group.
   if (!parsed && !config_json.empty())
-    return diagnostic.emit() << "invalid plugin configuration JSON";
+    return emit_error.emit() << "invalid plugin configuration JSON: " << parser.error_;
   auto root = parsed ? flexbuffers::GetRoot(root_fbb.GetBuffer()) : flexbuffers::Reference();
+
+  if (parsed && !root.IsMap())
+    return emit_error.emit() << "plugin configuration must be an object";
 
   if (map_has_key(root, "profiled"))
     util::Logger::warn("hook profiling was removed; ignoring top-level 'profiled' config");
 
-  const util::FailureOr<bool> require_all = parse_require_all_plugins(root, diagnostic);
+  const util::FailureOr<bool> require_all = parse_require_all_plugins(root, emit_error);
   if (require_all.failed())
     return util::Result::failure();
   const bool require_all_plugins = require_all.value();
   const util::FailureOr<size_t> requested =
-      configured_plugin_count(root, require_all_plugins, diagnostic);
+      configured_plugin_count(root, require_all_plugins, emit_error);
   if (requested.failed())
     return util::Result::failure();
   const size_t requested_plugins = requested.value();
   auto group = std::make_shared<ExecutionPluginGroup>(parse_sink_config(root));
   const int loaded_plugins = load_from_config(config_json, *group, plugin_dir);
   if (require_all_plugins && static_cast<size_t>(loaded_plugins) != requested_plugins) {
-    return diagnostic.emit() << "required plugin loading failed: loaded " << loaded_plugins
+    return emit_error.emit() << "required plugin loading failed: loaded " << loaded_plugins
                              << " of " << requested_plugins << " configured plugins";
   }
   return group;

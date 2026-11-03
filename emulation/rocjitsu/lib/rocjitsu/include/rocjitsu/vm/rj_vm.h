@@ -202,16 +202,21 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_string_for_node(const char *json, co
 /// @param[in] vm VM handle from rj_vm_create / rj_vm_create_from_string.
 /// @param[in] config_json The full config-file JSON containing the plugin
 ///            configuration; it may differ from the text used to create the VM.
-///            Never NULL.
+///            Never NULL. An empty string removes all installed plugins; a non-empty
+///            config must be a JSON object.
 /// @param[in] plugin_dir Trusted directory to load plugin shared objects from
 ///            by explicit path — required in daemon mode, where the process is
 ///            not re-exec'd and cannot rely on a launcher-populated
 ///            LD_LIBRARY_PATH. NULL or empty resolves plugins by soname via the
 ///            dynamic-linker search path (the interposer/local path).
 /// @retval ROCJITSU_STATUS_SUCCESS Plugins were configured (or none declared).
-/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC, configuration failed, or a
-///                               required plugin could not be loaded.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL, or plugin
+///            admission rejected the config (invalid JSON/object/options or a
+///            required plugin could not be loaded). The installed group and its
+///            active state are unchanged.
+/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC, or an exception occurred during
+///            configuration, replacement, or initialization. The installed group
+///            and active state may have changed.
 RJ_API_EXPORT rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json,
                                              const char *plugin_dir);
 

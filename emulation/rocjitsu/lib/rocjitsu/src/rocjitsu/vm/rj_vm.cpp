@@ -289,7 +289,7 @@ rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char 
                                              diagnostic.emitter());
     if (configured.failed()) {
       util::Logger::warn("rj_vm_load_plugins failed: ", diagnostic.message());
-      return ROCJITSU_STATUS_ERROR;
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
     }
     std::shared_ptr<ExecutionPluginGroup> group = std::move(configured).value();
     // rj_vm_load_plugins() is a pre-run operation, so replacing and initializing
@@ -301,6 +301,9 @@ rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char 
     return ROCJITSU_STATUS_SUCCESS;
   } catch (const std::exception &e) {
     util::Logger::warn("rj_vm_load_plugins failed: ", e.what());
+    return ROCJITSU_STATUS_ERROR;
+  } catch (...) {
+    util::Logger::warn("rj_vm_load_plugins failed: unknown plugin exception");
     return ROCJITSU_STATUS_ERROR;
   }
 }
