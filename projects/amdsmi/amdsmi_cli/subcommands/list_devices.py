@@ -367,11 +367,13 @@ class ListDevicesCommands:
         return nics, ainics
 
     def list_cpu(self, args, multiple_devices=False, cpu=None):
-        """List CPU identification (family, model, stepping) for target cpu.
+        """List CPU identification for target cpu.
 
-        `list` only exposes the socket-level CPU identity. family and model come
-        from the amd-smi APIs; stepping is not exposed by amd-smi so it is read
-        from /proc/cpuinfo via the helpers.
+        Always reports the model name, BIOS (SMBIOS processor) model name and
+        cores per socket. With -e (args.enumeration) also reports family, model and
+        stepping. Model name and cores come from the amd-smi APIs; stepping
+        is read from /proc/cpuinfo and the BIOS model name from the SMBIOS table
+        via the helpers.
 
         Args:
             args (Namespace): Namespace containing the parsed CLI args
@@ -402,27 +404,54 @@ class ListDevicesCommands:
 
         cpu_id = self.helpers.get_cpu_id_from_device_handle(args.cpu)
 
-        try:
-            family = amdsmi_interface.amdsmi_get_cpu_family()
-        except amdsmi_exception.AmdSmiLibraryException as e:
-            family = "N/A"
-            logging.debug("Failed to get cpu family for cpu %s | %s", cpu_id, e.get_error_info())
-
-        try:
-            model = amdsmi_interface.amdsmi_get_cpu_model()
-        except amdsmi_exception.AmdSmiLibraryException as e:
-            model = "N/A"
-            logging.debug("Failed to get cpu model for cpu %s | %s", cpu_id, e.get_error_info())
-
-        stepping = self.helpers.get_cpu_stepping()
-
         # Report the identification values as hex (N/A stays as-is).
         def _as_hex(value):
             return f"0x{value:X}" if isinstance(value, int) else value
 
-        self.logger.store_cpu_output(args.cpu, "family", _as_hex(family))
-        self.logger.store_cpu_output(args.cpu, "model", _as_hex(model))
-        self.logger.store_cpu_output(args.cpu, "stepping", _as_hex(stepping))
+        try:
+            model_name = amdsmi_interface.amdsmi_get_cpu_model_name(args.cpu)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            model_name = "N/A"
+            logging.debug(
+                "Failed to get cpu model name for cpu %s | %s", cpu_id, e.get_error_info()
+            )
+
+        bios_model_name = self.helpers.get_cpu_bios_model_name(cpu_id)
+
+        try:
+            cores_per_socket = amdsmi_interface.amdsmi_get_cpu_cores_per_socket(cpu_id)[
+                "cores_per_socket"
+            ]
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            cores_per_socket = "N/A"
+            logging.debug(
+                "Failed to get cores per socket for cpu %s | %s", cpu_id, e.get_error_info()
+            )
+
+        self.logger.store_cpu_output(args.cpu, "model_name", model_name)
+        self.logger.store_cpu_output(args.cpu, "bios_model_name", bios_model_name)
+        self.logger.store_cpu_output(args.cpu, "cores_per_socket", cores_per_socket)
+
+        if getattr(args, "enumeration", False):
+            try:
+                family = amdsmi_interface.amdsmi_get_cpu_family()
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                family = "N/A"
+                logging.debug(
+                    "Failed to get cpu family for cpu %s | %s", cpu_id, e.get_error_info()
+                )
+
+            try:
+                model = amdsmi_interface.amdsmi_get_cpu_model()
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                model = "N/A"
+                logging.debug("Failed to get cpu model for cpu %s | %s", cpu_id, e.get_error_info())
+
+            stepping = self.helpers.get_cpu_stepping()
+
+            self.logger.store_cpu_output(args.cpu, "family", _as_hex(family))
+            self.logger.store_cpu_output(args.cpu, "model", _as_hex(model))
+            self.logger.store_cpu_output(args.cpu, "stepping", _as_hex(stepping))
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
@@ -432,8 +461,9 @@ class ListDevicesCommands:
 
     def list_devices(self, args, multiple_devices=False, gpu=None, nic=None, switch=None):
 
-        # `list` reports GPU information. --cpu now reports CPU identification
-        # (family/model/stepping); --core is still not serviced and is rejected.
+        # `list` reports GPU information. --cpu reports CPU identification
+        # (model name, BIOS model name and cores per socket; with -e also
+        # family/model/stepping); --core is still not serviced and is rejected.
         if getattr(args, "core", None):
             raise AmdSmiCommandNotSupportedException(
                 "list",

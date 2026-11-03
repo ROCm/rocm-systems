@@ -29,6 +29,7 @@ import os
 import sys
 import types
 import unittest
+import unittest.mock
 from typing import Any
 
 from common.common import (
@@ -221,3 +222,69 @@ class TestCliDeviceArgsCpuCoreHidden(unittest.TestCase):
         for supported in (False, True):
             parser = self._build_parser(cpu_core_supported=supported)
             self.assertIn("--gpu", parser.format_help())
+
+
+class TestCpuOptionalValueForList(unittest.TestCase):
+    """``list --cpu`` takes zero values (all CPUs); other subcommands still need one."""
+
+    _HANDLES = {"0": {"Device Handle": "h0"}, "1": {"Device Handle": "h1"}}
+
+    def _build_parser(self, cpu_nargs):
+        def select_handles(cpu_selections, cpu_choices):
+            if "all" in cpu_selections:
+                return True, True, ["h0", "h1"]
+            return True, False, [cpu_choices[sel]["Device Handle"] for sel in cpu_selections]
+
+        fake = types.SimpleNamespace()
+        fake.helpers = _FakeHelpers()
+        fake.helpers.get_output_format = lambda: "human"
+        fake.helpers.get_device_handles_from_cpu_selections = select_handles
+        for name in (
+            "gpu_choices_str",
+            "cpu_choices_str",
+            "nic_choices_str",
+            "core_choices_str",
+            "switch_choices_str",
+        ):
+            setattr(fake, name, "0")
+        for name in ("gpu_choices", "core_choices", "nic_choices", "vf_choices", "switch_choices"):
+            setattr(fake, name, ["0"])
+        fake.cpu_choices = dict(self._HANDLES)
+        fake._gpu_select = lambda choices: "store"
+        fake._core_select = lambda choices: "store"
+        fake._nic_select = lambda choices: "store"
+        fake._switch_select = lambda choices: "store"
+        fake._cpu_select = types.MethodType(AMDSMIParser._cpu_select, fake)
+        fake._validate_cpu_core = types.MethodType(AMDSMIParser._validate_cpu_core, fake)
+        fake._add_device_arguments = types.MethodType(AMDSMIParser._add_device_arguments, fake)
+
+        parser = argparse.ArgumentParser(prog="amd-smi list")
+        parser.add_argument("-e", "--enumeration", action="store_true")
+        fake._add_device_arguments(
+            parser,
+            required=False,
+            cpu_core_supported=False,
+            cpu_supported=True,
+            cpu_nargs=cpu_nargs,
+        )
+        return parser
+
+    def test_bare_cpu_selects_all_cpus(self):
+        parser = self._build_parser(cpu_nargs="*")
+        self.assertEqual(parser.parse_args(["--cpu"]).cpu, ["h0", "h1"])
+
+    def test_bare_cpu_with_enumeration_selects_all_cpus(self):
+        parser = self._build_parser(cpu_nargs="*")
+        args = parser.parse_args(["--cpu", "-e"])
+        self.assertEqual(args.cpu, ["h0", "h1"])
+        self.assertTrue(args.enumeration)
+
+    def test_explicit_cpu_ids_still_select_those_cpus(self):
+        parser = self._build_parser(cpu_nargs="*")
+        self.assertEqual(parser.parse_args(["--cpu", "1"]).cpu, ["h1"])
+        self.assertEqual(parser.parse_args(["--cpu", "all", "-e"]).cpu, ["h0", "h1"])
+
+    def test_default_cpu_still_requires_a_value(self):
+        parser = self._build_parser(cpu_nargs="+")
+        with unittest.mock.patch("sys.stderr"), self.assertRaises(SystemExit):
+            parser.parse_args(["--cpu"])

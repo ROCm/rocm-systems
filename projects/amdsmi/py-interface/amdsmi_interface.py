@@ -2437,7 +2437,7 @@ def amdsmi_get_cpu_model_name(processor_handle: processor_handle_t):
     cpu_info = amdsmi_wrapper.amdsmi_cpu_info_t()
 
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_model_name(processor_handle, cpu_info))
-    return f"{cpu_info.model_name}"
+    return cpu_info.model_name.decode("utf-8")
 
 
 def amdsmi_get_cpu_cores_per_socket(sock_count: ctypes.c_uint32):

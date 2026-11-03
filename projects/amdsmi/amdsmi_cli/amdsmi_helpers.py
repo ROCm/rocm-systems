@@ -31,6 +31,37 @@ from BDF import BDF
 
 import amdsmi_cli_exceptions
 
+SMBIOS_TABLE_PATH = "/sys/firmware/dmi/tables/DMI"
+_SMBIOS_TYPE_PROCESSOR = 4
+_SMBIOS_TYPE_END_OF_TABLE = 127
+_SMBIOS_PROCESSOR_VERSION_OFFSET = 0x10
+
+
+def parse_smbios_processor_versions(data: bytes) -> List[str]:
+    """Return the Processor Version string of each SMBIOS type 4 entry, in table order.
+
+    Each structure is a formatted area followed by a double-NUL-terminated string set.
+    """
+    versions: List[str] = []
+    offset = 0
+    while offset + 4 <= len(data):
+        stype, length = data[offset], data[offset + 1]
+        if stype == _SMBIOS_TYPE_END_OF_TABLE or length < 4:
+            break
+        strings_start = offset + length
+        strings_end = data.find(b"\x00\x00", strings_start)
+        if strings_end == -1:
+            break
+        if stype == _SMBIOS_TYPE_PROCESSOR and length > _SMBIOS_PROCESSOR_VERSION_OFFSET:
+            index = data[offset + _SMBIOS_PROCESSOR_VERSION_OFFSET]
+            strings = data[strings_start:strings_end].split(b"\x00")
+            version = ""
+            if 0 < index <= len(strings):
+                version = strings[index - 1].decode("utf-8", errors="replace").strip()
+            versions.append(version)
+        offset = strings_end + 2
+    return versions
+
 
 class AMDSMIHelpers:
     """Helper functions that aren't apart of the AMDSMI API
@@ -1484,6 +1515,22 @@ class AMDSMIHelpers:
                         return int(line.split(":", 1)[1].strip())
         except (OSError, ValueError) as e:
             logging.debug("Failed to read cpu stepping from /proc/cpuinfo | %s", e)
+        return "N/A"
+
+    def get_cpu_bios_model_name(self, cpu_id: int) -> str:
+        """Return the SMBIOS Processor Version for a CPU socket, or "N/A".
+
+        The SMBIOS table is root-only, so non-root callers get "N/A".
+        The Nth type 4 (Processor) entry is taken to describe CPU N.
+        """
+        try:
+            with open(SMBIOS_TABLE_PATH, "rb") as table:
+                versions = parse_smbios_processor_versions(table.read())
+        except OSError as e:
+            logging.debug("Failed to read SMBIOS table | %s", e)
+            return "N/A"
+        if cpu_id < len(versions) and versions[cpu_id]:
+            return versions[cpu_id]
         return "N/A"
 
     def get_amd_gpu_bdfs(self):
