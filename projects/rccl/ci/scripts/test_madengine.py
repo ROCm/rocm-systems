@@ -1621,15 +1621,24 @@ def write_repro_bundle(
     images: dict[str, str],
     base_digest: str,
     env: dict | None = None,
-) -> Path:
+) -> Path | None:
     """Write ``WORK_DIR/repro``: what a rerun by hand needs once WORK_DIR is gone.
 
     The CI manifests are left exactly as the run uses them; the bundle carries
     rewritten copies.
+
+    Writes nothing when the candidate bind-mounts its RCCL from this host, as
+    with --skip-overlay-build: the bundle carries neither that library nor a
+    way to rewrite the mount, so it could not reproduce the candidate anywhere
+    else. CI always builds the overlay; that mode is for local runs.
     """
     bundle = work_dir / REPRO_DIR
     if bundle.exists():
         shutil.rmtree(bundle)
+    candidate = (phase_dirs[CANDIDATE] / "manifest.json").read_text()
+    if re.search(r"-v \S+:\S+/librccl\.so", candidate):
+        log.info("No repro bundle: the candidate bind-mounts its RCCL from this host")
+        return None
     bundle.mkdir(parents=True)
 
     ctx = work_dir / OVERLAY_CTX
