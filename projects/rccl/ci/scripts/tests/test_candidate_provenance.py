@@ -22,6 +22,20 @@ GFX950_OBJECTS = {
 }
 
 
+class FakeResponse:
+    def __init__(self, body: bytes):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self):
+        return self.body
+
+
 class CandidateResolutionTest(unittest.TestCase):
     def test_develop_run_uses_immutable_event_sha(self):
         self.assertEqual(
@@ -354,6 +368,156 @@ class CandidateResolutionTest(unittest.TestCase):
                 token="unused",
                 run=unsupported,
                 artifact_manifests=[],
+                artifact_group="gfx950-dcgpu",
+                available_objects=GFX950_OBJECTS,
+            )
+
+    def test_manifest_listing_uses_narrow_encoded_prefix(self):
+        run_id = "123"
+        base = cp.artifact_prefix("ROCm/rocm-systems", run_id)
+        manifest = {
+            "github_run_id": run_id,
+            "the_rock_commit": "c" * 40,
+            "submodules": [],
+        }
+        all_keys = [
+            *(f"{base}artifacts/unrelated-{index}.tar.zst" for index in range(1001)),
+            f"{base}manifests/therock_manifest.json",
+            f"{base}manifests/gfx950-dcgpu/therock_manifest.json",
+        ]
+        listing_urls = []
+
+        def urlopen(request, timeout):
+            self.assertEqual(timeout, 60)
+            url = request if isinstance(request, str) else request.full_url
+            parsed = cp.urllib.parse.urlparse(url)
+            if parsed.path == "/":
+                listing_urls.append(url)
+                query = cp.urllib.parse.parse_qs(parsed.query)
+                self.assertEqual(query["list-type"], ["2"])
+                prefix = query["prefix"][0]
+                filtered = [key for key in all_keys if key.startswith(prefix)]
+                contents = "".join(
+                    f"<Contents><Key>{key}</Key></Contents>" for key in filtered
+                )
+                return FakeResponse(
+                    (
+                        '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+                        "<IsTruncated>false</IsTruncated>"
+                        f"<KeyCount>{len(filtered)}</KeyCount>{contents}"
+                        "</ListBucketResult>"
+                    ).encode()
+                )
+            self.assertIn("/manifests/", parsed.path)
+            return FakeResponse(json.dumps(manifest).encode())
+
+        with mock.patch.object(cp.urllib.request, "urlopen", side_effect=urlopen):
+            manifests = cp.fetch_artifact_manifests("ROCm/rocm-systems", run_id)
+
+        self.assertEqual(
+            [item["path"] for item in manifests],
+            [
+                "manifests/gfx950-dcgpu/therock_manifest.json",
+                "manifests/therock_manifest.json",
+            ],
+        )
+        self.assertEqual(len(listing_urls), 1)
+        self.assertIn(
+            "prefix=ROCm-rocm-systems%2F123-linux%2Fmanifests%2F",
+            listing_urls[0],
+        )
+        self.assertNotIn("unrelated-", listing_urls[0])
+        self.assertIn(
+            "manifests/gfx950%20dcgpu/therock_manifest.json",
+            cp.artifact_object_url(
+                "ROCm/rocm-systems",
+                run_id,
+                "manifests/gfx950 dcgpu/therock_manifest.json",
+            ),
+        )
+
+    def test_truncated_manifest_prefix_fails_closed(self):
+        listing = (
+            '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+            "<IsTruncated>true</IsTruncated>"
+            "<NextContinuationToken>opaque</NextContinuationToken>"
+            "</ListBucketResult>"
+        ).encode()
+        with mock.patch.object(
+            cp.urllib.request, "urlopen", return_value=FakeResponse(listing)
+        ), self.assertRaisesRegex(cp.ProvenanceError, "listing.*truncated"):
+            cp.fetch_artifact_manifests("ROCm/rocm-systems", "123")
+
+    def test_duplicate_authoritative_manifests_fail_closed(self):
+        merge_sha = "c" * 40
+        root = {
+            "path": "manifests/therock_manifest.json",
+            "url": "https://example.invalid/therock_manifest.json",
+            "manifest": {
+                "github_run_id": "123",
+                "the_rock_commit": "d" * 40,
+                "submodules": [{
+                    "submodule_name": "rocm-systems",
+                    "submodule_path": "rocm-systems",
+                    "submodule_url": "https://github.com/ROCm/rocm-systems.git",
+                    "pin_sha": merge_sha,
+                }],
+            },
+        }
+        run = {
+            "head_sha": SHA,
+            "event": "pull_request",
+            "path": ".github/workflows/therock-multi-arch-ci.yml",
+        }
+        with self.assertRaisesRegex(
+            cp.ProvenanceError, "2 authoritative root manifests"
+        ):
+            cp.verify_artifact_run(
+                repository="ROCm/rocm-systems",
+                run_id="123",
+                expected_sha=SHA,
+                token="unused",
+                run=run,
+                artifact_manifests=[root, dict(root)],
+            )
+
+        family = {
+            **root,
+            "path": "manifests/gfx950-dcgpu/therock_manifest.json",
+        }
+        direct_run = {
+            "head_sha": SHA,
+            "event": "workflow_dispatch",
+            "path": ".github/workflows/therock-rccl-ci.yml",
+        }
+        with self.assertRaisesRegex(
+            cp.ProvenanceError, "2 manifests.*gfx950-dcgpu"
+        ):
+            cp.verify_artifact_run(
+                repository="ROCm/rocm-systems",
+                run_id="123",
+                expected_sha=SHA,
+                token="unused",
+                run=direct_run,
+                artifact_manifests=[family, dict(family)],
+                artifact_group="gfx950-dcgpu",
+                available_objects=GFX950_OBJECTS,
+            )
+
+        other_family = {
+            **family,
+            "path": "manifests/gfx94X-dcgpu/therock_manifest.json",
+        }
+        with self.assertRaisesRegex(
+            cp.ProvenanceError, "0 manifests.*gfx950-dcgpu"
+        ):
+            cp.verify_artifact_run(
+                repository="ROCm/rocm-systems",
+                run_id="123",
+                expected_sha=SHA,
+                token="unused",
+                run=direct_run,
+                artifact_manifests=[other_family],
                 artifact_group="gfx950-dcgpu",
                 available_objects=GFX950_OBJECTS,
             )

@@ -105,14 +105,18 @@ def artifact_prefix(repository: str, run_id: str) -> str:
 
 def artifact_object_url(repository: str, run_id: str, relative: str) -> str:
     key = artifact_prefix(repository, run_id) + relative
-    return f"https://{ARTIFACT_BUCKET}.s3.amazonaws.com/{key}"
+    return (
+        f"https://{ARTIFACT_BUCKET}.s3.amazonaws.com/"
+        + urllib.parse.quote(key, safe="/")
+    )
 
 
 def fetch_artifact_manifests(repository: str, run_id: str) -> list[dict]:
     prefix = artifact_prefix(repository, run_id)
+    manifest_prefix = prefix + "manifests/"
     listing_url = (
         f"https://{ARTIFACT_BUCKET}.s3.amazonaws.com/?"
-        + urllib.parse.urlencode({"list-type": "2", "prefix": prefix})
+        + urllib.parse.urlencode({"list-type": "2", "prefix": manifest_prefix})
     )
     with urllib.request.urlopen(listing_url, timeout=60) as response:
         root = ET.fromstring(response.read())
@@ -131,7 +135,7 @@ def fetch_artifact_manifests(repository: str, run_id: str) -> list[dict]:
         if key and key.endswith("/therock_manifest.json")
     ):
         relative = key.removeprefix(prefix)
-        url = f"https://{ARTIFACT_BUCKET}.s3.amazonaws.com/{key}"
+        url = artifact_object_url(repository, run_id, relative)
         with urllib.request.urlopen(url, timeout=60) as response:
             manifests.append({
                 "path": relative,
