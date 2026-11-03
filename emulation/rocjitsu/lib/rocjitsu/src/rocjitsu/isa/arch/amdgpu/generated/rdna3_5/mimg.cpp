@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/mimg.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include <algorithm>
 #include <bit>
 #include <memory>
@@ -51,7 +52,6 @@ bool mimg_name_has_token(std::string_view name, std::string_view token) {
 
 template <typename MimgMachineInst>
 uint32_t mimg_vaddr_bits(const MimgMachineInst *inst, std::string_view name) {
-  static constexpr uint8_t coords[] = {1, 2, 3, 3, 2, 3, 3, 4};
   static constexpr uint8_t gradients[] = {2, 4, 6, 4, 2, 4, 4, 4};
   const uint32_t dim = inst->dim & 7u;
   const bool resinfo = name == "image_get_resinfo";
@@ -62,7 +62,8 @@ uint32_t mimg_vaddr_bits(const MimgMachineInst *inst, std::string_view name) {
   uint32_t words = mimg_name_has_token(name, "c") ? 1u : 0u;
   words += mimg_name_has_token(name, "o") ? 1u : 0u;
   words += mimg_name_has_token(name, "b") ? 1u : 0u;
-  const uint32_t coord_words = (resinfo ? 0u : coords[dim]) + (lod ? 1u : 0u);
+  const uint32_t coord_words =
+      (resinfo ? 0u : amdgpu::image_coordinate_count(dim)) + (lod ? 1u : 0u);
   words += inst->a16 ? (coord_words + 1) / 2 : coord_words;
   if (gradient) {
     const uint32_t gradient_words = gradients[dim];
@@ -87,7 +88,39 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageLoadMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageLoadMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageLoadMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(inst_.nsa && src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -260,7 +293,22 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageStoreMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageStoreMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(inst_.nsa && src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {

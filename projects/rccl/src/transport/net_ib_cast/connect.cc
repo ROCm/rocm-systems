@@ -12,6 +12,7 @@
 #include "net_telemetry.h"
 #include "qp_sharing.h"
 #include "multiplane.h"
+#include "ib_gid_utils.h"
 #include <mutex>
 #include <atomic>
 #include "net_ib_cast_inspect.h"
@@ -82,7 +83,7 @@ constexpr int8_t ncclIbCastUDMANone = (int8_t)-1;
 
 static ncclIbCastUDMAPolicy ncclIbCastGetUDMAPolicy() {
   int64_t policy = rcclParamIbCastUDMAPolicy();
-  if (policy < (int64_t)ncclIbCastUDMAPolicy::First || policy > (int64_t)ncclIbCastUDMAPolicy::Last) {
+  if (!ncclIbCastUDMAPolicyIsValid(policy)) {
     return ncclIbCastUDMAPolicy::ChannelAffinity;
   }
   return (ncclIbCastUDMAPolicy)policy;
@@ -97,6 +98,8 @@ static int8_t ncclIbCastSelectUDMA(const struct ncclIbQpCreateAttr* createQpAttr
   uint8_t udmaCount = IbCastAinicRoce ? IbCastDevs[createQpAttrs->ibDevN].capsProvider.ionic.udmaCount : 2;
 
   if (policy == ncclIbCastUDMAPolicy::SplitConnection) {
+    // qpIdx only advances with >= 2 QPs per device per connection; otherwise
+    // it is always 0 and only the channel-id parity varies.
     uint8_t udmaEngine = (__builtin_parity(static_cast<unsigned>(createQpAttrs->channelId))
                          + createQpAttrs->qpIdx) % udmaCount;
     return (int8_t)(1u << udmaEngine);
@@ -214,15 +217,12 @@ ncclResult_t IbCastDestroyBase(struct ncclIbNetCommDevBase* base) {
   return ncclSuccess;
 }
 
-// GID Format
-// global:  |              64b  - subnet-prefix                |                 64b - EUI                          |
-// raw   :  | 10b fixed | 22b 0 | 16b FLID | 16b subnet-prefix |                 64b - EUI                          |
 static uint16_t IbCastExtractLocalSubnetPrefix(uint64_t subnet_prefix) {
-  return (be64toh(subnet_prefix) & 0xffff);
+  return ncclIbGidSubnetPrefix16(subnet_prefix);
 }
 
 static int IbCastExtractFlid(union ibv_gid* gid) {
-  return ntohs(*((uint16_t*)((uintptr_t)(gid->raw) + 4)));
+  return ncclIbGidFlid(gid->raw);
 }
 
 static sa_family_t envIbAddrFamily(void) {

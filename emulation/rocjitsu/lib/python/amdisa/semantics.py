@@ -447,6 +447,10 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'waitcnt')
     if name == 'S_SET_VGPR_MSB':
         return InstructionSemantics(name, 'set_vgpr_msb')
+    if name == 'S_ROUND_MODE':
+        return InstructionSemantics(name, 'round_mode')
+    if name == 'S_DENORM_MODE':
+        return InstructionSemantics(name, 'denorm_mode')
     # RDNA4 split-wait instructions (GFX12 — no S_WAITCNT; each waits on a
     # single counter whose threshold is the immediate operand directly).
     _SPLIT_WAIT = {

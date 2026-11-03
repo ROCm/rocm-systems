@@ -6,7 +6,7 @@ import struct
 
 import pytest
 
-from elf_test_utils import patch_hip_fatbin_to_nobits
+from elf_test_utils import patch_hip_fatbin_size, patch_hip_fatbin_to_nobits
 from rocm_kpack import binutils
 from rocm_kpack.elf.surgery import ElfSurgery
 from rocm_kpack.tools import bulk_unbundle
@@ -214,6 +214,15 @@ def test_has_fatbin_section_rejects_nobits(test_assets_dir: Path, tmp_path: Path
         source, tmp_path / "test_kernel_single.exe.debug"
     )
     assert ElfSurgery.has_fatbin_section(debug_copy) is False
+
+
+def test_has_fatbin_section_rejects_zero_size(test_assets_dir: Path, tmp_path: Path):
+    """A zero-sized SHT_PROGBITS .hip_fatbin is not device code."""
+    source = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_single.exe"
+    assert ElfSurgery.has_fatbin_section(source) is True
+
+    empty = patch_hip_fatbin_size(source, tmp_path / "test_kernel_single.exe.empty", 0)
+    assert ElfSurgery.has_fatbin_section(empty) is False
 
 
 def test_bundled_binary_nobits_is_standalone(

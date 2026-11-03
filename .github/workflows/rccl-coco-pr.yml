@@ -1,6 +1,7 @@
 name: RCCL coco PR
 
-# PR build/smoke via `coco pr` on Ruby and OCI.
+# PR build/smoke via `coco pr` on Ruby and OCI. TW and Crusoe run only from
+# rccl-coco-scheduled.yml.
 # Fork PRs get no secrets, so a maintainer must dispatch this with pr_number and pr_sha.
 # Draft PRs skip the cluster queue. The RCCL PR gate passes until the PR is
 # marked ready for review, which starts the cluster jobs.
