@@ -29,6 +29,11 @@
  * every subscribed context must be handed the same id for a given symbol, and the
  * ids must stay unique. This tool subscribes two contexts to code object tracing
  * and verifies both properties.
+ *
+ * When CODE_OBJECT_HOST_SYMBOLS_TRACE_HIP_COMPILER_API is non-zero, both contexts
+ * also trace the HIP compiler API. The tracing wrappers on __hipRegisterFatBinary,
+ * __hipRegisterFunction and __hipUnregisterFatBinary must still invoke the internal
+ * code object wrappers that collect the host symbols.
  */
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -38,6 +43,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -45,8 +51,14 @@
 #include <mutex>
 #include <set>
 
+#if !defined(CODE_OBJECT_HOST_SYMBOLS_TRACE_HIP_COMPILER_API)
+#    define CODE_OBJECT_HOST_SYMBOLS_TRACE_HIP_COMPILER_API 0
+#endif
+
 namespace
 {
+constexpr bool trace_hip_compiler_api = (CODE_OBJECT_HOST_SYMBOLS_TRACE_HIP_COMPILER_API != 0);
+
 using host_symbol_data_t =
     rocprofiler_callback_tracing_code_object_host_kernel_symbol_register_data_t;
 
@@ -57,7 +69,20 @@ constexpr size_t num_contexts = 2;
 
 std::mutex                                         symbols_mutex;
 std::map<uint64_t, host_symbol_map_t>              symbols_by_context;
-std::array<rocprofiler_context_id_t, num_contexts> client_contexts = {};
+std::array<rocprofiler_context_id_t, num_contexts> client_contexts             = {};
+std::atomic<uint64_t>                              hip_register_function_count = {0};
+
+void
+hip_compiler_api_callback(rocprofiler_callback_tracing_record_t record,
+                          rocprofiler_user_data_t* /* user_data */,
+                          void* /* callback_data */)
+{
+    if(record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API) return;
+    if(record.operation != ROCPROFILER_HIP_COMPILER_API_ID___hipRegisterFunction) return;
+    if(record.phase != ROCPROFILER_CALLBACK_PHASE_ENTER) return;
+
+    ++hip_register_function_count;
+}
 
 void
 codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
@@ -89,6 +114,19 @@ tool_fini(void* /* tool_data */)
 
     std::cout << "\n=== ROCProfiler Host Symbol Id Test Results ===\n";
     std::cout << "Contexts that observed host symbols: " << symbols_by_context.size() << "\n";
+
+    if constexpr(trace_hip_compiler_api)
+    {
+        std::cout << "Traced __hipRegisterFunction calls:  " << hip_register_function_count.load()
+                  << "\n";
+
+        // without this the test would not exercise the traced __hipRegisterFunction entry
+        if(hip_register_function_count.load() == 0)
+        {
+            std::cerr << "ERROR: HIP compiler API tracing did not observe __hipRegisterFunction\n";
+            std::abort();
+        }
+    }
 
     if(symbols_by_context.size() != num_contexts)
     {
@@ -169,6 +207,21 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
         {
             std::cerr << "Failed to configure code object tracing\n";
             return -1;
+        }
+
+        if constexpr(trace_hip_compiler_api)
+        {
+            if(rocprofiler_configure_callback_tracing_service(
+                   context,
+                   ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
+                   nullptr,
+                   0,
+                   hip_compiler_api_callback,
+                   tool_data) != ROCPROFILER_STATUS_SUCCESS)
+            {
+                std::cerr << "Failed to configure HIP compiler API tracing\n";
+                return -1;
+            }
         }
 
         int valid_ctx = 0;
