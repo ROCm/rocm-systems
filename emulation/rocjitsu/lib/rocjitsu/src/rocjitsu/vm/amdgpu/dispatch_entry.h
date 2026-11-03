@@ -15,6 +15,7 @@
 #include "rocjitsu/vm/amdgpu/consumer_cursor_journal.h"
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
@@ -41,7 +42,6 @@ class ComputeUnitCore;
 class Pm4ScratchPool;
 struct Pm4FailureState;
 using QueueCuSelection = std::optional<std::vector<ComputeUnitCore *>>;
-class GpuVmAccess;
 
 /// @brief Validate the packet storage shared by AQL registration and update paths.
 [[nodiscard]] inline constexpr bool valid_aql_packet_ring(uint64_t base_address,
@@ -143,7 +143,7 @@ enum class CompletionPublicationPhase : uint8_t {
 class CompletionPublicationState {
 public:
   CompletionPublicationPhase phase = CompletionPublicationPhase::ExecutionEnd;
-  std::shared_ptr<GpuVmAccess> access;
+  util::IntrusiveSharedPtr<GpuVmAccessSnapshot> access;
   uint64_t start_timestamp = 0;
   uint64_t end_timestamp = 0;
   uint64_t mailbox_pointer = 0;
@@ -172,7 +172,7 @@ enum class QueueIdlePublicationPhase : uint8_t {
 class QueueIdlePublicationState {
 public:
   QueueIdlePublicationPhase phase = QueueIdlePublicationPhase::Inactive;
-  std::shared_ptr<GpuVmAccess> access;
+  util::IntrusiveSharedPtr<GpuVmAccessSnapshot> access;
   AddressSpaceHandle address_space;
   InterruptSink interrupt_sink;
   uint64_t queue_desc_va = 0;
@@ -209,7 +209,7 @@ enum class QueueScratchRequestPhase : uint8_t {
 class QueueScratchRequestState {
 public:
   QueueScratchRequestPhase phase = QueueScratchRequestPhase::Inactive;
-  std::shared_ptr<GpuVmAccess> access;
+  util::IntrusiveSharedPtr<GpuVmAccessSnapshot> access;
   uint64_t packet_index = 0;
   uint64_t status = 0;
   uint64_t signal_address = 0;
@@ -243,7 +243,7 @@ enum class QueueScratchReclaimPhase : uint8_t {
 class QueueScratchReclaimState {
 public:
   QueueScratchReclaimPhase phase = QueueScratchReclaimPhase::Inactive;
-  std::shared_ptr<GpuVmAccess> access;
+  util::IntrusiveSharedPtr<GpuVmAccessSnapshot> access;
   uint64_t dispatch_id = 0;
   uint64_t signal_address = 0;
   uint64_t mailbox_pointer = 0;
@@ -319,7 +319,7 @@ struct DispatchEntry {
   AddressSpaceHandle address_space;
   /// Immutable VM snapshot captured by the queue-service transaction that
   /// admitted this dispatch. Every wave in the dispatch shares this snapshot.
-  std::shared_ptr<const GpuVmAccess> execution_access;
+  util::IntrusiveSharedPtr<const GpuVmAccessSnapshot> execution_access;
   InterruptSink interrupt_sink;
   uint32_t process_id = 0;
 

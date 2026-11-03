@@ -4223,6 +4223,52 @@ TEST(CfgAnalysis, Gfx1250LaneRestoreReachesConsumerAcrossBranch) {
   EXPECT_EQ(restored.source_call_sreg, 20u);
 }
 
+TEST(CfgAnalysis, Gfx1250RestoredSgprMutationPreservesSiblingBranch) {
+  constexpr auto branch = cdna5::build_sopp(cdna5::kSCbranchScc1Sopp, {.simm16 = 3});
+  constexpr auto clobber = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 20});
+  std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      68u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(68) -> target 0x48.
+      0xD761002Cu,
+      0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x18: v_writelane_b32 v44, s1, 1.
+      0xD7600014u,
+      0x0201012Cu, // 0x20: v_readlane_b32 s20, v44, 0.
+      0xD7600015u,
+      0x0201032Cu, // 0x28: v_readlane_b32 s21, v44, 1.
+      branch[0],   // 0x30: branch to the sibling at 0x40.
+      clobber[0],  // 0x34: s_mov_b32 s20, 0 invalidates only this path's low half.
+      rocjitsu::build_s_swappc_b64(30, 20, ROCJITSU_CODE_ARCH_CDNA5), // 0x38: unknown target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),                       // 0x3c: continuation.
+      rocjitsu::build_s_swappc_b64(30, 20, ROCJITSU_CODE_ARCH_CDNA5), // 0x40: intact target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),                       // 0x44: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),                       // 0x48: target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
+
+  // The two successors share restored facts until the fallthrough erases s20.
+  // That erase must detach, preserving the sibling's complete restored pair.
+  const IndirectCallFixup *sibling_call = nullptr;
+  for (const auto &block : blocks) {
+    for (const auto &fixup : block->static_indirect_call_fixups()) {
+      EXPECT_NE(fixup.source_call_offset, 0x38u);
+      if (fixup.source_call_offset == 0x40)
+        sibling_call = &fixup;
+    }
+  }
+  ASSERT_NE(sibling_call, nullptr);
+  EXPECT_EQ(sibling_call->source_target_offset, 0x48u);
+  EXPECT_EQ(sibling_call->source_builder_sreg, 0u);
+  EXPECT_EQ(sibling_call->source_call_sreg, 20u);
+}
+
 TEST(CfgAnalysis, Gfx1250PcPairCopyReachesConsumer) {
   constexpr uint16_t kSourceSreg = 20;
   constexpr uint16_t kCopiedSreg = 54;
