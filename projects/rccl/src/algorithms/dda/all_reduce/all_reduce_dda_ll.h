@@ -29,6 +29,9 @@
 
 namespace dda::common {
 
+// Grid-stride passes of the send buffer the LL one-shot prefetches per thread before its epoch barrier.
+constexpr int kDdaLLArPrefetchPasses = 4;
+
 // Packets one per-rank slot holds, derived from the scratch bank the host picked
 // rather than a fixed constant, so the tier's reach follows the allocation. A
 // packet is 16B and the slot is floored to a whole 16 of them, so the slot base
@@ -71,6 +74,9 @@ __launch_bounds__(512)
   const size_t nPk = bytes >> 3;           // 8 payload bytes per packet
   const size_t slot = ddaLLArSlotPkts(bankSize, nRanks);
 
+  // The grid strides over the whole message, so a thread's first passes are what it publishes right after the barrier.
+  ddaLLPrefetchSend(sendbuff, (size_t)blockIdx.x * blockDim.x + threadIdx.x, (size_t)gridDim.x * blockDim.x,
+                    kDdaLLArPrefetchPasses, nPk);
   const uint32_t flag = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
   const size_t bankOffsetPkts = (size_t)(flag & 1u) * (bankSize / sizeof(LLPacket16));
 
@@ -96,31 +102,45 @@ __launch_bounds__(512)
   // Phase 2: poll my slots for the other ranks and fold every rank's payload in
   // rank order, so each rank rounds the same partial sums and all get the same
   // result. My own payload comes straight from sendbuff.
+  // Each batch of peer lines is polled under one load wait; an abort is sticky so every thread reaches the epoch bump.
   LLPacket16* myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
-  for (size_t pk = gtid; pk < nPk; pk += stride) {
+  constexpr int kB = ddaLLRecvBatch(NRANKS_CT);
+  bool aborted = false;
+  for (size_t pk = gtid; pk < nPk && !aborted; pk += stride) {
+    const uint32_t s0 = in[2 * pk];
+    const uint32_t s1 = in[2 * pk + 1];
     uint32_t acc0 = 0, acc1 = 0;
-    for (int peer = 0; peer < nRanks; ++peer) {
-      uint32_t d0, d1;
-      if (peer == selfRank) {
-        d0 = in[2 * pk];
-        d1 = in[2 * pk + 1];
-      } else {
-        volatile LLPacket16* src = myBase + (size_t)peer * slot;
-        uint32_t f0, f1;
-        if (!ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1)) {
-          ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
-          return;
+    for (int base = 0; base < nRanks && !aborted; base += kB) {
+      const uint32_t* line[kB];
+      uint32_t d0[kB], d1[kB];
+      uint32_t mask = 0;
+#pragma unroll
+      for (int i = 0; i < kB; ++i) {
+        const int peer = base + i;
+        const bool polled = peer < nRanks && peer != selfRank;
+        line[i] = polled ? reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk) : nullptr;
+        mask |= polled ? 1u << i : 0u;
+      }
+      aborted = !ddaLLWaitLineFlagsBatched(line, mask, flag, params, d0, d1);
+#pragma unroll
+      for (int i = 0; i < kB; ++i) {
+        const int peer = base + i;
+        if (peer < nRanks) {
+          const uint32_t e0 = peer == selfRank ? s0 : d0[i];
+          const uint32_t e1 = peer == selfRank ? s1 : d1[i];
+          if (peer == 0) {
+            acc0 = e0;
+            acc1 = e1;
+          } else {
+            ddaLLAddPayload<T>(acc0, acc1, e0, e1);
+          }
         }
       }
-      if (peer == 0) {
-        acc0 = d0;
-        acc1 = d1;
-      } else {
-        ddaLLAddPayload<T>(acc0, acc1, d0, d1);
-      }
     }
-    out[2 * pk] = acc0;
-    out[2 * pk + 1] = acc1;
+    if (!aborted) {
+      out[2 * pk] = acc0;
+      out[2 * pk + 1] = acc1;
+    }
   }
 
   ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
