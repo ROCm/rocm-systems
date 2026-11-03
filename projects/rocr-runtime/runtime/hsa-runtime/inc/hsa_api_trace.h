@@ -296,6 +296,7 @@ struct AmdExtTable {
   decltype(hsa_amd_agent_set_attribute)* hsa_amd_agent_set_attribute_fn;
   decltype(hsa_amd_vmem_get_vmem_info)* hsa_amd_vmem_get_vmem_info_fn;
   decltype(hsa_amd_enable_high_precision_timestamps)* hsa_amd_enable_high_precision_timestamps_fn;
+  decltype(hsa_amd_signal_create_v2)* hsa_amd_signal_create_v2_fn;
 };
 
 // Table to export HSA Core Runtime Apis

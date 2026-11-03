@@ -1618,6 +1618,13 @@ typedef union rocprofiler_hsa_api_args_t
         rocprofiler_hsa_api_no_args no_args;
     } hsa_amd_enable_high_precision_timestamps;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x17
+    struct
+    {
+        hsa_amd_signal_create_desc_t* descs;
+        uint32_t                      num_descs;
+    } hsa_amd_signal_create_v2;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 

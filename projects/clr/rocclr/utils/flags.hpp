@@ -215,6 +215,12 @@ release(uint, ROC_AQL_QUEUE_SIZE, 16384,                                      \
         "AQL queue size in AQL packets")                                      \
 release(uint, ROC_SIGNAL_POOL_SIZE, 64,                                       \
         "Initial size of HSA signal pool")                                    \
+release(uint, ROC_EDGE_SIGNAL_POOL_SIZE, 16384,                               \
+        "Number of device resident ordering edge signals per device")         \
+release(uint, DEBUG_CLR_DEVICE_ORDERING_EDGE, 1,                              \
+        "Cross queue ordering edges: 0 off (host resident value word), "      \
+        "1 device resident, segment completion signal on its own barrier, "   \
+        "2 device resident, completion signal on the kernel dispatch")        \
 release(uint, DEBUG_CLR_LIMIT_BLIT_WG, 16,                                    \
         "Limit the number of workgroups in blit operations")                  \
 release(bool, DEBUG_CLR_BLIT_KERNARG_OPT, false,                              \

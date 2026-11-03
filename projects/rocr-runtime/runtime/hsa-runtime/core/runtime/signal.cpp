@@ -44,6 +44,7 @@
 #define HSA_RUNTME_CORE_SIGNAL_CPP_
 
 #include "core/inc/signal.h"
+#include "core/inc/amd_gpu_agent.h"
 
 #include <algorithm>
 #include <numeric>
@@ -105,6 +106,13 @@ SharedSignal* SharedSignalPool_t::alloc() {
   return ret;
 }
 
+SharedSignal* SharedSignalPool_t::alloc(int agent_node_id, int flags) {
+  if (agent_node_id != 0 || flags != 0)
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ALLOCATION,
+                             "SharedSignalPool_t cannot honour a placement request.");
+  return alloc();
+}
+
 void SharedSignalPool_t::free(SharedSignal* ptr) {
   if (ptr == nullptr) return;
 
@@ -131,6 +139,65 @@ LocalSignal::LocalSignal(hsa_signal_value_t initial_value, bool exportable)
                                : core::Runtime::runtime_singleton_->GetSharedSignalPool(),
                     exportable ? core::MemoryRegion::AllocateIPC : 0) {
   local_signal_.shared_object()->amd_signal.value = initial_value;
+}
+
+
+// SharedSignal's assertions above constrain offsets WITHIN the object, so a slot
+// at base + i*stride preserves them exactly when stride % 32 == 0.  The slab's
+// base is page aligned, coming from a KFD allocation.
+static_assert(AMD::GpuAgent::kOrderingEdgeDefaultStride >= sizeof(SharedSignal),
+              "Ordering edge slot stride must hold a whole SharedSignal.");
+static_assert((AMD::GpuAgent::kOrderingEdgeDefaultStride % 32) == 0,
+              "Ordering edge slot stride must preserve SharedSignal's 32 byte internal alignment.");
+static_assert((AMD::GpuAgent::kOrderingEdgeBlockSize %
+               AMD::GpuAgent::kOrderingEdgeDefaultStride) == 0,
+              "Ordering edge slot stride must divide the slab block exactly.");
+
+static SharedSignal* AllocateDeviceSignalBlock(core::Agent& device_agent) {
+  if (device_agent.device_type() != core::Agent::DeviceType::kAmdGpuDevice)
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_AGENT,
+                             "Ordering edge signal consumer is not a GPU agent.");
+
+  const core::MemoryRegion* local =
+      static_cast<AMD::GpuAgent&>(device_agent).OrderingEdgeSignalRegion();
+  if (local == nullptr)
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_AGENT,
+                             "Agent has no host visible coarse grain device local memory region.");
+
+  // The slab block carries AllocateUncached.  Uncached is a GPU-side page attribute
+  // only and does NOT change the host mapping, which is why the write combining
+  // drain in default_signal.cpp is still needed.  It is also required on gfx1250
+  // with older MEC firmware, where a buffer the command processor also reads hangs
+  // the GPU without it.
+  hsa_status_t why = HSA_STATUS_SUCCESS;
+  void* ptr = static_cast<AMD::GpuAgent&>(device_agent).AcquireOrderingEdgeSlot(&why);
+  if (ptr == nullptr) {
+    if (why == HSA_STATUS_ERROR_INVALID_AGENT)
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_AGENT,
+                               "Agent has no host visible coarse grain device local memory region.");
+    throw std::bad_alloc();  // this one really is out of memory
+  }
+
+  // Constructed here, not when the block was allocated, so that a recycled slot is
+  // fully reinitialised before its handle goes out again.
+  return new (ptr) SharedSignal();
+}
+
+LocalSignal::LocalSignal(hsa_signal_value_t initial_value, core::Agent& device_agent)
+    : local_signal_(Shared<SharedSignal, SharedSignalPool_t>::NoAlloc()),
+      device_block_(AllocateDeviceSignalBlock(device_agent)),
+      device_agent_(&device_agent) {
+  device_block_->amd_signal.value = initial_value;
+}
+
+LocalSignal::~LocalSignal() {
+  if (device_block_ != nullptr) {
+    // SharedSignal is trivially destructible (static_assert in signal.h), so only
+    // the storage goes back -- to the agent's slab free list, not to the driver.
+    static_cast<AMD::GpuAgent*>(device_agent_)->ReleaseOrderingEdgeSlot(device_block_);
+    device_block_ = nullptr;
+    device_agent_ = nullptr;
+  }
 }
 
 void Signal::registerIpc() {
