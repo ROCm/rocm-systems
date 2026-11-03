@@ -1080,12 +1080,14 @@ TEST_F(GinRocshmemGdaTemplateTest, Put_ThreadModeSignalAddDeliversArg) {
   env.src.zero();
   env.build();
   resetSignalCount();
+  resetThreadSafePostCount();
   kernelPutSignalAddThread<<<1, 1>>>(env.dHarness.ptr);
   syncAndCheck();
   EXPECT_EQ(readSignalCount(), 1ULL);  // signal dispatched, same as GPU mode
   auto sigs = env.signals.copyTo();
   EXPECT_EQ(sigs[1], 7ULL);
   EXPECT_EQ(sigs[0], 0ULL);
+  EXPECT_EQ(readThreadSafePostCount(), 0ULL);  // THREAD elides the lock on put + signal
 }
 
 __global__ void kernelPutValueSignalThread(GdaHarness* h, uint32_t val) {
@@ -1107,6 +1109,7 @@ TEST_F(GinRocshmemGdaTemplateTest, PutValue_ThreadModeWithSignal) {
   env.build();
   resetPutValCount();
   resetSignalCount();
+  resetThreadSafePostCount();
   const uint32_t kVal = 0x12345678u;
   kernelPutValueSignalThread<<<1, 1>>>(env.dHarness.ptr, kVal);
   syncAndCheck();
@@ -1118,6 +1121,7 @@ TEST_F(GinRocshmemGdaTemplateTest, PutValue_ThreadModeWithSignal) {
   EXPECT_EQ(observed, kVal);
   auto sigs = env.signals.copyTo();
   EXPECT_EQ(sigs[2], 4ULL);
+  EXPECT_EQ(readThreadSafePostCount(), 0ULL);  // THREAD elides the lock on PutValue + signal
 }
 
 // G28: the CTA and (explicit) GPU sharing modes both route to callImpl<true>
