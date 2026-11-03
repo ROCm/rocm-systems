@@ -83,7 +83,7 @@ constexpr int8_t ncclIbCastUDMANone = (int8_t)-1;
 
 static ncclIbCastUDMAPolicy ncclIbCastGetUDMAPolicy() {
   int64_t policy = rcclParamIbCastUDMAPolicy();
-  if (policy < (int64_t)ncclIbCastUDMAPolicy::First || policy > (int64_t)ncclIbCastUDMAPolicy::Last) {
+  if (!ncclIbCastUDMAPolicyIsValid(policy)) {
     return ncclIbCastUDMAPolicy::ChannelAffinity;
   }
   return (ncclIbCastUDMAPolicy)policy;
@@ -98,6 +98,8 @@ static int8_t ncclIbCastSelectUDMA(const struct ncclIbQpCreateAttr* createQpAttr
   uint8_t udmaCount = IbCastAinicRoce ? IbCastDevs[createQpAttrs->ibDevN].capsProvider.ionic.udmaCount : 2;
 
   if (policy == ncclIbCastUDMAPolicy::SplitConnection) {
+    // qpIdx only advances with >= 2 QPs per device per connection; otherwise
+    // it is always 0 and only the channel-id parity varies.
     uint8_t udmaEngine = (__builtin_parity(static_cast<unsigned>(createQpAttrs->channelId))
                          + createQpAttrs->qpIdx) % udmaCount;
     return (int8_t)(1u << udmaEngine);
