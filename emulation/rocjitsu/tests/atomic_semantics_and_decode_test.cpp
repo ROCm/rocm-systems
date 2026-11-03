@@ -39,6 +39,7 @@
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
+#include "util/result.h"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -73,8 +74,9 @@ public:
   }
   ~InstructionPolicyMachine() { wave->halt(); }
   template <size_t N>
-  uint32_t run(const std::array<uint32_t, N> &words, uint32_t a, uint32_t b = 0, uint32_t c = 0,
-               uint32_t mode = 0xf0, bool memory_op = false, bool buffer = false) {
+  util::FailureOr<uint32_t> run(const std::array<uint32_t, N> &words, uint32_t a, uint32_t b = 0,
+                                uint32_t c = 0, uint32_t mode = 0xf0, bool memory_op = false,
+                                bool buffer = false) {
     wave->set_mode_raw(mode);
     cu->write_vgpr(base, 0, a);
     cu->write_vgpr(base + 1, 0, b);
@@ -84,7 +86,7 @@ public:
     std::ranges::copy(words, padded.begin());
     DecodeResult decoded = decoder->decode(padded.data());
     if (decoded.failed())
-      throw std::runtime_error("Instruction encoding rejected by decoder");
+      return util::Result::failure();
     std::unique_ptr<Instruction> instruction(std::move(decoded).value());
     EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
     if (memory_op) {
@@ -97,7 +99,8 @@ public:
     return cu->read_vgpr(base + (buffer ? 0 : 6), 0);
   }
   template <size_t N>
-  uint32_t global(const std::array<uint32_t, N> &words, uint32_t old, uint32_t src, bool buffer) {
+  util::FailureOr<uint32_t> global(const std::array<uint32_t, N> &words, uint32_t old, uint32_t src,
+                                   bool buffer) {
     memory.write32(0x1000, old);
     const uint32_t scalar = wave->sgpr_alloc().base;
     cu->write_sgpr(scalar + 4, 0x1000);
@@ -107,8 +110,10 @@ public:
     cu->write_sgpr(scalar + 7, arch_is_cdna_4_or_lower(cu->arch()) ? kGfx9DataFormat32 : 3u << 28);
     cu->write_vgpr(base + 4, 0, 0);
     cu->write_vgpr(base + 5, 0, 0);
-    const uint32_t returned = run(words, src, 0, 0, 0xf0, true, buffer);
-    EXPECT_EQ(returned, old);
+    util::FailureOr<uint32_t> returned = run(words, src, 0, 0, 0xf0, true, buffer);
+    if (returned.failed())
+      return util::Result::failure();
+    EXPECT_EQ(returned.value(), old);
     return memory.read32(0x1000);
   }
   amdgpu::GpuMemory memory;
@@ -118,6 +123,12 @@ public:
   amdgpu::Wavefront *wave = nullptr;
   uint32_t base = 0;
 };
+TEST(AtomicSemanticsAndDecode, RejectsInvalidFixtureInstruction) {
+  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  const std::array<uint32_t, 4> invalid_words{0xffffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu};
+  EXPECT_TRUE(machine.run(invalid_words, 0).failed());
+}
+
 void witness(const char *name, rj_code_arch_t arch, uint32_t got, uint32_t expected) {
   EXPECT_EQ(got, expected) << name << " arch=" << unsigned(arch);
 }
@@ -143,10 +154,18 @@ TEST(AtomicSemanticsAndDecode, ConditionalAndClampedMemorySubtract) {
         const std::array<uint32_t, 3> buffer = cdna5::build_vbuffer(
             opcode,
             {.soffset = 124, .vdata = 0, .rsrc = 4, .scope = 2, .th = 1, .offen = 1, .vaddr = 4});
-        witness(name, arch, machine.global(buffer, old, 5, true), expected);
+        {
+          util::FailureOr<uint32_t> result = machine.global(buffer, old, 5, true);
+          ASSERT_TRUE(result.succeeded());
+          witness(name, arch, result.value(), expected);
+        }
         const std::array<uint32_t, 3> global = cdna5::build_vglobal(
             opcode, {.saddr = 4, .vdst = 6, .scope = 2, .th = 1, .vsrc = 0, .vaddr = 4});
-        witness(name, arch, machine.global(global, old, 5, false), expected);
+        {
+          util::FailureOr<uint32_t> result = machine.global(global, old, 5, false);
+          ASSERT_TRUE(result.succeeded());
+          witness(name, arch, result.value(), expected);
+        }
       }
     }
   }
@@ -167,9 +186,17 @@ TEST(AtomicSemanticsAndDecode, ConditionalAndClampedLegacyCsub) {
       global =
           rdna3::build_flat(55, {.glc = 1, .seg = 2, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
     }
-    witness("legacy_csub_buffer", arch, machine.global(buffer, 2, 5, true), 0);
+    {
+      util::FailureOr<uint32_t> result = machine.global(buffer, 2, 5, true);
+      ASSERT_TRUE(result.succeeded());
+      witness("legacy_csub_buffer", arch, result.value(), 0);
+    }
     ASSERT_FALSE(machine.decoder->decode(global.data()).failed());
-    witness("legacy_csub_global", arch, machine.global(global, 2, 5, false), 0);
+    {
+      util::FailureOr<uint32_t> result = machine.global(global, 2, 5, false);
+      ASSERT_TRUE(result.succeeded());
+      witness("legacy_csub_global", arch, result.value(), 0);
+    }
   }
 }
 TEST(AtomicSemanticsAndDecode, LegacyCsubLegalizesToClampedSubtract) {
@@ -187,8 +214,16 @@ TEST(AtomicSemanticsAndDecode, LegacyCsubLegalizesToClampedSubtract) {
     InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_RDNA4);
     const std::array<uint32_t, 3> target = rdna4::build_vglobal(
         entry->target_opcode, {.saddr = 4, .vdst = 6, .scope = 2, .th = 1, .vsrc = 0, .vaddr = 4});
-    EXPECT_EQ(machine.global(target, 2, 5, false), 0u);
-    EXPECT_EQ(machine.global(target, 7, 5, false), 2u);
+    {
+      util::FailureOr<uint32_t> result = machine.global(target, 2, 5, false);
+      ASSERT_TRUE(result.succeeded());
+      EXPECT_EQ(result.value(), 0u);
+    }
+    {
+      util::FailureOr<uint32_t> result = machine.global(target, 7, 5, false);
+      ASSERT_TRUE(result.succeeded());
+      EXPECT_EQ(result.value(), 2u);
+    }
   }
 }
 
@@ -260,11 +295,27 @@ TEST(AtomicSemanticsAndDecode, GlobalOnlyPackedHalfAndScalarFloatAtomics) {
         if (segment != 2)
           continue;
         if (opcode == 78) {
-          EXPECT_EQ(machine.global(words, 0x3c004000, 0x42004400, false), 0x44004600u);
-          EXPECT_EQ(machine.global(words, 0x00010001, 0x00010001, false), 0x00020002u);
-          EXPECT_EQ(machine.global(words, 0x7bff7bff, 0x7bff7bff, false), 0x7c007c00u);
+          {
+            util::FailureOr<uint32_t> result = machine.global(words, 0x3c004000, 0x42004400, false);
+            ASSERT_TRUE(result.succeeded());
+            EXPECT_EQ(result.value(), 0x44004600u);
+          }
+          {
+            util::FailureOr<uint32_t> result = machine.global(words, 0x00010001, 0x00010001, false);
+            ASSERT_TRUE(result.succeeded());
+            EXPECT_EQ(result.value(), 0x00020002u);
+          }
+          {
+            util::FailureOr<uint32_t> result = machine.global(words, 0x7bff7bff, 0x7bff7bff, false);
+            ASSERT_TRUE(result.succeeded());
+            EXPECT_EQ(result.value(), 0x7c007c00u);
+          }
         } else {
-          EXPECT_EQ(machine.global(words, 1, 1, false), 0u);
+          {
+            util::FailureOr<uint32_t> result = machine.global(words, 1, 1, false);
+            ASSERT_TRUE(result.succeeded());
+            EXPECT_EQ(result.value(), 0u);
+          }
         }
       }
     }
@@ -299,12 +350,19 @@ TEST(AtomicSemanticsAndDecode, LegacyGlobalAddtidUsesScalarAddressAndSignedOffse
         arch == ROCJITSU_CODE_ARCH_RDNA2
             ? rdna2::build_flat(22, {.offset = 0x1ffc, .seg = 2, .saddr = 4, .vdst = 6})
             : rdna3::build_flat(40, {.offset = 0x1ffc, .seg = 2, .saddr = 4, .vdst = 6});
-    EXPECT_EQ(machine.run(load, 0, 0, 0, 0xf0, true), 0x12345678u);
+    {
+      util::FailureOr<uint32_t> result = machine.run(load, 0, 0, 0, 0xf0, true);
+      ASSERT_TRUE(result.succeeded());
+      EXPECT_EQ(result.value(), 0x12345678u);
+    }
     const std::array<uint32_t, 2> store =
         arch == ROCJITSU_CODE_ARCH_RDNA2
             ? rdna2::build_flat(23, {.offset = 0x1ffc, .seg = 2, .data = 0, .saddr = 4})
             : rdna3::build_flat(41, {.offset = 0x1ffc, .seg = 2, .data = 0, .saddr = 4});
-    machine.run(store, 0xabcdef01, 0, 0, 0xf0, true);
+    {
+      util::FailureOr<uint32_t> result = machine.run(store, 0xabcdef01, 0, 0, 0xf0, true);
+      ASSERT_TRUE(result.succeeded());
+    }
     EXPECT_EQ(machine.memory.read32(0x1000), 0xabcdef01u);
     machine.cu->write_sgpr(scalar + 4, 0x2000);
     machine.memory.write32(0x2000, 0x11223344);
@@ -312,8 +370,11 @@ TEST(AtomicSemanticsAndDecode, LegacyGlobalAddtidUsesScalarAddressAndSignedOffse
         arch == ROCJITSU_CODE_ARCH_RDNA2
             ? rdna2::build_flat(22, {.offset = 0x1000, .seg = 2, .saddr = 4, .vdst = 6})
             : rdna3::build_flat(40, {.offset = 0x1000, .seg = 2, .saddr = 4, .vdst = 6});
-    EXPECT_EQ(machine.run(boundary_load, 0, 0, 0, 0xf0, true),
-              arch == ROCJITSU_CODE_ARCH_RDNA2 ? 0x11223344u : 0xabcdef01u);
+    {
+      util::FailureOr<uint32_t> result = machine.run(boundary_load, 0, 0, 0, 0xf0, true);
+      ASSERT_TRUE(result.succeeded());
+      EXPECT_EQ(result.value(), arch == ROCJITSU_CODE_ARCH_RDNA2 ? 0x11223344u : 0xabcdef01u);
+    }
   }
 }
 
@@ -323,11 +384,23 @@ TEST(AtomicSemanticsAndDecode, PackedAtomicsAcrossOlderTargets) {
     InstructionPolicyMachine machine(arch);
     const std::array<uint32_t, 2> buffer =
         cdna1::build_mubuf(78, {.glc = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
-    EXPECT_EQ(machine.global(buffer, 0x3c004000, 0x42004400, true), 0x44004600u);
-    EXPECT_EQ(machine.global(buffer, 0x00010001, 0x00010001, true), 0x00020002u);
+    {
+      util::FailureOr<uint32_t> result = machine.global(buffer, 0x3c004000, 0x42004400, true);
+      ASSERT_TRUE(result.succeeded());
+      EXPECT_EQ(result.value(), 0x44004600u);
+    }
+    {
+      util::FailureOr<uint32_t> result = machine.global(buffer, 0x00010001, 0x00010001, true);
+      ASSERT_TRUE(result.succeeded());
+      EXPECT_EQ(result.value(), 0x00020002u);
+    }
     const int saved = std::fegetround();
     std::fesetround(FE_UPWARD);
-    EXPECT_EQ(machine.global(buffer, 0x3c003c00, 0x10001000, true), 0x3c003c00u);
+    {
+      util::FailureOr<uint32_t> result = machine.global(buffer, 0x3c003c00, 0x10001000, true);
+      ASSERT_TRUE(result.succeeded());
+      EXPECT_EQ(result.value(), 0x3c003c00u);
+    }
     std::fesetround(saved);
     if (arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2)
       continue;
@@ -337,8 +410,16 @@ TEST(AtomicSemanticsAndDecode, PackedAtomicsAcrossOlderTargets) {
       const uint32_t one_two = bf16 ? 0x3f804000u : 0x3c004000u;
       const uint32_t three_four = bf16 ? 0x40404080u : 0x42004400u;
       const uint32_t four_six = bf16 ? 0x408040c0u : 0x44004600u;
-      EXPECT_EQ(machine.global(global, one_two, three_four, false), four_six);
-      EXPECT_EQ(machine.global(global, 0x00010001, 0x00010001, false), 0x00020002u);
+      {
+        util::FailureOr<uint32_t> result = machine.global(global, one_two, three_four, false);
+        ASSERT_TRUE(result.succeeded());
+        EXPECT_EQ(result.value(), four_six);
+      }
+      {
+        util::FailureOr<uint32_t> result = machine.global(global, 0x00010001, 0x00010001, false);
+        ASSERT_TRUE(result.succeeded());
+        EXPECT_EQ(result.value(), 0x00020002u);
+      }
     }
   }
   for (rj_code_arch_t arch :
