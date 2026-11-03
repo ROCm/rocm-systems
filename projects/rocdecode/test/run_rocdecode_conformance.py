@@ -691,7 +691,7 @@ def run_codec(
 
 def report(results: Dict[str, str]) -> None:
     width = max((len(name) for name in results), default=0)
-    rule = "=" * (width + 14)
+    rule = "=" * max(width + 14, len("rocDecode conformance"))
     logging.info("")
     logging.info(rule)
     logging.info("rocDecode conformance")
