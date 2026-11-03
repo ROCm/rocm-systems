@@ -2203,11 +2203,11 @@ def _register_high_impact_individual_builders() -> None:
         "native_dropout": OpSpec(
             build=lambda d: ([float_tensor(d, 4, 4), 0.5, True], {}),
         ),
-        # tril / triu / *_indices: (n, k=0)
+        # tril / triu: input tensor. *_indices: (row, col) on CUDA.
         "tril": OpSpec(build=lambda d: ([float_tensor(d, 4, 4)], {})),
         "triu": OpSpec(build=lambda d: ([float_tensor(d, 4, 4)], {})),
-        "tril_indices": OpSpec(build=lambda _d: ([4, 4], {})),
-        "triu_indices": OpSpec(build=lambda _d: ([4, 4], {})),
+        "tril_indices": OpSpec(build=lambda d: ([4, 4], {"device": d})),
+        "triu_indices": OpSpec(build=lambda d: ([4, 4], {"device": d})),
         # comparison with explicit Scalar overload short names
         "eq": OpSpec(
             build=lambda d: ([float_tensor(d, 4, 4), float_tensor(d, 4, 4)], {})
