@@ -634,8 +634,9 @@ struct file_probe_result_t
     ph_result_t             status{ PH_RESULT_UNSUPPORTED_FILE };
     trace_schema_t          trace_schema{ trace_schema_t::unknown };
     profiler_hub::version_t schema_version{ 0, 0, 0 };
-    std::string             uuid;
-    std::string             message;
+    std::string              uuid;
+    std::vector<std::string> uuids;
+    std::string              message;
 };
 
 }  // namespace profiler_hub::reader_types

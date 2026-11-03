@@ -184,4 +184,16 @@ make_trim_schema(reader_types::trace_schema_t schema, version_t version)
     return nullptr;
 }
 
+std::string
+table_guid(std::string_view table)
+{
+    const table_role_t* role = role_of(table);
+    if(role == nullptr || table.size() <= role->prefix.size() ||
+       table[role->prefix.size()] != '_')
+    {
+        return {};
+    }
+    return std::string{ table.substr(role->prefix.size() + 1) };
+}
+
 }  // namespace profiler_hub

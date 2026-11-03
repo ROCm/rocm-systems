@@ -3,6 +3,7 @@
 #include "ph_ctx.hpp"
 #include "ph_future.hpp"
 #include "profiler-hub/c/profiler_hub.h"
+#include "profiler-hub/c/profiler_hub_trim.h"
 #include "profiler-hub/cpp/reader.hpp"
 
 #include <functional>
@@ -10,6 +11,7 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -106,12 +108,14 @@ get_event_details(ph_ctx_t        ctx,
             {
                 return ready;
             }
-            *details = fetch(ctx, event_id);
-            if(const auto track_id = ctx->track_id_of(event_id, expected_type);
-               track_id.has_value())
+            uint32_t track_id = event->track_id;
+            if(const auto found = ctx->track_id_of(track_id, event_id, expected_type);
+               found.has_value())
             {
-                event->track_id = track_id.value();
+                track_id       = found.value();
+                event->track_id = track_id;
             }
+            *details = fetch(ctx, track_id, event_id);
             return PH_RESULT_SUCCESS;
         });
 }
@@ -137,21 +141,42 @@ ph_probe_file(const char* file_path, ph_file_probe_t* probe)
 ph_result_t
 ph_ctx_create(ph_ctx_t* ctx, const char* file_path, ph_future_t future)
 {
+    const char* const paths[] = { file_path };
+    return ph_ctx_create_files(ctx, file_path == nullptr ? nullptr : paths, 1, future);
+}
+
+ph_result_t
+ph_ctx_create_files(ph_ctx_t*           ctx,
+                    const char* const* paths,
+                    uint32_t           path_count,
+                    ph_future_t        future)
+{
     if(ctx == nullptr)
     {
         return PH_RESULT_INVALID_CONTEXT;
     }
 
     *ctx = nullptr;
-    if(file_path == nullptr)
+    if(paths == nullptr || path_count == 0)
     {
         return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    std::vector<std::string> files;
+    files.reserve(path_count);
+    for(uint32_t index = 0; index < path_count; ++index)
+    {
+        if(paths[index] == nullptr)
+        {
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
+        files.emplace_back(paths[index]);
     }
 
     std::unique_ptr<ph_ctx> created;
     try
     {
-        created = std::make_unique<ph_ctx>(file_path);
+        created = std::make_unique<ph_ctx>(std::move(files));
         if(future == nullptr)
         {
             created->load();
@@ -284,6 +309,86 @@ ph_get_node(ph_ctx_t ctx, ph_node_t* node, ph_future_t future)
 }
 
 ph_result_t
+ph_get_trace_source_count(ph_ctx_t ctx, uint32_t* count)
+{
+    if(count != nullptr)
+    {
+        *count = 0;
+    }
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(count == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+    return guard_call([ctx, count]() {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
+        *count = ctx->trace_source_count();
+        return PH_RESULT_SUCCESS;
+    });
+}
+
+ph_result_t
+ph_get_trace_source(ph_ctx_t ctx, uint32_t index, ph_trace_source_t* source)
+{
+    if(source != nullptr)
+    {
+        *source = {};
+    }
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(source == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+    return guard_call([ctx, index, source]() {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
+        if(index >= ctx->trace_source_count())
+        {
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
+        source->path = ctx->trace_source_path(index);
+        source->guid = ctx->trace_source_guid(index);
+        return PH_RESULT_SUCCESS;
+    });
+}
+
+ph_result_t
+ph_get_source_node(ph_ctx_t ctx, uint32_t index, ph_node_t* node, ph_future_t future)
+{
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(node == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+    return run_operation(ctx, future, [ctx, index, node]() -> ph_result_t {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
+        if(index >= ctx->trace_source_count())
+        {
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
+        *node = ctx->source_node(index);
+        return PH_RESULT_SUCCESS;
+    });
+}
+
+ph_result_t
 ph_get_track_events(ph_ctx_t         ctx,
                     uint32_t         track_id,
                     uint64_t         start_ts,
@@ -341,15 +446,17 @@ ph_get_correlated_events(ph_ctx_t          ctx,
     }
 
     const uint64_t        event_id   = event->id;
+    const uint32_t        track_id   = event->track_id;
     const ph_event_type_t event_type = event->type;
     return run_operation(
-        ctx, future, [ctx, event_id, event_type, events]() -> ph_result_t {
+        ctx, future, [ctx, track_id, event_id, event_type, events]() -> ph_result_t {
             if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
             {
                 return ready;
             }
 
-            const auto correlated = ctx->get_correlated_events(event_id, event_type);
+            const auto correlated =
+                ctx->get_correlated_events(track_id, event_id, event_type);
             if(!correlated.has_value())
             {
                 return PH_RESULT_INTERNAL_ERROR;
@@ -381,15 +488,16 @@ ph_get_call_stack(ph_ctx_t          ctx,
     }
 
     const uint64_t        event_id   = event->id;
+    const uint32_t        track_id   = event->track_id;
     const ph_event_type_t event_type = event->type;
     return run_operation(
-        ctx, future, [ctx, event_id, event_type, call_stack]() -> ph_result_t {
+        ctx, future, [ctx, track_id, event_id, event_type, call_stack]() -> ph_result_t {
             if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
             {
                 return ready;
             }
 
-            *call_stack = ctx->get_call_stack(event_id, event_type);
+            *call_stack = ctx->get_call_stack(track_id, event_id, event_type);
             return PH_RESULT_SUCCESS;
         });
 }
@@ -406,7 +514,9 @@ ph_get_region_details(ph_ctx_t             ctx,
         details,
         future,
         PH_EVENT_TYPE_REGION,
-        [](ph_ctx_t context, uint64_t id) { return context->get_region_details(id); });
+        [](ph_ctx_t context, uint32_t track_id, uint64_t id) {
+            return context->get_region_details(track_id, id);
+        });
 }
 
 ph_result_t
@@ -420,8 +530,8 @@ ph_get_kernel_dispatch_details(ph_ctx_t                      ctx,
                              details,
                              future,
                              PH_EVENT_TYPE_KERNEL_DISPATCH,
-                             [](ph_ctx_t context, uint64_t id) {
-                                 return context->get_kernel_dispatch_details(id);
+                             [](ph_ctx_t context, uint32_t track_id, uint64_t id) {
+                                 return context->get_kernel_dispatch_details(track_id, id);
                              });
 }
 
@@ -436,8 +546,8 @@ ph_get_memory_copy_details(ph_ctx_t                  ctx,
                              details,
                              future,
                              PH_EVENT_TYPE_MEMORY_COPY,
-                             [](ph_ctx_t context, uint64_t id) {
-                                 return context->get_memory_copy_details(id);
+                             [](ph_ctx_t context, uint32_t track_id, uint64_t id) {
+                                 return context->get_memory_copy_details(track_id, id);
                              });
 }
 
@@ -452,8 +562,8 @@ ph_get_memory_alloc_details(ph_ctx_t                   ctx,
                              details,
                              future,
                              PH_EVENT_TYPE_MEMORY_ALLOCATE,
-                             [](ph_ctx_t context, uint64_t id) {
-                                 return context->get_memory_alloc_details(id);
+                             [](ph_ctx_t context, uint32_t track_id, uint64_t id) {
+                                 return context->get_memory_alloc_details(track_id, id);
                              });
 }
 
@@ -640,6 +750,12 @@ copy_event_filter(const ph_event_filter_t& filter, profiler_hub::resolved_event_
     query.process_id       = copied_id(filter.process_id);
     query.thread_id        = copied_id(filter.thread_id);
     query.include_category = filter.string_filter.include_category != 0;
+    query.match_substring  = filter.string_filter.include_substring != 0;
+    query.match_partial    = filter.string_filter.partial_matching != 0;
+    if(filter.has_source != 0)
+    {
+        query.source_index = filter.source_index;
+    }
 
     if(filter.track_count > 0)
     {
@@ -702,8 +818,13 @@ ph_event_query_create(ph_ctx_t ctx, const ph_event_filter_t* filter, ph_event_qu
         {
             return copied;
         }
+        const uint32_t source = resolved->query.source_index.value_or(0);
+        if(source >= ctx->trace_source_count() || ctx->catalog_at(source) == nullptr)
+        {
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
         profiler_hub::resolve_event_query_strings(
-            *ctx->catalog(),
+            *ctx->catalog_at(source),
             resolved->query,
             filter->string_filter.include_substring != 0,
             filter->string_filter.partial_matching != 0);
@@ -787,7 +908,7 @@ ph_event_query_id_span(ph_event_query_t query,
         }
         uint64_t first = 0;
         uint64_t last  = 0;
-        if(query->ctx->table_event_id_span(event_type, first, last))
+        if(query->ctx->table_event_id_span(query->query, event_type, first, last))
         {
             *first_id = first;
             *last_id  = last;
@@ -795,6 +916,38 @@ ph_event_query_id_span(ph_event_query_t query,
         return PH_RESULT_SUCCESS;
     });
 }
+
+namespace
+{
+ph_result_t
+visit_catalog_text(const profiler_hub::reader_catalog_t& catalog,
+                   uint32_t                              kind,
+                   ph_text_visitor_t                     visitor,
+                   void*                                 user_data)
+{
+    if(kind == PH_TEXT_KIND_STRING)
+    {
+        for(const auto& entry : catalog.strings_by_id)
+        {
+            visitor(static_cast<uint64_t>(entry.first), entry.second.c_str(), user_data);
+        }
+        return PH_RESULT_SUCCESS;
+    }
+
+    for(const auto& entry : catalog.kernel_symbols_by_id)
+    {
+        if(!entry.second)
+        {
+            continue;
+        }
+        const auto& symbol = *entry.second;
+        const char* text   = symbol.display_name.empty() ? symbol.name.c_str()
+                                                         : symbol.display_name.c_str();
+        visitor(static_cast<uint64_t>(entry.first), text, user_data);
+    }
+    return PH_RESULT_SUCCESS;
+}
+}  // namespace
 
 ph_result_t
 ph_lookup_text(ph_ctx_t ctx, uint64_t id, uint32_t kind, const char** text)
@@ -867,29 +1020,37 @@ ph_visit_text(ph_ctx_t ctx, uint32_t kind, ph_text_visitor_t visitor, void* user
         {
             return PH_RESULT_INVALID_CONTEXT;
         }
-        const auto& catalog = *ctx->catalog();
-        if(kind == PH_TEXT_KIND_STRING)
-        {
-            for(const auto& entry : catalog.strings_by_id)
-            {
-                visitor(static_cast<uint64_t>(entry.first), entry.second.c_str(),
-                        user_data);
-            }
-            return PH_RESULT_SUCCESS;
-        }
+        return visit_catalog_text(*ctx->catalog(), kind, visitor, user_data);
+    });
+}
 
-        for(const auto& entry : catalog.kernel_symbols_by_id)
+ph_result_t
+ph_visit_source_text(ph_ctx_t          ctx,
+                     uint32_t          source,
+                     uint32_t          kind,
+                     ph_text_visitor_t visitor,
+                     void*             user_data)
+{
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(visitor == nullptr ||
+       (kind != PH_TEXT_KIND_STRING && kind != PH_TEXT_KIND_KERNEL_SYMBOL))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_call([ctx, source, kind, visitor, user_data]() {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
         {
-            if(!entry.second)
-            {
-                continue;
-            }
-            const auto& symbol = *entry.second;
-            const char* text   = symbol.display_name.empty() ? symbol.name.c_str()
-                                                             : symbol.display_name.c_str();
-            visitor(static_cast<uint64_t>(entry.first), text, user_data);
+            return ready;
         }
-        return PH_RESULT_SUCCESS;
+        if(source >= ctx->trace_source_count() || ctx->catalog_at(source) == nullptr)
+        {
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
+        return visit_catalog_text(*ctx->catalog_at(source), kind, visitor, user_data);
     });
 }
 

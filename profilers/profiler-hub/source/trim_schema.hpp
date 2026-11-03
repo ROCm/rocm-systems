@@ -51,4 +51,7 @@ public:
 [[nodiscard]] std::unique_ptr<trim_schema_t>
 make_trim_schema(reader_types::trace_schema_t schema, version_t version);
 
+/** GUID suffix of a per-node table, or empty when @p table is unsuffixed. */
+[[nodiscard]] std::string table_guid(std::string_view table);
+
 }  // namespace profiler_hub

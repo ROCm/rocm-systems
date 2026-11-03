@@ -41,12 +41,13 @@ connection_pool::lease::~lease()
 
 connection_pool::connection_pool(std::string_view file_path,
                                  size_t           num_connections,
-                                 std::shared_ptr<profiler_hub::reader_catalog_t> catalog)
+                                 std::shared_ptr<profiler_hub::reader_catalog_t> catalog,
+                                 std::string_view uuid)
 {
     m_connections.reserve(num_connections);
     for(size_t i = 0; i < num_connections; ++i)
     {
-        m_connections.push_back(std::make_unique<connection>(file_path, catalog));
+        m_connections.push_back(std::make_unique<connection>(file_path, catalog, uuid));
         m_free.push_back(m_connections.back().get());
     }
 }

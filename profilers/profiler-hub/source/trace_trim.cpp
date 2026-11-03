@@ -10,9 +10,11 @@
 #include "data_storage/backends/sqlite_api_policy.hpp"
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <stdexcept>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -35,7 +37,6 @@ struct master_row_t
 struct planned_copy_t
 {
     std::string name;
-    row_kind_t  kind{ row_kind_t::copy };
     std::string sql;
 };
 
@@ -148,23 +149,112 @@ cancelled(ph_future* future)
     return future != nullptr && future->stop_token().stop_requested();
 }
 
+std::string
+quote_ident(std::string_view name)
+{
+    std::string quoted = "\"";
+    for(const char ch : name)
+    {
+        if(ch == '"') quoted += "\"\"";
+        else quoted += ch;
+    }
+    quoted += '"';
+    return quoted;
+}
+
+std::string
+union_view_sql(std::string_view name, const std::vector<std::string>& tables)
+{
+    std::string sql = "CREATE VIEW " + quote_ident(name) + " AS ";
+    for(size_t index = 0; index < tables.size(); ++index)
+    {
+        if(index != 0) sql += " UNION ALL ";
+        sql += "SELECT * FROM " + quote_ident(tables[index]);
+    }
+    return sql;
+}
+
+bool
+starts_with_table_prefix(std::string_view table, std::string_view view)
+{
+    if(table.size() <= view.size() + 1 || table[view.size()] != '_') return false;
+    return table.substr(0, view.size()) == view;
+}
+
+struct source_window_t
+{
+    std::string uuid;
+    uint64_t    start_ts{};
+    uint64_t    end_ts{};
+};
+
+struct file_group_t
+{
+    std::string                     path;
+    std::vector<source_window_t>    windows;
+    std::unordered_set<std::string> kept_tables;
+    std::unordered_set<std::string> omitted;
+    std::vector<master_row_t>       tables;
+    std::vector<master_row_t>       views;
+    std::vector<master_row_t>       indexes;
+};
+
+std::pair<uint64_t, uint64_t>
+window_for(const file_group_t& group, std::string_view table)
+{
+    const std::string guid = table_guid(table);
+    if(!guid.empty())
+    {
+        for(const source_window_t& window : group.windows)
+        {
+            if(window.uuid == guid) return { window.start_ts, window.end_ts };
+        }
+    }
+    return { group.windows.front().start_ts, group.windows.front().end_ts };
+}
+
+void
+classify(file_group_t& group, const std::vector<master_row_t>& master)
+{
+    for(const master_row_t& row : master)
+    {
+        if(is_internal_name(row.name) || is_internal_name(row.table_name))
+        {
+            group.omitted.insert(row.name);
+            group.omitted.insert(row.table_name);
+            continue;
+        }
+        if(row.type == "table")
+        {
+            group.kept_tables.insert(row.name);
+            group.tables.push_back(row);
+        }
+        else if(row.type == "view") group.views.push_back(row);
+        else if(row.type == "index" || row.type == "trigger") group.indexes.push_back(row);
+    }
+}
+
 }  // namespace
 
 ph_result_t
-trim_trace_file(const std::string&           source_path,
-                const std::string&           output_path,
-                reader_types::trace_schema_t schema,
-                version_t                    version,
-                uint64_t                     start_ts,
-                uint64_t                     end_ts,
-                ph_future*                   future)
+trim_trace_files(const std::vector<trim_source_t>& inputs,
+                 const std::string&                output_path,
+                 reader_types::trace_schema_t      schema,
+                 version_t                         version,
+                 ph_future*                        future)
 {
-    if(source_path.empty() || output_path.empty()) return PH_RESULT_INVALID_ARGUMENT;
+    if(inputs.empty() || output_path.empty()) return PH_RESULT_INVALID_ARGUMENT;
+
     std::error_code error;
-    if(std::filesystem::exists(output_path, error) &&
-       std::filesystem::equivalent(source_path, output_path, error))
+    const bool      output_exists = std::filesystem::exists(output_path, error);
+    if(error) return PH_RESULT_INVALID_ARGUMENT;
+    for(const trim_source_t& input : inputs)
     {
-        return PH_RESULT_INVALID_ARGUMENT;
+        if(input.path.empty()) return PH_RESULT_INVALID_ARGUMENT;
+        if(output_exists && std::filesystem::equivalent(input.path, output_path, error))
+        {
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
     }
 
     const std::unique_ptr<trim_schema_t> trim_schema = make_trim_schema(schema, version);
@@ -173,80 +263,166 @@ trim_trace_file(const std::string&           source_path,
     std::filesystem::remove(output_path, error);
     if(error) return PH_RESULT_INVALID_FILE;
 
-    const std::vector<master_row_t> master = read_master(sqlite_connection_t{ source_path, true });
-    std::unordered_set<std::string> kept_tables;
-    std::unordered_set<std::string> omitted;
-    std::vector<master_row_t>       tables;
-    std::vector<master_row_t>       views;
-    std::vector<master_row_t>       indexes;
-    for(const master_row_t& row : master)
-    {
-        if(is_internal_name(row.name) || is_internal_name(row.table_name))
-        {
-            omitted.insert(row.name);
-            omitted.insert(row.table_name);
-            continue;
-        }
-        if(row.type == "table")
-        {
-            kept_tables.insert(row.name);
-            tables.push_back(row);
-        }
-        else if(row.type == "view") views.push_back(row);
-        else if(row.type == "index" || row.type == "trigger") indexes.push_back(row);
-    }
-
-    std::vector<planned_copy_t> copies;
-    copies.reserve(tables.size());
-    for(const master_row_t& table : tables)
-    {
-        trim_statement_t statement =
-            trim_schema->statement_for(table.name, kept_tables, start_ts, end_ts);
-        copies.push_back(
-            planned_copy_t{ table.name, statement.kind, std::move(statement.sql) });
-    }
-    std::sort(copies.begin(), copies.end(), [](const planned_copy_t& left,
-                                                const planned_copy_t& right) {
-        if(left.kind != right.kind)
-            return static_cast<int>(left.kind) < static_cast<int>(right.kind);
-        return left.name < right.name;
-    });
-
     try
     {
+        std::vector<file_group_t> groups;
+        for(const trim_source_t& input : inputs)
+        {
+            file_group_t* group = nullptr;
+            for(file_group_t& existing : groups)
+            {
+                if(existing.path == input.path)
+                {
+                    group = &existing;
+                    break;
+                }
+            }
+            if(group == nullptr)
+            {
+                groups.push_back(file_group_t{});
+                group       = &groups.back();
+                group->path = input.path;
+                classify(*group, read_master(sqlite_connection_t{ group->path, true }));
+            }
+            group->windows.push_back(
+                source_window_t{ input.uuid, input.start_ts, input.end_ts });
+        }
+
+        // Later phases read rows an earlier phase wrote, including rows from
+        // another file that landed in the same table. Finish one phase for
+        // every file before starting the next.
+        constexpr int phase_count = static_cast<int>(row_kind_t::event_child) + 1;
+        std::vector<std::array<std::vector<planned_copy_t>, phase_count>> plans(groups.size());
+        size_t total = 0;
+        for(size_t index = 0; index < groups.size(); ++index)
+        {
+            for(const master_row_t& table : groups[index].tables)
+            {
+                const auto [start_ts, end_ts] = window_for(groups[index], table.name);
+                trim_statement_t statement    = trim_schema->statement_for(
+                    table.name, groups[index].kept_tables, start_ts, end_ts);
+                const int phase = static_cast<int>(statement.kind);
+                plans[index][phase].push_back(
+                    planned_copy_t{ table.name, std::move(statement.sql) });
+                ++total;
+            }
+            for(auto& phase : plans[index])
+            {
+                std::sort(phase.begin(), phase.end(), [](const planned_copy_t& left,
+                                                          const planned_copy_t& right) {
+                    return left.name < right.name;
+                });
+            }
+        }
+
+        std::vector<master_row_t>       views_in_order;
+        std::unordered_set<std::string> seen_views;
+        std::unordered_set<std::string> all_omitted;
+        for(const file_group_t& group : groups)
+        {
+            all_omitted.insert(group.omitted.begin(), group.omitted.end());
+            for(const master_row_t& view : group.views)
+            {
+                if(seen_views.insert(view.name).second) views_in_order.push_back(view);
+            }
+        }
+
         sqlite_connection_t destination{ output_path, false };
         destination.execute("PRAGMA foreign_keys = OFF");
         report(future, 0.05, "Creating trimmed database");
-        for(const master_row_t& table : tables)
-        {
-            destination.execute(table.sql);
-        }
-        for(const master_row_t& view : views)
-        {
-            if(!mentions_omitted(view.sql, omitted)) destination.execute(view.sql);
-        }
 
-        destination.execute("BEGIN");
-        destination.execute(attach_sql(std::filesystem::path{ source_path }.generic_string()));
-        const double span = copies.empty() ? 1.0 : 0.9 / static_cast<double>(copies.size());
-        for(size_t index = 0; index < copies.size(); ++index)
+        std::unordered_set<std::string> created_tables;
+        for(const file_group_t& group : groups)
         {
-            if(cancelled(future))
+            for(const master_row_t& table : group.tables)
             {
-                destination.execute("ROLLBACK");
-                throw std::runtime_error("cancelled");
+                if(!created_tables.insert(table.name).second) continue;
+                destination.execute(table.sql);
             }
-            report(future,
-                   0.05 + span * static_cast<double>(index),
-                   copies[index].name.c_str());
-            destination.execute(copies[index].sql);
         }
-        destination.execute("COMMIT");
-        destination.execute("DETACH oldDb");
 
-        for(const master_row_t& index : indexes)
+        size_t       done = 0;
+        const double span = total == 0 ? 0.0 : 0.9 / static_cast<double>(total);
+        for(int phase = 0; phase < phase_count; ++phase)
         {
-            if(!mentions_omitted(index.sql, omitted)) destination.execute(index.sql);
+            for(size_t index = 0; index < groups.size(); ++index)
+            {
+                const std::vector<planned_copy_t>& copies = plans[index][phase];
+                if(copies.empty()) continue;
+
+                destination.execute("BEGIN");
+                destination.execute(
+                    attach_sql(std::filesystem::path{ groups[index].path }.generic_string()));
+                for(const planned_copy_t& copy : copies)
+                {
+                    if(cancelled(future))
+                    {
+                        destination.execute("ROLLBACK");
+                        throw std::runtime_error("cancelled");
+                    }
+                    report(future, 0.05 + span * static_cast<double>(done), copy.name.c_str());
+                    destination.execute(copy.sql);
+                    ++done;
+                }
+                destination.execute("COMMIT");
+                destination.execute("DETACH oldDb");
+            }
+        }
+
+        std::unordered_map<std::string, std::vector<std::string>> parts_of;
+        for(const std::string& table : created_tables)
+        {
+            const master_row_t* best = nullptr;
+            for(const master_row_t& view : views_in_order)
+            {
+                if(!starts_with_table_prefix(table, view.name)) continue;
+                if(best == nullptr || view.name.size() > best->name.size()) best = &view;
+            }
+            if(best != nullptr) parts_of[best->name].push_back(table);
+        }
+
+        std::unordered_set<std::string> made_views;
+        for(const master_row_t& view : views_in_order)
+        {
+            const auto found = parts_of.find(view.name);
+            if(found == parts_of.end() || created_tables.count(view.name) != 0) continue;
+
+            bool mentioned = false;
+            for(const std::string& part : found->second)
+            {
+                if(view.sql.find(part) != std::string::npos)
+                {
+                    mentioned = true;
+                    break;
+                }
+            }
+            if(!mentioned) continue;
+
+            std::vector<std::string> parts = found->second;
+            std::sort(parts.begin(), parts.end());
+            destination.execute(union_view_sql(view.name, parts));
+            made_views.insert(view.name);
+        }
+        for(const master_row_t& view : views_in_order)
+        {
+            if(made_views.count(view.name) != 0 || created_tables.count(view.name) != 0)
+            {
+                continue;
+            }
+            if(mentions_omitted(view.sql, all_omitted)) continue;
+            destination.execute(view.sql);
+            made_views.insert(view.name);
+        }
+
+        std::unordered_set<std::string> created_indexes;
+        for(const file_group_t& group : groups)
+        {
+            for(const master_row_t& index : group.indexes)
+            {
+                if(mentions_omitted(index.sql, all_omitted)) continue;
+                if(!created_indexes.insert(index.name).second) continue;
+                destination.execute(index.sql);
+            }
         }
     } catch(const std::exception& err)
     {
@@ -257,6 +433,19 @@ trim_trace_file(const std::string&           source_path,
     }
     report(future, 1.0, "Trace trimmed");
     return PH_RESULT_SUCCESS;
+}
+
+ph_result_t
+trim_trace_file(const std::string&           source_path,
+                const std::string&           output_path,
+                reader_types::trace_schema_t schema,
+                version_t                    version,
+                uint64_t                     start_ts,
+                uint64_t                     end_ts,
+                ph_future*                   future)
+{
+    const trim_source_t source{ source_path, {}, start_ts, end_ts };
+    return trim_trace_files({ source }, output_path, schema, version, future);
 }
 
 }  // namespace profiler_hub

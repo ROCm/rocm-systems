@@ -14,6 +14,8 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -88,6 +90,10 @@ private:
         track_row_reader&                     reader,
         const reader_types::track_info_ptr_t& track);
 
+    // ph_event_t.name has to outlive the row that produced it. The deque is
+    // append-only, so a c_str() taken after emplace stays valid.
+    [[nodiscard]] const char* keep_name(std::string_view text);
+
     connection_source&   m_source;
     common::thread_pool& m_workers;
     track_read_options   m_options;
@@ -108,6 +114,9 @@ private:
     std::mutex                           m_windowed_mutex;
     std::deque<std::vector<ph_event_t>>  m_windowed_events;
     std::deque<std::vector<ph_sample_t>> m_windowed_samples;
+
+    std::mutex              m_name_mutex;
+    std::deque<std::string> m_names;
 };
 
 }  // namespace profiler_hub

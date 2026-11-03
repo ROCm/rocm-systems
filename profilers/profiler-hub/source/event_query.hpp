@@ -34,6 +34,9 @@ struct resolved_event_query
     std::optional<uint64_t>    agent_id;
     std::optional<uint64_t>    process_id;
     std::optional<uint64_t>    thread_id;
+    std::optional<uint32_t>    source_index;
+    bool                       match_substring{};
+    bool                       match_partial{};
     bool                       include_category{};
     bool                       has_string_filter{};
     std::vector<std::string>   search_strings;

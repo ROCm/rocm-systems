@@ -4,6 +4,7 @@
 set(profiler-hub_public_headers
     ${CMAKE_CURRENT_LIST_DIR}/writer.hpp
     ${CMAKE_CURRENT_LIST_DIR}/reader.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/trimmer.hpp
     ${CMAKE_CURRENT_LIST_DIR}/storage.hpp
     ${CMAKE_CURRENT_LIST_DIR}/version.hpp
     ${CMAKE_CURRENT_LIST_DIR}/writer_types.hpp

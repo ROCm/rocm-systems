@@ -18,21 +18,32 @@ template <std::random_access_iterator RandomIt, typename Compare>
 void
 natural_merge_sort(RandomIt first, RandomIt last, Compare comp)
 {
-    std::vector<RandomIt> bounds{ first };
+    // Bounds are distances from `first`. A Debug MSVC iterator registers
+    // itself on the vector it points into. Destroying a vector full of those
+    // iterators unlinks them one at a time, and each unlink walks every
+    // iterator that is still registered. A track with one run per event makes
+    // that walk take time proportional to the square of the event count, so
+    // the sort looks stuck. An integer has no registration.
+    using difference_type = std::iter_difference_t<RandomIt>;
+
+    std::vector<difference_type> bounds{ 0 };
     for(auto it = first; it != last;)
     {
         it = std::is_sorted_until(it, last, comp);
-        bounds.push_back(it);
+        bounds.push_back(it - first);
     }
 
     while(bounds.size() > 2)
     {
-        std::vector<RandomIt> merged{ bounds.front() };
+        std::vector<difference_type> merged{ bounds.front() };
 
         size_t i = 0;
         for(; i + 2 < bounds.size(); i += 2)
         {
-            std::inplace_merge(bounds[i], bounds[i + 1], bounds[i + 2], comp);
+            std::inplace_merge(first + bounds[i],
+                               first + bounds[i + 1],
+                               first + bounds[i + 2],
+                               comp);
             merged.push_back(bounds[i + 2]);
         }
         if(merged.back() != bounds.back())

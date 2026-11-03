@@ -176,6 +176,9 @@ struct event_range_result
     std::optional<size_t> agent_id;
     std::optional<size_t> queue_id;
     std::optional<size_t> stream_id;
+    /** Set for a kernel dispatch. The region-name string is empty in some
+     *  multi-node traces, and the symbol carries the name those events show. */
+    std::optional<size_t> kernel_id;
 };
 
 struct timeline_event_result
@@ -195,6 +198,7 @@ struct timeline_event_result
     std::optional<size_t> agent_id;
     std::optional<size_t> queue_id;
     std::optional<size_t> stream_id;
+    std::optional<size_t> kernel_id;
 };
 
 // One row of a source-specific correlation query. kind matches
@@ -217,6 +221,7 @@ struct correlated_event_row
     std::optional<size_t> agent_id;
     std::optional<size_t> queue_id;
     std::optional<size_t> stream_id;
+    std::optional<size_t> kernel_id;
 };
 
 inline constexpr auto timeline_event_columns =
@@ -231,7 +236,8 @@ inline constexpr auto timeline_event_columns =
                     &timeline_event_result::track_id,
                     &timeline_event_result::agent_id,
                     &timeline_event_result::queue_id,
-                    &timeline_event_result::stream_id);
+                    &timeline_event_result::stream_id,
+                    &timeline_event_result::kernel_id);
 
 // ----- Event detail result structs -----
 
@@ -440,6 +446,11 @@ struct read_statements
     , m_uuid{ std::move(uuid) }
     {
         m_hip_event_table = table_present("rocpd_hip_event_" + m_uuid);
+        // Chosen before any statement is built. A per-GUID table must win
+        // over the unsuffixed UNION view, which repeats every source.
+        m_sample_table   = choose_sample_table();
+        m_pmc_info_table = choose_physical_table("rocpd_info_pmc");
+        m_event_table    = choose_physical_table("rocpd_event");
         initialize_string_statement();
         initialize_node_info_statement();
         initialize_process_info_statement();
@@ -916,6 +927,10 @@ struct read_statements
         return m_hip_event_time_range;
     }
 
+    // Physical sample table for this source. The unsuffixed name is a UNION
+    // view when one file holds several GUIDs, and event ids collide there.
+    [[nodiscard]] std::string joined_sample_table() const { return sample_join_table(); }
+
 private:
     void initialize_string_statement()
     {
@@ -1103,7 +1118,7 @@ private:
                                  "MIN(T.start) AS min_start",
                                  "MAX(T.end) AS max_end")
                          .from(fmt::format("{}_{}", table, m_uuid), "T")
-                         .left_join("rocpd_sample", "S", "S.event_id = T.event_id")
+                         .left_join(sample_join_table(), "S", "S.event_id = T.event_id")
                          .where("S.track_id IS NULL")
                          .group_by("T.nid", "T.pid", "T.tid")
                          .get_query_string();
@@ -1140,7 +1155,7 @@ private:
                                  "COUNT(*) AS count",
                                  "MIN(T.start) AS min_start",
                                  "MAX(T.end) AS max_end")
-                         .from("rocpd_sample", "S")
+                         .from(sample_join_table(), "S")
                          .join_in_order(fmt::format("{}_{}", table, m_uuid),
                                         "T",
                                         "T.event_id = S.event_id")
@@ -1369,15 +1384,32 @@ private:
         return !rows.empty();
     }
 
-    // Samples live in rocpd_sample_<uuid> on hub-written databases. Older files
-    // keep an unsuffixed rocpd_sample. Prefer the table that actually has rows.
-    std::string choose_sample_table()
+    // Per-GUID tables are physical tables. The unsuffixed name is a UNION
+    // view of every GUID in the file, so an empty per-GUID table must still
+    // win over that view.
+    std::string choose_physical_table(const std::string& base)
     {
-        const std::string suffixed = "rocpd_sample_" + m_uuid;
-        if(table_has_row(suffixed)) return suffixed;
-        if(table_present("rocpd_sample")) return "rocpd_sample";
+        const std::string suffixed = base + "_" + m_uuid;
         if(table_present(suffixed)) return suffixed;
+        if(table_present(base)) return base;
         return {};
+    }
+
+    std::string choose_sample_table() { return choose_physical_table("rocpd_sample"); }
+
+    std::string sample_join_table() const
+    {
+        return m_sample_table.empty() ? std::string("rocpd_sample") : m_sample_table;
+    }
+
+    std::string event_join_table() const
+    {
+        return m_event_table.empty() ? std::string("rocpd_event") : m_event_table;
+    }
+
+    std::string pmc_info_join_table() const
+    {
+        return m_pmc_info_table.empty() ? std::string("rocpd_info_pmc") : m_pmc_info_table;
     }
 
     void initialize_pmc_track_statement()
@@ -1413,7 +1445,7 @@ private:
                         "MIN(PE.value) AS min_value",
                         "MAX(PE.value) AS max_value")
                 .from(fmt::format("rocpd_pmc_event_{}", m_uuid), "PE")
-                .inner_join("rocpd_info_pmc", "PI", "PI.id = PE.pmc_id")
+                .inner_join(pmc_info_join_table(), "PI", "PI.id = PE.pmc_id")
                 .inner_join(m_sample_table, "S", "S.event_id = PE.event_id")
                 .group_by("PI.nid", "PI.pid", "PI.agent_id", "PE.pmc_id", "PI.name")
                 .get_query_string();
@@ -1450,7 +1482,7 @@ private:
                         "MIN(PE.value) AS min_value",
                         "MAX(PE.value) AS max_value")
                 .from(fmt::format("rocpd_pmc_event_{}", m_uuid), "PE")
-                .inner_join("rocpd_info_pmc", "PI", "PI.id = PE.pmc_id")
+                .inner_join(pmc_info_join_table(), "PI", "PI.id = PE.pmc_id")
                 .inner_join(fmt::format("rocpd_kernel_dispatch_{}", m_uuid),
                             "K",
                             "K.event_id = PE.event_id")
@@ -1517,7 +1549,7 @@ private:
         queries::select::table_select_query query;
         auto&                               base = query.select("S.timestamp", "PE.value")
                          .from(fmt::format("rocpd_pmc_event_{}", m_uuid), "PE")
-                         .inner_join("rocpd_info_pmc", "PI", "PI.id = PE.pmc_id")
+                         .inner_join(pmc_info_join_table(), "PI", "PI.id = PE.pmc_id")
                          .inner_join(m_sample_table, "S", "S.event_id = PE.event_id");
 
         m_pmc_sample_statement =
@@ -1668,11 +1700,12 @@ private:
         std::string_view alias,
         std::string_view name_expression,
         std::string_view event_join       = {},
-        std::string_view location_columns = "NULL, NULL, NULL")
+        std::string_view location_columns     = "NULL, NULL, NULL",
+        std::string_view kernel_id_expression = "NULL")
     {
         const auto sql = fmt::format(
-            "SELECT {0}.id, {0}.start, {0}.end, {1}, {5} FROM {2}_{3} {0} {4} "
-            "LEFT JOIN rocpd_sample S ON S.event_id = {0}.event_id "
+            "SELECT {0}.id, {0}.start, {0}.end, {1}, {5}, {7} FROM {2}_{3} {0} {4} "
+            "LEFT JOIN {6} S ON S.event_id = {0}.event_id "
             "WHERE {0}.nid = ? AND {0}.pid = ? AND {0}.tid = ? AND S.track_id IS NULL "
             "AND {0}.id >= ? AND {0}.id < ?",
             alias,
@@ -1680,7 +1713,9 @@ private:
             table,
             m_uuid,
             event_join,
-            location_columns);
+            location_columns,
+            sample_join_table(),
+            kernel_id_expression);
 
         return m_backend->create_read_statement_executor<
             event_range_result,
@@ -1692,7 +1727,8 @@ private:
             &event_range_result::display_name_id,
             &event_range_result::agent_id,
             &event_range_result::queue_id,
-            &event_range_result::stream_id);
+            &event_range_result::stream_id,
+            &event_range_result::kernel_id);
     }
 
     template <typename BindTypes>
@@ -1730,7 +1766,7 @@ private:
             make_timeline_statement<bind_types<size_t, size_t, size_t, size_t>>(
                 unfiltered_sql + " WHERE " + own_track_where + " UNION ALL " +
                 unfiltered_sql +
-                " WHERE S.track_id = ?4 AND EXISTS (SELECT 1 FROM rocpd_sample WHERE "
+                " WHERE S.track_id = ?4 AND EXISTS (SELECT 1 FROM " + sample_join_table() + " WHERE "
                 "track_id = ?4)");
 
         const auto time_where = " AND " + a + ".start <= ? AND " + a + ".end >= ?";
@@ -1739,7 +1775,7 @@ private:
             bind_types<size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t>>(
             unfiltered_sql + " WHERE " + own_track_where + time_where + " UNION ALL " +
             unfiltered_sql +
-            " WHERE S.track_id = ?6 AND EXISTS (SELECT 1 FROM rocpd_sample WHERE "
+            " WHERE S.track_id = ?6 AND EXISTS (SELECT 1 FROM " + sample_join_table() + " WHERE "
             "track_id = ?6)" +
             time_where);
 
@@ -1819,19 +1855,20 @@ private:
                                  "S.track_id",
                                  "NULL",
                                  "NULL",
+                                 "NULL",
                                  "NULL")
                          .from(fmt::format("rocpd_region_{}", m_uuid), "R")
-                         .inner_join("rocpd_event", "E", "R.event_id = E.id")
-                         .left_join("rocpd_sample", "S", "S.event_id = R.event_id");
+                         .inner_join(event_join_table(), "E", "R.event_id = E.id")
+                         .left_join(sample_join_table(), "S", "S.event_id = R.event_id");
 
         initialize_timeline_event_variants(base, "R", m_region_statements);
         m_region_statements.by_id = make_timeline_statement<bind_types<size_t>>(
             std::string("SELECT R.id, R.start, R.end, R.name_id, E.category_id, R.nid, "
-                        "R.pid, R.tid, S.track_id, NULL, NULL, NULL "
+                        "R.pid, R.tid, S.track_id, NULL, NULL, NULL, NULL "
                         "FROM rocpd_region_") +
             m_uuid +
-            " R INNER JOIN rocpd_event E ON R.event_id = E.id "
-            "LEFT JOIN rocpd_sample S ON S.event_id = R.event_id WHERE R.id = ?");
+            " R INNER JOIN " + event_join_table() + " E ON R.event_id = E.id "
+            "LEFT JOIN " + sample_join_table() + " S ON S.event_id = R.event_id WHERE R.id = ?");
         m_region_statements.track_range_filtered =
             make_track_range_statement("rocpd_region", "R", "R.name_id");
     }
@@ -1851,26 +1888,28 @@ private:
                                  "S.track_id",
                                  "K.agent_id",
                                  "K.queue_id",
-                                 "K.stream_id")
+                                 "K.stream_id",
+                                 "K.kernel_id")
                          .from(fmt::format("rocpd_kernel_dispatch_{}", m_uuid), "K")
-                         .inner_join("rocpd_event", "E", "E.id = K.event_id")
-                         .left_join("rocpd_sample", "S", "S.event_id = K.event_id");
+                         .inner_join(event_join_table(), "E", "E.id = K.event_id")
+                         .left_join(sample_join_table(), "S", "S.event_id = K.event_id");
 
         initialize_timeline_event_variants(
             base, "K", m_kernel_dispatch_statements, std::string("agent_id"));
         m_kernel_dispatch_statements.by_id = make_timeline_statement<bind_types<size_t>>(
             std::string("SELECT K.id, K.start, K.end, K.region_name_id, E.category_id, "
                         "K.nid, K.pid, K.tid, S.track_id, K.agent_id, K.queue_id, "
-                        "K.stream_id FROM rocpd_kernel_dispatch_") +
+                        "K.stream_id, K.kernel_id FROM rocpd_kernel_dispatch_") +
             m_uuid +
-            " K INNER JOIN rocpd_event E ON E.id = K.event_id "
-            "LEFT JOIN rocpd_sample S ON S.event_id = K.event_id WHERE K.id = ?");
+            " K INNER JOIN " + event_join_table() + " E ON E.id = K.event_id "
+            "LEFT JOIN " + sample_join_table() + " S ON S.event_id = K.event_id WHERE K.id = ?");
         m_kernel_dispatch_statements.track_range_filtered = make_track_range_statement(
             "rocpd_kernel_dispatch",
             "K",
             "K.region_name_id",
             "",
-            "K.agent_id, K.queue_id, K.stream_id");
+            "K.agent_id, K.queue_id, K.stream_id",
+            "K.kernel_id");
     }
 
     void initialize_memory_allocate_timeline_event_statements()
@@ -1888,25 +1927,26 @@ private:
                                  "S.track_id",
                                  "MA.agent_id",
                                  "MA.queue_id",
-                                 "MA.stream_id")
+                                 "MA.stream_id",
+                                 "NULL")
                          .from(fmt::format("rocpd_memory_allocate_{}", m_uuid), "MA")
-                         .inner_join("rocpd_event", "E", "E.id = MA.event_id")
-                         .left_join("rocpd_sample", "S", "S.event_id = MA.event_id");
+                         .inner_join(event_join_table(), "E", "E.id = MA.event_id")
+                         .left_join(sample_join_table(), "S", "S.event_id = MA.event_id");
 
         initialize_timeline_event_variants(
             base, "MA", m_memory_allocate_statements, std::string("agent_id"));
         m_memory_allocate_statements.by_id = make_timeline_statement<bind_types<size_t>>(
             std::string("SELECT MA.id, MA.start, MA.end, E.category_id, E.category_id, "
                         "MA.nid, MA.pid, MA.tid, S.track_id, MA.agent_id, MA.queue_id, "
-                        "MA.stream_id FROM rocpd_memory_allocate_") +
+                        "MA.stream_id, NULL FROM rocpd_memory_allocate_") +
             m_uuid +
-            " MA INNER JOIN rocpd_event E ON E.id = MA.event_id "
-            "LEFT JOIN rocpd_sample S ON S.event_id = MA.event_id WHERE MA.id = ?");
+            " MA INNER JOIN " + event_join_table() + " E ON E.id = MA.event_id "
+            "LEFT JOIN " + sample_join_table() + " S ON S.event_id = MA.event_id WHERE MA.id = ?");
         m_memory_allocate_statements.track_range_filtered = make_track_range_statement(
             "rocpd_memory_allocate",
             "MA",
             "E.category_id",
-            "INNER JOIN rocpd_event E ON E.id = MA.event_id",
+            "INNER JOIN " + event_join_table() + " E ON E.id = MA.event_id",
             "MA.agent_id, MA.queue_id, MA.stream_id");
     }
 
@@ -1925,20 +1965,21 @@ private:
                                  "S.track_id",
                                  "MC.dst_agent_id",
                                  "MC.queue_id",
-                                 "MC.stream_id")
+                                 "MC.stream_id",
+                                 "NULL")
                          .from(fmt::format("rocpd_memory_copy_{}", m_uuid), "MC")
-                         .inner_join("rocpd_event", "E", "MC.event_id = E.id")
-                         .left_join("rocpd_sample", "S", "S.event_id = MC.event_id");
+                         .inner_join(event_join_table(), "E", "MC.event_id = E.id")
+                         .left_join(sample_join_table(), "S", "S.event_id = MC.event_id");
 
         initialize_timeline_event_variants(
             base, "MC", m_memory_copy_statements, std::string("dst_agent_id"));
         m_memory_copy_statements.by_id = make_timeline_statement<bind_types<size_t>>(
             std::string("SELECT MC.id, MC.start, MC.end, MC.region_name_id, E.category_id, "
                         "MC.nid, MC.pid, MC.tid, S.track_id, MC.dst_agent_id, MC.queue_id, "
-                        "MC.stream_id FROM rocpd_memory_copy_") +
+                        "MC.stream_id, NULL FROM rocpd_memory_copy_") +
             m_uuid +
-            " MC INNER JOIN rocpd_event E ON MC.event_id = E.id "
-            "LEFT JOIN rocpd_sample S ON S.event_id = MC.event_id WHERE MC.id = ?");
+            " MC INNER JOIN " + event_join_table() + " E ON MC.event_id = E.id "
+            "LEFT JOIN " + sample_join_table() + " S ON S.event_id = MC.event_id WHERE MC.id = ?");
         m_memory_copy_statements.track_range_filtered = make_track_range_statement(
             "rocpd_memory_copy",
             "MC",
@@ -1983,7 +2024,8 @@ private:
                     &event_range_result::display_name_id,
                     &event_range_result::agent_id,
                     &event_range_result::queue_id,
-                    &event_range_result::stream_id);
+                    &event_range_result::stream_id,
+                    &event_range_result::kernel_id);
     }
 
     void initialize_hip_event_timeline_event_statements()
@@ -2006,20 +2048,21 @@ private:
                                  "S.track_id",
                                  "HE.agent_id",
                                  "HE.queue_id",
-                                 "HE.stream_id")
+                                 "HE.stream_id",
+                                 "NULL")
                          .from(fmt::format("rocpd_hip_event_{}", m_uuid), "HE")
-                         .inner_join("rocpd_event", "E", "HE.event_id = E.id")
-                         .left_join("rocpd_sample", "S", "S.event_id = HE.event_id");
+                         .inner_join(event_join_table(), "E", "HE.event_id = E.id")
+                         .left_join(sample_join_table(), "S", "S.event_id = HE.event_id");
 
         initialize_timeline_event_variants(
             base, "HE", m_hip_event_statements, std::string("agent_id"));
         m_hip_event_statements.by_id = make_timeline_statement<bind_types<size_t>>(
             std::string("SELECT HE.id, HE.start, HE.end, HE.name_id, E.category_id, "
                         "HE.nid, HE.pid, HE.tid, S.track_id, HE.agent_id, HE.queue_id, "
-                        "HE.stream_id FROM rocpd_hip_event_") +
+                        "HE.stream_id, NULL FROM rocpd_hip_event_") +
             m_uuid +
-            " HE INNER JOIN rocpd_event E ON HE.event_id = E.id "
-            "LEFT JOIN rocpd_sample S ON S.event_id = HE.event_id WHERE HE.id = ?");
+            " HE INNER JOIN " + event_join_table() + " E ON HE.event_id = E.id "
+            "LEFT JOIN " + sample_join_table() + " S ON S.event_id = HE.event_id WHERE HE.id = ?");
         m_hip_event_statements.track_range_filtered = make_track_range_statement(
             "rocpd_hip_event", "HE", "HE.name_id", "", "HE.agent_id, HE.queue_id, HE.stream_id");
     }
@@ -2246,9 +2289,9 @@ private:
         // target table. A region reaches regions, kernel dispatches, memory
         // copies, and memory allocations. A kernel dispatch reaches regions
         // and kernel dispatches. A memory copy reaches regions and memory
-        // copies. A memory allocation reaches regions. kernel_id is a
-        // kernel-symbol row, so a dispatch uses region_name_id, a string id.
-        // kind matches reader_types::event_type_t.
+        // copies. A memory allocation reaches regions. A dispatch name is
+        // region_name_id when that string is set, and kernel_id otherwise.
+        // kernel_id is a kernel-symbol row. kind matches reader_types::event_type_t.
         constexpr int region_kind = 0;
         constexpr int kernel_kind = 1;
         constexpr int copy_kind   = 2;
@@ -2260,10 +2303,11 @@ private:
                               std::string_view target_table,
                               std::string_view target_alias,
                               std::string_view display_name,
-                              std::string_view location_cols) {
+                              std::string_view location_cols,
+                              std::string_view kernel_id = "NULL") {
             return fmt::format(
                 "SELECT {kind}, {ta}.id, {ta}.start, {ta}.end, {dn}, E2.category_id, "
-                "{ta}.nid, {ta}.pid, {ta}.tid, S.track_id, {loc} "
+                "{ta}.nid, {ta}.pid, {ta}.tid, S.track_id, {loc}, {kid} "
                 "FROM {st}_{uuid} {sa} "
                 "INNER JOIN rocpd_event_{uuid} E1 "
                 "ON {sa}.event_id = E1.id AND E1.stack_id != 0 "
@@ -2276,6 +2320,7 @@ private:
                 fmt::arg("ta", target_alias),
                 fmt::arg("dn", display_name),
                 fmt::arg("loc", location_cols),
+                fmt::arg("kid", kernel_id),
                 fmt::arg("st", source_table),
                 fmt::arg("uuid", m_uuid),
                 fmt::arg("sa", source_alias),
@@ -2298,7 +2343,8 @@ private:
                 &correlated_event_row::track_id,
                 &correlated_event_row::agent_id,
                 &correlated_event_row::queue_id,
-                &correlated_event_row::stream_id);
+                &correlated_event_row::stream_id,
+                &correlated_event_row::kernel_id);
         };
 
         const auto no_location = std::string_view{ "NULL, NULL, NULL" };
@@ -2318,7 +2364,8 @@ private:
                        "rocpd_kernel_dispatch",
                        "K",
                        "K.region_name_id",
-                       "K.agent_id, K.queue_id, K.stream_id") +
+                       "K.agent_id, K.queue_id, K.stream_id",
+                       "K.kernel_id") +
             " UNION ALL " +
             target_arm(copy_kind,
                        "rocpd_region",
@@ -2351,7 +2398,8 @@ private:
                        "rocpd_kernel_dispatch",
                        "K2",
                        "K2.region_name_id",
-                       "K2.agent_id, K2.queue_id, K2.stream_id"));
+                       "K2.agent_id, K2.queue_id, K2.stream_id",
+                       "K2.kernel_id"));
 
         m_correlated_event_statements.memory_copy = prepare(
             target_arm(region_kind,
@@ -2403,7 +2451,8 @@ private:
                           &correlated_event_row::track_id,
                           &correlated_event_row::agent_id,
                           &correlated_event_row::queue_id,
-                          &correlated_event_row::stream_id);
+                          &correlated_event_row::stream_id,
+                          &correlated_event_row::kernel_id);
     }
 
     void initialize_count_statements()
@@ -2507,6 +2556,8 @@ private:
     pmc_track_statement_func_t                m_pmc_kernel_track_statement;
     memory_allocation_statement_func_t        m_memory_allocation_statement;
     std::string                               m_sample_table;
+    std::string                               m_pmc_info_table;
+    std::string                               m_event_table;
     pmc_sample_statement_func_t               m_pmc_sample_statement;
     pmc_sample_time_filtered_statement_func_t m_pmc_sample_time_filtered_statement;
 

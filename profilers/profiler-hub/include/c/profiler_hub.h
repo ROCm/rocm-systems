@@ -6,6 +6,9 @@
  * lists, node info, string fields, ...). Pointers obtained from a context
  * are only valid while that context is alive and must not be used after
  * ph_ctx_free() is called on it.
+ *
+ * This header is the reader API. The writer API is profiler-hub/cpp/writer.hpp.
+ * The trimmer API is profiler_hub_trim.h.
  */
 
 #ifndef PROFILER_HUB_INC
@@ -60,6 +63,45 @@ extern "C"
      *          on_finished callback of its future with PH_FUTURE_CANCELLED.
      */
     ph_result_t ph_ctx_create(ph_ctx_t* ctx, const char* file_path, ph_future_t future);
+
+    /**
+     * @brief One SQLite file and the GUID of the tables read from it.
+     * @note path and guid point into the context that produced them. They
+     *       stay valid until that context is freed.
+     */
+    typedef struct
+    {
+        const char* path;
+        const char* guid;
+    } ph_trace_source_t;
+
+    /**
+     * @brief Opens every trace file and creates one context for all of them.
+     * @param paths SQLite trace files. A file with several rocpd metadata
+     *        tables becomes one source per GUID. Must not be null.
+     * @param path_count Number of entries in @p paths. Must be greater than zero.
+     * @param future Same contract as ph_ctx_create().
+     * @return Same status values as ph_ctx_create().
+     */
+    ph_result_t ph_ctx_create_files(ph_ctx_t*           ctx,
+                                    const char* const* paths,
+                                    uint32_t           path_count,
+                                    ph_future_t        future);
+
+    /**
+     * @brief Number of file-and-GUID sources opened by the context.
+     * @param count Out parameter. One for a single-GUID file.
+     */
+    ph_result_t ph_get_trace_source_count(ph_ctx_t ctx, uint32_t* count);
+
+    /**
+     * @brief Path and GUID of one source.
+     * @param index Zero-based index, less than the count from
+     *        ph_get_trace_source_count().
+     */
+    ph_result_t ph_get_trace_source(ph_ctx_t            ctx,
+                                    uint32_t            index,
+                                    ph_trace_source_t*  source);
 
     /**
      * @brief Releases a context and all data obtained through it.
@@ -134,6 +176,18 @@ extern "C"
      *       @p ctx and follow the same lifetime rule as ph_get_track_list().
      */
     ph_result_t ph_get_node(ph_ctx_t ctx, ph_node_t* node, ph_future_t future);
+
+    /**
+     * @brief Node information for one file and GUID.
+     * @param index Source index from ph_get_trace_source().
+     * @param node Out parameter. Its track list is the tracks whose
+     *        ph_track_t::source_index equals @p index.
+     * @param future Same contract as ph_get_node().
+     */
+    ph_result_t ph_get_source_node(ph_ctx_t    ctx,
+                                   uint32_t    index,
+                                   ph_node_t*  node,
+                                   ph_future_t future);
 
     /**
      * @brief Retrieves duration events (region/kernel dispatch/memory
@@ -567,29 +621,14 @@ extern "C"
                               void*              user_data);
 
     /**
-     * @brief Writes a trimmed copy of the trace opened in @p ctx.
-     * @param start_ts Inclusive overlap start, in absolute trace nanoseconds.
-     *        The caller adds the trace origin before calling.
-     * @param end_ts Exclusive overlap end, in absolute trace nanoseconds.
-     * @param output_path File to create. An existing file at this path is
-     *        replaced. It must not be the source trace.
-     * @param future Null to trim before returning. Otherwise a future from
-     *        ph_future_create() that was not passed to an operation yet.
-     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
-     *         @p ctx is null or the trace failed to load,
-     *         PH_RESULT_INVALID_ARGUMENT if @p output_path is null or names
-     *         the source file, PH_RESULT_INVALID_FILE if the output cannot be
-     *         replaced, PH_RESULT_UNSUPPORTED_FILE if this schema has no trim
-     *         rules, PH_RESULT_CANCELLED if @p future is cancelled.
-     * @note The copy keeps the source schema. Duration rows that overlap the
-     *       window are kept, and rows that belong to those events are kept
-     *       with them. Tables the schema does not describe are copied whole.
+     * @brief Same as ph_visit_text() for one file and GUID.
+     * @param source Source index from ph_get_trace_source().
      */
-    ph_result_t ph_trim_trace(ph_ctx_t    ctx,
-                              uint64_t    start_ts,
-                              uint64_t    end_ts,
-                              const char* output_path,
-                              ph_future_t future);
+    ph_result_t ph_visit_source_text(ph_ctx_t          ctx,
+                                     uint32_t          source,
+                                     uint32_t          kind,
+                                     ph_text_visitor_t visitor,
+                                     void*             user_data);
 
 #ifdef __cplusplus
 }
