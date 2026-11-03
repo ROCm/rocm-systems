@@ -4,6 +4,8 @@ description: "Test review subagent. Checks test coverage, quality, missing tests
 tools: execute/runInTerminal, read/readFile, search/textSearch, search/fileSearch, search/listDirectory
 model: "Claude Sonnet 5.5"
 user-invocable: false
+applyTo: "projects/amdsmi/**"
+excludeAgent: "cloud-agent"
 ---
 
 # Test Review — amd-smi
