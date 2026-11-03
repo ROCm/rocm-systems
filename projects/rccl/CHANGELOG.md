@@ -6,6 +6,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Added
 * `ncclGinFlushTimeout` and `ncclGinWaitTimeout` support on the rocSHMEM GDA and Anvil SDMA GIN backends, along with `ncclGinFlushAsync` and `ncclGinWait` on rocSHMEM GDA. Flush and wait on both backends also return when the communicator is aborted, except blocking flush on Anvil SDMA.
+* `RCCL_DDA_BC` (default `-1`): opt-in DDA `ncclBroadcast` on the gfx1250 fabric path. When unset, Broadcast follows the per-architecture table, which has no Broadcast DDA tier, so Broadcast keeps its previous path. `0` turns it off and a positive value turns it on. The DDA LL and LL128 tier ceilings still apply, and the table sets both to 0 for Broadcast, so also set `RCCL_DDA_LL_THRESHOLD` or `RCCL_DDA_LL128_THRESHOLD`; those apply to every collective.
 
 ### Changed
 * On gfx1250, cuMem auto-detection (`NCCL_CUMEM_ENABLE=-2`, the default) no longer requires Linux kernel 6.8 or later; it enables cuMem whenever the ROCm version, VMM support and runtime probe checks pass. The runtime probe now also exports a DMA-BUF, so hosts that cannot export one keep cuMem off. Kernel 6.8 or later is still recommended for performance, and RCCL logs a warning when cuMem runs on an older kernel. Set `NCCL_CUMEM_ENABLE=0` to keep cuMem off.

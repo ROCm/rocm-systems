@@ -225,6 +225,15 @@ testResult_t  BroadcastGetAlgoProtoChannels(ncclComm_t comm, size_t count, ncclD
   return testSuccess;
 }
 
+testResult_t  BroadcastGetCollImplInfo(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op,
+    const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* proto, int* nchannels) {
+  if(rcclTestsGetCollImplInfo == NULL) return testInternalError;
+  // Grouped broadcasts always enqueue; let the caller fall back to the enqueue reporter.
+  if (broadcast_grouped) return testNotImplemented;
+  NCCLCHECK(rcclTestsGetCollImplInfo(comm, ncclFuncBroadcast, count, type, op, sendbuff, recvbuff, graphCapturing, algo, proto, nchannels));
+  return testSuccess;
+}
+
 void BroadcastGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   if (broadcast_grouped) {
     double baseBw = (double)(count * nranks * typesize) / 1.0E9 / sec;
@@ -1362,7 +1371,7 @@ struct testColl broadcastTest = {
   BroadcastRunColl,
   BroadcastGetAlgoProtoChannels,
   NULL,
-  NULL,
+  BroadcastGetCollImplInfo,
   BroadcastDeviceTime
 };
 

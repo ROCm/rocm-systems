@@ -12,6 +12,7 @@
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/dda/broadcast/dda_broadcast.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "fail_loud.h"
 #include "signature-drift.h"
@@ -77,6 +78,17 @@ DEFINE_DDA_BLOCKS(reduceScatterDdaFabricBlocks, ncclReduceScatterDdaFabricBlocks
 DEFINE_DDA_BLOCKS(reduceScatterDdaFabricLLBlocks, ncclReduceScatterDdaFabricLLBlocks, 133)
 DEFINE_DDA_BLOCKS(reduceScatterDdaFabricLL128Blocks, ncclReduceScatterDdaFabricLL128Blocks, 134)
 
+#define DEFINE_DDA_BROADCAST_ELIGIBLE(hook, prod)                                                         \
+  std::function<bool(ncclComm*, size_t, ncclDataType_t)> g_##hook = [](ncclComm*, size_t, ncclDataType_t) { \
+    return false;                                                                                          \
+  };                                                                                                       \
+  bool prod(ncclComm* comm, size_t count, ncclDataType_t type) { return g_##hook(comm, count, type); }
+
+DEFINE_DDA_BROADCAST_ELIGIBLE(broadcastDdaFabricLLEligible, ncclBroadcastDdaFabricLLEligible)
+DEFINE_DDA_BROADCAST_ELIGIBLE(broadcastDdaFabricLL128Eligible, ncclBroadcastDdaFabricLL128Eligible)
+DEFINE_DDA_BLOCKS(broadcastDdaFabricLLBlocks, ncclBroadcastDdaFabricLLBlocks, 151)
+DEFINE_DDA_BLOCKS(broadcastDdaFabricLL128Blocks, ncclBroadcastDdaFabricLL128Blocks, 152)
+
 #define DEFINE_DDA_LAUNCH(hook, prod)                                                                     \
   DdaLaunchHook g_##hook = [](const void*, void*, size_t, ncclDataType_t, ncclComm*,                     \
                               hipStream_t) -> ncclResult_t { FailLoudUnfaked("dda_fakes", #prod); };     \
@@ -95,6 +107,17 @@ DEFINE_DDA_BLOCKS(reduceScatterDdaFabricLL128Blocks, ncclReduceScatterDdaFabricL
   }                                                                                                      \
   ASSERT_HOOK_MATCHES_PROD(g_##hook, prod);
 
+#define DEFINE_DDA_ROOT_LAUNCH(hook, prod)                                                                \
+  DdaRootLaunchHook g_##hook = [](const void*, void*, size_t, ncclDataType_t, int, ncclComm*,             \
+                                  hipStream_t) -> ncclResult_t { FailLoudUnfaked("dda_fakes", #prod); };   \
+  ncclResult_t prod(const void* send, void* recv, size_t count, ncclDataType_t type, int root, ncclComm* comm, \
+                    hipStream_t stream) {                                                                  \
+    return g_##hook(send, recv, count, type, root, comm, stream);                                          \
+  }                                                                                                        \
+  ASSERT_HOOK_MATCHES_PROD(g_##hook, prod);
+
+DEFINE_DDA_ROOT_LAUNCH(broadcastDdaFabricLL, ncclBroadcastDdaFabricLL)
+DEFINE_DDA_ROOT_LAUNCH(broadcastDdaFabricLL128, ncclBroadcastDdaFabricLL128)
 DEFINE_DDA_LAUNCH(allGatherDdaIpc, ncclAllGatherDdaIpc)
 DEFINE_DDA_LAUNCH(allGatherDdaFabric, ncclAllGatherDdaFabric)
 DEFINE_DDA_LAUNCH(allGatherDdaFabricLL, ncclAllGatherDdaFabricLL)
@@ -112,6 +135,8 @@ DEFINE_DDA_REDUCE_LAUNCH(reduceScatterDdaFabric, ncclReduceScatterDdaFabric)
 DEFINE_DDA_REDUCE_LAUNCH(reduceScatterDdaFabricLL, ncclReduceScatterDdaFabricLL)
 DEFINE_DDA_REDUCE_LAUNCH(reduceScatterDdaFabricLL128, ncclReduceScatterDdaFabricLL128)
 
+#undef DEFINE_DDA_ROOT_LAUNCH
+#undef DEFINE_DDA_BROADCAST_ELIGIBLE
 #undef DEFINE_DDA_REDUCE_LAUNCH
 #undef DEFINE_DDA_LAUNCH
 #undef ASSERT_HOOK_MATCHES_PROD

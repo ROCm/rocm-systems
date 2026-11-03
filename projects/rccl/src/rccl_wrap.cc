@@ -42,6 +42,7 @@ THE SOFTWARE.
 #include "algorithms/gin/gin_all_reduce.h"
 #endif
 #include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/dda/broadcast/dda_broadcast.h"
 #include "algorithms/gin/gin_alltoall.h"
 #include "group.h"
 #include "sym_kernels.h"
@@ -109,6 +110,8 @@ RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(2) * 1024
 RCCL_PARAM(DdaLL128OneShotThreshold, "DDA_LL128_ONESHOT_THRESHOLD", (size_t)(4) * 1024 * 1024); // 4 MiB
 RCCL_PARAM(DdaLL128TwoShotThreshold, "DDA_LL128_TWOSHOT_THRESHOLD", (size_t)(64) * 1024 * 1024); // 64 MiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", kDdaThresholdUnset);
+// Broadcast DDA: unset follows the arch table (any Broadcast DDA tier), 0 off, >0 on.
+RCCL_PARAM(DdaBc, "DDA_BC", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
 // When set, bypass the per-arch tuning table entirely and use base-commit
 // env-var defaults for all thresholds (DDA, CE, symMaxR2).  Useful for
@@ -825,6 +828,18 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
     *protocol = decision.protocol;
     *maxChannels = decision.nMaxChannels;
     return ncclSuccess;
+  }
+
+  // Broadcast: report DDA when picked, else the generic query below.
+  if (coll == ncclFuncBroadcast) {
+    struct rcclCollDecision decision;
+    NCCLCHECK(rcclSelectBroadcast(comm, (size_t)count, dataType, /*root=*/0, /*query=*/true, &decision));
+    if (decision.algo >= NCCL_NUM_ALGORITHMS) {
+      *algo = decision.algo;
+      *protocol = decision.protocol;
+      *maxChannels = decision.nMaxChannels;
+      return ncclSuccess;
+    }
   }
 
   // Other collectives: fall back to the size/algo query until they are migrated
@@ -2285,6 +2300,51 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   }
 
   return rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncAllGather, sendcount, datatype, query, decision);
+}
+
+// See the header comment.
+// RCCL_DDA_BC, so a global DDA threshold set for another collective does not turn Broadcast on.
+static bool rcclDdaBcEnabled(const rcclArchThresholds* table) {
+  const int64_t param = rcclParamDdaBc();
+  if (param != kDdaThresholdUnset) return param > 0;
+  return table != nullptr && (funcThresholdFromTable(table->ddaLLMax, ncclFuncBroadcast) != 0 ||
+                              funcThresholdFromTable(table->ddaLL128Max, ncclFuncBroadcast) != 0);
+}
+
+ncclResult_t rcclSelectBroadcast(struct ncclComm* comm, size_t count, ncclDataType_t datatype, int root, bool query,
+                                 struct rcclCollDecision* decision) {
+  if (comm == nullptr) return ncclInvalidArgument;
+  memset(decision, 0, sizeof(*decision));
+  decision->algo = NCCL_ALGO_RING;
+  decision->protocol = NCCL_PROTO_SIMPLE;
+  decision->nMaxChannels = 0;
+
+  if (rcclNcclAlgoEnvIsSet()) return ncclSuccess;
+  // DDA skips ArgsCheck; let the enqueue path report a bad root.
+  if (!query && (root < 0 || root >= comm->nRanks)) return ncclSuccess;
+
+  const size_t bytes = count * ncclTypeSize(datatype);
+  const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
+  if (!rcclDdaBcEnabled(archTable)) return ncclSuccess;
+  const size_t entryMax = rcclDdaEntryThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
+  if (!rcclDdaEnabled(comm, bytes, entryMax, query, "BC")) return ncclSuccess;
+  if (!IsArchMatch(comm->archName, "gfx1250")) return ncclSuccess;
+
+  const size_t llMax = rcclDdaLLThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
+  const size_t ll128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
+  if (llMax > 0 && bytes <= llMax && ncclBroadcastDdaFabricLLEligible(comm, count, datatype)) {
+    decision->algo = RCCL_DDA_FABRIC_LL;
+    decision->protocol = NCCL_PROTO_LL;
+    decision->nMaxChannels = ncclBroadcastDdaFabricLLBlocks(comm, count, datatype);
+    return rcclSelectDone("BC", query, decision);
+  }
+  if (ll128Max > 0 && bytes <= ll128Max && ncclBroadcastDdaFabricLL128Eligible(comm, count, datatype)) {
+    decision->algo = RCCL_DDA_FABRIC_LL128;
+    decision->protocol = NCCL_PROTO_LL128;
+    decision->nMaxChannels = ncclBroadcastDdaFabricLL128Blocks(comm, count, datatype);
+    return rcclSelectDone("BC", query, decision);
+  }
+  return ncclSuccess;
 }
 
 // See the header comment. Consolidates the backend picking formerly inlined in
