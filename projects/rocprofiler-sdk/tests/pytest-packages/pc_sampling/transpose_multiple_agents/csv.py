@@ -36,7 +36,9 @@ def validate_all_agents_are_sampled(
     if agent_index not in {"absolute", "relative", "type-relative"}:
         raise ValueError(f"unsupported agent index mode: {agent_index}")
 
-    gpu_agents_df = input_agent_info_csv[input_agent_info_csv["Agent_Type"] == "GPU"].copy()
+    gpu_agents_df = input_agent_info_csv[
+        input_agent_info_csv["Agent_Type"] == "GPU"
+    ].copy()
     # PC sampling is supported on gfx90a, gfx94x/gfx95x, and gfx12 GPUs.
     supported_gpus_df = gpu_agents_df[
         gpu_agents_df["Name"].apply(
@@ -63,7 +65,9 @@ def validate_all_agents_are_sampled(
     # Agent_Id is "Agent N" for absolute/relative and "GPU N" for type-relative.
     def agent_ordinals(agent_ids: pd.Series) -> set:
         parsed = agent_ids.astype(str).str.extract(r"^(Agent|GPU) ([0-9]+)$")
-        assert parsed.notna().all().all(), f"invalid Agent_Id values: {agent_ids.unique()}"
+        assert (
+            parsed.notna().all().all()
+        ), f"invalid Agent_Id values: {agent_ids.unique()}"
         expected_prefix = "GPU" if agent_index == "type-relative" else "Agent"
         assert parsed[0].eq(expected_prefix).all(), (
             f"Agent_Id format does not match --agent-index {agent_index}: "
