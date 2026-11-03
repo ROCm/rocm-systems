@@ -72,9 +72,10 @@ TEST_F(PluginLoaderTest, CApiRejectsAdmissionBeforeReplacingInstalledGroup) {
     soc.set_plugin_group(nullptr);
     std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(new rj_vm_t, rj_vm_destroy);
     vm->soc = &soc;
-    if (initially_active)
+    if (initially_active) {
       ASSERT_EQ(rj_vm_load_plugins(vm.get(), valid, PLUGIN_LOADER_FIXTURE_DIR),
                 ROCJITSU_STATUS_SUCCESS);
+    }
     rocjitsu::ExecutionPluginGroup *installed = &soc.plugin_group();
     for (const RejectionCase &test : cases) {
       SCOPED_TRACE(test.config);
