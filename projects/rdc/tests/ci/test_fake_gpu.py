@@ -166,6 +166,7 @@ class Rdcd:
         self.env.update(
             LD_PRELOAD=self.fake,
             RDC_FAKE_GPUS=str(gpus),
+            RDC_DISABLE_ROCP="yes",
             RDC_FAKE_LOG=str(self.call_log),
             RDC_FAKE_ARM=str(self.armed),
             RDC_FAKE_EVENT_WAIT_MS="100",
@@ -533,7 +534,12 @@ def test_embedded_start_read_stop(tools):
     bootstrap = _first_file(os.path.join(PREFIX, "lib", "librdc_bootstrap.so"))
     if bootstrap is None:
         _missing("librdc_bootstrap.so")
-    env = dict(os.environ, LD_PRELOAD=tools[2], RDC_FAKE_GPUS=str(NUM_GPUS))
+    env = dict(
+        os.environ,
+        LD_PRELOAD=tools[2],
+        RDC_FAKE_GPUS=str(NUM_GPUS),
+        RDC_DISABLE_ROCP="yes",
+    )
     try:
         r = subprocess.run(
             [sys.executable, "-c", _EMBEDDED, bootstrap],

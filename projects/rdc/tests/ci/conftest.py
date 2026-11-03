@@ -171,7 +171,7 @@ def rdcd_server(rdcd_path, has_gpu, rocm_dir):
         fake = fake_amdsmi(rocm_dir)
         if fake is None:
             pytest.skip("No AMD GPU and no fake amd-smi -- skipping daemon tests")
-        env.update(LD_PRELOAD=fake, RDC_FAKE_GPUS="4")
+        env.update(LD_PRELOAD=fake, RDC_FAKE_GPUS="4", RDC_DISABLE_ROCP="yes")
 
     server = RdcdServer(rdcd_path, env)
     if not server.start():

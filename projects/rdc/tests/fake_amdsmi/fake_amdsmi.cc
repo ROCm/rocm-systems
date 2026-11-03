@@ -514,8 +514,9 @@ amdsmi_status_t amdsmi_init(uint64_t init_flags) {
   }
   // Rules without @gpu apply; RDC_FAKE_UNFILLED changes nothing, as there are no outputs.
   if (auto st = done(apply_rules(__func__, -1))) return st;
-  // No simulated CPUs: amd-smi fails a CPU init on hosts without the HSMP driver.
-  if ((init_flags & AMDSMI_INIT_AMD_CPUS) != 0) return AMDSMI_STATUS_NOT_SUPPORTED;
+  // No simulated CPUs. amd-smi succeeds a CPU init without the HSMP driver (it logs and goes on
+  // with no CPUs), so the flag is accepted and finds nothing.
+  (void)init_flags;
   std::lock_guard<std::mutex> lock(g_mutex);
   ++g_init_refs;
   return AMDSMI_STATUS_SUCCESS;
@@ -1191,18 +1192,17 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info(amdsmi_process_info_t* procs
 amdsmi_status_t amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t* dv_indices,
                                                     uint32_t* num_devices) {
   if (auto st = enter_global(__func__, num_devices)) return done(st);
-  if (num_devices == nullptr) return AMDSMI_STATUS_INVAL;
+  // As with amd-smi, a NULL list or count is invalid: there is no count-only query.
+  if (dv_indices == nullptr || num_devices == nullptr) return AMDSMI_STATUS_INVAL;
   // The processes the last process-list call reported.
   const uint32_t calls = g_process_calls.load();
   if (pid < 1000 || pid - 1000 >= g_cfg.procs + (calls > 0 ? calls - 1 : 0)) {
     return AMDSMI_STATUS_NOT_FOUND;
   }
-  // Each process runs on one GPU. As with amd-smi, a NULL list asks for the count, and a list
-  // without room gets AMDSMI_STATUS_INSUFFICIENT_SIZE and keeps *num_devices.
-  if (dv_indices != nullptr) {
-    if (*num_devices < 1) return AMDSMI_STATUS_INSUFFICIENT_SIZE;
-    dv_indices[0] = (pid - 1000) % g_cfg.gpus;
-  }
+  // Each process runs on one GPU. As with amd-smi, a list without room gets
+  // AMDSMI_STATUS_INSUFFICIENT_SIZE and keeps *num_devices.
+  if (*num_devices < 1) return AMDSMI_STATUS_INSUFFICIENT_SIZE;
+  dv_indices[0] = (pid - 1000) % g_cfg.gpus;
   *num_devices = 1;
   return AMDSMI_STATUS_SUCCESS;
 }
