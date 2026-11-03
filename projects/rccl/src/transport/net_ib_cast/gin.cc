@@ -5,6 +5,8 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
+#include <atomic>
+
 #include "common_cast.h"
 #include "connect_cast.h"
 
@@ -440,6 +442,14 @@ struct IbCastRmaIbProxyCtx {
   int nContexts;
 };
 
+// [RCCL] On AINIC a queue pair's channel id picks its uDMA pipeline (connect.cc): under the default
+// RCCL_IB_UDMA_POLICY the first QP of each (NIC, channel id) takes the next pipeline in turn. Every GIN
+// and RMA proxy context therefore takes its own id, counting down from the top of the range; NET
+// channels use the low ids and reach these only when the channel count is raised past
+// MAXCHANNELS / 2. The id only selects the local pipeline (and telemetry bucket) and is never sent
+// to the peer, so ranks need not agree on it.
+static std::atomic<unsigned> ibCastRmaContextChIds{0};
+
 ncclResult_t IbCastRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* config, void** ginCtx) {
   ncclResult_t ret = ncclSuccess;
   struct CastIbGinCollComm* cComm = (struct CastIbGinCollComm*)collComm;
@@ -471,6 +481,9 @@ ncclResult_t IbCastRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* conf
     NCCLCHECKGOTO(ncclIbMalloc((void**)&gc->fullSendComm, sizeof(void*) * nranks), ret, end);
     NCCLCHECKGOTO(ncclIbMalloc((void**)&gc->fullRecvComm, sizeof(void*) * nranks), ret, end);
     gc->rank = cComm->rank;
+    ncclNet_ctxt_t chCtxt = {};
+    chCtxt.chId =
+      (MAXCHANNELS - 1) - (int)(ibCastRmaContextChIds.fetch_add(1, std::memory_order_relaxed) % (MAXCHANNELS / 2));
 
     // RMA v17 replaces rankStride with a sorted peerArray. Iterate through all ranks and barrier on each round to
     // handle non-uniform peer counts across ranks; always connect to self (the self-QP serves iFlush).
@@ -486,11 +499,12 @@ ncclResult_t IbCastRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* conf
       do {
         if (wantConnect && gc->fullSendComm[connectPeer] == NULL)
           NCCLCHECKGOTO(IbCastConnectImpl(cComm->ctx, cComm->dev, handles + NCCL_NET_HANDLE_MAXSIZE * connectPeer,
-                                          &gc->fullSendComm[connectPeer], NULL,
+                                          &gc->fullSendComm[connectPeer], (ncclNetDeviceHandle_t**)&chCtxt,
                                           ncclParamCastGinIbTc() != -1 ? ncclParamCastGinIbTc() : ncclParamIbCastTc()),
                         ret, end);
         if (wantAccept && gc->fullRecvComm[acceptPeer] == NULL)
-          NCCLCHECKGOTO(netIbCast.accept(lComm, &gc->fullRecvComm[acceptPeer], NULL), ret, end);
+          NCCLCHECKGOTO(netIbCast.accept(lComm, &gc->fullRecvComm[acceptPeer], (ncclNetDeviceHandle_t**)&chCtxt), ret,
+                        end);
         if (IbCastGinIbAborted(cComm->abortFlag)) {
           INFO(NCCL_NET, "NET/IB/GIN: proxy context connect aborted on rank %d/%d (peers %d/%d)", cComm->rank, nranks,
                connectPeer, acceptPeer);
