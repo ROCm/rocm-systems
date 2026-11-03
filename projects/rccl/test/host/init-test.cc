@@ -5747,6 +5747,11 @@ void FillInfo_FillFabricInfo(struct amdsmiFabricDeviceInfo* info) {
   }
 }
 
+void FillInfo_ReadUuidHalves(const struct amdsmiFabricDeviceInfo& info, uint64_t* lo, uint64_t* hi) {
+  std::memcpy(lo, info.clusterUuid, sizeof(*lo));
+  std::memcpy(hi, info.clusterUuid + sizeof(*lo), sizeof(*hi));
+}
+
 std::string FillInfo_RunCapturingInfo(FillInfoComm* c, ncclPeerInfo* info, ncclResult_t* result) {
   ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
   return RcclUnitTesting::CaptureLog([&] { *result = fillInfo(c->get(), info, 0); });
@@ -5823,6 +5828,84 @@ TEST_F(InitMicrotest, FillInfo_FabricSupported_LogsTopologyWithBothUuidHalves) {
   EXPECT_TRUE(LogHas(log, "acceleratorId 11 bandwidth 400000 Mb/s latency 250 ns")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "UUID 807060504030201.100f0e0d0c0b0a09")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "ppodSize 8 cliqueId 5 clique size 4")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, FillInfo_AmdMnnvlCliqueOverride_AppliesForEligibleRank) {
+  FillInfoComm c;
+  c.get()->busId = kPhysGpuBusId;
+  SetParams({{"MNNVL_ENABLE", 2}, {"MNNVL_CLIQUE_ID", 101}});
+  g_cuMemEnable = [] { return 1; };
+  ScopedHook attr(g_hipDeviceGetAttribute, [](int* pi, hipDeviceAttribute_t, int) {
+    if (pi) *pi = 1;
+    return hipSuccess;
+  });
+  ScopedHook index(g_amdSmiGetDeviceIndexByPciBusId, [](const char*, uint32_t* out) {
+    *out = FillInfo_kFabricDeviceIndex;
+    return ncclSuccess;
+  });
+  ScopedHook fabric(g_amdSmiGetFabricDeviceInfo,
+                    [](uint32_t, struct amdsmiFabricDeviceInfo* out) {
+                      FillInfo_FillFabricInfo(out);
+                      return ncclSuccess;
+                    });
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_EQ(101u, info.fabricInfo.cliqueId);
+}
+
+TEST_F(InitMicrotest, FillInfo_AmdMnnvlUuidOverride_AppliesForEligibleRank) {
+  FillInfoComm c;
+  c.get()->busId = kPhysGpuBusId;
+  constexpr uint64_t kUuidOverride = 0x12345678u;
+  SetParams({{"MNNVL_ENABLE", 2}, {"MNNVL_UUID", static_cast<int64_t>(kUuidOverride)}});
+  g_cuMemEnable = [] { return 1; };
+  ScopedHook attr(g_hipDeviceGetAttribute, [](int* pi, hipDeviceAttribute_t, int) {
+    if (pi) *pi = 1;
+    return hipSuccess;
+  });
+  ScopedHook index(g_amdSmiGetDeviceIndexByPciBusId, [](const char*, uint32_t* out) {
+    *out = FillInfo_kFabricDeviceIndex;
+    return ncclSuccess;
+  });
+  ScopedHook fabric(g_amdSmiGetFabricDeviceInfo,
+                    [](uint32_t, struct amdsmiFabricDeviceInfo* out) {
+                      FillInfo_FillFabricInfo(out);
+                      return ncclSuccess;
+                    });
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  uint64_t uuid0 = 0, uuid1 = 0;
+  FillInfo_ReadUuidHalves(info.fabricInfo, &uuid0, &uuid1);
+  EXPECT_EQ(kUuidOverride, uuid0);
+  EXPECT_EQ(kUuidOverride, uuid1);
+}
+
+TEST_F(InitMicrotest, FillInfo_AmdMnnvlEnvOverride_DisabledMnnvlKeepsFabricValues) {
+  FillInfoComm c;
+  c.get()->busId = kPhysGpuBusId;
+  constexpr uint64_t kUuidOverride = 0xabcdefu;
+  SetParams({{"MNNVL_ENABLE", 0}, {"MNNVL_CLIQUE_ID", 101}, {"MNNVL_UUID", static_cast<int64_t>(kUuidOverride)}});
+  g_cuMemEnable = [] { return 1; };
+  ScopedHook attr(g_hipDeviceGetAttribute, [](int* pi, hipDeviceAttribute_t, int) {
+    if (pi) *pi = 1;
+    return hipSuccess;
+  });
+  ScopedHook index(g_amdSmiGetDeviceIndexByPciBusId, [](const char*, uint32_t* out) {
+    *out = FillInfo_kFabricDeviceIndex;
+    return ncclSuccess;
+  });
+  ScopedHook fabric(g_amdSmiGetFabricDeviceInfo,
+                    [](uint32_t, struct amdsmiFabricDeviceInfo* out) {
+                      FillInfo_FillFabricInfo(out);
+                      return ncclSuccess;
+                    });
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_EQ(5u, info.fabricInfo.cliqueId);
+  uint64_t uuid0 = 0, uuid1 = 0;
+  FillInfo_ReadUuidHalves(info.fabricInfo, &uuid0, &uuid1);
+  EXPECT_EQ(0x0807060504030201ull, uuid0);
+  EXPECT_EQ(0x100f0e0d0c0b0a09ull, uuid1);
 }
 
 // Comm teardown / lifecycle (init.cc:453-4100): commFree, setCommAbortFlags, destroy/finalize/revoke/abort.
