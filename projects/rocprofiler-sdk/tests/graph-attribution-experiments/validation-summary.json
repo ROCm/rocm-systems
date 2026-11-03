@@ -43,5 +43,49 @@
   "review_regression": {
     "memcpy_dispatches": 30,
     "case": "captured memcpy followed by an identical manually added node; mixed graphs must remain unattributed"
+  },
+  "post_review_long_context": {
+    "source_commit": "8bc27cb00a8bb4aa5709163b93e8fb1d04d4d327",
+    "prompt_tokens": 524288,
+    "completion_tokens": 128,
+    "cached_tokens": 0,
+    "num_retractions": 0,
+    "cuda_graph_decode": true,
+    "queue_interposition": false,
+    "experimental_copybuffer": true,
+    "ranks": [
+      {
+        "rank": "sglang::scheduler_TP0",
+        "graph_dispatches": 6513,
+        "resolved": 6513,
+        "copybuffer": 179,
+        "copybuffer_api": "hipMemcpyAsync",
+        "finalized": true
+      },
+      {
+        "rank": "sglang::scheduler_TP1",
+        "graph_dispatches": 6513,
+        "resolved": 6513,
+        "copybuffer": 179,
+        "copybuffer_api": "hipMemcpyAsync",
+        "finalized": true
+      },
+      {
+        "rank": "sglang::scheduler_TP2",
+        "graph_dispatches": 6513,
+        "resolved": 6513,
+        "copybuffer": 179,
+        "copybuffer_api": "hipMemcpyAsync",
+        "finalized": true
+      },
+      {
+        "rank": "sglang::scheduler_TP3",
+        "graph_dispatches": 6513,
+        "resolved": 6513,
+        "copybuffer": 179,
+        "copybuffer_api": "hipMemcpyAsync",
+        "finalized": true
+      }
+    ]
   }
 }

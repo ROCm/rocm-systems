@@ -87,3 +87,9 @@ speculative acceptance differences, not a throughput comparison.
 The summary intentionally excludes model weights, generated response text,
 machine-specific paths and bulk traces. The percentages describe the observed
 request windows, not a guarantee for arbitrary graphs or ROCm versions.
+
+The post-review rerun at `8bc27cb0` used the same 524,288/128-token workload
+with CUDA Graph decode and zero cached tokens or retractions. Each of four ranks
+resolved 6,513/6,513 graph dispatches, including 179 copyBuffer dispatches mapped
+to `hipMemcpyAsync`; all worker traces finalized and no kernel names were missing.
+This verifies observed coverage for this workload, not arbitrary-graph accuracy.
