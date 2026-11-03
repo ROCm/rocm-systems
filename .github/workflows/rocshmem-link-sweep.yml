@@ -31,8 +31,8 @@ jobs:
             cmake
       - name: Install host prerequisites
         run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-venv python3-pip cmake ninja-build build-essential pkg-config libnuma-dev libdrm-dev libibverbs-dev
+          sudo -n apt-get update
+          sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-venv python3-pip cmake ninja-build build-essential pkg-config libnuma-dev libdrm-dev libibverbs-dev
       - name: Validate experiment tests
         run: python3 -m unittest discover -s .github/experiments/rocshmem-link-sweep/benchmark -p 'test_*.py' -v
       - name: Build rocSHMEM only and measure link widths
