@@ -69,6 +69,7 @@ CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
     const bool idle_publication_cancelable =
         qs.idle_publication.phase == QueueIdlePublicationPhase::CaptureAccess ||
         qs.idle_publication.phase == QueueIdlePublicationPhase::ReadSignalHandle ||
+        qs.idle_publication.phase == QueueIdlePublicationPhase::ReadMailboxPointer ||
         qs.idle_publication.phase == QueueIdlePublicationPhase::StoreIdleStatus;
     if (idle_generation_stale && idle_publication_cancelable) {
       // Before the status CAS commits, new work invalidates the prior empty
@@ -279,7 +280,20 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
       }
       if ((state.signal_address & 0x3f) != 0)
         return VmAccessOutcome::Malformed;
-      state.phase = QueueIdlePublicationPhase::StoreIdleStatus;
+      state.phase = QueueIdlePublicationPhase::ReadMailboxPointer;
+      continue;
+    }
+
+    case QueueIdlePublicationPhase::ReadMailboxPointer: {
+      const VmAccessOutcome outcome =
+          read_gpu(state.access->value, state.signal_address + kMailboxPointerOffset,
+                   &state.mailbox_pointer, sizeof(state.mailbox_pointer));
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
+      // A polled signal has no idle-event handler to consume and clear 0x10.
+      // Leave its value unchanged, including errors and teardown sentinels.
+      state.phase = state.mailbox_pointer == 0 ? QueueIdlePublicationPhase::DeliverGenericInterrupt
+                                               : QueueIdlePublicationPhase::StoreIdleStatus;
       continue;
     }
 
@@ -291,16 +305,6 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
                                sizeof(uint64_t), 0, kIdleStatus);
       if (idle.outcome != VmAccessOutcome::Complete)
         return idle.outcome;
-      state.phase = QueueIdlePublicationPhase::ReadMailboxPointer;
-      continue;
-    }
-
-    case QueueIdlePublicationPhase::ReadMailboxPointer: {
-      const VmAccessOutcome outcome =
-          read_gpu(state.access->value, state.signal_address + kMailboxPointerOffset,
-                   &state.mailbox_pointer, sizeof(state.mailbox_pointer));
-      if (outcome != VmAccessOutcome::Complete)
-        return outcome;
       state.phase = QueueIdlePublicationPhase::ReadEventId;
       continue;
     }

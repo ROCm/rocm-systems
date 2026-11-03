@@ -370,6 +370,42 @@ TEST(CompletionTrackerTest, ReportsTerminalPublicationFaultWithoutRetiringEntry)
   EXPECT_EQ(fixture.interrupts, 0u);
 }
 
+TEST(CompletionTrackerTest, QueueIdlePreservesInactiveSignalValues) {
+  constexpr uint64_t kQueueDescriptor = 0x500;
+  constexpr uint64_t kIdleSignal = 0x200;
+  constexpr uint64_t kIdleMailbox = 0x380;
+
+  for (const uint64_t mailbox : {uint64_t{0}, kIdleMailbox}) {
+    SCOPED_TRACE(mailbox);
+    for (const uint64_t value : {uint64_t{0}, uint64_t{1}, uint64_t{0x8000000000000000}}) {
+      SCOPED_TRACE(value);
+      CompletionFixture fixture;
+      auto &queue = fixture.queues.front();
+      queue.fanout_replica = false;
+      queue.address_space = fixture.address_space;
+      queue.interrupt_sink = fixture.subscription.sink();
+      queue.queue_desc_va = kQueueDescriptor;
+      queue.entries.front().completion_signal = 0;
+      fixture.memory->store(kQueueDescriptor + offsetof(amd_queue_t, queue_inactive_signal),
+                            kIdleSignal);
+      fixture.memory->store(kIdleSignal + CompletionFixture::kValueOffset, value);
+      fixture.memory->store(kIdleSignal + CompletionFixture::kMailboxOffset, mailbox);
+      fixture.memory->store(kIdleSignal + CompletionFixture::kEventOffset, uint32_t{41});
+
+      const CompletionDrainResult result = fixture.tracker.drain_completions(fixture.queues);
+      EXPECT_FALSE(result.retry_pending);
+      EXPECT_FALSE(result.terminal_fault);
+      EXPECT_TRUE(fixture.tracker.all_complete(fixture.queues));
+      EXPECT_EQ(fixture.retired, 1u);
+      EXPECT_EQ(fixture.memory->load<uint64_t>(kIdleSignal + CompletionFixture::kValueOffset),
+                mailbox && value == 0 ? 0x10 : value);
+      EXPECT_EQ(fixture.memory->successful_compare_exchanges(), mailbox && value == 0 ? 1u : 0u);
+      EXPECT_EQ(fixture.memory->successful_stores(kIdleMailbox), mailbox ? 1u : 0u);
+      EXPECT_EQ(fixture.interrupts, mailbox ? 2u : 1u);
+    }
+  }
+}
+
 TEST(CompletionTrackerTest, QueueIdlePublicationSurvivesUnavailableMailboxStore) {
   constexpr uint64_t kQueueDescriptor = 0x500;
   constexpr uint64_t kIdleSignal = 0x200;
@@ -478,7 +514,9 @@ TEST(CompletionTrackerTest, NewQueueGenerationFinishesCommittedIdleRetry) {
   EXPECT_EQ(fixture.interrupts, 4u);
 }
 
-TEST(CompletionTrackerTest, NewQueueGenerationCancelsUncommittedIdleRetry) {
+class QueueIdleRetryTest : public ::testing::TestWithParam<QueueIdlePublicationPhase> {};
+
+TEST_P(QueueIdleRetryTest, NewQueueGenerationCancelsUncommittedIdleRetry) {
   constexpr uint64_t kQueueDescriptor = 0x500;
   constexpr uint64_t kIdleSignal = 0x200;
   constexpr uint64_t kIdleMailbox = 0x380;
@@ -495,14 +533,28 @@ TEST(CompletionTrackerTest, NewQueueGenerationCancelsUncommittedIdleRetry) {
   fixture.memory->store(kIdleSignal + CompletionFixture::kValueOffset, uint64_t{0});
   fixture.memory->store(kIdleSignal + CompletionFixture::kMailboxOffset, kIdleMailbox);
   fixture.memory->store(kIdleSignal + CompletionFixture::kEventOffset, uint32_t{41});
-  fixture.memory->fail_next(CompletionRetryMemory::Operation::CompareExchange,
-                            kIdleSignal + CompletionFixture::kValueOffset);
+  switch (GetParam()) {
+  case QueueIdlePublicationPhase::ReadSignalHandle:
+    fixture.memory->fail_next(CompletionRetryMemory::Operation::Read,
+                              kQueueDescriptor + offsetof(amd_queue_t, queue_inactive_signal));
+    break;
+  case QueueIdlePublicationPhase::ReadMailboxPointer:
+    fixture.memory->fail_next(CompletionRetryMemory::Operation::Read,
+                              kIdleSignal + CompletionFixture::kMailboxOffset);
+    break;
+  case QueueIdlePublicationPhase::StoreIdleStatus:
+    fixture.memory->fail_next(CompletionRetryMemory::Operation::CompareExchange,
+                              kIdleSignal + CompletionFixture::kValueOffset);
+    break;
+  default:
+    FAIL() << "phase is not an uncommitted idle access";
+  }
 
   const CompletionDrainResult first = fixture.tracker.drain_completions(fixture.queues);
   ASSERT_TRUE(first.retry_pending);
   ASSERT_TRUE(queue.entries.empty());
   ASSERT_TRUE(queue.idle_publication.active());
-  EXPECT_EQ(queue.idle_publication.phase, QueueIdlePublicationPhase::StoreIdleStatus);
+  EXPECT_EQ(queue.idle_publication.phase, GetParam());
   EXPECT_EQ(fixture.memory->load<uint64_t>(kIdleSignal + CompletionFixture::kValueOffset), 0u);
   EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 0u);
 
@@ -536,5 +588,10 @@ TEST(CompletionTrackerTest, NewQueueGenerationCancelsUncommittedIdleRetry) {
   EXPECT_EQ(fixture.memory->successful_stores(kIdleMailbox), 1u);
   EXPECT_EQ(fixture.interrupts, 2u);
 }
+
+INSTANTIATE_TEST_SUITE_P(Uncommitted, QueueIdleRetryTest,
+                         ::testing::Values(QueueIdlePublicationPhase::ReadSignalHandle,
+                                           QueueIdlePublicationPhase::ReadMailboxPointer,
+                                           QueueIdlePublicationPhase::StoreIdleStatus));
 
 } // namespace
