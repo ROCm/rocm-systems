@@ -124,6 +124,10 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
     return tier.ll128 ? RunOneLL128(count, datatype, cap) : RunOneLL(count, datatype, cap);
   }
 
+  // Calls fn(maxBlocks, tier, nRanks, type, bytes, count) for every sweep case a tier runs; 20+ cases per tier.
+  template <typename Fn>
+  void ForEachTierCase(Fn fn);
+
   // Blocks `tier`'s path reports for `count` elements under `cap`.
   template <typename Tier>
   uint32_t ReportTier(const Tier& tier, size_t count, ncclDataType_t datatype, rcclDdaLaunchCap cap) {
@@ -554,8 +558,8 @@ unsigned FixedBlocks(size_t units, unsigned threads, unsigned unitThreads, int m
   return (unsigned)std::max<size_t>(blocks, 1);
 }
 
-// Without a cap every tier launches its fixed shape, and each reporter reports its one-shot tier's fixed grid.
-TEST_F(DdaAllReduceFabricLLMicrotest, Run_NoCapKeepsTheFixedShapeInEveryTier) {
+template <typename Fn>
+void DdaAllReduceFabricLLMicrotest::ForEachTierCase(Fn fn) {
   for (int maxBlocks : {256, 5}) {
     comm().ddaFabricMaxBlocks = maxBlocks;
     for (const FixedTier& tier : kTiers) {
@@ -577,16 +581,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Run_NoCapKeepsTheFixedShapeInEveryTier) {
             SCOPED_TRACE(testing::Message() << "ll128=" << tier.ll128 << " twoShot=" << tier.twoShot
                                             << " maxBlocks=" << maxBlocks << " nRanks=" << nRanks << " type=" << type
                                             << " bytes=" << bytes);
-            const DdaLaunch launch = RunTier(tier, count, type);
-            EXPECT_EQ(launch.block.x, tier.threads);
-            EXPECT_EQ(launch.grid.x, FixedBlocks(TierUnits(tier, bytes, nRanks), tier.threads, tier.unitThreads,
-                                                 maxBlocks));
-            const DdaLaunch zero = RunTier(tier, count, type, {0, 0});
-            EXPECT_EQ(zero.grid.x, launch.grid.x);
-            EXPECT_EQ(zero.block.x, launch.block.x);
-            const FixedTier oneShot = {tier.ll128, false, 512, tier.unitThreads};
-            const unsigned reported = FixedBlocks(TierUnits(oneShot, bytes, nRanks), 512, tier.unitThreads, maxBlocks);
-            EXPECT_EQ(ReportTier(tier, count, type, {0, 0}), reported);
+            fn(maxBlocks, tier, nRanks, type, bytes, count);
           }
         }
       }
@@ -595,67 +590,59 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Run_NoCapKeepsTheFixedShapeInEveryTier) {
   }
 }
 
+// Without a cap every tier launches its fixed shape, and each reporter reports its one-shot tier's fixed grid.
+TEST_F(DdaAllReduceFabricLLMicrotest, Run_NoCapKeepsTheFixedShapeInEveryTier) {
+  ForEachTierCase([&](int maxBlocks, const FixedTier& tier, int nRanks, ncclDataType_t type, size_t bytes,
+                      size_t count) {
+    const DdaLaunch launch = RunTier(tier, count, type);
+    EXPECT_EQ(launch.block.x, tier.threads);
+    EXPECT_EQ(launch.grid.x, FixedBlocks(TierUnits(tier, bytes, nRanks), tier.threads, tier.unitThreads, maxBlocks));
+    const DdaLaunch zero = RunTier(tier, count, type, {0, 0});
+    EXPECT_EQ(zero.grid.x, launch.grid.x);
+    EXPECT_EQ(zero.block.x, launch.block.x);
+    const FixedTier oneShot = {tier.ll128, false, 512, tier.unitThreads};
+    const unsigned reported = FixedBlocks(TierUnits(oneShot, bytes, nRanks), 512, tier.unitThreads, maxBlocks);
+    EXPECT_EQ(ReportTier(tier, count, type, {0, 0}), reported);
+  });
+}
+
 // A capped launch stays within the cap's blocks and its threads (whole 64-thread granules, at least one) in every tier,
 // keeps its kernel, and its reporter reports the grid it launches; the next uncapped call is the fixed shape again.
 // Caps above and below ddaFabricMaxBlocks both stay within it.
 TEST_F(DdaAllReduceFabricLLMicrotest, Run_CapBoundsTheGridAndTheReporterInEveryTier) {
   const rcclDdaLaunchCap caps[] = {{1, 64}, {3, 192}, {17, 256},   {3, 0},  {0, 192}, {17, 96}, {2, 1024},
                                    {1, 0},  {0, 64},  {1000, 4096}, {0, 480}, {0, 992}, {1, 32},  {0, 1}};
-  for (int maxBlocks : {256, 5}) {
-    comm().ddaFabricMaxBlocks = maxBlocks;
-    for (const FixedTier& tier : kTiers) {
-      params_.clear();
-      if (tier.twoShot) {
-        OnlyTwoShot();
+  ForEachTierCase([&](int maxBlocks, const FixedTier& tier, int nRanks, ncclDataType_t type, size_t bytes,
+                      size_t count) {
+    const DdaLaunch fixed = RunTier(tier, count, type);
+    for (const rcclDdaLaunchCap& cap : caps) {
+      SCOPED_TRACE(testing::Message() << "cap={" << cap.blocks << "," << cap.threads << "}");
+      const DdaLaunch capped = RunTier(tier, count, type, cap);
+      EXPECT_EQ(capped.kernel, fixed.kernel);
+      EXPECT_GE(capped.grid.x, 1u);
+      EXPECT_LE(capped.grid.x, (unsigned)maxBlocks);
+      if (cap.blocks > 0) {
+        EXPECT_LE(capped.grid.x, cap.blocks);
       }
-      int cases = 0;
-      for (int nRanks : kSweepRanks) {
-        comm().nRanks = nRanks;
-        for (ncclDataType_t type : kLLTypes) {
-          for (size_t shard : kShardBytes) {
-            const size_t bytes = shard * (size_t)nRanks;
-            const size_t count = bytes / ncclTypeSize(type);
-            if (!TierRuns(tier, count, type)) {
-              continue;
-            }
-            ++cases;
-            const DdaLaunch fixed = RunTier(tier, count, type);
-            for (const rcclDdaLaunchCap& cap : caps) {
-              SCOPED_TRACE(testing::Message() << "ll128=" << tier.ll128 << " twoShot=" << tier.twoShot
-                                              << " maxBlocks=" << maxBlocks << " nRanks=" << nRanks << " type="
-                                              << type << " bytes=" << bytes << " cap={" << cap.blocks << ","
-                                              << cap.threads << "}");
-              const DdaLaunch capped = RunTier(tier, count, type, cap);
-              EXPECT_EQ(capped.kernel, fixed.kernel);
-              EXPECT_GE(capped.grid.x, 1u);
-              EXPECT_LE(capped.grid.x, (unsigned)maxBlocks);
-              if (cap.blocks > 0) {
-                EXPECT_LE(capped.grid.x, cap.blocks);
-              }
-              EXPECT_LE(capped.block.x, tier.threads);
-              if (cap.threads >= 64) {
-                EXPECT_LE(capped.block.x, cap.threads);
-              }
-              EXPECT_EQ(capped.block.x % 64, 0u);
-              const unsigned threads = capped.block.x;
-              EXPECT_EQ(threads, cap.threads > 0 && cap.threads < tier.threads ? std::max(cap.threads / 64 * 64, 64u)
-                                                                                 : tier.threads);
-              const int blockBound = cap.blocks > 0 ? std::min<int>(cap.blocks, maxBlocks) : maxBlocks;
-              const size_t units = TierUnits(tier, bytes, nRanks);
-              EXPECT_EQ(capped.grid.x, FixedBlocks(units, threads, tier.unitThreads, blockBound))
-                  << "the capped width sizes the grid";
-              EXPECT_EQ(ReportTier(tier, count, type, cap), capped.grid.x * capped.grid.y)
-                  << "the reporter reports the capped grid";
-            }
-            const DdaLaunch next = RunTier(tier, count, type);
-            EXPECT_EQ(next.grid.x, fixed.grid.x);
-            EXPECT_EQ(next.block.x, fixed.block.x);
-          }
-        }
+      EXPECT_LE(capped.block.x, tier.threads);
+      if (cap.threads >= 64) {
+        EXPECT_LE(capped.block.x, cap.threads);
       }
-      EXPECT_GE(cases, 20) << "ll128=" << tier.ll128 << " twoShot=" << tier.twoShot;
+      EXPECT_EQ(capped.block.x % 64, 0u);
+      const unsigned threads = capped.block.x;
+      EXPECT_EQ(threads, cap.threads > 0 && cap.threads < tier.threads ? std::max(cap.threads / 64 * 64, 64u)
+                                                                         : tier.threads);
+      const int blockBound = cap.blocks > 0 ? std::min<int>(cap.blocks, maxBlocks) : maxBlocks;
+      const size_t units = TierUnits(tier, bytes, nRanks);
+      EXPECT_EQ(capped.grid.x, FixedBlocks(units, threads, tier.unitThreads, blockBound))
+          << "the capped width sizes the grid";
+      EXPECT_EQ(ReportTier(tier, count, type, cap), capped.grid.x * capped.grid.y)
+          << "the reporter reports the capped grid";
     }
-  }
+    const DdaLaunch next = RunTier(tier, count, type);
+    EXPECT_EQ(next.grid.x, fixed.grid.x);
+    EXPECT_EQ(next.block.x, fixed.block.x);
+  });
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, Blocks_EmptyMessageStillReportsOneBlock) {

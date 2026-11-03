@@ -67,7 +67,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   },
   // ddaVmmMaxR2: DDA VMM cap when recv buffer is registered (R2 mode).
   // DDA is gated on !symEligible (AR: !symkRequested) on every arch, including
-  // gfx1250 fabric; R2 sum takes DDA below symMinR2, on a GIN yield, and in the capture/eager windows past symMaxR2.
+  // gfx1250 fabric; R2 sum takes DDA below symMinR2, on a GIN yield, and when symkWithdrawn (rccl_wrap.cc).
   // A non-zero entry only shortens DDA when recv is registered and that gate still passes. 0 means use ddaVmmMax.
   .ddaVmmMaxR2 = {
     0,                   // [0] Broadcast      -- not used
@@ -302,7 +302,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   },
   // ddaVmmMaxR2: DDA VMM cap when recv buffer is registered (R2 mode).
   // DDA is gated on !symEligible (AR: !symkRequested) on every arch, including
-  // gfx1250 fabric; R2 sum takes DDA below symMinR2, on a GIN yield, and in the capture/eager windows past symMaxR2.
+  // gfx1250 fabric; R2 sum takes DDA below symMinR2, on a GIN yield, and when symkWithdrawn (rccl_wrap.cc).
   // A non-zero entry only shortens DDA when recv is registered and that gate still passes. 0 means use ddaVmmMax.
   .ddaVmmMaxR2 = {
     0,                   // [0] Broadcast      -- not used

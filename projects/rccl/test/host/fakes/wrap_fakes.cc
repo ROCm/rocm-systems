@@ -54,7 +54,6 @@
 ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetFirmwareVersion, amd_smi_getFirmwareVersion);
 ASSERT_HOOK_MATCHES_PROD(g_isSymmetricKernelRequested, isSymmetricKernelRequested);
 ASSERT_HOOK_MATCHES_PROD(g_allReduceShouldTakeDdaPath, rcclAllReduceShouldTakeDdaPath);
-ASSERT_HOOK_MATCHES_PROD(g_collectiveMustUseEnqueuePath, rcclCollectiveMustUseEnqueuePath);
 ASSERT_HOOK_MATCHES_PROD(g_ensureHierarchicalComms, rcclEnsureHierarchicalComms);
 ASSERT_HOOK_MATCHES_PROD(g_reserveHierarchicalTempBuffer, rcclReserveHierarchicalTempBuffer);
 
@@ -223,13 +222,6 @@ std::function<bool(const struct ncclComm*, size_t, ncclDataType_t, bool, bool)> 
 bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, ncclDataType_t dt, bool symEligible,
                                     bool query) {
   return g_allReduceShouldTakeDdaPath(comm, count, dt, symEligible, query);
-}
-
-// rcclCollectiveMustUseEnqueuePath: real body lives in collectives.cc. Default false, a plain comm in default
-// check mode, neither suspended nor revoked.
-std::function<bool(struct ncclComm*)> g_collectiveMustUseEnqueuePath = [](struct ncclComm*) { return false; };
-bool rcclCollectiveMustUseEnqueuePath(struct ncclComm* comm) {
-  return g_collectiveMustUseEnqueuePath(comm);
 }
 
 // getAlgoInfo / rcclKernelPackedChannels: rccl_wrap.cc `extern`-declares both

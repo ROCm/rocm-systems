@@ -1838,7 +1838,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // symkRequested is the raw "symk would run for these operands" signal and keeps
     // gating the CE 2-shot and DDA branches below, so registered buffers still reach
     // CE-registered at (5) rather than being claimed by a staging-buffer or fabric path.
-    // Exceptions in (4): below symMinR2, a GIN yield, and gfx1250's capture bound and eager band past symMaxR2.
+    // Exceptions in (4): below symMinR2, a GIN yield, and symkWithdrawn.
     // symMaxR2 / symMaxR2Graph from the arch table only withdraws symk as the final
     // choice once the message exceeds the CE/symk crossover size, letting
     // CE-registered win instead.  kThreshUnlimited means no suppression.
@@ -1935,7 +1935,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // rcclCandSearch arbitrates via probe order and the preferred-backend mask.
     // rcclDdaEnabled gates individual DDA sub-paths. Passes the raw symk signal
     // for the same reason as (3): symMaxR2 chooses between symk and CE-registered,
-    // except on gfx1250, where its withdrawal hands some registered calls to DDA (symkWithdrawn below).
+    // except where symkWithdrawn hands the call to DDA.
     //
     // GIN AllReduce is selected first in this function and requires symmetric
     // windows. By default gfx950 claims messages >= 256 MiB. gfx1250 claims

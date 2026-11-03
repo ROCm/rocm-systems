@@ -382,9 +382,9 @@ size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm);
 // set; on rank-scaled comms the AllReduce LL tier cap; else the env var's default.
 size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm);
 // Largest registered gfx1250 AllReduce that graph capture keeps on fabric DDA instead of Ring.
-size_t rcclDdaArRegCaptureMaxBytes(const struct ncclComm* comm);
+size_t rcclDdaArRegCaptureMaxBytes(const ncclComm* comm);
 // Whether an eager registered AllReduce of `bytes` has a shard the DDA LL128 two-shot takes over from CE-registered.
-bool rcclDdaArRegEagerShardFits(const struct ncclComm* comm, size_t bytes);
+bool rcclDdaArRegEagerShardFits(const ncclComm* comm, size_t bytes);
 // Blocks the DDA VMM AllReduce / ReduceScatter kernels launch: the init cap,
 // lowered on large comms per rcclArchThresholds::ddaVmmBlockBudget.
 int rcclDdaFabricVmmBlocks(const ncclComm* comm);

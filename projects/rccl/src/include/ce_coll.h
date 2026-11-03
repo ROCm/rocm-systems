@@ -78,7 +78,7 @@ inline size_t ncclCeAllReduceChooseChunkBytes(size_t shardBytes, size_t slotChun
   return alignDown(targetChunkBytes, (size_t)16);
 }
 
-// Bytes ncclCeAllReduce reduces per chunk: the whole shard when it fits one slot, else the pipelined chunk.
+// Per-chunk bytes of ncclCeAllReduce and ncclCeReduceScatter: the shard if it fits a slot, else the pipelined chunk.
 inline size_t ncclCeAllReduceChunkBytes(size_t shardBytes, size_t slotChunkBytes) {
   return (shardBytes <= slotChunkBytes) ? shardBytes : ncclCeAllReduceChooseChunkBytes(shardBytes, slotChunkBytes);
 }
