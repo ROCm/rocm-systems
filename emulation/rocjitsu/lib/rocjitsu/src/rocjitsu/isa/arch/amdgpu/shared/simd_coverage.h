@@ -127,7 +127,8 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, bool Scop
             result = op(load(a, 0), load(*b, 1), load(*c, 2));
           if constexpr (HalfDst)
             result = (result & U(0xffffu)) << (high_dst ? 16 : 0);
-          dst.template store_native<uint32_t>(base, result, chunk);
+          if (dst.template store_native<uint32_t>(base, result, chunk).failed())
+            return;
         }
       }))
     return false;
@@ -255,7 +256,8 @@ template <typename T, typename Inst, typename WriteResult>
     auto [value, bits] = div_scale_simd<T>(
         modify(a.template load_native<T>(base), 0), modify(b.template load_native<T>(base), 1),
         modify(c.template load_native<T>(base), 2), rounding, denorm);
-    dst.template store_native<T>(base, value, chunk);
+    if (dst.template store_native<T>(base, value, chunk).failed())
+      return true;
     mask = (mask & ~(chunk << base)) | ((bits & chunk) << base);
   }
   commit(mask);
@@ -490,27 +492,32 @@ template <bool Extended, typename Slot>
   };
   if (!compute(x, xr) || !compute(y, yr))
     return false;
-  auto store = [&](const Slot &slot, const Results &result) {
+  auto store = [&](const Slot &slot, const Results &result) -> Result {
     if constexpr (Extended) {
       if (slot.op >= 32) {
         auto dst = regs.write_operand64(*slot.dst, exec);
         constexpr uint32_t W = util::native<uint64_t>::size();
         for (uint32_t base = 0; base < wf.wf_size(); base += W)
-          dst.template store_native<uint64_t>(
-              base, util::native<uint64_t>(result.pairs + base, util::stdx::vector_aligned),
-              (exec >> base) & util::mask<uint64_t>(W));
-        return;
+          if (dst.template store_native<uint64_t>(
+                     base, util::native<uint64_t>(result.pairs + base, util::stdx::vector_aligned),
+                     (exec >> base) & util::mask<uint64_t>(W))
+                  .failed())
+            return Result::failure();
+        return Result::success();
       }
     }
     auto dst = regs.write_operand(*slot.dst, exec);
     constexpr uint32_t W = util::native<uint32_t>::size();
     for (uint32_t base = 0; base < wf.wf_size(); base += W)
-      dst.template store_native<uint32_t>(
-          base, util::native<uint32_t>(result.words + base, util::stdx::vector_aligned),
-          (exec >> base) & util::mask<uint64_t>(W));
+      if (dst.template store_native<uint32_t>(
+                 base, util::native<uint32_t>(result.words + base, util::stdx::vector_aligned),
+                 (exec >> base) & util::mask<uint64_t>(W))
+              .failed())
+        return Result::failure();
+    return Result::success();
   };
-  store(x, xr);
-  store(y, yr);
+  if (store(x, xr).failed() || store(y, yr).failed())
+    return true;
   detail::record_simd_fast_path(SimdFastPath::VOPD);
   return true;
 }
@@ -576,7 +583,8 @@ template <bool Vop3, typename Inst>
           fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
     };
     U low = compute(0), high = compute(16);
-    dst.template store_native<uint32_t>(base, low | (high << 16), mask);
+    if (dst.template store_native<uint32_t>(base, low | (high << 16), mask).failed())
+      return true;
   }
   return true;
 }
