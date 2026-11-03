@@ -194,7 +194,7 @@ TEST_F(DdaAllGatherFabricLLMicrotest, Launch_PassesBuffersBytesEpochAndBank) {
   EXPECT_EQ(launch.Arg<int>(4), 5);
   EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
-  EXPECT_EQ(launch.Arg<size_t>(8), 2064u);
+  EXPECT_EQ(launch.Arg<size_t>(8), 2048u);
   EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(9).flag, comm().abortFlagDev);
 }
 

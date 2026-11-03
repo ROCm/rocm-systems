@@ -1367,6 +1367,59 @@ TEST(CommandProcessorVmFault, FaultsEveryFanoutReplicaAndDropsPresentAndFutureWo
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
 }
 
+TEST(CommandProcessorFailure, ShutdownCancelsUnprocessedFanoutFailure) {
+  GpuVm gpu_vm;
+  CommandProcessor owner("owner");
+  CommandProcessor peer("peer");
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint32_t kQueueId = 41;
+  constexpr uint32_t kDispatchId = 19;
+  const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, kProcessId, 0x11);
+  owner.set_gpu_vm(&gpu_vm);
+  peer.set_gpu_vm(&gpu_vm);
+  owner.set_xcd_topology(0, {&owner, &peer});
+  peer.set_xcd_topology(1, {&owner, &peer});
+  (void)owner.register_queue({.address_space = address_space,
+                              .process_id = kProcessId,
+                              .queue_id = kQueueId,
+                              .ring_base_va = 0x100,
+                              .ring_size = 4096,
+                              .read_ptr_va = 0x80,
+                              .write_ptr_va = 0x88,
+                              .xcd_fanout = true});
+
+  auto grid = std::make_shared<GridCompletion>();
+  grid->grid_wgs = 2;
+  DispatchEntry owner_entry{};
+  owner_entry.dispatch_id = kDispatchId;
+  owner_entry.queue_id = kQueueId;
+  owner_entry.process_id = kProcessId;
+  owner_entry.kind = DispatchPacketKind::Kernel;
+  owner_entry.total_wgs = 1;
+  owner_entry.grid_completion = grid;
+  DispatchEntry peer_entry = owner_entry;
+  peer_entry.fanout_peer = true;
+  owner.accept_fanout_shard(std::move(owner_entry));
+  peer.accept_fanout_shard(std::move(peer_entry));
+  peer.drain_fanout_inbox_for_test();
+
+  // The owner has not even consumed its shard when the peer fails. No further
+  // doorbell event runs after the engine stops; shutdown must cancel it.
+  peer.notify_dispatch_failure(kQueueId, kProcessId, kDispatchId);
+  EXPECT_TRUE(grid->faulted());
+  owner.shutdown();
+  peer.shutdown();
+  EXPECT_TRUE(owner.queue_faulted_for_test(kQueueId, kProcessId));
+  EXPECT_TRUE(peer.queue_faulted_for_test(kQueueId, kProcessId));
+  EXPECT_FALSE(owner.has_dispatch_for_test(kQueueId, kProcessId, kDispatchId));
+  EXPECT_FALSE(peer.has_dispatch_for_test(kQueueId, kProcessId, kDispatchId));
+  EXPECT_EQ(grid.use_count(), 1);
+
+  owner.unregister_queue(kQueueId, kProcessId);
+  peer.unregister_queue(kQueueId, kProcessId);
+  EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+}
+
 TEST(CommandProcessorVmFault, RejectsNonterminalOrMismatchedNotifications) {
   GpuVm gpu_vm;
   CommandProcessor command_processor("cp");
@@ -1451,6 +1504,43 @@ TEST(GpuVmService, ReplacingABindingPreservesIdentityAndAdvancesItsEpoch) {
   EXPECT_EQ(gpu_vm.read(address_space, 0, value), VmAccessOutcome::Complete);
   EXPECT_EQ(std::to_integer<uint8_t>(value[0]), 0x22);
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+}
+
+TEST(GpuVmService, SharedPinnedSnapshotRetainsBackingAndPreservesValueCopies) {
+  GpuVm gpu_vm;
+  auto backing = std::make_shared<ByteAddressSpace>(0x11);
+  std::weak_ptr<ByteAddressSpace> backing_lifetime = backing;
+  const auto address_space = gpu_vm.register_translated(7, backing, backing);
+  ASSERT_TRUE(address_space);
+  auto access = gpu_vm.snapshot_pinned(address_space);
+  ASSERT_TRUE(access);
+  const auto original_namespace = access->cache_namespace();
+  auto owner = util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(*access);
+  util::IntrusiveSharedPtr<const GpuVmAccessSnapshot> shared = owner;
+  EXPECT_EQ(owner.get(), shared.get());
+  access.reset();
+  owner.reset();
+  backing.reset();
+
+  auto replacement = std::make_shared<ByteAddressSpace>(0x22);
+  ASSERT_TRUE(gpu_vm.replace_translated(address_space, replacement, replacement));
+  EXPECT_FALSE(backing_lifetime.expired());
+  std::array<std::byte, 1> value{};
+  EXPECT_EQ(shared->value.read(0, value), VmAccessOutcome::Complete);
+  EXPECT_EQ(value[0], std::byte{0x11});
+  EXPECT_EQ(shared->value.cache_namespace(), original_namespace);
+
+  // A value copy retains the access state independently of the shared storage.
+  std::optional<GpuVmAccess> copied = shared->value;
+  shared.reset();
+  EXPECT_FALSE(backing_lifetime.expired());
+  EXPECT_EQ(copied->read(0, value), VmAccessOutcome::Complete);
+  EXPECT_EQ(value[0], std::byte{0x11});
+  ASSERT_TRUE(gpu_vm.unregister_address_space(address_space));
+  EXPECT_TRUE(copied->revoked());
+  EXPECT_EQ(copied->read(0, value), VmAccessOutcome::Revoked);
+  copied.reset();
+  EXPECT_TRUE(backing_lifetime.expired());
 }
 
 TEST(GpuVmService, AccessSnapshotIsRevokedAndNamespacesItsTranslationEpoch) {
@@ -1540,10 +1630,11 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
               .begin = address & ~uint64_t{4095},
               .size = 4096,
               .mutation_epoch = epoch,
-              .captured_epoch = epoch->load()};
+              .captured_epoch = epoch->value.load()};
     }
 
-    std::shared_ptr<std::atomic<uint64_t>> epoch = std::make_shared<std::atomic<uint64_t>>(0);
+    util::IntrusiveSharedPtr<VmMutationEpoch> epoch =
+        util::IntrusiveSharedPtr<VmMutationEpoch>::make(0);
     Mtype mtype = Mtype::RW;
     mutable uint32_t queries = 0;
   };
@@ -1579,7 +1670,7 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
     EXPECT_EQ(policy->queries, 9u);
   }
 
-  policy->epoch->fetch_add(1);
+  policy->epoch->value.fetch_add(1);
   policy->mtype = Mtype::UC;
   for (uint64_t page = 0; page < 8; ++page)
     EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::UC);
@@ -1589,7 +1680,7 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
   // queries even when the binding and mutation epoch themselves do not change.
   cache.clear();
   cache.clear(); // Clearing an already-empty table is idempotent.
-  EXPECT_EQ(policy->epoch.use_count(), 1);
+  EXPECT_EQ(policy->epoch->ref_count(), 1);
   policy->mtype = Mtype::CC;
   for (uint64_t page = 0; page < 8; ++page)
     EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::CC);
@@ -1613,7 +1704,7 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
   access.reset();
   new_access.reset();
   cache.clear();
-  EXPECT_EQ(policy->epoch.use_count(), 2);
+  EXPECT_EQ(policy->epoch->ref_count(), 2);
 }
 
 TEST(GpuVmService, PolicyCacheReusesStridedPagesAndRevalidatesPrivateHints) {
@@ -1624,7 +1715,7 @@ TEST(GpuVmService, PolicyCacheReusesStridedPagesAndRevalidatesPrivateHints) {
 
     VmMtypeSnapshot snapshot_mtype(uint64_t address) const override {
       ++queries;
-      const uint64_t captured_epoch = epoch->load();
+      const uint64_t captured_epoch = epoch->value.load();
       const bool private_uc = (address / kRowStride + captured_epoch) % 2 == 0;
       return {.mtype = private_uc ? Mtype::UC : Mtype::RW,
               .may_batch_private_uc = private_uc,
@@ -1635,7 +1726,8 @@ TEST(GpuVmService, PolicyCacheReusesStridedPagesAndRevalidatesPrivateHints) {
               .captured_epoch = captured_epoch};
     }
 
-    std::shared_ptr<std::atomic<uint64_t>> epoch = std::make_shared<std::atomic<uint64_t>>(0);
+    util::IntrusiveSharedPtr<VmMutationEpoch> epoch =
+        util::IntrusiveSharedPtr<VmMutationEpoch>::make(0);
     mutable uint32_t queries = 0;
   };
 
@@ -1662,7 +1754,7 @@ TEST(GpuVmService, PolicyCacheReusesStridedPagesAndRevalidatesPrivateHints) {
   EXPECT_EQ(policy->queries, 8u);
 
   // Cached hints must reject stale policy before a fresh lookup replaces it.
-  policy->epoch->fetch_add(1);
+  policy->epoch->value.fetch_add(1);
   for (uint64_t row = 0; row < 8; ++row) {
     const uint64_t address = 0x100000000 + row * kRowStride;
     EXPECT_FALSE(access->cached_private_uc_hint(address, cache));
@@ -1687,10 +1779,11 @@ TEST(GpuVmService, PolicyCacheReusesContiguousAndTiledPages) {
               .begin = address & ~uint64_t{4095},
               .size = 4096,
               .mutation_epoch = epoch,
-              .captured_epoch = epoch->load()};
+              .captured_epoch = epoch->value.load()};
     }
 
-    std::shared_ptr<std::atomic<uint64_t>> epoch = std::make_shared<std::atomic<uint64_t>>(0);
+    util::IntrusiveSharedPtr<VmMutationEpoch> epoch =
+        util::IntrusiveSharedPtr<VmMutationEpoch>::make(0);
     mutable uint32_t queries = 0;
   };
 
