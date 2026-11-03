@@ -228,10 +228,9 @@ class RocProfCompute_Base:
         try:
             frameworks = resolve_profile_selection(getattr(args, "trace_ml_api", None))
         except ValueError as error:
-            console_error(str(error))
+            console_error("ml api trace", str(error))
         if getattr(args, "trace_ml_api", None) is not None:
             args.trace_ml_api = list(frameworks)
-        selected_frameworks = set(frameworks)
         self._ml_api_trace_enabled: bool = bool(frameworks)
         if frameworks and is_only_pc_sampling(args.filter_blocks):
             console_error(
@@ -326,14 +325,14 @@ class RocProfCompute_Base:
                 if script_index is None and skip_flag is None:
                     raise NoScriptInCommandError(args.remaining)
 
-            if selected_frameworks:
+            if frameworks:
                 _prepare_ml_api_trace_injection(
                     args.remaining,
                     resolved_exec_path,
                     bool(is_python),
                     script_index,
                     skip_flag,
-                    selected_frameworks,
+                    set(frameworks),
                 )
             args.remaining = shlex.join(args.remaining)
         elif not args.attach_pid:
