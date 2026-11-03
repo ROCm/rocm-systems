@@ -51,6 +51,10 @@ typedef enum RcclTunableColls {
 #define RCCL_SINGLE_NODE_MAX_NTHREADS 256
 #define RCCL_GFX950_MAX_NTHREADS 256  // for Simple and LL64/LL128 gfx950
 #define RCCL_DEFAULT_MAX_NTHREADS 256 // for Simple and LL64/LL128 other archs
+// gfx1250 DPX launch default. SPX stays at 256 until it is measured. A lower
+// NCCL_NTHREADS / NCCL_LL128_NTHREADS is not raised. The 256-thread cap stays
+// RCCL_DEFAULT_MAX_NTHREADS so RCCL_THREADS_PER_BLOCK can still select 256.
+#define RCCL_GFX1250_DEFAULT_NTHREADS 192
 #define RCCL_LL_MAX_NTHREADS 256
 #define RCCL_P2P_MAX_NTHREADS 256
 #define RCCL_MI3XX_MAX_MULTI_NODE_CHANNELS 64
