@@ -23,6 +23,35 @@ cache level, because it tells you which level to open.
 
 Always analyze one kernel at a time with `-k`.
 
+If there is no workload yet, collect only the memory blocks:
+
+```bash
+rocprof-compute profile --name <workload_name> -b memchart vl1d l2 lds -- <application> <args>
+```
+
+The cache aliases differ by architecture; for example, some GPUs name their
+caches `gl0` and `gl2`.
+
+### Collect only what the question needs
+
+Never run a full profile. It replays the application once per counter pass and
+also runs the roofline benchmarks.
+
+- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
+  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
+  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
+  Aliases differ by architecture.
+- `--set <set_name>` collects a predefined topic in one pass.
+  `rocprof-compute profile --list-sets` lists the sets.
+- Add `-k <kernel_name>` when the user names the kernels that matter.
+- Add `--no-roof` unless the question is about roofline. A `-b` list without
+  block 4 (`roof`) already skips it.
+- `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
+  each kernel, so it only helps when every profiled kernel is dispatched many
+  times. Pair it with `-k`. See Iteration multiplexing in
+  [profile mode](../../docs/how-to/profile/mode.rst).
+- Tell the user which analysis panels the narrower profile leaves empty.
+
 ## 2. Open the level the chart points at
 
 ```bash

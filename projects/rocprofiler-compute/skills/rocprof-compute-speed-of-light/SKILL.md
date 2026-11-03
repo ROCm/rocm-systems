@@ -22,9 +22,32 @@ rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b 
 pass `-k` with one kernel id from `--list-stats`; a Speed-of-Light table
 averaged over unrelated kernels means nothing.
 
-If the panel is missing or empty, those counters were not collected. Collect
-them with the `rocprof-compute-kernel-bottleneck` skill, using `-b sol` at
-profile time for a cheap single-topic run.
+If there is no workload yet, or the panel is missing or empty, collect
+Speed-of-Light alone:
+
+```bash
+rocprof-compute profile --name <workload_name> -b sol -- <application> <args>
+```
+
+### Collect only what the question needs
+
+Never run a full profile. It replays the application once per counter pass and
+also runs the roofline benchmarks.
+
+- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
+  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
+  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
+  Aliases differ by architecture.
+- `--set <set_name>` collects a predefined topic in one pass.
+  `rocprof-compute profile --list-sets` lists the sets.
+- Add `-k <kernel_name>` when the user names the kernels that matter.
+- Add `--no-roof` unless the question is about roofline. A `-b` list without
+  block 4 (`roof`) already skips it.
+- `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
+  each kernel, so it only helps when every profiled kernel is dispatched many
+  times. Pair it with `-k`. See Iteration multiplexing in
+  [profile mode](../../docs/how-to/profile/mode.rst).
+- Tell the user which analysis panels the narrower profile leaves empty.
 
 ## 2. Read it
 

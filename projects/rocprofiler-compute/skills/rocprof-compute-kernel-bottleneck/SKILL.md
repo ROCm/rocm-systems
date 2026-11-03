@@ -64,9 +64,15 @@ a timeout; profile mode has no such option.
 
 ## 3. Profile
 
+Start with Speed-of-Light for the kernels that matter:
+
 ```bash
-rocprof-compute profile --name <workload_name> -- <application> <args>
+rocprof-compute profile --name <workload_name> -b sol -k <kernel_name> -- <application> <args>
 ```
+
+Drop `-k` when the user has not named kernels. Once Speed-of-Light points at a
+limit, profile again with only the blocks section 5 opens, such as `wavefront`,
+`spi`, or `cu_pipe`.
 
 Output lands in `./workloads/<workload_name>/<gpu_model>/`, or `<rank>/` under
 MPI. Change it with `--output-directory`, which replaces `--name` for building
@@ -82,30 +88,25 @@ filtering, and the full option list. To profile a process that is already
 running, see
 [live attach and detach](../../docs/how-to/live_attach_detach.rst).
 
-### Collect less when a full replay is too expensive
+### Collect only what the question needs
 
-A single-pass, topic-focused collection:
+Never run a full profile. It replays the application once per counter pass and
+also runs the roofline benchmarks.
 
-```bash
-rocprof-compute profile --list-sets
-rocprof-compute profile --name <name> --set <set_name> -- <application>
-```
-
-Or collect only named blocks:
-
-```bash
-rocprof-compute profile --name <name> -b sol wavefront -- <application>
-```
-
-Iteration multiplexing spreads counters across kernel launches so a single pass
-collects more:
-
-```bash
-rocprof-compute profile --name <name> --iteration-multiplexing kernel -- <application>
-```
-
-Whenever you collect a subset, tell the user which analysis panels will be
-empty and that answering those questions needs another profile.
+- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
+  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
+  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
+  Aliases differ by architecture.
+- `--set <set_name>` collects a predefined topic in one pass.
+  `rocprof-compute profile --list-sets` lists the sets.
+- Add `-k <kernel_name>` when the user names the kernels that matter.
+- Add `--no-roof` unless the question is about roofline. A `-b` list without
+  block 4 (`roof`) already skips it.
+- `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
+  each kernel, so it only helps when every profiled kernel is dispatched many
+  times. Pair it with `-k`. See Iteration multiplexing in
+  [profile mode](../../docs/how-to/profile/mode.rst).
+- Tell the user which analysis panels the narrower profile leaves empty.
 
 ## 4. Find the hot kernel
 

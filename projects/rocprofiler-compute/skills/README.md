@@ -116,6 +116,11 @@ each change. A PR that alters CLI options, output layout, supported
 architectures, or the experimental status of a feature updates the matching
 skill in the same PR, exactly as it updates docs and tests.
 
+Every skill that collects counters has the same "Collect only what the question
+needs" section: kernel-bottleneck, memory, roofline, speed-of-light, and
+torch-trace. Keep that section identical in all five. Put a tip that only one
+skill needs in that skill's own steps.
+
 Skills must also serve users on the two previous ROCm releases. When a change
 alters how a feature behaves, keep a short note in the skill saying how it
 worked before and in which release.
