@@ -17,13 +17,6 @@ public:
   SdmaQueueBinding(SdmaQueueScheduler &scheduler, SdmaQueueScheduler::Handle handle)
       : scheduler_(scheduler), handle_(handle) {}
 
-  SdmaQueueBinding(const SdmaQueueBinding &) = delete;
-  SdmaQueueBinding &operator=(const SdmaQueueBinding &) = delete;
-  SdmaQueueBinding &operator=(SdmaQueueBinding &&) = delete;
-
-  SdmaQueueBinding(SdmaQueueBinding &&other) noexcept
-      : scheduler_(other.scheduler_), handle_(std::exchange(other.handle_, {})) {}
-
   ~SdmaQueueBinding() override {
     if (handle_)
       (void)scheduler_.detach(handle_);
@@ -117,9 +110,8 @@ SdmaQueueBindingFactory::create_binding(const QueueRegistrationRequest &request)
                                  : SdmaQueueProgressObserver{});
   if (!handle)
     return {};
-  SdmaQueueBinding binding(*scheduler_, handle);
   return {.status = QueueBindingCreateStatus::Bound,
-          .binding = std::make_unique<SdmaQueueBinding>(std::move(binding))};
+          .binding = std::make_unique<SdmaQueueBinding>(*scheduler_, handle)};
 }
 
 std::shared_ptr<SdmaQueueBindingFactory>

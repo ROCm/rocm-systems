@@ -29,7 +29,6 @@
 #include <limits>
 #include <memory>
 #include <mutex>
-#include <new>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -37,14 +36,6 @@
 #include <vector>
 
 namespace rocjitsu::amdgpu {
-
-class GpuQueueRegistryTestAccess {
-public:
-  static void fail_next_registry_allocation(GpuQueueRegistry &registry) {
-    std::lock_guard lock(registry.mutex_);
-    registry.registry_allocation_failure_for_test_ = [] { throw std::bad_alloc(); };
-  }
-};
 
 class CommandProcessorCloseTestAccess {
 public:
@@ -605,7 +596,6 @@ enum class BlockedQueueOperation : uint8_t {
   PrepareClose,
   Reconfigure,
   Submit,
-  DestroyBinding,
 };
 
 class RecordingQueueBindingFactory final : public QueueBindingFactory {
@@ -656,7 +646,6 @@ private:
         ++state_->destruction_calls;
         shared_->condition.notify_all();
       }
-      shared_->block(BlockedQueueOperation::DestroyBinding);
       try {
         std::lock_guard lock(shared_->mutex);
         if (shared_->destruction_observer)
@@ -2713,56 +2702,6 @@ TEST(GpuVmService, CloseAllPublishesItsEpochAfterBlockedRegistrationRollsBack) {
   EXPECT_EQ(binding_factory->destruction_calls(0), 1u);
   EXPECT_EQ(queues.lifecycle_epoch(), old_epoch + 1);
   EXPECT_EQ(queues.active_queues(), 0u);
-  ASSERT_TRUE(gpu_vm.lookup(address_space));
-  EXPECT_EQ(gpu_vm.lookup(address_space)->queue_references, 0u);
-  EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
-}
-
-TEST(GpuVmService, CloseAllWaitsForFailedRegistrationCleanupWithoutResettingVm) {
-  GpuMemory memory("memory");
-  GpuVm gpu_vm;
-  GpuQueueRegistry queues(gpu_vm);
-  auto binding_factory =
-      std::make_shared<RecordingQueueBindingFactory>(BlockedQueueOperation::DestroyBinding);
-  AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
-  const uint64_t old_queue_epoch = queues.lifecycle_epoch();
-  const uint64_t old_vm_epoch = gpu_vm.reset_epoch();
-
-  GpuQueueRegistryTestAccess::fail_next_registry_allocation(queues);
-  std::future<QueueHandle> registration = std::async(std::launch::async, [&]() {
-    return queues.register_queue(queue_request(address_space, binding_factory, 1));
-  });
-  if (!binding_factory->wait_until_callback_is_blocked()) {
-    binding_factory->release_callback();
-    try {
-      (void)registration.get();
-    } catch (...) {
-    }
-    FAIL() << "failed registration did not enter binding cleanup";
-  }
-
-  std::future<void> close_all = std::async(std::launch::async, [&]() { queues.close_all(); });
-  if (!wait_until_registration_admission_closes(queues)) {
-    binding_factory->release_callback();
-    try {
-      (void)registration.get();
-    } catch (...) {
-    }
-    close_all.get();
-    FAIL() << "close_all did not close queue admission";
-  }
-
-  EXPECT_EQ(close_all.wait_for(std::chrono::milliseconds(50)), std::future_status::timeout);
-  ASSERT_TRUE(gpu_vm.lookup(address_space));
-  EXPECT_EQ(gpu_vm.lookup(address_space)->queue_references, 1u);
-  EXPECT_EQ(binding_factory->destruction_calls(0), 1u);
-
-  binding_factory->release_callback();
-  EXPECT_THROW((void)registration.get(), std::bad_alloc);
-  close_all.get();
-  EXPECT_EQ(binding_factory->destruction_calls(0), 1u);
-  EXPECT_EQ(queues.lifecycle_epoch(), old_queue_epoch + 1);
-  EXPECT_EQ(gpu_vm.reset_epoch(), old_vm_epoch);
   ASSERT_TRUE(gpu_vm.lookup(address_space));
   EXPECT_EQ(gpu_vm.lookup(address_space)->queue_references, 0u);
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));

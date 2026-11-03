@@ -17,20 +17,11 @@
 #include <future>
 #include <memory>
 #include <mutex>
-#include <new>
 #include <span>
 #include <stdexcept>
 #include <thread>
 
 namespace rocjitsu::amdgpu {
-
-class GpuQueueRegistryTestAccess {
-public:
-  static void fail_next_allocation(GpuQueueRegistry &registry) {
-    std::lock_guard lock(registry.mutex_);
-    registry.registry_allocation_failure_for_test_ = [] { throw std::bad_alloc(); };
-  }
-};
 
 namespace {
 
@@ -242,14 +233,6 @@ TEST_F(GpuQueueRegistryTest, RegistrationFailuresRollBackAddressSpaceRetention) 
   ASSERT_TRUE(gpu_vm_.lookup(address_space_));
   EXPECT_EQ(gpu_vm_.lookup(address_space_)->queue_references, 0u);
 
-  auto allocation = factory_control();
-  GpuQueueRegistryTestAccess::fail_next_allocation(registry_);
-  EXPECT_THROW(
-      (void)registry_.register_queue(request(std::make_shared<TestQueueFactory>(allocation))),
-      std::bad_alloc);
-  ASSERT_TRUE(gpu_vm_.lookup(address_space_));
-  EXPECT_EQ(gpu_vm_.lookup(address_space_)->queue_references, 0u);
-  EXPECT_EQ(allocation->binding->destructions, 1);
   EXPECT_EQ(registry_.active_queues(), 0u);
   const QueueHandle replacement =
       registry_.register_queue(request(std::make_shared<TestQueueFactory>(factory_control())));

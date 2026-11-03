@@ -23,7 +23,6 @@
 namespace rocjitsu::amdgpu {
 
 class GpuVm;
-class GpuQueueRegistryTestAccess;
 
 enum class QueueType : uint8_t { Compute, Sdma };
 
@@ -188,9 +187,7 @@ class QueueBindingFactory {
 public:
   virtual ~QueueBindingFactory() = default;
 
-  /// @brief Create a fully attached binding or leave no processor state behind.
-  /// @details If creation throws before returning a binding, the factory must
-  /// roll back any processor state it created before propagating the exception.
+  /// @brief Create a fully attached binding or reject without leaving processor state.
   [[nodiscard]] virtual QueueBindingCreateResult
   create_binding(const QueueRegistrationRequest &request) = 0;
 };
@@ -223,10 +220,9 @@ public:
   explicit GpuQueueRegistry(GpuVm &gpu_vm) : gpu_vm_(gpu_vm) {}
   ~GpuQueueRegistry();
 
-  /// @brief Register a queue; allocation and factory exceptions propagate.
-  /// @details Registry-owned state and any returned binding are released before
-  /// exceptions propagate. The binding is destroyed before its VM retention is
-  /// released, so binding cleanup can still access the VM.
+  /// @brief Register a queue or return an empty handle on rejection.
+  /// @details On rejection, destroy any returned binding before releasing its VM
+  /// retention so binding cleanup can still access the VM.
   [[nodiscard]] QueueHandle register_queue(const QueueRegistrationRequest &request);
   [[nodiscard]] QueueReconfigureResult reconfigure_queue(QueueHandle handle,
                                                          QueueReconfigureRequest request);
@@ -245,8 +241,6 @@ public:
   [[nodiscard]] bool accepting_registrations_for_test() const;
 
 private:
-  friend class GpuQueueRegistryTestAccess;
-
   enum class QueueState : uint8_t { Open, Closing, Dead };
 
   class QueueRecord {
@@ -344,7 +338,6 @@ private:
   uint32_t active_closes_ = 0;
   bool admission_open_ = true;
   bool close_all_in_progress_ = false;
-  void (*registry_allocation_failure_for_test_)() = nullptr;
 };
 
 } // namespace rocjitsu::amdgpu

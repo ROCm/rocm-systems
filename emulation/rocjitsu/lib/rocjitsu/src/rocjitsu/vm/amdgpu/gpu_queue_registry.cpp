@@ -99,8 +99,6 @@ void GpuQueueRegistry::close_all(bool reopen_registration) {
 }
 
 QueueHandle GpuQueueRegistry::allocate_locked(std::shared_ptr<QueueRecord> queue) {
-  if (registry_allocation_failure_for_test_)
-    std::exchange(registry_allocation_failure_for_test_, nullptr)();
   uint32_t slot_index = 0;
   if (free_slots_.empty()) {
     slot_index = static_cast<uint32_t>(slots_.size());

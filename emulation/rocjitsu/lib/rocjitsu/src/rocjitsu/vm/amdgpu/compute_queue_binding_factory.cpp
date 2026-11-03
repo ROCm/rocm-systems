@@ -17,15 +17,6 @@ public:
       : command_processor_(command_processor), registration_id_(registration_id), format_(format),
         ring_base_(ring_base), ring_size_(ring_size) {}
 
-  ComputeQueueBinding(const ComputeQueueBinding &) = delete;
-  ComputeQueueBinding &operator=(const ComputeQueueBinding &) = delete;
-  ComputeQueueBinding &operator=(ComputeQueueBinding &&) = delete;
-
-  ComputeQueueBinding(ComputeQueueBinding &&other) noexcept
-      : command_processor_(other.command_processor_),
-        registration_id_(std::exchange(other.registration_id_, 0)), format_(other.format_),
-        ring_base_(other.ring_base_), ring_size_(other.ring_size_) {}
-
   ~ComputeQueueBinding() override {
     if (registration_id_)
       (void)command_processor_.unregister_queue_registration(registration_id_);
@@ -111,10 +102,10 @@ public:
     });
     if (registration_id == 0)
       return {};
-    ComputeQueueBinding binding(command_processor_, registration_id, request.packet_format,
-                                request.ring.base_address, request.ring.size_bytes);
     return {.status = QueueBindingCreateStatus::Bound,
-            .binding = std::make_unique<ComputeQueueBinding>(std::move(binding))};
+            .binding = std::make_unique<ComputeQueueBinding>(
+                command_processor_, registration_id, request.packet_format,
+                request.ring.base_address, request.ring.size_bytes)};
   }
 
 private:
