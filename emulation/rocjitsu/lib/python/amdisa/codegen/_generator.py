@@ -6454,8 +6454,10 @@ class CodeGenerator:
     # spelling has to be listed: an omitted one derives as `true_nop` and its
     # generated execute_impl() comes out an empty body, which leaves that ISA's
     # trap handlers unable to return at all. GFX1250 spells the return
-    # S_RFE_I64 (SOP1 opcode 74).
-    _TRAP_RETURN_NAMES = ('S_RFE', 'S_RFE_B64', 'S_RFE_I64')
+    # S_RFE_I64 (SOP1 opcode 74). GFX9 also keeps S_RFE_RESTORE_B64 (SOP2
+    # opcode 43), which the GFX9 manuals define as S_RFE_B64 with its second
+    # operand ignored.
+    _TRAP_RETURN_NAMES = ('S_RFE', 'S_RFE_B64', 'S_RFE_I64', 'S_RFE_RESTORE_B64')
     _TRAP_SENDMSG_NAMES = ('S_SENDMSG', 'S_SENDMSGHALT')
 
     def _sleep_body(self, sem: InstructionSemantics) -> str:

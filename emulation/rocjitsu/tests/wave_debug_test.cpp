@@ -329,6 +329,65 @@ TEST(WaveDebugTest, TrapHandlerRestoresInterruptedExecWhenReturningWithoutStoppi
   EXPECT_TRUE(wf->is_halted());
 }
 
+// s_rfe_restore_b64 is the GFX9 legacy trap return: the manuals define it as
+// `PRIV = 0; PC = S0.u64` with the second operand ignored, the same return as
+// s_rfe_b64. Returning through it must leave the wave exactly as s_rfe_b64
+// would, whatever its second operand holds and however long its encoding is.
+TEST(WaveDebugTest, RfeRestoreReturnsFromTheTrapHandlerLikeRfe) {
+  struct ReturnForm {
+    const char *name;
+    std::vector<uint32_t> words;
+  };
+  const ReturnForm forms[] = {
+      {"sgpr", {0x9580016Cu}},                 // s_rfe_restore_b64 ttmp[0:1], s1
+      {"literal", {0x9580FF6Cu, 0xDEADBEEFu}}, // s_rfe_restore_b64 ttmp[0:1], 0xdeadbeef
+  };
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (const auto &form : forms) {
+      SCOPED_TRACE(std::string(form.name) + " arch=" + std::to_string(arch));
+      WaveDebugFixture fx(arch);
+      fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
+      fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
+
+      std::vector<uint32_t> handler = {
+          0x806C846Cu,              // s_add_u32 ttmp0, ttmp0, 4
+          0x826D806Du,              // s_addc_u32 ttmp1, ttmp1, 0
+          0xBEFE00FFu, 0x80000000u, // s_mov_b32 exec_lo, 0x80000000
+      };
+      handler.insert(handler.end(), form.words.begin(), form.words.end());
+      for (uint32_t i = 0; i < handler.size(); ++i)
+        fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+
+      fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+        return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
+      });
+
+      constexpr uint64_t kInterruptedExec = 0x15ULL;
+      auto *wf = fx.dispatch(kKernelAddr);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(kInterruptedExec);
+      fx.cu->write_sgpr(wf->sgpr_alloc().base + 1, 0xFFFFFFFFu);
+
+      fx.cu->step();
+      ASSERT_TRUE(wf->in_trap_handler());
+      ASSERT_EQ(wf->pc, kTrapHandlerAddr);
+      for (int i = 0; i < 4 && wf->in_trap_handler(); ++i)
+        fx.cu->step();
+
+      ASSERT_FALSE(wf->in_trap_handler());
+      EXPECT_FALSE(wf->debug_halted());
+      EXPECT_EQ(wf->pc, kKernelAddr + 4);
+      EXPECT_EQ(wf->exec(), kInterruptedExec);
+      EXPECT_FALSE(wf->instruction_execution_failed());
+
+      for (int i = 0; i < 4 && !wf->is_halted(); ++i)
+        fx.cu->step();
+      EXPECT_TRUE(wf->is_halted());
+    }
+  }
+}
+
 TEST(WaveDebugTest, UnmappedInstructionFetchReportsMemoryViolationAtBranchTarget) {
   WaveDebugFixture fx;
   constexpr uint32_t kProcessId = 7;
