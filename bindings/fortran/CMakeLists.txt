@@ -309,9 +309,9 @@ install(
 
 # From HIP's source VERSION file, as hipamd does; hip_VERSION is the INSTALLED HIP.
 set(_fortran_version "")
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../hip/VERSION")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../projects/hip/VERSION")
     file(
-        STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../hip/VERSION"
+        STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../../projects/hip/VERSION"
         _hip_vlist
         REGEX "^[0-9]+"
     )

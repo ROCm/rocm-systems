@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 # Intel oneAPI toolchain (ifx).
-# Usage, from projects/fortran:
+# Usage, from bindings/fortran:
 #   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel.cmake
 
 set(CMAKE_Fortran_COMPILER ifx CACHE FILEPATH "Fortran compiler")
