@@ -75,6 +75,29 @@ void expect_matches_scalar(
   expect_bit_exact(label, Mode::RandomInt, fixture, reseed, run, destination, shape.d_regs);
 }
 
+// Every wave64 shape that the generated MFMA executors route through exec_f32_mixed,
+// exec_i32_i8 and exec_f64 and that has at most 16 result registers.
+TEST(MfmaRegisterPathsTest, RoutedShapesFitTheSnapshotPath) {
+  SKIP_IF_NO_SIMD();
+  struct Mfma {
+    uint32_t m, n, k, batch;
+  };
+  for (const Mfma s : {Mfma{4, 4, 1, 16}, Mfma{4, 4, 2, 16}, Mfma{4, 4, 4, 16},
+                       Mfma{16, 16, 128, 1}, Mfma{32, 32, 64, 1}})
+    EXPECT_TRUE(amdgpu::mfma_regions_shape_fits<float>(s.m, s.n, s.k, s.batch))
+        << s.m << "x" << s.n << "x" << s.k << "x" << s.batch;
+  for (const Mfma s :
+       {Mfma{16, 16, 64, 1}, Mfma{32, 32, 32, 1}, Mfma{32, 32, 16, 1}, Mfma{16, 16, 32, 1},
+        Mfma{16, 16, 16, 1}, Mfma{32, 32, 8, 1}, Mfma{16, 16, 4, 4}, Mfma{4, 4, 4, 16}})
+    EXPECT_TRUE(amdgpu::mfma_regions_shape_fits<int32_t>(s.m, s.n, s.k, s.batch))
+        << s.m << "x" << s.n << "x" << s.k << "x" << s.batch;
+  for (const Mfma s : {Mfma{16, 16, 4, 1}, Mfma{4, 4, 4, 4}})
+    EXPECT_TRUE(amdgpu::mfma_regions_shape_fits<double>(s.m, s.n, s.k, s.batch))
+        << s.m << "x" << s.n << "x" << s.k << "x" << s.batch;
+  // 32 result registers exceed the snapshot; this shape keeps the existing path.
+  EXPECT_FALSE(amdgpu::mfma_regions_shape_fits<int32_t>(32, 32, 4, 2));
+}
+
 TEST(MfmaRegisterPathsTest, F64MatchesScalarForSeparateAndOverlappingDestinations) {
   SKIP_IF_NO_SIMD();
   struct Mfma {
