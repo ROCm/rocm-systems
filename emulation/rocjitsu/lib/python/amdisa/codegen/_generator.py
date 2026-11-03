@@ -7240,6 +7240,17 @@ class CodeGenerator:
             )
             return '\n'.join(L)
 
+        if cls == 'round_mode':
+            # S_ROUND_MODE loads MODE.FP_ROUND from SIMM16[3:0]
+            # ([1:0] f32, [3:2] f16/f64); other MODE bits are preserved.
+            return (
+                '  wf.set_fp_round_mode(static_cast<uint32_t>(simm16.encoding_value_));'
+            )
+
+        if cls == 'denorm_mode':
+            # S_DENORM_MODE loads MODE.FP_DENORM (bits 7:4) from SIMM16[3:0].
+            return '  wf.set_fp_denorm_mode(static_cast<uint32_t>(simm16.encoding_value_));'
+
         if cls == 'nop':
             return '  (void)wf;\n throw util::UnimplementedInst(mnemonic());'
 
