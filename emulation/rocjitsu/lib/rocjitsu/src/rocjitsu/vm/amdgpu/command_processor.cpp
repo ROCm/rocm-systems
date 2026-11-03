@@ -715,7 +715,12 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     uint64_t global_wave_idx = static_cast<uint64_t>(global_wg_id) * waves_per_wg + wf_index_in_wg;
     uint64_t scratch_slot = global_wave_idx;
     if (pkt.pm4_abi) {
-      auto lease = pkt.pm4_scratch_pool->acquire();
+      auto report = [](std::string_view message) { util::Logger::warn(message); };
+      util::FailureOr<std::shared_ptr<uint32_t>> maybe_lease =
+          pkt.pm4_scratch_pool->acquire(util::DiagnosticEmitter(report));
+      if (maybe_lease.failed())
+        return VmAccessOutcome::Malformed;
+      std::shared_ptr<uint32_t> lease = std::move(maybe_lease.value());
       scratch_slot = *lease;
       wf->set_scratch_lease(std::move(lease));
     } else if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5 || pkt.queue_ptr != 0) {
@@ -1045,8 +1050,10 @@ void CommandProcessor::drain_fanout_inbox() {
     // Honour the packet's acquire fence on this XCD too. The owner invalidated
     // only its own CUs; this runs on our partition's thread, so ours are safe
     // to touch here and the peer ends up with the same view the owner has.
+    // AQL fanout retains its existing best-effort maintenance policy. PM4
+    // admission and retirement instead reject incomplete maintenance.
     if (shard.acquire_invalidate)
-      flush_gpu_caches();
+      (void)flush_gpu_caches();
     if (!shard.is_non_kernel()) {
       const std::unordered_map<uint32_t, DispatchLaunchMetadata>::iterator metadata =
           launch_metadata.find(shard.dispatch_id);
@@ -3090,11 +3097,16 @@ void CommandProcessor::service_command_streams(simdojo::Tick now) {
     }
     while (!state.entries.empty() && state.entries.front().fully_completed()) {
       const auto &entry = state.entries.front();
-      flush_gpu_caches();
+      const VmAccessOutcome flushed = flush_gpu_caches(queue.address_space);
       if (entry.execution_begun)
         plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
       erase_cluster_workgroups(entry.dispatch_id);
       state.entries.pop_front();
+      if (flushed != VmAccessOutcome::Complete) {
+        util::Logger::warn("PM4 queue failed: PM4 cache flush failed");
+        fail_pm4_queue(queue, state);
+        break;
+      }
     }
     fetch_pm4(queue, state, now);
     service_pm4_ring(queue, now);
@@ -3180,6 +3192,12 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
     return util::Result::success();
   if (cus_.empty())
     return emit_error.emit() << "PM4 dispatch requires a compute unit";
+  // Waves tag L2 lines with process_id; scoped PM4 maintenance uses the VMID.
+  // Reject mismatched identities before admitting work whose writes it could skip.
+  const std::optional<AddressSpaceInfo> address_space =
+      gpu_vm_ ? gpu_vm_->lookup(queue.address_space) : std::nullopt;
+  if (!address_space || address_space->vmid != queue.process_id)
+    return emit_error.emit() << "PM4 dispatch process ID does not match address-space VMID";
   const bool thread_dimensions = initiator & (1u << 5);
   const auto arch = cus_[0]->config().arch;
   const uint32_t rsrc1 = regs[kPm4ComputePgmRsrc1], rsrc2 = regs[kPm4ComputePgmRsrc2];
@@ -3299,7 +3317,8 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   dp.wait_for_predecessors = true;
   util::Logger::vm("PM4 dispatch pc=", std::hex, dp.kernel_entry_pc, " rsrc1=", rsrc1,
                    " rsrc2=", rsrc2, std::dec, " workgroups=", total);
-  flush_gpu_caches();
+  if (flush_gpu_caches(queue.address_space) != VmAccessOutcome::Complete)
+    return emit_error.emit() << "PM4 cache flush failed";
   KernelDispatchInfo info{};
   info.dispatch_id = dp.dispatch_id;
   info.entry_pc = dp.kernel_entry_pc;
@@ -3367,13 +3386,14 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
       pending_queue_failures_.push_back(queue.registration_id);
     return;
   }
-  flush_gpu_caches();
   // A prior worker exception may have left this queue's finalization deferred.
   std::erase(pending_queue_failures_, queue.registration_id);
   complete_failed_queue(queue);
 }
 
 void CommandProcessor::complete_failed_queue(ComputeQueueRecord &queue) {
+  if (flush_gpu_caches(queue.address_space) != VmAccessOutcome::Complete)
+    util::Logger::warn("PM4 queue cancellation cache flush failed");
   for (auto &submission : queue.commands.submissions)
     if (submission.complete)
       submission.complete(false);
@@ -3387,7 +3407,6 @@ void CommandProcessor::drain_pending_queue_failures() {
     return;
   std::vector<uint64_t> registrations;
   registrations.swap(pending_queue_failures_);
-  flush_gpu_caches();
   for (uint64_t registration_id : registrations) {
     const std::vector<ComputeQueueRecord>::iterator queue =
         std::ranges::find(compute_queues_, registration_id, &ComputeQueueRecord::registration_id);
@@ -3403,7 +3422,7 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
       {
           .arch = cus_.empty() ? ROCJITSU_CODE_ARCH_INVALID : cus_[0]->config().arch,
           .xcc_id = scratch_xcc_id_,
-          .flush_caches = [this] { flush_gpu_caches(); },
+          .flush_caches = [this, &queue] { return flush_gpu_caches(queue.address_space); },
           .dispatch =
               [this, &queue, &qs](const std::array<uint32_t, 4> &dimensions,
                                   util::DiagnosticEmitter emit_error) {
@@ -4974,8 +4993,16 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
   }
 }
 
-void CommandProcessor::flush_gpu_caches() {
+VmAccessOutcome CommandProcessor::flush_gpu_caches(AddressSpaceHandle address_space) {
   assert(!dispatch_workers_active_ && "cache maintenance must follow the CU worker join");
+  std::optional<uint32_t> vmid;
+  if (address_space) {
+    const std::optional<AddressSpaceInfo> info =
+        gpu_vm_ ? gpu_vm_->lookup(address_space) : std::nullopt;
+    if (!info)
+      return VmAccessOutcome::Faulted;
+    vmid = info->vmid;
+  }
   // Runtime wave-state snapshots can flush these caches after the workers join,
   // so each CU maintenance call takes that CU's lock.
   // Both L1 caches are write-through, so discard their clean snapshots around
@@ -4983,12 +5010,17 @@ void CommandProcessor::flush_gpu_caches() {
   // later L2 flush cannot overwrite it.
   for (auto *cu : cus_)
     cu->invalidate_scalar_cache();
-  for (auto *l2 : l2_caches_)
-    l2->flush_all();
+  VmAccessOutcome outcome = VmAccessOutcome::Complete;
+  for (auto *l2 : l2_caches_) {
+    const VmAccessOutcome flushed = vmid ? l2->flush_address_space(*vmid) : l2->flush_all();
+    if (outcome == VmAccessOutcome::Complete)
+      outcome = flushed;
+  }
   // A direct backing write may land on code, and the I$ is not coherent with
   // data writes any more than the hardware one is.
   for (auto *cu : cus_)
     cu->invalidate_vector_and_instruction_caches();
+  return outcome;
 }
 
 } // namespace amdgpu

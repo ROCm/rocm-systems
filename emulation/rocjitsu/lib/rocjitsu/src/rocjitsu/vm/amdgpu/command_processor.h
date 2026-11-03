@@ -38,10 +38,12 @@
 
 #include "simdojo/sim/component.h"
 #include "util/diagnostic.h"
+#include "util/result.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -117,15 +119,18 @@ public:
 
   /// @brief Replace the GWS store across this CP's drained compute units.
   /// @details The caller serializes topology changes. Preflights every CU and
-  /// throws std::logic_error if any active CU would change stores, before
+  /// returns failure if any active CU would change stores, before
   /// updating any CU or the CP's shared owner.
-  void set_gws_device(std::shared_ptr<GwsDevice> device) {
+  /// @param emit_error Destination for failure diagnostics.
+  util::Result set_gws_device(std::shared_ptr<GwsDevice> device,
+                              util::DiagnosticEmitter emit_error = {}) {
     for (ComputeUnitCore *cu : cus_)
       if (!cu->can_set_gws_device(device))
-        throw std::logic_error("Cannot replace GWS store with active waves or workgroups");
+        return emit_error.emit() << "Cannot replace GWS store with active waves or workgroups";
     for (ComputeUnitCore *cu : cus_)
       (void)cu->set_gws_device(device);
     gws_device_ = std::move(device);
+    return util::Result::success();
   }
   void add_l2_cache(L2Cache *l2) {
     // Idempotent: the config-driven builder and the Xcd full constructor may
@@ -277,9 +282,11 @@ public:
 
   void add_spi(ShaderProcessorInput *spi) { spis_.push_back(spi); }
 
+  /// @brief Attach a CU during topology construction, before execution starts.
+  /// @details The CU must be compatible with the CP's GWS store.
   void add_compute_unit(ComputeUnitCore *cu) {
-    if (gws_device_ && !cu->can_set_gws_device(gws_device_))
-      throw std::logic_error("Cannot attach an active CU to a different GWS store");
+    assert((!gws_device_ || cu->can_set_gws_device(gws_device_)) &&
+           "CU must accept the CP's GWS store during construction");
     auto port_id = static_cast<simdojo::PortID>(dispatch_ports_.size());
     auto port = std::make_unique<simdojo::Port>("req_" + cu->name(), port_id, this,
                                                 simdojo::PortDirection::OUT,
@@ -633,11 +640,17 @@ private:
 
   /// @brief Write back L2 and invalidate scalar, vector and instruction caches.
   /// @details Scalar and vector L1 are write-through and only need
-  /// invalidation. Dirty L2 data is published under the owning VMID. Requires
-  /// hw_queue_mutex_ and joined CU workers. CU maintenance takes each CU's
-  /// mutex to serialize with runtime snapshots, without delivering notifications
-  /// that could re-enter the CP and invalidate queue or dispatch references.
-  void flush_gpu_caches();
+  /// invalidation. A supplied address space limits L2 maintenance to its VMID;
+  /// otherwise all L2 lines are published under their owning VMIDs. If the supplied
+  /// address space cannot be looked up, returns Faulted without touching any cache.
+  /// Otherwise, returns the first incomplete L2 outcome after visiting every L2
+  /// and invalidating L1/I$.
+  /// Successful writebacks remain published; failed dirty lines remain for retry.
+  /// Requires hw_queue_mutex_ and joined CU workers. CU maintenance takes each
+  /// CU's mutex to serialize with runtime snapshots, without delivering
+  /// notifications that could re-enter the CP and invalidate queue or dispatch
+  /// references.
+  [[nodiscard]] VmAccessOutcome flush_gpu_caches(AddressSpaceHandle address_space = {});
 
   /// @brief Ask ROCr to provision scratch while leaving the head packet unconsumed.
   [[nodiscard]] AqlAdmissionResult request_dynamic_scratch(ComputeQueueRecord &queue,
