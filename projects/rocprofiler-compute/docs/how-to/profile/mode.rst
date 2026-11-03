@@ -412,6 +412,8 @@ Filtering options
 ``-b``, ``--block <block-id|block-alias|metric-id>``
    Allows system profiling on one or more selected analysis report blocks to speed
    up the profiling process. See :ref:`profiling-hw-component-filtering`.
+   Give all values after one ``-b``, for example ``-b 2 5``. A repeated ``-b``
+   keeps only its own values.
    Note that this option cannot be used with ``--roof-only`` or ``--set``.
 
 ``-k``, ``--kernel <kernel-substr>``
