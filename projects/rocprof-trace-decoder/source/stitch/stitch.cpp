@@ -394,7 +394,7 @@ void Stitcher::stitch(WaveDataInternal& wave)
     if (wave.callbackComplete) return;
     wave.callbackComplete = true;
 
-    if (!pctranslator) pctranslator = std::make_unique<PCTranslator>(raw_code, codeobj_service, gfxip);
+    if (!pctranslator) pctranslator = std::make_unique<PCTranslator>(raw_code, codeobj_service, static_cast<int>(gfxip));
 
     auto stitch_rate = stitchWave(wave);
     if (!wave.bIsComplete && !wave.isTrapping)

@@ -654,8 +654,7 @@ const FactoryMap &factories(BuildMode build_mode) {
     f["soc"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode mode, rj_code_arch_t arch,
                   rj_code_target_id_t, amdgpu::GpuMemory *mem, const AsyncResources &,
                   util::DiagnosticEmitter) -> ComponentResult {
-      auto soc = std::make_unique<SoC>(n, mem);
-      soc->set_arch(arch);
+      auto soc = std::make_unique<SoC>(n, mem, arch);
       soc->set_exec_mode(mode);
       return std::unique_ptr<simdojo::Component>(std::move(soc));
     };
@@ -1041,11 +1040,11 @@ build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode, rj_c
         // below supersedes it with the one device-wide store shared across every
         // XCD, so a dispatch under XCD fan-out still rendezvouses.
         xcd->wire_gws_to_cus();
-        if (soc)
-          soc->add_xcd(xcd);
+        if (soc && soc->add_xcd(xcd, emit_error).failed())
+          return util::Result::failure();
       } else if (auto *iod = dynamic_cast<amdgpu::Iod *>(c)) {
-        if (soc)
-          soc->add_iod(iod);
+        if (soc && soc->add_iod(iod, emit_error).failed())
+          return util::Result::failure();
       }
     }
     result.num_xcds = static_cast<uint32_t>(result.xcds.size());
