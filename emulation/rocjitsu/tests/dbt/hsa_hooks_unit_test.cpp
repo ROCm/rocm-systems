@@ -701,22 +701,35 @@ struct FakeApiTable {
   }
 };
 
-void write_runtime_config_path(const std::string &runtime_dir,
-                               bool create_host_topology_node = true) {
+[[nodiscard]] testing::AssertionResult
+write_runtime_config_path(const std::string &runtime_dir, bool create_host_topology_node = true) {
   setenv("ROCJITSU_RUNTIME_DIR", runtime_dir.c_str(), 1);
 
   const std::filesystem::path topology_root =
       std::filesystem::path(runtime_dir) / "topology" / "nodes";
-  std::filesystem::create_directories(topology_root);
+  std::error_code error;
+  std::filesystem::create_directories(topology_root, error);
+  if (error)
+    return testing::AssertionFailure() << "Failed to create topology root: " << error.message();
   if (create_host_topology_node) {
     const std::filesystem::path host_node = topology_root / std::to_string(kHostNodeId);
-    std::filesystem::create_directories(host_node);
-    std::ofstream(host_node / "gpu_id") << kResolvedHostGpuId << '\n';
+    std::filesystem::create_directories(host_node, error);
+    if (error)
+      return testing::AssertionFailure() << "Failed to create host node: " << error.message();
+    std::ofstream gpu_id(host_node / "gpu_id");
+    gpu_id << kResolvedHostGpuId << '\n';
+    gpu_id.close();
+    if (!gpu_id)
+      return testing::AssertionFailure() << "Failed to write host node gpu_id";
   }
   rj_hsa_dbt_set_topology_nodes_root_for_test(topology_root.c_str());
 
   std::ofstream config_path(rocjitsu::rpc_default_config_file_path());
   config_path << RJ_HOOK_UNIT_CONFIG_PATH << '\n' << kResolvedHostGpuId << '\n';
+  config_path.close();
+  if (!config_path)
+    return testing::AssertionFailure() << "Failed to write runtime config path";
+  return testing::AssertionSuccess();
 }
 
 class InstalledHook {
@@ -727,7 +740,10 @@ public:
         !result)
       return result;
     OnUnload();
-    write_runtime_config_path(runtime_dir_.path(), create_host_topology_node);
+    if (testing::AssertionResult result =
+            write_runtime_config_path(runtime_dir_.path(), create_host_topology_node);
+        !result)
+      return result;
     installed_ = OnLoad(&api.table, 0, 0, nullptr);
     return testing::AssertionSuccess();
   }

@@ -46,8 +46,8 @@ const std::string CONFIG_RDNA4_PATH = std::string(CONFIG_DIR) + "/gfx1201_r9700.
 // Most shipped configs omit num_threads so they pick up the default; the 2-GPU
 // KMD config pins it. Replace the pin when there is one, otherwise insert an
 // override after the opening brace.
-testing::AssertionResult config_json_with_num_threads(std::string &json, const std::string &path,
-                                                      uint32_t num_threads) {
+[[nodiscard]] testing::AssertionResult
+config_json_with_num_threads(std::string &json, const std::string &path, uint32_t num_threads) {
   std::ifstream input(path);
   if (!input.is_open())
     return testing::AssertionFailure() << "Failed to open config: " + path;

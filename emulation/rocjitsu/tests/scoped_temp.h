@@ -24,6 +24,9 @@ class ScopedTempFile {
 public:
   ScopedTempFile() = default;
 
+  /// @brief Create the resource; check success before using path().
+  /// @details An initial creation failure leaves the path empty. Reinitializing
+  /// an owned resource fails and preserves its existing path.
   [[nodiscard]] testing::AssertionResult initialize(std::string_view prefix) {
     if (!path_.empty())
       return testing::AssertionFailure() << "Temporary resource is already initialized";
@@ -62,6 +65,7 @@ public:
 
   [[nodiscard]] const std::string &path() const { return path_; }
 
+  /// @brief Write an initialized file; check success before consuming its contents.
   [[nodiscard]] testing::AssertionResult write(std::string_view contents) const {
     if (path_.empty())
       return testing::AssertionFailure() << "Temporary file is not initialized";
@@ -88,6 +92,9 @@ class ScopedTempDirectory {
 public:
   ScopedTempDirectory() = default;
 
+  /// @brief Create the resource; check success before using path().
+  /// @details An initial creation failure leaves the path empty. Reinitializing
+  /// an owned resource fails and preserves its existing path.
   [[nodiscard]] testing::AssertionResult initialize(std::string_view prefix) {
     if (!path_.empty())
       return testing::AssertionFailure() << "Temporary resource is already initialized";

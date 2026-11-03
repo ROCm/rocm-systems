@@ -1287,7 +1287,7 @@ std::string compact_vfio_server_config(uint32_t gpu_count) {
   )";
 }
 
-testing::AssertionResult compact_manifest_vfio_server_config(std::string &config) {
+[[nodiscard]] testing::AssertionResult compact_manifest_vfio_server_config(std::string &config) {
   config = compact_vfio_server_config(2);
   const std::string replication = R"("num_gpus":2,)";
   const auto replication_at = config.find(replication);
@@ -1307,8 +1307,8 @@ testing::AssertionResult compact_manifest_vfio_server_config(std::string &config
   return testing::AssertionSuccess();
 }
 
-testing::AssertionResult compact_vfio_config_has_usable_functions(const std::string &path,
-                                                                  uint32_t count) {
+[[nodiscard]] testing::AssertionResult
+compact_vfio_config_has_usable_functions(const std::string &path, uint32_t count) {
   util::StringDiagnostic diagnostic;
   auto loaded =
       rocjitsu::config::load_config(path, rocjitsu::kEmbeddedSchema, diagnostic.emitter());

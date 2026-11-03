@@ -84,7 +84,8 @@ public:
 // \NPI new GPU: add a config-load test for its configs/<gpu>.json here.
 using namespace rocjitsu;
 
-testing::AssertionResult write_temp_config(test::ScopedTempFile &file, std::string_view json) {
+[[nodiscard]] testing::AssertionResult write_temp_config(test::ScopedTempFile &file,
+                                                         std::string_view json) {
   if (testing::AssertionResult result = file.initialize("rocjitsu-config-"); !result)
     return result;
   return file.write(json);
@@ -459,14 +460,14 @@ constexpr std::string_view kSystemGraphManifest = R"({
   "coherence_domains":[{"id":"local7","gpus":["g5","g9"]}]
 })";
 
-testing::AssertionResult local_switch_manifest(std::string &manifest) {
+[[nodiscard]] testing::AssertionResult local_switch_manifest(std::string &manifest) {
   manifest.assign(kSystemGraphManifest);
   if (!replace_exactly_once(manifest, R"({"src":"e2","dst":"sw","link_class":"scale_up"},)", ""))
     return testing::AssertionFailure() << "local switch test route was not isolated";
   return testing::AssertionSuccess();
 }
 
-testing::AssertionResult system_graph_thread_test_config(std::string &json) {
+[[nodiscard]] testing::AssertionResult system_graph_thread_test_config(std::string &json) {
   json = system_graph_test_config(kSystemGraphManifest);
   const bool topology_replaced =
       replace_exactly_once(json, R"("topology":{"root":{"name":"soc","type":"soc","children":[
@@ -3954,10 +3955,9 @@ TEST(ConfigLoaderTest, ComponentFailuresReturnDiagnosticsWithoutThrowing) {
   }
 }
 
-testing::AssertionResult write_legacy_quantum_checkpoint(test::ScopedTempFile &file,
-                                                         uint32_t dispatch_threads = 1,
-                                                         uint32_t num_cus = 1,
-                                                         bool include_allocations = false) {
+[[nodiscard]] testing::AssertionResult
+write_legacy_quantum_checkpoint(test::ScopedTempFile &file, uint32_t dispatch_threads = 1,
+                                uint32_t num_cus = 1, bool include_allocations = false) {
   flatbuffers::FlatBufferBuilder builder;
   auto arch = builder.CreateString("cdna3");
   // The legacy writer supplied only the first four values. With the original

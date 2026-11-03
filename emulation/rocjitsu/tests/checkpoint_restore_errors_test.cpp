@@ -50,8 +50,8 @@ struct InvalidCheckpoint {
   size_t vgpr_bytes = 0;
 };
 
-testing::AssertionResult write_checkpoint(test::ScopedTempFile &file,
-                                          const InvalidCheckpoint &input) {
+[[nodiscard]] testing::AssertionResult write_checkpoint(test::ScopedTempFile &file,
+                                                        const InvalidCheckpoint &input) {
   flatbuffers::FlatBufferBuilder builder;
   auto arch = builder.CreateString(input.arch);
   auto cu = fb::CreateComputeUnitConfig(builder, 1, 104, 256, 64);
