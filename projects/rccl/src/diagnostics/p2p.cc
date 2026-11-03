@@ -938,7 +938,10 @@ fail:
     DIAG_PRINT("NCCL DIAG [INFO] p2p: resource cleanup failed rank=%d result=%d; some temporary resources may remain",
                comm->rank, cleanupRet);
   }
-  ret = runRet == ncclSuccess ? cleanupRet : runRet;
+  // Return only the run outcome. Cleanup runs after the last collective, so a failure there (e.g.
+  // ncclDiagP2pReleaseLocalHandle, which is ncclInternalError on ROCm) does not desync the ranks and
+  // must not fail init via ncclRunDiagnostics; it is reported above and left non-fatal.
+  ret = runRet;
   if (comm->p2pCrossClique) free(p2pRanks);
   free(edgeMatrix);
   free(setupResults);
