@@ -1054,7 +1054,7 @@ function(rocprofiler_add_unit_test)
     endif()
 
     # parse args
-    set(_FLAG_OPTS)
+    set(_FLAG_OPTS "INSTALLED_METRICS_PATH")
     set(_SINGLE_OPTS
         "TARGET"
         "TEST_LIST"
