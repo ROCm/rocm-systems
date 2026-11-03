@@ -9,6 +9,7 @@
 
 #include "rocjitsu/config/kfd_device_config.h"
 #include "rocjitsu/config/pci_device_config.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 
 #include <cstdint>
 #include <string>
@@ -160,6 +161,7 @@ private:
   std::string topology_dir_;
   std::string drm_dir_;
   GpuInfo gpu_info_{};
+  std::vector<BackingFile> files_;
 
   void write_file(const std::string &path, const std::string &content);
   void make_dir(const std::string &path);

@@ -131,10 +131,23 @@ on owner exit or exec, preserving any exported tokens until they close, without
 retaining application mappings. The interposer starts it before application
 code can lower file limits. A forked child starts its own helper under the
 child's then-current hard limits. Generated topology files and proc-maps
-snapshots are sized there and populated through mappings; these small metadata
-files must fit that helper's hard file limit. Topology population failures emit
-a warning identifying the file. Application writes, including runtime compiler
-temporary files, continue to obey the application's current limit.
+snapshots are sized there. Metadata up to 4 KiB travels with the sizing request
+and is written by the helper with positional I/O; larger files are populated
+through shared mappings. Both paths preserve the caller's file offset, and
+metadata files must fit that helper's hard file limit. Topology population
+failures emit a warning identifying the file. Application writes, including
+runtime compiler temporary files, continue to obey the application's current
+limit.
+
+Allocation and metadata requests use temporary private connections for both
+requests and responses. Topology generation uses one connection, acknowledges
+up to eight small writes together, and waits for all results before publishing
+the tree. The caller closes each file descriptor immediately after passing it
+to the helper, so batch size does not increase the application's descriptor
+requirement. Larger files still use mapped population. No persistent application
+descriptor is cached.
+Token reopen requests retain separate reply socket pairs because a token may
+be shared by multiple callers, including callers in different processes.
 
 Changing effective user or group credentials retires the previous helper's
 lease before using a new helper; previously exported tokens retain their keeper

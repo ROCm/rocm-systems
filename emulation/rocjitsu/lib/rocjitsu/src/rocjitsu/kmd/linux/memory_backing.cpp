@@ -119,21 +119,41 @@ int check_token_liveness(int fd) {
   return 0;
 }
 
-enum class Operation : uint32_t { Backing, SizeFile, PreallocatedBacking, TokenBacking };
+enum class Operation : uint32_t {
+  Backing,
+  SizeFile,
+  PreallocatedBacking,
+  TokenBacking,
+  PopulateFile,
+  DeferredFile,
+  FlushFiles
+};
+
+// Keep metadata in one small seqpacket. Larger snapshots retain the mapped
+// population path, without depending on socket buffer limits.
+constexpr size_t kInlineFileSize = 4096;
 
 struct Request {
   uint64_t size;
   int32_t mode;
   Operation operation;
   char name[64];
+  bool keep_connection = false;
 };
 
-int send_descriptor(int socket, const void *data, size_t size, int fd) {
-  iovec buffer{const_cast<void *>(data), size};
+struct FileResults {
+  uint32_t count = 0;
+  std::array<int32_t, 8> errors{};
+};
+
+int send_descriptor(int socket, const void *data, size_t size, int fd,
+                    const void *payload = nullptr, size_t payload_size = 0,
+                    int flags = MSG_DONTWAIT) {
+  iovec buffers[] = {{const_cast<void *>(data), size}, {const_cast<void *>(payload), payload_size}};
   alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int))]{};
   msghdr message{};
-  message.msg_iov = &buffer;
-  message.msg_iovlen = 1;
+  message.msg_iov = buffers;
+  message.msg_iovlen = payload_size ? 2 : 1;
   if (fd >= 0) {
     message.msg_control = control;
     message.msg_controllen = sizeof(control);
@@ -145,10 +165,9 @@ int send_descriptor(int socket, const void *data, size_t size, int fd) {
   }
   long sent;
   do {
-    sent = host_call(libc_passthrough().sendmsg, ::sendmsg, socket, &message,
-                     MSG_NOSIGNAL | MSG_DONTWAIT);
+    sent = host_call(libc_passthrough().sendmsg, ::sendmsg, socket, &message, MSG_NOSIGNAL | flags);
   } while (sent < 0 && errno == EINTR);
-  if (sent == static_cast<long>(size))
+  if (sent == static_cast<long>(size + payload_size))
     return 0;
   if (sent >= 0)
     errno = EIO;
@@ -203,6 +222,7 @@ struct Region {
 struct Token {
   Region *region;
   int socket;
+  FileResults files;
 };
 
 template <typename T> T *allocate_record() {
@@ -444,6 +464,118 @@ void *watch_lease(void *argument) {
     }
     free_record(token);
   };
+  // A request is usually queued before accept completes. Serve it immediately
+  // without allocating a connection record or another trip through epoll. A
+  // connected client that has not sent yet is registered below, never waited on.
+  auto serve = [&](Token &channel) {
+    const int socket = channel.socket;
+    Region *region = channel.region;
+    struct {
+      Request request;
+      char data[kInlineFileSize];
+    } packet;
+    auto &request = packet.request;
+    int incoming = -1;
+    const long received =
+        receive_descriptor(socket, &packet, sizeof(packet), incoming, MSG_DONTWAIT);
+    if (received == 0 || (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
+      return false;
+    }
+    if (received < 0)
+      return true;
+    // Allocation connections are private to a single request, so their
+    // responses can use the connection itself. Exported tokens can be shared
+    // across processes and threads; those still supply a private reply socket.
+    const bool inline_file = !region && received >= static_cast<long>(sizeof(request)) &&
+                             (request.operation == Operation::PopulateFile ||
+                              request.operation == Operation::DeferredFile) &&
+                             request.size <= kInlineFileSize;
+    const size_t expected = sizeof(request) + (inline_file ? request.size : 0);
+    if (received != static_cast<long>(expected) || (region && incoming < 0)) {
+      close_fd(incoming);
+      return region != nullptr;
+    }
+    if (!region && request.operation == Operation::FlushFiles) {
+      const bool valid = incoming < 0 && request.size == channel.files.count;
+      close_fd(incoming);
+      if (!valid)
+        return false;
+      const bool sent = send_descriptor(socket, &channel.files, sizeof(channel.files), -1) == 0;
+      channel.files.count = 0;
+      return sent && request.keep_connection;
+    }
+    if (!region && (channel.files.count == channel.files.errors.size() ||
+                    (channel.files.count && request.operation != Operation::DeferredFile))) {
+      close_fd(incoming);
+      return false;
+    }
+    const int reply = region ? incoming : socket;
+    int result = EINVAL;
+    int descriptor = -1;
+    if (!region && (request.operation == Operation::SizeFile || inline_file)) {
+      descriptor = incoming;
+      incoming = -1;
+      if (descriptor >= 0) {
+        result = host_call(libc_passthrough().ftruncate, ::ftruncate, descriptor, request.size) == 0
+                     ? 0
+                     : errno;
+        // The helper's file limit permits this write. pwrite keeps the
+        // caller's shared open-file offset unchanged, including on errors.
+        size_t written = 0;
+        while (result == 0 && inline_file && written < request.size) {
+          const ssize_t count =
+              ::pwrite(descriptor, packet.data + written, request.size - written, written);
+          if (count < 0 && errno == EINTR)
+            continue;
+          if (count <= 0)
+            result = count < 0 ? errno : EIO;
+          else
+            written += count;
+        }
+      }
+    } else if ((request.operation == Operation::Backing ||
+                request.operation == Operation::PreallocatedBacking ||
+                request.operation == Operation::TokenBacking) &&
+               (request.mode == O_RDONLY || request.mode == O_RDWR) &&
+               (region || (request.size && request.size <= SIZE_MAX))) {
+      if (!region) {
+        if (request.operation == Operation::TokenBacking) {
+          result = EFBIG;
+        } else {
+          descriptor = create_file(
+              request.size, request.operation == Operation::PreallocatedBacking, request.name);
+          result = descriptor >= 0 ? 0 : errno;
+        }
+      }
+      if (region || result == EFBIG) {
+        Region *backing =
+            region ? region
+                   : create_region(
+                         request.size,
+                         std::string_view(request.name).starts_with(kmd::kDeviceBackingNamePrefix));
+        if (backing) {
+          descriptor = create_token(epoll, backing, request.mode, ++serial);
+          result = descriptor >= 0 ? 0 : errno;
+          if (descriptor >= 0)
+            ++tokens;
+          else if (!region)
+            release_region(backing);
+        } else {
+          result = errno;
+        }
+      }
+    }
+    if (!region && request.operation == Operation::DeferredFile) {
+      channel.files.errors[channel.files.count++] = result;
+      close_fd(descriptor);
+      close_fd(incoming);
+      return request.keep_connection;
+    }
+    const bool sent = send_descriptor(reply, &result, sizeof(result), descriptor) == 0;
+    close_fd(descriptor);
+    close_fd(incoming);
+    return region != nullptr || (sent && request.keep_connection);
+  };
   bool owner_alive = true;
   while (owner_alive || tokens != 0) {
     epoll_event events[32];
@@ -483,12 +615,18 @@ void *watch_lease(void *argument) {
           close_fd(socket);
           continue;
         }
+        Token accepted{};
+        accepted.socket = socket;
+        if (!serve(accepted)) {
+          close_fd(socket);
+          continue;
+        }
         auto *connection = allocate_record<Token>();
         if (!connection) {
           close_fd(socket);
           continue;
         }
-        connection->socket = socket;
+        *connection = accepted;
         event.events = EPOLLIN | EPOLLRDHUP;
         event.data.ptr = connection;
         if (host_call(libc_passthrough().epoll_ctl, ::epoll_ctl, epoll, EPOLL_CTL_ADD, socket,
@@ -498,65 +636,7 @@ void *watch_lease(void *argument) {
         }
         continue;
       }
-      const int socket = token->socket;
-      Request request{};
-      int reply = -1;
-      const long received =
-          receive_descriptor(socket, &request, sizeof(request), reply, MSG_DONTWAIT);
-      if (received == 0 || (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
-        retire(token);
-        continue;
-      }
-      if (received != sizeof(request) || reply < 0) {
-        close_fd(reply);
-        continue;
-      }
-      int result = EINVAL;
-      int descriptor = -1;
-      if (!token->region && request.operation == Operation::SizeFile) {
-        char byte = 0;
-        if (receive_descriptor(reply, &byte, 1, descriptor, MSG_DONTWAIT) == 1 && descriptor >= 0)
-          result =
-              host_call(libc_passthrough().ftruncate, ::ftruncate, descriptor, request.size) == 0
-                  ? 0
-                  : errno;
-      } else if ((request.operation == Operation::Backing ||
-                  request.operation == Operation::PreallocatedBacking ||
-                  request.operation == Operation::TokenBacking) &&
-                 (request.mode == O_RDONLY || request.mode == O_RDWR) &&
-                 (token->region || (request.size && request.size <= SIZE_MAX))) {
-        if (!token->region) {
-          if (request.operation == Operation::TokenBacking) {
-            result = EFBIG;
-          } else {
-            descriptor = create_file(
-                request.size, request.operation == Operation::PreallocatedBacking, request.name);
-            result = descriptor >= 0 ? 0 : errno;
-          }
-        }
-        if (token->region || result == EFBIG) {
-          Region *region =
-              token->region
-                  ? token->region
-                  : create_region(
-                        request.size,
-                        std::string_view(request.name).starts_with(kmd::kDeviceBackingNamePrefix));
-          if (region) {
-            descriptor = create_token(epoll, region, request.mode, ++serial);
-            result = descriptor >= 0 ? 0 : errno;
-            if (descriptor >= 0)
-              ++tokens;
-            else if (!token->region)
-              release_region(region);
-          } else {
-            result = errno;
-          }
-        }
-      }
-      send_descriptor(reply, &result, sizeof(result), descriptor);
-      close_fd(descriptor);
-      close_fd(reply);
-      if (!token->region)
+      if (!serve(*token))
         retire(token);
     }
   }
@@ -564,36 +644,59 @@ void *watch_lease(void *argument) {
   __builtin_unreachable();
 }
 
-int request_backing(int socket, size_t size, int mode, int sized_file = -1,
-                    bool *disconnected = nullptr, Operation operation = Operation::Backing,
-                    const char *name = kMemoryBackingDefaultName) {
+int receive_backing(int socket, bool *disconnected) {
+  int descriptor = -1;
+  int response = EIO;
+  const long received = receive_descriptor(socket, &response, sizeof(response), descriptor);
+  if (disconnected && (received == 0 || (received < 0 && (errno == EPIPE || errno == ECONNRESET))))
+    *disconnected = true;
+  const int error = received < 0 ? errno : (received == sizeof(response) ? response : EIO);
+  if (error || descriptor < 0) {
+    close_fd(descriptor);
+    errno = error ? error : EIO;
+    return -1;
+  }
+  return descriptor;
+}
+
+int send_allocation(int socket, size_t size, int sized_file, bool &disconnected,
+                    Operation operation, const char *name, const void *data,
+                    bool keep_connection = false) {
+  Request request{size,
+                  O_RDWR,
+                  sized_file < 0 ? operation
+                  : data         ? Operation::PopulateFile
+                                 : Operation::SizeFile,
+                  {}};
+  std::snprintf(request.name, sizeof(request.name), "%s", name);
+  request.keep_connection = keep_connection;
+  if (send_descriptor(socket, &request, sizeof(request), sized_file, data, data ? size : 0) != 0) {
+    disconnected = errno == EPIPE || errno == ECONNRESET;
+    return -1;
+  }
+  return 0;
+}
+
+int request_allocation(int socket, size_t size, int sized_file, bool &disconnected,
+                       Operation operation, const char *name, const void *data) {
+  if (send_allocation(socket, size, sized_file, disconnected, operation, name, data) != 0)
+    return -1;
+  return receive_backing(socket, &disconnected);
+}
+
+int request_reopen(int socket, int mode) {
   int reply[2];
   if (host_call(libc_passthrough().socketpair, ::socketpair, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC,
                 0, reply) != 0)
     return -1;
-  Request request{size, mode, sized_file >= 0 ? Operation::SizeFile : operation, {}};
-  std::snprintf(request.name, sizeof(request.name), "%s", name);
-  int result = 0;
-  if (sized_file >= 0) {
-    const char byte = 0;
-    result = send_descriptor(reply[0], &byte, 1, sized_file);
-  }
-  if (result == 0)
-    result = send_descriptor(socket, &request, sizeof(request), reply[1]);
+  Request request{0, mode, Operation::Backing, {}};
+  const int result = send_descriptor(socket, &request, sizeof(request), reply[1]);
   int error = result == 0 ? 0 : errno;
-  if (disconnected && (error == EPIPE || error == ECONNRESET))
-    *disconnected = true;
   close_fd(reply[1]);
   int descriptor = -1;
   if (result == 0) {
-    int response = EIO;
-    const long received = receive_descriptor(reply[0], &response, sizeof(response), descriptor);
-    if (disconnected &&
-        (received == 0 || (received < 0 && (errno == EPIPE || errno == ECONNRESET))))
-      *disconnected = true;
-    error = received < 0 ? errno : (received == sizeof(response) ? response : EIO);
-    if (error == 0 && descriptor < 0)
-      error = EIO;
+    descriptor = receive_backing(reply[0], nullptr);
+    error = descriptor < 0 ? errno : 0;
   }
   close_fd(reply[0]);
   if (error) {
@@ -798,7 +901,7 @@ public:
     return owner_ == getpid() && user_ == geteuid() && group_ == getegid();
   }
 
-  int allocate(size_t size, int sized_file, bool &retry, Operation operation, const char *name) {
+  template <typename Function> int request(bool &retry, Function &&function) {
     std::lock_guard lock(mutex_);
     // A caller may have obtained this pointer just before a credential change
     // replaced it. Never restart an unreachable helper after retirement.
@@ -819,8 +922,7 @@ public:
       bool disconnected = false;
       if (host_call(libc_passthrough().connect, ::connect, socket,
                     reinterpret_cast<const sockaddr *>(&address_), length_) == 0)
-        descriptor =
-            request_backing(socket, size, O_RDWR, sized_file, &disconnected, operation, name);
+        descriptor = function(socket, disconnected);
       else
         disconnected = errno == ECONNREFUSED;
       const int error = errno;
@@ -1044,17 +1146,35 @@ Keeper *get_keeper() {
   return current;
 }
 
-int allocate_backing(size_t size, int sized_file = -1, Operation operation = Operation::Backing,
-                     const char *name = kMemoryBackingDefaultName) {
+template <typename Function> int with_keeper(Function &&function) {
   for (;;) {
     auto *current = get_keeper();
     if (!current)
       return -1;
     bool retry = false;
-    const int result = current->allocate(size, sized_file, retry, operation, name);
+    const int result = current->request(retry, function);
     if (!retry)
       return result;
   }
+}
+
+int allocate_backing(size_t size, int sized_file = -1, Operation operation = Operation::Backing,
+                     const char *name = kMemoryBackingDefaultName, const void *data = nullptr) {
+  return with_keeper([&](int socket, bool &disconnected) {
+    return request_allocation(socket, size, sized_file, disconnected, operation, name, data);
+  });
+}
+
+int populate_mapping(int fd, const void *data, size_t size) {
+  // Even overwriting an already sized file with write() checks RLIMIT_FSIZE.
+  // These private setup mappings have never been published to a simulated GPU.
+  void *view = host_call(libc_passthrough().mmap, ::mmap, nullptr, size, PROT_READ | PROT_WRITE,
+                         MAP_SHARED, fd, 0);
+  if (view == MAP_FAILED)
+    return -1;
+  std::memcpy(reinterpret_cast<void *>(view), data, size);
+  host_call(libc_passthrough().munmap, ::munmap, view, size);
+  return 0;
 }
 
 } // namespace
@@ -1082,20 +1202,121 @@ int populate_backing_file(int fd, const void *data, size_t size) {
     errno = EFBIG;
     return -1;
   }
-  const int resized = allocate_backing(size, fd);
+  const bool inline_file = data && size <= kInlineFileSize;
+  const int resized = allocate_backing(size, fd, Operation::SizeFile, kMemoryBackingDefaultName,
+                                       inline_file ? data : nullptr);
   if (resized < 0)
     return -1;
   close_fd(resized);
-  // Even overwriting an already sized file with write() checks RLIMIT_FSIZE.
-  // Populate through its shared mapping instead; these are private setup
-  // mappings that have never been published to a simulated GPU.
-  void *view = host_call(libc_passthrough().mmap, ::mmap, nullptr, size, PROT_READ | PROT_WRITE,
-                         MAP_SHARED, fd, 0);
-  if (view == MAP_FAILED)
-    return -1;
-  std::memcpy(reinterpret_cast<void *>(view), data, size);
-  host_call(libc_passthrough().munmap, ::munmap, view, size);
-  return 0;
+  if (inline_file)
+    return 0;
+  return populate_mapping(fd, data, size);
+}
+
+void create_backing_files(std::span<BackingFile> files) {
+  if (files.empty())
+    return;
+  for (auto &file : files)
+    file.error = EINPROGRESS;
+  const int result = with_keeper([&](int socket, bool &disconnected) {
+    // A disconnected helper can be restarted. Rewriting these unpublished
+    // files is idempotent; do not retain successes from a partially sent attempt.
+    for (auto &file : files)
+      file.error = EINPROGRESS;
+    std::array<BackingFile *, FileResults{}.errors.size()> pending{};
+    size_t count = 0;
+    auto flush = [&] {
+      if (!count)
+        return 0;
+      Request request{count, O_RDWR, Operation::FlushFiles, {}, true};
+      // Deferred writes produce no replies until this flush. Blocking sends
+      // therefore cannot deadlock on a full reply queue, even with small socket
+      // buffers. The helper never blocks on an application reply socket.
+      if (send_descriptor(socket, &request, sizeof(request), -1, nullptr, 0, 0) != 0) {
+        disconnected = errno == EPIPE || errno == ECONNRESET;
+        return -1;
+      }
+      FileResults results;
+      int descriptor = -1;
+      const long received = receive_descriptor(socket, &results, sizeof(results), descriptor);
+      disconnected = received == 0 || (received < 0 && (errno == EPIPE || errno == ECONNRESET));
+      if (received != sizeof(results) || descriptor >= 0 || results.count != count) {
+        const int error = received < 0 ? errno : EPROTO;
+        close_fd(descriptor);
+        errno = error;
+        return -1;
+      }
+      for (size_t i = 0; i < count; ++i)
+        pending[i]->error = results.errors[i];
+      count = 0;
+      return 0;
+    };
+    for (auto &file : files) {
+      const size_t size = file.contents.size();
+      if (size > static_cast<size_t>(std::numeric_limits<off_t>::max())) {
+        file.error = EFBIG;
+        continue;
+      }
+      const bool inline_file = size <= kInlineFileSize;
+      if (!inline_file && flush() != 0)
+        return -1;
+      constexpr int flags = O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC;
+      const int fd =
+          host_call(libc_passthrough().openat, ::openat, AT_FDCWD, file.path.c_str(), flags, 0666);
+      if (fd < 0) {
+        file.error = errno;
+        continue;
+      }
+      if (!size) {
+        close_fd(fd);
+        file.error = 0;
+        continue;
+      }
+      int sent;
+      if (inline_file) {
+        Request request{size, O_RDWR, Operation::DeferredFile, {}, true};
+        sent =
+            send_descriptor(socket, &request, sizeof(request), fd, file.contents.data(), size, 0);
+        if (sent < 0)
+          disconnected = errno == EPIPE || errno == ECONNRESET;
+      } else {
+        sent = send_allocation(socket, size, fd, disconnected, Operation::SizeFile,
+                               kMemoryBackingDefaultName, nullptr, true);
+      }
+      const int error = errno;
+      close_fd(fd);
+      if (sent < 0) {
+        file.error = error;
+        if (disconnected) {
+          errno = error;
+          return -1;
+        }
+        continue;
+      }
+      if (inline_file) {
+        pending[count++] = &file;
+        if (count == pending.size() && flush() != 0)
+          return -1;
+      } else {
+        const int resized = receive_backing(socket, &disconnected);
+        file.error = resized < 0 ? errno : 0;
+        if (disconnected)
+          return -1;
+        if (resized >= 0) {
+          if (populate_mapping(resized, file.contents.data(), size) != 0)
+            file.error = errno;
+          close_fd(resized);
+        }
+      }
+    }
+    return flush();
+  });
+  if (result < 0) {
+    const int error = errno;
+    for (auto &file : files)
+      if (file.error == EINPROGRESS)
+        file.error = error;
+  }
 }
 
 bool is_memory_backing_token(int fd) {
@@ -1174,7 +1395,7 @@ int reopen_memory_backing(int fd, int access_mode) {
   if (identify(fd, identity)) {
     if (check_token_liveness(fd) != 0)
       return -1;
-    const int reopened = request_backing(fd, 0, access_mode & O_ACCMODE);
+    const int reopened = request_reopen(fd, access_mode & O_ACCMODE);
     if (reopened < 0) {
       const int error = errno;
       if (check_token_liveness(fd) == 0)

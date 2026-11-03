@@ -137,7 +137,8 @@ using kmd::DebugTopology;
 Sysfs::~Sysfs() { cleanup(); }
 
 Sysfs::Sysfs(Sysfs &&other) noexcept
-    : topology_dir_(std::move(other.topology_dir_)), drm_dir_(std::move(other.drm_dir_)) {
+    : topology_dir_(std::move(other.topology_dir_)), drm_dir_(std::move(other.drm_dir_)),
+      files_(std::move(other.files_)) {
   // Clear both owned-tree paths in the moved-from object so its cleanup() cannot
   // remove_all a tree this object now owns.
   other.topology_dir_.clear();
@@ -149,6 +150,7 @@ Sysfs &Sysfs::operator=(Sysfs &&other) noexcept {
     cleanup();
     topology_dir_ = std::move(other.topology_dir_);
     drm_dir_ = std::move(other.drm_dir_);
+    files_ = std::move(other.files_);
     other.topology_dir_.clear();
     other.drm_dir_.clear();
   }
@@ -156,27 +158,13 @@ Sysfs &Sysfs::operator=(Sysfs &&other) noexcept {
 }
 
 void Sysfs::write_file(const std::string &path, const std::string &content) {
-  // Called while the backend is being constructed: bypass the interposer,
-  // whose synthetic DRM open path would recursively initialize this backend.
-  const auto &libc = libc_passthrough();
-  constexpr int flags = O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC;
-  const int fd = libc.openat ? libc.openat(AT_FDCWD, path.c_str(), flags, 0666)
-                             : ::open(path.c_str(), flags, 0666);
-  if (fd < 0) {
-    util::Logger::warn("Cannot create topology file '", path, "': ", std::strerror(errno));
-    return;
-  }
-  if (populate_backing_file(fd, content.data(), content.size()) != 0)
-    util::Logger::warn("Cannot populate topology file '", path, "': ", std::strerror(errno));
-  if (libc.close)
-    libc.close(fd);
-  else
-    ::close(fd);
+  files_.push_back({path, content});
 }
 
 void Sysfs::make_dir(const std::string &path) { fs::create_directories(path); }
 
 void Sysfs::cleanup() {
+  files_.clear();
   if (!topology_dir_.empty()) {
     std::error_code ec;
     fs::remove_all(topology_dir_, ec);
@@ -575,6 +563,15 @@ std::string Sysfs::generate(const std::vector<GpuInfo> &gpus, bool publish_peer_
     write_gpu_node(nodes_dir, i + 1, gpus[i], num_gpus, publish_peer_links);
 
   write_drm_tree(gpus);
+
+  // Publish only after all files have been populated. Reuse a temporary helper
+  // connection for the tree without retaining application file descriptors.
+  create_backing_files(files_);
+  for (const auto &file : files_)
+    if (file.error)
+      util::Logger::warn("Cannot populate topology file '", file.path,
+                         "': ", std::strerror(file.error));
+  files_.clear();
 
   return topology_dir_;
 }

@@ -11,12 +11,14 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <fstream>
+#include <future>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
 #include <poll.h>
@@ -245,13 +247,18 @@ void check_metadata_population() {
       if (!memory_file) {
         ASSERT_EQ(unlink(path), 0);
       }
-      for (const size_t size : {size_t{2}, size_t{8193}}) {
-        const std::string expected(size, 'x');
+      // Cover both sides of the inline metadata boundary, including shrinking
+      // a previously larger file. Positional population must preserve offsets.
+      for (const size_t size : {size_t{2}, size_t{4096}, size_t{4097}, size_t{8193}, size_t{17}}) {
+        std::string expected(size, '\0');
+        for (size_t i = 0; i < size; ++i)
+          expected[i] = static_cast<char>(i * 37);
+        ASSERT_EQ(lseek(fd, 7, SEEK_SET), 7);
         ASSERT_EQ(rocjitsu::populate_backing_file(fd, expected.data(), expected.size()), 0);
         struct stat info {};
         ASSERT_EQ(fstat(fd, &info), 0);
         EXPECT_EQ(info.st_size, size);
-        EXPECT_EQ(lseek(fd, 0, SEEK_CUR), 0);
+        EXPECT_EQ(lseek(fd, 0, SEEK_CUR), 7);
         std::string actual(size, '\0');
         ASSERT_EQ(pread(fd, actual.data(), actual.size(), 0), size);
         EXPECT_EQ(actual, expected);
@@ -269,6 +276,133 @@ TEST_F(MemoryBackingDeathTest, MetadataPopulationPreservesContentsAfterLimitDrop
   ASSERT_EXIT(
       {
         check_metadata_population();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+void check_metadata_limit_errors() {
+  const rlimit limited{64, 64};
+  ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &limited), 0);
+  const int warmup = rocjitsu::create_memory_backing(1);
+  ASSERT_GE(warmup, 0);
+  close(warmup);
+  const rlimit zero{};
+  ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
+  const int fd = memfd_create("metadata", MFD_CLOEXEC);
+  ASSERT_GE(fd, 0);
+  const std::string contents(64, 'm');
+  ASSERT_EQ(rocjitsu::populate_backing_file(fd, contents.data(), contents.size()), 0);
+  const std::string too_large(65, 'x');
+  EXPECT_EQ(rocjitsu::populate_backing_file(fd, too_large.data(), too_large.size()), -1);
+  EXPECT_EQ(errno, EFBIG);
+  std::string actual(contents.size(), '\0');
+  ASSERT_EQ(pread(fd, actual.data(), actual.size(), 0), actual.size());
+  EXPECT_EQ(actual, contents);
+
+  const std::string path = "/proc/self/fd/" + std::to_string(fd);
+  const int readonly = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(readonly, 0);
+  EXPECT_EQ(rocjitsu::populate_backing_file(readonly, contents.data(), contents.size()), -1);
+  EXPECT_EQ(errno, EINVAL);
+  close(readonly);
+  // Errors must not retire the helper or leave a reply queued for the next call.
+  ASSERT_EQ(rocjitsu::populate_backing_file(fd, contents.data(), 17), 0);
+  struct stat info {};
+  ASSERT_EQ(fstat(fd, &info), 0);
+  EXPECT_EQ(info.st_size, 17);
+  close(fd);
+}
+
+TEST_F(MemoryBackingDeathTest, MetadataPopulationReportsHelperLimitsAndAccessErrors) {
+  ASSERT_EXIT(
+      {
+        check_metadata_limit_errors();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+int small_send_buffer_socket(int domain, int type, int protocol) noexcept {
+  const int fd = ::socket(domain, type, protocol);
+  const int size = 4096;
+  if (fd >= 0 && setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, sizeof(size)) != 0) {
+    const int error = errno;
+    close(fd);
+    errno = error;
+    return -1;
+  }
+  return fd;
+}
+
+void check_metadata_batch(bool finite_limit) {
+  if (finite_limit) {
+    const rlimit limit{64, 64};
+    ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &limit), 0);
+  }
+  const int warmup = rocjitsu::create_memory_backing(1);
+  ASSERT_GE(warmup, 0);
+  close(warmup);
+  char directory[] = "/tmp/rocjitsu-metadata-batch-XXXXXX";
+  ASSERT_NE(mkdtemp(directory), nullptr);
+  const rlimit zero{};
+  ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
+  rlimit original{};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &original), 0);
+  rlimit limited = original;
+  limited.rlim_cur = std::min<rlim_t>(original.rlim_cur, 16);
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limited), 0);
+  std::vector<rocjitsu::BackingFile> files;
+  const size_t sizes[] = {0, 1, 64, 65, 4096, 4096, 4096, 4096, 4097, 8193};
+  for (size_t i = 0; i < 42; ++i) {
+    std::string contents(sizes[i % std::size(sizes)], '\0');
+    for (size_t j = 0; j < contents.size(); ++j)
+      contents[j] = static_cast<char>(i + j * 37);
+    files.push_back({std::string(directory) + "/" + std::to_string(i), std::move(contents)});
+  }
+  files[20].path = std::string(directory) + "/missing/parent";
+  rocjitsu::libc_passthrough().socket = small_send_buffer_socket;
+  rocjitsu::create_backing_files(files);
+  rocjitsu::libc_passthrough().socket = ::socket;
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &original), 0);
+  for (size_t i = 0; i < files.size(); ++i) {
+    const auto &file = files[i];
+    if (i == 20) {
+      EXPECT_EQ(file.error, ENOENT);
+      continue;
+    }
+    const bool too_large = finite_limit && file.contents.size() > 64;
+    EXPECT_EQ(file.error, too_large ? EFBIG : 0) << i;
+    const int fd = open(file.path.c_str(), O_RDONLY | O_CLOEXEC);
+    ASSERT_GE(fd, 0);
+    struct stat info {};
+    ASSERT_EQ(fstat(fd, &info), 0);
+    const size_t expected = too_large ? 0 : file.contents.size();
+    EXPECT_EQ(info.st_size, expected);
+    std::string observed(expected, '\0');
+    ASSERT_EQ(read(fd, observed.data(), observed.size()), observed.size());
+    if (!too_large) {
+      EXPECT_EQ(observed, file.contents);
+    }
+    close(fd);
+    EXPECT_EQ(unlink(file.path.c_str()), 0);
+  }
+  EXPECT_EQ(rmdir(directory), 0);
+}
+
+TEST_F(MemoryBackingDeathTest, MetadataBatchPreservesContentsWithFewDescriptors) {
+  ASSERT_EXIT(
+      {
+        check_metadata_batch(false);
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST_F(MemoryBackingDeathTest, MetadataBatchReportsIndividualFileErrors) {
+  ASSERT_EXIT(
+      {
+        check_metadata_batch(true);
         _exit(::testing::Test::HasFailure() ? 1 : 0);
       },
       ::testing::ExitedWithCode(0), "");
@@ -578,6 +712,107 @@ pid_t token_keeper(int fd) {
   return getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &peer, &size) == 0 ? peer.pid : -1;
 }
 
+pid_t metadata_keeper_to_kill = -1;
+unsigned metadata_request_count = 0;
+
+ssize_t interrupt_metadata_batch(int socket, const msghdr *message, int flags) {
+  if (++metadata_request_count == 3) {
+    kill(metadata_keeper_to_kill, SIGKILL);
+    metadata_keeper_to_kill = -1;
+  }
+  return ::sendmsg(socket, message, flags);
+}
+
+void check_metadata_batch_recovery() {
+  ASSERT_EQ(setenv("RJ_TEST_FORCE_TOKEN_BACKING", "1", 1), 0);
+  const int retained = rocjitsu::create_memory_backing(kSize);
+  ASSERT_GE(retained, 0);
+  metadata_keeper_to_kill = token_keeper(retained);
+  ASSERT_GT(metadata_keeper_to_kill, 0);
+  char directory[] = "/tmp/rocjitsu-metadata-recovery-XXXXXX";
+  ASSERT_NE(mkdtemp(directory), nullptr);
+  std::vector<rocjitsu::BackingFile> files;
+  for (unsigned i = 0; i < 19; ++i)
+    files.push_back({std::string(directory) + "/" + std::to_string(i),
+                     std::string(100, static_cast<char>('a' + i))});
+  rocjitsu::libc_passthrough().sendmsg = interrupt_metadata_batch;
+  rocjitsu::create_backing_files(files);
+  rocjitsu::libc_passthrough().sendmsg = ::sendmsg;
+  EXPECT_EQ(metadata_keeper_to_kill, -1);
+  for (const auto &file : files) {
+    EXPECT_EQ(file.error, 0);
+    const int fd = open(file.path.c_str(), O_RDONLY | O_CLOEXEC);
+    ASSERT_GE(fd, 0);
+    std::string contents(file.contents.size(), '\0');
+    ASSERT_EQ(read(fd, contents.data(), contents.size()), contents.size());
+    EXPECT_EQ(contents, file.contents);
+    close(fd);
+    EXPECT_EQ(unlink(file.path.c_str()), 0);
+  }
+  EXPECT_EQ(rmdir(directory), 0);
+  close(retained);
+}
+
+TEST_F(MemoryBackingDeathTest, MetadataBatchRetriesAfterHelperLoss) {
+  ASSERT_EXIT(
+      {
+        check_metadata_batch_recovery();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+thread_local bool delay_allocation_send = false;
+std::atomic<bool> allocation_send_entered{false};
+std::atomic<bool> release_allocation_send{false};
+
+ssize_t send_after_release(int socket, const msghdr *message, int flags) {
+  if (delay_allocation_send) {
+    allocation_send_entered.store(true);
+    allocation_send_entered.notify_all();
+    release_allocation_send.wait(false);
+  }
+  return ::sendmsg(socket, message, flags);
+}
+
+void check_delayed_allocation() {
+  const rlimit zero{};
+  ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
+  const int retained = rocjitsu::create_memory_backing(kSize);
+  ASSERT_GE(retained, 0);
+  rocjitsu::libc_passthrough().sendmsg = send_after_release;
+  auto allocation = std::async(std::launch::async, [] {
+    delay_allocation_send = true;
+    return rocjitsu::create_memory_backing(kSize);
+  });
+  allocation_send_entered.wait(false);
+  // The allocation has connected but deliberately sent nothing. The helper
+  // must keep serving existing tokens instead of blocking on that connection.
+  auto reopened = std::async(std::launch::async,
+                             [&] { return rocjitsu::reopen_memory_backing(retained, O_RDONLY); });
+  const auto status = reopened.wait_for(std::chrono::seconds(2));
+  release_allocation_send.store(true);
+  release_allocation_send.notify_all();
+  const int next = allocation.get();
+  const int alias = reopened.get();
+  rocjitsu::libc_passthrough().sendmsg = ::sendmsg;
+  EXPECT_EQ(status, std::future_status::ready);
+  EXPECT_GE(next, 0);
+  EXPECT_GE(alias, 0);
+  close(next);
+  close(alias);
+  close(retained);
+}
+
+TEST_F(MemoryBackingDeathTest, DelayedAllocationDoesNotBlockTokenReopens) {
+  ASSERT_EXIT(
+      {
+        check_delayed_allocation();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
 bool truncated_reply = false;
 
 ssize_t receive_with_full_descriptor_table(int socket, msghdr *message, int flags) {
@@ -811,7 +1046,9 @@ void check_helper_lifecycle(bool subreaper = false) {
   rlimit original{}, limited{};
   ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &original), 0);
   limited = original;
-  limited.rlim_cur = 5;
+  // Exhaust descriptors at connection creation without depending on the
+  // transport's temporary descriptor count. Truncated replies are tested above.
+  limited.rlim_cur = 0;
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limited), 0);
   EXPECT_EQ(rocjitsu::create_memory_backing(kSize), -1);
   EXPECT_EQ(errno, EMFILE);

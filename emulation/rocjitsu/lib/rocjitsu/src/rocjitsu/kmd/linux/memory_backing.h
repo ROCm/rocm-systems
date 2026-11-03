@@ -15,6 +15,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
+#include <string>
 #include <string_view>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -55,9 +57,25 @@ int create_memory_backing(size_t size, bool preallocate = false,
                           const char *name = kMemoryBackingDefaultName);
 
 /// @brief Populate a newly created metadata file using the keeper's inherited hard limit.
-/// @details The caller owns this unpublished regular file; its offset stays at zero.
+/// @details The caller owns this unpublished regular file; its offset is unchanged.
 /// Unlike GPU backing, metadata files must fit the keeper's inherited hard file limit.
 int populate_backing_file(int fd, const void *data, size_t size);
+
+/// @brief An unpublished metadata file and its individual creation/population error.
+struct BackingFile {
+  std::string path;
+  std::string contents;
+  int error = 0;
+};
+
+/// @brief Create metadata files through one temporary connection.
+/// @details Each file is opened with O_CREAT|O_TRUNC and mode 0666 in the caller,
+/// then passed to the helper. Application descriptors are closed as requests
+/// are sent; batching does not retain an array of open application descriptors.
+/// Up to eight small writes share one reply; larger files use mapped population.
+/// Files must remain unpublished until this function returns. Errors are errno
+/// values in each entry; successful entries have error zero.
+void create_backing_files(std::span<BackingFile> files);
 
 /// @brief Entry point for the private memory keeper executable.
 [[noreturn]] void run_memory_keeper(int listener, int lease, int startup, pid_t owner);
