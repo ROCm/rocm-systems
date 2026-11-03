@@ -35,7 +35,7 @@ namespace dda::common {
 // (compile-time, so the double-buffered layout is identical on every rank and
 // call). The effective size gate is the runtime LL128 threshold; this cap
 // bounds the scratch footprint.
-constexpr size_t kDdaLL128A2AMaxPerChunkBytes = 524288;              // 512 KiB
+constexpr size_t kDdaLL128A2AMaxPerChunkBytes = 2097152;             // 2 MiB
 constexpr size_t kDdaLL128A2ASlotStrideLines =
   (kDdaLL128A2AMaxPerChunkBytes / 8 + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems; // ceil(nWords/15)
 

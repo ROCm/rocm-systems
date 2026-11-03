@@ -4607,15 +4607,20 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           break;
         }
 
+        util::StringDiagnostic growth_diagnostic;
+        const util::DiagnosticEmitter growth_error = growth_diagnostic.emitter();
         const auto insertions = grow_control_flow_windows(
-            kernel_text, layout, patched_control_flow.required_windows, host_arch_);
+            kernel_text, layout, patched_control_flow.required_windows, host_arch_, &growth_error);
         if (!insertions) {
           patched_control_flow = {
               .ok = false,
               .failure = TextLayoutFailureCategory::InvalidLayout,
               .source_offset = patched_control_flow.source_offset,
               .required_windows = {},
-              .message = "control-flow layout returned an invalid growth request",
+              .message =
+                  growth_diagnostic.message().empty()
+                      ? "control-flow layout returned an invalid growth request"
+                      : "control-flow layout growth: " + std::string(growth_diagnostic.message()),
               .compact_builder_fallbacks = {},
           };
           break;

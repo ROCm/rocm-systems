@@ -49,13 +49,13 @@ bool FdOpen(int fd) { return fcntl(fd, F_GETFD) != -1; }
 
 void CuMemExportRecorder::Install() {
 #if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
-  g_hipMemGetHandleForAddressRange = [this](void* handle, hipDeviceptr_t ptr, size_t size, hipMemRangeHandleType,
+  g_hipMemGetHandleForAddressRange = [this](void* handle, hipDeviceptr_t ptr, size_t size, hipMemRangeHandleType type,
                                              unsigned long long flags) {
     if (result != hipSuccess) return result;
     int fd = FreshDevNullFd();
     if (fd == -1) return hipErrorInvalidValue;
     *static_cast<int*>(handle) = fd;
-    push_back({ptr, size, flags, fd});
+    push_back({ptr, size, flags, fd, static_cast<int>(type)});
     return hipSuccess;
   };
 #else

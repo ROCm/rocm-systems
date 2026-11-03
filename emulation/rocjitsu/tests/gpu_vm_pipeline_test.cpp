@@ -484,7 +484,8 @@ TEST(GpuVmPipeline, QuantumRetainsAdmissionSnapshotAcrossReturnAndException) {
     {
       auto admitted = vm.snapshot_pinned(context.address_space);
       ASSERT_TRUE(admitted);
-      context.wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(std::move(*admitted)));
+      context.wf->set_vm_access(
+          util::IntrusiveSharedPtr<amdgpu::GpuVmAccessSnapshot>::make(std::move(*admitted)));
     }
     auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto plugin = std::make_unique<InstructionVmPlugin>();
@@ -534,7 +535,8 @@ TEST(GpuVmPipeline, WaveUsesAdmissionSnapshotAcrossRootReplacement) {
   std::optional<amdgpu::GpuVmAccess> admitted =
       context.sim.soc->gpu_vm().snapshot_pinned(context.address_space);
   ASSERT_TRUE(admitted);
-  context.wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(std::move(*admitted)));
+  context.wf->set_vm_access(
+      util::IntrusiveSharedPtr<amdgpu::GpuVmAccessSnapshot>::make(std::move(*admitted)));
 
   auto replacement = std::make_shared<TestExternalAddressSpace>();
   replacement->store(kAddress, kReplacement);
@@ -557,7 +559,8 @@ TEST(GpuVmPipeline, WaveAdmissionSnapshotRevocationTerminatesAfterUnregister) {
   std::optional<amdgpu::GpuVmAccess> admitted =
       context.sim.soc->gpu_vm().snapshot_pinned(context.address_space);
   ASSERT_TRUE(admitted);
-  context.wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(std::move(*admitted)));
+  context.wf->set_vm_access(
+      util::IntrusiveSharedPtr<amdgpu::GpuVmAccessSnapshot>::make(std::move(*admitted)));
   ASSERT_TRUE(context.sim.soc->gpu_vm().unregister_address_space(context.address_space));
 
   std::array<uint8_t, sizeof(uint32_t)> bytes{};
@@ -1333,7 +1336,8 @@ TEST(GpuVmPipeline, RevokedDataRetryTerminatesInsteadOfSpinning) {
   std::optional<amdgpu::GpuVmAccess> admitted =
       context.sim.soc->gpu_vm().snapshot_pinned(context.address_space);
   ASSERT_TRUE(admitted);
-  context.wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(std::move(*admitted)));
+  context.wf->set_vm_access(
+      util::IntrusiveSharedPtr<amdgpu::GpuVmAccessSnapshot>::make(std::move(*admitted)));
 
   constexpr uint64_t kAddress = 0x2000;
   constexpr uint32_t kDestination = 1;

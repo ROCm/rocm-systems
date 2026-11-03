@@ -852,13 +852,13 @@ static void reserved_aperture_release(manageable_aperture_t *app,
 		mbind(address, MemorySizeInBytes, MPOL_DEFAULT, NULL, 0, 0);
 
 		/*
-		 * Drop the CPU mapping to release shmem pages for MAP_SHARED
-		 * allocations, then re-reserve the VA range as PROT_NONE.
-		 * Callers hold fmm_mutex (see contract above), which serializes
-		 * this against aperture allocations, so no allocation can claim
-		 * the VA in the window between munmap() and mmap().
+		 * Atomically replace the CPU mapping with a PROT_NONE
+		 * reservation. MAP_FIXED over the existing range drops the
+		 * shmem pages (for MAP_SHARED allocations) and re-reserves the
+		 * VA in a single syscall, leaving no unmapped window that a
+		 * concurrent glibc mmap on another thread could claim
+		 * (fmm_mutex does not serialize glibc's own mmaps).
 		 */
-		munmap(address, MemorySizeInBytes);
 		mmap_ret = mmap(address, MemorySizeInBytes, PROT_NONE,
 			MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
 			-1, 0);
@@ -3210,8 +3210,6 @@ static int __fmm_release_locked(HsaKFDContext *ctx,
 			pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
 			free(rr);
 		}
-
-		munmap(object->start, object->size);
 	}
 
 	aperture_release_area(aperture, object->start, object->size);

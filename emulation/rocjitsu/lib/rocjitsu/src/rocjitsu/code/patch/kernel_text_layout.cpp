@@ -362,17 +362,19 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
 
 [[nodiscard]] bool append_recovered_indirect_sequence(std::vector<uint32_t> &words,
                                                       const RecoveredIndirectFixup &fixup,
-                                                      uint64_t target_offset, rj_code_arch_t arch) {
+                                                      uint64_t target_offset, rj_code_arch_t arch,
+                                                      const util::DiagnosticEmitter *error) {
   if (!fixup.preserve_marked_long_transfer) {
-    if (const auto direct_simm =
+    if (const std::optional<int16_t> direct_simm =
             compute_sopp_branch_simm16(fixup.target_window_offset, target_offset)) {
       if (fixup.is_call) {
-        util::FailureOr<uint32_t> word = build_s_call_b64(fixup.return_sreg, *direct_simm, arch);
+        util::FailureOr<uint32_t> word =
+            build_s_call_b64(fixup.return_sreg, *direct_simm, arch, error);
         if (word.failed())
           return false;
         words.push_back(word.value());
       } else {
-        util::FailureOr<uint32_t> word = build_s_branch(*direct_simm, arch);
+        util::FailureOr<uint32_t> word = build_s_branch(*direct_simm, arch, error);
         if (word.failed())
           return false;
         words.push_back(word.value());
@@ -388,12 +390,12 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
     // One word in, one word out, so the reserved window is exact and .text cannot change size.
     if (fixup.is_call) {
       util::FailureOr<uint32_t> word =
-          build_s_swappc_b64(fixup.return_sreg, fixup.target_sreg, arch);
+          build_s_swappc_b64(fixup.return_sreg, fixup.target_sreg, arch, error);
       if (word.failed())
         return false;
       words.push_back(word.value());
     } else {
-      util::FailureOr<uint32_t> word = build_s_setpc_b64(fixup.target_sreg, arch);
+      util::FailureOr<uint32_t> word = build_s_setpc_b64(fixup.target_sreg, arch, error);
       if (word.failed())
         return false;
       words.push_back(word.value());
@@ -405,7 +407,7 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
   // pass can then preserve the exact window even if CFG compaction has brought
   // its target back within direct SOPP range.
   {
-    util::FailureOr<uint32_t> word = build_s_nop(kLongDirectBranchMarkerNopImmediate, arch);
+    util::FailureOr<uint32_t> word = build_s_nop(kLongDirectBranchMarkerNopImmediate, arch, error);
     if (word.failed())
       return false;
     words.push_back(word.value());
@@ -421,22 +423,23 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
   // address builder may still execute, but this sequence overwrites the pair
   // immediately before the actual control transfer.
   {
-    util::FailureOr<uint32_t> word = build_s_getpc_b64(fixup.target_sreg, arch);
+    util::FailureOr<uint32_t> word = build_s_getpc_b64(fixup.target_sreg, arch, error);
     if (word.failed())
       return false;
     words.push_back(word.value());
   }
   const int64_t base = static_cast<int64_t>(sequence_offset + sizeof(uint32_t));
   const int64_t delta = static_cast<int64_t>(target_offset) - base;
-  if (!append_pc_delta_builder(words, arch, fixup.target_sreg, delta))
+  if (!append_pc_delta_builder(words, arch, fixup.target_sreg, delta, false, error))
     return false;
   if (fixup.is_call) {
-    util::FailureOr<uint32_t> word = build_s_swappc_b64(fixup.return_sreg, fixup.target_sreg, arch);
+    util::FailureOr<uint32_t> word =
+        build_s_swappc_b64(fixup.return_sreg, fixup.target_sreg, arch, error);
     if (word.failed())
       return false;
     words.push_back(word.value());
   } else {
-    util::FailureOr<uint32_t> word = build_s_setpc_b64(fixup.target_sreg, arch);
+    util::FailureOr<uint32_t> word = build_s_setpc_b64(fixup.target_sreg, arch, error);
     if (word.failed())
       return false;
     words.push_back(word.value());
@@ -447,29 +450,30 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
 [[nodiscard]] bool append_long_pc_transfer(std::vector<uint32_t> &words, rj_code_arch_t arch,
                                            uint16_t pc_sreg, uint64_t sequence_offset,
                                            uint64_t target_offset,
-                                           std::optional<uint16_t> call_sdst) {
+                                           std::optional<uint16_t> call_sdst,
+                                           const util::DiagnosticEmitter *error) {
   constexpr uint64_t kMaxSigned = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
   if (sequence_offset > kMaxSigned - sizeof(uint32_t) || target_offset > kMaxSigned)
     return false;
 
   {
-    util::FailureOr<uint32_t> word = build_s_getpc_b64(pc_sreg, arch);
+    util::FailureOr<uint32_t> word = build_s_getpc_b64(pc_sreg, arch, error);
     if (word.failed())
       return false;
     words.push_back(word.value());
   }
   const int64_t base = static_cast<int64_t>(sequence_offset + sizeof(uint32_t));
   const int64_t delta = static_cast<int64_t>(target_offset) - base;
-  if (!append_pc_delta_builder(words, arch, pc_sreg, delta))
+  if (!append_pc_delta_builder(words, arch, pc_sreg, delta, false, error))
     return false;
 
   if (call_sdst) {
-    util::FailureOr<uint32_t> word = build_s_swappc_b64(*call_sdst, pc_sreg, arch);
+    util::FailureOr<uint32_t> word = build_s_swappc_b64(*call_sdst, pc_sreg, arch, error);
     if (word.failed())
       return false;
     words.push_back(word.value());
   } else {
-    util::FailureOr<uint32_t> word = build_s_setpc_b64(pc_sreg, arch);
+    util::FailureOr<uint32_t> word = build_s_setpc_b64(pc_sreg, arch, error);
     if (word.failed())
       return false;
     words.push_back(word.value());
@@ -527,7 +531,7 @@ void TextOffsetRebaser::rebase(uint64_t &offset) const {
 std::optional<std::vector<TextLayoutInsertion>>
 grow_control_flow_windows(std::vector<uint8_t> &text, KernelTextLayout &layout,
                           std::span<const ControlFlowWindowRequirement> requirements,
-                          rj_code_arch_t arch) {
+                          rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
   struct ValidatedGrowth {
     ControlFlowWindowKind kind = ControlFlowWindowKind::DirectBranch;
     size_t fixup_index = 0;
@@ -614,7 +618,7 @@ grow_control_flow_windows(std::vector<uint8_t> &text, KernelTextLayout &layout,
     const TextLayoutInsertion insertion = growth.insertion;
     grown_text.insert(grown_text.end(), text.begin() + static_cast<std::ptrdiff_t>(copied_until),
                       text.begin() + static_cast<std::ptrdiff_t>(insertion.offset));
-    if (append_nop_padding(grown_text, insertion.size, arch).failed())
+    if (append_nop_padding(grown_text, insertion.size, arch, error).failed())
       return std::nullopt;
     copied_until = insertion.offset;
     insertions.push_back(insertion);
@@ -693,14 +697,14 @@ util::Result append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text,
   return util::Result::success();
 }
 
-[[nodiscard]] std::optional<uint32_t> build_inverted_conditional_skip(const Instruction &inst,
-                                                                      uint32_t translated_word,
-                                                                      uint64_t window_offset,
-                                                                      uint64_t window_bytes,
-                                                                      rj_code_arch_t arch) {
+[[nodiscard]] std::optional<uint32_t>
+build_inverted_conditional_skip(const Instruction &inst, uint32_t translated_word,
+                                uint64_t window_offset, uint64_t window_bytes, rj_code_arch_t arch,
+                                const util::DiagnosticEmitter *error = nullptr) {
   if (!conditional_branch_can_invert(inst.mnemonic()))
     return std::nullopt;
-  const auto skip = compute_sopp_branch_simm16(window_offset, window_offset + window_bytes);
+  const std::optional<int16_t> skip =
+      compute_sopp_branch_simm16(window_offset, window_offset + window_bytes);
   if (!skip)
     return std::nullopt;
 
@@ -713,8 +717,8 @@ util::Result append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text,
   const std::string_view mnemonic = inst.mnemonic();
   const bool invert_to_next =
       mnemonic == "s_cbranch_scc0" || mnemonic == "s_cbranch_vccz" || mnemonic == "s_cbranch_execz";
-  const util::FailureOr<uint32_t> word =
-      build_sopp_encoding(arch, invert_to_next ? op + 1u : op - 1u, static_cast<uint16_t>(*skip));
+  const util::FailureOr<uint32_t> word = build_sopp_encoding(
+      arch, invert_to_next ? op + 1u : op - 1u, static_cast<uint16_t>(*skip), error);
   if (word.failed())
     return std::nullopt;
   return word.value();
@@ -788,15 +792,17 @@ allocate_branch_island_chain(uint64_t branch_pc, uint64_t target_offset,
   return chain;
 }
 
-[[nodiscard]] bool append_branch_island_direct_sequence(
-    std::vector<uint32_t> &words, const Instruction &inst, uint32_t translated_word,
-    uint64_t window_offset, uint64_t window_bytes, uint64_t first_target, rj_code_arch_t arch) {
+[[nodiscard]] bool
+append_branch_island_direct_sequence(std::vector<uint32_t> &words, const Instruction &inst,
+                                     uint32_t translated_word, uint64_t window_offset,
+                                     uint64_t window_bytes, uint64_t first_target,
+                                     rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
   if ((inst.flags() & BRANCH) != 0) {
-    const auto simm = compute_sopp_branch_simm16(window_offset, first_target);
+    const std::optional<int16_t> simm = compute_sopp_branch_simm16(window_offset, first_target);
     if (!simm)
       return false;
     {
-      util::FailureOr<uint32_t> word = build_s_branch(*simm, arch);
+      util::FailureOr<uint32_t> word = build_s_branch(*simm, arch, error);
       if (word.failed())
         return false;
       words.push_back(word.value());
@@ -809,17 +815,18 @@ allocate_branch_island_chain(uint64_t branch_pc, uint64_t target_offset,
 
   if (window_bytes < 2 * sizeof(uint32_t))
     return false;
-  auto inverted = build_inverted_conditional_skip(inst, translated_word, window_offset,
-                                                  2 * sizeof(uint32_t), arch);
+  std::optional<uint32_t> inverted = build_inverted_conditional_skip(
+      inst, translated_word, window_offset, 2 * sizeof(uint32_t), arch, error);
   if (!inverted)
     return false;
-  const auto simm = compute_sopp_branch_simm16(window_offset + sizeof(uint32_t), first_target);
+  const std::optional<int16_t> simm =
+      compute_sopp_branch_simm16(window_offset + sizeof(uint32_t), first_target);
   if (!simm)
     return false;
 
   words.push_back(*inverted);
   {
-    util::FailureOr<uint32_t> word = build_s_branch(*simm, arch);
+    util::FailureOr<uint32_t> word = build_s_branch(*simm, arch, error);
     if (word.failed())
       return false;
     words.push_back(word.value());
@@ -827,36 +834,35 @@ allocate_branch_island_chain(uint64_t branch_pc, uint64_t target_offset,
   return true;
 }
 
-[[nodiscard]] bool append_long_direct_branch_sequence(std::vector<uint32_t> &words,
-                                                      const Instruction &inst,
-                                                      uint32_t translated_word,
-                                                      uint64_t window_offset, uint64_t window_bytes,
-                                                      uint64_t target_offset, rj_code_arch_t arch,
-                                                      uint16_t pc_sreg) {
-  util::FailureOr<uint32_t> maybe_marker = build_s_nop(kLongDirectBranchMarkerNopImmediate, arch);
+[[nodiscard]] bool append_long_direct_branch_sequence(
+    std::vector<uint32_t> &words, const Instruction &inst, uint32_t translated_word,
+    uint64_t window_offset, uint64_t window_bytes, uint64_t target_offset, rj_code_arch_t arch,
+    uint16_t pc_sreg, const util::DiagnosticEmitter *error) {
+  util::FailureOr<uint32_t> maybe_marker =
+      build_s_nop(kLongDirectBranchMarkerNopImmediate, arch, error);
   if (maybe_marker.failed())
     return false;
   const uint32_t marker = maybe_marker.value();
   if ((inst.flags() & BRANCH) != 0) {
     words.push_back(marker);
     return append_long_pc_transfer(words, arch, pc_sreg, window_offset + sizeof(uint32_t),
-                                   target_offset, std::nullopt);
+                                   target_offset, std::nullopt, error);
   }
 
   if (auto call_sdst = direct_call_return_sgpr(inst, translated_word)) {
     words.push_back(marker);
     return append_long_pc_transfer(words, arch, pc_sreg, window_offset + sizeof(uint32_t),
-                                   target_offset, call_sdst);
+                                   target_offset, call_sdst, error);
   }
 
-  auto inverted =
-      build_inverted_conditional_skip(inst, translated_word, window_offset, window_bytes, arch);
+  std::optional<uint32_t> inverted = build_inverted_conditional_skip(
+      inst, translated_word, window_offset, window_bytes, arch, error);
   if (!inverted)
     return false;
   words.push_back(*inverted);
   words.push_back(marker);
   return append_long_pc_transfer(words, arch, pc_sreg, window_offset + 2 * sizeof(uint32_t),
-                                 target_offset, std::nullopt);
+                                 target_offset, std::nullopt, error);
 }
 
 TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
@@ -937,7 +943,7 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
         std::vector<uint32_t> island_words;
         if (!append_branch_island_direct_sequence(
                 island_words, *fixup.inst, words.front(), fixup.target_inst_offset,
-                fixup.target_window_bytes, chain->front(), arch)) {
+                fixup.target_window_bytes, chain->front(), arch, &error)) {
           const bool can_grow_conditional_source =
               (fixup.inst->flags() & COND_BRANCH) != 0 &&
               conditional_branch_can_invert(fixup.inst->mnemonic()) &&
@@ -945,7 +951,9 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
           if (!can_grow_conditional_source) {
             return relocation_error(
                 fixup.source_inst_offset,
-                "direct branch relocation cannot build SGPR-free island sequence");
+                builder_message.empty()
+                    ? "direct branch relocation cannot build SGPR-free island sequence"
+                    : "direct branch island sequence: " + builder_message);
           }
           if (!fixup.allow_window_growth) {
             return relocation_error(
@@ -966,7 +974,7 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
         for (size_t i = 0; i < chain->size(); ++i) {
           const uint64_t next =
               i + 1 < chain->size() ? (*chain)[i + 1] : static_cast<uint64_t>(*target_target);
-          const auto simm = compute_sopp_branch_simm16((*chain)[i], next);
+          const std::optional<int16_t> simm = compute_sopp_branch_simm16((*chain)[i], next);
           if (!simm || !text_contains_range(text, (*chain)[i], sizeof(uint32_t))) {
             return relocation_error(fixup.source_inst_offset,
                                     "direct branch island patch points outside translated .text");
@@ -980,9 +988,12 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
         std::vector<uint32_t> long_words;
         if (!append_long_direct_branch_sequence(long_words, *fixup.inst, words.front(),
                                                 fixup.target_inst_offset, fixup.target_window_bytes,
-                                                *target_target, arch, *layout.long_branch_sgpr)) {
+                                                *target_target, arch, *layout.long_branch_sgpr,
+                                                &error)) {
           return relocation_error(fixup.source_inst_offset,
-                                  "direct branch relocation cannot build long branch sequence");
+                                  builder_message.empty()
+                                      ? "direct branch relocation cannot build long branch sequence"
+                                      : "direct branch long sequence: " + builder_message);
         }
         if (long_words.size() * sizeof(uint32_t) > fixup.target_window_bytes) {
           if (!fixup.allow_window_growth) {
@@ -1069,10 +1080,12 @@ TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
     }
 
     std::vector<uint32_t> words;
-    if (!append_recovered_indirect_sequence(words, fixup, *target_target, arch)) {
+    if (!append_recovered_indirect_sequence(words, fixup, *target_target, arch, &error)) {
       return relocation_error(
           fixup.source_call_offset,
-          "target ISA cannot encode canonical recovered indirect branch sequence",
+          builder_message.empty()
+              ? "target ISA cannot encode canonical recovered indirect branch sequence"
+              : "canonical recovered indirect branch sequence: " + builder_message,
           TextLayoutFailureCategory::ResourceLimit);
     }
     if (words.size() * sizeof(uint32_t) > fixup.target_window_bytes) {
