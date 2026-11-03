@@ -2099,7 +2099,8 @@ TEST(ConfigLoaderTest, Gfx1151HighSgprsAndVccStayWithinTheirWave) {
   EXPECT_FALSE(cu->owns_sgpr_range(*wf, base + 106, 1));
   amdgpu::RegisterAccess registers(*wf);
   EXPECT_EQ(registers.read_sgpr(neighbor_base), 0u);
-  registers.write_sgpr(neighbor_base, 0xDEADBEEFu);
+  EXPECT_TRUE(registers.write_sgpr(neighbor_base, 0xDEADBEEFu).succeeded());
+  EXPECT_FALSE(wf->instruction_execution_failed());
   EXPECT_EQ(cu->read_sgpr(neighbor_base), sentinel);
   wf->halt();
   neighbor->halt();
