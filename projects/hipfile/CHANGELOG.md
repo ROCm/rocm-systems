@@ -8,6 +8,8 @@
 
 ### Changed
 
+* When the amdgpu kernel driver doesn't support AIS (the AIS ioctl fails with `ENOTTY`), hipFile now stops trying the fastpath for the rest of the process and sends all I/O directly to the compatibility path. Previously, every I/O first attempted the fastpath and was recorded as a fastpath error in the statistics.
+
 ### Fixed
 
 * `hipFileRead()`, `hipFileWrite()`, and the asynchronous and batch I/O APIs now fall back to the compatibility path when the amdgpu kernel driver doesn't support AIS (for example, the inbox Linux driver). Previously, they failed with `ENOTTY` ("Inappropriate ioctl for device"). This requires a ROCr whose libhsakmt reports `ENOTTY` as the AIS status; older versions report an unrelated error code, which hipFile can't distinguish.
