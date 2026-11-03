@@ -5,6 +5,7 @@
 
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_scheduler.h"
+#include "util/diagnostic.h"
 #include "util/log.h"
 
 #include <chrono>

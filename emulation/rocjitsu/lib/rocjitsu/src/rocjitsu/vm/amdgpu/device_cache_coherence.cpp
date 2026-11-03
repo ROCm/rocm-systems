@@ -132,12 +132,21 @@ DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation,
       ++locked_l2_count;
     }
 
+    for (MemorySideCache *cache : memory_side_caches_) {
+      cache->access_gate_.lock();
+      ++locked_memory_side_count;
+    }
+
     // This path can run on the standalone SDMA worker. It must never enter the
     // simulation topology from that thread, so legacy dirty state is published
     // directly to the SoC's GpuMemory backing while cache access is excluded.
     if (operation == DeviceCacheOperation::WritebackInvalidate) {
       for (L2Cache *cache : l2_caches_) {
         if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete) {
+          // Direct publication bypasses the MSC. Drop its stale clean copies
+          // without advancing the epoch, which would discard dirty L2 bytes.
+          for (MemorySideCache *memory_side_cache : memory_side_caches_)
+            memory_side_cache->cache_.invalidate_clean();
           release_cache_locks(std::exchange(locked_l2_count, 0),
                               std::exchange(locked_memory_side_count, 0));
           coherence_lock.unlock();
@@ -147,14 +156,13 @@ DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation,
       }
     }
 
-    for (MemorySideCache *cache : memory_side_caches_) {
-      cache->access_gate_.lock();
-      ++locked_memory_side_count;
-    }
-
     if (operation == DeviceCacheOperation::WritebackInvalidate) {
       for (MemorySideCache *cache : memory_side_caches_) {
         if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete) {
+          // Direct publication bypasses the MSC. Drop its stale clean copies
+          // without advancing the epoch, which would discard dirty L2 bytes.
+          for (MemorySideCache *memory_side_cache : memory_side_caches_)
+            memory_side_cache->cache_.invalidate_clean();
           release_cache_locks(std::exchange(locked_l2_count, 0),
                               std::exchange(locked_memory_side_count, 0));
           coherence_lock.unlock();

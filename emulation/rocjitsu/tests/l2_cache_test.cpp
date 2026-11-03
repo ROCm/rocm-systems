@@ -44,6 +44,7 @@
 #include <sys/syscall.h>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
@@ -133,6 +134,8 @@ public:
     ++write_calls;
     if (write_outcome != rocjitsu::amdgpu::VmAccessOutcome::Complete)
       return write_outcome;
+    if (address == failing_write_address)
+      return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
     if (domain != rocjitsu::amdgpu::VmMemoryDomain::System || !contains(address, bytes.size()))
       return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
     std::ranges::copy(bytes, bytes_.begin() + static_cast<std::ptrdiff_t>(address));
@@ -169,6 +172,7 @@ public:
   rocjitsu::amdgpu::VmAccessOutcome read_outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete;
   rocjitsu::amdgpu::VmAccessOutcome write_outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete;
   rocjitsu::amdgpu::VmAccessOutcome atomic_outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete;
+  uint64_t failing_write_address = std::numeric_limits<uint64_t>::max();
   uint32_t read_calls = 0;
   uint32_t write_calls = 0;
   uint32_t atomic_calls = 0;
@@ -1099,6 +1103,86 @@ TEST(DeviceCacheCoherenceTest, FailedL2WritebackRetainsOnlyUnpublishedDirtyBytes
   EXPECT_EQ(retained_first, kReplacementFirstValue);
   EXPECT_EQ(retried_second, kSecondValue);
   EXPECT_TRUE(legacy_vm.unregister_vmid(kVmid));
+}
+
+TEST(DeviceCacheCoherenceTest, PartialL2WritebackInvalidatesCleanMemorySideCopies) {
+  constexpr uint64_t kFirstAddress = 0x1000;
+  constexpr uint64_t kSecondAddress = kFirstAddress + L2Cache::LINE_SIZE;
+  constexpr uint64_t kDirtyMemorySideAddress = kSecondAddress + L2Cache::LINE_SIZE;
+  constexpr uint32_t kInitialValue = 0x11111111;
+  constexpr uint32_t kFirstValue = 0x22222222;
+  constexpr uint32_t kSecondValue = 0x33333333;
+  LinkedCacheHierarchy hierarchy(0x2000);
+  ASSERT_TRUE(hierarchy.address_space);
+  hierarchy.l2.set_legacy_maintenance_memory(&hierarchy.memory);
+  hierarchy.l2.set_legacy_maintenance_vm(&hierarchy.gpu_vm);
+  hierarchy.memory_side_cache.set_legacy_maintenance_vm(&hierarchy.gpu_vm);
+  hierarchy.physical->store(kFirstAddress, kInitialValue);
+  hierarchy.physical->store(kSecondAddress, kInitialValue);
+
+  for (uint64_t address : {kFirstAddress, kSecondAddress}) {
+    uint32_t observed = 0;
+    ASSERT_EQ(hierarchy.l2.read(address, reinterpret_cast<uint8_t *>(&observed), sizeof(observed),
+                                Mtype::RW, LinkedCacheHierarchy::kVmid),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(observed, kInitialValue);
+  }
+  for (const auto &[address, value] :
+       std::array{std::pair{kFirstAddress, kFirstValue}, std::pair{kSecondAddress, kSecondValue}}) {
+    std::array<uint8_t, L2Cache::LINE_SIZE> dirty_line{};
+    std::memcpy(dirty_line.data(), &value, sizeof(value));
+    ASSERT_EQ(hierarchy.l2.writeback_line(address, dirty_line.data(), 0, sizeof(value), Mtype::RW,
+                                          LinkedCacheHierarchy::kVmid),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  }
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> dirty_memory_side_line{};
+  dirty_memory_side_line.fill(0x6d);
+  rocjitsu::amdgpu::MemorySideCacheTestAccess::store_dirty_line(
+      hierarchy.memory_side_cache, kDirtyMemorySideAddress, dirty_memory_side_line,
+      LinkedCacheHierarchy::kVmid);
+
+  hierarchy.physical->failing_write_address = kSecondAddress;
+  const uint64_t epoch_before_failure = hierarchy.coherence->current_epoch();
+  util::StringDiagnostic diagnostics;
+  auto report = maintenance_failure_sink(hierarchy.coherence, true, diagnostics);
+  util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> failed_maintenance =
+      hierarchy.coherence->acquire_cache_maintenance(
+          rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate,
+          util::DiagnosticEmitter(report));
+  ASSERT_TRUE(failed_maintenance.failed());
+  EXPECT_EQ(diagnostics.message(), "L2 cache maintenance backing write failed");
+  EXPECT_EQ(hierarchy.coherence->current_epoch(), epoch_before_failure);
+  EXPECT_EQ(hierarchy.physical->load<uint32_t>(kFirstAddress), kFirstValue);
+  EXPECT_EQ(hierarchy.physical->load<uint32_t>(kSecondAddress), kInitialValue);
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_dirty(
+      hierarchy.memory_side_cache, kDirtyMemorySideAddress, LinkedCacheHierarchy::kVmid));
+
+  uint32_t observed = 0;
+  ASSERT_EQ(hierarchy.memory_side_cache.read(kFirstAddress, reinterpret_cast<uint8_t *>(&observed),
+                                             sizeof(observed), LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kFirstValue);
+  ASSERT_EQ(
+      hierarchy.l2.invalidate_range(kFirstAddress, L2Cache::LINE_SIZE, LinkedCacheHierarchy::kVmid),
+      rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  for (const auto &[address, value] :
+       std::array{std::pair{kFirstAddress, kFirstValue}, std::pair{kSecondAddress, kSecondValue}}) {
+    ASSERT_EQ(hierarchy.l2.read(address, reinterpret_cast<uint8_t *>(&observed), sizeof(observed),
+                                Mtype::RW, LinkedCacheHierarchy::kVmid),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(observed, value);
+  }
+
+  hierarchy.physical->failing_write_address = std::numeric_limits<uint64_t>::max();
+  {
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
+        hierarchy.coherence->acquire_cache_maintenance(
+            rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+    ASSERT_TRUE(maintenance.succeeded());
+  }
+  EXPECT_EQ(hierarchy.physical->load<uint32_t>(kFirstAddress), kFirstValue);
+  EXPECT_EQ(hierarchy.physical->load<uint32_t>(kSecondAddress), kSecondValue);
+  EXPECT_EQ(hierarchy.physical->load<uint32_t>(kDirtyMemorySideAddress), 0x6d6d6d6du);
 }
 
 TEST(DeviceCacheCoherenceTest, FailedMemorySideWritebackRetainsDirtyLineForRetry) {

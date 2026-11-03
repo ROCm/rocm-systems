@@ -12,7 +12,6 @@
 #include <limits>
 #include <optional>
 #include <span>
-#include <string_view>
 
 namespace rocjitsu {
 namespace amdgpu {
