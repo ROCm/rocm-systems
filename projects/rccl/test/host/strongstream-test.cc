@@ -816,6 +816,25 @@ TEST_F(StrongstreamMicrotest, AcquireCapture_StatusFailureAfterTakingASpareRelea
   ncclStrongStreamDestruct(&ss_);
 }
 
+// The same spare on the success path: graph 1's ended entry sits ahead of graph 2's (new entries go on the head),
+// so it is unlinked as the spare before graph 2 matches and must not be dropped with the early return.
+TEST_F(StrongstreamMicrotest, AcquireCapture_MatchAfterTakingASpareReleasesTheSpare) {
+  Construct(&ss_);
+  hipStream_t second = AcquireCapture(&ss_, 2);
+  hipStream_t first = AcquireCapture(&ss_, 1);
+  g_capture[first].status = hipStreamCaptureStatusNone;
+  hipStream_t work = nullptr;
+  EXPECT_EQ(ncclStrongStreamAcquire(Captured(2), &ss_, true, &work), ncclSuccess);
+  EXPECT_EQ(work, second);
+  ASSERT_NE(ss_.captureHead, nullptr);
+  EXPECT_EQ(ss_.captureHead->captureStream, second);
+  EXPECT_EQ(ss_.captureHead->next, nullptr);
+  EXPECT_EQ(g_liveStreams.count(first), 0u);
+  EXPECT_EQ(g_frees, 1);
+  EXPECT_FALSE(HeldElsewhere(ss_.mutex));
+  ncclStrongStreamDestruct(&ss_);
+}
+
 TEST_F(StrongstreamMicrotest, AcquireCapture_AllocationFailureIsASystemError) {
   Construct(&ss_);
   g_failCalloc = true;

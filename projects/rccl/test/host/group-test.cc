@@ -1895,6 +1895,24 @@ TEST_F(GroupRegisterSymmetricTest, StagingSetupFails_PropagatesAndStillClearsThe
   EXPECT_FALSE(comm_->ceColl.stagingPending);
 }
 
+// Nothing drains commCreateTaskQueue at teardown, so a failure before its loop must release the queued creates
+// and their deep-copied requirements; LSan reports them otherwise.
+TEST_F(GroupRegisterSymmetricTest, EarlyFailure_ReleasesEveryQueuedCommCreate) {
+  for (int i = 0; i < 2; i++) {
+    auto* task = static_cast<struct ncclDevrCommCreateTask*>(calloc(1, sizeof(struct ncclDevrCommCreateTask)));
+    task->reqs = static_cast<struct ncclDevCommRequirements*>(calloc(1, sizeof(struct ncclDevCommRequirements)));
+    task->reqs->resourceRequirementsList =
+      static_cast<struct ncclDevResourceRequirements*>(calloc(1, sizeof(struct ncclDevResourceRequirements)));
+    ncclIntruQueueEnqueue(&comm_->devrState.commCreateTaskQueue, task);
+  }
+  ScopedHook setDevice(g_hipSetDevice, [](int) { return hipErrorInvalidDevice; });
+
+  EXPECT_EQ(ncclUnhandledCudaError, ncclCommGroupRegisterSymmetric(&job_.base));
+
+  EXPECT_EQ(1, setDevice.calls);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm_->devrState.commCreateTaskQueue));
+}
+
 TEST_F(GroupRegisterSymmetricTest, CeInitQueued_RunsBeforeStagingSetup) {
   comm_->ceColl.stagingPending = true;
   auto* ceTask = static_cast<struct ncclCeInitTask*>(calloc(1, sizeof(struct ncclCeInitTask)));

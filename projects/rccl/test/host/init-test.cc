@@ -5103,7 +5103,7 @@ TEST_F(InitMicrotest, CommFinalizeAsyncJobFree_ReturnsTheJobToTheHeap) {
   EXPECT_EQ(1, watch.hits()) << "the job was not deleted";
 }
 
-TEST_F(InitMicrotest, CommInitJobFree_FreesTheCommIdThenReturnsTheJobToTheHeap) {
+TEST_F(InitMicrotest, ChildCommCleanupJob_InitRankJob_FreesTheCommIdThenReturnsTheJobToTheHeap) {
   auto* job = new ncclCommInitRankAsyncJob{};
   job->commId = static_cast<ncclUniqueId*>(std::malloc(sizeof(ncclUniqueId)));
   ASSERT_NE(nullptr, job->commId);
@@ -5114,7 +5114,7 @@ TEST_F(InitMicrotest, CommInitJobFree_FreesTheCommIdThenReturnsTheJobToTheHeap) 
   int hits = 0;
   {
     ScopedHook microFree(g_microFree, [&](void* p) { freed = p; });
-    ncclCommInitJobFree(job);
+    childCommCleanupJob(job);
     hits = watch.hits();
     EXPECT_EQ(1, microFree.calls);
   }
@@ -8591,7 +8591,7 @@ TEST_F(InitMicrotest, CommInitRankDev_HappyPath_LaunchesRankFuncWithTheJobItBuil
   EXPECT_EQ(ncclInProgress, nc->initState);
   ASSERT_EQ(1, rec.calls);
   EXPECT_EQ(Teardown_JobFn(ncclCommInitRankFunc), rec.func);
-  EXPECT_EQ(ncclCommInitJobFree, rec.destructor);
+  EXPECT_EQ(childCommCleanupJob, rec.destructor) << "one destructor for every ncclCommInitRankAsyncJob";
   EXPECT_EQ(nc, rec.comm);
   ncclCommInitRankAsyncJob* job = Rank_LaunchedJob(rec);
   EXPECT_EQ(nc, job->comm);

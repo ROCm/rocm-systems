@@ -4118,10 +4118,12 @@ fail:
   goto exit;
 }
 
-static void ncclCommInitJobFree(void* _job) {
-  struct ncclCommInitRankAsyncJob* job = (struct ncclCommInitRankAsyncJob*)_job;
-  free(job->commId);
-  delete job;
+// The single destructor for every ncclCommInitRankAsyncJob (init, split, shrink and grow).
+static void childCommCleanupJob(void* job) {
+  struct ncclCommInitRankAsyncJob* initJob = (struct ncclCommInitRankAsyncJob*)job;
+  if (initJob->excludeRanksList) free(initJob->excludeRanksList);
+  if (initJob->commId) free(initJob->commId);
+  delete initJob;
 }
 
 static ncclResult_t ncclCommInitRankDev(ncclComm_t* newcomm, int nranks, int nId, ncclUniqueId* commId, int myrank,
@@ -4134,7 +4136,6 @@ static ncclResult_t ncclCommInitRankDev(ncclComm_t* newcomm, int nranks, int nId
   const char* commIdEnv = NULL;
   ncclComm_t comm = NULL;
   struct ncclCommInitRankAsyncJob* job = NULL;
-  bool launchedJob = false;
   uint32_t levelMask;
   // first call ncclInit, this will setup the environment
   NCCLCHECKGOTO(ncclInit(), res, fail);
@@ -4196,13 +4197,14 @@ static ncclResult_t ncclCommInitRankDev(ncclComm_t* newcomm, int nranks, int nId
     // start the bootstrap root before bootstrapping, use only the first handle
     NCCLCHECKGOTO(bootstrapCreateRoot((struct ncclBootstrapHandle*)&job->commId[0], true), res, fail);
   }
-  launchedJob = true;
   if (ncclParamEnqueueRearchEnable()) {
-    NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)job, ncclCommInitRankFunc, ncclCommInitJobFree, comm), res,
-                  fail);
+    res = ncclMgmtTaskEnqueue((struct ncclAsyncJob*)job, ncclCommInitRankFunc, childCommCleanupJob, comm);
+    job = NULL;  // enqueue owns and destroys the job on both success and failure
+    NCCLCHECKGOTO(res, res, fail);
   } else {
-    NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, ncclCommInitRankFunc, NULL, ncclCommInitJobFree, comm),
-                  res, fail);
+    res = ncclAsyncLaunch((struct ncclAsyncJob*)job, ncclCommInitRankFunc, NULL, childCommCleanupJob, comm);
+    job = NULL;  // launch owns and destroys the job on both success and failure
+    NCCLCHECKGOTO(res, res, fail);
   }
 
 exit:
@@ -4211,7 +4213,7 @@ exit:
   NCCLCHECK(Recorder::instance().record(rrCommInitDev, nranks, myrank, commId, comm, cudaDev));
   return ncclGroupErrCheck(res);
 fail:
-  if (job && !launchedJob) ncclCommInitJobFree(job);
+  if (job) childCommCleanupJob(job);
   if (comm) {
     free(comm->abortFlag);
     if (comm->abortFlagDev) (void)ncclCudaHostFree((void*)comm->abortFlagDev);
@@ -4877,13 +4879,6 @@ exit:
   return res;
 fail:
   goto exit;
-}
-
-static void childCommCleanupJob(void* job) {
-  struct ncclCommInitRankAsyncJob* initJob = (struct ncclCommInitRankAsyncJob*)job;
-  if (initJob->excludeRanksList) free(initJob->excludeRanksList);
-  if (initJob->commId) free(initJob->commId); // set only by ncclCommGrow
-  delete initJob;
 }
 
 // initializing a child communicator (for both split and shrink)

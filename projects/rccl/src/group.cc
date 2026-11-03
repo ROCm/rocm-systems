@@ -468,6 +468,12 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
 exit:
   return ret;
 fail:
+  // Unlike the other queues here, nothing drains commCreateTaskQueue at teardown.
+  while (!ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue)) {
+    struct ncclDevrCommCreateTask* task = ncclIntruQueueDequeue(&comm->devrState.commCreateTaskQueue);
+    freeDevCommRequirements(task->reqs);
+    free(task);
+  }
   goto exit;
 }
 
