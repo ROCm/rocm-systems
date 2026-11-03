@@ -270,6 +270,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed duplicate and stale AI NIC handles after reinitializing the library**.  
   - After a shut down, a NIC-only session listed every AI NIC one extra time for each earlier session and grew its memory use. AI NIC handles from before the shut down also kept working, and an init that followed one failing during GPU discovery could hang. Each init now lists every AI NIC once, rejects old handles, and no longer hangs.
 
+- **Fixed AI NIC port and RDMA state never updating after initialization**.  
+  - Port and RDMA queries for an AI NIC returned the state read at initialization, so a long-running program never saw a link or RDMA port go down or come back. They now read the current state on every call, and AI NIC queries no longer need over 600 KB of the calling thread's stack.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added

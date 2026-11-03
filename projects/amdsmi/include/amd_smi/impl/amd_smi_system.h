@@ -54,6 +54,12 @@ class AMDSmiSystem {
 
   std::vector<uint32_t> get_cpu_sockets_from_numa_node(int32_t numa_node);
 
+  // Read an AI-NIC's port or RDMA state now, through the getters discovery uses, rather than
+  // returning what discovery saw: link and RDMA state keep changing after amdsmi_init().
+  amdsmi_status_t read_ainic_port_info(uint64_t bdf, amdsmi_nic_port_info_t* info) const;
+  amdsmi_status_t read_ainic_rdma_dev_info(uint64_t bdf,
+                                           amdsmi_nic_rdma_devices_info_t* info) const;
+
  private:
   friend class testing::ScopedProcessorRegistration;
 

@@ -36,6 +36,17 @@ class AMDSmiAINICDevice : public AMDSmiProcessor {
   ~AMDSmiAINICDevice() = default;
   amdsmi_status_t amd_query_nic_info(AINICInfo& info) const;
 
+  // Single-field reads, so a getter does not copy the whole AINICInfo (over 600 KB) to its stack.
+  const amdsmi_nic_asic_info_t& asic() const { return ai_nic_info_.asic; }
+  const amdsmi_nic_bus_info_t& bus() const { return ai_nic_info_.bus; }
+  const amdsmi_nic_driver_info_t& driver() const { return ai_nic_info_.driver; }
+  const amdsmi_nic_numa_info_t& numa() const { return ai_nic_info_.numa; }
+  // The RDMA devices and ports found at init; read their state through AMDSmiSystem instead.
+  const amdsmi_nic_rdma_devices_info_t& discovered_rdma_dev() const {
+    return ai_nic_info_.rdma_dev;
+  }
+  uint64_t bdf() const { return ai_nic_info_.bus.bdf.as_uint; }
+
  private:
   AINICInfo ai_nic_info_;
 };

@@ -9,6 +9,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -499,6 +500,47 @@ amdsmi_status_t populate_amd_ainic_device(const smi_nic_ctx_t& ctx, uint64_t bdf
   }
 
   return AMDSMI_STATUS_SUCCESS;
+}
+
+static amdsmi_status_t report_ainic_read_exception(const char* func, uint64_t bdf,
+                                                   const char* what) {
+  std::ostringstream ss;
+  ss << func << ": BDF=0x" << std::hex << bdf << std::dec << " threw: " << what;
+  LOG_ERROR(ss);
+  return AMDSMI_STATUS_INTERNAL_EXCEPTION;
+}
+
+// The NIC library's sysfs parsing (std::stoul) throws on text it cannot parse; a read made on
+// every call must not let that escape through the C API. Both reads cast to the struct pairs
+// whose layout populate_amd_ainic_device() static_asserts.
+amdsmi_status_t AMDSmiSystem::read_ainic_port_info(uint64_t bdf,
+                                                   amdsmi_nic_port_info_t* info) const {
+  try {
+    return ainic_to_amdsmi_status(
+        g_nic_info_getters->port(ainic_ctx_, bdf, reinterpret_cast<smi_nic_port_info_t*>(info)));
+  } catch (const std::exception& e) {
+    return report_ainic_read_exception(__func__, bdf, e.what());
+  } catch (...) {
+    return report_ainic_read_exception(__func__, bdf, "unknown exception");
+  }
+}
+
+amdsmi_status_t AMDSmiSystem::read_ainic_rdma_dev_info(uint64_t bdf,
+                                                       amdsmi_nic_rdma_devices_info_t* info) const {
+  try {
+    const smi_nic_status_t status = g_nic_info_getters->rdma(
+        ainic_ctx_, bdf, reinterpret_cast<smi_nic_rdma_devices_info_t*>(info));
+    if (status != SMI_NIC_STATUS_SUCCESS && !is_nic_rdma_failure_fatal(status)) {
+      // As at discovery and per amdsmi.h: no RDMA device or driver is SUCCESS, zeroed.
+      std::memset(info, 0, sizeof(*info));
+      return AMDSMI_STATUS_SUCCESS;
+    }
+    return ainic_to_amdsmi_status(status);
+  } catch (const std::exception& e) {
+    return report_ainic_read_exception(__func__, bdf, e.what());
+  } catch (...) {
+    return report_ainic_read_exception(__func__, bdf, "unknown exception");
+  }
 }
 
 std::tuple<uint64_t, amdsmi_bdf_t> bdf_to_int(const std::string& bdf) {

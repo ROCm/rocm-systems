@@ -948,7 +948,10 @@ amdsmi_status_t amdsmi_get_ainic_info(amdsmi_processor_handle processor_handle,
   if (r != AMDSMI_STATUS_SUCCESS || !nic_device) return r;
 
   nic_device->amd_query_nic_info(*info);
-  return AMDSMI_STATUS_SUCCESS;
+  const auto& system = amd::smi::AMDSmiSystem::getInstance();
+  r = system.read_ainic_port_info(nic_device->bdf(), &info->port);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  return system.read_ainic_rdma_dev_info(nic_device->bdf(), &info->rdma_dev);
 }
 
 amdsmi_status_t amdsmi_get_nic_asic_info(amdsmi_processor_handle processor_handle,
@@ -958,12 +961,12 @@ amdsmi_status_t amdsmi_get_nic_asic_info(amdsmi_processor_handle processor_handl
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  *info = ainic_info.asic;
+  *info = nic_device->asic();
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -974,12 +977,12 @@ amdsmi_status_t amdsmi_get_nic_bus_info(amdsmi_processor_handle processor_handle
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  *info = ainic_info.bus;
+  *info = nic_device->bus();
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -990,12 +993,12 @@ amdsmi_status_t amdsmi_get_nic_driver_info(amdsmi_processor_handle processor_han
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  *info = ainic_info.driver;
+  *info = nic_device->driver();
   return AMDSMI_STATUS_SUCCESS;
 }
 amdsmi_status_t amdsmi_get_nic_numa_info(amdsmi_processor_handle processor_handle,
@@ -1005,12 +1008,12 @@ amdsmi_status_t amdsmi_get_nic_numa_info(amdsmi_processor_handle processor_handl
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  *info = ainic_info.numa;
+  *info = nic_device->numa();
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -1021,13 +1024,12 @@ amdsmi_status_t amdsmi_get_nic_port_info(amdsmi_processor_handle processor_handl
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  *info = ainic_info.port;
-  return AMDSMI_STATUS_SUCCESS;
+  return amd::smi::AMDSmiSystem::getInstance().read_ainic_port_info(nic_device->bdf(), info);
 }
 
 amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_handle,
@@ -1037,13 +1039,12 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_h
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  *info = ainic_info.rdma_dev;
-  return AMDSMI_STATUS_SUCCESS;
+  return amd::smi::AMDSmiSystem::getInstance().read_ainic_rdma_dev_info(nic_device->bdf(), info);
 }
 
 amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
@@ -1330,23 +1331,17 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
     LOG_ERROR(ss);
     return status;
   }
-  amd::smi::AMDSmiAINICDevice::AINICInfo nic_info = {};
-  status = nic_device->amd_query_nic_info(nic_info);
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__ << " | Failed to query NIC info";
-    LOG_ERROR(ss);
-    return status;
-  }
-  if (nic_info.rdma_dev.num_rdma_dev < 1) {
+  const amdsmi_nic_rdma_devices_info_t& rdma_dev = nic_device->discovered_rdma_dev();
+  if (rdma_dev.num_rdma_dev < 1) {
     ss << __PRETTY_FUNCTION__ << " | No RDMA devices found";
     LOG_ERROR(ss);
     return AMDSMI_STATUS_NOT_SUPPORTED;
-  } else if (rdma_port_index >= nic_info.rdma_dev.num_rdma_dev) {
+  } else if (rdma_port_index >= rdma_dev.num_rdma_dev) {
     ss << __PRETTY_FUNCTION__ << " | NIC ports (" << rdma_port_index
-       << ") is out of range (max ports:" << nic_info.rdma_dev.num_rdma_dev << ")";
+       << ") is out of range (max ports:" << rdma_dev.num_rdma_dev << ")";
     LOG_ERROR(ss);
     return AMDSMI_STATUS_NOT_SUPPORTED;
-  } else if (nic_info.rdma_dev.rdma_dev_info[0].num_rdma_ports < 1) {
+  } else if (rdma_dev.rdma_dev_info[0].num_rdma_ports < 1) {
     ss << __PRETTY_FUNCTION__ << " | No RDMA ports found";
     LOG_ERROR(ss);
     return AMDSMI_STATUS_NOT_SUPPORTED;
@@ -1361,9 +1356,9 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
   }
 
   std::string netdev(
-      amd::smi::trim(nic_info.rdma_dev.rdma_dev_info[0].rdma_port_info[rdma_port_index].netdev));
-  std::string rdmadev(nic_info.rdma_dev.rdma_dev_info[0].rdma_dev);
-  int port_num = nic_info.rdma_dev.rdma_dev_info[0].rdma_port_info[rdma_port_index].rdma_port;
+      amd::smi::trim(rdma_dev.rdma_dev_info[0].rdma_port_info[rdma_port_index].netdev));
+  std::string rdmadev(rdma_dev.rdma_dev_info[0].rdma_dev);
+  int port_num = rdma_dev.rdma_dev_info[0].rdma_port_info[rdma_port_index].rdma_port;
 
   std::string directory_path = "/sys/class/net/" + netdev + "/device/infiniband/" + rdmadev +
                                "/subsystem/" + rdmadev + "/subsystem/" + rdmadev + "/ports/" +
