@@ -4,6 +4,9 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ## HIP 7.18.0 for ROCm 10.3.0
 
+### Added
+* Support for child graph node ownership in `hipGraphAddNode`. The new `hipGraphChildGraphNodeOwnership` enumeration and the `ownership` member of `hipChildGraphNodeParams` select whether a child graph is cloned into the parent (`hipGraphChildGraphOwnershipClone`, the default) or moved into it (`hipGraphChildGraphOwnershipMove`), providing parity with corresponding CUDA behavior. A moved child graph is owned by its parent and destroyed with it. It can no longer be independently destroyed or instantiated, added to a second parent graph, or passed to `hipGraphExecUpdate`.
+
 ### Resolved issues
 
 * Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
