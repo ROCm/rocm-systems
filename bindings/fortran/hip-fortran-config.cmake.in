@@ -26,7 +26,7 @@ if(NOT CMAKE_Fortran_COMPILER_LOADED)
   return()
 endif()
 
-# Must match the mapping in projects/fortran/CMakeLists.txt.
+# Must match the mapping in bindings/fortran/CMakeLists.txt.
 if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
   set(_hip_fc "gfortran")
 elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")     # Flang, LLVMFlang

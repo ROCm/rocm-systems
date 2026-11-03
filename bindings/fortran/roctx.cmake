@@ -122,9 +122,10 @@ install(
 
 # From rocprofiler-sdk's source VERSION file, which versions rocprofiler-sdk-roctx.
 set(_roctx_version "")
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../rocprofiler-sdk/VERSION")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../projects/rocprofiler-sdk/VERSION")
     file(
-        STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../rocprofiler-sdk/VERSION"
+        STRINGS
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../projects/rocprofiler-sdk/VERSION"
         _roctx_version
         LIMIT_COUNT 1
     )

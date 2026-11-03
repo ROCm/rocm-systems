@@ -191,7 +191,10 @@ include(CMakePackageConfigHelpers)
 # One section per procedure (see hip.cmake), with the compilers that take the
 # flags: the amdflang of ROCm 7.13 rejects them.
 include(CheckFortranCompilerFlag)
-check_fortran_compiler_flag(-ffunction-sections ROCM_FORTRAN_HAVE_FUNCTION_SECTIONS)
+check_fortran_compiler_flag(
+    -ffunction-sections
+    ROCM_FORTRAN_HAVE_FUNCTION_SECTIONS
+)
 check_fortran_compiler_flag(-fdata-sections ROCM_FORTRAN_HAVE_DATA_SECTIONS)
 
 # dev: the component HIP's headers and CMake config install under.
