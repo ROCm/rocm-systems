@@ -28,20 +28,23 @@ constexpr duration_source_t k_region{ "rocpd_region", "R", nullptr, 1 };
 constexpr duration_source_t k_kernel{ "rocpd_kernel_dispatch", "K", "agent_id", 2 };
 constexpr duration_source_t k_allocate{ "rocpd_memory_allocate", "MA", "agent_id", 3 };
 constexpr duration_source_t k_copy{ "rocpd_memory_copy", "MC", "dst_agent_id", 4 };
+constexpr duration_source_t k_hip{ "rocpd_hip_event", "HE", "agent_id", 5 };
 
 std::string
 interval_select(const duration_source_t& source,
                 const std::string&       uuid,
+                const std::string&       sample_table,
                 const std::string&       where)
 {
     return fmt::format(
         "SELECT ({0}.id + ({1} << 60)) AS event_id, {0}.start AS start_ts, "
         "{0}.end AS end_ts FROM {2}_{3} {0} "
-        "LEFT JOIN rocpd_sample S ON S.event_id = {0}.event_id WHERE {4}",
+        "LEFT JOIN {4} S ON S.event_id = {0}.event_id WHERE {5}",
         source.alias,
         source.type_code,
         source.table,
         uuid,
+        sample_table,
         where);
 }
 
@@ -57,11 +60,12 @@ thread_where(const duration_source_t& source, const topology_key_t& topology)
 }
 
 std::string
-sample_where(size_t sample_track_id)
+sample_where(size_t sample_track_id, const std::string& sample_table)
 {
     return fmt::format(
-        "S.track_id = {0} AND EXISTS (SELECT 1 FROM rocpd_sample WHERE track_id = {0})",
-        sample_track_id);
+        "S.track_id = {0} AND EXISTS (SELECT 1 FROM {1} WHERE track_id = {0})",
+        sample_track_id,
+        sample_table);
 }
 
 // A recorded id compares equal, so the column can be indexed. 0 is the
@@ -106,7 +110,8 @@ duration_source_sql(const reader_catalog_t&                         catalog,
                     const reader_types::track_info_ptr_t&           track,
                     const data_storage::schema_v3::read_statements& statements)
 {
-    const auto& uuid = statements.trace_uuid();
+    const auto& uuid         = statements.trace_uuid();
+    const auto  sample_table = statements.joined_sample_table();
     std::string sql;
 
     switch(track->category)
@@ -119,8 +124,10 @@ duration_source_sql(const reader_catalog_t&                         catalog,
                 { k_region, k_kernel, k_allocate, k_copy })
             {
                 append_union(sql,
-                             interval_select(
-                                 source, uuid, thread_where(source, topology->second)));
+                             interval_select(source,
+                                             uuid,
+                                             sample_table,
+                                             thread_where(source, topology->second)));
             }
             break;
         }
@@ -128,17 +135,18 @@ duration_source_sql(const reader_catalog_t&                         catalog,
         {
             const auto sample_id = catalog.db_id_by_track.find(track);
             if(sample_id == catalog.db_id_by_track.end()) return {};
-            const auto where = sample_where(sample_id->second);
+            const auto where = sample_where(sample_id->second, sample_table);
             for(const duration_source_t& source :
                 { k_region, k_kernel, k_allocate, k_copy })
             {
-                append_union(sql, interval_select(source, uuid, where));
+                append_union(sql, interval_select(source, uuid, sample_table, where));
             }
             break;
         }
         case reader_types::track_kind_t::kernel_dispatch_agent_queue:
         case reader_types::track_kind_t::memory_allocate_agent_queue:
         case reader_types::track_kind_t::memory_copy_agent_queue:
+        case reader_types::track_kind_t::hip_event_agent_queue:
         {
             if(!track->node_info) return {};
             const duration_source_t& source =
@@ -147,10 +155,13 @@ duration_source_sql(const reader_catalog_t&                         catalog,
                 : track->category ==
                         reader_types::track_kind_t::memory_allocate_agent_queue
                     ? k_allocate
+                : track->category == reader_types::track_kind_t::hip_event_agent_queue
+                    ? k_hip
                     : k_copy;
             sql = interval_select(
                 source,
                 uuid,
+                sample_table,
                 agent_where(
                     source, track->node_info->node_id, track->agent_id, track->queue_id));
             break;
@@ -158,11 +169,16 @@ duration_source_sql(const reader_catalog_t&                         catalog,
         case reader_types::track_kind_t::stream:
         {
             if(!track->node_info) return {};
-            for(const duration_source_t& source : { k_kernel, k_allocate, k_copy })
+            for(const duration_source_t& source : { k_kernel, k_allocate, k_copy, k_hip })
             {
+                if(source.table == k_hip.table && !statements.hip_event_table_present())
+                {
+                    continue;
+                }
                 append_union(sql,
                              interval_select(source,
                                              uuid,
+                                             sample_table,
                                              stream_where(source,
                                                           track->node_info->node_id,
                                                           track->db_pid,
@@ -170,7 +186,9 @@ duration_source_sql(const reader_catalog_t&                         catalog,
             }
             break;
         }
-        case reader_types::track_kind_t::pmc_agent: break;
+        case reader_types::track_kind_t::pmc_agent:
+        case reader_types::track_kind_t::pmc_kernel:
+        case reader_types::track_kind_t::pmc_memory: break;
     }
     return sql;
 }

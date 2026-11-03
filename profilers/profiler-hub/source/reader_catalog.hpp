@@ -8,6 +8,7 @@
 #include "data_storage/read_statements.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <limits>
 #include <optional>
@@ -16,6 +17,14 @@
 
 namespace profiler_hub
 {
+
+struct memory_activity_point_t
+{
+    uint64_t id{};
+    uint64_t start{};
+    uint64_t end{};
+    double   value{};
+};
 
 struct topology_key_t
 {
@@ -161,6 +170,14 @@ struct reader_catalog_t
     /** @brief Builds every category sequentially, in dependency order. */
     void build_all(data_storage::schema_v3::read_statements& stmts);
 
+    const std::vector<memory_activity_point_t>* memory_activity_points(
+        size_t track_id) const;
+    bool memory_activity_id_span(uint64_t& first_id, uint64_t& last_id) const;
+
+    // Memory-activity tracks are derived in memory and have no rocpd_info_pmc
+    // row. Add a catalog entry for each one after pmc_infos has been loaded.
+    void publish_memory_activity_pmc_infos();
+
     reader_types::node_info_list_t            nodes;
     reader_types::process_info_list_t         processes;
     reader_types::thread_info_list_t          threads;
@@ -199,6 +216,11 @@ struct reader_catalog_t
                        agent_queue_track_key_hash_t>
         agent_queue_track_by_key;
 
+    std::unordered_map<size_t, std::vector<memory_activity_point_t>> m_memory_activity;
+    uint64_t m_memory_activity_first_id{ 0 };
+    uint64_t m_memory_activity_last_id{ 0 };
+    bool     m_memory_activity_has_ids{ false };
+
 private:
     void link_owner(reader_types::track_info_t& track,
                     size_t                      nid,
@@ -231,6 +253,9 @@ private:
     // build_tracks().
     void add_category_tracks(data_storage::schema_v3::read_statements& stmts,
                              size_t&                                   next_synthetic_id);
+
+    void add_memory_activity_tracks(data_storage::schema_v3::read_statements& stmts,
+                                    size_t& next_synthetic_id);
 };
 
 }  // namespace profiler_hub

@@ -70,8 +70,8 @@ downstream consumer of the library.
   `ph_probe_file()` reports that outcome with `ph_result_t`. `ph_file_probe_t`
   carries the trace schema and schema version. `ph-c-client
   --probe` runs the C probe against one or more existing trace files. Schema 3
-  is accepted. `ph_ctx_create()` returns `PH_RESULT_UNSUPPORTED_FILE`,
-  `PH_RESULT_INVALID_FILE`, or `PH_RESULT_UNSUPPORTED_SCHEMA_VERSION` instead
+  is accepted. `ph_ctx_create()` returns `PH_RESULT_UNSUPPORTED_FILE` or
+  `PH_RESULT_INVALID_FILE` instead
   of opening an unsupported trace. Another file format is added by
   registering a detector, and another schema by registering the versions its
   reader accepts.

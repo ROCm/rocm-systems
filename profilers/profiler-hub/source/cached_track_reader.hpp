@@ -14,6 +14,8 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -23,8 +25,10 @@ namespace profiler_hub
 /**
  * Serves the events and samples of a track as C API lists. A request for a whole track
  * (both bounds 0) is read once, sorted, kept and answered with the same storage on every
- * later call; a request with a time window gets storage of its own, filled from the
- * whole-track events. Everything handed out stays valid until the reader is destroyed.
+ * later call; a request with a time window gets storage of its own, filled from that
+ * whole-track read. A sample window also includes the sample before the window and the
+ * sample after it, and repeats the last value at the track end when nothing follows.
+ * Everything handed out stays valid until the reader is destroyed.
  * Events are only served for tracks that are not PMC tracks and samples only for PMC
  * tracks; any other request yields an empty list.
  *
@@ -86,6 +90,10 @@ private:
         track_row_reader&                     reader,
         const reader_types::track_info_ptr_t& track);
 
+    // ph_event_t.name has to outlive the row that produced it. The deque is
+    // append-only, so a c_str() taken after emplace stays valid.
+    [[nodiscard]] const char* keep_name(std::string_view text);
+
     connection_source&   m_source;
     common::thread_pool& m_workers;
     track_read_options   m_options;
@@ -93,7 +101,7 @@ private:
     struct event_depth_index
     {
         std::once_flag                                        once;
-        std::array<std::unordered_map<uint64_t, uint32_t>, 4> by_type;
+        std::array<std::unordered_map<uint64_t, uint32_t>, 5> by_type;
     };
 
     std::mutex           m_cache_mutex;
@@ -106,6 +114,9 @@ private:
     std::mutex                           m_windowed_mutex;
     std::deque<std::vector<ph_event_t>>  m_windowed_events;
     std::deque<std::vector<ph_sample_t>> m_windowed_samples;
+
+    std::mutex              m_name_mutex;
+    std::deque<std::string> m_names;
 };
 
 }  // namespace profiler_hub

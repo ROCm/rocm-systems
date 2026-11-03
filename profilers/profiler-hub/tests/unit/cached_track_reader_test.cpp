@@ -533,19 +533,41 @@ TEST_F(cached_track_reader_test, whole_track_samples_are_sorted_and_read_once)
     EXPECT_EQ(m_state.counter_calls, 1);
 }
 
-TEST_F(cached_track_reader_test, a_windowed_sample_request_is_read_each_time)
+TEST_F(cached_track_reader_test, a_windowed_sample_request_is_served_from_the_whole_track)
 {
-    m_state.counters  = { counter_event(10, 1.0) };
+    m_state.counters  = { counter_event(10, 1.0),
+                          counter_event(40, 4.0),
+                          counter_event(80, 8.0) };
     auto       reader = make_reader();
     const auto track  = make_track(4, track_kind_t::pmc_agent);
 
-    std::ignore = reader.samples(track, 5, 15);
-    std::ignore = reader.samples(track, 5, 15);
+    const auto first  = reader.samples(track, 30, 50);
+    const auto second = reader.samples(track, 30, 50);
 
-    EXPECT_EQ(m_state.counter_calls, 2);
-    ASSERT_TRUE(m_state.last_counter_filter.has_value());
-    EXPECT_EQ(m_state.last_counter_filter->time_window.start, 5U);
-    EXPECT_EQ(m_state.last_counter_filter->time_window.end, 15U);
+    EXPECT_EQ(m_state.counter_calls, 1);
+    ASSERT_EQ(first.list_size, 3U);
+    EXPECT_EQ(first.samples[0].timestamp, 10U);
+    EXPECT_EQ(first.samples[1].timestamp, 40U);
+    EXPECT_EQ(first.samples[2].timestamp, 80U);
+    EXPECT_EQ(first.samples, second.samples);
+}
+
+TEST_F(cached_track_reader_test, a_window_past_the_last_sample_holds_the_last_value)
+{
+    m_state.counters   = { counter_event(10, 1.0), counter_event(40, 4.0) };
+    auto       reader  = make_reader();
+    const auto track   = make_track(4, track_kind_t::pmc_memory);
+    track->end_ts      = 100;
+
+    const auto list = reader.samples(track, 30, 50);
+
+    ASSERT_EQ(list.list_size, 3U);
+    EXPECT_EQ(list.samples[0].timestamp, 10U);
+    EXPECT_DOUBLE_EQ(list.samples[0].value, 1.0);
+    EXPECT_EQ(list.samples[1].timestamp, 40U);
+    EXPECT_DOUBLE_EQ(list.samples[1].value, 4.0);
+    EXPECT_EQ(list.samples[2].timestamp, 100U);
+    EXPECT_DOUBLE_EQ(list.samples[2].value, 4.0);
 }
 
 TEST_F(cached_track_reader_test, a_small_thread_track_is_read_with_one_query)

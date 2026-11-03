@@ -50,6 +50,7 @@ event_type_index(ph_event_type_t type)
         case PH_EVENT_TYPE_KERNEL_DISPATCH: return 1;
         case PH_EVENT_TYPE_MEMORY_COPY: return 2;
         case PH_EVENT_TYPE_MEMORY_ALLOCATE: return 3;
+        case PH_EVENT_TYPE_HIP_EVENT: return 4;
     }
     return std::nullopt;
 }
@@ -65,6 +66,7 @@ to_ph_event_type(reader_types::event_type_t type)
         case reader_types::event_type_t::memory_copy: return PH_EVENT_TYPE_MEMORY_COPY;
         case reader_types::event_type_t::memory_allocate:
             return PH_EVENT_TYPE_MEMORY_ALLOCATE;
+        case reader_types::event_type_t::hip_event: return PH_EVENT_TYPE_HIP_EVENT;
         case reader_types::event_type_t::sample:
         case reader_types::event_type_t::pmc_event: break;
     }
@@ -91,9 +93,11 @@ to_ph_sample(const reader_types::counter_timeline_event_t& sample)
     return ph_sample_t{ .timestamp = sample.timestamp, .value = sample.value };
 }
 
+template <typename KeepName>
 std::vector<ph_event_t>
-to_ph_events(const reader_types::timeline_event_list_t&    events,
-             const reader_types::track_info_ptr_t&         track)
+to_ph_events(const reader_types::timeline_event_list_t& events,
+             const reader_types::track_info_ptr_t&      track,
+             KeepName&&                                 keep_name)
 {
     const auto track_id = static_cast<uint32_t>(track->id);
     // A host thread query also selects device events on that thread.
@@ -110,7 +114,9 @@ to_ph_events(const reader_types::timeline_event_list_t&    events,
         {
             continue;
         }
-        converted.push_back(to_ph_event(event, track_id));
+        ph_event_t item = to_ph_event(event, track_id);
+        item.name       = keep_name(event.display_name);
+        converted.push_back(item);
     }
     return converted;
 }
@@ -176,6 +182,61 @@ sort_by_timestamp(std::vector<ph_sample_t>& samples)
                                });
 }
 
+// The timeline turns each sample into a segment that ends at the next later
+// timestamp, and it fetches the track one short slice at a time. A slice that
+// contains only the samples inside it cannot draw a step that crosses the
+// slice, so keep the sample just before the window and the sample just after
+// it. When nothing follows the window, repeat the last value at the track end
+// so the step holds for the rest of the track.
+std::vector<ph_sample_t>
+samples_for_window(const std::vector<ph_sample_t>& sorted,
+                   uint64_t                        window_start,
+                   uint64_t                        window_end,
+                   uint64_t                        track_end)
+{
+    std::vector<ph_sample_t> selected;
+    if(sorted.empty()) return selected;
+
+    const uint64_t upper =
+        window_end == 0 ? std::numeric_limits<uint64_t>::max() : window_end;
+
+    const auto first_inside = std::lower_bound(
+        sorted.begin(),
+        sorted.end(),
+        window_start,
+        [](const ph_sample_t& sample, uint64_t timestamp) {
+            return sample.timestamp < timestamp;
+        });
+    const auto first_after = std::upper_bound(
+        sorted.begin(),
+        sorted.end(),
+        upper,
+        [](uint64_t timestamp, const ph_sample_t& sample) {
+            return timestamp < sample.timestamp;
+        });
+
+    auto begin = first_inside;
+    if(begin != sorted.begin())
+    {
+        --begin;
+    }
+    auto end = first_after;
+    if(end != sorted.end())
+    {
+        ++end;
+    }
+
+    selected.assign(begin, end);
+    if(first_after == sorted.end() && !selected.empty() &&
+       track_end > selected.back().timestamp)
+    {
+        ph_sample_t hold = selected.back();
+        hold.timestamp   = track_end;
+        selected.push_back(hold);
+    }
+    return selected;
+}
+
 ph_event_list_t
 as_list(std::vector<ph_event_t>& events)
 {
@@ -199,6 +260,15 @@ cached_track_reader::cached_track_reader(connection_source&   source,
 , m_workers{ workers }
 , m_options{ options }
 {}
+
+const char*
+cached_track_reader::keep_name(std::string_view text)
+{
+    if(text.empty()) return "";
+    const std::scoped_lock lock{ m_name_mutex };
+    m_names.emplace_back(text);
+    return m_names.back().c_str();
+}
 
 template <typename Item, typename Build>
 std::vector<Item>&
@@ -303,7 +373,9 @@ cached_track_reader::samples(const reader_types::track_info_ptr_t& track,
                              uint64_t                              start_ts,
                              uint64_t                              end_ts)
 {
-    if(!track || track->category != reader_types::track_kind_t::pmc_agent)
+    if(!track ||
+       (track->category != reader_types::track_kind_t::pmc_agent &&
+        track->category != reader_types::track_kind_t::pmc_memory))
     {
         return ph_sample_list_t{ .list_size = 0, .samples = nullptr };
     }
@@ -319,10 +391,16 @@ cached_track_reader::samples(const reader_types::track_info_ptr_t& track,
         }));
     }
 
-    auto windowed = with_reader(m_source, [&](track_row_reader& reader) {
-        return to_ph_samples(
-            reader.counter_events_for_track(track, make_window_filter(start_ts, end_ts)));
+    const auto& whole = cached(m_samples_cache, track, [&] {
+        return with_reader(m_source, [&](track_row_reader& reader) {
+            auto sorted = to_ph_samples(reader.counter_events_for_track(track, {}));
+            sort_by_timestamp(sorted);
+            return sorted;
+        });
     });
+
+    auto windowed = samples_for_window(
+        whole, start_ts, end_ts, static_cast<uint64_t>(track->end_ts));
 
     const std::scoped_lock lock{ m_windowed_mutex };
     return as_list(m_windowed_samples.emplace_back(std::move(windowed)));
@@ -340,7 +418,10 @@ cached_track_reader::build_sorted_events(track_row_reader&                     r
         return merged;
     }
 
-    auto sorted = to_ph_events(reader.events_for_track(track, {}), track);
+    auto sorted = to_ph_events(
+        reader.events_for_track(track, {}), track, [&](std::string_view text) {
+            return keep_name(text);
+        });
     sort_by_start(sorted);
     assign_depths(sorted);
     return sorted;
