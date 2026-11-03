@@ -191,6 +191,17 @@ public:
     virtual ncclResult_t createTestCommunicator();
 
     /**
+   * @brief Optional config for createTestCommunicator().
+   *
+   * Return nullptr to initialize with ncclCommInitRank. A non-null pointer is
+   * passed to ncclCommInitRankConfig and must outlive that call.
+   */
+    virtual ncclConfig_t* communicatorConfig()
+    {
+        return nullptr;
+    }
+
+    /**
    * @brief Get the active NCCL communicator for this test
    *
    * Returns the test-specific communicator. Returns nullptr if createTestCommunicator()

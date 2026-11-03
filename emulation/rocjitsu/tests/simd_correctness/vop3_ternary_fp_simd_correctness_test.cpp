@@ -86,15 +86,13 @@ const std::array<Case, 10> kCases = {{
     {"v_fma_f16_vop3", 518, Kind::F16, amdgpu::SimdFastPath::VOP3_FMA_FP16},
     {"v_fma_f64_vop3", 460, Kind::F64},
     {"v_mad_f16_vop3", 515, Kind::F16, amdgpu::SimdFastPath::VOP3_TERNARY_FP16},
-    // min3/max3/med3: fmax/fmin compositions. Inputs are finite non-zero
-    // normals, so the fmax/fmin NaN-payload / signed-zero-tie carve-out never
-    // triggers — bit-exact vs scalar on every lane.
+    // Selection uses raw encodings in both scalar and SIMD execution.
     {"v_max3_f32_vop3", 467, Kind::F32},
     {"v_min3_f32_vop3", 464, Kind::F32},
     {"v_med3_f32_vop3", 470, Kind::F32},
-    {"v_max3_f16_vop3", 503, Kind::F16, amdgpu::SimdFastPath::VOP3_TERNARY_FP16},
-    {"v_min3_f16_vop3", 500, Kind::F16, amdgpu::SimdFastPath::VOP3_TERNARY_FP16},
-    {"v_med3_f16_vop3", 506, Kind::F16, amdgpu::SimdFastPath::VOP3_TERNARY_FP16},
+    {"v_max3_f16_vop3", 503, Kind::F16, amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16},
+    {"v_min3_f16_vop3", 500, Kind::F16, amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16},
+    {"v_med3_f16_vop3", 506, Kind::F16, amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16},
 }};
 
 // Finite-normal f32 sanitized inputs (avoid NaN/Inf for cleaner FMA bit-equality
@@ -331,6 +329,7 @@ struct F16OutputCase {
   uint8_t omod;
   uint16_t expected;
   uint8_t clamp = 0;
+  amdgpu::SimdFastPath expected_simd_path = amdgpu::SimdFastPath::VOP3_TERNARY_FP16;
 };
 
 // These cases separate destination-format rounding from OMOD/CLAMP ordering.
@@ -401,6 +400,7 @@ std::vector<F16OutputCase> f16_output_cases() {
                      0x3c00});
   }
   const auto add_selections = [&](const char *target, rj_code_arch_t arch, auto operations) {
+    const auto first = cases.size();
     for (const auto &[name, opcode] : operations) {
       const auto prefix = std::string(target) + name;
       cases.push_back(
@@ -423,6 +423,10 @@ std::vector<F16OutputCase> f16_output_cases() {
                        3,
                        0x8400});
     }
+    for (auto i = first; i != cases.size(); ++i)
+      cases[i].expected_simd_path = arch == ROCJITSU_CODE_ARCH_RDNA2
+                                        ? amdgpu::SimdFastPath::VOP3_TERNARY_RAW_FP
+                                        : amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16;
   };
   // MODE 0x80 cases exercise the emulator's old-target output-denormal gate.
   // The available gfx1030/gfx1100 captures keep output denormals disabled, so
@@ -531,7 +535,7 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
           EXPECT_TRUE(tracker.no_tracked_path_executed())
               << test.name << ": forced-scalar execution used SIMD";
         else
-          EXPECT_TRUE(tracker.only_tracked_path_executed(amdgpu::SimdFastPath::VOP3_TERNARY_FP16))
+          EXPECT_TRUE(tracker.only_tracked_path_executed(test.expected_simd_path))
               << test.name << ": eligible execution did not use the ternary F16 SIMD path";
         for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
           const uint32_t actual = fx.cu->read_vgpr(vb + kDstVgpr32, lane);

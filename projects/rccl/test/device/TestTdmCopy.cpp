@@ -31,9 +31,11 @@
 #include "DeviceTestBase.hpp"
 
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
+#include "ll128Layout.h"
 #include "tdm/tdmCopy.h"
 
 namespace RcclUnitTesting
@@ -408,5 +410,203 @@ protected:
 };
 
 TEST_F(TdmCachePolicyTest, NonDefaultPolicy) { run(6000, 2048, 64, 256); }
+
+// ===========================================================================
+//  LL128 TDM user-buffer store leg (device/tdm/ll128Tdm.h)
+// ---------------------------------------------------------------------------
+// The mi455_tdm_ll128_func.json suites observe nothing about which copy path the
+// kernel took, so they stay green when the build flag compiled the path away.
+// These three supply that observable: the flag reached the device pass, the slot
+// indices tile the staged window, and the staged store matches the scalar path.
+//
+// tdmStoreRegs is a private member of Primitives<...ProtoLL128...>, so the
+// staging below is a replica. The slot-index arithmetic is not replicated --
+// replica and production both call ll128SlotIx() from device/ll128Layout.h.
+// ===========================================================================
+
+// gfx1250 LL128 geometry, mirroring device.h (LINESIZE 128 -> LINEELEMS 16,
+// WARP_SIZE 32, SHMEM_ELEMS_PER_THREAD 32). TDM_SUPPORTED holds only on gfx1250,
+// so these are the only values the store leg is ever compiled for. They are not
+// static_asserted against device.h because those macros are arch-conditional and
+// resolve differently in the host pass; Ll128StoreLegMatchesScalarPath asserts
+// the wave width at run time instead.
+constexpr int kLlLineElems     = 16;
+constexpr int kLlWarpSz        = 32;
+constexpr int kLlWordPerThread = 32;
+constexpr int kLlWireBytes     = kLlWordPerThread * kLlWarpSz * static_cast<int>(sizeof(uint64_t));
+constexpr int kLlDataBytes     = kLlWireBytes - kLlWireBytes / kLlLineElems;  // 7680
+constexpr int kLlSlots         = kLlDataBytes / 16;                           // 480 16B chunks
+
+// A lane is a flag thread when it holds the wire format's flag word; production
+// derives this from tid, equivalent to wid here since WARP_SIZE is a multiple of
+// LINEELEMS/2 (prims_ll128.h, Primitives constructor).
+__host__ __device__ __forceinline__ bool llIsFlagThread(int wid) {
+  return (wid % (kLlLineElems / 2)) == (kLlLineElems / 2 - 1);
+}
+
+#ifndef ENABLE_TDM_PRIM_LL128
+#define ENABLE_TDM_PRIM_LL128 0
+#endif
+
+// Writes the device-pass value of TDM_LL128_ON into result[0]. The host pass
+// cannot evaluate it: TDM_SUPPORTED keys on __gfx1250__, never defined off-device.
+__global__ void kLl128TdmOnProbe(int* result) {
+  if (threadIdx.x == 0 && blockIdx.x == 0)
+    result[0] = (TDM_SUPPORTED && ENABLE_TDM_PRIM_LL128) ? 1 : 0;
+}
+
+// Scalar reference: each lane writes its register pairs straight to the packed
+// destination at the slot index. This is the storeUser128 aligned branch of
+// Primitives::storeRegs, which the TDM leg replaces.
+__global__ void kLl128StoreScalar(uint64_t* dst, const uint64_t* regsIn) {
+  const int wid  = static_cast<int>(threadIdx.x);
+  const bool flg = llIsFlagThread(wid);
+  uint64_t* out  = dst + static_cast<size_t>(blockIdx.x) * (kLlDataBytes / sizeof(uint64_t));
+  const uint64_t* regs = regsIn + static_cast<size_t>(wid) * kLlWordPerThread;
+  for (int g = 0; g < kLlWordPerThread / 2; ++g) {
+    if (flg && (g % 2) != 0) continue;
+    const int ix = ll128SlotIx<kLlLineElems, kLlWarpSz>(g, wid);
+    out[2 * ix + 0] = regs[2 * g + 0];
+    out[2 * ix + 1] = regs[2 * g + 1];
+  }
+}
+
+// Replica of tdmStoreRegs: stage the warp's slice in LDS, push it out as one
+// bulk transfer. Mirrors ll128Tdm.h step for step, including the fence that
+// orders the lanes' LDS writes against the mover's read of the window.
+__global__ void kLl128StoreTdm([[maybe_unused]] uint8_t* dst,
+                               [[maybe_unused]] const uint64_t* regsIn) {
+#if TDM_SUPPORTED
+  extern __shared__ __align__(128) uint8_t lds[];
+  const int wid  = static_cast<int>(threadIdx.x);
+  const bool flg = llIsFlagThread(wid);
+  uint64_t* shm8 = reinterpret_cast<uint64_t*>(lds);
+  const uint64_t* regs = regsIn + static_cast<size_t>(wid) * kLlWordPerThread;
+
+  tdm::tdmWait();  // drain the previous slice before overwriting the window
+  for (int g = 0; g < kLlWordPerThread / 2; ++g) {
+    if (flg && (g % 2) != 0) continue;
+    const int ix = ll128SlotIx<kLlLineElems, kLlWarpSz>(g, wid);
+    shm8[2 * ix + 0] = regs[2 * g + 0];
+    shm8[2 * ix + 1] = regs[2 * g + 1];
+  }
+  // The mover reads the window by descriptor, so nothing orders the lane stores
+  // above against it; __syncwarp() is empty on AMD.
+  __threadfence_block();
+
+  tdm::asyncStoreFromLDS<SyncPolicy::Async, DEFAULT_CACHE_POLICY, false>(
+      lds, dst + static_cast<size_t>(blockIdx.x) * kLlDataBytes, kLlDataBytes);
+  tdm::tdmWait();
+#endif
+}
+
+class Ll128TdmStoreTest : public TdmCopyTest {
+protected:
+  // One warp per block, each block staging its own slice into its own output
+  // window; many blocks so many TDM engines are live at once.
+  static constexpr int kBlocks = 512;
+
+  static std::vector<uint64_t> makeRegs(uint32_t seed) {
+    std::vector<uint64_t> v(static_cast<size_t>(kLlWarpSz) * kLlWordPerThread);
+    uint64_t s = seed * 6364136223846793005ull + 1442695040888963407ull;
+    for (auto& x : v) {
+      s = s * 6364136223846793005ull + 1442695040888963407ull;
+      x = s;
+    }
+    return v;
+  }
+};
+
+TEST_F(Ll128TdmStoreTest, Ll128TdmBuildFlagMatchesExpectation) {
+  const char* want = getenv("RCCL_TEST_EXPECT_TDM_LL128");
+  if (want == nullptr)
+    GTEST_SKIP() << "set RCCL_TEST_EXPECT_TDM_LL128=1 to assert the LL128 TDM build flag";
+  const int expect = atoi(want);
+
+  EXPECT_EQ(static_cast<int>(ENABLE_TDM_PRIM_LL128), expect)
+      << "ENABLE_TDM_PRIM_LL128 is " << ENABLE_TDM_PRIM_LL128 << " but RCCL_TEST_EXPECT_TDM_LL128 "
+      << "asks for " << expect << ". Either the build is missing --enable-tdm-prim-ll128 (in which "
+      << "case every LL128 TDM suite runs the scalar path and covers nothing), or the config sets "
+      << "the wrong expectation.";
+
+  if (expect == 0) return;
+  if (!supported_) GTEST_SKIP() << "TDM not supported on this device";
+
+  DeviceBuffer<int> d_res(1);
+  const int init = -1;
+  d_res.copyFrom(&init, 1);
+  kLl128TdmOnProbe<<<1, kLlWarpSz>>>(d_res.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_res.download(), 1)
+      << "TDM_LL128_ON is 0 in the device pass: the store leg compiled away, so the "
+         "LL128 TDM suites are vacuous even though the build flag was set";
+}
+
+TEST_F(Ll128TdmStoreTest, Ll128SlotIndicesPackDensely) {
+  // The store leg hands the mover one contiguous [0, kLlDataBytes) window, so it
+  // is correct only if the payload slots tile that range exactly once. Pure host
+  // arithmetic over the shared ll128SlotIx(), so it runs on any arch.
+  std::vector<int> hits(kLlSlots, 0);
+  int emitted = 0;
+  for (int wid = 0; wid < kLlWarpSz; ++wid) {
+    const bool flg = llIsFlagThread(wid);
+    for (int g = 0; g < kLlWordPerThread / 2; ++g) {
+      if (flg && (g % 2) != 0) continue;
+      const int ix = ll128SlotIx<kLlLineElems, kLlWarpSz>(g, wid);
+      ASSERT_GE(ix, 0) << "negative slot index for wid=" << wid << " g=" << g;
+      ASSERT_LT(ix, kLlSlots)
+          << "slot index " << ix << " for wid=" << wid << " g=" << g
+          << " runs past the " << kLlDataBytes << "-byte window the mover is handed";
+      ++hits[ix];
+      ++emitted;
+    }
+  }
+  EXPECT_EQ(emitted, kLlSlots) << "payload slot count does not match the window size";
+  for (int i = 0; i < kLlSlots; ++i)
+    EXPECT_EQ(hits[i], 1) << "slot " << i << " written " << hits[i]
+                          << " times; the staged window would carry a hole or a collision";
+}
+
+TEST_F(Ll128TdmStoreTest, Ll128StoreLegMatchesScalarPath) {
+  if (!supported_) GTEST_SKIP() << "TDM not supported on this device";
+  ASSERT_EQ(warpSize_, kLlWarpSz) << "LL128 TDM geometry assumes a 32-wide wave";
+
+  const size_t words = static_cast<size_t>(kBlocks) * (kLlDataBytes / sizeof(uint64_t));
+  const size_t bytes = static_cast<size_t>(kBlocks) * kLlDataBytes;
+
+  // Several seeds so a stuck slot cannot alias a correct one across the run.
+  for (uint32_t seed : {0x1u, 0xA5A5A5A5u, 0xDEADBEEFu, 0x5EED1234u}) {
+    auto h_regs = makeRegs(seed);
+    DeviceBuffer<uint64_t> d_regs(h_regs.size());
+    d_regs.copyFrom(h_regs);
+
+    DeviceBuffer<uint64_t> d_ref(words);
+    DeviceBuffer<uint8_t>  d_tdm(bytes);
+    d_ref.zero();
+    d_tdm.zero();
+
+    kLl128StoreScalar<<<kBlocks, kLlWarpSz>>>(d_ref.ptr, d_regs.ptr);
+    syncAndCheck();
+    kLl128StoreTdm<<<kBlocks, kLlWarpSz, kLlDataBytes + 128>>>(d_tdm.ptr, d_regs.ptr);
+    syncAndCheck();
+
+    auto h_ref = d_ref.copyTo();
+    auto h_tdm = d_tdm.copyTo();
+    const uint8_t* ref8 = reinterpret_cast<const uint8_t*>(h_ref.data());
+
+    size_t wrong = 0;
+    size_t firstBad = 0;
+    for (size_t i = 0; i < bytes; ++i) {
+      if (h_tdm[i] != ref8[i]) {
+        if (wrong == 0) firstBad = i;
+        ++wrong;
+      }
+    }
+    ASSERT_EQ(wrong, 0u) << "seed 0x" << std::hex << seed << std::dec << ": staged store differs "
+                         << "from the scalar path in " << wrong << " of " << bytes
+                         << " bytes, first at byte " << firstBad << " (block "
+                         << firstBad / kLlDataBytes << ", offset " << firstBad % kLlDataBytes << ")";
+  }
+}
 
 }  // namespace RcclUnitTesting

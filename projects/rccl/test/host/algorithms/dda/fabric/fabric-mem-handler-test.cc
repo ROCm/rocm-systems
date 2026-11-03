@@ -9,17 +9,18 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <cstring>
-#include <map>
 #include <memory>
 #include <set>
 #include <vector>
 
+#include "FailWhen.h"
 #include "ScopedHook.h"
 #include "fakes/bootstrap_stubs.h"
 #include "fakes/env_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
+
+#include "algorithms/dda/fabric/FabricTestFixture.h"
 
 #include "alloc.h"
 #include "bootstrap.h"
@@ -27,16 +28,16 @@
 
 #include FABRIC_MEM_HANDLER_CC_PATH
 
-// alloc.h data symbol with no owning fakes file, as in p2p-test.cc.
-struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
-
 namespace {
 
-constexpr int kNRanks = 4;
-constexpr int kRank = 1;
-constexpr size_t kPage = 4096;  // emulator allocation granularity
+using dda_fabric_test::FabricLedgerTest;
+using dda_fabric_test::kBootstrap;
+using dda_fabric_test::kHandleType;
+using dda_fabric_test::kNRanks;
+using dda_fabric_test::kPage;
+using dda_fabric_test::kRank;
+using dda_fabric_test::PeerRanks;
 
-void* const kBootstrap = reinterpret_cast<void*>(0xB007);
 void* const kSelfPtr = reinterpret_cast<void*>(0x5E1F000);
 const hipMemGenericAllocationHandle_t kSelfHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x5E1F);
 constexpr size_t kSelfSize = 2 * kPage;
@@ -49,41 +50,11 @@ hipMemGenericAllocationHandle_t HandleForDesc(uint64_t desc) {
   return reinterpret_cast<hipMemGenericAllocationHandle_t>(0x10000 + desc);
 }
 
-class FabricMemHandlerMicrotest : public ::testing::Test {
+class FabricMemHandlerMicrotest : public FabricLedgerTest {
  protected:
   void SetUp() override {
-    savedHandleType_ = ncclCuMemHandleType;
-    SetMicroEnvAbsent("NCCL_CUMEM_SKIP_FREE");
-    InstallHipVmmEmulator();
-    ASSERT_FALSE(rcclSkipCuMemFree());  // alloc.h caches this once per process
-
-    // Track reservations so frees can be checked.
-    auto emulatedReserve = g_hipMemAddressReserve;
-    auto emulatedFree = g_hipMemAddressFree;
-    g_hipMemAddressReserve = [this, emulatedReserve](void** ptr, size_t size, size_t align, void* addr,
-                                                     unsigned long long flags) {
-      hipError_t err = emulatedReserve(ptr, size, align, addr, flags);
-      if (err == hipSuccess) reserved_[*ptr] = size;
-      return err;
-    };
-    g_hipMemAddressFree = [this, emulatedFree](void* ptr, size_t size) {
-      freed_.push_back(ptr);
-      auto it = reserved_.find(ptr);
-      if (it == reserved_.end() || it->second != size) return hipErrorInvalidValue;
-      reserved_.erase(it);
-      return emulatedFree(ptr, size);
-    };
-    g_hipMemGetAddressRange = [this](hipDeviceptr_t* base, size_t* size, hipDeviceptr_t ptr) {
-      auto it = reserved_.find(ptr);
-      if (it == reserved_.end()) return hipErrorInvalidValue;
-      *base = ptr;
-      *size = it->second;
-      return hipSuccess;
-    };
-    g_hipMemMap = [this](void* ptr, size_t, size_t, hipMemGenericAllocationHandle_t handle, unsigned long long) {
-      mappedHandle_[ptr] = handle;
-      return hipSuccess;
-    };
+    FabricLedgerTest::SetUp();
+    if (HasFatalFailure()) return;
 
     g_hipMemExportToShareableHandle = [](void* shareable, hipMemGenericAllocationHandle_t,
                                          hipMemAllocationHandleType, unsigned long long) {
@@ -97,14 +68,9 @@ class FabricMemHandlerMicrotest : public ::testing::Test {
       *handle = HandleForDesc(desc);
       return hipSuccess;
     };
-    g_hipMemRelease = [this](hipMemGenericAllocationHandle_t handle) {
-      released_.push_back(handle);
-      return hipSuccess;
-    };
     g_bootstrapAllGather = [this](void*, void* allData, int) {
       auto* entries = static_cast<FabricExchEntry*>(allData);
-      for (int r = 0; r < nRanks_; ++r) {
-        if (r == rank_) continue;
+      for (int r : PeerRanks(nRanks_, rank_)) {
         entries[r].desc.data = PeerDesc(r);
         entries[r].size = PeerSize(r);
       }
@@ -114,12 +80,7 @@ class FabricMemHandlerMicrotest : public ::testing::Test {
 
   void TearDown() override {
     handler_.reset();
-    EXPECT_TRUE(reserved_.empty()) << reserved_.size() << " peer mappings never freed";
-    ncclCuMemHandleType = savedHandleType_;
-    ResetBootstrapStubs();
-    ResetHipFakes();
-    ResetNcclFakes();
-    ResetEnvFakes();
+    FabricLedgerTest::TearDown();
   }
 
   ncclFabricMemHandler* MakeHandler(int nRanks = kNRanks, int rank = kRank) {
@@ -159,13 +120,8 @@ class FabricMemHandlerMicrotest : public ::testing::Test {
 
   int nRanks_ = kNRanks;
   int rank_ = kRank;
-  hipMemAllocationHandleType savedHandleType_ = hipMemHandleTypeNone;
   std::unique_ptr<ncclFabricMemHandler> handler_;
-  std::map<void*, size_t> reserved_;  // live reservations -> size
-  std::vector<void*> freed_;          // every hipMemAddressFree, in order
-  std::map<void*, hipMemGenericAllocationHandle_t> mappedHandle_;
   std::vector<uint64_t> importedDescs_;
-  std::vector<hipMemGenericAllocationHandle_t> released_;
 };
 
 // ---------------------------------------------------------------------------
@@ -210,8 +166,7 @@ TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_AllSucceed_SelfSlotIsLocalPtrA
 
   EXPECT_EQ(PeerPtr(kRank), kSelfPtr);
   std::set<void*> peers;
-  for (int r = 0; r < kNRanks; ++r) {
-    if (r == kRank) continue;
+  for (int r : PeerRanks()) {
     void* p = PeerPtr(r);
     EXPECT_NE(p, nullptr) << "peer " << r;
     EXPECT_NE(p, kSelfPtr) << "peer " << r;
@@ -221,22 +176,20 @@ TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_AllSucceed_SelfSlotIsLocalPtrA
 }
 
 TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_ExportsSelfHandleAndImportsPeersWithConfiguredHandleType) {
-  // Not the default, so a hard-coded type fails.
-  ncclCuMemHandleType = hipMemHandleTypeWin32Kmt;
   ncclFabricMemHandler* h = MakeRegisteredHandler();
   auto importPeer = g_hipMemImportFromShareableHandle;
   ScopedHook exportHook(g_hipMemExportToShareableHandle,
                         [](void* shareable, hipMemGenericAllocationHandle_t handle,
                            hipMemAllocationHandleType type, unsigned long long) {
                           EXPECT_EQ(handle, kSelfHandle);
-                          EXPECT_EQ(type, hipMemHandleTypeWin32Kmt);
+                          EXPECT_EQ(type, kHandleType);
                           static_cast<ncclCuDesc*>(shareable)->data = kSelfDesc;
                           return hipSuccess;
                         });
   ScopedHook importHook(g_hipMemImportFromShareableHandle,
                         [importPeer](hipMemGenericAllocationHandle_t* handle, void* shareable,
                                      hipMemAllocationHandleType type) {
-                          EXPECT_EQ(type, hipMemHandleTypeWin32Kmt);
+                          EXPECT_EQ(type, kHandleType);
                           return importPeer(handle, shareable, type);
                         });
 
@@ -271,20 +224,19 @@ TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_ImportsEachPeersDescriptorButN
 TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_MapsEachPeerToItsImportedHandleAtItsAdvertisedSize) {
   MakeExchangedHandler();
 
-  for (int r = 0; r < kNRanks; ++r) {
-    if (r == kRank) continue;
+  for (int r : PeerRanks()) {
     void* p = PeerPtr(r);
-    ASSERT_EQ(mappedHandle_.count(p), 1u) << "peer " << r;
-    ASSERT_EQ(reserved_.count(p), 1u) << "peer " << r;
-    EXPECT_EQ(mappedHandle_.at(p), HandleForDesc(PeerDesc(r))) << "peer " << r;
-    EXPECT_EQ(reserved_.at(p), PeerSize(r)) << "peer " << r;
+    ASSERT_EQ(ledger_.mappedHandle.count(p), 1u) << "peer " << r;
+    ASSERT_EQ(ledger_.mappedSize.count(p), 1u) << "peer " << r;
+    EXPECT_EQ(ledger_.mappedHandle.at(p), HandleForDesc(PeerDesc(r))) << "peer " << r;
+    EXPECT_EQ(ledger_.mappedSize.at(p), PeerSize(r)) << "peer " << r;
   }
 }
 
 TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_AllSucceed_ReleasesEachImportedHandle) {
   MakeExchangedHandler();
 
-  EXPECT_EQ(released_, (std::vector<hipMemGenericAllocationHandle_t>{
+  EXPECT_EQ(ledger_.released, (std::vector<hipMemGenericAllocationHandle_t>{
                            HandleForDesc(PeerDesc(0)), HandleForDesc(PeerDesc(2)), HandleForDesc(PeerDesc(3))}));
 }
 
@@ -356,16 +308,16 @@ TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_ImportFails_ReturnsCudaErrorAn
 TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_PeerMappingFails_ReleasesThatPeersHandleAndStops) {
   ncclFabricMemHandler* h = MakeRegisteredHandler();
   const hipMemGenericAllocationHandle_t failing = HandleForDesc(PeerDesc(2));
-  auto recordMap = g_hipMemMap;
-  ScopedHook map(g_hipMemMap, [failing, recordMap](void* ptr, size_t size, size_t offset,
-                                                   hipMemGenericAllocationHandle_t handle, unsigned long long flags) {
-    if (handle == failing) return hipErrorOutOfMemory;
-    return recordMap(ptr, size, offset, handle, flags);
-  });
+  FailWhen(
+      g_hipMemMap,
+      [failing](void*, size_t, size_t, hipMemGenericAllocationHandle_t handle, unsigned long long) {
+        return handle == failing;
+      },
+      hipErrorOutOfMemory);
 
   EXPECT_EQ(h->exchangeMemPtrs(), ncclUnhandledCudaError);
 
-  EXPECT_EQ(released_, (std::vector<hipMemGenericAllocationHandle_t>{HandleForDesc(PeerDesc(0)), failing}));
+  EXPECT_EQ(ledger_.released, (std::vector<hipMemGenericAllocationHandle_t>{HandleForDesc(PeerDesc(0)), failing}));
   EXPECT_EQ(importedDescs_, (std::vector<uint64_t>{PeerDesc(0), PeerDesc(2)}));
 }
 
@@ -382,7 +334,7 @@ TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_FailsAfterSomePeersMapped_Peer
   ncclFabricMemHandler* h = MakeRegisteredHandler();
   ScopedHook import(g_hipMemImportFromShareableHandle, FailImportOfPeer(2));
   ASSERT_NE(h->exchangeMemPtrs(), ncclSuccess);
-  ASSERT_EQ(reserved_.size(), 1u);  // peer 0
+  ASSERT_EQ(ledger_.reserved.size(), 1u);  // peer 0
   void* p = nullptr;
 
   EXPECT_EQ(h->getPeerDeviceMemPtr(0, &p), ncclInvalidUsage);
@@ -395,37 +347,35 @@ TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_FailsAfterSomePeersMapped_Peer
 TEST_F(FabricMemHandlerMicrotest, Destructor_AfterExchange_FreesEveryPeerMappingButNotSelf) {
   MakeExchangedHandler();
   std::set<void*> peers;
-  for (int r = 0; r < kNRanks; ++r) {
-    if (r != kRank) peers.insert(PeerPtr(r));
-  }
+  for (int r : PeerRanks()) peers.insert(PeerPtr(r));
 
   handler_.reset();
 
-  EXPECT_EQ(std::set<void*>(freed_.begin(), freed_.end()), peers);
-  EXPECT_EQ(freed_.size(), peers.size());
+  EXPECT_EQ(std::set<void*>(ledger_.addressFrees.begin(), ledger_.addressFrees.end()), peers);
+  EXPECT_EQ(ledger_.addressFrees.size(), peers.size());
 }
 
 TEST_F(FabricMemHandlerMicrotest, Destructor_AfterImportFailsPartway_FreesOnlyTheMappedPeers) {
   ncclFabricMemHandler* h = MakeRegisteredHandler();
   ScopedHook import(g_hipMemImportFromShareableHandle, FailImportOfPeer(3));
   ASSERT_NE(h->exchangeMemPtrs(), ncclSuccess);
-  ASSERT_EQ(reserved_.size(), 2u);  // peers 0 and 2
+  ASSERT_EQ(ledger_.reserved.size(), 2u);  // peers 0 and 2
 
   handler_.reset();
 
-  EXPECT_EQ(freed_.size(), 2u);
+  EXPECT_EQ(ledger_.addressFrees.size(), 2u);
 }
 
 TEST_F(FabricMemHandlerMicrotest, Destructor_AfterReleaseFails_StillFreesThatPeersMapping) {
   ncclFabricMemHandler* h = MakeRegisteredHandler();
   ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
   ASSERT_NE(h->exchangeMemPtrs(), ncclSuccess);
-  ASSERT_EQ(reserved_.size(), 1u);  // peer 0
-  void* const peer0 = reserved_.begin()->first;
+  ASSERT_EQ(ledger_.reserved.size(), 1u);  // peer 0
+  void* const peer0 = ledger_.reserved.begin()->first;
 
   handler_.reset();
 
-  EXPECT_EQ(freed_, std::vector<void*>{peer0});
+  EXPECT_EQ(ledger_.addressFrees, std::vector<void*>{peer0});
 }
 
 TEST_F(FabricMemHandlerMicrotest, Destructor_NeverExchanged_FreesNothing) {
@@ -433,7 +383,7 @@ TEST_F(FabricMemHandlerMicrotest, Destructor_NeverExchanged_FreesNothing) {
 
   handler_.reset();
 
-  EXPECT_TRUE(freed_.empty());
+  EXPECT_TRUE(ledger_.addressFrees.empty());
 }
 
 }  // namespace

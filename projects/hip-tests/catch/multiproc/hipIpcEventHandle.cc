@@ -8,9 +8,14 @@
 #include <hip_test_checkers.hh>
 
 #ifdef __linux__
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#include <cstddef>
+#include <cstring>
+#include <string>
 
 /**
  * @addtogroup hipIpcGetEventHandle hipIpcGetEventHandle
@@ -373,6 +378,70 @@ HIP_TEST_CASE(Unit_hipIpcEventHandle_ParameterValidation) {
       REQUIRE(false);
     }
   }
+
+#if HT_AMD
+  // AMD handle layout: type (0 selects the emulated /dev/shm path), creator pid, 32-byte name.
+  struct EmulatedIpcEventHandle {
+    uint32_t type;
+    int32_t creator_pid;
+    char shmem_name[32];
+  };
+  static_assert(sizeof(EmulatedIpcEventHandle) <= sizeof(hipIpcEventHandle_t));
+
+  SECTION("Open emulated handle whose name is not NUL-terminated") {
+    hipIpcEventHandle_t ipc_handle{};
+    constexpr size_t name_offset = offsetof(EmulatedIpcEventHandle, shmem_name);
+    std::memset(reinterpret_cast<char*>(&ipc_handle) + name_offset, 'A',
+                sizeof(ipc_handle) - name_offset);
+    hipEvent_t opened = reinterpret_cast<hipEvent_t>(0x1);
+    HIP_CHECK_ERROR(hipIpcOpenEventHandle(&opened, ipc_handle), hipErrorInvalidValue);
+    REQUIRE(opened == nullptr);
+  }
+
+  SECTION("Open emulated handle with a name the runtime never exports") {
+    const std::string name = "/hiptest_foreign_" + std::to_string(getpid());
+    shm_unlink(name.c_str());
+
+    hipIpcEventHandle_t ipc_handle{};
+    auto* h = reinterpret_cast<EmulatedIpcEventHandle*>(&ipc_handle);
+    std::strncpy(h->shmem_name, name.c_str(), sizeof(h->shmem_name) - 1);
+
+    hipEvent_t opened = nullptr;
+    ret = hipIpcOpenEventHandle(&opened, ipc_handle);
+    const int fd = shm_open(name.c_str(), O_RDONLY, 0);
+    if (fd >= 0) {
+      close(fd);
+      shm_unlink(name.c_str());
+    }
+    if (ret == hipSuccess) {
+      HIP_CHECK(hipEventDestroy(opened));
+    }
+    REQUIRE(ret == hipErrorInvalidValue);
+    REQUIRE(fd < 0);  // a rejected handle must not leave a shared memory object behind
+  }
+
+  SECTION("Open emulated handle whose shared memory object does not exist") {
+    const std::string name = "/hip_missing_" + std::to_string(getpid());
+    shm_unlink(name.c_str());
+
+    hipIpcEventHandle_t ipc_handle{};
+    auto* h = reinterpret_cast<EmulatedIpcEventHandle*>(&ipc_handle);
+    std::strncpy(h->shmem_name, name.c_str(), sizeof(h->shmem_name) - 1);
+
+    hipEvent_t opened = nullptr;
+    ret = hipIpcOpenEventHandle(&opened, ipc_handle);
+    const int fd = shm_open(name.c_str(), O_RDONLY, 0);
+    if (fd >= 0) {
+      close(fd);
+      shm_unlink(name.c_str());
+    }
+    if (ret == hipSuccess) {
+      HIP_CHECK(hipEventDestroy(opened));
+    }
+    REQUIRE(ret == hipErrorInvalidValue);
+    REQUIRE(fd < 0);  // opening must never create the object
+  }
+#endif
 
   SECTION("Open handle in process that created it") {
     hipEvent_t event1, event2;

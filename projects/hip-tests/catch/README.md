@@ -72,6 +72,15 @@ Every test case has its own entry. Currently supported options are:
 - disabled : Temporarily skip the case on the listed targets (a regression or tracked bug that is expected to be re-enabled)
 - unsupported : Permanently skip the case on the listed targets, where the platform, architecture, or backend cannot support it
 `disabled` and `unsupported` share the same syntax and produce the same skip; they differ only in intent (temporary regression versus permanent capability gap).
+Each takes the mapping form `{targets: [...], reason: "..."}`. A section with a
+non-empty `targets` list **must** carry a non-empty `reason`, and that reason **must**
+cite a real Jira reference from a known project key (**AIRUNTIME, ROCM, SWDEV, EXSWHTEC,
+AIRADSW**), e.g. `AIRUNTIME-2892`; both are enforced by `check_config.py` in CI. The known
+project keys are an allowlist; add a new one by editing the `JIRA_PROJECTS` tuple in
+`check_config.py`. The bare flat-list form (`disabled: [amd_wsl]`) is no longer accepted for a
+non-empty skip. An empty section (`targets: []`) is a no-op and needs no reason. If a
+skip has not yet been triaged, lead the reason with the tracking ticket, e.g.
+`AIRUNTIME-2744 - needs to be re-triaged`.
 The group name is automatically added as a tag for every case.
 Changing the configuration file will retrigger the build, so we have an up to date configuration every time.
 
@@ -147,10 +156,57 @@ To run the `level_0` tests with `level_0` parameters, set both explicitly.
 | `ctest -N`, `--list-tests`, `--help` | — | no level is resolved at all |
 
 `HIP_TEST_LEVEL` must name exactly one supported level (`level_0` through
-`level_4`). Anything else — a list such as `level_0,level_2`, an exclusion such
+`level_4`) or one test category (see [Test categories](#test-categories)). Anything else — a list such as `level_0,level_2`, an exclusion such
 as `~level_4`, a bracketed tag such as `[level_0]`, or a typo — is rejected: the
 test binary prints an error and exits with a failure before running any test,
 rather than silently falling back to the default parameters.
+
+### Test categories
+
+`catch/config/configs/test_categories.yaml` names groups of levels, so a CI stage can ask
+for a tier rather than spell out levels. A test case joins a category when its
+`level:` list overlaps that category's `test_levels`, which makes the categories
+nest: a `level_0` case is in all four.
+
+| Category | Levels | Parameters | Intended stage |
+|---|---|---|---|
+| `quick` | 0 | `level_0` | build/CI sanity check |
+| `standard` | 0, 1 | `level_1` | PR gate for component changes |
+| `comprehensive` | 0, 1, 2 | `level_2` | nightly |
+| `full` | 0–4 | `level_4` | pre-release, on demand |
+
+Categories work with both knobs, with the same single meaning each:
+
+- **As a filter**, a category is a Catch2 tag and so a ctest label:
+  `ctest -L quick` or `./MemoryTest1 "[quick]"` selects the category's tests.
+  It never changes the parameters.
+- **As `HIP_TEST_LEVEL`**, a category stands for the single level in the
+  *Parameters* column above — the highest level it covers. It never filters.
+
+| Invocation | Parameters | Tests that run |
+|---|---|---|
+| `ctest -L quick` | `level_2` (default) | the `quick`-labelled entries |
+| `./MemoryTest1 "[quick]"` | `level_2` (default) | only `[quick]`-tagged |
+| `HIP_TEST_LEVEL=quick ctest` | `level_0` | every test |
+| `HIP_TEST_LEVEL=quick ctest -L quick` | `level_0` | the `quick`-labelled entries |
+| `HIP_TEST_LEVEL=full ./MemoryTest1 "[full]"` | `level_4` | only `[full]`-tagged |
+
+`HIP_TEST_LEVEL=quick` is exactly `HIP_TEST_LEVEL=level_0`. Only a single
+category name is accepted; lists, exclusions and bracketed forms are rejected
+like any other invalid value.
+
+Categories do not carry exclusions. A test case declares its own in the
+`disabled:` or `unsupported:` field of its group config (see
+[Configuration](#configuration) for the list and `{targets, reason}` forms),
+where a target may name the platform and OS (`amd_linux`, `amd_windows`,
+`nvidia_linux`, `nvidia_windows`, `amd_wsl`), the exact architecture the build
+targets (`<arch>`), the two combined (`linux_<arch>`, `windows_<arch>`), or
+`asan`. `test_categories.yaml` lists every accepted spelling in full.
+
+A matching target in either field tags the case `[disabled]` and registers it
+`DISABLED TRUE` in ctest. Every target also produces an `[exclude_<entry>]` label whether or not it
+matched this build, so a runner can filter on one directly —
+`ctest -L standard -LE exclude_amd_wsl`.
 
 ### Writing level-aware tests with `isQuickLevel()`
 

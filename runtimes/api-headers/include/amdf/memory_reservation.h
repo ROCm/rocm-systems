@@ -60,10 +60,11 @@ typedef struct amdf_memory_reservation_access_t {
   /// Consumers sharing host/SVA translations require identical envelopes.
   amdf_memory_access_t access;
   /// Minimum mapping offset/length unit, or zero for provider policy.
-  /// Must be a power-of-two multiple of the native mapping granularity and
-  /// divide the reservation length. The returned geometry also satisfies any
-  /// consumers sharing this native mapping group. Independently owned native
-  /// views use these units on platforms requiring whole-view removal.
+  /// Must be a power-of-two multiple of the native mapping granularity. The
+  /// final unit may be shorter, ending exactly at the native-aligned
+  /// reservation length. The returned geometry also satisfies any consumers
+  /// sharing this native mapping group. Independently owned native views use
+  /// these units on platforms requiring whole-view removal.
   uint64_t mapping_granularity;
 } amdf_memory_reservation_access_t;
 
@@ -75,7 +76,9 @@ typedef struct amdf_memory_reservation_create_info_t {
   uint32_t structure_size;
   /// Optional input extension chain. No extensions are defined.
   const void* next;
-  /// Nonzero length shared by all requested consumers.
+  /// Nonzero length shared by all requested consumers, satisfying their native
+  /// reservation and mapping granularities. It need not fill the final unit of
+  /// a larger caller-selected mapping granularity.
   uint64_t byte_length;
   /// Minimum power-of-two base alignment, or zero for provider policy.
   uint64_t minimum_alignment;
@@ -114,7 +117,8 @@ typedef struct amdf_memory_reservation_access_info_t {
   uint64_t address;
   /// Complete reserved length in bytes.
   uint64_t byte_length;
-  /// Required native mapping offset and length alignment in bytes.
+  /// Required mapping offset alignment and full replacement unit in bytes.
+  /// The final unit may be shorter and ends exactly at byte_length.
   uint64_t mapping_granularity;
   /// Device reset epoch, or zero for a host projection.
   uint64_t reset_epoch;
@@ -125,7 +129,8 @@ typedef struct amdf_memory_reservation_access_info_t {
 typedef struct amdf_memory_mapping_update_t {
   /// Byte offset in the destination reservation.
   uint64_t target_byte_offset;
-  /// Nonzero length wholly contained by the destination and any source.
+  /// Nonzero length wholly contained by the destination and any source. A
+  /// non-multiple of the mapping unit must end exactly at the reservation end.
   uint64_t byte_length;
   /// Ordinary prepared backing, or NULL to detach the destination range.
   /// The caller keeps backing alive through its last installed alias and user.

@@ -11,16 +11,19 @@
 #[cfg(test)]
 use super::test_driver;
 use super::{
-    AddressSpaceInfo, AllocationOperations, Driver, GpuDriver, GpuInstrumentationOperations,
-    GpuKernelQueueOperations, GpuUserQueueOperations, KfdDriver, KfdEventSubscription, linux_kfd,
+    AddressSpaceInfo, AllocationOperations, AllocationState, Driver, GpuDriver,
+    GpuInstrumentationOperations, GpuKernelQueueOperations, GpuUserQueueOperations, KfdDriver,
+    KfdEventSubscription, linux_kfd,
 };
 use crate::device::event::DeviceEvent;
 use crate::device::gpu::profiling::{
-    ClockCounters, PcSamplingConfiguration, PcSamplingConfigurationSet,
+    ClockCounters, PcSamplingConfiguration, PcSamplingConfigurationSet, SpmDestinationFailure,
+    SpmDestinationReport,
 };
+use crate::memory::Allocation;
 use crate::memory::storage::Shared;
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, EndpointDetails};
+use crate::topology::{Endpoint, TopologySnapshot};
 use crate::{Error, ErrorKind};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -68,11 +71,28 @@ impl DriverInstance {
         }
     }
 
-    pub(crate) fn has_other_owners(&self) -> bool {
-        match self {
-            Self::LinuxKfd(driver) => Shared::strong_count(driver) != 1,
+    /// Checks whether an allocation holds this exact installed driver.
+    pub(crate) fn owns_allocation(&self, allocation: &Allocation) -> bool {
+        match (self, &allocation.inner) {
+            (Self::LinuxKfd(driver), AllocationState::LinuxKfd(allocation)) => {
+                allocation.shares_driver_instance(driver)
+            }
             #[cfg(test)]
-            Self::Test(driver) => Shared::strong_count(driver) != 1,
+            (Self::Test(driver), AllocationState::Test(allocation)) => {
+                allocation.shares_driver_instance(driver)
+            }
+            #[cfg(test)]
+            _ => false,
+        }
+    }
+
+    /// Counts only the driver reference held by a recognized internal page.
+    pub(crate) fn has_other_owners_except(&self, page: Option<&Allocation>) -> bool {
+        let expected = 1 + usize::from(page.is_some_and(|page| self.owns_allocation(page)));
+        match self {
+            Self::LinuxKfd(driver) => Shared::strong_count(driver) != expected,
+            #[cfg(test)]
+            Self::Test(driver) => Shared::strong_count(driver) != expected,
         }
     }
 
@@ -105,11 +125,40 @@ impl DriverInstance {
         }
     }
 
+    pub(crate) fn contribute_topology(&self, snapshot: &mut TopologySnapshot) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(driver) => driver.contribute_topology(snapshot),
+            #[cfg(test)]
+            Self::Test(driver) => driver.contribute_topology(snapshot),
+        }
+    }
+
+    pub(crate) fn can_access_local_memory(&self, consumer: &Endpoint, owner: &Endpoint) -> bool {
+        if consumer.driver_instance != self.instance_id()
+            || owner.driver_instance != self.instance_id()
+        {
+            return false;
+        }
+        match self {
+            Self::LinuxKfd(driver) => driver.can_access_local_memory(consumer, owner),
+            #[cfg(test)]
+            Self::Test(driver) => driver.can_access_local_memory(consumer, owner),
+        }
+    }
+
     pub(crate) fn open_endpoint(&self, id: [u8; 16]) -> Result<Endpoint, Error> {
         match self {
             Self::LinuxKfd(driver) => driver.open_endpoint(id),
             #[cfg(test)]
             Self::Test(driver) => driver.open_endpoint(id),
+        }
+    }
+
+    pub(crate) fn probe_endpoint(&self, id: [u8; 16]) -> Result<Option<Endpoint>, Error> {
+        match self {
+            Self::LinuxKfd(driver) => driver.probe_endpoint(id),
+            #[cfg(test)]
+            Self::Test(driver) => driver.probe_endpoint(id),
         }
     }
 
@@ -127,14 +176,11 @@ impl DriverInstance {
         }
     }
 
-    pub(crate) fn query_endpoint_details(
-        &self,
-        endpoint: &Endpoint,
-    ) -> Result<EndpointDetails, Error> {
+    pub(crate) fn populate_endpoint(&self, endpoint: &mut Endpoint) -> Result<(), Error> {
         match self {
-            Self::LinuxKfd(driver) => driver.query_endpoint_details(endpoint),
+            Self::LinuxKfd(driver) => driver.populate_endpoint(endpoint),
             #[cfg(test)]
-            Self::Test(driver) => driver.query_endpoint_details(endpoint),
+            Self::Test(driver) => driver.populate_endpoint(endpoint),
         }
     }
 
@@ -172,6 +218,24 @@ pub(crate) enum DeviceDriverState {
 }
 
 impl DeviceDriverState {
+    /// Uses the retained activation driver to check its cached local-memory
+    /// access policy for two devices of that same driver instance.
+    pub(crate) fn can_access_local_memory(
+        &self,
+        other: &Self,
+        consumer: &Endpoint,
+        owner: &Endpoint,
+    ) -> bool {
+        if !self.shares_driver_instance(other) {
+            return false;
+        }
+        match self {
+            Self::LinuxKfd { driver, .. } => driver.can_access_local_memory(consumer, owner),
+            #[cfg(test)]
+            Self::Test { driver, .. } => driver.can_access_local_memory(consumer, owner),
+        }
+    }
+
     /// Reports whether this driver can register host pages for an endpoint.
     pub(crate) fn supports_host_registration(&self, endpoint: &Endpoint) -> bool {
         match self {
@@ -206,24 +270,17 @@ impl DeviceDriverState {
         match self {
             Self::LinuxKfd { driver, state } => Some(GpuDriverRef::LinuxKfd { driver, state }),
             #[cfg(test)]
-            Self::Test { .. } => None,
+            Self::Test { driver, state } => Some(GpuDriverRef::Test { driver, state }),
         }
     }
     /// Subscribes to the activated driver's retained system notifications.
-    #[allow(
-        clippy::unnecessary_wraps,
-        reason = "other driver variants may not support events"
-    )]
     pub(crate) fn subscribe_events(&self) -> Result<EventSubscription, Error> {
         match self {
             Self::LinuxKfd { state, .. } => {
                 Ok(EventSubscription::LinuxKfd(state.subscribe_events()?))
             }
             #[cfg(test)]
-            Self::Test { .. } => Err(Error::Operation {
-                kind: ErrorKind::Unsupported,
-                detail: "driver does not expose system events",
-            }),
+            Self::Test { state, .. } => Ok(EventSubscription::Test(state.subscribe_events())),
         }
     }
 
@@ -282,6 +339,9 @@ impl DeviceDriverState {
 pub(crate) enum EventSubscription {
     /// Linux KFD observer retained by the generic device event handle.
     LinuxKfd(KfdEventSubscription),
+    /// Test-driver observer used to exercise backend-neutral event routing.
+    #[cfg(test)]
+    Test(test_driver::TestEventSubscription),
 }
 
 impl EventSubscription {
@@ -289,6 +349,17 @@ impl EventSubscription {
     pub(crate) fn poll(&mut self) -> Result<Option<DeviceEvent>, Error> {
         match self {
             Self::LinuxKfd(subscription) => subscription.poll(),
+            #[cfg(test)]
+            Self::Test(subscription) => subscription.poll(),
+        }
+    }
+
+    /// Blocks until a native event may be ready or the timeout expires.
+    pub(crate) fn wait_native(&self, timeout: std::time::Duration) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(subscription) => subscription.wait_native(timeout),
+            #[cfg(test)]
+            Self::Test(subscription) => subscription.wait_native(timeout),
         }
     }
 }
@@ -299,11 +370,21 @@ impl EventSubscription {
 /// checks the driver instance and reopens the endpoint before using it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum EndpointSelector {
-    /// KFD node identity captured during passive discovery.
-    LinuxKfd(linux_kfd::LinuxSelector),
+    /// KFD node identity and cached native peer-access evidence.
+    LinuxKfd {
+        native: linux_kfd::LinuxSelector,
+        access_targets: Option<Shared<Vec<KfdAccessTarget>>>,
+    },
     /// Driver-private selector for a future non-KFD backend.
     #[allow(dead_code)]
     Opaque(u64),
+}
+
+/// KFD node and GPU identity used only for driver-qualified access policy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct KfdAccessTarget {
+    pub node: u32,
+    pub gpu_id: u32,
 }
 
 #[cfg(not(all(
@@ -346,37 +427,69 @@ pub(crate) enum GpuDriverRef<'a> {
         driver: &'a Shared<KfdDriver>,
         state: &'a KfdDeviceState,
     },
+    /// GPU capability exercised by the test driver without KFD.
+    #[cfg(test)]
+    Test {
+        driver: &'a Shared<test_driver::TestDriver>,
+        state: &'a test_driver::TestDevice,
+    },
+}
+
+#[cfg(test)]
+pub(crate) fn unsupported_test_gpu() -> Error {
+    Error::Operation {
+        kind: ErrorKind::Unsupported,
+        detail: "test GPU does not implement this native capability",
+    }
 }
 
 /// Routes GPU-only operations through a checked GPU driver projection.
 impl GpuDriverRef<'_> {
+    pub(crate) fn xnack_enabled(&self) -> Result<bool, Error> {
+        match self {
+            Self::LinuxKfd { driver, state } => driver.xnack_enabled(state),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
+        }
+    }
+
     pub(crate) fn supports_expert_scheduling(&self) -> Result<bool, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.supports_expert_scheduling(state),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
     pub(crate) fn set_persisting_l2_cache_size(&self, size: u32) -> Result<(), Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.set_persisting_l2_cache_size(state, size),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
     pub(crate) fn available_memory(&self) -> Result<u64, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.available_memory(state),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
     pub(crate) fn available_sdma_engines(&self) -> Result<u32, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.available_sdma_engines(state),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
     pub(crate) fn clock_counters(&self) -> Result<ClockCounters, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.clock_counters(state),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
@@ -386,12 +499,16 @@ impl GpuDriverRef<'_> {
     ) -> Result<Vec<PcSamplingConfiguration>, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.pc_sampling_configurations(state, set),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
     pub(crate) fn surface_config(&self) -> Result<crate::device::gpu::GpuSurfaceConfig, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.surface_config(state),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
@@ -409,18 +526,24 @@ impl GpuDriverRef<'_> {
             Self::LinuxKfd { driver, state } => unsafe {
                 driver.set_trap_handler(state, handler_address, memory_address)
             },
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
     pub(crate) fn spm_acquire(&self) -> Result<(), Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.spm_acquire(state),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
     pub(crate) fn spm_release(&self) -> Result<(), Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.spm_release(state),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
@@ -431,23 +554,19 @@ impl GpuDriverRef<'_> {
     pub(crate) unsafe fn spm_set_destination(
         &self,
         size: u32,
-        timeout: &mut u32,
-        bytes_copied: &mut u32,
+        timeout: u32,
         destination: Option<usize>,
-        data_loss: &mut bool,
-    ) -> Result<(), Error> {
+    ) -> Result<SpmDestinationReport, SpmDestinationFailure> {
         match self {
             // SAFETY: The caller preserves previous and new destinations.
             Self::LinuxKfd { driver, state } => unsafe {
-                driver.spm_set_destination(
-                    state,
-                    size,
-                    timeout,
-                    bytes_copied,
-                    destination,
-                    data_loss,
-                )
+                driver.spm_set_destination(state, size, timeout, destination)
             },
+            #[cfg(test)]
+            Self::Test { .. } => Err(SpmDestinationFailure {
+                error: unsupported_test_gpu(),
+                report: SpmDestinationReport::default(),
+            }),
         }
     }
 }

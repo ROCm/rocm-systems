@@ -10,6 +10,7 @@
 #include "core/trace_cache/sample_type.hpp"
 #include "library/tracing.hpp"
 #include <cstdint>
+#include <optional>
 
 using rocprofsys::common::units::bytes;
 using rocprofsys::common::units::data_size_cast;
@@ -41,8 +42,7 @@ void
 metadata_initialize_track()
 {
     auto _init_track = [&](const char* label) {
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = label, .thread_id = std::nullopt, .extdata = "{}" });
+        trace_cache::get_metadata_registry().ensure_track(label, std::nullopt);
     };
 
     static std::once_flag _once{};
@@ -149,7 +149,7 @@ cache_comm_data_events(const std::uint32_t device_id, int bytes)
     std::uint64_t        _now  = 0;
     {
         const std::unique_lock<std::mutex> _lk{ _mutex };
-        _now  = rocprofsys::tracing::now<std::uint64_t>();
+        _now  = rocprofsys::tracing::now();
         bytes = (value += bytes);
     }
     const std::string track_name      = Track::label;

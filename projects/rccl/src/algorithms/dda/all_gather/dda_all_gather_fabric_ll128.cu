@@ -103,23 +103,24 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
        nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer,
        ddaLL128AgSlotWords(bankSize, nRanks));
 
+  const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
   switch (nRanks) {
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
     break;
   }
 
@@ -134,9 +135,6 @@ bool ncclAllGatherDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
                                          ncclDataType_t datatype) {
   (void)sendbuff;
   (void)recvbuff;
-  if (!rcclParamDdaLL()) {
-    return false;
-  }
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }

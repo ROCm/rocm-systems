@@ -802,6 +802,12 @@ __device__ inline __attribute__((convergent)) int __syncthreads_or(int predicate
 #define XCC_ID_XCC_ID_OFFSET 0
 #endif
 
+#if defined(__gfx1250__)
+  #define __gfx125plus_clr__
+  #define SE_HW_ID_XCC_ID_SIZE     4
+  #define SE_HW_ID_XCC_ID_OFFSET   16
+#endif
+
 #if !defined(__HIP_NO_IMAGE_SUPPORT) && defined(__gfx94plus_clr__)
   #define __HIP_NO_IMAGE_SUPPORT   1
 #endif
@@ -846,6 +852,9 @@ unsigned __smid(void)
                        ? __builtin_amdgcn_s_sendmsg_rtn(RTN_GET_SE_HW_ID)
                        : 0u;
     se       = (msg >> SE_HW_ID_SE_ID_OFFSET) & ((1 << SE_HW_ID_SE_ID_SIZE) - 1);
+    #if defined(__gfx125plus_clr__)
+    xcc      = (msg >> SE_HW_ID_XCC_ID_OFFSET) & ((1 << SE_HW_ID_XCC_ID_SIZE) - 1);
+    #endif
     se_bits  = SE_HW_ID_SE_ID_SIZE;
 
     unsigned hw = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_getreg)

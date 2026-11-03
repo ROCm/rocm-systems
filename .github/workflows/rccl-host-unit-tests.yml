@@ -6,6 +6,10 @@ name: RCCL host unit tests
 # links no HIP/ROCm runtime. The workflow's own path is in the trigger so it
 # self-runs on the PR that introduces it. JIRA ID: AICOMRCCL-1711
 #
+# rccl-coco-pr.yml skips host-only test and test_runner PRs to develop because
+# this workflow covers them. Keep its COVERAGE_RULES entries in
+# .github/scripts/rccl_change_sets.py in sync (its tests enforce it).
+#
 # TODO(AICOMRCCL-1711): fold this into TheRock's packaged CI once the host-test
 # gate stabilizes
 

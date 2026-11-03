@@ -14,6 +14,7 @@
 
 #ifdef MPI_TESTS_ENABLED
 
+#include "DdaMPITestHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
 #include "TestChecks.hpp"
@@ -47,12 +48,7 @@ inline bool fabricInitRequired()
 
 inline bool isGfx1250Device()
 {
-    hipDeviceProp_t props{};
-    if(hipGetDeviceProperties(&props, 0) != hipSuccess)
-    {
-        return false;
-    }
-    return std::string(props.gcnArchName).find("gfx1250") != std::string::npos;
+    return DdaMPITestHelpers::isGfx1250Device();
 }
 
 inline size_t countOccurrences(const std::string& haystack, const char* needle)
@@ -175,11 +171,13 @@ protected:
         return mpiCoordinatedSkipReason(!DdaFabricMPI::isGfx1250Device(), reason);
     }
 
-    // After createTestCommunicator(): without MNNVL, or on a multi-clique comm, fabric DDA never initializes.
-    std::string fabricInitSkipReason()
+    // After comm init (default: createTestCommunicator()'s): without MNNVL, or on a multi-clique comm, fabric DDA
+    // never initializes.
+    std::string fabricInitSkipReason(ncclComm_t comm = nullptr)
     {
-        return mpiCoordinatedSkipReason(getActiveCommunicator()->ddaFabricBarrierState == nullptr,
-                                        "DDA fabric path did not initialize");
+        if(comm == nullptr)
+            comm = getActiveCommunicator();
+        return mpiCoordinatedSkipReason(comm->ddaFabricBarrierState == nullptr, "DDA fabric path did not initialize");
     }
 
     size_t countLogNeedle(const char* needle) const

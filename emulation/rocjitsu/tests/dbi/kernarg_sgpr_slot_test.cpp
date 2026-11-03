@@ -101,7 +101,8 @@ TEST_P(KernargSgprSlot, CommandProcessorWritesThePointerWhereTheHelperNamesIt) {
   // USER_SGPR_COUNT field it is paired with is not arch-neutral (gfx1250 widens
   // it), but DbiSim writes the generic field and has no gfx1250 config. The
   // kernarg bytes are never read; only the pointer's placement is under test.
-  test::DbiSim sim("cdna3", /*wave_size=*/64);
+  test::DbiSim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize("cdna3", /*wave_size=*/64));
   sim.set_kernarg(std::vector<uint8_t>(8, 0), properties, c.user_sgpr_count);
 
   const std::vector<uint32_t> code{build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3)};
@@ -124,7 +125,8 @@ TEST(KernargSgprSlotNeighbours, ThePointerIsNotAlsoInTheAdjacentPairs) {
 
   const std::vector<uint32_t> code{build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3)};
   for (uint32_t slot : {kSlot - 2, kSlot + 2}) {
-    test::DbiSim sim("cdna3", /*wave_size=*/64);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize("cdna3", /*wave_size=*/64));
     sim.set_kernarg(std::vector<uint8_t>(8, 0), properties, /*user_sgpr_count=*/8);
     const std::optional<uint64_t> pair = sim.run_and_read_sgpr64(code, /*private_bytes=*/0, slot);
     ASSERT_TRUE(pair.has_value()) << "no wave halted";

@@ -13,14 +13,41 @@ use crate::memory;
 use crate::support::*;
 use rocddi::memory::host;
 use rocddi::memory::storage::Owned;
+use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(crate) struct Reservation {
     pub(crate) instance: *mut Instance,
-    pub(crate) native: Option<host::HostReservation>,
+    /// Mutation and destruction are caller-serialized; queries read only the
+    /// immutable fields outside this cell.
+    mutation: UnsafeCell<ReservationMutation>,
     pub(crate) info: amdf_memory_reservation_access_info_t,
     pub(crate) children: AtomicU64,
+}
+
+/// Native state changed only by caller-serialized reservation operations.
+struct ReservationMutation {
+    /// Owned host VA reservation until terminal destruction.
+    native: Option<host::HostReservation>,
+    /// A partial native map failure prevents further replacements.
     poisoned: bool,
+}
+
+impl Reservation {
+    /// Borrows mutation state after the caller excludes another mutation or
+    /// destruction of this reservation. Immutable queries never access it.
+    ///
+    /// # Safety
+    /// The caller serializes reservation mutation and destruction.
+    #[allow(
+        clippy::mut_from_ref,
+        reason = "UnsafeCell holds caller-serialized native state beside lock-free immutable queries"
+    )]
+    unsafe fn mutation(&self) -> &mut ReservationMutation {
+        // SAFETY: The C contract excludes another mutator, while the cell
+        // permits this disjoint mutation beside immutable query borrows.
+        unsafe { &mut *self.mutation.get() }
+    }
 }
 
 fn capabilities(page: u64) -> amdf_memory_reservation_capabilities_t {
@@ -105,13 +132,10 @@ pub(crate) unsafe extern "C" fn create(
         } else {
             access.mapping_granularity
         };
-        if !granularity.is_power_of_two()
-            || granularity < page
-            || info.byte_length % granularity != 0
-        {
+        if !granularity.is_power_of_two() || granularity < page {
             return Err(INVALID);
         }
-        let slot = Owned::<Reservation>::try_new_uninit().map_err(|_| EXHAUSTED)?;
+        let slot = instance.owner_slot::<Reservation>()?;
         let native_owner =
             host::HostReservation::reserve(info.byte_length, info.minimum_alignment.max(page))
                 .map_err(|error| native(&error))?;
@@ -119,7 +143,10 @@ pub(crate) unsafe extern "C" fn create(
         register(&instance.children)?;
         let owner = slot.write(Reservation {
             instance: pointer.cast(),
-            native: Some(native_owner),
+            mutation: UnsafeCell::new(ReservationMutation {
+                native: Some(native_owner),
+                poisoned: false,
+            }),
             info: amdf_memory_reservation_access_info_t {
                 ordinal: 0,
                 mapping_access_ordinal: 0,
@@ -132,7 +159,6 @@ pub(crate) unsafe extern "C" fn create(
                 ..Default::default()
             },
             children: AtomicU64::new(0),
-            poisoned: false,
         });
         out.write(owner.into_raw().cast());
         Ok(())
@@ -179,9 +205,10 @@ fn validate_update(
     let granularity = reservation.info.mapping_granularity;
     if update.byte_length == 0
         || update.target_byte_offset % granularity != 0
-        || update.byte_length % granularity != 0
         || update.target_byte_offset > reservation.info.byte_length
         || update.byte_length > reservation.info.byte_length - update.target_byte_offset
+        || (update.byte_length % granularity != 0
+            && update.byte_length != reservation.info.byte_length - update.target_byte_offset)
     {
         return Err(INVALID);
     }
@@ -218,11 +245,13 @@ pub(crate) unsafe extern "C" fn update(
     updates: *const amdf_memory_mapping_update_t,
 ) -> u64 {
     boundary(|| unsafe {
-        let reservation = exclusive(pointer.cast::<Reservation>())?;
+        let reservation = object(pointer.cast::<Reservation>())?;
         if ordinal != 0 {
             return Err(RANGE);
         }
-        if reservation.poisoned {
+        // SAFETY: The caller serializes updates and destruction.
+        let mutation = reservation.mutation();
+        if mutation.poisoned {
             return Err(PRECONDITION);
         }
         let updates = array(updates, count)?;
@@ -238,14 +267,14 @@ pub(crate) unsafe extern "C" fn update(
         }
         for update in updates {
             let result = if update.memory.is_null() {
-                reservation
+                mutation
                     .native
                     .as_mut()
                     .ok_or(INTERNAL)?
                     .clear(update.target_byte_offset, update.byte_length)
             } else {
                 let (source, _) = memory::host_mapping_source(update.memory, reservation.instance)?;
-                reservation.native.as_mut().ok_or(INTERNAL)?.replace(
+                mutation.native.as_mut().ok_or(INTERNAL)?.replace(
                     update.target_byte_offset,
                     update.byte_length,
                     source,
@@ -254,7 +283,7 @@ pub(crate) unsafe extern "C" fn update(
                 )
             };
             if let Err(error) = result {
-                reservation.poisoned = true;
+                mutation.poisoned = true;
                 return Err(native(&error));
             }
         }
@@ -267,17 +296,19 @@ pub(crate) unsafe extern "C" fn detach(
     ordinal: u32,
 ) -> u64 {
     boundary(|| unsafe {
-        let reservation = exclusive(pointer.cast::<Reservation>())?;
+        let reservation = object(pointer.cast::<Reservation>())?;
         if ordinal != 0 {
             return Err(RANGE);
         }
-        let result = reservation
+        // SAFETY: The caller serializes detach and destruction.
+        let mutation = reservation.mutation();
+        let result = mutation
             .native
             .as_mut()
             .ok_or(INTERNAL)?
             .clear(0, reservation.info.byte_length);
         if let Err(error) = result {
-            reservation.poisoned = true;
+            mutation.poisoned = true;
             return Err(native(&error));
         }
         Ok(())
@@ -286,11 +317,12 @@ pub(crate) unsafe extern "C" fn detach(
 
 pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_memory_reservation_t) -> u64 {
     boundary(|| unsafe {
-        let reservation = exclusive(pointer.cast::<Reservation>())?;
+        let reservation = object(pointer.cast::<Reservation>())?;
         if reservation.children.load(Ordering::Acquire) != 0 {
             return Err(BUSY);
         }
-        let mut native_owner = reservation.native.take().ok_or(INTERNAL)?;
+        // SAFETY: Destruction is exclusive to every reservation use.
+        let mut native_owner = reservation.mutation().native.take().ok_or(INTERNAL)?;
         let result = native_owner.free().map_err(|error| native(&error));
         if result.is_err() {
             std::mem::forget(native_owner);
