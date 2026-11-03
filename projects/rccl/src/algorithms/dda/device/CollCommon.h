@@ -415,18 +415,29 @@ constexpr int ddaLLRecvBatch(int n) {
 // crowds the CU memory path its remote stores also use; with few the extra sweep costs more than it saves.
 constexpr int kDdaLLSpinOneMinLines = 5;
 
-// L2-prefetches the 8B send packets first + k * step (k < count, below limit) before the LL epoch barrier, one 128B
-// line per 16 lanes (gfx1250; th 1 walks page tables); a no-op elsewhere.
+// Payload bytes one LL packet carries; the send buffer is read one packet per thread.
+constexpr int kDdaLLPayloadBytes = 8;
+static_assert(sizeof(LLPacket16) == 2 * kDdaLLPayloadBytes, "an LL line is payload plus one flag per 4B word");
+
+// Bytes one global_prefetch pulls into L2: a 128B cache line.
+constexpr int kDdaLLPrefetchLineBytes = 128;
+
+// Consecutive threads whose packets share a prefetch line; one per group issues it, for any wave size.
+constexpr int kDdaLLPrefetchThreadsPerLine = kDdaLLPrefetchLineBytes / kDdaLLPayloadBytes;
+static_assert((kDdaLLPrefetchThreadsPerLine & (kDdaLLPrefetchThreadsPerLine - 1)) == 0, "thread group is a power of 2");
+
+// L2-prefetches send packets first + k * step (k < count, below limit) before the LL epoch barrier; gfx1250 only.
 __device__ __forceinline__ void ddaLLPrefetchSend(const void* sendbuff, size_t first, size_t step, int count,
                                                   size_t limit) {
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __has_builtin(__builtin_amdgcn_global_prefetch)
-  if ((threadIdx.x & 15) != 0) {
+  if (threadIdx.x % kDdaLLPrefetchThreadsPerLine != 0) {
     return;
   }
   const char* base = reinterpret_cast<const char*>(sendbuff);
 #pragma unroll 1
   for (int k = 0; k < count && first + (size_t)k * step < limit; ++k) {
-    const char* pkt = base + (first + (size_t)k * step) * 8;
+    const char* pkt = base + (first + (size_t)k * step) * kDdaLLPayloadBytes;
+    // th 1 also walks the page tables, so the first post-barrier read of the line does not.
     __builtin_amdgcn_global_prefetch((const __attribute__((address_space(1))) void*)pkt, 0x11);
   }
 #else
@@ -479,7 +490,11 @@ __device__ __forceinline__ bool ddaLLWaitLineFlagsBatched(const uint32_t* const 
   if (mask == 0) {
     return true;
   }
-  const uint32_t* first = line[__builtin_ctz(mask)];
+  const uint32_t* first = line[0];
+#pragma unroll
+  for (int i = kN - 1; i >= 0; --i) {
+    first = ((mask >> i) & 1u) != 0 ? line[i] : first;
+  }
   if (__builtin_popcount(mask) == 1) {
     uint32_t w0, f0, w1, f1;
     const auto* only = reinterpret_cast<const volatile LLPacket16*>(first);
@@ -500,15 +515,30 @@ __device__ __forceinline__ bool ddaLLWaitLineFlagsBatched(const uint32_t* const 
   int spins = 0;
   while (true) {
     uint32_t f0[kN], f1[kN];
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+    asm volatile("" ::: "memory");
+    v4u got[kN];
+#pragma unroll
+    for (int i = 0; i < kN; ++i) {
+      got[i] = __builtin_amdgcn_global_load_b128((v4u_gptr)src[i], RCCL_SYSTEM_SYNCSCOPE);
+    }
+    // Keep every load above this point so the flag tests cannot sink one between them.
+    asm volatile("" ::: "memory");
+#pragma unroll
+    for (int i = 0; i < kN; ++i) {
+      d0[i] = got[i][0];
+      f0[i] = got[i][1];
+      d1[i] = got[i][2];
+      f1[i] = got[i][3];
+    }
+#else
 #pragma unroll
     for (int i = 0; i < kN; ++i) {
       ddaLLLoadLineB128(src[i], d0[i], f0[i], d1[i], f1[i]);
     }
-    // Pins each slot's words to this sweep's load, so none is re-loaded behind a later branch.
-#pragma unroll
-    for (int i = 0; i < kN; ++i) {
-      asm volatile("" : "+v"(d0[i]), "+v"(f0[i]), "+v"(d1[i]), "+v"(f1[i]));
-    }
+    // Keep every load above this point so none sinks past the flag tests or out of the loop.
+    asm volatile("" ::: "memory");
+#endif
     bool stale = false;
     bool staleLine[kN];
 #pragma unroll

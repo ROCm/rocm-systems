@@ -43,6 +43,43 @@ constexpr size_t ddaLLArSlotPkts(size_t bankSize, int nRanks) {
   return ddaLLSlotPkts(bankSize, sizeof(LLPacket16) * (size_t)nRanks, 16);
 }
 
+// AllReduce one-shot only: folds packet pk of ranks 0..nRanks-1 in rank order, self from (s0, s1); false if aborted.
+template <typename T, int kB>
+__device__ __forceinline__ bool ddaLLFoldRanksInOrder(const LLPacket16* myBase, size_t slot, size_t pk, int nRanks,
+                                                      int selfRank, uint32_t s0, uint32_t s1, uint32_t flag,
+                                                      DdaKernelParams params, uint32_t& acc0, uint32_t& acc1) {
+  for (int base = 0; base < nRanks; base += kB) {
+    const uint32_t* line[kB];
+    uint32_t d0[kB], d1[kB];
+    uint32_t mask = 0;
+#pragma unroll
+    for (int i = 0; i < kB; ++i) {
+      const int peer = base + i;
+      const bool polled = peer < nRanks && peer != selfRank;
+      line[i] = polled ? reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk) : nullptr;
+      mask |= polled ? 1u << i : 0u;
+    }
+    if (!ddaLLWaitLineFlagsBatched(line, mask, flag, params, d0, d1)) {
+      return false;
+    }
+#pragma unroll
+    for (int i = 0; i < kB; ++i) {
+      const int peer = base + i;
+      if (peer < nRanks) {
+        const uint32_t e0 = peer == selfRank ? s0 : d0[i];
+        const uint32_t e1 = peer == selfRank ? s1 : d1[i];
+        if (peer == 0) {
+          acc0 = e0;
+          acc1 = e1;
+        } else {
+          ddaLLAddPayload<T>(acc0, acc1, e0, e1);
+        }
+      }
+    }
+  }
+  return true;
+}
+
 // LL flat all-reduce kernel. 1D grid over packets (8B payload each).
 //
 // Phase 1 (publish): rank selfRank writes its full sendbuff into every peer's
@@ -102,45 +139,17 @@ __launch_bounds__(512)
   // Phase 2: poll my slots for the other ranks and fold every rank's payload in
   // rank order, so each rank rounds the same partial sums and all get the same
   // result. My own payload comes straight from sendbuff.
-  // Each batch of peer lines is polled under one load wait; an abort is sticky so every thread reaches the epoch bump.
-  LLPacket16* myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
+  // An abort leaves the loop rather than returning, so every thread reaches the epoch bump.
+  const LLPacket16* myBase = reinterpret_cast<const LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
   constexpr int kB = ddaLLRecvBatch(NRANKS_CT);
-  bool aborted = false;
-  for (size_t pk = gtid; pk < nPk && !aborted; pk += stride) {
-    const uint32_t s0 = in[2 * pk];
-    const uint32_t s1 = in[2 * pk + 1];
+  for (size_t pk = gtid; pk < nPk; pk += stride) {
     uint32_t acc0 = 0, acc1 = 0;
-    for (int base = 0; base < nRanks && !aborted; base += kB) {
-      const uint32_t* line[kB];
-      uint32_t d0[kB], d1[kB];
-      uint32_t mask = 0;
-#pragma unroll
-      for (int i = 0; i < kB; ++i) {
-        const int peer = base + i;
-        const bool polled = peer < nRanks && peer != selfRank;
-        line[i] = polled ? reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk) : nullptr;
-        mask |= polled ? 1u << i : 0u;
-      }
-      aborted = !ddaLLWaitLineFlagsBatched(line, mask, flag, params, d0, d1);
-#pragma unroll
-      for (int i = 0; i < kB; ++i) {
-        const int peer = base + i;
-        if (peer < nRanks) {
-          const uint32_t e0 = peer == selfRank ? s0 : d0[i];
-          const uint32_t e1 = peer == selfRank ? s1 : d1[i];
-          if (peer == 0) {
-            acc0 = e0;
-            acc1 = e1;
-          } else {
-            ddaLLAddPayload<T>(acc0, acc1, e0, e1);
-          }
-        }
-      }
+    if (!ddaLLFoldRanksInOrder<T, kB>(myBase, slot, pk, nRanks, selfRank, in[2 * pk], in[2 * pk + 1], flag, params,
+                                      acc0, acc1)) {
+      break;
     }
-    if (!aborted) {
-      out[2 * pk] = acc0;
-      out[2 * pk + 1] = acc1;
-    }
+    out[2 * pk] = acc0;
+    out[2 * pk + 1] = acc1;
   }
 
   ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
