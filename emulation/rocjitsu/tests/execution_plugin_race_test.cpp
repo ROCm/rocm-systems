@@ -583,6 +583,18 @@ TEST_F(TensorDmaRaceTest, EveryRangeOfATransferIsTracked) {
   EXPECT_TRUE(ds_read(1, 16));
 }
 
+TEST_F(TensorDmaRaceTest, SameWaveLoadOverwritingAPendingStoreSourceRaces) {
+  // Transfers from one wave complete in order but may access LDS out of order.
+  tensor_store(0, {{.address = 0, .bytes = 16}});
+  EXPECT_TRUE(tensor_load(0, {{.address = 4, .bytes = 8}}));
+}
+
+TEST_F(TensorDmaRaceTest, SameWaveLoadAfterTensorcntIsSafe) {
+  tensor_store(0, {{.address = 0, .bytes = 16}});
+  wait_tensorcnt(0, 0);
+  EXPECT_FALSE(tensor_load(0, {{.address = 0, .bytes = 16}}));
+}
+
 TEST_F(TensorDmaRaceTest, TransferIsCheckedAgainstPendingLdsAccesses) {
   EXPECT_FALSE(ds_read(1, 4));
   const size_t previous = sink->str().size();

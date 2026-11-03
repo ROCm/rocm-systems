@@ -521,7 +521,13 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   auto *rs = s->race_state;
   auto *detector = rs->getDetector();
   const auto waveId = rs->getWaveId();
+  // Tensor transfers from one wave complete on TENSORCNT in issue order, which
+  // partial waits rely on, so the event takes the TENSOR class. They do not
+  // access LDS in issue order, though: a later transfer may write bytes an
+  // earlier one has not read yet. Check the transfer's LDS bytes as unordered
+  // with every pending access, including the wave's own tensor transfers.
   constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
+  constexpr MemoryOrderClass ldsAccessOrder = MemoryOrderClass::UNORDERED;
   const int elementBytes = static_cast<int>(issue.element_size_bytes);
 
   // A transfer has no lanes; its violations report lane -1. The core takes
@@ -535,9 +541,9 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
       continue;
     const int addr = static_cast<int>(range.address);
     if (issue.is_load)
-      detector->validateWrite(addr, waveId, -1, static_cast<int>(bytes), memoryOrder);
+      detector->validateWrite(addr, waveId, -1, static_cast<int>(bytes), ldsAccessOrder);
     else
-      detector->validateRead(addr, waveId, -1, static_cast<int>(bytes), memoryOrder);
+      detector->validateRead(addr, waveId, -1, static_cast<int>(bytes), ldsAccessOrder);
   }
 
   // An instruction that moves no data, such as a store wholly outside the

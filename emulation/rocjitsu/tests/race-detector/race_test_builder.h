@@ -341,14 +341,16 @@ private:
   /// A transfer has no lanes; its violations report lane -1.
   void tensorTransfer(int wave, MemoryEventType type, std::span<const LdsByteRange> ranges,
                       int elementBytes) {
+    // Completion is in issue order (TENSOR); LDS access is not, as in the plugin.
     constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
+    constexpr MemoryOrderClass ldsAccessOrder = MemoryOrderClass::UNORDERED;
     for (const auto &range : ranges) {
       const int addr = static_cast<int>(range.address);
       const int bytes = static_cast<int>(range.bytes);
       if (type == MemoryEventType::GLOBAL_TO_LDS)
-        detector_->validateWrite(addr, WaveId{wave}, /*lane=*/-1, bytes, memoryOrder);
+        detector_->validateWrite(addr, WaveId{wave}, /*lane=*/-1, bytes, ldsAccessOrder);
       else
-        detector_->validateRead(addr, WaveId{wave}, /*lane=*/-1, bytes, memoryOrder);
+        detector_->validateRead(addr, WaveId{wave}, /*lane=*/-1, bytes, ldsAccessOrder);
     }
     const std::array obligations{
         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};

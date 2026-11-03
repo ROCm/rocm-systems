@@ -204,10 +204,13 @@ races. Some examples:
   store's source before `s_wait_tensorcnt` is reported; other waves also need an
   `s_barrier`. A load covers every element of its tile, including elements
   outside the tensor, which it zero-fills; padding bytes are excluded. A store
-  covers only the elements inside the tensor. Each instruction is registered
-  when it issues, as other memory instructions are, so an instruction that
-  moves no data still occupies its `tensorcnt` slot, and a transfer that waits
-  for memory is pending from the moment it issues.
+  covers only the elements inside the tensor. Transfers from one wave complete
+  in issue order but do not access LDS in issue order, so a transfer that
+  overlaps an earlier one from the same wave also races until
+  `s_wait_tensorcnt`. Each instruction is registered when it issues, as other
+  memory instructions are, so an instruction that moves no data still occupies
+  its `tensorcnt` slot, and a transfer that waits for memory is pending from the
+  moment it issues.
 
 Detection is at byte granularity: D16 (half-register) loads only flag races on
 the affected bytes, and LDS races are tracked per byte.

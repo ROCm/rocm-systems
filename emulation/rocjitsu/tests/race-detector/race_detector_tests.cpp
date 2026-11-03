@@ -1368,18 +1368,42 @@ TEST(RaceDetector, TensorDma_SameWavePartialTensorcntRetiresStoreAheadOfLoad) {
   EXPECT_TRUE(b.hasLdsRace(4));
 }
 
-TEST(RaceDetector, TensorDma_SameWaveTransfersOrdered) {
-  // Tensor DMA completes in issue order, so a load may overwrite the bytes an
-  // earlier store from the same wave is still reading.
+// Tensor DMA from one wave completes in issue order but does not access LDS in
+// issue order, so overlapping transfers from the same wave race until
+// s_wait_tensorcnt.
+TEST(RaceDetector, TensorDma_SameWaveLoadOverwritingAPendingStoreSourceRaces) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
   b.tensorStore(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.tensorLoad(/*wave=*/0, {{.address = 4, .bytes = 8}});
+  EXPECT_TRUE(b.hasLdsRace(4));
+}
+
+TEST(RaceDetector, TensorDma_SameWaveStoreReadingAPendingLoadDestinationRaces) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
   b.tensorLoad(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.tensorStore(/*wave=*/0, {{.address = 4, .bytes = 8}});
+  EXPECT_TRUE(b.hasLdsRace(4));
+}
+
+TEST(RaceDetector, TensorDma_SameWaveOverlappingTransfersAfterTensorcntAreSafe) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorStore(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/0);
+  b.tensorLoad(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/0);
+  b.tensorStore(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, TensorDma_SameWaveDisjointTransfersAreSafe) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorStore(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.tensorLoad(/*wave=*/0, {{.address = 16, .bytes = 16}});
   EXPECT_FALSE(b.hasRace());
 }
 
 TEST(RaceDetector, TensorDma_CrossWaveLoadThenStoreRace) {
-  // Tensor DMA is ordered only within one wave: wave 1's store reads bytes
-  // wave 0's load may still be writing.
+  // Wave 1's store reads bytes wave 0's load may still be writing.
   RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
   b.tensorLoad(/*wave=*/0, {{.address = 0, .bytes = 16}});
   b.tensorStore(/*wave=*/1, {{.address = 4, .bytes = 8}});
