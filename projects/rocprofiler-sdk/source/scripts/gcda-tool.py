@@ -30,7 +30,8 @@ and combine them into a single report without running the tests again.
 A test killed by a timeout (SIGKILL) while libgcov is writing a .gcda file
 can leave it truncated. gcov reads what is left, but gcov-tool merge can crash
 on it. Rather than predicting which files gcov-tool accepts, merge combines
-each file separately and leaves out any file that gcov-tool fails to merge.
+each file separately. When gcov-tool fails, it cannot tell which input is bad,
+so merge keeps the largest input rather than none.
 
 A .gcda whose stamp differs from its .gcno was written by an older compile of
 the object. gcov reports such files as 0% covered without failing, so check
@@ -39,11 +40,12 @@ exists, which is a problem with the CI steps, not with a test.
 """
 
 import os
-import re
 import sys
+import struct
 import shutil
 import argparse
 import tempfile
+import contextlib
 import subprocess
 import concurrent.futures
 
@@ -56,6 +58,8 @@ def gcov_sibling(gcov, name):
     path = os.path.realpath(path)
     dirname, basename = os.path.split(path)
     sibling = os.path.join(dirname, basename.replace("gcov", name, 1))
+    if sibling == path:
+        raise RuntimeError(f"{path} is not named like gcov: cannot find its {name}")
     if not os.path.isfile(sibling):
         raise RuntimeError(f"{name} matching {path} not found (expected {sibling})")
     return sibling
@@ -73,26 +77,28 @@ def github_message(kind, message):
     print(f"::{kind}::{message}" if github else f"{kind}: {message}")
 
 
-def read_stamp(gcov_dump, path):
-    """Stamp of a .gcda or .gcno file, or None if gcov-dump cannot read one"""
-    proc = subprocess.run(
-        [gcov_dump, path],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        universal_newlines=True,
-    )
-    stamp = re.search(r":stamp (\d+)$", proc.stdout, re.MULTILINE)
-    return stamp.group(1) if stamp else None
+def read_stamp(path, magic):
+    """Stamp of a .gcda or .gcno file, or None if the file has no gcov header"""
+    # the header is the magic, version and stamp words, in the writer's byte order
+    with open(path, "rb") as f:
+        header = f.read(12)
+    if len(header) < 12:
+        return None
+    for order in "<>":
+        words = struct.unpack(f"{order}3I", header)
+        if words[0] == struct.unpack(">I", magic)[0]:
+            return words[2]
+    return None
 
 
-def stale_error(gcov_dump, gcda):
+def stale_error(gcda):
     """Error message if a .gcda does not match the stamp of its .gcno"""
     gcno = f"{gcda[:-5]}.gcno"
     if not os.path.isfile(gcno):
         return None
 
-    gcda_stamp = read_stamp(gcov_dump, gcda)
-    gcno_stamp = read_stamp(gcov_dump, gcno)
+    gcda_stamp = read_stamp(gcda, b"gcda")
+    gcno_stamp = read_stamp(gcno, b"gcno")
     # a .gcda without a readable stamp was truncated, not built against another .gcno
     if gcda_stamp is None or gcda_stamp == gcno_stamp:
         return None
@@ -100,12 +106,10 @@ def stale_error(gcov_dump, gcda):
 
 
 def check(args):
-    gcov_dump = gcov_sibling(args.gcov, "gcov-dump")
     root = os.path.realpath(args.directory)
 
     files = list(find_gcda(root))
-    with concurrent.futures.ThreadPoolExecutor() as pool:
-        errors = list(pool.map(lambda x: stale_error(gcov_dump, x), files))
+    errors = [stale_error(itr) for itr in files]
 
     stale = sorted((path, err) for path, err in zip(files, errors) if err is not None)
     for path, error in stale:
@@ -132,10 +136,17 @@ def move_gcda(source, destination):
 def move(args):
     count = move_gcda(args.source, args.destination)
     print(f"Moved {count} .gcda files from {args.source} to {args.destination}")
+    if count == 0:
+        # no tests ran, e.g. the build failed
+        print(f"No .gcda files in {args.source}", file=sys.stderr)
+        return 1
 
 
 def merge_one(gcov_tool, tmpdir, relpath, inputs, output):
-    """Merge one .gcda from several directories; returns an error message on failure"""
+    """Merge one .gcda from several directories into output.
+
+    Returns a warning if an input was left out, or the .gcda could not be written.
+    """
     target = os.path.join(output, relpath)
     os.makedirs(os.path.dirname(target), exist_ok=True)
     if len(inputs) == 1:
@@ -145,13 +156,14 @@ def merge_one(gcov_tool, tmpdir, relpath, inputs, output):
     # gcov-tool merge combines directories: give it directories holding only this file
     workdir = tempfile.mkdtemp(dir=tmpdir)
     name = os.path.basename(relpath)
-    result = None
+    result, result_inputs = None, []
+    warnings = []
     for idx, itr in enumerate(inputs):
         current = os.path.join(workdir, f"in{idx}")
         os.makedirs(current)
         shutil.move(os.path.join(itr, relpath), os.path.join(current, name))
         if result is None:
-            result = current
+            result, result_inputs = current, [itr]
             continue
 
         merged = os.path.join(workdir, f"out{idx}")
@@ -161,13 +173,24 @@ def merge_one(gcov_tool, tmpdir, relpath, inputs, output):
             stderr=subprocess.STDOUT,
             universal_newlines=True,
         )
-        if proc.returncode != 0:
-            first = proc.stdout.strip().splitlines()[:1]
-            return f"gcov-tool merge failed ({proc.returncode}): {' '.join(first)}"
-        result = merged
+        if proc.returncode == 0:
+            result, result_inputs = merged, result_inputs + [itr]
+            continue
+
+        # gcov-tool cannot say which input is bad: keep the larger one, not neither
+        first = proc.stdout.strip().splitlines()[:1]
+        result_size = os.path.getsize(os.path.join(result, name))
+        if os.path.getsize(os.path.join(current, name)) > result_size:
+            result, result_inputs, left_out = current, [itr], result_inputs
+        else:
+            left_out = [itr]
+        warnings.append(
+            f"gcov-tool merge failed ({proc.returncode}): {' '.join(first)}; "
+            f"left out the counters from {', '.join(left_out)}"
+        )
 
     shutil.move(os.path.join(result, name), target)
-    return None
+    return "; ".join(warnings) or None
 
 
 def merge(args):
@@ -183,24 +206,27 @@ def merge(args):
         print("No .gcda files to merge", file=sys.stderr)
         return 1
 
+    def merge_or_warn(tmpdir, relpath, dirs):
+        try:
+            return merge_one(gcov_tool, tmpdir, relpath, dirs, args.output)
+        except OSError as err:
+            # a failed move can leave a partial copy behind
+            with contextlib.suppress(OSError):
+                os.remove(os.path.join(args.output, relpath))
+            return f"leaving out the file: {err}"
+
     with tempfile.TemporaryDirectory() as tmpdir:
         with concurrent.futures.ThreadPoolExecutor() as pool:
-            errors = list(
-                pool.map(
-                    lambda x: merge_one(gcov_tool, tmpdir, x[0], x[1], args.output),
-                    inputs.items(),
-                )
-            )
+            warnings = list(pool.map(lambda x: merge_or_warn(tmpdir, *x), inputs.items()))
 
-    failed = 0
-    for relpath, error in sorted(zip(inputs.keys(), errors)):
-        if error is not None:
-            failed += 1
-            github_message("warning", f"leaving out coverage data {relpath}: {error}")
+    for relpath, warning in sorted(zip(inputs.keys(), warnings)):
+        if warning is not None:
+            github_message("warning", f"coverage data {relpath}: {warning}")
 
+    merged = sum(os.path.isfile(os.path.join(args.output, itr)) for itr in inputs)
     print(
         f"Merged {len(args.directories)} directories into "
-        f"{len(inputs) - failed} .gcda files in {args.output}"
+        f"{merged} .gcda files in {args.output}"
     )
 
 
@@ -224,7 +250,8 @@ def main():
     merge_parser = subparsers.add_parser(
         "merge",
         help="Sum the counters of .gcda files in several directories and move the "
-        "result into an output directory, leaving out files gcov-tool cannot merge",
+        "result into an output directory, keeping the largest input of files "
+        "gcov-tool cannot merge",
     )
     merge_parser.add_argument("-o", "--output", required=True, help="Output directory")
     merge_parser.add_argument(
@@ -232,13 +259,12 @@ def main():
     )
     merge_parser.set_defaults(func=merge)
 
-    for itr in (check_parser, merge_parser):
-        itr.add_argument(
-            "--gcov",
-            default="gcov",
-            help="gcov used for coverage; gcov-tool and gcov-dump are taken from "
-            "the same installation (default: %(default)s)",
-        )
+    merge_parser.add_argument(
+        "--gcov",
+        default="gcov",
+        help="gcov used for coverage; gcov-tool is taken from the same installation "
+        "(default: %(default)s)",
+    )
 
     args = parser.parse_args()
     return args.func(args)
