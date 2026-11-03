@@ -65,6 +65,7 @@ target_sources(
     envvar_gtest.cpp
     backend_bc_buffer_register_gtest.cpp
     anvil_engine_map_gtest.cpp
+    sdma_agreement_gtest.cpp
 )
 
 if (USE_IPC)
