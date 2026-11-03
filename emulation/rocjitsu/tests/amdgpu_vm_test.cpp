@@ -127,7 +127,7 @@ class CommandProcessorCacheTestAccess {
 public:
   static void flush_gpu_caches(CommandProcessor &cp) {
     std::lock_guard lock(cp.hw_queue_mutex_);
-    cp.flush_gpu_caches();
+    EXPECT_EQ(cp.flush_gpu_caches(), VmAccessOutcome::Complete);
   }
 
   static void flush_completion_caches(CommandProcessor &cp) {
@@ -10895,7 +10895,9 @@ TEST(Pm4DispatchTest, InstructionFailureReclaimsWgpReservationsForOtherQueues) {
           submission.buffers.push_back({ib, uint32_t(words.size())});
           // Keep the second queue pending until the first reports failure. The
           // first grid may also have workgroups that never found LDS capacity.
-          submission.ready = [&, index] { return index == 0 || completed[0]; };
+          submission.ready = [&, index](util::DiagnosticEmitter) -> util::FailureOr<bool> {
+            return index == 0 || completed[0];
+          };
           f.engine->register_as_primary();
           submission.complete = [&, index](bool success) {
             EXPECT_FALSE(completed[index]);
@@ -11139,7 +11141,7 @@ TEST(Pm4DispatchTest, CancellationFailsPendingSubmissionAndReleasesVmBinding) {
   ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
   EXPECT_FALSE(adapter.unregister_address_space(address_space));
   amdgpu::Pm4Submission submission;
-  submission.ready = [] { return false; };
+  submission.ready = [](util::DiagnosticEmitter) -> util::FailureOr<bool> { return false; };
   uint32_t callbacks = 0;
   submission.complete = [&](bool success) {
     EXPECT_FALSE(success);
@@ -11172,7 +11174,7 @@ TEST(Pm4DispatchTest, ExactQueueRetirementPreservesOtherQueuesAndReleasesBinding
     queue.process_id = 7;
     ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
     amdgpu::Pm4Submission submission;
-    submission.ready = [] { return false; };
+    submission.ready = [](util::DiagnosticEmitter) -> util::FailureOr<bool> { return false; };
     submission.complete = [&, i](bool success) {
       EXPECT_FALSE(success);
       ++callbacks[i];
