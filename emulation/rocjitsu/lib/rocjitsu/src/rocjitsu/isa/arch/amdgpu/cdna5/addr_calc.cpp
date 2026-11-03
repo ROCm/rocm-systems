@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_lanes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
@@ -131,45 +132,61 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
   uint32_t vbase = resolved_vgpr_base(wf, inst.vaddr, amdgpu::VgprMsbRole::Src0);
   amdgpu::RegisterAccess regs(cu);
   auto vaddr_region = regs.read_vgpr_region(vbase, saddr_present ? 1 : 2, exec);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t vaddr;
-    if (saddr_present) {
-      // The VGPR half of a GLOBAL saddr address is a SIGNED 32-bit offset on
-      // gfx1250, and its scaled form scales that value signed as well. LLVM
-      // gates both on hasSignedGVSOffset, matching a sign extension over a zero
-      // extension and selecting the signed multiply-add, so it emits a negative
-      // value here whenever an access walks backwards from its base -- a
-      // reversed iteration order is enough. Zero-extending one does not reach
-      // below the base, it reaches 4 GiB above the allocation, where the access
-      // silently reads or drops rather than faulting. The steps are named
-      // rather than nested so both signed conversions stay visible: the offset
-      // is reinterpreted as signed before it is widened, and it is widened
-      // before it is scaled, which is what keeps the multiply signed.
-      const int32_t voffset = static_cast<int32_t>(vaddr_region.lane(0, lane));
-      vaddr = amdgpu::flat_vector_offset(static_cast<uint32_t>(voffset), true, scale);
-    } else {
-      vaddr = vaddr_region.lane64(0, lane);
-    }
-    uint64_t addr = saddr_val + vaddr + offset;
-    if (decode_flat_private) {
-      const auto translated = amdgpu::translate_flat_address(
-          wf, addr, lane, amdgpu::flat_private_layout(wf.cu().arch()));
-      if (translated.private_address) {
-        addr = translated.value;
-        d.scratch_swizzle = true;
-        d.requires_scratch_backing = true;
-        d.scratch_addr_stride = wf.wf_size() * sizeof(uint32_t);
-        d.scratch_lane_mask |= uint64_t{1} << lane;
-      }
-    } else {
-      assert(!amdgpu::translate_flat_address(wf, addr, lane,
-                                             amdgpu::flat_private_layout(wf.cu().arch()))
+  const uint64_t bias = saddr_val + static_cast<uint64_t>(offset);
+  if (saddr_present) {
+    // The VGPR half of a GLOBAL saddr address is a SIGNED 32-bit offset on
+    // gfx1250, and its scaled form scales that value signed as well. LLVM
+    // gates both on hasSignedGVSOffset, matching a sign extension over a zero
+    // extension and selecting the signed multiply-add, so it emits a negative
+    // value here whenever an access walks backwards from its base -- a
+    // reversed iteration order is enough. Zero-extending one does not reach
+    // below the base, it reaches 4 GiB above the allocation, where the access
+    // silently reads or drops rather than faulting. lane_addresses_s32 widens
+    // the offset as signed before it scales it, which keeps the multiply signed.
+    amdgpu::addr_calc::lane_addresses_s32(vaddr_region.lanes(0).value(), exec, wf.wf_size(), bias,
+                                          scale, d.per_lane_addr.data());
+  } else {
+    amdgpu::addr_calc::lane_addresses_u64(vaddr_region.lanes(0).value(),
+                                          vaddr_region.lanes(1).value(), exec, wf.wf_size(), bias,
+                                          d.per_lane_addr.data());
+  }
+  // GLOBAL never decodes the private encoding; only debug builds check that.
+#ifdef NDEBUG
+  if (!decode_flat_private)
+    return;
+#endif
+  const uint32_t wf_size = wf.wf_size();
+  if (!wf.scratch_lane_size())
+    return;
+  // The private encoding carries a lane number in high address bits. With
+  // those cleared, only addresses in the 4 GiB above the scratch base can be
+  // private, so only those lanes need the exact translation.
+  const uint64_t lane_bits = uint64_t{wf_size - 1} << (wf_size == 64 ? 51 : 52);
+  const uint64_t private_lanes = amdgpu::addr_calc::lanes_in_window(
+      d.per_lane_addr.data(), exec, wf_size, ~lane_bits, wf.scratch_base() & ~lane_bits);
+  if (!decode_flat_private) {
+#ifndef NDEBUG
+    for (uint64_t lanes = private_lanes; lanes; lanes &= lanes - 1) {
+      const uint32_t lane = std::countr_zero(lanes);
+      assert(!amdgpu::translate_flat_address(wf, d.per_lane_addr[lane], lane,
+                                             amdgpu::FlatPrivateLayout::EncodedLane)
                   .private_address &&
              "gfx1250 global memory address must not use flat private scratch encoding");
     }
-    d.per_lane_addr[lane] = addr;
+#endif
+    return;
+  }
+  for (uint64_t lanes = private_lanes; lanes; lanes &= lanes - 1) {
+    const uint32_t lane = std::countr_zero(lanes);
+    const auto translated = amdgpu::translate_flat_address(wf, d.per_lane_addr[lane], lane,
+                                                           amdgpu::FlatPrivateLayout::EncodedLane);
+    if (translated.private_address) {
+      d.per_lane_addr[lane] = translated.value;
+      d.scratch_swizzle = true;
+      d.requires_scratch_backing = true;
+      d.scratch_addr_stride = wf_size * sizeof(uint32_t);
+      d.scratch_lane_mask |= uint64_t{1} << lane;
+    }
   }
 }
 
