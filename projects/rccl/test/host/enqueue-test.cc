@@ -5098,6 +5098,23 @@ TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_RoundDoesNotFitPartialPlan_Defer
   EXPECT_EQ(2, sc.bp.c()->planner.nTasksP2p) << "the round waits for a fresh plan";
 }
 
+TEST_F(EnqueueMicrotest, LaunchPrepare_P2pRoundNeverFits_ReturnsErrorInsteadOfSpinning) {
+  SelfPairBudgetScene sc(/*channelsPerPeer=*/256);
+  sc.bp.c()->workArgsBytes = sizeof(struct ncclDevKernelArgs) + 255 * kBatch;
+  ncclResult_t rc = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] { rc = ncclLaunchPrepare(sc.bp.c()); });
+  EXPECT_EQ(ncclInternalError, rc);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "does not fit an empty kernel plan")) << log;
+}
+
+TEST_F(EnqueueMicrotest, LaunchPrepare_InPlaceSelfPairOnly_ReturnsEmptyPlanToPool) {
+  // An in-place self pair with P2P batching off is consumed without work, leaving an empty plan.
+  SelfPairBudgetScene sc(/*channelsPerPeer=*/1, /*inPlace=*/true);
+  ASSERT_EQ(ncclSuccess, ncclLaunchPrepare(sc.bp.c()));
+  EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
+  EXPECT_NE(nullptr, sc.bp.c()->memPool_ncclKernelPlan.head) << "the empty plan must go back to the pool";
+}
+
 // ===========================================================================
 // Topology, arch, tuner, NVLS and CollNet arms of topoGetAlgoInfo, getAlgoInfo, updateCollCostTable, calcCollChunking.
 // ===========================================================================
