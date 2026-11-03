@@ -424,7 +424,10 @@ void ds_calculate_addresses_masked(const VdsMachineInst &inst, amdgpu::Wavefront
   amdgpu::RegisterAccess regs(cu);
   amdgpu::RegisterAccess::VgprReadRegion addr_region =
       regs.read_vgpr_region(addr_base, 1, lane_mask);
-  const std::span<const uint32_t> addresses = addr_region.lanes();
+  auto maybe_addresses = addr_region.lanes();
+  if (maybe_addresses.failed())
+    return;
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(lane_mask & (1ULL << lane)))
       continue;

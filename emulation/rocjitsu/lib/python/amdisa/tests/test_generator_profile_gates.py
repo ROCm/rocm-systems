@@ -8766,7 +8766,7 @@ def test_gfx1250_flat_u64_atomic_payload_width_uses_two_dwords():
             4,
             4,
             False,
-            'data.copy_dwords_lane_major(d->store_data, exec);',
+            'if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;',
         ),
         (
             'GLOBAL_STORE_BYTE',
