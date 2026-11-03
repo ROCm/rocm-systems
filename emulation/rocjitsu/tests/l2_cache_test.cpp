@@ -88,6 +88,7 @@ using rocjitsu::amdgpu::L2Cache;
 using rocjitsu::amdgpu::MemorySideCache;
 using rocjitsu::amdgpu::Mtype;
 using rocjitsu::amdgpu::RequestMtypeResolver;
+using rocjitsu::amdgpu::VmMutationEpoch;
 
 class IdentityAddressSpace final : public rocjitsu::amdgpu::AddressSpaceTranslator {
 public:
@@ -438,6 +439,40 @@ TEST(L2CacheTest, AtomicBoundaryFailureRetainsDirtyStateAndSuppressesMutation) {
   EXPECT_TRUE(callback_ran);
   EXPECT_EQ(physical->load<uint32_t>(kDirtyAddress), kDirty);
   EXPECT_EQ(physical->load<uint32_t>(kAtomicAddress), kInitialAtomic + 1);
+}
+
+TEST(L2CacheTest, ScopedFlushInvalidatesCleanLine) {
+  constexpr uint32_t kVmid = 1;
+  constexpr uint64_t kAddress = 0x800;
+  constexpr uint32_t kInitial = 0x11112222;
+  constexpr uint32_t kReplacement = 0x33334444;
+  auto translator = std::make_shared<IdentityAddressSpace>(0x2000);
+  auto physical = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  physical->store(kAddress, kInitial);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm gpu_vm;
+  ASSERT_TRUE(gpu_vm.register_translated(kVmid, translator, physical));
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&gpu_vm);
+
+  uint32_t observed = 0;
+  ASSERT_EQ(
+      l2.read(kAddress, reinterpret_cast<uint8_t *>(&observed), sizeof(observed), Mtype::RW, kVmid),
+      rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(observed, kInitial);
+
+  physical->store(kAddress, kReplacement);
+  ASSERT_EQ(
+      l2.read(kAddress, reinterpret_cast<uint8_t *>(&observed), sizeof(observed), Mtype::RW, kVmid),
+      rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(observed, kInitial);
+
+  ASSERT_EQ(l2.flush_address_space(kVmid), rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(
+      l2.read(kAddress, reinterpret_cast<uint8_t *>(&observed), sizeof(observed), Mtype::RW, kVmid),
+      rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kReplacement);
 }
 
 TEST(L2CacheTest, FailedDirectDirtyFlushRetainsLineForRetry) {
@@ -2465,7 +2500,7 @@ TEST_F(L1CacheMtypeTest, LiveResolverWithoutGenerationDoesNotCacheMutationToken)
 
 TEST_F(L1CacheMtypeTest, MutationTokenRefreshesPolicyWithoutGenerationPublication) {
   map_pages(Mtype::UC, Mtype::RW);
-  auto epoch = std::make_shared<std::atomic<uint64_t>>(1);
+  auto epoch = util::IntrusiveSharedPtr<VmMutationEpoch>::make(1);
   ASSERT_TRUE(legacy_vm_.unregister_vmid(kVmid));
   address_space_ = legacy_vm_.register_address_space(
       kVmid, {.page_table = &process_.page_table_,
@@ -2481,7 +2516,7 @@ TEST_F(L1CacheMtypeTest, MutationTokenRefreshesPolicyWithoutGenerationPublicatio
     // throws before publishing the ordinary page-table generation.
     std::unique_lock request_lock(*process_.page_table_request_mutex());
     std::unique_lock table_lock(process_.page_table_mutex_);
-    epoch->fetch_add(1, std::memory_order_release);
+    epoch->value.fetch_add(1, std::memory_order_release);
     process_.page_table_.at(kBase >> GpuMemory::PAGE_SHIFT).mtype = Mtype::CC;
   }
   EXPECT_EQ(request.at(kAddr + 1), Mtype::CC);
