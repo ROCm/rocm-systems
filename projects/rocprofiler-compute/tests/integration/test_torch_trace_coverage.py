@@ -91,22 +91,22 @@ def test_random_operator_kernel_coverage(
     ground_truth_runner_script_path = str(tmp_path / "coverage_ground_truth_runner.py")
 
     try:
+        coverage_utils.write_coverage_workload_artifacts(
+            sampled,
+            workload_script_path,
+            ground_truth_runner_script_path,
+        )
+
         coverage_utils.run_ground_truth_torch_profiler_subprocess(
             ground_truth_runner_script_path,
             workload_script_path,
             ground_truth_path,
-            operators=sampled,
             coverage_seed=seed,
             coverage_sample_budget=sample_budget,
         )
         with open(ground_truth_path, encoding="utf-8") as f:
             ground_truth = json.load(f)
 
-        coverage_utils.write_coverage_workload_artifacts(
-            sampled,
-            workload_script_path,
-            ground_truth_runner_script_path,
-        )
         binary_handler_profile_rocprof_compute(
             {
                 **COVERAGE_TEST_CONFIG,
@@ -120,6 +120,7 @@ def test_random_operator_kernel_coverage(
             check_success=True,
             app_name="coverage_workload",
         )
+
         forest = coverage_utils.call_trees_from_workload(workload_dir)
 
         failure_detail: List[Tuple[str, str]] = []
@@ -180,6 +181,11 @@ def test_random_operator_kernel_coverage(
                 f"Summary: {passed} PASS / {len(failure_detail)} FAIL "
                 f"/ {skipped} SKIP. Re-run with pytest -s for per-op lines."
             )
+        assert aten_passed > 0, (
+            f"no ATen operators PASSed forest coverage "
+            f"(seed={seed}, sampled={len(sampled)}, PASS={passed}, "
+            f"FAIL={len(failure_detail)}, SKIP={skipped})"
+        )
     finally:
         common.clean_output_dir(
             COVERAGE_TEST_CONFIG["cleanup"],

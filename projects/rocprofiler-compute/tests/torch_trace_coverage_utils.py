@@ -8,7 +8,6 @@ builds arguments or records a skip reason.
 """
 
 import functools
-import json
 import os
 import shutil
 import signal
@@ -490,7 +489,6 @@ SKIP_CATEGORY_LABELS: Dict[str, str] = {
     "opspec_builder_present_but_not_emitted": (
         "OpSpec builder present but op was not emitted into the workload"
     ),
-    "ground_truth_timeout": "ground-truth timeout",
     "other": "other / uncategorized",
 }
 
@@ -3680,8 +3678,6 @@ def categorize_skip_reason(reason: str) -> str:
     """Return the SKIP-category key for an ``outcome.reason`` string."""
     r = reason.lower()
 
-    if "ground-truth exceeded" in r and "timeout" in r:
-        return "ground_truth_timeout"
     if "no opspec.build entry" in r:
         return "argument_builder_gap"
     if "workload raised at runtime" in r:
@@ -4199,10 +4195,11 @@ def op_workload_failure_due_to(
     *,
     timed_out: bool,
     returncode: Optional[int],
+    timeout_s: int = 120,
 ) -> str:
     """Short phrase for pytest.fail lead-in."""
     if timed_out:
-        return "ground-truth subprocess exceeded 120s timeout"
+        return f"ground-truth subprocess exceeded {timeout_s}s timeout"
     assert returncode is not None
     if returncode < 0:
         name = signal_name(returncode)
@@ -4312,34 +4309,73 @@ def run_ground_truth_torch_profiler_subprocess(
     *,
     coverage_seed: Optional[int] = None,
     coverage_sample_budget: Optional[int] = None,
-    operators: List[OpEntry],
 ) -> None:
     """Run coverage_ground_truth_runner.py (torch.profiler + JSON write)."""
-    merged: Dict[str, Any] = {}
-    for op in operators:
-        write_coverage_workload_artifacts(
-            [op], workload_script_path, runner_script_path
+    repro = ""
+    if coverage_seed is not None and coverage_sample_budget is not None:
+        repro = f" (seed={coverage_seed}, n={coverage_sample_budget})"
+    argv = [
+        sys.executable,
+        str(Path(runner_script_path).resolve()),
+        str(Path(workload_script_path).resolve()),
+        str(Path(ground_truth_json_path).resolve()),
+    ]
+    timeout_s = 300 * coverage_sample_budget if coverage_sample_budget else 300
+    try:
+        completed = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
         )
-        argv = [
-            sys.executable,
-            str(Path(runner_script_path).resolve()),
-            str(Path(workload_script_path).resolve()),
-            str(Path(ground_truth_json_path).resolve()),
-        ]
-        try:
-            completed = subprocess.run(
-                argv, capture_output=True, text=True, timeout=60
-            )
-        except subprocess.TimeoutExpired:
-            merged[op.name] = {
-                "error": "ground-truth exceeded 60s timeout"
-            }
-            continue
-        if completed.returncode != 0:
-            merged[op.name] = {
-                "error": f"workload raised at runtime: exit {completed.returncode}"
-            }
-            continue
-        with open(ground_truth_json_path, encoding="utf-8") as f:
-            merged.update(json.load(f))
-    Path(ground_truth_json_path).write_text(json.dumps(merged), encoding="utf-8")
+    except subprocess.TimeoutExpired as exc:
+        copy_note = copy_failed_coverage_artifacts_to_cwd(
+            workload_script_path,
+            runner_script_path,
+        )
+        due = op_workload_failure_due_to(
+            timed_out=True, returncode=None, timeout_s=timeout_s
+        )
+        stdout_text = (
+            exc.stdout.decode(errors="replace")
+            if isinstance(exc.stdout, bytes)
+            else (exc.stdout or "")
+        )
+        stderr_text = (
+            exc.stderr.decode(errors="replace")
+            if isinstance(exc.stderr, bytes)
+            else (exc.stderr or "")
+        )
+        out_tail = stderr_tail_collapsed(stdout_text, max_lines=8)
+        err_tail = stderr_tail_collapsed(stderr_text)
+        fault_hint = extract_device_fault_banner(stderr_text)
+        hint_block = f"--- device fault ---\n{fault_hint}\n\n" if fault_hint else ""
+        pytest.fail(
+            f"Op workload failed: {due}.{repro}{copy_note}\n\n"
+            f"{hint_block}"
+            f"--- stdout (tail) ---\n{out_tail}\n\n"
+            f"--- stderr (tail) ---\n{err_tail}"
+        )
+    if completed.returncode != 0:
+        copy_note = copy_failed_coverage_artifacts_to_cwd(
+            workload_script_path,
+            runner_script_path,
+        )
+        due = op_workload_failure_due_to(
+            timed_out=False,
+            returncode=completed.returncode,
+        )
+        exit_expl = describe_subprocess_exit_code(completed.returncode)
+        err_tail = stderr_tail_collapsed(completed.stderr or "")
+        out_tail = stderr_tail_collapsed(completed.stdout or "", max_lines=12)
+        cmdline = subprocess.list2cmdline(argv)
+        fault_hint = extract_device_fault_banner(completed.stderr or "")
+        hint_block = f"--- device fault ---\n{fault_hint}\n\n" if fault_hint else ""
+        pytest.fail(
+            f"Op workload failed: {due}.{repro}{copy_note}\n\n"
+            f"{exit_expl}\n\n"
+            f"{hint_block}"
+            f"--- command ---\n{cmdline}\n\n"
+            f"--- stdout (tail) ---\n{out_tail}\n\n"
+            f"--- stderr (tail) ---\n{err_tail}"
+        )
