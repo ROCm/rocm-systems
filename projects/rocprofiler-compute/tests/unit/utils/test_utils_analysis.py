@@ -12,17 +12,10 @@ import pandas as pd
 import pytest
 
 import utils.utils_analysis as utils_analysis
-from ml_api_tracing.call_tree import rollup_node_stats
-from ml_api_tracing.models import CallTreeNode, KernelStats
 from utils.utils_analysis import (
     COUNTER_RESULTS_COLUMNS,
     assign_native_ids,
-    build_operator_summary,
-    copy_matched_operator_subtree,
-    filter_forest_by_backends,
     find_native_artifacts,
-    fold_identical_sibling_subtrees,
-    format_operator_args,
     join_native_counters,
     number_gpus_by_node,
 )
@@ -81,30 +74,18 @@ def touch_native_process(workload_dir, fbase, pid, kinds):
         (workload_dir / f"{kind}_{fbase}_{pid}.csv.gz").touch()
 
 
-def leaf_operator(
-    name: str,
-    start: str,
-    duration_ns: float,
-    kernel: str = "k",
-    file_name: str = "net.py",
-    line_number: int = 10,
-    backend: str = "torch",
-) -> CallTreeNode:
-    node = CallTreeNode(
-        name=name,
-        file_name=file_name,
-        line_number=line_number,
-        backend=backend,
-    )
-    node.invocation_ids.add(start)
-    node.kernels[kernel] = KernelStats(
-        launches=1,
-        total_duration_ns=duration_ns,
-        min_duration_ns=duration_ns,
-        max_duration_ns=duration_ns,
-    )
-    rollup_node_stats(node)
-    return node
+def seed_perfmon_files(tmp_path: Path, count: int) -> None:
+    """Create empty pmc_perf_*.yaml files so the imputation function sees the
+    expected number of counter buckets. Clears any existing perfmon files
+    first so the helper is safe to call multiple times in one test."""
+    perfmon = tmp_path / "perfmon"
+    perfmon.mkdir(exist_ok=True)
+    for stale in perfmon.glob("pmc_perf_*.yaml"):
+        stale.unlink()
+    for stale in perfmon.glob("*.txt"):
+        stale.unlink()
+    for i in range(count):
+        (perfmon / f"pmc_perf_{i}.yaml").touch()
 
 
 # =============================================================================
@@ -859,205 +840,9 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
     assert len(result) == 8  # Ensure same number of rows
 
 
-# ---------------------------------------------------------------------------
-# Tests for call-tree functions (build/display)
-# ---------------------------------------------------------------------------
-
-
-def test_fold_identical_sibling_subtrees_empty():
-    assert fold_identical_sibling_subtrees([]) == []
-
-
-def test_fold_identical_sibling_subtrees_merges_matching_leaves():
-    folded = fold_identical_sibling_subtrees([
-        leaf_operator("aten::addmm", "1", 2_000_000.0),
-        leaf_operator("aten::addmm", "2", 3_000_000.0),
-    ])
-    assert len(folded) == 1
-    node = folded[0]
-    assert node.call_count == 2
-    assert node.kernels["k"].launches == 2
-    assert node.kernels["k"].total_duration_ns == 5_000_000.0
-    assert node.kernels["k"].min_duration_ns == 2_000_000.0
-    assert node.kernels["k"].max_duration_ns == 3_000_000.0
-    assert node.kernel_launches == 2
-
-
-def test_fold_identical_sibling_subtrees_keeps_different_kernels_apart():
-    folded = fold_identical_sibling_subtrees([
-        leaf_operator("aten::addmm", "1", 1_000_000.0, kernel="addmm"),
-        leaf_operator("aten::addmm", "2", 1_000_000.0, kernel="copy"),
-    ])
-    assert len(folded) == 2
-
-
-def test_fold_identical_sibling_subtrees_keeps_different_locations_apart():
-    folded = fold_identical_sibling_subtrees([
-        leaf_operator("aten::addmm", "1", 1_000_000.0, line_number=10),
-        leaf_operator("aten::addmm", "2", 1_000_000.0, line_number=20),
-    ])
-    assert len(folded) == 2
-
-
-def test_fold_identical_sibling_subtrees_keeps_different_child_shapes_apart():
-    nested = CallTreeNode(
-        name="aten::addmm", file_name="net.py", line_number=10, backend="torch"
-    )
-    nested.invocation_ids.add("1")
-    nested.children = [leaf_operator("aten::relu", "1a", 500_000.0)]
-    rollup_node_stats(nested)
-    folded = fold_identical_sibling_subtrees([
-        nested,
-        leaf_operator("aten::addmm", "2", 1_000_000.0),
-    ])
-    assert len(folded) == 2
-
-
-def test_fold_identical_sibling_subtrees_does_not_mutate_input():
-    first = leaf_operator("aten::addmm", "1", 1_000_000.0)
-    second = leaf_operator("aten::addmm", "2", 1_000_000.0)
-    original = [first, second]
-    fold_identical_sibling_subtrees(original)
-    assert original == [first, second]
-    assert first.call_count == 1
-    assert second.call_count == 1
-
-
-def test_fold_identical_sibling_subtrees_merges_nested_children():
-    parent = CallTreeNode(name="forward", backend="torch")
-    parent.invocation_ids.add("0")
-    parent.children = [
-        leaf_operator("aten::addmm", "1", 1_000_000.0),
-        leaf_operator("aten::addmm", "2", 2_000_000.0),
-    ]
-    rollup_node_stats(parent)
-    folded = fold_identical_sibling_subtrees([parent])
-    assert len(folded) == 1
-    assert folded[0].call_count == 1
-    assert len(parent.children) == 2
-    assert len(folded[0].children) == 1
-    assert folded[0].children[0].call_count == 2
-    assert folded[0].children[0].kernels["k"].launches == 2
-
-
-def test_filter_forest_by_backends_strips_scaffolding_kernels():
-    child = leaf_operator(
-        "triton.JITFunction.matmul_kernel",
-        "1",
-        40.0,
-        kernel="triton_matmul_kernel",
-        backend="triton",
-    )
-    parent = leaf_operator(
-        "nn.Module.Linear.forward",
-        "0",
-        10.0,
-        kernel="torch_gemm_kernel",
-        backend="torch",
-    )
-    parent.children = [child]
-    forest = {"1": [parent]}
-
-    filtered = filter_forest_by_backends(forest, ["triton"])
-    filtered_parent = filtered["1"][0]
-    assert filtered_parent.kernels == {}
-    assert "triton_matmul_kernel" in filtered_parent.children[0].kernels
-    assert "torch_gemm_kernel" in forest["1"][0].kernels
-    assert "triton_matmul_kernel" in forest["1"][0].children[0].kernels
-
-
-def test_copy_matched_operator_subtree_keeps_ancestors_and_descendants():
-    node_c = leaf_operator("C", "2", 30.0, kernel="c_kernel")
-    node_b = leaf_operator("B", "1", 20.0, kernel="b_kernel")
-    node_d = leaf_operator("D", "3", 40.0, kernel="d_kernel")
-    node_a = leaf_operator("A", "0", 10.0, kernel="a_kernel")
-    node_b.children = [node_c]
-    node_a.children = [node_b, node_d]
-    forest = {"1": [node_a]}
-
-    copied = copy_matched_operator_subtree(forest, [node_b])
-    copied_a = copied["1"][0]
-    assert copied_a.name == "A"
-    assert copied_a.kernels == {}
-    assert [child.name for child in copied_a.children] == ["B"]
-    assert [child.name for child in copied_a.children[0].children] == ["C"]
-
-
-def test_format_operator_args_caps_item_count():
-    args_blob = "(" + ", ".join(f"a{i}={i}" for i in range(12)) + ")"
-    formatted_args = format_operator_args(args_blob, max_items=3, max_chars=200)
-    assert formatted_args == "(a0=0, a1=1, a2=2, ...)"
-
-
-def test_format_operator_args_caps_length():
-    long_token = "x" * 80
-    formatted_args = format_operator_args(f"({long_token})", max_items=8, max_chars=20)
-    assert len(formatted_args) <= 20
-    assert formatted_args.endswith("...)")
-
-
-def test_format_operator_args_empty_blob():
-    assert format_operator_args("") == ""
-    assert format_operator_args("()") == ""
-
-
-def test_fold_identical_sibling_subtrees_merges_args_variants():
-    first = leaf_operator("aten::addmm", "1", 2_000_000.0)
-    first.args_invocations["(self=float32[2x2])"] = {"1"}
-    second = leaf_operator("aten::addmm", "2", 3_000_000.0)
-    second.args_invocations["(self=float32[4x4])"] = {"2"}
-    folded = fold_identical_sibling_subtrees([first, second])
-    assert len(folded) == 1
-    assert folded[0].args_variants == [
-        ("(self=float32[2x2])", 1),
-        ("(self=float32[4x4])", 1),
-    ]
-    assert first.args_invocations == {"(self=float32[2x2])": {"1"}}
-
-
-# ---------------------------------------------------------------------------
-# build_operator_summary
-# ---------------------------------------------------------------------------
-
-
-_OPERATOR_SUMMARY_COLUMNS = [
-    "Operator",
-    "Location",
-    "Calls",
-    "Dispatches",
-    "Dispatches_Per_Call",
-    "Total_GPU",
-    "Pct_Total_GPU",
-    "Mean_Per_Call",
-    "Mean_Per_Dispatch",
-    "Min_Dispatch",
-    "Max_Dispatch",
-]
-
-
-def test_build_operator_summary_empty_input_returns_empty_with_full_schema():
-    summary = build_operator_summary({})
-    assert list(summary.columns) == _OPERATOR_SUMMARY_COLUMNS
-    assert summary.empty
-
-
 # =============================================================================
 # TESTS FOR COUNTER IMPUTATION
 # =============================================================================
-
-
-def seed_perfmon_files(tmp_path: Path, count: int) -> None:
-    """Create empty pmc_perf_*.yaml files so the imputation function sees the
-    expected number of counter buckets. Clears any existing perfmon files
-    first so the helper is safe to call multiple times in one test."""
-    perfmon = tmp_path / "perfmon"
-    perfmon.mkdir(exist_ok=True)
-    for stale in perfmon.glob("pmc_perf_*.yaml"):
-        stale.unlink()
-    for stale in perfmon.glob("*.txt"):
-        stale.unlink()
-    for i in range(count):
-        (perfmon / f"pmc_perf_{i}.yaml").touch()
 
 
 def test_impute_multiplex_kernel_policy(tmp_path: Path) -> None:
@@ -2656,23 +2441,3 @@ def test_assign_native_ids_numbers_dispatches_in_launch_order():
 
     assert numbered["Dispatch_ID"].tolist() == [1, 2, 3, 4]
     assert numbered["Counter_Value"].tolist() == [101, 102, 201, 202]
-
-
-def test_build_operator_summary_location_from_node_file_line():
-    located = CallTreeNode(
-        name="linear",
-        file_name="simple_torch_code.py",
-        line_number=19,
-    )
-    located.kernel_launches = 1
-    located.total_duration_ms = 1.0
-    located.invocation_ids.add("10")
-    missing = CallTreeNode(name="addmm")
-    missing.kernel_launches = 1
-    missing.total_duration_ms = 0.5
-    missing.invocation_ids.add("20")
-    located.children = [missing]
-    summary = build_operator_summary({"1": [located]})
-    by_name = summary.set_index("Operator")
-    assert by_name.loc["linear", "Location"] == "simple_torch_code.py:19"
-    assert by_name.loc["linear/addmm", "Location"] == ""

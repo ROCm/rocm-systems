@@ -21,6 +21,9 @@ test_categories:
       - test_ml_api_tracing_input
       - test_ml_api_tracing_processing
       - test_ml_api_tracing_call_tree
+      - test_ml_api_tracing_summary
+      - test_ml_api_tracing_display
+      - test_ml_api_tracing_selection
       - test_ml_api_tracing_analysis
       - test_utils_profile
       - test_common
@@ -117,6 +120,9 @@ test_categories:
       - test_ml_api_tracing_input
       - test_ml_api_tracing_processing
       - test_ml_api_tracing_call_tree
+      - test_ml_api_tracing_summary
+      - test_ml_api_tracing_display
+      - test_ml_api_tracing_selection
       - test_ml_api_tracing_analysis
       - test_utils_profile
       - test_common
@@ -233,6 +239,9 @@ test_categories:
       - test_ml_api_tracing_input
       - test_ml_api_tracing_processing
       - test_ml_api_tracing_call_tree
+      - test_ml_api_tracing_summary
+      - test_ml_api_tracing_display
+      - test_ml_api_tracing_selection
       - test_ml_api_tracing_analysis
       - test_utils_profile
       - test_common
@@ -349,6 +358,9 @@ test_categories:
       - test_ml_api_tracing_input
       - test_ml_api_tracing_processing
       - test_ml_api_tracing_call_tree
+      - test_ml_api_tracing_summary
+      - test_ml_api_tracing_display
+      - test_ml_api_tracing_selection
       - test_ml_api_tracing_analysis
       - test_utils_profile
       - test_common

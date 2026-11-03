@@ -4,196 +4,26 @@
 import argparse
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Tuple
 
 import pandas as pd
 
 from membw_analysis.engine import run_membw_analysis
-from ml_api_tracing.analysis import process_ml_api_trace_output
-from ml_api_tracing.call_tree import iter_call_tree_paths, rollup_node_stats
-from ml_api_tracing.models import CallTreeForest, CallTreeNode
+from ml_api_tracing.analysis import (
+    active_operator_backends,
+    apply_operator_filter,
+    apply_sliced_kernel_top,
+    process_ml_api_trace_output,
+    select_operator_dispatches,
+)
+from ml_api_tracing.display import list_operators, show_matched_operator_report
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
-from utils.logger import console_error, console_log, console_warning, demarcate
+from utils.logger import console_log, console_warning, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import calc_ai_analyze
-from utils.utils_analysis import (
-    build_operator_summary,
-    copy_matched_operator_subtree,
-    filter_forest_by_backends,
-)
 from utils.utils_common import validate_roofline_csv
-
-# Maps each ML API trace backend to its analyze CLI attributes and display label.
-_ML_API_ANALYSIS_CLI_OPTIONS = {
-    "torch": {
-        "filter_attr": "torch_operator",
-        "list_attr": "list_torch_operators",
-        "label": "PyTorch",
-    },
-    "triton": {
-        "filter_attr": "triton_operator",
-        "list_attr": "list_triton_operators",
-        "label": "Triton",
-    },
-}
-
-
-def parse_operator_patterns(
-    args: argparse.Namespace, backends: list[str]
-) -> Optional[dict[str, list[str]]]:
-    """Parse operator glob patterns from args for each backend in backends.
-
-    Returns a {backend: patterns} dict, or None when no filter flag is
-    set for any backend. An empty flag value maps to ["**"].
-    """
-    framewise_patterns: dict[str, list[str]] = {}
-    for backend in backends:
-        raw = getattr(args, _ML_API_ANALYSIS_CLI_OPTIONS[backend]["filter_attr"], None)
-        if raw is None:
-            continue
-        pattern_list: list[str] = []
-        for operator_arg in raw:
-            pattern_list.extend(
-                pattern.strip()
-                for pattern in str(operator_arg).split(",")
-                if pattern.strip()
-            )
-        if not pattern_list:
-            pattern_list = ["**"]
-        framewise_patterns[backend] = pattern_list
-    if not framewise_patterns:
-        return None
-    return framewise_patterns
-
-
-def _collect_glob_matched_nodes(
-    forest: CallTreeForest,
-    framewise_patterns: dict[str, list[str]],
-) -> list[CallTreeNode]:
-    """Return nodes whose backend matches and whose path or name glob-matches."""
-    return [
-        node
-        for roots in forest.values()
-        for node, path in iter_call_tree_paths(roots)
-        if any(
-            parser.torch_operator_pattern_matches(pattern, "/".join(path))
-            or parser.torch_operator_pattern_matches(pattern, node.name)
-            for pattern in framewise_patterns.get(node.backend or "", [])
-        )
-    ]
-
-
-def _assign_kernel_ids_from_top(
-    node: CallTreeNode, name_to_id: dict[str, int]
-) -> set[int]:
-    """Set KernelStats.kernel_id on this node and descendants; return those ids."""
-    kernel_ids: set[int] = set()
-    for kernel_name, stats in node.kernels.items():
-        kernel_id = name_to_id.get(str(kernel_name).strip())
-        if kernel_id is not None:
-            stats.kernel_id = kernel_id
-            kernel_ids.add(kernel_id)
-    for child in node.children:
-        kernel_ids.update(_assign_kernel_ids_from_top(child, name_to_id))
-    return kernel_ids
-
-
-def _pmc_group_keys_from_node(node: CallTreeNode) -> list[tuple]:
-    pmc_group_keys: list[tuple] = []
-    for stats in node.kernels.values():
-        pmc_group_keys.extend(stats.pmc_group_keys)
-    for child in node.children:
-        pmc_group_keys.extend(_pmc_group_keys_from_node(child))
-    return pmc_group_keys
-
-
-def _analyze_ids_from_pmc_group_keys(
-    pmc_group_keys: list[tuple],
-    slot_to_id: dict[tuple, int],
-    labels: str,
-) -> list[int]:
-    analyze_ids: list[int] = []
-    for group_key in pmc_group_keys:
-        if group_key not in slot_to_id:
-            console_error(
-                "ml api trace",
-                f"No {labels} analyze dispatch id for pmc group key {group_key}",
-            )
-        analyze_ids.append(slot_to_id[group_key])
-    return analyze_ids
-
-
-def _intersect_with_user_dispatch_filter(
-    operator_dispatch_ids: list[int],
-    user_dispatch_filter: list,
-    labels: str,
-) -> list[int]:
-    operator_ids = set(operator_dispatch_ids)
-    if not user_dispatch_filter:
-        selected_ids = operator_ids
-    else:
-        first_filter = str(user_dispatch_filter[0]).strip()
-        if first_filter.startswith(">"):
-            threshold = int(first_filter[1:].strip())
-            selected_ids = {
-                dispatch_id for dispatch_id in operator_ids if dispatch_id > threshold
-            }
-        else:
-            selected_ids = operator_ids & {
-                int(dispatch_id) for dispatch_id in user_dispatch_filter
-            }
-    if not selected_ids:
-        console_error(
-            "ml api trace",
-            f"No {labels} dispatches matched the -d filter: {user_dispatch_filter}",
-        )
-    return sorted(selected_ids)
-
-
-def _apply_sliced_kernel_top(
-    workload: schema.Workload,
-    kernel_top_df: pd.DataFrame,
-    args: argparse.Namespace,
-    labels: str,
-) -> None:
-    name_to_id = {
-        str(kernel_name).strip(): idx
-        for idx, kernel_name in enumerate(kernel_top_df["Kernel_Name"].tolist())
-    }
-    for roots in workload.ml_api_call_trees.values():
-        for root in roots:
-            _assign_kernel_ids_from_top(root, name_to_id)
-
-    if not workload.filter_kernel_ids:
-        return
-
-    file_io.validate_kernel_filter_ids(
-        workload.filter_kernel_ids,
-        len(kernel_top_df["Kernel_Name"]),
-    )
-    selected_names = {
-        str(kernel_top_df.loc[kernel_id, "Kernel_Name"]).strip()
-        for kernel_id in workload.filter_kernel_ids
-    }
-    dispatch_names = {
-        int(dispatch_id): str(kernel_name).strip()
-        for dispatch_id, kernel_name in zip(
-            workload.raw_pmc["Dispatch_ID"].tolist(),
-            workload.raw_pmc["Kernel_Name"].tolist(),
-        )
-    }
-    workload.filter_dispatch_ids = [
-        dispatch_id
-        for dispatch_id in workload.filter_dispatch_ids
-        if dispatch_names.get(int(dispatch_id)) in selected_names
-    ]
-    if not workload.filter_dispatch_ids:
-        console_error(
-            "ml api trace",
-            f"No {labels} operators matched the -k filter: {args.gpu_kernel}",
-        )
 
 
 class cli_analysis(OmniAnalyze_Base):
@@ -207,17 +37,7 @@ class cli_analysis(OmniAnalyze_Base):
         super().pre_processing()
         args = self.get_args()
 
-        active_operator_filters = [
-            framework_name
-            for framework_name, framework_flags in _ML_API_ANALYSIS_CLI_OPTIONS.items()
-            if getattr(args, framework_flags["filter_attr"], None) is not None
-        ]
-
-        active_operator_lists = [
-            framework_name
-            for framework_name, framework_flags in _ML_API_ANALYSIS_CLI_OPTIONS.items()
-            if getattr(args, framework_flags["list_attr"], False)
-        ]
+        active_operator_filters, active_operator_lists = active_operator_backends(args)
 
         for path_info in args.path:
             workload = self._runs[path_info[0]]
@@ -268,27 +88,12 @@ class cli_analysis(OmniAnalyze_Base):
                 pmc_group_keys = self.apply_operator_filter(
                     args, workload, path_info[0], active_operator_filters
                 )
-                labels = ", ".join(
-                    _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"]
-                    for backend in active_operator_filters
-                )
                 workload.raw_pmc, slot_to_id = file_io.create_df_pmc_with_slot_ids(
                     path_info[0],
                     args.verbose,
                 )
-                operator_dispatch_ids = _analyze_ids_from_pmc_group_keys(
-                    pmc_group_keys, slot_to_id, labels
-                )
-                workload.filter_dispatch_ids = _intersect_with_user_dispatch_filter(
-                    operator_dispatch_ids,
-                    workload.filter_dispatch_ids,
-                    labels,
-                )
-                console_log(
-                    "ml api trace",
-                    f"{labels} operator filter selected "
-                    f"{len(workload.filter_dispatch_ids)} dispatch(es) "
-                    "for metric analysis.",
+                select_operator_dispatches(
+                    workload, pmc_group_keys, slot_to_id, active_operator_filters
                 )
             else:
                 workload.raw_pmc = file_io.create_df_pmc(
@@ -314,7 +119,9 @@ class cli_analysis(OmniAnalyze_Base):
             workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
 
             if active_operator_filters:
-                _apply_sliced_kernel_top(workload, kernel_top_df, args, labels)
+                apply_sliced_kernel_top(
+                    workload, kernel_top_df, args, active_operator_filters
+                )
 
             # create the loaded table
             gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
@@ -344,11 +151,7 @@ class cli_analysis(OmniAnalyze_Base):
         gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
         arch_config = self._arch_configs[gpu_arch]
 
-        active_operator_filters = [
-            framework_name
-            for framework_name, framework_flags in _ML_API_ANALYSIS_CLI_OPTIONS.items()
-            if getattr(args, framework_flags["filter_attr"], None) is not None
-        ]
+        active_operator_filters, _ = active_operator_backends(args)
         if active_operator_filters:
             for path_info in args.path:
                 self.handle_operator(
@@ -429,27 +232,11 @@ class cli_analysis(OmniAnalyze_Base):
             )
 
     def list_operators(
-        self,
-        workload_path: str,
-        kernel_top_df: pd.DataFrame,
-        backends: list[str],
+        self, workload_path: str, kernel_top_df: pd.DataFrame, backends: List[str]
     ) -> None:
-        """Render the operator call tree for the given backends."""
-        forest_view = filter_forest_by_backends(
-            self._runs[workload_path].ml_api_call_trees, backends
-        )
-        name_to_id = {
-            str(kernel_name).strip(): idx
-            for idx, kernel_name in enumerate(kernel_top_df["Kernel_Name"].tolist())
-        }
-        for roots in forest_view.values():
-            for root in roots:
-                _assign_kernel_ids_from_top(root, name_to_id)
-        framework_labels = [
-            _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"] for backend in backends
-        ]
-        tty.list_ml_operators(
-            workload_path, forest_view, framework_labels=framework_labels
+        """Coordinate the feature listing for this workload."""
+        list_operators(
+            workload_path, self._runs[workload_path], kernel_top_df, backends
         )
 
     def apply_operator_filter(
@@ -457,67 +244,13 @@ class cli_analysis(OmniAnalyze_Base):
         args: argparse.Namespace,
         workload: schema.Workload,
         workload_path: str,
-        backends: list[str],
-    ) -> list[tuple]:
-        """Glob-filter the operator forest and return pmc group keys on the subtree."""
-        framewise_patterns = parse_operator_patterns(args, backends)
-        if framewise_patterns is None:
-            return []
-        labels = ", ".join(
-            _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"] for backend in backends
-        )
-        confined_forest = filter_forest_by_backends(
-            workload.ml_api_call_trees, list(framewise_patterns)
-        )
-        matched_nodes = _collect_glob_matched_nodes(confined_forest, framewise_patterns)
-        if not matched_nodes:
-            all_patterns = ", ".join(
-                pattern
-                for patterns in framewise_patterns.values()
-                for pattern in patterns
-            )
-            console_error(
-                "ml api trace",
-                f"No {labels} operators matched the pattern(s): {all_patterns}",
-            )
-        workload.ml_api_call_trees = copy_matched_operator_subtree(
-            confined_forest, matched_nodes
-        )
-
-        pmc_group_keys: list[tuple] = []
-        for roots in workload.ml_api_call_trees.values():
-            for root in roots:
-                pmc_group_keys.extend(_pmc_group_keys_from_node(root))
-        if not pmc_group_keys:
-            console_error(
-                "ml api trace",
-                f"No {labels} kernel dispatches on the matched operators",
-            )
-        return pmc_group_keys
+        backends: List[str],
+    ) -> List[Tuple]:
+        """Request staged selection; retain workload_path for existing CLI callers."""
+        return apply_operator_filter(args, workload, backends)
 
     def handle_operator(
-        self, args: argparse.Namespace, workload: schema.Workload, backends: list[str]
+        self, args: argparse.Namespace, workload: schema.Workload, backends: List[str]
     ) -> None:
-        """Display the matched operator call tree."""
-        if not workload.ml_api_call_trees:
-            return
-        framewise_patterns = parse_operator_patterns(args, backends)
-        patterns_str = ", ".join(
-            pattern
-            for patterns in (framewise_patterns or {}).values()
-            for pattern in patterns
-        )
-        labels = ", ".join(
-            _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"] for backend in backends
-        )
-        subtree = workload.ml_api_call_trees
-        print(f"\n{'=' * 80}")
-        print(f"Matched {labels} Operators: {patterns_str}")
-        print("Sorted by total GPU kernel duration.")
-        print(f"{'=' * 80}")
-        for roots in subtree.values():
-            for root in roots:
-                rollup_node_stats(root)
-        tty.show_call_tree(subtree)
-        tty.show_operator_summary(build_operator_summary(subtree))
-        print(f"{'=' * 80}")
+        """Coordinate the feature's matched operator report."""
+        show_matched_operator_report(args, workload, backends)
