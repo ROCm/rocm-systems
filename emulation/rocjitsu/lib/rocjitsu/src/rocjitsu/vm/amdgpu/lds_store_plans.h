@@ -97,7 +97,7 @@ template <StoreFormat F, uint32_t Span> RJ_NOINLINE void by_shape(Lds &lds, cons
 /// stores with at most 4 lanes pay no large frame: a single-lane store costs
 /// about a third of what it did with the writers inlined.
 template <StoreFormat F, uint32_t Wave>
-[[gnu::always_inline]] inline void store(Lds &lds, const StoreRequest &r) {
+RJ_ALWAYS_INLINE inline void store(Lds &lds, const StoreRequest &r) {
   using namespace detail;
   if (std::popcount(r.exec) <= 4) // many stores, nearly all EXEC = 1
     return lane_by_lane<F>(lds, r);
@@ -156,7 +156,7 @@ template <StoreFormat F, uint32_t Span> void by_shape(Lds &lds, const StoreReque
 ///     AVX2 zip / transpose, as the load writeback has, is worth only a sliver
 ///     of store time, so stores have no AVX2 body.
 template <StoreFormat F, uint32_t Span>
-[[gnu::always_inline]] inline const uint8_t *payload(const StoreRequest &r, uint8_t *staging) {
+RJ_ALWAYS_INLINE inline const uint8_t *payload(const StoreRequest &r, uint8_t *staging) {
   constexpr uint32_t Width = kWidth<F>;
   if constexpr (Width == 4) {
     return reinterpret_cast<const uint8_t *>(r.data[0]);
@@ -176,8 +176,7 @@ template <StoreFormat F, uint32_t Span>
 
 /// One lane's payload bytes, straight from the data rows.
 template <StoreFormat F>
-[[gnu::always_inline]] inline void lane_payload(const StoreRequest &r, uint32_t lane,
-                                                uint8_t *bytes) {
+RJ_ALWAYS_INLINE inline void lane_payload(const StoreRequest &r, uint32_t lane, uint8_t *bytes) {
   if constexpr (kWidth<F> >= 4) {
     for (uint32_t i = 0; i < kWidth<F> / 4; ++i)
       std::memcpy(bytes + 4 * i, &r.data[i][lane], 4);
@@ -216,7 +215,7 @@ template <StoreFormat F, uint32_t Span> void exact_span(Lds &lds, const StoreReq
 /// once equals growing as the loop goes: growth depends only on the highest
 /// byte.
 template <StoreFormat F, uint32_t Span>
-[[gnu::always_inline]] inline void write_blocks(Lds &lds, const StoreRequest &r, BlockPlan plan) {
+RJ_ALWAYS_INLINE inline void write_blocks(Lds &lds, const StoreRequest &r, BlockPlan plan) {
   constexpr uint32_t Width = kWidth<F>;
   uint8_t *data = Access::materialize(lds, plan.end);
   alignas(64) uint8_t staging[kStagingBytes];
@@ -230,8 +229,8 @@ template <StoreFormat F, uint32_t Span>
 /// Equals the loop because every lane writes the same bytes in order, so the
 /// last, highest lane's bytes are what remain.
 template <StoreFormat F, uint32_t Span>
-[[gnu::always_inline]] inline void write_highest_lane(Lds &lds, const StoreRequest &r,
-                                                      BroadcastPlan plan) {
+RJ_ALWAYS_INLINE inline void write_highest_lane(Lds &lds, const StoreRequest &r,
+                                                BroadcastPlan plan) {
   uint8_t bytes[16];
   lane_payload<F>(r, Span - 1, bytes);
   uint8_t *data = Access::materialize(lds, plan.end);
@@ -241,7 +240,7 @@ template <StoreFormat F, uint32_t Span>
 /// Equals the loop because it is the loop, minus the per-lane bounds check
 /// and growth the plan already settled.
 template <StoreFormat F, uint32_t Span>
-[[gnu::always_inline]] inline void write_lanes(Lds &lds, const StoreRequest &r, LanesPlan plan) {
+RJ_ALWAYS_INLINE inline void write_lanes(Lds &lds, const StoreRequest &r, LanesPlan plan) {
   constexpr uint32_t Width = kWidth<F>;
   uint8_t *data = Access::materialize(lds, plan.end);
   alignas(64) uint8_t staging[kStagingBytes];

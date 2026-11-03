@@ -81,17 +81,17 @@ struct LoadRequest {
 
 // Defined below: the rest of level 1, then the rewrites (level 2).
 template <uint32_t Width, uint32_t Wave, typename Slow>
-[[gnu::always_inline]] inline void by_wave(const LoadRequest &r, Slow &slow, const uint8_t **view);
+RJ_ALWAYS_INLINE inline void by_wave(const LoadRequest &r, Slow &slow, const uint8_t **view);
 template <uint32_t Width, uint32_t Span, typename Slow>
-[[gnu::always_inline]] inline void by_shape(const LoadRequest &r, Slow &slow, const uint8_t **view);
+RJ_ALWAYS_INLINE inline void by_shape(const LoadRequest &r, Slow &slow, const uint8_t **view);
 template <uint32_t Width, uint32_t Span>
-[[gnu::always_inline]] inline void copy_blocks(const LoadRequest &r, const uint8_t **view,
-                                               BlockPlan plan);
-[[gnu::always_inline]] inline void copy_column_pairs(const LoadRequest &r, ColumnPlan plan);
+RJ_ALWAYS_INLINE inline void copy_blocks(const LoadRequest &r, const uint8_t **view,
+                                         BlockPlan plan);
+RJ_ALWAYS_INLINE inline void copy_column_pairs(const LoadRequest &r, ColumnPlan plan);
 template <uint32_t Width, uint32_t Span>
-[[gnu::always_inline]] inline void copy_lanes(const LoadRequest &r, LanesPlan plan);
+RJ_ALWAYS_INLINE inline void copy_lanes(const LoadRequest &r, LanesPlan plan);
 template <uint32_t Width, typename Slow>
-[[gnu::always_inline]] inline void lane_by_lane(const LoadRequest &r, Slow &slow);
+RJ_ALWAYS_INLINE inline void lane_by_lane(const LoadRequest &r, Slow &slow);
 template <typename Slow>
 RJ_NOINLINE void exact_rule(const uint32_t *addr, uint32_t offset, uint64_t lanes, Slow &slow);
 
@@ -113,9 +113,9 @@ RJ_NOINLINE void exact_rule(const uint32_t *addr, uint32_t offset, uint64_t lane
 /// are the 16 * stride bytes at view[g], which is @p dst + 16g * stride unless
 /// those lanes read consecutive LDS bytes, when it points at them in place.
 template <uint32_t Wave = 64, typename Slow>
-[[gnu::always_inline]] inline void load(Backing backing, const uint32_t *lanes, uint32_t offset,
-                                        uint64_t lane_mask, uint32_t elem_size, uint32_t num_elems,
-                                        uint8_t *dst, Slow &&slow, const uint8_t **view = nullptr) {
+RJ_ALWAYS_INLINE inline void load(Backing backing, const uint32_t *lanes, uint32_t offset,
+                                  uint64_t lane_mask, uint32_t elem_size, uint32_t num_elems,
+                                  uint8_t *dst, Slow &&slow, const uint8_t **view = nullptr) {
   if (view)
     for (uint32_t g = 0; g < Wave / 16; ++g)
       view[g] = dst + g * 16 * elem_size * num_elems;
@@ -140,7 +140,7 @@ namespace detail {
 
 /// By wave: how far the active lanes reach.
 template <uint32_t Width, uint32_t Wave, typename Slow>
-[[gnu::always_inline]] inline void by_wave(const LoadRequest &r, Slow &slow, const uint8_t **view) {
+RJ_ALWAYS_INLINE inline void by_wave(const LoadRequest &r, Slow &slow, const uint8_t **view) {
   // Many loads, nearly all single-lane: plain per-lane copies beat any setup.
   if (std::popcount(r.exec) <= 4)
     return lane_by_lane<Width>(r, slow);
@@ -162,8 +162,7 @@ template <uint32_t Width, uint32_t Wave, typename Slow>
 /// the span counts as active: unlike stores, no EXEC check in any proof or
 /// copy.
 template <uint32_t Width, uint32_t Span, typename Slow>
-[[gnu::always_inline]] inline void by_shape(const LoadRequest &r, Slow &slow,
-                                            const uint8_t **view) {
+RJ_ALWAYS_INLINE inline void by_shape(const LoadRequest &r, Slow &slow, const uint8_t **view) {
   // The column pattern only occurs in b64 read2 on 32 lanes, so no other
   // instantiation pays for its proof.
   if constexpr (Width == 8 && Span == 32)
@@ -186,8 +185,7 @@ template <uint32_t Width, uint32_t Span, typename Slow>
 /// restarts its run every 16 lanes. With a @p view, point at the bytes in place
 /// instead of copying them.
 template <uint32_t Width, uint32_t Span>
-[[gnu::always_inline]] inline void copy_blocks(const LoadRequest &r, const uint8_t **view,
-                                               BlockPlan) {
+RJ_ALWAYS_INLINE inline void copy_blocks(const LoadRequest &r, const uint8_t **view, BlockPlan) {
 #pragma GCC unroll 4
   for (uint32_t g = 0; g < Span; g += 16) {
     if (view)
@@ -200,7 +198,7 @@ template <uint32_t Width, uint32_t Span>
 /// Equals the loop because lane i+16's 8 bytes follow lane i's, so one 16-byte
 /// read covers both. The surprise in b64 read2: adjacent lanes look scattered
 /// (0, 128, 272, ...), but each 16-byte column is [lane i | lane i+16].
-[[gnu::always_inline]] inline void copy_column_pairs(const LoadRequest &r, ColumnPlan) {
+RJ_ALWAYS_INLINE inline void copy_column_pairs(const LoadRequest &r, ColumnPlan) {
 #if RJ_HOST_HAS_AVX2
   // Two neighbouring columns unzip into two lanes of each output row, so each
   // row gets 16-byte stores instead of 8-byte ones.
@@ -224,7 +222,7 @@ template <uint32_t Width, uint32_t Span>
 /// Equals the loop because it is the loop, minus the per-lane bounds check the
 /// plan already settled.
 template <uint32_t Width, uint32_t Span>
-[[gnu::always_inline]] inline void copy_lanes(const LoadRequest &r, LanesPlan) {
+RJ_ALWAYS_INLINE inline void copy_lanes(const LoadRequest &r, LanesPlan) {
 #pragma GCC unroll 64
   for (uint32_t lane = 0; lane < Span; ++lane)
     std::memcpy(r.dst + lane * Width, r.data + r.address(lane), Width);
@@ -233,7 +231,7 @@ template <uint32_t Width, uint32_t Span>
 /// The loop itself over the active lanes, each checked; lanes past the backing
 /// take the exact rule.
 template <uint32_t Width, typename Slow>
-[[gnu::always_inline]] inline void lane_by_lane(const LoadRequest &r, Slow &slow) {
+RJ_ALWAYS_INLINE inline void lane_by_lane(const LoadRequest &r, Slow &slow) {
   uint64_t late = 0;
   for (uint64_t lanes = r.exec; lanes; lanes &= lanes - 1) {
     const uint32_t lane = std::countr_zero(lanes);

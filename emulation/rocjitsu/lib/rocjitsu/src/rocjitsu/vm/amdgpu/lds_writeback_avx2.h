@@ -19,6 +19,7 @@
 #ifndef ROCJITSU_VM_AMDGPU_LDS_WRITEBACK_AVX2_H_
 #define ROCJITSU_VM_AMDGPU_LDS_WRITEBACK_AVX2_H_
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/vm/amdgpu/lds_writeback.h"
 
 #include <immintrin.h>
@@ -31,17 +32,17 @@ namespace avx2 {
 enum class Stores { Plain, Masked };
 
 template <DstFormat F, uint32_t Wave, Stores S>
-[[gnu::always_inline]] inline void store_chunks(const Target<F, Wave> &t, uint64_t exec);
+RJ_ALWAYS_INLINE inline void store_chunks(const Target<F, Wave> &t, uint64_t exec);
 template <DstFormat F, uint32_t Wave>
-[[gnu::always_inline]] inline void values(const Target<F, Wave> &t, uint32_t c, __m256i *v);
-[[gnu::always_inline]] inline __m256i block(const uint8_t *src);
-[[gnu::always_inline]] inline void unzip(const uint8_t *src, __m256i *v);
-[[gnu::always_inline]] inline void transpose(const uint8_t *src, __m256i *v);
-[[gnu::always_inline]] inline void gather(const uint8_t *src, __m256i *v);
+RJ_ALWAYS_INLINE inline void values(const Target<F, Wave> &t, uint32_t c, __m256i *v);
+RJ_ALWAYS_INLINE inline __m256i block(const uint8_t *src);
+RJ_ALWAYS_INLINE inline void unzip(const uint8_t *src, __m256i *v);
+RJ_ALWAYS_INLINE inline void transpose(const uint8_t *src, __m256i *v);
+RJ_ALWAYS_INLINE inline void gather(const uint8_t *src, __m256i *v);
 template <DstFormat F>
-[[gnu::always_inline]] inline __m256i extend(const uint8_t *src, const uint8_t *old, bool ecc);
-[[gnu::always_inline]] inline __m256i exec_mask(uint64_t exec, uint32_t c);
-[[gnu::always_inline]] inline __m256i load(const void *p);
+RJ_ALWAYS_INLINE inline __m256i extend(const uint8_t *src, const uint8_t *old, bool ecc);
+RJ_ALWAYS_INLINE inline __m256i exec_mask(uint64_t exec, uint32_t c);
+RJ_ALWAYS_INLINE inline __m256i load(const void *p);
 
 // ---------------------------------------------------------------------------
 // Level 1: by EXEC shape.
@@ -51,7 +52,7 @@ template <DstFormat F>
 /// lanes, so a branch on it mispredicts and costs the mix far more than it
 /// saves on full b32 waves. Other formats are a full wave almost always, where
 /// plain stores are clearly faster than masked ones.
-template <DstFormat F, uint32_t Wave> [[gnu::always_inline]] inline Stores choose(uint64_t exec) {
+template <DstFormat F, uint32_t Wave> RJ_ALWAYS_INLINE inline Stores choose(uint64_t exec) {
   if (kStride<F> != 4 && exec == lds_shapes::prefix(Wave))
     return Stores::Plain;
   return Stores::Masked;

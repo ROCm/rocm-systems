@@ -33,6 +33,7 @@
 #ifndef ROCJITSU_VM_AMDGPU_LDS_LANE_SHAPES_H_
 #define ROCJITSU_VM_AMDGPU_LDS_LANE_SHAPES_H_
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "util/host_target.h"
 
 #include <algorithm>
@@ -104,14 +105,13 @@ namespace scalar {
 /// x, hidden from the optimizer. Without it v[0] ^ v[0] folds to 0 and the
 /// remaining 31 or 63 lanes get shuffled into vectors, which made broadcast
 /// stores markedly slower.
-[[gnu::always_inline]] inline uint32_t opaque(uint32_t x) {
+RJ_ALWAYS_INLINE inline uint32_t opaque(uint32_t x) {
   asm("" : "+r"(x));
   return x;
 }
 
 /// Whether lane g+j holds vgpr[g] + j*Width in every 16-lane group.
-template <uint32_t Width, uint32_t Span>
-[[gnu::always_inline]] inline bool ramps(const uint32_t *vgpr) {
+template <uint32_t Width, uint32_t Span> RJ_ALWAYS_INLINE inline bool ramps(const uint32_t *vgpr) {
   uint32_t first[Span / 16];
   for (uint32_t group = 0; group < Span / 16; ++group)
     first[group] = vgpr[group * 16];
@@ -122,7 +122,7 @@ template <uint32_t Width, uint32_t Span>
 }
 
 /// Whether vgpr[i + 16] == vgpr[i] + 8 for every i < 16.
-[[gnu::always_inline]] inline bool columns(const uint32_t *vgpr) {
+RJ_ALWAYS_INLINE inline bool columns(const uint32_t *vgpr) {
   uint32_t mismatch = 0;
   for (uint32_t lane = 0; lane < 16; ++lane)
     mismatch |= vgpr[lane + 16] ^ (vgpr[lane] + 8);
@@ -130,7 +130,7 @@ template <uint32_t Width, uint32_t Span>
 }
 
 /// Whether every lane of the span equals lane 0.
-template <uint32_t Span> [[gnu::always_inline]] inline bool all_same(const uint32_t *vgpr) {
+template <uint32_t Span> RJ_ALWAYS_INLINE inline bool all_same(const uint32_t *vgpr) {
   const uint32_t base = opaque(vgpr[0]);
   uint32_t mismatch = 0;
   for (uint32_t lane = 0; lane < Span; ++lane)
@@ -140,7 +140,7 @@ template <uint32_t Span> [[gnu::always_inline]] inline bool all_same(const uint3
 
 /// max over the first N lanes of (vgpr[l] + offset) mod 2^32.
 template <uint32_t N>
-[[gnu::always_inline]] inline uint32_t max_lane(const uint32_t *vgpr, uint32_t offset) {
+RJ_ALWAYS_INLINE inline uint32_t max_lane(const uint32_t *vgpr, uint32_t offset) {
   uint32_t highest = 0;
   for (uint32_t lane = 0; lane < N; ++lane)
     highest = std::max(highest, vgpr[lane] + offset);
@@ -149,8 +149,7 @@ template <uint32_t N>
 
 /// Whether (vgpr[l] + offset) mod 2^32 <= last for each of the first N lanes.
 template <uint32_t N>
-[[gnu::always_inline]] inline bool all_at_most(const uint32_t *vgpr, uint32_t offset,
-                                               uint32_t last) {
+RJ_ALWAYS_INLINE inline bool all_at_most(const uint32_t *vgpr, uint32_t offset, uint32_t last) {
   return max_lane<N>(vgpr, offset) <= last;
 }
 
@@ -166,20 +165,19 @@ template <uint32_t N>
 // class, and they held steady through the changes that broke the plain ones.
 namespace avx2 {
 
-[[gnu::always_inline]] inline __m256i lanes8(const uint32_t *vgpr) {
+RJ_ALWAYS_INLINE inline __m256i lanes8(const uint32_t *vgpr) {
   return _mm256_loadu_si256(reinterpret_cast<const __m256i *>(vgpr));
 }
 
-[[gnu::always_inline]] inline bool none(__m256i v) { return _mm256_testz_si256(v, v); }
+RJ_ALWAYS_INLINE inline bool none(__m256i v) { return _mm256_testz_si256(v, v); }
 
 /// j*W .. (j+7)*W: where lanes j..j+7 of a group sit relative to its first.
-template <uint32_t Width> [[gnu::always_inline]] inline __m256i steps(uint32_t j) {
+template <uint32_t Width> RJ_ALWAYS_INLINE inline __m256i steps(uint32_t j) {
   return _mm256_setr_epi32(j * Width, (j + 1) * Width, (j + 2) * Width, (j + 3) * Width,
                            (j + 4) * Width, (j + 5) * Width, (j + 6) * Width, (j + 7) * Width);
 }
 
-template <uint32_t Width, uint32_t Span>
-[[gnu::always_inline]] inline bool ramps(const uint32_t *vgpr) {
+template <uint32_t Width, uint32_t Span> RJ_ALWAYS_INLINE inline bool ramps(const uint32_t *vgpr) {
   __m256i mismatch = _mm256_setzero_si256();
 #pragma GCC unroll 4
   for (uint32_t group = 0; group < Span; group += 16) {
@@ -192,7 +190,7 @@ template <uint32_t Width, uint32_t Span>
   return none(mismatch);
 }
 
-[[gnu::always_inline]] inline bool columns(const uint32_t *vgpr) {
+RJ_ALWAYS_INLINE inline bool columns(const uint32_t *vgpr) {
   const __m256i eight = _mm256_set1_epi32(8);
   __m256i mismatch = _mm256_setzero_si256();
   for (uint32_t lane = 0; lane < 16; lane += 8)
@@ -202,7 +200,7 @@ template <uint32_t Width, uint32_t Span>
   return none(mismatch);
 }
 
-template <uint32_t Span> [[gnu::always_inline]] inline bool all_same(const uint32_t *vgpr) {
+template <uint32_t Span> RJ_ALWAYS_INLINE inline bool all_same(const uint32_t *vgpr) {
   const __m256i base = _mm256_set1_epi32(static_cast<int>(vgpr[0]));
   __m256i mismatch = _mm256_setzero_si256();
 #pragma GCC unroll 8
@@ -212,7 +210,7 @@ template <uint32_t Span> [[gnu::always_inline]] inline bool all_same(const uint3
 }
 
 template <uint32_t N>
-[[gnu::always_inline]] inline uint32_t max_lane(const uint32_t *vgpr, uint32_t offset) {
+RJ_ALWAYS_INLINE inline uint32_t max_lane(const uint32_t *vgpr, uint32_t offset) {
   const __m256i bias = _mm256_set1_epi32(static_cast<int>(offset));
   __m256i highest = _mm256_setzero_si256();
 #pragma GCC unroll 8
@@ -227,8 +225,7 @@ template <uint32_t N>
 /// Tested in-register: folding to one max first, as max_lane does and as the
 /// scalar body may, made the load census mix measurably slower.
 template <uint32_t N>
-[[gnu::always_inline]] inline bool all_at_most(const uint32_t *vgpr, uint32_t offset,
-                                               uint32_t last) {
+RJ_ALWAYS_INLINE inline bool all_at_most(const uint32_t *vgpr, uint32_t offset, uint32_t last) {
   const __m256i bias = _mm256_set1_epi32(static_cast<int>(offset));
   const __m256i bound = _mm256_set1_epi32(static_cast<int>(last));
   __m256i highest = _mm256_setzero_si256();
@@ -255,15 +252,15 @@ namespace host = scalar;
 
 /// The highest start address whose Width bytes end inside the limit, clamped
 /// to 32 bits (an LDS limit is far below 2^32). Requires limit >= Width.
-[[gnu::always_inline]] inline uint32_t last_start(uint64_t limit, uint32_t width) {
+RJ_ALWAYS_INLINE inline uint32_t last_start(uint64_t limit, uint32_t width) {
   return static_cast<uint32_t>(std::min<uint64_t>(limit - width, UINT32_MAX));
 }
 
 /// Accepts: every 16-lane group is its own ramp.
 ///   ▁▂▃▄▅▆▇█ ▁▂▃▄▅▆▇█ ▁▂▃▄▅▆▇█ ▁▂▃▄▅▆▇█    (each ramp starts at its own base)
 template <uint32_t Width, uint32_t Span>
-[[gnu::always_inline]] inline std::optional<BlockPlan>
-prove_blocks(const uint32_t *vgpr, uint32_t offset, uint64_t limit) {
+RJ_ALWAYS_INLINE inline std::optional<BlockPlan> prove_blocks(const uint32_t *vgpr, uint32_t offset,
+                                                              uint64_t limit) {
   // Every other shape fails here and skips the full proof, which alone made
   // the load census mix measurably faster.
   if (vgpr[1] != vgpr[0] + Width)
@@ -283,7 +280,7 @@ prove_blocks(const uint32_t *vgpr, uint32_t offset, uint64_t limit) {
 /// Accepts: lanes 16-31 repeat lanes 0-15's shape, 8 bytes higher.
 ///   ▃▁▆▂█▄▇▅ ▃▁▆▂█▄▇▅                      (scattered, but in matching pairs)
 /// b64 read2 looks scattered lane to lane, but this holds for many of them.
-[[gnu::always_inline]] inline std::optional<ColumnPlan>
+RJ_ALWAYS_INLINE inline std::optional<ColumnPlan>
 prove_column_pairs(const uint32_t *vgpr, uint32_t offset, uint64_t limit) {
   // Most b64 loads already fail on lane 0: no loop for them.
   if (limit < 16 || vgpr[16] != vgpr[0] + 8 || !lanes::host::columns(vgpr) ||
@@ -295,7 +292,7 @@ prove_column_pairs(const uint32_t *vgpr, uint32_t offset, uint64_t limit) {
 /// Accepts: every lane the same address.
 ///   ▄▄▄▄▄▄▄▄
 template <uint32_t Width, uint32_t Span>
-[[gnu::always_inline]] inline std::optional<BroadcastPlan>
+RJ_ALWAYS_INLINE inline std::optional<BroadcastPlan>
 prove_broadcast(const uint32_t *vgpr, uint32_t offset, uint64_t limit) {
   const uint64_t end = uint64_t{uint32_t(vgpr[0] + offset)} + Width;
   if (!lanes::host::all_same<Span>(vgpr) || end > limit)
@@ -309,8 +306,8 @@ prove_broadcast(const uint32_t *vgpr, uint32_t offset, uint64_t limit) {
 /// One bounds pass, so the copies after it need no check per lane. Checking
 /// each lane instead made b64 loads much slower.
 template <uint32_t Width, uint32_t Span>
-[[gnu::always_inline]] inline std::optional<LanesPlan>
-prove_lanes(const uint32_t *vgpr, uint32_t offset, uint64_t limit) {
+RJ_ALWAYS_INLINE inline std::optional<LanesPlan> prove_lanes(const uint32_t *vgpr, uint32_t offset,
+                                                             uint64_t limit) {
   if (limit < Width || !lanes::host::all_at_most<Span>(vgpr, offset, last_start(limit, Width)))
     return std::nullopt;
   // Loads read neither field, so for them both passes below compile away.

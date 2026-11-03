@@ -77,8 +77,8 @@ template <DstFormat F, uint32_t Wave> struct Target {
 };
 
 template <DstFormat F, uint32_t Wave>
-[[gnu::always_inline]] inline Target<F, Wave> target(uint8_t *const *dst, bool sram_ecc,
-                                                     const uint8_t *const *groups) {
+RJ_ALWAYS_INLINE inline Target<F, Wave> target(uint8_t *const *dst, bool sram_ecc,
+                                               const uint8_t *const *groups) {
   Target<F, Wave> t;
   for (uint32_t r = 0; r < kRegs<F>; ++r)
     t.dst[r] = dst[r];
@@ -96,7 +96,7 @@ RJ_NOINLINE void for_wave(uint8_t *const *dst, bool sram_ecc, uint64_t exec,
 }
 namespace avx2 {
 template <DstFormat F, uint32_t Wave>
-[[gnu::always_inline]] inline void by_exec(const Target<F, Wave> &t, uint64_t exec);
+RJ_ALWAYS_INLINE inline void by_exec(const Target<F, Wave> &t, uint64_t exec);
 }
 
 // ---------------------------------------------------------------------------
@@ -110,8 +110,8 @@ template <DstFormat F, uint32_t Wave>
 /// past the wave, so the wave size can be a template parameter and every lane
 /// loop has a constant trip count. @p groups holds Wave / 16 group pointers.
 template <DstFormat F, Isa I = kHostIsa>
-[[gnu::always_inline]] inline void write_back_as(uint8_t *const *dst, bool sram_ecc, uint32_t wave,
-                                                 uint64_t exec, const uint8_t *const *groups) {
+RJ_ALWAYS_INLINE inline void write_back_as(uint8_t *const *dst, bool sram_ecc, uint32_t wave,
+                                           uint64_t exec, const uint8_t *const *groups) {
   static_assert(I == Isa::scalar || RJ_HOST_HAS_AVX2, "Isa::avx2 needs an AVX2 build");
   if constexpr (I == Isa::avx2) {
     // Inline in the load's handler, where the group pointers are still in
@@ -131,23 +131,23 @@ namespace scalar {
 enum class Coverage { Wave, FewLanes, Chunks };
 
 template <DstFormat F, uint32_t Wave>
-[[gnu::always_inline]] inline void by_exec(const Target<F, Wave> &t, uint64_t exec);
+RJ_ALWAYS_INLINE inline void by_exec(const Target<F, Wave> &t, uint64_t exec);
 template <DstFormat F, uint32_t Wave>
-[[gnu::always_inline]] inline void store_wave(const Target<F, Wave> &t);
+RJ_ALWAYS_INLINE inline void store_wave(const Target<F, Wave> &t);
 template <DstFormat F, uint32_t Wave, uint32_t N>
-[[gnu::always_inline]] inline void store_lanes(const Target<F, Wave> &t, uint32_t first);
+RJ_ALWAYS_INLINE inline void store_lanes(const Target<F, Wave> &t, uint32_t first);
 template <DstFormat F, uint32_t Wave>
-[[gnu::always_inline]] inline void store_active(const Target<F, Wave> &t, uint64_t lanes);
+RJ_ALWAYS_INLINE inline void store_active(const Target<F, Wave> &t, uint64_t lanes);
 template <DstFormat F, uint32_t Wave>
-[[gnu::always_inline]] inline void store_chunks(const Target<F, Wave> &t, uint64_t exec);
+RJ_ALWAYS_INLINE inline void store_chunks(const Target<F, Wave> &t, uint64_t exec);
 template <DstFormat F, uint32_t Wave>
-[[gnu::always_inline]] inline void lane(const Target<F, Wave> &t, uint32_t l);
+RJ_ALWAYS_INLINE inline void lane(const Target<F, Wave> &t, uint32_t l);
 template <DstFormat F, uint32_t Wave>
-[[gnu::always_inline]] inline const uint8_t *src(const Target<F, Wave> &t, uint32_t l);
+RJ_ALWAYS_INLINE inline const uint8_t *src(const Target<F, Wave> &t, uint32_t l);
 template <DstFormat F>
-[[gnu::always_inline]] inline uint32_t narrow(const uint8_t *src, uint32_t old, bool ecc);
-[[gnu::always_inline]] inline uint64_t load64(const uint8_t *p);
-[[gnu::always_inline]] inline void store64(uint8_t *p, uint64_t v);
+RJ_ALWAYS_INLINE inline uint32_t narrow(const uint8_t *src, uint32_t old, bool ecc);
+RJ_ALWAYS_INLINE inline uint64_t load64(const uint8_t *p);
+RJ_ALWAYS_INLINE inline void store64(uint8_t *p, uint64_t v);
 
 /// A function per wave size, so each gets its own register allocation: with
 /// both waves inlined into one function, scalar u16 spilled its constants and
@@ -160,7 +160,7 @@ RJ_NOINLINE void for_wave(uint8_t *const *dst, bool sram_ecc, uint64_t exec,
   by_exec<F, Wave>(target<F, Wave>(dst, sram_ecc, groups), exec);
 }
 
-template <uint32_t Wave> [[gnu::always_inline]] inline Coverage choose(uint64_t exec) {
+template <uint32_t Wave> RJ_ALWAYS_INLINE inline Coverage choose(uint64_t exec) {
   if (exec == lds_shapes::prefix(Wave))
     return Coverage::Wave;
   // Walking all 8-lane chunks for these instead is measurably slower.
@@ -196,11 +196,11 @@ constexpr Form kForm = kStride<F> == 4               ? Form::Block
                                                      : Form::PerLane;
 
 template <DstFormat F, uint32_t Wave, uint32_t N>
-[[gnu::always_inline]] inline void block(const Target<F, Wave> &t, uint32_t first);
+RJ_ALWAYS_INLINE inline void block(const Target<F, Wave> &t, uint32_t first);
 template <DstFormat F, uint32_t Wave, uint32_t N>
-[[gnu::always_inline]] inline void pairs(const Target<F, Wave> &t, uint32_t first);
+RJ_ALWAYS_INLINE inline void pairs(const Target<F, Wave> &t, uint32_t first);
 template <DstFormat F, uint32_t Wave, uint32_t N>
-[[gnu::always_inline]] inline void extend(const Target<F, Wave> &t, uint32_t first);
+RJ_ALWAYS_INLINE inline void extend(const Target<F, Wave> &t, uint32_t first);
 
 /// Every lane, a group at a time: groups may sit apart.
 template <DstFormat F, uint32_t Wave> void store_wave(const Target<F, Wave> &t) {

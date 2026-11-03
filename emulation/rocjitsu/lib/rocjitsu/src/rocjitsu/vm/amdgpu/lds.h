@@ -207,9 +207,9 @@ public:
   /// @p dst: lanes 16g..16g+15 are at view[g], which points into LDS itself
   /// when those lanes read consecutive bytes. Reader: lds_load_plans.h.
   template <uint32_t Wave = 64>
-  [[gnu::always_inline]] void
-  vector_load32(const uint32_t *lanes, uint32_t offset, uint64_t lane_mask, uint32_t elem_size,
-                uint32_t num_elems, uint8_t *dst, const uint8_t **view = nullptr) const {
+  RJ_ALWAYS_INLINE void vector_load32(const uint32_t *lanes, uint32_t offset, uint64_t lane_mask,
+                                      uint32_t elem_size, uint32_t num_elems, uint8_t *dst,
+                                      const uint8_t **view = nullptr) const {
     lds_load::load<Wave>(
         {data_.data(), data_.size()}, lanes, offset, lane_mask, elem_size, num_elems, dst,
         [&](const uint64_t *exact, uint64_t slow_lanes) {

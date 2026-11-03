@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/lds_inline_access.h"
@@ -36,9 +37,9 @@ constexpr uint32_t vgpr_count(uint32_t stride) { return std::max(1u, (stride + 3
 ///    yet, so declining costs a few loads and branches, and the handler falls
 ///    back to its VectorMemState.
 template <bool IsLoad, bool Dual = false>
-[[gnu::always_inline]] inline bool can_complete_inline(const LdsAccessRequest &req,
-                                                       const ComputeUnitCore &cu,
-                                                       const Wavefront &wf, uint32_t stride) {
+RJ_ALWAYS_INLINE inline bool can_complete_inline(const LdsAccessRequest &req,
+                                                 const ComputeUnitCore &cu, const Wavefront &wf,
+                                                 uint32_t stride) {
   // 1a. Decided once per execution by the issue loop (observers of the routed
   //     order, a debugger, RJ_DS_INLINE).
   if (!cu.completes_lds_inline())
@@ -75,9 +76,9 @@ template <bool IsLoad, bool Dual = false>
 /// two-address load reads both accesses first), so a destination overlapping
 /// the address register is safe.
 template <uint32_t Wave>
-[[gnu::always_inline]] inline void
-read_steps(const LdsAccessRequest &req, Wavefront &wf, ComputeUnitCore &cu, uint32_t offset,
-           uint32_t dst_vgpr, uint32_t dst_vgprs, uint8_t *staging, LdsStagedLoad &load) {
+RJ_ALWAYS_INLINE inline void read_steps(const LdsAccessRequest &req, Wavefront &wf,
+                                        ComputeUnitCore &cu, uint32_t offset, uint32_t dst_vgpr,
+                                        uint32_t dst_vgprs, uint8_t *staging, LdsStagedLoad &load) {
   const uint64_t exec = wf.exec(); // == lane_mask == exec_mask for DS; no lanes past Wave
 
   // 2. Addresses: lane l reads at (address_lanes[l] + lds_offset) mod 2^32. The
@@ -107,9 +108,9 @@ read_steps(const LdsAccessRequest &req, Wavefront &wf, ComputeUnitCore &cu, uint
 /// A whole plain load, or both accesses of a two-address one, from the gate
 /// to step 5, all but the writebacks.
 template <bool Dual>
-[[gnu::always_inline]] inline bool LdsInlineAccess::read(const Instruction &inst,
-                                                         const LdsAccessRequest &req, Wavefront &wf,
-                                                         uint8_t *staging, LdsStagedLoad *load) {
+RJ_ALWAYS_INLINE inline bool LdsInlineAccess::read(const Instruction &inst,
+                                                   const LdsAccessRequest &req, Wavefront &wf,
+                                                   uint8_t *staging, LdsStagedLoad *load) {
   ComputeUnitCore &cu = wf.raw_cu();
   const uint32_t stride = req.num_elems * req.elem_size;
   assert(stride != 0 && stride <= kMaxLaneBytes);
@@ -121,7 +122,7 @@ template <bool Dual>
   // 2-4, specialized by wave size; a second access reads into the registers
   // right after the first's.
   const uint32_t dst_vgprs = lds_inline::vgpr_count(stride);
-  const auto steps = [&]<uint32_t Wave>() __attribute__((always_inline)) {
+  const auto steps = [&]<uint32_t Wave>() RJ_ALWAYS_INLINE {
     lds_inline::read_steps<Wave>(req, wf, cu, req.offset, req.dst_vgpr, dst_vgprs, staging,
                                  load[0]);
     if constexpr (Dual)
@@ -140,8 +141,8 @@ template <bool Dual>
 }
 
 template <lds_writeback::DstFormat F>
-[[gnu::always_inline]] inline bool
-LdsInlineAccess::load(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf) {
+RJ_ALWAYS_INLINE inline bool LdsInlineAccess::load(const Instruction &inst,
+                                                   const LdsAccessRequest &req, Wavefront &wf) {
   // Everything down to the reader's strategies is inlined, so the compiler sees
   // the whole path: the group pointers stay in registers, and a group read in
   // place goes from LDS to the destination VGPRs without passing through
@@ -157,8 +158,8 @@ LdsInlineAccess::load(const Instruction &inst, const LdsAccessRequest &req, Wave
 }
 
 template <lds_writeback::DstFormat F>
-[[gnu::always_inline]] inline bool
-LdsInlineAccess::load2(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf) {
+RJ_ALWAYS_INLINE inline bool LdsInlineAccess::load2(const Instruction &inst,
+                                                    const LdsAccessRequest &req, Wavefront &wf) {
   // Both accesses are read before either is written back: the destination may
   // overlap the address register.
   alignas(64) uint8_t staging[2 * 64 * kMaxLaneBytes];
@@ -174,8 +175,8 @@ LdsInlineAccess::load2(const Instruction &inst, const LdsAccessRequest &req, Wav
 
 /// A whole plain store, or both accesses of a two-address one.
 template <lds_store::StoreFormat F, bool Dual>
-[[gnu::always_inline]] inline bool
-LdsInlineAccess::write(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf) {
+RJ_ALWAYS_INLINE inline bool LdsInlineAccess::write(const Instruction &inst,
+                                                    const LdsAccessRequest &req, Wavefront &wf) {
   ComputeUnitCore &cu = wf.raw_cu();
   constexpr uint32_t stride = lds_store::kWidth<F>;
   constexpr uint32_t regs = lds_inline::vgpr_count(stride);
@@ -202,7 +203,7 @@ LdsInlineAccess::write(const Instruction &inst, const LdsAccessRequest &req, Wav
   //    in order, so the highest lane wins on overlap; only active lanes are
   //    written. A two-address store writes its first access for every lane,
   //    then its second, which therefore wins where they overlap.
-  const auto store = [&]<uint32_t Wave>() __attribute__((always_inline)) {
+  const auto store = [&]<uint32_t Wave>() RJ_ALWAYS_INLINE {
     lds_store::store<F, Wave>(wf.lds(), request(req.offset, req.data_vgpr));
     if constexpr (Dual)
       lds_store::store<F, Wave>(wf.lds(), request(req.offset2, req.data2_vgpr));
@@ -218,14 +219,14 @@ LdsInlineAccess::write(const Instruction &inst, const LdsAccessRequest &req, Wav
 }
 
 template <lds_store::StoreFormat F>
-[[gnu::always_inline]] inline bool
-LdsInlineAccess::store(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf) {
+RJ_ALWAYS_INLINE inline bool LdsInlineAccess::store(const Instruction &inst,
+                                                    const LdsAccessRequest &req, Wavefront &wf) {
   return write<F, false>(inst, req, wf);
 }
 
 template <lds_store::StoreFormat F>
-[[gnu::always_inline]] inline bool
-LdsInlineAccess::store2(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf) {
+RJ_ALWAYS_INLINE inline bool LdsInlineAccess::store2(const Instruction &inst,
+                                                     const LdsAccessRequest &req, Wavefront &wf) {
   return write<F, true>(inst, req, wf);
 }
 
