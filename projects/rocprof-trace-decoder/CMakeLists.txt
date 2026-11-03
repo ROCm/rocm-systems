@@ -60,6 +60,23 @@ if(BUILD_BENCHMARKS)
     add_subdirectory(test/benchmarks)
 endif()
 
+# The samples, including the marker tools, are examples rather than supported
+# commands, so they go to share/ in their own component rather than bin/. Keep
+# the tree's layout: the marker samples import ../common.py, which imports
+# _code_object_paths from the source tree's python/ directory.
+set(TTD_SAMPLES_DIR ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples)
+install(
+    DIRECTORY ${CMAKE_SOURCE_DIR}/samples/
+    DESTINATION ${TTD_SAMPLES_DIR}
+    COMPONENT samples
+    USE_SOURCE_PERMISSIONS
+    PATTERN "__pycache__" EXCLUDE
+    PATTERN "*.pyc" EXCLUDE)
+install(
+    FILES ${CMAKE_SOURCE_DIR}/python/_code_object_paths.py
+    DESTINATION ${TTD_SAMPLES_DIR}
+    COMPONENT samples)
+
 # The producer lives in llvm-project/amd/sqtt-marker; retain the format docs.
 install(
     DIRECTORY ${CMAKE_SOURCE_DIR}/docs/markers/
