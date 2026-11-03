@@ -15,6 +15,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import traceback
 from functools import lru_cache
 from pathlib import Path
@@ -986,6 +987,7 @@ def _ompt_include_choice_supported(rocprofsys_run: str) -> bool | None:
     try:
         result = subprocess.run(
             [rocprofsys_run, "-I", "ompt", "--help"],
+            check=False,
             capture_output=True,
             text=True,
             timeout=15,
@@ -2202,6 +2204,15 @@ def domain_backend_flag_env() -> dict[str, str]:
 @pytest.fixture
 def transpose_baseline_rules(validation_rules_dir: Path) -> list[Path]:
     return [validation_rules_dir / "default-rules.json"]
+
+
+@pytest.fixture
+def cpu_workload(rocprof_config) -> str:
+    """CPU workload with real, instrumentable functions. Used by most tests here."""
+    try:
+        return str(rocprof_config.get_target_executable("parallel-overhead"))
+    except FileNotFoundError:
+        pytest.skip("parallel-overhead example not built")
 
 
 # ----------------------------------------------------------------------------

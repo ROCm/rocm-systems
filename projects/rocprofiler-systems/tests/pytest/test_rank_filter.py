@@ -343,8 +343,6 @@ class TestRankFilter(RocprofsysTest):
 
 
 @pytest.mark.timeout(180)
-@pytest.mark.mpi
-@pytest.mark.rank_filter
 @pytest.mark.sampling
 @pytest.mark.rocpd("rocpd_env")
 @pytest.mark.class_name("rank-filter-sample")

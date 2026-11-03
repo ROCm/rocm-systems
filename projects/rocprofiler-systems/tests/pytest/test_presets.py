@@ -235,6 +235,7 @@ class TestDomainFlags(RocprofsysTest):
 # narrower flag must leave out.
 # ============================================================================
 
+
 def _echoed_settings(pass_regex: list[str]) -> dict[str, object]:
     """Settings the launcher echoed as ROCPROFSYS_KEY=value.
 
@@ -288,6 +289,11 @@ _TRACE_GPU_COUNTERS = (
 
 # --gpus picks a subset of devices, which only shows with more than one GPU.
 _MULTI_GPU = pytest.mark.multi_gpu(2)
+
+# gpu_with_gpus_range needs a 3rd GPU on the host: with only 2 GPUs, "all GPUs"
+# and "--gpus=0-1" sample the same 2 agents, so an ignored --gpus would still
+# pass. A 3rd GPU makes the counts diverge (2 vs 3+) if the flag is ignored.
+_MULTI_GPU_RANGE = pytest.mark.multi_gpu(3)
 
 # flag_args, pass_regex, seed_env, perfetto_categories, rules, gpu_counters
 DOMAIN_ARTIFACT_CASES = [
@@ -349,7 +355,7 @@ DOMAIN_ARTIFACT_CASES = [
         ["--rocm=hip,kernel"],
         ["ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch"],
         None,
-        ["hip_runtime_api"],
+        ["hip_runtime_api", "kernel_dispatch"],
         ["baseline", "rocm-hip-kernel"],
         None,
         id="rocm_hip_kernel",
@@ -382,7 +388,7 @@ DOMAIN_ARTIFACT_CASES = [
         ["baseline", "sampling-target-gpu-range"],
         None,
         id="gpu_with_gpus_range",
-        marks=_MULTI_GPU,
+        marks=_MULTI_GPU_RANGE,
     ),
     pytest.param(
         ["--gpu", "--rocm"],
@@ -834,14 +840,6 @@ class TestSamplingTargetFlags(RocprofsysTest):
                 "ROCPROFSYS_USE_AMD_SMI=true",
             ],
         )
-
-
-@pytest.fixture
-def cpu_workload(rocprof_config) -> str:
-    try:
-        return str(rocprof_config.get_target_executable("parallel-overhead"))
-    except FileNotFoundError:
-        pytest.skip("parallel-overhead example not built")
 
 
 # --cpu / --cpus record host frequency counters. parallel-overhead can finish

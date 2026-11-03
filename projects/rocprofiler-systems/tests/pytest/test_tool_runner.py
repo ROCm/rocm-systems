@@ -48,15 +48,6 @@ SAMPLING_NO_DELAY = {"ROCPROFSYS_SAMPLING_DELAY": "0.1"}
 
 
 @pytest.fixture
-def cpu_workload(rocprof_config) -> str:
-    """CPU workload with real, instrumentable functions. Used by most tests here."""
-    try:
-        return str(rocprof_config.get_target_executable("parallel-overhead"))
-    except FileNotFoundError:
-        pytest.skip("parallel-overhead example not built")
-
-
-@pytest.fixture
 def gpu_workload(rocprof_config) -> str:
     """HIP workload that dispatches real GPU kernels."""
     try:
@@ -1148,6 +1139,11 @@ class TestBackendFlagsGpuArtifacts(RocprofsysTest):
 
 
 def _assert_backend_settings(result, pass_regex: list[str]) -> None:
+    """Assert the settings in pass_regex that are registered in this build.
+
+    Skip only when none of them are; a build-dependent key (rcclp) missing
+    from the build must not hide a real failure on the rest of the case.
+    """
     metadata = result.get_output_file("metadata*.json")
     if metadata is None:
         pytest.fail(f"No metadata.json found under {result.output_dir}")
@@ -1160,7 +1156,8 @@ def _assert_backend_settings(result, pass_regex: list[str]) -> None:
             unregistered.append(key)
             continue
         expected[key] = value == "true"
-    if expected:
-        assert_resolved_settings(result, expected)
-    if unregistered:
+    if not expected:
         pytest.skip(f"Not registered as a setting in this build: {unregistered}")
+    assert_resolved_settings(result, expected)
+    if unregistered:
+        print(f"Not registered as a setting in this build, skipped: {unregistered}")
