@@ -6303,6 +6303,113 @@ TEST(CommandProcessorTest, Cdna5RuntimeScratchAcceptsTargetGranules) {
   EXPECT_FALSE(f.cp()->queue_faulted_for_test(19, 7));
 }
 
+TEST(CommandProcessorTest, AqlPublicationAcceptsOutOfOrderDoorbells) {
+  constexpr uint32_t kQueueId = 20;
+  constexpr uint64_t kRing = 0xF0100000;
+  constexpr uint64_t kReadPointer = kRing + 256;
+  constexpr uint64_t kWritePointer = kReadPointer + 8;
+  constexpr uint64_t kFirstSignal = kRing + 512;
+  constexpr uint64_t kSecondSignal = kFirstSignal + 64;
+
+  for (const uint64_t index : {uint64_t{0}, uint64_t{3}, (uint64_t{1} << 32) + 3}) {
+    SCOPED_TRACE(index);
+    for (const bool observe_later_first : {false, true}) {
+      SCOPED_TRACE(observe_later_first);
+      uint64_t doorbell = UINT64_MAX;
+      VmFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", /*num_cus=*/1));
+      const uint64_t first_slot = kRing + (index % 4) * amdgpu::kAqlPacketBytes;
+      const uint64_t second_slot = kRing + ((index + 1) % 4) * amdgpu::kAqlPacketBytes;
+      fixture.mem()->write32(first_slot, HSA_PACKET_TYPE_INVALID);
+      fixture.mem()->write32(second_slot, HSA_PACKET_TYPE_INVALID);
+      fixture.mem()->write64(kReadPointer, index);
+      fixture.mem()->write64(kWritePointer, index + 2);
+      fixture.mem()->write64(kFirstSignal + 8, 1);
+      fixture.mem()->write64(kSecondSignal + 8, 1);
+      amdgpu::ComputeQueueConfig queue{};
+      queue.queue_id = kQueueId;
+      queue.ring_base_va = kRing;
+      queue.ring_size = 4 * amdgpu::kAqlPacketBytes;
+      queue.read_ptr_va = kReadPointer;
+      queue.write_ptr_va = kWritePointer;
+      queue.doorbell_mode = amdgpu::QueueDoorbellMode::HostPolled;
+      queue.doorbell_base = &doorbell;
+      queue.last_doorbell = UINT64_MAX;
+      const uint64_t registration = fixture.cp()->register_queue(std::move(queue));
+      ASSERT_NE(registration, 0u);
+
+      hsa_barrier_and_packet_t packet{};
+      packet.header = HSA_PACKET_TYPE_BARRIER_AND;
+      packet.completion_signal.handle = kSecondSignal;
+      fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet),
+                                second_slot);
+      std::atomic_ref(doorbell).store(index + 1, std::memory_order_release);
+      fixture.cp()->notify_queue_doorbell(registration, index + 1);
+      if (observe_later_first) {
+        ASSERT_TRUE(fixture.engine->step());
+        EXPECT_EQ(fixture.cp()->queue_last_doorbell_for_test(registration), index + 1);
+        EXPECT_EQ(fixture.mem()->read64(kReadPointer), index);
+        EXPECT_EQ(fixture.mem()->read64(kSecondSignal + 8), 1u);
+      }
+
+      // The lower-index publisher can overwrite the doorbell before the CP sees
+      // the higher index. Reservation and valid headers still expose both slots.
+      packet.completion_signal.handle = kFirstSignal;
+      fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet),
+                                first_slot);
+      std::atomic_ref(doorbell).store(index, std::memory_order_release);
+      fixture.cp()->notify_queue_doorbell(registration, index);
+      fixture.engine->run();
+      EXPECT_EQ(fixture.mem()->read64(kReadPointer), index + 2);
+      EXPECT_EQ(fixture.mem()->read64(kFirstSignal + 8), 0u);
+      EXPECT_EQ(fixture.mem()->read64(kSecondSignal + 8), 0u);
+      EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(kQueueId, 0));
+      EXPECT_EQ(fixture.mem()->read32(first_slot) & 0xFFu, HSA_PACKET_TYPE_INVALID);
+      EXPECT_EQ(fixture.mem()->read32(second_slot) & 0xFFu, HSA_PACKET_TYPE_INVALID);
+    }
+  }
+}
+
+TEST(CommandProcessorTest, AqlPublicationWaitsForFirstDoorbell) {
+  constexpr uint64_t kRing = 0xF0100000;
+  constexpr uint64_t kReadPointer = kRing + 256;
+  constexpr uint64_t kWritePointer = kReadPointer + 8;
+  constexpr uint64_t kSignal = kRing + 512;
+  uint64_t doorbell = UINT64_MAX;
+  VmFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", /*num_cus=*/1));
+  fixture.mem()->write64(kReadPointer, 0);
+  fixture.mem()->write64(kWritePointer, 1);
+  fixture.mem()->write64(kSignal + 8, 1);
+  hsa_barrier_and_packet_t packet{};
+  packet.header = HSA_PACKET_TYPE_BARRIER_AND;
+  packet.completion_signal.handle = kSignal;
+  fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), kRing);
+  amdgpu::ComputeQueueConfig queue{};
+  queue.queue_id = 20;
+  queue.ring_base_va = kRing;
+  queue.ring_size = 4 * amdgpu::kAqlPacketBytes;
+  queue.read_ptr_va = kReadPointer;
+  queue.write_ptr_va = kWritePointer;
+  queue.doorbell_mode = amdgpu::QueueDoorbellMode::HostPolled;
+  queue.doorbell_base = &doorbell;
+  queue.last_doorbell = UINT64_MAX;
+  const uint64_t registration = fixture.cp()->register_queue(std::move(queue));
+  ASSERT_NE(registration, 0u);
+
+  fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
+  ASSERT_TRUE(fixture.engine->step());
+  EXPECT_EQ(fixture.cp()->queue_last_doorbell_for_test(registration), UINT64_MAX);
+  EXPECT_EQ(fixture.mem()->read64(kReadPointer), 0u);
+  EXPECT_EQ(fixture.mem()->read64(kSignal + 8), 1u);
+  std::atomic_ref(doorbell).store(0, std::memory_order_release);
+  fixture.cp()->notify_queue_doorbell(registration, 0);
+  fixture.engine->run();
+  EXPECT_EQ(fixture.mem()->read64(kReadPointer), 1u);
+  EXPECT_EQ(fixture.mem()->read64(kSignal + 8), 0u);
+  EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(20, 0));
+}
+
 TEST(CommandProcessorTest, DynamicScratchRequestBlocksRemovalOnlyUntilDelivery) {
   using namespace rocjitsu::amdhsa;
 
