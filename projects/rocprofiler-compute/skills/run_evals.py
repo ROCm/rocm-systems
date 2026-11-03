@@ -13,6 +13,7 @@ Usage:
     ./skills/run_evals.py                      # routing only, no tools
     ./skills/run_evals.py --mode behavioral    # also grade what the agent did
     ./skills/run_evals.py --skill rocprof-compute-memory  # one skill
+    ./skills/run_evals.py --only kb-kernel-name-filter    # one case
     ./skills/run_evals.py --list               # validate datasets, run nothing
 
 Exits 0 when every case passes, 1 on a failure, and 77 when the `claude` CLI
@@ -337,6 +338,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=["routing", "behavioral"], default="routing")
     parser.add_argument("--skill", help="Run one skill instead of all of them.")
+    parser.add_argument("--only", help="Comma-separated case ids to run.")
     parser.add_argument("--list", action="store_true", help="Validate datasets only.")
     parser.add_argument(
         "--jobs",
@@ -367,8 +369,14 @@ def main() -> int:
                     case.pop(key, None)
 
     queued = [(name, case) for name, cases in datasets.items() for case in cases]
+    if args.only:
+        wanted = set(args.only.split(","))
+        queued = [(name, case) for name, case in queued if case["id"] in wanted]
+        missing = wanted - {case["id"] for _, case in queued}
+        if missing:
+            sys.exit(f"--only names unknown case ids: {', '.join(sorted(missing))}")
     started = time.monotonic()
-    results: dict[str, list[tuple[str, list[str]]]] = {name: [] for name in datasets}
+    results: dict[str, list[tuple[str, list[str]]]] = {name: [] for name, _ in queued}
 
     # Each case gets its own workspace and its own agent, so they are
     # independent. The work is waiting on a subprocess, not on Python.
