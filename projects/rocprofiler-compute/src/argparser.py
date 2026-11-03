@@ -721,8 +721,9 @@ Examples:
         feature_label="Operator filter",
         help=(
             "\t\tFilter operators with glob patterns.\n"
-            "\t\tA pattern with no framework stays on the preceding one.\n"
-            "\t\tPrefix-less patterns are also legal.\n"
+            "\t\tA pattern with no prefix uses the preceding prefix.\n"
+            "\t\tIf there is no preceding prefix, it matches every "
+            "traced framework and user regions.\n"
             "\t\tExample: --operator 'torch:*conv*' '*relu*' 'triton:*matmul*'\n"
             "\t\tExample: --operator 'user:*UserDefined*'\n"
             "\t\tWith no arguments, matches every collected operator.\n"
