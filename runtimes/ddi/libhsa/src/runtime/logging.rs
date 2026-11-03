@@ -152,7 +152,7 @@ impl LogOutput {
         line.push('\n');
         Some(LogWork {
             output: self.clone(),
-            _inflight: inflight,
+            inflight,
             flag,
             line,
         })
@@ -164,7 +164,7 @@ pub(crate) struct LogWork {
     /// Sink retained while writing outside the registry lock.
     output: Arc<LogOutput>,
     /// Blocks shutdown from freeing state while this work is outstanding.
-    _inflight: InFlightToken,
+    inflight: InFlightToken,
     /// Category to check before emitting the line.
     flag: u32,
     /// Complete formatted line owned by this work item.
@@ -174,6 +174,7 @@ pub(crate) struct LogWork {
 impl LogWork {
     /// Writes a prepared log record after releasing the runtime lock.
     pub(crate) fn write(self) {
+        let _lease_scope = ApiLeaseScope::enter(self.inflight);
         self.output.write(self.flag, self.line.as_bytes());
     }
 }

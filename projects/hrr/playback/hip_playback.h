@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <shared_mutex>
 #include <chrono>
@@ -217,6 +218,12 @@ struct PlaybackContext {
     // ---- Handle translation maps (recorded raw ptr -> live handle) ----
     // Protected by map_mutex: shared_lock for reads, unique_lock for writes.
     mutable std::shared_mutex map_mutex;
+    // Orders a pinned-host snapshot copy against the free of its destination.
+    // A kernel launch holds it shared from before it hands on the turn until
+    // its launch call returns (hrr_launch_hold); every host free holds it
+    // exclusive across map removal and the HIP free. Take this before
+    // map_mutex, never the other way round.
+    std::shared_mutex host_free_mu;
     std::unordered_map<uint64_t, hipStream_t>    stream_map;
     std::unordered_map<uint64_t, hipEvent_t>     event_map;
     std::unordered_map<uint64_t, hipModule_t>    module_map;
@@ -314,6 +321,10 @@ struct PlaybackContext {
     // The archive header has HRR_FILE_FLAG_PACKED_HOST_RECTS: the host blobs of
     // the pitched copies hold only the copied rows, packed end to end.
     bool packed_host_rects = false;
+    // The archive header has HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS: capture
+    // wrote the hipEventRecord events for hipExtModuleLaunchKernel start/stop
+    // events. Without it the archive predates them.
+    bool ext_launch_event_markers = false;
     std::string kernel_filter;
 
     // Lightweight replay tracing. These are intentionally separate from
@@ -983,6 +994,11 @@ struct PlaybackContext {
     // Load a code object and cache the resulting hipModule_t
     hipModule_t load_module(uint64_t hash_lo, uint64_t hash_hi);
 
+    // Parameter sizes the code object declares for `func`, in order. Empty
+    // means the default, which asks HIP (hipKernelGetParamInfo); a handler test
+    // sets it to stand in for a code object.
+    std::function<void(hipFunction_t, std::vector<size_t>&)> kernel_param_sizes;
+
     // Resolve a playback-time replacement function for a recorded kernel name.
     // Returns a hipFunction_t loaded from a user-supplied .hsaco if `kernel_name`
     // matches a --replace-kernel pattern, or nullptr if no replacement applies
@@ -1077,6 +1093,14 @@ void* hrr_runtime_symbol(const char* name);
 bool hrr_replayed_recorded_error(PlaybackContext& ctx, const char* api,
                                  int32_t recorded_ret, hipError_t replayed);
 
+// hrr_decode_kernel_args — the kernel-argument decoder a launch and a graph
+// kernel node share, for a handler test to look at what it hands to HIP: each
+// argument's storage ends with 8 zeroed bytes past the recorded size.
+void hrr_decode_kernel_args(PlaybackContext& ctx, const uint8_t* p,
+                            const uint8_t* end, uint16_t num_args,
+                            std::vector<void*>& arg_ptrs,
+                            std::vector<std::vector<uint8_t>>& arg_storage);
+
 // ---------------------------------------------------------------------------
 // hrr_live_ctx — a usable hipCtx_t for a recorded one.
 //
@@ -1101,6 +1125,44 @@ bool hrr_translate_memcpy3d_arrays(const PlaybackContext& ctx, const char* api,
 // Kernel-launch handlers read this to wait for their submission turn at the
 // exact point of the HIP call, allowing preparation work to run in parallel.
 extern thread_local uint64_t hrr_dispatch_seq;
+
+// Kernel-launch handoff, for dispatch_event. A launch gives up the global turn
+// before its handler runs, so it holds host_free_mu shared from before that
+// (hrr_launch_hold) until the launch call returns: the handler calls
+// hrr_launch_release then, and dispatch_event again on the way out. A free of
+// pinned host memory takes the lock exclusive, so it cannot drop a destination
+// a snapshot is about to be queued for. Both are per thread.
+void hrr_launch_hold(PlaybackContext& ctx);
+void hrr_launch_release();
+// True for the handlers that replay a kernel launch.
+bool hrr_is_launch_handler(hipError_t (*fn)(PlaybackContext&, const uint8_t*));
+
+// Hands the global turn on for one event, which dispatch_event does through
+// this guard. An unordered event hands the turn on at construction, an ordered
+// one on destruction. A kernel launch takes the host_free_mu hold first, before
+// it hands the turn on, and gives it up on destruction if its handler has not.
+class HrrTurnGuard {
+ public:
+  HrrTurnGuard(PlaybackContext& ctx, uint64_t next, bool ordered, bool launch)
+      : ctx_(ctx), next_(next), ordered_(ordered), launch_(launch) {
+    if (!ordered_) {
+      if (launch_) hrr_launch_hold(ctx_);
+      ctx_.next_seq.store(next_, std::memory_order_release);
+    }
+  }
+  ~HrrTurnGuard() {
+    if (ordered_) ctx_.next_seq.store(next_, std::memory_order_release);
+    if (launch_) hrr_launch_release();
+  }
+  HrrTurnGuard(const HrrTurnGuard&) = delete;
+  HrrTurnGuard& operator=(const HrrTurnGuard&) = delete;
+
+ private:
+  PlaybackContext& ctx_;
+  uint64_t next_;
+  bool ordered_;
+  bool launch_;
+};
 
 // Device synchronize with an optional watchdog. When ctx.sync_watchdog_ms == 0
 // this is a plain hipDeviceSynchronize(). Otherwise the (potentially blocking)
