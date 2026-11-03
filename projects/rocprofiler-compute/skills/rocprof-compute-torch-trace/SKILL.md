@@ -124,9 +124,9 @@ a piece with no framework stays on the preceding one. Bare
 `--operator` or `**` matches everything.
 Quote patterns so the shell does not expand them.
 
-`--operator triton:*rmsnorm_kernel*` works the same way.
+`--operator 'triton:*rmsnorm_kernel*'` works the same way.
 
-`--operator user:*UserDefined*` selects matching user-defined ROCTx regions
+`--operator 'user:*UserDefined*'` selects matching user-defined ROCTx regions
 and includes everything in that region. A framework pattern given with
 `user:` adds those matching operators; it does not cut work out of the
 user-defined ROCTx region.
