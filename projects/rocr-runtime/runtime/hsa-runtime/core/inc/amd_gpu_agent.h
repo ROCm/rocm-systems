@@ -740,7 +740,8 @@ class GpuAgent : public GpuAgentInt {
   // @brief Mutex to protect sdma gang submissions.
   std::mutex sdma_gang_lock_;
 
-  // @brief GPU tick on initialization.
+  // @brief GPU tick on initialization.  Set once at construction and never
+  // modified afterwards, so lock-free reads (e.g. in RawTsValid) are safe.
   HsaClockCounters t0_;
 
   HsaClockCounters t1_;
@@ -752,7 +753,8 @@ class GpuAgent : public GpuAgentInt {
   // where the two GPU clock domains share frequency but differ in epoch (AQL
   // ahead of the calibration on Windows, behind it on WSL).  Detected from the
   // first translated timestamp that proves a mismatch; zero on native Linux /
-  // KFD (clocks match).
+  // KFD (clocks match).  Sign follows the mismatch direction: positive on Windows
+  // (AQL leads the calibration), negative on WSL/DXG (AQL lags it).
   int64_t gpu_clock_offset_;
 
   // @brief Running under WSL (DXG), where gpu_clock_offset_ applies on a Linux
