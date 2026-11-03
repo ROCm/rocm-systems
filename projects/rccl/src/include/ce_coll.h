@@ -40,6 +40,16 @@
 #define NCCL_CE_NUM_SLOTS 2
 #endif
 
+// Block width of the CE local reduce kernel (ce_reduce_launcher.cpp.in, ce_reduce_impl.h.in).
+#ifndef NCCL_CE_REDUCE_THREADS
+#define NCCL_CE_REDUCE_THREADS 256
+#endif
+
+// AllReduce staging bytes ncclCeInit resolves: RCCL_CE_AR_STAGING_BYTES (`param`) when set, else the default.
+inline size_t ncclCeArStagingBytes(int64_t param) {
+  return param >= 0 ? (size_t)param : (size_t)NCCL_CE_AR_STAGING_BYTES;
+}
+
 // Per-rank staging capacity in ceARTmpBuf.
 inline size_t ncclCeAllReduceMaxChunkBytes(int nRanks, size_t stagingBytes) {
   return nRanks > 0 ? stagingBytes / (size_t)nRanks : 0;

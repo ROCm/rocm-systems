@@ -273,7 +273,7 @@ inline size_t ddaCapBlocks(size_t blocks, uint32_t capBlocks) {
   return (capBlocks > 0 && capBlocks < blocks) ? capBlocks : blocks;
 }
 
-// Block width under a grid cap: within `capThreads` when set, in whole granules, at least one; kernels stride the grid.
+// Block width under a grid cap: `capThreads` rounded down to whole granules, floored at one; kernels stride the grid.
 inline uint32_t ddaCapThreads(uint32_t threads, uint32_t capThreads) {
   if (capThreads == 0 || threads <= capThreads) {
     return threads;

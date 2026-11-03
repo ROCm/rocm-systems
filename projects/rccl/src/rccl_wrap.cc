@@ -1229,16 +1229,10 @@ bool rcclDdaArRegEagerShardFits(const ncclComm* comm, size_t bytes) {
   return shard >= kDdaArRegEagerMinShardBytes && shard <= kDdaArRegEagerMaxShardBytes;
 }
 
-// Block width of the CE reduce kernel (ncclCeLocalReduceLaunch_* in ce_reduce_launcher.cpp.in).
-constexpr uint32_t kCeLocalReduceThreads = 256;
-
 // Elements per CE-registered reduce launch: ncclCeAllReduce's chunk for the staging size ncclCeInit resolves.
 static size_t rcclCeArRegChunkElems(const ncclComm* comm, size_t count, ncclDataType_t datatype) {
-  size_t stagingBytes = comm->ceColl.ceArStagingBytes;
-  if (stagingBytes == 0) {
-    const int64_t param = rcclParamCeArStagingBytes();
-    stagingBytes = param >= 0 ? (size_t)param : (size_t)NCCL_CE_AR_STAGING_BYTES;
-  }
+  const size_t initBytes = comm->ceColl.ceArStagingBytes;
+  const size_t stagingBytes = initBytes != 0 ? initBytes : ncclCeArStagingBytes(rcclParamCeArStagingBytes());
   const size_t eltSize = ncclTypeSize(datatype);
   const size_t shardBytes = count / (size_t)comm->nRanks * eltSize;
   const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(stagingBytes / (size_t)comm->nRanks);
@@ -1844,7 +1838,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // symkRequested is the raw "symk would run for these operands" signal and keeps
     // gating the CE 2-shot and DDA branches below, so registered buffers still reach
     // CE-registered at (5) rather than being claimed by a staging-buffer or fabric path.
-    // The one exception is gfx1250 in (4), where a symk that symMaxR2 withdraws can hand the call to fabric DDA.
+    // Exceptions in (4): below symMinR2, a GIN yield, and gfx1250's capture bound and eager band past symMaxR2.
     // symMaxR2 / symMaxR2Graph from the arch table only withdraws symk as the final
     // choice once the message exceeds the CE/symk crossover size, letting
     // CE-registered win instead.  kThreshUnlimited means no suppression.
@@ -1981,7 +1975,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     if (arShouldTakeDda && ddaReplacesCeReg) {
       const int ceBlocks = ncclCeLocalReduceBlocks(datatype, rcclCeArRegChunkElems(comm, count, datatype));
       ddaCap.blocks = (uint32_t)std::max(ceBlocks, 1);
-      ddaCap.threads = kCeLocalReduceThreads;
+      ddaCap.threads = NCCL_CE_REDUCE_THREADS;
     } else if (arShouldTakeDda && ddaReplacesRing) {
       struct rcclCollDecision ringChoice;
       memset(&ringChoice, 0, sizeof(ringChoice));
