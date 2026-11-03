@@ -53,9 +53,7 @@ public:
   static __device__ inline size_t rma_inline_count{0};
   static __device__ inline size_t amo_count{0};
   static __device__ inline size_t quiet_count{0};
-  // Posts (RMA + AMO) made with PostOpt ThreadSafe==true, i.e. the SQ-locking path.
-  // THREAD resource-sharing elides the lock (ThreadSafe==false) so this stays 0,
-  // while GPU/CTA sharing keep it -- lets tests assert the mode reached the QP.
+  // Like rma_count/amo_count, but only the ops posted with PostOpt ThreadSafe==true
   static __device__ inline size_t thread_safe_post_count{0};
 
   // Per queue pair. poll_cq_once() reports busy for busy_polls polls, then treats all but the
@@ -180,7 +178,8 @@ __device__ __forceinline__ void QueuePairMock::post_wqe_rma(
                               __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     posted += wf_info.num_pe_group_lanes;
     if constexpr (PostOpt<Options...>::ThreadSafe) {
-      __scoped_atomic_fetch_add(&thread_safe_post_count, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+      __scoped_atomic_fetch_add(&thread_safe_post_count, wf_info.num_pe_group_lanes,
+                                __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
   }
 
@@ -243,7 +242,8 @@ __device__ __forceinline__ QueuePairMock::amo_ret_t<Fetch> QueuePairMock::post_w
                               __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     posted += wf_info.num_pe_group_lanes;
     if constexpr (PostOpt<Options...>::ThreadSafe) {
-      __scoped_atomic_fetch_add(&thread_safe_post_count, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+      __scoped_atomic_fetch_add(&thread_safe_post_count, wf_info.num_pe_group_lanes,
+                                __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
   }
 
