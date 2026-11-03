@@ -1905,14 +1905,17 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       patch.link_pair_base = a.link_pair_base;
       patch.target_pair_base = a.target_pair_base;
     }
-    result.sites.push_back({.kind = a.site->kind,
-                            .original_offset = a.site->anchor_offset,
-                            .guest_offset = a.trampoline_offset + a.bytes.original_byte_offset,
-                            .guest_size = a.site->kind == InstrumentationKind::KernelEntry
-                                              ? 0u
-                                              : a.site->original_size,
-                            .instrumentation_offset = a.trampoline_offset,
-                            .instrumentation_size = a.bytes.original_byte_offset});
+    // The builder owns the layout, including the call envelope's attribution.
+    result.sites.push_back(
+        {.kind = a.site->kind,
+         .original_offset = a.site->anchor_offset,
+         .guest_offset = a.trampoline_offset + a.bytes.original_byte_offset,
+         .guest_size =
+             a.site->kind == InstrumentationKind::KernelEntry ? 0u : a.site->original_size,
+         .instrumentation_offset =
+             a.trampoline_offset + (a.is_probe_call ? a.bytes.call_envelope_byte_offset : 0),
+         .instrumentation_size =
+             a.is_probe_call ? a.bytes.call_envelope_byte_size : a.bytes.original_byte_offset});
     result.patches.push_back(std::move(patch));
   }
   return result;

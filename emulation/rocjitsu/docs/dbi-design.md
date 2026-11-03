@@ -115,9 +115,21 @@ The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPat
 
 Generic byte emitter. Takes a `TrampolinePlan` and returns `TrampolineBytes{patched_anchor_bytes, trampoline_words}`. Knows nothing about `InstrumentationPoint`s or milestones. It emits two body shapes: the inline-nop body, and the probe-call envelope wrapped around the relocated original. `plan_probe_call()` selects the link/target SGPR pairs, the SCC temp, and any special-state (EXEC/VCC/M0) and SGPR-bridge temps, and reports `builder_clobbers`; `emit_probe_call()` lowers the chosen plan to bytes.
 
+The low-level `probe_after_original` plan option places the relocated instruction
+before its callable envelope. It defaults to false; the Instrumentor still
+rejects `AfterInst` requests. A caller selecting this layout must supply
+preservation requirements for the state after the instruction, including its
+definitions; the builder does not compute liveness. The emitted call-target
+displacement includes the relocated instruction's four or eight bytes only when
+`emit_original` is true. With the original omitted, both placements emit the
+envelope at the trampoline start and call the same probe body. `TrampolineBytes` reports the call
+envelope's offset and size separately from the guest instruction and resume
+branch, allowing the Instrumentor to attribute emitted bytes without deriving
+their range from a particular layout.
+
 The caller supplies the `preserve_exec`, `preserve_vcc`, and `preserve_m0` inputs. `plan_probe_call()` reserves an EXEC temp when `preserve_exec || needs_full_mask`; VCC and M0 temps follow their respective inputs. The full-mask window is required for spills, argument writes, or `force_full_exec`. The builder allocates a dead SGPR pair for each saved EXEC/VCC and a single dead SGPR for saved M0; the caller's production decisions are described in [Special state](#special-state-preservation).
 
-The probe-call envelope, in emit order, is: an in-flight-load drain; the special-state saves (`s_mov` EXEC/VCC into dead SGPR pairs, M0 into a dead SGPR); the **spill prologue** (see below); the argument writes; the anchor-mask restore; the SCC save; the `s_getpc_b64` + 64-bit add chain that materializes the copied probe body's address; `s_swappc_b64` to it; then after the call a `build_wait_all_loads_complete()` drain (so the probe's own in-flight loads finish before the restores and host resume), the SCC restore, the **spill epilogue**, and the special-state restores, before the relocated original.
+The probe-call envelope, in emit order, is: an in-flight-load drain; the special-state saves (`s_mov` EXEC/VCC into dead SGPR pairs, M0 into a dead SGPR); the **spill prologue** (see below); the argument writes; the anchor-mask restore; the SCC save; the `s_getpc_b64` + 64-bit add chain that materializes the copied probe body's address; `s_swappc_b64` to it; then after the call a `build_wait_all_loads_complete()` drain (so the probe's own in-flight loads finish before the restores and host resume), the SCC restore, the **spill epilogue**, and the special-state restores. The default layout places this envelope before the relocated original; `probe_after_original` places it after the original. Saves and restores protect the state at the selected observation point.
 
 ### Spill bracket
 
