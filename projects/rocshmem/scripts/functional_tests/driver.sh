@@ -172,6 +172,10 @@ declare -A TEST_NUMBERS=(
   ["tile_reduce"]="155"
   ["tile_reduce_wave"]="156"
   ["tile_reduce_wg"]="157"
+  ["qp_pingpong"]="158"
+  ["qp_putnbi"]="159"
+  ["sdma_pingpong"]="160"
+  ["sdma_putnbi"]="161"
   ["buffer_register_symmetric"]="162"
   ["tile_put_wave_rowmajor"]="163"
   ["tile_put_wave_colmajor"]="164"
@@ -184,7 +188,8 @@ declare -A TEST_NUMBERS=(
   ["signaladd"]="171"
   ["signalset"]="172"
   ["signalwaituntil"]="173"
-  ["signal_ops_on_stream"]="174"
+  ["qp_putnbi_poll"]="174"
+  ["sdma_putnbi_poll"]="175"
   ["tile_put_rowmajor_start_coord"]="177"
   ["tile_get_rowmajor_start_coord"]="178"
   ["tile_put_wave_rowmajor_start_coord"]="179"
@@ -203,6 +208,7 @@ declare -A TEST_NUMBERS=(
   ["tile_get_wave_3d"]="192"
   ["tile_put_wave_4d"]="193"
   ["tile_get_wave_4d"]="194"
+  ["signal_ops_on_stream"]="195"
 )
 
 # Detect which runtime to use
@@ -362,6 +368,16 @@ ExecTest_SLR() {
         "${selected_backend:-}" == gda* ]]; then
     env_vars+=("ROCSHMEM_DISABLE_MIXED_IPC=1")
   fi
+  # QP needs GDA; SDMA needs IPC+SDMA enabled. Force rather than rely on ambient.
+  if [[ "$TEST_NAME" == qp_* ]]; then
+    env_vars+=("ROCSHMEM_BACKEND=gda")
+  elif [[ "$TEST_NAME" == sdma_* ]]; then
+    env_vars+=(
+      "ROCSHMEM_BACKEND=ipc"
+      "ROCSHMEM_SDMA_ENABLED=1"
+      "ROCSHMEM_SDMA_THRESHOLD=0"
+    )
+  fi
   # Note: ROCSHMEM_TEST_UUID not needed - SLR always uses uniqueid approach
 
   # Construct Test Command
@@ -507,6 +523,16 @@ ExecTest_MPI() {
     if [[ "${selected_backend:-}" == gda* ]]; then
       test_env_args+=(-x "ROCSHMEM_DISABLE_MIXED_IPC=1")
     fi
+  fi
+  # QP needs GDA; SDMA needs IPC+SDMA enabled. Force rather than rely on ambient.
+  if [[ "$TEST_NAME" == qp_* ]]; then
+    test_env_args+=(-x "ROCSHMEM_BACKEND=gda")
+  elif [[ "$TEST_NAME" == sdma_* ]]; then
+    test_env_args+=(
+      -x "ROCSHMEM_BACKEND=ipc"
+      -x "ROCSHMEM_SDMA_ENABLED=1"
+      -x "ROCSHMEM_SDMA_THRESHOLD=0"
+    )
   fi
 
   cmd=( "$LAUNCHER"
@@ -1006,6 +1032,14 @@ TestOther() {
   ExecTest  "pingall"          2       1            1
   ExecTest  "pingall"          2       8            1
   ExecTest  "pingall"          2       32           1
+
+  ExecTest  "qp_pingpong"      2       1            1
+  ExecTest  "qp_putnbi"        2       1            1         1048576
+  ExecTest  "qp_putnbi_poll"   2       1            1         1048576
+
+  ExecTest  "sdma_pingpong"    2       1            1
+  ExecTest  "sdma_putnbi"      2       1            1         1048576
+  ExecTest  "sdma_putnbi_poll" 2       1            1         1048576
 
   ################################ Flood test ##################################
   if [[ $TEST != ro* ]]; then #AIROCSHMEM-324
