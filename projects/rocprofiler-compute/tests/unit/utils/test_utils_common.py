@@ -1192,3 +1192,197 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
     assert not utils_common.is_gfx1250("gfx12500")
     assert not utils_common.is_gfx1250("gfx1251")
     assert not utils_common.is_gfx1250(None)
+
+
+@pytest.mark.misc
+def test_gfx115_merge_keeps_sdk_counters_and_generated_extras():
+    config_path = (
+        Path(utils_common.config.rocprof_compute_home)
+        / "rocprof_compute_soc/profile_configs/sdk_config.yaml"
+    )
+    local_config = utils_common.yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    extra_counter = {
+        "name": "TCC_HIT[0]",
+        "definitions": [
+            {
+                "architectures": ["gfx1151"],
+                "expression": (
+                    "select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[0]])"
+                ),
+            }
+        ],
+    }
+    local_config["rocprofiler-sdk"]["counters"].append(extra_counter)
+    installed_config = {
+        "rocprofiler-sdk": {
+            "counters-schema-version": 1,
+            "counters": [
+                {
+                    "name": "SQ_WAVES",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1151"],
+                            "block": "SQ",
+                            "event": 4,
+                        }
+                    ],
+                },
+                {
+                    "name": "TCC_HIT",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1151"],
+                            "block": "TCC",
+                            "event": 1,
+                        }
+                    ],
+                },
+            ],
+        }
+    }
+
+    limited = utils_common.definitions_limited_to_agent(
+        local_config,
+        "gfx1151",
+        installed_config,
+    )
+
+    names = [counter["name"] for counter in limited["rocprofiler-sdk"]["counters"]]
+    assert names == ["SQ_WAVES", "TCC_HIT", "TCC_HIT[0]"]
+
+
+@pytest.mark.misc
+def test_definitions_limited_to_agent_appends_generated_gfx115_extras():
+    extra_counter = {
+        "name": "TCC_HIT[0]",
+        "definitions": [
+            {
+                "architectures": ["gfx1151"],
+                "expression": (
+                    "select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[0]])"
+                ),
+            }
+        ],
+    }
+    local_config = {"rocprofiler-sdk": {"counters": [extra_counter]}}
+    installed_counter = {
+        "name": "TCC_HIT",
+        "definitions": [
+            {
+                "architectures": ["gfx1151"],
+                "block": "TCC",
+                "event": 1,
+            }
+        ],
+    }
+    installed_config = {
+        "rocprofiler-sdk": {
+            "counters-schema-version": 1,
+            "counters": [installed_counter],
+        }
+    }
+
+    limited = utils_common.definitions_limited_to_agent(
+        local_config,
+        "gfx1151",
+        installed_config,
+    )
+
+    counters = limited["rocprofiler-sdk"]["counters"]
+    assert [counter["name"] for counter in counters] == ["TCC_HIT", "TCC_HIT[0]"]
+
+
+@pytest.mark.misc
+def test_definitions_limited_to_agent_keeps_local_gfx115_without_install():
+    extra_counter = {
+        "name": "LOCAL_GFX115_COUNTER",
+        "definitions": [
+            {
+                "architectures": ["gfx1151", "gfx942"],
+                "block": "SQ",
+                "event": 1,
+            }
+        ],
+    }
+    other_arch_counter = {
+        "name": "LOCAL_GFX942_COUNTER",
+        "definitions": [
+            {
+                "architectures": ["gfx942"],
+                "block": "SQ",
+                "event": 2,
+            }
+        ],
+    }
+    local_config = {
+        "rocprofiler-sdk": {
+            "counters": [extra_counter, other_arch_counter],
+        }
+    }
+
+    limited = utils_common.definitions_limited_to_agent(
+        local_config,
+        "gfx1151",
+        None,
+    )
+
+    counters = limited["rocprofiler-sdk"]["counters"]
+    assert [counter["name"] for counter in counters] == ["LOCAL_GFX115_COUNTER"]
+    assert counters[0]["definitions"][0]["architectures"] == ["gfx1151"]
+
+
+@pytest.mark.parametrize("filename", ["config.yaml", "counter_defs.yaml"])
+def test_installed_sdk_counter_config_supports_sdk_filenames(
+    filename, tmp_path, monkeypatch
+):
+    rocm_path = tmp_path / "rocm"
+    share_path = rocm_path / "share/rocprofiler-sdk"
+    share_path.mkdir(parents=True)
+    expected = {
+        "rocprofiler-sdk": {
+            "counters-schema-version": 1,
+            "counters": [],
+        }
+    }
+    (share_path / filename).write_text(
+        utils_common.yaml.dump(expected),
+        encoding="utf-8",
+    )
+    tool_path = rocm_path / "lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path / "absent"))
+
+    assert utils_common.installed_sdk_counter_config(str(tool_path)) == expected
+
+
+def test_installed_sdk_counter_config_prefers_current_filename(tmp_path, monkeypatch):
+    rocm_path = tmp_path / "rocm"
+    share_path = rocm_path / "share/rocprofiler-sdk"
+    share_path.mkdir(parents=True)
+    current = {"rocprofiler-sdk": {"counters": [{"name": "CURRENT"}]}}
+    legacy = {"rocprofiler-sdk": {"counters": [{"name": "LEGACY"}]}}
+    (share_path / "config.yaml").write_text(
+        utils_common.yaml.dump(current),
+        encoding="utf-8",
+    )
+    (share_path / "counter_defs.yaml").write_text(
+        utils_common.yaml.dump(legacy),
+        encoding="utf-8",
+    )
+    tool_path = rocm_path / "lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path / "absent"))
+
+    assert utils_common.installed_sdk_counter_config(str(tool_path)) == current
+
+
+def test_installed_sdk_counter_config_uses_rocm_path_legacy_file(tmp_path, monkeypatch):
+    rocm_path = tmp_path / "rocm"
+    share_path = rocm_path / "share/rocprofiler-sdk"
+    share_path.mkdir(parents=True)
+    expected = {"rocprofiler-sdk": {"counters": [{"name": "LEGACY"}]}}
+    (share_path / "counter_defs.yaml").write_text(
+        utils_common.yaml.dump(expected),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ROCM_PATH", str(rocm_path))
+
+    assert utils_common.installed_sdk_counter_config(None) == expected
