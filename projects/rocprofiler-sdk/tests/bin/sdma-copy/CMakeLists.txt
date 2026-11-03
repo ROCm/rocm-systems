@@ -20,7 +20,11 @@ add_test(NAME sdma-copy-profiling COMMAND sdma-copy)
 add_test(NAME sdma-copy-profiling-counted COMMAND sdma-copy --completion-value 2)
 add_test(NAME sdma-copy-profiling-counted-64bit COMMAND sdma-copy --completion-value
                                                         4294967297)
+add_test(NAME sdma-copy-profiling-no-dependencies COMMAND sdma-copy --dependencies 0)
+add_test(NAME sdma-copy-profiling-multiple-dependencies COMMAND sdma-copy --dependencies
+                                                                3)
 set_tests_properties(
     sdma-copy-profiling sdma-copy-profiling-counted sdma-copy-profiling-counted-64bit
+    sdma-copy-profiling-no-dependencies sdma-copy-profiling-multiple-dependencies
     PROPERTIES TIMEOUT 60 ENVIRONMENT "HSA_ENABLE_SDMA=1" SKIP_RETURN_CODE 77 LABELS
                "integration-tests;sdma")

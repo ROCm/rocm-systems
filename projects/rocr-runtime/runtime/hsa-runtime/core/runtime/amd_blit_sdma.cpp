@@ -696,13 +696,14 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
         platform_atomic_support_ ? atomic_command_size_ : fence_64b_command_size_;
   }
 
-  const uint32_t wait_dws = dep_signals.empty() ? 0 : 7;
+  const bool inline_wait = !profiling_enabled && !dep_signals.empty();
+  const uint32_t wait_dws = inline_wait ? 7 : 0;
   const uint32_t signal_dws = profiling_enabled ? 0 : 5;
   const uint32_t per_pkt_dws = 1 + wait_dws + 6 + signal_dws;
   const uint32_t total_copy_dws = num_copy_command * per_pkt_dws;
 
-  const uint32_t extra_polls = (dep_signals.size() > 1)
-      ? static_cast<uint32_t>(dep_signals.size() - 1) : 0;
+  const uint32_t first_polled_signal = inline_wait ? 1 : 0;
+  const uint32_t extra_polls = static_cast<uint32_t>(dep_signals.size()) - first_polled_signal;
   const uint32_t extra_poll_bytes = extra_polls * poll_64b_command_size_;
 
   const uint32_t copy_bytes = total_copy_dws * sizeof(uint32_t);
@@ -750,8 +751,8 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
     wrapped_index += gcr_command_size();
   }
 
-  for (uint32_t i = 1; i < dep_signals.size(); ++i) {
-    BuildPoll64bCommand(command_addr, dep_signals[i]->ValueLocation(), 0);
+  for (uint32_t index = first_polled_signal; index < dep_signals.size(); ++index) {
+    BuildPoll64bCommand(command_addr, dep_signals[index]->ValueLocation(), 0);
     command_addr += poll_64b_command_size_;
     bytes_written_[wrapped_index] = prior_bytes;
     wrapped_index += poll_64b_command_size_;
@@ -764,7 +765,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
     wrapped_index += timestamp_command_size_;
   }
 
-  const core::Signal* wait_sig = dep_signals.empty() ? nullptr : dep_signals[0];
+  const core::Signal* wait_sig = inline_wait ? dep_signals[0] : nullptr;
   BuildWaitSignalCopyCommand(command_addr, num_copy_command,
                              dst, src, size,
                              wait_sig, profiling_enabled ? nullptr : &out_signal, false);

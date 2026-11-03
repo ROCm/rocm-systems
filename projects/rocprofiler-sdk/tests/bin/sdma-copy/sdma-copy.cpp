@@ -66,6 +66,7 @@ struct options
     size_t             bytes            = 1 << 20;
     size_t             iterations       = 64;
     size_t             threads          = 2;
+    uint32_t           dependencies     = 1;
     hsa_signal_value_t completion_value = 1;
     bool               profiling        = true;
     bool               peer             = false;
@@ -127,7 +128,7 @@ struct buffer
 
 struct signals
 {
-    std::array<hsa_signal_t, 4> values{};
+    std::array<hsa_signal_t, 6> values{};
     signals()
     {
         for(auto& signal : values)
@@ -169,25 +170,32 @@ make_route(hsa_agent_t source, hsa_agent_t destination, bool blit)
 }
 
 void
-submit(const route& copy,
-       void*        destination,
-       const void*  source,
-       size_t       bytes,
-       hsa_signal_t dependency,
-       hsa_signal_t completion,
-       bool         blit)
+submit(const route&        copy,
+       void*               destination,
+       const void*         source,
+       size_t              bytes,
+       uint32_t            dependency_count,
+       const hsa_signal_t* dependencies,
+       hsa_signal_t        completion,
+       bool                blit)
 {
     if(blit)
-        check(hsa_amd_memory_async_copy(
-            destination, copy.destination, source, copy.source, bytes, 1, &dependency, completion));
+        check(hsa_amd_memory_async_copy(destination,
+                                        copy.destination,
+                                        source,
+                                        copy.source,
+                                        bytes,
+                                        dependency_count,
+                                        dependencies,
+                                        completion));
     else
         check(hsa_amd_memory_async_copy_on_engine(destination,
                                                   copy.destination,
                                                   source,
                                                   copy.source,
                                                   bytes,
-                                                  1,
-                                                  &dependency,
+                                                  dependency_count,
+                                                  dependencies,
                                                   completion,
                                                   copy.engine,
                                                   true));
@@ -201,7 +209,8 @@ void
 wait_and_check(hsa_signal_t       signal,
                uint64_t           timeout,
                bool               timestamps,
-               hsa_signal_value_t expected_value)
+               hsa_signal_value_t expected_value,
+               uint64_t           earliest_start = 0)
 {
     require(hsa_signal_wait_scacquire(
                 signal, HSA_SIGNAL_CONDITION_EQ, expected_value, timeout, HSA_WAIT_STATE_ACTIVE) ==
@@ -213,6 +222,8 @@ wait_and_check(hsa_signal_t       signal,
         check(hsa_amd_profiling_get_async_copy_time(signal, &time));
         require(time.start > 0 && time.end > time.start,
                 "Completed SDMA copy has invalid or non-positive profiling duration");
+        require(time.start >= earliest_start,
+                "Profiled copy started before its dependency was released");
         ++timestamp_checks;
     }
     ++completed;
@@ -231,7 +242,9 @@ run(const options& config, const agents& devices, size_t worker, uint64_t timeou
     buffer  device_source(pool_for(gpu_source), config.bytes, access);
     buffer  device_destination(pool_for(gpu_destination), config.bytes, access);
     signals completion;
-    auto*   expected = static_cast<uint32_t*>(host_source.data);
+    const std::array<hsa_signal_t, 3> dependencies = {
+        completion.values[0], completion.values[4], completion.values[5]};
+    auto* expected = static_cast<uint32_t*>(host_source.data);
     for(size_t index = 0; index < config.bytes / sizeof(uint32_t); ++index)
         expected[index] = static_cast<uint32_t>(index * 13 + worker + 1);
     const auto upload   = make_route(devices.cpu, gpu_source, config.blit);
@@ -241,15 +254,21 @@ run(const options& config, const agents& devices, size_t worker, uint64_t timeou
     for(size_t iteration = 0; iteration < config.iterations; ++iteration)
     {
         std::memset(host_destination.data, 0, config.bytes);
-        for(size_t index = 0; index < completion.values.size(); ++index)
-            hsa_signal_store_screlease(completion.values[index],
-                                       index == 0 ? 1 : config.completion_value);
+        for(auto signal : completion.values)
+            hsa_signal_store_screlease(signal, config.completion_value);
+        for(auto signal : dependencies)
+            hsa_signal_store_screlease(signal, 0);
+        const auto pending_dependency = (config.dependencies != 0u)
+                                            ? dependencies[iteration % config.dependencies]
+                                            : hsa_signal_t{};
+        if(config.dependencies != 0u) hsa_signal_store_screlease(pending_dependency, 1);
         const auto start = std::chrono::steady_clock::now();
         submit(upload,
                device_source.data,
                host_source.data,
                config.bytes,
-               completion.values[0],
+               config.dependencies,
+               (config.dependencies != 0u) ? dependencies.data() : nullptr,
                completion.values[1],
                config.blit);
         if(config.peer)
@@ -257,23 +276,34 @@ run(const options& config, const agents& devices, size_t worker, uint64_t timeou
                    device_destination.data,
                    device_source.data,
                    config.bytes,
-                   completion.values[1],
+                   1,
+                   &completion.values[1],
                    completion.values[2],
                    config.blit);
         submit(download,
                host_destination.data,
                config.peer ? device_destination.data : device_source.data,
                config.bytes,
-               completion.values[config.peer ? 2 : 1],
+               1,
+               &completion.values[config.peer ? 2 : 1],
                completion.values[3],
                config.blit);
-        require(hsa_signal_load_scacquire(completion.values[1]) >= config.completion_value &&
-                    hsa_signal_load_scacquire(completion.values[3]) >= config.completion_value,
-                "Copy completed before its dependency was released");
-        hsa_signal_store_screlease(completion.values[0], 0);
-        const bool timestamps     = config.profiling && !config.benchmark;
+        const bool timestamps         = config.profiling && !config.benchmark;
+        uint64_t   dependency_release = 0;
+        if(config.dependencies != 0u)
+        {
+            require(hsa_signal_load_scacquire(completion.values[1]) >= config.completion_value &&
+                        hsa_signal_load_scacquire(completion.values[3]) >= config.completion_value,
+                    "Copy completed before its dependency was released");
+            if(timestamps && iteration < config.dependencies)
+                std::this_thread::sleep_for(std::chrono::milliseconds{50});
+            if(timestamps)
+                check(hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &dependency_release));
+            hsa_signal_store_screlease(pending_dependency, 0);
+        }
         const auto expected_value = config.completion_value - 1;
-        wait_and_check(completion.values[1], timeout, timestamps, expected_value);
+        wait_and_check(
+            completion.values[1], timeout, timestamps, expected_value, dependency_release);
         if(expected_value != 0) hsa_signal_store_screlease(completion.values[1], 0);
         if(config.peer)
         {
@@ -315,6 +345,8 @@ main(int argc, char** argv)
                     config.iterations = value;
                 else if(name == "--threads")
                     config.threads = value;
+                else if(name == "--dependencies" && value <= 3)
+                    config.dependencies = static_cast<uint32_t>(value);
                 else if(name == "--completion-value" && value > 0 &&
                         value <=
                             static_cast<uint64_t>(std::numeric_limits<hsa_signal_value_t>::max()))
@@ -364,11 +396,12 @@ main(int argc, char** argv)
             "Missing profiling timestamp checks");
     check(hsa_amd_profiling_async_copy_enable(false));
     check(hsa_shut_down());
-    std::cout << "bytes,iterations,threads,profiling,peer,blit,benchmark,copies,timestamp_checks,"
+    std::cout << "bytes,iterations,threads,profiling,peer,blit,benchmark,dependencies,copies,"
+                 "timestamp_checks,"
                  "elapsed_ns\n"
               << config.bytes << ',' << config.iterations << ',' << config.threads << ','
               << config.profiling << ',' << config.peer << ',' << config.blit << ','
-              << config.benchmark << ',' << completed << ',' << timestamp_checks << ','
-              << elapsed_ns << '\n';
+              << config.benchmark << ',' << config.dependencies << ',' << completed << ','
+              << timestamp_checks << ',' << elapsed_ns << '\n';
     return EXIT_SUCCESS;
 }
