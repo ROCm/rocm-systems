@@ -31,11 +31,9 @@ static float rasLoadTimeoutFactor() {
   errno = 0;
   char* end = nullptr;
   const double value = strtod(str, &end);
-  // Validate the result as a float too: a positive finite double can still narrow to 0 (underflow,
-  // e.g. 1e-46) or infinity (overflow, e.g. 1e39) when returned as float. Reject those as invalid.
+  // A positive finite double can still narrow to 0 or inf as float (e.g. 1e-46, 1e39).
   const float fvalue = (float)value;
-  if (errno != 0 || end == str || (end != nullptr && *end != '\0') || !std::isfinite(value) || value <= 0.0 ||
-      !std::isfinite(fvalue) || fvalue <= 0.0f) {
+  if (errno != 0 || end == str || (end != nullptr && *end != '\0') || !std::isfinite(fvalue) || fvalue <= 0.0f) {
 #ifndef NCCL_RAS_CLIENT
     INFO(NCCL_ALL, "Invalid value %s for NCCL_RAS_TIMEOUT_FACTOR, using default %g.", str, kDefault);
 #else

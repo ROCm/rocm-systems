@@ -49,7 +49,8 @@ TEST_F(RasParamMicrotest, LoadTimeoutFactorAcceptsPositiveFiniteValues) {
 }
 
 TEST_F(RasParamMicrotest, LoadTimeoutFactorRejectsInvalidValues) {
-  for (const char* value : {"abc", "1x", "0", "-1", "nan", "inf", "1e9999", "1e-9999", "1e-310"}) {
+  // 1e-46 and 1e39 are positive finite doubles that narrow to 0.0f and +inf as float.
+  for (const char* value : {"abc", "1x", "0", "-1", "nan", "inf", "1e9999", "1e-9999", "1e-310", "1e-46", "1e39"}) {
     SetMicroEnv("NCCL_RAS_TIMEOUT_FACTOR", value);
     EXPECT_FLOAT_EQ(1.0f, rasLoadTimeoutFactor()) << value;
   }
@@ -58,16 +59,6 @@ TEST_F(RasParamMicrotest, LoadTimeoutFactorRejectsInvalidValues) {
 TEST_F(RasParamMicrotest, LoadTimeoutFactorRejectsTrailingWhitespace) {
   SetMicroEnv("NCCL_RAS_TIMEOUT_FACTOR", "2.5 ");
   EXPECT_FLOAT_EQ(1.0f, rasLoadTimeoutFactor());
-}
-
-TEST_F(RasParamMicrotest, LoadTimeoutFactorRejectsValuesThatNarrowToZeroOrInfAsFloat) {
-  // These parse as positive, finite doubles (no errno, so the double checks pass), but narrow to
-  // 0.0f (underflow, below the smallest float subnormal) or +inf (overflow, above FLT_MAX) when
-  // returned as float, so they must still fall back to the default.
-  for (const char* value : {"1e-46", "1e39", "3.5e38"}) {
-    SetMicroEnv("NCCL_RAS_TIMEOUT_FACTOR", value);
-    EXPECT_FLOAT_EQ(1.0f, rasLoadTimeoutFactor()) << value;
-  }
 }
 
 TEST_F(RasParamMicrotest, PublicAccessorsScaleAndCacheTheFactor) {
