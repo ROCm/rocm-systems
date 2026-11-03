@@ -494,7 +494,7 @@ class cli_analysis(OmniAnalyze_Base):
             workload.ml_api_call_trees, nodes_matching_operator_patterns
         )
 
-        pmc_group_keys: list[tuple] = list(
+        pmc_group_keys: List[Tuple] = list(
             dict.fromkeys(
                 key
                 for roots in workload.ml_api_call_trees.values()
