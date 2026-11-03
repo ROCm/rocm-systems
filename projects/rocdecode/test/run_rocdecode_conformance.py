@@ -68,6 +68,46 @@ ETAG_MARKER = ".rocdecode-conformance-etag"
 
 SKIP_BANNER = "SKIPPING rocDecode conformance"
 
+
+class CorpusUnavailable(Exception):
+    """The corpus cannot be reached for a reason that should skip, not fail.
+
+    Raised where a failure to read the bucket says nothing about the build under
+    test: no usable credentials. Everything else -- a missing object, a bucket
+    that does not exist, a transport error -- propagates and fails the sweep.
+    """
+
+
+# S3 error codes that mean "these credentials cannot read this", as opposed to
+# "something is wrong". A fork PR gets no repository secrets, but a container or
+# pod runner may still present an ambient identity -- an IMDS instance profile,
+# IRSA environment variables, a baked-in ~/.aws -- so the credential chain
+# resolves and the request is made and refused. That is the same skip case as
+# having no credentials at all, and it arrives as a 403 rather than as None.
+AUTH_ERROR_CODES = frozenset(
+    {
+        "AccessDenied",
+        "AccountProblem",
+        "AllAccessDisabled",
+        "AuthorizationHeaderMalformed",
+        "ExpiredToken",
+        "ExpiredTokenException",
+        "InvalidAccessKeyId",
+        "InvalidToken",
+        "SignatureDoesNotMatch",
+        "UnrecognizedClientException",
+    }
+)
+
+
+def auth_failure(exc) -> bool:
+    """Whether this ClientError is a credentials problem rather than a fault."""
+    metadata = exc.response.get("ResponseMetadata", {})
+    if metadata.get("HTTPStatusCode") in (401, 403):
+        return True
+    return exc.response.get("Error", {}).get("Code") in AUTH_ERROR_CODES
+
+
 PASSED = "PASSED"
 FAILED = "FAILED"
 # Every stream in the codec's set was skipped because this GPU cannot handle that
@@ -238,10 +278,12 @@ def fetch_feasibility() -> Optional[str]:
     corpus skips with an explanation, rather than failing part-way through on a
     ModuleNotFoundError or an opaque NoCredentialsError.
 
-    boto3 is not part of the installed test payload. CI gets it from
-    requirements-test.txt, but someone running run_rocdecode.py from an installed
-    ROCm tree may not have it, and the CTest suite they came for does not need
-    it -- so a missing SDK skips the sweep rather than failing the whole run.
+    boto3 is not part of the installed test payload. CI installs it explicitly
+    before invoking run_rocdecode.py, so a missing SDK there is a provisioning
+    failure that fails the step outright. Someone running run_rocdecode.py by hand
+    from an installed ROCm tree may simply not have it, and the CTest suite they
+    came for does not need it -- so here a missing SDK skips the sweep rather than
+    failing the whole run.
     """
     try:
         import boto3
@@ -327,7 +369,7 @@ def extract_nested_zips(root: Path) -> None:
     Looping rather than making a single pass costs four lines and means a future
     archive that nests one level deeper does not quietly yield an empty corpus.
     """
-    while True:
+    for _ in range(8):
         archives = sorted(root.rglob("*.zip"))
         if not archives:
             return
@@ -335,6 +377,10 @@ def extract_nested_zips(root: Path) -> None:
             logging.info(f"++ Extracting {archive_path.name}")
             extract_zip(archive_path, archive_path.parent)
             archive_path.unlink()
+    raise RuntimeError(
+        f"Still finding nested zips under {root} after 8 extraction passes; "
+        "the archive layout is not what this script expects."
+    )
 
 
 def download_corpus(
@@ -352,6 +398,22 @@ def download_corpus(
     rename instead of a copy of every stream.
     """
     dest.mkdir(parents=True, exist_ok=True)
+
+    # Only a directory this script created is cleared out. default_corpus_dir()
+    # honours ROCDECODE_CONFORMANCE_DIR, which test/README.md tells developers to
+    # point at their own stream collection -- wiping that, along with whatever
+    # else lives there, is not something to do on a cache miss. The marker is
+    # written only after a successful fetch, so its absence means the contents
+    # came from somewhere else. Checked before downloading rather than after.
+    if not (dest / ETAG_MARKER).is_file() and any(dest.iterdir()):
+        raise RuntimeError(
+            f"{dest} is not empty and was not populated by this script (no "
+            f"{ETAG_MARKER}), so it will not be replaced.\n"
+            "Pass --conformance-dir to run against it as it is, point "
+            "ROCDECODE_CONFORMANCE_DIR somewhere else to fetch a fresh copy, or "
+            "empty it to let this script manage it."
+        )
+
     with tempfile.TemporaryDirectory(
         prefix=".rocdecode-conformance-", dir=dest.parent
     ) as scratch:
@@ -371,24 +433,62 @@ def download_corpus(
         extract_nested_zips(staging)
 
         logging.info(f"++ Installing corpus into {dest}")
-        for existing in dest.iterdir():
-            if existing.is_dir():
-                shutil.rmtree(existing)
-            else:
+        # Confined to the marker and the codec folders -- the things a previous
+        # fetch wrote. Anything else a developer has left beside the corpus is
+        # left alone, rather than being collateral of a cache refresh.
+        for existing in sorted(dest.iterdir()):
+            if existing.name == ETAG_MARKER:
                 existing.unlink()
-        for extracted in staging.iterdir():
-            shutil.move(str(extracted), str(dest / extracted.name))
+            elif existing.is_dir() and (
+                codec_of(existing.name) or scan_codec_dirs(existing)
+            ):
+                shutil.rmtree(existing)
+        for extracted in sorted(staging.iterdir()):
+            target = dest / extracted.name
+            # The fresh copy is authoritative for anything it ships.
+            if target.is_dir():
+                shutil.rmtree(target)
+            elif target.exists():
+                target.unlink()
+            shutil.move(str(extracted), str(target))
 
 
 def fetch_corpus(
     bucket: str, keys: List[str], dest: Path, region: str
 ) -> Dict[str, Path]:
-    """Ensure the corpus is present locally and return its per-codec folders."""
+    """Ensure the corpus is present locally and return its per-codec folders.
+
+    Raises CorpusUnavailable if the credentials in play cannot read the bucket,
+    which is a skip rather than a failure -- see that class and auth_failure.
+    """
+    from botocore.exceptions import ClientError, NoCredentialsError
+
     client = make_client(region, bucket)
     heads: Dict[str, Tuple[str, int]] = {}
-    for key in keys:
-        response = client.head_object(Bucket=bucket, Key=key)
-        heads[key] = (response["ETag"].strip('"'), int(response["ContentLength"]))
+    try:
+        for key in keys:
+            response = client.head_object(Bucket=bucket, Key=key)
+            heads[key] = (response["ETag"].strip('"'), int(response["ContentLength"]))
+    except NoCredentialsError:
+        raise CorpusUnavailable(
+            "no AWS credentials available.\n"
+            "\n"
+            "The stream corpus lives in a private bucket. GitHub does not\n"
+            "expose repository secrets to pull requests from forks, so this\n"
+            "is expected on fork PRs and is not a failure."
+        )
+    except ClientError as exc:
+        if not auth_failure(exc):
+            raise
+        code = exc.response.get("Error", {}).get("Code")
+        raise CorpusUnavailable(
+            f"the available AWS credentials cannot read s3://{bucket} ({code}).\n"
+            "\n"
+            "The stream corpus lives in a private bucket. A fork PR gets no\n"
+            "repository secrets, and a runner that supplies its own ambient\n"
+            "identity gets refused rather than going unauthenticated, so this\n"
+            "is expected on fork PRs and is not a failure."
+        )
 
     # One line per object, so changing any of them invalidates the cached copy.
     want = "".join(f"{key} {etag}\n" for key, (etag, _) in heads.items())
@@ -401,7 +501,17 @@ def fetch_corpus(
     if cached and cached != want:
         logging.info("++ Cached corpus is stale; fetching again")
 
-    download_corpus(client, bucket, heads, dest)
+    try:
+        download_corpus(client, bucket, heads, dest)
+    except ClientError as exc:
+        # head_object may be allowed where the object read itself is not, so the
+        # refusal can arrive here instead.
+        if not auth_failure(exc):
+            raise
+        code = exc.response.get("Error", {}).get("Code")
+        raise CorpusUnavailable(
+            f"the available AWS credentials cannot download from s3://{bucket} ({code})."
+        )
     marker.write_text(want)
 
     found = find_codec_dirs(dest)
@@ -435,19 +545,35 @@ def resolve_corpus(args: argparse.Namespace) -> Optional[Dict[str, Path]]:
         return found
 
     blocker = fetch_feasibility()
-    if blocker is not None:
-        logging.warning("")
-        logging.warning("=" * 72)
-        for line in f"{SKIP_BANNER}: {blocker}".splitlines():
-            logging.warning(line)
-        logging.warning("=" * 72)
-        logging.warning("")
-        return None
+    if blocker is None:
+        keys = [k.strip() for k in args.keys.split(",") if k.strip()]
+        if not keys:
+            raise ValueError("--keys selected no objects to download.")
+        try:
+            return fetch_corpus(args.bucket, keys, default_corpus_dir(), args.region)
+        except CorpusUnavailable as exc:
+            blocker = str(exc)
 
-    keys = [k.strip() for k in args.keys.split(",") if k.strip()]
-    if not keys:
-        raise ValueError("--keys selected no objects to download.")
-    return fetch_corpus(args.bucket, keys, default_corpus_dir(), args.region)
+    announce_skip(blocker)
+    return None
+
+
+def announce_skip(blocker: str) -> None:
+    """Report that the sweep is being skipped, and why.
+
+    Under GitHub Actions this is also emitted as a workflow annotation. A skip
+    leaves the job green having decoded nothing, so without one the only trace is
+    a line buried in several thousand lines of build log.
+    """
+    logging.warning("")
+    logging.warning("=" * 72)
+    for line in f"{SKIP_BANNER}: {blocker}".splitlines():
+        logging.warning(line)
+    logging.warning("=" * 72)
+    logging.warning("")
+    if os.getenv("GITHUB_ACTIONS") == "true":
+        summary = blocker.splitlines()[0] if blocker else "no reason given"
+        print(f"::warning title={SKIP_BANNER}::{summary}", flush=True)
 
 
 # --------------------------------------------------------------------------
@@ -497,12 +623,18 @@ def build_videodecode(env: Dict[str, str], rocm_path: Path, build_dir: Path) -> 
 # streams the GPU cannot decode has nothing to report as failed, so it exits 0
 # exactly like a pass. The verdict line is therefore the only place the skip is
 # visible, which is why this is matched rather than read off the exit code.
-CHILD_SKIP_VERDICT = "Conformance test SKIPPED"
+#
+# The codec is named in that line, because this sweep runs several in turn and a
+# bare "Conformance test FAILED" does not say which one. That name is passed to
+# the child, so the string to match for is built the same way here.
+def child_skip_verdict(codec: str) -> str:
+    return f"Conformance test for {codec} SKIPPED"
 
 
 def run_codec(
     env: Dict[str, str],
     conformance_script: Path,
+    codec: str,
     codec_dir: Path,
     videodecode_exe: Path,
     results_dir: Path,
@@ -511,8 +643,12 @@ def run_codec(
     """Run one codec's sweep and return its status: PASSED, FAILED or SKIPPED.
 
     Each codec gets its own results directory. Without that they share one
-    rocDecode_output.log, which run_rocDecode_Conformance.py appends to, and each
-    codec's tally ends up taken partly over the previous codec's output.
+    rocDecode_output.log, which run_rocDecode_Conformance.py appends to.
+
+    The child's output is echoed line by line as it arrives rather than collected
+    and printed at the end. The sweep runs for minutes per codec, and buffering it
+    means a hung decode or a step timeout kills the job with nothing in the log to
+    say which stream was in flight.
     """
     cmd = [
         sys.executable,
@@ -525,21 +661,32 @@ def run_codec(
         str(results_dir),
         "--gpu_device_id",
         str(gpu_device_id),
+        "--codec_name",
+        codec,
     ]
     logging.info(f"++ Exec $ {shlex.join(cmd)}")
     # stderr is folded into stdout so a traceback from the child is printed rather
     # than swallowed, and so the whole transcript is echoed in order.
-    result = subprocess.run(
+    saw_skip = False
+    process = subprocess.Popen(
         cmd,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         universal_newlines=True,
+        bufsize=1,
     )
-    print(result.stdout, end="")
-    if result.returncode != 0:
+    skip_verdict = child_skip_verdict(codec)
+    with process.stdout:
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            if skip_verdict in line:
+                saw_skip = True
+    returncode = process.wait()
+
+    if returncode != 0:
         return FAILED
-    return SKIPPED if CHILD_SKIP_VERDICT in result.stdout else PASSED
+    return SKIPPED if saw_skip else PASSED
 
 
 def report(results: Dict[str, str]) -> None:
@@ -634,6 +781,7 @@ def main() -> int:
         results[codec] = run_codec(
             env,
             conformance_script,
+            codec,
             codec_dir,
             videodecode_exe,
             results_dir / codec,
