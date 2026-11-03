@@ -5,7 +5,6 @@
 //   skills/rocprof-compute-kernel-bottleneck/evals/samples/common.h
 //   skills/rocprof-compute-memory/evals/samples/common.h
 //   skills/rocprof-compute-pc-sampling/evals/samples/common.h
-//   skills/rocprof-compute-roofline/evals/samples/common.h
 
 #pragma once
 

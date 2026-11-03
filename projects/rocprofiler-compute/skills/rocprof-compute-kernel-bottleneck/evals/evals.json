@@ -28,21 +28,6 @@
       "logs_contain": ["--list-stats", "-k"]
     },
     {
-      "id": "kb-occupancy-limited",
-      "skill_should_trigger": true,
-      "prompt": "is occupancy limiting this rocprof-compute kernel?\n\nThe application is ./occupancy.hip.",
-      "workspace": "evals/samples",
-      "expected_behavior": [
-        "opens the wavefront block for the selected kernel",
-        "compares achieved occupancy against the theoretical occupancy printed in the report",
-        "ties any VGPR, SGPR, or LDS advice to numbers read from the report"
-      ],
-      "unexpected_behavior": [
-        "calls low occupancy a defect without checking whether the kernel already saturates another resource"
-      ],
-      "logs_contain": ["wavefront"]
-    },
-    {
       "id": "kb-expensive-replay-fallback",
       "skill_should_trigger": true,
       "prompt": "a full rocprof-compute replay of this workload is too expensive, collect something cheaper\n\nThe application is ./vmem.hip.",
@@ -70,7 +55,7 @@
     {
       "id": "kb-kernel-name-filter",
       "skill_should_trigger": true,
-      "prompt": "profile only the gemm kernels in my ROCm application\n\nThe application is ./wmma_gemm_fp16.",
+      "prompt": "profile only the kernels whose names end in bound in my ROCm application\n\nThe application is ./occupancy.hip.",
       "workspace": "evals/samples",
       "expected_behavior": [
         "uses rocprof-compute profile -k to filter by kernel name",

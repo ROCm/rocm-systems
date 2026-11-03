@@ -1,10 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-// Keep this folder in sync with its copies under projects/rocprofiler-compute/:
-//   skills/rocprof-compute-kernel-bottleneck/evals/samples/wmma_gemm_fp16/
-//   skills/rocprof-compute-roofline/evals/samples/wmma_gemm_fp16/
-
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
