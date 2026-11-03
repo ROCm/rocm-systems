@@ -10,10 +10,9 @@ import re
 import shlex
 import shutil
 import time
-from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Optional, Union, cast
+from typing import Any, Dict, Generator, List, Optional, Tuple, Union, cast
 
 import config
 import utils.utils_profile_csv as csv_ops
@@ -62,7 +61,7 @@ _OUTDATED_FIRMWARE_MESSAGE = (
     "GPU firmware on this machine is below the minimum rocprofiler-sdk requires."
 )
 
-ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
+ProfilerOptions = Union[List[str], Dict[str, Union[str, List[str]]]]
 
 
 def is_live_attach(
@@ -100,7 +99,7 @@ def file_lock(
         yield
 
 
-def _open_shared_lock_fd(lock_path: Path) -> tuple[int, str]:
+def _open_shared_lock_fd(lock_path: Path) -> Tuple[int, str]:
     """Open a shared world-rw lock file, creating it if needed.
 
     flock advisory locks do not require write access, so a read-only fd is
@@ -174,7 +173,7 @@ def keep_native_artifacts(source_dir: Path, workload_dir: Path, fbase: str) -> N
 
 
 def run_prof(
-    fnames: Union[list[str], str],
+    fnames: Union[List[str], str],
     profiler_options: ProfilerOptions,
     workload_dir: str,
     ml_api_trace_enabled: bool = False,
@@ -205,7 +204,7 @@ def run_prof(
 
     # standard rocprof options
     if get_rocprof_cmd() == "rocprofiler-sdk":
-        options = cast(dict[str, Union[str, list[str]]], profiler_options).copy()
+        options = cast(Dict[str, Union[str, List[str]]], profiler_options).copy()
         if multiple_files:
             options["ROCPROF_COUNTERS"] = ", ".join([
                 f"pmc: {' '.join(parse_pmc_perf(fname))}" for fname in fnames
@@ -221,7 +220,7 @@ def run_prof(
             )
             return
         default_options = ["-i", fnames]
-        options = default_options + cast(list[str], profiler_options)
+        options = default_options + cast(List[str], profiler_options)
         options = ["-A", "absolute"] + options
 
     new_env = os.environ.copy()
@@ -460,7 +459,7 @@ def gen_sysinfo(
         writer.writerow(data)
 
 
-def get_submodules(package_name: str) -> list[str]:
+def get_submodules(package_name: str) -> List[str]:
     """List all submodules for a target package"""
 
     submodules: list[str] = []

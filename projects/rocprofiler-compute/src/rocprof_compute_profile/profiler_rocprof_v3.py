@@ -3,6 +3,7 @@
 
 import argparse
 import shlex
+from typing import List
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
@@ -20,17 +21,17 @@ class rocprof_v3_profiler(RocProfCompute_Base):
     ) -> None:
         super().__init__(profiling_args, profiler_mode, soc)
 
-    def _live_attach_options(self) -> list[str]:
+    def _live_attach_options(self) -> List[str]:
         args = self.get_args()
         options = ["--pid", args.attach_pid, "--attach-sync-output"]
         if args.attach_duration_msec:
             options += ["--attach-duration-msec", args.attach_duration_msec]
         return options
 
-    def _app_cmd_options(self) -> list[str]:
+    def _app_cmd_options(self) -> List[str]:
         return ["--", *shlex.split(self.get_args().remaining)]
 
-    def get_profiler_options(self) -> list[str]:
+    def get_profiler_options(self) -> List[str]:
         args = self.get_args()
         if getattr(self, "_selected_frameworks", set()):
             trace_option = "--marker-trace"
@@ -74,7 +75,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             profiling_options += self._app_cmd_options()
         return profiling_options
 
-    def get_pc_sampling_profiler_options(self) -> list[str]:
+    def get_pc_sampling_profiler_options(self) -> List[str]:
         args = self.get_args()
         method = args.pc_sampling_method
 

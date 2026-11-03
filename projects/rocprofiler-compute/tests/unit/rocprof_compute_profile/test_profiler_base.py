@@ -577,6 +577,7 @@ def _make_rpc_args(
     return argparse.Namespace(
         mode=mode,
         list_metrics=None,
+        list_metrics_gfx_id=None,
         list_blocks=None,
         list_available_metrics=False,
         list_sets=False,

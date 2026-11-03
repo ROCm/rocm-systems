@@ -5,7 +5,7 @@ import argparse
 import os
 import shlex
 from pathlib import Path
-from typing import Optional, Union
+from typing import Dict, List, Optional, Union
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
@@ -42,7 +42,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
 
     def get_profiler_options(
         self, native_tool_path: Optional[str] = None
-    ) -> dict[str, Union[str, list[str]]]:
+    ) -> Dict[str, Union[str, List[str]]]:
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
 
@@ -157,7 +157,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
 
     def get_pc_sampling_profiler_options(
         self, native_tool_path: Optional[str] = None
-    ) -> dict[str, Union[str, list[str]]]:
+    ) -> Dict[str, Union[str, List[str]]]:
         args = self.get_args()
         method = args.pc_sampling_method
 
