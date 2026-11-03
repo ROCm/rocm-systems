@@ -566,9 +566,10 @@ inline bool validate_materialization_address_ranges(const TensorDmaDescriptor &d
 }
 
 /// @brief Append one transfer element after the descriptor-wide address proof.
+/// @details LDS bytes at or past lds_allocation_end, tensor_dma_lds_allocation_end(wf), are
+/// dropped.
 /// @pre The descriptor and wave passed validate_supported_descriptor and
-/// validate_materialization_address_ranges. LDS bytes at or past
-/// lds_allocation_end, tensor_dma_lds_allocation_end(wf), are dropped.
+/// validate_materialization_address_ranges.
 inline void append_copy(TensorDmaState &state, Wavefront &wf, uint64_t lds_allocation_end,
                         uint64_t global_element, uint64_t lds_element, bool in_bounds) {
   const TensorDmaDescriptor &desc = state.desc;
