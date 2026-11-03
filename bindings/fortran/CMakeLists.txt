@@ -169,7 +169,10 @@ add_library(hip::hip_fortran ALIAS hip_fortran)
 # (the Intel ones accept the flags but do not), and not every version takes the
 # flags: the amdflang of ROCm 7.13 rejects them.
 include(CheckFortranCompilerFlag)
-check_fortran_compiler_flag(-ffunction-sections HIP_FORTRAN_HAVE_FUNCTION_SECTIONS)
+check_fortran_compiler_flag(
+    -ffunction-sections
+    HIP_FORTRAN_HAVE_FUNCTION_SECTIONS
+)
 check_fortran_compiler_flag(-fdata-sections HIP_FORTRAN_HAVE_DATA_SECTIONS)
 if(HIP_FORTRAN_HAVE_FUNCTION_SECTIONS AND HIP_FORTRAN_HAVE_DATA_SECTIONS)
     target_compile_options(
