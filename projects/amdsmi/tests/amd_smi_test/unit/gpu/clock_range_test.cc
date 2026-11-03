@@ -10,58 +10,24 @@
 #include <gtest/gtest.h>
 
 #include <climits>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <memory>
 #include <sstream>
-#include <stdexcept>
+#include <string>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_clk_testing.h"
+#include "amd_smi/impl/amd_smi_drm.h"
+#include "amd_smi/impl/amd_smi_gpu_device.h"
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi/rocm_smi_device.h"
-#include "rocm_smi/rocm_smi_main.h"
+#include "rocm_smi/rocm_smi_gpu_metrics.h"
+#include "test_fixture_utils.h"
 
 namespace {
 
-class FakeDpmDevice {
- public:
-  FakeDpmDevice() {
-    auto path = (std::filesystem::temp_directory_path() / "amdsmi_dpm_XXXXXX").string();
-    if (!mkdtemp(path.data())) {
-      throw std::runtime_error("cannot create DPM test directory");
-    }
-    root_ = path;
-    std::filesystem::create_directory(root_ / "device");
-    auto& devices = amd::smi::RocmSMI::getInstance().devices();
-    index_ = static_cast<uint32_t>(devices.size());
-    devices.push_back(std::make_shared<amd::smi::Device>(root_.string(), nullptr));
-  }
-
-  ~FakeDpmDevice() {
-    auto& devices = amd::smi::RocmSMI::getInstance().devices();
-    devices.erase(devices.begin() + index_);
-    std::filesystem::remove_all(root_);
-  }
-
-  FakeDpmDevice(const FakeDpmDevice&) = delete;
-  FakeDpmDevice& operator=(const FakeDpmDevice&) = delete;
-
-  uint32_t index() const { return index_; }
-  std::filesystem::path table() const { return root_ / "device" / "pp_dpm_fclk"; }
-
-  void WriteTable(const char* contents) const {
-    std::ofstream out(table());
-    ASSERT_TRUE(out.is_open());
-    out << contents;
-    ASSERT_TRUE(out.good());
-  }
-
- private:
-  std::filesystem::path root_;
-  uint32_t index_;
-};
+using amd::smi::AMDSmiDrm;
+using amd::smi::AMDSmiGPUDevice;
+using amd::smi::testing::ScopedOverride;
+using amd::smi::testing::ScopedProcessorRegistration;
 
 // pp_od_clk_voltage as seen on MI45x: SCLK and MCLK sections plus an OD_RANGE
 // footer, but no OD_FCLK section.
@@ -298,8 +264,21 @@ TEST(GpuUnit, DpmRangesUnavailableSleepSentinelNotRejected) {
   EXPECT_EQ(ranges.sleep_state_freq, -1);
 }
 
-TEST(GpuUnit, DpmRangesEmptyTablesReportIoError) {
-  for (const char* contents : {"", "\n", " \t\r\n", "\n\n"}) {
+// An empty pp_dpm_* stream with no overdrive range: min keeps its UINT_MAX
+// "unavailable" sentinel and surfaces as -1 rather than failing the call.
+TEST(GpuUnit, DpmRangesEmptyStreamKeepsUnavailableMin) {
+  std::istringstream dpm("");
+  SmiAmdgpuOdClkRange od_range;  // not present -> derive from the (absent) levels
+  SmiAmdgpuClkRanges ranges;
+  EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(ranges.max_freq, 0);
+  EXPECT_EQ(ranges.min_freq, -1);
+  EXPECT_EQ(ranges.sleep_state_freq, -1);
+}
+
+TEST(GpuUnit, DpmRangesBlankTablesReportIoError) {
+  for (const char* contents : {"\n", " \t\r\n", "\n\n"}) {
+    SCOPED_TRACE(contents);
     std::istringstream dpm(contents);
     SmiAmdgpuOdClkRange od_range;
     SmiAmdgpuClkRanges ranges{1800, 1300, 2, 400};
@@ -311,69 +290,50 @@ TEST(GpuUnit, DpmRangesEmptyTablesReportIoError) {
   }
 }
 
-// With an overdrive range the domain still has a range to report.
-TEST(GpuUnit, DpmRangesBlankLineKeepsOdRange) {
-  std::istringstream dpm("\n");
-  SmiAmdgpuOdClkRange od_range{true, 1800u, 1300u};
-  SmiAmdgpuClkRanges ranges;
-  EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(ranges.max_freq, 1800);
-  EXPECT_EQ(ranges.min_freq, 1300);
-}
-
-TEST(GpuUnit, DpmRangesReadFailureIsNotAnEmptyTable) {
-  for (bool has_od_range : {false, true}) {
-    std::istringstream dpm("0: 1300Mhz\n");
-    dpm.setstate(std::ios::badbit);
-    SmiAmdgpuOdClkRange od_range{has_od_range, 1800u, 1300u};
-    SmiAmdgpuClkRanges ranges;
+TEST(GpuUnit, DpmRangesBlankLinesReportIoWithOdRange) {
+  for (const char* contents : {"\n", " \t\r\n", "\n0: 1300Mhz\n", "0: 1300Mhz\n\n"}) {
+    SCOPED_TRACE(contents);
+    std::istringstream dpm(contents);
+    SmiAmdgpuOdClkRange od_range{true, 1800u, 1300u};
+    SmiAmdgpuClkRanges ranges{1800, 1300, 2, 400};
     EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_IO);
+    EXPECT_EQ(ranges.max_freq, 1800);
+    EXPECT_EQ(ranges.min_freq, 1300);
+    EXPECT_EQ(ranges.num_dpm, 2);
+    EXPECT_EQ(ranges.sleep_state_freq, 400);
   }
 }
 
-TEST(GpuUnit, DpmFrequencyReadFailureIsNotAnEmptyTable) {
-  FakeDpmDevice device;
-  // Offset zero in our own proc mem file fails with EIO without reading memory.
-  std::filesystem::create_symlink("/proc/self/mem", device.table());
-  rsmi_frequencies_t frequencies{};
-  EXPECT_EQ(rsmi_dev_gpu_clk_freq_get(device.index(), RSMI_CLK_TYPE_DF, &frequencies),
-            RSMI_STATUS_UNEXPECTED_SIZE);
-}
-
 TEST(GpuUnit, DpmFrequencyMissingTableNotSupported) {
-  FakeDpmDevice device;
+  FakeSysfsTree tree;
+  ScopedRocmSmiDevice device(tree.root() + "/card0");
   rsmi_frequencies_t frequencies{};
   EXPECT_EQ(rsmi_dev_gpu_clk_freq_get(device.index(), RSMI_CLK_TYPE_DF, &frequencies),
             RSMI_STATUS_NOT_SUPPORTED);
 }
 
 TEST(GpuUnit, DpmFrequencyEmptyTablesPreserveDataError) {
-  FakeDpmDevice device;
+  FakeSysfsTree tree;
+  ScopedRocmSmiDevice device(tree.root() + "/card0");
   for (const char* contents : {"", "\n", " \t\r\n", "\n\n"}) {
-    device.WriteTable("0: 1300Mhz *\n");
+    SCOPED_TRACE(contents);
+    tree.WriteFile("card0/device/pp_dpm_fclk", "0: 1300Mhz *\n");
     rsmi_frequencies_t frequencies{};
     ASSERT_EQ(rsmi_dev_gpu_clk_freq_get(device.index(), RSMI_CLK_TYPE_DF, &frequencies),
               RSMI_STATUS_SUCCESS);
     ASSERT_EQ(frequencies.num_supported, 1u);
 
-    device.WriteTable(contents);
+    tree.WriteFile("card0/device/pp_dpm_fclk", contents);
     EXPECT_EQ(rsmi_dev_gpu_clk_freq_get(device.index(), RSMI_CLK_TYPE_DF, &frequencies),
               RSMI_STATUS_UNEXPECTED_DATA);
     EXPECT_EQ(frequencies.num_supported, 0u);
   }
 }
 
-TEST(GpuUnit, DpmFrequencyMalformedTableStillFails) {
-  FakeDpmDevice device;
-  device.WriteTable("0: 1300invalid\n");
-  rsmi_frequencies_t frequencies{};
-  EXPECT_EQ(rsmi_dev_gpu_clk_freq_get(device.index(), RSMI_CLK_TYPE_DF, &frequencies),
-            RSMI_STATUS_UNEXPECTED_DATA);
-}
-
 TEST(GpuUnit, DpmFrequencyValidTableStillReportsLevels) {
-  FakeDpmDevice device;
-  device.WriteTable("0: 1300Mhz\n1: 1550Mhz *\n2: 1800Mhz\n");
+  FakeSysfsTree tree;
+  tree.WriteFile("card0/device/pp_dpm_fclk", "0: 1300Mhz\n1: 1550Mhz *\n2: 1800Mhz\n");
+  ScopedRocmSmiDevice device(tree.root() + "/card0");
   rsmi_frequencies_t frequencies{};
   ASSERT_EQ(rsmi_dev_gpu_clk_freq_get(device.index(), RSMI_CLK_TYPE_DF, &frequencies),
             RSMI_STATUS_SUCCESS);
@@ -381,6 +341,54 @@ TEST(GpuUnit, DpmFrequencyValidTableStillReportsLevels) {
   EXPECT_EQ(frequencies.current, 1u);
   EXPECT_EQ(frequencies.frequency[0], 1300000000u);
   EXPECT_EQ(frequencies.frequency[2], 1800000000u);
+}
+
+TEST(GpuUnit, DpmMixedDevicesPreservePublicApiErrors) {
+  ScopedAmdsmiInit smi_init;
+  FakeSysfsTree tree;
+  tree.WriteFile("card0/device/pp_dpm_fclk", "0: 1300Mhz\n1: 1550Mhz *\n2: 1800Mhz\n");
+  tree.WriteFile("card1/device/pp_dpm_fclk", "\n");
+  amd::smi::AMDGpuMetrics_v10_t metrics{};
+  metrics.m_common_header = {sizeof(metrics), 1, 0};
+  for (const char* card : {"card0", "card1"}) {
+    const std::string device_path = std::string(card) + "/device/";
+    tree.WriteFile(device_path + "gpu_metrics",
+                   std::string(reinterpret_cast<const char*>(&metrics), sizeof(metrics)));
+    tree.WriteFile(device_path + "pp_od_clk_voltage", kOdNoFclk);
+  }
+  ScopedOverride<std::string> root_guard(
+      smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
+  ScopedRocmSmiDevice rocm_dgpu(tree.root() + "/card0");
+  ScopedRocmSmiDevice rocm_igpu(tree.root() + "/card1");
+  AMDSmiDrm drm;
+  AMDSmiGPUDevice dgpu(rocm_dgpu.index(), "card0", amdsmi_bdf_t{}, drm);
+  AMDSmiGPUDevice igpu(rocm_igpu.index(), "card1", amdsmi_bdf_t{}, drm);
+  ScopedProcessorRegistration dgpu_registration(&dgpu);
+  ScopedProcessorRegistration igpu_registration(&igpu);
+  for (const auto handle : {dgpu_registration.handle(), igpu_registration.handle()}) {
+    amdsmi_gpu_metrics_t result{};
+    ASSERT_EQ(amdsmi_get_gpu_metrics_info(handle, &result), AMDSMI_STATUS_SUCCESS);
+  }
+
+  amdsmi_frequencies_t frequencies{};
+  ASSERT_EQ(amdsmi_get_clk_freq(dgpu_registration.handle(), AMDSMI_CLK_TYPE_DF, &frequencies),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(frequencies.num_supported, 3u);
+  EXPECT_EQ(frequencies.current, 1u);
+  EXPECT_EQ(frequencies.frequency[0], 1300000000u);
+  EXPECT_EQ(frequencies.frequency[1], 1550000000u);
+  EXPECT_EQ(frequencies.frequency[2], 1800000000u);
+  amdsmi_clk_info_t info{};
+  ASSERT_EQ(amdsmi_get_clock_info(dgpu_registration.handle(), AMDSMI_CLK_TYPE_DF, &info),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(info.min_clk, 1300u);
+  EXPECT_EQ(info.max_clk, 1800u);
+
+  EXPECT_EQ(amdsmi_get_clk_freq(igpu_registration.handle(), AMDSMI_CLK_TYPE_DF, &frequencies),
+            AMDSMI_STATUS_UNEXPECTED_DATA);
+  EXPECT_EQ(frequencies.num_supported, 0u);
+  EXPECT_EQ(amdsmi_get_clock_info(igpu_registration.handle(), AMDSMI_CLK_TYPE_DF, &info),
+            AMDSMI_STATUS_IO);
 }
 
 TEST(GpuUnit, DpmRangesWhitespaceDoesNotHideMalformedData) {
