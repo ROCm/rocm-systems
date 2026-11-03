@@ -15,7 +15,7 @@ graph:
   Unit_hipGraph_ConcurrentCreate_GraphIDRace:
     <<: *level_default
     tags: [node]
-  Unit_hipGraph_ConcurrentConstruct_NextIDRace:
+  Unit_hipGraph_ConcurrentConstruct_LocalIDSequence:
     <<: *level_default
     tags: [node]
   Unit_hipGraph_ConcurrentConstruct_LaunchDropSmoke:
