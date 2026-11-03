@@ -2837,7 +2837,13 @@ extern "C" ncclResult_t ncclReshard(ncclM2nHandle_t handle, ncclComm_t comm, con
 
   auto finalizeCurrentStagingDescriptor = [&]() -> int {
     int activePeerCount = stagingComputeCtaHeuristicPeerCount(&desc, srcTensor, dstTensor);
+#if defined(__HIP_PLATFORM_AMD__)
+    /* One CTA per peer caps DIRECT at a few GB/s per peer on AMD (pack/unpack and proxy GIN round trips). */
+    desc.ctaHeuristicPeerCount =
+      (copyAlgo == RESHARD_COPY_ALGO_PIPE || copyAlgo == RESHARD_COPY_ALGO_DIRECT) ? activePeerCount : 0;
+#else
     desc.ctaHeuristicPeerCount = (copyAlgo == RESHARD_COPY_ALGO_PIPE) ? activePeerCount : 0;
+#endif
     if (copyAlgo == RESHARD_COPY_ALGO_DIRECT) {
       desc.peerGroupSizeBound =
         stagingComputePeerGroupSizeBound(activePeerCount, dstTensor, dst_gpus_per_domain, copyAlgo);
