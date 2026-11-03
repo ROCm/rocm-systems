@@ -183,7 +183,7 @@ export default function DurationHistory({ projection, catalogs, onRangeChange, o
     </Box>
     <Typography ref={statusRef} data-testid="trend-inspection-status" aria-live="polite" aria-atomic="true" data-visible="false" variant="caption" sx={{ display: 'block', mt: 1, overflowWrap: 'anywhere', '&[data-visible="false"]': visuallyHiddenStyles }} />
     <Typography id={helpId} variant="caption" color="text.muted" sx={{ fontSize: fontSizes.caption }}>Arrow keys inspect dates and attempts · Home/End first/last · Escape clears · Date</Typography>
-    <CatalogWorkloads catalogs={catalogs} projection={projection} />
+    <CatalogWorkloads catalogs={catalogs} />
 
   </SectionCard>;
 }

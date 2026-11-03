@@ -8,11 +8,16 @@ import ChangeCountChip from '../../src/components/shared/ChangeCountChip.jsx';
 
 test.each(['light', 'dark'])('%s comparison chips use semantic surfaces with quiet borders', (mode) => {
   const theme = createDashboardTheme(mode);
-  for (const [tone, surface] of [['success', 'successSurface'], ['error', 'errorSurface'], ['neutral', 'subtleSurface']]) {
+  const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ');
+  for (const tone of ['success', 'error']) {
     const html = renderToStaticMarkup(createElement(ThemeProvider, { theme }, createElement(ChangeCountChip, { tone, label: '0 results' })));
-    expect(html).toContain(`background-color:${theme.palette.dashboard[surface]}`);
-    expect(html).toContain(`border-color:${theme.palette.dashboard.border}`);
+    // Fill and border are both alpha tints of the text hue, so they cannot disagree.
+    const hue = rgb(theme.palette[tone].main);
+    expect(html).toContain(`background-color:rgba(${hue}, 0.08)`);
+    expect(html).toContain(`border-color:rgba(${hue}, 0.4)`);
   }
+  const neutral = renderToStaticMarkup(createElement(ThemeProvider, { theme }, createElement(ChangeCountChip, { label: '0 results' })));
+  expect(neutral).toContain(`background-color:${theme.palette.dashboard.subtleSurface}`);
 });
 
 function metricColors(mode, delta = 0, comparable = [{}]) {

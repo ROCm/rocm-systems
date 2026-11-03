@@ -2,7 +2,7 @@ import { cloneElement, createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, test, vi } from 'vitest';
 import { TextField } from '@mui/material';
-import { ThemeProvider, getContrastRatio } from '@mui/material/styles';
+import { ThemeProvider } from '@mui/material/styles';
 import { createDashboardTheme } from '../../src/theme/theme.js';
 import RunMetadataDiff from '../../src/components/compare/RunMetadataDiff.jsx';
 import BranchEnvironment from '../../src/components/branch/BranchEnvironment.jsx';
@@ -119,18 +119,18 @@ function rowStyle(html, row) {
 test.each([
   [RunMetadataDiff, 'metadata-row-', 'light'], [RunMetadataDiff, 'metadata-row-', 'dark'],
   [BranchEnvironment, 'branch-environment-', 'light'], [BranchEnvironment, 'branch-environment-', 'dark'],
-].map(([Component, prefix, mode]) => ({ name: Component.name, Component, prefix, mode })))('metadata $name uses readable whole-row $mode highlights without repeated status text', ({ Component, prefix, mode }) => {
+].map(([Component, prefix, mode]) => ({ name: Component.name, Component, prefix, mode })))('metadata $name marks changed rows with a light blue fill and a left bar, $mode, without repeated status text', ({ Component, prefix, mode }) => {
   const { html, theme } = renderMetadata(Component, mode);
   const changed = metadataRow(html, `${prefix}literal`);
   const unchanged = metadataRow(html, `${prefix}same`);
   expect(changed).toContain('data-different="true"');
   expect(unchanged).toContain('data-different="false"');
   const css = rowStyle(html, changed);
+  // Differences: very light blue cell fill plus a bar on the first cell only.
+  expect(css).toContain(`box-shadow:inset 3px 0 0 ${theme.palette.primary.main}`);
   expect(css).toContain('>.MuiTableCell-root');
-  expect(css).toContain(`background-color:${theme.palette.action.selected}`);
-  expect(css).toContain(`color:${theme.palette.text.primary}`);
-  expect(rowStyle(html, unchanged)).not.toContain(`background-color:${theme.palette.action.selected}`);
-  expect(getContrastRatio(theme.palette.text.primary, theme.palette.action.selected)).toBeGreaterThanOrEqual(4.5);
+  expect(rowStyle(html, unchanged)).not.toContain('box-shadow');
+  expect(rowStyle(html, unchanged)).not.toContain('>.MuiTableCell-root');
   expect(changed).toContain('Literal flag');
   expect(changed.indexOf('-old+literal')).toBeLessThan(changed.indexOf('+new-literal'));
   expect(unchanged).toContain('&quot;enabled&quot;:false');

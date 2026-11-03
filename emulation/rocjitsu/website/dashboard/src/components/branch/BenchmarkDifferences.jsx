@@ -1,14 +1,17 @@
-import { tableStyles, numericTableCell } from '../../theme/tableStyles';
+import { tallSearchFieldSx } from '../shared/tallSearchFieldSx';
+import { tableStyles, numericTableCell, changedRowSx } from '../../theme/tableStyles';
 import { fontWeights, textStyles } from '../../theme/typography';
 import AnchoredSelect from '../shared/AnchoredSelect';
 import { Fragment } from 'react';
-import { Box, Button, Checkbox, FormControl, InputLabel, MenuItem, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel, TextField, Typography } from '@mui/material';
+import { Box, Checkbox, FormControl, InputLabel, MenuItem, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel, TextField, Typography } from '@mui/material';
 import { formatDuration, formatPercent } from '../../utils/formatters';
 import { changeTone, classifyDurationChange } from '../../utils/performance';
 import { sansFont } from '../../theme/tokens';
 import { hasConfiguration } from '../../data/runSchema';
 import CategoryTag from '../shared/CategoryTag';
 import { groupComparisonRows, rowChanges } from './branchPresentation';
+import ActionButton from '../shared/ActionButton';
+import Disclosure from '../shared/Disclosure';
 import ScrollTableContainer from '../shared/ScrollTableContainer';
 
 function MeasuredChange({ row, measurement = 'seconds' }) {
@@ -24,8 +27,7 @@ function MeasuredChange({ row, measurement = 'seconds' }) {
 function ExcludedResults({ rows, candidate, reference, target, mode }) {
   const status = (test, run) => !run ? 'No run selected' : !hasConfiguration(run, target, mode) ? 'Configuration not published'
     : !test ? 'Not in this catalog' : test.status === 'completed' ? `Completed · ${formatDuration(test.durationSeconds)}` : test.status === 'timeout' ? 'Timeout' : 'Failed';
-  return <Box component="details" data-testid="branch-exclusions" sx={{ mt: '10px', padding: '10px 2px 4px', borderTop: 1, borderColor: 'divider' }}>
-    <Box component="summary" sx={{ cursor: 'pointer', minHeight: { xs: 44, sm: 'auto' }, display: 'list-item', fontWeight: fontWeights.emphasized, ml: 2 }}>Excluded results ({rows.length})</Box>
+  return <Disclosure data-testid="branch-exclusions" title={`Excluded results (${rows.length})`}>
     <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Missing catalog entries, unpublished configurations, failures and timeouts are excluded, never replaced with zero.</Typography>
     {rows.length ? rows.map((row) => {
       const test = row.candidateTest ?? row.baselineTest;
@@ -36,7 +38,7 @@ function ExcludedResults({ rows, candidate, reference, target, mode }) {
         {[['Reference', row.baselineTest], ['Candidate', row.candidateTest]].map(([label, result]) => result?.error && <Typography key={label} variant="caption" component="p" sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', mt: '4px' }}>{label} diagnostic: {result.error}</Typography>)}
       </Box>;
     }) : <Typography variant="body2">No excluded results in this scope.{!candidate || !reference ? ' Select both published attempts to inspect a comparison.' : ''}</Typography>}
-  </Box>;
+  </Disclosure>;
 }
 
 export default function BenchmarkDifferences({ comparison, summary, candidate, reference, selection, suites, suiteOptions, query, sort, onSuites, onQuery, onSort, onClear, onOpenComparison, children }) {
@@ -46,7 +48,8 @@ export default function BenchmarkDifferences({ comparison, summary, candidate, r
   const sortLabel = (key, mobile = false) => <TableSortLabel active={sortKey === key} direction={sortKey === key ? sortDirection : 'desc'}
     data-testid={`branch-${mobile ? 'mobile-' : ''}sort-${key}`} aria-label={`${key === 'seconds' ? 'Abs change' : 'Pct change'}${mobile ? ', sort benchmarks' : ''}`}
     onClick={() => onSort({ key, direction: sortKey === key && sortDirection === 'desc' ? 'asc' : 'desc' })}
-    sx={{ minHeight: 44 }}>
+    // Icon goes before the label so the text, not the hidden icon slot, meets the column's right edge.
+    sx={{ minHeight: 44, flexDirection: 'row-reverse' }}>
     {key === 'seconds' ? 'Abs change' : 'Pct change'}
   </TableSortLabel>;
   return <Box>
@@ -64,23 +67,20 @@ export default function BenchmarkDifferences({ comparison, summary, candidate, r
           {suiteOptions.map((suite) => <MenuItem key={suite} value={suite} sx={{ minHeight: 44, overflowWrap: 'anywhere', whiteSpace: 'normal' }}><Checkbox checked={suites.includes(suite)} tabIndex={-1} size="small" />{suite}</MenuItem>)}
         </AnchoredSelect>
       </FormControl>
-      <TextField size="small" type="search" label="Search benchmarks" value={query} onChange={(event) => onQuery(event.target.value)} sx={{ flex: '1 1 200px', '& .MuiInputBase-root': { minHeight: 44 } }} />
-      {(query || suites.length !== suiteOptions.length) && <Button onClick={onClear} sx={{ minHeight: 44 }}>Reset benchmark filters</Button>}
+      <TextField size="small" type="search" label="Search benchmarks" value={query} onChange={(event) => onQuery(event.target.value)} sx={{ flex: '1 1 200px', ...tallSearchFieldSx }} />
+      {(query || suites.length !== suiteOptions.length) && <ActionButton onClick={onClear}>Clear filters</ActionButton>}
     </Box>
     {!summary.available && <Typography variant="body2" sx={{ py: 2 }}>{summary.reason}. Choose another reference or configuration, or adjust suites and search.</Typography>}
     {summary.available && <>
-      <ScrollTableContainer role="region" tabIndex={0} aria-label="Branch benchmark differences, horizontally scrollable on tablet" sx={{ minWidth: 0, maxWidth: '100%', overflow: 'auto', border: 1, borderColor: 'dashboard.border', borderRadius: '8px', '@media (max-width:767px)': { display: 'none' } }}>
-        <Table size="small" aria-label="Benchmark differences" sx={{ ...tableStyles.normal, minWidth: 520, tableLayout: 'fixed', bgcolor: 'background.paper',
-          borderCollapse: 'collapse', borderSpacing: 0,
-          '& thead th': { bgcolor: 'dashboard.tableHeader' },
-          '& tbody tr[data-testid]': { '&:nth-of-type(even)': { bgcolor: 'background.default' }, '&:hover > *': { bgcolor: 'action.hover' } }, '& td, & th': { ...tableStyles.normal['& td, & th'], verticalAlign: 'top', overflowWrap: 'anywhere' } }}>
+      <ScrollTableContainer role="region" tabIndex={0} aria-label="Branch benchmark differences, horizontally scrollable on tablet" sx={{ minWidth: 0, '@media (max-width:767px)': { display: 'none' } }}>
+        <Table size="small" aria-label="Benchmark differences" sx={{ ...tableStyles.normal, minWidth: 520, tableLayout: 'fixed', '& td, & th': { ...tableStyles.normal['& td, & th'], verticalAlign: 'top', overflowWrap: 'anywhere' }, '& thead th': { verticalAlign: 'middle' } }}>
           <TableHead><TableRow><TableCell sx={{ width: '30%' }}>Benchmark</TableCell><TableCell align="right">Base</TableCell><TableCell align="right">Candidate</TableCell>
             <TableCell align="right" sortDirection={sortKey === 'seconds' ? sortDirection : false} sx={{ width: '23%' }}>{sortLabel('seconds')}</TableCell>
             <TableCell align="right" sortDirection={sortKey === 'percent' ? sortDirection : false} sx={{ width: '20%' }}>{sortLabel('percent')}</TableCell>
           </TableRow></TableHead>
           <TableBody>{groups.map(({ suite, rows }) => <Fragment key={`${suite}:${rows[0].candidateTest.testId}`}>
-            <TableRow><TableCell component="th" scope="rowgroup" colSpan={5} sx={{ bgcolor: 'background.paper', color: 'text.secondary', borderColor: 'dashboard.border' }}><CategoryTag label={suite} kind="suite" /></TableCell></TableRow>
-            {rows.map((row) => <TableRow key={row.candidateTest.testId} data-testid={`branch-result-${row.candidateTest.testId}`} data-abs-change={rowChanges(row).seconds ?? "unavailable"} data-pct-change={rowChanges(row).percent ?? "unavailable"}
+            <TableRow><TableCell component="th" scope="rowgroup" colSpan={5} sx={{ bgcolor: 'dashboard.tableGroup', color: 'text.secondary' }}><CategoryTag label={suite} kind="suite" /></TableCell></TableRow>
+            {rows.map((row) => <TableRow key={row.candidateTest.testId} data-testid={`branch-result-${row.candidateTest.testId}`} data-different={['slower', 'faster'].includes(classifyDurationChange(rowChanges(row).percent))} sx={['slower', 'faster'].includes(classifyDurationChange(rowChanges(row).percent)) ? changedRowSx : undefined} data-abs-change={rowChanges(row).seconds ?? "unavailable"} data-pct-change={rowChanges(row).percent ?? "unavailable"}
               >
               <TableCell component="th" scope="row"><Typography variant="body2">{row.candidateTest.name}</Typography><Typography variant="caption" color="text.secondary">{row.candidateTest.logicalTestId}</Typography></TableCell>
               <TableCell align="right" sx={numericTableCell}>{formatDuration(row.baselineTest.durationSeconds)}</TableCell>
@@ -106,9 +106,9 @@ export default function BenchmarkDifferences({ comparison, summary, candidate, r
     </>}
     <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '12px', mt: '12px' }}>
       <Typography variant="caption" color="text.muted" component="p" sx={{ m: 0, flex: '1 1 320px' }}>Negative change means less measured wall time. Totals include only matched completed benchmarks; environment equivalence is not guaranteed.</Typography>
-      <Button variant="outlined" data-testid="branch-open-comparison" disabled={!candidate || !reference || typeof onOpenComparison !== 'function'}
+<ActionButton data-testid="branch-open-comparison" disabled={!candidate || !reference || typeof onOpenComparison !== 'function'}
         onClick={() => candidate && reference && onOpenComparison({ candidateId: selection.candidateId, baselineId: selection.referenceId, target: selection.target, mode: selection.mode, suites })}
-        sx={{ minHeight: 44, flexShrink: 0, ml: 'auto', fontWeight: fontWeights.emphasized, whiteSpace: 'nowrap', border: 1, borderColor: 'primary.main', '@media (max-width:767px)': { width: '100%' } }}>Open full comparison ↗</Button>
+        sx={{ flexShrink: 0, ml: 'auto', '@media (max-width:767px)': { width: '100%' } }}>Open full comparison ↗</ActionButton>
     </Box>
     {(!candidate || !reference) && <Typography variant="caption" component="p" color="text.secondary">Choose both published attempts to open full comparison.</Typography>}
     {children}

@@ -1,3 +1,4 @@
+import ActionButton from '../shared/ActionButton';
 import {
   Box,
   Button,
@@ -88,7 +89,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
           </DialogContent>
           <DialogActions sx={{ px: 3, py: '12px' }}>
             {sourceUrl && (
-              <Button
+              <ActionButton
                 component={Link}
                 href={sourceUrl}
                 target="_blank"
@@ -97,7 +98,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
                 sx={{ mr: 'auto' }}
               >
                 Commit {shortSha(run)}
-              </Button>
+              </ActionButton>
             )}
             <Button onClick={onClose} color="inherit">Close</Button>
           </DialogActions>

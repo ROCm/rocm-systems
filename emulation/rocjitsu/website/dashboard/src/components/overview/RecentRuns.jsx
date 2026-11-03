@@ -40,7 +40,7 @@ export default function RecentRuns({ data, filters }) {
   return (
     <SectionCard title="Recent runs" subtitle="Published develop runs · newest executions first · selected targets, suites and thread policies · time in UTC" data-testid="recent-runs" sx={{ minWidth: 0 }} contentSx={{ minWidth: 0 }}>
       {rows.length > 0 ? <>
-        <ScrollTableContainer key={page} data-testid="recent-runs-table" tabIndex={0} role="region" aria-label="Recent runs scroll area" sx={{ height: rows.length > 7 ? 496 : 'auto', maxHeight: 496, maxWidth: '100%', overflow: 'auto', border: 1, borderColor: 'dashboard.border', borderRadius: 1, scrollbarGutter: 'stable', overscrollBehavior: 'contain' }}>
+        <ScrollTableContainer key={page} data-testid="recent-runs-table" tabIndex={0} role="region" aria-label="Recent runs scroll area" sx={{ height: rows.length > 7 ? 496 : 'auto', maxHeight: 496, scrollbarGutter: 'stable', overscrollBehavior: 'contain' }}>
           <Table stickyHeader size="small" aria-label="Recent runs" sx={{ ...tableStyles.recentRuns, tableLayout: 'fixed', minWidth: 1040, borderCollapse: 'separate', borderSpacing: 0, '& td:not(:first-of-type), & th:not(:first-of-type)': { textAlign: 'center' } }}>
             <colgroup><col style={{ width: '35%' }} />{Array.from({ length: 5 }, (_, i) => <col key={i} style={{ width: '13%' }} />)}</colgroup>
             <TableHead><TableRow>{['Commit', 'Run time', 'Commit time', 'Coverage', 'Duration', 'Status'].map((label) => <TableCell key={label}>{label}</TableCell>)}</TableRow></TableHead>

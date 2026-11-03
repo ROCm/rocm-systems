@@ -1,5 +1,6 @@
 import { fontWeights } from '../../theme/typography';
-import { Box, Button, ButtonBase, Paper, Typography } from '@mui/material';
+import ActionButton from '../shared/ActionButton';
+import { Box, ButtonBase, Paper, Typography } from '@mui/material';
 import { formatFullDate, shortSha } from '../../utils/formatters';
 import { sansFont } from '../../theme/tokens';
 
@@ -32,17 +33,16 @@ export default function BranchList({ branches, selectedBranch, onSelect, onClear
           '&:hover': { bgcolor: selectedBranch === entry.branch ? 'action.selected' : 'action.hover' },
           '&.Mui-focusVisible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: -2 },
         }}>
-        <Typography variant="body2" sx={{ fontWeight: fontWeights.emphasized, overflowWrap: 'anywhere' }}>{entry.branch}</Typography>
-        <Typography component="div" variant="caption" color="text.secondary" sx={{ mt: '4px' }}>
-          <Box component="span" sx={{ fontFamily: sansFont }}>{shortSha(entry.latestRun)}</Box>
+        <Typography variant="body2" color="text.primary" sx={{ fontWeight: fontWeights.emphasized, overflowWrap: 'anywhere' }}>{entry.branch}</Typography>
+        <Typography component="div" variant="caption" color="text.primary" sx={{ mt: '4px' }}>
+          <Box component="span" sx={{ fontFamily: sansFont, fontWeight: fontWeights.emphasized }}>{shortSha(entry.latestRun)}</Box>
           {entry.pullRequest ? ` · PR #${entry.pullRequest.number}` : ' · No PR'}
         </Typography>
-        <Typography component="div" variant="caption" color="text.secondary">{formatFullDate(entry.latestRun.timestamp)}</Typography>
-        <Typography component="div" variant="caption" color="text.secondary">{entry.latestRun.configurations.length} published configurations</Typography>
+        <Typography component="div" variant="caption" color="text.muted" sx={{ mt: '2px' }}>{formatFullDate(entry.latestRun.timestamp)}</Typography>
       </ButtonBase>) : <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
         <Typography variant="body2">No matching branches</Typography>
         <Typography variant="caption" color="text.secondary">Try another branch, PR or SHA.</Typography>
-        <Button onClick={onClear} sx={{ mt: 1, minHeight: 44, px: 0 }}>Clear filters</Button>
+        <ActionButton onClick={onClear} sx={{ mt: 1, minHeight: 44, px: 0 }}>Clear filters</ActionButton>
       </Box>}
     </Box>
     <Typography variant="caption" color="text.muted" sx={{ padding: '10px 20px', borderTop: 1, borderColor: 'divider', flexShrink: 0 }}>

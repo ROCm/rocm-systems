@@ -1,6 +1,8 @@
+import { tallSearchFieldSx } from '../shared/tallSearchFieldSx';
+import ActionButton from '../shared/ActionButton';
 import { fontSizes } from '../../theme/typography';
 import { useEffect, useRef, useState } from 'react';
-import { Box, Button, FormControl, InputLabel, MenuItem, Paper, TextField, Typography } from '@mui/material';
+import { Box, FormControl, InputLabel, MenuItem, Paper, TextField, Typography } from '@mui/material';
 import AnchoredSelect from '../shared/AnchoredSelect';
 import { compareRunExecution } from '../../data/runOrdering';
 import { selectAutomaticReference, selectPublishedBranches } from '../../data/branchSelectors';
@@ -49,14 +51,14 @@ export default function BranchRunsView({ data, state, onOpenComparison }) {
     <Typography variant="body2" color="text.secondary" sx={{ fontSize: fontSizes.body, mb: 1 }}>Published branch benchmarks · all branches are public</Typography>
     {branches.length || selection.branch ? <>
       <Box className="branch-toolbar" sx={{ display: 'flex', gap: '12px', mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-        <TextField type="search" label="Search branch, PR or SHA" placeholder="Search branch, PR or SHA" size="small" value={query} onChange={(event) => setQuery(event.target.value)} sx={{ flex: '1 1 240px', '& .MuiInputBase-root': { minHeight: 44 }, '& .MuiInputBase-input': { py: '10px' }, '& .MuiInputLabel-root:not(.MuiInputLabel-shrink)': { transform: 'translate(14px, 12px) scale(1)' } }} />
+        <TextField type="search" label="Search branch, PR or SHA" placeholder="Search branch, PR or SHA" size="small" value={query} onChange={(event) => setQuery(event.target.value)} sx={{ flex: '1 1 240px', ...tallSearchFieldSx }} />
         <FormControl size="small" sx={{ width: 200, flexGrow: { xs: 1, sm: 0 } }}>
           <InputLabel id="branch-pr-filter-label" shrink>Pull request</InputLabel>
           <AnchoredSelect label="Pull request" labelId="branch-pr-filter-label" value={pr} onChange={(event) => setPr(event.target.value)} sx={{ minHeight: 44 }}>
             <MenuItem value="all">All branches</MenuItem><MenuItem value="with-pr">With PR</MenuItem><MenuItem value="no-pr">No PR</MenuItem>
           </AnchoredSelect>
         </FormControl>
-        {(query || pr !== 'all') && <Button onClick={clear} sx={{ minHeight: 44 }}>Clear filters</Button>}
+        {(query || pr !== 'all') && <ActionButton onClick={clear} sx={{ minHeight: 44 }}>Clear filters</ActionButton>}
       </Box>
       <Box sx={{ display: 'grid', gap: 2, minWidth: 0, gridTemplateColumns: 'minmax(0,1fr)', '@container branch-runs (min-width:1000px)': { gridTemplateColumns: pickerCollapsed ? '44px minmax(0,1fr)' : '320px minmax(0,1fr)', alignItems: 'stretch' } }}>
         <BranchPicker collapsed={pickerCollapsed} onToggle={() => setPickerCollapsed((collapsed) => !collapsed)}>
@@ -67,7 +69,7 @@ export default function BranchRunsView({ data, state, onOpenComparison }) {
             write(selectionForBranch(selection, entry, selectAutomaticReference(data, entry.latestRun).run?.runId));
           }} />
         </BranchPicker>
-        <BranchDetail selection={selection} candidate={candidate} reference={reference} automatic={automatic} candidateOptions={candidateOptions} runs={runs} onOpenComparison={onOpenComparison} repository={data.repository} headingRef={headingRef}
+        <BranchDetail selection={selection} candidate={candidate} reference={reference} automatic={automatic} candidateOptions={candidateOptions} runs={runs} onOpenComparison={onOpenComparison} headingRef={headingRef}
           onCandidate={(runId) => write(selectionForCandidate(selection, runId, selectAutomaticReference(data, runs.find((run) => run.runId === runId)).run?.runId))}
           onReference={(runId) => write(selectionForAction(selection, { type: 'reference', runId }))}
           onAutomatic={() => write(selectionForAction(selection, { type: 'automatic', runId: automatic.run?.runId }))}

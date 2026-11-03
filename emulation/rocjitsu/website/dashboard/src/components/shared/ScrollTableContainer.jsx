@@ -18,6 +18,7 @@ export default function ScrollTableContainer({ sx, ...props }) {
   }, []);
   return <TableContainer ref={ref} {...props} sx={[
     (theme) => ({
+      maxWidth: '100%', overflow: 'auto', border: `1px solid ${theme.palette.dashboard.border}`, borderRadius: `${theme.shape.borderRadius}px`,
       // Header colour continues under the scrollbar gutter beside the header row.
       background: `linear-gradient(${theme.palette.dashboard.tableHeader}, ${theme.palette.dashboard.tableHeader}) top / 100% var(--table-head-height, 0px) no-repeat`,
       '&::-webkit-scrollbar-track': { marginTop: 'var(--table-head-height, 0px)', background: 'transparent' },

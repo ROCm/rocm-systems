@@ -10,12 +10,12 @@ const fullDateFormatter = new Intl.DateTimeFormat(undefined, {
   day: 'numeric',
   hour: '2-digit',
   minute: '2-digit',
+  hourCycle: 'h23',
   timeZone: 'UTC',
-  timeZoneName: 'short',
 });
 
 export const formatShortDate = (timestamp) => typeof timestamp === 'string' && Number.isFinite(Date.parse(timestamp)) ? shortDateFormatter.format(new Date(timestamp)) : '-';
-export const formatFullDate = (timestamp) => typeof timestamp === 'string' && Number.isFinite(Date.parse(timestamp)) ? fullDateFormatter.format(new Date(timestamp)) : '-';
+export const formatFullDate = (timestamp) => typeof timestamp === 'string' && Number.isFinite(Date.parse(timestamp)) ? `${fullDateFormatter.format(new Date(timestamp))} UTC` : '-';
 
 const runTimeFormatter = new Intl.DateTimeFormat(undefined, {
   year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',

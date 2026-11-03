@@ -1,4 +1,4 @@
-import { tableStyles, numericTableCell } from '../../theme/tableStyles';
+import { tableStyles, numericTableCell, changedRowSx } from '../../theme/tableStyles';
 import { fontSizes, fontWeights } from '../../theme/typography';
 import { Box, Alert, Button, Chip, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography, useMediaQuery, useTheme } from '@mui/material';
 import { alpha } from '@mui/material/styles';
@@ -21,8 +21,16 @@ import {
 } from '../../utils/formatters';
 import { classifyDurationChange } from '../../utils/performance';
 import CommitComparison from '../shared/CommitComparison';
-import { colorTokens, shapeTokens } from '../../theme/tokens';
+import { categoryTextColor, colorTokens } from '../../theme/tokens';
+import Disclosure from '../shared/Disclosure';
 import ScrollTableContainer from '../shared/ScrollTableContainer';
+
+// ThreadPolicySwatch's non-legend drawing as an image, for chart rich text (which cannot embed React).
+function policySwatchImage(policy, color) {
+  const dash = policy === 'single' ? ' stroke-dasharray="0.1 6"' : '';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="8" viewBox="0 0 22 8"><line x1="1" y1="4" x2="21" y2="4" stroke="${color}" stroke-width="3"${dash} stroke-linecap="round"/></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
 
 function TestAvailability({ test, run, benchmark }) {
   const label = !run ? 'No run selected'
@@ -46,7 +54,7 @@ function ExcludedTestsTable({ comparisons, comparableCount, baseline, candidate 
   }
 
   return (
-    <ScrollTableContainer tabIndex={0} role="region" aria-label="Excluded results scroll area" sx={{ maxHeight: 250, maxWidth: '100%', overflow: 'auto', border: 1, borderColor: 'dashboard.border', borderRadius: shapeTokens.controlRadius }}>
+    <ScrollTableContainer tabIndex={0} role="region" aria-label="Excluded results scroll area" sx={{ maxHeight: 250 }}>
       <Table size="small" stickyHeader aria-label="Excluded benchmark results" sx={{ ...tableStyles.normal, minWidth: 760 }}>
         <TableHead>
           <TableRow>
@@ -98,13 +106,19 @@ export default function CompareRunsView({
   const axisLimit = Math.max(5, Math.ceil(maximumDelta * 1.25));
   const chartRangeAvailable = Number.isFinite(axisLimit) && axisLimit > 0 && Number.isFinite(axisLimit * 2);
   const chartHeight = Math.min(720, Math.max(320, chartItems.length * 34 + 100));
+  const targetIds = [...new Set(chartItems.map((item) => item.candidateTest.target))];
   const richLabelStyles = {
     separator: { color: theme.palette.text.disabled },
-    target: {
-      color: theme.palette.text.secondary,
+    // One rich-text style per target so the label carries the same hue as the target tag/legend.
+    ...Object.fromEntries(targetIds.map((target, index) => [`target${index}`, {
+      color: categoryTextColor(theme.palette.mode, target, theme.palette.text.secondary, 'target'),
       fontWeight: fontWeights.emphasized,
       fontFamily: theme.typography.fontFamily,
-    },
+    }])),
+    // Thread policy stays neutral (as in the tags); the swatch is the same line drawing as ThreadPolicySwatch.
+    mode: { color: theme.palette.text.secondary, fontFamily: theme.typography.fontFamily },
+    singleSwatch: { width: 22, height: 8, backgroundColor: { image: policySwatchImage('single', theme.palette.text.secondary) } },
+    defaultSwatch: { width: 22, height: 8, backgroundColor: { image: policySwatchImage('default', theme.palette.text.secondary) } },
     benchmark: {
       color: theme.palette.text.secondary,
       fontWeight: fontWeights.emphasized,
@@ -125,10 +139,15 @@ export default function CompareRunsView({
     return `${indicator} ${formatPercent(delta)}`;
   };
   const categoryFor = (item) => {
-    const target = `${item.candidateTest.target} · ${item.candidateTest.mode}`.replace(/[{}|]/g, '');
-    const benchmark = item.candidateTest.name.replace(/[{}|]/g, '');
+    const clean = (value) => String(value).replace(/[{}|]/g, '');
+    const target = clean(item.candidateTest.target);
+    const mode = clean(item.candidateTest.mode);
+    const swatch = item.candidateTest.mode === 'single' ? 'singleSwatch' : 'defaultSwatch';
+    const benchmark = clean(item.candidateTest.name);
     const separator = compactChart ? '\n' : '{separator| · }';
-    return `{target|${target}}${separator}{benchmark|${benchmark}}`;
+    // Phones: the swatch alone carries the policy (as in the tags); the word needs width they lack.
+    const policy = compactChart ? `{${swatch}|}` : `{${swatch}|} {mode|${mode}}`;
+    return `{target${targetIds.indexOf(item.candidateTest.target)}|${target}} ${policy}${separator}{benchmark|${benchmark}}`;
   };
 
   const option = {
@@ -148,8 +167,8 @@ export default function CompareRunsView({
       },
     },
     grid: compactChart
-      ? { left: 118, right: 12, top: 18, bottom: 48 }
-      : { left: 235, right: 88, top: 18, bottom: 48 },
+      ? { left: 150, right: 12, top: 18, bottom: 48 }
+      : { left: 300, right: 88, top: 18, bottom: 48 },
     xAxis: {
       type: 'value',
       name: 'Duration change (%)',
@@ -181,7 +200,7 @@ export default function CompareRunsView({
         fontSize: fontSizes.caption,
         fontFamily: theme.typography.fontFamily,
         color: theme.palette.text.secondary,
-        width: compactChart ? 100 : 205,
+        width: compactChart ? 132 : 270,
         overflow: 'truncate',
         formatter: (value) => value,
         rich: richLabelStyles,
@@ -250,12 +269,12 @@ export default function CompareRunsView({
             else { onBaselineChange(candidate.runId); onCandidateChange(baseline.runId); }
           }}
           sx={{
-            bgcolor: 'transparent', color: 'text.primary', borderColor: 'dashboard.controlBorder',
-            '&:hover': { bgcolor: 'action.hover' },
+            bgcolor: 'dashboard.subtleSurface', color: 'text.primary', fontWeight: fontWeights.emphasized, borderColor: 'text.secondary',
+            '&:hover': { bgcolor: 'action.selected', borderColor: 'text.primary' },
             whiteSpace: 'nowrap',
             justifySelf: 'center',
             alignSelf: { xs: 'center', md: 'start' },
-            mt: { xs: 0, md: '5px' },
+            mt: 0, height: { md: 37 }, py: 0, minHeight: { md: 0 },
           }}
         >
           Swap
@@ -293,15 +312,14 @@ export default function CompareRunsView({
           <Typography sx={{ color: 'text.secondary', py: 8, textAlign: 'center' }}>{!hasRuns ? 'Select baseline and candidate runs to compare benchmark results.' : chartItems.length ? 'Chart unavailable: percentage changes exceed the supported chart range. Measured results remain in the results table below.' : viewModel.comparable.length ? 'No percentage changes available. Measured results remain in the results table below.' : 'No completed benchmark results are comparable between these runs.'}</Typography>
         )}
         {viewModel.comparable.length > 0 && (
-          <Box component="details" sx={{ mt: 1 }}>
-            <Box component="summary" sx={{ cursor: 'pointer', py: 1, fontSize: fontSizes.caption, fontWeight: fontWeights.emphasized }}>View comparable results ({viewModel.comparable.length})</Box>
-            <ScrollTableContainer tabIndex={0} role="region" aria-label="Comparable results scroll area" sx={{ maxHeight: 250, overflow: 'auto', border: 1, borderColor: 'dashboard.border', borderRadius: '8px' }}>
+          <Disclosure title={`View comparable results (${viewModel.comparable.length})`}>
+            <ScrollTableContainer tabIndex={0} role="region" aria-label="Comparable results scroll area" sx={{ maxHeight: 250 }}>
               <Table size="small" stickyHeader aria-label="Comparable benchmark results" sx={{ ...tableStyles.normal, minWidth: 540 }}>
                 <TableHead><TableRow>
                   <TableCell>Benchmark / target / thread policy</TableCell><TableCell align="right">Baseline</TableCell><TableCell align="right">Candidate</TableCell><TableCell align="right">Change</TableCell>
                 </TableRow></TableHead>
                 <TableBody>{viewModel.comparable.map((item) => (
-                  <TableRow key={item.candidateTest.testId}>
+                  <TableRow key={item.candidateTest.testId} data-different={['slower', 'faster'].includes(stateFor(item.delta))} sx={['slower', 'faster'].includes(stateFor(item.delta)) ? changedRowSx : undefined}>
                     <TableCell sx={{ overflowWrap: 'anywhere', maxWidth: 320 }}>{item.candidateTest.name} · {item.candidateTest.target} · {item.candidateTest.mode}</TableCell>
                     <TableCell sx={numericTableCell}>{formatDuration(item.baselineTest.durationSeconds)}</TableCell>
                     <TableCell sx={numericTableCell}>{formatDuration(item.candidateTest.durationSeconds)}</TableCell>
@@ -310,7 +328,7 @@ export default function CompareRunsView({
                 ))}</TableBody>
               </Table>
             </ScrollTableContainer>
-          </Box>
+          </Disclosure>
         )}
       </SectionCard>
 

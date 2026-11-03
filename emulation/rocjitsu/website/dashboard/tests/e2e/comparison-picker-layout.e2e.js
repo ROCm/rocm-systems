@@ -11,7 +11,7 @@ for (const width of [1439, 390]) {
       const page = await context.newPage();
       const errors = [];
       page.on('pageerror', (error) => errors.push(error.message));
-      await openDashboard(page, '/?view=compare');
+      await openDashboard(page, '/?view=compare&compareCandidate=unpublished-c&compareBaseline=unpublished-b');
       const controls = [
         page.getByRole('combobox', { name: 'Candidate run', exact: true }),
         page.getByRole('button', { name: 'Swap', exact: true }),

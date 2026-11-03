@@ -59,7 +59,10 @@ it('grid popup and long chip sets have viewport-bounded local scrolling', () => 
   expect(state.rects.popper.height).toBe(212);
   state.elements.reference.getBoundingClientRect = () => ({ top: 350, bottom: 520 });
   modifier.fn({ state });
-  expect(values['--benchmark-listbox-height']).toBe('340px');
+  // The list always opens below the field, so it only gets the space below (600 - 520 - 8).
+  expect(values['--benchmark-listbox-height']).toBe('72px');
+  expect(picker.props.slotProps.popper.placement).toBe('bottom-start');
+  expect(picker.props.slotProps.popper.modifiers.find((item) => item.name === 'flip')?.enabled).toBe(false);
 });
 
 it('UI-005 keeps workload options named with no independently focusable nested checkbox', () => {

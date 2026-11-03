@@ -47,7 +47,7 @@ afterEach(() => {
 // instead of mounting MUI/ECharts host DOM. Loader is the only data boundary mock.
 function mountApp(storage = new Map(), blockedStorage = false) {
   const { browser, container } = createReactRootSurface();
-  browser.location = { href: 'https://example.test/app/?view=benchmarks&campaign=keep#anchor' };
+  browser.location = { href: 'https://example.test/app/?view=benchmarks&benchmarkRange=ALL&campaign=keep#anchor' };
   if (blockedStorage) Object.defineProperty(browser, 'localStorage', { get() { throw new Error('Storage denied'); } });
   else browser.localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
   browser.matchMedia = () => ({ matches: false });

@@ -10,7 +10,7 @@ export default function RunOptionDetails({ run, result }) {
     secondary={<>
       <Box component="span" sx={{ fontFamily: sansFont, fontWeight: fontWeights.emphasized }}>{shortSha(run)}</Box>
       {` · Commit · ${formatRunTime(commitTimestampFor(run))}`}
-      <Box component="span" sx={{ display: 'block' }}>{run.branch} · {(run.modes ?? []).join(' / ')} · {run.runId}</Box>
+      <Box component="span" sx={{ display: 'block' }}>{run.branch} · {run.runId}</Box>
       {result && <Box component="span" sx={{ display: 'block' }}>{result}</Box>}
     </>}
     slotProps={{ primary: { variant: 'body2', fontWeight: fontWeights.emphasized }, secondary: { component: 'div', variant: 'caption', sx: { mt: '2px' } } }}

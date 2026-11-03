@@ -326,3 +326,13 @@ test('positive overflow ratios remain measured, arbitrary metadata stays aligned
   await expect(page.locator('img[src="x"]')).toHaveCount(0);
   expect(await page.evaluate(() => window.__tooltipInjection)).toBeUndefined();
 });
+
+test('opening Run comparison with no chosen pair selects the newest attempt against its automatic develop reference', async ({ page }) => {
+  await openDashboard(page, '/?view=compare');
+  await expect(page.getByRole('combobox', { name: 'Candidate run', exact: true })).not.toHaveValue('');
+  await expect(page.getByRole('combobox', { name: 'Baseline run', exact: true })).not.toHaveValue('');
+  const params = new URL(page.url()).searchParams;
+  expect(params.get('compareCandidate')).toBeTruthy();
+  expect(params.get('compareBaseline')).toBeTruthy();
+  expect(params.get('compareCandidate')).not.toBe(params.get('compareBaseline'));
+});

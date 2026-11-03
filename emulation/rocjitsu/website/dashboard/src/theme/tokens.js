@@ -21,7 +21,7 @@ export const colorTokens = {
     errorText: '#da1e28', errorGraphic: '#da1e28', errorSurface: '#fff1f1',
     warningText: '#8a3800', warningSurface: '#fff1e6',
     purpleText: '#6929c4', purpleSurface: '#f6f2ff', hover: '#f5f7fb',
-    tableHeader: '#eef1f6', barTrack: '#e6eaf2', commitText: '#3a4a68',
+    tableHeader: '#eef1f6', tableGroup: '#f7f9fc', barTrack: '#e6eaf2', commitText: '#3a4a68',
     // Decorative identities, not success/warning/error signals.
     secondaryAccent: '#007d79', seriesSecondary: '#c2570c', seriesSecondaryText: '#a94b0a',
     goldAccent: '#a17812', goldText: '#805d0e', roseAccent: '#ad5478', roseText: '#9e456a', oliveAccent: '#727b3d', oliveText: '#606a30',
@@ -38,7 +38,7 @@ export const colorTokens = {
     errorText: '#ff8389', errorGraphic: '#fa4d56', errorSurface: '#520408',
     warningText: '#ffa04d', warningSurface: '#3a2208',
     purpleText: '#be95ff', purpleSurface: '#31135e', hover: '#1e2837',
-    tableHeader: '#222a36', barTrack: '#222a36', commitText: '#b4c0d9',
+    tableHeader: '#222a36', tableGroup: '#1c2430', barTrack: '#222a36', commitText: '#b4c0d9',
     secondaryAccent: '#3ddbd9', seriesSecondary: '#ffa04d', seriesSecondaryText: '#ffa04d',
     goldAccent: '#e0b94f', goldText: '#e0b94f', roseAccent: '#e58db0', roseText: '#e58db0', oliveAccent: '#b5c06a', oliveText: '#b5c06a',
     shadowColor: '#000000',

@@ -117,8 +117,9 @@ test('grid point selection survives timeframe and scope changes without legacy m
   await expect(dialog.getByText('Simulator threads', { exact: true })).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Close details', exact: true }).click();
   expect(await selectedRunIds(chart)).toEqual(['fictional-develop-23']);
-  await page.getByRole('button', { name: 'Trailing 7 days' }).click();
-  await expect(page.getByRole('button', { name: 'Trailing 7 days' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('benchmark-timeframe').getByRole('combobox').click();
+  await page.getByRole('option', { name: 'Trailing 30 days' }).click();
+  await expect(page.getByTestId('benchmark-timeframe').getByRole('combobox')).toContainText('Trailing 30 days');
   await page.getByRole('checkbox', { name: 'default', exact: true }).uncheck();
   expect(await selectedRunIds(chart)).toEqual(['fictional-develop-23']);
   const series = await readChart(chart, (instance) => {
@@ -139,7 +140,7 @@ test('grid point selection survives timeframe and scope changes without legacy m
 });
 
 test('keyboard result details distinguish positive completion, failed, timeout and unpublished configurations', async ({ page }) => {
-  await openDashboard(page, '/?view=benchmarks&range=ALL');
+  await openDashboard(page, '/?view=benchmarks&benchmarkRange=ALL');
   await page.getByRole('checkbox', { name: 'gfx950', exact: true }).check();
   await ensureGridBenchmark(page, gemm);
   await page.getByRole('button', { name: `Inspect ${gemm} results`, exact: true }).click();

@@ -17,7 +17,7 @@ async function theme(page, mode) {
 
 test('feedback: either empty comparison selector retains geometry on focus/open in both themes and narrow layouts', async ({ page }) => {
   const errors = errorsFor(page);
-  await openDashboard(page, '/?view=compare');
+  await openDashboard(page, '/?view=compare&compareCandidate=unpublished-c&compareBaseline=unpublished-b');
   for (const mode of ['light', 'dark']) {
     await theme(page, mode);
     for (const width of [1440, 390]) {
@@ -146,7 +146,7 @@ test('feedback: Abs/Pct headers sort raw deltas and full comparison navigation r
   expect(errors).toEqual([]);
 });
 
-test('feedback: compared metadata highlights complete differing rows instead of Changed labels', async ({ page }) => {
+test('feedback: compared metadata marks differing rows with a light blue fill and a left bar instead of Changed labels', async ({ page }) => {
   const errors = errorsFor(page);
   await openDashboard(page, '/?view=compare&compareCandidate=fictional-branch-01&compareBaseline=fictional-develop-20');
   for (const mode of ['light', 'dark']) {
@@ -157,13 +157,16 @@ test('feedback: compared metadata highlights complete differing rows instead of 
     await expect(different).toHaveAttribute('data-different', 'true');
     await expect(different.getByRole('cell').nth(0)).toHaveText('test-b');
     await expect(different.getByRole('cell').nth(1)).toHaveText('test-branch');
-    const backgrounds = await different.locator('th, td').evaluateAll((cells) => cells.map((cell) => getComputedStyle(cell).backgroundColor));
-    expect(backgrounds).toHaveLength(3);
-    expect(new Set(backgrounds).size).toBe(1);
-    expect(backgrounds[0]).not.toBe('rgba(0, 0, 0, 0)');
+    // One shared light blue fill on every cell, and the bar on the first cell only.
+    const marks = await different.locator('th, td').evaluateAll((cells) => cells.map((cell) => [getComputedStyle(cell).boxShadow, getComputedStyle(cell).backgroundColor]));
+    expect(marks).toHaveLength(3);
+    expect(marks[0][0]).not.toBe('none');
+    expect(marks.slice(1).map(([shadow]) => shadow)).toEqual(['none', 'none']);
+    expect(new Set(marks.map(([, background]) => background)).size).toBe(1);
+    expect(marks[0][1]).not.toBe('rgba(0, 0, 0, 0)');
     const same = page.getByTestId('metadata-row-catalog');
     await expect(same).toHaveAttribute('data-different', 'false');
-    expect(await same.locator('th').evaluate((cell) => getComputedStyle(cell).backgroundColor)).not.toBe(backgrounds[0]);
+    expect(await same.locator('th').evaluate((cell) => getComputedStyle(cell).boxShadow)).toBe('none');
   }
   expect(errors).toEqual([]);
 });

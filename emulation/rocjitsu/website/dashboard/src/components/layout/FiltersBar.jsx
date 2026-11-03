@@ -24,7 +24,7 @@ function FilterGroup({ label, options, value, onChange, disabled, kind }) {
         ))}
       </Box>
       {!options.length && <Typography variant="caption" color="text.secondary">No available {label.toLowerCase()}</Typography>}
-      {kind === 'mode' && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: '4px', pt: '8px', px: '2px', fontSize: fontSizes.caption, lineHeight: '18px' }}>single · single-threaded<br />default · automatic policy</Typography>}
+      {kind === 'mode' && options.length > 0 && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: '4px', pt: '8px', px: '2px', fontSize: fontSizes.caption, lineHeight: '18px' }}>single · single-threaded<br />default · automatic policy</Typography>}
     </Box>
   );
 }

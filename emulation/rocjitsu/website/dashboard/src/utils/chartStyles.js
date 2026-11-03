@@ -17,7 +17,7 @@ export function chartLineStyle(color, policy = 'default') {
 // MIN_DOT_SPACING px; then an even stride thins them so spacing stays readable at
 // any chart width or range. Isolated measurements, both ends of each measured
 // segment and the last slot always stay visible.
-export const MIN_DOT_SPACING = 100;
+export const MIN_DOT_SPACING = 140;
 // Both charts use grid left 56 + right 14.
 export const CHART_PLOT_INSET = 70;
 

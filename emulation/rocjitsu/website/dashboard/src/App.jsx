@@ -171,8 +171,8 @@ function Dashboard({ data, state, dataError = null, onRetry = null }) {
             <BenchmarksView
               data={data}
               filters={state.filters}
-              historyRange={state.historyRange}
-              onRangeChange={state.setHistoryRange}
+              historyRange={state.benchmarkRange}
+              onRangeChange={state.setBenchmarkRange}
               selectedBenchmarks={state.selectedBenchmarks}
               onBenchmarksChange={state.setSelectedBenchmarks}
               selectedRunIds={state.explorerRunIds}

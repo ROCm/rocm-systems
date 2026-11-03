@@ -13,8 +13,8 @@ import CheckBoxOutlineBlankIcon from '@mui/icons-material/CheckBoxOutlineBlank';
 import { boundedGridSelection, filterBenchmarkOptions } from './benchmarkExplorer';
 import { MAX_BENCHMARK_CHARTS } from '../../config/benchmarkGrid';
 
-// Size before Popper's flip/overflow calculations, using the larger side of the
-// anchor. A fixed 340px list can extend below a short dialog/phone viewport.
+// The list always opens below the field. Size it before Popper's overflow
+// calculations to the space below, so it never runs past the viewport (it scrolls instead).
 const benchmarkViewport = {
   name: 'benchmarkViewport', enabled: true, phase: 'beforeRead',
   fn: ({ state }) => {
@@ -24,7 +24,7 @@ const benchmarkViewport = {
     const top = viewport?.offsetTop ?? 0;
     const bottom = top + (viewport?.height ?? window.innerHeight);
     const rect = anchor.getBoundingClientRect();
-    const height = Math.max(0, Math.min(340, Math.max(rect.top - top, bottom - rect.bottom) - 8));
+    const height = Math.max(0, Math.min(340, bottom - rect.bottom - 8));
     state.elements.popper.style.setProperty('--benchmark-listbox-height', `${height}px`);
     state.rects.popper.height = state.elements.popper.offsetHeight;
   },
@@ -93,7 +93,7 @@ export function BenchmarkGridPicker({
       )}
       slots={{ paper: Paper }}
       slotProps={{
-        popper: { modifiers: [matchAnchorWidth, benchmarkViewport, { name: 'flip', options: { padding: 8 } }, { name: 'preventOverflow', options: { padding: 8 } }] },
+        popper: { placement: 'bottom-start', modifiers: [matchAnchorWidth, benchmarkViewport, { name: 'flip', enabled: false }, { name: 'preventOverflow', options: { padding: 8, altAxis: false } }] },
         listbox: { sx: { maxHeight: 'min(340px, var(--benchmark-listbox-height, calc(100dvh - 16px)))', overflowY: 'auto', overscrollBehavior: 'contain', '& .MuiAutocomplete-option': { overflowWrap: 'anywhere' } } },
       }}
       sx={{ width: '100%', maxWidth: 720, '& .MuiAutocomplete-inputRoot': { height: 'min(120px, 20dvh)', minHeight: 44, alignContent: 'flex-start', alignItems: 'flex-start', overflowY: 'auto', overscrollBehavior: 'contain' }, '& .MuiAutocomplete-tag': { maxWidth: 'calc(100% - 6px)' } }}

@@ -13,8 +13,8 @@ import { chartLineStyle, chartPointStyle, chartPointSize, chartSwatch } from '..
 import { durationAxisBounds } from '../../utils/durationAxis';
 import { categoryColor } from '../../theme/tokens';
 
-// Cards are ~300px wide, so dots may sit closer than on the full-width trend chart.
-const MIN_CARD_DOT_SPACING = 14;
+// Cards are ~300px wide, so their dots may sit closer than on the full-width trend chart, but still sparse.
+const MIN_CARD_DOT_SPACING = 44;
 const LEFT_PAD_FRACTION = 0.08; // of the visible span
 
 export default function BenchmarkHistoryChart({ data, filters, benchmark, range = 'ALL', height = 370, selectedRunIds = [], onSelectRecord }) {
