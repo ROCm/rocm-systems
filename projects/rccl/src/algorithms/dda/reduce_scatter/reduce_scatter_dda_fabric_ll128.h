@@ -79,7 +79,7 @@ __launch_bounds__(512)
 
   const uint32_t flag32 = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
   const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
-  // ddaBankSize() floors the bank to a multiple of 16B, so it is always a whole
+  // ddaBankSize() floors the bank to a multiple of 128B, so it is always a whole
   // number of 8B words and the slot stride below is a whole number of slices.
   const size_t slotWords = ddaLL128RsSlotWords(bankSize, nRanks);
   const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
@@ -101,10 +101,12 @@ __launch_bounds__(512)
     const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     const size_t wireOff = s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
 
-    for (int base = 1; base < nRanks; base += kDdaLLPeerBatch) {
-      uint64_t regs[kDdaLLPeerBatch][kDdaLL128WordsPerThread] = {};
+    // Runtime-rank instance stages 4 peers per batch: 8 would spill.
+    constexpr int kSendBatch = NRANKS_CT ? kDdaLLPeerBatch : 4;
+    for (int base = 1; base < nRanks; base += kSendBatch) {
+      uint64_t regs[kSendBatch][kDdaLL128WordsPerThread] = {};
 #pragma unroll
-      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
+      for (int i = 0; i < kSendBatch; ++i) {
         const int r = base + i;
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;
@@ -113,7 +115,7 @@ __launch_bounds__(512)
         }
       }
 #pragma unroll
-      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
+      for (int i = 0; i < kSendBatch; ++i) {
         const int r = base + i;
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;

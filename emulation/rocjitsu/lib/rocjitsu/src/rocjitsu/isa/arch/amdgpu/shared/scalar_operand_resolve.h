@@ -243,7 +243,10 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
     return;
   }
   if (ev <= static_cast<int>(kScalarSgprSelectorLast)) {
-    RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+    if (RegisterAccess(wf)
+            .write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val)
+            .failed())
+      return;
     return;
   }
   if (ev == static_cast<int>(kVccSelectorFirst)) {
@@ -287,7 +290,10 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
     return;
   }
   if (ev <= static_cast<int>(kScalarSgprSelectorLast)) {
-    RegisterAccess(wf).write_sgpr64(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+    if (RegisterAccess(wf)
+            .write_sgpr64(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val)
+            .failed())
+      return;
     return;
   }
   if (ev == static_cast<int>(kVccSelectorFirst)) {

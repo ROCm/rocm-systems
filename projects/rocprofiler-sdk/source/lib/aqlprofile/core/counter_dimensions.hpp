@@ -175,9 +175,8 @@ public:
 private:
     bool HasAttr(CounterBlockAttr attr) const { return (block_info->attr & attr) != 0; }
 
-    EventKey                       key        = {};
-    const GpuBlockInfo*            block_info = nullptr;
-    hsa_ven_amd_aqlprofile_event_t event      = {};
+    EventKey            key        = {};
+    const GpuBlockInfo* block_info = nullptr;
 
     bool bIsGFX12 = false;
     bool bIsGFX11 = false;
