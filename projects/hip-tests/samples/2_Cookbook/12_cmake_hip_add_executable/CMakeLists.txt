@@ -29,7 +29,7 @@ else()
   set(CMAKE_MODULE_PATH "${ROCM_PATH}/lib/cmake/hip" ${CMAKE_MODULE_PATH})
 endif()
 
-find_package(HIP REQUIRED)
+find_package(HIP MODULE REQUIRED)
 message(STATUS "Found HIP: ${HIP_VERSION}")
 
 if(TARGET build_cookbook)
