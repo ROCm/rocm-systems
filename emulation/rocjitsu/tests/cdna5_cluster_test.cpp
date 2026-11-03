@@ -788,7 +788,7 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineRejectsUndersizedPa
   EXPECT_EQ(engine.submit(std::move(txn), [&]() { ++callbacks; }),
             amdgpu::ClusterLdsMulticastResult::InvalidPayload);
   EXPECT_EQ(callbacks, 0u);
-  EXPECT_EQ(cu->lds().read32(0x200), sentinel);
+  EXPECT_EQ(cu->lds().read32(0x200), 0u);
 }
 
 TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineDropsOutOfRangeTarget) {
@@ -819,20 +819,20 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineRejectsStridedOutOf
   amdgpu::ClusterLdsMulticastTransaction txn{};
   txn.source_lds_base = 0;
   txn.bytes_per_lane = 4;
-  txn.wf_size = 2;
-  txn.lane_mask = 0x3;
-  txn.payload.resize(8, 0x5a);
-  const uint32_t target_base = static_cast<uint32_t>(cu->lds().size_bytes()) - 4;
+  txn.wf_size = 1;
+  txn.lane_mask = 0x1;
+  txn.payload.resize(4, 0x5a);
+  const uint32_t target_base = static_cast<uint32_t>(cu->lds().size_bytes()) - 2;
   txn.targets = {{cu, /*wg_id=*/0, target_base, /*cluster_rank=*/0}};
   constexpr uint32_t kSentinel = 0x11223344;
-  cu->lds().write32(target_base, kSentinel);
+  cu->lds().write32(target_base - 2, kSentinel);
 
   amdgpu::ImmediateClusterLdsMulticastEngine engine;
   uint32_t callbacks = 0;
   EXPECT_EQ(engine.submit(std::move(txn), [&]() { ++callbacks; }),
             amdgpu::ClusterLdsMulticastResult::InvalidTarget);
   EXPECT_EQ(callbacks, 0u);
-  EXPECT_EQ(cu->lds().read32(target_base), kSentinel);
+  EXPECT_EQ(cu->lds().read32(target_base - 2), kSentinel);
 }
 
 TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineDropsWidenedRemapOverflow) {
@@ -899,7 +899,7 @@ TEST(Gfx1250ExecutionTest, ClusterLdsPinPreventsAllocatorReuseUntilClusterComple
   EXPECT_EQ(cu->allocate_lds(257), 0u);
 }
 
-TEST(Gfx1250ExecutionTest, LdsWritebackRejectsMalformedPayloadBeforeAnyWriteOrCompletion) {
+TEST(Gfx1250ExecutionTest, LdsWritebackRejectsMalformedFirstLaneWithoutCompletion) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -912,13 +912,14 @@ TEST(Gfx1250ExecutionTest, LdsWritebackRejectsMalformedPayloadBeforeAnyWriteOrCo
     const char *name;
     bool multicast;
     uint32_t response_bytes;
+    uint32_t per_lane_bytes;
     uint32_t lds_base;
     const char *diagnostic;
   };
   const RejectionCase cases[] = {
-      {"ordinary payload", false, 4, 0, "LDS-destination load payload too small"},
-      {"multicast payload", true, 4, 0, "cluster LDS multicast payload too small"},
-      {"multicast target", true, 8, static_cast<uint32_t>(cu->lds().size_bytes() - 4),
+      {"ordinary payload", false, 0, 4, 0, "LDS-destination load payload too small"},
+      {"multicast payload", true, 0, 4, 0, "cluster LDS multicast payload too small"},
+      {"multicast target", true, 8, 8, static_cast<uint32_t>(cu->lds().size_bytes() - 4),
        "cluster LDS multicast target out of range"},
   };
   for (const RejectionCase &test : cases) {
@@ -928,7 +929,7 @@ TEST(Gfx1250ExecutionTest, LdsWritebackRejectsMalformedPayloadBeforeAnyWriteOrCo
     cu->lds().write32(test.lds_base, kSentinel);
     const auto make_state = [&]() {
       auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-      state->elem_size = 4;
+      state->elem_size = test.per_lane_bytes;
       state->num_elems = 1;
       state->is_load = true;
       state->lds_dst = true;

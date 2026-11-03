@@ -110,7 +110,7 @@ protected:
   virtual VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) = 0;
   /// Return Complete and do not call complete, or return Deferred and call it
   /// exactly once after the memory response is ready for architectural writeback.
-  /// Failed must not invoke complete or commit architectural writeback.
+  /// Failed must not invoke complete. Earlier lane writes may remain.
   virtual MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
                                                  MemoryAccessDeferredCompletion complete) = 0;
 

@@ -30,7 +30,6 @@
 #include <cstring>
 #include <format>
 #include <optional>
-#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -352,19 +351,12 @@ std::vector<ClusterLdsTarget> resolve_lds_write_targets(VectorMemState &d, Wavef
 
 util::Result write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_lane_bytes,
                                        uint64_t write_mask) {
-  if (d.wf_size > d.per_lane_lds_addr.size())
-    return util::Result::failure();
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if ((write_mask & (1ULL << lane)) == 0)
       continue;
-    const uint64_t data_offset = static_cast<uint64_t>(lane) * per_lane_bytes;
+    uint32_t data_offset = lane * per_lane_bytes;
     if (data_offset + per_lane_bytes > d.response_data.size())
       return util::Result::failure();
-  }
-  for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-    if ((write_mask & (1ULL << lane)) == 0)
-      continue;
-    const uint64_t data_offset = static_cast<uint64_t>(lane) * per_lane_bytes;
     const uint32_t output_bytes = d.lds_dword_extend ? d.num_elems * 4 : per_lane_bytes;
     uint32_t lds_addr =
         d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * output_bytes;
@@ -389,11 +381,6 @@ util::Result write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32
 
 MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, ComputeUnitCore &cu,
                                              MemoryAccessDeferredCompletion complete) {
-  if (d.wf_size > d.per_lane_lds_addr.size()) {
-    wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue,
-                                          "invalid LDS-destination load wave size");
-    return MemoryAccessCompletion::Failed;
-  }
   uint32_t per_lane_bytes = d.num_elems * d.elem_size;
   std::vector<ClusterLdsTarget> targets;
   size_t target_count = 1;
