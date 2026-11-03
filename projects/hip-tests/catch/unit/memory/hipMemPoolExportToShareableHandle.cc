@@ -130,6 +130,8 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldUseHdl) {
   int fd[2], fdSig[2];
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
+  std::string socketName =
+    ipcSocketCom::generateIPCObjName(Catch::getResultCapture().getCurrentTestName());
 
   auto pid = fork();
   REQUIRE(pid >= 0);
@@ -141,7 +143,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldUseHdl) {
     hipMemPoolPtrExportData ptrExp;
     REQUIRE(read(fd[0], &ptrExp, sizeof(hipMemPoolPtrExportData)) >= 0);
     // Open Socket as client
-    ipcSocketCom sockObj(false, Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom sockObj(false, socketName);
     REQUIRE(sockObj.initialize());
     // Signal Parent process that Child is ready to receive msg
     int sig = 0;
@@ -192,7 +194,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldUseHdl) {
     // Export A_d
     HIP_CHECK(hipMemPoolExportPointer(&ptrExp, A_d));
     // Create the socket for communication as Server
-    ipcSocketCom sockObj(true, Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom sockObj(true, socketName);
     REQUIRE(sockObj.initialize());
     // Signal child process that socket is ready and share ptr to child
     REQUIRE(write(fd[1], &ptrExp, sizeof(hipMemPoolPtrExportData)) >= 0);
@@ -237,6 +239,8 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess) {
   int fd[2], fdSig[2];
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
+  std::string socketName =
+    ipcSocketCom::generateIPCObjName(Catch::getResultCapture().getCurrentTestName());
 
   auto pid = fork();
   REQUIRE(pid >= 0);
@@ -248,7 +252,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess) {
     int sig = 0;
     REQUIRE(read(fd[0], &sig, sizeof(int)) >= 0);
     // Open Socket as client
-    ipcSocketCom sockObj(false, Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom sockObj(false, socketName);
     REQUIRE(sockObj.initialize());
     // Signal Parent process that Child is ready to receive msg
     REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
@@ -303,7 +307,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess) {
     HIP_CHECK(
         hipMemPoolExportToShareableHandle(&shdl, mempool, hipMemHandleTypePosixFileDescriptor, 0));
     // Create the socket for communication as Server
-    ipcSocketCom sockObj(true, Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom sockObj(true, socketName);
     REQUIRE(sockObj.initialize());
     // Signal child process that socket is ready
     int sig = 0;
@@ -345,6 +349,8 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl) {
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
   REQUIRE(pipe(fdpid) == 0);
+  std::string socketName =
+    ipcSocketCom::generateIPCObjName(Catch::getResultCapture().getCurrentTestName());
   auto pid = fork();
   REQUIRE(pid >= 0);
 
@@ -357,7 +363,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl) {
       hipMemPoolPtrExportData ptrExp;
       REQUIRE(read(fd[0], &ptrExp, sizeof(hipMemPoolPtrExportData)) >= 0);
       // Open Socket as client
-      ipcSocketCom sockObj(false, Catch::getResultCapture().getCurrentTestName());
+      ipcSocketCom sockObj(false, socketName);
       REQUIRE(sockObj.initialize());
       hipShareableHdl shdl;
       // Signal Parent process that Child is ready to receive msg
@@ -420,7 +426,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl) {
     HIP_CHECK(hipMemPoolExportPointer(&ptrExp, A_d));
 
     // Create the socket for communication as Server
-    ipcSocketCom sockObj(true, Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom sockObj(true, socketName);
     REQUIRE(sockObj.initialize());
     // Signal child process that socket is ready and share ptr to child
     REQUIRE(write(fd[1], &ptrExp, sizeof(hipMemPoolPtrExportData)) >= 0);
@@ -514,6 +520,10 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc) {
   sprintf(shmName, "/hipMemPoolIPC_shm%lu", (unsigned long)getpid());
 #endif
 
+  std::string socketName =
+    ipcSocketCom::generateIPCObjName(Catch::getResultCapture().getCurrentTestName());
+  REQUIRE(socketName.size() <= sizeof(mempoolIpcShmStruct::socketName));
+
   SharedMemory shm;
   REQUIRE(shm.create(shmName, sizeof(mempoolIpcShmStruct)) == 0);
   auto *shmData = shm.as<mempoolIpcShmStruct>();
@@ -522,6 +532,8 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc) {
   shmData->ptrExportData = ptrExp;
   shmData->handleType = handleType;
   shmData->device = 0;
+  std::memcpy(shmData->socketName, socketName.data(), socketName.size());
+  shmData->socketNameLen = socketName.size();
 
   std::string exePath = getSelfExePath();
   REQUIRE(!exePath.empty());
@@ -529,7 +541,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc) {
   hip::SpawnProc child(exePath);
   REQUIRE(child.spawn("Unit_hipMemPoolExportToShareableHandle_multiproc_child") == 0);
 
-  ipcSocketCom sockObj(true, Catch::getResultCapture().getCurrentTestName());
+  ipcSocketCom sockObj(true, socketName);
   REQUIRE(sockObj.initialize());
 
   barrierWait(shmData->barrier, shmData->sense, 2);
@@ -594,10 +606,11 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc_child) {
   hipMemPoolPtrExportData ptrExp = shmData->ptrExportData;
   hipMemAllocationHandleType handleType = shmData->handleType;
   int device = shmData->device;
+  std::string socketName(shmData->socketName, shmData->socketNameLen);
 
   HIP_CHECK(hipSetDevice(device));
 
-  ipcSocketCom sockObj(false, Catch::getResultCapture().getCurrentTestName());
+  ipcSocketCom sockObj(false, socketName);
   REQUIRE(sockObj.initialize());
 
   barrierWait(shmData->barrier, shmData->sense, 2);

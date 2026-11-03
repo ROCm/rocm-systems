@@ -72,15 +72,10 @@ public:
 
   // @isServer   Only makes a difference on Windows; if false, a mailslot is created. If true,
   //             a mailslot is created
-  // @userPrefix an extra string that helps with avoiding clashes between ipc unix domain socket
-  //             names. This could be a test name + section for instance. This will be part of the
-  //             IPC object name in addition to the PID and a random nonce. Note: on Linux names
-  //             that are too long will be truncated so the whole identifier fits into the
-  //             sockaddr_un::sun_path array
-  ipcSocketCom(bool isServer, const std::string& userPrefix) :
+  ipcSocketCom(bool isServer, const std::string& name) :
     isServer_(isServer),
     serverFd_(-1),
-    userPrefix_(userPrefix)
+    name_(name)
   {
   }
 
@@ -93,7 +88,7 @@ public:
     handle->mailslot = INVALID_HANDLE_VALUE;
 
     if (!isServer_) {
-      std::string name = "\\\\.\\mailslot\\hipMemPoolIPC_"s + userPrefix_ +
+      std::string name = "\\\\.\\mailslot\\hipMemPoolIPC_"s + name_ +
                          std::to_string((unsigned long)GetCurrentProcessId());
 
       handle->mailslot = CreateMailslot(name.c_str(), 0, MAILSLOT_WAIT_FOREVER, NULL);
@@ -119,7 +114,6 @@ public:
     if (bindSocket() == -1) {
       return false;
     }
-
     return true;
 #endif
   }
@@ -265,6 +259,26 @@ public:
   }
 #endif
 
+  // @userPrefix a user-provided string that will be prepended to the name; must be less than
+  //             kSocketPrefixMaxSize characters; otherwise it will be truncated before used
+  // @return     an abstract name containing \0, the user prefix and a 6 hex-digit random name
+  static std::string generateIPCObjName(const std::string& userPrefix)
+  {
+    using namespace std::string_literals;
+
+    return "\0"s +
+           userPrefix.substr(0, kSocketPrefixMaxSize) +
+           std::to_string(
+#if HT_WIN
+            getCurrentProcessId()
+#else
+            getpid()
+#endif
+          ) +
+           "." +
+           generateRandomHex();
+  }
+
 private:
 
   static std::string generateRandomHex(size_t length = kNonceDigitsSize)
@@ -278,20 +292,6 @@ private:
     }
 
     return ss.str().substr(0, length);
-  }
-
-  // @userPrefix a user-provided string that will be prepended to the name; must be less than 
-  //             kSocketPrefixMaxSize characters; otherwise it will be truncated before used
-  // @return     an abstract name containing \0, the user prefix and a 6 hex-digit random name
-  static std::string generateIPCObjName(const std::string& userPrefix)
-  {
-    using namespace std::string_literals;
-
-    return "\0"s +
-           userPrefix.substr(0, kSocketPrefixMaxSize) +
-           std::to_string(getpid()) +
-           "." +
-           generateRandomHex();
   }
 
   // @return the file descriptor of the newly created socket or -1 if there is a failure
@@ -312,19 +312,19 @@ private:
   {
     sockaddr_un servaddr = {};
     socklen_t addr_len;
-    std::string name = generateIPCObjName(userPrefix_);
     int code;
 
-    strncpy(servaddr.sun_path, name.c_str(), name.size());
+    strncpy(servaddr.sun_path, name_.c_str(), name_.size());
     // Address length is sizeof(sun_family) + 1 (null byte) + string length
-    addr_len = offsetof(struct sockaddr_un, sun_path) + 1 + name.size();
+    addr_len = offsetof(struct sockaddr_un, sun_path) + 1 + name_.size();
     servaddr.sun_family = AF_UNIX;
 
+    // TODO change bind so it only opens on the child?
     if ((code = bind(serverFd_, (struct sockaddr *)&servaddr, addr_len)) < 0) {
-      UNSCOPED_INFO("bind failed: " << strerror(errno));
+      UNSCOPED_INFO("bind failed: " << strerror(errno) << " when binding with name: " << name_);
       return -1;
     } else {
-      handle->name = name;
+      handle->name = name_;
     }
 
     return code;
@@ -332,5 +332,5 @@ private:
   
   bool isServer_;
   int serverFd_;
-  std::string userPrefix_;
+  std::string name_;
 };

@@ -682,6 +682,8 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem) {
   int fd[2], fdSig[2];
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
+  std::string socketName =
+    ipcSocketCom::generateIPCObjName(Catch::getResultCapture().getCurrentTestName());
 
   auto pid = fork();
   REQUIRE(pid >= 0);
@@ -695,7 +697,7 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem) {
     int size_mem = 0;
     REQUIRE(read(fd[0], &size_mem, sizeof(int)) >= 0);
     // Open Socket as client
-    ipcSocketCom sockObj(false, Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom sockObj(false, socketName);
     REQUIRE(sockObj.initialize());
     hipShareableHdl  shHandle;
     // Signal Parent process that Child is ready to receive msg
@@ -747,7 +749,7 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem) {
 
     int size_mem = sizeBytes;
     // Create the socket for communication as Server
-    ipcSocketCom sockObj(true, Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom sockObj(true, socketName);
     REQUIRE(sockObj.initialize());
     // Signal child process that socket is ready
     REQUIRE(write(fd[1], &size_mem, sizeof(int)) >= 0);
@@ -788,6 +790,8 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM) {
   int fd[2], fdSig[2];
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
+  std::string socketName =
+    ipcSocketCom::generateIPCObjName(Catch::getResultCapture().getCurrentTestName());
 
   auto pid = fork();
   REQUIRE(pid >= 0);
@@ -800,7 +804,7 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM) {
     int size_mem = 0;
     REQUIRE(read(fd[0], &size_mem, sizeof(int)) >= 0);
     // Open Socket as client
-    ipcSocketCom sockObj(false, Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom sockObj(false, socketName);
     REQUIRE(sockObj.initialize());
     hipShareableHdl shHandle;
     // Signal Parent process that Child is ready to receive msg
@@ -849,7 +853,7 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM) {
     REQUIRE(handle > 0);
 
     // Create the socket for communication as Server
-    ipcSocketCom sockObj(true, Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom sockObj(true, socketName);
     REQUIRE(sockObj.initialize());
     int size_mem = buffer_size;
     // Signal child process that socket is ready
