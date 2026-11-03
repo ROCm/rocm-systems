@@ -9,6 +9,11 @@
 
 namespace rocjitsu {
 
+size_t &ScopedOperandDelegate::active_count() noexcept {
+  static thread_local size_t count = 0;
+  return count;
+}
+
 void Operand::report_missing_execution_backend(const amdgpu::Wavefront &wf) {
   wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::MissingExecutionBackend);
 }

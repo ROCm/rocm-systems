@@ -16719,8 +16719,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  static const void *full_execution_backend();\n'
                 '  /// @brief Validate that every full-simulator operand callback is present.\n'
                 '  static bool full_execution_backend_complete();\n'
-                '  bool execution_backend_available() const override;\n'
-            )
+            ) + execution_backend_public_decl
             execution_backend_ctor_init = (
                 ',\n'
                 '      execution_backend_(static_cast<const ExecutionBackend *>(\n'

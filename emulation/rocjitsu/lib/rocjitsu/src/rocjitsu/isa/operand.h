@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_ISA_OPERAND_H_
 #define ROCJITSU_ISA_OPERAND_H_
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/result.h"
@@ -418,7 +419,7 @@ public:
   /// Model-only operands remain usable for decoding and analysis. The base
   /// descriptor has no value access; subclasses with value storage or callbacks
   /// must opt in and check their delegate chain.
-  virtual bool execution_backend_available() const { return false; }
+  [[nodiscard]] virtual bool execution_backend_available() const { return false; }
 
   /// @brief Whether `read_lane_chunk` / `write_lane_chunk` produce correct,
   /// SIMD-friendly results for this operand.
@@ -779,13 +780,13 @@ public:
     operand_ = &operand;
     previous_ = operand.delegate();
     operand.set_delegate(delegate);
-    ++active_count_;
+    ++active_count();
   }
 
   ~ScopedOperandDelegate() noexcept { restore(); }
 
   /// @brief Whether this thread has bindings requiring execution preflight.
-  [[nodiscard]] static bool active() noexcept { return active_count_ != 0; }
+  [[nodiscard]] static bool active() noexcept { return active_count() != 0; }
 
   ScopedOperandDelegate(const ScopedOperandDelegate &) = delete;
   ScopedOperandDelegate &operator=(const ScopedOperandDelegate &) = delete;
@@ -797,11 +798,12 @@ private:
     if (!operand_)
       return;
     operand_->set_delegate(previous_);
-    --active_count_;
+    --active_count();
     operand_ = nullptr;
   }
 
-  inline static thread_local size_t active_count_ = 0;
+  // One exported accessor keeps module-local inline bindings visible to preflight.
+  RJ_API_EXPORT static size_t &active_count() noexcept;
   Operand *operand_ = nullptr;
   Operand *previous_ = nullptr;
 };

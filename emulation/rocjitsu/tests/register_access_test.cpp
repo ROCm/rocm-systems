@@ -11,6 +11,9 @@
 /// observation lives in execution_plugin_test.cpp.
 
 #include "decode_test_util.h"
+#ifdef __linux__
+#include <dlfcn.h>
+#endif
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
@@ -356,6 +359,49 @@ TEST(RegisterAccessTest, ExecutionCallbackRejectsLateMissingBackendDelegateBefor
     }
   }
 }
+
+#ifdef __linux__
+TEST(RegisterAccessTest, ModuleBindingRejectsMissingBackendBeforeEffects) {
+  void *module = dlopen(RJ_OPERAND_DELEGATE_PROBE_MODULE, RTLD_NOW | RTLD_LOCAL);
+  ASSERT_NE(module, nullptr) << dlerror();
+  using Probe = void (*)(Operand *, Operand *, void *, void (*)(void *, bool));
+  auto probe = reinterpret_cast<Probe>(dlsym(module, "rj_probe_operand_delegate"));
+  ASSERT_NE(probe, nullptr) << dlerror();
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  constexpr uint32_t word = 0x7E000301u; // v_mov_b32 v0, v1
+  DecodeResult result = cdna4::Decoder::decode(&word, {});
+  ASSERT_TRUE(result.succeeded());
+  std::unique_ptr<Instruction> instruction = std::move(result).value();
+  std::optional<cdna4::Operand> missing;
+  {
+    ScopedIsaExecutionBackend model_scope(nullptr);
+    missing.emplace(32, cdna4::OperandType::OPR_VGPR, 1);
+  }
+  for (uint32_t lane = 0; lane < 64; ++lane)
+    fx.cu->write_vgpr(fx.vgpr_base(), lane, 0xA5A5A5A5u);
+  struct Context {
+    Instruction *instruction;
+    Wavefront *wave;
+  } context{instruction.get(), fx.wf};
+  probe(const_cast<Operand *>(instruction->src_operand(0)), &*missing, &context,
+        [](void *opaque, bool module_active) {
+          EXPECT_TRUE(module_active);
+          EXPECT_TRUE(ScopedOperandDelegate::active());
+          auto &context = *static_cast<Context *>(opaque);
+          EXPECT_NO_THROW(context.instruction->execute(*context.instruction, context.wave));
+        });
+  EXPECT_EQ(fx.wf->instruction_execution_error(),
+            InstructionExecutionError::MissingExecutionBackend);
+  EXPECT_TRUE(fx.plugin->reads.empty());
+  EXPECT_TRUE(fx.plugin->writes.empty());
+  for (uint32_t lane = 0; lane < 64; ++lane)
+    EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), lane), 0xA5A5A5A5u);
+  EXPECT_EQ(instruction->src_operand(0)->delegate(), nullptr);
+  EXPECT_FALSE(ScopedOperandDelegate::active());
+  EXPECT_EQ(dlclose(module), 0);
+}
+#endif
 
 TEST(RegisterAccessTest, ScopedOperandDelegateRestoresAfterException) {
   EXPECT_FALSE(ScopedOperandDelegate::active());

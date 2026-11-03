@@ -1983,6 +1983,15 @@ rj_configure_target(util_force_scalar_probe TEST)
 add_dependencies(rocjitsu_tests util_force_scalar_probe)
 rj_add_test_path(rocjitsu_tests RJ_FORCE_SCALAR_PROBE_MODULE "$<TARGET_FILE:util_force_scalar_probe>")
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_library(operand_delegate_probe MODULE operand_delegate_probe.cpp)
+    target_link_libraries(operand_delegate_probe PRIVATE util simdojo_headers)
+    rj_configure_target(operand_delegate_probe LIB)
+    set_target_properties(rocjitsu_tests PROPERTIES ENABLE_EXPORTS ON)
+    add_dependencies(rocjitsu_tests operand_delegate_probe)
+    rj_add_test_path(rocjitsu_tests RJ_OPERAND_DELEGATE_PROBE_MODULE "$<TARGET_FILE:operand_delegate_probe>")
+endif()
+
 # --- Interposer loader initialization regression tests ---
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
