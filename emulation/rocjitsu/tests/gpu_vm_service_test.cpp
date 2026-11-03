@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/soc.h"
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
@@ -2452,6 +2453,59 @@ TEST(CommandProcessorQueueRegistration, RequiresAnAddressSpaceAndUsesTheConfigur
   EXPECT_TRUE(gpu_vm.unregister_address_space(internal));
 }
 
+TEST(SoCAssembly, RejectsNullXcdWithoutRecordingIt) {
+  GpuMemory memory("memory");
+  rocjitsu::SoC soc("soc", &memory);
+  util::StringDiagnostic diagnostic;
+
+  EXPECT_TRUE(soc.add_xcd(nullptr, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "cannot add a null XCD");
+  EXPECT_EQ(soc.num_xcds(), 0u);
+}
+
+TEST(SoCAssembly, RejectsNullIodWithoutRecordingIt) {
+  GpuMemory memory("memory");
+  rocjitsu::SoC soc("soc", &memory);
+  util::StringDiagnostic diagnostic;
+
+  EXPECT_TRUE(soc.add_iod(nullptr, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "cannot add a null IOD");
+  EXPECT_EQ(soc.num_iods(), 0u);
+}
+
+TEST(SoCAssembly, RejectsArchitectureReplacementWhileCopyQueueIsActive) {
+  GpuMemory memory("memory");
+  rocjitsu::SoC soc("soc", &memory, ROCJITSU_CODE_ARCH_CDNA4);
+  const AddressSpaceHandle internal = soc.internal_address_space();
+  const SdmaQueueScheduler::Handle queue =
+      soc.sdma_queue_scheduler().attach({.ring = {.address_space = internal,
+                                                  .ring_base = 0x100,
+                                                  .ring_bytes = 256,
+                                                  .read_pointer_address = 0x80,
+                                                  .initial_cursor = 0},
+                                         .context = {}},
+                                        {});
+  ASSERT_TRUE(queue);
+  util::StringDiagnostic diagnostic;
+
+  EXPECT_TRUE(soc.set_arch(ROCJITSU_CODE_ARCH_RDNA4, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "SoC architecture cannot change while copy queues are active");
+  EXPECT_EQ(soc.arch(), ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_EQ(soc.sdma_queue_scheduler().packet_dialect(), SdmaPacketDialect::LegacyExtendedCount);
+  EXPECT_TRUE(soc.sdma_queue_scheduler().contains(queue));
+  EXPECT_EQ(soc.internal_address_space(), internal);
+  EXPECT_TRUE(soc.gpu_vm().lookup(internal));
+  EXPECT_FALSE(soc.gpu_vm().unregister_address_space(internal));
+
+  ASSERT_TRUE(soc.sdma_queue_scheduler().detach(queue));
+  util::StringDiagnostic retry_diagnostic;
+  EXPECT_TRUE(soc.set_arch(ROCJITSU_CODE_ARCH_RDNA4, retry_diagnostic.emitter()).succeeded());
+  EXPECT_TRUE(retry_diagnostic.message().empty());
+  EXPECT_EQ(soc.arch(), ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ(soc.sdma_queue_scheduler().packet_dialect(), SdmaPacketDialect::Rdna4);
+  EXPECT_EQ(soc.internal_address_space(), internal);
+}
+
 TEST(SoCInternalAddressSpace, RefusesBackingReplacementWhileAnotherAddressSpaceExists) {
   GpuMemory original_memory("original");
   GpuMemory replacement_memory("replacement");
@@ -2483,7 +2537,7 @@ TEST(SoCInternalAddressSpace, RefusesBackingReplacementWhileAnInternalAqlQueueEx
   Xcd xcd("xcd");
   xcd.set_command_processor(&command_processor);
   rocjitsu::SoC soc("soc", &original_memory);
-  soc.add_xcd(&xcd);
+  ASSERT_TRUE(soc.add_xcd(&xcd).succeeded());
 
   const AddressSpaceHandle original_internal = soc.internal_address_space();
   ASSERT_TRUE(original_internal);
@@ -2518,7 +2572,7 @@ TEST(SoCInternalAddressSpace, ReinstallsTheSameBackingAfterAnExplicitVmReset) {
   Xcd xcd("xcd");
   xcd.set_command_processor(&command_processor);
   rocjitsu::SoC soc("soc", &memory);
-  soc.add_xcd(&xcd);
+  ASSERT_TRUE(soc.add_xcd(&xcd).succeeded());
 
   const AddressSpaceHandle original_internal = soc.internal_address_space();
   ASSERT_TRUE(original_internal);
