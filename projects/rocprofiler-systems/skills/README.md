@@ -86,7 +86,8 @@ uv tool install --system-certs git+https://github.com/amd/skillscope
 skillscope structural                        # no agent, no tokens
 skillscope structural --external             # the same, plus checking external URLs
 skillscope behavioral --skill instrumenting-binaries   # needs an authenticated `claude` CLI
-skillscope routing --routing-room instrumenting-binaries,choosing-a-profiling-preset
+skillscope routing --routing-room instrumenting-binaries
+skillscope routing --routing-room choosing-a-profiling-preset
 ```
 
 CI uses a pinned release, so install that one to reproduce a CI result: append
