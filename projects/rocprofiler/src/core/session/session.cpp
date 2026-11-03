@@ -280,8 +280,11 @@ void Session::DestroyFilter(rocprofiler_filter_id_t filter_id) {
   {
     std::vector<Filter*>::iterator filter;
     std::lock_guard<std::mutex> lock(filters_lock_);
-    for (filter = filters_.begin(); filter != filters_.end(); ++filter) {
-      if ((*filter) && (*filter)->GetId().value == filter_id.value) filters_.erase(filter);
+    for (filter = filters_.begin(); filter != filters_.end();) {
+      if ((*filter) && (*filter)->GetId().value == filter_id.value)
+        filter = filters_.erase(filter);
+      else
+        ++filter;
     }
   }
 }
