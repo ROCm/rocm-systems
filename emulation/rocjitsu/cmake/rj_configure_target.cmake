@@ -22,8 +22,10 @@
 #     TEST    = PRIVATE_INCLUDES GENERATED WARNINGS SCHEMAS CONFIG_DIRS DEVICE_KERNELS
 #     TOOL    = PRIVATE_INCLUDES GENERATED WARNINGS SCHEMAS
 include(rj_add_test_path)
+include(rj_relative_relocations)
 
 function(rj_configure_target target)
+    rj_pack_relative_relocations(${target})
     set(options
         PRIVATE_INCLUDES
         GENERATED

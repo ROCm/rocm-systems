@@ -399,6 +399,7 @@ add_subdirectory(lib/arith)
 
 # Apply the host CPU policy to rocjitsu targets, after configuring dependencies.
 include(rj_host_cpu)
+include(rj_relative_relocations)
 
 # Libraries
 add_subdirectory(lib/util)
@@ -409,6 +410,7 @@ add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
 
 # Main shared library - assembles all object libraries.
 add_library(rocjitsu_shared SHARED)
+rj_pack_relative_relocations(rocjitsu_shared)
 target_sources(
     rocjitsu_shared
     PRIVATE $<TARGET_OBJECTS:rocjitsu_version_objects>

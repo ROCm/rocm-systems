@@ -39,6 +39,7 @@ configuration. Keep that header tree at a matching revision.
 | `RJ_CLANG_TIDY` | `OFF` | Enable clang-tidy static analysis |
 | `RJ_RUNTIME_API_HEADERS_SOURCE_DIR` | `../../runtimes/api-headers` | Source directory of the shared runtime API headers |
 | `LTO` | `OFF` | Enable link-time optimization for Release/RelWithDebInfo |
+| `ROCJITSU_PACK_RELATIVE_RELOCS` | `OFF` | Compress ELF relative relocations to reduce startup overhead; requires Linux, GCC/Clang, a supporting linker, and glibc 2.36+ at build and deployment time |
 | `ROCJITSU_ENABLE_VFIO` | `OFF` | Build Linux VFIO-user support; requires CMake 3.28+ and Linux 6.1+ UAPI headers |
 
 ### Host CPU baseline
@@ -53,6 +54,22 @@ cmake -B build -G Ninja -DROCJITSU_HOST_CPU_BASELINE=x86-64
 Use `ROCJITSU_HOST_CPU_BASELINE=default` to retain your compiler or toolchain's
 CPU settings. Explicit x86-64 baselines are supported only for Linux x86-64
 targets.
+
+### Packed relative relocations
+
+The instruction tables contain many pointers that the dynamic loader relocates
+at process startup. On supported Linux systems, a compact `DT_RELR` encoding
+reduces relocation metadata and loader work without changing instruction
+execution:
+
+```bash
+cmake -B build -G Ninja -DROCJITSU_PACK_RELATIVE_RELOCS=ON
+```
+
+This option applies privately to Rocjitsu targets. It checks the target glibc
+headers and linker support, including when cross-compiling. Deployment machines
+must also have glibc 2.36 or newer. Leave it disabled when distributing binaries
+to older systems; a successful build does not check those machines' loaders.
 
 ### Sanitizer builds
 
