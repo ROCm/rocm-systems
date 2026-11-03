@@ -27,8 +27,9 @@ namespace
 {
 using EnvMap = std::unordered_map<std::string, std::string>;
 
-// A regression here spins while growing host memory by gigabytes per second; keep the timeout short.
-constexpr int    kTimeoutSeconds = 60;
+// A regression here spins while growing host memory by gigabytes per second, so the timeout stays
+// short; each healthy case takes about 2 s on MI350X.
+constexpr int    kTimeoutSeconds = 30;
 constexpr size_t kCount          = 16;
 
 void groupedSendRecvToSelf()
