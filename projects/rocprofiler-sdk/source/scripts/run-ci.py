@@ -39,6 +39,7 @@ import multiprocessing
 _PROJECT_NAME = "rocprofiler-sdk-alt"
 _BASE_URL = "my.cdash.org"
 _GCOVR_GENERATE_CMD = None
+_GCDA_TOOL = os.path.join(os.path.dirname(os.path.realpath(__file__)), "gcda-tool.py")
 
 # these are various default values
 _VISIBLE_PROJECT_NAME = _PROJECT_NAME.replace("-internal", "")
@@ -295,8 +296,7 @@ def generate_dashboard_script(args):
     BINARY_DIR = os.path.realpath(args.binary_dir)
     MEMCHECK = 1 if args.memcheck is not None else 0
     PYTHON_CMD = sys.executable
-    GCOV_CMD = which("gcov", require=CODECOV > 0)
-    GCDA_TOOL = os.path.join(os.path.dirname(os.path.realpath(__file__)), "gcda-tool.py")
+    GCDA_TOOL = _GCDA_TOOL
     SUBMIT = 0 if args.disable_cdash else 1
     STRICT_SUBMIT = 1 if args.require_cdash_submission else 0
     ARGN = "${ARGN}"
@@ -376,18 +376,22 @@ def generate_dashboard_script(args):
             endif()
         endif()
 
+        set(_check_ret 0)
         if("{CODECOV}" GREATER 0 AND "COVERAGE" IN_LIST STAGES)
             execute_process(
-                COMMAND {PYTHON_CMD} {GCDA_TOOL} check {BINARY_DIR} --gcov {GCOV_CMD}
-                COMMAND_ERROR_IS_FATAL ANY)
-            ctest_coverage(
-                BUILD "{BINARY_DIR}"
-                RETURN_VALUE _coverage_ret
-                CAPTURE_CMAKE_ERROR _coverage_err)
-            dashboard_submit(PARTS Coverage RETURN_VALUE _submit_ret)
+                COMMAND {PYTHON_CMD} {GCDA_TOOL} check {BINARY_DIR}
+                RESULT_VARIABLE _check_ret)
+            if(_check_ret EQUAL 0)
+                ctest_coverage(
+                    BUILD "{BINARY_DIR}"
+                    RETURN_VALUE _coverage_ret
+                    CAPTURE_CMAKE_ERROR _coverage_err)
+                dashboard_submit(PARTS Coverage RETURN_VALUE _submit_ret)
+            endif()
         endif()
 
         handle_error("Testing" _test_ret)
+        handle_error("Coverage data check" _check_ret)
 
         dashboard_submit(PARTS Done RETURN_VALUE _submit_ret)
         """
@@ -612,6 +616,14 @@ def run(*args, **kwargs):
     return subprocess.run(*args, **kwargs)
 
 
+def has_gcda(binary_dir):
+    return any(glob.iglob(os.path.join(binary_dir, "**", "*.gcda"), recursive=True))
+
+
+def gcda_match_build(binary_dir):
+    return run([sys.executable, _GCDA_TOOL, "check", binary_dir]).returncode == 0
+
+
 if __name__ == "__main__":
     args, cmake_args, ctest_args = parse_args()
 
@@ -685,15 +697,18 @@ if __name__ == "__main__":
         )
     finally:
         if "-VV" not in ctest_args and not args.quiet:
-            tag = None
+            tag_files = []
             tagfpath = os.path.join(args.binary_dir, "Testing/TAG")
-            with open(tagfpath, "r") as f:
-                tag = f.readline().strip()
+            # ctest -S writes no TAG if it fails before ctest_start: keep its error
+            if os.path.isfile(tagfpath):
+                with open(tagfpath, "r") as f:
+                    tag = f.readline().strip()
+                tag_files = glob.glob(
+                    os.path.join(args.binary_dir, "Testing", tag, "**"),
+                    recursive=True,
+                )
 
-            for file in glob.glob(
-                os.path.join(args.binary_dir, "Testing", tag, "**"),
-                recursive=True,
-            ):
+            for file in tag_files:
                 if not os.path.isfile(file):
                     continue
                 elif "CoverageLog-" in os.path.basename(file):
@@ -718,11 +733,10 @@ if __name__ == "__main__":
 
         # generate the coverage report even when tests fail, but not when no
         # tests ran (e.g. the build failed): gcovr would report 0% coverage
-        has_gcda = any(
-            glob.iglob(os.path.join(args.binary_dir, "**", "*.gcda"), recursive=True)
-        )
-        if _GCOVR_GENERATE_CMD and not has_gcda:
+        if _GCOVR_GENERATE_CMD and not has_gcda(args.binary_dir):
             print("\n\n\n###### No .gcda files, skipping coverage report ######")
+        elif _GCOVR_GENERATE_CMD and not gcda_match_build(args.binary_dir):
+            print("\n\n\n###### Stale .gcda files, skipping coverage report ######")
         elif _GCOVR_GENERATE_CMD:
             print("\n\n\n###### Generating Cobertura XML... ######")
             print(
