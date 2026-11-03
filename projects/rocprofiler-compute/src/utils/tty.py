@@ -39,7 +39,6 @@ from utils.utils_analysis import (
     simplify_kernel_name,
 )
 from utils.utils_common import (
-    TABLE_FORMAT,
     convert_filter_blocks_to_panel_ids,
     format_table_id,
     strip_ansi,
@@ -150,7 +149,7 @@ def get_table_string(
     return tabulate(
         df_with_index.values,
         headers=list(df_with_index.columns),
-        tablefmt=TABLE_FORMAT,
+        tablefmt="fancy_grid",
         floatfmt=f".{decimal}f",
     )
 
@@ -591,7 +590,7 @@ def show_operator_summary(summary_df: pd.DataFrame) -> None:
         tabulate(
             display_df.values,
             headers=headers,
-            tablefmt=TABLE_FORMAT,
+            tablefmt="fancy_grid",
             floatfmt=floatfmt,
             colalign=colalign,
             missingval="N/A",

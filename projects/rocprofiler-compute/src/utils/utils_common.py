@@ -56,8 +56,6 @@ NATIVE_AGENTS_PREFIX = "agents"
 MEMBW_ANALYSIS_PANEL_ID: int = 3000
 # Panel id of block 4, Roofline
 ROOFLINE_PANEL_ID: int = 400
-# tabulate table style of the analyze tables, used in every mode
-TABLE_FORMAT = "fancy_grid"
 # --list-metrics value that lists every metric
 LIST_ALL_METRICS = "all"
 # Narrowest the --list-metrics Description column gets on a narrow terminal
