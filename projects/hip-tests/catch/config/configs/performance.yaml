@@ -212,6 +212,7 @@ performance:
   Performance_hipPerfDotProduct: *level_stress
   Performance_hipPerfMandelbrot: *level_stress
   Performance_hipPerfDispatchAndExecutionSpeed: *level_stress
+  Performance_hipPerfBlockingStreamDispatch: *level_stress
   Performance_hipKernelLookup: *level_stress
   Performance_hipEventOverflow: *level_stress
   Performance_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations: *level_stress
