@@ -50,7 +50,9 @@ using packet_data_t          = hsa::packet_data_t;
 using profiling_time         = tracing::profiling_time;
 
 profiling_time
-get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_data);
+get_dispatch_time(const queue_info_session_t& session,
+                  packet_data_t&              packet_data,
+                  profiling_time*             raw_time = nullptr);
 
 void
 dispatch_complete(queue_info_session_t& session, packet_data_t& packet_data, profiling_time);

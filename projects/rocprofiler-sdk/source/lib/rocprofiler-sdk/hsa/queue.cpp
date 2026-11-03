@@ -165,16 +165,19 @@ track_dispatch_time(hsa_signal_t _signal, hsa_signal_t _pending, hsa_agent_t _ag
 }
 
 void
-store_dispatch_time(hsa_signal_t _signal, hsa_signal_t _pending)
+store_dispatch_time(hsa_signal_t                           _signal,
+                    hsa_signal_t                           _pending,
+                    const kernel_dispatch::profiling_time& _raw_time)
 {
     if(auto* _map = get_dispatch_time_map())
         _map->wlock([&](dispatch_time_map_t& _data) {
             auto itr = _data.find(_signal.handle);
             if(itr == _data.end() || itr->second.pending_signal.handle != _pending.handle) return;
 
-            auto& _entry  = itr->second;
-            _entry.status = get_amd_ext_table()->hsa_amd_profiling_get_dispatch_time_fn(
-                _entry.agent, _pending, &_entry.time);
+            auto& _entry          = itr->second;
+            _entry.status         = _raw_time.status;
+            _entry.time.start     = _raw_time.start;
+            _entry.time.end       = _raw_time.end;
             _entry.pending_signal = null_hsa_signal;
         });
 }
@@ -435,10 +438,13 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
     for(auto& packet : queue_info_session.packet_data)
     {
-        auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session, packet);
+        auto raw_dispatch_time = kernel_dispatch::profiling_time{};
+        auto dispatch_time =
+            kernel_dispatch::get_dispatch_time(queue_info_session, packet, &raw_dispatch_time);
         if(packet.orig_completion_signal.handle != 0)
             store_dispatch_time(packet.orig_completion_signal,
-                                packet.kernel_packet.kernel_dispatch.completion_signal);
+                                packet.kernel_packet.kernel_dispatch.completion_signal,
+                                raw_dispatch_time);
         kernel_dispatch::dispatch_complete(queue_info_session, packet, dispatch_time);
 
         // Calls our internal callbacks to callers who need to be notified post
@@ -599,16 +605,24 @@ WriteInterceptor(const void* packets,
         return;
     }
 
-    // every packet, traced or not, starts a new use of its completion signal
-    for(size_t i = 0; i < pkt_count; ++i)
-    {
-        const auto& _packet = static_cast<const rocprofiler_packet*>(packets)[i];
-        auto        _type   = bit_extract(_packet.kernel_dispatch.header,
-                                 HSA_PACKET_HEADER_TYPE,
-                                 HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
-        if(_type != HSA_PACKET_TYPE_INVALID)
-            forget_dispatch_time(_packet.kernel_dispatch.completion_signal);
-    }
+    auto invalidate_and_forward = [&]() {
+        // Every forwarded packet starts a new use of its completion signal. Instrumented packets
+        // perform the same invalidation in packet order inside process_packet_batch below. Avoid
+        // rebuilding or accessing dispatch-time state if finalization completed after entry.
+        if(registration::get_fini_status() <= 0)
+        {
+            for(size_t i = 0; i < pkt_count; ++i)
+            {
+                const auto& _packet = static_cast<const rocprofiler_packet*>(packets)[i];
+                auto        _type   = bit_extract(_packet.kernel_dispatch.header,
+                                         HSA_PACKET_HEADER_TYPE,
+                                         HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+                if(_type != HSA_PACKET_TYPE_INVALID)
+                    forget_dispatch_time(_packet.kernel_dispatch.completion_signal);
+            }
+        }
+        writer(packets, pkt_count);
+    };
 
     ROCP_TRACE << fmt::format("WriteInterceptor called with pkt_count={}", pkt_count);
 
@@ -672,7 +686,7 @@ WriteInterceptor(const void* packets,
     if(pkt_count == 0 || (no_real_consumers && !graph_launch_active && !has_kernel_replay &&
                           !hip::event::is_active()))
     {
-        writer(packets, pkt_count);
+        invalidate_and_forward();
         return;
     }
 
@@ -702,7 +716,7 @@ WriteInterceptor(const void* packets,
 
     if(num_dispatch_packets == 0 && !hip::event::is_active())
     {
-        writer(packets, pkt_count);
+        invalidate_and_forward();
         return;
     }
 
@@ -739,7 +753,7 @@ WriteInterceptor(const void* packets,
     if(graph_launch_active && no_real_consumers && !has_kernel_replay && !hip::event::is_active())
     {
         gls->dispatch_count += num_dispatch_packets;
-        writer(packets, pkt_count);
+        invalidate_and_forward();
         return;
     }
 
@@ -785,7 +799,7 @@ WriteInterceptor(const void* packets,
     // just write packet through without tracing
     if(!corr_id)
     {
-        writer(packets, pkt_count);
+        invalidate_and_forward();
         return;
     }
 
