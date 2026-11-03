@@ -270,6 +270,7 @@ performance:
   Performance_KernelLaunchLatency_IncreasingNumberOfStreams: *level_stress
   Performance_hipPerfMultiStreamKernelLaunch: *level_stress
   Performance_hipPerfVMMAllocSpeed_test: *level_stress
+  Performance_hipMemImportFromShareableHandle_ImportedPeersBatchCopy: *level_stress
   Performance_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU: *level_stress
   Performance_Graph_CollapseCorrectness: *level_stress
   Performance_Graph_DisabledBoundarySynchronization: *level_stress
