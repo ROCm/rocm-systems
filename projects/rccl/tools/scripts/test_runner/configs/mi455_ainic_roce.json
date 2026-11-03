@@ -238,7 +238,7 @@
       ]
     },
     "cast_multithread": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 600,
       "command_args": "--net_ib_nthreads=4",
       "env_variables": {
@@ -260,7 +260,7 @@
       ]
     },
     "fault_inject_multithread": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 600,
       "command_args": "--net_ib_nthreads=4",
       "env_variables": {
@@ -650,7 +650,7 @@
         }
       ]
     },
-    "cast_base": {
+    "cast_scheduler_base": {
       "extends": "net_ib_base",
       "num_nodes": 2,
       "num_gpus": 1,
@@ -660,11 +660,33 @@
         "RCCL_IB_QP_SCHED_WEIGHT": "0",
         "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "50",
         "RCCL_IB_QP_SCHED_RESET_INTERVAL": "60000",
-        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "65536"
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "65536",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
       }
     },
+    "cast_setup": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_SetupUnilateralConnectFailureReported",
+          "description": "One invalid connect-side device must fail setup on both ranks without hanging",
+          "test_filter": "NetIbMPITest.CastSetupUnilateralConnectFailureReported"
+        },
+        {
+          "name": "Cast_SetupPeerFailurePropagates",
+          "description": "A post-connect failure must reach the healthy peer through setup reduction",
+          "test_filter": "NetIbMPITest.CastSetupPeerFailurePropagates"
+        }
+      ]
+    },
+
     "cast_wrr_split": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -713,21 +735,12 @@
           "name": "Cast_RegistrationRejectsBadArguments",
           "description": "regMr, regMrDmaBuf and deregMr reject a null communicator, and regMr rejects a zero size, instead of dereferencing it",
           "test_filter": "NetIbMPITest.CastRegistrationRejectsBadArguments"
-        },
-        {
-          "name": "Cast_SetupUnilateralConnectFailureReported",
-          "description": "Connect-side device is invalid on one rank only; both ranks must report the setup failure and reach the same barrier, not hang",
-          "test_filter": "NetIbMPITest.CastSetupUnilateralConnectFailureReported"
-        },
-        {
-          "name": "Cast_SetupPeerFailurePropagates",
-          "description": "One rank fails after its own setup succeeded; the locally healthy peer must learn of it through the cross-rank reduction",
-          "test_filter": "NetIbMPITest.CastSetupPeerFailurePropagates"
         }
+
       ]
     },
     "cast_wrr_no_split": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -766,7 +779,7 @@
       ]
     },
     "cast_single_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 60,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "1",
@@ -781,7 +794,7 @@
       ]
     },
     "cast_grh": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 60,
       "tests": [
         {
@@ -792,7 +805,7 @@
       ]
     },
     "cast_four_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "4",
@@ -812,7 +825,7 @@
       ]
     },
     "cast_max_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "128",
@@ -827,7 +840,7 @@
       ]
     },
     "cast_stress": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -842,7 +855,7 @@
       ]
     },
     "fault_inject_cast": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
@@ -917,7 +930,7 @@
       ]
     },
     "resiliency_failover": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
@@ -964,7 +977,7 @@
       ]
     },
     "resiliency_recovery": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
@@ -6984,6 +6997,12 @@
       "name": "NET IB - CAST WRR+Split (QPS=2, splitData=1)",
       "description": "White-box WRR scheduler tests with split-data path enabled: token counts, threshold boundary, split/WRR token accounting, sched enable/disable. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
       "config": "cast_wrr_split",
+      "enabled": false
+    },
+    {
+      "name": "NET IB - CAST Setup Failure Propagation",
+      "description": "Rank-agreed CAST setup failures must report cleanly without hanging",
+      "config": "cast_setup",
       "enabled": false
     },
     {
