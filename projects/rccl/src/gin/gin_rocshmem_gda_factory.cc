@@ -428,14 +428,21 @@ static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
       int gid_tbl_len = port_attr.gid_tbl_len;
       struct ibv_gid_entry* gid_entries = (struct ibv_gid_entry*)calloc(gid_tbl_len, sizeof(struct ibv_gid_entry));
       ssize_t n = gin_ibv_query_gid_table(ctx, gid_entries, gid_tbl_len, 0);
-      int pos = gin_select_gid_pos(gid_entries, (int)n, port, (int)ncclParamGinRocshmemRoutableFlidGidIndex());
-      uint32_t selected_type = IBV_GID_TYPE_ROCE_V1;
-      if (pos >= 0) {
-        selected_type = gid_entries[pos].gid_type;
-        set->nic.gid = gid_entries[pos].gid;
-        set->nic.gid_index = gid_entries[pos].gid_index;
+      // n < 0 (e.g. kernel -EINVAL) also yields pos < 0 via the empty loop. Skip a
+      // device with no usable GID rather than opening it with a zero GID, which
+      // would produce an unreachable endpoint at RTR.
+      int pos = (n < 0) ? -1 : gin_select_gid_pos(gid_entries, (int)n, port,
+                                                  (int)ncclParamGinRocshmemRoutableFlidGidIndex());
+      if (pos < 0) {
+        LOG_WARN("GIN QP factory: device %s port %d has no usable GID, skipping",
+                 gin_ibv_get_device_name(dev_list[d]), port);
+        free(gid_entries);
+        gin_ibv_close_device(ctx);
+        continue;
       }
-      set->nic.gid_type = selected_type;
+      set->nic.gid_type = gid_entries[pos].gid_type;
+      set->nic.gid = gid_entries[pos].gid;
+      set->nic.gid_index = gid_entries[pos].gid_index;
       free(gid_entries);
     }
 
