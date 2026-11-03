@@ -1185,7 +1185,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_CloseFdBeforeMapAndBa
       ipcSocketCom sockObj(false);
       hipShareableHdl shHandle;
       int sig = 0;
-      REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
+      REQUIRE(write(fdSig[1], &sig, sizeof(int)) == static_cast<ssize_t>(sizeof(int)));
       checkSysCallErrors(sockObj.recvShareableHdl(&shHandle));
 
       hipMemGenericAllocationHandle_t imported_handle;
@@ -1338,7 +1338,9 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_CloseFdBeforeMapAndBa
     ipcSocketCom sockObj(true);
     REQUIRE(write(fd[1], &size_mem, sizeof(size_t)) == static_cast<ssize_t>(sizeof(size_t)));
     int sig = 0;
-    REQUIRE(read(fdSig[0], &sig, sizeof(int)) >= 0);
+    // A child that failed before it signalled closes its end of the pipe: read() returns 0 then,
+    // and the test has to fail here instead of sending to a socket that was never created.
+    REQUIRE(read(fdSig[0], &sig, sizeof(int)) == static_cast<ssize_t>(sizeof(int)));
     checkSysCallErrors(sockObj.sendShareableHdl(shareable_handle, pid));
     // The child has its own copy of the fd now.
     REQUIRE(close(shareable_handle) == 0);
