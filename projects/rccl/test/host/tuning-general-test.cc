@@ -225,7 +225,9 @@ TEST_F(TuningGeneralMicrotest, RingSimplePlateauIsFixedMultiNodeAndAbsentElsewhe
   comm_->graphs[NCCL_ALGO_RING].typeIntra = PATH_PIX;
   EXPECT_NEAR(10.0, RingSimpleTimeUs(ncclFuncAllGather, 8, 1024), 1e-3);
   comm_->graphs[NCCL_ALGO_RING].typeIntra = PATH_NVL;
-  EXPECT_NEAR(10.0, RingSimpleTimeUs(ncclFuncAllGather, 2, 32), 1e-3);
+  // A seven-step Ring isolates the 64-byte threshold from step scaling.
+  EXPECT_NEAR(10.0, RingSimpleTimeUs(ncclFuncAllGather, 8, 63), 1e-3);
+  EXPECT_NEAR(14.0, RingSimpleTimeUs(ncclFuncAllGather, 8, 64), 1e-3);
 }
 
 TEST_F(TuningGeneralMicrotest, ThreadCountValidationUsesDefaultAndBounds) {
