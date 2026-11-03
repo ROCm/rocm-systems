@@ -654,7 +654,10 @@ class RocProfCompute:
             tmp_csv = Path(tmp_dir) / "roofline.csv"
             try:
                 run_roofline_benchmark(
-                    self.__args.device, tmp_csv, self.__mspec.cache_sizes
+                    self.__args.device,
+                    tmp_csv,
+                    self.__mspec.cache_sizes,
+                    self.__mspec.gpu_arch,
                 )
             except Exception as e:
                 console_error(f"Benchmark execution failed: {e}")
