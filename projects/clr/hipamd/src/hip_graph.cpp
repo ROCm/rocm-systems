@@ -77,18 +77,17 @@ inline hipMemcpy3DParms ihipLinearAsMemcpy3DParms(void* dst, const void* src, si
 inline hipError_t ihipGraphAddNode(hip::GraphNode* graphNode, hip::Graph* graph,
                                    hip::GraphNode* const* pDependencies, size_t numDependencies,
                                    bool capture, int devId) {
-  std::unordered_set<hip::GraphNode*> uniqueDependencies;
+  graph->AddNode(graphNode);
+  std::unordered_set<hip::GraphNode*> DuplicateDep;
   for (size_t i = 0; i < numDependencies; i++) {
     if ((!hip::GraphNode::isNodeValid(pDependencies[i])) ||
         (graph != pDependencies[i]->GetParentGraph())) {
       return hipErrorInvalidValue;
     }
-    if (!uniqueDependencies.insert(pDependencies[i]).second) {
+    if (DuplicateDep.find(pDependencies[i]) != DuplicateDep.end()) {
       return hipErrorInvalidValue;
     }
-  }
-  graph->AddNode(graphNode);
-  for (size_t i = 0; i < numDependencies; i++) {
+    DuplicateDep.insert(pDependencies[i]);
     pDependencies[i]->AddEdgeDep(graphNode);
   }
   if (capture == false) {
@@ -2579,7 +2578,7 @@ hipError_t hipGraphNodeFindInClone(hipGraphNode_t* pNode, hipGraphNode_t origina
   }
 
   for (auto node : iClonedGraph->GetNodes()) {
-    if (node->GetID() == iGraphnode->GetID()) {
+    if (node->GetOriginalNode() == iGraphnode) {
       *pNode = reinterpret_cast<hipGraphNode_t>(node);
       HIP_RETURN(hipSuccess);
     }
