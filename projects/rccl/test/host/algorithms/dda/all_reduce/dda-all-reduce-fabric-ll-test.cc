@@ -595,12 +595,12 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Run_NoCapKeepsTheFixedShapeInEveryTier) {
   }
 }
 
-// A capped launch stays within the cap's blocks and its threads (whole 64-thread granules) in every tier, keeps its
-// kernel, and its reporter reports the grid it launches; the next uncapped call is the fixed shape again. Caps above
-// and below ddaFabricMaxBlocks both stay within it.
+// A capped launch stays within the cap's blocks and its threads (whole 64-thread granules, at least one) in every tier,
+// keeps its kernel, and its reporter reports the grid it launches; the next uncapped call is the fixed shape again.
+// Caps above and below ddaFabricMaxBlocks both stay within it.
 TEST_F(DdaAllReduceFabricLLMicrotest, Run_CapBoundsTheGridAndTheReporterInEveryTier) {
-  const rcclDdaLaunchCap caps[] = {{1, 64},  {3, 192}, {17, 256}, {3, 0},     {0, 192},
-                                   {17, 96}, {2, 1024}, {1, 0},  {1000, 4096}, {0, 64}};
+  const rcclDdaLaunchCap caps[] = {{1, 64}, {3, 192}, {17, 256},   {3, 0},  {0, 192}, {17, 96}, {2, 1024},
+                                   {1, 0},  {0, 64},  {1000, 4096}, {0, 480}, {0, 992}, {1, 32},  {0, 1}};
   for (int maxBlocks : {256, 5}) {
     comm().ddaFabricMaxBlocks = maxBlocks;
     for (const FixedTier& tier : kTiers) {
@@ -633,12 +633,13 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Run_CapBoundsTheGridAndTheReporterInEveryT
                 EXPECT_LE(capped.grid.x, cap.blocks);
               }
               EXPECT_LE(capped.block.x, tier.threads);
-              if (cap.threads > 0) {
+              if (cap.threads >= 64) {
                 EXPECT_LE(capped.block.x, cap.threads);
               }
               EXPECT_EQ(capped.block.x % 64, 0u);
               const unsigned threads = capped.block.x;
-              EXPECT_EQ(threads, cap.threads > 0 && cap.threads < tier.threads ? cap.threads / 64 * 64 : tier.threads);
+              EXPECT_EQ(threads, cap.threads > 0 && cap.threads < tier.threads ? std::max(cap.threads / 64 * 64, 64u)
+                                                                                 : tier.threads);
               const int blockBound = cap.blocks > 0 ? std::min<int>(cap.blocks, maxBlocks) : maxBlocks;
               const size_t units = TierUnits(tier, bytes, nRanks);
               EXPECT_EQ(capped.grid.x, FixedBlocks(units, threads, tier.unitThreads, blockBound))
@@ -655,14 +656,6 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Run_CapBoundsTheGridAndTheReporterInEveryT
       EXPECT_GE(cases, 20) << "ll128=" << tier.ll128 << " twoShot=" << tier.twoShot;
     }
   }
-}
-
-// A thread cap under one 64-thread granule still launches one granule, whole warps for LL128.
-TEST_F(DdaAllReduceFabricLLMicrotest, Run_ThreadCapBelowOneGranuleLaunchesOneGranule) {
-  EXPECT_EQ(RunOneLL(1u << 16, ncclFloat32, {0, 32}).block.x, 64u);
-  EXPECT_EQ(RunOneLL128(1u << 16, ncclFloat32, {0, 1}).block.x, 64u);
-  EXPECT_EQ(ncclAllReduceDdaFabricLL128Blocks(mock_.get(), 1u << 16, ncclFloat32, {0, 1}),
-            RunOneLL128(1u << 16, ncclFloat32, {0, 1}).grid.x);
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, Blocks_EmptyMessageStillReportsOneBlock) {
