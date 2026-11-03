@@ -102,7 +102,6 @@ protected:
     ASSERT_NO_FATAL_FAILURE(
         rocjitsu::test::initialize_compute_unit(cu_, "vector16_inline", config, &memory_, &cache_));
     decoder_ = Decoder::create(config.arch);
-    ASSERT_NE(cu_, nullptr);
     ASSERT_NE(decoder_, nullptr);
     wave_ = cu_->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
     ASSERT_NE(wave_, nullptr);

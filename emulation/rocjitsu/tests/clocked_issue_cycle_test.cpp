@@ -5,6 +5,7 @@
 /// @brief ComputeUnitCore::run_issue_cycle(): the per-cycle entry point for a
 /// clocked driver that chooses which waves issue.
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
@@ -35,8 +36,8 @@ constexpr uint32_t kSgprs = 104;
 constexpr uint32_t kVgprs = 256;
 
 /// A two-slot CU over @p memory.
-std::unique_ptr<ComputeUnitCore> make_cu(GpuMemory &memory, L2Cache &l2,
-                                         rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
+void make_cu(std::unique_ptr<ComputeUnitCore> &cu, GpuMemory &memory, L2Cache &l2,
+             rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
   l2.set_backing_memory(&memory);
   ComputeUnitCore::Config config{};
   config.arch = arch;
@@ -44,7 +45,8 @@ std::unique_ptr<ComputeUnitCore> make_cu(GpuMemory &memory, L2Cache &l2,
   config.sgprs_per_wf = kSgprs;
   config.vgprs_per_wf = kVgprs;
   config.lds_size_kb = 64;
-  return ComputeUnitCore::create("clocked_cu", config, &memory, &l2);
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "clocked_cu", config, &memory, &l2));
 }
 
 /// Identity translation whose instruction fetches can be made to retry.
@@ -66,7 +68,7 @@ private:
 class ClockedIssueCycleTest : public ::testing::Test {
 protected:
   void SetUp() override {
-    cu = make_cu(memory, l2);
+    ASSERT_NO_FATAL_FAILURE(make_cu(cu, memory, l2));
     ASSERT_NE(cu, nullptr);
     const std::array words{kMovS5, kNop, kEndpgm};
     for (size_t i = 0; i < words.size(); ++i)
@@ -163,7 +165,8 @@ TEST(ClockedIssueCycleVskipTest, SkippedInstructionDoesNotIssue) {
   GpuMemory memory{"vskip_memory"};
   L2Cache l2{"vskip_l2"};
   // VSKIP is a CDNA mode bit.
-  std::unique_ptr<ComputeUnitCore> cu = make_cu(memory, l2, ROCJITSU_CODE_ARCH_CDNA3);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu, memory, l2, ROCJITSU_CODE_ARCH_CDNA3));
   ASSERT_NE(cu, nullptr);
   for (size_t i = 0; i < 4; ++i)
     memory.write32(kVectorProgram + i * 4, i == 0 ? kMoveVector : kNop);
@@ -181,7 +184,8 @@ TEST(ClockedIssueCycleVskipTest, SkippedInstructionDoesNotIssue) {
 TEST(ClockedIssueCycleReservationTest, ReservationHandlerSeesEachReservedSlot) {
   GpuMemory memory{"reservation_memory"};
   L2Cache l2{"reservation_l2"};
-  std::unique_ptr<ComputeUnitCore> cu = make_cu(memory, l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu, memory, l2));
   std::vector<std::pair<uint32_t, uint64_t>> reserved;
   cu->set_wave_reservation_handler([&](Wavefront &wf) {
     reserved.emplace_back(wf.wf_id(), wf.dispatch_generation());

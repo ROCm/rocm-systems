@@ -869,8 +869,9 @@ TEST(MemoryWaitExecutionTest, WaitIdleAndRdna4CompatibilityWaitDrainEveryFunctio
       config.sgprs_per_wf = 128;
       config.vgprs_per_wf = 32;
       config.lds_size_kb = 64;
-      auto cu = ComputeUnitCore::create("wait_cu", config, &memory, &l2);
-      ASSERT_NE(cu, nullptr);
+      std::unique_ptr<ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "wait_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
       ASSERT_NE(wf, nullptr);
       const auto counters = {WaitCounterType::LOADCNT, WaitCounterType::STORECNT,
@@ -1453,8 +1454,9 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndCounterPartici
         config.sgprs_per_wf = 128;
         config.vgprs_per_wf = 32;
         config.lds_size_kb = 64;
-        auto cu = ComputeUnitCore::create("flat_cu", config, &memory, &l2);
-        ASSERT_NE(cu, nullptr);
+        std::unique_ptr<ComputeUnitCore> cu;
+        ASSERT_NO_FATAL_FAILURE(
+            rocjitsu::test::initialize_compute_unit(cu, "flat_cu", config, &memory, &l2));
         auto *wf = cu->dispatch_wf(0, 0x100, config.sgprs_per_wf, config.vgprs_per_wf);
         ASSERT_NE(wf, nullptr);
         wf->set_exec(0b1111);
@@ -3558,8 +3560,9 @@ TEST(XcntExecutionTest, FlatReplayCompletionFollowsTheWholeRequestRoute) {
   config.sgprs_per_wf = 128;
   config.vgprs_per_wf = 32;
   config.lds_size_kb = 64;
-  auto cu = ComputeUnitCore::create("flat_replay_cu", config, &memory, &l2);
-  ASSERT_NE(cu, nullptr);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "flat_replay_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(3);

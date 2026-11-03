@@ -215,8 +215,9 @@ public:
     return cfg;
   }
 
-  std::unique_ptr<amdgpu::ComputeUnitCore> make_cu(uint32_t wf_slots = 4) {
-    return amdgpu::ComputeUnitCore::create("ds_gws_cu", cu_config(wf_slots), &mem, &l2);
+  void make_cu(std::unique_ptr<amdgpu::ComputeUnitCore> &cu, uint32_t wf_slots = 4) {
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "ds_gws_cu", cu_config(wf_slots), &mem, &l2));
   }
 
   const rj_code_arch_t arch;
@@ -387,7 +388,8 @@ TEST_P(DsGwsTest, RejectsExecutionWithoutGdsBit) {
 TEST_P(DsGwsTest, Rdna3CountOpsHonorLaneZeroWhenExecEmpty) {
   if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5)
     GTEST_SKIP() << "EXEC=0 lane-0 count ops are specific to RDNA3/3.5";
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   cu->gws_init(*wf0, 0, 1);
@@ -405,7 +407,8 @@ TEST_P(DsGwsTest, Rdna3CountOpsHonorLaneZeroWhenExecEmpty) {
 TEST_P(DsGwsTest, Rdna3InitSeedsCreditViaLaneZeroWhenExecEmpty) {
   if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5)
     GTEST_SKIP() << "EXEC=0 lane-0 count ops are specific to RDNA3/3.5";
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   // init(count=1) with EXEC=0 seeds one semaphore credit via lane 0.
@@ -428,7 +431,8 @@ TEST_P(DsGwsTest, Rdna3InitSeedsCreditViaLaneZeroWhenExecEmpty) {
 TEST_P(DsGwsTest, Rdna3SemaBrReleasesViaLaneZeroWhenExecEmpty) {
   if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5)
     GTEST_SKIP() << "EXEC=0 lane-0 count ops are specific to RDNA3/3.5";
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   // sema_p parks wf0 (EXEC-gated op, so it uses a live lane).
@@ -449,7 +453,8 @@ TEST_P(DsGwsTest, Rdna3SemaBrReleasesViaLaneZeroWhenExecEmpty) {
 TEST_P(DsGwsTest, OlderTargetsSkipCountOpsWhenExecEmpty) {
   if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
     GTEST_SKIP() << "RDNA3/3.5 run EXEC=0 count ops via lane 0 rather than gating";
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   // EXEC=0: the barrier is skipped, so the first arrival does not park.
@@ -468,7 +473,8 @@ TEST_P(DsGwsTest, OlderTargetsSkipCountOpsWhenExecEmpty) {
 }
 
 TEST_P(DsGwsTest, CountOpsReadFirstActiveLaneNotLaneZero) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   // INIT and both barrier reloads must read lane 3. A wrong lane-0 read
@@ -489,7 +495,8 @@ TEST_P(DsGwsTest, CountOpsReadFirstActiveLaneNotLaneZero) {
 // arrival; the final arrival releases the co-resident set. GWS programs the
 // barrier value as (participants - 1), so two participants use a count of 1.
 TEST_P(DsGwsTest, BarrierParksUntilAllCoResidentWavesArrive) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   // Explicitly initialize the resource for two participants (count = 1).
@@ -509,7 +516,8 @@ TEST_P(DsGwsTest, BarrierParksUntilAllCoResidentWavesArrive) {
 // After a barrier releases, the counter re-arms so the same resource serves a
 // second rendezvous phase.
 TEST_P(DsGwsTest, BarrierReusesCounterAcrossPhases) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   run_gws(*cu, GwsOp::kInit, *wf0, /*count=*/1);
@@ -531,7 +539,8 @@ TEST_P(DsGwsTest, BarrierReusesCounterAcrossPhases) {
 // three arrivals; the releasing barrier(1) then resizes the next phase to two.
 // (A fixed reload would keep requiring three arrivals and hang the second phase.)
 TEST_P(DsGwsTest, BarrierChangingPhaseSizeReusesArrivalCount) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wf0, wf1, wf2] = make_workgroup<3>(*cu);
 
   // Phase 1: three participants (init value 2). Two park, the third releases.
@@ -558,7 +567,8 @@ TEST_P(DsGwsTest, BarrierChangingPhaseSizeReusesArrivalCount) {
 }
 
 TEST_P(DsGwsTest, BarrierWaitsWhenCountExceedsResident) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
   auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
   ASSERT_NE(wf0, nullptr);
@@ -577,7 +587,8 @@ TEST_P(DsGwsTest, BarrierWaitsWhenCountExceedsResident) {
 }
 
 TEST_P(DsGwsTest, BarrierHugeCountStillWaits) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
   auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
   ASSERT_NE(wf0, nullptr);
@@ -597,7 +608,8 @@ TEST_P(DsGwsTest, BarrierHugeCountStillWaits) {
 // ds_gws_sema_p parks when no credit is available; ds_gws_sema_v then releases a
 // parked waiter within the dispatch.
 TEST_P(DsGwsTest, SemaphorePParksAndVReleases) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   run_gws(*cu, GwsOp::kSemaP, *wf0, /*count=*/0);
@@ -613,7 +625,8 @@ TEST_P(DsGwsTest, SemaphorePParksAndVReleases) {
 
 // ds_gws_sema_br releases up to @count parked waiters in one shot.
 TEST_P(DsGwsTest, SemaphoreBulkReleaseWakesWaiters) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wf0, wf1, wf2] = make_workgroup<3>(*cu);
 
   run_gws(*cu, GwsOp::kSemaP, *wf0, /*count=*/0);
@@ -632,7 +645,8 @@ TEST_P(DsGwsTest, SemaphoreBulkReleaseWakesWaiters) {
 
 // ds_gws_sema_release_all wakes every parked waiter and clears the credits.
 TEST_P(DsGwsTest, SemaphoreReleaseAllWakesWaiters) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wf0, wf1, wf2] = make_workgroup<3>(*cu);
 
   run_gws(*cu, GwsOp::kSemaP, *wf0, /*count=*/0);
@@ -651,7 +665,8 @@ TEST_P(DsGwsTest, SemaphoreReleaseAllWakesWaiters) {
 // The rid is ((M0[21:16] + offset0) & 0x3f). A P on rid 0 (M0=0, offset0=0) is
 // released by a V whose (M0[21:16]=63, offset0=1) sum wraps back to rid 0.
 TEST_P(DsGwsTest, SemaphoreRidSumWrapsToSameResource) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
   auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
   ASSERT_NE(wf0, nullptr);
@@ -676,7 +691,8 @@ TEST_P(DsGwsTest, SemaphoreRidSumWrapsToSameResource) {
 // released by a V issued from another workgroup sharing the resource -- the
 // hardware rendezvous the workgroup-private model could not express.
 TEST_P(DsGwsTest, CrossWorkgroupSemaphorePWakesOnCrossWgV) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wf0] = make_workgroup<1>(*cu);
   auto [wf1] = make_workgroup<1>(*cu, {.wg_id = 1});
 
@@ -696,7 +712,8 @@ TEST_P(DsGwsTest, CrossWorkgroupSemaphorePWakesOnCrossWgV) {
 // resident wave, the first P consumes that credit and keeps running, while the
 // second P finds no credit and parks. Guards the credit seed in GwsDevice::init.
 TEST_P(DsGwsTest, InitSeedsCreditFirstPConsumesSecondParks) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   // Seed exactly one credit.
@@ -716,7 +733,8 @@ TEST_P(DsGwsTest, InitSeedsCreditFirstPConsumesSecondParks) {
 }
 
 TEST_P(DsGwsTest, PollingSiblingDoesNotBlockCrossWgSemaphoreWake) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [consumer, sibling] = make_workgroup<2>(*cu);
   auto [producer] = make_workgroup<1>(*cu, {.wg_id = 1});
 
@@ -740,7 +758,8 @@ TEST_P(DsGwsTest, PollingSiblingDoesNotBlockCrossWgSemaphoreWake) {
 // arrive at a barrier programmed for two participants rendezvous across the
 // workgroup boundary (the early arrival parks, the second releases it).
 TEST_P(DsGwsTest, CrossWorkgroupBarrierReleasesBothParticipants) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wf0] = make_workgroup<1>(*cu);
   auto [wf1] = make_workgroup<1>(*cu, {.wg_id = 1});
 
@@ -760,7 +779,8 @@ TEST_P(DsGwsTest, CrossWorkgroupBarrierReleasesBothParticipants) {
 }
 
 TEST_P(DsGwsTest, UnsatisfiedBarrierFailsAtWaitLimit) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto [wf0, wf1, wf2] = make_workgroup<3>(*cu, {.pc = kPc});
@@ -784,7 +804,8 @@ TEST_P(DsGwsTest, UnsatisfiedBarrierFailsAtWaitLimit) {
 }
 
 TEST_P(DsGwsTest, MixedBarrierWaitFailsAtWaitLimit) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto [wf0, wf1] = make_workgroup<2>(*cu, {.pc = kPc});
@@ -822,8 +843,10 @@ TEST_P(DsGwsTest, CrossComputeUnitSemaphorePWakesOnCrossCuV) {
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_cu();
-  auto cu1 = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu0;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu0));
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu1;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu1));
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
   auto [consumer] = make_workgroup<1>(*cu0, {.pc = kPc});
@@ -848,8 +871,10 @@ TEST_P(DsGwsTest, CrossComputeUnitBarrierReleasesBothParticipants) {
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_cu();
-  auto cu1 = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu0;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu0));
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu1;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu1));
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
   auto [wf0] = make_workgroup<1>(*cu0, {.pc = kPc});
@@ -890,8 +915,10 @@ TEST_P(DsGwsTest, CrossCuSemaphoreWaitsForScalarBarrierProducer) {
   mem.write32(kPcB + 4, endpgm);
 
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_cu();
-  auto cu1 = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu0;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu0));
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu1;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu1));
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
 
@@ -942,8 +969,10 @@ TEST_P(DsGwsTest, OverlappingDispatchesShareProcessResources) {
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_cu();
-  auto cu1 = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu0;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu0));
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu1;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu1));
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
 
@@ -975,8 +1004,10 @@ TEST_P(DsGwsTest, NewDispatchSignalsPreviouslyParkedWaiter) {
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_cu();
-  auto cu1 = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu0;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu0));
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu1;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu1));
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
 
@@ -1019,7 +1050,8 @@ TEST_P(DsGwsTest, NewDispatchSignalsPreviouslyParkedWaiter) {
 TEST_P(DsGwsTest, NoGwsWorkloadKeepsStoreIdle) {
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto *wf = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
   ASSERT_NE(wf, nullptr);
   cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
@@ -1041,8 +1073,10 @@ TEST_P(DsGwsTest, ConcurrentCrossCuSteppingIsRaceFree) {
   // Each CU owns its memory/L2; the only shared mutable object is the store, so
   // any race TSan reports is a GWS store race.
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = consumer_context.make_cu();
-  auto cu1 = producer_context.make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu0;
+  ASSERT_NO_FATAL_FAILURE(consumer_context.make_cu(cu0));
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu1;
+  ASSERT_NO_FATAL_FAILURE(producer_context.make_cu(cu1));
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
 
@@ -1191,7 +1225,8 @@ TEST_P(DsGwsTest, DirectlyAttachedCpCuSharesGwsStore) {
 
   // A CU attached straight to the command processor, with no shader engine -- as a
   // custom topology would produce.
-  auto direct_cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> direct_cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(direct_cu));
   ASSERT_NE(&direct_cu->gws_device(), store); // Starts on its private default store.
   xcd.command_processor()->add_compute_unit(direct_cu.get());
   xcd.wire_gws_to_cus();
@@ -1204,7 +1239,8 @@ TEST_P(DsGwsTest, DirectlyAttachedCpCuSharesGwsStore) {
 // credit, the signaling workgroup fully retires, and a later workgroup's P still
 // finds the persisted credit. The dispatch-keyed per-CU model lost it here.
 TEST_P(DsGwsTest, WorkgroupTurnoverSemaphoreCreditPersists) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [producer] = make_workgroup<1>(*cu);
 
   // Producer signals (no waiter), leaving one credit, then its workgroup retires.
@@ -1224,7 +1260,8 @@ TEST_P(DsGwsTest, WorkgroupTurnoverSemaphoreCreditPersists) {
 // GWS resources are keyed by process and persist across dispatches, so the seed
 // survives the init dispatch's retirement.
 TEST_P(DsGwsTest, SeparateInitDispatchSeedsLaterDispatch) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
 
   // Init dispatch (dispatch_id 0) seeds one credit, then fully retires.
   auto [initer] = make_workgroup<1>(*cu);
@@ -1242,7 +1279,8 @@ TEST_P(DsGwsTest, SeparateInitDispatchSeedsLaterDispatch) {
 TEST_P(DsGwsTest, AccBitSelectsAgprCountOperand) {
   if (arch != ROCJITSU_CODE_ARCH_CDNA2 && arch != ROCJITSU_CODE_ARCH_CDNA3)
     GTEST_SKIP() << "DS acc bit only exists on CDNA2/3";
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   const uint16_t op = gws_opcode(arch, GwsOp::kInit);
@@ -1297,7 +1335,8 @@ TEST_P(DsGwsTest, AccBitSelectsAgprCountOperand) {
 }
 
 TEST_P(DsGwsTest, BarrierRequiresExplicitInitialization) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto *wave = cu->dispatch_wf(0, 0, 102, 16);
   ASSERT_NE(wave, nullptr);
   cu->begin_workgroup(0, 0, 1);
@@ -1316,8 +1355,10 @@ TEST_P(DsGwsTest, SemaphoreVReservedForEarlierParkedWaiter) {
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_cu();
-  auto cu1 = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu0;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu0));
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu1;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu1));
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
   auto [waiter0] = make_workgroup<1>(*cu0, {.pc = kPc});
@@ -1354,8 +1395,10 @@ TEST_P(DsGwsTest, BarrierRendezvousWithLateAdmittedParticipant) {
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_cu();
-  auto cu1 = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu0;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu0));
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu1;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu1));
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
   // Only CU0's wave is resident so far, but the grid has two waves.
@@ -1381,9 +1424,12 @@ TEST_P(DsGwsTest, RemoteReleaseDoesNotReleaseUnrelatedResource) {
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu_a = make_cu();
-  auto cu_b = make_cu();
-  auto cu_c = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu_a;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu_a));
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu_b;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu_b));
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu_c;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu_c));
   cu_a->set_gws_device(gws);
   cu_b->set_gws_device(gws);
   cu_c->set_gws_device(gws);
@@ -1425,9 +1471,12 @@ TEST_P(DsGwsTest, RemoteInitDoesNotReleaseUnrelatedResource) {
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu_a = make_cu();
-  auto cu_b = make_cu();
-  auto cu_c = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu_a;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu_a));
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu_b;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu_b));
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu_c;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu_c));
   cu_a->set_gws_device(gws);
   cu_b->set_gws_device(gws);
   cu_c->set_gws_device(gws);
@@ -1467,7 +1516,8 @@ TEST_P(DsGwsTest, DestroyingCuReconcilesParkedWaveInSharedStore) {
   auto gws = std::make_shared<amdgpu::GwsDevice>();
   ASSERT_FALSE(gws->any_parked());
   {
-    auto cu = make_cu();
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(make_cu(cu));
     cu->set_gws_device(gws);
     auto [wf] = make_workgroup<1>(*cu);
     // Park a semaphore P (no credit), then let the CU go out of scope unwoken.
@@ -1495,7 +1545,8 @@ TEST_P(DsGwsTest, ReplacingLiveCuStoreIsRejectedUntilDrained) {
   auto store_b = std::make_shared<amdgpu::GwsDevice>();
 
   // A resident waiter already parked in store B on its own CU (populated destination).
-  auto cu_b = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu_b;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu_b));
   ASSERT_TRUE(cu_b->set_gws_device(store_b)); // Drained CU: accepted.
   auto [wf_b] = make_workgroup<1>(*cu_b, {.dispatch_id = 1});
   run_gws(*cu_b, GwsOp::kSemaP, *wf_b, /*count=*/0);
@@ -1503,7 +1554,8 @@ TEST_P(DsGwsTest, ReplacingLiveCuStoreIsRejectedUntilDrained) {
   ASSERT_TRUE(store_b->any_parked());
 
   // A second CU parks a waiter in store A.
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   ASSERT_TRUE(cu->set_gws_device(store_a)); // Drained CU: accepted.
   auto [wf] = make_workgroup<1>(*cu);
   run_gws(*cu, GwsOp::kSemaP, *wf, /*count=*/0);
@@ -1543,8 +1595,10 @@ TEST_P(DsGwsTest, ReleaseAllRetiresCreditReservationForDelayedPeerPoll) {
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_cu();
-  auto cu1 = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu0;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu0));
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu1;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu1));
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
 
@@ -1593,7 +1647,8 @@ TEST_P(DsGwsTest, ReleaseAllRetiresCreditReservationForDelayedPeerPoll) {
 // parks for lack of a credit), while B's seeded credit survives and is consumed.
 TEST_P(DsGwsTest, ReleaseProcessDropsOnlyThatProcessTable) {
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu = make_cu(8);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu, 8));
   cu->set_gws_device(gws);
   constexpr uint32_t kProcA = 11;
   constexpr uint32_t kProcB = 22;
@@ -1627,7 +1682,8 @@ TEST_P(DsGwsTest, ReleaseProcessDropsOnlyThatProcessTable) {
 }
 
 TEST_P(DsGwsTest, SemaphoreAndBarrierShareCounterAcrossTypeChanges) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wave] = make_workgroup<1>(*cu);
   run_gws(*cu, GwsOp::kInit, *wave, /*count=*/1);
   run_gws(*cu, GwsOp::kSemaP, *wave, /*count=*/0);
@@ -1648,7 +1704,8 @@ TEST_P(DsGwsTest, SemaphoreSignalsAreVisibleToBarrier) {
   for (auto op : {GwsOp::kSemaV, GwsOp::kSemaBr}) {
     SCOPED_TRACE(static_cast<int>(op));
     GwsTestContext context(arch);
-    auto cu = context.make_cu();
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(context.make_cu(cu));
     auto [wave] = make_workgroup<1>(*cu);
     context.run_gws(*cu, GwsOp::kInit, *wave, /*count=*/0);
     context.run_gws(*cu, op, *wave, /*count=*/1);
@@ -1659,7 +1716,8 @@ TEST_P(DsGwsTest, SemaphoreSignalsAreVisibleToBarrier) {
 }
 
 TEST_P(DsGwsTest, ReleaseAllClearsCounterBeforeBarrier) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto [wave] = make_workgroup<1>(*cu);
   run_gws(*cu, GwsOp::kInit, *wave, /*count=*/3);
   run_gws(*cu, GwsOp::kReleaseAll, *wave, /*count=*/0);
@@ -1669,8 +1727,10 @@ TEST_P(DsGwsTest, ReleaseAllClearsCounterBeforeBarrier) {
 }
 
 TEST_P(DsGwsTest, UnlimitedQuantumYieldsWithGwsAndWorkgroupBarrierWaiters) {
-  auto cu = make_cu();
-  auto peer_cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
+  std::unique_ptr<amdgpu::ComputeUnitCore> peer_cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(peer_cu));
   auto store = std::make_shared<amdgpu::GwsDevice>();
   ASSERT_TRUE(cu->set_gws_device(store));
   ASSERT_TRUE(peer_cu->set_gws_device(store));
@@ -1707,8 +1767,10 @@ TEST_P(DsGwsTest, UnlimitedQuantumYieldsWithGwsAndWorkgroupBarrierWaiters) {
 }
 
 TEST_P(DsGwsTest, UnlimitedQuantumYieldsToPeerBarrierArrival) {
-  auto waiter_cu = make_cu();
-  auto producer_cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> waiter_cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(waiter_cu));
+  std::unique_ptr<amdgpu::ComputeUnitCore> producer_cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(producer_cu));
   auto store = std::make_shared<amdgpu::GwsDevice>();
   ASSERT_TRUE(waiter_cu->set_gws_device(store));
   ASSERT_TRUE(producer_cu->set_gws_device(store));
@@ -1740,7 +1802,8 @@ TEST_P(DsGwsTest, UnlimitedQuantumYieldsToPeerBarrierArrival) {
 }
 
 TEST_P(DsGwsTest, ParkedWaiterDoesNotShortenResidentProducerQuantum) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   cu->set_functional_quantum(16);
   cu->set_gws_wait_limit(4);
   constexpr uint64_t kPc = 0x200000;
@@ -1766,8 +1829,10 @@ TEST_P(DsGwsTest, OnlySameProcessInstructionProgressExtendsWaitBudget) {
   for (bool same_process : {false, true}) {
     SCOPED_TRACE(same_process);
     GwsTestContext context(arch);
-    auto waiter_cu = context.make_cu();
-    auto producer_cu = context.make_cu();
+    std::unique_ptr<amdgpu::ComputeUnitCore> waiter_cu;
+    ASSERT_NO_FATAL_FAILURE(context.make_cu(waiter_cu));
+    std::unique_ptr<amdgpu::ComputeUnitCore> producer_cu;
+    ASSERT_NO_FATAL_FAILURE(context.make_cu(producer_cu));
     auto store = std::make_shared<amdgpu::GwsDevice>();
     ASSERT_TRUE(waiter_cu->set_gws_device(store));
     ASSERT_TRUE(producer_cu->set_gws_device(store));
@@ -1807,7 +1872,8 @@ TEST_P(DsGwsTest, OnlySameProcessInstructionProgressExtendsWaitBudget) {
 }
 
 TEST_P(DsGwsTest, WaitBudgetPausesAndCanBeDisabled) {
-  auto cu = make_cu();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   auto *wave = cu->dispatch_wf(0, 0, 102, 16);
   ASSERT_NE(wave, nullptr);
   cu->begin_workgroup(0, 0, 1);
