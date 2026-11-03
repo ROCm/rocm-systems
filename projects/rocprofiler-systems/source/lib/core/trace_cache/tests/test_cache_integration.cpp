@@ -140,53 +140,39 @@ public:
         }
     }
 
-    void execute_sample_processing(test_type_identifier_t type_identifier,
-                                   const rocprofsys::trace_cache::cacheable_t& value)
+    void handle_sample(const test_sample_1& sample)
     {
-        switch(type_identifier)
-        {
-            case test_type_identifier_t::sample_type_1:
-            {
-                const auto& sample = static_cast<const test_sample_1&>(value);
-                const std::lock_guard<std::mutex> lock(m_data_mutex);
-                m_sample_1_count++;
-                check_sample_1(sample);
-                break;
-            }
-            case test_type_identifier_t::sample_type_2:
-            {
-                const auto& sample = static_cast<const test_sample_2&>(value);
-                const std::lock_guard<std::mutex> lock(m_data_mutex);
-                m_sample_2_count++;
-                check_sample_2(sample);
-                break;
-            }
-            case test_type_identifier_t::sample_type_3:
-            {
-                const auto& sample = static_cast<const test_sample_3&>(value);
-                const std::lock_guard<std::mutex> lock(m_data_mutex);
-                m_sample_3_count++;
-                check_sample_3(sample);
-                break;
-            }
-            case test_type_identifier_t::sample_type_4:
-            {
-                const auto& sample = static_cast<const test_sample_4&>(value);
-                const std::lock_guard<std::mutex> lock(m_data_mutex);
-                m_sample_4_count++;
-                check_sample_4(sample);
-                break;
-            }
-            case test_type_identifier_t::sample_type_5:
-            {
-                const auto& sample = static_cast<const test_sample_5&>(value);
-                const std::lock_guard<std::mutex> lock(m_data_mutex);
-                m_sample_5_count++;
-                check_sample_5(sample);
-                break;
-            }
-            default: break;
-        }
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
+        m_sample_1_count++;
+        check_sample_1(sample);
+    }
+
+    void handle_sample(const test_sample_2& sample)
+    {
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
+        m_sample_2_count++;
+        check_sample_2(sample);
+    }
+
+    void handle_sample(const test_sample_3& sample)
+    {
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
+        m_sample_3_count++;
+        check_sample_3(sample);
+    }
+
+    void handle_sample(const test_sample_4& sample)
+    {
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
+        m_sample_4_count++;
+        check_sample_4(sample);
+    }
+
+    void handle_sample(const test_sample_5& sample)
+    {
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
+        m_sample_5_count++;
+        check_sample_5(sample);
     }
 
     int  get_sample_1_count() const { return m_sample_1_count.load(); }
