@@ -284,7 +284,7 @@ protected:
   }};
   ScopedHook<hipError_t(void*)> closeHook_{g_hipIpcCloseMemHandle, [this](void* ptr) {
     std::lock_guard<std::mutex> lock(memoryMu_);
-    const bool failThisClose = ++closeCalls_ == failCloseCall_;
+    const bool failThisClose = failCloseCalls_.count(++closeCalls_) != 0;
     auto it = openMappings_.find(ptr);
     EXPECT_NE(it, openMappings_.end());
     if (it != openMappings_.end()) {
@@ -295,7 +295,7 @@ protected:
   }};
 
   int closeCalls_ = 0;
-  int failCloseCall_ = -1;
+  std::set<int> failCloseCalls_;
 };
 
 TEST_F(DdaIpcLifecycleMicrotest, NormalDestroyClosesPeerMappingsBeforeSerialCommFree) {
@@ -401,11 +401,26 @@ TEST_F(DdaIpcLifecycleMicrotest, ClosePeerMappingsWaitsForInFlightDdaKernelsBefo
 TEST_F(DdaIpcLifecycleMicrotest, FiniWithoutPriorCloseStaysLocalAndClosesPeerMappings) {
   initializeDdaIpcForAllRanks();
   abortFlags_[0] = 1;
+  for (int rank = 0; rank < kRanks; ++rank) {
+    comms_[rank]->doneEvent = reinterpret_cast<hipEvent_t>(static_cast<uintptr_t>(0x1000 + rank));
+  }
+  std::vector<int> closesAtSync;
+  ScopedHook<hipError_t(hipEvent_t)> syncHook{g_hipEventSynchronize, [&](hipEvent_t) {
+    std::lock_guard<std::mutex> lock(memoryMu_);
+    closesAtSync.push_back(closeCalls_);
+    return hipSuccess;
+  }};
 
   // Direct commFree paths (e.g. init failure) have no earlier close stage.
-  // Fini must stay local and still release every mapping and allocation.
+  // Fini must stay local, wait for in-flight launches before its handler
+  // destructors unmap, and still release every mapping and allocation.
   finalizeDdaIpcSerially();
 
+  const int closesPerRank = 2 * (kRanks - 1);
+  ASSERT_EQ(static_cast<size_t>(kRanks), closesAtSync.size());
+  for (int rank = 0; rank < kRanks; ++rank) {
+    EXPECT_EQ(rank * closesPerRank, closesAtSync[rank]) << "rank " << rank << " unmapped before waiting";
+  }
   EXPECT_EQ(0, bootstrap_.timeouts);
   EXPECT_EQ(0, bootstrap_.desyncs);
   EXPECT_EQ(0, bootstrap_.barrierCalls);
@@ -418,9 +433,13 @@ TEST_F(DdaIpcLifecycleMicrotest, FiniWithoutPriorCloseStaysLocalAndClosesPeerMap
 
 TEST_F(DdaIpcLifecycleMicrotest, PeerCloseFailureIsBestEffortAndSerialCleanupCompletes) {
   initializeDdaIpcForAllRanks();
-  failCloseCall_ = 1;
+  // Close rank by rank so the injected failures land deterministically: rank 0
+  // closes its barrier imports (calls 1..kRanks-1) before its scratch imports.
+  failCloseCalls_ = {1, kRanks};
 
-  closeDdaIpcPeerMappingsForAllRanks();
+  for (int rank = 0; rank < kRanks; ++rank) {
+    closeResults_[rank] = ncclDdaIpcCommClosePeerMappings(comms_[rank].get());
+  }
   finalizeDdaIpcSerially();
 
   EXPECT_EQ(0, bootstrap_.timeouts);

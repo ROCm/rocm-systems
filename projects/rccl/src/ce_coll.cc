@@ -3892,6 +3892,12 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
       break;
     }
   }
+  // As ncclLaunchKernel does: CE copies may write peer DDA scratch, so teardown's
+  // doneEvent wait and the next launch on another stream must cover them too.
+  if (ret == ncclSuccess) {
+    CUDACHECKGOTO(cudaEventRecord(comm->doneEvent, stream), ret, fail);
+    comm->lastStreamTag = ncclStreamTag(stream);
+  }
 
 exit:
   // Stop CE collective profiling - always attempt if started, even on error

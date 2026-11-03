@@ -149,6 +149,72 @@ TEST_F(CeCollMicrotest, LaunchAllReduceWithStaging_ReachesTheCollectiveWithoutRe
   EXPECT_TRUE(LogHas(log, "CE AllReduce: no valid chunk layout")) << log;
 }
 
+TEST_F(CeCollMicrotest, LaunchSucceeds_RecordsDoneEventAndStreamTagLast) {
+  hipStream_t const launchStream = reinterpret_cast<hipStream_t>(0x5100);
+  hipEvent_t const doneEvent = reinterpret_cast<hipEvent_t>(0x5200);
+  streams_.stream = launchStream;
+  comm_->doneEvent = doneEvent;
+  comm_->nRanks = 1;
+  comm_->devrState.lsaSize = 1;
+  comm_->devrState.lsaSelf = 0;
+  int lsaRankList[1] = {0};
+  comm_->devrState.lsaRankList = lsaRankList;
+  uint32_t syncFlags[2] = {};
+  ncclDevrWindow syncWin = {};
+  syncWin.userPtr = syncFlags;
+  comm_->ceColl.baseUCSymReadyPtr = reinterpret_cast<uint8_t*>(&syncFlags[0]);
+  comm_->ceColl.baseUCSymComplPtr = reinterpret_cast<uint8_t*>(&syncFlags[1]);
+  comm_->ceColl.ceSyncWin = &syncWin;
+  comm_->ceColl.intraBatchSyncFreq = CE_COLL_INTRA_BATCH_SYNC_FREQ;
+  comm_->ceColl.intraBatchSyncMsgThreshold = CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD;
+  float send = 1.0f, recv = 0.0f;
+  args_.func = ncclFuncAllGather;
+  args_.nElts = 1;
+  args_.eltSize = sizeof(float);
+  args_.sendBuff = reinterpret_cast<uint8_t*>(&send);
+  args_.recvBuff = reinterpret_cast<uint8_t*>(&recv);
+
+  std::vector<std::pair<hipEvent_t, hipStream_t>> records;
+  int copiesIssued = 0;
+  int streamOpsAfterRecord = 0;
+  auto afterDoneRecord = [&] { return !records.empty() && records.back().first == doneEvent; };
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t stream) {
+    records.emplace_back(event, stream);
+    return hipSuccess;
+  });
+  ScopedHook copies(g_hipMemcpyAsync, [&](void*, const void*, size_t, hipMemcpyKind, hipStream_t) {
+    ++copiesIssued;
+    if (afterDoneRecord()) ++streamOpsAfterRecord;
+    return hipSuccess;
+  });
+  ScopedHook syncs(g_hipStreamBatchMemOp, [&](hipStream_t, unsigned int, hipStreamBatchMemOpParams*, unsigned int) {
+    if (afterDoneRecord()) ++streamOpsAfterRecord;
+    return hipSuccess;
+  });
+  std::string log;
+
+  ASSERT_EQ(ncclSuccess, Launch(&log)) << log;
+
+  EXPECT_GT(copiesIssued, 0) << "the launch must reach the CE copy path";
+  ASSERT_FALSE(records.empty());
+  EXPECT_EQ(doneEvent, records.back().first);
+  EXPECT_EQ(launchStream, records.back().second);
+  EXPECT_EQ(0, streamOpsAfterRecord) << "doneEvent must be recorded after the last CE copy";
+  EXPECT_EQ(ncclStreamTag(launchStream), comm_->lastStreamTag);
+}
+
+TEST_F(CeCollMicrotest, LaunchFails_LeavesDoneEventAndStreamTagUntouched) {
+  args_.func = ncclFuncBroadcast;  // rejected by the dispatch default arm
+  comm_->doneEvent = reinterpret_cast<hipEvent_t>(0x5200);
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+  std::string log;
+
+  EXPECT_EQ(ncclInvalidUsage, Launch(&log));
+
+  EXPECT_EQ(0, record.calls);
+  EXPECT_EQ(0u, comm_->lastStreamTag);
+}
+
 // The eager 2-shot path calls ncclCeAllReduce directly, bypassing ncclLaunchCeColl.
 TEST_F(CeCollMicrotest, CeAllReduceWithoutStaging_FailsLoudlyWithoutRegistering) {
   std::string log;
