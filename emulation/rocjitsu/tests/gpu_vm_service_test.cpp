@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/soc.h"
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
@@ -2412,6 +2413,16 @@ TEST(CommandProcessorQueueRegistration, RequiresAnAddressSpaceAndUsesTheConfigur
   EXPECT_TRUE(gpu_vm.unregister_address_space(internal));
 }
 
+TEST(SoCAssembly, RejectsNullXcdWithoutRecordingIt) {
+  GpuMemory memory("memory");
+  rocjitsu::SoC soc("soc", &memory);
+  util::StringDiagnostic diagnostic;
+
+  EXPECT_TRUE(soc.add_xcd(nullptr, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "cannot add a null XCD");
+  EXPECT_EQ(soc.num_xcds(), 0u);
+}
+
 TEST(SoCAssembly, RejectsNullIodWithoutRecordingIt) {
   GpuMemory memory("memory");
   rocjitsu::SoC soc("soc", &memory);
@@ -2486,7 +2497,7 @@ TEST(SoCInternalAddressSpace, RefusesBackingReplacementWhileAnInternalAqlQueueEx
   Xcd xcd("xcd");
   xcd.set_command_processor(&command_processor);
   rocjitsu::SoC soc("soc", &original_memory);
-  soc.add_xcd(&xcd);
+  ASSERT_TRUE(soc.add_xcd(&xcd).succeeded());
 
   const AddressSpaceHandle original_internal = soc.internal_address_space();
   ASSERT_TRUE(original_internal);
@@ -2521,7 +2532,7 @@ TEST(SoCInternalAddressSpace, ReinstallsTheSameBackingAfterAnExplicitVmReset) {
   Xcd xcd("xcd");
   xcd.set_command_processor(&command_processor);
   rocjitsu::SoC soc("soc", &memory);
-  soc.add_xcd(&xcd);
+  ASSERT_TRUE(soc.add_xcd(&xcd).succeeded());
 
   const AddressSpaceHandle original_internal = soc.internal_address_space();
   ASSERT_TRUE(original_internal);

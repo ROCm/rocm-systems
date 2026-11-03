@@ -58,9 +58,9 @@ void SoC::release_vm_resources() {
   sdma_queue_scheduler_.shutdown();
 }
 
-void SoC::add_xcd(amdgpu::Xcd *xcd) {
+util::Result SoC::add_xcd(amdgpu::Xcd *xcd, util::DiagnosticEmitter emit_error) {
   if (xcd == nullptr)
-    throw std::invalid_argument("cannot add a null XCD");
+    return emit_error.emit() << "cannot add a null XCD";
   xcd->set_coherence_domain(cache_coherence_);
   if (xcd->l2_cache()) {
     xcd->l2_cache()->set_legacy_maintenance_memory(memory_);
@@ -74,6 +74,7 @@ void SoC::add_xcd(amdgpu::Xcd *xcd) {
   // standalone default store. The XCD's CUs are already attached by this point.
   xcd->adopt_gws_store(gws_device_);
   xcds_.push_back(xcd);
+  return util::Result::success();
 }
 
 void SoC::wire_gws_to_xcds() {

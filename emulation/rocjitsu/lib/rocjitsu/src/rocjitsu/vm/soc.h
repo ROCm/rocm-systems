@@ -79,8 +79,12 @@ public:
 
   uint32_t gpu_id() const { return gpu_id_; }
 
-  void add_xcd(amdgpu::Xcd *xcd);
-  /// @brief Add an IOD, or diagnose failure for a null pointer.
+  /// @brief Add an XCD, or return failure without changes for a null pointer.
+  /// @details Failure diagnostics are discarded when the emitter is omitted.
+  /// Deeper GWS setup and allocation failures can still throw.
+  util::Result add_xcd(amdgpu::Xcd *xcd, util::DiagnosticEmitter emit_error = {});
+  /// @brief Add an IOD, or return failure without changes for a null pointer.
+  /// @details Failure diagnostics are discarded when the emitter is omitted.
   util::Result add_iod(amdgpu::Iod *iod, util::DiagnosticEmitter emit_error = {});
 
   /// @brief Set flat-address-space aperture boundaries on all CUs via the SPI hierarchy.
@@ -97,7 +101,9 @@ public:
 
   /// @brief Wire L2 → HBM backing store links (call after engine build).
   void wire_backing(simdojo::Topology &topo);
-  /// @brief Set the architecture, or diagnose failure without changes while copy queues exist.
+  /// @brief Set the architecture, or return failure while copy queues exist.
+  /// @details Rejection preserves both the architecture and the SDMA dialect.
+  /// Failure diagnostics are discarded when the emitter is omitted.
   util::Result set_arch(rj_code_arch_t arch, util::DiagnosticEmitter emit_error = {});
   rj_code_arch_t arch() const { return arch_; }
   void set_exec_mode(simdojo::ExecMode mode) { exec_mode_ = mode; }
