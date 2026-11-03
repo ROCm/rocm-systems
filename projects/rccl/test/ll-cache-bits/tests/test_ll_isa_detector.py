@@ -97,27 +97,73 @@ def test_eq_compares_and_sys_scope():
     assert [p.modifiers for p in polls(text)] == [["scope:SCOPE_SYS"]]
 
 
-def test_unpolled_proto_ll_lists_proto_ll_functions_without_a_poll():
+def test_unpolled_lists_ll_functions_without_a_poll():
     text = GFX942_POLL.format(mods=" nt") + """\
 0001 <_Z6runLLA7ProtoLLLi0EE>:
 	global_load_dwordx4 v[0:3], v[8:9], off nt
 0002 <_Z6runLL128A10ProtoLL128Li0EE>:
-0003 <other>:
+0003 <_ZN3dda6common18ddaAllReduceFlatLLIfLi0EEEvv>:
+0004 <_ZN3dda6common21ddaAllReduceFlatLL128IfLi0EEEvv>:
+0005 <_Z30ncclSymkDevKernel_AllGather_LL21ncclSymkDevWorkArgs4K>:
+0006 <_Z30ncclSymkDevKernel_AllGather_ST21ncclSymkDevWorkArgs4K>:
+0007 <other>:
 """
     lines = text.splitlines()
-    unmatched = ll_isa.unpolled_proto_ll(lines, polls(text))
-    assert unmatched == ["_Z6runLLA7ProtoLLLi0EE"]
+    assert ll_isa.unpolled(lines, polls(text)) == [
+        "_Z6runLLA7ProtoLLLi0EE",
+        "_ZN3dda6common18ddaAllReduceFlatLLIfLi0EEEvv",
+        "_Z30ncclSymkDevKernel_AllGather_LL21ncclSymkDevWorkArgs4K",
+    ]
 
 
-def test_compare_after_next_load_belongs_to_that_load():
+def test_batched_loads_with_chained_compares():
+    # LLA2A shape: loads issued back to back, flag2 compared against flag1.
+    text = """\
+0000 <f>:
+	global_load_dwordx4 v[16:19], v[32:33], off sc0 sc1
+	global_load_dwordx4 v[12:15], v[34:35], off sc0 sc1
+	s_waitcnt vmcnt(0)
+	v_cmp_eq_u32_e32 vcc, v17, v3
+	v_cmp_eq_u32_e64 s[4:5], v19, v17
+	v_cmp_eq_u32_e32 vcc, v13, v3
+	v_cmp_eq_u32_e64 s[4:5], v15, v13
+"""
+    assert [p.modifiers for p in polls(text)] == [["sc0", "sc1"]] * 2
+
+
+def test_flags_compared_through_copies():
+    # DDA shape: the flags are copied before they are compared.
+    text = """\
+0000 <f>:
+	global_load_dwordx4 v[56:59], v[34:35], off sc0 sc1
+	s_waitcnt vmcnt(0)
+	v_mov_b32_e32 v8, v57
+	v_mov_b32_e32 v12, v59
+	v_cmp_eq_u32_e64 s[20:21], s33, v8
+	v_cmp_eq_u32_e64 s[22:23], s33, v12
+"""
+    assert len(polls(text)) == 1
+
+
+def test_compares_after_flags_are_reloaded_belong_to_the_new_load():
     text = """\
 0000 <f>:
 	global_load_dwordx4 v[0:3], v[8:9], off nt
-	global_load_dwordx4 v[4:7], v[10:11], off
+	global_load_dwordx4 v[0:3], v[10:11], off
 	v_cmp_ne_u32_e64 s[0:1], v1, v20
 	v_cmp_ne_u32_e64 s[2:3], v3, v20
 """
-    assert polls(text) == []
+    assert [p.modifiers for p in polls(text)] == [[]]
+
+
+def test_split_bundles(tmp_path):
+    magic = b"__CLANG_OFFLOAD_BUNDLE__"
+    data = (b"CCOB" + b"\0" * (ll_isa.BUNDLE_ALIGN - 4) + magic + b"x" * 8
+            + magic)  # an unaligned magic is not a bundle start
+    fatbin = tmp_path / "fb"
+    fatbin.write_bytes(data)
+    paths = ll_isa.split_bundles(str(fatbin), str(tmp_path))
+    assert [Path(p).read_bytes()[:4] for p in paths] == [b"CCOB", magic[:4]]
 
 
 def test_compares_in_next_function_are_not_a_poll():

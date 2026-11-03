@@ -8,6 +8,7 @@
 See ../README.md for why the bits matter and the environment variables.
 """
 
+import collections
 import functools
 import os
 import subprocess
@@ -34,18 +35,19 @@ ROCM_PATH = os.environ.get("ROCM_PATH", "/opt/rocm")
 REQUIRED = os.environ.get("RCCL_LL_GUARD_REQUIRED") == "1"
 
 # ---------------------------------------------------------------------------
-# Modifiers every LL poll load must carry, per arch, as printed by
-# llvm-objdump. Each is the disassembler's spelling of the load's cache bits.
-# Extend this table (after checking the arch's ISA guide) when RCCL starts
-# building for a new arch.
+# Modifiers an LL poll load must carry, per arch, as printed by llvm-objdump:
+# each poll needs one of the listed sets. Each set is the disassembler's
+# spelling of cache bits that skip a stale cached line. Extend this table
+# (after checking the arch's ISA guide) when RCCL starts building for a new
+# arch.
 # ---------------------------------------------------------------------------
 EXPECTED_POLL_MODIFIERS = {
-    # CDNA3 / CDNA4: NT=1 -- non-temporal, so the poll never re-hits a stale
-    # cached line.
-    "gfx942": {"nt"},
-    "gfx950": {"nt"},
+    # CDNA3 / CDNA4: NT=1 or system scope; either is accepted for any poll
+    # (the LL primitives use nt, DDA and LLA2A use sc0 sc1).
+    "gfx942": ({"nt"}, {"sc0", "sc1"}),
+    "gfx950": ({"nt"}, {"sc0", "sc1"}),
     # gfx1250: system scope (RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h).
-    "gfx1250": {"scope:SCOPE_SYS"},
+    "gfx1250": ({"scope:SCOPE_SYS"},),
 }
 
 MAX_REPORTED = 10
@@ -83,22 +85,27 @@ def fatbin(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def targets(fatbin):
-    found = _toolchain().targets(fatbin)
+def targets(fatbin, tmp_path_factory):
+    """{arch: [(bundle, target id)]} across every bundle in the fatbin."""
+    found = collections.defaultdict(list)
+    work = str(tmp_path_factory.mktemp("bundles"))
+    for bundle in ll_isa.split_bundles(fatbin, work):
+        for arch, tids in _toolchain().targets(bundle).items():
+            found[arch] += [(bundle, tid) for tid in tids]
     assert found, f"no amdgcn device code found in {RCCL_LIB}"
     if not set(found) & set(EXPECTED_POLL_MODIFIERS):
         _skip(f"{RCCL_LIB} has none of the checked arches "
               f"{sorted(EXPECTED_POLL_MODIFIERS)}, only {sorted(found)}")
-    return found
+    return dict(found)
 
 
 @pytest.fixture(scope="session")
-def disassemble(fatbin, targets, tmp_path_factory):
+def disassemble(tmp_path_factory):
     @functools.lru_cache(maxsize=None)
-    def _disassemble(tid):
+    def _disassemble(bundle, tid):
         work = tmp_path_factory.mktemp("co")
         code_object = str(work / "code.co")
-        _toolchain().unbundle(fatbin, tid, code_object)
+        _toolchain().unbundle(bundle, tid, code_object)
         return _toolchain().candidate_disassembly(code_object, str(work))
 
     return _disassemble
@@ -122,26 +129,32 @@ def test_ll_poll_loads_keep_cache_bits(arch, targets, disassemble):
     if arch not in targets:
         pytest.skip(f"{RCCL_LIB} was not built for {arch}")
     want = EXPECTED_POLL_MODIFIERS[arch]
-    for tid in targets[arch]:
-        name = tid.split("--", 1)[1]
-        lines = disassemble(tid)
-        polls = list(ll_isa.find_polls(lines))
+    by_variant = collections.defaultdict(list)
+    for bundle, tid in targets[arch]:
+        by_variant[tid.split("--", 1)[1]].append((bundle, tid))
+    for name, code_objects in sorted(by_variant.items()):
+        polls, unmatched = [], []
+        for bundle, tid in code_objects:
+            lines = disassemble(bundle, tid)
+            found = list(ll_isa.find_polls(lines))
+            polls += found
+            unmatched += ll_isa.unpolled(lines, found)
 
         # A guard that finds nothing passes vacuously.
-        unmatched = ll_isa.unpolled_proto_ll(lines, polls)
         assert polls, f"{name}: found no LL flag-poll loads; update ll_isa.py."
         assert not unmatched, (
-            f"{name}: found no LL flag-poll load in {len(unmatched)} ProtoLL "
+            f"{name}: found no LL flag-poll load in {len(unmatched)} LL "
             f"function(s), e.g. {unmatched[:3]}. The poll's instruction shape "
             "changed (or it was split into narrower loads); update ll_isa.py."
         )
 
-        bad = [p for p in polls if not want <= set(p.modifiers)]
+        bad = [p for p in polls
+               if not any(w <= set(p.modifiers) for w in want)]
         report = "\n".join(f"  {p.insn}\n      in {p.func}"
                            for p in bad[:MAX_REPORTED])
         assert not bad, (
             f"{name}: {len(bad)} of {len(polls)} LL flag-poll loads lack "
-            f"{sorted(want)}. Without them the receiver can spin on a stale "
-            f"cached copy of the FIFO line and hang. First "
+            f"any of {[sorted(w) for w in want]}. Without them the receiver "
+            f"can spin on a stale cached copy of the line and hang. First "
             f"{min(len(bad), MAX_REPORTED)}:\n{report}"
         )

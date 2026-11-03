@@ -3,23 +3,25 @@
 #  *
 #  * See LICENSE.txt for license information
 #  ************************************************************************
-"""Helpers to find the LL protocol's flag-poll loads in RCCL device code.
+"""Helpers to find LL flag-poll loads in RCCL device code.
 
-The LL receiver (readLL / readLLBeginAll / readLLFinish in
-src/device/prims_ll.h) spins on a single 16-byte load of an ncclLLFifoLine
-{data1, flag1, data2, flag2} until both flags match the expected step. The
-line is written by a peer GPU or a NIC, so the load must bypass any stale
-cached copy -- otherwise the poll never observes the new flag and the
-collective hangs. The cache-policy bits that make this true are chosen by the
-compiler, so they are only visible in the final ISA.
+An LL receiver spins on a single 16-byte load of a line
+{data1, flag1, data2, flag2} until both flags match the expected value: the
+LL primitives (src/device/prims_ll.h), the DDA LL kernels (ddaLLWaitLineFlags)
+and LLA2A in the symmetric kernels. A peer GPU or a NIC writes the line, so
+the load must bypass any stale cached copy -- otherwise the poll never
+observes the new flag and the collective hangs. The cache-policy bits that
+make this true are chosen by the compiler, so they are only visible in the
+final ISA.
 
 A poll load is recognised by its shape, not by its cache bits, so a load that
 lost its bits is still found (and then reported):
 
-  * a 128-bit vector load into v[N:N+3], followed (before the next 128-bit
-    load) by
-  * v_cmp_ne_u32 or v_cmp_eq_u32 of BOTH v[N+1] (flag1) and v[N+3] (flag2)
-    against the same register (the expected flag).
+  * a 128-bit vector load into v[N:N+3], followed by
+  * v_cmp_ne_u32 or v_cmp_eq_u32 of v[N+1] (flag1) and v[N+3] (flag2), or
+    v_mov copies of them, against the same register (the expected flag), or
+    of one flag against a register and flag1 against flag2,
+  * before either flag register is overwritten.
 """
 
 import collections
@@ -37,6 +39,10 @@ LOAD128_RE = re.compile(
 CMP_RE = re.compile(
     r"^\s*v_cmp_(?:ne|eq)_u32\w*\s+[^,]+,\s*(?P<a>[vs]\d+),\s*(?P<b>[vs]\d+)"
 )
+MOV_RE = re.compile(r"^\s*v_mov_b32\w*\s+(v\d+),\s*(v\d+)\s*$")
+# Instructions whose first operand is not a VGPR they write.
+NO_VDST_RE = re.compile(r"^\s*(?:s_|v_cmp|\w+_store|ds_write)")
+VDST_RE = re.compile(r"^\s*\w+\s+v(?:(\d+)|\[(\d+):(\d+)\])(?=[\s,])")
 # Disassembly lines to scan after a load for its flag compares, past any
 # inlined abort check.
 POLL_WINDOW = 48
@@ -44,9 +50,16 @@ POLL_WINDOW = 48
 # Mangled template argument for the LL protocol; LL128 mangles as
 # "10ProtoLL128", so the length prefix keeps the two apart.
 PROTO_LL_RE = re.compile(r"7ProtoLL(?!128)")
-# Where LL poll loads can live: Primitives<ProtoLL> instantiations, kernels
-# with LL in their name, and RunWorkBatch bodies that inline them.
-CANDIDATE_RE = re.compile(PROTO_LL_RE.pattern + r"|_LL_|RunWorkBatch")
+# Functions that must hold an LL poll: Primitives<ProtoLL> instantiations,
+# DDA LL kernels (ddaAllReduceFlatLL<...>, not LL128) and symmetric LL kernels.
+MUST_POLL_RE = re.compile(
+    PROTO_LL_RE.pattern + r"|dda\w+LLI|ncclSymkDevKernel_\w*LL")
+# Where LL poll loads can live: the above, kernels with LL in their name, and
+# RunWorkBatch bodies that inline them.
+CANDIDATE_RE = re.compile(MUST_POLL_RE.pattern + r"|_LL_|RunWorkBatch")
+# Each fat object adds its own 4 KiB-aligned offload bundle to .hip_fatbin.
+BUNDLE_MAGICS = (b"__CLANG_OFFLOAD_BUNDLE__", b"CCOB")
+BUNDLE_ALIGN = 0x1000
 
 Poll = collections.namedtuple("Poll", "func insn modifiers")
 
@@ -63,6 +76,51 @@ def modifiers(insn):
     return last[1:]
 
 
+def _written(line):
+    """Return the VGPRs `line` writes, as far as the poll check needs."""
+    if NO_VDST_RE.match(line):
+        return set()
+    m = VDST_RE.match(line)
+    if not m:
+        return set()
+    if m.group(1):
+        return {"v" + m.group(1)}
+    return {"v%d" % r for r in range(int(m.group(2)), int(m.group(3)) + 1)}
+
+
+def _is_poll(lines, lo):
+    """Whether the flags of a load into v[lo:lo+3] are checked in `lines`."""
+    alias = [{"v%d" % (lo + 1)}, {"v%d" % (lo + 3)}]  # regs holding each flag
+    expect = [set(), set()]  # regs each flag was compared against
+    linked = False  # flag1 compared against flag2
+    for line in lines:
+        if FUNC_RE.match(line):
+            return False
+        c = CMP_RE.match(line)
+        if c:
+            a, b = c.group("a"), c.group("b")
+            if ((a in alias[0] and b in alias[1])
+                    or (a in alias[1] and b in alias[0])):
+                linked = True
+            for k in (0, 1):
+                if a in alias[k] and b not in alias[1 - k]:
+                    expect[k].add(b)
+                elif b in alias[k] and a not in alias[1 - k]:
+                    expect[k].add(a)
+            if expect[0] & expect[1] or (linked and (expect[0] or expect[1])):
+                return True
+            continue
+        mov = MOV_RE.match(line)
+        for k in (0, 1):
+            if mov and mov.group(2) in alias[k]:
+                alias[k].add(mov.group(1))
+            else:
+                alias[k] -= _written(line)
+        if not alias[0] or not alias[1]:
+            return False
+    return False
+
+
 def find_polls(lines):
     """Yield a Poll for every LL flag-poll load in disassembly `lines`."""
     func = None
@@ -73,24 +131,8 @@ def find_polls(lines):
             func = m.group(1)
             continue
         m = LOAD128_RE.match(line)
-        if not m:
-            continue
-        lo = int(m.group("lo"))
-        flags = {"v%d" % (lo + 1), "v%d" % (lo + 3)}
-        # expected-flag register -> which of our two flags were compared to it
-        compared = collections.defaultdict(set)
-        for nxt in lines[i + 1:i + 1 + POLL_WINDOW]:
-            if FUNC_RE.match(nxt) or LOAD128_RE.match(nxt):
-                break
-            c = CMP_RE.match(nxt)
-            if not c:
-                continue
-            a, b = c.group("a"), c.group("b")
-            if a in flags:
-                compared[b].add(a)
-            if b in flags:
-                compared[a].add(b)
-        if any(regs == flags for regs in compared.values()):
+        if m and _is_poll(lines[i + 1:i + 1 + POLL_WINDOW],
+                          int(m.group("lo"))):
             insn = line.strip()
             yield Poll(func, insn, modifiers(insn))
 
@@ -100,14 +142,31 @@ def functions(lines):
     return [m.group(1) for m in map(FUNC_RE.match, lines) if m]
 
 
-def unpolled_proto_ll(lines, polls):
-    """Return the ProtoLL functions in `lines` that hold none of `polls`.
+def unpolled(lines, polls):
+    """Return the MUST_POLL_RE functions in `lines` that hold none of `polls`.
 
-    Every Primitives<ProtoLL> instantiation receives through the poll loop, so
-    any hit means the detector no longer matches what the compiler emits."""
+    Each of them receives through an LL poll loop, so any hit means the
+    detector no longer matches what the compiler emits."""
     polled = {p.func for p in polls}
     return [f for f in functions(lines)
-            if PROTO_LL_RE.search(f) and f not in polled]
+            if MUST_POLL_RE.search(f) and f not in polled]
+
+
+def split_bundles(fatbin, outdir):
+    """Write each offload bundle in `fatbin` to its own file; return paths.
+
+    clang-offload-bundler reads only the first bundle of a file."""
+    with open(fatbin, "rb") as f:
+        data = f.read()
+    starts = [o for o in range(0, len(data), BUNDLE_ALIGN)
+              if data.startswith(BUNDLE_MAGICS, o)]
+    paths = []
+    for n, (a, b) in enumerate(zip(starts, starts[1:] + [len(data)])):
+        path = os.path.join(outdir, "bundle%d" % n)
+        with open(path, "wb") as f:
+            f.write(data[a:b])
+        paths.append(path)
+    return paths
 
 
 class Toolchain:
