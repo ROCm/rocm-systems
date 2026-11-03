@@ -208,18 +208,19 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };
 
-//! Per-GraphExecBase pool of HW event sets.
+//! Per-GraphExecBase pool of HW event sets, taken from the device's pool and given back to it
+//! when the graph is destroyed.
 class GraphSignalManager : public amd::ReferenceCountedObject {
  public:
   GraphSignalManager() : amd::ReferenceCountedObject() {}
   ~GraphSignalManager();
 
-  //! Pre-create `num_sets` signal sets of `count` signals each at instantiate
+  //! Take `num_sets` signal sets of `count` signals each at instantiate
   //! time, so launches never pay signal creation on the hot path.
   bool Prepopulate(amd::Device* device, int count, int num_sets);
 
   //! Acquire a ready signal set for a single launch. Pops from the free pool;
-  //! only creates a new set as a fallback if the pool is unexpectedly empty.
+  //! takes a new set from the device only if the pool is unexpectedly empty.
   bool AcquireSet(amd::Device* device, int count, std::vector<void*>& out_set);
 
   //! Re-arm a used set and return it to the free pool. Called from the launch

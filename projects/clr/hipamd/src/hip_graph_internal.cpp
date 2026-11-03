@@ -3478,15 +3478,7 @@ GraphSignalManager::~GraphSignalManager() {
   for (auto& dev_pool : free_sets_) {
     amd::Device* device = dev_pool.first;
     for (auto& set : dev_pool.second) {
-      // Pooled signals rest armed (value 1); mark them idle before destroy so
-      // ~ProfilingSignal does not block waiting on an armed-but-idle signal.
-      device->QuiesceHwEvents(set);
-      for (void* sig : set) {
-        if (sig != nullptr) {
-          // Pair with CreateHwEvents() so non-ROCm devices can hook teardown.
-          device->DestroyHwEvent(sig);
-        }
-      }
+      device->ReturnHwEvents(set);
     }
   }
   free_sets_.clear();
@@ -3501,16 +3493,11 @@ bool GraphSignalManager::Prepopulate(amd::Device* device, int count, int num_set
 
   // BuildSyncPlan is re-runnable, so Prepopulate may be called more than once.
   // If a prior run sized the sets for a different segment count, those sets are
-  // unusable -- destroy and rebuild. No launches are in flight at (re)instantiate
+  // unusable -- return them and rebuild. No launches are in flight at (re)instantiate
   // time, so every set for this device is present in the free pool here.
   if (!pool.empty() && static_cast<int>(pool.back().size()) != count) {
     for (auto& set : pool) {
-      device->QuiesceHwEvents(set);
-      for (void* sig : set) {
-        if (sig != nullptr) {
-          device->DestroyHwEvent(sig);
-        }
-      }
+      device->ReturnHwEvents(set);
     }
     pool.clear();
   }
@@ -3519,7 +3506,7 @@ bool GraphSignalManager::Prepopulate(amd::Device* device, int count, int num_set
   // would grow the pool without bound across re-instantiations.
   for (int i = static_cast<int>(pool.size()); i < num_sets; ++i) {
     std::vector<void*> set;
-    if (!device->CreateHwEvents(count, /*batched=*/true, set)) {
+    if (!device->AcquireHwEvents(count, set)) {
       return false;
     }
     pool.push_back(std::move(set));
@@ -3545,9 +3532,9 @@ bool GraphSignalManager::AcquireSet(amd::Device* device, int count,
     }
   }
 
-  // Fallback only: more launches in flight than pre-created sets. Create one
-  // (armed to 1 by CreateHwEvents); it joins the pool when released.
-  return device->CreateHwEvents(count, /*batched=*/true, out_set);
+  // Fallback only: more launches in flight than pre-created sets. Take another
+  // armed set from the device; it joins this pool when released.
+  return device->AcquireHwEvents(count, out_set);
 }
 
 void GraphSignalManager::ReleaseSet(amd::Device* device, std::vector<void*>& set) {
