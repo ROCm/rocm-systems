@@ -163,6 +163,13 @@ perfmon_clock_supported()
     return perfmon_clock_supported_for_version(kfd_profiler_version());
 }
 
+bool
+perfmon_clk_override_supported_for_agent(const rocprofiler_agent_t* agent)
+{
+    CHECK(agent);
+    return agent->gfx_target_version >= kPerfmonClkOverrideMinGfxTarget;
+}
+
 uint32_t
 kfd_profiler_version()
 {
@@ -226,8 +233,12 @@ counter_collection_dispatch_perfmon_enable(const rocprofiler_agent_t* agent)
 {
     CHECK(agent);
 
-    // A no-op success on kernels that don't support dispatch mode.
-    if(!perfmon_clock_supported()) return ROCPROFILER_STATUS_SUCCESS;
+    // A no-op success on kernels that don't support dispatch mode, and on agents whose ASIC
+    // doesn't wire up the kernel's perfmon-clock override (the ioctl returns -EOPNOTSUPP there
+    // rather than silently no-op'ing, so this must be checked here rather than left to the
+    // kernel).
+    if(!perfmon_clk_override_supported_for_agent(agent) || !perfmon_clock_supported())
+        return ROCPROFILER_STATUS_SUCCESS;
 
     kfd_ioctl_profiler_args args = {};
     args.op                      = KFD_IOC_PROFILER_PMC;

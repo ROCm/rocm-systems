@@ -188,10 +188,12 @@ start_context(const context::context* ctx)
 
     // Request the dispatch-mode perfmon enable (no-op on older Linux kernels that don't support
     // it); stop_context() doesn't need a release to match: there is no unprivileged "off" ioctl,
-    // and the KFD only clears this when this process's KFD device context is torn down.
+    // and the KFD only clears this when this process's KFD device context is torn down. Scoped to
+    // this context's configured agents (service.collects_on(), empty set == every GPU agent) to
+    // match enable_serialization() above rather than reaching every GPU agent in the process.
     for(const auto& agent : agent::get_agents())
     {
-        if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+        if(agent->type == ROCPROFILER_AGENT_TYPE_GPU && service.collects_on(agent->id))
         {
             counters::counter_collection_dispatch_perfmon_enable(agent);
         }

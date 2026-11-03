@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
@@ -673,6 +674,21 @@ DispatchThreadTracer::start_context()
     const auto serialization_agents = configured_agents();
     CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization(serialization_agents);
     enabled.store(true, std::memory_order_release);
+
+    // Request the dispatch-mode perfmon enable (no-op on older Linux kernels, and on agents
+    // whose ASIC doesn't implement it; see counter_collection_dispatch_perfmon_enable()).
+    // Mirrors counters/core.cpp and spm/core.cpp: ATT perfcounter streaming reads the same
+    // hardware counter blocks as PMC/SPM, and dispatch-scoped ATT is just as exclusivity-free.
+    // Unlike counters/SPM, an empty agent set here means "no agents configured," not "every
+    // agent" (see configured_agents()), so this is scoped to serialization_agents directly
+    // rather than every GPU agent in the process.
+    for(const auto& agent_id : serialization_agents)
+    {
+        if(const auto* agent = agent::get_agent(agent_id))
+        {
+            counters::counter_collection_dispatch_perfmon_enable(agent);
+        }
+    }
 }
 
 void

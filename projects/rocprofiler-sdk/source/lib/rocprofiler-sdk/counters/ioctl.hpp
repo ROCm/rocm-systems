@@ -52,6 +52,21 @@ perfmon_clock_supported_for_version(uint32_t version);
 bool
 perfmon_clock_supported();
 
+// The minimum gfx_target_version at and above which the KFD driver's
+// amdgpu_gfx_perfmon_clk_override() is wired up to a real ASIC implementation
+// (gfx_funcs->set_perfmon_clk_override) -- GFX11 and up, open-ended (every ASIC from here
+// forward is expected to implement it). Below this version the kernel does not silently no-op
+// the dispatch-mode perfmon-clock ioctl -- it returns -EOPNOTSUPP -- so callers must gate on
+// gfx_target_version themselves rather than relying on the ioctl call to be harmless.
+constexpr uint32_t kPerfmonClkOverrideMinGfxTarget = 110000;
+
+// Whether the given agent's gfx_target_version is at or above the ASIC floor where the KFD
+// dispatch-mode perfmon-clock-enable ioctl (see counter_collection_dispatch_perfmon_enable()
+// below) is actually implemented. Exposed separately so it can be unit tested without a real
+// agent/driver.
+bool
+perfmon_clk_override_supported_for_agent(const rocprofiler_agent_t* agent);
+
 bool
 counter_collection_has_device_lock();
 
