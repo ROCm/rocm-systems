@@ -23,6 +23,7 @@
 ///                                     (GFX11/12: op=1 is s_setkill; s_endpgm moved to op=48)
 
 #include "decode_test_util.h"
+#include "gfx11_mimg_test_common.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
@@ -58,6 +59,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -70,6 +72,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <barrier>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -79,6 +82,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -108,7 +112,7 @@ constexpr uint32_t make_cdna1_sop1(uint32_t sdst, uint32_t ssrc0) {
 TEST(OperandLayoutTest, DeferredSelectorStateFitsExistingPadding) {
   EXPECT_EQ(sizeof(Operand), 32u);
   EXPECT_EQ(sizeof(cdna5::Operand), 80u);
-  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 512u);
+  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 480u);
 }
 
 TEST(OperandLayoutTest, DecodedVectorRegistersExcludeScalarAndLiteralSelectors) {
@@ -536,9 +540,9 @@ TEST(DecoderSmokeTest, Gfx1201ImageCachePolicyUsesOperationKind) {
   };
   constexpr TestCase cases[] = {
       {{{0xD0400000u, 0x003C0000u, 0x00000000u, 0x00000000u}},
-       "image_load v0, s[0:7] th:TH_LOAD_BYPASS scope:SCOPE_SYS"},
+       "image_load v0, v0, s[0:7] th:TH_LOAD_BYPASS scope:SCOPE_SYS"},
       {{{0xD0418000u, 0x003C0000u, 0x00000000u, 0x00000000u}},
-       "image_store v0, s[0:7] th:TH_STORE_BYPASS scope:SCOPE_SYS"},
+       "image_store v0, v0, s[0:7] th:TH_STORE_BYPASS scope:SCOPE_SYS"},
       {{{0xD0430000u, 0x003C0000u, 0x00000000u, 0x00000000u}},
        "image_atomic_add_uint v0, s[0:7] th:TH_ATOMIC_NT_RETURN scope:SCOPE_SYS"},
       {{{0xE446C000u, 0x003C0000u, 0x00000000u, 0x00000000u}},
@@ -551,6 +555,25 @@ TEST(DecoderSmokeTest, Gfx1201ImageCachePolicyUsesOperationKind) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, tc.words.data()));
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(inst->disassemble(), tc.expected_disassembly);
+  }
+}
+
+TEST(DecoderSmokeTest, Gfx1201SingleImageAddressUsesCanonicalRegisterSpelling) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &[dim, a16] :
+       {std::pair{amdgpu::kImageDim1d, false}, std::pair{amdgpu::kImageDim2d, true}}) {
+    for (const bool load : {false, true}) {
+      SCOPED_TRACE(testing::Message()
+                   << "dim=" << unsigned{dim} << " a16=" << a16 << " load=" << load);
+      const auto words = rdna4::build_vimage(
+          load ? rdna4::kImageLoadVimage : rdna4::kImageStoreVimage,
+          {.dim = dim, .a16 = a16, .dmask = 1, .vdata = 8, .vaddr0 = 4, .vaddr1 = 9});
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      EXPECT_EQ(inst->disassemble(),
+                load ? "image_load v8, v4, s[0:7]" : "image_store v8, v4, s[0:7]");
+    }
   }
 }
 
@@ -1238,6 +1261,51 @@ TEST(RdnaMimgDecodeTest, NsaStorePreservesExtensionAndNextInstruction) {
     inst.reset(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(inst->size(), 8);
+  }
+}
+
+TEST(RdnaMimgDecodeTest, BvhWidthsAndDependenciesIgnoreDimSizing) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const bool bvh64 : {false, true}) {
+      for (const bool a16 : {false, true}) {
+        for (const bool nsa : {false, true}) {
+          SCOPED_TRACE(testing::Message() << "bvh64=" << bvh64 << " a16=" << a16 << " nsa=" << nsa);
+          const uint8_t vaddr_words = bvh64 ? (a16 ? 9 : 12) : (a16 ? 8 : 11);
+          // Canonical NSA groups that collectively name the same contiguous
+          // v[9:9+vaddr_words-1] control used by the non-NSA form.
+          const uint32_t nsa_word =
+              bvh64 ? (a16 ? 0x000f0c0b : 0x120f0c0b) : (a16 ? 0x000e0b0a : 0x110e0b0a);
+          const test::Gfx11MimgEncoding mimg{
+              .nsa = nsa, .a16 = a16, .vaddr = 9, .vdata = 4, .srsrc = 1, .nsa_word = nsa_word};
+          util::StringDiagnostic error;
+          auto decoded = [&]() -> DecodeResult {
+            if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+              return test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(
+                  *decoder, rdna3::build_mimg,
+                  bvh64 ? rdna3::kImageBvh64IntersectRayMimg : rdna3::kImageBvhIntersectRayMimg,
+                  mimg, error.emitter());
+            return test::decode_gfx11_mimg<rdna3_5::MimgBuilderFields>(
+                *decoder, rdna3_5::build_mimg,
+                bvh64 ? rdna3_5::kImageBvh64IntersectRayMimg : rdna3_5::kImageBvhIntersectRayMimg,
+                mimg, error.emitter());
+          }();
+          ASSERT_TRUE(decoded.succeeded()) << error.message();
+          std::unique_ptr<Instruction> inst = std::move(decoded).value();
+          ASSERT_NE(inst, nullptr);
+          EXPECT_EQ(inst->size(), nsa ? 12 : 8);
+          ASSERT_EQ(inst->num_src_operands(), 2);
+          EXPECT_EQ(inst->src_operand(0)->size_bits(), vaddr_words * 32);
+
+          InstDefUse def_use(*inst, 64);
+          EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 9, vaddr_words}));
+          EXPECT_FALSE(
+              def_use.uses.contains({RegClass::VGPR, static_cast<uint16_t>(9 + vaddr_words), 1}));
+        }
+      }
+    }
   }
 }
 
@@ -1937,6 +2005,58 @@ make_vopdxy_pair(uint8_t opx, uint8_t opy, uint16_t srcx0 = vopd_src0_vgpr(1), u
           (static_cast<uint32_t>(vsrcy1) << 9) | (srcy0 & 0x1FFu),
       literal,
   };
+}
+
+TEST(InstructionDisassemblyTest, ConcurrentFormattingReturnsIndependentText) {
+  const struct {
+    rj_code_arch_t arch;
+    std::array<uint32_t, 3> words;
+    const char *expected;
+  } cases[] = {
+      {ROCJITSU_CODE_ARCH_CDNA4, {S_NOP, 0, 0}, "s_nop 0"},
+      {ROCJITSU_CODE_ARCH_RDNA3,
+       {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu},
+       "v_dual_mul_f32 v4, 0x4f7ffffe, v3 :: v_dual_mov_b32 v3, 0"},
+      {ROCJITSU_CODE_ARCH_RDNA3_5,
+       {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu},
+       "v_dual_mul_f32 v4, 0x4f7ffffe, v3 :: v_dual_mov_b32 v3, 0"},
+      {ROCJITSU_CODE_ARCH_RDNA4,
+       {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu},
+       "v_dual_mul_f32 v4, 0x4f7ffffe, v3 :: v_dual_mov_b32 v3, 0"},
+      {ROCJITSU_CODE_ARCH_CDNA5,
+       {0xCF455083u, 0x00000086u, 0x0A000001u},
+       "v_dual_lshlrev_b32 v1, 3, v0 :: v_dual_lshrrev_b32 v10, 6, v0"},
+  };
+  for (const auto &tc : cases) {
+    SCOPED_TRACE(tc.arch);
+    auto decoder = Decoder::create(tc.arch);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, tc.words.data()));
+    ASSERT_NE(inst, nullptr);
+
+    constexpr size_t thread_count = 4;
+    std::barrier start(thread_count);
+    std::array<std::string, thread_count> text;
+    std::vector<std::thread> threads;
+    for (size_t i = 0; i < thread_count; ++i) {
+      threads.emplace_back([&, i] {
+        start.arrive_and_wait();
+        for (int repeat = 0; repeat < 32; ++repeat) {
+          text[i] = inst->disassemble();
+          EXPECT_EQ(text[i], tc.expected);
+        }
+      });
+    }
+    for (auto &thread : threads)
+      thread.join();
+
+    text[0].clear();
+    EXPECT_EQ(inst->disassemble(), tc.expected);
+    inst.reset();
+    decoder.reset();
+    for (size_t i = 1; i < thread_count; ++i)
+      EXPECT_EQ(text[i], tc.expected);
+  }
 }
 
 class RdnaVopdDecodeSmokeTest : public ::testing::TestWithParam<VopdDecodeCase> {};

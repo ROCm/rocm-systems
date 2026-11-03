@@ -4,7 +4,7 @@
 
 - CMake 3.22+ (3.28+ when `ROCJITSU_ENABLE_VFIO=ON`)
 - C++20 compiler (GCC 13+, Clang 16+)
-- Python 3.10+ (for ISA code generation and the VFIO guest launcher)
+- Python 3.10+ (for ISA code generation, the VFIO guest launcher, and the Python execution API)
 - `runtimes/api-headers` from the same source checkout (HSA and Linux UAPI headers)
 - ROCm toolchain (optional, for HIP test kernels and daemon tests)
 

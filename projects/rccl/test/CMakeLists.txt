@@ -182,8 +182,9 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/gensrc # for rccl_bfloat16.h
     ${PROJECT_BINARY_DIR}/hipify/src # for graph/topo.h
     ${PROJECT_BINARY_DIR}/hipify/src/include/plugin # for recorder tests, nccl_tuner.h
-    ${PROJECT_BINARY_DIR}/hipify/src/transport/net_ib_cast # for net_ib_fault_inject.h, net_ib_cast_inspect.h
+    ${PROJECT_BINARY_DIR}/hipify/src/transport/net_ib_cast # for net_ib_fault_inject.h, net_ib_cast_inspect.h, net_ib_qp_sharing_inspect.h
     ${PROJECT_BINARY_DIR}/hipify/src/transport             # for net_ib_limits.h
+    ${PROJECT_BINARY_DIR}/hipify/src/gin                   # for gin_rocshmem_gda_inspect.h
     ${ROCM_PATH}/include
     ${ROCM_PATH}
   )
@@ -310,6 +311,8 @@ if(BUILD_TESTS)
     StandaloneTests.cpp
     SymmetricInPlaceSliceTests.cpp
     DdaIpcTests.cpp
+    # Also in rccl-UnitTestsFixtures; built here without DWORDX4_INTRINSICS_FORCE_OFF, so it runs the b128 re-read.
+    device/DdaReduceScatterFabricLLTests.cpp
     NetPluginReloadTests.cpp
     GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
@@ -410,6 +413,7 @@ if(BUILD_TESTS)
       device/RcclEpTests.cpp
       device/LlFifoSysScopeTests.cpp
       device/DdaIpcGpuBarrierOrderingTests.cpp
+      device/DdaReduceScatterFabricLLTests.cpp
       device/DdaVecElementAddTests.cpp
       device/DdaLL128PollWireTests.cpp
       device/TestTDM.cpp
@@ -717,6 +721,33 @@ if(BUILD_TESTS)
   add_test(NAME rccl-UnitTestsGinSdmaPolicy COMMAND rccl-UnitTestsGinSdmaPolicy)
   set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
 
+  # GinScatter local reduce on one GPU. Runs ginScatterReduceChunk against a fake
+  # scratch and a host sum, for staged and full-column layouts, including
+  # multi-rank sums at 64 MiB and 1 GiB. No librccl. Skips when no GPU is visible.
+  # Registered in the test-runner configs so CI runs it with the other unit tests.
+  add_executable(rccl-UnitTestsGinScatterReduceGpu gin/gin_scatter_reduce_gpu_test.cpp)
+  set_source_files_properties(gin/gin_scatter_reduce_gpu_test.cpp PROPERTIES LANGUAGE CXX)
+  target_include_directories(rccl-UnitTestsGinScatterReduceGpu PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/include
+    ${PROJECT_SOURCE_DIR}/src)
+  set(_gin_scatter_gpu_offload "")
+  foreach(_g IN LISTS GPU_TARGETS)
+    if(_g)
+      list(APPEND _gin_scatter_gpu_offload "--offload-arch=${_g}")
+    endif()
+  endforeach()
+  if(_gin_scatter_gpu_offload)
+    target_compile_options(rccl-UnitTestsGinScatterReduceGpu PRIVATE ${_gin_scatter_gpu_offload})
+    target_link_options(rccl-UnitTestsGinScatterReduceGpu PRIVATE ${_gin_scatter_gpu_offload})
+  endif()
+  target_link_libraries(rccl-UnitTestsGinScatterReduceGpu PRIVATE
+    ${GTEST_BOTH_LIBRARIES} hip::host hip::device Threads::Threads)
+  set_target_properties(rccl-UnitTestsGinScatterReduceGpu PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+  add_test(NAME rccl-UnitTestsGinScatterReduceGpu COMMAND rccl-UnitTestsGinScatterReduceGpu)
+  set_tests_properties(rccl-UnitTestsGinScatterReduceGpu PROPERTIES LABELS "unit;gpu")
+
   # utility.h as plain C++ for its !NCCL_DEVICE_COMPILE branches; not with CXX=hipcc, which defines __HIPCC__ and fails strict CI.
   add_executable(rccl-UnitTestsUtilityHostOnly NcclUtilityHostOnlyTests.cpp)
   set_source_files_properties(NcclUtilityHostOnlyTests.cpp PROPERTIES LANGUAGE CXX)
@@ -849,6 +880,7 @@ if(BUILD_TESTS)
       transport/NetIbCast/NetIbCastPlaneSubnetTests.cpp
       transport/NetIbCast/NetIbCastMultiplaneTests.cpp
       transport/NetIbCast/NetIbCastUdmaTests.cpp
+      transport/Gin/GinMtuNegotiationTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
@@ -1074,6 +1106,7 @@ if(BUILD_TESTS)
       transport/NetIbMPI/NetIbWqeLatMonTests.cpp
       transport/RmaMPI/RmaMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
+      transport/NetIbMPI/QpSharingTests.cpp
       transport/GinDeviceMPITests.cpp
       transport/GinNicFusionMPITests.cpp
       WarpSpeedMPITests.cpp
