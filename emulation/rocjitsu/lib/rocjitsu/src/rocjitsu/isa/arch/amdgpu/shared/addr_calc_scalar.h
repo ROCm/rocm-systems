@@ -114,7 +114,7 @@ std::optional<uint64_t> smem_calculate_address(const SmemInst &inst, amdgpu::Wav
     wf.report_undefined_behavior("negative combined scalar-memory offset");
   inst_offset &= ~0x3LL;
   reg_offset &= kDwordMask;
-  if (smem_is_buffer_load_op(inst.op))
+  if (gfx9_smem_is_buffer_op(inst.op))
     return scalar_buffer_address(wf, inst.sbase * 2, *base, inst_offset + reg_offset, state);
   const uint64_t addr = *base + inst_offset + reg_offset;
   util::Logger::vm([&](auto &os) {
@@ -146,7 +146,10 @@ void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMem
   uint32_t offset = (static_cast<uint32_t>(inst.offset1) << 8) | inst.offset0;
   RegisterAccess regs(cu);
   auto addr_region = regs.read_vgpr_region(wf.vgpr_alloc().base + inst.addr, 1, exec);
-  const std::span<const uint32_t> addresses = addr_region.lanes();
+  auto maybe_addresses = addr_region.lanes();
+  if (maybe_addresses.failed())
+    return;
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;

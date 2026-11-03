@@ -9,6 +9,7 @@
 //! callback is retained. Failed native detach retains the VA and backing so a
 //! GPU address cannot be reused while it may still be mapped.
 
+use crate::memory::storage::TryPush;
 use std::os::fd::AsRawFd;
 
 use super::drm;
@@ -20,17 +21,13 @@ use super::vmem::{
 };
 use super::{error, native_error};
 use super::{os_file, os_memory};
-use crate::host_storage::{Buffer, Owned, Shared};
 use crate::memory::interop::linux::DmaBuf;
+use crate::memory::storage::{Owned, Shared};
 use crate::memory::{AllocationInfo, DeviceAccess};
 use crate::{Error, ErrorKind};
 
-fn local_gem(
-    render: &std::fs::File,
-    handle: u32,
-    allocator: crate::host_storage::Allocator,
-) -> Result<bool, Error> {
-    let mut entries = Buffer::new(allocator);
+fn local_gem(render: &std::fs::File, handle: u32) -> Result<bool, Error> {
+    let mut entries = Vec::new();
     for _ in 0..4 {
         let count = drm::list_gem_handles(render, entries.as_mut_slice())
             .map_err(|source| native_error("DRM GEM handle query", source))?;
@@ -68,7 +65,7 @@ fn validate_backing(vm: &DeviceVm, memory: &KfdVirtualMemory) -> Result<(), Erro
         .dma_buf_info(dma_buf.as_raw_fd())
         .map_err(|source| native_error("AMDKFD_IOC_GET_DMABUF_INFO", source))?;
     let kfd = details.info;
-    if kfd.gpu_id != vm.gpu_id() || kfd.flags & !uapi::PUBLIC != uapi::GTT {
+    if kfd.gpu_id != vm.gpu_id || kfd.flags & !uapi::PUBLIC != uapi::GTT {
         return Err(error(
             ErrorKind::Unsupported,
             "DMA-BUF is not same-device SYSTEM/GTT storage",
@@ -84,7 +81,7 @@ fn validate_backing(vm: &DeviceVm, memory: &KfdVirtualMemory) -> Result<(), Erro
     // A separate render file gives qualification its own GEM namespace. File
     // closure releases this temporary handle without touching any live VM
     // mapping, including an earlier import of the same physical backing.
-    let render = sysfs::open_render(vm.render_minor())
+    let render = sysfs::open_render(vm.render_minor)
         .map_err(|source| native_error("DMA-BUF qualification render open", source))?;
     let handle = drm::import_dma_buf(&render, dma_buf.as_raw_fd())
         .map_err(|source| native_error("DRM DMA-BUF qualification import", source))?;
@@ -101,7 +98,7 @@ fn validate_backing(vm: &DeviceVm, memory: &KfdVirtualMemory) -> Result<(), Erro
         || info.domains != drm::GEM_DOMAIN_GTT
         || info.flags & required != required
         || info.flags & excluded != 0
-        || !local_gem(&render, handle, vm.allocator())?
+        || !local_gem(&render, handle)?
     {
         return Err(error(
             ErrorKind::Unsupported,
@@ -113,15 +110,25 @@ fn validate_backing(vm: &DeviceVm, memory: &KfdVirtualMemory) -> Result<(), Erro
 
 /// One imported physical backing and its host/device views at a common VA.
 pub(crate) struct DrmImportedSystem {
+    /// Creating render VM retained through import cleanup.
     owner: Shared<DeviceVm>,
+    /// Imported physical backing owner.
     memory: Option<Owned<KfdVirtualMemory>>,
+    /// Common virtual address reservation.
     address: Option<Owned<KfdVirtualAddress>>,
+    /// Device mapping of the imported backing.
     mapping: Option<Owned<KfdVirtualDeviceMapping>>,
+    /// Host mapping of the imported backing.
     host: Option<Owned<KfdVirtualHostMapping>>,
+    /// Byte offset into the source DMA-BUF.
     source_offset: u64,
+    /// Public byte extent requested by the caller.
     logical_size: u64,
+    /// Native physical extent covering that request.
     native_size: u64,
+    /// Stable identity of the imported physical backing.
     physical_backing_id: [u64; 2],
+    /// Prevents new mappings once release begins.
     freeing: bool,
 }
 
@@ -135,7 +142,7 @@ impl DrmImportedSystem {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Owned<Self>, Error> {
-        if !vm.supports_system_dma_buf_import() {
+        if !vm.system_dma_buf_import {
             return Err(error(
                 ErrorKind::Unsupported,
                 "DRM system import is unavailable",
@@ -157,8 +164,8 @@ impl DrmImportedSystem {
             ));
         }
         vm.check()?;
-        let allocator = vm.allocator();
-        let memory = KfdVirtualMemory::import(descriptor, allocator)?;
+
+        let memory = KfdVirtualMemory::import(descriptor)?;
         let native_size = memory.info().size;
         if native_size == 0
             || native_size % page != 0
@@ -172,9 +179,8 @@ impl DrmImportedSystem {
             ));
         }
         validate_backing(&vm, &memory)?;
-        let address =
-            KfdVirtualAddress::reserve(vm.address_range(), native_size, alignment, 0, allocator)?;
-        let slot = Owned::<Self>::try_new_uninit(allocator)?;
+        let address = KfdVirtualAddress::reserve(vm.address_range(), native_size, alignment, 0)?;
+        let slot = Owned::<Self>::try_new_uninit()?;
         let mut imported = slot.write(Self {
             owner: vm.clone(),
             physical_backing_id: memory.info().physical_backing_id,
@@ -225,7 +231,6 @@ impl DrmImportedSystem {
             0,
             native_size,
             DeviceAccess::READ | DeviceAccess::WRITE,
-            allocator,
         )?;
         imported.host = Some(host);
         imported.owner.check()?;
@@ -273,7 +278,7 @@ impl DrmImportedSystem {
     }
 
     pub(crate) fn is_owned_by(&self, device: &Shared<DeviceVm>) -> bool {
-        self.owner.shares_kfd(device) && self.owner.gpu_id() == device.gpu_id()
+        self.owner.shares_kfd(device) && self.owner.gpu_id == device.gpu_id
     }
 
     pub(crate) fn export_dma_buf(&self) -> Result<DmaBuf, Error> {
@@ -308,7 +313,8 @@ impl DrmImportedSystem {
 
 impl Drop for DrmImportedSystem {
     fn drop(&mut self) {
-        if self.free().is_err() {
+        if let Err(error) = self.free() {
+            crate::memory::device::record_rollback(error, 0);
             if let Some(mapping) = self.mapping.take() {
                 std::mem::forget(mapping);
             }

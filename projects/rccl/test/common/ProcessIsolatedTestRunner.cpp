@@ -587,6 +587,19 @@ void ProcessIsolatedTestRunner::displayCapturedOutput(
     flush(std::cerr, output.stderrContent);
 }
 
+void ProcessIsolatedTestRunner::exitChild(int code)
+{
+    fflush(NULL);
+#if defined(RCCL_TEST_CODE_COVERAGE)
+    __llvm_profile_write_file();
+    using WriteFn = int (*)(void);
+    auto libWrite = reinterpret_cast<WriteFn>(
+        dlsym(RTLD_DEFAULT, "rcclCoverageWriteFile"));
+    if(libWrite) libWrite();
+#endif
+    _exit(code);
+}
+
 // Re-exec child entrypoint: if kReexecMarkerEnvVar is set, runs the named test
 // and _exit()s with the result. Returns normally only in the original parent.
 void ProcessIsolatedTestRunner::handleReexecEntrypoint(
@@ -603,16 +616,7 @@ void ProcessIsolatedTestRunner::handleReexecEntrypoint(
     {
         if(testConfig.name == target)
         {
-            int result = runTestInProcess(testConfig);
-            fflush(NULL);
-#if defined(RCCL_TEST_CODE_COVERAGE)
-            __llvm_profile_write_file();
-            using WriteFn = int (*)(void);
-            auto libWrite = reinterpret_cast<WriteFn>(
-                dlsym(RTLD_DEFAULT, "rcclCoverageWriteFile"));
-            if(libWrite) libWrite();
-#endif
-            _exit(result);
+            exitChild(runTestInProcess(testConfig));
         }
     }
 

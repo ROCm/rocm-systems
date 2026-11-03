@@ -317,6 +317,50 @@ uint32_t EnvOrDefault(const char *name, uint32_t fallback) {
     return fallback;
 }
 
+/**
+ * @brief A crop rectangle that the decode APIs must reject for the 16x16 ColorSeedJpeg.
+ */
+struct InvalidCropCase {
+    const char *name;
+    int16_t left;
+    int16_t top;
+    int16_t right;
+    int16_t bottom;
+};
+
+/**
+ * @brief Crop rectangles that do not lie within a 16x16 image.
+ *
+ * The offset case mirrors a crop sized to fit the image but positioned so that
+ * it runs past the right and bottom edges, which was previously accepted.
+ */
+const std::vector<InvalidCropCase> &InvalidCropCases() {
+    static const std::vector<InvalidCropCase> kCases = {
+        {"right past the image width", 0, 0, 32, 16},
+        {"bottom past the image height", 0, 0, 16, 32},
+        {"image-sized crop at an offset", 8, 8, 24, 24},
+        {"negative left", -2, 0, 8, 8},
+        {"negative top", 0, -2, 8, 8},
+        {"right before left", 8, 0, 4, 8},
+        {"bottom before top", 0, 8, 8, 4},
+        {"zero width", 4, 4, 4, 8},
+    };
+    return kCases;
+}
+
+/**
+ * @brief Builds decode parameters with the crop rectangle of the given case.
+ */
+RocJpegDecodeParams CropDecodeParams(const InvalidCropCase &crop_case) {
+    RocJpegDecodeParams decode_params = {};
+    decode_params.output_format = ROCJPEG_OUTPUT_NATIVE;
+    decode_params.crop_rectangle.left = crop_case.left;
+    decode_params.crop_rectangle.top = crop_case.top;
+    decode_params.crop_rectangle.right = crop_case.right;
+    decode_params.crop_rectangle.bottom = crop_case.bottom;
+    return decode_params;
+}
+
 }  // namespace
 
 RocJpegApiNegativeTests:: RocJpegApiNegativeTests() {};
@@ -645,11 +689,202 @@ int RocJpegApiNegativeTests::TestInvalidDecode() {
        return EXIT_FAILURE;
    }
 
+   // Scenario 5: Pass a crop rectangle that does not lie within the image, to rocJpegDecode and rocJpegDecodeAsync
+   const std::vector<uint8_t> &seed = ColorSeedJpeg();
+   rocjpeg_status = rocJpegStreamParse(seed.data(), seed.size(), rocjpeg_stream_handle_);
+   if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+       std::cerr << "Expected ROCJPEG_STATUS_SUCCESS when parsing the 16x16 seed JPEG but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+       return EXIT_FAILURE;
+   }
+   RocJpegImage destination = {};
+   for (const auto &crop_case : InvalidCropCases()) {
+       decode_params = CropDecodeParams(crop_case);
+       rocjpeg_status = rocJpegDecode(rocjpeg_handle_, rocjpeg_stream_handle_, &decode_params, &destination);
+       if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+           std::cerr << "rocJpegDecode with crop rectangle (" << crop_case.name << "): Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                     << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+           return EXIT_FAILURE;
+       }
+       rocjpeg_status = rocJpegDecodeAsync(rocjpeg_handle_, rocjpeg_stream_handle_, &decode_params, &destination);
+       if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+           std::cerr << "rocJpegDecodeAsync with crop rectangle (" << crop_case.name << "): Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                     << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+           return EXIT_FAILURE;
+       }
+       // A rejected submit must not leave a decode pending for the destination.
+       rocjpeg_status = rocJpegDecodeSync(rocjpeg_handle_, &destination);
+       if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+           std::cerr << "rocJpegDecodeSync after a rejected crop rectangle (" << crop_case.name << "): Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                     << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+           return EXIT_FAILURE;
+       }
+   }
+
    return EXIT_SUCCESS;
 }
 
 int RocJpegApiNegativeTests::TestInvalidDecodeBatched() {
     std::cout << "info: Executing negative test cases for the rocJpegDecodeBatched API" << std::endl;
+    // Scenario 1: Pass a batch whose second image has a crop rectangle that does not lie within the image, to
+    // rocJpegDecodeBatched and rocJpegDecodeBatchedAsync. The first image requests no cropping, and the whole batch
+    // must be rejected before it is submitted.
+    const std::vector<uint8_t> &seed = ColorSeedJpeg();
+    RocJpegStatus rocjpeg_status = rocJpegStreamParse(seed.data(), seed.size(), rocjpeg_stream_handle_);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS when parsing the 16x16 seed JPEG but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    RocJpegStreamHandle stream_handles[2] = {rocjpeg_stream_handle_, rocjpeg_stream_handle_};
+    RocJpegImage destinations[2] = {};
+    RocJpegDecodeParams decode_params[2] = {};
+    for (const auto &crop_case : InvalidCropCases()) {
+        decode_params[1] = CropDecodeParams(crop_case);
+        rocjpeg_status = rocJpegDecodeBatched(rocjpeg_handle_, stream_handles, 2, decode_params, destinations);
+        if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+            std::cerr << "rocJpegDecodeBatched with crop rectangle (" << crop_case.name << "): Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        rocjpeg_status = rocJpegDecodeBatchedAsync(rocjpeg_handle_, stream_handles, 2, decode_params, destinations);
+        if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+            std::cerr << "rocJpegDecodeBatchedAsync with crop rectangle (" << crop_case.name << "): Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        // A rejected submit must not leave decodes pending for any destination in the batch. Check each destination
+        // on its own first: rocJpegDecodeBatchedSync stops at the first destination with nothing pending, so on its
+        // own it would also pass if only some destinations of the batch were left pending.
+        for (int k = 0; k < 2; k++) {
+            rocjpeg_status = rocJpegDecodeSync(rocjpeg_handle_, &destinations[k]);
+            if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+                std::cerr << "rocJpegDecodeSync for destination " << k << " after a rejected crop rectangle (" << crop_case.name
+                          << "): Expected ROCJPEG_STATUS_INVALID_PARAMETER but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
+        rocjpeg_status = rocJpegDecodeBatchedSync(rocjpeg_handle_, destinations, 2);
+        if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+            std::cerr << "rocJpegDecodeBatchedSync after a rejected crop rectangle (" << crop_case.name << "): Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
+int RocJpegApiNegativeTests::TestInvalidGetDecoderCaps() {
+    std::cout << "info: Executing negative test cases for the rocJpegGetDecoderCaps API" << std::endl;
+    RocJpegDecodeCaps decode_caps = {};
+    // Scenario 1: Pass nullptr for all parameters
+    RocJpegStatus rocjpeg_status = rocJpegGetDecoderCaps(nullptr, nullptr);
+    if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+        std::cerr << "Expected ROCJPEG_STATUS_INVALID_PARAMETER but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    // Scenario 2: Pass nullptr for handle
+    rocjpeg_status = rocJpegGetDecoderCaps(nullptr, &decode_caps);
+    if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+        std::cerr << "Expected ROCJPEG_STATUS_INVALID_PARAMETER but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    // Scenario 3: Pass valid handle but nullptr for decode_caps
+    rocjpeg_status = rocJpegGetDecoderCaps(rocjpeg_handle_, nullptr);
+    if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+        std::cerr << "Expected ROCJPEG_STATUS_INVALID_PARAMETER but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    // Scenario 4: Query handles whose rocJpegCreate failed (unsupported backend, invalid device_id);
+    // decode_caps must be fully zeroed.
+    const struct {
+        RocJpegBackend backend;
+        int device_id;
+    } failed_creates[] = {{ROCJPEG_BACKEND_HYBRID, 0}, {ROCJPEG_BACKEND_HARDWARE, 255}};
+    for (const auto &failed_create : failed_creates) {
+        RocJpegHandle handle = nullptr;
+        rocjpeg_status = rocJpegCreate(failed_create.backend, failed_create.device_id, &handle);
+        if (rocjpeg_status == ROCJPEG_STATUS_SUCCESS || handle == nullptr) {
+            std::cerr << "Expected rocJpegCreate to fail with a non-null handle for backend " << failed_create.backend
+                      << " and device_id " << failed_create.device_id << std::endl;
+            if (handle != nullptr) {
+                rocJpegDestroy(handle);
+            }
+            return EXIT_FAILURE;
+        }
+        memset(&decode_caps, 0xFF, sizeof(decode_caps));
+        rocjpeg_status = rocJpegGetDecoderCaps(handle, &decode_caps);
+        rocJpegDestroy(handle);
+        if (rocjpeg_status != ROCJPEG_STATUS_NOT_INITIALIZED) {
+            std::cerr << "Expected ROCJPEG_STATUS_NOT_INITIALIZED but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        const uint8_t *bytes = reinterpret_cast<const uint8_t *>(&decode_caps);
+        for (size_t i = 0; i < sizeof(decode_caps); i++) {
+            if (bytes[i] != 0) {
+                std::cerr << "Expected a zeroed RocJpegDecodeCaps for a failed rocJpegCreate" << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
+    }
+
+    // Scenario 5: Pass a valid handle; the reported capabilities must be self-consistent.
+    memset(&decode_caps, 0xFF, sizeof(decode_caps));
+    rocjpeg_status = rocJpegGetDecoderCaps(rocjpeg_handle_, &decode_caps);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    const uint32_t rgb_output_formats = (1u << ROCJPEG_OUTPUT_RGB) | (1u << ROCJPEG_OUTPUT_RGB_PLANAR);
+    bool reserved_zero = true;
+    for (uint32_t value : decode_caps.reserved) {
+        reserved_zero = reserved_zero && (value == 0);
+    }
+    // These fields do not depend on which formats the VA-API driver advertises, so they are always reported.
+    if (decode_caps.is_supported > 1 || decode_caps.roi_decode > 1 || decode_caps.hw_roi_decode > 1 ||
+        decode_caps.max_components != 3 || decode_caps.num_jpeg_cores < 1 ||
+        decode_caps.min_width == 0 || decode_caps.min_width > decode_caps.max_width ||
+        decode_caps.min_height == 0 || decode_caps.min_height > decode_caps.max_height ||
+        !reserved_zero) {
+        std::cerr << "Inconsistent RocJpegDecodeCaps reported for a valid rocJPEG handle" << std::endl;
+        return EXIT_FAILURE;
+    }
+    if (decode_caps.is_supported) {
+        if (decode_caps.subsampling_mask == 0 || (decode_caps.subsampling_mask & (1u << ROCJPEG_CSS_411)) != 0 ||
+            decode_caps.output_format_mask != (1u << ROCJPEG_OUTPUT_FORMAT_MAX) - 1 ||
+            decode_caps.coding_process_mask != (1u << ROCJPEG_CODING_PROCESS_BASELINE) ||
+            (decode_caps.hw_rgb_subsampling_mask & ~decode_caps.subsampling_mask) != 0 ||
+            (decode_caps.hw_rgb_output_format_mask & ~rgb_output_formats) != 0 ||
+            (decode_caps.hw_rgb_subsampling_mask == 0) != (decode_caps.hw_rgb_output_format_mask == 0)) {
+            std::cerr << "Inconsistent RocJpegDecodeCaps reported for a supported rocJPEG handle" << std::endl;
+            return EXIT_FAILURE;
+        }
+    } else {
+        // rocJpegGetDecoderCaps returns success with is_supported == 0 when the VA-API driver advertises none of
+        // the surface formats the VCN JPEG decoder writes. Every format-dependent field must then be zero.
+        std::cout << "info: the decoder reports no supported chroma subsampling; checking the zeroed fields" << std::endl;
+        if (decode_caps.subsampling_mask != 0 || decode_caps.output_format_mask != 0 ||
+            decode_caps.coding_process_mask != 0 || decode_caps.hw_rgb_subsampling_mask != 0 ||
+            decode_caps.hw_rgb_output_format_mask != 0) {
+            std::cerr << "Expected zeroed format fields for an unsupported rocJPEG handle" << std::endl;
+            return EXIT_FAILURE;
+        }
+    }
+    // A subsampling is supported exactly when it reports its native surface format.
+    const uint32_t expected_native_formats[ROCJPEG_NUM_CHROMA_SUBSAMPLINGS] = {
+        ROCJPEG_SURFACE_FORMAT_YUV444P, ROCJPEG_SURFACE_FORMAT_YUV440P, ROCJPEG_SURFACE_FORMAT_YUYV,
+        ROCJPEG_SURFACE_FORMAT_NV12, ROCJPEG_SURFACE_FORMAT_NONE, ROCJPEG_SURFACE_FORMAT_Y8};
+    for (int css = 0; css < ROCJPEG_NUM_CHROMA_SUBSAMPLINGS; css++) {
+        bool css_supported = (decode_caps.subsampling_mask & (1u << css)) != 0;
+        uint32_t expected = css_supported ? expected_native_formats[css] : ROCJPEG_SURFACE_FORMAT_NONE;
+        if (decode_caps.native_surface_format[css] != expected) {
+            std::cerr << "Unexpected native_surface_format " << decode_caps.native_surface_format[css]
+                      << " for chroma subsampling " << css << std::endl;
+            return EXIT_FAILURE;
+        }
+    }
+
     return EXIT_SUCCESS;
 }
 
@@ -1452,7 +1687,7 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
 int RocJpegApiNegativeTests::RunTests() {
     if (TestInvalidStreamCreate() || TestInvalidStreamParse () || TestInvalidStreamDestroy() || TestInvalidCreate() || TestInvalidDestroy() ||
         TestInvalidGetImageInfo() || TestInvalidDecode() || TestInvalidDecodeBatched() || TestInvalidGetErrorName() ||
-        TestStreamParseFuzz()) {
+        TestInvalidGetDecoderCaps() || TestStreamParseFuzz()) {
         std::cerr << "One or more negative tests failed." << std::endl;
         return EXIT_FAILURE;
     } else {

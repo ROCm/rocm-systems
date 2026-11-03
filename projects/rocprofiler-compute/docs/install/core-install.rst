@@ -114,7 +114,7 @@ Install the analyze mode dependencies
 =====================================
 
 Profile mode uses only the standard library. Analyze mode needs packages such as
-``numpy``, ``pandas``, ``dash``, and ``textual``, at the versions it pins.
+``numpy``, ``pandas``, ``plotly``, and ``rich``, at the versions it pins.
 
 Install them into a virtual environment of their own, separate from the one your
 profiled application uses. Those pins can conflict with a workload that brings

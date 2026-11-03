@@ -18,7 +18,7 @@ TEST_F(NetIbMPITest, OptRecvCompletionFlagEnabled) {
 
   ConnectionPair pair;
   NetConnectionGuard connGuard(net_);
-  SetupConnectionWithGuard(0, pair, connGuard);
+  ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
   const int rank = MPIEnvironment::world_rank;
   void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
@@ -37,7 +37,7 @@ TEST_F(NetIbMPITest, OptRecvCompletionFlagDisabledByQpSched) {
 
   ConnectionPair pair;
   NetConnectionGuard connGuard(net_);
-  SetupConnectionWithGuard(0, pair, connGuard);
+  ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
   const int rank = MPIEnvironment::world_rank;
   void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
@@ -59,7 +59,7 @@ TEST_F(NetIbMPITest, OptRecvCompletionDisabledKeepsRecvSize) {
 
   ConnectionPair pair;
   NetConnectionGuard connGuard(net_);
-  SetupConnectionWithGuard(0, pair, connGuard);
+  ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
   const size_t bufferSize = kSmallBufferSize;
   const int tag = 78;
@@ -117,7 +117,7 @@ TEST_F(NetIbMPITest, OptRecvCompletionSkipWritePath) {
 
   ConnectionPair pair;
   NetConnectionGuard connGuard(net_);
-  SetupConnectionWithGuard(0, pair, connGuard);
+  ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
   const size_t bufferSize = kSmallBufferSize;
   const int tag = 77;
@@ -174,7 +174,7 @@ void NetIbMPITest::OptRecvCompletionRunMultiRecv(bool optRecvHint) {
   const int rank = MPIEnvironment::world_rank;
   ConnectionPair pair;
   NetConnectionGuard connGuard(net_);
-  SetupConnectionWithGuard(0, pair, connGuard);
+  ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
   constexpr int kN = 4;
   size_t sizes[kN] = {64, 1024, 4096, 65536};

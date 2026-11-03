@@ -10,7 +10,7 @@
 #![allow(unsafe_code)]
 
 use super::errno;
-use libc::{F_DUPFD_CLOEXEC, close, fcntl};
+use libc::close;
 use std::fs::File;
 use std::io;
 use std::os::fd::{FromRawFd, IntoRawFd};
@@ -30,13 +30,13 @@ pub(crate) fn duplicate_file(descriptor: i32) -> io::Result<File> {
     if descriptor < 0 {
         return Err(io::Error::from(io::ErrorKind::InvalidInput));
     }
-    // SAFETY: fcntl borrows the caller descriptor and returns a new descriptor
-    // owned by the caller on success. The zero third argument is the lower bound.
-    let duplicate = unsafe { fcntl(descriptor, F_DUPFD_CLOEXEC, 0) };
+    // SAFETY: fcntl validates this raw integer in the kernel. A stale or
+    // closed descriptor reports EBADF without creating a Rust BorrowedFd.
+    let duplicate = unsafe { libc::fcntl(descriptor, libc::F_DUPFD_CLOEXEC, 0) };
     if duplicate < 0 {
         return Err(io::Error::last_os_error());
     }
-    // SAFETY: fcntl returned a new descriptor that this File now owns.
+    // SAFETY: A successful F_DUPFD_CLOEXEC returns a new owned descriptor.
     Ok(unsafe { File::from_raw_fd(duplicate) })
 }
 

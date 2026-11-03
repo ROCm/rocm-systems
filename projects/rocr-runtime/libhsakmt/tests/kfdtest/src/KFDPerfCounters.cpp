@@ -288,6 +288,13 @@ void KFDPerfCountersTest::ClockCountersBasicTest(int gpuNode) {
     EXPECT_GT(counters2.GPUClockCounter, counters1.GPUClockCounter);
     EXPECT_GT(counters2.SystemClockCounter, counters1.SystemClockCounter);
 
+    HsaClockCounters precise;
+    EXPECT_SUCCESS(hsaKmtGetClockCountersPrecise(gpuNode, &precise));
+    EXPECT_NE(0, precise.GPUClockCounter);
+    EXPECT_NE(0, precise.SystemClockCounter);
+    EXPECT_GE(precise.GPUClockCounter, counters2.GPUClockCounter);
+    EXPECT_GE(precise.SystemClockCounter, counters2.SystemClockCounter);
+
 }
 
 TEST_F(KFDPerfCountersTest, ClockCountersBasicTest) {

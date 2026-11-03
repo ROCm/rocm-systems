@@ -199,7 +199,9 @@ bool RocJpegVaapiMemoryPool::DeleteIdleEntry() {
  * idle entry exists, every entry is still in flight and the pool is allowed to grow past the target:
  * on a GPU with a single JPEG core the batched decoder submits one image per call, so each image in
  * the batch holds its own busy entry and a batch larger than the target legitimately needs more live
- * entries than the target allows. Failing here would reject valid work.
+ * entries than the target allows. Failing here would reject valid work. An entry also stays busy
+ * until every one of its surfaces is released, so a caller that syncs only some images of a batched
+ * decode before submitting again can likewise grow the pool past the target until the rest are released.
  *
  * @param surface_format The surface format for which the pool entry is being added.
  * @param pool_entry The pool entry to be added.
@@ -231,10 +233,11 @@ RocJpegVaapiMemPoolEntry RocJpegVaapiMemoryPool::GetEntry(uint32_t surface_forma
     for (auto& entry : mem_pool_[surface_format]) {
         if (entry.image_width >= image_width && entry.image_height >= image_height && entry.va_surface_ids.size() == num_surfaces && entry.entry_status == kIdle) {
             entry.entry_status = kBusy;
+            std::fill(entry.surface_status.begin(), entry.surface_status.end(), kBusy);
             return entry;
         }
     }
-    return {0, 0, kIdle, {}, {}};
+    return {0, 0, kIdle, {}, {}, {}};
 }
 
 bool RocJpegVaapiMemoryPool::FindSurfaceId(VASurfaceID surface_id) {
@@ -368,8 +371,17 @@ bool RocJpegVaapiMemoryPool::SetSurfaceAsIdle(VASurfaceID surface_id) {
     std::lock_guard<std::mutex> lock(pool_mutex_);
     for (auto& pair : mem_pool_) {
         for (auto& entry : pair.second) {
-            if (std::find(entry.va_surface_ids.begin(), entry.va_surface_ids.end(), surface_id) != entry.va_surface_ids.end()) {
-                entry.entry_status = kIdle;
+            auto it = std::find(entry.va_surface_ids.begin(), entry.va_surface_ids.end(), surface_id);
+            if (it != entry.va_surface_ids.end()) {
+                size_t idx = std::distance(entry.va_surface_ids.begin(), it);
+                if (idx >= entry.surface_status.size()) {
+                    ErrorLog(g_rocjpeg_logger, "The surface_status of the pool entry for surface_id: " + ROCJPEG_TOSTR(surface_id) + " does not match its surfaces!");
+                    return false;
+                }
+                entry.surface_status[idx] = kIdle;
+                if (std::all_of(entry.surface_status.begin(), entry.surface_status.end(), [](MemPoolEntryStatus status) { return status == kIdle; })) {
+                    entry.entry_status = kIdle;
+                }
                 return true;
             }
         }
@@ -682,13 +694,50 @@ RocJpegStatus RocJpegVappiDecoder::CreateDecoderConfig() {
         for (auto attrib : attribs) {
             if (attrib.type == VASurfaceAttribDRMFormatModifiers) {
                 supports_modifiers_ = true;
-                break;
+            } else if (attrib.type == VASurfaceAttribPixelFormat && attrib.value.type == VAGenericValueTypeInteger) {
+                driver_pixel_formats_.push_back(static_cast<uint32_t>(attrib.value.value.i));
             }
         }
         return ROCJPEG_STATUS_SUCCESS;
     } else {
         return ROCJPEG_STATUS_HW_JPEG_DECODER_NOT_SUPPORTED;
     }
+}
+
+RocJpegSurfaceFormat RocJpegVappiDecoder::GetNativeSurfaceFormat(ChromaSubsampling chroma_subsampling) const {
+    // Must match the non-RGB surface selection in SubmitDecode and SubmitDecodeBatched.
+    uint32_t pixel_format = 0;
+    RocJpegSurfaceFormat surface_format = ROCJPEG_SURFACE_FORMAT_NONE;
+    switch (chroma_subsampling) {
+        case CSS_444:
+            pixel_format = VA_FOURCC_444P;
+            surface_format = ROCJPEG_SURFACE_FORMAT_YUV444P;
+            break;
+        case CSS_440:
+            pixel_format = VA_FOURCC_422V;
+            surface_format = ROCJPEG_SURFACE_FORMAT_YUV440P;
+            break;
+        case CSS_422:
+            pixel_format = VA_FOURCC_YUY2;
+            surface_format = ROCJPEG_SURFACE_FORMAT_YUYV;
+            break;
+        case CSS_420:
+            pixel_format = VA_FOURCC_NV12;
+            surface_format = ROCJPEG_SURFACE_FORMAT_NV12;
+            break;
+        case CSS_400:
+            pixel_format = VA_FOURCC_Y800;
+            surface_format = ROCJPEG_SURFACE_FORMAT_Y8;
+            break;
+        default:
+            return ROCJPEG_SURFACE_FORMAT_NONE;
+    }
+    // Some drivers do not report pixel formats for the config; the surface selection is then trusted as is.
+    if (!driver_pixel_formats_.empty() &&
+        std::find(driver_pixel_formats_.begin(), driver_pixel_formats_.end(), pixel_format) == driver_pixel_formats_.end()) {
+        return ROCJPEG_SURFACE_FORMAT_NONE;
+    }
+    return surface_format;
 }
 
 /**
@@ -782,6 +831,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecode(const JpegStreamParameters *jpeg
     // If RGB output format is requested, and the HW JPEG decoder has a built-in format conversion,
     // set the RGB surface format and attributes to obtain the RGB output directly from the JPEG HW decoder.
     // otherwise set the appropriate surface format and attributes based on the chroma subsampling of the image.
+    // Keep in sync with the hw_rgb_* fields reported by RocJpegDecoder::GetDecoderCaps().
     if ((decode_params->output_format == ROCJPEG_OUTPUT_RGB || decode_params->output_format == ROCJPEG_OUTPUT_RGB_PLANAR) && current_vcn_jpeg_spec_.can_convert_to_rgb && jpeg_stream_params->chroma_subsampling != CSS_440) {
         if (decode_params->output_format == ROCJPEG_OUTPUT_RGB) {
             surface_format = VA_RT_FORMAT_RGB32;
@@ -791,6 +841,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecode(const JpegStreamParameters *jpeg
             surface_attrib.value.value.i = VA_FOURCC_RGBP;
         }
     } else {
+        // Keep in sync with GetNativeSurfaceFormat().
         switch (jpeg_stream_params->chroma_subsampling) {
             case CSS_444:
                 surface_format = VA_RT_FORMAT_YUV444;
@@ -862,6 +913,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecode(const JpegStreamParameters *jpeg
         mem_pool_entry.image_width = surface_width;
         mem_pool_entry.image_height = surface_height;
         mem_pool_entry.hip_interops.resize(1, HipInteropDeviceMem());
+        mem_pool_entry.surface_status.resize(1, kBusy);
         surface_id = mem_pool_entry.va_surface_ids[0];
         mem_pool_entry.entry_status = kBusy;
         CHECK_ROCJPEG(vaapi_mem_pool_->AddPoolEntry(surface_pixel_format, mem_pool_entry));
@@ -915,6 +967,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
                 return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
             }
 
+        // Keep in sync with the hw_rgb_* fields reported by RocJpegDecoder::GetDecoderCaps().
         if ((decode_params[i].output_format == ROCJPEG_OUTPUT_RGB || decode_params[i].output_format == ROCJPEG_OUTPUT_RGB_PLANAR) && current_vcn_jpeg_spec_.can_convert_to_rgb && jpeg_streams_params[i].chroma_subsampling != CSS_440) {
             if (decode_params[i].output_format == ROCJPEG_OUTPUT_RGB) {
                 jpeg_stream_key.surface_format = VA_RT_FORMAT_RGB32;
@@ -924,6 +977,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
                 jpeg_stream_key.pixel_format = VA_FOURCC_RGBP;
             }
         } else {
+            // Keep in sync with GetNativeSurfaceFormat().
             switch (jpeg_streams_params[i].chroma_subsampling) {
                 case CSS_444:
                     jpeg_stream_key.surface_format = VA_RT_FORMAT_YUV444;
@@ -1000,6 +1054,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
                 surface_ids[indices[i]] = mem_pool_entry.va_surface_ids[i];
             }
             mem_pool_entry.hip_interops.resize(indices.size(), HipInteropDeviceMem());
+            mem_pool_entry.surface_status.resize(indices.size(), kBusy);
             mem_pool_entry.entry_status = kBusy;
             CHECK_ROCJPEG(vaapi_mem_pool_->AddPoolEntry(key.pixel_format, mem_pool_entry));
         } else {

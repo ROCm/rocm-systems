@@ -45,7 +45,7 @@ THE SOFTWARE.
 
 // Increment the ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION when new runtime API functions are added.
 // If the corresponding ROCJPEG_RUNTIME_API_TABLE_MAJOR_VERSION increases reset the ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION to zero.
-#define ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION 2
+#define ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION 3
 
 // rocJPEG API interface
 typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegStreamCreate)(RocJpegStreamHandle *jpeg_stream_handle);
@@ -61,6 +61,7 @@ typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegDecodeAsync)(RocJpegHandle handle, 
 typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegDecodeSync)(RocJpegHandle handle, RocJpegImage *destination);
 typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegDecodeBatchedAsync)(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
 typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegDecodeBatchedSync)(RocJpegHandle handle, RocJpegImage *destinations, int batch_size);
+typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegGetDecoderCaps)(RocJpegHandle handle, RocJpegDecodeCaps *decode_caps);
 
 // rocJPEG API dispatch table
 struct RocJpegDispatchTable {
@@ -88,6 +89,10 @@ struct RocJpegDispatchTable {
 
     // PLEASE DO NOT EDIT ABOVE!
     // ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION == 3
+    PfnRocJpegGetDecoderCaps pfn_rocjpeg_get_decoder_caps;
+
+    // PLEASE DO NOT EDIT ABOVE!
+    // ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION == 4
 
     // ******************************************************************************************* //
     //                                            READ BELOW

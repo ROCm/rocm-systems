@@ -160,7 +160,8 @@ To use ROCm Systems Profiler for instrumentation, follow these two configuration
 Command-line tools
 ====================
 
-ROCm Systems Profiler ships as a set of standalone executables, each oriented toward a different profiling workflow:
+ROCm Systems Profiler ships as a set of standalone executables, each oriented toward a different profiling workflow.
+``rocsys`` is the unified entry point that dispatches to these tools. See :doc:`how-to/using-rocsys`.
 
 .. list-table::
    :header-rows: 1
@@ -170,6 +171,10 @@ ROCm Systems Profiler ships as a set of standalone executables, each oriented to
      - Purpose
      - Example
      - See also
+   * - ``rocsys``
+     - Dispatches a subcommand to the tool for that workflow. ``rocsys -- ./app`` and ``rocsys profile -- ./app`` collect a full trace profile.
+     - ``rocsys profile -- ./app``
+     - :doc:`how-to/using-rocsys`
    * - ``rocprof-sys-avail``
      - Lists what is available to configure and collect on your system (settings, domains, counters, components).
      - ``rocprof-sys-avail -d`` or ``rocprof-sys-avail -H -c GPU``

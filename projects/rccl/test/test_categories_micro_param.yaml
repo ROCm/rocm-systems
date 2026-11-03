@@ -1,0 +1,46 @@
+# rccl-UnitTestsMicroParam — shared/ctest schema.
+# Host-only micro-tests for the param runtime (src/param/{param,c_api}.cc, src/misc/param.cc, include/param/param.h) (no GPU, no librccl).
+# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
+
+test_categories:
+  quick: &micro_param_quick
+    description: "Smoke — host-only param runtime micro-tests, sub-second."
+    test_patterns:
+      - "Param*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "microtest"
+  standard:
+    <<: *micro_param_quick
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "microtest"
+  comprehensive:
+    <<: *micro_param_quick
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "microtest"
+  full:
+    <<: *micro_param_quick
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "microtest"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 600
+    comprehensive: 600
+    full: 600

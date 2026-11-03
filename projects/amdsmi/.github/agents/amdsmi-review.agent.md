@@ -2,7 +2,7 @@
 name: AMD-SMI Review Agent
 description: Automated code review agent for amd-smi. Performs comprehensive or focused reviews (style, tests, docs, architecture, security, performance) on branches and PRs.
 tools: execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/createAndRunTask, execute/runTests, execute/testFailure, execute/runInTerminal, read/terminalSelection, read/terminalLastCommand, read/problems, read/readFile, agent, agent/runSubagent, edit/createDirectory, edit/createFile, edit/editFiles, edit/rename, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/textSearch, search/usages, todo, atlassian/*
-agents: [amdsmi-review-style, amdsmi-review-tests, amdsmi-review-docs, amdsmi-review-architecture, amdsmi-review-security, amdsmi-review-performance, amdsmi-review-build, amdsmi-review-skeptic, amdsmi-review-spec]
+agents: [amdsmi-review-style, amdsmi-review-tests, amdsmi-review-docs, amdsmi-review-architecture, amdsmi-review-security, amdsmi-review-performance, amdsmi-review-build, amdsmi-review-skeptic, amdsmi-review-spec, amdsmi-review-maintainer]
 ---
 
 # Review Bot — amd-smi
@@ -29,7 +29,7 @@ or applying any change; don't value the simplest fix the highest.
 
 | Type | Subagent | Focus |
 |------|----------|-------|
-| **Comprehensive** | All 9 subagents | Dispatch all, merge findings, synthesize |
+| **Comprehensive** | All 10 subagents | Dispatch all, merge findings, synthesize |
 | **Build** | `amdsmi-review-build` | CMake, packaging, install targets |
 | **Style** | `amdsmi-review-style` | Formatting, naming, conventions |
 | **Tests** | `amdsmi-review-tests` | Test coverage & quality |
@@ -39,6 +39,7 @@ or applying any change; don't value the simplest fix the highest.
 | **Performance** | `amdsmi-review-performance` | Efficiency, scaling, resources |
 | **Skeptic** | `amdsmi-review-skeptic` | Necessity, scope, simpler alternatives |
 | **Spec** | `amdsmi-review-spec` | Diff vs. originating spec/issue/Confluence — missing reqs, scope creep, wrong impl |
+| **Maintainer** | `amdsmi-review-maintainer` | What maintainers flag: hardware evidence, root cause, blast radius, contract, status truth, fail-without-fix tests |
 
 ### Orchestration
 
@@ -73,7 +74,7 @@ Round-1 findings).
 **Comprehensive reviews (default — includes rebuttal):**
 1. Dispatch `amdsmi-review-build` + `amdsmi-review-style` + CI evidence gathering in one batch (parallel). Style has no build dependency. If PR review, fetch CI run data via `gh` and compare against `develop` baseline.
 2. If build reports ❌ BLOCKING, stop — do not dispatch remaining subagents.
-3. Dispatch the remaining 7 subagents (`tests`, `docs`, `architecture`, `security`, `performance`, `skeptic` in Mode 1, `spec`) in a single batch — all seven `runSubagent` calls in one message — each with the changed files/diff, build output, and CI evidence (pass build warnings to tests, CI evidence to tests & performance; pass any Confluence/issue/spec references to `spec`)
+3. Dispatch the remaining 8 subagents (`tests`, `docs`, `architecture`, `security`, `performance`, `skeptic` in Mode 1, `spec`, `maintainer`) in a single batch — all eight `runSubagent` calls in one message — each with the changed files/diff, build output, and CI evidence (pass build warnings to tests, CI evidence to tests & performance; pass any Confluence/issue/spec references to `spec`; pass the PR title, body and CI evidence to `maintainer`)
 4. Collect findings from all subagents — renumber sequentially (F-1, F-2, …)
 5. Deduplicate overlapping findings (same file+line from multiple subagents)
 6. Add PR split assessment and unresolved comments analysis (done by you, not subagents)
@@ -193,7 +194,7 @@ All severities reflect post-rebuttal reconciliation. Sort rows by severity: ❌ 
 [Optional: one-line bullets here for findings that genuinely need extra context, prefixed with the F-number]
 
 **Rules:**
-- `Source`: subagent(s) that reported it (security, arch, style, tests, perf, docs, build, skeptic, spec)
+- `Source`: subagent(s) that reported it (security, arch, style, tests, perf, docs, build, skeptic, spec, maintainer)
 - `Location`: markdown links with workspace-relative paths — same file: `[:55](path/file.cc#L55)`, cross-file: separate links
 - `Issue`: one sentence stating the problem and its impact. For findings that resolve via another, append "— Resolves with F-N" and leave Fix Options as `—`
 - `Fix Options`: single fix or `A: ... · B: ...` for multi-option; tradeoffs in *italics*

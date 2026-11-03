@@ -288,6 +288,10 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       HSAKMT_PFN(hsaKmtGetClockCounters) = (HSAKMT_DEF(hsaKmtGetClockCounters)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetClockCounters");
       if (HSAKMT_PFN(hsaKmtGetClockCounters) == nullptr) goto LOAD_ERROR;
 
+      // Optional. An older libhsakmt has no precise entry; GetClockCounters
+      // falls back to the single-sample query when this stays null.
+      HSAKMT_PFN(hsaKmtGetClockCountersPrecise) = (HSAKMT_DEF(hsaKmtGetClockCountersPrecise)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetClockCountersPrecise");
+
       HSAKMT_PFN(hsaKmtPmcGetCounterProperties) = (HSAKMT_DEF(hsaKmtPmcGetCounterProperties)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtPmcGetCounterProperties");
       if (HSAKMT_PFN(hsaKmtPmcGetCounterProperties) == nullptr) goto LOAD_ERROR;
 
@@ -561,6 +565,7 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtDbgGetDeviceData) = (HSAKMT_DEF(hsaKmtDbgGetDeviceData)*)(&hsaKmtDbgGetDeviceData);
       HSAKMT_PFN(hsaKmtDbgGetQueueData) = (HSAKMT_DEF(hsaKmtDbgGetQueueData)*)(&hsaKmtDbgGetQueueData);
       HSAKMT_PFN(hsaKmtGetClockCounters) = (HSAKMT_DEF(hsaKmtGetClockCounters)*)(&hsaKmtGetClockCounters);
+      HSAKMT_PFN(hsaKmtGetClockCountersPrecise) = (HSAKMT_DEF(hsaKmtGetClockCountersPrecise)*)(&hsaKmtGetClockCountersPrecise);
       HSAKMT_PFN(hsaKmtPmcGetCounterProperties) = (HSAKMT_DEF(hsaKmtPmcGetCounterProperties)*)(&hsaKmtPmcGetCounterProperties);
       HSAKMT_PFN(hsaKmtPmcRegisterTrace) = (HSAKMT_DEF(hsaKmtPmcRegisterTrace)*)(&hsaKmtPmcRegisterTrace);
       HSAKMT_PFN(hsaKmtPmcUnregisterTrace) = (HSAKMT_DEF(hsaKmtPmcUnregisterTrace)*)(&hsaKmtPmcUnregisterTrace);

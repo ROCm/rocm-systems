@@ -60,16 +60,31 @@ __device__ __forceinline__ uint64_t ddaLL128LoadWord(const uint64_t* p) {
   return __scoped_atomic_load_n((u64_gptr) const_cast<uint64_t*>(p), __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
 }
 
+// Poll the LL128 flag word until it matches, or the comm abort flag is set.
+// Returns false if the wait was aborted so the kernel can exit.
+__device__ __forceinline__ bool ddaLL128WaitFlag(const uint64_t* flagAddr, uint64_t flag, DdaKernelParams params) {
+  int spins = 0;
+  while (ddaLL128LoadWord(flagAddr) != flag) {
+    if (params.abortSpinTick(spins)) return false;
+  }
+  return true;
+}
+
 // Element-wise add of the T-elements packed into two 8B payload words. An 8B
-// word holds 2 x fp32 or 4 x fp16/bf16; each 4B half is folded with the shared
-// vecElementAdd<T> (which handles the per-type packing), then recombined.
+// word holds 2 x fp32, 4 x fp16/bf16 or 8 x fp8. fp8 adds the whole word at
+// once; other types fold each 4B half with the shared vecElementAdd<T> (which
+// handles the per-type packing), then recombine.
 template <typename T>
 __device__ __forceinline__ uint64_t ddaLL128AddWord(uint64_t a, uint64_t b) {
-  if constexpr (std::is_same<T, bf16>::value) __atomic_signal_fence(__ATOMIC_SEQ_CST);
-  const uint32_t lo = vecElementAdd<T>((uint32_t)a, (uint32_t)b);
-  if constexpr (std::is_same<T, bf16>::value) __atomic_signal_fence(__ATOMIC_SEQ_CST);
-  const uint32_t hi = vecElementAdd<T>((uint32_t)(a >> 32), (uint32_t)(b >> 32));
-  return ((uint64_t)hi << 32) | (uint64_t)lo;
+  if constexpr (is_fp8_v<T>) {
+    return vecElementAddFp8x8<T>(a, b);
+  } else {
+    if constexpr (std::is_same<T, bf16>::value) __atomic_signal_fence(__ATOMIC_SEQ_CST);
+    const uint32_t lo = vecElementAdd<T>((uint32_t)a, (uint32_t)b);
+    if constexpr (std::is_same<T, bf16>::value) __atomic_signal_fence(__ATOMIC_SEQ_CST);
+    const uint32_t hi = vecElementAdd<T>((uint32_t)(a >> 32), (uint32_t)(b >> 32));
+    return ((uint64_t)hi << 32) | (uint64_t)lo;
+  }
 }
 
 // ---- Register-packed slice geometry (16B per lane) ----
@@ -86,6 +101,15 @@ constexpr int kDdaLL128DataBytesPerSlice =
   (kDdaLL128WireWordsPerSlice - kDdaLL128FlagWordsPerSlice) * 8; // 1920
 static_assert(kDdaLL128WireBytesPerSlice % (int)kDdaLL128LineBytes == 0,
               "a slice must be a whole number of lines");
+
+// Per-rank slot in 8B wire words. nStagingAreas is 1 for one-shot publish/reduce
+// and 2 for two-shot (publish plus write-back). Shared by all-reduce, all-gather
+// and reduce-scatter so the four tiers carve the bank the same way.
+constexpr size_t ddaLL128SlotWords(size_t bankSize, int nRanks, int nStagingAreas) {
+  return ddaLLSlotPkts(bankSize,
+                       sizeof(uint64_t) * (size_t)nRanks * (size_t)nStagingAreas,
+                       (size_t)kDdaLL128WireWordsPerSlice);
+}
 
 // The last lane of each line's lane group owns that line's flag word: lanes
 // 7,15,23,31 for a 128-byte line
@@ -133,8 +157,8 @@ __device__ __forceinline__ void ddaLL128Load16B(const uint64_t* src, uint64_t& l
   hi = u.w[1];
 }
 
-// 16B wire access. The cooperative form gives a tear-free 16B transaction on
-// hardware that has the builtin; otherwise it degrades to the plain access.
+// 16B wire access. With the builtin, 8 lanes move one aligned 128B line, flag
+// included, in a single access; without it, each lane is a plain 16B access.
 __device__ __forceinline__ void ddaLL128StoreAtomic16B(uint64_t* dst, uint64_t lo, uint64_t hi) {
 #if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
   union {
@@ -194,12 +218,16 @@ __device__ __forceinline__ void ddaLL128StoreWire(
     ddaLL128StoreAtomic16B(wire + u * kDdaLL128Warp, regs[u], flagLane ? flag : regs[u + 1]);
 }
 
-// Poll until every line this lane reads has landed, then read the payload once.
-__device__ __forceinline__ void ddaLL128PollWire(
-  const uint64_t* wire, uint64_t (&vr)[kDdaLL128WordsPerThread], uint64_t flag, int wid) {
+// Poll until every line this lane reads has landed. With the cooperative load the
+// payload arrives with its flag, so only the 16B fallback reads it again.
+// Returns false if the comm abort flag is set so the kernel can leave the wait.
+__device__ __forceinline__ bool ddaLL128PollWire(const uint64_t* wire, uint64_t (&vr)[kDdaLL128WordsPerThread],
+                                                 uint64_t flag, int wid, DdaKernelParams params) {
   const bool flagLane = ddaLL128IsFlagLane(wid);
+  int spins = 0;
   bool needReload;
   do {
+    if (params.abortSpinTick(spins)) return false;
     needReload = false;
 #pragma unroll
     for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
@@ -207,9 +235,12 @@ __device__ __forceinline__ void ddaLL128PollWire(
       needReload |= flagLane && (vr[u + 1] != flag);
     }
   } while (__any(needReload));
+#if !RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
 #pragma unroll
   for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
     ddaLL128LoadAtomic16B(wire + u * kDdaLL128Warp, vr[u], vr[u + 1]);
+#endif
+  return true;
 }
 
 // Flag-lane un-shuffle then store of registers into `dst`

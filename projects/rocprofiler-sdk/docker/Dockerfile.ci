@@ -5,7 +5,7 @@ ARG GPU_TYPE=gfx94X
 ARG GPU_TARBALL
 
 SHELL ["/bin/bash","-lc"]
-COPY projects/rocprofiler-sdk/requirements.txt /root/requirements.txt
+COPY projects/rocprofiler-sdk/requirements*.txt /root/
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CMAKE_HIP_PLATFORM=amd

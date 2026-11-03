@@ -20,6 +20,9 @@ doctest = false
 [dependencies]
 rocddi.workspace = true
 
+[dev-dependencies]
+rocddi = { path = "../rocddi", features = ["allocator-test-hooks"] }
+
 [lints.rust]
 missing_docs = "deny"
 unsafe_code = "allow"

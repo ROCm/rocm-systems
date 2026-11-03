@@ -1,0 +1,41 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "libhsa"
+description = "Early-access HSA runtime ABI frontend over the private rocddi core"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "hsa_runtime64"
+crate-type = ["rlib"]
+doc = false
+doctest = false
+
+[dependencies]
+rocddi.workspace = true
+rocloader = { path = "../../loader/rocloader" }
+rocaddr3 = { path = "../../image/rocaddr3" }
+libc = "0.2.189"
+
+[dev-dependencies]
+rocelf = { path = "../../loader/rocelf" }
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+missing_docs_in_private_items = "warn"
+expect_used = "deny"
+panic = "deny"
+pedantic = { level = "warn", priority = -1 }
+unreachable = "deny"
+unwrap_used = "deny"

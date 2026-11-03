@@ -91,11 +91,7 @@ bool static TstCoherency(int* Ptr, bool HmmMem) {
 HIP_TEST_CASE(Unit_malloc_CoherentTst) {
   CHECK_PCIE_ATOMIC_SUPPORT
   CHECK_MANAGED_MEMORY_SUPPORT
-  hipDeviceProp_t prop;
-  HIPCHECK(hipGetDeviceProperties(&prop, 0));
-  char* p = NULL;
-  p = strstr(prop.gcnArchName, "xnack+");
-  if (p) {
+  if (HipTest::isXnackOn()) {
     int *Ptr = nullptr, SIZE = sizeof(int);
     bool HmmMem = true;
 
@@ -116,11 +112,7 @@ HIP_TEST_CASE(Unit_malloc_CoherentTst) {
 #if HT_AMD
 HIP_TEST_CASE(Unit_malloc_CoherentTstWthAdvise) {
   CHECK_MANAGED_MEMORY_SUPPORT
-  hipDeviceProp_t prop;
-  HIPCHECK(hipGetDeviceProperties(&prop, 0));
-  char* p = NULL;
-  p = strstr(prop.gcnArchName, "xnack+");
-  if (p) {
+  if (HipTest::isXnackOn()) {
     int *Ptr = nullptr, SIZE = sizeof(int);
 
     // Allocating hipMallocManaged() memory
@@ -146,11 +138,7 @@ HIP_TEST_CASE(Unit_malloc_CoherentTstWthAdvise) {
 HIP_TEST_CASE(Unit_mmap_CoherentTst) {
   CHECK_PCIE_ATOMIC_SUPPORT
   CHECK_MANAGED_MEMORY_SUPPORT
-  hipDeviceProp_t prop;
-  HIPCHECK(hipGetDeviceProperties(&prop, 0));
-  char *p = NULL;
-  p = strstr(prop.gcnArchName, "xnack+");
-  if (p) {
+  if (HipTest::isXnackOn()) {
     bool HmmMem = true;
     int *Ptr =
         reinterpret_cast<int *>(mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE,
@@ -170,11 +158,7 @@ HIP_TEST_CASE(Unit_mmap_CoherentTst) {
 #if HT_AMD
 HIP_TEST_CASE(Unit_mmap_CoherentTstWthAdvise) {
   CHECK_MANAGED_MEMORY_SUPPORT
-  hipDeviceProp_t prop;
-  HIPCHECK(hipGetDeviceProperties(&prop, 0));
-  char *p = NULL;
-  p = strstr(prop.gcnArchName, "xnack+");
-  if (p) {
+  if (HipTest::isXnackOn()) {
     int SIZE = sizeof(int);
     int *Ptr = reinterpret_cast<int *>(mmap(NULL, SIZE, PROT_READ | PROT_WRITE,
                                             MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));

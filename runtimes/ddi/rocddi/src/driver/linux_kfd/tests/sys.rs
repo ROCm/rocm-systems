@@ -613,6 +613,32 @@ fn hardware_exception_poll_uses_persistent_events_and_decodes_payload() {
 }
 
 #[test]
+fn exception_wait_uses_both_persistent_events_and_preserves_timeout() {
+    for (result, expected) in [
+        (uapi::WAIT_COMPLETE, Some(true)),
+        (uapi::WAIT_TIMEOUT, Some(false)),
+        (u32::MAX, None),
+    ] {
+        let kfd = endpoint(Arc::new(move |call| {
+            let Call::WaitExceptions(args, events) = call else {
+                panic!("unexpected exception wait call")
+            };
+            assert_eq!(args.count, 2);
+            assert_eq!(args.wait_all, 0);
+            assert_eq!(args.timeout, 3);
+            assert_eq!([events[0].event_id, events[1].event_id], [19, 20]);
+            args.result = result;
+            Ok(())
+        }));
+        let observed = kfd.wait_exception_events(19, 20, 3);
+        match expected {
+            Some(expected) => assert_eq!(observed.unwrap(), expected),
+            None => assert_eq!(observed.unwrap_err().kind(), io::ErrorKind::InvalidData),
+        }
+    }
+}
+
+#[test]
 fn memory_exception_poll_decodes_the_complete_uapi_payload() {
     let kfd = endpoint(Arc::new(|call| {
         match call {

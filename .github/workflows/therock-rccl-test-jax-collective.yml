@@ -72,7 +72,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: 05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
+          ref: b063323dfed92047c0067097b4da6d597986f102 # 2026-10-27
 
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -99,18 +99,24 @@ jobs:
         #
         # xla_rocm_plugin.so has RUNPATH entries that resolve math libraries
         # (hipBLASLt, hipFFT, MIOpen, rocBLAS, etc.) from the _rocm_sdk_libraries
-        # site-package. The arch-specific v2 index provides the real binary
-        # wheels; the whl-multi-arch index only has stub metapackages.
+        # site-package, so the real binary SDK wheels must be installed first.
         # The test script overrides librccl.so with the CI-built version.
         run: |
-          AMDGPU_LOWER=$(echo "${{ inputs.amdgpu_families }}" | tr '[:upper:]' '[:lower:]')
           uv pip install --prerelease=allow \
-            rocm-sdk-core "rocm-sdk-libraries-${AMDGPU_LOWER}" \
-            --index-url "https://rocm.nightlies.amd.com/v2/${{ inputs.amdgpu_families }}/"
+            rocm-sdk-core rocm-sdk-device-gfx942 \
+            --index-url https://nightly.repo.amd.com/rocm/core/whl-next/
+          # PyPI is the base index and the nightly one is "extra" because uv
+          # ranks extra indexes ABOVE --index-url. Reversed, the plain-PyPI
+          # jax-rocm10-plugin outranks the nightly build and is silently
+          # installed in its place.
+          #
+          # jax/jaxlib are held to the plugin's 0.11 series: the plugin
+          # declares no jax dependency at all, so an unconstrained resolve
+          # pairs jax 0.12 with a 0.11 plugin.
           uv pip install --prerelease=allow \
-            jax-rocm7-plugin jax-rocm7-pjrt jax \
-            --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
-            --extra-index-url https://pypi.org/simple/
+            jax-rocm10-plugin jax-rocm10-pjrt "jax==0.11.*" "jaxlib==0.11.*" \
+            --index-url https://pypi.org/simple/ \
+            --extra-index-url https://nightly.repo.amd.com/rocm/jax/whl-next/
           uv pip install \
             pytest \
             pytest-timeout \

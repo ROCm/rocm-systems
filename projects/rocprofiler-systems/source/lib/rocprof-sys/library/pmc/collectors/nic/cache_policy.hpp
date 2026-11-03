@@ -24,8 +24,6 @@ namespace rocprofsys::pmc::collectors::nic
  *
  * This policy handles serialization of NIC RDMA metric samples into the
  * rocprofiler-systems trace cache for later analysis and visualization.
- *
- * @see perfetto_policy for direct Perfetto trace output
  */
 struct cache_policy
 {
@@ -44,46 +42,26 @@ struct cache_policy
     {
         const auto thread_id = std::nullopt;
 
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = "ainic_rx_rdma_ucast_bytes",
-              .thread_id  = thread_id,
-              .extdata    = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = "ainic_tx_rdma_ucast_bytes",
-              .thread_id  = thread_id,
-              .extdata    = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = "ainic_rx_rdma_ucast_pkts",
-              .thread_id  = thread_id,
-              .extdata    = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = "ainic_tx_rdma_ucast_pkts",
-              .thread_id  = thread_id,
-              .extdata    = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = "ainic_rx_rdma_cnp_pkts",
-              .thread_id  = thread_id,
-              .extdata    = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = "ainic_tx_rdma_cnp_pkts",
-              .thread_id  = thread_id,
-              .extdata    = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = "ainic_tx_rdma_ack_timeout",
-              .thread_id  = thread_id,
-              .extdata    = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = "ainic_resp_tx_pkt_seq_err",
-              .thread_id  = thread_id,
-              .extdata    = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = "ainic_req_rx_pkt_seq_err",
-              .thread_id  = thread_id,
-              .extdata    = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = "ainic_req_rx_impl_nak_seq_err",
-              .thread_id  = thread_id,
-              .extdata    = "{}" });
+        trace_cache::get_metadata_registry().ensure_track("ainic_rx_rdma_ucast_bytes",
+                                                          thread_id);
+        trace_cache::get_metadata_registry().ensure_track("ainic_tx_rdma_ucast_bytes",
+                                                          thread_id);
+        trace_cache::get_metadata_registry().ensure_track("ainic_rx_rdma_ucast_pkts",
+                                                          thread_id);
+        trace_cache::get_metadata_registry().ensure_track("ainic_tx_rdma_ucast_pkts",
+                                                          thread_id);
+        trace_cache::get_metadata_registry().ensure_track("ainic_rx_rdma_cnp_pkts",
+                                                          thread_id);
+        trace_cache::get_metadata_registry().ensure_track("ainic_tx_rdma_cnp_pkts",
+                                                          thread_id);
+        trace_cache::get_metadata_registry().ensure_track("ainic_tx_rdma_ack_timeout",
+                                                          thread_id);
+        trace_cache::get_metadata_registry().ensure_track("ainic_resp_tx_pkt_seq_err",
+                                                          thread_id);
+        trace_cache::get_metadata_registry().ensure_track("ainic_req_rx_pkt_seq_err",
+                                                          thread_id);
+        trace_cache::get_metadata_registry().ensure_track("ainic_req_rx_impl_nak_seq_err",
+                                                          thread_id);
     }
 
     /**

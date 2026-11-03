@@ -9,8 +9,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"
 #include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
@@ -848,6 +848,24 @@ public:
 class Mimg : public IsaInstruction<Isa> {
 public:
   Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
+  bool should_print_dst_operand(uint8_t operand_index) const override {
+    // Image atomics have one encoded VDATA tuple, printed as a source.
+    return !mnemonic_.starts_with("image_atomic_") &&
+           Instruction::should_print_dst_operand(operand_index);
+  }
+  void append_src_operand(std::string &out, uint8_t operand_index) const override {
+    const ::rocjitsu::Operand *operand = src_operands_[operand_index];
+    if (operand_index == 0 && inst_.tfe && mnemonic_.starts_with("image_atomic_")) {
+      // VDATA is the first source. Assembly includes the status slot;
+      // the source dependency includes only the atomic payload.
+      const auto first = operand->encoding_value();
+      const auto last = first + operand->size_bits() / 32;
+      out += first == last ? "v" + std::to_string(first)
+                           : "v[" + std::to_string(first) + ":" + std::to_string(last) + "]";
+      return;
+    }
+    Instruction::append_src_operand(out, operand_index);
+  }
   bool has_nsa_1();
   bool has_nsa_2();
   bool has_nsa_3();

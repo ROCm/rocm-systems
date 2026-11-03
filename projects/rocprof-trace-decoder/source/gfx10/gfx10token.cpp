@@ -50,7 +50,7 @@ static constexpr encoding_t bit_encodings[] = {
     {WAVE_END,           0b10101,  5,  20,  5,  8},
     {SHADER_DATA,        0b00110,  5,  52,  5,  8},
     {SHADER_DATA_SHORT,  0b10110,  5,  28,  5,  8},
-    {UTIL_COUNTER_GFX10, 0b0110001,7,  64,  7,  9},
+    {UTIL_COUNTER,       0b0110001,7,  64,  7,  9},
  // Reference
     {TIME,               0b1000,   4,   8,  4,  8},
     {NOP,                0b0000,   4,   4,  0,  0},

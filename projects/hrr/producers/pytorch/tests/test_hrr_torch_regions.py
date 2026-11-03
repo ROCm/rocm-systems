@@ -75,9 +75,8 @@ class ArchiveDirTest(_ArchiveCase):
             self.assertIsNone(regions._archive_dir())
 
     def test_events_bin_without_marker(self):
-        # What a refused capture leaves behind, and a resume that fails after
-        # the writer opened the earlier run's events.bin: pid-<pid> and
-        # events.bin, but no marker.
+        # What a refused capture can leave behind: pid-<pid> and events.bin,
+        # but no marker.
         self.marker.unlink()
         self.assertTrue((self.archive / "events.bin").is_file())
         self.assertIsNone(regions._archive_dir())

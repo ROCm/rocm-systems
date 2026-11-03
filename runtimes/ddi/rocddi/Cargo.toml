@@ -17,5 +17,9 @@ crate-type = ["rlib"]
 [dependencies]
 libc = "0.2.189"
 
+[features]
+# Test-only callback allocator hooks for native rollback fault injection.
+allocator-test-hooks = []
+
 [lints]
 workspace = true

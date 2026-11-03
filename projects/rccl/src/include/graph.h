@@ -86,7 +86,7 @@ ncclResult_t ncclGetUserP2pLevel(int* level);
 #define MAX_XGMI_INTER_GPUS 4
 ncclResult_t ncclTopoGetIntraNetDev(struct ncclTopoSystem* system, int rank, struct ncclTopoGraph* graph, int channelId,
                                     int type, int64_t* id, int* dev);
-ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* system, int cudaDev1, int cudaDev2, bool* isXGMI,
+ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* system, int dev1, int dev2, bool* isXGMI,
                                  int maxInter = MAX_XGMI_INTER_GPUS, int nInter = 0, int* inter = nullptr);
 
 // Find CPU affinity
@@ -221,6 +221,7 @@ ncclResult_t ncclTopoDumpGraphs(struct ncclTopoSystem* system, int ngraphs, stru
 
 struct ncclTopoRanks {
   int crossNicRing;
+  int nChannels;  // valid channels in the per-channel arrays below; set by Preset, raised by Postset's expansion
   int ringRecv[MAXCHANNELS];
   int ringSend[MAXCHANNELS];
   int ringPrev[MAXCHANNELS];

@@ -40,6 +40,20 @@ find_package(hip CONFIG REQUIRED)
 
 add_subdirectory(unit)
 
+# Generator rules: regenerate the playback handlers and fail if
+# one still casts an archive field to a pointer or an opaque handle.
+# Also fails if a checked-in generated source or the API matrix header is
+# stale against the generator (test_generated_files_current.py), and if
+# PRIVACY.md no longer lists the manifest fields capture writes
+# (test_privacy_doc.py), and if the enable-recording skill does not know the
+# current archive format version (test_skill_api_ids.py).
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME hrr-generator-rules
+    COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..)
+endif()
+
 if(HRR_BUILD_INTEGRATION_TESTS)
   if(NOT HRR_BUILD_PLAYBACK)
     message(FATAL_ERROR "HRR_BUILD_INTEGRATION_TESTS requires HRR_BUILD_PLAYBACK because integration tests spawn hrr-playback")

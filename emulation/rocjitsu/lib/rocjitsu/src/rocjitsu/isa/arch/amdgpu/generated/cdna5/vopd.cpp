@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
-#include "util/except.h"
 #include <format>
 #include <string>
 
@@ -214,6 +213,10 @@ Vopd::Vopd(const MachineInst *inst)
                                        : Operand(x_bits, OperandType::OPR_VGPR, vsrcx2);
     srcy2_ = (opy_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcy2)
                                        : Operand(y_bits, OperandType::OPR_VGPR, vsrcy2);
+    if (opx_ == kVopdCndmaskB32)
+      srcx2_.set_wave_mask();
+    if (opy_ == kVopdCndmaskB32)
+      srcy2_.set_wave_mask();
   } else {
     format_ = Format::VopdXy;
     encoding_id_ = 0x32;
@@ -330,8 +333,9 @@ Vopd::Vopd(const MachineInst *inst)
     flags_ |= INVALID_VOPD_OPERANDS;
   mnemonic_storage_ = std::string(op_name(opx_)) + " :: " + op_name(opy_);
   mnemonic_ = mnemonic_storage_;
-  disassembly_ = format_slot(x_) + " :: " + format_slot(y_);
 }
+
+std::string Vopd::disassemble() const { return format_slot(x_) + " :: " + format_slot(y_); }
 
 void Vopd::init_operands() {
   x_ = Slot{opx_, &dstx_, &srcx0_, &srcx1_, &srcx2_, 0, negx_, false, false, false};

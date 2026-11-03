@@ -731,8 +731,10 @@ aql_queue_t::aql_dispatch_t::aql_dispatch_t (
                    packet_bytes.data (),
                    sizeof (hsa_amd_ext_kernel_dispatch_packet_t));
 
-      if (std::get<hsa_amd_ext_kernel_dispatch_packet_t> (m_packet).amd_format
-          != HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+      if ((std::get<hsa_amd_ext_kernel_dispatch_packet_t> (m_packet).amd_format
+           != HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+          && (std::get<hsa_amd_ext_kernel_dispatch_packet_t> (m_packet).amd_format
+              != HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD))
         fatal_error ("Unsupported packet format");
     }
   else
@@ -1110,9 +1112,10 @@ aql_queue_t::scratch_memory_region (
   const architecture_t::cwsr_record_t &cwsr_record) const
 {
   auto [offset, size] = architecture ().scratch_memory_region (
-    agent (), m_compute_tmpring_size, cwsr_record);
+    agent (), m_compute_tmpring_size,
+    m_scratch_backing_memory_address, cwsr_record);
 
-  return { m_scratch_backing_memory_address + offset, size };
+  return { offset, size };
 }
 
 void
