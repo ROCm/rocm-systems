@@ -155,6 +155,8 @@ extern "C"
         uint64_t thread_row_id;  /**< rocpd_info_thread.id. Not tid. 0 if this
                                        track has no thread. */
         uint64_t pmc_id; /**< rocpd_info_pmc.id for counter tracks, else 0. */
+        uint32_t source_index; /**< Index of the file and GUID this track was
+                                    read from. ph_get_trace_source() uses it. */
     } ph_track_t;
 
     /**
@@ -471,6 +473,9 @@ extern "C"
         ph_optional_uint64_t process_id;
         ph_optional_uint64_t thread_id;
         ph_string_filter_t   string_filter;
+        uint32_t             has_source; /**< Non-zero to read one file and GUID.
+                                              source_index selects it. */
+        uint32_t             source_index;
     } ph_event_filter_t;
 
     /** @brief One table row copied into caller-owned memory.

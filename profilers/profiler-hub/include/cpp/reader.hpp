@@ -19,7 +19,7 @@ struct ph_table_event;
 namespace profiler_hub
 {
 
-class reader_catalog_t;
+struct reader_catalog_t;
 struct resolved_event_query;
 
 namespace common

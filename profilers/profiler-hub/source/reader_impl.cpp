@@ -22,6 +22,16 @@ namespace profiler_hub
 namespace
 {
 
+std::string_view
+kernel_symbol_label(const reader_catalog_t& catalog, std::optional<size_t> kernel_id)
+{
+    if(!kernel_id.has_value()) return {};
+    const auto found = catalog.kernel_symbols_by_id.find(kernel_id.value());
+    if(found == catalog.kernel_symbols_by_id.end() || !found->second) return {};
+    if(!found->second->display_name.empty()) return found->second->display_name;
+    return found->second->name;
+}
+
 class timeline_event_builder
 {
 public:
@@ -38,6 +48,11 @@ public:
         event.start_timestamp   = row.start_timestamp;
         event.end_timestamp     = row.end_timestamp;
         event.display_name      = resolve_string(row.display_name_id, m_display_name);
+        if(event.display_name.empty() &&
+           type == reader_types::event_type_t::kernel_dispatch)
+        {
+            event.display_name = kernel_symbol_label(m_catalog, row.kernel_id);
+        }
         event.category          = resolve_string(row.category_id, m_category);
         event.track             = resolve_track(row, type);
         return event;
@@ -582,6 +597,10 @@ reader_t::impl::visit_track_events_in_id_range(
                 }
                 name = last_name;
             }
+            if(name.empty() && type == reader_types::event_type_t::kernel_dispatch)
+            {
+                name = kernel_symbol_label(*m_catalog, row.kernel_id);
+            }
             visitor(
                 context, { row.id, type }, row.start_timestamp, row.end_timestamp, name);
         });
@@ -908,6 +927,11 @@ reader_t::impl::get_kernel_dispatch_details(const reader_types::timeline_event_t
             data.kernel_symbol_info = it->second;
             if(it->second && it->second->code_object_info)
                 data.code_object_info = it->second->code_object_info;
+            if(data.name.empty() && it->second)
+            {
+                data.name = it->second->display_name.empty() ? it->second->name
+                                                             : it->second->display_name;
+            }
         }
     }
 
@@ -1242,6 +1266,7 @@ reader_t::impl::get_correlated_events(const reader_types::timeline_event_t& even
             mapped.start_timestamp = row.start_timestamp;
             mapped.end_timestamp   = row.end_timestamp;
             mapped.display_name_id = row.display_name_id;
+            mapped.kernel_id       = row.kernel_id;
             mapped.category_id     = row.category_id;
             mapped.nid             = row.nid;
             mapped.pid             = row.pid;

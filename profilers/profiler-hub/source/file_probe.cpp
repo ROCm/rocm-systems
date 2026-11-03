@@ -177,53 +177,10 @@ find_support(file_kind_t kind, trace_schema_t schema, version_t version)
 }
 
 file_probe_result_t
-probe_sqlite(file_kind_t kind, const std::string& path)
+probe_one_metadata(sqlite_probe_connection& connection,
+                   file_kind_t              kind,
+                   const std::string&       table)
 {
-    sqlite_probe_connection connection{ path };
-    if(!connection.ok())
-    {
-        return result_of(PH_RESULT_INVALID_FILE,
-                         "SQLite database could not be opened read-only: " +
-                             connection.error());
-    }
-
-    sqlite_statement tables{ connection.get(),
-                             "SELECT name FROM sqlite_master WHERE type = 'table' AND "
-                             "name LIKE 'rocpd_metadata\\_%' ESCAPE '\\'" };
-    if(!tables.ok())
-    {
-        return result_of(PH_RESULT_INVALID_FILE,
-                         "rocpd metadata tables could not be listed: " + tables.error(),
-                         trace_schema_t::rocpd);
-    }
-
-    std::vector<std::string> names;
-    int                      rc = sqlite_api_policy::result_done;
-    while((rc = sqlite_api_policy::step(tables.get())) == sqlite_api_policy::result_row)
-    {
-        names.push_back(sqlite_api_policy::column_text(tables.get(), 0));
-    }
-    if(rc != sqlite_api_policy::result_done)
-    {
-        return result_of(PH_RESULT_INVALID_FILE,
-                         "rocpd metadata tables could not be read: " +
-                             sqlite_api_policy::errmsg(connection.get()),
-                         trace_schema_t::rocpd);
-    }
-
-    if(names.empty())
-    {
-        return result_of(PH_RESULT_UNSUPPORTED_FILE,
-                         "SQLite database has no rocpd_metadata table");
-    }
-    if(names.size() != 1)
-    {
-        return result_of(PH_RESULT_INVALID_FILE,
-                         "SQLite database has more than one rocpd_metadata table",
-                         trace_schema_t::rocpd);
-    }
-
-    const std::string& table = names.front();
     if(table.rfind(k_metadata_prefix, 0) != 0)
     {
         return result_of(PH_RESULT_UNSUPPORTED_FILE,
@@ -256,6 +213,7 @@ probe_sqlite(file_kind_t kind, const std::string& path)
     std::optional<std::string> major;
     std::optional<std::string> minor;
     std::optional<std::string> patch;
+    int                        rc = sqlite_api_policy::result_done;
     while((rc = sqlite_api_policy::step(versions.get())) == sqlite_api_policy::result_row)
     {
         const std::string tag   = sqlite_api_policy::column_text(versions.get(), 0);
@@ -311,6 +269,75 @@ probe_sqlite(file_kind_t kind, const std::string& path)
 
     return result_of(
         PH_RESULT_SUCCESS, "", trace_schema_t::rocpd, resolved.version, uuid);
+}
+
+file_probe_result_t
+probe_sqlite(file_kind_t kind, const std::string& path)
+{
+    sqlite_probe_connection connection{ path };
+    if(!connection.ok())
+    {
+        return result_of(PH_RESULT_INVALID_FILE,
+                         "SQLite database could not be opened read-only: " +
+                             connection.error());
+    }
+
+    sqlite_statement tables{ connection.get(),
+                             "SELECT name FROM sqlite_master WHERE type = 'table' AND "
+                             "name LIKE 'rocpd_metadata\\_%' ESCAPE '\\'" };
+    if(!tables.ok())
+    {
+        return result_of(PH_RESULT_INVALID_FILE,
+                         "rocpd metadata tables could not be listed: " + tables.error(),
+                         trace_schema_t::rocpd);
+    }
+
+    std::vector<std::string> names;
+    int                      rc = sqlite_api_policy::result_done;
+    while((rc = sqlite_api_policy::step(tables.get())) == sqlite_api_policy::result_row)
+    {
+        names.push_back(sqlite_api_policy::column_text(tables.get(), 0));
+    }
+    if(rc != sqlite_api_policy::result_done)
+    {
+        return result_of(PH_RESULT_INVALID_FILE,
+                         "rocpd metadata tables could not be read: " +
+                             sqlite_api_policy::errmsg(connection.get()),
+                         trace_schema_t::rocpd);
+    }
+
+    if(names.empty())
+    {
+        return result_of(PH_RESULT_UNSUPPORTED_FILE,
+                         "SQLite database has no rocpd_metadata table");
+    }
+
+    std::vector<file_probe_result_t> probed;
+    probed.reserve(names.size());
+    for(const std::string& table : names)
+    {
+        file_probe_result_t one = probe_one_metadata(connection, kind, table);
+        if(one.status != PH_RESULT_SUCCESS) return one;
+        probed.push_back(std::move(one));
+    }
+
+    file_probe_result_t result = probed.front();
+    result.uuids.reserve(probed.size());
+    for(const file_probe_result_t& one : probed)
+    {
+        if(one.schema_version.major != result.schema_version.major ||
+           one.schema_version.minor != result.schema_version.minor ||
+           one.schema_version.patch != result.schema_version.patch)
+        {
+            return result_of(PH_RESULT_UNSUPPORTED_FILE,
+                             "rocpd metadata tables do not share a schema version",
+                             trace_schema_t::rocpd,
+                             result.schema_version,
+                             result.uuid);
+        }
+        result.uuids.push_back(one.uuid);
+    }
+    return result;
 }
 
 struct format_detector_t

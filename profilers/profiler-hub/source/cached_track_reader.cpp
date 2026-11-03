@@ -93,9 +93,11 @@ to_ph_sample(const reader_types::counter_timeline_event_t& sample)
     return ph_sample_t{ .timestamp = sample.timestamp, .value = sample.value };
 }
 
+template <typename KeepName>
 std::vector<ph_event_t>
-to_ph_events(const reader_types::timeline_event_list_t&    events,
-             const reader_types::track_info_ptr_t&         track)
+to_ph_events(const reader_types::timeline_event_list_t& events,
+             const reader_types::track_info_ptr_t&      track,
+             KeepName&&                                 keep_name)
 {
     const auto track_id = static_cast<uint32_t>(track->id);
     // A host thread query also selects device events on that thread.
@@ -112,7 +114,9 @@ to_ph_events(const reader_types::timeline_event_list_t&    events,
         {
             continue;
         }
-        converted.push_back(to_ph_event(event, track_id));
+        ph_event_t item = to_ph_event(event, track_id);
+        item.name       = keep_name(event.display_name);
+        converted.push_back(item);
     }
     return converted;
 }
@@ -256,6 +260,15 @@ cached_track_reader::cached_track_reader(connection_source&   source,
 , m_workers{ workers }
 , m_options{ options }
 {}
+
+const char*
+cached_track_reader::keep_name(std::string_view text)
+{
+    if(text.empty()) return "";
+    const std::scoped_lock lock{ m_name_mutex };
+    m_names.emplace_back(text);
+    return m_names.back().c_str();
+}
 
 template <typename Item, typename Build>
 std::vector<Item>&
@@ -405,7 +418,10 @@ cached_track_reader::build_sorted_events(track_row_reader&                     r
         return merged;
     }
 
-    auto sorted = to_ph_events(reader.events_for_track(track, {}), track);
+    auto sorted = to_ph_events(
+        reader.events_for_track(track, {}), track, [&](std::string_view text) {
+            return keep_name(text);
+        });
     sort_by_start(sorted);
     assign_depths(sorted);
     return sorted;
