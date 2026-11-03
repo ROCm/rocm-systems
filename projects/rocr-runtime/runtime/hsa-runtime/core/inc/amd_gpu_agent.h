@@ -638,10 +638,14 @@ class GpuAgent : public GpuAgentInt {
   // On WSL (DXG) the comparison is done after removing the epoch offset.
   bool RawTsValid(uint64_t start, uint64_t end);
 
-  // @brief On WSL (DXG), detect an AQL timestamp epoch that predates the
-  // D3DKMTQueryClockCalibration GPU clock, from a just-completed end tick, and
-  // return the offset to subtract from raw AQL ticks.  WSL only.
+  // @brief On WSL (DXG), latch and return the AQL-vs-calibration epoch offset,
+  // detecting it from a just-completed end tick.  Acquires t1_lock_.  WSL only.
   int64_t WslEpochOffset(uint64_t end);
+
+  // @brief Body of WslEpochOffset; the caller must already hold t1_lock_.  Also
+  // called from the scalar TranslateTime path (which holds the lock) so scalar
+  // conversions detect the offset too.  WSL only.
+  int64_t DetectWslOffsetLocked(uint64_t end);
 
   // @brief Binds the second-level trap handler to this node.
   void BindTrapHandler();
