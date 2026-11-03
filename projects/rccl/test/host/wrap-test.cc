@@ -6121,7 +6121,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerCeCapFollowsCeChunk) 
       });
 }
 
-// The Ring cap is whatever getAlgoInfo plans, Tree included: its packed channels and max(nWarps, 3) warps.
+// Capture re-routes only where the planner runs Ring (fp8 plans Tree); the cap is Ring's packed channels and
+// max(nWarps, 3) warps.
 TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureCapFollowsThePlannedKernel) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_RegisteredCaptureCapFollowsThePlannedKernel",
@@ -6130,6 +6131,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureCapFollowsThePlanne
         ar.ringAlgo_ = NCCL_ALGO_TREE;
         ar.ringChannels_ = 40;
         ar.ringWarps_ = 6;
+        ar.ExpectUnchanged(16 * kMiB, /*capturing=*/true, NCCL_ALGO_TREE, "planner picks Tree");
+        ar.ringAlgo_ = NCCL_ALGO_RING;
         rcclCollDecision d = ar.Select(16 * kMiB, /*capturing=*/true);
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo);
         EXPECT_EQ(40u, d.ddaCap.blocks);
