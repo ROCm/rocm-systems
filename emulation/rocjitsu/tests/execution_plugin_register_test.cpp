@@ -56,8 +56,11 @@
 #include <bit>
 #include <cfenv>
 #include <format>
+#include <functional>
 #include <map>
 #include <set>
+#include <string>
+#include <tuple>
 
 namespace {
 
@@ -2801,6 +2804,87 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAc
             }
           }
         }
+}
+
+// Register observers, such as the race detector, must see the same (register, lane) reads and
+// writes from the snapshot path as from the per-element forced-scalar path, including when
+// cbsz/abid or blgp broadcast part of a register.
+TEST(ExecutionPluginTest, MfmaSnapshotObservationsMatchForcedScalar) {
+  if constexpr (!util::has_stdx_simd)
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  ForceScalarOverride restore(util::force_scalar());
+  constexpr uint32_t A = 0, B = 16, C = 32, D = 64;
+  using Run = std::function<void(ComputeUnitCore &, uint32_t)>;
+  std::vector<std::pair<std::string, Run>> cases;
+  for (uint32_t acc : {ACC_FROM_VGPR, 0u}) {
+    for (const auto &[m, k, batch] : {std::tuple{16u, 4u, 1u}, std::tuple{4u, 4u, 4u}})
+      cases.emplace_back(std::format("f64 {}x{}x{}x{} acc={}", m, m, k, batch, acc),
+                         [=](ComputeUnitCore &cu, uint32_t vb) {
+                           exec_f64(cu, m, m, k, batch, vb + D, vb + A, vb + B, vb + C, acc, 7);
+                         });
+    for (const auto &[m, k, batch] :
+         {std::tuple{16u, 64u, 1u}, std::tuple{32u, 32u, 1u}, std::tuple{32u, 16u, 1u},
+          std::tuple{16u, 32u, 1u}, std::tuple{16u, 16u, 1u}, std::tuple{32u, 8u, 1u},
+          std::tuple{32u, 4u, 2u}, std::tuple{16u, 4u, 4u}, std::tuple{4u, 4u, 16u}})
+      for (uint32_t cbsz = 0; (1u << cbsz) <= batch; ++cbsz)
+        for (uint32_t blgp = 0; blgp < 8; ++blgp)
+          cases.emplace_back(
+              std::format("i8 {}x{}x{}x{} acc={} cbsz={} blgp={}", m, m, k, batch, acc, cbsz, blgp),
+              [=](ComputeUnitCore &cu, uint32_t vb) {
+                exec_i32_i8(cu, m, m, k, batch, vb + D, vb + A, vb + B, vb + C, acc, cbsz,
+                            (1u << cbsz) - 1, blgp);
+              });
+    for (const auto &[k, bits] : {std::pair{1u, 32u}, std::pair{2u, 16u}, std::pair{4u, 16u}})
+      for (uint32_t cbsz = 0; cbsz <= 4; ++cbsz)
+        for (uint32_t blgp = 0; blgp < 8; ++blgp)
+          cases.emplace_back(
+              std::format("f32 4x4x{}x16 acc={} cbsz={} blgp={}", k, acc, cbsz, blgp),
+              [=](ComputeUnitCore &cu, uint32_t vb) {
+                if (bits == 32)
+                  exec_f32(cu, 4, 4, k, 16, 32, vb + D, vb + A, vb + B, vb + C, extract_f32,
+                           extract_f32, acc, cbsz, 1, blgp);
+                else
+                  exec_f32(cu, 4, 4, k, 16, 16, vb + D, vb + A, vb + B, vb + C, extract_bf16,
+                           extract_bf16, acc, cbsz, 1, blgp);
+              });
+    for (uint32_t m : {16u, 32u})
+      for (uint32_t a_fmt = 0; a_fmt < 5; ++a_fmt)
+        for (uint32_t b_fmt = 0; b_fmt < 5; ++b_fmt)
+          cases.emplace_back(
+              std::format("f8f6f4 {}x{} acc={} a={} b={}", m, m, acc, a_fmt, b_fmt),
+              [=](ComputeUnitCore &cu, uint32_t vb) {
+                ASSERT_TRUE(dispatch_matrix_fmt_pair(
+                    a_fmt, b_fmt, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+                      exec_f32_mixed(cu, m, m, m == 16 ? 128 : 64, 1, a_bits, b_bits, vb + D,
+                                     vb + A, vb + B, vb + C, ea, eb, acc);
+                    }));
+              });
+  }
+  using LaneSets = std::map<uint32_t, uint64_t>;
+  auto observe = [](const Run &run, bool force_scalar, LaneSets &reads, LaneSets &writes) {
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
+    auto *wf = f.cu()->dispatch_wf(0, 0, 104, 256);
+    ASSERT_NE(wf, nullptr);
+    const uint32_t vb = wf->vgpr_alloc().base;
+    auto *plugin = f.attach_ordering_plugin();
+    util::set_force_scalar_for_testing(force_scalar);
+    run(*f.cu(), vb);
+    for (const HookEvent &event : vgpr_read_events(*plugin))
+      reads[event.physical_reg - vb] |= event.lane_mask;
+    for (const HookEvent &event : vgpr_write_events(*plugin))
+      writes[event.physical_reg - vb] |= event.lane_mask;
+  };
+  for (const auto &[name, run] : cases) {
+    SCOPED_TRACE(name);
+    LaneSets snapshot_reads, snapshot_writes, scalar_reads, scalar_writes;
+    ASSERT_NO_FATAL_FAILURE(observe(run, false, snapshot_reads, snapshot_writes));
+    ASSERT_NO_FATAL_FAILURE(observe(run, true, scalar_reads, scalar_writes));
+    EXPECT_EQ(snapshot_reads, scalar_reads);
+    EXPECT_EQ(snapshot_writes, scalar_writes);
+    if (::testing::Test::HasFailure())
+      return;
+  }
 }
 
 TEST(ExecutionPluginTest, SdwaFloatingConversionsUseDestinationFormat) {

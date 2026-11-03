@@ -1342,14 +1342,15 @@ inline uint32_t matrix_vgpr_word(const MfmaOperandWords &source, uint32_t physic
 }
 
 /// Whole-register copies of an MFMA's A, B and accumulator operands with one observed read per
-/// range. Not valid for operands beyond MfmaOperandWords::kMaxRegs registers, in which case no
-/// register is read.
+/// range. The A and B reads report only the lanes the instruction uses, since a broadcast uses
+/// part of each register. Not valid for operands beyond MfmaOperandWords::kMaxRegs registers, in
+/// which case no register is read.
 class MfmaOperandSnapshots {
 public:
   template <typename ComputeUnit>
   MfmaOperandSnapshots(ComputeUnit &cu, uint32_t s0, uint32_t s1, uint32_t s2, uint64_t a_elements,
                        uint32_t a_bits, uint64_t b_elements, uint32_t b_bits, uint64_t acc_elements,
-                       uint32_t acc_bits, uint32_t const_acc) {
+                       uint32_t acc_bits, uint32_t const_acc, uint64_t a_lanes, uint64_t b_lanes) {
     constexpr uint32_t kWave = 64;
     const uint32_t a_regs = mfma_dense_reg_count(a_elements, a_bits, kWave);
     const uint32_t b_regs = mfma_dense_reg_count(b_elements, b_bits, kWave);
@@ -1358,8 +1359,9 @@ public:
     if (std::max({a_regs, b_regs, acc_regs}) > MfmaOperandWords::kMaxRegs)
       return;
     RegisterAccess regs(cu);
-    failed_ = capture(regs, s0, a_regs, a_).failed() || capture(regs, s1, b_regs, b_).failed() ||
-              (acc_regs && capture(regs, s2, acc_regs, acc_).failed());
+    failed_ = capture(regs, s0, a_regs, a_lanes, a_).failed() ||
+              capture(regs, s1, b_regs, b_lanes, b_).failed() ||
+              (acc_regs && capture(regs, s2, acc_regs, mfma_full_lane_mask(kWave), acc_).failed());
   }
 
   [[nodiscard]] bool valid() const { return a_.valid && !failed_; }
@@ -1369,9 +1371,10 @@ public:
   [[nodiscard]] const MfmaOperandWords &acc() const { return acc_; }
 
 private:
-  static Result capture(RegisterAccess &regs, uint32_t base, uint32_t reg_count,
+  static Result capture(RegisterAccess &regs, uint32_t base, uint32_t reg_count, uint64_t lanes,
                         MfmaOperandWords &operand) {
-    if (regs.read_vgpr_region(base, reg_count, mfma_full_lane_mask(64))
+    // The copy holds every lane; the mask only limits what observers are told was read.
+    if (regs.read_vgpr_region(base, reg_count, lanes)
             .copy_to({operand.words, static_cast<size_t>(reg_count) * 64})
             .failed())
       return Result::failure();
@@ -1473,9 +1476,25 @@ bool try_exec_mfma_regions(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_
     const uint64_t output_elements = uint64_t{M} * N * B;
     if (util::force_scalar() || cu.wf_size() != 64 || !mfma_regions_shape_fits<T>(M, N, K, B))
       return false;
+    // Lanes read through cbsz/abid and blgp, which can broadcast part of a register.
+    auto used_lanes = [&](uint32_t rows, uint32_t bits, auto permute) {
+      uint64_t lanes = 0;
+      for (uint32_t b = 0; b < B; ++b)
+        for (uint32_t row = 0; row < rows; ++row)
+          for (uint32_t k = 0; k < K; ++k)
+            lanes |= uint64_t{1} << permute(input_loc(rows, K, B, row, k, b, bits).lane);
+      return lanes;
+    };
+    const uint64_t a_lanes =
+        cbsz == 0
+            ? mfma_full_lane_mask(64)
+            : used_lanes(M, a_bits, [&](uint32_t l) { return permute_a_lane(l, cbsz, abid); });
+    const uint64_t b_lanes =
+        blgp == 0 ? mfma_full_lane_mask(64)
+                  : used_lanes(N, b_bits, [&](uint32_t l) { return permute_b_lane(l, blgp); });
     const MfmaOperandSnapshots snapshots(cu, s0, s1, s2, uint64_t{M} * K * B, a_bits,
                                          uint64_t{N} * K * B, b_bits, output_elements,
-                                         sizeof(T) * 8, const_acc);
+                                         sizeof(T) * 8, const_acc, a_lanes, b_lanes);
     // A reported read failure ends the instruction; it must not retry through the generic path.
     if (snapshots.failed())
       return true;
