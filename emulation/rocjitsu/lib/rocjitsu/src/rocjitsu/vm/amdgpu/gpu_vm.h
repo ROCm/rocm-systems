@@ -688,9 +688,13 @@ public:
   [[nodiscard]] std::optional<Mtype> cached_private_ram_mtype(uint64_t address,
                                                               const VmMtypeCache &cache) const;
   [[nodiscard]] bool try_write_contiguous(uint64_t address, std::span<const std::byte> bytes) const;
-  [[nodiscard]] AtomicLoadResult atomic_load(uint64_t address, uint32_t width) const;
-  [[nodiscard]] VmAccessOutcome atomic_store(uint64_t address, uint32_t width,
-                                             uint64_t value) const;
+  /// Acquire-load for an atomic operation, or a plain read when access is Read.
+  /// Atomic admission checks both permissions before a read/modify/write sequence.
+  [[nodiscard]] AtomicLoadResult atomic_load(uint64_t address, uint32_t width,
+                                             VmAccessKind access = VmAccessKind::Atomic) const;
+  /// Release-store for an atomic operation, or a plain write when access is Write.
+  [[nodiscard]] VmAccessOutcome atomic_store(uint64_t address, uint32_t width, uint64_t value,
+                                             VmAccessKind access = VmAccessKind::Atomic) const;
   [[nodiscard]] AtomicCompareExchangeResult
   compare_exchange(uint64_t address, uint32_t width, uint64_t expected, uint64_t desired) const;
   [[nodiscard]] VmAccessOutcome
