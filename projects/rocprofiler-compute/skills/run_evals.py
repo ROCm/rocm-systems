@@ -4,8 +4,8 @@
 
 """Run the skill evaluation datasets through Claude Code.
 
-Structural checks run in the AMD skills repo, not here. This script is the
-manual gate for routing and behavior: run it before a release to check that
+CI runs only the skillscope structural checks. This script is the manual gate
+for routing and behavior: run it before a release to check that
 each skill still routes on the prompts it should and stays quiet on the ones
 it should not.
 
@@ -122,13 +122,7 @@ def load_cases(skill: Path) -> list[dict[str, Any]]:
 
 
 def workspace_dir(skill: Path, workspace: str) -> Path:
-    """Join ``workspace`` onto the skill directory the way skillscope does.
-
-    skillscope checks ``(skill_path / workspace).is_dir()`` and then
-    ``copytree``s that directory. Parent-directory references stay in the
-    relative path and are followed by both calls, so a case can name
-    ``../../sample/<application>`` without copying those sources into the skill.
-    """
+    """Join ``workspace`` onto the skill directory the way skillscope does."""
     return skill / workspace
 
 
@@ -136,8 +130,7 @@ def build_workspace(root: Path, skill: Path, case: dict[str, Any]) -> Path:
     """Install every skill and seed a scratch workspace with the case's files.
 
     Like skillscope, the contents of the case's workspace directory, relative
-    to the skill, land at the workspace root. Parent-directory references in
-    ``workspace`` are kept and followed.
+    to the skill, land at the workspace root.
     """
     workspace = root / "workspace"
     workspace.mkdir(parents=True)
