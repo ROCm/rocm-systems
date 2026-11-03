@@ -110,6 +110,49 @@ through the service level, by setting ``ginTrafficClass`` and leaving
 ``NCCL_IB_SL`` unset. Set these values only when the fabric administrator
 provides appropriate values.
 
+Connect GIN at a custom stride
+==============================
+
+``NCCL_GIN_CONNECTION_FULL`` connects every rank. ``NCCL_GIN_CONNECTION_RAIL``
+connects only the rail team. ``NCCL_GIN_CONNECTION_CUSTOM_STRIDE`` connects each
+rank to the ranks a fixed number of communicator ranks away, which is denser
+than a rail when the stride is smaller than the rail-team stride. The stride
+is ``ginCustomStride``.
+
+Query ``ginMinStride`` before choosing it. That value is ``1`` when the
+communicator has full GIN connectivity. Otherwise it is the number of
+contiguous ranks on each host, or ``INT_MAX`` when that count is not the same
+on every host. ``INT_MAX`` means a custom stride cannot be used. A usable
+stride is positive, a multiple of ``ginMinStride``, and no larger than the
+rail-team stride from ``ncclTeamRail``. Stride ``1`` is full connectivity. The
+rail stride is railed connectivity. ``NCCL_CROSS_NIC=0`` keeps GIN on the rail,
+so ``ginMinStride`` rises to the rail stride and a stride that would cross
+rails is rejected.
+
+.. code-block:: cpp
+
+   ncclCommProperties properties = NCCL_COMM_PROPERTIES_INITIALIZER;
+   NCCLCHECK(ncclCommQueryProperties(comm, &properties));
+   if (properties.ginMinStride == INT_MAX) {
+     // This communicator has no uniform GIN stride.
+     return;
+   }
+   int stride = properties.ginMinStride;  // or another legal multiple
+
+   ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+   reqs.ginConnectionType = NCCL_GIN_CONNECTION_CUSTOM_STRIDE;
+   reqs.ginCustomStride = stride;
+   reqs.ginSignalCount = 1;
+   reqs.barrierCount = 1;
+
+A stride of ``0`` fails device-communicator creation with ``ncclInvalidUsage``.
+A stride larger than the rail team, or a stride that is not a multiple of
+``ginMinStride``, fails creation with ``ncclInternalError``. Puts and gets are
+valid only for peers on that stride.
+A generic ``ncclBarrierSession`` on the world team, with a fence that includes
+``ncclGinFenceLevel::Put``, synchronizes the local team and then the ranks
+connected at ``ginCustomStride``.
+
 Device code creates an ``ncclGin`` object for one returned context:
 
 .. code-block:: cpp
