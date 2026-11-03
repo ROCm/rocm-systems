@@ -171,6 +171,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   t1_ = t0_;
   historical_clock_ratio_ = 0.0;
   gpu_clock_offset_ = 0;
+  is_wsl_dxg_ = core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg();
   assert(err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
 
   num_h2d_d2h_engines_ = properties_.NumSdmaEngines > 2 ? 2 : properties_.NumSdmaEngines;
@@ -3322,7 +3323,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_ti
   uint64_t start, end;
   signal->GetRawTs(start, end);
 
-  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
+  if (!RawTsValid(start, end)) {
     debug_print("Signal %p time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
                 &signal->signal_, start, end, t0_.GPUClockCounter);
     time.start = 0;
@@ -3340,7 +3341,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_
   uint64_t start, end;
   signal->GetRawTs(start, end);
 
-  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
+  if (!RawTsValid(start, end)) {
     debug_print("Signal %p async copy time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
                 &signal->signal_, start, end, t0_.GPUClockCounter);
     time.start = 0;
@@ -3369,12 +3370,15 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
 
   std::lock_guard<std::mutex> lock(t1_lock_);
 
+  // On Windows and WSL (DXG), AQL dispatch timestamps may have a fixed epoch
+  // offset from D3DKMTQueryClockCalibration's GPUClockCounter (same clock domain,
+  // different base).  Subtract the offset before interpolation (0 until first
+  // detection).  gpu_clock_offset_ is read and written under t1_lock_ to avoid
+  // data races.  On native Linux (KFD) the clocks match, so no offset applies.
 #ifdef _WIN32
-  // On Windows, AQL dispatch timestamps may have a fixed epoch offset from
-  // D3DKMTQueryClockCalibration's GPUClockCounter (same clock domain, different
-  // base).  Subtract the offset before interpolation (0 until first detection).
-  // gpu_clock_offset_ is read and written under t1_lock_ to avoid data races.
   tick -= gpu_clock_offset_;
+#else
+  if (is_wsl_dxg_) tick -= gpu_clock_offset_;
 #endif
   // Limit errors due to correlated pair certainty to ~0.5us.
   // extrapolated time < (0.5us / half clock read certainty) * delay between clock measures
@@ -3451,6 +3455,35 @@ uint16_t GpuAgent::GetSdmaMicrocodeVersion() const {
 void GpuAgent::SyncClocks() {
   [[maybe_unused]] hsa_status_t sync_err = driver().GetClockCounters(node_id(), &t1_);
   assert(sync_err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
+}
+
+bool GpuAgent::RawTsValid(uint64_t start, uint64_t end) {
+  if ((start == 0) || (end == 0)) return false;
+  // Native Linux (KFD): the AQL timestamp clock and D3DKMT's calibration share an
+  // epoch, so this is the upstream check - a packet is valid iff it does not
+  // predate t0_.
+  if (!is_wsl_dxg_)
+    return (start >= t0_.GPUClockCounter) && (end >= t0_.GPUClockCounter);
+  // WSL (DXG): raw AQL ticks lag the calibration epoch by a fixed offset, so
+  // compare against t0_ after removing it.
+  const uint64_t off = uint64_t(WslEpochOffset(end));
+  return (start - off >= t0_.GPUClockCounter) && (end - off >= t0_.GPUClockCounter);
+}
+
+// WSL only.  The AQL timestamp clock can lag D3DKMT's GPUClockCounter by hours,
+// so every completed packet looks older than t0_ and was reported as invalid
+// (zero duration).  An end tick that predates t0_ by more than this process could
+// have run for is an epoch offset, not an early timestamp; latch it once, taking
+// the end as "now".  That makes durations exact and leaves absolute times late
+// only by the read latency.  gpu_clock_offset_ is read and written under t1_lock_.
+int64_t GpuAgent::WslEpochOffset(uint64_t end) {
+  std::lock_guard<std::mutex> lock(t1_lock_);
+  if (gpu_clock_offset_ != 0 || end == 0 || end >= t0_.GPUClockCounter)
+    return gpu_clock_offset_;
+  SyncClocks();
+  if (t0_.GPUClockCounter - end > t1_.GPUClockCounter - t0_.GPUClockCounter)
+    gpu_clock_offset_ = int64_t(end) - int64_t(t1_.GPUClockCounter);
+  return gpu_clock_offset_;
 }
 
 hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttrap_buffers,
