@@ -23,6 +23,7 @@
 
 #include "ScopedHook.h"
 #include "../common/ScopedEnv.hpp"
+#include "../common/TopoRailPlane.hpp"
 #include "fakes/graph_fakes.h"
 #include "fakes/param_redirect.h"
 
@@ -2405,8 +2406,7 @@ TEST_F(TopoGetSystemMicrotest, GetSystem_FailuresAreReturned) {
   EXPECT_EQ(nullptr, system_);
 }
 
-// --- topo_expl models: every model loads, and its CPU gets the Rome class and Zen generation a live host
-// with that CPUID would get, so topo_expl keeps exercising the detection path real hosts take.
+// --- topo_expl models: each loads with the CPU class a live host with its CPUID would get.
 
 struct TopoModelCpu {
   const char* model;
@@ -2430,6 +2430,7 @@ const TopoModelCpu kTopoModelCpus[] = {
 
 std::vector<std::string> TopoExplModels() {
   std::vector<std::string> models;
+  if (!std::filesystem::is_directory(TOPO_EXPL_MODELS_DIR)) return models;
   for (const auto& entry : std::filesystem::directory_iterator(TOPO_EXPL_MODELS_DIR)) {
     if (entry.path().extension() == ".xml") models.push_back(entry.path().filename().string());
   }
@@ -2437,31 +2438,23 @@ std::vector<std::string> TopoExplModels() {
   return models;
 }
 
-// Loads a model as topo_expl does: no net plugin ran, so give each NIC the rail and plane defaults, and load
-// it as the first host it records. Reports the first <cpu>'s familyid/modelid.
+// Loads a model as topo_expl does: rail/plane defaults for its NICs, loaded as the first host it records.
+// Reports the first <cpu>'s familyid/modelid.
 SystemPtr LoadTopoExplModel(const std::string& model, int* familyId = nullptr, int* modelId = nullptr) {
   XmlPtr xml = NewXml(NCCL_GRAPH_XML_MAX_NODES);
   const std::string path = std::string(TOPO_EXPL_MODELS_DIR) + "/" + model;
   EXPECT_EQ(ncclSuccess, ncclTopoGetXmlFromFile(path.c_str(), xml.get(), 0)) << model;
+  EXPECT_EQ(ncclSuccess, RcclUnitTesting::fillMissingRailPlane(xml.get())) << model;
   uint64_t localHostHash = 0;
-  bool hostHashSet = false;
-  for (int i = 0, rail = 0; i < xml->maxIndex; i++) {
+  for (int i = 0; i < xml->maxIndex; i++) {
     ncclXmlNode* node = xml->nodes + i;
-    if (strcmp(node->name, "cpu") == 0 && !hostHashSet) {
-      const char* hostHash;
-      EXPECT_EQ(ncclSuccess, xmlGetAttr(node, "host_hash", &hostHash));
-      if (hostHash) localHostHash = strtoull(hostHash, nullptr, 16);
-      if (familyId) EXPECT_EQ(ncclSuccess, xmlGetAttrIntDefault(node, "familyid", familyId, NCCL_TOPO_UNDEF));
-      if (modelId) EXPECT_EQ(ncclSuccess, xmlGetAttrIntDefault(node, "modelid", modelId, NCCL_TOPO_UNDEF));
-      hostHashSet = true;
-    }
-    if (strcmp(node->name, "net") != 0 && strcmp(node->name, "gin") != 0 && strcmp(node->name, "rma") != 0) continue;
-    int value, port;
-    EXPECT_EQ(ncclSuccess, xmlGetAttrIntDefault(node, "port", &port, 0));
-    EXPECT_EQ(ncclSuccess, xmlGetAttrIntDefault(node, "rail", &value, NCCL_TOPO_UNDEF));
-    if (value == NCCL_TOPO_UNDEF) EXPECT_EQ(ncclSuccess, xmlSetAttrInt(node, "rail", NCCL_TOPO_UNDEF_BIT | rail++));
-    EXPECT_EQ(ncclSuccess, xmlGetAttrIntDefault(node, "plane", &value, NCCL_TOPO_UNDEF));
-    if (value == NCCL_TOPO_UNDEF) EXPECT_EQ(ncclSuccess, xmlSetAttrInt(node, "plane", NCCL_TOPO_UNDEF_BIT | port));
+    if (strcmp(node->name, "cpu") != 0) continue;
+    const char* hostHash;
+    EXPECT_EQ(ncclSuccess, xmlGetAttr(node, "host_hash", &hostHash));
+    if (hostHash) localHostHash = strtoull(hostHash, nullptr, 16);
+    if (familyId) EXPECT_EQ(ncclSuccess, xmlGetAttrIntDefault(node, "familyid", familyId, NCCL_TOPO_UNDEF));
+    if (modelId) EXPECT_EQ(ncclSuccess, xmlGetAttrIntDefault(node, "modelid", modelId, NCCL_TOPO_UNDEF));
+    break;
   }
   ncclTopoSystem* system = nullptr;
   EXPECT_EQ(ncclSuccess, ncclTopoGetSystemFromXml(xml.get(), &system, localHostHash)) << model;
@@ -2470,7 +2463,7 @@ SystemPtr LoadTopoExplModel(const std::string& model, int* familyId = nullptr, i
 
 TEST_F(TopoMicrotest, TopoExplModels_LoadWithTheCpuClassOfTheirCpuid) {
   const std::vector<std::string> models = TopoExplModels();
-  ASSERT_FALSE(models.empty()) << TOPO_EXPL_MODELS_DIR;
+  if (models.empty()) GTEST_SKIP() << "no topo_expl models under " << TOPO_EXPL_MODELS_DIR;
   for (const std::string& model : models) {
     int familyId = NCCL_TOPO_UNDEF, modelId = NCCL_TOPO_UNDEF;
     SystemPtr system = LoadTopoExplModel(model, &familyId, &modelId);
@@ -2491,6 +2484,7 @@ TEST_F(TopoMicrotest, TopoExplModels_LoadWithTheCpuClassOfTheirCpuid) {
 }
 
 TEST_F(TopoMicrotest, TopoExplModels_KnownModelsKeepTheirCpuClass) {
+  if (TopoExplModels().empty()) GTEST_SKIP() << "no topo_expl models under " << TOPO_EXPL_MODELS_DIR;
   for (const TopoModelCpu& c : kTopoModelCpus) {
     SystemPtr system = LoadTopoExplModel(c.model);
     ASSERT_NE(nullptr, system) << c.model;

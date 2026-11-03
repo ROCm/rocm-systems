@@ -2,14 +2,7 @@
 # Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 #
 # See LICENSE.txt for license information
-"""Guards for the CPU identity in the topo_expl model XMLs.
-
-Topology detection writes the CPUID family into each <cpu> (0x17/0x19/0x1A for
-AMD Zen 1-2/3-4/5, 6 for Intel). Models copied from dumps made before NCCL 2.31
-carry the old family + (extFamily << 4) value (143/175/191 for AMD). RCCL still
-accepts that value, so such a model no longer exercises the detection path a
-live host takes, and a regression there goes unnoticed in topo_expl.
-"""
+"""Each topo_expl model <cpu> carries the CPUID family a live host writes (AMD 23/25/26, Intel 6), not 143/175/191."""
 
 import unittest
 import xml.etree.ElementTree as ET
