@@ -6,6 +6,9 @@ from the code objects, decode the ATT buffers, and print or plot results.
 
 Install the Python package first, or run from the source tree with
 `PYTHONPATH=python`. Plotting samples require `matplotlib` and `numpy`.
+Installed samples live in `share/rocprof-trace-decoder/samples` (the
+`rocprof-trace-decoder-samples` package); run them with the installed package's
+`site-packages` directory on `PYTHONPATH`.
 
 The plotting samples write their PNG output to the current directory by
 default. Use `-d DIR` to choose a different output directory.
