@@ -22,7 +22,11 @@
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+#include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/record_producer.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/context.h>
@@ -130,5 +134,34 @@ rocprofiler_context_is_valid(rocprofiler_context_id_t context_id, int* status)
     }
 
     return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+}
+
+rocprofiler_status_t
+rocprofiler_synchronize_contexts(const rocprofiler_context_id_t* contexts, size_t num_contexts)
+{
+    // Finalization has already run these drains.
+    if(rocprofiler::registration::get_fini_status() > 0) return ROCPROFILER_STATUS_SUCCESS;
+
+    for(size_t i = 0; i < num_contexts; ++i)
+    {
+        if(contexts[i] == rocprofiler_context_none ||
+           !rocprofiler::context::get_registered_context(contexts[i]))
+            return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+    }
+
+    // A drain entered from a record-producing thread would wait on the caller's own work.
+    if(rocprofiler::hsa::on_record_producer_thread())
+        return ROCPROFILER_STATUS_ERROR_REENTRANT_CALL;
+
+    // Same sequence and order as finalization. Each drain is internally bounded and reports
+    // whether it completed.
+    bool _copies_drained     = rocprofiler::hsa::async_copy_sync();
+    bool _dispatches_drained = rocprofiler::hsa::queue_controller_sync();
+
+    // Signal-less dispatch is not drained here. kfd::signal_less_fence_completions() is terminal
+    // on every path, not only on timeout: it stops and joins the reader, and ledgers in-flight
+    // dispatches as losses. Those are the semantics finalization needs and a live call cannot use.
+    return (_copies_drained && _dispatches_drained) ? ROCPROFILER_STATUS_SUCCESS
+                                                    : ROCPROFILER_STATUS_ERROR_TIMEOUT;
 }
 }

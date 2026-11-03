@@ -46,7 +46,9 @@ get_ids();
 void
 async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance);
 
-void
+// Drain outstanding memory copy completion callbacks. False if the internal wait expired with
+// callbacks still undelivered.
+bool
 async_copy_sync();
 
 void
