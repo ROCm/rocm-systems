@@ -55,6 +55,7 @@ enum class InstructionExecutionError : uint8_t {
   None,
   InvalidInstructionEncoding,
   UnsupportedOperandValue,
+  InvalidRegisterAccess,
   UnimplementedInstruction,
   DecodeFailure,
 };
@@ -486,6 +487,10 @@ public:
   /// Short for conditional stack pointer, used by fork/join instructions
   static constexpr uint32_t CSP_SHIFT = 29;
   static constexpr uint32_t CSP_MASK = 7u << CSP_SHIFT;
+  /// MODE.FP_ROUND field (bits 3:0) and MODE.FP_DENORM field (bits 7:4).
+  static constexpr uint32_t FP_ROUND_MASK = 0xFu;
+  static constexpr uint32_t FP_DENORM_SHIFT = 4;
+  static constexpr uint32_t FP_DENORM_MASK = 0xFu << FP_DENORM_SHIFT;
 
   /// STATUS.HALT. Bit 13 on every modelled architecture -- see StatusReg::HALT
   /// in each arch's isa.h, which all spell it member<13, 13>.
@@ -505,10 +510,24 @@ public:
     set_mode_raw((mode_raw_ & ~CSP_MASK) | (csp << CSP_SHIFT));
   }
 
+  /// @brief Set MODE.FP_ROUND (bits 3:0) from a packed 4-bit value,
+  /// leaving every other MODE bit unchanged.
+  /// @param val Packed rounding modes; only the lowest 4 bits are used.
+  void set_fp_round_mode(uint32_t val) {
+    set_mode_raw((mode_raw_ & ~FP_ROUND_MASK) | (val & FP_ROUND_MASK));
+  }
+
+  /// @brief Set MODE.FP_DENORM (bits 7:4) from a packed 4-bit value,
+  /// leaving every other MODE bit unchanged.
+  /// @param val Packed denorm modes; only the lowest 4 bits are used.
+  void set_fp_denorm_mode(uint32_t val) {
+    set_mode_raw((mode_raw_ & ~FP_DENORM_MASK) | ((val << FP_DENORM_SHIFT) & FP_DENORM_MASK));
+  }
+
   uint32_t fp_round_mode_f32() const { return mode_raw_ & 0x3u; }
   uint32_t fp_round_mode_f16_f64() const { return (mode_raw_ >> 2) & 0x3u; }
-  uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> 4) & 0x3u; }
-  uint32_t fp_denorm_mode_f16_f64() const { return (mode_raw_ >> 6) & 0x3u; }
+  uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> FP_DENORM_SHIFT) & 0x3u; }
+  uint32_t fp_denorm_mode_f16_f64() const { return (mode_raw_ >> (FP_DENORM_SHIFT + 2)) & 0x3u; }
   uint32_t gpr_idx_offset() const { return m0() & 0xFF; }
   uint32_t gpr_idx_mode() const { return (m0() >> 12) & 0xF; }
 
@@ -755,13 +774,20 @@ public:
 
   /// @brief Record a fail-closed instruction execution error.
   /// @details Execution callbacks use this for inputs whose architectural
-  /// behavior is not implemented. Callers must not treat it as a hardware trap.
-  void report_instruction_execution_error(InstructionExecutionError error) const {
+  /// behavior is not implemented, or for invalid register-view operations.
+  /// Callers must not treat it as a hardware trap. Detail must have static lifetime.
+  void report_instruction_execution_error(InstructionExecutionError error,
+                                          const char *detail = nullptr) const {
     instruction_execution_error_ = error;
+    instruction_execution_error_detail_ = detail;
   }
 
   InstructionExecutionError instruction_execution_error() const {
     return instruction_execution_error_;
+  }
+
+  const char *instruction_execution_error_detail() const {
+    return instruction_execution_error_detail_;
   }
 
   bool instruction_execution_failed() const {
@@ -770,6 +796,7 @@ public:
 
   void clear_instruction_execution_error() {
     instruction_execution_error_ = InstructionExecutionError::None;
+    instruction_execution_error_detail_ = nullptr;
   }
 
   // -- KFD debugger (trap) state --
@@ -1090,6 +1117,7 @@ public:
     trapsts_ = 0;
     pending_alu_causes_ = 0;
     instruction_execution_error_ = InstructionExecutionError::None;
+    instruction_execution_error_detail_ = nullptr;
     sleep_cycles_ = 0;
     in_trap_handler_ = false;
     trap_interrupt_sent_ = false;
@@ -1141,6 +1169,7 @@ protected:
   std::shared_ptr<uint32_t> scratch_lease_;      ///< Resident PM4 scratch slot.
   uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
   mutable InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
+  mutable const char *instruction_execution_error_detail_ = nullptr;
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
   uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
   Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.

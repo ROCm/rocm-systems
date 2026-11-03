@@ -14,7 +14,7 @@
 #include <memory>
 #include <string>
 
-#include "../common/LogCapture.hpp"
+#include "../../../common/LogCapture.hpp"
 #include "fakes/net_ib_cast_p2p_resiliency_fakes.h"
 #include "fakes/transport_stubs.h"
 #include "net-ib-cast-test-common.h"
