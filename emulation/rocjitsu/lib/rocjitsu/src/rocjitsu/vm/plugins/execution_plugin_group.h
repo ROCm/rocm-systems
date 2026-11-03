@@ -383,6 +383,14 @@ public:
     });
   }
 
+  void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) {
+    invalidate_hot_hook_subscription_cache(wf);
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuWavefrontCancelled(wf);
+    });
+  }
+
   void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
     if (!observes_vgpr_reads_)
