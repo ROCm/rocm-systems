@@ -17,6 +17,7 @@
 #include "fakes/hip_fakes.h"      // the shared g_hip* seams this suite drives
 #include "fakes/nccl_fakes.h"     // g_ncclProxyClientGetFdBlocking
 #include "fakes/devcomm_fakes.h"  // g_ncclTeamLsa
+#include "fakes/nccl_device_core_fakes.h"  // g_ncclTeamWorld and the rest of the ncclTeam* family
 
 // param.h's NCCL_PARAM caches its value in a function-local static, so a param
 // read once is frozen for the process. fakes/param_redirect.h -- shared with
@@ -5379,7 +5380,7 @@ protected:
     // descriptors carry *our own* position in that team -- the member test is
     // relative to it -- so world rank 4 is lsa rank 0, and a returned index is
     // plainly distinguishable from the world rank it came from.
-    g_devrTeamWorld = [](ncclComm_t) { return ncclTeam_t{8, 4, 1}; };
+    g_ncclTeamWorld = [](ncclComm_t) { return ncclTeam_t{8, 4, 1}; };
     g_ncclTeamLsa   = [](ncclComm_t) { return ncclTeam_t{4, 0, 1}; };
   }
   void TearDown() override {
@@ -6745,11 +6746,12 @@ TEST(DevrGinContextsTotal, ZeroConnectionBackend_TreatedAsOne) {
 // ncclDevrCommCreateInternal is where a queued create is actually carried out.
 // This suite covers its GIN request validation, which runs before any resource
 // is touched and rejects combinations the communicator cannot serve, and the
-// resource-window sizing that follows it, up to the cuMemCreate call.
+// resource-window sizing that follows it, up to the cuMemCreate call. A devcomm
+// that asks for no resources has no window to create, so its build completes.
 //
-// The rest of the devcomm build -- symmetric-memory window creation, GIN
-// window registration, barriers -- is not covered here beyond a failed GIN
-// connect.
+// The rest of the devcomm build -- GIN activation, symmetric-memory window
+// creation, GIN window registration, barriers -- is not covered here beyond a
+// failed GIN activation.
 
 class DevrCommCreateInternalTest : public NcclVersionCompatTest {
 protected:
@@ -6758,6 +6760,10 @@ protected:
   ncclComm* comm = nullptr;
   ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
   ncclDevComm outDevComm{};
+  size_t memSegmentSizes[2] = {8192, 8192};
+  hipMemGenericAllocationHandle_t memHandles[2] = {reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55),
+                                                   reinterpret_cast<hipMemGenericAllocationHandle_t>(0x56)};
+  ncclDevrMemory mems[2] = {};
 
   void SetUp() override {
     DevRuntimeMicroTest::SetUp();
@@ -6782,6 +6788,8 @@ protected:
   }
 
   void TearDown() override {
+    comm->devrState.memHead = nullptr;
+    for (ncclDevrMemory& mem : mems) free(mem.ginSegmentInfos);
     while (comm->devrState.teamHead != nullptr) {
       ncclDevrTeam* next = comm->devrState.teamHead->next;
       free(comm->devrState.teamHead);
@@ -6793,6 +6801,20 @@ protected:
   ncclResult_t Create() {
     return ncclDevrCommCreateInternal(comm, &reqs, &outDevComm, /*isInternal=*/false,
                                       /*deviceCodeVersion=*/NCCL_VERSION_CODE);
+  }
+
+  // Puts mems on memHead as GIN-capable memories obtained before GIN was enabled.
+  void LinkPreGinMemories() {
+    for (int m = 0; m < 2; m++) {
+      mems[m].primaryAddr = reinterpret_cast<void*>(0x100000 * (m + 1));
+      mems[m].size = memSegmentSizes[m];
+      mems[m].numSegments = 1;
+      mems[m].maxGlobalNumSegments = 1;
+      mems[m].segmentSizes = &memSegmentSizes[m];
+      mems[m].memHandles = &memHandles[m];
+    }
+    mems[0].next = &mems[1];
+    comm->devrState.memHead = &mems[0];
   }
 };
 
@@ -6825,17 +6847,22 @@ TEST_F(DevrCommCreateInternalTest, FullGinRequestedOnRailOnlyComm_ReturnsInvalid
 
 // Branch: the deprecated ginForceEnable is equivalent to asking for a full
 // connection, so it fails the same support check rather than being ignored.
-//
-// The counterpart -- the same requirements with the flag clear, which requests
-// nothing and passes the gate -- is not tested: passing the gate is only
-// observable once the devcomm build completes, and this fixture stops that
-// build at the resource-window cuMemCreate.
 TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
   reqs.ginForceEnable = true;
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;  // overridden by the flag
   comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
 
   EXPECT_EQ(Create(), ncclInvalidArgument);
+}
+
+// Branch: the same requirements with the flag clear request nothing, so they
+// pass the gate that GinForceEnable_BehavesAsFullConnection fails.
+TEST_F(DevrCommCreateInternalTest, GinForceEnableClear_PassesGate) {
+  reqs.ginForceEnable = false;
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+
+  EXPECT_EQ(Create(), ncclSuccess);
 }
 
 // Integration point: the resource-window allocation must use the rounded
@@ -6882,6 +6909,79 @@ TEST_F(DevrCommCreateInternalTest, GinConnectFails_RetryConnectsAgain) {
   EXPECT_FALSE(comm->devrState.ginEnabled);
 }
 
+// Register fails after connect: activation rolls back, so the retry registers again.
+TEST_F(DevrCommCreateInternalTest, GinRegisterFailsAfterConnect_RollsBackActivation) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  LinkPreGinMemories();
+
+  void* const goodHostWin = reinterpret_cast<void*>(0xa1);
+  int goodRegistrations = 0;
+  int goodDeregistrations = 0;
+  ScopedHook connect(g_devrGinConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook reg(g_devrGinRegister, [&](ncclComm*, void* addr, size_t, void* hostWins[], ncclGinWindow_t[], uint32_t[],
+                                        int, bool, int) {
+    // Registration only runs once connect has latched GIN.
+    EXPECT_TRUE(comm->devrState.ginEnabled);
+    if (addr != mems[0].primaryAddr) return ncclSystemError;
+    hostWins[0] = goodHostWin;
+    goodRegistrations++;
+    return ncclSuccess;
+  });
+  ScopedHook dereg(g_devrGinDeregister, [&](ncclComm*, void* hostWins[], uint32_t const[]) {
+    if (hostWins[0] == goodHostWin) goodDeregistrations++;
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(Create(), ncclSystemError);
+  ASSERT_FALSE(comm->devrState.ginEnabled);
+  EXPECT_EQ(goodRegistrations, 1);
+  EXPECT_EQ(goodDeregistrations, 1);
+  EXPECT_EQ(mems[0].ginSegmentInfos, nullptr);
+  EXPECT_EQ(mems[0].ginHostWins[0], nullptr);
+  EXPECT_EQ(mems[1].ginSegmentInfos, nullptr);
+
+  EXPECT_EQ(Create(), ncclSystemError);
+  EXPECT_EQ(connect.calls, 2);
+  EXPECT_EQ(goodRegistrations, 2);
+  EXPECT_EQ(goodDeregistrations, 2);
+  EXPECT_FALSE(comm->devrState.ginEnabled);
+}
+
+// Stream creation fails after every memory registered: activation still rolls back.
+TEST_F(DevrCommCreateInternalTest, StreamCreateFailsAfterGinRegister_RollsBackActivation) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  comm->sharedRes->ginState.numActiveBackends = 1;
+  comm->sharedRes->ginState.backends[0].ginCommCount = 1;
+  LinkPreGinMemories();
+
+  int registrations = 0;
+  int deregistrations = 0;
+  ScopedHook connect(g_devrGinConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook reg(g_devrGinRegister, [&](ncclComm*, void* addr, size_t, void* hostWins[], ncclGinWindow_t[], uint32_t[],
+                                        int, bool, int) {
+    hostWins[0] = addr;
+    registrations++;
+    return ncclSuccess;
+  });
+  ScopedHook dereg(g_devrGinDeregister, [&](ncclComm*, void* hostWins[], uint32_t const[]) {
+    if (hostWins[0] == mems[0].primaryAddr || hostWins[0] == mems[1].primaryAddr) deregistrations++;
+    return ncclSuccess;
+  });
+  ScopedHook stream(g_hipStreamCreateWithFlags, [](hipStream_t*, unsigned) { return hipErrorInvalidValue; });
+
+  EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(stream.calls, 1);
+  EXPECT_EQ(registrations, 2);
+  EXPECT_EQ(deregistrations, 2);
+  EXPECT_FALSE(comm->devrState.ginEnabled);
+  for (ncclDevrMemory& mem : mems) {
+    EXPECT_EQ(mem.ginSegmentInfos, nullptr);
+    EXPECT_EQ(mem.ginHostWins[0], nullptr);
+  }
+}
+
 // Branch: a GIN request rejected after the support checks but before connect
 // leaves GIN unlatched, so a later valid create still connects.
 TEST_F(DevrCommCreateInternalTest, WorldGinBarrierOnRail_RejectedWithoutLatchingGin) {
@@ -6893,6 +6993,19 @@ TEST_F(DevrCommCreateInternalTest, WorldGinBarrierOnRail_RejectedWithoutLatching
   EXPECT_EQ(Create(), ncclInvalidArgument);
   EXPECT_EQ(connect.calls, 0);
   EXPECT_FALSE(comm->devrState.ginEnabled);
+}
+
+// Branch: GIN already enabled on the comm by an earlier devComm. A devComm
+// that requests no GIN connection must not get GIN dev-comm setup (AICOMRCCL-3230).
+TEST_F(DevrCommCreateInternalTest, NoGinRequestedOnGinEnabledComm_SkipsGinDevCommSetup) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  comm->devrState.ginEnabled = true;
+  ScopedHook setup(g_devrGinDevCommSetup,
+                   [](ncclComm*, ncclDevCommRequirements const*, ncclDevComm*, uint32_t) { return ncclSuccess; });
+
+  EXPECT_EQ(Create(), ncclSuccess);
+  EXPECT_EQ(setup.calls, 0);
 }
 
 

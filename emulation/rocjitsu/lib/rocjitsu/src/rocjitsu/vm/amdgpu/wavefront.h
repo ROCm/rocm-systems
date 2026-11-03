@@ -23,6 +23,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -54,7 +55,9 @@ enum class InstructionExecutionError : uint8_t {
   None,
   InvalidInstructionEncoding,
   UnsupportedOperandValue,
+  InvalidRegisterAccess,
   UnimplementedInstruction,
+  DecodeFailure,
 };
 
 /// @brief Allocation slice within a register file.
@@ -82,9 +85,12 @@ struct RegAllocation {
 /// cycles. Dynamic dispatch state (wg_id, pc, register allocations,
 /// execution masks) is set when the slot is activated and reset by reset().
 ///
-/// Plugin state (plugin_states_) is NOT cleared by reset(). Plugins must
-/// set their per-wavefront state in onAmdgpuWorkgroupDispatched, which
-/// fires before the wavefront's first instruction.
+/// Plugin state (plugin_states_) is not cleared by reset(). Plugins initialize
+/// it in onAmdgpuWorkgroupDispatched or onAmdgpuWavefrontDispatched, before the
+/// first instruction of each wave incarnation. onAmdgpuWavefrontHalted or
+/// onAmdgpuWavefrontCancelled ends that incarnation, including a cluster
+/// placement rolled back before retry in the same slot. See the cancellation
+/// contract in execution_plugin.h for terminal-hook and retry semantics.
 ///
 /// A slot is considered dispatched (active) when it has a nonzero register
 /// allocation (sgpr_alloc_.count > 0). After clear(), the slot is idle.
@@ -361,6 +367,16 @@ public:
   /// exposing the owning compute unit or reclassifying the address through the
   /// legacy memory path.
   [[nodiscard]] std::optional<GpuVmAccess> snapshot_vm_access() const;
+
+  /// @brief Disassemble captured instruction bytes with this CU's target decoder.
+  /// @details Call on the CU execution thread with a complete instruction encoding.
+  /// Standalone plugin modules do not link the simulator, so they reach the CU's
+  /// decoder through this virtual call. It is pure virtual because an out-of-line
+  /// definition would become Wavefront's key function, and plugins could then no
+  /// longer emit Wavefront's type information themselves.
+  /// @throws std::logic_error if the encoding is empty, truncated, or undecodable.
+  virtual std::string disassemble_instruction(std::span<const uint32_t> encoding,
+                                              uint64_t pc) const = 0;
 
   /// @brief Read GPU memory in this wave's process address space.
   [[nodiscard]] VmAccessOutcome read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const;
@@ -740,13 +756,20 @@ public:
 
   /// @brief Record a fail-closed instruction execution error.
   /// @details Execution callbacks use this for inputs whose architectural
-  /// behavior is not implemented. Callers must not treat it as a hardware trap.
-  void report_instruction_execution_error(InstructionExecutionError error) const {
+  /// behavior is not implemented, or for invalid register-view operations.
+  /// Callers must not treat it as a hardware trap. Detail must have static lifetime.
+  void report_instruction_execution_error(InstructionExecutionError error,
+                                          const char *detail = nullptr) const {
     instruction_execution_error_ = error;
+    instruction_execution_error_detail_ = detail;
   }
 
   InstructionExecutionError instruction_execution_error() const {
     return instruction_execution_error_;
+  }
+
+  const char *instruction_execution_error_detail() const {
+    return instruction_execution_error_detail_;
   }
 
   bool instruction_execution_failed() const {
@@ -755,6 +778,7 @@ public:
 
   void clear_instruction_execution_error() {
     instruction_execution_error_ = InstructionExecutionError::None;
+    instruction_execution_error_detail_ = nullptr;
   }
 
   // -- KFD debugger (trap) state --
@@ -1075,6 +1099,7 @@ public:
     trapsts_ = 0;
     pending_alu_causes_ = 0;
     instruction_execution_error_ = InstructionExecutionError::None;
+    instruction_execution_error_detail_ = nullptr;
     sleep_cycles_ = 0;
     in_trap_handler_ = false;
     trap_interrupt_sent_ = false;
@@ -1126,6 +1151,7 @@ protected:
   std::shared_ptr<uint32_t> scratch_lease_;      ///< Resident PM4 scratch slot.
   uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
   mutable InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
+  mutable const char *instruction_execution_error_detail_ = nullptr;
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
   uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
   Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
@@ -1299,6 +1325,9 @@ public:
   IsaWavefront(ComputeUnitCore &cu, uint32_t wf_id)
       : Wavefront(cu, wf_id, Isa::WF_SIZE, Isa::WF_SIZE_MAX, Isa::MAX_SGPRS_PER_WF,
                   Isa::MAX_VGPRS_PER_WF, Isa::MODE_HAS_GPR_IDX_EN) {}
+
+  std::string disassemble_instruction(std::span<const uint32_t> encoding,
+                                      uint64_t pc) const override;
 };
 
 } // namespace amdgpu
