@@ -1,0 +1,53 @@
+name: rocSHMEM link worker sweep (96 CPUs)
+on:
+  push:
+    branches: [codex/rocshmem-link-sweep-01a19d9e]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rocshmem-link-sweep-01a19d9e
+  cancel-in-progress: false
+jobs:
+  rocshmem:
+    runs-on: aws-linux-scale-rocm-prod
+    timeout-minutes: 240
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/experiments/rocshmem-link-sweep
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          repository: ROCm/rocm-systems
+          ref: a10dca087065a82f15ea89dc7d6fdd3c6bb2c246
+          path: rocshmem-source
+          persist-credentials: false
+          sparse-checkout: |
+            projects/rocshmem
+            shared
+            cmake
+      - name: Install host prerequisites
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-venv python3-pip cmake ninja-build build-essential pkg-config libnuma-dev libdrm-dev libibverbs-dev
+      - name: Validate experiment tests
+        run: python3 -m unittest discover -s .github/experiments/rocshmem-link-sweep/benchmark -p 'test_*.py' -v
+      - name: Build rocSHMEM only and measure link widths
+        run: python3 .github/experiments/rocshmem-link-sweep/run_ci.py
+      - name: Upload measurements and logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rocshmem-link-sweep-${{ github.run_id }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            rocshmem-results/**/*.json
+            rocshmem-results/**/*.jsonl
+            rocshmem-results/**/*.log
+            rocshmem-results/**/*.txt
+            rocshmem-results/**/*.csv
+            rocshmem-results/**/*.md
