@@ -1768,7 +1768,10 @@ static constexpr unsigned long long kValidInstantiateParamsFlags =
 hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                         unsigned long long flags = 0) {
   HIP_INIT_API(hipGraphInstantiateWithFlags, pGraphExec, graph, flags);
-  if (pGraphExec == nullptr || graph == nullptr) {
+  // A graph moved into a child graph node is owned by its parent and cannot be
+  // instantiated on its own, same as hipGraphInstantiate/hipGraphInstantiateWithParams.
+  if (pGraphExec == nullptr || graph == nullptr ||
+      reinterpret_cast<hip::Graph*>(graph)->IsMoved()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
