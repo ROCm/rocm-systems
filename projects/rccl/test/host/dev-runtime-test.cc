@@ -6880,6 +6880,12 @@ TEST_F(DevrCommCreateInternalTest, LateStageFailureFreesGinDevComm) {
 
   EXPECT_NE(Create(), ncclSuccess);
   EXPECT_EQ(ginFree.calls, 1);
+  // The free must be followed by ncclGinDevCommClearFields, so the devComm does
+  // not keep a non-zero ginContextCount and a stale handle. Without the clear, a
+  // later ncclDevCommDestroy sees ginContextCount == 1 and frees the already-freed
+  // contexts a second time (dev_runtime.cc ncclDevCommDestroy guard).
+  EXPECT_EQ(outDevComm.ginContextCount, 0u);
+  EXPECT_EQ(outDevComm.ginHandles[0], nullptr);
 }
 
 // Control: GIN not requested, so ncclGinDevCommSetup never runs and
@@ -6896,6 +6902,30 @@ TEST_F(DevrCommCreateInternalTest, LateStageFailureWithoutGinDoesNotFree) {
 
   EXPECT_NE(Create(), ncclSuccess);
   EXPECT_EQ(streamCreate.calls, 1);  // reached the same late-stage failure as the positive test
+  EXPECT_EQ(ginFree.calls, 0);
+}
+
+// The fail-path guard keys on ginDevCommSetupDone, not on ginContextCount. A
+// ncclGinDevCommSetup that records a non-zero ginContextCount and then fails (as
+// gin_host.cc can on an allocation or unsupported-type exit) jumps to fail with
+// the flag still false, so the free must NOT fire. A guard that read
+// ginContextCount instead would wrongly free here -- this is what pins the flag.
+TEST_F(DevrCommCreateInternalTest, GinSetupFailsAfterRecordingContexts_DoesNotFree) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  comm->devrState.cftMcSize = 1;  // past the GIN gate idivRcp32(cftMcSize) runs; 0 would divide-by-zero
+
+  ScopedHook ginSetup(g_devrGinDevCommSetup,
+                      [](struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm* devComm,
+                         uint32_t) {
+                        devComm->ginContextCount = 1;  // recorded before the failure, mirroring gin_host.cc
+                        devComm->ginHandles[0] = reinterpret_cast<void*>(0xACE);
+                        return ncclSystemError;
+                      });
+  ScopedHook ginFree(g_devrGinDevCommFree,
+                     [](struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; });
+
+  EXPECT_NE(Create(), ncclSuccess);
   EXPECT_EQ(ginFree.calls, 0);
 }
 
