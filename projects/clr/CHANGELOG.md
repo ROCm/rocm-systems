@@ -26,6 +26,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
         type and the device's CU-masking granularity. `hipExecAffinityTypeCUCount` is always reported
         as supported. Two HIP-specific extension types, `hipExtExecAffinityTypeGranularityCU` and
         `hipExtExecAffinityTypeGranularityWGP`, report the granularity the applies to the CU mask.
+* Support for child graph node ownership in `hipGraphAddNode`. The new `hipGraphChildGraphNodeOwnership` enumeration and the `ownership` member of `hipChildGraphNodeParams` select whether a child graph is cloned into the parent (`hipGraphChildGraphOwnershipClone`, the default) or moved into it (`hipGraphChildGraphOwnershipMove`), providing parity with corresponding CUDA behavior. A moved child graph is owned by its parent and destroyed with it. It can no longer be independently destroyed or instantiated, added to a second parent graph, or passed to `hipGraphExecUpdate`.
 
 ### Resolved issues
 
