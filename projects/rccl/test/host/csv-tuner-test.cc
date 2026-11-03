@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <sstream>
 #include <string>
 #include <vector>
 #include <sys/stat.h>
@@ -152,6 +153,32 @@ class CsvTunerMicrotest : public ::testing::Test {
     ctx->configs = nullptr;
   }
 
+  static void ExpectTuning(void* context, ncclFunc_t collective, size_t bytes, int pipeOps, int regBuff,
+                           int expectedAlgorithm, int expectedProtocol, int expectedChannels,
+                           int ignoredAlgorithm = -1, int ignoredProtocol = -1) {
+    SCOPED_TRACE(::testing::Message() << "collective=" << collective << " bytes=" << bytes
+                                    << " pipeOps=" << pipeOps << " regBuff=" << regBuff);
+    float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+    for (auto& row : table) {
+      for (float& cost : row) cost = 1.0f;
+    }
+    if (ignoredAlgorithm >= 0) table[ignoredAlgorithm][ignoredProtocol] = NCCL_ALGO_PROTO_IGNORE;
+
+    int channels = -1;
+    ASSERT_EQ(ncclSuccess, csvTunerGetCollInfo(context, collective, bytes, pipeOps, (float**)table,
+                                             NCCL_NUM_ALGORITHMS, NCCL_NUM_PROTOCOLS, regBuff, &channels));
+    EXPECT_EQ(expectedChannels, channels);
+    for (int algorithm = 0; algorithm < NCCL_NUM_ALGORITHMS; algorithm++) {
+      for (int protocol = 0; protocol < NCCL_NUM_PROTOCOLS; protocol++) {
+        const float expected = algorithm == ignoredAlgorithm && protocol == ignoredProtocol
+                                   ? NCCL_ALGO_PROTO_IGNORE
+                                   : algorithm == expectedAlgorithm && protocol == expectedProtocol ? 0.0f : 1.0f;
+        EXPECT_FLOAT_EQ(expected, table[algorithm][protocol])
+            << "algorithm=" << algorithm << " protocol=" << protocol;
+      }
+    }
+  }
+
   // Field-wise, not memcmp: the structs come from malloc, so their padding
   // bytes are whatever the allocator last left there.
   static void ExpectSameConfig(const CsvTuningConfig& a, const CsvTuningConfig& b, const std::string& what) {
@@ -225,6 +252,103 @@ TEST_F(CsvTunerMicrotest, EmbeddedAndFileParseIdentically) {
     FreeContext(&fromBuffer);
     FreeContext(&fromFile);
   }
+}
+
+TEST_F(CsvTunerMicrotest, EveryEmbeddedDataRowIsParsed) {
+  const auto& embedded = rcclCsvTunerEmbeddedConfigs();
+  ASSERT_FALSE(embedded.empty());
+  for (const auto& entry : embedded) {
+    std::istringstream contents(entry.second);
+    std::string line;
+    int dataRows = 0;
+    while (std::getline(contents, line)) {
+      const size_t first = line.find_first_not_of(" \t\r");
+      if (first != std::string::npos && line[first] != '#') dataRows++;
+    }
+    CsvTunerContext context = MakeContext(16, 2);
+    ASSERT_EQ(ncclSuccess, loadConfigFromBuffer(&context, entry.second.c_str(), entry.first.c_str()));
+    EXPECT_EQ(dataRows, context.numConfigs) << entry.first;
+    FreeContext(&context);
+  }
+}
+
+TEST_F(CsvTunerMicrotest, Gfx950TwoNodeTuningBoundariesAndTopology) {
+  const char* source = rcclCsvTunerFindConfig("gfx950");
+  ASSERT_NE(nullptr, source);
+  ASSERT_STREQ("<embedded>/rccl_tuner_gfx950.csv", source);
+  struct Probe {
+    ncclFunc_t collective;
+    size_t bytes;
+    int algorithm;
+    int protocol;
+    int channels;
+  };
+  const Probe probes[] = {
+      {ncclFuncAllReduce, 16777215, -1, -1, 0},
+      {ncclFuncAllReduce, 16777216, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64},
+      {ncclFuncAllReduce, 33554431, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64},
+      {ncclFuncAllReduce, 33554432, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64},
+      {ncclFuncAllReduce, 54525951, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64},
+      {ncclFuncAllReduce, 54525952, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64},
+      {ncclFuncAllReduce, 117440511, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64},
+      {ncclFuncAllReduce, 117440512, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64},
+      {ncclFuncAllReduce, 150994943, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64},
+      {ncclFuncAllReduce, 150994944, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 48},
+      {ncclFuncAllReduce, 234881024, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 48},
+      {ncclFuncAllReduce, 234881025, -1, -1, 0},
+      {ncclFuncAllGather, 150994943, -1, -1, 0},
+      {ncclFuncAllGather, 150994944, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 48},
+      {ncclFuncAllGather, 234881023, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 48},
+      {ncclFuncAllGather, 234881024, -1, -1, 0},
+      {ncclFuncReduceScatter, 142606335, -1, -1, 0},
+      {ncclFuncReduceScatter, 142606336, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 32},
+      {ncclFuncReduceScatter, 176160767, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 32},
+      {ncclFuncReduceScatter, 176160768, -1, -1, 0},
+      {ncclFuncBroadcast, 16777216, -1, -1, 0},
+      {ncclFuncReduce, 16777216, -1, -1, 0},
+  };
+  struct Topology {
+    size_t ranks;
+    size_t nodes;
+  };
+  const Topology topologies[] = {{16, 2}, {8, 1}, {16, 1}, {8, 2}, {32, 2}, {16, 4}};
+  for (const auto& topology : topologies) {
+    SCOPED_TRACE(::testing::Message() << "ranks=" << topology.ranks << " nodes=" << topology.nodes);
+    void* context = nullptr;
+    ASSERT_EQ(ncclSuccess, csvTunerInit(&context, 0, topology.ranks, topology.nodes, nullptr, nullptr, nullptr));
+    ASSERT_NE(nullptr, context);
+    const bool matches = topology.ranks == 16 && topology.nodes == 2;
+    for (const auto& probe : probes) {
+      for (int pipeOps : {1, 4}) {
+        for (int regBuff : {0, 1, 2}) {
+          ExpectTuning(context, probe.collective, probe.bytes, pipeOps, regBuff,
+                       matches ? probe.algorithm : -1, matches ? probe.protocol : -1,
+                       matches ? probe.channels : 0);
+        }
+      }
+    }
+    EXPECT_EQ(ncclSuccess, csvTunerFinalize(context));
+  }
+}
+
+TEST_F(CsvTunerMicrotest, Gfx950TwoNodeTuningPreservesUnavailableProtocolFallbacks) {
+  ASSERT_NE(nullptr, rcclCsvTunerFindConfig("gfx950"));
+  void* context = nullptr;
+  ASSERT_EQ(ncclSuccess, csvTunerInit(&context, 0, 16, 2, nullptr, nullptr, nullptr));
+  ASSERT_NE(nullptr, context);
+  ExpectTuning(context, ncclFuncAllReduce, 16777216, 1, 0, -1, -1, 0,
+               NCCL_ALGO_TREE, NCCL_PROTO_LL128);
+  ExpectTuning(context, ncclFuncAllReduce, 33554432, 1, 0, NCCL_ALGO_RING, NCCL_PROTO_LL128, 64,
+               NCCL_ALGO_TREE, NCCL_PROTO_LL128);
+  ExpectTuning(context, ncclFuncAllReduce, 54525952, 1, 0, NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE, 64,
+               NCCL_ALGO_TREE, NCCL_PROTO_LL128);
+  ExpectTuning(context, ncclFuncAllReduce, 117440512, 1, 0, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 48,
+               NCCL_ALGO_TREE, NCCL_PROTO_LL128);
+  ExpectTuning(context, ncclFuncAllGather, 150994944, 1, 0, -1, -1, 0,
+               NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  ExpectTuning(context, ncclFuncReduceScatter, 142606336, 1, 0, -1, -1, 0,
+               NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  EXPECT_EQ(ncclSuccess, csvTunerFinalize(context));
 }
 
 TEST_F(CsvTunerMicrotest, ResolvesArchSpecificEmbeddedConfig) {
