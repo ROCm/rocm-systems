@@ -1017,6 +1017,19 @@ in the following table.
       - | Unset or ``0``: off (default). Windows are registered through LSA.
         | ``1``: on.
 
+    * - | ``RCCL_GIN_ANVIL_FABRIC_POD``
+        | Lets the Anvil SDMA GIN backend serve a gfx1250 communicator that
+          spans hosts inside one fabric pod (MNNVL, one clique covering every
+          rank, cuMem enabled, at most 16 ranks). Peers on other hosts are
+          written through their fabric-mapped memory, so this also needs
+          ``RCCL_GIN_ANVIL_FABRIC_MEM=1``. Every rank must set both;
+          otherwise RCCL removes Anvil SDMA from the communicator on every
+          rank and PROXY or rocSHMEM GDA serves it. Ignored on MI300X and
+          MI350, which have no scale-up fabric between hosts.
+      - | Unset or ``0``: off (default). Anvil SDMA serves single-host
+          communicators only.
+        | ``1``: on.
+
     * - | ``RCCL_GIN_ANVIL_FABRIC_LSA_A2A``
         | ``NCCL_GIN_ANVIL_FABRIC_LSA_A2A``
         | Opts into the direct LSA-flat AllToAll lane on the Anvil SDMA GIN

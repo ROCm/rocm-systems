@@ -489,12 +489,18 @@ static ncclResult_t ginAnvilConnect(void* ctx, void* handles[], int nranks, int 
   }
 
   int numCh = ginAnvilSdmaNumChannels();
+  struct ncclComm* comm = cctx->comm;
+  const uint64_t hostId = (comm && comm->peerInfo) ? comm->peerInfo[comm->rank].hostHash : 0;
+  // ncclGinSetDefaultBackend already removed this backend from a multi-host
+  // communicator unless every rank opted in to the pod (RCCL_GIN_ANVIL_FABRIC_POD).
+  const int remoteHostsOk =
+      cctx->fabricMem && ginAnvilSdmaReachCapable(comm) == GinAnvilSdmaReach::FabricPod ? 1 : 0;
 
   gin_anvil_sdma_handle_t h = nullptr;
   void* gpu_handles = nullptr;
   uint64_t* dirty = nullptr;
-  if (gin_anvil_sdma_create(nranks, rank, localDev, ginAnvilBootstrapAllgather, cctx->comm->bootstrap, numCh, &h,
-                            &gpu_handles, &dirty) != 0) {
+  if (gin_anvil_sdma_create(nranks, rank, localDev, hostId, remoteHostsOk, ginAnvilBootstrapAllgather,
+                            cctx->comm->bootstrap, numCh, &h, &gpu_handles, &dirty) != 0) {
     WARN("GIN anvil-sdma: gin_anvil_sdma_create failed");
     delete cctx;
     return ncclSystemError;

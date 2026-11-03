@@ -176,7 +176,7 @@ static bool ginGateAllows(uint64_t ginTypeBitMask, const struct ncclComm* comm) 
 }
 
 // GIN connection type once ncclGinSetDefaultBackend has run. That can drop every active backend
-// (Anvil SDMA alone on a multi-host communicator), and FULL or RAIL with none left would make
+// (Anvil SDMA alone on a multi-host communicator outside a gfx1250 fabric pod), and FULL or RAIL with none left would make
 // query and connect report a backend that is gone.
 static ncclGinConnectionType_t ginConnectionType(const struct ncclComm* comm, bool globalCrossNicSupport) {
   if (!comm->sharedRes->ginState.supported) return NCCL_GIN_CONNECTION_NONE;

@@ -25,14 +25,17 @@
 #include <cstring>
 #include <iterator>
 #include <memory>
+#include <string>
 
 #include "nccl.h"
 #include "comm.h"
 #include "graph/topo.h"
 #include "nccl_gin.h"
 #include "plugin.h"
+#include "gin/gin_anvil_reach.h"
 
 #include "../common/ScopedEnv.hpp"
+#include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/nccl_fakes.h"
 
 #ifdef ENABLE_ROCSHMEM_GIN
@@ -58,6 +61,21 @@ ncclGin_t* getNcclGin_v14(void*) { return nullptr; }
 
 int64_t ncclParamGinEnable() { return 1; }
 int64_t ncclParamGinType() { return -1; }
+
+// ncclGinSetDefaultBackend asks how far Anvil SDMA reaches. The comm readers
+// live in gin_anvil_reach.cc, which this binary does not compile, so arch,
+// fabric state and the pod opt-in come from the test while the per-system
+// policy stays real.
+static GinAnvilArch g_anvilArch = GinAnvilArch::Other;
+static bool g_anvilFabricMem = false;
+static bool g_anvilPodOptIn = false;
+GinAnvilArch ginAnvilArch(struct ncclComm*) { return g_anvilArch; }
+GinAnvilSdmaReach ginAnvilSdmaReachCapable(struct ncclComm* comm) {
+  return ginAnvilSdmaReachPredicate(g_anvilArch, comm->topo->nHosts, comm->nRanks, g_anvilFabricMem);
+}
+bool ginAnvilUseFabricPod(struct ncclComm* comm) {
+  return ginAnvilSdmaReachCapable(comm) == GinAnvilSdmaReach::FabricPod && g_anvilPodOptIn;
+}
 
 ncclGin_t ncclGinProxy{};
 int ncclGinProxyVersion = 14;
@@ -182,9 +200,28 @@ class GinFinalizeTest : public GinPluginInitTest {
     comm_.sharedRes = sharedRes_.get();
     topo_->nHosts = 1;
     comm_.topo = topo_.get();
+    g_anvilArch = GinAnvilArch::Other;
+    g_anvilFabricMem = false;
+    g_anvilPodOptIn = false;
+    peerPodOptIn_ = true;
+    podVotes_ = 0;
+    // Peers vote peerPodOptIn_ in the pod opt-in allgather.
+    g_devrBootstrapAllGather = [this](void*, void* buf, int bytes) {
+      if (bytes != static_cast<int>(sizeof(int))) return ncclInternalError;
+      ++podVotes_;
+      int* votes = static_cast<int*>(buf);
+      for (int r = 0; r < comm_.nRanks; r++) {
+        if (r != comm_.rank) votes[r] = peerPodOptIn_ ? 1 : 0;
+      }
+      return ncclSuccess;
+    };
   }
 
   void TearDown() override {
+    g_anvilArch = GinAnvilArch::Other;
+    g_anvilFabricMem = false;
+    g_anvilPodOptIn = false;
+    g_devrBootstrapAllGather = [](void*, void*, int) { return ncclSuccess; };
     std::memset(pluginLibs, 0, sizeof(pluginLibs));
     GinPluginInitTest::TearDown();
   }
@@ -199,6 +236,8 @@ class GinFinalizeTest : public GinPluginInitTest {
   }
 
   static constexpr int kInitialRefCount = 3;
+  bool peerPodOptIn_ = true;
+  int podVotes_ = 0;
 };
 
 TEST_F(GinFinalizeTest, ConnectedBackend_FinalizesContextAndDropsRefCount) {
@@ -383,8 +422,25 @@ TEST(GinTypeListTest, EmptyGinTypeCountsAsUnset) {
   }
 }
 
-// AICOMRCCL-3417: Anvil SDMA stays on a single physical host alongside PROXY.
-TEST_F(GinFinalizeTest, AnvilSdma_KeptWithProxyOnSingleHost) {
+// Which systems keep Anvil SDMA next to PROXY (gin_anvil_reach.h): every
+// single-host communicator, and across hosts only an MI450 fabric pod within
+// Anvil's peer table size whose ranks all opted in. MI300 and MI350 have no
+// cross-host SDMA path.
+struct AnvilReachCase {
+  const char* name;
+  GinAnvilArch arch;
+  int nHosts;
+  int nRanks;
+  bool fabricMem;
+  bool podOptIn;  // this rank and every peer
+  bool kept;
+  int podVotes;
+};
+
+class GinAnvilReachTest : public GinFinalizeTest, public ::testing::WithParamInterface<AnvilReachCase> {};
+
+TEST_P(GinAnvilReachTest, AnvilKeptOnlyWithinSdmaReach) {
+  const AnvilReachCase& c = GetParam();
   void* anvil = std::malloc(8);
   void* proxy = std::malloc(8);
   fake_.lastCtx = anvil;
@@ -393,22 +449,55 @@ TEST_F(GinFinalizeTest, AnvilSdma_KeptWithProxyOnSingleHost) {
   struct ncclGinState* ginState = &sharedRes_->ginState;
   ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
   ginState->backends[1].ginType = NCCL_GIN_TYPE_PROXY;
-  topo_->nHosts = 1;
+  topo_->nHosts = c.nHosts;
+  comm_.nRanks = c.nRanks;
+  g_anvilArch = c.arch;
+  g_anvilFabricMem = c.fabricMem;
+  g_anvilPodOptIn = c.podOptIn;
+  peerPodOptIn_ = c.podOptIn;
 
   EXPECT_EQ(ncclGinSetDefaultBackend(&comm_,
                                      BIT(NCCL_GIN_TYPE_ANVIL_SDMA) | BIT(NCCL_GIN_TYPE_PROXY)),
             ncclSuccess);
+  EXPECT_EQ(podVotes_, c.podVotes);
   EXPECT_TRUE(ginState->supported);
-  EXPECT_EQ(ginState->numActiveBackends, 2);
-  EXPECT_EQ(fake_.finalizeCalls, 0);
-  std::free(anvil);
+  // Priority order depends on ENABLE_ROCSHMEM_GIN, so only membership is checked.
+  bool kept = false;
+  for (int i = 0; i < ginState->numActiveBackends; i++) {
+    kept |= ginState->backends[i].ginType == NCCL_GIN_TYPE_ANVIL_SDMA;
+  }
+  EXPECT_EQ(kept, c.kept);
+  EXPECT_EQ(ginState->numActiveBackends, c.kept ? 2 : 1);
+  EXPECT_EQ(fake_.finalizeCalls, c.kept ? 0 : 1);
+  if (c.kept) std::free(anvil);
   std::free(proxy);
   fake_.lastCtx = nullptr;
 }
 
-// AICOMRCCL-3417: Anvil SDMA is dropped when topo reports more than one host,
-// including MNNVL pods that fold nNodes to 1. PROXY remains the default.
-TEST_F(GinFinalizeTest, AnvilSdma_DroppedOnMultiHostKeepsProxy) {
+INSTANTIATE_TEST_SUITE_P(
+    PerSystem, GinAnvilReachTest,
+    ::testing::Values(
+        AnvilReachCase{"Mi300SingleHost", GinAnvilArch::Mi300, 1, 8, false, false, true, 0},
+        AnvilReachCase{"Mi300MultiHost", GinAnvilArch::Mi300, 2, 16, false, false, false, 0},
+        AnvilReachCase{"Mi300MultiHostWithFabricMemAndOptIn", GinAnvilArch::Mi300, 2, 16, true, true, false, 0},
+        AnvilReachCase{"Mi350SingleHost", GinAnvilArch::Mi350, 1, 8, false, false, true, 0},
+        AnvilReachCase{"Mi350MultiHost", GinAnvilArch::Mi350, 2, 16, false, false, false, 0},
+        AnvilReachCase{"Mi350MultiHostWithFabricMemAndOptIn", GinAnvilArch::Mi350, 2, 16, true, true, false, 0},
+        AnvilReachCase{"Mi450SingleHost", GinAnvilArch::Mi450, 1, 4, false, false, true, 0},
+        AnvilReachCase{"Mi450SingleHostWithFabricMem", GinAnvilArch::Mi450, 1, 4, true, true, true, 0},
+        AnvilReachCase{"Mi450MultiHostOutsidePod", GinAnvilArch::Mi450, 2, 8, false, true, false, 0},
+        AnvilReachCase{"Mi450FabricPodWithoutOptIn", GinAnvilArch::Mi450, 2, 8, true, false, false, 1},
+        AnvilReachCase{"Mi450FabricPod", GinAnvilArch::Mi450, 2, 8, true, true, true, 1},
+        AnvilReachCase{"Mi450FabricPodAtRankCap", GinAnvilArch::Mi450, 4, NCCL_GIN_ANVIL_IPC_MAX_RANKS, true, true,
+                       true, 1},
+        AnvilReachCase{"Mi450FabricPodAboveRankCap", GinAnvilArch::Mi450, 4, NCCL_GIN_ANVIL_IPC_MAX_RANKS + 1, true,
+                       true, false, 0},
+        AnvilReachCase{"OtherArchMultiHost", GinAnvilArch::Other, 2, 4, true, true, false, 0}),
+    [](const ::testing::TestParamInfo<AnvilReachCase>& info) { return std::string(info.param.name); });
+
+// The pod exception does not override the all-ranks mask: a rank without Anvil
+// still removes it everywhere.
+TEST_F(GinFinalizeTest, AnvilSdma_FabricPodStillHonorsGlobalMask) {
   void* anvil = std::malloc(8);
   void* proxy = std::malloc(8);
   fake_.lastCtx = anvil;
@@ -418,19 +507,73 @@ TEST_F(GinFinalizeTest, AnvilSdma_DroppedOnMultiHostKeepsProxy) {
   ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
   ginState->backends[1].ginType = NCCL_GIN_TYPE_PROXY;
   topo_->nHosts = 2;
+  comm_.nRanks = 8;
+  g_anvilArch = GinAnvilArch::Mi450;
+  g_anvilFabricMem = true;
+  g_anvilPodOptIn = true;
 
-  EXPECT_EQ(ncclGinSetDefaultBackend(&comm_,
-                                     BIT(NCCL_GIN_TYPE_ANVIL_SDMA) | BIT(NCCL_GIN_TYPE_PROXY)),
+  EXPECT_EQ(ncclGinSetDefaultBackend(&comm_, BIT(NCCL_GIN_TYPE_PROXY)), ncclSuccess);
+  ASSERT_EQ(ginState->numActiveBackends, 1);
+  EXPECT_EQ(ginState->backends[0].ginType, NCCL_GIN_TYPE_PROXY);
+  EXPECT_EQ(fake_.finalizeCalls, 1);
+  // Without Anvil in the all-ranks mask no rank takes the pod vote.
+  EXPECT_EQ(podVotes_, 0);
+  std::free(proxy);
+  fake_.lastCtx = nullptr;
+}
+
+// The opt-in is agreed: one peer without it keeps Anvil off across hosts on
+// every rank, including those that opted in.
+TEST_F(GinFinalizeTest, AnvilSdma_FabricPodNeedsEveryRankOptIn) {
+  void* anvil = std::malloc(8);
+  void* proxy = std::malloc(8);
+  fake_.lastCtx = anvil;
+  addActiveBackend(anvil);
+  addActiveBackend(proxy);
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  ginState->backends[1].ginType = NCCL_GIN_TYPE_PROXY;
+  topo_->nHosts = 2;
+  comm_.nRanks = 8;
+  comm_.rank = 3;
+  g_anvilArch = GinAnvilArch::Mi450;
+  g_anvilFabricMem = true;
+  g_anvilPodOptIn = true;
+  peerPodOptIn_ = false;
+
+  EXPECT_EQ(ncclGinSetDefaultBackend(&comm_, BIT(NCCL_GIN_TYPE_ANVIL_SDMA) | BIT(NCCL_GIN_TYPE_PROXY)),
             ncclSuccess);
-  EXPECT_TRUE(ginState->supported);
-  EXPECT_EQ(ginState->numActiveBackends, 1);
+  EXPECT_EQ(podVotes_, 1);
+  ASSERT_EQ(ginState->numActiveBackends, 1);
   EXPECT_EQ(ginState->backends[0].ginType, NCCL_GIN_TYPE_PROXY);
   EXPECT_EQ(fake_.finalizeCalls, 1);
   std::free(proxy);
   fake_.lastCtx = nullptr;
 }
 
-// AICOMRCCL-3417: Anvil-only on multi-host leaves zero backends and clears supported
+// A failed vote fails backend selection rather than guessing, since peers
+// that did finish the allgather act on its result.
+TEST_F(GinFinalizeTest, AnvilSdma_FabricPodVoteFailurePropagates) {
+  void* anvil = std::malloc(8);
+  fake_.lastCtx = anvil;
+  addActiveBackend(anvil);
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  topo_->nHosts = 2;
+  comm_.nRanks = 8;
+  g_anvilArch = GinAnvilArch::Mi450;
+  g_anvilFabricMem = true;
+  g_anvilPodOptIn = true;
+  g_devrBootstrapAllGather = [](void*, void*, int) { return ncclSystemError; };
+
+  EXPECT_EQ(ncclGinSetDefaultBackend(&comm_, BIT(NCCL_GIN_TYPE_ANVIL_SDMA)), ncclSystemError);
+  EXPECT_EQ(ginState->numActiveBackends, 1);
+  EXPECT_EQ(fake_.finalizeCalls, 0);
+  EXPECT_EQ(ncclGinFinalize(&comm_), ncclSuccess);
+  fake_.lastCtx = nullptr;
+}
+
+// AICOMRCCL-3417: Anvil-only on a multi-host MI300 leaves zero backends and clears supported
 // so init.cc keeps globalGinSupport NONE.
 TEST_F(GinFinalizeTest, AnvilSdmaOnly_MultiHostClearsSupported) {
   void* anvil = std::malloc(8);
@@ -439,6 +582,7 @@ TEST_F(GinFinalizeTest, AnvilSdmaOnly_MultiHostClearsSupported) {
   struct ncclGinState* ginState = &sharedRes_->ginState;
   ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
   topo_->nHosts = 2;
+  g_anvilArch = GinAnvilArch::Mi300;
 
   EXPECT_EQ(ncclGinSetDefaultBackend(&comm_, BIT(NCCL_GIN_TYPE_ANVIL_SDMA)), ncclSuccess);
   EXPECT_FALSE(ginState->supported);

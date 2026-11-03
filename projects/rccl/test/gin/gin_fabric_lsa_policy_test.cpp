@@ -6,7 +6,10 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
+
 #include "nccl_device/gin/anvil_sdma/gin_fabric_lsa_policy.h"
+#include "gin/gin_anvil_reach.h"
 
 using gin::fabric::ginFabricLsaA2ACapablePredicate;
 using gin::fabric::ginFabricLsaA2ALaunchConfig;
@@ -110,4 +113,37 @@ TEST(GinFabricA2ASelect, LsaWhenOptedInAndUnderThresholdElsePut) {
   EXPECT_EQ(ginFabricA2ASelectAlgo(false, 1, 4, 32 * 1024, lsaThr), GinFabricA2AAlgo::Put);
   // Rank count above the 64-CTA LSA pool falls through to put even when LSA is armed.
   EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 65, 32 * 1024, lsaThr), GinFabricA2AAlgo::Put);
+}
+
+TEST(GinAnvilSdmaReach, SingleHostOnEveryArch) {
+  for (GinAnvilArch arch : {GinAnvilArch::Other, GinAnvilArch::Mi300, GinAnvilArch::Mi350, GinAnvilArch::Mi450}) {
+    EXPECT_EQ(ginAnvilSdmaReachPredicate(arch, 1, 8, false), GinAnvilSdmaReach::Host);
+    EXPECT_EQ(ginAnvilSdmaReachPredicate(arch, 1, 64, true), GinAnvilSdmaReach::Host);
+  }
+}
+
+TEST(GinAnvilSdmaReach, Mi300AndMi350StopAtTheHost) {
+  for (GinAnvilArch arch : {GinAnvilArch::Mi300, GinAnvilArch::Mi350, GinAnvilArch::Other}) {
+    EXPECT_EQ(ginAnvilSdmaReachPredicate(arch, 2, 16, false), GinAnvilSdmaReach::None);
+    EXPECT_EQ(ginAnvilSdmaReachPredicate(arch, 2, 16, true), GinAnvilSdmaReach::None);
+    EXPECT_STREQ(ginAnvilSdmaNoReachReason(arch, 16, false), "SDMA reaches only GPUs on the same host");
+  }
+}
+
+TEST(GinAnvilSdmaReach, Mi450CrossesHostsOnlyInFabricPod) {
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(GinAnvilArch::Mi450, 2, 8, true), GinAnvilSdmaReach::FabricPod);
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(GinAnvilArch::Mi450, 4, NCCL_GIN_ANVIL_IPC_MAX_RANKS, true),
+            GinAnvilSdmaReach::FabricPod);
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(GinAnvilArch::Mi450, 2, 8, false), GinAnvilSdmaReach::None);
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(GinAnvilArch::Mi450, 4, NCCL_GIN_ANVIL_IPC_MAX_RANKS + 1, true),
+            GinAnvilSdmaReach::None);
+  EXPECT_STRNE(ginAnvilSdmaNoReachReason(GinAnvilArch::Mi450, 8, false),
+               ginAnvilSdmaNoReachReason(GinAnvilArch::Mi450, NCCL_GIN_ANVIL_IPC_MAX_RANKS + 1, false));
+}
+
+// A pod the topology allows but a rank did not opt in to names the variables to set.
+TEST(GinAnvilSdmaReach, Mi450PodWithoutOptInNamesTheOptIns) {
+  const char* reason = ginAnvilSdmaNoReachReason(GinAnvilArch::Mi450, 8, true);
+  EXPECT_NE(std::string(reason).find("RCCL_GIN_ANVIL_FABRIC_POD=1"), std::string::npos);
+  EXPECT_NE(std::string(reason).find("RCCL_GIN_ANVIL_FABRIC_MEM=1"), std::string::npos);
 }

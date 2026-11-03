@@ -12,6 +12,7 @@
 
 #include "../common/ScopedEnv.hpp"
 
+#include "gin/gin_anvil_reach.h"
 #include "gin/gin_host_anvil_sdma.h"
 #include "comm.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
@@ -266,6 +267,61 @@ TEST_F(GinAnvilPluginTest, Connect_Success) {
   void* coll = nullptr;
   connectColl(ictx, &coll);
   ASSERT_NE(coll, nullptr);
+  EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  EXPECT_EQ(plugin_.finalize(ictx), ncclSuccess);
+}
+
+// The factory tells cross-host peers apart by hostHash, so connect must pass this
+// rank's own entry, and 0 (every peer local) when peerInfo is not set up.
+TEST_F(GinAnvilPluginTest, Connect_PassesOwnHostHash) {
+  ncclPeerInfo peers[2] = {};
+  peers[0].hostHash = 0x1111;
+  peers[1].hostHash = 0x2222;
+  mockComm_.comm.rank = 1;
+  mockComm_.comm.peerInfo = peers;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll);
+  ASSERT_NE(coll, nullptr);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFactoryHostId(), 0x2222u);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFactoryRemoteHostsOk(), 0);
+  EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+
+  mockComm_.comm.peerInfo = nullptr;
+  connectColl(ictx, &coll);
+  ASSERT_NE(coll, nullptr);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFactoryHostId(), 0u);
+  EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  EXPECT_EQ(plugin_.finalize(ictx), ncclSuccess);
+}
+
+// Only an MI450 fabric pod whose ranks agreed on fabric registration lets the
+// factory build queues for peers on other hosts; elsewhere it must refuse them.
+TEST_F(GinAnvilPluginTest, Connect_AllowsRemoteHostsOnlyInFabricPod) {
+  setupFabricComm(2);
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  GinAnvilPluginStubs::SetAnvilReach(static_cast<int>(GinAnvilSdmaReach::FabricPod));
+  connectColl(ictx, &coll, 2);
+  ASSERT_NE(coll, nullptr);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFactoryRemoteHostsOk(), 1);
+  EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+
+  GinAnvilPluginStubs::SetUseFabricMem(false);
+  connectColl(ictx, &coll, 2);
+  ASSERT_NE(coll, nullptr);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFactoryRemoteHostsOk(), 0);
+  EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  GinAnvilPluginStubs::SetAnvilReach(static_cast<int>(GinAnvilSdmaReach::Host));
+  connectColl(ictx, &coll, 2);
+  ASSERT_NE(coll, nullptr);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFactoryRemoteHostsOk(), 0);
   EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
   EXPECT_EQ(plugin_.finalize(ictx), ncclSuccess);
 }

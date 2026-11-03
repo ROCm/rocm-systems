@@ -8,10 +8,74 @@
 #define _GIN_ANVIL_REACH_H_
 
 #include <cstdint>
+#include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
+
+// Which peers the Anvil SDMA GIN backend can serve, by GPU generation. An SDMA
+// engine copies only into memory its GPU can address:
+//   MI300X (gfx942), MI350 (gfx950): GPUs on the same host over xGMI or PCIe.
+//     There is no scale-up fabric between hosts, so a multi-host communicator
+//     needs a network backend (PROXY or rocSHMEM GDA).
+//   MI450 (gfx1250): GPUs on the same host, and, when every rank opts in with
+//     RCCL_GIN_ANVIL_FABRIC_POD=1 and RCCL_GIN_ANVIL_FABRIC_MEM=1, GPUs on other
+//     hosts of the same scale-up pod once their memory is fabric-mapped (MNNVL,
+//     one clique covering the communicator, cuMem). Anvil's peer tables cap that
+//     at NCCL_GIN_ANVIL_IPC_MAX_RANKS ranks.
+enum class GinAnvilArch : int { Other = 0, Mi300 = 1, Mi350 = 2, Mi450 = 3 };
+
+enum class GinAnvilSdmaReach : int {
+  None = 0,       // some peer is beyond this GPU's SDMA engines
+  Host = 1,       // every peer is on this host
+  FabricPod = 2,  // peers span hosts, all inside one MI450 fabric pod
+};
+
+// fabricPod: comm's peers are fabric-mapped (ginAnvilFabricMemCapable), and for
+// the agreed reach, every rank opted in to the pod.
+inline GinAnvilSdmaReach ginAnvilSdmaReachPredicate(GinAnvilArch arch, int nHosts, int nRanks, bool fabricPod) {
+  if (nHosts <= 1) return GinAnvilSdmaReach::Host;
+  switch (arch) {
+  case GinAnvilArch::Mi450:
+    return fabricPod && nRanks <= NCCL_GIN_ANVIL_IPC_MAX_RANKS ? GinAnvilSdmaReach::FabricPod
+                                                               : GinAnvilSdmaReach::None;
+  case GinAnvilArch::Mi300:
+  case GinAnvilArch::Mi350:
+  case GinAnvilArch::Other:
+  default:
+    return GinAnvilSdmaReach::None;
+  }
+}
+
+inline const char* ginAnvilArchName(GinAnvilArch arch) {
+  switch (arch) {
+  case GinAnvilArch::Mi300: return "MI300 (gfx942)";
+  case GinAnvilArch::Mi350: return "MI350 (gfx950)";
+  case GinAnvilArch::Mi450: return "MI450 (gfx1250)";
+  default: return "this GPU";
+  }
+}
+
+// Why the agreed reach is None, for the log line. podCapable is whether the
+// topology alone would have allowed a pod (ginAnvilSdmaReachCapable).
+inline const char* ginAnvilSdmaNoReachReason(GinAnvilArch arch, int nRanks, bool podCapable) {
+  if (arch != GinAnvilArch::Mi450) return "SDMA reaches only GPUs on the same host";
+  if (nRanks > NCCL_GIN_ANVIL_IPC_MAX_RANKS) return "the communicator exceeds Anvil's peer table size";
+  if (podCapable) return "crossing hosts in a fabric pod needs RCCL_GIN_ANVIL_FABRIC_POD=1 and "
+                         "RCCL_GIN_ANVIL_FABRIC_MEM=1 on every rank";
+  return "SDMA crosses hosts only inside one fabric pod (MNNVL, a single clique, cuMem)";
+}
 
 struct ncclComm;
 
 // Readers of comm state, defined in src/gin/gin_anvil_reach.cc.
+GinAnvilArch ginAnvilArch(struct ncclComm* comm);
+
+// Reach of comm by topology alone, as if every rank opted in to the pod. Every
+// rank of comm gets the same answer.
+GinAnvilSdmaReach ginAnvilSdmaReachCapable(struct ncclComm* comm);
+
+// This rank's pod opt-in: ginAnvilSdmaReachCapable is FabricPod, and both
+// RCCL_GIN_ANVIL_FABRIC_POD=1 and RCCL_GIN_ANVIL_FABRIC_MEM=1 are set. The
+// opt-ins can differ between ranks, so ncclGinSetDefaultBackend agrees on it.
+bool ginAnvilUseFabricPod(struct ncclComm* comm);
 
 // True when comm could register Anvil SDMA windows through exported fabric VMM
 // handles: MI450 with MNNVL, one clique covering comm, and cuMem. Depends on
