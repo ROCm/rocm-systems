@@ -8,6 +8,11 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+- `librocprofiler-sdk` no longer exports an `ompt_start_tool` symbol; OMPT is now engaged only via the rocprofv3 tool library.
+- `rocprofv3` takes the OMPT tool role only when it was asked to collect OMPT, so another OMPT tool such as TAU or Score-P can hold the role while `rocprofv3` continues tracing everything else it was asked for.
+- `rocprofv3` collects OMPT only when rocprofiler-sdk is initialized before the OpenMP runtime; otherwise a warning is emitted and the OMPT tool role is handed to the next tool.
+- `rocprofiler_ompt_start_tool()` now returns `NULL` unless a registered client subscribes to OMPT tracing. A tool deferring to rocprofiler-sdk for OMPT must be prepared to keep the OMPT tool role.
+
 ### Resolved issues
 
 - Fixed rocpd reporting a counter at N times its value under `rocprofv3 --replay-mode kernel` when N `--pmc` groups list it, for example a sanity counter such as `SQ_WAVES` in every group. Every pass of a replayed dispatch shares the dispatch's record, so the `counters_collection` view, and the counter CSV and Perfetto output that `rocpd convert` builds from it, summed the passes. Passes after the first are now tagged with `replay_pass` in `rocpd_pmc_event.extdata`, the view averages a counter over the passes that collected it, and the `pmc_events` view reports each row's pass in a new `replay_pass` column. This behavior is identified by rocpd schema version 3.0.6.
@@ -173,11 +178,6 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - Decoder integration tests have been migrated to Python, simplifying test authoring and making it easier for downstream tools to validate their trace-decoding pipelines.
 
 ### Changed
-
-- `librocprofiler-sdk` no longer exports an `ompt_start_tool` symbol; OMPT is now engaged only via the rocprofv3 tool library.
-- `rocprofv3` takes the OMPT tool role only when it was asked to collect OMPT, so another OMPT tool such as TAU or Score-P can hold the role while `rocprofv3` continues tracing everything else it was asked for.
-- `rocprofv3` collects OMPT only when rocprofiler-sdk is initialized before the OpenMP runtime; otherwise a warning is emitted and the OMPT tool role is handed to the next tool.
-- `rocprofiler_ompt_start_tool()` now returns `NULL` unless a registered client subscribes to OMPT tracing. A tool deferring to rocprofiler-sdk for OMPT must be prepared to keep the OMPT tool role.
 
 ### Resolved issues
 

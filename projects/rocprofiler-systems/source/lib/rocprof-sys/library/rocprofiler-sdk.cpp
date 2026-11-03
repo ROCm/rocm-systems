@@ -67,7 +67,7 @@
 #    include <rocprofiler-sdk/registration.h>
 #endif
 
-#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0 && ROCPROFILER_VERSION >= 600
+#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
 #    include <rocprofiler-sdk/ompt.h>
 #    include <timemory/components/ompt/backends.hpp>
 #endif
@@ -1711,7 +1711,7 @@ extern "C"
     }
 #endif  // ROCPROFILER_VERSION >= 10200
 
-#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0 && ROCPROFILER_VERSION >= 600
+#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
     ompt_start_tool_result_t* ompt_start_tool(
         unsigned int omp_version, const char* runtime_version) ROCPROFSYS_PUBLIC_API;
 
@@ -1719,10 +1719,21 @@ extern "C"
     // and offloading binaries call it from a static initializer, so the body is a plain
     // forward with no initialization or library loading. A NULL result means
     // rocprofiler-sdk declined the OMPT tool role and it stays with this library.
+    // Always defined, including when the SDK is too old to forward to: rocprof-sys-dl
+    // resolves this symbol by name and the OpenMP runtime looks it up in this library.
     ompt_start_tool_result_t* ompt_start_tool(unsigned int omp_version,
                                               const char*  runtime_version)
     {
+#    if ROCPROFILER_VERSION >= 10600
         return rocprofiler_ompt_start_tool(omp_version, runtime_version);
+#    else
+        // rocprofiler_ompt_start_tool() is only declared by rocprofiler-sdk 1.6.0 and
+        // newer. Against an older SDK, decline the role so OMPT tracing is disabled
+        // rather than failing to build.
+        (void) omp_version;
+        (void) runtime_version;
+        return nullptr;
+#    endif
     }
-#endif  // ROCPROFSYS_USE_OMPT && ROCPROFILER_VERSION >= 600
+#endif  // ROCPROFSYS_USE_OMPT
 }
