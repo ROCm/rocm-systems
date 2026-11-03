@@ -49,6 +49,12 @@ inline float as_float(uint32_t v) { return rocjitsu::arith::bit_cast<float>(v); 
 // Return the FP32 bit pattern without numeric conversion.
 inline uint32_t as_bits(float f) { return rocjitsu::arith::bit_cast<uint32_t>(f); }
 
+// Reinterpret FP64 bits without numeric conversion.
+inline double as_double(uint64_t bits) { return rocjitsu::arith::bit_cast<double>(bits); }
+
+// Return the FP64 representation without numeric conversion.
+inline uint64_t double_bits(double value) { return rocjitsu::arith::bit_cast<uint64_t>(value); }
+
 // Resolve the legacy rocjitsu policy selected by this entry point's wrapper.
 // Explicit semantics are never reinterpreted.
 inline uint64_t resolve_compatibility(uint64_t flags, uint64_t semantics) {

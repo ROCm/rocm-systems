@@ -1373,7 +1373,8 @@ template <uint16_t kMovOp, uint16_t kAddOp, uint16_t kLshlOp, typename Slot>
     case kLshlOp:
       return simd_lshl_u32(src1_view->template load_native<uint32_t>(lane_base), src0);
     default:
-      throw util::UnimplementedInst("unsupported VOPD integer SIMD operation");
+      assert(false && "integer slot was validated before SIMD execution");
+      return decltype(src0)(0);
     }
   };
   constexpr uint32_t kWidth = util::native_width_v<uint32_t>;

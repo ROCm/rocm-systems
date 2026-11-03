@@ -3,22 +3,44 @@
 
 // AVX2 loose dense FP16/BF16 WMMA kernels for gfx11/gfx12 and both wave sizes.
 // Reuses decoded factors across eight-column FMA accumulation, applying operand
-// modifiers before final stores.
+// modifiers and stage-specific narrowing for packed results before final stores.
 
 #include "common/float_formats.h"
 #include "common/simd.h"
+#include "common/x86_64/half_x86_64_v3.h"
 #include "rj_arith/rj_arith.h"
+#include "wmma/layout.h"
 
 #include <immintrin.h>
 #include <stdint.h>
 
 namespace {
 
+// Narrow eight FP32 lanes into low halfwords: BF16 truncates, FP16 rounds
+// to nearest-even and optionally saturates finite overflow. Preserve subnormals.
+template <bool Bf16> __m256i packed_narrow(__m256 value, bool saturate) {
+  if constexpr (Bf16) {
+    return _mm256_srli_epi32(_mm256_castps_si256(value), 16);
+  } else {
+    return rocjitsu::arith::half_narrow(value, saturate);
+  }
+}
+
+// Widen eight low-halfword FP16/BF16 encodings into FP32 lanes.
+template <bool Bf16> __m256 packed_widen(__m256i value) {
+  if constexpr (Bf16) {
+    return _mm256_castsi256_ps(_mm256_slli_epi32(value, 16));
+  } else {
+    return rocjitsu::arith::half_input(value, 0, 0);
+  }
+}
+
 // Compute loose FP16/BF16 A*B+C in the selected gfx layout and wave size.
-// Modifiers must be validated; Modified=false requires zero instruction_flags.
-template <bool Bf16, bool Modified, int Lanes, bool Rdna3>
+// Modifiers must be validated; Modified=false requires zero instruction_flags. Packed
+// results use staged narrowing and preserve gfx11's unselected D half.
+template <bool Bf16, bool Modified, int Lanes, bool Rdna3, bool Packed = false>
 void wmma(uint32_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
-          const uint32_t *const *b, const uint32_t *const *c) {
+          const uint32_t *const *b, const uint32_t *const *c, bool saturate = false) {
   const uint32_t a_sign = ((instruction_flags & RJ_ARITH_WMMA_NEG_LO_A) ? 0x8000U : 0) |
                           ((instruction_flags & RJ_ARITH_WMMA_NEG_HI_A) ? 0x80000000U : 0);
   // Decode B once for all output rows. Each input word holds two consecutive
@@ -39,12 +61,12 @@ void wmma(uint32_t instruction_flags, uint32_t *const *d, const uint32_t *const 
         }
         if constexpr (Bf16) {
           // BF16 widens exactly by placing its bits in FP32's high half.
-          words = k % 2 ? _mm256_and_si256(words, _mm256_set1_epi32(-65536))
+          words = k % 2 ? _mm256_and_si256(words, _mm256_set1_epi32(0xffff0000U))
                         : _mm256_slli_epi32(words, 16);
           _mm256_store_ps(right[group][k] + col, _mm256_castsi256_ps(words));
         } else {
           words = k % 2 ? _mm256_srli_epi32(words, 16)
-                        : _mm256_and_si256(words, _mm256_set1_epi32(65535));
+                        : _mm256_and_si256(words, _mm256_set1_epi32(0xffff));
           __m128i halves =
               _mm_packus_epi32(_mm256_castsi256_si128(words), _mm256_extracti128_si256(words, 1));
           _mm256_store_ps(right[group][k] + col, _mm256_cvtph_ps(halves));
@@ -60,13 +82,19 @@ void wmma(uint32_t instruction_flags, uint32_t *const *d, const uint32_t *const 
     int group = Rdna3 ? row % Groups : 0;
     int reg = Rdna3 ? row / Groups : row % KPerLane;
     int lane = Rdna3 ? 16 * group : 16 * (row / 8) + (Lanes == 64 ? 32 * ((row / 4) % 2) : 0);
-    int source_reg = reg;
-    // Read eight FP32 C values at a column offset.
+    int source_reg = Packed && !Rdna3 ? reg / 2 : reg;
+    // Read eight C values at a column offset, widening the selected half if packed.
     auto read_acc = [&](int offset) {
       auto words =
           _mm256_loadu_si256(reinterpret_cast<const __m256i *>(c[source_reg] + lane + offset));
-
-      return _mm256_castsi256_ps(words);
+      if constexpr (Packed) {
+        int shift = Rdna3 ? (instruction_flags & RJ_ARITH_WMMA_HIGH_C_D ? 16 : 0) : 16 * (reg % 2);
+        words = _mm256_and_si256(_mm256_srl_epi32(words, _mm_cvtsi32_si128(shift)),
+                                 _mm256_set1_epi32(0xffff));
+        return packed_widen<Bf16>(words);
+      } else {
+        return _mm256_castsi256_ps(words);
+      }
     };
     __m256 low = read_acc(0), high = read_acc(8);
     if constexpr (Modified) {
@@ -78,7 +106,7 @@ void wmma(uint32_t instruction_flags, uint32_t *const *d, const uint32_t *const 
       high = _mm256_xor_ps(_mm256_and_ps(high, keep), sign);
     }
     for (int step = 0; step < 16; ++step) {
-      int k = step;
+      int k = Packed && !Rdna3 && Lanes == 32 ? rocjitsu::arith::wmma_gfx12_w32_k(step) : step;
       uint32_t word =
           a[Rdna3 ? k / 2 : (k % KPerLane) / 2][row + 16 * (Rdna3 ? group : k / KPerLane)];
       if constexpr (Modified) {
@@ -88,19 +116,38 @@ void wmma(uint32_t instruction_flags, uint32_t *const *d, const uint32_t *const 
       __m256 left = _mm256_set1_ps(Bf16 ? rocjitsu::arith::bf16_to_float(bits) : _cvtsh_ss(bits));
       low = _mm256_fmadd_ps(left, _mm256_load_ps(right[group][k]), low);
       high = _mm256_fmadd_ps(left, _mm256_load_ps(right[group][k] + 8), high);
+      // gfx11 narrows every DOT2; gfx12 every DOT4, so the order matters.
+      if constexpr (Packed) {
+        if ((step + 1) % (Rdna3 ? 2 : 4) == 0) {
+          low = packed_widen<Bf16>(packed_narrow<Bf16>(low, saturate));
+          high = packed_widen<Bf16>(packed_narrow<Bf16>(high, saturate));
+        }
+      }
     }
-    _mm256_storeu_si256(reinterpret_cast<__m256i *>(result[reg] + lane), _mm256_castps_si256(low));
+    _mm256_storeu_si256(reinterpret_cast<__m256i *>(result[reg] + lane),
+                        Packed ? packed_narrow<Bf16>(low, saturate) : _mm256_castps_si256(low));
     _mm256_storeu_si256(reinterpret_cast<__m256i *>(result[reg] + lane + 8),
-                        _mm256_castps_si256(high));
+                        Packed ? packed_narrow<Bf16>(high, saturate) : _mm256_castps_si256(high));
   }
 
   // Stage all outputs before any stores, since D may overlap A, B or C.
-  constexpr int DestinationRegs = 256 / Lanes;
+  constexpr int DestinationRegs = 256 / Lanes / (Packed && !Rdna3 ? 2 : 1);
   for (int reg = 0; reg < DestinationRegs; ++reg) {
     for (int lane = 0; lane < Lanes; lane += 8) {
-      int source_reg = reg;
+      int source_reg = Packed && !Rdna3 ? reg * 2 : reg;
       auto value = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(result[source_reg] + lane));
-
+      // gfx11 replaces one half of each D word; gfx12 combines two output rows.
+      if constexpr (Packed && Rdna3) {
+        int shift = instruction_flags & RJ_ARITH_WMMA_HIGH_C_D ? 16 : 0;
+        auto old = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(d[reg] + lane));
+        value =
+            _mm256_or_si256(_mm256_sll_epi32(value, _mm_cvtsi32_si128(shift)),
+                            _mm256_and_si256(old, _mm256_set1_epi32(shift ? 0xffff : 0xffff0000U)));
+      } else if constexpr (Packed) {
+        auto high =
+            _mm256_loadu_si256(reinterpret_cast<const __m256i *>(result[source_reg + 1] + lane));
+        value = _mm256_or_si256(value, _mm256_slli_epi32(high, 16));
+      }
       _mm256_storeu_si256(reinterpret_cast<__m256i *>(d[reg] + lane), value);
     }
   }
@@ -146,5 +193,48 @@ template void wmma_f32_x86_64_v3<true, 64, false>(uint32_t, uint32_t *const *,
 template void wmma_f32_x86_64_v3<true, 64, true>(uint32_t, uint32_t *const *,
                                                  const uint32_t *const *, const uint32_t *const *,
                                                  const uint32_t *const *);
+
+// Compute loose WMMA with packed FP16/BF16 C/D and validated instruction flags.
+// D may overlap inputs; preserve the unused gfx11 half. saturate controls
+// finite FP16 overflow at each narrowing stage.
+template <bool Bf16, int Lanes, bool Rdna3>
+void wmma_packed_x86_64_v3(uint32_t instruction_flags, bool saturate, uint32_t *const *d,
+                           const uint32_t *const *a, const uint32_t *const *b,
+                           const uint32_t *const *c) {
+  wmma<Bf16, true, Lanes, Rdna3, true>(instruction_flags, d, a, b, c, saturate);
+}
+
+template void wmma_packed_x86_64_v3<false, 32, false>(uint32_t, bool, uint32_t *const *,
+                                                      const uint32_t *const *,
+                                                      const uint32_t *const *,
+                                                      const uint32_t *const *);
+template void wmma_packed_x86_64_v3<false, 32, true>(uint32_t, bool, uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *);
+template void wmma_packed_x86_64_v3<false, 64, false>(uint32_t, bool, uint32_t *const *,
+                                                      const uint32_t *const *,
+                                                      const uint32_t *const *,
+                                                      const uint32_t *const *);
+template void wmma_packed_x86_64_v3<false, 64, true>(uint32_t, bool, uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *);
+template void wmma_packed_x86_64_v3<true, 32, false>(uint32_t, bool, uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *);
+template void wmma_packed_x86_64_v3<true, 32, true>(uint32_t, bool, uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *);
+template void wmma_packed_x86_64_v3<true, 64, false>(uint32_t, bool, uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *);
+template void wmma_packed_x86_64_v3<true, 64, true>(uint32_t, bool, uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *);
 
 } // namespace rocjitsu::arith

@@ -926,6 +926,7 @@ endif()
 # The defines go here because this file is filtered out of the rccl target, so
 # per-source properties never apply. Leaving only SDMA on keeps ncclGinCallImpl
 # on its single backend branch. GDA must stay off, as this object gets no QP bitcode.
+# gfx1250 GinScatter and gfx950 two-shot both use Anvil SDMA gin.put().
 # ===========================================================================
 set(GIN_ALLREDUCE_SDMA_FAT_OBJ "")
 if(ENABLE_ROCSHMEM_GIN)

@@ -203,6 +203,20 @@ __host__ void Context::putmem_signal_on_stream(void *dest, const void *source,
                                         sig_op, pe, stream));
 }
 
+__host__ void Context::signal_add_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                            int pe, hipStream_t stream) {
+  ctxHostStats.incStat(NUM_HOST_ATOMIC_ADD);
+
+  HOST_DISPATCH(signal_add_on_stream(sig_addr, signal, pe, stream));
+}
+
+__host__ void Context::signal_set_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                            int pe, hipStream_t stream) {
+  ctxHostStats.incStat(NUM_HOST_ATOMIC_SET);
+
+  HOST_DISPATCH(signal_set_on_stream(sig_addr, signal, pe, stream));
+}
+
 __host__ void Context::signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,
                                                    uint64_t cmp_value,
                                                    hipStream_t stream) {

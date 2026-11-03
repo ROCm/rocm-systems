@@ -76,17 +76,36 @@ template <bool Bf16, bool Rdna3, typename V> inline Term<V> product(V a, V b, V 
   return {magnitude, sub(exponent, constant<V>(2 * fraction)), negative};
 }
 
+// Widen without changing NaN payloads. Finite F16 values convert exactly;
+// nonfinite lanes use integer widening instead of passing sNaNs to F16C.
+template <bool Bf16, typename V> inline V widen(V bits) {
+  if constexpr (Bf16) {
+    return shift_left(bits, 16);
+  }
+  auto magnitude = bit_and(bits, constant<V>(0x7fff));
+  auto special = greater(magnitude, constant<V>(0x7bff));
+  auto finite = andnot(special, bits);
+  auto value = widen_finite_half(finite);
+  auto nonfinite =
+      bit_or(shift_left(bit_and(bits, constant<V>(0x8000)), 16),
+             bit_or(constant<V>(0x7f800000), shift_left(bit_and(bits, constant<V>(1023)), 13)));
+  return choose(special, nonfinite, value);
+}
+
 // Round the inherited signed-integer sum onto the selected output grid.
-// Mirrors the scalar packers: gfx11 rounds before flushing; gfx12 rounds
-// directly on the subnormal grid.
-template <bool Bf16, bool Rdna3, typename V> inline V pack(V total, V grid, V frame_negative) {
-  constexpr int Fraction = 23, Bias = 127;
+// Mirrors gfx11_dot2_detail::pack, gfx12_dot_detail::pack and packed16::pack_f16:
+// GFX11 F32 rounds before flushing; GFX12 F32 and all F16 outputs round directly
+// on the subnormal grid. BF16 output truncates the resulting F32 bits.
+template <bool Bf16, bool Rdna3, bool Packed, typename V>
+inline V pack(V total, V grid, V frame_negative, bool saturate) {
+  constexpr bool Half = Packed && !Bf16;
+  constexpr int Fraction = Half ? 10 : 23, Bias = Half ? 15 : 127;
   auto magnitude = absolute(total);
   auto top = highest_bit(magnitude);
   auto exponent = add(top, grid);
   auto tiny = greater(constant<V>(1 - Bias), exponent);
   auto shift = sub(top, constant<V>(Fraction));
-  if constexpr (!Rdna3) {
+  if constexpr (!Rdna3 || Half) {
     shift = choose(tiny, sub(constant<V>(1 - Bias - Fraction), grid), shift);
   }
   auto rounded =
@@ -105,9 +124,9 @@ template <bool Bf16, bool Rdna3, typename V> inline V pack(V total, V grid, V fr
   exponent = add(exponent, bit_and(carry, constant<V>(1)));
   auto bits = bit_or(shift_left(add(exponent, constant<V>(Bias)), Fraction),
                      bit_and(significand, constant<V>((1 << Fraction) - 1)));
-  auto overflow = constant<V>(0x7f800000);
+  auto overflow = constant<V>(Half ? (saturate ? 0x7bff : 0x7c00) : 0x7f800000);
   bits = choose(greater(exponent, constant<V>(Bias)), overflow, bits);
-  if constexpr (!Rdna3) {
+  if constexpr (!Rdna3 || Half) {
     bits = choose(tiny, rounded, bits);
   } else {
     bits = andnot(greater(constant<V>(-126), exponent), bits);
@@ -116,17 +135,20 @@ template <bool Bf16, bool Rdna3, typename V> inline V pack(V total, V grid, V fr
   if constexpr (Rdna3) {
     sign = bit_xor(sign, frame_negative);
   }
-  bits = bit_or(bits, bit_and(sign, constant<V>(int(0x80000000U))));
+  bits = bit_or(bits, bit_and(sign, constant<V>(Half ? 0x8000 : int(0x80000000U))));
 
   // These models return positive zero on exact zero and on flushed underflow.
-  bits = bit_and(bits, bit_and(nonzero(total), nonzero(bit_and(bits, constant<V>(0x7fffffff)))));
-
+  bits = bit_and(bits, bit_and(nonzero(total),
+                               nonzero(bit_and(bits, constant<V>(Half ? 0x7fff : 0x7fffffff)))));
+  if constexpr (Packed && Bf16) {
+    bits = shift_right(bits, 16);
+  }
   return bits;
 }
 
-// Return the empirical vector DOT result for the selected architecture with FP32 output.
-template <bool Bf16, bool Rdna3, typename V, int N>
-inline V dot(const V (&a)[N], const V (&b)[N], V acc) {
+// Return the empirical vector DOT result for the selected architecture and packed/FP32 output.
+template <bool Bf16, bool Rdna3, bool Packed, typename V, int N>
+inline V dot(const V (&a)[N], const V (&b)[N], V acc, bool saturate) {
   static_assert(Rdna3 ? N == 2 : (N == 2 || N == 4));
   constexpr int Columns = sizeof(V) / sizeof(int32_t);
   Term<V> products[N];
@@ -143,12 +165,14 @@ inline V dot(const V (&a)[N], const V (&b)[N], V acc) {
             signed_shift_right(acc, 31)};
   auto top = leading(c);
   if constexpr (Rdna3) {
-
+    if constexpr (Packed && !Bf16) {
+      top = maximum(top, constant<V>(-14));
+    }
     for (auto term : products) {
       top = maximum(top, leading(term));
     }
   } else {
-    top = maximum(top, constant<V>(-126));
+    top = maximum(top, constant<V>(Packed && !Bf16 ? -14 : -126));
   }
   auto grid = maximum(product_grid, sub(top, constant<V>(26)));
   V total;
@@ -163,7 +187,7 @@ inline V dot(const V (&a)[N], const V (&b)[N], V acc) {
     }
     total = bit_and(total, nonzero(any));
   } else {
-    auto accumulator = greater(grid, constant<V>(-126));
+    auto accumulator = greater(grid, constant<V>(Packed && !Bf16 ? -14 : -126));
     total = align(c, grid, accumulator);
     for (int i = 0; i < N; i += 2) {
       auto group_grid = maximum(grids[i], grids[i + 1]);
@@ -172,7 +196,7 @@ inline V dot(const V (&a)[N], const V (&b)[N], V acc) {
       total = add(total, align(sum, grid));
     }
   }
-  auto result = pack<Bf16, Rdna3>(total, grid, c.negative);
+  auto result = pack<Bf16, Rdna3, Packed>(total, grid, c.negative, saturate);
 
   // Only exceptional columns use the scalar model; a NaN in one column must
   // not send the remaining columns (or the entire matrix) off SIMD.
@@ -195,7 +219,7 @@ inline V dot(const V (&a)[N], const V (&b)[N], V acc) {
         av[i] = uint16_t(left[i][lane]);
         bv[i] = uint16_t(right[i][lane]);
       }
-      values[lane] = repair_wmma_dot(av, bv, accumulators[lane], Bf16, Rdna3);
+      values[lane] = repair_wmma_dot(av, bv, accumulators[lane], Bf16, Rdna3, Packed, saturate);
     }
     result = load<V>(values);
   }

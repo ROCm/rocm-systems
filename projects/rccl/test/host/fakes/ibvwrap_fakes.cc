@@ -70,6 +70,9 @@ std::function<ncclResult_t(struct ibv_qp*)> g_ibvDestroyQp = DefaultIbvDestroyQp
 static ncclResult_t DefaultIbvQueryGid(struct ibv_context*, uint8_t, int, union ibv_gid*) { return ncclSystemError; }
 std::function<ncclResult_t(struct ibv_context*, uint8_t, int, union ibv_gid*)> g_ibvQueryGid = DefaultIbvQueryGid;
 
+static ncclResult_t DefaultIbvQueryPkey(struct ibv_context*, uint8_t, int, uint16_t*) { return ncclSystemError; }
+std::function<ncclResult_t(struct ibv_context*, uint8_t, int, uint16_t*)> g_ibvQueryPkey = DefaultIbvQueryPkey;
+
 static ncclResult_t DefaultIbvQueryEce(struct ibv_qp*, struct ibv_ece*, int*) { return ncclSystemError; }
 std::function<ncclResult_t(struct ibv_qp*, struct ibv_ece*, int*)> g_ibvQueryEce = DefaultIbvQueryEce;
 
@@ -157,6 +160,7 @@ ASSERT_HOOK_MATCHES_PROD(g_ibvCreateQp, wrap_ibv_create_qp);
 ASSERT_HOOK_MATCHES_PROD(g_ibvModifyQp, wrap_ibv_modify_qp);
 ASSERT_HOOK_MATCHES_PROD(g_ibvDestroyQp, wrap_ibv_destroy_qp);
 ASSERT_HOOK_MATCHES_PROD(g_ibvQueryGid, wrap_ibv_query_gid);
+ASSERT_HOOK_MATCHES_PROD(g_ibvQueryPkey, wrap_ibv_query_pkey);
 ASSERT_HOOK_MATCHES_PROD(g_ibvQueryEce, wrap_ibv_query_ece);
 ASSERT_HOOK_MATCHES_PROD(g_ibvSetEce, wrap_ibv_set_ece);
 ASSERT_HOOK_MATCHES_PROD(g_ibvGetDeviceName, wrap_ibv_get_device_name);
@@ -210,6 +214,9 @@ ncclResult_t wrap_ibv_destroy_qp(struct ibv_qp* qp) { return g_ibvDestroyQp(qp);
 ncclResult_t wrap_ibv_query_gid(struct ibv_context* context, uint8_t port_num, int index, union ibv_gid* gid) {
   return g_ibvQueryGid(context, port_num, index, gid);
 }
+ncclResult_t wrap_ibv_query_pkey(struct ibv_context* context, uint8_t port_num, int index, uint16_t* pkey) {
+  return g_ibvQueryPkey(context, port_num, index, pkey);
+}
 ncclResult_t wrap_ibv_query_ece(struct ibv_qp* qp, struct ibv_ece* ece, int* supported) {
   return g_ibvQueryEce(qp, ece, supported);
 }
@@ -259,6 +266,7 @@ const char* ibvWcStatusStr(enum ibv_wc_status status) {
   return status == IBV_WC_SUCCESS ? "IBV_WC_SUCCESS" : "IBV_WC_ERROR(fake)";
 }
 const char* ibvWcOpcodeStr(enum ibv_wc_opcode) { return "IBV_WC_OPCODE(fake)"; }
+const char* ibvWrOpcodeStr(enum ibv_wr_opcode) { return "IBV_WR_OPCODE(fake)"; }
 
 void ResetIbvwrapFakes() {
   g_ibvAllocPd = DefaultIbvAllocPd;
@@ -274,6 +282,7 @@ void ResetIbvwrapFakes() {
   g_ibvModifyQp = DefaultIbvModifyQp;
   g_ibvDestroyQp = DefaultIbvDestroyQp;
   g_ibvQueryGid = DefaultIbvQueryGid;
+  g_ibvQueryPkey = DefaultIbvQueryPkey;
   g_ibvQueryEce = DefaultIbvQueryEce;
   g_ibvSetEce = DefaultIbvSetEce;
   g_ibvGetDeviceName = DefaultIbvGetDeviceName;
