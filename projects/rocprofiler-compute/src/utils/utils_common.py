@@ -17,17 +17,18 @@ import textwrap
 import threading
 import time
 import uuid
-from collections import OrderedDict
-from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import (
     Any,
     Dict,
+    Generator,
     Iterator,
     List,
     Mapping,
+    Match,
     Optional,
+    OrderedDict,
     Set,
     Tuple,
     Union,
@@ -92,7 +93,7 @@ def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
 
 
 # Supported expression field names for metric tables
-SUPPORTED_FIELD: list[str] = [
+SUPPORTED_FIELD: List[str] = [
     "Value",
     "Minimum",
     "Maximum",
@@ -154,7 +155,7 @@ def set_rocprof_cmd(cmd: str) -> None:
     _rocprof_cmd = cmd
 
 
-def version_to_numeric(version_parts: list[int], max_len: int) -> int:
+def version_to_numeric(version_parts: List[int], max_len: int) -> int:
     """Convert version tuple to numeric value using base-1000 positional system."""
     version_numeric = 0
     for i, part in enumerate(version_parts):
@@ -225,13 +226,13 @@ def is_tcc_channel_counter(counter: str) -> bool:
 
 
 def add_counter_extra_config_input_yaml(
-    data: dict[str, Any],
+    data: Dict[str, Any],
     counter_name: str,
     description: str,
     expression: str,
-    architectures: list[str],
-    properties: Optional[list[str]] = None,
-) -> dict[str, Any]:
+    architectures: List[str],
+    properties: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """
     Add a new counter to the rocprofiler-sdk dictionary.
     Initialize missing parts if data is empty or incomplete.
@@ -300,7 +301,7 @@ def add_counter_extra_config_input_yaml(
     return data
 
 
-def get_version(rocprof_compute_home: Path) -> dict[str, str]:
+def get_version(rocprof_compute_home: Path) -> Dict[str, str]:
     """Return ROCm Compute Profiler versioning info"""
 
     # semantic version info - note that version file(s) can reside in
@@ -386,9 +387,9 @@ def detect_rocprof(args: argparse.Namespace) -> str:
     return get_rocprof_cmd()
 
 
-def perform_attach_detach(new_env: dict[str, str], options: dict[str, Any]) -> None:
+def perform_attach_detach(new_env: Dict[str, str], options: Dict[str, Any]) -> None:
     @contextmanager
-    def temporary_env(env_vars: dict[str, str]) -> Generator[None, None, None]:
+    def temporary_env(env_vars: Dict[str, str]) -> Generator[None, None, None]:
         """
         Temporarily change the environment variable of this application.
         """
@@ -489,10 +490,10 @@ def perform_attach_detach(new_env: dict[str, str], options: dict[str, Any]) -> N
 
 
 def capture_subprocess_output(
-    subprocess_args: list[str],
-    new_env: Optional[dict[str, str]] = None,
+    subprocess_args: List[str],
+    new_env: Optional[Dict[str, str]] = None,
     profileMode: bool = False,
-) -> tuple[bool, str]:
+) -> Tuple[bool, str]:
     sanitized_env = (
         None
         if new_env is None
@@ -610,7 +611,7 @@ def capture_subprocess_output(
     return success, output
 
 
-def parse_pmc_perf(pmc_perf_file: str) -> list[str]:
+def parse_pmc_perf(pmc_perf_file: str) -> List[str]:
     """
     Parse the YAML file to get the pmc counters.
     Assumes only one job per file.
@@ -623,7 +624,7 @@ def parse_pmc_perf(pmc_perf_file: str) -> list[str]:
     return jobs[0].get("pmc") or []
 
 
-def is_only_pc_sampling(filter_blocks: list[str]) -> bool:
+def is_only_pc_sampling(filter_blocks: List[str]) -> bool:
     """Return True if all requested blocks are PC sampling (block 21 or the
     ``pc_sampling`` alias)."""
     return bool(filter_blocks) and all(
@@ -655,7 +656,7 @@ def strip_ansi(text: str) -> str:
     return re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", text)
 
 
-def parse_sets_yaml(arch: str) -> dict[str, Any]:
+def parse_sets_yaml(arch: str) -> Dict[str, Any]:
     config_arch = canonical_config_arch(arch) or arch
     filename = (
         config.rocprof_compute_home
@@ -679,8 +680,8 @@ def parse_sets_yaml(arch: str) -> dict[str, Any]:
 
 
 def load_panel_configs(
-    dirs: list[str],
-) -> OrderedDict[int, dict[str, Any]]:
+    dirs: List[str],
+) -> OrderedDict[int, Dict[str, Any]]:
     """
     Load all panel configs from yaml file.
     """
@@ -705,9 +706,9 @@ def load_panel_configs(
 
 
 def expand_placeholder_ranges(
-    panel_configs: OrderedDict[int, dict[str, Any]],
-    sys_info: Optional[dict[str, Any]],
-) -> OrderedDict[int, dict[str, Any]]:
+    panel_configs: OrderedDict[int, Dict[str, Any]],
+    sys_info: Optional[Dict[str, Any]],
+) -> OrderedDict[int, Dict[str, Any]]:
     """
     Expand placeholder_range entries in metric_table data configs in-place.
 
@@ -771,7 +772,7 @@ def _metric_has_valid_expr(entries: dict, data_config: dict) -> bool:
 
 def build_metric_details(
     panel_configs: Mapping[int, Dict[str, Any]],
-    sys_info: Optional[dict[str, Any]],
+    sys_info: Optional[Dict[str, Any]],
 ) -> Dict[str, Tuple[str, str, str]]:
     """Map panel, table and metric ids to (name, unit, description). Without
     sys_info, per-channel tables have no metrics."""
@@ -872,8 +873,8 @@ def get_uuid() -> str:
 
 
 def convert_filter_blocks_to_panel_ids(
-    filter_blocks: list[str], arch: Optional[str] = None
-) -> set[int]:
+    filter_blocks: List[str], arch: Optional[str] = None
+) -> Set[int]:
     """Inverse of convert_metric_id_to_panel_info: map metric ids like
     "2" or "11.1" to the set of file_id integers (e.g. {200, 1100}).
     Tokens that are not metric ids are looked up as panel aliases (e.g.
@@ -895,7 +896,7 @@ def convert_filter_blocks_to_panel_ids(
 
 def convert_metric_id_to_panel_info(
     metric_id: str,
-) -> tuple[str, Optional[int], Optional[int]]:
+) -> Tuple[str, Optional[int], Optional[int]]:
     """
     Convert metric id into panel information.
     Output is a tuples of the form (file_id, panel_id, metric_id).
@@ -941,13 +942,13 @@ def convert_metric_id_to_panel_info(
     return (file_id, panel_id, metric_id_int)
 
 
-def load_yaml(filepath: Union[str, os.PathLike]) -> dict[str, Any]:
+def load_yaml(filepath: Union[str, os.PathLike]) -> Dict[str, Any]:
     """Load YAML file and return as dictionary."""
     with open(filepath, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
-def get_arch_panel_id_to_alias(arch: str) -> dict[str, str]:
+def get_arch_panel_id_to_alias(arch: str) -> Dict[str, str]:
     """Return panel_id_str -> alias from the *_config_template.yaml whose
     filename prefix matches arch. Empty/None aliases stay as "".
     Returns {} when no template matches the arch."""
@@ -960,7 +961,7 @@ def get_arch_panel_id_to_alias(arch: str) -> dict[str, str]:
     return {}
 
 
-def get_arch_alias_to_panel_id(arch: str) -> dict[str, str]:
+def get_arch_alias_to_panel_id(arch: str) -> Dict[str, str]:
     """Inverse of get_arch_panel_id_to_alias for resolving --block
     <alias> tokens: alias -> panel_id_str. Skips panels with empty or
     None aliases so unknown aliases naturally raise KeyError on lookup."""
@@ -969,7 +970,7 @@ def get_arch_alias_to_panel_id(arch: str) -> dict[str, str]:
     }
 
 
-def get_job_rank_and_size() -> tuple[Optional[str], Optional[int]]:
+def get_job_rank_and_size() -> Tuple[Optional[str], Optional[int]]:
     """Detect job rank and total ranks from runtime environment variables.
 
     Returns a (rank, total_ranks) tuple, ensuring both values come from the same
@@ -1030,7 +1031,7 @@ def get_job_rank_and_size() -> tuple[Optional[str], Optional[int]]:
 
 
 def replace_rank(name: str) -> str:
-    def rank(match: re.Match[str]) -> str:
+    def rank(match: Match[str]) -> str:
         value, _ = get_job_rank_and_size()
         if value is not None:
             return value + match.group(1)  # preserve trailing slash
@@ -1044,7 +1045,7 @@ def replace_rank(name: str) -> str:
 
 
 def replace_env(name: str) -> str:
-    def env(match: re.Match[str]) -> str:
+    def env(match: Match[str]) -> str:
         var_name = match.group(1)
         return os.environ.get(var_name, "")  # Default to empty string if not found
 
@@ -1054,7 +1055,7 @@ def replace_env(name: str) -> str:
     return pattern.sub(env, name)
 
 
-def normalize_filter_to_str_list(value: Any) -> list[str]:  # noqa: ANN401
+def normalize_filter_to_str_list(value: Any) -> List[str]:  # noqa: ANN401
     """Normalize a filter value (scalar or list) to a list of strings."""
     if isinstance(value, (list, tuple)):
         return [str(v) for v in value]
@@ -1071,7 +1072,7 @@ def print_status(msg: str) -> None:
     console_log("")
 
 
-def create_temp_rocprofiler_metrics_path(sdk_config: dict[str, Any]) -> str:
+def create_temp_rocprofiler_metrics_path(sdk_config: Dict[str, Any]) -> str:
     """
     Create temporary directory with rocprofiler metrics config files.
 
@@ -1135,7 +1136,7 @@ def _workload_base_dir(workload_dir: Union[str, list, None]) -> Optional[str]:
     return workload_dir
 
 
-def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, str]:
+def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> Tuple[bool, str]:
     """
     Validate roofline.csv exists and has consistent structure.
 
@@ -1195,8 +1196,8 @@ def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, s
 
 
 def format_table_ascii(
-    data: list[dict[str, Any]],
-    columns: list[str],
+    data: List[Dict[str, Any]],
+    columns: List[str],
     description_wrap_width: int = 40,
     decimal: int = 2,
     show_index: bool = True,
@@ -1282,7 +1283,7 @@ def format_table_ascii(
         return "".join(parts)
 
     # Create data row (handles multi-line cells)
-    def make_row(row_idx: int, wrapped_row: dict[str, list[str]]) -> list[str]:
+    def make_row(row_idx: int, wrapped_row: Dict[str, List[str]]) -> List[str]:
         # Find max lines in this row
         max_lines = max(len(lines) for lines in wrapped_row.values())
 

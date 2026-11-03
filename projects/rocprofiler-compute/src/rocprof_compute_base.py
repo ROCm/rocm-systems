@@ -420,7 +420,7 @@ class RocProfCompute:
     def _build_arch_metric_details(
         self,
         arch: str,
-        sys_info: Optional[dict[str, Any]],
+        sys_info: Optional[Dict[str, Any]],
     ) -> Dict[str, Tuple[str, str, str]]:
         """Map the ids of arch's panel configs to (name, unit, description)."""
         config_root = Path(self.__args.config_dir) / (

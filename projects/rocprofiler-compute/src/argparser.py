@@ -4,7 +4,7 @@
 import argparse
 import os
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
@@ -37,7 +37,7 @@ class ExperimentalAction(argparse.Action):
 
     def __init__(
         self,
-        option_strings: list[str],
+        option_strings: List[str],
         help: str,
         **kwargs,
     ) -> None:
@@ -135,8 +135,8 @@ def non_negative_int(value: str) -> int:
 def add_general_group(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
-    supported_archs: dict[str, str],
-    rocprof_compute_version: dict[str, Optional[str]],
+    supported_archs: Dict[str, str],
+    rocprof_compute_version: Dict[str, Optional[str]],
 ) -> None:
     general_group = parser.add_argument_group("General Options")
 
@@ -225,8 +225,8 @@ def add_general_group(
 def omniarg_parser(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
-    supported_archs: dict[str, str],
-    rocprof_compute_version: dict[str, Optional[str]],
+    supported_archs: Dict[str, str],
+    rocprof_compute_version: Dict[str, Optional[str]],
     experimental_enabled: bool = False,
 ) -> None:
     # -----------------------------------------
