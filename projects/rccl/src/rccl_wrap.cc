@@ -1966,11 +1966,11 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
                                  &ringChoice, &ringThreads));
       ddaReplacesRing = ringChoice.algo == NCCL_ALGO_RING;
     }
-    // Eager it is CE-registered, which DDA LL128 replaces for rcclDdaArRegEagerShardFits shards.
+    // Eager it is CE-registered, which DDA LL128 replaces for rcclDdaArRegEagerShardFits shards within the LL128 cap.
     // ceAvailable already rejects sysmem windows, and ceRegInWindow implies ceRegEnabled.
     const bool ceRegRuns = ceAvailable && ceRegInWindow;
     // Check-mode, suspended and revoked comms divert to enqueue, which runs CE only for a CE decision.
-    const bool ddaReplacesCeReg = symkWithdrawn && !ceCapturing && ceRegRuns && arDdaLL128Max > 0 &&
+    const bool ddaReplacesCeReg = symkWithdrawn && !ceCapturing && ceRegRuns && msgBytes <= arDdaLL128Max &&
                                   rcclDdaArRegEagerShardFits(comm, msgBytes) &&
                                   !rcclCollectiveMustUseEnqueuePath(comm);
     const bool ddaSymEligible =

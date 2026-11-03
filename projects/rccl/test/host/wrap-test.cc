@@ -6003,6 +6003,36 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerKeepsEveryOtherChoice
       });
 }
 
+// A user-set RCCL_DDA_LL128_THRESHOLD bounds the eager re-route: past it CE-registered keeps the call.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerStaysWithinUserLL128Cap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredEagerStaysWithinUserLL128Cap",
+      []() {
+        int64_t ll128Cap = 4 * kMiB;
+        g_loadParam = [&ll128Cap](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0 ? ll128Cap : def;
+        };
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        RegisteredAr ar(8);
+        ar.ExpectUnchanged(8 * kMiB, /*capturing=*/false, ceReg, "1M shards past a 4M cap");
+        ll128Cap = 8 * kMiB - 1;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "one byte past the cap");
+        for (size_t cap : {8 * kMiB, 16 * kMiB}) {
+          SCOPED_TRACE(testing::Message() << "cap=" << cap);
+          ll128Cap = (int64_t)cap;
+          const rcclCollDecision d = ar.Select(8 * kMiB, false);
+          EXPECT_EQ(ll128, d.algo);
+          EXPECT_EQ(46u, d.ddaCap.blocks) << "CE's reduce blocks";
+          EXPECT_EQ(256u, d.ddaCap.threads);
+        }
+        ar.SetRanks(16);
+        ll128Cap = 8 * kMiB;
+        EXPECT_EQ(ll128, ar.Select(8 * kMiB, false).algo) << "512K shards at the cap";
+        ar.ExpectUnchanged(16 * kMiB, false, ceReg, "1M shards past the cap");
+      });
+}
+
 // In graph capture Ring runs instead; DDA takes registered calls up to max(32M, n x 2M), within Ring's grid.
 TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureTakesDdaWithinRingGrid) {
   RUN_ISOLATED_TEST(
