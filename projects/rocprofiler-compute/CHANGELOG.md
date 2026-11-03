@@ -27,14 +27,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-* Replaced the experimental `--torch-trace`, `--triton-trace`, `--ml-api-trace`, `--list-*-operators`, and `--*-operator` flags with `--trace-ml-api [torch triton]`, `--list-operators [torch triton user]`, and `--operator [FW:PATTERN]`. User-defined ROCTx regions are included with every `--trace-ml-api` run. Older workloads still support counter analysis. Profile again with `--trace-ml-api` to use `--list-operators` or `--operator`.
-
-* `--list-operators user` and `--operator user:PATTERN` select a user-defined ROCTx region. A framework match keeps that backend's in-scope descendants and drops children of other backends. A user-defined ROCTx region match keeps the full subtree, including nested framework work.
-
-* `--trace-ml-api triton` does not capture the Triton kernels that `torch.compile` generates. Use `--trace-ml-api torch` for those kernels.
-
-* The PyTorch and Triton operator call trees now show each operator's arguments. Torch and Triton selectors can be passed together to `--operator`.
-
 * Improved the standalone roofline HTML kernel hover tooltip: it now shows the limiting roof, percent of roofline, achieved and peak bandwidth per memory level, dispatch count and share of total application dispatches, and kernel duration and share of total application time. Kernel names longer than 200 characters are truncated in the sidebar, with the full name shown on hover.
 
 * The roofline benchmark now reports the peak measured sample across runs instead of the mean.
@@ -66,6 +58,16 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * `--block` 30 metric IDs (e.g. 30.1.7) now refer to different metrics following the removal of unnecessary gfx950 Memory Bandwidth Analysis metrics.
 
+* Replaced the ML API tracing flags with `--trace-ml-api torch triton`, `--list-operators torch`, and `--operator 'torch:*conv*'`.
+
+* User-defined ROCTx regions are included with every `--trace-ml-api` run.
+
+* `--operator 'user:PATTERN'` selects a user ROCTx region with all the operators and kernels inside it.
+
+* `--trace-ml-api triton` does not capture Triton kernels from `torch.compile`; use `--trace-ml-api torch`.
+
+* Older workloads still support counter analysis; profile again with `--trace-ml-api` to use `--list-operators` or `--operator`.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
@@ -90,6 +92,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed the `analyze --pc-sampling-sorting-type` option. The PC sampling table is always sorted by sample count.
 
 * Removed unnecessary gfx950 Memory Bandwidth Analysis (block 30) metrics. Block 30 now shows only the L1 cache, L2 bottleneck, and EA bottleneck indicators, as tables 30.1, 30.2, and 30.3.
+
+* Removed the experimental `--torch-trace`, `--triton-trace`, `--ml-api-trace`, `--list-torch-operators`, `--list-triton-operators`, `--torch-operator`, and `--triton-operator` options.
 
 ### Optimized
 
