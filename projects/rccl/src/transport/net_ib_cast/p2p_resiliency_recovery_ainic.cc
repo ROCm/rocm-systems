@@ -28,6 +28,8 @@ ncclResult_t IbCastPortRecoveryQpsRestoreAinic(struct ncclIbPortRecoveryContext*
     if (localQp->devIndex != recoveryContext->devIndex) {
       continue;
     }
+    int devIndex, qpIdxInDev;
+    NCCLCHECK(IbCastQpStripe(qpIndex, recoveryContext->resCtx->baseComm->vProps.ndevs, &devIndex, &qpIdxInDev));
 
     uint32_t oldQpn = localQp->qp->qp_num;
     INFO(NCCL_NET, "NET/IB: %s: Destroying QP %d on device %d (comm=%p, old_qp_num=%u)", __func__, qpIndex,
@@ -51,6 +53,9 @@ ncclResult_t IbCastPortRecoveryQpsRestoreAinic(struct ncclIbPortRecoveryContext*
     //        to analyze and set sharing accordingly for this QP during recovery restore.
     //        identify if it is primary or secondary comm and set sharing attributes accordingly.
     IbCastQpCreateAttrInitSharing(&createAttr);
+    // Restore the connect-time per-device ordinal that InitSharing reset, so
+    // UDMA SplitConnection puts the recreated QP back on its original pipeline.
+    createAttr.qpIdx = qpIdxInDev;
     NCCLCHECK(IbCastQpCreate(localQp, &createAttr));
     localQp->telQpStats = telQpStats;
 

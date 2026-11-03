@@ -103,6 +103,7 @@ int hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx);
 void hsakmt_kfdcontext_clear_context(HsaKFDContext *ctx);
 
 int hsakmt_kfdcontext_init_fmm_context(HsaKFDContext *ctx);
+void hsakmt_kfdcontext_fini_fmm_context(HsaKFDContext *ctx);
 int hsakmt_kfdcontext_init_topology_context(HsaKFDContext *ctx);
 int hsakmt_kfdcontext_init_queue_context(HsaKFDContext *ctx);
 int hsakmt_kfdcontext_init_event_context(HsaKFDContext *ctx);

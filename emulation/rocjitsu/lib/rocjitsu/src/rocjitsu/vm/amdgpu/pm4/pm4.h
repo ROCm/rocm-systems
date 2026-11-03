@@ -39,6 +39,7 @@ enum class Pm4Opcode : uint32_t {
   ClearState = 0x12,
   SetPredication = 0x20,
   CondExec = 0x22,
+  PredExec = 0x23,
   ContextControl = 0x28,
   PfpSyncMe = 0x42,
   SetContextReg = 0x69,
@@ -133,6 +134,7 @@ struct Pm4FailureState {
 /// publishes completion only after all commands retire.
 struct Pm4Submission {
   bool graphics_engine = false;
+  bool allow_dispatch = true; ///< AQL vendor IBs disable this to reject shader launches.
   std::deque<Pm4IndirectBuffer> buffers;
   uint32_t indirect_expansions = 0;
   static constexpr uint32_t kMaxIndirectDepth = 64;

@@ -38,7 +38,6 @@ inline constexpr uint16_t kCdna3ScalarNull = 0x7F;
 inline constexpr uint16_t kCdnaWaitcntAll0 = 0x0000;
 inline constexpr uint32_t kFlatGlobalPositiveImm13Max = 4095;
 inline constexpr uint32_t kCdnaOrdinarySgprLimit = 102;
-inline constexpr uint32_t kCdnaSpecialSgprTailReserve = 8;
 inline constexpr uint32_t kCdnaSmemImmediateByteOffsetMax = 0x1FFFFF;
 
 /// @brief Common fields for CDNA3 FLAT instructions targeting global memory.
@@ -575,7 +574,7 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
   static_assert(kCdnaOrdinarySgprLimit == REGISTER_SET_ALLOCATABLE_SGPRS,
                 "virtual-LDS reservation and the shared SGPR scan must agree on "
                 "where ordinary SGPRs end");
-  uint32_t ordinary_floor = explicit_ordinary_sgpr_bound(blocks);
+  uint32_t ordinary_floor = explicit_ordinary_sgpr_bound(blocks, translation.guest_wavefront_size);
 
   ordinary_floor = std::max<uint32_t>(ordinary_floor, translation.target_user_sgpr_count);
   auto include_sgpr = [&](int16_t sgpr, uint32_t width) {
@@ -599,7 +598,7 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
   const uint32_t current = std::max(ordinary_floor, context.required_sgpr_count);
   const uint32_t base = (current + 1u) & ~1u;
   if (base + 4 <= kCdnaOrdinarySgprLimit) {
-    context.require_sgprs(base + 4 + kCdnaSpecialSgprTailReserve);
+    context.require_sgprs(base + 4 + kDbtCdnaSpecialSgprTailReserve);
     return VirtualLdsBaseSgprReservation{.base = static_cast<uint16_t>(base),
                                          .prologue_temp = static_cast<uint16_t>(base + 2)};
   }
@@ -611,7 +610,7 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
 
   const uint32_t borrowed_temp = (allocated_ordinary - 2u) & ~1u;
   if (base + 2 <= kCdnaOrdinarySgprLimit) {
-    context.require_sgprs(base + 2 + kCdnaSpecialSgprTailReserve);
+    context.require_sgprs(base + 2 + kDbtCdnaSpecialSgprTailReserve);
     return VirtualLdsBaseSgprReservation{.base = static_cast<uint16_t>(base),
                                          .prologue_temp = static_cast<uint16_t>(borrowed_temp)};
   }

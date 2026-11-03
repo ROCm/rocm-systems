@@ -51,6 +51,8 @@ SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  if ((inst_.sdst < 105u && (inst_.sdst & 1u)) || (inst_.ssrc0 < 105u && (inst_.ssrc0 & 1u)))
+    flags_ |= MISALIGNED_SCALAR_DATA;
   flags_ |= RESULT_COPY;
 }
 
@@ -2349,10 +2351,9 @@ SCvtHiF32F16Sop1::SCvtHiF32F16Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 =
-        Operand(16, OperandType::OPR_SIMM32,
-                static_cast<int>((
-                    reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+    ssrc0 = Operand(
+        16, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
 namespace detail {

@@ -49,8 +49,12 @@ namespace rocshmem {
  * socket address using getnameinfo()
  *
  * Output: "IPv4/IPv6 address<port>"
+ *
+ * The result is written into buf and truncated to at most bufLen bytes,
+ * including the terminating NUL.
  */
 const char* SocketToString(union SocketAddress* addr, char* buf,
+                           size_t bufLen,
                            const int numericHostForm /*= 1*/) {
   if (buf == NULL || addr == NULL) return NULL;
   struct sockaddr* saddr = &addr->sa;
@@ -64,7 +68,7 @@ const char* SocketToString(union SocketAddress* addr, char* buf,
    */
   int flag = NI_NUMERICSERV | (numericHostForm ? NI_NUMERICHOST : 0);
   (void)getnameinfo(saddr, sizeof(union SocketAddress), host, NI_MAXHOST, service, NI_MAXSERV, flag);
-  sprintf(buf, "%s<%s>", host, service);
+  snprintf(buf, bufLen, "%s<%s>", host, service);
   return buf;
 }
 
@@ -114,7 +118,7 @@ static int findInterfaces(const char* prefixList, char* names, union SocketAddre
     if (family != AF_INET && family != AF_INET6) continue;
 
     LOG_TRACE("Found interface %s:%s", interface->ifa_name,
-          SocketToString((union SocketAddress*)interface->ifa_addr, line));
+          SocketToString((union SocketAddress*)interface->ifa_addr, line, sizeof(line)));
 
     /* Allow the caller to force the socket family type */
     if (sock_family != AF_UNSPEC && family != sock_family) continue;
@@ -226,14 +230,15 @@ int FindInterfaceMatchSubnet(char* ifNames, union SocketAddress* localAddrs, uni
     strncpy(ifNames + found * ifNameMaxSize, interface->ifa_name, ifNameMaxSize);
 
     LOG_TRACE("NET : Found interface %s:%s in the same subnet as remote address %s",
-          interface->ifa_name, SocketToString(localAddrs + found, line), SocketToString(remoteAddr, line_a));
+          interface->ifa_name, SocketToString(localAddrs + found, line, sizeof(line)),
+          SocketToString(remoteAddr, line_a, sizeof(line_a)));
     found++;
     if (found == maxIfs) break;
   }
 
   if (found == 0) {
     ERROR("Net : No interface found in the same subnet as remote address %s\n",
-         SocketToString(remoteAddr, line_a));
+         SocketToString(remoteAddr, line_a, sizeof(line_a)));
   }
   freeifaddrs(interfaces);
   return found;
@@ -372,7 +377,7 @@ Socket::Socket(const SocketAddress* addr, uint64_t magic, enum SocketType type, 
     if (family != AF_INET && family != AF_INET6) {
       char line[SOCKET_NAME_MAXLEN + 1];
       ERROR("SocketInit: connecting to address %s with family %d is neither AF_INET(%d) nor AF_INET6(%d)\n",
-           SocketToString(&addr_, line), family, (int)AF_INET, (int)AF_INET6);
+           SocketToString(&addr_, line, sizeof(line)), family, (int)AF_INET, (int)AF_INET6);
       return;
     }
     salen_ = (family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
@@ -460,7 +465,7 @@ void Socket::bindAndListen() {
   char line[SOCKET_NAME_MAXLEN + 1];
 #endif
   bind();
-  LOG_TRACE("Listening on socket %s", SocketToString(&addr_, line));
+  LOG_TRACE("Listening on socket %s", SocketToString(&addr_, line, sizeof(line)));
 
   /* Put the socket in listen mode
    * NB: The backlog will be silently truncated to the value in /proc/sys/net/core/somaxconn
@@ -488,7 +493,7 @@ void Socket::connect(int64_t timeout) {
     ERROR("wrong socket state %d\n", state_);
     return;
   }
-  LOG_TRACE("Connecting to socket %s ", SocketToString(&addr_, line));
+  LOG_TRACE("Connecting to socket %s ", SocketToString(&addr_, line, sizeof(line)));
 
   if (setsockopt(fd_, IPPROTO_TCP, TCP_NODELAY, (char*)&one, sizeof(int)) != 0) {
     LOG_TRACE("setsockopt(TCP_NODELAY) failed, errno %d", errno);
@@ -633,28 +638,67 @@ void Socket::tryAccept() {
   fd_ = ::accept(acceptFd_, &addr_.sa, &socklen);
   if (fd_ != -1) {
     state_ = SocketStateAccepted;
-  } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
-    ERROR("accept failed (fd %d) errno %d\n", acceptFd_, errno);
-  } else {
+  } else if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ECONNABORTED || errno == EINTR ||
+             errno == ENETDOWN || errno == EPROTO || errno == ENOPROTOOPT || errno == EHOSTDOWN ||
+             errno == ENONET || errno == EHOSTUNREACH || errno == EOPNOTSUPP || errno == ENETUNREACH) {
+    // Per accept(2) these may be already-pending peer/network errors (e.g. a peer
+    // that reset the connection before we accepted it). They are not fatal to the
+    // root: retry accepting. The caller's accept loop bounds this via abortFlag_ /
+    // timeout. Mirrors the transient-error handling in RCCL's ncclOsSocketTryAccept.
     usleep(SLEEP_INT);
     if (++acceptRetries_ % 1000 == 0)
       LOG_TRACE("tryAccept: Call to try accept returned %s, retrying", strerror(errno));
+  } else {
+    ERROR("accept failed (fd %d) errno %d\n", acceptFd_, errno);
   }
+}
+
+// Drop a half-open/spurious peer connection and go back to accepting. Pre-magic
+// failures (peer closed before/mid handshake, wrong magic, abort requested) are
+// not fatal to the root: discarding lets the accept loop reap the fd and keep
+// serving real ranks instead of aborting the whole job.
+void Socket::discardAccept() {
+  if (fd_ >= 0) {
+    ::close(fd_);
+    fd_ = -1;
+  }
+  state_ = SocketStateAccepting;
+}
+
+// Wait for the remaining bytes of the handshake magic once the first chunk has
+// arrived. Returns false (without aborting) if the peer closed mid-magic or an
+// abort was requested, so finalizeAccept can discard the connection. Mirrors the
+// non-fatal pre-magic handling in RCCL's socketFinalizeAccept.
+bool Socket::recvMagic(uint64_t* magic, int* received) {
+  while (*received < (int)sizeof(*magic)) {
+    int closed = 0;
+    socketProgressOpt(ROCSHMEM_SOCKET_RECV, magic, sizeof(*magic), received, 0, &closed);
+    if (closed) return false;
+    if (abortFlag_ && *abortFlag_ != 0) return false;
+  }
+  return true;
 }
 
 void Socket::finalizeAccept() {
   uint64_t magic;
   enum SocketType type;
   int received = 0;
-  socketProgress(ROCSHMEM_SOCKET_RECV, &magic, sizeof(magic), &received);
+  int closed = 0;
+  socketProgressOpt(ROCSHMEM_SOCKET_RECV, &magic, sizeof(magic), &received, 0, &closed);
+  if (closed) {
+    LOG_TRACE("finalizeAccept: peer closed before magic, discarding connection");
+    discardAccept();
+    return;
+  }
   if (received == 0) return;
-  socketWait(ROCSHMEM_SOCKET_RECV, &magic, sizeof(magic), &received);
+  if (!recvMagic(&magic, &received)) {
+    LOG_TRACE("finalizeAccept: peer closed or abort mid-magic, discarding connection");
+    discardAccept();
+    return;
+  }
   if (magic != magic_) {
-    ERROR("finalizeAccept: wrong magic %lx != %lx\n", magic, magic_);
-    ::close(fd_);
-    fd_ = -1;
-    // Ignore spurious connection and accept again
-    state_ = SocketStateAccepting;
+    LOG_WARN("finalizeAccept: wrong magic %lx != %lx, discarding connection", magic, magic_);
+    discardAccept();
     return;
   } else {
     received = 0;
@@ -687,7 +731,7 @@ void Socket::startConnect() {
   } else {
     char line[SOCKET_NAME_MAXLEN + 1];
     state_ = SocketStateError;
-    ERROR("connect to %s failed, errno %d\n", SocketToString(&addr_, line), errno);
+    ERROR("connect to %s failed, errno %d\n", SocketToString(&addr_, line, sizeof(line)), errno);
     return;
   }
 }
@@ -779,7 +823,7 @@ void Socket::socketProgress(int op, void* ptr, int size, int* offset) {
   socketProgressOpt(op, ptr, size, offset, 0, &closed);
   if (closed) {
     char line[SOCKET_NAME_MAXLEN + 1];
-    ERROR("connection closed by remote peer %s\n", SocketToString(&addr_, line, 0));
+    ERROR("connection closed by remote peer %s\n", SocketToString(&addr_, line, sizeof(line), 0));
     return;
   }
 }

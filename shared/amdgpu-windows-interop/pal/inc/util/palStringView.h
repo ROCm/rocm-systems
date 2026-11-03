@@ -33,6 +33,7 @@
 
 #include "palAssert.h"
 #include "palInlineFuncs.h"
+#include "palSpan.h"
 #include "palStringUtil.h"
 #include "palUtil.h"
 #include <type_traits>
@@ -83,6 +84,9 @@ public:
             m_pData  = s;
         }
     }
+
+    constexpr StringView(Util::Span<CharT> span) : StringView(span.Data(), uint32(span.Size())) {}
+    constexpr StringView(Util::Span<const CharT> span) : StringView(span.Data(), uint32(span.Size())) {}
 
     constexpr StringView(std::nullptr_t) = delete;
 
@@ -178,6 +182,13 @@ public:
 
     constexpr const_iterator begin() const noexcept { return m_pData; }
     constexpr const_iterator end()   const noexcept { return m_pData + Length(); }
+    ///@}
+
+    ///@{
+    /// Implicitly gets the current contents of the view as a Span.
+    ///
+    /// @returns The contents of the view as a Span; same as Span<T>(Data(), Length()).
+    operator Span<const CharT>() const { return Span<const CharT>(Data(), Length()); }
     ///@}
 
 private:

@@ -5,9 +5,13 @@ rj_add_object_library(rocjitsu_isa
     decoder.cpp
     execution_backend.cpp
     operand.cpp
-    register_set.cpp
     rj_decode.cpp
     target_registry.cpp
+)
+
+rj_add_object_library(
+    rocjitsu_wait_counter_policy
+    arch/amdgpu/shared/wait_counter_policy.cpp
 )
 
 function(rj_add_split_amdgpu_isa_library arch)

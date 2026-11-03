@@ -38,6 +38,11 @@ ASSERT_HOOK_MATCHES_PROD(g_ncclArgsGlobalCheck, ncclArgsGlobalCheck);
 
 // enqueue.h
 ncclResult_t ncclPrepareTasks(struct ncclComm*, bool*, bool*, ncclSimInfo_t*) { ::abort(); }
+// group.cc validates every comm's launch-completion events on the happy path, so mirror
+// enqueue.cc rather than abort: at most one per communicator per group.
+ncclResult_t ncclValidateCollConfigLaunchCompletionEvents(struct ncclComm* comm) {
+  return comm->planner.nCollConfigLaunchCompletionEvents > 1 ? ncclInvalidUsage : ncclSuccess;
+}
 ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclLaunchPrepare(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclLaunchKernelBefore_NoUncapturedCuda(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
@@ -79,15 +84,13 @@ void ResetCollectiveStubs() {
   g_ncclArgsGlobalCheck = DefaultArgsGlobalCheck;
 }
 
-// os.h
-int ncclOsCpuCount(const ncclAffinity&) { ::abort(); }
-ncclResult_t ncclOsSetAffinity(const ncclAffinity&) { ::abort(); }
-
 // transport.h -- only the connect/setup entry points group.cc references.
 ncclResult_t ncclTransportRingConnect(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclTransportTreeConnect(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclTransportPatConnect(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclNvlsBufferSetup(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclNvlsTreeConnect(struct ncclComm*) { ::abort(); }
+#ifndef RCCL_COLLECTIVE_STUBS_OMIT_COLL_NET  // the binary compiles the real coll_net.cc
 ncclResult_t ncclCollNetChainBufferSetup(ncclComm_t) { ::abort(); }
 ncclResult_t ncclCollNetDirectBufferSetup(ncclComm_t) { ::abort(); }
+#endif

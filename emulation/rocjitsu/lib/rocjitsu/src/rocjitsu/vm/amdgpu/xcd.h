@@ -8,6 +8,7 @@
 
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gws_device.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/shader_engine.h"
 
@@ -54,6 +55,26 @@ public:
   void set_l2_cache(L2Cache *l2);
   void set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence);
   void add_shader_engine(ShaderEngine *se) { shader_engines_.push_back(se); }
+
+  /// @brief Point every CU the command processor can dispatch to at this XCD's
+  /// shared GWS store (see GwsDevice for the scheduling policy).
+  /// @details Each CU takes a shared_ptr, so the store outlives every registered
+  /// CU regardless of teardown order. Must be called after the CUs are attached to
+  /// the command processor; the full constructor and the config loader both do so.
+  /// Preflights every CU and throws std::logic_error if an active CU would
+  /// change stores, before changing any CU. The caller serializes topology changes.
+  void wire_gws_to_cus();
+
+  /// @brief Replace this XCD's default GWS store with an externally owned one (the
+  /// SoC's device-wide store, shared across every XCD; see GwsDevice).
+  /// @details Rewires every CU to @p store. Idempotent and a no-op if @p store is
+  /// null or already current; must be called after the CUs are attached.
+  /// Preflights every CU and throws std::logic_error if an active CU would change
+  /// stores, before updating any CU or the XCD owner. The caller serializes topology changes.
+  void adopt_gws_store(std::shared_ptr<GwsDevice> store);
+
+  /// @brief Return the device-global GWS store this XCD's CUs share.
+  const std::shared_ptr<GwsDevice> &gws_device() const { return gws_device_; }
 
   /// @brief Set flat-address-space aperture boundaries on all CUs via their SPIs.
   void set_apertures(uint64_t shared_base, uint64_t shared_limit, uint64_t private_base,
@@ -111,6 +132,10 @@ public:
 private:
   simdojo::ExecMode exec_mode_;
   std::shared_ptr<DeviceCacheCoherence> coherence_ = std::make_shared<DeviceCacheCoherence>();
+  /// Device-global GWS store shared by every CU of this XCD (see wire_gws_to_cus).
+  /// A standalone default; an owning SoC replaces it with one device-wide store
+  /// shared across all XCDs via adopt_gws_store (GWS is device-global).
+  std::shared_ptr<GwsDevice> gws_device_ = std::make_shared<GwsDevice>();
   CommandProcessor *cp_ = nullptr;
   L2Cache *l2_cache_ = nullptr;
   std::vector<ShaderEngine *> shader_engines_;

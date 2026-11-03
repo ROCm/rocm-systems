@@ -55,6 +55,7 @@ set(TEST_SRC
   hipGraphExecMemcpyNodeSetParams.cc
   hipGraphExecMemcpyNodeSetParams_old.cc
   hipStreamBeginCapture.cc
+  hipStreamCaptureDeviceScopedInvalidation.cc
   hipGraphAddMemcpyNode1D_old.cc
   hipStreamBeginCapture_old.cc
   hipStreamIsCapturing.cc
@@ -189,6 +190,9 @@ if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
     # hipLaunchAttributePriority not available on older CUDA versions
     hipGraphKernelNodePriority.cc
+    # wall_clock64 and __hip_atomic_* builtins are AMD-only
+    hipGraphSegmentOrdering.cc
+    hipGraphDualStreamCapture.cc
     # hipGraphAddNode, hipGraphNodeParams, hipMemcpyNodeParams are not mapped to Nvidia
     hipGraphAddNode.cc
     # hipDrvGraphAddMemsetNode, HIP_MEMSET_NODE_PARAMS are not mapped to Nvidia

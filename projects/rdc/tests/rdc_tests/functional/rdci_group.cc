@@ -85,6 +85,7 @@ void TestRdciGroup::Run(void) {
 
   rdc_gpu_group_t group_id = 0;
   uint32_t count = 0;
+  uint32_t gpu_count = 0;
   rdc_group_info_t group_info;
   uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
   result = rdc_group_gpu_create(0, RDC_GROUP_EMPTY, "GRP_NAME", &group_id);
@@ -102,9 +103,10 @@ void TestRdciGroup::Run(void) {
   result = rdc_group_gpu_add(rdc_handle, group_id, -1);
   ASSERT_EQ(result, RDC_ST_NOT_FOUND);
 
-  result = rdc_device_get_all(rdc_handle, gpu_index_list, &count);
+  result = rdc_device_get_all(rdc_handle, gpu_index_list, &gpu_count);
   ASSERT_EQ(result, RDC_ST_OK);
-  for (uint32_t i = 0; i < count; i++) {
+  ASSERT_GT(gpu_count, 0u);
+  for (uint32_t i = 0; i < gpu_count; i++) {
     result = rdc_group_gpu_add(rdc_handle, group_id, gpu_index_list[i]);
     ASSERT_EQ(result, RDC_ST_OK);
   }
@@ -138,4 +140,15 @@ void TestRdciGroup::Run(void) {
 
   result = rdc_group_gpu_destroy(rdc_handle, group_id);
   ASSERT_EQ(result, RDC_ST_OK);
+
+  // The destroyed group no longer exists. rdc_group_gpu_add() checks the GPU index before the
+  // group, so pass an index that exists.
+  result = rdc_group_gpu_get_info(rdc_handle, group_id, &group_info);
+  ASSERT_EQ(result, RDC_ST_GROUP_NOT_FOUND);
+
+  result = rdc_group_gpu_add(rdc_handle, group_id, gpu_index_list[0]);
+  ASSERT_EQ(result, RDC_ST_GROUP_NOT_FOUND);
+
+  result = rdc_group_gpu_destroy(rdc_handle, group_id);
+  ASSERT_EQ(result, RDC_ST_GROUP_NOT_FOUND);
 }

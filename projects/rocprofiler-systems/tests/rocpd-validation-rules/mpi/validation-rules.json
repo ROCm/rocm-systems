@@ -41,6 +41,22 @@
                     "query": "SELECT COUNT(*) FROM {table_name} WHERE category = 'mpi';"
                 }
             ]
+        },
+        {
+            "name": "rocpd_info_process",
+            "required_columns": [
+                "pid",
+                "environment"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Verify every process records its MPI rank as an integer",
+                    "error_message": "Found processes without an integer MPI_COMM_WORLD_RANK in their environment",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE json_type(environment, '$.MPI_COMM_WORLD_RANK') IS NOT 'integer';"
+                }
+            ]
         }
     ]
 }

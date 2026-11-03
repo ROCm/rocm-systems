@@ -505,6 +505,12 @@ pub fn describe() -> EmulatorDescription {
             description: description.to_owned(),
             default: None,
         })
+        .chain([OptionDef {
+            name: "wait_checking".to_owned(),
+            dtype: mirage_core::common::SimpleType::String,
+            description: "Memory wait checks on every CU/GPU: on = ordinary, off = disabled, all = ordinary and gfx1250 XCNT. Omit to keep config settings/defaults.".to_owned(),
+            default: None,
+        }])
         .collect(),
     }
 }
@@ -981,15 +987,15 @@ fn absolute_supplied_config(path: PathBuf) -> PathBuf {
 /// here, which is what lets [`check_config`] validate one without a
 /// session and without leaving a file behind.
 fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
+    let overrides = launch_overrides(&def.options)?;
     // Drop-in `--config <path>`: when an explicit rocjitsu simulation
     // config is supplied (mirage being used as a `rocjitsu` replacement)
     // use that file verbatim instead of synthesising one from the
     // profile's topology. This is the `--config` of the upstream
     // `rocjitsu` CLI. (Container path remapping is not applied; the
     // explicit-config path is intended for direct, non-containerised
-    // drop-in use.) A CPU thread budget is the one override that still
-    // applies, because upstream `rocjitsu --cpu-thread-budget` takes it
-    // alongside `--config`; it goes to a session copy, never to the file.
+    // drop-in use.) CPU thread budget and wait checking overrides go to
+    // a session copy, never to the file, just like the upstream CLI.
     if let Some(SimpleValue::String(path)) = def.options.get("config") {
         let cfg = absolute_supplied_config(PathBuf::from(path));
         if !cfg.exists() {
@@ -999,11 +1005,12 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
                 "rocjitsu config not found: {path}"
             )));
         }
-        return match def.options.get("cpu_thread_budget") {
-            None => Ok(SimConfig::Supplied(cfg)),
-            Some(budget) => Ok(SimConfig::Synthesised(supplied_config_with_budget(
-                &cfg, budget,
-            )?)),
+        return if overrides.is_empty() {
+            Ok(SimConfig::Supplied(cfg))
+        } else {
+            Ok(SimConfig::Synthesised(supplied_config_with_overrides(
+                &cfg, overrides,
+            )?))
         };
     }
 
@@ -1100,8 +1107,8 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
         sim["async_helper_threads"] = serde_json::Value::from(0);
     }
     // Leave allocation to the native target-aware policy unless overridden.
+    apply_launch_overrides(&mut sim, overrides)?;
     for (key, min, max) in [
-        ("cpu_thread_budget", 0, i64::from(u32::MAX)),
         ("num_threads", 0, i64::from(u32::MAX)),
         ("cpu_dispatch_threads", 0, i64::from(u32::MAX)),
         ("async_helper_threads", -1, 128),
@@ -1341,53 +1348,93 @@ fn collect_missing_fields(
     }
 }
 
-/// Re-emit the supplied `--config` file with `cpu_thread_budget` replaced.
-///
-/// A run's budget belongs to that run, so the override produces a session copy
-/// and never touches the user's file. The copy is what the backend loads, and a
-/// `dbt_guest.simulator_config` would not survive the move: it names the host's
-/// own simulator config relative to the file declaring it, and that file, not
-/// this one, is where the budget would have to land. So that pairing is refused.
-fn supplied_config_with_budget(cfg: &std::path::Path, budget: &SimpleValue) -> Result<Vec<u8>> {
-    let budget = match budget {
-        SimpleValue::Number(n) if (0..=i64::from(u32::MAX)).contains(n) => *n,
-        _ => {
-            return Err(MirageError::Other(format!(
-                "rocjitsu cpu_thread_budget must be an integer between 0 and {}",
-                u32::MAX
-            )));
+/// Validate launch options once for both profile and supplied-config paths.
+fn launch_overrides(options: &SimpleMap) -> Result<serde_json::Map<String, serde_json::Value>> {
+    let mut overrides = serde_json::Map::new();
+    if let Some(value) = options.get("cpu_thread_budget") {
+        match value {
+            SimpleValue::Number(n) if (0..=i64::from(u32::MAX)).contains(n) => {
+                overrides.insert("cpu_thread_budget".into(), (*n).into());
+            }
+            _ => {
+                return Err(MirageError::Other(format!(
+                    "rocjitsu cpu_thread_budget must be an integer between 0 and {}",
+                    u32::MAX
+                )));
+            }
         }
-    };
+    }
+    if let Some(value) = options.get("wait_checking") {
+        match value {
+            SimpleValue::String(mode) if matches!(mode.as_str(), "on" | "off" | "all") => {
+                overrides.insert("wait_checking".into(), mode.clone().into());
+            }
+            _ => {
+                return Err(MirageError::Other(
+                    "rocjitsu wait_checking must be on, off, or all".into(),
+                ));
+            }
+        }
+    }
+    Ok(overrides)
+}
+
+fn apply_launch_overrides(
+    sim: &mut serde_json::Value,
+    overrides: serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
+    if overrides.is_empty() {
+        return Ok(());
+    }
+    // A separate host config is where these settings would have to land.
+    // Its relative path also cannot survive moving the guest config to a copy.
+    if sim
+        .pointer(DBT_GUEST_ENABLED_POINTER)
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+        && let Some(simulator_config) = sim["dbt_guest"]["simulator_config"].as_str()
+        && !simulator_config.is_empty()
+    {
+        let flags = overrides
+            .keys()
+            .map(|k| format!("--{}", k.replace('_', "-")))
+            .collect::<Vec<_>>()
+            .join(" and ");
+        let keys = overrides.keys().cloned().collect::<Vec<_>>().join(" and ");
+        return Err(MirageError::Other(format!(
+            "{flags} cannot be combined with a dbt_guest simulator_config; \
+             set {keys} in {simulator_config} instead"
+        )));
+    }
+    let map = sim
+        .as_object_mut()
+        .ok_or_else(|| MirageError::Other("rocjitsu config is not a JSON object".into()))?;
+    map.extend(overrides);
+    Ok(())
+}
+
+/// Re-emit `--config` with all launch overrides in one session copy.
+/// The source file is never changed.
+fn supplied_config_with_overrides(
+    cfg: &std::path::Path,
+    overrides: serde_json::Map<String, serde_json::Value>,
+) -> Result<Vec<u8>> {
     let text = std::fs::read_to_string(cfg)
         .map_err(|e| MirageError::Other(format!("rocjitsu config {}: {e}", cfg.display())))?;
     let mut sim: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
         MirageError::Other(format!(
-            "rocjitsu config {}: {e}. --cpu-thread-budget rewrites the config, so it \
-             needs plain JSON; set cpu_thread_budget in the file instead.",
+            "rocjitsu config {}: {e}. Launch overrides need plain JSON; \
+             set cpu_thread_budget or wait_checking in the file instead.",
             cfg.display()
         ))
     })?;
-    let Some(map) = sim.as_object_mut() else {
+    if !sim.is_object() {
         return Err(MirageError::Other(format!(
             "rocjitsu config {} is not a JSON object",
             cfg.display()
         )));
-    };
-    if let Some(simulator_config) = map
-        .get("dbt_guest")
-        .and_then(|dbt| dbt.get("simulator_config"))
-        .and_then(serde_json::Value::as_str)
-        && !simulator_config.is_empty()
-    {
-        return Err(MirageError::Other(format!(
-            "--cpu-thread-budget cannot be combined with a dbt_guest simulator_config; \
-             set cpu_thread_budget in {simulator_config} instead"
-        )));
     }
-    map.insert(
-        "cpu_thread_budget".to_string(),
-        serde_json::Value::from(budget),
-    );
+    apply_launch_overrides(&mut sim, overrides)?;
     serde_json::to_vec_pretty(&sim)
         .map_err(|e| MirageError::Other(format!("rocjitsu kmd_config: serialize sim config: {e}")))
 }
@@ -1416,14 +1463,14 @@ fn supplied_config_with_budget(cfg: &std::path::Path, budget: &SimpleValue) -> R
 /// profile at it, so this hands the interposer those same bytes. It copies
 /// here only for a profile that was never reconciled.
 ///
-/// The copy is byte for byte apart from one thing: a relative
+/// Without launch overrides, the copy is byte for byte except that a relative
 /// `dbt_guest.simulator_config` is made absolute against the original's
 /// directory first, because moving the file would otherwise move what
 /// that reference means. A config whose references cannot be pinned is
 /// not copied at all — see [`pin_external_references`].
 ///
-/// A run that overrides its CPU thread budget gets the same session copy,
-/// carrying the override — see [`supplied_config_with_budget`].
+/// CPU thread budget and wait checking overrides go into that same session
+/// copy; see `supplied_config_with_overrides`.
 ///
 /// Nothing is written beside the user's file, then or now.
 ///
@@ -3591,6 +3638,152 @@ mod tests {
         assert_eq!(copy["cpu_thread_budget"], 4);
         assert_eq!(copy["max_ticks"], 7);
         assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
+    }
+
+    #[test]
+    fn wait_checking_composes_with_budget_in_generated_and_supplied_configs() {
+        let option = describe()
+            .options_schema
+            .into_iter()
+            .find(|o| o.name == "wait_checking")
+            .unwrap();
+        assert_eq!(option.dtype, mirage_core::common::SimpleType::String);
+        assert_eq!(option.default, None);
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join("cfg.json");
+        let original = r#"{"max_ticks":7,"cpu_thread_budget":32,"wait_checking":"all"}"#;
+        std::fs::write(&config, original).unwrap();
+        for supplied in [false, true] {
+            for mode in [None, Some("on"), Some("off"), Some("all")] {
+                for budget in [None, Some(4)] {
+                    let mut def = def_with_gpus(2);
+                    def.extra.insert("wait_checking".into(), "all".into());
+                    def.extra.insert("cpu_thread_budget".into(), 32.into());
+                    if supplied {
+                        def.options.insert(
+                            "config".into(),
+                            SimpleValue::String(config.display().to_string()),
+                        );
+                    }
+                    if let Some(mode) = mode {
+                        def.options
+                            .insert("wait_checking".into(), SimpleValue::String(mode.into()));
+                    }
+                    if let Some(budget) = budget {
+                        def.options
+                            .insert("cpu_thread_budget".into(), SimpleValue::Number(budget));
+                    }
+                    let copy = kmd_config(&def, &tmp.path().join("session")).unwrap();
+                    let json: serde_json::Value =
+                        serde_json::from_slice(&std::fs::read(copy).unwrap()).unwrap();
+                    assert_eq!(json["wait_checking"], mode.unwrap_or("all"));
+                    assert_eq!(json["cpu_thread_budget"], budget.unwrap_or(32));
+                    if supplied {
+                        assert_eq!(json["max_ticks"], 7);
+                    } else {
+                        assert_eq!(json["vm"]["gpu"]["num_gpus"], 2);
+                    }
+                    assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
+                }
+            }
+        }
+        let SimConfig::Synthesised(bytes) = resolve_sim_config(&def_with_gpus(1)).unwrap() else {
+            panic!("expected generated config");
+        };
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(json.get("wait_checking").is_none());
+    }
+
+    #[test]
+    fn wait_checking_options_reject_invalid_values_in_both_config_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join("cfg.json");
+        std::fs::write(&config, "{}").unwrap();
+        for supplied in [false, true] {
+            for value in [
+                SimpleValue::String("warn".into()),
+                SimpleValue::String("".into()),
+                SimpleValue::String("ALL".into()),
+                SimpleValue::Boolean(false),
+                SimpleValue::Number(0),
+            ] {
+                let mut def = def_with_gpus(1);
+                if supplied {
+                    def.options.insert(
+                        "config".into(),
+                        SimpleValue::String(config.display().to_string()),
+                    );
+                }
+                def.options.insert("wait_checking".into(), value);
+                let error = resolve_sim_config(&def).unwrap_err().to_string();
+                assert!(
+                    error.contains("wait_checking must be on, off, or all"),
+                    "{error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn launch_overrides_refuse_only_enabled_external_dbt_configs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join("cfg.json");
+        for enabled in [false, true] {
+            let dbt = serde_json::json!({"enabled": enabled, "simulator_config": "host.json"});
+            let original = serde_json::json!({"dbt_guest": dbt}).to_string();
+            std::fs::write(&config, &original).unwrap();
+            for supplied in [false, true] {
+                for wait in [false, true] {
+                    for budget in [false, true] {
+                        if !wait && !budget {
+                            continue;
+                        }
+                        let mut def = def_with_gpus(1);
+                        def.extra.insert("dbt_guest".into(), dbt.clone());
+                        if supplied {
+                            def.options.insert(
+                                "config".into(),
+                                SimpleValue::String(config.display().to_string()),
+                            );
+                        }
+                        if budget {
+                            def.options
+                                .insert("cpu_thread_budget".into(), SimpleValue::Number(4));
+                        }
+                        if wait {
+                            def.options
+                                .insert("wait_checking".into(), SimpleValue::String("off".into()));
+                        }
+                        let result = resolve_sim_config(&def);
+                        if enabled {
+                            let error = result.unwrap_err().to_string();
+                            assert!(error.contains("host.json"), "{error}");
+                            if wait {
+                                assert!(error.contains("--wait-checking"), "{error}");
+                            }
+                            if budget {
+                                assert!(error.contains("--cpu-thread-budget"), "{error}");
+                            }
+                        } else {
+                            // A disabled DBT block never loads the named host file.
+                            // Cover budget-only too: generated profiles already supported it.
+                            let SimConfig::Synthesised(bytes) = result.unwrap() else {
+                                panic!("an override must produce a copy");
+                            };
+                            let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                            if wait {
+                                assert_eq!(json["wait_checking"], "off");
+                            }
+                            if budget {
+                                assert_eq!(json["cpu_thread_budget"], 4);
+                            }
+                            assert_eq!(json["dbt_guest"]["enabled"], false);
+                        }
+                        assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
+                    }
+                }
+            }
+        }
     }
 
     /// `dbt_guest.simulator_config` names the host's simulator config relative to

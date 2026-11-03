@@ -129,6 +129,10 @@ class MemoryRegion : public core::MemoryRegion {
             (mem_props_.HeapType == HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC));
   }
 
+  /// @brief Whether hsa_amd_signal_batch_create may place signals here: host fine-grained
+  /// memory, or device memory where every queue's CP sees a completion.
+  bool SignalCapable() const;
+
   __forceinline bool IsPublic() const {
     return (mem_props_.HeapType == HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC);
   }

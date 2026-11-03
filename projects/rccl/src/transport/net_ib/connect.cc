@@ -10,6 +10,8 @@
 #include "p2p.h"
 #include "p2p_resiliency.h"
 
+#include <mutex>
+
 NCCL_PARAM(IbGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
 NCCL_PARAM(IbRoceVersionNum, "IB_ROCE_VERSION_NUM", 2);
@@ -30,6 +32,11 @@ struct ncclIbDevExtraProps {
 };
 
 extern int64_t rcclParamIbGdrFlushGpuMemNoRelaxedOrdering();
+
+// The flush scratchpad is registered on every accept; report the outcome once per IB device.
+static std::once_flag gpuFlushRegLogOnce[MAX_IB_DEVS];
+static std::once_flag gpuFlushRegWarnOnce[MAX_IB_DEVS];
+
 enum ncclIbCommState {
   ncclIbCommStateStart = 0,
   ncclIbCommStateConnect = 1,
@@ -64,15 +71,89 @@ struct ncclIbHandle {
 NCCL_PARAM(IbQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
 RCCL_PARAM(IbQpsPerP2p, "IB_QPS_PER_P2P", 0);
 
-// Calculate number of QPs based on P2P flag and device counts
-static int ncclIbCalculateNqps(int isP2p, int localNdevs, int remoteNdevs, const char* funcName) {
-  auto qp_multiplier = (rcclParamIbQpsPerP2p() > 0 && isP2p) ? rcclParamIbQpsPerP2p() : ncclParamIbQpsPerConn();
-  int localNqps = qp_multiplier * localNdevs;
-  int remoteNqps = qp_multiplier * remoteNdevs;
+// nQpsPerDev > 0 wins (GIN passes 1). Otherwise use the IB QP env policy.
+static int rcclIbQpsPerDev(int nQpsPerDev, int isP2p) {
+  if (nQpsPerDev > 0) {
+    // GIN opens a link per context per peer, so log once per process.
+    static std::once_flag once;
+    if (ncclParamIbQpsPerConn() > nQpsPerDev) {
+      std::call_once(once, [&]() {
+        INFO(NCCL_ENV | NCCL_NET,
+             "NET/IB: NCCL_IB_QPS_PER_CONNECTION=%ld is not applied to GIN connections, which use %d QP per device",
+             ncclParamIbQpsPerConn(), nQpsPerDev);
+      });
+    }
+    return nQpsPerDev;
+  }
+  if (rcclParamIbQpsPerP2p() > 0 && isP2p) return (int)rcclParamIbQpsPerP2p();
+  return (int)ncclParamIbQpsPerConn();
+}
+
+// Explicit GIN count sizes the CQ. The env path keeps NCCL_IB_QPS_PER_CONNECTION.
+static int rcclIbCqQpsPerDev(int nQpsPerDev) {
+  return nQpsPerDev > 0 ? nQpsPerDev : (int)ncclParamIbQpsPerConn();
+}
+
+static int rcclIbMaxNqps(int qpPerDev, int localNdevs, int remoteNdevs, const char* funcName) {
+  int localNqps = qpPerDev * localNdevs;
+  int remoteNqps = qpPerDev * remoteNdevs;
   int maxNqps = (remoteNqps > localNqps) ? remoteNqps : localNqps;
-  INFO(NCCL_NET, "NET/IB: %s Max Nqps=%d, localNqps=%d, remoteNqps=%d", funcName, maxNqps, localNqps, remoteNqps);
+  INFO(NCCL_NET, "NET/IB: %s Max Nqps=%d, localNqps=%d, remoteNqps=%d, qpPerDev=%d", funcName, maxNqps,
+       localNqps, remoteNqps, qpPerDev);
   return maxNqps;
 }
+
+static int rcclIbSelectNqps(int nQpsPerDev, int isP2p, int localNdevs, int remoteNdevs, const char* funcName) {
+  return rcclIbMaxNqps(rcclIbQpsPerDev(nQpsPerDev, isP2p), localNdevs, remoteNdevs, funcName);
+}
+
+// Opt-in GDR flush through RO=0 GPU flags written by the sender after the
+// payload, one flag per QP. Flagged requests rotate over the QPs like the rest
+// (all QPs at once with NCCL_IB_SPLIT_DATA_ON_QPS=1); the GPU waits only on the
+// flags of the QPs that carried each step, and net.cc skips the proxy flush.
+// The communicator enables it at init only when every rank passes
+// ncclIbGdrFlushFlagLocalSupport(), so a receiver that publishes a flag always
+// has a sender that writes it.
+RCCL_PARAM(IbGdrFlushFlag, "IB_GDR_FLUSH_FLAG", 0);
+extern int64_t ncclParamIbOooRq();
+extern int64_t ncclParamIbReceiverSideMatchingScheme();
+extern int64_t ncclParamIbResiliencyPortFailover();
+
+static_assert(NCCL_IB_MAX_QPS * NCCL_GDR_FLUSH_FLAG_STRIDE <= GPU_PAGE_SIZE, "per-QP GDR flush flags must fit in one page");
+static_assert((NCCL_IB_MAX_QPS + NCCL_GDR_FLUSH_MAX_WAIT_QPS - 1) * NCCL_GDR_FLUSH_FLAG_STRIDE <= GPU_PAGE_SIZE,
+              "the GPU polls NCCL_GDR_FLUSH_MAX_WAIT_QPS flags from any first QP, all within the page");
+static_assert(NCCL_IB_MAX_QPS < 256, "per-QP GDR flush flag first index and count are packed in 8 bits each");
+
+// The RO=0 flag write is only ordered behind the payload posted ahead of it on
+// the same QP, delivered in order: no adaptive routing, no out-of-order receive
+// queues (ID-based matching) and no resiliency retransmits. NIC fusion is
+// checked per connection at accept: fused vNICs are only created by the
+// topology search, after the init all-gather.
+bool ncclIbGdrFlushFlagOrdered(int64_t oooRq, int64_t portFailover, int64_t matchingScheme, int nDevs,
+                               const int* adaptiveRouting) {
+  if (nDevs == 0 || oooRq != 0 || portFailover != 0) return false;
+  if (matchingScheme != -2 && matchingScheme != BY_INDEX) return false;
+  for (int d = 0; d < nDevs; d++)
+    if (adaptiveRouting[d]) return false;
+  return true;
+}
+
+bool ncclIbGdrFlushFlagLocalSupport() {
+  if (rcclParamIbGdrFlushFlag() == 0) return false;
+  int adaptiveRouting[MAX_IB_DEVS];
+  for (int d = 0; d < ncclNIbDevs; d++) adaptiveRouting[d] = ncclIbDevs[d].ar;
+  return ncclIbGdrFlushFlagOrdered(ncclParamIbOooRq(), ncclParamIbResiliencyPortFailover(),
+                                   ncclParamIbReceiverSideMatchingScheme(), ncclNIbDevs, adaptiveRouting);
+}
+
+void ncclIbSetGdrFlushFlag(void* netContext, int enable) {
+  ((struct ncclIbNetCtx*)netContext)->gdrFlushFlag = enable;
+}
+
+void ncclIbSetListenGdrFlushFlag(void* listenComm, int enable) {
+  ((struct ncclIbListenComm*)listenComm)->gdrFlushFlag = enable;
+}
+
 NCCL_PARAM(IbSubnetAwareRouting, "IB_SUBNET_AWARE_ROUTING", 0);
 NCCL_PARAM(IbSubnetPrefixLen, "IB_SUBNET_PREFIX_LEN", 24);
 
@@ -678,6 +759,12 @@ fail:
   goto exit;
 }
 
+ncclResult_t ncclIbNetListen(void* ctx, int dev, void* opaqueHandle, void** listenComm) {
+  NCCLCHECK(ncclIbListen(ctx, dev, opaqueHandle, listenComm));
+  ((struct ncclIbListenComm*)*listenComm)->gdrFlushFlag = ctx ? ((struct ncclIbNetCtx*)ctx)->gdrFlushFlag : 0;
+  return ncclSuccess;
+}
+
 #define NCCL_IB_SL_DEFAULT 0
 #define NCCL_IB_TC_DEFAULT 0
 
@@ -932,7 +1019,7 @@ ib_recv_dev_list:
   // Read isP2p from handle
   isP2p = handle->isP2p;
   INFO(NCCL_NET, "NET/IB: ncclIbConnect isP2p=%d", isP2p);
-  comm->base.nqps = ncclIbCalculateNqps(isP2p, comm->base.vProps.ndevs, remoteVProps.ndevs, __func__);
+  comm->base.nqps = rcclIbSelectNqps(nQpsPerDev, isP2p, comm->base.vProps.ndevs, remoteVProps.ndevs, __func__);
 
   comm->base.nDataQps = std::max(comm->base.vProps.ndevs, remoteVProps.ndevs);
 
@@ -945,7 +1032,7 @@ ib_recv_dev_list:
   // Sender's CQ size needs to accomodate the upper bound of number of send
   // requests multiplied by the number of QPs used per request.
   int cqSize;
-  cqSize = NET_IB_MAX_REQUESTS * ncclParamIbQpsPerConn();
+  cqSize = NET_IB_MAX_REQUESTS * rcclIbCqQpsPerDev(nQpsPerDev);
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     int ibDevN = comm->base.vProps.devs[i];
     if (comm->base.resiliency) {
@@ -1118,6 +1205,19 @@ ib_connect:
     comm->devs[i].sge.lkey = comm->devs[i].cmplsRecordsMr->lkey;
   }
 
+  if (remMeta.flagFlushAddr != 0) {
+    NCCLCHECKGOTO(wrap_ibv_reg_mr(&comm->devs[0].flagFlushSrcMr, comm->devs[0].base.pd, comm->flagFlushSrc,
+                                  sizeof(comm->flagFlushSrc), IBV_ACCESS_LOCAL_WRITE),
+                  ret, fail);
+    comm->flagFlushSge.lkey = comm->devs[0].flagFlushSrcMr->lkey;
+    comm->flagFlushSge.length = sizeof(uint64_t);
+    comm->flagFlushRemAddr = remMeta.flagFlushAddr;
+    comm->flagFlushRkey = remMeta.flagFlushRkey;
+    comm->flagFlush = 1;
+    INFO(NCCL_NET, "NET/IB: %s: GDR flush flag enabled (remote flag 0x%lx rkey 0x%x)", __func__,
+         comm->flagFlushRemAddr, comm->flagFlushRkey);
+  }
+
   NCCLCHECKGOTO(ncclIbSenderQpsToRts(comm, &remMeta), ret, fail);
   ncclIbComputeDevSpeeds(&comm->base);
   ncclIbComputeLbWeights(&comm->base);
@@ -1137,13 +1237,17 @@ exit:
   stage->state = ncclIbCommStateStart;
   return ret;
 fail:
+  if (comm && comm->devs[0].flagFlushSrcMr != nullptr) {
+    (void)wrap_ibv_dereg_mr(comm->devs[0].flagFlushSrcMr);
+    comm->devs[0].flagFlushSrcMr = nullptr;
+  }
   free(comm);
   goto exit;
 }
 
 ncclResult_t ncclIbConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
                            ncclNetDeviceHandle_t** sendDevComm) {
-  return ncclIbConnectImpl(ctx, dev, opaqueHandle, sendComm, sendDevComm, ncclParamIbQpsPerConn(), ncclParamIbTc());
+  return ncclIbConnectImpl(ctx, dev, opaqueHandle, sendComm, sendDevComm, /*nQpsPerDev*/ 0, ncclParamIbTc());
 }
 
 NCCL_PARAM(IbWarnRailLocal, "IB_WARN_RAIL_LOCAL", 0);
@@ -1356,7 +1460,8 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     qpCreateAttrs.cq = rCommDev->base.cq;
     qpCreateAttrs.pd = rCommDev->base.pd;
     qpCreateAttrs.maxRecvWorkRequest = 0;
-    qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
+    // Each flush may post a scratchpad write in addition to the read.
+    qpCreateAttrs.maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
     qpCreateAttrs.qpContext = &comm->base.stats;
     NCCLCHECK(ncclIbQpCreate(flushQp, &qpCreateAttrs));
     INFO(NCCL_NET, "NET/IB: %s: Flush QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p",
@@ -1434,6 +1539,100 @@ static ncclResult_t ncclIbFreeGpuFlushMem(struct ncclIbGpuFlush* gpuFlush) {
   }
   gpuFlush->gpuFlushGpuMem = nullptr;
   gpuFlush->gpuFlushMemIsHipAlloc = false;
+  return ncclSuccess;
+}
+
+uint64_t* ncclIbGetGpuFlushFlag(void* recvComm) {
+  struct ncclIbRecvComm* rComm = (struct ncclIbRecvComm*)recvComm;
+  return (rComm && rComm->flagFlush) ? rComm->flagFlushGpuMem : nullptr;
+}
+
+void ncclIbSetGpuFlushFlagHint(void* recvComm, int need) {
+  ((struct ncclIbRecvComm*)recvComm)->flagFlushHint = need;
+}
+
+uint64_t ncclIbGetGpuFlushFlagSeq(void* recvComm) {
+  return ((struct ncclIbRecvComm*)recvComm)->flagFlushLastDesc;
+}
+
+static ncclResult_t ncclIbFreeFlagFlush(struct ncclIbRecvComm* rComm) {
+  if (rComm->flagFlushMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(rComm->flagFlushMr));
+  rComm->flagFlushMr = nullptr;
+  if (rComm->flagFlushDmabufFd >= 0) close(rComm->flagFlushDmabufFd);
+  rComm->flagFlushDmabufFd = -1;
+#if defined(__HIP_PLATFORM_AMD__)
+  if (rComm->flagFlushGpuMem != nullptr) CUDACHECK(hipFree((void*)rComm->flagFlushGpuMem));
+#endif
+  rComm->flagFlushGpuMem = nullptr;
+  rComm->flagFlush = 0;
+  return ncclSuccess;
+}
+
+// Allocates the receiver's GDR flush flags, one uint64_t per QP in one page,
+// NCCL_GDR_FLUSH_FLAG_STRIDE bytes apart.
+// The page is registered without IBV_ACCESS_RELAXED_ORDERING so the NIC issues
+// flag writes with RO=0, which cannot pass the preceding (RO=1) payload writes
+// on the same QP. The proxy writes the flags and the per-step sequences through
+// the CPU mapping of fine-grained VRAM, which is only available on
+// gfx942/gfx950 (checked at communicator init). The page is registered through
+// dma-buf when the connection uses dma-buf for GDR, and through peermem
+// otherwise. Any failure leaves this connection on the RDMA read flush: the
+// sender only writes flags it was given an address for.
+static ncclResult_t ncclIbSetupFlagFlush(struct ncclIbRecvComm* rComm, struct ncclIbConnectionMetadata* meta,
+                                         bool useDmaBuf) {
+#if defined(__HIP_PLATFORM_AMD__)
+  void* ptr = nullptr;
+#if defined(HIP_UNCACHED_MEMORY)
+  const unsigned int flagFlags = hipDeviceMallocUncached;
+#else
+  const unsigned int flagFlags = hipDeviceMallocFinegrained;
+#endif
+  if (hipExtMallocWithFlags(&ptr, GPU_PAGE_SIZE, flagFlags) != hipSuccess) {
+    (void)hipGetLastError();
+    INFO(NCCL_NET, "NET/IB: GDR flush flag allocation failed, using RDMA read flush");
+    return ncclSuccess;
+  }
+  rComm->flagFlushGpuMem = (uint64_t*)ptr;
+  rComm->flagFlushDmabufFd = -1;
+  for (int q = 0; q < rComm->base.nqps; q++)
+    __atomic_store_n(rComm->flagFlushGpuMem + q * (NCCL_GDR_FLUSH_FLAG_STRIDE / sizeof(uint64_t)), 0, __ATOMIC_RELAXED);
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+  ncclResult_t regRes = ncclSystemError;
+  if (useDmaBuf) {
+    uint64_t exportOffset = 0;
+    void* alignedPtr = nullptr;
+    size_t alignedSize = 0;
+    get_aligned_ptr_and_size(ptr, GPU_PAGE_SIZE, &alignedPtr, &alignedSize);
+    if (hsa_amd_portable_export_dmabuf(alignedPtr, alignedSize, &rComm->flagFlushDmabufFd, &exportOffset) ==
+          HSA_STATUS_SUCCESS &&
+        rComm->flagFlushDmabufFd >= 0) {
+      regRes = wrap_ibv_reg_dmabuf_mr(&rComm->flagFlushMr, rComm->devs[0].base.pd, exportOffset, GPU_PAGE_SIZE,
+                                      (uint64_t)ptr, rComm->flagFlushDmabufFd,
+                                      IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+    }
+  } else {
+    regRes = wrap_ibv_reg_mr(&rComm->flagFlushMr, rComm->devs[0].base.pd, ptr, GPU_PAGE_SIZE,
+                             IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+  }
+  if (regRes != ncclSuccess) {
+    INFO(NCCL_NET, "NET/IB: GDR flush flag %s registration failed, using RDMA read flush",
+         useDmaBuf ? "dma-buf" : "peermem");
+    rComm->flagFlushMr = nullptr;
+    NCCLCHECK(ncclIbFreeFlagFlush(rComm));
+    return ncclSuccess;
+  }
+  rComm->flagFlush = 1;
+  rComm->flagFlushHint = 0;
+  rComm->flagFlushLastDesc = 0;
+  meta->flagFlushAddr = (uint64_t)ptr;
+  meta->flagFlushRkey = rComm->flagFlushMr->rkey;
+  INFO(NCCL_NET, "NET/IB: GDR flush flag enabled via %s (flag %p rkey 0x%x)", useDmaBuf ? "dma-buf" : "peermem", ptr,
+       meta->flagFlushRkey);
+#else
+  (void)rComm;
+  (void)meta;
+  (void)useDmaBuf;
+#endif
   return ncclSuccess;
 }
 
@@ -1545,7 +1744,7 @@ ib_recv:
 
   /* copy back the received info */
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
-  rComm->base.nqps = ncclIbCalculateNqps(remMeta.isP2p, rComm->base.vProps.ndevs, remMeta.ndevs, __func__);
+  rComm->base.nqps = rcclIbSelectNqps(nQpsPerDev, remMeta.isP2p, rComm->base.vProps.ndevs, remMeta.ndevs, __func__);
 
   // Subnet-aware device selection: use the remote sender's GIDs to find a local
   // NIC on the same subnet. Override lComm->dev and update vProps if a
@@ -1587,7 +1786,7 @@ ib_recv:
   // of a receive request) per QP, in the worst case.
   // +1 reserves space for one in-flight speed update RDMA write completion.
   int cqSize;
-  cqSize = 3 * NET_IB_MAX_REQUESTS * ncclParamIbQpsPerConn() +
+  cqSize = 3 * NET_IB_MAX_REQUESTS * rcclIbCqQpsPerDev(nQpsPerDev) +
            ((ncclParamIbEventBasedLb() && ncclParamIbEventBasedLbRemote()) ? 1 : 0);
   for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
     rCommDev = rComm->devs + i;
@@ -1816,6 +2015,25 @@ ib_recv:
               close(rCommDev->gpuFlush.dmabuf_fd);
               rCommDev->gpuFlush.dmabuf_fd = -1;
             }
+          } else if (peermemAvailable) {
+            // Registered without IBV_ACCESS_RELAXED_ORDERING so the flush write to it is strictly ordered.
+            if (wrap_ibv_reg_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, rCommDev->gpuFlush.gpuFlushGpuMem,
+                                sizeof(int),
+                                IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ) ==
+                ncclSuccess) {
+              gpuFlushRegistered = true;
+              std::call_once(gpuFlushRegLogOnce[rCommDev->base.ibDevN], [&] {
+                INFO(NCCL_INIT | NCCL_NET, "NET/IB: GDR flush scratchpad registered via peermem on device %d (%s)",
+                     rCommDev->base.ibDevN, ibDev->devName);
+              });
+            }
+          }
+          if (!gpuFlushRegistered) {
+            std::call_once(gpuFlushRegWarnOnce[rCommDev->base.ibDevN], [&] {
+              WARN("NET/IB: GDR flush scratchpad registration failed on device %d (%s); flush falls back to "
+                   "reading the receive buffer, which does not fence relaxed-ordering writes",
+                   rCommDev->base.ibDevN, ibDev->devName);
+            });
           }
         }
 #endif
@@ -1838,6 +2056,15 @@ ib_recv:
     meta.devs[i].currSpeed =
       COMPILER_ATOMIC_LOAD(&ncclIbDevs[rCommDev->base.ibDevN].currSpeed, std::memory_order_relaxed);
     rComm->lastSentSpeeds[i] = (uint16_t)(meta.devs[i].currSpeed / 1000);
+  }
+  // The flag WR carries devs[0]'s keys, so both sides must use a single NIC.
+  // Check vProps after subnet-aware routing, which can replace vProps with a
+  // fused vNIC while leaving nDataQps at its pre-fusion value.
+  if (lComm->gdrFlushFlag && rComm->flushEnabled && rComm->base.vProps.ndevs == 1 && remMeta.ndevs == 1) {
+    int nQpsPerRequest = 0;
+    NCCLCHECKGOTO(ncclIbCommBaseGetNqpsPerRequest(&rComm->base, &nQpsPerRequest), ret, fail);
+    if (nQpsPerRequest <= NCCL_GDR_FLUSH_MAX_WAIT_QPS)
+      NCCLCHECKGOTO(ncclIbSetupFlagFlush(rComm, &meta, useDmaBuf), ret, fail);
   }
   meta.addr = (uint64_t)rComm->cmplsRecords;
   meta.sl = remMeta.sl;
@@ -1879,12 +2106,13 @@ exit:
   lComm->stage = NULL;
   return ret;
 fail:
+  if (rComm) (void)ncclIbFreeFlagFlush(rComm);
   free(rComm);
   goto exit;
 }
 
 ncclResult_t ncclIbAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_t** recvDevComm) {
-  return ncclIbAcceptImpl(listenComm, recvComm, recvDevComm, ncclParamIbQpsPerConn());
+  return ncclIbAcceptImpl(listenComm, recvComm, recvDevComm, /*nQpsPerDev*/ 0);
 }
 
 ncclResult_t ncclIbCloseSend(void* sendComm) {
@@ -1912,6 +2140,7 @@ ncclResult_t ncclIbCloseSend(void* sendComm) {
       if (commDev->ctsFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->ctsFifoMr));
       if (commDev->cmplsRecordsMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->cmplsRecordsMr));
       if (commDev->putSignalScratchpadMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->putSignalScratchpadMr));
+      if (commDev->flagFlushSrcMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->flagFlushSrcMr));
       if (comm->base.resiliency) {
         NCCLCHECK(ncclIbResiliencyDevDestroy(comm->base.resiliency, i));
       }
@@ -1939,6 +2168,7 @@ ncclResult_t ncclIbCloseRecv(void* recvComm) {
       NCCLCHECK(ncclIbResiliencyClose(comm->base.resiliency));
     }
 
+    NCCLCHECK(ncclIbFreeFlagFlush(comm));
     for (int i = 0; i < comm->base.vProps.ndevs; i++) {
       struct ncclIbRecvCommDev* commDev = comm->devs + i;
       if (comm->flushEnabled) {

@@ -3,7 +3,7 @@
 ## The University of Illinois/NCSA
 ## Open Source License (NCSA)
 ##
-## Copyright (c) 2014-2021, Advanced Micro Devices, Inc. All rights reserved.
+## Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 ##
 ## Developed by:
 ##
@@ -105,7 +105,7 @@ find_path(AMDCUID_INCLUDE_DIR
   PATHS ${AMDCUID_ROOT}/include
   NO_DEFAULT_PATH
 )
-if (AMDCUID_LIB AND AMDCUID_INCLUDE_DIR) 
+if (AMDCUID_LIB AND AMDCUID_INCLUDE_DIR)
   message(STATUS "Found AMDCUID lib: ${AMDCUID_LIB}")
   message(STATUS "Found AMDCUID header: ${AMDCUID_INCLUDE_DIR}")
   set(AMDCUID_FOUND TRUE)
@@ -259,7 +259,8 @@ set ( SRCS core/driver/driver.cpp
            libamdhsacode/amd_hsa_code_util.cpp
            libamdhsacode/amd_hsa_locks.cpp
            libamdhsacode/amd_options.cpp
-           libamdhsacode/amd_hsa_code.cpp)
+           libamdhsacode/amd_hsa_code.cpp
+           core/runtime/amd_aie_code.cpp)
 
 if(UNIX)
   set(SRC_OS core/util/lnx/os_linux.cpp
@@ -267,7 +268,8 @@ if(UNIX)
 	     libamdhsacode/lnx/amd_core_dump.cpp)
   set(SRC_XDNA core/driver/xdna/amd_xdna_driver.cpp
                core/runtime/amd_aie_agent.cpp
-               core/runtime/amd_aie_aql_queue.cpp)
+               core/runtime/amd_aie_aql_queue.cpp
+               core/runtime/amd_aie_elf.cpp)
 else()
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE NOMINMAX)
   set(SRC_OS core/util/win/os_win.cpp

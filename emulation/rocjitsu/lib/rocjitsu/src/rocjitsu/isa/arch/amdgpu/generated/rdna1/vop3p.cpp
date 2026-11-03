@@ -648,6 +648,12 @@ VFmaMixF32Vop3p::VFmaMixF32Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_register_byte_mask(
+      src0.decoded_vgpr() && (inst_.op_sel_hi & 1) ? ((inst_.op_sel & 1) ? 0xc : 0x3) : 0xf);
+  src1.set_register_byte_mask(
+      src1.decoded_vgpr() && (inst_.op_sel_hi & 2) ? ((inst_.op_sel & 2) ? 0xc : 0x3) : 0xf);
+  src2.set_register_byte_mask(
+      src2.decoded_vgpr() && (inst_.op_sel_hi_2) ? ((inst_.op_sel & 4) ? 0xc : 0x3) : 0xf);
 }
 
 namespace detail {
@@ -687,6 +693,13 @@ VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_register_byte_mask(
+      src0.decoded_vgpr() && (inst_.op_sel_hi & 1) ? ((inst_.op_sel & 1) ? 0xc : 0x3) : 0xf);
+  src1.set_register_byte_mask(
+      src1.decoded_vgpr() && (inst_.op_sel_hi & 2) ? ((inst_.op_sel & 2) ? 0xc : 0x3) : 0xf);
+  src2.set_register_byte_mask(
+      src2.decoded_vgpr() && (inst_.op_sel_hi_2) ? ((inst_.op_sel & 4) ? 0xc : 0x3) : 0xf);
+  vdst.set_register_byte_mask(0x3);
 }
 
 namespace detail {
@@ -732,6 +745,13 @@ VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_register_byte_mask(
+      src0.decoded_vgpr() && (inst_.op_sel_hi & 1) ? ((inst_.op_sel & 1) ? 0xc : 0x3) : 0xf);
+  src1.set_register_byte_mask(
+      src1.decoded_vgpr() && (inst_.op_sel_hi & 2) ? ((inst_.op_sel & 2) ? 0xc : 0x3) : 0xf);
+  src2.set_register_byte_mask(
+      src2.decoded_vgpr() && (inst_.op_sel_hi_2) ? ((inst_.op_sel & 4) ? 0xc : 0x3) : 0xf);
+  vdst.set_register_byte_mask(0xc);
 }
 
 namespace detail {

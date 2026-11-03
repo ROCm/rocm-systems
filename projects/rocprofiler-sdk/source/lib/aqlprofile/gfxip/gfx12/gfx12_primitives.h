@@ -631,6 +631,7 @@ public:
     {
         uint32_t sq_thread_trace_token_mask{0};
         sq_thread_trace_token_mask =
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, EXCLUDE_BARRIER_WAIT, 1) |
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_DETAIL_ALL, 1) |
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK,
                                REG_INCLUDE,
@@ -740,7 +741,7 @@ public:
     // SPM primitives
     static uint16_t spm_timestamp_muxsel(uint16_t index)
     {
-        return spm_mux_ram_value(index, 31, 1).data;
+        return spm_mux_ram_value(index, 31, 2).data;
     }
 
     enum ESQTT_STATUS_MASK

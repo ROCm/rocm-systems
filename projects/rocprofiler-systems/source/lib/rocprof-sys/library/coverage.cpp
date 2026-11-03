@@ -14,7 +14,6 @@
 #include <fmt/format.h>
 #include <timemory/backends/threading.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
-#include <timemory/utility/popen.hpp>
 
 #include "logger/debug.hpp"
 

@@ -21,6 +21,10 @@
 
 namespace amd::smi {
 
+namespace testing {
+class ScopedProcessorRegistration;
+}  // namespace testing
+
 // Singleton: Only one system in an application
 class AMDSmiSystem {
  public:
@@ -53,6 +57,13 @@ class AMDSmiSystem {
   const auto& get_ai_nic_info() const;
 
  private:
+  friend class testing::ScopedProcessorRegistration;
+
+  // Test seam: registers/unregisters a synthetic processor by its type. Not
+  // exported from libamd_smi.so (no "amdsmi_" prefix); only the friend may call these.
+  void register_processor_for_testing(AMDSmiProcessor* processor);
+  void unregister_processor_for_testing(AMDSmiProcessor* processor);
+
   AMDSmiSystem() : init_flag_(AMDSMI_INIT_AMD_GPUS) {}
 
   /* The GPU socket id is used to identify the socket, so that the XCDs
@@ -65,9 +76,11 @@ class AMDSmiSystem {
   amdsmi_status_t populate_amd_ainic_devices();
   amdsmi_status_t populate_brcm_nic_devices();
   amdsmi_status_t populate_brcm_switch_devices();
+  // Backing storage lookup for register/unregister_processor_for_testing().
+  std::set<AMDSmiProcessor*>& set_for_type_for_testing(amdsmi_processor_type_t type);
   uint64_t init_flag_;
   AMDSmiDrm drm_;
-  smi_nic_ctx_t ainic_ctx_;
+  smi_nic_ctx_t ainic_ctx_ = nullptr;
   std::vector<AMDSmiAINICDevice::AINICInfo> ai_nic_info_;
 #ifdef BRCM_NIC
   AMDSmiNoDrmNIC no_drm_nic_;

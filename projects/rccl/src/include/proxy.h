@@ -333,6 +333,7 @@ struct ncclProxyLocalPeer {
   int tpLocalRank;
   ncclProxyAsyncOp* asyncOps;
   int asyncOpCounter;
+  uint64_t id; // Unique id per accepted peer for connection identification
 };
 
 // Common response header for all proxyOps
@@ -364,6 +365,7 @@ struct ncclProxyState {
   int p2pChunkSize;
   int nChannels;
   int buffSizes[NCCL_NUM_PROTOCOLS];
+  int p2pLl128BuffSize;
   bool allocP2pNetLLBuffers;
   bool dmaBufSupport;
   ncclNet_t* ncclNet;
@@ -433,6 +435,7 @@ struct ncclProxyConnection {
   int send, transport, shared;
   int tpLocalRank, sameProcess;
   struct ncclSocket* sock;
+  uint64_t peerId; // Initialized with peer->id, used for connection checks
   struct ncclTransportComm* tcomm;
   struct ncclProxyArgs* proxyAppend;
   struct ncclProxyArgs** proxyAppendPtr;
@@ -501,11 +504,11 @@ ncclResult_t ncclPollProxyResponse(struct ncclComm* comm, struct ncclProxyConnec
                                    void* opId);
 
 // UDS support
-ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* comm, int rank, void* handle, int* convertedFd);
-ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm* comm, struct ncclProxyConnector* proxyConn, int localFd,
-                                            int* rmtFd);
+ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* comm, int rank, void* handle, ncclIpcFd* convertedFd);
+ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm* comm, struct ncclProxyConnector* proxyConn,
+                                            ncclIpcFd localFd, ncclIpcFd* rmtFd);
 ncclResult_t ncclProxyClientBatchQueryFdBlocking(struct ncclComm* comm, struct ncclProxyConnector* proxyConn,
-                                                 int* localFds, int* rmtFds, int numSegments);
+                                                 ncclIpcFd* localFds, ncclIpcFd* rmtFds, int numSegments);
 
 ncclResult_t ncclProxyStop(struct ncclComm* comm);
 ncclResult_t ncclProxyShmUnlink(struct ncclComm* comm);

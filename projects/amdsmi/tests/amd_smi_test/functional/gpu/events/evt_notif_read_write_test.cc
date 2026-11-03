@@ -4,18 +4,164 @@
 #include "evt_notif_read_write.h"
 
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <cstdint>
+#include <cstdlib>
+#include <ctime>
 #include <iostream>
+#include <map>
+#include <set>
+#include <sstream>
+#include <string>
+#include <vector>
 
+#include "rocm_smi/rocm_smi_utils.h"
 #include "test_common.h"
 #include "test_utils.h"
+
+namespace {
+
+// One reset can yield several records on every device; the read loop drains what does not fit.
+constexpr uint32_t kEventsPerDevice = 20;
+// Only a guard against an endless event stream; the loop normally ends on NO_DATA.
+constexpr int kMaxReads = 100;
+constexpr int kFirstReadTimeoutMs = 10000;
+constexpr int kDrainReadTimeoutMs = 1000;
+
+constexpr uint64_t kNanosPerSecond = 1000000000ull;
+constexpr int kDecimal = 10;
+constexpr int kHexadecimal = 16;
+// Event message fields are separated by two spaces, e.g. "ns: 5  pid: 7".
+constexpr const char* kFieldSeparator = "  ";
+// Stands for a device whose KFD gpu_id could not be read; that failure is reported where it
+// happens.
+constexpr uint64_t kUnknownKfdId = 0;
+
+constexpr uint64_t AllEventsMask() {
+  uint64_t mask = 0;
+  for (uint32_t evt = AMDSMI_EVT_NOTIF_FIRST; evt <= AMDSMI_EVT_NOTIF_LAST; ++evt) {
+    mask |= AMDSMI_EVENT_MASK_FROM_INDEX(evt);
+  }
+  return mask;
+}
+
+// Subscribes to every defined event type; the single place to change if that set changes.
+constexpr uint64_t kAllEventsMask = AllEventsMask();
+
+// amdsmi_reset_gpu() is destructive, so generating reset events is opt-in.
+bool ResetRequested() {
+  const char* env = std::getenv("AMDSMI_TEST_TRIGGER_RESET");
+  return env != nullptr && std::string(env) == "1";
+}
+
+// One reset covers every device in an XGMI hive, so only one device per hive needs one.
+std::vector<uint32_t> ResetTargets(const amdsmi_processor_handle* handles, uint32_t count) {
+  std::vector<uint32_t> targets;
+  std::set<uint64_t> seen_hives;
+  for (uint32_t i = 0; i < count; ++i) {
+    amdsmi_xgmi_info_t info = {};
+    const bool in_hive =
+        amdsmi_get_xgmi_info(handles[i], &info) == AMDSMI_STATUS_SUCCESS && info.xgmi_hive_id != 0;
+    if (!in_hive || seen_hives.insert(info.xgmi_hive_id).second) {
+      targets.push_back(i);
+    }
+  }
+  return targets;
+}
+
+bool Verbose() { return GetTestVerbosity() >= TestBase::VERBOSE_STANDARD; }
+
+// The kernel stamps events with the boot-time clock, which includes time spent suspended.
+uint64_t BootTimeNs() {
+  timespec ts = {};
+  clock_gettime(CLOCK_BOOTTIME, &ts);
+  return static_cast<uint64_t>(ts.tv_sec) * kNanosPerSecond + static_cast<uint64_t>(ts.tv_nsec);
+}
+
+// Reads "<name>: <value>" from a double-space separated event message.
+bool MessageField(const std::string& message, const std::string& name, int base, uint64_t* value) {
+  const std::string key = name + ": ";
+  const std::string separator = kFieldSeparator;
+  for (size_t pos = message.find(key); pos != std::string::npos; pos = message.find(key, pos + 1)) {
+    const bool starts_field =
+        pos == 0 || (pos >= separator.size() &&
+                     message.compare(pos - separator.size(), separator.size(), separator) == 0);
+    if (!starts_field) {
+      continue;  // the tail of a longer label, e.g. "rw: " inside "xrw: "
+    }
+    const char* begin = message.c_str() + pos + key.size();
+    char* end = nullptr;
+    const uint64_t parsed = std::strtoull(begin, &end, base);
+    if (end == begin) {
+      return false;
+    }
+    *value = parsed;
+    return true;
+  }
+  return false;
+}
+
+std::string ProcessName(uint64_t pid) {
+  std::string name;
+  const bool read = amd::smi::ReadSysfsStr("/proc/" + std::to_string(pid) + "/comm", &name) == 0;
+  return read && !name.empty() ? name : "no longer running";
+}
+
+// Checks the fields of one event against sources the parser does not use, and with verbose
+// output prints what each was compared with.
+//   node: the KFD gpu_id of the device, i.e. amdsmi_get_gpu_kfd_info().kfd_id (kUnknownKfdId =
+//         it could not be read, which the caller has already reported as a failure)
+//   ns:   inside the boot-time window of this test
+//   pid:  positive; the process name is shown, and whether it is this test
+void CheckEventFields(const std::string& message, const std::string& gpu, uint64_t kfd_id,
+                      uint64_t window_start_ns, uint64_t window_end_ns) {
+  uint64_t node = 0;
+  uint64_t ns = 0;
+  uint64_t pid = 0;
+  if (MessageField(message, "node", kHexadecimal, &node) && kfd_id != kUnknownKfdId) {
+    EXPECT_EQ(node, kfd_id) << "gpu " << gpu << ": node in \"" << message
+                            << "\" is not the device's KFD gpu_id";
+    if (Verbose()) {
+      std::cout << "\t\t  node " << node << " (0x" << std::hex << node << std::dec << ")"
+                << (node == kfd_id ? " == " : " != ") << "kfd_id of gpu " << gpu << std::endl;
+    }
+  }
+  if (MessageField(message, "ns", kDecimal, &ns)) {
+    EXPECT_GE(ns, window_start_ns)
+        << "gpu " << gpu << ": ns in \"" << message << "\" is before this test started";
+    EXPECT_LE(ns, window_end_ns) << "gpu " << gpu << ": ns in \"" << message
+                                 << "\" is after the read that returned it";
+    if (Verbose()) {
+      const double seconds_after_start =
+          (static_cast<double>(ns) - static_cast<double>(window_start_ns)) /
+          static_cast<double>(kNanosPerSecond);
+      std::cout << "\t\t  ns is " << seconds_after_start << " s after this test started"
+                << std::endl;
+    }
+  }
+  if (MessageField(message, "pid", kDecimal, &pid)) {
+    EXPECT_GT(pid, 0u) << "gpu " << gpu << ": pid in \"" << message << "\"";
+    if (Verbose()) {
+      // The kernel reports the pid in the host's PID namespace, so inside a container this
+      // can name another process or none.
+      std::cout << "\t\t  pid " << pid << ": " << ProcessName(pid)
+                << (pid == static_cast<uint64_t>(getpid()) ? " (this process)" : "") << std::endl;
+    }
+  }
+}
+
+}  // namespace
 
 TestEvtNotifReadWrite::TestEvtNotifReadWrite() : TestBase() {
   set_title("AMDSMI Event Notification Read/Write Test");
   set_description(
       "The Event Notification Read/Write tests verifies that "
-      "we can configure to collect various event types and then read them");
+      "we can configure to collect various event types and then read them, and checks the "
+      "fields of each event. "
+      "Set AMDSMI_TEST_TRIGGER_RESET=1 (as root) to also reset each GPU and require the "
+      "GPU_PRE_RESET and GPU_POST_RESET events. A reset is destructive, so it is off by "
+      "default.");
 }
 
 TestEvtNotifReadWrite::~TestEvtNotifReadWrite(void) {}
@@ -53,11 +199,29 @@ void TestEvtNotifReadWrite::Run(void) {
     return;
   }
 
-  amdsmi_evt_notification_type_t evt_type = AMDSMI_EVT_NOTIF_FIRST;
-  uint64_t mask = AMDSMI_EVENT_MASK_FROM_INDEX(evt_type);
-  while (evt_type <= AMDSMI_EVT_NOTIF_LAST) {
-    mask |= AMDSMI_EVENT_MASK_FROM_INDEX(evt_type);
-    evt_type = static_cast<amdsmi_evt_notification_type_t>(static_cast<uint32_t>(evt_type) + 1);
+  const bool trigger_reset = ResetRequested();
+  const uint64_t window_start_ns = BootTimeNs();
+
+  // KFD gpu_id per device. Every device under test must report one: it is what the events'
+  // node field is checked against. kUnknownKfdId stands for a failure already reported here.
+  std::map<amdsmi_processor_handle, uint64_t> kfd_ids;
+  for (dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
+    amdsmi_kfd_info_t kfd_info = {};
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_kfd_info", "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+    ret = amdsmi_get_gpu_kfd_info(processor_handles_[dv_ind], &kfd_info);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    IF_VERB(STANDARD) {
+      if (ret == AMDSMI_STATUS_SUCCESS) {
+        std::cout << "\tkfd_id=" << kfd_info.kfd_id << " (0x" << std::hex << kfd_info.kfd_id
+                  << std::dec << ")" << std::endl;
+      }
+    }
+    EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS)
+        << "gpu " << dv_ind << ": amdsmi_get_gpu_kfd_info() failed, so the events' node cannot be "
+        << "checked";
+    EXPECT_NE(kfd_info.kfd_id, UINT64_MAX) << "gpu " << dv_ind << ": kfd_id is not supported";
+    const bool known = ret == AMDSMI_STATUS_SUCCESS && kfd_info.kfd_id != UINT64_MAX;
+    kfd_ids[processor_handles_[dv_ind]] = known ? kfd_info.kfd_id : kUnknownKfdId;
   }
 
   for (dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
@@ -69,73 +233,121 @@ void TestEvtNotifReadWrite::Run(void) {
       return;
     }
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
-    DISPLAY_AMDSMI_API("amdsmi_set_gpu_event_notification_mask", "gpu=" + std::to_string(dv_ind),
-                       VERB(STANDARD));
-    ret = amdsmi_set_gpu_event_notification_mask(processor_handles_[dv_ind], mask);
+    std::ostringstream mask_desc;
+    mask_desc << "gpu=" << dv_ind << ", mask=0x" << std::hex << std::uppercase << kAllEventsMask;
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_event_notification_mask", mask_desc.str(), VERB(STANDARD));
+    ret = amdsmi_set_gpu_event_notification_mask(processor_handles_[dv_ind], kAllEventsMask);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
   }
 
-  amdsmi_evt_notification_data_t data[10];
-  uint32_t num_elem = 10;
-  bool read_again = false;
-
-  DISPLAY_AMDSMI_API("amdsmi_get_gpu_event_notification", "", VERB(STANDARD));
-  ret = amdsmi_get_gpu_event_notification(10000, &num_elem, data);
-  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS,
-                        AMDSMI_STATUS_INSUFFICIENT_SIZE, AMDSMI_STATUS_NO_DATA);
-  if (ret == AMDSMI_STATUS_SUCCESS || ret == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
-    EXPECT_LE(num_elem, 10) << "Expected the number of elements found to be <= buffer size (10)";
+  if (trigger_reset) {
+    const std::vector<uint32_t> targets = ResetTargets(processor_handles_, num_monitor_devs());
     IF_VERB(STANDARD) {
-      for (uint32_t i = 0; i < num_elem; ++i) {
+      if (targets.size() < num_monitor_devs()) {
+        std::cout << "\tResetting " << targets.size() << " of " << num_monitor_devs()
+                  << " devices; the others share an XGMI hive and are reset with it." << std::endl;
+      }
+    }
+    for (uint32_t target : targets) {
+      DISPLAY_AMDSMI_API("amdsmi_reset_gpu", "gpu=" + std::to_string(target), VERB(STANDARD));
+      ret = amdsmi_reset_gpu(processor_handles_[target]);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+      ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
+    }
+  } else {
+    IF_VERB(STANDARD) {
+      std::cout << "\tSKIPPED amdsmi_reset_gpu: set AMDSMI_TEST_TRIGGER_RESET=1 to generate "
+                   "reset events."
+                << std::endl;
+    }
+  }
+
+  std::map<amdsmi_processor_handle, std::set<amdsmi_evt_notification_type_t>> seen_events;
+  const uint32_t max_events = kEventsPerDevice * num_monitor_devs();
+  std::vector<amdsmi_evt_notification_data_t> data(max_events);
+  std::map<amdsmi_processor_handle, std::set<uint64_t>> pre_reset_sequences;
+  std::map<amdsmi_processor_handle, std::set<uint64_t>> post_reset_sequences;
+
+  // Event records carry a raw handle; map it back to the gpu index used elsewhere in the output.
+  auto gpu_label = [&](amdsmi_processor_handle handle) {
+    for (uint32_t idx = 0; idx < num_monitor_devs(); ++idx) {
+      if (processor_handles_[idx] == handle) {
+        return std::to_string(idx);
+      }
+    }
+    return std::string("?");
+  };
+
+  // A get can return as soon as the first event lands (e.g. PRE_RESET), so keep reading
+  // until the stream goes quiet.
+  for (int read = 0; read < kMaxReads; ++read) {
+    uint32_t num_elem = max_events;
+    const int timeout_ms = (read == 0) ? kFirstReadTimeoutMs : kDrainReadTimeoutMs;
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_event_notification",
+                       "timeout_ms=" + std::to_string(timeout_ms), VERB(STANDARD));
+    ret = amdsmi_get_gpu_event_notification(timeout_ms, &num_elem, data.data());
+    const uint64_t read_done_ns = BootTimeNs();
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS,
+                          AMDSMI_STATUS_INSUFFICIENT_SIZE, AMDSMI_STATUS_NO_DATA);
+    if (ret == AMDSMI_STATUS_NO_DATA) {
+      IF_VERB(STANDARD) {
+        std::cout << (read == 0 ? "\tNo events were collected."
+                                : "\tNo further events were collected.")
+                  << std::endl;
+      }
+      break;
+    }
+    if (ret != AMDSMI_STATUS_SUCCESS && ret != AMDSMI_STATUS_INSUFFICIENT_SIZE) {
+      // This should always fail. We want to print out the return code.
+      EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS)
+          << "Unexpected return code for  amdsmi_get_gpu_event_notification()";
+      break;
+    }
+    EXPECT_LE(num_elem, max_events)
+        << "Expected the number of elements found to be <= buffer size (" << max_events << ")";
+    for (uint32_t i = 0; i < num_elem && i < max_events; ++i) {
+      seen_events[data[i].processor_handle].insert(data[i].event);
+      IF_VERB(STANDARD) {
         std::cout << "\tdv_handle=" << data[i].processor_handle
-                  << "  Type: " << NameFromEvtNotifType(data[i].event)
-                  << "  Mesg: " << data[i].message << std::endl;
+                  << "[gpu=" << gpu_label(data[i].processor_handle) << "]"
+                  << "\t Type: " << NameFromEvtNotifType(data[i].event)
+                  << "\t Msg:  " << data[i].message << std::endl;
+      }
+      CheckEventFields(data[i].message, gpu_label(data[i].processor_handle),
+                       kfd_ids[data[i].processor_handle], window_start_ns, read_done_ns);
+      uint64_t sequence = 0;
+      if (MessageField(data[i].message, "reset sequence number", kDecimal, &sequence)) {
         if (data[i].event == AMDSMI_EVT_NOTIF_GPU_PRE_RESET) {
-          read_again = true;
+          pre_reset_sequences[data[i].processor_handle].insert(sequence);
+        } else if (data[i].event == AMDSMI_EVT_NOTIF_GPU_POST_RESET) {
+          post_reset_sequences[data[i].processor_handle].insert(sequence);
         }
       }
     }
     IF_VERB(STANDARD) {
       if (ret == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
-        std::cout << "\t\tBuffer size is 10, but more than 10 events are available." << std::endl;
+        std::cout << "\t\tBuffer size is " << max_events << ", but more events are available."
+                  << std::endl;
       }
     }
-  } else if (ret == AMDSMI_STATUS_NO_DATA) {
-    IF_VERB(STANDARD) { std::cout << "\tNo events were collected." << std::endl; }
-  } else {
-    // This should always fail. We want to print out the return code.
-    EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS)
-        << "Unexpected return code for  amdsmi_get_gpu_event_notification()";
   }
 
-  // In case GPU Pre reset event was collected in the previous read,
-  // read again to get the GPU Post reset event.
-  if (read_again) {
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_event_notification", "", VERB(STANDARD));
-    ret = amdsmi_get_gpu_event_notification(10000, &num_elem, data);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS,
-                          AMDSMI_STATUS_INSUFFICIENT_SIZE, AMDSMI_STATUS_NO_DATA);
-    if (ret == AMDSMI_STATUS_SUCCESS || ret == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
-      EXPECT_LE(num_elem, 10) << "Expected the number of elements found to be <= buffer size (10)";
-      IF_VERB(STANDARD) {
-        for (uint32_t i = 0; i < num_elem; ++i) {
-          std::cout << "\tdv_handle=" << data[i].processor_handle
-                    << "  Type: " << NameFromEvtNotifType(data[i].event)
-                    << "  Mesg: " << data[i].message << std::endl;
-        }
-      }
-      IF_VERB(STANDARD) {
-        if (ret == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
-          std::cout << "\t\tBuffer size is 10, but more than 10 events are available." << std::endl;
-        }
-      }
-    } else if (ret == AMDSMI_STATUS_NO_DATA) {
-      IF_VERB(STANDARD) { std::cout << "\tNo further events were collected." << std::endl; }
-    } else {
-      // This should always fail. We want to print out the return code.
-      EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS)
-          << "Unexpected return code for  amdsmi_get_gpu_event_notification()";
+  // PRE and POST of one reset carry the same sequence number.
+  for (dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
+    const auto handle = processor_handles_[dv_ind];
+    EXPECT_EQ(pre_reset_sequences[handle], post_reset_sequences[handle])
+        << "gpu " << dv_ind << ": GPU_PRE_RESET and GPU_POST_RESET sequence numbers differ";
+  }
+
+  // A forced reset must produce both reset events on every device.
+  if (trigger_reset) {
+    for (dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
+      const auto& events = seen_events[processor_handles_[dv_ind]];
+      EXPECT_EQ(events.count(AMDSMI_EVT_NOTIF_GPU_PRE_RESET), 1u)
+          << "gpu " << dv_ind << ": GPU_PRE_RESET not received after amdsmi_reset_gpu";
+      EXPECT_EQ(events.count(AMDSMI_EVT_NOTIF_GPU_POST_RESET), 1u)
+          << "gpu " << dv_ind << ": GPU_POST_RESET not received after amdsmi_reset_gpu";
     }
   }
 

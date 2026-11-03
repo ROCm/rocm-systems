@@ -155,6 +155,13 @@ set_property(
     TARGET @PACKAGE_NAME@::rocprofv3-avail
     PROPERTY IMPORTED_LOCATION ${@PACKAGE_NAME@_ROOT_DIR}/@CMAKE_INSTALL_BINDIR@/rocprofv3-avail)
 
+# the script behind `rocprofv3 --doctor`; installed in libexec, not on PATH
+add_executable(@PACKAGE_NAME@::rocprofv3-doctor IMPORTED)
+set_property(
+    TARGET @PACKAGE_NAME@::rocprofv3-doctor
+    PROPERTY IMPORTED_LOCATION
+             ${@PACKAGE_NAME@_ROOT_DIR}/@CMAKE_INSTALL_LIBEXECDIR@/rocprofiler-sdk/rocprofv3-doctor)
+
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(
     @PACKAGE_NAME@

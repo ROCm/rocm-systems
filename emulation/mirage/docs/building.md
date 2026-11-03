@@ -352,9 +352,12 @@ suite that crashes cannot leave a session behind for the next one to
 trip over.
 
 The release lane of [RocJITsu CI](../../../.github/workflows/rocjitsu-corpus-tests.yml)
-runs `cargo test --locked --workspace --no-fail-fast -- --test-threads=4 --nocapture`
-against that job's freshly built RocJITsu libraries, with missing-emulator
-skips disabled. Changes to either project trigger the workflow. This
+runs `cargo test --locked --workspace --no-fail-fast -- --test-threads="${MIRAGE_TEST_THREADS}" --nocapture`
+under `tini -s` against that job's freshly built RocJITsu libraries, with
+missing-emulator skips disabled. `MIRAGE_TEST_THREADS` is set to four,
+independently of HIP/Vulkan corpus concurrency: Mirage's spawned simulators
+do not inherit the corpus's four-thread execution budget.
+Changes to either project trigger the workflow. This
 includes daemon startup for every builtin agent — the list is taken from
 `mirage agent list`, so a GPU added to RocJITsu is covered without
 editing a test — legacy-agent upgrades, the container and lifecycle

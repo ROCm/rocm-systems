@@ -221,8 +221,6 @@ struct settings_policy
         return _enabled_metrics;
     }
 
-    static bool get_use_perfetto_legacy_metrics() { return get_use_perfetto(); }
-
     /**
      * @brief Get NIC device filter based on ROCPROFSYS_SAMPLING_AINICS setting.
      *
@@ -349,7 +347,7 @@ struct settings_policy
                     {
                         continue;
                     }
-                    if(device_str.empty() || !std::ranges::all_of(device_str, ::isdigit))
+                    if(!utility::string::is_numeric(device_str))
                     {
                         LOG_ERROR("Invalid :device= value in "
                                   "ROCPROFSYS_GPU_PERF_COUNTERS: '{}'",
