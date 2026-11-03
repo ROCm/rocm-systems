@@ -365,7 +365,7 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
                                                       uint64_t target_offset, rj_code_arch_t arch,
                                                       const util::DiagnosticEmitter *error) {
   if (!fixup.preserve_marked_long_transfer) {
-    if (const auto direct_simm =
+    if (const std::optional<int16_t> direct_simm =
             compute_sopp_branch_simm16(fixup.target_window_offset, target_offset)) {
       if (fixup.is_call) {
         util::FailureOr<uint32_t> word =
@@ -703,7 +703,8 @@ build_inverted_conditional_skip(const Instruction &inst, uint32_t translated_wor
                                 const util::DiagnosticEmitter *error = nullptr) {
   if (!conditional_branch_can_invert(inst.mnemonic()))
     return std::nullopt;
-  const auto skip = compute_sopp_branch_simm16(window_offset, window_offset + window_bytes);
+  const std::optional<int16_t> skip =
+      compute_sopp_branch_simm16(window_offset, window_offset + window_bytes);
   if (!skip)
     return std::nullopt;
 
@@ -973,7 +974,7 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
         for (size_t i = 0; i < chain->size(); ++i) {
           const uint64_t next =
               i + 1 < chain->size() ? (*chain)[i + 1] : static_cast<uint64_t>(*target_target);
-          const auto simm = compute_sopp_branch_simm16((*chain)[i], next);
+          const std::optional<int16_t> simm = compute_sopp_branch_simm16((*chain)[i], next);
           if (!simm || !text_contains_range(text, (*chain)[i], sizeof(uint32_t))) {
             return relocation_error(fixup.source_inst_offset,
                                     "direct branch island patch points outside translated .text");

@@ -279,7 +279,8 @@ util::Result append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count,
 /// @param arch Target architecture used to initialize inserted words.
 /// @returns Insertions in the original @p text coordinate space, or
 /// std::nullopt without mutation when any request is invalid or padding fails.
-/// @param error Optional diagnostic emitter for padding failures.
+/// @param error Optional borrowed diagnostic emitter for padding failures. Invalid
+/// growth requests fail silently. The emitter and its sink must outlive this call.
 [[nodiscard]] std::optional<std::vector<TextLayoutInsertion>>
 grow_control_flow_windows(std::vector<uint8_t> &text, KernelTextLayout &layout,
                           std::span<const ControlFlowWindowRequirement> requirements,
