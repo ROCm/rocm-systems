@@ -591,11 +591,7 @@ jobs:
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         run: |
-          # Keep the pinned corpus on the compatible pytest/xdist pair.
-          # pytest 9.2 node IDs break loadgroup in pytest-xdist 3.8.
-          uv pip install -r requirements.txt \
-            "pytest>=5.4.1,<9.2" \
-            "pytest-xdist>=1.32.0,<3.9"
+          uv pip install -r requirements.txt
           ROCM_SDK_DEVICE_PACKAGES=()
           for gfx in ${ROCM_SDK_DEVICE_GFX_GROUP}; do
             ROCM_SDK_DEVICE_PACKAGES+=(
