@@ -65,6 +65,18 @@
       "logs_contain": ["--experimental", "--trace-ml-api torch", "--list-operators user"]
     },
     {
+      "id": "tt-user-roctx-no-collection-control",
+      "skill_should_trigger": true,
+      "prompt": "start and stop rocprof-compute counter collection at my ROCTx range UserDefined",
+      "expected_behavior": [
+        "says rocprof-compute does not start, stop, or resume counter collection at a user ROCTx range",
+        "offers --list-operators user or --operator user:PATTERN on an already traced Python profile, or -k/-d"
+      ],
+      "unexpected_behavior": [
+        "claims --user-range, ROCTx, or --trace-ml-api can start or stop counter collection"
+      ]
+    },
+    {
       "id": "tt-non-python-binary",
       "skill_should_trigger": true,
       "prompt": "attribute GPU kernels to functions in my compiled C++ HIP binary",
