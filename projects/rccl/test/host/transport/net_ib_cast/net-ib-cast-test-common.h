@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Shared by the rccl-UnitTestsMicroNetIbCastInit test TUs: param and comm helpers, fake verbs
-// objects whose context ops call back into the test, and the reset of the transport's globals.
+// Shared by net-ib-cast-{capability,common,gdr,gid-inspect,gin,init,multiplane,reg}-test.cc: param and comm
+// helpers, fake verbs objects whose context ops call back into the test, and the reset of the transport's globals.
 #pragma once
 
 #include <gtest/gtest.h>
@@ -37,10 +37,33 @@
 #include "fakes/net_ib_cast_scheduler_fakes.h"
 #include "fakes/signature-drift.h"
 #include "fakes/socket_fakes.h"
+#include "qp_sharing.h"
 
-// Puts every net_ib_cast global back to its load-time value. Defined in
-// net-ib-cast-init-test.cc, the TU that can reach init.cc's file-scope state.
-void NetIbCastResetGlobals();
+extern int64_t IbCastArThreshold;  // p2p.cc
+
+// Puts the net_ib_cast globals init.cc writes back to their load-time values. init.cc's file-scope netRefCount
+// is reset only by NetIbCastResetInitRefCount() (NetIbCastInit.h), in the TUs that compile init.cc; the common
+// and gdr binaries link init.cc as a plain source, so their tests must not drive IbCastInit or IbCastInitDevices.
+inline void NetIbCastResetGlobals() {
+  for (struct ncclIbDev& dev : IbCastDevs) {
+    free(dev.pciPath);
+    free(dev.mrCache.slots);
+    dev.~ncclIbDev();
+    new (&dev) ncclIbDev();
+  }
+  memset(IbCastMergedDevs, 0, sizeof(IbCastMergedDevs));
+  IbCastNDevs = -1;
+  IbCastNMergedDevs = -1;
+  memset(IbCastIfName, 0, sizeof(IbCastIfName));
+  memset(&IbCastIfAddr, 0, sizeof(IbCastIfAddr));
+  IbCastRelaxedOrderingEnabled = 0;
+  IbCastProfilerFunction = nullptr;
+  IbCastAinicRoce = IbCastMultiplaneEnable = IbCastOffloadEnabled = IbCastUseInline = IbCastAinicCtsInlineData = false;
+  IbCastGdrFlushDisable = 0;
+  IbCastArThreshold = 8192;
+  IbCastQpSharingGlobalEnable = false;
+  memset(&castGlobalQpSchedParms, 0, sizeof(castGlobalQpSchedParms));
+}
 
 namespace {
 

@@ -65,7 +65,7 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
+const std::string CONFIG_PATH = test::config_path("gfx950_mi350x.json");
 const std::string CDNA5_CONFIG_PATH = test::config_path("gfx1250_mi455x.json");
 // CDNA3 (GWS-capable, multi-XCD) for the cross-XCD GWS rendezvous regressions.
 const std::string CDNA3_CONFIG_PATH = test::config_path("gfx942_cdna3.json");

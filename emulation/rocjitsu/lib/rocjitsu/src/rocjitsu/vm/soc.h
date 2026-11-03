@@ -79,9 +79,9 @@ public:
 
   uint32_t gpu_id() const { return gpu_id_; }
 
-  /// @brief Add an XCD, or return failure without changes for a null pointer.
-  /// @details Failure diagnostics are discarded when the emitter is omitted.
-  /// Deeper GWS setup and allocation failures can still throw.
+  /// @brief Attach an XCD during topology construction, before its CUs can execute.
+  /// @details A null pointer returns failure without changes. Failure diagnostics
+  /// are discarded when the emitter is omitted.
   util::Result add_xcd(amdgpu::Xcd *xcd, util::DiagnosticEmitter emit_error = {});
   /// @brief Add an IOD, or return failure without changes for a null pointer.
   /// @details Failure diagnostics are discarded when the emitter is omitted.

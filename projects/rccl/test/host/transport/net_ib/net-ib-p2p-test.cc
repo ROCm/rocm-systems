@@ -19,30 +19,12 @@
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
 #include "fakes/socket_fakes.h"
-#include "fakes/transport_net_ib_p2p_fakes.h"
 #include "fakes/transport_net_ib_resiliency_fakes.h"
 #include "fakes/transport_net_ib_wqe_lat_fakes.h"
 #include "transport/net_ib/NetIbGlobals.h"
 #include "transport/net_ib/common.h"
 
-// Keep p2p.cc's generic owner fake available to sibling transport tests while
-// this TU compiles the real implementation under unit-qualified plugin names.
-#define ncclParamIbArThreshold NetIbP2pParamIbArThreshold
-#define ncclIbArThreshold NetIbP2pArThreshold
-#define ncclParamIbReceiverSideMatchingScheme NetIbP2pParamIbReceiverSideMatchingScheme
-#define ncclIbIsend NetIbP2pIsend
-#define ncclIbIrecv NetIbP2pIrecv
-#define ncclIbIflush NetIbP2pIflush
-#define ncclIbTest NetIbP2pTest
 #include NET_IB_P2P_CC_PATH
-#undef ncclIbTest
-#undef ncclIbIflush
-#undef ncclIbIrecv
-#undef ncclIbIsend
-#undef ncclParamIbReceiverSideMatchingScheme
-#undef ncclIbArThreshold
-#undef ncclParamIbArThreshold
-
 namespace {
 
 void InitOneQpBase(ncclIbNetCommBase* base, IbVerbsScene* verbs, bool isSend) {
@@ -115,7 +97,9 @@ struct IrecvArgs {
   IrecvArgs(const IrecvArgs&) = delete;
   IrecvArgs& operator=(const IrecvArgs&) = delete;
 
-  ncclResult_t Post(ncclIbRecvComm* comm) { return NetIbP2pIrecv(comm, 1, data, sizes, tags, handles, nullptr, &request); }
+  ncclResult_t Post(ncclIbRecvComm* comm) {
+    return ncclIbIrecv(comm, 1, data, sizes, tags, handles, nullptr, &request);
+  }
 
   ibv_mr mr{};
   ncclIbMrHandle handle{};
@@ -191,7 +175,6 @@ class NetIbP2pMicrotest : public ::testing::Test {
     NetIbResetGlobals();
     ResetTransportNetIbWqeLatFakes();
     ResetTransportNetIbResiliencyFakes();
-    ResetTransportNetIbP2pFakes();
     ResetSocketFakes();
     ResetNcclFakes();
   }
@@ -446,10 +429,10 @@ TEST_F(NetIbP2pMicrotest, IsendAndIrecv_NotReadyRejectAndClearRequest) {
   ncclIbRecvComm recv{};
   void* request = reinterpret_cast<void*>(0x1);
 
-  EXPECT_EQ(NetIbP2pIsend(&send, nullptr, 0, 0, nullptr, nullptr, &request), ncclInternalError);
+  EXPECT_EQ(ncclIbIsend(&send, nullptr, 0, 0, nullptr, nullptr, &request), ncclInternalError);
   EXPECT_EQ(request, nullptr);
   request = reinterpret_cast<void*>(0x1);
-  EXPECT_EQ(NetIbP2pIrecv(&recv, 0, nullptr, nullptr, nullptr, nullptr, nullptr, &request), ncclInternalError);
+  EXPECT_EQ(ncclIbIrecv(&recv, 0, nullptr, nullptr, nullptr, nullptr, nullptr, &request), ncclInternalError);
   EXPECT_EQ(request, nullptr);
 }
 
@@ -472,7 +455,7 @@ TEST_F(NetIbP2pMicrotest, Irecv_ReceiveCountAboveCapacityIsRejected) {
   }
   void* request = reinterpret_cast<void*>(0x1);
 
-  EXPECT_EQ(NetIbP2pIrecv(&recv.comm, kTooMany, data.data(), sizes.data(), tags.data(), handles.data(), nullptr,
+  EXPECT_EQ(ncclIbIrecv(&recv.comm, kTooMany, data.data(), sizes.data(), tags.data(), handles.data(), nullptr,
                           &request),
             ncclInternalError);
   EXPECT_EQ(request, reinterpret_cast<void*>(0x1));
@@ -488,11 +471,11 @@ TEST_F(NetIbP2pMicrotest, Iflush_DisabledOrAllEmptyInputPostsNothing) {
   void* request = reinterpret_cast<void*>(0x1);
 
   flush.comm.flushEnabled = 0;
-  EXPECT_EQ(NetIbP2pIflush(&flush.comm, 2, data, sizes, handles, &request), ncclSuccess);
+  EXPECT_EQ(ncclIbIflush(&flush.comm, 2, data, sizes, handles, &request), ncclSuccess);
   EXPECT_EQ(request, reinterpret_cast<void*>(0x1));
   flush.comm.flushEnabled = 1;
   sizes[0] = 0;
-  EXPECT_EQ(NetIbP2pIflush(&flush.comm, 2, data, sizes, handles, &request), ncclSuccess);
+  EXPECT_EQ(ncclIbIflush(&flush.comm, 2, data, sizes, handles, &request), ncclSuccess);
   EXPECT_EQ(request, reinterpret_cast<void*>(0x1));
   EXPECT_TRUE(flush.verbs.posted.empty());
 }
@@ -633,7 +616,7 @@ TEST_F(NetIbP2pMicrotest, Isend_MatchedReceivePublishesClampedRequestAndAdvances
   std::array<unsigned char, 64> data{};
   void* request = nullptr;
 
-  ASSERT_EQ(NetIbP2pIsend(&comm, data.data(), data.size(), 7, &handle, nullptr, &request), ncclSuccess);
+  ASSERT_EQ(ncclIbIsend(&comm, data.data(), data.size(), 7, &handle, nullptr, &request), ncclSuccess);
   auto* ibRequest = static_cast<ncclIbRequest*>(request);
   ASSERT_NE(ibRequest, nullptr);
   EXPECT_EQ(ibRequest->type, NCCL_NET_IB_REQ_SEND);
@@ -665,13 +648,13 @@ TEST_F(NetIbP2pMicrotest, Isend_MultiReceiveDefersUntilEveryTagMatchesThenPostsB
   void* firstRequest = nullptr;
   void* secondRequest = nullptr;
 
-  ASSERT_EQ(NetIbP2pIsend(&comm, firstData.data(), firstData.size(), 7, &handle, nullptr, &firstRequest), ncclSuccess);
+  ASSERT_EQ(ncclIbIsend(&comm, firstData.data(), firstData.size(), 7, &handle, nullptr, &firstRequest), ncclSuccess);
   EXPECT_NE(firstRequest, nullptr);
   EXPECT_EQ(comm.sendReqsCnt[0], 1);
   EXPECT_EQ(comm.base.fifoHead, 0u);
   EXPECT_TRUE(verbs.posted.empty());
 
-  ASSERT_EQ(NetIbP2pIsend(&comm, secondData.data(), secondData.size(), 8, &handle, nullptr, &secondRequest),
+  ASSERT_EQ(ncclIbIsend(&comm, secondData.data(), secondData.size(), 8, &handle, nullptr, &secondRequest),
             ncclSuccess);
   EXPECT_NE(secondRequest, nullptr);
   EXPECT_EQ(comm.sendReqsCnt[0], 2);
@@ -698,7 +681,7 @@ TEST_F(NetIbP2pMicrotest, Isend_PostFailureWithEventsReturnsFailedRequestForDrai
   verbs.postSendErr = EIO;
   void* request = nullptr;
 
-  EXPECT_EQ(NetIbP2pIsend(&comm, nullptr, 16, 7, &handle, nullptr, &request), ncclSuccess);
+  EXPECT_EQ(ncclIbIsend(&comm, nullptr, 16, 7, &handle, nullptr, &request), ncclSuccess);
   auto* failed = static_cast<ncclIbRequest*>(request);
   ASSERT_NE(failed, nullptr);
   EXPECT_EQ(failed->type, NCCL_NET_IB_REQ_FAILED);
@@ -711,14 +694,14 @@ TEST_F(NetIbP2pMicrotest, Isend_ReceiveNotPublishedOrTagMismatchReturnsWithoutRe
   comm.base.ready = 1;
   void* request = reinterpret_cast<void*>(0x1);
 
-  EXPECT_EQ(NetIbP2pIsend(&comm, nullptr, 0, 5, nullptr, nullptr, &request), ncclSuccess);
+  EXPECT_EQ(ncclIbIsend(&comm, nullptr, 0, 5, nullptr, nullptr, &request), ncclSuccess);
   EXPECT_EQ(request, nullptr);
 
   comm.ctsFifo[0][0].idx = 1;
   comm.ctsFifo[0][0].nreqs = 1;
   comm.ctsFifo[0][0].tag = 6;
   request = reinterpret_cast<void*>(0x1);
-  EXPECT_EQ(NetIbP2pIsend(&comm, nullptr, 0, 5, nullptr, nullptr, &request), ncclSuccess);
+  EXPECT_EQ(ncclIbIsend(&comm, nullptr, 0, 5, nullptr, nullptr, &request), ncclSuccess);
   EXPECT_EQ(request, nullptr);
 }
 
@@ -766,7 +749,7 @@ TEST_F(NetIbP2pMicrotest, Irecv_MultiReceivePublishesEveryDescriptorInOneNonInli
   std::fill(std::begin(comm.cmplsRecords[0].sizes), std::end(comm.cmplsRecords[0].sizes), -1);
   void* request = nullptr;
 
-  ASSERT_EQ(NetIbP2pIrecv(&comm, 2, data, sizes, tags, handles, nullptr, &request), ncclSuccess);
+  ASSERT_EQ(ncclIbIrecv(&comm, 2, data, sizes, tags, handles, nullptr, &request), ncclSuccess);
   auto* ibRequest = static_cast<ncclIbRequest*>(request);
   ASSERT_NE(ibRequest, nullptr);
   EXPECT_EQ(ibRequest->nreqs, 2);
@@ -820,7 +803,7 @@ TEST_F(NetIbP2pMicrotest, Iflush_FallbackPostsSignaledReadFromLastNonzeroBuffer)
   void* handles[] = {&flush.handle, &flush.handle};
   void* request = nullptr;
 
-  ASSERT_EQ(NetIbP2pIflush(&flush.comm, 2, data, sizes, handles, &request), ncclSuccess);
+  ASSERT_EQ(ncclIbIflush(&flush.comm, 2, data, sizes, handles, &request), ncclSuccess);
   auto* ibRequest = static_cast<ncclIbRequest*>(request);
   ASSERT_NE(ibRequest, nullptr);
   ASSERT_EQ(flush.verbs.posted.size(), 1u);
@@ -838,7 +821,7 @@ TEST_F(NetIbP2pMicrotest, Iflush_GpuScratchPostsWriteBeforeRead) {
   void* handles[] = {&flush.handle};
   void* request = nullptr;
 
-  ASSERT_EQ(NetIbP2pIflush(&flush.comm, 1, data, sizes, handles, &request), ncclSuccess);
+  ASSERT_EQ(ncclIbIflush(&flush.comm, 1, data, sizes, handles, &request), ncclSuccess);
   const auto& posted = flush.verbs.posted;
   ASSERT_EQ(posted.size(), 2u);
   EXPECT_EQ(posted[0].opcode, IBV_WR_RDMA_WRITE);
@@ -859,7 +842,7 @@ TEST_F(NetIbP2pMicrotest, Iflush_RelaxedOrderingFenceOffReadsLastReceiveDespiteS
   void* handles[] = {&flush.handle};
   void* request = nullptr;
 
-  ASSERT_EQ(NetIbP2pIflush(&flush.comm, 1, data, sizes, handles, &request), ncclSuccess);
+  ASSERT_EQ(ncclIbIflush(&flush.comm, 1, data, sizes, handles, &request), ncclSuccess);
   ASSERT_EQ(flush.verbs.posted.size(), 1u);
   EXPECT_EQ(flush.verbs.posted[0].opcode, IBV_WR_RDMA_READ);
   EXPECT_EQ(flush.verbs.posted[0].remoteAddress, 0x8400u);
@@ -874,7 +857,7 @@ TEST_F(NetIbP2pMicrotest, Iflush_FirstPostFailureReleasesRequestAndReturnsError)
   void* handles[] = {&flush.handle};
   void* request = reinterpret_cast<void*>(0x1);
 
-  EXPECT_EQ(NetIbP2pIflush(&flush.comm, 1, data, sizes, handles, &request), ncclSystemError);
+  EXPECT_EQ(ncclIbIflush(&flush.comm, 1, data, sizes, handles, &request), ncclSystemError);
   EXPECT_EQ(request, nullptr);
   EXPECT_EQ(flush.comm.base.reqs[0].type, NCCL_NET_IB_REQ_UNUSED);
   EXPECT_GT(flush.comm.base.stats.fatalErrorCount, 0);
@@ -889,7 +872,7 @@ TEST_F(NetIbP2pMicrotest, DISABLED_Iflush_ReadPostFailurePropagatesError) {
   void* handles[] = {&flush.handle};
   void* request = nullptr;
 
-  EXPECT_EQ(NetIbP2pIflush(&flush.comm, 1, data, sizes, handles, &request), ncclSystemError);
+  EXPECT_EQ(ncclIbIflush(&flush.comm, 1, data, sizes, handles, &request), ncclSystemError);
   EXPECT_EQ(request, nullptr);
   EXPECT_EQ(flush.comm.base.reqs[0].type, NCCL_NET_IB_REQ_UNUSED);
 }
@@ -899,7 +882,7 @@ TEST_F(NetIbP2pMicrotest, Test_NoCompletionsReturnsNotDoneWithoutSpinning) {
   auto& request = flush.PendingFlush();
   int done = -1;
 
-  EXPECT_EQ(NetIbP2pTest(&request, &done, nullptr), ncclSuccess);
+  EXPECT_EQ(ncclIbTest(&request, &done, nullptr), ncclSuccess);
   EXPECT_EQ(done, 0);
   EXPECT_EQ(flush.verbs.polledCqs, std::vector<ibv_cq*>{&flush.verbs.cq});
 }
@@ -911,7 +894,7 @@ TEST_F(NetIbP2pMicrotest, Test_PollFailureMarksRequestConnectionAndDeviceFatal) 
   flush.verbs.pollErr = -1;
   int done = 0;
 
-  EXPECT_EQ(NetIbP2pTest(&request, &done, nullptr), ncclSystemError);
+  EXPECT_EQ(ncclIbTest(&request, &done, nullptr), ncclSystemError);
   EXPECT_EQ(done, 1);
   EXPECT_EQ(request.type, NCCL_NET_IB_REQ_FAILED);
   EXPECT_GT(flush.comm.base.stats.fatalErrorCount, 0);
@@ -924,7 +907,7 @@ TEST_F(NetIbP2pMicrotest, Test_SuccessfulCompletionDrainsAndFinishesRequest) {
   flush.verbs.Complete(NCCL_IB_FLUSH_REQ_WR_ID_OFFSET, IBV_WC_RDMA_READ, 100);
   int done = 0;
 
-  EXPECT_EQ(NetIbP2pTest(&request, &done, nullptr), ncclSuccess);
+  EXPECT_EQ(ncclIbTest(&request, &done, nullptr), ncclSuccess);
   EXPECT_EQ(done, 1);
   EXPECT_EQ(request.type, NCCL_NET_IB_REQ_UNUSED);
 }
@@ -936,7 +919,7 @@ TEST_F(NetIbP2pMicrotest, Test_ErrorCompletionWithoutResiliencyReturnsRemoteErro
   flush.verbs.Complete(NCCL_IB_FLUSH_REQ_WR_ID_OFFSET, IBV_WC_RDMA_READ, 100, IBV_WC_REM_ACCESS_ERR);
   int done = 0;
 
-  EXPECT_EQ(NetIbP2pTest(&request, &done, nullptr), ncclRemoteError);
+  EXPECT_EQ(ncclIbTest(&request, &done, nullptr), ncclRemoteError);
   EXPECT_EQ(done, 0);
 }
 

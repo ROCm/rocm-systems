@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/soc.h"
+#include "util/result.h"
 
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 
@@ -9,6 +10,7 @@
 #include "simdojo/sim/topology.h"
 
 #include <algorithm>
+#include <cassert>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -72,14 +74,18 @@ util::Result SoC::add_xcd(amdgpu::Xcd *xcd, util::DiagnosticEmitter emit_error) 
   // GWS is device-global: share one store across every XCD so a dispatch that
   // fans out across XCDs still rendezvouses (see GwsDevice). Supersedes the XCD's
   // standalone default store. The XCD's CUs are already attached by this point.
-  xcd->adopt_gws_store(gws_device_);
+  [[maybe_unused]] const util::Result wired = xcd->adopt_gws_store(gws_device_);
+  assert(wired.succeeded() && "XCDs must accept the SoC's GWS store before execution");
   xcds_.push_back(xcd);
   return util::Result::success();
 }
 
 void SoC::wire_gws_to_xcds() {
-  for (amdgpu::Xcd *xcd : xcds_)
-    xcd->adopt_gws_store(gws_device_);
+  // Only the full constructor calls this helper, before any CU can execute.
+  for (amdgpu::Xcd *xcd : xcds_) {
+    [[maybe_unused]] const util::Result wired = xcd->adopt_gws_store(gws_device_);
+    assert(wired.succeeded() && "XCDs must accept the SoC's GWS store before execution");
+  }
 }
 
 util::Result SoC::add_iod(amdgpu::Iod *iod, util::DiagnosticEmitter emit_error) {

@@ -12,7 +12,7 @@
 #include <cstring>
 #include <string>
 
-#include "../common/LogCapture.hpp"
+#include "../../../common/LogCapture.hpp"
 #include "net-ib-cast-test-common.h"
 
 #include NET_IB_CAST_CAPABILITY_CC_PATH
