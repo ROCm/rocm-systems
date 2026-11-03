@@ -10,6 +10,14 @@ either does it while the program runs or writes a new instrumented binary. For t
 full, current flag list run `rocprof-sys-instrument --help` (use
 `--help | grep -A3 -- --<flag>` for one flag).
 
+## How to answer
+
+Keep answers short: under about 1200 characters unless the user asks for more.
+Lead with the direct answer and the command, then add only the caveats from this
+skill that apply to the question (for example: binary rewrite skips shared libraries,
+`-MR` ignores `-R`, `-l` pairs with a lower `-i`, how to list modules with
+`--print-available`). Do not add alternatives or background nobody asked for.
+
 ## Prerequisites
 
 - `rocprof-sys-instrument` and `rocprof-sys-run` on `PATH`; if not, run
