@@ -1933,15 +1933,15 @@ DBT guest configs select the guest and host targets and execution backend.</p>
 <td>Single CDNA3 GPU (daemon/KFD mode)</td>
 </tr>
 <tr>
-<td><code>gfx950_mi355x.json</code></td>
+<td><code>gfx950_mi350x.json</code></td>
 <td>Single CDNA4 GPU (standalone simulation)</td>
 </tr>
 <tr>
-<td><code>gfx950_mi355x_kmd.json</code></td>
+<td><code>gfx950_mi350x_kmd.json</code></td>
 <td>Single CDNA4 GPU (daemon/KFD mode)</td>
 </tr>
 <tr>
-<td><code>gfx950_mi355x_kmd_2gpu.json</code></td>
+<td><code>gfx950_mi350x_kmd_2gpu.json</code></td>
 <td>Two CDNA4 GPUs (multi-GPU daemon mode)</td>
 </tr>
 <tr>
@@ -1974,6 +1974,12 @@ DBT guest configs select the guest and host targets and execution backend.</p>
 </tr>
 </tbody>
 </table>
+<p><code>gfx950_mi355x.json</code>, <code>gfx950_mi355x_kmd.json</code> and <code>gfx950_mi355x_kmd_2gpu.json</code>
+are deprecated copies of the <code>gfx950_mi350x*</code> configs. Despite their names, they
+describe an MI350X (PCI device ID <code>0x75a0</code>). They remain only so that existing
+callers keep working; use the <code>gfx950_mi350x*</code> names instead. The
+<code>gfx950_mi355x*</code> configs will later describe an MI355X (PCI device ID <code>0x75a3</code>);
+see <a href="https://github.com/ROCm/rocm-systems/issues/14644">#14644</a>.</p>
 <h3 id="pcivfio-guest-compatibility">PCI/VFIO guest compatibility<a class="headerlink" href="#pcivfio-guest-compatibility" title="Permanent link">&para;</a></h3>
 <p>The gfx1250 PCI profile intentionally advertises no UVD, VCN, or JPEG hardware.
 Compute-only guests therefore require an AMDGPU kernel containing commit
@@ -2165,7 +2171,8 @@ across all SoCs. Partition assignment follows one global XCD ordering across
 the SoCs and is deliberately locality-agnostic. For example, two 8-XCD GPUs
 permit up to 16 partitions, while <code>num_threads: 4</code> assigns XCDs from both GPUs
 to each partition.</p>
-<p><code>gfx950_mi355x_kmd_2gpu.json</code> and <code>gfx1250_mi455x_kmd_4gpu.json</code> are the
+<p><code>gfx950_mi350x_kmd_2gpu.json</code> (with its deprecated copy
+<code>gfx950_mi355x_kmd_2gpu.json</code>) and <code>gfx1250_mi455x_kmd_4gpu.json</code> are the
 shipped configs that still pin <code>num_threads: 1</code>. Any multi-partition setting on
 the 2-GPU config hangs RCCL collectives (<code>AllReduce</code>, <code>Broadcast</code>, <code>AllGather</code>,
 <code>ReduceScatter</code>) with the engine workers spinning and the simulation making no
@@ -2261,7 +2268,7 @@ at budget 48, selecting 8/33/8. Larger hosts retain those allocations.
 CDNA3 stops at 8/17/0.
 A budget of 12 selects the eight-thread row.</p>
 <p>Print allocations for any target without constructing a simulated GPU:</p>
-<div class="highlight"><pre><span></span><code>rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi355x.json<span class="w"> </span>--thread-budget-table
+<div class="highlight"><pre><span></span><code>rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi350x.json<span class="w"> </span>--thread-budget-table
 </code></pre></div>
 <p>The configured row reflects the file's budget and current affinity. Remaining
 rows show explicit budget ceilings while retaining the file's knob overrides.
@@ -2488,7 +2495,7 @@ checkpoints without shader-array geometry keep CU_ID unsupported.</p>
 location IDs. Each GPU gets its own command processor, memory, and
 cache hierarchy. The daemon manages all GPUs and routes KFD ioctls
 to the correct device based on <code>gpu_id</code>.</p>
-<p><code>configs/gfx950_mi355x_kmd_2gpu.json</code> is the default multi-GPU
+<p><code>configs/gfx950_mi350x_kmd_2gpu.json</code> is the default multi-GPU
 configuration for RCCL tests. <code>configs/gfx1250_mi455x_kmd_4gpu.json</code>
 provides a four-GPU daemon topology for explicit multi-GPU runs.
 When the selected ROCm compiler parses <code>gfx1250</code>, its HIP runtime advertises

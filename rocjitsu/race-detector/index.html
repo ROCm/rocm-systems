@@ -1930,7 +1930,7 @@ a barrier. The reads race with the writes.</p>
 </code></pre></div>
 <p>Compile it with <code>hipcc</code> or <code>amdclang++</code>. The <code>--offload-arch</code> must match the
 emulated GPU, which depends on the config file you pass to rocjitsu (e.g.
-<code>gfx950_mi355x.json</code> emulates gfx950). If using <code>amdclang++</code>, pass <code>-O1</code> or
+<code>gfx950_mi350x.json</code> emulates gfx950). If using <code>amdclang++</code>, pass <code>-O1</code> or
 higher — the emulator does not currently support unoptimized (<code>-O0</code>) GPU code
 objects. <code>hipcc</code> defaults to <code>-O3</code> so this isn't an issue there.</p>
 <div class="highlight"><pre><span></span><code>hipcc<span class="w"> </span>-o<span class="w"> </span>/tmp/race_example<span class="w"> </span>race_example.hip<span class="w"> </span>--offload-arch<span class="o">=</span>gfx950

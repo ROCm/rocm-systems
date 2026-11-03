@@ -1818,8 +1818,8 @@ retaining matrix overlap; they are not universal throughput optima.</p>
 Two- and four-GPU presets keep <strong>1/1/0</strong> for RCCL. Mirage embeds these native
 tables in its rocjitsu backend and exposes the helper option alongside the
 engine, dispatch and total-budget options.</p>
-<div class="highlight"><pre><span></span><code>rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi355x.json<span class="w"> </span>--thread-budget-table
-rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi355x.json<span class="w"> </span>--cpu-thread-budget<span class="w"> </span><span class="m">64</span><span class="w"> </span>--thread-budget-table
+<div class="highlight"><pre><span></span><code>rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi350x.json<span class="w"> </span>--thread-budget-table
+rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi350x.json<span class="w"> </span>--cpu-thread-budget<span class="w"> </span><span class="m">64</span><span class="w"> </span>--thread-budget-table
 </code></pre></div>
 <h2 id="execution-and-ownership">Execution and ownership<a class="headerlink" href="#execution-and-ownership" title="Permanent link">&para;</a></h2>
 <p>Each issue window has a bounded queue and a 512-register dependency map:

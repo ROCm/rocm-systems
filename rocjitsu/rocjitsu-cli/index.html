@@ -2544,16 +2544,16 @@ receiving real GPU descriptors over a Unix socket.</p>
 </table>
 <h3 id="usage-examples">Usage Examples<a class="headerlink" href="#usage-examples" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># Local mode: in-process simulation</span>
-rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi355x_kmd.json<span class="w"> </span>--<span class="w"> </span>./app
+rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi350x_kmd.json<span class="w"> </span>--<span class="w"> </span>./app
 
 <span class="c1"># Daemon mode: fork daemon + launch app</span>
-rocjitsu<span class="w"> </span>--daemon<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi355x_kmd.json<span class="w"> </span>--<span class="w"> </span>./app<span class="w"> </span>args...
+rocjitsu<span class="w"> </span>--daemon<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi350x_kmd.json<span class="w"> </span>--<span class="w"> </span>./app<span class="w"> </span>args...
 
 <span class="c1"># Daemon-only: run server (no app launched)</span>
-rocjitsu<span class="w"> </span>--daemon<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi355x_kmd.json
+rocjitsu<span class="w"> </span>--daemon<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi350x_kmd.json
 
 <span class="c1"># Attach to running daemon</span>
-rocjitsu<span class="w"> </span>--attach<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi355x_kmd.json<span class="w"> </span>--<span class="w"> </span>./app
+rocjitsu<span class="w"> </span>--attach<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi350x_kmd.json<span class="w"> </span>--<span class="w"> </span>./app
 
 <span class="c1"># Serve the gfx1250 PCI function to a VMM</span>
 rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx1250_mi455x.json<span class="w"> </span><span class="se">\</span>

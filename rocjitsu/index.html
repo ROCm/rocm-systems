@@ -2033,10 +2033,10 @@ a family, run the dedicated executable with a GoogleTest filter:</p>
 </code></pre></div>
 <h2 id="running-hip-workloads">Running HIP workloads<a class="headerlink" href="#running-hip-workloads" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="c1"># Local mode (in-process simulation)</span>
-rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi355x_kmd.json<span class="w"> </span>--<span class="w"> </span>./my_hip_app
+rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi350x_kmd.json<span class="w"> </span>--<span class="w"> </span>./my_hip_app
 
 <span class="c1"># Daemon mode (separate daemon process)</span>
-rocjitsu<span class="w"> </span>--daemon<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi355x_kmd.json<span class="w"> </span>--<span class="w"> </span>./my_hip_app
+rocjitsu<span class="w"> </span>--daemon<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi350x_kmd.json<span class="w"> </span>--<span class="w"> </span>./my_hip_app
 </code></pre></div>
 <p>See <a href="rocjitsu-cli/">docs/rocjitsu-cli.md</a> for all CLI modes.</p>
 <h2 id="vgpr-observation-contract">VGPR observation contract<a class="headerlink" href="#vgpr-observation-contract" title="Permanent link">&para;</a></h2>
@@ -2051,7 +2051,7 @@ updates register storage without reporting the same instruction effect again.
 See
 <a href="plugins/">docs/plugins.md</a> for the plugin contract.</p>
 <h2 id="running-pytorch">Running PyTorch<a class="headerlink" href="#running-pytorch" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>rocjitsu<span class="w"> </span>--daemon<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi355x_kmd.json<span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
+<div class="highlight"><pre><span></span><code>rocjitsu<span class="w"> </span>--daemon<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi350x_kmd.json<span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import torch; x = torch.randn(4, 4, device='cuda'); print(x @ x)"</span>
 </code></pre></div>
 <p>See <a href="building/">docs/building.md</a> for container setup with PyTorch.</p>

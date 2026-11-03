@@ -1924,7 +1924,7 @@ ROCm and PyTorch pre-installed:</p>
 <span class="nb">cd</span><span class="w"> </span>/workspace
 cmake<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release
 cmake<span class="w"> </span>--build<span class="w"> </span>build
-rocjitsu<span class="w"> </span>--daemon<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi355x_kmd.json<span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
+rocjitsu<span class="w"> </span>--daemon<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi350x_kmd.json<span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import torch; print(torch.randn(4,4,device='cuda'))"</span>
 </code></pre></div>
 

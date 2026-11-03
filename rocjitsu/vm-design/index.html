@@ -3162,7 +3162,7 @@ convenience wrapper that releases the last reference and tears down the VM.</p>
 <div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;rocjitsu/rocjitsu.h&gt;</span>
 
 <span class="n">rj_vm_t</span><span class="w"> </span><span class="o">*</span><span class="n">vm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">NULL</span><span class="p">;</span>
-<span class="n">rj_vm_create</span><span class="p">(</span><span class="s">"configs/gfx950_mi355x.json"</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">vm</span><span class="p">);</span>
+<span class="n">rj_vm_create</span><span class="p">(</span><span class="s">"configs/gfx950_mi350x.json"</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">vm</span><span class="p">);</span>
 
 <span class="kt">uint64_t</span><span class="w"> </span><span class="n">ticks</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
 <span class="n">rj_vm_run</span><span class="p">(</span><span class="n">vm</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">ticks</span><span class="p">);</span>

@@ -2142,8 +2142,8 @@ Mirage tests exercise generated configurations and the real CLI override path.</
 <div class="highlight"><pre><span></span><code>build/tests/rocjitsu_tests<span class="w"> </span>--gtest_filter<span class="o">=</span>CpuDispatchPoolBenchmark.SparseConcurrentSubmissions
 </code></pre></div>
 <p>Inspect a preset's effective allocations without constructing the simulated GPU:</p>
-<div class="highlight"><pre><span></span><code>build/tools/rocjitsu/rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi355x.json<span class="w"> </span>--thread-budget-table
-build/tools/rocjitsu/rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi355x.json<span class="w"> </span>--cpu-thread-budget<span class="w"> </span><span class="m">64</span><span class="w"> </span>--thread-budget-table
+<div class="highlight"><pre><span></span><code>build/tools/rocjitsu/rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi350x.json<span class="w"> </span>--thread-budget-table
+build/tools/rocjitsu/rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi350x.json<span class="w"> </span>--cpu-thread-budget<span class="w"> </span><span class="m">64</span><span class="w"> </span>--thread-budget-table
 </code></pre></div>
 <p>The <a href="../configuration/#thread-accounting-and-preferred-allocations">configuration reference</a>
 describes the override rules. The tables above record the measured allocations,
