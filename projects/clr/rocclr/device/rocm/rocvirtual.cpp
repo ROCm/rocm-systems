@@ -1096,6 +1096,7 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 // ================================================================================================
 void VirtualGPU::SetGpuQueue(hsa_queue_t* queue, void* metadata_ring_buffer) {
   gpu_queue_ = queue;
+  aql_ordered_publish_state_ = roc_device_.aqlPublishState(queue);
   cached_read_dispatch_id_ = 0;
   // The cached queue-progress state belongs to the previously assigned HW queue. When the HW
   // queue changes (released back to / reacquired from the shared dynamic-queue pool), that state
@@ -1260,6 +1261,37 @@ std::string VirtualGPU::AnalyzeAqlQueue() const {
 }
 
 // ================================================================================================
+// Streams outnumber hardware queues, so several VirtualGPUs end up multiplexed onto one physical
+// AQL ring, and hsa_queue_add_write_index_screlease() reserves a slot and advances the GPU-visible
+// write index in one step. The ring therefore advertises slots whose packets are still being
+// written. Hold the doorbell until every earlier slot has been written so CPF is not sent at a
+// packet that is still in flight. Reservations stay a single atomic add; only the doorbell waits.
+void VirtualGPU::CommitAqlSlots(uint64_t commit_start, uint64_t commit_end, bool ring_doorbell) {
+  assert(commit_end > commit_start);
+  if (aql_ordered_publish_state_ == nullptr) {
+    if (ring_doorbell) {
+      Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, commit_end - 1);
+    }
+    return;
+  }
+
+  // Wait for every earlier slot's doorbell. A read index that reached this submission ends the
+  // wait too: those slots are already consumed, so a slot reserved here by anything other than
+  // CLR cannot stall the streams behind it.
+  while (aql_ordered_publish_state_->DoorbellSlot() < commit_start &&
+         Hsa::queue_load_read_index_relaxed(gpu_queue_) < commit_start) {
+    amd::Os::spinPause();
+  }
+
+  if (ring_doorbell) {
+    Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, commit_end - 1);
+  }
+  // Let the next reservation ring. Skipping the doorbell does not change what this promises:
+  // every slot below commit_end is written, and the next doorbell covers them too.
+  aql_ordered_publish_state_->AdvanceDoorbell(commit_end);
+}
+
+// ================================================================================================
 template <typename AqlPacket>
 bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, uint16_t rest,
                                           bool blocking, bool attach_signal, bool cluster_launch) {
@@ -1362,8 +1394,8 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   bool ring_for_non_profiler_signal = attach_signal && (packet->completion_signal.handle != 0);
   bool ring_doorbell = IS_LINUX || dev().IsPm4Emulation() || blocking ||
                        (skippedDispatches_ >= skip_limit) || ring_for_non_profiler_signal;
+  CommitAqlSlots(index, index + 1, ring_doorbell);
   if (ring_doorbell) {
-    Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
     skippedDispatches_ = 0;
   } else {
     ++skippedDispatches_;
@@ -1651,7 +1683,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
     if (isFirstChunk) {
       packet_store_release(first_loc, firstHeader, firstSetup);
     }
-    Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, startIndex + chunkEnd - 1);
+    CommitAqlSlots(startIndex + chunkStart, startIndex + chunkEnd, true);
 
     chunkStart = chunkEnd;
   }
@@ -1756,7 +1788,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
   metadata_preloader_.Set(&barrier_packet_, packetHeader, index & queueMask);
   packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), packetHeader, 0);
 
-  Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+  CommitAqlSlots(index, index + 1, true);
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
     char buf[32];
     const char* virtual_pipe_prefix = "";
@@ -1840,7 +1872,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   *aql_loc = barrier_value_packet_;
   metadata_preloader_.Set(&barrier_value_packet_, packetHeader, index & queueMask);
   packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), packetHeader, rest);
-  Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+  CommitAqlSlots(index, index + 1, true);
 
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
     char buf[32];

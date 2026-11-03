@@ -274,6 +274,9 @@ release(cstring, HIP_HRR_CAPTURE_OUTPUT, "",                                  \
         "Set to a directory path to enable HRR capture; archive written there") \
 release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
         "Number of consecutive dispatches that may skip the doorbell flush.") \
+release(uint, DEBUG_CLR_ORDER_DOORBELL, 2,                                    \
+        "Order shared AQL ring doorbells by reservation "                     \
+        "(0=never, 1=Intel hosts only, 2=every host (default))")              \
 release(bool, DEBUG_CLR_DISABLE_FALLBACK, false,                              \
         "Disables certain fallback paths")
 

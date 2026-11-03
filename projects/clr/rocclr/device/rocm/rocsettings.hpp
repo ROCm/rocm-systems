@@ -38,7 +38,8 @@ class Settings : public device::Settings {
       uint blocking_blit_ : 1;         //!< Blit ops can be blocking on CPU
       uint queue_pipe_dist_ : 1;       //!< gfx94x queue pipe distribution
       uint ext_dispatch_packet_ : 1;   //!< Uses new ext dispatch packet for all launches
-      uint reserved_ : 18;
+      uint isOrderedDoorbell_ : 1;     //!< Ring shared AQL ring doorbells in slot order
+      uint reserved_ : 17;
     };
     uint value_;
   };

@@ -20,6 +20,39 @@
 
 #include "device/rocm/rocrctx.hpp"
 #include "device/rocm/rocsettings.hpp"
+
+#include <atomic>
+
+namespace amd::roc {
+
+//! Doorbell order for one AQL ring shared by several streams.
+//!
+//! Slots are still reserved through the ring's own write index, so producers own disjoint slots
+//! and keep writing their packets in parallel. Only the doorbell is held back: a producer waits
+//! until the doorbell has been rung for every slot below its own, so the doorbell that sends CPF
+//! into the ring never fires while an earlier packet is still being written.
+struct alignas(64) AqlOrderedPublishState {
+  //! First slot whose doorbell has not been rung. A producer may ring once this reaches its own
+  //! first slot.
+  uint64_t DoorbellSlot() const { return doorbell_slot_.load(std::memory_order_acquire); }
+
+  //! Report every slot below |next_slot| written and rung. Never moves backwards: a write index
+  //! rewound from outside CLR must not leave a reservation waiting behind a slot that is gone.
+  void AdvanceDoorbell(uint64_t next_slot) {
+    uint64_t doorbell_slot = doorbell_slot_.load(std::memory_order_relaxed);
+    while (doorbell_slot < next_slot &&
+           !doorbell_slot_.compare_exchange_weak(doorbell_slot, next_slot,
+                                                 std::memory_order_release,
+                                                 std::memory_order_relaxed)) {
+    }
+  }
+
+ private:
+  alignas(64) std::atomic<uint64_t> doorbell_slot_{0};
+};
+
+}  // namespace amd::roc
+
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rocdefs.hpp"
 #include "device/rocm/rocprintf.hpp"
@@ -576,6 +609,9 @@ class Device : public NullDevice {
       const std::unordered_set<uint64_t>* excluded_ids = nullptr,
       void** metadata_ring_buffer = nullptr);
 
+  //! Doorbell order for a pooled queue, or null when ordering is off or the queue is not pooled.
+  AqlOrderedPublishState* aqlPublishState(hsa_queue_t* queue);
+
   //! Release HSA queue
   void releaseQueue(hsa_queue_t*, const std::vector<uint32_t>& cuMask = {}, bool coop_queue = false,
                     bool managed = false);
@@ -711,6 +747,8 @@ class Device : public NullDevice {
     int refCount;             //! Reference counter. Shows how many time the queue was shared
     bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
     void* metadataRingBuffer_; //! Metadata prefetch ring buffer base
+    //! Doorbell order shared by every VirtualGPU using this physical queue.
+    AqlOrderedPublishState aqlPublishState_;
 
     // Constructor
     QueueInfo() : refCount(0), hasDedicatedQueue_(false), metadataRingBuffer_(nullptr) {}

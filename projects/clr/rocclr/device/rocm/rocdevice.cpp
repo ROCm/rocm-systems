@@ -1722,6 +1722,8 @@ bool Device::populateOCLDeviceConstants() {
           info_.hmmSupported_, info_.hmmCpuMemoryAccessible_, info_.hmmDirectHostAccess_);
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Max SDMA Read Mask: 0x%x, Max SDMA Write Mask: 0x%x",
           maxSdmaReadMask_, maxSdmaWriteMask_);
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Ordered doorbell: %d, Max HW queues: %u",
+          settings().isOrderedDoorbell_, settings().max_hw_queues_);
 
   info_.globalCUMask_ = {};
 
@@ -3392,7 +3394,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
 
   // Add queue to the pool (including dedicated queues)
   amd::ScopedLock l(active_queue_access_);
-  auto result = queuePool_[qIndex].emplace(std::make_pair(queue, QueueInfo()));
+  auto result = queuePool_[qIndex].try_emplace(queue);
   assert(result.second && "QueueInfo already exists");
   auto& qInfo = result.first->second;
   qInfo.refCount = 1;
@@ -3409,6 +3411,23 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     num_queues_[qIndex]++;
   }
   return queue;
+}
+
+// ================================================================================================
+AqlOrderedPublishState* Device::aqlPublishState(hsa_queue_t* queue) {
+  if (queue == nullptr || !settings().isOrderedDoorbell_) {
+    return nullptr;
+  }
+  // Only pooled queues are shared by several VirtualGPUs. CU-masked and cooperative queues are
+  // not pooled, so they ring as soon as their packet is written.
+  amd::ScopedLock l(active_queue_access_);
+  for (auto& pool : queuePool_) {
+    auto it = pool.find(queue);
+    if (it != pool.end()) {
+      return &it->second.aqlPublishState_;
+    }
+  }
+  return nullptr;
 }
 
 // ================================================================================================

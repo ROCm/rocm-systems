@@ -629,6 +629,10 @@ class VirtualGPU : public device::VirtualDevice {
   bool dispatchAqlPacket(hsa_barrier_and_packet_t* packet, uint16_t header, uint16_t rest,
                          bool blocking = true, bool attach_signal = false);
 
+  //! Ring the doorbell for slots [commit_start, commit_end), in reservation order. Every reserved
+  //! slot must be committed: an abandoned reservation stalls every stream sharing the HW queue.
+  void CommitAqlSlots(uint64_t commit_start, uint64_t commit_end, bool ring_doorbell);
+
   //! Fast-path dispatch: pre-built flat contiguous buffer
   bool dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPacketData,
                                   const std::vector<uint32_t>& validFullHeaders,
@@ -794,6 +798,9 @@ class VirtualGPU : public device::VirtualDevice {
   void* last_barrier_hw_event_ = nullptr;
   hsa_agent_t gpu_device_;  //!< Physical device
   hsa_queue_t* gpu_queue_;  //!< Active queue associated with a vgpu
+  //! Doorbell order shared by all VirtualGPUs on this pooled HW queue. Owned by the queue pool,
+  //! which outlives every VirtualGPU bound to the queue.
+  AqlOrderedPublishState* aql_ordered_publish_state_ = nullptr;
   hsa_barrier_and_packet_t barrier_packet_ {};
   hsa_amd_barrier_value_packet_t barrier_value_packet_ {};
 
