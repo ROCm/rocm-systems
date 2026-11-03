@@ -12,33 +12,29 @@
 
 #include "rccl_ptr.h"
 
+// Per-thread 128-bit access for user buffers and other callers that do not
+// execute on every lane of an 8-lane group. The gfx1250 cooperative atomics
+// live in load128Fifo/store128Fifo; using them here would issue the builtin
+// from a partial group (loadRegsBegin and storeRegs skip flag lanes).
 inline __device__ void load128(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
+  rcclB128 u;
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
   u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)ptr, RCCL_SYSTEM_SYNCSCOPE);
+#else
+  u.v = __builtin_nontemporal_load((v4u_gptr)ptr);
+#endif
   v0 = u.u64[0];
   v1 = u.u64[1];
-#else
-  v0 = __builtin_nontemporal_load((u64_gptr)ptr);
-  v1 = __builtin_nontemporal_load((u64_gptr)ptr + 1);
-#endif
 }
 
 inline __device__ void store128(uint64_t* ptr, uint64_t v0, uint64_t v1) {
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
+  rcclB128 u;
   u.u64[0] = v0;
   u.u64[1] = v1;
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   __builtin_amdgcn_global_store_b128((v4u_gptr)ptr, u.v, RCCL_SYSTEM_SYNCSCOPE);
 #else
-  *((u64_gptr)ptr) = v0;
-  *((u64_gptr)ptr + 1) = v1;
+  *((v4u_gptr)ptr) = u.v;
 #endif
 }
 
