@@ -140,12 +140,9 @@ SHARED_FORMULA_IDS = {
     "compute.mfma_flops_mxf8": "compute.mfma_flops_f8",
 }
 # Ids that hold another id's formula on a different arch (id -> that id): one label
-# shows two equations on gfx940 and gfx941 (D8 Kind 3), and the parent arch's equation
-# keeps the id until the metric owners choose one.
-SPLIT_FORMULA_IDS = {
-    "fabric.rd_bw_incl_128b": "fabric.rd_bw",
-    "vl1d.cache_bw_128b": "vl1d.cache_bw",
-}
+# shows two equations on an arch (D8 Kind 3), and the parent arch's equation keeps
+# the id until the metric owners choose one.
+SPLIT_FORMULA_IDS = {}
 # Ids allowed to share a value on an arch although their formulas differ (arch -> id
 # pairs): different quantities whose formulas coincide there.
 SAME_VALUE_IDS = {}
@@ -212,44 +209,21 @@ DISPLAY_VARIANTS = {
         "4.1.11": _ROOFLINE_LDS_BW,
         "11.2.7": _PIPELINE_MFMA_UTIL,
     },
-    "gfx941": {
-        "4.1.10": _ROOFLINE_L2_BW,
+    "gfx942": {
+        "4.1.10": _ROOFLINE_L2_BW_128B,
         "4.1.12": _ROOFLINE_LDS_BW,
         "11.2.7": _PIPELINE_MFMA_UTIL,
+        # TODO(AIPROFCOMP-820): the clamp is deferred (FOLLOWUPS); the other vL1D hit
+        # rate rows have no NOISE_CLAMP.
+        "16.3.5": (
+            "Cache Hit Rate",
+            "vl1d.hit_rate",
+            "100 * SUM(NOISE_CLAMP(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum"
+            " + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
+            "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), TCP_TOTAL_CACHE_ACCESSES_sum)) "
+            "/ SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
+        ),
     },
-}
-# gfx940's roofline arithmetic intensity rows drop the F8 MFMA term and leave a
-# dangling "+", so they do not parse; the library holds the formula with the term.
-_GFX940_AI_NUMERATOR = (
-    "( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 *"
-    " SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32 "
-    "+ SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + "
-    "SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + "
-    "(2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64) )) + "
-    "(SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +"
-    " (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) +"
-    " )"
-)
-DISPLAY_VARIANTS["gfx940"] = {
-    **DISPLAY_VARIANTS["gfx941"],
-    "4.2.1": (
-        "AI L2",
-        "l2.ai",
-        _GFX940_AI_NUMERATOR
-        + " / (64 * SUM((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum"
-        " + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum))) )",
-    ),
-    "4.2.2": (
-        "AI L1",
-        "vl1d.ai",
-        _GFX940_AI_NUMERATOR + " / (64 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum)) )",
-    ),
-    "4.2.3": (
-        "AI LDS",
-        "lds.ai",
-        _GFX940_AI_NUMERATOR + " / SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4"
-        " * $lds_banks_per_cu) )",
-    ),
 }
 # Panel 3000's TA and TD stalls as a percentage of all CU cycles.
 _NORMALIZED_STALL_EQUATION = (
@@ -363,31 +337,9 @@ DISPLAY_VARIANTS["gfx950"] = {
         "/ SUM(End_Timestamp - Start_Timestamp)",
     ),
 }
-DISPLAY_VARIANTS["gfx942"] = {
-    **DISPLAY_VARIANTS["gfx941"],
-    "4.1.10": _ROOFLINE_L2_BW_128B,
-    # TODO(AIPROFCOMP-820): the clamp is deferred (FOLLOWUPS); the other vL1D hit rate
-    # rows have no NOISE_CLAMP.
-    "16.3.5": (
-        "Cache Hit Rate",
-        "vl1d.hit_rate",
-        "100 * SUM(NOISE_CLAMP(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum "
-        "+ TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
-        "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), TCP_TOTAL_CACHE_ACCESSES_sum)) "
-        "/ SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
-    ),
-}
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
 UNIT_VARIANTS = {arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx942")}
-# gfx940 and gfx941 label integer ops in FLOPs.
-_GFX940_UNIT_VARIANTS = {
-    **_CDNA_UNIT_VARIANTS,
-    "11.3.1": ("IOPs (Total)", "(FLOPs + $normUnit)"),
-    "11.3.7": ("INT8 OPs", "(FLOPs + $normUnit)"),
-}
-UNIT_VARIANTS["gfx940"] = _GFX940_UNIT_VARIANTS
-UNIT_VARIANTS["gfx941"] = _GFX940_UNIT_VARIANTS
 UNIT_VARIANTS["gfx950"] = {
     **_CDNA_UNIT_VARIANTS,
     "30.3.6": ("TD - atomic wavefronts", "(Wavefronts + $normUnit)"),

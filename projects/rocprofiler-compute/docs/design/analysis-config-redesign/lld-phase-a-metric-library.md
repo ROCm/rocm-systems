@@ -563,9 +563,7 @@ flowchart TD
 The same holds across archs: a formula has one id on every arch. An arch reuses the id
 that the first arch to show the quantity gave it (gfx950 keeps gfx942's
 `fabric.hbm_rd`), and the validator rejects a formula with two ids. The exceptions are
-listed in `SPLIT_FORMULA_IDS`: on gfx940 and gfx941 one label shows two formulas, so the
-second one has its own id there (`vl1d.cache_bw_128b`), while gfx942 and gfx950 show
-only that formula, as `vl1d.cache_bw`.
+listed in `SPLIT_FORMULA_IDS`.
 
 | Category | Hardware | File | Example IDs |
 |---|---|---|---|
