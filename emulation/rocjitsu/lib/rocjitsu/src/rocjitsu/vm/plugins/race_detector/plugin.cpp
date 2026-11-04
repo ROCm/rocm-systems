@@ -452,8 +452,6 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     if (d.exec_mask == 0)
       return;
     if (d.lds_dst) {
-      if (obligations.empty())
-        return;
       uint32_t perLaneBytes = d.buffer_components
                                   ? 4u * d.destination_vgpr_count()
                                   : d.num_elems * (d.lds_dword_extend ? 4u : d.elem_size);
@@ -470,7 +468,17 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
         ldsAddrs[lane] =
             d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * perLaneBytes;
+        // Check each written lane against pending LDS reads, such as a tensor
+        // store's source or another wave's DS read, as the DS write path does.
+        if (!(validLaneMask & (1ULL << lane)))
+          continue;
+        const auto bytes = detector->ldsBytesInRange(ldsAddrs[lane], perLaneBytes, perLaneBytes);
+        if (bytes != 0)
+          detector->validateWrite(static_cast<int>(ldsAddrs[lane]), waveId, static_cast<int>(lane),
+                                  static_cast<int>(bytes), memoryOrder);
       }
+      if (obligations.empty())
+        return;
       rs->registerLdsEvent(instruction, MemoryEventType::GLOBAL_TO_LDS, {}, validLaneMask,
                            wf.wf_size(), std::span<const uint32_t>(ldsAddrs, wf.wf_size()),
                            perLaneBytes, 0xF, obligations, memoryOrder);

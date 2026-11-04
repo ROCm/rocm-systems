@@ -1546,6 +1546,23 @@ TEST(RaceDetector, TensorDma_LaterWaitNeedsAnotherBarrier) {
   EXPECT_FALSE(b.hasRace());
 }
 
+TEST(RaceDetector, TensorDma_DtlOverwritingPendingStoreSourceRace) {
+  // Direct-to-LDS completes independently of tensor DMA, so overwriting a
+  // pending store's source races until tensorcnt retires the store.
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorStoreFromLds(/*wave=*/0, {{.address = 32, .bytes = 16}});
+  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{36}, /*bytesPerLane=*/4, /*exec=*/1);
+  EXPECT_TRUE(b.hasLdsRace(36));
+}
+
+TEST(RaceDetector, TensorDma_DtlAfterStoreRetiredSafe) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorStoreFromLds(/*wave=*/0, {{.address = 32, .bytes = 16}});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/0);
+  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{36}, /*bytesPerLane=*/4, /*exec=*/1);
+  EXPECT_FALSE(b.hasRace());
+}
+
 TEST(RaceDetector, TensorDma_StoreReadsSameWavePendingDtlRace) {
   // Direct-to-LDS completes on vmcnt, independently of tensor DMA.
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);

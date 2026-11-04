@@ -85,6 +85,11 @@ public:
     constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::VMEM;
     waves_[wave]->prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT);
     ldsAddrs.resize(waveSize_, 0);
+    // Validate each active lane's write against outstanding reads, as the plugin does.
+    for (int lane = 0; lane < waveSize_; ++lane)
+      if (exec & (1ULL << lane))
+        detector_->validateWrite(static_cast<int>(ldsAddrs[lane]), WaveId{wave}, lane, bytesPerLane,
+                                 memoryOrder);
     waves_[wave]->registerLdsEvent(testInstruction(pc_++), MemoryEventType::GLOBAL_TO_LDS,
                                    /*registers=*/{}, exec, waveSize_, ldsAddrs, bytesPerLane,
                                    /*byteMask=*/0xF, amdgpu::WaitCounterType::VMCNT, memoryOrder);

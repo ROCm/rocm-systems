@@ -545,6 +545,28 @@ protected:
   bool ds_read(int wave, uint32_t address) { return ds_access(wave, address, true); }
   bool ds_write(int wave, uint32_t address) { return ds_access(wave, address, false); }
 
+  /// Issue a one-lane Direct-to-LDS write of one dword, as an async load to LDS
+  /// does, and report whether it produced a race.
+  bool dtl_write(int wave, uint32_t address) {
+    waves[wave]->pc += 16;
+    const size_t previous = sink->str().size();
+    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = true;
+    state->lds_dst = true;
+    state->lds_per_lane_addr = true;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = 1;
+    state->lane_mask = 1;
+    state->per_lane_lds_addr[0] = address;
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}});
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave]);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *waves[wave]);
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+
   void wait_tensorcnt(int wave, uint16_t count) {
     execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfcb0000u | count);
   }
@@ -645,6 +667,29 @@ TEST_F(TensorDmaRaceTest, RaceIsReportedAtAByteBothAccessesTouch) {
   const std::string report = sink->str().substr(previous);
   EXPECT_NE(report.find("Race on LDS byte 120 ["), std::string::npos) << report;
   EXPECT_NE(report.find(" reg=120 "), std::string::npos) << report;
+}
+
+// A Direct-to-LDS write is checked against pending LDS reads when it issues.
+TEST_F(TensorDmaRaceTest, DtlOverwritingAPendingStoreSourceRaces) {
+  tensor_store(0, {{.address = 0, .bytes = 16}});
+  EXPECT_TRUE(dtl_write(0, 4));
+}
+
+TEST_F(TensorDmaRaceTest, DtlAfterTensorcntIsSafe) {
+  tensor_store(0, {{.address = 0, .bytes = 16}});
+  wait_tensorcnt(0, 0);
+  EXPECT_FALSE(dtl_write(0, 4));
+}
+
+TEST_F(TensorDmaRaceTest, DtlOverwritingAPendingDsReadRaces) {
+  EXPECT_FALSE(ds_read(0, 4));
+  EXPECT_TRUE(dtl_write(0, 4));
+}
+
+TEST_F(TensorDmaRaceTest, DtlAfterDscntIsSafe) {
+  EXPECT_FALSE(ds_read(0, 4));
+  wait_dscnt(0);
+  EXPECT_FALSE(dtl_write(0, 4));
 }
 
 TEST_F(TensorDmaRaceTest, StoreAfterDscntIsSafe) {
