@@ -243,6 +243,13 @@ DISPLAY_VARIANTS = {
     },
 }
 DISPLAY_VARIANTS["gfx115x"] = {
+    # LDS bandwidth with gfx115x's 32 LDS banks per CU written as a constant.
+    "3.4.3": (
+        "LDS Estimated Bandwidth",
+        "lds.theoretical_bw",
+        "32 * 4 * SUM(SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum)"
+        " / (SUM(End_Timestamp - Start_Timestamp) / 1e9)",
+    ),
     "4.1.0": (
         "VALU FLOPs",
         "compute.valu_flops",
