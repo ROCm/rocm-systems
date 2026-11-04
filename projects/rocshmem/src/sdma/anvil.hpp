@@ -81,11 +81,13 @@ class SdmaQueue {
   // Status of the queue-creation attempt, so the caller can tell an exhausted queue budget
   // (NO_MEMORY) apart from other failures.
   HSAKMT_STATUS createStatus() const;
+  uint32_t engineId() const { return engineId_; }
 
  private:
   bool valid_{false};
   HSAKMT_STATUS createStatus_{HSAKMT_STATUS_ERROR};
   int remoteDeviceId_{-1};
+  uint32_t engineId_{0};
   uint64_t* cachedWptr_{nullptr};
   uint64_t* committedWptr_{nullptr};
   void* queueBuffer_{nullptr};
@@ -123,6 +125,13 @@ class AnvilLib {
   SdmaQueue* getSdmaQueue(int srcDeviceId, int dstDeviceId, int channel_idx = 0);
   SdmaQueue* createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
                              const EngineSelection& selection, int* channelIdx = nullptr);
+  // Queues for a peer on another host, which copies reach through its fabric-mapped memory. They
+  // are keyed by the caller's peer key rather than a local device id, so such a peer never shares a
+  // queue (and its in-order ring) with a peer on this host. Each queue goes on the usable engine
+  // carrying the fewest of this process's queues.
+  bool connectRemotePeer(int srcDeviceId, uint64_t peerKey, int numChannels = 1);
+  SdmaQueue* getRemotePeerQueue(uint64_t peerKey, int channel_idx = 0);
+  void disconnectRemotePeer(uint64_t peerKey);
 
  private:
   /*
@@ -179,6 +188,10 @@ class AnvilLib {
   std::once_flag init_flag;
   std::vector<hsa_agent_t> gpuAgentsByHipDev_;
   std::unordered_map<int, std::vector<std::unique_ptr<SdmaQueue>>> sdma_channels_;
+  std::unordered_map<uint64_t, std::vector<std::unique_ptr<SdmaQueue>>> remote_peer_channels_;
+
+  // This process's queues per engine, across both maps; empty when the engine total is unknown.
+  std::vector<uint32_t> queuesPerEngine() const;
 };
 
 extern AnvilLib& anvil;
