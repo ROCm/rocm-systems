@@ -299,12 +299,18 @@ else()
     if(ROCM_PATH)
         set(_rocm_flags --rocm-path=${ROCM_PATH} -isystem ${ROCM_PATH}/include)
     endif()
+    set(HIP_FORTRAN_GENCO_FLAGS
+        ""
+        CACHE STRING
+        "Extra hipcc flags for the code object of the module_kernel test"
+    )
 
     set(_code_object "${CMAKE_CURRENT_BINARY_DIR}/vecadd_kernel.co")
     add_custom_command(
         OUTPUT "${_code_object}"
         COMMAND
             ${HIP_FORTRAN_HIPCC} --genco ${_arch_flags} ${_rocm_flags}
+            ${HIP_FORTRAN_GENCO_FLAGS}
             "${CMAKE_CURRENT_SOURCE_DIR}/vecadd_kernel.hip.cpp" -o
             "${_code_object}"
         DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vecadd_kernel.hip.cpp"
