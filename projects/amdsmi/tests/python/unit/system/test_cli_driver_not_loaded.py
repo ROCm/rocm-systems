@@ -10,8 +10,12 @@ bnxt_en (Broadcom NIC) are loaded. Input that needs a missing driver reports tha
 "invalid parameter" error when it is not.
 """
 
+import contextlib
+import importlib.util
 import inspect
+import io
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -336,6 +340,66 @@ class TestDriverNotes(unittest.TestCase):
                             ),
                             expected,
                         )
+
+
+class TestNotesStream(unittest.TestCase):
+    """The notes go to stderr, so JSON and CSV on stdout stay parseable."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        restore = stub_modules_at_import(
+            {"amdsmi_commands": fake_module("amdsmi_commands", AMDSMICommands=object)}
+        )
+        cls.addClassCleanup(restore)
+        spec = importlib.util.spec_from_file_location(
+            "amdsmi_cli_main", Path(_CLI_DIR) / "amdsmi_cli.py"
+        )
+        cls.cli = importlib.util.module_from_spec(spec)
+        with mock.patch.dict(os.environ):
+            spec.loader.exec_module(cls.cli)
+
+    def setUp(self) -> None:
+        handlers, level = logging.root.handlers[:], logging.root.level
+
+        def restore_logging() -> None:
+            logging.root.handlers[:] = handlers
+            logging.root.setLevel(level)
+
+        self.addCleanup(restore_logging)
+        self.addCleanup(setattr, sys, "tracebacklimit", getattr(sys, "tracebacklimit", None))
+
+    def _run(self, present):
+        payload = json.dumps([{"gpu": 0}])
+        args = types.SimpleNamespace(
+            loglevel="ERROR",
+            note_drivers=("amdgpu", "ionic"),
+            func=lambda _args: print(payload),
+        )
+        helpers = _FakeHelpers(loaded=(), present=present)
+        helpers.get_driver_notes = types.MethodType(
+            helpers_module.AMDSMIHelpers.get_driver_notes, helpers
+        )
+        commands = types.SimpleNamespace(helpers=helpers)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.cli.configure_logging_and_execute(args, commands)
+        return payload, out.getvalue(), err.getvalue()
+
+    def test_notes_are_on_stderr_and_stdout_is_only_the_command_output(self) -> None:
+        payload, out, err = self._run(present=("amdgpu", "ionic"))
+        self.assertEqual(json.loads(out), json.loads(payload))
+        self.assertEqual(
+            err.splitlines(),
+            [
+                "Note: GPU 0000:01:00.0: amdgpu driver not loaded (sudo modprobe amdgpu)",
+                "Note: AI NIC 0000:01:00.0: ionic driver not loaded (sudo modprobe ionic)",
+            ],
+        )
+
+    def test_no_notes_when_no_hardware_is_missing_its_driver(self) -> None:
+        _, out, err = self._run(present=())
+        self.assertNotEqual(out, "")
+        self.assertEqual(err, "")
 
 
 class TestPciDevicesWithoutDriver(unittest.TestCase):
