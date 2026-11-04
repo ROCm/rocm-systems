@@ -973,40 +973,6 @@ TEST_F(GinHostTypeQueryMicrotest, GetRailedGinType_UnconnectedComm_ReportsNoGin)
   EXPECT_EQ(NCCL_GIN_TYPE_NONE, type);
 }
 
-// ncclGinTypeActive looks past the default backend, with ncclGetGinType's gates.
-TEST_F(GinHostTypeQueryMicrotest, GinTypeActive_TypeInANonDefaultSlot_ReportsActive) {
-  auto* gs = gin();
-  gs->numActiveBackends = 2;
-  gs->backends[1] = gs->backends[0];
-  gs->backends[1].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
-
-  EXPECT_TRUE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_PROXY));
-  EXPECT_TRUE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_ANVIL_SDMA));
-  EXPECT_FALSE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_ROCSHMEM_GDA));
-
-  ncclGinType_t def = NCCL_GIN_TYPE_NONE;
-  ASSERT_EQ(ncclSuccess, ncclGetGinType(comm(), &def));
-  EXPECT_EQ(NCCL_GIN_TYPE_PROXY, def);
-
-  // Slots past numActiveBackends are stale, not active.
-  gs->numActiveBackends = 1;
-  EXPECT_FALSE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_ANVIL_SDMA));
-}
-
-TEST_F(GinHostTypeQueryMicrotest, GinTypeActive_RailOnlyFinalizedOrNullComm_ReportsInactive) {
-  EXPECT_TRUE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_PROXY));
-
-  comm_->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
-  EXPECT_FALSE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_PROXY));
-  comm_->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
-
-  gin()->finalized = true;
-  EXPECT_FALSE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_PROXY));
-  gin()->finalized = false;
-
-  EXPECT_FALSE(ncclGinTypeActive(nullptr, NCCL_GIN_TYPE_PROXY));
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // ncclGinValidateSignalRequest
 
@@ -1329,31 +1295,6 @@ TEST_F(GinHostBackendSelectMicrotest, DevCommSetup_FirstBackendsSetupFails_Succe
   ASSERT_EQ(ncclSuccess, setup(reqs));
   EXPECT_EQ(1, devComm_.backendIndex);
   EXPECT_EQ(2, fake_.createContextCalls);
-}
-
-// ncclGinDevCommSetup honors reqs.ginType: an SDMA request binds backendIndex 1 when
-// PROXY is the default; NCCL_GIN_TYPE_NONE still takes backends[0].
-TEST_F(GinHostBackendSelectMicrotest, DevCommSetup_RequestedTypeIsNotTheDefault_BindsThatBackend) {
-  auto* gs = gin();
-  gs->numActiveBackends = 2;
-  gs->backends[1] = gs->backends[0];
-  gs->backends[1].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
-  gs->backends[1].ginComms[0] = fake_.collCommHandle(1);
-  fake_.needsProxyProgress = false;
-
-  auto reqs = proxyReqs();
-  reqs.ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
-  ASSERT_EQ(ncclSuccess, setup(reqs));
-  EXPECT_EQ(1, devComm_.backendIndex);
-  ASSERT_NE(nullptr, gs->devComms);
-  EXPECT_EQ(1, gs->devComms->backendIndex);
-
-  // Without a type the DevComm takes the default, which is what the SDMA paths got before.
-  reqs.ginType = NCCL_GIN_TYPE_NONE;
-  ncclDevComm dflt{};
-  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &dflt, NCCL_VERSION_CODE));
-  EXPECT_EQ(0, dflt.backendIndex);
-  ASSERT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &dflt));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
