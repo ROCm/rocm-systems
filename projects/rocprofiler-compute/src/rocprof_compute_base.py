@@ -19,6 +19,7 @@ from pc_sampling.pc_sampling_profile import (
 )
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
+from utils.analysis_views import arch_panel_configs
 from utils.logger import (
     console_debug,
     console_error,
@@ -46,7 +47,6 @@ from utils.utils_common import (
     get_job_rank_and_size,
     get_version,
     get_version_display,
-    load_panel_configs,
     parse_sets_yaml,
     reconfigure_stdio_utf8,
     replace_env,
@@ -387,7 +387,7 @@ class RocProfCompute:
         )
         if arch not in self.__supported_archs and not config_root.is_dir():
             console_error("Unsupported arch")
-        panel_configs = load_panel_configs([str(config_root)])
+        panel_configs = arch_panel_configs(arch)
         # Converted here: utils.metrics.expression imports utils_common.
         return {
             metric_id: (name, update_normal_unit_string(unit, "per_normUnit"), text)

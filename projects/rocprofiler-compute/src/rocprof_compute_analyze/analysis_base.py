@@ -12,9 +12,9 @@ from typing import Any, Optional, Set, TextIO
 
 import pandas as pd
 
-import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
+from utils.analysis_views import arch_panel_configs
 from utils.logger import (
     console_debug,
     console_error,
@@ -30,10 +30,8 @@ from utils.utils_analysis import (
 from utils.utils_common import (
     PC_SAMPLING_BLOCK_IDS,
     ROOFLINE_PANEL_ID,
-    canonical_config_arch,
     get_uuid,
     is_only_pc_sampling,
-    load_panel_configs,
     validate_roofline_csv,
 )
 
@@ -173,10 +171,7 @@ class OmniAnalyze_Base:
         if list_stats:
             ac.panel_configs = TOP_STATS_BUILD_IN_CONFIG
         else:
-            config_arch = canonical_config_arch(arch) or arch
-            ac.panel_configs = load_panel_configs([
-                str(config.analysis_configs_dir / config_arch)
-            ])
+            ac.panel_configs = arch_panel_configs(arch)
 
         parser.build_dfs(
             arch_configs=ac,

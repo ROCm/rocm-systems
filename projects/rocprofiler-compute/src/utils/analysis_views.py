@@ -14,7 +14,8 @@ views/<arch>/ holds the views of one metric library arch. "legacy_id" marks the 
 numeric id (11.2.3) each metric keeps from the panel files until numeric ids are
 retired.
 
-Only tools use this module until the cutover; tools/validate_views.py checks the files.
+arch_panel_configs() returns the panel configs analyze shows; tools/validate_views.py
+checks the view files.
 Standard library and the vendored YAML only: profile mode imports it.
 """
 
@@ -24,7 +25,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import config
 from utils.equation_format import normalize_equation
-from utils.utils_common import canonical_config_arch
+from utils.utils_common import canonical_config_arch, load_panel_configs
 from vendored import yaml
 
 # Table kinds, as the panel configs' data source keys; a table without "render" is a
@@ -113,6 +114,12 @@ def views_to_panel_configs(
     """
     configs = {view["legacy_panel_id"]: _panel_config(view, metrics) for view in views}
     return OrderedDict(sorted(configs.items()))
+
+
+def arch_panel_configs(arch: str) -> "OrderedDict[int, Dict[str, Any]]":
+    """Return the panel configs analyze shows for an arch."""
+    config_arch = canonical_config_arch(arch) or arch
+    return load_panel_configs([str(config.analysis_configs_dir / config_arch)])
 
 
 def panel_aliases(views: List[Dict[str, Any]]) -> Dict[str, str]:

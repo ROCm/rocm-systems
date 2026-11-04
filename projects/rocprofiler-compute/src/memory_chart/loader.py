@@ -16,8 +16,9 @@ from typing import Any, Dict, NoReturn, Optional, Tuple
 
 import config
 from membw_analysis.models import BOTTLENECK_LEVELS
+from utils.analysis_views import arch_panel_configs
 from utils.logger import console_warning
-from utils.utils_common import canonical_config_arch, load_panel_configs
+from utils.utils_common import canonical_config_arch
 
 LAYOUTS_DIR = config.rocprof_compute_home / "memory_chart" / "layouts"
 
@@ -174,7 +175,7 @@ class PanelConfigs:
     def for_arch(cls, arch: str) -> Optional[dict[str, Any]]:
         """The memory chart panel config of *arch*, or None if it has none."""
         if arch not in cls._by_arch:
-            panels = load_panel_configs([str(config.analysis_configs_dir / arch)])
+            panels = arch_panel_configs(arch)
             cls._by_arch[arch] = next(
                 (panel for panel in panels.values() if is_memory_chart_panel(panel)),
                 None,
