@@ -43,6 +43,10 @@ const void* LLTwoShot() {
   return KernelPtr(&dda::common::ddaAllReduceTwoShotLL<T, N>);
 }
 template <typename T, int N>
+const void* LLSpread() {
+  return KernelPtr(&dda::common::ddaAllReduceSpreadTwoShotLL<T, N>);
+}
+template <typename T, int N>
 const void* LL128OneShot() {
   return KernelPtr(&dda::common::ddaAllReduceFlatLL128<T, N>);
 }
@@ -516,6 +520,91 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Run_LaunchErrorIsReportedFromEveryTier) {
   EXPECT_EQ(RunLL(256), ncclUnhandledCudaError);
   EXPECT_EQ(RunLL128(256), ncclUnhandledCudaError);
   EXPECT_EQ(g_ddaLaunches.size(), 4u);
+}
+
+// Floats in a message of `bytes`.
+constexpr size_t Floats(size_t bytes) {
+  return bytes / sizeof(float);
+}
+
+// The spread two-shot takes a message once the one-shot's wire per block reaches 96 KiB (16 B x 512 packets x
+// (n - 1)) or its wire beyond the two-shot's, 2 (n - 1)(n - 2) / n x bytes, reaches 4 MiB; else the one-shot runs.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadWhereOneShotBlockWireOrSavedWireIsLarge) {
+  comm().ddaScratchBytes = 1u << 30;
+  struct Case {
+    int nRanks;
+    size_t bytes;
+    bool spread;
+  };
+  const Case cases[] = {
+      {16, 2048, false},       // 256 packets x 16 B x 15 = 60 KiB a block
+      {16, 4096, true},        // 512 packets: 120 KiB a block
+      {32, 1024, false},       // 128 packets x 16 B x 31 = 62 KiB
+      {32, 2048, true},        // 124 KiB
+      {12, 4096, false},       // 88 KiB, and 2 x 11 x 10 / 12 x 4 KiB of saved wire
+      {64, 1024, true},        // 126 KiB
+      {8, 256 << 10, false},   // 56 KiB a block, 2.6 MiB saved
+      {8, 512 << 10, true},    // 5.25 MiB saved
+      {4, 1 << 20, false},     // 3 MiB saved
+      {2, 1 << 20, false},     // nothing saved at 2 ranks
+  };
+  for (const Case& c : cases) {
+    comm().nRanks = c.nRanks;
+    const DdaLaunch& launch = RunOneLL(Floats(c.bytes));
+    const void* want = c.spread ? LLSpread<float, 0>() : LLOneShot<float, 0>();
+    if (c.nRanks == 4 || c.nRanks == 8) {
+      want = c.spread ? (c.nRanks == 4 ? LLSpread<float, 4>() : LLSpread<float, 8>())
+                      : (c.nRanks == 4 ? LLOneShot<float, 4>() : LLOneShot<float, 8>());
+    }
+    EXPECT_EQ(launch.kernel, want) << c.nRanks << " ranks, " << c.bytes << " bytes";
+  }
+}
+
+// The spread runs on exactly the one-shot's grid, which the reporter also returns.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadTakesTheOneShotGridAndArguments) {
+  comm().nRanks = 32;
+  comm().ddaScratchBytes = (256u << 20) + 40;
+  for (size_t bytes : {size_t{2048}, size_t{64} << 10, size_t{1} << 20}) {
+    comm().addonStopEvent = kStopEvent;
+    const DdaLaunch& launch = RunOneLL(Floats(bytes));
+    ASSERT_EQ(launch.kernel, (LLSpread<float, 0>())) << bytes;
+    EXPECT_EQ(launch.grid.x, std::max<size_t>(1, bytes / 8 / 512)) << bytes;
+    EXPECT_EQ(launch.grid.x, ncclAllReduceDdaFabricLLBlocks(mock_.get(), Floats(bytes), ncclFloat32)) << bytes;
+    EXPECT_EQ(launch.block.x, 512u);
+    EXPECT_EQ(launch.sharedMemBytes, 0u);
+    EXPECT_EQ(launch.stopEvent, kStopEvent);
+    ASSERT_EQ(launch.args.size(), 10u);
+    EXPECT_EQ(launch.Arg<float**>(0), comm().ddaPeerPtrsDev);
+    EXPECT_EQ(launch.Arg<float*>(1), kRecvbuff);
+    EXPECT_EQ(launch.Arg<const float*>(2), kSendbuff);
+    EXPECT_EQ(launch.Arg<size_t>(3), Floats(bytes));
+    EXPECT_EQ(launch.Arg<int>(4), 5);
+    EXPECT_EQ(launch.Arg<int>(5), 32);
+    EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
+    EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
+    EXPECT_EQ(launch.Arg<size_t>(8), 128u << 20);
+    EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(9).flag, comm().abortFlagDev);
+  }
+  comm().ddaFabricMaxBlocks = 5;
+  EXPECT_EQ(RunOneLL(Floats(1 << 20)).grid.x, 5u);
+}
+
+// Every rank must own a whole number of packets; else the one-shot runs.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadNeedsWholePacketsPerRank) {
+  comm().nRanks = 24;
+  comm().ddaScratchBytes = 1u << 30;
+  EXPECT_EQ(RunOneLL(Floats(9216)).kernel, (LLSpread<float, 0>()));   // 1152 packets, 48 a rank
+  EXPECT_EQ(RunOneLL(Floats(8192)).kernel, (LLOneShot<float, 0>()));  // 1024 packets, not a multiple of 24
+}
+
+// Every datatype has its own spread kernel.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadEachDatatypeLaunchesItsOwnKernel) {
+  comm().nRanks = 16;
+  comm().ddaScratchBytes = 1u << 30;
+  EXPECT_EQ(RunOneLL(4096 / 2, ncclFloat16).kernel, (LLSpread<half, 0>()));
+  EXPECT_EQ(RunOneLL(4096 / 2, ncclBfloat16).kernel, (LLSpread<bf16, 0>()));
+  EXPECT_EQ(RunOneLL(4096, ncclFloat8e4m3).kernel, (LLSpread<dda::common::fp8e4m3, 0>()));
+  EXPECT_EQ(RunOneLL(4096, ncclFloat8e5m2).kernel, (LLSpread<dda::common::fp8e5m2, 0>()));
 }
 
 }  // namespace

@@ -19,6 +19,7 @@
 
 #include "algorithms/dda/all_reduce/all_reduce_dda_ll.h"
 #include "algorithms/dda/all_reduce/all_reduce_dda_ll_twoshot.h"
+#include "algorithms/dda/all_reduce/all_reduce_dda_ll_spread.h"
 #include "algorithms/dda/all_reduce/all_reduce_dda_ll128.h"
 #include "algorithms/dda/all_reduce/all_reduce_dda_ll128_twoshot.h"
 #include "checks.h"
@@ -68,6 +69,36 @@ static inline std::pair<dim3, dim3> ddaAllReduceFabricLLGeom(ncclComm* comm, siz
   return std::make_pair(dim3(blocks), dim3(threads));
 }
 
+static_assert(dda::common::kDdaLLSpreadMaxRanks >= dda::common::kDdaMaxNranks, "spread peer table too small");
+
+// One-shot wire per block from which the spread two-shot's extra fabric hop costs less than the block's store backlog.
+constexpr size_t kDdaLLSpreadMinBlockWireBytes = 96 * 1024;
+
+// One-shot wire beyond the two-shot's, 2 (n - 1)(n - 2) / n x bytes, from which the GPU's egress favours the spread.
+constexpr size_t kDdaLLSpreadMinSavedWireBytes = 4 * 1024 * 1024;
+
+// Whether the spread two-shot beats the LL one-shot for a message of `bytes` on nRanks ranks, on the one-shot's grid.
+static bool ddaLLArSpreadWins(size_t bytes, int nRanks) {
+  const size_t n = (size_t)nRanks;
+  const size_t nPk = bytes >> 3;
+  const size_t blockWire = std::min<size_t>(nPk, 512) * sizeof(dda::common::LLPacket16) * (n - 1);
+  const size_t savedWire = 2 * (n - 1) * (n - 2) * bytes / n;
+  return blockWire >= kDdaLLSpreadMinBlockWireBytes || savedWire >= kDdaLLSpreadMinSavedWireBytes;
+}
+
+// LL one-shot messages that run as the spread two-shot on its grid: whole packets per rank, a shard per slot, a win.
+static bool ddaLLArSpreadSelected(ncclComm* comm, size_t bytes) {
+  const size_t nRanks = (size_t)comm->nRanks;
+  const size_t nPk = bytes >> 3;
+  if (nRanks < 2 || nPk % nRanks != 0) {
+    return false;
+  }
+  if (nPk / nRanks > ddaLLArTwoShotSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
+    return false;
+  }
+  return ddaLLArSpreadWins(bytes, comm->nRanks);
+}
+
 template <typename T>
 static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
                                                   cudaStream_t stream) {
@@ -94,10 +125,38 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   const int epochLen = comm->ddaLLEpochLen;
   const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
 
+  const dda::common::DdaKernelParams params{comm->abortFlagDev};
+  if (ddaLLArSpreadSelected(comm, bytes)) {
+    INFO(NCCL_COLL, "DDA fabric AllReduce LL spread two-shot: nRanks=%d bytes=%zu nPk=%zu grid=%u block=%u", nRanks,
+         bytes, nPk, grid.x, block.x);
+    const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+    switch (nRanks) {
+    case 4:
+      hipExtLaunchKernelGGL((dda::common::ddaAllReduceSpreadTwoShotLL<T, 4>), grid, block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
+                            static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen, bankSize,
+                            params);
+      break;
+    case 8:
+      hipExtLaunchKernelGGL((dda::common::ddaAllReduceSpreadTwoShotLL<T, 8>), grid, block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
+                            static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen, bankSize,
+                            params);
+      break;
+    default:
+      hipExtLaunchKernelGGL((dda::common::ddaAllReduceSpreadTwoShotLL<T, 0>), grid, block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
+                            static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen, bankSize,
+                            params);
+      break;
+    }
+    CUDACHECK(cudaGetLastError());
+    return ncclSuccess;
+  }
+
   INFO(NCCL_COLL, "DDA fabric AllReduce LL: nRanks=%d bytes=%zu nPk=%zu grid=%u block=%u", nRanks, bytes, nPk, grid.x,
        block.x);
 
-  const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback (up to
   // kDdaMaxNranks).
