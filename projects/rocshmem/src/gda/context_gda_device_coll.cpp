@@ -687,6 +687,6 @@ __device__ void GDAContext::fcollectmem_linear_thread_puts_wg(rocshmem_team_t te
     team_obj->alltoall_sequence_number++;
   }
 
-  sync_wg(team);
+  __syncthreads();
 }
 }  // namespace rocshmem

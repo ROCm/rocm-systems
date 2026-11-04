@@ -383,7 +383,7 @@ __device__ void IPCContext::broadcastmem_linear_thread_puts_wave(
   long *sync_flag = &pSync[pe_size];
   while (uncached_load(sync_flag) < expected) { }
 
-  if (is_thread_zero_in_block()) {
+  if (is_thread_zero_in_wave()) {
     team_obj->bcast_sequence_number++;
   }
 
@@ -633,7 +633,7 @@ __device__ void IPCContext::fcollectmem_linear_thread_puts_wave(rocshmem_team_t 
     pSync[fcollect_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
   }
 
-  if (is_thread_zero_in_block()) {
+  if (is_thread_zero_in_wave()) {
     team_obj->fcollect_sequence_number++;
   }
 
@@ -744,7 +744,7 @@ __device__ void IPCContext::fcollectmem_wg_linear_thread_puts(rocshmem_team_t te
     team_obj->fcollect_sequence_number++;
   }
 
-  sync_wg(team);
+  __syncthreads();
 }
 
 __device__ void IPCContext::fcollectmem_wg_linear(rocshmem_team_t team, void *dst,
