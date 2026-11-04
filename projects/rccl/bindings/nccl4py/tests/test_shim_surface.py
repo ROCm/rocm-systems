@@ -176,14 +176,15 @@ class TestMemoryResource:
 
         freed = []
 
-        class _KeywordOnlyStream(_HipMallocResource):
+        class _KeywordOnlyResource(_HipMallocResource):
             # Same signature as nccl.core.memory.NcclMemoryResource.deallocate.
             def deallocate(self, ptr, size, *, stream=None):
                 freed.append((int(ptr), size, stream))
 
-        b = Buffer.from_handle(ptr=0xBEEF, size=64, mr=_KeywordOnlyStream(0))
-        b.close()
-        assert freed == [(0xBEEF, 64, None)]
+        stream = object()
+        b = Buffer.from_handle(ptr=0xBEEF, size=64, mr=_KeywordOnlyResource(0))
+        b.close(stream)
+        assert freed == [(0xBEEF, 64, stream)]
         assert int(b.handle) == 0
 
 
