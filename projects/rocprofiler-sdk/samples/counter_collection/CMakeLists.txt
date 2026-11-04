@@ -69,6 +69,8 @@ set_tests_properties(
                "${counter-collection-buffer-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}"
                DISABLED
                "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
 
@@ -90,9 +92,16 @@ add_test(NAME counter-collection-buffer-device-serialization
 
 set_tests_properties(
     counter-collection-buffer-device-serialization
-    PROPERTIES TIMEOUT 120 LABELS "samples" ENVIRONMENT
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "samples"
+               ENVIRONMENT
                "${counter-collection-buffer-device-serialization-env}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}")
 
 set(counter-collection-buffer-finalize-at-exit-env
     ${counter-collection-buffer-device-serialization-env}
@@ -103,9 +112,16 @@ add_test(NAME counter-collection-buffer-finalize-at-exit
 
 set_tests_properties(
     counter-collection-buffer-finalize-at-exit
-    PROPERTIES TIMEOUT 120 LABELS "samples;repro" ENVIRONMENT
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "samples;repro"
+               ENVIRONMENT
                "${counter-collection-buffer-finalize-at-exit-env}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}")
 
 set(counter-collection-buffer-finalize-at-exit-forced-inline-env
     ${counter-collection-buffer-device-serialization-env}
@@ -116,9 +132,16 @@ add_test(NAME counter-collection-buffer-finalize-at-exit-forced-inline
 
 set_tests_properties(
     counter-collection-buffer-finalize-at-exit-forced-inline
-    PROPERTIES TIMEOUT 120 LABELS "samples;repro" ENVIRONMENT
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "samples;repro"
+               ENVIRONMENT
                "${counter-collection-buffer-finalize-at-exit-forced-inline-env}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}")
 
 add_library(counter-collection-callback-client SHARED)
 target_sources(counter-collection-callback-client PRIVATE callback_client.cpp client.hpp)
@@ -150,6 +173,8 @@ set_tests_properties(
                "${counter-collection-callback-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}"
                DISABLED
                "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
 
@@ -231,7 +256,7 @@ set_tests_properties(
                FIXTURES_SETUP
                "counter-collection-device-profiling-async"
                RESOURCE_LOCK
-               "rocprofiler_device_counting_pmc"
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}"
                ATTACHED_FILES_ON_FAIL
                "${counter-collection-device-profiling-output}"
                DISABLED
@@ -281,7 +306,7 @@ set_tests_properties(
                FIXTURES_SETUP
                "counter-collection-device-profiling-sync"
                RESOURCE_LOCK
-               "rocprofiler_device_counting_pmc"
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}"
                ATTACHED_FILES_ON_FAIL
                "${counter-collection-device-profiling-sync-output}"
                DISABLED
