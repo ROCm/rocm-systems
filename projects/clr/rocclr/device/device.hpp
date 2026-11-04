@@ -1891,7 +1891,8 @@ class Device : public RuntimeObject {
   cl_device_type type() const { return info().type_ & ~(CL_DEVICE_TYPE_DEFAULT); }
 
   //! Create a new virtual device environment.
-  virtual device::VirtualDevice* createVirtualDevice(CommandQueue* queue = NULL) = 0;
+  virtual device::VirtualDevice* createVirtualDevice(CommandQueue* queue = NULL,
+                                                     bool cooperative = false) = 0;
 
   //! Create a program for device.
   virtual device::Program* createProgram(amd::Program& owner, option::Options* options = NULL) = 0;
@@ -2348,8 +2349,9 @@ class Device : public RuntimeObject {
   //! single-signal field share an offset, so callers patch slot 0 either way.
   //! num_deps == 0 is a completion-only barrier.
   virtual uint8_t* CreateBarrierPacket(int num_deps = 0) const { return nullptr; }
+  //! profiled means the launch reads the timing of its patched completion signals
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                   const std::vector<void*>& hw_events) const {}
+                                   const std::vector<void*>& hw_events, bool profiled) const {}
 
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
