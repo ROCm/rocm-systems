@@ -1226,25 +1226,29 @@ function(add_other_tests)
         add_rocshmem_functional_test(NAME shmemptr RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8)
     end_test_group()
 
-    # QP (GDA raw queue-pair) tests hard-exit if the backend isn't GDA.
-    begin_test_group(CATEGORY "RMA;NBI;QP" TIER full BACKENDS "gda" GPUS "all" EXTRA_LABELS "GDA")
-        add_rocshmem_functional_test(NAME qp_pingpong RANKS 2 WORKGROUPS 1 THREADS 1
-            ENV_VARS "ROCSHMEM_BACKEND=gda")
-        add_rocshmem_functional_test(NAME qp_putnbi RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
-            ENV_VARS "ROCSHMEM_BACKEND=gda")
-        add_rocshmem_functional_test(NAME qp_putnbi_poll RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
-            ENV_VARS "ROCSHMEM_BACKEND=gda")
-    end_test_group()
+    # qp_*_tester.cpp is only compiled in when USE_GDA is set.
+    if(USE_GDA)
+        begin_test_group(CATEGORY "RMA;NBI;QP" TIER full BACKENDS "gda" GPUS "all" EXTRA_LABELS "GDA")
+            add_rocshmem_functional_test(NAME qp_pingpong RANKS 2 WORKGROUPS 1 THREADS 1
+                ENV_VARS "ROCSHMEM_BACKEND=gda")
+            add_rocshmem_functional_test(NAME qp_putnbi RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
+                ENV_VARS "ROCSHMEM_BACKEND=gda")
+            add_rocshmem_functional_test(NAME qp_putnbi_poll RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
+                ENV_VARS "ROCSHMEM_BACKEND=gda")
+        end_test_group()
+    endif()
 
-    # SDMA direct tests drive the SDMA queue, so force SDMA on.
-    begin_test_group(CATEGORY "RMA;NBI;SDMA" TIER full BACKENDS "ipc" GPUS "all" EXTRA_LABELS "SDMA")
-        add_rocshmem_functional_test(NAME sdma_pingpong RANKS 2 WORKGROUPS 1 THREADS 1
-            ENV_VARS "ROCSHMEM_BACKEND=ipc" "ROCSHMEM_SDMA_ENABLED=1" "ROCSHMEM_SDMA_THRESHOLD=0")
-        add_rocshmem_functional_test(NAME sdma_putnbi RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
-            ENV_VARS "ROCSHMEM_BACKEND=ipc" "ROCSHMEM_SDMA_ENABLED=1" "ROCSHMEM_SDMA_THRESHOLD=0")
-        add_rocshmem_functional_test(NAME sdma_putnbi_poll RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
-            ENV_VARS "ROCSHMEM_BACKEND=ipc" "ROCSHMEM_SDMA_ENABLED=1" "ROCSHMEM_SDMA_THRESHOLD=0")
-    end_test_group()
+    # sdma_*_tester.cpp is only compiled in when USE_IPC and USE_SDMA are set.
+    if(USE_IPC AND USE_SDMA)
+        begin_test_group(CATEGORY "RMA;NBI;SDMA" TIER full BACKENDS "ipc" GPUS "all" EXTRA_LABELS "SDMA")
+            add_rocshmem_functional_test(NAME sdma_pingpong RANKS 2 WORKGROUPS 1 THREADS 1
+                ENV_VARS "ROCSHMEM_BACKEND=ipc" "ROCSHMEM_SDMA_ENABLED=1" "ROCSHMEM_SDMA_THRESHOLD=0")
+            add_rocshmem_functional_test(NAME sdma_putnbi RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
+                ENV_VARS "ROCSHMEM_BACKEND=ipc" "ROCSHMEM_SDMA_ENABLED=1" "ROCSHMEM_SDMA_THRESHOLD=0")
+            add_rocshmem_functional_test(NAME sdma_putnbi_poll RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
+                ENV_VARS "ROCSHMEM_BACKEND=ipc" "ROCSHMEM_SDMA_ENABLED=1" "ROCSHMEM_SDMA_THRESHOLD=0")
+        end_test_group()
+    endif()
 
     # Flood tests - don't work with RO backend (AIROCSHMEM-324)
     begin_test_group(CATEGORY "FLOOD;RMA;PUT" TIER full BACKENDS "ipc;gda" GPUS "all")
