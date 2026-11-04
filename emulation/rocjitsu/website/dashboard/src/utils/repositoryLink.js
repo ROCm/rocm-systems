@@ -11,7 +11,7 @@ const safeBranchPath = (branch) => {
     ? null : segments.map(encodeURIComponent).join('/');
 };
 
-// Header link to the RocJITsu source tree, derived from the publication's configured repository and
+// Header link to the rocjitsu source tree, derived from the publication's configured repository and
 // canonical branch so another publication points at its own repository. Null when unusable.
 export function repositoryLink(repository, canonicalBranch = 'develop') {
   const url = repositoryBase(repository);

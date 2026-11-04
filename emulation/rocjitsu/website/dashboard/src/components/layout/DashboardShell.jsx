@@ -86,7 +86,8 @@ export default function DashboardShell({ data, state, loading = false, header, c
                 '&:hover': { bgcolor: 'action.selected', borderColor: 'dashboard.selectionBorder' },
               }}><MenuBookRoundedIcon sx={{ width: 16, height: 16, fontSize: 16 }} /></ButtonBase></HoverTooltip>
           </Box>
-          <Typography sx={{ mt: '2px', ml: '6px', ...textStyles.captionCompact, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Sim perf dashboard</Typography>
+          {/* 12px so the uppercase subtitle stays on one line in the 256px sidebar; at the 14px caption size it wraps. */}
+          <Typography sx={{ mt: '2px', ml: '6px', ...textStyles.captionCompact, fontSize: '12px', color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Simulator perf dashboard</Typography>
           <UpdatedStatus key={data.generatedAt ?? 'missing'} generatedAt={data.generatedAt} loading={loading} />
         </Box>
         <Box component="nav" aria-label="Dashboard">
