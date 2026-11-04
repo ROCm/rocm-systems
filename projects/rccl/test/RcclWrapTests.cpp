@@ -3230,12 +3230,17 @@ void InitA2ADecisionComm(ncclComm& comm, const char* arch, int nRanks)
     comm.ddaLLEpochLen         = DDA_FABRIC_MAXBLOCKS;
 }
 
-ncclResult_t SelectA2A(ncclComm& comm, size_t totalBytes, rcclCollDecision& out)
+// Distinct, 256-byte aligned send and receive buffers; selection reads only their addresses.
+alignas(256) char a2aSendStorage[256];
+alignas(256) char a2aRecvStorage[256];
+
+// count is per-peer bytes / type size; totalBytes = count * type size * nRanks
+ncclResult_t SelectA2A(ncclComm& comm, size_t totalBytes, rcclCollDecision& out, size_t sendOffset = 0,
+                       size_t recvOffset = 0, ncclDataType_t datatype = ncclFloat32)
 {
-    // count is per-peer bytes / sizeof(float); totalBytes = count * sizeof(float) * nRanks
-    size_t count = totalBytes / sizeof(float) / comm.nRanks;
-    return rcclSelectAlltoAll(&comm, /*sendbuff=*/nullptr, /*recvbuff=*/nullptr,
-                              count, ncclFloat32, /*stream=*/nullptr,
+    size_t count = totalBytes / ncclTypeSize(datatype) / comm.nRanks;
+    return rcclSelectAlltoAll(&comm, a2aSendStorage + sendOffset, a2aRecvStorage + recvOffset,
+                              count, datatype, /*stream=*/nullptr,
                               /*query=*/true, /*graphCapturingHint=*/false, &out);
 }
 } // namespace
@@ -3320,6 +3325,36 @@ TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBands)
         rcclCollDecision dec{};
         ASSERT_EQ(SelectA2A(*comm, c.first, dec), ncclSuccess) << c.first;
         EXPECT_EQ(dec.algo, c.second) << c.first;
+    }
+}
+
+// gfx1250 DPX table, 8 ranks, bf16: buffer offsets of 1 and 2 bytes, in and out of place, take the band
+// a 256-byte aligned call takes, so ranks whose buffers differ in alignment pick the same kernel.
+TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBandsIgnoreBufferAlignment)
+{
+    auto comm = std::make_unique<ncclComm>();
+    InitA2ADecisionComm(*comm, "gfx1250", 8);
+    comm->archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+    ASSERT_NE(comm->archThresholds, nullptr);
+    const size_t align = 16u * (size_t)comm->nRanks;
+    const std::pair<size_t, int> cases[] = {{2ul << 20, RCCL_DDA_FABRIC_LL},
+                                            {(2ul << 20) + align, RCCL_DDA_FABRIC_LL128},
+                                            {16ul << 20, RCCL_DDA_FABRIC_LL128}};
+    const std::pair<size_t, size_t> offsets[] = {{0, 0}, {2, 0}, {0, 2}, {1, 1}};
+    for (const auto& c : cases)
+    {
+        for (const auto& o : offsets)
+        {
+            rcclCollDecision dec{};
+            ASSERT_EQ(SelectA2A(*comm, c.first, dec, o.first, o.second, ncclBfloat16), ncclSuccess) << c.first;
+            EXPECT_EQ(dec.algo, c.second) << c.first << " send+" << o.first << " recv+" << o.second;
+        }
+        rcclCollDecision dec{};
+        const size_t count = c.first / ncclTypeSize(ncclBfloat16) / comm->nRanks;
+        ASSERT_EQ(rcclSelectAlltoAll(comm.get(), a2aRecvStorage + 2, a2aRecvStorage + 2, count, ncclBfloat16,
+                                     /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &dec),
+                  ncclSuccess);
+        EXPECT_EQ(dec.algo, c.second) << c.first << " in place +2";
     }
 }
 

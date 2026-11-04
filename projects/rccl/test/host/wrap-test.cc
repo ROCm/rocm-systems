@@ -7769,9 +7769,12 @@ int SelectAllGatherAlgo(ncclComm* comm) {
   return decision.algo;
 }
 
+// Distinct send and receive buffers, so the out-of-place path is the one selected.
 int SelectAlltoAllAlgo(ncclComm* comm) {
+  alignas(256) static char send[256];
+  alignas(256) static char recv[256];
   rcclCollDecision decision{};
-  EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, /*stream=*/nullptr,
+  EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, send, recv, /*count=*/8, ncclFloat32, /*stream=*/nullptr,
                                             /*query=*/true, /*graphCapturingHint=*/false, &decision));
   return decision.algo;
 }
