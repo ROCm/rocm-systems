@@ -1627,6 +1627,20 @@ public:
     write_vgpr_region(physical_reg, 2, uint64_t{1} << lane).set_lane64(0, lane, value);
   }
 
+  /// @brief Acquire observed storage for an undelegated VGPR operand.
+  /// reg_count is the number of consecutive physical source registers consumed.
+  /// @returns No view for uniform or delegated operands; their operand semantics
+  /// must be materialized through the logical read APIs instead.
+  [[nodiscard]] std::optional<VgprReadRegion>
+  read_operand_region(const Operand &op, uint64_t lane_mask, uint32_t reg_count = 1) const {
+    if (op.delegate())
+      return std::nullopt;
+    auto base = op.simd_vgpr_base(wavefront());
+    if (!base)
+      return std::nullopt;
+    return read_vgpr_region(*base, reg_count, lane_mask);
+  }
+
   [[nodiscard]] VgprReadRegion read_vgpr_region(uint32_t physical_base, uint32_t reg_count,
                                                 uint64_t lane_mask, uint8_t byte_mask = 0xF) const {
     const uint32_t wave_size = vgpr_region_wave_size(physical_base, reg_count);
@@ -1673,16 +1687,33 @@ public:
     if (!mutable_wf_)
       return std::nullopt;
     Wavefront &wf = mutable_wavefront();
-    if (cu_->observes_register_access() || reg_count == 0 || reg_count > MaxRegisters ||
-        !cu_->owns_vgpr_range(wf, physical_base, reg_count))
-      return std::nullopt;
     const uint64_t all_lanes = wf.wf_size() == 32 ? 0xffffffffULL : ~0ULL;
     if ((wf.vgpr_write_mask() & all_lanes) != all_lanes)
       return std::nullopt;
-    std::array<uint32_t *, MaxRegisters> pointers{};
-    for (uint32_t reg = 0; reg < reg_count; ++reg)
-      pointers[reg] = reinterpret_cast<uint32_t *>(mutable_cu().raw_vgpr_data(physical_base + reg));
-    return write(pointers.data());
+    auto pointers = bulk_write_pointers<MaxRegisters>(physical_base, reg_count);
+    if (!pointers)
+      return std::nullopt;
+    return write(pointers->data());
+  }
+
+  /// Invoke a masked writer for a one-, two-, or four-word logical destination.
+  /// The writer must honor the effective lane mask and leave storage unchanged on error.
+  /// Delegated, subword and non-VGPR destinations require logical write APIs.
+  template <size_t Registers = 1, typename Function>
+  [[nodiscard]] std::optional<int> try_bulk_write_operand(const Operand &op, uint64_t lane_mask,
+                                                          Function &&write) const {
+    static_assert(Registers == 1 || Registers == 2 || Registers == 4);
+    if (op.delegate() || op.size_bits() != 32 * Registers || !op.simd_capable())
+      return std::nullopt;
+    auto base = op.simd_vgpr_base_mut(mutable_wavefront());
+    if (!base)
+      return std::nullopt;
+    Wavefront &wf = mutable_wavefront();
+    auto pointers = bulk_write_pointers<Registers>(*base, Registers);
+    if (!pointers)
+      return std::nullopt;
+    lane_mask &= wf.vgpr_write_mask() & (wf.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
+    return write(pointers->data(), lane_mask);
   }
 
   [[nodiscard]] VgprReadWriteRegion readwrite_vgpr_region(uint32_t physical_base,
@@ -1707,6 +1738,19 @@ public:
   }
 
 private:
+  /// Acquire unobserved, wave-owned storage for the direct bulk-write APIs.
+  template <size_t MaxRegisters>
+  std::optional<std::array<uint32_t *, MaxRegisters>>
+  bulk_write_pointers(uint32_t physical_base, uint32_t reg_count) const {
+    if (cu_->observes_register_access() || reg_count == 0 || reg_count > MaxRegisters ||
+        !cu_->owns_vgpr_range(mutable_wavefront(), physical_base, reg_count))
+      return std::nullopt;
+    std::array<uint32_t *, MaxRegisters> pointers{};
+    for (uint32_t reg = 0; reg < reg_count; ++reg)
+      pointers[reg] = reinterpret_cast<uint32_t *>(mutable_cu().raw_vgpr_data(physical_base + reg));
+    return pointers;
+  }
+
   friend class MemoryWaitScoreboard;
 
   /// Only explicitly qualified destinations preserve bytes outside their mask.

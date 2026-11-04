@@ -109,7 +109,7 @@ template <typename Call> void expect_invalid_fp_requests(Call call) {
   EXPECT_EQ(call(0, 1ULL << 63), RJ_ARITH_ERROR_INVALID_FLAGS);
 }
 
-// FP64 FMA and unary APIs reject nondefault guest rounding in Loose/Compatibility.
+// FP64 unary APIs reject nondefault guest rounding in Loose/Compatibility.
 // The caller checks that rejected requests preserve operand and status storage.
 template <typename Call> void expect_invalid_fp64_rounding(Call call) {
   for (uint64_t cpu : supported_cpu_levels()) {
