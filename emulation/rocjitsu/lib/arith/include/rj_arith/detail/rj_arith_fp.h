@@ -284,8 +284,8 @@ int rj_arith_v_pk_fmac_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 // Supports ALU ABS/NEG on present sources, OMOD and CLAMP, with loose semantics.
 // Mode 2 returns UNSUPPORTED_SEMANTICS; mode 3 returns UNSUPPORTED_FP_STATUS.
 // Compatibility resolves to Loose; dropping status alone does not enable exact FP64 arithmetic.
-// Nonzero RJ_ARITH_FP_ROUND_* flags are rejected with INVALID_FLAGS, including
-// in Loose and Compatibility. Rejection preserves all outputs.
+// Guest RJ_ARITH_FP_ROUND_* controls finite arithmetic and output scaling in
+// Loose and Compatibility without changing host floating-point controls.
 // Host nearest-even rounding and enabled denormals are required. Whole VGPR
 // aliases may cross operand halves; sources are read before destination writes.
 // FMA uses APIs without _gfx12 for RDNA3 and _gfx12 variants for RDNA4.
@@ -293,6 +293,8 @@ int rj_arith_v_pk_fmac_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 // set; RDNA4 applies it regardless. FMA accepts guest input/output
 // denormal flushing, also in Wave64. They remain loose-only: IEEE-mode support
 // does not promise exact NaN behavior or exception reporting.
+// Output flushing follows rounding: a tiny result rounded to minimum normal is
+// retained. This inherited approximation can differ from GPU flushing.
 // CLAMP maps NaNs to +0; RDNA3 preserves NaNs with RJ_ARITH_FP_DX10_CLAMP_OFF.
 int rj_arith_v_fma_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
@@ -310,7 +312,8 @@ int rj_arith_v_fma_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *excp_flag_user);
 
 // Unary FP64 arithmetic uses the same low/high VGPR layout, Compatibility
-// resolution, and guest-rounding flag rejection as FP64 FMA above. Guest
+// resolution and loose-only support as FP64 FMA above. Unary APIs currently
+// reject nondefault guest rounding. Guest
 // input/output-denormal flags control flushing. RDNA3 disables OMOD when IEEE
 // is set or output denormals are preserved; RDNA4 applies OMOD independently.
 // Supports A ABS/NEG,
