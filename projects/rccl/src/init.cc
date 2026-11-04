@@ -1567,7 +1567,9 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
           memcpy(info->fabricInfo.clusterUuid, &temp_uuid0, sizeof(temp_uuid0));
           memcpy(info->fabricInfo.clusterUuid + sizeof(temp_uuid0), &temp_uuid1, sizeof(temp_uuid1));
         }
-        if (ncclParamMNNVLCliqueId() != -1) {
+        // On AMD, -2 is not applicable (NV-only rack-hash semantics), so only
+        // apply explicit non-negative user clique IDs here.
+        if (ncclParamMNNVLCliqueId() >= 0) {
           info->fabricInfo.cliqueId = (uint32_t)ncclParamMNNVLCliqueId();
         }
       }
