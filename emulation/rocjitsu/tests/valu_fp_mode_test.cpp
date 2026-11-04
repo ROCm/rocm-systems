@@ -914,7 +914,9 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
         0xf0u);
     add("FixupF16ProvisionalNaN", 6, {{0, 0x7e2au}, {1, 0xbc00u}, {2, 0x3c00u}}, {{6, 0xfc00u}},
         0xf0u);
-    add("FixupF16QuietNaNPayload", 6, {{0, 0u}, {1, 0x3c00u}, {2, 0xfc2au}}, {{6, 0xfe2au}}, 0xf0u);
+    // gfx1100 captures preserve the selected signaling NaN with IEEE mode clear.
+    add("FixupF16NaNPayload", 6, {{0, 0u}, {1, 0x3c00u}, {2, 0xfc2au}},
+        {{6, encoding.arch == ROCJITSU_CODE_ARCH_RDNA3 ? 0xfc2au : 0xfe2au}}, 0xf0u);
   }
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
     for (uint32_t mode = 0; mode < 256; mode += 17) {
