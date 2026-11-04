@@ -1124,6 +1124,30 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_SymkAvailable_ReceivesTaskField
   EXPECT_EQ(remainTasksHead, &task);
 }
 
+// Regression: ncclAllReduceWithBias must never reach the symmetric kernels, which have no
+// bias operand -- extracting such a task silently drops the bias from the result.
+// ncclAllReduceWithBias_impl bypasses rcclSelectAllReduce, so symkExtract stays at
+// RCCL_SYMK_EXTRACT_NONE and cannot gate this. Mirrors the guard in rcclUseCeAr2Shot().
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_AllReduceWithBias_StaysOnRemainderList) {
+  MakeSymmetricTaskList_Scene scene;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene, ncclFuncAllReduce, ncclFloat32);
+  task.count = 1024;
+  task.opHost = ncclSum;
+  task.opDev.op = ncclDevSum;
+  int biasBuffer = 0;
+  task.acc = &biasBuffer;
+
+  // Symmetric kernels report themselves available for these operands; the bias guard must
+  // still win. symTaskQueue is nullptr, so an incorrect extraction would not return success.
+  ScopedHook symkHook(g_symkAvailable,
+                      [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(remainTasksHead, &task);
+  EXPECT_EQ(task.next, nullptr);
+}
+
 TEST_F(SchedulerMicrotest,
       MakeSymmetricTaskList_SymmetricTaskBetweenTwoRemainderTasks_AppendCorrectsStalePointer) {
   MakeSymmetricTaskList_Scene scene;
