@@ -6738,18 +6738,36 @@ class CodeGenerator:
         )
         from amdisa.codegen.execute.rj_arith_float import (
             RjArithBody,
+            gen_float_unary32,
+            gen_float_unary64,
+            gen_float64_word,
             gen_float_fma64,
+            gen_float_binary64,
+            gen_float_unary16,
+            gen_float_binary32,
+            gen_float_binary16,
             gen_float_fma32,
             gen_float_fma16,
+            gen_float_ternary_selection,
             gen_packed_fma16,
             gen_mixed_fma,
+            gen_packed_binary16,
         )
 
         if result_writer is None:
             for handler in (
+                gen_packed_binary16,
                 gen_packed_fma16,
                 gen_mixed_fma,
+                gen_float_unary16,
+                gen_float_unary32,
+                gen_float_unary64,
+                gen_float_binary64,
                 gen_float_fma64,
+                gen_float64_word,
+                gen_float_binary16,
+                gen_float_binary32,
+                gen_float_ternary_selection,
                 gen_float_fma16,
                 gen_float_fma32,
             ):

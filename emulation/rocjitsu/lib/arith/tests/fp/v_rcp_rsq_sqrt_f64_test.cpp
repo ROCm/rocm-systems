@@ -13,49 +13,57 @@
 // Check FP64 reciprocal, reciprocal square root, and square root.
 TEST(FpRcpF64W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_loose_unary_f64<32>(
-      rj_arith_v_rcp_f64_w32_gfx12, [](double x) { return 1.0 / x; }, true);
+      rj_arith_v_rcp_f64_w32_gfx12, [](double x) { return 1.0 / x; }, true,
+      /*supports_guest_rounding=*/false);
 }
 
 // Check FP64 reciprocal, reciprocal square root, and square root.
 TEST(FpRcpF64W32Gfx11, Arithmetic) {
   rocjitsu::arith::test::check_loose_unary_f64<32>(
-      rj_arith_v_rcp_f64_w32, [](double x) { return 1.0 / x; }, false);
+      rj_arith_v_rcp_f64_w32, [](double x) { return 1.0 / x; }, false,
+      /*supports_guest_rounding=*/false);
 }
 
 // Check FP64 reciprocal, reciprocal square root, and square root.
 TEST(FpRcpF64W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_loose_unary_f64<64>(
-      rj_arith_v_rcp_f64_w64_gfx12, [](double x) { return 1.0 / x; }, true);
+      rj_arith_v_rcp_f64_w64_gfx12, [](double x) { return 1.0 / x; }, true,
+      /*supports_guest_rounding=*/false);
 }
 
 // Check FP64 reciprocal, reciprocal square root, and square root.
 TEST(FpRcpF64W64Gfx11, Arithmetic) {
   rocjitsu::arith::test::check_loose_unary_f64<64>(
-      rj_arith_v_rcp_f64_w64, [](double x) { return 1.0 / x; }, false);
+      rj_arith_v_rcp_f64_w64, [](double x) { return 1.0 / x; }, false,
+      /*supports_guest_rounding=*/false);
 }
 
 // Check FP64 reciprocal, reciprocal square root, and square root.
 TEST(FpRsqF64W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_loose_unary_f64<32>(
-      rj_arith_v_rsq_f64_w32_gfx12, [](double x) { return 1.0 / std::sqrt(x); }, true);
+      rj_arith_v_rsq_f64_w32_gfx12, [](double x) { return 1.0 / std::sqrt(x); }, true,
+      /*supports_guest_rounding=*/false);
 }
 
 // Check FP64 reciprocal, reciprocal square root, and square root.
 TEST(FpRsqF64W32Gfx11, Arithmetic) {
   rocjitsu::arith::test::check_loose_unary_f64<32>(
-      rj_arith_v_rsq_f64_w32, [](double x) { return 1.0 / std::sqrt(x); }, false);
+      rj_arith_v_rsq_f64_w32, [](double x) { return 1.0 / std::sqrt(x); }, false,
+      /*supports_guest_rounding=*/false);
 }
 
 // Check FP64 reciprocal, reciprocal square root, and square root.
 TEST(FpRsqF64W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_loose_unary_f64<64>(
-      rj_arith_v_rsq_f64_w64_gfx12, [](double x) { return 1.0 / std::sqrt(x); }, true);
+      rj_arith_v_rsq_f64_w64_gfx12, [](double x) { return 1.0 / std::sqrt(x); }, true,
+      /*supports_guest_rounding=*/false);
 }
 
 // Check FP64 reciprocal, reciprocal square root, and square root.
 TEST(FpRsqF64W64Gfx11, Arithmetic) {
   rocjitsu::arith::test::check_loose_unary_f64<64>(
-      rj_arith_v_rsq_f64_w64, [](double x) { return 1.0 / std::sqrt(x); }, false);
+      rj_arith_v_rsq_f64_w64, [](double x) { return 1.0 / std::sqrt(x); }, false,
+      /*supports_guest_rounding=*/false);
 }
 
 // Check FP64 reciprocal, reciprocal square root, and square root.
@@ -66,7 +74,7 @@ TEST(FpSqrtF64W32Gfx12, Arithmetic) {
         double value = std::sqrt(x);
         return value;
       },
-      true);
+      true, /*supports_guest_rounding=*/false);
 }
 
 // Check FP64 reciprocal, reciprocal square root, and square root.
@@ -77,7 +85,7 @@ TEST(FpSqrtF64W32Gfx11, Arithmetic) {
         double value = std::sqrt(x);
         return value;
       },
-      false);
+      false, /*supports_guest_rounding=*/false);
 }
 
 // Check FP64 reciprocal, reciprocal square root, and square root.
@@ -88,7 +96,7 @@ TEST(FpSqrtF64W64Gfx12, Arithmetic) {
         double value = std::sqrt(x);
         return value;
       },
-      true);
+      true, /*supports_guest_rounding=*/false);
 }
 
 // Check FP64 reciprocal, reciprocal square root, and square root.
@@ -99,7 +107,7 @@ TEST(FpSqrtF64W64Gfx11, Arithmetic) {
         double value = std::sqrt(x);
         return value;
       },
-      false);
+      false, /*supports_guest_rounding=*/false);
 }
 
 // Guest denormal controls affect unary arithmetic on both architectures.

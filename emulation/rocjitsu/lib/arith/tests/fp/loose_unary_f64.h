@@ -24,7 +24,8 @@ namespace rocjitsu::arith::test {
 // modes, modifiers, EXEC, aliasing, and untouched FP status. The caller supplies
 // the entry point and an independent scalar reference expression.
 template <int Lanes, typename Call, typename Reference>
-void check_loose_unary_f64(Call call, Reference reference, bool gfx12) {
+void check_loose_unary_f64(Call call, Reference reference, bool gfx12,
+                           bool supports_guest_rounding = true) {
   static_assert(Lanes == 32 || Lanes == 64);
   using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
   using Registers = rocjitsu::arith::test::Registers<10, Lanes>;
@@ -50,7 +51,9 @@ void check_loose_unary_f64(Call call, Reference reference, bool gfx12) {
     return result;
   };
   expect_invalid_fp_requests(invalid_request);
-  expect_invalid_fp64_rounding(invalid_request);
+  if (!supports_guest_rounding) {
+    expect_invalid_fp64_rounding(invalid_request);
+  }
 
   // This entry point is loose-only. Its reference is computed independently;
   // strict numeric semantics and required reporting are checked as error contracts.
