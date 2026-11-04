@@ -931,14 +931,16 @@ TEST_F(DecodedTensorDmaRaceTest, LoadStaysPendingUntilTheWaitCoversIt) {
                                         {.lds_offset = kEmptyOffset, .tensor_dim0 = 0}));
 }
 
-// An 8-byte element at offset 252 straddles the end of the 256-byte allocation:
-// the transfer moves only its first four bytes, so its LDS range ends
-// mid-element. The race detector tracks those bytes, at byte granularity.
+// An i32 element at offset 254 straddles the end of the 256-byte allocation:
+// the transfer moves only its first two bytes, so its LDS range ends
+// mid-element. The race detector tracks those bytes at byte granularity, so a
+// peer DWORD access at 252 overlaps them; DWORD granularity would drop them.
+static constexpr uint32_t kPartialI32Offset = 254;
+static constexpr uint32_t kPeerDwordOffset = 252;
 
 TEST_F(DecodedTensorDmaRaceTest, PartialElementLoadIsAnLdsWrite) {
-  execute_decoded_tensor(0, /*is_load=*/true,
-                         {.lds_offset = 252, .tile_dim0 = 1, .data_size = kI64DataSizeEncoding});
-  EXPECT_TRUE(ds_read(1, waves[1]->lds_base() + 252));
+  execute_decoded_tensor(0, /*is_load=*/true, {.lds_offset = kPartialI32Offset, .tile_dim0 = 1});
+  EXPECT_TRUE(ds_read(1, waves[1]->lds_base() + kPeerDwordOffset));
 }
 
 TEST_F(DecodedTensorDmaRaceTest, MergedLoadKeepsItsPartialTail) {
@@ -949,16 +951,14 @@ TEST_F(DecodedTensorDmaRaceTest, MergedLoadKeepsItsPartialTail) {
 }
 
 TEST_F(DecodedTensorDmaRaceTest, PartialElementStoreIsAnLdsRead) {
-  execute_decoded_tensor(0, /*is_load=*/false,
-                         {.lds_offset = 252, .tile_dim0 = 1, .data_size = kI64DataSizeEncoding});
-  EXPECT_TRUE(ds_write(1, waves[1]->lds_base() + 252));
+  execute_decoded_tensor(0, /*is_load=*/false, {.lds_offset = kPartialI32Offset, .tile_dim0 = 1});
+  EXPECT_TRUE(ds_write(1, waves[1]->lds_base() + kPeerDwordOffset));
 }
 
 TEST_F(DecodedTensorDmaRaceTest, PartialElementLoadIsCheckedAgainstAnOlderRead) {
-  EXPECT_FALSE(ds_read(1, waves[1]->lds_base() + 252));
+  EXPECT_FALSE(ds_read(1, waves[1]->lds_base() + kPeerDwordOffset));
   const size_t previous = sink->str().size();
-  execute_decoded_tensor(0, /*is_load=*/true,
-                         {.lds_offset = 252, .tile_dim0 = 1, .data_size = kI64DataSizeEncoding});
+  execute_decoded_tensor(0, /*is_load=*/true, {.lds_offset = kPartialI32Offset, .tile_dim0 = 1});
   EXPECT_NE(sink->str().find("RACE ", previous), std::string::npos) << sink->str();
 }
 
