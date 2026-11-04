@@ -86,15 +86,22 @@ public:
   bool observes_sgpr_reads() const override { return true; }
   bool observes_memory_routing() const override { return true; }
   bool observes_tensor_dma_issue() const override { return true; }
+  /// Skip waves without race state, including slots between a halt and the
+  /// next workgroup dispatch, when other plugins may read their registers.
+  bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const override;
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
-
-  /// Release the workgroup's detector. Reported races are still counted.
-  void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) override;
 
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
                                    uint32_t physical_vgpr_count, uint32_t physical_sgpr_count,
                                    std::span<amdgpu::Wavefront *> wavefronts) override;
+
+  /// Release the workgroup's detector. Reported races are still counted.
+  void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) override;
+
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override;
+
+  void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override;
 
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
                                   const Instruction &inst, amdgpu::Wavefront &wf) override;
@@ -147,6 +154,7 @@ private:
   RaceWavefrontState *get_state(const amdgpu::Wavefront *wf) {
     return wf ? get_state(*wf) : nullptr;
   }
+  void release_wave_state(amdgpu::Wavefront &wf) { wf.clear_plugin_state(slot_index()); }
 
   mutable std::mutex dispatch_mutex_;
   std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;

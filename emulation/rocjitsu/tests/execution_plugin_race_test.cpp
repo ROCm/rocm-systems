@@ -983,8 +983,7 @@ TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
 
 TEST(RaceDetectorPluginTest, CompletedWorkgroupReleasesOnlyItsDetector) {
   PluginFixture f;
-  f.initialize(/*num_wf_slots=*/2);
-  ASSERT_FALSE(testing::Test::HasFatalFailure());
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/3));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -997,20 +996,30 @@ TEST(RaceDetectorPluginTest, CompletedWorkgroupReleasesOnlyItsDetector) {
   auto *cu = f.cu();
   auto *first = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
   auto *second = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  auto *next_dispatch = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(first, nullptr);
   ASSERT_NE(second, nullptr);
+  ASSERT_NE(next_dispatch, nullptr);
   first->set_exec(1u);
   second->set_exec(1u);
+  next_dispatch->set_exec(1u);
   std::array<amdgpu::Wavefront *, 1> first_waves{first};
   std::array<amdgpu::Wavefront *, 1> second_waves{second};
-  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0, 256, 104,
-                                               first_waves);
-  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/1, 256, 104,
-                                               second_waves);
-  EXPECT_EQ(race->retainedWorkgroupCount(), 2u);
+  std::array<amdgpu::Wavefront *, 1> next_dispatch_waves{next_dispatch};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0,
+                                               /*physical_vgpr_count=*/256,
+                                               /*physical_sgpr_count=*/104, first_waves);
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/1,
+                                               /*physical_vgpr_count=*/256,
+                                               /*physical_sgpr_count=*/104, second_waves);
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/2, /*wg_id=*/0,
+                                               /*physical_vgpr_count=*/256,
+                                               /*physical_sgpr_count=*/104, next_dispatch_waves);
+  EXPECT_EQ(race->retainedWorkgroupCount(), 3u);
 
+  // Workgroup 0 of dispatch 2 keeps its detector.
   f.plugin_group_->onAmdgpuWorkgroupCompleted(/*dispatch_id=*/1, /*wg_id=*/0);
-  EXPECT_EQ(race->retainedWorkgroupCount(), 1u);
+  EXPECT_EQ(race->retainedWorkgroupCount(), 2u);
 
   // The other workgroup of the dispatch still detects a read before its load
   // completes.
@@ -1032,11 +1041,31 @@ TEST(RaceDetectorPluginTest, CompletedWorkgroupReleasesOnlyItsDetector) {
 
   const std::string summary = race->getSummary();
   f.plugin_group_->onAmdgpuWorkgroupCompleted(/*dispatch_id=*/1, /*wg_id=*/1);
+  f.plugin_group_->onAmdgpuWorkgroupCompleted(/*dispatch_id=*/2, /*wg_id=*/0);
   EXPECT_EQ(race->retainedWorkgroupCount(), 0u);
   EXPECT_EQ(race->getSummary(), summary);
 }
 
 TEST(RaceDetectorPluginTest, SchedulerReleasesDetectorsAcrossWaveSlotReuse) {
+  // Reads registers from the workgroup-dispatch callback, which runs before the
+  // race plugin installs state for the new waves.
+  class RegisterProbe : public ExecutionPlugin {
+  public:
+    RegisterProbe() : ExecutionPlugin("register_probe") {}
+
+    void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, uint32_t, uint32_t,
+                                     std::span<Wavefront *> waves) override {
+      for (auto *wave : waves) {
+        const RegisterAccess registers(*wave);
+        static_cast<void>(registers.read_vgpr(wave->vgpr_alloc().base, /*lane=*/0));
+        static_cast<void>(registers.read_sgpr(wave->sgpr_alloc().base));
+        ++probed_waves;
+      }
+    }
+
+    uint32_t probed_waves = 0;
+  };
+
   class LifetimeObserver : public ExecutionPlugin {
   public:
     explicit LifetimeObserver(RaceDetectorPlugin &race)
@@ -1076,11 +1105,14 @@ TEST(RaceDetectorPluginTest, SchedulerReleasesDetectorsAcrossWaveSlotReuse) {
     PluginSinkConfig sink_config;
     auto &sink = sink_config.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    auto probe = std::make_unique<RegisterProbe>();
+    RegisterProbe *register_probe = probe.get();
+    ASSERT_TRUE(f.plugin_group_->add(std::move(probe)));
     auto plugin = std::make_unique<RaceDetectorPlugin>();
-    auto *race = plugin.get();
+    RaceDetectorPlugin *race = plugin.get();
     ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
     auto observer = std::make_unique<LifetimeObserver>(*race);
-    auto *lifetime = observer.get();
+    LifetimeObserver *lifetime = observer.get();
     // Observe counts after the race plugin processes each lifecycle callback.
     ASSERT_TRUE(f.plugin_group_->add(std::move(observer)));
     f.soc->set_plugin_group(f.plugin_group_);
@@ -1107,6 +1139,7 @@ TEST(RaceDetectorPluginTest, SchedulerReleasesDetectorsAcrossWaveSlotReuse) {
 
       EXPECT_EQ(lifetime->dispatched, dispatch * 4);
       ASSERT_EQ(lifetime->completed, dispatch * 4);
+      EXPECT_EQ(register_probe->probed_waves, dispatch * 8);
       EXPECT_EQ(lifetime->peak_retained, 2u);
       EXPECT_EQ(race->retainedWorkgroupCount(), 0u);
       EXPECT_TRUE(f.cu(0)->is_idle());
