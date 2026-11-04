@@ -157,17 +157,21 @@ Modes: `pack|direct|pipe` = `--algorithm direct --copy-algorithm <mode>`; `defau
 is parsed but has no effect: the copy path (`NCCL_RESHARD_COPY_ALGORITHM`, default PACK) decides the data
 movement, so RING, DIRECT and AUTO give the same numbers for the same copy path.
 
-Expected: **all PASS, no HANG**. GiB/s per rank, 2 MiB / 64 MiB / 1 GiB:
+Expected: **all PASS, no HANG**, except the known PIPE 1x4 -> 2x2 FAIL below. GiB/s per rank, 2 MiB / 64 MiB / 1 GiB:
 
 | Mode | same 0->0 | cross 0->1 | cross 1->0 | 1x4 -> 2x2 (source ranks) |
 |---|---|---|---|---|
 | PACK | 3.7 / 39 / 51 | 3.6 / 66 / 176 | 3.7 / 68 / 176 | 2.2 / 35 / 52 |
 | DIRECT | 0.8 / 3.3 / 3.8 | 0.7 / 7.1 / 9.6 | 0.6 / 7.5 / 9.5 | 0.5 / 7.7 / 6.0 |
-| PIPE | 2.6 / 27 / 44 | 1.7 / 18 / 19 | 1.7 / 18 / 19 | 0.6 / 2.1 / 40 |
+| PIPE | 2.6 / 27 / 44 | 1.7 / 18 / 19 | 1.7 / 18 / 19 | **FAIL** (known; 0.6 / 2.1 / 40 with the LSA-tile path) |
 
 Copy DIRECT moves every byte with GIN put, also inside a node (no xGMI/LSA path), and runs one CTA per
 peer, so it is far below PACK. PIPE is slow for strided destination rows shorter than 64 KiB (cross-dim
 up to 1 GiB, 1x4 -> 2x2 below 1 GiB here): those are copied one row per thread.
+
+Known FAIL on the current base: PIPE with a destination replicated inside a node (1x4 -> 2x2, LSA-sourced
+tiles) ends with `VALIDATION FAILED` and `exit 1` at every size, because this base does not carry the AMD
+LSA-tile path without TMA (`e0f6f109c26`). `dl_check.sh` and the aggregators report it as FAIL.
 
 ## 8. reshard_bench matrix (1, 2, 4 nodes + asymmetric)
 
@@ -235,7 +239,8 @@ DIRECT copy reaches 4-17 GiB/s. For 1xS -> 2x(D/2) (destination replicated x2) P
 over the network and is bound by the destination NICs (23.3 GiB/s per source rank for S = D): 23.1 on 2 nodes,
 11.0 on 4 nodes. PIPE fans the replicas out inside the destination node and reaches 43.1 / 19.0 GiB/s,
 but has reproducible cliffs (1 node cross 1 GiB: 18.8 vs 27.5 at 256 MiB; 2 nodes mesh change 1 GiB:
-2.1 vs 3.5 at 256 MiB and 43 at 4 GiB). All numbers are the `Sources only` block (per source rank);
+2.1 vs 3.5 at 256 MiB and 43 at 4 GiB; PIPE mesh change was measured with the LSA-tile path and fails
+validation on the current base, see section 7). All numbers are the `Sources only` block (per source rank);
 for the replicated shape the bench's `Overall` average is larger because destination ranks hold twice the bytes. Below 16 MiB everything is latency bound:
 ~0.13 ms per call on 1 node, ~0.3-0.4 ms on 2 nodes, ~0.45-1.0 ms on 4 nodes.
 
