@@ -1375,9 +1375,15 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
 
   // Validate all signals for the wait and skip already completed
   for (uint32_t i = 0; i < external_signals_.size(); ++i) {
+    const Settings& settings = gpu_.dev().settings();
+    // DEBUG_CLR_GRAPH_FAST_LAUNCH: a signal in device memory (graph signals, end-marker gates,
+    // device-memory queue signals) is not read: the read crosses PCIe and waits for the
+    // write-combined packet stores ahead of it, and the CP checks the wait anyway. Only a wait the
+    // host bookkeeping proves retired, with no read, is left out
+    const bool unread = DEBUG_CLR_GRAPH_FAST_LAUNCH && external_signals_[i]->in_device_memory_ &&
+                        !settings.cpu_wait_for_signal_;
     // Early signal status check
-    if (IsBusy(external_signals_[i])) {
-      const Settings& settings = gpu_.dev().settings();
+    if (unread ? !IsKnownRetired(external_signals_[i]) : IsBusy(external_signals_[i])) {
       if (settings.cpu_wait_for_signal_) {
         // Wait on CPU for completion if requested
         CpuWaitForSignal(external_signals_[i]);
@@ -1576,7 +1582,12 @@ hsa_status_t VirtualGPU::RetiringSignalTracker::SetAsyncHandler(ProfilingSignal*
 
 // ================================================================================================
 bool VirtualGPU::RetiringSignalTracker::IsBusy(const ProfilingSignal* signal) const {
-  return !(signal == signal_list_[current_id_] && IsRetired(signal)) && LoadValue(signal) > 0;
+  return !IsKnownRetired(signal) && LoadValue(signal) > 0;
+}
+
+// ================================================================================================
+bool VirtualGPU::RetiringSignalTracker::IsKnownRetired(const ProfilingSignal* signal) const {
+  return signal == signal_list_[current_id_] && IsRetired(signal);
 }
 
 // ================================================================================================
@@ -2756,6 +2767,13 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   // Reserving the full batch up front lets the write index lead the read index by a full
   // ring or more, which the CP cannot tell apart from an empty queue.
   uint64_t lastIndex = 0;
+  // DEBUG_CLR_GRAPH_FAST_LAUNCH: the last packet's completion signal as written, kept on the
+  // host; reading it back from a device-memory ring is a PCIe read, which on some hosts also
+  // waits for the write-combined stores ahead of it. A profiled batch's NT path writes the signal
+  // in place, so it is read back as before.
+  hsa_signal_t last_completion = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
+      flatPacketData.data() + (numPackets - 1) * kPacketSize)->completion_signal;
+  const bool last_completion_known = DEBUG_CLR_GRAPH_FAST_LAUNCH && (!profiled || use_movdir64b);
   size_t chunk_size = std::min(kLead, kPeriod);
   for (size_t chunkStart = 0; chunkStart < numPackets; ) {
     const size_t chunkEnd  = std::min(chunkStart + chunk_size, numPackets);
@@ -2813,7 +2831,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
           queueBase + (chunkLastIndex & queueMask) * kPacketSize);
       if (isLastChunk && (attach_signal || blocking) && timestamp_ == nullptr) {
         Barriers().ActiveSignal();
-        lastSlotPtr->completion_signal = Barriers().GetLastSignal()->PacketHandle(false);
+        last_completion = Barriers().GetLastSignal()->PacketHandle(false);
+        lastSlotPtr->completion_signal = last_completion;
       }
       if (isFirstChunk && (fork_dep.handle != 0)) {
         reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(queueBase +
@@ -2881,6 +2900,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         *reinterpret_cast<uint32_t*>(&stg) = hdr | (static_cast<uint32_t>(setup) << 16);
         auto* dst = queueBase + slotIdx * kPacketSize;
         amd::movdir64b_copy64(dst, &stg);
+        if (i == numPackets - 1) {
+          last_completion = stg.completion_signal;
+        }
         if (record_dispatches || kLogBatch) {
           reportBatchPacket(i, slotIdx, packetSignal);
         }
@@ -2901,20 +2923,23 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
 
   auto* finalLastSlot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
       queueBase + (lastIndex & queueMask) * kPacketSize);
+  hsa_kernel_dispatch_packet_t final_packet = {};
+  final_packet.completion_signal =
+      last_completion_known ? last_completion : finalLastSlot->completion_signal;
 
   // Skip the pending dispatch only when both conditions are met: a completion
   // signal tracks the last packet and the fence is already clean (system scope).
-  if (finalLastSlot->completion_signal.handle != 0 && !isFenceDirty()) {
+  if (final_packet.completion_signal.handle != 0 && !isFenceDirty()) {
     ClearStateFlag(kHasPendingDispatch);
   }
 
-  TrackQueueProgress(*finalLastSlot, lastIndex, pre_patched);
+  TrackQueueProgress(final_packet, lastIndex, pre_patched);
 
   if (blocking) {
     LogInfo("Running serialized as blocking is requested");
     if (!Barriers().WaitCurrent()) {
       LogPrintfError("Failed blocking queue wait with signal [0x%lx]",
-                     finalLastSlot->completion_signal.handle);
+                     final_packet.completion_signal.handle);
       profilingEnd();
       return false;
     }
