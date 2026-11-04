@@ -31,3 +31,15 @@ repos:
         name: clang-format (C/C++)
         entry: clang-format -i -style=file
         files: ^projects/rccl/src/.*\.(c|cc|cpp|h|hpp)$
+
+  # Python linting, advisory only.
+  - repo: local
+    hooks:
+      - id: pylint-advisory
+        name: pylint (advisory, RCCL-owned Python)
+        language: python
+        additional_dependencies: ["pylint==4.1.3"]
+        entry: bash -c 'pylint --rcfile=projects/rccl/.pylintrc "$@" || true' --
+        # Always show output, even when the hook passes, since it always passes.
+        verbose: true
+        files: ^projects/rccl/(ci/scripts|cmake/scripts|tools/asm_extract|tools/ci|tools/scripts|tools/time-trace|tuner)/.*\.py$|^projects/rccl/test/[^/]*\.py$
