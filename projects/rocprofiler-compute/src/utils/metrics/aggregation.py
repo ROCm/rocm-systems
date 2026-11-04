@@ -242,7 +242,12 @@ def merge_dispatch_collect_ratio(
     numerator_series_list: list[pd.Series],
     denominator_series_list: list[pd.Series],
 ) -> float:
-    """Sum numerators and denominators across dispatches, then divide once."""
+    """Sum numerators and denominators across dispatches, then divide once.
+
+    A dispatch whose denominator is zero still adds its numerator. A missing
+    or NaN fragment skips that dispatch. The result is unset when every
+    dispatch is skipped or the pooled denominator is zero.
+    """
     if not numerator_series_list or not denominator_series_list:
         return np.nan
 
@@ -271,7 +276,7 @@ def merge_dispatch_collect_ratio(
                     skip_dispatch = True
                     break
                 denominator += value
-        if skip_dispatch or denominator == 0.0:
+        if skip_dispatch:
             continue
         numerator_total += numerator
         denominator_total += denominator

@@ -101,6 +101,20 @@ def test_merge_dispatch_collect_ratio_pools_unequal_dispatches():
 
 
 @pytest.mark.misc
+def test_merge_dispatch_collect_ratio_keeps_numerator_when_denominator_is_zero():
+    nums = [pd.Series({1: 1000.0, 2: 1000.0})]
+    dens = [pd.Series({1: 100.0, 2: 0.0})]
+    assert merge_dispatch_collect_ratio(nums, dens) == pytest.approx(20.0)
+
+
+@pytest.mark.misc
+def test_merge_dispatch_collect_ratio_is_unset_when_pooled_denominator_is_zero():
+    nums = [pd.Series({1: 1000.0, 2: 500.0})]
+    dens = [pd.Series({1: 0.0, 2: 0.0})]
+    assert pd.isna(merge_dispatch_collect_ratio(nums, dens))
+
+
+@pytest.mark.misc
 def test_gfx942_hbm_bandwidth_is_collect_sum():
     doc = yaml.safe_load((_GFX942 / "0400_roofline.yaml").read_text())
     hbm = doc["Panel Config"]["data source"][0]["metric_table"]["metric"][
