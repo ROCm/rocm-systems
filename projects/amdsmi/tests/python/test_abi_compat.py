@@ -169,12 +169,15 @@ class _Patch:
 
     def __enter__(self):
         self._orig = ctypes.CDLL
+        self._orig_dlltype = ctypes.cdll._dlltype
         available = self._available
         ctypes.CDLL = lambda path, mode=0: FakeCDLL(path, mode, available)
+        ctypes.cdll._dlltype = ctypes.CDLL
         return self
 
     def __exit__(self, *exc):
         ctypes.CDLL = self._orig
+        ctypes.cdll._dlltype = self._orig_dlltype
 
 
 class _LibOverrideEnvMixin:
@@ -437,14 +440,15 @@ class WheelLoaderContractTest(unittest.TestCase):
         self.assertEqual(mod._loaded_lib_path, str(sdk_lib))
         self.assertNotIn("_rocm_sdk_core", sys.modules)
 
-    def _import_with(self, site, pkg, cdll):
+    def _import_with(self, site, pkg, cdll, hook=None):
         sys.path.insert(0, str(site))
-        orig = ctypes.CDLL
-        ctypes.CDLL = cdll
+        orig, orig_dlltype = ctypes.CDLL, ctypes.cdll._dlltype
+        ctypes.cdll._dlltype = cdll
+        ctypes.CDLL = hook or cdll
         try:
             return _import_wrapper_from(str(pkg), self._modname)
         finally:
-            ctypes.CDLL = orig
+            ctypes.CDLL, ctypes.cdll._dlltype = orig, orig_dlltype
             sys.path.remove(str(site))
 
     @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
@@ -517,6 +521,61 @@ class WheelLoaderContractTest(unittest.TestCase):
         mod = self._import_with(site, pkg, _cdll)
         self.assertEqual(attempted, [(str(sdk_lib), True)])
         self.assertEqual(mod._loaded_lib_path, str(sdk_lib))
+
+    @unittest.skipUnless(
+        WRAPPER_SRC.is_file() and hasattr(os, "RTLD_NOLOAD"), "needs the wrapper and RTLD_NOLOAD"
+    )
+    def test_plain_load_is_not_redirected_by_ctypes_hook(self):
+        # With nothing loaded, PyTorch 2.14's hook sends any libamd_smi.so*
+        # open to $ROCM_HOME's copy; the rocm-sdk-core copy must still load
+        # the file it asked for, not a same-version system library.
+        site, pkg, sdk_lib = self._sdk_core_site()
+        system_lib = str(self._tmp / "rocm" / "lib" / "libamd_smi.so")
+        plain = lambda path, mode=0: FakeCDLL(path, mode, STABLE_SYMBOLS)
+
+        def _hook(path, mode=0):
+            if Path(path).name.startswith("libamd_smi.so"):
+                path = system_lib
+            return plain(path, mode)
+
+        mod = self._import_with(site, pkg, plain, hook=_hook)
+        self.assertEqual(mod._loaded_lib_path, str(sdk_lib))
+        self.assertEqual(mod._libraries["libamd_smi.so"]._path, str(sdk_lib))
+
+    @unittest.skipUnless(
+        WRAPPER_SRC.is_file() and hasattr(os, "RTLD_NOLOAD"), "needs the wrapper and RTLD_NOLOAD"
+    )
+    def test_loaded_system_library_is_reused_before_a_plain_soname_load(self):
+        # Without TheRock's flag the SONAME lookup also asks for a loaded copy
+        # first, so PyTorch's hook cannot load a second one beside it.
+        site, pkg, sdk_lib = self._sdk_core_site(rocm_sdk_core=False)
+        attempted = []
+
+        def _cdll(path, mode=0):
+            attempted.append((str(path), bool(mode & os.RTLD_NOLOAD)))
+            if mode & os.RTLD_NOLOAD and str(path) == "libamd_smi.so.27":
+                return FakeCDLL(path, 0, STABLE_SYMBOLS)
+            raise OSError("not loaded")
+
+        mod = self._import_with(site, pkg, _cdll)
+        self.assertEqual(attempted, [("libamd_smi.so.27", True)])
+        self.assertEqual(mod._loaded_lib_path, mod._AMDSMI_LIB_SONAME)
+
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    def test_empty_sys_path_entry_is_the_working_directory(self):
+        # "" is the working directory (python -c, python -m), so a
+        # _rocm_sdk_core found only there must still be used.
+        site, pkg, sdk_lib = self._sdk_core_site()
+        cwd = os.getcwd()
+        os.chdir(site)
+        sys.path.insert(0, "")
+        try:
+            with _Patch(STABLE_SYMBOLS):
+                mod = _import_wrapper_from(str(pkg), self._modname)
+        finally:
+            sys.path.remove("")
+            os.chdir(cwd)
+        self.assertEqual(Path(mod._loaded_lib_path).resolve(), sdk_lib.resolve())
 
     @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
     def test_rocm_sdk_core_copy_names_the_missing_library(self):

@@ -268,9 +268,9 @@ def _rocm_sdk_core_dir():
     if getattr(module, "__file__", None):
         return Path(module.__file__).parent
     for entry in sys.path:
-        if not entry or not isinstance(entry, str):
+        if not isinstance(entry, str):
             continue
-        candidate = Path(entry) / "_rocm_sdk_core"
+        candidate = Path(os.path.abspath(entry)) / "_rocm_sdk_core"
         try:
             if (candidate / "__init__.py").is_file():
                 return candidate
@@ -279,14 +279,19 @@ def _rocm_sdk_core_dir():
     return None
 
 
-def _open_library(path, mode, errors):
+def _open_library(path, mode, errors, pinned=True):
     """Open path, reusing it when it is already loaded. PyTorch's import hook
     can redirect a plain load to another libamd_smi; with RTLD_NOLOAD the
-    redirect can only return a copy the process has already loaded."""
+    redirect can only return a copy the process has already loaded. A pinned
+    path is then opened through ctypes.cdll, which the hook does not wrap, so
+    the file asked for is the file loaded."""
     noload = getattr(os, "RTLD_NOLOAD", 0)
     for attempt in ([mode | noload] if noload else []) + [mode]:
         try:
-            lib = ctypes.CDLL(str(path), mode=attempt)
+            if attempt == mode and pinned:
+                lib = ctypes.cdll.LoadLibrary(str(path))
+            else:
+                lib = ctypes.CDLL(str(path), mode=attempt)
         except OSError as err:
             if attempt == mode:
                 errors.append(str(err))
@@ -357,17 +362,9 @@ def _load_library():
             "no usable %s from rocm-sdk-core: %s"
             % (_AMDSMI_LIB_SONAME, "; ".join(errors) or "no file at " + ", ".join(map(str, candidates)))
         )
-    try:
-        lib = ctypes.CDLL(_AMDSMI_LIB_SONAME, mode=mode)
-    except OSError as err:
-        errors.append(str(err))
-    else:
-        try:
-            _check_library_version(lib, _AMDSMI_LIB_SONAME)
-            return lib, _AMDSMI_LIB_SONAME
-        except OSError as err:
-            errors.append(str(err))
-            _unload(lib)
+    lib = _open_library(_AMDSMI_LIB_SONAME, mode, errors, pinned=False)
+    if lib is not None:
+        return lib, _AMDSMI_LIB_SONAME
 
     # No system library: a module copied beside TheRock's rocm-sdk-core wheel
     # by hand, without TheRock's flag, still finds that wheel's library.
