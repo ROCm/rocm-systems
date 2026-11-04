@@ -918,6 +918,7 @@ TEST(GpuMemoryTest, SparsePages) {
   EXPECT_EQ(mem->read32(0x50000), 0u);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 // A direct atomic lets the guarded host access perform the permission check as
 // part of the operation. Split atomics still validate every destination before
 // modifying any of them, while driver-owned extents can trust their backing:
@@ -958,6 +959,7 @@ TEST(GpuMemoryTest, AtomicsValidateApplicationPagesAndTrustDriverPages) {
   munmap(pages, 2 * KfdProcess::kPageSize);
   mem.unregister_process(process.process_id());
 }
+#endif
 
 /// @brief Common host-backed stores must not open procfs on their hot path.
 /// @details Strict writes and direct atomics used to scan /proc/self/maps before
@@ -997,6 +999,7 @@ TEST(GpuMemoryTest, SinglePageApplicationStoresDoNotDependOnProcMaps) {
   mem.unregister_process(process.process_id());
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 // The application can revoke a page the GPU page table still describes -- it is
 // the application's own memory, registered through USERPTR. Nothing checks
 // beforehand, because checking costs more than the access; the access is
@@ -1046,6 +1049,7 @@ TEST(GpuMemoryTest, RevokedApplicationPagesFaultInsteadOfKillingTheProcess) {
   munmap(page, KfdProcess::kPageSize);
   mem.unregister_process(process.process_id());
 }
+#endif
 
 TEST(GpuMemoryTest, FindHostRangeUsesVmidPageTable) {
   rocjitsu::test::LegacyGpuMemoryFixture mem("vmid_range_mem");
@@ -2927,6 +2931,7 @@ TEST(GpuMemoryThreadingTest, IndependentL2sReadWholeMappedLinePublications) {
   }
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(GpuMemoryThreadingTest, GuardedLineCopyReleasesStripesAfterHostFault) {
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kAddress = 0x40000000;
@@ -2959,7 +2964,9 @@ TEST(GpuMemoryThreadingTest, GuardedLineCopyReleasesStripesAfterHostFault) {
   }
   EXPECT_EQ(munmap(page, page_size), 0);
 }
+#endif
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(GpuMemoryThreadingTest, BulkCopyReleasesCurrentStripeAfterLaterPageFault) {
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kAddress = 0x40000000;
@@ -2992,6 +2999,7 @@ TEST(GpuMemoryThreadingTest, BulkCopyReleasesCurrentStripeAfterLaterPageFault) {
   EXPECT_TRUE(unlocked);
   EXPECT_EQ(munmap(pages, 2 * kPageSize), 0);
 }
+#endif
 
 TEST(GpuMemoryTest, IdentityMappedEntryStillEnforcesItsExtent) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
@@ -3909,6 +3917,7 @@ TEST(GpuMemoryTest, PassthroughRejectsUninhabitedIdentityAddresses) {
   EXPECT_GE(amdgpu::GpuMemoryTestAccess::rejected_identity_accesses(memory), 3u);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 /// @brief A rejected identity write must fault without reaching host memory.
 /// @details The page is inhabited but inaccessible, so a raw dereference would
 /// have written through it. The access must not invent a successful sparse
@@ -3947,7 +3956,9 @@ TEST(GpuMemoryTest, PassthroughRejectedAccessFaultsAndLeavesHostMemoryUntouched)
   std::memcpy(&observed, page.data, sizeof(observed));
   EXPECT_EQ(observed, kSentinel);
 }
+#endif
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 /// @brief A copy a registered client refuses must fault, not retry forever.
 /// @details An endpoint that is simply not mapped yet is worth waiting for, and
 /// the SDMA queue scheduler retries the packet for exactly that reason. An endpoint the
@@ -4052,6 +4063,8 @@ TEST(GpuMemoryTest, RefusedClientCopyDeliversItsFaultBeforeReturning) {
   memory.unregister_process(kPid);
 }
 
+#endif
+
 /// @brief A range that wraps the address space is refused, not walked.
 /// @details The page walks add an offset to the base without rechecking, so a
 /// range running past the end of the address space resumes at zero: the access
@@ -4150,6 +4163,7 @@ TEST(GpuMemoryTest, PartiallyBackedAtomicIsRefusedRatherThanTorn) {
   memory.unregister_process(kPid);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 /// @brief A block write must stop at a fault, not step over it.
 /// @details Hardware halts the engine on a memory violation, so a payload that
 /// spans a writable page, an inaccessible one, and another writable one must
@@ -4193,7 +4207,9 @@ TEST(GpuMemoryTest, FaultedBlockWriteStopsInsteadOfSkippingThePage) {
 
   munmap(raw, 3 * kPageSize);
 }
+#endif
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 /// @brief An identity atomic must fail closed on a page it may not store to.
 /// @details A hole or PROT_NONE reservation used to be handed to the callback as
 /// a raw pointer; a PROT_READ page passes any read probe and then faults on the
@@ -4231,6 +4247,7 @@ TEST(GpuMemoryTest, IdentityAtomicFailsClosedOnUnwritablePages) {
   std::memcpy(&observed, read_only.data, sizeof(observed));
   EXPECT_EQ(observed, kSeed) << "the refused store must not have reached the page";
 }
+#endif
 
 /// @brief An identity atomic must be atomic against the host, not just the GPU.
 /// @details The HSA contract makes device atomics on fine-grained system memory
@@ -4272,6 +4289,7 @@ TEST(GpuMemoryTest, IdentityAtomicIsAtomicAgainstConcurrentHostUpdates) {
       << "an update was lost, so the emulated atomic is not system scoped";
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 /// @brief A faulted address must be told apart from unwritten GPU memory.
 /// @details Sparse backing is legitimate -- memory never written reads as zero
 /// and has to keep doing so -- and the block accessors used to answer the same
@@ -4317,6 +4335,7 @@ TEST(GpuMemoryTest, FaultedAccessIsDistinguishedFromSparseBacking) {
   EXPECT_EQ(memory.copy_block(live.addr(), live.addr() + 128, 64, kPid),
             amdgpu::CopyOutcome::Complete);
 }
+#endif
 
 TEST(GpuMemoryTest, AtomicLanesPreserveMappedAliasesAndInactiveLanes) {
   for (uint32_t width : {4u, 8u}) {
@@ -4427,6 +4446,7 @@ TEST(GpuMemoryTest, AtomicLanesStopAtClippedMappedOperand) {
   memory.set_memory_fault_reporter(nullptr);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 /// @brief A fault must not be reported while translation locks are held.
 /// @details The driver takes its process-table lock to deliver a fault, and
 /// takes that same lock before registering a process, which needs this class's
@@ -4481,6 +4501,7 @@ TEST(GpuMemoryTest, FaultsAreReportedOutsideTranslationLocks) {
   EXPECT_GE(reporter.calls.load(), 1u) << "the fault never reached the reporter";
   memory.set_memory_fault_reporter(nullptr);
 }
+#endif
 
 /// @brief The mapping cannot change between an atomic's check and its modify.
 /// @details An atomic establishes that a page is writable and then modifies it
@@ -4678,6 +4699,7 @@ TEST(GpuMemoryTest, ClientOwnedAtomicsAreRefusedRatherThanApproximated) {
   memory.unregister_process(kPid);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 /// @brief A refused client write must not be blamed on the protection.
 /// @details process_vm_writev() reports EFAULT for a range the client unmapped
 /// and for one it merely protected, and ESRCH for a client that exited, so a
@@ -4731,6 +4753,8 @@ TEST(GpuMemoryTest, RefusedClientWriteReportsAnUndeterminedCause) {
   std::memcpy(&observed, page.data, sizeof(observed));
   EXPECT_EQ(observed, kSeed) << "the refused write still reached the page";
 }
+
+#endif
 
 /// @brief A mapped atomic must not stall against page-table mutation.
 /// @details The writability probe runs while the atomic holds the VMID and
@@ -4791,6 +4815,7 @@ TEST(GpuMemoryTest, MappedAtomicMakesProgressAgainstPageTableMutation) {
   memory.unregister_process(kPid);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 /// @brief A page-table-backed atomic must refuse a read-only host page.
 /// @details A PTE says where bytes live, not what may be done to them, and in
 /// local mode the host page it names is the application's own mapping -- a
@@ -4823,6 +4848,7 @@ TEST(GpuMemoryTest, MappedAtomicFailsClosedOnUnwritableHostPages) {
 
   memory.unregister_process(kPid);
 }
+#endif
 
 /// @brief A 64-bit atomic add must accept any operand bit pattern.
 /// @details The packet field is raw 64 bits. Reaching an addition by negating a

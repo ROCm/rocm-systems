@@ -771,6 +771,13 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+#if defined(RJ_DISABLE_INTERPOSER)
+  std::cerr << "rocjitsu: application launches require the interposer; reconfigure with "
+               "-DROCJITSU_ENABLE_INTERPOSER=ON\n";
+  cleanup_runtime_files(my_pid);
+  return 1;
+#endif
+
   char **app_argv = &argv[separator_idx + 1];
 
   auto lib_path = find_interposer_lib();

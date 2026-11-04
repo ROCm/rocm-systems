@@ -216,6 +216,8 @@ endfunction()
 # applied to both registrations. ENVIRONMENT applies only to the build-tree test;
 # INSTALL_ENVIRONMENT adds to the default installed test environment, which
 # points installed tests at packaged configs, kernels, binaries, and runtimes.
+# REQUIRES_INTERPOSER disables the build-tree registration and omits the installed
+# registration when the preload interposer is excluded from the build.
 function(rj_add_test)
     set(oneValueArgs NAME WORKING_DIRECTORY TIMEOUT SKIP_REGULAR_EXPRESSION)
     set(multiValueArgs
@@ -227,7 +229,7 @@ function(rj_add_test)
     )
     cmake_parse_arguments(
         ARG
-        "RUN_SERIAL"
+        "RUN_SERIAL;REQUIRES_INTERPOSER"
         "${oneValueArgs}"
         "${multiValueArgs}"
         ${ARGN}
@@ -249,6 +251,9 @@ function(rj_add_test)
     endif()
 
     add_test(NAME "${ARG_NAME}" COMMAND ${ARG_COMMAND})
+    if(ARG_REQUIRES_INTERPOSER AND NOT ROCJITSU_ENABLE_INTERPOSER)
+        set_tests_properties("${ARG_NAME}" PROPERTIES DISABLED TRUE)
+    endif()
 
     if(ARG_WORKING_DIRECTORY)
         set_tests_properties(
@@ -277,7 +282,11 @@ function(rj_add_test)
         set_tests_properties("${ARG_NAME}" PROPERTIES ENVIRONMENT "${_env}")
     endif()
 
-    if(RJ_INSTALL_TESTS AND ARG_INSTALL_COMMAND)
+    if(
+        RJ_INSTALL_TESTS
+        AND ARG_INSTALL_COMMAND
+        AND (NOT ARG_REQUIRES_INTERPOSER OR ROCJITSU_ENABLE_INTERPOSER)
+    )
         set(_install_args COMMAND ${ARG_INSTALL_COMMAND})
         if(ARG_TIMEOUT)
             list(APPEND _install_args TIMEOUT "${ARG_TIMEOUT}")

@@ -1770,6 +1770,7 @@ TEST(Gfx1250SdmaTest, CopyWaitSignalResolvesTranslatedAddresses) {
   EXPECT_EQ(queue.signal_value(), 4);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 // An endpoint that does not resolve YET is worth retrying, and
 // ConstFillUnmappedTailDoesNotAdvance pins that. An endpoint that does not
 // exist is not: the violation has already been reported to the process, and
@@ -1882,6 +1883,8 @@ TEST(Gfx1250SdmaTest, UnwritableReadPointerHaltsInsteadOfReplayingPackets) {
   munmap(raw, KfdProcess::kPageSize);
 }
 
+#endif
+
 /// @brief A poll on a faulted address must halt rather than spin forever.
 /// @details A poll that cannot read its address is normally right to retry --
 /// waiting for a value to appear is the entire point of the packet. But a
@@ -1929,6 +1932,7 @@ TEST(Gfx1250SdmaTest, PollOnFaultedAddressHaltsInsteadOfSpinning) {
   munmap(raw, KfdProcess::kPageSize);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(Gfx1250SdmaTest, FaultedCopyHaltsTheQueueBeforeLaterPackets) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
@@ -2054,6 +2058,8 @@ TEST(Gfx1250SdmaTest, CopyFromFaultedAddressRetiresPacketInsteadOfWedgingQueue) 
 
   munmap(raw, KfdProcess::kPageSize);
 }
+
+#endif
 
 TEST(Gfx1250SdmaTest, CompactCopyWaitPacketCopies) {
   Gfx1250Sim sim;

@@ -37,9 +37,38 @@ configuration. Keep that header tree at a matching revision.
 | `RJ_ENABLE_MSAN` | `OFF` | Enable MemorySanitizer |
 | `RJ_SANITIZER_RUNTIME` | `AUTO` | Select `AUTO`, `SHARED`, or `STATIC` sanitizer runtime linkage |
 | `RJ_CLANG_TIDY` | `OFF` | Enable clang-tidy static analysis |
+| `ROCJITSU_ENABLE_INTERPOSER` | `ON` | Include the Linux LD_PRELOAD interposer in librocjitsu |
+| `RJ_ENABLE_HOST_FAULT_RECOVERY` | `ON` | Recover host memory faults with SIGSEGV/SIGBUS handlers |
 | `RJ_RUNTIME_API_HEADERS_SOURCE_DIR` | `../../runtimes/api-headers` | Source directory of the shared runtime API headers |
 | `LTO` | `OFF` | Enable link-time optimization for Release/RelWithDebInfo |
 | `ROCJITSU_ENABLE_VFIO` | `OFF` | Build Linux VFIO-user support; requires CMake 3.28+ and Linux 6.1+ UAPI headers |
+
+### Explicit C API embedding
+
+Applications that manage rocjitsu through its C API can build without the
+preload interposer and without installing host signal handlers:
+
+```bash
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DROCJITSU_ENABLE_INTERPOSER=OFF -DRJ_ENABLE_HOST_FAULT_RECOVERY=OFF
+cmake --build build --target rocjitsu_shared
+```
+
+The host loads `librocjitsu`, creates VMs through the C API, and retains the
+library through their lifetimes. Before destroying a VM, it requests exit and
+joins any thread calling `rj_vm_run`. It destroys every VM before closing the
+library. Excluding the interposer also gives the default execution-plugin group
+and the current process's memory-keeper owner lease the library's lifetime.
+
+The two options are independent. Disabling fault recovery makes emulated host
+memory accesses execute directly; invalid accesses follow the host's signal
+disposition. The caller keeps registered backing accessible for the duration of
+execution. Availability queries inspect mapping metadata without faulting.
+Host-fault recovery installs process-wide handlers; a host using it must keep
+the library loaded while those handlers are installed. Unloadable embedding
+selects both options OFF. Builds without the interposer reject application
+launches through the CLI; standalone daemon and C API use remain available.
+The default build retains both preload interposition and host fault recovery.
 
 ### Host CPU baseline
 
