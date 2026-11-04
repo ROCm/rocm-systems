@@ -54,7 +54,7 @@ jobs:
 
   rdc_build:
     if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
-    runs-on: lstt_ci_runners
+    runs-on: lstt-ci-runner
     timeout-minutes: 90
     container: rocm/dev-ubuntu-22.04:7.2
     outputs:
@@ -215,7 +215,7 @@ jobs:
   rdc_test:
     if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
     needs: rdc_build
-    runs-on: lstt_ci_runners
+    runs-on: lstt-ci-runner
     timeout-minutes: 45
     container: rocm/dev-ubuntu-22.04:7.2
 

@@ -1,9 +1,10 @@
 # QEMU VFIO-user compute
 
 This guide describes the QEMU/VFIO-user path that rocJITsu supports today.
-The supported device profile is a single gfx1250 compute GPU using
-`configs/gfx1250_mi455x.json`. QEMU owns the guest, while rocJITsu supplies
-the emulated PCI device and the shared GPU execution models.
+The single-GPU guest qualification recipe uses `configs/gfx1250_mi455x.json`.
+The launcher can also expose multiple local gfx1250 GPUs from a matching
+configuration, including `configs/gfx1250_mi455x_kmd_4gpu.json`. QEMU owns the
+guest, while rocJITsu supplies the emulated PCI devices and GPU models.
 
 The repository provides the VFIO-user server and
 `scripts/run-vfio-guest.py`. It does not build or distribute a guest kernel,
@@ -213,8 +214,8 @@ seconds (10 by default). SIGTERM or SIGINT sent to the launcher while a probe
 is running terminates and reaps that probe before the launcher exits.
 
 The launcher waits at most `--startup-timeout` seconds (60 by default) for the
-server to create and explicitly announce its listening socket. It then creates
-shared memfd-backed guest RAM and starts:
+server to create and explicitly announce its listening socket. It then checks
+the socket, creates shared memfd-backed guest RAM, and starts:
 
 ```text
 rocjitsu --config configs/gfx1250_mi455x.json \
@@ -223,6 +224,54 @@ rocjitsu --config configs/gfx1250_mi455x.json \
 
 and connects QEMU's `vfio-user-pci` device to that socket. Shared guest RAM
 is required so the VFIO-user server can map DMA windows.
+
+### Expose multiple local GPUs
+
+Repeat `--socket` once for each local GPU, in GPU ordinal order. Every socket
+must have a distinct, short path directly inside the new output directory.
+The paths are the complete ordered local GPU list; specifying one `--socket`
+does not append the default socket. The default remains
+`<output>/vfio-user.sock` when no `--socket` is specified. rocJITsu validates
+the socket count against the selected configuration or local node.
+
+For the repository's four-GPU configuration, use the same prepared guest inputs
+and kernel command line as above, with four explicit sockets:
+
+The preset uses PCI ID `0x1002:0x75c1` for every GPU, matching the single-GPU
+guest contract. The guest must discover four distinct BDFs and confirm that
+AMDGPU binds each one before running per-GPU numerical checks.
+
+```bash
+OUTPUT=/tmp/rocjitsu-four-gpu-run
+
+python3 scripts/run-vfio-guest.py \
+  --qemu "${QEMU}" \
+  --kernel "${KERNEL}" \
+  --initramfs "${INITRAMFS}" \
+  --rocjitsu "${ROCJITSU}" \
+  --config configs/gfx1250_mi455x_kmd_4gpu.json \
+  --output "${OUTPUT}" \
+  --socket "${OUTPUT}/gpu0.sock" \
+  --socket "${OUTPUT}/gpu1.sock" \
+  --socket "${OUTPUT}/gpu2.sock" \
+  --socket "${OUTPUT}/gpu3.sock" \
+  --accel auto \
+  --memory 4G \
+  --append 'console=ttyS0 rdinit=/init panic=-1 amdgpu.discovery=2 amdgpu.emu_mode=1 amdgpu.fw_load_type=0 amdgpu.vm_update_mode=3 amdgpu.gpu_recovery=0 amdgpu.vramlimit=1024 amdgpu.ip_block_mask=0x3f rocjitsu.workload=sgemm'
+```
+
+Use `--node <id>` with a system manifest to select the local node served by
+this process; rocJITsu checks the selection. The launcher starts one rocJITsu
+server and waits for one readiness signal, then checks that every requested
+socket exists before starting QEMU. For multiple GPUs, QEMU receives one
+`vfio-user-pci` device per socket on `pcie.0` at slots `0x4`, `0x5`, and so
+on, with IDs `rocjitsu-gpu-0`, `rocjitsu-gpu-1`, and so on. The single-GPU
+QEMU device arguments remain unchanged.
+
+The existing GEMM qualification contract covers one GPU. A multi-GPU launch
+does not by itself establish guest PCI enumeration, peer DMA, RCCL operation,
+or numerical correctness. Check the actual guest BDFs and validate the intended
+multi-GPU workload before reporting such a result.
 
 ## Results and reruns
 
@@ -303,4 +352,4 @@ this ordering needs no grace period. Use the partial `guest.log` and `server.log
 to distinguish slow progress from a deadlock. CI systems can enforce a job-level
 budget without changing launcher behavior. If that budget sends SIGTERM or
 SIGINT to the launcher, it terminates and reaps both children and removes the
-owned VFIO socket before exiting. SIGKILL cannot provide cooperative cleanup.
+owned VFIO sockets before exiting. SIGKILL cannot provide cooperative cleanup.

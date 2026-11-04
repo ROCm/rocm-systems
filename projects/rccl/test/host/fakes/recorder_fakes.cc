@@ -5,16 +5,14 @@
  ************************************************************************/
 
 // See recorder_fakes.h.
-//
-// NOT "recorder.h": comm.h already pulls in one copy and that header has no
-// include guard, so including it again re-declares the whole rcclCall_t
-// enumerator list ("redefinition of enumerator rrBroadcast").
 
 #include "recorder_fakes.h"
 
 #include <mutex>
 
-#include "comm.h"
+#include "recorder.h"
+
+#include "info.h"  // the collective overload reads ncclInfo fields
 
 ncclResult_t g_recorderResult = ncclSuccess;
 std::vector<std::string> g_recorderLabels;
@@ -25,6 +23,10 @@ ncclUniqueId* g_recorderLastId = nullptr;
 int g_recorderLastRank = -12345;
 int g_recorderLastNranks = -12345;
 
+static ncclResult_t DefaultRecorderCall(const RecorderCall&) { return g_recorderResult; }
+std::function<ncclResult_t(const RecorderCall&)> g_recorderCall = DefaultRecorderCall;
+std::vector<bool> g_recorderSkips;
+
 void ResetRecorderFakes() {
   g_recorderResult = ncclSuccess;
   g_recorderLabels.clear();
@@ -33,6 +35,8 @@ void ResetRecorderFakes() {
   g_recorderLastId = nullptr;
   g_recorderLastRank = -12345;
   g_recorderLastNranks = -12345;
+  g_recorderCall = DefaultRecorderCall;
+  g_recorderSkips.clear();
 }
 
 // The overloads the microtest units reach today, not all 12 declared in
@@ -45,6 +49,15 @@ Recorder& Recorder::instance() {
   return inst;
 }
 
+void Recorder::skip(bool b) { g_recorderSkips.push_back(b); }
+ncclResult_t Recorder::record(rcclCall_t type, const ncclInfo& info) {  // collective
+  return g_recorderCall({type, info.sendbuff, info.recvbuff, info.count, info.root, nullptr, nullptr});
+}
+ncclResult_t Recorder::record(rcclCall_t type, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t,
+                              ncclComm_t, hipStream_t, int root, const size_t sendcounts[], const size_t[],
+                              const size_t[], const size_t rdispls[]) {  // send/recv-based
+  return g_recorderCall({type, sendbuff, recvbuff, count, root, sendcounts, rdispls});
+}
 // Production records from whatever thread entered the API, so tests that drive one entry point
 // from two threads at once land here concurrently. Unsynchronised emplace_back corrupts the heap.
 // Readers run single-threaded after the fact, so only the writer side needs the lock.
@@ -59,6 +72,7 @@ void Recorder::record(rcclCall_t, int, int, ncclUniqueId*, ncclConfig_t*, ncclCo
 
 ncclResult_t Recorder::record(rcclCall_t, int) { return g_recorderResult; }            // group op
 ncclResult_t Recorder::record(rcclCall_t, ncclComm_t) { return g_recorderResult; }     // comm destroy
+ncclResult_t Recorder::record(rcclCall_t, ncclComm_t, void*, void*, size_t) { return g_recorderResult; }  // UBR
 ncclResult_t Recorder::record(rcclCall_t call, int rank, int nranks, ncclUniqueId* id, ncclComm_t,
                               int) {  // init
   ++g_recorderIdCalls;
@@ -68,7 +82,7 @@ ncclResult_t Recorder::record(rcclCall_t call, int rank, int nranks, ncclUniqueI
   g_recorderLastNranks = nranks;
   return g_recorderResult;
 }
-// recorder.h:128 declares ONE overload with defaulted trailing args, which both
+// recorder.h:134 declares ONE overload with defaulted trailing args, which both
 // RedOpCreate (6 args) and RedOpDestroy (3 args) call. Defining a second 3-arg
 // version here would be a redefinition, not an overload.
 ncclResult_t Recorder::record(rcclCall_t, ncclRedOp_t, ncclComm_t, ncclDataType_t,

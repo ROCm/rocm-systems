@@ -5,6 +5,8 @@
 
 """Local sanity checks for rocprofiler-systems GitHub workflows."""
 
+from __future__ import annotations
+
 import argparse
 import base64
 import gzip
@@ -18,7 +20,7 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 try:
     import yaml
@@ -74,7 +76,7 @@ for first_char in "OoYyNn":
     ]
 
 
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run local rocprofiler-systems workflow sanity checks."
     )
@@ -116,7 +118,7 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def load_workflow(path: Path) -> Dict[str, Any]:
+def load_workflow(path: Path) -> dict[str, Any]:
     try:
         data = yaml.load(read_text(path), Loader=GitHubActionsLoader)
     except yaml.YAMLError as exc:
@@ -133,7 +135,7 @@ def as_mapping(value: Any, context: str) -> Mapping[str, Any]:
     return value
 
 
-def as_list(value: Any, context: str) -> List[Any]:
+def as_list(value: Any, context: str) -> list[Any]:
     require(isinstance(value, list), f"{context} must be a list")
     return value
 
@@ -142,9 +144,9 @@ def jobs(workflow: Mapping[str, Any], path: Path) -> Mapping[str, Any]:
     return as_mapping(workflow.get("jobs"), f"{path.relative_to(REPO_ROOT)} jobs")
 
 
-def job_steps(job: Mapping[str, Any], job_name: str) -> List[Mapping[str, Any]]:
+def job_steps(job: Mapping[str, Any], job_name: str) -> list[Mapping[str, Any]]:
     steps = as_list(job.get("steps"), f"job '{job_name}' steps")
-    result: List[Mapping[str, Any]] = []
+    result: list[Mapping[str, Any]] = []
     for index, step in enumerate(steps):
         if isinstance(step, str):
             continue
@@ -159,7 +161,7 @@ def step_uses(step: Mapping[str, Any], action_prefix: str) -> bool:
 
 def step_with_name(
     steps: Iterable[Mapping[str, Any]], name: str
-) -> Optional[Mapping[str, Any]]:
+) -> Mapping[str, Any] | None:
     for step in steps:
         if step.get("name") == name:
             return step
@@ -676,8 +678,8 @@ def write_fake_tool(bin_dir: Path, name: str, log_path: Path, exit_code: int = 0
     tool_path.chmod(tool_path.stat().st_mode | stat.S_IXUSR)
 
 
-def fake_tool_invocations(log_path: Path) -> List[List[str]]:
-    invocations: List[List[str]] = []
+def fake_tool_invocations(log_path: Path) -> list[list[str]]:
+    invocations: list[list[str]] = []
     if not log_path.exists():
         return invocations
 
@@ -712,14 +714,23 @@ def run_ci_command(
     )
 
 
-def _load_run_ci_module():
-    """Import run-ci.py as a module (its filename isn't a valid identifier,
-    so it can't use a normal `import`) to unit test its pure functions
-    directly, without a subprocess."""
-    spec = importlib.util.spec_from_file_location("run_ci", RUN_CI)
+def _load_script(name: str, path: Path):
+    """Import a script whose filename isn't a valid identifier as a module.
+
+    The module is registered in sys.modules before it runs so dataclasses can
+    resolve postponed (``from __future__ import annotations``) annotations.
+    """
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _load_run_ci_module():
+    """Import run-ci.py to unit test its pure functions directly, without a
+    subprocess."""
+    return _load_script("run_ci", RUN_CI)
 
 
 def _gzip_base64_value(text: str) -> str:
@@ -902,12 +913,8 @@ def check_run_ci_skipped_tests_summary(verbose: bool) -> None:
 
 
 def _load_summary_module():
-    """Import summarize-junit-results.py as a module (its filename isn't a
-    valid identifier) to unit test its pure functions directly."""
-    spec = importlib.util.spec_from_file_location("summarize_junit", SUMMARY_SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    """Import summarize-junit-results.py to unit test its pure functions directly."""
+    return _load_script("summarize_junit", SUMMARY_SCRIPT)
 
 
 def check_summarize_junit_results_unit(verbose: bool) -> None:
@@ -1452,7 +1459,7 @@ def run_checks(args: argparse.Namespace) -> None:
     check_cdash_link_and_notes_unit(args.verbose)
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         run_checks(args)
