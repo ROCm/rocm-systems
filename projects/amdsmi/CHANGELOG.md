@@ -4,6 +4,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 10.3.0
+
+### Resolved Issues
+
+- **Fixed `amd-smi static --cuid` reporting an error on WSL**.  
+  - The CUID metadata status showed `amdsmi_error_31` for WSL GPUs. It now shows `not_supported`, since WSL does not publish a GPU identity to derive a CUID from. Requires libamdcuid 2.1.1.
+
 ## amd_smi_lib for ROCm 10.2.0
 
 ### Added

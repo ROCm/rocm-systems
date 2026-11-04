@@ -40,7 +40,11 @@ extern "C" {
 #define AMDCUID_LIB_VERSION_MINOR 1
 
 //! Patch version should be updated for each bug fix or non-API change
-#define AMDCUID_LIB_VERSION_PATCH 0
+//!
+//! 2.1.1: a GPU lookup by path or BDF that finds nothing returns
+//! AMDCUID_STATUS_UNSUPPORTED on WSL, where sysfs publishes no GPU identity,
+//! instead of AMDCUID_STATUS_DEVICE_NOT_FOUND.
+#define AMDCUID_LIB_VERSION_PATCH 1
 
 /**
  * @brief Retrieve the version of the CUID library.
@@ -211,7 +215,7 @@ amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t* handles, uint32_t* count)
  *         AMDCUID_STATUS_INVALID_ARGUMENT if the provided arguments are
  * invalid, AMDCUID_STATUS_DEVICE_NOT_FOUND if the device could not be found at
  * the specified path AMDCUID_STATUS_UNSUPPORTED if the device type is not
- * supported, AMDCUID_STATUS_INVALID_FORMAT if another component has the same
+ * supported or the device is a GPU on WSL, AMDCUID_STATUS_INVALID_FORMAT if another component has the same
  * derived CUID
  */
 amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
@@ -236,7 +240,7 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
  *         AMDCUID_STATUS_INVALID_ARGUMENT if the provided arguments are
  * invalid, AMDCUID_STATUS_DEVICE_NOT_FOUND if the device could not be found
  * with the specified BDF AMDCUID_STATUS_UNSUPPORTED if the device type is not
- * supported, AMDCUID_STATUS_WRONG_DEVICE_TYPE if the device type is
+ * supported or the device is a GPU on WSL, AMDCUID_STATUS_WRONG_DEVICE_TYPE if the device type is
  * inappropriate for BDF lookup (e.g., CPU or platform devices),
  * AMDCUID_STATUS_INVALID_FORMAT if another component has the same derived CUID
  */

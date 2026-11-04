@@ -429,3 +429,38 @@ TEST(cuidtstUnprivileged, AnInventoryOfOnlyCollidingComponentsIsEmpty) {
   EXPECT_TRUE(handles.empty());
   EXPECT_EQ(lookup, AMDCUID_STATUS_INVALID_FORMAT);
 }
+
+namespace {
+
+// Points the WSL probe at `path` for the scope of a test.
+class DxgNodeOverride {
+ public:
+  explicit DxgNodeOverride(const std::string& path) : saved_(CuidUtilities::dxg_node_path()) {
+    CuidUtilities::dxg_node_path() = path;
+  }
+  ~DxgNodeOverride() { CuidUtilities::dxg_node_path() = saved_; }
+
+ private:
+  std::string saved_;
+};
+
+}  // namespace
+
+// A GPU that is not there is unsupported on WSL, not missing.
+TEST(cuidtstUnprivileged, MissingGpuIsUnsupportedOnWsl) {
+  const char* const absent_bdf = "ffff:ff:1f.7";
+  const char* const absent_path = "/sys/class/drm/renderD65535";
+  amdcuid_id_t handle{};
+  {
+    DxgNodeOverride wsl("/dev/null");
+    EXPECT_EQ(amdcuid_get_handle_by_bdf(absent_bdf, AMDCUID_DEVICE_TYPE_GPU, &handle),
+              AMDCUID_STATUS_UNSUPPORTED);
+    EXPECT_EQ(amdcuid_get_handle_by_dev_path(absent_path, AMDCUID_DEVICE_TYPE_GPU, &handle),
+              AMDCUID_STATUS_UNSUPPORTED);
+  }
+  DxgNodeOverride native("/nonexistent/dxg");
+  EXPECT_EQ(amdcuid_get_handle_by_bdf(absent_bdf, AMDCUID_DEVICE_TYPE_GPU, &handle),
+            AMDCUID_STATUS_DEVICE_NOT_FOUND);
+  EXPECT_EQ(amdcuid_get_handle_by_dev_path(absent_path, AMDCUID_DEVICE_TYPE_GPU, &handle),
+            AMDCUID_STATUS_DEVICE_NOT_FOUND);
+}

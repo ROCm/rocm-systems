@@ -98,6 +98,13 @@ std::string CuidUtilities::readlink_bdf(const std::string& device_path) {
   return "";
 }
 
+std::string& CuidUtilities::dxg_node_path() {
+  static std::string path = "/dev/dxg";
+  return path;
+}
+
+bool CuidUtilities::is_wsl() { return access(dxg_node_path().c_str(), F_OK) == 0; }
+
 // Helper to get device path from BDF based on device type
 // For GPUs: returns /sys/class/drm/renderDXXX/device or
 //           /sys/class/drm/cardN/device path
