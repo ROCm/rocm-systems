@@ -286,7 +286,7 @@ class AMDSMILogger:
         # Increase tabbing for device arguments by pulling them out of the main dictionary and assigning them to an empty string
         tabbed_dictionary = {}
         for key, value in capitalized_json.items():
-            if key not in ["GPU", "CPU", "CORE", "AI_NIC"]:
+            if key not in ["GPU", "CPU", "CORE", "NIC"]:
                 tabbed_dictionary[key] = value
             # Filter out N/A values under clock
             if key == "CLOCK":
@@ -581,13 +581,13 @@ class AMDSMILogger:
             self.output["timestamp"] = int(time.time())
 
         if self.is_json_format() or self.is_human_readable_format():
-            self.output["ai_nic"] = int(nic_id)
+            self.output["nic"] = int(nic_id)
             if argument == "values" and isinstance(data, dict):
                 self.output.update(data)
             else:
                 self.output[argument] = data
         elif self.is_csv_format():
-            self.output["ai_nic"] = int(nic_id)
+            self.output["nic"] = int(nic_id)
 
             if argument == "values" or isinstance(data, dict):
                 flat_dict = self.flatten_dict(data)

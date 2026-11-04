@@ -1573,7 +1573,7 @@ class StaticCommands:
 
         static_dict = {}
         if self.logger.is_json_format():
-            static_dict["ai_nic"] = int(nic_id)
+            static_dict["nic"] = int(nic_id)
 
         if args.nic:
             try:
@@ -1588,16 +1588,15 @@ class StaticCommands:
                 if hasattr(args, "numa") and getattr(args, "numa"):
                     info_filter.append("numa")
                 if len(info_filter) == 0 or len(info_filter) == 4:
-                    static_dict["nic"] = nic_info
+                    static_dict.update(nic_info)
                 else:
                     nic_info_filtered = {}
                     for attr in info_filter:  # remove all attributes except the one in info_filter:
                         nic_info_filtered = nic_info_filtered | {
                             key: value for key, value in nic_info.items() if key.lower() == attr
                         }
-                    static_dict["nic"] = nic_info_filtered
+                    static_dict.update(nic_info_filtered)
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["nic"] = "N/A"
                 logging.debug("Failed to get NIC %s | %s", nic_id, e.get_error_info())
 
         multiple_devices_csv_override = False

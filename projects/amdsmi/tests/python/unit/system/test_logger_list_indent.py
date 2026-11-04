@@ -52,7 +52,7 @@ def _load_renderer() -> Any:
     return namespace["Renderer"]()
 
 
-def _nested(depth: int, leaf: Dict[str, Any], device: str = "ai_nic") -> Dict[str, Any]:
+def _nested(depth: int, leaf: Dict[str, Any], device: str = "nic") -> Dict[str, Any]:
     """``leaf`` wrapped in ``depth`` dictionaries under a ``device`` entry."""
     node = leaf
     for level in range(depth):

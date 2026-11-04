@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 """metric --nic --port [--extended] tests: text output trims to the default
-scope, JSON always requests the extended scope regardless of --extended, and
+scope (JSON too, unless --extended is given), and
 a NIC with no ports reports that plainly instead of raising.
 
 These load subcommands/metric.py standalone with a stubbed ``amdsmi`` package
@@ -105,7 +105,7 @@ class TestMetricNicPortStats(unittest.TestCase):
         _, called_args, _ = get_vendor_stats.mock_calls[0]
         self.assertEqual(called_args[2], 0)  # AMDSMI_NIC_STAT_SCOPE_DEFAULT
 
-    def test_json_always_requests_extended_scope_even_without_flag(self):
+    def test_json_requests_default_scope_without_the_flag(self):
         module, amdsmi_stub = _load_metric()
         command = self._make_command(module, amdsmi_stub, is_json=True)
         amdsmi_stub.amdsmi_interface.amdsmi_get_nic_telemetry = mock.Mock(return_value={})
@@ -120,7 +120,23 @@ class TestMetricNicPortStats(unittest.TestCase):
         command.metric_nic(args)
 
         _, called_args, _ = get_vendor_stats.mock_calls[0]
-        self.assertEqual(called_args[2], 1)  # AMDSMI_NIC_STAT_SCOPE_EXTENDED, forced by JSON
+        self.assertEqual(called_args[2], 0)  # AMDSMI_NIC_STAT_SCOPE_DEFAULT
+
+    def test_json_with_extended_requests_extended_scope(self):
+        module, amdsmi_stub = _load_metric()
+        command = self._make_command(module, amdsmi_stub, is_json=True)
+        amdsmi_stub.amdsmi_interface.amdsmi_get_nic_telemetry = mock.Mock(return_value={})
+        amdsmi_stub.amdsmi_interface.amdsmi_get_nic_port_info = mock.Mock(
+            return_value={"num_ports": 1, "ports": [{"netdev": "enp1s0"}]}
+        )
+        get_vendor_stats = mock.Mock(return_value={})
+        amdsmi_stub.amdsmi_interface.amdsmi_get_nic_vendor_statistics = get_vendor_stats
+        amdsmi_stub.amdsmi_interface.amdsmi_get_nic_port_statistics = mock.Mock(return_value={})
+
+        command.metric_nic(types.SimpleNamespace(nic=None, port=-1, extended=True))
+
+        _, called_args, _ = get_vendor_stats.mock_calls[0]
+        self.assertEqual(called_args[2], 1)  # AMDSMI_NIC_STAT_SCOPE_EXTENDED
 
     def test_a_failed_vendor_read_leaves_that_block_empty_and_keeps_the_rest(self):
         module, amdsmi_stub = _load_metric()

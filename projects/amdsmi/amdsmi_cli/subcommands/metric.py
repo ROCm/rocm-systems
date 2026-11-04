@@ -3356,11 +3356,11 @@ class MetricCommands:
             sensors[f"SENSOR_{index}"] = sensor
         return sensors
 
-    def _nic_rdma_ports(self, nic_handle, requested_index, nic_id):
-        """RDMA port blocks for one NIC. The index counts RDMA ports across the NIC's RDMA devices.
+    def _nic_rdma_devices(self, nic_handle, requested_index, nic_id):
+        """RDMA device blocks for one NIC, each with its ports' counters.
 
-        Each block names its RDMA device and netdev so the index maps to
-        ``rdma statistic show link DEV/PORT``.
+        The index counts RDMA ports across the NIC's RDMA devices, like
+        ``static --nic`` lists them. Device and port keys keep their ``static`` labels.
         """
         try:
             rdma_devices = amdsmi_interface.amdsmi_get_ainic_info(nic_handle, True)["RDMA_DEVICES"]
@@ -3369,22 +3369,22 @@ class MetricCommands:
             return {}
 
         rdma_ports = [
-            (device["NAME"], port)
-            for device in rdma_devices.values()
-            for key, port in device.items()
-            if key.startswith("PORT_")
+            (device_key, device["NAME"], port_key)
+            for device_key, device in rdma_devices.items()
+            for port_key in device
+            if port_key.startswith("PORT_")
         ]
         if requested_index == -1:
             port_indices = range(len(rdma_ports))
         else:
             port_indices = [requested_index]
 
-        ports_output = {}
+        devices_output = {}
         for port_index in port_indices:
             if not (0 <= port_index < len(rdma_ports)):
                 continue
 
-            rdma_device, port = rdma_ports[port_index]
+            device_key, rdma_device, port_key = rdma_ports[port_index]
             statistics = {}
             try:
                 raw_statistics = amdsmi_interface.amdsmi_get_nic_rdma_port_statistics(
@@ -3399,13 +3399,11 @@ class MetricCommands:
                     e.get_error_info(),
                 )
 
-            ports_output[f"PORT_{port_index}"] = {
-                "RDMA_DEVICE": rdma_device,
-                "PORT_NUM": port["PORT_NUM"],
-                "NETDEV": port["NETDEV"],
-                "STATISTICS": statistics,
-            }
-        return ports_output
+            device_output = devices_output.setdefault(
+                device_key, {"RDMA_DEV": rdma_device, "PORTS": {}}
+            )
+            device_output["PORTS"][port_key] = {"STATISTICS": statistics}
+        return devices_output
 
     def metric_nic(self, args, multiple_devices=False, nic=None):
         """Get metric (telemetry, and optionally per-port statistics) for target nic
@@ -3480,9 +3478,7 @@ class MetricCommands:
 
         requested_port = getattr(args, "port", None)
         if requested_port is not None:
-            # JSON always requests the full extended set regardless of --extended
-            # (design doc section 6); text output honors --extended.
-            want_extended = self.logger.is_json_format() or getattr(args, "extended", False)
+            want_extended = getattr(args, "extended", False)
             scope = (
                 amdsmi_interface.amdsmi_wrapper.AMDSMI_NIC_STAT_SCOPE_EXTENDED
                 if want_extended
@@ -3559,15 +3555,15 @@ class MetricCommands:
 
         requested_rdma = getattr(args, "rdma", None)
         if requested_rdma is not None:
-            rdma_ports = self._nic_rdma_ports(args.nic, requested_rdma, nic_id)
-            if rdma_ports and self.logger.is_csv_format():
-                values.update(_flatten_with_prefix(rdma_ports, "RDMA_"))
-            elif rdma_ports:
-                values["RDMA_PORTS"] = rdma_ports
+            rdma_devices = self._nic_rdma_devices(args.nic, requested_rdma, nic_id)
+            if rdma_devices and self.logger.is_csv_format():
+                values.update(_flatten_with_prefix(rdma_devices, "RDMA_"))
+            elif rdma_devices:
+                values["RDMA_DEVICES"] = rdma_devices
             elif not self.logger.is_json_format():
-                values["RDMA_PORTS"] = "No RDMA ports found for this NIC"
+                values["RDMA_DEVICES"] = "No RDMA ports found for this NIC"
             else:
-                values["RDMA_PORTS"] = {}
+                values["RDMA_DEVICES"] = {}
 
         self.logger.store_ainic_output(args.nic, "values", values)
 

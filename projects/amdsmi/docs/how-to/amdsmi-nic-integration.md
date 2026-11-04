@@ -970,13 +970,13 @@ amd-smi metric --nic <ID | BDF | UUID> --port [PORT_NUM] [--extended] [--json]
 
 - ``--port`` (bare, no argument): Report statistics for all ports on the NIC.
 - ``--port PORT_NUM``: Report statistics for a single port (by numeric index).
-- ``--extended``: Include extended (vendor-specific) counters. Requires ``--port`` to be specified. Text output only; JSON output always includes extended counters.
-- ``--json``: Output as JSON. When combined with ``--port --extended``, the output still contains the full extended set.
+- ``--extended``: Include extended (vendor-specific) counters. Requires ``--port`` to be specified. Applies to text and JSON output.
+- ``--json``: Output as JSON. Uses the same scope as text: ``DEFAULT`` unless ``--extended`` is given.
 
 **Scopes:**
 
 - ``DEFAULT``: The vendor-tier subset of ``VENDOR_STATISTICS`` (e.g. ``frames_rx_ok`` for ionic, ``rx_pfc_frames`` for bnxt).
-- ``EXTENDED``: The full vendor-specific counter set from the driver (via ``ethtool -S`` plus, for ionic, netlink FEC stats). A superset of ``DEFAULT``. Text output requires ``--extended`` to display the extra counters; JSON always returns the full set.
+- ``EXTENDED``: The full vendor-specific counter set from the driver (via ``ethtool -S`` plus, for ionic, netlink FEC stats). A superset of ``DEFAULT``. Requires ``--extended``, in text and JSON.
 
 ``STATISTICS`` (the standard driver counters, e.g. ``RX_PACKETS``, ``TX_PACKETS``,
 ``RX_BYTES``) is a separate, untiered block; it isn't affected by scope.
@@ -1008,7 +1008,7 @@ sudo amd-smi metric --nic 0 --port
 sudo amd-smi metric --nic 0 --port 0 --extended
 
 # All ports on NIC 0, EXTENDED scope (JSON)
-sudo amd-smi metric --nic 0 --port --json
+sudo amd-smi metric --nic 0 --port --extended --json
 ```
 
 ### RDMA port statistics with ``metric --nic --rdma``
@@ -1036,18 +1036,18 @@ amd-smi metric --nic <ID | BDF | UUID> --rdma [RDMA_PORT_NUM] [--json]
 **Output structure:**
 
 ```
-RDMA_PORTS:
-  PORT_<N>:
-    RDMA_DEVICE: <RDMA device name, for example ionic_0>
-    PORT_NUM: <port number on that device>
-    NETDEV: <interface name>
-    STATISTICS:
-      <COUNTER_NAME>: <value>
-      ...
+RDMA_DEVICES:
+  RDMA_DEVICE_<N>:
+    RDMA_DEV: <RDMA device name, for example ionic_0>
+    PORTS:
+      PORT_<M>:
+        STATISTICS:
+          <COUNTER_NAME>: <value>
+          ...
 ```
 
-``RDMA_DEVICE`` and ``PORT_NUM`` map an index to ``rdma statistic show link DEV/PORT``.
-A NIC without RDMA ports prints ``RDMA_PORTS: No RDMA ports found for this NIC`` in text
+``RDMA_DEVICE_<N>`` and ``PORT_<M>`` are the labels ``static --nic`` prints.
+A NIC without RDMA ports prints ``RDMA_DEVICES: No RDMA ports found for this NIC`` in text
 and ``{}`` in JSON. That is the case for a UALoE endpoint, which has no RDMA device.
 
 **Examples:**
