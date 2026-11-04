@@ -473,11 +473,6 @@ class cli_analysis(OmniAnalyze_Base):
         except ValueError as error:
             console_error("ml api trace", f"{workload_path}: {error}")
         labels = _labels_for_backends(list(operator_patterns_by_backend))
-        if not operator_patterns_by_backend:
-            console_error(
-                "ml api trace",
-                f"{workload_path}: No {labels} operators matched the pattern(s).",
-            )
         nodes_matching_operator_patterns = _collect_nodes_matching_operator_patterns(
             workload.ml_api_call_trees, operator_patterns_by_backend
         )
