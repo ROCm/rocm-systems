@@ -59,7 +59,10 @@ cases:
   Unit_HRR_Sign_SigningHoldsFilesToTheVerifiedTree: {}
   Unit_HRR_Sign_KeyOptionsAreNotIgnored: {}
   Unit_HRR_Sign_PlaybackRefusesTamperedArchive: {}
+  Unit_HRR_Sign_RepairChecksTheSignatureBeforeReadingEvents: {}
+  Unit_HRR_Sign_RepairReadsTheOldManifestThroughTheVerifiedDigests: {}
   Unit_HRR_Sign_RepairRefusesToSignAnAlteredSignedArchive: {}
+  Unit_HRR_Sign_RepairRootSignsACompleteArchive: {}
   Unit_HRR_Sign_RepairSignsOrDropsStaleSignature: {}
   Unit_HRR_Sign_Rfc8032Vector: {}
   Unit_HRR_Sign_SignedArchiveVerifies: {}

@@ -761,6 +761,14 @@ HRR_TEST_CASE(Unit_HRR_Sign_FilesAreHeldToTheVerifiedDigestsWhenRead) {
     CHECK_FALSE(hrr::load_archive(a.dir.string(), loaded));
   }
   {
+    Archive a("toctou_added_blob");
+    CheckGuard guard(a, [&](const std::string& dir) {
+      write_bytes(fs::path(dir) / "blobs/evil.blob", "unsigned blob");
+    });
+    hrr::Archive loaded;
+    CHECK_FALSE(hrr::load_archive(a.dir.string(), loaded));
+  }
+  {
     Archive a("toctou_after_load");
     CheckGuard guard(a);
     hrr::Archive loaded;
@@ -768,8 +776,9 @@ HRR_TEST_CASE(Unit_HRR_Sign_FilesAreHeldToTheVerifiedDigestsWhenRead) {
     write_bytes(a.dir / "code_objects/0123.hsaco", "code objecT");  // same size, one byte
     write_bytes(a.dir / "blobs/ab/abcdef.blob", "something else");
     write_bytes(a.dir / "code_objects/new.hsaco", "never listed");
+    write_bytes(a.dir / "blobs/evil.blob", "never listed");
     for (const char* rel : {"code_objects/0123.hsaco", "blobs/ab/abcdef.blob",
-                            "code_objects/new.hsaco"}) {
+                            "code_objects/new.hsaco", "blobs/evil.blob"}) {
       std::vector<uint8_t> data;
       std::string err;
       bool refused = false;
@@ -927,6 +936,24 @@ HRR_TEST_CASE(Unit_HRR_Sign_RepairReadsTheOldManifestThroughTheVerifiedDigests) 
   }
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   --repair on a root directory with --signing-key signs a pid archive that is
+ *   already complete, as --repair on the archive itself does: the complete archive
+ *   is not skipped, and it verifies afterwards.
+ */
+HRR_TEST_CASE(Unit_HRR_Sign_RepairRootSignsACompleteArchive) {
+  Archive a("repair_root_complete", /*sign=*/false);  // complete (trailer), unsigned
+  std::string err;
+  REQUIRE(a.verify(&err) == VerifyResult::kUnsigned);
+  auto [ret, out] = hrr_playback_merged(a.root, "--repair --signing-key " + a.write_seed_file().string());
+  INFO(out);
+  REQUIRE(ret == 0);
+  CHECK(a.verify(&err) == VerifyResult::kOk);
+  INFO(err);
+}
+
 #else
 // projects/hrr was checked out without CLR's hrr_archive_sign.cpp or shared/sha256
 // (playback/CMakeLists.txt).
@@ -948,6 +975,7 @@ HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_ManifestLimitAppliesToSigningToo)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_FilesAreHeldToTheVerifiedDigestsWhenRead)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_SigningHoldsFilesToTheVerifiedTree)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_RepairReadsTheOldManifestThroughTheVerifiedDigests)
+HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_RepairRootSignsACompleteArchive)
 #endif
 
 /**

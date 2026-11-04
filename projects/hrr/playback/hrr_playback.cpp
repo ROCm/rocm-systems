@@ -1563,7 +1563,13 @@ static bool repair_root(const std::string& archive_path, uint64_t host_cap,
     // ahead of the whole run by block buffering when output is piped.
     fflush(stdout);
 
-    if (hrr::has_clean_trailer(dir.string())) {
+    // With --signing-key a complete archive still goes through repair_archive,
+    // which signs it (as the single-archive path does).
+    bool skip_clean = true;
+#ifdef HRR_HAVE_ARCHIVE_SIGN
+    skip_clean = g_signing_key_path.empty();
+#endif
+    if (skip_clean && hrr::has_clean_trailer(dir.string())) {
       printf("[HRR] Archive already complete; nothing to repair\n");
       already_clean++;
       continue;
