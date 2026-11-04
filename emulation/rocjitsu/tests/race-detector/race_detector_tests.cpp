@@ -1370,7 +1370,7 @@ TEST(RaceDetector, TensorDma_PartialWaitsUseTheObligationClassNotTheEventOrder) 
     for (uint32_t address : {0u, 64u}) {
       const std::array ranges{LdsByteRange{.address = address, .bytes = 16}};
       wave.registerLdsRangeEvent(testInstruction(address), MemoryEventType::GLOBAL_TO_LDS, ranges,
-                                 /*elementBytes=*/4, obligations, c.eventOrder);
+                                 obligations, c.eventOrder);
     }
     PendingWaitCount wait;
     wait.add(amdgpu::WaitCounterType::TENSORCNT, 1);
