@@ -23,6 +23,7 @@
  *****************************************************************************/
 
 #include "gda_team.hpp"
+#include <cstring>
 
 #include "constants.hpp"
 #include "backend_type.hpp"
@@ -47,6 +48,12 @@ GDATeam::GDATeam(Backend *backend, const TeamInfo& team_info_parent,
   alltoall_pSync = &(b->alltoall_pSync_pool[pool_index * ROCSHMEM_ALLTOALL_SYNC_SIZE]);
 
   pWrk = reinterpret_cast<char *>(b->pWrk_pool) + ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) * pool_index;
+
+  // Zero pSync arrays to prevent stale values from a recycled pool index.
+  memset(barrier_pSync, 0, ROCSHMEM_BARRIER_SYNC_SIZE * sizeof(long));
+  memset(reduce_pSync, 0, ROCSHMEM_REDUCE_SYNC_SIZE * sizeof(long));
+  memset(bcast_pSync, 0, ROCSHMEM_BCAST_SYNC_SIZE * sizeof(long));
+  memset(alltoall_pSync, 0, ROCSHMEM_ALLTOALL_SYNC_SIZE * sizeof(long));
 }
 
 GDATeam::~GDATeam() {}
