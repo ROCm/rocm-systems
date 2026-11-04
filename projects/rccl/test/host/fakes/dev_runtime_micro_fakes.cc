@@ -34,7 +34,7 @@
 #include "fakes/hip_fakes.h"   // shared HIP seams + InstallHipVmmEmulator()
 #include "fakes/nccl_device_core_fakes.h"  // ncclTeam* accessors + ResetNcclDeviceCoreFakes()
 #include "fakes/nccl_fakes.h"  // g_ncclProxyClientGetFdBlocking, ResetNcclFakes()
-#include "fakes/signature-drift.h"
+#include "signature-drift.h"
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -461,23 +461,26 @@ ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct nc
 // ---------------------------------------------------------------------------
 // Barrier requirement builders (host variants).
 // ---------------------------------------------------------------------------
-// The real builders fully populate the out-requirement; the create path's
-// resource-sizing loop then reads its fields (and writes through
-// outBufferHandle). Zero it so stack-garbage pointers do not cause wild writes
-// once a test drives the create path past the GIN gate.
+// ncclDevrCommCreateInternal assigns .next after each builder returns. The
+// fields it then reads off these stack objects are bufferAlign, bufferSize,
+// and the outBufferHandle / outGinSignalStart / outGinCounterStart pointers.
+// Zero them so that walk does not store through an uninitialized pointer.
+static void ZeroDevResourceReq(ncclDevResourceRequirements_t* req) {
+  if (req != nullptr) *req = ncclDevResourceRequirements{};
+}
 extern "C" ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t, int, ncclLsaBarrierHandle_t*,
                                                         ncclDevResourceRequirements_t* req) {
-  if (req != nullptr) *req = {};
+  ZeroDevResourceReq(req);
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, int, ncclGinBarrierHandle_t*,
                                                         ncclDevResourceRequirements_t* req) {
-  if (req != nullptr) *req = {};
+  ZeroDevResourceReq(req);
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCftBarrierHandle_t*,
                                                         ncclDevResourceRequirements_t* req) {
-  if (req != nullptr) *req = {};
+  ZeroDevResourceReq(req);
   return ncclSuccess;
 }
 
@@ -497,6 +500,7 @@ static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommR
 }
 std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t)>
     g_devrGinDevCommSetup = DefaultGinDevCommSetup;
+ASSERT_HOOK_MATCHES_PROD(g_devrGinDevCommSetup, ncclGinDevCommSetup);
 ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
                                  struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
   return g_devrGinDevCommSetup(comm, reqs, devComm, deviceCodeVersion);
@@ -514,6 +518,7 @@ void ncclGinDevCommClearFields(struct ncclDevComm* devComm) {
   devComm->ginContextCount = 0;
   for (auto& handle : devComm->ginHandles) handle = nullptr;
 }
+#undef ASSERT_HOOK_MATCHES_PROD
 
 // The enqueue-rearch job path: collective_stubs.cc pins
 // ncclParamEnqueueRearchEnable to 0, so every call site takes the in-group task

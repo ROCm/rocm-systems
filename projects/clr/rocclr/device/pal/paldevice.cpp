@@ -1203,7 +1203,7 @@ bool Device::initializeHeapResources() {
 }
 
 // ================================================================================================
-device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
+device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue, bool /*cooperative*/) {
   bool profiling = false;
   uint rtCUs = amd::CommandQueue::RealTimeDisabled;
   uint deviceQueueSize = 0;
