@@ -122,7 +122,9 @@ def test_operator_patterns_reject_backend_missing_from_workload():
 
 
 def test_operator_patterns_reject_when_workload_has_no_trace():
-    with pytest.raises(ValueError, match="was not profiled"):
+    with pytest.raises(
+        ValueError, match="Profile again with --trace-ml-api to use those flags"
+    ):
         operator_patterns_for_traced_frameworks(resolve_operator_patterns([]), [])
 
 

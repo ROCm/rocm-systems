@@ -168,7 +168,8 @@ def _require_ml_api_trace(traced_frameworks: List[str]) -> None:
     if not traced_frameworks:
         raise ValueError(
             "Workload was not profiled with --trace-ml-api. "
-            "Cannot use --list-operators or --operator."
+            "Cannot use --list-operators or --operator. "
+            "Profile again with --trace-ml-api to use those flags."
         )
 
 
