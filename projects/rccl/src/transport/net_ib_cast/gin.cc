@@ -413,12 +413,7 @@ struct IbCastRmaIbProxyCtx {
   int nContexts;
 };
 
-// [RCCL] On AINIC a queue pair's channel id picks its uDMA pipeline (connect.cc): under the default
-// RCCL_IB_UDMA_POLICY the first QP of each (NIC, channel id) takes the next pipeline in turn. Every GIN
-// and RMA proxy context therefore takes its own id, counting down from the top of the range; NET
-// channels use the low ids and reach these only when the channel count is raised past
-// MAXCHANNELS / 2. The id only selects the local pipeline (and telemetry bucket) and is never sent
-// to the peer, so ranks need not agree on it.
+// [RCCL] Each RMA context takes its own top-half chId, so on AINIC it gets its own uDMA pipeline; never sent to peer.
 static std::atomic<unsigned> ibCastRmaContextChIds{0};
 
 ncclResult_t IbCastRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* config, void** ginCtx) {
