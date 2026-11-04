@@ -26,6 +26,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   instrumenting binaries are now installed in `share/rocprofiler-systems/skills`. Run the
   bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
   agent's personal skills folder.
+- Perfetto traces now contain a `system_info` packet with the host's system name, kernel
+  release, kernel version, and machine, so trace readers can show them.
 
 ### Resolved issues
 
