@@ -28,7 +28,7 @@ on:
         default: "ROCm/rocjitsu-test-corpus"
         required: true
       corpus_ref:
-        description: "Branch, tag, or SHA used by HIP, race, file-limit, and DBT corpus tests"
+        description: "Branch, tag, or SHA used by HIP, race, file-limit, and DBT corpus tests. A ref without the file-limit matrix fails unless its SHA is in ROCJITSU_FILE_LIMIT_LEGACY_CORPUS_SHAS."
         # Last updated on 2026/11/02.
         default: "86181748e972cde89676634727f754fff58a3788"
         required: true
@@ -58,6 +58,9 @@ env:
   ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
   # Pins HIP, race, file-limit, and DBT tests; keep equal to the corpus_ref default.
   ROCJITSU_DBT_CORPUS_REF: 86181748e972cde89676634727f754fff58a3788
+  # Earlier corpus pins that predate corpus/runtime/file-limits. Only these
+  # skip the file-limit matrix; any other ref without it fails.
+  ROCJITSU_FILE_LIMIT_LEGACY_CORPUS_SHAS: 8172b0ad3099e1836923a62d51abe65e106b5382
   ROCJITSU_DBT_SHA_FRAGMENTS: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/fragments
   ROCJITSU_DBT_SHA_MANIFEST: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/gfx1250-b0-a0-sha-pairs.json
   ROCM_SDK_VERSION: 10.1.0a20260812
@@ -879,6 +882,16 @@ jobs:
         if: ${{ !cancelled() && steps.build_rocjitsu.outcome == 'success' }}
         shell: bash
         run: |
+          suite=corpus/runtime/file-limits/CMakeLists.txt
+          corpus_sha="$(git -C "${ROCJITSU_CORPUS_DIR}" rev-parse HEAD)"
+          if [[ ! -f "${ROCJITSU_CORPUS_DIR}/${suite}" ]]; then
+            if [[ " ${ROCJITSU_FILE_LIMIT_LEGACY_CORPUS_SHAS} " == *" ${corpus_sha} "* ]]; then
+              echo "::notice title=File-limit matrix skipped::Legacy corpus ${corpus_sha} has no ${suite}."
+              exit 0
+            fi
+            echo "::error title=File-limit matrix missing::Corpus ${corpus_sha} has no ${suite} and is not in ROCJITSU_FILE_LIMIT_LEGACY_CORPUS_SHAS."
+            exit 1
+          fi
           ROCM_PATH="$(rocm-sdk path --root)" \
             bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-file-limit-tests.sh"
 
