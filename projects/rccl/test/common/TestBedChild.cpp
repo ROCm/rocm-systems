@@ -138,8 +138,11 @@ namespace RcclUnitTesting
     }
   }
 
-  void TestBedChild::StartExecutionLoop()
+  void TestBedChild::StartExecutionLoop(int const readFd, int const writeFd, MemAllocType const memAllocType)
   {
+    this->childReadFd   = readFd;
+    this->childWriteFd  = writeFd;
+    this->memAllocType  = memAllocType;
 
     // Wait for commands from parent process
     if (verbose) TEST_INFO("Child %d enters execution loop", this->childId);

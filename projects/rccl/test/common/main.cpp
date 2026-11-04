@@ -38,14 +38,9 @@ int main(int argc, char **argv)
 
         // Instantiate child worker
         RcclUnitTesting::TestBedChild child(childId, verbose, printValues, useRankThreading);
-        child.childReadFd   = childReadFd;
-        child.childWriteFd  = childWriteFd;
-        child.parentReadFd  = -1;
-        child.parentWriteFd = -1;
-        child.memAllocType  = memAllocType;
 
         // Enter worker execution loop
-        child.StartExecutionLoop();
+        child.StartExecutionLoop(childReadFd, childWriteFd, memAllocType);
         return 0; // Exit cleanly when CHILD_STOP is received
     }
 

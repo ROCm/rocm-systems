@@ -22,27 +22,7 @@ namespace RcclUnitTesting
   class TestBed
   {
   public:
-    int                        numDevicesAvailable;   // # of devices detected on node
-    std::vector<TestBedChild*> childList;             // Active child processes (with usable RCCL comms); owned by ownedChildren or poolChildren
-    std::vector<std::unique_ptr<TestBedChild>> ownedChildren; // Fork-fresh workers of the active config (empty when it uses the pool)
-    std::vector<int>           rankToChildMap;        // Child process of each active rank
-    std::vector<int>           numCollectivesInGroup; // # of collectives to execute per group call
-    std::vector<int>           numStreamsPerGroup;    // # of different streams available per group call
-    int                        numGroupCalls;         // Total # of group calls to be executed
-    bool                       useBlocking;           // RCCL communication with blocking or non-blocking option
-    MemAllocType               memAllocType = MEM_ALLOC_HIP; // Allocation mode of the current config
-    EnvVars                    ev;                    // Environment variables
-
-    // Comm process pool: poolChildren[d] is pinned to device d; Finalize() is
-    // the pool-reset boundary (re-forks the pool with the current env).
-    bool                       poolMode;              // reuse workers across configs (UT_COMM_POOL != 0)
-    std::vector<std::unique_ptr<TestBedChild>> poolChildren; // persistent pool, index == pinned device id
-    // Cold: device code not loaded yet. Warming: a WARMUP reply is still unread,
-    // so nothing else may be sent to or read from that worker. Warm: loaded.
-    enum class PoolWorkerState { Cold, Warming, Warm };
-    std::vector<PoolWorkerState> poolWorkerState;     // parallel to poolChildren
-    bool                       configUsedPool;        // last InitComms served from the pool (skip Finalize in DestroyComms)
-    bool                       childFailed = false;   // a child reported failure since the last DestroyComms (abort, not finalize)
+    EnvVars ev;  // Environment variables; tests read the run's configuration here
 
     // Constructor - Creates one child process per detected GPU device that waits for further commands
     TestBed();
@@ -51,6 +31,7 @@ namespace RcclUnitTesting
 
     int NumActiveChildren() const { return static_cast<int>(childList.size()); }
     int NumActiveRanks() const    { return static_cast<int>(rankToChildMap.size()); }
+    int NumDevicesAvailable() const { return numDevicesAvailable; }
 
     // Prepare TestBed with multiple group call customization
     void InitComms(std::vector<std::vector<int>> const& deviceIdsPerChild,
@@ -148,16 +129,6 @@ namespace RcclUnitTesting
     // No further calls to TestBed should be performed after this call
     void Finalize();
 
-    // Teardown helpers. TeardownOwnedChildList reaps ownedChildren (classic /
-    // pool-fallback path). TeardownPool reaps the persistent pool workers.
-    // Finalize() is the pool-reset boundary and runs both.
-    void TeardownOwnedChildList();
-    void TeardownPool();
-
-    // Test hook: appends an already-forked child to the active fork-fresh config
-    // as its next rank, as InitComms would. Returns the adopted child.
-    TestBedChild* AdoptChild(std::unique_ptr<TestBedChild> child);
-
     // Destructor - Calls Finalize() to release all child processes
     ~TestBed();
 
@@ -215,13 +186,43 @@ namespace RcclUnitTesting
                         bool                        const& enableSweep = true,
                         MemAllocType                       memAllocType = MEM_ALLOC_HIP);
 
-    // Wait for user-input if in interactive mode
-    void InteractiveWait(std::string message);
-
     // Used to track total number of calls to ExecuteCollectives()
     static int& NumTestsRun();
 
   private:
+    // Gives white-box tests access to the internals below.
+    friend class TestBedPeer;
+
+    int                        numDevicesAvailable;   // # of devices detected on node
+    std::vector<TestBedChild*> childList;             // Active child processes (with usable RCCL comms); owned by ownedChildren or poolChildren
+    std::vector<std::unique_ptr<TestBedChild>> ownedChildren; // Fork-fresh workers of the active config (empty when it uses the pool)
+    std::vector<int>           rankToChildMap;        // Child process of each active rank
+    std::vector<int>           numCollectivesInGroup; // # of collectives to execute per group call
+    std::vector<int>           numStreamsPerGroup;    // # of different streams available per group call
+    int                        numGroupCalls;         // Total # of group calls to be executed
+    bool                       useBlocking;           // RCCL communication with blocking or non-blocking option
+    MemAllocType               memAllocType = MEM_ALLOC_HIP; // Allocation mode of the current config
+
+    // Comm process pool: poolChildren[d] is pinned to device d; Finalize() is
+    // the pool-reset boundary (re-forks the pool with the current env).
+    bool                       poolMode;              // reuse workers across configs (UT_COMM_POOL != 0)
+    std::vector<std::unique_ptr<TestBedChild>> poolChildren; // persistent pool, index == pinned device id
+    // Cold: device code not loaded yet. Warming: a WARMUP reply is still unread,
+    // so nothing else may be sent to or read from that worker. Warm: loaded.
+    enum class PoolWorkerState { Cold, Warming, Warm };
+    std::vector<PoolWorkerState> poolWorkerState;     // parallel to poolChildren
+    bool                       configUsedPool;        // last InitComms served from the pool (skip Finalize in DestroyComms)
+    bool                       childFailed = false;   // a child reported failure since the last DestroyComms (abort, not finalize)
+
+    // Teardown helpers. TeardownOwnedChildList reaps ownedChildren (classic /
+    // pool-fallback path). TeardownPool reaps the persistent pool workers.
+    // Finalize() is the pool-reset boundary and runs both.
+    void TeardownOwnedChildList();
+    void TeardownPool();
+
+    // Wait for user-input if in interactive mode
+    void InteractiveWait(std::string message);
+
     // Starts a worker in a fresh process image so it never inherits HIP/HSA
     // runtime state from the test parent.
     bool SpawnChildProcess(TestBedChild* child, MemAllocType memAllocType);

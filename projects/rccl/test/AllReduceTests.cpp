@@ -844,7 +844,7 @@ namespace RcclUnitTesting
   {
     TestBed testBed;
 
-    if (testBed.numDevicesAvailable < 1)
+    if (testBed.NumDevicesAvailable() < 1)
       GTEST_SKIP() << "Requires at least 1 GPU";
 
     ncclFunc_t                  const funcType      = ncclCollAllReduce;

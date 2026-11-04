@@ -70,7 +70,7 @@
   {                                                                                     \
     TestBedChild::Reply reply = {};                                                     \
     PIPE_READ(childId, reply);                                                          \
-    std::string const mismatch = ReplyMismatch(*childList[childId], reply, command);    \
+    std::string const mismatch = ReplyMismatch(childList[childId]->replySeq, reply, command); \
     if (!mismatch.empty())                                                              \
     {                                                                                   \
       TEST_ERROR("Child %d %s", childId, mismatch.c_str());                             \
@@ -123,12 +123,12 @@ namespace RcclUnitTesting
 
     char const* const kOutOfSequence = "sent an out-of-sequence reply";
 
-    // Consumes the next reply sequence number of child. Empty if reply answers
-    // command in order; otherwise describes the mismatch. A mismatch means the
-    // pipe is out of step and cannot be resynchronized.
-    std::string ReplyMismatch(TestBedChild& child, TestBedChild::Reply const& reply, int const command)
+    // Consumes the next reply sequence number of a child (its replySeq). Empty if
+    // reply answers command in order; otherwise describes the mismatch. A mismatch
+    // means the pipe is out of step and cannot be resynchronized.
+    std::string ReplyMismatch(uint32_t& replySeq, TestBedChild::Reply const& reply, int const command)
     {
-      uint32_t const expectedSeq = ++child.replySeq;
+      uint32_t const expectedSeq = ++replySeq;
       if (reply.command == command && reply.seq == expectedSeq) return "";
       return "sent reply #" + std::to_string(reply.seq) + " to " + TestBedChild::CommandName(reply.command) +
              " where reply #" + std::to_string(expectedSeq) + " to " + TestBedChild::CommandName(command) +
@@ -374,16 +374,6 @@ namespace RcclUnitTesting
     this->childFailed = false;
   }
 
-  TestBedChild* TestBed::AdoptChild(std::unique_ptr<TestBedChild> child)
-  {
-    this->poolMode = false;
-    this->configUsedPool = false;
-    this->rankToChildMap.push_back(NumActiveChildren());
-    this->childList.push_back(child.get());
-    this->ownedChildren.push_back(std::move(child));
-    return this->childList.back();
-  }
-
   bool TestBed::SelectRanks(int const rank, std::vector<int>& ranks) const
   {
     ranks.clear();
@@ -531,7 +521,7 @@ namespace RcclUnitTesting
     }
     else
     {
-      problem = ReplyMismatch(*child, reply, TestBedChild::CHILD_WARMUP);
+      problem = ReplyMismatch(child->replySeq, reply, TestBedChild::CHILD_WARMUP);
       if (problem.empty() && reply.status != TEST_SUCCESS) problem = "reported failure";
     }
     if (problem.empty()) return true;
@@ -867,7 +857,7 @@ namespace RcclUnitTesting
           ReportReadFailure(childId, retval, sizeof(reply));
           FAIL() << AbandonChildren(childId);
         }
-        std::string const mismatch = ReplyMismatch(*childList[childId], reply, command);
+        std::string const mismatch = ReplyMismatch(childList[childId]->replySeq, reply, command);
         if (!mismatch.empty())
         {
           TEST_ERROR("Child %d %s", childId, mismatch.c_str());

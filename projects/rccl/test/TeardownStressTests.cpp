@@ -23,6 +23,66 @@
 
 namespace RcclUnitTesting
 {
+  // White-box access to TestBed and TestBedChild internals for these tests;
+  // both classes declare it a friend.
+  class TestBedPeer
+  {
+  public:
+    using PoolWorkerState = TestBed::PoolWorkerState;
+
+    explicit TestBedPeer(TestBed& testBed) : testBed(testBed) {}
+
+    bool PoolMode() const       { return testBed.poolMode; }
+    bool ConfigUsedPool() const { return testBed.configUsedPool; }
+    bool ChildFailed() const    { return testBed.childFailed; }
+    std::vector<std::unique_ptr<TestBedChild>>& PoolChildren() { return testBed.poolChildren; }
+    std::vector<PoolWorkerState>& PoolWorkerStates()           { return testBed.poolWorkerState; }
+    void TeardownOwnedChildList() { testBed.TeardownOwnedChildList(); }
+
+    // Appends child to the active fork-fresh config as its next rank, as a
+    // one-group InitComms would. Returns the adopted child.
+    TestBedChild* AdoptChild(std::unique_ptr<TestBedChild> child)
+    {
+      testBed.poolMode = false;
+      testBed.configUsedPool = false;
+      testBed.numGroupCalls = 1;
+      testBed.rankToChildMap.push_back(testBed.NumActiveChildren());
+      testBed.childList.push_back(child.get());
+      testBed.ownedChildren.push_back(std::move(child));
+      return testBed.childList.back();
+    }
+
+    static pid_t Pid(TestBedChild const& child)           { return child.pid; }
+    static int   ParentReadFd(TestBedChild const& child)  { return child.parentReadFd; }
+    static int   ParentWriteFd(TestBedChild const& child) { return child.parentWriteFd; }
+
+    // Forks a stand-in worker that runs body on its ends of the pipes, then exits.
+    // Returns nullptr if the pipes or the fork fail.
+    static std::unique_ptr<TestBedChild> ForkFakeChild(int const childId,
+                                                       std::function<void(int readFd, int writeFd)> const& body)
+    {
+      auto child = std::make_unique<TestBedChild>(childId, false, 0, false);
+      if (child->InitPipes() != TEST_SUCCESS) return nullptr;
+      child->pid = fork();
+      if (child->pid == 0)
+      {
+        close(child->parentWriteFd);
+        close(child->parentReadFd);
+        body(child->childReadFd, child->childWriteFd);
+        _exit(0);
+      }
+      if (child->pid < 0) return nullptr;
+      close(child->childWriteFd);
+      close(child->childReadFd);
+      child->childWriteFd = -1;
+      child->childReadFd = -1;
+      return child;
+    }
+
+  private:
+    TestBed& testBed;
+  };
+
   // Stress coverage for the parallelized TestBed::DestroyComms teardown
   // (ROCM-25953): DestroyComms now broadcasts the destroy command to every child
   // process first and collects the acknowledgements in a second pass, so the
@@ -47,7 +107,8 @@ namespace RcclUnitTesting
     std::string MultiProcessSkipReason(TestBed& testBed, bool const needPool = false,
                                        bool const needWarmAhead = false)
     {
-      if (needPool && !testBed.poolMode) return "Requires communicator pooling (UT_COMM_POOL=1)";
+      TestBedPeer peer(testBed);
+      if (needPool && !peer.PoolMode()) return "Requires communicator pooling (UT_COMM_POOL=1)";
       if (needWarmAhead && !testBed.ev.commWarmAhead) return "Requires UT_COMM_WARMAHEAD=1";
       if (testBed.ev.maxGpus < 2)
       {
@@ -144,37 +205,22 @@ namespace RcclUnitTesting
   TEST(Teardown, AlreadyExitedChildCleanup)
   {
     TestBed testBed;
-    auto owned = std::make_unique<TestBedChild>(0, false, 0, false);
-    TestBedChild* const child = owned.get();
-    ASSERT_EQ(child->InitPipes(), TEST_SUCCESS);
-    child->pid = fork();
-    ASSERT_GE(child->pid, 0);
-    if (child->pid == 0)
-    {
-      close(child->parentWriteFd);
-      close(child->parentReadFd);
-      close(child->childWriteFd);
-      close(child->childReadFd);
-      _exit(0);
-    }
-
-    close(child->childWriteFd);
-    close(child->childReadFd);
-    child->childWriteFd = -1;
-    child->childReadFd = -1;
-    testBed.AdoptChild(std::move(owned));
+    TestBedPeer peer(testBed);
+    auto owned = TestBedPeer::ForkFakeChild(0, [](int, int) {});
+    ASSERT_NE(owned, nullptr);
+    TestBedChild* const child = peer.AdoptChild(std::move(owned));
+    pid_t const childPid = TestBedPeer::Pid(*child);
 
     // Wait until the worker has exited, but leave it for TestBed to reap.
     siginfo_t childInfo{};
-    ASSERT_EQ(waitid(P_PID, child->pid, &childInfo, WEXITED | WNOWAIT), 0);
-    pid_t const childPid = child->pid;
+    ASSERT_EQ(waitid(P_PID, childPid, &childInfo, WEXITED | WNOWAIT), 0);
     // Teardown deletes the child, so snapshot the parent-side descriptors first.
-    int const parentWriteFd = child->parentWriteFd;
-    int const parentReadFd = child->parentReadFd;
+    int const parentWriteFd = TestBedPeer::ParentWriteFd(*child);
+    int const parentReadFd = TestBedPeer::ParentReadFd(*child);
 
-    testBed.TeardownOwnedChildList();
+    peer.TeardownOwnedChildList();
 
-    EXPECT_TRUE(testBed.childList.empty());
+    EXPECT_EQ(testBed.NumActiveChildren(), 0);
     EXPECT_EQ(testBed.NumActiveRanks(), 0);
     errno = 0;
     EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
@@ -202,37 +248,25 @@ namespace RcclUnitTesting
     std::unique_ptr<TestBedChild> ForkHungChild(int const childId, std::optional<int> const status = std::nullopt,
                                                 uint32_t const seq = 1)
     {
-      auto child = std::make_unique<TestBedChild>(childId, false, 0, false);
-      if (child->InitPipes() != TEST_SUCCESS) return nullptr;
-      child->pid = fork();
-      if (child->pid == 0)
-      {
-        close(child->parentWriteFd);
-        close(child->parentReadFd);
+      return TestBedPeer::ForkFakeChild(childId, [=](int const readFd, int const writeFd) {
         int command[2];
-        if (status && safe_pipe_read(child->childReadFd, command, sizeof(command)) ==
-                      static_cast<ssize_t>(sizeof(command)))
+        if (status && safe_pipe_read(readFd, command, sizeof(command)) == static_cast<ssize_t>(sizeof(command)))
         {
           TestBedChild::Reply const reply = {command[0], seq, *status};
-          (void)safe_pipe_write(child->childWriteFd, &reply, sizeof(reply));
+          (void)safe_pipe_write(writeFd, &reply, sizeof(reply));
         }
         while (true) pause();
-      }
-      if (child->pid < 0) return nullptr;
-      close(child->childWriteFd);
-      close(child->childReadFd);
-      child->childWriteFd = -1;
-      child->childReadFd = -1;
-      return child;
+      });
     }
 
     // Makes a hung worker testBed's only (non-pool) child, with 1 s parent waits.
     TestBedChild* InstallHungChild(TestBed& testBed)
     {
+      TestBedPeer peer(testBed);
       LimitParentWaitsToOneSecond(testBed);
       auto child = ForkHungChild(0);
       if (child == nullptr) return nullptr;
-      return testBed.AdoptChild(std::move(child));
+      return peer.AdoptChild(std::move(child));
     }
 
     bool AnyFailureMentions(::testing::TestPartResultArray const& failures, char const* text)
@@ -259,9 +293,10 @@ namespace RcclUnitTesting
     {
       SCOPED_TRACE(command.first);
       TestBed testBed;
+      TestBedPeer peer(testBed);
       TestBedChild* const child = InstallHungChild(testBed);
       ASSERT_NE(child, nullptr);
-      pid_t const childPid = child->pid;
+      pid_t const childPid = TestBedPeer::Pid(*child);
 
       ::testing::TestPartResultArray failures;
       auto const elapsed = CaptureFailures(failures, [&]() { command.second(testBed); });
@@ -269,9 +304,9 @@ namespace RcclUnitTesting
       EXPECT_EQ(failures.size(), 1);
       EXPECT_TRUE(AnyFailureMentions(failures, "stopped responding"));
       EXPECT_LT(elapsed, std::chrono::seconds(30));
-      EXPECT_TRUE(testBed.childList.empty());
+      EXPECT_EQ(testBed.NumActiveChildren(), 0);
       EXPECT_EQ(testBed.NumActiveRanks(), 0);
-      EXPECT_FALSE(testBed.childFailed);
+      EXPECT_FALSE(peer.ChildFailed());
       errno = 0;
       EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
       EXPECT_EQ(errno, ECHILD);
@@ -283,17 +318,18 @@ namespace RcclUnitTesting
   TEST(Teardown, HungChildKilledAtTeardownDeadline)
   {
     TestBed testBed;
+    TestBedPeer peer(testBed);
     TestBedChild* const child = InstallHungChild(testBed);
     ASSERT_NE(child, nullptr);
-    pid_t const childPid = child->pid;
+    pid_t const childPid = TestBedPeer::Pid(*child);
 
     ::testing::TestPartResultArray failures;
-    auto const elapsed = CaptureFailures(failures, [&]() { testBed.TeardownOwnedChildList(); });
+    auto const elapsed = CaptureFailures(failures, [&]() { peer.TeardownOwnedChildList(); });
 
     EXPECT_EQ(failures.size(), 1);
     EXPECT_TRUE(AnyFailureMentions(failures, "teardown deadline"));
     EXPECT_LT(elapsed, std::chrono::seconds(30));
-    EXPECT_TRUE(testBed.childList.empty());
+    EXPECT_EQ(testBed.NumActiveChildren(), 0);
     EXPECT_EQ(testBed.NumActiveRanks(), 0);
     errno = 0;
     EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
@@ -311,22 +347,22 @@ namespace RcclUnitTesting
     {
       SCOPED_TRACE(std::to_string(statuses->size()) + " children");
       TestBed testBed;
+      TestBedPeer peer(testBed);
       LimitParentWaitsToOneSecond(testBed);
       std::vector<pid_t> pids;
       for (int const status : *statuses)
       {
         auto child = ForkHungChild(testBed.NumActiveChildren(), status);
-        if (child != nullptr) pids.push_back(testBed.AdoptChild(std::move(child))->pid);
+        if (child != nullptr) pids.push_back(TestBedPeer::Pid(*peer.AdoptChild(std::move(child))));
       }
       ASSERT_EQ(testBed.NumActiveChildren(), static_cast<int>(statuses->size()));
-      testBed.numGroupCalls = 1;
 
       ::testing::TestPartResultArray failures;
       CaptureFailures(failures, [&]() { testBed.LaunchGraphs(0); });
 
       EXPECT_EQ(failures.size(), 1);
       EXPECT_TRUE(AnyFailureMentions(failures, "Child 0 reported failure"));
-      EXPECT_TRUE(testBed.childList.empty());
+      EXPECT_EQ(testBed.NumActiveChildren(), 0);
       EXPECT_EQ(testBed.NumActiveRanks(), 0);
       for (pid_t const pid : pids)
       {
@@ -343,11 +379,11 @@ namespace RcclUnitTesting
   TEST(Teardown, OutOfSequenceReplyStopsAllWorkers)
   {
     TestBed testBed;
+    TestBedPeer peer(testBed);
     LimitParentWaitsToOneSecond(testBed);
     auto child = ForkHungChild(0, TEST_SUCCESS, /*seq*/ 2);
     ASSERT_NE(child, nullptr);
-    pid_t const childPid = testBed.AdoptChild(std::move(child))->pid;
-    testBed.numGroupCalls = 1;
+    pid_t const childPid = TestBedPeer::Pid(*peer.AdoptChild(std::move(child)));
 
     ::testing::TestPartResultArray failures;
     auto const elapsed = CaptureFailures(failures, [&]() { testBed.LaunchGraphs(0); });
@@ -355,7 +391,7 @@ namespace RcclUnitTesting
     EXPECT_EQ(failures.size(), 1);
     EXPECT_TRUE(AnyFailureMentions(failures, "out-of-sequence reply"));
     EXPECT_LT(elapsed, std::chrono::seconds(30));
-    EXPECT_TRUE(testBed.childList.empty());
+    EXPECT_EQ(testBed.NumActiveChildren(), 0);
     errno = 0;
     EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
     EXPECT_EQ(errno, ECHILD);
@@ -366,6 +402,7 @@ namespace RcclUnitTesting
   TEST(Teardown, PoolAfterParentHipInitialization)
   {
     TestBed testBed;
+    TestBedPeer peer(testBed);
     std::string const skipReason = MultiProcessSkipReason(testBed, /*needPool=*/true);
     if (!skipReason.empty()) GTEST_SKIP() << skipReason;
 
@@ -382,7 +419,7 @@ namespace RcclUnitTesting
     EXPECT_TRUE(isCorrect);
     // InitComms silently falls back to fork-fresh workers if the pool cannot
     // serve the config, which would make this test cover the wrong path.
-    EXPECT_TRUE(testBed.configUsedPool) << "Config was not served from the communicator pool";
+    EXPECT_TRUE(peer.ConfigUsedPool()) << "Config was not served from the communicator pool";
     testBed.Finalize();
   }
 
@@ -392,15 +429,16 @@ namespace RcclUnitTesting
     // worker of a 2-process config. Returns that worker, or -1 on failure.
     int StartWarmingSecondWorker(TestBed& testBed, std::vector<std::vector<int>>& twoProcessIds)
     {
+      TestBedPeer peer(testBed);
       bool isCorrect = true;
       RunTeardownCycles(testBed, 1, /*useBlocking*/ true, /*iterations*/ 1, isCorrect);
-      if (!isCorrect || testBed.poolChildren.empty()) return -1;
+      if (!isCorrect || peer.PoolChildren().empty()) return -1;
 
       twoProcessIds = TestBed::GetDeviceIdsList(2, 2, testBed.ev.GetGpuPriorityOrder());
       int const worker = twoProcessIds[1][0];
-      EXPECT_EQ(testBed.poolWorkerState[worker], TestBed::PoolWorkerState::Cold);
+      EXPECT_EQ(peer.PoolWorkerStates()[worker], TestBedPeer::PoolWorkerState::Cold);
       testBed.WarmPoolWorkers(twoProcessIds);
-      EXPECT_EQ(testBed.poolWorkerState[worker], TestBed::PoolWorkerState::Warming);
+      EXPECT_EQ(peer.PoolWorkerStates()[worker], TestBedPeer::PoolWorkerState::Warming);
       return worker;
     }
 
@@ -425,7 +463,7 @@ namespace RcclUnitTesting
     // the leftover bytes in the pipe show it right away.
     bool HasUnreadReply(TestBedChild const* worker, int const waitMs)
     {
-      pollfd fd = {worker->parentReadFd, POLLIN, 0};
+      pollfd fd = {TestBedPeer::ParentReadFd(*worker), POLLIN, 0};
       return poll(&fd, 1, waitMs) > 0 && (fd.revents & POLLIN);
     }
 
@@ -446,6 +484,7 @@ namespace RcclUnitTesting
   TEST(Teardown, PoolWorkerFreesBuffersLeftAllocated)
   {
     TestBed testBed;
+    TestBedPeer peer(testBed);
     std::string const skipReason = MultiProcessSkipReason(testBed, /*needPool=*/true);
     if (!skipReason.empty()) GTEST_SKIP() << skipReason;
 
@@ -457,7 +496,7 @@ namespace RcclUnitTesting
     for (int cycle = 0; cycle < 3; ++cycle)
     {
       testBed.InitComms(deviceIds);
-      ASSERT_TRUE(testBed.configUsedPool) << "Config was not served from the communicator pool";
+      ASSERT_TRUE(peer.ConfigUsedPool()) << "Config was not served from the communicator pool";
       OptionalColArgs options;
       options.redOp = ncclSum;
       testBed.SetCollectiveArgs(ncclCollAllReduce, ncclFloat32, numElements, numElements, options);
@@ -465,7 +504,7 @@ namespace RcclUnitTesting
       testBed.DestroyComms();
       ASSERT_FALSE(testing::Test::HasFailure());
 
-      long long const vram = ProcessVramBytes(testBed.poolChildren[worker]->pid);
+      long long const vram = ProcessVramBytes(TestBedPeer::Pid(*peer.PoolChildren()[worker]));
       if (vram < 0) GTEST_SKIP() << "Per-process VRAM usage unavailable (/sys/class/kfd/kfd/proc)";
       if (cycle == 0) firstVram = vram;
       else EXPECT_LT(vram - firstVram, bufferBytes) << "Pool worker VRAM grew after config " << cycle;
@@ -504,7 +543,7 @@ namespace RcclUnitTesting
     EXPECT_TRUE(AnyFailureMentions(failures, "Child 0 reported failure"));
     EXPECT_LT(elapsed, std::chrono::microseconds(testBed.ev.timeoutUs))
       << "Waited for rank 1 to time out instead of stopping the workers";
-    EXPECT_TRUE(testBed.childList.empty());
+    EXPECT_EQ(testBed.NumActiveChildren(), 0);
     EXPECT_EQ(testBed.NumActiveRanks(), 0);
     testBed.Finalize();
   }
@@ -528,7 +567,7 @@ namespace RcclUnitTesting
     EXPECT_EQ(failures.size(), 1);
     EXPECT_TRUE(AnyFailureMentions(failures, "Child 1 reported failure"));
     EXPECT_LT(elapsed, std::chrono::seconds(10));
-    EXPECT_TRUE(testBed.childList.empty());
+    EXPECT_EQ(testBed.NumActiveChildren(), 0);
     EXPECT_EQ(testBed.NumActiveRanks(), 0);
     testBed.Finalize();
   }
@@ -537,6 +576,7 @@ namespace RcclUnitTesting
   TEST(Teardown, WarmedPoolWorkerIsReused)
   {
     TestBed testBed;
+    TestBedPeer peer(testBed);
     std::string const skipReason = MultiProcessSkipReason(testBed, /*needPool=*/true, /*needWarmAhead=*/true);
     if (!skipReason.empty()) GTEST_SKIP() << skipReason;
 
@@ -547,11 +587,11 @@ namespace RcclUnitTesting
     bool isCorrect = true;
     RunTeardownCycles(testBed, 2, /*useBlocking*/ true, /*iterations*/ 1, isCorrect);
     EXPECT_TRUE(isCorrect);
-    EXPECT_TRUE(testBed.configUsedPool) << "Config was not served from the communicator pool";
-    EXPECT_EQ(testBed.poolWorkerState[worker], TestBed::PoolWorkerState::Warm);
+    EXPECT_TRUE(peer.ConfigUsedPool()) << "Config was not served from the communicator pool";
+    EXPECT_EQ(peer.PoolWorkerStates()[worker], TestBedPeer::PoolWorkerState::Warm);
     for (auto const& deviceIds : twoProcessIds)
     {
-      EXPECT_FALSE(HasUnreadReply(testBed.poolChildren[deviceIds[0]].get(), /*waitMs*/ 1000))
+      EXPECT_FALSE(HasUnreadReply(peer.PoolChildren()[deviceIds[0]].get(), /*waitMs*/ 1000))
         << "Pool worker " << deviceIds[0] << " has a reply the parent never read";
     }
     testBed.Finalize();
@@ -562,12 +602,13 @@ namespace RcclUnitTesting
   TEST(Teardown, FinalizeReportsLostWarmupWorker)
   {
     TestBed testBed;
+    TestBedPeer peer(testBed);
     LimitParentWaitsToOneSecond(testBed);
     auto child = ForkHungChild(0);
     ASSERT_NE(child, nullptr);
-    pid_t const childPid = child->pid;
-    testBed.poolChildren.push_back(std::move(child));
-    testBed.poolWorkerState = {TestBed::PoolWorkerState::Warming};
+    pid_t const childPid = TestBedPeer::Pid(*child);
+    peer.PoolChildren().push_back(std::move(child));
+    peer.PoolWorkerStates() = {TestBedPeer::PoolWorkerState::Warming};
     ASSERT_EQ(kill(childPid, SIGKILL), 0);
 
     ::testing::TestPartResultArray failures;
@@ -575,8 +616,8 @@ namespace RcclUnitTesting
 
     EXPECT_EQ(failures.size(), 1);
     EXPECT_TRUE(AnyFailureMentions(failures, "warm-up pipe closed"));
-    EXPECT_TRUE(testBed.poolChildren.empty());
-    EXPECT_TRUE(testBed.poolWorkerState.empty());
+    EXPECT_TRUE(peer.PoolChildren().empty());
+    EXPECT_TRUE(peer.PoolWorkerStates().empty());
     errno = 0;
     EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
     EXPECT_EQ(errno, ECHILD);
@@ -587,14 +628,15 @@ namespace RcclUnitTesting
   TEST(Teardown, HungWarmupsShareOneDeadline)
   {
     TestBed testBed;
+    TestBedPeer peer(testBed);
     LimitParentWaitsToOneSecond(testBed);
     int const numWorkers = 3;
     for (int worker = 0; worker < numWorkers; ++worker)
     {
       auto child = ForkHungChild(worker);
       ASSERT_NE(child, nullptr);
-      testBed.poolChildren.push_back(std::move(child));
-      testBed.poolWorkerState.push_back(TestBed::PoolWorkerState::Warming);
+      peer.PoolChildren().push_back(std::move(child));
+      peer.PoolWorkerStates().push_back(TestBedPeer::PoolWorkerState::Warming);
     }
 
     ::testing::TestPartResultArray failures;
@@ -603,7 +645,7 @@ namespace RcclUnitTesting
     EXPECT_EQ(failures.size(), numWorkers);
     EXPECT_TRUE(AnyFailureMentions(failures, "warm-up did not reply"));
     EXPECT_LT(elapsed, std::chrono::seconds(numWorkers - 1)) << "Each warm-up waited out its own reply timeout";
-    EXPECT_TRUE(testBed.poolChildren.empty());
+    EXPECT_TRUE(peer.PoolChildren().empty());
   }
 
   namespace
@@ -612,6 +654,7 @@ namespace RcclUnitTesting
     // leaves rank 1's comms marked failed and rank 0's healthy.
     void FailValidationOnRank1(TestBed& testBed)
     {
+      TestBedPeer peer(testBed);
       testBed.ev.childTimeoutSec = 20;
       testBed.InitComms(TestBed::GetDeviceIdsList(2, 2, testBed.ev.GetGpuPriorityOrder()));
       ASSERT_FALSE(testing::Test::HasFailure());
@@ -627,7 +670,7 @@ namespace RcclUnitTesting
       ::testing::TestPartResultArray validateFailures;
       CaptureFailures(validateFailures, [&]() { testBed.ValidateResults(isCorrect); });
       ASSERT_FALSE(isCorrect) << "Rank 1 did not detect its corrupted expected value";
-      ASSERT_TRUE(testBed.childFailed);
+      ASSERT_TRUE(peer.ChildFailed());
       testBed.DeallocateMem();
       ASSERT_FALSE(testing::Test::HasFailure());
     }
@@ -638,6 +681,7 @@ namespace RcclUnitTesting
   TEST(Teardown, DestroyCommsAbortsPeersAfterValidationFailure)
   {
     TestBed testBed;
+    TestBedPeer peer(testBed);
     std::string const skipReason = MultiProcessSkipReason(testBed);
     if (!skipReason.empty()) GTEST_SKIP() << skipReason;
     FailValidationOnRank1(testBed);
@@ -648,7 +692,7 @@ namespace RcclUnitTesting
 
     EXPECT_EQ(failures.size(), 0) << (failures.size() > 0 ? failures.GetTestPartResult(0).message() : "");
     EXPECT_LT(elapsed, std::chrono::seconds(testBed.ev.childTimeoutSec));
-    EXPECT_FALSE(testBed.childFailed);
+    EXPECT_FALSE(peer.ChildFailed());
     testBed.Finalize();
   }
 
@@ -658,6 +702,7 @@ namespace RcclUnitTesting
   TEST(Teardown, FinalizeAbortsPeersAfterValidationFailure)
   {
     TestBed testBed;
+    TestBedPeer peer(testBed);
     std::string const skipReason = MultiProcessSkipReason(testBed);
     if (!skipReason.empty()) GTEST_SKIP() << skipReason;
     FailValidationOnRank1(testBed);
@@ -668,8 +713,8 @@ namespace RcclUnitTesting
 
     EXPECT_EQ(failures.size(), 0) << (failures.size() > 0 ? failures.GetTestPartResult(0).message() : "");
     EXPECT_LT(elapsed, std::chrono::seconds(testBed.ev.childTimeoutSec));
-    EXPECT_TRUE(testBed.childList.empty());
-    EXPECT_TRUE(testBed.poolChildren.empty());
+    EXPECT_EQ(testBed.NumActiveChildren(), 0);
+    EXPECT_TRUE(peer.PoolChildren().empty());
   }
 
   // A rank, group or collective outside the config must fail the command rather
@@ -764,21 +809,22 @@ namespace RcclUnitTesting
   TEST(Teardown, LostWarmupWorkerFallsBackToFreshWorkers)
   {
     TestBed testBed;
+    TestBedPeer peer(testBed);
     std::string const skipReason = MultiProcessSkipReason(testBed, /*needPool=*/true, /*needWarmAhead=*/true);
     if (!skipReason.empty()) GTEST_SKIP() << skipReason;
 
     std::vector<std::vector<int>> twoProcessIds;
     int const worker = StartWarmingSecondWorker(testBed, twoProcessIds);
     ASSERT_GE(worker, 0);
-    pid_t const workerPid = testBed.poolChildren[worker]->pid;
+    pid_t const workerPid = TestBedPeer::Pid(*peer.PoolChildren()[worker]);
     ASSERT_EQ(kill(workerPid, SIGKILL), 0);
 
     ::testing::TestPartResultArray failures;
     CaptureFailures(failures, [&]() { testBed.InitComms(twoProcessIds); });
     EXPECT_EQ(failures.size(), 1);
     EXPECT_TRUE(AnyFailureMentions(failures, "warm-up"));
-    EXPECT_EQ(testBed.poolChildren[worker].get(), nullptr);
-    EXPECT_FALSE(testBed.configUsedPool);
+    EXPECT_EQ(peer.PoolChildren()[worker].get(), nullptr);
+    EXPECT_FALSE(peer.ConfigUsedPool());
     EXPECT_EQ(testBed.NumActiveChildren(), 2);
     errno = 0;
     EXPECT_EQ(waitpid(workerPid, nullptr, WNOHANG), -1);

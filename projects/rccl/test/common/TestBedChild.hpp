@@ -101,6 +101,23 @@ namespace RcclUnitTesting
     };
     static constexpr char const* kChildFlag = "--child";
 
+    // Constructor
+    TestBedChild(int const childId, bool const verbose, int const printValues, bool const useRankThreading);
+    TestBedChild(TestBedChild const&) = delete;
+    TestBedChild& operator=(TestBedChild const&) = delete;
+
+    // Parent side: kills and reaps a process teardown did not reap (pid > 0),
+    // then closes the pipes. Whoever reaps pid must set it to -1 first.
+    ~TestBedChild();
+
+    // Worker side: runs commands from the parent over readFd / writeFd until CHILD_STOP
+    void StartExecutionLoop(int readFd, int writeFd, MemAllocType memAllocType);
+
+  private:
+    // TestBed drives the parent's end of the pipes; TestBedPeer gives white-box tests access.
+    friend class TestBed;
+    friend class TestBedPeer;
+
     // These variables remain constant for life of TestBedChild
     int   childId;
     pid_t pid;
@@ -132,25 +149,12 @@ namespace RcclUnitTesting
     MemAllocType memAllocType = MEM_ALLOC_HIP;                        // Current memory allocation mode
     bool commsFailed = false;                                         // A command failed since comms were created: abort, not finalize
 
-    // Constructor
-    TestBedChild(int const childId, bool const verbose, int const printValues, bool const useRankThreading);
-    TestBedChild(TestBedChild const&) = delete;
-    TestBedChild& operator=(TestBedChild const&) = delete;
-
-    // Parent side: kills and reaps a process teardown did not reap (pid > 0),
-    // then closes the pipes. Whoever reaps pid must set it to -1 first.
-    ~TestBedChild();
-
     // Prepare parent/child communication pipes - to be executed by parent process
     int InitPipes();
 
     // Closes every open pipe descriptor and marks it -1 - to be executed by parent process
     void ClosePipes();
 
-    // Execution
-    void StartExecutionLoop();
-
-  protected:
     // Number of elements UT_PRINT_VALUES prints from a buffer of numElements (-1 prints all)
     size_t NumElementsToPrint(size_t numElements) const
     {
@@ -206,7 +210,6 @@ namespace RcclUnitTesting
     // comm so RCCL's device code is loaded before the worker's first real config.
     ErrCode Warmup();
 
-  private:
     // Writes the reply header for command; false if the parent pipe is gone.
     bool SendReply(int command, ErrCode status);
 
