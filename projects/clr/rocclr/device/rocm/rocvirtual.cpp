@@ -2390,6 +2390,77 @@ static inline void writeMetadataPacketToRing(uint8_t* dst, const uint8_t* src,
 //     signal + valid header).  Reserved slots already carry INVALID headers from the CP's
 //     previous consumption, so publish order is irrelevant and no packet-0-last dance is
 //     needed.  The metadata ring uses the same NT-vs-MOVDIR64B split.
+void VirtualGPU::FlushPendingForkWait() {
+  if (pending_fork_wait_ == nullptr) {
+    return;
+  }
+  // The wait as 0009 issues it: a barrier without completion signal
+  barrier_packet_.dep_signal[0] = pending_fork_wait_->signal_;
+  constexpr bool kSkipSignal = true;
+  constexpr bool kDepSignalsSet = true;
+  dispatchBarrierPacket(kNopPacketHeader, kSkipSignal, hsa_signal_t{0}, kDepSignalsSet);
+  ReleasePendingForkWait();
+}
+
+// ================================================================================================
+void VirtualGPU::ReleasePendingForkWait() {
+  pending_fork_wait_->release();
+  pending_fork_wait_ = nullptr;
+  pending_fork_anchor_ = nullptr;
+}
+
+// ================================================================================================
+bool VirtualGPU::dispatchGraphForkWait(amd::Command* wait_cmd, amd::AccumulateCommand* anchor) {
+  // The waited command's queue attaches a marker with a HW event if the command has none
+  wait_cmd->notifyCmdQueue();
+  amd::Event* event = (wait_cmd->NotifyEvent() != nullptr) ? wait_cmd->NotifyEvent() : wait_cmd;
+  auto* hw_event = reinterpret_cast<ProfilingSignal*>(event->HwEvent());
+  if (hw_event == nullptr) {
+    // Nothing to wait for if it completed; otherwise the caller waits with a marker
+    return wait_cmd->status() == CL_COMPLETE;
+  }
+
+  std::scoped_lock lock(execution());
+  profilingBegin(*anchor);
+  Barriers().AddExternalSignal(hw_event);
+  device::VirtualDevice* wait_vdev =
+      (wait_cmd->queue() != nullptr) ? wait_cmd->queue()->vdev() : nullptr;
+  if ((wait_vdev != nullptr) && (wait_vdev != this) && wait_vdev->isFenceDirty()) {
+    setFenceDirty(true);
+  }
+  // Like the fork marker's barrier, without its scopes, but with no completion signal: the
+  // queue's first packet after it starts once the waits are met
+  const auto& wait_signals = Barriers().WaitingSignal();
+  // With the ext dispatch packet, a single wait on the waited command's own signal is left pending
+  // for the segment's first packet, which carries it in its dep_signal if it is an ext dispatch
+  if (dev().settings().ext_dispatch_packet_ &&
+      (wait_signals.size() == 1) && (wait_signals[0].handle == hw_event->signal_.handle)) {
+    // Two level-0 segments on this queue wait on the same command
+    if (pending_fork_wait_ != hw_event) {
+      FlushPendingForkWait();
+      hw_event->retain();
+      pending_fork_wait_ = hw_event;
+      pending_fork_anchor_ = anchor;
+    }
+    profilingEnd();
+    anchor->holdCommand(wait_cmd);
+    return true;
+  }
+  constexpr size_t kDepSignals = 5;
+  for (size_t i = 0; i < wait_signals.size(); i += kDepSignals) {
+    for (size_t j = 0; (j < kDepSignals) && ((i + j) < wait_signals.size()); ++j) {
+      barrier_packet_.dep_signal[j] = wait_signals[i + j];
+    }
+    constexpr bool kSkipSignal = true;
+    constexpr bool kDepSignalsSet = true;
+    dispatchBarrierPacket(kNopPacketHeader, kSkipSignal, hsa_signal_t{0}, kDepSignalsSet);
+  }
+  profilingEnd();
+  anchor->holdCommand(wait_cmd);
+  return true;
+}
+
+// ================================================================================================
 bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>& flatPacketData,
                                             const std::vector<uint32_t>& validFullHeaders,
                                             amd::AccumulateCommand* vcmd, bool attach_signal,
@@ -2449,6 +2520,24 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     if (numPackets == 1) {
       firstHeader &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
       firstHeader |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    }
+  }
+
+  // A pending fork wait (DEBUG_CLR_GRAPH_FAST_LAUNCH) goes in the first packet's dep_signal if it
+  // is an ext dispatch without one (a level-0 segment has no other dependency), else in a
+  // barrier ahead of the batch
+  hsa_signal_t fork_dep{0};
+  if (pending_fork_wait_ != nullptr) {
+    const auto* first =
+        reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(flatPacketData.data());
+    const bool first_is_ext = (firstPacketType == HSA_PACKET_TYPE_VENDOR_SPECIFIC) &&
+                              ((firstSetup & 0xFF) == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+    if (first_is_ext && (first->dep_signal.handle == 0)) {
+      // The anchor holds the waited command, so the signal is not rearmed before the wait
+      fork_dep = pending_fork_wait_->signal_;
+      ReleasePendingForkWait();
+    } else {
+      FlushPendingForkWait();
     }
   }
 
@@ -2626,10 +2715,14 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         if (isBaseKernelDispatch) {
           logAqlDispatchPacket(roc_device_, gpu_queue_, hdr, hostPkt, slotIdx, priority_);
         } else {
-          logAqlDispatchPacketExtended(
-              roc_device_, gpu_queue_, hdr,
-              reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(hostPkt), slotIdx,
-              priority_);
+          // The ring copy of the first packet may carry the fork wait
+          hsa_amd_ext_kernel_dispatch_packet_t logged =
+              *reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(hostPkt);
+          if ((i == 0) && (fork_dep.handle != 0)) {
+            logged.dep_signal = fork_dep;
+          }
+          logAqlDispatchPacketExtended(roc_device_, gpu_queue_, hdr, &logged, slotIdx,
+                                       priority_);
         }
       }
     } else if (kLogBatch && pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
@@ -2722,6 +2815,11 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         Barriers().ActiveSignal();
         lastSlotPtr->completion_signal = Barriers().GetLastSignal()->PacketHandle(false);
       }
+      if (isFirstChunk && (fork_dep.handle != 0)) {
+        reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(queueBase +
+                                                                chunkSlot * kPacketSize)
+            ->dep_signal = fork_dep;
+      }
 
       // Per-packet fixups: profiling signals, kernel-name printing, inline barrier logging.
       if (profiled || kLogBatch) {
@@ -2772,6 +2870,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         std::memcpy(&stg, flatPacketData.data() + i * kPacketSize, kPacketSize);
         ProfilingSignal* packetSignal =
             attachPacketSignal(&stg, i, i == numPackets - 1);
+        if ((i == 0) && (fork_dep.handle != 0)) {
+          reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(&stg)->dep_signal = fork_dep;
+        }
         const uint32_t dword = validFullHeaders[i];
         const uint16_t hdr = (i == 0)                 ? firstHeader
                              : (i == numPackets - 1)  ? lastHeader
@@ -3190,6 +3291,10 @@ VirtualGPU::~VirtualGPU() {
     LogError("There was a timestamp that was not used; deleting.");
   }
 
+  if (pending_fork_wait_ != nullptr) {
+    ReleasePendingForkWait();
+  }
+
   delete printfdbg_;
 
   if (nullptr != schedulerQueue_) {
@@ -3519,6 +3624,11 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
   // Dedicated queues keep their HW queue, never acquire from pool
   if (!dedicated_queue_ && gpu_queue_ == nullptr) {
     SetGpuQueue(roc_device_.AcquireActiveQueue(priority_));
+  }
+  // A pending fork wait orders only its own launch's segments: any other command gets it as a
+  // barrier ahead of its packets
+  if ((pending_fork_wait_ != nullptr) && (&command != pending_fork_anchor_)) {
+    FlushPendingForkWait();
   }
   // Track the current command
   command_ = &command;
