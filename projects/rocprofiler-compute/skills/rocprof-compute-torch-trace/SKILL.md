@@ -35,6 +35,7 @@ full requirement list is in the Torch trace section of
 rocprof-compute profile \
     --experimental \
     --torch-trace \
+    --no-roof \
     --name <workload_name> \
     -- python <script.py> <args>
 ```
@@ -60,11 +61,28 @@ overhead by dropping the device and layout wraps; see
 Tracing cannot be combined with attaching to a running process, and cannot be
 combined with a PC-sampling-only profile.
 
-When counters are being spread thin across many short operator kernels,
-`--iteration-multiplexing kernel` collects more per pass.
-
 Profile preserves each pass's raw marker and counter CSVs with the
 `ml_api_trace` prefix.
+
+### Collect only what the question needs
+
+Never run a full profile. It replays the application once per counter pass and
+also runs the roofline benchmarks.
+
+- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
+  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
+  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
+  Aliases differ by architecture.
+- `--set <set_name>` collects a predefined topic in one pass.
+  `rocprof-compute profile --list-sets` lists the sets.
+- Add `-k <kernel_name>` when the user names the kernels that matter.
+- Add `--no-roof` unless the question is about roofline. A `-b` list without
+  block 4 (`roof`) already skips it.
+- `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
+  each kernel, so it only helps when every profiled kernel is dispatched many
+  times. Pair it with `-k`. See Iteration multiplexing in
+  [profile mode](../../docs/how-to/profile/mode.rst).
+- Tell the user which analysis panels the narrower profile leaves empty.
 
 ## 3. List the captured operators
 

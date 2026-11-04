@@ -278,8 +278,11 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// Temporarily fills it ONLY with a plan to instrument with a nop.
 /// Fills before_items = {{ s_nop 0 }}, after_items = {}, emit_original = true.
 /// The caller chooses @p trampoline_offset (typically `patcher.text_size()`).
-[[nodiscard]] TrampolinePlan make_trampoline_plan(const ResolvedInstrumentationSite &site,
-                                                  rj_code_arch_t arch, uint64_t trampoline_offset);
+/// @returns std::nullopt for an unsupported architecture; writes the reason to
+/// @p error_out when supplied.
+[[nodiscard]] std::optional<TrampolinePlan>
+make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arch,
+                     uint64_t trampoline_offset, std::string *error_out = nullptr);
 
 /// @brief Verify @p plan matches the (temporary) inlined nop body shape:
 ///        exactly one `before_items` entry containing `s_nop 0`, empty
