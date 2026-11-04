@@ -16,6 +16,7 @@
 #include <string>
 
 #if HT_WIN
+#include <afunix.h>
 typedef HANDLE hipShareableHdl;
 #else
 #ifdef HT_AMD
@@ -34,7 +35,11 @@ struct ipcHdl {
     std::string name;
 };
 
-//users of this 
+// Creates a UNIX domain socket (Linux) or a mailslot (Windows) and allows to receive or send
+// handles through it. Users of this class must call initialize() and check its result
+// The static method generateIPCObjName() generates a unique name and can optionally be used to
+// name the IPC objects, to be called from the parent before spawning children, to make sure all
+// participants use the same name. Note that direction of communication is always parent -> child
 class ipcSocketCom {
   static constexpr int kPidBufferSize = 16;
   static constexpr int kNonceDigitsSize = 6;
@@ -261,22 +266,21 @@ public:
 
   // @userPrefix a user-provided string that will be prepended to the name; must be less than
   //             kSocketPrefixMaxSize characters; otherwise it will be truncated before used
-  // @return     an abstract name containing \0, the user prefix and a 6 hex-digit random name
+  // @return     UNIX: an abstract name containing \0, the user prefix, a 6 hex-digit random
+  //             number and the PID
+  //             Windows: a mailsot name the user prefix and a 6 hex-digit random number and the PID
   static std::string generateIPCObjName(const std::string& userPrefix)
   {
     using namespace std::string_literals;
-
-    return "\0"s +
-           userPrefix.substr(0, kSocketPrefixMaxSize) +
-           std::to_string(
+    std::string commonSuffix = userPrefix.substr(0, kSocketPrefixMaxSize) +
+                              generateRandomHex() +
+                              ".";
 #if HT_WIN
-            getCurrentProcessId()
+    return "\\\\.\\mailslot\\hipMemPoolIPC_"s + commonSuffix + 
+           std::to_string(static_cast<unsigned long>(GetCurrentProcessId()));
 #else
-            getpid()
+    return "\0"s + commonSuffix + std::to_string(getpid());
 #endif
-          ) +
-           "." +
-           generateRandomHex();
   }
 
 private:
