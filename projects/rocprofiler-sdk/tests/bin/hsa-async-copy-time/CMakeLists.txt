@@ -14,8 +14,10 @@ target_sources(hsa-async-copy-time PRIVATE hsa-async-copy-time.cpp)
 target_compile_options(hsa-async-copy-time PRIVATE -Wpedantic)
 
 find_package(Threads REQUIRED)
-target_link_libraries(hsa-async-copy-time PRIVATE Threads::Threads
-                                                  rocprofiler-sdk::tests-common-library)
+find_package(rocprofiler-sdk-roctx REQUIRED)
+target_link_libraries(
+    hsa-async-copy-time PRIVATE Threads::Threads rocprofiler-sdk::tests-common-library
+                                rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
 
 find_package(
     hsa-runtime64
