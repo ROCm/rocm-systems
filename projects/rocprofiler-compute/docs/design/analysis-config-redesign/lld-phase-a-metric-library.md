@@ -540,9 +540,10 @@ flowchart TD
   (`SUM(a * $cu_per_gpu)` and `SUM(a) * $cu_per_gpu`), are one metric too. The validator
   evaluates every formula with the runtime evaluator (`build_eval_string()`,
   `MetricEvaluator` and the built-in variables) on one seeded random dispatch per
-  normalization (`$denom`). Machine values come from the arch's SoC class where it sets
-  them (`$lds_banks_per_cu`); the values only a GPU reports (`$cu_per_gpu`,
-  `$wave_size`, `$num_xcd`, ...) are random. `NOISE_CLAMP(x, reference)` counts as `x`,
+  normalization (`$denom`). Machine values every device of the arch shares are real:
+  the SoC class's (`$lds_banks_per_cu`), the roofline benchmark's `$wave_size`, and the
+  SPX `$num_xcd` and `$total_l2_chan`; the values each device reports (`$cu_per_gpu`,
+  clocks, ...) are random. `NOISE_CLAMP(x, reference)` counts as `x`,
   and formulas that give no number (per-channel templates, `CONCAT`) are skipped.
   `SAME_VALUE_IDS` lists, per arch, the pairs that are different quantities whose
   formulas coincide there.
