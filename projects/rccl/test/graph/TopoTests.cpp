@@ -344,8 +344,15 @@ protected:
     return built;
   }
 
+  // What ncclTopoGetSystem() stamps on the fused <system>: 1 when the comm spans cliques (scale-out).
+  void setCrossClique(int crossClique) {
+    EXPECT_EQ(xmlSetAttrInt(root, "cross_clique", crossClique), ncclSuccess);
+  }
+
   // Two fused hosts of one clique, both stamped with the same fabric_supported.
-  struct ncclTopoSystem* buildTwoFabricHosts(uint64_t hostA, uint64_t hostB, int fabricSupported) {
+  struct ncclTopoSystem* buildTwoFabricHosts(uint64_t hostA, uint64_t hostB, int fabricSupported,
+                                             int crossClique = 1) {
+    setCrossClique(crossClique);
     addFabricHost(hostA, /*baseRank=*/0, fabricSupported);
     addFabricHost(hostB, /*baseRank=*/kFabricGpusPerHost, fabricSupported);
     return buildSystemWithPaths(hostA);
@@ -2122,10 +2129,40 @@ TEST_F(TopoTest, UaloeFabric_XgmiEntriesKeepDirectPeerLinks) {
   ncclTopoFree(built);
 }
 
+// A comm inside one clique gets no switch even on fabric hosts: each host keeps its direct peer
+// links and nothing links across hosts.
+TEST_F(TopoTest, UaloeFabric_IntraCliqueCommKeepsDirectPeerLinks) {
+  const uint64_t hostA = 0x1251b, hostB = 0x1251c;
+  struct ncclTopoSystem* built =
+      buildTwoFabricHosts(hostA, hostB, /*fabricSupported=*/1, /*crossClique=*/0);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nHosts, 2);
+  EXPECT_EQ(built->nodes[NVS].count, 0);
+
+  const float linkBw = ncclTopoXGMISpeed("gfx1250");
+  for (int d = 0; d < built->nodes[DEV].count; d++) {
+    struct ncclTopoNode* dev = built->nodes[DEV].nodes + d;
+    for (int p = 0; p < built->nodes[DEV].count; p++) {
+      if (p == d) continue;
+      struct ncclTopoNode* peer = built->nodes[DEV].nodes + p;
+      struct ncclTopoLink* link = findLink(dev, peer);
+      if (NCCL_TOPO_ID_SYSTEM_ID(dev->id) == NCCL_TOPO_ID_SYSTEM_ID(peer->id)) {
+        ASSERT_NE(link, nullptr) << "DEV " << d << " -> DEV " << p;
+        EXPECT_FLOAT_EQ(link->bw, linkBw) << "DEV " << d << " -> DEV " << p;
+      } else {
+        EXPECT_EQ(link, nullptr) << "DEV " << d << " -> DEV " << p << " links across hosts";
+      }
+    }
+  }
+
+  ncclTopoFree(built);
+}
+
 // A single host keeps direct peer links even when amd-smi reports UALoE: there is no other host to
 // reach, and a switch node would raise the search's starting bw to the sum of the fabric links.
 TEST_F(TopoTest, UaloeFabric_SingleHostKeepsDirectPeerLinks) {
   const uint64_t host = 0x12512;
+  setCrossClique(1);
   addFabricHost(host, /*baseRank=*/0, /*fabricSupported=*/1);
   struct ncclTopoSystem* built = buildSystemWithPaths(host);
   ASSERT_NE(built, nullptr);
@@ -2176,6 +2213,7 @@ TEST_F(TopoTest, UaloeFabric_MultiHostTreeDoesNotFallBackToSimpleOrder) {
 TEST_F(TopoTest, UaloeFabric_ThreeHostCliqueSharesOneSwitch) {
   const uint64_t hosts[] = {0x12515, 0x12516, 0x12517};
   const int nHosts = sizeof(hosts) / sizeof(hosts[0]);
+  setCrossClique(1);
   for (int h = 0; h < nHosts; h++) {
     addFabricHost(hosts[h], /*baseRank=*/h * kFabricGpusPerHost, /*fabricSupported=*/1);
   }
@@ -2226,6 +2264,7 @@ TEST_F(TopoTest, UaloeFabric_ThreeHostCliqueSharesOneSwitch) {
 // switch, while the fabric hosts still reach each other through it.
 TEST_F(TopoTest, UaloeFabric_NonFabricHostStaysOffTheSwitch) {
   const uint64_t hostA = 0x12518, hostB = 0x12519, hostC = 0x1251a;
+  setCrossClique(1);
   addFabricHost(hostA, /*baseRank=*/0, /*fabricSupported=*/1);
   addFabricHost(hostB, /*baseRank=*/kFabricGpusPerHost, /*fabricSupported=*/1);
   addFabricHost(hostC, /*baseRank=*/2 * kFabricGpusPerHost, /*fabricSupported=*/0);
@@ -2269,6 +2308,7 @@ TEST_F(TopoTest, UaloeFabric_NonFabricHostStaysOffTheSwitch) {
 TEST_F(TopoTest, UaloeFabric_FullCliqueFitsPathFrontier) {
   const int nHosts = NCCL_TOPO_MAX_NODES / kFabricGpusPerHost;
   ASSERT_NO_FATAL_FAILURE(resetXml(1 /* <system> */ + nHosts * kFabricHostXmlNodes));
+  setCrossClique(1);
   for (int h = 0; h < nHosts; h++) {
     addFabricHost(0x12600 + h, /*baseRank=*/h * kFabricGpusPerHost, /*fabricSupported=*/1);
   }
