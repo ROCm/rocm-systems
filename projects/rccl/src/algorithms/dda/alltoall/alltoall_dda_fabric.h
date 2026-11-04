@@ -229,7 +229,7 @@ __launch_bounds__(512)
     for (size_t p = 0; p <= nPieces; ++p) {
       if (p < nPieces) {
          auto [lo, hi] = pieceOf(begin, p);
-         ddaA2APeerCopy<false, false>(dst, src, lo, hi, stride);
+         ddaA2APeerCopy<false, true>(dst, src, lo, hi, stride);
       }
       if (p > 0 && drainHere) {
         barrier.waitPeer(srcRank, epoch, static_cast<unsigned>(p - 1));
