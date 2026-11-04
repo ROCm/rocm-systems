@@ -59,9 +59,11 @@ def validate_all_agents_are_sampled(
     samples_df["Agent_Id"] = (
         samples_df["Dispatch_Id"].map(dispatch_agents).astype(np.uint64)
     )
-    sampled_agents = samples_df["Agent_Id"].unique()
+    sampled_agents = set(samples_df["Agent_Id"].unique())
+    # Assumes that the default relative agent indexing is used and that `Agent_Id` in
+    # the kernel trace maps to the `Logical_Node_Id`
     expected_agents = set(gfx9_gfx12_agents_df["Logical_Node_Id"]) & set(dispatch_agents)
-    assert expected_agents and expected_agents.issubset(sampled_agents)
+    assert expected_agents and (expected_agents == sampled_agents)
 
     # separate samples per agents
     grouped_samples_per_agent = samples_df.groupby("Agent_Id")
