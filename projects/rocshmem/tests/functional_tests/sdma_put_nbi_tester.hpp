@@ -40,6 +40,8 @@ class SdmaPutNbiTester : public Tester {
 
   char *s_buf;
   char *r_buf;
+  // True if SDMA failed to connect (deviceHandles_d is null); host-pinned.
+  bool *sdma_unavailable;
 };
 
 #endif
