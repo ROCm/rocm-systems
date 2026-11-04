@@ -39,6 +39,8 @@
 #include "rocjitsu/code/builders/vector_builders.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -311,24 +313,28 @@ TEST(DbiFixtureSetupTest, MalformedConfigRecordsFatalFailure) {
 }
 
 TEST(DbiAfterInstSim, ProbeObservesTheResultAndPreservesLiveGuestDefinitions) {
+  constexpr uint32_t kOldValue = 3;
+  constexpr uint32_t kAnchorResult = 7;
+  constexpr uint32_t kCallbackClobber = 11;
   for (const ArgSimArch arch : {kCdna3ArgArch, kCdna4ArgArch, kRdna4ArgArch}) {
     SCOPED_TRACE(arch.sim_arch);
     for (const InstrumentationKind kind :
          {InstrumentationKind::BeforeInst, InstrumentationKind::AfterInst}) {
       const util::FailureOr<uint32_t> guest_move = build_v_mov_b32_src(2, 257, arch.arch);
       ASSERT_TRUE(guest_move.succeeded());
-      const std::vector<uint32_t> guest = {test::make_mov_vgpr_inline(1, 3),
-                                           test::make_mov_vgpr_inline(0, 7), kMovV1V0,
+      const std::vector<uint32_t> guest = {test::make_mov_vgpr_inline(1, kOldValue),
+                                           test::make_mov_vgpr_inline(0, kAnchorResult), kMovV1V0,
                                            guest_move.value(), build_s_endpgm(arch.arch)};
       const bool wave32 = arch.arch == ROCJITSU_CODE_ARCH_RDNA4;
       const std::vector<uint8_t> image =
           wave32 ? test::make_gfx1200_wave32_kernel_elf(guest, 64, 3)
                  : test::make_amdgpu_kernel_elf(guest, 64, 3, arch.e_flags);
       const std::vector<uint8_t> target = test::with_descriptor_metadata(image, arch.arch);
-      const std::vector<uint8_t> probe = test::make_amdgpu_probe_elf(
-          "after_result",
-          {kMovV3V0, test::make_mov_vgpr_inline(1, 11), build_s_setpc_b64(30, arch.arch)},
-          arch.e_flags);
+      const std::vector<uint8_t> probe =
+          test::make_amdgpu_probe_elf("after_result",
+                                      {kMovV3V0, test::make_mov_vgpr_inline(1, kCallbackClobber),
+                                       build_s_setpc_b64(30, arch.arch)},
+                                      arch.e_flags);
       const AmdGpuCodeObject object(target.data(), target.size());
       const AmdGpuCodeObject body(probe.data(), probe.size());
       Instrumentor instrumentor(object, arch.arch);
@@ -367,10 +373,59 @@ TEST(DbiAfterInstSim, ProbeObservesTheResultAndPreservesLiveGuestDefinitions) {
       ASSERT_EQ(values[0].size(), arch.wave_size);
       ASSERT_EQ(values[1].size(), arch.wave_size);
       for (uint32_t lane = 0; lane < arch.wave_size; ++lane) {
-        EXPECT_EQ(values[0][lane], kind == InstrumentationKind::AfterInst ? 7u : 3u);
-        EXPECT_EQ(values[1][lane], 7u);
+        EXPECT_EQ(values[0][lane],
+                  kind == InstrumentationKind::AfterInst ? kAnchorResult : kOldValue);
+        EXPECT_EQ(values[1][lane], kAnchorResult);
       }
     }
+  }
+}
+
+TEST(DbiAfterInstSim, RejectsGprIndexEnableWhileBeforeInstPreservesTheDisplacedRegister) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kGuestValue = 9;
+  constexpr uint32_t kProbeValue = 5;
+  const uint32_t enable = cdna4::build_sopc(cdna4::kSSetGprIdxOnSopc, {.ssrc0 = 5, .ssrc1 = 8})[0];
+  const uint32_t disable = cdna4::build_sopp(cdna4::kSSetGprIdxOffSopp)[0];
+  const util::FailureOr<uint32_t> readback = build_v_mov_b32_src(2, 256 + 7, kArch);
+  ASSERT_TRUE(readback.succeeded());
+  const std::vector<uint8_t> image = test::with_descriptor_metadata(
+      test::make_gfx950_kernel_elf({test::make_mov_vgpr_inline(7, kGuestValue),
+                                    build_s_mov_b32(5, scalar_positive_inline_u32(4), kArch),
+                                    enable, disable, readback.value(), build_s_endpgm(kArch)},
+                                   /*private_bytes=*/64, /*granulated_sgpr_count=*/3,
+                                   /*granulated_vgpr_count=*/3, /*accum_offset=*/1),
+      kArch);
+  const std::vector<uint8_t> probe = test::make_gfx950_probe_elf(
+      "index_clobber", {test::make_mov_vgpr_inline(3, kProbeValue), build_s_setpc_b64(30, kArch)});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject body(probe.data(), probe.size());
+  for (const InstrumentationKind kind :
+       {InstrumentationKind::BeforeInst, InstrumentationKind::AfterInst}) {
+    Instrumentor instrumentor(object, kArch);
+    const InstrumentationPoint point = {.anchor_offset = 8,
+                                        .kind = kind,
+                                        .probe_obj = &body,
+                                        .probe_symbol = "index_clobber",
+                                        .probe_args = {}};
+    instrumentor.add_point(point);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    if (kind == InstrumentationKind::AfterInst) {
+      ASSERT_EQ(result.errors.size(), 1u);
+      EXPECT_NE(result.errors.front().find("GPR indexing"), std::string::npos);
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+      continue;
+    }
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize("cdna4", 64));
+    const std::vector<uint32_t> values = sim.run_and_read_vgpr(
+        test::section_words(patched, ".text"), test::patched_private_segment_size(patched), 2);
+    ASSERT_EQ(values.size(), 64u);
+    for (const uint32_t value : values)
+      EXPECT_EQ(value, kGuestValue);
   }
 }
 

@@ -76,6 +76,13 @@ struct HwregSlice {
                     .width = static_cast<uint16_t>(((hwreg >> 11) & 0x1f) + 1)};
 }
 
+/// @brief Whether an S_SETREG slice overlaps MODE.VGPR_MSB (bits 19:12).
+[[nodiscard]] constexpr bool hwreg_slice_overlaps_vgpr_msb(uint16_t hwreg) {
+  const HwregSlice slice = decode_vgpr_msb_hwreg(hwreg);
+  return slice.id == MODE_HWREG && slice.begin < VGPR_MSB_MODE_SHIFT + 8 &&
+         static_cast<uint32_t>(slice.begin) + slice.width > VGPR_MSB_MODE_SHIFT;
+}
+
 /// @brief Apply one right-justified S_SETREG value to MODE.VGPR_MSB fields.
 ///
 /// @details Dynamic writes pass std::nullopt and make only overlapping bank

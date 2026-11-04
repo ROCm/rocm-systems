@@ -34,6 +34,13 @@ class ExecMaskAnalysis;
 class Gfx1250VgprMsbAnalysis;
 class Instruction;
 
+/// @brief Whether an instruction can enable displaced VGPR addressing.
+/// @details Immediate MODE writes covering GPR_IDX_EN are eligible when the
+/// supplied instruction bytes prove the written bit is clear. Missing operands
+/// or literals fail closed.
+[[nodiscard]] bool may_enable_gpr_indexing(const Instruction &inst, std::span<const uint8_t> text,
+                                           rj_code_arch_t arch);
+
 /// @brief The basic blocks reachable from one kernel entry.
 using KernelBlockScope = std::span<BasicBlock *const>;
 
