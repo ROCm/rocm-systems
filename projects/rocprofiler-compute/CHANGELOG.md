@@ -60,6 +60,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * `--list-metrics` no longer takes a GPU architecture. It lists the blocks of the current GPU, or the metrics of the blocks and metrics you name, for example `rocprof-compute --list-metrics sol`. Use `--list-metrics-gfx-id <arch>` to list another GPU.
 
+* `--block` 30 metric IDs (e.g. 30.1.7) now refer to different metrics following the removal of unnecessary gfx950 Memory Bandwidth Analysis metrics.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
@@ -80,6 +82,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * These options were utilized solely by roofline plot in CLI analyze output block 4.3, which has been removed. The roofline HTML output shows every memory level and precision, and you can filter them in the browser.
 
 * Removed the `analyze --pc-sampling-sorting-type` option. The PC sampling table is always sorted by sample count.
+
+* Removed unnecessary gfx950 Memory Bandwidth Analysis (block 30) metrics. Block 30 now shows only the L1 cache, L2 bottleneck, and EA bottleneck indicators, as tables 30.1, 30.2, and 30.3.
 
 ### Optimized
 
