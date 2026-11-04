@@ -1238,8 +1238,8 @@ function(add_other_tests)
         end_test_group()
     endif()
 
-    # sdma_*_tester.cpp is only compiled in when USE_IPC and USE_SDMA are set.
-    if(USE_IPC AND USE_SDMA)
+    # sdma_*_tester.cpp needs USE_IPC/USE_SDMA, and a single node (no MPI hostfile).
+    if(USE_IPC AND USE_SDMA AND (USE_SLR_LAUNCHER OR NOT DEFINED ENV{HOSTFILE}))
         begin_test_group(CATEGORY "RMA;NBI;SDMA" TIER full BACKENDS "ipc" GPUS "all" EXTRA_LABELS "SDMA")
             add_rocshmem_functional_test(NAME sdma_pingpong RANKS 2 WORKGROUPS 1 THREADS 1
                 ENV_VARS "ROCSHMEM_BACKEND=ipc" "ROCSHMEM_SDMA_ENABLED=1" "ROCSHMEM_SDMA_THRESHOLD=0")
