@@ -64,10 +64,8 @@ test_categories:
       - test-torch-trace-collector
       - test-torch-trace-collector-before-install
     therock_ci_exclude:
-      - test_profile_live_attach_detach
       - test_metric_validation
-    rocprofiler_compute_ci_exclude:
-      - test_profile_live_attach_detach
+    rocprofiler_compute_ci_exclude: []
     labels:
       - "quick"
       - "pre-commit"
@@ -160,11 +158,9 @@ test_categories:
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:
-      - test_profile_live_attach_detach
       - test_metric_validation
       - test_torch_trace_coverage
     rocprofiler_compute_ci_exclude:
-      - test_profile_live_attach_detach
       - test_torch_trace_coverage
     labels:
       - "standard"
@@ -266,11 +262,9 @@ test_categories:
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:
-      - test_profile_live_attach_detach
       - test_metric_validation
       - test_torch_trace_coverage
     rocprofiler_compute_ci_exclude:
-      - test_profile_live_attach_detach
       - test_torch_trace_coverage
     labels:
       - "comprehensive"
@@ -372,11 +366,9 @@ test_categories:
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:
-      - test_profile_live_attach_detach
       - test_metric_validation
       - test_torch_trace_coverage
     rocprofiler_compute_ci_exclude:
-      - test_profile_live_attach_detach
       - test_torch_trace_coverage
     labels:
       - "full"
