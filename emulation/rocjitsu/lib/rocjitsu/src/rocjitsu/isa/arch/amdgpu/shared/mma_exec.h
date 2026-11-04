@@ -1494,21 +1494,18 @@ inline uint64_t mfma_permuted_lane_mask(auto permute) {
 }
 
 /// Wave64 MFMA from register snapshots, published by register. Returns false without reading
-/// registers when the shape or wave size needs the generic handler.
+/// registers when the shape or wave size needs the generic handler. Callers with fixed input
+/// widths pass them as std::integral_constant so the register layout is known at compile time.
 template <typename T, typename ExtractA, typename ExtractB>
-bool try_exec_mfma_snapshot(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
-                            uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0,
-                            uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc,
-                            uint32_t cbsz = 0, uint32_t abid = 0, uint32_t blgp = 0,
-                            uint32_t neg = 0) {
+bool try_exec_mfma_snapshot(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, auto a_bits,
+                            auto b_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                            ExtractA ea, ExtractB eb, uint32_t const_acc, uint32_t cbsz = 0,
+                            uint32_t abid = 0, uint32_t blgp = 0, uint32_t neg = 0) {
   static_assert(std::is_same_v<T, float> || std::is_same_v<T, double> ||
                 std::is_same_v<T, int32_t>);
   if constexpr (!util::has_stdx_simd) {
     return false;
   } else {
-    // Fixed input widths let the compiler simplify the F64 and I8 register layouts.
-    if constexpr (!std::is_same_v<T, float>)
-      a_bits = b_bits = std::is_same_v<T, double> ? 64 : 8;
     constexpr uint32_t W = static_cast<uint32_t>(util::native<T>::size());
     constexpr uint32_t kWordsPerElement = sizeof(T) / sizeof(uint32_t);
     using Staging = MfmaSnapshotStaging<T>;
@@ -4844,7 +4841,8 @@ RJ_NOINLINE inline void exec_i32_i8_generic(auto &cu, uint32_t M, uint32_t N, ui
 inline void exec_i32_i8(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t dst,
                         uint32_t s0, uint32_t s1, uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
                         uint32_t cbsz = 0, uint32_t abid = 0, uint32_t blgp = 0) {
-  if (!try_exec_mfma_snapshot<int32_t>(cu, M, N, K, B, 8, 8, dst, s0, s1, s2, extract_i8,
+  constexpr std::integral_constant<uint32_t, 8> kBits;
+  if (!try_exec_mfma_snapshot<int32_t>(cu, M, N, K, B, kBits, kBits, dst, s0, s1, s2, extract_i8,
                                        extract_i8, const_acc, cbsz, abid, blgp))
     exec_i32_i8_generic(cu, M, N, K, B, dst, s0, s1, s2, const_acc, cbsz, abid, blgp);
 }
@@ -5485,7 +5483,8 @@ RJ_NOINLINE inline void exec_f64_generic(auto &cu, uint32_t M, uint32_t N, uint3
 inline void exec_f64(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t dst,
                      uint32_t s0, uint32_t s1, uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
                      uint32_t neg = 0) {
-  if (!try_exec_mfma_snapshot<double>(cu, M, N, K, B, 64, 64, dst, s0, s1, s2, extract_f64,
+  constexpr std::integral_constant<uint32_t, 64> kBits;
+  if (!try_exec_mfma_snapshot<double>(cu, M, N, K, B, kBits, kBits, dst, s0, s1, s2, extract_f64,
                                       extract_f64, const_acc, 0, 0, 0, neg))
     exec_f64_generic(cu, M, N, K, B, dst, s0, s1, s2, const_acc, neg);
 }
