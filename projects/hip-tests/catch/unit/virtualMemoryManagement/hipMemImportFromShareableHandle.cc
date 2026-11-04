@@ -493,7 +493,8 @@ static void CheckImportedCopiesOverlap(const std::vector<ImportedAllocation>& so
  * Test Description
  * ------------------------
  *    - Allocations created on device 0 and imported back on device 0. Device-0 copies from them,
- *      each into its own buffer on its own stream, must not serialize.
+ *      each into its own buffer on its own stream, must not serialize. Source and destination are
+ *      both physically on device 0, so every copy is a blit copy.
  * ------------------------
  *    - unit/virtualMemoryManagement/hipMemImportFromShareableHandle.cc
  * Test requirements
@@ -527,15 +528,16 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_SelfImportCopiesOverlapAcross
 /**
  * Test Description
  * ------------------------
- *    - One allocation created on each of devices 0 to 3 (those present), all imported on device 0,
- *      the pattern torch symmetric memory uses to map peer buffers. Device-0 copies from them,
- *      each into its own buffer on its own stream, must not serialize.
+ *    - One allocation created on each of devices 0 and 1, both imported on device 0, the pattern
+ *      torch symmetric memory uses to map peer buffers. Device-0 copies from them, each into its
+ *      own buffer on its own stream, must not serialize: the device 0 <-> device 0 blit copy and
+ *      the device 1 -> device 0 SDMA copy should overlap.
  * ------------------------
  *    - unit/virtualMemoryManagement/hipMemImportFromShareableHandle.cc
  * Test requirements
  * ------------------------
  *    - Host specific (LINUX)
- *    - At least 2 devices, with peer access from device 0 to the other devices used
+ *    - At least 2 devices, with peer access from device 0 to device 1
  *    - Stream wait-value support (hipDeviceAttributeCanUseStreamWaitValue)
  *    - HIP_VERSION >= 6.1
  */
@@ -547,7 +549,10 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_ImportFromPeersCopiesOverlapA
   if (device_count < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
-  constexpr int kMaxStreams = 4;
+  // Two streams are the minimum to show overlap, one blit copy and one SDMA copy. Peer copies
+  // share device 0's SDMA engines (only 2 in a CPX partition), so more peers can legitimately
+  // serialize on an engine.
+  constexpr int kMaxStreams = 2;
   const int num_devices = std::min(device_count, kMaxStreams);
   for (int dev = 0; dev < num_devices; ++dev) {
     hipDevice_t device;
@@ -581,7 +586,8 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_ImportFromPeersCopiesOverlapA
  * ------------------------
  *    - Allocations created on device 0, each imported on a different one of devices 0 to 3
  *      (those present) and mapped with access for device 0. Device-0 copies from them, each into
- *      its own buffer on its own stream, must not serialize.
+ *      its own buffer on its own stream, must not serialize. The physical memory is on device 0
+ *      for every source and destination, so every copy is a blit copy.
  * ------------------------
  *    - unit/virtualMemoryManagement/hipMemImportFromShareableHandle.cc
  * Test requirements
