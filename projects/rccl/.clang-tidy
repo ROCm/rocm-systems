@@ -1,0 +1,17 @@
+# clang-tidy configuration for RCCL.
+
+Checks: >
+  -*,
+  readability-function-cognitive-complexity
+
+CheckOptions:
+  readability-function-cognitive-complexity.Threshold: 300
+  # IgnoreMacros is deliberately left at its default of false. RCCL's control
+  # flow runs largely through macros such as NCCLCHECK and NCCLCHECKGOTO, and
+  # those branches are real: ignoring them roughly halves the score for the
+  # most macro-dense functions and points the check at a different, less
+  # interesting set of files.
+
+# Only report findings in RCCL's own sources, not in system or ROCm headers
+# pulled in by them.
+HeaderFilterRegex: '.*/(src|plugins|tools)/.*'
