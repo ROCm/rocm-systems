@@ -766,6 +766,54 @@ TEST(RoutedMemoryObservationTest, AScalarAccessCarriesItsFullIdentity) {
   EXPECT_TRUE(access.pre_routing_addresses.empty());
 }
 
+TEST(RoutedMemoryObservationTest, AScalarBufferAccessOutOfRangeRequestsNothing) {
+  // A scalar buffer access whose bounds mask clears every DWORD is still
+  // reported with its return metadata, but its one lane is not valid and
+  // requests nothing. A partly in-range load still requests.
+  struct Case {
+    AtomicOp atomic_op;
+    uint16_t load_dword_mask;
+    bool requests;
+  };
+  for (const auto &[atomic_op, load_dword_mask, requests] :
+       {Case{AtomicOp::NONE, 0x3, true}, Case{AtomicOp::NONE, 0x1, true},
+        Case{AtomicOp::NONE, 0x0, false}, Case{AtomicOp::INC, 0x3, true},
+        Case{AtomicOp::INC, 0x0, false}}) {
+    SCOPED_TRACE(testing::Message()
+                 << "atomic=" << (atomic_op != AtomicOp::NONE) << " mask=" << load_dword_mask);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize());
+    auto *plugin = fixture.attach_memory_observation_plugin();
+    auto *cu = fixture.cu();
+    auto *wave = cu->dispatch_wf(0, 0x240, 104, 256);
+    ASSERT_NE(wave, nullptr);
+
+    auto state = std::make_unique<ScalarMemState>();
+    state->addr = 0x4000;
+    state->num_dwords = 2;
+    state->elem_size = atomic_op == AtomicOp::NONE ? 4 : 8;
+    state->is_load = true;
+    state->dst_register = {ScalarRegisterStorage::SGPR, 0, 2};
+    state->atomic_op = atomic_op;
+    state->load_dword_mask = load_dword_mask;
+    test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
+                                                   *wave);
+
+    ASSERT_EQ(plugin->accesses.size(), 1u);
+    const auto &access = plugin->accesses.front();
+    EXPECT_EQ(access.mnemonic, "test_mem");
+    EXPECT_EQ(access.route, MemoryRoute::SCALAR);
+    EXPECT_EQ(access.atomic_op, atomic_op);
+    EXPECT_TRUE(access.is_load);
+    EXPECT_EQ(access.active_lane_mask, 1u);
+    EXPECT_EQ(access.valid_lane_mask, requests ? 1u : 0u);
+    EXPECT_EQ(access.request_lane_mask, requests ? 1u : 0u);
+    EXPECT_EQ(access.unknown_lane_mask, requests ? 0u : 1u);
+    ASSERT_EQ(access.addresses.size(), 1u);
+    EXPECT_EQ(access.addresses[0], 0x4000u);
+  }
+}
+
 TEST(RoutedMemoryObservationTest, AFlatAccessToTheSharedApertureIsSeenAsTheLdsAccessItBecame) {
   // The reason the observation is taken after routing rather than before. This
   // instruction decodes as global and is issued to the local pipeline with its
