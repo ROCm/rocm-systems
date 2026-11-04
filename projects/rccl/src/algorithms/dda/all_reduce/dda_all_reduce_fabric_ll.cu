@@ -86,14 +86,14 @@ static bool ddaLLArSpreadWins(size_t bytes, int nRanks) {
   return blockWire >= kDdaLLSpreadMinBlockWireBytes || savedWire >= kDdaLLSpreadMinSavedWireBytes;
 }
 
-// LL one-shot messages that run as the spread two-shot on its grid: whole packets per rank, a shard per slot, a win.
+// LL one-shot messages that run as the spread two-shot on its grid: the two-shot slot holds a shard, and the spread wins.
 static bool ddaLLArSpreadSelected(ncclComm* comm, size_t bytes) {
   const size_t nRanks = (size_t)comm->nRanks;
-  const size_t nPk = bytes >> 3;
-  if (nRanks < 2 || nPk % nRanks != 0) {
+  if (nRanks < 2) {
     return false;
   }
-  if (nPk / nRanks > ddaLLArTwoShotSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
+  const size_t shardPkts = ((bytes >> 3) + nRanks - 1) / nRanks;
+  if (shardPkts > ddaLLArTwoShotSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
     return false;
   }
   return ddaLLArSpreadWins(bytes, comm->nRanks);

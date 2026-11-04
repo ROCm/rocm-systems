@@ -99,7 +99,12 @@ __launch_bounds__(512)
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t nPk = (count * sizeof(T)) >> 3;
-  const size_t nPkRank = nPk / (size_t)nRanks;
+  // Shards of nPkRank packets, the last ones shorter (or empty) when nRanks does not divide the message.
+  const size_t nPkRank = (nPk + (size_t)nRanks - 1) / (size_t)nRanks;
+  auto shardLen = [&](int rank) {
+    const size_t first = (size_t)rank * nPkRank;
+    return first < nPk ? (nPk - first < nPkRank ? nPk - first : nPkRank) : (size_t)0;
+  };
   const size_t slot = ddaLLArTwoShotSlotPkts(bankSize, nRanks);
 
   // This block's slice of every shard: the same packet range on every rank, so its LL epoch stays in lockstep.
@@ -123,6 +128,10 @@ __launch_bounds__(512)
     if (u < peerUnits) {
       peer = (selfRank + 1 + (int)((uint32_t)u / len32)) % nRanks;
       pk = p0 + (uint32_t)u % len32;
+      if (pk >= shardLen(peer)) {
+        peer = -1;
+        return;
+      }
       const size_t w = ((size_t)peer * nPkRank + pk) * 2;
       d0 = in[w];
       d1 = in[w + 1];
@@ -143,7 +152,10 @@ __launch_bounds__(512)
   for (int i = 0; i < kDdaLLSpreadBatch; ++i) {
     sendUnit(tid + (size_t)i * nthr, peer[i], pk[i], d0[i], d1[i]);
   }
-  const size_t plen0 = len < passPkts ? len : passPkts;
+  // My shard's part of this block's range: the reduce covers only packets every rank sends.
+  const size_t mine = shardLen(selfRank);
+  const size_t p1Mine = p1 < mine ? p1 : (p0 < mine ? mine : p0);
+  const size_t plen0 = p1Mine - p0 < passPkts ? p1Mine - p0 : passPkts;
   uint2 self0 = make_uint2(0, 0);
   if (tid < plen0) {
     const size_t w = ((size_t)selfRank * nPkRank + p0 + tid) * 2;
@@ -174,8 +186,8 @@ __launch_bounds__(512)
 
   // Phase 2 per LDS pass: stage each rank's copy, fold in rank order, publish; a sticky abort meets every barrier.
   bool aborted = false;
-  for (size_t q0 = p0; q0 < p1; q0 += passPkts) {
-    const size_t plen = p1 - q0 < passPkts ? p1 - q0 : passPkts;
+  for (size_t q0 = p0; q0 < p1Mine; q0 += passPkts) {
+    const size_t plen = p1Mine - q0 < passPkts ? p1Mine - q0 : passPkts;
     const size_t pollUnits = (size_t)(nRanks - 1) * plen;
     const uint32_t plen32 = (uint32_t)plen;
     for (size_t base = tid; base < pollUnits; base += nthr * kDdaLLSpreadBatch) {
@@ -270,9 +282,11 @@ __launch_bounds__(512)
       if (u < peerUnits) {
         const int peer = (selfRank + 1 + (int)((uint32_t)u / len32)) % nRanks;
         const size_t pk = p0 + (uint32_t)u % len32;
-        line[i] = reinterpret_cast<const uint32_t*>(myBase + bankOffsetPktsNext + (size_t)peer * slot + pk);
-        w[i] = ((size_t)peer * nPkRank + pk) * 2;
-        mask |= 1u << i;
+        if (pk < shardLen(peer)) {
+          line[i] = reinterpret_cast<const uint32_t*>(myBase + bankOffsetPktsNext + (size_t)peer * slot + pk);
+          w[i] = ((size_t)peer * nPkRank + pk) * 2;
+          mask |= 1u << i;
+        }
       }
     }
     uint32_t d0[kDdaLLSpreadBatch], d1[kDdaLLSpreadBatch];

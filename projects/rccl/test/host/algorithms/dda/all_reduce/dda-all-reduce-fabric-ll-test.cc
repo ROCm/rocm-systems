@@ -589,12 +589,27 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadTakesTheOneShotGridAndArgument
   EXPECT_EQ(RunOneLL(Floats(1 << 20)).grid.x, 5u);
 }
 
-// Every rank must own a whole number of packets; else the one-shot runs.
-TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadNeedsWholePacketsPerRank) {
+// Shards need not be equal: a rank count that does not divide the message gives the last ranks shorter shards.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadTakesUnevenShards) {
   comm().nRanks = 24;
   comm().ddaScratchBytes = 1u << 30;
+  EXPECT_EQ(RunOneLL(Floats(8192)).kernel, (LLSpread<float, 0>()));   // 1024 packets: 23 shards of 43, one of 35
   EXPECT_EQ(RunOneLL(Floats(9216)).kernel, (LLSpread<float, 0>()));   // 1152 packets, 48 a rank
-  EXPECT_EQ(RunOneLL(Floats(8192)).kernel, (LLOneShot<float, 0>()));  // 1024 packets, not a multiple of 24
+  comm().nRanks = 12;
+  EXPECT_EQ(RunOneLL(Floats(4096)).kernel, (LLOneShot<float, 0>()));  // 88 KiB of one-shot wire a block: below the rule
+  EXPECT_EQ(RunOneLL(Floats(512 << 10)).kernel, (LLSpread<float, 0>()));
+}
+
+// The shard must fit the two-shot slot: a scratch whose two-shot slot is below a shard keeps the one-shot.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadNeedsTheShardInTheTwoShotSlot) {
+  comm().nRanks = 32;
+  comm().ddaScratchBytes = 2 * 32 * 16 * 2 * 16;  // bank 16 KiB: one-shot slot 32 packets, two-shot slot 16
+  ASSERT_EQ(dda::common::ddaLLArSlotPkts(dda::common::ddaBankSize(comm().ddaScratchBytes), 32), 32u);
+  ASSERT_EQ(dda::common::ddaLLArTwoShotSlotPkts(dda::common::ddaBankSize(comm().ddaScratchBytes), 32), 16u);
+  EXPECT_FALSE(ddaLLArSpreadSelected(mock_.get(), 32 * 32 * 8 + 8)) << "33-packet shards past the 16-packet slot";
+  EXPECT_FALSE(ddaLLArSpreadSelected(mock_.get(), 1u << 20));
+  comm().ddaScratchBytes = 1u << 30;
+  EXPECT_TRUE(ddaLLArSpreadSelected(mock_.get(), 1u << 20));
 }
 
 // Every datatype has its own spread kernel.

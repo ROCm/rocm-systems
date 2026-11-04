@@ -7,6 +7,7 @@
 // ddaAllReduceSpreadTwoShotLL on one GPU: the host plays the peers by writing LL lines into coherent host scratch, both
 // the copies of the self shard (first area) and the peers' reduced shards (second area).
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -88,8 +89,14 @@ class DdaAllReduceFabricLLSpread : public DeviceTestBase {
   }
 
   size_t slot() const { return dda::common::ddaLLArTwoShotSlotPkts(kBankBytes, nRanks_); }
-  size_t shardPkts() const { return kCount * sizeof(float) / 8 / nRanks_; }
-  unsigned blocks() const { return (unsigned)((kCount * sizeof(float) / 8 + kThreads - 1) / kThreads); }
+  size_t packets() const { return kCount * sizeof(float) / 8; }
+  // Shards of ceil(packets / nRanks) packets; the last ones are shorter when nRanks does not divide the message.
+  size_t shardPkts() const { return (packets() + nRanks_ - 1) / nRanks_; }
+  size_t shardLen(int rank) const {
+    const size_t first = (size_t)rank * shardPkts();
+    return first < packets() ? std::min(shardPkts(), packets() - first) : 0;
+  }
+  unsigned blocks() const { return (unsigned)((packets() + kThreads - 1) / kThreads); }
 
   // Line pk of sender's slot in owner's scratch, staging area 0 (copies of owner's shard) or 1 (reduced shards).
   volatile uint32_t* line(int owner, int area, int sender, size_t pk) {
@@ -98,13 +105,13 @@ class DdaAllReduceFabricLLSpread : public DeviceTestBase {
   }
 
   void publishCopy(int peer) {
-    for (size_t pk = 0; pk < shardPkts(); ++pk) {
+    for (size_t pk = 0; pk < shardLen(kSelf); ++pk) {
       DdaLLHostPeers::PublishLine(line(kSelf, 0, peer, pk), bitsOf(rankValue(peer)), bitsOf(rankValue(peer)), kFlag);
     }
   }
 
   void publishReduced(int peer) {
-    for (size_t pk = 0; pk < shardPkts(); ++pk) {
+    for (size_t pk = 0; pk < shardLen(peer); ++pk) {
       DdaLLHostPeers::PublishLine(line(kSelf, 1, peer, pk), bitsOf(reducedValue(peer)), bitsOf(reducedValue(peer)),
                                   kFlag);
     }
@@ -130,7 +137,7 @@ class DdaAllReduceFabricLLSpread : public DeviceTestBase {
   // True once every line of the self copy bound for the next peer has landed there.
   bool phase1Done() {
     const int peer = (kSelf + 1) % nRanks_;
-    for (size_t pk = 0; pk < shardPkts(); ++pk) {
+    for (size_t pk = 0; pk < shardLen(peer); ++pk) {
       volatile uint32_t* w = line(peer, 0, kSelf, pk);
       if (w[1] != kFlag || w[3] != kFlag) {
         return false;
@@ -166,10 +173,12 @@ class DdaAllReduceFabricLLSpread : public DeviceTestBase {
       if (peer == kSelf) {
         continue;
       }
-      for (size_t pk = 0; pk < shardPkts(); ++pk) {
+      for (size_t pk = 0; pk < shardLen(peer); ++pk) {
         volatile uint32_t* c = line(peer, 0, kSelf, pk);
         ASSERT_TRUE(c[0] == mine && c[1] == kFlag && c[2] == mine && c[3] == kFlag)
             << "copy to " << peer << " pk " << pk;
+      }
+      for (size_t pk = 0; pk < shardLen(kSelf); ++pk) {
         volatile uint32_t* r = line(peer, 1, kSelf, pk);
         ASSERT_TRUE(r[0] == sum && r[1] == kFlag && r[2] == sum && r[3] == kFlag) << "sum to " << peer << " pk " << pk;
       }
@@ -179,9 +188,8 @@ class DdaAllReduceFabricLLSpread : public DeviceTestBase {
   // The self shard holds the rank-order sum; every other shard holds that peer's reduced value.
   void expectRecv() {
     const std::vector<float> out = recv();
-    const size_t shardElems = kCount / nRanks_;
     for (size_t i = 0; i < kCount; ++i) {
-      const int owner = (int)(i / shardElems);
+      const int owner = (int)(i / 2 / shardPkts());
       const float want = owner == kSelf ? rankOrderSum(nRanks_) : reducedValue(owner);
       ASSERT_EQ(bitsOf(out[i]), bitsOf(want)) << "element " << i << " of shard " << owner;
     }
@@ -239,6 +247,11 @@ TEST_F(DdaAllReduceFabricLLSpread, RuntimeRanksLatePeerFoldsInRankOrder) {
   runLatePeer<0>(6);
 }
 
+// Five ranks do not divide the 1536 packets: four shards of 308 and one of 304, each on its own length.
+TEST_F(DdaAllReduceFabricLLSpread, UnevenShardsLatePeerFoldsInRankOrder) {
+  runLatePeer<0>(5);
+}
+
 // In place: the self copies of the peers' shards leave before the reduced shards overwrite the same recvbuff range.
 TEST_F(DdaAllReduceFabricLLSpread, InPlaceSendsBeforeOverwriting) {
   nRanks_ = 6;
@@ -267,15 +280,14 @@ TEST_F(DdaAllReduceFabricLLSpread, AbortBeforeFoldPublishesNoPartialSum) {
     if (peer == kSelf) {
       continue;
     }
-    for (size_t pk = 0; pk < shardPkts(); ++pk) {
+    for (size_t pk = 0; pk < shardLen(kSelf); ++pk) {
       volatile uint32_t* r = line(peer, 1, kSelf, pk);
       ASSERT_NE(r[1], kFlag) << "partial sum published to " << peer;
     }
   }
   const std::vector<float> out = recv();
-  const size_t shardElems = kCount / nRanks_;
   for (size_t i = 0; i < kCount; ++i) {
-    if ((int)(i / shardElems) != kSelf) {
+    if ((int)(i / 2 / shardPkts()) != kSelf) {
       ASSERT_EQ(out[i], kUntouched) << "an aborted thread wrote a peer shard";
     }
   }
