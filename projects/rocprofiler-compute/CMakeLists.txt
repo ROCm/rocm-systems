@@ -987,6 +987,18 @@ add_test(
 )
 
 # -----------------------------------
+# rocprof_compute_base unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_rocprof_compute_base
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_rocprof_compute_base.xml
+        ${COV_OPTION} tests/unit/test_rocprof_compute_base.py
+        ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
 # PC sampling profiler unit tests
 # -----------------------------------
 
@@ -1165,6 +1177,7 @@ if(${ENABLE_COVERAGE})
         test_metric_validation
         test_native_tool_finder
         test_profiler_base
+        test_rocprof_compute_base
         test_rocprofv3_avail_interface
         test_soc_base
         test_tty

@@ -34,6 +34,7 @@ test_categories:
       - test_roofline_main
       - test_report_shell
       - test_profiler_base
+      - test_rocprof_compute_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
       - test_specs
@@ -134,6 +135,7 @@ test_categories:
       - test_inject_roctx_torch_trace_collector
       - test_inject_roctx_torch_gpu
       - test_profiler_base
+      - test_rocprof_compute_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
       - test_memory_chart_loader
@@ -239,6 +241,7 @@ test_categories:
       - test_inject_roctx_torch_trace_collector
       - test_inject_roctx_torch_gpu
       - test_profiler_base
+      - test_rocprof_compute_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
       - test_memory_chart_loader
@@ -344,6 +347,7 @@ test_categories:
       - test_inject_roctx_torch_trace_collector
       - test_inject_roctx_torch_gpu
       - test_profiler_base
+      - test_rocprof_compute_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
       - test_memory_chart_loader
