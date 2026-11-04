@@ -886,6 +886,23 @@ TEST_F(DdaAllReduceFabricLLMicrotest, SplitTakes_IsThePeerSplitWindow) {
   EXPECT_FALSE(takes(4 * kMiB)) << "staged writer off: the VMM-first window keeps the message";
 }
 
+// In the unregistered VMM-first window the split may use the blocks of the VMM launch it replaces, if more than LL's.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitInTheVmmFirstWindowTakesTheVmmGrid) {
+  SplitTiersOn(comm(), params_);
+  comm().nRanks = 32;
+  const size_t count = 4 * kMiB / 4;  // 128 KiB shards: 69 slices x 31 peers need 134 blocks of 16 warps
+  const unsigned llTwoShot = (unsigned)std::min<size_t>(4 * kMiB / 32 / 8 / 1024, comm().ddaFabricMaxBlocks);
+  EXPECT_EQ(RunOneLL128(count).grid.x, llTwoShot) << "outside the VMM-first window: the LL two-shot's grid";
+  g_rcclDdaArVmmFirstFor = [](ncclComm*, const void*, const void*, size_t) { return true; };
+  ASSERT_TRUE(ncclAllReduceDdaFabricEligible(mock_.get(), kSendbuff, kRecvbuff, count, ncclFloat32, ncclSum));
+  const unsigned vmm = ncclAllReduceDdaFabricBlocks(mock_.get(), count, ncclFloat32);
+  ASSERT_GT(vmm, llTwoShot);
+  const DdaLaunch& l = RunOneLL128(count);
+  EXPECT_EQ(l.kernel, (LL128Split<float, 0>()));
+  EXPECT_EQ(l.grid.x, std::min<unsigned>(vmm, 134)) << "the VMM launch's blocks";
+  EXPECT_EQ(l.block.x, 512u);
+}
+
 // A user-set LL or LL128 one-shot threshold keeps the window's messages on that tier.
 TEST_F(DdaAllReduceFabricLLMicrotest, Eligible_PeerSplitWindowLeavesAPinnedLLTier) {
   SplitTiersOn(comm(), params_);

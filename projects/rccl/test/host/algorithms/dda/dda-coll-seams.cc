@@ -46,6 +46,8 @@ std::function<size_t(const ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold = Def
 std::function<size_t(const ncclComm*)> g_rcclDdaLLTwoShotThreshold = DefaultDdaLLTwoShotThreshold;
 std::function<size_t(const ncclComm*)> g_rcclDdaLL128TwoShotThreshold = DefaultDdaLL128TwoShotThreshold;
 std::function<bool()> g_rcclDdaArLLTierPinnedByEnv = [] { return false; };
+std::function<bool(ncclComm*, const void*, const void*, size_t)> g_rcclDdaArVmmFirstFor =
+    [](ncclComm*, const void*, const void*, size_t) { return false; };
 std::function<bool()> g_rcclDdaArLL128OneShotPinnedByEnv = [] { return false; };
 std::function<int(const ncclComm*)> g_rcclDdaFabricVmmBlocks = DefaultDdaFabricVmmBlocks;
 std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricAgLL128Threads = DefaultDdaFabricAgLL128Threads;
@@ -57,6 +59,9 @@ size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) { return g_r
 size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm) { return g_rcclDdaLLTwoShotThreshold(comm); }
 size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm) { return g_rcclDdaLL128TwoShotThreshold(comm); }
 bool rcclDdaArLLTierPinnedByEnv() { return g_rcclDdaArLLTierPinnedByEnv(); }
+bool rcclDdaArVmmFirstFor(ncclComm* comm, const void* sendbuff, const void* recvbuff, size_t msgBytes) {
+  return g_rcclDdaArVmmFirstFor(comm, sendbuff, recvbuff, msgBytes);
+}
 bool rcclDdaArLL128OneShotPinnedByEnv() { return g_rcclDdaArLL128OneShotPinnedByEnv(); }
 int rcclDdaFabricVmmBlocks(const ncclComm* comm) { return g_rcclDdaFabricVmmBlocks(comm); }
 int rcclDdaFabricAgLL128Threads(const ncclComm* comm, size_t totalBytes) {
@@ -76,6 +81,7 @@ void ResetDdaCollSeams() {
   g_rcclDdaLLTwoShotThreshold = DefaultDdaLLTwoShotThreshold;
   g_rcclDdaLL128TwoShotThreshold = DefaultDdaLL128TwoShotThreshold;
   g_rcclDdaArLLTierPinnedByEnv = [] { return false; };
+  g_rcclDdaArVmmFirstFor = [](ncclComm*, const void*, const void*, size_t) { return false; };
   g_rcclDdaArLL128OneShotPinnedByEnv = [] { return false; };
   g_rcclDdaFabricVmmBlocks = DefaultDdaFabricVmmBlocks;
   g_rcclDdaFabricAgLL128Threads = DefaultDdaFabricAgLL128Threads;

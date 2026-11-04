@@ -1370,6 +1370,17 @@ inline bool rcclDdaArVmmFirstTab(const rcclArchThresholds* table, int nRanks, si
   return msgBytes > table->ddaArVmmFirstMinBytes && msgBytes <= (size_t)nRanks * table->ddaArVmmFirstMaxPerRank;
 }
 
+bool rcclDdaArVmmFirstFor(ncclComm* comm, const void* sendbuff, const void* recvbuff, size_t msgBytes) {
+  if (comm == nullptr) return false;
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  ncclDevrFindWindow(comm, sendbuff, &sendWin);
+  ncclDevrFindWindow(comm, recvbuff, &recvWin);
+  ncclSymRegType_t winRegType;
+  if (ncclGetSymRegType(sendWin, recvWin, &winRegType) != ncclSuccess) return false;
+  return rcclDdaArVmmFirstTab(extAlgoArchTable(comm), comm->nRanks, msgBytes, winRegType);
+}
+
 int rcclDdaFabricVmmBlocks(const ncclComm* comm) {
   if (comm == nullptr) return 0;
   const int cap = comm->ddaFabricMaxBlocks;

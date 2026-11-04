@@ -8138,6 +8138,25 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstYieldsToThePeerSplit)
       });
 }
 
+// rcclDdaArVmmFirstFor: the VMM-first window for these buffers, which the LL128 peer-split reads for its block cap.
+TEST(WrapMicrotestIsolated, DdaArVmmFirstFor_UnregisteredWindowOnly) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaArVmmFirstFor_UnregisteredWindowOnly",
+      []() {
+        ArDdaHooks hooks;
+        ncclComm* comm = MakeArDdaComm(32);
+        EXPECT_TRUE(rcclDdaArVmmFirstFor(comm, nullptr, nullptr, 8 * kMiB));
+        EXPECT_FALSE(rcclDdaArVmmFirstFor(comm, nullptr, nullptr, 2 * kMiB)) << "the window starts above 2 MiB";
+        EXPECT_FALSE(rcclDdaArVmmFirstFor(nullptr, nullptr, nullptr, 8 * kMiB));
+        ScopedHook regType(g_getSymRegType, [](struct ncclDevrWindow*, struct ncclDevrWindow*, ncclSymRegType_t* out) {
+          *out = ncclSymSendNonregRecvReg;
+          return ncclSuccess;
+        });
+        EXPECT_FALSE(rcclDdaArVmmFirstFor(comm, nullptr, nullptr, 8 * kMiB)) << "registered receive";
+        DeleteCommWithArch(comm);
+      });
+}
+
 // Registered receive windows keep the normal tier order (the window was measured on
 // unregistered buffers).
 TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstUnregisteredOnly) {
