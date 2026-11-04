@@ -2,16 +2,22 @@
 # with a checked-in baseline, so an undocumented firmware or driver change on a
 # CI host shows up as a red job naming the host and the layer.
 #
-# Baselines live in .github/lstt/baselines/<host>.env. An empty EXPECT_* value
-# is reported but not enforced, which is how a host is onboarded before its
-# target versions are agreed.
+# This repository is public. System BIOS and BMC firmware are public releases,
+# but the amdgpu driver on the lab hosts is an internal build, so nothing here
+# may print a version unless it is listed in .github/lstt/public-releases.txt.
+# Everything else is reported as "withheld", and failures say that a value
+# differs without saying what it is.
+#
+# Baselines live in .github/lstt/baselines/<host>.env and may hold only public
+# release versions, so EXPECT_AMDGPU stays empty. An empty EXPECT_* value is
+# reported but not enforced, which is how a host is onboarded.
 name: LSTT hardware health
 
 on:
   pull_request:
     paths:
       - '.github/workflows/lstt-hw-health.yml'
-      - '.github/lstt/baselines/**'
+      - '.github/lstt/**'
   workflow_dispatch:
   schedule:
     # Nightly drift check. Schedules only run from the default branch, so this
@@ -58,7 +64,7 @@ jobs:
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: .github/lstt/baselines
+          sparse-checkout: .github/lstt
           sparse-checkout-cone-mode: false
 
       # Host-level, so no container: /sys/class/dmi is what the firmware
@@ -67,21 +73,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          . "$BASELINE"
+          . .github/lstt/lib.sh
           # A baseline that omits a key must behave like an empty one, not
           # trip `set -u`.
-          . "$BASELINE"
           : "${EXPECT_BIOS:=}"
           got="$(cat /sys/class/dmi/id/bios_version)"
-          bios_date="$(cat /sys/class/dmi/id/bios_date)"
-          product="$(cat /sys/class/dmi/id/product_name)"
-          echo "### ${{ matrix.host }} ($product)" >> "$GITHUB_STEP_SUMMARY"
+          echo "### ${{ matrix.host }}" >> "$GITHUB_STEP_SUMMARY"
           if [ -z "${EXPECT_BIOS}" ]; then
-            echo "- BIOS: $got ($bios_date) — no baseline recorded" >> "$GITHUB_STEP_SUMMARY"
+            echo "- BIOS: $(show bios "$got") (no baseline recorded)" >> "$GITHUB_STEP_SUMMARY"
           elif [ "$got" = "${EXPECT_BIOS}" ]; then
-            echo "- BIOS: $got ($bios_date)" >> "$GITHUB_STEP_SUMMARY"
+            echo "- BIOS: $(show bios "$got") (matches baseline)" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "- BIOS: $got, expected ${EXPECT_BIOS}" >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::BIOS is $got but the baseline says ${EXPECT_BIOS}. Update $BASELINE if the change was intended."
+            echo "- BIOS: differs from the baseline" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::BIOS differs from the baseline in $BASELINE. Read the version on the host; update the baseline if the change was intended."
             exit 1
           fi
 
@@ -93,33 +98,18 @@ jobs:
         run: |
           set -euo pipefail
           . "$BASELINE"
+          . .github/lstt/lib.sh
           : "${EXPECT_BMC:=}"
-          sudo ipmitool mc info > mc.txt
-          got="$(awk -F': *' '/Firmware Revision/ {print $2; exit}' mc.txt)"
+          got="$(sudo ipmitool mc info | awk -F': *' '/Firmware Revision/ {print $2; exit}')"
           if [ -z "${EXPECT_BMC}" ]; then
-            echo "- BMC: $got — no baseline recorded" >> "$GITHUB_STEP_SUMMARY"
+            echo "- BMC: $(show bmc "$got") (no baseline recorded)" >> "$GITHUB_STEP_SUMMARY"
           elif [ "$got" = "${EXPECT_BMC}" ]; then
-            echo "- BMC: $got" >> "$GITHUB_STEP_SUMMARY"
+            echo "- BMC: $(show bmc "$got") (matches baseline)" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "- BMC: $got, expected ${EXPECT_BMC}" >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::BMC firmware is $got but the baseline says ${EXPECT_BMC}."
+            echo "- BMC: differs from the baseline" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::BMC firmware differs from the baseline in $BASELINE."
             exit 1
           fi
-
-      # Recent hardware events (ECC errors, fan and power faults) that are
-      # otherwise only visible by logging in to the BMC. Never fails the job.
-      - name: BMC event log
-        if: ${{ matrix.bmc && !cancelled() }}
-        shell: bash
-        run: |
-          {
-            echo "<details><summary>Recent BMC events</summary>"
-            echo
-            echo '```'
-            sudo ipmitool sel elist 2>&1 | tail -20 || echo "could not read the event log"
-            echo '```'
-            echo "</details>"
-          } >> "$GITHUB_STEP_SUMMARY"
 
       # The driver version the host booted, which is what the GPU step below
       # depends on. Checked outside the container for the same reason as BIOS.
@@ -128,6 +118,7 @@ jobs:
         run: |
           set -euo pipefail
           . "$BASELINE"
+          . .github/lstt/lib.sh
           : "${EXPECT_AMDGPU:=}"
           got="$(cat /sys/module/amdgpu/version 2>/dev/null || echo not-loaded)"
           if [ "$got" = not-loaded ]; then
@@ -136,29 +127,27 @@ jobs:
             exit 1
           fi
           if [ -n "${EXPECT_AMDGPU}" ] && [ "$got" != "${EXPECT_AMDGPU}" ]; then
-            echo "- amdgpu: $got, expected ${EXPECT_AMDGPU}" >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::amdgpu is $got but the baseline says ${EXPECT_AMDGPU}."
+            echo "- amdgpu: differs from the baseline" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::amdgpu differs from the baseline in $BASELINE."
             exit 1
           fi
-          echo "- amdgpu: $got" >> "$GITHUB_STEP_SUMMARY"
+          echo "- amdgpu: $(show amdgpu "$got")" >> "$GITHUB_STEP_SUMMARY"
 
       # The same container shape the real CI jobs use, so this proves what they
       # need: the devices are passed through and ROCm sees the right ASIC.
+      # Nothing from rocminfo or docker is printed: its output includes the
+      # kernel driver version, and a log of a failure would too.
       - name: GPU
         shell: bash
         run: |
           set -euo pipefail
-          docker run --rm \
-            --device=/dev/kfd --device=/dev/dri --group-add video \
-            rocm/dev-ubuntu-22.04:7.2 \
-            bash -c 'rocminfo | grep -E "Marketing Name|gfx" | sort -u; rocminfo | grep -q ${{ matrix.gfx }}' \
-            > gpu.txt 2>&1 || { cat gpu.txt; echo "::error::${{ matrix.gfx }} was not visible inside the container."; exit 1; }
-          {
-            echo "- GPU: ${{ matrix.gfx }} visible"
-            echo "<details><summary>rocminfo</summary>"
-            echo
-            echo '```'
-            cat gpu.txt
-            echo '```'
-            echo "</details>"
-          } >> "$GITHUB_STEP_SUMMARY"
+          if docker run --rm \
+              --device=/dev/kfd --device=/dev/dri --group-add video \
+              rocm/dev-ubuntu-22.04:7.2 \
+              bash -c 'rocminfo | grep -q ${{ matrix.gfx }}' > /dev/null 2>&1; then
+            echo "- GPU: ${{ matrix.gfx }} visible" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- GPU: ${{ matrix.gfx }} not visible" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::${{ matrix.gfx }} was not visible inside the container. Run the same docker command on the host for details."
+            exit 1
+          fi
