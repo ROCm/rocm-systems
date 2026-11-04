@@ -26,7 +26,6 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
-- Fixed `rocprofv3` process attachment failing with framework workloads and Python wheels. Attachment libraries now load on runtime-only installs that lack unversioned library symlinks. Loading the same library through different paths is no longer treated as a conflict. A compatible library next to `rocprofiler-register` is preferred over an unrelated installation.
 - Fixed `rocprofiler_configure_buffer_tracing_service` and `rocprofiler_configure_callback_tracing_service` throwing an exception for an out-of-range tracing kind. They now return `ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND`.
 - Fixed the rocprofv3 tool library aborting when it runs with an older rocprofiler-sdk, for example after attaching to a process from a different installation. Tracing kinds that the running rocprofiler-sdk does not support, including those enabled internally (external correlation requests and HIP graph tracing), are skipped with a warning.
 - Thread trace is disabled with a warning when the rocprofv3 tool library runs with a rocprofiler-sdk older than 1.5.0, instead of running with a mismatched thread trace ABI.
@@ -119,6 +118,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Fixed the synchronous device counting sample crashing at exit.
 - Fixed time-based (microsecond) PC sampling intervals being limited by the maximum meant for cycle-based intervals.
 - Fixed a possible crash when a traced HIP API call had a string (`const char*`) argument that was read after the call returned. String arguments are now copied when the call is traced.
+- Fixed `rocprofv3` process attachment failing with framework workloads and Python wheels. Attachment libraries now load on runtime-only installs that lack unversioned library symlinks. Loading the same library through different paths is no longer treated as a conflict. A compatible library next to `rocprofiler-register` is preferred over an unrelated installation.
 - Fixed `rocprofv3 --att` ignoring `ROCPROF_ATT_LIBRARY_PATH`. It searched the whole filesystem from `/` and used the first trace decoder it found.
 
 ### Known issues
