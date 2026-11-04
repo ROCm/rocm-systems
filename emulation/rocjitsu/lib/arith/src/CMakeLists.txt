@@ -25,6 +25,10 @@ add_library(
     fp/minmax.cpp
     fp/mixed_fma.cpp
     fp/packed_fma.cpp
+    dot/dot.cpp
+    dot/fp8_dot.cpp
+    dot/half_dot.cpp
+    dot/integer_dot.cpp
     dot/scalar_repair.cpp
     register/dpp.cpp
     wmma/swmmac16.cpp
