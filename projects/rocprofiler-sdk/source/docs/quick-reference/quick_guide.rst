@@ -334,6 +334,6 @@ Quick troubleshooting tips
 
 - **Large output files:** Use ``--minimum-output-data`` to set file size thresholds.
 
-- **Signal handling:** Use ``--disable-signal-handlers`` in case of conflicts with application handlers.
+- **Signal handling:** Use ``--disable-signal-handlers`` in case of conflicts with application handlers, or ``--disable-signal-handlers <SIGNAL>`` to leave a specific signal entirely to the application.
 
 - **ROCm path issues:** Use ``--rocm-root`` to specify custom ROCm installation paths.
