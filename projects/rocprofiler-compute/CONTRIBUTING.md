@@ -347,16 +347,17 @@ under these keys are treated as equations: `value`, `avg`, `min`, `max`, `peak`.
   multiplies by a numeric constant, factor it out:
   `128 * SUM(x)`, not `SUM(x * 128)`. Addition inside aggregations is left as-is.
 - **Minimal parentheses** — remove parentheses made redundant by operator
-  precedence (`a + b + c`, not `(a + b) + c`), but preserve those required for
-  correct evaluation (`a - (b - c)`, `(a + b) * c`).
+  precedence (`a + b + c`, not `(a + b) + c`), but preserve those that set the
+  evaluation order (`a - (b - c)`, `a + (b + c)`, `(a + b) * c`).
 - **Unary negation** — negation of a compound expression keeps its parentheses:
   `-(a + b)`, not `-a + b`.
 - **Literal values** — `N/A`, `None`, `null`, `true`, `false`, and
   `Peak (Empirical)` are never parsed as equations and must be written exactly
   as shown (the space before `(` in `Peak (Empirical)` is required).
 
-Equations with unsupported syntax (unknown characters, unmatched parentheses) are
-left unchanged; the formatter never corrupts an equation it cannot fully parse.
+The formatter reports an equation it cannot parse (unknown characters, unmatched
+parentheses, a missing operand) with its key and leaves it unchanged; fix it by
+hand.
 
 **Enforcement.** The `yaml-format-fix` pre-commit hook runs
 `tools/format_yaml.py --fix` on staged config files and auto-corrects equations
