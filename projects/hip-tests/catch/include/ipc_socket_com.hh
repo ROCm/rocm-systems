@@ -248,11 +248,9 @@ public:
     cmptr->cmsg_len = CMSG_LEN(sizeof(int));
     cmptr->cmsg_level = SOL_SOCKET;
     cmptr->cmsg_type = SCM_RIGHTS;
-
     memmove(CMSG_DATA(cmptr), &sendfd, sizeof(sendfd));
-
     msg.msg_name = (void *)&cliaddr;
-    msg.msg_namelen = sizeof(struct sockaddr_un);
+    msg.msg_namelen = offsetof(struct sockaddr_un, sun_path) + name.size();
     iov[0].iov_base = &dummy_data;
     iov[0].iov_len = sizeof(dummy_data);
     msg.msg_iov = iov;
@@ -323,9 +321,7 @@ private:
     std::string name = prefix_ + std::to_string(getpid());
 
     std::memcpy(servaddr.sun_path, name.data(), name.size());
-
-    // Address length is sizeof(sun_family) + 1 (null byte) + string length
-    addr_len = offsetof(struct sockaddr_un, sun_path) + 1 + name.size();
+    addr_len = offsetof(struct sockaddr_un, sun_path) + name.size();
     servaddr.sun_family = AF_UNIX;
 
     UNSCOPED_INFO("Binding IPC socket with name: " << name);
