@@ -5083,6 +5083,12 @@ pub fn amdsmi_get_gpu_device_bdf(
 /// UUID, and enumeration IDs. The HIP UUID is distinct from the device UUID
 /// returned by [`amdsmi_get_gpu_device_uuid`].
 ///
+/// Fields the library cannot determine are set to `0xFFFFFFFF` (`u32::MAX`)
+/// and the call still returns `Ok`. This applies to `hsa_id`, `hip_id`,
+/// `oam_id` and `physical_acc_id`, and to `drm_render` and `drm_card` when the
+/// device identifiers cannot be read. Compare against `u32::MAX` before using
+/// these values.
+///
 /// # Arguments
 ///
 /// * `processor_handle` - A processor handle obtained after initializing AMD SMI.
@@ -5096,6 +5102,9 @@ pub fn amdsmi_get_gpu_device_bdf(
 /// println!("DRM render node: renderD{}", info.drm_render);
 /// println!("HSA ID: {}, HIP ID: {}", info.hsa_id, info.hip_id);
 /// println!("HIP UUID: {}", info.hip_uuid());
+/// if info.oam_id == u32::MAX {
+///     println!("OAM ID is not available");
+/// }
 /// # Ok(())
 /// # }
 /// ```
