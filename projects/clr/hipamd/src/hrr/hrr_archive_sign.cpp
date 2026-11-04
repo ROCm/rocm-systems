@@ -135,10 +135,11 @@ bool write_file(const fs::path& p, const std::string& data, std::string* err,
 bool sha256_at(int dir, const char* name, std::string* hex_out) {
   const int fd = openat(dir, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
   if (fd < 0) return false;
+  struct stat st;
+  bool ok = fstat(fd, &st) == 0 && S_ISREG(st.st_mode);
   rocm::sha2::sha256 h;
-  std::vector<uint8_t> buf(1u << 20);
-  bool ok = true;
-  for (;;) {
+  std::vector<uint8_t> buf(ok ? (1u << 20) : 0);
+  while (ok) {
     const ssize_t n = read(fd, buf.data(), buf.size());
     if (n > 0) h.update(buf.data(), static_cast<size_t>(n));
     else if (n == 0) break;
