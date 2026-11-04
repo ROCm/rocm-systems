@@ -1095,16 +1095,11 @@ def test_copy_matched_operator_subtree_keeps_ancestors_and_descendants():
     assert [child.name for child in copied_a.children[0].children] == ["C"]
 
 
-def test_copy_matched_user_region_keeps_nested_work_and_unions_relu():
-    addmm = leaf_operator(
-        "aten::addmm", "1", 50.0, kernel="addmm_kernel", backend="torch"
-    )
-    region1 = CallTreeNode(name="region1", backend="user")
-    region1.children = [addmm]
-    sibling = leaf_operator(
-        "aten::relu", "2", 10.0, kernel="relu_kernel", backend="torch"
-    )
-    forest = {"1": [region1, sibling]}
+def test_copy_matched_user_region_keeps_nested_work_and_unions_relu(
+    user_region_with_nested_addmm_and_outside_relu,
+):
+    forest = user_region_with_nested_addmm_and_outside_relu
+    region1, sibling = forest["1"]
 
     copied = copy_matched_operator_subtree(forest, [region1])
     roots = copied["1"]

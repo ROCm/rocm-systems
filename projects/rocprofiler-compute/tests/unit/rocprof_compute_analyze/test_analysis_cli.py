@@ -44,25 +44,6 @@ def simple_model_forest_with_relu_and_addmm():
     return {"1": [simple]}
 
 
-def user_region_with_nested_addmm_and_outside_relu():
-    """User region1 wraps addmm; relu is a sibling root outside the region."""
-    addmm = CallTreeNode(name="aten::addmm", backend="torch")
-    addmm.kernels["addmm_kernel"] = KernelStats(
-        launches=1,
-        total_duration_ns=50.0,
-        pmc_group_keys=[ADDMM_PMC_GROUP_KEY],
-    )
-    region1 = CallTreeNode(name="region1", backend="user")
-    region1.children = [addmm]
-    relu = CallTreeNode(name="aten::relu", backend="torch")
-    relu.kernels["relu_kernel"] = KernelStats(
-        launches=1,
-        total_duration_ns=10.0,
-        pmc_group_keys=[RELU_PMC_GROUP_KEY],
-    )
-    return {"1": [region1, relu]}
-
-
 def torch_parent_triton_child_forest():
     child = CallTreeNode(name="triton.JITFunction.matmul_kernel", backend="triton")
     child.kernels["triton_matmul_kernel"] = KernelStats(
@@ -317,11 +298,12 @@ def test_apply_operator_filter_keeps_nodes_from_requested_backend(monkeypatch):
 
 
 def test_apply_operator_filter_user_region_keeps_nested_work_and_unions_relu(
+    user_region_with_nested_addmm_and_outside_relu,
     monkeypatch,
 ):
     stub_trace_ml_api(monkeypatch)
     workload = schema.Workload()
-    workload.ml_api_call_trees = user_region_with_nested_addmm_and_outside_relu()
+    workload.ml_api_call_trees = user_region_with_nested_addmm_and_outside_relu
     args = argparse.Namespace(
         operator_patterns=resolve_operator_patterns(["user:region1"])
     )
@@ -333,7 +315,7 @@ def test_apply_operator_filter_user_region_keeps_nested_work_and_unions_relu(
     assert region_names == ["region1", "aten::addmm"]
 
     union_workload = schema.Workload()
-    union_workload.ml_api_call_trees = user_region_with_nested_addmm_and_outside_relu()
+    union_workload.ml_api_call_trees = user_region_with_nested_addmm_and_outside_relu
     union_args = argparse.Namespace(
         operator_patterns=resolve_operator_patterns(["user:region1", "torch:*relu*"])
     )
@@ -379,10 +361,12 @@ def test_list_operators_omits_other_backend_kernel_lines(capsys):
     assert "torch_gemm_kernel" not in captured.out
 
 
-def test_list_operators_user_keeps_nested_torch_and_drops_outside_relu(capsys):
+def test_list_operators_user_keeps_nested_torch_and_drops_outside_relu(
+    capsys, user_region_with_nested_addmm_and_outside_relu
+):
     cli = cli_analysis.__new__(cli_analysis)
     workload = schema.Workload()
-    workload.ml_api_call_trees = user_region_with_nested_addmm_and_outside_relu()
+    workload.ml_api_call_trees = user_region_with_nested_addmm_and_outside_relu
     cli._runs = {"/workload": workload}
     kernel_top = pd.DataFrame({"Kernel_Name": ["addmm_kernel", "relu_kernel"]})
     cli.list_operators("/workload", kernel_top, ["user"])
