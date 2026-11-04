@@ -10,6 +10,7 @@
 // sibling targets built as LANGUAGE CXX, where the HIP compilation prelude that
 // would otherwise declare it is absent.
 #include <cstddef>
+#include <cstdint>
 
 #include <vector>
 
@@ -28,6 +29,12 @@ void SetBootstrapPeerLsaSetupFail(bool fail);
 void SetBootstrapIntResult(const int* values, int count);
 void SetFactoryCreateFail(bool fail);
 void SetFactoryNullHandles(bool nullHandles);
+// my_host_id the plugin passed to the last gin_anvil_sdma_create.
+uint64_t GetFactoryHostId();
+// remote_hosts_ok the plugin passed to the last gin_anvil_sdma_create.
+int GetFactoryRemoteHostsOk();
+// Value of the faked ginAnvilSdmaReachCapable, as an int GinAnvilSdmaReach (default Host).
+void SetAnvilReach(int reach);
 void SetLsaAddrFail(bool fail);
 // Also clears the latched input base, so the next resolved address maps to `addr`.
 void SetLsaSelfAddr(void* addr);

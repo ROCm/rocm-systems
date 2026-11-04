@@ -8140,12 +8140,15 @@ TEST_F(GinProxyNthreadsSplitTests, SplitShare_SecondDevCommPut) {
   runPutWaitRoundTrip(child, getActiveStream());
 }
 
-// Two ranks, two physical hosts, NCCL_GIN_TYPE unset (AICOMRCCL-3417). Anvil
-// SDMA must not stay active: its factory addresses peers by local device id,
-// including across hosts in one MNNVL pod where nNodes folds to 1. PROXY is
-// the default, a symmetric window registers, a default DevComm and an explicit
-// PROXY DevComm each complete a cross-host put/signal, and an explicit Anvil
-// DevComm is rejected.
+// Two ranks, two physical hosts, NCCL_GIN_TYPE unset (AICOMRCCL-3417). Outside
+// a gfx1250 fabric pod Anvil SDMA must not stay active, because it can only
+// reach a peer whose memory is fabric-mapped: PROXY is the default, a symmetric
+// window registers, a default DevComm and an explicit PROXY DevComm each
+// complete a cross-host put/signal, and an explicit Anvil DevComm is rejected.
+// Inside one pod (MNNVL, one clique covering the communicator) with
+// RCCL_GIN_ANVIL_FABRIC_POD=1 and RCCL_GIN_ANVIL_FABRIC_MEM=1 on every rank,
+// Anvil stays active and an explicit Anvil DevComm must complete that
+// put/signal itself.
 TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodeUnsetType) {
   if (auto reason = mixedBackendTwoNodeSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
   if (auto reason = mpiCoordinatedSkipReason(
@@ -8165,6 +8168,19 @@ TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodeUnsetType) {
 
   ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
   ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(comm, &props));
+  auto envIsOne = [](const char* name) {
+    const char* v = std::getenv(name);
+    return v != nullptr && std::strcmp(v, "1") == 0;
+  };
+  const bool fabricPod = comm->MNNVL == 1 && comm->clique.size == comm->nRanks && comm->archName != nullptr &&
+                         std::strncmp(comm->archName, "gfx1250", 7) == 0 && envIsOne("RCCL_GIN_ANVIL_FABRIC_POD") &&
+                         envIsOne("RCCL_GIN_ANVIL_FABRIC_MEM");
+  if (fabricPod) {
+    // ROCSHMEM_GDA ranks with Anvil, so the default may be either one.
+    ASSERT_MPI_EQ(true, props.ginSupport[NCCL_GIN_TYPE_ANVIL_SDMA]);
+    runPutWaitRoundTrip(comm, getActiveStream(), NCCL_GIN_TYPE_ANVIL_SDMA);
+    return;
+  }
   ASSERT_MPI_EQ(NCCL_GIN_TYPE_PROXY, props.ginType);
   ASSERT_MPI_EQ(true, props.ginSupport[NCCL_GIN_TYPE_PROXY]);
   ASSERT_MPI_EQ(false, props.ginSupport[NCCL_GIN_TYPE_ANVIL_SDMA]);
