@@ -94,6 +94,8 @@ __launch_bounds__(512)
   __shared__ uint2 ldsIn[kDdaLLSpreadLdsPkts];
   __shared__ uint2 ldsAcc[kDdaLLSpreadMaxPassPkts];
   __shared__ LLPacket16* ldsPeer[kDdaLLSpreadMaxRanks];
+  // Set by any thread whose wait aborted: the fold reads LDS rows other threads polled, so an abort is block-wide.
+  __shared__ int ldsAborted;
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t nPk = (count * sizeof(T)) >> 3;
@@ -130,6 +132,9 @@ __launch_bounds__(512)
   // Loaded ahead of the epoch barrier: the peer table, this thread's first phase-1 batch, its first self packet.
   for (int r = (int)tid; r < nRanks; r += (int)nthr) {
     ldsPeer[r] = reinterpret_cast<LLPacket16*>(peerScratch[r]);
+  }
+  if (tid == 0) {
+    ldsAborted = 0;
   }
   uint32_t d0[kDdaLLSpreadBatch], d1[kDdaLLSpreadBatch];
   int peer[kDdaLLSpreadBatch];
@@ -210,7 +215,11 @@ __launch_bounds__(512)
         ldsIn[(size_t)selfRank * plen + k] = make_uint2(in[w], in[w + 1]);
       }
     }
+    if (aborted) {
+      ldsAborted = 1;
+    }
     ddaLLSpreadLdsBarrier();
+    aborted = aborted || ldsAborted != 0;
 
     for (size_t k = tid; k < plen; k += nthr) {
       uint32_t acc0 = ldsIn[k].x;
