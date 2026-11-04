@@ -216,8 +216,6 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
         hip_inited = true;
     }
 
-    const bool hip_error_pending{Context<Hip>::get()->hipPeekAtLastError() != hipSuccess};
-
     try {
         switch (type) {
             case IoType::Read:
@@ -236,12 +234,10 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
         Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size, buffer->getGpuId());
         markAisUnsupportedOnENOTTY(e.code().value());
         // A failed AIS call records hipErrorUnknown as this thread's last HIP
-        // error. Fallback-eligible failures are reported to the caller as
-        // errno or handled by the fallback, so don't leave that error behind
-        // unless one was already pending (it can't be restored). Async I/O
-        // runs on a HIP callback thread, so its last error never reaches the
-        // caller.
-        if (!hip_error_pending && fastpathFallbackEligibleErrno(e.code().value())) {
+        // error. Don't leave it behind if the I/O will be retried on the
+        // fallback. Async I/O runs on a HIP callback thread, so its last error
+        // never reaches the caller.
+        if (is_fallback_eligible(std::current_exception(), 0)) {
             (void)Context<Hip>::get()->hipGetLastError();
         }
         throw;

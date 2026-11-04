@@ -13,7 +13,7 @@
 ### Fixed
 
 * `hipFileRead()`, `hipFileWrite()`, and the asynchronous and batch I/O APIs now fall back to the compatibility path when the amdgpu kernel driver doesn't support AIS (for example, the inbox Linux driver). Previously, they failed with `ENOTTY` ("Inappropriate ioctl for device"). This requires a ROCr whose libhsakmt reports `ENOTTY` as the AIS status; older versions report an unrelated error code, which hipFile can't distinguish.
-* `hipFileRead()` and `hipFileWrite()` now return `-hipFileHipDriverError` when a HIP runtime call fails. Previously, they returned the negated `hipError_t` (for example, `-999` for `hipErrorUnknown`), which is neither `-1` nor a negated `hipFileOpError_t` as documented. With a HIP runtime that records `hipAmdFileRead()`/`hipAmdFileWrite()` failures as the last HIP error, `hipPeekAtLastError()` returns the underlying `hipError_t`. When such a failure is retried on the compatibility path, `hipFileRead()` and `hipFileWrite()` clear that error, unless a HIP error was already pending before the call.
+* `hipFileRead()` and `hipFileWrite()` now return `-hipFileHipDriverError` when a HIP runtime call fails. Previously, they returned the negated `hipError_t` (for example, `-999` for `hipErrorUnknown`), which is neither `-1` nor a negated `hipFileOpError_t` as documented. With a HIP runtime that records `hipAmdFileRead()`/`hipAmdFileWrite()` failures as the last HIP error, `hipPeekAtLastError()` returns the underlying `hipError_t`. When such a failure is retried on the compatibility path, `hipFileRead()` and `hipFileWrite()` clear the last HIP error.
 
 ### Removed
 
