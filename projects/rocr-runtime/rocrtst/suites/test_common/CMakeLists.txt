@@ -464,6 +464,12 @@ set(ENABLE_COPY_NUMA_MEMBIND_NODESET OFF CACHE BOOL "Enable libnuma membind in N
 include_directories(${ROCRTST_ROOT})
 include_directories(${ROCRTST_ROOT}/gtest/include)
 
+# kfd_ioctl.h bundled with libhsakmt, matching the KFD ABI ROCr is built against
+if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+  include_directories(${ROCRTST_ROOT}/../libhsakmt/include
+                      ${ROCRTST_ROOT}/../libhsakmt/include/hsakmt/linux)
+endif()
+
 # Custom command set for code objects.
 set (HSACO_TARG_LIST "")
 
