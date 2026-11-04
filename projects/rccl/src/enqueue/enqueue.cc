@@ -30,6 +30,7 @@
 #include "api_trace.h"
 #include "rccl_common.h"
 #include "archinfo.h"
+#include "warp_speed_plan.h"
 #include "rccl_float8.h"
 #include "net.h"
 #include "compiler.h"
@@ -361,7 +362,7 @@ static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   plan->kernelArgs->devFlags = (ncclProfilerPluginLoaded() ? RCCL_DEV_FLAG_PROFILER : 0) |
                                (comm->deviceCountersBlock != nullptr ? RCCL_DEV_FLAG_PROGRESS : 0);
 #ifdef ENABLE_WARP_SPEED
-  plan->kernelArgs->warpLevelComm = rcclWarpSpeedSupported(comm, plan);
+  plan->kernelArgs->warpLevelComm = plan->warpSpeedPlan;
 #endif
 
   // Put batches into the kernel arguments. The first batch for each channel
@@ -876,6 +877,11 @@ ncclResult_t ncclAddProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelPlan
 
 RCCL_PARAM(IntraNetThreshold, "INTRANET_THRESHOLD", 8388608);
 
+#ifdef RCCL_TEST_ENQUEUE_HOOKS
+static size_t g_rcclScheduleCollEstimateVisits;
+static bool g_rcclLaunchPrepareStopAfterPlanning;
+#endif
+
 static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan,
                                             struct ncclKernelPlanBudget* budget) {
   struct ncclKernelPlanner* planner = &comm->planner;
@@ -886,11 +892,30 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
   int const nMaxChannels[2 * 2] = {comm->nChannels, comm->nvlsChannels, // [collnet][nvls]
                                    comm->nChannels, std::min(comm->nChannels, comm->nvlsChannels)};
   constexpr size_t MinTrafficPerChannel = 16 << 10;
+  auto accountTask = [&](struct ncclTaskColl* task) {
+    int kind = 2 * task->isCollnet + task->isNvls;
+    trafficBytes[kind] += std::max(MinTrafficPerChannel, task->trafficBytes);
+    // minCTAs/maxCTAs are resolved (env > per-call > comm) at task-append time.
+    // Check the minimum first because a per-call max may be below the comm minimum.
+    task->nMaxChannels = std::max<int>(task->nMaxChannels, task->minCTAs);
+    task->nMaxChannels = std::min<int>(task->nMaxChannels, task->maxCTAs);
+    // nvlsCTAs has no comm default, so apply it only when resolved.
+    if (task->isNvls && task->nvlsCTAs != NCCL_CONFIG_UNDEF_INT)
+      task->nMaxChannels = std::min<int>(task->nMaxChannels, task->nvlsCTAs);
+    nChannels[kind] += task->nMaxChannels;
+    nChannels[kind] = std::min(nChannels[kind], nMaxChannels[kind]);
+  };
+#ifdef ENABLE_WARP_SPEED
+  bool capProven = false;
+#endif
   do {
     size_t workBytes = 0;
     struct ncclTaskColl* task = ncclIntruQueueHead(&planner->collTaskQueue);
     struct ncclWorkList* workNode = ncclIntruQueueHead(&planner->collWorkQueue);
     while (task != nullptr) {
+#ifdef RCCL_TEST_ENQUEUE_HOOKS
+      g_rcclScheduleCollEstimateVisits += 1;
+#endif
       int nBatches = divUp(nPlanColls, 4); // Rough guess: 4 colls per batch.
       if (!ncclTestBudget(budget, nBatches, workBytes + workNode->size)) goto plan_full;
 
@@ -899,34 +924,39 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
       // per-kind channel budget.
       bool taskAggIsolate = task->aggIsolate;
       if (taskAggIsolate && nPlanColls > 0) goto plan_full; // leave it to start a fresh plan
-      // gfx950 + ENABLE_WARP_SPEED: fusing 4 equal 1M-element AllReduces into one
-      // kernel drops rank nRanks-1's contribution on a subset of elements
-      // (GroupCall.Multistream, 8 GPU, delta 1/nRanks). Identical (3 colls) and
-      // 2-coll Multistream pass. Cap at 3 colls per plan.
-      if (nPlanColls >= 3) goto plan_full;
-
       nPlanColls += 1;
       workBytes += workNode->size;
-      int kind = 2 * task->isCollnet + task->isNvls;
-      trafficBytes[kind] += std::max(MinTrafficPerChannel, task->trafficBytes);
-      // minCTAs/maxCTAs are resolved (env > per-call > comm) at task-append time, so they are
-      // applied unconditionally; comm defaults (minCTAs=1, maxCTAs=MAXCHANNELS) are no-ops on the base.
-      // We must check the minCTAs first to avoid the case where task->minCTAs > task->maxCTAs.
-      // For example, comm's min/max CTAs set to [8, 32] and config only set maxCTAs=4.
-      // We would have task->minCTAs=8 and task->maxCTAs=4.
-      task->nMaxChannels = std::max<int>(task->nMaxChannels, task->minCTAs);
-      task->nMaxChannels = std::min<int>(task->nMaxChannels, task->maxCTAs);
-      // nvlsCTAs has no comm default (UNDEF == no cap), so it is applied only when resolved to a value.
-      if (task->isNvls && task->nvlsCTAs != NCCL_CONFIG_UNDEF_INT)
-        task->nMaxChannels = std::min<int>(task->nMaxChannels, task->nvlsCTAs);
-      nChannels[kind] += task->nMaxChannels;
-      nChannels[kind] = std::min(nChannels[kind], nMaxChannels[kind]);
+      accountTask(task);
+#ifdef ENABLE_WARP_SPEED
+      if (nPlanColls == RCCL_WARP_SPEED_MAX_PLAN_COLLS + 1 &&
+          rcclShouldCapGroupedPlan(
+            comm, plan, ncclIntruQueueHead(&planner->collTaskQueue), nPlanColls)) {
+        capProven = true;
+        goto plan_full;
+      }
+#endif
       task = task->next;
       workNode = workNode->next;
       if (taskAggIsolate) goto plan_full; // configured collective is alone in this plan
     }
   plan_full:;
   } while (0);
+
+#ifdef ENABLE_WARP_SPEED
+  // Preserve the three-task limit for WarpSpeed and the historical ordinary signature.
+  if (capProven) {
+    nPlanColls = RCCL_WARP_SPEED_MAX_PLAN_COLLS;
+    for (int kind = 0; kind < 2 * 2; kind++) {
+      trafficBytes[kind] = 0;
+      nChannels[kind] = 0;
+    }
+    struct ncclTaskColl* task = ncclIntruQueueHead(&planner->collTaskQueue);
+    for (int i = 0; i < nPlanColls; i++) {
+      accountTask(task);
+      task = task->next;
+    }
+  }
+#endif
 
   int kindPrev = -1;
   size_t trafficPerChannel = 0;
@@ -941,10 +971,10 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
   int const planCollCount = nPlanColls;
 
 #ifdef ENABLE_WARP_SPEED
-  // The plan queue is populated below, so evaluate the exact budgeted prefix
-  // now with the same plan-wide predicate used at launch.
-  bool warpSpeedPlan = rcclWarpSpeedSupported(
-    comm, plan, ncclIntruQueueHead(&planner->collTaskQueue), planCollCount);
+  // Classify the budgeted prefix once; finishPlan and launch reuse plan->warpSpeedPlan.
+  plan->warpSpeedPlan =
+    rcclWarpSpeedSupported(comm, plan, ncclIntruQueueHead(&planner->collTaskQueue), planCollCount);
+  bool const warpSpeedPlan = plan->warpSpeedPlan;
 #endif
 
   while (nPlanColls != 0 && !ncclIntruQueueEmpty(&planner->collTaskQueue)) {
@@ -2472,6 +2502,14 @@ static ncclResult_t getImplicitOrder(enum ncclImplicitOrder* mode, struct ncclCo
   return ncclSuccess;
 }
 
+static bool ncclPlanCanScheduleP2p(struct ncclKernelPlan* plan) {
+#ifdef ENABLE_WARP_SPEED
+  return !plan->warpSpeedPlan;
+#else
+  return true;
+#endif
+}
+
 ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
   ncclResult_t result = ncclSuccess;
   struct ncclKernelPlanner* planner = &comm->planner;
@@ -2562,8 +2600,11 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
           if (planner->nTasksColl == 0 && planner->nTasksBcast != 0) {
             NCCLCHECKGOTO(ncclScheduleBcastTasksToPlan(comm, plan, &budget), result, failure);
           }
-          // And only drain p2p tasks once colls are depleted.
-          if (planner->nTasksColl == 0 && planner->nTasksBcast == 0 && planner->nTasksP2p != 0) {
+          // And only drain p2p tasks once colls are depleted. WarpSpeed mode
+          // is collective-global while P2P counts are rank-local, so never let
+          // rank-local P2P presence change the collective plan's mode.
+          if (planner->nTasksColl == 0 && planner->nTasksBcast == 0 &&
+              planner->nTasksP2p != 0 && ncclPlanCanScheduleP2p(plan)) {
             NCCLCHECKGOTO(scheduleP2pTasksToPlan(comm, &p2pEpoch, &p2pRound, plan, &budget), result, failure);
           }
         }
@@ -2584,6 +2625,10 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
     planner->unlaunchedPlansHead = planHead;
 
     if (nPlans == 0) return ncclSuccess;
+
+#ifdef RCCL_TEST_ENQUEUE_HOOKS
+    if (g_rcclLaunchPrepareStopAfterPlanning) return ncclSuccess;
+#endif
 
     cudaStream_t launchStream = planner->streams->stream;
     cudaStream_t deviceStream, launchOrder;
@@ -2696,18 +2741,23 @@ ncclResult_t ncclLaunchKernelBefore_NoUncapturedCuda(struct ncclComm* comm, stru
 NCCL_PARAM(MemSyncDomain, "MEM_SYNC_DOMAIN", cudaLaunchMemSyncDomainRemote);
 #endif
 
+static int ncclPlanLaunchChannels(struct ncclComm* comm, struct ncclKernelPlan* plan, int nChannels) {
+#ifdef ENABLE_WARP_SPEED
+  if (plan->warpSpeedPlan) {
+    int const warpsPerBlock = plan->threadPerBlock / comm->WarpSize;
+    return divUp(nChannels, warpsPerBlock);
+  }
+#endif
+  return nChannels;
+}
+
 ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   ncclResult_t ret = ncclSuccess;
   struct ncclKernelPlanner* planner = &comm->planner;
   int nChannels = 0;
   for (int i = 0; i < MAXCHANNELS / CHANNELS_PER_MASK_WORD; i++) nChannels += countOneBits(plan->channelMask.masks[i]);
   void* sym = plan->kernelFn;
-#ifdef ENABLE_WARP_SPEED
-  int warpsPerBlock = plan->threadPerBlock / comm->WarpSize;
-  nChannels = rcclWarpSpeedSupported(comm, plan) ?
-                (nChannels / warpsPerBlock + ((nChannels % warpsPerBlock) != 0 ? 1 : 0)) :
-                nChannels; // each CU can handle warpsPerBlock
-#endif
+  nChannels = ncclPlanLaunchChannels(comm, plan, nChannels);
   dim3 grid = {(unsigned)nChannels, 1, 1};
   dim3 block = {(unsigned)plan->threadPerBlock, 1, 1};
   int smem = plan->isSymColl ? plan->kernelDynSmem : rcclShmemDynamicSize(comm->cudaArch, comm->WarpSize);

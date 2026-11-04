@@ -410,6 +410,9 @@ struct ncclKernelPlan {
   bool isSymColl;
   bool isCeColl;
   bool isRma;
+#ifdef ENABLE_WARP_SPEED
+  bool warpSpeedPlan;
+#endif
   enum ncclDevWorkStorageType workStorageType;
   bool kernelSpecialized;
   int kernelDynSmem; // only for symmetric kernels
