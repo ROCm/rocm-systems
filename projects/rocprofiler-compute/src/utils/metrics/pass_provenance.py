@@ -275,8 +275,8 @@ _SAME_PASS_COUNTERS = frozenset({
     "GRBM_GUI_ACTIVE_sum",
 })
 
-# Both binders write this into a metric that fits no single pass, and both
-# evaluators leave such a cell unset.
+# Both binders write this into a metric that fits no single pass when the
+# profile copied a counter. Both evaluators leave such a cell unset.
 UNSET_EXPRESSION = ""
 
 
@@ -289,8 +289,9 @@ def choose_metric_pass(
     """Pick a pass from the hardware PMC set.
 
     Timestamps do not choose the pass. If no pass holds every required
-    counter, including SQ_WAVES and GRBM_GUI_ACTIVE, return None so the
-    caller leaves the metric unset. The caller prints one summary.
+    counter, including SQ_WAVES and GRBM_GUI_ACTIVE, return None. The caller
+    leaves the metric unset only when the profile copied a counter, and
+    prints one summary either way.
     """
     pmc_required = hardware_counters_for_pass_select(required, gpu_series)
     chosen, _relaxed = select_pass_with_normalization_fallback(
@@ -309,7 +310,7 @@ def choose_metric_pass(
 
 
 def _warn_unbound_metrics(count: int, layout: PassLayout, *, database: bool) -> None:
-    """One summary for every metric this bind left unset."""
+    """One summary for every metric whose counters span passes."""
     if not count:
         return
     scope = "same-pass bind (DB)" if database else "same-pass bind"
@@ -455,7 +456,8 @@ def bind_metric_tables_to_passes(
     Mutates ``dfs`` in place. Evaluation then stores numeric results in those
     same frames, so callers pass the live workload tables. A second bind of a
     still-string formula is idempotent. A row whose PMC set fits no pass is
-    left unset: its counter expressions are cleared, not read across passes.
+    cleared when the profile copied a counter. A profile that copied nothing
+    keeps the merged expressions. Either row is counted in one warning.
 
     Returns the set of pass keys that were selected for at least one row.
     """
@@ -464,7 +466,7 @@ def bind_metric_tables_to_passes(
 
     scoped = pass_scoped_builtins(pass_layout, gpu_series)
     used_passes: Set[str] = set()
-    unbound = 0
+    spanning = 0
 
     for table_id, df in dfs.items():
         if dfs_type.get(table_id) != "metric_table":
@@ -481,13 +483,13 @@ def bind_metric_tables_to_passes(
             )
             for field, value in zip(fields, binding.values):
                 df.at[row_id, field] = value
-            unbound += binding.unset
+            spanning += binding.spans_passes
             if binding.pass_key is not None:
                 used_passes.add(binding.pass_key)
                 row_pass[row_id] = binding.pass_key
         df.attrs[METRIC_ROW_PASS_ATTR] = row_pass
 
-    _warn_unbound_metrics(unbound, pass_layout, database=False)
+    _warn_unbound_metrics(spanning, pass_layout, database=False)
     return used_passes
 
 
@@ -500,7 +502,9 @@ def bind_expression_dataframe(
 
     Expects columns ``metric_id`` and ``value``. Mutates ``value`` in place and
     stores ``metric_id -> pass_key`` on ``expression_df.attrs[METRIC_ROW_PASS_ATTR]``.
-    All value columns for one ``metric_id`` share a single pass.
+    All value columns for one ``metric_id`` share a single pass. A metric
+    whose counters fit no pass is cleared when the profile copied a counter,
+    and kept when it copied nothing.
 
     Returns the set of pass keys selected for at least one metric.
     """
@@ -512,7 +516,7 @@ def bind_expression_dataframe(
     scoped = pass_scoped_builtins(pass_layout, gpu_series)
     used_passes: Set[str] = set()
     metric_pass: Dict[object, str] = {}
-    unbound = 0
+    spanning = 0
 
     for metric_id, group in expression_df.groupby("metric_id", sort=False):
         binding = _bind_metric_values(
@@ -524,13 +528,13 @@ def bind_expression_dataframe(
         )
         for row_index, value in zip(group.index, binding.values):
             expression_df.at[row_index, "value"] = value
-        unbound += binding.unset
+        spanning += binding.spans_passes
         if binding.pass_key is not None:
             used_passes.add(binding.pass_key)
             metric_pass[metric_id] = binding.pass_key
 
     expression_df.attrs[METRIC_ROW_PASS_ATTR] = metric_pass
-    _warn_unbound_metrics(unbound, pass_layout, database=True)
+    _warn_unbound_metrics(spanning, pass_layout, database=True)
     return used_passes
 
 
@@ -598,10 +602,15 @@ def _bind_metric_values(
     gpu_series: str,
     scoped_builtins: FrozenSet[str],
 ) -> "_MetricBinding":
-    """Rewrite one metric's expression values onto the pass it reads from."""
+    """Rewrite one metric's expression values onto the pass it reads from.
+
+    A metric whose counters span passes is cleared when the profile copied a
+    counter. A profile that copied nothing keeps the merged expressions. The
+    third field counts the metric for the one-line warning.
+    """
     expressions = [value for value in values if _is_metric_expression(value)]
-    pass_key, unset = _choose_metric_pass(label, expressions, layout, gpu_series)
-    if unset:
+    pass_key, spans_passes = _choose_metric_pass(label, expressions, layout, gpu_series)
+    if spans_passes and layout.has_duplicates:
         rewritten = [
             UNSET_EXPRESSION
             if _is_metric_expression(value) and _reads_pass_data(value)
@@ -609,8 +618,8 @@ def _bind_metric_values(
             for value in values
         ]
         return _MetricBinding(None, rewritten, True)
-    if pass_key is None:
-        return _MetricBinding(None, list(values), False)
+    if spans_passes or pass_key is None:
+        return _MetricBinding(None, list(values), spans_passes)
     rewritten = [
         bind_expression(value, pass_key, layout, scoped_builtins)
         if _is_metric_expression(value)
@@ -628,8 +637,9 @@ def _choose_metric_pass(
 ) -> Tuple[Optional[str], bool]:
     """Pick the one pass a metric reads its counters from.
 
-    Returns (pass_key, unset). Every pass is its own replay, so a metric
-    that reads hardware counters and fits no single pass is left unset.
+    Returns (pass_key, spans_passes). A metric that reads hardware counters
+    and fits no single pass spans passes. The caller clears it only when the
+    profile copied a counter.
     """
     required = expand_required_counters(extract_row_refs(expressions), gpu_series)
     if not _needs_one_pass(required, gpu_series):
@@ -662,4 +672,4 @@ def _referenced_builtins(
 class _MetricBinding(NamedTuple):
     pass_key: Optional[str]
     values: List[object]
-    unset: bool
+    spans_passes: bool
