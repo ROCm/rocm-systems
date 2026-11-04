@@ -108,6 +108,8 @@ class IbCtrl {
   int lane_count() const { return lm_.num_lanes(); }
   uint32_t local_psn() const { return psn_; }
   const IbDevice &dev() const { return dev_; }
+  /// Inline-data capacity the driver actually granted on the QPs (bytes).
+  uint32_t max_inline_data() const { return max_inline_data_; }
 
  private:
   bool select_gid();
@@ -122,6 +124,7 @@ class IbCtrl {
   std::vector<struct ibv_cq *> cqs_;  //!< one per context
   std::vector<struct ibv_qp *> qps_;  //!< one per lane
   uint32_t psn_{0x1234};
+  uint32_t max_inline_data_{0};  //!< inline bytes granted by the driver
 };
 
 }  // namespace net

@@ -98,7 +98,7 @@ if (USE_GDA)
   )
 endif()
 
-if (USE_VERBS)
+if (USE_HOST_VERBS)
   target_sources(
     ${PROJECT_NAME}
     PRIVATE

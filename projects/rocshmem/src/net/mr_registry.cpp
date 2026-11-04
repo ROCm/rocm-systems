@@ -22,7 +22,9 @@
 
 #include "net/mr_registry.hpp"
 
-#include <cstdio>
+#include <unistd.h>  // close(fd)
+
+#include "log.hpp"
 
 namespace rocshmem {
 namespace net {
@@ -36,14 +38,25 @@ MrRegistry::~MrRegistry() {
   if (!ibv_) {
     return;
   }
+  auto close_dmabuf_fd = [this](struct ibv_mr *mr) {
+    auto it = dmabuf_fds_.find(mr);
+    if (it != dmabuf_fds_.end()) {
+      if (it->second >= 0) {
+        close(it->second);
+      }
+      dmabuf_fds_.erase(it);
+    }
+  };
   for (auto *mr : local_mrs_) {
     if (mr) {
       ibv_->dereg_mr(mr);
+      close_dmabuf_fd(mr);
     }
   }
   local_mrs_.clear();
   if (heap_mr_) {
     ibv_->dereg_mr(heap_mr_);
+    close_dmabuf_fd(heap_mr_);
     heap_mr_ = nullptr;
   }
 }
@@ -58,10 +71,16 @@ struct ibv_mr *MrRegistry::reg_region(Ibv *ibv, struct ibv_pd *pd, void *addr,
       struct ibv_mr *mr = ibv->reg_dmabuf_mr(
           pd, offset, len, reinterpret_cast<uint64_t>(addr), fd, access);
       if (mr) {
+        // Take ownership of the dma-buf fd; it is closed when the MR is
+        // deregistered (see the destructor).
+        dmabuf_fds_[mr] = fd;
         return mr;
       }
-      fprintf(stderr,
-              "[rocSHMEM] verbs: reg_dmabuf_mr failed; trying ibv_reg_mr\n");
+      LOG_WARN("verbs: reg_dmabuf_mr failed; trying ibv_reg_mr");
+      // The fd is unused on the fallback path; close it so it does not leak.
+      if (fd >= 0) {
+        close(fd);
+      }
     }
   }
   return ibv->reg_mr(pd, addr, len, access);
@@ -74,7 +93,7 @@ bool MrRegistry::register_heap(Ibv *ibv, struct ibv_pd *pd, void *base,
   local_base_ = reinterpret_cast<uintptr_t>(base);
   heap_mr_ = reg_region(ibv, pd, base, size, is_device, dmabuf, kHeapAccess);
   if (!heap_mr_) {
-    fprintf(stderr, "[rocSHMEM] verbs: heap MR registration failed\n");
+    LOG_ERROR("verbs: heap MR registration failed");
     return false;
   }
   heap_lkey_ = heap_mr_->lkey;
@@ -109,7 +128,7 @@ uint32_t MrRegistry::register_local(Ibv *ibv, struct ibv_pd *pd, void *addr,
   struct ibv_mr *mr =
       reg_region(ibv, pd, addr, len, is_device, dmabuf, kHeapAccess);
   if (!mr) {
-    fprintf(stderr, "[rocSHMEM] verbs: local buffer MR registration failed\n");
+    LOG_ERROR("verbs: local buffer MR registration failed");
     return 0;
   }
   local_mrs_.push_back(mr);

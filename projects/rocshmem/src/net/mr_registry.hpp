@@ -26,6 +26,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <unordered_map>
 #include <vector>
 
 #include "net/addr_exchange.hpp"
@@ -86,6 +87,9 @@ class MrRegistry {
   Ibv *ibv_{nullptr};
   struct ibv_mr *heap_mr_{nullptr};
   std::vector<struct ibv_mr *> local_mrs_;
+  // dma-buf fds owned by this registry, keyed by the MR they back. Closed when
+  // the MR is deregistered so the fd obtained from DmabufFn does not leak.
+  std::unordered_map<struct ibv_mr *, int> dmabuf_fds_;
   std::vector<RemoteRegion> remote_;
   uintptr_t local_base_{0};
   uint32_t heap_lkey_{0};

@@ -22,8 +22,9 @@
 
 #include "net/ib_ctrl.hpp"
 
-#include <cstdio>
 #include <cstring>
+
+#include "log.hpp"
 
 namespace rocshmem {
 namespace net {
@@ -37,7 +38,7 @@ bool IbCtrl::open(Ibv *ibv, const char *dev_name, uint8_t port_hint) {
   int num = 0;
   struct ibv_device **list = ibv_->get_device_list(&num);
   if (!list || num == 0) {
-    fprintf(stderr, "[rocSHMEM] verbs: no RDMA devices found\n");
+    LOG_ERROR("verbs: no RDMA devices found");
     return false;
   }
 
@@ -66,19 +67,18 @@ bool IbCtrl::open(Ibv *ibv, const char *dev_name, uint8_t port_hint) {
   }
 
   if (!chosen) {
-    fprintf(stderr, "[rocSHMEM] verbs: no device with an ACTIVE port%s%s\n",
-            dev_name ? " matching " : "", dev_name ? dev_name : "");
+    LOG_ERROR("verbs: no device with an ACTIVE port%s%s",
+              dev_name ? " matching " : "", dev_name ? dev_name : "");
     ibv_->free_device_list(list);
     return false;
   }
-  fprintf(stderr, "[rocSHMEM] verbs: using %s port %u (%s)\n",
-          ibv_->get_device_name(chosen), dev_.port,
-          dev_.is_roce ? "RoCE" : "IB");
+  LOG_INFO("verbs: using %s port %u (%s)", ibv_->get_device_name(chosen),
+           dev_.port, dev_.is_roce ? "RoCE" : "IB");
   ibv_->free_device_list(list);
 
   dev_.pd = ibv_->alloc_pd(dev_.ctx);
   if (!dev_.pd) {
-    fprintf(stderr, "[rocSHMEM] verbs: alloc_pd failed\n");
+    LOG_ERROR("verbs: alloc_pd failed");
     return false;
   }
   return select_gid();
@@ -133,8 +133,7 @@ bool IbCtrl::select_gid() {
   // Last resort: index 0.
   dev_.gid_index = 0;
   ibv_->query_gid(dev_.ctx, dev_.port, 0, &dev_.gid);
-  fprintf(stderr,
-          "[rocSHMEM] verbs: GID-table query unavailable; using GID index 0\n");
+  LOG_WARN("verbs: GID-table query unavailable; using GID index 0");
   return true;
 }
 
@@ -147,7 +146,7 @@ bool IbCtrl::create_queues(const LaneMap &lm, int cq_depth,
   for (int ctx = 0; ctx < lm_.num_ctx; ctx++) {
     cqs_[ctx] = ibv_->create_cq(dev_.ctx, cq_depth, nullptr, nullptr, 0);
     if (!cqs_[ctx]) {
-      fprintf(stderr, "[rocSHMEM] verbs: create_cq failed (ctx %d)\n", ctx);
+      LOG_ERROR("verbs: create_cq failed (ctx %d)", ctx);
       return false;
     }
   }
@@ -164,14 +163,21 @@ bool IbCtrl::create_queues(const LaneMap &lm, int cq_depth,
       qa.cap.max_recv_wr = 1;
       qa.cap.max_send_sge = 1;
       qa.cap.max_recv_sge = 1;
-      qa.cap.max_inline_data = 64;
+      // Per-WQE inline capacity is vendor-specific and small (mlx5 ~28B,
+      // bnxt ~16B, ionic ~48B). Request the tightest of these so create_qp
+      // does not fail on stricter drivers; the actual granted value is read
+      // back below. A later data-path PR can query the device cap and raise
+      // this where the hardware allows.
+      qa.cap.max_inline_data = 16;
 
       int lane = lm_.lane(ctx, pe);
       qps_[lane] = ibv_->create_qp(dev_.pd, &qa);
       if (!qps_[lane]) {
-        fprintf(stderr, "[rocSHMEM] verbs: create_qp failed (lane %d)\n", lane);
+        LOG_ERROR("verbs: create_qp failed (lane %d)", lane);
         return false;
       }
+      // Record what the driver actually granted (may be less than requested).
+      max_inline_data_ = qa.cap.max_inline_data;
       if (!to_init(qps_[lane])) {
         return false;
       }
@@ -192,7 +198,7 @@ bool IbCtrl::to_init(struct ibv_qp *qp) {
              IBV_QP_ACCESS_FLAGS;
   int rc = ibv_->modify_qp(qp, &attr, mask);
   if (rc != 0) {
-    fprintf(stderr, "[rocSHMEM] verbs: modify_qp->INIT failed (%d)\n", rc);
+    LOG_ERROR("verbs: modify_qp->INIT failed (%d)", rc);
     return false;
   }
   return true;
@@ -224,7 +230,7 @@ bool IbCtrl::to_rtr(struct ibv_qp *qp, const DestInfo &remote) {
              IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
   int rc = ibv_->modify_qp(qp, &attr, mask);
   if (rc != 0) {
-    fprintf(stderr, "[rocSHMEM] verbs: modify_qp->RTR failed (%d)\n", rc);
+    LOG_ERROR("verbs: modify_qp->RTR failed (%d)", rc);
     return false;
   }
   return true;
@@ -243,7 +249,7 @@ bool IbCtrl::to_rts(struct ibv_qp *qp) {
              IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC;
   int rc = ibv_->modify_qp(qp, &attr, mask);
   if (rc != 0) {
-    fprintf(stderr, "[rocSHMEM] verbs: modify_qp->RTS failed (%d)\n", rc);
+    LOG_ERROR("verbs: modify_qp->RTS failed (%d)", rc);
     return false;
   }
   return true;

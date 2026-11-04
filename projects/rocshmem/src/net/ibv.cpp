@@ -24,7 +24,7 @@
 
 #include <dlfcn.h>
 
-#include <cstdio>
+#include "log.hpp"
 
 namespace rocshmem {
 namespace net {
@@ -35,7 +35,7 @@ template <typename Fn>
 void resolve(void *handle, const char *name, Fn &slot, bool &ok) {
   slot = reinterpret_cast<Fn>(dlsym(handle, name));
   if (!slot) {
-    fprintf(stderr, "[rocSHMEM] verbs conduit: missing symbol '%s'\n", name);
+    LOG_ERROR("verbs conduit: missing symbol '%s'", name);
     ok = false;
   }
 }
@@ -51,9 +51,7 @@ bool Ibv::load() {
     handle_ = dlopen("libibverbs.so", RTLD_NOW | RTLD_GLOBAL);
   }
   if (!handle_) {
-    fprintf(stderr,
-            "[rocSHMEM] verbs conduit: cannot dlopen libibverbs (%s)\n",
-            dlerror());
+    LOG_ERROR("verbs conduit: cannot dlopen libibverbs (%s)", dlerror());
     return false;
   }
 
