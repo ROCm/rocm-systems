@@ -874,43 +874,51 @@ TEST(GpuVmPipeline, ADeclinedFetchFaultIsOfferedOnlyOnce) {
   EXPECT_TRUE(context.wf->is_halted());
 }
 
+// A load from unmapped global memory faults once and does not complete, so it
+// never arrives at its barrier. That holds even when its whole LDS destination
+// lies past the wave's allocation: the global read still happens.
 TEST(GpuVmPipeline, TensorDmaFaultReportsIssueAndResumePcs) {
-  for (const bool rewind : {false, true}) {
-    SCOPED_TRACE(rewind);
-    TranslatedPipelineContext context;
-    ASSERT_NO_FATAL_FAILURE(context.initialize());
-    ASSERT_NE(context.wf, nullptr);
-    constexpr uint64_t kCode = 0x1000, kUnmappedData = 0x20000;
-    const std::array<uint32_t, 3> instruction{0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
-    context.external->store(kCode, instruction);
-    context.wf->pc = kCode;
-    context.wf->set_lds_base(context.cu->allocate_lds(256));
-    context.wf->set_lds_size(256);
-    const uint32_t base = context.wf->sgpr_alloc().base;
-    context.cu->write_sgpr(base, 1);
-    context.cu->write_sgpr(base + 1, 0);
-    context.cu->write_sgpr(base + 2, kUnmappedData);
-    context.cu->write_sgpr(base + 3, 0x80000000u);
-    context.cu->write_sgpr(base + 12, (2u << 16) | (1u << 18));
-    context.cu->write_sgpr(base + 13, (1u << 16) | (64u >> 3));
-    context.cu->write_sgpr(base + 15, 1u << 16);
-    uint32_t faults = 0;
-    context.cu->set_memory_violation_handler(
-        [&](amdgpu::Wavefront &wf, uint64_t, bool, uint64_t issue_pc) {
-          ++faults;
-          EXPECT_EQ(issue_pc, kCode);
-          EXPECT_EQ(wf.pc, kCode + sizeof(instruction));
-          if (rewind)
-            wf.pc = issue_pc;
-          wf.set_fatal_exception_pending(true);
-          wf.set_debug_suspended(true);
-          return true;
-        });
-    context.cu->step();
-    EXPECT_EQ(faults, 1u);
-    EXPECT_TRUE(context.wf->fatal_exception_pending());
-    EXPECT_EQ(context.wf->pc, rewind ? kCode : kCode + sizeof(instruction));
-  }
+  constexpr uint32_t kBarrierLdsAddr = 64;
+  for (const uint32_t lds_offset : {0u, 256u}) // In range, and fully clipped.
+    for (const bool rewind : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "LDS offset " << lds_offset << ", rewind " << rewind);
+      TranslatedPipelineContext context;
+      ASSERT_NO_FATAL_FAILURE(context.initialize());
+      ASSERT_NE(context.wf, nullptr);
+      constexpr uint64_t kCode = 0x1000, kUnmappedData = 0x20000;
+      const std::array<uint32_t, 3> instruction{0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+      context.external->store(kCode, instruction);
+      context.wf->pc = kCode;
+      context.wf->set_lds_base(context.cu->allocate_lds(256));
+      context.wf->set_lds_size(256);
+      const uint64_t unarrived = amdgpu::lds_barrier_cell_init_state(1);
+      context.cu->lds().write64(context.wf->lds_base() + kBarrierLdsAddr, unarrived);
+      const uint32_t base = context.wf->sgpr_alloc().base;
+      context.cu->write_sgpr(base, 1);
+      context.cu->write_sgpr(base + 1, lds_offset);
+      context.cu->write_sgpr(base + 2, kUnmappedData);
+      context.cu->write_sgpr(base + 3, 0x80000000u);
+      context.cu->write_sgpr(base + 12, (2u << 16) | (1u << 18)); // i32, atomic barrier enabled.
+      context.cu->write_sgpr(base + 13, (1u << 16) | (kBarrierLdsAddr >> 3));
+      context.cu->write_sgpr(base + 15, 1u << 16);
+      uint32_t faults = 0;
+      context.cu->set_memory_violation_handler(
+          [&](amdgpu::Wavefront &wf, uint64_t, bool, uint64_t issue_pc) {
+            ++faults;
+            EXPECT_EQ(issue_pc, kCode);
+            EXPECT_EQ(wf.pc, kCode + sizeof(instruction));
+            if (rewind)
+              wf.pc = issue_pc;
+            wf.set_fatal_exception_pending(true);
+            wf.set_debug_suspended(true);
+            return true;
+          });
+      context.cu->step();
+      EXPECT_EQ(faults, 1u);
+      EXPECT_TRUE(context.wf->fatal_exception_pending());
+      EXPECT_EQ(context.wf->pc, rewind ? kCode : kCode + sizeof(instruction));
+      EXPECT_EQ(context.cu->lds().read64(context.wf->lds_base() + kBarrierLdsAddr), unarrived);
+    }
 }
 
 TEST(GpuVmPipeline, DebuggerProbeDoesNotClaimUnavailableTranslation) {
