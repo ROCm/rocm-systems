@@ -532,9 +532,8 @@ flowchart TD
   reviewers to check this.
 
 The same holds across archs: a formula has one id on every arch. An arch reuses the id
-that the first arch to show the quantity gave it (gfx950 keeps gfx942's
-`fabric.hbm_rd`), and the validator rejects a formula with two ids. The exceptions are
-listed in `SPLIT_FORMULA_IDS`.
+that the first arch to show the quantity gave it, and the validator rejects a formula
+with two ids. The exceptions are listed in `SPLIT_FORMULA_IDS`.
 
 | Category | Hardware | File | Example IDs |
 |---|---|---|---|
@@ -568,8 +567,8 @@ panel that shows it:
   `under`, `vs`) stay lowercase.
 - A metric that shows one raw counter is named after the counter (`TCC_BUSY`).
 - A metric shown only by panel 3000 (memory bandwidth analysis) keeps that model's block
-  words (`EA` for the L2-Fabric interface, `L1 Cache` and `TCP` for the vL1D, `TD -`,
-  `Normalized`); its abbreviations are spelled out like any other name.
+  words (`EA` for the L2-Fabric interface, `L1 Cache` and `TCP` for the vL1D); its
+  abbreviations are spelled out like any other name.
 - Names are unique on an arch, ignoring case; the validator rejects two metrics with the
   same name. Two quantities that panels show under one label get names that tell them
   apart (`Wavefront Occupancy`, `Wavefront Occupancy (Percent)`).
