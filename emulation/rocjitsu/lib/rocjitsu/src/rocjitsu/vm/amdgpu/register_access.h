@@ -1662,6 +1662,29 @@ public:
     return VgprWriteRegion(mutable_cu(), physical_base, reg_count, wave_size, lane_mask, byte_mask);
   }
 
+  /// Execute a bulk writer directly on valid wave-owned storage when no register
+  /// observer is installed. Otherwise return nullopt without invoking it.
+  /// Partial wave write masks decline this fast path. The writer must leave storage unchanged
+  /// on error, and retain no pointers. Its integer status is returned unchanged.
+  /// Unlike observed write views, this permits rejection without a write event.
+  template <size_t MaxRegisters, typename Function>
+  [[nodiscard]] std::optional<int> try_bulk_write_vgprs(uint32_t physical_base, uint32_t reg_count,
+                                                        Function &&write) const {
+    if (!mutable_wf_)
+      return std::nullopt;
+    Wavefront &wf = mutable_wavefront();
+    if (cu_->observes_register_access() || reg_count == 0 || reg_count > MaxRegisters ||
+        !cu_->owns_vgpr_range(wf, physical_base, reg_count))
+      return std::nullopt;
+    const uint64_t all_lanes = wf.wf_size() == 32 ? 0xffffffffULL : ~0ULL;
+    if ((wf.vgpr_write_mask() & all_lanes) != all_lanes)
+      return std::nullopt;
+    std::array<uint32_t *, MaxRegisters> pointers{};
+    for (uint32_t reg = 0; reg < reg_count; ++reg)
+      pointers[reg] = reinterpret_cast<uint32_t *>(mutable_cu().raw_vgpr_data(physical_base + reg));
+    return write(pointers.data());
+  }
+
   [[nodiscard]] VgprReadWriteRegion readwrite_vgpr_region(uint32_t physical_base,
                                                           uint32_t reg_count, uint64_t lane_mask,
                                                           uint8_t byte_mask = 0xF) const {
