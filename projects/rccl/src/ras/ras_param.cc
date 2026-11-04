@@ -31,13 +31,17 @@ static float rasLoadTimeoutFactor() {
   errno = 0;
   char* end = nullptr;
   const double value = strtod(str, &end);
-  // A positive finite double can still narrow to 0 or inf as float (e.g. 1e-46, 1e39).
-  const float fvalue = (float)value;
-  if (errno != 0 || end == str || (end != nullptr && *end != '\0') || !std::isfinite(fvalue) || fvalue <= 0.0f) {
+  // The bounds keep every scaled timeout usable: the shortest RAS timeout (1 s) stays at least 1 ms, the
+  // longest (60 s) stays far inside int64 nanoseconds and int milliseconds, and the value fits in a float.
+  constexpr double kMin = 1e-3;
+  constexpr double kMax = 1e6;
+  if (errno != 0 || end == str || (end != nullptr && *end != '\0') || !(value >= kMin && value <= kMax)) {
 #ifndef NCCL_RAS_CLIENT
-    INFO(NCCL_ALL, "Invalid value %s for NCCL_RAS_TIMEOUT_FACTOR, using default %g.", str, kDefault);
+    INFO(NCCL_ALL, "Invalid value %s for NCCL_RAS_TIMEOUT_FACTOR (accepted range [%g, %g]), using default %g.", str,
+         kMin, kMax, kDefault);
 #else
-    fprintf(stderr, "Invalid value %s for NCCL_RAS_TIMEOUT_FACTOR, using default %g.\n", str, kDefault);
+    fprintf(stderr, "Invalid value %s for NCCL_RAS_TIMEOUT_FACTOR (accepted range [%g, %g]), using default %g.\n", str,
+            kMin, kMax, kDefault);
 #endif
     return kDefault;
   }
@@ -45,7 +49,7 @@ static float rasLoadTimeoutFactor() {
 #ifndef NCCL_RAS_CLIENT
   INFO(NCCL_ENV, "NCCL_RAS_TIMEOUT_FACTOR set by environment to %g", value);
 #endif
-  return fvalue;
+  return (float)value;
 }
 
 float ncclParamRasTimeoutFactor(void) {
