@@ -293,7 +293,8 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
     auto processed    = tim::unwind::processed_entry{};
     processed.address = _entry.address();
 #if TIMEMORY_LIBUNWIND_HAS_PROC_NAME_BY_IP == 1
-    processed.name = _entry.template get_name<4096, true>(*_context_p, &processed.offset,
+    constexpr size_t k_name_buffer_size = 4096;
+    processed.name = _entry.template get_name<k_name_buffer_size, true>(*_context_p, &processed.offset,
                                                           &processed.error);
 #else
     // unw_get_proc_name requires a cursor, which an address-only entry does not have
