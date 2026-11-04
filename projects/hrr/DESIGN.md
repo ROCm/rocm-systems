@@ -296,8 +296,7 @@ the check is therefore refused where it is read (the replay ends) rather than us
   before it is used. Files the replay is given on the command line, such as
   `--replace-kernel` objects, are the user's own and are not covered.
 - Hashing every file happens at process exit, so a very large capture delays exit.
-- Encryption is not implemented here. It belongs to the same epic, AIRUNTIME-2856
-  (archive signing and encryption), as a separate piece of work.
+- Encryption is not implemented here; archive encryption is a separate piece of work.
 
 Implementation: `projects/clr/hipamd/src/hrr/hrr_archive_sign.{h,cpp}`, SHA-256
 from `shared/sha256` (embedded as objects), Ed25519 from a vendored, unmodified
