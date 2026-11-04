@@ -1394,8 +1394,8 @@ TEST(RaceDetector, TensorDma_WaitedTransfersWithoutRangesDoNotAccumulate) {
                                                                MemoryOrderClass::TENSOR}};
   constexpr int kTransfers = 4096;
   for (int i = 0; i < kTransfers; ++i) {
-    wave.registerLdsRangeEvent(testInstruction(i), MemoryEventType::LDS_TO_GLOBAL, {},
-                               /*elementBytes=*/4, obligations, MemoryOrderClass::TENSOR);
+    wave.registerLdsRangeEvent(testInstruction(i), MemoryEventType::LDS_TO_GLOBAL, {}, obligations,
+                               MemoryOrderClass::TENSOR);
     PendingWaitCount wait;
     wait.add(amdgpu::WaitCounterType::TENSORCNT, 0);
     wave.dispatch(wait);
