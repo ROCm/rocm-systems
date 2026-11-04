@@ -1806,8 +1806,10 @@ RJ_NOINLINE void exec_f32_mixed_generic(auto &cu, uint32_t M, uint32_t N, uint32
     RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
     float fval = std::bit_cast<float>(r.val);
     if (std::isnan(fval) || std::isinf(fval))
-      has_nan = true;
+    has_nan = true;
   }
+  // The dumps below show staged results only: a register read here would be reported to
+  // execution plugins as an access by the instruction.
   if (has_nan) {
     util::Logger::vm([&](auto &os) {
       os << std::format("MFMA_NAN_DETECTED dst=v{} s0=v{} s1=v{} s2=v{} M={} N={} K={}", dst, s0,
@@ -1815,12 +1817,8 @@ RJ_NOINLINE void exec_f32_mixed_generic(auto &cu, uint32_t M, uint32_t N, uint32
       for (const auto &r : results) {
         float fval = std::bit_cast<float>(r.val);
         if (std::isnan(fval) || std::isinf(fval))
-          os << std::format("\n[rj log VM]   reg={} lane={} val={:#x}({}) "
-                            "a=[{:#x},{:#x}] b=[{:#x},{:#x}]",
-                            r.reg, r.lane, r.val, fval, RegisterAccess(cu).read_vgpr(s0, r.lane),
-                            RegisterAccess(cu).read_vgpr(s0 + 1, r.lane),
-                            RegisterAccess(cu).read_vgpr(s1, r.lane),
-                            RegisterAccess(cu).read_vgpr(s1 + 1, r.lane));
+          os << std::format("\n[rj log VM]   reg={} lane={} val={:#x}({})", r.reg, r.lane, r.val,
+                            fval);
       }
     });
   }
@@ -1830,17 +1828,15 @@ RJ_NOINLINE void exec_f32_mixed_generic(auto &cu, uint32_t M, uint32_t N, uint32
       return;
     os << std::format("MFMA_F32 #{} M={} N={} K={} B={} dst=v{} s0=v{} s1=v{} s2=v{}", mfma_count,
                       M, N, K, B, dst, s0, s1, s2);
+    std::array<uint32_t, 4 * 64> out{};
+    for (const auto &r : results)
+      if (r.reg < 4)
+        out[r.reg * 64 + r.lane] = r.val;
     for (uint32_t ln : {0u, 1u, 4u, 8u, 16u, 31u, 32u, 48u, 63u}) {
-      os << std::format(
-          "\n[rj log VM]   L{}: s0=[{:#x},{:#x},{:#x},{:#x}]"
-          " s1=[{:#x},{:#x},{:#x},{:#x}]"
-          " out=[{:#x},{:#x},{:#x},{:#x}]",
-          ln, RegisterAccess(cu).read_vgpr(s0, ln), RegisterAccess(cu).read_vgpr(s0 + 1, ln),
-          RegisterAccess(cu).read_vgpr(s0 + 2, ln), RegisterAccess(cu).read_vgpr(s0 + 3, ln),
-          RegisterAccess(cu).read_vgpr(s1, ln), RegisterAccess(cu).read_vgpr(s1 + 1, ln),
-          RegisterAccess(cu).read_vgpr(s1 + 2, ln), RegisterAccess(cu).read_vgpr(s1 + 3, ln),
-          RegisterAccess(cu).read_vgpr(dst, ln), RegisterAccess(cu).read_vgpr(dst + 1, ln),
-          RegisterAccess(cu).read_vgpr(dst + 2, ln), RegisterAccess(cu).read_vgpr(dst + 3, ln));
+      if (ln >= wf)
+        break;
+      os << std::format("\n[rj log VM]   L{}: out=[{:#x},{:#x},{:#x},{:#x}]", ln, out[ln],
+                        out[64 + ln], out[128 + ln], out[192 + ln]);
     }
   });
 }
