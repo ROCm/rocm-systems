@@ -31,7 +31,7 @@ _SHMEM_NP = 2
 def shmem_env() -> dict[str, str]:
     """Environment variables for SHMEM tests."""
     return {
-        "ROCPROFSYS_USE_PID": "OFF",
+        "ROCPROFSYS_USE_PID": "ON",
         "ROCPROFSYS_USE_OPENSHMEM": "ON",
         "OMPI_MCA_memheap_base_max_segments": "64",
     }
