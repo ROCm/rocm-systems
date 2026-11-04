@@ -97,9 +97,8 @@ function(copy_image_files_and_make_copies)
         file(COPY ${image_files} DESTINATION ${CMAKE_BINARY_DIR}/images)
         set(NUM_COPIES 20)
 
-        # Loop over each file and make additional copies.
-        # configure_file with COPYONLY treats the destination as a file path,
-        # unlike file(COPY ... DESTINATION dir) which always creates a directory.
+        # Make additional copies of each image so the decode runs longer and the
+        # tests collect enough profiling data.
         foreach(file ${image_files})
             get_filename_component(filename ${file} NAME_WE)
             foreach(i RANGE 1 ${NUM_COPIES})
