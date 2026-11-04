@@ -630,8 +630,8 @@ amdcuid_status_t CuidUtilities::generate_derived_cuid(const amdcuid_primary_id* 
 
   // The derived payload carries 109 hash bits: hash[0:63] at payload 0:63 and
   // hash[64:108] at payload 72:116, the latter being 45 bits, not 46. Payload
-  // bit 117 is the Auxiliary Value Identifier in the derived layout as well as
-  // the primary, so the top bit of the last hash octet has nowhere to go.
+  // bit 117 is the temporary marker, 0 in every DerivedID, so the top bit of the
+  // last hash octet has nowhere to go.
   memcpy(derived_id->hash, hash, 14);
   derived_id->hash[13] &= 0x1F;  // 00011111 - 45th and last hash bit
 
@@ -651,12 +651,6 @@ amdcuid_status_t CuidUtilities::generate_derived_cuid(const amdcuid_primary_id* 
   // 72-116
   memcpy(id_bits + 9, derived_id->hash + 8, 6);
   id_bits[14] &= 0x1F;
-
-  // Bit 117 is meaningful only in a constructed primary. For an adopted
-  // Platform UUID, raw_bits contains opaque firmware bytes.
-  if (is_constructed(&primary_id->UUIDv8_representation)) {
-    id_bits[14] |= (primary_id->raw_bits[14] & 0x20);
-  }
 
   // bits 118-121: reserved bits part 2 (4 bits), placed by the same helper the
   // primary packer uses. Bits 122-127 are padding and stay zero.
@@ -723,6 +717,12 @@ amdcuid_status_t CuidUtilities::generate_primary_cuid(uint64_t serial_number, ui
   add_UUIDv8_bits(id_bits, &primary_id->UUIDv8_representation);
 
   return AMDCUID_STATUS_SUCCESS;
+}
+
+void CuidUtilities::adopt_primary(const uint8_t uuid[16], amdcuid_primary_id* id) {
+  if (!uuid || !id) return;
+  std::memcpy(id->UUIDv8_representation.bytes, uuid, sizeof(id->UUIDv8_representation.bytes));
+  std::memcpy(id->raw_bits, uuid, sizeof(id->raw_bits));
 }
 
 bool CuidUtilities::is_constructed(const amdcuid_id_t* id) {

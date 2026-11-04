@@ -206,13 +206,11 @@ class GpuPaths(unittest.TestCase):
                 "/sys/" + str(net.relative_to(self.sys)),
             )
 
-    def smbios(self):
+    def smbios(self, uuid="12345678-9abc-4def-8123-456789abcdef"):
         """The SMBIOS system UUID, which a Stage 2 Platform and a CPU without
         a PPIN take their PrimaryID from."""
         dmi = self.sys / "devices/virtual/dmi/id"
-        self.write(
-            dmi / "product_uuid", "12345678-9abc-4def-8123-456789abcdef\n", 0o400
-        )
+        self.write(dmi / "product_uuid", uuid + "\n", 0o400)
         self.write(dmi / "board_vendor", "0x1022\n")
         self.link(self.sys / "class/dmi/id", "/sys/devices/virtual/dmi/id")
 
@@ -962,6 +960,15 @@ class GpuPaths(unittest.TestCase):
                 self.run_probe("components", mode, A.hex())
                 self.run_probe("key-info", "PERMISSION_DENIED", nonroot=True)
                 self.run_probe("components", "temporary", nonroot=True)
+
+    def test_adopted_uuidv8_platform_is_keyed_as_firmware_wrote_it(self):
+        """A system UUID that firmware wrote as version 8, with its bit-117
+        position set, is still adopted: keyed from its sixteen octets, and its
+        DerivedID is not temporary."""
+        self.components()
+        self.smbios("12345678-9abc-8def-8123-456789abcdef")
+        self.driver(key=B)
+        self.run_probe("components", "keyed", B.hex())
 
     def test_root_refused_cuid_seed_is_not_a_host_without_a_key(self):
         """amdgpu refuses cuid_seed to root without CAP_SYS_ADMIN."""

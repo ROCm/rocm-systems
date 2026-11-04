@@ -175,10 +175,10 @@ bool components(const std::string& mode, const std::string& key_hex) {
     if (mode != "keyed") continue;
     amdcuid_primary_id primary{};
     if (!query(handle, AMDCUID_QUERY_PRIMARY_CUID, primary.UUIDv8_representation)) return false;
-    if (CuidUtilities::is_constructed(&primary.UUIDv8_representation))
-      CuidUtilities::remove_UUIDv8_bits(&primary.UUIDv8_representation, primary.raw_bits);
+    if (type == AMDCUID_DEVICE_TYPE_PLATFORM)
+      CuidUtilities::adopt_primary(primary.UUIDv8_representation.bytes, &primary);
     else
-      std::memcpy(primary.raw_bits, primary.UUIDv8_representation.bytes, sizeof(primary.raw_bits));
+      CuidUtilities::remove_UUIDv8_bits(&primary.UUIDv8_representation, primary.raw_bits);
     cuid_hmac hmac(reinterpret_cast<const char*>(key.data()), key.size());
     amdcuid_derived_id derived{};
     if (CuidUtilities::generate_derived_cuid(&primary, &derived, &hmac) != AMDCUID_STATUS_SUCCESS ||

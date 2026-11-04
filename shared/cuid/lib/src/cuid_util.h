@@ -134,13 +134,13 @@ amdcuid_status_t generate_primary_cuid(uint64_t serial_number, uint16_t unit_id,
                                        amdcuid_primary_id* primary_id, bool temp = false);
 void remove_UUIDv8_bits(amdcuid_id_t* id, uint8_t out_raw_bits[16]);
 
-// True when `id` was constructed from the 122-bit CUID payload, and so its
-// fields can be decoded; false when it was adopted verbatim from firmware.
-//
-// The Platform CUID is the exception: where firmware supplies a system UUID,
-// that UUID is the identifier, carrying whatever version bits firmware wrote
-// (1, 3 or 4 in practice, never 8). So the version nibble is the discriminator
-// and must be checked before any field is read.
+// A firmware UUID taken as a PrimaryID as it is. Its HMAC message is the
+// sixteen octets firmware wrote, never a de-framed payload, whatever its version
+// nibble: firmware may write a UUIDv8 too.
+void adopt_primary(const uint8_t uuid[16], amdcuid_primary_id* id);
+
+// True when `id` has a UUIDv8 version nibble. An adopted firmware UUID can
+// have one too, so this does not say whether its payload can be decoded.
 bool is_constructed(const amdcuid_id_t* id);
 void add_UUIDv8_bits(const uint8_t raw_bits[16], amdcuid_id_t* id);
 std::string get_cuid_as_string(const amdcuid_id_t* id);
