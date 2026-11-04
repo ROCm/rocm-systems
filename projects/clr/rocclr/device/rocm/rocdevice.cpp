@@ -136,6 +136,7 @@ Device::Device(hsa_agent_t bkendDevice)
       gpuvm_segment_max_alloc_(0),
       alloc_granularity_(0),
       xferQueue_(nullptr),
+      coopQueue_(nullptr),
       freeMem_(0),
       hsa_exclusive_gpu_access_(false),
       numOfVgpus_(0),
@@ -236,6 +237,12 @@ Device::~Device() {
   // so this is a safe no-op in that path.
   WaitForHsaAsyncHandlersIdle();
 
+  QuiesceHwEvents(graph_hw_events_);
+  for (void* hw_event : graph_hw_events_) {
+    DestroyHwEvent(hw_event);
+  }
+  graph_hw_events_.clear();
+
   // Release cached map targets
   for (uint i = 0; mapCache_ != nullptr && i < mapCache_->size(); ++i) {
     if ((*mapCache_)[i] != nullptr) {
@@ -258,8 +265,10 @@ Device::~Device() {
     glb_ctx_ = nullptr;
   }
 
-  // Destroy transfer queue FIRST (before destroying queues in pool)
-  // because its destructor will call releaseQueue()
+  // Destroy internal queues FIRST (before destroying queues in pool)
+  // because their destructors will call releaseQueue()
+  delete coopQueue_;
+  coopQueue_ = nullptr;
   delete xferQueue_;
   xferQueue_ = nullptr;
 
@@ -1278,15 +1287,23 @@ bool Device::populateOCLDeviceConstants() {
       amd::IS_HIP && info_.largeBar_ && (device_signal_pool_.handle != 0) && !tool_attached;
   graph_device_signals_ = DEBUG_CLR_GRAPH_DEV_SIGNALS && device_signals;
   queue_device_signals_ = DEBUG_CLR_DEV_SIGNALS && device_signals;
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT,
-          "Signal pool: %s. Device memory: graph signals %d, queue signals %d, "
-          "AQL rings %d (profiler tool: %d)",
-          signal_pool_name, graph_device_signals_, queue_device_signals_,
-          AqlRingsInDeviceMemory(), tool_attached);
   // Left true by a runtime without the query, since flushing is always correct
   Hsa::agent_get_info(bkendDevice_,
                       static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH),
                       &pcie_stores_need_flush_);
+  // CP firmware without hint support takes a hinted handle as the signal address. Left false by
+  // a runtime without the query. A profiler tool hands packet completion signals to ROCr, which
+  // rejects a hinted handle.
+  if (!tool_attached) {
+    Hsa::agent_get_info(bkendDevice_,
+                        static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED),
+                        &signal_hints_);
+  }
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT,
+          "Signal pool: %s. Device memory: graph signals %d, queue signals %d, "
+          "AQL rings %d. Signal hints %d (profiler tool: %d)",
+          signal_pool_name, graph_device_signals_, queue_device_signals_, AqlRingsInDeviceMemory(),
+          signal_hints_, tool_attached);
 
   for (auto agent : gpu_agents_) {
     if (agent.handle != bkendDevice_.handle) {
@@ -1925,18 +1942,15 @@ bool Device::populateOCLDeviceConstants() {
 }
 
 // ================================================================================================
-device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
+device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue, bool cooperative) {
   std::scoped_lock lock(vgpusAccess());
 
   bool profiling = (queue != nullptr) && queue->properties().test(CL_QUEUE_PROFILING_ENABLE);
-  bool cooperative = false;
   bool dedicated_queue = (queue != nullptr) && queue->isDedicatedQueue() &&
                          (settings().dynamic_queues_ >= 2);
 
   // If amd command queue is null, then it's an internal device queue
   if (queue == nullptr) {
-    // In HIP mode the device queue will be allocated for the cooperative launches only
-    cooperative = amd::IS_HIP && settings().enableCoopGroups_;
     profiling = amd::IS_HIP;
   }
   // Initialization of heap and other resources occur during the command
@@ -1947,6 +1961,10 @@ device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
       new VirtualGPU(*this, profiling, cooperative, q ? queue->cuMask() : defaultCuMask,
                      q ? queue->priority() : amd::CommandQueue::Priority::Normal,
                      dedicated_queue);
+
+  if (!q && !cooperative) {
+    virtualDevice->PinQueue();
+  }
 
   if (!virtualDevice->create()) {
     delete virtualDevice;
@@ -3377,9 +3395,9 @@ VirtualGPU* Device::xferQueue() const {
   Device* thisDevice = const_cast<Device*>(this);
   std::call_once(xferQueueOnce_, [thisDevice]() {
     // Create virtual device for internal memory transfer
-    thisDevice->xferQueue_ = reinterpret_cast<VirtualGPU*>(thisDevice->createVirtualDevice());
+    thisDevice->xferQueue_ =
+        reinterpret_cast<VirtualGPU*>(thisDevice->createVirtualDevice(nullptr, /*cooperative=*/false));
     if (!thisDevice->xferQueue_) {
-      LogError("Couldn't create the device transfer manager!");
       return;
     }
     if (thisDevice->xferQueue_->gpu_queue() == nullptr) {
@@ -3396,6 +3414,29 @@ VirtualGPU* Device::xferQueue() const {
 }
 
 // ================================================================================================
+VirtualGPU* Device::coopQueue() const {
+  Device* thisDevice = const_cast<Device*>(this);
+  std::call_once(coopQueueOnce_, [thisDevice]() {
+    // Create virtual device for cooperative launches
+    thisDevice->coopQueue_ = reinterpret_cast<VirtualGPU*>(
+        thisDevice->createVirtualDevice(nullptr, amd::IS_HIP && thisDevice->settings().enableCoopGroups_));
+    if (!thisDevice->coopQueue_) {
+      return;
+    }
+    if (thisDevice->coopQueue_->gpu_queue() == nullptr) {
+      thisDevice->coopQueue_->SetGpuQueue(
+          thisDevice->AcquireActiveQueue(amd::CommandQueue::Priority::Normal));
+    }
+  });
+  if (!coopQueue_) {
+    LogError("Couldn't create the cooperative queue!");
+    return nullptr;
+  }
+  coopQueue_->enableSyncBlit();
+  return coopQueue_;
+}
+
+// ================================================================================================
 bool Device::SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
                           cl_set_device_clock_mode_output_amd* pSetClockModeOutput) {
   bool result = true;
@@ -3409,7 +3450,15 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy 
   if (hw_event == nullptr) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_SIG, "No HW event");
     return false;
-  } else if (wait) {
+  }
+  auto* signal = reinterpret_cast<ProfilingSignal*>(hw_event);
+  // A signal in device memory loads across the bus, and callers such as WaitActiveStreams check
+  // the same finished command on every launch
+  uint64_t completion = signal->use_completion_.load(std::memory_order_acquire);
+  if ((completion & ProfilingSignal::kUseCompleteBit) != 0) {
+    return true;
+  }
+  if (wait) {
     // hipEventBlockingSync
     // when set the CPU gives up host thread for other work
     // when not set the CPU enters a busy-wait on the event to occur
@@ -3417,14 +3466,19 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy 
     bool active_wait =
         !((policy == amd::SyncPolicy::Blocking) & kHipEventBlockingSync) && ActiveWait();
     bool yield = (policy == amd::SyncPolicy::Yield);
-    const auto* signal = reinterpret_cast<const ProfilingSignal*>(hw_event);
+    // Not cached: after a GPU error the wait gives up and returns true with the use unfinished
     return WaitForSignal(signal->signal_, active_wait, yield, signal->in_device_memory_);
   }
 
-  auto signal = reinterpret_cast<ProfilingSignal*>(hw_event)->signal_;
-  ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Check HW event = 0x%lx", signal.handle);
-
-  return (Hsa::signal_load_relaxed(signal) == 0);
+  ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Check HW event = 0x%lx", signal->signal_.handle);
+  if (Hsa::signal_load_relaxed(signal->signal_) != 0) {
+    return false;
+  }
+  // Fails if a new use started since the load, which must not be marked
+  signal->use_completion_.compare_exchange_strong(
+      completion, completion | ProfilingSignal::kUseCompleteBit, std::memory_order_release,
+      std::memory_order_relaxed);
+  return true;
 }
 
 // ================================================================================================
@@ -4213,7 +4267,7 @@ bool Device::CreateHwEvents(int count, bool batched, std::vector<void*>& hw_even
   }
   hw_events.resize(count);
   for (int event_idx = 0; event_idx < count; ++event_idx) {
-    ProfilingSignal* profiling_signal = new ProfilingSignal();
+    ProfilingSignal* profiling_signal = new ProfilingSignal(SignalHints());
     profiling_signal->signal_ = signals[event_idx];
     profiling_signal->in_device_memory_ = in_device_memory;
     hw_events[event_idx] = profiling_signal;
@@ -4262,6 +4316,38 @@ void Device::DestroyHwEvent(void* hw_event) const {
 }
 
 // ================================================================================================
+bool Device::AcquireHwEvents(int count, std::vector<void*>& hw_events) const {
+  // A batch is one allocation, which the last of its signals frees with an unmap from the GPU, so
+  // batches cover many sets rather than one each
+  constexpr int kHwEventBatch = 256;
+  std::unique_lock lock(graph_hw_events_lock_);
+  // Creation allocates device memory, so other graphs must not wait on the lock meanwhile, and
+  // another thread may take the new signals before this one relocks
+  while (static_cast<int>(graph_hw_events_.size()) < count) {
+    const int num_missing = count - static_cast<int>(graph_hw_events_.size());
+    lock.unlock();
+    std::vector<void*> batch;
+    if (!CreateHwEvents(std::max(num_missing, kHwEventBatch), /*batched=*/true, batch)) {
+      return false;
+    }
+    lock.lock();
+    graph_hw_events_.insert(graph_hw_events_.end(), batch.begin(), batch.end());
+  }
+  hw_events.assign(graph_hw_events_.end() - count, graph_hw_events_.end());
+  graph_hw_events_.resize(graph_hw_events_.size() - count);
+  return true;
+}
+
+// ================================================================================================
+void Device::ReturnHwEvents(std::vector<void*>& hw_events) const {
+  // Kept rather than destroyed: a queue that waited on a signal may hold the last other reference
+  // and release it inside a later launch
+  std::scoped_lock lock(graph_hw_events_lock_);
+  graph_hw_events_.insert(graph_hw_events_.end(), hw_events.begin(), hw_events.end());
+  hw_events.clear();
+}
+
+// ================================================================================================
 void Device::FlushSignalStores(hsa_signal_t last_stored, hsa_signal_value_t value) const {
   if (!pcie_stores_need_flush_) {
     return;
@@ -4294,7 +4380,8 @@ void Device::ResetHwEvents(const std::vector<void*>& hw_events) const {
       } else {
         Hsa::signal_silent_store_relaxed(ps->signal_, 1);
       }
-      ps->flags_.done_ = true;
+      ps->flags_.timing_processed_ = true;
+      ps->StartUse();
       ps->ResetCachedTiming();
     }
   }
@@ -4357,7 +4444,8 @@ uint8_t* Device::CreateBarrierPacket(int num_deps) const {
 
 // ================================================================================================
 void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                 const std::vector<void*>& hw_events) const {
+                                 const std::vector<void*>& hw_events, bool profiled) const {
+  // Starts no use: the set comes new from CreateHwEvents or re-armed by ResetHwEvents, which did
   for (const auto& patch : patches) {
     auto* ps = reinterpret_cast<ProfilingSignal*>(hw_events[patch.hw_event_index]);
     hsa_signal_t sig = ps->signal_;
@@ -4372,12 +4460,14 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
           offsetof(hsa_amd_ext_kernel_dispatch_packet_t, dep_signal);
       memcpy(raw + kExtDepSignalOffset, &sig, sizeof(sig));
     } else if (patch.dep_slot == HwEventPatch::kCompletionSignal) {
+      // Pooled signals rest armed at 1, and only this packet completes them
+      ps->binary_use_ = true;
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
-      pkt->completion_signal = sig;
+      pkt->completion_signal = ps->PacketHandle(profiled);
 
       // Prepare this signal for profiling. The dispatch path assigns this
       // launch's slot only when the actual carrier is a kernel dispatch.
-      ps->flags_.done_ = false;
+      ps->flags_.timing_processed_ = false;
       ps->dispatch_slot_ = ProfilingSignal::kNoDispatchSlot;
     } else {
       // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait).
@@ -4390,7 +4480,7 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
 
 // ================================================================================================
 bool Device::CreateUserEvent(amd::UserEvent* event) const {
-  std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
+  std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal(SignalHints()));
   if ((signal == nullptr) ||
       (HSA_STATUS_SUCCESS != Hsa::signal_create(0, 0, nullptr, &signal->signal_))) {
     return false;

@@ -113,25 +113,31 @@ protected:
       AmdGpuCodeObject object(image.data(), image.size());
       CodeObjectPatcher patcher(object);
       std::vector<uint8_t> text(patcher.text_bytes().begin(), patcher.text_bytes().end());
-      append_nop_padding(
-          text,
-          padding_for_residue(text.size(), input.kernel.entry_text_offset, kKernelEntryAlignment),
-          arch);
+      ASSERT_TRUE(
+          append_nop_padding(text,
+                             padding_for_residue(text.size(), input.kernel.entry_text_offset,
+                                                 kKernelEntryAlignment),
+                             arch)
+              .succeeded());
       const uint64_t bootstrap_offset = text.size();
       std::vector<uint32_t> words = plan->prologue.words;
+      const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+      ASSERT_TRUE(nop.succeeded());
       if (mode == Bootstrap::OmitPayloadLoad) {
-        words[0] = build_s_nop(0, arch);
-        words[1] = build_s_nop(0, arch);
+        words[0] = nop.value();
+        words[1] = nop.value();
       }
       if (mode == Bootstrap::OmitPointerRestore) {
-        words[words.size() - 2] = build_s_nop(0, arch);
-        words[words.size() - 1] = build_s_nop(0, arch);
+        words[words.size() - 2] = nop.value();
+        words[words.size() - 1] = nop.value();
       }
       append_words(text, words);
       const std::optional<int16_t> branch =
           compute_sopp_branch_simm16(text.size(), input.kernel.entry_text_offset);
       ASSERT_TRUE(branch.has_value());
-      const std::array<uint32_t, 1> jump = {build_s_branch(*branch, arch)};
+      const util::FailureOr<uint32_t> branch_word = build_s_branch(*branch, arch);
+      ASSERT_TRUE(branch_word.succeeded());
+      const std::array<uint32_t, 1> jump = {branch_word.value()};
       append_words(text, jump);
       ASSERT_TRUE(patcher.replace_text(text));
       image = std::move(patcher).emit();
