@@ -174,7 +174,8 @@ goamdsmi_status_t go_shim_amdsmiapu_init(goamdsmi_Init_t goamdsmi_Init) {
                  &amdsmi_processor_handle_all_cpu_across_socket[num_cpu_inAllSocket],
                  go_shim_fit_count(&num_cpu, num_cpu_inAllSocket,
                                    GO_SHIM_CAPACITY(amdsmi_processor_handle_all_cpu_across_socket),
-                                   "CPUs")))) {
+                                   "CPUs"))) &&
+            (GOAMDSMI_VALUE_0 != num_cpu)) {
           if ((AMDSMI_STATUS_SUCCESS == amdsmi_get_processor_handles_by_type(
                                             amdsmi_apusocket_handle_all_socket[socket_counter],
                                             cpu_core_processor_type, nullptr,
@@ -209,7 +210,8 @@ goamdsmi_status_t go_shim_amdsmiapu_init(goamdsmi_Init_t goamdsmi_Init) {
                  go_shim_fit_count(
                      &num_gpu_devices, num_gpu_devices_inAllSocket,
                      GO_SHIM_CAPACITY(amdsmi_processor_handle_all_gpu_device_across_socket),
-                     "GPUs")))) {
+                     "GPUs"))) &&
+            (GOAMDSMI_VALUE_0 != num_gpu_devices)) {
           num_gpu_devices_inAllSocket = num_gpu_devices_inAllSocket + num_gpu_devices;
           num_gpuSockets = num_gpuSockets + 1;
         }
