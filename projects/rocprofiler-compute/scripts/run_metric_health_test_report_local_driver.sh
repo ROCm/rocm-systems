@@ -63,6 +63,7 @@ Options:
 
 Env: ARTIFACTS HOST NODE PARTITION GRES PROXY REMOTE_USER REMOTE_PASS REMOTE_ROOT
      HOST_LOGIN WALLTIME ROCR_VISIBLE_DEVICES METRIC_HEALTH_SITES_ENV
+     WAIT_TIMEOUT (seconds --wait polls before failing; default 90000)
 
 Site values (per-arch HOST, PROXY, NODE, roots, ...) come from the environment
 or from scripts/.metric_health_sites.env; see scripts/.metric_health_sites.env.example.
@@ -154,6 +155,12 @@ if [[ -z "$ARCH" ]]; then
 fi
 
 ITERS=${ITERS_ARG:-500}
+# Longer than the 24h slurm walltime, so slurm ends a stuck job first.
+WAIT_TIMEOUT=${WAIT_TIMEOUT:-90000}
+if [[ ! "$WAIT_TIMEOUT" =~ ^[0-9]+$ ]]; then
+  echo "WAIT_TIMEOUT must be a number of seconds: ${WAIT_TIMEOUT}" >&2
+  exit 1
+fi
 RUN=${RUN_ARG:-single-pass}
 BASELINE_RUN=${BASELINE_RUN_ARG:-develop}
 BASELINE=${BASELINE_ARG:-}
@@ -320,9 +327,12 @@ apply_driver_profile() {
     fi
     REMOTE_LOG=${REMOTE_LOG:-${REMOTE_LOG_DIR}/metric_health_${TAG}.log}
     REMOTE_NOHUP=${REMOTE_NOHUP:-${REMOTE_LOG_DIR}/metric_health_${TAG}.nohup}
+    REMOTE_PID_FILE=${REMOTE_NOHUP}.pid
   else
     REMOTE_LOG=${REMOTE_LOG:-${SLURM_REMOTE_HOME}/metric_health_${TAG}.log}
     SBATCH_OUT=${SBATCH_OUT:-${SLURM_REMOTE_HOME}/metric_health_${TAG}.sbatch.out}
+    # --wait finds the job by this name, so it names the tag, not only the arch.
+    HEALTH_JOB_NAME=metric-health-${TAG}
   fi
   if [[ "$REPORT_HOST_KIND" == "node" ]]; then
     REPORT_HOST=$NODE
@@ -332,11 +342,6 @@ apply_driver_profile() {
 }
 
 apply_driver_profile
-
-# Tests source this file to read ROCR_DEFAULT. An executed run falls through.
-if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
-  return 0
-fi
 
 if [[ "$RSYNC_STYLE" == "site" ]]; then
   RSYNC_EXCLUDES=(
@@ -406,15 +411,9 @@ remote_rsync() {
 
 remote_scp() {
   if [[ "$TRANSPORT" == "ssh-pass" ]]; then
-    if [[ -n "${REMOTE_PASS:-}" ]] && command -v sshpass >/dev/null 2>&1; then
-      SSHPASS="${REMOTE_PASS}" scp -o StrictHostKeyChecking=no \
-        -o PreferredAuthentications=password -o PubkeyAuthentication=no \
-        -o ProxyCommand="${PROXY}" "$@"
-    else
-      scp -o StrictHostKeyChecking=no \
-        -o PreferredAuthentications=password -o PubkeyAuthentication=no \
-        -o ProxyCommand="${PROXY}" "$@"
-    fi
+    _with_pass scp -o StrictHostKeyChecking=no \
+      -o PreferredAuthentications=password -o PubkeyAuthentication=no \
+      -o ProxyCommand="${PROXY}" "$@"
     return
   fi
   scp -o BatchMode=yes -o ProxyCommand="$PROXY" "$@"
@@ -470,7 +469,7 @@ launch_ssh() {
   ssh_cmd "chmod +x '${REMOTE_ROOT}/scripts/run_metric_health_test_report.sh' && \
     nohup env ROCR_VISIBLE_DEVICES='${gpu}' HIP_VISIBLE_DEVICES='0' \
       ${remote_command} \
-      >'${REMOTE_NOHUP}' 2>&1 & echo PID=\$!"
+      >'${REMOTE_NOHUP}' 2>&1 & echo \$! >'${REMOTE_PID_FILE}' && echo PID=\$!"
   echo "Remote log: ${REMOTE_LOG}"
   if [[ "$TRANSPORT" == "ssh-pass" ]]; then
     echo "Re-run: REMOTE_PASS=… $(basename "$0") --arch ${ARCH} --tag ${TAG} --wait --fetch --report"
@@ -496,7 +495,7 @@ write_sbatch() {
   remote_command=$(shell_join "${REMOTE_ARGS[@]}")
   cat >"$dest" <<SBATCH
 #!/bin/bash
-#SBATCH -J metric-health-${ARCH}
+#SBATCH -J ${HEALTH_JOB_NAME}
 #SBATCH -p ${PARTITION}
 #SBATCH -w ${NODE}
 #SBATCH --gres=${GRES}
@@ -562,62 +561,85 @@ sync_and_start() {
   esac
 }
 
-wait_ssh() {
-  local poll_re='WORKLOAD_DONE|PROFILE |MEGA_SMOKE|WARN:|DISPATCH_COUNT'
-  if [[ "$TRANSPORT" == "ssh-pass" ]]; then
-    poll_re="${poll_re}|START"
-  fi
-  echo "=== waiting for ALL_DONE in ${REMOTE_LOG} ==="
-  while true; do
-    if ssh_cmd "grep -q 'ALL_DONE' '${REMOTE_LOG}' 2>/dev/null"; then
-      echo "ALL_DONE"
-      ssh_cmd "grep -E 'WORKLOAD_DONE|ALL_DONE|MEGA_SMOKE|WARN:|DISPATCH_COUNT|iters=' '${REMOTE_LOG}' | tail -40" || true
-      return 0
-    fi
-    ssh_cmd "grep -E '${poll_re}' '${REMOTE_LOG}' 2>/dev/null | tail -5" || true
-    sleep "$POLL_SLEEP"
-  done
-}
-
-wait_slurm_home() {
-  echo "=== waiting for ALL_DONE in ${REMOTE_LOG} ==="
-  while true; do
-    if ssh_login "grep -q 'ALL_DONE' '${REMOTE_LOG}' 2>/dev/null"; then
-      echo "ALL_DONE"
-      ssh_login "grep -E 'WORKLOAD_DONE|ALL_DONE|MEGA_SMOKE|WARN:|DISPATCH_COUNT|iters=' '${REMOTE_LOG}' | tail -40" || true
-      return 0
-    fi
-    ssh_login "squeue -u ${LOCAL_USER} -o '%.18i %.9P %.8j %.2t %.10M %N' | head -10; \
-      grep -E 'WORKLOAD_DONE|PROFILE |MEGA_SMOKE|WARN:' '${REMOTE_LOG}' 2>/dev/null | tail -5" || true
-    sleep "$POLL_SLEEP"
-  done
-}
-
-wait_slurm_remote() {
-  echo "=== waiting for ALL_DONE in ${REMOTE_LOG} (node home via srun) ==="
-  while true; do
-    if ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:05:00 -J metric-poll \
-        bash -lc 'grep -q ALL_DONE \"${REMOTE_LOG}\" 2>/dev/null'"; then
-      echo "ALL_DONE"
-      ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:05:00 \
-        bash -lc 'grep -E \"WORKLOAD_DONE|ALL_DONE|MEGA_SMOKE|WARN:|DISPATCH_COUNT|iters=\" \"${REMOTE_LOG}\" | tail -40'" || true
-      return 0
-    fi
-    ssh_login "squeue -u ${LOCAL_USER} -o '%.18i %.9P %.8j %.2t %.10M %N' | head -10" || true
-    sleep "$POLL_SLEEP"
-  done
-}
-
-wait_for_done() {
+# Runs one shell command on the host that holds REMOTE_LOG.
+on_log_host() {
   case "$TRANSPORT" in
-    ssh-pass|ssh-key) wait_ssh ;;
-    slurm-home) wait_slurm_home ;;
-    slurm-remote) wait_slurm_remote ;;
+    ssh-pass|ssh-key) ssh_cmd "$1" ;;
+    slurm-home) ssh_login "$1" ;;
+    slurm-remote)
+      ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:05:00 -J metric-poll \
+        bash -lc $(printf '%q' "$1")"
+      ;;
     *)
       echo "Internal error: TRANSPORT=${TRANSPORT}" >&2
       exit 1
       ;;
   esac
+}
+
+# Prints running, gone, or unknown when the state cannot be read (for example
+# a dropped connection, or a run started before the driver kept a pid file).
+worker_state() {
+  if [[ "$TRANSPORT" == "ssh-pass" || "$TRANSPORT" == "ssh-key" ]]; then
+    ssh_cmd "if [ ! -f '${REMOTE_PID_FILE}' ]; then echo unknown; \
+      elif kill -0 \"\$(cat '${REMOTE_PID_FILE}')\" 2>/dev/null; then echo running; \
+      else echo gone; fi" || echo unknown
+    return 0
+  fi
+  local jobs
+  if ! jobs=$(ssh_login "squeue -h -n '${HEALTH_JOB_NAME}' -o %i && echo SQUEUE_OK"); then
+    echo unknown
+  elif [[ "$jobs" != *SQUEUE_OK* ]]; then
+    echo unknown
+  elif [[ "$jobs" == "SQUEUE_OK" ]]; then
+    echo gone
+  else
+    echo running
+  fi
+}
+
+show_progress() {
+  local poll_re='WORKLOAD_DONE|PROFILE |MEGA_SMOKE|WARN:|DISPATCH_COUNT'
+  case "$TRANSPORT" in
+    ssh-key) ssh_cmd "grep -E '${poll_re}' '${REMOTE_LOG}' 2>/dev/null | tail -5" ;;
+    ssh-pass) ssh_cmd "grep -E '${poll_re}|START' '${REMOTE_LOG}' 2>/dev/null | tail -5" ;;
+    slurm-home)
+      ssh_login "squeue -u ${LOCAL_USER} -o '%.18i %.9P %.8j %.2t %.10M %N' | head -10; \
+        grep -E 'WORKLOAD_DONE|PROFILE |MEGA_SMOKE|WARN:' '${REMOTE_LOG}' 2>/dev/null | tail -5"
+      ;;
+    slurm-remote)
+      ssh_login "squeue -u ${LOCAL_USER} -o '%.18i %.9P %.8j %.2t %.10M %N' | head -10"
+      ;;
+  esac
+}
+
+# Polls until ALL_DONE. Fails when the worker stops without writing it (such
+# as after a build failure) or when WAIT_TIMEOUT seconds pass.
+wait_for_done() {
+  local state deadline
+  deadline=$(($(date +%s) + WAIT_TIMEOUT))
+  echo "=== waiting for ALL_DONE in ${REMOTE_LOG} (timeout ${WAIT_TIMEOUT}s) ==="
+  while true; do
+    # Read the state before the log: a worker already gone at that point
+    # cannot write ALL_DONE later.
+    state=$(worker_state)
+    if on_log_host "grep -q 'ALL_DONE' '${REMOTE_LOG}' 2>/dev/null"; then
+      echo "ALL_DONE"
+      on_log_host "grep -E 'WORKLOAD_DONE|ALL_DONE|MEGA_SMOKE|WARN:|DISPATCH_COUNT|iters=' '${REMOTE_LOG}' | tail -40" || true
+      return 0
+    fi
+    if [[ "$state" == "gone" ]]; then
+      echo "ERROR: health worker for TAG=${TAG} stopped without ALL_DONE in ${REMOTE_LOG}" >&2
+      on_log_host "tail -40 '${REMOTE_LOG}'" >&2 || true
+      return 1
+    fi
+    if (($(date +%s) >= deadline)); then
+      echo "ERROR: no ALL_DONE in ${REMOTE_LOG} after ${WAIT_TIMEOUT}s; set WAIT_TIMEOUT to wait longer" >&2
+      return 1
+    fi
+    show_progress || true
+    sleep "$POLL_SLEEP"
+  done
 }
 
 fetch_ssh() {
@@ -677,12 +699,43 @@ fetch_results() {
   esac
 }
 
+run_meta_value() {
+  local meta=$1 key=$2
+  if [[ -f "$meta" ]]; then
+    grep -E "^${key}=" "$meta" | tail -1 | cut -d= -f2- || true
+  fi
+}
+
+# Both runs can resolve the same rocprof-compute (one TheRock or PATH
+# install), which would label one binary's output as two branches.
+require_distinct_profilers() {
+  local baseline_bin candidate_bin
+  baseline_bin=$(run_meta_value "${BASELINE}/logs/${ARCH}/run_meta.env" ROCPROF_COMPUTE_RESOLVED)
+  candidate_bin=$(run_meta_value "${ARTIFACTS}/logs/${ARCH}/run_meta.env" ROCPROF_COMPUTE_RESOLVED)
+  echo "baseline rocprof-compute: ${baseline_bin:-unknown}"
+  echo "candidate rocprof-compute: ${candidate_bin:-unknown}"
+  if [[ -z "$baseline_bin" || -z "$candidate_bin" ]]; then
+    echo "WARN: run_meta.env has no ROCPROF_COMPUTE_RESOLVED for both runs;" \
+      "cannot check that they used different rocprof-compute builds" >&2
+    return 0
+  fi
+  if [[ "$baseline_bin" == "$candidate_bin" ]]; then
+    echo "ERROR: baseline and candidate both ran ${candidate_bin}." \
+      "Install each checkout's rocprof-compute under its --profiler-root" \
+      "before comparing them." >&2
+    exit 1
+  fi
+}
+
 generate_report() {
   local logs="${ARTIFACTS}/logs/${ARCH}"
   local reports="${ARTIFACTS}/reports"
   if [[ -n "${BASELINE:-}" && ! -d "$BASELINE" ]]; then
     echo "ERROR: baseline artifact directory not found: ${BASELINE}" >&2
     exit 1
+  fi
+  if [[ -n "${BASELINE:-}" ]]; then
+    require_distinct_profilers
   fi
   mkdir -p "$reports"
   local name
@@ -729,13 +782,19 @@ generate_report() {
   echo "Report: ${report_path}"
 }
 
+# Tests source this file to read its settings and call its functions. An
+# executed run falls through.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
+
 if ! "${DO_WAIT}" && ! "${DO_FETCH}" && ! "${DO_REPORT}"; then
   sync_and_start
   exit 0
 fi
 
 if "${DO_WAIT}"; then
-  wait_for_done
+  wait_for_done || exit 1
 fi
 if "${DO_FETCH}"; then
   fetch_results
