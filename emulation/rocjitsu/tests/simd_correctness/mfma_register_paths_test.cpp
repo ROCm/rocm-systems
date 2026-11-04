@@ -11,6 +11,7 @@
 #include <format>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -102,6 +103,40 @@ TEST(MfmaRegisterPathsTest, RoutedShapesFitTheSnapshotPath) {
         << s.m << "x" << s.n << "x" << s.k << "x" << s.batch;
   // 32 result registers exceed the snapshot; this shape keeps the existing path.
   EXPECT_FALSE(amdgpu::mfma_snapshot_shape_fits<int32_t>(32, 32, 4, 2));
+}
+
+// An operand or destination that runs past the end of the wave's VGPR allocation reads zero
+// from, and skips writes to, only the registers outside it.
+TEST(MfmaRegisterPathsTest, OperandsCrossingTheAllocationEndMatchScalar) {
+  SKIP_IF_NO_SIMD();
+  ForceScalarGuard guard;
+  ExactFixture fx(ROCJITSU_CODE_ARCH_CDNA4, WF_SIZE);
+  ASSERT_NE(fx.wf, nullptr);
+  const uint32_t end = fx.cu->vgpr_allocation_block_size();
+  ASSERT_GE(end, 48u);
+  struct Case {
+    const char *name;
+    uint32_t a, b, c, d;
+  };
+  // i8 16x16x64 has four registers in each operand and in the result.
+  for (const Case c :
+       {Case{"A", end - 2, 4, 8, 16}, Case{"B", 0, end - 2, 8, 16},
+        Case{"accumulator", 0, 4, end - 2, 16}, Case{"destination", 0, 4, 8, end - 2}})
+    for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, 5u}) {
+      SCOPED_TRACE(std::format("{} const_acc={}", c.name, const_acc));
+      std::vector<uint32_t> results[2];
+      for (bool force_scalar : {true, false}) {
+        fx.seed_words(0, 24, 81);
+        fx.seed_words(end - 24, 24, 82);
+        util::set_force_scalar_for_testing(force_scalar);
+        amdgpu::exec_i32_i8(*fx.cu, 16, 16, 64, 1, fx.vbase + c.d, fx.vbase + c.a, fx.vbase + c.b,
+                            fx.vbase + c.c, const_acc);
+        results[force_scalar] = fx.snapshot(0, 24);
+        const auto tail = fx.snapshot(end - 24, 24);
+        results[force_scalar].insert(results[force_scalar].end(), tail.begin(), tail.end());
+      }
+      EXPECT_EQ(results[false], results[true]);
+    }
 }
 
 TEST(MfmaRegisterPathsTest, F64MatchesScalarForSeparateAndOverlappingDestinations) {

@@ -1336,10 +1336,11 @@ public:
   std::optional<RegisterAccess::VgprReadRegion> acc;
 };
 
-/// Whole-register copies of an MFMA's A, B and accumulator operands with one observed read per
-/// range. The A and B reads report only the lanes the instruction uses, since a broadcast uses
-/// part of each register. Not valid for operands beyond MfmaOperandWords::kMaxRegs registers, in
-/// which case no register is read.
+/// Whole-register copies of an MFMA's A, B and accumulator operands. Each register is read as
+/// its own region, as the generic path reads it, so a register outside the wave's allocation
+/// reads as zero without affecting the registers that are inside it. The A and B reads report
+/// only the lanes the instruction uses, since a broadcast uses part of each register. Not valid
+/// for operands beyond MfmaOperandWords::kMaxRegs registers, in which case no register is read.
 class MfmaOperandSnapshots {
 public:
   template <typename ComputeUnit>
@@ -1369,10 +1370,11 @@ private:
   static Result capture(RegisterAccess &regs, uint32_t base, uint32_t reg_count, uint64_t lanes,
                         MfmaOperandWords &operand) {
     // The copy holds every lane; the mask only limits what observers are told was read.
-    if (regs.read_vgpr_region(base, reg_count, lanes)
-            .copy_to({operand.words, static_cast<size_t>(reg_count) * 64})
-            .failed())
-      return Result::failure();
+    for (uint32_t reg = 0; reg < reg_count; ++reg)
+      if (regs.read_vgpr_region(base + reg, 1, lanes)
+              .copy_to({operand.words + reg * 64, 64})
+              .failed())
+        return Result::failure();
     operand.base = base;
     operand.reg_count = reg_count;
     return Result::success();
@@ -1397,18 +1399,19 @@ public:
     reg_count_ = std::max(reg_count_, reg + 1);
   }
 
+  /// Writes each register as its own region, as the generic path writes it, so a register
+  /// outside the wave's allocation is skipped without affecting the others.
   void publish(auto &cu, uint32_t dst) const {
-    if (reg_count_ == 0)
-      return;
-    auto writes = RegisterAccess(cu).write_vgpr_region(dst, reg_count_, mfma_full_lane_mask(64));
+    RegisterAccess regs(cu);
     for (uint32_t reg = 0; reg < reg_count_; ++reg) {
+      auto writes = regs.write_vgpr_region(dst + reg, 1, mfma_full_lane_mask(64));
       if (covered_[reg] == ~uint64_t{0}) {
-        writes.set_lanes(reg, std::span<const uint32_t>(words_ + reg * 64, 64));
+        writes.set_lanes(0, std::span<const uint32_t>(words_ + reg * 64, 64));
         continue;
       }
       for (uint32_t lane = 0; lane < 64; ++lane)
         if (covered_[reg] & (uint64_t{1} << lane))
-          writes.set_lane(reg, lane, words_[reg * 64 + lane]);
+          writes.set_lane(0, lane, words_[reg * 64 + lane]);
     }
   }
 
