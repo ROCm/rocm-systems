@@ -229,7 +229,7 @@ class P2pResiliencyScene {
                    }),
       udSupported_(g_ibCastCapUdSupported, [](const struct ncclIbDev* dev) { return dev->udSupported == 1; }),
       multiSend_(g_ibCastMultiSend,
-                 [this](struct ncclIbSendComm* comm, int slot, int nqps, int start, bool wrr, bool write) {
+                 [this](struct ncclIbSendComm* comm, int slot, int nqps, int start, bool wrr, bool write, bool) {
                    std::lock_guard<std::mutex> lock(mu);
                    multiSends.push_back({comm, slot, nqps, start, wrr, write});
                    return ncclSuccess;
@@ -451,7 +451,7 @@ class P2pResiliencyScene {
   ScopedHook<ncclResult_t(struct ncclIbQp*)> qpError_;
   ScopedHook<ncclResult_t(struct ncclIbRecvComm*, struct ncclIbQp*)> postRecvWrs_;
   ScopedHook<bool(const struct ncclIbDev*)> udSupported_;
-  ScopedHook<ncclResult_t(struct ncclIbSendComm*, int, int, int, bool, bool)> multiSend_;
+  ScopedHook<ncclResult_t(struct ncclIbSendComm*, int, int, int, bool, bool, bool)> multiSend_;
   ScopedHook<ncclResult_t(struct ncclIbRecvComm*, struct ncclIbRequest*, int, int)> postFifo_;
   ScopedHook<void(struct ncclIbRequest*, int)> addEvent_;
   ScopedHook<int64_t(const char*, int64_t)> loadParam_;

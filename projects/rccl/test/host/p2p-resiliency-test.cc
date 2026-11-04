@@ -1124,7 +1124,7 @@ TEST_F(P2pResiliencyProbeMicrotest, Progress_ResendFails_ReturnsTheError) {
   FailRequestOnDevice0();
   req_->send.sentData[0] = true;
   ScopedHook multiSend(g_ibCastMultiSend,
-                       [](ncclIbSendComm*, int, int, int, bool, bool) { return ncclSystemError; });
+                       [](ncclIbSendComm*, int, int, int, bool, bool, bool) { return ncclSystemError; });
   P2pResiliencyAdvanceMs(kProbeDelayMs);
   ASSERT_EQ(IbCastResiliencyProgress(res_), ncclSuccess);
   CompleteProbe(1);

@@ -678,7 +678,7 @@ class NetIbCastP2pRetransmitMicrotest : public NetIbCastP2pMicrotest {
     verbs_[0].sends.clear();
     Req(req)->send.sentData[lost] = false;
     ncclResult_t r = ncclInternalError;
-    CaptureLog([&] { r = IbCastMultiSend(send_.get(), 0, nqps, 0, false, false); });
+    CaptureLog([&] { r = IbCastMultiSend(send_.get(), 0, nqps, 0, false, false, false); });
     ASSERT_EQ(r, ncclSuccess);
     ASSERT_EQ(verbs_[0].sends.size(), 1u);
     EXPECT_EQ(verbs_[0].sends[0].qp, &verbs_[0].qps[lost]);
@@ -689,6 +689,23 @@ class NetIbCastP2pRetransmitMicrotest : public NetIbCastP2pMicrotest {
   }
   std::unique_ptr<ncclIbResiliency> res_ = std::make_unique<ncclIbResiliency>();
 };
+
+TEST_F(NetIbCastP2pIsendMicrotest, Isend_Telemetry_ChargesEachNicItsShare) {
+  WireSend(/*nqps=*/2, /*ndevs=*/2);
+  EnableTelemetry();
+  Cts(0, 1, 1, 4096);
+  void* req = nullptr;
+  ASSERT_EQ(Isend(1000, 1, &req), ncclSuccess);
+  // 1000 bytes over two QPs on two NICs: each NIC gets the chunk its QP sent.
+  EXPECT_EQ(rcclTelemetryDevs[0].tx_bytes, 512u);
+  EXPECT_EQ(rcclTelemetryDevs[1].tx_bytes, 488u);
+}
+
+TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_Retransmit_IsNotCountedAgain) {
+  EnableTelemetry();
+  SendThenLose(2, 0, 1000);
+  EXPECT_EQ(rcclTelemetryDevs[0].tx_bytes, 1000u);   // the Isend; the replay adds nothing
+}
 
 TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_Retransmit_ResendsOnlyTheUndeliveredQp) {
   SendThenLose(2, 0, 1000);
@@ -718,7 +735,7 @@ TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_KnownBug_RetransmitAfterTwoSki
 TEST_F(NetIbCastP2pIsendMicrotest, MultiSend_MoreRequestsThanAMultiRecvHolds_IsRejected) {
   WireSend();
   send_->ctsFifo[0][0].nreqs = NCCL_NET_IB_MAX_RECVS + 1;
-  EXPECT_EQ(IbCastMultiSend(send_.get(), 0, 1, 0, false, false), ncclInternalError);
+  EXPECT_EQ(IbCastMultiSend(send_.get(), 0, 1, 0, false, false, false), ncclInternalError);
   EXPECT_TRUE(verbs_[0].sends.empty());
 }
 

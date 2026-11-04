@@ -37,6 +37,7 @@ The RCCL public repository is located within the rocm-systems repo at `<https://
     * :doc:`Troubleshoot RCCL <./how-to/troubleshooting-rccl>`
     * :doc:`RCCL usage tips <./how-to/rccl-usage-tips>`
     * :doc:`RCCL network telemetry <./how-to/network-telemetry>`
+    * :doc:`Fabric or host? Telemetry with the accl profiler <./how-to/fabric-telemetry-profiler>`
 
 
   .. grid-item-card:: Examples

@@ -16,7 +16,7 @@
 #include "p2p_cast.h"
 
 extern std::function<ncclResult_t(struct ncclIbSendComm* /*comm*/, int /*slot*/, int /*nqps*/, int /*startQpIndex*/,
-                                  bool /*wrrSched*/, bool /*useWriteOp*/)>
+                                  bool /*wrrSched*/, bool /*useWriteOp*/, bool /*countTx*/)>
     g_ibCastMultiSend;
 extern std::function<ncclResult_t(struct ncclIbRecvComm* /*comm*/, struct ncclIbRequest* /*req*/, int /*slot*/,
                                   int /*n*/)>

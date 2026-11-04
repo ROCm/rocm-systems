@@ -101,7 +101,7 @@ static inline bool IbCastSkipRecvCompletionCheck(const struct ncclIbNetCommBase*
 }
 
 ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, int startQpIndex, bool wrrSched,
-                             bool useWriteOp) {
+                             bool useWriteOp, bool countTx) {
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
   volatile void* slots = (volatile void*)comm->ctsFifo[slot];
   int nreqs = comm->useCtsOffload ? 1 : ctsFifoNreqs(slots, 0);
@@ -224,6 +224,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     // Hoisted out of the loop below: the WQE-size histogram is per device, so
     // this index is the same for every sub-request posted on this QP.
     const int telDevIdx = comm->base.vProps.devs[devIndex];
+    uint64_t qpBytes = 0;  // charged to this QP's NIC once its WRs are posted
     for (int r = 0; r < nreqs; r++) {
       // Track this event for completion
       // IbCastAddEvent(reqs[r], devIndex);
@@ -248,6 +249,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
         comm->wrs[r].sg_list = NULL;
         comm->wrs[r].num_sge = 0;
         length = 0;
+        rcclTelemetryWqeSize(telDevIdx, 0);
       } else {
         // Select proper lkey
         comm->sges[r].lkey = reqs[r]->send.lkeys[devIndex];
@@ -255,6 +257,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
         comm->wrs[r].sg_list = comm->sges + r;
         comm->wrs[r].num_sge = 1;
         rcclTelemetryWqeSize(telDevIdx, (uint64_t)length);
+        qpBytes += (uint64_t)length;
       }
 
       // wr_id remapping is only used for CAST scheduler RTT timing (BY_INDEX).
@@ -343,6 +346,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     NCCLCHECK(wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr));
 
     rcclTelemetryQpSendPosted(qp->telQpStats, useWriteOp ? 0 : 1);
+    if (countTx) rcclTelemetryBytes(telDevIdx, 1, qpBytes);
 
     // Update the send offset and addresses for the next QP according to the
     // actual data size that was sent on the current QP, for every request
@@ -524,9 +528,11 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
     if (comm->sendReqsCnt[slot] < nreqs) return ncclSuccess;
 
     TIME_START(0);
-    NCCLCHECK(IbCastMultiSend(comm, slot, nqps, startQpIndex, wrrSched, useWriteOp));
-
-    rcclTelemetryBytes(comm->base.vProps.devs[0], 1, (uint64_t)size);
+    // Reached once per multi-send, when sendReqsCnt[slot] == nreqs, so every
+    // reqs[i] is set; fifoHead then moves on. The bytes are charged per QP
+    // inside, to the NIC that QP is on. Resiliency replays call
+    // IbCastMultiSend directly with countTx off and are not counted again.
+    NCCLCHECK(IbCastMultiSend(comm, slot, nqps, startQpIndex, wrrSched, useWriteOp, /*countTx=*/true));
 
     comm->base.fifoHead++;
     TIME_STOP(0);
@@ -933,6 +939,11 @@ static inline ncclResult_t IbCastRequestComplete(struct ncclIbRequest* r, int* d
           r->base, r->id, IbCastReqTypeStr[r->type], r->nreqs);
     int* sizesToReport =
       (r->nreqs > 1 || r->recv.cmplsRecords->sizes[0] > 0) ? r->recv.cmplsRecords->sizes : &(r->recv.aggSize);
+    // A receive on a connection spread over several NICs is charged to its
+    // first NIC: the per-NIC split is not known here. Say so on every NIC of
+    // the connection, so no consumer reads it as that NIC's own traffic.
+    if (rcclTelemetryOn() && r->base->vProps.ndevs > 1)
+      for (int d = 0; d < r->base->vProps.ndevs; d++) rcclTelemetryMarkRxMerged(r->base->vProps.devs[d]);
     for (int i = 0; i < r->nreqs; i++) {
       sizes[i] = sizesToReport[i];
       if (r->devBases[0])
@@ -1101,6 +1112,7 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
       req->events[devIndex]--;
     } else if (wc->opcode == IBV_WC_RDMA_WRITE) {
       TRACE(NCCL_NET, "NET/IB: %s: Got completion for a CTS (devIndex=%d, qp_num=%u)", __func__, devIndex, wc->qp_num);
+      IbCastTelemetryWqeComplete(commBase, wc, devIndex, 0);
       req->events[devIndex]--;
       return ncclSuccess;
     } else {
@@ -1212,6 +1224,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
         NCCLCHECK(IbCastCommBaseGetQpByQpNum(commBase, devIndex, wc->qp_num, &qp, &qpIndex));
         req->recv.cmplsRecords->completions[qpIndex] = 1;
         NCCLCHECK(IbCastPostRecvWorkRequest(qp->qp, &recvComm->ibRecvWorkRequest));
+        rcclTelemetryQpRecvPosted(qp->telQpStats);
       } else {
         // In the prepost path wr_id is UINT64_MAX (sentinel); only decrement rxPosts
         // in the non-prepost path where wr_id is a valid slot index.
@@ -1253,6 +1266,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
              be32toh(wc->imm_data));
         return ncclSuccess;
       }
+      IbCastTelemetryWqeComplete(commBase, wc, devIndex, 0);
     } else {
       WARN("NET/IB: %s: Unknown completion (req=%p, comm=%p, id=%ld, devIndex=%d, req->type=%s, wc.wr_id=0x%lx, "
            "wc.opcode=%s(%d), wc.qp_num=%u, wc.imm_data=0x%x)",

@@ -17,8 +17,10 @@ static_assert(NCCL_IB_FLUSH_REQ_WR_ID_OFFSET <= UINT64_MAX - NET_IB_MAX_REQUESTS
               "wr_id for flush requests must fit in 64 bits since ibv_send_wr::wr_id is 64 bits");
 
 ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* req, int slot, int n);
+// countTx: charge the bytes to telemetry, per NIC. Off for resiliency replays,
+// which resend bytes already counted.
 ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, int startQpIndex, bool wrrSched,
-                             bool useWriteOp);
+                             bool useWriteOp, bool countTx);
 
 static inline ncclResult_t IbCastRecvCommGetQpForCts(struct ncclIbRecvComm* recvComm, uint32_t id, ncclIbQp** qp) {
   // AINIC requires CTS and data to be posted on the same QP.

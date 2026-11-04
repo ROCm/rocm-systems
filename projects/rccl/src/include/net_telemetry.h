@@ -432,6 +432,11 @@ typedef struct __attribute__((aligned(RCCL_TELEMETRY_CACHELINE))) {
    * installed instead of being reported as bogus absolute values. */
   int snap_taken;
 
+  /* Set when a receive on a connection spread over several NICs completed:
+   * its bytes are all charged to the connection's first NIC, so this NIC's
+   * rx_bytes is not its own traffic. Sticky; written relaxed, read at flush. */
+  int rx_bytes_merged;
+
   /* Baselines for hw_counters[]/pfc_*[] — captured on first use of the device,
    * subtracted from the current values at flush so JSON reports deltas. */
   int64_t snap_init_hw_counters[RCCL_TELEMETRY_MAX_HWC];
@@ -474,6 +479,10 @@ extern int             rcclTelemetryNumDevs;
  * Returns the device index (== device_id) or -1 on failure.
  */
 int rcclTelemetryRegisterDevice(int device_id, const char* roce_device, const char* transport);
+
+/* Traffic class and SL a sender data QP on this device sends with, once the
+ * QP is at RTR (the values come from the peer's connection metadata). */
+void rcclTelemetryNoteTrafficClass(int device_id, int tc, int sl);
 
 /* ------------------------------------------------------------------ */
 /* Hot-path telemetry inline functions                                 */
@@ -891,6 +900,14 @@ static inline void rcclTelemetryBytes(int devIdx, int isSend, uint64_t bytes) {
   __atomic_fetch_add(field, bytes, __ATOMIC_RELAXED);
 }
 
+/** Mark a NIC whose rx_bytes is pooled with other NICs of a merged connection. */
+static inline void rcclTelemetryMarkRxMerged(int devIdx) {
+  if (!rcclTelemetryOn() || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
+  /* Load first: storing on every receive would keep dirtying a shared line. */
+  if (!__atomic_load_n(&rcclTelemetryDevs[devIdx].rx_bytes_merged, __ATOMIC_RELAXED))
+    __atomic_store_n(&rcclTelemetryDevs[devIdx].rx_bytes_merged, 1, __ATOMIC_RELAXED);
+}
+
 /**
  * Record a CQ error.
  * Call when ibv_poll_cq returns an error completion.
@@ -1066,6 +1083,15 @@ static inline void rcclTelemetryWqeSize(int devIdx, uint64_t bytes) {
 int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots);
 
 /**
+ * Set up the n QPs of one device on a channel and resolve their handles.
+ * Entries with the same key (e.g. the ibv_qp a QP-sharing secondary borrows)
+ * share one slot, so posts and completions on that QP meet in the same place.
+ * handles[q] is NULL for an untracked entry. Returns the slots granted.
+ */
+int rcclTelemetrySetupQps(int devIdx, int chIdx, const void* const* keys, const int* isDataQp, int n,
+                          RcclQpStats** handles);
+
+/**
  * Mark a device's channel ids as not real NCCL channel ids.
  *
  * Call from a transport that cannot supply a channel id (e.g. mlx5/thor2, where
@@ -1101,6 +1127,59 @@ static inline void rcclTelemetrySetQpRole(int devIdx, int chIdx, int qpIdx, int 
   else
     __atomic_fetch_add(&ch->num_cts_qp, 1, __ATOMIC_RELAXED);
 }
+
+/* ------------------------------------------------------------------ */
+/* Internal to net_telemetry.cc, declared here for the unit test.      */
+/* Transports must not use anything below.                             */
+/* ------------------------------------------------------------------ */
+
+/* Longest `ethtool -S` statistic name we ever ask for. The kernel bounds a
+ * statistic name by ETH_GSTRING_LEN (32), and the per-priority names we format
+ * stay well inside that, so this has room to spare. */
+#define RCCL_TEL_ETHTOOL_KEY_MAX 64
+
+typedef struct {
+  char     key[RCCL_TEL_ETHTOOL_KEY_MAX];
+  int64_t* target;
+} RcclEthtoolWantedEx;
+
+/* First match in `wanted` order wins, so a primary key queued before its
+ * fallback is preferred. */
+void rcclTelemetryEthtoolResolve(const char* names, size_t nameStride, const uint64_t* values, unsigned n,
+                                 RcclEthtoolWantedEx* wanted, int nwanted);
+
+struct dcb_app;
+/* IEEE DCB read of a netdev: 1 read, 0 the driver has no DCB/PFC support,
+ * -1 failed. Fills the PFC-enabled bitmap and up to 256 app-table entries;
+ * *truncated is set if the NIC had more. */
+int rcclTelemetryReadDcb(const char* eth_device, int* pfc_en, struct dcb_app* app, int* napp, int* truncated);
+/* Traffic class / SL recorded for a device, -1 if none; mixed if QPs disagreed. */
+void rcclTelemetryGetTrafficClass(int device_id, int* tc, int* sl, int* mixed);
+
+/* Root of the sysfs/debugfs tree telemetry reads, "/sys" outside tests. */
+extern const char* rcclTelemetrySysRoot;
+
+/* Delta of a HW counter vs. its baseline; -1 if either is unavailable. A
+ * counter that went down is one wrap at wrapBits (e.g. 48 for bnxt_re
+ * rx_bytes), or unknown (-1) when wrapBits is 0 or it cannot be a wrap. */
+int64_t rcclTelemetryCounterDelta(int64_t cur, int64_t init, int wrapBits);
+
+/* Samples that retry a sampled column's primary row before it locks to the
+ * alternate. */
+#define RCCL_TEL_SAMPLE_PRIMARY_TRIES 10
+
+/* Which table row an hw_samples column reads on one device. With both a
+ * primary and an alternate row, the primary is tried on each sample and the
+ * choice locks on its first successful read, else to the alternate after
+ * RCCL_TEL_SAMPLE_PRIMARY_TRIES samples. */
+typedef struct {
+  int nameIdx, altIdx;
+  int locked; /* row in use once settled, -2 while still trying the primary */
+  int tries;
+} RcclTelSampledCol;
+
+void rcclTelemetrySampledColInit(int devIdx, int sampled, RcclTelSampledCol* col);
+int64_t rcclTelemetrySampledColRead(int devIdx, RcclTelSampledCol* col);
 
 #ifdef __cplusplus
 }

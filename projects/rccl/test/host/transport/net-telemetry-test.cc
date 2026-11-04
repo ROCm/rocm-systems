@@ -210,6 +210,7 @@ int FakeIoctl(int, unsigned long request, void* arg) {
     }
   } else if (cmd == ETHTOOL_GSTATS) {
     auto* values = reinterpret_cast<struct ethtool_stats*>(ifr->ifr_data);
+    values->n_stats = static_cast<uint32_t>(stats.size());  // as the kernel does
     for (size_t i = 0; i < stats.size(); i++) values->data[i] = stats[i].second;
   }
   return 0;
@@ -252,6 +253,9 @@ void ResetTelemetryState() {
   free(rcclTelemetrySamples);
   rcclTelemetrySamples = nullptr;
   rcclTelemetryNumSamples = 0;
+  rcclTelemetrySamplesTruncated = 0;
+  std::memset(rcclTelemetryLinkGbps, 0, sizeof(rcclTelemetryLinkGbps));
+  std::memset(rcclTelemetryQos, 0, sizeof(rcclTelemetryQos));
   rcclTelemetrySampleIntervalMs = 0;
   rcclTelemetrySamplerStopFlag = 0;
   rcclTelemetryInitOnceControl = PTHREAD_ONCE_INIT;
@@ -1681,12 +1685,13 @@ TEST_F(NetTelemetryEthtoolMicrotest, CollectEthtoolBatch_TargetAlreadySet_KeepsF
   EXPECT_EQ(a_, 5);
 }
 
-TEST_F(NetTelemetryEthtoolMicrotest, CollectEthtoolBatch_TwoKeysForOneTarget_FirstListedStatWins) {
+TEST_F(NetTelemetryEthtoolMicrotest, CollectEthtoolBatch_TwoKeysForOneTarget_FirstWantedKeyWins) {
   Want(1, "stat_b", &a_);
 
   rcclTelemetryCollectEthtoolBatch("eth0", wanted_, 3);
 
-  EXPECT_EQ(a_, 20);
+  // stat_a is wanted first, so it wins although ethtool lists stat_b first.
+  EXPECT_EQ(a_, 10);
 }
 
 TEST_F(NetTelemetryEthtoolMicrotest, CollectEthtoolBatch_FullWidthStatName_Matches) {
@@ -2133,25 +2138,42 @@ class NetTelemetrySamplerMicrotest : public NetTelemetryMicrotest {
   }
 };
 
-TEST_F(NetTelemetrySamplerMicrotest, SampledTableIdx_ResolvesNameThenAlternate) {
-  EXPECT_EQ(rcclTelemetrySampledTableIdx(&rcclHwConfigAinic, 2), CounterIndex(&rcclHwConfigAinic, "cnp_rcvd"));
-  EXPECT_EQ(rcclTelemetrySampledTableIdx(&rcclHwConfigMlx5, 2), CounterIndex(&rcclHwConfigMlx5, "cnp_handled"));
-  EXPECT_EQ(rcclTelemetrySampledTableIdx(&rcclHwConfigAinic, 7), CounterIndex(&rcclHwConfigAinic, "to_retransmits"));
-  EXPECT_EQ(rcclTelemetrySampledTableIdx(&rcclHwConfigMlx5, 7),
-            CounterIndex(&rcclHwConfigMlx5, "local_ack_timeout_err"));
-  EXPECT_EQ(rcclTelemetrySampledTableIdx(&rcclHwConfigThor2, 7),
-            CounterIndex(&rcclHwConfigThor2, "local_ack_timeout_err"));
-  EXPECT_EQ(rcclTelemetrySampledTableIdx(&rcclHwConfigThor2, 3), -1);
+TEST_F(NetTelemetrySamplerMicrotest, SampledRows_ResolvesNameAndAlternate) {
+  int name = 0, alt = 0;
+  rcclTelemetrySampledRows(&rcclHwConfigAinic, 2, &name, &alt);
+  EXPECT_EQ(name, CounterIndex(&rcclHwConfigAinic, "cnp_rcvd"));
+  EXPECT_EQ(alt, -1);
+  rcclTelemetrySampledRows(&rcclHwConfigMlx5, 2, &name, &alt);
+  EXPECT_EQ(name, -1);
+  EXPECT_EQ(alt, CounterIndex(&rcclHwConfigMlx5, "cnp_handled"));
+  rcclTelemetrySampledRows(&rcclHwConfigAinic, 7, &name, &alt);
+  EXPECT_EQ(name, -1);
+  EXPECT_EQ(alt, CounterIndex(&rcclHwConfigAinic, "to_retransmits"));
+  rcclTelemetrySampledRows(&rcclHwConfigMlx5, 7, &name, &alt);
+  EXPECT_EQ(name, CounterIndex(&rcclHwConfigMlx5, "local_ack_timeout_err"));
+  EXPECT_EQ(alt, -1);
+  // Thor2 has both rows, so the sampler retries the primary before the alternate.
+  rcclTelemetrySampledRows(&rcclHwConfigThor2, 7, &name, &alt);
+  EXPECT_EQ(name, CounterIndex(&rcclHwConfigThor2, "local_ack_timeout_err"));
+  EXPECT_EQ(alt, CounterIndex(&rcclHwConfigThor2, "to_retransmits"));
+  rcclTelemetrySampledRows(&rcclHwConfigThor2, 3, &name, &alt);
+  EXPECT_EQ(name, CounterIndex(&rcclHwConfigThor2, "out_of_buffer"));
+  EXPECT_EQ(alt, -1);
 }
 
-TEST_F(NetTelemetrySamplerMicrotest, SampledTableIdx_AlternateMissingToo_ReturnsMinusOne) {
+TEST_F(NetTelemetrySamplerMicrotest, SampledRows_AlternateMissingToo_ReturnsMinusOne) {
   static const RcclHwCounterDesc counters[] = {HWC("cnp_sent", HWC_IB_SYSFS, "x")};
   RcclHwConfig hw = rcclHwConfigAinic;
   hw.counters = counters;
   hw.num_counters = 1;
+  int name = 0, alt = 0;
 
-  EXPECT_EQ(rcclTelemetrySampledTableIdx(&hw, 2), -1);
-  EXPECT_EQ(rcclTelemetrySampledTableIdx(&hw, 1), 0);
+  rcclTelemetrySampledRows(&hw, 2, &name, &alt);
+  EXPECT_EQ(name, -1);
+  EXPECT_EQ(alt, -1);
+  rcclTelemetrySampledRows(&hw, 1, &name, &alt);
+  EXPECT_EQ(name, 0);
+  EXPECT_EQ(alt, -1);
 }
 
 TEST_F(NetTelemetrySamplerMicrotest, SampleRow_PrimaryMissing_ReadsFallback) {
@@ -2206,6 +2228,8 @@ TEST_F(NetTelemetrySamplerMicrotest, SamplerMain_OneRound_SamplesEachUsableDevic
   ASSERT_EQ(rcclTelemetryRegisterDevice(0, "rdma0", "IB"), 0);
   ASSERT_EQ(rcclTelemetryRegisterDevice(1, "rdma1", "IB"), 1);
   ASSERT_EQ(rcclTelemetryRegisterDevice(2, "rdma2", "IB"), 2);
+  // The sampler reads only devices this process drives: those with a baseline.
+  for (int d = 0; d < 3; d++) rcclTelemetryDevs[d].snap_taken = 1;
   rcclTelemetryBytes(0, 1, 100);
   rcclTelemetryBytes(0, 0, 50);
   SetHwCounter("rdma0", "rx_rdma_ecn_pkts", 7);
@@ -2248,6 +2272,7 @@ TEST_F(NetTelemetrySamplerMicrotest, SamplerMain_BufferFull_StopsSampling) {
   Enable();
   AddNic("rdma0", "eth0", "ionic");
   ASSERT_EQ(rcclTelemetryRegisterDevice(0, "rdma0", "IB"), 0);
+  rcclTelemetryDevs[0].snap_taken = 1;
   rcclTelemetrySamples = static_cast<RcclHwSample*>(::calloc(RCCL_TEL_MAX_SAMPLES, sizeof(RcclHwSample)));
   rcclTelemetryNumSamples = RCCL_TEL_MAX_SAMPLES;
   StopOnSleep();
@@ -2262,6 +2287,7 @@ TEST_F(NetTelemetrySamplerMicrotest, SamplerMain_LastFreeSlot_IsFilled) {
   Enable();
   AddNic("rdma0", "eth0", "ionic");
   ASSERT_EQ(rcclTelemetryRegisterDevice(0, "rdma0", "IB"), 0);
+  rcclTelemetryDevs[0].snap_taken = 1;
   rcclTelemetrySamples = static_cast<RcclHwSample*>(::calloc(RCCL_TEL_MAX_SAMPLES, sizeof(RcclHwSample)));
   rcclTelemetryNumSamples = RCCL_TEL_MAX_SAMPLES - 1;
   StopOnSleep();
@@ -2366,12 +2392,17 @@ TEST_F(NetTelemetryJsonMicrotest, WriteJson_ActiveDevice_WritesFullReport) {
   "start_time": "T",
   "end_time": "T",
   "transport": "IB",
+  "clock": "CLOCK_MONOTONIC",
+  "histogram_bucket_interval_ns": 30000,
+  "histogram_max_buckets": 2,
   "devices": [
     {
       "device_id": 0,
       "roce_device": "rdma0",
       "eth_device": "eth0",
       "hw_type": "unsupported",
+      "link_gbps": 0,
+      "qos": {"dcb": "error", "traffic_class": -1, "sl": -1, "traffic_class_mixed": false},
       "tx_bytes": 100,
       "rx_bytes": 50,
       "num_cq_errors": 1,
@@ -2448,20 +2479,21 @@ TEST_F(NetTelemetryJsonMicrotest, WriteJson_ActiveDevice_WritesFullReport) {
   EXPECT_EQ(json, expected);
 }
 
-TEST_F(NetTelemetryJsonMicrotest, WriteJson_NoDevices_WritesEmptyListAndDefaultTransport) {
+TEST_F(NetTelemetryJsonMicrotest, WriteJson_NoDevices_WritesEmptyListAndTransportNone) {
   Enable();
 
   std::string json = WriteJson();
 
-  EXPECT_NE(json.find("  \"transport\": \"IB-CAST\",\n  \"devices\": [\n  ]\n}\n"), std::string::npos) << json;
+  EXPECT_NE(json.find("  \"transport\": \"none\",\n"), std::string::npos) << json;
+  EXPECT_NE(json.find("  \"devices\": [\n  ]\n}\n"), std::string::npos) << json;
   EXPECT_EQ(json.find("latency_sample_interval"), std::string::npos);
 }
 
-TEST_F(NetTelemetryJsonMicrotest, WriteJson_FirstDeviceWithoutTransport_UsesDefaultTransport) {
+TEST_F(NetTelemetryJsonMicrotest, WriteJson_DeviceWithoutTransport_WritesTransportNone) {
   Enable();
   ASSERT_EQ(rcclTelemetryRegisterDevice(0, "rdma0", nullptr), 0);
 
-  EXPECT_NE(WriteJson().find("\"transport\": \"IB-CAST\""), std::string::npos);
+  EXPECT_NE(WriteJson().find("\"transport\": \"none\""), std::string::npos);
 }
 
 TEST_F(NetTelemetryJsonMicrotest, WriteJson_HostnameUnavailable_WritesUnknown) {
@@ -2620,7 +2652,11 @@ TEST_F(NetTelemetryJsonMicrotest, WriteJson_Samples_AppendsTimeSeries) {
   std::string row = "\"device_id\": 3, \"roce_device\": \"rdma3\", \"tx_bytes\": 10, \"rx_bytes\": 20, "
                     "\"ecn_marked_pkts\": 0, \"cnp_sent\": 1, \"cnp_rcvd\": 2, \"out_of_buffer\": 3, "
                     "\"oos_drop_count\": 4, \"seq_err_naks_rcvd\": 5, \"rnr_retry_err\": 6, "
-                    "\"local_ack_timeout_err\": 7}";
+                    "\"local_ack_timeout_err\": 7, \"nic_tx_bytes\": 0, \"nic_rx_bytes\": 0, "
+                    "\"nic_tx_packets\": 0, \"nic_rx_packets\": 0, "
+                    "\"pfc_rx_pause_us\": [0, 0, 0, 0, 0, 0, 0, 0], \"pfc_tx_pause_us\": [0, 0, 0, 0, 0, 0, 0, 0], "
+                    "\"pfc_rx_frames\": [0, 0, 0, 0, 0, 0, 0, 0], \"pfc_tx_frames\": [0, 0, 0, 0, 0, 0, 0, 0], "
+                    "\"prio_rx_bytes\": [0, 0, 0, 0, 0, 0, 0, 0], \"prio_tx_bytes\": [0, 0, 0, 0, 0, 0, 0, 0]}";
   EXPECT_NE(json.find("  ],\n  \"hw_samples\": [\n    {\"ts_us\": 100, " + row + ",\n    {\"ts_us\": 101, " + row +
                       "\n  ]\n}\n"),
             std::string::npos)
