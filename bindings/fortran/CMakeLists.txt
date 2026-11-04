@@ -11,7 +11,7 @@
 cmake_minimum_required(VERSION 3.19)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    project(hip-fortran LANGUAGES NONE)
+    project(rocm-systems-fortran LANGUAGES NONE)
 endif()
 
 # "${UNIX}": ROCm ships no Fortran compiler on Windows, where the probe would

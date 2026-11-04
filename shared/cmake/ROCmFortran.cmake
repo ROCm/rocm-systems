@@ -23,7 +23,8 @@ if(NOT DEFINED ROCM_HAVE_FORTRAN)
         set(ROCM_ERROR_TOOLCHAIN_VAR OFF)
 
         # Prefer amdflang over a system gfortran found first on PATH; an explicit
-        # CMAKE_Fortran_COMPILER or FC wins. Mirrored in hip/fortran/CMakeLists.txt.
+        # CMAKE_Fortran_COMPILER or FC wins. Mirrored in
+        # bindings/fortran/CMakeLists.txt.
         if(NOT CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
             set(_rocm_fc_hints)
             foreach(

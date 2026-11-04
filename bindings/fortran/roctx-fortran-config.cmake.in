@@ -13,7 +13,7 @@ set(roctx_FORTRAN_FOUND FALSE)
 if(NOT CMAKE_Fortran_COMPILER_LOADED)
   set(roctx-fortran_FOUND FALSE)
   string(CONCAT roctx-fortran_NOT_FOUND_MESSAGE
-      "The rocTX Fortran bindings need Fortran enabled before find_package: "
+      "The ROCTx Fortran bindings need Fortran enabled before find_package: "
       "add Fortran to your project() languages, or call enable_language(Fortran).")
   return()
 endif()
