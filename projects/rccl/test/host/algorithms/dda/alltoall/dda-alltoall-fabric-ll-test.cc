@@ -204,6 +204,19 @@ TEST_F(DdaAlltoallFabricLLMicrotest, Launch_BlocksPerPeerFollowPacketCountCapped
   }
 }
 
+// The whole grid must be co-resident, so blocks per peer are also capped at the comm block budget / nRanks.
+TEST_F(DdaAlltoallFabricLLMicrotest, Launch_BlocksPerPeerCappedByTheCuBudget) {
+  comm().nRanks = 4;
+  const std::pair<int, unsigned> cases[] = {{256, 8}, {20, 5}, {4, 1}, {3, 1}};
+  for (const auto& [budget, bpp] : cases) {
+    comm().ddaFabricMaxBlocks = budget;
+    g_ddaLaunches.clear();
+    ASSERT_EQ(Run(4096), ncclSuccess);
+    ASSERT_EQ(g_ddaLaunches.size(), 1u);
+    EXPECT_EQ(g_ddaLaunches[0].grid.y, bpp) << "budget " << budget;
+  }
+}
+
 TEST_F(DdaAlltoallFabricLLMicrotest, Blocks_SizedOnBytesNotElements) {
   EXPECT_EQ(ncclAllToAllDdaFabricLLBlocks(mock_.get(), 1024, ncclFloat16), 8u);
   EXPECT_EQ(ncclAllToAllDdaFabricLLBlocks(mock_.get(), 1024, ncclFloat32), 16u);

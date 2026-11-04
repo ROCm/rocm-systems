@@ -51,7 +51,11 @@ static inline int ddaLLA2ABlocksPerPeer(size_t perChunkBytes) {
 // per-peer packet split; 256 threads/block.
 static inline std::pair<dim3, dim3> ddaAllToAllFabricLLGeom(ncclComm* comm, size_t perChunkBytes) {
   const unsigned threads = 256;
-  const int blocksPerPeer = ddaLLA2ABlocksPerPeer(perChunkBytes);
+  int blocksPerPeer = ddaLLA2ABlocksPerPeer(perChunkBytes);
+  // A gather block polls a slot written by a peer block of another index, so the whole grid must be
+  // co-resident: cap it at the comm-wide CU budget.
+  const int cap = comm->ddaFabricMaxBlocks / comm->nRanks;
+  if (blocksPerPeer > cap) blocksPerPeer = cap < 1 ? 1 : cap;
   return std::make_pair(dim3((unsigned)comm->nRanks, (unsigned)blocksPerPeer), dim3(threads));
 }
 
