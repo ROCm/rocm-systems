@@ -200,8 +200,9 @@ __host__ void rocshmem_query_thread(int *provided);
  * @brief Bytes of dynamic LDS the TDM (Tensor Data Mover) fast path wants
  * for work-group or wave put/get on gfx1250 -- size the kernel's dynamic
  * LDS and the buffer passed to rocshmem_set_tdm_lds() with this. Reflects
- * ROCSHMEM_TDM_TILE_BYTES, doubled for double buffering (0/unset
- * auto-sizes from this device's available LDS). Wave put/get splits this
+ * ROCSHMEM_TDM_TILE_BYTES, doubled for double buffering (defaults to a
+ * fixed size; explicitly setting ROCSHMEM_TDM_TILE_BYTES=0 auto-sizes
+ * from this device's available LDS instead). Wave put/get splits this
  * buffer across the block's waves, so its effective tile is smaller.
  * Returns 0 if rocSHMEM wasn't built with USE_TDM.
  *
@@ -871,8 +872,9 @@ __device__ void rocshmem_query_thread(int *provided);
  * @brief Bytes of dynamic LDS the TDM (Tensor Data Mover) fast path wants
  * for work-group or wave put/get on gfx1250 -- size the kernel's dynamic
  * LDS and the buffer passed to rocshmem_set_tdm_lds() with this. Reflects
- * ROCSHMEM_TDM_TILE_BYTES, doubled for double buffering (0/unset
- * auto-sizes from this device's available LDS). Wave put/get splits this
+ * ROCSHMEM_TDM_TILE_BYTES, doubled for double buffering (defaults to a
+ * fixed size; explicitly setting ROCSHMEM_TDM_TILE_BYTES=0 auto-sizes
+ * from this device's available LDS instead). Wave put/get splits this
  * buffer across the block's waves, so its effective tile is smaller.
  * Returns 0 if rocSHMEM wasn't built with USE_TDM.
  *
