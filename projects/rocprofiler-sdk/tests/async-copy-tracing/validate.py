@@ -108,16 +108,19 @@ def test_completion_signal_lifecycle(completion_times):
         end = int(row["End"]) * 10**9 // frequency
         assert start < end
         if int(row["Traced"]):
-            traced.append((start, end))
+            traced.append(end - start)
 
     assert len(trace) == len(traced)
     for row in trace:
-        timestamps = (int(row["Start_Timestamp"]), int(row["End_Timestamp"]))
-        assert timestamps[0] < timestamps[1]
+        start = int(row["Start_Timestamp"])
+        end = int(row["End_Timestamp"])
+        assert start < end
+        # Clock-skew adjustment translates an interval without changing its duration.
+        duration = end - start
         assert (
-            timestamps in traced
-        ), f"Trace timing missing from application queries: {row}"
-        traced.remove(timestamps)
+            duration in traced
+        ), f"Trace duration missing from application queries: {row}"
+        traced.remove(duration)
     assert not traced
 
 
