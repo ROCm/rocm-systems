@@ -3496,6 +3496,10 @@ int64_t GpuAgent::WslEpochOffset(uint64_t end) {
 // process runs longer than the lag before its first translated packet, that packet
 // already has end >= t0_, is indistinguishable from a native tick, and the offset
 // is never latched (absolute times then run ~lag early; durations stay exact).
+// These are accepted limitations of this workaround.  The robust fix - reporting a
+// GPUClockCounter in the CP epoch (as PAL does on native Windows) or exposing a
+// contemporaneous CP-clock/calibration pair - belongs in librocdxg/KMD, where the
+// epoch is known, rather than being reconstructed heuristically here.
 int64_t GpuAgent::DetectWslOffsetLocked(uint64_t end) {
   if (gpu_clock_offset_ != 0 || end == 0 || end >= t0_.GPUClockCounter)
     return gpu_clock_offset_;
