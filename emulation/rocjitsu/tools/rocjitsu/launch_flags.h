@@ -51,7 +51,7 @@ public:
   }
   std::string format_value() const override {
     std::string text;
-    for (const auto &value : values_) {
+    for (const std::string &value : values_) {
       if (!text.empty())
         text += ",";
       text += value;
@@ -152,16 +152,14 @@ struct LaunchFlags {
       std::make_shared<rjtools::OptionalUInt32Flag>(ucli::FlagInfo{
           "--cpu-thread-budget",
           {},
-          "Override CPU thread budget for this launch; zero selects automatic sizing. "
-          "Omission preserves JSON and launch overrides do not rewrite the source "
-          "config. Not available with --attach"});
+          "Override CPU thread budget for this launch; zero selects automatic sizing. Not "
+          "available with --attach"});
   std::shared_ptr<WaitCheckingFlag> wait_checking =
       std::make_shared<WaitCheckingFlag>(ucli::FlagInfo{
           "--wait-checking",
           {},
           "Override wait checks: off disables checks, on enables ordinary checks, and all includes "
-          "gfx1250 XCNT. Omission preserves JSON and launch overrides do not rewrite the source "
-          "config. Not available with --attach"});
+          "gfx1250 XCNT checks. Not available with --attach"});
   std::shared_ptr<ucli::BoolFlag> thread_budget_table = std::make_shared<ucli::BoolFlag>(
       ucli::FlagInfo{"--thread-budget-table",
                      {},

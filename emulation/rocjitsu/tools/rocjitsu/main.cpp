@@ -394,8 +394,6 @@ void print_usage(const ucli::Command &command) {
                "/tmp/gpu1.sock\n"
                "\nLaunch overrides apply only to this invocation and do not rewrite the source "
                "config.\n"
-               "--wait-checking=off disables checks, on enables ordinary checks, and all includes "
-               "gfx1250 XCNT checks.\n"
                "VFIO serving requires ROCJITSU_ENABLE_VFIO=ON. VMM guest RAM must be shared, for "
                "example with -object memory-backend-memfd,id=mem,size=<N>,share=on and -machine "
                "memory-backend=mem.\n";

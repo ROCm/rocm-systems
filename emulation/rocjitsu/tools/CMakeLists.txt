@@ -93,7 +93,7 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/test_decode_benchmark_cli.py
             $<TARGET_FILE:rj_decode_benchmark>
         INSTALL_COMMAND
-            ${Python3_EXECUTABLE}
+            python3
             tools/test_decode_benchmark_cli.py
             bin/rj_decode_benchmark
     )
@@ -231,7 +231,7 @@ if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
             $<TARGET_FILE:rj_ip_discovery> $<TARGET_FILE:rj_decode_fuzz>
             $<TARGET_FILE:rocjitsu_bin>
         INSTALL_COMMAND
-            ${Python3_EXECUTABLE}
+            python3
             tools/test_shared_cli_tools.py
             bin/rj_dbt_translate
             \${RJ_INSTALLED_BINDIR}/rj_pretranslate

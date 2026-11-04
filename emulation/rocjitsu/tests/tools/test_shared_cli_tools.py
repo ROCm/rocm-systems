@@ -41,7 +41,8 @@ for tool, failure in (
     assert b"unknown flag" in invoke(tool, "--help", "--unknown", status=failure)
 
 launcher_help = invoke(launcher, "--help")
-assert b"launch overrides do not rewrite the source config" in launcher_help
+assert b"Launch overrides apply only to this invocation" in launcher_help
+assert b"do not rewrite the source config" in launcher_help
 assert b"off disables checks" in launcher_help
 assert b"on enables ordinary checks" in launcher_help
 assert b"all includes gfx1250 XCNT checks" in launcher_help
@@ -77,7 +78,7 @@ assert b"requires a value" in invoke(translate, "--input-revision", status=1)
 assert b"Usage:" in invoke(fuzz, "unexpected-positional", status=2)
 
 with tempfile.TemporaryDirectory(prefix="rj-cli-tools-") as directory:
-    root = Path(directory)
+    root = Path(directory).resolve()
     source = root / "-input.co"
     write_code_object(source)
     assert b"no generation named" in invoke(
@@ -85,6 +86,8 @@ with tempfile.TemporaryDirectory(prefix="rj-cli-tools-") as directory:
     )
     invoke(discovery, "--", "gfx1250", "-discovery.bin", cwd=root)
     assert (root / "-discovery.bin").stat().st_size > 0
+    invoke(discovery, "gfx1250", "--help", cwd=root)
+    assert (root / "--help").stat().st_size > 0
     # The pretranslator should distinguish expected target rejections from I/O failures.
     skipped = invoke(
         pretranslate, f"--store-root={root / 'store'}", "--portable", "--", source

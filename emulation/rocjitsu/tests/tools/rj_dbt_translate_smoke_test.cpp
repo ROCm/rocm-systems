@@ -677,7 +677,7 @@ TEST(RjPretranslate, SharedParserWritesReusesAndForcesTranslationStore) {
   const auto &tool = g_pretranslate_tool;
   ASSERT_TRUE(std::filesystem::exists(tool));
   const rocjitsu::test::ScopedTempDirectory temp_dir("rj_pretranslate_cli_");
-  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path temp_path = std::filesystem::canonical(temp_dir.path());
   const auto input = temp_path / "gfx1250.co";
   const auto output = temp_path / "stdout.txt";
   const auto error = temp_path / "stderr.txt";
