@@ -2337,12 +2337,13 @@ print_banner(std::ostream& _os)
             return _property_info;
         };
 
-    auto _properties =
-        _generate_properties({ { "rev", ROCPROFSYS_GIT_REVISION },
-                               { "tag", ROCPROFSYS_GIT_DESCRIBE },
-                               { "", ROCPROFSYS_LIBRARY_ARCH },
-                               { "compiler", ROCPROFSYS_COMPILER_STRING },
-                               { "rocm", "v" ROCPROFSYS_ROCM_VERSION_STRING } });
+    auto _properties = _generate_properties(
+        { { "rev", ROCPROFSYS_GIT_REVISION },
+          { "tag", ROCPROFSYS_GIT_DESCRIBE },
+          { "", ROCPROFSYS_LIBRARY_ARCH },
+          { "compiler", ROCPROFSYS_COMPILER_STRING },
+          { "rocm", "v" ROCPROFSYS_ROCM_VERSION_STRING },
+          { "profiler-hub", "v" ROCPROFSYS_PROFILER_HUB_VERSION_STRING } });
 
     // <NAME> <VERSION> (<PROPERTIES>)
     if(!_properties.empty())
