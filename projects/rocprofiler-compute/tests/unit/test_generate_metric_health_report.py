@@ -3,16 +3,83 @@
 
 """Unit tests for the two-directory metric health report."""
 
+import shutil
 import sys
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Optional
 
+import pandas as pd
 import pytest
 
 from tools import generate_metric_health_report as report
 
 ARCH = "gfx942"
 METRIC_LINE = "| 2.1.0 | VALU FLOPs | {value} | Gflop |"
+MI300X_WORKLOAD = (
+    Path(__file__).resolve().parents[1] / "workloads" / "path" / "MI300X_A1"
+)
+# MIN(SQ_INSTS / SQ_WAVES): 327680 / 16384 in every dispatch of the fixture.
+INSTS_PER_WAVE_KEY = "7.2.2|Instructions per wavefront"
+INSTS_PER_WAVE = 20.0
+PERCENT_KEY = "2.1.9|CP Busy"
+PERCENT_FORMULAS = {PERCENT_KEY: ("", "Percent", False)}
+
+
+def make_log(values: Dict[str, Optional[float]]) -> report.ParsedLog:
+    """Build a parsed analyze log from metric key -> Median value."""
+    return report.ParsedLog(
+        metrics={
+            key: report.MetricValue(
+                value=value, raw="N/A" if value is None else f"{value:g}"
+            )
+            for key, value in values.items()
+        }
+    )
+
+
+def make_run(root: Path, label: str) -> report.RunArtifacts:
+    return report.RunArtifacts(label=label, artifact_dir=root)
+
+
+def render(data: report.ReportData, tmp_path: Path) -> str:
+    """Render comparison data with fixed run labels."""
+    return report.render_report(
+        data,
+        make_run(tmp_path / "candidate", "this branch"),
+        make_run(tmp_path / "develop", "rocprofiler-compute-develop"),
+        {},
+        "2026-01-01",
+        "host",
+        ARCH,
+        ARCH,
+        None,
+        "Median",
+    )
+
+
+def write_two_pass_workload(dest: Path, numerator_pass: int) -> Path:
+    """Copy the MI300X workload and split SQ_INSTS / SQ_WAVES across two passes.
+
+    SQ_WAVES is collected in both passes. The pass holding SQ_INSTS keeps the
+    real SQ_WAVES; the other pass doubles it, so binding the numerator to the
+    wrong pass's divisor halves the metric.
+    """
+    shutil.copytree(MI300X_WORKLOAD, dest)
+    source = dest / "results_pmc_perf_0.csv.gz"
+    rows = pd.read_csv(source)
+    source.unlink()
+    names = rows["Counter_Name"]
+    waves = rows[names == "SQ_WAVES"]
+    decoy_waves = waves.assign(Counter_Value=waves["Counter_Value"] * 2)
+    numerator_rows = pd.concat([rows[names == "SQ_INSTS"], waves])
+    other_rows = pd.concat([
+        rows[~names.isin(["SQ_INSTS", "SQ_WAVES"])],
+        decoy_waves,
+    ])
+    passes = {numerator_pass: numerator_rows, 1 - numerator_pass: other_rows}
+    for index, frame in passes.items():
+        frame.to_csv(dest / f"results_pmc_perf_{index}.csv.gz", index=False)
+    return dest
 
 
 def write_artifact_dir(root: Path, run: str, value: float) -> Path:
@@ -183,3 +250,94 @@ def test_cdna3_total_note_counts_reported_channels(arch: str) -> None:
     assert "16 channel" not in lowered
     assert "cpx" not in lowered
     assert "cu_per_gpu" not in lowered
+
+
+def test_recompute_medians_on_real_workload() -> None:
+    """Median recompute runs the analyze filters and evaluator end to end."""
+    medians = report.compute_medians_for_workload(MI300X_WORKLOAD, [])
+
+    assert medians[INSTS_PER_WAVE_KEY] == pytest.approx(INSTS_PER_WAVE)
+
+
+@pytest.mark.parametrize("numerator_pass", [0, 1])
+def test_recompute_medians_keep_divisor_on_numerator_pass(
+    tmp_path: Path, numerator_pass: int
+) -> None:
+    """A counter copied across passes is read from the numerator's pass."""
+    workload = write_two_pass_workload(tmp_path / "workload", numerator_pass)
+
+    medians = report.compute_medians_for_workload(workload, [])
+
+    assert medians[INSTS_PER_WAVE_KEY] == pytest.approx(INSTS_PER_WAVE)
+
+
+def test_f64_valu_flops_zero_is_optional_path() -> None:
+    assert report.classify_all_workload_zero("VALU FLOPs (F64)", "") == "zero_optional"
+
+
+def test_valu_flops_zero_is_sdk_bug_suspect() -> None:
+    assert report.classify_all_workload_zero("VALU FLOPs", "") == "zero_sdk_bug"
+
+
+def test_na_candidate_is_not_an_overflow_improvement() -> None:
+    data = report.compute_report(
+        {"vcopy": make_log({PERCENT_KEY: None})},
+        {"vcopy": make_log({PERCENT_KEY: 150.0})},
+        PERCENT_FORMULAS,
+    )
+
+    assert data.improvements == []
+
+
+def test_real_candidate_value_is_an_overflow_improvement() -> None:
+    data = report.compute_report(
+        {"vcopy": make_log({PERCENT_KEY: 80.0})},
+        {"vcopy": make_log({PERCENT_KEY: 150.0})},
+        PERCENT_FORMULAS,
+    )
+
+    assert [(c.workload, c.key) for c in data.improvements] == [("vcopy", PERCENT_KEY)]
+
+
+def test_delta_fraction_counts_unique_metrics(tmp_path: Path) -> None:
+    """One metric changing in three workloads is one changed metric."""
+    workloads = ["vcopy", "nbody", "mega_kernel"]
+    data = report.compute_report(
+        {wl: make_log({"2.1.0|VALU FLOPs": 10.0}) for wl in workloads},
+        {wl: make_log({"2.1.0|VALU FLOPs": 5.0}) for wl in workloads},
+        {},
+    )
+
+    page = render(data, tmp_path)
+
+    assert len(data.deltas) == 3
+    assert "3 rows, 1 of 1 metrics (100.0%)" in page
+    assert "300.0%" not in page
+
+
+def test_baseline_only_metric_is_reported_missing(tmp_path: Path) -> None:
+    lost_key = "2.1.1|VALU IOPs"
+    data = report.compute_report(
+        {"vcopy": make_log({"2.1.0|VALU FLOPs": 5.0})},
+        {"vcopy": make_log({"2.1.0|VALU FLOPs": 5.0, lost_key: 3.0})},
+        {},
+    )
+
+    page = render(data, tmp_path)
+
+    assert [(c.workload, c.key, c.new) for c in data.missing] == [
+        ("vcopy", lost_key, None)
+    ]
+    assert data.all_keys == ["2.1.0|VALU FLOPs"]
+    assert "Missing from this branch vs rocprofiler-compute-develop" in page
+    assert "VALU IOPs" in page
+
+
+def test_compute_report_without_baseline_has_no_comparison() -> None:
+    data = report.compute_report(
+        {"vcopy": make_log({"2.1.0|VALU FLOPs": 5.0})}, None, {}
+    )
+
+    assert data.summary["vcopy"]["total"] == 1
+    assert data.summary["vcopy"]["good"] == 1
+    assert (data.improvements, data.deltas, data.missing) == ([], [], [])

@@ -11,12 +11,18 @@
 
 #include "hip/hip_runtime.h"
 
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
 
 constexpr int kBlockSize = 128;
 constexpr float kSoftening = 1e-9f;
+// Position and velocity, x/y/z each.
+constexpr int kCoordinatesPerBody = 6;
+// The kernel indexes bodies with int, so every coordinate offset must fit.
+constexpr long kMaxBodyCount = INT_MAX / kCoordinatesPerBody;
 
 namespace {
 
@@ -32,10 +38,23 @@ double elapsed_ms() {
   return elapsed.tv_sec * 1000.0 + elapsed.tv_usec / 1000.0;
 }
 
-void fill_random(float* values, int count) {
-  for (int index = 0; index < count; ++index) {
+void fill_random(float* values, size_t count) {
+  for (size_t index = 0; index < count; ++index) {
     values[index] = 2.0f * (rand() / static_cast<float>(RAND_MAX)) - 1.0f;
   }
+}
+
+// Values below 1 become 1.
+int parse_count(const char* text, const char* name, long max_value) {
+  char* end = nullptr;
+  errno = 0;
+  long value = strtol(text, &end, 10);
+  if (errno != 0 || end == text || *end != '\0' || value > max_value) {
+    fprintf(stderr, "%s must be an integer no larger than %ld: %s\n", name,
+            max_value, text);
+    exit(EXIT_FAILURE);
+  }
+  return value < 1 ? 1 : static_cast<int>(value);
 }
 
 #define HIP_CHECK(call)                                                        \
@@ -103,20 +122,15 @@ int main(int argc, char** argv) {
   int body_count = 81920;
   int iteration_count = 10;
   if (argc > 1) {
-    body_count = atoi(argv[1]);
+    body_count = parse_count(argv[1], "bodies", kMaxBodyCount);
   }
   if (argc > 2) {
-    iteration_count = atoi(argv[2]);
-  }
-  if (body_count < 1) {
-    body_count = 1;
-  }
-  if (iteration_count < 1) {
-    iteration_count = 1;
+    iteration_count = parse_count(argv[2], "iterations", INT_MAX);
   }
 
   const float step = 0.01f;
-  const int coordinate_count = body_count * 6;
+  const size_t bodies = static_cast<size_t>(body_count);
+  const size_t coordinate_count = bodies * kCoordinatesPerBody;
   float* host_state = nullptr;
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&host_state),
                           coordinate_count * sizeof(float)));
@@ -146,12 +160,10 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(host_state, device_state,
                         coordinate_count * sizeof(float),
                         hipMemcpyDeviceToHost));
-    for (int body = 0; body < body_count; ++body) {
-      host_state[body] += host_state[body + 3 * body_count] * step;
-      host_state[body + body_count] +=
-          host_state[body + 4 * body_count] * step;
-      host_state[body + 2 * body_count] +=
-          host_state[body + 5 * body_count] * step;
+    for (size_t body = 0; body < bodies; ++body) {
+      host_state[body] += host_state[body + 3 * bodies] * step;
+      host_state[body + bodies] += host_state[body + 4 * bodies] * step;
+      host_state[body + 2 * bodies] += host_state[body + 5 * bodies] * step;
     }
     double seconds = elapsed_ms() / 1000.0;
     if (iteration > 1) {

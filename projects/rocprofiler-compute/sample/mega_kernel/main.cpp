@@ -691,10 +691,9 @@ main(int argc, char** argv)
         h_results.vmem_tex_store_passed = -1;
     }
 
-    // Verify memory operations output. Under ROCPROF_COUNTER_COLLECTION the
-    // host-side full-buffer check is unreliable on gfx90a (stale values such as
-    // output[512]==199 while ISA path tests still PASS). Soft-bypass so the
-    // sample remains usable as a rocprof-compute health workload.
+    // Verify memory operations output. Only the gfx90a counter-collection
+    // artifact (stale values such as output[512]==199 while ISA path tests
+    // still PASS) is soft-bypassed; every other mismatch is a failure.
     bool memory_verified = true;
     for(int i = 0; i < BUFFER_SIZE && memory_verified; i++)
     {
@@ -707,10 +706,11 @@ main(int argc, char** argv)
         }
     }
     int memory_verify_result = memory_verified ? 1 : 0;
-    if(!memory_verified && std::getenv("ROCPROF_COUNTER_COLLECTION") != nullptr)
+    if(!memory_verified && mega_kernel_host::memory_verify_failure_is_counter_artifact(
+                               g_arch_name, std::getenv("ROCPROF_COUNTER_COLLECTION")))
     {
-        printf("WARN: host memory verify soft-bypassed under ROCPROF_COUNTER_COLLECTION "
-               "(ISA path tests still counted)\n");
+        printf("WARN: host memory verify soft-bypassed on gfx90a under "
+               "ROCPROF_COUNTER_COLLECTION=1 (ISA path tests still counted)\n");
         memory_verify_result = -1;
     }
 

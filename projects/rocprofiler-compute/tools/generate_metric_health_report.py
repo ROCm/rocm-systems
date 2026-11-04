@@ -173,6 +173,15 @@ ZERO_BUCKET_CARD_STYLES: Dict[str, Tuple[str, str]] = {
     "zero_other": ("#f5f5f5", "#616161"),
 }
 
+OVERFLOW_CLASSES = frozenset({"overflow", "formula_overflow"})
+
+WORKLOAD_DESCRIPTIONS: Dict[str, str] = {
+    "mega_kernel": "All-ops (RDNA35 mega kernel)",
+    "vcopy": "Memory-bound",
+    "nbody": "Compute-bound",
+    "wmma_gemm": "WMMA",
+}
+
 
 @dataclass
 class MetricDef:
@@ -213,6 +222,35 @@ class RunArtifacts:
     workload_dirs: Dict[str, Path] = field(default_factory=dict)
 
 
+@dataclass
+class MetricChange:
+    """One workload's metric compared between the baseline and the candidate.
+
+    `new` is None when the candidate has no row for a baseline metric.
+    """
+
+    workload: str
+    key: str
+    old: MetricValue
+    new: Optional[MetricValue]
+    rel: Optional[float] = None
+
+
+@dataclass
+class ReportData:
+    """Everything the HTML report shows, computed before any rendering."""
+
+    wl_names: List[str]
+    metrics: Dict[str, Dict[str, MetricValue]]
+    suppressed: Dict[str, List[str]]
+    dispatch_counts: Dict[str, Optional[int]]
+    all_keys: List[str]
+    summary: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    improvements: List[MetricChange] = field(default_factory=list)
+    deltas: List[MetricChange] = field(default_factory=list)
+    missing: List[MetricChange] = field(default_factory=list)
+
+
 def strip_ansi(text: str) -> str:
     return ANSI.sub("", text)
 
@@ -248,10 +286,12 @@ def classify_all_workload_zero(name: str, formula: str) -> str:
         return "zero_sdk_bug"
     if any(fragment in name for fragment in HEALTHY_ZERO_NAME_FRAGMENTS):
         return "zero_healthy"
-    if any(fragment in name for fragment in SDK_BUG_ZERO_NAME_FRAGMENTS):
-        return "zero_sdk_bug"
+    # Optional names such as "VALU FLOPs (F64)" also match the broader SDK
+    # fragments, so the optional rule must run first.
     if any(fragment in name for fragment in OPTIONAL_ZERO_NAME_FRAGMENTS):
         return "zero_optional"
+    if any(fragment in name for fragment in SDK_BUG_ZERO_NAME_FRAGMENTS):
+        return "zero_sdk_bug"
     formula_upper = formula.upper()
     if any(token in formula_upper for token in ("FP64", "FP8", "FP6", "FP4", "SPARSE")):
         return "zero_optional"
@@ -518,13 +558,11 @@ def compute_medians_for_workload(
     workload.filter_gpu_ids = None
     workload.filter_kernel_ids = None
     workload.filter_dispatch_ids = None
-    workload.raw_pmc = file_io.create_df_pmc(str(wl_dir), verbose=0)
-
-    filtered = parser.apply_filters(
-        workload,
-        str(wl_dir),
-        debug=False,
+    workload.raw_pmc, workload.pmc_pass_layout = file_io.load_df_pmc(
+        str(wl_dir), verbose=0
     )
+
+    filtered = parser.apply_filters(workload, debug=False)
 
     for df_id, frame in arch_config.dfs.items():
         if arch_config.dfs_type.get(df_id) != "metric_table":
@@ -549,6 +587,7 @@ def compute_medians_for_workload(
         workload.roofline_peaks,
         filtered,
         debug=False,
+        pass_layout=workload.pmc_pass_layout,
     )
 
     skip_cols = {
@@ -932,31 +971,76 @@ def build_report(
     iterations: Optional[int],
     stat_label: str,
 ) -> None:
-    wl_names = list(parsed_logs.keys())
-    parsed: Dict[str, Dict[str, MetricValue]] = {
-        wl: log.metrics for wl, log in parsed_logs.items()
-    }
-    suppressed: Dict[str, List[str]] = {
-        wl: log.suppressed for wl, log in parsed_logs.items()
-    }
-    dispatch_counts: Dict[str, Optional[int]] = {
-        wl: log.dispatch_count for wl, log in parsed_logs.items()
-    }
+    """Compute the report data, render it, and write the HTML page."""
+    data = compute_report(parsed_logs, baseline_logs, formulas)
+    page = render_report(
+        data,
+        primary_run,
+        baseline,
+        formulas,
+        report_date,
+        host_label,
+        arch,
+        config_arch,
+        iterations,
+        stat_label,
+    )
+    out_path.write_text(page, encoding="utf-8")
 
+
+def compute_report(
+    parsed_logs: Dict[str, ParsedLog],
+    baseline_logs: Optional[Dict[str, ParsedLog]],
+    formulas: Dict[str, Tuple[str, str, bool]],
+) -> ReportData:
+    """Classify metrics, count buckets, and compare against the baseline."""
     metric_units = {k: formulas.get(k, ("", "", False))[1] for k in formulas}
     metric_formulas = {k: formulas.get(k, ("", "", False))[0] for k in formulas}
-    classify_metrics(parsed, metric_units, metric_formulas)
+    metrics: Dict[str, Dict[str, MetricValue]] = {
+        wl: log.metrics for wl, log in parsed_logs.items()
+    }
+    classify_metrics(metrics, metric_units, metric_formulas)
+    data = ReportData(
+        wl_names=list(parsed_logs),
+        metrics=metrics,
+        suppressed={wl: log.suppressed for wl, log in parsed_logs.items()},
+        dispatch_counts={wl: log.dispatch_count for wl, log in parsed_logs.items()},
+        all_keys=ordered_metric_keys(metrics),
+    )
+    data.summary = summarize_buckets(data.metrics, data.all_keys)
+    if baseline_logs is not None:
+        base_metrics: Dict[str, Dict[str, MetricValue]] = {
+            wl: log.metrics for wl, log in baseline_logs.items()
+        }
+        classify_metrics(base_metrics, metric_units, metric_formulas)
+        compare_runs(data, base_metrics)
+    return data
 
-    all_keys: List[str] = []
+
+def ordered_metric_keys(metrics: Dict[str, Dict[str, MetricValue]]) -> List[str]:
+    """Return every metric key once, in Metric_ID order per workload."""
+    keys: List[str] = []
     seen: Set[str] = set()
-    for wl in wl_names:
-        for key in sorted(
-            parsed[wl], key=lambda k: [int(p) for p in k.split("|")[0].split(".")]
-        ):
+    for wl_metrics in metrics.values():
+        for key in sorted(wl_metrics, key=_metric_id_sort_key):
             if key not in seen:
                 seen.add(key)
-                all_keys.append(key)
+                keys.append(key)
+    return keys
 
+
+def summarize_buckets(
+    metrics: Dict[str, Dict[str, MetricValue]],
+    all_keys: List[str],
+) -> Dict[str, Dict[str, int]]:
+    """Count each workload's metrics per bucket over the shared key universe.
+
+    Total counts analyze-table rows parsed from --view table logs (including
+    all-N/A cells), not YAML metric definitions. On CDNA3, Block 18 expands
+    across $total_l2_chan — see build_total_note(). Missing keys (present in
+    another workload's log only) count as N/A so each card Total matches the
+    main-table row universe (len(all_keys)).
+    """
     summary: Dict[str, Dict[str, int]] = {
         wl: {
             "total": 0,
@@ -968,220 +1052,106 @@ def build_report(
             "formula_overflow": 0,
             **{bucket: 0 for bucket in ZERO_SUB_BUCKETS},
         }
-        for wl in wl_names
+        for wl in metrics
     }
-    # Total counts analyze-table rows parsed from --view table logs (including
-    # all-N/A cells), not YAML metric definitions. On CDNA3, Block 18 expands
-    # across $total_l2_chan — see build_total_note(). Missing keys (present in
-    # another workload's log only) count as N/A so each card Total matches the
-    # main-table row universe (len(all_keys)).
     for key in all_keys:
-        for wl in wl_names:
-            mv = parsed[wl].get(key)
+        for wl, wl_metrics in metrics.items():
+            mv = wl_metrics.get(key)
             summary[wl]["total"] += 1
             if mv is None:
                 summary[wl]["na"] += 1
                 continue
             if mv.cls in summary[wl]:
                 summary[wl][mv.cls] += 1
+    return summary
 
-    cards = []
-    descs = {
-        "mega_kernel": "All-ops (RDNA35 mega kernel)",
-        "vcopy": "Memory-bound",
-        "nbody": "Compute-bound",
-        "wmma_gemm": "WMMA",
-    }
-    for wl in wl_names:
-        s = summary[wl]
-        n_disp = dispatch_counts.get(wl)
-        disp_line = (
-            f"<div style='font-size:10px;color:#546e7a'>"
-            f"dispatches: <b>{n_disp}</b></div>"
-            if n_disp is not None
-            else ""
-        )
-        cards.append(
-            f"<div class='card'><h3>{html.escape(wl)}</h3>"
-            f"<div class='desc'>{descs.get(wl, '')}</div>"
-            f"{disp_line}"
-            f"<div>Total: <b>{s['total']}</b></div>"
-            f"<div style='color:#1b5e20'>✅ Good: {s['good']}</div>"
-            f"{render_zero_sub_bucket_lines(s)}"
-            f"<div style='color:#01579b'>⚪ Expected zero: {s['workload_zero']}</div>"
-            f"<div style='color:#4527a0'>🔹 Expected N/A: {s['expected_na']}</div>"
-            f"<div style='color:#e65100'>⚠️ N/A: {s['na']}</div>"
-            f"<div style='color:#ff8f00'>📐 &gt;100% formula: {s['formula_overflow']}</div>"
-            f"<div style='color:#c62828'>🚨 &gt;100% hardware: {s['overflow']}</div></div>"
-        )
 
-    total_note = build_total_note(arch, config_arch, summary, len(all_keys), stat_label)
+def compare_runs(
+    data: ReportData,
+    base_metrics: Dict[str, Dict[str, MetricValue]],
+) -> None:
+    """Fill the overflow fixes, value deltas, and candidate-missing rows.
 
-    improve_rows: List[str] = []
-    delta_rows: List[str] = []
-    baseline_label = ""
-    if baseline is not None and baseline_logs is not None:
-        baseline_label = baseline.label
-        base_parsed: Dict[str, Dict[str, MetricValue]] = {
-            wl: log.metrics for wl, log in baseline_logs.items()
-        }
-        classify_metrics(base_parsed, metric_units, metric_formulas)
-        for key in all_keys:
-            mid, name = key.split("|", 1)
-            unit = formulas.get(key, ("", "", False))[1]
-            for wl in wl_names:
-                old = base_parsed.get(wl, {}).get(key)
-                new = parsed.get(wl, {}).get(key)
-                if not old or not new:
-                    continue
-                if old.cls in {"overflow", "formula_overflow"} and new.cls not in {
-                    "overflow",
-                    "formula_overflow",
-                }:
-                    improve_rows.append(
-                        f"<tr><td>{html.escape(wl)}</td>"
-                        f"<td class='mid'>{html.escape(mid)}</td>"
-                        f"<td>{html.escape(name)}</td>"
-                        f"<td style='background:#ffcdd2;font-weight:bold'>"
-                        f"{html.escape(fmt_value(old, unit))}</td>"
-                        f"<td style='background:#c8e6c9;font-weight:bold'>"
-                        f"{html.escape(fmt_value(new, unit))}</td>"
-                        f"<td>{html.escape(unit)}</td></tr>"
-                    )
-                if old.value is None or new.value is None:
-                    continue
-                # |rel| with old≈0 is undefined — skip (no huge % highlights).
-                rel = relative_abs_delta(old.value, new.value)
-                if rel is None or rel < DELTA_REL_THRESHOLD:
-                    continue
-                rel_pct = rel * 100.0
-                hi = rel >= DELTA_HIGHLIGHT_THRESHOLD
-                row_cls = " class='delta-ge-100'" if hi else ""
-                rel_cell = (
-                    f"<td style='background:#ffe082;font-weight:bold'>{rel_pct:.1f}%</td>"
-                    if hi
-                    else f"<td>{rel_pct:.1f}%</td>"
-                )
-                delta_rows.append(
-                    f"<tr{row_cls}><td>{html.escape(wl)}</td>"
-                    f"<td class='mid'>{html.escape(mid)}</td>"
-                    f"<td>{html.escape(name)}</td>"
-                    f"<td>{html.escape(fmt_value(old, unit))}</td>"
-                    f"<td>{html.escape(fmt_value(new, unit))}</td>"
-                    f"{rel_cell}"
-                    f"<td>{html.escape(unit)}</td></tr>"
-                )
+    Keys and workloads are the union of both runs, so a metric the baseline
+    reports and the candidate lost shows up as missing instead of vanishing.
+    """
+    workloads = data.wl_names + [wl for wl in base_metrics if wl not in data.metrics]
+    candidate_keys = set(data.all_keys)
+    keys = data.all_keys + [
+        key for key in ordered_metric_keys(base_metrics) if key not in candidate_keys
+    ]
+    for key in keys:
+        for wl in workloads:
+            old = base_metrics.get(wl, {}).get(key)
+            if old is None:
+                continue
+            new = data.metrics.get(wl, {}).get(key)
+            if new is None:
+                data.missing.append(MetricChange(wl, key, old, None))
+                continue
+            if is_overflow_fix(old, new):
+                data.improvements.append(MetricChange(wl, key, old, new))
+            if old.value is None or new.value is None:
+                continue
+            # |rel| with old≈0 is undefined — skip (no huge % highlights).
+            rel = relative_abs_delta(old.value, new.value)
+            if rel is None or rel < DELTA_REL_THRESHOLD:
+                continue
+            data.deltas.append(MetricChange(wl, key, old, new, rel))
+
+
+def is_overflow_fix(old: MetricValue, new: MetricValue) -> bool:
+    """True when the baseline overflowed and the candidate has a real value."""
+    return (
+        old.cls in OVERFLOW_CLASSES
+        and new.value is not None
+        and new.cls not in OVERFLOW_CLASSES
+    )
+
+
+def render_report(
+    data: ReportData,
+    primary_run: RunArtifacts,
+    baseline: Optional[RunArtifacts],
+    formulas: Dict[str, Tuple[str, str, bool]],
+    report_date: str,
+    host_label: str,
+    arch: str,
+    config_arch: str,
+    iterations: Optional[int],
+    stat_label: str,
+) -> str:
+    """Render computed report data as one self-contained HTML page."""
+    wl_names = data.wl_names
+    cards = [
+        _render_card(wl, data.summary[wl], data.dispatch_counts.get(wl))
+        for wl in wl_names
+    ]
+    total_note = build_total_note(
+        arch, config_arch, data.summary, len(data.all_keys), stat_label
+    )
 
     sup_rows = []
     for wl in wl_names:
-        for table in suppressed.get(wl, []):
+        for table in data.suppressed.get(wl, []):
             sup_rows.append(
                 f"<tr><td>{html.escape(wl)}</td><td>{html.escape(table)}</td></tr>"
             )
 
-    body_rows = []
-    for key in all_keys:
-        mid, name = key.split("|", 1)
-        formula, unit, level = formulas.get(key, ("", "", False))
-        row_cats: Set[str] = set()
-        wl_cells = []
-        for wl in wl_names:
-            mv = parsed[wl].get(key)
-            cls = mv.cls if mv else "na"
-            row_cats.add(cls)
-            val = fmt_value(mv, unit)
-            style = cell_style(cls)
-            wl_cells.append(
-                f"<td style='{style}' data-cls='{cls}'>{html.escape(val)}</td>"
-            )
-
-        problematic = row_cats & {
-            "na",
-            "overflow",
-            "formula_overflow",
-            *ZERO_SUB_BUCKETS,
-        }
-        if problematic:
-            level_cell = (
-                "<b style='color:#6a1b9a'>Yes</b>"
-                if level
-                else "<span style='color:#546e7a'>No</span>"
-            )
-        else:
-            level_cell = "—"
-
-        formula_html = html.escape(f"value: {formula}") if formula else "—"
-        body_rows.append(
-            f"<tr data-cats='{' '.join(sorted(row_cats))}'>"
-            f"<td class='mid'>{html.escape(mid)}</td>"
-            f"<td class='mname'>{html.escape(name)}</td>"
-            f"<td class='unit'>{html.escape(unit)}</td>"
-            f"<td style='text-align:center;font-size:11px'>{level_cell}</td>"
-            f"<td><div style='overflow-x:auto;white-space:nowrap;max-width:600px;font-size:10px;"
-            f"font-family:monospace;background:#f0f4f8;color:#1a237e;padding:2px 5px;"
-            f"border-radius:3px;border:1px solid #c5cae9'>{formula_html}</div></td>"
-            + "".join(wl_cells)
-            + "</tr>"
-        )
+    body_rows = [_render_metric_row(data, key, formulas) for key in data.all_keys]
 
     wl_headers = "".join(
-        f"<th>{html.escape(wl)}<br><small>{descs.get(wl, '')}</small><br>"
+        f"<th>{html.escape(wl)}<br><small>{WORKLOAD_DESCRIPTIONS.get(wl, '')}</small><br>"
         f"<small>{html.escape(stat_label)}</small></th>"
         for wl in wl_names
     )
 
     arch_title = ARCH_TITLE.get(arch, arch)
-    iter_banner = _iteration_banner(iterations, dispatch_counts, stat_label)
+    iter_banner = _iteration_banner(iterations, data.dispatch_counts, stat_label)
     improve_section = ""
-    if improve_rows:
-        improve_section = (
-            f"<h2>Overflow improvements vs {html.escape(baseline_label)} "
-            f"({len(improve_rows)} metrics fixed)</h2>"
-            "<table class='improve-table'><thead><tr><th>Workload</th><th>ID</th>"
-            f"<th>Metric</th><th>Old ({html.escape(stat_label)})</th>"
-            f"<th>New ({html.escape(stat_label)})</th><th>Unit</th></tr></thead><tbody>"
-            + "".join(improve_rows)
-            + "</tbody></table>"
-        )
-    if len(delta_rows) > 2:
-        n_hi = sum(1 for r in delta_rows if "delta-ge-100" in r)
-        n_delta = len(delta_rows)
-        n_metrics = len(all_keys)
-        delta_of_total_pct = (100.0 * n_delta / n_metrics) if n_metrics else 0.0
-        rel_pct = DELTA_REL_THRESHOLD * 100
-        hi_pct = DELTA_HIGHLIGHT_THRESHOLD * 100
-        near_zero = f"{DELTA_NEAR_ZERO:g}"
-        # Fraction uses unique analyze-table metrics (same universe as card
-        # Total / main table rows), not metric×workload cells.
-        improve_section += (
-            f"<h2>Value deltas vs {html.escape(baseline_label)} "
-            f"(|rel| ≥ {rel_pct:.0f}%, {n_delta} rows, "
-            f"{delta_of_total_pct:.1f}% of {n_metrics} metrics)</h2>"
-            "<p class='filter-note'>Click a column header to sort "
-            "(Kernel name, ID, Metric, |rel|, …). "
-            f"Compared values are <b>{html.escape(stat_label)}</b> from analyze "
-            "<code>--view table</code> logs (or recomputed from per-dispatch "
-            "data when the Median column is absent). "
-            "|rel| = |new−old|/|old|.</p>"
-            "<p class='filter-note'>"
-            f"Include when |rel| ≥ {rel_pct:.0f}% "
-            f"({n_delta} rows, {delta_of_total_pct:.1f}% of "
-            f"{n_metrics} metrics)<br>"
-            f"Highlight when |rel| ≥ {hi_pct:.0f}% "
-            f"({n_hi} rows)<br>"
-            f"Skip when baseline |old| &lt; {near_zero} "
-            "(|rel| undefined)"
-            "</p>"
-            "<table class='improve-table sortable-table' id='delta-table'>"
-            "<thead><tr>"
-            "<th data-sort='str'>Kernel</th>"
-            "<th data-sort='str'>ID</th>"
-            "<th data-sort='str'>Metric</th>"
-            f"<th data-sort='num'>Old ({html.escape(stat_label)})</th>"
-            f"<th data-sort='num'>New ({html.escape(stat_label)})</th>"
-            "<th data-sort='num'>|rel|</th>"
-            "<th data-sort='str'>Unit</th>"
-            "</tr></thead><tbody>" + "".join(delta_rows) + "</tbody></table>"
+    if baseline is not None:
+        improve_section = _render_comparison_sections(
+            data, formulas, baseline.label, primary_run.label, stat_label
         )
 
     primary_label = "Candidate" if baseline is not None else "Run"
@@ -1331,7 +1301,228 @@ document.querySelectorAll('table.sortable-table').forEach(table=>{{
 }});
 </script></body></html>"""
 
-    out_path.write_text(doc, encoding="utf-8")
+    return doc
+
+
+def _metric_id_sort_key(key: str) -> List[int]:
+    return [int(part) for part in key.split("|")[0].split(".")]
+
+
+def _render_card(wl: str, s: Dict[str, int], n_disp: Optional[int]) -> str:
+    disp_line = (
+        f"<div style='font-size:10px;color:#546e7a'>dispatches: <b>{n_disp}</b></div>"
+        if n_disp is not None
+        else ""
+    )
+    return (
+        f"<div class='card'><h3>{html.escape(wl)}</h3>"
+        f"<div class='desc'>{WORKLOAD_DESCRIPTIONS.get(wl, '')}</div>"
+        f"{disp_line}"
+        f"<div>Total: <b>{s['total']}</b></div>"
+        f"<div style='color:#1b5e20'>✅ Good: {s['good']}</div>"
+        f"{render_zero_sub_bucket_lines(s)}"
+        f"<div style='color:#01579b'>⚪ Expected zero: {s['workload_zero']}</div>"
+        f"<div style='color:#4527a0'>🔹 Expected N/A: {s['expected_na']}</div>"
+        f"<div style='color:#e65100'>⚠️ N/A: {s['na']}</div>"
+        f"<div style='color:#ff8f00'>📐 &gt;100% formula: {s['formula_overflow']}</div>"
+        f"<div style='color:#c62828'>🚨 &gt;100% hardware: {s['overflow']}</div></div>"
+    )
+
+
+def _render_metric_row(
+    data: ReportData,
+    key: str,
+    formulas: Dict[str, Tuple[str, str, bool]],
+) -> str:
+    mid, name = key.split("|", 1)
+    formula, unit, level = formulas.get(key, ("", "", False))
+    row_cats: Set[str] = set()
+    wl_cells = []
+    for wl in data.wl_names:
+        mv = data.metrics[wl].get(key)
+        cls = mv.cls if mv else "na"
+        row_cats.add(cls)
+        val = fmt_value(mv, unit)
+        style = cell_style(cls)
+        wl_cells.append(f"<td style='{style}' data-cls='{cls}'>{html.escape(val)}</td>")
+
+    problematic = row_cats & {
+        "na",
+        "overflow",
+        "formula_overflow",
+        *ZERO_SUB_BUCKETS,
+    }
+    if problematic:
+        level_cell = (
+            "<b style='color:#6a1b9a'>Yes</b>"
+            if level
+            else "<span style='color:#546e7a'>No</span>"
+        )
+    else:
+        level_cell = "—"
+
+    formula_html = html.escape(f"value: {formula}") if formula else "—"
+    return (
+        f"<tr data-cats='{' '.join(sorted(row_cats))}'>"
+        f"<td class='mid'>{html.escape(mid)}</td>"
+        f"<td class='mname'>{html.escape(name)}</td>"
+        f"<td class='unit'>{html.escape(unit)}</td>"
+        f"<td style='text-align:center;font-size:11px'>{level_cell}</td>"
+        f"<td><div style='overflow-x:auto;white-space:nowrap;max-width:600px;font-size:10px;"
+        f"font-family:monospace;background:#f0f4f8;color:#1a237e;padding:2px 5px;"
+        f"border-radius:3px;border:1px solid #c5cae9'>{formula_html}</div></td>"
+        + "".join(wl_cells)
+        + "</tr>"
+    )
+
+
+def _render_comparison_sections(
+    data: ReportData,
+    formulas: Dict[str, Tuple[str, str, bool]],
+    baseline_label: str,
+    candidate_label: str,
+    stat_label: str,
+) -> str:
+    sections = ""
+    if data.improvements:
+        improve_rows = [
+            _render_improvement_row(change, formulas) for change in data.improvements
+        ]
+        sections += (
+            f"<h2>Overflow improvements vs {html.escape(baseline_label)} "
+            f"({len(improve_rows)} metrics fixed)</h2>"
+            "<table class='improve-table'><thead><tr><th>Workload</th><th>ID</th>"
+            f"<th>Metric</th><th>Old ({html.escape(stat_label)})</th>"
+            f"<th>New ({html.escape(stat_label)})</th><th>Unit</th></tr></thead><tbody>"
+            + "".join(improve_rows)
+            + "</tbody></table>"
+        )
+    if len(data.deltas) > 2:
+        sections += _render_delta_section(data, formulas, baseline_label, stat_label)
+    if data.missing:
+        missing_rows = [
+            _render_missing_row(change, formulas) for change in data.missing
+        ]
+        n_missing_metrics = len({change.key for change in data.missing})
+        sections += (
+            f"<h2>Missing from {html.escape(candidate_label)} vs "
+            f"{html.escape(baseline_label)} ({len(missing_rows)} rows, "
+            f"{n_missing_metrics} metrics)</h2>"
+            "<p class='filter-note'>The baseline reports these metrics for the "
+            "workload, but the candidate analyze log has no row for them.</p>"
+            "<table class='improve-table'><thead><tr><th>Workload</th><th>ID</th>"
+            f"<th>Metric</th><th>Old ({html.escape(stat_label)})</th>"
+            "<th>New</th><th>Unit</th></tr></thead><tbody>"
+            + "".join(missing_rows)
+            + "</tbody></table>"
+        )
+    return sections
+
+
+def _render_delta_section(
+    data: ReportData,
+    formulas: Dict[str, Tuple[str, str, bool]],
+    baseline_label: str,
+    stat_label: str,
+) -> str:
+    delta_rows = [_render_delta_row(change, formulas) for change in data.deltas]
+    n_hi = sum(
+        1 for change in data.deltas if (change.rel or 0) >= DELTA_HIGHLIGHT_THRESHOLD
+    )
+    n_delta = len(delta_rows)
+    # Numerator and denominator are both unique analyze-table metrics (same
+    # universe as card Total / main table rows), not metric×workload cells.
+    n_changed = len({change.key for change in data.deltas})
+    n_metrics = len(data.all_keys)
+    changed_pct = (100.0 * n_changed / n_metrics) if n_metrics else 0.0
+    rel_pct = DELTA_REL_THRESHOLD * 100
+    hi_pct = DELTA_HIGHLIGHT_THRESHOLD * 100
+    near_zero = f"{DELTA_NEAR_ZERO:g}"
+    counts = f"{n_delta} rows, {n_changed} of {n_metrics} metrics ({changed_pct:.1f}%)"
+    return (
+        f"<h2>Value deltas vs {html.escape(baseline_label)} "
+        f"(|rel| ≥ {rel_pct:.0f}%, {counts})</h2>"
+        "<p class='filter-note'>Click a column header to sort "
+        "(Kernel name, ID, Metric, |rel|, …). "
+        f"Compared values are <b>{html.escape(stat_label)}</b> from analyze "
+        "<code>--view table</code> logs (or recomputed from per-dispatch "
+        "data when the Median column is absent). "
+        "|rel| = |new−old|/|old|.</p>"
+        "<p class='filter-note'>"
+        f"Include when |rel| ≥ {rel_pct:.0f}% ({counts})<br>"
+        f"Highlight when |rel| ≥ {hi_pct:.0f}% "
+        f"({n_hi} rows)<br>"
+        f"Skip when baseline |old| &lt; {near_zero} "
+        "(|rel| undefined)"
+        "</p>"
+        "<table class='improve-table sortable-table' id='delta-table'>"
+        "<thead><tr>"
+        "<th data-sort='str'>Kernel</th>"
+        "<th data-sort='str'>ID</th>"
+        "<th data-sort='str'>Metric</th>"
+        f"<th data-sort='num'>Old ({html.escape(stat_label)})</th>"
+        f"<th data-sort='num'>New ({html.escape(stat_label)})</th>"
+        "<th data-sort='num'>|rel|</th>"
+        "<th data-sort='str'>Unit</th>"
+        "</tr></thead><tbody>" + "".join(delta_rows) + "</tbody></table>"
+    )
+
+
+def _render_improvement_row(
+    change: MetricChange, formulas: Dict[str, Tuple[str, str, bool]]
+) -> str:
+    mid, name = change.key.split("|", 1)
+    unit = formulas.get(change.key, ("", "", False))[1]
+    return (
+        f"<tr><td>{html.escape(change.workload)}</td>"
+        f"<td class='mid'>{html.escape(mid)}</td>"
+        f"<td>{html.escape(name)}</td>"
+        f"<td style='background:#ffcdd2;font-weight:bold'>"
+        f"{html.escape(fmt_value(change.old, unit))}</td>"
+        f"<td style='background:#c8e6c9;font-weight:bold'>"
+        f"{html.escape(fmt_value(change.new, unit))}</td>"
+        f"<td>{html.escape(unit)}</td></tr>"
+    )
+
+
+def _render_delta_row(
+    change: MetricChange, formulas: Dict[str, Tuple[str, str, bool]]
+) -> str:
+    mid, name = change.key.split("|", 1)
+    unit = formulas.get(change.key, ("", "", False))[1]
+    rel = change.rel or 0.0
+    rel_pct = rel * 100.0
+    hi = rel >= DELTA_HIGHLIGHT_THRESHOLD
+    row_cls = " class='delta-ge-100'" if hi else ""
+    rel_cell = (
+        f"<td style='background:#ffe082;font-weight:bold'>{rel_pct:.1f}%</td>"
+        if hi
+        else f"<td>{rel_pct:.1f}%</td>"
+    )
+    return (
+        f"<tr{row_cls}><td>{html.escape(change.workload)}</td>"
+        f"<td class='mid'>{html.escape(mid)}</td>"
+        f"<td>{html.escape(name)}</td>"
+        f"<td>{html.escape(fmt_value(change.old, unit))}</td>"
+        f"<td>{html.escape(fmt_value(change.new, unit))}</td>"
+        f"{rel_cell}"
+        f"<td>{html.escape(unit)}</td></tr>"
+    )
+
+
+def _render_missing_row(
+    change: MetricChange, formulas: Dict[str, Tuple[str, str, bool]]
+) -> str:
+    mid, name = change.key.split("|", 1)
+    unit = formulas.get(change.key, ("", "", False))[1]
+    return (
+        f"<tr><td>{html.escape(change.workload)}</td>"
+        f"<td class='mid'>{html.escape(mid)}</td>"
+        f"<td>{html.escape(name)}</td>"
+        f"<td>{html.escape(fmt_value(change.old, unit))}</td>"
+        "<td style='background:#e1bee7;font-weight:bold'>missing</td>"
+        f"<td>{html.escape(unit)}</td></tr>"
+    )
 
 
 def merge_formulas_from_logs(
@@ -1462,6 +1653,9 @@ def main() -> None:
     primary_run = candidate or baseline
     baseline_logs = load_run_logs(baseline) if candidate is not None else None
     formulas = merge_formulas_from_logs(primary_run.logs, config_arch)
+    if candidate is not None:
+        # Baseline-only metrics still need their unit in the missing section.
+        formulas = {**merge_formulas_from_logs(baseline.logs, config_arch), **formulas}
     build_report(
         primary_run,
         load_run_logs(primary_run),
