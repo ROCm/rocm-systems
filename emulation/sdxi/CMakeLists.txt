@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.28)
 
 set(ROCM_SDXI_VERSION_MAJOR 0)
 set(ROCM_SDXI_VERSION_MINOR 1)
@@ -38,33 +38,12 @@ endif()
 
 include(SdxiGitInfo)
 include(SdxiCompilerOptions)
+include(SdxiVfioUser)
 
 # ---------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------
-find_package(PkgConfig REQUIRED)
 find_package(ZLIB REQUIRED)
-
-pkg_check_modules(VFIO_USER vfio-user)
-if(NOT VFIO_USER_FOUND)
-    find_library(VFIO_USER_FALLBACK_LIB NAMES vfio-user
-        DOC "Path to libvfio-user library")
-    find_path(VFIO_USER_FALLBACK_INC NAMES vfio-user/libvfio-user.h
-        DOC "Path to libvfio-user headers")
-    if(NOT VFIO_USER_FALLBACK_LIB OR NOT VFIO_USER_FALLBACK_INC)
-        message(FATAL_ERROR
-          "libvfio-user not found via pkg-config, /usr/local, or /usr.\n"
-          "Build it from https://github.com/nutanix/libvfio-user\n"
-          "then set CMAKE_PREFIX_PATH or PKG_CONFIG_PATH."
-        )
-    endif()
-    set(VFIO_USER_INCLUDE_DIRS "${VFIO_USER_FALLBACK_INC}")
-    set(VFIO_USER_LINK_LIBRARIES "${VFIO_USER_FALLBACK_LIB}")
-    message(STATUS "Found libvfio-user (fallback): ${VFIO_USER_FALLBACK_LIB}")
-else()
-    set(VFIO_USER_LINK_LIBRARIES "${VFIO_USER_LIBRARIES}")
-    message(STATUS "Found libvfio-user via pkg-config: ${VFIO_USER_VERSION}")
-endif()
 
 # ---------------------------------------------------------------
 # Sources
@@ -84,21 +63,13 @@ target_include_directories(rocm-sdxi PRIVATE
     ${PROJECT_SOURCE_DIR}/src
 )
 
-target_include_directories(rocm-sdxi SYSTEM PRIVATE
-    ${VFIO_USER_INCLUDE_DIRS}
-)
-
 target_compile_definitions(rocm-sdxi PRIVATE
     GIT_SHA_FULL="${SDXI_GIT_SHA_FULL}"
     GIT_SHA_SHORT="${SDXI_GIT_SHA_SHORT}"
 )
 
-target_link_directories(rocm-sdxi PRIVATE
-    ${VFIO_USER_LIBRARY_DIRS}
-)
-
 target_link_libraries(rocm-sdxi PRIVATE
-    ${VFIO_USER_LINK_LIBRARIES}
+    libvfio-user::libvfio-user
     ZLIB::ZLIB
 )
 
@@ -126,10 +97,6 @@ if(PROJECT_IS_TOP_LEVEL)
     message(STATUS "  Git SHA     : ${SDXI_GIT_SHA_SHORT}")
     message(STATUS "  Build type  : ${CMAKE_BUILD_TYPE}")
     message(STATUS "  C compiler  : ${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}")
-    if(VFIO_USER_FOUND)
-        message(STATUS "  libvfio-user: ${VFIO_USER_VERSION} (pkg-config)")
-    else()
-        message(STATUS "  libvfio-user: ${VFIO_USER_FALLBACK_LIB} (fallback)")
-    endif()
+    message(STATUS "  libvfio-user: v0.8 (FetchContent)")
     message(STATUS "")
 endif()
