@@ -47,6 +47,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - Stopping `rdcd`, or embedded RDC with `rdc_stop_embedded()`, no longer hangs. Rarely, the stop never returned and the process had to be killed.
 
+- `rdcd` no longer aborts on the first update of a watched field when the C++ standard library checks vector accesses, as Ubuntu's headers do by default. When every field was supported, or an unwatch left every field in use, RDC indexed an empty vector. Without the checks, the telemetry module was called with a null pointer and returned `RDC_ST_BAD_PARAMETER`.
+
 ## RDC 1.3.1 for ROCm 10.1.0
 
 ### Removed
