@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// IEEE format traits and bitwise OMOD/CLAMP shared by arithmetic families.
+// IEEE format traits and bitwise OMOD/CLAMP shared by arithmetic and selection.
 // Internal helpers shared by instruction implementations; not part of the public C API.
 
 // Format and rounding helpers adapted from rocjitsu shared/division.h.
@@ -58,6 +58,24 @@ float_output(typename IeeeFormat<Width>::Bits result, uint32_t instruction_flags
     }
   }
   return result;
+}
+
+// Apply selection output modifiers with guest overflow rounding and FP16 saturation.
+// Preserve selected NaN payloads; DX10_CLAMP_OFF disables clamping a NaN.
+template <int Width>
+inline typename IeeeFormat<Width>::Bits selection_output(typename IeeeFormat<Width>::Bits bits,
+                                                         uint32_t instruction_flags,
+                                                         uint64_t flags) {
+  using F = IeeeFormat<Width>;
+  unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
+  bool infinity = rounding == 0 || rounding == (bits & F::sign ? 2U : 1U);
+  if constexpr (Width == 16) {
+    infinity &= !(flags & RJ_ARITH_FP16_OVFL);
+  }
+  if ((flags & RJ_ARITH_FP_DX10_CLAMP_OFF) && (bits & (F::sign - 1)) > F::infinity) {
+    instruction_flags &= ~RJ_ARITH_ALU_CLAMP;
+  }
+  return float_output<Width>(bits, instruction_flags, F::infinity - !infinity);
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE
