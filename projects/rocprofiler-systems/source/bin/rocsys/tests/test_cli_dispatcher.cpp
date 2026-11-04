@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "common/cli_dispatcher.hpp"
+#include "cli_dispatcher.hpp"
 #include "common/tool_runner.hpp"
 
 #include <gtest/gtest.h>
