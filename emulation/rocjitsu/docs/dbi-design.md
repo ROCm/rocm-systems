@@ -15,9 +15,11 @@ This document describes the DBI subsystem as implemented. The instrumentor can
 insert an inline nop or call a verified, copied probe body. Calls pass explicit
 arguments, preserve guest state, and share one body across sites. Before-placement,
 callable `AfterInst`, and callable kernel entry/exit observations are supported.
-`AfterInst` requires a callable probe and rejects bank-changing anchors because
-the pre-anchor bank proof does not establish the post-anchor state. Block
-boundaries remain reserved. Existing scratch spills coexist with an
+`AfterInst` requires a callable probe and rejects anchors that change VGPR bank
+selection, may enable GPR indexing, or deallocate VGPRs and scratch. The
+pre-anchor addressing proof does not establish the post-anchor state, and the
+callback envelope requires allocated VGPRs and scratch. Block boundaries remain
+reserved. Existing scratch spills coexist with an
 explicit register-growth policy that uses disjoint register backups. The shared
 code-object layer updates the resource note and descriptor together. General HWREG/MODE preservation, scratch enablement
 from zero, arbitrary composed instrumentation, and streaming transport remain
@@ -97,7 +99,7 @@ current limits.
 
 - Multiple queued `InstrumentationPoint`s per `patch()` call are supported; sites sharing the same `(probe_obj, probe_symbol)` reuse one copied probe body, and a site whose declared argument count, argument sources, or mask policy disagrees with the first declaration of that probe is rejected. All-or-nothing: any per-site failure fails the whole patch.
 - Single `.text` section (multi-text is fatal).
-- `BeforeInst` relocates an ordinary anchor. Callable `AfterInst` relocates the same supported anchors and observes their resulting state; it rejects bank-changing anchors because the pre-anchor bank proof does not establish the post-anchor state. Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable `KernelExit` runs before `s_endpgm` without a return branch. Other kinds are rejected.
+- `BeforeInst` relocates an ordinary anchor. Callable `AfterInst` relocates the same supported anchors and observes their resulting state; it rejects anchors that change VGPR bank selection, may enable GPR indexing, or deallocate VGPRs and scratch, because the envelope requires proven VGPR addressing state and allocated storage. Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable `KernelExit` runs before `s_endpgm` without a return branch. Other kinds are rejected.
 - `probe_obj` + `probe_symbol` are **consumed**: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.
 - `filter_flags` is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. `force_full_exec` is consumed (see [Mask policy](#mask-policy)); it is rejected only on an inline-nop site, which has no call envelope whose mask could be widened.
 - Probe calls require the probe body to read no register its ABI does not supply (`analyze_probe_live_ins`, see [Probe live-ins](#probe-live-ins)). Under `AmdGpuFuncReturnS30S31` that is the link pair plus the declared argument VGPRs; any other input is fatal.
@@ -424,7 +426,8 @@ Branch offsets are computed in SOPP `simm16` units; the trampoline must lie with
 
 A probe-call point sets `probe_obj` + `probe_symbol`. Resolution copies the probe's self-contained body (`rj_nop_probe`: `s_waitcnt` then `s_setpc_b64 s[30:31]`) once into the cave; sites sharing a `(probe_obj, probe_symbol)` reuse that one copy. The cave is laid out as `[probe bodies][s_nop padding][entry stub][trampolines]` after the original kernel bytes; the padding and stub are present only when the kernel has an entry prologue. The forward `s_branch` at the anchor targets the trampoline (not the body); the trampoline *calls* the body via `s_swappc_b64`.
 
-The trampoline envelope wraps the relocated original:
+The relocated original precedes the call envelope for `AfterInst` and follows
+it for `BeforeInst`:
 
 ```
 .text:
@@ -436,6 +439,7 @@ The trampoline envelope wraps the relocated original:
   [s_nop padding]           <-- only with an entry prologue: to the entry's residue mod 256
   [entry stub]              <-- descriptor enters here: prologue, then s_branch <original entry>
   [trampoline]              @ trampoline_offset:
+    <relocated original word(s)>        <-- AfterInst only: before the envelope
     <in-flight-load drain>              <-- s_wait_loadcnt / s_waitcnt; also emitted on no-spill sites
     s_mov_b64    <exec_temp>, exec      <-- EXEC save (preserve_exec || needs_full_mask)
     s_mov_b64    <vcc_temp>,  vcc       <-- VCC save  (preserve_vcc)
@@ -465,7 +469,7 @@ The trampoline envelope wraps the relocated original:
     s_mov_b32    m0,   <m0_temp>        <-- M0 restore
     s_nop        <n>                    <-- GFX9 wait-state pad after an SGPR or M0 restore
     s_wait_alu 0xf1fc                   <-- RDNA4: completed restores before guest resume
-    <relocated original word(s)>
+    <relocated original word(s)>        <-- BeforeInst only: after the envelope
     s_branch <return>                   <-- back to anchor_offset + original_size
 ```
 
@@ -486,7 +490,9 @@ shared DBI envelope; it does not require an analysis-specific lowering path.
 
 ### Mask policy
 
-By default the probe runs under the mask the guest had at the anchor: the envelope restores `<exec_temp>` before the `s_swappc`, so a lane inactive at the site is inactive inside the probe. `InstrumentationPoint::force_full_exec` selects the other policy. The full-mask window the envelope already opened for the spill stores and argument writes simply stays open across the call, so the body runs with every lane enabled. The anchor mask is restored afterwards by the EXEC special-state restore that every such site already reserves.
+The saved mask comes from the selected observation point: before the anchor for
+`BeforeInst`, and from the post-instruction `EXEC` mask for `AfterInst`. By
+default the probe runs under that observed mask: the envelope restores `<exec_temp>` before the `s_swappc`, so a lane inactive at the site is inactive inside the probe. `InstrumentationPoint::force_full_exec` selects the other policy. The full-mask window the envelope already opened for the spill stores and argument writes simply stays open across the call, so the body runs with every lane enabled. The observed mask is restored afterwards by the EXEC special-state restore that every such site already reserves.
 
 This permits uniform bookkeeping and probes that consume an explicitly saved guest mask as data. A probe relying on execution under the original mask uses the default; per-lane operands passed under full EXEC must be interpreted using the saved mask.
 

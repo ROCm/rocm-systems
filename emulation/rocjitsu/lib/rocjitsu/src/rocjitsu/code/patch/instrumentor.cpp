@@ -26,6 +26,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "util/diagnostic.h"
 #include "util/result.h"
@@ -45,6 +46,33 @@
 namespace rocjitsu {
 
 namespace {
+
+rj_code_target_id_t effective_target(const AmdGpuCodeObject &object, rj_code_arch_t arch) {
+  if (object.target_id() != ROCJITSU_CODE_TARGET_INVALID)
+    return object.target_id();
+  const IsaTargetRegistry &registry = default_isa_target_registry();
+  const IsaTargetDescriptor *descriptor = registry.find(arch);
+  if (descriptor == nullptr)
+    return ROCJITSU_CODE_TARGET_INVALID;
+  const IsaGpuTargetDescription *target = registry.find_default_gpu_target(*descriptor);
+  return target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : target->public_id;
+}
+
+// These ISA message tables assign MSG_DEALLOC_VGPRS to message 3. Older
+// architectures give that encoding different semantics.
+bool deallocates_vgprs(const Instruction &instruction, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 && arch != ROCJITSU_CODE_ARCH_RDNA3 &&
+      arch != ROCJITSU_CODE_ARCH_RDNA3_5 && arch != ROCJITSU_CODE_ARCH_RDNA4)
+    return false;
+  if (instruction.mnemonic() != "s_sendmsg")
+    return false;
+  const Operand *message = instruction.src_operand(0);
+  constexpr uint32_t kDeallocVgprsMessage = 3;
+  const uint32_t message_mask = arch == ROCJITSU_CODE_ARCH_RDNA3     ? 0x1ffu
+                                : arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? 0xfu
+                                                                     : 0x7fu;
+  return message == nullptr || (message->encoding_value() & message_mask) == kDeallocVgprsMessage;
+}
 
 // PC-reading / PC-relative instructions to reject as anchors: relocating any of
 // them into a trampoline changes the PC value they read (s_getpc) or the target
@@ -380,6 +408,15 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
   if (pt.kind == InstrumentationKind::AfterInst &&
       (pt.probe_obj == nullptr || may_change_vgpr_msb(anchor, arch, setreg_vgpr_msb_fixup))) {
     fail("AfterInst requires a callable probe and an anchor preserving VGPR bank selection");
+    return std::nullopt;
+  }
+  if (pt.kind == InstrumentationKind::AfterInst &&
+      may_enable_gpr_indexing(anchor, text_bytes, arch)) {
+    fail("AfterInst anchor may enable GPR indexing");
+    return std::nullopt;
+  }
+  if (pt.kind == InstrumentationKind::AfterInst && deallocates_vgprs(anchor, arch)) {
+    fail("AfterInst anchor deallocates VGPRs and scratch");
     return std::nullopt;
   }
   if (pt.kind == InstrumentationKind::BeforeInst || pt.kind == InstrumentationKind::AfterInst) {
@@ -965,6 +1002,7 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
   LivenessAnalysisOptions options;
   if (arch_ == ROCJITSU_CODE_ARCH_CDNA5) {
     options.arch = arch_;
+    options.target = effective_target(obj_, arch_);
     options.text = {reinterpret_cast<const uint8_t *>(text->data()), text->size()};
   }
   for (const std::unique_ptr<BasicBlock> &block : blocks_) {
@@ -1021,16 +1059,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   out.wave_size = common_wavefront_size(arch_, out.kernels);
 
   const auto &registry = default_isa_target_registry();
-  const IsaTargetDescriptor *arch_descriptor = registry.find(arch_);
-  auto effective_target = [&](const AmdGpuCodeObject &object) {
-    if (object.target_id() != ROCJITSU_CODE_TARGET_INVALID)
-      return object.target_id();
-    if (arch_descriptor == nullptr)
-      return ROCJITSU_CODE_TARGET_INVALID;
-    const IsaGpuTargetDescription *gpu_target = registry.find_default_gpu_target(*arch_descriptor);
-    return gpu_target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : gpu_target->public_id;
-  };
-  const rj_code_target_id_t destination_target = effective_target(obj_);
+  const rj_code_target_id_t destination_target = effective_target(obj_, arch_);
   const IsaGpuTargetDescription *gpu_target = registry.find_gpu_target(destination_target);
   const bool setreg_vgpr_msb_fixup =
       gpu_target == nullptr || gpu_target->capabilities.setreg_vgpr_msb_fixup;
@@ -1138,7 +1167,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
              " arguments; the limit is " + std::to_string(kMaxProbeArgVgprs);
       return std::nullopt;
     }
-    const rj_code_target_id_t probe_target = effective_target(*pt.probe_obj);
+    const rj_code_target_id_t probe_target = effective_target(*pt.probe_obj, arch_);
     if (destination_target != ROCJITSU_CODE_TARGET_INVALID &&
         probe_target != ROCJITSU_CODE_TARGET_INVALID && destination_target != probe_target) {
       perr = "probe concrete target does not match the destination code-object target";
@@ -1603,7 +1632,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // Including original definitions conservatively covers live-after state:
       // the callback must observe and preserve the relocated instruction's result.
       if (site.kind == InstrumentationKind::AfterInst)
-        live |= InstDefUse(*anchor, *resolved.wave_size).defs;
+        live |= InstDefUse(*anchor, *resolved.wave_size, liveness_->gfx1250_vgpr_msb(),
+                           UnknownVgprDefPolicy::ExpandAll)
+                    .defs;
       if (options_.register_growth &&
           options_.preservation == GuestStatePreservation::DeclaredRegisters) {
         for (uint16_t reg = 0; reg < options_.register_growth->sgprs; ++reg)
