@@ -767,8 +767,8 @@ void SplitTiersOn(ncclComm& c, std::map<std::string, int64_t>& params) {
   c.WarpSize = 32;
 }
 
-// Messages from 2 MiB with a shard of at most 512 KiB run the split on one warp per (slice, peer) unit, within the
-// blocks of the LL two-shot they replace (1024 threads over the shard's packets) and with half its threads per block.
+// Messages from 2 MiB run the split on one warp per (slice, peer) unit, within the blocks of the LL two-shot they
+// replace (1024 threads over the shard's packets) and with half its threads per block.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitTakesTheWindowWithinTheReplacedGrid) {
   SplitTiersOn(comm(), params_);
   const struct {
@@ -799,7 +799,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitTakesTheWindowWithinTheR
   EXPECT_EQ(RunOneLL128(2 * kMiB, ncclFloat8e5m2).kernel, (LL128Split<dda::common::fp8e5m2, 8>()));
 }
 
-// Outside the window the LL128 launch keeps its own kernel: below 2 MiB, past a 512 KiB shard, on 2 ranks, on wave64,
+// The window has no shard cap; outside it the LL128 launch keeps its own kernel: below 2 MiB, on 2 ranks, on wave64,
 // and with the LL128 tier off.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitStaysInsideItsWindow) {
   SplitTiersOn(comm(), params_);
@@ -808,9 +808,10 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitStaysInsideItsWindow) {
     return k == LL128Split<float, 4>() || k == LL128Split<float, 8>() || k == LL128Split<float, 0>();
   };
   EXPECT_FALSE(split(2 * kMiB - 8 * 16)) << "8r just below 2 MiB";
-  EXPECT_FALSE(split(8 * kMiB)) << "8r 8 MiB: 1 MiB shard";
+  EXPECT_TRUE(split(8 * kMiB)) << "8r 8 MiB: 1 MiB shard";
+  EXPECT_TRUE(split(64 * kMiB)) << "8r 64 MiB: 8 MiB shard, past the LL tier";
   comm().nRanks = 4;
-  EXPECT_FALSE(split(4 * kMiB)) << "4r 4 MiB: 1 MiB shard";
+  EXPECT_TRUE(split(4 * kMiB)) << "4r 4 MiB: 1 MiB shard";
   comm().nRanks = 2;
   EXPECT_FALSE(split(2 * kMiB)) << "2 ranks: one peer";
   comm().nRanks = 8;
@@ -851,6 +852,21 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitCapIsTheReplacedLauncher
   params_["RCCL_DDA_LL128_ONESHOT_THRESHOLD"] = kMiB;
   EXPECT_EQ(replaced(false), 9u) << "LL128 two-shot";
   EXPECT_EQ(splitGrid(), 9u);
+}
+
+// Past the LL tier the split replaces the LL128 two-shot and stays within its grid (one warp per shard slice).
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitPastTheLLTierStaysWithinTheLL128TwoShotGrid) {
+  SplitTiersOn(comm(), params_);
+  const size_t bytes = 64 * kMiB;  // 8 ranks: 8 MiB shards, past the 16 MiB LL tier
+  comm().WarpSize = 64;
+  const unsigned replaced = RunOneLL128(bytes / 4).grid.x;
+  comm().WarpSize = 32;
+  const DdaLaunch& l = RunOneLL128(bytes / 4);
+  EXPECT_EQ(l.kernel, (LL128Split<float, 8>()));
+  EXPECT_EQ(replaced, std::min<size_t>((bytes / 8 / kSliceData + 1 + 15) / 16, comm().ddaFabricMaxBlocks));
+  EXPECT_EQ(l.grid.x, replaced) << "units fill every replaced block";
+  EXPECT_EQ(ddaArLL128SplitBound(mock_.get(), kSendbuff, kRecvbuff, bytes / 4, ncclFloat32, ncclSum, {}).blocks,
+            replaced);
 }
 
 // A user-set LL or LL128 one-shot threshold keeps the window's messages on that tier.

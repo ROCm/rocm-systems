@@ -193,9 +193,8 @@ static DdaArLL128Kernel<T> ddaArLL128TwoShotKernel(int nRanks, int wire) {
   });
 }
 
-// Peer-split window (measured crossovers): from 2 MiB, shards up to 512 KiB, more than two ranks, staged writer on.
+// Peer-split window (measured crossovers): from 2 MiB on the LL128 tier, more than two ranks, staged writer on.
 constexpr size_t kDdaArLL128SplitMinBytes = 2 * 1024 * 1024;
-constexpr size_t kDdaArLL128SplitMaxShardBytes = 512 * 1024;
 constexpr unsigned kDdaArSplitThreads = 512;
 
 template <typename T>
@@ -385,7 +384,6 @@ static bool ddaArLL128SplitWindow(ncclComm* comm, const void* sendbuff, void* re
                                   ncclDataType_t datatype, ncclRedOp_t op) {
   const size_t bytes = count * ncclTypeSize(datatype);
   return comm != nullptr && comm->nRanks > 2 && ddaArLL128StagedWireOk(comm) && bytes >= kDdaArLL128SplitMinBytes &&
-         bytes / (size_t)comm->nRanks <= kDdaArLL128SplitMaxShardBytes &&
          !(rcclDdaArLL128OneShotPinnedByEnv() &&
            ddaLL128ArOneShotShapeEligible(comm, sendbuff, recvbuff, count, datatype, op)) &&
          bytes <= rcclDdaLL128Threshold(comm, ncclFuncAllReduce) &&
