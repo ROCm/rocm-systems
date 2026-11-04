@@ -1670,7 +1670,7 @@ TEST(RaceDetector, TensorDma_StoreReadsSameWaveCompletedDtlSafe) {
   EXPECT_FALSE(b.hasRace());
 }
 
-TEST(RaceDetector, TensorDma_TransferWithoutRangesTakesACounterSlot) {
+TEST(RaceDetector, TensorDma_TransferWithoutRangesTakesATensorcntSlot) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
   b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
   b.tensorLoadToLds(/*wave=*/0, {});
@@ -1679,7 +1679,7 @@ TEST(RaceDetector, TensorDma_TransferWithoutRangesTakesACounterSlot) {
   EXPECT_FALSE(b.hasRace());
 }
 
-TEST(RaceDetector, TensorDma_EachTransferWithoutRangesTakesOneCounterSlot) {
+TEST(RaceDetector, TensorDma_EachTransferWithoutRangesTakesOneTensorcntSlot) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
   b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
   b.tensorLoadToLds(/*wave=*/0, {});
@@ -1698,7 +1698,7 @@ TEST(RaceDetector, TensorDma_PartialWaitRetiresAnOlderTransferWithoutRanges) {
   EXPECT_TRUE(b.hasLdsRace(4));
 }
 
-TEST(RaceDetector, TensorDma_StoreWithoutRangesTakesACounterSlot) {
+TEST(RaceDetector, TensorDma_StoreWithoutRangesTakesATensorcntSlot) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
   b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
   b.tensorStoreFromLds(/*wave=*/0, {});
