@@ -248,6 +248,9 @@ TEST_CASE("Unit_HRR_PinnedHostStructLowBits_Direct", "[.][hrr-direct]") {
 // land while it holds the pinned tracking lock. Each child frees an address
 // capture does not track, which takes that lock and fails without device work.
 // A child that inherited the lock held never exits.
+// The forks wait for the launcher's first launches to finish: the first loads
+// the code object and creates the null stream, which take ROCr's memory lock,
+// and a child forked then hangs in hipFree on a lock capture does not own.
 TEST_CASE("Unit_HRR_PinnedHostFork_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   constexpr size_t kBig = 32u << 20;
@@ -256,14 +259,16 @@ TEST_CASE("Unit_HRR_PinnedHostFork_Direct", "[.][hrr-direct]") {
   std::memset(p, 1, kBig);
   // Nothing may REQUIRE before the join.
   std::atomic<bool> stop{false};
+  std::atomic<int>  launched{0};
   std::thread launcher([&] {
     while (!stop.load()) {
       hipLaunchKernelGGL(hrr_pinned_ignore, dim3(1), dim3(1), 0, nullptr,
                          reinterpret_cast<uint64_t>(p));
       (void)hipStreamSynchronize(nullptr);
+      ++launched;
     }
   });
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  while (launched.load() < 2) std::this_thread::sleep_for(std::chrono::milliseconds(1));
   int hung = 0, failed = 0;
   for (int i = 0; i < 20 && !hung; ++i) {
     const pid_t pid = fork();

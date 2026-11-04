@@ -132,8 +132,97 @@ protected:
         }
     }
 
+    // main_mpi.cpp silences gtest output on non-zero ranks, so re-raise their failures
+    // on rank 0 at the file and line where they failed.
+    void ForwardPeerFailures()
+    {
+        constexpr int kTagCount = 9640;
+        constexpr int kTagLen   = 9641;
+        constexpr int kTagMsg   = 9642;
+
+        // Each failed part travels as three NUL-terminated fields: file, line, summary.
+        if(worldRank_ != 0)
+        {
+            int         nFailed = 0;
+            std::string msg;
+            const auto* r = ::testing::UnitTest::GetInstance()->current_test_info()->result();
+            for(int i = 0; i < r->total_part_count(); ++i)
+            {
+                const auto& p = r->GetTestPartResult(i);
+                if(!p.failed()) continue;
+                ++nFailed;
+                msg += p.file_name() ? p.file_name() : "unknown";
+                msg += '\0';
+                msg += std::to_string(p.line_number());
+                msg += '\0';
+                msg += p.summary() ? p.summary() : "";
+                msg += '\0';
+            }
+            int len = static_cast<int>(msg.size());
+            MPI_Send(&nFailed, 1, MPI_INT, 0, kTagCount, MPI_COMM_WORLD);
+            MPI_Send(&len, 1, MPI_INT, 0, kTagLen, MPI_COMM_WORLD);
+            if(len > 0) MPI_Send(msg.data(), len, MPI_CHAR, 0, kTagMsg, MPI_COMM_WORLD);
+            return;
+        }
+
+        // Same timeout as MPIEnvironment::TearDown, which a peer stuck in the test body
+        // would otherwise keep rank 0 from ever reaching.
+        int timeoutSec = 60;
+        if(const char* env = std::getenv("RCCL_TEST_TEARDOWN_TIMEOUT_SEC"))
+        {
+            int v = std::atoi(env);
+            if(v > 0) timeoutSec = v;
+        }
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeoutSec);
+
+        for(int peer = 1; peer < worldSize_; ++peer)
+        {
+            int arrived = 0;
+            MPI_Iprobe(peer, kTagCount, MPI_COMM_WORLD, &arrived, MPI_STATUS_IGNORE);
+            while(!arrived)
+            {
+                if(std::chrono::steady_clock::now() > deadline)
+                {
+                    ADD_FAILURE() << "rank " << peer << " did not reach TearDown within "
+                                  << timeoutSec << " s (ranks out of sync), forcing abort";
+                    MPI_Abort(MPI_COMM_WORLD, 1);
+                    return;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                MPI_Iprobe(peer, kTagCount, MPI_COMM_WORLD, &arrived, MPI_STATUS_IGNORE);
+            }
+
+            int nFailed = 0, len = 0;
+            MPI_Recv(&nFailed, 1, MPI_INT, peer, kTagCount, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(&len, 1, MPI_INT, peer, kTagLen, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            if(len <= 0) continue;
+
+            std::string msg(len, '\0');
+            MPI_Recv(msg.data(), len, MPI_CHAR, peer, kTagMsg, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            size_t pos = 0;
+            auto   nextField = [&msg, &pos]() {
+                const size_t end = msg.find('\0', pos);
+                std::string  field = msg.substr(pos, end - pos);
+                pos = (end == std::string::npos) ? msg.size() : end + 1;
+                return field;
+            };
+            for(int i = 0; i < nFailed && pos < msg.size(); ++i)
+            {
+                const std::string file    = nextField();
+                const int         line    = std::atoi(nextField().c_str());
+                const std::string summary = nextField();
+                ADD_FAILURE_AT(file.c_str(), line) << "[rank " << peer << "] " << summary;
+            }
+        }
+    }
+
     void TearDown() override
     {
+        // Every rank must reach TearDown for the same test; otherwise rank 0 aborts the job
+        // after RCCL_TEST_TEARDOWN_TIMEOUT_SEC. worldSize_ stays 0 until SetUpFixture
+        // passes its world-size checks.
+        if(worldSize_ > 1) ForwardPeerFailures();
+
         if(rma_ != nullptr)
         {
             if(collComm_ != nullptr && rma_->deregMrSym)
@@ -459,18 +548,51 @@ protected:
         (void)hipDeviceSynchronize();
     }
 
-    /** Return true iff device `buf` matches (seed + i) % 256 for all i. */
-    bool VerifyBuf(const void* buf, size_t size, int seed)
+    /** Check device `buf` against (seed + i) % 256, reporting where a mismatch starts
+     *  and what was read, so a payload that never landed (zeros) stands out. */
+    ::testing::AssertionResult VerifyBuf(const void* buf, size_t size, int seed)
     {
+        constexpr size_t kHexWindow = 16;
+        auto expectedAt = [seed](size_t i) { return static_cast<uint8_t>((seed + i) % 256); };
+
         std::vector<uint8_t> staging(size);
-        if(hipMemcpy(staging.data(), buf, size, hipMemcpyDeviceToHost) != hipSuccess)
-            return false;
+        hipError_t err = hipMemcpy(staging.data(), buf, size, hipMemcpyDeviceToHost);
+        if(err != hipSuccess)
+        {
+            return ::testing::AssertionFailure() << "hipMemcpy D2H failed: " << hipGetErrorString(err);
+        }
         (void)hipDeviceSynchronize();
+
+        size_t nBad = 0, first = 0;
+        bool   allZero = true;
         for(size_t i = 0; i < size; ++i)
         {
-            if(staging[i] != static_cast<uint8_t>((seed + i) % 256)) return false;
+            if(staging[i] == expectedAt(i)) continue;
+            if(nBad++ == 0) first = i;
+            allZero = allZero && staging[i] == 0;
         }
-        return true;
+        if(nBad == 0) return ::testing::AssertionSuccess();
+
+        std::string expectedHex, actualHex;
+        char        hex[4];
+        char        seedHex[16];
+        std::snprintf(seedHex, sizeof(seedHex), "0x%02x", seed);
+        for(size_t i = first; i < size && i < first + kHexWindow; ++i)
+        {
+            std::snprintf(hex, sizeof(hex), " %02x", expectedAt(i));
+            expectedHex += hex;
+            std::snprintf(hex, sizeof(hex), " %02x", staging[i]);
+            actualHex += hex;
+        }
+
+        return ::testing::AssertionFailure()
+               << nBad << " of " << size << " bytes mismatched (seed " << seedHex
+               << "), first at offset " << first
+               << (allZero ? "; all mismatching bytes are 0x00" : "")
+               << "\n  expected @" << first << ":" << expectedHex
+               << "\n  actual   @" << first << ":" << actualHex
+               << "\n  rank " << worldRank_ << ", nContexts " << GetNumContexts() << ", "
+               << (UseDmaBuf() ? "DmaBuf" : "RegMr");
     }
 
     /** Fill device `buf` with a constant byte (sentinel). */
