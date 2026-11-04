@@ -567,6 +567,7 @@ add_executable(
     util_result_test.cpp
     util_bit_test.cpp
     util_unique_handle_test.cpp
+    util_intrusive_shared_ptr_test.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
@@ -1058,8 +1059,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
             -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_analysis_tests>
-            -DANALYSIS_ARCHIVE=$<TARGET_FILE:rocjitsu_analysis_internal> -P
-            ${CMAKE_CURRENT_SOURCE_DIR}/check_static_analysis_symbols.cmake
+            -DANALYSIS_ARCHIVE=$<TARGET_FILE:rocjitsu_analysis_internal>
+            -DREQUIRED_MODEL_ARCHES=cdna1,cdna2,cdna3,cdna4,cdna5,rdna1,rdna2,rdna3,rdna3_5,rdna4
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_static_analysis_symbols.cmake
     )
 endif()
 
@@ -1164,7 +1166,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         NAME ModelOnlyIsaTest.SymbolBoundary
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
-            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_model_only_test> -P
+            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_model_only_test>
+            -DREQUIRED_MODEL_ARCHES=cdna5 -P
             ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
     )
 
@@ -1203,7 +1206,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         NAME Gfx1250B0ToA0Library.SymbolBoundary
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
-            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_gfx1250_b0_to_a0> -P
+            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_gfx1250_b0_to_a0>
+            -DREQUIRED_MODEL_ARCHES=cdna5 -P
             ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
     )
 
@@ -1278,8 +1282,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         NAME IsaRegistryCompositionTest.NarrowSymbolBoundary
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
-            -DNARROW_LIBRARY=$<TARGET_FILE:rocjitsu_narrow_isa_registry_fixture>
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_narrow_registry_symbols.cmake
+            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_narrow_isa_registry_fixture>
+            -DREQUIRED_MODEL_ARCHES=cdna5 -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_narrow_registry_symbols.cmake
     )
 endif()
 
@@ -2372,6 +2377,7 @@ set(_rj_interposer_pm4_tests
     UnmappedShaderFailsFence
     OversizedLdsFailsFence
     FailedFenceIsStillAvailable
+    FailedDependencyFailsFenceWithoutExecutingCommands
     MappedScalarLoadSucceeds
     UnmappedScalarLoadFailsFence
     MappedVectorLoadSucceeds

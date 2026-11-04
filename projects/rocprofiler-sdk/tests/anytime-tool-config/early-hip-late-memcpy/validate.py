@@ -82,14 +82,20 @@ def test_tool_b_captured_memcpy_only(tool_b_data):
     )
 
 
-def test_tool_b_copy_count_is_phase2_only(tool_b_data, phase1_copies, phase2_copies):
-    """Count proof: Tool B captured exactly the post-registration copies."""
+def test_tool_b_copy_volume_is_phase2_only(
+    tool_b_data, phase1_copies, phase2_copies, copy_bytes
+):
+    """Volume proof: Tool B captured exactly the post-registration copies, in bytes."""
     sdk = _sdk(tool_b_data)
-    captured = len(sdk["buffer_records"]["memory_copies"])
+    copies = sdk["buffer_records"]["memory_copies"]
 
-    assert captured == phase2_copies, (
-        f"expected exactly {phase2_copies} memory copies (phase 2 only), got {captured}; "
-        f"phase 1 ({phase1_copies}) should have been missed"
+    captured = sum(itr["bytes"] for itr in copies)
+    expected = phase2_copies * copy_bytes
+
+    assert captured == expected, (
+        f"expected exactly {expected} bytes of memory copies (phase 2 only), "
+        f"got {captured}; phase 1 ({phase1_copies * copy_bytes} bytes) should "
+        "have been missed"
     )
 
 
