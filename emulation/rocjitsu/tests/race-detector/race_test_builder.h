@@ -92,13 +92,13 @@ public:
 
   /// Register a tensor DMA load into LDS (tracked by tensorcnt). The load
   /// writes every range; it is validated against outstanding LDS reads.
-  void tensorLoad(int wave, std::vector<LdsByteRange> ranges, int elementBytes = 4) {
+  void tensorLoadToLds(int wave, std::vector<LdsByteRange> ranges, int elementBytes = 4) {
     tensorTransfer(wave, MemoryEventType::GLOBAL_TO_LDS, ranges, elementBytes);
   }
 
   /// Register a tensor DMA store from LDS (tracked by tensorcnt). The store
   /// reads every range; it is validated against outstanding LDS writes.
-  void tensorStore(int wave, std::vector<LdsByteRange> ranges, int elementBytes = 4) {
+  void tensorStoreFromLds(int wave, std::vector<LdsByteRange> ranges, int elementBytes = 4) {
     tensorTransfer(wave, MemoryEventType::LDS_TO_GLOBAL, ranges, elementBytes);
   }
 
