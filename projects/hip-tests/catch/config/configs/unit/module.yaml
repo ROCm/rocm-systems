@@ -1,5 +1,11 @@
 ---
 module:
+  Unit_hipModuleLoad_Compressed_StaticRegistration:
+    <<: *level_default
+    tags: [load, launch]
+  Unit_hipModuleLoad_Compressed_Lifetime:
+    <<: *level_default
+    tags: [load, function, global]
   Unit_hipModuleLaunchCooperativeKernel_Positive_Basic:
     <<: *level_default
     disabled:
