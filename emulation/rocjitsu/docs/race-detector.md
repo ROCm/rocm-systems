@@ -197,7 +197,13 @@ races. Some examples:
   wave has an outstanding read of the same byte, without an intervening
   `s_barrier`;
   or a wave reads bytes targeted by its own outstanding direct-to-LDS operation
-  before the required `s_waitcnt vmcnt`.
+  before the required `s_waitcnt vmcnt`. A direct-to-LDS write over bytes of
+  the same wave's pending DS read is also reported, on every target with
+  direct-to-LDS, until a DS wait completes the read. That is a conservative
+  rule: the ISA does not establish that the write waits for the read. Compilers
+  can emit such a pair without a DS wait (on gfx1250, LLVM may place only
+  `s_wait_kmcnt 0` between a `ds_load_b32` and a `global_load_async_to_lds_b32`
+  to the same dword), and the detector reports it.
 - **Tensor DMA races** (gfx1250): `tensor_load_to_lds` writes and
   `tensor_store_from_lds` reads are LDS events on `tensorcnt`. Any wave,
   including the issuing one, that reads a load's destination or overwrites a

@@ -685,6 +685,9 @@ TEST_F(TensorDmaRaceTest, DtlAfterTensorcntIsSafe) {
   EXPECT_FALSE(dtl_write(0, 4));
 }
 
+// A direct-to-LDS write over the same wave's pending DS read is reported as a
+// conservative rule: the ISA does not establish that the write waits for the
+// read.
 TEST_F(TensorDmaRaceTest, DtlOverwritingAPendingDsReadRaces) {
   EXPECT_FALSE(ds_read(0, 4));
   EXPECT_TRUE(dtl_write(0, 4));

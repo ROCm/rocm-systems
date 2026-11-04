@@ -469,7 +469,10 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
         ldsAddrs[lane] =
             d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * perLaneBytes;
         // Check each written lane against pending LDS reads, such as a tensor
-        // store's source or another wave's DS read, as the DS write path does.
+        // store's source or a DS read, as the DS write path does. That includes
+        // the wave's own pending DS reads: the ISA does not establish that a
+        // direct-to-LDS write waits for them, so as a conservative rule the
+        // overlap is reported until a DS wait completes the read.
         if (!(validLaneMask & (1ULL << lane)))
           continue;
         const auto bytes = detector->ldsBytesInRange(ldsAddrs[lane], perLaneBytes, perLaneBytes);
