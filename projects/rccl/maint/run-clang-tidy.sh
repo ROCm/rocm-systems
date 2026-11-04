@@ -85,15 +85,37 @@ done
 # ---------------------------------------------------------------------------
 # Locate clang-tidy and verify version
 # ---------------------------------------------------------------------------
-CLANG_TIDY="${CLANG_TIDY:-/opt/rocm/lib/llvm/bin/clang-tidy}"
-if ! command -v "$CLANG_TIDY" &>/dev/null; then
-  CLANG_TIDY="clang-tidy"
-fi
+# Prefer the clang-tidy that ships with ROCm. A stock upstream clang-tidy is
+# built against its own headers and cannot parse ROCm's HIP headers: clang-tidy
+# 22.1.8 from PyPI reports 25 clang-diagnostic-errors ("builtin functions must
+# be directly called") inside /opt/rocm/include before reaching any RCCL code.
+# That is the breakage MIOpen works around with -nogpulib and __builtin_*
+# redefinitions; using ROCm's own build means needing none of it.
+#
+# The LLVM location moved between ROCm releases, hence the candidate list.
+CLANG_TIDY_CANDIDATES=(
+  "${CLANG_TIDY:-}"
+  /opt/rocm/lib/llvm/bin/clang-tidy
+  /opt/rocm/llvm/bin/clang-tidy
+  clang-tidy
+)
 
-if ! command -v "$CLANG_TIDY" &>/dev/null; then
-  echo "ERROR: clang-tidy not found. Install clang-tidy >= $MIN_VERSION, or set CLANG_TIDY." >&2
+CLANG_TIDY=""
+for CANDIDATE in "${CLANG_TIDY_CANDIDATES[@]}"; do
+  if [[ -n "$CANDIDATE" ]] && command -v "$CANDIDATE" &>/dev/null; then
+    CLANG_TIDY="$CANDIDATE"
+    break
+  fi
+done
+
+if [[ -z "$CLANG_TIDY" ]]; then
+  echo "ERROR: clang-tidy not found. Looked for ROCm's build under /opt/rocm and" >&2
+  echo "       for clang-tidy on PATH. Install clang-tidy >= $MIN_VERSION, or set" >&2
+  echo "       CLANG_TIDY to its path." >&2
   exit 2
 fi
+
+echo "Using $(command -v "$CLANG_TIDY")"
 
 VERSION=$("$CLANG_TIDY" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 | cut -d. -f1)
 if [[ -z "$VERSION" || "$VERSION" -lt "$MIN_VERSION" ]]; then
@@ -101,11 +123,26 @@ if [[ -z "$VERSION" || "$VERSION" -lt "$MIN_VERSION" ]]; then
   exit 2
 fi
 
-RUN_CLANG_TIDY="$(dirname "$CLANG_TIDY")/run-clang-tidy"
-if ! command -v "$RUN_CLANG_TIDY" &>/dev/null; then
-  echo "ERROR: run-clang-tidy not found next to $CLANG_TIDY." >&2
+# LLVM and ROCm ship this driver as `run-clang-tidy`, but the PyPI clang-tidy
+# package (which is how ROCm CI jobs install a pinned version) names it
+# `run-clang-tidy.py`. Accept either.
+CLANG_TIDY_BIN_DIR="$(dirname "$(command -v "$CLANG_TIDY")")"
+RUN_CLANG_TIDY=""
+for CANDIDATE in "${CLANG_TIDY_BIN_DIR}/run-clang-tidy" "${CLANG_TIDY_BIN_DIR}/run-clang-tidy.py"; do
+  if [[ -x "$CANDIDATE" ]]; then
+    RUN_CLANG_TIDY="$CANDIDATE"
+    break
+  fi
+done
+
+if [[ -z "$RUN_CLANG_TIDY" ]]; then
+  echo "ERROR: neither run-clang-tidy nor run-clang-tidy.py found in ${CLANG_TIDY_BIN_DIR}." >&2
   exit 2
 fi
+
+# run-clang-tidy defaults to whatever `clang-tidy` is on PATH, which is not
+# necessarily the one we just version-checked.
+RUN_CLANG_TIDY_ARGS=(-clang-tidy-binary "$(command -v "$CLANG_TIDY")")
 
 # ---------------------------------------------------------------------------
 # Make sure we have a compile database and hipified sources
@@ -166,7 +203,8 @@ fi
 # each analysed file, and the files it analyses are the hipified copies in the
 # build directory, which may be outside the source tree entirely. Relying on
 # the walk-up silently yields zero findings.
-ARGS=(-p "$BUILD_DIR" -quiet -j "$(nproc)" -config-file "${RCCL_ROOT}/.clang-tidy")
+ARGS=(-p "$BUILD_DIR" -quiet -j "$(nproc)" -config-file "${RCCL_ROOT}/.clang-tidy"
+  "${RUN_CLANG_TIDY_ARGS[@]}")
 if [[ -n "$FILTER" ]]; then
   ARGS+=("$FILTER")
 fi

@@ -1,0 +1,114 @@
+# clang-tidy static analysis for projects/rccl.
+#
+# Advisory: this workflow reports findings and does not fail on them, matching
+# how the pylint hook in rccl-formatting.yml is wired. Turning it into a gate
+# is a one-word change (--strict), to be made once the runtime and the noise
+# level are known from real PRs.
+#
+# It is a separate workflow from rccl-formatting.yml because clang-tidy needs a
+# parsed translation unit: a compile database and hipified sources, which means
+# configuring a build in a ROCm container. pre-commit works from a changed-file
+# list and cannot do that. Nothing is compiled here and no GPU is used; the only
+# build steps are hipify and the generated tuner header.
+#
+# The container, the GPU_TARGETS pin and the dependency bootstrap all follow
+# rccl-host-unit-tests.yml, which already runs a GPU-free RCCL configure on
+# GitHub-hosted runners.
+#
+# On clang-tidy versions: this uses the clang-tidy that ships inside the ROCm
+# image rather than installing one. A stock upstream clang-tidy cannot parse
+# ROCm's HIP headers (clang-tidy 22.1.8 from PyPI reports 25
+# clang-diagnostic-errors inside /opt/rocm/include before reaching any RCCL
+# code), which is why MIOpen's clang-tidy job needs -nogpulib and __builtin_*
+# redefinitions to work at all. Using ROCm's own build avoids that entirely, and
+# keeps the analyser in step with the compiler the code is built with.
+
+name: "RCCL clang-tidy"
+
+on:
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - 'projects/rccl/**'
+      - '.github/workflows/rccl-clang-tidy.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  clang-tidy:
+    name: clang-tidy (advisory, CPU-only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container:
+      image: rocm/dev-ubuntu-22.04:7.2
+    env:
+      ROCM_PATH: /opt/rocm
+      # Pin a valid arch so RCCL's configure never probes for a GPU (there is
+      # none on CI). hipify compiles no device code, so any gfx9xx is equivalent.
+      GPU_TARGETS: gfx942
+    steps:
+      - name: Checkout rccl
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # rocm-systems is a large monorepo; fetch only what the analysis needs.
+          sparse-checkout: projects/rccl
+
+      - name: Install build deps
+        # The ROCm dev image ships hipcc/hipify but not cmake or a host
+        # toolchain. The dependency list lives in run_host_tests.sh, which is
+        # the single source of truth shared with rccl-host-unit-tests.yml.
+        run: bash projects/rccl/test/host/run_host_tests.sh deps
+
+      - name: Put ROCm on PATH
+        run: echo "/opt/rocm/bin" >> "$GITHUB_PATH"
+
+      - name: Fetch the NCCL ref used to tell RCCL-owned files from upstream
+        # maint/run-clang-tidy.sh hides findings in files NVIDIA/nccl ships at
+        # the same path, and refuses to run rather than silently widening its
+        # scope when it cannot work out which those are. Blobless and shallow:
+        # only the tree listing is needed, not file contents.
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git remote add nccl https://github.com/NVIDIA/nccl.git
+          git remote set-url --push nccl no_push
+          git fetch --no-tags --depth=1 --filter=blob:none nccl master
+
+      - name: Run clang-tidy
+        # Advisory: the script exits 0 on findings unless --strict is passed.
+        # It configures the build and runs hipify itself when the build
+        # directory has no compile database yet.
+        run: |
+          bash projects/rccl/maint/run-clang-tidy.sh \
+            --build-dir "$RUNNER_TEMP/rccl-clang-tidy-build"
+
+      - name: Summarise findings
+        if: always()
+        run: |
+          FINDINGS="$RUNNER_TEMP/rccl-clang-tidy-build/clang-tidy-findings.txt"
+          {
+            echo "## clang-tidy (advisory)"
+            echo
+            if [ ! -s "$FINDINGS" ]; then
+              echo "No findings in RCCL-owned files."
+            else
+              echo "$(wc -l < "$FINDINGS") finding(s) in RCCL-owned files:"
+              echo
+              echo '```'
+              cat "$FINDINGS"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload findings
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rccl-clang-tidy-findings
+          path: ${{ runner.temp }}/rccl-clang-tidy-build/clang-tidy-*.txt
+          if-no-files-found: warn
