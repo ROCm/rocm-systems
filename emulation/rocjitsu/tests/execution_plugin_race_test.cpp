@@ -874,11 +874,10 @@ protected:
 
   /// Load a tile, issue a transfer that moves no data, wait until at most
   /// `remaining` transfers are outstanding, and read the loaded tile.
-  template <int Remaining>
-  bool load_then_empty_then_read(bool empty_is_load, const Descriptor &empty) {
+  bool load_then_empty_then_read(uint16_t remaining, bool empty_is_load, const Descriptor &empty) {
     execute_decoded_tensor(0, /*is_load=*/true, {});
     execute_decoded_tensor(0, empty_is_load, empty);
-    wait_tensorcnt(0, Remaining);
+    wait_tensorcnt(0, remaining);
     return ds_read(0, waves[0]->lds_base() + kTileOffset + 4);
   }
 };
@@ -887,31 +886,41 @@ protected:
 // others, including one that moves no data. Waiting for all but one therefore
 // completes the load issued before it.
 TEST_F(DecodedTensorDmaRaceTest, StoreOutsideTheTensorTakesATensorcntSlot) {
-  EXPECT_FALSE(load_then_empty_then_read<1>(/*empty_is_load=*/false,
-                                            {.lds_offset = kEmptyOffset, .tensor_dim0 = 0}));
+  EXPECT_FALSE(load_then_empty_then_read(/*remaining=*/1, /*empty_is_load=*/false,
+                                         {.lds_offset = kEmptyOffset, .tensor_dim0 = 0}));
 }
 
 TEST_F(DecodedTensorDmaRaceTest, NullTensorStoreTakesATensorcntSlot) {
-  EXPECT_FALSE(load_then_empty_then_read<1>(/*empty_is_load=*/false,
-                                            {.lds_offset = kEmptyOffset, .count = 0}));
+  EXPECT_FALSE(load_then_empty_then_read(/*remaining=*/1, /*empty_is_load=*/false,
+                                         {.lds_offset = kEmptyOffset, .count = 0}));
 }
 
 TEST_F(DecodedTensorDmaRaceTest, NullTensorLoadTakesATensorcntSlot) {
-  EXPECT_FALSE(load_then_empty_then_read<1>(/*empty_is_load=*/true,
-                                            {.lds_offset = kEmptyOffset, .count = 0}));
+  EXPECT_FALSE(load_then_empty_then_read(/*remaining=*/1, /*empty_is_load=*/true,
+                                         {.lds_offset = kEmptyOffset, .count = 0}));
 }
 
 TEST_F(DecodedTensorDmaRaceTest, NopTileLoadTakesATensorcntSlot) {
   // With tile_dim1 = 0 the zero-width tile has rank zero, a shape accepted
   // before NOP tiles were; tile_dim1 = 1 exercises the newly accepted {0,1}.
-  EXPECT_FALSE(load_then_empty_then_read<1>(
+  EXPECT_FALSE(load_then_empty_then_read(
+      /*remaining=*/1,
       /*empty_is_load=*/true, {.lds_offset = kEmptyOffset, .tile_dim0 = 0, .tile_dim1 = 1}));
 }
 
 // With both transfers outstanding, the load is still pending, so the read races.
+// Had the NOP tile taken more than one slot, waiting for two would complete the
+// load.
+TEST_F(DecodedTensorDmaRaceTest, NopTileLoadStaysPendingUntilTheWaitCoversIt) {
+  EXPECT_TRUE(load_then_empty_then_read(
+      /*remaining=*/2, /*empty_is_load=*/true,
+      {.lds_offset = kEmptyOffset, .tile_dim0 = 0, .tile_dim1 = 1}));
+}
+
+// Likewise for a store outside the tensor.
 TEST_F(DecodedTensorDmaRaceTest, LoadStaysPendingUntilTheWaitCoversIt) {
-  EXPECT_TRUE(load_then_empty_then_read<2>(/*empty_is_load=*/false,
-                                           {.lds_offset = kEmptyOffset, .tensor_dim0 = 0}));
+  EXPECT_TRUE(load_then_empty_then_read(/*remaining=*/2, /*empty_is_load=*/false,
+                                        {.lds_offset = kEmptyOffset, .tensor_dim0 = 0}));
 }
 
 TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
