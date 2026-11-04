@@ -1235,6 +1235,19 @@ bool open(const char* output_dir) {
   snprintf(sub, sizeof(sub), "/pid-%llu", static_cast<unsigned long long>(pid));
   const std::string out_dir = g_base_dir + sub;
 
+  if (const char* key_path = std::getenv("HIP_HRR_SIGNING_KEY");
+      key_path != nullptr && key_path[0] != '\0') {
+    uint8_t seed[hrr_sign::kSeedSize];
+    std::string key_err;
+    const bool key_ok = hrr_sign::read_key_file(key_path, /*is_seed=*/true, seed, &key_err);
+    rocm::sha2::secure_zero(seed, sizeof(seed));
+    if (!key_ok) {
+      LogPrintfError("[HRR capture] %s", key_err.c_str());
+      fprintf(stderr, "[HRR capture] Capture disabled: %s.\n", key_err.c_str());
+      return open_failed(out_dir, false);
+    }
+  }
+
   std::error_code exists_ec;
   bool created_pid_dir = !fs::exists(fs::symlink_status(out_dir, exists_ec));
   PendingDirs dirs;
@@ -1461,51 +1474,56 @@ void flush(const char* /*output_dir*/) {
   // A forked child opens its archive on its first record, under g_reopen_mu.
   // Holding it here keeps the trailer and the manifest from landing before
   // that open has finished, and no archive opens once this one is finalized.
-  std::lock_guard<std::mutex> reopen_lk(g_reopen_mu);
-  g_reopen_after_fork.store(false, std::memory_order_release);
-  bool incomplete;
   std::string out_dir;
   int dir_fd;
   {
-    BufWriteGuard lk;
-    // Must be read under the lock, see stop_capture_locked().
-    incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
-    out_dir = g_output_dir;
-    dir_fd = g_dir_fd.load();
-    if (g_events_fd >= 0 && !g_events_finalized) {
-      {
-        // Stop new blob and code object claims, then wait for the claimed writes
-        // to end: a failed one marks the capture incomplete, which decides the
-        // trailer and the manifest below. Holding g_file_mu keeps events out
-        // meanwhile, so none is recorded without its blob.
-        std::unique_lock<std::mutex> blk(g_blob_mu);
-        g_events_finalized = true;
-        g_blob_writes_done.wait(blk, [] { return g_blob_writes_in_flight == 0; });
+    std::lock_guard<std::mutex> reopen_lk(g_reopen_mu);
+    g_reopen_after_fork.store(false, std::memory_order_release);
+    bool incomplete;
+    {
+      BufWriteGuard lk;
+      // Must be read under the lock, see stop_capture_locked().
+      incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
+      out_dir = g_output_dir;
+      dir_fd = g_dir_fd.load();
+      if (g_events_fd >= 0 && !g_events_finalized) {
+        {
+          // Stop new blob and code object claims, then wait for the claimed writes
+          // to end: a failed one marks the capture incomplete, which decides the
+          // trailer and the manifest below. Holding g_file_mu keeps events out
+          // meanwhile, so none is recorded without its blob.
+          std::unique_lock<std::mutex> blk(g_blob_mu);
+          g_events_finalized = true;
+          g_blob_writes_done.wait(blk, [] { return g_blob_writes_in_flight == 0; });
+        }
+        incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
+        // Skip the clean-shutdown trailer when the capture is known incomplete: its
+        // absence is exactly how the reader detects a non-faithful archive.
+        if (!incomplete) {
+          hrr_eof_record rec = hrr_make_eof_record(
+              g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
+          rec.hdr.timestamp_ns = amd::Os::timeNanos();
+          rec.hdr.thread_id    = current_thread_id();
+          buffer_append_locked(&rec, sizeof(rec));
+        }
+        flush_buffer_locked();
+        HRR_FSYNC(g_events_fd);
       }
       incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
-      // Skip the clean-shutdown trailer when the capture is known incomplete: its
-      // absence is exactly how the reader detects a non-faithful archive.
-      if (!incomplete) {
-        hrr_eof_record rec = hrr_make_eof_record(
-            g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
-        rec.hdr.timestamp_ns = amd::Os::timeNanos();
-        rec.hdr.thread_id    = current_thread_id();
-        buffer_append_locked(&rec, sizeof(rec));
-      }
-      flush_buffer_locked();
-      HRR_FSYNC(g_events_fd);
+      // close() runs later and the fd stays open until then. A thread can still
+      // record in between: a forked child's first record finishes opening the
+      // archive just before this, and takes the lock after it.
+      g_events_finalized = true;
     }
-    incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
-    // close() runs later and the fd stays open until then. A thread can still
-    // record in between: a forked child's first record finishes opening the
-    // archive just before this, and takes the lock after it.
-    g_events_finalized = true;
-  }
 
-  if (out_dir.empty()) return;
-  write_manifest_stdio(dir_fd, out_dir, /*complete=*/!incomplete);
-  update_root_manifest();
-  remove_in_archive(dir_fd, out_dir, kActiveMarker);
+    if (out_dir.empty()) return;
+    write_manifest_stdio(dir_fd, out_dir, /*complete=*/!incomplete);
+    update_root_manifest();
+    remove_in_archive(dir_fd, out_dir, kActiveMarker);
+  }
+  // Outside g_reopen_mu: hashing the archive can take seconds on a large capture,
+  // and atfork_prepare() takes g_reopen_mu first. Events and manifests are done,
+  // and dir_fd stays open until close().
   sign_finished_archive(dir_fd, out_dir);
 }
 
