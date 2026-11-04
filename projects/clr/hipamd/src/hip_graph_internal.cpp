@@ -1697,14 +1697,63 @@ void GraphExecSegmented::SelectStreamAssignment() {
 // stream removes both barriers and signals (it runs inline, 0/0), so the full
 // sync cost is what multi-stream genuinely pays over collapse. Tunable via
 // DEBUG_HIP_GRAPH_MIN_OVERLAP; 0 disables the gate.
+//
+// DEBUG_HIP_GRAPH_COLLAPSE_RULE=1 (C1) checks first for a cross-stream edge that touches a node
+// that isn't AQL-captured (its producer segment's last node or its consumer segment's first node:
+// host<->device memcpy, host, event and memory nodes; not a child graph node, which synchronizes
+// its own nodes): such an edge is synchronized across engines on every launch, so the graph
+// collapses. Otherwise the slack rule applies only if
+// DEBUG_HIP_GRAPH_MIN_OVERLAP is set explicitly. Rule 0 is the slack rule alone, as before.
 bool GraphExecSegmented::ShouldCollapseToSingleStream() const {
-  const uint32_t min_overlap = DEBUG_HIP_GRAPH_MIN_OVERLAP;
-  if (min_overlap == 0) return false;            // gate disabled
-  if (segments_.size() < 2) return false;        // nothing to parallelize
+  const uint32_t rule = DEBUG_HIP_GRAPH_COLLAPSE_RULE;
+  const uint32_t min_overlap =
+      ((rule == 1) && flagIsDefault(DEBUG_HIP_GRAPH_MIN_OVERLAP)) ? 0 : DEBUG_HIP_GRAPH_MIN_OVERLAP;
+  if ((rule == 0) && (min_overlap == 0)) {  // gate disabled
+    ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+            "[hipGraph] Single-stream gate: rule=%u segments=%zu decided by none (min_overlap=0) "
+            "-> keep multi-stream",
+            rule, segments_.size());
+    return false;
+  }
+  if (segments_.size() < 2) return false;               // nothing to parallelize
 
   const int dev0 = segments_.front().dev_id;
   for (const auto& seg : segments_) {
     if (seg.dev_id != dev0) return false;
+  }
+
+  if (rule == 1) {
+    // A child graph node is a segment of its own, launched with its own synchronization, so its
+    // capture status (false unless set) doesn't describe the edges into or out of it: multi-stream
+    // child graphs with kernels, a memcpy or a host node inside measured 13-24% faster than
+    // collapsed
+    auto uncaptured = [](Node node) {
+      return (node->GetType() != hipGraphNodeTypeGraph) && !node->GraphCaptureEnabled();
+    };
+    for (const auto& seg : segments_) {
+      for (int dep_id : seg.segment_ids_dependencies) {
+        if (dep_id < 0 || dep_id >= static_cast<int>(segments_.size())) continue;
+        const auto& dep_seg = segments_[dep_id];
+        if (dep_seg.stream_id == seg.stream_id) continue;
+        const bool consumer_uncaptured = !seg.nodes.empty() && uncaptured(seg.nodes.front());
+        const bool producer_uncaptured = !dep_seg.nodes.empty() && uncaptured(dep_seg.nodes.back());
+        if (consumer_uncaptured || producer_uncaptured) {
+          ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+                  "[hipGraph] Single-stream gate: rule=%u segments=%zu decided by uncaptured-edge "
+                  "(segment %d -> %d, %s node uncaptured) -> collapse to single stream",
+                  rule, segments_.size(), dep_id, seg.id,
+                  producer_uncaptured ? "producer's last" : "consumer's first");
+          return true;
+        }
+      }
+    }
+    if (min_overlap == 0) {
+      ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+              "[hipGraph] Single-stream gate: rule=%u segments=%zu decided by none "
+              "(no uncaptured cross-stream edge, slack rule off) -> keep multi-stream",
+              rule, segments_.size());
+      return false;
+    }
   }
 
   size_t machine_threads = 0;
@@ -1743,7 +1792,13 @@ bool GraphExecSegmented::ShouldCollapseToSingleStream() const {
     total_work += seg_work[i];
   }
   const size_t sync_cost = barrier_est + signal_est;
-  if (sync_cost == 0) return false;
+  if (sync_cost == 0) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+            "[hipGraph] Single-stream gate: rule=%u segments=%zu decided by slack (no cross-stream "
+            "sync) -> keep multi-stream",
+            rule, segments_.size());
+    return false;
+  }
 
   std::vector<size_t> cp(segments_.size(), 0);
   size_t critical_path_work = 0;
@@ -1767,11 +1822,12 @@ bool GraphExecSegmented::ShouldCollapseToSingleStream() const {
       (total_work > critical_path_work) ? (total_work - critical_path_work) : 0;
   const bool collapse = parallel_slack < static_cast<size_t>(min_overlap) * sync_cost;
 
-  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
-          "[hipGraph] Single-stream gate: work=%zu critical_path=%zu slack=%zu "
-          "barrier_packets~=%zu signals~=%zu sync_cost=%zu min_overlap=%u -> %s",
-          total_work, critical_path_work, parallel_slack, barrier_est, signal_est,
-          sync_cost, min_overlap,
+  ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+          "[hipGraph] Single-stream gate: rule=%u segments=%zu decided by slack: work=%zu "
+          "critical_path=%zu slack=%zu barrier_packets~=%zu signals~=%zu sync_cost=%zu "
+          "min_overlap=%u -> %s",
+          rule, segments_.size(), total_work, critical_path_work, parallel_slack, barrier_est,
+          signal_est, sync_cost, min_overlap,
           collapse ? "collapse to single stream" : "keep multi-stream");
   return collapse;
 }
