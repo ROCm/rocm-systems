@@ -9,11 +9,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added a *Limited by* mode to the *AI axis* selector in the standalone roofline HTML. It shows each kernel at its limiting memory-level point, falling back to the leftmost point for compute-bound or unknown kernels.
 
-* Added Data Fabric to MALL bandwidth arrows to the CDNA (gfx9) Memory Chart. On gfx942 these report estimated HBM bandwidth, derived from a 64B-per-request approximation, through the new `Estimated HBM Read BW` and `Estimated HBM Write and Atomic BW` metrics. On gfx950 they use the existing `HBM Read BW` and the new `HBM Write and Atomic BW` metric.
+* Added Data Fabric to MALL bandwidth arrows to the CDNA (gfx9) Memory Chart. On gfx940–gfx942 these report estimated HBM bandwidth, derived from a 64B-per-request approximation, through the new `Estimated HBM Read BW` and `Estimated HBM Write and Atomic BW` metrics. On gfx950 they use the existing `HBM Read BW` and the new `HBM Write and Atomic BW` metric.
 
 * Added the `VL1 Coalesce` metric to the VL1D panel of the CDNA (gfx9) Memory Chart.
 
-* Added the xGMI block to the gfx908, gfx90a, and gfx942 Memory Charts, which previously showed it only on gfx950. The block is drawn without bandwidth counters on these architectures.
+* Added the xGMI block to the gfx908, gfx90a, and gfx940–gfx942 Memory Charts, which previously showed it only on gfx950. The block is drawn without bandwidth counters on these architectures.
 
 * Added metrics to the gfx1250 Memory Chart:
   * Instruction cache utilization, latency, and stall rate.
@@ -69,7 +69,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the unused `compute_workload_roofline_data` table from the analysis database.
 
-* Removed the HBM and remote traffic percentage metrics from the gfx908–gfx942 Memory Chart. On gfx942 the new Data Fabric to MALL arrows report estimated HBM bandwidth instead.
+* Removed the HBM and remote traffic percentage metrics from the gfx908–gfx942 Memory Chart. On gfx940–gfx942 the new Data Fabric to MALL arrows report estimated HBM bandwidth instead.
 
 * Removed Memory Chart metrics that the panel YAMLs defined but never rendered, across all CDNA architectures. The remaining Memory Chart metrics are renumbered, so `3.1.N` metric IDs used with `--block` now refer to different metrics.
 
