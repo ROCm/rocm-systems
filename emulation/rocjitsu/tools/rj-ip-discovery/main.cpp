@@ -37,14 +37,11 @@ int main(int argc, char **argv) {
   if (command.add_flag(help, diagnostic).failed())
     return EXIT_FAILURE;
   std::vector<std::string_view> arguments(argv + 1, argv + argc);
-  std::vector<std::string_view> parse_arguments;
   if (arguments.size() == 2 && !arguments[0].empty() && arguments[0].front() != '-') {
     // Legacy two-operand form permits flag-like output filenames after the generation.
-    parse_arguments.reserve(arguments.size() + 1);
-    parse_arguments.emplace_back("--");
+    arguments.insert(arguments.begin(), "--");
   }
-  parse_arguments.insert(parse_arguments.end(), arguments.begin(), arguments.end());
-  auto parsed = parse(command, parse_arguments, diagnostic);
+  auto parsed = parse(command, arguments, diagnostic);
   if (parsed.failed())
     return EXIT_FAILURE;
   const auto &inputs = parsed.value().positional;
