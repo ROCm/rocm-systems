@@ -510,6 +510,8 @@ TEST_P(CbranchForkJoinTest, GetpcRoundTripsThroughGForkWithLoadBias) {
   constexpr uint64_t kExport = 0xFFFFFFFF12345004ULL;
   constexpr uint64_t kForkPc = 0x2000;
   constexpr uint64_t kFewLanes = 0x15;
+  util::FailureOr<uint32_t> getpc = build_s_getpc_b64(36, GetParam());
+  ASSERT_TRUE(getpc.succeeded());
   for (uint64_t bias : {uint64_t{0}, uint64_t{0x00007FFF00000000ULL}}) {
     SCOPED_TRACE(::testing::Message() << "bias=" << std::hex << bias);
     wf->set_code_load_bias(bias);
@@ -520,7 +522,7 @@ TEST_P(CbranchForkJoinTest, GetpcRoundTripsThroughGForkWithLoadBias) {
       set_sgpr64(0, kStackSentinel);
       set_sgpr64(2, kStackSentinel);
       wf->pc = kHighPc;
-      ASSERT_NO_FATAL_FAILURE(execute(build_s_getpc_b64(36, GetParam())));
+      ASSERT_NO_FATAL_FAILURE(execute(getpc.value()));
       ASSERT_EQ(sgpr64(36), kExport);
 
       wf->pc = kForkPc;
