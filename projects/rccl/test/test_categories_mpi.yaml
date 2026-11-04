@@ -382,8 +382,9 @@ test_categories:
       - "DdaAlltoAllPeerColumnsMPI.*"
       - "DdaFabricBlockCap.*"
       - "DdaFabricBarrierStress.*"
-      # Skips under comprehensive: NCCL_LAUNCH_ORDER_IMPLICIT=1 disables DDA, so standard is where it runs.
+      # Skip under comprehensive: NCCL_LAUNCH_ORDER_IMPLICIT=1 disables DDA, so standard is where they run.
       - "DdaIpcMPI_IndexData.*"
+      - "DdaIpcMPI_CommLifecycle.*"
       - "DdaMPI_CollOpCount.*"
     exclude_windows: *mpi_exclude_windows
     labels: &mpi_standard_labels
