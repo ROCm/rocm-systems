@@ -109,6 +109,40 @@ Current Variables:
 ```{note}
 AMDSMI_GPU_METRICS_CACHE_MS - Controls the internal GPU metrics cache duration (ms). Default 100, set to 0 to disable.
 AMDSMI_ASIC_INFO_CACHE_MS - Controls the internal GPU asic info cache duration (ms). Default 10000, set to 0 to disable.
+```{note}
+For command-specific help, use `amd-smi [command] --help` to see more detailed
+usage information. See [Commands](#cmds).
+
+For more detailed version information, use `amd-smi version`.
+
+To display GPU information in the legacy ROCm-SMI format, use `amd-smi --rocm-smi`.
+See [ROCm-SMI compatibility mode](#cli-ex-rocm-smi).
+```
+
+### Selecting devices
+
+`--gpu`, `--cpu`, `--core`, `--nic`, and `--switch` accept space-separated or repeated
+selections without duplicates, preserving first-selected order (`--gpu 2 --gpu all`
+reports GPU 2 first). Comma-separated lists such as `--gpu=0,1` aren't supported.
+Repeating an option adds devices rather than narrowing an earlier selection, so
+`--gpu all --gpu 0` selects every GPU, including for `set` and `reset`. On
+virtualization hosts, `--vf` uses only its last value. In `amd-smi set`, GPU options
+apply the last value given and CPU or core options apply the first value across all
+selected targets.
+
+### Environment variables
+
+You can set one or more variables in front of any `amd-smi` invocation. For example:
+
+```shell-session
+AMDSMI_GPU_METRICS_CACHE_MS=200 amd-smi metric
+```
+
+Current Variables:
+
+```{note}
+AMDSMI_GPU_METRICS_CACHE_MS - Controls the internal GPU metrics cache duration (ms). Default 100, set to 0 to disable.
+AMDSMI_ASIC_INFO_CACHE_MS - Controls the internal GPU asic info cache duration (ms). Default 10000, set to 0 to disable.
 ```
 
 (cmds)=
