@@ -9,6 +9,7 @@
 #include "simdojo/components/vector_reg.h"
 
 #include <format>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -219,6 +220,29 @@ TEST(MfmaRegisterPathsTest, OperandsCrossingTheAllocationEndMatchScalar) {
       }
       EXPECT_EQ(results[false], results[true]);
     }
+}
+
+// Integer accumulation wraps. On a host with eight int32 lanes the four-column shape also runs
+// the matmul's scalar tail.
+TEST(MfmaRegisterPathsTest, I8AccumulationWrapsOnBothPaths) {
+  SKIP_IF_NO_SIMD();
+  ForceScalarGuard guard;
+  for (bool force_scalar : {true, false}) {
+    SCOPED_TRACE(force_scalar);
+    ExactFixture fx(ROCJITSU_CODE_ARCH_CDNA4, WF_SIZE);
+    ASSERT_NE(fx.wf, nullptr);
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+      fx.cu->write_vgpr(fx.vbase + kSourceA, lane, 0x01010101u);
+      fx.cu->write_vgpr(fx.vbase + kSourceB, lane, 0x01010101u);
+      for (uint32_t reg = 0; reg < 4; ++reg)
+        fx.cu->write_vgpr(fx.vbase + kAccumulator + reg, lane, 0x7ffffffeu);
+    }
+    util::set_force_scalar_for_testing(force_scalar);
+    amdgpu::exec_i32_i8(*fx.cu, 4, 4, 4, 16, fx.vbase + kDestination, fx.vbase + kSourceA,
+                        fx.vbase + kSourceB, fx.vbase + kAccumulator);
+    for (uint32_t word : fx.snapshot(kDestination, 4))
+      ASSERT_EQ(word, 0x80000002u);
+  }
 }
 
 TEST(MfmaRegisterPathsTest, F64MatchesScalarForSeparateAndOverlappingDestinations) {

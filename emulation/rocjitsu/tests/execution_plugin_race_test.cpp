@@ -73,6 +73,7 @@ uint32_t legacy_wait_word(rj_code_arch_t arch, uint8_t vmcnt, uint8_t lgkmcnt) {
   return 0xbf8c0070u | (vmcnt & 0xfu) | ((vmcnt & 0x30u) << 10) | (uint32_t{lgkmcnt} << 8);
 }
 
+/// Applies the race detector's register checks to the VGPR reads and writes of one wave.
 class MfmaRacePlugin : public ExecutionPlugin {
 public:
   MfmaRacePlugin() : ExecutionPlugin("mfma_race_probe") {}
@@ -98,56 +99,18 @@ public:
     state_->checkVgprReadLanes(static_cast<int>(logical_reg), lane_mask, byte_mask);
   }
 
+  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
+                              uint64_t lane_mask, uint8_t byte_mask) override {
+    if (wf != wf_ || !state_)
+      return;
+    uint32_t logical_reg = physical_reg - wf->vgpr_alloc().base;
+    state_->checkVgprWriteLanes(static_cast<int>(logical_reg), lane_mask, byte_mask);
+  }
+
   void registerOutstandingLoad(uint32_t logical_reg, uint64_t exec_mask, uint8_t byte_mask = 0xF) {
     ASSERT_NE(state_, nullptr);
     state_->registerEvent(testInstruction(/*pc=*/0x1000), MemoryEventType::GLOBAL_TO_VGPR,
                           {logical_reg}, exec_mask, byte_mask);
-  }
-
-  std::vector<RaceViolation> violations;
-
-private:
-  std::unique_ptr<RaceDetector> detector_;
-  amdgpu::Wavefront *wf_ = nullptr;
-  WaveRaceState *state_ = nullptr;
-};
-
-/// Applies the race detector's register checks to both reads and writes of one wave.
-class MfmaRegisterRacePlugin : public ExecutionPlugin {
-public:
-  MfmaRegisterRacePlugin() : ExecutionPlugin("mfma_register_race_probe") {}
-
-  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t wg_id, uint32_t physical_vgpr_count,
-                                   uint32_t physical_sgpr_count,
-                                   std::span<amdgpu::Wavefront *> wavefronts) override {
-    detector_ = std::make_unique<RaceDetector>(
-        static_cast<int>(wavefronts.size()), static_cast<int>(physical_vgpr_count),
-        static_cast<int>(physical_sgpr_count), Dim3d(static_cast<int>(wg_id)),
-        [this](RaceViolation v) { violations.push_back(v); },
-        counterCapacitiesForArch(wavefronts.front()->cu().arch()),
-        wavefronts.front()->lds().size_bytes());
-    wf_ = wavefronts.front();
-    state_ = &detector_->getWaveRaceState(0);
-  }
-
-  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
-                             uint8_t byte_mask) override {
-    if (wf == wf_ && state_)
-      state_->checkVgprReadLanes(static_cast<int>(physical_reg - wf->vgpr_alloc().base), lane_mask,
-                                 byte_mask);
-  }
-
-  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
-                              uint64_t lane_mask, uint8_t byte_mask) override {
-    if (wf == wf_ && state_)
-      state_->checkVgprWriteLanes(static_cast<int>(physical_reg - wf->vgpr_alloc().base), lane_mask,
-                                  byte_mask);
-  }
-
-  void registerOutstandingLoad(uint32_t logical_reg, uint32_t lane) {
-    ASSERT_NE(state_, nullptr);
-    state_->registerEvent(testInstruction(/*pc=*/0x1000), MemoryEventType::GLOBAL_TO_VGPR,
-                          {logical_reg}, uint64_t{1} << lane, 0xF);
   }
 
   [[nodiscard]] bool raced_on(uint32_t logical_reg) const {
@@ -3015,8 +2978,6 @@ TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
   }
 }
 
-// -- Ordering tests ----------------------------------------------------------
-
 namespace mfma_race {
 
 constexpr uint32_t A = 0, B = 16, C = 32, D = 64;
@@ -3028,7 +2989,7 @@ bool races_on(const Run &run, uint32_t reg, uint32_t lane, uint32_t acc, bool fo
   PluginFixture f;
   f.initialize(/*num_wf_slots=*/1);
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-  auto plugin = std::make_unique<MfmaRegisterRacePlugin>();
+  auto plugin = std::make_unique<MfmaRacePlugin>();
   auto *race_plugin = plugin.get();
   f.plugin_group_->add(std::move(plugin));
   f.soc->set_plugin_group(f.plugin_group_);
@@ -3039,7 +3000,7 @@ bool races_on(const Run &run, uint32_t reg, uint32_t lane, uint32_t acc, bool fo
     return false;
   std::array<amdgpu::Wavefront *, 1> waves{wf};
   f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0, 256, 104, waves);
-  race_plugin->registerOutstandingLoad(reg, lane);
+  race_plugin->registerOutstandingLoad(reg, /*exec_mask=*/uint64_t{1} << lane);
   util::set_force_scalar_for_testing(force_scalar);
   run(*f.cu(), wf->vgpr_alloc().base, acc);
   util::set_force_scalar_for_testing(false);
@@ -3118,6 +3079,8 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReportRacesOnlyOnBroadcastLanes) {
     EXPECT_FALSE(races_on(run, B, /*lane=*/63, ACC_FROM_VGPR, force_scalar));
   }
 }
+
+// -- Ordering tests ----------------------------------------------------------
 //
 // These tests use functional mode (the PluginFixture default). Tests that
 // assert strictly sequential dispatch execution use num_wf_slots=1 so that
