@@ -50,17 +50,19 @@ jobs:
       # codec, each as its own process, so the budget here is dominated by the
       # sweep rather than by CTest.
       #
-      # boto3 is installed explicitly: it is what fetches the corpus, nothing in
-      # the test payload provides it, and the runner image does not carry it.
-      # Without this the sweep reports a skip and exits 0, leaving a green job
-      # that decoded nothing. TheRock's requirements.txt constrains the version
-      # so this lands in the botocore window its build_tools expect.
+      # boto3 fetches the corpus and is already present: setup_test_environment
+      # runs `uv pip install -r requirements-test.txt` into VENV_DIR before this
+      # step, and that pulls in boto3/botocore/s3transfer. Nothing is installed
+      # here -- that venv is built by uv and has no pip in it, so `python -m pip`
+      # fails outright. If boto3 ever stops arriving that way the sweep does not
+      # quietly skip: run_rocdecode_conformance.py treats a missing SDK under
+      # GITHUB_ACTIONS as a hard error.
       component: >-
         {
           "job_name": "rocdecode",
           "fetch_artifact_args": "--rocdecode --tests",
           "timeout_minutes": 60,
-          "test_script": "python -m pip install -c requirements.txt boto3 && python ./build/share/rocdecode/test/run_rocdecode.py",
+          "test_script": "python ./build/share/rocdecode/test/run_rocdecode.py",
           "shard_arr": [1],
           "total_shards": 1,
           "test_type": "full",

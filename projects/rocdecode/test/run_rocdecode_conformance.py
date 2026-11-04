@@ -278,20 +278,32 @@ def fetch_feasibility() -> Optional[str]:
     corpus skips with an explanation, rather than failing part-way through on a
     ModuleNotFoundError or an opaque NoCredentialsError.
 
-    boto3 is not part of the installed test payload. CI installs it explicitly
-    before invoking run_rocdecode.py, so a missing SDK there is a provisioning
-    failure that fails the step outright. Someone running run_rocdecode.py by hand
-    from an installed ROCm tree may simply not have it, and the CTest suite they
-    came for does not need it -- so here a missing SDK skips the sweep rather than
-    failing the whole run.
+    boto3 is not part of the installed test payload. Someone running
+    run_rocdecode.py by hand from an installed ROCm tree may simply not have it,
+    and the CTest suite they came for does not need it, so for them a missing SDK
+    skips the sweep rather than failing the whole run.
+
+    Under CI it is an error instead. TheRock's setup_test_environment installs
+    boto3 into VENV_DIR from requirements-test.txt before the test step runs, so
+    its absence there means provisioning changed under us -- and skipping on that
+    would leave a green job that silently decoded nothing, which is the one
+    outcome a gating sweep must not produce.
     """
     try:
         import boto3
     except ImportError:
-        return (
+        message = (
             "boto3 is not installed, so the stream corpus cannot be downloaded.\n"
             "Install it (pip install boto3) to run the conformance sweep."
         )
+        if os.getenv("GITHUB_ACTIONS") == "true":
+            raise RuntimeError(
+                message + "\n"
+                "\n"
+                "In CI this is a provisioning failure, not a skip: boto3 is "
+                "expected from TheRock's requirements-test.txt."
+            )
+        return message
 
     if boto3.Session().get_credentials() is None:
         return (
