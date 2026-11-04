@@ -1381,6 +1381,43 @@ TEST(RaceDetector, TensorDma_PartialWaitsUseTheObligationClassNotTheEventOrder) 
   }
 }
 
+// A transfer without LDS bytes has nothing for another wave to conflict with,
+// so once its wait completes it is trimmed without waiting for a barrier.
+// Waited transfers in a loop without barriers must not accumulate.
+TEST(RaceDetector, TensorDma_WaitedTransfersWithoutRangesDoNotAccumulate) {
+  std::vector<RaceViolation> violations;
+  RaceDetector detector(
+      1, 4, 4, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
+      counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5), /*ldsSizeBytes=*/64 * 1024);
+  auto &wave = detector.getWaveRaceState(0);
+  const std::array obligations{amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT,
+                                                               MemoryOrderClass::TENSOR}};
+  constexpr int kTransfers = 4096;
+  for (int i = 0; i < kTransfers; ++i) {
+    wave.registerLdsRangeEvent(testInstruction(i), MemoryEventType::LDS_TO_GLOBAL, {},
+                               /*elementBytes=*/4, obligations, MemoryOrderClass::TENSOR);
+    PendingWaitCount wait;
+    wait.add(amdgpu::WaitCounterType::TENSORCNT, 0);
+    wave.dispatch(wait);
+  }
+  EXPECT_EQ(detector.events().totalAllocated(), kTransfers);
+  EXPECT_TRUE(wave.getBarrierPendingEvents().empty());
+  // The registry trims in batches, so it holds at most two batches' worth.
+  EXPECT_LT(detector.events().size(), 2000);
+  EXPECT_TRUE(violations.empty());
+}
+
+// A waited transfer with LDS bytes is still visible to other waves until a
+// barrier retires it.
+TEST(RaceDetector, TensorDma_WaitedTransferWithRangesWaitsForABarrier) {
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorStoreFromLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/0);
+  EXPECT_FALSE(b.events().isTrimmable(EventId{0}));
+  b.barrier();
+  EXPECT_EQ(b.events().status(EventId{0}), EventStatus::RETIRED);
+}
+
 TEST(RaceDetector, TensorDma_SameWavePartialTensorcntRetiresOldest) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
   b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
