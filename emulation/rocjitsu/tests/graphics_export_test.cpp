@@ -2815,9 +2815,9 @@ TEST_P(GraphicsExportTest, FragmentInitializationPreservesInputPackingAndPadding
     ~Restore() { std::fesetenv(&saved); }
   } restore{saved};
   ASSERT_EQ(std::fesetround(FE_TONEAREST), 0);
-  constexpr uint32_t input_bits[] = {0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 13, 15};
-  constexpr uint32_t first[] = {0, 2, 4, 6, 9, 11, 13, 15, 16, 17, 18, 19, 20};
-  constexpr uint32_t count[] = {2, 2, 2, 3, 2, 2, 2, 1, 1, 1, 1, 1, 1};
+  constexpr uint32_t input_bits[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15};
+  constexpr uint32_t first[] = {0, 2, 4, 6, 9, 11, 13, 15, 16, 17, 18, 19, 20, 21, 22};
+  constexpr uint32_t count[] = {2, 2, 2, 3, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1};
   constexpr uint32_t barycentric_mask = (1u << 7) - 1;
   constexpr uint32_t remaining_mask = (1u << (std::size(input_bits) - 7)) - 1;
   for (uint32_t wave_size : {32u, 64u}) {
@@ -2834,8 +2834,7 @@ TEST_P(GraphicsExportTest, FragmentInitializationPreservesInputPackingAndPadding
       const uint32_t remaining = selection >> 7;
       // Cover every barycentric combination with the remaining inputs absent
       // or complete. Exercise every remaining-input combination after 0, 2 and
-      // 15 barycentric VGPRs. These 442 masks cover every input's possible VGPR
-      // offset and every output length without crossing all 8192 combinations.
+      // 15 barycentric VGPRs to cover every input offset and output length.
       if (remaining != 0 && remaining != remaining_mask && barycentric != 0 && barycentric != 1 &&
           barycentric != barycentric_mask)
         continue;
@@ -2844,7 +2843,7 @@ TEST_P(GraphicsExportTest, FragmentInitializationPreservesInputPackingAndPadding
       for (uint32_t input = 0; input < std::size(input_bits); ++input)
         mask |= ((selection >> input) & 1) << input_bits[input];
       amdgpu::GraphicsDrawTestAccess::set_fragment_inputs(draw, mask);
-      for (uint32_t reg = 0; reg < 22; ++reg)
+      for (uint32_t reg = 0; reg < 24; ++reg)
         for (uint32_t lane = 0; lane < wave_size; ++lane)
           wave_->debug_write_vgpr(reg, lane, 0xdeadbeef);
       draw.initialize(*wave_, 0, 0);
@@ -2870,7 +2869,7 @@ TEST_P(GraphicsExportTest, FragmentInitializationPreservesInputPackingAndPadding
         const uint32_t linear_j = populated ? 0xbf800000u + lane : 0;
         const int32_t x = populated ? int32_t(lane) - 3 : 0;
         const int32_t y = populated ? 2 - int32_t(lane) : 0;
-        const std::array<uint32_t, 21> canonical{i,
+        const std::array<uint32_t, 23> canonical{i,
                                                  j,
                                                  i,
                                                  j,
@@ -2885,13 +2884,15 @@ TEST_P(GraphicsExportTest, FragmentInitializationPreservesInputPackingAndPadding
                                                  linear_j,
                                                  linear_i,
                                                  linear_j,
+                                                 0u, // LINE_STIPPLE_TEX
                                                  std::bit_cast<uint32_t>(float(x) + 0.5f),
                                                  std::bit_cast<uint32_t>(float(y) + 0.5f),
                                                  populated ? 0x7fc00000u + lane : 0,
                                                  populated ? 0x3f800000u : 0x7f800000u,
                                                  0x12340000u,
+                                                 populated && ((0xa5u >> lane) & 1),
                                                  (uint32_t(x) & 0xffff) | (uint32_t(y) << 16)};
-        std::array<uint32_t, 22> expected, actual;
+        std::array<uint32_t, canonical.size() + 1> expected, actual;
         expected.fill(0xdeadbeef);
         uint32_t reg = 0;
         for (uint32_t input = 0; input < std::size(input_bits); ++input)
@@ -3020,11 +3021,11 @@ TEST_P(GraphicsExportTest, FragmentInitializationKeepsFallbackAndHostState) {
   for (uint32_t wave_size : {32u, 64u}) {
     amdgpu::GraphicsDraw draw(batch_state(wave_size), GetParam(), 3);
     amdgpu::GraphicsDrawTestAccess::seed_fragment_inputs(draw, wave_size);
-    for (uint32_t mask : {0u, 0x7fu, 0xef7fu}) {
+    for (uint32_t mask : {0u, 0x7fu, 0xefffu}) {
       amdgpu::GraphicsDrawTestAccess::set_fragment_inputs(draw, mask);
       for (int rounding : {FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO}) {
         for (uint32_t flush : {0u, 0x40u, 0x8000u, 0x8040u}) {
-          std::array<uint32_t, 22 * 64> expected{};
+          std::array<uint32_t, 23 * 64> expected{};
           for (uint32_t allocated : {32u, 1u}) {
             wave_->halt();
             wave_ = cu_->dispatch_wf(0, 0, 106, allocated, wave_size);
@@ -3051,7 +3052,7 @@ TEST_P(GraphicsExportTest, FragmentInitializationKeepsFallbackAndHostState) {
             // Padding lanes evaluate 1/0 even when no position input is enabled.
             EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), before_flags | FE_DIVBYZERO);
             EXPECT_EQ(observed->writes, 0u);
-            for (uint32_t reg = 0; reg < 22; ++reg)
+            for (uint32_t reg = 0; reg < 23; ++reg)
               for (uint32_t lane = 0; lane < wave_size; ++lane) {
                 const uint32_t bits = wave_->debug_read_vgpr(reg, lane);
                 if (allocated == 32) {
@@ -3570,7 +3571,7 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
       {.name = "viewport scissor", .expected_coverage = 0x440, .viewport_scissor = true},
       {.name = "unequal W and explicit vertex parameters", .inputs = 0xaf28, .passthrough = true},
       {.name = "position z and packed coordinates", .inputs = 0x8402},
-      {.name = "unsupported line stipple input", .outcome = Outcome::Reject, .inputs = 0x80},
+      {.name = "line stipple as sole fragment input", .inputs = 0x80},
       {.name = "unsupported front-face input", .outcome = Outcome::Reject, .inputs = 0x1000},
       {.name = "fractional coverage", .extent = 0.625f, .full_scissor = true},
       {.name = "rasterizer discard", .outcome = Outcome::Empty, .clip_control = 1u << 22},

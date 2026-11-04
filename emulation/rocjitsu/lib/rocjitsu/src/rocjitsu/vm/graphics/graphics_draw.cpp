@@ -833,7 +833,7 @@ void GraphicsDraw::initialize(Wavefront &wave, uint32_t workgroup, uint32_t wave
       wave.lds().write32(wave.lds_base() + i * 4, batch.parameters[i]);
     // Resolve each register only at its original first write, preserving lazy
     // allocation and FP evaluation order. Other registers never move its lanes.
-    std::array<uint32_t *, 22> input_lanes;
+    std::array<uint32_t *, 23> input_lanes;
     uint32_t resolved_inputs = 0;
     const auto write_input = [&](uint32_t reg, uint32_t lane, uint32_t value) {
       auto *&lanes = input_lanes[reg];
@@ -881,6 +881,9 @@ void GraphicsDraw::initialize(Wavefront &wave, uint32_t workgroup, uint32_t wave
                     sizeof(value));
         write_input(vgpr++, lane, value);
       }
+      // RADV can request LINE_STIPPLE_TEX as a dummy input for filled primitives.
+      if (context_[0x198] & (1u << 7))
+        write_input(vgpr++, lane, 0);
       // POS_W_FLOAT supplies W; PERSP_PULL_MODEL above supplies 1/W.
       const std::array<float, 4> position{float(f.x) + 0.5f, float(f.y) + 0.5f, f.z,
                                           raster::reciprocal(f.pull_model[2])};
@@ -1373,7 +1376,7 @@ void GraphicsDraw::prepare_attachments() {
   if (depth_control_ & ~0x7007f7u)
     throw std::runtime_error(
         std::format("unsupported graphics depth bounds or control {:#x}", depth_control_));
-  if ((context_[0x198] & ~0xef7fu) || (context_[0x197] & ~context_[0x198]))
+  if ((context_[0x198] & ~0xefffu) || (context_[0x197] & ~context_[0x198]))
     throw std::runtime_error(
         std::format("unsupported graphics fragment inputs addr={:#x} ena={:#x}", context_[0x198],
                     context_[0x197]));
