@@ -368,7 +368,9 @@ def _serialize_ast(
             parent_prec = OPERATOR_PRECEDENCE.get(parent_op, 0)
             if node_prec < parent_prec:
                 return f"({result})"
-            if node_prec == parent_prec and is_right and parent_op in "-/":
+            # A right operand keeps its parens even where the result would be
+            # equal, such as a + (b + c), so the evaluation order stays the same.
+            if node_prec == parent_prec and is_right:
                 return f"({result})"
         return result
 
