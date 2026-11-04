@@ -43,6 +43,12 @@ def pytest_addoption(parser):
         default="",
         help="Path to the rocprof-attach launcher script to import and unit-test.",
     )
+    parser.addoption(
+        "--rocprofv3-completion-path",
+        action="store",
+        default="",
+        help="Path to the rocprofv3 Bash completion script to test.",
+    )
 
 
 def _load_launcher(module_name, path, option):
@@ -73,3 +79,13 @@ def rocprof_attach(request):
     return _load_launcher(
         "rocprof_attach_under_test", request.config.getoption(option), option
     )
+
+
+@pytest.fixture(scope="session")
+def rocprofv3_completion_path(request):
+    """Return the configured rocprofv3 Bash completion script."""
+    option = "--rocprofv3-completion-path"
+    path = request.config.getoption(option)
+    assert path, f"{option} must point at the Bash completion script"
+    assert os.path.isfile(path), f"completion script not found: {path}"
+    return path

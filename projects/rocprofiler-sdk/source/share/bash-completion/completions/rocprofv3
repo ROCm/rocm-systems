@@ -1,0 +1,253 @@
+# MIT License
+#
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+_rocprofv3_complete_path()
+{
+    local current=$1
+    local prefix=$2
+    local path_type=$3
+    local candidate
+    local -a compgen_args=(-f)
+
+    if [[ ${path_type} == directory ]]; then
+        compgen_args=(-d)
+    fi
+
+    while IFS= read -r candidate; do
+        COMPREPLY+=("${prefix}${candidate}")
+    done < <(compgen "${compgen_args[@]}" -- "${current}")
+
+    compopt -o filenames 2>/dev/null || true
+}
+
+_rocprofv3_set_replies()
+{
+    local tab=$'\t'
+    local candidate
+    local value
+    local details
+    local display
+    local description
+    local padding
+    local columns=${COLUMNS:-80}
+    local max_description_length
+    local -i longest=0
+    local -i padding_length
+    local has_descriptions=false
+    local -a candidates=("$@")
+
+    COMPREPLY=()
+    ((${#candidates[@]})) || return
+    compopt -o nosort 2>/dev/null || true
+
+    for candidate in "${candidates[@]}"; do
+        value=${candidate%%"${tab}"*}
+        display=${value}
+        description=
+        if [[ ${candidate} == *"${tab}"* ]]; then
+            details=${candidate#*"${tab}"}
+            if [[ ${details} == *"${tab}"* ]]; then
+                display=${details%%"${tab}"*}
+                description=${details#*"${tab}"}
+            else
+                description=${details}
+            fi
+        fi
+        ((${#display} > longest)) && longest=${#display}
+        if [[ ${display} != "${value}" || -n ${description} ]]; then
+            has_descriptions=true
+        fi
+    done
+
+    # Menu completion inserts candidates directly instead of displaying a list.
+    # Descriptions must never become part of the command line.
+    if [[ ${COMP_TYPE:-9} == 37 || ${COMP_TYPE:-9} == 42 ||
+        ${#candidates[@]} == 1 || ${has_descriptions} == false ]]; then
+        for candidate in "${candidates[@]}"; do
+            COMPREPLY+=("${candidate%%"${tab}"*}")
+        done
+        return
+    fi
+
+    [[ ${columns} =~ ^[0-9]+$ ]] || columns=80
+    max_description_length=$((columns - longest - 2))
+
+    for candidate in "${candidates[@]}"; do
+        value=${candidate%%"${tab}"*}
+        display=${value}
+        description=
+        if [[ ${candidate} == *"${tab}"* ]]; then
+            details=${candidate#*"${tab}"}
+            if [[ ${details} == *"${tab}"* ]]; then
+                display=${details%%"${tab}"*}
+                description=${details#*"${tab}"}
+            else
+                description=${details}
+            fi
+        fi
+
+        if ((max_description_length <= 0)); then
+            description=
+        elif ((${#description} > max_description_length)); then
+            if ((max_description_length > 3)); then
+                description="${description:0:$((max_description_length - 3))}..."
+            else
+                description=${description:0:max_description_length}
+            fi
+        fi
+
+        padding_length=$((longest - ${#display} + 2))
+        printf -v padding "%${padding_length}s" ""
+        COMPREPLY+=("${display}${padding}${description}")
+    done
+}
+
+_rocprofv3_complete_application()
+{
+    local application_index=$1
+    local current=${COMP_WORDS[COMP_CWORD]-}
+    local candidate
+
+    if declare -F _command_offset >/dev/null; then
+        _command_offset "${application_index}"
+        return
+    fi
+
+    COMPREPLY=()
+    if ((COMP_CWORD == application_index)); then
+        while IFS= read -r candidate; do
+            COMPREPLY+=("${candidate}")
+        done < <(compgen -c -d -- "${current}")
+    else
+        while IFS= read -r candidate; do
+            COMPREPLY+=("${candidate}")
+        done < <(compgen -f -- "${current}")
+        compopt -o filenames 2>/dev/null || true
+    fi
+}
+
+_rocprofv3_resolve_executable()
+{
+    if [[ -n ${_ROCPROFV3_COMPLETION_EXECUTABLE:-} ]]; then
+        printf '%s\n' "${_ROCPROFV3_COMPLETION_EXECUTABLE}"
+        return
+    fi
+
+    if [[ ${COMP_WORDS[0]} == */* ]]; then
+        printf '%s\n' "${COMP_WORDS[0]}"
+        return
+    fi
+
+    type -P "${COMP_WORDS[0]}" 2>/dev/null
+}
+
+_rocprofv3()
+{
+    local current=${COMP_WORDS[COMP_CWORD]-}
+    local before_cursor
+    local cur
+    local prev
+    local cword
+    local executable
+    local record
+    local value
+    local prefix=
+    local path_current=${current}
+    local path_type=
+    local delegate_index=
+    local -i completion_cword=${COMP_CWORD}
+    local -i index
+    local -a words=()
+    local -a completion_words=("${COMP_WORDS[@]}")
+    local -a records=()
+    local -a candidates=()
+
+    COMPREPLY=()
+
+    if declare -F _get_comp_words_by_ref >/dev/null &&
+        _get_comp_words_by_ref -n = cur prev words cword; then
+        current=${cur}
+        completion_cword=${cword}
+        completion_words=("${words[@]}")
+    else
+        before_cursor=${COMP_LINE:0:COMP_POINT}
+        if [[ ${before_cursor} == *[[:space:]] ]]; then
+            current=
+        else
+            current=${before_cursor##*[[:space:]]}
+        fi
+    fi
+    completion_words[completion_cword]=${current}
+
+    for ((index = 1; index < completion_cword; ++index)); do
+        if [[ ${completion_words[index]} == -- ]]; then
+            _rocprofv3_complete_application "$((index + 1))"
+            return
+        fi
+    done
+
+    executable=$(_rocprofv3_resolve_executable) || return
+    [[ -n ${executable} ]] || return
+
+    mapfile -t records < <(
+        _ROCPROFV3_BASH_COMPLETE=1 "${executable}" "${completion_cword}" \
+            "${completion_words[@]}" 2>/dev/null
+    )
+
+    for record in "${records[@]}"; do
+        case ${record} in
+            __ROCPROFV3_COMPLETE_FILE__)
+                path_type=file
+                ;;
+            __ROCPROFV3_COMPLETE_DIRECTORY__)
+                path_type=directory
+                ;;
+            __ROCPROFV3_COMPLETE_DELEGATE__$'\t'*)
+                delegate_index=${record#*$'\t'}
+                ;;
+            *)
+                candidates+=("${record}")
+                ;;
+        esac
+    done
+
+    if [[ -n ${delegate_index} ]]; then
+        _rocprofv3_complete_application "${delegate_index}"
+        return
+    fi
+
+    if [[ -n ${path_type} ]]; then
+        for record in "${candidates[@]}"; do
+            COMPREPLY+=("${record%%$'\t'*}")
+        done
+        if [[ ${current} == --*=* ]]; then
+            prefix="${current%%=*}="
+            path_current=${current#*=}
+        fi
+        _rocprofv3_complete_path "${path_current}" "${prefix}" "${path_type}"
+        return
+    fi
+
+    _rocprofv3_set_replies "${candidates[@]}"
+}
+
+complete -F _rocprofv3 rocprofv3

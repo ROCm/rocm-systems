@@ -81,6 +81,7 @@ rocprofiler_install_env_setup_files(
     NAME ${PACKAGE_NAME}
     VERSION ${PROJECT_VERSION}
     INSTALL_DIR ${CMAKE_INSTALL_DATAROOTDIR}
+    BASH_COMPLETION ${CMAKE_INSTALL_DATAROOTDIR}/bash-completion/completions/rocprofv3
     COMPONENT development)
 
 function(compute_rocprofiler_sdk_version _VAR)

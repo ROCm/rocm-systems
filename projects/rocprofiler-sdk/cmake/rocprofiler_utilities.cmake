@@ -1002,7 +1002,9 @@ endfunction()
 function(rocprofiler_install_env_setup_files)
     # parse args
     cmake_parse_arguments(
-        RIEF "" "NAME;VERSION;SOURCE_DIR;BINARY_DIR;INSTALL_DIR;COMPONENT" "" ${ARGN})
+        RIEF ""
+        "NAME;VERSION;SOURCE_DIR;BINARY_DIR;INSTALL_DIR;COMPONENT;BASH_COMPLETION" ""
+        ${ARGN})
 
     if(NOT RIEF_NAME OR NOT RIEF_INSTALL_DIR)
         message(SEND_ERROR "Missing NAME / INSTALL_DIR arguments")

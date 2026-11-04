@@ -253,6 +253,7 @@ parse:
         BINARY_DIR: '*'
         INSTALL_DIR: '*'
         COMPONENT: '*'
+        BASH_COMPLETION: '*'
     rocprofiler_sdk_custom_compilation:
       flags:
         - GLOBAL
