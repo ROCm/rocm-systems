@@ -180,6 +180,21 @@ protected:
         return AllRanks(found);
     }
 
+    // With NCCL_IB_RESILIENCY_PORT_RECOVERY=1 every net_ib connect creates UC port recovery QPs,
+    // so a NIC without UC (bnxt_re) fails the connect itself. Collective.
+    bool NetIbRecoveryLacksUc() {
+        if (T().net != &ncclNetIb) return false;
+        const char* recoveryEnv = getenv("NCCL_IB_RESILIENCY_PORT_RECOVERY");
+        bool ok = true;
+        if (recoveryEnv && strcmp(recoveryEnv, "1") == 0) {
+            for (int dev = 0; dev < GetPhysicalDeviceCount(); dev++) {
+                int uc = 0;
+                ok = ok && ncclIbGidUcSupported(dev, &uc) == ncclSuccess && uc == 1;
+            }
+        }
+        return !AllRanks(ok);
+    }
+
     bool ProbingUsesGidIndex(void* comm, int devIndex, int gidIndex) {
         int probingGidIndex = -1;
         EXPECT_EQ(T().getProbingGidIndex(comm, devIndex, &probingGidIndex), ncclSuccess) << "devIndex " << devIndex;
@@ -272,6 +287,7 @@ TEST_P(NetIbGidChangeTest, ConnectSnapshotsDeviceCache) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses, false, kMinGpusPerNode, kNoNodeLimit);
     const int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
+    if (NetIbRecoveryLacksUc()) GTEST_SKIP() << "net_ib port recovery is enabled and the NIC cannot create UC QPs";
 
     ncclIbGidState real = {}, expected = {};
     ASSERT_EQ(T().getDev(0, &real), ncclSuccess);
@@ -317,6 +333,7 @@ TEST_P(NetIbGidChangeTest, PortRecoveryRefreshesStaleCommGid) {
     const int rank = MPIEnvironment::world_rank;
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
+    if (NetIbRecoveryLacksUc()) GTEST_SKIP() << "net_ib port recovery needs UC QPs, which the NIC cannot create";
     if (T().net == &netIbCast) {
         RECOVERY_UD_OR_SKIP();
         FAILOVER_RDMA_READ_OR_SKIP();
