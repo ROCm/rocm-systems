@@ -832,6 +832,13 @@ protected:
   static constexpr uint32_t kEmptyOffset = 64;
   /// The descriptor's data_size encoding for eight-byte elements.
   static constexpr uint32_t kI64DataSizeEncoding = 3;
+  /// An i32 element at offset 254 straddles the end of the 256-byte
+  /// allocation: the transfer moves only its first two bytes, so its LDS range
+  /// ends mid-element. The race detector tracks those bytes at byte
+  /// granularity, so a peer DWORD access at kPeerDwordOffset overlaps them;
+  /// DWORD granularity would drop them.
+  static constexpr uint32_t kPartialI32Offset = 254;
+  static constexpr uint32_t kPeerDwordOffset = 252;
 
   struct Descriptor {
     uint32_t lds_offset = kTileOffset;
@@ -931,12 +938,7 @@ TEST_F(DecodedTensorDmaRaceTest, LoadStaysPendingUntilTheWaitCoversIt) {
                                         {.lds_offset = kEmptyOffset, .tensor_dim0 = 0}));
 }
 
-// An i32 element at offset 254 straddles the end of the 256-byte allocation:
-// the transfer moves only its first two bytes, so its LDS range ends
-// mid-element. The race detector tracks those bytes at byte granularity, so a
-// peer DWORD access at 252 overlaps them; DWORD granularity would drop them.
-static constexpr uint32_t kPartialI32Offset = 254;
-static constexpr uint32_t kPeerDwordOffset = 252;
+// Partial elements at the end of the allocation; see kPartialI32Offset.
 
 TEST_F(DecodedTensorDmaRaceTest, PartialElementLoadIsAnLdsWrite) {
   execute_decoded_tensor(0, /*is_load=*/true, {.lds_offset = kPartialI32Offset, .tile_dim0 = 1});
