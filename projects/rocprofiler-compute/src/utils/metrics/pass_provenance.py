@@ -289,8 +289,8 @@ def choose_metric_pass(
     """Pick a pass from the hardware PMC set.
 
     Timestamps do not choose the pass. If no pass holds every required
-    counter, including SQ_WAVES and GRBM_GUI_ACTIVE, warn and return None
-    so the caller leaves the metric unset.
+    counter, including SQ_WAVES and GRBM_GUI_ACTIVE, return None so the
+    caller leaves the metric unset. The caller prints one summary.
     """
     pmc_required = hardware_counters_for_pass_select(required, gpu_series)
     chosen, _relaxed = select_pass_with_normalization_fallback(
@@ -299,19 +299,31 @@ def choose_metric_pass(
         gpu_series,
     )
     if chosen is None:
-        if pmc_required:
-            console_warning(
-                "pass_provenance",
-                f"{label}: contract violation, PMC set {sorted(pmc_required)} "
-                "does not fit one pass; leaving the metric unset",
-            )
-        else:
+        if not pmc_required:
             console_debug(
                 "pass_provenance",
                 f"{label}: no hardware PMC set to bind",
             )
         return None
     return chosen
+
+
+def _warn_unbound_metrics(count: int, layout: PassLayout, *, database: bool) -> None:
+    """One summary for every metric this bind left unset."""
+    if not count:
+        return
+    scope = "same-pass bind (DB)" if database else "same-pass bind"
+    if layout.has_duplicates:
+        console_warning(
+            "pass_provenance",
+            f"{scope}: {count} metric(s) were left unset",
+        )
+        return
+    console_warning(
+        "pass_provenance",
+        f"{scope}: {count} metric(s) read counters from more than one pass. "
+        "This profile has no copied counters; profile again.",
+    )
 
 
 _ALREADY_BOUND_BUILTIN_RE = re.compile(rf"{re.escape(PASS_VAR_SEP)}\d+$")
@@ -475,12 +487,7 @@ def bind_metric_tables_to_passes(
                 row_pass[row_id] = binding.pass_key
         df.attrs[METRIC_ROW_PASS_ATTR] = row_pass
 
-    if unbound:
-        console_warning(
-            "pass_provenance",
-            f"same-pass bind: {unbound} metric row(s) fit no single pass and "
-            "are left unset",
-        )
+    _warn_unbound_metrics(unbound, pass_layout, database=False)
     return used_passes
 
 
@@ -523,12 +530,7 @@ def bind_expression_dataframe(
             metric_pass[metric_id] = binding.pass_key
 
     expression_df.attrs[METRIC_ROW_PASS_ATTR] = metric_pass
-    if unbound:
-        console_warning(
-            "pass_provenance",
-            f"same-pass bind (DB): {unbound} metric(s) fit no single pass and "
-            "are left unset",
-        )
+    _warn_unbound_metrics(unbound, pass_layout, database=True)
     return used_passes
 
 
