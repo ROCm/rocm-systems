@@ -1878,9 +1878,8 @@ _SMEM_NARROW_LOAD_MAP = {
 }
 
 # S_ATOMIC_* and S_BUFFER_ATOMIC_* operations the CDNA ISAs define and the
-# scalar pipeline supports.
-# Other flat atomic operations do not derive smem_atomic, even when the flat
-# tables know them.
+# scalar pipeline supports, spelled as in the mnemonic without _X2. Any other
+# scalar atomic derives nop, even when the flat tables know its operation.
 _SMEM_ATOMIC_OPS = frozenset(
     {
         'swap',
@@ -1935,9 +1934,8 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
         is_x2 = suffix.endswith('_X2')
         if is_x2:
             suffix = suffix[:-3]
-        info = _derive_flat_atomic_info(suffix, is_x2)
-        if info and info[0] in _SMEM_ATOMIC_OPS:
-            op, elem_size, data_dw_actual = info
+        if suffix.lower() in _SMEM_ATOMIC_OPS:
+            op, elem_size, data_dw_actual = _derive_flat_atomic_info(suffix, is_x2)
             return InstructionSemantics(
                 name,
                 'smem_atomic',
@@ -1945,6 +1943,7 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
                 elem_size=elem_size,
                 num_elems=data_dw_actual,
             )
+        return InstructionSemantics(name, 'nop')
 
     is_store = '_STORE_' in upper or '_SCRATCH_STORE_' in upper
     if not is_store:

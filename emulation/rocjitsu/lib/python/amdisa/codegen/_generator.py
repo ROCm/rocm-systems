@@ -11540,7 +11540,7 @@ class CodeGenerator:
                                 f'modifiers.block_data = &{self.isa_spec.profile.flat_store_src_field};'
                             )
                         if is_smem and inst.name.startswith(
-                            ('S_BUFFER_LOAD_', 'S_BUFFER_STORE_')
+                            ('S_BUFFER_LOAD_', 'S_BUFFER_STORE_', 'S_BUFFER_ATOMIC_')
                         ):
                             words = (
                                 2

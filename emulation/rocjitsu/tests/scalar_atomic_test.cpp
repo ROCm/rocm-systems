@@ -497,7 +497,8 @@ TEST_P(ScalarAtomicTest, UnavailableAtomicRetainsCounterAndUpdatesExactlyOnce) {
 TEST_P(ScalarAtomicTest, MisalignedTwoDwordAtomicFaultsWithoutUpdate) {
   // On gfx90a, S_ATOMIC_*_X2 at an address that is 4 mod 8 raises a memory
   // violation and leaves both neighboring qwords unchanged. The buffer form
-  // faults even with NUM_RECORDS = 0: alignment is checked before bounds.
+  // faults even with NUM_RECORDS = 0: alignment is checked before bounds. The
+  // CDNA ISA manuals do not describe this ordering.
   write_descriptor(/*records=*/0);
   for (const uint16_t opcode :
        {cdna3::kSAtomicDecX2Smem, buffer_atomic_opcode(cdna3::kSAtomicDecX2Smem)}) {
@@ -535,7 +536,8 @@ struct BufferBoundsCase {
   bool in_range;
 };
 
-// gfx90a results for S_BUFFER_ATOMIC_INC[_X2]. The element must lie wholly below
+// S_BUFFER_ATOMIC_INC[_X2] results observed on gfx90a; the CDNA ISA manuals do
+// not describe them. The element must lie wholly below
 // STRIDE ? NUM_RECORDS * STRIDE : NUM_RECORDS bytes; otherwise memory is
 // untouched and GLC returns zero.
 TEST_P(ScalarAtomicTest, BufferAtomicRunsOnlyWhenWhollyInRange) {
@@ -563,7 +565,7 @@ TEST_P(ScalarAtomicTest, BufferAtomicRunsOnlyWhenWhollyInRange) {
       const uint32_t dwords = opcode == cdna3::kSBufferAtomicIncX2Smem ? 2 : 1;
       const uint64_t address = kAddress + offset + soffset;
       write_descriptor(records, stride);
-      write_sgpr(8, soffset);
+      wf->set_m0(soffset);
       write_memory(address, dwords, 6);
       write_sgprs(4, dwords, 7);
       if (backing) {
@@ -575,7 +577,7 @@ TEST_P(ScalarAtomicTest, BufferAtomicRunsOnlyWhenWhollyInRange) {
                            .glc = glc,
                            .imm = 1,
                            .offset = offset,
-                           .soffset = 8},
+                           .soffset = kLegacyM0Selector},
                           opcode);
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Complete);

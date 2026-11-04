@@ -5361,6 +5361,48 @@ TEST(MemoryWaitExecutionTest, ScalarBufferStoreChecksItsConsumedBaseWords) {
     }
 }
 
+TEST(MemoryWaitExecutionTest, ScalarBufferAtomicChecksItsConsumedDescriptorWords) {
+  GpuMemory memory("smem_atomic_wait_memory");
+  L2Cache l2("smem_atomic_wait_l2");
+  ComputeUnitCore::Config config{};
+  config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+  config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 32;
+  auto cu = ComputeUnitCore::create("smem_atomic_wait_cu", config, &memory, &l2);
+  auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, 64);
+  ASSERT_NE(wf, nullptr);
+  auto decoder = Decoder::create(config.arch);
+  // s_buffer_atomic_inc s4, s[8:11], 0 glc
+  const auto words =
+      cdna4::build_smem(cdna4::kSBufferAtomicIncSmem, {.sbase = 4, .sdata = 4, .glc = 1, .imm = 1});
+  util::StringDiagnostic error;
+  auto consumer = decoder->decode_window(words, 0, error.emitter());
+  ASSERT_TRUE(consumer.succeeded()) << error.message();
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  // The base and NUM_RECORDS are consumed; descriptor word 3 is unused.
+  for (uint8_t pending : {8, 9, 10, 11})
+    for (bool waited : {false, true}) {
+      SCOPED_TRACE(unsigned(pending));
+      SCOPED_TRACE(waited);
+      const auto producer_words =
+          cdna4::build_smem(cdna4::kSLoadDwordSmem, {.sdata = pending, .imm = 1});
+      auto producer = decoder->decode_window(producer_words, 0, error.emitter());
+      ASSERT_TRUE(producer.succeeded()) << error.message();
+      state.clear();
+      cu->track_memory_wait(*producer.value(), *wf);
+      ASSERT_EQ(state.events().size(), 1u);
+      if (waited)
+        state.wait(state.events().front().counter, 0);
+      unsigned reports = 0;
+      state.bind(0x200, &reports,
+                 [](void *context, const auto &) { ++*static_cast<unsigned *>(context); });
+      state.check_instruction(*consumer.value(), *wf);
+      EXPECT_EQ(reports, pending < 11 && !waited ? 1u : 0u);
+    }
+}
+
 TEST(MemoryWaitFootprintTest, ScalarBufferDescriptorsRetainOnlyBackedAndConsumedWords) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_CDNA5})
     for (unsigned sgprs : {62u, 63u, 64u, 65u, 66u}) {

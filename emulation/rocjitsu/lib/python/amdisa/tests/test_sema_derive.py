@@ -2399,8 +2399,9 @@ class TestDeriveSmemAtomic:
         assert sem.elem_size == elem_size
         assert sem.num_elems == num_elems
 
-    # No CDNA ISA defines these. The flat atomic tables know their operations,
-    # so they pin that scalar support comes from the allowlist, not that table.
+    # No CDNA ISA defines these. They pin that scalar support comes from the
+    # allowlist: the flat atomic tables know most of these operations, SUB_F32
+    # strips to an allowlisted SUB, and ADD_U16 ends in a narrow load suffix.
     @pytest.mark.parametrize(
         'name',
         [
@@ -2411,6 +2412,8 @@ class TestDeriveSmemAtomic:
             'S_ATOMIC_COND_SUB_U32',
             'S_BUFFER_ATOMIC_ADD_F32',
             'S_BUFFER_ATOMIC_FMIN',
+            'S_BUFFER_ATOMIC_SUB_F32',
+            'S_BUFFER_ATOMIC_ADD_U16',
         ],
     )
     def test_scalar_atomic_operations_outside_allowlist_stay_nop(self, name):
