@@ -49,11 +49,17 @@ namespace untracked_memory
 {
 // Writable mappings of this process that are ordinary host memory. Device mappings through
 // /dev/kfd or /dev/dri are left out: HSA classifies the ones that matter.
-std::vector<address_span_t>
+host_mappings_t
 read_writable_host_mappings()
 {
-    auto out  = std::vector<address_span_t>{};
     auto file = std::ifstream{"/proc/self/maps"};
+    return read_writable_host_mappings(file);
+}
+
+host_mappings_t
+read_writable_host_mappings(std::istream& file)
+{
+    auto out  = host_mappings_t{};
     auto line = std::string{};
     while(std::getline(file, line))
     {
@@ -73,10 +79,17 @@ read_writable_host_mappings()
         if(line.find("[vvar") != std::string::npos || line.find("[vdso") != std::string::npos ||
            line.find("[vsyscall") != std::string::npos)
             continue;
-        out.push_back({begin, end});
+        out.spans.push_back({begin, end});
     }
-    std::sort(
-        out.begin(), out.end(), [](const auto& l, const auto& r) { return l.begin < r.begin; });
+    if(!file.eof() || file.bad())
+    {
+        out.spans.clear();
+        return out;
+    }
+    std::sort(out.spans.begin(), out.spans.end(), [](const auto& l, const auto& r) {
+        return l.begin < r.begin;
+    });
+    out.ok = true;
     return out;
 }
 
@@ -162,7 +175,7 @@ to_string(kind_t kind)
         case kind_t::device_other: return "device memory the snapshot does not track";
         case kind_t::locked_host: return "locked host memory (hipHostRegister)";
         case kind_t::host_pageable: return "pageable host memory";
-        case kind_t::unclassified: return "memory whose pointer information is unavailable";
+        case kind_t::unclassified: return "memory whose classification is unavailable";
     }
     return "untracked memory";
 }
@@ -170,7 +183,7 @@ to_string(kind_t kind)
 pointer_facts_fn_t
 make_hsa_pointer_facts()
 {
-    auto mappings = std::make_shared<std::optional<std::vector<address_span_t>>>();
+    auto mappings = std::make_shared<std::optional<host_mappings_t>>();
 
     return [mappings](uint64_t address) {
         auto facts = pointer_facts_t{};
@@ -210,7 +223,9 @@ make_hsa_pointer_facts()
         if(facts.pointer_info_succeeded && facts.type == pointer_facts_t::type_t::unknown)
         {
             if(!mappings->has_value()) *mappings = read_writable_host_mappings();
-            facts.in_writable_host_mapping = in_spans(**mappings, address);
+            facts.host_mappings_ok = mappings->value().ok;
+            if(facts.host_mappings_ok)
+                facts.in_writable_host_mapping = in_spans(mappings->value().spans, address);
         }
         return facts;
     };
@@ -278,6 +293,7 @@ classify_pointer(const pointer_facts_t& facts)
         case type_t::locked: return kind_t::locked_host;
         case type_t::other: return kind_t::device_other;
         case type_t::unknown:
+            if(!facts.host_mappings_ok) return kind_t::unclassified;
             if(facts.in_writable_host_mapping) return kind_t::host_pageable;
             return std::nullopt;
     }
@@ -426,7 +442,7 @@ save_dispatch_memory(region_set_t&                                     saved,
                             hit.region.kind == kind_t::host_pageable)
                         why = "its extent is not known";
                     else if(hit.region.kind == kind_t::unclassified)
-                        why = "its pointer information could not be queried";
+                        why = "it could not be classified";
                     else
                         why = "it is not device memory of this agent";
                     break;

@@ -164,13 +164,17 @@ Stated plainly, because each one has a concrete cause in the mechanism above.
   [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md#what-is-not-isolated).
 - **Coarse-grained device memory only in the tracker.** Kernarg, host, fine-grained and executable
   allocations are excluded by design, as is unified and managed memory. Before the first pass, the
-  words the kernel's own `amdhsa` metadata identifies as pointer arguments are followed:
-  fine-grained device memory of the replaying agent is saved and restored between passes, and any
-  other memory outside the snapshot runs the dispatch once without replay. Two things are therefore
-  not seen: a pointer the kernel finds inside memory it was handed (a device-side linked list, say),
-  and a value the metadata describes as a scalar the width of a pointer, whose bits are not read as
-  an address even when they happen to fall in a range the process has mapped. For a kernel whose
-  metadata cannot be read, every word of its kernarg segment is followed instead.
+  arguments are checked using the kernel's own `amdhsa` metadata: fine-grained device memory of the
+  replaying agent is saved and restored between passes, and checked pointers to any other memory
+  outside the snapshot run the dispatch once without replay. An unavailable pointer-information
+  query or required host-mapping scan also causes the dispatch to run once. The check follows
+  pointer arguments and `by_value` arguments of at least 16 bytes; the latter are scanned in
+  eight-byte words starting at their metadata offset. Smaller by-value arguments and pointer fields
+  at other offsets, such as fields in packed structs, are not detected, while scalar aggregates can
+  resemble pointers and cause replay to be declined. A pointer the kernel finds inside memory it
+  was handed (a device-side linked list, say) is not seen, and neither is a scalar the width of a
+  pointer whose bits happen to name an address. For a kernel whose metadata cannot be read, every
+  word of its kernarg segment is followed instead.
 - **Fine-grained memory named by an argument is saved under a cap** of 512 MiB per dispatch
   (`region_set_t::max_total_bytes`), on top of the whole-device snapshot. A dispatch whose arguments
   name more than that runs once instead of being replayed, and the save is a copy of the full extent
