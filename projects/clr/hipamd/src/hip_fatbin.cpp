@@ -412,57 +412,78 @@ static bool UncompressAndPopulateCodeObject(
 // Copy out the code object comgr produced for one requested target, if it produced one at all.
 //
 // comgr can return more than one entry for a single request, so this takes the first, the way
-// amd_comgr_lookup_code_object picks the first compatible entry of a bundle. Returns false
-// only on a comgr failure.
+// amd_comgr_lookup_code_object picks the first compatible entry of a bundle. Returns false on a
+// comgr failure, or when the package holds an entry for this target that comgr classified as
+// something other than an executable (see below); returns true, leaving code_obj_map untouched,
+// when the package simply has no entry at all for this target.
 static bool TakeUnpackagedCodeObject(
     amd_comgr_data_set_t unpackaged_co, const std::string& isa_name,
     std::map<std::string, std::pair<const void*, size_t>>& code_obj_map) {
-  // comgr classifies each unpackaged entry by sniffing its contents, so the kind depends on what
-  // the package holds. AMDGPU HIP entries arrive as executables; the rest are queried too so that
-  // a package nesting bitcode, SPIR-V or a fat binary is not silently dropped.
-  constexpr amd_comgr_data_kind_t kUnpackagedKinds[] = {
-      AMD_COMGR_DATA_KIND_EXECUTABLE, AMD_COMGR_DATA_KIND_BC, AMD_COMGR_DATA_KIND_SPIRV,
-      AMD_COMGR_DATA_KIND_FATBIN};
+  size_t count = 0;
+  if (auto comgr_status =
+          amd::Comgr::action_data_count(unpackaged_co, AMD_COMGR_DATA_KIND_EXECUTABLE, &count);
+      comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogPrintfError("Failed to get data count of unpackaged code object for kind %d",
+                   AMD_COMGR_DATA_KIND_EXECUTABLE);
+    return false;
+  }
 
-  for (auto kind : kUnpackagedKinds) {
-    size_t count = 0;
-    if (auto comgr_status = amd::Comgr::action_data_count(unpackaged_co, kind, &count);
+  for (size_t i = 0; i < count; i++) {
+    amd_comgr_data_t item;
+    if (auto comgr_status = amd::Comgr::action_data_get_data(
+            unpackaged_co, AMD_COMGR_DATA_KIND_EXECUTABLE, i, &item);
         comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogPrintfError("Failed to get data count of unpackaged code object for kind %d", kind);
+      LogError("Failed to get data of unpackaged code object");
+      return false;
+    }
+    comgr_helper::ComgrDataUniqueHandle item_handle(item);
+
+    size_t item_size = 0;
+    if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, nullptr);
+        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+      LogError("Failed to get data size");
       return false;
     }
 
-    for (size_t i = 0; i < count; i++) {
-      amd_comgr_data_t item;
-      if (auto comgr_status = amd::Comgr::action_data_get_data(unpackaged_co, kind, i, &item);
-          comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-        LogError("Failed to get data of unpackaged code object");
-        return false;
-      }
-      comgr_helper::ComgrDataUniqueHandle item_handle(item);
-
-      size_t item_size = 0;
-      if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, nullptr);
-          comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-        LogError("Failed to get data size");
-        return false;
-      }
-
-      if (item_size == 0) {
-        continue;
-      }
-
-      char* item_data = new char[item_size];
-      if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, item_data);
-          comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-        LogError("Failed to get data");
-        delete[] item_data;
-        return false;
-      }
-
-      code_obj_map[isa_name] = std::make_pair(item_data, item_size);
-      return true;
+    if (item_size == 0) {
+      continue;
     }
+
+    char* item_data = new char[item_size];
+    if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, item_data);
+        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+      LogError("Failed to get data");
+      delete[] item_data;
+      return false;
+    }
+
+    code_obj_map[isa_name] = std::make_pair(item_data, item_size);
+    return true;
+  }
+
+  // No executable entry for this target. Before treating that as "nothing in the package for
+  // this ISA", check whether comgr actually classified something as bitcode, SPIR-V or a fat
+  // binary for it, so that case is reported clearly instead of looking identical to a package
+  // that never targeted this device at all.
+  struct NonLoadableKind {
+    amd_comgr_data_kind_t kind;
+    const char* description;
+  };
+  constexpr NonLoadableKind kNonLoadableKinds[] = {
+      {AMD_COMGR_DATA_KIND_BC, "bitcode"},
+      {AMD_COMGR_DATA_KIND_SPIRV, "SPIR-V"},
+      {AMD_COMGR_DATA_KIND_FATBIN, "a fat binary"}};
+
+  for (const auto& non_loadable : kNonLoadableKinds) {
+    size_t non_loadable_count = 0;
+    if (amd::Comgr::action_data_count(unpackaged_co, non_loadable.kind, &non_loadable_count) !=
+            AMD_COMGR_STATUS_SUCCESS ||
+        non_loadable_count == 0) {
+      continue;
+    }
+    LogPrintfError("package entry for %s is %s; not loadable by hipModuleLoad", isa_name.c_str(),
+                   non_loadable.description);
+    return false;
   }
 
   return true;

@@ -4,6 +4,10 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ## HIP 7.18.0 for ROCm 10.3.0
 
+### Added
+
+* Support for the llvm-offload-binary package format alongside the existing clang-offload-bundle format. `hipModuleLoad` and `hipModuleLoadData` now accept a package and select the entry matching the current device, treating an entry that names a plain architecture (for example `gfx942`) as compatible with a feature-qualified agent (for example `gfx942:sramecc+:xnack-`). The JIT linker accepts packages as well: packaged device bitcode through `hiprtcLinkAddData` and `hiprtcLinkAddFile` with `HIPRTC_JIT_INPUT_LLVM_BUNDLED_BITCODE`, and packaged SPIR-V through `hipLinkAddData` and `hipLinkAddFile` with `hipJitInputSpirv`. A package holding no entry for the device is reported as an error rather than silently loading or linking nothing.
+
 ### Resolved issues
 
 * Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
@@ -12,6 +16,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Changed
 
 * After `hipFuncSetCacheConfig`, `preferredShmemCarveout` reads back `-1` for `hipFuncCachePreferNone` (was `0`) and `0` for `hipFuncCachePreferL1` (was `1`).
+* Building HIP now requires Code Object Manager (comgr) 3.5 or newer, up from 3.2, for the package-extraction API. At run time the runtime still loads any comgr 3.x: an older library leaves every other path working, and only the package paths fail, with a message naming the missing symbol and the required version.
 
 ## HIP 7.17.0 for ROCm 10.2.0
 

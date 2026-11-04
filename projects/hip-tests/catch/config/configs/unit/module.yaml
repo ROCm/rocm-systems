@@ -175,7 +175,7 @@ module:
     <<: *level_default
     tags: [load]
   Unit_hipModuleLoad_Negative_MalformedPackageBounds:
-    <<: *level_2
+    <<: *level_default
     tags: [load]
   Unit_hipModuleLoad_Positive_Package:
     <<: *level_2

@@ -12,6 +12,10 @@
 #include <unistd.h>
 #endif
 #include "../src/amd_hsa_elf.hpp"
+// For hip::symbols::kOffloadPackageMagic: the package magic is part of the llvm-offload-binary
+// wire format, so module loading (IsCodeObjectPackage) and the linker (CheckIfPackaged below)
+// have to agree on it. Keeping a second copy here let the two detection paths drift.
+#include "hip_code_object.hpp"
 
 namespace hip {
 std::unordered_set<LinkProgram*> LinkProgram::linker_set_;
@@ -35,10 +39,6 @@ constexpr char const* SPIRV_BUNDLE_ENTRY_ID = "hip-spirv64-amd-amdhsa-unknown-am
 
 static constexpr size_t bundle_magic_string_size =
     strLiteralLength(CLANG_OFFLOAD_BUNDLER_MAGIC_STR);
-
-// llvm-offload-binary package magic
-constexpr unsigned char OFFLOAD_PACKAGE_MAGIC[] = {0x10, 0xFF, 0x10, 0xAD};
-static constexpr size_t package_magic_size = sizeof(OFFLOAD_PACKAGE_MAGIC);
 
 struct __ClangOffloadBundleInfo {
   uint64_t offset;
@@ -339,10 +339,11 @@ bool UnbundleUsingComgr(std::string_view source, const std::string& isa,
 }
 
 bool CheckIfPackaged(std::string_view image) {
-  if (image.size() < package_magic_size) {
+  if (image.size() < symbols::kOffloadPackageMagicSize) {
     return false;
   }
-  return std::memcmp(image.data(), OFFLOAD_PACKAGE_MAGIC, package_magic_size) == 0;
+  return std::memcmp(image.data(), symbols::kOffloadPackageMagic,
+                     symbols::kOffloadPackageMagicSize) == 0;
 }
 
 bool SplitIsaName(const std::string& isa_name, std::string& triple, std::string& arch) {
