@@ -1043,9 +1043,9 @@ TEST(Gfx1250ExecutionTest, TensorDmaIssueRangesSkipPadding) {
                                                     {.address = wf->lds_base() + 12, .bytes = 8}}));
 }
 
-// The issue hook fires before the transfer moves data. A transfer that waits for
+// The issue hook fires before a load writes LDS. A transfer that waits for
 // memory is covered in gpu_vm_pipeline_test.cpp.
-TEST(Gfx1250ExecutionTest, TensorDmaIssueFiresBeforeDataMoves) {
+TEST(Gfx1250ExecutionTest, TensorDmaIssueFiresBeforeALoadWritesLds) {
   constexpr uint64_t kGlobal = 0x189000;
   constexpr uint32_t kSentinel = 0x5e5e5e5eu;
   Gfx1250Sim sim;
@@ -1075,6 +1075,45 @@ TEST(Gfx1250ExecutionTest, TensorDmaIssueFiresBeforeDataMoves) {
   EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
   EXPECT_TRUE(lds_untouched_at_issue);
   EXPECT_EQ(cu->lds().read32(wf->lds_base()), 0x12345678u);
+  EXPECT_EQ(observer.issues.size(), 1u);
+}
+
+// The issue hook fires after a store samples its LDS source and before it writes
+// global memory, so overwriting the source in the callback does not change what
+// the store writes.
+TEST(Gfx1250ExecutionTest, TensorDmaIssueFiresAfterAStoreSamplesLds) {
+  constexpr uint64_t kGlobal = 0x189000;
+  constexpr uint32_t kSource = 0xaabbccddu;
+  constexpr uint32_t kUnwritten = 0xffffffffu;
+  constexpr uint32_t kOverwrite = 0x5e5e5e5eu;
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto &observer = install_tensor_dma_issue_observer(sim);
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_lds_size(256);
+  cu->lds().write32(wf->lds_base(), kSource);
+  write_global_u32(*sim.memory, kGlobal, kUnwritten);
+  bool global_untouched_at_issue = false;
+  observer.inspect = [&](const amdgpu::TensorDmaIssueObservation &, const amdgpu::Wavefront &) {
+    global_untouched_at_issue = read_global_u32(*sim.memory, kGlobal) == kUnwritten;
+    cu->lds().write32(wf->lds_base(), kOverwrite);
+  };
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16);
+  write_wave_sgpr(*cu, *wf, 13, 1u << 16);
+  write_wave_sgpr(*cu, *wf, 14, 0);
+  write_wave_sgpr(*cu, *wf, 15, 1u << 16);
+  for (uint32_t reg = 16; reg < 20; ++reg)
+    write_wave_sgpr(*cu, *wf, reg, 0);
+  const std::array<uint32_t, 3> words = {0xd0714001u, 0x7c000000u, 0x7c7c0c00u};
+  auto store = decode_gfx1250(words, "tensor_store_from_lds");
+  ASSERT_NE(store, nullptr);
+  EXPECT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
+  EXPECT_TRUE(global_untouched_at_issue);
+  EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), kSource);
   EXPECT_EQ(observer.issues.size(), 1u);
 }
 

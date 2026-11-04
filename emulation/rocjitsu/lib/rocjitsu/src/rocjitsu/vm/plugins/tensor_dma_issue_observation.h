@@ -19,10 +19,13 @@ struct TensorDmaLdsRange {
   bool operator==(const TensorDmaLdsRange &) const = default;
 };
 
-/// @brief A tensor DMA instruction as it issues, before any of its data moves.
+/// @brief A tensor DMA instruction as it issues, before its global requests
+/// and LDS writes.
 ///
-/// @details Every tensor DMA instruction that issues is reported once, before
-/// its transfer starts and whether or not the transfer later waits for memory.
+/// @details Every tensor DMA instruction that issues is reported once, whether
+/// or not the transfer later waits for memory. A store has already sampled its
+/// LDS source bytes when it is reported; no global request has been made and a
+/// load has written no LDS.
 /// That includes an instruction that moves no data, such as a store whose tile
 /// lies wholly outside the tensor, which still completes on TENSORcnt, and a
 /// NULL descriptor (`count = 0`), which the emulator also counts on TENSORcnt.

@@ -718,8 +718,10 @@ inline std::vector<TensorDmaLdsRange> tensor_dma_lds_ranges(const TensorDmaState
   return ranges;
 }
 
-/// @brief Report a tensor DMA instruction as it issues, before any data moves.
-/// @details Called once per instruction. A NULL descriptor has no elements and
+/// @brief Report a tensor DMA instruction as it issues, before its global
+/// requests and LDS writes.
+/// @details Called once per instruction, after prepare_tensor has sampled a
+/// store's LDS source bytes. A NULL descriptor has no elements and
 /// reports no LDS ranges; the emulator still counts it on TENSORcnt, which is an
 /// assumption rather than established hardware behavior.
 inline void report_issued_tensor_dma(Wavefront &wf, const TensorDmaState &state) {

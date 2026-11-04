@@ -515,8 +515,9 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
                                                  const amdgpu::Wavefront &wf) {
   auto *s = get_state(wf);
   assert(s && s->race_state);
-  // The hook fires in the tensor instruction's own step, before any data moves,
-  // as onAmdgpuMemoryAccessRouted() does for other memory instructions.
+  // The hook fires in the tensor instruction's own step, before the transfer's
+  // global requests and LDS writes, as onAmdgpuMemoryAccessRouted() does for
+  // other memory instructions.
   const InstructionSnapshot &instruction = current_instruction(*s, wf);
   auto *rs = s->race_state;
   auto *detector = rs->getDetector();

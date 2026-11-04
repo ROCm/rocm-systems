@@ -216,8 +216,11 @@ public:
   }
 
   /// Called once when a tensor DMA instruction issues, after its descriptor is
-  /// read and, unless it is NULL, validated and prepared, and before any data
-  /// moves. This is the tensor DMA counterpart of onAmdgpuMemoryAccessRouted():
+  /// read and, unless it is NULL, validated and prepared. A store has already
+  /// sampled its LDS source bytes, so changing LDS in the callback does not
+  /// change what it writes to global memory. No global request has been made
+  /// and a load has written no LDS. This is the tensor DMA counterpart of
+  /// onAmdgpuMemoryAccessRouted():
   /// it fires in the issuing wave's instruction step, also when the transfer
   /// later waits for memory, and also for an instruction that moves no data,
   /// such as a NULL descriptor or a store wholly outside the tensor. A transfer
