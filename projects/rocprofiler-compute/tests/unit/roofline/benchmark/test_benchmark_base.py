@@ -26,7 +26,7 @@ from utils.mi_gpu_spec import mi_gpu_specs
 
 try:
     # The class of every arch the roofline benchmark runs on, imported as load_bench()
-    # imports it. gfx940 and gfx941 share the gfx942 class.
+    # imports it.
     ROOFLINE_ARCHS = mi_gpu_specs.get_roofline_archs()
     BENCH_CLASSES = {arch: run_benchmark.bench_class(arch) for arch in ROOFLINE_ARCHS}
 except OSError as hip_load_error:

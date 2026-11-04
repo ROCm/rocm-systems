@@ -518,13 +518,10 @@ def preserve_manual_rst_edits(new_descriptions: dict, existing_per_arch: dict) -
 
 
 def resolved_docs_target_archs(per_arch_dir: Union[str, Path]) -> list[str]:
-    """Doc emit list: every per-arch YAML on disk except known-excluded archs."""
-    excluded = {"gfx940", "gfx941"}
+    """Doc emit list: the arch of every per-arch YAML on disk."""
     suffix = "_metrics_description.yaml"
     return sorted(
-        arch
-        for path in Path(per_arch_dir).glob(f"*{suffix}")
-        if (arch := path.name.removesuffix(suffix)) not in excluded
+        path.name.removesuffix(suffix) for path in Path(per_arch_dir).glob(f"*{suffix}")
     )
 
 

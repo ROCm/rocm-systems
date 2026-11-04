@@ -53,7 +53,7 @@ class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
             + """
         extern "C" __global__ void mfma_f8(int iter, float *dummy)
         {
-            // MI300 series only - note gfx940/gfx941/gfx942 only uses fnuz f8
+            // MI300 series only - note gfx942 only uses fnuz f8
             long a =  threadIdx.x;
 
             vec16<float> result = {0};
