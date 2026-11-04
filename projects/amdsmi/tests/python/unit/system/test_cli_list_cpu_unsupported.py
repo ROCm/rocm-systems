@@ -34,6 +34,7 @@ from common.common import (
     find_cli_dir,
     generated_version_stub,
     load_cli_module,
+    stub_modules,
     stub_modules_at_import,
 )
 
@@ -50,22 +51,27 @@ _HELPERS_PATH = os.path.join(_CLI_DIR, "amdsmi_helpers.py") if _CLI_DIR else Non
 _MODEL_NAME = "AMD Eng Sample: 100-000001645-04"
 _BIOS_MODEL_NAME = "AMD Eng Sample: 100-000001645-04 To be filled by O.E.M. CPU @ 3.7GHz"
 
+
+def _amdsmi_init_stub():
+    """Stand-in for the driver-init module that amdsmi_helpers star-imports."""
+    from amdsmi import amdsmi_exception, amdsmi_interface
+
+    return fake_module(
+        "amdsmi_init",
+        AMDSMI_INIT_FLAG=0,
+        AMDSMI_INITIALIZED=True,
+        amdsmi_interface=amdsmi_interface,
+        amdsmi_exception=amdsmi_exception,
+    )
+
+
 # list_devices imports ``from amdsmi_helpers import AMDSMIHelpers``, and
 # amdsmi_helpers does ``from amdsmi_init import *`` at load, which needs the
 # driver-init module. Stub it (and the CMake-generated _version) at import;
 # tearDownModule restores them.
 _stubs = {}
 if _CLI_DIR and "amdsmi_init" not in sys.modules:
-    from amdsmi import amdsmi_exception as _amdsmi_exception
-    from amdsmi import amdsmi_interface as _amdsmi_interface
-
-    _stubs["amdsmi_init"] = fake_module(
-        "amdsmi_init",
-        AMDSMI_INIT_FLAG=0,
-        AMDSMI_INITIALIZED=True,
-        amdsmi_interface=_amdsmi_interface,
-        amdsmi_exception=_amdsmi_exception,
-    )
+    _stubs["amdsmi_init"] = _amdsmi_init_stub()
 if "_version" not in sys.modules:
     _stubs.update(generated_version_stub())
 _restore_stubs = stub_modules_at_import(_stubs) if _stubs else None
@@ -271,6 +277,13 @@ def _smbios_structure(stype, length, strings=(), version_index=0):
 
 
 class TestCpuBiosModelName(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # setUp reloads amdsmi_helpers, which star-imports amdsmi_init. Another module's
+        # tearDownModule can remove that name, so own a stub for this class: the real
+        # driver-init module is never imported, and nothing is left in sys.modules.
+        stub_modules(cls, {"amdsmi_init": _amdsmi_init_stub()})
+
     def setUp(self):
         if _HELPERS_PATH is None:
             raise unittest.SkipTest("amd-smi CLI dir not found")
