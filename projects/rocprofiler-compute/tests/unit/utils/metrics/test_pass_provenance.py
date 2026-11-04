@@ -26,7 +26,6 @@ from utils.metrics.pass_provenance import (
     expand_required_counters,
     extract_row_refs,
     natural_pass_sort_key,
-    resolve_weight_counter_column,
     select_pass,
     select_pass_with_normalization_fallback,
 )
@@ -143,12 +142,6 @@ def _write_gzip_csv(path, text: str) -> None:
     import gzip
 
     path.write_bytes(gzip.compress(text.encode("utf-8")))
-
-
-def _sub_metric_frame(pass_key: str) -> pd.DataFrame:
-    frame = pd.DataFrame({"Metric": ["read_sub"]})
-    frame.attrs[METRIC_ROW_PASS_ATTR] = {frame.index[0]: pass_key}
-    return frame
 
 
 def test_natural_pass_sort_key_orders_numeric_suffix() -> None:
@@ -1007,91 +1000,6 @@ def test_missing_denominator_keeps_pooled_ratio() -> None:
 
     assert float(dfs[1].at["9.9.9", "Avg"]) == 50.0
     assert float(dfs[1].at["9.9.8", "Avg"]) == 100.0
-
-
-def test_weight_counter_uses_the_sub_metric_pass() -> None:
-    layout = PassLayout(
-        pass_keys=("pmc_perf_0", "pmc_perf_1"),
-        counters_by_pass={
-            "pmc_perf_0": frozenset({"TCC_EA0_RDREQ_sum", "SQ_A"}),
-            "pmc_perf_1": frozenset({"TCC_EA0_RDREQ_sum", "SQ_A"}),
-        },
-        duplicated=frozenset({"TCC_EA0_RDREQ_sum", "SQ_A"}),
-    )
-    bound = resolve_weight_counter_column(
-        "TCC_EA0_RDREQ_sum",
-        "read_sub",
-        _sub_metric_frame("pmc_perf_1"),
-        layout,
-    )
-    assert bound == "TCC_EA0_RDREQ_sum@pass:pmc_perf_1"
-
-
-def test_weight_counter_refuses_a_different_pass() -> None:
-    layout = PassLayout(
-        pass_keys=("pmc_perf_0", "pmc_perf_1"),
-        counters_by_pass={
-            "pmc_perf_0": frozenset({"TCC_EA0_RDREQ_sum", "SQ_A"}),
-            "pmc_perf_1": frozenset({"SQ_A", "SQ_B"}),
-        },
-        duplicated=frozenset({"SQ_A"}),
-    )
-    bound = resolve_weight_counter_column(
-        "TCC_EA0_RDREQ_sum",
-        "read_sub",
-        _sub_metric_frame("pmc_perf_1"),
-        layout,
-    )
-    assert bound == "TCC_EA0_RDREQ_sum@pass:pmc_perf_1"
-
-
-def test_weight_counter_keeps_bare_name_when_its_only_copy_is_that_pass() -> None:
-    layout = PassLayout(
-        pass_keys=("pmc_perf_0", "pmc_perf_1"),
-        counters_by_pass={
-            "pmc_perf_0": frozenset({"SQ_A"}),
-            "pmc_perf_1": frozenset({"SQ_A", "TCC_EA0_RDREQ_sum"}),
-        },
-        duplicated=frozenset({"SQ_A"}),
-    )
-    bound = resolve_weight_counter_column(
-        "TCC_EA0_RDREQ_sum",
-        "read_sub",
-        _sub_metric_frame("pmc_perf_1"),
-        layout,
-    )
-    assert bound == "TCC_EA0_RDREQ_sum"
-
-
-def test_weight_only_in_another_pass_is_not_the_bare_column() -> None:
-    layout = PassLayout(
-        pass_keys=("pmc_perf_0", "pmc_perf_1"),
-        counters_by_pass={
-            "pmc_perf_0": frozenset({"TCC_EA0_RDREQ_sum"}),
-            "pmc_perf_1": frozenset({"SQ_A"}),
-        },
-        duplicated=frozenset(),
-    )
-    bound = resolve_weight_counter_column(
-        "TCC_EA0_RDREQ_sum",
-        "read_sub",
-        _sub_metric_frame("pmc_perf_1"),
-        layout,
-    )
-    assert bound == "TCC_EA0_RDREQ_sum@pass:pmc_perf_1"
-
-
-def test_weight_counter_on_a_single_pass_layout_is_the_bare_column() -> None:
-    layout = PassLayout(
-        pass_keys=("pmc_perf_0",),
-        counters_by_pass={"pmc_perf_0": frozenset({"TCC_EA0_RDREQ_sum", "SQ_A"})},
-        duplicated=frozenset(),
-    )
-    frame = pd.DataFrame({"Metric": ["read_sub"]}, index=["1"])
-    bound = resolve_weight_counter_column(
-        "TCC_EA0_RDREQ_sum", "read_sub", frame, layout
-    )
-    assert bound == "TCC_EA0_RDREQ_sum"
 
 
 def test_bind_moves_timestamps_onto_the_pmc_chosen_pass() -> None:

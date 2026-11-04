@@ -539,59 +539,6 @@ def bind_expression_dataframe(
     return used_passes
 
 
-def resolve_weight_counter_column(
-    weight_counter: str,
-    sub_metric_name: str,
-    df: pd.DataFrame,
-    pass_layout: Optional[PassLayout],
-) -> Optional[str]:
-    """Read a WEIGHTED_AVG weight from the sub-metric's pass.
-
-    A weight that exists in only one pass is still that pass. If it is not
-    the sub-ratio's pass, return the qualified name for the sub-ratio's pass
-    so analysis does not read the other replay. None means the pass is
-    unknown and the composite must stay unset.
-    """
-    if pass_layout is None or not pass_layout.is_multi_pass:
-        return weight_counter
-    pass_key = bound_pass_for_metric(df, sub_metric_name)
-    if pass_key is None:
-        console_warning(
-            "pass_provenance",
-            f"WEIGHTED_AVG weight {weight_counter!r} for {sub_metric_name!r} "
-            "has no sub-metric pass; not reading another replay",
-        )
-        return None
-    in_pass = weight_counter in pass_layout.counters_by_pass.get(pass_key, frozenset())
-    if not in_pass:
-        console_warning(
-            "pass_provenance",
-            f"WEIGHTED_AVG weight {weight_counter!r} for {sub_metric_name!r} "
-            f"is not in {pass_key}; not using another pass",
-        )
-        return pass_layout.qualified_column(weight_counter, pass_key)
-    if weight_counter in pass_layout.duplicated:
-        return pass_layout.qualified_column(weight_counter, pass_key)
-    return weight_counter
-
-
-def bound_pass_for_metric(
-    df: pd.DataFrame,
-    sub_metric_name: str,
-) -> Optional[str]:
-    """Pass key same-pass bind stored for the named metric row."""
-    row_pass = df.attrs.get(METRIC_ROW_PASS_ATTR, {})
-    if not isinstance(row_pass, dict) or "Metric" not in df.columns:
-        return None
-    matches = df.index[df["Metric"] == sub_metric_name]
-    if len(matches) == 0:
-        return None
-    pass_key = row_pass.get(matches[0])
-    if not isinstance(pass_key, str) or not pass_key:
-        return None
-    return pass_key
-
-
 def _is_metric_expression(value: object) -> bool:
     return isinstance(value, str) and value not in (UNSET_EXPRESSION, "None")
 
