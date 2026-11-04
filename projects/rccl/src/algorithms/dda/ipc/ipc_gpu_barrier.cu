@@ -11,7 +11,9 @@
 
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
 
+#include "bitops.h"
 #include "checks.h"
+#include "comm.h"
 #include "debug.h"
 
 #include <cuda_runtime.h>
@@ -26,7 +28,12 @@ __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
 /* static */ __host__ std::pair<std::unique_ptr<DeviceBuffer>, DeviceMailbox> DeviceMailbox::mallocAndInit(
   int nRanks, int nBlocks) {
   assert(nRanks == NRANKS);
-  auto flagBuf = std::make_unique<DeviceBuffer>(nRanks * nBlocks * sizeof(FlagType));
+  /* The mailbox is exported via cudaIpcGetMemHandle. Small allocations are
+   * suballocated from a shared chunk, and peers that open and close handles
+   * to different offsets of that chunk break later opens of it. */
+  size_t allocBytes = nRanks * nBlocks * sizeof(FlagType);
+  ALIGN_SIZE(allocBytes, CUDA_IPC_MIN);
+  auto flagBuf = std::make_unique<DeviceBuffer>(allocBytes);
   if (flagBuf == nullptr) {
     ERROR("DeviceMailbox::mallocAndInit: allocation failed");
     return {nullptr, DeviceMailbox{}};
