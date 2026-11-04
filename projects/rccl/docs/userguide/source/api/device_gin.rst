@@ -20,8 +20,10 @@ ncclGin
       Initializes a new ``ncclGin`` object. *comm* is the device communicator created using :c:func:`ncclDevCommCreate`.
       *contextIndex* is the index of the GIN context -- a network communication channel.  Using multiple GIN contexts allows
       the implementation to spread traffic onto multiple connections, avoiding locking and bottlenecks.  Therefore,
-      performance-oriented kernels should cycle among the available contexts to improve resource utilization (the number of
-      available contexts is available via :c:macro:`ginContextCount`).
+      performance-oriented kernels should cycle among the available contexts to improve resource utilization. The number of
+      available contexts is ``comm.ginContextCount`` on the device communicator. That value is the allocated count,
+      rounded up to a multiple of the GIN connection count, and may be larger than the count requested at
+      :c:func:`ncclDevCommCreate`.
 
       ``ncclGin`` always represents one specific context. To run a barrier whose fence covers every GIN context on the comm
       (useful when operations have been sharded across multiple contexts -- e.g. multi-NIC), pass
