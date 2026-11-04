@@ -21,9 +21,9 @@
 #include "library/thread_info.hpp"
 
 #include <nlohmann/json_fwd.hpp>
-#include <profiler-hub/reader.hpp>
-#include <profiler-hub/reader_types.hpp>
-#include <profiler-hub/storage.hpp>
+#include <profiler-hub/cpp/reader.hpp>
+#include <profiler-hub/cpp/reader_types.hpp>
+#include <profiler-hub/cpp/storage.hpp>
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
