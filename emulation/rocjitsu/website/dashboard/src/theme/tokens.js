@@ -1,7 +1,5 @@
 // Carbon Soft palette, shared by DOM and explicit chart options.
 // Category identities remain published values; color never renames a workload.
-export { sansFont } from './typography.js';
-
 export const shapeTokens = {
 
   cardRadius: '12px', controlRadius: '8px',
@@ -46,7 +44,7 @@ export const colorTokens = {
   },
 };
 
-// Suites and thread policies have fixed identities; target colors are generated per publication (targetColors.js).
+// Suites and thread policies have fixed identities; target colors follow list position: the first seven are fixed and later ones are generated (targetColors.js).
 // Suites = purple/teal/rose/olive.
 export const suiteColors = {
   light: { Triton: colorTokens.light.purpleText, Llama: colorTokens.light.secondaryAccent, DeepSeek: colorTokens.light.roseAccent, TensileLite: colorTokens.light.oliveAccent },

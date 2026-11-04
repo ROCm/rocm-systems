@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { hslToHex, softenColor } from '../../src/utils/softenColor.js';
+import { hslToHex, softenColor } from '../../src/utils/colorMath.js';
 
 test.each([
   [[0, 1, 0.5], '#ff0000'], [[60, 1, 0.5], '#ffff00'], [[120, 1, 0.5], '#00ff00'],

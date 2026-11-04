@@ -1,9 +1,8 @@
 import { tableStyles } from '../../theme/tableStyles';
-import { fontSizes, fontWeights, textStyles } from '../../theme/typography';
+import { fontSizes, fontWeights, textStyles, sansFont } from '../../theme/typography';
 import { useMemo, useState } from 'react';
 import { Box, Link, Pagination, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
 import SectionCard from '../shared/SectionCard';
-import { sansFont } from '../../theme/tokens';
 import { selectRecentRunAttempts, selectRecentRunSummaries } from '../../data/selectors';
 import { commitTimestampFor } from '../../data/runOrdering';
 import { formatCompactRunTime, formatDuration, formatFullDate, shortSha } from '../../utils/formatters';

@@ -34,6 +34,16 @@ test.each([null, '', '../../x', 'a//b', 'a/./b', 'a/../b', 42])('repository link
   expect(repositoryLink('https://github.com/ROCm/rocm-systems', branch)).toBeNull();
 });
 
+test.each(['https://example.test/', 'https://example.test'])('an origin-only repository %s gives single-slash commit and tree links', (repository) => {
+  expect(commitUrl(repository, 'abcdef0')).toBe('https://example.test/commit/abcdef0');
+  expect(repositoryLink(repository, 'develop')).toEqual({ href: 'https://example.test/tree/develop/emulation/rocjitsu', label: 'example.test' });
+});
+
+test('a repository with a path keeps it, with and without trailing slashes', () => {
+  expect(commitUrl('https://example.test/org/repo/', 'abcdef0')).toBe('https://example.test/org/repo/commit/abcdef0');
+  expect(repositoryLink('https://example.test/org/repo//', 'main').href).toBe('https://example.test/org/repo/tree/main/emulation/rocjitsu');
+});
+
 test('repository link encodes each branch segment and keeps slashes between them', () => {
   expect(repositoryLink('https://github.com/ROCm/rocm-systems', 'users/a b/c?d').href)
     .toBe('https://github.com/ROCm/rocm-systems/tree/users/a%20b/c%3Fd/emulation/rocjitsu');

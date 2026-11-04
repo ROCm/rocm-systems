@@ -28,7 +28,7 @@ export function createDashboardTheme(mode, targets = []) {
       text: { primary: colors.textPrimary, secondary: colors.textSecondary, muted: colors.textMuted, disabled: alpha(colors.textPrimary, 0.38) },
       selectionText: colors.selectionText,
       dashboard: colors,
-      // Target -> chart color, generated from the published targets (see targetColors.js).
+      // Target -> chart color by list position: the first seven are fixed, later ones are generated (see targetColors.js).
       targetColors: Object.fromEntries(generateTargetColors(mode === 'dark' ? 'dark' : 'light', targets)),
     },
     typography: {

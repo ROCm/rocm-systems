@@ -63,7 +63,9 @@ export default function BenchmarksView({ data, filters, historyRange: controlled
     if (choice.record) openRecord(choice.record);
     else { onSelectRun?.(choice.run.runId); setUnavailable(choice); }
   };
-  const chartProps = { data, filters, range, selectedRunIds, onSelectRecord: openRecord };
+  // Each card gets only the runs the range plots (on 1W, every run of the last 7 commit days), the same set Inspect results
+  // and the default selection use, so no card scans the whole history just to cut it down again.
+  const chartProps = { data: rangedData, filters, range, selectedRunIds, onSelectRecord: openRecord };
   return (
     <Box data-testid="benchmark-explorer" sx={{ minWidth: 0 }}>
       <SectionCard title="Benchmark history" subtitle="Selected workloads across the configurations checked in the sidebar" sx={{ minWidth: 0 }} action={<ActionButton startIcon={<AddRoundedIcon />} disabled={!catalog.all.length} onClick={() => setDraft(selected)}>Add benchmarks</ActionButton>}>

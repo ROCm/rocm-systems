@@ -45,7 +45,7 @@ function UpdatedStatus({ generatedAt, loading }) {
   return <Box data-testid="dashboard-updated" sx={{
     display: 'inline-flex', alignItems: 'center', alignSelf: 'flex-start', gap: '6px', mt: '10px', minWidth: '124px', height: '23px',
     padding: '2px 10px 2px 8px', border: 1, borderColor: 'dashboard.border', borderRadius: '999px', bgcolor: 'background.default',
-    color: 'text.secondary', fontSize: fontSizes.caption, fontWeight: fontWeights.regular, lineHeight: '17px', whiteSpace: 'nowrap',
+    color: 'text.secondary', ...textStyles.captionCompact, whiteSpace: 'nowrap',
   }}>
     <Box component="span" aria-hidden="true" sx={{ width: 7, height: 7, flexShrink: 0, borderRadius: '50%', bgcolor: available ? 'dashboard.successGraphic' : 'text.muted' }} />
     {available ? <Box component="time" dateTime={generatedAt}>Updated {age}</Box> : loading ? 'Loading data…' : 'Data unavailable'}

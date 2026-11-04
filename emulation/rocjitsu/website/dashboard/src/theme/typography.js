@@ -1,8 +1,9 @@
 // The approved text scale. Icon dimensions are intentionally independent.
 export const fontSizes = Object.freeze({ caption: 14, body: 14, tableHeader: 15, nav: 16, section: 18, dialog: 20, page: 24, brand: 32 });
-// Three semantic weight tiers. The native system family decides which faces exist: a static family (Noto Sans on
-// Linux) ships Regular and Bold only, so 500 renders Regular and 600/700 both render Bold; variable system fonts
-// (San Francisco, Segoe UI Variable) render all three. Roles therefore also differ by size, case and color.
+// Three semantic weight tiers. The native system family decides which faces exist, so the result depends on the
+// installed faces: on one Linux setup 500 renders Regular and 600/700 both render Bold; on another Chromium picked
+// Medium for 500 and Bold for 600 and 700; variable system fonts (San Francisco, Segoe UI Variable) render all three.
+// Roles therefore also differ by size, case and color.
 export const fontWeights = Object.freeze({ regular: 500, medium: 600, emphasized: 700 });
 
 // Native system fonts only: nothing is bundled or downloaded. system-ui resolves to the platform UI

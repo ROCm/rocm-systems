@@ -3,7 +3,7 @@ import { Box, Chip } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import { colorTokens } from '../../theme/tokens';
 import ThreadPolicySwatch from './ThreadPolicySwatch';
-import { softenColor } from '../../utils/softenColor';
+import { softenColor } from '../../utils/colorMath';
 import { markerColor, textColor } from './tagColors';
 
 const shapes = { target: 'square', suite: 'circle', mode: 'triangle' };

@@ -1,8 +1,7 @@
-import { fontWeights } from '../../theme/typography';
+import { fontWeights, sansFont } from '../../theme/typography';
 import ActionButton from '../shared/ActionButton';
 import { Box, ButtonBase, Paper, Typography } from '@mui/material';
 import { formatFullDate, shortSha } from '../../utils/formatters';
-import { sansFont } from '../../theme/tokens';
 
 export default function BranchList({ branches, selectedBranch, onSelect, onClear, scrollRef, onScroll }) {
   return <Paper variant="outlined" className="branch-list" data-testid="branch-list-panel" component="section" aria-labelledby="branches-heading" sx={{

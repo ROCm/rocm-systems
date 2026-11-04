@@ -1,11 +1,11 @@
-import { fontSizes, fontWeights } from '../../theme/typography';
+import { fontSizes, fontWeights, sansFont } from '../../theme/typography';
 import { Fragment } from 'react';
 import { THREAD_POLICIES } from '../../data/runSchema';
 import { Box, ButtonBase, Typography } from '@mui/material';
 import { selectConfigurationComparison } from '../../data/branchSelectors';
 import { formatDuration, formatPercent } from '../../utils/formatters';
 import { changeTone, classifyDurationChange } from '../../utils/performance';
-import { sansFont, shapeTokens } from '../../theme/tokens';
+import { shapeTokens } from '../../theme/tokens';
 import CategoryTag from '../shared/CategoryTag';
 import { configurationTargets } from './branchSelection';
 import { configurationState } from './branchPresentation';

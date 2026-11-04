@@ -1,7 +1,6 @@
-import { fontWeights } from '../../theme/typography';
+import { fontWeights, sansFont } from '../../theme/typography';
 import { Box, ListItemText } from '@mui/material';
 import { commitTimestampFor } from '../../data/runOrdering';
-import { sansFont } from '../../theme/tokens';
 import { formatRunTime, shortSha } from '../../utils/formatters';
 
 export default function RunOptionDetails({ run, result }) {

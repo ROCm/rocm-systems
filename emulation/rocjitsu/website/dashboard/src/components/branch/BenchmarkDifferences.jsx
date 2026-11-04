@@ -1,12 +1,11 @@
 import { tallSearchFieldSx } from '../shared/tallSearchFieldSx';
 import { tableStyles, numericTableCell, changedRowSx } from '../../theme/tableStyles';
-import { fontWeights, textStyles } from '../../theme/typography';
+import { fontWeights, textStyles, sansFont } from '../../theme/typography';
 import AnchoredSelect from '../shared/AnchoredSelect';
 import { Fragment } from 'react';
 import { Box, Checkbox, FormControl, InputLabel, MenuItem, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel, TextField, Typography } from '@mui/material';
 import { formatDuration, formatPercent } from '../../utils/formatters';
 import { changeTone, classifyDurationChange } from '../../utils/performance';
-import { sansFont } from '../../theme/tokens';
 import { hasConfiguration } from '../../data/runSchema';
 import CategoryTag from '../shared/CategoryTag';
 import { groupComparisonRows, rowChanges } from './branchPresentation';

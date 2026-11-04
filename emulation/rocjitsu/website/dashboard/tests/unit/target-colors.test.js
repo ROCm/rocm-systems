@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { generateTargetColors, targetColor, targetHues } from '../../src/theme/targetColors.js';
+import { FIXED_TARGET_COUNT, generateTargetColors, targetColor, targetHues } from '../../src/theme/targetColors.js';
 import { createDashboardTheme } from '../../src/theme/theme.js';
 import { colorTokens } from '../../src/theme/tokens.js';
 
@@ -93,4 +93,80 @@ test('a target the theme was not given falls back to neutral text, never another
 test.each(['constructor', 'toString', 'hasOwnProperty', '__proto__'])('inherited object member %s is not a target and falls back to neutral text', (name) => {
   const theme = createDashboardTheme('light', ['gfx1250', 'gfx950']);
   expect(targetColor(theme, name)).toBe(theme.palette.text.secondary);
+});
+
+// The palette for the first seven targets is fixed. These literals are the contract: they are written out here on
+// purpose, so changing the generator or the palette file cannot quietly recolor charts users already know.
+const FIRST_SEVEN = {
+  light: ['#0f62fe', '#c2570c', '#158463', '#ca21ca', '#5d7b14', '#dd2c42', '#158428'],
+  dark: ['#78a9ff', '#ffa04d', '#50e2b8', '#e250e2', '#b8e250', '#e4586a', '#50e268'],
+};
+
+for (const mode of ['light', 'dark']) {
+  describe(`${mode} fixed colors for the first seven targets`, () => {
+    test('seven targets get exactly the fixed list, in order', () => {
+      expect([...generateTargetColors(mode, named(7)).values()]).toEqual(FIRST_SEVEN[mode]);
+      expect(FIXED_TARGET_COUNT).toBe(7);
+    });
+
+    test('the first two are still the original blue and orange tokens', () => {
+      const [first, second] = FIRST_SEVEN[mode];
+      expect(first).toBe(colorTokens[mode].interactive);
+      expect(second).toBe(colorTokens[mode].seriesSecondary);
+    });
+
+    test('appending targets never changes a color already given, from 1 up to 24 targets', () => {
+      const all = [...generateTargetColors(mode, named(24)).values()];
+      for (let count = 1; count <= 24; count += 1) {
+        expect([...generateTargetColors(mode, named(count)).values()], `${count} targets`).toEqual(all.slice(0, count));
+      }
+    });
+
+    test('adding targets one at a time keeps every earlier target on its color', () => {
+      const names = ['gfx1100', 'gfx1200', 'gfx1250', 'gfx906', 'gfx942', 'gfx950', 'gfx90a', 'gfx908'];
+      const sorted = (list) => [...list].sort();
+      for (let count = 1; count < names.length; count += 1) {
+        const before = generateTargetColors(mode, sorted(names.slice(0, count)));
+        // Only a name that sorts after every existing one is appended, so no earlier position can shift.
+        const next = names.slice(0, count + 1);
+        const after = generateTargetColors(mode, next);
+        const appendedLast = sorted(next).at(-1) === names[count];
+        if (appendedLast) for (const [target, color] of before) expect(after.get(target), `${target} when ${names[count]} is added`).toBe(color);
+      }
+    });
+
+    test('the same targets published in any order get the same colors', () => {
+      const names = ['gfx950', 'gfx1250', 'gfx942', 'gfx1100', 'gfx906', 'gfx1200', 'gfx90a'];
+      const baseline = [...generateTargetColors(mode, names)].sort();
+      for (const order of [[...names].reverse(), [...names].sort(), [names[3], names[0], names[6], names[1], names[5], names[2], names[4]]]) {
+        expect([...generateTargetColors(mode, order)].sort()).toEqual(baseline);
+      }
+    });
+
+    test('duplicate published targets count once and do not shift a color', () => {
+      const once = generateTargetColors(mode, ['gfx1250', 'gfx950', 'gfx942']);
+      const repeated = generateTargetColors(mode, ['gfx950', 'gfx1250', 'gfx950', 'gfx942', 'gfx1250']);
+      expect([...repeated]).toEqual([...once]);
+    });
+
+    test('the seven are distinct and each readable on the surface (4.5:1)', () => {
+      const surface = colorTokens[mode].surface;
+      expect(new Set(FIRST_SEVEN[mode]).size).toBe(7);
+      for (const color of FIRST_SEVEN[mode]) expect(contrast(color, surface), color).toBeGreaterThanOrEqual(4.5);
+    });
+
+    test('targets past the seventh are generated, distinct from the fixed seven, and leave the seven alone', () => {
+      const colors = [...generateTargetColors(mode, named(12)).values()];
+      expect(colors.slice(0, 7)).toEqual(FIRST_SEVEN[mode]);
+      expect(new Set(colors).size).toBe(12);
+    });
+  });
+}
+
+test('a target that sorts ahead of the existing ones shifts the colors after it (accepted, documented behaviour)', () => {
+  const before = generateTargetColors('light', ['gfx1250', 'gfx950']);
+  const after = generateTargetColors('light', ['gfx1100', 'gfx1250', 'gfx950']);
+  expect(after.get('gfx1100')).toBe(FIRST_SEVEN.light[0]);
+  expect(after.get('gfx1250')).toBe(FIRST_SEVEN.light[1]);
+  expect(after.get('gfx1250')).not.toBe(before.get('gfx1250'));
 });

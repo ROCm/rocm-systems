@@ -1,4 +1,4 @@
-import { repositoryBase } from './externalUrls.js';
+import { repositoryBase, repositoryPath } from './externalUrls.js';
 
 // The dashboard lives in this subdirectory of the published repository.
 const PROJECT_PATH = 'emulation/rocjitsu';
@@ -18,6 +18,6 @@ export function repositoryLink(repository, canonicalBranch = 'develop') {
   const branchPath = safeBranchPath(canonicalBranch);
   if (!url || !branchPath) return null;
   const label = url.pathname.split('/').filter(Boolean).join('/') || url.host;
-  url.pathname = `${url.pathname}/tree/${branchPath}/${PROJECT_PATH}`;
+  url.pathname = repositoryPath(url, `/tree/${branchPath}/${PROJECT_PATH}`);
   return { href: url.href, label };
 }

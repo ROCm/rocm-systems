@@ -1,8 +1,8 @@
-import { fontSizes, fontWeights } from '../../theme/typography';
+import { fontSizes, fontWeights, sansFont } from '../../theme/typography';
 import { Box, Stack, Typography } from '@mui/material';
 import SectionCard from '../shared/SectionCard';
 import CategoryTag from '../shared/CategoryTag';
-import { sansFont, shapeTokens } from '../../theme/tokens';
+import { shapeTokens } from '../../theme/tokens';
 import { formatPercent } from '../../utils/formatters';
 import { changeTone, classifyDurationChange } from '../../utils/performance';
 

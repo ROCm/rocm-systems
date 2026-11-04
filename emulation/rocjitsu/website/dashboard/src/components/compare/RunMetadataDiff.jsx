@@ -1,11 +1,10 @@
 import { tableStyles, changedRowSx } from '../../theme/tableStyles';
-import { fontSizes, fontWeights } from '../../theme/typography';
+import { fontSizes, fontWeights, sansFont } from '../../theme/typography';
 import { Fragment } from 'react';
 import { groupMetadataFacts, metadataLabel } from '../shared/metadataPresentation';
 import { Box, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
 import { runEnvironmentDetails } from '../../data/provenance';
 import { formatMetadataValue, shortSha } from '../../utils/formatters';
-import { sansFont } from '../../theme/tokens';
 import ScrollTableContainer from '../shared/ScrollTableContainer';
 
 function coverage(run, filters) {

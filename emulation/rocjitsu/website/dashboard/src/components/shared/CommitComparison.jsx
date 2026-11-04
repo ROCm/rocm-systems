@@ -1,6 +1,5 @@
-import { fontWeights } from '../../theme/typography';
+import { fontWeights, sansFont } from '../../theme/typography';
 import { Box, Typography } from '@mui/material';
-import { sansFont } from '../../theme/tokens';
 import { shortSha } from '../../utils/formatters';
 
 export default function CommitComparison({ candidate, baseline, align = 'left', sx }) {
