@@ -434,6 +434,37 @@ namespace RcclUnitTesting
     return childIds;
   }
 
+  bool TestBed::WriteToChild(int const childId, CommandMessage const& message)
+  {
+    std::vector<char> const& bytes = message.Bytes();
+    if (RcclUnitTesting::safe_pipe_write(childList[childId]->parentWriteFd, bytes.data(), bytes.size()) ==
+        static_cast<ssize_t>(bytes.size()))
+      return true;
+    TEST_ERROR("Unable to write to child %d: Error %s", childId, strerror(errno));
+    [&]() { FAIL() << AbandonChildren(childId); }();  // FAIL() only compiles in a void function
+    return false;
+  }
+
+  bool TestBed::SendToRanks(int const command, std::vector<int> const& groupList, std::vector<int> const& rankList,
+                            int const collId, OnChildFailure const onFailure, CommandMessage const& args)
+  {
+    // Send every command before waiting, so children work in parallel.
+    std::vector<int> ackChildIds;
+    for (int const group : groupList)
+    {
+      for (int const rank : rankList)
+      {
+        int const childId = rankToChildMap[rank];
+        TestBedChild::RankTarget const target = {rank, group, collId};
+        if (!WriteToChild(childId, CommandMessage() << command << target << args)) return false;
+        ackChildIds.push_back(childId);
+      }
+    }
+    bool allAcked = false;
+    CollectAcks(command, ackChildIds, onFailure, &allAcked);
+    return allAcked;
+  }
+
   bool TestBed::PoolWorkersFor(std::vector<std::vector<int>> const& deviceIdsPerChild,
                                std::vector<int>& workers) const
   {
@@ -766,25 +797,9 @@ namespace RcclUnitTesting
       FAIL();
     }
 
-    // Send CollectiveArgs for every selected rank before waiting, so children work in parallel
-    int const cmd = TestBedChild::CHILD_SET_COLL_ARGS;
-    std::vector<int> ackChildIds;
-    for (auto currRank : rankList)
-    {
-      int const childId = rankToChildMap[currRank];
-      ackChildIds.push_back(childId);
-      PIPE_WRITE(childId, cmd);
-      PIPE_WRITE(childId, currRank);
-      PIPE_WRITE(childId, collId);
-      PIPE_WRITE(childId, groupId);
-      PIPE_WRITE(childId, funcType);
-      PIPE_WRITE(childId, dataType);
-      PIPE_WRITE(childId, numInputElements);
-      PIPE_WRITE(childId, numOutputElements);
-      PIPE_WRITE(childId, streamIdx);
-      PIPE_WRITE(childId, optionalArgs);
-    }
-    CollectAcks(TestBedChild::CHILD_SET_COLL_ARGS, ackChildIds);
+    SendToRanks(TestBedChild::CHILD_SET_COLL_ARGS, {groupId}, rankList, collId, OnChildFailure::Report,
+                CommandMessage() << funcType << dataType << numInputElements << numOutputElements
+                                 << streamIdx << optionalArgs);
     InteractiveWait("Finishing SetCollectiveArgs");
   }
 
@@ -903,31 +918,9 @@ namespace RcclUnitTesting
     std::vector<int> rankList, groupList;
     if (!SelectRanks(rank, rankList) || !SelectGroups(groupId, groupList)) return false;
 
-    // Loop over all ranks and send allocation command to appropriate child process.
-    // The lambda confines the early return of the ASSERT-based PIPE_WRITE.
-    bool allocated = false;
-    [&]()
-    {
-      int const cmd = TestBedChild::CHILD_ALLOCATE_MEM;
-      std::vector<int> ackChildIds;
-      for (auto currGroup : groupList) {
-        for (auto currRank : rankList)
-        {
-          int const childId = rankToChildMap[currRank];
-          PIPE_WRITE(childId, cmd);
-          PIPE_WRITE(childId, currRank);
-          PIPE_WRITE(childId, collId);
-          PIPE_WRITE(childId, inPlace);
-          PIPE_WRITE(childId, useManagedMem);
-          PIPE_WRITE(childId, userRegistered);
-          PIPE_WRITE(childId, currGroup);
-          ackChildIds.push_back(childId);
-        }
-      }
-      // Each CHILD_ALLOCATE_MEM command produces one acknowledgement. Read one
-      // acknowledgement from the child that received that command.
-      CollectAcks(TestBedChild::CHILD_ALLOCATE_MEM, ackChildIds, OnChildFailure::Report, &allocated);
-    }();
+    bool const allocated = SendToRanks(TestBedChild::CHILD_ALLOCATE_MEM, groupList, rankList, collId,
+                                       OnChildFailure::Report,
+                                       CommandMessage() << inPlace << useManagedMem << userRegistered);
     InteractiveWait("Finishing AllocateMemInternal");
     return allocated;
   }
@@ -956,10 +949,7 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, regCmd);
         PIPE_WRITE(childId, currGroup);
         PIPE_WRITE(childId, collId);
-        int const numRanks = static_cast<int>(ranksPerChild[childId].size());
-        PIPE_WRITE(childId, numRanks);
-        for (int currRank : ranksPerChild[childId])
-          PIPE_WRITE(childId, currRank);
+        PIPE_WRITE_VEC(childId, ranksPerChild[childId]);
       }
 
       bool allAcked = false;
@@ -1000,24 +990,8 @@ namespace RcclUnitTesting
     std::vector<int> rankList, groupList;
     if (!SelectRanks(rank, rankList) || !SelectGroups(groupId, groupList)) return;
 
-    // Send every selected rank its prepare data command before waiting, so children work in parallel
-    int const cmd = TestBedChild::CHILD_PREPARE_DATA;
-    intptr_t const prepDataFuncOffset = CollFuncPtrToOffset(prepDataFunc);
-    std::vector<int> ackChildIds;
-    for (auto currGroup : groupList)
-    {
-      for (auto currRank : rankList)
-      {
-        int const childId = rankToChildMap[currRank];
-        PIPE_WRITE(childId, cmd);
-        PIPE_WRITE(childId, currRank);
-        PIPE_WRITE(childId, currGroup);
-        PIPE_WRITE(childId, collId);
-        PIPE_WRITE(childId, prepDataFuncOffset);
-        ackChildIds.push_back(childId);
-      }
-    }
-    CollectAcks(TestBedChild::CHILD_PREPARE_DATA, ackChildIds);
+    SendToRanks(TestBedChild::CHILD_PREPARE_DATA, groupList, rankList, collId, OnChildFailure::Report,
+                CommandMessage() << CollFuncPtrToOffset(prepDataFunc));
     InteractiveWait("Finishing PrepareData");
   }
 
@@ -1052,11 +1026,7 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, ev.timeoutUs);
         PIPE_WRITE(childId, currGroup);
         PIPE_WRITE(childId, useHipGraph);
-        int tempCurrentRanks = currentRanks.size();
-        PIPE_WRITE(childId, tempCurrentRanks);
-        for (int rank = 0; rank < currentRanks.size(); ++rank){
-          PIPE_WRITE(childId, currentRanks[rank]);
-        }
+        PIPE_WRITE_VEC(childId, currentRanks);
       }
 
       bool allAcked = false;
@@ -1074,23 +1044,8 @@ namespace RcclUnitTesting
     std::vector<int> rankList, groupList;
     if (!SelectRanks(rank, rankList) || !SelectGroups(groupId, groupList)) return;
 
-    // Send every selected rank its ValidateResults command before waiting, so children work in parallel
-    int const cmd = TestBedChild::CHILD_VALIDATE_RESULTS;
-    std::vector<int> ackChildIds;
-    for (auto currGroup : groupList)
-    {
-      for (auto currRank : rankList)
-      {
-        int const childId = rankToChildMap[currRank];
-        PIPE_WRITE(childId, cmd);
-        PIPE_WRITE(childId, currRank);
-        PIPE_WRITE(childId, currGroup);
-        PIPE_WRITE(childId, collId);
-        ackChildIds.push_back(childId);
-      }
-    }
-    CollectAcks(TestBedChild::CHILD_VALIDATE_RESULTS, ackChildIds, OnChildFailure::Report, &isCorrect);
-
+    isCorrect = SendToRanks(TestBedChild::CHILD_VALIDATE_RESULTS, groupList, rankList, collId,
+                            OnChildFailure::Report);
     InteractiveWait("Finishing ValidateResults");
   }
 
@@ -1134,7 +1089,6 @@ namespace RcclUnitTesting
     OnChildFailure const registrationFailure = this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN
                                                ? OnChildFailure::StopIfOwed : OnChildFailure::Report;
     int const deregCmd = TestBedChild::CHILD_DEREGISTER_MEM;
-    int const deallocCmd = TestBedChild::CHILD_DEALLOCATE_MEM;
     for (auto currGroup : groupList) {
       // Phase 1: deregister all selected windows/handles. Send every child its
       // command before waiting so any collective registration teardown can
@@ -1143,10 +1097,7 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, deregCmd);
         PIPE_WRITE(childId, currGroup);
         PIPE_WRITE(childId, collId);
-        int const numRanks = static_cast<int>(ranksPerChild[childId].size());
-        PIPE_WRITE(childId, numRanks);
-        for (int currRank : ranksPerChild[childId])
-          PIPE_WRITE(childId, currRank);
+        PIPE_WRITE_VEC(childId, ranksPerChild[childId]);
       }
 
       bool allDeregistered = false;
@@ -1155,19 +1106,8 @@ namespace RcclUnitTesting
 
       // Phase 2: now no selected communicator retains a window/registration
       // over these buffers, so their backing allocations can be released.
-      std::vector<int> deallocAckChildIds;
-      for (auto currRank : rankList)
-      {
-        int const childId = rankToChildMap[currRank];
-        PIPE_WRITE(childId, deallocCmd);
-        PIPE_WRITE(childId, currRank);
-        PIPE_WRITE(childId, currGroup);
-        PIPE_WRITE(childId, collId);
-        deallocAckChildIds.push_back(childId);
-      }
-
-      // Each CHILD_DEALLOCATE_MEM command produces one acknowledgement.
-      CollectAcks(TestBedChild::CHILD_DEALLOCATE_MEM, deallocAckChildIds);
+      if (!SendToRanks(TestBedChild::CHILD_DEALLOCATE_MEM, {currGroup}, rankList, collId, OnChildFailure::Report))
+        return;
     }
 
     InteractiveWait("Finishing DeallocateMem");

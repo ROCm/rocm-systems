@@ -77,6 +77,15 @@ namespace RcclUnitTesting
       int      status;   // ErrCode
     };
 
+    // The rank, group and collective (-1 = all) a per-rank command applies to.
+    // TestBed::SendToRanks sends it right after the command id.
+    struct RankTarget
+    {
+      int globalRank;
+      int groupId;
+      int collId;
+    };
+
     // argv layout of an exec'd child worker (TestBed::InitChild builds it, main() parses it)
     enum
     {
@@ -227,6 +236,17 @@ namespace RcclUnitTesting
     // or collId (-1 = all) that does not index the current config, or a rank this
     // child does not own.
     bool ResolveTarget(int globalRank, int groupId, int collId, char const* handler, int& localRank) const;
+
+    // A handler reads its own arguments too before calling ResolveTarget, so a
+    // rejected command leaves nothing in the pipe to be decoded as the next one.
+    bool ResolveTarget(RankTarget const& target, char const* handler, int& localRank) const
+    {
+      return ResolveTarget(target.globalRank, target.groupId, target.collId, handler, localRank);
+    }
+
+    // Reads (groupId, collId, globalRanks) for a command over several local ranks,
+    // and resolves every rank, after reading all of it.
+    bool ReadRankListCommand(char const* handler, int& groupId, int& collId, std::vector<int>& localRanks);
 
     // Destroys any live graph / graph-exec handles for groupId after syncing
     // the owning devices.

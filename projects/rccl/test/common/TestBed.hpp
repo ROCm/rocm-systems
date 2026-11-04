@@ -8,6 +8,7 @@
 #include <map>
 #include "CollectiveArgs.hpp"
 #include "TestBedChild.hpp"
+#include "PipeUtils.hpp"
 #include "EnvVars.hpp"
 #include <gtest/gtest.h>
 #include <iomanip>
@@ -262,6 +263,16 @@ namespace RcclUnitTesting
     // failure. An ack to another command, or out of order, stops all workers.
     void CollectAcks(int command, std::vector<int> const& childIds,
                      OnChildFailure onFailure = OnChildFailure::Report, bool* allSucceeded = nullptr);
+
+    // Writes message to a child's command pipe. A failed write stops all workers
+    // and fails the test, so false means the caller must send nothing more.
+    bool WriteToChild(int childId, CommandMessage const& message);
+
+    // Sends command, then a TestBedChild::RankTarget, then args to the child of
+    // each listed rank, once per listed group, and collects the acks. Returns
+    // whether every child succeeded.
+    bool SendToRanks(int command, std::vector<int> const& groupList, std::vector<int> const& rankList,
+                     int collId, OnChildFailure onFailure, CommandMessage const& args = CommandMessage());
 
     // Forgets the active config's children, ranks and failure flag; owned children
     // must already be reaped. configUsedPool still reports how that config was served.

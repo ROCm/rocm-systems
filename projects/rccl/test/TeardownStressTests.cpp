@@ -698,12 +698,19 @@ namespace RcclUnitTesting
     expectFailure("SetCollectiveArgs on group 1", [&]() {
       testBed.SetCollectiveArgs(ncclCollAllReduce, ncclFloat32, 1024, 1024, options, -1, /*groupId*/ 1);
     });
+    // The child rejects a collective; the valid command after it shows the
+    // rejected one's arguments were consumed rather than decoded as a command.
+    expectFailure("SetCollectiveArgs on collective 1", [&]() {
+      testBed.SetCollectiveArgs(ncclCollAllReduce, ncclFloat32, 1024, 1024, options, /*collId*/ 1);
+    });
     testBed.SetCollectiveArgs(ncclCollAllReduce, ncclFloat32, 1024, 1024, options);
     testBed.AllocateMem(/*inPlace*/ false, /*useManagedMem*/ false);
     ASSERT_FALSE(testing::Test::HasFailure());
 
     expectFailure("PrepareData on group 1", [&]() { testBed.PrepareData(/*groupId*/ 1); });
     expectFailure("PrepareData on collective 1", [&]() { testBed.PrepareData(-1, /*collId*/ 1); });
+    testBed.PrepareData();
+    ASSERT_FALSE(testing::Test::HasFailure());
     bool isCorrect = true;
     expectFailure("ValidateResults on rank 1", [&]() { testBed.ValidateResults(isCorrect, -1, -1, /*rank*/ 1); });
     EXPECT_FALSE(isCorrect);
