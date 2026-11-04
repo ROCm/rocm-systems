@@ -412,10 +412,11 @@ static rcclDdaLaunchCap ddaArLL128SplitBound(ncclComm* comm, const void* sendbuf
     geom = ddaArLL128TwoShotGeom(comm, bytes, cap);
   }
   rcclDdaLaunchCap bound = {geom.first.x, geom.second.x};
-  // In the VMM-first window the split replaces the VMM launch the selector would have made.
+  // In the VMM-first window the split replaces the VMM launch the selector would have made, so it takes that grid:
+  // its blocks, and at these sizes its 512-thread blocks, both under the cap.
   if (rcclDdaArVmmFirstFor(comm, sendbuff, recvbuff, bytes) &&
       ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-    bound.blocks = std::max(bound.blocks, ncclAllReduceDdaFabricBlocks(comm, count, datatype, cap));
+    bound = {ncclAllReduceDdaFabricBlocks(comm, count, datatype, cap), cap.threads};
   }
   return bound;
 }

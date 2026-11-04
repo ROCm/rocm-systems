@@ -15,9 +15,11 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "../common/DdaFabricTestHelpers.hpp"
 #include "algorithms/dda/DdaCollSeams.h"
+#include "algorithms/dda/dda_init_detail.h"
 
 #include DDA_ALL_REDUCE_FABRIC_LL_CC_PATH
 
@@ -886,7 +888,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, SplitTakes_IsThePeerSplitWindow) {
   EXPECT_FALSE(takes(4 * kMiB)) << "staged writer off: the VMM-first window keeps the message";
 }
 
-// In the unregistered VMM-first window the split may use the blocks of the VMM launch it replaces, if more than LL's.
+// In the unregistered VMM-first window the split replaces the VMM launch, so its cap is the VMM grid, not LL's.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitInTheVmmFirstWindowTakesTheVmmGrid) {
   SplitTiersOn(comm(), params_);
   comm().nRanks = 32;
@@ -901,6 +903,29 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitInTheVmmFirstWindowTakes
   EXPECT_EQ(l.kernel, (LL128Split<float, 0>()));
   EXPECT_EQ(l.grid.x, std::min<unsigned>(vmm, 134)) << "the VMM launch's blocks";
   EXPECT_EQ(l.block.x, 512u);
+  // A smaller VMM grid than the LL two-shot's still caps the split.
+  g_rcclDdaFabricVmmBlocks = [](const ncclComm*) { return 4; };
+  ASSERT_LT(ncclAllReduceDdaFabricBlocks(mock_.get(), count, ncclFloat32), llTwoShot);
+  EXPECT_EQ(RunOneLL128(count).grid.x, ncclAllReduceDdaFabricBlocks(mock_.get(), count, ncclFloat32));
+
+  // Under a launch cap the split stays within the capped VMM launch: its blocks and its threads per block.
+  g_rcclDdaFabricVmmBlocks = [](const ncclComm* c) { return c->ddaFabricMaxBlocks; };
+  comm().ddaFabricBarrierState = SharedBarrierState<nccl_dda_detail::DdaFabricBarrierState>(0x5a);
+  std::vector<DdaCopy> copies;
+  RecordDdaCopies(&copies);
+  const rcclDdaLaunchCap caps[] = {{3, 256}, {0, 128}, {200, 0}, {7, 1024}};
+  for (const rcclDdaLaunchCap& cap : caps) {
+    SCOPED_TRACE(testing::Message() << "cap={" << cap.blocks << "," << cap.threads << "}");
+    g_ddaLaunches.clear();
+    ASSERT_EQ(ncclAllReduceDdaFabric(kSendbuff, kRecvbuff, count, ncclFloat32, ncclSum, mock_.get(), kStream, cap),
+              ncclSuccess);
+    const DdaLaunch vmmLaunch = Only();
+    const DdaLaunch& capped = RunOneLL128(count, ncclFloat32, cap);
+    EXPECT_EQ(capped.kernel, (LL128Split<float, 0>()));
+    EXPECT_LE(capped.grid.x, vmmLaunch.grid.x);
+    EXPECT_EQ(capped.grid.x, std::min<unsigned>(vmmLaunch.grid.x, (134 * 512 + capped.block.x - 1) / capped.block.x));
+    EXPECT_EQ(capped.block.x, vmmLaunch.block.x);
+  }
 }
 
 // A user-set LL or LL128 one-shot threshold keeps the window's messages on that tier.
