@@ -91,21 +91,17 @@ def test_operator_rejects_unknown_prefix():
         ])
 
 
-def test_comma_joined_profile_token_is_unknown():
+@pytest.mark.parametrize(
+    "resolver, token",
+    [
+        (resolve_profile_selection, "torch,triton"),
+        (resolve_list_selectors, "torch,triton"),
+        (resolve_operator_patterns, "torch,triton:*relu*"),
+    ],
+)
+def test_comma_joined_ml_api_token_hints_spaces(resolver, token):
     with pytest.raises(ValueError, match="torch,triton") as excinfo:
-        resolve_profile_selection(["torch,triton"])
-    assert_comma_name_hints_spaces(excinfo)
-
-
-def test_comma_joined_list_token_is_unknown():
-    with pytest.raises(ValueError, match="torch,triton") as excinfo:
-        resolve_list_selectors(["torch,triton"])
-    assert_comma_name_hints_spaces(excinfo)
-
-
-def test_comma_joined_operator_prefix_is_unknown():
-    with pytest.raises(ValueError, match="torch,triton") as excinfo:
-        resolve_operator_patterns(["torch,triton:*relu*"])
+        resolver([token])
     assert_comma_name_hints_spaces(excinfo)
 
 
