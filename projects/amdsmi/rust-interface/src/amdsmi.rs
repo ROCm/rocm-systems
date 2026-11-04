@@ -3979,6 +3979,7 @@ pub fn amdsmi_get_gpu_available_counters(
 /// # Returns
 ///
 /// * `AmdsmiResult<(Vec<AmdsmiProcessInfoT>, u32)>` - Returns `Ok((Vec<AmdsmiProcessInfoT>, u32))` containing a list of [`AmdsmiProcessInfoT`] and the number of items if successful, or an error if it fails.
+///   A statistic with all bits set is not available.
 ///
 /// # Example
 ///
@@ -4058,6 +4059,7 @@ pub fn amdsmi_get_gpu_compute_process_info() -> AmdsmiResult<(Vec<AmdsmiProcessI
 /// # Returns
 ///
 /// * `AmdsmiResult<AmdsmiProcessInfoT>` - Returns `Ok(AmdsmiProcessInfoT)` containing the [`AmdsmiProcessInfoT`] if successful, or an error if it fails.
+///   A statistic with all bits set is not available.
 ///
 /// # Example
 ///
@@ -5950,6 +5952,7 @@ pub fn amdsmi_get_gpu_total_ecc_count(
 /// # Returns
 ///
 /// * `AmdsmiResult<Vec<AmdsmiProcInfoT>>` - Returns a vector containing the [`AmdsmiProcInfoT`] if successful, or an error if it fails.
+///   A statistic with all bits set is not available.
 ///
 /// # Example
 ///
@@ -5980,26 +5983,53 @@ pub fn amdsmi_get_gpu_total_ecc_count(
 ///
 /// # Errors
 ///
-/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_process_list` call fails.
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_process_list` call fails,
+/// including [`AmdsmiStatusT::AmdsmiStatusRetry`] when the library could not list the GPU's processes because they kept starting,
+/// and [`AmdsmiStatusT::AmdsmiStatusOutOfResources`] when processes keep starting through three attempts.
 pub fn amdsmi_get_gpu_process_list(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<Vec<AmdsmiProcInfoT>> {
-    let mut num_processes: u32 = 0;
-    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_process_list(
-        processor_handle,
-        &mut num_processes,
-        std::ptr::null_mut()
-    ));
+    // A process that starts between the count and the read makes the read
+    // return OUT_OF_RESOURCES; count again. Processes that keep starting make
+    // the call fail after COUNT_ATTEMPTS.
+    const COUNT_ATTEMPTS: u32 = 3;
+    let mut attempt = 1;
+    loop {
+        let mut num_processes: u32 = 0;
+        call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_process_list(
+            processor_handle,
+            &mut num_processes,
+            std::ptr::null_mut()
+        ));
+        // With a capacity of 0 the read only counts and writes nothing.
+        if num_processes == 0 {
+            return Ok(Vec::new());
+        }
 
-    let mut processes: Vec<AmdsmiProcInfoT> = Vec::with_capacity(num_processes as usize);
-    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_process_list(
-        processor_handle,
-        &mut num_processes,
-        processes.as_mut_ptr()
-    ));
-    unsafe { processes.set_len(num_processes as usize) };
-
-    Ok(processes)
+        let mut processes: Vec<AmdsmiProcInfoT> = Vec::with_capacity(num_processes as usize);
+        let status = unsafe {
+            amdsmi_wrapper::amdsmi_get_gpu_process_list(
+                processor_handle,
+                &mut num_processes,
+                processes.as_mut_ptr(),
+            )
+        };
+        match status {
+            AmdsmiStatusT::AmdsmiStatusSuccess => {
+                debug_assert!(num_processes as usize <= processes.capacity());
+                // SAFETY: the capacity passed in num_processes is not 0, so
+                // the library writes every process it lists, and on success
+                // there are at most that many. num_processes is then the
+                // number of records it wrote.
+                unsafe { processes.set_len(num_processes as usize) };
+                return Ok(processes);
+            }
+            AmdsmiStatusT::AmdsmiStatusOutOfResources if attempt < COUNT_ATTEMPTS => {
+                attempt += 1;
+            }
+            _ => return Err(status),
+        }
+    }
 }
 
 /// Get the library version information.

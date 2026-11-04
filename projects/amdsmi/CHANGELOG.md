@@ -186,8 +186,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amdsmi_get_gpu_compute_process_gpus()` failing when it counts a process's GPUs**.  
   - The documented count call, with a NULL index list, returned an invalid-argument error, so the Python and Rust APIs always failed.
 
-- **Fixed the Rust `amdsmi_get_gpu_compute_process_info()` returning invalid entries**.  
-  - When processes exited between its count and its read, the list ended with entries of undefined content; when processes started, the call failed.
+- **Fixed the Rust `amdsmi_get_gpu_compute_process_info()` and `amdsmi_get_gpu_process_list()` returning invalid entries**.  
+  - When processes exited between the count and the read, the compute process list ended with entries of undefined content; when processes started, the call failed.
+  - When the GPU had no processes at the count and one started before the read, the process list held an entry of undefined content; when more processes started, the call failed.
 
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.
