@@ -50,7 +50,6 @@
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
-#include "lib/rocprofiler-sdk/record_producer.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -735,9 +734,6 @@ release_completion_signals(const std::shared_ptr<queue_info_session_t>& session,
 void
 emit_dispatch_records(retired_batch&& batch)
 {
-    // Marked in the body: every caller writes records, including the teardown paths.
-    auto _producer = scoped_record_producer{};
-
     auto&      session      = *batch.session;
     const auto emit_records = !batch.dispatch_times.empty();
     auto*      _corr_id     = session.correlation_id;
@@ -770,9 +766,6 @@ emit_dispatch_records(retired_batch&& batch)
 void
 complete_signal_less_dispatch(kfd::signal_less_hub_t::proven&& proven)
 {
-    // Marked in the body: both the task-group and teardown callers write records.
-    auto _producer = scoped_record_producer{};
-
     auto&       _payload    = proven.payload;
     const auto* _rocp_agent = agent::get_agent(_payload.agent_id);
     auto        _hsa_agent  = agent::get_hsa_agent(_rocp_agent);
@@ -2506,8 +2499,8 @@ drain_signal_less_queues_hw(uint64_t deadline_ns)
 }
 
 // Waits on the completion monitor's in-flight counter, which counts signal-less completions
-// alongside interposed ones. Bounded either way: the short grace period once finalization has
-// begun, the long one otherwise.
+// alongside interposed ones. The wait has no deadline and no return value, so a monitor that
+// never reaches zero is not reported.
 void
 join_signal_less_tasks()
 {

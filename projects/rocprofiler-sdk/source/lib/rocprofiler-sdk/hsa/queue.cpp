@@ -46,7 +46,6 @@
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
-#include "lib/rocprofiler-sdk/record_producer.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/spm/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
@@ -236,9 +235,6 @@ bool
 AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 {
     using session_info_t = std::shared_ptr<queue_info_session_t>;
-
-    // Writes the dispatch record and runs tool callbacks; async_complete() below releases it.
-    auto _producer = scoped_record_producer{};
 
     if(!data)
     {

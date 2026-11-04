@@ -109,8 +109,6 @@ typedef enum rocprofiler_status_t  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_RECORDS_OUTSTANDING,            ///< Records remain outstanding; record
                                                    ///< production has not caught up. Nothing was
                                                    ///< discarded and the call may be retried.
-    ROCPROFILER_STATUS_ERROR_REENTRANT_CALL,  ///< Function was invoked from a rocprofiler
-                                              ///< callback it may not be called from
     ROCPROFILER_STATUS_LAST,
     ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND =
         ROCPROFILER_STATUS_ERROR_CONFIG_NOT_FOUND,  ///< ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND

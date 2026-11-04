@@ -31,7 +31,6 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
-#include "lib/rocprofiler-sdk/record_producer.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
@@ -707,7 +706,6 @@ async_copy_handler(hsa_signal_value_t, void* arg)
     }
 
     // Writes the copy record and runs tool callbacks; the scope destructor below releases it.
-    auto _producer = scoped_record_producer{};
 
     auto  ts               = common::timestamp_ns();
     auto* _data            = static_cast<async_copy_data*>(arg);

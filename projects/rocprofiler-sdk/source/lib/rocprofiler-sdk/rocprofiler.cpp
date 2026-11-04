@@ -124,9 +124,6 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_RECORDS_OUTSTANDING,
                           "Records remain outstanding; record production has not caught up. "
                           "Nothing was discarded and the call may be retried")
-ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_REENTRANT_CALL,
-                          "Function was invoked from a rocprofiler callback it may not be "
-                          "called from")
 
 template <size_t Idx, size_t... Tail>
 const char*

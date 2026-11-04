@@ -11,8 +11,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - `rocprofiler_synchronize_contexts` waits until records have been written for
     already-submitted GPU operations, so a following `rocprofiler_flush_buffer` returns them.
     Expensive: call it once before reading a buffer, not per dispatch.
-  - New status codes `ROCPROFILER_STATUS_ERROR_RECORDS_OUTSTANDING` and
-    `ROCPROFILER_STATUS_ERROR_REENTRANT_CALL`.
+  - New status code `ROCPROFILER_STATUS_ERROR_RECORDS_OUTSTANDING`.
 
 ### Changed
 
