@@ -2190,7 +2190,9 @@ def validation_rules_dir(rocprof_config) -> Path:
 # Shared by the domain-flag (test_presets.py) and backend-flag
 # (test_tool_runner.py) transpose tests, so the launch args and baseline
 # env/rules live in one place.
-DOMAIN_BACKEND_TRANSPOSE_ARGS = ["2", "100", "50"]
+# threads, iterations, sync-every-N. amd-smi-rules.json wants more than
+# 100 samples; 2 100 50 only captured ~72 on MI355.
+DOMAIN_BACKEND_TRANSPOSE_ARGS = ["4", "300", "50"]
 
 
 @pytest.fixture
@@ -2208,7 +2210,7 @@ def transpose_baseline_rules(validation_rules_dir: Path) -> list[Path]:
 
 @pytest.fixture
 def cpu_workload(rocprof_config) -> str:
-    """CPU workload with real, instrumentable functions. Used by most tests here."""
+    """CPU workload with real, instrumentable functions (parallel-overhead)."""
     try:
         return str(rocprof_config.get_target_executable("parallel-overhead"))
     except FileNotFoundError:

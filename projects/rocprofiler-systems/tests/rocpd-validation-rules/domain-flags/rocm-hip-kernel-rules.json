@@ -14,7 +14,7 @@
             "validation_queries": [
                 {
                     "comparison": "greater_than_or_equal",
-                    "description": "HIP API regions collected (transpose 2x100: setup + launch calls)",
+                    "description": "HIP API regions collected (transpose 4x300: setup + launch calls)",
                     "error_message": "--rocm=hip,kernel produced fewer than 100 rocm_hip_api regions",
                     "expected_result": 100,
                     "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hip_api';"
@@ -50,7 +50,7 @@
                 {
                     "comparison": "greater_than_or_equal",
                     "description": "Kernel launch APIs present to correlate against (~1 per kernel)",
-                    "error_message": "Fewer than 100 hipLaunchKernel-family regions for a 2x100x50 run",
+                    "error_message": "Fewer than 100 hipLaunchKernel-family regions for a 4x300x50 run",
                     "expected_result": 100,
                     "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hip_api' AND name LIKE '%LaunchKernel%';"
                 },
@@ -78,8 +78,8 @@
             "validation_queries": [
                 {
                     "comparison": "between_inclusive",
-                    "description": "transpose kernel dispatches captured (2 threads x 100 iterations)",
-                    "error_message": "transpose kernel count outside expected range for a 2x100x50 run",
+                    "description": "transpose kernel dispatches captured (4 threads x 300 iterations)",
+                    "error_message": "transpose kernel count outside expected range for a 4x300x50 run",
                     "expected_result": 100,
                     "expected_result_max": 2000,
                     "query": "SELECT COUNT(*) FROM kernels WHERE name LIKE 'transpose%';"
