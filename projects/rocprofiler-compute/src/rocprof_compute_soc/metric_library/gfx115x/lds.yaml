@@ -24,14 +24,6 @@ lds.bank_conflicts:
     Number of Local Data Share bank conflicts during execution. Bank conflicts occur
     when multiple work-items in a wavefront access the same LDS bank simultaneously,
     causing serialized accesses. Reducing conflicts improves shared memory throughput.
-lds.estimated_bw:
-  name: LDS Estimated Bandwidth
-  formula: 32 * 4 * SUM(SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) / SUM(End_Timestamp - Start_Timestamp)
-  unit: GB/s
-  description: >-
-    Estimated achieved bandwidth for Local Data Share operations. This reflects the
-    effective throughput after accounting for bank conflicts. RDNA 3.5 provides 32
-    LDS banks per compute unit for high-bandwidth shared memory access.
 lds.theoretical_bw:
   name: Theoretical LDS Bandwidth
   formula: SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / SUM(End_Timestamp - Start_Timestamp)
