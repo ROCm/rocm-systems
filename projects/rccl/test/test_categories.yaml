@@ -116,6 +116,7 @@ test_categories:
       - "GinPluginInitFail.*"
       - "CpuAffinity.*"
       - "DdaReduceScatterFabricLL.*"
+      - "DdaAllReduceFabricLL.*"
     exclude_windows:
       - "*"
     labels:
