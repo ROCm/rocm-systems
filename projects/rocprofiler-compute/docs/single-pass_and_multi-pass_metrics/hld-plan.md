@@ -180,7 +180,7 @@ A multi-pass metric cannot fit one pass. Split it. Each part is an ordinary sing
 
 - `COLLECT_SUM` adds parts, including a negative part. The parts may come from different passes. That covers VALU FLOPs, HBM bandwidth rates, IPC issued ratios, Performance GFLOPs, vL1D hit (non-RW hit plus the atom correction), and Read Instructions (load plus −store−atomic).
 - `WEIGHTED_AVG` rebuilds one ratio whose weights were split: \(M = (M_0 C_0 + M_1 C_1)/(C_0 + C_1)\). Each weight comes from the same pass as its sub-ratio, so \(M_i C_i\) is that pass's absolute piece. Adding those pieces, and adding the weights, may cross passes. The division is of those two sums. If a weight is not on its sub-ratio's pass, the parent stays unset.
-- `COLLECT_RATIO` divides the pooled numerator by the pooled denominator. The pieces may come from different passes. A missing piece, or a zero denominator, leaves the parent unset.
+- `COLLECT_RATIO` divides the pooled numerator by the pooled denominator. The pieces may come from different passes. A dispatch whose denominator is zero still adds its numerator. A missing piece, or a pooled denominator of zero, leaves the parent unset.
 
 ```yaml
 value: COLLECT_SUM(hbm_read_sub, hbm_write_sub)
@@ -205,7 +205,7 @@ gfx942 has **16** multi-pass metrics and **10** unique PMC sets. Some metrics ap
 | HBM Bandwidth | `COLLECT_SUM` read and write rates | Shown. Each piece is `SUM(bytes) / SUM(duration)` from its own pass, and the parent adds those rates. That matches the shipping GB/s when both passes have the same summed duration over the same dispatch filter. A missing or zero duration leaves the parent unset |
 | Performance GFLOPs | `COLLECT_SUM` VALU+MFMA rates | Shown |
 | IPC Issued | `COLLECT_SUM` two issued ratios | Shown. Each piece is `SUM(instructions) / SUM(cycles)`, and the parent adds those ratios. That matches the shipping value when both pieces use the same cycle total over the same dispatch filter. A missing or zero cycle count leaves the parent unset |
-| AI HBM/L2/L1/LDS | `COLLECT_RATIO` FLOP pieces over bytes | Shown. Per-dispatch pooled FLOPs over pooled bytes. The pieces may sit on different passes. A missing piece or a zero byte total leaves the parent unset |
+| AI HBM/L2/L1/LDS | `COLLECT_RATIO` FLOP pieces over bytes | Shown. Per-dispatch pooled FLOPs over pooled bytes. The pieces may sit on different passes. A dispatch with zero bytes still adds its FLOPs. A missing piece or a zero pooled byte total leaves the parent unset |
 | vL1D hit | `COLLECT_SUM` non-RW hit + atom correction | Shown. The non-RW hit and the atom correction are each one pass, and the parent adds them, including the negative atom term |
 | Read Instructions | `COLLECT_SUM` load + (−store−atomic) | Shown. Load plus (−store−atomic). The pieces may sit on different passes |
 
@@ -244,7 +244,7 @@ A script runs this build and a separate `rocprofiler-compute-develop` checkout o
 
 ### Debugging a bad ratio
 
-The failure mode is a wrong ratio, not a crash. Loaded frames keep one column per pass for a copied counter, so the pass an expression used is visible in the data. A metric that cannot be read from one pass is unset with a warning. A Phase 2 parent stays unset when a part is missing or a denominator is zero. `eval_single_pass_metrics.py` prints the offline gates without a GPU. Compare against a `rocprofiler-compute-develop` run to tell a layout change from a change in which pass analyze reads.
+The failure mode is a wrong ratio, not a crash. Loaded frames keep one column per pass for a copied counter, so the pass an expression used is visible in the data. A metric that cannot be read from one pass is unset with a warning. A Phase 2 parent stays unset when a part is missing or the pooled denominator is zero. `eval_single_pass_metrics.py` prints the offline gates without a GPU. Compare against a `rocprofiler-compute-develop` run to tell a layout change from a change in which pass analyze reads.
 
 ### Security
 
