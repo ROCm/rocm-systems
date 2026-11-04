@@ -560,20 +560,31 @@ protected:
   }
 };
 
-TEST_F(TensorDmaRaceTest, LoadIsAnLdsWriteRetiredByTensorcntAndBarrier) {
+// A reported race suppresses later reports involving either instruction, so
+// each retirement check uses a transfer that has not raced yet; the unwaited
+// case is its own test.
+TEST_F(TensorDmaRaceTest, LoadIsAnLdsWriteUntilRetired) {
   tensor_load(0, {{.address = 0, .bytes = 16}});
   EXPECT_TRUE(ds_read(1, 4));
-  wait_tensorcnt(0, 0);
-  barrier();
-  EXPECT_FALSE(ds_read(1, 8));
 }
 
-TEST_F(TensorDmaRaceTest, StoreIsAnLdsReadRetiredByTensorcntAndBarrier) {
-  tensor_store(0, {{.address = 32, .bytes = 16}});
-  EXPECT_TRUE(ds_write(1, 40));
+TEST_F(TensorDmaRaceTest, LoadIsRetiredByTensorcntAndBarrier) {
+  tensor_load(0, {{.address = 0, .bytes = 16}});
   wait_tensorcnt(0, 0);
   barrier();
-  EXPECT_FALSE(ds_write(1, 44));
+  EXPECT_FALSE(ds_read(1, 4));
+}
+
+TEST_F(TensorDmaRaceTest, StoreIsAnLdsReadUntilRetired) {
+  tensor_store(0, {{.address = 32, .bytes = 16}});
+  EXPECT_TRUE(ds_write(1, 40));
+}
+
+TEST_F(TensorDmaRaceTest, StoreIsRetiredByTensorcntAndBarrier) {
+  tensor_store(0, {{.address = 32, .bytes = 16}});
+  wait_tensorcnt(0, 0);
+  barrier();
+  EXPECT_FALSE(ds_write(1, 40));
 }
 
 TEST_F(TensorDmaRaceTest, EveryRangeOfATransferIsTracked) {
