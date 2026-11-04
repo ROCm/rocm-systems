@@ -90,8 +90,9 @@
         "v" ROCPROFSYS_VERSION_STRING, ROCPROFSYS_GIT_DESCRIBE, ROCPROFSYS_GIT_REVISION, \
         {                                                                                \
             { "", ROCPROFSYS_LIBRARY_ARCH }, { "compiler", ROCPROFSYS_COMPILER_STRING }, \
+            { "rocm", "v" ROCPROFSYS_ROCM_VERSION_STRING },                              \
             {                                                                            \
-                "rocm", "v" ROCPROFSYS_ROCM_VERSION_STRING                               \
+                "profiler-hub", "v" ROCPROFSYS_PROFILER_HUB_VERSION_STRING               \
             }                                                                            \
         }
 #endif
