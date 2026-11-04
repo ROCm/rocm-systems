@@ -277,6 +277,7 @@
       "timeout": 120,
       "tests": [
         { "name": "A2A_Eligibility_Gates", "description": "All comm-state eligibility gates at default params", "test_filter": "GinAlltoAllEligibilityTest.*" },
+        { "name": "AG_Eligibility_Gates", "description": "GIN AllGather eligibility, including the single-segment window gate", "test_filter": "GinAllGatherEligibilityTest.*:GinAllGatherCtaCount.*" },
         {
           "name": "A2A_Eligibility_Disabled", "description": "Negative: NCCL_GIN_A2A_ENABLE=0 makes the path ineligible", "test_filter": "GinAlltoAllEligibilityTest.A2ADisabledByParam",
           "env_variables": { "NCCL_GIN_A2A_ENABLE": "0" }

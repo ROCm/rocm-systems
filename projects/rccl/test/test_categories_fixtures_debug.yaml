@@ -47,6 +47,7 @@ test_categories:
       - "CeHierAlltoAllvEligibilityTest.*"
       - "CeAlltoAllEligibilityTest.*"
       - "GinAllReduceEligibilityTest.*"
+      - "GinAllGatherEligibilityTest.*"
       - "NetSocketTests.*"
       - "NetBootstrapInterfaceTest.*"
       - "BcmLinksTest.*"

@@ -69,7 +69,13 @@ struct ncclDevrNonSymExchangeEntry {
 };
 #endif
 
-struct ncclDevrWindowSorted;
+// Sorted by userAddr. Defined here so host tests can install windows without
+// linking the device runtime's internal helpers.
+struct ncclDevrWindowSorted {
+  uintptr_t userAddr;
+  size_t size;
+  struct ncclDevrWindow* win;
+};
 struct ncclDevrTeam;
 
 struct ncclDevrRegTask {

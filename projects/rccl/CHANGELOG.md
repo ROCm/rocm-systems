@@ -6,6 +6,9 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Added
 * `ncclGinFlushTimeout` and `ncclGinWaitTimeout` support on the rocSHMEM GDA and Anvil SDMA GIN backends, along with `ncclGinFlushAsync` and `ncclGinWait` on rocSHMEM GDA. Flush and wait on both backends also return when the communicator is aborted, except blocking flush on Anvil SDMA.
+* `NCCL_GIN_ALLGATHER_ENABLE` (default `1`): selects the single-node GIN AllGather on gfx950 and gfx1250 when the buffers are single-segment `NCCL_WIN_COLL_SYMMETRIC` device windows. Set `0` to keep the previous AllGather algorithms.
+* `NCCL_GIN_ALLGATHER_MIN_BYTES` (default `0`): per-rank byte floor below which GIN AllGather is not selected.
+* `NCCL_GIN_ALLGATHER_SDMA_MIN_BYTES` (default 8 MiB): per-rank byte threshold at or above which GIN AllGather uses SDMA puts instead of LSA copies.
 
 ### Changed
 * On gfx1250, cuMem auto-detection (`NCCL_CUMEM_ENABLE=-2`, the default) no longer requires Linux kernel 6.8 or later; it enables cuMem whenever the ROCm version, VMM support and runtime probe checks pass. The runtime probe now also exports a DMA-BUF, so hosts that cannot export one keep cuMem off. Kernel 6.8 or later is still recommended for performance, and RCCL logs a warning when cuMem runs on an older kernel. Set `NCCL_CUMEM_ENABLE=0` to keep cuMem off.

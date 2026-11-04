@@ -2095,7 +2095,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
 #if defined(ENABLE_ROCSHMEM_GIN)
     if (ncclAllGatherGinSdmaEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
       decision->algo = RCCL_AG_GIN_SDMA;
-      decision->nMaxChannels = 1;
+      decision->nMaxChannels = ncclAllGatherGinSdmaCtaCount(comm->nRanks, sendcount * typeSize);
       return rcclSelectDone("AG", query, decision);
     }
 #endif

@@ -28,6 +28,11 @@ struct ncclGinAllGatherState {
 bool ncclAllGatherGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                   ncclDataType_t datatype);
 
+// CTA count ncclAllGatherGinSdma() launches for this message. One CTA on the SDMA
+// tier; nRanks * chunks on the LSA tier. Shared with rcclSelectAllGather so the
+// reported channel count matches the launch.
+int ncclAllGatherGinSdmaCtaCount(int nRanks, size_t bytes);
+
 ncclResult_t ncclAllGatherGinSdma(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                   ncclComm* comm, cudaStream_t stream);
 
