@@ -1,4 +1,4 @@
-import { fontSizes, fontWeights, sansFont } from '../../theme/typography';
+import { fontSizes, fontWeights } from '../../theme/typography';
 import { Box, Stack, Typography } from '@mui/material';
 import SectionCard from '../shared/SectionCard';
 import CategoryTag from '../shared/CategoryTag';
@@ -39,7 +39,7 @@ export default function LargestChanges({ projection, catalogs = [] }) {
           <Box sx={{ minWidth: 0 }}><Typography sx={{ fontWeight: fontWeights.medium, overflowWrap: 'anywhere', fontSize: fontSizes.body }}>{result.name}</Typography>
             <Stack direction="row" sx={{ mt: '3px', gap: '5px', flexWrap: 'wrap' }}><CategoryTag subdued kind="target" label={row.target} /><CategoryTag subdued label={result.suite} /><CategoryTag subdued kind="mode" label={row.mode} /></Stack>
           </Box>
-          <Typography sx={{ flexShrink: 0, fontFamily: sansFont, fontSize: fontSizes.body, color: tone === 'neutral' ? 'text.secondary' : `${tone}.main` }}>{formatPercent(delta)}</Typography>
+          <Typography variant="numeric" sx={{ flexShrink: 0, color: tone === 'neutral' ? 'text.secondary' : `${tone}.main` }}>{formatPercent(delta)}</Typography>
         </Box>
         {/* The line is a border: the browser snaps borders to a whole number of device pixels, so every
             bar paints the same thickness at any row position and display density. 2px is divided by the page zoom. */}
