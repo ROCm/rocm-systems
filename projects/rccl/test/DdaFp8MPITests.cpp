@@ -330,6 +330,12 @@ protected:
                               return copyPattern(rank_ * nRanks + dest, i % countPerPeer);
                           }));
         ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, totalCount));
+        // Two back-to-back calls flip the scratch bank; the memset between them, ordered on the
+        // stream, leaves only the second call's bytes to verify.
+        ASSERT_MPI_EQ(ncclSuccess,
+                      ncclAlltoAll(sendBuf, recvBuf, countPerPeer, datatype,
+                                   getActiveCommunicator(), getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(recvBuf, 0, totalCount, getActiveStream()));
         ASSERT_MPI_EQ(ncclSuccess,
                       ncclAlltoAll(sendBuf, recvBuf, countPerPeer, datatype,
                                    getActiveCommunicator(), getActiveStream()));
@@ -461,9 +467,11 @@ TEST_F(DdaFp8MPI_LL128, AllGather)
     });
 }
 
+// 256 KiB per peer gives each block several slices to move, and stays under the SPX 8 MiB LL128
+// ceiling at 32 ranks.
 TEST_F(DdaFp8MPI_LL128, AllToAll)
 {
-    forEachFp8AndCount({kLine, kPrimeLines, 1024}, [this](ncclDataType_t datatype, size_t count) {
+    forEachFp8AndCount({kLine, kPrimeLines, 1024, 256 * 1024}, [this](ncclDataType_t datatype, size_t count) {
         runAllToAll(datatype, count, RCCL_DDA_FABRIC_LL128);
     });
 }
