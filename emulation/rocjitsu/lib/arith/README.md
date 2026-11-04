@@ -5,8 +5,10 @@
 Dense WMMA supports FP16/BF16, packed accumulators, gfx12 FP8/BF8 and
 integer formats, in both wave sizes. Sparse WMMA adds 2:4 metadata selection
 with tied accumulators. Fused arithmetic includes FP16/FP32, packed halves,
-literals and mixed precision; FP64 arithmetic currently supports loose results only.
-FP status is available for gfx12 FP16 FMA under default guest rounding and denormals.
+literals and mixed precision. Add, subtract, multiply and exponent operations
+are also available; FP64 LDEXP supports exact results, while other FP64 arithmetic is loose-only.
+FP status is available for gfx12 FP16 FMA under default guest rounding and denormals,
+and for gfx12 FP32 MUL under nearest-even rounding, preserved denormals, and no OMOD/CLAMP.
 WMMA has no FP-status output; mode 3 has the same numeric requirements as mode 2.
 Source/output modifiers and FMA DPP routing are supported. Compatibility selects
 the established instruction policy. CPU implementations are scalar, AVX2, AVX-512 and native BF16.
