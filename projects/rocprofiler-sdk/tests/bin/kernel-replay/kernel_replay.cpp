@@ -396,9 +396,9 @@ run_untracked_saxpy(int n, bool fine_grained)
 }
 }  // namespace
 
-// Usage: kernel-replay [n_elems] [iters] [mode]
-//   mode "untracked" runs only the in-place saxpy over memory the snapshot does not track --
-//   host-pinned first, then fine-grained device memory -- so that one profile run yields both.
+// Usage: kernel-replay [n_elems] [iters] [mode] [pass_counts_file]
+//   mode "untracked" runs the in-place saxpy over host-pinned memory and, when supported,
+//   fine-grained device memory. An optional file records the expected per-dispatch pass counts.
 //   Any other mode runs the kernels the other replay tests measure.
 int
 main(int argc, char** argv)
@@ -409,7 +409,27 @@ main(int argc, char** argv)
     if(argc > 3 && std::string_view{argv[3]} == "untracked")
     {
         if(run_untracked_saxpy(n, false) != EXIT_SUCCESS) return EXIT_FAILURE;
-        if(run_untracked_saxpy(n, true) != EXIT_SUCCESS) return EXIT_FAILURE;
+        int device = 0, fine_grained = 0;
+        HIP_CHECK(hipGetDevice(&device));
+        HIP_CHECK(hipDeviceGetAttribute(&fine_grained, hipDeviceAttributeFineGrainSupport, device));
+        const bool fine_grained_supported = fine_grained != 0;
+        if(fine_grained_supported)
+        {
+            if(run_untracked_saxpy(n, true) != EXIT_SUCCESS) return EXIT_FAILURE;
+        }
+        else
+            printf("kernel-replay: fine-grained device memory is unsupported; host-pinned launches "
+                   "completed\n");
+
+        if(argc > 4)
+        {
+            auto* file = std::fopen(argv[4], "w");
+            if(file == nullptr) return EXIT_FAILURE;
+            const bool written =
+                std::fputs(fine_grained_supported ? "1,1,1,1,1,1\n" : "1,1,1\n", file) >= 0;
+            const bool closed = std::fclose(file) == 0;
+            if(!written || !closed) return EXIT_FAILURE;
+        }
         printf("kernel-replay: untracked memory kernels completed\n");
         return EXIT_SUCCESS;
     }
