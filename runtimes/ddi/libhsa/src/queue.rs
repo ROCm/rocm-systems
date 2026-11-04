@@ -25,9 +25,9 @@ use std::time::Duration;
 
 use rocddi::device::Device;
 use rocddi::device::gpu::queue::{
-    AqlControlRegion, MAX_PRIVATE_SEGMENT_BYTES, QueueAccessWidth, QueueErrorEvent,
-    QueueParameters, QueuePriority, QueueProducerMode, QueueRequest, QueueRingMemory, QueueScratch,
-    QueueTransport, RetainedQueue, SdmaEngineSelection, plan_scratch,
+    AqlControlRegion, MAX_PRIVATE_SEGMENT_BYTES, QueueErrorEvent, QueueParameters, QueuePriority,
+    QueueProducerMode, QueueRequest, QueueRingMemory, QueueScratch, RetainedQueue,
+    SdmaEngineSelection, plan_scratch,
 };
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 use rocddi::topology::GpuInfo;
@@ -44,9 +44,9 @@ pub(crate) use create::{create_hardware_queue, create_sdma_queue};
 pub(crate) mod index;
 #[cfg(test)]
 use crate::api::queue::core::*;
-use event::queue_event_worker;
 #[cfg(test)]
-use event::{queue_error_status, update_scratch_owner};
+use event::queue_error_status;
+use event::queue_event_worker;
 
 /// AQL packet size in bytes, checked against the public C header by ABI tests.
 pub(crate) const AQL_PACKET_BYTES: usize = std::mem::size_of::<HsaKernelDispatchPacket>();
@@ -228,6 +228,8 @@ pub(crate) struct Queue {
     callback_data: CallbackArg,
     /// Whether an observed event reported a VM fault.
     pub(crate) vm_faulted: bool,
+    /// Tracks whether the system or queue worker owes the fault callback.
+    pub(crate) vm_fault_callback_state: VmFaultCallbackState,
     /// Last observed GPU fault address.
     pub(crate) vm_fault_address: u64,
     /// Last observed native fault reason flags.
@@ -349,6 +351,61 @@ pub(crate) fn destroy_runtime_sdma_queue(queue: &mut SdmaQueue) -> Result<(), ro
 const COUNTED_QUEUE_HANDLE_BIT: usize = 64;
 /// Tag bit distinguishing SDMA queue handles.
 const SDMA_QUEUE_HANDLE_BIT: usize = 128;
+
+/// Delivery state for one queue's terminal memory-fault notification.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum VmFaultCallbackState {
+    /// This queue has not reported a memory fault.
+    #[default]
+    Unseen,
+    /// The queue worker left notification to the system event worker.
+    Deferred,
+    /// A system event or the queue callback has reported this fault.
+    Reported,
+}
+
+/// Action to take when a queue reports a memory fault.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VmFaultCallbackAction {
+    /// Invoke the queue's callback now.
+    Callback,
+    /// Let the system event worker report the fault.
+    Defer,
+    /// A second native signal describes an already observed fault.
+    Ignore,
+}
+
+impl VmFaultCallbackState {
+    /// Records a fault once and selects its initial notification path.
+    fn observe(&mut self, defer_to_system: bool) -> VmFaultCallbackAction {
+        if *self != Self::Unseen {
+            return VmFaultCallbackAction::Ignore;
+        }
+        if defer_to_system {
+            *self = Self::Deferred;
+            VmFaultCallbackAction::Defer
+        } else {
+            *self = Self::Reported;
+            VmFaultCallbackAction::Callback
+        }
+    }
+
+    /// Completes a deferred notification covered by a system event.
+    pub(crate) fn report_by_system(&mut self) {
+        if *self == Self::Deferred {
+            *self = Self::Reported;
+        }
+    }
+
+    /// Returns one deferred notification to its queue worker after failure.
+    fn take_after_system_failure(&mut self) -> bool {
+        if *self != Self::Deferred {
+            return false;
+        }
+        *self = Self::Reported;
+        true
+    }
+}
 
 /// Stable storage for the public prefix copied from a shared hardware queue.
 #[repr(C, align(128))]

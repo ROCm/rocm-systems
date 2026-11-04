@@ -45,6 +45,7 @@
 #include "putmem_on_stream_tester.hpp"
 #include "putmem_signal_on_stream_tester.hpp"
 #include "signal_wait_until_on_stream_tester.hpp"
+#include "signal_ops_on_stream_tester.hpp"
 #include "ping_all_tester.hpp"
 #include "ping_pong_tester.hpp"
 #include "primitive_tester.hpp"
@@ -168,7 +169,9 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WGPutSignalTestType:
       case WGPutSignalNBITestType:
       case QpPutNbiTestType:
+      case QpPutNbiPollTestType:
       case SdmaPutNbiTestType:
+      case SdmaPutNbiPollTestType:
         max_msg_size = args.max_volume_size / args.num_wgs;
         break;
       case PingPongTestType:
@@ -560,6 +563,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case SignalWaitUntilOnStreamTestType:
       test_name = "Signal_Wait_Until_On_Stream";
       testers.push_back(new SignalWaitUntilOnStreamTester(args));
+      break;
+    case SignalOpsOnStreamTestType:
+      test_name = "Signal_Ops_On_Stream";
+      testers.push_back(new SignalOpsOnStreamTester(args));
       break;
     case TeamFCollectTestType:
       test_name = "Fcollect Test";
@@ -1169,6 +1176,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "QP-Direct Put NBI";
       testers.push_back(new QpPutNbiTester(args));
       break;
+    case QpPutNbiPollTestType:
+      test_name = "QP-Direct Put NBI Poll";
+      testers.push_back(new QpPutNbiTester(args));
+      break;
 #endif
 #if defined(USE_SDMA)
     case SdmaPingPongTestType:
@@ -1178,6 +1189,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case SdmaPutNbiTestType:
       test_name = "SDMA-Direct Put NBI";
+      testers.push_back(new SdmaPutNbiTester(args));
+      break;
+    case SdmaPutNbiPollTestType:
+      test_name = "SDMA-Direct Put NBI Poll";
       testers.push_back(new SdmaPutNbiTester(args));
       break;
 #endif
@@ -1325,6 +1340,7 @@ bool Tester::peLaunchesKernel() {
     case PutmemOnStreamTestType:
     case PutmemSignalOnStreamTestType:
     case SignalWaitUntilOnStreamTestType:
+    case SignalOpsOnStreamTestType:
     case SignalAddTestType:
     case SignalSetTestType:
     case SignalWaitUntilTestType:
