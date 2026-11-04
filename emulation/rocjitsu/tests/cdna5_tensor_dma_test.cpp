@@ -1122,7 +1122,9 @@ TEST(Gfx1250ExecutionTest, TensorDmaZeroTileDim0IsANopWhateverTheHigherTileDims)
   // tile_dim0). Pipelines empty a prefetch this way and leave the higher tile
   // dimensions set.
   constexpr uint64_t kGlobal = 0x188000;
-  constexpr uint32_t kSentinel = 0x5e5e5e5eu;
+  // Distinct values, so a copy in either direction changes one of them.
+  constexpr uint32_t kLdsSentinel = 0x5e5e5e5eu;
+  constexpr uint32_t kGlobalSentinel = 0xa7a7a7a7u;
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto &observer = install_tensor_dma_issue_observer(sim);
@@ -1131,8 +1133,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaZeroTileDim0IsANopWhateverTheHigherTileDims)
   ASSERT_NE(wf, nullptr);
   wf->set_lds_base(cu->allocate_lds(256));
   wf->set_lds_size(256);
-  cu->lds().write32(wf->lds_base(), kSentinel);
-  write_global_u32(*sim.memory, kGlobal, kSentinel);
+  cu->lds().write32(wf->lds_base(), kLdsSentinel);
+  write_global_u32(*sim.memory, kGlobal, kGlobalSentinel);
 
   write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
   write_wave_sgpr(*cu, *wf, 12, 2u << 16); // i32 elements.
@@ -1156,8 +1158,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaZeroTileDim0IsANopWhateverTheHigherTileDims)
   ASSERT_EQ(observer.issues.size(), 2u);
   for (const auto &issue : observer.issues)
     EXPECT_TRUE(issue.lds_ranges.empty());
-  EXPECT_EQ(cu->lds().read32(wf->lds_base()), kSentinel);
-  EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), kSentinel);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base()), kLdsSentinel);
+  EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), kGlobalSentinel);
 }
 
 // Pipelines drain an iterating prefetch with a zero-width tile. Such a tile
@@ -1167,7 +1169,9 @@ TEST(Gfx1250ExecutionTest, TensorDmaZeroTileDim0IsANopWhateverTheHigherTileDims)
 // tile with elements and the same overlapping stride is still rejected.
 TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
   constexpr uint64_t kGlobal = 0x18c000;
-  constexpr uint32_t kSentinel = 0x5e5e5e5eu;
+  // Distinct values, so a copy in either direction changes one of them.
+  constexpr uint32_t kLdsSentinel = 0x5e5e5e5eu;
+  constexpr uint32_t kGlobalSentinel = 0xa7a7a7a7u;
   struct Case {
     const char *name;
     uint32_t tile_dim0;
@@ -1215,8 +1219,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
       wf->set_lds_base(cu->allocate_lds(256));
       wf->set_lds_size(256);
       for (uint32_t i = 0; i < 16; ++i) {
-        cu->lds().write32(wf->lds_base() + i * 4, kSentinel);
-        write_global_u32(*sim.memory, kGlobal + i * 4, kSentinel);
+        cu->lds().write32(wf->lds_base() + i * 4, kLdsSentinel);
+        write_global_u32(*sim.memory, kGlobal + i * 4, kGlobalSentinel);
       }
 
       write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
@@ -1246,8 +1250,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
         EXPECT_TRUE(observer.issues.empty());
       }
       for (uint32_t i = 0; i < 16; ++i) {
-        EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * 4), kSentinel) << i;
-        EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + i * 4), kSentinel) << i;
+        EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * 4), kLdsSentinel) << i;
+        EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + i * 4), kGlobalSentinel) << i;
       }
     }
   }
@@ -1308,7 +1312,9 @@ TEST(Gfx1250ExecutionTest, TensorDmaGatherWithoutRowsIsANop) {
 TEST(Gfx1250ExecutionTest, TensorDmaNopTilesArriveAtTheirBarrierOnceAndNullTensorsDoNot) {
   constexpr uint64_t kGlobal = 0x18a000;
   constexpr uint32_t kBarrierLdsAddr = 64;
-  constexpr uint32_t kSentinel = 0x5e5e5e5eu;
+  // Distinct values, so a copy in either direction changes one of them.
+  constexpr uint32_t kLdsSentinel = 0x5e5e5e5eu;
+  constexpr uint32_t kGlobalSentinel = 0xa7a7a7a7u;
   const uint64_t kUnarrived = amdgpu::lds_barrier_cell_init_state(3);
   const uint64_t kArrivedOnce = amdgpu::lds_barrier_cell_update_arrive(kUnarrived);
 
@@ -1339,8 +1345,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaNopTilesArriveAtTheirBarrierOnceAndNullTenso
     ASSERT_NE(wf, nullptr);
     wf->set_lds_base(cu->allocate_lds(256));
     wf->set_lds_size(256);
-    cu->lds().write32(wf->lds_base(), kSentinel);
-    write_global_u32(*sim.memory, kGlobal, kSentinel);
+    cu->lds().write32(wf->lds_base(), kLdsSentinel);
+    write_global_u32(*sim.memory, kGlobal, kGlobalSentinel);
     cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, kUnarrived);
 
     write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
@@ -1365,8 +1371,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaNopTilesArriveAtTheirBarrierOnceAndNullTenso
               c.arrives ? kArrivedOnce : kUnarrived);
     ASSERT_EQ(observer.issues.size(), 1u);
     EXPECT_TRUE(observer.issues[0].lds_ranges.empty());
-    EXPECT_EQ(cu->lds().read32(wf->lds_base()), kSentinel);
-    EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), kSentinel);
+    EXPECT_EQ(cu->lds().read32(wf->lds_base()), kLdsSentinel);
+    EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), kGlobalSentinel);
   }
 }
 
