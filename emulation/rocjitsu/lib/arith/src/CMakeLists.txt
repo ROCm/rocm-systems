@@ -11,8 +11,13 @@ add_library(
     common/cpu_decode.cpp
     fp/scalar_repair.cpp
     fp/fma.cpp
+    fp/binary.cpp
     fp/fp64.cpp
+    fp/frexp_exp.cpp
+    fp/half_binary.cpp
+    fp/half_exponent.cpp
     fp/half_fma.cpp
+    fp/ldexp.cpp
     fp/mixed_fma.cpp
     fp/packed_fma.cpp
     dot/scalar_repair.cpp

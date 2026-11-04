@@ -145,8 +145,12 @@ loose arithmetic.
 ### Compatibility mode
 
 Mode 7 is a temporary, instruction-specific policy outside the ordered modes.
-Each entry point resolves it before validation or calling another entry point;
-the resolved mode determines both numerical behavior and FP status reporting.
+Each entry point selects the arithmetic and FP status policy matching Rocjitsu's
+previous behavior. This can retain instruction-specific details beyond the
+other modes, such as rounding FP16 results before applying OMOD.
+FP32 MUL selects numeric-only exact semantics in every configuration. Its
+integration retains Rocjitsu's existing exception classifier for Compatibility;
+explicit mode 3 uses the library's qualified reporting domain instead.
 Rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
 setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
