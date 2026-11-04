@@ -87,22 +87,104 @@ void expect_matches_scalar(
 TEST(MfmaRegisterPathsTest, RoutedShapesFitTheSnapshotPath) {
   SKIP_IF_NO_SIMD();
   struct Mfma {
-    uint32_t m, n, k, batch;
+    uint32_t m, n, k, batch, bits;
   };
-  for (const Mfma s : {Mfma{4, 4, 1, 16}, Mfma{4, 4, 2, 16}, Mfma{4, 4, 4, 16},
-                       Mfma{16, 16, 128, 1}, Mfma{32, 32, 64, 1}})
-    EXPECT_TRUE(amdgpu::mfma_snapshot_shape_fits<float>(s.m, s.n, s.k, s.batch))
+  for (const Mfma s : {Mfma{4, 4, 1, 16, 32}, Mfma{4, 4, 2, 16, 16}, Mfma{4, 4, 4, 16, 16}})
+    EXPECT_TRUE(amdgpu::mfma_snapshot_shape_fits<float>(s.m, s.n, s.k, s.batch, s.bits, s.bits))
         << s.m << "x" << s.n << "x" << s.k << "x" << s.batch;
-  for (const Mfma s :
-       {Mfma{16, 16, 64, 1}, Mfma{32, 32, 32, 1}, Mfma{32, 32, 16, 1}, Mfma{16, 16, 32, 1},
-        Mfma{16, 16, 16, 1}, Mfma{32, 32, 8, 1}, Mfma{16, 16, 4, 4}, Mfma{4, 4, 4, 16}})
-    EXPECT_TRUE(amdgpu::mfma_snapshot_shape_fits<int32_t>(s.m, s.n, s.k, s.batch))
+  // f8f6f4 selects the A and B widths independently.
+  for (const Mfma s : {Mfma{16, 16, 128, 1, 0}, Mfma{32, 32, 64, 1, 0}})
+    for (uint32_t a_bits : {8u, 6u, 4u})
+      for (uint32_t b_bits : {8u, 6u, 4u})
+        EXPECT_TRUE(amdgpu::mfma_snapshot_shape_fits<float>(s.m, s.n, s.k, s.batch, a_bits, b_bits))
+            << s.m << "x" << s.n << "x" << s.k << " a_bits=" << a_bits << " b_bits=" << b_bits;
+  for (const Mfma s : {Mfma{16, 16, 64, 1, 8}, Mfma{32, 32, 32, 1, 8}, Mfma{32, 32, 16, 1, 8},
+                       Mfma{16, 16, 32, 1, 8}, Mfma{16, 16, 16, 1, 8}, Mfma{32, 32, 8, 1, 8},
+                       Mfma{16, 16, 4, 4, 8}, Mfma{4, 4, 4, 16, 8}})
+    EXPECT_TRUE(amdgpu::mfma_snapshot_shape_fits<int32_t>(s.m, s.n, s.k, s.batch, 8, 8))
         << s.m << "x" << s.n << "x" << s.k << "x" << s.batch;
-  for (const Mfma s : {Mfma{16, 16, 4, 1}, Mfma{4, 4, 4, 4}})
-    EXPECT_TRUE(amdgpu::mfma_snapshot_shape_fits<double>(s.m, s.n, s.k, s.batch))
+  for (const Mfma s : {Mfma{16, 16, 4, 1, 64}, Mfma{4, 4, 4, 4, 64}})
+    EXPECT_TRUE(amdgpu::mfma_snapshot_shape_fits<double>(s.m, s.n, s.k, s.batch, 64, 64))
         << s.m << "x" << s.n << "x" << s.k << "x" << s.batch;
-  // 32 result registers exceed the snapshot; this shape keeps the existing path.
-  EXPECT_FALSE(amdgpu::mfma_snapshot_shape_fits<int32_t>(32, 32, 4, 2));
+  // 32 result registers exceed the snapshot; this shape keeps the generic path.
+  EXPECT_FALSE(amdgpu::mfma_snapshot_shape_fits<int32_t>(32, 32, 4, 2, 8, 8));
+}
+
+// The snapshot path copies and publishes whole registers, so its layout predicates may only
+// accept shapes whose elements use every lane of exactly the registers the snapshot copies.
+TEST(MfmaRegisterPathsTest, LayoutPredicatesAcceptOnlyDenseLayouts) {
+  constexpr uint32_t kDims[] = {1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64};
+  constexpr uint32_t kBatches[] = {1, 2, 3, 4, 8, 16, 32, 64};
+  uint32_t accepted = 0;
+  for (uint32_t dim : kDims)
+    for (uint32_t k : {1u, 2u, 3u, 4u, 8u, 12u, 16u, 32u, 48u, 64u, 128u, 256u})
+      for (uint32_t batch : kBatches)
+        for (uint32_t bits : {4u, 6u, 8u, 16u, 32u, 64u}) {
+          if (!amdgpu::mfma_input_layout_is_dense(dim, k, batch, bits))
+            continue;
+          ++accepted;
+          SCOPED_TRACE(std::format("input {}x{}x{} bits={}", dim, k, batch, bits));
+          const uint32_t regs = amdgpu::mfma_dense_reg_count(uint64_t{dim} * k * batch, bits, 64);
+          std::vector<bool> used(size_t{regs} * 64);
+          for (uint32_t b = 0; b < batch; ++b)
+            for (uint32_t i = 0; i < dim; ++i)
+              for (uint32_t kk = 0; kk < k; ++kk) {
+                const auto loc = amdgpu::input_loc(dim, k, batch, i, kk, b, bits);
+                const uint32_t last_reg = loc.vgpr_offset + (loc.bit_offset + bits + 31) / 32 - 1;
+                ASSERT_LT(loc.lane, 64u);
+                ASSERT_LT(last_reg, regs);
+                for (uint32_t reg = loc.vgpr_offset; reg <= last_reg; ++reg)
+                  used[size_t{reg} * 64 + loc.lane] = true;
+              }
+          EXPECT_EQ(std::ranges::count(used, false), 0);
+        }
+  EXPECT_GT(accepted, 0u);
+  accepted = 0;
+  for (uint32_t m : kDims)
+    for (uint32_t n : kDims)
+      for (uint32_t batch : kBatches)
+        for (uint32_t words_per_element : {1u, 2u}) {
+          if (!amdgpu::mfma_output_layout_is_dense(m, n, batch, words_per_element))
+            continue;
+          ++accepted;
+          SCOPED_TRACE(std::format("output {}x{}x{} words={}", m, n, batch, words_per_element));
+          const uint64_t words = uint64_t{m} * n * batch * words_per_element;
+          ASSERT_EQ(words % 64, 0u);
+          std::vector<bool> written(words);
+          for (uint32_t b = 0; b < batch; ++b)
+            for (uint32_t i = 0; i < m; ++i)
+              for (uint32_t j = 0; j < n; ++j) {
+                const auto out = words_per_element == 1 ? amdgpu::output_loc_32(m, n, i, j, b)
+                                                        : amdgpu::output_loc_64(m, n, i, j, b);
+                ASSERT_LT(out.lane, 64u);
+                for (uint32_t w = 0; w < words_per_element; ++w) {
+                  const uint64_t word = uint64_t{out.reg + w} * 64 + out.lane;
+                  ASSERT_LT(word, words);
+                  ASSERT_FALSE(written[word]) << "reg " << out.reg + w << " lane " << out.lane;
+                  written[word] = true;
+                }
+              }
+        }
+  EXPECT_GT(accepted, 0u);
+}
+
+// A direct exec_f32 call with M = N = K = B = 4 places its 64 outputs in lanes 0-15 of four
+// registers, which the snapshot cannot publish; it must use the generic path.
+TEST(MfmaRegisterPathsTest, SparseOutputLayoutMatchesScalar) {
+  SKIP_IF_NO_SIMD();
+  EXPECT_FALSE(amdgpu::mfma_snapshot_shape_fits<float>(4, 4, 4, 4, 32, 32));
+  const Shape shape{Fmt::F32, Fmt::F32, 1, 1, 4};
+  for (Overlap overlap : {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB})
+    for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, 0x3f800000u}) {
+      expect_matches_scalar(
+          "f32 4x4x4x4", shape, overlap, /*cross_chunks=*/false, 71,
+          [&](ExactFixture &fx, uint32_t dst, uint32_t a, uint32_t b, uint32_t c) {
+            amdgpu::exec_f32(*fx.cu, 4, 4, 4, 4, 32, dst, a, b, c, amdgpu::extract_f32,
+                             amdgpu::extract_f32, const_acc);
+          });
+      if (::testing::Test::HasFatalFailure())
+        return;
+    }
 }
 
 // An operand or destination that runs past the end of the wave's VGPR allocation reads zero

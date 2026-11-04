@@ -261,6 +261,45 @@ inline OutputLoc output_loc_64(uint32_t M, uint32_t N, uint32_t i, uint32_t j, u
   return {local * 2, lane};
 }
 
+/// Whether input_loc places the dim x K x B elements of an MFMA operand on every lane of
+/// each of its mfma_dense_reg_count registers and on no other register. The closed form is
+/// conservative: it accepts every hardware MFMA operand layout, and some other dense layouts
+/// may be rejected.
+constexpr bool mfma_input_layout_is_dense(uint32_t dim, uint32_t K, uint32_t B, uint32_t bits) {
+  const uint64_t lanes_per_element = uint64_t{dim} * B;
+  if (K == 0 || bits == 0 || lanes_per_element == 0 || 64 % lanes_per_element != 0)
+    return false;
+  const uint32_t lanes_per_block = static_cast<uint32_t>(64 / lanes_per_element);
+  if (K % lanes_per_block != 0)
+    return false;
+  const uint32_t elems_per_group = K / lanes_per_block;
+  // input_loc splits more than 16 byte-or-wider elements per lane into 16-element chunks.
+  if (elems_per_group > 16 && bits >= 8 && elems_per_group % 16 != 0)
+    return false;
+  return uint64_t{elems_per_group} * bits % 32 == 0;
+}
+
+/// Whether the M x N x B results of a wave64 MFMA, placed by output_loc_32 (one dword per
+/// element) or output_loc_64 (two), fill every word of the first M*N*B*words_per_element/64
+/// VGPRs exactly once. The closed form is conservative: it accepts every hardware MFMA output
+/// layout, and some other dense layouts may be rejected.
+constexpr bool mfma_output_layout_is_dense(uint32_t M, uint32_t N, uint32_t B,
+                                           uint32_t words_per_element) {
+  if (M == 0 || N == 0 || B == 0 || 64 % N != 0)
+    return false;
+  const uint32_t rows_per_reg = 64 / N;
+  if (words_per_element == 1)
+    // Rows go to four registers at a time, rows_per_reg rows each, so a block of a multiple
+    // of 4 * rows_per_reg rows fills whole registers. Otherwise a block of four rows spans N
+    // lanes of four registers, and rows_per_reg such blocks fill them.
+    return M % (4 * rows_per_reg) == 0 || (M == 4 && N < 16 && uint64_t{B} * N == 64);
+  if (words_per_element == 2)
+    // A block of a multiple of rows_per_reg rows fills whole register pairs. A smaller block
+    // spans M * N lanes of one pair, and 64 / (M * N) such blocks fill it.
+    return M % rows_per_reg == 0 || (uint64_t{M} * N < 64 && uint64_t{M} * N * B == 64);
+  return false;
+}
+
 inline void require_wmma_wave32([[maybe_unused]] const auto &cu) {
   assert(cu.wf_size() == WMMA_WAVE32 && "gfx1250 WMMA requires wave32");
 }
@@ -1339,28 +1378,18 @@ public:
 /// Whole-register copies of an MFMA's A, B and accumulator operands. Each register is read as
 /// its own region, as the generic path reads it, so a register outside the wave's allocation
 /// reads as zero without affecting the registers that are inside it. The A and B reads report
-/// only the lanes the instruction uses, since a broadcast uses part of each register. Not valid
-/// for operands beyond MfmaOperandWords::kMaxRegs registers, in which case no register is read.
+/// only the lanes the instruction uses, since a broadcast uses part of each register.
 class MfmaOperandSnapshots {
 public:
   template <typename ComputeUnit>
-  MfmaOperandSnapshots(ComputeUnit &cu, uint32_t s0, uint32_t s1, uint32_t s2, uint64_t a_elements,
-                       uint32_t a_bits, uint64_t b_elements, uint32_t b_bits, uint64_t acc_elements,
-                       uint32_t acc_bits, uint32_t const_acc, uint64_t a_lanes, uint64_t b_lanes) {
-    constexpr uint32_t kWave = 64;
-    const uint32_t a_regs = mfma_dense_reg_count(a_elements, a_bits, kWave);
-    const uint32_t b_regs = mfma_dense_reg_count(b_elements, b_bits, kWave);
-    const uint32_t acc_regs =
-        const_acc == ACC_FROM_VGPR ? mfma_dense_reg_count(acc_elements, acc_bits, kWave) : 0;
-    if (std::max({a_regs, b_regs, acc_regs}) > MfmaOperandWords::kMaxRegs)
-      return;
+  MfmaOperandSnapshots(ComputeUnit &cu, uint32_t s0, uint32_t a_regs, uint64_t a_lanes, uint32_t s1,
+                       uint32_t b_regs, uint64_t b_lanes, uint32_t s2, uint32_t acc_regs) {
     RegisterAccess regs(cu);
     failed_ = capture(regs, s0, a_regs, a_lanes, a_).failed() ||
               capture(regs, s1, b_regs, b_lanes, b_).failed() ||
-              (acc_regs && capture(regs, s2, acc_regs, mfma_full_lane_mask(kWave), acc_).failed());
+              capture(regs, s2, acc_regs, mfma_full_lane_mask(64), acc_).failed();
   }
 
-  [[nodiscard]] bool valid() const { return a_.reg_count != 0 && !failed_; }
   [[nodiscard]] bool failed() const { return failed_; }
   [[nodiscard]] const MfmaOperandWords &a() const { return a_; }
   [[nodiscard]] const MfmaOperandWords &b() const { return b_; }
@@ -1369,14 +1398,15 @@ public:
 private:
   static Result capture(RegisterAccess &regs, uint32_t base, uint32_t reg_count, uint64_t lanes,
                         MfmaOperandWords &operand) {
+    assert(reg_count <= MfmaOperandWords::kMaxRegs && "MFMA operand exceeds its copy");
+    operand.base = base;
+    operand.reg_count = reg_count;
     // The copy holds every lane; the mask only limits what observers are told was read.
     for (uint32_t reg = 0; reg < reg_count; ++reg)
       if (regs.read_vgpr_region(base + reg, 1, lanes)
               .copy_to({operand.words + reg * 64, 64})
               .failed())
         return Result::failure();
-    operand.base = base;
-    operand.reg_count = reg_count;
     return Result::success();
   }
 
@@ -1386,39 +1416,33 @@ private:
   bool failed_ = false;
 };
 
-/// Wave64 MFMA result words staged by (register, lane) and published one VGPR at a time. Words
-/// that are never staged keep their previous contents.
+/// Wave64 MFMA result registers, staged so that every operand is read before any result is
+/// written. The caller sets every word of each register.
 class MfmaResultWords {
 public:
   static constexpr uint32_t kMaxRegs = MfmaOperandWords::kMaxRegs;
 
+  explicit MfmaResultWords(uint32_t reg_count) : reg_count_(reg_count) {
+    assert(reg_count <= kMaxRegs && "MFMA result exceeds the staging area");
+  }
+
   void set(uint32_t reg, uint32_t lane, uint32_t word) {
-    assert(reg < kMaxRegs && lane < 64 && "MFMA result outside the staging area");
+    assert(reg < reg_count_ && lane < 64 && "MFMA result outside the staging area");
     words_[reg * 64 + lane] = word;
-    covered_[reg] |= uint64_t{1} << lane;
-    reg_count_ = std::max(reg_count_, reg + 1);
   }
 
   /// Writes each register as its own region, as the generic path writes it, so a register
   /// outside the wave's allocation is skipped without affecting the others.
   void publish(auto &cu, uint32_t dst) const {
     RegisterAccess regs(cu);
-    for (uint32_t reg = 0; reg < reg_count_; ++reg) {
-      auto writes = regs.write_vgpr_region(dst + reg, 1, mfma_full_lane_mask(64));
-      if (covered_[reg] == ~uint64_t{0}) {
-        writes.set_lanes(0, std::span<const uint32_t>(words_ + reg * 64, 64));
-        continue;
-      }
-      for (uint32_t lane = 0; lane < 64; ++lane)
-        if (covered_[reg] & (uint64_t{1} << lane))
-          writes.set_lane(0, lane, words_[reg * 64 + lane]);
-    }
+    for (uint32_t reg = 0; reg < reg_count_; ++reg)
+      regs.write_vgpr_region(dst + reg, 1, mfma_full_lane_mask(64))
+          .set_lanes(0, std::span<const uint32_t>(words_ + reg * 64, 64));
   }
 
 private:
-  uint32_t reg_count_ = 0;
+  uint32_t reg_count_;
   uint32_t words_[kMaxRegs * 64];
-  uint64_t covered_[kMaxRegs] = {};
 };
 
 /// Staging capacity of try_exec_mfma_snapshot, in elements of T. The A, B and C buffers have
@@ -1435,20 +1459,38 @@ template <typename T> struct MfmaSnapshotStaging {
 };
 
 /// Whether try_exec_mfma_snapshot handles a wave64 MFMA shape; other shapes use the generic
-/// handler.
+/// handler. The snapshot copies and publishes whole registers, so the operand and result
+/// layouts must use every lane of every register they touch, and the copies and staging
+/// buffers must hold them.
 template <typename T>
-constexpr bool mfma_snapshot_shape_fits(uint32_t M, uint32_t N, uint32_t K, uint32_t B) {
+bool mfma_snapshot_shape_fits(uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t a_bits,
+                              uint32_t b_bits) {
   if constexpr (!util::has_stdx_simd) {
     return false;
   } else {
     using Staging = MfmaSnapshotStaging<T>;
     constexpr uint32_t W = static_cast<uint32_t>(util::native<T>::size());
+    constexpr uint32_t kMaxRegs = MfmaOperandWords::kMaxRegs;
+    if (!mfma_input_layout_is_dense(M, K, B, a_bits) ||
+        !mfma_input_layout_is_dense(N, K, B, b_bits) ||
+        !mfma_output_layout_is_dense(M, N, B, sizeof(T) / sizeof(uint32_t)))
+      return false;
     const uint32_t stride = ((N + W - 1) / W) * W;
-    const uint64_t output_words = uint64_t{M} * N * B * (sizeof(T) / sizeof(uint32_t));
-    return output_words % 64 == 0 && output_words <= MfmaResultWords::kMaxRegs * 64 &&
+    return mfma_dense_reg_count(uint64_t{M} * K * B, a_bits, 64) <= kMaxRegs &&
+           mfma_dense_reg_count(uint64_t{N} * K * B, b_bits, 64) <= kMaxRegs &&
+           mfma_dense_reg_count(uint64_t{M} * N * B, sizeof(T) * 8, 64) <= kMaxRegs &&
            size_t{M} * K <= Staging::kMaxA && size_t{K} * stride <= Staging::kMaxB &&
            size_t{M} * stride <= Staging::kMaxC;
   }
+}
+
+/// Lanes that an operand read through @p permute uses in each register of a layout that uses
+/// every lane of every register.
+inline uint64_t mfma_permuted_lane_mask(auto permute) {
+  uint64_t lanes = 0;
+  for (uint32_t lane = 0; lane < 64; ++lane)
+    lanes |= uint64_t{1} << permute(lane);
+  return lanes;
 }
 
 /// Wave64 MFMA from register snapshots, published by register. Returns false without reading
@@ -1470,35 +1512,27 @@ bool try_exec_mfma_snapshot(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32
     constexpr uint32_t W = static_cast<uint32_t>(util::native<T>::size());
     constexpr uint32_t kWordsPerElement = sizeof(T) / sizeof(uint32_t);
     using Staging = MfmaSnapshotStaging<T>;
-    const uint32_t stride = ((N + W - 1) / W) * W;
-    const uint64_t output_elements = uint64_t{M} * N * B;
-    if (util::force_scalar() || cu.wf_size() != 64 || !mfma_snapshot_shape_fits<T>(M, N, K, B))
+    if (util::force_scalar() || cu.wf_size() != 64 ||
+        !mfma_snapshot_shape_fits<T>(M, N, K, B, a_bits, b_bits))
       return false;
-    // Lanes read through cbsz/abid and blgp, which can broadcast part of a register.
-    auto used_lanes = [&](uint32_t rows, uint32_t bits, auto permute) {
-      uint64_t lanes = 0;
-      for (uint32_t b = 0; b < B; ++b)
-        for (uint32_t row = 0; row < rows; ++row)
-          for (uint32_t k = 0; k < K; ++k)
-            lanes |= uint64_t{1} << permute(input_loc(rows, K, B, row, k, b, bits).lane);
-      return lanes;
-    };
+    const uint32_t stride = ((N + W - 1) / W) * W;
+    const uint32_t d_regs = mfma_dense_reg_count(uint64_t{M} * N * B, sizeof(T) * 8, 64);
+    // cbsz/abid and blgp can broadcast part of each register.
     const uint64_t a_lanes =
-        cbsz == 0 ? mfma_full_lane_mask(64) : used_lanes(M, a_bits, [&](uint32_t lane) {
+        cbsz == 0 ? mfma_full_lane_mask(64) : mfma_permuted_lane_mask([&](uint32_t lane) {
           return permute_a_lane(lane, cbsz, abid);
         });
     const uint64_t b_lanes =
         blgp == 0
             ? mfma_full_lane_mask(64)
-            : used_lanes(N, b_bits, [&](uint32_t lane) { return permute_b_lane(lane, blgp); });
-    const MfmaOperandSnapshots snapshots(cu, s0, s1, s2, uint64_t{M} * K * B, a_bits,
-                                         uint64_t{N} * K * B, b_bits, output_elements,
-                                         sizeof(T) * 8, const_acc, a_lanes, b_lanes);
+            : mfma_permuted_lane_mask([&](uint32_t lane) { return permute_b_lane(lane, blgp); });
+    const MfmaOperandSnapshots snapshots(
+        cu, s0, mfma_dense_reg_count(uint64_t{M} * K * B, a_bits, 64), a_lanes, s1,
+        mfma_dense_reg_count(uint64_t{N} * K * B, b_bits, 64), b_lanes, s2,
+        const_acc == ACC_FROM_VGPR ? d_regs : 0);
     // A reported read failure ends the instruction; it must not retry through the generic path.
     if (snapshots.failed())
       return true;
-    if (!snapshots.valid())
-      return false;
     auto output = [=](uint32_t row, uint32_t col, uint32_t batch) {
       if constexpr (kWordsPerElement == 2)
         return output_loc_64(M, N, row, col, batch);
@@ -1513,7 +1547,7 @@ bool try_exec_mfma_snapshot(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32
       else
         return value;
     };
-    MfmaResultWords results;
+    MfmaResultWords results(d_regs);
     alignas(64) T Abuf[Staging::kMaxA] = {};
     alignas(64) T Bbuf[Staging::kMaxB] = {};
     alignas(64) T Cbuf[Staging::kMaxC] = {};
