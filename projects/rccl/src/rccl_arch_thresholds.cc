@@ -486,6 +486,12 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .ddaAgLL128MaxBlocks = 75,
   .ddaAgLL128MaxBlocksMinBytes = 1ULL*1024*1024,
   .ddaAgLL128MaxBlocksMaxBytes = 32ULL*1024*1024,
+  // AllToAll LL128 block cap over its whole band, so its grid is never wider than the 64
+  // channels Direct p2p used there. Rounded to a multiple of the peer count: 63 / 60 / 62
+  // blocks at 8 / 16 / 32 ranks (DPX).
+  .ddaA2aLL128MaxBlocks = 64,
+  .ddaA2aLL128MaxBlocksMinBytes = 0,
+  .ddaA2aLL128MaxBlocksMaxBytes = 16ULL*1024*1024,
   // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
   .arRingLL128MaxPerRank = 16ULL*1024*1024,       // Ring Simple beats LL128 1.1-1.3x from 256M/512M/1G
                                                   // at 8/16/32 (DPX)
