@@ -66,6 +66,10 @@ namespace RcclUnitTesting
 
     RUN_ISOLATED_TEST("Fp8Validation_DeviceCompareIsExact", []()
     {
+      ASSERT_EQ(hipSetDevice(0), hipSuccess);
+      if (!UtDeviceDataEnabled())
+        GTEST_SKIP() << "Device-data kernels are disabled or cannot run on this GPU";
+
       for (ncclDataType_t const dataType : {ncclFloat8e4m3, ncclFloat8e5m2})
       {
         PtrUnion actual;
