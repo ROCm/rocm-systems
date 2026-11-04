@@ -1736,30 +1736,51 @@ TEST(TrampolineBuilderEmit, Rdna4GuardsTargetWritesAndPreservesGetpcRelativeAddr
   }
 }
 
-TEST(TrampolineBuilderEmit, PostPlacementWithoutOriginalKeepsTheProbeTarget) {
-  TrampolinePlan plan = make_probe_plan(ROCJITSU_CODE_ARCH_RDNA4);
-  plan.emit_original = false;
-  plan.probe_after_original = true;
-  plan.patch_anchor = false;
-  plan.return_target = plan.anchor_offset;
+TEST(TrampolineBuilderEmit, PostPlacementWithoutOriginalKeepsTheLayoutAndProbeTarget) {
+  for (const bool returns_to_kernel : {false, true}) {
+    SCOPED_TRACE(returns_to_kernel);
+    TrampolinePlan plan = make_probe_plan(ROCJITSU_CODE_ARCH_RDNA4);
+    plan.emit_original = false;
+    plan.probe_after_original = true;
+    plan.patch_anchor = false;
+    plan.return_target = plan.anchor_offset;
+    plan.returns_to_kernel = returns_to_kernel;
 
-  std::string error;
-  const std::optional<TrampolineBytes> bytes = TrampolineBuilder::emit_probe_call(plan, &error);
-  ASSERT_TRUE(bytes) << error;
-  const std::vector<uint32_t> &words = bytes->trampoline_words;
-  const util::FailureOr<uint32_t> getpc_word = build_s_getpc_b64(plan.target_pair_base, plan.arch);
-  ASSERT_TRUE(getpc_word.succeeded());
-  const std::vector<uint32_t>::const_iterator getpc = std::ranges::find(words, getpc_word.value());
-  ASSERT_NE(getpc, words.end());
-  ASSERT_GE(words.end() - getpc, 8);
-  const uint64_t pc = plan.trampoline_offset + sizeof(uint32_t) * (getpc - words.begin() + 1);
-  const uint64_t delta = static_cast<uint64_t>(getpc[3]) | (static_cast<uint64_t>(getpc[5]) << 32);
-  EXPECT_EQ(pc + delta, plan.probe_target_offset);
-  EXPECT_TRUE(bytes->patched_anchor_bytes.empty());
-  EXPECT_EQ(bytes->call_envelope_byte_offset, 0u);
-  EXPECT_EQ(bytes->call_envelope_byte_size, sizeof(uint32_t) * (words.size() - 1));
-  const uint64_t return_pc = plan.trampoline_offset + sizeof(uint32_t) * (words.size() - 1);
-  EXPECT_EQ(resolve_sopp_target(return_pc, words.back()), plan.return_target);
+    std::string error;
+    const std::optional<TrampolineBytes> bytes = TrampolineBuilder::emit_probe_call(plan, &error);
+    ASSERT_TRUE(bytes) << error;
+    const std::vector<uint32_t> &words = bytes->trampoline_words;
+    const util::FailureOr<uint32_t> getpc_word =
+        build_s_getpc_b64(plan.target_pair_base, plan.arch);
+    ASSERT_TRUE(getpc_word.succeeded());
+    const std::vector<uint32_t>::const_iterator getpc =
+        std::ranges::find(words, getpc_word.value());
+    ASSERT_NE(getpc, words.end());
+    ASSERT_GE(words.end() - getpc, 8);
+    const uint64_t pc = plan.trampoline_offset + sizeof(uint32_t) * (getpc - words.begin() + 1);
+    const uint64_t delta =
+        static_cast<uint64_t>(getpc[3]) | (static_cast<uint64_t>(getpc[5]) << 32);
+    EXPECT_EQ(pc + delta, plan.probe_target_offset);
+    EXPECT_TRUE(bytes->patched_anchor_bytes.empty());
+    EXPECT_EQ(bytes->call_envelope_byte_offset, 0u);
+    const uint32_t envelope_size =
+        sizeof(uint32_t) * (words.size() - (returns_to_kernel ? 1u : 0u));
+    EXPECT_EQ(bytes->call_envelope_byte_size, envelope_size);
+    EXPECT_EQ(bytes->original_byte_offset, bytes->call_envelope_byte_size);
+    if (returns_to_kernel) {
+      const uint64_t return_pc = plan.trampoline_offset + envelope_size;
+      EXPECT_EQ(resolve_sopp_target(return_pc, words.back()), plan.return_target);
+    }
+
+    plan.probe_after_original = false;
+    const std::optional<TrampolineBytes> before = TrampolineBuilder::emit_probe_call(plan, &error);
+    ASSERT_TRUE(before) << error;
+    EXPECT_EQ(bytes->trampoline_words, before->trampoline_words);
+    EXPECT_EQ(bytes->patched_anchor_bytes, before->patched_anchor_bytes);
+    EXPECT_EQ(bytes->original_byte_offset, before->original_byte_offset);
+    EXPECT_EQ(bytes->call_envelope_byte_offset, before->call_envelope_byte_offset);
+    EXPECT_EQ(bytes->call_envelope_byte_size, before->call_envelope_byte_size);
+  }
 }
 
 TEST(TrampolineBuilderEmit, Rdna4GuardsScalarSavesBeforeArgumentReads) {

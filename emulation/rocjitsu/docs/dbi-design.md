@@ -119,13 +119,25 @@ The low-level `probe_after_original` plan option places the relocated instructio
 before its callable envelope. It defaults to false; the Instrumentor still
 rejects `AfterInst` requests. A caller selecting this layout must supply
 preservation requirements for the state after the instruction, including its
-definitions; the builder does not compute liveness. The emitted call-target
-displacement includes the relocated instruction's four or eight bytes only when
-`emit_original` is true. With the original omitted, both placements emit the
-envelope at the trampoline start and call the same probe body. `TrampolineBytes` reports the call
-envelope's offset and size separately from the guest instruction and resume
-branch, allowing the Instrumentor to attribute emitted bytes without deriving
-their range from a particular layout.
+definitions; the builder does not compute liveness. An emitted original must
+fall through into the envelope, so a branch or terminator is not a valid choice
+for this placement. The caller must also resolve the original's software-managed
+register hazards before the envelope reads its results (including spill stores)
+or overwrites registers with pending source reads (including dead-register temps).
+For example, an MFMA result spilled by the envelope can require instruction
+spacing that the envelope's load drain does not establish. Live-after preservation
+alone does not establish readiness. The builder neither validates these
+obligations nor inserts anchor-specific hazard spacing.
+
+The emitted call-target displacement includes the relocated instruction's four
+or eight bytes only when `emit_original` is true. With the original omitted,
+both placements emit the envelope at the trampoline start and call the same
+probe body, with identical bytes and attribution offsets. `original_byte_offset`
+then names the return branch, or the end of the trampoline if no return branch
+is requested.
+`TrampolineBytes` reports the call envelope's offset and size separately from the
+guest instruction and resume branch, allowing the Instrumentor to attribute
+emitted bytes without deriving their range from a particular layout.
 
 The caller supplies the `preserve_exec`, `preserve_vcc`, and `preserve_m0` inputs. `plan_probe_call()` reserves an EXEC temp when `preserve_exec || needs_full_mask`; VCC and M0 temps follow their respective inputs. The full-mask window is required for spills, argument writes, or `force_full_exec`. The builder allocates a dead SGPR pair for each saved EXEC/VCC and a single dead SGPR for saved M0; the caller's production decisions are described in [Special state](#special-state-preservation).
 
@@ -198,8 +210,8 @@ Defense-in-depth check that the orchestrator-produced `TrampolinePlan` matches t
 | `InstrumentationPoint` | request | `anchor_offset`, `kind`, `probe_obj`, `probe_symbol`, `probe_args`, `force_full_exec`, reserved `filter_flags` |
 | `ResolvedInstrumentationSite` | post-validation | `anchor_offset`, `original_size`, `original_bytes`, `mnemonic`, `kind`, `probe_index` (set for probe calls), `probe_args` |
 | `ProbeCallable` | probe registry | resolved probe `symbol`, `arch`, `target`, verified `ProbeAbi`, `body_words`, declared `arg_sources` and `force_full_exec`, `output_text_offset` |
-| `TrampolinePlan` | builder input | `arch`, `anchor_offset`, `original_size`, `original_words`, `trampoline_offset`, `return_target`, `before_items`, `after_items`, `emit_original`, `kernel_sgpr_count`, `entry_storage_base`; probe-call: `is_probe_call`, `probe_target_offset`, `link_pair_base`, `arg_vgpr_base`, `probe_args`, `force_full_exec`, `target_pair_base`, `scc_temp`, `preserve_scc`, `preserve_exec`, `preserve_vcc`, `preserve_m0`, `special_state_saves`, `vgpr_spills`, `sgpr_spills`, `acc_spills`, `spill_bridge_vgpr`, `before_word_count`, `builder_clobbers` |
-| `TrampolineBytes` | builder output | `patched_anchor_bytes`, `trampoline_words` |
+| `TrampolinePlan` | builder input | `arch`, `anchor_offset`, `original_size`, `original_words`, `trampoline_offset`, `return_target`, `before_items`, `after_items`, `emit_original`, `kernel_sgpr_count`, `entry_storage_base`; probe-call: `is_probe_call`, `probe_after_original`, `probe_target_offset`, `link_pair_base`, `arg_vgpr_base`, `probe_args`, `force_full_exec`, `target_pair_base`, `scc_temp`, `preserve_scc`, `preserve_exec`, `preserve_vcc`, `preserve_m0`, `special_state_saves`, `vgpr_spills`, `sgpr_spills`, `acc_spills`, `spill_bridge_vgpr`, `before_word_count`, `builder_clobbers` |
+| `TrampolineBytes` | builder output | `patched_anchor_bytes`, `trampoline_words`, `original_byte_offset`, `call_envelope_byte_offset`, `call_envelope_byte_size` |
 | `InstrumentationPatch` | per-site summary (test/debug) | `anchor_offset`, `original_size`, `trampoline_offset`, optional `return_target`, `original_bytes`, `patched_anchor_bytes`; probe-call: `is_probe_call`, `probe_symbol`, `probe_target_offset`, `link_pair_base`, `target_pair_base` |
 | `InstrumentedCodeObject` | `patch()` output | `elf_bytes`, `errors`, `warnings`, `sites`, `resources` |
 | `InstrumentedCodeObjectDebug` | `patch_with_debug_summaries()` output | `InstrumentedCodeObject` + `patches` |
@@ -418,7 +430,7 @@ Branch offsets are computed in SOPP `simm16` units; the trampoline must lie with
 
 A probe-call point sets `probe_obj` + `probe_symbol`. Resolution copies the probe's self-contained body (`rj_nop_probe`: `s_waitcnt` then `s_setpc_b64 s[30:31]`) once into the cave; sites sharing a `(probe_obj, probe_symbol)` reuse that one copy. The cave is laid out as `[probe bodies][s_nop padding][entry stub][trampolines]` after the original kernel bytes; the padding and stub are present only when the kernel has an entry prologue. The forward `s_branch` at the anchor targets the trampoline (not the body); the trampoline *calls* the body via `s_swappc_b64`.
 
-The trampoline envelope wraps the relocated original:
+The default callable layout places the envelope before the relocated original:
 
 ```
 .text:
@@ -462,6 +474,13 @@ The trampoline envelope wraps the relocated original:
     <relocated original word(s)>
     s_branch <return>                   <-- back to anchor_offset + original_size
 ```
+
+The diagram shows the default placement (`probe_after_original=false`). With
+`probe_after_original=true`, the relocated original moves to the trampoline
+start, before the first in-flight-load drain; the envelope's internal order stays
+the same, and the return branch still follows it. With `emit_original=false`,
+both placements omit the original and start with the envelope. Post placement
+requires the caller obligations described under [TrampolineBuilder](#trampolinebuilder).
 
 The diagram describes the builder's conditional emissions; production probe calls request EXEC/VCC preservation as described in [Special state](#special-state-preservation). EXEC saves and restores appear when `preserve_exec || needs_full_mask`; VCC and M0 follow `preserve_vcc` and `preserve_m0`. The remaining lines are conditional: the `v_mov_b32` block is empty when the site passes no arguments; the `[spill prologue]` / `[spill epilogue]` are empty when `spill_set` is empty (leaving the plain SCC-bracketed call). The full-mask window's `exec` toggles appear whenever the site spills, passes arguments, **or** runs the probe under a full mask. A site with nothing to spill still opens the window, and still emits the re-widen over an empty epilogue so the planner and emitter count the same toggles unconditionally. Three toggles by default; two under `force_full_exec`, which drops the pre-call restore. See [TrampolineBuilder → Spill bracket](#spill-bracket) for the bracket contents. The `s_getpc_b64` + 64-bit add chain is `.text`-relative, so the materialized target is load-base-independent; the `±simm16` branch range only constrains the forward/return `s_branch`es, not the call.
 

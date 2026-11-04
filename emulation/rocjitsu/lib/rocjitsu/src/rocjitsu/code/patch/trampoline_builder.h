@@ -96,7 +96,13 @@ struct TrampolinePlan {
   std::vector<InlineAsmItem> after_items;
   bool emit_original = true;
   /// Execute the relocated anchor before the callable envelope.
-  /// With emit_original=false, both placements emit only the envelope.
+  /// The caller must ensure an emitted anchor falls through into the envelope
+  /// and resolve its software-managed register hazards before the envelope
+  /// reads results or overwrites registers with pending source reads. Live-after
+  /// preservation alone is insufficient; the builder neither checks these
+  /// obligations nor inserts anchor-specific hazard spacing.
+  /// With emit_original=false, both placements emit only the envelope and keep
+  /// the same original_byte_offset and call-envelope range.
   bool probe_after_original = false;
   /// A dispatch-only callback returns to an untouched original entry; it has
   /// no anchor splice and imposes no relocation-size constraint on that entry.
@@ -109,8 +115,8 @@ struct TrampolinePlan {
   //
   // These are the call-envelope resource decisions made BEFORE layout is known:
   // which registers the envelope uses and how many words it spans. Emission
-  // materializes `before_items` from these decisions plus the assigned layout,
-  // so it must not re-pick registers or recount words. Folded into
+  // materializes `before_items` or `after_items` according to probe_after_original
+  // and emit_original, so it must not re-pick registers or recount words. Folded into
   // TrampolinePlan for now since this is the builder's one input;
   // lift back out into a dedicated resource-plan type if it grows unwieldy.
   //----------------------------------------------------------------------------
@@ -204,6 +210,10 @@ struct TrampolineBytes {
   /// Empty without an anchor splice; otherwise original_size bytes.
   std::vector<uint8_t> patched_anchor_bytes;
   std::vector<uint32_t> trampoline_words;
+  /// Original's byte offset from trampoline start, or its insertion boundary
+  /// between before_items and after_items when emit_original=false. Callable
+  /// plans without an original place this after the envelope, at the return
+  /// branch if present, otherwise at the end of the trampoline.
   uint32_t original_byte_offset = 0;
   /// Call envelope relative to trampoline start, excluding the relocated guest
   /// instruction and resume branch. Both fields are zero for inline plans.
@@ -283,7 +293,7 @@ public:
   /// then delegates to build() for layout and branch math.
   ///
   /// On GFX9 (CDNA1-4), which does not interlock them, a restored SGPR or M0 is
-  /// spaced from the relocated original by the wait states its readers need: one
+  /// spaced from guest resumption by the wait states its readers need: one
   /// s_nop tops up what the instructions after the restore already supply. That
   /// word is not part of before_word_count, since it depends on the spill sets,
   /// which are filled after planning.

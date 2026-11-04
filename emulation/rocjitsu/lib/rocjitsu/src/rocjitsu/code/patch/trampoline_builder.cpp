@@ -353,10 +353,11 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
   out.trampoline_words = std::move(body);
   out.original_byte_offset = original_offset;
   if (plan.is_probe_call) {
-    out.call_envelope_byte_offset = plan.probe_after_original ? after_offset : 0;
+    const bool after_original = plan.probe_after_original && plan.emit_original;
+    out.call_envelope_byte_offset = after_original ? after_offset : 0;
     out.call_envelope_byte_size =
-        plan.probe_after_original ? out.trampoline_words.size() * sizeof(uint32_t) - after_offset
-                                  : original_offset;
+        after_original ? out.trampoline_words.size() * sizeof(uint32_t) - after_offset
+                       : original_offset;
   }
   if (plan.returns_to_kernel) {
     util::FailureOr<uint32_t> backward = build_s_branch(*ret, plan.arch, &error);
@@ -980,8 +981,8 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     return std::nullopt;
 
   // Capture SCC at the selected observation point before the call-address adds
-  // overwrite it. For AfterInst this includes the relocated anchor's effects;
-  // restore that same value after the callback.
+  // overwrite it. With probe_after_original this includes the relocated anchor's
+  // effects; restore that same value after the callback.
   if (plan.preserve_scc &&
       !append_scalar(build_s_cselect_b32(plan.scc_temp, scalar_positive_inline_u32(1),
                                          scalar_positive_inline_u32(0), plan.arch, &error)))
@@ -1003,10 +1004,10 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe).value());
   // getpc_index is relative to the envelope. Include the original's prefix only
   // when it is emitted; dispatch-only plans can retain a snapshot without it.
-  const uint64_t va_after_getpc =
-      plan.trampoline_offset +
-      (plan.probe_after_original && plan.emit_original ? plan.original_size : 0) +
-      static_cast<uint64_t>(getpc_index + 1) * sizeof(uint32_t);
+  const bool after_original = plan.probe_after_original && plan.emit_original;
+  const uint64_t va_after_getpc = plan.trampoline_offset +
+                                  (after_original ? plan.original_size : 0) +
+                                  static_cast<uint64_t>(getpc_index + 1) * sizeof(uint32_t);
   const uint64_t delta = static_cast<uint64_t>(static_cast<int64_t>(plan.probe_target_offset) -
                                                static_cast<int64_t>(va_after_getpc));
   if (!append_scalar(build_s_add_u32(target_lo, target_lo, kLiteralConstant, plan.arch, &error)))
@@ -1027,7 +1028,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
 
   // Drain the probe's in-flight loads before restoration or resuming the guest:
   // a probe may return with an unwaited load targeting a register we restore or
-  // the guest reads next. For AfterInst the anchor has already executed.
+  // the guest reads next. With probe_after_original the anchor has already executed.
   // Mirrors the boundary drain at the envelope top.
   env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
 
@@ -1059,15 +1060,15 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   }
 
   // Special-state restores: copy each temp back into its register. After the spill
-  // loads so EXEC is restored to its anchor mask only once the full-mask loads are
-  // done; all run before the relocated original.
+  // loads so EXEC is restored to its observed mask only once the full-mask loads
+  // are done, before resuming guest execution.
   for (const SpecialStateSlot &s : plan.special_state_saves)
     if (!append_scalar(s.width == 2 ? build_s_mov_b64(s.operand, s.temp_base, plan.arch, &error)
                                     : build_s_mov_b32(s.operand, s.temp_base, plan.arch, &error)))
       return std::nullopt;
 
-  // GFX9 wait states the restores still owe the relocated original, topped up with
-  // one s_nop covering the larger shortfall. Counted rather than fixed, so a site
+  // GFX9 wait states the restores still owe guest resumption, topped up with one
+  // s_nop covering the larger shortfall. Counted rather than fixed, so a site
   // whose reloads and restores already fill the gap pays nothing. The guest code
   // the return branch reaches is further away still, so it is covered too.
   uint32_t owed_wait_states = 0;
@@ -1114,7 +1115,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   emit_plan.before_items.clear();
   emit_plan.after_items.clear();
   std::vector<InlineAsmItem> &items =
-      plan.probe_after_original ? emit_plan.after_items : emit_plan.before_items;
+      after_original ? emit_plan.after_items : emit_plan.before_items;
   items.push_back(InlineAsmItem{.words = std::move(env)});
   return build(emit_plan, error_out);
 }
