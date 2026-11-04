@@ -109,7 +109,8 @@ class Event : public RuntimeObject {
   const Device* device_;  //!< Device, this event associated with
 
   struct ProfilingInfo {
-    ProfilingInfo(bool enabled = false) : enabled_(enabled), marker_ts_(false) {
+    ProfilingInfo(bool enabled = false)
+        : enabled_(enabled), timed_(enabled), signal_required_(false) {
       if (enabled) {
         clear();
         correlation_id_ = amd::activity_prof::correlation_id;
@@ -123,7 +124,11 @@ class Event : public RuntimeObject {
 
     uint64_t correlation_id_;
     bool enabled_;             //!< Profiling enabled for the wave limiter
-    bool marker_ts_;           //!< TS marker
+    //! The command's barriers capture timestamps: it was created under queue or activity
+    //! profiling, or is a timed event marker. enabled_ alone may only track the batch.
+    bool timed_;
+    //! The completion needs a signal of its own: an event binds to it or a command waits on it
+    bool signal_required_;
     bool batch_flush_ = true;  //!< Command can flush the batch in direct dispatch mode
 
     void clear() {
@@ -163,10 +168,16 @@ class Event : public RuntimeObject {
   }
 
  public:
-  //! Use profiling info to force a tracking signal on command
-  void SetProfiling() {
+  //! Give the command's completion a signal of its own, tracked through profiling
+  void RequireSignal() {
     EnableProfiling();
-    profilingInfo_.marker_ts_ = true;
+    profilingInfo_.signal_required_ = true;
+  }
+
+  //! Profile this command and capture the timestamps of its barriers
+  void EnableTiming() {
+    EnableProfiling();
+    profilingInfo_.timed_ = true;
   }
 
   //! Return the context for this event.
