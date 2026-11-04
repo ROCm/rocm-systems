@@ -939,18 +939,36 @@ HRR_TEST_CASE(Unit_HRR_Sign_RepairReadsTheOldManifestThroughTheVerifiedDigests) 
 /**
  * Test Description
  * ----------------
- *   --repair on a root directory with --signing-key signs a pid archive that is
- *   already complete, as --repair on the archive itself does: the complete archive
- *   is not skipped, and it verifies afterwards.
+ *   --repair on a root directory holding two complete, unsigned pid archives
+ *   (repair_root only runs for two or more; one is handled as a single archive):
+ *   - without --signing-key both are complete, so both are left unsigned and the
+ *     exit code is 0;
+ *   - with --signing-key neither is skipped as complete: both are signed and
+ *     verify, and the run reports repairing two process captures.
  */
 HRR_TEST_CASE(Unit_HRR_Sign_RepairRootSignsACompleteArchive) {
   Archive a("repair_root_complete", /*sign=*/false);  // complete (trailer), unsigned
+  const fs::path dir2 = a.root / "pid-4243";
+  fs::copy(a.dir, dir2, fs::copy_options::recursive);
+  write_bytes(dir2 / "manifest.json",
+              "{\n  \"pid\": 4243,\n  \"parent_pid\": 1,\n  \"complete\": true,\n"
+              "  \"event_count\": 0,\n  \"blob_count\": 1\n}\n");
   std::string err;
   REQUIRE(a.verify(&err) == VerifyResult::kUnsigned);
+  REQUIRE(hrr_sign::verify_archive(dir2.string(), a.pub, &err) == VerifyResult::kUnsigned);
+
+  auto [ret_plain, out_plain] = hrr_playback_merged(a.root, "--repair");
+  INFO(out_plain);
+  CHECK(ret_plain == 0);
+  CHECK(a.verify(&err) == VerifyResult::kUnsigned);
+  CHECK(hrr_sign::verify_archive(dir2.string(), a.pub, &err) == VerifyResult::kUnsigned);
+
   auto [ret, out] = hrr_playback_merged(a.root, "--repair --signing-key " + a.write_seed_file().string());
   INFO(out);
   REQUIRE(ret == 0);
+  CHECK(out.find("Repairing 2 process captures") != std::string::npos);
   CHECK(a.verify(&err) == VerifyResult::kOk);
+  CHECK(hrr_sign::verify_archive(dir2.string(), a.pub, &err) == VerifyResult::kOk);
   INFO(err);
 }
 
