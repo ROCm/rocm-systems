@@ -34,5 +34,6 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     LABELS "integration-tests"
     TIMEOUT 45
+    SKIP_REGULAR_EXPRESSION "two devices with bidirectional peer access are required"
     FIXTURES_REQUIRED async-copy-peer-tracing
     ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/async-copy-peer-tracing-test.json)
