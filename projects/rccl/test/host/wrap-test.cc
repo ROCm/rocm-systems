@@ -11714,14 +11714,13 @@ rcclArchThresholds Gfx1250A2aTable() {
 }
 
 bool A2aPerPeer16(size_t count, ncclDataType_t t) { return (count * ncclTypeSize(t)) % 16 == 0; }
-bool A2aLL128PtrsAligned(const void* s, const void* r) { return (((uintptr_t)s | (uintptr_t)r) % 4) == 0; }
 
 void InstallA2aFabricFakes() {
   g_allToAllDdaFabricLLEligible = [](ncclComm*, const void*, void*, size_t c, ncclDataType_t t) {
     return A2aPerPeer16(c, t);
   };
-  g_allToAllDdaFabricLL128Eligible = [](ncclComm*, const void* s, void* r, size_t c, ncclDataType_t t) {
-    return A2aPerPeer16(c, t) && A2aLL128PtrsAligned(s, r);
+  g_allToAllDdaFabricLL128Eligible = [](ncclComm*, const void*, void*, size_t c, ncclDataType_t t) {
+    return A2aPerPeer16(c, t);
   };
 }
 
@@ -11904,11 +11903,11 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DdaLLOffFallsToLL128) {
       });
 }
 
-// A dword-aligned call takes LL128 in and out of place; below dword alignment an out-of-place call
-// takes p2p, which is correct out of place. Live dispatch and the query report the same decision.
-TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DwordAlignedTakesLL128) {
+// Buffer alignment does not move a call off LL128, in or out of place, so ranks whose buffers differ
+// in alignment pick the same kernel. Live dispatch and the query report the same decision.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250AnyAlignmentTakesLL128) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAlltoAll_Gfx1250DwordAlignedTakesLL128",
+      "Wrap_SelectAlltoAll_Gfx1250AnyAlignmentTakesLL128",
       []() {
         InstallA2aFabricFakes();
         ScopedHook ll128Blocks(g_allToAllDdaFabricLL128Blocks,
@@ -11917,8 +11916,10 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DwordAlignedTakesLL128) {
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->archThresholds = &tbl;
         void* const inPlace4 = static_cast<char*>(kA2aRecv) + 4;
+        void* const inPlace2 = static_cast<char*>(kA2aRecv) + 2;
         const void* const send4 = static_cast<const char*>(kA2aSend) + 4;
         const void* const send2 = static_cast<const char*>(kA2aSend) + 2;
+        void* const recv1 = static_cast<char*>(kA2aRecv) + 1;
         for (bool query : {false, true}) {
           for (int n : {8, 16}) {
             comm->nRanks = n;
@@ -11932,7 +11933,11 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DwordAlignedTakesLL128) {
               ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, send4, kA2aRecv, query, &d));
               EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
               ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, send2, kA2aRecv, query, &d));
-              EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo);
+              EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
+              ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aSend, recv1, query, &d));
+              EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
+              ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, inPlace2, inPlace2, query, &d));
+              EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
             }
           }
         }

@@ -2979,7 +2979,7 @@
       "tests": [
         {
           "name": "DdaAlltoAllInPlace_OffsetsStayOnDda_8rank",
-          "description": "In-place AlltoAll at fp32 offsets 0, 4 and 16 bytes stays on DDA LL or LL128 with exact data (8 ranks)",
+          "description": "AlltoAll at buffer offsets down to 1 byte, in and out of place, stays on DDA LL or LL128 with exact data (8 ranks)",
           "test_filter": "DdaAlltoAllInPlaceMPI.OffsetsStayOnDda"
         }
       ]

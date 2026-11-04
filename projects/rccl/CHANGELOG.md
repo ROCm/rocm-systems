@@ -65,7 +65,6 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * gfx1250 AllToAll on MNNVL communicators uses a new register-packed DDA fabric LL128 kernel whose slots sit in the shared scratch bank layout.
 * On gfx1250 DPX, AllToAll takes DDA LL128 above 2 MiB up to 16 MiB total (LL128 was capped at 1 MiB, below the 2 MiB LL ceiling, so p2p took 2 to 16 MiB).
 * The gfx1250 AllToAll DDA fabric LL128 kernel caps its grid at the communicator's CU budget, so every block is co-resident.
-* gfx1250 AllToAll DDA fabric LL128 requires 4-byte aligned send and receive buffers.
 * gfx1250 AllToAll skips the DDA fabric paths under `NCCL_CHECK_MODE` or on a suspended or revoked communicator, and takes the next path.
 
 ### Removed
