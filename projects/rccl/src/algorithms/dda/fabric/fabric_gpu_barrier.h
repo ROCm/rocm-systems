@@ -236,6 +236,7 @@ public:
   // All ranks must use the same scheme. The kernels still bracket the launch with epochBegin / epochEnd; in the CAS
   // scheme those only touch the epoch cell and are harmless.
   __host__ void setEpochFlags(bool on) { useEpoch_ = on; }
+  __host__ bool epochFlags() const { return useEpoch_; }
 
   // Entry handshake of block b: posts to rank `to` and waits for rank `from`.
   __device__ __forceinline__ void signalWait(int to, int from, FlagType epoch) {

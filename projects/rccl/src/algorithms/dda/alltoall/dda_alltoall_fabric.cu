@@ -41,6 +41,7 @@ RCCL_PARAM(DdaA2APushPeerPieces, "DDA_A2A_PUSH_PEER_PIECES", 0);
 // RCCL_DDA_A2A_PUSH_PEER_DRAIN: D > 0 requests D dedicated drain blocks per non-self source offset.
 // 0 disables dedicated drains. -1 (default): TDM reserves about half the block budget for drains; vector uses 0.
 // Dedicated drains copy received data from local scratch to recvbuff. All ranks must use the same value.
+// Forced to 0 with RCCL_DDA_A2A_PUSH_PEER_EPOCH=0 (see ddaAllToAllFabricPeerDrain).
 RCCL_PARAM(DdaA2APushPeerDrain, "DDA_A2A_PUSH_PEER_DRAIN", -1);
 
 namespace {
@@ -95,13 +96,24 @@ static inline DdaA2APeerGeom ddaAllToAllFabricPeerGeom(ncclComm* comm, size_t wa
 // Drain blocks per source offset: D > 0 as given (at most 64), 0 none, < 0 selects the kernel's default.
 // TDM auto reserves about half the barrier block budget for drains across nRanks - 1 source offsets; vector uses none.
 // The result depends only on the CVAR, kernel type, nRanks and init-time cap, so all ranks get the same value.
-// The caller still limits it to blocksPerPeer.
+// Forced to 0 with RCCL_DDA_A2A_PUSH_PEER_EPOCH=0 (deadlocks with drain blocks); the caller limits it to blocksPerPeer.
 static inline unsigned ddaAllToAllFabricPeerDrain(ncclComm* comm, bool tdm) {
   const int64_t param = rcclParamDdaA2APushPeerDrain();
-  if (param >= 0) return static_cast<unsigned>(std::min<int64_t>(param, 64));
-  if (!tdm || comm->nRanks < 2) return 0;
-  const size_t half = static_cast<size_t>(comm->ddaFabricMaxBlocks) / 2;
-  return static_cast<unsigned>(std::min<size_t>(half / static_cast<size_t>(comm->nRanks - 1), 64));
+  unsigned drain = 0;
+  if (param >= 0) {
+    drain = static_cast<unsigned>(std::min<int64_t>(param, 64));
+  } else if (tdm && comm->nRanks >= 2) {
+    const size_t half = static_cast<size_t>(comm->ddaFabricMaxBlocks) / 2;
+    drain = static_cast<unsigned>(std::min<size_t>(half / static_cast<size_t>(comm->nRanks - 1), 64));
+  }
+  if (drain > 0 && !comm->ddaFabricBarrierState->barrierHost.epochFlags()) {
+    INFO(NCCL_COLL,
+         "DDA fabric AllToAll: drain blocks forced to 0 (instead of %u): RCCL_DDA_A2A_PUSH_PEER_EPOCH=0 deadlocks "
+         "with drain blocks",
+         drain);
+    return 0;
+  }
+  return drain;
 }
 
 // The TDM pushes use 8 KiB tiles, two per wave window. The kernels keep the <TileBytes, UnrollPeers> template so
