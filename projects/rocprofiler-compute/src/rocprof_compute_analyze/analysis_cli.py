@@ -447,13 +447,10 @@ class cli_analysis(OmniAnalyze_Base):
         for roots in operator_forest.values():
             for root in roots:
                 _assign_kernel_ids_from_top(root, name_to_id)
-        framework_labels = (
-            [OPERATOR_LABELS.get(backend, backend) for backend in backends]
-            if backends
-            else ["ML API"]
-        )
         tty.list_ml_operators(
-            workload_path, operator_forest, framework_labels=framework_labels
+            workload_path,
+            operator_forest,
+            framework_labels=[_labels_for_backends(backends)],
         )
 
     def apply_operator_filter(
