@@ -221,7 +221,7 @@ typedef struct SDMA_PKT_COPY_LINEAR_GFX13_TAG {
 
 } SDMA_PKT_COPY_LINEAR_GFX13;
 
-// linear copy (broadcast) packet (SDMA5.2+)
+// linear copy (broadcast) packet (SDMA5.2+ to SDMA7.x)
 typedef struct SDMA_PKT_COPY_LINEAR_BROADCAST_TAG {
   union {
     struct {
@@ -312,6 +312,89 @@ typedef struct SDMA_PKT_COPY_LINEAR_BROADCAST_TAG {
   static const size_t kMaxSize_ = 0x3fffe0;
   static const size_t kDstAlignMask_ = 0x1F;
 } SDMA_PKT_COPY_LINEAR_BROADCAST;
+
+// linear copy (broadcast) packet for GFX13 (SDMA8)
+// Additional COMPRESSION dword, packet size increased to 10 dwords.
+typedef struct SDMA_PKT_COPY_LINEAR_BROADCAST_GFX13_TAG {
+  union {
+    struct {
+      unsigned int op         : 8;
+      unsigned int sub_op     : 8;
+      unsigned int reserved_0 : 2;
+      unsigned int tmz        : 1;
+      unsigned int reserved_1 : 8;
+      unsigned int broadcast  : 1;
+      unsigned int reserved_2 : 4;
+    };
+    unsigned int DW_0_DATA;
+  } HEADER_UNION;
+
+  union {
+    struct {
+      unsigned int count      :30;
+      unsigned int reserved_0 : 2;
+    } count_ext;
+    unsigned int DW_1_DATA;
+  } COUNT_UNION;
+
+  union {
+    struct {
+      unsigned int unused : 32;
+    };
+    unsigned int DW_2_DATA;
+  } PARAMETER_UNION;
+
+  // GFX13: New dword, currently unused.
+  union {
+    struct {
+      unsigned int unused : 32;
+    };
+    unsigned int DW_3_DATA;
+  } COMPRESSION_UNION;
+
+  union {
+    struct {
+      unsigned int src_addr_31_0 : 32;
+    };
+    unsigned int DW_4_DATA;
+  } SRC_ADDR_LO_UNION;
+  union {
+    struct {
+      unsigned int src_addr_63_32 : 32;
+    };
+    unsigned int DW_5_DATA;
+  } SRC_ADDR_HI_UNION;
+
+  union {
+    struct {
+      unsigned int dst_addr_31_0 : 32;
+    };
+    unsigned int DW_6_DATA;
+  } DST_ADDR_LO_UNION;
+
+  union {
+    struct {
+      unsigned int dst_addr_63_32 : 32;
+    };
+    unsigned int DW_7_DATA;
+  } DST_ADDR_HI_UNION;
+
+  union {
+    struct {
+      unsigned int dst2_addr_31_0 : 32;
+    };
+    unsigned int DW_8_DATA;
+  } DST2_ADDR_LO_UNION;
+
+  union {
+    struct {
+      unsigned int dst2_addr_63_32 : 32;
+    };
+    unsigned int DW_9_DATA;
+  } DST2_ADDR_HI_UNION;
+
+  static const size_t kDstAlignMask_ = 0x1F;
+} SDMA_PKT_COPY_LINEAR_BROADCAST_GFX13;
 
 // linear copy (swap) packet (SDMA5.2+)
 // Atomically swaps data between Address A and Address B.

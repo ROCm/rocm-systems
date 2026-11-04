@@ -80,9 +80,6 @@ const size_t BlitSdmaBase::kMaxSingleFillSize = SDMA_PKT_CONSTANT_FILL::kMaxSize
 // Initialize size of various sDMA commands use by this module
 
 template <bool useGCR, bool scopeFields>
-const uint32_t BlitSdma<useGCR, scopeFields>::broadcast_copy_command_size_ = sizeof(SDMA_PKT_COPY_LINEAR_BROADCAST);
-
-template <bool useGCR, bool scopeFields>
 const uint32_t BlitSdma<useGCR, scopeFields>::swap_copy_command_size_ = sizeof(SDMA_PKT_COPY_LINEAR_SWAP);
 
 template <bool useGCR, bool scopeFields>
@@ -125,6 +122,15 @@ uint32_t BlitSdma<useGCR, scopeFields>::linear_copy_command_size() {
     return sizeof(SDMA_PKT_COPY_LINEAR_GFX13);
   } else {
     return sizeof(SDMA_PKT_COPY_LINEAR);
+  }
+}
+
+template <bool useGCR, bool scopeFields>
+uint32_t BlitSdma<useGCR, scopeFields>::broadcast_copy_command_size() {
+  if (agent_->supported_isas()[0]->GetMajorVersion() >= 13) {
+    return sizeof(SDMA_PKT_COPY_LINEAR_BROADCAST_GFX13);
+  } else {
+    return sizeof(SDMA_PKT_COPY_LINEAR_BROADCAST);
   }
 }
 
@@ -1713,7 +1719,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBroadcastCommand(
   // Total command buffer: broadcast packets for each pair, plus linear packets
   // for the remainder destination, all multiplied by the number of size chunks.
   const size_t broadcast_bytes = num_pairs * num_chunks *
-                                 static_cast<size_t>(broadcast_copy_command_size_);
+                                 static_cast<size_t>(broadcast_copy_command_size());
   const size_t linear_cmd_size = linear_copy_command_size();
   const size_t linear_bytes = has_remainder ?
                               (num_chunks * linear_cmd_size) : 0;
@@ -1726,7 +1732,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBroadcastCommand(
   for (uint32_t p = 0; p < num_pairs; ++p) {
     BuildBroadcastCopyCommand(cmd_ptr, num_chunks,
                               dsts[p * 2], dsts[p * 2 + 1], src, size);
-    cmd_ptr += num_chunks * broadcast_copy_command_size_;
+    cmd_ptr += num_chunks * broadcast_copy_command_size();
   }
 
   // Handle the remaining odd destination with a regular linear copy.
@@ -2310,6 +2316,7 @@ template <bool useGCR, bool scopeFields>
 void BlitSdma<useGCR, scopeFields>::BuildBroadcastCopyCommand(char* cmd_addr, uint32_t num_copy_command,
                                                   void* dst1, void* dst2,
                                                   const void* src, size_t size) {
+  const bool isGFX13Plus = (agent_->supported_isas()[0]->GetMajorVersion() >= 13);
   [[maybe_unused]] constexpr size_t kMask = SDMA_PKT_COPY_LINEAR_BROADCAST::kDstAlignMask_;
   assert((reinterpret_cast<uintptr_t>(dst1) & kMask) ==
          (reinterpret_cast<uintptr_t>(dst2) & kMask));
@@ -2324,30 +2331,40 @@ void BlitSdma<useGCR, scopeFields>::BuildBroadcastCopyCommand(char* cmd_addr, ui
     void* cur_dst2 = static_cast<char*>(dst2) + cur_size;
     const void* cur_src = static_cast<const char*>(src) + cur_size;
 
-    SDMA_PKT_COPY_LINEAR_BROADCAST* packet_addr =
-        reinterpret_cast<SDMA_PKT_COPY_LINEAR_BROADCAST*>(cmd_addr);
+    if (isGFX13Plus) {
+      SDMA_PKT_COPY_LINEAR_BROADCAST_GFX13* pkt =
+          reinterpret_cast<SDMA_PKT_COPY_LINEAR_BROADCAST_GFX13*>(cmd_addr);
+      memset(pkt, 0, sizeof(SDMA_PKT_COPY_LINEAR_BROADCAST_GFX13));
+      pkt->HEADER_UNION.op        = SDMA_OP_COPY;
+      pkt->HEADER_UNION.sub_op    = SDMA_SUBOP_COPY_LINEAR_BROADCAST;
+      pkt->HEADER_UNION.broadcast = 1;
+      pkt->COUNT_UNION.count_ext.count = copy_size - 1;
+      pkt->SRC_ADDR_LO_UNION.src_addr_31_0    = ptrlow32(cur_src);
+      pkt->SRC_ADDR_HI_UNION.src_addr_63_32   = ptrhigh32(cur_src);
+      pkt->DST_ADDR_LO_UNION.dst_addr_31_0    = ptrlow32(cur_dst1);
+      pkt->DST_ADDR_HI_UNION.dst_addr_63_32   = ptrhigh32(cur_dst1);
+      pkt->DST2_ADDR_LO_UNION.dst2_addr_31_0  = ptrlow32(cur_dst2);
+      pkt->DST2_ADDR_HI_UNION.dst2_addr_63_32 = ptrhigh32(cur_dst2);
+    } else {
+      SDMA_PKT_COPY_LINEAR_BROADCAST* pkt =
+          reinterpret_cast<SDMA_PKT_COPY_LINEAR_BROADCAST*>(cmd_addr);
+      memset(pkt, 0, sizeof(SDMA_PKT_COPY_LINEAR_BROADCAST));
+      pkt->HEADER_UNION.op        = SDMA_OP_COPY;
+      pkt->HEADER_UNION.sub_op    = SDMA_SUBOP_COPY_LINEAR_BROADCAST;
+      pkt->HEADER_UNION.broadcast = 1;
+      if (max_copy_size == max_single_linear_copy_size_)
+        pkt->COUNT_UNION.count_ext.count = copy_size - 1;
+      else
+        pkt->COUNT_UNION.count.count = copy_size - 1;
+      pkt->SRC_ADDR_LO_UNION.src_addr_31_0    = ptrlow32(cur_src);
+      pkt->SRC_ADDR_HI_UNION.src_addr_63_32   = ptrhigh32(cur_src);
+      pkt->DST_ADDR_LO_UNION.dst_addr_31_0    = ptrlow32(cur_dst1);
+      pkt->DST_ADDR_HI_UNION.dst_addr_63_32   = ptrhigh32(cur_dst1);
+      pkt->DST2_ADDR_LO_UNION.dst2_addr_31_0  = ptrlow32(cur_dst2);
+      pkt->DST2_ADDR_HI_UNION.dst2_addr_63_32 = ptrhigh32(cur_dst2);
+    }
 
-    memset(packet_addr, 0, sizeof(SDMA_PKT_COPY_LINEAR_BROADCAST));
-
-    packet_addr->HEADER_UNION.op = SDMA_OP_COPY;
-    packet_addr->HEADER_UNION.sub_op = SDMA_SUBOP_COPY_LINEAR_BROADCAST;
-    packet_addr->HEADER_UNION.broadcast = 1;
-
-    if (max_copy_size == max_single_linear_copy_size_)
-      packet_addr->COUNT_UNION.count_ext.count = copy_size - 1;
-    else
-      packet_addr->COUNT_UNION.count.count = copy_size - 1;
-
-    packet_addr->SRC_ADDR_LO_UNION.src_addr_31_0 = ptrlow32(cur_src);
-    packet_addr->SRC_ADDR_HI_UNION.src_addr_63_32 = ptrhigh32(cur_src);
-
-    packet_addr->DST_ADDR_LO_UNION.dst_addr_31_0 = ptrlow32(cur_dst1);
-    packet_addr->DST_ADDR_HI_UNION.dst_addr_63_32 = ptrhigh32(cur_dst1);
-
-    packet_addr->DST2_ADDR_LO_UNION.dst2_addr_31_0 = ptrlow32(cur_dst2);
-    packet_addr->DST2_ADDR_HI_UNION.dst2_addr_63_32 = ptrhigh32(cur_dst2);
-
-    cmd_addr += broadcast_copy_command_size_;
+    cmd_addr += broadcast_copy_command_size();
     cur_size += copy_size;
   }
 
