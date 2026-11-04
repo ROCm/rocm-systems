@@ -503,11 +503,6 @@ fabric.tcc_ea0_wrreq_wr_io_32b:
   formula: SUM(TCC_EA0_WRREQ_WRITE_IO_32B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: ''
-fabric.to_ea_wr_atomic_bw:
-  name: L2 to EA Write and Atomic Bandwidth
-  formula: SUM(TCC_EA0_WRREQ_64B_sum * 64 + NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum, TCC_EA0_WRREQ_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
-  unit: GB/s
-  description: The write and atomic bandwidth from L2 to the EA interface.
 fabric.to_memory_traffic_ratio:
   name: L2 to Memory Traffic Ratio
   formula: 100 * SUM(TCC_EA0_RDREQ_sum + TCC_EA0_WRREQ_sum) / SUM(TCC_REQ_sum)

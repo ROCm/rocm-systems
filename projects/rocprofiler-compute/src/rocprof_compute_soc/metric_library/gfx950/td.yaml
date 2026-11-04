@@ -54,22 +54,6 @@ td.normalized_td_output_fifo_full:
     Percentage of GPU active time that TD's output FIFO was full, meaning TD could
     not deliver completed data to the CU (VGPR/LDS). Averaged across all CUs. High
     values indicate backpressure from the CU's register file or LDS.
-td.normalized_td_stalled_by_spi:
-  name: Normalized TD - Stalled by SPI
-  formula: 100 * SUM(TD_SPI_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
-  unit: Percent
-  description: >-
-    Percentage of GPU active time that TD was stalled because SPI (Shader Processor
-    Input) was not ready to accept write-back data to VGPRs. Averaged across all CUs.
-    High values indicate VGPR write port contention.
-td.normalized_td_stalled_by_tcp:
-  name: Normalized TD - Stalled by TCP
-  formula: 100 * SUM(TD_TC_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
-  unit: Percent
-  description: >-
-    Percentage of GPU active time that TD was waiting for TCP (L1 Cache) to provide
-    data. Averaged across all CUs. High values indicate L1 cache read latency is slowing
-    the data return path to the CU.
 td.output_fifo_full:
   name: TD - Output FIFO Full
   formula: 100 * SUM(TD_OUTPUT_FIFO_FULL_sum) / SUM(TD_TD_BUSY_sum)
