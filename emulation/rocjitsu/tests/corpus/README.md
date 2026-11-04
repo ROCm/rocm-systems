@@ -107,6 +107,11 @@ set `CMAKE_BUILD_PARALLEL_LEVEL` to limit it. CTest defaults to four concurrent
 tests to bound memory use. Extra arguments go to CTest, for example
 `-R local.early -V`.
 
+When the rocjitsu build's GoogleTest sources are the release the suite
+requests, the script passes them as `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` so the
+client does not fetch GoogleTest again. Otherwise the suite finds an installed
+GoogleTest or fetches its pinned release.
+
 The script uses its own source tree by default; set `ROCJITSU_SOURCE_DIR` to
 override it. It does not check out or update the corpus revision and does not
 run the pytest corpus suites.

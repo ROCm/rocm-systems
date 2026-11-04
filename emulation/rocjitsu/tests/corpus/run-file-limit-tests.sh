@@ -103,6 +103,19 @@ configure=(
   -DROCJITSU="${launcher}"
   -DROCJITSU_CONFIG="${config}"
 )
+# Reuse rocjitsu's GoogleTest sources when they are the release the suite
+# requests, so the client does not fetch it again.
+gtest_source="$(sed -n 's/^googletest-distribution_SOURCE_DIR:[^=]*=//p' "${cache}")"
+gtest_tag="$(sed -n 's/^[[:space:]]*GIT_TAG v\([0-9.]*\).*/\1/p' \
+  "${file_limit_source_dir}/CMakeLists.txt" | head -n 1)"
+if [[ -n "${gtest_source}" && -n "${gtest_tag}" ]] &&
+   grep -qxF "set(GOOGLETEST_VERSION ${gtest_tag})" \
+     "${gtest_source}/CMakeLists.txt" 2>/dev/null; then
+  echo "Using rocjitsu's GoogleTest ${gtest_tag} sources: ${gtest_source}"
+  configure+=(-DFETCHCONTENT_SOURCE_DIR_GOOGLETEST="${gtest_source}")
+else
+  configure+=(-UFETCHCONTENT_SOURCE_DIR_GOOGLETEST)
+fi
 if [[ "${refresh_cache}" == true ]]; then
   # CMake rejects source changes and clears settings when switching compilers.
   # Start fresh so the requested source, launcher, and instrumentation take effect.
