@@ -1721,21 +1721,12 @@ extern "C"
     // and offloading binaries call it from a static initializer, so the body is a plain
     // forward with no initialization or library loading. A NULL result means
     // rocprofiler-sdk declined the OMPT tool role and it stays with this library.
-    // Always defined, including when the SDK is too old to forward to: rocprof-sys-dl
-    // resolves this symbol by name and the OpenMP runtime looks it up in this library.
+    // <rocprofiler-sdk/ompt.h> gates availability: an SDK without
+    // rocprofiler_ompt_start_tool() does not ship that header.
     ompt_start_tool_result_t* ompt_start_tool(unsigned int omp_version,
                                               const char*  runtime_version)
     {
-#    if ROCPROFILER_VERSION >= 10600
         return rocprofiler_ompt_start_tool(omp_version, runtime_version);
-#    else
-        // rocprofiler_ompt_start_tool() is only declared by rocprofiler-sdk 1.6.0 and
-        // newer. Against an older SDK, decline the role so OMPT tracing is disabled
-        // rather than failing to build.
-        (void) omp_version;
-        (void) runtime_version;
-        return nullptr;
-#    endif
     }
 #endif  // ROCPROFSYS_USE_OMPT
 }
