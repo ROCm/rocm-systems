@@ -21,7 +21,8 @@
 
 // Keep lane id, flag-lane test and peer 0's FIFO pointer and flag in registers instead of reloading them
 // from the Primitives object, which lives in scratch.
-#if defined(__gfx1250_strict__) || defined(__gfx1250__) || defined(__gfx950__) || defined(__gfx90a__) || defined(__gfx942__)
+#if defined(__gfx1250_strict__) || defined(__gfx1250__) || defined(__gfx950__) \
+    || defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx908__)
 #define RCCL_LL128_HW_LANE_ENABLE 1
 #else
 #define RCCL_LL128_HW_LANE_ENABLE 0
