@@ -261,8 +261,8 @@ public:
       return -1;
     }
     return 0;
-  }
 #endif
+  }
 
   // @userPrefix a user-provided string that will be prepended to the name; must be less than
   //             kSocketPrefixMaxSize characters; otherwise it will be truncated before used.
