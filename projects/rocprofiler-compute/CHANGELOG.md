@@ -73,7 +73,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed the `analyze --sort`, `analyze --mem-level`, and `analyze --roofline-data-type` options.
   * These options were utilized solely by roofline plot in CLI analyze output block 4.3, which has been removed. The roofline HTML output shows every memory level and precision, and you can filter them in the browser.
 
-* Removed most gfx950 Memory Bandwidth Analysis (block 30) metrics. Block 30 now shows only the L1 cache, L2 bottleneck, and EA bottleneck indicators, and its `30.x.y` metric IDs used with `--block` now refer to different metrics.
+* Removed most gfx950 Memory Bandwidth Analysis (block 30) metrics. Block 30 now shows only the L1 cache, L2 bottleneck, and EA bottleneck indicators, as tables 30.1, 30.2, and 30.3, so `30.x` table IDs and `30.x.y` metric IDs used with `--block` now refer to different tables and metrics.
 
 ### Optimized
 
