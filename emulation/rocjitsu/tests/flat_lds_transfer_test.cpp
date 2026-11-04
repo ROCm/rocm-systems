@@ -416,6 +416,33 @@ TEST_P(FlatLdsTransfer, GlobalWideLoadsRespectM0WidthAndWholePayloadBounds) {
       }
 }
 
+TEST_P(FlatLdsTransfer, GlobalWideLoadsApplyThirteenBitOffsetToLds) {
+  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA4)
+    GTEST_SKIP() << "Wide GLOBAL LDS loads require CDNA4.";
+  // Offset 2048 sets bit 11, so it becomes -2048 if only 12 bits are sign-extended.
+  constexpr int offset = 2048;
+  constexpr unsigned destination = 128 + offset;
+  for (unsigned count : {3u, 4u}) {
+    SCOPED_TRACE(count);
+    clear();
+    for (unsigned word = 0; word < 4; ++word)
+      wave->lds().write32(destination + word * 4, 0xcccccccc);
+    cu->flush_all();
+    wave->set_lds_size(4096);
+    wave->set_exec(1);
+    wave->set_m0(0);
+    vector(2, 0, 0x20000);
+    vector(3, 0, 0);
+    for (unsigned word = 0; word < count; ++word)
+      memory.write32(0x20000 + offset + word * 4, 0xabc000 + word);
+    ASSERT_NO_FATAL_FAILURE(issue(global_wide_lds_encoding(count, 127, offset)));
+    for (unsigned word = 0; word < 4; ++word)
+      EXPECT_EQ(wave->lds().read32(destination + word * 4),
+                word < count ? 0xabc000 + word : 0xcccccccc)
+          << word;
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(Architectures, FlatLdsTransfer,
                          testing::Values(std::pair{ROCJITSU_CODE_ARCH_CDNA1, 64u},
                                          std::pair{ROCJITSU_CODE_ARCH_CDNA2, 64u},
