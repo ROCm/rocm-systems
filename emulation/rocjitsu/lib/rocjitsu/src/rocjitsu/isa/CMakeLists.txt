@@ -53,6 +53,9 @@ function(rj_add_split_amdgpu_isa_library arch)
 
     rj_add_object_library(${_target}_model ${_model_sources})
     rj_add_object_library(${_target}_exec ${_execution_sources})
+    # Profiles choose which instructions call rj-arith. Keep the dependency available
+    # to execution targets without duplicating that architecture policy in CMake.
+    target_link_libraries(${_target}_exec PUBLIC rj_arith)
 
     add_library(${_target} INTERFACE)
     target_sources(

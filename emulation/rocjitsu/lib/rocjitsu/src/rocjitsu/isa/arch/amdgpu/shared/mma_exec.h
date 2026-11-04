@@ -3236,7 +3236,7 @@ template <typename ExtractA, typename ExtractB>
 }
 
 // Generic sparse-float execution for the remaining CDNA5 wave32 callers.
-// RDNA4 uses exec_gfx12_swmmac_dot4/dot8 for its measured arithmetic.
+// Generated RDNA4 instructions use arith::exec_swmmac instead.
 template <typename ExtractA, typename ExtractB>
 void exec_swmmac_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t a_bits,
                            uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1,
@@ -3334,7 +3334,7 @@ void exec_swmmac_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_
 }
 
 // Generic sparse-float execution for the remaining CDNA5 wave32 callers.
-// RDNA4 uses exec_gfx12_swmmac_dot4/dot8 for its measured arithmetic.
+// Generated RDNA4 instructions use arith::exec_swmmac instead.
 template <typename ExtractA, typename ExtractB>
 void exec_swmmac_f32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
                      uint32_t s0, uint32_t s1, uint32_t acc_base, uint32_t index_base,
@@ -3364,7 +3364,7 @@ void exec_swmmac_f32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_b
 }
 
 /// Execute sparse BF16F32 for the remaining CDNA5 wave32 callers.
-/// RDNA4 uses exec_gfx12_swmmac_dot4 for its measured arithmetic.
+/// Generated RDNA4 instructions use arith::exec_swmmac instead.
 /// The architectural mixed-width D/C contract reads eight F32 accumulator
 /// registers and writes four packed-BF16 result
 /// registers. The encoding names the eight-register C view; the
@@ -3963,7 +3963,7 @@ void exec_wmma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32
 }
 
 // Generic sparse-float execution for the remaining CDNA5 wave32 callers.
-// RDNA4 uses exec_gfx12_swmmac_dot4/dot8 for its measured arithmetic.
+// Generated RDNA4 instructions use arith::exec_swmmac instead.
 template <typename ExtractA, typename ExtractB>
 void exec_swmmac_f16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
                      uint32_t s0, uint32_t s1, uint32_t acc_base, uint32_t index_base,
@@ -4211,7 +4211,7 @@ void exec_wmma_f16_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
 }
 
 // Generic sparse-float execution for the remaining CDNA5 wave32 callers.
-// RDNA4 uses exec_gfx12_swmmac_dot4/dot8 for its measured arithmetic.
+// Generated RDNA4 instructions use arith::exec_swmmac instead.
 template <typename ExtractA, typename ExtractB>
 void exec_swmmac_bf16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
                       uint32_t s0, uint32_t s1, uint32_t acc_base, uint32_t index_base,
