@@ -77,7 +77,7 @@ public:
   ipcSocketCom() = default;
 
   // @isServer   Only makes a difference on Windows; if false, a mailslot is created. If true,
-  //             a mailslot is created
+  //             the mailslot is not created
   ipcSocketCom(bool isServer, const std::string& prefix) :
     isServer_(isServer),
     serverFd_(-1),
@@ -94,7 +94,7 @@ public:
     handle->mailslot = INVALID_HANDLE_VALUE;
 
     if (!isServer_) {
-      std::string name = "\\\\.\\mailslot\\hipMemPoolIPC_"s + prefix_ +
+      std::string name = prefix_ +
                          std::to_string((unsigned long)GetCurrentProcessId());
 
       handle->mailslot = CreateMailslot(name.c_str(), 0, MAILSLOT_WAIT_FOREVER, NULL);
@@ -203,10 +203,9 @@ public:
     }
     CloseHandle(hProcess);
 
-    char slotName[128];
-    sprintf(slotName, "\\\\.\\mailslot\\hipMemPoolIPC_%lu",
-            (unsigned long)process.dwProcessId);
-    HANDLE hFile = CreateFile(slotName, GENERIC_WRITE, FILE_SHARE_READ,
+    std::string slotName = prefix_ +
+                           std::to_string(static_cast<unsigned long>(process.dwProcessId));
+    HANDLE hFile = CreateFile(slotName.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
                               NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
       UNSCOPED_INFO("CreateFile for mailslot failed (" << GetLastError() << ")");
