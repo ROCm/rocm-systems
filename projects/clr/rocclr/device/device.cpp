@@ -854,12 +854,13 @@ bool Device::init() {
       (gpu_enable_pal_env != nullptr && gpu_enable_pal_env[0] == '\0');
 
   // atoi("") is 0. An empty value still means the platform default.
+  // On Windows, unset, empty, and any value other than 0, 1, or 2 are PAL only.
   uint palRequest = GPU_ENABLE_PAL;
-  if (gpu_enable_pal_is_empty_string) {
+  if (gpu_enable_pal_is_empty_string ||
+      (palRequest != 0 && palRequest != 1 && palRequest != 2)) {
     palRequest = IS_WINDOWS ? 1 : 0;
-  } else if (palRequest != 0 && palRequest != 1 && palRequest != 2) {
-    // 0, 1, and 2 are the defined requests. Any other value takes the same path as 2.
-    palRequest = 2;
+  } else if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
+    palRequest = 1;
   }
 
 // IMPORTANT: Note that we are initialiing HSA stack first and then
