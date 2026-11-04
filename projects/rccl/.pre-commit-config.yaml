@@ -1,0 +1,33 @@
+# pre-commit configuration for projects/rccl.
+#
+# Hooks are adopted one at a time. Where a check needs a one-time cleanup of
+# existing code, that cleanup lands as its own separate, reviewable commit
+# recorded in .git-blame-ignore-revs, rather than being mixed in here.
+#
+# Run it locally, from the repository root:
+#
+#   # once, to run the hooks on `git commit` against your staged files
+#   pre-commit install --config projects/rccl/.pre-commit-config.yaml
+#
+#   # full sweep
+#   pre-commit run --config projects/rccl/.pre-commit-config.yaml --all-files
+#
+#   # just what you changed
+#   pre-commit run --config projects/rccl/.pre-commit-config.yaml \
+#     --files $(git diff --name-only origin/develop...HEAD)
+#
+# pre-commit itself: `pip install pre-commit` (or `uv tool install pre-commit`).
+
+# Only ever look at files under projects/rccl, whatever file list pre-commit is
+# handed.
+files: ^projects/rccl/
+
+repos:
+  # C/C++ formatting.
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v22.1.8
+    hooks:
+      - id: clang-format
+        name: clang-format (C/C++)
+        entry: clang-format -i -style=file
+        files: ^projects/rccl/src/.*\.(c|cc|cpp|h|hpp)$
