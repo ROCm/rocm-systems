@@ -13,8 +13,7 @@ from the file name (0300_memory_chart.yaml is panel 300), table and row ids from
 position (301 is the first table, 3.1.0 its first row).
 
 views_to_panel_configs() builds the panel configs that load_panel_configs() reads from
-analysis_configs/. Until the cutover, analyze reads only the built-in top stats view
-(--list-stats); tools read the rest.
+analysis_configs/. Analyze reads its panel configs through arch_panel_configs().
 Standard library and vendored YAML only, because profile imports this module.
 """
 
@@ -39,6 +38,7 @@ from utils.utils_common import (
     PLACEHOLDER_RANGE_KEY,
     canonical_config_arch,
     format_row_id,
+    load_panel_configs,
     load_yaml,
     mapping_field_errors,
 )
@@ -179,6 +179,12 @@ def per_dispatch_partners(collectables: Dict[str, str]) -> Dict[str, Optional[st
         name: per_dispatch_partner(name, collectables)
         for name in summed_collectables(collectables)
     }
+
+
+def arch_panel_configs(arch: str) -> "OrderedDict[int, Dict[str, Any]]":
+    """Return the panel configs analyze shows for arch, from analysis_configs/."""
+    config_arch = canonical_config_arch(arch) or arch
+    return load_panel_configs([str(config.analysis_configs_dir / config_arch)])
 
 
 def panel_aliases(views: Dict[int, Dict[str, Any]]) -> Dict[str, str]:
