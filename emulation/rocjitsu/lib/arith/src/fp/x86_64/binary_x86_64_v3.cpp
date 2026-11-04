@@ -1,11 +1,13 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// AVX2 FP32 add/subtract/multiply and DX9-zero multiplication.
+// AVX2 FP32 add/subtract/multiply and DX9-zero multiplication and min/max selection.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
 #include "common/x86_64/alu_x86_64_v3.h"
 #include "fp/binary.h"
+#include "fp/binary_impl.h"
+#include "fp/x86_64/minmax_x86_64_v3.h"
 #include "rj_arith/rj_arith.h"
 
 #include <immintrin.h>
@@ -77,7 +79,21 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
     if constexpr (Op == Binary::Mul) {
       value = _mm256_mul_ps(x, y);
     }
-
+    if constexpr (Op == Binary::MinNum) {
+      value = minmax<false, false>(x, y);
+    }
+    if constexpr (Op == Binary::MaxNum) {
+      value = minmax<true, false>(x, y);
+    }
+    if constexpr (Op == Binary::Minimum) {
+      value = minmax<false, true>(x, y);
+    }
+    if constexpr (Op == Binary::Maximum) {
+      value = minmax<true, true>(x, y);
+    }
+    if constexpr (Op == Binary::MinLegacy || Op == Binary::MaxLegacy) {
+      value = minmax_rdna3<Op == Binary::MaxLegacy>(x, y, flags & RJ_ARITH_FP_IEEE_MODE);
+    }
     if (instruction_flags & RJ_ARITH_ALU_OMOD_HALF) {
       value =
           scale_omod(value, instruction_flags, unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24));
@@ -88,7 +104,8 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
                   ? _mm256_blendv_ps(clamped, value, _mm256_cmp_ps(value, value, _CMP_UNORD_Q))
                   : clamped;
     }
-    if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
+    constexpr bool arithmetic = rocjitsu::arith::is_arithmetic(Op);
+    if (arithmetic && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
       value = flush_denorm_f32(value);
     }
     auto lane_exec_mask = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask >> lane)),
@@ -111,12 +128,22 @@ void binary_x86_64_v3(Binary op, uint64_t flags, uint32_t exec_mask, uint32_t in
     return run<Binary::Sub>(flags, exec_mask, instruction_flags, d, a, b);
   case Binary::Subrev:
     return run<Binary::Subrev>(flags, exec_mask, instruction_flags, d, a, b);
-
-  case Binary::MulDx9Zero:
-    return run<Binary::MulDx9Zero>(flags, exec_mask, instruction_flags, d, a, b);
-
   case Binary::Mul:
     return run<Binary::Mul>(flags, exec_mask, instruction_flags, d, a, b);
+  case Binary::MulDx9Zero:
+    return run<Binary::MulDx9Zero>(flags, exec_mask, instruction_flags, d, a, b);
+  case Binary::MinLegacy:
+    return run<Binary::MinLegacy>(flags, exec_mask, instruction_flags, d, a, b);
+  case Binary::MaxLegacy:
+    return run<Binary::MaxLegacy>(flags, exec_mask, instruction_flags, d, a, b);
+  case Binary::MinNum:
+    return run<Binary::MinNum>(flags, exec_mask, instruction_flags, d, a, b);
+  case Binary::MaxNum:
+    return run<Binary::MaxNum>(flags, exec_mask, instruction_flags, d, a, b);
+  case Binary::Minimum:
+    return run<Binary::Minimum>(flags, exec_mask, instruction_flags, d, a, b);
+  case Binary::Maximum:
+    return run<Binary::Maximum>(flags, exec_mask, instruction_flags, d, a, b);
   }
 }
 
