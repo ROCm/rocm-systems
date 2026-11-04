@@ -568,10 +568,12 @@ TEST_P(ScalarAtomicTest, BufferAtomicRunsOnlyWhenWhollyInRange) {
                    << " stride=" << stride << " records=" << records << " glc=" << +glc);
       const uint32_t dwords = opcode == cdna3::kSBufferAtomicIncX2Smem ? 2 : 1;
       const uint64_t address = kAddress + offset + soffset;
+      // A nonzero upper SDATA dword shows a dropped _x2 that zeroes only one half.
+      const uint64_t data = dwords == 2 ? 0x1'0000'0007 : 7;
       write_descriptor(records, stride);
       wf->set_m0(soffset);
       write_memory(address, dwords, 6);
-      write_sgprs(4, dwords, 7);
+      write_sgprs(4, dwords, data);
       if (backing) {
         backing->load_attempts = 0;
         backing->update_attempts = 0;
@@ -586,7 +588,7 @@ TEST_P(ScalarAtomicTest, BufferAtomicRunsOnlyWhenWhollyInRange) {
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Complete);
       EXPECT_EQ(read_memory(address, dwords), in_range ? 7u : 6u);
-      EXPECT_EQ(read_sgprs(4, dwords), !glc ? 7u : (in_range ? 6u : 0u));
+      EXPECT_EQ(read_sgprs(4, dwords), !glc ? data : (in_range ? 6u : 0u));
       EXPECT_TRUE(wf->wait_counters().empty());
       if (backing && !in_range) {
         EXPECT_EQ(backing->load_attempts, 0u);
