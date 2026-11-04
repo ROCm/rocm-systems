@@ -1,4 +1,4 @@
-name: "RCCL clang-tidy"
+name: RCCL clang-tidy
 
 on:
   pull_request:

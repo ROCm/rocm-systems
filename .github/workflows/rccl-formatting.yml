@@ -1,24 +1,4 @@
-# Formatting and lint checks for projects/rccl.
-#
-# The job below is named `pre-commit` because that is the single entry in
-# `checks.required_check_runs` in tools/systems_pr_bot/policy.yml. The bot
-# waits for a check run with that name, so a PR touching a path this workflow
-# does not list produces no check run at all and the bot times out waiting for
-# one. Hence the deliberately broad `paths:` filter: match anything under
-# projects/rccl and let each hook's own `files:` pattern decide what actually
-# runs. A PR that only touches RCCL documentation will create the check run and
-# pass it with nothing to do, which is the behaviour we want.
-#
-# What runs is defined entirely by projects/rccl/.pre-commit-config.yaml, so
-# this workflow and a developer's local `pre-commit run` cannot disagree.
-# Hooks install their own pinned tools, so there is nothing to apt-get here.
-#
-# clang-tidy is deliberately absent. It needs a compile database and hipified
-# sources, which means configuring a build, so it belongs in its own workflow
-# with a ROCm image rather than in a changed-files job. Run it locally with
-# projects/rccl/maint/run-clang-tidy.sh.
-
-name: "rccl-formatting"
+name: RCCL formatting
 
 on:
   pull_request:
