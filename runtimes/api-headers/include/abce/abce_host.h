@@ -818,14 +818,12 @@ static inline abce_policy_result_t abce_sdma_policy_trampoline(void* user_data,
 // coordinator (carries the prologue + epilogue).
 typedef struct abce_plan_frame_t {
   uint32_t engine;   // selected registry index / ring. The client may replace this
-                     // with any entry in ranked_engines before submit.
+                     // before submit with an engine that
+                     // abce_copy_orchestrator_rank_legal_engines() returns for
+                     // every copy on the frame.
   uint32_t num_ops;  // bodies on this frame.
   uint32_t bytes;    // total packet bytes for this frame.
-  uint8_t num_ranked_engines;      // valid entries in ranked_engines.
-  bool has_engine_preference;      // policy ranked the alternatives; false means equal.
-  bool coordinator;                // frames[0]: carries the prologue + epilogue.
-  uint32_t ranked_engines[ABCE_MAX_ENGINE_CHOICES];  // legal alternatives; best first
-                                                     // when has_engine_preference.
+  bool coordinator;  // frames[0]: carries the prologue + epilogue.
   // Non-owning view of this frame's `bytes` formed packets. Points into the
   // orchestrator's per-thread packet scratch (see the map phase); valid only
   // until the same thread maps another plan. Submit copies it into the ring.
@@ -836,13 +834,10 @@ typedef struct abce_plan_frame_t {
 //
 // Outputs:
 //   frames[0..num_frames) — one per participating ring; frames[0] is the
-//                           coordinator (carries prologue + epilogue). Each
-//                           frame also exposes up to ABCE_MAX_ENGINE_CHOICES
-//                           legal alternatives and records whether policy ranked
-//                           them. A client may replace frame.engine with one of
-//                           those registered indices before submit;
-//                           multi-frame clients must keep the selected frame
-//                           engines distinct.
+//                           coordinator (carries prologue + epilogue). A client
+//                           may replace frame.engine with a legal alternative
+//                           before submit; multi-frame clients must keep the
+//                           selected frame engines distinct.
 //   num_frames       — number of distinct engines used.
 //   multi            — true when the copy is spread across more than one SDMA
 //                      engine (num_frames > 1), so the frames run in parallel
@@ -976,19 +971,23 @@ static inline size_t abce_broadcast_max_size(void) {
 //===----------------------------------------------------------------------===//
 
 // The map phase builds packets into a per-thread scratch buffer (relocatable —
-// no ring offset embedded). Reusing the scratch avoids a per-call heap
-// allocation on the hot map->submit path; it grows once to the batch high-water
-// mark. A pthread key gives the buffer a destructor so it is released at thread
+// no ring offset embedded) and decomposes copies into a per-thread engine-op
+// array. Reusing the scratch avoids per-call heap allocations on the hot
+// map->submit path; each buffer grows once to the batch high-water mark. A
+// pthread key gives the buffers a destructor so they are released at thread
 // exit, which is what the C++ thread_local unique_ptr did.
 typedef struct abce_packet_scratch_t {
   char* buffer;
   size_t capacity;
+  abce_engine_op_t* ops;
+  size_t ops_capacity;
 } abce_packet_scratch_t;
 
 static inline void abce_packet_scratch_destroy(void* scratch) {
   abce_packet_scratch_t* state = (abce_packet_scratch_t*)scratch;
   if (!state) return;
   free(state->buffer);
+  free(state->ops);
   free(state);
 }
 
@@ -999,22 +998,45 @@ static inline void abce_packet_scratch_key_create(void) {
   (void)pthread_key_create(&abce_packet_scratch_key, abce_packet_scratch_destroy);
 }
 
+// Returns the calling thread's scratch state, creating it on first use.
+// Returns null only on allocation failure.
+static inline abce_packet_scratch_t* abce_thread_scratch(void) {
+  (void)pthread_once(&abce_packet_scratch_key_once, abce_packet_scratch_key_create);
+  abce_packet_scratch_t* state =
+      (abce_packet_scratch_t*)pthread_getspecific(abce_packet_scratch_key);
+  if (state) return state;
+  state = (abce_packet_scratch_t*)calloc(1, sizeof(*state));
+  if (!state) return NULL;
+  if (pthread_setspecific(abce_packet_scratch_key, state) != 0) {
+    free(state);
+    return NULL;
+  }
+  return state;
+}
+
+// Returns a per-thread array of at least |count| engine ops, growing it to the
+// high-water mark. The contents are uninitialized and are overwritten by the
+// next map call on the same thread. Returns null only on allocation failure.
+static inline abce_engine_op_t* abce_acquire_op_scratch(size_t count) {
+  abce_packet_scratch_t* state = abce_thread_scratch();
+  if (!state) return NULL;
+  if (state->ops_capacity < count) {
+    abce_engine_op_t* grown =
+        (abce_engine_op_t*)realloc(state->ops, count * sizeof(abce_engine_op_t));
+    if (!grown) return NULL;
+    state->ops = grown;
+    state->ops_capacity = count;
+  }
+  return state->ops;
+}
+
 // Returns a per-thread packet scratch buffer of at least |bytes|, growing it to
 // the high-water mark. The buffer is reused across map calls on the same thread,
 // so a plan's packet views are valid only until that thread maps another plan.
 // Returns null only on allocation failure.
 static inline char* abce_acquire_packet_scratch(size_t bytes) {
-  (void)pthread_once(&abce_packet_scratch_key_once, abce_packet_scratch_key_create);
-  abce_packet_scratch_t* state =
-      (abce_packet_scratch_t*)pthread_getspecific(abce_packet_scratch_key);
-  if (!state) {
-    state = (abce_packet_scratch_t*)calloc(1, sizeof(*state));
-    if (!state) return NULL;
-    if (pthread_setspecific(abce_packet_scratch_key, state) != 0) {
-      free(state);
-      return NULL;
-    }
-  }
+  abce_packet_scratch_t* state = abce_thread_scratch();
+  if (!state) return NULL;
   if (bytes == 0) return state->buffer;
   if (state->capacity < bytes) {
     char* grown = (char*)realloc(state->buffer, bytes);
@@ -1256,11 +1278,10 @@ static inline uint32_t abce_copy_orchestrator_back_to_back_engine(
 
 static inline uint8_t abce_copy_orchestrator_rank_engine_choices(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* op, uint64_t candidates,
-    uint32_t* out_choices, bool* out_has_engine_preference) {
+    uint32_t* out_choices) {
   uint32_t ranked[ABCE_MAX_ENGINES] = {0};
   const abce_policy_result_t result =
       abce_copy_orchestrator_invoke_policy(orchestrator, op, candidates, ranked);
-  *out_has_engine_preference = result.disposition == ABCE_POLICY_DISPOSITION_RANKED;
   if (result.disposition == ABCE_POLICY_DISPOSITION_NO_LEGAL_ENGINE) return 0;
 
   const uint32_t num_candidates = abce_popcount_engines(candidates);
@@ -1284,9 +1305,7 @@ static inline uint32_t abce_copy_orchestrator_rank_legal_engines(
 
 static inline uint32_t abce_copy_orchestrator_select_engine(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* op, uint64_t candidates,
-    bool can_fanout, uint32_t max_participants, uint32_t* round_robin, uint64_t* selected_mask,
-    uint32_t* out_ranked_engines, uint8_t* out_num_ranked_engines,
-    bool* out_has_engine_preference) {
+    bool can_fanout, uint32_t max_participants, uint32_t* round_robin, uint64_t* selected_mask) {
   const bool participant_cap_reached =
       abce_popcount_engines(*selected_mask) >= max_participants;
   const uint64_t unselected_candidates = candidates & ~*selected_mask;
@@ -1297,12 +1316,9 @@ static inline uint32_t abce_copy_orchestrator_select_engine(
                       : ((*selected_mask != 0 && (!can_fanout || participant_cap_reached))
                              ? *selected_mask
                              : candidates);
-  *out_num_ranked_engines = abce_copy_orchestrator_rank_engine_choices(
-      orchestrator, op, candidates, out_ranked_engines, out_has_engine_preference);
   uint32_t allowed_ranked_engines[ABCE_MAX_ENGINE_CHOICES] = {0};
-  bool allowed_has_engine_preference = false;
-  const uint8_t num_allowed_ranked_engines = abce_copy_orchestrator_rank_engine_choices(
-      orchestrator, op, allowed, allowed_ranked_engines, &allowed_has_engine_preference);
+  const uint8_t num_allowed_ranked_engines =
+      abce_copy_orchestrator_rank_engine_choices(orchestrator, op, allowed, allowed_ranked_engines);
   if (num_allowed_ranked_engines == 0) return ABCE_MAX_ENGINES;
   const uint32_t engine =
       (add_participant || !can_fanout)
@@ -1351,28 +1367,19 @@ static inline uint32_t abce_pick_balanced_engine(uint64_t legal_mask, uint32_t r
 
 // Legal ring set for |op|. On gfx1250 every candidate ring is legal and no ring
 // is preferred; elsewhere the policy ranks the class-legal rings, with the
-// recommended (affinity) ring first. Also fills |out_ranked_engines| for the
-// engine op so downstream ring substitution still has the ordered choices.
+// recommended (affinity) ring first.
 static inline uint64_t abce_copy_orchestrator_legal_engine_set(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* op, uint64_t candidates,
-    uint32_t* out_recommended, uint32_t* out_ranked_engines, uint8_t* out_num_ranked_engines,
-    bool* out_has_engine_preference) {
-  if (orchestrator->is_gfx125plus) {
-    *out_num_ranked_engines = 0;
-    for (uint32_t engine = 0;
-         engine < ABCE_MAX_ENGINES && *out_num_ranked_engines < ABCE_MAX_ENGINE_CHOICES; ++engine)
-      if (candidates & (((uint64_t)1) << engine))
-        out_ranked_engines[(*out_num_ranked_engines)++] = engine;
-    *out_has_engine_preference = false;
-    *out_recommended = ABCE_MAX_ENGINES;
-    return candidates;
-  }
-  *out_num_ranked_engines = abce_copy_orchestrator_rank_engine_choices(
-      orchestrator, op, candidates, out_ranked_engines, out_has_engine_preference);
+    uint32_t* out_recommended) {
+  *out_recommended = ABCE_MAX_ENGINES;
+  if (orchestrator->is_gfx125plus) return candidates;
+  uint32_t ranked[ABCE_MAX_ENGINE_CHOICES] = {0};
+  const uint8_t num_ranked =
+      abce_copy_orchestrator_rank_engine_choices(orchestrator, op, candidates, ranked);
   uint64_t legal_mask = 0;
-  for (uint32_t choice_idx = 0; choice_idx < *out_num_ranked_engines; ++choice_idx)
-    legal_mask |= ((uint64_t)1) << out_ranked_engines[choice_idx];
-  *out_recommended = *out_num_ranked_engines ? out_ranked_engines[0] : ABCE_MAX_ENGINES;
+  for (uint32_t choice_idx = 0; choice_idx < num_ranked; ++choice_idx)
+    legal_mask |= ((uint64_t)1) << ranked[choice_idx];
+  if (num_ranked) *out_recommended = ranked[0];
   return legal_mask;
 }
 
@@ -1380,13 +1387,16 @@ static inline uint32_t abce_copy_orchestrator_rank_legal_engines(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* copy, uint32_t* out_engines,
     uint32_t capacity) {
   if (!out_engines || capacity == 0) return 0;
+  const uint64_t candidates = orchestrator->registered_mask;
   uint32_t ranked[ABCE_MAX_ENGINE_CHOICES] = {0};
-  uint32_t recommended = ABCE_MAX_ENGINES;
-  uint8_t num_ranked = 0;
-  bool has_engine_preference = false;
-  (void)abce_copy_orchestrator_legal_engine_set(orchestrator, copy,
-                                                orchestrator->registered_mask, &recommended,
-                                                ranked, &num_ranked, &has_engine_preference);
+  uint32_t num_ranked = 0;
+  if (orchestrator->is_gfx125plus) {
+    for (uint32_t engine = 0; engine < ABCE_MAX_ENGINES && num_ranked < ABCE_MAX_ENGINE_CHOICES;
+         ++engine)
+      if (candidates & (((uint64_t)1) << engine)) ranked[num_ranked++] = engine;
+  } else {
+    num_ranked = abce_copy_orchestrator_rank_engine_choices(orchestrator, copy, candidates, ranked);
+  }
   const uint32_t count = num_ranked < capacity ? num_ranked : capacity;
   for (uint32_t rank = 0; rank < count; ++rank) out_engines[rank] = ranked[rank];
   return count;
@@ -1538,29 +1548,6 @@ static inline void abce_engine_op_initialize(abce_engine_op_t* out_op) {
   out_op->kind = ABCE_OP_KIND_LINEAR;
 }
 
-static inline void abce_set_engine_choices(abce_engine_op_t* op, const uint32_t* ranked_engines,
-                                           uint8_t num_ranked_engines,
-                                           bool has_engine_preference) {
-  op->num_ranked_engines = num_ranked_engines;
-  op->has_engine_preference = has_engine_preference;
-  for (uint32_t choice_idx = 0; choice_idx < num_ranked_engines; ++choice_idx)
-    op->ranked_engines[choice_idx] = ranked_engines[choice_idx];
-}
-
-static inline void abce_copy_orchestrator_set_fixed_engine(
-    const abce_copy_orchestrator_t* orchestrator, abce_engine_op_t* op,
-    const abce_copy_op_t* copy, uint64_t candidates, uint32_t engine) {
-  op->engine = engine;
-  bool has_engine_preference = false;
-  op->num_ranked_engines = abce_copy_orchestrator_rank_engine_choices(
-      orchestrator, copy, candidates, op->ranked_engines, &has_engine_preference);
-  op->has_engine_preference = has_engine_preference;
-  if (op->num_ranked_engines == 0) {
-    op->ranked_engines[0] = engine;
-    op->num_ranked_engines = 1;
-  }
-}
-
 static inline bool abce_copy_orchestrator_decompose_multi_dst(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* op,
     const abce_copy_metadata_t* metadata, uint64_t candidates, bool can_fanout,
@@ -1575,24 +1562,12 @@ static inline bool abce_copy_orchestrator_decompose_multi_dst(
       (metadata->multicast_mode == ABCE_MULTICAST_MODE_AUTOMATIC &&
        op->size <= ABCE_MULTICAST_MAX_SIZE);
   if (orchestrator->is_gfx125plus && use_multicast) {
-    uint32_t ranked_engines[ABCE_MAX_ENGINE_CHOICES] = {0};
-    uint8_t num_ranked_engines = 0;
-    bool has_engine_preference = false;
     const uint32_t multicast_engine =
         force_back_to_back
             ? fixed_engine
-            : abce_copy_orchestrator_select_engine(
-                  orchestrator, op, candidates, can_fanout, max_participants, round_robin,
-                  selected_mask, ranked_engines, &num_ranked_engines, &has_engine_preference);
+            : abce_copy_orchestrator_select_engine(orchestrator, op, candidates, can_fanout,
+                                                   max_participants, round_robin, selected_mask);
     if (multicast_engine == ABCE_MAX_ENGINES) return false;
-    if (force_back_to_back) {
-      num_ranked_engines = abce_copy_orchestrator_rank_engine_choices(
-          orchestrator, op, candidates, ranked_engines, &has_engine_preference);
-      if (num_ranked_engines == 0) {
-        ranked_engines[0] = fixed_engine;
-        num_ranked_engines = 1;
-      }
-    }
     for (uint32_t base = 0; base < op->num_dsts; base += ABCE_MULTICAST_MAX_DSTS) {
       const uint32_t chunk_dsts = (op->num_dsts - base < ABCE_MULTICAST_MAX_DSTS)
                                       ? (op->num_dsts - base)
@@ -1605,32 +1580,18 @@ static inline bool abce_copy_orchestrator_decompose_multi_dst(
       engine_op.num_dsts = chunk_dsts;
       engine_op.size = op->size;
       engine_op.engine = multicast_engine;
-      abce_set_engine_choices(&engine_op, ranked_engines, num_ranked_engines,
-                              has_engine_preference);
       if (!abce_push_engine_op(ops, num_ops, capacity, &engine_op)) return false;
     }
     return true;
   }
 
   if (!orchestrator->is_gfx125plus && op->size < abce_broadcast_max_size()) {
-    uint32_t ranked_engines[ABCE_MAX_ENGINE_CHOICES] = {0};
-    uint8_t num_ranked_engines = 0;
-    bool has_engine_preference = false;
     const uint32_t bcast_engine =
         force_back_to_back
             ? fixed_engine
-            : abce_copy_orchestrator_select_engine(
-                  orchestrator, op, candidates, can_fanout, max_participants, round_robin,
-                  selected_mask, ranked_engines, &num_ranked_engines, &has_engine_preference);
+            : abce_copy_orchestrator_select_engine(orchestrator, op, candidates, can_fanout,
+                                                   max_participants, round_robin, selected_mask);
     if (bcast_engine == ABCE_MAX_ENGINES) return false;
-    if (force_back_to_back) {
-      num_ranked_engines = abce_copy_orchestrator_rank_engine_choices(
-          orchestrator, op, candidates, ranked_engines, &has_engine_preference);
-      if (num_ranked_engines == 0) {
-        ranked_engines[0] = fixed_engine;
-        num_ranked_engines = 1;
-      }
-    }
     for (uint32_t base = 0; base < op->num_dsts; base += ABCE_BROADCAST_MAX_DSTS) {
       const uint32_t chunk_dsts = (op->num_dsts - base < ABCE_BROADCAST_MAX_DSTS)
                                       ? (op->num_dsts - base)
@@ -1641,8 +1602,6 @@ static inline bool abce_copy_orchestrator_decompose_multi_dst(
       engine_op.dsts = &op->dsts[base];
       engine_op.size = op->size;
       engine_op.engine = bcast_engine;
-      abce_set_engine_choices(&engine_op, ranked_engines, num_ranked_engines,
-                              has_engine_preference);
       if (chunk_dsts == ABCE_BROADCAST_MAX_DSTS) {
         engine_op.kind = ABCE_OP_KIND_BROADCAST;
         engine_op.num_dsts = ABCE_BROADCAST_MAX_DSTS;
@@ -1669,18 +1628,13 @@ static inline bool abce_copy_orchestrator_decompose_multi_dst(
     engine_op.dst = op->dsts[dst_idx];
     engine_op.size = op->size;
     if (force_back_to_back) {
-      abce_copy_orchestrator_set_fixed_engine(orchestrator, &engine_op, op, candidates,
-                                              fixed_engine);
+      engine_op.engine = fixed_engine;
     } else if (use_large_copy_grouping) {
       const uint32_t engine_slot = (dst_idx / ABCE_MAX_COPIES_PER_ENGINE) % num_group_engines;
-      abce_copy_orchestrator_set_fixed_engine(orchestrator, &engine_op, op, candidates,
-                                              abce_engine_at(candidates, engine_slot));
+      engine_op.engine = abce_engine_at(candidates, engine_slot);
     } else {
-      bool has_engine_preference = false;
       engine_op.engine = abce_copy_orchestrator_select_engine(
-          orchestrator, op, candidates, can_fanout, max_participants, round_robin, selected_mask,
-          engine_op.ranked_engines, &engine_op.num_ranked_engines, &has_engine_preference);
-      engine_op.has_engine_preference = has_engine_preference;
+          orchestrator, op, candidates, can_fanout, max_participants, round_robin, selected_mask);
     }
     if (engine_op.engine == ABCE_MAX_ENGINES) return false;
     if (!abce_push_engine_op(ops, num_ops, capacity, &engine_op)) return false;
@@ -1715,6 +1669,13 @@ static inline bool abce_copy_orchestrator_decompose(
   // Per-ring copy count that drives the fan-out balancer (see
   // abce_pick_balanced_engine).
   uint32_t engine_load[ABCE_MAX_ENGINES] = {0};
+  // The built-in policy ranks only on the endpoints and the candidates, so a
+  // fan-out copy with the endpoints of |cached_copy| reuses its legal mask.
+  const bool reuse_cached_copy =
+      !orchestrator->policy || orchestrator->policy_user_data == &orchestrator->owned_policy;
+  const abce_copy_op_t* cached_copy = NULL;
+  uint64_t legal_mask = 0;
+  uint32_t recommended = ABCE_MAX_ENGINES;
 
   for (uint32_t op_idx = 0; op_idx < num_copies; ++op_idx) {
     const abce_copy_op_t* copy = &copies[op_idx];
@@ -1746,22 +1707,22 @@ static inline bool abce_copy_orchestrator_decompose(
     engine_op.indirect_dst = copy->indirect_dst;
     engine_op.rect = copy->rect;
     if (force_back_to_back) {
-      abce_copy_orchestrator_set_fixed_engine(orchestrator, &engine_op, copy, candidates,
-                                              fixed_engine);
+      engine_op.engine = fixed_engine;
     } else if (use_large_copy_grouping) {
       const uint32_t engine_slot = (op_idx / ABCE_MAX_COPIES_PER_ENGINE) % num_group_engines;
-      abce_copy_orchestrator_set_fixed_engine(orchestrator, &engine_op, copy, candidates,
-                                              abce_engine_at(candidates, engine_slot));
+      engine_op.engine = abce_engine_at(candidates, engine_slot);
     } else if (can_fanout) {
       // Parallel-first placement: least-loaded legal ring, biased to the
       // recommended (affinity map) ring so a copy stays on it until the ring is
       // as busy as its alternatives.
-      bool has_engine_preference = false;
-      uint32_t recommended = ABCE_MAX_ENGINES;
-      const uint64_t legal_mask = abce_copy_orchestrator_legal_engine_set(
-          orchestrator, copy, candidates, &recommended, engine_op.ranked_engines,
-          &engine_op.num_ranked_engines, &has_engine_preference);
-      engine_op.has_engine_preference = has_engine_preference;
+      if (!cached_copy || cached_copy->src_end.kind != copy->src_end.kind ||
+          cached_copy->src_end.device_id != copy->src_end.device_id ||
+          cached_copy->dst_end.kind != copy->dst_end.kind ||
+          cached_copy->dst_end.device_id != copy->dst_end.device_id) {
+        legal_mask =
+            abce_copy_orchestrator_legal_engine_set(orchestrator, copy, candidates, &recommended);
+        cached_copy = reuse_cached_copy ? copy : NULL;
+      }
       const bool can_add_participant =
           abce_popcount_engines(selected_mask) < max_participants;
       const uint64_t unselected_legal = legal_mask & ~selected_mask;
@@ -1774,12 +1735,9 @@ static inline bool abce_copy_orchestrator_decompose(
         ++engine_load[engine_op.engine];
       }
     } else {
-      bool has_engine_preference = false;
       engine_op.engine = abce_copy_orchestrator_select_engine(
           orchestrator, copy, candidates, can_fanout, max_participants, &round_robin,
-          &selected_mask, engine_op.ranked_engines, &engine_op.num_ranked_engines,
-          &has_engine_preference);
-      engine_op.has_engine_preference = has_engine_preference;
+          &selected_mask);
     }
     if (engine_op.engine == ABCE_MAX_ENGINES) {
       *out_status = ABCE_STATUS_NO_LEGAL_ENGINE;
@@ -1799,36 +1757,11 @@ static inline bool abce_copy_orchestrator_decompose(
 // Frame assembly
 //===----------------------------------------------------------------------===//
 
-static inline void abce_initialize_frame_choices(abce_plan_frame_t* frame,
-                                                 const abce_engine_op_t* op) {
-  frame->num_ranked_engines = op->num_ranked_engines;
-  frame->has_engine_preference = op->has_engine_preference;
-  for (uint32_t choice_idx = 0; choice_idx < op->num_ranked_engines; ++choice_idx)
-    frame->ranked_engines[choice_idx] = op->ranked_engines[choice_idx];
-}
-
-static inline void abce_intersect_frame_choices(abce_plan_frame_t* frame,
-                                                const abce_engine_op_t* op) {
-  frame->has_engine_preference = frame->has_engine_preference && op->has_engine_preference;
-  uint32_t common[ABCE_MAX_ENGINE_CHOICES] = {0};
-  uint8_t num_common = 0;
-  for (uint32_t frame_choice_idx = 0;
-       frame_choice_idx < frame->num_ranked_engines && num_common < ABCE_MAX_ENGINE_CHOICES;
-       ++frame_choice_idx) {
-    const uint32_t candidate = frame->ranked_engines[frame_choice_idx];
-    for (uint32_t op_choice_idx = 0; op_choice_idx < op->num_ranked_engines; ++op_choice_idx) {
-      if (candidate == op->ranked_engines[op_choice_idx]) {
-        common[num_common++] = candidate;
-        break;
-      }
-    }
-  }
-  frame->num_ranked_engines = num_common;
-  for (uint32_t choice_idx = 0; choice_idx < num_common; ++choice_idx)
-    frame->ranked_engines[choice_idx] = common[choice_idx];
-}
-
-static inline void abce_build_frames(const abce_engine_op_t* ops, uint32_t num_ops,
+// Groups |ops| in place into one frame per engine, so that the ops of each frame
+// are contiguous and the frames follow plan order.
+// Sets |out_all_fused|[frame_idx] when every op in the frame uses a fused packet.
+// The fused flags must be final.
+static inline void abce_build_frames(abce_engine_op_t* ops, uint32_t num_ops, bool* out_all_fused,
                                      abce_plan_t* plan) {
   uint64_t seen = 0;
   uint8_t engine_to_frame[ABCE_MAX_ENGINES] = {0};
@@ -1840,32 +1773,54 @@ static inline void abce_build_frames(const abce_engine_op_t* ops, uint32_t num_o
       abce_plan_frame_t* frame = &plan->frames[plan->num_frames];
       memset(frame, 0, sizeof(*frame));
       frame->engine = engine;
-      abce_initialize_frame_choices(frame, &ops[op_idx]);
       frame->coordinator = (plan->num_frames == 0);
+      out_all_fused[plan->num_frames] = true;
       engine_to_frame[engine] = (uint8_t)plan->num_frames;
       plan->num_frames++;
-    } else {
-      abce_intersect_frame_choices(&plan->frames[engine_to_frame[engine]], &ops[op_idx]);
     }
-    plan->frames[engine_to_frame[engine]].num_ops++;
+    const uint32_t frame_idx = engine_to_frame[engine];
+    plan->frames[frame_idx].num_ops++;
+    out_all_fused[frame_idx] = out_all_fused[frame_idx] && ops[op_idx].fused;
+  }
+
+  uint32_t next_op[ABCE_MAX_ENGINES];
+  uint32_t first_op = 0;
+  for (uint32_t frame_idx = 0; frame_idx < plan->num_frames; ++frame_idx) {
+    next_op[frame_idx] = first_op;
+    first_op += plan->frames[frame_idx].num_ops;
+  }
+  // Each swap moves one op to its final slot in the region of the frame that
+  // owns it, so the grouping takes at most |num_ops| swaps.
+  uint32_t frame_end = 0;
+  for (uint32_t frame_idx = 0; frame_idx + 1 < plan->num_frames; ++frame_idx) {
+    frame_end += plan->frames[frame_idx].num_ops;
+    while (next_op[frame_idx] < frame_end) {
+      abce_engine_op_t* op = &ops[next_op[frame_idx]];
+      const uint32_t owner = engine_to_frame[op->engine];
+      if (owner == frame_idx) {
+        next_op[frame_idx]++;
+        continue;
+      }
+      abce_engine_op_t* slot = &ops[next_op[owner]++];
+      const abce_engine_op_t displaced = *slot;
+      *slot = *op;
+      *op = displaced;
+    }
   }
 }
 
 // Bundles the current mapping state for one frame into the descriptor the frame
-// composer sizes / emits from.
-static inline abce_frame_job_t abce_make_frame_job(const abce_engine_op_t* ops, uint32_t num_ops,
+// composer sizes / emits from. |frame_ops| points at the first op of |frame|.
+static inline abce_frame_job_t abce_make_frame_job(const abce_engine_op_t* frame_ops,
+                                                   bool frame_all_fused,
                                                    const abce_copy_metadata_t* metadata,
                                                    const abce_plan_t* plan,
                                                    const abce_plan_frame_t* frame) {
   abce_frame_job_t job;
-  job.ops = ops;
-  job.num_ops = num_ops;
+  job.ops = frame_ops;
+  job.num_ops = frame->num_ops;
   job.metadata = metadata;
-  job.engine = frame->engine;
-  job.frame_num_ops = frame->num_ops;
-  job.frame_all_fused = true;
-  for (uint32_t op_idx = 0; op_idx < num_ops; ++op_idx)
-    if (ops[op_idx].engine == frame->engine && !ops[op_idx].fused) job.frame_all_fused = false;
+  job.frame_all_fused = frame_all_fused;
   job.coordinator = frame->coordinator;
   job.multi = plan->multi;
   job.start_gate_required = plan->start_gate_required;
@@ -1908,7 +1863,7 @@ static inline abce_status_t abce_copy_orchestrator_map_copy(
         abce_classify_transfer(&copies[copy_idx].src_end, &copies[copy_idx].dst_end));
   }
 
-  abce_engine_op_t* local_ops = (abce_engine_op_t*)calloc(capacity, sizeof(abce_engine_op_t));
+  abce_engine_op_t* local_ops = abce_acquire_op_scratch(capacity);
   if (!local_ops) return ABCE_STATUS_RESOURCE_EXHAUSTED;
 
   uint32_t num_ops = 0;
@@ -1919,7 +1874,6 @@ static inline abce_status_t abce_copy_orchestrator_map_copy(
           ? abce_copy_orchestrator_back_to_back_engine(orchestrator, &copies[0], candidates)
           : ABCE_MAX_ENGINES;
   if (force_back_to_back && fixed_engine == ABCE_MAX_ENGINES) {
-    free(local_ops);
     out_plan->failed_op = 0;
     return ABCE_STATUS_NO_LEGAL_ENGINE;
   }
@@ -1927,33 +1881,31 @@ static inline abce_status_t abce_copy_orchestrator_map_copy(
   if (!abce_copy_orchestrator_decompose(orchestrator, copies, num_copies, metadata, candidates,
                                         force_back_to_back, fixed_engine, local_ops, &num_ops,
                                         capacity, &status, &out_plan->failed_op)) {
-    free(local_ops);
     return status;
   }
   if (num_ops == 0) {
-    free(local_ops);
     return ABCE_STATUS_INVALID_ARGUMENT;
   }
-
-  abce_build_frames(local_ops, num_ops, out_plan);
-  out_plan->multi = (out_plan->num_frames > 1);
 
   // Mark ops that use the fused wait/signal packet. gfx125+ can fuse direct
   // completion into a single-frame batch as well as fan-out synchronization into
   // a multi-frame batch.
-  const bool use_fused_packets = metadata->prefer_fused && orchestrator->is_gfx125plus;
-  bool all_bodies_fused = true;
-  for (uint32_t op_idx = 0; op_idx < num_ops; ++op_idx) {
+  bool all_bodies_fused = orchestrator->is_gfx125plus;
+  for (uint32_t op_idx = 0; orchestrator->is_gfx125plus && op_idx < num_ops; ++op_idx) {
     const abce_op_kind_t kind = local_ops[op_idx].kind;
     if (kind == ABCE_OP_KIND_INDIRECT) {
       local_ops[op_idx].fused = true;
-    } else if (use_fused_packets &&
+    } else if (metadata->prefer_fused &&
                (kind == ABCE_OP_KIND_LINEAR || kind == ABCE_OP_KIND_MULTICAST ||
                 kind == ABCE_OP_KIND_SWAP)) {
       local_ops[op_idx].fused = true;
     }
     all_bodies_fused = all_bodies_fused && local_ops[op_idx].fused;
   }
+
+  bool frame_all_fused[ABCE_MAX_ENGINES];
+  abce_build_frames(local_ops, num_ops, frame_all_fused, out_plan);
+  out_plan->multi = (out_plan->num_frames > 1);
 
   // Match ROCr's gfx125+ dependency-free fan-out path: when every body is a
   // fused wait/signal packet and the coordinator has no ordering work, all
@@ -1976,10 +1928,16 @@ static inline abce_status_t abce_copy_orchestrator_map_copy(
                                 abce_timestamp_surface_enabled(&metadata->timestamps) ||
                                 effective_gcr || metadata->out.event_mailbox != NULL;
   out_plan->fan_in_count = 0;
+  const abce_engine_op_t* next_frame_ops = local_ops;
   for (uint32_t frame_idx = 0; frame_idx < out_plan->num_frames; ++frame_idx) {
-    const abce_frame_job_t job = abce_make_frame_job(local_ops, num_ops, metadata, out_plan,
-                                                     &out_plan->frames[frame_idx]);
+    abce_plan_frame_t* frame = &out_plan->frames[frame_idx];
+    const abce_frame_job_t job = abce_make_frame_job(next_frame_ops, frame_all_fused[frame_idx],
+                                                     metadata, out_plan, frame);
     out_plan->fan_in_count += abce_frame_composer_signal_count(&orchestrator->composer, &job);
+    const size_t frame_bytes = abce_frame_composer_frame_bytes(&orchestrator->composer, &job);
+    if (frame_bytes > UINT32_MAX) return ABCE_STATUS_TOO_MANY_OPERATIONS;
+    frame->bytes = (uint32_t)frame_bytes;
+    next_frame_ops += frame->num_ops;
   }
 
   // Where the gate and fan-in counter live. When the coordinator drains fan-in
@@ -1993,7 +1951,6 @@ static inline abce_status_t abce_copy_orchestrator_map_copy(
   const bool coordinator_drains_fan_in = out_plan->multi && out_plan->epilogue_required;
   if (coordinator_drains_fan_in) {
     if (!metadata->out.coordination_scratch) {
-      free(local_ops);
       return ABCE_STATUS_MISSING_COORDINATION_SCRATCH;
     }
     // The gfx125+ 64-bit poll encodes only addr[63:3], so a misaligned
@@ -2001,7 +1958,6 @@ static inline abce_status_t abce_copy_orchestrator_map_copy(
     ABCE_ASSERT(((uintptr_t)metadata->out.coordination_scratch % 8) == 0 &&
                 "coordination_scratch must be 8-byte aligned");
     if (out_plan->fan_in_count > UINT32_MAX) {
-      free(local_ops);
       return ABCE_STATUS_TOO_MANY_OPERATIONS;
     }
     out_plan->coordination_signal = metadata->out.coordination_scratch;
@@ -2012,24 +1968,11 @@ static inline abce_status_t abce_copy_orchestrator_map_copy(
     if (out_plan->multi || out_plan->fan_in_count > 1) {
       if (metadata->out.completion_value > UINT32_MAX ||
           out_plan->fan_in_count > UINT32_MAX - metadata->out.completion_value) {
-        free(local_ops);
         return ABCE_STATUS_TOO_MANY_OPERATIONS;
       }
       out_plan->coordination_initial_value =
           out_plan->fan_in_count + metadata->out.completion_value;
     }
-  }
-
-  // Size each frame.
-  for (uint32_t frame_idx = 0; frame_idx < out_plan->num_frames; ++frame_idx) {
-    const abce_frame_job_t job = abce_make_frame_job(local_ops, num_ops, metadata, out_plan,
-                                                     &out_plan->frames[frame_idx]);
-    const size_t frame_bytes = abce_frame_composer_frame_bytes(&orchestrator->composer, &job);
-    if (frame_bytes > UINT32_MAX) {
-      free(local_ops);
-      return ABCE_STATUS_TOO_MANY_OPERATIONS;
-    }
-    out_plan->frames[frame_idx].bytes = (uint32_t)frame_bytes;
   }
 
   // Build packets into the per-thread scratch buffer. Frames are laid out
@@ -2041,25 +1984,25 @@ static inline abce_status_t abce_copy_orchestrator_map_copy(
 
   char* scratch = abce_acquire_packet_scratch(total_bytes);
   if (!scratch && total_bytes > 0) {
-    free(local_ops);
     return ABCE_STATUS_RESOURCE_EXHAUSTED;
   }
   size_t scratch_offset = 0;
+  next_frame_ops = local_ops;
   for (uint32_t frame_idx = 0; frame_idx < out_plan->num_frames; ++frame_idx) {
     abce_plan_frame_t* frame = &out_plan->frames[frame_idx];
     char* frame_buffer = scratch + scratch_offset;
     memset(frame_buffer, 0, frame->bytes);
-    const abce_frame_job_t job =
-        abce_make_frame_job(local_ops, num_ops, metadata, out_plan, frame);
+    const abce_frame_job_t job = abce_make_frame_job(next_frame_ops, frame_all_fused[frame_idx],
+                                                     metadata, out_plan, frame);
     const size_t emitted =
         abce_frame_composer_emit_frame(&orchestrator->composer, frame_buffer, &job);
     (void)emitted;
     assert(emitted == frame->bytes && "ABCE emit/size divergence");
     frame->packets = frame_buffer;
     scratch_offset += frame->bytes;
+    next_frame_ops += frame->num_ops;
   }
 
-  free(local_ops);
   out_plan->valid = true;
   return ABCE_STATUS_OK;
 }

@@ -130,9 +130,10 @@ permanent unpublished hole in the ring. Keeping the fallible part in the map pha
 has almost nothing left to fail on.
 
 The split is also what lets a client inspect or override the mapping decision. An
-`abce_plan_t` exposes the engine chosen for each frame plus the ranked legal alternatives, so a
+`abce_plan_t` exposes the engine chosen for each frame, and
+`abce_copy_orchestrator_rank_legal_engines()` returns the ranked legal engines for a copy, so a
 scheduler that knows something ABCE does not (queue depth, an in-flight copy on that engine) can
-rewrite `frame.engine` before submitting.
+rewrite `frame.engine` before submitting. The map phase does not compute the alternatives itself.
 
 Most importantly, it is what makes copy work pre-capturable: the map phase is the "compile" step a
 HIP graph can run at instantiate time, and submit is the cheap replay step

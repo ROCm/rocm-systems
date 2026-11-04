@@ -199,24 +199,10 @@ AbceBlitManager::CopyResult AbceBlitManager::submitCopy(
     }
     for (uint32_t frame_idx = 0; frame_idx < plan.num_frames; ++frame_idx) {
       const abce_plan_frame_t& frame = plan.frames[frame_idx];
-      char choices[128];
-      int choices_offset = std::snprintf(choices, sizeof(choices), "[");
-      for (uint32_t choice_idx = 0;
-           choice_idx < frame.num_ranked_engines && choices_offset > 0 &&
-           static_cast<size_t>(choices_offset) < sizeof(choices);
-           ++choice_idx) {
-        choices_offset +=
-            std::snprintf(choices + choices_offset, sizeof(choices) - choices_offset, "%s%u",
-                          choice_idx == 0 ? "" : ",", frame.ranked_engines[choice_idx]);
-      }
-      if (choices_offset > 0 && static_cast<size_t>(choices_offset) < sizeof(choices))
-        std::snprintf(choices + choices_offset, sizeof(choices) - choices_offset, "]");
-
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE,
-              "ABCE frame[%u]: engine=%u ops=%u bytes=%u coordinator=%u preferred=%u "
-              "choices=%s active_signal=0x%zx",
+              "ABCE frame[%u]: engine=%u ops=%u bytes=%u coordinator=%u active_signal=0x%zx",
               frame_idx, frame.engine, frame.num_ops, frame.bytes, frame.coordinator,
-              frame.has_engine_preference ? 1u : 0u, choices, completion.handle);
+              completion.handle);
       logFramePackets(frame, frame_idx, "ABCE", amd::LOG_QUEUE);
     }
   }
