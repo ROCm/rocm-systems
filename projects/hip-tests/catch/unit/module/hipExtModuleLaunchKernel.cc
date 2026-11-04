@@ -297,7 +297,7 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_ExceedMaxGridDim_NonUniform) {
   const auto kernel = GetKernel(mg.module(), "NOPKernel");
   HIP_CHECK_ERROR(hipExtModuleLaunchKernel(kernel, 1, 2u * maxGridY + 1u, 1, 1, 2, 1, 0, nullptr,
                                            nullptr, nullptr, nullptr, nullptr, 0u),
-                  hipErrorInvalidConfiguration);
+                  hipErrorInvalidValue);
 }
 
 /**

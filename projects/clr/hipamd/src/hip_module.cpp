@@ -393,7 +393,7 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
 
   // Make sure dispatch doesn't exceed max grid dimensions
   if (exceedsMaxGridDim(launch_params, *device)) {
-    return hipErrorInvalidConfiguration;
+    return hipErrorInvalidValue;
   }
 
   amd::Kernel* kernel = hip::asKernel(f);
@@ -839,8 +839,7 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   amd::HIPLaunchParams launch_params(gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
                                      sharedMemBytes, *device, 0, 0, 0, 1, 1, 1);
   if (!launch_params.IsValidConfig() ||
-       launch_params.local_.product() > device->info().maxWorkGroupSize_ ||
-       exceedsMaxGridDim(launch_params, *device)) {
+       launch_params.local_.product() > device->info().maxWorkGroupSize_) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 

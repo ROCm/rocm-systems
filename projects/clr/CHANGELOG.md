@@ -6,7 +6,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Resolved issues
 
-* A kernel launch that exceeds the device's `hipDeviceProp_t.maxGridSize` limits is now rejected. Launches report `hipErrorInvalidConfiguration`, matching `cudaErrorInvalidConfiguration`, except for `hipModuleLaunchKernel`, which reports `hipErrorInvalidValue` to match the CUDA driver API. The workgroup count is rounded up, so a non-uniform launch cannot bypass the limit with a partial final workgroup.
+* A kernel launch that exceeds the device's `hipDeviceProp_t.maxGridSize` limits is now rejected and reports `hipErrorInvalidValue`, matching CUDA. The workgroup count is rounded up, so a non-uniform launch cannot bypass the limit with a partial final workgroup.
 
 ## HIP 7.17.0 for ROCm 10.2.0
 

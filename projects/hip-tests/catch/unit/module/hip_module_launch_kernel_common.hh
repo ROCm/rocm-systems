@@ -144,19 +144,19 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
   SECTION("gridDimX > maxGridDimX") {
     const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxGridDimX, 0) + 1u;
     HIP_CHECK_ERROR(func(f, x, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorLaunchParam);
+                    hipErrorInvalidValue);
   }
 
   SECTION("gridDimY > maxGridDimY") {
     const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxGridDimY, 0) + 1u;
     HIP_CHECK_ERROR(func(f, 1, y, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorLaunchParam);
+                    hipErrorInvalidValue);
   }
 
   SECTION("gridDimZ > maxGridDimZ") {
     const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxGridDimZ, 0) + 1u;
     HIP_CHECK_ERROR(func(f, 1, 1, z, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorLaunchParam);
+                    hipErrorInvalidValue);
   }
 
   SECTION("blockDimX > maxBlockDimX") {
