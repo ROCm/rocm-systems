@@ -869,6 +869,23 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitPastTheLLTierStaysWithin
             replaced);
 }
 
+// The selector asks ncclAllReduceDdaFabricLL128SplitTakes before the VMM-first window: it is the split window itself.
+TEST_F(DdaAllReduceFabricLLMicrotest, SplitTakes_IsThePeerSplitWindow) {
+  SplitTiersOn(comm(), params_);
+  comm().nRanks = 32;
+  auto takes = [&](size_t bytes) {
+    return ncclAllReduceDdaFabricLL128SplitTakes(mock_.get(), kSendbuff, kRecvbuff, bytes / 4, ncclFloat32, ncclSum);
+  };
+  EXPECT_TRUE(takes(4 * kMiB)) << "32r 4 MiB, a VMM-first size";
+  EXPECT_TRUE(takes(16 * kMiB));
+  EXPECT_FALSE(takes(kMiB)) << "below 2 MiB";
+  comm().WarpSize = 64;
+  EXPECT_FALSE(takes(4 * kMiB)) << "no LDS-staged writer on wave64";
+  comm().WarpSize = 32;
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 0;
+  EXPECT_FALSE(takes(4 * kMiB)) << "staged writer off: the VMM-first window keeps the message";
+}
+
 // A user-set LL or LL128 one-shot threshold keeps the window's messages on that tier.
 TEST_F(DdaAllReduceFabricLLMicrotest, Eligible_PeerSplitWindowLeavesAPinnedLLTier) {
   SplitTiersOn(comm(), params_);
