@@ -325,9 +325,10 @@ TEST_P(ScalarAtomicTest, CompareSwapReturnsOldAndPreservesCompare) {
         const uint64_t guard_address = kAddress + dwords * 4;
         const unsigned compare_sgpr = 4 + dwords;
         const unsigned guard_sgpr = 4 + 2 * dwords;
-        // The buffer bound fits only the memory element: CMPSWAP_X2 reads 16
-        // bytes of SGPRs but accesses 8 bytes of memory.
-        write_descriptor(dwords * 4);
+        // The V# bound fits only the memory element: CMPSWAP_X2 reads 16 bytes
+        // of SGPRs but accesses 8 bytes of memory.
+        if (opcode != global_opcode)
+          write_descriptor(dwords * 4);
         write_memory(kAddress, dwords, old);
         memory.write32(guard_address, 0xdeadbeef);
         write_sgprs(4, dwords, source);
@@ -713,29 +714,33 @@ TEST_P(ScalarAtomicTest, FailedCompareExchangeDoesNotWriteBackOrLeakCounter) {
 }
 
 TEST_P(ScalarAtomicTest, DecodedDependenciesFollowReturnBit) {
-  for (const auto &[opcode, dwords] : kDecrementForms) {
-    for (uint8_t glc : {0, 1}) {
-      SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " glc=" << +glc);
-      const auto words = cdna3::build_smem(opcode, {.sdata = 4, .glc = glc, .imm = 1});
-      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-      ASSERT_NE(inst, nullptr);
-      const InstDefUse def_use(*inst, 64);
-      const RegisterRef sdata{RegClass::SGPR, 4, static_cast<uint8_t>(dwords)};
-      EXPECT_TRUE(def_use.uses.contains(sdata));
-      EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 0, 2}));
-      EXPECT_EQ(def_use.defs.contains(sdata), glc != 0);
-      EXPECT_EQ(inst->num_dst_operands(), glc ? 1 : 0);
+  for (const auto &[global_opcode, dwords] : kDecrementForms) {
+    for (const uint16_t opcode : {global_opcode, buffer_atomic_opcode(global_opcode)}) {
+      // A buffer atomic's SBASE is a 128-bit V#, not a 64-bit address.
+      const uint8_t base_width = opcode == global_opcode ? 2 : 4;
+      for (uint8_t glc : {0, 1}) {
+        SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " glc=" << +glc);
+        const auto words = cdna3::build_smem(opcode, {.sdata = 4, .glc = glc, .imm = 1});
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        const InstDefUse def_use(*inst, 64);
+        const RegisterRef sdata{RegClass::SGPR, 4, static_cast<uint8_t>(dwords)};
+        EXPECT_TRUE(def_use.uses.contains(sdata));
+        EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 0, base_width}));
+        EXPECT_EQ(def_use.defs.contains(sdata), glc != 0);
+        EXPECT_EQ(inst->num_dst_operands(), glc ? 1 : 0);
 
-      EXPECT_TRUE(inst->is_memory_wait_producer());
-      const auto *issue = inst->amdgpu_memory_issue_info();
-      ASSERT_NE(issue, nullptr);
-      EXPECT_FALSE(issue->exec_masked);
-      const auto obligations = issue->counter_obligations();
-      ASSERT_EQ(obligations.size(), 1u);
-      EXPECT_EQ(obligations[0].wait_counter_type(), WaitCounterType::LGKMCNT);
-      EXPECT_EQ(obligations[0].completion_class(), MemoryCompletionClass::UNORDERED);
-      // The access width sets the token count, independent of GLC.
-      EXPECT_EQ(obligations[0].counter_increment(), dwords);
+        EXPECT_TRUE(inst->is_memory_wait_producer());
+        const auto *issue = inst->amdgpu_memory_issue_info();
+        ASSERT_NE(issue, nullptr);
+        EXPECT_FALSE(issue->exec_masked);
+        const auto obligations = issue->counter_obligations();
+        ASSERT_EQ(obligations.size(), 1u);
+        EXPECT_EQ(obligations[0].wait_counter_type(), WaitCounterType::LGKMCNT);
+        EXPECT_EQ(obligations[0].completion_class(), MemoryCompletionClass::UNORDERED);
+        // The access width sets the token count, independent of GLC.
+        EXPECT_EQ(obligations[0].counter_increment(), dwords);
+      }
     }
   }
 }
