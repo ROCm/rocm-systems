@@ -266,12 +266,9 @@ typedef struct abce_engine_op_t {
   uint32_t num_dsts;
   uint32_t fill_value;
   abce_op_kind_t kind;
-  uint8_t num_ranked_engines;
   bool indirect_src;
   bool indirect_dst;
-  bool has_engine_preference;
   bool fused;
-  uint32_t ranked_engines[ABCE_MAX_ENGINE_CHOICES];
 } abce_engine_op_t;
 
 //===----------------------------------------------------------------------===//
@@ -281,9 +278,8 @@ typedef struct abce_engine_op_t {
 // Everything the frame composer needs to size / emit one frame.
 //
 // A frame is the group of packets written to a single engine's ring in one
-// reservation. `ops` points at the whole batch's decomposed ops; the composer
-// filters to those matching `engine` (there are `frame_num_ops` of them). The
-// coordinator frame (`coordinator == true`) additionally carries the prologue +
+// reservation. `ops` points at the decomposed ops of this frame only, in no
+// particular order. The coordinator frame (`coordinator == true`) additionally carries the prologue +
 // epilogue. For a fan-out (`multi == true`) the frames coordinate through
 // `coordination_word`: when ordering work requires it, non-coordinator frames
 // wait for the start gate (bit 62) to clear before their first body. Every
@@ -292,15 +288,13 @@ typedef struct abce_engine_op_t {
 // once per fused chunk when every body on the frame is fused, otherwise once
 // after its last body (see abce_body_sync_for()).
 typedef struct abce_frame_job_t {
-  const abce_engine_op_t* ops;  // all ops in the batch (filtered by `engine`).
-  uint32_t num_ops;             // total ops in `ops`.
+  const abce_engine_op_t* ops;  // the ops on this frame.
+  uint32_t num_ops;             // ops in `ops`.
   const abce_copy_metadata_t* metadata;
 
-  uint32_t engine;         // this frame's engine / ring index.
-  uint32_t frame_num_ops;  // ops on THIS frame (for the last-body signal).
-  bool frame_all_fused;    // every op on THIS frame is a fused packet.
-  bool coordinator;        // carries the prologue + epilogue.
-  bool multi;              // batch fans out across engines.
+  bool frame_all_fused;  // every op on this frame is a fused packet.
+  bool coordinator;      // carries the prologue + epilogue.
+  bool multi;            // batch fans out across engines.
   // Whether non-coordinator frames must wait for the coordinator to release the
   // bit-62 start gate. gfx125+ fused fan-out without dependencies can start
   // directly and has every frame signal the fan-in count.
@@ -396,7 +390,7 @@ static inline abce_body_sync_t abce_body_sync_for(const abce_frame_job_t* job, u
   sync.wait = wait_for_start && (body_idx == 0);
   sync.inline_signal = job->frame_all_fused;
   sync.signal = (signals_completion_directly || contributes_to_fan_in) &&
-                (sync.inline_signal || body_idx == job->frame_num_ops - 1);
+                (sync.inline_signal || body_idx == job->num_ops - 1);
   // Both roles read the same word for a given plan: abce_frame_job_t's
   // coordination_word already resolves to the scratch or to the signal value
   // depending on whether anything drains the count.
@@ -579,12 +573,9 @@ static inline size_t abce_frame_composer_frame_bytes(const abce_frame_composer_t
   size_t bytes = 0;
   if (job->coordinator)
     bytes += abce_frame_prologue_bytes(composer, metadata, job->multi, job->start_gate_required);
-  uint32_t body_idx = 0;
   for (uint32_t op_idx = 0; op_idx < job->num_ops; ++op_idx) {
-    if (job->ops[op_idx].engine != job->engine) continue;
-    const abce_body_sync_t sync = abce_body_sync_for(job, body_idx);
+    const abce_body_sync_t sync = abce_body_sync_for(job, op_idx);
     bytes += abce_frame_body_bytes(composer, &job->ops[op_idx], &sync);
-    body_idx++;
   }
   if (job->coordinator && job->epilogue_required)
     bytes += abce_frame_epilogue_bytes(composer, metadata, job->multi);
@@ -595,13 +586,10 @@ static inline size_t abce_frame_composer_frame_bytes(const abce_frame_composer_t
 static inline uint64_t abce_frame_composer_signal_count(const abce_frame_composer_t* composer,
                                                         const abce_frame_job_t* job) {
   uint64_t num_signals = 0;
-  uint32_t body_idx = 0;
   for (uint32_t op_idx = 0; op_idx < job->num_ops; ++op_idx) {
-    if (job->ops[op_idx].engine != job->engine) continue;
-    const abce_body_sync_t sync = abce_body_sync_for(job, body_idx);
+    const abce_body_sync_t sync = abce_body_sync_for(job, op_idx);
     if (sync.signal)
       num_signals += sync.inline_signal ? abce_frame_fused_packets(composer, &job->ops[op_idx]) : 1;
-    body_idx++;
   }
   return num_signals;
 }
@@ -839,12 +827,9 @@ static inline size_t abce_frame_composer_emit_frame(const abce_frame_composer_t*
     cursor += abce_frame_emit_prologue(composer, cursor, metadata, job->multi,
                                        job->start_gate_required, job->coordination_word);
 
-  uint32_t body_idx = 0;
   for (uint32_t op_idx = 0; op_idx < job->num_ops; ++op_idx) {
-    if (job->ops[op_idx].engine != job->engine) continue;
-    const abce_body_sync_t sync = abce_body_sync_for(job, body_idx);
+    const abce_body_sync_t sync = abce_body_sync_for(job, op_idx);
     cursor += abce_frame_emit_body(composer, cursor, &job->ops[op_idx], &sync);
-    body_idx++;
   }
 
   if (job->coordinator && job->epilogue_required)
