@@ -78,7 +78,8 @@ A file the child does not have comes from its nearest ancestor.
 ## Checks
 
 `tools/validate_metric_library.py` runs as a pre-commit hook on any change here or in
-`analysis_configs/`. It checks the schema, inheritance, ids (a formula has one id on
-every arch), names, units, roofline ceilings and sets, and proves the library equals
+`analysis_configs/`. It checks the schema, inheritance, that formulas parse, ids (a
+formula has one id on every arch, and no two ids on an arch compute the same value),
+names, units, roofline ceilings and sets, and proves the library equals
 `analysis_configs/`: every equation a panel row shows is a library formula, and the
 counters, built-in variables and sets match. Its module docstring lists every check.
