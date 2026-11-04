@@ -663,10 +663,12 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   const TensorDmaLayout layout(desc);
   if (validate_supported_descriptor(desc, layout).failed()) [[unlikely]]
     return util::Result::failure();
-  if (layout.rank() != 0 && !wf.has_gpu_memory()) [[unlikely]]
-    return util::Result::failure();
   const auto element_count = tensor_element_count(desc, layout);
   if (!element_count) [[unlikely]]
+    return util::Result::failure();
+  // Only a transfer with elements touches global memory; a NOP tile or an empty
+  // gather does not need any.
+  if (*element_count != 0 && !wf.has_gpu_memory()) [[unlikely]]
     return util::Result::failure();
   // Iterations may legally reuse LDS through a zero or overlapping increment.
   // This separate simulator limit bounds the eager host representation.

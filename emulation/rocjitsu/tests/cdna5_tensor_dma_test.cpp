@@ -1178,6 +1178,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
     uint32_t tile_dim1;
     uint32_t tensor_dim0_stride;
     bool succeeds;
+    bool barrier = false; ///< Request a completion arrival on a barrier cell.
   };
   constexpr Case kCases[] = {
       {.name = "zero-width tile, overlapping stride",
@@ -1196,6 +1197,14 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
        .tile_dim1 = 4,
        .tensor_dim0_stride = 4,
        .succeeds = true},
+      // Two iterations of a NOP tile still make one instruction, which arrives
+      // once.
+      {.name = "zero-width tile, disjoint stride, barrier",
+       .tile_dim0 = 0,
+       .tile_dim1 = 4,
+       .tensor_dim0_stride = 4,
+       .succeeds = true,
+       .barrier = true},
       {.name = "all-zero tile",
        .tile_dim0 = 0,
        .tile_dim1 = 0,
@@ -1222,11 +1231,17 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
         cu->lds().write32(wf->lds_base() + i * 4, kLdsSentinel);
         write_global_u32(*sim.memory, kGlobal + i * 4, kGlobalSentinel);
       }
+      // The barrier cell lies past the 16 sentinel dwords.
+      constexpr uint32_t kBarrierLdsAddr = 128;
+      const uint64_t kUnarrived = amdgpu::lds_barrier_cell_init_state(3);
+      cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, kUnarrived);
 
       write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
-      write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
-      write_wave_sgpr(*cu, *wf, 13, 4u << 16);                // tensor dim0.
-      write_wave_sgpr(*cu, *wf, 14, 4u << 16);                // tensor dim1.
+      const uint32_t barrier_bit = c.barrier ? 1u << 18 : 0;
+      const uint32_t barrier_addr = c.barrier ? kBarrierLdsAddr >> 3 : 0;
+      write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19) | barrier_bit); // i32, iterate.
+      write_wave_sgpr(*cu, *wf, 13, (4u << 16) | barrier_addr);             // tensor dim0, barrier.
+      write_wave_sgpr(*cu, *wf, 14, 4u << 16);                              // tensor dim1.
       write_wave_sgpr(*cu, *wf, 15, c.tile_dim0 << 16);
       write_wave_sgpr(*cu, *wf, 16, c.tile_dim1);
       write_wave_sgpr(*cu, *wf, 17, c.tensor_dim0_stride);
@@ -1246,6 +1261,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
         EXPECT_EQ(observer.issues.size(), 1u);
         for (const auto &issue : observer.issues)
           EXPECT_TRUE(issue.lds_ranges.empty());
+        EXPECT_EQ(cu->lds().read64(wf->lds_base() + kBarrierLdsAddr),
+                  c.barrier ? amdgpu::lds_barrier_cell_update_arrive(kUnarrived) : kUnarrived);
       } else {
         EXPECT_TRUE(observer.issues.empty());
       }
@@ -1262,7 +1279,9 @@ TEST(Gfx1250ExecutionTest, TensorDmaGatherWithoutRowsIsANop) {
   // tile_dim1, which gather mode uses as the valid-index count), and a zero
   // tile_dim0 makes it a NOP like any other tile.
   constexpr uint64_t kGlobal = 0x189000;
-  constexpr uint32_t kSentinel = 0x5e5e5e5eu;
+  // Distinct values, so a copy in either direction changes one of them.
+  constexpr uint32_t kLdsSentinel = 0x5e5e5e5eu;
+  constexpr uint32_t kGlobalSentinel = 0xa7a7a7a7u;
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto &observer = install_tensor_dma_issue_observer(sim);
@@ -1271,8 +1290,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaGatherWithoutRowsIsANop) {
   ASSERT_NE(wf, nullptr);
   wf->set_lds_base(cu->allocate_lds(256));
   wf->set_lds_size(256);
-  cu->lds().write32(wf->lds_base(), kSentinel);
-  write_global_u32(*sim.memory, kGlobal, 0x4f000000u);
+  cu->lds().write32(wf->lds_base(), kLdsSentinel);
+  write_global_u32(*sim.memory, kGlobal, kGlobalSentinel);
 
   write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
   write_wave_sgpr(*cu, *wf, 0, 1u | (1u << 30) | (1u << 31)); // 32-bit gather indices.
@@ -1282,27 +1301,36 @@ TEST(Gfx1250ExecutionTest, TensorDmaGatherWithoutRowsIsANop) {
   write_wave_sgpr(*cu, *wf, 17, 2u);                          // tensor dim0 stride.
   for (uint32_t reg = 18; reg < 28; ++reg)
     write_wave_sgpr(*cu, *wf, reg, 0);
-  const std::array<uint32_t, 3> words = {0xd0710001u, 0x7c000000u, 0x18140c00u};
-  auto load = decode_gfx1250(words, "tensor_load_to_lds");
-  ASSERT_NE(load, nullptr);
 
   struct EmptyGather {
     uint32_t tile_dim0;
     uint32_t valid_indices;
   };
-  for (const EmptyGather gather : {EmptyGather{.tile_dim0 = 2, .valid_indices = 0},
-                                   EmptyGather{.tile_dim0 = 0, .valid_indices = 2}}) {
-    SCOPED_TRACE(testing::Message() << "tile_dim0 = " << gather.tile_dim0
-                                    << ", valid_indices = " << gather.valid_indices);
-    write_wave_sgpr(*cu, *wf, 15, gather.tile_dim0 << 16);
-    write_wave_sgpr(*cu, *wf, 16, gather.valid_indices);
-    EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+  // A gather load and a scatter store, for each empty shape.
+  for (const bool store : {false, true}) {
+    const std::array<uint32_t, 3> words = {store ? 0xd0714001u : 0xd0710001u, 0x7c000000u,
+                                           0x18140c00u};
+    auto inst = decode_gfx1250(words, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
+    ASSERT_NE(inst, nullptr);
+    for (const EmptyGather gather : {EmptyGather{.tile_dim0 = 2, .valid_indices = 0},
+                                     EmptyGather{.tile_dim0 = 0, .valid_indices = 2}}) {
+      SCOPED_TRACE(testing::Message()
+                   << (store ? "store" : "load") << ", tile_dim0 = " << gather.tile_dim0
+                   << ", valid_indices = " << gather.valid_indices);
+      observer.issues.clear();
+      write_wave_sgpr(*cu, *wf, 15, gather.tile_dim0 << 16);
+      write_wave_sgpr(*cu, *wf, 16, gather.valid_indices);
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      // Each issues once and touches neither LDS nor global memory.
+      EXPECT_EQ(observer.issues.size(), 1u);
+      if (observer.issues.size() == 1) {
+        EXPECT_EQ(observer.issues[0].is_load, !store);
+        EXPECT_TRUE(observer.issues[0].lds_ranges.empty());
+      }
+      EXPECT_EQ(cu->lds().read32(wf->lds_base()), kLdsSentinel);
+      EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), kGlobalSentinel);
+    }
   }
-  // Each still issues, and touches no LDS.
-  ASSERT_EQ(observer.issues.size(), 2u);
-  for (const auto &issue : observer.issues)
-    EXPECT_TRUE(issue.lds_ranges.empty());
-  EXPECT_EQ(cu->lds().read32(wf->lds_base()), kSentinel);
 }
 
 // With atomic_barrier set, a NOP tile or a gather with no valid indices moves
@@ -1373,6 +1401,65 @@ TEST(Gfx1250ExecutionTest, TensorDmaNopTilesArriveAtTheirBarrierOnceAndNullTenso
     EXPECT_TRUE(observer.issues[0].lds_ranges.empty());
     EXPECT_EQ(cu->lds().read32(wf->lds_base()), kLdsSentinel);
     EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), kGlobalSentinel);
+  }
+}
+
+// An instruction with no elements makes no global request, so it runs on a
+// compute unit without GPU memory, whatever its rank; one with elements still
+// requires memory.
+TEST(Gfx1250ExecutionTest, TensorDmaEmptyInstructionsNeedNoGpuMemory) {
+  struct Case {
+    const char *name;
+    bool gather = false;
+    uint32_t tile_dim0 = 0;
+    uint32_t tile_dim1 = 0; ///< Or the valid-index count, for a gather.
+    bool succeeds = true;
+  };
+  constexpr Case kCases[] = {
+      {.name = "rank-zero tile"},
+      {.name = "zero-width {0,4} tile", .tile_dim1 = 4},
+      {.name = "gather without valid indices", .gather = true, .tile_dim0 = 2},
+      {.name = "zero-width gather", .gather = true, .tile_dim1 = 2},
+      {.name = "one-element tile", .tile_dim0 = 1, .tile_dim1 = 1, .succeeds = false},
+  };
+  for (const Case &c : kCases) {
+    for (const bool store : {false, true}) {
+      SCOPED_TRACE(testing::Message() << c.name << (store ? ", store" : ", load"));
+      Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
+      auto &observer = install_tensor_dma_issue_observer(sim);
+      auto *cu = sim.cu();
+      auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_lds_base(cu->allocate_lds(256));
+      wf->set_lds_size(256);
+      cu->set_memory(nullptr);
+      ASSERT_FALSE(wf->has_gpu_memory());
+
+      write_tensor_dma_d0(*cu, *wf, 0, 0x18d000);
+      const uint32_t gather_bits = c.gather ? (1u << 30) | (1u << 31) : 0; // 32-bit indices.
+      write_wave_sgpr(*cu, *wf, 0, 1u | gather_bits);
+      write_wave_sgpr(*cu, *wf, 12, 2u << 16); // i32 elements.
+      write_wave_sgpr(*cu, *wf, 13, 4u << 16); // tensor dim0.
+      write_wave_sgpr(*cu, *wf, 14, 4u << 16); // tensor dim1.
+      write_wave_sgpr(*cu, *wf, 15, c.tile_dim0 << 16);
+      write_wave_sgpr(*cu, *wf, 16, c.tile_dim1);
+      write_wave_sgpr(*cu, *wf, 17, 4u); // tensor dim0 stride.
+      for (uint32_t reg = 18; reg < 28; ++reg)
+        write_wave_sgpr(*cu, *wf, reg, 0);
+
+      const std::array<uint32_t, 3> words = {store ? 0xd0714001u : 0xd0710001u, 0x7c000000u,
+                                             c.gather ? 0x18140c00u : 0x7c7c0c00u};
+      auto inst = decode_gfx1250(words, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
+      ASSERT_NE(inst, nullptr);
+      EXPECT_EQ(cu->execute_instruction(inst.get(), *wf).succeeded(), c.succeeds);
+      if (c.succeeds) {
+        EXPECT_EQ(observer.issues.size(), 1u);
+        if (observer.issues.size() == 1) {
+          EXPECT_TRUE(observer.issues[0].lds_ranges.empty());
+        }
+      }
+    }
   }
 }
 

@@ -849,8 +849,10 @@ protected:
     }
   }
 
-  /// Execute one decoded tensor DMA instruction on `wave`: i32 elements, one row.
-  void tensor(int wave, bool is_load, const Descriptor &desc) {
+  /// Decode and execute one tensor DMA instruction on `wave`: i32 elements, one
+  /// row. Unlike record_tensor_instruction(), this runs the instruction, so the
+  /// race detector hears of it through the issue hook as in a run.
+  void execute_decoded_tensor(int wave, bool is_load, const Descriptor &desc) {
     waves[wave]->pc += 16;
     const uint32_t sgprs = waves[wave]->sgpr_alloc().base;
     const std::array<uint32_t, 4> group0{desc.count, desc.lds_offset,
@@ -874,8 +876,8 @@ protected:
   /// `remaining` transfers are outstanding, and read the loaded tile.
   template <int Remaining>
   bool load_then_empty_then_read(bool empty_is_load, const Descriptor &empty) {
-    tensor(0, /*is_load=*/true, {});
-    tensor(0, empty_is_load, empty);
+    execute_decoded_tensor(0, /*is_load=*/true, {});
+    execute_decoded_tensor(0, empty_is_load, empty);
     wait_tensorcnt(0, Remaining);
     return ds_read(0, waves[0]->lds_base() + kTileOffset + 4);
   }
@@ -900,6 +902,8 @@ TEST_F(DecodedTensorDmaRaceTest, NullTensorLoadTakesATensorcntSlot) {
 }
 
 TEST_F(DecodedTensorDmaRaceTest, NopTileLoadTakesATensorcntSlot) {
+  // With tile_dim1 = 0 the zero-width tile has rank zero, a shape accepted
+  // before NOP tiles were; tile_dim1 = 1 exercises the newly accepted {0,1}.
   EXPECT_FALSE(load_then_empty_then_read<1>(
       /*empty_is_load=*/true, {.lds_offset = kEmptyOffset, .tile_dim0 = 0, .tile_dim1 = 1}));
 }
