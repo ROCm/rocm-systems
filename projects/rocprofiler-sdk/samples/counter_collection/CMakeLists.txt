@@ -65,12 +65,12 @@ set_tests_properties(
                120
                LABELS
                "samples"
-               RUN_SERIAL
-               ON
                ENVIRONMENT
                "${counter-collection-buffer-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}"
                DISABLED
                "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
 
@@ -96,12 +96,12 @@ set_tests_properties(
                120
                LABELS
                "samples"
-               RUN_SERIAL
-               ON
                ENVIRONMENT
                "${counter-collection-buffer-device-serialization-env}"
                FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}")
 
 set(counter-collection-buffer-finalize-at-exit-env
     ${counter-collection-buffer-device-serialization-env}
@@ -116,12 +116,12 @@ set_tests_properties(
                120
                LABELS
                "samples;repro"
-               RUN_SERIAL
-               ON
                ENVIRONMENT
                "${counter-collection-buffer-finalize-at-exit-env}"
                FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}")
 
 set(counter-collection-buffer-finalize-at-exit-forced-inline-env
     ${counter-collection-buffer-device-serialization-env}
@@ -136,12 +136,12 @@ set_tests_properties(
                120
                LABELS
                "samples;repro"
-               RUN_SERIAL
-               ON
                ENVIRONMENT
                "${counter-collection-buffer-finalize-at-exit-forced-inline-env}"
                FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}")
 
 add_library(counter-collection-callback-client SHARED)
 target_sources(counter-collection-callback-client PRIVATE callback_client.cpp client.hpp)
@@ -169,12 +169,12 @@ set_tests_properties(
                120
                LABELS
                "samples"
-               RUN_SERIAL
-               ON
                ENVIRONMENT
                "${counter-collection-callback-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}"
                DISABLED
                "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
 
@@ -206,8 +206,8 @@ set_tests_properties(
                120
                LABELS
                "samples"
-               RUN_SERIAL
-               ON
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}"
                ENVIRONMENT
                "${counter-collection-functional-counter-env}"
                FAIL_REGULAR_EXPRESSION
@@ -255,8 +255,8 @@ set_tests_properties(
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_SETUP
                "counter-collection-device-profiling-async"
-               RUN_SERIAL
-               ON
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}"
                ATTACHED_FILES_ON_FAIL
                "${counter-collection-device-profiling-output}"
                DISABLED
@@ -305,8 +305,8 @@ set_tests_properties(
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_SETUP
                "counter-collection-device-profiling-sync"
-               RUN_SERIAL
-               ON
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}"
                ATTACHED_FILES_ON_FAIL
                "${counter-collection-device-profiling-sync-output}"
                DISABLED
