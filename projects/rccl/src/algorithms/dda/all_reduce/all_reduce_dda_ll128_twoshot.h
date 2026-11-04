@@ -212,6 +212,10 @@ __launch_bounds__(512)
 
     // Publish before the local unpack: it is what the peers are spinning on, and
     // ddaLL128StoreRegs rewrites acc in place when it reverses the flag-lane shuffle.
+    if constexpr (ddaLL128Staged<WIRE>()) {
+      // The abort return leaves lastOps in a VGPR; an EXEC-masked wait ladder rung would wait to 0, so keep it scalar.
+      stage.lastOps = __builtin_amdgcn_readfirstlane(stage.lastOps);
+    }
     ddaLL128StageFill<WIRE>(stage, acc, flag, flagLane, lane);
 #pragma unroll
     for (int r = 1; r < nRanks; ++r) {
