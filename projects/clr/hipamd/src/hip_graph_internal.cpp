@@ -590,6 +590,39 @@ void GraphExecSegmented::BuildSyncPlan() {
   // be dropped when a copy/blit node also contributed an empty-string entry.
   static const std::string* const kBarrierKernelNamePtr = nullptr;
 
+  // DEBUG_CLR_GRAPH_FAST_LAUNCH: a segment that starts with a captured empty node starts
+  // with its nop barrier-AND, which can wait on up to five dependencies itself instead of
+  // following a barrier-AND that waits on them
+  auto merge_empty_node = [](const Segment& seg, const SegmentBatch& seg_batch, int num_deps) {
+    if (!DEBUG_CLR_GRAPH_FAST_LAUNCH || (num_deps > 5) || seg.nodes.empty() ||
+        (seg.nodes.front()->GetType() != hipGraphNodeTypeEmpty) ||
+        (!seg_batch.node_capture_status.empty() && !seg_batch.node_capture_status[0]) ||
+        seg_batch.packet_batches.empty() ||
+        seg_batch.packet_batches[0].dispatchPackets.empty()) {
+      return false;
+    }
+    // hsa_barrier_and_packet_t: the type in the header's low byte, dep_signal[5] at bytes 8-47
+    // and completion_signal at 56, all clear in a nop barrier-AND
+    const uint8_t* pkt = seg_batch.packet_batches[0].dispatchPackets[0];
+    constexpr uint8_t kBarrierAndType = 3;
+    constexpr size_t kDepSignalOffset = 8;
+    constexpr size_t kCompletionSignalOffset = 56;
+    if (pkt[0] != kBarrierAndType) {
+      return false;
+    }
+    auto handle_at = [pkt](size_t offset) {
+      uint64_t handle;
+      memcpy(&handle, pkt + offset, sizeof(handle));
+      return handle;
+    };
+    for (size_t d = 0; d < 5; ++d) {
+      if (handle_at(kDepSignalOffset + d * sizeof(uint64_t)) != 0) {
+        return false;
+      }
+    }
+    return handle_at(kCompletionSignalOffset) == 0;
+  };
+
   // PASS 3: Materialize barrier packets and patch entries using the compact
   // hw_event slot indices computed in PASS 1.
   for (auto& segment : segments_) {
@@ -639,6 +672,17 @@ void GraphExecSegmented::BuildSyncPlan() {
         firstBatch.fallbackDepBarrier = device->CreateBarrierPacket(1);
         sync_plan_.barrier_packets.push_back(firstBatch.fallbackDepBarrier);
         sync_plan_.patch_list.push_back({firstBatch.fallbackDepBarrier, nullptr, dep_hw_slot, 0});
+      } else if (merge_empty_node(segment, segBatch, num_deps)) {
+        // The empty node's own barrier-AND waits, in the dep_signal slots it doesn't use. Like
+        // the ext dispatch's dependency, a standalone wait takes over if the node is disabled.
+        uint8_t* empty_barrier = firstBatch.dispatchPackets[0];
+        firstBatch.fallbackDepBarrier = device->CreateBarrierPacket(num_deps);
+        sync_plan_.barrier_packets.push_back(firstBatch.fallbackDepBarrier);
+        for (int d = 0; d < num_deps; ++d) {
+          const int dep_hw_slot = sync_plan_.seg_to_hw_event[barrier_dep_indices[d]];
+          sync_plan_.patch_list.push_back({empty_barrier, nullptr, dep_hw_slot, d});
+          sync_plan_.patch_list.push_back({firstBatch.fallbackDepBarrier, nullptr, dep_hw_slot, d});
+        }
       } else {
         // One barrier packet holds up to five dependencies. A packet that
         // carries exactly one is a barrier-value packet on devices that
