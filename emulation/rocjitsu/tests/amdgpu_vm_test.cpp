@@ -2696,6 +2696,45 @@ TEST(GpuMemoryTest, HostBackingProbeAcceptsAdjacentSubpageExtents) {
   memory.unregister_process(process.process_id());
 }
 
+TEST(GpuMemoryTest, CommandTranslationCachesReleaseAndRestoreNestedOwners) {
+  const auto translate = [](uint32_t pid) {
+    rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
+    KfdProcess process(pid);
+    constexpr uint64_t kAddress = 0x40000000;
+    std::array<uint8_t, KfdProcess::kPageSize> page{};
+    page[0] = 0x5a;
+    process.map_pages(kAddress, page.data(), page.size(), amdgpu::Mtype::UC);
+    memory.register_process(pid, &process.page_table_, &process.page_table_mutex_,
+                            process.page_table_generation(), process.page_table_request_mutex(),
+                            process.page_table_mutation_epoch(), process.page_table_cache_state());
+    EXPECT_EQ(memory.read8(kAddress, pid), 0x5a);
+    std::weak_ptr<amdgpu::LegacyPageTableCacheState> state = process.page_table_cache_state();
+    memory.unregister_process(pid);
+    return state;
+  };
+  std::weak_ptr<amdgpu::LegacyPageTableCacheState> outer_state;
+  std::weak_ptr<amdgpu::LegacyPageTableCacheState> inner_state;
+  {
+    const amdgpu::LegacyAddressSpace::ScopedPteCache outer;
+    outer_state = translate(7);
+    EXPECT_FALSE(outer_state.expired());
+    try {
+      const amdgpu::LegacyAddressSpace::ScopedPteCache inner;
+      inner_state = translate(8);
+      EXPECT_FALSE(inner_state.expired());
+      EXPECT_FALSE(outer_state.expired());
+      throw std::runtime_error("unwind command");
+    } catch (const std::runtime_error &) {
+    }
+    EXPECT_TRUE(inner_state.expired());
+    EXPECT_FALSE(outer_state.expired());
+    inner_state = translate(9);
+    EXPECT_FALSE(inner_state.expired());
+  }
+  EXPECT_TRUE(outer_state.expired());
+  EXPECT_TRUE(inner_state.expired());
+}
+
 TEST(GpuMemoryTest, UnregisterInvalidatesThreadLocalTranslationCaches) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   const amdgpu::GpuVmAccessBatchGuard batch;

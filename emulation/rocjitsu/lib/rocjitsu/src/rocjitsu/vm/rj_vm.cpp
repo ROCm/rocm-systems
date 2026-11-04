@@ -8,6 +8,7 @@
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
+#include "rocjitsu/vm/amdgpu/legacy_address_space.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
@@ -462,6 +463,9 @@ rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t 
     }
   }
 
+  // Queue creation may translate GPU memory on the embedding thread. A
+  // persistent TLS cache would retain this DSO until that host thread exits.
+  const amdgpu::LegacyAddressSpace::ScopedPteCache translation_cache;
   cmd->result =
       driver->ioctl(process_id, cmd->cmd, cmd->buf, &cmd->in_mem_handle, cmd->in_proc_handle);
   cmd->shared_handle = -1;
