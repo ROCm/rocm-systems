@@ -306,7 +306,24 @@ HRR_TEST_CASE(Unit_HRR_Sign_KeyFiles) {
 
   REQUIRE(::chmod(seed_path.c_str(), 0644) == 0);
   CHECK_FALSE(hrr_sign::read_key_file(seed_path, true, seed, &err));
+  CHECK(err.find("chmod 600") != std::string::npos);
   CHECK(hrr_sign::read_key_file(seed_path, false, seed, &err));  // a public key may be world-readable
+  REQUIRE(::chmod(seed_path.c_str(), 0600) == 0);
+  REQUIRE(hrr_sign::read_key_file(seed_path, true, seed, &err));  // negative control for link/fifo/owner
+
+  // A link or a special file is refused (O_NOFOLLOW, S_ISREG on the opened fd),
+  // even when a link points at a valid 0600 seed file owned by the current user.
+  const std::string link_path = (d / "seed_link").string();
+  REQUIRE(::symlink(seed_path.c_str(), link_path.c_str()) == 0);
+  CHECK_FALSE(hrr_sign::read_key_file(link_path, true, seed, &err));
+  CHECK_FALSE(hrr_sign::read_key_file(link_path, false, pub, &err));
+  const std::string fifo_path = (d / "seed_fifo").string();
+  REQUIRE(::mkfifo(fifo_path.c_str(), 0600) == 0);
+  CHECK_FALSE(hrr_sign::read_key_file(fifo_path, true, seed, &err));
+  if (::geteuid() != 0) {
+    CHECK_FALSE(hrr_sign::read_key_file("/etc/passwd", true, seed, &err));
+    CHECK(err.find("not owned") != std::string::npos);
+  }
 #endif
   write_bytes(d / "bad", "not hex\n");
   CHECK_FALSE(hrr_sign::read_key_file((d / "bad").string(), false, nullptr, &err));

@@ -51,7 +51,7 @@ bool unhex(const std::string& s, uint8_t* out, size_t n) {
       else return false;
       v = v * 16 + x;
     }
-    out[i] = static_cast<uint8_t>(v);
+    if (out) out[i] = static_cast<uint8_t>(v);
   }
   return true;
 }
@@ -70,7 +70,6 @@ bool sha256_file(const fs::path& p, std::string* hex_out) {
   *hex_out = h.hexdigest();
   return true;
 }
-#endif
 
 bool read_all(const fs::path& p, uintmax_t max, std::string* out) {
   std::error_code ec;
@@ -83,6 +82,7 @@ bool read_all(const fs::path& p, uintmax_t max, std::string* out) {
   fclose(f);
   return ok;
 }
+#endif
 
 bool is_sign_file(const std::string& rel) { return rel == kManifestName || rel == kSignatureName; }
 
@@ -444,22 +444,46 @@ bool public_key_from_seed(const uint8_t seed[kSeedSize], uint8_t public_key[kPub
 }
 
 bool read_key_file(const std::string& path, bool is_seed, uint8_t out[32], std::string* err) {
+  std::string text;
 #if !defined(_WIN32)
+  const int fd = open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
   struct stat st;
-  if (stat(path.c_str(), &st) != 0) {
+  if (fd < 0 || fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+    if (fd >= 0) close(fd);
     *err = path + ": cannot read";
     return false;
   }
+  if (is_seed && st.st_uid != geteuid()) {
+    close(fd);
+    *err = path + ": signing key is not owned by the current user";
+    return false;
+  }
   if (is_seed && (st.st_mode & 077) != 0) {
+    close(fd);
     *err = path + ": signing key is readable by group or others; chmod 600 it";
     return false;
   }
-#endif
-  std::string text;
+  bool ok = static_cast<uintmax_t>(st.st_size) <= 256;
+  if (ok) {
+    text.resize(static_cast<size_t>(st.st_size));
+    for (size_t off = 0; ok && off < text.size();) {
+      const ssize_t n = read(fd, text.data() + off, text.size() - off);
+      if (n > 0) off += static_cast<size_t>(n);
+      else ok = n < 0 && errno == EINTR;
+    }
+  }
+  close(fd);
+  if (!ok) {
+    rocm::sha2::secure_zero(text.data(), text.size());
+    *err = path + ": cannot read";
+    return false;
+  }
+#else
   if (!read_all(path, 256, &text)) {
     *err = path + ": cannot read";
     return false;
   }
+#endif
   while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) text.pop_back();
   const bool parsed = unhex(text, out, 32);
   rocm::sha2::secure_zero(text.data(), text.size());

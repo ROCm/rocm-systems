@@ -81,8 +81,9 @@ VerifyResult verify_archive(const std::string& dir, const uint8_t public_key[kPu
 // modified. Always true; the bool leaves room to refuse a key that is not valid.
 bool public_key_from_seed(const uint8_t seed[kSeedSize], uint8_t public_key[kPublicKeySize]);
 
-// A key file holds 64 hex digits and an optional newline. A seed file is refused
-// when group or others can read it (POSIX), as ssh does for a private key.
+// A key file holds 64 hex digits and an optional newline. On POSIX it must be a
+// regular file (not a link), and a seed file must be owned by the current user
+// and not readable by group or others, as ssh requires of a private key.
 bool read_key_file(const std::string& path, bool is_seed, uint8_t out[32], std::string* err);
 
 // Creates a new seed file (mode 0600) and the matching public key file, neither
