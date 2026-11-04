@@ -5,7 +5,6 @@
 
 #include <unistd.h>
 
-#include <cstring>
 #include <iostream>
 #include <sstream>
 
@@ -62,27 +61,6 @@ amdcuid_status_t CuidPlatform::get_hardware_fingerprint(uint64_t& fingerprint) c
   return AMDCUID_STATUS_SUCCESS;
 }
 
-namespace {
-
-// Populate raw_bits for a Platform primary, which is the HMAC message, so the
-// two constructions need different treatment.
-//
-// An adopted firmware UUID is not a framed 122-bit payload: remove_UUIDv8_bits()
-// on it drops six bits and shifts the rest, so two platforms whose UUIDs differ
-// only in the version and variant bits de-frame alike and derive the same
-// derived CUID. It has to be the sixteen octets as firmware wrote them. A
-// serial-derived primary is framed as a UUIDv8, so its raw_bits are the
-// de-framed payload. is_constructed() discriminates on the version nibble.
-void set_platform_raw_bits(amdcuid_primary_id& id) {
-  if (CuidUtilities::is_constructed(&id.UUIDv8_representation)) {
-    CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-    return;
-  }
-  std::memcpy(id.raw_bits, id.UUIDv8_representation.bytes, sizeof(id.raw_bits));
-}
-
-}  // namespace
-
 amdcuid_status_t CuidPlatform::get_primary_cuid(amdcuid_primary_id& id) const {
   // Where the firmware supplies a system UUID, the Platform CUID is those 16
   // octets used directly: no reframing, no component type, no vendor field, no
@@ -91,8 +69,7 @@ amdcuid_status_t CuidPlatform::get_primary_cuid(amdcuid_primary_id& id) const {
   // unique, and makes the result depend on which producer folded it.
   uint8_t system_uuid[16];
   if (get_system_uuid(system_uuid)) {
-    std::memcpy(id.UUIDv8_representation.bytes, system_uuid, sizeof(system_uuid));
-    set_platform_raw_bits(id);
+    CuidUtilities::adopt_primary(system_uuid, &id);
     return AMDCUID_STATUS_SUCCESS;
   }
 

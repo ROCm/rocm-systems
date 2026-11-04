@@ -171,6 +171,62 @@ TEST(cuidtstUnprivileged, DeframingAnAdoptedUuidWouldLoseBits) {
   EXPECT_NE(0, std::memcmp(id.bytes, reframed.bytes, sizeof(id.bytes)));
 }
 
+// Firmware may write a version 8 UUID. Adopted, it is still the sixteen octets
+// as written: two such UUIDs that differ only where UUIDv8 framing sits derive
+// different CUIDs, and one whose bit-117 position is set derives a DerivedID
+// with bit 117 clear, which is not temporary.
+TEST(cuidtstUnprivileged, AdoptedUuidV8IsKeyedAsFirmwareWroteIt) {
+  const char* const uuids[] = {"12345678-9abc-8def-8123-456789abcdef",
+                               "12345678-9abc-8def-c123-456789abcdef"};
+  uint8_t key[key_length];
+  for (size_t i = 0; i < sizeof(key); ++i) key[i] = static_cast<uint8_t>(42 + i);
+  cuid_hmac hmac(key);
+  ASSERT_TRUE(hmac.is_valid());
+
+  amdcuid_derived_id derived[2] = {};
+  for (int n = 0; n < 2; ++n) {
+    uint8_t uuid[16];
+    ASSERT_EQ(CuidUtilities::uuid_string_to_uint8(uuids[n], uuid), AMDCUID_STATUS_SUCCESS);
+    ASSERT_TRUE(CuidUtilities::is_constructed(reinterpret_cast<const amdcuid_id_t*>(uuid)));
+    ASSERT_NE(uuid[15] & 0x80, 0) << "the bit-117 position is not set in " << uuids[n];
+
+    amdcuid_primary_id primary = {};
+    CuidUtilities::adopt_primary(uuid, &primary);
+    EXPECT_EQ(0, std::memcmp(primary.UUIDv8_representation.bytes, uuid, sizeof(uuid)));
+    EXPECT_EQ(0, std::memcmp(primary.raw_bits, uuid, sizeof(uuid))) << uuids[n];
+
+    ASSERT_EQ(CuidUtilities::generate_derived_cuid(&primary, &derived[n], &hmac),
+              AMDCUID_STATUS_SUCCESS);
+    uint8_t digest[hash_length] = {};
+    size_t size = 0;
+    ASSERT_EQ(hmac.generate_hmac_sha256(uuid, sizeof(uuid), digest, &size), AMDCUID_STATUS_SUCCESS);
+    EXPECT_EQ(0, std::memcmp(derived[n].hash, digest, 8)) << uuids[n];
+    EXPECT_EQ(derived[n].raw_bits[14] & 0x20, 0) << uuids[n];
+    EXPECT_EQ(derived[n].UUIDv8_representation.bytes[15] & 0x80, 0) << uuids[n];
+  }
+  EXPECT_NE(0, std::memcmp(derived[0].UUIDv8_representation.bytes,
+                           derived[1].UUIDv8_representation.bytes, sizeof(amdcuid_id_t)));
+}
+
+// Bit 117 is 0 in every DerivedID, whatever the primary carries there.
+TEST(cuidtstUnprivileged, DerivedIdNeverCarriesTheTemporaryMarker) {
+  amdcuid_primary_id primary = {};
+  ASSERT_EQ(CuidUtilities::generate_primary_cuid(0x76543210FEDCBA98ull, 0x1FFF, 0xC1, 0x73A1,
+                                                 0x1002, AMDCUID_DEVICE_TYPE_GPU, &primary, true),
+            AMDCUID_STATUS_SUCCESS);
+  ASSERT_NE(primary.raw_bits[14] & 0x20, 0);
+
+  uint8_t key[key_length];
+  for (size_t i = 0; i < sizeof(key); ++i) key[i] = static_cast<uint8_t>(i);
+  cuid_hmac hmac(key);
+  ASSERT_TRUE(hmac.is_valid());
+  amdcuid_derived_id derived = {};
+  ASSERT_EQ(CuidUtilities::generate_derived_cuid(&primary, &derived, &hmac),
+            AMDCUID_STATUS_SUCCESS);
+  EXPECT_EQ(derived.raw_bits[14] & 0x20, 0);
+  EXPECT_EQ(derived.UUIDv8_representation.bytes[15] & 0x80, 0);
+}
+
 // A machine-id is 32 hex digits and never all zero (machine-id(5)). Anything
 // else, including the all-zero ID of an unfinished image and systemd's
 // "uninitialized" placeholder, is no machine-id rather than a K_app every

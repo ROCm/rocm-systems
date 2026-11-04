@@ -88,14 +88,14 @@ def derive(key, raw_primary):
     """HMAC-SHA256(key, the 16 primary octets), folded into the derived layout.
 
     0:63 = hash[0:63]; 64:71 reserved; 72:116 = hash[64:108] (45 bits, not 46);
-    117 = the auxiliary bit copied from the primary; 118:121 reserved.
+    117 = 0, the temporary marker, clear in every DerivedID; 118:121 reserved.
     """
     d = hmac.new(key, raw_primary, hashlib.sha256).digest()
     out = bytearray(16)
     out[0:8] = d[0:8]
     out[8] = 0
     out[9:14] = d[8:13]
-    out[14] = (d[13] & 0x1F) | (raw_primary[14] & 0x20)
+    out[14] = d[13] & 0x1F
     out[15] = 0
     return d, bytes(out)
 

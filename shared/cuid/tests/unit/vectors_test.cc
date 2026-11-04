@@ -690,13 +690,11 @@ void TestVectors::Run() {
     const Vector* expected = find(vectors, "derived", "AD-2");
     ASSERT_NE(adopted, nullptr);
     ASSERT_NE(expected, nullptr);
+    uint8_t uuid[16];
+    ASSERT_EQ(CuidUtilities::uuid_string_to_uint8(adopted->uuid, uuid), AMDCUID_STATUS_SUCCESS);
     amdcuid_primary_id id = {};
-    ASSERT_EQ(CuidUtilities::uuid_string_to_uint8(adopted->uuid, id.UUIDv8_representation.bytes),
-              AMDCUID_STATUS_SUCCESS);
-    ASSERT_FALSE(CuidUtilities::is_constructed(&id.UUIDv8_representation))
-        << "AD-1 must not look constructed, or it is not testing the adopted path";
+    CuidUtilities::adopt_primary(uuid, &id);
     EXPECT_EQ(CuidUtilities::get_cuid_as_string(&id.UUIDv8_representation), adopted->uuid);
-    std::memcpy(id.raw_bits, id.UUIDv8_representation.bytes, sizeof(id.raw_bits));
     EXPECT_EQ(to_hex(id.raw_bits, sizeof(id.raw_bits)), adopted->payload);
     cuid_hmac h(kTestKey1, key_length);
     ASSERT_TRUE(h.is_valid());
