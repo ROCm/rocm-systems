@@ -212,19 +212,6 @@ namespace RcclUnitTesting
       return false;
     }
 
-    // Parent-side descriptors must not leak into subsequently exec'd workers.
-    // Child-side descriptors are the only descriptors preserved across exec.
-    if (fcntl(child->parentWriteFd, F_SETFD, FD_CLOEXEC) == -1 ||
-        fcntl(child->parentReadFd, F_SETFD, FD_CLOEXEC) == -1 ||
-        fcntl(child->childWriteFd, F_SETFD, 0) == -1 ||
-        fcntl(child->childReadFd, F_SETFD, 0) == -1)
-    {
-      TEST_ERROR("Unable to configure pipe descriptors for child %d: %s",
-                 child->childId, strerror(errno));
-      child->ClosePipes();
-      return false;
-    }
-
     // Construct all arguments before fork. A HIP-initialized parent can have
     // background threads holding libc locks, so the child must do only
     // async-signal-safe work before replacing its process image.
@@ -251,9 +238,9 @@ namespace RcclUnitTesting
     pid_t const pid = fork();
     if (pid == 0)
     {
-      close(child->parentWriteFd);
-      close(child->parentReadFd);
-      execv("/proc/self/exe", const_cast<char* const*>(childArgv));
+      // InitPipes made every end close-on-exec; keep only this worker's own ends.
+      if (fcntl(child->childReadFd, F_SETFD, 0) == 0 && fcntl(child->childWriteFd, F_SETFD, 0) == 0)
+        execv("/proc/self/exe", const_cast<char* const*>(childArgv));
       _exit(127);
     }
     if (pid < 0)

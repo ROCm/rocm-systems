@@ -16,6 +16,7 @@
 #include <csignal>
 #include <thread>
 #include <execinfo.h>
+#include <fcntl.h>
 #include <sys/wait.h>
 #ifdef ENABLE_OPENMP
 #include <omp.h>
@@ -108,7 +109,7 @@ namespace RcclUnitTesting
   {
     // Prepare parent->child pipe
     int pipefd[2];
-    if (pipe(pipefd) == -1)
+    if (pipe2(pipefd, O_CLOEXEC) == -1)
     {
       TEST_ERROR("Unable to create parent->child pipe for child %d", this->childId);
       return TEST_FAIL;
@@ -118,7 +119,7 @@ namespace RcclUnitTesting
 
     // Prepare child->parent pipe
     this->parentReadFd = -1;
-    if (pipe(pipefd) == -1)
+    if (pipe2(pipefd, O_CLOEXEC) == -1)
     {
       TEST_ERROR("Unable to create child->parent pipe for child %d", this->childId);
       return TEST_FAIL;

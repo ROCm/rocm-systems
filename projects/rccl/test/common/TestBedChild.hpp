@@ -149,7 +149,8 @@ namespace RcclUnitTesting
     MemAllocType memAllocType = MEM_ALLOC_HIP;                        // Current memory allocation mode
     bool commsFailed = false;                                         // A command failed since comms were created: abort, not finalize
 
-    // Prepare parent/child communication pipes - to be executed by parent process
+    // Prepare parent/child communication pipes - to be executed by parent process.
+    // Every end is close-on-exec, so no other worker's exec can inherit it.
     int InitPipes();
 
     // Closes every open pipe descriptor and marks it -1 - to be executed by parent process

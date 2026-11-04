@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <poll.h>
@@ -35,6 +36,7 @@ namespace RcclUnitTesting
     bool PoolMode() const       { return testBed.poolMode; }
     bool ConfigUsedPool() const { return testBed.configUsedPool; }
     bool ChildFailed() const    { return testBed.childFailed; }
+    std::vector<TestBedChild*> const& ActiveChildren() const   { return testBed.childList; }
     std::vector<std::unique_ptr<TestBedChild>>& PoolChildren() { return testBed.poolChildren; }
     std::vector<PoolWorkerState>& PoolWorkerStates()           { return testBed.poolWorkerState; }
     void TeardownOwnedChildList() { testBed.TeardownOwnedChildList(); }
@@ -395,6 +397,60 @@ namespace RcclUnitTesting
     errno = 0;
     EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
     EXPECT_EQ(errno, ECHILD);
+  }
+
+  namespace
+  {
+    // "pipe:[inode]" if the descriptor at fdPath is a pipe, else empty.
+    std::string PipeName(std::filesystem::path const& fdPath)
+    {
+      std::error_code ec;
+      std::string const target = std::filesystem::read_symlink(fdPath, ec).string();
+      return (!ec && target.rfind("pipe:", 0) == 0) ? target : "";
+    }
+  }
+
+  // A worker must hold only its own pipes. One that inherits another worker's
+  // pipe ends keeps them open, so the parent never sees that worker exit.
+  TEST(Teardown, WorkersHoldOnlyTheirOwnPipes)
+  {
+    TestBed testBed;
+    TestBedPeer peer(testBed);
+    std::string const skipReason = MultiProcessSkipReason(testBed);
+    if (!skipReason.empty()) GTEST_SKIP() << skipReason;
+
+    testBed.InitComms(TestBed::GetDeviceIdsList(2, 2, testBed.ev.GetGpuPriorityOrder()));
+    ASSERT_FALSE(testing::Test::HasFailure());
+    // A pool spawns a worker per GPU, not only the ones this config uses.
+    std::vector<TestBedChild*> workers;
+    for (auto const& worker : peer.PoolChildren())
+      if (worker != nullptr) workers.push_back(worker.get());
+    if (!peer.ConfigUsedPool()) workers = peer.ActiveChildren();
+    ASSERT_GE(workers.size(), 2u);
+
+    std::map<std::string, size_t> pipeOwner;
+    for (size_t i = 0; i < workers.size(); ++i)
+    {
+      for (int const fd : {TestBedPeer::ParentReadFd(*workers[i]), TestBedPeer::ParentWriteFd(*workers[i])})
+        pipeOwner[PipeName("/proc/self/fd/" + std::to_string(fd))] = i;
+    }
+    for (size_t i = 0; i < workers.size(); ++i)
+    {
+      int ownPipes = 0;
+      std::error_code ec;
+      std::string const fdDir = "/proc/" + std::to_string(TestBedPeer::Pid(*workers[i])) + "/fd";
+      for (auto const& entry : std::filesystem::directory_iterator(fdDir, ec))
+      {
+        auto const owner = pipeOwner.find(PipeName(entry.path()));
+        if (owner == pipeOwner.end()) continue;
+        EXPECT_EQ(owner->second, i) << "Worker " << i << " holds a pipe end of worker " << owner->second;
+        if (owner->second == i) ++ownPipes;
+      }
+      ASSERT_FALSE(ec) << "Cannot list " << fdDir << ": " << ec.message();
+      EXPECT_EQ(ownPipes, 2) << "Worker " << i << " should hold exactly its own two pipe ends";
+    }
+    testBed.DestroyComms();
+    testBed.Finalize();
   }
 
   // Pool workers must start from a fresh process image even when an earlier
