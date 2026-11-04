@@ -474,8 +474,7 @@ endif()
 
 # rocprofv3 rejects --att-no-intercept on a host CPU without AVX-512.
 set(ATT_NO_INTERCEPT_SKIP_REGEX
-    "--att-no-intercept requires a host CPU with AVX-512 support|ATT no-intercept output unavailable"
-    )
+    "--att-no-intercept requires a host CPU with AVX-512 support")
 
 set(ATT_NO_INTERCEPT_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-intercept-out")
 
