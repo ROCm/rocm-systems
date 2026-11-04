@@ -4,7 +4,8 @@
 """Matrix instruction execute body generators.
 
 Free functions that emit C++ execute_impl bodies for matrix
-instructions: MFMA (matrix fused multiply-add), AccVGPR read/write.
+instructions: WMMA, SWMMAC, MFMA, and AccVGPR read/write. Opted-in
+targets dispatch to rj-arith; other targets use the legacy mma_exec.h helpers.
 """
 
 from __future__ import annotations
@@ -12,6 +13,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name, uses_fnuz_fp8
+from amdisa.codegen.execute.rj_arith_matrix import gen_dense_wmma
+from amdisa.codegen.execute.rj_arith_sparse_matrix import gen_swmmac
 from amdisa.isa_profile import MatrixLayout, SwmmacLayout
 
 if TYPE_CHECKING:
@@ -111,11 +114,18 @@ def gen_accvgpr_write(dst: list[str], src: list[str]) -> str:
 def gen_mfma(ctx: ExecuteContext) -> str:
     """Generate MFMA / SMFMAC matrix multiply-accumulate.
 
-    Uses the mma_exec.h helpers which implement the exact GFX9 register
+    Opted-in targets use rj-arith or reject a missing binding. Other targets
+    use the mma_exec.h helpers which implement the exact GFX9 register
     mapping formulas. The helpers handle cross-lane data movement, WAR
     hazard avoidance (buffered writes), and inline constant accumulator
     initialization without clobbering overlapping source operands.
     """
+    if (rj_arith_body := gen_dense_wmma(ctx) or gen_swmmac(ctx)) is not None:
+        return rj_arith_body
+    if ctx.profile.uses_rj_arith_matrix:
+        raise ValueError(
+            f'Missing rj-arith matrix binding: {ctx.arch_name} {ctx.inst.name}'
+        )
     inst, dst, src = ctx.inst, ctx.dst_ops, ctx.src_ops
     arch_name = ctx.arch_name
     supports_gpr_idx = ctx.profile.supports_gpr_idx

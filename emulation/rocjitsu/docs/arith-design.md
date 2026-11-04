@@ -150,7 +150,8 @@ the resolved mode determines both numerical behavior and FP status reporting.
 Rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
 setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
-Configuration stores the policy now; instruction handlers still use their existing implementations.
+RDNA3/RDNA4 dense WMMA and RDNA4 sparse WMMA use this policy. RDNA3.5,
+CDNA, and other instruction families retain their existing implementations.
 
 ### Guest FP controls
 
