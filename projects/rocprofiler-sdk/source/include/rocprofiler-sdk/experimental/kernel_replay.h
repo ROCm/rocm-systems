@@ -98,16 +98,15 @@ typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
  * single dispatch. HIP graph launches are not replayed, and a multi-packet submission runs once
  * without replay; each case warns once. Repeatability rests on a snapshot covering coarse-grained
  * device allocations owned by the agent plus module-scope @c __device__ / @c __constant__
- * variables. Fine-grained device memory of that agent named by a kernel argument is also saved and
- * restored between passes, up to 512 MiB per dispatch; a host thread must not write that memory
- * while the dispatch is being replayed. The check uses the kernel's own metadata to identify
+ * variables. The check uses the kernel's own metadata to identify
  * pointer arguments and @c by_value arguments of at least 16 bytes. By-value arguments are scanned
  * in eight-byte words starting at their metadata offset. Smaller by-value arguments and pointer
  * fields at other offsets, such as fields in packed structs, are not detected; scalar aggregates
  * can also resemble pointers and cause replay to be declined. A scalar the width of a pointer is
  * not read as one; without metadata every argument word is checked. A dispatch whose checked
- * kernel arguments point at other memory outside the snapshot (unified or managed memory, host
- * memory, another agent's memory, @c hipMallocAsync and other virtual-memory-mapped allocations)
+ * kernel arguments point at memory outside the snapshot (fine-grained device, unified or managed
+ * memory, host memory, another agent's memory, @c hipMallocAsync and other virtual-memory-mapped
+ * allocations)
  * runs once without replay and warns once. The same applies when pointer information or the
  * required host mappings cannot be queried. A pointer the kernel finds inside memory it was handed
  * is not seen, so a kernel writing through one observes values accumulated across passes rather
