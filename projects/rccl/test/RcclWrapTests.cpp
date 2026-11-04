@@ -3303,6 +3303,26 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
     EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
 }
 
+// gfx1250 DPX table, 8 ranks: DDA LL to 2 MiB total, DDA LL128 above it to 16 MiB, DDA VMM past that.
+TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBands)
+{
+    auto comm = std::make_unique<ncclComm>();
+    InitA2ADecisionComm(*comm, "gfx1250", 8);
+    comm->archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+    ASSERT_NE(comm->archThresholds, nullptr);
+    const size_t align = 16u * (size_t)comm->nRanks;
+    const std::pair<size_t, int> cases[] = {{2ul << 20, RCCL_DDA_FABRIC_LL},
+                                            {(2ul << 20) + align, RCCL_DDA_FABRIC_LL128},
+                                            {16ul << 20, RCCL_DDA_FABRIC_LL128},
+                                            {(16ul << 20) + align, RCCL_DDA_FABRIC_VMM}};
+    for (const auto& c : cases)
+    {
+        rcclCollDecision dec{};
+        ASSERT_EQ(SelectA2A(*comm, c.first, dec), ncclSuccess) << c.first;
+        EXPECT_EQ(dec.algo, c.second) << c.first;
+    }
+}
+
 // gfx950, message at its DDA-IPC ceiling (ddaVmmMax[A2A] = 4 MiB):
 // rcclSelectAlltoAll must choose RCCL_DDA_IPC.
 TEST(RcclAlltoAllDecision, Gfx950_DdaIpc_Band)

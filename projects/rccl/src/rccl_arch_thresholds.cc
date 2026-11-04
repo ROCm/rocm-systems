@@ -299,7 +299,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    1ULL*1024*1024,      // [8] AlltoAll
+    16ULL*1024*1024,     // [8] AlltoAll        -- LL128 above the 2M LL ceiling, Direct above 16M (DPX)
   },
   // ddaVmmMax: DDA VMM (fabric simple) tier ceiling per collective.
   // Messages above this fall to Ring/CE (or sym kernel for R2).
