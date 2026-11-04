@@ -16,7 +16,6 @@
 #include <string>
 
 #if HT_WIN
-#include <afunix.h>
 typedef HANDLE hipShareableHdl;
 #else
 #ifdef HT_AMD
@@ -48,7 +47,7 @@ class ipcSocketCom {
   // the maximum size of the user provided part of the name for the UNIX domain socket/Windows
   // mailslot; basically a result of the size of sockaddr_un::sun_path, minus 16 bytes for a PID,
   // 6 bytes for a random nonce, the initial '\0' and the dot '.' symbol
-  static constexpr int kSocketPrefixMaxSize = sizeof(sockaddr_un::sun_path) -
+  static constexpr int kSocketPrefixMaxSize = 108 -
                                               kNonceDigitsSize -
                                               kPidBufferSize -
                                               2;
