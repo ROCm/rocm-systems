@@ -212,6 +212,10 @@ TEST_F(WslFunctionalReadOnly, LiveClockInfoGfxSuccessOrNotSupported) {
   if (r == HSAKMT_STATUS_SUCCESS) {
     // max_clk always comes from static WKMI data — must be non-zero
     EXPECT_GT(info.max_clk, 0u);
+    // Fields rocdxg never populates must stay at the N/A sentinel.
+    EXPECT_EQ(info.min_clk, UINT32_MAX);
+    EXPECT_EQ(info.clk_locked, UINT8_MAX);
+    EXPECT_EQ(info.clk_deep_sleep, UINT8_MAX);
   }
 }
 
@@ -223,6 +227,9 @@ TEST_F(WslFunctionalReadOnly, LiveClockInfoMemSuccessOrNotSupported) {
       << "unexpected status: " << r;
   if (r == HSAKMT_STATUS_SUCCESS) {
     EXPECT_GT(info.max_clk, 0u);
+    EXPECT_EQ(info.min_clk, UINT32_MAX);
+    EXPECT_EQ(info.clk_locked, UINT8_MAX);
+    EXPECT_EQ(info.clk_deep_sleep, UINT8_MAX);
   }
 }
 
