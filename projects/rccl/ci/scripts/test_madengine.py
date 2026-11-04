@@ -2694,7 +2694,7 @@ def main() -> None:
         # Read before Step 8 appends this run's rows, so it is the previous run.
         prev = previous_comparison(
             results_dir, args.workload, scale, c["precision"],
-            workload_config["base_image"],
+            base_ref or workload_config["base_image"],
         )
         if prev is None:
             regression_msgs.append(
@@ -2724,8 +2724,9 @@ def main() -> None:
     # absolute values kept for trend analysis and the ratio on the candidate.
     extra = {
         # What previous_comparison() keys the reference on: the stock
-        # image is the ratio's denominator.
-        "base_image": workload_config["base_image"],
+        # image is the ratio's denominator. Pinned by digest when it was
+        # resolved, so a push to the mutable tag starts a fresh history.
+        "base_image": base_ref or workload_config["base_image"],
         # The run's own gate verdict, final by now: it covers the phase exit
         # codes, RCCL verification and both regression checks. A later run
         # takes only a passing one as its reference.
