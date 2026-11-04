@@ -8949,14 +8949,17 @@ class CodeGenerator:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
         block = sem.name in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK')
-        dedicated_lds = sem.semantic_class in ('scratch_load_lds', 'global_load_lds')
+        dedicated_flat_lds_load = sem.semantic_class in (
+            'scratch_load_lds',
+            'global_load_lds',
+        )
         legacy_lds = self._legacy_flat_lds_load(sem)
         sc0, sc1, nt = self._coherency_exprs()
         acc = self._acc_vgpr_expr
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
-        if not dedicated_lds:
+        if not dedicated_flat_lds_load:
             L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {esz};')
         L.append(
@@ -8991,8 +8994,8 @@ class CodeGenerator:
         if sem.name.startswith('CLUSTER_LOAD_'):
             L.append('  d->request_force_l1_bypass = true;')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
-        if dedicated_lds or legacy_lds:
-            self._append_flat_lds_destination(L, dedicated_lds, ne)
+        if dedicated_flat_lds_load or legacy_lds:
+            self._append_flat_lds_destination(L, dedicated_flat_lds_load, ne)
         if block:
             L.append('  d->set_block_dword_mask(wf.m0());')
         L.append('  set_data(std::move(d));')
