@@ -134,7 +134,7 @@ Priority is the order of delivery. Phase 1 handles single-pass metrics. Phase 2 
 | FR-5 | Phase 1 | The 75 metrics the old allocator split are fixed by FR-1 and FR-2. They stay one expression. They are not split into parts. |
 | FR-6 | Phase 2 | Each multi-pass metric is split into parts whose counters each fit one pass. `COLLECT_SUM` adds those finished parts, including a negative part. `COLLECT_RATIO` divides the pooled numerator by the pooled denominator. The parts may come from different passes. A part whose own counters fit no pass leaves the parent unset. |
 | FR-7 | Phase 2 | `WEIGHTED_AVG` is only for a ratio whose weight was split: \(M = (M_0 C_0 + M_1 C_1)/(C_0 + C_1)\). Each weight comes from the same pass as its sub-ratio, so \(M_i C_i\) is that pass's absolute piece. Adding those pieces, and adding the weights, may cross passes. The division is of those two sums. If a weight is not on its sub-ratio's pass, the parent stays unset. Sums use `COLLECT_SUM`. A ratio of summed pieces uses `COLLECT_RATIO`: the pooled numerator divided by the pooled denominator. Those pieces may come from different passes. |
-| FR-8 | Phase 2 | A multi-pass metric leaves its YAML `min` and `max` empty. If they named counters, the allocator would have to place the parent's full PMC set in one pass, which cannot be done. A parent whose `min`, `max`, or `peak` names a counter is rejected when the config loads. |
+| FR-8 | Phase 2 | A multi-pass metric leaves its YAML `min` and `max` empty when they would name the parent's raw counters. If they named those counters, the allocator would have to place the parent's full PMC set in one pass, which cannot be done. A parent whose `min`, `max`, or `peak` names a raw counter is rejected when the config loads. A `min` or `max` that only names `_collect` pieces stays. It is the extremum over dispatches of the summed pieces. Those pieces are already packed, so the parent does not pull its full PMC set into one pass. |
 
 ### Non-functional
 
@@ -255,5 +255,4 @@ No new privilege, network, or credential surface. Profile still launches the exi
 ## Open questions
 
 - Filtered `--block` / `--set` profiles allocate only the counters that were requested. There is no separate acceptance count for those subsets.
-- A multi-pass metric leaves its YAML `min` and `max` empty (FR-8). A parent whose `min`, `max`, or `peak` names a counter is rejected when the config loads. A later definition of min and max for a split parent is deferred.
 - One replay can still be split into time slices. This design does not cover that. Reading each metric from one pass is about which replay the counters come from.
