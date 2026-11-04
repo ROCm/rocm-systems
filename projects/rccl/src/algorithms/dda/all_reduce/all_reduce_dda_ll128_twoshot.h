@@ -118,7 +118,17 @@ __launch_bounds__(512)
     stage = ddaLL128StageInit(ddaLL128ArStageLds, warp);
   }
 
-  // Phase 1: send each peer the shard that peer owns.
+  // Start of the wire slice holding wireOff in my slot of the peer's staging area `area` words into its scratch.
+  auto scatterSlice = [&](int peer, uint64_t area, size_t wireOff) {
+    return reinterpret_cast<uint64_t*>(peerScratch[peer]) + area + (uint64_t)selfRank * (uint64_t)slotWords +
+           (wireOff - 2 * lane);
+  };
+
+  // Phase 1: send each peer the shard that peer owns, kBatch peers per round.
+  // Staged: a push returns once issued, so loading one peer ahead hides the load; a batch of 8 would spill.
+  // Coop: load a batch of 8 peers, then store it.
+  constexpr int kAhead = ddaLL128Staged<WIRE>() ? 1 : 0;
+  constexpr int kBatch = kAhead ? 1 : kDdaLLPeerBatch;
   for (size_t s = gwarp; s < slicesTotal; s += wstride) {
     const size_t sliceByte = s * (size_t)kDdaLL128DataBytesPerSlice;
     const size_t rem = shardBytes - sliceByte;
@@ -126,51 +136,42 @@ __launch_bounds__(512)
       rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     const size_t wireOff = s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
 
-    if constexpr (ddaLL128Staged<WIRE>()) {
-      // A staged push returns once issued, so one peer of look-ahead hides the load; a batch of 8 would spill.
-      uint64_t cur[kDdaLL128WordsPerThread] = {};
-      ddaLL128LoadRegs<int8_t>(cur, srcBytes + (size_t)((selfRank + 1) % nRanks) * shardBytes + sliceByte, eltInSlice,
-                               lane, flagLane);
-#pragma unroll 1
-      for (int r = 1; r < nRanks; ++r) {
-        const int peer = (selfRank + r) % nRanks;
-        uint64_t next[kDdaLL128WordsPerThread] = {};
-        if (r + 1 < nRanks) {
-          ddaLL128LoadRegs<int8_t>(next, srcBytes + (size_t)((peer + 1) % nRanks) * shardBytes + sliceByte,
-                                   eltInSlice, lane, flagLane);
-        }
-        ddaLL128StageFill<WIRE>(stage, cur, flag, flagLane, lane);
-        ddaLL128StagePush<WIRE>(stage,
-                                reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords +
-                                  (uint64_t)selfRank * (uint64_t)slotWords + (wireOff - 2 * lane),
-                                cur, flag, flagLane, lane);
-#pragma unroll
-        for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
-          cur[u] = next[u];
-        }
-      }
-      continue;
+    // With look-ahead, the round's batch was loaded by the round before.
+    uint64_t cur[kBatch][kDdaLL128WordsPerThread] = {};
+    if constexpr (kAhead) {
+      ddaLL128LoadRegs<int8_t>(cur[0], srcBytes + (size_t)((selfRank + 1) % nRanks) * shardBytes + sliceByte,
+                               eltInSlice, lane, flagLane);
     }
-
-    for (int base = 1; base < nRanks; base += kDdaLLPeerBatch) {
-      uint64_t regs[kDdaLLPeerBatch][kDdaLL128WordsPerThread] = {};
+#pragma unroll 1
+    for (int base = 1; base < nRanks; base += kBatch) {
+      uint64_t next[kBatch][kDdaLL128WordsPerThread] = {};
+      // do-while: a batch of one leaves no inner loop, which keeps the staged code as tight as a plain peer loop.
+      int i = 0;
 #pragma unroll
-      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
+      do {
         const int r = base + i;
-        if (r < nRanks) {
+        if (r + kAhead < nRanks) {
           const int peer = (selfRank + r) % nRanks;
-          ddaLL128LoadRegs<int8_t>(regs[i], srcBytes + (size_t)peer * shardBytes + sliceByte, eltInSlice, lane,
+          const int src = kAhead ? (peer + 1) % nRanks : peer;
+          ddaLL128LoadRegs<int8_t>(next[i], srcBytes + (size_t)src * shardBytes + sliceByte, eltInSlice, lane,
                                    flagLane);
         }
-      }
+      } while (++i < kBatch);
+      uint64_t (&send)[kBatch][kDdaLL128WordsPerThread] = kAhead ? cur : next;
+      i = 0;
 #pragma unroll
-      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
+      do {
         const int r = base + i;
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;
-          uint64_t* scatterSlot = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords +
-            (uint64_t)selfRank * (uint64_t)slotWords;
-          ddaLL128StoreWire(scatterSlot + wireOff, regs[i], flag, flagLane);
+          ddaLL128StageFill<WIRE>(stage, send[i], flag, flagLane, lane);
+          ddaLL128StagePush<WIRE>(stage, scatterSlice(peer, bankWords, wireOff), send[i], flag, flagLane, lane);
+        }
+      } while (++i < kBatch);
+      if constexpr (kAhead) {
+#pragma unroll
+        for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
+          cur[0][u] = next[0][u];
         }
       }
     }
@@ -215,9 +216,7 @@ __launch_bounds__(512)
 #pragma unroll
     for (int r = 1; r < nRanks; ++r) {
       const int peer = (selfRank + r) % nRanks;
-      uint64_t* scatterSlot = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWordsNext +
-        (uint64_t)selfRank * (uint64_t)slotWords;
-      ddaLL128StagePush<WIRE>(stage, scatterSlot + (wireOff - 2 * lane), acc, flag, flagLane, lane);
+      ddaLL128StagePush<WIRE>(stage, scatterSlice(peer, bankWordsNext, wireOff), acc, flag, flagLane, lane);
     }
 
     ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)selfRank * shardBytes + sliceByte, acc, eltInSlice, lane, flagLane);

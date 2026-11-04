@@ -211,12 +211,22 @@ __device__ __forceinline__ void ddaLL128LoadRegs(
     if (flag) regs[2 * g] = regs[2 * g - 1];
 }
 
+// This lane's wire image of one slice: f(word, lo, hi) per 16B pair; the flag lane carries the flag in place of hi.
+template <typename F>
+__device__ __forceinline__ void ddaLL128ForEachWirePair(const uint64_t (&regs)[kDdaLL128WordsPerThread], uint64_t flag,
+                                                        bool flagLane, F&& f) {
+#pragma unroll
+  for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
+    f(u * kDdaLL128Warp, regs[u], flagLane ? flag : regs[u + 1]);
+  }
+}
+
 // Store one slice to the wire with the flag word embedded on the flag lane
 __device__ __forceinline__ void ddaLL128StoreWire(
   uint64_t* wire, const uint64_t (&regs)[kDdaLL128WordsPerThread], uint64_t flag, bool flagLane) {
-#pragma unroll
-  for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
-    ddaLL128StoreAtomic16B(wire + u * kDdaLL128Warp, regs[u], flagLane ? flag : regs[u + 1]);
+  ddaLL128ForEachWirePair(regs, flag, flagLane, [wire](int word, uint64_t lo, uint64_t hi) {
+    ddaLL128StoreAtomic16B(wire + word, lo, hi);
+  });
 }
 
 // ---- LDS-staged wire writer ----
@@ -251,6 +261,8 @@ __device__ __forceinline__ void ddaLL128StageWaitAtMost(int keep) {
     } else {
       asyncWait<0>();
     }
+    // The wait intrinsic touches no memory; the fence keeps the window stores that follow below it, and emits nothing.
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
   }
 #endif
   (void)keep;
@@ -267,7 +279,7 @@ __device__ __forceinline__ DdaLL128Stage ddaLL128StageInit(uint8_t* ldsBase, int
   return {ldsBase + (size_t)warp * kDdaLL128StageWindows * kDdaLL128WireBytesPerSlice, 1, 0};
 }
 
-// Fill the next window with this lane's wire image (ddaLL128StoreWire's bytes and offsets).
+// Fill the next window with this lane's wire image, at the same word offsets as on the wire.
 template <int WIRE>
 __device__ __forceinline__ void ddaLL128StageFill(DdaLL128Stage& st, const uint64_t (&regs)[kDdaLL128WordsPerThread],
                                                   uint64_t flag, bool flagLane, int lane) {
@@ -277,17 +289,16 @@ __device__ __forceinline__ void ddaLL128StageFill(DdaLL128Stage& st, const uint6
   ddaLL128StageWaitAtMost<WIRE>(st.lastOps);
   st.win ^= 1;
   st.lastOps = 0;
-  uint8_t* w = st.lds + (size_t)st.win * kDdaLL128WireBytesPerSlice + (size_t)lane * 16;
-#pragma unroll
-  for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
+  uint8_t* slice = st.lds + (size_t)st.win * kDdaLL128WireBytesPerSlice + (size_t)lane * 16;
+  ddaLL128ForEachWirePair(regs, flag, flagLane, [slice](int word, uint64_t lo, uint64_t hi) {
     union {
-      v4u v;
-      uint64_t q[2];
-    } x;
-    x.q[0] = regs[u];
-    x.q[1] = flagLane ? flag : regs[u + 1];
-    *reinterpret_cast<v4u*>(w + (size_t)u * kDdaLL128Warp * 8) = x.v;
-  }
+      v4i v;
+      uint64_t w[2];
+    } u;
+    u.w[0] = lo;
+    u.w[1] = hi;
+    *reinterpret_cast<v4i*>(slice + (size_t)word * sizeof(uint64_t)) = u.v;
+  });
 #if ASYNC_COPY_SUPPORTED
   // The mover reads LDS by address, outside this lane's program order.
   asm volatile("s_wait_dscnt 0x0" ::: "memory");
@@ -317,6 +328,8 @@ __device__ __forceinline__ void ddaLL128StageDrain() {
 #if ASYNC_COPY_SUPPORTED
   if constexpr (ddaLL128Staged<WIRE>()) {
     asyncWait<0>();
+    // Keeps the epoch publish that follows below the drain.
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
   }
 #endif
 }
