@@ -288,7 +288,7 @@ get_kernel_pointer_regions(amd_comgr_metadata_node_t kernel_node)
             described = false;
     }
 
-    if(!described) return std::vector<kernarg_region_t>{{0u, static_cast<uint32_t>(hidden_start)}};
+    if(!described) regions.push_back(kernarg_region_t{0u, static_cast<uint32_t>(hidden_start)});
     return regions;
 }
 }  // namespace

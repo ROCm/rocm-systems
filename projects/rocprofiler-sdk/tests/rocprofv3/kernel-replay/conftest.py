@@ -68,6 +68,12 @@ def pytest_addoption(parser):
         help="comma-separated number of passes per dispatch, in dispatch_id order, for runs "
         "where some dispatches are not replayed and so carry fewer passes",
     )
+    parser.addoption(
+        "--expected-pass-counts-file",
+        action="store",
+        default=None,
+        help="file containing comma-separated per-dispatch pass counts for capability-dependent launches",
+    )
     parser.addoption("--n-elems", type=int, default=1048576)
     parser.addoption("--baseline-json", help="optional 1-pass baseline JSON for scaling")
     parser.addoption("--max-scaling-ratio", type=float, default=10.0)
@@ -112,9 +118,18 @@ def expected_dispatch_count(request):
 @pytest.fixture
 def expected_pass_counts(request):
     raw = request.config.getoption("--expected-pass-counts")
+    path = request.config.getoption("--expected-pass-counts-file")
+    assert (
+        raw is None or path is None
+    ), "specify pass counts directly or by file, not both"
+    if path is not None:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = f.read()
     if raw is None:
         return None
-    return [int(field) for field in raw.split(",") if field.strip() != ""]
+    counts = [int(field) for field in raw.split(",") if field.strip() != ""]
+    assert counts and all(count > 0 for count in counts), "expected positive pass counts"
+    return counts
 
 
 @pytest.fixture

@@ -41,10 +41,12 @@ set_tests_properties(
 # contaminate the per-pass counters or performance baseline.
 set(REPLAY_PASSES 5)
 
-# The untracked-memory app issues three host-pinned and three fine-grained device saxpy
-# launches. Neither allocation class is snapshotted, so all six run once despite two
-# --pmc groups.
-set(REPLAY_UNTRACKED_PASS_COUNTS "1,1,1,1,1,1")
+# The untracked-memory app issues three host-pinned saxpy launches and, when supported,
+# three fine-grained device launches. Each runs once despite two --pmc groups. The app
+# records the expected launch counts after checking device support and application
+# results.
+set(REPLAY_UNTRACKED_PASS_COUNTS_FILE
+    "${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-untracked-memory/pass-counts.txt")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-kernel-replay-generate
@@ -180,6 +182,7 @@ rocprofiler_add_integration_execute_test(
         --kernel-include-regex saxpy --kernel-replay-beta-enabled --output-format json -d
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-untracked-memory -o out --
         $<TARGET_FILE:kernel-replay> 65536 1 untracked
+        ${REPLAY_UNTRACKED_PASS_COUNTS_FILE}
     DEPENDS kernel-replay
     TIMEOUT 120
     LABELS "kernel-replay"
@@ -194,8 +197,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-untracked-memory/out_results.json
          --passes
          2
-         --expected-pass-counts
-         ${REPLAY_UNTRACKED_PASS_COUNTS}
+         --expected-pass-counts-file
+         ${REPLAY_UNTRACKED_PASS_COUNTS_FILE}
          --common-counters
          SQ_WAVES
          SQ_INSTS_VALU
