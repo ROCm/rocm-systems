@@ -98,7 +98,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #if defined(RCCL_LL128_HW_LANE_ENABLE)
   // Primitives groups start on a warp boundary, so tid % WARP_SIZE is the hardware lane; every LL128 Primitives
   // construction must keep that true, or the lanes are wrong and data is silently corrupted. wid and flagThread take
-  // no storage; use int(wid) where a plain int is needed (auto, varargs, templates).
+  // Valid only if every LL128 group starts on a warp boundary (lane == tid % WARP_SIZE).
+  // Use int(wid) where a plain int is needed (auto, varargs, templates).
   struct HwLane {
     __device__ __forceinline__ operator int() const { return (int)__lane_id(); }
   };
