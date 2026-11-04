@@ -81,8 +81,10 @@ private:
 std::optional<packet_info>
 create(const hsa::Queue& queue, const std::vector<copy_region_t>& regions);
 
-// Submit all GPU-backed regions through one mixed-size raw AQL blit packet. The completion signal
-// and kernarg storage are reused from per-agent state after the dependent target kernel drains.
+// Submit all GPU-backed regions as raw AQL packets: three dispatches that cut them into 16 KiB
+// tiles on the GPU, one that copies the tiles a wave each, and a barrier on its completion. The
+// completion signal, argument buffer and tile workspace are reused from per-agent state after the
+// dependent target kernel drains.
 hsa_status_t
 copy(const hsa::Queue&                     queue,
      hsa_amd_queue_intercept_packet_writer writer,
