@@ -790,6 +790,21 @@ inline uint32_t matrix_vgpr_word(RegisterAccess::VgprReadRegion &region, uint32_
   return matrix_vgpr_word(std::as_const(region), physical_reg, lane);
 }
 
+/// A copy of the wave64 VGPRs that hold one MFMA operand.
+struct MfmaOperandWords {
+  static constexpr uint32_t kMaxRegs = 16;
+  uint32_t base = 0;
+  uint32_t reg_count = 0;
+  uint32_t words[kMaxRegs * 64];
+};
+
+inline uint32_t matrix_vgpr_word(const MfmaOperandWords &operand, uint32_t physical_reg,
+                                 uint32_t lane) {
+  assert(physical_reg >= operand.base && physical_reg - operand.base < operand.reg_count &&
+         lane < 64 && "MFMA read exceeds the operand copy");
+  return operand.words[(physical_reg - operand.base) * 64 + lane];
+}
+
 inline uint32_t matrix_vgpr_word(auto &cu, uint32_t physical_reg, uint32_t lane) {
   return RegisterAccess(cu).read_vgpr(physical_reg, lane);
 }
@@ -1321,26 +1336,6 @@ public:
   std::optional<RegisterAccess::VgprReadRegion> acc;
 };
 
-/// A local copy of the wave64 VGPRs that hold one MFMA operand.
-struct MfmaOperandWords {
-  static constexpr uint32_t kMaxRegs = 16;
-  bool valid = false;
-  uint32_t base = 0;
-  uint32_t words[kMaxRegs * 64];
-
-  [[nodiscard]] uint32_t word(uint32_t physical_reg, uint32_t lane) const {
-    assert(valid && physical_reg >= base && physical_reg - base < kMaxRegs && lane < 64 &&
-           "MFMA read exceeds the operand copy");
-    return words[(physical_reg - base) * 64 + lane];
-  }
-};
-
-/// Operand extractors use a snapshot in place of the compute unit.
-inline uint32_t matrix_vgpr_word(const MfmaOperandWords &source, uint32_t physical_reg,
-                                 uint32_t lane) {
-  return source.word(physical_reg, lane);
-}
-
 /// Whole-register copies of an MFMA's A, B and accumulator operands with one observed read per
 /// range. The A and B reads report only the lanes the instruction uses, since a broadcast uses
 /// part of each register. Not valid for operands beyond MfmaOperandWords::kMaxRegs registers, in
@@ -1364,7 +1359,7 @@ public:
               (acc_regs && capture(regs, s2, acc_regs, mfma_full_lane_mask(kWave), acc_).failed());
   }
 
-  [[nodiscard]] bool valid() const { return a_.valid && !failed_; }
+  [[nodiscard]] bool valid() const { return a_.reg_count != 0 && !failed_; }
   [[nodiscard]] bool failed() const { return failed_; }
   [[nodiscard]] const MfmaOperandWords &a() const { return a_; }
   [[nodiscard]] const MfmaOperandWords &b() const { return b_; }
@@ -1379,7 +1374,7 @@ private:
             .failed())
       return Result::failure();
     operand.base = base;
-    operand.valid = true;
+    operand.reg_count = reg_count;
     return Result::success();
   }
 
@@ -1423,10 +1418,10 @@ private:
   uint64_t covered_[kMaxRegs] = {};
 };
 
-/// Staging capacity of try_exec_mfma_regions, in elements of T. The A, B and C buffers have
+/// Staging capacity of try_exec_mfma_snapshot, in elements of T. The A, B and C buffers have
 /// fixed byte sizes so that, with the operand and result copies, the frame stays within the
 /// 48 KiB budget of the other matrix staging paths.
-template <typename T> struct MfmaRegionStaging {
+template <typename T> struct MfmaSnapshotStaging {
   static constexpr size_t kMaxA = 8 * 1024 / sizeof(T);
   static constexpr size_t kMaxB = 8 * 1024 / sizeof(T);
   static constexpr size_t kMaxC = 4 * 1024 / sizeof(T);
@@ -1436,14 +1431,14 @@ template <typename T> struct MfmaRegionStaging {
                 "MFMA register-snapshot staging exceeds the 48 KiB stack budget");
 };
 
-/// Whether a wave64 MFMA shape fits try_exec_mfma_regions; shapes that do not use the existing
-/// path.
+/// Whether try_exec_mfma_snapshot handles a wave64 MFMA shape; other shapes use the generic
+/// handler.
 template <typename T>
-constexpr bool mfma_regions_shape_fits(uint32_t M, uint32_t N, uint32_t K, uint32_t B) {
+constexpr bool mfma_snapshot_shape_fits(uint32_t M, uint32_t N, uint32_t K, uint32_t B) {
   if constexpr (!util::has_stdx_simd) {
     return false;
   } else {
-    using Staging = MfmaRegionStaging<T>;
+    using Staging = MfmaSnapshotStaging<T>;
     constexpr uint32_t W = static_cast<uint32_t>(util::native<T>::size());
     const uint32_t stride = ((N + W - 1) / W) * W;
     const uint64_t output_words = uint64_t{M} * N * B * (sizeof(T) / sizeof(uint32_t));
@@ -1453,14 +1448,14 @@ constexpr bool mfma_regions_shape_fits(uint32_t M, uint32_t N, uint32_t K, uint3
   }
 }
 
-/// Wave64 MFMA from local operand copies, published by register. Returns false without reading
-/// registers when the shape or wave size needs the existing path.
+/// Wave64 MFMA from register snapshots, published by register. Returns false without reading
+/// registers when the shape or wave size needs the generic handler.
 template <typename T, typename ExtractA, typename ExtractB>
-bool try_exec_mfma_regions(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
-                           uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1,
-                           uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc,
-                           uint32_t cbsz = 0, uint32_t abid = 0, uint32_t blgp = 0,
-                           uint32_t neg = 0) {
+bool try_exec_mfma_snapshot(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
+                            uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0,
+                            uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc,
+                            uint32_t cbsz = 0, uint32_t abid = 0, uint32_t blgp = 0,
+                            uint32_t neg = 0) {
   static_assert(std::is_same_v<T, float> || std::is_same_v<T, double> ||
                 std::is_same_v<T, int32_t>);
   if constexpr (!util::has_stdx_simd) {
@@ -1471,10 +1466,10 @@ bool try_exec_mfma_regions(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_
       a_bits = b_bits = std::is_same_v<T, double> ? 64 : 8;
     constexpr uint32_t W = static_cast<uint32_t>(util::native<T>::size());
     constexpr uint32_t kWordsPerElement = sizeof(T) / sizeof(uint32_t);
-    using Staging = MfmaRegionStaging<T>;
+    using Staging = MfmaSnapshotStaging<T>;
     const uint32_t stride = ((N + W - 1) / W) * W;
     const uint64_t output_elements = uint64_t{M} * N * B;
-    if (util::force_scalar() || cu.wf_size() != 64 || !mfma_regions_shape_fits<T>(M, N, K, B))
+    if (util::force_scalar() || cu.wf_size() != 64 || !mfma_snapshot_shape_fits<T>(M, N, K, B))
       return false;
     // Lanes read through cbsz/abid and blgp, which can broadcast part of a register.
     auto used_lanes = [&](uint32_t rows, uint32_t bits, auto permute) {
@@ -1486,12 +1481,13 @@ bool try_exec_mfma_regions(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_
       return lanes;
     };
     const uint64_t a_lanes =
-        cbsz == 0
-            ? mfma_full_lane_mask(64)
-            : used_lanes(M, a_bits, [&](uint32_t l) { return permute_a_lane(l, cbsz, abid); });
+        cbsz == 0 ? mfma_full_lane_mask(64) : used_lanes(M, a_bits, [&](uint32_t lane) {
+          return permute_a_lane(lane, cbsz, abid);
+        });
     const uint64_t b_lanes =
-        blgp == 0 ? mfma_full_lane_mask(64)
-                  : used_lanes(N, b_bits, [&](uint32_t l) { return permute_b_lane(l, blgp); });
+        blgp == 0
+            ? mfma_full_lane_mask(64)
+            : used_lanes(N, b_bits, [&](uint32_t lane) { return permute_b_lane(lane, blgp); });
     const MfmaOperandSnapshots snapshots(cu, s0, s1, s2, uint64_t{M} * K * B, a_bits,
                                          uint64_t{N} * K * B, b_bits, output_elements,
                                          sizeof(T) * 8, const_acc, a_lanes, b_lanes);
@@ -1544,11 +1540,11 @@ bool try_exec_mfma_regions(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_
             else
               acc = std::bit_cast<T>(const_acc);
           } else if constexpr (kWordsPerElement == 2) {
-            const uint64_t lo = snapshots.acc().word(s2 + out.reg, out.lane);
-            const uint64_t hi = snapshots.acc().word(s2 + out.reg + 1, out.lane);
+            const uint64_t lo = matrix_vgpr_word(snapshots.acc(), s2 + out.reg, out.lane);
+            const uint64_t hi = matrix_vgpr_word(snapshots.acc(), s2 + out.reg + 1, out.lane);
             acc = std::bit_cast<T>(hi << 32 | lo);
           } else {
-            acc = std::bit_cast<T>(snapshots.acc().word(s2 + out.reg, out.lane));
+            acc = std::bit_cast<T>(matrix_vgpr_word(snapshots.acc(), s2 + out.reg, out.lane));
           }
           Cbuf[row * stride + col] = apply_neg(acc, 0x4u);
         }
@@ -1672,7 +1668,7 @@ inline PackedOutputLoc output_loc_16(uint32_t M, uint32_t N, uint32_t i, uint32_
   return {f32.reg / 2, f32.lane, f32.reg % 2};
 }
 
-/// exec_f32_mixed for shapes and modes that try_exec_mfma_regions does not handle. Kept out of
+/// exec_f32_mixed for shapes and modes that try_exec_mfma_snapshot does not handle. Kept out of
 /// line so its staging frame is not live while the snapshot path runs.
 template <typename ExtractA, typename ExtractB>
 RJ_NOINLINE void exec_f32_mixed_generic(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
@@ -1806,7 +1802,7 @@ RJ_NOINLINE void exec_f32_mixed_generic(auto &cu, uint32_t M, uint32_t N, uint32
     RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
     float fval = std::bit_cast<float>(r.val);
     if (std::isnan(fval) || std::isinf(fval))
-    has_nan = true;
+      has_nan = true;
   }
   // The dumps below show staged results only: a register read here would be reported to
   // execution plugins as an access by the instruction.
@@ -1854,8 +1850,8 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
                     uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                     ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR, uint32_t cbsz = 0,
                     uint32_t abid = 0, uint32_t blgp = 0) {
-  if (!try_exec_mfma_regions<float>(cu, M, N, K, B, a_bits, b_bits, dst, s0, s1, s2, ea, eb,
-                                    const_acc, cbsz, abid, blgp))
+  if (!try_exec_mfma_snapshot<float>(cu, M, N, K, B, a_bits, b_bits, dst, s0, s1, s2, ea, eb,
+                                     const_acc, cbsz, abid, blgp))
     exec_f32_mixed_generic(cu, M, N, K, B, a_bits, b_bits, dst, s0, s1, s2, ea, eb, const_acc, cbsz,
                            abid, blgp);
 }
@@ -4688,7 +4684,7 @@ void exec_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_
                        const_acc, c_modifier);
 }
 
-/// exec_i32_i8 for shapes and modes that try_exec_mfma_regions does not handle. Kept out of line
+/// exec_i32_i8 for shapes and modes that try_exec_mfma_snapshot does not handle. Kept out of line
 /// so its staging frame is not live while the snapshot path runs.
 RJ_NOINLINE inline void exec_i32_i8_generic(auto &cu, uint32_t M, uint32_t N, uint32_t K,
                                             uint32_t B, uint32_t dst, uint32_t s0, uint32_t s1,
@@ -4811,8 +4807,8 @@ RJ_NOINLINE inline void exec_i32_i8_generic(auto &cu, uint32_t M, uint32_t N, ui
 inline void exec_i32_i8(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t dst,
                         uint32_t s0, uint32_t s1, uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
                         uint32_t cbsz = 0, uint32_t abid = 0, uint32_t blgp = 0) {
-  if (!try_exec_mfma_regions<int32_t>(cu, M, N, K, B, 8, 8, dst, s0, s1, s2, extract_i8, extract_i8,
-                                      const_acc, cbsz, abid, blgp))
+  if (!try_exec_mfma_snapshot<int32_t>(cu, M, N, K, B, 8, 8, dst, s0, s1, s2, extract_i8,
+                                       extract_i8, const_acc, cbsz, abid, blgp))
     exec_i32_i8_generic(cu, M, N, K, B, dst, s0, s1, s2, const_acc, cbsz, abid, blgp);
 }
 
@@ -5316,7 +5312,7 @@ inline void exec_wmma_f64_16x16x4_f64(auto &cu, uint32_t dst, uint32_t s0, uint3
     }
 }
 
-/// exec_f64 for shapes and modes that try_exec_mfma_regions does not handle. Kept out of line so
+/// exec_f64 for shapes and modes that try_exec_mfma_snapshot does not handle. Kept out of line so
 /// its staging frame is not live while the snapshot path runs.
 RJ_NOINLINE inline void exec_f64_generic(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
                                          uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
@@ -5452,8 +5448,8 @@ RJ_NOINLINE inline void exec_f64_generic(auto &cu, uint32_t M, uint32_t N, uint3
 inline void exec_f64(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t dst,
                      uint32_t s0, uint32_t s1, uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
                      uint32_t neg = 0) {
-  if (!try_exec_mfma_regions<double>(cu, M, N, K, B, 64, 64, dst, s0, s1, s2, extract_f64,
-                                     extract_f64, const_acc, 0, 0, 0, neg))
+  if (!try_exec_mfma_snapshot<double>(cu, M, N, K, B, 64, 64, dst, s0, s1, s2, extract_f64,
+                                      extract_f64, const_acc, 0, 0, 0, neg))
     exec_f64_generic(cu, M, N, K, B, dst, s0, s1, s2, const_acc, neg);
 }
 

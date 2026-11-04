@@ -90,18 +90,18 @@ TEST(MfmaRegisterPathsTest, RoutedShapesFitTheSnapshotPath) {
   };
   for (const Mfma s : {Mfma{4, 4, 1, 16}, Mfma{4, 4, 2, 16}, Mfma{4, 4, 4, 16},
                        Mfma{16, 16, 128, 1}, Mfma{32, 32, 64, 1}})
-    EXPECT_TRUE(amdgpu::mfma_regions_shape_fits<float>(s.m, s.n, s.k, s.batch))
+    EXPECT_TRUE(amdgpu::mfma_snapshot_shape_fits<float>(s.m, s.n, s.k, s.batch))
         << s.m << "x" << s.n << "x" << s.k << "x" << s.batch;
   for (const Mfma s :
        {Mfma{16, 16, 64, 1}, Mfma{32, 32, 32, 1}, Mfma{32, 32, 16, 1}, Mfma{16, 16, 32, 1},
         Mfma{16, 16, 16, 1}, Mfma{32, 32, 8, 1}, Mfma{16, 16, 4, 4}, Mfma{4, 4, 4, 16}})
-    EXPECT_TRUE(amdgpu::mfma_regions_shape_fits<int32_t>(s.m, s.n, s.k, s.batch))
+    EXPECT_TRUE(amdgpu::mfma_snapshot_shape_fits<int32_t>(s.m, s.n, s.k, s.batch))
         << s.m << "x" << s.n << "x" << s.k << "x" << s.batch;
   for (const Mfma s : {Mfma{16, 16, 4, 1}, Mfma{4, 4, 4, 4}})
-    EXPECT_TRUE(amdgpu::mfma_regions_shape_fits<double>(s.m, s.n, s.k, s.batch))
+    EXPECT_TRUE(amdgpu::mfma_snapshot_shape_fits<double>(s.m, s.n, s.k, s.batch))
         << s.m << "x" << s.n << "x" << s.k << "x" << s.batch;
   // 32 result registers exceed the snapshot; this shape keeps the existing path.
-  EXPECT_FALSE(amdgpu::mfma_regions_shape_fits<int32_t>(32, 32, 4, 2));
+  EXPECT_FALSE(amdgpu::mfma_snapshot_shape_fits<int32_t>(32, 32, 4, 2));
 }
 
 TEST(MfmaRegisterPathsTest, F64MatchesScalarForSeparateAndOverlappingDestinations) {
