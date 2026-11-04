@@ -18,6 +18,7 @@ from typing import Tuple
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEST_PATHS: Tuple[str, ...] = (
     "tests/unit/test_generate_metric_health_report.py",
+    "tests/unit/test_run_metric_health_test_report.py",
     "tests/unit/test_run_metric_health_test_report_local_driver.py",
 )
 
