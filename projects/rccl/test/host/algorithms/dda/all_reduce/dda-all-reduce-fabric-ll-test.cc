@@ -528,8 +528,26 @@ const void* LL128TwoShotW() {
 constexpr int kAsync = dda::common::kDdaLL128WireAsync;
 constexpr size_t kMiB = 1024 * 1024;
 
-// From a 2 MiB shard a gfx1250 wave32 comm takes the staged writer, with two windows per warp of LDS, on the same grid.
+// RCCL_DDA_LL128_ASYNC_WIRE unset or 0: a gfx1250 wave32 comm keeps the cooperative writer and no LDS at every shard.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedWriterOffByDefault) {
+  comm().WarpSize = 32;
+  for (const bool unset : {true, false}) {
+    if (!unset) {
+      params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 0;
+    }
+    for (const size_t count : {16 * kMiB / 4, 32 * kMiB / 4}) {  // 8 ranks: 2 and 4 MiB shards, two-shot
+      const DdaLaunch& launch = RunOneLL128(count);
+      EXPECT_EQ(launch.kernel, (LL128TwoShot<float, 8>())) << "unset " << unset << " count " << count;
+      EXPECT_EQ(launch.sharedMemBytes, 0u) << "unset " << unset << " count " << count;
+    }
+  }
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+  EXPECT_EQ(RunOneLL128(16 * kMiB / 4).kernel, (LL128TwoShotW<float, 8, kAsync>())) << "1 opts in";
+}
+
+// With RCCL_DDA_LL128_ASYNC_WIRE=1, from a 2 MiB shard a gfx1250 wave32 comm takes the staged writer on the same grid.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedWriterFromTwoMegShardsOnTheSameGrid) {
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
   const size_t big = 16 * kMiB / 4;  // 8 ranks: a 2 MiB shard, two-shot
   const DdaLaunch coop = RunOneLL128(big);
   EXPECT_EQ(coop.kernel, (LL128TwoShot<float, 8>())) << "WarpSize 0: the cooperative writer";
@@ -562,6 +580,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedWriterFromTwoMegShardsOnThe
 
 // The one-shot keeps the cooperative writer at every size: it sends the whole message to each peer.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_OneShotKeepsTheCooperativeWriter) {
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
   comm().WarpSize = 32;
   comm().nRanks = 2;
   const DdaLaunch& two = RunOneLL128(4 * kMiB / 4);
@@ -571,6 +590,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_OneShotKeepsTheCooperativeWriter)
 
 // Every rank count and datatype gets its own staged instantiation.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedKernelsPerRankCountAndDatatype) {
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
   comm().WarpSize = 32;
   const struct {
     int nRanks;

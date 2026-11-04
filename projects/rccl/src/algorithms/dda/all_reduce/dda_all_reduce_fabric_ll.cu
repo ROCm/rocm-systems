@@ -41,6 +41,7 @@
 RCCL_PARAM_DECLARE(DdaLL);
 RCCL_PARAM_DECLARE(DdaLLOneShotThreshold);
 RCCL_PARAM_DECLARE(DdaLL128OneShotThreshold);
+RCCL_PARAM_DECLARE(DdaLL128AsyncWire);
 
 namespace {
 
@@ -148,7 +149,11 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
 constexpr size_t kDdaArLL128AsyncMinShardBytes = 2 * 1024 * 1024;
 
 // Writer of an LL128 two-shot launch: staged from kDdaArLL128AsyncMinShardBytes where ddaArLL128StagedWireOk.
+// Opt-in with RCCL_DDA_LL128_ASYNC_WIRE=1; at 0 (default) every launch takes the cooperative writer and no dynamic LDS.
 static int ddaArLL128Wire(const ncclComm* comm, size_t bytes) {
+  if (rcclParamDdaLL128AsyncWire() == 0) {
+    return dda::common::kDdaLL128WireCoop;
+  }
   const size_t shard = bytes / (size_t)std::max(comm->nRanks, 1);
   return ddaArLL128StagedWireOk(comm) && shard >= kDdaArLL128AsyncMinShardBytes ? dda::common::kDdaLL128WireAsync
                                                                                   : dda::common::kDdaLL128WireCoop;
