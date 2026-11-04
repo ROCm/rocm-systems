@@ -581,12 +581,18 @@ inline void append_copy(TensorDmaState &state, Wavefront &wf, uint64_t lds_alloc
     lds_byte += (lds_byte / padding.interval_bytes) * padding.amount_bytes;
   }
 
-  // An out-of-range LDS address does not abort the transfer (CDNA5 ISA 10.11.6). The ISA
-  // does not establish the width of the LDS address calculation, nor say how an element that
-  // straddles the end of the allocation is handled or what a store reads from out-of-range LDS.
-  // As modeling choices, the simulator forms the address in 64 bits, so it never wraps back into
-  // LDS; keeps a straddling element's in-range leading bytes and drops the rest; and has a store
-  // read the dropped bytes as zero, like other out-of-range LDS loads.
+  // The tensor DMA section (CDNA5 ISA 10.11.6) specifies that processing of the descriptor
+  // continues past an out-of-range LDS address. It does not establish the width of the LDS
+  // address calculation, how an element that straddles the end of the allocation is handled, or
+  // what a store reads from out-of-range LDS. rocjitsu uses a byte-prefix model: it forms the
+  // address in 64 bits, so it never wraps back into LDS; keeps a straddling element's in-range
+  // leading bytes and drops the rest; and has a store read the dropped bytes as zero. An i32
+  // store at offset 254 of a 256-byte allocation therefore stores two bytes from LDS and two zero
+  // bytes.
+  //
+  // Ordinary LDS instructions follow a different rule (CDNA5 ISA 3.3.4.1): the range check is per
+  // byte in UNALIGNED mode and per DWORD in DWORD mode, and a multi-DWORD load returns zero for
+  // any DWORD that is partly out of range. The byte-prefix model is not derived from that rule.
   const uint64_t lds_address = uint64_t{wf.lds_base()} + uint64_t{desc.lds_base} + lds_byte;
   const uint64_t lds_bytes =
       lds_address < lds_allocation_end
