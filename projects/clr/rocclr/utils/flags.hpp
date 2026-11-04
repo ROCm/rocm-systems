@@ -248,6 +248,11 @@ release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
 release(uint, DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING, 0,                          \
         "Segment scheduling mode (segmented path only): "                      \
         "0=Hybrid/auto, 1=Round-robin, 2=DFS")                                \
+release(uint, DEBUG_HIP_GRAPH_COLLAPSE_RULE, 1,                               \
+        "When a segmented graph collapses to one stream: 1 = C1, a cross-stream "\
+        "edge touching a node that isn't AQL-captured collapses it, and the "  \
+        "slack rule applies only if DEBUG_HIP_GRAPH_MIN_OVERLAP is set; 0 = the "\
+        "slack rule (DEBUG_HIP_GRAPH_MIN_OVERLAP) alone, as before")          \
 release(uint, DEBUG_HIP_GRAPH_MIN_OVERLAP, 2,                                 \
         "Min overlappable work (in occupancy passes) per unit of cross-stream "\
         "sync (barrier packets + completion signals) to keep a graph "         \
