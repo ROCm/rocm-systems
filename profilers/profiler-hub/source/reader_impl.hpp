@@ -8,12 +8,12 @@
 #include "profiler-hub/cpp/storage.hpp"
 
 #include "data_storage/backends/sqlite_backend.hpp"
-#include "data_storage/read_statements.hpp"
 #include "reader_catalog.hpp"
 
 #include <memory>
 #include <optional>
-#include <unordered_map>
+#include <string>
+#include <utility>
 
 struct ph_table_event;
 
@@ -21,19 +21,32 @@ namespace profiler_hub
 {
 struct resolved_event_query;
 
+/**
+ * @brief One trace format's read path behind reader_t.
+ *
+ * Every format fills the same reader_catalog_t and answers the same queries.
+ * Only the storage access behind them differs, so callers above reader_t never
+ * see which format they read. A format registers its factory in
+ * formats/trace_formats.cpp.
+ *
+ * The catalog is shared by every connection of one trace source. Pooled
+ * readers receive it unbuilt and fill it through build_catalog_category().
+ */
 struct reader_t::impl
 {
-    explicit impl(std::unique_ptr<profiler_hub::storage_t> storage);
+    virtual ~impl() = default;
 
-    // Pooled/shared-catalog construction: does not build anything itself;
-    // `catalog` (non-null) is shared with sibling connections and may be
-    // populated by any of them via build_catalog_category().
-    impl(std::unique_ptr<profiler_hub::storage_t> storage,
-         std::shared_ptr<reader_catalog_t>        catalog);
+    impl(const impl&)            = delete;
+    impl& operator=(const impl&) = delete;
+    impl(impl&&)                 = delete;
+    impl& operator=(impl&&)      = delete;
 
-    void build_catalog_category(reader_t::catalog_category_t category,
-                                reader_catalog_t&            catalog);
-    void ensure_track_topology_indexes();
+    /** @brief Builds every catalog category in dependency order. */
+    void build_catalog();
+
+    virtual void build_catalog_category(reader_t::catalog_category_t category,
+                                        reader_catalog_t&            catalog) = 0;
+    virtual void ensure_track_topology_indexes()                         = 0;
 
     // Info table accessors (cached)
     [[nodiscard]] reader_types::node_info_list_t            get_all_nodes();
@@ -49,102 +62,96 @@ struct reader_t::impl
     [[nodiscard]] reader_types::pmc_info_list_t             get_all_pmc_infos();
 
     // Timeline event queries
-    [[nodiscard]] reader_types::timeline_event_list_t get_events(
-        const reader_types::event_filter_t& filter);
+    [[nodiscard]] virtual reader_types::timeline_event_list_t get_events(
+        const reader_types::event_filter_t& filter) = 0;
 
-    [[nodiscard]] reader_types::timeline_event_list_t get_events_for_track(
+    [[nodiscard]] virtual reader_types::timeline_event_list_t get_events_for_track(
         reader_types::track_info_ptr_t      track,
-        const reader_types::event_filter_t& filter);
+        const reader_types::event_filter_t& filter) = 0;
 
-    [[nodiscard]] std::optional<std::pair<size_t, size_t>> get_event_id_span(
-        reader_types::event_type_t type);
+    [[nodiscard]] virtual std::optional<std::pair<size_t, size_t>> get_event_id_span(
+        reader_types::event_type_t type) = 0;
 
-    void visit_track_events_in_id_range(const reader_types::track_info_ptr_t& track,
-                                        reader_types::event_type_t            type,
-                                        size_t                                id_begin,
-                                        size_t                                id_end,
-                                        reader_t::event_visitor_t             visitor,
-                                        void*                                 context);
+    virtual void visit_track_events_in_id_range(
+        const reader_types::track_info_ptr_t& track,
+        reader_types::event_type_t            type,
+        size_t                                id_begin,
+        size_t                                id_end,
+        reader_t::event_visitor_t             visitor,
+        void*                                 context) = 0;
 
-    [[nodiscard]] reader_types::counter_timeline_event_list_t
+    [[nodiscard]] virtual reader_types::counter_timeline_event_list_t
     get_counter_events_for_track(reader_types::track_info_ptr_t      track,
-                                 const reader_types::event_filter_t& filter);
+                                 const reader_types::event_filter_t& filter) = 0;
 
-    [[nodiscard]] size_t get_event_count(const reader_types::event_filter_t& filter);
+    [[nodiscard]] virtual size_t get_event_count(
+        const reader_types::event_filter_t& filter) = 0;
 
-    [[nodiscard]] reader_types::histogram_t get_histogram(size_t max_buckets);
+    [[nodiscard]] virtual reader_types::histogram_t get_histogram(size_t max_buckets) = 0;
 
-    // Event detail queries
-    [[nodiscard]] std::optional<reader_types::region_data_t> get_region_details(
+    // Event detail queries. A format without the data keeps the empty default.
+    [[nodiscard]] virtual std::optional<reader_types::region_data_t> get_region_details(
         const reader_types::timeline_event_t& event);
 
-    [[nodiscard]] std::optional<reader_types::kernel_dispatch_data_t>
+    [[nodiscard]] virtual std::optional<reader_types::kernel_dispatch_data_t>
     get_kernel_dispatch_details(const reader_types::timeline_event_t& event);
 
-    [[nodiscard]] std::optional<reader_types::memory_copy_data_t> get_memory_copy_details(
-        const reader_types::timeline_event_t& event);
+    [[nodiscard]] virtual std::optional<reader_types::memory_copy_data_t>
+    get_memory_copy_details(const reader_types::timeline_event_t& event);
 
-    [[nodiscard]] std::optional<reader_types::memory_alloc_data_t>
+    [[nodiscard]] virtual std::optional<reader_types::memory_alloc_data_t>
     get_memory_alloc_details(const reader_types::timeline_event_t& event);
 
     // Track the same placement ph_get_track_events uses for this row.
-    [[nodiscard]] reader_types::track_info_ptr_t track_of(
+    [[nodiscard]] virtual reader_types::track_info_ptr_t track_of(
+        const reader_types::timeline_event_t& event) = 0;
+
+    // Event property queries. A format without the data keeps the empty default.
+    [[nodiscard]] virtual reader_types::call_stack_t get_call_stack(
         const reader_types::timeline_event_t& event);
 
-    // Event property queries
-    [[nodiscard]] reader_types::call_stack_t get_call_stack(
+    [[nodiscard]] virtual reader_types::source_context_list_t get_source_context(
         const reader_types::timeline_event_t& event);
 
-    [[nodiscard]] reader_types::source_context_list_t get_source_context(
+    [[nodiscard]] virtual reader_types::arg_data_list_t get_arguments(
         const reader_types::timeline_event_t& event);
 
-    [[nodiscard]] reader_types::arg_data_list_t get_arguments(
-        const reader_types::timeline_event_t& event);
-
-    [[nodiscard]] reader_types::timeline_event_list_t get_correlated_events(
+    [[nodiscard]] virtual reader_types::timeline_event_list_t get_correlated_events(
         const reader_types::timeline_event_t& event);
 
     // Database metadata
-    [[nodiscard]] reader_types::time_window_t  get_data_time_range();
-    [[nodiscard]] reader_types::event_counts_t get_event_counts(
-        const reader_types::time_window_t& window);
+    [[nodiscard]] virtual reader_types::time_window_t  get_data_time_range() = 0;
+    [[nodiscard]] virtual reader_types::event_counts_t get_event_counts(
+        const reader_types::time_window_t& window) = 0;
 
-    [[nodiscard]] uint32_t read_table_events(const resolved_event_query& query,
-                                             uint32_t                    event_type,
-                                             uint64_t                    after_id,
-                                             uint64_t                    last_id,
-                                             ph_table_event*             rows,
-                                             uint32_t                    capacity);
-    [[nodiscard]] bool table_event_id_span(uint32_t  event_type,
-                                           uint64_t& first_id,
-                                           uint64_t& last_id);
+    [[nodiscard]] virtual uint32_t read_table_events(const resolved_event_query& query,
+                                                     uint32_t        event_type,
+                                                     uint64_t        after_id,
+                                                     uint64_t        last_id,
+                                                     ph_table_event* rows,
+                                                     uint32_t        capacity) = 0;
+    [[nodiscard]] virtual bool     table_event_id_span(uint32_t  event_type,
+                                                       uint64_t& first_id,
+                                                       uint64_t& last_id) = 0;
 
-private:
-    // Resolve event metadata from event-specific table by db_id and type.
-    // Returns event_id_result containing event_id + stack_id + source context etc.
-    [[nodiscard]] std::optional<data_storage::schema_v3::event_id_result>
-    resolve_event_metadata(const reader_types::timeline_event_t& event);
+protected:
+    // reader_t keeps the category enum private. Formats name it through here.
+    using catalog_category_t = reader_t::catalog_category_t;
 
-    // Build event_data_t from event_id (queries rocpd_event, parses JSON)
-    [[nodiscard]] reader_types::event_data_ptr_t build_event_data(
-        const data_storage::schema_v3::event_id_result& event_meta);
+    impl(std::unique_ptr<profiler_hub::storage_t> storage,
+         std::shared_ptr<reader_catalog_t>        catalog);
+
+    /** @brief Opens this reader's own read connection to a SQLite trace. */
+    [[nodiscard]] std::shared_ptr<data_storage::sqlite_backend> open_sqlite() const;
+
+    [[nodiscard]] std::string database_path() const;
 
     // Applies limit/offset to merged event list
-    void apply_pagination(reader_types::timeline_event_list_t& events,
-                          const reader_types::pagination_t&    pagination);
+    static void apply_pagination(reader_types::timeline_event_list_t& events,
+                                 const reader_types::pagination_t&    pagination);
 
-    // Fetches events for the 4 optiq-parity category tracks (agent+queue
-    // and stream), which have no rocpd_track row and so aren't in
-    // m_track_ptr_to_topology/m_track_ptr_to_db_id.
-    [[nodiscard]] reader_types::timeline_event_list_t get_category_track_events(
-        const reader_types::track_info_ptr_t& track,
-        const reader_types::event_filter_t&   filter);
-
-    std::unique_ptr<profiler_hub::storage_t>                  m_storage;
-    std::shared_ptr<data_storage::sqlite_backend>             m_backend;
-    std::shared_ptr<data_storage::schema_v3::read_statements> m_read_statements;
-
-    std::shared_ptr<reader_catalog_t> m_catalog;
+    std::unique_ptr<profiler_hub::storage_t> m_storage;
+    std::shared_ptr<reader_catalog_t>        m_catalog;
 };
 
 }  // namespace profiler_hub

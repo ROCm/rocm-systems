@@ -374,6 +374,9 @@ struct reader_t
                                            uint64_t& first_id,
                                            uint64_t& last_id);
 
+    /** @brief Read backend for one trace format. Defined inside the library. */
+    struct impl;
+
 private:
     friend class common::connection;
     friend void populate_reader_catalog(common::thread_pool&     workers,
@@ -382,9 +385,11 @@ private:
 
     // Pooled/shared-catalog construction: `catalog` is shared with sibling
     // connections in the same pool and may be populated by any of them (see
-    // populate_reader_catalog). Caller guarantees non-null.
+    // populate_reader_catalog). Caller guarantees non-null. `format` is the
+    // probed schema and version and selects the read backend.
     reader_t(std::unique_ptr<profiler_hub::storage_t> storage,
-             std::shared_ptr<reader_catalog_t>        catalog);
+             std::shared_ptr<reader_catalog_t>        catalog,
+             const reader_types::trace_format_t&      format);
 
     /**
      * @brief Independently-buildable metadata categories (see
@@ -413,7 +418,6 @@ private:
 
     void ensure_track_topology_indexes();
 
-    struct impl;
     std::unique_ptr<impl> m_impl;
 };
 

@@ -929,6 +929,7 @@ visit_catalog_text(const profiler_hub::reader_catalog_t& catalog,
     {
         for(const auto& entry : catalog.strings_by_id)
         {
+            if(catalog.canonical_string_ids.contains(entry.first)) continue;
             visitor(static_cast<uint64_t>(entry.first), entry.second.c_str(), user_data);
         }
         return PH_RESULT_SUCCESS;

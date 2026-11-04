@@ -7,8 +7,20 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/insert_validator.cpp
     ${CMAKE_CURRENT_LIST_DIR}/json_serializers.cpp
     ${CMAKE_CURRENT_LIST_DIR}/reader.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/reader_impl.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/histogram.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/reader_impl.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/histogram_grid.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/trace_formats.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/trace_formats.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v3/rocpd_v3_reader.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v3/rocpd_v3_reader.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v3/rocpd_v3_histogram.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v3/rocpd_v3_table_events.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v3/rocpd_v3_trim_schema.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v2/rocpd_v2_reader.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v2/rocpd_v2_reader.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v2/rocpd_v2_catalog.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v2/rocpd_v2_table_events.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v2/rocpd_v2_trim_schema.cpp
     ${CMAKE_CURRENT_LIST_DIR}/reader_catalog.cpp
     ${CMAKE_CURRENT_LIST_DIR}/reader_catalog.hpp
     ${CMAKE_CURRENT_LIST_DIR}/populate_reader_catalog.cpp
@@ -18,10 +30,8 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/file_probe.cpp
     ${CMAKE_CURRENT_LIST_DIR}/trace_trim.cpp
     ${CMAKE_CURRENT_LIST_DIR}/trace_trim.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/rocpd_trim_schema.cpp
     ${CMAKE_CURRENT_LIST_DIR}/trim_schema.hpp
     ${CMAKE_CURRENT_LIST_DIR}/event_query.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/table_events.cpp
     ${CMAKE_CURRENT_LIST_DIR}/event_query.hpp
     ${CMAKE_CURRENT_LIST_DIR}/ph_ctx.cpp
     ${CMAKE_CURRENT_LIST_DIR}/ph_ctx.hpp

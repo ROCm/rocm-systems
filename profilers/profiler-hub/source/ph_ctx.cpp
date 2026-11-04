@@ -405,7 +405,15 @@ ph_ctx::open_sources()
         source->uuid    = accepted.uuid;
         source->catalog = std::make_shared<profiler_hub::reader_catalog_t>();
         source->pool    = std::make_unique<profiler_hub::common::connection_pool>(
-            source->path, default_connection_count(), source->catalog, source->uuid);
+            source->path,
+            default_connection_count(),
+            source->catalog,
+            source->uuid,
+            profiler_hub::reader_types::trace_format_t{
+                accepted.schema,
+                profiler_hub::version_t{ accepted.version.major,
+                                         accepted.version.minor,
+                                         accepted.version.patch } });
         source->connections =
             std::make_unique<profiler_hub::pooled_connection_source>(*source->pool);
         source->reader = std::make_unique<profiler_hub::cached_track_reader>(

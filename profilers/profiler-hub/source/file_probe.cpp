@@ -3,6 +3,7 @@
 
 #include "profiler-hub/cpp/reader.hpp"
 
+#include "formats/trace_formats.hpp"
 #include "data_storage/backends/sqlite_api_policy.hpp"
 #include "data_storage/schema_version.hpp"
 
@@ -30,18 +31,8 @@ using data_storage::sqlite_api_policy;
 
 constexpr std::string_view k_sqlite_magic{ "SQLite format 3" };
 constexpr std::string_view k_metadata_prefix{ "rocpd_metadata_" };
-
-enum class file_kind_t
-{
-    sqlite,
-};
-
-struct schema_support_t
-{
-    file_kind_t    file_kind;
-    trace_schema_t trace_schema;
-    bool (*supports_version)(version_t version);
-};
+// rocpd schema 2 keeps one metadata table without a GUID suffix.
+constexpr std::string_view k_legacy_metadata{ "rocpd_metadata" };
 
 file_probe_result_t
 result_of(ph_result_t    status,
@@ -147,54 +138,13 @@ private:
     std::string                    m_error;
 };
 
-bool
-supports_rocpd_schema_v3(version_t version)
-{
-    return version.major == 3;
-}
-
-const std::array<schema_support_t, 1>&
-supported_schemas()
-{
-    static const std::array<schema_support_t, 1> schemas{ {
-        { file_kind_t::sqlite, trace_schema_t::rocpd, supports_rocpd_schema_v3 },
-    } };
-    return schemas;
-}
-
-const schema_support_t*
-find_support(file_kind_t kind, trace_schema_t schema, version_t version)
-{
-    for(const schema_support_t& entry : supported_schemas())
-    {
-        if(entry.file_kind == kind && entry.trace_schema == schema &&
-           entry.supports_version(version))
-        {
-            return &entry;
-        }
-    }
-    return nullptr;
-}
-
+// Reads the schema version tags of one metadata table. uuid is empty for the
+// single unsuffixed table of rocpd schema 2.
 file_probe_result_t
-probe_one_metadata(sqlite_probe_connection& connection,
-                   file_kind_t              kind,
-                   const std::string&       table)
+probe_metadata_version(sqlite_probe_connection& connection,
+                       const std::string&       table,
+                       const std::string&       uuid)
 {
-    if(table.rfind(k_metadata_prefix, 0) != 0)
-    {
-        return result_of(PH_RESULT_UNSUPPORTED_FILE,
-                         "rocpd metadata table name is malformed",
-                         trace_schema_t::rocpd);
-    }
-    const std::string uuid = table.substr(k_metadata_prefix.size());
-    if(!is_identifier(uuid))
-    {
-        return result_of(PH_RESULT_UNSUPPORTED_FILE,
-                         "rocpd metadata uuid is not an identifier",
-                         trace_schema_t::rocpd);
-    }
-
     const std::string version_sql =
         "SELECT tag, value FROM \"" + table +
         "\" WHERE tag IN ('schema_version', 'schema_version_major', "
@@ -258,7 +208,7 @@ probe_one_metadata(sqlite_probe_connection& connection,
                          {},
                          uuid);
     }
-    if(find_support(kind, trace_schema_t::rocpd, resolved.version) == nullptr)
+    if(!is_supported_format({ trace_schema_t::rocpd, resolved.version }))
     {
         return result_of(PH_RESULT_UNSUPPORTED_FILE,
                          "rocpd schema version is not supported",
@@ -272,7 +222,56 @@ probe_one_metadata(sqlite_probe_connection& connection,
 }
 
 file_probe_result_t
-probe_sqlite(file_kind_t kind, const std::string& path)
+probe_one_metadata(sqlite_probe_connection& connection, const std::string& table)
+{
+    if(table.rfind(k_metadata_prefix, 0) != 0)
+    {
+        return result_of(PH_RESULT_UNSUPPORTED_FILE,
+                         "rocpd metadata table name is malformed",
+                         trace_schema_t::rocpd);
+    }
+    const std::string uuid = table.substr(k_metadata_prefix.size());
+    if(!is_identifier(uuid))
+    {
+        return result_of(PH_RESULT_UNSUPPORTED_FILE,
+                         "rocpd metadata uuid is not an identifier",
+                         trace_schema_t::rocpd);
+    }
+    file_probe_result_t result = probe_metadata_version(connection, table, uuid);
+    if(result.status == PH_RESULT_SUCCESS && result.schema_version.major < 3)
+    {
+        result.status  = PH_RESULT_UNSUPPORTED_FILE;
+        result.message = "GUID-suffixed rocpd tables need schema version 3 or later";
+    }
+    return result;
+}
+
+file_probe_result_t
+probe_legacy_metadata(sqlite_probe_connection& connection)
+{
+    file_probe_result_t result =
+        probe_metadata_version(connection, std::string{ k_legacy_metadata }, {});
+    if(result.status == PH_RESULT_SUCCESS && result.schema_version.major >= 3)
+    {
+        result.status  = PH_RESULT_UNSUPPORTED_FILE;
+        result.message = "unsuffixed rocpd_metadata needs schema version 2";
+    }
+    return result;
+}
+
+bool
+has_table(sqlite_probe_connection& connection, std::string_view name)
+{
+    sqlite_statement table{ connection.get(),
+                            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND "
+                            "name = '" +
+                                std::string{ name } + "'" };
+    return table.ok() &&
+           sqlite_api_policy::step(table.get()) == sqlite_api_policy::result_row;
+}
+
+file_probe_result_t
+probe_sqlite(const std::string& path)
 {
     sqlite_probe_connection connection{ path };
     if(!connection.ok())
@@ -308,6 +307,10 @@ probe_sqlite(file_kind_t kind, const std::string& path)
 
     if(names.empty())
     {
+        if(has_table(connection, k_legacy_metadata))
+        {
+            return probe_legacy_metadata(connection);
+        }
         return result_of(PH_RESULT_UNSUPPORTED_FILE,
                          "SQLite database has no rocpd_metadata table");
     }
@@ -316,7 +319,7 @@ probe_sqlite(file_kind_t kind, const std::string& path)
     probed.reserve(names.size());
     for(const std::string& table : names)
     {
-        file_probe_result_t one = probe_one_metadata(connection, kind, table);
+        file_probe_result_t one = probe_one_metadata(connection, table);
         if(one.status != PH_RESULT_SUCCESS) return one;
         probed.push_back(std::move(one));
     }
@@ -342,16 +345,15 @@ probe_sqlite(file_kind_t kind, const std::string& path)
 
 struct format_detector_t
 {
-    file_kind_t kind;
     bool (*matches)(const std::string& path);
-    file_probe_result_t (*probe)(file_kind_t kind, const std::string& path);
+    file_probe_result_t (*probe)(const std::string& path);
 };
 
 const std::array<format_detector_t, 1>&
 format_detectors()
 {
     static const std::array<format_detector_t, 1> detectors{ {
-        { file_kind_t::sqlite, sqlite_magic_matches, probe_sqlite },
+        { sqlite_magic_matches, probe_sqlite },
     } };
     return detectors;
 }
@@ -379,7 +381,7 @@ probe_file(const std::string& path)
 
     for(const format_detector_t& detector : format_detectors())
     {
-        if(detector.matches(path)) return detector.probe(detector.kind, path);
+        if(detector.matches(path)) return detector.probe(path);
     }
     return result_of(PH_RESULT_UNSUPPORTED_FILE, "trace file is not a supported format");
 }

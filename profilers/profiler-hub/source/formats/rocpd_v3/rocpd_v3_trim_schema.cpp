@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocpd_v3_reader.hpp"
 #include "trim_schema.hpp"
 
 #include <string>
@@ -175,13 +176,9 @@ private:
 }  // namespace
 
 std::unique_ptr<trim_schema_t>
-make_trim_schema(reader_types::trace_schema_t schema, version_t version)
+make_rocpd_v3_trim_schema()
 {
-    if(schema == reader_types::trace_schema_t::rocpd && version.major == 3)
-    {
-        return std::make_unique<rocpd_v3_trim_schema_t>();
-    }
-    return nullptr;
+    return std::make_unique<rocpd_v3_trim_schema_t>();
 }
 
 std::string

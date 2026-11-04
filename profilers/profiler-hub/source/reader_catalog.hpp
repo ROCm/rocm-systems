@@ -192,6 +192,10 @@ struct reader_catalog_t
 
     std::unordered_map<size_t, std::string> strings_by_id;
 
+    // A schema that stores one text under several string ids maps each later
+    // id to the first id with that text. Empty when every id is unique.
+    std::unordered_map<size_t, size_t> canonical_string_ids;
+
     std::unordered_map<size_t, reader_types::node_info_ptr_t>    nodes_by_id;
     std::unordered_map<size_t, reader_types::process_info_ptr_t> processes_by_id;
     std::unordered_map<size_t, reader_types::thread_info_ptr_t>  threads_by_id;

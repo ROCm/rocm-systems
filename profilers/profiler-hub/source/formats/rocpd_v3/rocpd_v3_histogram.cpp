@@ -1,13 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "reader_impl.hpp"
+#include "histogram_grid.hpp"
+#include "rocpd_v3_reader.hpp"
 
 #include <fmt/format.h>
 
-#include <algorithm>
-#include <cstdint>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -192,194 +190,31 @@ duration_source_sql(const reader_catalog_t&                         catalog,
     }
     return sql;
 }
-
-struct bucket_accumulator_t
-{
-    size_t event_count{};
-    double value{};
-};
-
-reader_types::histogram_bucket_list_t
-accumulate_overlaps(const std::vector<data_storage::schema_v3::interval_result>& rows,
-                    reader_types::timestamp_ns_t                                 origin,
-                    reader_types::timestamp_ns_t bucket_size,
-                    size_t                       bucket_count)
-{
-    std::vector<bucket_accumulator_t> buckets(bucket_count);
-    for(const auto& row : rows)
-    {
-        if(row.end_ts <= row.start_ts || bucket_size == 0) continue;
-        const size_t end_mark = row.end_ts - 1;
-        if(end_mark < origin) continue;
-
-        size_t start_bucket =
-            row.start_ts <= origin ? 0 : (row.start_ts - origin) / bucket_size;
-        size_t end_bucket = (end_mark - origin) / bucket_size;
-        if(start_bucket >= bucket_count) continue;
-        if(end_bucket >= bucket_count) end_bucket = bucket_count - 1;
-        if(end_bucket < start_bucket) continue;
-
-        for(size_t bucket = start_bucket; bucket <= end_bucket; ++bucket)
-        {
-            const size_t bucket_start  = origin + bucket * bucket_size;
-            const size_t bucket_end    = bucket_start + bucket_size;
-            const size_t overlap_start = std::max(row.start_ts, bucket_start);
-            const size_t overlap_end   = std::min(row.end_ts, bucket_end);
-            if(overlap_end <= overlap_start) continue;
-            buckets[bucket].event_count += 1;
-            buckets[bucket].value += static_cast<double>(overlap_end - overlap_start);
-        }
-    }
-
-    reader_types::histogram_bucket_list_t result;
-    for(size_t index = 0; index < buckets.size(); ++index)
-    {
-        if(buckets[index].event_count == 0) continue;
-        result.push_back(reader_types::histogram_bucket_t{
-            index, buckets[index].event_count, buckets[index].value });
-    }
-    return result;
-}
-
-reader_types::histogram_bucket_list_t
-accumulate_samples(const std::vector<data_storage::schema_v3::pmc_sample_result>& rows,
-                   reader_types::timestamp_ns_t                                   origin,
-                   reader_types::timestamp_ns_t bucket_size,
-                   size_t                       bucket_count)
-{
-    struct sample_accumulator_t
-    {
-        size_t count{};
-        double sum{};
-    };
-    std::vector<sample_accumulator_t> buckets(bucket_count);
-    for(const auto& row : rows)
-    {
-        if(row.timestamp < origin || bucket_size == 0) continue;
-        const size_t index = (row.timestamp - origin) / bucket_size;
-        if(index >= bucket_count) continue;
-        buckets[index].count += 1;
-        buckets[index].sum += row.value;
-    }
-
-    reader_types::histogram_bucket_list_t populated;
-    for(size_t index = 0; index < buckets.size(); ++index)
-    {
-        if(buckets[index].count == 0) continue;
-        populated.push_back(reader_types::histogram_bucket_t{
-            index,
-            buckets[index].count,
-            buckets[index].sum / static_cast<double>(buckets[index].count) });
-    }
-
-    if(populated.size() < 2) return populated;
-
-    reader_types::histogram_bucket_list_t filled;
-    for(size_t index = 0; index < populated.size(); ++index)
-    {
-        filled.push_back(populated[index]);
-        if(index + 1 == populated.size()) break;
-        for(size_t gap = populated[index].bucket_index + 1;
-            gap < populated[index + 1].bucket_index;
-            ++gap)
-        {
-            filled.push_back(
-                reader_types::histogram_bucket_t{ gap, 0, populated[index].value });
-        }
-    }
-    return filled;
-}
-
-struct histogram_grid_t
-{
-    reader_types::timestamp_ns_t origin{};
-    reader_types::timestamp_ns_t bucket_size{};
-    size_t                       bucket_count{};
-};
-
-// max_buckets is an upper bound. The grid never has more buckets than
-// requested, and a short trace has fewer.
-histogram_grid_t
-make_grid(const reader_catalog_t& catalog, size_t max_buckets)
-{
-    if(max_buckets == 0)
-    {
-        throw std::invalid_argument{ "max_buckets must be non-zero" };
-    }
-
-    bool                         any    = false;
-    reader_types::timestamp_ns_t origin = 0;
-    reader_types::timestamp_ns_t end    = 0;
-    for(const auto& track : catalog.tracks)
-    {
-        if(track->event_count == 0) continue;
-        if(!any || track->start_ts < origin) origin = track->start_ts;
-        if(!any || track->end_ts > end) end = track->end_ts;
-        any = true;
-    }
-    if(!any || end < origin)
-    {
-        return {};
-    }
-
-    const reader_types::timestamp_ns_t duration = end - origin;
-    reader_types::timestamp_ns_t bucket_size    = (duration + max_buckets) / max_buckets;
-    if(bucket_size == 0) bucket_size = 1;
-    const size_t bucket_count =
-        duration == 0 ? 1 : (duration + bucket_size) / bucket_size;
-    return { origin, bucket_size, bucket_count };
-}
 }  // namespace
 
 reader_types::histogram_t
-reader_t::impl::get_histogram(size_t max_buckets)
+rocpd_v3_reader::get_histogram(size_t max_buckets)
 {
-    const histogram_grid_t    grid = make_grid(*m_catalog, max_buckets);
-    reader_types::histogram_t histogram;
-    histogram.origin_ts    = grid.origin;
-    histogram.bucket_size  = grid.bucket_size;
-    histogram.bucket_count = grid.bucket_count;
-    histogram.tracks.reserve(m_catalog->tracks.size());
-
-    for(const reader_types::track_info_ptr_t& track : m_catalog->tracks)
-    {
-        reader_types::track_histogram_t track_histogram;
-        track_histogram.track = track;
-        if(grid.bucket_count == 0)
-        {
-            histogram.tracks.push_back(std::move(track_histogram));
-            continue;
-        }
-
-        if(track->category == reader_types::track_kind_t::pmc_agent)
-        {
-            if(track->node_info)
+    return build_histogram(
+        *m_catalog,
+        max_buckets,
+        [this](const reader_types::track_info_ptr_t& track,
+               const histogram_grid_t& grid) -> reader_types::histogram_bucket_list_t {
+            if(track->category == reader_types::track_kind_t::pmc_agent)
             {
-                const auto rows = m_read_statements
-                                      ->pmc_sample_statement()(track->node_info->node_id,
-                                                               track->agent_id,
-                                                               track->pmc_id)
-                                      .to_vector();
-                track_histogram.buckets = accumulate_samples(
-                    rows, grid.origin, grid.bucket_size, grid.bucket_count);
+                if(!track->node_info) return {};
+                return accumulate_samples(
+                    m_read_statements
+                        ->pmc_sample_statement()(
+                            track->node_info->node_id, track->agent_id, track->pmc_id)
+                        .to_vector(),
+                    grid);
             }
-        }
-        else
-        {
             const std::string sql =
                 duration_source_sql(*m_catalog, track, *m_read_statements);
-            if(!sql.empty())
-            {
-                track_histogram.buckets =
-                    accumulate_overlaps(m_read_statements->query_intervals(sql),
-                                        grid.origin,
-                                        grid.bucket_size,
-                                        grid.bucket_count);
-            }
-        }
-        histogram.tracks.push_back(std::move(track_histogram));
-    }
-    return histogram;
+            if(sql.empty()) return {};
+            return accumulate_overlaps(m_read_statements->query_intervals(sql), grid);
+        });
 }
 
 }  // namespace profiler_hub

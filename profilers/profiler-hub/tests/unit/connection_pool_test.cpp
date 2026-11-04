@@ -36,7 +36,12 @@ protected:
     [[nodiscard]] std::unique_ptr<common::connection_pool> make_pool(size_t size) const
     {
         return std::make_unique<common::connection_pool>(
-            m_db_path, size, std::make_shared<reader_catalog_t>());
+            m_db_path,
+            size,
+            std::make_shared<reader_catalog_t>(),
+            "",
+            reader_types::trace_format_t{ reader_types::trace_schema_t::rocpd,
+                                          version_t{ 3, 0, 0 } });
     }
 
     std::string m_db_path;

@@ -3,7 +3,7 @@
 
 #include "event_query.hpp"
 #include "reader_catalog.hpp"
-#include "reader_impl.hpp"
+#include "rocpd_v3_reader.hpp"
 
 #include "data_storage/backends/database_backend.hpp"
 #include "profiler-hub/c/profiler_hub_types.h"
@@ -797,12 +797,12 @@ sample_id_span(data_storage::sqlite_backend& backend,
 }  // namespace
 
 uint32_t
-reader_t::impl::read_table_events(const resolved_event_query& query,
-                                  uint32_t                    event_type,
-                                  uint64_t                    after_id,
-                                  uint64_t                    last_id,
-                                  ph_table_event*             rows,
-                                  uint32_t                    capacity)
+rocpd_v3_reader::read_table_events(const resolved_event_query& query,
+                                   uint32_t                    event_type,
+                                   uint64_t                    after_id,
+                                   uint64_t                    last_id,
+                                   ph_table_event*             rows,
+                                   uint32_t                    capacity)
 {
     if(rows == nullptr || capacity == 0 || m_catalog == nullptr || m_backend == nullptr)
     {
@@ -963,9 +963,9 @@ reader_t::impl::read_table_events(const resolved_event_query& query,
 }
 
 bool
-reader_t::impl::table_event_id_span(uint32_t  event_type,
-                                    uint64_t& first_id,
-                                    uint64_t& last_id)
+rocpd_v3_reader::table_event_id_span(uint32_t  event_type,
+                                     uint64_t& first_id,
+                                     uint64_t& last_id)
 {
     first_id = 0;
     last_id  = 0;
