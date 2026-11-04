@@ -756,7 +756,10 @@ class OmniSoC_Base:
             if not roofline_csv.is_file():
                 try:
                     run_roofline_benchmark(
-                        self.get_args().device, roofline_csv, self._mspec.cache_sizes
+                        self.get_args().device,
+                        roofline_csv,
+                        self._mspec.cache_sizes,
+                        self._mspec.gpu_arch,
                     )
                 except Exception as e:
                     console_error(

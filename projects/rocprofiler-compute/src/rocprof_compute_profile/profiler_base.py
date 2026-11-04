@@ -9,7 +9,7 @@ import sys
 import time
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from pc_sampling.pc_sampling_profile import PCSamplingProfile
 from rocprof_compute_soc.soc_base import OmniSoC_Base
@@ -40,7 +40,7 @@ from utils.utils_profile import gen_sysinfo, run_prof
 from vendored import yaml
 
 # Maps each CLI flag to the backends it enables.
-_FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
+_FLAG_TO_FRAMEWORKS: Dict[str, Tuple[str, ...]] = {
     "torch_trace": ("torch",),
     "triton_trace": ("triton",),
     "ml_api_trace": KNOWN_ML_API_BACKENDS,
@@ -56,7 +56,7 @@ _PMC_POWER_GATING_WARNING = (
 )
 
 
-def _partition_warning_messages(mspec: MachineSpecs) -> list[str]:
+def _partition_warning_messages(mspec: MachineSpecs) -> List[str]:
     """Return notices on how active partition modes shape analysis metrics."""
     if not MIGPUSpecs.is_partition_supported(
         getattr(mspec, "gpu_arch", None), getattr(mspec, "gpu_model", None)
@@ -78,7 +78,7 @@ def _partition_warning_messages(mspec: MachineSpecs) -> list[str]:
     return messages
 
 
-def _compute_selected_frameworks(args: argparse.Namespace) -> set[str]:
+def _compute_selected_frameworks(args: argparse.Namespace) -> Set[str]:
     """Return the set of frameworks requested via CLI flags."""
     selected: set[str] = set()
     for flag, frameworks in _FLAG_TO_FRAMEWORKS.items():
@@ -87,7 +87,7 @@ def _compute_selected_frameworks(args: argparse.Namespace) -> set[str]:
     return selected
 
 
-def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[str]]:
+def _find_python_script_index(argv: List[str]) -> Tuple[Optional[int], Optional[str]]:
     """Locate the script argument in a Python command, skipping interpreter flags.
 
     Returns (script_index, skip_flag).  skip_flag is the flag string ("-c"/"-m")
@@ -111,12 +111,12 @@ def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[
 
 
 def _prepare_ml_api_trace_injection(
-    remaining: list[str],
+    remaining: List[str],
     resolved_exec_path: Path,
     is_python: bool,
     script_index: Optional[int],
     skip_flag: Optional[str],
-    frameworks: set[str],
+    frameworks: Set[str],
 ) -> None:
     """Insert the inject_roctx launcher into the workload command.
 
@@ -189,7 +189,7 @@ class RocProfCompute_Base:
     def get_args(self) -> argparse.Namespace:
         return self.__args
 
-    def get_profiler_options(self) -> Union[list[str], dict[str, Any]]:
+    def get_profiler_options(self) -> Union[List[str], Dict[str, Any]]:
         """Fetch any version specific arguments required by profiler"""
         # assume no SoC specific options and return empty list by default
         return []
@@ -398,8 +398,8 @@ class RocProfCompute_Base:
 
     def profile(
         self,
-        fnames: Union[list[Path], Path],
-        options: Union[list[str], dict[str, Any]],
+        fnames: Union[List[Path], Path],
+        options: Union[List[str], Dict[str, Any]],
         total_runs: int = 1,
     ) -> float:
         args = self.get_args()

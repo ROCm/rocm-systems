@@ -54,6 +54,14 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Renamed the PC sampling analyze table columns `count_issued` and `count_stalled` to `issue_count` and `stall_count`, so the terminal table uses the same column names as `pc_sampling_summary.csv` and `compute_pc_sampling_summary_view`.
 
+* The PC sampling analyze table, `compute_pc_sampling_summary_view`, and `pc_sampling_summary.csv` now show one row per kernel instead of one row per instruction.
+  * `--pc-sampling-rows` now sets the number of kernels shown.
+  * Per-instruction counts are in the per-kernel ISA CSV files.
+
+* `--list-metrics` no longer takes a GPU architecture. It lists the blocks of the current GPU, or the metrics of the blocks and metrics you name, for example `rocprof-compute --list-metrics sol`. Use `--list-metrics-gfx-id <arch>` to list another GPU.
+
+* `--block` 30 metric IDs (e.g. 30.1.7) now refer to different metrics following the removal of unnecessary gfx950 Memory Bandwidth Analysis metrics.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
@@ -73,11 +81,15 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed the `analyze --sort`, `analyze --mem-level`, and `analyze --roofline-data-type` options.
   * These options were utilized solely by roofline plot in CLI analyze output block 4.3, which has been removed. The roofline HTML output shows every memory level and precision, and you can filter them in the browser.
 
-* Removed most gfx950 Memory Bandwidth Analysis (block 30) metrics. Block 30 now shows only the L1 cache, L2 bottleneck, and EA bottleneck indicators, as tables 30.1, 30.2, and 30.3, so `30.x` table IDs and `30.x.y` metric IDs used with `--block` now refer to different tables and metrics.
+* Removed the `analyze --pc-sampling-sorting-type` option. The PC sampling table is always sorted by sample count.
+
+* Removed unnecessary gfx950 Memory Bandwidth Analysis (block 30) metrics. Block 30 now shows only the L1 cache, L2 bottleneck, and EA bottleneck indicators, as tables 30.1, 30.2, and 30.3.
 
 ### Optimized
 
 * Profile mode collects only the counters that metric equations use, which can reduce the number of profiling passes.
+
+* PC sampling now writes disassembly only for dispatched kernels, so profiling output is much smaller.
 
 ### Resolved issues
 
@@ -97,6 +109,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed PC sampling stall reasons counting samples where the wave issued an instruction.
 
 ### Upcoming changes
+
+* `--list-blocks` and `--list-available-metrics` will be removed in a future release.
 
 ### Known issues
 

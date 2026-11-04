@@ -27,11 +27,11 @@ BENCHMARKING_SUPPORTED = mi_gpu_specs.get_roofline_archs()
 
 
 def run_roofline_benchmark(
-    device_id: int, roofline_csv: Path, cache_sizes: dict
+    device_id: int, roofline_csv: Path, cache_sizes: dict, gpu_arch: str
 ) -> None:
     """Load device benchmark, execute, and save results to CSV."""
-    bench = load_bench(device_id, cache_sizes)
-    benchmark_metrics = bench.run_benchmark(device_id)
+    bench = load_bench(device_id, cache_sizes, gpu_arch)
+    benchmark_metrics = bench.run_benchmark(device_id, gpu_arch)
     bench.dump_csv(benchmark_metrics, str(roofline_csv))
 
 
@@ -43,12 +43,8 @@ def bench_class(gpu_arch: str) -> type:
     return getattr(module, f"Bench_{device}")
 
 
-def load_bench(device_id: int, cache_sizes: dict) -> object:
+def load_bench(device_id: int, cache_sizes: dict, gpu_arch: str) -> object:
     try:
-        from utils.hip_interface import hipGetDeviceProperties
-
-        # The device's exact LLVM target, e.g. "gfx942" from "gfx942:sramecc+:xnack-"
-        gpu_arch = hipGetDeviceProperties(device_id).gcnArchName.split(":", 1)[0]
         return bench_class(gpu_arch)(device_id, cache_sizes, gpu_arch)
     except Exception as e:
         # Propagate error so users do not attempt to use a non-existent bench instance
