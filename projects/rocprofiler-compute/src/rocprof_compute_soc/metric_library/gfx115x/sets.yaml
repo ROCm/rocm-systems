@@ -17,6 +17,6 @@ mem_thruput:
   title: Memory Throughput
   metrics:
   - lds.bank_conflicts
-  - lds.estimated_bw
+  - lds.theoretical_bw
   - gl1.util
   - gl2.util
