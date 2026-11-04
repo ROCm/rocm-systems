@@ -24,6 +24,8 @@ extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t,
     g_allReduceDdaFabricLLEligible;
 extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
     g_allReduceDdaFabricLL128Eligible;
+extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
+    g_allReduceDdaFabricLL128SplitTakes;
 extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allReduceDdaIpcBlocks;
 // The fabric AllReduce reporters and launchers also receive the call's rcclDdaLaunchCap.
 using DdaCappedBlocksHook = std::function<uint32_t(ncclComm*, size_t, ncclDataType_t, rcclDdaLaunchCap)>;

@@ -8120,6 +8120,24 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstWindow) {
       });
 }
 
+// Messages the LL128 peer-split two-shot takes leave the VMM-first window to the LL128 tier.
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstYieldsToThePeerSplit) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250VmmFirstYieldsToThePeerSplit",
+      []() {
+        ArDdaHooks hooks;
+        ArVmmEligible vmmHook;
+        ncclComm* comm = MakeArDdaComm(32);
+        const int vmm = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM;
+        EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
+        ScopedHook split(g_allReduceDdaFabricLL128SplitTakes,
+                         [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        EXPECT_NE(vmm, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
+        EXPECT_NE(vmm, SelectAllReduceDdaAlgo(comm, 16 * kMiB));
+        DeleteCommWithArch(comm);
+      });
+}
+
 // Registered receive windows keep the normal tier order (the window was measured on
 // unregistered buffers).
 TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstUnregisteredOnly) {

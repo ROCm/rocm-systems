@@ -2100,7 +2100,9 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
         // rcclCandSearch arbitration runs to completion: under CTA_POLICY_ZERO the
         // preferred mask is RCCL_BACKEND_CE, so an early return would silently
         // bypass the preferred/fallback warning when CE 2-shot is not yet ready.
+        // The VMM-first window leaves messages the LL128 peer-split two-shot takes to the LL128 tier.
         if (rcclDdaArVmmFirstTab(archTable, comm->nRanks, msgBytes, winRegType) &&
+            !ncclAllReduceDdaFabricLL128SplitTakes(comm, sendbuff, recvbuff, count, datatype, op) &&
             ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           rcclCollDecision cand = *decision;
           cand.algo = RCCL_DDA_FABRIC_VMM;

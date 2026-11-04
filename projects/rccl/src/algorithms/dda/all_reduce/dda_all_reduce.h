@@ -67,6 +67,10 @@ ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size
 bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                          ncclDataType_t datatype, ncclRedOp_t op);
 
+// True when the LL128 peer-split two-shot takes the message; the VMM-first window then leaves it to the LL128 tier.
+bool ncclAllReduceDdaFabricLL128SplitTakes(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                           ncclDataType_t datatype, ncclRedOp_t op);
+
 ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                          ncclRedOp_t op, ncclComm* comm, cudaStream_t stream,
                                          rcclDdaLaunchCap cap = {});

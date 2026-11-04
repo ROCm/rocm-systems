@@ -390,6 +390,11 @@ static bool ddaArLL128SplitWindow(ncclComm* comm, const void* sendbuff, void* re
          ddaLL128ArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op);
 }
 
+bool ncclAllReduceDdaFabricLL128SplitTakes(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                           ncclDataType_t datatype, ncclRedOp_t op) {
+  return ddaArLL128SplitWindow(comm, sendbuff, recvbuff, count, datatype, op);
+}
+
 // Blocks and threads of the launch the split replaces under `cap` (LL two-shot, else LL128 one-shot or two-shot);
 // {0, 0} outside the window.
 static rcclDdaLaunchCap ddaArLL128SplitBound(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
