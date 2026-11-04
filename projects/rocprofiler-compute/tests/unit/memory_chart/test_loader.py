@@ -165,7 +165,7 @@ def test_bars_are_only_on_percent_metrics(path, arch):
 
 @pytest.mark.parametrize(
     ("gpu_arch", "layout"),
-    [("gfx1150", "gfx115x"), ("gfx1153", "gfx115x"), ("gfx942", "gfx942")],
+    [("gfx1150", "gfx115x"), ("gfx1153", "gfx115x"), ("gfx90a", "gfx90x")],
 )
 def test_runtime_arch_resolves_to_its_family_layout(gpu_arch, layout):
     assert Layouts.for_arch(gpu_arch).path.stem == layout
