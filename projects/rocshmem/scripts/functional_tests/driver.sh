@@ -1033,13 +1033,24 @@ TestOther() {
   ExecTest  "pingall"          2       8            1
   ExecTest  "pingall"          2       32           1
 
-  ExecTest  "qp_pingpong"      2       1            1
-  ExecTest  "qp_putnbi"        2       1            1         1048576
-  ExecTest  "qp_putnbi_poll"   2       1            1         1048576
+  # QP needs a gda suite + USE_GDA build; forcing gda elsewhere aborts init.
+  if [[ $TEST == gda* ]] && grep -q "USE_GDA.*: ON" <<< "$ROCSHMEM_BUILD_INFO"; then
+    ExecTest  "qp_pingpong"      2       1            1
+    ExecTest  "qp_putnbi"        2       1            1         1048576
+    ExecTest  "qp_putnbi_poll"   2       1            1         1048576
+  else
+    echo "Skip:   qp_* (requires a gda test suite with USE_GDA=ON)"
+  fi
 
-  ExecTest  "sdma_pingpong"    2       1            1
-  ExecTest  "sdma_putnbi"      2       1            1         1048576
-  ExecTest  "sdma_putnbi_poll" 2       1            1         1048576
+  # SDMA needs single-node IPC + USE_SDMA build; a hostfile may span nodes.
+  if [[ $TEST != ro* && $TEST != gda* && -z "$HOSTFILE" ]] &&
+     grep -q "USE_SDMA.*: ON" <<< "$ROCSHMEM_BUILD_INFO"; then
+    ExecTest  "sdma_pingpong"    2       1            1
+    ExecTest  "sdma_putnbi"      2       1            1         1048576
+    ExecTest  "sdma_putnbi_poll" 2       1            1         1048576
+  else
+    echo "Skip:   sdma_* (requires an IPC suite, single-node placement, and USE_SDMA=ON)"
+  fi
 
   ################################ Flood test ##################################
   if [[ $TEST != ro* ]]; then #AIROCSHMEM-324
@@ -1363,8 +1374,10 @@ if [ ! -x "$ROCSHMEM_INFO" ]; then
   # builddir case
   ROCSHMEM_INFO="$(dirname "$APP")/../../tools/rocshmem_info"
 fi
+ROCSHMEM_BUILD_INFO=""
 if [ -x "$ROCSHMEM_INFO" ]; then
-  "$ROCSHMEM_INFO"
+  ROCSHMEM_BUILD_INFO="$("$ROCSHMEM_INFO")"
+  echo "$ROCSHMEM_BUILD_INFO"
 fi
 
 case $TEST in
@@ -1396,7 +1409,7 @@ case $TEST in
     fi
     ;;
   *"host")
-    if [ -x "$ROCSHMEM_INFO" ] && "$ROCSHMEM_INFO" | grep -q "USE_IPC.*: ON"; then
+    if grep -q "USE_IPC.*: ON" <<< "$ROCSHMEM_BUILD_INFO"; then
       TestHostRma
     else
       echo "Skip: host tests require IPC backend (USE_IPC=OFF in this build)"
