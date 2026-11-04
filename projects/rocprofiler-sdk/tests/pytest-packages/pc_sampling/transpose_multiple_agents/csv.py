@@ -32,7 +32,7 @@ def validate_all_agents_are_sampled(
     input_kernel_trace_csv: pd.DataFrame,
     input_agent_info_csv: pd.DataFrame,
 ):
-    transpose_kernel_source_line_start = 193
+    transpose_kernel_source_line_start = 194
     transpose_kernel_source_line_end = 202
 
     gfx9_gfx12_agents_df = input_agent_info_csv[
