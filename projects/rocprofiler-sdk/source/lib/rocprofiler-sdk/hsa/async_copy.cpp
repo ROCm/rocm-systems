@@ -827,7 +827,7 @@ hsa_status_t
 signal_destroy_impl(hsa_signal_t _signal)
 {
     auto& _next  = get_next_dispatch<ROCPROFILER_HSA_TABLE_ID_Core,
-                                     ROCPROFILER_HSA_CORE_API_ID_hsa_signal_destroy>();
+                                    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_destroy>();
     auto* _cache = get_copy_time_cache();
     if(!_cache) return _next(_signal);
 
@@ -841,7 +841,7 @@ hsa_status_t
 ipc_signal_attach_impl(const hsa_amd_ipc_signal_t* _handle, hsa_signal_t* _signal)
 {
     auto& _next  = get_next_dispatch<ROCPROFILER_HSA_TABLE_ID_AmdExt,
-                                     ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_ipc_signal_attach>();
+                                    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_ipc_signal_attach>();
     auto* _cache = get_copy_time_cache();
     if(!_cache) return _next(_handle, _signal);
 
@@ -931,8 +931,7 @@ signal_create_impl(Args... args)
 }
 
 template <size_t TableIdx, size_t OpIdx, typename RetT, typename... Args>
-auto
-get_signal_create_impl(RetT (*)(Args...))
+auto get_signal_create_impl(RetT (*)(Args...))
 {
     return &signal_create_impl<TableIdx, OpIdx, Args...>;
 }
