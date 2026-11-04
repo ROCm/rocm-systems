@@ -162,6 +162,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `--numa` was previously limited to Linux baremetal and passthrough guests.
   - Default `amd-smi static` output on guests now includes NUMA, in human-readable, JSON, and CSV output.
 
+- **GPU process lists return an error when they cannot be read, and compute process info marks unreadable statistics as not available**.  
+  - `amdsmi_get_gpu_process_list()` and `amdsmi_get_gpu_process_list_by_pid()` returned `AMDSMI_STATUS_SUCCESS` with an empty list when a GPU's processes could not be listed. They now return `AMDSMI_STATUS_RETRY` when processes kept starting while the list was read, and otherwise the error from the listing. In Python, `AMDSMI_STATUS_RETRY` raises `AmdSmiRetryException`.
+  - `amdsmi_get_gpu_compute_process_info()` (`rsmi_compute_process_info_get()`) failed when the KFD statistics of a running process could not be read. It now succeeds and reports that process with `vram_usage`, `sdma_usage`, `cu_occupancy` and `evicted_time` all-ones (not available).
+  - `amdsmi_process_info_t.vram_usage` was documented in MB and is now documented in bytes, which it has always been. Only the documentation changes, not the ABI or the values.
+  - `amdsmi_process_info_t.cu_occupancy` was documented as a percentage and is now documented as the number of compute units in use, which it has always been.
+
 ### Removed
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
@@ -184,7 +190,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - VRAM, GTT and CPU memory read 2.3% low and could be counted several times for one process. A process that opened the same GPU more than once showed the engine usage of only one of those opens.
 
 - **Fixed `amdsmi_get_gpu_compute_process_gpus()` failing when it counts a process's GPUs**.  
-  - The documented count call, with a NULL index list, returned an invalid-argument error, so the Python and Rust APIs always failed.
+  - The documented count call, with a NULL index list, returned an invalid-argument error, so the Python and Rust APIs always failed. RDC's compute process diagnostic skipped every process because of it and always passed; it now checks the processes running on the selected GPUs.
 
 - **Fixed the Rust `amdsmi_get_gpu_compute_process_info()` and `amdsmi_get_gpu_process_list()` returning invalid entries**.  
   - When processes exited between the count and the read, the compute process list ended with entries of undefined content; when processes started, the call failed.

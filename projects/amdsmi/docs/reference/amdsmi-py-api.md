@@ -1838,6 +1838,7 @@ Exceptions that can be thrown by `amdsmi_get_gpu_process_list` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+* `AmdSmiRetryException`
 
 #### Possible Library Exceptions
 
@@ -1892,6 +1893,7 @@ Exceptions that can be thrown by `amdsmi_get_gpu_process_list_by_pid` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+* `AmdSmiRetryException`
 
 Example:
 
