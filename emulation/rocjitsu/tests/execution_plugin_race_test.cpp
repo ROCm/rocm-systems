@@ -3488,8 +3488,9 @@ TEST(RaceDetectorPluginTest, GlobalWideLdsLoadsTrackPayloadAndSynchronization) {
           std::array<Wavefront *, 2> waves{producer, peer};
           f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 208, waves);
           auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
-          const std::array<uint32_t, 2> words{0xdc008000u | ((count == 3 ? 126u : 125u) << 18),
-                                              0xff7f0002u};
+          const auto words = cdna4::build_flat(count == 3 ? cdna4::kGlobalLoadLdsDwordx3Flat
+                                                          : cdna4::kGlobalLoadLdsDwordx4Flat,
+                                               {.seg = 2, .addr = 2, .saddr = 0x7f, .vdst = 0xff});
           auto load = decoder->decode_window(words);
           ASSERT_TRUE(load.succeeded());
           f.plugin_group_->onAmdgpuBeforeExecuteInstruction(producer->pc, *load.value(), *producer);

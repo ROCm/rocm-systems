@@ -3,6 +3,7 @@
 
 #include "decode_test_util.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -57,10 +58,21 @@ protected:
   std::array<uint32_t, 2> encoding(unsigned kind, unsigned segment, bool vaddr, unsigned saddr,
                                    int offset = 0, bool lds = true) {
     const unsigned op = (modern() && lds ? 38 : rdna() ? 8 : 16) + kind;
+    return encoding_for_opcode(op, segment, vaddr, saddr, offset, lds);
+  }
+  std::array<uint32_t, 2> encoding_for_opcode(unsigned op, unsigned segment, bool vaddr,
+                                              unsigned saddr, int offset = 0, bool lds = true,
+                                              unsigned vdst = 8) {
     const unsigned bit13 = modern() ? vaddr : lds;
     return {0xdc000000u | (op << 18) | (segment << 14) | (bit13 << 13) |
                 (static_cast<unsigned>(offset) & (rdna() ? 0xfff : 0x1fff)),
-            2u | (saddr << 16) | (8u << 24)};
+            2u | (saddr << 16) | (vdst << 24)};
+  }
+  std::array<uint32_t, 2> global_wide_lds_encoding(unsigned count, unsigned saddr, int offset,
+                                                   unsigned vdst = 8) {
+    return encoding_for_opcode(count == 3 ? cdna4::kGlobalLoadLdsDwordx3Flat
+                                          : cdna4::kGlobalLoadLdsDwordx4Flat,
+                               2, false, saddr, offset, true, vdst);
   }
   void clear() {
     for (unsigned a = 0; a < 1408; a += 4)
@@ -352,10 +364,8 @@ TEST_P(FlatLdsTransfer, GlobalWideLoadsPreservePaddingInactiveLanesAndVgprs) {
             for (unsigned word = 0; word < count; ++word)
               memory.write32(address + offset + word * 4, 0x12340000 + lane * 16 + word);
           }
-          auto words = encoding(0, 2, false, scalar_base ? 4 : 127, offset);
-          words[0] = (words[0] & ~(0x7fu << 18)) | ((count == 3 ? 126u : 125u) << 18);
-          words[1] = (words[1] & 0x00ffffffu) | (255u << 24);
-          ASSERT_NO_FATAL_FAILURE(issue(words));
+          ASSERT_NO_FATAL_FAILURE(
+              issue(global_wide_lds_encoding(count, scalar_base ? 4 : 127, offset, 255)));
           for (unsigned address = 0; address < 1408; address += 4) {
             const int relative = static_cast<int>(address) - (128 + 64 + offset);
             const unsigned lane = relative / 16;
@@ -389,9 +399,7 @@ TEST_P(FlatLdsTransfer, GlobalWideLoadsRespectM0WidthAndWholePayloadBounds) {
           for (unsigned word = 0; word < count; ++word)
             memory.write32(0x20000 + lane * 32 + offset + word * 4, 0xabc000 + lane * 16 + word);
         }
-        auto words = encoding(0, 2, false, 127, offset);
-        words[0] = (words[0] & ~(0x7fu << 18)) | ((count == 3 ? 126u : 125u) << 18);
-        ASSERT_NO_FATAL_FAILURE(issue(words));
+        ASSERT_NO_FATAL_FAILURE(issue(global_wide_lds_encoding(count, 127, offset)));
         for (unsigned address = 0; address < 256; address += 4) {
           uint32_t expected = 0xcccccccc;
           for (unsigned lane = 0; lane < 3; ++lane) {
