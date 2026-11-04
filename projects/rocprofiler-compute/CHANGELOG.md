@@ -89,6 +89,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed PC sampling stall reasons counting samples where the wave issued an instruction.
 
+* Fixed `analyze` failing with a `SyntaxError` on gfx940 workloads. The roofline arithmetic intensities at L2, L1 and LDS also count F8 MFMA operations, as the HBM intensity does.
+
 ### Upcoming changes
 
 ### Known issues
