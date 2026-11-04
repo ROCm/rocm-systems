@@ -1013,8 +1013,8 @@ queue_controller_adopt_existing_queue(const hsa_queue_t* queue)
     // eraser and it runs only from this process's hsa_queue_destroy.
     if(!queue_destruction_intercepted.load(std::memory_order_acquire))
     {
-        ROCP_WARNING << "[queue-intercept] not adopting pre-existing queue: queue destruction is "
-                        "not intercepted, so the registration could not be removed";
+        ROCP_INFO << "[queue-intercept] not adopting pre-existing queue: queue destruction is "
+                     "not intercepted, so the registration could not be removed";
         return false;
     }
 
