@@ -14,10 +14,10 @@
 
 // Happy-path coverage for the llvm-offload-binary package container.
 //
-// package_module.code declares its entry with the device's plain arch (no sramecc/xnack
-// qualifiers), the way a --offload-arch=gfx90a build names it. On an agent whose ISA does carry
-// those qualifiers that is a compatible-but-not-exact match, which is the case a naive
-// exact-name lookup silently drops, so this is the interesting direction to test.
+// package_module.code holds one entry per arch the tests were built for, each declaring the plain
+// arch with no sramecc/xnack qualifiers, the way a --offload-arch=gfx90a build names it. On an
+// agent whose ISA does carry those qualifiers that is a compatible-but-not-exact match, which is
+// the case a naive exact-name lookup silently drops, so this is the interesting direction to test.
 
 namespace {
 
