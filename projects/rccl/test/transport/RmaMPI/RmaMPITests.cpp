@@ -523,6 +523,189 @@ TEST_P(RmaMPITest, MixedIPutIGetIPutSignal)
     }
 }
 
+// Earlier aggregated puts complete through the tail completion's sequence number, not a completion of their own.
+TEST_P(RmaMPITest, AggregatedIPutsCompleteBySequence)
+{
+    if(!SetUpFixture(2, 2))
+    {
+        return;
+    }
+
+    const size_t kBlock   = MessageSize();
+    const size_t kBufSize = kInflightN * kBlock;
+    const int    nCtx     = NumContexts();
+
+    void* sendBuf = AllocBuf(kBufSize);
+    void* recvBuf = AllocBuf(kBufSize);
+    ASSERT_NE(sendBuf, nullptr);
+    ASSERT_NE(recvBuf, nullptr);
+
+    if(worldRank_ == 0)
+    {
+        for(int i = 0; i < kInflightN; ++i)
+        {
+            FillBuf(static_cast<uint8_t*>(sendBuf) + i * kBlock, kBlock, /*seed=*/i);
+        }
+    }
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kBufSize, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kBufSize, &recvMh, &recvGh));
+
+    Barrier();
+    std::vector<void*> reqs(kInflightN, nullptr);
+    if(worldRank_ == 0)
+    {
+        for(int i = 0; i < kInflightN; ++i)
+        {
+            ASSERT_EQ(ncclSuccess,
+                      IPut( /*context=*/i % nCtx,
+                                 /*srcOff=*/i * kBlock, sendMh, kBlock,
+                                 /*dstOff=*/i * kBlock, recvMh,
+                                 /*peerRank=*/1, &reqs[i],
+                                 ncclRmaOptFlagsAggregateRequests));
+        }
+    }
+
+    // The batch stays queued until the first test() rings the doorbell.
+    Barrier();
+    if(worldRank_ == 1 && RetiresBatchOnTailCompletion())
+    {
+        EXPECT_TRUE(AllSentinel(recvBuf, kBufSize, 0)) << "batch posted before test()";
+    }
+    Barrier();
+
+    if(worldRank_ == 0)
+    {
+        // The first request of each context is unsignaled: polling it rings
+        // that context's doorbell and waits for the batch tail's completion.
+        for(int c = 0; c < nCtx; ++c)
+        {
+            EXPECT_TRUE(PollUntilDone(reqs[c]))
+                << "first request of ctx " << c << " did not complete";
+        }
+
+        const bool retiresBatch = RetiresBatchOnTailCompletion();
+        for(int i = nCtx; i < kInflightN; ++i)
+        {
+            const bool doneNow = TestOnce(reqs[i]);
+            if(retiresBatch)
+            {
+                EXPECT_TRUE(doneNow)
+                    << "request " << i << " (ctx " << (i % nCtx)
+                    << ") was not retired by its batch's single completion";
+            }
+            if(!doneNow)
+            {
+                EXPECT_TRUE(PollUntilDone(reqs[i]))
+                    << "request " << i << " (ctx " << (i % nCtx) << ") did not complete";
+            }
+        }
+    }
+    Barrier();
+
+    if(worldRank_ == 1)
+    {
+        for(int i = 0; i < kInflightN; ++i)
+        {
+            EXPECT_TRUE(VerifyBuf(static_cast<uint8_t*>(recvBuf) + i * kBlock,
+                                  kBlock, /*seed=*/i))
+                << "block " << i << " (ctx " << (i % nCtx) << ") mismatched";
+        }
+    }
+}
+
+// An unsignaled RDMA READ completes via a later write and atomic, so its data is in place when test() reports done.
+TEST_P(RmaMPITest, AggregatedMixedBatchCompletesInPostingOrder)
+{
+    if(!SetUpFixture(2, 2))
+    {
+        return;
+    }
+
+    const size_t kSize = MessageSize();
+
+    void* getBuf     = AllocBuf(kSize);
+    void* putSendBuf = AllocBuf(kSize);
+    void* putRecvBuf = AllocBuf(kSize);
+    void* psSendBuf  = AllocBuf(kSize);
+    void* psRecvBuf  = AllocBuf(kSize);
+    void* sigBuf     = AllocBuf(kSignalSize);
+    ASSERT_NE(getBuf,     nullptr);
+    ASSERT_NE(putSendBuf, nullptr);
+    ASSERT_NE(putRecvBuf, nullptr);
+    ASSERT_NE(psSendBuf,  nullptr);
+    ASSERT_NE(psRecvBuf,  nullptr);
+    ASSERT_NE(sigBuf,     nullptr);
+
+    if(worldRank_ == 0)
+    {
+        FillBuf(putSendBuf, kSize, /*seed=*/0x24);
+        FillBuf(psSendBuf,  kSize, /*seed=*/0x66);
+    }
+    if(worldRank_ == 1)
+    {
+        FillBuf(getBuf, kSize, /*seed=*/0x42);
+    }
+
+    void *getMh, *getGh, *putSendMh, *putSendGh, *putRecvMh, *putRecvGh;
+    void *psSendMh, *psSendGh, *psRecvMh, *psRecvGh, *sigMh, *sigGh;
+    ASSERT_EQ(ncclSuccess, RegMr(getBuf,     kSize,       &getMh,     &getGh));
+    ASSERT_EQ(ncclSuccess, RegMr(putSendBuf, kSize,       &putSendMh, &putSendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(putRecvBuf, kSize,       &putRecvMh, &putRecvGh));
+    ASSERT_EQ(ncclSuccess, RegMr(psSendBuf,  kSize,       &psSendMh,  &psSendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(psRecvBuf,  kSize,       &psRecvMh,  &psRecvGh));
+    ASSERT_EQ(ncclSuccess, RegMr(sigBuf,     kSignalSize, &sigMh,     &sigGh));
+
+    // Ctx2 must not repeat Ctx1: post the batch on the last context.
+    const int ctx = NumContexts() - 1;
+
+    Barrier();
+    void *getReq = nullptr, *putReq = nullptr, *psReq = nullptr;
+    if(worldRank_ == 0)
+    {
+        ASSERT_EQ(ncclSuccess,
+                  IGet( /*context=*/ctx, 0, getMh, kSize, 0, getMh, 1, &getReq,
+                       ncclRmaOptFlagsAggregateRequests));
+        ASSERT_EQ(ncclSuccess,
+                  IPut( /*context=*/ctx, 0, putSendMh, kSize, 0, putRecvMh, 1, &putReq,
+                       ncclRmaOptFlagsAggregateRequests));
+        ASSERT_EQ(ncclSuccess,
+                  IPutSignal( /*context=*/ctx,
+                                   0, psSendMh, kSize,
+                                   0, psRecvMh, 1,
+                                   0, sigMh, /*signalValue=*/0,
+                                   NCCL_NET_SIGNAL_OP_INC, &psReq,
+                                   ncclRmaOptFlagsAggregateRequests));
+    }
+
+    // The batch stays queued until the first test() rings the doorbell.
+    Barrier();
+    if(worldRank_ == 1 && RetiresBatchOnTailCompletion())
+    {
+        EXPECT_TRUE(AllSentinel(putRecvBuf, kSize, 0)) << "batch posted before test()";
+        EXPECT_EQ(ReadSignal(sigBuf), 0u) << "batch posted before test()";
+    }
+    Barrier();
+
+    if(worldRank_ == 0)
+    {
+        EXPECT_TRUE(PollUntilDone(getReq));
+        EXPECT_TRUE(VerifyBuf(getBuf, kSize, /*seed=*/0x42))
+            << "iget reported done before its data landed";
+        EXPECT_TRUE(PollUntilDone(putReq));
+        EXPECT_TRUE(PollUntilDone(psReq));
+    }
+    Barrier();
+
+    if(worldRank_ == 1)
+    {
+        EXPECT_TRUE(VerifyBuf(putRecvBuf, kSize, /*seed=*/0x24));
+        EXPECT_TRUE(VerifyBuf(psRecvBuf,  kSize, /*seed=*/0x66));
+        EXPECT_EQ(ReadSignal(sigBuf), 1u);
+    }
+}
+
 TEST_P(RmaMPIFixedSizeTest, IPutSignalZeroSize)
 {
     if(!SetUpFixture(2, 2))
