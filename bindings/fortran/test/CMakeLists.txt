@@ -23,6 +23,32 @@ if(NOT APPLE AND NOT WIN32)
     add_link_options(-Wl,--gc-sections)
 endif()
 
+include(GNUInstallDirs)
+
+# Installed tests: the executables go to bin/, and each binding's
+# CTestTestfile.cmake to bin/<binding>-fortran/, for ctest --test-dir.
+# fortran_binding_install_test(<ctest file> <test> <target> [<properties>])
+function(fortran_binding_install_test file test target)
+    install(
+        TARGETS ${target}
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT tests
+    )
+    file(APPEND "${file}" "add_test(${test} \"../${target}\")\n")
+    if(ARGN)
+        file(
+            APPEND "${file}"
+            "set_tests_properties(${test} PROPERTIES ${ARGN})\n"
+        )
+    endif()
+endfunction()
+
+set(_roctx_ctest
+    "${CMAKE_CURRENT_BINARY_DIR}/roctx-fortran-CTestTestfile.cmake"
+)
+set(_hip_ctest "${CMAKE_CURRENT_BINARY_DIR}/hip-fortran-CTestTestfile.cmake")
+file(WRITE "${_roctx_ctest}" "")
+file(WRITE "${_hip_ctest}" "")
+
 # ROCTx: one test, no GPU needed. The parent found rocprofiler-sdk-roctx.
 if(TARGET roctx_fortran AND _ROCTX_clients)
     if(ROCTX_FORTRAN_NEEDS_C_PACKAGE)
@@ -34,6 +60,17 @@ if(TARGET roctx_fortran AND _ROCTX_clients)
         )
         target_link_libraries(roctx_fortran_test_roctx PRIVATE roctx_fortran)
         add_test(NAME roctx_fortran_roctx COMMAND roctx_fortran_test_roctx)
+        fortran_binding_install_test(
+            "${_roctx_ctest}"
+            roctx_fortran_roctx
+            roctx_fortran_test_roctx
+        )
+        install(
+            FILES "${_roctx_ctest}"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}/roctx-fortran"
+            COMPONENT tests
+            RENAME CTestTestfile.cmake
+        )
     else()
         message(
             STATUS
@@ -94,6 +131,12 @@ function(hip_fortran_add_test name)
     set_tests_properties(
         hip_fortran_${id}
         PROPERTIES LABELS "gpu" SKIP_RETURN_CODE 77
+    )
+    fortran_binding_install_test(
+        "${_hip_ctest}"
+        hip_fortran_${id}
+        hip_fortran_test_${id}
+        "LABELS gpu SKIP_RETURN_CODE 77"
     )
 endfunction()
 
@@ -159,6 +202,11 @@ set_tests_properties(
     PROPERTIES
         PASS_REGULAR_EXPRESSION "HIP ERROR: hipErrorInvalidValue \\(code 1\\)"
         FAIL_REGULAR_EXPRESSION "FAILED!"
+)
+file(
+    APPEND "${_hip_ctest}"
+    [=[set_tests_properties(hip_fortran_check_message PROPERTIES PASS_REGULAR_EXPRESSION "HIP ERROR: hipErrorInvalidValue \\(code 1\\)" FAIL_REGULAR_EXPRESSION "FAILED!")
+]=]
 )
 
 # occupancy and cooperative_launch take a kernel's host stub, so the kernel is
@@ -263,6 +311,11 @@ else()
         COMMENT "Building the HIP code object used by the module_kernel test"
     )
     add_custom_target(hip_fortran_test_code_object DEPENDS "${_code_object}")
+    install(
+        FILES "${_code_object}"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}/hip-fortran"
+        COMPONENT tests
+    )
 
     hip_fortran_add_test(module_kernel)
     add_dependencies(
@@ -272,6 +325,10 @@ else()
     set_tests_properties(
         hip_fortran_module_kernel
         PROPERTIES ENVIRONMENT "HIP_FORTRAN_TEST_CODE_OBJECT=${_code_object}"
+    )
+    file(
+        APPEND "${_hip_ctest}"
+        "set_tests_properties(hip_fortran_module_kernel PROPERTIES ENVIRONMENT HIP_FORTRAN_TEST_CODE_OBJECT=vecadd_kernel.co)\n"
     )
 
     # hipLibrary* on the same code object, and the module behind the library.
@@ -284,4 +341,15 @@ else()
         hip_fortran_library_module
         PROPERTIES ENVIRONMENT "HIP_FORTRAN_TEST_CODE_OBJECT=${_code_object}"
     )
+    file(
+        APPEND "${_hip_ctest}"
+        "set_tests_properties(hip_fortran_library_module PROPERTIES ENVIRONMENT HIP_FORTRAN_TEST_CODE_OBJECT=vecadd_kernel.co)\n"
+    )
 endif()
+
+install(
+    FILES "${_hip_ctest}"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/hip-fortran"
+    COMPONENT tests
+    RENAME CTestTestfile.cmake
+)
