@@ -488,8 +488,10 @@ protected:
     ASSERT_NE(decoder, nullptr);
   }
 
-  /// Record a decoded tensor DMA instruction in the wave's trace, as execution does.
-  void execute_tensor(int wave, bool is_load) {
+  /// Record a decoded tensor DMA instruction in the wave's trace, as execution
+  /// does before running it. It does not execute the instruction; transfer()
+  /// delivers the issue observation separately.
+  void record_tensor_instruction(int wave, bool is_load) {
     const std::array<uint32_t, 3> words{is_load ? 0xd0710001u : 0xd0714001u, 0x7c000000u,
                                         0x7c7c0c00u};
     util::StringDiagnostic error;
@@ -504,7 +506,7 @@ protected:
   bool transfer(int wave, bool is_load, std::span<const TensorDmaLdsRange> ranges) {
     // Each access gets a distinct PC so reports are not deduplicated.
     waves[wave]->pc += 16;
-    execute_tensor(wave, is_load);
+    record_tensor_instruction(wave, is_load);
     const size_t previous = sink->str().size();
     fixture.plugin_group_->onAmdgpuTensorDmaIssued(
         {.is_load = is_load, .element_size_bytes = sizeof(uint32_t), .lds_ranges = ranges},
