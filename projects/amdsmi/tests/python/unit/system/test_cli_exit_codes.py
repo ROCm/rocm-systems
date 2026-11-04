@@ -1697,6 +1697,26 @@ def _build_set_specs(set_value):
             "amdsmi_set_gpu_accelerator_partition_mem_alloc_mode": setfn
         }
 
+    def ampp_activate(cmd, mode):
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return "profile_0", {
+            "amdsmi_activate_ampp_profile": setfn,
+            # Hit by the except block's "available profiles" lookup; failing it
+            # too just degrades the error message, so NOT_SUPPORTED is fine here.
+            "amdsmi_get_ampp_profiles": _raise_not_supported,
+        }
+
+    def ampp_configure(cmd, mode):
+        AmppConfigureArgs = collections.namedtuple(
+            "ampp_configure_args", ["profile_name", "fields", "file_path"]
+        )
+        arg = AmppConfigureArgs("profile_0", [], None)
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return arg, {
+            "amdsmi_configure_ampp_profile": setfn,
+            "amdsmi_get_ampp_profiles": _raise_not_supported,
+        }
+
     return {
         "fan": fan,
         "perf_level": perf_level,
@@ -1714,6 +1734,8 @@ def _build_set_specs(set_value):
         "process_isolation": process_isolation,
         "mem_carveout": mem_carveout,
         "compute_partition_mem_alloc_mode": compute_partition_mem_alloc_mode,
+        "ampp_activate": ampp_activate,
+        "ampp_configure": ampp_configure,
     }
 
 

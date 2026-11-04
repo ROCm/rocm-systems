@@ -56,7 +56,7 @@ public:
         exited.store(false);
 
         internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
-        consumer = std::thread{&consumer_thread_t::consumer_loop, this};
+        consumer = std::thread(&consumer_thread_t::consumer_loop, this);
         internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
     }
 
@@ -117,7 +117,7 @@ protected:
     std::atomic<size_t>        write_ptr{0};
     std::atomic<size_t>        read_ptr{0};
     std::array<DataType, SIZE> buffer;
-    std::thread                consumer;
+    std::thread                consumer{};
     std::condition_variable    cv;
 };
 

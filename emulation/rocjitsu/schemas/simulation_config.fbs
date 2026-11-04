@@ -17,6 +17,8 @@ table ComputeUnitConfig {
   // Scratch-addressable wave slots per CU. Omitted in legacy checkpoints,
   // which retain the execution-slot count as their scratch capacity.
   scratch_slots_per_cu: uint32;
+  // Unpaused CU steps without process instruction progress; zero disables this inactivity budget.
+  gws_wait_limit: uint32 = 1000000;
 }
 
 /// Configuration for a command processor.
@@ -290,6 +292,72 @@ table ExecutionThreadChoice {
   async_helper_threads: uint32;
 }
 
+/// Globally named GPU instance. The top-level vm and topology are its shared
+/// profile in the first system-manifest version. KFD GPU ID, PCI location, and
+/// DRM render minor are node-local; unique_id must be unique across the graph.
+table SystemGpuInstanceDef {
+  id: string;
+  profile: string;          // Omitted or "vm" selects the top-level vm/topology.
+  gpu_id: uint32;           // Nonzero KFD GPU ID on this node.
+  unique_id: uint64;        // Nonzero instance identity advertised by KFD.
+  location_id: uint32;      // PCI bus/device/function encoded for KFD.
+  drm_render_minor: uint32; // Local DRM render minor (at least 128). Manifest
+                            // sessions interpose only this minor; other opens
+                            // fall through to the host. Legacy single-GPU
+                            // sessions accept any render minor for compatibility.
+}
+
+/// A daemon or guest owns only the GPU instances listed on its selected node.
+table SystemNodeDef {
+  id: string;
+  gpus: [SystemGpuInstanceDef];
+}
+
+enum SystemEndpointKind: byte {
+  gpu,
+  switch,
+  network,
+}
+
+/// Named endpoint in the descriptive system graph. A GPU endpoint names one
+/// GPU instance; a network endpoint names one system node. Switch endpoints
+/// may stand for a whole disclosed switch tier in a schematic fixture.
+table SystemEndpointDef {
+  id: string;
+  kind: SystemEndpointKind;
+  gpu: string;
+  node: string;
+}
+
+enum SystemLinkClass: byte {
+  scale_up,
+  net,
+  infinity_fabric,
+}
+
+/// Bidirectional descriptive connectivity, not a peer-memory access grant.
+table SystemLinkDef {
+  src: string;
+  dst: string;
+  link_class: SystemLinkClass;
+}
+
+/// Descriptive local coherence-domain membership. This metadata is validated
+/// for unique, nonempty, node-local members but grants no coherence or peer
+/// memory access capability.
+table SystemCoherenceDomainDef {
+  id: string;
+  gpus: [string];
+}
+
+/// A complete declarative graph. Runtime projections select one local node.
+table SystemManifestDef {
+  nodes: [SystemNodeDef];
+  endpoints: [SystemEndpointDef];
+  links: [SystemLinkDef];
+  coherence_domains: [SystemCoherenceDomainDef];
+}
+
 /// Top-level simulation configuration.
 table SimulationConfig {
   max_ticks: uint64;             // Maximum simulation ticks before halting.
@@ -315,6 +383,14 @@ table SimulationConfig {
   // Shared async helpers across this VM. -1 selects the table; zero disables.
   // Append after thread_allocations to preserve existing checkpoint field IDs.
   async_helper_threads: int32 = -1;
+  // Optional override for all CUs: "off", "on" (ordinary only), or "all" (with XCNT).
+  // Omission preserves the per-CU diagnostic settings and defaults.
+  wait_checking: string;
+  // Append after all existing fields: checkpoint buffers use this table too.
+  system: SystemManifestDef;
+  // Per-launch local projection of a system manifest. Required for multi-node
+  // construction; one-node and legacy configs may omit it.
+  local_node: string;
 }
 
 root_type SimulationConfig;

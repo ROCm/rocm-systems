@@ -190,11 +190,22 @@ def get_ROCm_version():
 
 # Get HIP Version
 def get_HIP_version():
-	result = run_cli_command("hipconfig --version")
-	if result.stdout:
-		summary = result.stdout.strip()
-	else:
-		summary = "Unable to detect"
+	rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+	hip_version_h = os.path.join(rocm_path, "include", "hip", "hip_version.h")
+	summary = "Unable to detect"
+	try:
+		with open(hip_version_h, encoding="utf-8") as f:
+			text = f.read()
+		kv = dict(re.findall(r'#define\s+(HIP_VERSION_\w+)\s+([0-9"]\S*)', text))
+		major   = kv.get("HIP_VERSION_MAJOR")
+		minor   = kv.get("HIP_VERSION_MINOR")
+		patch   = kv.get("HIP_VERSION_PATCH")
+		githash = kv.get("HIP_VERSION_GITHASH", "").strip('"')
+		if major and minor and patch:
+			summary = f"{major}.{minor}.{patch}" + (f"-{githash}" if githash else "")
+	except OSError:
+		pass
+	result = CommandResult(stdout=summary, stderr="")
 	return summary, result
 
 

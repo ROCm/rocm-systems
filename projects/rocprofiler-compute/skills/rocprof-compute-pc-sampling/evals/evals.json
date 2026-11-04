@@ -4,6 +4,7 @@
       "id": "pcs-which-instruction-stalls",
       "skill_should_trigger": true,
       "prompt": "which instruction in my MI300 kernel stalls the most?",
+      "sample": "vmem.hip",
       "expected_behavior": [
         "queries the device for supported PC sampling configurations before choosing an interval",
         "collects with --experimental --pc-sampling",
@@ -18,6 +19,7 @@
       "id": "pcs-source-line-attribution",
       "skill_should_trigger": true,
       "prompt": "map the hot GPU instructions back to my HIP source lines",
+      "sample": "vmem.hip",
       "expected_behavior": [
         "states that source line mapping requires the application to be built with debug info",
         "notes that samples map to assembly even without debug info"
@@ -41,6 +43,7 @@
       "id": "pcs-export-disassembly",
       "skill_should_trigger": true,
       "prompt": "export the annotated disassembly with sample counts from my pc sampling workload",
+      "sample": "vmem.hip",
       "expected_behavior": [
         "uses --output-format csv or db",
         "notes that the per-kernel disassembly is written under per_kernel_pc_sampling"

@@ -31,6 +31,7 @@
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
@@ -538,6 +539,25 @@ TEST_F(SdmaQueueSchedulerTest, HostDoorbellSynchronizesWithoutExtendingPublished
   EXPECT_TRUE(scheduler_.detach(queue));
 }
 
+TEST_F(SdmaQueueSchedulerTest, HostDoorbellSynchronizationTimesOutWithoutDiscardingWork) {
+  memory_->store<uint32_t>(kRing, 0);
+  memory_->set_reads_unavailable(true);
+  alignas(8) uint64_t doorbell = sizeof(uint32_t);
+  SdmaQueueConfig info = queue_info();
+  info.doorbell_base = &doorbell;
+  info.host_accessible = true;
+  const SdmaQueueScheduler::Handle queue = scheduler_.attach(info, {});
+  ASSERT_TRUE(queue);
+
+  EXPECT_FALSE(scheduler_.synchronize_host_queue_for_test(kProcessId, kQueueId, 20ms));
+  EXPECT_TRUE(scheduler_.contains(queue));
+  EXPECT_EQ(memory_->load<uint64_t>(kReadPointer), 0u);
+  memory_->set_reads_unavailable(false);
+  EXPECT_TRUE(scheduler_.synchronize_host_queue_for_test(kProcessId, kQueueId));
+  EXPECT_EQ(memory_->load<uint64_t>(kReadPointer), sizeof(uint32_t));
+  EXPECT_TRUE(scheduler_.detach(queue));
+}
+
 TEST_F(SdmaQueueSchedulerTest, HostDoorbellPublicationDoesNotTearAcross32BitBoundary) {
   constexpr uint64_t kInitialCursor = (uint64_t{1} << 32) - sizeof(uint32_t);
   constexpr uint32_t kPackets = 128;
@@ -770,6 +790,35 @@ TEST_F(SdmaQueueSchedulerTest, RetriesUnavailablePacketWithoutSecondDoorbell) {
   EXPECT_TRUE(scheduler_.detach(queue));
 }
 
+TEST_F(SdmaQueueSchedulerTest, TestSynchronizationTimesOutWithoutDiscardingBlockedPacket) {
+  memory_->store<uint32_t>(kRing, 0);
+  memory_->set_reads_unavailable(true);
+  const SdmaQueueScheduler::Handle queue = scheduler_.attach(queue_info(), {});
+  ASSERT_TRUE(queue);
+  ASSERT_EQ(scheduler_.notify(queue, sizeof(uint32_t)), QueueSubmissionStatus::Accepted);
+
+  EXPECT_FALSE(scheduler_.synchronize_queue_for_test(kProcessId, kQueueId, {}, 20ms));
+  EXPECT_TRUE(scheduler_.contains(queue));
+  EXPECT_EQ(memory_->load<uint64_t>(kReadPointer), 0u);
+  memory_->set_reads_unavailable(false);
+  EXPECT_TRUE(scheduler_.synchronize_queue_for_test(kProcessId, kQueueId));
+  EXPECT_EQ(memory_->load<uint64_t>(kReadPointer), sizeof(uint32_t));
+}
+
+TEST_F(SdmaQueueSchedulerTest, TestSynchronizationTimesOutWhileServiceIsActive) {
+  memory_->store<uint32_t>(kRing, 0);
+  memory_->block_reads();
+  const SdmaQueueScheduler::Handle queue = scheduler_.attach(queue_info(), {});
+  ASSERT_TRUE(queue);
+  ASSERT_EQ(scheduler_.notify(queue, sizeof(uint32_t)), QueueSubmissionStatus::Accepted);
+  ASSERT_TRUE(memory_->wait_for_read_attempts(1));
+
+  EXPECT_FALSE(scheduler_.synchronize_queue_for_test(kProcessId, kQueueId, {}, 20ms));
+  memory_->unblock_reads();
+  EXPECT_TRUE(scheduler_.synchronize_queue_for_test(kProcessId, kQueueId));
+  EXPECT_EQ(memory_->load<uint64_t>(kReadPointer), sizeof(uint32_t));
+}
+
 TEST_F(SdmaQueueSchedulerTest, GracefulDetachPreservesBlockedPacketStateUntilItDrains) {
   memory_->store<uint32_t>(kRing, 0);
   memory_->set_reads_unavailable(true);
@@ -780,12 +829,14 @@ TEST_F(SdmaQueueSchedulerTest, GracefulDetachPreservesBlockedPacketStateUntilItD
   ASSERT_TRUE(wait_until([this]() { return memory_->read_attempts() != 0; }));
   EXPECT_EQ(scheduler_.prepare_detach(queue), QueuePrepareCloseStatus::Busy);
   EXPECT_TRUE(scheduler_.contains(queue));
+  EXPECT_FALSE(gpu_vm_.unregister_address_space(address_space_));
 
   memory_->set_reads_unavailable(false);
   ASSERT_TRUE(
       wait_until([this]() { return memory_->load<uint64_t>(kReadPointer) == sizeof(uint32_t); }));
   EXPECT_EQ(scheduler_.prepare_detach(queue), QueuePrepareCloseStatus::Ready);
   EXPECT_FALSE(scheduler_.contains(queue));
+  EXPECT_TRUE(gpu_vm_.unregister_address_space(address_space_));
 }
 
 TEST_F(SdmaQueueSchedulerTest, DisableRejectsBlockedPacketStateSoGracefulDetachCanDrain) {
@@ -815,13 +866,20 @@ TEST_F(SdmaQueueSchedulerTest, DetachWaitsForActiveServiceAndRejectsLaterNotific
 
   EXPECT_EQ(scheduler_.notify(queue, sizeof(uint32_t)), QueueSubmissionStatus::Accepted);
   ASSERT_TRUE(memory_->wait_for_read_attempts(1));
-  std::future<bool> detached =
-      std::async(std::launch::async, [this, queue]() { return scheduler_.detach(queue); });
+  std::future<std::pair<bool, bool>> detached = std::async(std::launch::async, [this, queue]() {
+    const bool closed = scheduler_.detach(queue);
+    // Check on the closing thread before future synchronization gives the
+    // worker another opportunity to release its QueueRecord reference.
+    const bool unregistered = gpu_vm_.unregister_address_space(address_space_);
+    return std::pair{closed, unregistered};
+  });
   EXPECT_EQ(detached.wait_for(20ms), std::future_status::timeout);
 
   memory_->permit_one_read();
   ASSERT_EQ(detached.wait_for(1s), std::future_status::ready);
-  EXPECT_TRUE(detached.get());
+  const auto [closed, unregistered] = detached.get();
+  EXPECT_TRUE(closed);
+  EXPECT_TRUE(unregistered);
 
   const uint32_t reads_after_detach = memory_->read_attempts();
   EXPECT_EQ(scheduler_.notify(queue, 2 * sizeof(uint32_t)), QueueSubmissionStatus::Faulted);

@@ -5,8 +5,7 @@
  */
 
 #pragma once
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 #include "os/os.hpp"
 #include <string>
 #include <utility>
@@ -25,5 +24,4 @@ class UriLocator {
                                                           amd::Os::FileDesc* uri_fd) = 0;
 };
 }  // namespace amd::device
-#endif
 #endif

@@ -201,21 +201,31 @@ create_amd_queue(hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t
                 // then hand that back to the caller in place of the original queue.
                 //
                 // NOTE: the InterceptQueue is created via the classic hsa_queue_create path, so
-                // the descriptor's device-memory ring-buffer flag is not honored while a
-                // non-inline profiling context (e.g. --sys-trace / HIP graph tracing) is active;
-                // the queue falls back to a system-memory ring.
+                // the descriptor's device-memory flags are not honored while a non-inline
+                // profiling context (e.g. --sys-trace / HIP graph tracing) is active; the queue
+                // falls back to a system-memory ring. The flags are cleared in the descriptor
+                // below because callers (HIP) read them back after the call to decide how to
+                // write packets and kernel arguments.
                 //
                 // Known limitation: the replacement InterceptQueue does not preserve the
                 // descriptor's priority or CU-mask settings. A CU-partitioned or high-priority
                 // stream may behave differently while profiled. Passing these attributes through
                 // (e.g. via SetPriority / SetCUMasking on the replacement queue) is deferred to a
                 // follow-up change.
-                ROCP_WARNING
-                    << "[queue-intercept] device-memory ring-buffer requested but profiling "
-                       "requires system-memory InterceptQueue; falling back to system-memory "
-                       "ring for agent "
-                    << agent.handle
-                    << " (priority and CU-mask from the descriptor are not preserved)";
+                constexpr uint16_t device_mem_flags =
+                    HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF |
+                    HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR;
+                const bool device_mem_requested = (descs[desc_idx].flags & device_mem_flags) != 0;
+                descs[desc_idx].flags &= static_cast<uint16_t>(~device_mem_flags);
+
+                ROCP_WARNING << "[queue-intercept] replacing hsa_amd_queue_create queue with a "
+                                "system-memory InterceptQueue for agent "
+                             << agent.handle
+                             << (device_mem_requested
+                                     ? " (device-memory placement was requested; cleared from "
+                                       "the descriptor flags)"
+                                     : "")
+                             << "; priority and CU mask from the descriptor are not preserved";
 
                 const auto&    compute_params = descs[desc_idx].engine.compute;
                 const uint32_t ring_packets   = static_cast<uint32_t>(
@@ -904,7 +914,7 @@ enable_queue_intercept()
 {
     for(const auto& itr : context::get_registered_contexts())
     {
-        constexpr auto expected_context_size = 224UL;
+        constexpr auto expected_context_size = 232UL;
         static_assert(
             sizeof(context::context) == expected_context_size,
             "If you added a new field to context struct, make sure there is a check here if it "
@@ -928,7 +938,8 @@ enable_queue_intercept()
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_EVENT);
 
         if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
-           itr->dispatch_spm || has_scratch_reporting || itr->device_counter_collection ||
+           itr->dispatch_spm || itr->device_spm || has_scratch_reporting ||
+           itr->device_counter_collection ||
            (itr->device_thread_trace && itr->device_thread_trace->requires_queue_intercept()) ||
            itr->dispatch_thread_trace || has_hip_graph_tracing || has_kernel_replay ||
            has_hip_event_tracing)
@@ -955,14 +966,21 @@ queue_controller_init(HsaApiTable* table)
     if(enable_queue_intercept()) queue_init();
 }
 
-void
+bool
 queue_controller_sync()
 {
     // sync the queue interceptor
     queue_interposition::interposition_sync();
 
+    bool _drained = true;
     if(get_queue_controller())
-        get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
+    {
+        // Every queue is synced even after one times out, so a slow queue cannot hide the state of
+        // the ones behind it.
+        get_queue_controller()->iterate_queues(
+            [&_drained](const Queue* _queue) { _drained = _queue->sync() && _drained; });
+    }
+    return _drained;
 }
 
 void

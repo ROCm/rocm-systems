@@ -176,6 +176,7 @@ def _build_args():
         clock=False,
         mem_carveout=False,
         partition=False,
+        numa=False,
     )
 
 

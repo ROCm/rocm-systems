@@ -1,0 +1,252 @@
+# MIT License
+#
+# Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+"""Python environment checks: interpreter version and required/optional modules."""
+
+from __future__ import absolute_import
+
+from rocprofv3.doctor_layout import same_installation
+from rocprofv3.doctor_registry import register
+from rocprofv3.doctor_result import (
+    make_fail,
+    make_pass,
+    make_warn,
+    PROBE_PROCESS,
+    SEV_ERROR,
+    SEV_INFO,
+    SEV_WARNING,
+)
+
+MIN_PYTHON = (3, 6)
+
+
+def _module_check(accessor, module, purpose, remediation, failure_factory):
+    ok, detail = accessor.can_import(module)
+    data = {"module": module, "purpose": purpose}
+    if not ok:
+        data["error"] = detail
+        return failure_factory(
+            "{} is not importable ({})".format(module, detail), remediation, data
+        )
+    location = accessor.module_file(module)
+    if location:
+        data["location"] = location
+    if detail:
+        data["version"] = detail
+        return make_pass("{} {} available".format(module, detail), "", data)
+    return make_pass("{} available".format(module), "", data)
+
+
+@register(
+    id="python.version",
+    group="python",
+    title="Python interpreter is 3.6 or newer",
+    severity=SEV_ERROR,
+    order=70,
+)
+def check_python_version(accessor):
+    version = accessor.python_version()
+    data = {
+        "version": ".".join(["{}".format(part) for part in version]),
+        "executable": accessor.python_executable(),
+    }
+    if version >= MIN_PYTHON:
+        return make_pass("Python {}".format(data["version"]), "", data)
+    return make_fail(
+        "Python {} is older than the required 3.6".format(data["version"]),
+        "Install Python 3.6 or newer and re-run with it:\n"
+        "  python3.9 $(which rocprofv3) ...",
+        data,
+    )
+
+
+@register(
+    id="python.sqlite3",
+    group="python",
+    title="sqlite3 module usable (rocpd convert/merge/query)",
+    severity=SEV_WARNING,
+    order=71,
+    probe=PROBE_PROCESS,
+)
+def check_sqlite3(accessor):
+    # rocprofv3 writes rocpd databases from C++ (source/lib/output/sql) and
+    # never imports sqlite3; only the `rocpd` Python CLI (importer, merge,
+    # time_window) needs it. So a missing sqlite3 is a warning, not an error.
+    ok, detail = accessor.can_import("sqlite3")
+    data = {"module": "sqlite3", "purpose": "`rocpd` convert/merge/query"}
+    only_rocpd = (
+        "\nOnly the `rocpd` command needs it; `rocprofv3 --output-format rocpd` "
+        "works without it."
+    )
+    if not ok:
+        data["error"] = detail
+        return make_warn(
+            "sqlite3 is not importable ({}); the `rocpd` command cannot read "
+            "databases".format(detail),
+            "This Python was built without SQLite support. Install a complete "
+            "Python:\n  sudo apt install python3 libsqlite3-0" + only_rocpd,
+            data,
+        )
+    usable, why = accessor.sqlite_usable()
+    if not usable:
+        data["error"] = why
+        return make_warn(
+            "sqlite3 imports but cannot open an in-memory database ({}); the "
+            "`rocpd` command cannot read databases".format(why),
+            "This Python was built against a broken or missing SQLite library. "
+            "Install a complete Python:\n  sudo apt install python3 libsqlite3-0"
+            + only_rocpd,
+            data,
+        )
+    return make_pass("sqlite3 imports and can open a database", "", data)
+
+
+@register(
+    id="python.ctypes",
+    group="python",
+    title="ctypes module importable",
+    severity=SEV_ERROR,
+    order=72,
+    probe=PROBE_PROCESS,
+)
+def check_ctypes(accessor):
+    return _module_check(
+        accessor,
+        "ctypes",
+        "used by rocprofv3-avail to bind the list-avail library",
+        "This Python was built without libffi support. Install a complete "
+        "Python:\n  sudo apt install python3 libffi-dev",
+        make_fail,
+    )
+
+
+@register(
+    id="python.importlib",
+    group="python",
+    title="importlib module importable",
+    severity=SEV_ERROR,
+    order=73,
+    probe=PROBE_PROCESS,
+)
+def check_importlib(accessor):
+    return _module_check(
+        accessor,
+        "importlib",
+        "used to load rocpd output plugins",
+        "Reinstall Python; importlib is part of the standard library.",
+        make_fail,
+    )
+
+
+@register(
+    id="python.pyyaml",
+    group="python",
+    title="pyyaml importable (YAML input files)",
+    severity=SEV_WARNING,
+    order=74,
+    probe=PROBE_PROCESS,
+)
+def check_pyyaml(accessor):
+    return _module_check(
+        accessor,
+        "yaml",
+        "required for `rocprofv3 --input config.yaml`",
+        "python3 -m pip install pyyaml\n"
+        "Only needed for YAML input files; safe to ignore otherwise.",
+        make_warn,
+    )
+
+
+@register(
+    id="python.pandas",
+    group="python",
+    title="pandas importable (rocpd CSV conversion)",
+    severity=SEV_INFO,
+    order=75,
+    probe=PROBE_PROCESS,
+)
+def check_pandas(accessor):
+    return _module_check(
+        accessor,
+        "pandas",
+        "used by some rocpd conversion paths",
+        "python3 -m pip install pandas\nOptional; safe to ignore otherwise.",
+        make_warn,
+    )
+
+
+@register(
+    id="python.otf2",
+    group="python",
+    title="otf2 importable (OTF2 output format)",
+    severity=SEV_INFO,
+    order=76,
+    probe=PROBE_PROCESS,
+)
+def check_otf2(accessor):
+    return _module_check(
+        accessor,
+        "otf2",
+        "required for `rocprofv3 --output-format otf2`",
+        "python3 -m pip install otf2\n"
+        "Only needed for OTF2 output; safe to ignore otherwise.",
+        make_warn,
+    )
+
+
+@register(
+    id="python.rocprofv3-package",
+    group="python",
+    title="rocprofv3 Python package importable",
+    severity=SEV_ERROR,
+    order=77,
+    probe=PROBE_PROCESS,
+)
+def check_rocprofv3_package(accessor):
+    ok, detail = accessor.can_import("rocprofv3")
+    location = accessor.module_file("rocprofv3")
+    data = {"module": "rocprofv3", "location": location}
+
+    if not ok:
+        data["error"] = detail
+        site_packages = accessor.join(accessor.rocm_root, "lib/python3/site-packages")
+        return make_fail(
+            "the rocprofv3 Python package is not importable ({})".format(detail),
+            "export PYTHONPATH={}:$PYTHONPATH".format(site_packages),
+            data,
+        )
+
+    # This tool *is* the rocprofv3 package, so the import can only fail in
+    # exotic situations -- but the location is worth reporting, because an
+    # unexpected one means a stale copy is shadowing the installed package.
+    if location:
+        root_real = accessor.realpath(accessor.rocm_root)
+        if not same_installation(accessor, location, accessor.rocm_root):
+            return make_warn(
+                "rocprofv3 package loaded from {}, which is outside {}".format(
+                    location, root_real
+                ),
+                "A stale copy may be shadowing the installed package; check "
+                "PYTHONPATH.",
+                data,
+            )
+    return make_pass("rocprofv3 package importable from {}".format(location), "", data)

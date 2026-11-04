@@ -6,11 +6,11 @@
 ///        words for the DBI relocation-only path.
 ///
 /// This is the byte emitter; it owns SOPP branch math and basic plan
-/// well-formedness checks (original_size 4 or 8, original_words count
-/// matches, branch ranges fit). It does not touch the ELF, does not own
-/// layout assignment, and does not enforce milestone-scoped restrictions
-/// (e.g. "only emit s_nop placeholder bodies" — that lives in the
-/// orchestrator as `validate_inline_nop_plan` in instrumentor.h).
+/// well-formedness checks (original_size 4 or 8 when splicing or relocating,
+/// original_words count matches, requested branch ranges fit). It does not
+/// touch the ELF, own layout assignment, or enforce milestone-scoped restrictions
+/// (e.g. "only emit s_nop placeholder bodies" — that lives in the orchestrator
+/// as `validate_inline_nop_plan` in instrumentor.h).
 /// See code_object_patcher.h for the ELF mutation layer.
 
 #pragma once
@@ -58,6 +58,26 @@ struct SpecialStateSlot {
   uint8_t width = 1;      ///< Register lanes: 2 for EXEC/VCC, 1 for M0.
 };
 
+/// @brief One ordered copy in the parallel assignment of guest VGPR arguments.
+struct ProbeArgumentMove {
+  uint16_t destination = 0;
+  uint16_t source = 0;
+  constexpr bool operator==(const ProbeArgumentMove &) const = default;
+};
+
+/// @brief Framework-owned scalar snapshot of a VGPR's lane zero at kernel entry.
+struct EntryVgprCapture {
+  uint16_t vgpr = 0;
+  uint16_t sgpr = 0;
+};
+
+/// @brief Preserve an ordinary guest register in an additional allocated register.
+struct RegisterSave {
+  RegClass cls = RegClass::VGPR;
+  uint16_t source = 0;
+  uint16_t destination = 0;
+};
+
 /// @brief Builder-facing description of one trampoline.
 ///
 /// Coordinates are .text-relative byte offsets. The orchestrator fills this
@@ -75,6 +95,10 @@ struct TrampolinePlan {
   std::vector<InlineAsmItem> before_items;
   std::vector<InlineAsmItem> after_items;
   bool emit_original = true;
+  /// A dispatch-only callback returns to an untouched original entry; it has
+  /// no anchor splice and imposes no relocation-size constraint on that entry.
+  bool patch_anchor = true;
+  bool returns_to_kernel = true;
 
   //----------------------------------------------------------------------------
   // Probe-call resources (filled by plan_probe_call(); left at defaults for the
@@ -87,12 +111,13 @@ struct TrampolinePlan {
   // TrampolinePlan for now since this is the builder's one input;
   // lift back out into a dedicated resource-plan type if it grows unwieldy.
   //----------------------------------------------------------------------------
-  /// Upper bound (exclusive) for envelope/temp SGPR selection: the kernel's own
-  /// allocation. find_free_sgpr* never picks an index >= this, so a temp cannot
-  /// land past the kernel's .sgpr_count. Defaults to the conservative cross-ISA
-  /// allocatable bound (no kernel-specific limit); the orchestrator narrows it to
-  /// the patched kernel's actual count.
+  /// The kernel's SGPR allocation. Envelope/temp SGPR selection stays below
+  /// ordinary_sgpr_bound() of it, so a temp cannot land past the kernel's
+  /// .sgpr_count or in a CDNA kernel's special-register tail. Defaults to the
+  /// conservative cross-ISA allocatable bound (no kernel-specific limit); the
+  /// orchestrator narrows it to the patched kernel's actual count.
   uint32_t kernel_sgpr_count = REGISTER_SET_ALLOCATABLE_SGPRS;
+  uint32_t kernel_vgpr_count = 256;
 
   /// Argument dwords to materialize into the ABI's argument VGPRs before the
   /// call, in order from arg_vgpr_base. Mostly an emit-time input rather than a
@@ -106,6 +131,18 @@ struct TrampolinePlan {
   /// to be restorable from somewhere. An EXEC-sourced argument then reads that
   /// same temp rather than `exec`, which the widen has already overwritten.
   std::vector<ProbeArgValue> probe_args;
+  std::vector<ProbeArgumentMove> argument_moves;
+  std::optional<uint16_t> argument_copy_temp;
+
+  /// Base of the framework's persistent entry-storage SGPR pair: the two
+  /// registers the kernel-entry prologue loaded the DBI payload pointer into.
+  /// Set on every site of a kernel that has an entry prologue, not only the ones
+  /// passing the pointer on: the pair has to survive from entry to every later
+  /// site, so the envelope's own temp selection avoids it either way. Unset when
+  /// the kernel has no prologue, which makes a LogBufferPtr* argument fail closed.
+  std::optional<uint16_t> entry_storage_base;
+  std::vector<EntryVgprCapture> entry_vgpr_captures;
+  std::vector<RegisterSave> register_saves;
 
   /// Run the probe body under EXEC = -1 instead of the anchor mask. The envelope
   /// opens a full-mask window for the spill stores and argument writes either
@@ -120,21 +157,28 @@ struct TrampolinePlan {
   uint16_t link_pair_base = 30;  ///< Return-link pair, derived from the probe cc.
   uint16_t arg_vgpr_base = 0;    ///< First argument VGPR, derived from the probe ABI.
   uint16_t target_pair_base = 0; ///< Dead even SGPR pair holding the probe address.
-  bool preserve_scc = true;      ///< v0 preserves SCC across target materialization.
+  bool preserve_scc = true;      ///< Preserve SCC across target materialization.
   uint16_t scc_temp = 0;         ///< Dead SGPR holding saved SCC across the call.
 
-  // Special-state preservation: set by the orchestrator when the probe body
-  // clobbers the register; plan_probe_call allocates a dead SGPR temp for each
-  // and records it in special_state_saves (one plan/emit loop, not a branch each).
+  /// @brief Caller-requested special-state preservation across the probe call.
+  ///
+  /// plan_probe_call() allocates a dead SGPR temp for each saved register (a pair
+  /// for EXEC/VCC, one SGPR for M0) and records it in special_state_saves. EXEC is
+  /// also saved for a full-mask window: spills, argument writes, or force_full_exec.
+  /// @see Instrumentor::patch_with_debug_summaries() for the caller's policy.
   bool preserve_exec = false;
   bool preserve_vcc = false;
   bool preserve_m0 = false;
   std::vector<SpecialStateSlot> special_state_saves; ///< Filled by plan_probe_call.
-  /// {link} | {target pair} | {scc/special temps} | {argument VGPRs}; feeds spill.
-  /// The argument VGPRs are the only member not chosen dead -- the ABI fixes them
-  /// -- so they are the only one that can intersect the live set.
+  /// {link} | {target pair} | {scc/special temps} | {argument VGPRs}
+  /// | {backup destinations} | {argument-copy temp}; feeds preservation planning.
+  /// The ABI fixes the link and argument registers; live values in them require
+  /// preservation. The other destinations are chosen outside the live set.
   RegisterSet builder_clobbers;
-  uint32_t before_word_count = 0;   ///< Envelope words emitted before the relocated original.
+  /// Planned envelope words, including internal RDNA4 guards. The spill
+  /// bracket, the boundary drains and the GFX9 wait-state pad are accounted by
+  /// emit_probe_call, not here.
+  uint32_t before_word_count = 0;
   uint64_t probe_target_offset = 0; ///< .text-relative byte offset of the copied probe body.
 
   /// VGPRs to save/restore around the call; emit_probe_call brackets each with a
@@ -154,8 +198,10 @@ struct TrampolinePlan {
 
 /// @brief Output bytes for one trampoline.
 struct TrampolineBytes {
-  std::vector<uint8_t> patched_anchor_bytes; // original_size bytes.
+  /// Empty without an anchor splice; otherwise original_size bytes.
+  std::vector<uint8_t> patched_anchor_bytes;
   std::vector<uint32_t> trampoline_words;
+  uint32_t original_byte_offset = 0;
 };
 
 class TrampolineBuilder {
@@ -165,9 +211,10 @@ public:
   /// Returns std::nullopt and writes a human-readable explanation to
   /// @p error_out (if non-null) on:
   ///   - arch left at ROCJITSU_CODE_ARCH_INVALID (caller forgot to set it)
-  ///   - original_size other than 4 or 8
+  ///   - original_size zero or not dword aligned
+  ///   - original_size other than 4 or 8 when splicing or relocating the original
   ///   - original_words size mismatch with original_size
-  ///   - Forward or return branch outside s_branch simm16 range
+  ///   - A requested forward or return branch outside s_branch simm16 range
   ///
   /// The builder does not enforce milestone-scoped restrictions on body
   /// shape; the orchestrator decides what kind of plan to emit and calls
@@ -183,30 +230,30 @@ public:
   /// `special_state_saves`, `builder_clobbers`, and `before_word_count`, then
   /// returns true. (`preserve_scc`/`preserve_*` are inputs, read but not written.)
   ///
-  /// Policy:
+  /// Resource constraints:
   ///   - Link pair is read off @p abi; one that fails is_valid_probe_abi()
-  ///     fails here. If either lane of the pair is live at the
-  ///     anchor, fail. Extending the supported conventions is deferred.
+  ///     fails here. Every lane of the pair live at the anchor must have an
+  ///     explicit register backup in plan.register_saves.
   ///   - Target-address pair is a dead, even-aligned SGPR pair (excluding the
   ///     link pair). It is consumed by s_swappc before the probe body runs, so it
   ///     may overlap @p probe_body_clobbers.
-  ///   - SCC is preserved with one dead SGPR temp. The temp lives across the call
+  ///   - When plan.preserve_scc is set, SCC gets one dead SGPR temp across the call
   ///     (saved before materialization, restored after), so it must avoid both
   ///     the live set and @p probe_body_clobbers. Extending this is deferred.
-  ///   - EXEC/VCC/M0 are preserved when the corresponding plan.preserve_* flag is
-  ///     set. The orchestrator sets preserve_exec/preserve_vcc unconditionally as a
-  ///     conservative policy (the summary detects the special-state writes the
-  ///     decoder exposes as operands, but always saving keeps correctness
-  ///     independent of per-opcode implicit-def coverage) and gates preserve_m0 on
-  ///     the probe's clobbers; EXEC is additionally preserved here when the site
-  ///     spills (forced to -1 around the store/load). Each preserved register gets
-  ///     its own dead SGPR temp (a pair for EXEC/VCC, single for M0) recorded in
-  ///     plan.special_state_saves, drawn from the same dead pool as the SCC temp.
+  ///   - `plan.entry_storage_base` and `plan.entry_vgpr_captures`, when set, are
+  ///     excluded from every dead-register choice below. The prologue defines
+  ///     this persistent storage in the cave, outside the guest's liveness.
+  ///   - EXEC/VCC/M0 are preserved when the corresponding plan.preserve_* input
+  ///     is set. EXEC is additionally preserved whenever the site needs a
+  ///     full-mask window for spills, argument writes, or plan.force_full_exec.
+  ///     Each saved register gets its own dead SGPR temp (a pair for EXEC/VCC,
+  ///     single for M0) recorded in plan.special_state_saves, drawn from the same
+  ///     dead pool as the SCC temp.
   ///
   /// Returns false and writes a diagnostic naming the unavailable resource to
-  /// @p error_out (if non-null) when @p abi is unusable, the link pair is live,
-  /// or no dead target pair / SCC temp can be found. The plan is left unmodified
-  /// on failure.
+  /// @p error_out (if non-null) when @p abi is unusable, a live link lane lacks
+  /// a backup, or no dead target pair / SCC temp can be found. The plan is left
+  /// unmodified on failure.
   ///
   /// @param plan                Trampoline plan whose resource fields are filled.
   /// @param abi                 Probe ABI; supplies the link pair.
@@ -224,10 +271,17 @@ public:
   /// the call envelope from the planned resources and @p plan.probe_target_offset
   /// then delegates to build() for layout and branch math.
   ///
+  /// On GFX9 (CDNA1-4), which does not interlock them, a restored SGPR or M0 is
+  /// spaced from the relocated original by the wait states its readers need: one
+  /// s_nop tops up what the instructions after the restore already supply. That
+  /// word is not part of before_word_count, since it depends on the spill sets,
+  /// which are filled after planning.
+  ///
   /// Returns std::nullopt and writes a diagnostic to @p error_out (if non-null)
   /// when the plan is not a probe call, the synthesized envelope size disagrees
-  /// with the planned before_word_count (plan/emit drift), or build() reports a
-  /// branch-range failure.
+  /// with the planned before_word_count (plan/emit drift), a spill or boundary-wait
+  /// builder rejects the architecture or register class, build() reports a
+  /// branch-range failure, or a delegated vector builder rejects an argument operand.
   [[nodiscard]] static std::optional<TrampolineBytes>
   emit_probe_call(const TrampolinePlan &plan, std::string *error_out = nullptr);
 };

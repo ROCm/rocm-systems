@@ -629,16 +629,19 @@ case "$VERB" in
       fi
     fi
 
-    # Capture resumes into an archive that is already there and leaves the
-    # other pid-* directories where they are, so a second run against the same
-    # --output silently merges two attempts into what reads afterwards as one
-    # multi-process capture.
+    # Capture adds this run's pid-* directories next to the ones already there,
+    # so a second run against the same --output silently merges two attempts
+    # into what reads afterwards as one multi-process capture. A process of this
+    # run that reuses an earlier pid moves that pid-<pid> to pid-<pid>.prev-<n>
+    # instead, and readers of the archive root leave it out.
     if compgen -G "$OUTPUT/pid-*" >/dev/null 2>&1; then
       if (( FORCE )); then
         log "$OUTPUT already holds a capture and --force was given: this run will be added"
-        log "to it, and the result will read as one multi-process archive."
+        log "to it, and the result will read as one multi-process archive. Where this run"
+        log "reuses an earlier pid, that process's pid-<pid> is moved to pid-<pid>.prev-<n>,"
+        log "which readers of the archive root leave out."
       else
-        fail "$OUTPUT already holds a capture. Capture would add this run to it and the two would be indistinguishable afterwards. Move it aside, or give --output a new path."
+        fail "$OUTPUT already holds a capture. Capture would add this run to it and the two would be indistinguishable afterwards, and where this run reuses an earlier pid it would move that process's pid-<pid> to pid-<pid>.prev-<n>, which readers of the archive root leave out. Move it aside, or give --output a new path."
       fi
     fi
 

@@ -137,7 +137,7 @@ public:
             .begin = address & ~(kLegacyPageSize - 1),
             .size = kLegacyPageSize,
             .mutation_epoch = mutation_epoch_,
-            .captured_epoch = mutation_epoch_->load(std::memory_order_relaxed)};
+            .captured_epoch = mutation_epoch_->value.load(std::memory_order_relaxed)};
   }
 
   [[nodiscard]] VmTranslationResult probe_translation(uint64_t address, std::size_t size,
@@ -248,6 +248,21 @@ public:
     return vm_access_outcome(outcome);
   }
 
+  [[nodiscard]] VmAccessOutcome atomic_modify_lanes(VmMemoryDomain domain,
+                                                    std::span<const uint64_t> addresses,
+                                                    uint64_t lane_mask, uint32_t width,
+                                                    const AtomicLaneMutation &mutation,
+                                                    uint32_t &next_lane) override {
+    if (domain != VmMemoryDomain::Compatibility)
+      return VmAccessOutcome::Malformed;
+    return vm_access_outcome(address_space_->atomic_modify_strict_lanes(
+        addresses, lane_mask, width,
+        [&](uint32_t lane, uint8_t *bytes) {
+          mutation(lane, std::span<std::byte>(reinterpret_cast<std::byte *>(bytes), width));
+        },
+        vmid_, next_lane));
+  }
+
   [[nodiscard]] std::byte *resolve_host_pointer(VmMemoryDomain domain, uint64_t address,
                                                 std::size_t size) const override {
     if (domain != VmMemoryDomain::Compatibility)
@@ -287,7 +302,7 @@ private:
   // Synchronous word reads and stores must not destroy the final request-mutex owner
   // under the caller's VM-state lock, even after raw registry replacement.
   const std::shared_ptr<util::DistributedSharedMutex> original_request_mutex_;
-  std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch_;
+  util::IntrusiveSharedPtr<const amdgpu::VmMutationEpoch> mutation_epoch_;
   std::shared_ptr<void> frontend_lifetime_;
 };
 

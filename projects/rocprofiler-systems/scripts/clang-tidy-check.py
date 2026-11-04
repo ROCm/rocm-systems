@@ -11,6 +11,8 @@ changed lines of each affected file, then prints which files/lines were
 checked and which clang-tidy checks fired (with locations and messages).
 """
 
+from __future__ import annotations
+
 import argparse
 import concurrent.futures
 import os

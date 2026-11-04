@@ -534,7 +534,7 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
       return hipErrorInvalidDevice;
     }
     dev = g_devices[targetDevice]->devices()[0];
-    if (memObj == nullptr && !dev->info().hmmCpuMemoryAccessible_) {
+    if (memObj == nullptr && !dev->info().hmmSupported_) {
       return hipErrorNotSupported;
     }
   }
@@ -671,7 +671,7 @@ hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t coun
       devices_vec[op_idx] = dev;
     }
 
-    if (requires_pageable_support && !AllDevicesSupportPageableMemoryAccess()) {
+    if (requires_pageable_support && !AllDevicesSupportHmm()) {
       return hipErrorInvalidValue;
     }
 
