@@ -151,7 +151,12 @@ SHARED_FORMULA_IDS = {
 SPLIT_FORMULA_IDS = {}
 # Ids allowed to share a value on an arch although their formulas differ (arch -> id
 # pairs): different quantities whose formulas coincide there.
-SAME_VALUE_IDS = {}
+SAME_VALUE_IDS = {
+    "gfx115x": [
+        # The CDNA total performance; gfx115x's panel counts only VALU instructions.
+        ("compute.total_flops", "compute.valu_flops"),
+    ],
+}
 # The same-value check evaluates each formula on one dispatch per normalization
 # ($denom), with counters drawn from this seed. Machine values with no static source are
 # drawn too: the ones each device reports (CU, SE and SIMD counts, waves per CU, clocks,
