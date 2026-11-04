@@ -333,6 +333,71 @@ def test_baseline_only_metric_is_reported_missing(tmp_path: Path) -> None:
     assert "VALU IOPs" in page
 
 
+def test_sum_ratio_uses_per_dispatch_median_and_std() -> None:
+    expression = "to_sum(a) / to_sum(b)"
+
+    assert report.per_dispatch_stat_expr(expression, "median") == "to_median((a) / (b))"
+    assert report.per_dispatch_stat_expr(expression, "stddev") == "to_std((a) / (b))"
+
+
+def test_mixed_sum_and_min_has_no_per_dispatch_std() -> None:
+    assert report.per_dispatch_stat_expr("to_min(to_sum(a))", "stddev") is None
+
+
+def test_cv_is_stddev_over_absolute_median() -> None:
+    metric = report.MetricValue(value=0.072, raw="0.072", std_v=0.055)
+
+    assert report.fmt_cv(metric) == "76.4%"
+
+
+def test_cv_is_blank_when_median_is_near_zero() -> None:
+    metric = report.MetricValue(value=0.0, raw="0", std_v=1.0)
+
+    assert report.fmt_cv(metric) == "—"
+
+
+def test_parse_log_reads_std_dev(tmp_path: Path) -> None:
+    log_path = tmp_path / "vcopy.log"
+    log_path.write_text(
+        "| Metric_ID | Metric | Median | Std Dev | Unit |\n"
+        "| 2.1.21 | L2-Fabric Write BW | 0.072 | 0.055 | Gb/s |\n",
+        encoding="utf-8",
+    )
+
+    parsed = report.parse_log(log_path)
+    metric = parsed.metrics["2.1.21|L2-Fabric Write BW"]
+
+    assert metric.value == pytest.approx(0.072)
+    assert metric.std_v == pytest.approx(0.055)
+    assert metric.source == "median"
+
+
+def test_delta_row_shows_stddev_and_cv(tmp_path: Path) -> None:
+    key = "2.1.21|L2-Fabric Write BW"
+    workloads = ["vcopy", "nbody", "mega_kernel"]
+    old = report.MetricValue(value=0.072, raw="0.072", source="median", std_v=0.055)
+    new = report.MetricValue(value=0.036, raw="0.036", source="median", std_v=0.018)
+    data = report.compute_report(
+        {wl: report.ParsedLog(metrics={key: new}) for wl in workloads},
+        {wl: report.ParsedLog(metrics={key: old}) for wl in workloads},
+        {key: ("", "Gb/s", False)},
+    )
+
+    page = render(data, tmp_path)
+
+    assert "Old (Std Dev)" in page
+    assert "Old (CV)" in page
+    assert "76.4%" in page
+    assert "50.0%" in page
+
+
+def test_recompute_stddevs_on_real_workload() -> None:
+    """Constant per-dispatch values have a sample standard deviation of zero."""
+    stddevs = report.compute_stddevs_for_workload(MI300X_WORKLOAD, [])
+
+    assert stddevs[INSTS_PER_WAVE_KEY] == pytest.approx(0.0)
+
+
 def test_compute_report_without_baseline_has_no_comparison() -> None:
     data = report.compute_report(
         {"vcopy": make_log({"2.1.0|VALU FLOPs": 5.0})}, None, {}
