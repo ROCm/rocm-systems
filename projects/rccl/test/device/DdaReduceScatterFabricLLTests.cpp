@@ -16,6 +16,7 @@
 #include <thread>
 #include <vector>
 
+#include "DdaLLHostPeers.hpp"
 #include "DeviceTestBase.hpp"
 #include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h"
 #include "gtest/gtest.h"
@@ -74,17 +75,7 @@ class DdaReduceScatterFabricLL : public DeviceTestBase {
 protected:
   void SetUp() override {
     DeviceTestBase::SetUp();
-    const size_t bankBytes = dda::common::ddaLLRsBankBytes(kRanks);
-    for (int r = 0; r < kRanks; ++r) {
-      HIP_CHECK(hipHostMalloc(&hostScratch_[r], bankBytes, hipHostMallocMapped | hipHostMallocCoherent));
-      std::memset(hostScratch_[r], 0, bankBytes);
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&devScratch_[r]), hostScratch_[r], 0));
-    }
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&abortFlag_), sizeof(uint32_t),
-                            hipHostMallocMapped | hipHostMallocCoherent));
-    *abortFlag_ = 0;
-    HIP_CHECK(hipMalloc(&dPeers_, sizeof(devScratch_)));
-    HIP_CHECK(hipMemcpy(dPeers_, devScratch_, sizeof(devScratch_), hipMemcpyHostToDevice));
+    peers_.Init(kRanks, dda::common::ddaLLRsBankBytes(kRanks));
 
     std::vector<float> send(kRecvCount * kRanks);
     for (int r = 0; r < kRanks; ++r) {
@@ -108,37 +99,26 @@ protected:
     HIP_EXPECT(hipFree(dEpoch_));
     HIP_EXPECT(hipFree(dRecv_));
     HIP_EXPECT(hipFree(dSend_));
-    HIP_EXPECT(hipFree(dPeers_));
-    HIP_EXPECT(hipHostFree(abortFlag_));
-    for (void* p : hostScratch_) {
-      HIP_EXPECT(hipHostFree(p));
-    }
+    peers_.Release();
   }
 
   volatile uint32_t* line(int owner, int sender, size_t pk) {
-    LLPacket16* base = static_cast<LLPacket16*>(hostScratch_[owner]);
+    LLPacket16* base = static_cast<LLPacket16*>(peers_.Host(owner));
     return reinterpret_cast<volatile uint32_t*>(&base[sender * dda::common::kDdaLLRsSlotStridePkts + pk]);
   }
 
   // Writes the payload before the flags, as one 16B store would make them visible together to the poller.
   void publishPeer(int peer) {
     for (size_t pk = 0; pk < kPackets; ++pk) {
-      volatile uint32_t* w = line(kSelf, peer, pk);
-      w[0] = bitsOf(peerValue(peer, 2 * pk));
-      w[2] = bitsOf(peerValue(peer, 2 * pk + 1));
-      std::atomic_thread_fence(std::memory_order_release);
-      w[1] = kFlag;
-      w[3] = kFlag;
+      DdaLLHostPeers::PublishLine(line(kSelf, peer, pk), bitsOf(peerValue(peer, 2 * pk)),
+                                  bitsOf(peerValue(peer, 2 * pk + 1)), kFlag);
     }
   }
 
   // Publishes one 8B half of every line of a peer: half 0 is payload word 0 and flag 1, half 1 is word 2 and flag 3.
   void publishHalf(int peer, int half) {
     for (size_t pk = 0; pk < kPackets; ++pk) {
-      volatile uint32_t* w = line(kSelf, peer, pk);
-      w[2 * half] = bitsOf(peerValue(peer, 2 * pk + half));
-      std::atomic_thread_fence(std::memory_order_release);
-      w[2 * half + 1] = kFlag;
+      DdaLLHostPeers::PublishHalf(line(kSelf, peer, pk), half, bitsOf(peerValue(peer, 2 * pk + half)), kFlag);
     }
   }
 
@@ -177,26 +157,22 @@ protected:
 
   void launch() {
     hipLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<float, 0>), dim3(kBlocks), dim3(kThreads), 0, stream_,
-                       dPeers_, dRecv_, dSend_, kRecvCount, kSelf, kRanks, dEpoch_, static_cast<int>(kBlocks),
-                       dda::common::ddaLLRsBankBytes(kRanks), DdaKernelParams{abortFlag_});
+                       peers_.DevPeers<float>(), dRecv_, dSend_, kRecvCount, kSelf, kRanks, dEpoch_,
+                       static_cast<int>(kBlocks), dda::common::ddaLLRsBankBytes(kRanks),
+                       DdaKernelParams{peers_.AbortFlag()});
     ASSERT_EQ(hipGetLastError(), hipSuccess);
   }
 
   // Past the watchdog, raises abort and publishes every peer, so a lost wake-up or an ignored abort fails, not hangs.
   bool finishes() {
-    const auto deadline = std::chrono::steady_clock::now() + kWatchdog;
-    while (hipStreamQuery(stream_) == hipErrorNotReady) {
-      if (std::chrono::steady_clock::now() > deadline) {
-        *abortFlag_ = 1;
+    return peers_.Finishes(
+      stream_,
+      [this] {
         for (int r = 1; r < kRanks; ++r) {
           publishPeer((kSelf + r) % kRanks);
         }
-        EXPECT_EQ(hipStreamSynchronize(stream_), hipSuccess);
-        return false;
-      }
-      std::this_thread::yield();
-    }
-    return hipStreamSynchronize(stream_) == hipSuccess;
+      },
+      kWatchdog);
   }
 
   std::vector<float> recv() {
@@ -233,10 +209,7 @@ protected:
     expectEpochAdvanced();
   }
 
-  void* hostScratch_[kRanks] = {};
-  float* devScratch_[kRanks] = {};
-  uint32_t* abortFlag_ = nullptr;
-  float** dPeers_ = nullptr;
+  DdaLLHostPeers peers_;
   float* dSend_ = nullptr;
   float* dRecv_ = nullptr;
   uint32_t* dEpoch_ = nullptr;
@@ -261,7 +234,7 @@ TEST_F(DdaReduceScatterFabricLL, LateLinesAreReReadUntilFresh) {
     std::this_thread::yield();
   }
   if (!phase1Done()) {
-    *abortFlag_ = 1;
+    *peers_.AbortFlag() = 1;
     finishes();
     FAIL() << "phase 1 never stored its lines";
   }
@@ -285,7 +258,7 @@ TEST_F(DdaReduceScatterFabricLL, LateLinesAreReReadUntilFresh) {
 
 TEST_F(DdaReduceScatterFabricLL, AbortExitsTheWaitAndAdvancesEpoch) {
   publishPeer((kSelf + 2) % kRanks);
-  *abortFlag_ = 1;
+  *peers_.AbortFlag() = 1;
   launch();
   ASSERT_TRUE(finishes()) << "kernel ignored the abort flag";
   for (float v : recv()) {
@@ -340,10 +313,10 @@ TEST_F(DdaReduceScatterFabricLL, PrefetchStaysInsideSendbuffEndingAtUnmappedPage
     const uint32_t epoch = kFlag - 1;
     ASSERT_EQ(hipMemcpy(dEpoch_, &epoch, sizeof(epoch), hipMemcpyHostToDevice), hipSuccess);
     // The aborted wait still runs the prefetch and the send phase, then exits without needing any peer.
-    *abortFlag_ = 1;
-    hipLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<float, 0>), dim3(1), dim3(kThreads), 0, stream_, dPeers_,
-                       dRecv_, send, count, kSelf, kRanks, dEpoch_, 1, dda::common::ddaLLRsBankBytes(kRanks),
-                       DdaKernelParams{abortFlag_});
+    *peers_.AbortFlag() = 1;
+    hipLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<float, 0>), dim3(1), dim3(kThreads), 0, stream_,
+                       peers_.DevPeers<float>(), dRecv_, send, count, kSelf, kRanks, dEpoch_, 1,
+                       dda::common::ddaLLRsBankBytes(kRanks), DdaKernelParams{peers_.AbortFlag()});
     ASSERT_EQ(hipGetLastError(), hipSuccess);
     ASSERT_TRUE(finishes()) << "kernel did not exit on abort, shard bytes " << count * sizeof(float);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess) << "shard bytes " << count * sizeof(float);
