@@ -42,6 +42,11 @@ struct TensorDmaLdsRange {
 /// only its leading bytes. Consumers must treat the ranges as byte ranges, not
 /// as whole elements. An instruction that moves no data reports no ranges.
 ///
+/// Empty ranges describe only the transfer's LDS payload, not its global
+/// accesses. When the whole tile lies past the wave's LDS allocation, a load
+/// still reads its in-bounds tensor elements from global memory and can fault
+/// there, and a store still writes zeros to its global destination.
+///
 /// The ranges borrow execution-owned storage and are valid only for the
 /// duration of the callback.
 struct TensorDmaIssueObservation {

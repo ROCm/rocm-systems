@@ -331,8 +331,13 @@ protected:
     cu = sim.cu();
     wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
+    // A block ahead of the wave's puts its allocation at [256, 512), so its end
+    // differs from its size and code that confuses the two is caught.
+    const uint32_t preceding = cu->allocate_lds(256);
     wf->set_lds_base(cu->allocate_lds(256));
     wf->set_lds_size(256);
+    ASSERT_EQ(wf->lds_base(), preceding + 256);
+    ASSERT_NE(wf->lds_base(), 0u);
     neighbour = cu->allocate_lds(256);
     ASSERT_EQ(neighbour, wf->lds_base() + wf->lds_size());
     cu->lds().write32(neighbour, kSentinel);
@@ -371,7 +376,10 @@ TEST_F(TensorDmaLdsOutOfRangeTest, LoadDropsWritesOutsideTheWavesLds) {
 }
 
 TEST_F(TensorDmaLdsOutOfRangeTest, StoreReadsZeroOutsideTheWavesLds) {
-  // Out-of-range LDS reads return zero, as for other LDS loads.
+  // The store fills bytes past the wave's LDS with zeros. That is rocjitsu's
+  // modeling choice: CDNA5 ISA 10.11.6 says only that the transfer continues
+  // past the allocation, and the check for ordinary LDS reads (3.3.4.1)
+  // depends on the alignment mode.
   cu->lds().write32(wf->lds_base() + kLdsOffset, 0x49000000u);
   cu->lds().write32(wf->lds_base() + kLdsOffset + 4, 0x49000001u);
   for (uint32_t i = 0; i < 4; ++i)
