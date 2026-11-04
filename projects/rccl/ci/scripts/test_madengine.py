@@ -2313,6 +2313,25 @@ def append_result(
     run_dir.mkdir(parents=True, exist_ok=True)
 
 
+def metrics_prove_completion(family: str, phase_results: dict) -> bool:
+    """Whether the phases' results show training that ran to completion.
+
+    madengine can report failure (exit code 3) when its perf collector can't
+    parse the output format, even though training ran to completion; passing
+    rows with metrics from every phase then outweigh its exit code. Not for
+    MaxText: its wrapper parses a crashed run's partial steps too and exits
+    with the training's own code, so metrics do not prove completion.
+    """
+    if family == "maxtext" or not phase_results:
+        return False
+    rows = [r for phase_rows in phase_results.values() for r in phase_rows]
+    return (
+        all(phase_results.values())
+        and all(r["status"] == "pass" for r in rows)
+        and all(r.get("metric_value") is not None for r in rows)
+    )
+
+
 def pair_by_precision(
     baseline_results: list[dict],
     candidate_results: list[dict],
@@ -2698,23 +2717,14 @@ def main() -> None:
 
     all_rows = [r for rows in phase_results.values() for r in rows]
 
-    # Override exit_code if training actually completed successfully.
-    # madengine can report failure (exit code 3) when its perf collector
-    # can't parse the output format, even though training ran to completion.
-    # Not for MaxText: its wrapper parses a crashed run's partial steps too and
-    # exits with the training's own code, so metrics do not prove completion.
-    if (exit_code != 0 and not rccl_verification_failed and all_rows
-            and family != "maxtext"):
-        every_phase_scored = all(phase_results.get(p) for p, _ in phases)
-        all_pass = all(r["status"] == "pass" for r in all_rows)
-        has_metric = all(r.get("metric_value") is not None for r in all_rows)
-        if every_phase_scored and all_pass and has_metric:
-            log.info(
-                "Overriding madengine exit code %d → 0: all %d run(s) across "
-                "both phases passed with metrics",
-                exit_code, len(all_rows),
-            )
-            exit_code = 0
+    if (exit_code != 0 and not rccl_verification_failed
+            and metrics_prove_completion(family, phase_results)):
+        log.info(
+            "Overriding madengine exit code %d → 0: all %d run(s) across "
+            "both phases passed with metrics",
+            exit_code, len(all_rows),
+        )
+        exit_code = 0
 
     # Step 7: Score the candidate against the baseline, per precision
     comparisons = pair_by_precision(
