@@ -5984,8 +5984,7 @@ pub fn amdsmi_get_gpu_total_ecc_count(
 /// # Errors
 ///
 /// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_process_list` call fails,
-/// including [`AmdsmiStatusT::AmdsmiStatusRetry`] when the library could not list the GPU's processes because they kept starting,
-/// and [`AmdsmiStatusT::AmdsmiStatusOutOfResources`] when processes keep starting through three attempts.
+/// including [`AmdsmiStatusT::AmdsmiStatusOutOfResources`] when processes keep starting through three attempts.
 pub fn amdsmi_get_gpu_process_list(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<Vec<AmdsmiProcInfoT>> {

@@ -1521,7 +1521,7 @@ auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string {
 namespace {
 // Room for processes that start while the KFD processes are listed.
 constexpr auto kProcessListHeadroom = uint32_t(64);
-// Listings tried before processes that keep starting make the read fail.
+// Listings tried before the processes the last one had room for are returned.
 constexpr auto kListAttempts = 3;
 }  // namespace
 
@@ -1544,7 +1544,13 @@ auto smi_amdgpu_list_kfd_processes(const SmiKfdProcessLister& list, uint32_t exp
       return AMDSMI_STATUS_SUCCESS;
     }
     if (attempt == kListAttempts) {
-      return AMDSMI_STATUS_RETRY;
+      // The process list APIs never failed for processes that start while they
+      // list; an incomplete list keeps callers that poll them running.
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | Processes kept starting while KFD was listed; returning "
+         << procs->size() << " of the " << found << " processes found";
+      LOG_WARN(ss);
+      return AMDSMI_STATUS_SUCCESS;
     }
     procs->assign(found + kProcessListHeadroom, rsmi_process_info_t{});
   }

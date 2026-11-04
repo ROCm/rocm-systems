@@ -8491,14 +8491,13 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *                            | ::AMDSMI_STATUS_OUT_OF_RESOURCES, filled list buffer with data, but
  * number of actual running processes is larger than the size provided,
- *                            | ::AMDSMI_STATUS_INVAL if max_processes is NULL,
- *                            | ::AMDSMI_STATUS_RETRY if processes kept starting while the
- * list was read; call again. When the GPU's processes cannot be listed, the error from that
- * listing is returned, which can be any status (including ::AMDSMI_STATUS_INVAL), and the list is
- * not filled. Without KFD the list is empty. A process whose KFD statistics cannot be read is
- * still listed, with cu_occupancy, evicted_time and sdma_usage all-ones (not available) and memory
- * sizes from its fdinfo only (0 if unreadable). So is a running process whose GPUs cannot be read
- * from KFD, on each GPU that its DRM fdinfo shows.
+ *                            | ::AMDSMI_STATUS_INVAL if max_processes is NULL. When the GPU's
+ * processes cannot be listed, the error from that listing is returned, which can be any status
+ * (including ::AMDSMI_STATUS_INVAL), and the list is not filled. Without KFD the list is empty.
+ * When processes keep starting while the list is read, it can leave some processes out. A process
+ * whose KFD statistics cannot be read is still listed, with cu_occupancy, evicted_time and
+ * sdma_usage all-ones (not available) and memory sizes from its fdinfo only (0 if unreadable). So
+ * is a running process whose GPUs cannot be read from KFD, on each GPU that its DRM fdinfo shows.
  */
 amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle,
                                             uint32_t* max_processes, amdsmi_proc_info_t* list);
@@ -8524,9 +8523,7 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *                            | ::AMDSMI_STATUS_OUT_OF_RESOURCES if max_processes was too small,
  *                            | ::AMDSMI_STATUS_INVAL if processor_handles or max_processes is NULL,
- * or num_processors is 0,
- *                            | ::AMDSMI_STATUS_RETRY if processes kept starting while a GPU's
- * list was read; call again. Handles that do not resolve to a GPU are skipped. When a GPU's
+ * or num_processors is 0. Handles that do not resolve to a GPU are skipped. When a GPU's
  * processes cannot be listed, the error from that listing is returned, which can be any status, and
  * nothing is filled. Each GPU's processes are listed as amdsmi_get_gpu_process_list() lists them.
  */

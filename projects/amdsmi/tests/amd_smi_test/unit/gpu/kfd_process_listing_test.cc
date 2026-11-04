@@ -54,12 +54,16 @@ TEST(GpuUnit, KfdProcessListingListsAgainWhenProcessesStartDuringIt) {
   }
 }
 
-TEST(GpuUnit, KfdProcessListingAsksForARetryWhileProcessesKeepStarting) {
+TEST(GpuUnit, KfdProcessListingKeepsWhatTheLastListingHadRoomFor) {
   // Each listing finds more processes than the room the one before left.
   FakeKfdProcessRoot root({100, 200, 300});
   std::vector<rsmi_process_info_t> procs;
-  EXPECT_EQ(smi_amdgpu_list_kfd_processes(root.Lister(), 0, &procs), AMDSMI_STATUS_RETRY);
+  ASSERT_EQ(smi_amdgpu_list_kfd_processes(root.Lister(), 0, &procs), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(root.buffer_sizes(), (std::vector<uint32_t>{64, 164, 264}));
+  ASSERT_EQ(procs.size(), 264U);
+  for (size_t i = 0; i < procs.size(); ++i) {
+    EXPECT_EQ(procs[i].process_id, FakeKfdProcessRoot::kFirstPid + i);
+  }
 }
 
 TEST(GpuUnit, KfdProcessListingSizesTheFirstBufferFromTheLastCount) {

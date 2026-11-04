@@ -163,7 +163,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Default `amd-smi static` output on guests now includes NUMA, in human-readable, JSON, and CSV output.
 
 - **GPU process lists return an error when they cannot be read, and compute process info marks unreadable statistics as not available**.  
-  - `amdsmi_get_gpu_process_list()` and `amdsmi_get_gpu_process_list_by_pid()` returned `AMDSMI_STATUS_SUCCESS` with an empty list when a GPU's processes could not be listed. They now return `AMDSMI_STATUS_RETRY` when processes kept starting while the list was read, and otherwise the error from the listing. In Python, `AMDSMI_STATUS_RETRY` raises `AmdSmiRetryException`.
+  - `amdsmi_get_gpu_process_list()` and `amdsmi_get_gpu_process_list_by_pid()` returned `AMDSMI_STATUS_SUCCESS` with an empty list when a GPU's processes could not be listed. They now return the error from the listing, such as `AMDSMI_STATUS_NO_PERM`. A system without KFD still gets an empty list.
   - `amdsmi_get_gpu_compute_process_info()` (`rsmi_compute_process_info_get()`) failed when the KFD statistics of a running process could not be read. It now succeeds and reports that process with `vram_usage`, `sdma_usage`, `cu_occupancy` and `evicted_time` all-ones (not available).
   - `amdsmi_process_info_t.vram_usage` was documented in MB and is now documented in bytes, which it has always been. Only the documentation changes, not the ABI or the values.
   - `amdsmi_process_info_t.cu_occupancy` was documented as a percentage and is now documented as the number of compute units in use, which it has always been.
@@ -184,7 +184,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Listing GPU processes from several threads at once could crash or leave processes out, and a process that uses several GPUs could show another GPU's memory and engine usage.
 
 - **Fixed GPU process lists coming back empty or incomplete while GPU processes start or exit**.  
-  - On a busy system, `amd-smi process` and the process-list APIs could briefly return no processes, miss a running one, fail, or, in Python, return entries with process ID 0. A list that cannot be read is now reported as an error (`AMDSMI_STATUS_RETRY` while processes keep starting). A process whose statistics cannot be read is listed with them not available, and so is one whose GPUs cannot be read, on each GPU its fdinfo shows. A process that exits while it is read is left out instead of listed with zero memory usage.
+  - On a busy system, `amd-smi process` and the process-list APIs could briefly return no processes, miss a running one, fail, or, in Python, return entries with process ID 0. A list that cannot be read is now reported as an error. A process whose statistics cannot be read is listed with them not available, and so is one whose GPUs cannot be read, on each GPU its fdinfo shows. A process that exits while it is read is left out instead of listed with zero memory usage.
 
 - **Fixed per-process memory and engine usage in `amd-smi process`**.  
   - VRAM, GTT and CPU memory read 2.3% low and could be counted several times for one process. A process that opened the same GPU more than once showed the engine usage of only one of those opens.

@@ -31,9 +31,9 @@ using SmiKfdProcessLister =
  *  @param[in] expected How many processes the last listing found; sizes the
  *  first buffer.
  *  @param[out] procs The processes found, with only process_id set. Empty when
- *  KFD has no process directory (the listing returns ENOENT).
- *  @return ::AMDSMI_STATUS_SUCCESS, ::AMDSMI_STATUS_RETRY if processes kept
- *  starting through every listing, or the status for the listing's errno.
+ *  KFD has no process directory (the listing returns ENOENT). When processes
+ *  kept starting through every listing, the ones the last listing had room for.
+ *  @return ::AMDSMI_STATUS_SUCCESS, or the status for the listing's errno.
  */
 auto smi_amdgpu_list_kfd_processes(const SmiKfdProcessLister& list, uint32_t expected,
                                    std::vector<rsmi_process_info_t>* procs) -> amdsmi_status_t;
