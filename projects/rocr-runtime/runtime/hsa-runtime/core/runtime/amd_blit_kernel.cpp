@@ -878,6 +878,22 @@ uint64_t BlitKernel::AcquireWriteIndex(uint32_t num_packet) {
     os::YieldThread();
   }
 
+  // The packet processor may still write the INVALID header of the packet that
+  // previously occupied a slot after it advanced the read index past it. If we
+  // published a packet into the slot before that, the late write would turn
+  // our packet's header back into INVALID, and the packet processor would wait
+  // on it forever. So also wait until the previous occupant of each reserved
+  // slot has been invalidated.
+  hsa_barrier_and_packet_t* queue_buffer =
+      reinterpret_cast<hsa_barrier_and_packet_t*>(queue_->public_handle()->base_address);
+  for (uint32_t i = 0; i < num_packet; ++i) {
+    uint16_t* header = &queue_buffer[(write_index + i) & queue_bitmask_].header;
+    while (((__atomic_load_n(header, __ATOMIC_ACQUIRE) >> HSA_PACKET_HEADER_TYPE) &
+            ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1)) != HSA_PACKET_TYPE_INVALID) {
+      os::YieldThread();
+    }
+  }
+
   return write_index;
 }
 
