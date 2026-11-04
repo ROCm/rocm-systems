@@ -423,7 +423,7 @@ class OmniSoC_Base:
         remaining = set(work_set)
         files = list(output_files)
 
-        # Same groups as single-pass packing, including WEIGHTED_AVG weights.
+        # Same groups as single-pass packing.
         rows = self.metric_groups(remaining)
 
         # -- Place each metric group into an existing or new bucket --
@@ -847,7 +847,7 @@ def _rebuild_tcc_channel_file_map(
 def _composite_part_expressions(
     table: dict[str, Any], metric: dict[str, Any]
 ) -> list[str]:
-    """Expressions of the rows a composite metric combines, plus its weights.
+    """Expressions of the rows a composite metric combines.
 
     A composite parent names no PMC itself, so selecting it alone with
     --block must also select the rows of its table that it combines.
@@ -864,13 +864,6 @@ def _composite_part_expressions(
             part = rows.get(ref) or by_collectable_id.get(ref.lstrip("_"))
             if isinstance(part, dict):
                 expressions.extend(metric_expressions(table, part))
-    weights = metric.get("_weighted_avg")
-    if isinstance(weights, dict):
-        expressions.extend(
-            sub["weight_counter"]
-            for sub in weights.values()
-            if isinstance(sub, dict) and isinstance(sub.get("weight_counter"), str)
-        )
     return expressions
 
 

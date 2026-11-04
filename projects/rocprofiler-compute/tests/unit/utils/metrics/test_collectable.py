@@ -15,8 +15,6 @@ from utils.metrics.collectable import (
     COLLECT_SUM_SPECS_ATTR,
     COLLECTABLE_IDS_ATTR,
     COMPOSITE_FINISH_ATTR,
-    WEIGHTED_AVG_ATTR,
-    WEIGHTED_AVG_SUBS_ATTR,
     CompositeKind,
     apply_composite_metrics,
     build_metric_eval_graph,
@@ -37,7 +35,7 @@ def _collect_sum_arch_config() -> schema.ArchConfig:
     fixture = (
         Path(__file__).resolve().parents[3]
         / "fixtures"
-        / "weighted_avg"
+        / "collect_sum"
         / "collect_sum_metric_table.yaml"
     )
     with open(fixture, encoding="utf-8") as stream:
@@ -59,21 +57,16 @@ def test_parse_collect_sum_submetrics():
 
 
 @pytest.mark.misc
-def test_build_metric_eval_graph_weighted_and_sum():
+def test_build_metric_eval_graph_collect_sum():
     df = pd.DataFrame(
-        [["1", "sub_a"], ["2", "sub_b"], ["3", "parent_w"], ["4", "parent_s"]],
+        [["1", "sub_a"], ["2", "sub_b"], ["4", "parent_s"]],
         columns=["Metric_ID", "Metric"],
     ).set_index("Metric_ID")
-    df.attrs[WEIGHTED_AVG_ATTR] = {
-        "3": {"sub_a": {"weight_counter": "W0"}},
-    }
-    df.attrs[WEIGHTED_AVG_SUBS_ATTR] = {"3": ["sub_a", "sub_b"]}
     df.attrs[COLLECT_SUM_SPECS_ATTR] = {"4": ["sub_a", "sub_b"]}
 
     graph = build_metric_eval_graph(df)
     assert graph.collectable_row_names == {"sub_a", "sub_b"}
     kinds = {c.metric_id: c.kind for c in graph.composites}
-    assert kinds["3"] is CompositeKind.WEIGHTED_AVG
     assert kinds["4"] is CompositeKind.COLLECT_SUM
 
 

@@ -115,30 +115,6 @@ def _composite_formula(body: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _weight_counters_by_submetric(
-    raw_metrics: List[Tuple[Any, ...]],
-) -> Dict[Tuple[str, str, str], Set[str]]:
-    """Map (stem, panel, sub-metric name) to WEIGHTED_AVG weight counters."""
-    extras: Dict[Tuple[str, str, str], Set[str]] = {}
-    for item in raw_metrics:
-        stem_id, panel_id, _metric_idx, _metric_name, _text, body = _metric_record(item)
-        if body is None:
-            continue
-        meta = body.get("_weighted_avg")
-        if not isinstance(meta, dict):
-            continue
-        panel_key = str(panel_id) if panel_id is not None else ""
-        for sub_name, sub_meta in meta.items():
-            if not isinstance(sub_meta, dict):
-                continue
-            counter = sub_meta.get("weight_counter")
-            if not isinstance(counter, str) or not counter:
-                continue
-            key = (str(stem_id), panel_key, str(sub_name))
-            extras.setdefault(key, set()).add(counter)
-    return extras
-
-
 def iter_metric_groups(
     priority_metric_ids: Iterable[str],
     yaml_metrics: Iterable[_YamlMetric],
@@ -148,13 +124,11 @@ def iter_metric_groups(
     """Metric PMC groups in priority-tier order for the profiled counters.
 
     profile_counters is already expanded, so a TCC channel template in a
-    formula matches the channel counters it holds. A WEIGHTED_AVG weight
-    counter is added to the sub-ratio collectable so Phase 1 can place it in
-    that collectable's bucket. Composite parents are not a second PMC pack.
+    formula matches the channel counters it holds. Composite parents are not
+    a second PMC pack.
     """
     priority_keys = _priority_metric_keys(priority_metric_ids)
     raw_metrics = list(yaml_metrics)
-    weight_extras = _weight_counters_by_submetric(raw_metrics)
 
     rows: List[_MetricGroup] = []
     for item in raw_metrics:
@@ -178,8 +152,7 @@ def iter_metric_groups(
             include_supported_denom=False,
         )
         panel_key = str(panel_id) if panel_id is not None else ""
-        extra = weight_extras.get((str(stem_id), panel_key, str(metric_name)), set())
-        counters = _profiled_counters(set(formula_hw) | set(extra), profile_counters)
+        counters = _profiled_counters(set(formula_hw), profile_counters)
         if not counters:
             continue
         tier = 0 if (stem_id, panel_id, metric_idx) in priority_keys else 1
