@@ -373,6 +373,9 @@ class VirtualGPU : public device::VirtualDevice {
     //! True if the GPU may still be working on the last use of the signal
     virtual bool IsBusy(const ProfilingSignal* signal) const = 0;
 
+    //! The signal's last use is known complete from host bookkeeping, without reading it
+    virtual bool IsKnownRetired(const ProfilingSignal* signal) const { return false; }
+
     //! The operations consuming the waits of the previous WaitingSignal call have been submitted
     virtual void NoteWaitsSubmitted() {}
 
@@ -436,6 +439,7 @@ class VirtualGPU : public device::VirtualDevice {
     hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
                                  hsa_signal_value_t init_value) override;
     bool IsBusy(const ProfilingSignal* signal) const override;
+    bool IsKnownRetired(const ProfilingSignal* signal) const override;
     void NoteWaitsSubmitted() override;
     void NoteGpuWait(ProfilingSignal* signal) override;
 
