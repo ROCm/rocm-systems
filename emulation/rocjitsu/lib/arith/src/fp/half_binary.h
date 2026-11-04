@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// FP16 add/subtract/multiply, including packed forms and guest FP status.
+// FP16 add/subtract/multiply, including packed forms and guest FP status and min/max selection.
 // Operation selectors and backend declarations shared by dispatch and SIMD code.
 
 #pragma once

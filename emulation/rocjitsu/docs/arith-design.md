@@ -151,6 +151,8 @@ other modes, such as rounding FP16 results before applying OMOD.
 FP32 MUL selects numeric-only exact semantics in every configuration. Its
 integration retains Rocjitsu's existing exception classifier for Compatibility;
 explicit mode 3 uses the library's qualified reporting domain instead.
+Compatibility may retain demonstrated hardware-fidelity improvements over the
+previous interpreter; instruction contracts document such exceptions.
 Rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
 setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
