@@ -11,8 +11,9 @@ Stage dependencies: [Stage dependencies and parallelism](lld-index.md#stage-depe
 
 New developer tool `tools/validate_metric_library.py`, following the existing
 `tools/validate_*.py` checks: it loads each arch's metric library through the
-inheritance loader, collects every schema error, and exits 1 if there are any. It runs
-as a pre-commit hook on `metric_library/` files and from
+inheritance loader, collects every schema error, and exits 1 if there are any. Every
+`formula`, `peak` and `peak_empirical` must be accepted by the runtime's expression
+parser (`build_eval_string()`). It runs as a pre-commit hook on `metric_library/` files and from
 `master_config_workflow_script.py --validate-only`. As with today's panel files, the
 runtime does not re-validate the files it loads.
 
@@ -235,8 +236,9 @@ The risk is covered instead by:
 ### Tests
 
 - Schema validation (`tools/validate_metric_library.py`): valid files pass; missing
-  required fields, unknown fields, bad ids, duplicate ids, names shared on an arch and a
-  child file that does not inherit from its parent's file are reported.
+  required fields, unknown fields, bad ids, duplicate ids, names shared on an arch, a
+  child file that does not inherit from its parent's file, an expression that does not
+  parse and two ids that share a value however written are reported.
 - Inheritance loader: single-level inheritance, multi-level chain (4+ deep, matching
   the real `gfx908 -> gfx90a -> gfx940 -> gfx942` chain), cycle detection error.
 - Merge operations: key modification (override), key addition (new metric in child),
@@ -534,6 +536,16 @@ flowchart TD
   and they are merged into one id (each panel's label becomes a view label in Phase B).
   The exceptions are listed in `SHARED_FORMULA_IDS`: the same counters bounded by a
   different measured ceiling; a row whose label names the listed id shows that id.
+- Two ids whose formulas give the same value on one arch, however written
+  (`SUM(a * $cu_per_gpu)` and `SUM(a) * $cu_per_gpu`), are one metric too. The validator
+  evaluates every formula with the runtime evaluator (`build_eval_string()`,
+  `MetricEvaluator` and the built-in variables) on one seeded random dispatch per
+  normalization (`$denom`). Machine values come from the arch's SoC class where it sets
+  them (`$lds_banks_per_cu`); the values only a GPU reports (`$cu_per_gpu`,
+  `$wave_size`, `$num_xcd`, ...) are random. `NOISE_CLAMP(x, reference)` counts as `x`,
+  and formulas that give no number (per-channel templates, `CONCAT`) are skipped.
+  `SAME_VALUE_IDS` lists, per arch, the pairs that are different quantities whose
+  formulas coincide there.
 
 The same holds across archs: a formula has one id on every arch. An arch reuses the id
 that the first arch to show the quantity gave it, and the validator rejects a formula
