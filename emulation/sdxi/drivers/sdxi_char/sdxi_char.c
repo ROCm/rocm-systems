@@ -1,0 +1,621 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * sdxi_char.c — out-of-tree SDXI userspace char device
+ *
+ * Registers /dev/sdxi (misc device) and exposes MEMCPY, COMPRESS, and
+ * DECOMPRESS to userspace via ioctl.  Operates directly against BAR0/BAR2
+ * of the SDXI PCI device (vendor 0x1022, device 0x149f) using the same
+ * context-table protocol as the upstream v3 kernel driver.
+ *
+ * NOTE: mutually exclusive with the upstream sdxi.ko — only one driver
+ * may probe the device at a time.  Unbind sdxi.ko before loading this
+ * module (echo "0000:00:XX.0" > /sys/bus/pci/drivers/sdxi/unbind).
+ *
+ * Register layout matches src/sdxi_regs.h and the v3 patchset.
+ */
+
+#include <linux/module.h>
+#include <linux/moduleparam.h>
+#include <linux/pci.h>
+#include <linux/miscdevice.h>
+#include <linux/fs.h>
+#include <linux/dma-mapping.h>
+#include <linux/uaccess.h>
+#include <linux/mutex.h>
+#include <linux/delay.h>
+#include <linux/io.h>
+#include <linux/slab.h>
+#include <linux/jiffies.h>
+#include <linux/types.h>
+
+#include "sdxi_user.h"
+
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("SDXI userspace char device — MEMCPY, COMPRESS, DECOMPRESS");
+MODULE_AUTHOR("Advanced Micro Devices, Inc.");
+MODULE_VERSION("1.0");
+
+/* PCI identity */
+#define SDXI_VENDOR_ID   0x1022
+#define SDXI_DEVICE_ID   0x149f
+
+/* BAR0 register offsets (v3 patchset layout) */
+#define BAR0_CTL0        0x000UL
+#define BAR0_STS0        0x100UL
+#define BAR0_VERSION     0x210UL
+#define BAR0_CXT_L2      0x10000UL  /* outer context-table GPA */
+
+/* BAR2: 4096-byte stride per context */
+#define SDXI_DB_STRIDE   4096UL
+
+/* Descriptor ring */
+#define DSC_SIZE         64U
+#define RING_SZ          16U
+
+/* CSB (struct sdxi_cst_blk) */
+#define CSB_SIZE         32U
+#define CSB_SIGNAL_OFF   0U    /* LE64: cleared to 0 on completion */
+#define CSB_FLAGS_OFF    8U    /* LE32: bit 31 = error */
+#define CSB_RESULT_OFF   12U   /* LE64: output length for compress/decompress */
+#define CSB_ER_BIT       (1U << 31)
+#define CSB_TIMEOUT_MS   5000
+
+/* Context-table geometry (matches sdxi_engine.c) */
+#define L1_CTX_PER_GROUP 128U
+#define INNER_ENTRY_SZ   32U
+#define CTX_CTL_SZ       64U
+
+/* Context IDs */
+#define ADMIN_CID        0U
+#define CLIENT_CID       1U
+
+/* Descriptor TYPE / SUBTYPE values */
+#define TYPE_DMAB          0x001U
+#define TYPE_ADMIN         0x002U
+#define SUBTYPE_COPY       0x03U
+#define SUBTYPE_CXT_START  0x03U   /* same value, disambiguated by TYPE */
+#define SUBTYPE_COMPRESS   0x04U
+#define SUBTYPE_DECOMPRESS 0x05U
+
+/* Per-operation bounce buffer limit */
+#define MAX_OP_SIZE      (16UL << 20)   /* 16 MiB */
+
+/* ------------------------------------------------------------------ */
+
+struct sdxi_cxt {
+	void       *ring_cpu;
+	dma_addr_t  ring_dma;
+	void       *cxt_ctl_cpu;
+	dma_addr_t  cxt_ctl_dma;
+	void       *csb_cpu;
+	dma_addr_t  csb_dma;
+	u32         wi;
+};
+
+struct sdxi_char_dev {
+	struct pci_dev   *pdev;
+	void __iomem     *bar0;
+	void __iomem     *bar2;
+
+	/* Two-level context table */
+	void             *outer_cpu;
+	dma_addr_t        outer_dma;
+	void             *inner_cpu;
+	dma_addr_t        inner_dma;
+
+	struct sdxi_cxt   admin;
+	struct sdxi_cxt   client;
+
+	struct mutex      lock;
+	struct miscdevice misc;
+	char              name[32];
+};
+
+static struct sdxi_char_dev *g_sdev;
+
+/* ------------------------------------------------------------------ */
+/* Descriptor helpers                                                  */
+/* ------------------------------------------------------------------ */
+
+static inline u32 make_opcode(u32 type, u32 subtype)
+{
+	return 1U | (subtype << 8) | (type << 16);
+}
+
+static inline u8 *ring_slot(struct sdxi_cxt *cxt)
+{
+	return (u8 *)cxt->ring_cpu + (cxt->wi % RING_SZ) * DSC_SIZE;
+}
+
+static void ring_doorbell(struct sdxi_char_dev *sdev, u32 cid, u32 wi)
+{
+	writeq(wi, sdev->bar2 + (u64)cid * SDXI_DB_STRIDE);
+}
+
+static void clear_csb(struct sdxi_cxt *cxt)
+{
+	memset(cxt->csb_cpu, 0xFF, CSB_SIZE);
+}
+
+static int poll_csb(struct sdxi_cxt *cxt, u64 *out_len)
+{
+	unsigned long deadline = jiffies + msecs_to_jiffies(CSB_TIMEOUT_MS);
+	u8 *csb = (u8 *)cxt->csb_cpu;
+	u32 sig_lo, flags;
+
+	do {
+		sig_lo = le32_to_cpu(*(__le32 *)(csb + CSB_SIGNAL_OFF));
+		if (sig_lo != 0xFFFFFFFF) {
+			flags = le32_to_cpu(*(__le32 *)(csb + CSB_FLAGS_OFF));
+			if (out_len)
+				*out_len = le64_to_cpu(*(__le64 *)(csb + CSB_RESULT_OFF));
+			return (flags & CSB_ER_BIT) ? -EIO : 0;
+		}
+		usleep_range(100, 200);
+	} while (time_before(jiffies, deadline));
+
+	return -ETIMEDOUT;
+}
+
+/* ------------------------------------------------------------------ */
+/* Bounce buffer helpers                                               */
+/* ------------------------------------------------------------------ */
+
+struct bounce {
+	void       *cpu;
+	dma_addr_t  dma;
+	size_t      size;
+};
+
+static int bounce_alloc(struct sdxi_char_dev *sdev, size_t size, struct bounce *b)
+{
+	b->size = size;
+	b->cpu  = dma_alloc_coherent(&sdev->pdev->dev, size, &b->dma, GFP_KERNEL);
+	return b->cpu ? 0 : -ENOMEM;
+}
+
+static void bounce_free(struct sdxi_char_dev *sdev, struct bounce *b)
+{
+	if (b->cpu) {
+		dma_free_coherent(&sdev->pdev->dev, b->size, b->cpu, b->dma);
+		b->cpu = NULL;
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/* ioctl handlers                                                      */
+/* ------------------------------------------------------------------ */
+
+static long handle_memcpy(struct sdxi_char_dev *sdev,
+			   struct sdxi_ioc_memcpy __user *uioc)
+{
+	struct sdxi_ioc_memcpy ioc;
+	struct bounce src = {}, dst = {};
+	u8 *slot;
+	long ret;
+
+	if (copy_from_user(&ioc, uioc, sizeof(ioc)))
+		return -EFAULT;
+	if (ioc.len == 0)
+		return 0;
+	if (ioc.len > MAX_OP_SIZE)
+		return -E2BIG;
+
+	ret = bounce_alloc(sdev, ioc.len, &src);
+	if (ret)
+		goto out;
+	ret = bounce_alloc(sdev, ioc.len, &dst);
+	if (ret)
+		goto out;
+
+	if (copy_from_user(src.cpu, (void __user *)ioc.src, ioc.len)) {
+		ret = -EFAULT;
+		goto out;
+	}
+
+	clear_csb(&sdev->client);
+	slot = ring_slot(&sdev->client);
+	memset(slot, 0, DSC_SIZE);
+	*(__le32 *)(slot + 0)  = cpu_to_le32(make_opcode(TYPE_DMAB, SUBTYPE_COPY));
+	*(__le32 *)(slot + 4)  = cpu_to_le32((u32)(ioc.len - 1));  /* size_m1 */
+	*(__le64 *)(slot + 16) = cpu_to_le64(src.dma);
+	*(__le64 *)(slot + 24) = cpu_to_le64(dst.dma);
+	*(__le64 *)(slot + 56) = cpu_to_le64(sdev->client.csb_dma);
+	sdev->client.wi++;
+	ring_doorbell(sdev, CLIENT_CID, sdev->client.wi);
+
+	ret = poll_csb(&sdev->client, NULL);
+	if (ret)
+		goto out;
+
+	if (copy_to_user((void __user *)ioc.dst, dst.cpu, ioc.len))
+		ret = -EFAULT;
+out:
+	bounce_free(sdev, &src);
+	bounce_free(sdev, &dst);
+	return ret;
+}
+
+static long handle_compress(struct sdxi_char_dev *sdev,
+			     struct sdxi_ioc_compress __user *uioc)
+{
+	struct sdxi_ioc_compress ioc;
+	struct bounce src = {}, dst = {};
+	u64 out_len = 0;
+	u8 *slot;
+	long ret;
+
+	if (copy_from_user(&ioc, uioc, sizeof(ioc)))
+		return -EFAULT;
+	if (ioc.src_len == 0 || ioc.dst_cap == 0)
+		return -EINVAL;
+	if (ioc.src_len > MAX_OP_SIZE || ioc.dst_cap > MAX_OP_SIZE)
+		return -E2BIG;
+
+	ret = bounce_alloc(sdev, ioc.src_len, &src);
+	if (ret)
+		goto out;
+	ret = bounce_alloc(sdev, ioc.dst_cap, &dst);
+	if (ret)
+		goto out;
+
+	if (copy_from_user(src.cpu, (void __user *)ioc.src, ioc.src_len)) {
+		ret = -EFAULT;
+		goto out;
+	}
+
+	clear_csb(&sdev->client);
+	slot = ring_slot(&sdev->client);
+	memset(slot, 0, DSC_SIZE);
+	*(__le32 *)(slot + 0)  = cpu_to_le32(make_opcode(TYPE_DMAB, SUBTYPE_COMPRESS));
+	*(__le32 *)(slot + 4)  = cpu_to_le32((u32)ioc.src_len);
+	*(__le32 *)(slot + 8)  = cpu_to_le32((u32)ioc.dst_cap);
+	*(__le32 *)(slot + 12) = cpu_to_le32(ioc.level);
+	*(__le64 *)(slot + 16) = cpu_to_le64(src.dma);
+	*(__le64 *)(slot + 24) = cpu_to_le64(dst.dma);
+	*(__le64 *)(slot + 56) = cpu_to_le64(sdev->client.csb_dma);
+	sdev->client.wi++;
+	ring_doorbell(sdev, CLIENT_CID, sdev->client.wi);
+
+	ret = poll_csb(&sdev->client, &out_len);
+	if (ret)
+		goto out;
+
+	if (out_len > ioc.dst_cap) {
+		ret = -EIO;
+		goto out;
+	}
+	if (copy_to_user((void __user *)ioc.dst, dst.cpu, (size_t)out_len)) {
+		ret = -EFAULT;
+		goto out;
+	}
+	ioc.out_len = out_len;
+	if (copy_to_user(uioc, &ioc, sizeof(ioc)))
+		ret = -EFAULT;
+out:
+	bounce_free(sdev, &src);
+	bounce_free(sdev, &dst);
+	return ret;
+}
+
+static long handle_decompress(struct sdxi_char_dev *sdev,
+			       struct sdxi_ioc_decompress __user *uioc)
+{
+	struct sdxi_ioc_decompress ioc;
+	struct bounce src = {}, dst = {};
+	u64 out_len = 0;
+	u8 *slot;
+	long ret;
+
+	if (copy_from_user(&ioc, uioc, sizeof(ioc)))
+		return -EFAULT;
+	if (ioc.src_len == 0 || ioc.dst_cap == 0)
+		return -EINVAL;
+	if (ioc.src_len > MAX_OP_SIZE || ioc.dst_cap > MAX_OP_SIZE)
+		return -E2BIG;
+
+	ret = bounce_alloc(sdev, ioc.src_len, &src);
+	if (ret)
+		goto out;
+	ret = bounce_alloc(sdev, ioc.dst_cap, &dst);
+	if (ret)
+		goto out;
+
+	if (copy_from_user(src.cpu, (void __user *)ioc.src, ioc.src_len)) {
+		ret = -EFAULT;
+		goto out;
+	}
+
+	clear_csb(&sdev->client);
+	slot = ring_slot(&sdev->client);
+	memset(slot, 0, DSC_SIZE);
+	*(__le32 *)(slot + 0)  = cpu_to_le32(make_opcode(TYPE_DMAB, SUBTYPE_DECOMPRESS));
+	*(__le32 *)(slot + 4)  = cpu_to_le32((u32)ioc.src_len);
+	*(__le32 *)(slot + 8)  = cpu_to_le32((u32)ioc.dst_cap);
+	*(__le64 *)(slot + 16) = cpu_to_le64(src.dma);
+	*(__le64 *)(slot + 24) = cpu_to_le64(dst.dma);
+	*(__le64 *)(slot + 56) = cpu_to_le64(sdev->client.csb_dma);
+	sdev->client.wi++;
+	ring_doorbell(sdev, CLIENT_CID, sdev->client.wi);
+
+	ret = poll_csb(&sdev->client, &out_len);
+	if (ret)
+		goto out;
+
+	if (out_len > ioc.dst_cap) {
+		ret = -EIO;
+		goto out;
+	}
+	if (copy_to_user((void __user *)ioc.dst, dst.cpu, (size_t)out_len)) {
+		ret = -EFAULT;
+		goto out;
+	}
+	ioc.out_len = out_len;
+	if (copy_to_user(uioc, &ioc, sizeof(ioc)))
+		ret = -EFAULT;
+out:
+	bounce_free(sdev, &src);
+	bounce_free(sdev, &dst);
+	return ret;
+}
+
+static long sdxi_char_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
+{
+	struct sdxi_char_dev *sdev = g_sdev;
+	long ret;
+
+	if (!sdev)
+		return -ENODEV;
+
+	mutex_lock(&sdev->lock);
+	switch (cmd) {
+	case SDXI_IOC_MEMCPY:
+		ret = handle_memcpy(sdev, (struct sdxi_ioc_memcpy __user *)arg);
+		break;
+	case SDXI_IOC_COMPRESS:
+		ret = handle_compress(sdev, (struct sdxi_ioc_compress __user *)arg);
+		break;
+	case SDXI_IOC_DECOMPRESS:
+		ret = handle_decompress(sdev, (struct sdxi_ioc_decompress __user *)arg);
+		break;
+	default:
+		ret = -ENOTTY;
+	}
+	mutex_unlock(&sdev->lock);
+	return ret;
+}
+
+static const struct file_operations sdxi_char_fops = {
+	.owner          = THIS_MODULE,
+	.unlocked_ioctl = sdxi_char_ioctl,
+	.compat_ioctl   = compat_ptr_ioctl,
+};
+
+/* ------------------------------------------------------------------ */
+/* Hardware context-table setup                                         */
+/* ------------------------------------------------------------------ */
+
+static int sdxi_alloc_cxt(struct sdxi_char_dev *sdev, struct sdxi_cxt *cxt)
+{
+	cxt->ring_cpu = dma_alloc_coherent(&sdev->pdev->dev, RING_SZ * DSC_SIZE,
+					   &cxt->ring_dma, GFP_KERNEL);
+	if (!cxt->ring_cpu)
+		return -ENOMEM;
+
+	cxt->cxt_ctl_cpu = dma_alloc_coherent(&sdev->pdev->dev, CTX_CTL_SZ,
+					       &cxt->cxt_ctl_dma, GFP_KERNEL);
+	if (!cxt->cxt_ctl_cpu)
+		return -ENOMEM;
+
+	cxt->csb_cpu = dma_alloc_coherent(&sdev->pdev->dev, CSB_SIZE,
+					  &cxt->csb_dma, GFP_KERNEL);
+	if (!cxt->csb_cpu)
+		return -ENOMEM;
+
+	cxt->wi = 0;
+	return 0;
+}
+
+static void sdxi_free_cxt(struct sdxi_char_dev *sdev, struct sdxi_cxt *cxt)
+{
+	if (cxt->csb_cpu) {
+		dma_free_coherent(&sdev->pdev->dev, CSB_SIZE,
+				  cxt->csb_cpu, cxt->csb_dma);
+		cxt->csb_cpu = NULL;
+	}
+	if (cxt->cxt_ctl_cpu) {
+		dma_free_coherent(&sdev->pdev->dev, CTX_CTL_SZ,
+				  cxt->cxt_ctl_cpu, cxt->cxt_ctl_dma);
+		cxt->cxt_ctl_cpu = NULL;
+	}
+	if (cxt->ring_cpu) {
+		dma_free_coherent(&sdev->pdev->dev, RING_SZ * DSC_SIZE,
+				  cxt->ring_cpu, cxt->ring_dma);
+		cxt->ring_cpu = NULL;
+	}
+}
+
+static int sdxi_hw_init(struct sdxi_char_dev *sdev)
+{
+	u8 *slot;
+	int ret;
+
+	/* Outer table: 4096-byte page, one entry pointing to inner. */
+	sdev->outer_cpu = dma_alloc_coherent(&sdev->pdev->dev, 4096,
+					     &sdev->outer_dma, GFP_KERNEL);
+	/* Inner table: 128 × 32 bytes. */
+	sdev->inner_cpu = dma_alloc_coherent(&sdev->pdev->dev,
+					     L1_CTX_PER_GROUP * INNER_ENTRY_SZ,
+					     &sdev->inner_dma, GFP_KERNEL);
+	if (!sdev->outer_cpu || !sdev->inner_cpu)
+		return -ENOMEM;
+
+	ret = sdxi_alloc_cxt(sdev, &sdev->admin);
+	if (ret)
+		return ret;
+	ret = sdxi_alloc_cxt(sdev, &sdev->client);
+	if (ret)
+		return ret;
+
+	/* Wire admin context (CID 0) ctx_ctl: ring ptr + ring size. */
+	*(__le64 *)((u8 *)sdev->admin.cxt_ctl_cpu + 0) =
+		cpu_to_le64(sdev->admin.ring_dma | 1ULL);   /* VL=1 */
+	*(__le64 *)((u8 *)sdev->admin.cxt_ctl_cpu + 8) = cpu_to_le64(RING_SZ);
+
+	/* Wire client context (CID 1) ctx_ctl. */
+	*(__le64 *)((u8 *)sdev->client.cxt_ctl_cpu + 0) =
+		cpu_to_le64(sdev->client.ring_dma | 1ULL);
+	*(__le64 *)((u8 *)sdev->client.cxt_ctl_cpu + 8) = cpu_to_le64(RING_SZ);
+
+	/* INNER[ADMIN_CID] → admin ctx_ctl, VL=1 */
+	*(__le64 *)((u8 *)sdev->inner_cpu + ADMIN_CID * INNER_ENTRY_SZ) =
+		cpu_to_le64(sdev->admin.cxt_ctl_dma | 1ULL);
+
+	/* INNER[CLIENT_CID] → client ctx_ctl, VL=1 */
+	*(__le64 *)((u8 *)sdev->inner_cpu + CLIENT_CID * INNER_ENTRY_SZ) =
+		cpu_to_le64(sdev->client.cxt_ctl_dma | 1ULL);
+
+	/* OUTER[0] → INNER, VL=1 */
+	*(__le64 *)sdev->outer_cpu = cpu_to_le64(sdev->inner_dma | 1ULL);
+
+	/* Point hardware at the outer table. */
+	writeq(sdev->outer_dma, sdev->bar0 + BAR0_CXT_L2);
+
+	/* Submit CXT_START for CLIENT_CID via the admin ring. */
+	slot = ring_slot(&sdev->admin);
+	memset(slot, 0, DSC_SIZE);
+	*(__le32 *)(slot + 0) = cpu_to_le32(make_opcode(TYPE_ADMIN, SUBTYPE_CXT_START));
+	*(__le32 *)(slot + 4) = cpu_to_le32(CLIENT_CID);
+	sdev->admin.wi++;
+	ring_doorbell(sdev, ADMIN_CID, sdev->admin.wi);
+
+	msleep(50);  /* give the emulator time to process */
+	return 0;
+}
+
+static void sdxi_hw_fini(struct sdxi_char_dev *sdev)
+{
+	sdxi_free_cxt(sdev, &sdev->client);
+	sdxi_free_cxt(sdev, &sdev->admin);
+
+	if (sdev->inner_cpu) {
+		dma_free_coherent(&sdev->pdev->dev,
+				  L1_CTX_PER_GROUP * INNER_ENTRY_SZ,
+				  sdev->inner_cpu, sdev->inner_dma);
+		sdev->inner_cpu = NULL;
+	}
+	if (sdev->outer_cpu) {
+		dma_free_coherent(&sdev->pdev->dev, 4096,
+				  sdev->outer_cpu, sdev->outer_dma);
+		sdev->outer_cpu = NULL;
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/* PCI probe / remove                                                  */
+/* ------------------------------------------------------------------ */
+
+static int sdxi_char_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+{
+	struct sdxi_char_dev *sdev;
+	int ret;
+
+	sdev = devm_kzalloc(&pdev->dev, sizeof(*sdev), GFP_KERNEL);
+	if (!sdev)
+		return -ENOMEM;
+
+	sdev->pdev = pdev;
+	mutex_init(&sdev->lock);
+	pci_set_drvdata(pdev, sdev);
+
+	ret = pci_enable_device(pdev);
+	if (ret)
+		return ret;
+
+	ret = pci_request_regions(pdev, "sdxi_char");
+	if (ret)
+		goto err_disable;
+
+	pci_set_master(pdev);
+
+	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
+	if (ret) {
+		ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+		if (ret)
+			goto err_regions;
+	}
+
+	sdev->bar0 = pci_iomap(pdev, 0, 0);
+	if (!sdev->bar0) {
+		ret = -EIO;
+		goto err_regions;
+	}
+
+	sdev->bar2 = pci_iomap(pdev, 2, 0);
+	if (!sdev->bar2) {
+		ret = -EIO;
+		goto err_bar0;
+	}
+
+	ret = sdxi_hw_init(sdev);
+	if (ret)
+		goto err_bar2;
+
+	snprintf(sdev->name, sizeof(sdev->name), "sdxi%d", pdev->devfn);
+	sdev->misc.minor  = MISC_DYNAMIC_MINOR;
+	sdev->misc.name   = sdev->name;
+	sdev->misc.fops   = &sdxi_char_fops;
+	sdev->misc.parent = &pdev->dev;
+
+	ret = misc_register(&sdev->misc);
+	if (ret)
+		goto err_hw;
+
+	g_sdev = sdev;
+	dev_info(&pdev->dev, "sdxi_char: registered /dev/%s\n", sdev->name);
+	return 0;
+
+err_hw:
+	sdxi_hw_fini(sdev);
+err_bar2:
+	pci_iounmap(pdev, sdev->bar2);
+err_bar0:
+	pci_iounmap(pdev, sdev->bar0);
+err_regions:
+	pci_release_regions(pdev);
+err_disable:
+	pci_disable_device(pdev);
+	return ret;
+}
+
+static void sdxi_char_remove(struct pci_dev *pdev)
+{
+	struct sdxi_char_dev *sdev = pci_get_drvdata(pdev);
+
+	if (!sdev)
+		return;
+
+	g_sdev = NULL;
+	misc_deregister(&sdev->misc);
+	sdxi_hw_fini(sdev);
+	pci_iounmap(pdev, sdev->bar2);
+	pci_iounmap(pdev, sdev->bar0);
+	pci_release_regions(pdev);
+	pci_disable_device(pdev);
+	dev_info(&pdev->dev, "sdxi_char: removed\n");
+}
+
+static const struct pci_device_id sdxi_char_pci_ids[] = {
+	{ PCI_DEVICE(SDXI_VENDOR_ID, SDXI_DEVICE_ID) },
+	{}
+};
+MODULE_DEVICE_TABLE(pci, sdxi_char_pci_ids);
+
+static struct pci_driver sdxi_char_driver = {
+	.name     = "sdxi_char",
+	.id_table = sdxi_char_pci_ids,
+	.probe    = sdxi_char_probe,
+	.remove   = sdxi_char_remove,
+};
+
+module_pci_driver(sdxi_char_driver);

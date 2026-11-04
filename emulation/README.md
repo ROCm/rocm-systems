@@ -31,6 +31,7 @@
   - [daemon](emulation/mirage/daemon/) — Optional HTTP/WebSocket server exposing the control plane as a REST API (off by default). See [api.rs](emulation/mirage/daemon/src/api.rs) and [server.rs](emulation/mirage/daemon/src/server.rs).
   - [dashboard](emulation/mirage/dashboard/) — React + Vite single-page app (topology editor, session dashboard, interactive terminals) bundled into the daemon. Source under [web/src/](emulation/mirage/dashboard/web/src/).
   - [scripts](emulation/mirage/scripts/), [tests](emulation/mirage/tests/), [docs](emulation/mirage/docs/), [cmake](emulation/mirage/cmake/) — Build/dev and Dockerized-build scripts, end-to-end and ML test fixtures, design docs, and the CMake wrapper over cargo.
+- [SDXI](emulation/sdxi/) — vfio-user emulator of the AMD SDXI PCIe copy-engine device (vendor 0x1022, device 0x149f). Presents a 128 KiB BAR0 register space and a 4 MiB BAR2 doorbell aperture to a QEMU guest; handles DMAB COPY, COMPRESS, and DECOMPRESS descriptors via the vfio-user protocol. Built with CMake against libvfio-user and zlib; includes a CTest suite and an out-of-tree kernel driver under [drivers/](emulation/sdxi/drivers/).
 
 ## Rocjitsu
 
