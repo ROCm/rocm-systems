@@ -21,13 +21,17 @@ Analyze logs must be produced with `--view table` so chart-only panels (roofline
 memory charts, etc.) are emitted as plain metric tables. Default TTY output omits
 metrics and yields incomplete coverage.
 
-Primary statistic is **Median** (not Avg):
+Primary statistic is **Median** (not Avg). Std Dev, when shown, is the
+per-dispatch sample standard deviation (analyze `STD` / `to_std`).
+CV is Std Dev / |Median|, shown as a percent:
 
 * Prefer the Median column when present in `--view table` output.
-* Else recompute Median from the run's per-dispatch data (`MEDIAN` of the Min
-  formula inner). Both runs are recomputed with the evaluator in this tree.
+* Else recompute Median from the run's per-dispatch data. `SUM / SUM` and
+  Value-only formulas are reduced per dispatch, then aggregated. Both runs are
+  recomputed with the evaluator in this tree.
 * Else, if Min==Max, treat that value as the Median.
 * Value-only panels (no Avg/Min/Max/Median) use the single Value column.
+* A Median or Std Dev already printed by the analyze log is kept.
 
 Arch → analysis_configs mapping (`--arch`):
 
@@ -202,6 +206,7 @@ class MetricValue:
     source: str = ""  # median | recomputed | minmax_eq | value
     min_v: Optional[float] = None
     max_v: Optional[float] = None
+    std_v: Optional[float] = None
     cls: str = ""
 
 
@@ -328,6 +333,7 @@ def parse_log(path: Path) -> ParsedLog:
     max_col: Optional[int] = None
     value_col: Optional[int] = None
     avg_col: Optional[int] = None
+    std_col: Optional[int] = None
     in_metric_table = False
     in_top_kernels = False
 
@@ -350,7 +356,7 @@ def parse_log(path: Path) -> ParsedLog:
         if "Metric_ID" in line:
             cols = [c.strip() for c in re.split(r"[│|]", line) if c.strip()]
             # Reset so multi-bar panels without Median/Value cannot inherit.
-            median_col = min_col = max_col = value_col = avg_col = None
+            median_col = min_col = max_col = value_col = avg_col = std_col = None
             in_metric_table = False
             if not (
                 "Median" in line or "Avg" in line or "Min" in line or "Value" in line
@@ -361,6 +367,7 @@ def parse_log(path: Path) -> ParsedLog:
             max_col = _header_col_index(cols, "Max")
             value_col = _header_col_index(cols, "Value")
             avg_col = _header_col_index(cols, "Avg")
+            std_col = _header_col_index(cols, "Std Dev")
             in_metric_table = True
             continue
 
@@ -384,6 +391,7 @@ def parse_log(path: Path) -> ParsedLog:
         raw_max, max_v = _cell_at(cols, max_col)
         raw_val, val_v = _cell_at(cols, value_col)
         raw_avg, avg_v = _cell_at(cols, avg_col)
+        _raw_std, std_v = _cell_at(cols, std_col)
 
         value: Optional[float] = None
         raw = ""
@@ -438,6 +446,7 @@ def parse_log(path: Path) -> ParsedLog:
             source=source,
             min_v=min_v,
             max_v=max_v,
+            std_v=std_v,
         )
 
     return result
@@ -481,12 +490,230 @@ def min_formula_to_median_expr(min_formula: str) -> Optional[str]:
     return None
 
 
-def compute_medians_for_workload(
+def _replace_to_sum_calls(expression: str) -> str:
+    """Replace every ``to_sum(x)`` call with its per-dispatch operand ``(x)``."""
+    pieces: List[str] = []
+    index = 0
+    while index < len(expression):
+        if not expression.startswith("to_sum(", index):
+            pieces.append(expression[index])
+            index += 1
+            continue
+        operand_start = index + len("to_sum(")
+        depth = 1
+        operand_end = operand_start
+        while operand_end < len(expression) and depth:
+            if expression[operand_end] == "(":
+                depth += 1
+            elif expression[operand_end] == ")":
+                depth -= 1
+            operand_end += 1
+        if depth:
+            return expression
+        operand = expression[operand_start : operand_end - 1]
+        pieces.append(f"({_replace_to_sum_calls(operand)})")
+        index = operand_end
+    return "".join(pieces)
+
+
+def aggregator_to_stat(expression: str, replacement: str) -> Optional[str]:
+    """Replace exactly one Min or Median aggregation with a statistic."""
+    hits = re.findall(r"\b(?:to_median|to_min|MEDIAN|MIN)\(", expression)
+    if len(hits) != 1:
+        return None
+    return re.sub(
+        r"\b(?:to_median|to_min|MEDIAN|MIN)\(",
+        replacement + "(",
+        expression,
+        count=1,
+    )
+
+
+def per_dispatch_stat_expr(expression: object, statistic: str) -> Optional[str]:
+    """Build Median or Std Dev over values from individual dispatches."""
+    if not isinstance(expression, str):
+        return None
+    text = expression.strip()
+    if not text or text == "None":
+        return None
+    if statistic == "median":
+        direct = aggregator_to_stat(text, "to_median")
+        if direct is not None:
+            return None if "to_sum(" in direct else direct
+        reducer = "to_median"
+    elif statistic == "stddev":
+        direct = aggregator_to_stat(text, "to_std")
+        if direct is not None:
+            return None if "to_sum(" in direct else direct
+        reducer = "to_std"
+    else:
+        raise ValueError(f"Unsupported statistic: {statistic}")
+    if "to_sum(" not in text:
+        return None
+    if re.search(r"\bto_(?:avg|median|min|max|std|quantile)\(", text):
+        return None
+    return f"{reducer}({_replace_to_sum_calls(text)})"
+
+
+def _attach_stat_column(dfs: dict, dfs_type: dict, statistic: str) -> None:
+    """Add a per-dispatch statistic expression when that column is absent."""
+    column = "Median" if statistic == "median" else "Std Dev"
+    for _df_id, frame in dfs.items():
+        if dfs_type.get(_df_id) != "metric_table" or column in frame.columns:
+            continue
+        source_col = next(
+            (
+                name
+                for name in ("Median", "Min", "Avg", "Value")
+                if name in frame.columns
+            ),
+            None,
+        )
+        if source_col is None:
+            continue
+        frame[column] = [
+            per_dispatch_stat_expr(value, statistic) for value in frame[source_col]
+        ]
+
+
+def _evaluate_stat_columns(
+    arch_config: object,
+    filtered: object,
+    sys_info: object,
+    pass_layout: object,
+    roofline_peaks: object,
+    columns: List[str],
+) -> None:
+    """Evaluate Median and Std Dev cells, keeping the rest of the table.
+
+    One expression that cannot be reduced does not drop the other metrics.
+    Pass binding matches ``eval_metric`` so a counter copied across passes is
+    read from the numerator's pass.
+    """
+    from utils.metrics.evaluation_pipeline import (
+        _calc_pass_scoped_builtins,
+        calc_builtin_vars,
+        create_empirical_peaks_dict,
+        create_sys_vars,
+    )
+    from utils.metrics.metric_evaluator import MetricEvaluator
+    from utils.metrics.pass_provenance import bind_metric_tables_to_passes
+    from utils.mi_gpu_spec import mi_gpu_specs
+    from utils.utils_common import SUPPORTED_FIELD
+
+    frames = arch_config.dfs
+    frame_types = arch_config.dfs_type
+    expressions: List[str] = []
+    for df_id, frame in frames.items():
+        if frame_types.get(df_id) != "metric_table":
+            continue
+        for column in columns:
+            if column not in frame.columns:
+                continue
+            for cell in frame[column]:
+                if isinstance(cell, str) and cell and cell != "None":
+                    expressions.append(cell)
+
+    info = sys_info.iloc[0]
+    sys_vars = create_sys_vars(info)
+    empirical_peaks = create_empirical_peaks_dict(roofline_peaks)
+    used_passes: Set[str] = set()
+    if pass_layout is not None and pass_layout.has_duplicates:
+        used_passes = bind_metric_tables_to_passes(
+            frames,
+            frame_types,
+            pass_layout,
+            mi_gpu_specs.get_gpu_series(info["gpu_arch"]),
+            frozenset(SUPPORTED_FIELD),
+        )
+    sys_vars.update(
+        calc_builtin_vars(filtered, sys_vars, info["gpu_arch"], expressions)
+    )
+    if pass_layout is not None and used_passes:
+        sys_vars.update(
+            _calc_pass_scoped_builtins(
+                filtered,
+                sys_vars,
+                info["gpu_arch"],
+                pass_layout,
+                used_passes,
+                expressions,
+            )
+        )
+    evaluator = MetricEvaluator(filtered, sys_vars, empirical_peaks)
+    for df_id, frame in frames.items():
+        if frame_types.get(df_id) != "metric_table":
+            continue
+        for column in columns:
+            if column not in frame.columns:
+                continue
+            for row_id, row in frame.iterrows():
+                expression = row.get(column)
+                if (
+                    not isinstance(expression, str)
+                    or not expression
+                    or expression == "None"
+                ):
+                    continue
+                try:
+                    evaluated = evaluator.eval_expression(expression)
+                except Exception:  # noqa: BLE001 — one bad aggregate must not drop the rest
+                    evaluated = None
+                if evaluated == "N/A":
+                    evaluated = None
+                frame.at[row_id, column] = evaluated
+
+
+def _read_stat_column(arch_config: object, column: str) -> Dict[str, Optional[float]]:
+    """Read one evaluated statistic column into metric-key → float."""
+    skip_cols = {
+        "Avg",
+        "Min",
+        "Max",
+        "Median",
+        "Std Dev",
+        "Unit",
+        "Peak",
+        "Percent of Peak",
+        "Description",
+        "Value",
+        "Q1",
+        "Q3",
+    }
+    out: Dict[str, Optional[float]] = {}
+    for df_id, frame in arch_config.dfs.items():
+        if arch_config.dfs_type.get(df_id) != "metric_table":
+            continue
+        if column not in frame.columns:
+            continue
+        name_col = "Metric" if "Metric" in frame.columns else None
+        if name_col is None:
+            for col in frame.columns:
+                if col not in skip_cols:
+                    name_col = col
+                    break
+        if name_col is None:
+            continue
+        for row_id, row in frame.iterrows():
+            cell = row.get(column)
+            if cell is None or (isinstance(cell, float) and math.isnan(cell)):
+                out[f"{row_id}|{row[name_col]}"] = None
+            elif isinstance(cell, str):
+                out[f"{row_id}|{row[name_col]}"] = to_float(cell)
+            else:
+                try:
+                    out[f"{row_id}|{row[name_col]}"] = float(cell)
+                except (TypeError, ValueError):
+                    out[f"{row_id}|{row[name_col]}"] = None
+    return out
+
+
+def compute_dispatch_stats_for_workload(
     wl_dir: Path,
     metric_keys: List[str],
-) -> Dict[str, Optional[float]]:
-    """Recompute Median for metrics that have a Min formula, via analyze path."""
-    del metric_keys  # compute all Min-backed rows; keys unused
+) -> Tuple[Dict[str, Optional[float]], Dict[str, Optional[float]]]:
+    """Recompute per-dispatch Median and sample Std Dev for one workload."""
+    del metric_keys  # compute every reducible row; keys unused
     if str(SRC) not in sys.path:
         sys.path.insert(0, str(SRC))
 
@@ -494,7 +721,6 @@ def compute_medians_for_workload(
 
     import config
     from utils import file_io, parser, schema
-    from utils.metrics.evaluation_pipeline import eval_metric
     from utils.metrics.expression import build_metric_value_string
     from utils.utils_common import canonical_config_arch
 
@@ -552,6 +778,9 @@ def compute_medians_for_workload(
                         "to_min(", "to_median(", 1
                     )
 
+    _attach_stat_column(arch_config.dfs, arch_config.dfs_type, "median")
+    _attach_stat_column(arch_config.dfs, arch_config.dfs_type, "stddev")
+
     workload = schema.Workload()
     workload.sys_info = sys_info
     workload.roofline_peaks = pd.DataFrame()
@@ -561,88 +790,52 @@ def compute_medians_for_workload(
     workload.raw_pmc, workload.pmc_pass_layout = file_io.load_df_pmc(
         str(wl_dir), verbose=0
     )
-
     filtered = parser.apply_filters(workload, debug=False)
-
-    for df_id, frame in arch_config.dfs.items():
-        if arch_config.dfs_type.get(df_id) != "metric_table":
-            continue
-        if "Median" not in frame.columns:
-            continue
-        exprs = arch_config.dfs_expressions.setdefault(df_id, [])
-        for _, row in frame.iterrows():
-            median_expr = row.get("Median")
-            if (
-                isinstance(median_expr, str)
-                and median_expr
-                and median_expr not in exprs
-            ):
-                exprs.append(median_expr)
-
-    eval_metric(
-        arch_config.dfs,
-        arch_config.dfs_type,
-        arch_config.dfs_expressions,
-        sys_info.iloc[0],
-        workload.roofline_peaks,
+    _evaluate_stat_columns(
+        arch_config,
         filtered,
-        debug=False,
-        pass_layout=workload.pmc_pass_layout,
+        sys_info,
+        workload.pmc_pass_layout,
+        workload.roofline_peaks,
+        ["Median", "Std Dev"],
+    )
+    return (
+        _read_stat_column(arch_config, "Median"),
+        _read_stat_column(arch_config, "Std Dev"),
     )
 
-    skip_cols = {
-        "Avg",
-        "Min",
-        "Max",
-        "Median",
-        "Unit",
-        "Peak",
-        "Percent of Peak",
-        "Description",
-        "Value",
-    }
-    out: Dict[str, Optional[float]] = {}
-    for df_id, frame in arch_config.dfs.items():
-        if arch_config.dfs_type.get(df_id) != "metric_table":
-            continue
-        if "Median" not in frame.columns:
-            continue
-        name_col = "Metric" if "Metric" in frame.columns else None
-        if name_col is None:
-            for col in frame.columns:
-                if col not in skip_cols:
-                    name_col = col
-                    break
-        if name_col is None:
-            continue
-        for row_id, row in frame.iterrows():
-            key = f"{row_id}|{row[name_col]}"
-            median_value = row.get("Median")
-            if median_value is None or (
-                isinstance(median_value, float) and math.isnan(median_value)
-            ):
-                out[key] = None
-            elif isinstance(median_value, str):
-                out[key] = to_float(median_value)
-            else:
-                try:
-                    out[key] = float(median_value)
-                except (TypeError, ValueError):
-                    out[key] = None
-    return out
+
+def compute_medians_for_workload(
+    wl_dir: Path,
+    metric_keys: List[str],
+) -> Dict[str, Optional[float]]:
+    """Recompute Median for metrics that have a Min formula, via analyze path."""
+    medians, _stddevs = compute_dispatch_stats_for_workload(wl_dir, metric_keys)
+    return medians
+
+
+def compute_stddevs_for_workload(
+    wl_dir: Path,
+    metric_keys: List[str],
+) -> Dict[str, Optional[float]]:
+    """Per-dispatch sample standard deviation, same STD/to_std analyze uses."""
+    _medians, stddevs = compute_dispatch_stats_for_workload(wl_dir, metric_keys)
+    return stddevs
 
 
 def apply_recomputed_medians(
     parsed: Dict[str, ParsedLog],
     workload_dirs: Dict[str, Path],
 ) -> None:
-    """Fill missing Medians from per-dispatch re-eval of each workload dir."""
+    """Fill missing Medians and Std Devs from per-dispatch re-eval."""
     for wl_name, wl_dir in workload_dirs.items():
         log = parsed.get(wl_name)
         if log is None:
             continue
         try:
-            medians = compute_medians_for_workload(wl_dir, list(log.metrics))
+            medians, stddevs = compute_dispatch_stats_for_workload(
+                wl_dir, list(log.metrics)
+            )
         except Exception as exc:  # noqa: BLE001 - report soft-fail in HTML
             print(f"WARN: median recompute failed for {wl_dir}: {exc}")
             continue
@@ -658,6 +851,13 @@ def apply_recomputed_medians(
                 existing.value = med
                 existing.raw = f"{med:g}"
                 existing.source = "recomputed"
+        for key, std in stddevs.items():
+            if std is None:
+                continue
+            existing = log.metrics.get(key)
+            if existing is None or existing.std_v is not None:
+                continue
+            existing.std_v = std
 
 
 def select_workload_log(workload: str, run: str, log_names: List[str]) -> Optional[str]:
@@ -781,11 +981,31 @@ def classify_metrics(
 def fmt_value(mv: Optional[MetricValue], unit: str = "") -> str:
     if mv is None or mv.value is None:
         return "N/A"
+    return _fmt_number(mv.value, unit)
+
+
+def _fmt_number(value: float, unit: str = "") -> str:
     if "percent" in unit.lower():
-        return f"{mv.value:.2f}".rstrip("0").rstrip(".")
-    if abs(mv.value) >= 1000:
-        return f"{mv.value:,.2f}".rstrip("0").rstrip(".")
-    return f"{mv.value:.2g}"
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+    if abs(value) >= 1000:
+        return f"{value:,.2f}".rstrip("0").rstrip(".")
+    return f"{value:.2g}"
+
+
+def fmt_std(mv: Optional[MetricValue], unit: str = "") -> str:
+    """Format sample standard deviation, or a dash when it is unknown."""
+    if mv is None or mv.std_v is None:
+        return "—"
+    return _fmt_number(mv.std_v, unit)
+
+
+def fmt_cv(mv: Optional[MetricValue]) -> str:
+    """Coefficient of variation, Std Dev / |Median|, as a percent."""
+    if mv is None or mv.value is None or mv.std_v is None:
+        return "—"
+    if abs(mv.value) < DELTA_NEAR_ZERO:
+        return "—"
+    return f"{100.0 * mv.std_v / abs(mv.value):.1f}%"
 
 
 def cell_style(cls: str) -> str:
@@ -871,7 +1091,9 @@ def build_total_note(
         f"they are not dropped from Total. Entire panels omitted by TTY "
         f"('<code>Not showing table with empty column(s)</code>') are not in any Total. "
         f"Cell values are <b>{html.escape(stat_label)}</b> "
-        f"(from log Median column, or recomputed from per-dispatch data)."
+        f"(from log Median column, or recomputed from per-dispatch data). "
+        f"Std Dev is the per-dispatch sample standard deviation. "
+        f"CV is Std Dev / |Median|."
     )
 
     if arch in _CDNA3_L2_CHAN_ARCHES:
@@ -1142,7 +1364,8 @@ def render_report(
 
     wl_headers = "".join(
         f"<th>{html.escape(wl)}<br><small>{WORKLOAD_DESCRIPTIONS.get(wl, '')}</small><br>"
-        f"<small>{html.escape(stat_label)}</small></th>"
+        f"<small>{html.escape(stat_label)}</small><br>"
+        "<small>σ Std Dev</small><br><small>CV</small></th>"
         for wl in wl_names
     )
 
@@ -1181,7 +1404,7 @@ h1{{color:#0d47a1;margin-bottom:4px}}h2{{color:#263238;border-bottom:2px solid #
 .sortable-table th.sort-asc::after{{content:' \\25b2';font-size:10px}}
 .sortable-table th.sort-desc::after{{content:' \\25bc';font-size:10px}}
 tr.delta-ge-100 td{{background:#fff8e1}}
-tr.delta-ge-100 td:nth-child(6){{background:#ffe082;font-weight:bold}}
+tr.delta-ge-100 td:nth-child(10){{background:#ffe082;font-weight:bold}}
 tr.delta-ge-100:hover td{{filter:brightness(0.96)}}
 .bucket-semantics{{border-collapse:collapse;width:100%;max-width:920px;background:#fff;margin:10px 0 4px;font-size:12px;box-shadow:0 1px 4px rgba(0,0,0,.08)}}
 .bucket-semantics th{{background:#eceff1;color:#37474f;padding:8px 10px;text-align:left;font-weight:600;position:static}}
@@ -1343,8 +1566,15 @@ def _render_metric_row(
         cls = mv.cls if mv else "na"
         row_cats.add(cls)
         val = fmt_value(mv, unit)
+        std = fmt_std(mv, unit)
+        cv = fmt_cv(mv)
         style = cell_style(cls)
-        wl_cells.append(f"<td style='{style}' data-cls='{cls}'>{html.escape(val)}</td>")
+        std_html = f"<div class='unit'>σ {html.escape(std)}</div>" if std != "—" else ""
+        cv_html = f"<div class='unit'>CV {html.escape(cv)}</div>" if cv != "—" else ""
+        wl_cells.append(
+            f"<td style='{style}' data-cls='{cls}'>"
+            f"{html.escape(val)}{std_html}{cv_html}</td>"
+        )
 
     problematic = row_cats & {
         "na",
@@ -1447,7 +1677,10 @@ def _render_delta_section(
         f"Compared values are <b>{html.escape(stat_label)}</b> from analyze "
         "<code>--view table</code> logs (or recomputed from per-dispatch "
         "data when the Median column is absent). "
-        "|rel| = |new−old|/|old|.</p>"
+        "|rel| = |new−old|/|old|. "
+        "Std Dev is the per-dispatch sample standard deviation. "
+        "CV = Std Dev / |Median|. "
+        "A dash means Std Dev is missing or the median is near zero.</p>"
         "<p class='filter-note'>"
         f"Include when |rel| ≥ {rel_pct:.0f}% ({counts})<br>"
         f"Highlight when |rel| ≥ {hi_pct:.0f}% "
@@ -1461,7 +1694,11 @@ def _render_delta_section(
         "<th data-sort='str'>ID</th>"
         "<th data-sort='str'>Metric</th>"
         f"<th data-sort='num'>Old ({html.escape(stat_label)})</th>"
+        "<th data-sort='num'>Old (Std Dev)</th>"
+        "<th data-sort='num'>Old (CV)</th>"
         f"<th data-sort='num'>New ({html.escape(stat_label)})</th>"
+        "<th data-sort='num'>New (Std Dev)</th>"
+        "<th data-sort='num'>New (CV)</th>"
         "<th data-sort='num'>|rel|</th>"
         "<th data-sort='str'>Unit</th>"
         "</tr></thead><tbody>" + "".join(delta_rows) + "</tbody></table>"
@@ -1504,7 +1741,11 @@ def _render_delta_row(
         f"<td class='mid'>{html.escape(mid)}</td>"
         f"<td>{html.escape(name)}</td>"
         f"<td>{html.escape(fmt_value(change.old, unit))}</td>"
+        f"<td>{html.escape(fmt_std(change.old, unit))}</td>"
+        f"<td>{html.escape(fmt_cv(change.old))}</td>"
         f"<td>{html.escape(fmt_value(change.new, unit))}</td>"
+        f"<td>{html.escape(fmt_std(change.new, unit))}</td>"
+        f"<td>{html.escape(fmt_cv(change.new))}</td>"
         f"{rel_cell}"
         f"<td>{html.escape(unit)}</td></tr>"
     )
