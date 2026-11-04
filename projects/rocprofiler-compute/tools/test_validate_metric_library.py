@@ -33,8 +33,9 @@ compute.valu_util:
 
 @pytest.fixture
 def tree(tmp_path, monkeypatch):
-    """The synthetic family, as the only known chain."""
+    """The synthetic family, as the only known chain, evaluated as gfx90a."""
     use_metric_library_family(monkeypatch, tmp_path)
+    monkeypatch.setattr(validate_metric_library, "_member_arch", lambda arch: "gfx90a")
     return tmp_path
 
 
@@ -69,6 +70,22 @@ def copy_shipped_trees(root, arch):
 
 def write_base_metrics(root, text):
     write_text_file(root / "gfx_base" / "compute.yaml", text)
+
+
+def write_base_metric_pair(root, formula, second_formula):
+    """Write compute.valu_util with formula, compute.valu_copy with second_formula."""
+    first = BASE_METRIC.replace("SUM(SQ_ACTIVE_INST_VALU)", formula)
+    second = (
+        BASE_METRIC
+        .replace("valu_util", "valu_copy")
+        .replace("VALU Utilization", "VALU Copy")
+        .replace("SUM(SQ_ACTIVE_INST_VALU)", second_formula)
+    )
+    write_base_metrics(root, first + second)
+
+
+def base_errors(root):
+    return [error for error in validate(root) if error.startswith("[gfx_base]")]
 
 
 def replace_in(path, old, new):
@@ -161,6 +178,82 @@ def test_metrics_cannot_share_a_formula(tree, formula):
         "['compute.valu_util', 'compute.valu_util_copy']: share a formula" in error
         for error in errors
     )
+
+
+@pytest.mark.parametrize(
+    "old, new, message",
+    [
+        (
+            "formula: SUM(SQ_ACTIVE_INST_VALU)",
+            "formula: SUM(SQ_ACTIVE_INST_VALU) +",
+            "formula does not parse: invalid syntax",
+        ),
+        (
+            "unit: Percent",
+            "unit: Percent\n  peak: $max_sclk * ",
+            "peak does not parse: invalid syntax",
+        ),
+        (
+            "formula: SUM(SQ_ACTIVE_INST_VALU)",
+            "formula: SUM(SQ_ACTIVE_INST_VALU.real)",
+            "formula does not parse: the expression parser does not allow",
+        ),
+    ],
+)
+def test_expressions_must_parse(tree, old, new, message):
+    write_base_metrics(tree, BASE_METRIC.replace(old, new))
+    assert f"[gfx_base] compute.valu_util: {message}" in " ".join(validate(tree))
+
+
+@pytest.mark.parametrize(
+    "formula, second_formula",
+    [
+        (
+            "SUM(SQ_ACTIVE_INST_VALU * $cu_per_gpu)",
+            "SUM(SQ_ACTIVE_INST_VALU) * $cu_per_gpu",
+        ),
+        (
+            "SUM(SQ_WAVES - SQ_INSTS_SALU) / SUM($denom)",
+            "SUM(NOISE_CLAMP(SQ_WAVES - SQ_INSTS_SALU, SQ_WAVES)) / SUM($denom)",
+        ),
+    ],
+)
+def test_metrics_cannot_share_a_value(tree, formula, second_formula):
+    write_base_metric_pair(tree, formula, second_formula)
+    assert (
+        "[gfx_base] ['compute.valu_util', 'compute.valu_copy']: share a value; use one "
+        "id, or list them in SAME_VALUE_IDS" in base_errors(tree)
+    )
+
+
+@pytest.mark.parametrize(
+    "formula, second_formula",
+    [
+        ("SUM(SQ_INSTS_VALU) / SUM($denom)", "SUM(SQ_INSTS_VALU) / SUM(SQ_WAVES)"),
+        ("100 * TCC_HIT[::_1]", "100 * TCC_MISS[::_1]"),
+    ],
+)
+def test_values_that_differ_or_are_not_numbers_pass(tree, formula, second_formula):
+    write_base_metric_pair(tree, formula, second_formula)
+    assert not any("share a value" in error for error in base_errors(tree))
+
+
+def test_same_value_ids_must_share_a_value(tree, monkeypatch):
+    monkeypatch.setitem(
+        validate_metric_library.SAME_VALUE_IDS,
+        "gfx_base",
+        [
+            ("compute.valu_util", "compute.valu_copy"),
+            ("compute.valu_util", "compute.salu_util"),
+        ],
+    )
+    write_base_metric_pair(
+        tree, "SUM(SQ_ACTIVE_INST_VALU) * 2", "SUM(2 * SQ_ACTIVE_INST_VALU)"
+    )
+    assert base_errors(tree) == [
+        "[gfx_base] SAME_VALUE_IDS lists ['compute.valu_util', 'compute.salu_util'], "
+        "but their values differ"
+    ]
 
 
 def test_child_arch_cannot_rename_a_formula(tree):

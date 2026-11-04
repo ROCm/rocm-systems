@@ -14,19 +14,25 @@ For every arch in src/rocprof_compute_soc/metric_library/, check that:
   4. metric ids look like "{category}.{subcategory}_{name}", name hardware rather than
      a view, and live in the file named after their category, so each id is unique on
      the arch;
-  5. no two metrics on the arch share a formula (except SHARED_FORMULA_IDS) or a name,
-     and a formula has one id on every arch (except SPLIT_FORMULA_IDS);
-  6. units use one spelling, and each metric id has one name and one unit on every
+  5. every formula and peak parses with the production expression parser;
+  6. no two metrics on the arch share a formula (except SHARED_FORMULA_IDS), a value
+     however written (except those and SAME_VALUE_IDS) or a name, and a formula has
+     one id on every arch (except SPLIT_FORMULA_IDS);
+  7. units use one spelling, and each metric id has one name and one unit on every
      arch;
-  7. the library matches analysis_configs: every equation a row shows is a library
+  8. the library matches analysis_configs: every equation a row shows is a library
      formula (DISPLAY_VARIANTS list the rows that show one in another form), every
      formula is shown, every row's unit is its metric's unit (except UNIT_VARIANTS),
      each row's peak is its metric's "peak" or "peak_empirical" and each library peak
      is shown by a row, the no-filter counters equal detect_counters(), and the
-     variables equal get_build_in_vars(). Check 7 is temporary; see "Equivalence with
+     variables equal get_build_in_vars(). Check 8 is temporary; see "Equivalence with
      analysis_configs" below.
 """
 
+import ast
+import functools
+import importlib
+import logging
 import re
 import sys
 from collections import defaultdict
@@ -46,6 +52,9 @@ from typing import (
     Tuple,
 )
 
+import numpy as np
+import pandas as pd
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -63,9 +72,21 @@ from utils.metric_library import (
     iter_library_documents,
     load_metric_library,
 )
+from utils.metrics.evaluation_pipeline import calc_builtin_vars
+from utils.metrics.expression import (
+    SUPPORTED_CALL,
+    build_eval_string,
+    update_denominator_string,
+)
+from utils.metrics.metric_evaluator import MetricEvaluator
 from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_analysis import add_unit_counter
 from utils.utils_common import MEMBW_ANALYSIS_PANEL_ID, canonical_config_arch
-from utils.utils_counter_defs import get_build_in_vars, metric_value_keys
+from utils.utils_counter_defs import (
+    SUPPORTED_DENOM,
+    get_build_in_vars,
+    metric_value_keys,
+)
 from utils.yaml_inherit_loader import InheritanceError, declared_parent
 from vendored import yaml
 
@@ -98,6 +119,8 @@ EMPIRICAL_PEAK_RE = re.compile(r"\$(\w+)_empirical_peak")
 CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops")
 ARCH_CEILINGS_WITHOUT_METRIC = {}
 VARIABLE_FIELDS = ("formula",)
+# Metric fields the runtime evaluates.
+EXPRESSION_FIELDS = ("formula", *METRIC_OPTIONAL_FIELDS)
 # Ids allowed to share another id's formula (id -> that id): the same counters bounded
 # by a different measured ceiling.
 SHARED_FORMULA_IDS = {}
@@ -105,6 +128,18 @@ SHARED_FORMULA_IDS = {}
 # shows two equations on an arch (D8 Kind 3), and the parent arch's equation keeps
 # the id until the metric owners choose one.
 SPLIT_FORMULA_IDS = {}
+# Ids allowed to share a value on an arch although their formulas differ (arch -> id
+# pairs): different quantities whose formulas coincide there.
+SAME_VALUE_IDS = {}
+# The same-value check evaluates each formula on one dispatch per normalization
+# ($denom), with counters and the machine values no SoC class sets drawn from this seed.
+# Counters within one decade keep built-in variables such as $numActiveCUs positive.
+SAME_VALUE_SEED = 0
+COUNTER_VALUE_RANGE = (1e5, 1e6)
+MACHINE_VALUE_RANGE = (2, 129)
+# The counter columns and $variables (with "$" replaced) of an eval string.
+EVAL_COLUMN_RE = re.compile(r"raw_pmc_df\['([^']+)'\]")
+EVAL_VARIABLE_RE = re.compile(r"\bammolite__(\w+)")
 
 # A row's equation comes from the first of these columns it has; a row with none
 # shows one equation in each of its table's value columns.
@@ -174,8 +209,9 @@ def validate(metric_dir: Path, analysis_dir: Optional[Path] = None) -> List[str]
         arch_errors = validate_arch(metric_dir, arch)
         if not arch_errors:
             valid_archs.append(arch)
+            arch_errors = same_value_errors(arch, load_metric_library(metric_dir, arch))
             if analysis_dir is not None:
-                arch_errors = equivalence_errors(metric_dir, analysis_dir, arch)
+                arch_errors.extend(equivalence_errors(metric_dir, analysis_dir, arch))
         errors.extend(arch_errors)
     errors.extend(_formula_id_errors(metric_dir, valid_archs))
     errors.extend(_name_unit_errors(metric_dir, valid_archs))
@@ -208,9 +244,33 @@ def validate_arch(metric_dir: Path, arch: str) -> List[str]:
             if isinstance(entry, dict)
         )
     errors.extend(f"[{_source(path)}] {error}" for path, error in load_errors.items())
+    errors.extend(_parse_errors(arch, metrics))
     errors.extend(_ceiling_errors(arch, metrics))
     errors.extend(_shared_formula_errors(arch, metrics))
     errors.extend(_shared_name_errors(arch, metrics))
+    return errors
+
+
+def same_value_errors(arch: str, library: MetricLibrary) -> List[str]:
+    """Check that no two ids on arch give the same value, however their formulas read.
+
+    Formulas that give no number (per-channel templates, CONCAT) are skipped. The pairs
+    of SHARED_FORMULA_IDS, SPLIT_FORMULA_IDS and the arch's SAME_VALUE_IDS may share a
+    value; a SAME_VALUE_IDS pair must.
+    """
+    values = _metric_values(library, _member_arch(arch))
+    same_value_ids = SAME_VALUE_IDS.get(arch, ())
+    errors = _shared_value_errors(
+        arch,
+        values,
+        "share a value; use one id, or list them in SAME_VALUE_IDS",
+        [*_listed_formula_pairs(), *(set(pair) for pair in same_value_ids)],
+    )
+    errors.extend(
+        f"[{arch}] SAME_VALUE_IDS lists {list(pair)}, but their values differ"
+        for pair in same_value_ids
+        if values.get(pair[0]) is None or values.get(pair[0]) != values.get(pair[1])
+    )
     return errors
 
 
@@ -350,6 +410,30 @@ def _metric_errors(entry: object, source: str, item: str) -> List[str]:
     return errors
 
 
+def _parse_errors(arch: str, metrics: Dict[str, Any]) -> List[str]:
+    errors = []
+    for metric_id, metric in metrics.items():
+        for field in EXPRESSION_FIELDS:
+            error = _expression_error(metric.get(field))
+            if error is not None:
+                errors.append(f"[{arch}] {metric_id}: {field} does not parse: {error}")
+    return errors
+
+
+def _expression_error(expression: object) -> Optional[str]:
+    """Return why build_eval_string() rejects an expression, or None if it accepts it.
+
+    Values that are not strings or numbers are left to the field type checks.
+    """
+    if not isinstance(expression, (str, int, float)):
+        return None
+    try:
+        eval_string = build_eval_string(str(expression))
+    except SyntaxError as error:
+        return error.msg
+    return None if eval_string else "the expression parser does not allow an element"
+
+
 def _ceiling_errors(arch: str, metrics: Dict[str, Any]) -> List[str]:
     measured = _arch_ceilings(arch)
     without_metric = {
@@ -449,10 +533,7 @@ def _formula_id_errors(metric_dir: Path, archs: List[str]) -> List[str]:
     formula on different archs: a quantity a later arch renamed. SPLIT_FORMULA_IDS lists
     the pairs kept on purpose.
     """
-    allowed_groups = [
-        {metric_id, partner}
-        for metric_id, partner in {**SHARED_FORMULA_IDS, **SPLIT_FORMULA_IDS}.items()
-    ]
+    allowed_groups = _listed_formula_pairs()
     archs_by_formula = _archs_by_value(
         metric_dir, archs, lambda metric_id, m: (_canonical(m["formula"]), metric_id)
     )
@@ -464,6 +545,14 @@ def _formula_id_errors(metric_dir: Path, archs: List[str]) -> List[str]:
         + "); use one id on every arch"
         for found in archs_by_formula.values()
         if len(found) > 1 and set(found) not in allowed_groups
+    ]
+
+
+def _listed_formula_pairs() -> List[Set[str]]:
+    """Return the id pairs of SHARED_FORMULA_IDS and SPLIT_FORMULA_IDS."""
+    return [
+        {metric_id, partner}
+        for metric_id, partner in {**SHARED_FORMULA_IDS, **SPLIT_FORMULA_IDS}.items()
     ]
 
 
@@ -492,6 +581,97 @@ def _archs_by_value(
             group, value = key(metric_id, metric)
             groups[group][value].append(arch)
     return groups
+
+
+def _metric_values(
+    library: MetricLibrary, gpu_arch: str
+) -> Dict[str, Optional[Tuple[float, ...]]]:
+    """Return each metric's values on seeded dispatches, one per normalization.
+
+    None marks a metric that gives no finite number on some dispatch.
+    """
+    random = np.random.default_rng(SAME_VALUE_SEED)
+    soc_specs = _soc_specs(gpu_arch)
+    samples = defaultdict(list)
+    previous_disable = logging.root.manager.disable
+    logging.disable(logging.CRITICAL)  # the evaluator warns about skipped formulas
+    try:
+        for normal_unit in SUPPORTED_DENOM:
+            formulas = {
+                metric_id: update_denominator_string(metric["formula"], normal_unit)
+                for metric_id, metric in library.metrics.items()
+            }
+            evaluator = _dispatch_evaluator(
+                gpu_arch, list(formulas.values()), soc_specs, random
+            )
+            for metric_id, formula in formulas.items():
+                samples[metric_id].append(
+                    _sample_value(evaluator, _eval_string(formula))
+                )
+    finally:
+        logging.disable(previous_disable)
+    return {
+        metric_id: None if None in values else tuple(values)
+        for metric_id, values in samples.items()
+    }
+
+
+def _dispatch_evaluator(
+    gpu_arch: str,
+    formulas: List[str],
+    soc_specs: Dict[str, Any],
+    random: np.random.Generator,
+) -> MetricEvaluator:
+    """Return the production evaluator for one random dispatch that formulas can read.
+
+    $variables take the value gpu_arch's SoC class sets, if any, or a random size.
+    Built-in variables are computed from the dispatch, as at runtime.
+    """
+    builtin_vars = get_build_in_vars(mi_gpu_specs.get_gpu_series(gpu_arch))
+    text = "\n".join(map(_eval_string, [*formulas, *builtin_vars.values()]))
+    pmc_df = pd.DataFrame({
+        column: [random.uniform(*COUNTER_VALUE_RANGE)]
+        for column in sorted(set(EVAL_COLUMN_RE.findall(text)))
+    })
+    add_unit_counter(pmc_df)
+    sys_vars = {
+        f"ammolite__{name}": soc_specs.get(
+            name, int(random.integers(*MACHINE_VALUE_RANGE))
+        )
+        for name in sorted(set(EVAL_VARIABLE_RE.findall(text)) - set(builtin_vars))
+    }
+    sys_vars.update(calc_builtin_vars(pmc_df, sys_vars, gpu_arch, formulas))
+    return MetricEvaluator(pmc_df, sys_vars, {})
+
+
+def _soc_specs(gpu_arch: str) -> Dict[str, Any]:
+    """Return the machine specs gpu_arch's SoC class sets, such as lds_banks_per_cu."""
+    machine_specs = SimpleNamespace(rocminfo_lines=None)
+    soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{gpu_arch}")
+    getattr(soc_module, f"{gpu_arch}_soc")(SimpleNamespace(), machine_specs)
+    return vars(machine_specs)
+
+
+@functools.lru_cache(maxsize=None)
+def _eval_string(formula: str) -> str:
+    """Return formula's production eval string, with NOISE_CLAMP(x, reference) as x.
+
+    The clamp zeroes only the negative differences of noisy counters, and random
+    counters make half of all differences negative.
+    """
+    eval_string = build_eval_string(formula)
+    if not eval_string:
+        return ""
+    return ast.unparse(_NoiseClampRemover().visit(ast.parse(eval_string)))
+
+
+def _sample_value(evaluator: MetricEvaluator, eval_string: str) -> Optional[float]:
+    """Return an eval string's value to nine digits; None if it is no finite number."""
+    try:
+        value = float(np.asarray(evaluator.eval_expression(eval_string)).item())
+    except (ArithmeticError, TypeError, ValueError):
+        return None
+    return float(f"{value:.9g}") if np.isfinite(value) else None
 
 
 def _arch_ceilings(arch: str) -> Set[str]:
@@ -845,6 +1025,18 @@ def _text_errors(
         for field in fields
         if not isinstance(entry.get(field), str) or not entry[field].strip()
     ]
+
+
+class _NoiseClampRemover(ast.NodeTransformer):
+    """Replace each NOISE_CLAMP(x, reference) call of an eval string with x."""
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        self.generic_visit(node)
+        is_clamp = (
+            isinstance(node.func, ast.Name)
+            and node.func.id == SUPPORTED_CALL["NOISE_CLAMP"]
+        )
+        return node.args[0] if is_clamp else node
 
 
 class _Row(NamedTuple):
