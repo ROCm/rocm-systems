@@ -150,13 +150,13 @@ The release configuration runs the corpus's opt-in `vulkan` suite separately on
 the job container and builds an unmodified pinned headless Vulkan CTS. CI selects 735
 compute and 2,543 texel-buffer cases, leaving twelve expensive
 maximum-workgroup/LDS stress cases available for local runs. Both targets run
-in the main corpus workflow's release configuration, after the existing HIP
-and DBT corpus steps. Vulkan setup and execution use their own prerequisite
+in the main corpus workflow's release configuration, after the HIP, DBT, and
+file-limit corpus steps. Vulkan setup and execution use their own prerequisite
 checks, so a Vulkan setup failure cannot suppress that earlier coverage and
-Vulkan can still run after a HIP/DBT test failure. Any CI coverage including
-the stress cases must use a separate workflow. Graphics and image sampling are
-out of scope. Exact hardware-baseline unsupported cases are reported as skips;
-unexpected unsupported results and incomplete logs fail.
+Vulkan can still run after a HIP, DBT, or file-limit test failure. Any CI
+coverage including the stress cases must use a separate workflow. Graphics and
+image sampling are out of scope. Exact hardware-baseline unsupported cases are
+reported as skips; unexpected unsupported results and incomplete logs fail.
 Four cases that initialize images through graphics commands are excluded from
 the original compute selection and recorded in `corpus/vulkan/excluded-graphics.txt`.
 

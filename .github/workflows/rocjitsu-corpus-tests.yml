@@ -895,7 +895,9 @@ jobs:
           ROCM_PATH="$(rocm-sdk path --root)" \
             bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-file-limit-tests.sh"
 
-      # Finish existing HIP/DBT coverage before starting Vulkan-only setup.
+      # Finish HIP, DBT, and file-limit coverage before starting Vulkan-only
+      # setup. Vulkan steps check their own prerequisites, so a failure in any
+      # of those suites still lets Vulkan run.
       - name: Install Mesa RADV for Vulkan compute CTS
         id: install_vulkan_dependencies
         if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' }}
