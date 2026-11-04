@@ -41,11 +41,10 @@ set_tests_properties(
 # contaminate the per-pass counters or performance baseline.
 set(REPLAY_PASSES 5)
 
-# The untracked-memory app issues six saxpy launches: three whose y is host-pinned memory,
-# which replay declines, then three whose y is fine-grained device memory, which it saves
-# and restores. With two --pmc groups that is one pass for the first three and two for the
-# last three.
-set(REPLAY_UNTRACKED_PASS_COUNTS "1,1,1,2,2,2")
+# The untracked-memory app issues three host-pinned and three fine-grained device saxpy
+# launches. Neither allocation class is snapshotted, so all six run once despite two
+# --pmc groups.
+set(REPLAY_UNTRACKED_PASS_COUNTS "1,1,1,1,1,1")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-kernel-replay-generate
@@ -169,14 +168,10 @@ rocprofiler_add_integration_validate_test(
         "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     FIXTURES_REQUIRED rocprofv3-test-kernel-replay-iteration-range-data)
 
-# Kernels writing memory the snapshot does not track. The app runs the same in-place saxpy
-# twice: three launches with y in host-pinned memory, which replay cannot save, then three
-# with y in fine-grained device memory, which it saves and restores between passes. Either
-# way each launch applies its update exactly once, so the app's own check cannot tell the
-# two apart -- running a dispatch once looks the same as running it twice and restoring
-# the inputs. The pass counts do: two --pmc groups, so a dispatch that was replayed
-# carries two passes and one that was declined carries one. Numeric dispatch ids are not
-# pinned.
+# The app checks that host-pinned and fine-grained device saxpy launches each apply their
+# update once. Pass counts also verify replay was declined: correct output alone cannot
+# distinguish a run-once dispatch from one replayed with restored inputs. Numeric dispatch
+# ids are not pinned.
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-kernel-replay-untracked-memory-generate
     COMMAND

@@ -352,7 +352,7 @@ def test_expected_logical_dispatch_count(json_data, expected_dispatch_count):
 
 def test_pass_counts_per_dispatch(json_data, expected_pass_counts):
     # Each dispatch carries the passes its memory allowed, in the order the dispatches were issued.
-    # A dispatch whose kernel arguments point at memory the snapshot cannot save runs once instead
+    # A dispatch whose kernel arguments point at memory the snapshot does not cover runs once instead
     # of once per counter group, so a run mixing such memory with replayable memory yields dispatches
     # of different lengths. The sequence says which ones were replayed, which the application's own
     # result cannot: running once and running twice-then-restoring both leave y correct.

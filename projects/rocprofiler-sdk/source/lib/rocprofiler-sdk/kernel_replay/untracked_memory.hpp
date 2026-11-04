@@ -25,16 +25,13 @@
 // Memory a replayed dispatch is handed that the snapshot does not cover.
 //
 // The snapshot restores tracked coarse-grained device allocations and module-scope variables before
-// every replayed pass. A kernel that writes anything else would have its writes applied again by
-// every pass. Fine-grained device memory of the replaying agent that the dispatch is handed is
-// saved before the first pass and restored before every later pass. Other dispatches to the agent
-// wait on the replay lock, but host stores to this memory do not, so a host thread must not write
-// it while the dispatch is being replayed. Any other such memory (host-pinned, managed, locked or
-// pageable host memory, another agent's memory, virtual-memory mappings) means the dispatch runs
-// once without replay. Which words of the kernarg segment hold a pointer comes from the kernel's
-// own `amdhsa` metadata, so a scalar the width of a pointer is not read as one; without that
-// metadata every word is a candidate. What is not seen is a pointer the kernel finds inside memory
-// it was handed, or one stored in a by-value argument too small to be told from a scalar.
+// every replayed pass. A checked pointer to memory outside that snapshot means the dispatch runs
+// once without replay, including fine-grained device, host-pinned, managed, locked or pageable
+// host memory, another agent's memory and virtual-memory mappings. Which words of the kernarg
+// segment hold a pointer comes from the kernel's own `amdhsa` metadata, so a scalar the width of
+// a pointer is not read as one; without that metadata every word is a candidate. What is not seen
+// is a pointer the kernel finds inside memory it was handed, or one stored in a by-value argument
+// too small to be told from a scalar.
 
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
@@ -47,7 +44,6 @@
 #include <iosfwd>
 #include <optional>
 #include <string_view>
-#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -67,7 +63,7 @@ enum class kind_t
     unclassified,
 };
 
-// What hsa_amd_pointer_info (and, when it reports no owner, the process's writable mappings)
+// What hsa_amd_pointer_info (and, for UNKNOWN pointers, the process's writable mappings)
 // says about an address, reduced to what the classification needs.
 struct pointer_facts_t
 {
@@ -81,15 +77,11 @@ struct pointer_facts_t
         other,
     };
 
-    type_t   type                     = type_t::unknown;
-    bool     owner_is_cpu             = false;
-    bool     in_writable_host_mapping = false;
-    bool     pointer_info_succeeded   = false;
-    bool     host_mappings_ok         = false;
-    bool     fine_grained             = false;
-    uint64_t agent_base               = 0;  // GPU-visible base of the allocation, 0 if none
-    uint64_t size                     = 0;  // extent of the allocation, 0 if unknown
-    uint64_t owner                    = 0;  // owning agent's handle, 0 if none
+    type_t type                     = type_t::unknown;
+    bool   owner_is_cpu             = false;
+    bool   in_writable_host_mapping = false;
+    bool   pointer_info_succeeded   = false;
+    bool   host_mappings_ok         = false;
 };
 
 using pointer_facts_fn_t = std::function<pointer_facts_t(uint64_t address)>;
@@ -106,20 +98,11 @@ struct host_mappings_t
     bool                        ok    = false;
 };
 
-// An allocation as it would be saved. `size` is 0 when it cannot be saved.
-struct region_t
-{
-    kind_t   kind  = kind_t::host_pinned;
-    uint64_t base  = 0;
-    uint64_t size  = 0;
-    uint64_t owner = 0;
-};
-
 struct hit_t
 {
     size_t   kernarg_offset = 0;
     uint64_t address        = 0;
-    region_t region         = {};
+    kind_t   kind           = kind_t::unclassified;
 };
 
 const char*
@@ -159,84 +142,31 @@ covered_spans(const memory_snapshot::device_snapshot_t& snapshot);
 std::optional<kind_t>
 classify_pointer(const pointer_facts_t& facts);
 
-// The whole allocation `facts` describes, if it is fine-grained device memory that can be saved.
-region_t
-region_of(kind_t kind, const pointer_facts_t& facts);
-
-// Kernarg words that point at untracked memory. `pointer_regions` holds the ranges of the segment
-// that can carry a pointer, or is null when nothing describes them and every word of the segment is
-// a candidate. Words are read from each region's metadata offset, including unaligned regions.
-// `seen` holds values already looked up, so a buffer passed in several arguments is classified
-// once.
-std::vector<hit_t>
+// The first kernarg word that identifies memory outside the snapshot. `pointer_regions` holds
+// ranges that can carry a pointer, or is null when every word is a candidate. Words are read from
+// each region's metadata offset, including unaligned regions. A successful UNKNOWN query with no
+// writable-host-mapping hit is not treated as unsupported memory.
+std::optional<hit_t>
 scan_kernarg(const uint8_t*                                    kernarg,
              size_t                                            segment_size,
              const std::vector<code_object::kernarg_region_t>* pointer_regions,
              const std::vector<address_span_t>&                covered,
-             const pointer_facts_fn_t&                         facts,
-             std::unordered_set<uint64_t>&                     seen);
+             const pointer_facts_fn_t&                         facts);
 
-// Saved copies of untracked allocations, taken before the first replayed pass.
-class region_set_t
-{
-public:
-    // Total bytes one replay may save.
-    static constexpr uint64_t max_total_bytes = uint64_t{512} << 20;
-
-    using copy_fn_t = std::function<bool(void* dst, const void* src, size_t size)>;
-
-    enum class save_status_t
-    {
-        saved,
-        already_saved,
-        not_restorable,
-        too_large,
-        copy_failed,
-    };
-
-    region_set_t();
-    explicit region_set_t(copy_fn_t copy);
-
-    save_status_t save(const region_t& region);
-
-    bool     contains(uint64_t address) const;
-    bool     empty() const { return m_saved.empty(); }
-    size_t   size() const { return m_saved.size(); }
-    uint64_t bytes() const { return m_bytes; }
-
-    bool restore() const;
-
-private:
-    struct saved_t
-    {
-        region_t             region = {};
-        std::vector<uint8_t> data   = {};
-    };
-
-    copy_fn_t            m_copy  = {};
-    std::vector<saved_t> m_saved = {};
-    uint64_t             m_bytes = 0;
-};
-
-// Saves the untracked memory one dispatch's kernel arguments point at into `saved`, reading the
-// words scan_kernarg would. Returns false, after logging why, when an argument points at memory
-// that cannot be saved or belongs to another agent; the dispatch must then run once without replay.
+// Returns false, after logging why, when a checked argument identifies unsupported memory or
+// cannot be classified; the dispatch must then run once without replay.
 bool
-save_dispatch_memory(region_set_t&                                     saved,
-                     const uint8_t*                                    kernarg,
-                     size_t                                            segment_size,
-                     const std::vector<code_object::kernarg_region_t>* pointer_regions,
-                     const memory_snapshot::device_snapshot_t&         snapshot,
-                     hsa_agent_t                                       agent,
-                     const pointer_facts_fn_t&                         facts);
+can_replay_dispatch(const uint8_t*                                    kernarg,
+                    size_t                                            segment_size,
+                    const std::vector<code_object::kernarg_region_t>* pointer_regions,
+                    const memory_snapshot::device_snapshot_t&         snapshot,
+                    const pointer_facts_fn_t&                         facts);
 
-// The same for a dispatch packet, with the kernel and its pointer ranges found by the packet's
-// kernel_object; a kernel the code object registry does not know about also runs once.
+// The same for a dispatch packet, with its kernel and pointer ranges found by kernel_object.
+// A kernel the code object registry does not know about also runs once.
 bool
-save_dispatch_memory(region_set_t&                             saved,
-                     const hsa_kernel_dispatch_packet_t&       packet,
-                     const memory_snapshot::device_snapshot_t& snapshot,
-                     hsa_agent_t                               agent);
+can_replay_dispatch(const hsa_kernel_dispatch_packet_t&       packet,
+                    const memory_snapshot::device_snapshot_t& snapshot);
 }  // namespace untracked_memory
 }  // namespace kernel_replay
 }  // namespace rocprofiler

@@ -137,14 +137,6 @@ convert_type(hsa_amd_pointer_type_t type)
     }
 }
 
-bool
-default_copy(void* dst, const void* src, size_t size)
-{
-    auto* core = hsa::get_core_table();
-    return core != nullptr && core->hsa_memory_copy_fn != nullptr &&
-           core->hsa_memory_copy_fn(dst, src, size) == HSA_STATUS_SUCCESS;
-}
-
 void*
 as_pointer(uint64_t address)
 {
@@ -199,11 +191,6 @@ make_hsa_pointer_facts()
             {
                 facts.pointer_info_succeeded = true;
                 facts.type                   = convert_type(info.type);
-                facts.fine_grained =
-                    (info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED) != 0;
-                facts.agent_base = reinterpret_cast<uint64_t>(info.agentBaseAddress);
-                facts.size       = info.sizeInBytes;
-                facts.owner      = info.agentOwner.handle;
                 if(facts.type == pointer_facts_t::type_t::hsa && info.agentOwner.handle != 0 &&
                    core != nullptr && core->hsa_agent_get_info_fn != nullptr)
                 {
@@ -300,31 +287,14 @@ classify_pointer(const pointer_facts_t& facts)
     return std::nullopt;
 }
 
-region_t
-region_of(kind_t kind, const pointer_facts_t& facts)
-{
-    auto out = region_t{};
-    out.kind = kind;
-    if(kind == kind_t::device_other && facts.type == pointer_facts_t::type_t::hsa &&
-       facts.fine_grained && facts.agent_base != 0 && facts.size != 0)
-    {
-        out.base  = facts.agent_base;
-        out.size  = facts.size;
-        out.owner = facts.owner;
-    }
-    return out;
-}
-
-std::vector<hit_t>
+std::optional<hit_t>
 scan_kernarg(const uint8_t*                                    kernarg,
              size_t                                            segment_size,
              const std::vector<code_object::kernarg_region_t>* pointer_regions,
              const std::vector<address_span_t>&                covered,
-             const pointer_facts_fn_t&                         facts,
-             std::unordered_set<uint64_t>&                     seen)
+             const pointer_facts_fn_t&                         facts)
 {
-    auto hits = std::vector<hit_t>{};
-    if(kernarg == nullptr) return hits;
+    if(kernarg == nullptr) return std::nullopt;
 
     const auto whole = std::vector<code_object::kernarg_region_t>{
         code_object::kernarg_region_t{0u,
@@ -343,119 +313,33 @@ scan_kernarg(const uint8_t*                                    kernarg,
             std::memcpy(&value, kernarg + off, sizeof(value));
             if(value < min_candidate || value > max_candidate) continue;
             if(in_spans(covered, value)) continue;
-            if(!seen.insert(value).second) continue;
-
-            const auto f = facts(value);
-            if(const auto kind = classify_pointer(f); kind)
-                hits.push_back(hit_t{off, value, region_of(*kind, f)});
+            if(const auto kind = classify_pointer(facts(value)); kind)
+                return hit_t{off, value, *kind};
         }
     }
-    return hits;
-}
-
-region_set_t::region_set_t()
-: m_copy{default_copy}
-{}
-
-region_set_t::region_set_t(copy_fn_t copy)
-: m_copy{std::move(copy)}
-{}
-
-region_set_t::save_status_t
-region_set_t::save(const region_t& region)
-{
-    if(region.size == 0) return save_status_t::not_restorable;
-    if(contains(region.base)) return save_status_t::already_saved;
-    if(region.size > max_total_bytes - m_bytes) return save_status_t::too_large;
-
-    auto saved   = saved_t{};
-    saved.region = region;
-    try
-    {
-        saved.data.resize(region.size);
-    } catch(const std::bad_alloc&)
-    {
-        return save_status_t::copy_failed;
-    }
-    if(!m_copy(saved.data.data(), as_pointer(region.base), region.size))
-        return save_status_t::copy_failed;
-
-    try
-    {
-        m_saved.emplace_back(std::move(saved));
-    } catch(const std::bad_alloc&)
-    {
-        return save_status_t::copy_failed;
-    }
-    m_bytes += region.size;
-    return save_status_t::saved;
+    return std::nullopt;
 }
 
 bool
-region_set_t::contains(uint64_t address) const
-{
-    return std::any_of(m_saved.begin(), m_saved.end(), [address](const saved_t& s) {
-        return address >= s.region.base && address < s.region.base + s.region.size;
-    });
-}
-
-bool
-region_set_t::restore() const
-{
-    return std::all_of(m_saved.begin(), m_saved.end(), [this](const saved_t& s) {
-        return m_copy(as_pointer(s.region.base), s.data.data(), s.data.size());
-    });
-}
-
-bool
-save_dispatch_memory(region_set_t&                                     saved,
-                     const uint8_t*                                    kernarg,
-                     size_t                                            segment_size,
-                     const std::vector<code_object::kernarg_region_t>* pointer_regions,
-                     const memory_snapshot::device_snapshot_t&         snapshot,
-                     hsa_agent_t                                       agent,
-                     const pointer_facts_fn_t&                         facts)
+can_replay_dispatch(const uint8_t*                                    kernarg,
+                    size_t                                            segment_size,
+                    const std::vector<code_object::kernarg_region_t>* pointer_regions,
+                    const memory_snapshot::device_snapshot_t&         snapshot,
+                    const pointer_facts_fn_t&                         facts)
 {
     try
     {
-        auto seen = std::unordered_set<uint64_t>{};
-        for(const auto& hit : scan_kernarg(
-                kernarg, segment_size, pointer_regions, covered_spans(snapshot), facts, seen))
+        if(const auto hit =
+               scan_kernarg(kernarg, segment_size, pointer_regions, covered_spans(snapshot), facts))
         {
-            const auto  where = fmt::format("kernel replay: kernarg offset {} points at 0x{:x}, {}",
-                                           hit.kernarg_offset,
-                                           hit.address,
-                                           to_string(hit.region.kind));
-            const bool  foreign = hit.region.size != 0 && hit.region.owner != agent.handle;
-            const char* why     = nullptr;
-            switch(foreign ? region_set_t::save_status_t::not_restorable : saved.save(hit.region))
-            {
-                case region_set_t::save_status_t::saved:
-                    ROCP_INFO << fmt::format(
-                        "{}; saved {} bytes at 0x{:x}", where, hit.region.size, hit.region.base);
-                    continue;
-                case region_set_t::save_status_t::already_saved: continue;
-                case region_set_t::save_status_t::not_restorable:
-                    if(foreign)
-                        why = "it belongs to another agent";
-                    else if(hit.region.kind == kind_t::virtual_mem ||
-                            hit.region.kind == kind_t::host_pageable)
-                        why = "its extent is not known";
-                    else if(hit.region.kind == kind_t::unclassified)
-                        why = "it could not be classified";
-                    else
-                        why = "it is not device memory of this agent";
-                    break;
-                case region_set_t::save_status_t::too_large:
-                    why = "saving it would exceed the per-dispatch limit";
-                    break;
-                case region_set_t::save_status_t::copy_failed: why = "copying it failed"; break;
-            }
-            LOG_FIRST_N(WARNING, 1) << fmt::format("{}, which the snapshot does not restore and "
-                                                   "{}; running this dispatch once without "
-                                                   "replay",
-                                                   where,
-                                                   why);
+            LOG_FIRST_N(WARNING, 1) << fmt::format(
+                "kernel replay: kernarg offset {} points at 0x{:x}, {}; "
+                "{}; running this dispatch once without replay",
+                hit->kernarg_offset,
+                hit->address,
+                to_string(hit->kind),
+                hit->kind == kind_t::unclassified ? "it could not be classified"
+                                                  : "the snapshot does not restore it");
             return false;
         }
         return true;
@@ -468,10 +352,8 @@ save_dispatch_memory(region_set_t&                                     saved,
 }
 
 bool
-save_dispatch_memory(region_set_t&                             saved,
-                     const hsa_kernel_dispatch_packet_t&       packet,
-                     const memory_snapshot::device_snapshot_t& snapshot,
-                     hsa_agent_t                               agent)
+can_replay_dispatch(const hsa_kernel_dispatch_packet_t&       packet,
+                    const memory_snapshot::device_snapshot_t& snapshot)
 {
     try
     {
@@ -501,13 +383,11 @@ save_dispatch_memory(region_set_t&                             saved,
                                kernel->name != nullptr ? kernel->name->c_str() : "<unnamed kernel>",
                                kernel->segment_size);
 
-        return save_dispatch_memory(saved,
-                                    static_cast<const uint8_t*>(packet.kernarg_address),
-                                    kernel->segment_size,
-                                    regions,
-                                    snapshot,
-                                    agent,
-                                    make_hsa_pointer_facts());
+        return can_replay_dispatch(static_cast<const uint8_t*>(packet.kernarg_address),
+                                   kernel->segment_size,
+                                   regions,
+                                   snapshot,
+                                   make_hsa_pointer_facts());
     } catch(const std::bad_alloc&)
     {
         LOG_FIRST_N(WARNING, 1) << "kernel replay: could not allocate memory for the untracked "

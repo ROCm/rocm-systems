@@ -35,7 +35,6 @@
 #include <new>
 #include <sstream>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 namespace msnp = ::rocprofiler::kernel_replay::memory_snapshot;
@@ -61,36 +60,6 @@ facts_of(type_t type, bool owner_is_cpu = false, bool in_host_mapping = false)
     return f;
 }
 
-uint64_t
-address_of(const std::vector<uint8_t>& buf)
-{
-    return reinterpret_cast<uint64_t>(buf.data());
-}
-
-constexpr auto this_agent  = hsa_agent_t{9};
-constexpr auto other_agent = hsa_agent_t{10};
-
-// Fine-grained device memory of `owner` for `buf`, a virtual-memory mapping at vmem_addr, unknown
-// to HSA otherwise. Host-pinned instead of device memory when `pinned`.
-um::pointer_facts_fn_t
-facts_for(const std::vector<uint8_t>& buf, hsa_agent_t owner = this_agent, bool pinned = false)
-{
-    return [&buf, owner, pinned](uint64_t address) {
-        const auto base = address_of(buf);
-        if(address >= base && address < base + buf.size())
-        {
-            auto f         = facts_of(type_t::hsa, pinned);
-            f.fine_grained = true;
-            f.agent_base   = base;
-            f.size         = buf.size();
-            f.owner        = owner.handle;
-            return f;
-        }
-        if(address == vmem_addr) return facts_of(type_t::vmem);
-        return facts_of(type_t::unknown);
-    };
-}
-
 bool
 covers(const std::vector<um::address_span_t>& mappings, uint64_t address)
 {
@@ -113,15 +82,6 @@ mapping_start(const std::string& name)
     return std::nullopt;
 }
 
-um::region_set_t
-host_copy_set(bool ok = true)
-{
-    return um::region_set_t{[ok](void* dst, const void* src, size_t size) {
-        if(ok) std::memcpy(dst, src, size);
-        return ok;
-    }};
-}
-
 std::vector<uint8_t>
 kernarg_with(const std::vector<uint64_t>& words, size_t trailing = 0)
 {
@@ -131,11 +91,11 @@ kernarg_with(const std::vector<uint64_t>& words, size_t trailing = 0)
 }
 
 bool
-save(um::region_set_t& saved, const std::vector<uint64_t>& words, const um::pointer_facts_fn_t& f)
+can_replay(const std::vector<uint64_t>& words, const um::pointer_facts_fn_t& facts)
 {
     const auto kernarg = kernarg_with(words);
-    return um::save_dispatch_memory(
-        saved, kernarg.data(), kernarg.size(), nullptr, msnp::device_snapshot_t{}, this_agent, f);
+    return um::can_replay_dispatch(
+        kernarg.data(), kernarg.size(), nullptr, msnp::device_snapshot_t{}, facts);
 }
 }  // namespace
 
@@ -166,17 +126,15 @@ TEST(kernel_replay_untracked_memory, ignores_scalars_and_covered_memory)
     // A small scalar, a pointer into the snapshot, then a pointer the passes would write through.
     auto kernarg = kernarg_with({42, tracked_addr + 8, vmem_addr});
 
-    auto seen = std::unordered_set<uint64_t>{};
     // Read only as far as the first two words, it holds nothing the snapshot does not restore.
     const auto first_two = std::vector<co::kernarg_region_t>{{0u, 16u}};
-    EXPECT_TRUE(
-        um::scan_kernarg(kernarg.data(), kernarg.size(), &first_two, covered, facts, seen).empty());
+    EXPECT_FALSE(
+        um::scan_kernarg(kernarg.data(), kernarg.size(), &first_two, covered, facts).has_value());
     // Read whole, the third word is found.
-    const auto hits =
-        um::scan_kernarg(kernarg.data(), kernarg.size(), nullptr, covered, facts, seen);
-    ASSERT_EQ(hits.size(), 1u);
-    EXPECT_EQ(hits[0].kernarg_offset, 2 * sizeof(uint64_t));
-    EXPECT_EQ(hits[0].address, vmem_addr);
+    const auto hits = um::scan_kernarg(kernarg.data(), kernarg.size(), nullptr, covered, facts);
+    ASSERT_TRUE(hits.has_value());
+    EXPECT_EQ(hits->kernarg_offset, 2 * sizeof(uint64_t));
+    EXPECT_EQ(hits->address, vmem_addr);
 }
 
 TEST(kernel_replay_untracked_memory, only_what_metadata_calls_a_pointer_is_queried)
@@ -185,7 +143,9 @@ TEST(kernel_replay_untracked_memory, only_what_metadata_calls_a_pointer_is_queri
     // for a pointer: nothing writes through it, and a value that happens to sit over memory the
     // snapshot does not restore would run the dispatch once for nothing.
     constexpr auto scalar_value = uint64_t{0x40000000};
-    const auto     facts        = [](uint64_t address) {
+    auto           queried      = std::vector<uint64_t>{};
+    const auto     facts        = [&queried](uint64_t address) {
+        queried.push_back(address);
         if(address == scalar_value) return facts_of(type_t::unknown, false, true);
         if(address == vmem_addr) return facts_of(type_t::vmem);
         return facts_of(type_t::unknown);
@@ -194,17 +154,17 @@ TEST(kernel_replay_untracked_memory, only_what_metadata_calls_a_pointer_is_queri
     const auto kernarg = kernarg_with({scalar_value, vmem_addr});
     const auto regions = std::vector<co::kernarg_region_t>{co::kernarg_region_t{8u, 8u}};
 
-    auto       seen = std::unordered_set<uint64_t>{};
-    const auto hits = um::scan_kernarg(kernarg.data(), kernarg.size(), &regions, {}, facts, seen);
-    ASSERT_EQ(hits.size(), 1u);
-    EXPECT_EQ(hits[0].kernarg_offset, 8u);
-    EXPECT_EQ(hits[0].region.kind, um::kind_t::virtual_mem);
-    EXPECT_EQ(seen.count(scalar_value), 0u) << "the scalar was never classified";
+    const auto hits = um::scan_kernarg(kernarg.data(), kernarg.size(), &regions, {}, facts);
+    ASSERT_TRUE(hits.has_value());
+    EXPECT_EQ(hits->kernarg_offset, 8u);
+    EXPECT_EQ(hits->kind, um::kind_t::virtual_mem);
+    EXPECT_EQ(std::count(queried.begin(), queried.end(), scalar_value), 0)
+        << "the scalar was never classified";
 
     // Without metadata the whole segment is the candidate set, scalar included.
-    auto blind = std::unordered_set<uint64_t>{};
-    EXPECT_EQ(um::scan_kernarg(kernarg.data(), kernarg.size(), nullptr, {}, facts, blind).size(),
-              2u);
+    const auto blind = um::scan_kernarg(kernarg.data(), kernarg.size(), nullptr, {}, facts);
+    ASSERT_TRUE(blind.has_value());
+    EXPECT_EQ(blind->address, scalar_value);
 }
 
 TEST(kernel_replay_untracked_memory, reads_unaligned_pointer_regions_at_their_metadata_offsets)
@@ -216,11 +176,10 @@ TEST(kernel_replay_untracked_memory, reads_unaligned_pointer_regions_at_their_me
         return address == vmem_addr ? facts_of(type_t::vmem) : facts_of(type_t::unknown);
     };
 
-    auto       seen = std::unordered_set<uint64_t>{};
-    const auto hits = um::scan_kernarg(kernarg.data(), kernarg.size(), &regions, {}, facts, seen);
-    ASSERT_EQ(hits.size(), 1u);
-    EXPECT_EQ(hits.front().kernarg_offset, sizeof(uint32_t));
-    EXPECT_EQ(hits.front().address, vmem_addr);
+    const auto hits = um::scan_kernarg(kernarg.data(), kernarg.size(), &regions, {}, facts);
+    ASSERT_TRUE(hits.has_value());
+    EXPECT_EQ(hits->kernarg_offset, sizeof(uint32_t));
+    EXPECT_EQ(hits->address, vmem_addr);
 }
 
 TEST(kernel_replay_untracked_memory, only_the_runtime_copy_and_fill_kernels_are_exempt)
@@ -310,67 +269,41 @@ TEST(kernel_replay_untracked_memory, addresses_in_the_56_bit_user_range_are_clas
     };
 
     const auto kernarg = kernarg_with({wide, past});
-    auto       seen    = std::unordered_set<uint64_t>{};
-    const auto hits    = um::scan_kernarg(kernarg.data(), kernarg.size(), nullptr, {}, facts, seen);
-    ASSERT_EQ(hits.size(), 1u);
-    EXPECT_EQ(hits[0].address, wide);
-    EXPECT_EQ(hits[0].region.kind, um::kind_t::virtual_mem);
+    const auto hits    = um::scan_kernarg(kernarg.data(), kernarg.size(), nullptr, {}, facts);
+    ASSERT_TRUE(hits.has_value());
+    EXPECT_EQ(hits->address, wide);
+    EXPECT_EQ(hits->kind, um::kind_t::virtual_mem);
 }
 
-TEST(kernel_replay_untracked_memory, fine_grained_memory_of_this_agent_is_restored_between_passes)
+TEST(kernel_replay_untracked_memory, memory_outside_the_snapshot_runs_the_dispatch_once)
 {
-    auto buf   = std::vector<uint8_t>(64, 1);
-    auto saved = host_copy_set();
+    for(const auto type :
+        {type_t::hsa, type_t::locked, type_t::reserved, type_t::vmem, type_t::other})
+        EXPECT_FALSE(can_replay({vmem_addr}, [type](uint64_t) { return facts_of(type); }));
+    EXPECT_FALSE(can_replay({vmem_addr}, [](uint64_t) { return facts_of(type_t::hsa, true); }))
+        << "host-pinned";
+    EXPECT_FALSE(can_replay({vmem_addr}, [](uint64_t) {
+        return facts_of(type_t::unknown, false, true);
+    })) << "pageable host memory";
 
-    ASSERT_TRUE(save(saved, {42, address_of(buf) + 16, address_of(buf)}, facts_for(buf)));
-    ASSERT_EQ(saved.size(), 1u) << "one allocation, however many arguments point into it";
-    EXPECT_EQ(saved.bytes(), buf.size());
-
-    // A pass writes 2; the next pass must start from 1 again.
-    std::fill(buf.begin(), buf.end(), 2);
-    ASSERT_TRUE(saved.restore());
-    EXPECT_EQ(buf, std::vector<uint8_t>(64, 1));
-}
-
-TEST(kernel_replay_untracked_memory, memory_that_cannot_be_saved_runs_the_dispatch_once)
-{
-    auto buf = std::vector<uint8_t>(64, 1);
-
-    const auto runs_once = [](const um::pointer_facts_fn_t& facts, uint64_t address) {
-        auto saved = host_copy_set();
-        return !save(saved, {address}, facts) && saved.empty();
-    };
-    EXPECT_TRUE(runs_once(facts_for(buf, this_agent, true), address_of(buf))) << "host-pinned";
-    EXPECT_TRUE(runs_once(facts_for(buf, other_agent), address_of(buf))) << "another agent's";
-    EXPECT_TRUE(runs_once(facts_for(buf), vmem_addr)) << "extent unknown";
-    const auto query_failed = [](bool pointer_info_succeeded) {
-        return [pointer_info_succeeded](uint64_t) {
+    for(const bool query_ok : {false, true})
+    {
+        EXPECT_FALSE(can_replay({vmem_addr}, [query_ok](uint64_t) {
             auto facts                   = facts_of(type_t::unknown);
-            facts.pointer_info_succeeded = pointer_info_succeeded;
+            facts.pointer_info_succeeded = query_ok;
             facts.host_mappings_ok       = false;
             return facts;
-        };
-    };
-    EXPECT_TRUE(runs_once(query_failed(false), vmem_addr)) << "pointer info query failed";
-    EXPECT_TRUE(runs_once(query_failed(true), vmem_addr)) << "host mapping query failed";
-
-    auto failing = host_copy_set(false);
-    EXPECT_FALSE(save(failing, {address_of(buf)}, facts_for(buf))) << "copy failed";
-    EXPECT_TRUE(failing.empty());
+        })) << (query_ok ? "host mapping query failed" : "pointer info query failed");
+    }
+    EXPECT_TRUE(can_replay({vmem_addr}, [](uint64_t) { return facts_of(type_t::unknown); }))
+        << "successful UNKNOWN query with no writable host mapping";
 }
 
 TEST(kernel_replay_untracked_memory, allocation_failure_declines_replay)
 {
-    auto       saved   = host_copy_set();
     auto       kernarg = kernarg_with({vmem_addr});
     const auto facts   = [](uint64_t) -> um::pointer_facts_t { throw std::bad_alloc{}; };
 
-    EXPECT_FALSE(um::save_dispatch_memory(saved,
-                                          kernarg.data(),
-                                          kernarg.size(),
-                                          nullptr,
-                                          msnp::device_snapshot_t{},
-                                          this_agent,
-                                          facts));
-    EXPECT_TRUE(saved.empty());
+    EXPECT_FALSE(um::can_replay_dispatch(
+        kernarg.data(), kernarg.size(), nullptr, msnp::device_snapshot_t{}, facts));
 }

@@ -1191,18 +1191,13 @@ WriteInterceptor(const void* packets,
             // which of those it hit.
             const auto snapshot = kernel_replay::memory_snapshot::snap(replay_agent);
 
-            // Memory outside the snapshot that the dispatch's kernel arguments point at is saved
-            // here and restored with the snapshot when it is this agent's fine-grained device
-            // memory (untracked_memory.hpp).
-            auto untracked = kernel_replay::untracked_memory::region_set_t{};
-
-            // Snapshot incomplete, or the kernel arguments point at memory that cannot be saved:
+            // Snapshot incomplete, or checked kernel arguments identify memory outside it:
             // restoring only part of what the passes write would corrupt application data, so
             // decline replay. Close the CONFIG sequence, free our drain signal, and run this
             // dispatch once still under the writer lock with its original completion signal, then
             // return.
-            if(!snapshot.ok || !kernel_replay::untracked_memory::save_dispatch_memory(
-                                   untracked, dispatch_pkt.kernel_dispatch, snapshot, replay_agent))
+            if(!snapshot.ok || !kernel_replay::untracked_memory::can_replay_dispatch(
+                                   dispatch_pkt.kernel_dispatch, snapshot))
             {
                 if(!snapshot.ok)
                     LOG_FIRST_N(WARNING, 1) << "kernel replay: snapshot capture incomplete; "
@@ -1267,8 +1262,7 @@ WriteInterceptor(const void* packets,
                 // A failed host->device copy leaves the snapshot only partially applied; continuing
                 // would submit the next pass over corrupted memory and (because the final pass
                 // skips restore) would also leave that corruption visible to the application.
-                ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(snapshot) ||
-                              !untracked.restore())
+                ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(snapshot))
                     << fmt::format("kernel replay: restore failed between passes (partial "
                                    "host->device copy); aborting rather than continuing with "
                                    "corrupted device memory");

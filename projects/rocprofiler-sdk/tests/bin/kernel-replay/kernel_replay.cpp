@@ -335,9 +335,8 @@ run_inplace_saxpy(int n)
     return EXIT_FAILURE;
 }
 
-// The in-place saxpy with y in memory the snapshot does not track: host-pinned memory, which
-// replay cannot save so the dispatch runs once, or fine-grained device memory, which replay saves
-// and restores between passes. Either way each host-observed launch adds `step` to y exactly once.
+// The in-place saxpy with y in host-pinned or fine-grained device memory outside the snapshot.
+// Each dispatch runs once without replay, adding `step` to y once per host-observed launch.
 int
 run_untracked_saxpy(int n, bool fine_grained)
 {
