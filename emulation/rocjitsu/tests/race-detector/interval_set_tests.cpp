@@ -280,6 +280,17 @@ TEST(IntervalSet, FirstOverlapNone) {
   EXPECT_EQ(s.firstOverlap(20, 30), std::nullopt);
 }
 
+TEST(IntervalSet, FirstOverlapOfAnEmptyQueryIsNone) {
+  IntervalSet s;
+  s.append(10, 20);
+  s.finalize();
+  // An empty query contains no bytes, even inside a stored interval.
+  EXPECT_EQ(s.firstOverlap(15, 15), std::nullopt);
+  EXPECT_EQ(s.firstOverlap(10, 10), std::nullopt);
+  // A reversed query is empty too.
+  EXPECT_EQ(s.firstOverlap(18, 12), std::nullopt);
+}
+
 TEST(IntervalSet, FirstOverlapSkipsIntervalsBeforeTheQueryAndGaps) {
   IntervalSet s;
   s.append(0, 4);

@@ -105,11 +105,14 @@ public:
   }
 
   /// Return the lowest byte of [qStart, qEnd) that some interval covers, or
-  /// nullopt if none does. Requires intervals to be sorted (finalize()).
+  /// nullopt if none does, including for an empty query. Requires intervals to
+  /// be sorted (finalize()).
   ///
   /// Sorted non-overlapping intervals also have sorted ends, so the first
   /// interval ending after qStart is the only candidate for the lowest byte.
   std::optional<int> firstOverlap(int qStart, int qEnd) const {
+    if (qStart >= qEnd)
+      return std::nullopt;
     auto it = std::ranges::upper_bound(intervals, qStart, {}, &Interval::end);
     if (it == intervals.end() || it->start >= qEnd)
       return std::nullopt;
