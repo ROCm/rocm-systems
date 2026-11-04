@@ -31,6 +31,7 @@
 #include "core/control/waitable_clocks/steady.hpp"
 #include "core/cpu.hpp"
 #include "core/gpu.hpp"
+#include "core/library_checker.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/output/output_summary.hpp"
@@ -590,6 +591,8 @@ rocprofsys_init_library_hidden()
                      "or configure permissive mode with 'sudo setenforce 0'. Aborting.");
         std::exit(EXIT_FAILURE);
     }
+
+    library_checker::check_profiler_hub_version_mismatch();
 
     if(_debug_init)
     {
