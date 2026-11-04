@@ -1809,6 +1809,9 @@ class AccumulateCommand : public Command {
   //! The graph launch runs segments on queues other than this command's
   //! (DEBUG_CLR_GRAPH_FAST_LAUNCH)
   bool multi_stream_ = false;
+  //! Commands of other queues that packets of this command wait on without a command of their
+  //! own (DEBUG_CLR_GRAPH_FAST_LAUNCH), held until this command completes
+  std::vector<Command*> held_commands_;
 
  public:
   AccumulateCommand(HostQueue& queue, const EventWaitList& eventWaitList = nullWaitList,
@@ -1844,6 +1847,22 @@ class AccumulateCommand : public Command {
   //! Marks a graph launch that runs segments on other queues than this command's
   void setMultiStream(bool multi_stream) { multi_stream_ = multi_stream; }
   bool multiStream() const { return multi_stream_; }
+
+  //! Holds a command that a packet of this command waits on, until this command completes
+  //! (releaseHeldCommands) or is destroyed
+  void holdCommand(Command* command) {
+    command->retain();
+    held_commands_.push_back(command);
+  }
+
+  //! Releases the held commands once this command completed: its packets, after the waits on
+  //! them, are done
+  void releaseHeldCommands() {
+    for (Command* command : held_commands_) {
+      command->release();
+    }
+    held_commands_.clear();
+  }
 
   //! Reserve one graph dispatch slot and return its index. |name| must not be
   //! nullptr for a kernel — use "<unknown>" when it cannot be resolved.

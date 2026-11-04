@@ -822,6 +822,10 @@ class VirtualGPU : public device::VirtualDevice {
   //! An armed gate signal for a graph end marker (DEBUG_CLR_GRAPH_FAST_LAUNCH) from the device's
   //! pool, nullptr if none
   ProfilingSignal* AcquireGateSignal();
+  //! Issues the pending fork wait (DEBUG_CLR_GRAPH_FAST_LAUNCH) as a barrier without signal
+  void FlushPendingForkWait();
+  //! Drops the pending fork wait and its reference
+  void ReleasePendingForkWait();
 
   hsa_agent_t gpu_device() const { return gpu_device_; }
   hsa_queue_t* gpu_queue() { return gpu_queue_; }
@@ -965,6 +969,7 @@ class VirtualGPU : public device::VirtualDevice {
                                                        bool attach_signal = false);
 
   //! Fast-path dispatch: pre-built flat contiguous buffer
+  bool dispatchGraphForkWait(amd::Command* wait_cmd, amd::AccumulateCommand* anchor) override;
   bool dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>& flatPacketData,
                                   const std::vector<uint32_t>& validFullHeaders,
                                   amd::AccumulateCommand* vcmd = nullptr,
@@ -1136,6 +1141,10 @@ class VirtualGPU : public device::VirtualDevice {
   //! Retained ProfilingSignal of that last barrier; a coalesced record reuses it
   //! as its HwEvent so query/sync observe correct readiness. Released on reset.
   void* last_barrier_hw_event_ = nullptr;
+  //! DEBUG_CLR_GRAPH_FAST_LAUNCH: a fork wait of the launch whose end marker is
+  //! pending_fork_anchor_, held for that launch's first ext dispatch on this queue
+  ProfilingSignal* pending_fork_wait_ = nullptr;
+  const amd::Command* pending_fork_anchor_ = nullptr;
   hsa_agent_t gpu_device_;  //!< Physical device
   hsa_queue_t* gpu_queue_;                //!< Active queue associated with a vgpu
   bool device_mem_ring_buf_ = false;           //!< Queue ring buffer is in device memory
