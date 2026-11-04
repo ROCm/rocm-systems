@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Box, Stack } from '@mui/material';
 import { hasCommitTimestamp, sortRunsByCommit } from '../../data/runOrdering';
 import { formatShortDate } from '../../utils/formatters';
+import { isValidTimestamp } from '../../utils/timestamp';
 import DurationHistory from '../overview/DurationHistory';
 import LargestChanges from '../overview/LargestChanges';
 import MetricsGrid from '../overview/MetricsGrid';
@@ -14,7 +15,7 @@ export default function OverviewView({ viewModel, data, state }) {
       const catalog = data.catalogs?.[run.catalogId];
       if (catalog) latest.set(catalog.id, { catalog, timestamp: run.commitTimestamp });
     }
-    return [...latest.values()].sort((a, b) => (Number.isFinite(Date.parse(b.timestamp)) ? Date.parse(b.timestamp) : -Infinity) - (Number.isFinite(Date.parse(a.timestamp)) ? Date.parse(a.timestamp) : -Infinity) || a.catalog.id.localeCompare(b.catalog.id))
+    return [...latest.values()].sort((a, b) => (isValidTimestamp(b.timestamp) ? Date.parse(b.timestamp) : -Infinity) - (isValidTimestamp(a.timestamp) ? Date.parse(a.timestamp) : -Infinity) || a.catalog.id.localeCompare(b.catalog.id))
       .map((entry) => ({ ...entry, label: `${entry.catalog.id} · ${formatShortDate(entry.timestamp)}` }));
   }, [data]);
   return <Stack sx={{ gap: 2, minWidth: 0 }}>

@@ -1,12 +1,13 @@
 import { fontSizes, fontWeights, textStyles } from '../../theme/typography';
 import { useEffect, useState } from 'react';
-import { Box, Button, ButtonBase, Collapse, Tab, Tabs, Typography, useMediaQuery, useTheme } from '@mui/material';
+import { Box, ButtonBase, Collapse, Tab, Tabs, Typography, useMediaQuery, useTheme } from '@mui/material';
 import MenuBookRoundedIcon from '@mui/icons-material/MenuBookRounded';
 import ShowChartRoundedIcon from '@mui/icons-material/ShowChartRounded';
 import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded';
 import GridViewRoundedIcon from '@mui/icons-material/GridViewRounded';
 import CompareArrowsRoundedIcon from '@mui/icons-material/CompareArrowsRounded';
 import FiltersBar from './FiltersBar';
+import SurfaceButton from '../shared/SurfaceButton';
 import HoverTooltip from '../shared/HoverTooltip';
 import { dashboardPages } from '../../config/dashboardPages';
 
@@ -85,7 +86,7 @@ export default function DashboardShell({ data, state, loading = false, header, c
                 '&:hover': { bgcolor: 'action.selected', borderColor: 'dashboard.selectionBorder' },
               }}><MenuBookRoundedIcon sx={{ width: 16, height: 16, fontSize: 16 }} /></ButtonBase></HoverTooltip>
           </Box>
-          <Typography sx={{ fontSize: fontSizes.caption, lineHeight: '16px', mt: '2px', ml: '6px', color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Sim perf dashboard</Typography>
+          <Typography sx={{ mt: '2px', ml: '6px', ...textStyles.captionCompact, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Sim perf dashboard</Typography>
           <UpdatedStatus key={data.generatedAt ?? 'missing'} generatedAt={data.generatedAt} loading={loading} />
         </Box>
         <Box component="nav" aria-label="Dashboard">
@@ -105,8 +106,8 @@ export default function DashboardShell({ data, state, loading = false, header, c
             <Typography variant="caption" color="text.secondary">Branch runs uses its local configuration matrix. Canonical filters are not applied here.</Typography>
           </Box>
         ) : <>
-          <Button variant="outlined" color="inherit" aria-expanded={filtersOpen} aria-controls="dashboard-filters" onClick={() => setFiltersOpen((open) => !open)}
-            sx={{ display: { xs: 'flex', md: 'none' }, my: '12px', mx: 1, minHeight: 44, maxWidth: 'calc(100% - 16px)', textAlign: 'left', justifyContent: 'flex-start', borderColor: 'dashboard.controlBorder', color: 'text.secondary', fontSize: fontSizes.body, lineHeight: '20px', px: '12px' }}>Filters · {summary}</Button>
+          <SurfaceButton aria-expanded={filtersOpen} aria-controls="dashboard-filters" onClick={() => setFiltersOpen((open) => !open)}
+            sx={{ display: { xs: 'flex', md: 'none' }, my: '12px', mx: 1, minHeight: 44, maxWidth: 'calc(100% - 16px)', textAlign: 'left', justifyContent: 'flex-start', borderColor: 'dashboard.controlBorder', fontSize: fontSizes.body, lineHeight: '20px', px: '12px' }}>Filters · {summary}</SurfaceButton>
           <Box id="dashboard-filters">
             <Collapse in={desktop || filtersOpen} unmountOnExit>
               <FiltersBar data={data} state={state} disabled={loading || !(state.tab === 'compare' ? data.allRuns : data.runs)?.length} />

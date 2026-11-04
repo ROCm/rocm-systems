@@ -30,7 +30,7 @@ export default function RunMetadataDiff({ baseline, candidate, filters }) {
   const rows = (items) => items.map((row) => {
     const changed = Boolean(baseline && candidate) && JSON.stringify(row.baseline ?? null) !== JSON.stringify(row.candidate ?? null);
     return <TableRow key={row.key} data-testid={`metadata-row-${row.key}`} data-different={changed} sx={changed ? changedRowSx : undefined}>
-      <TableCell component="th" scope="row" sx={{ width: '26%', fontFamily: 'inherit', fontWeight: fontWeights.tableHeader }}>
+      <TableCell component="th" scope="row" sx={{ width: '26%', fontFamily: 'inherit', fontWeight: fontWeights.medium }}>
         {metadataLabel(row.label, row.key)}
       </TableCell>
       {['baseline', 'candidate'].map((side) => <TableCell key={side} sx={{ width: '37%', fontFamily: sansFont, borderLeft: 1, borderColor: 'divider', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{row.key === 'configurations' && Array.isArray(row[side])
@@ -46,10 +46,10 @@ export default function RunMetadataDiff({ baseline, candidate, filters }) {
           {[[baseline, 'Baseline'], [candidate, 'Candidate']].map(([run, label]) => <TableCell key={label} data-testid={`${label.toLowerCase()}-run-information`} sx={{ width: '37%' }}>{label} run · {run ? shortSha(run) : 'Not selected'}<Box sx={{ mt: '2px', fontFamily: sansFont, fontSize: fontSizes.caption }}>{run?.runId}</Box></TableCell>)}
         </TableRow></TableHead>
         <TableBody>
-          <TableRow><TableCell colSpan={3} sx={{ bgcolor: 'dashboard.tableGroup', color: 'text.secondary', fontFamily: 'inherit', fontWeight: fontWeights.tableHeader }}>Benchmark configuration</TableCell></TableRow>
+          <TableRow><TableCell colSpan={3} sx={{ bgcolor: 'dashboard.tableGroup', color: 'text.secondary', fontFamily: 'inherit', fontWeight: fontWeights.medium }}>Benchmark configuration</TableCell></TableRow>
           {rows(facts)}
           {environment.length ? groupMetadataFacts(environment).map((group) => <Fragment key={group.label}>
-            <TableRow><TableCell component="th" scope="rowgroup" colSpan={3} sx={{ bgcolor: 'dashboard.tableGroup', color: 'text.secondary', fontFamily: 'inherit', fontWeight: fontWeights.tableHeader }}>{group.label}</TableCell></TableRow>
+            <TableRow><TableCell component="th" scope="rowgroup" colSpan={3} sx={{ bgcolor: 'dashboard.tableGroup', color: 'text.secondary', fontFamily: 'inherit', fontWeight: fontWeights.medium }}>{group.label}</TableCell></TableRow>
             {rows(group.rows)}
           </Fragment>) : <TableRow><TableCell colSpan={3}>No environment details provided.</TableCell></TableRow>}
         </TableBody>

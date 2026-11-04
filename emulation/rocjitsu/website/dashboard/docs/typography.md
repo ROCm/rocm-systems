@@ -2,7 +2,7 @@
 
 [`src/theme/typography.js`](../src/theme/typography.js) owns the approved font types, size scale and semantic text roles. Read the exported lists there rather than copying their values into this guide or components.
 
-Current presentation uses the **native system sans throughout** (no bundled or downloaded fonts), including measurements, hashes and metadata. The approved font catalog (including Mono) and size/weight lists remain unchanged; Mono is available but not selected by the active text roles. Numeric roles retain tabular figures and their existing emphasis.
+Current presentation uses the **native system sans throughout** (no bundled or downloaded fonts and no monospace stack), including measurements, hashes and metadata. Numeric roles use the same sans with tabular figures.
 
 ## Choose a role first
 
@@ -15,7 +15,9 @@ Current presentation uses the **native system sans throughout** (no bundled or d
 | Subsection heading | `subsectionTitle` / MUI `h3` |
 | Body text, descriptions and table values | `body` / MUI `body2` |
 | Actions and emphasized labels | `label` / MUI `button` |
-| Helper text, secondary information and table headings | `caption` or `captionEmphasized` |
+| Helper text and secondary information | `caption` or `captionEmphasized` |
+| Dense sidebar and header labels (16px line) | `captionCompact` or `captionCompactEmphasized` |
+| Table headings | `tableHeader` |
 | Measurements and identifiers | `numeric` |
 | Emphasized metric results | `numericEmphasized` |
 | Large comparison statistics | `summaryValue` |
@@ -31,14 +33,13 @@ For a non-Typography component, spread the matching `textStyles` role into `sx`.
 
 ## APIs that require numeric values
 
-ECharts requires numeric font sizes. Import `fontSizes` and `fontWeights` from the same module; do not introduce local numeric sizes or weights. `fontTypes` provides the approved family/weight combinations.
+ECharts requires numeric font sizes. Import `fontSizes` and `fontWeights` from the same module; do not introduce local numeric sizes or weights. The family/weight combinations are applied through the `textStyles` roles; `fontTypes` is internal to `typography.js`.
 
 ## Tables
 
 [`src/theme/tableStyles.js`](../src/theme/tableStyles.js) owns table density choices and compared-number formatting:
 
-- `tableStyles.normal`: benchmark, metadata and comparison tables.
-- `tableStyles.compact`: catalog membership tables.
+- `tableStyles.normal`: benchmark, metadata, comparison and catalog membership tables.
 - `tableStyles.recentRuns`: fixed-height summary rows; retain the approved partial-row viewport and centered summary columns.
 - `numericTableCell`: right-aligned numeric text with tabular numbers for directly compared measurements. Keep descriptive fields left-aligned; Recent runs is the intentional centered-summary exception.
 
@@ -49,6 +50,6 @@ Use the shared MUI `h3` variant for equivalent subsection headings, rather than 
 - Plain CSS uses the typography custom properties installed by the theme. Portal text density correction derives from those same properties; it is not a second size scale.
 - Floating labels and their notches use the same caption role without fractional text scaling, so their glyph widths and side gaps match. Preserve the shared inset/gap geometry and transparent backgrounds.
 - Icon dimensions, chart symbols and layout measurements are not text sizes and keep their own geometry.
-- The variable Sans asset is registered for the approved weight range; Mono uses its existing regular and semibold faces. Do not declare an unrelated font family or unsupported weight for a local exception.
+- No font files are bundled or registered. `fontWeights` has three tiers: `regular` 500, `medium` 600, `emphasized` 700. The native family decides which faces exist: a static family (Noto Sans on Linux) renders 500 as Regular and 600/700 as Bold, while variable system fonts render all three. Do not rely on weight alone to tell roles apart, and do not declare a local family or weight for an exception.
 - Preserve proper names, identifiers and sentence case. A typography change must not rewrite publication data.
 - When a new component seems to need another font size or weight, first reuse the closest existing role. Expand the central scale only through an explicit design decision.

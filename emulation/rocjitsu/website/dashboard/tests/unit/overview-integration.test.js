@@ -35,11 +35,11 @@ test('cards consume per-configuration endpoints and show only succeeded/required
   expect(html).toContain('1.00×');
   expect(html).not.toContain('Run health');
 });
-test('relative chart has only configuration series, no gap bridges, dots or fill, and gap tooltip is empty', () => {
+test('relative chart has only configuration series, connected lines, no bridge series or fill, and gap tooltip is empty', () => {
   renderToStaticMarkup(themed(DurationHistory, { projection, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
   const option = capture.props.option;
   expect(option.series).toHaveLength(1);
-  expect(option.series[0]).toMatchObject({ connectNulls: false });
+  expect(option.series[0]).toMatchObject({ connectNulls: true });
   expect(option.series[0].areaStyle).toBeUndefined();
   expect(option.tooltip.hideDelay).toBe(0);
   expect(option.tooltip.formatter([{ dataIndex: 1 }])).toBe('');

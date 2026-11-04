@@ -54,7 +54,7 @@ test('Overview shares endpoints with cards and keeps hover/catalog/range/filter 
   const chart = trend.getByRole('img');
   const plotted = await readChart(chart, (instance) => instance.getOption().series.map((s) => ({ name: s.name, connectNulls: s.connectNulls, showSymbol: s.showSymbol, area: s.areaStyle })));
   expect(plotted.map((s) => s.name)).toEqual(model.rows.map((r) => `${r.target} ${r.mode}`));
-  expect(plotted.every((s) => s.connectNulls === false && !s.area)).toBe(true);
+  expect(plotted.every((s) => s.connectNulls === true && !s.area)).toBe(true);
   const before = await cards.innerText();
   const group = trend.getByRole('group', { name: 'Inspect performance trend', exact: true });
   await group.press('End');

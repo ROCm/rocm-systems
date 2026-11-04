@@ -56,8 +56,6 @@ pre {
 
 .chart-tooltip-swatch {
   display: inline-block;
-  width: 22px;
-  height: 8px;
   vertical-align: middle;
   margin-right: 6px;
 }

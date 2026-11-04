@@ -27,9 +27,9 @@ function chartOptions() {
   return captured.chart.option;
 }
 
-it('keeps benchmark history discontinuous across unavailable measurements with positive measurements', () => {
+it('connects benchmark history lines across unavailable measurements without inventing points', () => {
   const lines = chartOptions().series.filter((series) => series.type === 'line');
-  expect(lines.every((series) => series.connectNulls === false)).toBe(true);
+  expect(lines.every((series) => series.connectNulls === true)).toBe(true);
   const mt = lines.find((series) => series.name === 'gfx1250 default');
   const values = mt.data.map((point) => point.value[1]);
   const measured = values.map((value, index) => value === null ? -1 : index).filter((index) => index >= 0);

@@ -4,7 +4,6 @@ import { ThemeProvider } from '@mui/material/styles';
 import { describe, expect, test, vi } from 'vitest';
 import BenchmarkHistoryChart from '../../src/components/benchmarks/BenchmarkHistoryChart.jsx';
 import { createDashboardTheme } from '../../src/theme/theme.js';
-import { categoryColor } from '../../src/theme/tokens.js';
 import { adaptPublishedDashboardData } from '../../src/data/dashboardDataAdapter.js';
 import { selectBenchmarkSeries } from '../../src/data/selectors.js';
 import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
@@ -26,16 +25,17 @@ function validatedTarget(target) {
 }
 
 describe.each(['light', 'dark'])('%s benchmark history category colors', (mode) => {
-  test.each(['constructor', 'toString', '__proto__', 'hasOwnProperty', 'unknown-target', 'gfx1250'])('uses only recognized palette entries for validated target %s', (target) => {
+  test.each(['constructor', 'toString', '__proto__', 'hasOwnProperty', 'unknown-target', 'gfx1250'])('draws the theme-generated color for validated target %s', (target) => {
     const data = validatedTarget(target);
     const filters = { targets: [target, 'gfx950'], suites: ['Triton', 'Llama'], modes: ['single', 'default'] };
     const viewModel = selectBenchmarkSeries(data, filters, 'a');
     expect(viewModel.series.some((series) => series.target === target)).toBe(true);
-    renderToStaticMarkup(createElement(ThemeProvider, { theme: createDashboardTheme(mode) }, createElement(BenchmarkHistoryChart, {
+    const theme = createDashboardTheme(mode, data.targets);
+    renderToStaticMarkup(createElement(ThemeProvider, { theme }, createElement(BenchmarkHistoryChart, {
       data, filters, benchmark: { id: 'a', name: 'Fictional GEMM' },
     })));
     const option = captured.chart.option;
-    const expectedColors = viewModel.series.map((series) => categoryColor(mode, series.target, series.color, 'target'));
+    const expectedColors = viewModel.series.map((series) => theme.palette.targetColors[series.target]);
     expect(option.color).toEqual(expectedColors);
     const lines = option.series.filter((series) => series.type === 'line');
     const selections = option.series.filter((series) => series.name.endsWith(' selected points'));

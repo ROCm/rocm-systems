@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { expectRunPicker } from './helpers/runPicker.js';
+import { expectRunPicker, unavailableAttempt } from './helpers/runPicker.js';
 import { setFixtureConfigurations } from '../fixtures/configurationScope.js';
 import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
 import { benchmarkData } from '../fixtures/publishedData.js';
@@ -127,11 +127,11 @@ test('branch layout stays within the document at normal 1280px and CSS zoom 2 at
 
 test('missing published identities stay inspectable instead of being replaced by defaults', async ({ page }) => {
   await openDashboard(page, '/?view=branch&branch=fictional/optimization-01&run=fictional-branch-01&reference=fictional-missing&manual=1&target=gfx950&mode=default&detail=1');
-  await expectRunPicker(page, 'reference', 'fictional-missing');
+  await expectRunPicker(page, 'reference', unavailableAttempt('fictional-missing'));
   await expect(page.getByTestId('branch-reference-reason')).toContainText('Saved reference attempt is unavailable');
   await expect(page.getByTestId('branch-open-comparison')).toBeDisabled();
   await page.reload();
-  await expectRunPicker(page, 'reference', 'fictional-missing');
+  await expectRunPicker(page, 'reference', unavailableAttempt('fictional-missing'));
   expect(new URL(page.url()).searchParams.get('reference')).toBe('fictional-missing');
   await page.goto('/?view=compare&compareCandidate=fictional-branch-01&compareBaseline=fictional-missing');
   await expect(page.getByText(/Selected baseline is unavailable · fictional-missing/)).toBeVisible();

@@ -1,5 +1,5 @@
 import RunOptionDetails from '../shared/RunOptionDetails';
-import { runSearchFields, runSelectionLabel as optionLabel } from '../shared/runOptionPresentation';
+import { runSearchFields, runSelectionLabelWithBranch as optionLabel } from '../shared/runOptionPresentation';
 import { matchAnchorWidth } from '../shared/dropdownGeometry';
 import {
   Autocomplete,

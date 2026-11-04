@@ -9,6 +9,7 @@ import { commitTimestampFor } from '../../data/runOrdering';
 import { formatCompactRunTime, formatDuration, formatFullDate, shortSha } from '../../utils/formatters';
 import { recentRunsPage } from './overviewPresentation';
 import { commitUrl } from '../../utils/commitUrl';
+import { isValidTimestamp } from '../../utils/timestamp';
 import ScrollTableContainer from '../shared/ScrollTableContainer';
 
 
@@ -20,7 +21,7 @@ function sourceCommitUrl(run, publicationRepository) {
 }
 
 function RunTime({ timestamp }) {
-  if (typeof timestamp !== 'string' || !Number.isFinite(Date.parse(timestamp))) return '-';
+  if (!isValidTimestamp(timestamp)) return '-';
   return <Typography component="time" dateTime={timestamp} aria-label={formatFullDate(timestamp)} variant="body2" sx={{ whiteSpace: 'nowrap' }}>{formatCompactRunTime(timestamp)}</Typography>;
 }
 

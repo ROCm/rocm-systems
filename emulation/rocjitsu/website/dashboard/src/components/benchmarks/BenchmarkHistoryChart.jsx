@@ -9,9 +9,9 @@ import { selectDaySlots } from '../../data/overviewProjection';
 import { commitTimestampFor } from '../../data/runOrdering';
 import { dayAxisBounds, dayXAxis } from '../../utils/dayAxis';
 import { escapeHtml, formatDuration, formatFullDate, shortSha } from '../../utils/formatters';
-import { chartLineStyle, chartPointStyle, chartPointSize, chartSwatch } from '../../utils/chartStyles';
+import { CHART_GRID_INSETS, chartLineStyle, chartPointStyle, chartPointSize, chartSwatch } from '../../utils/chartStyles';
 import { durationAxisBounds } from '../../utils/durationAxis';
-import { categoryColor } from '../../theme/tokens';
+import { targetColor } from '../../theme/targetColors';
 
 // Cards are ~300px wide, so their dots may sit closer than on the full-width trend chart, but still sparse.
 const MIN_CARD_DOT_SPACING = 44;
@@ -22,7 +22,7 @@ export default function BenchmarkHistoryChart({ data, filters, benchmark, range 
   const [chartRef, chartWidth] = useElementWidth();
   const compact = useMediaQuery(theme.breakpoints.down('sm'));
   // Same commit-day layout and axis as Overview's performance trend: one run per day
-  // (every run in 1W), x = commit time, gaps for days without a measured result.
+  // (every run in 1W), x = commit time; the line connects across days without a measured result.
   const model = useMemo(() => {
     const view = selectBenchmarkSeries(data, filters, benchmark.id);
     const layout = selectDaySlots(data.runs, data.generatedAt, range);
@@ -40,7 +40,7 @@ export default function BenchmarkHistoryChart({ data, filters, benchmark, range 
   const viewModel = model;
   const selectedRunIdSet = useMemo(() => new Set(selectedRunIds), [selectedRunIds]);
   const values = viewModel.series.flatMap((series) => series.points.map((point) => point.value[1]).filter(Number.isFinite));
-  const colorFor = (series) => categoryColor(theme.palette.mode, series.target, series.color, 'target');
+  const colorFor = (series) => targetColor(theme, series.target);
   const option = {
     color: viewModel.series.map(colorFor),
     tooltip: {
@@ -58,7 +58,7 @@ export default function BenchmarkHistoryChart({ data, filters, benchmark, range 
         ].join('');
       },
     },
-    grid: { left: 56, right: 14, top: 24, bottom: 30 },
+    grid: { ...CHART_GRID_INSETS, top: 24, bottom: 30 },
     // Extra room on the left so the first point clears the y axis.
     xAxis: dayXAxis(viewModel.bounds, theme, { leftPad: (viewModel.bounds.lastX - viewModel.bounds.firstX) * LEFT_PAD_FRACTION }),
     yAxis: {
@@ -70,7 +70,7 @@ export default function BenchmarkHistoryChart({ data, filters, benchmark, range 
     },
     series: viewModel.series.map((series) => ({
       name: series.name, type: 'line', data: series.points, smooth: false,
-      showSymbol: true, symbol: series.mode === 'single' ? 'diamond' : 'circle', symbolSize: (_value, params) => chartPointSize(series.measured, params.dataIndex, series.mode, 'value', chartWidth, MIN_CARD_DOT_SPACING), connectNulls: false,
+      showSymbol: true, symbol: series.mode === 'single' ? 'diamond' : 'circle', symbolSize: (_value, params) => chartPointSize(series.measured, params.dataIndex, series.mode, 'value', chartWidth, MIN_CARD_DOT_SPACING), connectNulls: true,
       lineStyle: chartLineStyle(colorFor(series), series.mode),
       itemStyle: chartPointStyle(colorFor(series), theme.palette.background.paper, series.mode),
       emphasis: { focus: 'series', scale: 1.4 }, z: 3,

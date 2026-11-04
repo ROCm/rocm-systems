@@ -36,7 +36,7 @@ export default function BranchEnvironment({ candidate, reference, selection }) {
   const rows = (items, prefix) => items.map((fact) => {
     const changed = Boolean(reference && candidate) && JSON.stringify(fact.baseline ?? null) !== JSON.stringify(fact.candidate ?? null);
     return <TableRow key={fact.key} data-testid={`branch-${prefix}-${fact.key}`} data-different={changed} sx={changed ? changedRowSx : undefined}>
-      <TableCell component="th" scope="row" sx={{ width: '30%', fontWeight: fontWeights.tableHeader }}>
+      <TableCell component="th" scope="row" sx={{ width: '30%', fontWeight: fontWeights.medium }}>
         {metadataLabel(fact.label, fact.key)}
         {fact.baselineLabel && fact.candidateLabel && fact.baselineLabel !== fact.candidateLabel && <Typography variant="caption">Reference label: {fact.baselineLabel}</Typography>}
       </TableCell>
@@ -51,11 +51,11 @@ export default function BranchEnvironment({ candidate, reference, selection }) {
         <TableHead><TableRow><TableCell sx={{ width: '30%' }}>Field</TableCell><TableCell sx={{ width: '35%' }}>Reference · {reference?.runId ?? 'Unavailable'}</TableCell><TableCell sx={{ width: '35%' }}>Candidate · {candidate?.runId ?? 'Unavailable'}</TableCell></TableRow></TableHead>
         <TableBody>
           {sourceGroups.map(({ label, facts }) => <Fragment key={label}>
-            <TableRow><TableCell component="th" scope="rowgroup" colSpan={3} sx={{ bgcolor: 'dashboard.tableGroup', color: 'text.secondary', fontWeight: fontWeights.tableHeader }}>{label}</TableCell></TableRow>
+            <TableRow><TableCell component="th" scope="rowgroup" colSpan={3} sx={{ bgcolor: 'dashboard.tableGroup', color: 'text.secondary', fontWeight: fontWeights.medium }}>{label}</TableCell></TableRow>
             {rows(facts, 'source')}
           </Fragment>)}
           {environment.length ? groupMetadataFacts(environment).map((group) => <Fragment key={group.label}>
-            <TableRow><TableCell component="th" scope="rowgroup" colSpan={3} sx={{ bgcolor: 'dashboard.tableGroup', color: 'text.secondary', fontWeight: fontWeights.tableHeader }}>{group.label}</TableCell></TableRow>
+            <TableRow><TableCell component="th" scope="rowgroup" colSpan={3} sx={{ bgcolor: 'dashboard.tableGroup', color: 'text.secondary', fontWeight: fontWeights.medium }}>{group.label}</TableCell></TableRow>
             {rows(group.rows, 'environment')}
           </Fragment>) : <TableRow><TableCell colSpan={3}>No environment facts provided.</TableCell></TableRow>}
         </TableBody>

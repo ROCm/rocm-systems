@@ -34,11 +34,14 @@ test('recent canonical runs summarizes twenty per page and renders six equal sti
   expect(html).toContain('tabindex="0"');
 });
 
-test('empty and short recent histories have no artificial rows', () => {
+test('an empty history says so, and a run with no recorded results shows one row with a dash instead of counts', () => {
   source.rows = [];
   expect(render()).toContain('No runs available');
   source.rows = [{ run: { runId: 'one', timestamp: '2026-10-05T14:02:00Z', commitTimestamp: '2026-10-05T13:48:00Z' }, total: 0, completed: 0 }];
-  expect(render().match(/data-run-id="/g)).toHaveLength(1);
+  const html = render();
+  expect(html.match(/data-run-id="/g)).toHaveLength(1);
+  expect(html).toMatch(/<span[^>]*>—<\/span>/);
+  expect(html).not.toContain('0/0');
 });
 
 test('both recent-run clocks retain compact UTC text and full accessible time metadata', () => {

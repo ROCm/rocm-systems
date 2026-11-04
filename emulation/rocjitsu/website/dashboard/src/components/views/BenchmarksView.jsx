@@ -13,21 +13,21 @@ import ActionButton from '../shared/ActionButton';
 import { CONTROL_HEIGHT } from '../shared/segmentedControlSx';
 
 import ThreadPolicySwatch from '../shared/ThreadPolicySwatch';
-import { configurationColor } from '../../utils/chartColors';
+import { targetColor } from '../../theme/targetColors';
 import { shapeTokens } from '../../theme/tokens';
 import CategoryTag from '../shared/CategoryTag';
-import { benchmarkRangeData, benchmarkResultChoices, boundedGridSelection } from '../benchmarks/benchmarkExplorer';
+import { benchmarkPlottedData, benchmarkResultChoices, boundedGridSelection } from '../benchmarks/benchmarkExplorer';
 import { selectBenchmarkCatalog, selectBenchmarkSeries, selectDefaultBenchmarks } from '../../data/selectors';
-import { historyRanges } from '../../config/historyRanges';
+import { DEFAULT_BENCHMARK_RANGE, historyRanges } from '../../config/historyRanges';
 import { MAX_BENCHMARK_CHARTS } from '../../config/benchmarkGrid';
 import { formatFullDate } from '../../utils/formatters';
 
 export default function BenchmarksView({ data, filters, historyRange: controlledRange, onRangeChange, initialBenchmarkIds, selectedBenchmarks, onBenchmarksChange, selectedRunIds = [], onSelectRun, onClearSelectedRuns }) {
   const catalog = useMemo(() => selectBenchmarkCatalog(data, filters), [data, filters]);
-  const [localRange, setLocalRange] = useState('1W');
+  const [localRange, setLocalRange] = useState(DEFAULT_BENCHMARK_RANGE);
   const range = controlledRange ?? localRange;
   const changeRange = (next) => { setLocalRange(next); onRangeChange?.(next); };
-  const rangedData = useMemo(() => benchmarkRangeData(data, range), [data, range]);
+  const rangedData = useMemo(() => benchmarkPlottedData(data, range), [data, range]);
   const defaultSelection = useMemo(() => selectedBenchmarks === null ? selectDefaultBenchmarks(rangedData, filters) : null, [selectedBenchmarks, rangedData, filters]);
   const [localSelection, setLocalSelection] = useState(() => {
     if (selectedBenchmarks !== undefined) return [];
@@ -84,7 +84,7 @@ export default function BenchmarksView({ data, filters, historyRange: controlled
           <Typography variant="caption" color="text.secondary">Applies to all {selected.length} charts below · by commit date, UTC</Typography>
         </Stack>
         <Stack direction="row" aria-label="Chart category and thread policy legend" sx={{ flexWrap: 'wrap', alignItems: 'center', gap: 2, borderTop: 1, borderColor: 'divider', pt: '12px', mb: 2, color: 'text.secondary' }}>
-          {(filters.modes ?? []).flatMap((mode) => filters.targets.map((target, index) => <Typography key={`${target}/${mode}`} variant="caption" sx={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><ThreadPolicySwatch policy={mode} color={(theme) => configurationColor({ target }, index, theme.palette.mode)} legend />{target} {mode}</Typography>))}
+          {(filters.modes ?? []).flatMap((mode) => filters.targets.map((target) => <Typography key={`${target}/${mode}`} variant="caption" sx={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><ThreadPolicySwatch policy={mode} color={(theme) => targetColor(theme, target)} legend />{target} {mode}</Typography>))}
           <Typography variant="caption" color="text.secondary" sx={{ ml: { sm: 'auto' } }}>Wall-clock seconds · measured results</Typography>
         </Stack>
         {!catalog.all.length && <Typography role="status" color="text.secondary" sx={{ py: 3 }}>No benchmarks available in the published catalog.</Typography>}
@@ -104,7 +104,7 @@ export default function BenchmarksView({ data, filters, historyRange: controlled
         </Box>
         {!selected.length && catalog.all.length > 0 && <Typography role="status" color="text.secondary" sx={{ py: 3 }}>No benchmark graphs selected. Add benchmarks to begin.</Typography>}
         <Stack direction="row" sx={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mt: '12px' }}>
-          <Typography variant="caption" color="text.muted">Each chart is one workload. Missing configurations remain gaps, not zero results.</Typography>
+          <Typography variant="caption" color="text.muted">Each chart is one workload. Hover a point to see the run behind it.</Typography>
           {selectedRunIds.length > 0 && <ActionButton size="small" onClick={onClearSelectedRuns}>Clear selected runs ({selectedRunIds.length})</ActionButton>}
         </Stack>
       </SectionCard>

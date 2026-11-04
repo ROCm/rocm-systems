@@ -3,7 +3,7 @@ import { selectAutomaticReference } from '../data/branchSelectors.js';
 import { isJsonObject, isJsonValue } from '../data/jsonValues.js';
 import { THREAD_POLICIES } from '../data/runSchema.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { historyRanges } from '../config/historyRanges.js';
+import { DEFAULT_BENCHMARK_RANGE, DEFAULT_OVERVIEW_RANGE, historyRanges } from '../config/historyRanges.js';
 import { dashboardPages } from '../config/dashboardPages.js';
 import { MAX_BENCHMARK_CHARTS } from '../config/benchmarkGrid.js';
 
@@ -50,8 +50,8 @@ export function readDashboardRoute(href = globalThis.window?.location?.href ?? '
   };
   const route = {
     tab: field('view', 'overview', pages),
-    historyRange: field('range', 'ALL', ranges),
-    benchmarkRange: field('benchmarkRange', '1W', ranges),
+    historyRange: field('range', DEFAULT_OVERVIEW_RANGE, ranges),
+    benchmarkRange: field('benchmarkRange', DEFAULT_BENCHMARK_RANGE, ranges),
     overviewCatalogId: field('catalog', null),
     preferences,
     comparisonPreferences,

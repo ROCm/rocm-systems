@@ -1,11 +1,11 @@
-import { fontSizes, fontWeights } from '../../theme/typography';
+import { fontSizes, fontWeights, textStyles } from '../../theme/typography';
 import { Box, ButtonBase, Checkbox, FormControlLabel, Typography } from '@mui/material';
 import { CategoryMarker } from '../shared/CategoryTag';
 
 function FilterGroup({ label, options, value, onChange, disabled, kind }) {
   return (
     <Box role="group" aria-label={label} data-testid={`${label.toLowerCase().replaceAll(' ', '-')}-filter`} sx={{ borderTop: 1, borderColor: 'dashboard.border', m: 0, pt: 'var(--sidebar-group-top, 12px)', pb: 'var(--sidebar-group-bottom, 8px)', minWidth: 0 }}>
-      <Typography variant="overline" sx={{ display: 'block', mb: '6px', height: '16px', fontSize: fontSizes.caption, lineHeight: '16px', fontWeight: fontWeights.emphasized, color: 'text.secondary' }}>{label}</Typography>
+      <Typography variant="overline" sx={{ display: 'block', mb: '6px', height: '16px', ...textStyles.captionCompactEmphasized, color: 'text.secondary' }}>{label}</Typography>
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '7px', rowGap: 'var(--sidebar-chip-row-gap, 7px)', pt: '2px' }}>
         {options.map((option) => (
           <FormControlLabel key={option} disabled={disabled} sx={{
@@ -24,7 +24,7 @@ function FilterGroup({ label, options, value, onChange, disabled, kind }) {
         ))}
       </Box>
       {!options.length && <Typography variant="caption" color="text.secondary">No available {label.toLowerCase()}</Typography>}
-      {kind === 'mode' && options.length > 0 && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: '4px', pt: '8px', px: '2px', fontSize: fontSizes.caption, lineHeight: '18px' }}>single · single-threaded<br />default · automatic policy</Typography>}
+      {kind === 'mode' && options.length > 0 && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: '4px', pt: '8px', px: '2px', ...textStyles.caption, lineHeight: '18px' }}>single · single-threaded<br />default · automatic policy</Typography>}
     </Box>
   );
 }
@@ -40,12 +40,12 @@ export default function FiltersBar({ data, state, disabled = false }) {
   const allSelected = totalCount > 0 && selectedCount === totalCount;
   return (
     <Box sx={{ borderTop: 1, borderColor: 'dashboard.border', pt: '14px', ml: '6px' }}>
-      <Typography variant="overline" sx={{ display: 'block', fontSize: fontSizes.caption, lineHeight: '16px', fontWeight: fontWeights.emphasized, color: 'text.secondary', pb: '10px', mb: '2px' }}>Filters</Typography>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', height: '28px', padding: '2px 0 10px', fontSize: fontSizes.caption, lineHeight: '16px', color: 'text.secondary' }}>
+      <Typography variant="overline" sx={{ display: 'block', ...textStyles.captionCompactEmphasized, color: 'text.secondary', pb: '10px', mb: '2px' }}>Filters</Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', height: '28px', padding: '2px 0 10px', ...textStyles.captionCompact, color: 'text.secondary' }}>
         <span>{selectedCount} of {totalCount} selected</span>
         <ButtonBase disabled={disabled || !totalCount}
           onClick={() => groups.forEach(({ options, onChange }) => onChange(allSelected ? [] : [...options]))}
-          sx={{ ml: 'auto', fontSize: fontSizes.caption, lineHeight: '16px', whiteSpace: 'nowrap', color: 'dashboard.sidebarAccentText', fontWeight: fontWeights.emphasized, '&.Mui-disabled': { color: 'text.muted' } }}>
+          sx={{ ml: 'auto', ...textStyles.captionCompactEmphasized, whiteSpace: 'nowrap', color: 'dashboard.sidebarAccentText', '&.Mui-disabled': { color: 'text.muted' } }}>
           {allSelected ? 'Deselect all' : 'Select all'}
         </ButtonBase>
       </Box>

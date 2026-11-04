@@ -6,7 +6,7 @@ import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded';
 import ChecklistRoundedIcon from '@mui/icons-material/ChecklistRounded';
 import { shapeTokens } from '../../theme/tokens';
 import { formatDuration } from '../../utils/formatters';
-import { configurationColor } from '../../utils/chartColors';
+import { targetColor } from '../../theme/targetColors';
 import ThreadPolicySwatch from '../shared/ThreadPolicySwatch';
 
 function Metric({ label, rows, valueFor, caption, icon: Icon, iconColor }) {
@@ -16,12 +16,12 @@ function Metric({ label, rows, valueFor, caption, icon: Icon, iconColor }) {
       <Icon role="img" aria-label={caption} sx={{ color: rows.some((row) => row.cohortIds.length && valueFor(row) != null) ? iconColor : 'text.muted', fontSize: 19, width: 19, height: 19, flexShrink: 0 }} />
     </Box>
     <Box sx={{ flex: 1 }}>
-      {!rows.length ? <Typography color="text.secondary" sx={{ fontSize: fontSizes.body, py: '10px' }}>No configurations selected</Typography> : rows.map((row, index) => {
+      {!rows.length ? <Typography color="text.secondary" sx={{ fontSize: fontSizes.body, py: '10px' }}>No configurations selected</Typography> : rows.map((row) => {
         const value = row.cohortIds.length ? valueFor(row) : null;
         const unavailable = value == null;
         const displayValue = row.cohortIds.length ? value ?? 'Unavailable' : 'No shared workloads';
         return <Box key={row.key} data-configuration={row.key} sx={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', alignItems: 'center', gap: 1, py: shapeTokens.rowPadding, '& + &': { borderTop: 1, borderColor: 'divider' } }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}><ThreadPolicySwatch policy={row.mode} color={(theme) => configurationColor(row, index, theme.palette.mode)} /><Typography variant="caption" sx={{ overflowWrap: 'anywhere', color: 'text.secondary', fontSize: fontSizes.body, lineHeight: '18px' }}>{row.target} {row.mode}</Typography></Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}><ThreadPolicySwatch policy={row.mode} color={(theme) => targetColor(theme, row.target)} /><Typography variant="caption" sx={{ overflowWrap: 'anywhere', color: 'text.secondary', fontSize: fontSizes.body, lineHeight: '18px' }}>{row.target} {row.mode}</Typography></Box>
           <Typography variant="numericEmphasized" sx={{ fontSize: unavailable ? fontSizes.caption : undefined, textAlign: 'right', color: unavailable ? 'text.muted' : 'text.secondary', fontStyle: unavailable ? 'italic' : 'normal' }}>{displayValue}</Typography>
         </Box>;
       })}

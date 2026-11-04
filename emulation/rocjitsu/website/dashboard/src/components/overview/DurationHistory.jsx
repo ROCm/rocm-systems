@@ -7,8 +7,8 @@ import Chart from '../shared/Chart';
 import SectionCard from '../shared/SectionCard';
 import CatalogWorkloads from './CatalogWorkloads';
 import { escapeHtml, formatDuration, formatFullDate, shortSha } from '../../utils/formatters';
-import { configurationColor as colorFor } from '../../utils/chartColors';
-import { chartLineStyle, chartPointStyle, chartPointSize, chartSwatch } from '../../utils/chartStyles';
+import { targetColor } from '../../theme/targetColors';
+import { CHART_GRID_INSETS, chartLineStyle, chartPointStyle, chartPointSize, chartSwatch } from '../../utils/chartStyles';
 import ThreadPolicySwatch from '../shared/ThreadPolicySwatch';
 import { alpha } from '@mui/material/styles';
 import { historyRanges } from '../../config/historyRanges';
@@ -58,7 +58,7 @@ export default function DurationHistory({ projection, catalogs, onRangeChange, o
     if (text) node.setAttribute('role', 'status');
     else node.removeAttribute('role');
   }, []);
-  const colors = projection.rows.map((row, index) => colorFor(row, index, theme.palette.mode));
+  const colors = projection.rows.map((row) => targetColor(theme, row.target));
   const clear = () => {
     const chart = chartRef.current;
     if (chart && !chart.isDisposed()) chart.dispatchAction({ type: 'hideTip' });
@@ -113,7 +113,7 @@ export default function DurationHistory({ projection, catalogs, onRangeChange, o
 
   const option = useMemo(() => ({
     animation: false,
-    grid: { left: 56, right: 14, top: 26, bottom: 42 },
+    grid: { ...CHART_GRID_INSETS, top: 26, bottom: 42 },
     tooltip: { trigger: 'axis', triggerOn: 'none', axisPointer: { type: 'none' }, hideDelay: 0,
       className: 'performance-trend-tooltip',
       formatter: (parameters) => {
@@ -123,17 +123,17 @@ export default function DurationHistory({ projection, catalogs, onRangeChange, o
         if (!slot?.run || !valid.length) return '';
         return `<div><b>Commit ${escapeHtml(shortSha(slot.run))}</b></div><div>${escapeHtml(formatFullDate(commitTimestampFor(slot.run)))}</div>` + valid.map((row) => {
           const point = row.points[index];
-          return `<div class="performance-trend-tooltip-row">${chartSwatch(colorFor(row, projection.rows.indexOf(row), theme.palette.mode), row.mode)}${escapeHtml(row.target)} ${escapeHtml(row.mode)} · <b>${point.speedup.toFixed(3)}×</b> · ${formatDuration(point.durationSeconds)} · ref ${formatDuration(row.reference.durationSeconds)}</div>`;
+          return `<div class="performance-trend-tooltip-row">${chartSwatch(targetColor(theme, row.target), row.mode)}${escapeHtml(row.target)} ${escapeHtml(row.mode)} · <b>${point.speedup.toFixed(3)}×</b> · ${formatDuration(point.durationSeconds)} · ref ${formatDuration(row.reference.durationSeconds)}</div>`;
         }).join('');
       } },
     xAxis: dayXAxis(bounds, theme),
     yAxis: { type: 'value', scale: true, min: (extent) => extent.min < 1 ? extent.min - 0.01 : 1, max: (extent) => Math.max(1.01, extent.max + 0.01),
       nameTextStyle: { align: 'left', color: theme.palette.text.secondary }, axisLine: { show: true, lineStyle: { width: 1, color: theme.palette.dashboard.border } }, axisLabel: { formatter: (v) => `${v.toFixed(2)}×`, color: theme.palette.text.secondary, fontSize: fontSizes.caption }, splitLine: { lineStyle: { color: alpha(theme.palette.dashboard.border, 0.55), width: 1 } } },
     series: projection.rows.map((row, index) => ({ name: `${row.target} ${row.mode}`, type: 'line',
-      data: row.points.map((point, i) => [projection.slots[i].x, point.speedup]), connectNulls: false,
+      data: row.points.map((point, i) => [projection.slots[i].x, point.speedup]), connectNulls: true,
       showSymbol: true, symbol: row.mode === 'single' ? 'diamond' : 'circle', symbolSize: (_value, params) => chartPointSize(row.points, params.dataIndex, row.mode, 'speedup', chartWidth),
-      itemStyle: chartPointStyle(colorFor(row, index, theme.palette.mode), theme.palette.background.paper, row.mode),
-      emphasis: { disabled: true }, lineStyle: chartLineStyle(colorFor(row, index, theme.palette.mode), row.mode),
+      itemStyle: chartPointStyle(targetColor(theme, row.target), theme.palette.background.paper, row.mode),
+      emphasis: { disabled: true }, lineStyle: chartLineStyle(targetColor(theme, row.target), row.mode),
       ...(index === 0 ? { markLine: { silent: true, symbol: 'none', label: { show: false }, lineStyle: { width: 1.4, opacity: 0.9, type: [14, 5, 3, 5], color: theme.palette.text.secondary }, data: [{ yAxis: 1 }] } } : {}) })),
   }), [projection, theme, bounds, chartWidth]);
   const onReady = useMemo(() => (chart) => { chartRef.current = chart; }, []);
@@ -178,7 +178,7 @@ export default function DurationHistory({ projection, catalogs, onRangeChange, o
         <Typography variant="caption" sx={{ position: 'absolute', top: 0, left: 0, color: 'text.secondary', pointerEvents: 'none', zIndex: 1 }}>Relative speedup (×)</Typography>
         <Box component="svg" ref={guideRef} data-testid="point-hover-guide" aria-hidden="true" sx={{ display: 'none', pointerEvents: 'none', position: 'absolute', top: 26, width: '1px', height: 'calc(100% - 68px)', color: 'text.secondary', overflow: 'visible', zIndex: 1 }}><line x1="0" x2="0" y1="0" y2="100%" stroke="currentColor" strokeWidth="1" strokeDasharray="2 3" /></Box>
         <Box component="svg" ref={focusRef} data-testid="hover-line-focus" aria-hidden="true" sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'none', pointerEvents: 'none', zIndex: 2 }} />
-        <Box sx={{ position: 'absolute', inset: 0 }}><StableChart option={option} height="100%" ariaLabel="Relative speedup by configuration; gaps unconnected" lazyUpdate={false} onReady={onReady} /></Box>
+        <Box sx={{ position: 'absolute', inset: 0 }}><StableChart option={option} height="100%" ariaLabel="Relative speedup by configuration" lazyUpdate={false} onReady={onReady} /></Box>
       </>}
     </Box>
     <Typography ref={statusRef} data-testid="trend-inspection-status" aria-live="polite" aria-atomic="true" data-visible="false" variant="caption" sx={{ display: 'block', mt: 1, overflowWrap: 'anywhere', '&[data-visible="false"]': visuallyHiddenStyles }} />

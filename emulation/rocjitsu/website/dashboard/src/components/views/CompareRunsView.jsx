@@ -21,16 +21,11 @@ import {
 } from '../../utils/formatters';
 import { classifyDurationChange } from '../../utils/performance';
 import CommitComparison from '../shared/CommitComparison';
-import { categoryTextColor, colorTokens } from '../../theme/tokens';
+import { colorTokens } from '../../theme/tokens';
+import { targetTextColor } from '../../theme/targetColors';
+import { policySwatchImage, SWATCH_HEIGHT, SWATCH_WIDTH } from '../../utils/chartStyles';
 import Disclosure from '../shared/Disclosure';
 import ScrollTableContainer from '../shared/ScrollTableContainer';
-
-// ThreadPolicySwatch's non-legend drawing as an image, for chart rich text (which cannot embed React).
-function policySwatchImage(policy, color) {
-  const dash = policy === 'single' ? ' stroke-dasharray="0.1 6"' : '';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="8" viewBox="0 0 22 8"><line x1="1" y1="4" x2="21" y2="4" stroke="${color}" stroke-width="3"${dash} stroke-linecap="round"/></svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
 
 function TestAvailability({ test, run, benchmark }) {
   const label = !run ? 'No run selected'
@@ -111,14 +106,14 @@ export default function CompareRunsView({
     separator: { color: theme.palette.text.disabled },
     // One rich-text style per target so the label carries the same hue as the target tag/legend.
     ...Object.fromEntries(targetIds.map((target, index) => [`target${index}`, {
-      color: categoryTextColor(theme.palette.mode, target, theme.palette.text.secondary, 'target'),
+      color: targetTextColor(theme, target),
       fontWeight: fontWeights.emphasized,
       fontFamily: theme.typography.fontFamily,
     }])),
     // Thread policy stays neutral (as in the tags); the swatch is the same line drawing as ThreadPolicySwatch.
     mode: { color: theme.palette.text.secondary, fontFamily: theme.typography.fontFamily },
-    singleSwatch: { width: 22, height: 8, backgroundColor: { image: policySwatchImage('single', theme.palette.text.secondary) } },
-    defaultSwatch: { width: 22, height: 8, backgroundColor: { image: policySwatchImage('default', theme.palette.text.secondary) } },
+    singleSwatch: { width: SWATCH_WIDTH, height: SWATCH_HEIGHT, backgroundColor: { image: policySwatchImage(theme.palette.text.secondary, 'single') } },
+    defaultSwatch: { width: SWATCH_WIDTH, height: SWATCH_HEIGHT, backgroundColor: { image: policySwatchImage(theme.palette.text.secondary, 'default') } },
     benchmark: {
       color: theme.palette.text.secondary,
       fontWeight: fontWeights.emphasized,

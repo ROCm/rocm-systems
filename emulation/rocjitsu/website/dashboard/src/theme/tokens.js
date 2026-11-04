@@ -1,13 +1,13 @@
 // Carbon Soft palette, shared by DOM and explicit chart options.
 // Category identities remain published values; color never renames a workload.
-export { sansFont, monoFont } from './typography.js';
+export { sansFont } from './typography.js';
 
 export const shapeTokens = {
 
   cardRadius: '12px', controlRadius: '8px',
   cardPadding: '20px', headerPadding: '24px', rowPadding: '8px',
 
-  tablePadding: '11px', cardHeaderPadding: '12px',
+  cardHeaderPadding: '12px',
 };
 
 export const colorTokens = {
@@ -24,7 +24,7 @@ export const colorTokens = {
     tableHeader: '#eef1f6', tableGroup: '#f7f9fc', barTrack: '#e6eaf2', commitText: '#3a4a68',
     // Decorative identities, not success/warning/error signals.
     secondaryAccent: '#007d79', seriesSecondary: '#c2570c', seriesSecondaryText: '#a94b0a',
-    goldAccent: '#a17812', goldText: '#805d0e', roseAccent: '#ad5478', roseText: '#9e456a', oliveAccent: '#727b3d', oliveText: '#606a30',
+    goldAccent: '#a17812', roseAccent: '#ad5478', roseText: '#9e456a', oliveAccent: '#727b3d', oliveText: '#606a30',
     shadowColor: '#101828',
     categoryTagSurface: '#eef1f6',
   },
@@ -40,53 +40,32 @@ export const colorTokens = {
     purpleText: '#be95ff', purpleSurface: '#31135e', hover: '#1e2837',
     tableHeader: '#222a36', tableGroup: '#1c2430', barTrack: '#222a36', commitText: '#b4c0d9',
     secondaryAccent: '#3ddbd9', seriesSecondary: '#ffa04d', seriesSecondaryText: '#ffa04d',
-    goldAccent: '#e0b94f', goldText: '#e0b94f', roseAccent: '#e58db0', roseText: '#e58db0', oliveAccent: '#b5c06a', oliveText: '#b5c06a',
+    goldAccent: '#e0b94f', roseAccent: '#e58db0', roseText: '#e58db0', oliveAccent: '#b5c06a', oliveText: '#b5c06a',
     shadowColor: '#000000',
     categoryTagSurface: '#2a3446',
   },
 };
 
-// Disjoint identity sets: targets = blue/orange/gold; suites = purple/teal/rose/olive;
-// standalone thread policies = neutral gray. Charts keep the target's hue.
-export const targetColors = {
-  light: { gfx1250: colorTokens.light.interactive, gfx950: colorTokens.light.seriesSecondary, gfx1201: colorTokens.light.goldAccent },
-  dark: { gfx1250: colorTokens.dark.interactive, gfx950: colorTokens.dark.seriesSecondary, gfx1201: colorTokens.dark.goldAccent },
-};
+// Suites and thread policies have fixed identities; target colors are generated per publication (targetColors.js).
+// Suites = purple/teal/rose/olive.
 export const suiteColors = {
   light: { Triton: colorTokens.light.purpleText, Llama: colorTokens.light.secondaryAccent, DeepSeek: colorTokens.light.roseAccent, TensileLite: colorTokens.light.oliveAccent },
   dark: { Triton: colorTokens.dark.purpleText, Llama: colorTokens.dark.secondaryAccent, DeepSeek: colorTokens.dark.roseAccent, TensileLite: colorTokens.dark.oliveAccent },
 };
-export const threadPolicyColors = {
-  light: { single: colorTokens.light.textSecondary, default: colorTokens.light.textSecondary },
-  dark: { single: colorTokens.dark.textSecondary, default: colorTokens.dark.textSecondary },
-};
-export const categoryPalettes = {
-  light: { target: targetColors.light, suite: suiteColors.light, mode: threadPolicyColors.light },
-  dark: { target: targetColors.dark, suite: suiteColors.dark, mode: threadPolicyColors.dark },
-};
-// Compatibility lookup; new renderers pass their kind to enforce set ownership.
-export const categoryColors = {
-  light: { ...targetColors.light, ...suiteColors.light, ...threadPolicyColors.light },
-  dark: { ...targetColors.dark, ...suiteColors.dark, ...threadPolicyColors.dark },
-};
 
-export function categoryColor(mode, label, fallback, kind) {
-  const colors = kind ? (categoryPalettes[mode][kind] ?? suiteColors[mode]) : categoryColors[mode];
-  if (Object.hasOwn(colors, label)) return colors[label];
-  if (!kind && fallback !== undefined) return fallback;
-  // Unknown publication labels stay in their own set, stable across series order.
-  const swatches = [...new Set(Object.values(kind ? colors : suiteColors[mode]))];
+// Unknown (newly published) suites hash into the suite hues, stable across series order.
+export function suiteColor(mode, label) {
+  if (Object.hasOwn(suiteColors[mode], label)) return suiteColors[mode][label];
+  const swatches = [...new Set(Object.values(suiteColors[mode]))];
   const hash = Array.from(String(label)).reduce((value, character) => (value * 31 + character.codePointAt(0)) >>> 0, 0);
   return swatches[hash % swatches.length];
 }
 
 // Tiny identity text needs stronger contrast than its decorative marker/plot hue.
-export function categoryTextColor(mode, label, fallback, kind) {
-  const color = categoryColor(mode, label, fallback, kind);
+export function suiteTextColor(mode, label) {
+  const color = suiteColor(mode, label);
   const palette = colorTokens[mode];
-  if (color === palette.seriesSecondary) return palette.seriesSecondaryText;
   if (color === palette.roseAccent) return palette.roseText;
-  if (color === palette.goldAccent) return palette.goldText;
   if (color === palette.oliveAccent) return palette.oliveText;
   return color;
 }

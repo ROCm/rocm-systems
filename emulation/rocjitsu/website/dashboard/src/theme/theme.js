@@ -1,9 +1,10 @@
 import { alpha, createTheme } from '@mui/material/styles';
 import { colorTokens, shapeTokens } from './tokens';
 import { tableDensities } from './tableStyles';
+import { generateTargetColors } from './targetColors';
 import { fontSizes, fontWeights, sansFont, textStyles, typographyCssVariables } from './typography';
 
-export function createDashboardTheme(mode) {
+export function createDashboardTheme(mode, targets = []) {
   const colors = colorTokens[mode === 'dark' ? 'dark' : 'light'];
   const phoneControl = { '@media (max-width:599.95px)': { minHeight: 44, minWidth: 44 } };
   const focusRing = { outline: `2px solid ${colors.interactive}`, outlineOffset: 2 };
@@ -27,13 +28,15 @@ export function createDashboardTheme(mode) {
       text: { primary: colors.textPrimary, secondary: colors.textSecondary, muted: colors.textMuted, disabled: alpha(colors.textPrimary, 0.38) },
       selectionText: colors.selectionText,
       dashboard: colors,
+      // Target -> chart color, generated from the published targets (see targetColors.js).
+      targetColors: Object.fromEntries(generateTargetColors(mode === 'dark' ? 'dark' : 'light', targets)),
     },
     typography: {
       fontFamily: sansFont,
       fontSize: fontSizes.body,
       fontWeightLight: fontWeights.regular,
       fontWeightRegular: fontWeights.regular,
-      fontWeightMedium: fontWeights.emphasized,
+      fontWeightMedium: fontWeights.medium,
       fontWeightBold: fontWeights.emphasized,
       body1: textStyles.body,
       body2: textStyles.body,

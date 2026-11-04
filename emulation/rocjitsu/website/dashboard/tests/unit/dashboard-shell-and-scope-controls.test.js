@@ -112,9 +112,17 @@ describe('v1 publication header', () => {
     expect(action('Use dark theme').props.disabled).not.toBe(true);
   });
 
-  it('links the fixed ROCm repository source tree', () => {
-    const html = markup(DashboardHeader, { data: { ...data, repository: 'https://example.test/ignored' }, mode: 'light' });
-    expect(html).toContain('href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu"');
+  it('derives the source link and label from the configured repository and canonical branch', () => {
+    const html = markup(DashboardHeader, { data: { ...data, repository: 'https://example.test/org/other-repo/', canonicalBranch: 'main' }, mode: 'light' });
+    expect(html).toContain('href="https://example.test/org/other-repo/tree/main/emulation/rocjitsu"');
+    expect(html).toContain('>org/other-repo<');
+    expect(html).not.toContain('ROCm/rocm-systems');
+  });
+
+  it('omits the source link when the repository is missing or unsafe', () => {
+    for (const repository of [undefined, 'javascript:alert(1)']) {
+      expect(markup(DashboardHeader, { data: { ...data, repository }, mode: 'light' })).not.toContain('/tree/');
+    }
   });
 
   it('shows actual publication time in UTC with only the timestamp bold', () => {

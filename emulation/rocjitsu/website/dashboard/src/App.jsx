@@ -222,7 +222,8 @@ export default function App() {
     reloadAll: false,
     cacheGeneration: readCacheGeneration(),
   }));
-  const theme = useMemo(() => createDashboardTheme(mode), [mode]);
+  const targets = dataState.data?.targets;
+  const theme = useMemo(() => createDashboardTheme(mode, targets), [mode, targets]);
   const state = useDashboardState(dataState.data ?? emptyDashboardData);
 
   useEffect(() => {

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { createDashboardTheme } from '../../src/theme/theme';
+import { fontWeights, sansFont, textStyles } from '../../src/theme/typography';
 
 describe('native fonts', () => {
   it('declares no @font-face and ships no font files or font licenses', () => {
@@ -11,10 +12,28 @@ describe('native fonts', () => {
     expect(createDashboardTheme('light').fontLicenses).toBeUndefined();
   });
 
-  it('uses system font stacks for both families', () => {
+  it('uses the native system sans stack, with no bundled family', () => {
     const { fontFamily } = createDashboardTheme('light').typography;
-    expect(fontFamily).toContain('system-ui');
-    expect(fontFamily).not.toMatch(/Inter|IBM Plex/);
+    expect(fontFamily).toBe(sansFont);
+    expect(sansFont).toContain('system-ui');
+    expect(sansFont).not.toMatch(/Inter|IBM Plex/);
+  });
+
+  it('defines no monospace stack; numerals use the sans with tabular figures', () => {
+    expect(textStyles.numeric).toMatchObject({ fontFamily: sansFont, fontVariantNumeric: 'tabular-nums' });
+    expect(textStyles.numericEmphasized).toMatchObject({ fontFamily: sansFont, fontVariantNumeric: 'tabular-nums' });
+  });
+
+  it('has three named weight tiers in increasing order, 500, 600 and 700', () => {
+    expect(Object.keys(fontWeights)).toEqual(['regular', 'medium', 'emphasized']);
+    expect(Object.values(fontWeights)).toEqual([500, 600, 700]);
+  });
+
+  it('gives MUI medium and the table header the shared medium tier (600, not the MUI default 500) and MUI bold the emphasized tier (700)', () => {
+    const { typography } = createDashboardTheme('light');
+    expect(typography.fontWeightMedium).toBe(600);
+    expect(typography.fontWeightBold).toBe(700);
+    expect(textStyles.tableHeader.fontWeight).toBe(600);
   });
 });
 
