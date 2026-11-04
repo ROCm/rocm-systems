@@ -751,8 +751,14 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out) {
   DIR* d = opendir(pdir.c_str());
 
   if (!d) {
-    perror(("Unable to open KFD process directory for process " + std::to_string(pid)).c_str());
-    return errno ? errno : ESRCH;
+    const int open_err = errno ? errno : ESRCH;
+    if (!SysfsEntryGone(open_err)) {
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | Unable to open KFD process directory " << pdir << " | "
+         << std::strerror(open_err);
+      LOG_ERROR(ss);
+    }
+    return open_err;
   }
   closedir(d);
 
@@ -1125,6 +1131,11 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
     }  // End of metric_paths loop
   }
 
+  // The reads above take a missing file as zero usage. If the process exited
+  // meanwhile, those zeros are not its usage.
+  if (!FileExists(proc_str_path.c_str())) {
+    return ESRCH;
+  }
   return 0;
 }
 

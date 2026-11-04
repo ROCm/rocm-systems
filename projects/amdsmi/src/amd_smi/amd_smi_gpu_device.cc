@@ -324,7 +324,10 @@ amdsmi_status_t AMDSmiGPUDevice::get_compute_process_list_impl(
           rsmi_proc_info = MakeUnavailableProcessInfo(pid);
         }
         amdsmi_proc_info_t amdsmi_proc_info{};
-        get_process_info(rsmi_proc_info, amdsmi_proc_info);
+        if (get_process_info(rsmi_proc_info, amdsmi_proc_info) != AMDSMI_STATUS_SUCCESS &&
+            !KfdProcessExists(pid)) {
+          break;
+        }
         compute_process_list.emplace(rsmi_proc_info.process_id, amdsmi_proc_info);
       }
     }

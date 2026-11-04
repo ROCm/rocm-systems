@@ -6,12 +6,18 @@
 // containers without the host PID namespace, a real process's fdinfo cannot be
 // read, so the functional tests skip that comparison there.
 
+#include <fcntl.h>
 #include <gtest/gtest.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
+#include <cerrno>
 #include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <string>
+#include <thread>
+#include <unordered_set>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_drm.h"
@@ -130,6 +136,48 @@ TEST(GpuUnit, ProcessInfoOfAProcessOnAnotherGpuIsNotFound) {
 
   amdsmi_proc_info_t info{};
   EXPECT_EQ(gpuvsmi_get_pid_info(TestBdf(), kPid, info, kKfdGpuId), AMDSMI_STATUS_NOT_FOUND);
+}
+
+TEST(GpuUnit, KfdGpuIdsOfAProcessThatExitedAreNotFoundQuietly) {
+  MockProcessRoots roots;
+  std::unordered_set<uint64_t> gpu_ids{kKfdGpuId};
+
+  ::testing::internal::CaptureStderr();
+  amd::smi::GetKfdGpuIdsForPid(4260, &gpu_ids);
+  const std::string err_output = ::testing::internal::GetCapturedStderr();
+
+  EXPECT_TRUE(gpu_ids.empty());
+  EXPECT_EQ(err_output, "");
+}
+
+TEST(GpuUnit, ProcessInfoOfAProcessThatExitsDuringTheReadIsNotFound) {
+  MockProcessRoots roots;
+  constexpr uint32_t kPid = 4270;
+  const std::string dir = roots.kfd().root() + "/4270";
+  const std::string vram_path = dir + "/vram_" + std::to_string(kKfdGpuId);
+  std::filesystem::create_directories(dir);
+  ASSERT_EQ(mkfifo(vram_path.c_str(), 0600), 0);
+
+  // Opening vram_ waits for this thread, which then removes the process's KFD
+  // directory, as KFD does when the process exits, and answers the open read.
+  std::thread exiting([&] {
+    const int fd = open(vram_path.c_str(), O_WRONLY | O_CLOEXEC);
+    std::filesystem::remove_all(dir);
+    if (fd >= 0) {
+      EXPECT_EQ(write(fd, "4096\n", 5), 5);
+      close(fd);
+    }
+  });
+
+  rsmi_process_info_t proc{};
+  std::unordered_set<uint64_t> gpu_set{kKfdGpuId};
+  const int err = amd::smi::GetProcessInfoForPID(kPid, &proc, &gpu_set);
+  // If the read never opened vram_, this open releases the thread.
+  const int unblock_fd = open(vram_path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+  exiting.join();
+  if (unblock_fd >= 0) close(unblock_fd);
+
+  EXPECT_EQ(err, ESRCH);
 }
 
 TEST(GpuUnit, ProcessListPlacesAProcessWhoseKfdGpusCannotBeRead) {

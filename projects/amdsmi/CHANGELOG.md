@@ -178,7 +178,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Listing GPU processes from several threads at once could crash or leave processes out, and a process that uses several GPUs could show another GPU's memory and engine usage.
 
 - **Fixed GPU process lists coming back empty or incomplete while GPU processes start or exit**.  
-  - On a busy system, `amd-smi process` and the process-list APIs could briefly return no processes, miss a running one, fail, or, in Python, return entries with process ID 0. A list that cannot be read is now reported as an error (`AMDSMI_STATUS_RETRY` while processes keep starting). A process whose statistics cannot be read is listed with them not available, and so is one whose GPUs cannot be read, on each GPU its fdinfo shows.
+  - On a busy system, `amd-smi process` and the process-list APIs could briefly return no processes, miss a running one, fail, or, in Python, return entries with process ID 0. A list that cannot be read is now reported as an error (`AMDSMI_STATUS_RETRY` while processes keep starting). A process whose statistics cannot be read is listed with them not available, and so is one whose GPUs cannot be read, on each GPU its fdinfo shows. A process that exits while it is read is left out instead of listed with zero memory usage.
 
 - **Fixed per-process memory and engine usage in `amd-smi process`**.  
   - VRAM, GTT and CPU memory read 2.3% low and could be counted several times for one process. A process that opened the same GPU more than once showed the engine usage of only one of those opens.
