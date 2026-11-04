@@ -72,20 +72,23 @@ if(NOT ROCSHMEM_NATIVE_LINK_JOBS MATCHES "^[1-9][0-9]*$")
   message(FATAL_ERROR "ROCSHMEM_NATIVE_LINK_JOBS must be a positive integer")
 endif()
 
-set(_ROCSHMEM_NATIVE_LINK_JOBS ${ROCSHMEM_NATIVE_LINK_JOBS})
-if(_ROCSHMEM_NATIVE_LINK_JOBS GREATER 1 AND NOT HIP_CLANG_SUPPORTS_PARALLEL_JOBS)
-  message(WARNING "HIP --offload-jobs is unavailable; using one device link job")
-  set(_ROCSHMEM_NATIVE_LINK_JOBS 1)
-endif()
-
 function(_rocshmem_set_native_link_jobs target)
-  if(_ROCSHMEM_NATIVE_LINK_JOBS GREATER 1)
-    if(DEFINED HIP_CLANG_NUM_PARALLEL_JOBS AND HIP_CLANG_NUM_PARALLEL_JOBS GREATER 1)
-      message(FATAL_ERROR "Use ROCSHMEM_NATIVE_LINK_JOBS with HIP_CLANG_NUM_PARALLEL_JOBS=1")
-    endif()
-    target_link_options(${target} PRIVATE
-      "--offload-jobs=${_ROCSHMEM_NATIVE_LINK_JOBS}")
+  if(NOT ROCSHMEM_NATIVE_LINK_JOBS GREATER 1)
+    return()
   endif()
+  if(NOT HIP_CLANG_SUPPORTS_PARALLEL_JOBS)
+    message(WARNING
+      "HIP --offload-jobs is unavailable; linking ${target} with one device-link job")
+    return()
+  endif()
+  if(DEFINED HIP_CLANG_NUM_PARALLEL_JOBS AND HIP_CLANG_NUM_PARALLEL_JOBS GREATER 1)
+    message(WARNING
+      "HIP_CLANG_NUM_PARALLEL_JOBS already sets --offload-jobs; "
+      "skipping ROCSHMEM_NATIVE_LINK_JOBS for ${target}")
+    return()
+  endif()
+  target_link_options(${target} PRIVATE
+    "--offload-jobs=${ROCSHMEM_NATIVE_LINK_JOBS}")
 endfunction()
 
 option(BUILD_CTESTS "Register tests with CTest for tier-based execution" ON)
