@@ -40,6 +40,11 @@ rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-samples-gfx-info ECHO)
 # common utilities for samples
 add_subdirectory(common)
 
+# Samples that use counters, SPM, thread trace or PC sampling program GPU-wide hardware
+# state, so concurrent instances on one GPU (ctest --parallel) can fault. They share this
+# lock, which is the same one the unit tests and device-profiling samples already use.
+set(ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK "rocprofiler_device_counting_pmc")
+
 # actual samples
 add_subdirectory(api_callback_tracing)
 add_subdirectory(api_buffered_tracing)

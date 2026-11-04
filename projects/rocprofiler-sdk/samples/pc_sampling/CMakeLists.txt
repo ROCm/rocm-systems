@@ -60,13 +60,13 @@ set_tests_properties(
                45
                LABELS
                "samples;pc-sampling"
-               RUN_SERIAL
-               ON
                ENVIRONMENT
                "${pc-sampling-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                SKIP_REGULAR_EXPRESSION
                "PC sampling unavailable"
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}"
                DISABLED
                "${IS_PC_SAMPLING_DISABLED}")

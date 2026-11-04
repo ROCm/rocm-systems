@@ -69,11 +69,11 @@ set_tests_properties(
                120
                LABELS
                "samples"
-               RUN_SERIAL
-               ON
                ENVIRONMENT
                "${spm-device-counting-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}"
                DISABLED
                "${IS_DISABLED}")
