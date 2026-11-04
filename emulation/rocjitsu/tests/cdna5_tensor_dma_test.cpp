@@ -387,7 +387,7 @@ TEST_F(TensorDmaLdsOutOfRangeTest, StoreReadsZeroOutsideTheWavesLds) {
                 {.address = wf->lds_base() + kLdsOffset, .bytes = 8}}));
 }
 
-TEST_F(TensorDmaLdsOutOfRangeTest, LoadElementStraddlingTheEndWritesOnlyInRangeBytes) {
+TEST_F(TensorDmaLdsOutOfRangeTest, LoadI64StraddlingTheEndWritesOnlyItsFourInRangeBytes) {
   // One i64 element at offset 252 has four bytes inside the wave's LDS.
   write_tensor_dma_d0(*cu, *wf, 0, kGlobal, 252);
   write_wave_sgpr(*cu, *wf, 12, 3u << 16); // i64 elements.
@@ -404,7 +404,7 @@ TEST_F(TensorDmaLdsOutOfRangeTest, LoadElementStraddlingTheEndWritesOnlyInRangeB
       (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base() + 252, .bytes = 4}}));
 }
 
-TEST_F(TensorDmaLdsOutOfRangeTest, StoreElementStraddlingTheEndReadsZeroPastIt) {
+TEST_F(TensorDmaLdsOutOfRangeTest, StoreI64StraddlingTheEndReadsZeroForItsFourOutOfRangeBytes) {
   write_tensor_dma_d0(*cu, *wf, 0, kGlobal, 252);
   write_wave_sgpr(*cu, *wf, 12, 3u << 16); // i64 elements.
   write_wave_sgpr(*cu, *wf, 13, 1u << 16);
