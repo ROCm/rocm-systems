@@ -32,6 +32,14 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `rdci topo` and `rdc_device_topology_get()` now report the links of the requested GPU. They reported links between other GPU pairs, which showed the wrong link types on systems where GPU pairs are not all linked the same way, such as XGMI hives joined by PCIe.
   - `rdci topo` now exits with an error code when the GPU index is out of range or the topology query fails, instead of exiting 0, and `rdc_device_topology_get()` reports link types RDC does not define as `RDC_IOLINK_TYPE_UNDEFINED`.
 
+- RDC checks GPU policy conditions every 500 ms, as intended. It checked them every 0.5 ms, which read every GPU in a policy group thousands of times per second and kept `rdcd` busy on a CPU core.
+
+- Deleting a GPU group stops its policies. RDC kept checking the policies of a deleted group on whatever GPUs an uninitialized group record held, and with the GPU reset action could reset those GPUs.
+
+- Setting or deleting policies while RDC checks them, and registering for policy notifications with `rdcd`, are now thread-safe.
+
+- `rdc_policy_set()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist, instead of accepting the policy, and `rdci policy` exits with the status of a failed set.
+
 - `RDC_FI_ECC_CORRECT_TOTAL`, `RDC_FI_ECC_UNCORRECT_TOTAL`, and `RDC_FI_ECC_DEFERRED_TOTAL` no longer hang when AMD SMI defines GPU blocks above bit 31. The block iteration used a 32-bit counter that wrapped to zero instead of terminating.
 
 - Opening or stopping an RDC handle no longer crashes the process when another handle is in use, and concurrent `rdc_connect()` calls no longer fail at random.
