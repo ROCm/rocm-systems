@@ -5095,6 +5095,7 @@ pub fn amdsmi_get_gpu_device_bdf(
 /// let info = amdsmi_get_gpu_enumeration_info(processor_handle)?;
 /// println!("DRM render node: renderD{}", info.drm_render);
 /// println!("HSA ID: {}, HIP ID: {}", info.hsa_id, info.hip_id);
+/// println!("HIP UUID: {}", info.hip_uuid());
 /// # Ok(())
 /// # }
 /// ```

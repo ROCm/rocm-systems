@@ -151,6 +151,9 @@ impl_cstr_getters!(AmdsmiVbiosInfoT, name, build_date, part_number, version, boo
 // Implement the getters for the C string fields in AmdsmiAsicInfoT
 impl_cstr_getters!(AmdsmiAsicInfoT, market_name, vendor_name, asic_serial);
 
+// Implement the getters for the C string fields in AmdsmiEnumerationInfoT
+impl_cstr_getters!(AmdsmiEnumerationInfoT, hip_uuid);
+
 // Implement the getters for the C string fields in AmdsmiBoardInfoT
 impl_cstr_getters!(
     AmdsmiBoardInfoT,
