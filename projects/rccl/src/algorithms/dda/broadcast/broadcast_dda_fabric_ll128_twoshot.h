@@ -136,16 +136,15 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
       for (size_t i = gtid; i < nVec; i += stride) d4[i] = s4[i];
     }
 
-    // Phase 4: wait for every peer's allgather contribution
+    // Phase 4: wait for every peer's allgather contribution.
+    // Q5: non-roots forward only 1 padding slice to the root (see Phase 1).
+    // The root uses its own sendbuff, so only 1 slice per peer is needed here.
     const uint64_t* myScratch = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]);
     const uint64_t* myGather = myScratch + gatherOff + (uint64_t)peer * slotWireWords;
-    for (size_t s = gwarp; s < chunkSlices; s += wstride) {
+    if (gwarp == 0) {
       uint64_t vr[kDdaLL128WordsPerThread];
-      if (!ddaLL128PollWire(myGather + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
-                            vr, flag, lane, params))
-        break;
-      ddaLL128ClearWire(const_cast<uint64_t*>(myGather) +
-        s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, lane);
+      if (ddaLL128PollWire(myGather + 2 * lane, vr, flag, lane, params))
+        ddaLL128ClearWire(const_cast<uint64_t*>(myGather) + 2 * lane, lane);
     }
   } else {
     // --- NON-ROOT ---
@@ -158,14 +157,16 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
                             vr, flag, lane, params))
         break;
 
-      // Forward: ddaLL128PollWire returned only after vr[u+1] == flag on every
-      // flag lane, so ddaLL128StoreWire re-emits those same wire words with the
-      // already-correct flag in the flag lanes. No unpack/repack is needed
-      // (design risk R2).
+      // Forward to peer's gather slot. For the root peer, only 1 padding slice
+      // is forwarded (Q5): the root uses its own sendbuff, so only the flag is
+      // needed to satisfy the root's completion poll. All other peers receive
+      // the full chunk. R2: see above on flag-lane correctness.
       uint64_t* peerGather = reinterpret_cast<uint64_t*>(peerScratch[peer]) + gatherOff +
         (uint64_t)selfRank * slotWireWords;
-      ddaLL128StoreWire(peerGather + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
-                        vr, flag, flagLane);
+      if (peer != root || s == 0) {
+        ddaLL128StoreWire(peerGather + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
+                          vr, flag, flagLane);
+      }
 
       // vr holds the scatter wire words just polled: that data is exactly
       // selfRank's chunk of the message (the root put chunk[selfRank] in
