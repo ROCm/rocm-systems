@@ -206,11 +206,13 @@ It does **not** restore:
 * Kernarg or executable allocations (excluded by design).
 * HIP graph-managed memory.
 
-A dispatch whose kernel arguments point at memory in that list runs once without replay, with a
-warning. Only the arguments the kernel's own metadata describes as pointers are followed: a pointer
-the kernel finds inside memory it was handed is not seen, and neither is a scalar the width of a
-pointer whose bits happen to name an address. For a kernel whose metadata cannot be read, every
-argument word is checked instead.
+If argument-memory checks find unsupported memory, or memory needed for replay cannot be safely
+captured or classified, the dispatch runs once without replay, with a warning.
+
+Argument-memory checks are best effort: pointers embedded in by-value arguments or loaded
+indirectly from other allocations are not guaranteed to be detected. Writes through undetected
+pointers to memory outside the snapshot can accumulate across replay passes. Values that resemble
+pointers can also cause a dispatch to run once without replay.
 
 Capture is a **full in-memory copy** of every tracked region into host RAM. Cost is
 ``O(tracked_bytes × passes)``, not kernel time alone. The last executed pass is **not** restored,
@@ -223,7 +225,6 @@ Limitations
 
 * **Beta.** The domain, payload, and snapshot policy may change.
 * **Single** ``KERNEL_REPLAY`` **subscriber.**
-* **Coarse-grained device VRAM only**, plus module-scope device/constant variables.
 * **HIP graph launches are not replayed.** The interceptor warns once and the graph runs once on
   the ordinary path. A graph dispatch does **not** hard-error at the replay gate.
 * **Only single-packet, single-dispatch submissions** are replayed. Multi-packet batches warn once

@@ -44,6 +44,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <iosfwd>
 #include <optional>
 #include <string_view>
 #include <unordered_set>
@@ -84,6 +85,7 @@ struct pointer_facts_t
     bool     owner_is_cpu             = false;
     bool     in_writable_host_mapping = false;
     bool     pointer_info_succeeded   = false;
+    bool     host_mappings_ok         = false;
     bool     fine_grained             = false;
     uint64_t agent_base               = 0;  // GPU-visible base of the allocation, 0 if none
     uint64_t size                     = 0;  // extent of the allocation, 0 if unknown
@@ -96,6 +98,12 @@ struct address_span_t
 {
     uint64_t begin = 0;
     uint64_t end   = 0;
+};
+
+struct host_mappings_t
+{
+    std::vector<address_span_t> spans = {};
+    bool                        ok    = false;
 };
 
 // An allocation as it would be saved. `size` is 0 when it cannot be saved.
@@ -120,9 +128,14 @@ to_string(kind_t kind);
 // Writable mappings of this process that hold host memory, sorted by address. Device mappings and
 // the pages the kernel manages itself (vvar, vdso, vsyscall) are left out. Read once per dispatch
 // that needs it, not cached across dispatches: this is the application's address space, and it
-// changes as the application maps and unmaps.
-std::vector<address_span_t>
+// changes as the application maps and unmaps. A failed open or read returns ok=false; a
+// successfully read empty mapping set returns ok=true.
+host_mappings_t
 read_writable_host_mappings();
+
+// The same mapping scan from a stream in /proc/self/maps format.
+host_mappings_t
+read_writable_host_mappings(std::istream& file);
 
 pointer_facts_fn_t
 make_hsa_pointer_facts();

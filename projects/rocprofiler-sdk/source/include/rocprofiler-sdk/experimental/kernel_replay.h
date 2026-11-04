@@ -100,14 +100,18 @@ typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
  * device allocations owned by the agent plus module-scope @c __device__ / @c __constant__
  * variables. Fine-grained device memory of that agent named by a kernel argument is also saved and
  * restored between passes, up to 512 MiB per dispatch; a host thread must not write that memory
- * while the dispatch is being replayed. Which arguments hold a pointer comes from the kernel's own
- * metadata, so a scalar the width of a pointer is not read as one; without that metadata every
- * argument word is checked. A dispatch whose kernel
- * arguments point at other memory outside the snapshot (unified or managed memory, host memory,
- * another agent's memory, @c hipMallocAsync and other virtual-memory-mapped allocations) runs once
- * without replay and warns once. A pointer the kernel finds inside memory it was handed is not
- * seen, so a kernel writing through one observes values accumulated across passes rather than
- * identical inputs. Allocations carrying
+ * while the dispatch is being replayed. The check uses the kernel's own metadata to identify
+ * pointer arguments and @c by_value arguments of at least 16 bytes. By-value arguments are scanned
+ * in eight-byte words starting at their metadata offset. Smaller by-value arguments and pointer
+ * fields at other offsets, such as fields in packed structs, are not detected; scalar aggregates
+ * can also resemble pointers and cause replay to be declined. A scalar the width of a pointer is
+ * not read as one; without metadata every argument word is checked. A dispatch whose checked
+ * kernel arguments point at other memory outside the snapshot (unified or managed memory, host
+ * memory, another agent's memory, @c hipMallocAsync and other virtual-memory-mapped allocations)
+ * runs once without replay and warns once. The same applies when pointer information or the
+ * required host mappings cannot be queried. A pointer the kernel finds inside memory it was handed
+ * is not seen, so a kernel writing through one observes values accumulated across passes rather
+ * than identical inputs. Allocations carrying
  * @c HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG are excluded from the snapshot (HIP kernarg pools /
  * profiler buffers share that flag). A direct-HSA application that puts ordinary writable device
  * data behind the same flag sees the same omission -- an unsupported allocation class for beta.
