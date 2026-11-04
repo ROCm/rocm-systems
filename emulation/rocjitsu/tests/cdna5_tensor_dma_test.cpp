@@ -462,7 +462,7 @@ TEST_F(TensorDmaLdsOutOfRangeTest, PaddingPushesTheLastElementPastTheEnd) {
   // One dword of padding after every two places the elements at 240, 244, 252
   // and 256; the last is past the wave's LDS.
   write_tensor_dma_d0(*cu, *wf, 0, kGlobal, 240);
-  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 20));
+  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 20)); // i32, pad enabled.
   for (uint32_t i = 0; i < 4; ++i)
     write_global_u32(*sim.memory, kGlobal + i * 4, 0x4b000000u + i);
   cu->lds().write32(wf->lds_base() + 248, kSentinel);
