@@ -214,11 +214,14 @@ races. Some examples:
   on `tensorcnt` in issue order (CDNA5 ISA 10.11.1), so a partial
   `s_wait_tensorcnt` retires the oldest. The ISA does not specify the relative
   timing of their LDS reads and writes, so as a conservative rule the detector
-  reports a transfer that overlaps an earlier, still pending one from the same
-  wave, until `s_wait_tensorcnt` retires it. Each instruction is registered when it issues, as other
-  memory instructions are, so an instruction that moves no data still occupies
-  its `tensorcnt` slot, and a transfer that waits for memory is pending from the
-  moment it issues.
+  reports a tensor load and a tensor store from the same wave that touch the
+  same LDS byte, in either order, until `s_wait_tensorcnt` retires the earlier
+  one. Two stores of the same tile only read it, which is safe; two loads over
+  the same bytes are an LDS write/write conflict, which the detector does not
+  check (see Limitations). Each instruction is registered when it issues, as
+  other memory instructions are, so an instruction that moves no data still
+  occupies its `tensorcnt` slot, and a transfer that waits for memory is pending
+  from the moment it issues.
 
 Detection is at byte granularity: D16 (half-register) loads only flag races on
 the affected bytes, and LDS races are tracked per byte.
@@ -233,9 +236,9 @@ following lifecycle:
    same-wave DS read or write does not race solely because the earlier DS event
    is still active. Direct-to-LDS VMEM writes still require the owning wave to
    wait for `vmcnt` before reading the destination bytes. Tensor DMA transfers
-   complete in issue order, but as a conservative rule an active transfer still
-   conflicts with an overlapping later transfer from the same wave (see Tensor
-   DMA races above).
+   complete in issue order, but as a conservative rule an active tensor load or
+   store still conflicts with a later, overlapping transfer in the other
+   direction from the same wave (see Tensor DMA races above).
 1. **WAVE_COMPLETE** — waits have satisfied every counter obligation for the
    event. This means the event is no longer in flight from the perspective of
    the wave that issued the operation, but is still in flight from the

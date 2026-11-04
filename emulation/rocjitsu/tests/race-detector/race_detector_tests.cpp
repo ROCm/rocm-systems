@@ -1406,8 +1406,8 @@ TEST(RaceDetector, TensorDma_SameWavePartialTensorcntRetiresStoreAheadOfLoad) {
 
 // Tensor DMA from one wave completes in issue order, but the ISA does not
 // specify the relative timing of overlapping LDS reads and writes, so the
-// detector conservatively reports overlapping transfers from the same wave until
-// s_wait_tensorcnt.
+// detector conservatively reports a tensor load and a tensor store from the same
+// wave that touch the same bytes, in either order, until s_wait_tensorcnt.
 TEST(RaceDetector, TensorDma_SameWaveLoadOverwritingAPendingStoreSourceRaces) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
   b.tensorStoreFromLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
@@ -1429,6 +1429,23 @@ TEST(RaceDetector, TensorDma_SameWaveOverlappingTransfersAfterTensorcntAreSafe) 
   b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
   b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/0);
   b.tensorStoreFromLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, TensorDma_SameWaveStoresOfTheSameTileAreSafe) {
+  // Both only read the tile.
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorStoreFromLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.tensorStoreFromLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, TensorDma_SameWaveLoadsOverTheSameTileAreNotReported) {
+  // Two loads writing the same bytes are an LDS write/write conflict, which the
+  // detector does not check; this pins that documented limitation.
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
   EXPECT_FALSE(b.hasRace());
 }
 

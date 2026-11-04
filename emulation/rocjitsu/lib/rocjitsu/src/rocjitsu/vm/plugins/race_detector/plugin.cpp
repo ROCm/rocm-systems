@@ -537,7 +537,9 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   // ISA 10.11.1), which partial waits rely on, so the event takes the TENSOR
   // class. The ISA does not specify the relative timing of their LDS reads and
   // writes, so as a conservative rule, check the transfer's LDS bytes as
-  // unordered with every pending access, including the wave's own transfers.
+  // unordered with every pending access, including the wave's own transfers in
+  // the other direction: a load against a pending store's source, and a store
+  // against a pending load's destination.
   constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
   constexpr MemoryOrderClass ldsAccessOrder = MemoryOrderClass::UNORDERED;
   const int elementBytes = static_cast<int>(issue.element_size_bytes);
