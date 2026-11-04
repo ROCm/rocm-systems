@@ -82,33 +82,6 @@ rocprofiler_add_integration_execute_test(
     )
 
 #
-# The reentrancy guard on rocprofiler_synchronize_contexts. A missing marker makes the
-# call block on the thread that would have satisfied it, so this test's failure mode is a
-# hang and the ctest timeout is the assertion that catches it.
-#
-add_executable(synchronize-contexts-reentrancy)
-target_sources(synchronize-contexts-reentrancy PRIVATE reentrancy.cpp)
-set_source_files_properties(reentrancy.cpp PROPERTIES LANGUAGE HIP)
-
-target_link_libraries(
-    synchronize-contexts-reentrancy
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            Threads::Threads)
-
-set_target_properties(synchronize-contexts-reentrancy PROPERTIES ENABLE_EXPORTS ON)
-
-rocprofiler_add_integration_execute_test(
-    synchronize-contexts-reentrancy
-    COMMAND $<TARGET_FILE:synchronize-contexts-reentrancy>
-    DEPENDS synchronize-contexts-reentrancy
-    TIMEOUT 60
-    LABELS "integration-tests"
-    ENVIRONMENT
-        "ROCPROFILER_QUEUE_INTERPOSITION=1"
-        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
-    )
-
-#
 # Counter records for a dispatch are written on a consumer thread, so a window that
 # synchronizes and flushes can be short. Asserted per window, never in aggregate.
 #

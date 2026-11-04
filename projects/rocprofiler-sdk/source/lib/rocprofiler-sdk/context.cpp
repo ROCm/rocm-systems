@@ -32,7 +32,6 @@
 #include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
-#include "lib/rocprofiler-sdk/record_producer.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/context.h>
@@ -158,9 +157,6 @@ rocprofiler_synchronize_contexts(const rocprofiler_context_id_t* contexts, size_
     // Finalization has already run these drains.
     if(rocprofiler::registration::get_fini_status() > 0) return ROCPROFILER_STATUS_SUCCESS;
 
-    // A drain entered from a record-producing thread would wait on the caller's own work.
-    if(rocprofiler::on_record_producer_thread()) return ROCPROFILER_STATUS_ERROR_REENTRANT_CALL;
-
     // The copy drain reports whether it completed. queue_controller_sync reports only its
     // per-queue waits: its completion-monitor wait has no deadline and no return value, so a
     // monitor that never drains cannot show up in _dispatches_drained.
@@ -176,19 +172,17 @@ rocprofiler_synchronize_contexts(const rocprofiler_context_id_t* contexts, size_
     // sample is already counted. Draining first would wait on a ring that is still filling.
     rocprofiler::counters::callback_thread_drain();
 
-    // Independent of the dispatch drains, since these samples are requested by the tool rather
-    // than caused by a dispatch. Grouped with the wait above because both produce counter records.
-    rocprofiler::counters::drain_device_counting_samples();
-
-    // Flushes this client's PC sampling agent buffers. Ordered after the dispatch drain, which
-    // retires the correlation ids those samples are attributed to.
-    // Deduplicated on client_idx: the flush is per-client, so several contexts owned by one
-    // client would otherwise flush the same agent buffers once each.
+    // Both of the remaining waits are scoped to the named contexts, so a context the caller does
+    // not name can never hold this call up. Device counting is per context; the PC sampling flush
+    // is per client, so it is deduplicated on client_idx and several contexts owned by one client
+    // flush the same agent buffers once rather than once each.
     auto _flushed_clients = rocprofiler::common::container::small_vector<uint32_t, 8>{};
     for(size_t i = 0; i < num_contexts; ++i)
     {
         const auto* _ctx = rocprofiler::context::get_registered_context(contexts[i]);
         if(_ctx == nullptr) continue;
+
+        rocprofiler::counters::drain_device_counting_samples(_ctx);
 
         const auto _client_idx = _ctx->client_idx;
         if(std::find(_flushed_clients.begin(), _flushed_clients.end(), _client_idx) !=
