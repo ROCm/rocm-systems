@@ -439,24 +439,40 @@ get_copy_metadata(hsa_agent_t      _hsa_dst_agent,
                          HSA_STATUS_SUCCESS);
                 }
 
-                auto _is_device_memory = [](bool _query_ok, const hsa_amd_pointer_info_t& _info) {
+                struct pointer_classification
+                {
+                    bool                       is_device = true;
+                    const rocprofiler_agent_t* owner     = nullptr;
+                };
+
+                auto _classify_pointer = [](bool _query_ok, const hsa_amd_pointer_info_t& _info) {
+                    auto _result = pointer_classification{};
+
                     // both HSA agents are GPUs, so assume device memory when the
                     // allocation cannot be inspected
-                    if(!_query_ok) return true;
+                    if(!_query_ok) return _result;
 
                     // locked and unknown pointers are host memory regardless of
                     // agentOwner, which is the agent the memory was locked for
                     if(_info.type == HSA_EXT_POINTER_TYPE_UNKNOWN ||
                        _info.type == HSA_EXT_POINTER_TYPE_LOCKED)
-                        return false;
+                    {
+                        _result.is_device = false;
+                        return _result;
+                    }
 
-                    const auto* _owner = agent::get_rocprofiler_agent(_info.agentOwner);
-                    return (_owner == nullptr) || (_owner->type == ROCPROFILER_AGENT_TYPE_GPU);
+                    if(_info.agentOwner.handle != 0)
+                        _result.owner = agent::get_rocprofiler_agent(_info.agentOwner);
+
+                    _result.is_device = (_result.owner == nullptr) ||
+                                        (_result.owner->type == ROCPROFILER_AGENT_TYPE_GPU);
+                    return _result;
                 };
 
-                auto _get_device_owner =
-                    [](bool                          _query_ok,
-                       const hsa_amd_pointer_info_t& _info) -> const rocprofiler_agent_t* {
+                auto _get_device_owner = [](bool                          _query_ok,
+                                            const hsa_amd_pointer_info_t& _info,
+                                            const pointer_classification& _classification)
+                    -> const rocprofiler_agent_t* {
                     if(!_query_ok || _info.agentOwner.handle == 0) return nullptr;
 
                     switch(_info.type)
@@ -467,17 +483,18 @@ get_copy_metadata(hsa_agent_t      _hsa_dst_agent,
                         default: return nullptr;
                     }
 
-                    const auto* _owner = agent::get_rocprofiler_agent(_info.agentOwner);
-                    return (_owner && _owner->type == ROCPROFILER_AGENT_TYPE_GPU) ? _owner
-                                                                                  : nullptr;
+                    return (_classification.owner &&
+                            _classification.owner->type == ROCPROFILER_AGENT_TYPE_GPU)
+                               ? _classification.owner
+                               : nullptr;
                 };
 
-                const bool _src_is_device = _is_device_memory(_src_query_ok, _src_info);
-                const bool _dst_is_device = _is_device_memory(_dst_query_ok, _dst_info);
+                const auto _src_classification = _classify_pointer(_src_query_ok, _src_info);
+                const auto _dst_classification = _classify_pointer(_dst_query_ok, _dst_info);
 
-                if(!_src_is_device && _dst_is_device)
+                if(!_src_classification.is_device && _dst_classification.is_device)
                     _copy_meta.direction = ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE;
-                else if(_src_is_device && !_dst_is_device)
+                else if(_src_classification.is_device && !_dst_classification.is_device)
                     _copy_meta.direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST;
                 else
                     _copy_meta.direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE;
@@ -487,8 +504,10 @@ get_copy_metadata(hsa_agent_t      _hsa_dst_agent,
                 if(_pointers_are_direct &&
                    _copy_meta.direction == ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE)
                 {
-                    const auto* _src_owner = _get_device_owner(_src_query_ok, _src_info);
-                    const auto* _dst_owner = _get_device_owner(_dst_query_ok, _dst_info);
+                    const auto* _src_owner =
+                        _get_device_owner(_src_query_ok, _src_info, _src_classification);
+                    const auto* _dst_owner =
+                        _get_device_owner(_dst_query_ok, _dst_info, _dst_classification);
 
                     if(_src_owner && _dst_owner &&
                        _copy_meta.src_agent.handle != _copy_meta.dst_agent.handle &&
