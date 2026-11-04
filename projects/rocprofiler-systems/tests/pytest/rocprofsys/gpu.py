@@ -12,7 +12,12 @@ from pathlib import Path
 
 from .cache import persistent_cache
 
-GFX_XXXX_PATTERN = re.compile(r"(gfx[0-9a-fA-F]+)")
+# An optional "-suffix" keeps target variants such as gfx1250-strict distinct.
+GFX_XXXX_PATTERN = re.compile(r"(gfx[0-9a-fA-F]+(?:-[A-Za-z]+)?)")
+# Only match gfx on rocminfo "Name:" lines
+ROCMINFO_NAME_GFX_PATTERN = re.compile(
+    r"^\s*Name:\s+(gfx[0-9A-Fa-f][0-9A-Fa-f]+(?:-[A-Za-z]+)?)", re.MULTILINE
+)
 
 # Architectures where GPU perf counter (device counting service) validation is
 # unreliable and dependent tests should be skipped.
@@ -47,8 +52,11 @@ class GPUInfo:
 
     @property
     def _is_gfx1250(self) -> bool:
-        """Check if any detected GPU uses the gfx1250 architecture."""
-        return "gfx1250" in self.architectures
+        """Check if any detected GPU uses the gfx1250 architecture (or a variant)."""
+        return any(
+            arch == "gfx1250" or arch.startswith("gfx1250-")
+            for arch in self.architectures
+        )
 
     @property
     def rocm_events_for_test(self) -> str:
@@ -178,11 +186,7 @@ def detect_gpu(rocm_path: Path | None = None) -> GPUInfo:
 
     rocminfo_stdout = run_rocminfo(rocm_path)
     if rocminfo_stdout:
-        # Only match gfx on "Name:"
-        name_gfx_pattern = re.compile(
-            r"^\s*Name:\s+(gfx[0-9A-Fa-f][0-9A-Fa-f]+)", re.MULTILINE
-        )
-        all_matches = name_gfx_pattern.findall(rocminfo_stdout)
+        all_matches = ROCMINFO_NAME_GFX_PATTERN.findall(rocminfo_stdout)
         # gfx000 is the cpu, remove it
         filtered = [arch for arch in all_matches if arch != "gfx000"]
         device_count = len(filtered)
