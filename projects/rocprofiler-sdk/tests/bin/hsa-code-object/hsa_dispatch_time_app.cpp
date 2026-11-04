@@ -137,6 +137,14 @@ main()
         packet.dispatch.kernel_object        = kernel.handle;
         packet.dispatch.kernarg_address      = args;
         packet.dispatch.completion_signal    = signal;
+#if defined(AMD_SIGNAL_HINT_MASK)
+        auto hints_supported = false;
+        if(hsa_agent_get_info(agent, HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED, &hints_supported) ==
+               HSA_STATUS_SUCCESS &&
+           hints_supported)
+            packet.dispatch.completion_signal =
+                hsa_amd_signal_set_hints(signal, AMD_SIGNAL_HINT_TS_ON);
+#endif
         obj.submit_packet(queue, packet);
 
         auto kernel_time = hsa_amd_profiling_dispatch_time_t{};
@@ -150,6 +158,15 @@ main()
                     static_cast<int>(status),
                     static_cast<unsigned long>(kernel_time.start),
                     static_cast<unsigned long>(kernel_time.end));
+            ++failures;
+        }
+
+        auto invalid_agent_time = hsa_amd_profiling_dispatch_time_t{};
+        status = hsa_amd_profiling_get_dispatch_time(obj.cpu[0].agent, signal, &invalid_agent_time);
+        if(status != HSA_STATUS_ERROR_INVALID_AGENT)
+        {
+            fprintf(
+                stderr, "dispatch %d: CPU agent query returned %d\n", i, static_cast<int>(status));
             ++failures;
         }
 
