@@ -237,7 +237,7 @@ public:
 
     bzero(&cliaddr, sizeof(cliaddr));
     cliaddr.sun_family = AF_UNIX;
-    strcpy(cliaddr.sun_path, name.c_str());
+    std::memcpy(cliaddr.sun_path, name.data(), name.size());
 
     int sendfd = (int)shareableHdl;
 
@@ -322,7 +322,7 @@ private:
     int code;
     std::string name = prefix_ + std::to_string(getpid());
 
-    std::strncpy(servaddr.sun_path, name.c_str(), name.size());
+    std::memcpy(servaddr.sun_path, name.data(), name.size());
 
     // Address length is sizeof(sun_family) + 1 (null byte) + string length
     addr_len = offsetof(struct sockaddr_un, sun_path) + 1 + name.size();
