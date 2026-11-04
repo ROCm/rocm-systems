@@ -1,0 +1,79 @@
+# Formatting and lint checks for projects/rccl.
+#
+# The job below is named `pre-commit` because that is the single entry in
+# `checks.required_check_runs` in tools/systems_pr_bot/policy.yml. The bot
+# waits for a check run with that name, so a PR touching a path this workflow
+# does not list produces no check run at all and the bot times out waiting for
+# one. Hence the deliberately broad `paths:` filter: match anything under
+# projects/rccl and let each hook's own `files:` pattern decide what actually
+# runs. A PR that only touches RCCL documentation will create the check run and
+# pass it with nothing to do, which is the behaviour we want.
+#
+# What runs is defined entirely by projects/rccl/.pre-commit-config.yaml, so
+# this workflow and a developer's local `pre-commit run` cannot disagree.
+# Hooks install their own pinned tools, so there is nothing to apt-get here.
+#
+# clang-tidy is deliberately absent. It needs a compile database and hipified
+# sources, which means configuring a build, so it belongs in its own workflow
+# with a ROCm image rather than in a changed-files job. Run it locally with
+# projects/rccl/maint/run-clang-tidy.sh.
+
+name: "rccl-formatting"
+
+on:
+  pull_request:
+    paths:
+      - "projects/rccl/**"
+      - ".github/workflows/rccl-formatting.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          fetch-depth: 0
+          # Controls which files are on disk, and so which files pre-commit can
+          # see. Everything this job touches must be listed here.
+          sparse-checkout: |
+            projects/rccl
+            .github
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install pre-commit
+
+      - name: Run pre-commit on changed files
+        run: |
+          # Diff against the merge base so that files changed only on the
+          # target branch are left alone. HEAD here is the pull-request merge
+          # commit, so compare with the PR head SHA directly.
+          MERGE_BASE=$(git merge-base \
+            ${{ github.event.pull_request.base.sha }} \
+            ${{ github.event.pull_request.head.sha }})
+
+          # Added, copied, modified or renamed only: a deleted file cannot be
+          # linted, and a path outside the sparse checkout is not on disk.
+          FILES=$(git diff --name-only --diff-filter=ACMR \
+            "$MERGE_BASE" ${{ github.event.pull_request.head.sha }} \
+            | while IFS= read -r f; do if [ -f "$f" ]; then echo "$f"; fi; done)
+
+          if [ -z "$FILES" ]; then
+            echo "No checked-in files changed in the sparse checkout, skipping."
+            exit 0
+          fi
+
+          echo "Checking files:"
+          echo "$FILES"
+          pre-commit run \
+            --config projects/rccl/.pre-commit-config.yaml \
+            --files $FILES
