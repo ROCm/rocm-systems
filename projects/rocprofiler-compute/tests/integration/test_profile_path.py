@@ -27,7 +27,8 @@ from tests.integration.common import (
 
 def test_path(binary_handler_profile_rocprof_compute):
     workload_dir = common.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir)
+    options = ["--set", common.SINGLE_PASS_SET]
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = integration_common.check_csv_files(
         workload_dir, num_devices, num_kernels
@@ -56,7 +57,7 @@ def test_path_rocflop(binary_handler_profile_rocprof_compute):
 
 def test_path_no_native(binary_handler_profile_rocprof_compute):
     workload_dir = common.get_output_dir()
-    options = ["--no-native-tool"]
+    options = ["--no-native-tool", "--set", common.SINGLE_PASS_SET]
     binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = integration_common.check_csv_files(
