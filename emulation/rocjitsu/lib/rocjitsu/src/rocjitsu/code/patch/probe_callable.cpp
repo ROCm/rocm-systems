@@ -243,6 +243,11 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
     const size_t inst_words = static_cast<size_t>(inst->size()) / sizeof(uint32_t);
     const std::string_view m = inst->mnemonic();
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+        (m.starts_with("s_setreg") || m.starts_with("s_set_vgpr_msb"))) {
+      report(error_out, "probe body may change the VGPR bank state required by its call ABI");
+      return std::nullopt;
+    }
     if (is_call(*inst)) {
       report(error_out, "probe body contains a call and is not self-contained");
       return std::nullopt;
@@ -264,7 +269,8 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   }
 
   // Must return through the s[30:31] link pair
-  if (last_mnemonic != "s_setpc_b64" || !last_has_src0 || last_src0_name != "s[30:31]") {
+  if ((last_mnemonic != "s_setpc_b64" && last_mnemonic != "s_set_pc_i64") || !last_has_src0 ||
+      last_src0_name != "s[30:31]") {
     report(error_out, "probe body does not return via s_setpc_b64 s[30:31]");
     return std::nullopt;
   }

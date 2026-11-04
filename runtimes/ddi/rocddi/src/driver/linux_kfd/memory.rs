@@ -20,8 +20,14 @@ use crate::{Error, ErrorKind};
 use std::fs::File;
 use std::io;
 use std::os::fd::AsRawFd;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
+
+mod host_alias;
+mod scratch;
+pub(super) use host_alias::KfdHostAlias;
+use scratch::ScratchPool;
 
 /// Process-local set of activated device VMs and their shared loss events.
 ///
@@ -42,7 +48,6 @@ struct Bindings {
     devices: Vec<Shared<DeviceVm>>,
 }
 
-const SCRATCH_BASE_ALIGNMENT: usize = 64 * 1024;
 const GRAPHICS_IMPORT_ALIGNMENT: usize = 256 * 1024;
 const IPC_PAGE_SIZE: u64 = 4096;
 const IPC_APERTURE_DGPU: u32 = 1;
@@ -51,192 +56,6 @@ const IPC_APERTURE_GPUVM: u32 = 3;
 const IPC_FRAGMENT: u32 = 1 << 31;
 /// Native exception delivery pauses when a subscriber falls this far behind.
 const MAX_RETAINED_EXCEPTIONS: usize = 64;
-
-/// One free or allocated interval in the process scratch aperture.
-#[derive(Clone, Copy)]
-struct ScratchRange {
-    /// Byte offset within the reserved scratch aperture.
-    offset: u64,
-    /// Byte extent of this interval.
-    size: u64,
-    /// Whether a queue currently owns this interval.
-    allocated: bool,
-}
-
-/// Lazily reserved scratch aperture shared by queues on one device VM.
-///
-/// The reservation is retained if programming its KFD base has an ambiguous
-/// outcome; reusing that virtual range could otherwise alias live GPU state.
-struct ScratchPool {
-    /// Largest scratch aperture supported by this device.
-    capacity: u64,
-    /// Process VA reservation retained after native base programming.
-    reservation: Option<os_memory::Reservation>,
-    /// Free and allocated intervals within the reservation.
-    ranges: Vec<ScratchRange>,
-    /// Native base programming may have succeeded despite an error.
-    uncertain: bool,
-}
-
-impl ScratchPool {
-    fn new(properties: sysfs::KfdQueueProperties) -> Self {
-        let per_xcc =
-            crate::topology::GpuInfo::scratch_bytes_per_xcc(properties.gfx_target / 10_000);
-        let capacity = per_xcc
-            .checked_mul(u64::from(properties.xcc_count))
-            .filter(|capacity| *capacity != 0 && usize::try_from(*capacity).is_ok())
-            .unwrap_or(0);
-        Self {
-            capacity,
-            reservation: None,
-            ranges: Vec::new(),
-            uncertain: false,
-        }
-    }
-
-    fn initialize(&mut self, vm: &DeviceVm) -> Result<(), Error> {
-        if self.uncertain {
-            return Err(error(
-                ErrorKind::DriverContract,
-                "KFD scratch-base programming outcome is uncertain",
-            ));
-        }
-        if self.reservation.is_some() {
-            return Ok(());
-        }
-        if self.capacity == 0 {
-            return Err(error(
-                ErrorKind::Unsupported,
-                "native target has no scratch aperture capacity",
-            ));
-        }
-        self.ranges.try_reserve_exact(1)?;
-        let reservation = os_memory::Reservation::new(
-            usize::try_from(self.capacity).map_err(|_| {
-                error(
-                    ErrorKind::ResourceExhausted,
-                    "scratch capacity exceeds the host address width",
-                )
-            })?,
-            SCRATCH_BASE_ALIGNMENT,
-            (
-                vm.address_range().0,
-                vm.address_range().1.min((1_u64 << 48) - 1),
-            ),
-            false,
-        )
-        .map_err(|source| native_error("scratch address reservation", source))?;
-        let address = reservation.address() as u64;
-        let result = vm.loss.kfd.set_scratch_backing_va(vm.gpu_id, address);
-        self.reservation = Some(reservation);
-        if let Err(source) = result {
-            // The ioctl has no output that can prove whether a failing call
-            // changed the process base. Retain the VA until process teardown.
-            self.uncertain = true;
-            return Err(native_error("AMDKFD_IOC_SET_SCRATCH_BACKING_VA", source));
-        }
-        self.ranges.try_push(ScratchRange {
-            offset: 0,
-            size: self.capacity,
-            allocated: false,
-        })?;
-        Ok(())
-    }
-
-    fn allocate(&mut self, vm: &DeviceVm, size: u64) -> Result<u64, Error> {
-        self.initialize(vm)?;
-        let index = self
-            .ranges
-            .iter()
-            .position(|range| !range.allocated && range.size >= size)
-            .ok_or_else(|| {
-                error(
-                    ErrorKind::ResourceExhausted,
-                    "scratch aperture is exhausted",
-                )
-            })?;
-        let range = self.ranges[index];
-        if range.size != size {
-            self.ranges.try_push(ScratchRange {
-                offset: range.offset + size,
-                size: range.size - size,
-                allocated: false,
-            })?;
-        }
-        self.ranges[index].size = size;
-        self.ranges[index].allocated = true;
-        self.reservation
-            .as_ref()
-            .and_then(|reservation| (reservation.address() as u64).checked_add(range.offset))
-            .ok_or_else(|| error(ErrorKind::Internal, "scratch address overflow"))
-    }
-
-    fn release(&mut self, address: u64, size: u64) -> Result<(), Error> {
-        let base = self
-            .reservation
-            .as_ref()
-            .map(|reservation| reservation.address() as u64)
-            .ok_or_else(|| error(ErrorKind::Internal, "scratch aperture is not initialized"))?;
-        let offset = address
-            .checked_sub(base)
-            .ok_or_else(|| error(ErrorKind::Internal, "scratch address precedes its aperture"))?;
-        let range = self
-            .ranges
-            .iter_mut()
-            .find(|range| range.allocated && range.offset == offset && range.size == size)
-            .ok_or_else(|| error(ErrorKind::Internal, "scratch range is not allocated"))?;
-        range.allocated = false;
-        loop {
-            let mut pair = None;
-            for first in 0..self.ranges.len() {
-                if self.ranges[first].allocated {
-                    continue;
-                }
-                for second in first + 1..self.ranges.len() {
-                    if self.ranges[second].allocated {
-                        continue;
-                    }
-                    let first_end = self.ranges[first]
-                        .offset
-                        .checked_add(self.ranges[first].size);
-                    let second_end = self.ranges[second]
-                        .offset
-                        .checked_add(self.ranges[second].size);
-                    if first_end == Some(self.ranges[second].offset)
-                        || second_end == Some(self.ranges[first].offset)
-                    {
-                        pair = Some((first, second));
-                        break;
-                    }
-                }
-                if pair.is_some() {
-                    break;
-                }
-            }
-            let Some((first, second)) = pair else {
-                break;
-            };
-            let offset = self.ranges[first].offset.min(self.ranges[second].offset);
-            let size = self.ranges[first]
-                .size
-                .checked_add(self.ranges[second].size)
-                .ok_or_else(|| error(ErrorKind::Internal, "scratch range size overflow"))?;
-            self.ranges[first] = ScratchRange {
-                offset,
-                size,
-                allocated: false,
-            };
-            let last = self
-                .ranges
-                .pop()
-                .ok_or_else(|| error(ErrorKind::Internal, "scratch range list is empty"))?;
-            if second < self.ranges.len() {
-                self.ranges[second] = last;
-            }
-        }
-        Ok(())
-    }
-}
 
 impl VmBindings {
     pub(super) fn shutdown(&mut self) -> Result<(), Error> {
@@ -549,6 +368,10 @@ impl DeviceVm {
         (self.base, self.limit)
     }
 
+    pub(super) fn endpoint_id(&self) -> [u8; 16] {
+        self.identity
+    }
+
     pub(super) fn next_sdma_engine_id(&self, count: u32) -> u32 {
         debug_assert!(count != 0);
         self.sdma_next_engine.fetch_add(1, Ordering::Relaxed) % count
@@ -570,7 +393,7 @@ impl DeviceVm {
             .initialize(self)
     }
 
-    fn allocate_scratch(&self, size: u64) -> Result<u64, Error> {
+    fn allocate_scratch(&self, size: u64) -> Result<(u64, Arc<AtomicBool>), Error> {
         self.initialize_scratch()?;
         if size == 0 || size % 4096 != 0 {
             return Err(error(
@@ -610,6 +433,8 @@ struct LossEvent {
     memory_destroy_uncertain: AtomicBool,
     /// Serialized retained records and subscriber cursors.
     observed: Mutex<ObservedEvents>,
+    /// Live BO-backed CPU mappings available for safe registration reuse.
+    host_aliases: Mutex<Vec<Shared<host_alias::HostAliasRecord>>>,
     /// Sticky terminal connection-loss flag.
     lost: AtomicBool,
 }
@@ -722,6 +547,28 @@ pub(crate) struct KfdEventSubscription {
 }
 
 impl KfdEventSubscription {
+    /// Waits on the connection's two persistent exception events without
+    /// holding the observation lock needed by other subscribers.
+    pub(crate) fn wait_native(&self, timeout: Duration) -> Result<(), Error> {
+        self.owner
+            .kfd
+            .check_process()
+            .map_err(|source| native_error("KFD event wait", source))?;
+        let milliseconds =
+            timeout.as_millis() + u128::from(timeout.subsec_nanos() % 1_000_000 != 0);
+        let milliseconds =
+            u32::try_from(milliseconds.min(i32::MAX as u128)).unwrap_or(i32::MAX as u32);
+        match self.owner.kfd.wait_exception_events(
+            self.owner.hardware_event_id.load(Ordering::Acquire),
+            self.owner.memory_event_id.load(Ordering::Acquire),
+            milliseconds,
+        ) {
+            Ok(_) => Ok(()),
+            Err(source) if source.raw_os_error() == Some(errno::EINTR) => Ok(()),
+            Err(source) => Err(native_error("KFD event wait", source)),
+        }
+    }
+
     fn take_record(&self, records: &mut ObservedEvents) -> Option<DeviceEvent> {
         let seen = self.cursor.load(Ordering::Acquire);
         let record = *records.events.iter().find(|event| event.sequence > seen)?;
@@ -838,6 +685,7 @@ impl LossEvent {
             hardware_destroy_uncertain: AtomicBool::new(false),
             memory_destroy_uncertain: AtomicBool::new(false),
             observed: Mutex::new(observed),
+            host_aliases: Mutex::new(Vec::new()),
             lost: AtomicBool::new(false),
         })?;
         let mut args = uapi::CreateEvent::default();
@@ -1091,6 +939,7 @@ pub(super) enum BufferKind {
     Vram {
         public: bool,
         coherent: bool,
+        extended_coherent: bool,
         uncached: bool,
         contiguous: bool,
     },
@@ -1147,6 +996,9 @@ pub(crate) struct KfdAllocation {
     origin_gpu_id: u32,
     /// KFD placement and permission flags.
     native_flags: u32,
+    /// GPU permissions established for this owner, including imports whose
+    /// backing flags do not encode the importing VM's access.
+    access_permissions: DeviceAccess,
     /// Native identity of the physical backing for import checks.
     physical_backing_id: [u64; 2],
     /// Driver metadata retained from a DMA-BUF import.
@@ -1161,6 +1013,11 @@ pub(crate) struct KfdAllocation {
     freeing: bool,
     /// Native outcome is ambiguous, so backing cannot be reused safely.
     uncertain: bool,
+    /// Published CPU mapping that must outlive any borrowed registrations.
+    host_alias_record: Option<Shared<host_alias::HostAliasRecord>>,
+    /// Provider and exported identities retained across access-set changes.
+    host_alias_frontend_id: OnceLock<[u64; 2]>,
+    host_alias_exported_id: OnceLock<[u64; 2]>,
 }
 
 fn allocation_source(kind: BufferKind, size: usize) -> Result<(Option<usize>, usize, u64), Error> {
@@ -1279,20 +1136,23 @@ impl KfdAllocation {
         if size == 0 {
             return Err(error(ErrorKind::InvalidArgument, "allocation size is zero"));
         }
-        let userptr_offset = match kind {
-            BufferKind::Userptr(pages) => pages.address & (page - 1),
-            _ => 0,
+        let native_size = if let BufferKind::Userptr(pages) = kind {
+            let (_, cover) =
+                crate::memory::device::registered_host_page_cover(pages.address, size, page)
+                    .ok_or_else(|| {
+                        error(ErrorKind::InvalidArgument, "invalid registered host extent")
+                    })?;
+            cover
+        } else {
+            size.checked_add(page - 1)
+                .map(|size| size & !(page - 1))
+                .ok_or_else(|| {
+                    error(
+                        ErrorKind::ResourceExhausted,
+                        "native allocation size overflows",
+                    )
+                })?
         };
-        let native_size = size
-            .checked_add(userptr_offset)
-            .and_then(|size| size.checked_add(page - 1))
-            .map(|size| size & !(page - 1))
-            .ok_or_else(|| {
-                error(
-                    ErrorKind::ResourceExhausted,
-                    "native allocation size overflows",
-                )
-            })?;
         if !desc.alignment.is_power_of_two() {
             return Err(error(
                 ErrorKind::InvalidArgument,
@@ -1337,6 +1197,7 @@ impl KfdAllocation {
             logical_size: desc.size,
             origin_gpu_id,
             native_flags: 0,
+            access_permissions: permissions,
             physical_backing_id: [0; 2],
             metadata: Vec::new(),
             scratch_range: None,
@@ -1344,6 +1205,9 @@ impl KfdAllocation {
             access_change: None,
             freeing: false,
             uncertain: false,
+            host_alias_record: None,
+            host_alias_frontend_id: OnceLock::new(),
+            host_alias_exported_id: OnceLock::new(),
         })?;
         let mut args = uapi::AllocMemory {
             va: allocation.address()? as u64,
@@ -1355,6 +1219,7 @@ impl KfdAllocation {
                     BufferKind::Vram {
                         public,
                         coherent,
+                        extended_coherent,
                         uncached,
                         contiguous,
                     } => {
@@ -1362,6 +1227,11 @@ impl KfdAllocation {
                             | uapi::NO_SUBSTITUTE
                             | if public { uapi::PUBLIC } else { 0 }
                             | if coherent { uapi::COHERENT } else { 0 }
+                            | if extended_coherent {
+                                uapi::EXT_COHERENT
+                            } else {
+                                0
+                            }
                             | if uncached { uapi::UNCACHED } else { 0 }
                             | if contiguous { uapi::CONTIGUOUS } else { 0 }
                     }
@@ -1433,6 +1303,7 @@ impl KfdAllocation {
         allocation.mapping = GpuMapping::Mapping(0);
         allocation.finish_map()?;
         allocation.vm.check()?;
+        allocation.publish_host_alias()?;
         Ok(allocation)
     }
 
@@ -1476,7 +1347,7 @@ impl KfdAllocation {
         // Reserve owner storage before taking an aperture range. Once the
         // range is acquired, publication of its cleanup owner cannot fail.
         let owner = Owned::<Self>::try_new_uninit()?;
-        let address = vm.allocate_scratch(desc.size)?;
+        let (address, poison) = vm.allocate_scratch(desc.size)?;
         let Ok(address_usize) = usize::try_from(address) else {
             vm.release_scratch(address, desc.size)?;
             return Err(error(
@@ -1484,7 +1355,7 @@ impl KfdAllocation {
                 "scratch address exceeds the host address width",
             ));
         };
-        let reservation = os_memory::Reservation::view(address_usize, size);
+        let reservation = os_memory::Reservation::view_with_poison(address_usize, size, poison);
         let mut allocation = owner.write(Self {
             vm: vm.clone(),
             peers,
@@ -1498,6 +1369,7 @@ impl KfdAllocation {
             logical_size: desc.size,
             origin_gpu_id,
             native_flags: 0,
+            access_permissions: DeviceAccess::READ | DeviceAccess::WRITE,
             physical_backing_id: [0; 2],
             metadata: Vec::new(),
             scratch_range: Some((address, desc.size)),
@@ -1505,6 +1377,9 @@ impl KfdAllocation {
             access_change: None,
             freeing: false,
             uncertain: false,
+            host_alias_record: None,
+            host_alias_frontend_id: OnceLock::new(),
+            host_alias_exported_id: OnceLock::new(),
         });
         let mut args = uapi::AllocMemory {
             va: address,
@@ -1646,6 +1521,7 @@ impl KfdAllocation {
             logical_size: byte_length,
             origin_gpu_id: native_info.gpu_id,
             native_flags: native_info.flags,
+            access_permissions: permissions,
             physical_backing_id: file_info.physical_id,
             metadata: details.metadata,
             scratch_range: None,
@@ -1653,6 +1529,9 @@ impl KfdAllocation {
             access_change: None,
             freeing: false,
             uncertain: false,
+            host_alias_record: None,
+            host_alias_frontend_id: OnceLock::new(),
+            host_alias_exported_id: OnceLock::new(),
         })?;
         let mut args = uapi::ImportDmaBuf {
             va: allocation.address()? as u64,
@@ -1693,6 +1572,7 @@ impl KfdAllocation {
         allocation.mapping = GpuMapping::Mapping(0);
         allocation.finish_map()?;
         allocation.vm.check()?;
+        allocation.publish_host_alias()?;
         Ok(allocation)
     }
 
@@ -1806,6 +1686,7 @@ impl KfdAllocation {
             logical_size: native_info.size,
             origin_gpu_id: native_info.gpu_id,
             native_flags: native_info.flags,
+            access_permissions: DeviceAccess::READ | DeviceAccess::WRITE,
             physical_backing_id: file_info.physical_id,
             metadata: details.metadata,
             scratch_range: None,
@@ -1813,6 +1694,9 @@ impl KfdAllocation {
             access_change: None,
             freeing: false,
             uncertain: false,
+            host_alias_record: None,
+            host_alias_frontend_id: OnceLock::new(),
+            host_alias_exported_id: OnceLock::new(),
         })?;
         let mut args = uapi::ImportDmaBuf {
             va: allocation.address()? as u64,
@@ -1857,6 +1741,7 @@ impl KfdAllocation {
         allocation.mapping = GpuMapping::Mapping(0);
         allocation.finish_map()?;
         allocation.vm.check()?;
+        allocation.publish_host_alias()?;
         Ok(allocation)
     }
 
@@ -1952,6 +1837,7 @@ impl KfdAllocation {
             logical_size,
             origin_gpu_id: words[7],
             native_flags: 0,
+            access_permissions: DeviceAccess::READ | DeviceAccess::WRITE,
             physical_backing_id: [0; 2],
             metadata: Vec::new(),
             scratch_range: None,
@@ -1959,6 +1845,9 @@ impl KfdAllocation {
             access_change: None,
             freeing: false,
             uncertain: false,
+            host_alias_record: None,
+            host_alias_frontend_id: OnceLock::new(),
+            host_alias_exported_id: OnceLock::new(),
         })?;
         let mut args = uapi::IpcImportHandle {
             va_addr: allocation.address()? as u64,
@@ -1999,6 +1888,7 @@ impl KfdAllocation {
             allocation.finish_map()?;
         }
         allocation.vm.check()?;
+        allocation.publish_host_alias()?;
         Ok(allocation)
     }
 
@@ -2247,6 +2137,10 @@ impl KfdAllocation {
             .count();
         self.gpu_ids.try_reserve(additions)?;
         self.peers.try_reserve(additions)?;
+        // The access set in a published alias record is immutable. Retire it
+        // before changing KFD mappings, and refuse changes while aliases use
+        // the old set.
+        self.begin_host_alias_cleanup()?;
         self.finish_access_change()?;
         for device in devices {
             if self.gpu_ids.iter().any(|id| *id == device.gpu_id) {
@@ -2278,7 +2172,8 @@ impl KfdAllocation {
             });
             self.finish_access_change()?;
         }
-        self.vm.check()
+        self.vm.check()?;
+        self.publish_host_alias()
     }
 
     fn transfer(&mut self) -> Result<(), Error> {
@@ -2519,6 +2414,10 @@ impl KfdAllocation {
                 "re-exported DMA-BUF changed physical identity",
             ));
         }
+        if let Some(source) = &self.host_alias_record {
+            source.note_export(file_info.physical_id);
+            let _ = self.host_alias_exported_id.set(file_info.physical_id);
+        }
         Ok(DmaBuf::new(
             file.into(),
             DmaBufInfo {
@@ -2591,6 +2490,7 @@ impl KfdAllocation {
             .kfd
             .check_process()
             .map_err(|source| native_error("KFD allocation free", source))?;
+        self.begin_host_alias_cleanup()?;
         self.freeing = true;
         if self.uncertain {
             return Err(error(
@@ -2655,6 +2555,7 @@ impl KfdAllocation {
 impl Drop for KfdAllocation {
     fn drop(&mut self) {
         if let Err(error) = self.free() {
+            self.abandon_host_alias();
             crate::memory::device::record_rollback(error, self.remaining_backing_byte_length());
             if self.handle.is_some() || self.uncertain {
                 if let Some(backing) = self.backing.take() {
@@ -2705,6 +2606,7 @@ pub(super) fn queue_fixture_with_range(
         hardware_destroy_uncertain: AtomicBool::new(false),
         memory_destroy_uncertain: AtomicBool::new(false),
         observed: Mutex::new(ObservedEvents::new().unwrap()),
+        host_aliases: Mutex::new(Vec::new()),
         lost: AtomicBool::new(false),
     })
     .unwrap();
@@ -2723,6 +2625,7 @@ pub(super) fn queue_fixture_with_range(
         sdma_next_engine: AtomicU32::new(0),
         scratch: Mutex::new(ScratchPool::new(sysfs::KfdQueueProperties {
             gfx_target: 120_001,
+            target_profile: crate::topology::GpuTargetProfile::Gfx1201,
             xcc_count: 1,
             ..sysfs::KfdQueueProperties::default()
         })),
