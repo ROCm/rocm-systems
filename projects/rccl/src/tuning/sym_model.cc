@@ -21,7 +21,8 @@ NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
 static constexpr float disableTime = 1.e30f;
 
 int ncclSymkModelCtasEnvOverride(enum ncclSymkKernelId kernelId) {
-  int maxBlocks = kernelId == ncclSymkKernelId_AllGather_HierLsaST ? ncclSymkAgHierMaxBlocks : ncclSymkMaxBlocks;
+  bool hier = kernelId == ncclSymkKernelId_AllGather_HierLsaST || kernelId == ncclSymkKernelId_AllGather_HierLsaTmaST;
+  int maxBlocks = hier ? ncclSymkAgHierMaxBlocks : ncclSymkMaxBlocks;
   int64_t nUserCTAs = ncclParamSymCTAs();
   if (nUserCTAs < 1) return 0;
   if (nUserCTAs > maxBlocks) return maxBlocks;
