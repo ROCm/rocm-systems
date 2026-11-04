@@ -246,6 +246,24 @@ module:
   Unit_hipModuleLoad_MultProcess_MultGPU:
     <<: *level_default
     tags: [load]
+  Unit_hiprtcLinkAdd_Positive_PackagedBitcode:
+    <<: *level_2
+    disabled:
+      targets: [nvidia_linux, nvidia_windows]
+      reason: "AIRUNTIME-2744 - fixture addKernel-package.bc is built only on the amd platform."
+    tags: [resource]
+  Unit_hiprtcLinkAdd_Negative_PackagedBitcodeNoCompatibleEntry:
+    <<: *level_2
+    disabled:
+      targets: [nvidia_linux, nvidia_windows]
+      reason: "AIRUNTIME-2744 - fixture addKernel-mismatch-package.bc is built only on the amd platform."
+    tags: [resource]
+  Unit_hipLinkAddData_Positive_PackagedSpirv:
+    <<: *level_2
+    disabled:
+      targets: [nvidia_linux, nvidia_windows, windows, amd_windows]
+      reason: "AIRUNTIME-2744 - fixture addKernel-package.spv is built only on amd and only on Linux."
+    tags: [resource]
   Unit_hip_linker_spirv_input:
     <<: *level_default
     disabled:

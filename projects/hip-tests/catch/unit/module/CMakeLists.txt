@@ -272,6 +272,7 @@ if(HIP_PLATFORM MATCHES "amd")
     hipExtModuleLaunchKernel.cc
     hipHccModuleLaunchKernel.cc
     hipLinkCreate.cc
+    hipLinkPackage.cc
     hipModuleLoadMalformedFatBinary.cc
     hipModuleLoadMalformedPackage.cc
     hipModuleLoadPackage.cc)
@@ -320,6 +321,67 @@ if(HIP_PLATFORM MATCHES "amd")
                   COMMENT "Compiling addKernel.code")
   add_custom_target(addKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code)
 
+  # llvm-offload-binary packages carrying device bitcode, for the JIT linker tests in
+  # hipLinkPackage.cc. Same two-step assembly as package_module.code above (no HIP compilation mode
+  # emits a package directly), except the per-arch payload is raw LLVM bitcode rather than a code
+  # object: -fgpu-rdc -emit-llvm -c is what makes the device compile stop at bitcode, and
+  # --no-gpu-bundle-output keeps clang from wrapping it in a clang-offload-bundle.
+  #
+  # addKernel-package.bc holds one entry per arch, so the single arch-independent test binary can
+  # link it on any runner in the matrix; addKernel-mismatch-package.bc is the gfx900-only negative
+  # counterpart.
+  if (HIP_OFFLOAD_PACKAGER AND PACKAGE_MODULE_ARCHS)
+    set(PACKAGE_BITCODE_COMMANDS "")
+    set(PACKAGE_BITCODE_IMAGES "")
+    set(PACKAGE_BITCODE_OBJECTS "")
+    foreach(_package_arch IN LISTS PACKAGE_MODULE_ARCHS)
+      set(_package_bc ${CMAKE_CURRENT_BINARY_DIR}/addKernel-${_package_arch}.bc)
+      list(APPEND PACKAGE_BITCODE_COMMANDS
+           COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH}
+           --offload-arch=${_package_arch} -fgpu-rdc --cuda-device-only -emit-llvm -c
+           --no-gpu-bundle-output
+           -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
+           -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+           -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+           -o ${_package_bc})
+      list(APPEND PACKAGE_BITCODE_IMAGES
+           --image=file=${_package_bc},triple=amdgcn-amd-amdhsa,arch=${_package_arch},kind=hip)
+      list(APPEND PACKAGE_BITCODE_OBJECTS ${_package_bc})
+    endforeach()
+
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel-package.bc
+                    ${PACKAGE_BITCODE_COMMANDS}
+                    COMMAND ${HIP_OFFLOAD_PACKAGER}
+                    -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-package.bc
+                    ${PACKAGE_BITCODE_IMAGES}
+                    BYPRODUCTS ${PACKAGE_BITCODE_OBJECTS}
+                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
+                    COMMENT "Packaging addKernel-package.bc")
+    add_custom_target(addKernel_package_bc
+                      DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel-package.bc)
+
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel-mismatch-package.bc
+                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH}
+                    --offload-arch=gfx900 -fgpu-rdc --cuda-device-only -emit-llvm -c
+                    --no-gpu-bundle-output
+                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
+                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                    -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-mismatch.bc
+                    COMMAND ${HIP_OFFLOAD_PACKAGER}
+                    -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-mismatch-package.bc
+                    --image=file=${CMAKE_CURRENT_BINARY_DIR}/addKernel-mismatch.bc,triple=amdgcn-amd-amdhsa,arch=gfx900,kind=hip
+                    BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/addKernel-mismatch.bc
+                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
+                    COMMENT "Packaging addKernel-mismatch-package.bc")
+    add_custom_target(addKernel_mismatch_package_bc
+                      DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel-mismatch-package.bc)
+
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+                 ${CMAKE_CURRENT_BINARY_DIR}/addKernel-package.bc
+                 ${CMAKE_CURRENT_BINARY_DIR}/addKernel-mismatch-package.bc)
+  endif()
+
   # TODO - Rock build failure from clang
   if(NOT WIN32)
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
@@ -345,6 +407,23 @@ if(HIP_PLATFORM MATCHES "amd")
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
     ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
     ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv)
+
+    # The package counterpart to addKernel-bundle.spv: the same SPIR-V, wrapped in an
+    # llvm-offload-binary rather than a clang-offload-bundle. The entry is keyed on the fixed
+    # (spirv64-amd-amdhsa-unknown, amdgcnspirv) target the linker hard-codes for hipJitInputSpirv,
+    # so unlike the bitcode packages it is arch-independent and needs only the one image.
+    if (HIP_OFFLOAD_PACKAGER)
+      add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel-package.spv
+                      COMMAND ${HIP_OFFLOAD_PACKAGER}
+                      -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-package.spv
+                      --image=file=${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv,triple=spirv64-amd-amdhsa-unknown,arch=amdgcnspirv,kind=hip
+                      DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
+                      COMMENT "Packaging addKernel-package.spv")
+      add_custom_target(addKernel_package_spv
+                        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel-package.spv)
+      set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+      ${CMAKE_CURRENT_BINARY_DIR}/addKernel-package.spv)
+    endif()
   endif()
 
 
@@ -540,10 +619,16 @@ if(HIP_PLATFORM MATCHES "amd")
   if(TARGET package_module)
     add_dependencies(ModuleTest package_module package_mismatch_module)
   endif()
+  if(TARGET addKernel_package_bc)
+    add_dependencies(ModuleTest addKernel_package_bc addKernel_mismatch_package_bc)
+  endif()
   # TODO - Rock build failure from clang
   if(NOT WIN32)
     add_dependencies(ModuleTest addKernel_spv)
     add_dependencies(ModuleTest addKernel-bundle_spv)
+    if(TARGET addKernel_package_spv)
+      add_dependencies(ModuleTest addKernel_package_spv)
+    endif()
   endif()
   add_dependencies(ModuleTest copyKernelCompressed_code)
   add_dependencies(ModuleTest copyKernelGenericTarget_code)
