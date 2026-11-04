@@ -26,6 +26,7 @@ const int gpiBackendMinVersions[] = {0, NCCL_VERSION(2, 30, 5)};
 // (their createContext ignores it); expose a single version so backendVersion=0.
 const int rocshmemGdaBackendMinVersions[] = {0};
 const int anvilSdmaBackendMinVersions[] = {0};
+const int abceSdmaBackendMinVersions[] = {0};
 constexpr int efaGdaBackendMinVersions[] = {0, NCCL_VERSION(2, 31, 0), NCCL_VERSION(2, 32, 0)};
 
 ncclResult_t ncclGetGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
@@ -329,6 +330,10 @@ static ncclResult_t ginDevCommSetupWithBackend(struct ncclComm* comm, struct ncc
   case NCCL_GIN_TYPE_ANVIL_SDMA:
     backendVersionArray = anvilSdmaBackendMinVersions;
     nVersions = sizeof(anvilSdmaBackendMinVersions) / sizeof(int);
+    break;
+  case NCCL_GIN_TYPE_ABCE_SDMA:
+    backendVersionArray = abceSdmaBackendMinVersions;
+    nVersions = sizeof(abceSdmaBackendMinVersions) / sizeof(int);
     break;
   case NCCL_GIN_TYPE_EFA_GDA:
     backendVersionArray = efaGdaBackendMinVersions;

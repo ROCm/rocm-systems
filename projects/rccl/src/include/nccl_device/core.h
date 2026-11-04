@@ -79,7 +79,8 @@ typedef enum {
   NCCL_GIN_TYPE_EFA_GDA = 5, // Must match NCCL_NET_DEVICE_GIN_EFA_GDA for backward compatibility
   NCCL_GIN_TYPE_ROCSHMEM_GDA = 6, // RCCL: must match NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA
   NCCL_GIN_TYPE_ANVIL_SDMA = 7, // RCCL: must match NCCL_NET_DEVICE_GIN_ANVIL_SDMA
-  NCCL_GIN_MAX_TYPES = 8,
+  NCCL_GIN_TYPE_ABCE_SDMA = 8, // RCCL: must match NCCL_NET_DEVICE_GIN_ABCE_SDMA
+  NCCL_GIN_MAX_TYPES = 9,
 } ncclGinType_t;
 
 typedef enum {

@@ -25,6 +25,7 @@ typedef enum {
   // RCCL backends; must stay in sync with ncclGinType_t in nccl_device/core.h
   NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA = 6,
   NCCL_NET_DEVICE_GIN_ANVIL_SDMA = 7,
+  NCCL_NET_DEVICE_GIN_ABCE_SDMA = 8,
 } ncclNetDeviceType;
 
 typedef struct {

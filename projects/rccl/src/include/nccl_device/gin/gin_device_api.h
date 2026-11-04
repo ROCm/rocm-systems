@@ -27,5 +27,8 @@
 #if NCCL_GIN_ANVIL_SDMA_ENABLE
 #include "anvil_sdma/gin_anvil_sdma.h"
 #endif
+#if NCCL_GIN_ABCE_SDMA_ENABLE
+#include "abce_sdma/gin_abce_sdma.h"
+#endif
 
 #endif

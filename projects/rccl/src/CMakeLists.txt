@@ -221,14 +221,18 @@ set(SRC_FILES
   include/gdrwrap.h
   include/gin.h
   include/gin/gin_anvil_conn_check.h
+  include/gin/gin_abce_conn_check.h
   include/gin/gin_host.h
   include/gin/gin_host_anvil_sdma.h
+  include/gin/gin_host_abce_sdma.h
   include/gin/gin_host_proxy.h
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
   include/dv_dlopen.h
   include/gin/gin_host_anvil_sdma.h
   include/gin/gin_anvil_sdma_factory.h
+  include/gin/gin_host_abce_sdma.h
+  include/gin/gin_abce_sdma_factory.h
   include/git_version.h
   include/graph.h
   include/group.h
@@ -274,6 +278,12 @@ set(SRC_FILES
   include/nccl_device/gin/anvil_sdma/gin_anvil_sdma.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h
+  include/nccl_device/gin/abce_sdma/gin_abce_ipc_copy.h
+  include/nccl_device/gin/abce_sdma/gin_abce_ipc_table.h
+  include/nccl_device/gin/abce_sdma/gin_abce_ipc_table_device.h
+  include/nccl_device/gin/abce_sdma/gin_abce_sdma.h
+  include/nccl_device/gin/abce_sdma/gin_abce_sdma_put_policy.h
+  include/nccl_device/gin/abce_sdma/gin_abce_sdma_device_host_common.h
   include/nccl_device/gin/gdaki/gin_gdaki.h
   include/nccl_device/gin/gdaki/gin_gdaki_device_host_common.h
   include/nccl_device/gin/gin_device_api.h
@@ -644,6 +654,10 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_anvil_sdma_factory.cc
     src/gin/gin_anvil_ipc_table_host.cc
     src/gin/gin_anvil_conn_check_device.cc
+    src/gin/gin_plugin_abce_sdma.cc
+    src/gin/gin_abce_sdma_factory.cc
+    src/gin/gin_abce_ipc_table_host.cc
+    src/gin/gin_abce_conn_check_device.cc
     src/algorithms/gin/sdma/gin_alltoall_sdma.cu
     src/algorithms/gin/sdma/gin_all_reduce_sdma.cu
   )
@@ -976,6 +990,7 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_alltoall_sdma\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_all_reduce_sdma\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_anvil_conn_check_device\\.cc$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_abce_conn_check_device\\.cc$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll128\\.cu\\.cpp$")

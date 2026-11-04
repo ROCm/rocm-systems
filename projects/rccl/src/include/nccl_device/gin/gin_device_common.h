@@ -66,6 +66,14 @@
 #endif
 #endif
 
+#ifndef NCCL_GIN_ABCE_SDMA_ENABLE
+#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM_GIN)
+#define NCCL_GIN_ABCE_SDMA_ENABLE 1
+#else
+#define NCCL_GIN_ABCE_SDMA_ENABLE 0
+#endif
+#endif
+
 // Test seam for the system-scope fence issued by the HIP GIN Put/PutValue
 // templates. Expands to the real fence in production (zero cost); unit tests
 // may override it (before including a backend header) to observe that the
@@ -86,7 +94,8 @@ enum ncclGinOptFlags {
    ((NCCL_GIN_GPI_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_GPI | \
    ((NCCL_GIN_EFA_GDA_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_EFA_GDA | \
    ((NCCL_GIN_ROCSHMEM_GDA_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA | \
-   ((NCCL_GIN_ANVIL_SDMA_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+   ((NCCL_GIN_ANVIL_SDMA_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_ANVIL_SDMA | \
+   ((NCCL_GIN_ABCE_SDMA_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_ABCE_SDMA)
 
 #ifdef __CUDACC__
 // Resource sharing mode for a given ncclGin/ncclGin_C *instance*.
@@ -269,6 +278,11 @@ NCCL_DEVICE_INLINE static decltype(auto) ncclGinCallImpl(unsigned beMask, ncclGi
   case (int)NCCL_NET_DEVICE_GIN_ANVIL_SDMA:
     if (!(1 & (beMask >> (int)NCCL_NET_DEVICE_GIN_ANVIL_SDMA))) __builtin_unreachable();
     return ApiFn<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ctx, static_cast<Arg&&>(arg)...);
+#endif
+#if NCCL_GIN_ABCE_SDMA_ENABLE
+  case (int)NCCL_NET_DEVICE_GIN_ABCE_SDMA:
+    if (!(1 & (beMask >> (int)NCCL_NET_DEVICE_GIN_ABCE_SDMA))) __builtin_unreachable();
+    return ApiFn<NCCL_NET_DEVICE_GIN_ABCE_SDMA>::call(ctx, static_cast<Arg&&>(arg)...);
 #endif
   default:
     __builtin_unreachable();

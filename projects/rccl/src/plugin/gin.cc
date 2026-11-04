@@ -17,6 +17,7 @@
 #ifdef ENABLE_ROCSHMEM_GIN
 #include "gin/gin_host_rocshmem_gda.h"
 #include "gin/gin_host_anvil_sdma.h"
+#include "gin/gin_host_abce_sdma.h"
 #endif
 
 #include <string.h>
@@ -36,7 +37,8 @@ getNcclGin_t* getNcclGin[NCCL_GIN_VERSION_COUNT] = {getNcclGin_v14, getNcclGin_v
 
 #if defined(__HIP_PLATFORM_AMD__)
 #ifdef ENABLE_ROCSHMEM_GIN
-#define NCCL_GIN_NUM_INTERNAL_PLUGINS 3
+// proxy + rocshmem_gda + anvil_sdma + abce_sdma
+#define NCCL_GIN_NUM_INTERNAL_PLUGINS 4
 #else
 #define NCCL_GIN_NUM_INTERNAL_PLUGINS 1
 #endif
@@ -137,6 +139,8 @@ static ncclResult_t ncclGinPluginInit(struct ncclComm* comm, ginPluginLib_t* plu
         ncclGinRocshmemSetInitContext(*outContext, comm);
       } else if (*outContext && pluginLib->ncclGin == &ncclGinAnvilSdmaPlugin) {
         ncclGinAnvilSetInitContext(*outContext, comm);
+      } else if (*outContext && pluginLib->ncclGin == &ncclGinAbceSdmaPlugin) {
+        ncclGinAbceSetInitContext(*outContext, comm);
       }
 #endif
     }
@@ -323,6 +327,11 @@ static void initPluginLibsOnceFunc() {
   pluginLibs[pluginCounter].state = ncclGinPluginStateInitReady;
   pluginLibs[pluginCounter].version = ncclGinVersion[0];
   pluginCounter++;
+  // Add internal SDMA Abce plugin (NCCL_GIN_TYPE=8)
+  pluginLibs[pluginCounter].ncclGin = &ncclGinAbceSdmaPlugin;
+  pluginLibs[pluginCounter].state = ncclGinPluginStateInitReady;
+  pluginLibs[pluginCounter].version = ncclGinVersion[0];
+  pluginCounter++;
 #endif
 
   pluginCount = pluginCounter;
@@ -410,6 +419,7 @@ static int ncclGetBackendPriority(struct ncclGinBackendState* backend) {
   // [RCCL] Device-initiated AMD backends rank with GDAKI, ahead of the host proxy.
   case NCCL_GIN_TYPE_ROCSHMEM_GDA:
   case NCCL_GIN_TYPE_ANVIL_SDMA:
+  case NCCL_GIN_TYPE_ABCE_SDMA:
     return 0;
 #endif
   case NCCL_GIN_TYPE_PROXY:
@@ -447,18 +457,20 @@ ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t globalBitM
   if (ginState->finalized) return ncclSuccess;
   std::lock_guard<std::mutex> lock(pluginMutex);
 
-  // Close ALL non-global backends and compact the array. Anvil SDMA addresses
-  // peers by local device id, so it is dropped when more than one physical host
-  // is in the communicator (including multi-host MNNVL where nNodes folds to 1).
+  // Close ALL non-global backends and compact the array. The SDMA backends
+  // (Anvil, Abce) address peers by local device id, so they are dropped when
+  // more than one physical host is in the communicator (including multi-host
+  // MNNVL where nNodes folds to 1).
   for (int i = 0; i < initialNumActiveBackends; i++) {
     struct ncclGinBackendState* backend = &ginState->backends[i];
-    const bool anvilMultiHost =
-        comm->topo->nHosts > 1 && backend->ginType == NCCL_GIN_TYPE_ANVIL_SDMA;
-    if (anvilMultiHost || !(BIT(backend->ginType) & globalBitMask)) {
-      if (anvilMultiHost) {
+    const bool sdmaMultiHost =
+        comm->topo->nHosts > 1 && (backend->ginType == NCCL_GIN_TYPE_ANVIL_SDMA ||
+                                   backend->ginType == NCCL_GIN_TYPE_ABCE_SDMA);
+    if (sdmaMultiHost || !(BIT(backend->ginType) & globalBitMask)) {
+      if (sdmaMultiHost) {
         INFO(NCCL_INIT | NCCL_NET,
-             "GIN backend ANVIL_SDMA is single-host only; removing it from active backends (nHosts=%d)",
-             comm->topo->nHosts);
+             "GIN backend SDMA (type %d) is single-host only; removing it from active backends (nHosts=%d)",
+             backend->ginType, comm->topo->nHosts);
       } else {
         WARN("GIN backend type %d not supported on all ranks, removing from active backends", backend->ginType);
       }

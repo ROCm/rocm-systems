@@ -26,6 +26,7 @@
 #endif
 #ifdef ENABLE_ROCSHMEM_GIN
 #include "gin/gin_host_anvil_sdma.h"
+#include "gin/gin_host_abce_sdma.h"
 #endif
 #include "argcheck.h"
 #include "alloc.h"
@@ -2366,6 +2367,11 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
   if (devr->ginEnabled && ginSignalTotal > 0 && outDevComm->resourceWindow != nullptr) {
     NCCLCHECKGOTO(ncclGinAnvilBindResourceWindowSignals(comm, win->userPtr, ginAnvilNetSignalsOffset, nGinContextsTotal,
                                                         ginSignalTotal),
+                  ret, fail_stream_mem_win);
+    // Abce baseline: same unconditional bind; no-ops unless abce is the active
+    // backend. Shares the anvil signal-region offset (same layout in pass 1).
+    NCCLCHECKGOTO(ncclGinAbceBindResourceWindowSignals(comm, win->userPtr, ginAnvilNetSignalsOffset, nGinContextsTotal,
+                                                       ginSignalTotal),
                   ret, fail_stream_mem_win);
   }
 #endif

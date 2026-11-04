@@ -959,6 +959,7 @@ endif()
 # This source must bypass the rccl target's --offload-host-only compilation.
 # ===========================================================================
 set(GIN_ANVIL_CONN_CHECK_FAT_OBJ "")
+set(GIN_ABCE_CONN_CHECK_FAT_OBJ "")
 if(ENABLE_ROCSHMEM_GIN)
   set(GIN_ANVIL_CONN_CHECK_FAT_OBJ "${DEVICE_BUILD_DIR}/gin_anvil_conn_check_device.o")
   add_custom_command(
@@ -979,6 +980,28 @@ if(ENABLE_ROCSHMEM_GIN)
       ${HIPIFY_DIR}/src/gin/gin_anvil_conn_check_device.cc
     DEPENDS ${HIPIFY_DIR}/src/gin/gin_anvil_conn_check_device.cc
     COMMENT "DL compile: gin_anvil_conn_check_device.cc (GIN-SDMA conn-check kernels)"
+    VERBATIM
+  )
+  # Abce baseline: same bespoke device-build as anvil's conn-check file.
+  set(GIN_ABCE_CONN_CHECK_FAT_OBJ "${DEVICE_BUILD_DIR}/gin_abce_conn_check_device.o")
+  add_custom_command(
+    OUTPUT  ${GIN_ABCE_CONN_CHECK_FAT_OBJ}
+    COMMAND ${DL_CLANG}
+      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+      ${DL_HIP_COMPILER_FLAGS}
+      -DRCCL_DEVICE_LINKER
+      -DENABLE_ROCSHMEM_GIN
+      ${_link_def_flags}
+      ${_host_inc_flags}
+      ${DL_OPT_FLAGS}
+      ${DL_INHERITED_FLAGS}
+      ${DL_DEVICE_COVERAGE_FLAGS}
+      -std=c++17
+      -fPIC
+      -c -o ${GIN_ABCE_CONN_CHECK_FAT_OBJ}
+      ${HIPIFY_DIR}/src/gin/gin_abce_conn_check_device.cc
+    DEPENDS ${HIPIFY_DIR}/src/gin/gin_abce_conn_check_device.cc
+    COMMENT "DL compile: gin_abce_conn_check_device.cc (GIN-SDMA conn-check kernels)"
     VERBATIM
   )
 endif()
@@ -1404,7 +1427,7 @@ endif()
 # Top-level target
 # ===========================================================================
 add_custom_target(device_linker_build ALL
-  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DIAG_P2P_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJS} ${SYM_FAT_OBJS} ${GIN_ALLTOALL_SDMA_FAT_OBJ} ${GIN_ALLREDUCE_SDMA_FAT_OBJ} ${GIN_ANVIL_CONN_CHECK_FAT_OBJ} ${RCCL_EP_FAT_OBJ} ${DEVICE_ELF_SYMLINKS}
+  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DIAG_P2P_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJS} ${SYM_FAT_OBJS} ${GIN_ALLTOALL_SDMA_FAT_OBJ} ${GIN_ALLREDUCE_SDMA_FAT_OBJ} ${GIN_ANVIL_CONN_CHECK_FAT_OBJ} ${GIN_ABCE_CONN_CHECK_FAT_OBJ} ${RCCL_EP_FAT_OBJ} ${DEVICE_ELF_SYMLINKS}
 )
 add_dependencies(device_linker_build hipify_all copy_nccl_device_headers)
 if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
@@ -1442,6 +1465,7 @@ set(DEVICE_LINKER_OBJECTS
   ${GIN_ALLTOALL_SDMA_FAT_OBJ}
   ${GIN_ALLREDUCE_SDMA_FAT_OBJ}
   ${GIN_ANVIL_CONN_CHECK_FAT_OBJ}
+  ${GIN_ABCE_CONN_CHECK_FAT_OBJ}
 )
 
 # ===========================================================================
