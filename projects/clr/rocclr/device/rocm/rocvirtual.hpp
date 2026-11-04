@@ -110,16 +110,6 @@ inline void WaitForIssuedOps(hsa_signal_t signal, hsa_signal_value_t unissued_op
   }
 }
 
-inline void fetchSignalTime(hsa_signal_t signal, hsa_agent_t gpu_device, uint64_t* start,
-                            uint64_t* end) {
-  if (start != nullptr && end != nullptr) {
-    hsa_amd_profiling_dispatch_time_t time = {};
-    Hsa::profiling_get_dispatch_time(gpu_device, signal, &time);
-    *start = time.start;
-    *end = time.end;
-  }
-}
-
 // Timestamp for keeping track of some profiling information for various commands
 // including EnqueueNDRangeKernel and clEnqueueCopyBuffer.
 class Timestamp : public amd::ReferenceCountedObject {
@@ -369,8 +359,12 @@ class VirtualGPU : public device::VirtualDevice {
 
     //! Starts a use of the current slot's signal at init_val. blocking_callback means the value
     //! stays above 0 after the packet retires.
-    virtual void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val,
-                          uint64_t aql_slot, bool barrier_bit, bool blocking_callback) = 0;
+    void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
+                  bool barrier_bit, bool blocking_callback);
+
+    //! The tracker's part of BeginUse: sets the value for the use and records it
+    virtual void ArmForUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
+                           bool barrier_bit, bool blocking_callback) = 0;
 
     //! Registers the async handler that processes ts once the signal drops below init_value
     virtual hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
@@ -405,8 +399,8 @@ class VirtualGPU : public device::VirtualDevice {
 
    private:
     void AcquireSlot() override;
-    void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
-                  bool barrier_bit, bool blocking_callback) override;
+    void ArmForUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
+                   bool barrier_bit, bool blocking_callback) override;
     hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
                                  hsa_signal_value_t init_value) override;
     bool IsBusy(const ProfilingSignal* signal) const override;
@@ -437,8 +431,8 @@ class VirtualGPU : public device::VirtualDevice {
     void PlaceForUse(bool timing_only) override;
     //! Advances current_id_ to an armed slot
     void AcquireSlot() override;
-    void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
-                  bool barrier_bit, bool blocking_callback) override;
+    void ArmForUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
+                   bool barrier_bit, bool blocking_callback) override;
     hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
                                  hsa_signal_value_t init_value) override;
     bool IsBusy(const ProfilingSignal* signal) const override;
@@ -464,6 +458,16 @@ class VirtualGPU : public device::VirtualDevice {
     //! Proves retirement from host memory, rearms retired slots ahead of current_id_ with one
     //! flush, and releases pins whose waiters have passed
     void Reclaim();
+
+    //! A slot whose use Reclaim proved retired, and the armed slots ahead of current_id_ before it
+    struct RetiredSlot {
+      size_t slot;
+      size_t num_armed_before;
+    };
+
+    //! Caches the timing of the retired device-memory uses a Timestamp will read, with one pass
+    //! of overlapping streaming loads instead of a bus round trip per signal
+    void CacheRetiredTiming(const RetiredSlot* retired, size_t num_retired);
 
     //! A use whose packet was published with the barrier bit. Its completion proves that every
     //! earlier packet on the HW queue completed.
@@ -526,9 +530,9 @@ class VirtualGPU : public device::VirtualDevice {
     const size_t max_signals_;        //!< Ring size beyond which reuse waits on a signal
     std::vector<ProfilingSignal*> spare_signals_;  //!< Armed signals for growth and swaps
     std::vector<ProfilingSignal*> host_signals_;   //!< Armed host-memory signals for timing
-    //! Retired signals swapped out while shared. Reusing them avoids destroying and recreating
-    //! device-memory signals.
-    std::vector<ProfilingSignal*> parked_signals_;
+    //! Retired signals swapped out while shared, oldest first. Reusing them avoids destroying and
+    //! recreating device-memory signals.
+    std::deque<ProfilingSignal*> parked_signals_;
     PinnedWaits open_pins_;                        //!< Pins from the last WaitingSignal call
     std::deque<PinnedWaits> closed_pins_;          //!< Pins waiting for their consumers
     ProfilingSignal* unflushed_store_ = nullptr;  //!< Last direct store not yet flushed
@@ -958,6 +962,9 @@ class VirtualGPU : public device::VirtualDevice {
                                   hsa_signal_condition32_t cond = HSA_SIGNAL_CONDITION_EQ,
                                   bool skipTs = false,
                                   hsa_signal_t completionSignal = hsa_signal_t{0});
+  //! True if a barrier of the current command needs timestamps: a timed event record, or a
+  //! command created under queue or activity profiling
+  bool BarrierTimestamps() const;
   void initializeDispatchPacket(hsa_kernel_dispatch_packet_t* packet, amd::NDRangeContainer& sizes);
 
   //! Write an AQL packet to the ring buffer with metadata prefetch.
