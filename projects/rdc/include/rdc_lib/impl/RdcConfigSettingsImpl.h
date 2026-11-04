@@ -47,6 +47,7 @@ class RdcConfigSettingsImpl : public RdcConfigSettings {
   rdc_status_t rdc_config_clear(rdc_gpu_group_t group_id) override;
 
   explicit RdcConfigSettingsImpl(const RdcGroupSettingsPtr& group_settings);
+  ~RdcConfigSettingsImpl() override;
 
  private:
   RdcGroupSettingsPtr group_settings_;

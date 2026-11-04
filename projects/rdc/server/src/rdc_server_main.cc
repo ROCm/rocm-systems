@@ -33,10 +33,14 @@ THE SOFTWARE.
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <atomic>
+#include <chrono>
 #include <csignal>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "common/rdc_capabilities.h"
@@ -54,8 +58,7 @@ THE SOFTWARE.
 //  * which RDC grpc services to start
 //  * port on which to listen
 
-static bool sShutDownServer = false;
-static bool sRestartServer = false;
+static std::atomic<bool> sShutDownServer{false};
 static const char* kDaemonName = "rdcd";
 static const char* kRDCDHomeDir = "/";
 static const char* kDaemonLockFileRoot = "/var/run/rdcd.lock";
@@ -74,10 +77,21 @@ static const char* kDefaultRDCClientCACertPemPkiPath = "/etc/rdc/client/certs/rd
 static const char* kDefaultListenAddress = "0.0.0.0";
 static const char* kDefaultListenPort = "50051";
 static const uint32_t kRSMIUMask = 027;
+// How long a stop waits for RPCs in progress before it cancels them.
+static constexpr auto kShutdownGracePeriod = std::chrono::seconds(5);
 
-RDCServer::RDCServer() : secure_creds_(false), rdc_admin_service_(nullptr) {}
+RDCServer::RDCServer()
+    : secure_creds_(false),
+      rdc_admin_service_(nullptr),
+      api_service_(nullptr),
+      stop_requested_(false) {}
 
-RDCServer::~RDCServer() {}
+RDCServer::~RDCServer() {
+  // gRPC services must outlive the server that dispatches to them.
+  server_.reset();
+  delete rdc_admin_service_;
+  delete api_service_;
+}
 
 // TODO(cfreehil): resolve here command line options with
 // (future) config file options
@@ -165,7 +179,7 @@ static int ConstructSSLOptsPKI(grpc::SslServerCredentialsOptions* ssl_opts) {
   return 0;
 }
 
-void RDCServer::Run() {
+bool RDCServer::Run() {
   ::grpc::ServerBuilder builder;
   int ret;
   if (secure_creds_) {
@@ -179,7 +193,7 @@ void RDCServer::Run() {
 
     if (ret) {
       std::cerr << "Failed to process OpenSSL keys and certificates. Errno: " << -ret << std::endl;
-      return;
+      return false;
     }
     builder.AddListeningPort(server_address_, grpc::SslServerCredentials(ssl_opts));
   } else {
@@ -194,25 +208,42 @@ void RDCServer::Run() {
   }
 
   if (start_api_service()) {
-    api_service_ = new amd::rdc::RdcAPIServiceImpl();
-    builder.RegisterService(api_service_);
+    auto* api_service = new amd::rdc::RdcAPIServiceImpl();
+    builder.RegisterService(api_service);
 
     // TODO(bill_liu): pass flags from cnfg file
-    rdc_status_t ret = api_service_->Initialize(0);
+    rdc_status_t ret = api_service->Initialize(0);
+    {
+      // Published after Initialize() returns, for ShutDown(); the destructor frees it.
+      std::lock_guard<std::mutex> lock(mutex_);
+      api_service_ = api_service;
+    }
 
     if (ret != RDC_ST_OK) {
       std::cerr << "Failed to start API service" << std::endl;
-      return;
+      return false;
     }
   }
 
-  // Finally assemble the server.
-  server_ = builder.BuildAndStart();
+  // Finally assemble the server. It is null if, for example, the port is in use.
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    server_ = builder.BuildAndStart();
+    if (!server_) {
+      std::cerr << "Failed to listen on " << server_address_ << std::endl;
+      return false;
+    }
+    if (stop_requested_) {
+      // Asked to stop while starting.
+      server_->Shutdown(std::chrono::system_clock::now() + kShutdownGracePeriod);
+    }
+  }
 
   std::cout << "Server listening on " << server_address_.c_str() << std::endl;
   std::cout << "Accepting " << (secure_creds_ ? "Authenticated" : "Unauthenticated")
             << " connections only." << std::endl;
   server_->Wait();
+  return true;
 }
 
 static void HandleSignal(int sig) {
@@ -223,14 +254,14 @@ static void HandleSignal(int sig) {
   switch (sig) {
     case SIGINT:
     case SIGTERM:
+      if (sShutDownServer) {
+        // A second request, or a stop that is stuck: exit now.
+        _exit(1);
+      }
       sShutDownServer = true;
       break;
 
-      // Grpc doesn't seem to handle stopping and restarting well, so
-      // user must manually do these steps
-      //    case SIGHUP:
-      //      sRestartServer = true;
-      //      break;
+      // SIGHUP (restart) is not handled: gRPC does not restart a server well.
 
     default:
       std::cerr << "Unexpected signal caught" << std::endl;
@@ -257,32 +288,32 @@ static int FileOwner(const char* fn, std::string* owner) {
     return errno;
   }
   struct passwd pw;
-  struct passwd* result;
-  char buf[20];
+  struct passwd* result = nullptr;
+  long buf_size = sysconf(_SC_GETPW_R_SIZE_MAX);  // a hint; entries can be larger
+  std::vector<char> buf(buf_size > 0 ? buf_size : 1024);
 
-  ret = getpwuid_r(info.st_uid, &pw, buf, 20, &result);
-  if (ret == 0) {
-    *owner = buf;
-  } else {
-    return ret;
-    perror("Failed to determine owner of file");
+  while ((ret = getpwuid_r(info.st_uid, &pw, buf.data(), buf.size(), &result)) == ERANGE &&
+         buf.size() < (1 << 20)) {
+    buf.resize(buf.size() * 2);
   }
+  if (ret && ret != ERANGE) {
+    return ret;
+  }
+  // A uid without a (usable) passwd entry is shown as the number.
+  *owner = (ret == 0 && result) ? pw.pw_name : std::to_string(info.st_uid);
   return 0;
 }
 
+// Stops serving; the destructor frees the server and its services.
 void RDCServer::ShutDown(void) {
-  api_service_->Shutdown();
-
-  server_->Shutdown();
-
-  if (rdc_admin_service_) {
-    delete rdc_admin_service_;
-    rdc_admin_service_ = nullptr;
-  }
-
+  std::lock_guard<std::mutex> lock(mutex_);
+  stop_requested_ = true;
+  // Either may be missing if the server is still starting or failed to start.
   if (api_service_) {
-    delete api_service_;
-    api_service_ = nullptr;
+    api_service_->Shutdown();
+  }
+  if (server_) {
+    server_->Shutdown(std::chrono::system_clock::now() + kShutdownGracePeriod);
   }
 }
 
@@ -290,26 +321,14 @@ static void* ProcessSignalLoop(void* server_ptr) {
   assert(server_ptr != nullptr);
   RDCServer* server = reinterpret_cast<RDCServer*>(server_ptr);
 
-  while (1) {
-    if (sShutDownServer) {
-      std::cout << "Shutting down RDC Server." << std::endl;
-      server->ShutDown();
-      // We will need to add shutdown of any completion queues
-      // here, when/if we add them
-      break;
-    } else if (sRestartServer) {
-      std::cout << "Re-starting RDC Server." << std::endl;
-      // We will need to add shutdown of any completion queues
-      // here, when/if we add them
-      server->ShutDown();
-      server->Run();
-
-      sRestartServer = false;
-    }
-    sleep(1);
+  while (!sShutDownServer) {
+    usleep(100 * 1000);
   }
-
-  pthread_exit(0);
+  std::cout << "Shutting down RDC Server." << std::endl;
+  server->ShutDown();
+  // We will need to add shutdown of any completion queues
+  // here, when/if we add them
+  return nullptr;
 }
 
 static bool FileIsLocked(std::string fn) {
@@ -327,10 +346,13 @@ static bool FileIsLocked(std::string fn) {
   (void)memset(&fl, 0, sizeof(struct flock));
   errno = 0;
   fh = open(fn.c_str(), O_RDONLY);
-  if (fh == -1 && errno == ENOENT) {
-    // In this case, there was no previous lock.
-    close_fh();
-    return false;
+  if (fh == -1) {
+    if (errno == ENOENT) {
+      // In this case, there was no previous lock.
+      return false;
+    }
+    perror(("Failed to open lock file " + fn).c_str());
+    exit(1);
   }
 
   ret = fcntl(fh, F_GETLK, &fl);
@@ -380,15 +402,14 @@ static void ExitIfAlreadyRunning(bool is_root) {
     std::string user;
     int ret = FileOwner(lock_fn, &user);
     if (ret) {
-      perror("Failed to determine owner of lock file.");
-      exit(ret);
+      std::cerr << "Failed to determine owner of lock file " << lock_fn << ": " << strerror(ret)
+                << std::endl;
+      exit(1);
     }
     std::cerr << "Failed to open file lock:" << lock_fn << " owned by user: " << user
               << ". If starting rdcd as a different user, delete this "
                  "lock-file first."
               << std::endl;
-    // asserting below since this should have been prevented in main()
-    assert(!"Unexpected user invoking rdcd");
     exit(1);
   }
 
@@ -666,24 +687,23 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  // Detach the thread, sys will recycle the resource
-  thr_ret = pthread_detach(sig_listen_thread);
-  // Don't fail if detach is not successful
-  if (thr_ret != 0) {
-    std::cerr << "Failed to detach ProcessSignalLoop. pthread_detach() returned " << thr_ret;
-  }
-
   // TODO(cfreehil): Eventually, set these by reading a config file
   rdc_server.set_start_rdc_admin_service(true);
   rdc_server.set_start_api_service(true);
 
-  rdc_server.Run();
-
-  if (sShutDownServer) {
-    std::cout << "RDC server successfully shut down." << std::endl;
-    return 0;
-  } else {
+  bool started = rdc_server.Run();
+  if (!started) {
     std::cerr << "RDC server failed to start." << std::endl;
+  }
+
+  // The signal thread stops the server, also after a failed start; wait for it.
+  // rdc_server's destructor then frees the server and its services.
+  sShutDownServer = true;
+  pthread_join(sig_listen_thread, nullptr);
+
+  if (!started) {
     return 1;
   }
+  std::cout << "RDC server successfully shut down." << std::endl;
+  return 0;
 }
