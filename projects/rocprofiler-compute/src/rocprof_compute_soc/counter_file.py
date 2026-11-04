@@ -3,7 +3,7 @@
 
 """Perfmon bucket file types, independent of the SoC allocator."""
 
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from utils.utils_counter_defs import counter_to_block, pmc_slot_cost
 
@@ -20,6 +20,17 @@ def _counter_base_name(counter: str) -> str:
 
 def _has_family(names: Sequence[str], prefix: str) -> bool:
     return any(name.startswith(prefix) for name in names)
+
+
+def _family_prefix(counter: str) -> Optional[str]:
+    """Incompatible-family prefix of counter, if it belongs to one."""
+    base = _counter_base_name(counter)
+    for left, right in _INCOMPATIBLE_PASS_PREFIXES:
+        if base.startswith(left):
+            return left
+        if base.startswith(right):
+            return right
+    return None
 
 
 def _cannot_share_pass(existing: Sequence[str], incoming: str) -> bool:
@@ -72,18 +83,26 @@ class CounterFile:
         self.blocks: Dict[str, LimitedSet] = {
             block: LimitedSet(capacity) for block, capacity in perfmon_config.items()
         }
+        # Prefixes of incompatible families already stored in this pass.
+        self._seen_families: Set[str] = set()
 
     def add(self, counter: str) -> bool:
         block = counter_to_block(counter)
-        present = [
-            name for limited in self.blocks.values() for name in limited.elements
-        ]
-        if counter in present:
+        if counter in self.blocks[block].elements:
             return True
-        if _cannot_share_pass(present, counter):
+        # The family check looks at the prefixes recorded below, not every
+        # counter already in the pass.
+        if self._seen_families and _cannot_share_pass(
+            tuple(self._seen_families), counter
+        ):
             return False
         cost = pmc_slot_cost(counter, present=self.blocks[block].elements)
-        return self.blocks[block].add(counter, cost=cost)
+        if not self.blocks[block].add(counter, cost=cost):
+            return False
+        prefix = _family_prefix(counter)
+        if prefix is not None:
+            self._seen_families.add(prefix)
+        return True
 
     def reserve(self, counter: str, n: int) -> bool:
         return self.blocks[counter_to_block(counter)].reserve(n)
