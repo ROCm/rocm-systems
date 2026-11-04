@@ -1,35 +1,3 @@
-# clang-tidy static analysis for projects/rccl.
-#
-# Advisory: this workflow reports findings and does not fail on them, matching
-# how the pylint hook in rccl-formatting.yml is wired. Turning it into a gate
-# is a one-word change (--strict), to be made once the runtime and the noise
-# level are known from real PRs.
-#
-# It is a separate workflow from rccl-formatting.yml because clang-tidy needs a
-# parsed translation unit: a compile database and hipified sources, which means
-# configuring a build in a ROCm container. pre-commit works from a changed-file
-# list and cannot do that. Nothing is compiled here and no GPU is used; the only
-# build steps are hipify and the generated tuner header.
-#
-# The GPU_TARGETS pin and the dependency bootstrap follow
-# rccl-host-unit-tests.yml, which already runs a GPU-free RCCL configure on
-# GitHub-hosted runners.
-#
-# The image does not: that workflow is still on rocm/dev-ubuntu-22.04:7.2,
-# while this uses a current ROCm. The analyser should match the toolchain
-# developers actually build with, and an older LLVM scores
-# readability-function-cognitive-complexity differently, which would put CI's
-# baseline out of step with what maint/run-clang-tidy.sh reports locally. The
-# -full tag is what carries clang-tidy, at /opt/rocm/llvm/bin/clang-tidy.
-#
-# On clang-tidy versions: this uses the clang-tidy that ships inside the ROCm
-# image rather than installing one. A stock upstream clang-tidy cannot parse
-# ROCm's HIP headers (clang-tidy 22.1.8 from PyPI reports 25
-# clang-diagnostic-errors inside /opt/rocm/include before reaching any RCCL
-# code), which is why MIOpen's clang-tidy job needs -nogpulib and __builtin_*
-# redefinitions to work at all. Using ROCm's own build avoids that entirely, and
-# keeps the analyser in step with the compiler the code is built with.
-
 name: "RCCL clang-tidy"
 
 on:
@@ -49,8 +17,8 @@ concurrency:
 
 jobs:
   clang-tidy:
-    name: clang-tidy (advisory, CPU-only)
-    runs-on: ubuntu-24.04
+    name: clang-tidy
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     container:
       image: rocm/dev-ubuntu-26.04:10.1.0-full
@@ -67,10 +35,28 @@ jobs:
           sparse-checkout: projects/rccl
 
       - name: Install build deps
-        # The ROCm dev image ships hipcc/hipify but not cmake or a host
-        # toolchain. The dependency list lives in run_host_tests.sh, which is
-        # the single source of truth shared with rccl-host-unit-tests.yml.
-        run: bash projects/rccl/test/host/run_host_tests.sh deps
+        # The ROCm image ships hipcc and hipify-perl but not a host toolchain
+        # or cmake. This is only what configure + hipify need; nothing is
+        # compiled and the tests are not built, so the test libraries are not
+        # installed either.
+        #
+        #   build-essential  host compiler and make
+        #   cmake            configure
+        #   git              rocm-cmake and version queries at configure time
+        #   perl             hipify-perl, which stages the sources to analyse
+        #   python3          find_package(Python3 ... REQUIRED) and the
+        #                    embedded tuner config header
+        #   rocm-cmake       find_package(ROCM); without it CMake falls back to
+        #                    downloading and building rocm-cmake from GitHub
+        run: |
+          apt-get update
+          apt-get install --assume-yes --no-install-recommends \
+            build-essential \
+            cmake \
+            git \
+            perl \
+            python3 \
+            rocm-cmake
 
       - name: Put ROCm on PATH
         run: echo "/opt/rocm/bin" >> "$GITHUB_PATH"
