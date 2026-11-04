@@ -884,11 +884,17 @@ uint64_t BlitKernel::AcquireWriteIndex(uint32_t num_packet) {
   // our packet's header back into INVALID, and the packet processor would wait
   // on it forever. So also wait until the previous occupant of each reserved
   // slot has been invalidated.
+  // This wait terminates: the read index wait above guarantees that the packet
+  // processor consumed the previous occupant, so only its INVALID header write
+  // can be outstanding. Slots that were never used hold the INVALID header
+  // written when the queue was created.
   hsa_barrier_and_packet_t* queue_buffer =
       reinterpret_cast<hsa_barrier_and_packet_t*>(queue_->public_handle()->base_address);
   for (uint32_t i = 0; i < num_packet; ++i) {
     uint16_t* header = &queue_buffer[(write_index + i) & queue_bitmask_].header;
-    while (((__atomic_load_n(header, __ATOMIC_ACQUIRE) >> HSA_PACKET_HEADER_TYPE) &
+    // The acquire pairs with the packet processor's INVALID header write, not
+    // with a CPU-side release.
+    while (((atomic::Load(header, std::memory_order_acquire) >> HSA_PACKET_HEADER_TYPE) &
             ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1)) != HSA_PACKET_TYPE_INVALID) {
       os::YieldThread();
     }
