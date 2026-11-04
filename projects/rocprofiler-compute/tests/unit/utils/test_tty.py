@@ -12,7 +12,6 @@ from typing import Optional
 import pandas as pd
 import pytest
 
-import config
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from utils.tty import (
     _render_membw_guidance,
@@ -25,7 +24,6 @@ from utils.tty import (
     format_table_output,
     has_time_data,
     print_operator_node,
-    resolve_hidden_columns,
     show_all,
     show_call_tree,
     show_operator_summary,
@@ -132,7 +130,6 @@ def render_roofline_panel(panel: SimpleNamespace, view: Optional[str]) -> str:
     show_all(
         make_args(
             filter_metrics=None,
-            include_cols=None,
             membw_analysis=False,
             path=[["fixture"]],
             time_unit="ns",
@@ -161,39 +158,6 @@ def sample_time_data() -> pd.DataFrame:
 def original_ns_values() -> dict[str, float]:
     """Original nanosecond values for the time row of sample_time_data."""
     return {"Avg": 3446.64, "Min": 1769.25, "Max": 12532.12}
-
-
-@pytest.mark.parametrize(
-    ("include_cols", "expected"),
-    [
-        pytest.param(None, ["Description", "Unit", "Count"], id="defaults"),
-        pytest.param(["Description"], ["Unit", "Count"], id="include-description"),
-        pytest.param(["Avg"], ["Description", "Unit", "Count"], id="include-avg"),
-    ],
-)
-def test_resolve_hidden_columns(
-    monkeypatch: pytest.MonkeyPatch,
-    include_cols: list[str] | None,
-    expected: list[str],
-) -> None:
-    """Explicitly included columns are removed from the hidden columns."""
-    hidden_columns = ["Description", "Unit", "Count"]
-    monkeypatch.setattr(config, "HIDDEN_COLUMNS_CLI", hidden_columns)
-
-    assert resolve_hidden_columns(make_args(include_cols=include_cols)) == expected
-
-
-def test_resolve_hidden_columns_does_not_modify_config(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Mutating resolved columns does not change the configured hidden columns."""
-    hidden_columns = ["Description", "Unit", "Count"]
-    monkeypatch.setattr(config, "HIDDEN_COLUMNS_CLI", hidden_columns)
-
-    resolved = resolve_hidden_columns(make_args(include_cols=None))
-    resolved.append("Avg")
-
-    assert config.HIDDEN_COLUMNS_CLI == ["Description", "Unit", "Count"]
 
 
 def test_format_table_output_suppresses_empty_column() -> None:
@@ -447,7 +411,6 @@ def test_show_all_membw_analysis_panel_gate(
     args = argparse.Namespace(
         decimal=2,
         filter_metrics=None,
-        include_cols=None,
         normal_unit="per_wave",
         path=[["fixture"]],
         time_unit="ns",
@@ -520,7 +483,6 @@ def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
     args = argparse.Namespace(
         decimal=2,
         filter_metrics=None,
-        include_cols=None,
         membw_analysis=False,
         normal_unit="per_wave",
         path=[["fixture"]],
@@ -596,7 +558,6 @@ def test_show_all_renders_identically_to_file_and_stdout(
     """A report is the same whether analyze writes it to a .txt file or stdout."""
     args = make_args(
         filter_metrics=None,
-        include_cols=None,
         membw_analysis=True,
         path=[["fixture"]],
         time_unit="ns",
@@ -1010,7 +971,6 @@ def test_show_all_view_table_replaces_memory_chart_panel(
     show_all(
         make_args(
             filter_metrics=None,
-            include_cols=None,
             membw_analysis=False,
             path=[["fixture"]],
             time_unit="ns",

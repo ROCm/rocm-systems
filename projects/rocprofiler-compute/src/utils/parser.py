@@ -107,7 +107,6 @@ def build_dfs(
 
                 if table_type == "metric_table":
                     df, expressions = _build_metric_table_df(
-                        panel=panel,
                         data_config=data_config,
                         simple_box=simple_box,
                         panel_id=panel_id,
@@ -188,7 +187,6 @@ def _metric_passes_filter(
 
 
 def _build_metric_table_df(
-    panel: dict[str, Any],
     data_config: dict[str, Any],
     simple_box: dict[str, list[str]],
     panel_id: int,
@@ -213,8 +211,6 @@ def _build_metric_table_df(
         for key, tile in data_config["header"].items():
             if key != "metric":
                 headers.append(tile)
-    if "metrics_description" in panel:
-        headers.append("Description")
 
     rows: list[list[Any]] = []
     expressions: list[str] = []
@@ -240,9 +236,6 @@ def _build_metric_table_df(
             elif k in value_keys:
                 values.append(v)
         expressions.extend(metric_expressions(data_config, entries))
-
-        if "metrics_description" in panel:
-            values.append(panel["metrics_description"].get(key, ""))
 
         rows.append(values)
 
