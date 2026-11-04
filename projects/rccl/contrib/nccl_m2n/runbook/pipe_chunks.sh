@@ -6,14 +6,15 @@
 # Usage: pipe_chunks.sh <local|1node|2node>    (inside the allocation, like run_local.sh / run_mpi.sh)
 D=$(dirname "$(readlink -f "$0")")
 . $D/env.sh
-LAY=$1; OUT=$WORK/logs/pipe_chunks/$LAY; mkdir -p $OUT
+LAY=$1; RUN=${RUN_ID:-$(date -u +%Y%m%dT%H%M%S)-$$}   # per invocation, so stale logs are not summarized
+OUT=$WORK/logs/pipe_chunks/$LAY/$RUN; mkdir -p $OUT
 # Single-node uneven_ratio 240x240 cases that hang (see "PIPE in the basic matrix" in RUNBOOK.md).
 [[ $LAY == 2node ]] && KNOWN_HANG=${KNOWN_HANG-} || KNOWN_HANG=${KNOWN_HANG-0066 0078 0081 0093}
 run() {  # label filter; prints the exit code
   case $LAY in
-    local) TMO=${TMO:-300} bash $D/run_local.sh pipe_chunks/$LAY/$1 --algorithm ring --copy-algorithm pipe --gtest_filter="$2" > /dev/null ;;
-    1node) TMO=${TMO:-300} bash $D/run_mpi.sh pipe_chunks/$LAY/$1 8 1node --algorithm ring --copy-algorithm pipe --gtest_filter="$2" > /dev/null ;;
-    2node) TMO=${TMO:-300} bash $D/run_mpi.sh pipe_chunks/$LAY/$1 16 2node --algorithm ring --copy-algorithm pipe --gtest_filter="$2" > /dev/null ;;
+    local) TMO=${TMO:-300} bash $D/run_local.sh pipe_chunks/$LAY/$RUN/$1 --algorithm ring --copy-algorithm pipe --gtest_filter="$2" > /dev/null ;;
+    1node) TMO=${TMO:-300} bash $D/run_mpi.sh pipe_chunks/$LAY/$RUN/$1 8 1node --algorithm ring --copy-algorithm pipe --gtest_filter="$2" > /dev/null ;;
+    2node) TMO=${TMO:-300} bash $D/run_mpi.sh pipe_chunks/$LAY/$RUN/$1 16 2node --algorithm ring --copy-algorithm pipe --gtest_filter="$2" > /dev/null ;;
   esac
   pkill -9 -x basic_api_test_ 2>/dev/null
   [[ $LAY == 2node ]] && for h in $(awk '{print $1}' ${HF:-$WORK/hostfile}); do ssh $h pkill -9 -x basic_api_test_ 2>/dev/null; done

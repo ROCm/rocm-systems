@@ -22,7 +22,7 @@ if want rccl; then
 fi
 
 MK=(make -f Makefile.rocm -j32 ROCM_PATH=$ROCM_PATH NCCL_HOME=$RCCL_INSTALL RCCL_LIBDIR=$RCCL_INSTALL/lib
-    GTEST_DIR=$WORK/googletest/googletest MPI_HOME=$MPI_HOME OFFLOAD_ARCH=gfx950 BUILDDIR=$WORK/mk)
+    GTEST_DIR=${GTEST_DIR:-$(dirname "$SRC")/googletest/googletest} MPI_HOME=$MPI_HOME OFFLOAD_ARCH=gfx950 BUILDDIR=$WORK/mk)
 M2N_DIR=$SRC/projects/rccl/contrib/nccl_m2n
 
 if want m2n; then

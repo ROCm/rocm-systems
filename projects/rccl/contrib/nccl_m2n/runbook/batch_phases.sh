@@ -12,6 +12,7 @@ NT=${NUM_TENSORS:-4}
 COMMS=${COMMS:-1 2 4}
 COPIES=${COPIES:-pack direct pipe}
 BATCH_RUNS=${BATCH_RUNS:-$PHASES}
+ST=0
 for run in $BATCH_RUNS; do
   IFS=: read -r lab np s d hf <<<"$run"
   P=(); [[ $hf == 1 ]] && P=(--hostfile $HF)
@@ -40,9 +41,11 @@ for run in $BATCH_RUNS; do
           echo "$lab,$np,$s,$d,$cp,$nc,$NT,$r,${V:+1},$res,${t//,/x},$p,$sq,$cn,$sp,${ef%\%},$sg,$cg,$(basename $L)" >> $CSV; n=1
         done < <(grep -E '^\[[0-9,]+\] ' $L)
         (( n )) || echo "$lab,$np,$s,$d,$cp,$nc,$NT,$r,${V:+1},$res,,,,,,,,,$(basename $L)" >> $CSV
+        [[ $res == PASS || $res == OK ]] || ST=1
         echo "$(date -u +%T) $lab $cp c$nc r$r $res"
       done
     done
   done
 done
-echo BATCH_DONE
+echo "BATCH_DONE status=$ST"
+exit $ST

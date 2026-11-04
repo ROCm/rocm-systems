@@ -13,6 +13,9 @@ CSV=$OUT/results.csv
 [[ -f $CSV ]] || echo "label,np,src,dst,shape,size,config,round,validate,result,bw_rank_avg,bw_rank_min,total_gbs,time_ms_max,log" > $CSV
 SIZES=${SIZES:-64K 256K 1M 4M 16M 64M 256M 1G 4G}; SIZES=${SIZES//,/ }
 ROUNDS=${ROUNDS:-4}
+# Per-invocation tag: reruns append to results.csv, so each launch needs its own log.
+RUN=${RUN_ID:-$(date -u +%Y%m%dT%H%M%S)-$$}
+NBAD=0
 PLACE=(); [[ -n $HF ]] && PLACE=(--hostfile $HF)
 MPI=(mpirun -np $NP "${PLACE[@]}" --map-by ppr:8:node --bind-to none --mca pml ob1 --mca btl ^vader,openib
   --mca oob_tcp_if_include $NCCL_SOCKET_IFNAME --mca btl_tcp_if_include $NCCL_SOCKET_IFNAME
@@ -55,7 +58,7 @@ for shp in $SHAPES; do
       for c in "${list[@]}"; do
         key=$shp/$z/$c; [[ -n ${DEAD[$key]} ]] && continue
         V=""; (( r == 0 )) && V="--validate"
-        L=$OUT/${shp}_${z}_${c}_r$r.log
+        L=$OUT/${shp}_${z}_${c}_r${r}_$RUN.log
         A="$(cfg_args $c) $(shape_args $shp) --tensor-dims $(dims $z) $(iters $z) $V"
         echo "=== $LAB $key r$r $(date -u +%FT%T) args: $A" > $L
         "${MPI[@]}" $BIN/reshard_bench $A >> $L 2>&1 &
@@ -78,10 +81,12 @@ for shp in $SHAPES; do
         bw=$(grep -A2 -- '--- Sources only' $L | grep -m1 'Bandwidth'); avg=$(grep -oE 'Avg=[0-9.]+' <<<"$bw" | cut -d= -f2); mn=$(grep -oE 'Min=[0-9.]+' <<<"$bw" | cut -d= -f2)
         tot=$(grep -m1 'Total data throughput' $L | grep -oE '[0-9.]+ GB/s' | cut -d' ' -f1)
         tm=$(grep -m1 'Time per iteration' $L | grep -oE 'Max=[0-9.]+' | cut -d= -f2)
+        [[ $res == PASS || $res == OK ]] || NBAD=$((NBAD+1))
         echo "$LAB,$NP,$S,$D,$shp,$z,$c,$r,${V:+1},$res,$avg,$mn,$tot,$tm,$(basename $L)" >> $CSV
         echo "$(date -u +%T) $key r$r $res avg=$avg tot=$tot"
       done
     done
   done
 done
-echo MATRIX_DONE $LAB
+echo "MATRIX_DONE $LAB failed=$NBAD"
+(( NBAD == 0 ))

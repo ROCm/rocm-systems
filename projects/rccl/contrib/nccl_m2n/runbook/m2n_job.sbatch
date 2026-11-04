@@ -42,6 +42,8 @@ wait
 for n in "${NODES[@]}"; do ssh $n "sudo docker ps --format '{{.Names}}' | grep -qx $NAME" || { echo "NO CONTAINER on $n"; RC=1; }; done
 if (( RC == 0 )); then
   # Background + wait so the traps fire while the phases run.
-  ssh $N1 "sudo docker exec -u $(id -u) -e HOME=$HOME -e WORK=$W -e PHASES='${PHASES:-}' -e MODEL_RUNS='${MODEL_RUNS:-}' -e HF=$HF $NAME bash -lc 'bash $RB/${PHASES_SCRIPT:-phases.sh}'" &
+  ssh $N1 "sudo docker exec -u $(id -u) -e HOME=$HOME -e WORK=$W -e PHASES='${PHASES:-}' -e MODEL_RUNS='${MODEL_RUNS:-}' -e HF=$HF \
+    -e SIZES='${SIZES:-}' -e ROUNDS='${ROUNDS:-}' -e BATCH_RUNS='${BATCH_RUNS:-}' -e NUM_TENSORS='${NUM_TENSORS:-}' \
+    -e COMMS='${COMMS:-}' -e COPIES='${COPIES:-}' $NAME bash -lc 'bash $RB/${PHASES_SCRIPT:-phases.sh}'" &
   wait $! || RC=$?
 fi

@@ -5,6 +5,7 @@ D=$(dirname "$(readlink -f "$0")")
 R=$WORK/logs/bench/model; mkdir -p $R
 MC=$SRC/projects/rccl/contrib/nccl_m2n/benchmarks/configs/model_configs/qwen3-32b.model.json
 SSHA="ssh -p $SSH_PORT -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+ST=0
 for run in $MODEL_RUNS; do
   IFS=: read -r lab np hf sc mc <<<"$run"
   MCR=${mc:-$MC}
@@ -24,9 +25,11 @@ for run in $MODEL_RUNS; do
       if (( rc == 124 )); then res=HANG; elif (( rc != 0 )); then res=FAIL_rc$rc
       elif [[ -n $V ]]; then grep -qi 'validation passed' $L && ! grep -qi 'validation failed' $L && res=PASS || res=FAIL_val
       else res=OK; fi
+      [[ $res == PASS || $res == OK ]] || ST=1
       echo "$(date -u +%T) $lab $mode r$r $res $(grep -iE -m2 'validation (passed|failed)|total' $L | tr '\n' ' ' | cut -c1-200)"
       (( rc == 124 )) && { pkill -9 -x reshard_model_b; [[ $hf == 1 ]] && for h in $(awk '{print $1}' $HF); do $SSHA $h pkill -9 -x reshard_model_b; done; break; }
     done
   done
 done
-echo MODEL_DONE
+echo "MODEL_DONE status=$ST"
+exit $ST
