@@ -623,7 +623,8 @@ TEST_F(TensorDmaRaceTest, EveryRangeOfATransferIsTracked) {
 }
 
 TEST_F(TensorDmaRaceTest, SameWaveLoadOverwritingAPendingStoreSourceRaces) {
-  // Transfers from one wave complete in order but may access LDS out of order.
+  // Transfers from one wave complete in order; the detector conservatively
+  // treats their LDS accesses as unordered.
   tensor_store(0, {{.address = 0, .bytes = 16}});
   EXPECT_TRUE(tensor_load(0, {{.address = 4, .bytes = 8}}));
 }

@@ -205,9 +205,11 @@ races. Some examples:
   `s_barrier`. A load covers every element of its tile, including elements
   outside the tensor, which it zero-fills; padding bytes are excluded. A store
   covers only the elements inside the tensor. Transfers from one wave complete
-  in issue order but do not access LDS in issue order, so a transfer that
-  overlaps an earlier one from the same wave also races until
-  `s_wait_tensorcnt`. Each instruction is registered when it issues, as other
+  on `tensorcnt` in issue order (CDNA5 ISA 10.11.1), so a partial
+  `s_wait_tensorcnt` retires the oldest. The ISA does not specify the relative
+  timing of their LDS reads and writes, so as a conservative rule the detector
+  reports a transfer that overlaps an earlier, still pending one from the same
+  wave, until `s_wait_tensorcnt` retires it. Each instruction is registered when it issues, as other
   memory instructions are, so an instruction that moves no data still occupies
   its `tensorcnt` slot, and a transfer that waits for memory is pending from the
   moment it issues.
@@ -224,7 +226,10 @@ following lifecycle:
    the same wave remain ordered with respect to each other, so a later
    same-wave DS read or write does not race solely because the earlier DS event
    is still active. Direct-to-LDS VMEM writes still require the owning wave to
-   wait for `vmcnt` before reading the destination bytes.
+   wait for `vmcnt` before reading the destination bytes. Tensor DMA transfers
+   complete in issue order, but as a conservative rule an active transfer still
+   conflicts with an overlapping later transfer from the same wave (see Tensor
+   DMA races above).
 1. **WAVE_COMPLETE** — waits have satisfied every counter obligation for the
    event. This means the event is no longer in flight from the perspective of
    the wave that issued the operation, but is still in flight from the

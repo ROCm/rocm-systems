@@ -530,11 +530,11 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   auto *rs = s->race_state;
   auto *detector = rs->getDetector();
   const auto waveId = rs->getWaveId();
-  // Tensor transfers from one wave complete on TENSORCNT in issue order, which
-  // partial waits rely on, so the event takes the TENSOR class. They do not
-  // access LDS in issue order, though: a later transfer may write bytes an
-  // earlier one has not read yet. Check the transfer's LDS bytes as unordered
-  // with every pending access, including the wave's own tensor transfers.
+  // Tensor transfers from one wave complete on TENSORCNT in issue order (CDNA5
+  // ISA 10.11.1), which partial waits rely on, so the event takes the TENSOR
+  // class. The ISA does not specify the relative timing of their LDS reads and
+  // writes, so as a conservative rule, check the transfer's LDS bytes as
+  // unordered with every pending access, including the wave's own transfers.
   constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
   constexpr MemoryOrderClass ldsAccessOrder = MemoryOrderClass::UNORDERED;
   const int elementBytes = static_cast<int>(issue.element_size_bytes);

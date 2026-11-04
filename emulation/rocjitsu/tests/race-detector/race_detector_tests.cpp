@@ -1368,8 +1368,9 @@ TEST(RaceDetector, TensorDma_SameWavePartialTensorcntRetiresStoreAheadOfLoad) {
   EXPECT_TRUE(b.hasLdsRace(4));
 }
 
-// Tensor DMA from one wave completes in issue order but does not access LDS in
-// issue order, so overlapping transfers from the same wave race until
+// Tensor DMA from one wave completes in issue order, but the ISA does not
+// specify the relative timing of overlapping LDS reads and writes, so the
+// detector conservatively reports overlapping transfers from the same wave until
 // s_wait_tensorcnt.
 TEST(RaceDetector, TensorDma_SameWaveLoadOverwritingAPendingStoreSourceRaces) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);

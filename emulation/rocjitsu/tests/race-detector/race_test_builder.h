@@ -346,7 +346,8 @@ private:
   /// A transfer has no lanes; its violations report lane -1.
   void tensorTransfer(int wave, MemoryEventType type, std::span<const LdsByteRange> ranges,
                       int elementBytes) {
-    // Completion is in issue order (TENSOR); LDS access is not, as in the plugin.
+    // Completion is in issue order (TENSOR); LDS accesses are checked as
+    // unordered, a conservative rule, as in the plugin.
     constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
     constexpr MemoryOrderClass ldsAccessOrder = MemoryOrderClass::UNORDERED;
     for (const auto &range : ranges) {
