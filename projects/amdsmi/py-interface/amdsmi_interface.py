@@ -3071,12 +3071,17 @@ def amdsmi_get_cpu_affinity_with_scope(
     if not isinstance(scope, AmdSmiAffinityScope):
         raise AmdSmiParameterException(scope, AmdSmiAffinityScope)
 
-    socket_count = amdsmi_get_cpu_socket_count()
-    sock_info = amdsmi_get_cpu_cores_per_socket(socket_count)
-    core_count = sock_info["cores_per_socket"]
+    try:
+        socket_count = amdsmi_get_cpu_socket_count()
+        sock_info = amdsmi_get_cpu_cores_per_socket(socket_count)
+        cpu_total = socket_count * sock_info["cores_per_socket"]
+    except AmdSmiLibraryException as e:
+        if e.get_error_code() != amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+            raise
+        cpu_total = os.cpu_count() or 1
 
     size = ctypes.c_uint32(0)
-    size = (socket_count * core_count) / (ctypes.sizeof(ctypes.c_uint64) * 8)
+    size = cpu_total / (ctypes.sizeof(ctypes.c_uint64) * 8)
     size = int(math.ceil(size))
     size = ctypes.c_uint32(size)
     cpu_set = (ctypes.c_uint64 * size.value)()
