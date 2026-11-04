@@ -25,9 +25,6 @@ class TestCpuEnergy(unittest.TestCase):
     def setUp(self):
         self.common.amdsmi_smart_init()
 
-    def tearDown(self):
-        amdsmi.amdsmi_shut_down()
-
     def test_get_cpu_core_energy(self):
         self.common.print_func_name("")
         # On a discrete-GPU host the energy APIs reach the ESMI IO path before the

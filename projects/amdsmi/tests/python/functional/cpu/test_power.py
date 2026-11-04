@@ -25,9 +25,6 @@ class TestCpuPower(unittest.TestCase):
     def setUp(self):
         self.common.amdsmi_smart_init()
 
-    def tearDown(self):
-        amdsmi.amdsmi_shut_down()
-
     def test_cpu_core_boostlimit(self):
         self.common.print_func_name("")
         # Writing a 0 boostlimit is the invalid-input probe. Firmware may clamp

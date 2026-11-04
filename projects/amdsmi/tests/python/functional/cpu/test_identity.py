@@ -25,9 +25,6 @@ class TestCpuIdentity(unittest.TestCase):
     def setUp(self):
         self.common.amdsmi_smart_init()
 
-    def tearDown(self):
-        amdsmi.amdsmi_shut_down()
-
     def test_first_online_core_on_cpu_socket(self):
         self.common.print_func_name("")
         # On a discrete-GPU host this API reaches the ESMI IO path before the HSMP

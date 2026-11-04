@@ -25,9 +25,6 @@ class TestCpuHsmp(unittest.TestCase):
     def setUp(self):
         self.common.amdsmi_smart_init()
 
-    def tearDown(self):
-        amdsmi.amdsmi_shut_down()
-
     def test_get_cpu_ddr_bw(self):
         self.common.print_func_name("")
         # NOT_SUPPORTED / NO_HSMP_MSG_SUP: platform lacks the DDR bandwidth message.

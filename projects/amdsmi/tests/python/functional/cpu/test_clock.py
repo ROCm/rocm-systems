@@ -35,9 +35,6 @@ class TestCpuClock(unittest.TestCase):
     def setUp(self):
         self.common.amdsmi_smart_init()
 
-    def tearDown(self):
-        amdsmi.amdsmi_shut_down()
-
     def test_cpu_apb_disable(self):
         self.common.print_func_name("")
         # NOT_SUPPORTED / NO_HSMP_MSG_SUP: platform lacks the APB control message.
@@ -129,9 +126,20 @@ class TestCpuClock(unittest.TestCase):
         self.common.print_func_name("")
 
         def positive(handles, failures):
+            # Engineering sample (family 26, model 0xC0) returns INVAL for P3 and G3 even
+            # though the protocol table lists them. Accept INVAL for those links on that
+            # family/model only, so the same links still fail on other SKUs.
+            try:
+                cpu_family = amdsmi.amdsmi_get_cpu_family()
+                cpu_model = amdsmi.amdsmi_get_cpu_model()
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
+                cpu_family = cpu_model = None
+            is_eng_sample = cpu_family == 26 and cpu_model == 0xC0
+            inval_ok_links = {"P3", "G3"} if is_eng_sample else set()
             # Link names are legal only for the platform's HSMP protocol version, so
             # resolve the table per socket. A version with no table is skipped for
-            # that socket; a legal link returning INVAL is a real failure.
+            # that socket; a legal link returning INVAL is a real failure unless the
+            # model exception above applies.
             with self.common.status_sweep():
                 for i, cpu in enumerate(handles):
                     try:
@@ -141,7 +149,7 @@ class TestCpuClock(unittest.TestCase):
                             f"\t### amdsmi_get_cpu_hsmp_proto_ver(cpu={i}): unavailable ({e}), skipping"
                         )
                         continue
-                    links = self.common.io_bw_encodings_for_proto_ver(proto_ver)
+                    links = common.io_bw_encodings_for_proto_ver(proto_ver)
                     if not links:
                         self.common.print(
                             f"\t### HSMP protocol version {proto_ver} defines no IO link encodings, skipping cpu={i}"
@@ -153,7 +161,12 @@ class TestCpuClock(unittest.TestCase):
                             f"encoding={encoding}, link_name={link_name}):"
                         )
                         val = "N/A"
-                        with self.common.expect_status(msg, correct_accept):
+                        accept = (
+                            correct_accept + [amdsmi.AmdSmiStatus.INVAL]
+                            if link_name in inval_ok_links
+                            else correct_accept
+                        )
+                        with self.common.expect_status(msg, accept):
                             val = amdsmi.amdsmi_get_cpu_current_io_bandwidth(
                                 cpu, encoding, link_name
                             )
@@ -281,17 +294,18 @@ class TestCpuClock(unittest.TestCase):
 
         def positive(handles, failures):
             # Narrow the range, then hand P-state selection back to the firmware.
-            # Note the parameter order is (min, max). There is no getter for the
-            # DF P-state range, so enabling APB is the documented restore path.
+            # Firmware requires max_pstate <= min_pstate, with 0 the highest P-state
+            # and 2 the lowest. There is no getter for the DF P-state range, so
+            # enabling APB is the documented restore path.
             with self.common.status_sweep():
                 for i, cpu in enumerate(handles):
                     set_msg = (
                         f"\t### amdsmi_set_cpu_df_pstate_range(cpu={i}, "
-                        f"min_pstate=1, max_pstate={DF_PSTATE_MAX}):"
+                        f"min_pstate={DF_PSTATE_MAX}, max_pstate=1):"
                     )
                     val = "N/A"
                     with self.common.expect_status(set_msg, correct_accept):
-                        val = amdsmi.amdsmi_set_cpu_df_pstate_range(cpu, 1, DF_PSTATE_MAX)
+                        val = amdsmi.amdsmi_set_cpu_df_pstate_range(cpu, DF_PSTATE_MAX, 1)
                     self.common.print(f"\t    data: {val}")
                     restore_msg = f"\t### amdsmi_cpu_apb_enable(cpu={i}):"
                     val = "N/A"
@@ -302,7 +316,7 @@ class TestCpuClock(unittest.TestCase):
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_set_cpu_df_pstate_range,
             "amdsmi_set_cpu_df_pstate_range",
-            arg_sets=[(f"min_pstate=1, max_pstate={DF_PSTATE_MAX}", (1, DF_PSTATE_MAX))],
+            arg_sets=[(f"min_pstate={DF_PSTATE_MAX}, max_pstate=1", (DF_PSTATE_MAX, 1))],
             wrong_accept=[
                 amdsmi.AmdSmiStatus.NOT_SUPPORTED,
                 amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,

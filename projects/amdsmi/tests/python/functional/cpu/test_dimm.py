@@ -25,9 +25,6 @@ class TestCpuDimm(unittest.TestCase):
     def setUp(self):
         self.common.amdsmi_smart_init()
 
-    def tearDown(self):
-        amdsmi.amdsmi_shut_down()
-
     def test_get_cpu_dimm_power_consumption(self):
         self.common.print_func_name("")
         # TODO Find better way to get dimm_addr
