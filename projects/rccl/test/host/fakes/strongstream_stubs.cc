@@ -38,12 +38,12 @@ std::function<ncclResult_t(struct ncclCudaGraph*, hipStream_t, int)> g_cudaGetCa
 ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph* graph, hipStream_t stream, int graphUsageMode) {
   return g_cudaGetCapturingGraph(graph, stream, graphUsageMode);
 }
-static ncclResult_t DefaultCudaGraphAddDestructor(struct ncclCudaGraph, cudaHostFn_t, void*) {
+static ncclResult_t DefaultCudaGraphAddDestructor(struct ncclCudaGraph, hipHostFn_t, void*) {
   FailLoudUnfaked("strongstream_stubs", "ncclCudaGraphAddDestructor");
 }
-std::function<ncclResult_t(struct ncclCudaGraph, cudaHostFn_t, void*)> g_cudaGraphAddDestructor =
+std::function<ncclResult_t(struct ncclCudaGraph, hipHostFn_t, void*)> g_cudaGraphAddDestructor =
     DefaultCudaGraphAddDestructor;
-ncclResult_t ncclCudaGraphAddDestructor(struct ncclCudaGraph graph, cudaHostFn_t fn, void* arg) {
+ncclResult_t ncclCudaGraphAddDestructor(struct ncclCudaGraph graph, hipHostFn_t fn, void* arg) {
   return g_cudaGraphAddDestructor(graph, fn, arg);
 }
 static ncclResult_t DefaultStreamAdvanceToEvent(struct ncclCudaGraph, hipStream_t, hipEvent_t) {

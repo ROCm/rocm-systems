@@ -2769,7 +2769,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclCalloc(&comm->gproxyConn, comm->nRanks), ret, fail);
 
   if (ncclParamRasDiagnostics() && comm->rank == 0) ncclRunRasDiagnostics(comm);
-  if (ncclParamDiagnostics()) ncclRunDiagnostics(comm);
+  if (ncclParamDiagnostics()) NCCLCHECKGOTO(ncclRunDiagnostics(comm), ret, fail);
 
   timers[TIMER_INIT_CONNECT] = clockNano();
   // Build p2p schedule
@@ -3691,8 +3691,7 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
 
   envNetName = ncclGetEnv("NCCL_NET");
   if (envNetName) {
-    if (strcasecmp(envNetName, "ROCM-IB") == 0) tmpNetName = "IB-CAST";
-    else tmpNetName = envNetName;
+    tmpNetName = rcclCanonicalNetName(envNetName);
   }
   if (tmpNetName != NULL) {
     if (comm->config.netName != NCCL_CONFIG_UNDEF_PTR) {

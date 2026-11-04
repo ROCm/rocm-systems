@@ -10,6 +10,7 @@
 #include "hip_global.hpp"
 
 #include <atomic>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -189,11 +190,12 @@ class StatCO : public CodeObject {
   // pointer to the alocated managed memory has to be copied to the address of symbol
   hipError_t InitManagedVarDevicePtr(int deviceId);
 
-  // Find a deferred managed var whose mmap address equals ptr
-  Var* FindDeferredManagedVar(const void* ptr);
-
   // Resize device-specific data structures for all registered functions and variables
   void ResizeForDevices(size_t device_count);
+
+  // Back every registered managed variable with a tracked allocation, so its host
+  // pointer is resolvable through MemObjMap before any HIP API can observe it.
+  hipError_t EnsureAllManagedVarsAreMapped();
 
   // Iterate all registered fat binary data pointers — for HRR capture post-registration sweep.
   void ForEachFatBinaryBlob(void (*cb)(const void*)) const;
@@ -220,10 +222,13 @@ class StatCO : public CodeObject {
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostFunctions_;
   //! Reverse mapping of vars
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;
-  //! Tracks managed var initialization per device
-  std::unique_ptr<std::atomic<bool>[]> managedVarsDevicePtrInitialized_;
-  //! Number of entries in managedVarsDevicePtrInitialized_
-  size_t managedVarsDevicePtrInitializedSize_ = 0;
+  //! Managed variables registered so far; never decremented, since removing a fat binary
+  //! only shrinks managedVars_. Each Var keeps the number it was given.
+  std::atomic<uint64_t> managedVarRegCount_{0};
+  //! Indexed by device id: the registration number this device's managed-variable pointers
+  //! have been written up to. Never grown in place, since std::atomic is neither copyable
+  //! nor movable.
+  std::vector<std::atomic<uint64_t>> managedDevPtrWrittenUpTo_;
 };
 
 };  // namespace hip

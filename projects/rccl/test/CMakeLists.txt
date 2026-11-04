@@ -313,6 +313,7 @@ if(BUILD_TESTS)
     DdaIpcTests.cpp
     # Also in rccl-UnitTestsFixtures; built here without DWORDX4_INTRINSICS_FORCE_OFF, so it runs the b128 re-read.
     device/DdaReduceScatterFabricLLTests.cpp
+    device/DdaAllReduceFabricLLTests.cpp
     NetPluginReloadTests.cpp
     GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
@@ -414,6 +415,7 @@ if(BUILD_TESTS)
       device/LlFifoSysScopeTests.cpp
       device/DdaIpcGpuBarrierOrderingTests.cpp
       device/DdaReduceScatterFabricLLTests.cpp
+      device/DdaAllReduceFabricLLTests.cpp
       device/DdaVecElementAddTests.cpp
       device/DdaLL128PollWireTests.cpp
       device/TestTDM.cpp
@@ -720,6 +722,33 @@ if(BUILD_TESTS)
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
   add_test(NAME rccl-UnitTestsGinSdmaPolicy COMMAND rccl-UnitTestsGinSdmaPolicy)
   set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
+
+  # GinScatter local reduce on one GPU. Runs ginScatterReduceChunk against a fake
+  # scratch and a host sum, for staged and full-column layouts, including
+  # multi-rank sums at 64 MiB and 1 GiB. No librccl. Skips when no GPU is visible.
+  # Registered in the test-runner configs so CI runs it with the other unit tests.
+  add_executable(rccl-UnitTestsGinScatterReduceGpu gin/gin_scatter_reduce_gpu_test.cpp)
+  set_source_files_properties(gin/gin_scatter_reduce_gpu_test.cpp PROPERTIES LANGUAGE CXX)
+  target_include_directories(rccl-UnitTestsGinScatterReduceGpu PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/include
+    ${PROJECT_SOURCE_DIR}/src)
+  set(_gin_scatter_gpu_offload "")
+  foreach(_g IN LISTS GPU_TARGETS)
+    if(_g)
+      list(APPEND _gin_scatter_gpu_offload "--offload-arch=${_g}")
+    endif()
+  endforeach()
+  if(_gin_scatter_gpu_offload)
+    target_compile_options(rccl-UnitTestsGinScatterReduceGpu PRIVATE ${_gin_scatter_gpu_offload})
+    target_link_options(rccl-UnitTestsGinScatterReduceGpu PRIVATE ${_gin_scatter_gpu_offload})
+  endif()
+  target_link_libraries(rccl-UnitTestsGinScatterReduceGpu PRIVATE
+    ${GTEST_BOTH_LIBRARIES} hip::host hip::device Threads::Threads)
+  set_target_properties(rccl-UnitTestsGinScatterReduceGpu PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+  add_test(NAME rccl-UnitTestsGinScatterReduceGpu COMMAND rccl-UnitTestsGinScatterReduceGpu)
+  set_tests_properties(rccl-UnitTestsGinScatterReduceGpu PROPERTIES LABELS "unit;gpu")
 
   # utility.h as plain C++ for its !NCCL_DEVICE_COMPILE branches; not with CXX=hipcc, which defines __HIPCC__ and fails strict CI.
   add_executable(rccl-UnitTestsUtilityHostOnly NcclUtilityHostOnlyTests.cpp)

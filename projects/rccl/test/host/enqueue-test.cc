@@ -4463,7 +4463,7 @@ TEST_F(EnqueueMicrotest, AddPersistentPlanRef_DropsNonLiveRefsAndKeepsLiveOnes) 
   comm.persistentPlanRefs = live;
 
   ncclPersistentPlanRef* registered = nullptr;
-  g_cudaGraphAddDestructor = [&](ncclCudaGraph, cudaHostFn_t, void* arg) {
+  g_cudaGraphAddDestructor = [&](ncclCudaGraph, hipHostFn_t, void* arg) {
     registered = static_cast<ncclPersistentPlanRef*>(arg);
     return ncclSuccess;
   };
