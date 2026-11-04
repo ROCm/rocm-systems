@@ -89,7 +89,7 @@ typedef struct rocprofiler_thread_trace_decoder_occupancy_t
     uint32_t pipe_id      : 4;
     uint32_t is_ext       : 1; ///< Is workgroup_id valid?
     uint32_t workgroup_id : 7;
-    uint32_t cluster_id   : 5; ///< 0 = not in a cluster; only valid on wavestart
+    uint32_t cluster_id   : 5;  ///< 0 = not in a cluster; only valid on wavestart
     uint32_t dispatch_id  : 10; ///< Low 10 bits of dispatch ID
     uint32_t _rsvd        : 1;
 } rocprofiler_thread_trace_decoder_occupancy_t;
