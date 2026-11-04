@@ -120,6 +120,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **``--nic`` output now labels each device ``NIC`` instead of ``AI_NIC``**.  
+  - The device key is ``nic`` in JSON and CSV and ``NIC: <n>`` in text, matching the host interface. ``static --nic`` now lists ``ASIC``, ``BUS``, ``DRIVER`` and ``NUMA`` directly under the device instead of under a nested ``nic`` key. ``metric --nic --rdma`` now groups counters as ``RDMA_DEVICES`` > ``RDMA_DEVICE_<n>`` > ``PORTS`` > ``PORT_<n>`` instead of ``RDMA_PORTS``. ``metric --nic --port --json`` now returns the default counter set, as text does; add ``--extended`` for the full set. Scripts that read ``ai_nic``, the nested ``nic`` key or ``RDMA_PORTS`` must be updated.
+
 - **``amd-smi list --nic`` now enumerates UALoE endpoints**.  
   - They appear as rows with their BDF, and their other fields read ``N/A``. NIC indices are positional, so these rows renumber the AI-NIC cards after them; select a device by BDF where the identity has to be stable.
 

@@ -163,7 +163,7 @@ class TestStaticNicJson(unittest.TestCase):
         commands.device_handles_ainics = [_Handle(2)]
 
         def store_nic_record(args, multiple_devices=False, nic=None):
-            commands.logger.store_nic_json_output.append({"ai_nic": 0})
+            commands.logger.store_nic_json_output.append({"nic": 0})
 
         commands._static_ainic = store_nic_record
         return commands
@@ -172,7 +172,7 @@ class TestStaticNicJson(unittest.TestCase):
         commands = self._make_commands("json")
         args = argparse.Namespace(nic=commands.device_handles_ainics)
         self.assertTrue(commands._static_nics(args, False, None))
-        self.assertEqual(commands.logger.store_nic_json_output, [{"ai_nic": 0}])
+        self.assertEqual(commands.logger.store_nic_json_output, [{"nic": 0}])
         self.assertEqual(commands.logger.combine_calls, 1)
 
     def test_json_nic_query_with_no_nics_does_not_add_a_second_document(self):

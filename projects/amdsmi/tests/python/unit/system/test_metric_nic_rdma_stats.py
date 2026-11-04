@@ -114,26 +114,22 @@ class TestMetricNicRdma(unittest.TestCase):
     def _stored(command):
         return command.logger.store_ainic_output.call_args[0][2]
 
-    def test_bare_rdma_lists_every_port_with_device_netdev_and_uppercased_counters(self):
+    def test_bare_rdma_groups_every_port_under_its_device_with_uppercased_counters(self):
         command, _ = self._command(
             devices=(("ionic_0", "enP1p3s0f3", 1), ("ionic_1", "enP2p3s0f3", 1))
         )
         command.metric_nic(types.SimpleNamespace(nic=None, port=None, extended=False, rdma=-1))
 
         self.assertEqual(
-            self._stored(command)["RDMA_PORTS"],
+            self._stored(command)["RDMA_DEVICES"],
             {
-                "PORT_0": {
-                    "RDMA_DEVICE": "ionic_0",
-                    "PORT_NUM": 1,
-                    "NETDEV": "enP1p3s0f3",
-                    "STATISTICS": {"RX_RDMA_UCAST_PKTS": 10},
+                "RDMA_DEVICE_0": {
+                    "RDMA_DEV": "ionic_0",
+                    "PORTS": {"PORT_0": {"STATISTICS": {"RX_RDMA_UCAST_PKTS": 10}}},
                 },
-                "PORT_1": {
-                    "RDMA_DEVICE": "ionic_1",
-                    "PORT_NUM": 1,
-                    "NETDEV": "enP2p3s0f3",
-                    "STATISTICS": {"RX_RDMA_UCAST_PKTS": 11},
+                "RDMA_DEVICE_1": {
+                    "RDMA_DEV": "ionic_1",
+                    "PORTS": {"PORT_0": {"STATISTICS": {"RX_RDMA_UCAST_PKTS": 11}}},
                 },
             },
         )
@@ -144,21 +140,21 @@ class TestMetricNicRdma(unittest.TestCase):
         )
         command.metric_nic(types.SimpleNamespace(nic=None, port=None, extended=False, rdma=1))
 
-        self.assertEqual(list(self._stored(command)["RDMA_PORTS"]), ["PORT_1"])
+        self.assertEqual(list(self._stored(command)["RDMA_DEVICES"]), ["RDMA_DEVICE_1"])
         self.assertEqual(interface.amdsmi_get_nic_rdma_port_statistics.call_count, 1)
 
     def test_index_counts_ports_across_devices(self):
         command, _ = self._command(devices=(("ionic_0", "enP1p3s0f3", 2),))
         command.metric_nic(types.SimpleNamespace(nic=None, port=None, extended=False, rdma=1))
 
-        port = self._stored(command)["RDMA_PORTS"]["PORT_1"]
-        self.assertEqual((port["RDMA_DEVICE"], port["PORT_NUM"]), ("ionic_0", 2))
+        device = self._stored(command)["RDMA_DEVICES"]["RDMA_DEVICE_0"]
+        self.assertEqual((device["RDMA_DEV"], list(device["PORTS"])), ("ionic_0", ["PORT_1"]))
 
     def test_out_of_range_index_reports_no_ports(self):
         command, _ = self._command()
         command.metric_nic(types.SimpleNamespace(nic=None, port=None, extended=False, rdma=7))
 
-        self.assertEqual(self._stored(command)["RDMA_PORTS"], "No RDMA ports found for this NIC")
+        self.assertEqual(self._stored(command)["RDMA_DEVICES"], "No RDMA ports found for this NIC")
 
     def test_negative_index_other_than_the_bare_marker_does_not_wrap_around(self):
         command, interface = self._command(
@@ -166,20 +162,20 @@ class TestMetricNicRdma(unittest.TestCase):
         )
         command.metric_nic(types.SimpleNamespace(nic=None, port=None, extended=False, rdma=-2))
 
-        self.assertEqual(self._stored(command)["RDMA_PORTS"], "No RDMA ports found for this NIC")
+        self.assertEqual(self._stored(command)["RDMA_DEVICES"], "No RDMA ports found for this NIC")
         interface.amdsmi_get_nic_rdma_port_statistics.assert_not_called()
 
     def test_nic_without_rdma_devices_reports_plainly_in_text(self):
         command, _ = self._command(devices=())
         command.metric_nic(types.SimpleNamespace(nic=None, port=None, extended=False, rdma=-1))
 
-        self.assertEqual(self._stored(command)["RDMA_PORTS"], "No RDMA ports found for this NIC")
+        self.assertEqual(self._stored(command)["RDMA_DEVICES"], "No RDMA ports found for this NIC")
 
     def test_nic_without_rdma_devices_is_an_empty_object_in_json(self):
         command, _ = self._command(is_json=True, devices=())
         command.metric_nic(types.SimpleNamespace(nic=None, port=None, extended=False, rdma=-1))
 
-        self.assertEqual(self._stored(command)["RDMA_PORTS"], {})
+        self.assertEqual(self._stored(command)["RDMA_DEVICES"], {})
 
     def test_rdma_does_not_require_port_and_adds_no_ports_block(self):
         command, _ = self._command()
@@ -191,7 +187,7 @@ class TestMetricNicRdma(unittest.TestCase):
         command, interface = self._command()
         command.metric_nic(types.SimpleNamespace(nic=None, port=None, extended=False))
 
-        self.assertNotIn("RDMA_PORTS", self._stored(command))
+        self.assertNotIn("RDMA_DEVICES", self._stored(command))
         interface.amdsmi_get_nic_rdma_port_statistics.assert_not_called()
 
     def test_library_error_keeps_the_port_with_empty_counters(self):
@@ -199,6 +195,6 @@ class TestMetricNicRdma(unittest.TestCase):
         interface.amdsmi_get_nic_rdma_port_statistics.side_effect = command.library_error("boom")
         command.metric_nic(types.SimpleNamespace(nic=None, port=None, extended=False, rdma=-1))
 
-        port = self._stored(command)["RDMA_PORTS"]["PORT_0"]
-        self.assertEqual(port["STATISTICS"], {})
-        self.assertEqual(port["RDMA_DEVICE"], "ionic_0")
+        device = self._stored(command)["RDMA_DEVICES"]["RDMA_DEVICE_0"]
+        self.assertEqual(device["PORTS"]["PORT_0"]["STATISTICS"], {})
+        self.assertEqual(device["RDMA_DEV"], "ionic_0")
