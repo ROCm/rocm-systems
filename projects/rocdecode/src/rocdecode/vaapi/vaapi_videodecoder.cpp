@@ -81,6 +81,14 @@ static VaapiLoader *g_va_loader = nullptr;
 // clang-format on
 #endif // ROCDECODE_USE_DLOPEN_VA
 
+// Every rocDecVideoSurfaceFormat that stores 16 bits per sample. Used to keep the capability mask
+// from advertising a 16-bit output format for 8-bit content.
+static const uint16_t k16BitOutputFormatMask =
+    (1 << rocDecVideoSurfaceFormat_P016) |
+    (1 << rocDecVideoSurfaceFormat_YUV444_16Bit) |
+    (1 << rocDecVideoSurfaceFormat_YUV420_16Bit) |
+    (1 << rocDecVideoSurfaceFormat_YUV422_16Bit);
+
 VaapiVideoDecoder::VaapiVideoDecoder(RocDecoderCreateInfo &decoder_create_info) : decoder_create_info_{decoder_create_info},
     output_surface_format_override_{false}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_ {VAProfileNone},
     va_context_id_{0}, va_surface_ids_{{}}, supports_modifiers_{false},
@@ -1398,6 +1406,10 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
 
     dec_cap->num_decoders = va_contexts_[va_ctx_id].num_dec_engines;
     dec_cap->output_format_mask = va_contexts_[va_ctx_id].output_format_mask;
+    // Check to ensure 10-bit output format is not set for an 8-bit stream
+    if (dec_cap->bit_depth_minus_8 == 0) {
+        dec_cap->output_format_mask &= ~k16BitOutputFormatMask;
+    }
     dec_cap->max_width = va_contexts_[va_ctx_id].max_width;
     dec_cap->max_height = va_contexts_[va_ctx_id].max_height;
     dec_cap->min_width = va_contexts_[va_ctx_id].min_width;

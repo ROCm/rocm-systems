@@ -233,9 +233,10 @@ atomics:
     tags: [deviceLib, ops]
   Unit_atomicAdd_system_Positive_Peer_GPUs:
     <<: *level_default
+    disabled:
+      targets: [amd_linux, amd_wsl]
+      reason: "AIRUNTIME-2744 - requires more than 1 GPU (peer); self-skips on single-device gfx1030 so not locally verifiable, and is in the Rock_Linux_Failures_on_gfx94X set. gfx1201 (amd_wsl) self-skips: required number of devices is not available. Needs re-triage on amd_linux."
     tags: [deviceLib, system, multigpu]
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux, amd_wsl]
   Unit_atomicAdd_system_Positive_Host_And_GPU:
     <<: *level_default
     tags: [deviceLib, system]
@@ -295,35 +296,37 @@ atomics:
     tags: [deviceLib, system, multigpu]
   Unit_atomicExch_Positive_Same_Address_Compile_Time:
     <<: *level_default
-    # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
-    disabled: [amd_wsl, nvidia_linux]
+    disabled:
+      targets: [nvidia_linux]
+      reason: "AIRUNTIME-2744 - SWDEV-435667: fails randomly in stress test (observed 01/12/23). Needs re-triage on nvidia_linux."
     tags: [deviceLib, ops]
   Unit_atomicExch_Positive:
     <<: *level_default
     tags: [deviceLib, ops]
   Unit_atomicExch_Positive_Multi_Kernel:
     <<: *level_default
-    # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
-    disabled: [amd_wsl]
     tags: [deviceLib, ops]
   Unit_atomicExch_Negative_Parameters_RTC:
     <<: *level_default
     tags: [deviceLib, ops]
   Unit_atomicExch_system_Positive_Peer_GPUs:
     <<: *level_default
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-435667: fails randomly in stress test (observed 01/12/23). gfx1201 (amd_wsl) self-skips: required number of devices is not available. Needs re-triage."
     tags: [deviceLib, system, multigpu]
-    # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
-    disabled: [amd_wsl]
   Unit_atomicExch_system_Positive_Host_And_GPU:
     <<: *level_default
+    disabled:
+      targets: [nvidia_linux]
+      reason: "AIRUNTIME-2744 - SWDEV-435667: fails randomly in stress test (observed 01/12/23). Needs re-triage on nvidia_linux."
     tags: [deviceLib, system]
-    # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
-    disabled: [amd_wsl, nvidia_linux]
   Unit_atomicExch_system_Positive_Host_And_Peer_GPUs:
     <<: *level_default
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-435667: fails randomly in stress test (observed 01/12/23). gfx1201 (amd_wsl) self-skips: required number of devices is not available. Needs re-triage."
     tags: [deviceLib, system, multigpu]
-    # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
-    disabled: [amd_wsl]
   Unit_atomicExch_system_Negative_Parameters_RTC:
     <<: *level_default
     tags: [deviceLib, system]

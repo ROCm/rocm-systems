@@ -856,7 +856,8 @@ void Buffer::destroy() {
 }
 
 // ================================================================================================
-bool Buffer::create(bool alloc_local) {
+bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
+  (void)errorCode;  // Currently not used but kept for signature parity
   bool success = false;
   OwningAgentGuard guard(this, &success);
 
@@ -909,10 +910,11 @@ bool Buffer::create(bool alloc_local) {
       }
     } else if (memFlags & ROCCLR_MEM_HOST_NUMA) {
       // Host-resident NUMA VMM: decode the packed node selector. Stored value is
-      // (node + 1); 0 means "resolve current node" (HostNumaCurrent) -> pass -1.
+      // (node + 2); 1 means "resolve current node" (HostNumaCurrent) -> pass -1;
+      // 0 means use default agent (Host) -> pass -2.
       const uint64_t stored =
           (memFlags & ROCCLR_MEM_HOST_NUMA_NODE_MASK) >> ROCCLR_MEM_HOST_NUMA_NODE_SHIFT;
-      const int numaNode = (stored == 0) ? -1 : static_cast<int>(stored - 1);
+      const int numaNode = static_cast<int>(stored) - 2;
       owner()->getUserData().hsa_handle = dev().hostVmemAlloc(owner()->getSize(),
                                           memFlags & ROCCLR_MEM_HSA_UNCACHED
                                           ? HSA_AMD_MEMORY_POOL_UNCACHED_FLAG : 0,
@@ -1195,24 +1197,44 @@ bool Buffer::create(bool alloc_local) {
   return (success = (deviceMemory_ != nullptr));
 }
 
-// Recompute the owning agent from a live pointer_info query. Used once the virtual
-// address is actually backed (post hsa_amd_vmem_map), which is the only point where the
-// true owner of VMM-mapped / imported memory can be resolved.
+// Resolve an imported VMM buffer's owning agent from its physical memory handle, since
+// pointer_info reports a null owner for imports. Returns false for non-VMM memory.
+static bool vmmOwningAgent(const Memory* self, hsa_agent_t* agent) {
+  amd::Memory* owner = self->owner();
+  if (owner == nullptr || !owner->vmmImported() || owner->getUserData().phys_mem_obj == nullptr) {
+    return false;
+  }
+  hsa_amd_vmem_alloc_handle_t handle{owner->getUserData().phys_mem_obj->getUserData().hsa_handle};
+  hsa_amd_vmem_handle_info_t info = {};
+  info.size = sizeof(info);
+  if (Hsa::vmem_get_vmem_info(handle, &info) != HSA_STATUS_SUCCESS || info.agent.handle == 0) {
+    return false;
+  }
+  *agent = info.agent;
+  return true;
+}
+
+// For VMM-imported memory, resolve the owner from the allocation handle (vmem_get_vmem_info):
+// pointer_info is not sufficient there, as it reports a null owner for imports. All other memory
+// uses pointer_info.
 void Memory::refreshOwningAgentFromPointerInfo() {
   if (deviceMemory_ == nullptr) {
     return;
   }
 
-  hsa_amd_pointer_info_t info = {};
-  info.size = sizeof(info);
-  hsa_status_t err = hsa_amd_pointer_info(reinterpret_cast<address>(deviceMemory_), &info, nullptr,
-                                          nullptr, nullptr);
+  hsa_agent_t agent;
+  if (!vmmOwningAgent(this, &agent)) {
+    hsa_amd_pointer_info_t info = {};
+    info.size = sizeof(info);
+    hsa_status_t err = hsa_amd_pointer_info(reinterpret_cast<address>(deviceMemory_), &info,
+                                            nullptr, nullptr, nullptr);
 
-  // info.agentOwner is the agent that actually owns the backing pages (a peer device for
-  // imported memory). Fall back to this device's backend if the query can't resolve it.
-  hsa_agent_t agent =
-      (err == HSA_STATUS_SUCCESS && info.agentOwner.handle != 0) ? info.agentOwner
-                                                                 : dev().getBackendDevice();
+    // info.agentOwner is the agent that actually owns the backing pages (a peer device for
+    // IPC memory). Note ROCr does not always tag IPC-opened memory with
+    // HSA_EXT_POINTER_TYPE_IPC, so key off a valid agentOwner rather than the pointer type.
+    agent = (err == HSA_STATUS_SUCCESS && info.agentOwner.handle != 0) ? info.agentOwner
+                                                                       : dev().getBackendDevice();
+  }
   setOwningAgent(agent);
 }
 
@@ -1233,19 +1255,12 @@ void Buffer::computeAndSetOwningAgent() {
     LogWarning("Sub-buffer parent not available for agent inheritance");
   }
 
-  // Check if this is IPC shared memory that needs pointer_info query
   if (owner() != nullptr && (owner()->ipcShared() || owner()->vmmImported())) {
-    hsa_amd_pointer_info_t info = {};
-    info.size = sizeof(info);
-    hsa_status_t err = hsa_amd_pointer_info(
-        reinterpret_cast<address>(deviceMemory_), &info, nullptr, nullptr, nullptr);
+    refreshOwningAgentFromPointerInfo();
+    return;
+  }
 
-    // info.agentOwner is the agent that actually owns the backing pages (a peer device for
-    // IPC/imported memory). Note ROCr does not always tag IPC-opened memory with
-    // HSA_EXT_POINTER_TYPE_IPC, so key off a valid agentOwner rather than the pointer type.
-    agent = (err == HSA_STATUS_SUCCESS && info.agentOwner.handle != 0) ? info.agentOwner
-                                                                       : dev().getBackendDevice();
-  } else if (kind_ == MEMORY_KIND_ARENA || kind_ == MEMORY_KIND_HOST) {
+  if (kind_ == MEMORY_KIND_ARENA || kind_ == MEMORY_KIND_HOST) {
     // Arena and host memory use CPU agent
     agent = dev().getCpuAgent();
   } else if (kind_ == MEMORY_KIND_INTEROP) {
@@ -1566,7 +1581,7 @@ bool Image::createInteropImage() {
   return true;
 }
 
-bool Image::create(bool alloc_local) {
+bool Image::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
   if (owner()->parent() != nullptr) {
     // Image view creation
     roc::Memory* parent = static_cast<roc::Memory*>(owner()->parent()->getDeviceMemory(dev_));
@@ -1576,7 +1591,7 @@ bool Image::create(bool alloc_local) {
       return false;
     }
 
-    return createView(*parent);
+    return createView(*parent, errorCode);
   }
 
   // Interop image
@@ -1600,11 +1615,11 @@ bool Image::create(bool alloc_local) {
   }
 
   // Get memory size requirement for device specific image.
-  hsa_status_t status = Hsa::image_data_get_info(dev().getBackendDevice(), &imageDescriptor_,
-                                                 permission_, &deviceImageInfo_);
+  hsa_status_t hsaStatus = Hsa::image_data_get_info(dev().getBackendDevice(), &imageDescriptor_,
+                                                    permission_, &deviceImageInfo_);
 
-  if (status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("Fail to allocate image memory, failed with hsa_status: %d", status);
+  if (hsaStatus != HSA_STATUS_SUCCESS) {
+    LogPrintfError("Fail to allocate image memory, failed with hsa_status: %d", hsaStatus);
     return false;
   }
 
@@ -1638,11 +1653,11 @@ bool Image::create(bool alloc_local) {
 
   assert(amd::isMultipleOf(deviceMemory_, static_cast<size_t>(deviceImageInfo_.alignment)));
 
-  status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, deviceMemory_,
-                             permission_, &hsaImageObject_);
+  hsaStatus = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, deviceMemory_,
+                                permission_, &hsaImageObject_);
 
-  if (status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("[OCL] Fail to allocate image memory, failed with hsa_status: %d \n", status);
+  if (hsaStatus != HSA_STATUS_SUCCESS) {
+    LogPrintfError("[OCL] Fail to allocate image memory, failed with hsa_status: %d \n", hsaStatus);
     return false;
   }
 
@@ -1656,7 +1671,10 @@ bool Image::create(bool alloc_local) {
   return true;
 }
 
-bool Image::createView(const Memory& parent) {
+bool Image::createView(const Memory& parent, amd::Memory::ErrorCode* errorCode) {
+  if (errorCode != nullptr) {
+    *errorCode = amd::Memory::kErrorUnknown;
+  }
   deviceMemory_ = parent.getDeviceMemory();
 
   originalDeviceMemory_ = (parent.owner()->asBuffer() != nullptr)
@@ -1716,12 +1734,12 @@ bool Image::createView(const Memory& parent) {
     }
   }
 
-  hsa_status_t status;
+  hsa_status_t hsaStatus;
   if (interop_mip_level_view) {
     // Derive this mip level from the parent interop mipmap's reconstructed (tiled) SRD.
     const Image& parentImage = static_cast<const Image&>(parent);
     amdImageDesc_ = parentImage.amdImageDesc_;  // borrowed; freed by the owning interop buffer
-    status = Hsa::image_get_mipmap_level(
+    hsaStatus = Hsa::image_get_mipmap_level(
         dev().getBackendDevice(), &parentImage.hsaImageObject_,
         owner()->asImage()->getBaseMipLevel(), nullptr, &hsaImageObject_);
   } else if (interop_swizzle_desc != nullptr) {
@@ -1730,7 +1748,7 @@ bool Image::createView(const Memory& parent) {
     // buffer; Image::destroy early-returns for views (parent != null) before freeing it, so the
     // buffer remains the sole owner.
     amdImageDesc_ = interop_swizzle_desc;
-    status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, amdImageDesc_,
+    hsaStatus = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, amdImageDesc_,
                                deviceMemory_, permission_, &hsaImageObject_);
   } else if (linearLayout) {
     size_t rowPitch;
@@ -1747,7 +1765,7 @@ bool Image::createView(const Memory& parent) {
     rowPitch =
         elementSize * amd::alignUp(rowPitch, (dev().info().imagePitchAlignment_ / elementSize));
 
-    status = Hsa::image_create_with_layout(
+    hsaStatus = Hsa::image_create_with_layout(
         dev().getBackendDevice(), &imageDescriptor_, deviceMemory_, permission_,
         HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR, rowPitch, 0, &hsaImageObject_);
 
@@ -1755,10 +1773,10 @@ bool Image::createView(const Memory& parent) {
         ((ownerImage.getWidth() * ownerImage.getImageFormat().getElementSize()) <
          ownerImage.getRowPitch())) {
       bool workaround = false;
-      if (status == static_cast<hsa_status_t>(HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED)) {
+      if (hsaStatus == static_cast<hsa_status_t>(HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED)) {
         workaround = true;
       }
-      if (status == HSA_STATUS_SUCCESS) {
+      if (hsaStatus == HSA_STATUS_SUCCESS) {
         // There are corner cases which still need workaround.
         const size_t kAlignments[] = {16, 32, 64, 128, 256};
         size_t tryPitch;
@@ -1786,10 +1804,10 @@ bool Image::createView(const Memory& parent) {
 
       if (workaround) {
         if (ValidateMemory()) {
-          status = HSA_STATUS_SUCCESS;
+          hsaStatus = HSA_STATUS_SUCCESS;
         } else {
           LogWarning("[OCL] copy image fail during validation");
-          status = HSA_STATUS_ERROR;
+          return false;
         }
       }
     }
@@ -1799,31 +1817,34 @@ bool Image::createView(const Memory& parent) {
       auto* ancestor_image = static_cast<Image*>(ancestor->getDeviceMemory(dev()));
       if (ancestor == parentOwner) {
         // This is leveled image
-        status = Hsa::image_get_mipmap_level(
+        hsaStatus = Hsa::image_get_mipmap_level(
             dev().getBackendDevice(), &ancestor_image->hsaImageObject_,
             owner()->asImage()->getBaseMipLevel(), nullptr, &hsaImageObject_);
       } else if (ancestor == parentOwner->parent()) {
         // This is format changed view on leveled image
-        status = Hsa::image_get_mipmap_level(
+        hsaStatus = Hsa::image_get_mipmap_level(
             dev().getBackendDevice(), &ancestor_image->hsaImageObject_,
             parentOwner->asImage()->getBaseMipLevel(), &imageDescriptor_, &hsaImageObject_);
       } else {
-        // This is an impossible view on leveled image
-        status = HSA_STATUS_ERROR_INVALID_REGION;
+        LogPrintfError("Failed to allocate image memory. Impossible view on leveled image\n");
+        return false;
       }
   } else if (kind_ == MEMORY_KIND_INTEROP) {
     // This is a view on interop regular image or mipmap image.
     amdImageDesc_ = static_cast<Image*>(parent.owner()->getDeviceMemory(dev()))->amdImageDesc_;
-    status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, amdImageDesc_,
+    hsaStatus = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, amdImageDesc_,
                                deviceMemory_, permission_, &hsaImageObject_);
   } else {
     // This is a view on regular image or mipmap image.
-    status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, deviceMemory_,
+    hsaStatus = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, deviceMemory_,
                                  permission_, &hsaImageObject_);
   }
 
-  if (status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("[OCL] Fail to allocate image memory with status: %d \n", status);
+  if (hsaStatus != HSA_STATUS_SUCCESS) {
+    LogPrintfError("Failed to allocate image memory with status: %d \n", hsaStatus);
+    if (errorCode != nullptr && hsaStatus == static_cast<hsa_status_t>(HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED)) {
+      *errorCode = amd::Memory::kErrorImagePitchUnsupported;
+    }
     return false;
   }
 

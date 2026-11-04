@@ -121,6 +121,26 @@ _LIBRARY_ARCH_DIR_PATTERN = re.compile(
     r"/library/(" + _GFX_ARCH_PATTERN.pattern + r")/"
 )
 
+# hipBLASLt and hipSPARSELt store gfx1250 A0 kernels under gfx1250v0/,
+# but name the kernels for gfx1250. Keep this alias explicit: other
+# stepping directories may need separate bundles.
+LIBRARY_ARCH_DIR_STEPPING_ALIASES = {
+    "hipblaslt/library": {"gfx1250v0": "gfx1250"},
+    "hipsparselt/library": {"gfx1250v0": "gfx1250"},
+}
+
+
+def resolve_stepping_alias(
+    preceding_parts: tuple[str, ...], part: str
+) -> Optional[str]:
+    """Return the base arch for a known alias directly under its library path."""
+    for library_dir, aliases in LIBRARY_ARCH_DIR_STEPPING_ALIASES.items():
+        base = aliases.get(part)
+        prefix = tuple(library_dir.split("/"))
+        if base is not None and preceding_parts[-len(prefix) :] == prefix:
+            return base
+    return None
+
 
 class _TensileHandler(DatabaseHandler):
     """Base class for Tensile-based library handlers (rocBLAS, hipBLASLt, hipSPARSELt).
@@ -162,6 +182,12 @@ class _TensileHandler(DatabaseHandler):
         dir_match = _LIBRARY_ARCH_DIR_PATTERN.search(path_str)
         if dir_match:
             return dir_match.group(1)
+
+        for alias, base in LIBRARY_ARCH_DIR_STEPPING_ALIASES.get(
+            self._library_dir, {}
+        ).items():
+            if f"/library/{alias}/" in path_str:
+                return base
 
         return None
 

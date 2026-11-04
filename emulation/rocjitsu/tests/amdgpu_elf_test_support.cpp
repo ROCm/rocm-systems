@@ -868,7 +868,7 @@ std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
   return image;
 }
 void enable_workgroup_id_x_sgpr(std::vector<uint8_t> &image) {
-  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 
   AmdGpuCodeObject layout(image.data(), image.size());
   ASSERT_TRUE(layout.is_valid());
@@ -878,7 +878,7 @@ void enable_workgroup_id_x_sgpr(std::vector<uint8_t> &image) {
 
   KD kd{};
   std::memcpy(&kd, image.data() + rodata->sectionOffset(), sizeof(kd));
-  kd.compute_pgm_rsrc2 |= rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X;
+  kd.compute_pgm_rsrc2 |= rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X;
   std::memcpy(image.data() + rodata->sectionOffset(), &kd, sizeof(kd));
 }
 

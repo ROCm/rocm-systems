@@ -296,7 +296,26 @@ struct ncclConnInfo {
   uint32_t* next_hdp_reg; // Next GPU in ring (for p2p transport use only)
   uint32_t* curr_hdp_reg; // Current GPU's HDP register
   ncclNetDeviceHandle_t netDeviceHandle;
+  // Net recv only: RO=0 GPU flags, one per QP, each written by the remote NIC
+  // after the payload it carried on that QP. When set, the GPU waits until the
+  // flags selected by gdrFlushSeq[step % NCCL_STEPS] reach its sequence instead
+  // of the proxy issuing a GDR flush. Both live in local VRAM.
+  uint64_t* gdrFlushFlag;
+  uint64_t* gdrFlushSeq;
 };
+
+// A gdrFlushSeq entry packs the flag value in its low bits with the per-QP
+// flags that must reach it: `count` consecutive flags starting at flag `first`.
+// Zero means nothing to wait for.
+#define NCCL_GDR_FLUSH_SEQ_BITS 48
+#define NCCL_GDR_FLUSH_SEQ_MASK ((1ULL << NCCL_GDR_FLUSH_SEQ_BITS) - 1)
+#define NCCL_GDR_FLUSH_FIRST_SHIFT 48
+#define NCCL_GDR_FLUSH_COUNT_SHIFT 56
+// Byte distance between per-QP flags: each flag sits alone in a GPU L2
+// cacheline so NIC writes and GPU polls of different QPs never share one.
+#define NCCL_GDR_FLUSH_FLAG_STRIDE 128
+// Most per-QP flags one step can wait on; the GPU polls them all at once.
+#define NCCL_GDR_FLUSH_MAX_WAIT_QPS 8
 
 struct ncclProxyConnector {
   bool initialized;
@@ -701,6 +720,7 @@ struct ncclKernelComm {
   int node;
   int nNodes;
   int buffSizes[NCCL_NUM_PROTOCOLS];
+  int p2pLl128BuffSize;
   int p2pChunkSize;
   bool p2pCrossClique;
   int isAllNvlink;
@@ -708,6 +728,10 @@ struct ncclKernelComm {
   int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
 #if ENABLE_TDM_SIMPLE
   int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
+  int tdmSimpleReduceEnable; // RCCL: route reduction-shaped SIMPLE slices through the TDM mover
+#endif
+#if ENABLE_TDM_PRIM_LL128
+  int tdmLl128Enable; // RCCL: route LL128 user-buffer legs through the async-to-LDS engine
 #endif
   int patSharedQps; // true if PAT ReduceScatter and AllGather share one connection set
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
@@ -970,7 +994,7 @@ extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
 // Arch each unroll factor's device functions were compiled for, or nullptr when
 // the unroll carries no arch restriction. Neither table implies the other, so both
 // have to be consulted: an entry names its arch even for an unroll this build left
-// out, and BUILD_ALL_UNROLLS clears every entry because it compiles them all.
+// out. BUILD_ALL_UNROLLS does not clear the pin.
 extern char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS];
 
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py

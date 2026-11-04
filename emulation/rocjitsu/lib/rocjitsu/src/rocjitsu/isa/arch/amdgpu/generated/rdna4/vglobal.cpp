@@ -2111,7 +2111,6 @@ GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;

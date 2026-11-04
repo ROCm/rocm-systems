@@ -90,9 +90,7 @@ struct cache_policy
                                     .is_constant      = is_constant,
                                     .is_derived       = is_derived,
                                     .extdata          = extdata });
-            registry.add_track({ .track_name = freq_name,
-                                 .thread_id  = std::nullopt,
-                                 .extdata    = extdata });
+            registry.ensure_track(freq_name, std::nullopt, extdata);
 
             const auto load_name =
                 fmt::format("{} [{}] Core [{}]", load_base, socket_id, cpu_id);
@@ -113,9 +111,7 @@ struct cache_policy
                                     .is_constant      = is_constant,
                                     .is_derived       = is_derived,
                                     .extdata          = extdata });
-            registry.add_track({ .track_name = load_name,
-                                 .thread_id  = std::nullopt,
-                                 .extdata    = extdata });
+            registry.ensure_track(load_name, std::nullopt, extdata);
         }
 
         if(!is_first_socket)
@@ -144,9 +140,7 @@ struct cache_policy
                                         .is_constant      = is_constant,
                                         .is_derived       = is_derived,
                                         .extdata          = extdata });
-                registry.add_track({ .track_name = metric_name,
-                                     .thread_id  = std::nullopt,
-                                     .extdata    = extdata });
+                registry.ensure_track(metric_name, std::nullopt, extdata);
             };
 
         add_process_pmc(name<category::process_page>::value, "Page RSS",
