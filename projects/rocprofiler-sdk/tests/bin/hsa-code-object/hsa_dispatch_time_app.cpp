@@ -139,8 +139,10 @@ main()
         packet.dispatch.completion_signal    = signal;
 #if defined(AMD_SIGNAL_HINT_MASK)
         auto hints_supported = false;
-        if(hsa_agent_get_info(agent, HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED, &hints_supported) ==
-               HSA_STATUS_SUCCESS &&
+        if(hsa_agent_get_info(
+               agent,
+               static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED),
+               &hints_supported) == HSA_STATUS_SUCCESS &&
            hints_supported)
             packet.dispatch.completion_signal =
                 hsa_amd_signal_set_hints(signal, AMD_SIGNAL_HINT_TS_ON);
