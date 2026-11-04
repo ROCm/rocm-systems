@@ -2,9 +2,13 @@
 #
 # run-clang-tidy.sh — Run clang-tidy over RCCL's hipified sources.
 #
-# The enabled checks live in the top-level .clang-tidy, which currently enables
-# exactly one. Findings are advisory: this script exits 0 even when clang-tidy
-# reports something, unless --strict is given.
+# The enabled checks live in projects/rccl/.clang-tidy, which currently enables
+# exactly one. That file is passed to clang-tidy explicitly rather than being
+# found by walking up from each source, because the sources analysed are the
+# hipified copies under the build directory, which may be outside the tree.
+#
+# Findings are advisory: this script exits 0 even when clang-tidy reports
+# something, unless --strict is given.
 #
 # Unlike clang-format, clang-tidy needs a parsed translation unit, which means
 # a compile_commands.json and hipified sources on disk. That is why this is a
