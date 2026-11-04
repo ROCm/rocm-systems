@@ -69,7 +69,7 @@
 
 #if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
 #    include <rocprofiler-sdk/ompt.h>
-#    include <timemory/components/ompt/backends.hpp>
+#    include <rocprofiler-sdk/ompt/omp-tools.h>
 #endif
 
 #include <rocprofiler-sdk/fwd.h>
