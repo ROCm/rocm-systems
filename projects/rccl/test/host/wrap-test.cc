@@ -11714,9 +11714,7 @@ rcclArchThresholds Gfx1250A2aTable() {
 }
 
 bool A2aPerPeer16(size_t count, ncclDataType_t t) { return (count * ncclTypeSize(t)) % 16 == 0; }
-bool A2aLL128PtrsAligned(const void* s, const void* r) {
-  return s == r ? (uintptr_t)s % 4 == 0 : (((uintptr_t)s | (uintptr_t)r) % 16) == 0;
-}
+bool A2aLL128PtrsAligned(const void* s, const void* r) { return (((uintptr_t)s | (uintptr_t)r) % 4) == 0; }
 
 void InstallA2aFabricFakes() {
   g_allToAllDdaFabricLLEligible = [](ncclComm*, const void*, void*, size_t c, ncclDataType_t t) {
@@ -11906,12 +11904,11 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DdaLLOffFallsToLL128) {
       });
 }
 
-// p2p is wrong in place on gfx1250, so a dword-aligned in-place call stays on LL128; out of place a
-// 4-byte offset is refused and p2p (correct out of place) takes it. Live dispatch and the query
-// report the same decision.
-TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DwordAlignedInPlaceStaysOnLL128) {
+// A dword-aligned call takes LL128 in and out of place; below dword alignment an out-of-place call
+// takes p2p, which is correct out of place. Live dispatch and the query report the same decision.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DwordAlignedTakesLL128) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAlltoAll_Gfx1250DwordAlignedInPlaceStaysOnLL128",
+      "Wrap_SelectAlltoAll_Gfx1250DwordAlignedTakesLL128",
       []() {
         InstallA2aFabricFakes();
         ScopedHook ll128Blocks(g_allToAllDdaFabricLL128Blocks,
@@ -11921,6 +11918,7 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DwordAlignedInPlaceStaysOnLL12
         comm->archThresholds = &tbl;
         void* const inPlace4 = static_cast<char*>(kA2aRecv) + 4;
         const void* const send4 = static_cast<const char*>(kA2aSend) + 4;
+        const void* const send2 = static_cast<const char*>(kA2aSend) + 2;
         for (bool query : {false, true}) {
           for (int n : {8, 16}) {
             comm->nRanks = n;
@@ -11932,6 +11930,8 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DwordAlignedInPlaceStaysOnLL12
               EXPECT_EQ(NCCL_PROTO_LL128, d.protocol);
               EXPECT_EQ(132u, d.nMaxChannels);
               ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, send4, kA2aRecv, query, &d));
+              EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
+              ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, send2, kA2aRecv, query, &d));
               EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo);
             }
           }
