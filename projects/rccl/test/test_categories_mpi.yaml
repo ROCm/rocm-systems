@@ -380,6 +380,7 @@ test_categories:
       - "DdaFabricSimple.*"
       - "DdaAlltoAllInPlaceMPI.*"
       - "DdaAlltoAllPeerColumnsMPI.*"
+      - "DdaAlltoAllLLBankMPI.*"
       - "DdaFabricBlockCap.*"
       - "DdaFabricBarrierStress.*"
       # Skips under comprehensive: NCCL_LAUNCH_ORDER_IMPLICIT=1 disables DDA, so standard is where it runs.
