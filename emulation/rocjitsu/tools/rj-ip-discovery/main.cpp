@@ -37,19 +37,17 @@ int main(int argc, char **argv) {
   if (command.add_flag(help, diagnostic).failed())
     return EXIT_FAILURE;
   std::vector<std::string_view> arguments(argv + 1, argv + argc);
-  std::vector<std::string> inputs;
+  std::vector<std::string_view> parse_arguments;
   if (arguments.size() == 2 && !arguments[0].empty() && arguments[0].front() != '-') {
-    inputs.emplace_back(arguments[0]);
-    inputs.emplace_back(arguments[1]);
-  } else {
-    auto parsed = parse(command, arguments, diagnostic);
-    if (parsed.failed())
-      return EXIT_FAILURE;
-    if (help->value())
-      inputs.clear();
-    else
-      inputs = parsed.value().positional;
+    // Legacy two-operand form permits flag-like output filenames after the generation.
+    parse_arguments.reserve(arguments.size() + 1);
+    parse_arguments.emplace_back("--");
   }
+  parse_arguments.insert(parse_arguments.end(), arguments.begin(), arguments.end());
+  auto parsed = parse(command, parse_arguments, diagnostic);
+  if (parsed.failed())
+    return EXIT_FAILURE;
+  const auto &inputs = parsed.value().positional;
   if (inputs.size() != 2) {
     std::cerr << format_help(command) << "\nRequired arguments: <generation> <output-path>\n"
               << "  known generations: " << generations.known_ids() << "\n";
