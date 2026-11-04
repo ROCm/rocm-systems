@@ -147,9 +147,9 @@ __device__ T IPCContext::amo_fetch_cas(void *dest, T value, T cond, int pe) {
 // Collectives
 template <typename T, ROCSHMEM_OP Op>
 __device__ void ipc_compute_reduce(T *src, T *dst, int size, int wg_id, int wg_size) {
-  for (int i = wg_id; i < size; i += wg_size) {
-    OpWrap<Op>::Calc(src, dst, i);
-  }
+  // Vectorized path: process uint4 (16 bytes) per thread per iteration.
+  // Falls back to scalar for the tail elements that don't fill a uint4.
+  ipc_compute_reduce_vec<T, Op>(src, dst, size, wg_id, wg_size);
   __syncthreads();
 }
 
@@ -170,8 +170,19 @@ __device__ void IPCContext::internal_direct_allreduce_wg(
   int wg_size = get_flat_block_size();
   int64_t flag_val = 1;
 
-  for (int i = wg_id; i < nelems; i += wg_size) {
-    dst[i] = src[i];
+  // Vectorized copy: src -> dst using uint4 loads/stores
+  constexpr int VEC = vecElems<T>();
+  const int vec_count = nelems / VEC;
+  const int vec_tail = vec_count * VEC;
+  {
+    const uint4 *src4 = reinterpret_cast<const uint4 *>(src);
+    uint4 *dst4 = reinterpret_cast<uint4 *>(dst);
+    for (int i = wg_id; i < vec_count; i += wg_size) {
+      dst4[i] = src4[i];
+    }
+    for (int i = vec_tail + wg_id; i < nelems; i += wg_size) {
+      dst[i] = src[i];
+    }
   }
   __syncthreads();
 
@@ -189,20 +200,24 @@ __device__ void IPCContext::internal_direct_allreduce_wg(
   threadfence_system();
   __syncthreads();
 
-  // Do the compute and pSync reset in parallel.
+  // Precompute peer pointers (hoisted out of hot loop, like RCCL LsaColumn).
+  T *peerPtrs[8];  // max 8 ranks
+  int nPeers = 0;
   for (int i = PE_start; i < finish; i += stride) {
     if (i != pe) {
-      // Wait for leader thread to see that the buffer is ready.
       if (is_thread_zero_in_block()) {
         wait_until(&pSync[i], ROCSHMEM_CMP_EQ, flag_val);
       }
       __syncthreads();
-
-      T *ptr = &pWrk[i * nelems];
-      ipc_compute_reduce<T, Op>(ptr, dst, nelems, wg_id, wg_size);
-      threadfence_system();
+      peerPtrs[nPeers++] = &pWrk[i * nelems];
     }
   }
+
+  // Vectorized reduce with double-buffered prefetching across all peers.
+  if (nPeers > 0) {
+    reduce_peers_vec<T, Op>(peerPtrs, nPeers, dst, nelems, wg_id, wg_size);
+  }
+  threadfence_system();
   __syncthreads();
 
   for (int i = wg_id; i < constmem.num_pes; i += wg_size) {
@@ -226,9 +241,20 @@ __device__ void IPCContext::internal_direct_allreduce_wave(
   int wf_tid = get_flat_block_id() % WF_SIZE;
   int64_t flag_val = 1;
 
-  // Initialize local dst from src
-  for (int i = wf_tid; i < nelems; i += WF_SIZE) {
-    dst[i] = src[i];
+  // Initialize local dst from src (vectorized copy)
+  constexpr int VEC = vecElems<T>();
+  const int vec_count = nelems / VEC;
+  const int vec_tail = vec_count * VEC;
+
+  {
+    const uint4 *src4 = reinterpret_cast<const uint4 *>(src);
+    uint4 *dst4 = reinterpret_cast<uint4 *>(dst);
+    for (int i = wf_tid; i < vec_count; i += WF_SIZE) {
+      dst4[i] = src4[i];
+    }
+    for (int i = vec_tail + wf_tid; i < nelems; i += WF_SIZE) {
+      dst[i] = src[i];
+    }
   }
 
   // Put src to pWrk on all other PEs and signal via pSync
@@ -243,17 +269,22 @@ __device__ void IPCContext::internal_direct_allreduce_wave(
     }
   }
 
-  // Reduce contributions from all other PEs into dst
+  // Precompute peer pointers (hoisted out of hot loop, like RCCL LsaColumn).
+  // Avoids re-resolving pWrk[i * nelems] per element in the reduction loop.
+  T *peerPtrs[8];  // max 8 ranks, matching kGinAllReduceMaxRanks
+  int nPeers = 0;
   for (int i = PE_start; i < finish; i += stride) {
     if (i != pe) {
       if (is_thread_zero_in_wave()) {
         wait_until(&pSync[i], ROCSHMEM_CMP_EQ, flag_val);
       }
-      T *ptr = &pWrk[i * nelems];
-      for (int j = wf_tid; j < nelems; j += WF_SIZE) {
-        OpWrap<Op>::Calc(ptr, dst, j);
-      }
+      peerPtrs[nPeers++] = &pWrk[i * nelems];
     }
+  }
+
+  // Vectorized reduce with double-buffered prefetching across all peers.
+  if (nPeers > 0) {
+    reduce_peers_vec<T, Op>(peerPtrs, nPeers, dst, nelems, wf_tid, WF_SIZE);
   }
 
   // Reset pSync entries
@@ -497,9 +528,9 @@ __device__ void IPCContext::internal_ring_allreduce_wave(
                           atomic::memory_order::acquire>();
       __builtin_amdgcn_wave_barrier();
 
-      for (int j = wf_tid; j < chunk_size; j += wave_size) {
-        OpWrap<Op>::Calc(&pWrk[off_recv], &dst[off_seg + off_recv], j);
-      }
+      // Vectorized reduce for ring allreduce reduce-scatter
+      ipc_compute_reduce_vec<T, Op>(&pWrk[off_recv], &dst[off_seg + off_recv],
+                                    chunk_size, wf_tid, wave_size);
       __builtin_amdgcn_wave_barrier();
     }
 
@@ -737,9 +768,9 @@ __device__ int IPCContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
 	      __builtin_amdgcn_wave_barrier();
         T *src_chunk = &pWrk[remote_rank * chunk_size];
         T *dst_chunk = dest + offset;
-        for (int j = wave_tid; j < count; j += WF_SIZE) {
-          OpWrap<Op>::Calc(src_chunk, dst_chunk, j);
-        }
+        // Vectorized reduce for reduce-scatter
+        ipc_compute_reduce_vec<T, Op>(src_chunk, dst_chunk, count,
+                                      wave_tid, WF_SIZE);
         threadfence_system();
       }
     }
