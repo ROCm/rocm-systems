@@ -102,6 +102,12 @@ device_counting_service_finalize();
 rocprofiler_status_t
 device_counting_service_hsa_registration();
 
+// Blocks until every device-counting sample already in flight has been written. Waits only:
+// no status transition and no end packet, so a context sampling before this call is still
+// sampling after it.
+void
+drain_device_counting_samples();
+
 // Send the AQL start packet to a queue on the agent to start
 // collecting counter data. This function is synchronous and will
 // return when the agent has started collecting data (or if there

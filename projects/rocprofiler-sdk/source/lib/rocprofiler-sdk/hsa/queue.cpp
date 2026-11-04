@@ -37,7 +37,6 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
-#include "lib/rocprofiler-sdk/hsa/record_producer.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
@@ -47,6 +46,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#include "lib/rocprofiler-sdk/record_producer.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/spm/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
@@ -398,6 +398,9 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         }
     }
 
+    // Last: this releases the dispatch, and the dispatch-scoped profiling services above extract
+    // their data inline before it. Deferring this call past them, or them past it, drops their
+    // coverage with nothing failing.
     queue_info_session.queue.async_complete();
 
     return false;

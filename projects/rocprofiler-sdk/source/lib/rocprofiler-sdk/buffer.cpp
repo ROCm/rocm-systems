@@ -28,9 +28,9 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
-#include "lib/rocprofiler-sdk/hsa/record_producer.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#include "lib/rocprofiler-sdk/record_producer.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -190,7 +190,7 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 
     auto _task = [buffer_id, idx, offset]() {
         // Buffer delivery runs tool callbacks and may run on a record-producing thread.
-        auto _producer = hsa::scoped_record_producer{};
+        auto _producer = scoped_record_producer{};
 
         ROCP_ERROR_IF(registration::get_fini_status() > 0)
             << "executing buffer (" << buffer_id.handle << ") flush task finalization!";

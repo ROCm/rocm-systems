@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -68,16 +68,67 @@ target_link_libraries(
 # dynamic symbol table rather than merely defined.
 set_target_properties(synchronize-contexts PROPERTIES ENABLE_EXPORTS ON)
 
-# Queue interposition is pinned rather than left to runtime qualification. Leaving it
-# unset makes this workload abort in the interposition record emitter on roughly 60% of
-# runs, independently of what this test is checking; pinning it to either value avoids
-# that and also keeps the path under test from varying run to run.
+# Queue interposition is pinned rather than left to runtime qualification, so the code
+# path under test is the same on every run.
 rocprofiler_add_integration_execute_test(
     synchronize-contexts
     COMMAND $<TARGET_FILE:synchronize-contexts>
+    DEPENDS synchronize-contexts
     TIMEOUT 120
     LABELS "integration-tests"
     ENVIRONMENT
         "ROCPROFILER_QUEUE_INTERPOSITION=1"
+        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    )
+
+#
+# The reentrancy guard on rocprofiler_synchronize_contexts. A missing marker makes the
+# call block on the thread that would have satisfied it, so this test's failure mode is a
+# hang and the ctest timeout is the assertion that catches it.
+#
+add_executable(synchronize-contexts-reentrancy)
+target_sources(synchronize-contexts-reentrancy PRIVATE reentrancy.cpp)
+set_source_files_properties(reentrancy.cpp PROPERTIES LANGUAGE HIP)
+
+target_link_libraries(
+    synchronize-contexts-reentrancy
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
+            Threads::Threads)
+
+set_target_properties(synchronize-contexts-reentrancy PROPERTIES ENABLE_EXPORTS ON)
+
+rocprofiler_add_integration_execute_test(
+    synchronize-contexts-reentrancy
+    COMMAND $<TARGET_FILE:synchronize-contexts-reentrancy>
+    DEPENDS synchronize-contexts-reentrancy
+    TIMEOUT 60
+    LABELS "integration-tests"
+    ENVIRONMENT
+        "ROCPROFILER_QUEUE_INTERPOSITION=1"
+        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    )
+
+#
+# Counter records for a dispatch are written on a consumer thread, so a window that
+# synchronizes and flushes can be short. Asserted per window, never in aggregate.
+#
+add_executable(synchronize-contexts-counter-window)
+target_sources(synchronize-contexts-counter-window PRIVATE counter_window.cpp)
+set_source_files_properties(counter_window.cpp PROPERTIES LANGUAGE HIP)
+
+target_link_libraries(
+    synchronize-contexts-counter-window
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
+            Threads::Threads)
+
+set_target_properties(synchronize-contexts-counter-window PROPERTIES ENABLE_EXPORTS ON)
+
+rocprofiler_add_integration_execute_test(
+    synchronize-contexts-counter-window
+    COMMAND $<TARGET_FILE:synchronize-contexts-counter-window>
+    DEPENDS synchronize-contexts-counter-window
+    TIMEOUT 300
+    LABELS "integration-tests"
+    ENVIRONMENT
         "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )

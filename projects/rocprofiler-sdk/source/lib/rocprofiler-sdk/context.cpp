@@ -21,18 +21,25 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/common/container/small_vector.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+#include "lib/rocprofiler-sdk/counters/device_counting.hpp"
+#include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
-#include "lib/rocprofiler-sdk/hsa/record_producer.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#include "lib/rocprofiler-sdk/record_producer.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <vector>
 
@@ -139,9 +146,8 @@ rocprofiler_context_is_valid(rocprofiler_context_id_t context_id, int* status)
 rocprofiler_status_t
 rocprofiler_synchronize_contexts(const rocprofiler_context_id_t* contexts, size_t num_contexts)
 {
-    // Finalization has already run these drains.
-    if(rocprofiler::registration::get_fini_status() > 0) return ROCPROFILER_STATUS_SUCCESS;
-
+    // Arguments are validated before the post-finalization shortcut below, so the contract does
+    // not depend on when the call is made: a bogus context is rejected either way.
     for(size_t i = 0; i < num_contexts; ++i)
     {
         if(contexts[i] == rocprofiler_context_none ||
@@ -149,19 +155,53 @@ rocprofiler_synchronize_contexts(const rocprofiler_context_id_t* contexts, size_
             return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
     }
 
-    // A drain entered from a record-producing thread would wait on the caller's own work.
-    if(rocprofiler::hsa::on_record_producer_thread())
-        return ROCPROFILER_STATUS_ERROR_REENTRANT_CALL;
+    // Finalization has already run these drains.
+    if(rocprofiler::registration::get_fini_status() > 0) return ROCPROFILER_STATUS_SUCCESS;
 
-    // Same sequence and order as finalization. Each drain is internally bounded and reports
-    // whether it completed.
+    // A drain entered from a record-producing thread would wait on the caller's own work.
+    if(rocprofiler::on_record_producer_thread()) return ROCPROFILER_STATUS_ERROR_REENTRANT_CALL;
+
+    // The copy drain reports whether it completed. queue_controller_sync reports only its
+    // per-queue waits: its completion-monitor wait has no deadline and no return value, so a
+    // monitor that never drains cannot show up in _dispatches_drained.
     bool _copies_drained     = rocprofiler::hsa::async_copy_sync();
     bool _dispatches_drained = rocprofiler::hsa::queue_controller_sync();
 
-    // Signal-less dispatch is not drained here. kfd::signal_less_fence_completions() is terminal
-    // on every path, not only on timeout: it stops and joins the reader, and ledgers in-flight
-    // dispatches as losses. Those are the semantics finalization needs and a live call cannot use.
-    return (_copies_drained && _dispatches_drained) ? ROCPROFILER_STATUS_SUCCESS
-                                                    : ROCPROFILER_STATUS_ERROR_TIMEOUT;
+    // Every record in the ring copied, published, popped and processed, and every submitted
+    // completion finished, with signal-less left running.
+    bool _signal_less_drained = rocprofiler::kfd::drain_signal_less_completions();
+
+    // Ordered after the dispatch drains and not beside them: a dispatch's counter sample is
+    // handed off while its completion is being handled, so a drained dispatch is one whose
+    // sample is already counted. Draining first would wait on a ring that is still filling.
+    rocprofiler::counters::callback_thread_drain();
+
+    // Independent of the dispatch drains, since these samples are requested by the tool rather
+    // than caused by a dispatch. Grouped with the wait above because both produce counter records.
+    rocprofiler::counters::drain_device_counting_samples();
+
+    // Flushes this client's PC sampling agent buffers. Ordered after the dispatch drain, which
+    // retires the correlation ids those samples are attributed to.
+    // Deduplicated on client_idx: the flush is per-client, so several contexts owned by one
+    // client would otherwise flush the same agent buffers once each.
+    auto _flushed_clients = rocprofiler::common::container::small_vector<uint32_t, 8>{};
+    for(size_t i = 0; i < num_contexts; ++i)
+    {
+        const auto* _ctx = rocprofiler::context::get_registered_context(contexts[i]);
+        if(_ctx == nullptr) continue;
+
+        const auto _client_idx = _ctx->client_idx;
+        if(std::find(_flushed_clients.begin(), _flushed_clients.end(), _client_idx) !=
+           _flushed_clients.end())
+            continue;
+        _flushed_clients.emplace_back(_client_idx);
+
+        rocprofiler::pc_sampling::service_sync(
+            rocprofiler_client_id_t{sizeof(rocprofiler_client_id_t), nullptr, _client_idx});
+    }
+
+    return (_copies_drained && _dispatches_drained && _signal_less_drained)
+               ? ROCPROFILER_STATUS_SUCCESS
+               : ROCPROFILER_STATUS_ERROR_RECORDS_OUTSTANDING;
 }
 }
