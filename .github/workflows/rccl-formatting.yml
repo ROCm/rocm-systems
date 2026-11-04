@@ -19,9 +19,8 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
+          # Needed for the merge base below; a shallow clone has none.
           fetch-depth: 0
-          # Controls which files are on disk, and so which files pre-commit can
-          # see. Everything this job touches must be listed here.
           sparse-checkout: |
             projects/rccl
             .github

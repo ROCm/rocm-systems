@@ -24,39 +24,16 @@ jobs:
       image: rocm/dev-ubuntu-26.04:10.1.0-full
     env:
       ROCM_PATH: /opt/rocm
-      # Pin a valid arch so RCCL's configure never probes for a GPU (there is
-      # none on CI). hipify compiles no device code, so any gfx9xx is equivalent.
       GPU_TARGETS: gfx942
     steps:
       - name: Checkout rccl
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # rocm-systems is a large monorepo; fetch only what the analysis needs.
+          # No fetch-depth: this analyses the tree, not a diff, so no merge
+          # base and no history are needed.
           sparse-checkout: projects/rccl
 
       - name: Install build deps
-        # Only what configure + hipify need. Nothing is compiled and the tests
-        # are not built, so the test libraries, lcov and ccache are not
-        # installed.
-        #
-        # Checked against rocm/dev-ubuntu-26.04:10.1.0-full; the three already
-        # present are listed anyway, so the job keeps working if a later image
-        # drops them.
-        #
-        #   build-essential  host compiler and make            (preinstalled)
-        #   perl             hipify-perl, which stages the
-        #                    sources to analyse                (preinstalled)
-        #   python3          find_package(Python3 ... REQUIRED)
-        #                    and the embedded tuner header     (preinstalled)
-        #   cmake            configure                         (missing)
-        #   git              rocm-cmake and version queries
-        #                    at configure time                 (missing)
-        #   rocm-cmake       find_package(ROCM); without it CMake
-        #                    downloads and builds it from GitHub (missing)
-        #
-        # clang-tidy itself needs no package: the image carries it at both
-        # /opt/rocm/lib/llvm/bin and /opt/rocm/llvm/bin, though neither is on
-        # PATH, which is why run-clang-tidy.sh looks for it by absolute path.
         run: |
           apt-get update
           apt-get install --assume-yes --no-install-recommends \
@@ -71,10 +48,6 @@ jobs:
         run: echo "/opt/rocm/bin" >> "$GITHUB_PATH"
 
       - name: Fetch the NCCL ref used to tell RCCL-owned files from upstream
-        # maint/run-clang-tidy.sh hides findings in files NVIDIA/nccl ships at
-        # the same path, and refuses to run rather than silently widening its
-        # scope when it cannot work out which those are. Blobless and shallow:
-        # only the tree listing is needed, not file contents.
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git remote add nccl https://github.com/NVIDIA/nccl.git
@@ -82,9 +55,6 @@ jobs:
           git fetch --no-tags --depth=1 --filter=blob:none nccl master
 
       - name: Run clang-tidy
-        # Advisory: the script exits 0 on findings unless --strict is passed.
-        # It configures the build and runs hipify itself when the build
-        # directory has no compile database yet.
         run: |
           bash projects/rccl/maint/run-clang-tidy.sh \
             --build-dir "$RUNNER_TEMP/rccl-clang-tidy-build"
