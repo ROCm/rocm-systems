@@ -263,7 +263,7 @@ __device__ void IPCContext::alltoallmem_wg_linear(rocshmem_team_t team, void *ds
   // Have each PE put their designated data to the other PEs
   for (int j = 0; j < pe_size; j++) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    putmem_nbi_wg(reinterpret_cast<char *>(dst) + my_pe_in_team * nelems, 
+    putmem_nbi_wg(reinterpret_cast<char *>(dst) + my_pe_in_team * nelems,
                   reinterpret_cast<const char *>(src) + j * nelems, nelems, dest_pe);
   }
   if (is_thread_zero_in_block()) {
@@ -284,7 +284,7 @@ __device__ void IPCContext::alltoallmem_wg_linear_thread_puts(rocshmem_team_t te
 
   int tid = get_flat_block_id();
   // min(get_flat_block_size(), WF_SIZE)
-  int step_size = get_flat_block_size();
+  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
@@ -301,7 +301,6 @@ __device__ void IPCContext::alltoallmem_wg_linear_thread_puts(rocshmem_team_t te
 
   // wait until everyone has obtained their designated data
   for (int j = tid; j < pe_size; j+= step_size) {
-    int dest_pe = team_obj->get_pe_in_world(j);
 
     long *sync_flag = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flag) != 1) { }
@@ -311,6 +310,8 @@ __device__ void IPCContext::alltoallmem_wg_linear_thread_puts(rocshmem_team_t te
     pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
+
+  __syncthreads();
   if (is_thread_zero_in_block()) {
     team_obj->alltoall_sequence_number++;
   }
@@ -355,12 +356,10 @@ __device__ void IPCContext::broadcastmem_linear_thread_puts_wave(
   int pe_size = team_obj->num_pes;
   long *pSync = team_obj->bcast_pSync;
   int pe_root_world = team_obj->get_pe_in_world(PE_root);
-  // Monotonic counter: capture expected value before signaling.
-  // No double-buffering or reset needed — eliminates the race where a
-  // fast root re-signals before a slow PE has polled and reset.
+  // Monotonic and never reset, so a fast root cannot outrun a slow poller.
   long expected = static_cast<long>(team_obj->bcast_sequence_number + 1);
 
-  int tid = get_flat_block_id() % WF_SIZE;
+  int tid = get_flat_block_id();
   int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Root: each lane puts src to its assigned subset of dest PEs, then signals.
@@ -458,7 +457,7 @@ __device__ void IPCContext::broadcastmem_wg_linear_thread_puts(
 
   int tid = get_flat_block_id();
   // min(get_flat_block_size(), WF_SIZE)
-  int step_size = get_flat_block_size();
+  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Root: each lane puts src to its assigned subset of dest PEs, then signals.
   if (my_pe == pe_root_world) {
@@ -476,6 +475,8 @@ __device__ void IPCContext::broadcastmem_wg_linear_thread_puts(
     }
   }
 
+
+  __syncthreads();
   if (is_thread_zero_in_block()) {
     long *sync_flag = &pSync[pe_size];
     while (uncached_load(sync_flag) < expected) { }
@@ -507,7 +508,7 @@ __device__ void IPCContext::broadcastmem_wg(rocshmem_team_t team,
     internal_broadcastmem_wg(dest, source, nelems, pe_root_world,
                                 pe_start, stride, pe_size, p_sync);
 }
-__device__ int IPCContext::alltoallmem_wave(rocshmem_team_t team, void* dest, 
+__device__ int IPCContext::alltoallmem_wave(rocshmem_team_t team, void* dest,
                                   const void* source, int nelems){
   if (dest == nullptr || source == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
@@ -516,7 +517,7 @@ __device__ int IPCContext::alltoallmem_wave(rocshmem_team_t team, void* dest,
 
   return ROCSHMEM_SUCCESS;
 }
-__device__ void IPCContext::internal_alltoallmem_wave(rocshmem_team_t team, void* dest, 
+__device__ void IPCContext::internal_alltoallmem_wave(rocshmem_team_t team, void* dest,
                                   const void* source, int nelems) {
 #if defined(USE_SDMA)
   if (nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
@@ -542,7 +543,7 @@ __device__ void IPCContext::alltoallmem_linear_wave(rocshmem_team_t team, void *
   // Have each PE put their designated data to the other PEs
   for (int j = 0; j < pe_size; j++) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    putmem_nbi_wave((static_cast<char *>(dst) + my_pe_in_team * nelems), 
+    putmem_nbi_wave((static_cast<char *>(dst) + my_pe_in_team * nelems),
                     (static_cast<const char *>(src) + j * nelems), nelems, dest_pe);
   }
   if (is_thread_zero_in_wave()) {
@@ -561,14 +562,14 @@ __device__ void IPCContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   int my_pe_in_team = team_obj->my_pe;
   size_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
-  int tid = get_flat_block_id() % WF_SIZE;
+  int tid = get_flat_block_id();
   // min(get_flat_block_size(), WF_SIZE)
   int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    putmem_nbi((static_cast<char *>(dst) + my_pe_in_team * nelems), 
+    putmem_nbi((static_cast<char *>(dst) + my_pe_in_team * nelems),
                     (static_cast<const char *>(src) + j * nelems), nelems, dest_pe);
   }
   for (int j = tid; j < pe_size; j += step_size) {
@@ -580,7 +581,6 @@ __device__ void IPCContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
 
   // wait until everyone has obtained their designated data
   for (int j = tid; j < pe_size; j+= step_size) {
-    int dest_pe = team_obj->get_pe_in_world(j);
 
     long *sync_flag = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flag) != 1) { }
@@ -607,7 +607,7 @@ __device__ void IPCContext::fcollectmem_linear_thread_puts_wave(rocshmem_team_t 
   int my_pe_in_team = team_obj->my_pe;
   size_t fcollect_pSync_offset = (team_obj->fcollect_sequence_number % 2) * pe_size;
 
-  int tid = get_flat_block_id() % WF_SIZE;
+  int tid = get_flat_block_id();
   int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Each lane puts this PE's src to its assigned subset of dest PEs.
@@ -713,7 +713,7 @@ __device__ void IPCContext::fcollectmem_wg_linear_thread_puts(rocshmem_team_t te
 
   int tid = get_flat_block_id();
   // min(get_flat_block_size(), WF_SIZE)
-  int step_size = get_flat_block_size();
+  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Each lane puts this PE's src to its assigned subset of dest PEs.
   // Unlike alltoall, src is the same for every dest (no per-PE offset).
@@ -740,6 +740,8 @@ __device__ void IPCContext::fcollectmem_wg_linear_thread_puts(rocshmem_team_t te
     pSync[fcollect_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
   }
 
+
+  __syncthreads();
   if (is_thread_zero_in_block()) {
     team_obj->fcollect_sequence_number++;
   }

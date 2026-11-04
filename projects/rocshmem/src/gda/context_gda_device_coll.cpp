@@ -424,7 +424,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
 
   int tid = get_flat_block_id();
   // min(get_flat_block_size(), WF_SIZE)
-  int step_size = get_flat_block_size();
+  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
@@ -447,6 +447,8 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
     pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
+
+  __syncthreads();
   if (is_thread_zero_in_block()) {
     team_obj->alltoall_sequence_number++;
   }
@@ -505,7 +507,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   int my_pe_in_team = team_obj->my_pe;
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
-  int tid = get_flat_block_id() % WF_SIZE;
+  int tid = get_flat_block_id();
   int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Have each PE put their designated data to the other PEs
@@ -538,7 +540,12 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
 
 __device__ void GDAContext::fcollectmem_wg(rocshmem_team_t team, void *dst,
                                      const void *src, int nelems) {
-  fcollectmem_linear_thread_puts_wg(team, dst, src, nelems);
+  GDATeam *team_obj_dispatch = reinterpret_cast<GDATeam *>(team);
+  size_t pe_size_dispatch = team_obj_dispatch->num_pes;
+  if (nelems < 512 && 2 * pe_size_dispatch <= ROCSHMEM_ALLTOALL_SYNC_SIZE)
+    fcollectmem_linear_thread_puts_wg(team, dst, src, nelems);
+  else
+    fcollectmem_linear_wg(team, dst, src, nelems);
 }
 
 __device__ void GDAContext::fcollectmem_linear_wg(rocshmem_team_t team, void *dst,
@@ -575,7 +582,12 @@ __device__ int GDAContext::fcollectmem_wave(rocshmem_team_t team, void *dst,
   if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
-  fcollectmem_linear_thread_puts_wave(team, dst, src, nelems);
+  GDATeam *team_obj_dispatch = reinterpret_cast<GDATeam *>(team);
+  size_t pe_size_dispatch = team_obj_dispatch->num_pes;
+  if (nelems < 512 && 2 * pe_size_dispatch <= ROCSHMEM_ALLTOALL_SYNC_SIZE)
+    fcollectmem_linear_thread_puts_wave(team, dst, src, nelems);
+  else
+    fcollectmem_linear_wave(team, dst, src, nelems);
 
   return ROCSHMEM_SUCCESS;
 }
@@ -598,7 +610,7 @@ __device__ void GDAContext::fcollectmem_linear_wave(rocshmem_team_t team, void *
       nelems, dest_pe, dest_pe, wf_info);
   }
 
-  if (is_thread_zero_in_block()) {
+  if (is_thread_zero_in_wave()) {
     // Iterate through 0th qp of each PE
     for (int j = 0; j < pe_size; j++) {
       int dest_pe = team_obj->get_pe_in_world(j);
@@ -619,7 +631,7 @@ __device__ void GDAContext::fcollectmem_linear_thread_puts_wave(rocshmem_team_t 
   int my_pe_in_team = team_obj->my_pe;
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
-  int tid = get_flat_block_id() % WF_SIZE;
+  int tid = get_flat_block_id();
   int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Have each PE put their designated data to the other PEs
@@ -660,7 +672,7 @@ __device__ void GDAContext::fcollectmem_linear_thread_puts_wg(rocshmem_team_t te
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
   int tid = get_flat_block_id();
-  int step_size = get_flat_block_size();
+  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
@@ -683,6 +695,8 @@ __device__ void GDAContext::fcollectmem_linear_thread_puts_wg(rocshmem_team_t te
     pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
+
+  __syncthreads();
   if (is_thread_zero_in_block()) {
     team_obj->alltoall_sequence_number++;
   }
