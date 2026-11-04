@@ -2659,8 +2659,8 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   return rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncReduceScatter, recvcount, datatype, query, decision);
 }
 
-// gfx1250 fabric AllToAll: LL up to rcclDdaLLThreshold total bytes, then LL128 up to ddaLL128Max. Ranks
-// must agree on in-place-ness and dword alignment, or they pick different kernels and the call hangs.
+// gfx1250 fabric AllToAll: LL up to rcclDdaLLThreshold total bytes, then LL128 up to ddaLL128Max. Neither
+// eligibility check reads the buffer pointers, so every rank picks the same kernel.
 static ncclResult_t rcclSelectAlltoAllFabric(struct ncclComm* comm, const rcclArchThresholds* table,
                                              const void* sendbuff, void* recvbuff, size_t count,
                                              ncclDataType_t datatype, bool query, struct rcclCollDecision* decision,

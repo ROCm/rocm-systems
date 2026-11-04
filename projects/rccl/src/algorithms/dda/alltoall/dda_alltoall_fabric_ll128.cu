@@ -136,10 +136,10 @@ bool ncclAllToAllDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, vo
   if (comm->ddaLLEpochDev == nullptr || comm->ddaLLEpochLen < comm->nRanks - 1) {
     return false;
   }
-  // Dword alignment is enough for the 16B accesses; only 1- and 2-byte types can miss it.
-  if ((reinterpret_cast<uintptr_t>(sendbuff) | reinterpret_cast<uintptr_t>(recvbuff)) % 4 != 0) {
-    return false;
-  }
+  // No pointer check: each rank passes its own buffers, so a rank-local refusal would leave its
+  // peers polling for a kernel it never runs. gfx1250's 16B global accesses take any alignment.
+  (void)sendbuff;
+  (void)recvbuff;
   return perChunkBytes <= ddaLL128A2AMaxPerChunkBytes(comm);
 }
 
