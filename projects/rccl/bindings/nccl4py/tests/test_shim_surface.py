@@ -138,7 +138,7 @@ class TestBuffer:
 
 
 # ---------------------------------------------------------------------------
-# MemoryResource (3 tests)
+# MemoryResource (4 tests)
 # ---------------------------------------------------------------------------
 
 
@@ -170,6 +170,21 @@ class TestMemoryResource:
 
         mr = _HipMallocResource(0)
         mr.deallocate(0, 0)
+
+    def test_close_calls_keyword_only_deallocate(self):
+        from nccl._hip_compat.cuda_core_shim._memory import _HipMallocResource
+
+        freed = []
+
+        class _KeywordOnlyStream(_HipMallocResource):
+            # Same signature as nccl.core.memory.NcclMemoryResource.deallocate.
+            def deallocate(self, ptr, size, *, stream=None):
+                freed.append((int(ptr), size, stream))
+
+        b = Buffer.from_handle(ptr=0xBEEF, size=64, mr=_KeywordOnlyStream(0))
+        b.close()
+        assert freed == [(0xBEEF, 64, None)]
+        assert int(b.handle) == 0
 
 
 # ---------------------------------------------------------------------------
