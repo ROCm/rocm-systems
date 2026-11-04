@@ -515,6 +515,13 @@ gfx1151, using absolute paths from this source tree. The original
 - **Tensor DMA scope**: only the LDS side of a transfer is tracked. Its global
   memory accesses are not checked.
 
+- **Async stores from LDS** (gfx1250): `global_store_async_from_lds_*` is
+  tracked only as a global store; its LDS read is neither checked nor
+  registered. An async store reading a pending tensor load's destination, and
+  a tensor load, DS write or direct-to-LDS write over a pending async store's
+  source, are therefore not reported in either issue order, even with no
+  `s_wait_asynccnt` between them.
+
 - **False positives with LDS barrier synchronization**: a tensor load can
   request an arrival on an LDS barrier cell when it completes, and a consumer
   wave can wait for that barrier's phase and then read the tile, without the
