@@ -14,8 +14,9 @@
 // and restructures the control flow onto a goto fail/exit pair, mirroring the
 // GIN plugin path covered by gin-plugin-init-test.cc.
 //
-// RmaInternalBackendTest covers initPluginLibsOnceFunc's choice of internal RMA
-// backend (IB-CAST or the generic IB proxy) for each NCCL_NET and NIC type.
+// RmaInternalBackendTest covers initPluginLibsOnceFunc's internal RMA backends (IB-CAST
+// before the generic IB proxy, or the IB proxy alone) for each NCCL_NET, NIC type and
+// NCCL_NET_PLUGIN.
 //
 // ncclRmaPluginInit is file-static, so this TU #includes the hipified plugin
 // rma.cc (RMA_PLUGIN_CC_PATH), the standard rccl-UnitTestsMicro pattern. A
@@ -28,6 +29,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <vector>
 
 #include "nccl.h"
 #include "comm.h"
@@ -280,8 +282,8 @@ TEST_F(RmaPluginInitTest, NullVtable_EnablesWithoutCallingIntoPlugin) {
   EXPECT_EQ(comm_->rmaContext, nullptr);
 }
 
-// Which backend initPluginLibsOnceFunc puts in the internal IB slot, the one before the
-// internal socket slot (no external, GIN or NET-plugin RMA library loads here).
+// The internal backends initPluginLibsOnceFunc puts at the end of pluginLibs, socket last (no
+// external, GIN or NET-plugin RMA library loads here).
 class RmaInternalBackendTest : public ::testing::Test {
  protected:
   void TearDown() override {
@@ -291,42 +293,64 @@ class RmaInternalBackendTest : public ::testing::Test {
     pluginCount = 0;
   }
 
-  const ncclRma_t* InternalIb(const char* net, bool ainic) {
+  std::vector<const ncclRma_t*> Internal(const char* net, bool ainic, const char* netPlugin = nullptr) {
     if (net) {
       SetMicroEnv("NCCL_NET", net);
     } else {
       SetMicroEnvAbsent("NCCL_NET");
     }
+    if (netPlugin) {
+      SetMicroEnv("NCCL_NET_PLUGIN", netPlugin);
+    } else {
+      SetMicroEnvAbsent("NCCL_NET_PLUGIN");
+    }
     SetMicroEnv("NCCL_RMA_PLUGIN", "none");
     g_rcclUseAinicValue = ainic;
     initPluginLibsOnceFunc();
-    EXPECT_EQ(pluginLibs[pluginCount - 1].ncclRma, &ncclRmaSocketProxy);
-    return pluginLibs[pluginCount - 2].ncclRma;
+    // With NCCL_RMA_PLUGIN=none and no GIN or NET plugin library, every entry is internal.
+    std::vector<const ncclRma_t*> out;
+    for (int i = 0; i < pluginCount; i++) out.push_back(pluginLibs[i].ncclRma);
+    return out;
   }
+  // IB-CAST first, the generic IB backend as its fallback, then socket.
+  const std::vector<const ncclRma_t*> kCast{&IbCastRmaIbProxy, &ncclRmaIbProxy, &ncclRmaSocketProxy};
+  const std::vector<const ncclRma_t*> kIb{&ncclRmaIbProxy, &ncclRmaSocketProxy};
 };
 
 // The data path picks IB-CAST on an AINIC host with NCCL_NET unset (plugin/net.cc), and
 // the generic IB backend is not AINIC-aware, so RMA (and GIN over it) takes IB-CAST too.
 TEST_F(RmaInternalBackendTest, NetUnsetOnAinicIsIbCast) {
-  EXPECT_EQ(InternalIb(nullptr, /*ainic=*/true), &IbCastRmaIbProxy);
+  EXPECT_EQ(Internal(nullptr, /*ainic=*/true), kCast);
 }
 
 TEST_F(RmaInternalBackendTest, NetUnsetWithoutAinicIsIb) {
-  EXPECT_EQ(InternalIb(nullptr, /*ainic=*/false), &ncclRmaIbProxy);
+  EXPECT_EQ(Internal(nullptr, /*ainic=*/false), kIb);
 }
 
 TEST_F(RmaInternalBackendTest, NetIbCastIsIbCast) {
-  EXPECT_EQ(InternalIb("IB-CAST", /*ainic=*/false), &IbCastRmaIbProxy);
+  EXPECT_EQ(Internal("IB-CAST", /*ainic=*/false), kCast);
 }
 
 // An explicit NCCL_NET=IB keeps the generic backend, on AINIC hosts too.
 TEST_F(RmaInternalBackendTest, NetIbOnAinicStaysIb) {
-  EXPECT_EQ(InternalIb("IB", /*ainic=*/true), &ncclRmaIbProxy);
+  EXPECT_EQ(Internal("IB", /*ainic=*/true), kIb);
 }
 
 // ROCM-IB selects the IB-CAST NET plugin (include/net.h), so RMA takes IB-CAST too.
 TEST_F(RmaInternalBackendTest, NetRocmIbIsIbCast) {
-  EXPECT_EQ(InternalIb("ROCM-IB", /*ainic=*/true), &IbCastRmaIbProxy);
+  EXPECT_EQ(Internal("ROCM-IB", /*ainic=*/true), kCast);
+}
+
+// An external NET plugin keeps plugin/net.cc's internal slot on the generic IB plugin, and RMA
+// follows it; "none" and an empty value only opt out of external plugins.
+TEST_F(RmaInternalBackendTest, ExternalNetPluginOnAinicIsIb) {
+  EXPECT_EQ(Internal(nullptr, /*ainic=*/true, "libnccl-net-ext.so"), kIb);
+  EXPECT_EQ(Internal("IB-CAST", /*ainic=*/true, "libnccl-net-ext.so"), kIb);
+}
+
+TEST_F(RmaInternalBackendTest, NetPluginNoneOrEmptyOnAinicIsIbCast) {
+  EXPECT_EQ(Internal(nullptr, /*ainic=*/true, "none"), kCast);
+  EXPECT_EQ(Internal(nullptr, /*ainic=*/true, ""), kCast);
 }
 
 }  // namespace

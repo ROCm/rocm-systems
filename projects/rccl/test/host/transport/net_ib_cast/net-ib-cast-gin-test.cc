@@ -625,13 +625,13 @@ class NetIbCastGinContextMicrotest : public NetIbCastGinRingMicrotest {
         *sendComm = peerSends_[connectPeers_.size() - 1].get();
         return ncclSuccess;
       }};
-  HookOf<decltype(g_ibCastAccept)> accept_{g_ibCastAccept, [this](void*, void** recvComm,
-                                                                   ncclNetDeviceHandle_t** devHandle) {
-                                             acceptPeers_.push_back(0);
-                                             acceptChIds_.push_back(devHandle ? ((ncclNet_ctxt_t*)devHandle)->chId : -1);
-                                             *recvComm = peerRecvs_[acceptPeers_.size() - 1].get();
-                                             return ncclSuccess;
-                                           }};
+  HookOf<decltype(g_ibCastAccept)> accept_{
+      g_ibCastAccept, [this](void*, void** recvComm, ncclNetDeviceHandle_t** devHandle) {
+        acceptPeers_.push_back(0);
+        acceptChIds_.push_back(devHandle ? ((ncclNet_ctxt_t*)devHandle)->chId : -1);
+        *recvComm = peerRecvs_[acceptPeers_.size() - 1].get();
+        return ncclSuccess;
+      }};
 };
 
 TEST_F(NetIbCastGinContextMicrotest, CreateContext_ConnectsToEveryPeerInEachContext) {
@@ -683,6 +683,20 @@ TEST_F(NetIbCastGinContextMicrotest, CreateContext_EachContextPassesItsOwnTopRan
     ids.insert(id);
   }
   EXPECT_EQ(ids.size(), 3u);
+}
+
+// After MAXCHANNELS / 2 contexts the ids wrap back to the top of the range, so they never leave its
+// top half (nor the range nccl_channel_ud_map covers).
+TEST_F(NetIbCastGinContextMicrotest, CreateContext_ChannelIdsWrapWithinTheTopHalf) {
+  cComm_.allGather = HandleAllGather;
+  char ring[4 * sizeof(int)];
+  base_ = ring;
+  ibCastRmaContextChIds.store(MAXCHANNELS / 2 - 1);  // the last context before the wrap
+  void* ctx = nullptr;
+  ASSERT_EQ(Create(2, 1, &ctx), ncclSuccess);
+  ASSERT_EQ(connectChIds_.size(), 8u);
+  EXPECT_EQ(connectChIds_[0], MAXCHANNELS / 2);
+  EXPECT_EQ(connectChIds_[4], MAXCHANNELS - 1);
 }
 
 TEST_F(NetIbCastGinContextMicrotest, CreateContext_RankStride_ConnectsOnlyToThatStride) {
