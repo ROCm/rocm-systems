@@ -115,6 +115,22 @@ class TestGoogleTestSuite:
             f"rdc_metric_fetcher_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
         )
 
+    def test_rdc_cache_bounds(self, rocm_dir, rdctst_path):
+        # rdctst_path skips this test unless the RDC test package is installed, and
+        # every build that installs rdctst also installs rdc_cache_bounds_tests.
+        binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_cache_bounds_tests")
+        assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
+
+        result = subprocess.run([binary], capture_output=True, text=True, timeout=120)
+
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+
+        assert result.returncode == 0, (
+            f"rdc_cache_bounds_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
+        )
+
     def test_rdctst_help(self, rdctst_path):
         result = subprocess.run(
             [rdctst_path, "--rdctst_help"], capture_output=True, text=True, timeout=30
