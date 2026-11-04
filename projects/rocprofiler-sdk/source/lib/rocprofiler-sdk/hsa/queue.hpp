@@ -47,6 +47,8 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <unordered_map>
 
 namespace rocprofiler
@@ -58,6 +60,45 @@ struct correlation_id;
 }  // namespace context
 namespace hsa
 {
+class dispatch_time_cache
+{
+public:
+    using query_type = decltype(&hsa_amd_profiling_get_dispatch_time);
+
+    void                        create(hsa_signal_t signal);
+    void                        retain(hsa_signal_t signal);
+    void                        release(hsa_signal_t signal);
+    void                        forget(hsa_signal_t signal);
+    void                        track(hsa_signal_t signal, hsa_signal_t pending, hsa_agent_t agent);
+    void                        store(hsa_signal_t signal, hsa_signal_t pending, query_type query);
+    std::optional<hsa_status_t> query(hsa_agent_t                        agent,
+                                      hsa_signal_t                       signal,
+                                      hsa_amd_profiling_dispatch_time_t* time,
+                                      query_type                         runtime_query) const;
+    void                        clear();
+
+    auto lock_lifetime() { return std::unique_lock<std::recursive_mutex>{m_lifetime_mutex}; }
+
+private:
+    struct dispatch_time_entry
+    {
+        hsa_signal_t                      pending_signal = {};
+        hsa_agent_t                       agent          = {};
+        hsa_status_t                      status         = HSA_STATUS_ERROR;
+        hsa_amd_profiling_dispatch_time_t time           = {};
+    };
+
+    struct entry
+    {
+        size_t                             references = 1;
+        std::optional<dispatch_time_entry> dispatch   = std::nullopt;
+    };
+
+    using map_type                                  = std::unordered_map<uint64_t, entry>;
+    common::Synchronized<map_type> m_data           = {};
+    std::recursive_mutex           m_lifetime_mutex = {};
+};
+
 enum class queue_state
 {
     normal       = 0,
@@ -241,12 +282,15 @@ void
 queue_init();
 
 /**
- * @brief Wraps hsa_amd_profiling_get_dispatch_time and hsa_signal_destroy so that a caller's
- * completion signal reports the dispatch time of a kernel that completed on a rocprofiler-owned
- * signal. Installed when queue interception is enabled, before the HSA API tracing wrappers.
+ * @brief Wraps dispatch-time queries and signal lifetime APIs so that a caller's completion
+ * signal reports the kernel's dispatch time. Installed when queue interception is enabled,
+ * before the HSA API tracing wrappers.
  */
 void
 dispatch_time_init(HsaApiTable* table, uint64_t tbl_instance);
+
+void
+dispatch_time_reset();
 
 void
 queue_fini();
