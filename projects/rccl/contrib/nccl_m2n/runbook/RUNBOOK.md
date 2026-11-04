@@ -67,8 +67,9 @@ Below, `N1` is the first node (you launch everything from it) and `N2` the secon
 ## 2. Docker image (per node)
 
 The image is Primus (TheRock HIP, OpenMPI in `/opt/openmpi`) plus rdma-core v61, which the
-ruby bnxt_re kernel driver needs, plus sshd on port 2222 for `mpirun`. Check first whether
-the node already has it:
+ruby bnxt_re kernel driver needs, plus sshd on port 2222 for `mpirun`, plus the Python setup of
+section 13 (no NVIDIA cuda-python, hip-python, setuptools < 82). Check first whether the node already
+has it (an image built before section 13 existed lacks the Python layer; rebuild it for section 13):
 
 ```bash
 ssh $N1 'sudo docker images | grep m2n-ruby'
@@ -316,56 +317,56 @@ were not run.
 
 ## 13. Optional: PyTorch (`nccl.m2n`)
 
-The Python package is not part of this tree. Take `python/` from upstream `NVIDIA/nccl-extensions` at the
-commit in `../UPSTREAM_VERSION` (the same sources as `nccl_m2n`) and apply `m2n-pytorch-rocm-shim.patch`
-(distributed separately): ctypes bindings for `libnccl_m2n.so`, a minimal `nccl.core` over RCCL instead of
-`cuda.bindings`/`nccl4py`, and `rocm/sitecustomize.py`, which makes torch use the same `librccl` as M2N.
-Build (section 5) first. The two `sudo docker exec` lines run on the node (root in the container); the rest
-runs in your shell inside the container.
+`nccl.m2n` (upstream `NVIDIA/nccl-extensions` `python/`) runs on RCCL through the RCCL port of `nccl4py`
+in this tree (`projects/rccl/bindings/nccl4py`, with its `nccl._hip_compat` HIP shim). The package itself
+is not in this tree: take `python/` at the commit in `../UPSTREAM_VERSION` (the same sources as `nccl_m2n`)
+and apply `m2n-nccl4py-port.patch` (distributed separately). The patch builds the Cython bindings against
+the port's `nccl.bindings.cynccl` (no CUDA headers, `nccl_m2n` only), skips `cuda.pathfinder` on ROCm, and
+adds `rocm/sitecustomize.py` (one `librccl` per process) and the DTensor check
+`tests/rocm/xdtensor_reshard_check.py`. The communicator comes from nccl4py (`nccl.core.Communicator`) or
+from torch (`ProcessGroupNCCL._comm_ptr()`).
+
+The image (section 2) already has what this needs: no NVIDIA `cuda-python`/`cuda-core`/`cuda-bindings`/
+`cuda-pathfinder` (a real `cuda.core` would shadow the port's HIP shim and needs `libcuda.so.1`), `mpi4py`,
+`hip-python`, `setuptools < 82` (torch), Cython, and `/opt/hipdev/libamdhip64.so` (hip-python dlopens the
+unversioned name, torch's `_rocm_sdk_core` ships only `.so.7`). `py_env.sh` sets the runtime environment
+instead of `env.sh` (which points `LD_LIBRARY_PATH` at `_rocm_sdk_devel`, a different HIP build than torch's).
+Container only; the native stack (section 12) has no torch.
+
+After section 5, in your shell inside the container:
 
 ```bash
-SRC=~/m2n-ruby/rocm-systems
 cd ~/m2n-ruby && git clone https://github.com/NVIDIA/nccl-extensions.git && cd nccl-extensions
-git checkout $(awk '/^commit:/{print $2}' $SRC/projects/rccl/contrib/nccl_m2n/UPSTREAM_VERSION)
-git apply --directory=python /path/to/m2n-pytorch-rocm-shim.patch
-# root: setuptools >= 77 for the wheel, < 82 for torch
-sudo docker exec $NAME /opt/venv/bin/pip install 'setuptools>=77,<82' mpi4py
-NCCL_EXTENSIONS_ROCM=1 /opt/venv/bin/python -m pip wheel --no-build-isolation --no-deps -w ~/m2n-ruby/whl ./python
-sudo docker exec $NAME bash -c "/opt/venv/bin/pip install --no-deps $HOME/m2n-ruby/whl/nccl_extensions-*.whl"
+git checkout $(awk '/^commit:/{print $2}' ~/m2n-ruby/rocm-systems/projects/rccl/contrib/nccl_m2n/UPSTREAM_VERSION)
+git apply --directory=python /path/to/m2n-nccl4py-port.patch
+bash $RB/py_build.sh                 # nccl4py + nccl_extensions wheels -> ~/m2n-ruby/whl
 ```
 
-Environment (do not source `env.sh`: `rocm-env.sh` puts `_rocm_sdk_devel` first in `LD_LIBRARY_PATH`,
-torch uses `_rocm_sdk_core`, and two HIP/LLVM copies in one process abort). `PYTHONPATH` is only for
-`sitecustomize.py`, which the wheel does not install; `LD_PRELOAD` goes to the Python ranks, not to `mpirun`:
+Install both wheels as root, from the node (`--no-deps`: nccl-extensions still declares `cuda-core`):
 
 ```bash
-S=/opt/venv/lib/python3.12/site-packages; X=~/m2n-ruby/nccl-extensions
-export PATH=/opt/openmpi/bin:/opt/venv/bin:$PATH PYTHONPATH=$X/python/rocm
-export LD_LIBRARY_PATH=/opt/openmpi/lib:$S/_rocm_sdk_core/lib:$S/_rocm_sdk_core/lib/rocm_sysdeps/lib:$S/_rocm_sdk_core/lib/llvm/lib
-export NCCL_EXTENSIONS_ROCM=1 NCCL_M2N_LIBRARY=~/m2n-ruby/mk/lib/libnccl_m2n.so
-export NCCL_M2N_RCCL_LIBRARY=~/m2n-ruby/rccl-install/lib/librccl.so.1
-export NCCL_GIN_ENABLE=1 NCCL_GIN_TYPE=2 NCCL_CUMEM_ENABLE=1 NCCL_DMABUF_ENABLE=1 HSA_NO_SCRATCH_RECLAIM=1
-export NCCL_ENV_PLUGIN=none NCCL_SOCKET_IFNAME=fenic0 MASTER_ADDR=$(hostname -s) MASTER_PORT=29533
-MPI=(mpirun -np 8 --map-by ppr:8:node --bind-to none --mca pml ob1 --mca btl ^vader,openib
-  --mca oob_tcp_if_include fenic0 --mca btl_tcp_if_include fenic0
-  --mca plm_rsh_agent "ssh -p 2222 -i $HOME/.ssh/id_m2n -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
-  -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH -x NCCL_EXTENSIONS_ROCM -x NCCL_M2N_LIBRARY -x NCCL_M2N_RCCL_LIBRARY
-  -x NCCL_GIN_ENABLE -x NCCL_GIN_TYPE -x NCCL_CUMEM_ENABLE -x NCCL_DMABUF_ENABLE -x HSA_NO_SCRATCH_RECLAIM
-  -x NCCL_ENV_PLUGIN -x NCCL_SOCKET_IFNAME -x MASTER_ADDR -x MASTER_PORT
-  env LD_PRELOAD=$NCCL_M2N_RCCL_LIBRARY python)
-cd /tmp
-"${MPI[@]}" -m nccl.m2n.benchmarks.reshard_bench --validate --buffer-provider torch \
+sudo docker exec $NAME bash -c "/opt/venv/bin/pip install --no-deps --force-reinstall $HOME/m2n-ruby/whl/*.whl"
+```
+
+Run (inside the container):
+
+```bash
+. $RB/py_env.sh && cd /tmp
+mpirun -np 8 "${PYMPI_ARGS[@]}" -m nccl.m2n.benchmarks.reshard_bench --validate --buffer-provider torch \
   --src-mesh-dims 1,4 --dst-mesh-dims 1,4 --src-shard-dim 0 --dst-shard-dim 1 --tensor-dims 8192,8192,16 \
   --algorithm direct --copy-algorithm pack --iterations 10 --warmup 2
-"${MPI[@]}" $X/python/tests/rocm/xdtensor_reshard_check.py --comm rccl    # or --comm pg (ProcessGroupNCCL)
+mpirun -np 8 "${PYMPI_ARGS[@]}" $NCCLX/python/tests/rocm/xdtensor_reshard_check.py --comm rccl   # nccl.core.Communicator
+mpirun -np 8 "${PYMPI_ARGS[@]}" $NCCLX/python/tests/rocm/xdtensor_reshard_check.py --comm pg     # ProcessGroupNCCL._comm_ptr()
 ```
 
 Expected: `VALIDATION PASSED` with the same bandwidth as the C bench at 1 GiB (PACK cross-dim ~170 GiB/s per
 source rank); the DTensor check (TP4 on ranks 0-3 -> DP2 x TP2 on 4-7, 3 placements x bf16/fp32/int8) ends
-with `RESULT PASS failures=0` for both `--comm rccl` and `--comm pg`. For 2 nodes replace `-np 8` with
-`-np 16 --hostfile ~/m2n-ruby/hostfile` and use 8-rank meshes in the bench (`--src-mesh-dims 1,8
+with `RESULT PASS failures=0` for both `--comm rccl` and `--comm pg`. For 2 nodes use
+`-np 16 --hostfile ~/m2n-ruby/hostfile` and 8-rank meshes in the bench (`--src-mesh-dims 1,8
 --dst-mesh-dims 1,8`, node 1 -> node 2); the DTensor check sizes itself from the world size (TP8 -> DP2 x TP4).
-Only `--buffer-provider torch` is supported on ROCm.
+Only `--buffer-provider torch` is supported on ROCm. Known port issue: `--api window` passes, but freeing an
+`nccl.core.torch.empty` buffer raises `TypeError` in `nccl/_hip_compat/cuda_core_shim/_memory.py`
+(`deallocate(..., stream)` against a keyword-only `stream`), so `ncclMemFree` is skipped.
 
 ## Troubleshooting
 
