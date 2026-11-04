@@ -109,10 +109,14 @@ constexpr uint32_t make_cdna1_sop1(uint32_t sdst, uint32_t ssrc0) {
   return 0xBE800000u | ((sdst & 0x7Fu) << 16) | (ssrc0 & 0xFFu);
 }
 
-TEST(OperandLayoutTest, DeferredSelectorStateFitsExistingPadding) {
+TEST(OperandLayoutTest, GeneratedOperandsUse64Bytes) {
+  EXPECT_EQ(sizeof(Instruction), 192u);
   EXPECT_EQ(sizeof(Operand), 32u);
-  EXPECT_EQ(sizeof(cdna5::Operand), 80u);
-  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 480u);
+  // Cover generator profiles with and without packed 16-bit state.
+  EXPECT_EQ(sizeof(cdna4::Operand), 64u);
+  EXPECT_EQ(sizeof(cdna5::Operand), 64u);
+  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 432u);
+  EXPECT_EQ(sizeof(cdna5::Vopd), 864u);
 }
 
 TEST(OperandLayoutTest, DecodedVectorRegistersExcludeScalarAndLiteralSelectors) {
