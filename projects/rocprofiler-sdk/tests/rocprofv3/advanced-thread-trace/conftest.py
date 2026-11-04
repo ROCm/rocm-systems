@@ -169,7 +169,7 @@ def att_marker_trace_out_dir_path(request):
 def missing_avx512_cpu_flags():
     with open("/proc/cpuinfo") as inp:
         flags = next(
-            (l.split(":", 1)[1].split() for l in inp if l.startswith("flags")), []
+            (ln.split(":", 1)[1].split() for ln in inp if ln.startswith("flags")), []
         )
     return [f for f in ["avx512f", "avx512bw", "avx512vbmi"] if f not in flags]
 
