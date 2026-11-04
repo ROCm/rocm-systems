@@ -34,7 +34,10 @@ def test_bare_profile_selection_saves_known_backends():
 
 
 def test_space_profile_tokens_save_known_backends():
-    assert resolve_profile_selection(["torch", "triton"]) == ["torch", "triton"]
+    assert resolve_profile_selection(["triton", "torch", "triton"]) == [
+        "triton",
+        "torch",
+    ]
 
 
 def test_profile_selection_rejects_user():
