@@ -10,6 +10,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// hip_ext_copy_engine's device detail header uses hipExtCopyEngine* types that
+// live in hip/driver_types.h (pulled via hip_runtime.h), without including it
+// itself. Include hip_runtime.h first so those types are declared regardless of
+// include order in the aggregating TU (gin_device_api.h pulls this early).
+#include <hip/hip_runtime.h>
+#include <hip/hip_ext_copy_engine.h>
+
 struct ncclGinAbceIpcBufEntry;
 
 #define NCCL_GIN_ABCE_SDMA_NET_VERSION 115
@@ -29,7 +36,14 @@ struct ncclGinAbceIpcBufEntry;
 
 struct ncclGinAbceSdmaGPUContext {
   uint32_t layoutMagic;  // NCCL_GIN_ABCE_SDMA_LAYOUT_MAGIC
-  void** queueHandles;   // [local_pe * numChannels + ch] SdmaQueueDeviceHandle*
+  // [local_pe * numChannels + ch] row of ABCE copy-engine handles, by value.
+  // (anvil stored SdmaQueueDeviceHandle* pointers; ABCE handles are 16B values.)
+  hipExtCopyEngineDeviceHandle* queueHandles;
+  // Per-(peer*numChannels+ch) monotonic completion counters: each SDMA put
+  // carries an Add-1 completion here, and flush/wait spins until the counter
+  // reaches the number submitted. Replaces anvil's drainable quiet() queue.
+  uint64_t* completion;      // device fine-grained; [nRanks*numChannels] words
+  uint64_t* submitted;       // GIN-owned submit counts, same layout (device-written)
   uint64_t* sdmaDirty;   // GIN-owned dirty bitmask
   uint64_t* signals;
   uint64_t* counters;

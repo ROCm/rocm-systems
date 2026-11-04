@@ -34,8 +34,19 @@
 
 #include "hsakmt/hsakmt.h"
 #include "hsakmt/hsakmttypes.h"
+
+// The SDMA_PKT_* packet structs and SDMA_SUBOP_* opcode constants live in
+// namespace sdma_anvil so they do not collide at global scope with ABCE's
+// identically-named SDMA_PKT_*_TAG (abce/sdma_packets.h). The RCCL GIN runtime
+// selects anvil (type 7) vs abce (type 8) at runtime, so both backend device
+// headers are included in one TU (via gin_device_api.h); without this isolation
+// the two packet definitions redefine each other. All anvil code that uses these
+// types is already inside namespace sdma_anvil, so this is transparent to it; the
+// SDMA_IS_OSS7 macro from sdma_opcodes.h is textual and stays global.
+namespace sdma_anvil {
 #include "sdma_pkt_struct.h"
 #include "sdma_pkt_struct_mi4.h"
+}  // namespace sdma_anvil
 
 namespace sdma_anvil {
 

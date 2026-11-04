@@ -58,6 +58,11 @@ struct ginAbceCollCtx {
   gin_abce_sdma_handle_t sdma;
   void** gpu_queue_handles;
   uint64_t* sdma_dirty_d;
+  // ABCE completion-counter model: per-(peer*numChannels+ch) words. completion_d
+  // is written by the copy engine (Add-1 per landed put); submitted_d is the
+  // GIN-owned per-slot submit count. flush spins until completion >= submitted.
+  uint64_t* completion_d;
+  uint64_t* submitted_d;
   int numChannels;
   int sdmaChannelStride;
 };
@@ -76,6 +81,8 @@ struct ginAbceGinCtx {
   uint64_t* counters;
   void** gpu_queue_handles;
   uint64_t* sdma_dirty_d;
+  uint64_t* completion_d;
+  uint64_t* submitted_d;
   int numChannels;
   int sdmaChannelStride;
   uintptr_t** signal_remote_addrs_dev;
@@ -327,6 +334,25 @@ static ncclResult_t ginAbceConnect(void* ctx, void* handles[], int nranks, int r
   cctx->numChannels = gin_abce_sdma_get_num_channels(h);
   cctx->sdmaChannelStride = gin_abce_sdma_get_channel_stride(h);
 
+  // Per-slot completion/submit counters for the ABCE flush model. Fine-grained
+  // device memory: the copy engine writes completion_d, the shader reads it.
+  const size_t slotBytes = (size_t)nranks * (size_t)cctx->numChannels * sizeof(uint64_t);
+  cctx->completion_d = nullptr;
+  cctx->submitted_d = nullptr;
+  if (hipExtMallocWithFlags((void**)&cctx->completion_d, slotBytes, hipDeviceMallocFinegrained) !=
+          hipSuccess ||
+      hipExtMallocWithFlags((void**)&cctx->submitted_d, slotBytes, hipDeviceMallocFinegrained) !=
+          hipSuccess ||
+      hipMemset(cctx->completion_d, 0, slotBytes) != hipSuccess ||
+      hipMemset(cctx->submitted_d, 0, slotBytes) != hipSuccess) {
+    WARN("GIN abce-sdma: completion/submit counter alloc failed");
+    if (cctx->completion_d) hipFree(cctx->completion_d);
+    if (cctx->submitted_d) hipFree(cctx->submitted_d);
+    gin_abce_sdma_destroy(h);
+    delete cctx;
+    return ncclSystemError;
+  }
+
   INFO(NCCL_INIT, "GIN abce-sdma: standalone SDMA queues (%d ranks, %d ch, spread=%d)", nranks, cctx->numChannels,
        cctx->sdmaChannelStride);
   *collComm = cctx;
@@ -350,6 +376,8 @@ static ncclResult_t ginAbceCloseColl(void* collComm) {
       std::lock_guard<std::mutex> lock(pluginMutex);
       ginAbceConnCheckedComms.erase(cctx->comm);
     }
+    if (cctx->completion_d) CUDACHECKIGNORE(hipFree(cctx->completion_d));
+    if (cctx->submitted_d) CUDACHECKIGNORE(hipFree(cctx->submitted_d));
     if (cctx->sdma) gin_abce_sdma_destroy(cctx->sdma);
     delete cctx;
   }
@@ -1032,6 +1060,8 @@ static ncclResult_t ginAbceCreateContext(void* collComm, ncclGinConfig_t* config
   ctx->hasError = false;
   ctx->gpu_queue_handles = cctx->gpu_queue_handles;
   ctx->sdma_dirty_d = cctx->sdma_dirty_d;
+  ctx->completion_d = cctx->completion_d;
+  ctx->submitted_d = cctx->submitted_d;
   ctx->numChannels = cctx->numChannels;
   ctx->sdmaChannelStride = cctx->sdmaChannelStride;
 
@@ -1081,8 +1111,10 @@ static ncclResult_t ginAbceCreateContext(void* collComm, ncclGinConfig_t* config
     gpuCtx->numChannels = ctx->numChannels;
     gpuCtx->sdmaChannel = 0;
     gpuCtx->sdmaChannelStride = ctx->sdmaChannelStride;
-    gpuCtx->queueHandles = ctx->gpu_queue_handles;
+    gpuCtx->queueHandles = (hipExtCopyEngineDeviceHandle*)ctx->gpu_queue_handles;
     gpuCtx->sdmaDirty = ctx->sdma_dirty_d;
+    gpuCtx->completion = ctx->completion_d;
+    gpuCtx->submitted = ctx->submitted_d;
     gpuCtx->sdmaThreshold = (threshold > (size_t)std::numeric_limits<uint32_t>::max())
                               ? std::numeric_limits<uint32_t>::max()
                               : (uint32_t)threshold;

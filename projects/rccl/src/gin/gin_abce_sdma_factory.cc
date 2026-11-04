@@ -8,8 +8,8 @@
 
 #include "gin/gin_abce_sdma_factory.h"
 
-#include "sdma/anvil.hpp"
 #include <hip/hip_runtime.h>
+#include <hip/hip_ext_copy_engine.h>
 #include <cstdlib>
 #include <vector>
 #include <cstring>
@@ -17,20 +17,33 @@
 
 #include "debug.h"
 
+// ABCE copy-engine backend. Unlike anvil (a process-global SdmaQueue singleton
+// with connect()/getSdmaQueue()), ABCE hands out per-(device,src,dst) device
+// handles via hipExtCopyEngineGetDeviceHandles(). A handle is a 16-byte value
+// struct passed to kernels by value, not a device pointer; we still store a
+// device-memory row of them indexed [local_pe * numChannels + ch] so the device
+// code indexes exactly as the anvil backend did.
 struct gin_abce_sdma_opaque {
   int nRanks;
   int numChannels;
   int myRank;
   int myDeviceId;
   int sdmaChannelStride;
-  sdma_anvil::SdmaQueueDeviceHandle** deviceHandles_d;
+  hipExtCopyEngineDeviceHandle* deviceHandles_d;  // [nRanks*numChannels] by value
   uint64_t* sdmaDirty_d;
 };
 
 extern "C" int gin_abce_sdma_probe(void) {
   int ndev = 0;
   if (hipGetDeviceCount(&ndev) != hipSuccess || ndev < 1) return 0;
-  return sdma_anvil::initEndpoint() ? 1 : 0;
+  int dev = 0;
+  if (hipGetDevice(&dev) != hipSuccess) return 0;
+  // A self-copy handle on the current device is the cheapest liveness check:
+  // succeeds only when the kernel-side copy engine is on and supported.
+  hipExtCopyEngineDeviceHandle h{};
+  int n = 0;
+  if (hipExtCopyEngineGetDeviceHandles(dev, dev, dev, 1, &h, &n) != hipSuccess || n < 1) return 0;
+  return 1;
 }
 
 static int checkHip(hipError_t e, const char* what) {
@@ -75,75 +88,73 @@ extern "C" int gin_abce_sdma_create(int nRanks, int myRank, int my_device_id,
 
   const int myDev = devs[static_cast<size_t>(myRank)];
 
-  if (!sdma_anvil::initEndpoint()) {
-    WARN("GIN abce-sdma: Abce SDMA init failed");
-    return -1;
-  }
-
-  // Queues live in the process-global singleton, so a failed create has to give back the ones it
-  // took or they keep charging the budget. It must give back no more than that either: each
-  // communicator gets its own ginState and the loop below deliberately reuses queues a previous
-  // create left behind, whose device handles are already published to the GPU.
-  std::vector<int> connectedDevs;
-  auto abandon = [&connectedDevs]() {
-    for (int dev : connectedDevs) sdma_anvil::anvil.disconnectDevice(dev);
-    return -1;
-  };
-
-  try {
-    for (int local_pe = 0; local_pe < nRanks; ++local_pe) {
-      const int remoteDev = devs[static_cast<size_t>(local_pe)];
-      if (sdma_anvil::anvil.getSdmaQueue(myDev, remoteDev, 0) != nullptr) continue;
-      if (myDev != remoteDev) sdma_anvil::EnablePeerAccess(myDev, remoteDev);
-      if (!sdma_anvil::anvil.connect(myDev, remoteDev, numChannels)) {
-        WARN("GIN abce-sdma: connect(%d -> %d) failed", myDev, remoteDev);
-        return abandon();
-      }
-      connectedDevs.push_back(remoteDev);
-    }
-  } catch (const std::exception& e) {
-    WARN("GIN abce-sdma: SDMA connect failed: %s", e.what());
-    return abandon();
-  }
-
+  // One copy-engine handle set per peer. ABCE ranks engines for the (src,dst)
+  // pair and returns up to numChannels handles; we fan them across channels,
+  // repeating the last if ABCE offered fewer than requested.
   const int total = nRanks * numChannels;
-  std::vector<sdma_anvil::SdmaQueueDeviceHandle*> host_handles(
-      static_cast<size_t>(total), nullptr);
+  std::vector<hipExtCopyEngineDeviceHandle> host_handles(static_cast<size_t>(total));
+  std::memset(host_handles.data(), 0, host_handles.size() * sizeof(hipExtCopyEngineDeviceHandle));
   int validHandles = 0;
   for (int local_pe = 0; local_pe < nRanks; ++local_pe) {
     const int remoteDev = devs[static_cast<size_t>(local_pe)];
+    if (myDev != remoteDev) {
+      // ABCE reaches the peer's memory over xGMI; HIP peer access must be on.
+      int canAccess = 0;
+      if (hipDeviceCanAccessPeer(&canAccess, myDev, remoteDev) == hipSuccess && canAccess) {
+        int prev = 0;
+        if (hipGetDevice(&prev) == hipSuccess) {
+          if (hipSetDevice(myDev) == hipSuccess) {
+            hipError_t pe = hipDeviceEnablePeerAccess(remoteDev, 0);
+            if (pe != hipSuccess && pe != hipErrorPeerAccessAlreadyEnabled)
+              WARN("GIN abce-sdma: enable peer access %d->%d: %s", myDev, remoteDev,
+                   hipGetErrorString(pe));
+            hipSetDevice(prev);
+          }
+        }
+      }
+    }
+    std::vector<hipExtCopyEngineDeviceHandle> handles(static_cast<size_t>(numChannels));
+    int n = 0;
+    hipError_t e =
+        hipExtCopyEngineGetDeviceHandles(myDev, myDev, remoteDev, numChannels, handles.data(), &n);
+    if (e != hipSuccess || n < 1) {
+      WARN("GIN abce-sdma: GetDeviceHandles(%d -> %d) failed (%s, n=%d)", myDev, remoteDev,
+           hipGetErrorString(e), n);
+      return -1;
+    }
     for (int c = 0; c < numChannels; ++c) {
-      sdma_anvil::SdmaQueue* q = sdma_anvil::anvil.getSdmaQueue(myDev, remoteDev, c);
-      auto* h = q ? q->deviceHandle() : nullptr;
-      host_handles[static_cast<size_t>(local_pe * numChannels + c)] = h;
-      if (h != nullptr) validHandles++;
+      host_handles[static_cast<size_t>(local_pe * numChannels + c)] =
+          handles[static_cast<size_t>(c < n ? c : n - 1)];
+      ++validHandles;
     }
   }
   if (validHandles == 0) {
-    WARN("GIN abce-sdma: no SDMA queue handles for device %d", myDev);
-    return abandon();
+    WARN("GIN abce-sdma: no copy-engine handles for device %d", myDev);
+    return -1;
   }
 
-  sdma_anvil::SdmaQueueDeviceHandle** dev_row = nullptr;
-  if (checkHip(hipMalloc(&dev_row, static_cast<size_t>(total) * sizeof(void*)), "hipMalloc handles") != 0)
-    return abandon();
-  if (checkHip(hipMemcpy(dev_row, host_handles.data(), static_cast<size_t>(total) * sizeof(void*),
+  hipExtCopyEngineDeviceHandle* dev_row = nullptr;
+  if (checkHip(hipMalloc(&dev_row, static_cast<size_t>(total) * sizeof(hipExtCopyEngineDeviceHandle)),
+               "hipMalloc handles") != 0)
+    return -1;
+  if (checkHip(hipMemcpy(dev_row, host_handles.data(),
+                         static_cast<size_t>(total) * sizeof(hipExtCopyEngineDeviceHandle),
                          hipMemcpyHostToDevice),
                "hipMemcpy handles") != 0) {
     checkHip(hipFree(dev_row), "hipFree handles (cleanup)");
-    return abandon();
+    return -1;
   }
 
   uint64_t* dirty = nullptr;
   if (checkHip(hipExtMallocWithFlags((void**)&dirty, sizeof(uint64_t), hipDeviceMallocFinegrained),
                "hipExtMallocWithFlags sdmaDirty") != 0) {
     checkHip(hipFree(dev_row), "hipFree handles (cleanup)");
-    return abandon();
+    return -1;
   }
   if (checkHip(hipMemset(dirty, 0, sizeof(uint64_t)), "hipMemset sdmaDirty") != 0) {
     checkHip(hipFree(dev_row), "hipFree handles (cleanup)");
     checkHip(hipFree(dirty), "hipFree dirty (cleanup)");
-    return abandon();
+    return -1;
   }
 
   auto* impl = new gin_abce_sdma_opaque{};

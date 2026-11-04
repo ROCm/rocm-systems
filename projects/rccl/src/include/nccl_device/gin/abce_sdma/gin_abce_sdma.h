@@ -13,14 +13,14 @@
 #include "gin_abce_sdma_put_policy.h"
 #include "gin_abce_ipc_copy.h"
 #include "gin_abce_ipc_table_device.h"
-// The SDMA engine device headers are physically copied by CMake only into
-// anvil_sdma/sdma/. Include them via that path so this TU and the anvil device
-// header share the SAME physical files -- sdma_opcodes.h uses #pragma once, which
-// dedupes by path, so two different copies redefine its enums when both backend
-// headers land in one TU (via gin_device_api.h). The abce baseline reuses the
-// anvil engine headers; pass 2 swaps these for the ABCE hipExtCopyEngine API.
-#include "../anvil_sdma/sdma/anvil_device.hpp"
-#include "../anvil_sdma/sdma/sdma_opcodes.h"
+#include <hip/hip_ext_copy_engine.h>
+
+// SDMA_IS_OSS7 was provided by anvil's sdma_opcodes.h (no longer included here).
+// The ABCE fused-signal path is a later refinement (fusedSdmaSignal defaults
+// off); define 0 so useSdmaFusedSignal() compiles to the unfused path.
+#ifndef SDMA_IS_OSS7
+#define SDMA_IS_OSS7 0
+#endif
 
 namespace nccl {
 namespace gin {
@@ -106,20 +106,18 @@ NCCL_DEVICE_INLINE uint64_t* remoteSdmaFusedSignalAddr(ncclGinAbceSdmaGPUContext
   return remoteSignalAddr(rsCtx, peer, signal);
 }
 
+// ABCE always supports a fused put+signal (hipExtCopyEngineSubmitLinearTwo
+// Completions: the engine writes the peer's signal cell right after the copy
+// lands), unlike anvil where it was gated on the engine's COPY_LINEAR_WAIT_
+// SIGNAL_MI4 packet (the old SDMA_IS_OSS7 check). So this is gated only on the
+// runtime fusedSdmaSignal flag and the signal addressing being bound. Fusing
+// removes the per-put shader quiet()+signalPeer round-trip (abceQuiet spins on
+// the engine's completion write-back), which is the small-message latency cost.
 NCCL_DEVICE_INLINE bool useSdmaFusedSignal(ncclGinAbceSdmaGPUContext* rsCtx, bool sdmaDataPath, bool hasSignal,
                                            bool hasCounter, ncclGinSignalOp_t signalOp) {
-#if SDMA_IS_OSS7
   return abceCtxValid(rsCtx) && sdmaDataPath && hasSignal && !hasCounter && signalOp == ncclGinSignalInc &&
          loadConst(&rsCtx->signals) != nullptr && loadConst(&rsCtx->signal_remote_addrs) != nullptr &&
          loadConst(&rsCtx->fusedSdmaSignal) != 0;
-#else
-  (void)rsCtx;
-  (void)sdmaDataPath;
-  (void)hasSignal;
-  (void)hasCounter;
-  (void)signalOp;
-  return false;
-#endif
 }
 
 // Callers must mark *after* the doorbell. That gives Flush the invariant "bit
@@ -147,24 +145,103 @@ NCCL_DEVICE_INLINE int effectiveChannel(ncclGinAbceSdmaGPUContext* rsCtx, int bl
   return (baseCh + stride * slot) % numCh;
 }
 
-NCCL_DEVICE_INLINE ::sdma_anvil::SdmaQueueDeviceHandle* queueHandle(ncclGinAbceSdmaGPUContext* rsCtx, int peer,
-                                                                    int blockId) {
+// ABCE copy-engine handle (16B value). Replaces anvil's SdmaQueueDeviceHandle*.
+using AbceHandle = hipExtCopyEngineDeviceHandle;
+
+// ABCE has no drainable queue; each engine carries a monotonic completion
+// counter. A put attaches an Add-1 completion on completion[idx] and bumps the
+// GIN-owned submitted[idx]; flush/quiet spins until completion[idx] reaches it.
+// idx is the same (peer*numChannels + ch) slot as the handle row.
+NCCL_DEVICE_INLINE AbceHandle* handleAt(ncclGinAbceSdmaGPUContext* rsCtx, int idx) {
+  auto* handles = (AbceHandle*)loadConst(&rsCtx->queueHandles);
+  if (handles == nullptr) return nullptr;
+  return handles + idx;  // by-value row; a stable pointer the submit calls read
+}
+
+NCCL_DEVICE_INLINE AbceHandle* queueHandle(ncclGinAbceSdmaGPUContext* rsCtx, int peer, int blockId) {
   int numCh = loadConst(&rsCtx->numChannels);
   int effCh = effectiveChannel(rsCtx, blockId);
-  auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
-  if (handles == nullptr) return nullptr;
-  return loadConst(handles + peer * numCh + effCh);
+  return handleAt(rsCtx, peer * numCh + effCh);
+}
+
+// Submit one SDMA copy on slot idx, recording an Add-1 completion so flush can
+// drain it. remoteSig (optional) fuses a second completion that increments the
+// peer's signal cell once the copy lands (replaces anvil putSignal).
+NCCL_DEVICE_INLINE void abcePut(ncclGinAbceSdmaGPUContext* rsCtx, int idx, AbceHandle* handle,
+                                void* dst, void* src, size_t bytes, uint64_t* remoteSig) {
+  uint64_t* completion = loadConst(&rsCtx->completion);
+  uint64_t* submitted = loadConst(&rsCtx->submitted);
+  hipExtCopyEngineSignal localDone{};
+  if (completion != nullptr) {
+    localDone.signalAddress = reinterpret_cast<uint64_t>(&completion[idx]);
+    localDone.value = 1;
+    localDone.op = hipExtCopyEngineSignalAdd;
+    localDone.flags = 0;
+  }
+  hipExtCopyEngineSignal peerSig{};
+  if (remoteSig != nullptr) {
+    peerSig.signalAddress = reinterpret_cast<uint64_t>(remoteSig);
+    peerSig.value = 1;
+    peerSig.op = hipExtCopyEngineSignalAdd;
+    peerSig.flags = 0;
+  }
+  // Blocking submit (no NONBLOCKING flag): the API waits while the ring is full
+  // and returns hipSuccess once the copy is queued; hipErrorNotReady is only
+  // possible under NONBLOCKING. So the counter MUST increment unconditionally in
+  // lockstep with the submit -- a conditional count would desync the sender's
+  // flush from what the receiver waits on: if a copy silently did not queue, the
+  // sender would drain early and fire the peer signal while the receiver spins on
+  // data that never arrived (the deadlock moves to the receiver and becomes a
+  // data-integrity hazard). Use the multi-lane SubmitLinear, not OneLane: the gin
+  // caller is reduced to one coop thread, but that thread shares its wave with
+  // other active lanes, which OneLane rejects (it needs exactly 1 active lane).
+  // Any non-success here is a true hard error (bad handle/args/unsupported ISA),
+  // not back-pressure; trap so it surfaces instead of silently desyncing ranks.
+  hipError_t rc =
+      remoteSig != nullptr
+          ? hipExtCopyEngineSubmitLinearTwoCompletions(handle, dst, src, bytes, &localDone, &peerSig)
+          : hipExtCopyEngineSubmitLinear(handle, dst, src, bytes,
+                                         completion != nullptr ? &localDone : nullptr);
+  if (rc != hipSuccess) __builtin_trap();
+  if (submitted != nullptr) submitted[idx] += 1;
+}
+
+// Spin until slot idx's completion counter has caught up to its submit count.
+NCCL_DEVICE_INLINE void abceQuiet(ncclGinAbceSdmaGPUContext* rsCtx, int idx) {
+  uint64_t* completion = loadConst(&rsCtx->completion);
+  uint64_t* submitted = loadConst(&rsCtx->submitted);
+  if (completion == nullptr || submitted == nullptr) return;
+  uint64_t target = submitted[idx];
+  while (__scoped_atomic_load_n(&completion[idx], __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM) < target) {
+  }
+}
+
+NCCL_DEVICE_INLINE bool abceIsFlushed(ncclGinAbceSdmaGPUContext* rsCtx, int idx, uint64_t target) {
+  uint64_t* completion = loadConst(&rsCtx->completion);
+  if (completion == nullptr) return true;
+  return __scoped_atomic_load_n(&completion[idx], __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM) >= target;
+}
+
+NCCL_DEVICE_INLINE uint64_t abceQuietTarget(ncclGinAbceSdmaGPUContext* rsCtx, int idx) {
+  uint64_t* submitted = loadConst(&rsCtx->submitted);
+  return submitted != nullptr ? submitted[idx] : 0;
+}
+
+// Slot index (peer*numChannels + effCh) for this peer/block, or -1 if no row.
+NCCL_DEVICE_INLINE int queueSlot(ncclGinAbceSdmaGPUContext* rsCtx, int peer, int blockId) {
+  if (loadConst(&rsCtx->queueHandles) == nullptr) return -1;
+  int numCh = loadConst(&rsCtx->numChannels);
+  return peer * numCh + effectiveChannel(rsCtx, blockId);
 }
 
 // Weak signals quiet only when this call itself posted SDMA: the signal orders
 // its own payload and nothing earlier. Pure IPC puts (A2A small messages) touch
 // no queue and skip quiet(). Strong signals take quietPeerQueues instead.
 NCCL_DEVICE_INLINE bool needSdmaQuietBeforeSignal(ncclGinAbceSdmaGPUContext* rsCtx, int peer, int blockId,
-                                                  ::sdma_anvil::SdmaQueueDeviceHandle** handle,
-                                                  bool issuedSdmaThisCall) {
+                                                  int* slot, bool issuedSdmaThisCall) {
   if (!issuedSdmaThisCall) return false;
-  if (*handle == nullptr) *handle = queueHandle(rsCtx, peer, blockId);
-  return *handle != nullptr;
+  if (*slot < 0) *slot = queueSlot(rsCtx, peer, blockId);
+  return *slot >= 0;
 }
 
 NCCL_DEVICE_INLINE void signalPeer(ncclGinAbceSdmaGPUContext* rsCtx, int peer, const ncclGinSignalDescriptor& signal,
@@ -179,10 +256,10 @@ NCCL_DEVICE_INLINE void signalPeer(ncclGinAbceSdmaGPUContext* rsCtx, int peer, c
   ipcFlatAtomicAddSys64(remoteSig, value);
 }
 
-NCCL_DEVICE_INLINE void fenceBeforeSignal(bool needSdmaQuiet, ::sdma_anvil::SdmaQueueDeviceHandle* handle) {
-  // quiet() drains this peer/channel queue. Sub-threshold IPC stores are not
-  // on that queue, so a system fence still orders them ahead of the signal.
-  if (needSdmaQuiet && handle != nullptr) ::sdma_anvil::quiet(*handle);
+NCCL_DEVICE_INLINE void fenceBeforeSignal(ncclGinAbceSdmaGPUContext* rsCtx, bool needSdmaQuiet, int slot) {
+  // quiet() drains this peer/channel engine. Sub-threshold IPC stores are not
+  // on that engine, so a system fence still orders them ahead of the signal.
+  if (needSdmaQuiet && slot >= 0) abceQuiet(rsCtx, slot);
   NCCL_GIN_THREADFENCE_SYSTEM();
 }
 
@@ -203,13 +280,11 @@ NCCL_DEVICE_INLINE bool skipFenceBeforeSignal(bool needSdmaQuiet, bool hasSignal
 // then coop.sync()) plus a weak signal is the equivalent the barrier contract
 // requires.
 NCCL_DEVICE_INLINE void quietPeerQueues(ncclGinAbceSdmaGPUContext* rsCtx, int peer) {
-  auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
-  if (handles == nullptr) return;
+  if (loadConst(&rsCtx->queueHandles) == nullptr) return;
   int numCh = loadConst(&rsCtx->numChannels);
 #pragma unroll 1
   for (int ch = 0; ch < numCh; ++ch) {
-    auto* h = loadConst(handles + peer * numCh + ch);
-    if (h != nullptr) ::sdma_anvil::quiet(*h);
+    abceQuiet(rsCtx, peer * numCh + ch);
   }
 }
 
@@ -224,18 +299,17 @@ NCCL_DEVICE_INLINE void fenceBeforeStrongFusedSignal(ncclGinAbceSdmaGPUContext* 
 }
 
 NCCL_DEVICE_INLINE void maybeFenceBeforeSignal(ncclGinAbceSdmaGPUContext* rsCtx, int peer, int blockId,
-                                               ::sdma_anvil::SdmaQueueDeviceHandle** handle,
-                                               bool issuedSdmaThisCall, bool hasSignal, bool hasCounter,
-                                               bool strongSignal) {
+                                               int* slot, bool issuedSdmaThisCall, bool hasSignal,
+                                               bool hasCounter, bool strongSignal) {
   if (hasSignal && strongSignal) {
     // signalPeer releases before the atomic. A fence here would only duplicate
     // that, and when the signal address is missing no signal is sent at all.
     quietPeerQueues(rsCtx, peer);
     return;
   }
-  bool needSdmaQuiet = needSdmaQuietBeforeSignal(rsCtx, peer, blockId, handle, issuedSdmaThisCall);
+  bool needSdmaQuiet = needSdmaQuietBeforeSignal(rsCtx, peer, blockId, slot, issuedSdmaThisCall);
   if (!skipFenceBeforeSignal(needSdmaQuiet, hasSignal, hasCounter)) {
-    fenceBeforeSignal(needSdmaQuiet, *handle);
+    fenceBeforeSignal(rsCtx, needSdmaQuiet, *slot);
   }
 }
 
@@ -277,7 +351,7 @@ NCCL_DEVICE_INLINE uint64_t ownedSdmaDirtyMask(int nRanks, int numCh, int thread
 NCCL_DEVICE_INLINE void quietOwnedSdmaDirtyBits(ncclGinAbceSdmaGPUContext* rsCtx, uint64_t* sdmaDirty,
                                                 int nRanks, int threadRank, int stride) {
   if (sdmaDirty == nullptr) return;
-  auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
+  const bool haveHandles = loadConst(&rsCtx->queueHandles) != nullptr;
   int numCh = loadConst(&rsCtx->numChannels);
   if (numCh <= 0) return;
 
@@ -287,21 +361,20 @@ NCCL_DEVICE_INLINE void quietOwnedSdmaDirtyBits(ncclGinAbceSdmaGPUContext* rsCtx
   // zero and Flush touches no atomic at all on the path this PR is about.
   const uint64_t dirty = __scoped_atomic_load_n(sdmaDirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) & owned;
   if (dirty == 0) return;
-  // Without a queue table there is nothing to drain, so drop every owned bit
+  // Without a handle row there is nothing to drain, so drop every owned bit
   // rather than leave the mask reporting work no quiet() can ever retire.
-  if (handles == nullptr) {
+  if (!haveHandles) {
     __scoped_atomic_fetch_and(sdmaDirty, ~owned, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     return;
   }
-  // Bit p * numCh + ch is also that queue's index in handles[], and owned has
-  // already dropped bits past kSdmaDirtyBitWidth.
+  // Bit p * numCh + ch is also that engine's slot index, and owned has already
+  // dropped bits past kSdmaDirtyBitWidth.
   uint64_t rem = dirty;
 #pragma unroll 1
   while (rem != 0) {
     const int bitIdx = __builtin_ctzll(rem);
     rem &= rem - 1;
-    auto* h = loadConst(handles + bitIdx);
-    if (h != nullptr) ::sdma_anvil::quiet(*h);
+    abceQuiet(rsCtx, bitIdx);
   }
   __scoped_atomic_fetch_and(sdmaDirty, ~dirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 }
@@ -316,20 +389,18 @@ NCCL_DEVICE_INLINE uint32_t dirtyChannelMask(uint64_t dirty, int peer, int numCh
   return mask;
 }
 
-NCCL_DEVICE_INLINE ::sdma_anvil::SdmaQueueDeviceHandle* channelHandle(ncclGinAbceSdmaGPUContext* rsCtx, int peer,
-                                                                      int ch) {
-  auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
-  if (handles == nullptr) return nullptr;
-  return loadConst(handles + peer * loadConst(&rsCtx->numChannels) + ch);
+NCCL_DEVICE_INLINE int channelSlot(ncclGinAbceSdmaGPUContext* rsCtx, int peer, int ch) {
+  if (loadConst(&rsCtx->queueHandles) == nullptr) return -1;
+  return peer * loadConst(&rsCtx->numChannels) + ch;
 }
 
-// Polls instead of calling quiet() so untimed callers still return on abort.
+// Polls the completion counter so untimed callers still return on abort.
 template <bool HasTimeout>
-NCCL_DEVICE_INLINE ncclResult_t waitFlushed(::sdma_anvil::SdmaQueueDeviceHandle* handle, uint64_t target,
+NCCL_DEVICE_INLINE ncclResult_t waitFlushed(ncclGinAbceSdmaGPUContext* rsCtx, int slot, uint64_t target,
                                             uint32_t* abortFlag, uint64_t startCycle, uint64_t timeoutCycles) {
   using nccl::utility::testAbort;
   uint32_t steps = 0;
-  while (!::sdma_anvil::isFlushed(*handle, target)) {
+  while (!abceIsFlushed(rsCtx, slot, target)) {
     if NCCL_IF_CONSTEXPR (HasTimeout) {
       if (clock64() - startCycle >= timeoutCycles) return ncclTimeout;
     }
@@ -344,10 +415,10 @@ NCCL_DEVICE_INLINE ncclResult_t drainChannels(ncclGinAbceSdmaGPUContext* rsCtx, 
   int numCh = loadConst(&rsCtx->numChannels);
   for (int ch = 0; ch < numCh; ++ch) {
     if ((channelMask & (1u << ch)) == 0) continue;
-    auto* handle = channelHandle(rsCtx, peer, ch);
-    if (handle == nullptr) continue;
+    int slot = channelSlot(rsCtx, peer, ch);
+    if (slot < 0) continue;
     ncclResult_t ret =
-      waitFlushed<HasTimeout>(handle, ::sdma_anvil::quietTarget(*handle), abortFlag, startCycle, timeoutCycles);
+      waitFlushed<HasTimeout>(rsCtx, slot, abceQuietTarget(rsCtx, slot), abortFlag, startCycle, timeoutCycles);
     if (ret != ncclSuccess) return ret;
   }
   return ncclSuccess;
@@ -363,8 +434,9 @@ NCCL_DEVICE_INLINE ncclResult_t waitRequest(ncclGinCtx ctx, ncclGinRequest_t& re
     uint64_t startCycle = HasTimeout ? clock64() : 0;
     if (req.target == kSdmaLiveTarget) {
       ret = drainChannels<HasTimeout>(rsCtx, req.peer, req.channelMask, abortFlag, startCycle, timeoutCycles);
-    } else if (auto* handle = channelHandle(rsCtx, req.peer, __builtin_ctz(req.channelMask))) {
-      ret = waitFlushed<HasTimeout>(handle, req.target, abortFlag, startCycle, timeoutCycles);
+    } else {
+      int slot = channelSlot(rsCtx, req.peer, __builtin_ctz(req.channelMask));
+      if (slot >= 0) ret = waitFlushed<HasTimeout>(rsCtx, slot, req.target, abortFlag, startCycle, timeoutCycles);
     }
   }
   NCCL_GIN_THREADFENCE_SYSTEM();
@@ -392,7 +464,10 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ABCE_SDMA> {
     using nccl::gin::abce::detail::useSdmaFusedSignal;
     using nccl::gin::abce::detail::markSdmaDirty;
     using nccl::gin::abce::detail::maybeFenceBeforeSignal;
-    using nccl::gin::abce::detail::queueHandle;
+    using nccl::gin::abce::detail::queueSlot;
+    using nccl::gin::abce::detail::handleAt;
+    using nccl::gin::abce::detail::abcePut;
+    using nccl::gin::abce::detail::AbceHandle;
     using nccl::gin::abce::detail::resolveRemotePeerVa;
     using nccl::gin::abce::detail::signalPeer;
     using nccl::gin::abce::ipcPut;
@@ -414,10 +489,10 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ABCE_SDMA> {
 
     size_t threshold = loadConst(&rsCtx->sdmaThreshold);
     bool useIpcPut = hasWins && bytes <= threshold;
-    ::sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
+    int slot = -1;
     if (hasWins && !useIpcPut) {
-      handle = queueHandle(rsCtx, peer, blockId);
-      if (handle == nullptr) useIpcPut = true;
+      slot = queueSlot(rsCtx, peer, blockId);
+      if (slot < 0) useIpcPut = true;
     }
     bool issuedSdmaThisCall = false;
     bool sdmaFusedSignal = false;
@@ -433,7 +508,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ABCE_SDMA> {
         if (dstAddr != nullptr && srcAddr != nullptr) {
           ipcPut(dstAddr, srcAddr, bytes);
         }
-      } else if (handle != nullptr) {
+      } else if (slot >= 0) {
         void* dstAddr = resolveRemotePeerVa(rsCtx, dstMh, peer, dstOff);
         if (dstAddr == nullptr) {
           const ncclGinAbceIpcBufEntry* table = loadConst(&rsCtx->ipcTable);
@@ -453,23 +528,20 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ABCE_SDMA> {
           __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
           // The SDMA linear-copy count field is 30 bits (max 1 GiB), and a single
           // fused copy+signal >=256 MiB stalls the engine on MI355X, so split any
-          // large put into <= kGinPutSegBytes (128 MiB) segments. The backend runs
-          // a single in-order SDMA queue per peer (numChannels forced to 1), so the
-          // fused signal on the FINAL segment (or the explicit SignalInc emitted
-          // below when the copy is not fused) still means the whole message landed.
+          // large put into <= kGinPutSegBytes (128 MiB) segments. The fused signal
+          // on the FINAL segment (or the explicit SignalInc emitted below when the
+          // copy is not fused) still means the whole message landed.
           // See gin_abce_sdma_put_policy.h. A <=128 MiB put is one segment, so the
           // common path is unchanged.
+          AbceHandle* handle = handleAt(rsCtx, slot);
           const size_t segMax = gin_sdma::kGinPutSegBytes;
           const size_t nSeg = gin_sdma::ginPutSegmentCount(bytes, segMax);
           for (size_t si = 0; si < nSeg; ++si) {
             const gin_sdma::PutSegment seg = gin_sdma::ginPutSegmentAt(bytes, segMax, si);
             void* segDst = static_cast<void*>(static_cast<char*>(dstAddr) + seg.offset);
             void* segSrc = static_cast<void*>(static_cast<char*>(srcAddr) + seg.offset);
-            if (seg.isFinal && sdmaFusedSignal) {
-              ::sdma_anvil::putSignal(*handle, segDst, segSrc, seg.bytes, remoteSig);
-            } else {
-              ::sdma_anvil::put(*handle, segDst, segSrc, seg.bytes);
-            }
+            uint64_t* segSig = (seg.isFinal && sdmaFusedSignal) ? remoteSig : nullptr;
+            abcePut(rsCtx, slot, handle, segDst, segSrc, seg.bytes, segSig);
           }
           markSdmaDirty(rsCtx, peer, loadConst(&rsCtx->numChannels), effectiveChannel(rsCtx, blockId));
         }
@@ -477,7 +549,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ABCE_SDMA> {
     }
 
     if ((hasSignal || hasCounter) && !sdmaFusedSignal) {
-      maybeFenceBeforeSignal(rsCtx, peer, blockId, &handle, issuedSdmaThisCall, hasSignal, hasCounter, strongSignal);
+      maybeFenceBeforeSignal(rsCtx, peer, blockId, &slot, issuedSdmaThisCall, hasSignal, hasCounter, strongSignal);
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
@@ -505,7 +577,10 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ABCE_SDMA> {
     using nccl::gin::abce::detail::useSdmaFusedSignal;
     using nccl::gin::abce::detail::markSdmaDirty;
     using nccl::gin::abce::detail::maybeFenceBeforeSignal;
-    using nccl::gin::abce::detail::queueHandle;
+    using nccl::gin::abce::detail::queueSlot;
+    using nccl::gin::abce::detail::handleAt;
+    using nccl::gin::abce::detail::abcePut;
+    using nccl::gin::abce::detail::AbceHandle;
     using nccl::gin::abce::detail::resolveRemotePeerVa;
     using nccl::gin::abce::detail::signalPeer;
     using nccl::gin::abce::ipcPutScalar;
@@ -530,10 +605,10 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ABCE_SDMA> {
     size_t threshold = loadConst(&rsCtx->sdmaThreshold);
     const size_t bytes = sizeof(T);
     bool useIpcPut = bytes <= threshold;
-    ::sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
+    int slot = -1;
     if (!useIpcPut) {
-      handle = queueHandle(rsCtx, peer, blockId);
-      if (handle == nullptr) useIpcPut = true;
+      slot = queueSlot(rsCtx, peer, blockId);
+      if (slot < 0) useIpcPut = true;
     }
     bool issuedSdmaThisCall = false;
     bool sdmaFusedSignal = false;
@@ -543,7 +618,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ABCE_SDMA> {
       if (dstAddr != nullptr) {
         ipcPutScalar(dstAddr, &srcVal, bytes);
       }
-    } else if (handle != nullptr) {
+    } else if (slot >= 0) {
       void* dstAddr = resolveRemotePeerVa(rsCtx, dstMh, peer, dstOff);
       if (dstAddr == nullptr) {
         void* dstSym = reinterpret_cast<void*>(loadConst(&dstMh->baseAddr) + dstOff);
@@ -562,17 +637,15 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ABCE_SDMA> {
         if (sdmaFusedSignal && strongSignal) fenceBeforeStrongFusedSignal(rsCtx, peer);
         issuedSdmaThisCall = true;
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
-        if (sdmaFusedSignal) {
-          ::sdma_anvil::putSignal(*handle, dstAddr, (void*)&tmp, bytes, remoteSig);
-        } else {
-          ::sdma_anvil::put(*handle, dstAddr, (void*)&tmp, bytes);
-        }
+        nccl::gin::abce::detail::abcePut(rsCtx, slot, nccl::gin::abce::detail::handleAt(rsCtx, slot),
+                                         dstAddr, (void*)&tmp, bytes,
+                                         sdmaFusedSignal ? remoteSig : nullptr);
         markSdmaDirty(rsCtx, peer, loadConst(&rsCtx->numChannels), effectiveChannel(rsCtx, blockId));
       }
     }
 
     if (hasSignal && !sdmaFusedSignal) {
-      maybeFenceBeforeSignal(rsCtx, peer, blockId, &handle, issuedSdmaThisCall, /*hasSignal=*/true,
+      maybeFenceBeforeSignal(rsCtx, peer, blockId, &slot, issuedSdmaThisCall, /*hasSignal=*/true,
                              /*hasCounter=*/false, strongSignal);
       if (signalOp == ncclGinSignalInc) signalOpArg = 1;
       signalPeer(rsCtx, peer, signal, signalOpArg);
@@ -698,7 +771,10 @@ struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_ABCE_SDMA> {
     using nccl::gin::abce::detail::abceCtxValid;
     using nccl::gin::abce::detail::effectiveChannel;
     using nccl::gin::abce::detail::markSdmaDirty;
-    using nccl::gin::abce::detail::queueHandle;
+    using nccl::gin::abce::detail::queueSlot;
+    using nccl::gin::abce::detail::handleAt;
+    using nccl::gin::abce::detail::abcePut;
+    using nccl::gin::abce::detail::AbceHandle;
     using nccl::gin::abce::detail::resolveRemotePeerVa;
     using nccl::gin::abce::ipcPut;
     using nccl::utility::loadConst;
@@ -719,20 +795,21 @@ struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_ABCE_SDMA> {
     if (remoteSrc == nullptr || localDst == nullptr) __builtin_trap();
 
     size_t threshold = loadConst(&rsCtx->sdmaThreshold);
-    auto* handle = bytes > threshold ? queueHandle(rsCtx, peer, blockId) : nullptr;
-    if (handle == nullptr) {
+    int slot = bytes > threshold ? queueSlot(rsCtx, peer, blockId) : -1;
+    if (slot < 0) {
       ipcPut(localDst, remoteSrc, bytes);
       return;
     }
 
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+    AbceHandle* handle = handleAt(rsCtx, slot);
     const size_t segMax = gin_sdma::kGinPutSegBytes;
     const size_t nSeg = gin_sdma::ginPutSegmentCount(bytes, segMax);
     for (size_t si = 0; si < nSeg; ++si) {
       const gin_sdma::PutSegment seg = gin_sdma::ginPutSegmentAt(bytes, segMax, si);
       void* segDst = static_cast<void*>(static_cast<char*>(localDst) + seg.offset);
       void* segSrc = static_cast<void*>(static_cast<char*>(remoteSrc) + seg.offset);
-      ::sdma_anvil::put(*handle, segDst, segSrc, seg.bytes);
+      abcePut(rsCtx, slot, handle, segDst, segSrc, seg.bytes, nullptr);
     }
     markSdmaDirty(rsCtx, peer, loadConst(&rsCtx->numChannels), effectiveChannel(rsCtx, blockId));
   }
@@ -745,7 +822,8 @@ struct ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ABCE_SDMA> {
     (void)hasDescriptor;
     (void)descriptor;
     (void)optFlags;
-    using nccl::gin::abce::detail::channelHandle;
+    using nccl::gin::abce::detail::channelSlot;
+    using nccl::gin::abce::detail::abceQuietTarget;
     using nccl::gin::abce::detail::kSdmaLiveTarget;
     using nccl::utility::loadConst;
     auto* request = reinterpret_cast<nccl::gin::abce::detail::ncclGinAbceSdmaRequest*>(outRequest);
@@ -764,8 +842,8 @@ struct ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ABCE_SDMA> {
       if (__builtin_popcount(mask) > 1) {
         request->target = kSdmaLiveTarget;
       } else if (mask != 0) {
-        auto* handle = channelHandle(rsCtx, peer, __builtin_ctz(mask));
-        if (handle != nullptr) request->target = ::sdma_anvil::quietTarget(*handle);
+        int slot = channelSlot(rsCtx, peer, __builtin_ctz(mask));
+        if (slot >= 0) request->target = abceQuietTarget(rsCtx, slot);
       }
     }
   }

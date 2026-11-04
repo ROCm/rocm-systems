@@ -1038,6 +1038,17 @@ add_dependencies(rccl update_git_version copy_nccl_device_headers net_ib_header_
                       rccl_embedded_tuner_configs)
 
 ## Set RCCL include directories
+# ABCE copy-engine backend: the from-source HIP (hip_DIR) ships driver_types.h
+# with the hipExtCopyEngine* types, but other find_package()s (SMI, roctracer,
+# rocprofiler) inject ${ROCM_PATH}/include ahead of it, shadowing it with the
+# nightly HIP that lacks those types. Force the hip_DIR include tree to win.
+if(ENABLE_ROCSHMEM_GIN AND hip_DIR)
+  get_filename_component(_abce_hip_prefix "${hip_DIR}/../../.." ABSOLUTE)
+  if(EXISTS "${_abce_hip_prefix}/include/hip/hip_ext_copy_engine.h")
+    target_include_directories(rccl BEFORE PRIVATE "${_abce_hip_prefix}/include")
+    message(STATUS "ABCE: forcing HIP include tree ${_abce_hip_prefix}/include ahead of ROCm")
+  endif()
+endif()
 target_include_directories(rccl PRIVATE ${PROJECT_BINARY_DIR}/include)        # for generated rccl.h header
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src)                    # for hipified headers
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/device)
