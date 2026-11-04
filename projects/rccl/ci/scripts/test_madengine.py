@@ -1639,7 +1639,8 @@ the refs, image digests and cluster settings. The run's own numbers are in the
 `madengine-results-*` artifact of the same CI run.
 
 1. Unpack this directory on storage that every compute node sees, `cd` into it,
-   and `source repro.env`.
+   and `source repro.env`. The artifact download drops execute bits, and the MAD
+   scripts run each other directly: `find scripts -name '*.sh' -exec chmod +x {{}} +`
 2. In a Python 3.10+ environment the nodes can also see (conda on shared storage):
    `pip install "git+$MADENGINE_REPO@$MADENGINE_REF"`
 3. `export MAD_DOCKER_BUILDS=<shared dir>` and `chmod 0777` it: node 0 saves the
