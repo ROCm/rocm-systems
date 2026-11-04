@@ -238,32 +238,6 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
   return oss.str();
 }
 
-void RaceDetectorPlugin::WorkgroupDetectorStore::installAndBind(
-    uint32_t dispatch_id, uint32_t wg_id, std::unique_ptr<RaceDetector> detector,
-    std::span<amdgpu::Wavefront *> wavefronts, uint32_t slot_index) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  auto &stored_detector = detectors_[WorkgroupKey{dispatch_id, wg_id}];
-  stored_detector = std::move(detector);
-  for (size_t w = 0; w < wavefronts.size(); ++w) {
-    auto state = std::make_unique<RaceWavefrontState>();
-    state->race_state = &stored_detector->getWaveRaceState(static_cast<int>(w));
-    wavefronts[w]->set_plugin_state(slot_index, std::move(state));
-  }
-}
-
-void RaceDetectorPlugin::WorkgroupDetectorStore::releaseCompleted(uint32_t dispatch_id,
-                                                                  uint32_t wg_id) {
-  // Halted wave slots retain pointers into this detector until the next
-  // installAndBind replaces their plugin state, before any instruction runs.
-  std::lock_guard<std::mutex> lock(mutex_);
-  detectors_.erase(WorkgroupKey{dispatch_id, wg_id});
-}
-
-size_t RaceDetectorPlugin::WorkgroupDetectorStore::retainedWorkgroupCount() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return detectors_.size();
-}
-
 RaceDetectorPlugin::RaceDetectorPlugin(const char * /*config_json*/) : ExecutionPlugin("race") {}
 
 RaceDetectorPlugin::~RaceDetectorPlugin() { sink().write(getSummary()); }
@@ -290,17 +264,25 @@ void RaceDetectorPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInf
 }
 
 void RaceDetectorPlugin::onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {
-  detectors_.releaseCompleted(dispatch_id, wg_id);
+  // The workgroup's wavefronts have halted. Their slots keep pointers into this
+  // detector only until the next workgroup dispatch replaces the plugin state,
+  // before any instruction runs.
+  std::lock_guard<std::mutex> lock(dispatch_mutex_);
+  detectors_.erase(WorkgroupKey{dispatch_id, wg_id});
 }
 
 size_t RaceDetectorPlugin::retainedWorkgroupCount() const {
-  return detectors_.retainedWorkgroupCount();
+  std::lock_guard<std::mutex> lock(dispatch_mutex_);
+  return detectors_.size();
 }
 
 void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
                                                      uint32_t physical_vgpr_count,
                                                      uint32_t physical_sgpr_count,
                                                      std::span<amdgpu::Wavefront *> wavefronts) {
+  uint32_t num_waves = static_cast<uint32_t>(wavefronts.size());
+  WorkgroupKey key{dispatch_id, wg_id};
+
   std::vector<amdgpu::Wavefront *> wf_ptrs(wavefronts.begin(), wavefronts.end());
   auto handler = [this, wf_ptrs, dispatch_id](RaceViolation v) {
     assert(v.wave >= 0 && static_cast<size_t>(v.wave) < wf_ptrs.size() &&
@@ -371,13 +353,21 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     }
   };
 
-  auto detector = std::make_unique<RaceDetector>(
-      static_cast<int>(wavefronts.size()), static_cast<int>(physical_vgpr_count),
+  // Multi-XCD: workgroups from the same dispatch can arrive on different
+  // partition threads, so the detector map needs protection.
+  std::lock_guard<std::mutex> lock(dispatch_mutex_);
+  detectors_[key] = std::make_unique<RaceDetector>(
+      static_cast<int>(num_waves), static_cast<int>(physical_vgpr_count),
       static_cast<int>(physical_sgpr_count), Dim3d(static_cast<int>(wg_id)), std::move(handler),
       counterCapacitiesForArch(wavefronts.front()->cu().arch()),
       wavefronts.front()->lds().size_bytes());
 
-  detectors_.installAndBind(dispatch_id, wg_id, std::move(detector), wavefronts, slot_index());
+  auto &det = *detectors_[key];
+  for (uint32_t w = 0; w < num_waves; ++w) {
+    auto state = std::make_unique<RaceWavefrontState>();
+    state->race_state = &det.getWaveRaceState(static_cast<int>(w));
+    wavefronts[w]->set_plugin_state(slot_index(), std::move(state));
+  }
 }
 
 void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,

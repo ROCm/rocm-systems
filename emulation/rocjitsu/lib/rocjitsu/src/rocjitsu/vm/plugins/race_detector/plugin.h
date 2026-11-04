@@ -15,7 +15,6 @@
 #include <mutex>
 #include <optional>
 #include <set>
-#include <span>
 #include <string>
 #include <tuple>
 #include <unordered_map>
@@ -129,28 +128,12 @@ public:
   size_t retainedWorkgroupCount() const;
 
 private:
-  /// Wavefronts borrow detector state without taking the store's mutex.
-  /// Install before execution; release or replace only after the old workgroup
-  /// has stopped executing.
-  class WorkgroupDetectorStore {
-  public:
-    void installAndBind(uint32_t dispatch_id, uint32_t wg_id,
-                        std::unique_ptr<RaceDetector> detector,
-                        std::span<amdgpu::Wavefront *> wavefronts, uint32_t slot_index);
-    void releaseCompleted(uint32_t dispatch_id, uint32_t wg_id);
-    size_t retainedWorkgroupCount() const;
-
-  private:
-    struct WorkgroupKey {
-      uint32_t dispatch_id;
-      uint32_t workgroup_id;
-      bool operator<(const WorkgroupKey &o) const {
-        return std::tie(dispatch_id, workgroup_id) < std::tie(o.dispatch_id, o.workgroup_id);
-      }
-    };
-
-    mutable std::mutex mutex_;
-    std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;
+  struct WorkgroupKey {
+    uint32_t dispatch_id;
+    uint32_t workgroup_id;
+    bool operator<(const WorkgroupKey &o) const {
+      return std::tie(dispatch_id, workgroup_id) < std::tie(o.dispatch_id, o.workgroup_id);
+    }
   };
 
   struct KernelNames {
@@ -165,7 +148,8 @@ private:
     return wf ? get_state(*wf) : nullptr;
   }
 
-  WorkgroupDetectorStore detectors_;
+  mutable std::mutex dispatch_mutex_;
+  std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;
 
   std::mutex report_mutex_;
   std::set<std::pair<uint32_t, uint64_t>> observed_races_;
