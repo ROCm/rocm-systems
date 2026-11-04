@@ -7,6 +7,7 @@
 #include "common/alu.h"
 #include "common/internal.h"
 #include "fp/fp64_impl.h"
+#include "fp/fp64_round.h"
 #include "rj_arith/rj_arith.h"
 
 #include <stdint.h>
@@ -29,6 +30,7 @@ int arithmetic(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, u
 
   constexpr uint64_t fp_flags = RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
                                 RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_IEEE_MODE |
+                                (Op == rocjitsu::arith::Fp64::Fma ? RJ_ARITH_FP_ROUND_MASK : 0) |
                                 (Rdna3 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0);
   if (int error = rocjitsu::arith::validate(flags, instruction_flags & ~known, fp_flags)) {
     return error;
@@ -45,8 +47,20 @@ int arithmetic(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, u
   if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if constexpr (Op == rocjitsu::arith::Fp64::Fma) {
+    if ((flags & RJ_ARITH_FP_ROUND_MASK) &&
+        rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::fma_f64_directed_x86_64_v4(flags, exec_mask, instruction_flags, d, a, b, c);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+  // AVX2 has no per-instruction directed FP64 FMA. Use the inherited integer
+  // model for directed modes; nearest rounding retains the existing SIMD path.
+  if (!(flags & RJ_ARITH_FP_ROUND_MASK) &&
+      rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::fp64_x86_64_v3(Op, flags, exec_mask, instruction_flags, d, a, b, c);
     return RJ_ARITH_SUCCESS;
   }
@@ -68,7 +82,15 @@ int arithmetic(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, u
       if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
         z = rocjitsu::arith::fp64_flush_denorm(z);
       }
-      value = __builtin_fma(x, y, z);
+      const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
+      const uint64_t xb = rocjitsu::arith::double_bits(x), yb = rocjitsu::arith::double_bits(y),
+                     zb = rocjitsu::arith::double_bits(z);
+      constexpr uint64_t exponent = 0x7ff0000000000000ULL;
+      value =
+          rounding && (xb & exponent) != exponent && (yb & exponent) != exponent &&
+                  (zb & exponent) != exponent
+              ? rocjitsu::arith::as_double(rocjitsu::arith::fma_finite_f64(xb, yb, zb, rounding))
+              : __builtin_fma(x, y, z);
     }
 
     if constexpr (Op == rocjitsu::arith::Fp64::Trunc) {
@@ -103,7 +125,8 @@ int arithmetic(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, u
         (flags & RJ_ARITH_FP_DX10_CLAMP_OFF) &&
         (rocjitsu::arith::double_bits(value) & 0x7fffffffffffffffULL) > 0x7ff0000000000000ULL;
     value = rocjitsu::arith::fp64_output(
-        value, preserve_nan ? instruction_flags & ~RJ_ARITH_ALU_CLAMP : instruction_flags);
+        value, preserve_nan ? instruction_flags & ~RJ_ARITH_ALU_CLAMP : instruction_flags,
+        unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24));
     if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
       value = rocjitsu::arith::fp64_flush_denorm(value);
     }
