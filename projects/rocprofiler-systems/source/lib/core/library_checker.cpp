@@ -28,7 +28,9 @@ check_profiler_hub_version_mismatch()
 
     if(mismatch)
     {
-        LOG_CRITICAL("{}. Aborting.", *mismatch);
+        LOG_CRITICAL("{}. Check LD_LIBRARY_PATH and the installed profiler-hub. "
+                     "Aborting.",
+                     *mismatch);
         std::exit(EXIT_FAILURE);
     }
 }
