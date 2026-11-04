@@ -24,6 +24,12 @@
 #               | -- physical_aid # Number of physical AIDs (CDNA)
 #               | -- logical_partitions_per_die # Logical AID partitions per physical AID (CDNA)
 #               | -- memory_levels # Cache and memory levels supported by the arch
+#           |-- roofline: ceilings the roofline benchmark measures (archs without it have none)
+#               | -- benchmark # Arch whose benchmark class runs, if not this arch
+#               | -- bandwidth # Memory levels with a bandwidth ceiling
+#               | -- valu # Data types with a VALU ceiling
+#               | -- mfma or wmma # Data types with a matrix ceiling, by matrix type
+#               | -- mfma_mixed or wmma_mixed # Mixed-precision matrix types, not plotted
 #
 # --------------------------------------------------------------------------------
 
@@ -63,6 +69,10 @@ mi_gpu_spec:
           SPI: 6
           GRBM: 2
           GDS: 4
+        roofline:
+          bandwidth: [HBM, L2, L1, LDS]
+          valu: [FP16, FP32, FP64, I8, I32, I64]
+          mfma: [FP16, BF16, FP32, FP64, I8]
         models:
           - gpu_model: mi210
             design:
@@ -94,6 +104,11 @@ mi_gpu_spec:
           SPI: 6
           GRBM: 2
           GDS: 4
+        roofline:
+          benchmark: gfx942
+          bandwidth: [HBM, MALL, L2, L1, LDS]
+          valu: [FP16, FP32, FP64, I8, I32, I64]
+          mfma: [FP8, FP16, BF16, FP32, FP64, I8]
         models:
           - gpu_model: mi300a_a0
             partition_mode:
@@ -128,6 +143,11 @@ mi_gpu_spec:
           SPI: 6
           GRBM: 2
           GDS: 4
+        roofline:
+          benchmark: gfx942
+          bandwidth: [HBM, MALL, L2, L1, LDS]
+          valu: [FP16, FP32, FP64, I8, I32, I64]
+          mfma: [FP8, FP16, BF16, FP32, FP64, I8]
         models:
           - gpu_model: mi300x_a0
             partition_mode:
@@ -167,6 +187,10 @@ mi_gpu_spec:
           SPI: 6
           GRBM: 2
           GDS: 4
+        roofline:
+          bandwidth: [HBM, MALL, L2, L1, LDS]
+          valu: [FP16, FP32, FP64, I8, I32, I64]
+          mfma: [FP8, FP16, BF16, FP32, FP64, I8]
         models:
           - gpu_model: mi300a_a1
             partition_mode:
@@ -327,6 +351,11 @@ mi_gpu_spec:
           GRBM: 2
           GDS: 4
           TCC_channels: 16
+        roofline:
+          bandwidth: [HBM, MALL, L2, L1, LDS]
+          valu: [FP16, FP32, FP64, I8, I32, I64]
+          mfma: [FP4, FP6, FP8, MXFP8, FP16, BF16, FP32, FP64, I8]
+          mfma_mixed: [F6F4]  # benchmarked, not plotted
         models:
           - gpu_model: mi350
             partition_mode:
@@ -444,6 +473,10 @@ mi_gpu_spec:
           GL1C: 4
           GL2A: 4
           GL2C: 4
+        roofline:
+          bandwidth: [L2, L1, L0, LDS]
+          valu: [FP16, BF16, FP32, FP64, I8, I32, I64]
+          wmma: []  # no WMMA counters to plot against
         models:
           - gpu_model: rdna35_point_1
             design:
@@ -464,6 +497,10 @@ mi_gpu_spec:
           GL1C: 4
           GL2A: 4
           GL2C: 4
+        roofline:
+          bandwidth: [MALL, L2, L1, L0, LDS]
+          valu: [FP16, BF16, FP32, FP64, I8, I32, I64]
+          wmma: []  # no WMMA counters to plot against
         models:
           - gpu_model: rdna35_halo
             design:
@@ -484,6 +521,10 @@ mi_gpu_spec:
           GL1C: 4
           GL2A: 4
           GL2C: 4
+        roofline:
+          bandwidth: [L2, L1, L0, LDS]
+          valu: [FP16, BF16, FP32, FP64, I8, I32, I64]
+          wmma: []  # no WMMA counters to plot against
         models:
           - gpu_model: rdna35_point_2
             design:
@@ -504,6 +545,10 @@ mi_gpu_spec:
           GL1C: 4
           GL2A: 4
           GL2C: 4
+        roofline:
+          bandwidth: [L2, L1, L0, LDS]
+          valu: [FP16, BF16, FP32, FP64, I8, I32, I64]
+          wmma: []  # no WMMA counters to plot against
         models:
           - gpu_model: rdna35_gorgon_point
             design:
@@ -537,6 +582,11 @@ mi_gpu_spec:
           SQ: 8  # Including all SQC and SP counters
           TCP: 8  # All TX counters using the old TCP block name
           UTCL1: 4
+        roofline:
+          bandwidth: [HBM, L2, L0, LDS]
+          valu: [FP16, FP32, FP64, I8, I32, I64]
+          wmma: [FP4, FP6, FP8, MXFP8, FP16, BF16, FP32, I8]
+          wmma_mixed: [F6F4]  # benchmarked, not plotted
         models:
           - gpu_model: gfx1250
             partition_mode:

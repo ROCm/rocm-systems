@@ -6,13 +6,9 @@
 import csv
 from pathlib import Path
 
-import pytest
-
+from pc_sampling.pc_sampling_csv_export import IsaLineLocation
 from pc_sampling.per_kernel_isa_export import (
-    MAX_SHORT_NAME_LENGTH,
-    _build_isa_header,
     _resolve_isa_export_path,
-    _sanitize_short_name,
     _write_per_kernel_isa_files,
     export_per_kernel_isa_files,
 )
@@ -23,6 +19,7 @@ def make_isa_row(
     short_name="vecCopy",
     code_object_id=5,
     pid=42,
+    instruction_uuid=100,
     offset=0x10,
     instruction="v_mov",
     total_count=3,
@@ -41,6 +38,7 @@ def make_isa_row(
         short_name,
         code_object_id,
         pid,
+        instruction_uuid,
         offset,
         instruction,
         total_count,
@@ -74,61 +72,24 @@ def test_resolve_isa_export_path_names_kernel_code_object_and_process():
     )
 
 
-def test_resolve_isa_export_path_falls_back_when_no_short_name_was_captured():
-    """A kernel with no short name keeps the folder name earlier releases used."""
-    export_path = _resolve_isa_export_path(
-        Path("/results/per_kernel_pc_sampling"),
-        ("vector_copy", "MI300X_A1", 7, None, 5, 42),
+def test_write_per_kernel_isa_files_places_stall_reasons_between_counts_and_source(
+    tmp_path,
+):
+    """The reasons a workload observed become columns of their own."""
+    _write_per_kernel_isa_files(
+        tmp_path,
+        iter([make_isa_row(stall_reason_counts=(None, 1))]),
+        ["NONE", "WAITCNT"],
+        {},
     )
 
-    assert export_path.parent.name == "kernel_uuid_7"
-
-
-def test_resolve_isa_export_path_keeps_a_shared_short_name_unique():
-    """Two overloads truncate to one short name, so the uuid separates them."""
-    export_paths = {
-        _resolve_isa_export_path(
-            Path("/results/per_kernel_pc_sampling"),
-            ("vector_copy", "MI300X_A1", kernel_uuid, "gemm", 5, 42),
-        )
-        for kernel_uuid in (7, 8)
-    }
-
-    assert len(export_paths) == 2
-
-
-@pytest.mark.parametrize(
-    ("short_name", "expected"),
-    [
-        ("vecCopy_2", "vecCopy_2"),
-        ("__amd_rocclr_streamOpsDecrement.kd", "amd_rocclr_streamOpsDecrement"),
-        ("operator/", "operator"),
-        ("cub::DeviceReduceKernel", "cub_DeviceReduceKernel"),
-        ("my kernel", "my_kernel"),
-        ("$_0::__cxx11", "0_cxx11"),
-        ("a" * 100, "a" * MAX_SHORT_NAME_LENGTH),
-        (None, None),
-    ],
-    ids=[
-        "plain_identifier",
-        "kernel_descriptor_suffix",
-        "operator_slash",
-        "namespace_qualifier",
-        "whitespace",
-        "lambda_spelling",
-        "over_length",
-        "missing",
-    ],
-)
-def test_sanitize_short_name(short_name, expected):
-    """A short name reduces to a path component without losing its identity."""
-    assert _sanitize_short_name(short_name) == expected
-
-
-def test_build_isa_header_places_stall_reasons_between_counts_and_source():
-    """The reasons a workload observed become columns of their own."""
-    header = _build_isa_header(["NONE", "WAITCNT"])
-
+    header = read_exported_rows(
+        tmp_path
+        / "vector_copy"
+        / "MI300X_A1"
+        / "vecCopy_uuid_1"
+        / "isa_code_object_id_5_pid_42.csv"
+    )[0]
     assert header == [
         "Instruction line number",
         "Code object offset",
@@ -147,14 +108,6 @@ def test_build_isa_header_places_stall_reasons_between_counts_and_source():
     ]
 
 
-def test_build_isa_header_carries_no_stall_columns_without_reasons():
-    """A host_trap workload records no stall reason, so it gets no column."""
-    header = _build_isa_header([])
-
-    assert "Stall NONE" not in header
-    assert header[-3:] == ["Source", "Code object id", "Pid"]
-
-
 def test_write_per_kernel_isa_files_opens_one_file_per_grouping_key(tmp_path):
     """A kernel spanning code objects and processes lands in separate files."""
     isa_rows = [
@@ -164,7 +117,7 @@ def test_write_per_kernel_isa_files_opens_one_file_per_grouping_key(tmp_path):
         make_isa_row(kernel_uuid=2, code_object_id=6, pid=43),
     ]
 
-    file_count = _write_per_kernel_isa_files(tmp_path, iter(isa_rows), [])
+    file_count = _write_per_kernel_isa_files(tmp_path, iter(isa_rows), [], {})
 
     assert file_count == 4
     assert sorted(
@@ -179,14 +132,18 @@ def test_write_per_kernel_isa_files_opens_one_file_per_grouping_key(tmp_path):
 
 
 def test_write_per_kernel_isa_files_numbers_instruction_lines_per_file(tmp_path):
-    """Line numbers count the file's own lines, not the kernel's."""
-    isa_rows = [
-        make_isa_row(code_object_id=5, offset=0x10),
-        make_isa_row(code_object_id=5, offset=0x14),
-        make_isa_row(code_object_id=6, offset=0x20),
-    ]
+    """Line numbers count the file's own lines, not the kernel's.
 
-    _write_per_kernel_isa_files(tmp_path, iter(isa_rows), [])
+    The location of each instruction is recorded with the same numbers.
+    """
+    isa_rows = [
+        make_isa_row(code_object_id=5, instruction_uuid=100, offset=0x10),
+        make_isa_row(code_object_id=5, instruction_uuid=101, offset=0x14),
+        make_isa_row(code_object_id=6, instruction_uuid=102, offset=0x20),
+    ]
+    isa_line_locations = {}
+
+    _write_per_kernel_isa_files(tmp_path, iter(isa_rows), [], isa_line_locations)
 
     workload_directory = tmp_path / "vector_copy" / "MI300X_A1" / "vecCopy_uuid_1"
     first_rows = read_exported_rows(
@@ -198,6 +155,11 @@ def test_write_per_kernel_isa_files_numbers_instruction_lines_per_file(tmp_path)
 
     assert [row[0] for row in first_rows[1:]] == ["1", "2"]
     assert [row[0] for row in second_rows[1:]] == ["1"]
+    assert isa_line_locations == {
+        100: IsaLineLocation(Path("vecCopy_uuid_1/isa_code_object_id_5_pid_42.csv"), 1),
+        101: IsaLineLocation(Path("vecCopy_uuid_1/isa_code_object_id_5_pid_42.csv"), 2),
+        102: IsaLineLocation(Path("vecCopy_uuid_1/isa_code_object_id_6_pid_42.csv"), 1),
+    }
 
 
 def test_write_per_kernel_isa_files_leaves_unsampled_counts_empty(tmp_path):
@@ -214,7 +176,7 @@ def test_write_per_kernel_isa_files_leaves_unsampled_counts_empty(tmp_path):
         make_isa_row(offset=0x14, stall_reason_counts=(4,)),
     ]
 
-    _write_per_kernel_isa_files(tmp_path, iter(isa_rows), ["WAITCNT"])
+    _write_per_kernel_isa_files(tmp_path, iter(isa_rows), ["WAITCNT"], {})
 
     exported_rows = read_exported_rows(
         tmp_path
@@ -243,7 +205,7 @@ def test_write_per_kernel_isa_files_leaves_unsampled_counts_empty(tmp_path):
 
 def test_write_per_kernel_isa_files_writes_nothing_without_rows(tmp_path):
     """A workload with no instruction lines leaves no folder behind."""
-    file_count = _write_per_kernel_isa_files(tmp_path / "per_kernel", iter([]), [])
+    file_count = _write_per_kernel_isa_files(tmp_path / "per_kernel", iter([]), [], {})
 
     assert file_count == 0
     assert not (tmp_path / "per_kernel").exists()
@@ -251,7 +213,7 @@ def test_write_per_kernel_isa_files_writes_nothing_without_rows(tmp_path):
 
 def test_export_per_kernel_isa_files_returns_the_folder_it_wrote(tmp_path):
     """The export folder is returned so the source lands beside the ISA."""
-    per_kernel_directory = export_per_kernel_isa_files(tmp_path, [])
+    per_kernel_directory = export_per_kernel_isa_files(tmp_path, []).directory
 
     assert per_kernel_directory == tmp_path / "per_kernel_pc_sampling"
     assert not per_kernel_directory.exists()

@@ -4,10 +4,26 @@
 import argparse
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
+
+# Deprecated options by argparse dest: the option and what to use instead
+DEPRECATED_OPTIONS: Dict[str, Tuple[str, str]] = {
+    "list_blocks": ("--list-blocks", "--list-metrics"),
+    "list_available_metrics": ("--list-available-metrics", "--list-metrics"),
+}
+
+
+def warn_deprecated_options(args: argparse.Namespace) -> None:
+    """Warn about each deprecated option the command line uses."""
+    for dest, (option, replacement) in DEPRECATED_OPTIONS.items():
+        if getattr(args, dest, None) not in (None, False):
+            console_warning(
+                f"{option} is deprecated and will be removed in a future release. "
+                f"Use {replacement} instead."
+            )
 
 
 class ExperimentalAction(argparse.Action):
@@ -21,7 +37,7 @@ class ExperimentalAction(argparse.Action):
 
     def __init__(
         self,
-        option_strings: list[str],
+        option_strings: List[str],
         help: str,
         **kwargs,
     ) -> None:
@@ -116,18 +132,11 @@ def non_negative_int(value: str) -> int:
     return parsed
 
 
-def print_avail_arch(avail_arch: list[str], args: str) -> str:
-    ret_str = f"List all available {args} for analysis on specified arch:"
-    for arch in avail_arch:
-        ret_str += f"\n   {arch}"
-    return ret_str
-
-
 def add_general_group(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
-    supported_archs: dict[str, str],
-    rocprof_compute_version: dict[str, Optional[str]],
+    supported_archs: Dict[str, str],
+    rocprof_compute_version: Dict[str, Optional[str]],
 ) -> None:
     general_group = parser.add_argument_group("General Options")
 
@@ -150,16 +159,38 @@ def add_general_group(
     general_group.add_argument(
         "--list-metrics",
         dest="list_metrics",
-        metavar="",
+        metavar="id",
+        nargs="*",
+        help=(
+            "List the blocks of the current GPU.\n"
+            "Add block or metric [id]s or aliases to list their metrics with units\n"
+            'and descriptions, or "all" to list every metric. Each id or alias adds\n'
+            "to the list: --list-metrics sol 12.1 lists all of block 2 (sol) and\n"
+            "table 12.1.\n"
+            "With analyze -p <workload>, list the workload's blocks and metrics."
+        ),
+    )
+    general_group.add_argument(
+        "--list-metrics-gfx-id",
+        dest="list_metrics_gfx_id",
+        metavar="<arch>",
         choices=supported_archs.keys(),
-        help=print_avail_arch(list(supported_archs.keys()), "metrics"),
+        help=(
+            "List the blocks of GPU <arch> instead of the current GPU.\n"
+            "Add --list-metrics [id ...] to list their metrics.\n"
+            f"Values: {', '.join(supported_archs)}"
+        ),
     )
     general_group.add_argument(
         "--list-blocks",
         dest="list_blocks",
-        metavar="",
+        metavar="<arch>",
         choices=supported_archs.keys(),
-        help=print_avail_arch(list(supported_archs.keys()), "blocks"),
+        help=(
+            "DEPRECATED: use --list-metrics instead.\n"
+            "List available blocks and their aliases for specified GPU <arch>.\n"
+            f"Values: {', '.join(supported_archs)}"
+        ),
     )
     general_group.add_argument(
         "--config-dir",
@@ -194,8 +225,8 @@ def add_general_group(
 def omniarg_parser(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
-    supported_archs: dict[str, str],
-    rocprof_compute_version: dict[str, Optional[str]],
+    supported_archs: Dict[str, str],
+    rocprof_compute_version: Dict[str, Optional[str]],
     experimental_enabled: bool = False,
 ) -> None:
     # -----------------------------------------
@@ -390,7 +421,10 @@ Examples:
     profile_group.add_argument(
         "--list-available-metrics",
         dest="list_available_metrics",
-        help="\t\t\tList all available metrics for analysis on current arch",
+        help=(
+            "\t\t\tDEPRECATED: use --list-metrics instead.\n"
+            "\t\t\tList all available metrics for analysis on current arch"
+        ),
         action="store_true",
     )
     profile_group.add_argument(
@@ -408,7 +442,7 @@ Examples:
             "\t\t\tAlternatively, specify block id(s) for filtering "
             "(e.g. 12, 13, 14).\n"
             "\t\t\tAlternatively, specify block alias(es) for filtering.\n"
-            "\t\t\tAliases are arch-specific; run --list-blocks <arch> to see\n"
+            "\t\t\tAliases are arch-specific; run --list-metrics to see\n"
             "\t\t\tall valid block ids and aliases.\n"
             "\t\t\tCan provide multiple space separated arguments.\n"
             "\t\t\tCannot be used with --set, --roof-only, or --bench-only"
@@ -633,7 +667,7 @@ rocprof-compute analyze --path <workload_path> [analyze options]
 
 -----------------------------------------------------------------------------------
 Examples:
-\trocprof-compute analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
+\trocprof-compute analyze -p workloads/vcopy/mi200/ --list-metrics
 \trocprof-compute analyze -p workloads/mixbench/mi200/ --dispatch 12 34 --decimal 3
 -----------------------------------------------------------------------------------
         """,
@@ -683,7 +717,10 @@ Examples:
     analyze_group.add_argument(
         "--list-available-metrics",
         dest="list_available_metrics",
-        help="\t\tList all available metrics for analysis on current arch",
+        help=(
+            "\t\tDEPRECATED: use --list-metrics instead.\n"
+            "\t\tList all available metrics for analysis on the workload arch"
+        ),
         action="store_true",
     )
     analyze_group.add_argument(
@@ -844,25 +881,14 @@ Examples:
         ),
     )
     analyze_group.add_argument(
-        "--pc-sampling-sorting-type",
-        required=False,
-        metavar="",
-        dest="pc_sampling_sorting_type",
-        default="count",
-        type=str,
-        choices=["offset", "count"],
-        help="\t\tSet the sorting type of pc sampling: "
-        "offset or count (DEFAULT: count).",
-    )
-    analyze_group.add_argument(
         "--pc-sampling-rows",
         required=False,
         metavar="",
         dest="pc_sampling_rows",
         default=10,
         type=non_negative_int,
-        help="\t\tSpecify the maximum number of rows shown in the PC "
-        "sampling table; use 0 to show all rows (DEFAULT: 10).",
+        help="\t\tMaximum number of kernels shown in the PC sampling table; "
+        "use 0 to show all kernels (Default: 10).",
     )
 
     analyze_advanced_group.add_argument(

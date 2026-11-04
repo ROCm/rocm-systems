@@ -39,7 +39,11 @@ from utils.utils_analysis import (
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
-from utils.utils_common import convert_filter_blocks_to_panel_ids, strip_ansi
+from utils.utils_common import (
+    convert_filter_blocks_to_panel_ids,
+    format_table_id,
+    strip_ansi,
+)
 
 _GUIDANCE_PANEL_MIN_WIDTH = 100
 
@@ -764,7 +768,7 @@ def format_table_output(
 ) -> str:
     """Format table for output, handling special cases and saving to files if needed."""
 
-    table_id_str = f"{table_config['id'] // 100}.{table_config['id'] % 100}"
+    table_id_str = format_table_id(table_config["id"])
     content = ""
 
     # Check if any column in df is empty
@@ -773,8 +777,7 @@ def format_table_output(
         for col_idx in range(len(df.columns))
     )
 
-    # Do not print the table if any column is empty. PC sampling table 21.1 is
-    # exempt: its source column is all N/A when the workload lacks debug info.
+    # Do not print the table if any column is empty.
     if is_empty_columns_exist and table_id_str != PC_SAMPLING_TABLE_ID:
         title = table_config.get("title", "")
         console_log(f"Not showing table with empty column(s): {table_id_str} {title}")
@@ -978,9 +981,7 @@ def show_all(
                     and panel_id not in filter_panel_ids
                     and panel_id > 100
                 ):
-                    table_id_str = (
-                        f"{table_config['id'] // 100}.{table_config['id'] % 100}"
-                    )
+                    table_id_str = format_table_id(table_config["id"])
 
                     console_log(
                         f"Not showing table not selected during profiling: "

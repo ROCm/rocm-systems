@@ -12,13 +12,7 @@
 Panel Config:
   id: 1200
   title: GLARB (Graphics Level Arbiter)
-  description: |-
-    GLARB (Graphics Level Arbiter) metrics for gfx1250. GLARB manages arbitration between
-    GL1 caches and GL2. GLARBA handles requests going to GL2, while GLARBC
-    handles requests from GL1 cache clients.
-
   data source:
-
   - metric_table:
       id: 1201
       title: GLARBA Processing

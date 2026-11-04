@@ -13,7 +13,7 @@
 #include "nccl_fakes.h"
 #include "signature-drift.h"
 
-const char* IbCastReqTypeStr[] = {"Unused", "Send", "Recv", "Flush", "IPut"};
+const char* IbCastReqTypeStr[] = {"Unused", "Send", "Recv", "Flush", "IPut", "IGet", "Failed"};
 int64_t IbCastArThreshold = 8192;
 
 int64_t ncclParamIbCastArThreshold() { return g_loadParam("IB_AR_THRESHOLD", -2); }

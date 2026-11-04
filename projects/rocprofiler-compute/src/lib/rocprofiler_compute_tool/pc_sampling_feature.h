@@ -7,7 +7,9 @@
 #include "source_snapshotter.h"
 
 #include <filesystem>
+#include <set>
 #include <string>
+#include <utility>
 
 namespace rocprofiler_compute_tool
 {
@@ -44,14 +46,14 @@ public:
 
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info);
 
-    /// Writes the code object info and the source snapshot. Disabled PC
-    /// sampling writes nothing.
+    /// Writes the code object info, limited to dispatched kernels, and the
+    /// source snapshot. Disabled PC sampling writes nothing.
     void write(tool_data_t& tool_data) override;
 
     std::string_view name() const override { return "pc_sampling"; }
 
 private:
-    void finalize();
+    void finalize(const std::set<std::pair<uint64_t, std::string>>& dispatched_symbols);
 
     bool                         m_enabled = false;
     PcSamplingMode               m_mode    = PcSamplingMode::Disabled;

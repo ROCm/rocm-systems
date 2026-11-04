@@ -9,10 +9,10 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Set, Tuple
 
 import config
-from argparser import omniarg_parser
+from argparser import omniarg_parser, warn_deprecated_options
 from pc_sampling.pc_sampling_profile import (
     PC_SAMPLING_DEFAULT_INTERVALS,
     pc_sampling_interval_limits,
@@ -29,15 +29,19 @@ from utils.logger import (
     setup_file_handler,
     setup_logging_priority,
 )
+from utils.metrics.expression import update_normal_unit_string
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import (
     MachineSpecs,
     generate_machine_specs,
 )
 from utils.utils_common import (
-    build_metric_list,
+    build_metric_details,
     canonical_config_arch,
     detect_rocprof,
+    format_block_table,
+    format_metric_tables,
+    get_arch_alias_to_panel_id,
     get_arch_panel_id_to_alias,
     get_job_rank_and_size,
     get_version,
@@ -47,6 +51,7 @@ from utils.utils_common import (
     reconfigure_stdio_utf8,
     replace_env,
     replace_rank,
+    select_listed_ids,
     validate_roofline_csv,
 )
 from utils.utils_exceptions import WorkloadCommandError
@@ -144,8 +149,10 @@ class RocProfCompute:
             self.__analyze_mode = "cli"
 
     def sanitize(self) -> None:
+        self._validate_list_option_exclusions()
+
         if self.__args.mode is None and not (
-            getattr(self.__args, "list_metrics", False)
+            self.__args.list_metrics is not None
             or getattr(self.__args, "list_blocks", False)
             or getattr(self.__args, "specs", False)
         ):
@@ -153,8 +160,6 @@ class RocProfCompute:
             console_error(
                 "rocprof-compute requires you to pass a valid mode. Detected None."
             )
-
-        self._validate_list_option_exclusions()
 
         if self.__mode == "profile":
             self._validate_profile_mode_arguments()
@@ -279,6 +284,10 @@ class RocProfCompute:
             experimental_requested,
         )
         self.__args = self.__parser.parse_args()
+        warn_deprecated_options(self.__args)
+        # --list-metrics-gfx-id <arch> on its own lists the blocks of <arch>
+        if self.__args.list_metrics_gfx_id and self.__args.list_metrics is None:
+            self.__args.list_metrics = []
 
         if self.__args.mode == "profile":
             self.handle_profile_args()
@@ -333,8 +342,12 @@ class RocProfCompute:
         if self.__args.specs:
             print(generate_machine_specs(self.__args))
             sys.exit(0)
-        elif self.__args.list_metrics is not None:
-            self.list_metrics()
+        elif self.__args.list_metrics is not None and self.__mode != "analyze":
+            arch = self.__args.list_metrics_gfx_id
+            if arch is None:
+                self.generate_machine_specs()
+                arch = self.__mspec.gpu_arch
+            self.list_metrics(arch)
         elif self.__args.list_blocks is not None:
             self.list_blocks()
 
@@ -342,55 +355,87 @@ class RocProfCompute:
             if self.__args.list_sets:
                 self.list_sets()
             elif self.__args.list_available_metrics:
-                self.list_metrics()
+                self.list_available_metrics()
 
     @demarcate
-    def list_metrics(self) -> None:
-        for_current_arch = getattr(self.__args, "list_available_metrics", False)
-        arch = self.__mspec.gpu_arch if for_current_arch else self.__args.list_metrics
-        config_arch = canonical_config_arch(arch) or arch
-        config_root = Path(self.__args.config_dir) / config_arch
+    def list_metrics(
+        self,
+        arch: str,
+        listable_block_ids: Optional[Set[str]] = None,
+        workload_dir: Optional[str] = None,
+    ) -> None:
+        """Print the --list-metrics output for arch and exit."""
+        metric_details = self._build_arch_metric_details(arch, sys_info=None)
+        selection = self.__args.list_metrics
+        listed_ids = select_listed_ids(
+            list(metric_details),
+            selection,
+            get_arch_alias_to_panel_id(arch),
+            listable_block_ids,
+        )
 
-        if arch in self.__supported_archs.keys() or config_root.is_dir():
-            sys_info = self.__mspec.get_class_members() if for_current_arch else None
-            metric_list = self._build_arch_metric_list(arch, sys_info)
-            for key, value in metric_list.items():
-                prefix = "\t" * min(key.count("."), 2)
-                print(f"{prefix}{key} -> {value}")
-            sys.exit(0)
+        if workload_dir is not None:
+            print(f"Workload: {workload_dir}")
+        series = mi_gpu_specs.get_gpu_series(arch)
+        print(f"Platform: {arch} ({series})\n" if series else f"Platform: {arch}\n")
+        block_aliases = get_arch_panel_id_to_alias(arch)
+        if selection:
+            print(
+                format_metric_tables(
+                    metric_details,
+                    listed_ids,
+                    block_aliases,
+                    shutil.get_terminal_size().columns,
+                )
+            )
         else:
-            console_error("Unsupported arch")
+            print(format_block_table(metric_details, listed_ids, block_aliases))
+            print(
+                '\nAdd block ids or aliases, or "all", to --list-metrics to list '
+                "their metrics."
+            )
+        sys.exit(0)
+
+    @demarcate
+    def list_available_metrics(self) -> None:
+        metric_details = self._build_arch_metric_details(
+            self.__mspec.gpu_arch, self.__mspec.get_class_members()
+        )
+        for key, (name, _unit, _description) in metric_details.items():
+            prefix = "\t" * min(key.count("."), 2)
+            print(f"{prefix}{key} -> {name}")
+        sys.exit(0)
 
     @demarcate
     def list_blocks(self) -> None:
         arch = self.__args.list_blocks
-        config_arch = canonical_config_arch(arch) or arch
-        config_root = Path(self.__args.config_dir) / config_arch
+        metric_details = self._build_arch_metric_details(arch, sys_info=None)
+        panel_alias_dict = get_arch_panel_id_to_alias(arch)
+        print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
+        for key, (name, _unit, _description) in metric_details.items():
+            if "." not in key:
+                print(f"{key:<8} {panel_alias_dict.get(key, ''):<16} {name}")
+        sys.exit(0)
 
-        if arch in self.__supported_archs.keys() or config_root.is_dir():
-            metric_list = self._build_arch_metric_list(arch, sys_info=None)
-            top_panels = {k: v for k, v in metric_list.items() if "." not in k}
-            panel_alias_dict = get_arch_panel_id_to_alias(arch)
-            print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
-            for key, value in top_panels.items():
-                alias = panel_alias_dict.get(key, "")
-                print(f"{key:<8} {alias:<16} {value}")
-            sys.exit(0)
-        else:
-            console_error("Unsupported arch")
-
-    def _build_arch_metric_list(
+    def _build_arch_metric_details(
         self,
         arch: str,
-        sys_info: Optional[dict[str, Any]],
-    ) -> dict[str, str]:
-        """Load panel configs for arch and build metric_list.
-        Returns the metric_list dictionary."""
-        config_arch = canonical_config_arch(arch) or arch
-        panel_configs = load_panel_configs([
-            str(Path(self.__args.config_dir) / config_arch)
-        ])
-        return build_metric_list(panel_configs, sys_info)
+        sys_info: Optional[Dict[str, Any]],
+    ) -> Dict[str, Tuple[str, str, str]]:
+        """Map the ids of arch's panel configs to (name, unit, description)."""
+        config_root = Path(self.__args.config_dir) / (
+            canonical_config_arch(arch) or arch
+        )
+        if arch not in self.__supported_archs and not config_root.is_dir():
+            console_error("Unsupported arch")
+        panel_configs = load_panel_configs([str(config_root)])
+        # Converted here: utils.metrics.expression imports utils_common.
+        return {
+            metric_id: (name, update_normal_unit_string(unit, "per_normUnit"), text)
+            for metric_id, (name, unit, text) in build_metric_details(
+                panel_configs, sys_info
+            ).items()
+        }
 
     @demarcate
     def list_sets(self) -> None:
@@ -599,10 +644,14 @@ class RocProfCompute:
             )
 
     def _validate_list_option_exclusions(self) -> None:
-        """Validate that list/discovery options aren't combined with --block.
-        Applies to both profile and analyze mode.
-        """
+        """Check which options the list options can be combined with."""
         args = self.__args
+        if args.list_metrics_gfx_id is not None and self.__mode == "analyze":
+            console_error(
+                "--list-metrics-gfx-id can't be used in analyze mode, which "
+                "lists the metrics of the -p workload's GPU."
+            )
+
         block_active = bool(
             getattr(args, "filter_blocks", None)
             or getattr(args, "filter_metrics", None)
@@ -611,7 +660,10 @@ class RocProfCompute:
             return
 
         if args.list_metrics is not None:
-            console_error("Cannot use --list-metrics with --blocks")
+            console_error(
+                "Pass block ids or aliases to --list-metrics instead of --block, "
+                "for example --list-metrics sol."
+            )
         if args.list_blocks is not None:
             console_error("Cannot use --list-blocks with --blocks")
         if getattr(args, "list_available_metrics", False):
@@ -654,7 +706,10 @@ class RocProfCompute:
             tmp_csv = Path(tmp_dir) / "roofline.csv"
             try:
                 run_roofline_benchmark(
-                    self.__args.device, tmp_csv, self.__mspec.cache_sizes
+                    self.__args.device,
+                    tmp_csv,
+                    self.__mspec.cache_sizes,
+                    self.__mspec.gpu_arch,
                 )
             except Exception as e:
                 console_error(f"Benchmark execution failed: {e}")
@@ -713,7 +768,18 @@ class RocProfCompute:
             self.load_soc_specs(sys_info_dict)
 
         if getattr(self.__args, "list_available_metrics", False):
-            self.list_metrics()
+            self.list_available_metrics()
+        if self.__args.list_metrics is not None:
+            if len(analyzer.get_args().path) > 1:
+                console_error("--list-metrics takes one workload.")
+            workload_dir = analyzer.get_args().path[0][0]
+            self.list_metrics(
+                self.__mspec.gpu_arch,
+                analyzer.listable_block_ids(
+                    self.__mspec.gpu_arch, sys_info.iloc[0], workload_dir
+                ),
+                workload_dir,
+            )
 
         analyzer.set_soc(self.__soc)
         analyzer.pre_processing()

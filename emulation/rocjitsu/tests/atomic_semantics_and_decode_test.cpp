@@ -27,6 +27,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
@@ -879,7 +881,7 @@ TEST_P(AtomicPolicyExecutionTest, LdsStackUpdatesPointerAndResultWithoutAnInters
     }
     std::unique_ptr<Instruction> inst(decode_valid(*decoder_, words.data()));
     ASSERT_NE(inst, nullptr);
-    const InstDefUse def_use(*inst);
+    const InstDefUse def_use(*inst, 64);
     EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::VGPR, 16, 1}));
     EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::VGPR, 16, 1}));
     ASSERT_TRUE(compute_unit_->execute_instruction(inst.get(), *wave_).succeeded());
@@ -1046,7 +1048,7 @@ TEST_P(AtomicPolicyExecutionTest, BufferFloatCompareSwapDefinesOnlyReturnedEleme
     ASSERT_NE(instruction, nullptr);
     ASSERT_EQ(instruction->num_dst_operands(), 2);
     EXPECT_EQ(instruction->dst_operand(1)->size_bits(), width * 32);
-    const InstDefUse def_use(*instruction);
+    const InstDefUse def_use(*instruction, 64);
     EXPECT_TRUE(
         def_use.uses.contains(RegisterRef{RegClass::VGPR, 0, static_cast<uint8_t>(width * 2)}));
     EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::VGPR, 0, static_cast<uint8_t>(width)}));
@@ -1100,4 +1102,141 @@ INSTANTIATE_TEST_SUITE_P(AllAmdgpu, AtomicPolicyExecutionTest,
                                          ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
                                          ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
                                          ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4));
+
+class Gfx12AtomicTemporalHintTest : public testing::TestWithParam<rj_code_arch_t> {};
+
+TEST_P(Gfx12AtomicTemporalHintTest, ReturnBitIsIndependentOfTemporalAndCascadeHints) {
+  amdgpu::GpuMemory memory("atomic_th_memory");
+  amdgpu::L2Cache l2("atomic_th_l2");
+  l2.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = GetParam();
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 128;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto compute_unit = amdgpu::ComputeUnitCore::create("atomic_th_cu", config, &memory, &l2);
+  ASSERT_NE(compute_unit, nullptr);
+  auto *wave = compute_unit->dispatch_wf(0, 0, 128, 32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(1);
+  auto decoder = Decoder::create(GetParam());
+  ASSERT_NE(decoder, nullptr);
+  const uint32_t sgpr_base = wave->sgpr_alloc().base;
+  const uint32_t vgpr_base = wave->vgpr_alloc().base;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kSentinel = 0xDEADBEEF;
+  constexpr uint8_t kDeviceScope = 2;
+  constexpr uint8_t kSystemScope = 3;
+  amdgpu::GlobalMemPipeline pipeline(&compute_unit->l1_vector(), &l2);
+  enum class Form { Buffer, Global, Flat };
+  for (const auto memory_form : {Form::Buffer, Form::Global, Form::Flat}) {
+    for (const bool is_64bit : {false, true}) {
+      for (const uint8_t memory_scope : {kDeviceScope, kSystemScope}) {
+        for (const uint8_t th : {0, 1, 2, 3, 4, 5, 6, 7}) {
+          // SYS coverage uses the physically qualified returning forms.
+          if (memory_scope == kSystemScope && th != amdgpu::GFX12_TH_ATOMIC_RETURN &&
+              th != (amdgpu::GFX12_TH_ATOMIC_RETURN | amdgpu::GFX12_TH_ATOMIC_CASCADE))
+            continue;
+          SCOPED_TRACE(testing::Message()
+                       << "arch=" << GetParam() << " memory_form=" << static_cast<int>(memory_form)
+                       << " is_64bit=" << is_64bit << " scope=" << unsigned(memory_scope)
+                       << " th=" << unsigned(th));
+          const bool returns_value = (th & amdgpu::GFX12_TH_ATOMIC_RETURN) != 0;
+          const auto expected_counter =
+              returns_value ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT;
+          const uint64_t old_value = is_64bit ? 0x1234'5678'0000'0007ULL : 7;
+          memory.write64(kAddress, old_value);
+          l2.invalidate_all();
+          compute_unit->write_sgpr(sgpr_base + 4, kAddress);
+          compute_unit->write_sgpr(sgpr_base + 5, memory_form == Form::Buffer &&
+                                                          GetParam() == ROCJITSU_CODE_ARCH_CDNA5
+                                                      ? 64u << 25
+                                                      : 0);
+          compute_unit->write_sgpr(
+              sgpr_base + 6,
+              memory_form == Form::Buffer && GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? 64 : 0);
+          compute_unit->write_sgpr(sgpr_base + 7,
+                                   GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? 0x30020000 : 0);
+          compute_unit->write_sgpr(sgpr_base + 12, 0);
+          compute_unit->write_vgpr(vgpr_base + 2, 0, memory_form == Form::Flat ? kAddress : 0);
+          compute_unit->write_vgpr(vgpr_base + 3, 0, 0);
+          compute_unit->write_vgpr(vgpr_base, 0, kSentinel);
+          compute_unit->write_vgpr(vgpr_base + 1, 0, kSentinel);
+          compute_unit->write_vgpr(vgpr_base + 8, 0, 5);
+          compute_unit->write_vgpr(vgpr_base + 9, 0, 0);
+          for (uint32_t reg : {0u, 1u, 8u, 9u})
+            compute_unit->write_vgpr(vgpr_base + reg, 1, kSentinel);
+
+          // These ADD encodings and operand layouts are shared by both GFX12 targets.
+          std::array<uint32_t, 3> encoded_instruction;
+          if (memory_form == Form::Buffer) {
+            encoded_instruction = cdna5::build_vbuffer(is_64bit ? cdna5::kBufferAtomicAddU64Vbuffer
+                                                                : cdna5::kBufferAtomicAddU32Vbuffer,
+                                                       {.soffset = 12,
+                                                        .vdata = 8,
+                                                        .rsrc = 4,
+                                                        .scope = memory_scope,
+                                                        .th = th,
+                                                        .offen = 1,
+                                                        .vaddr = 2});
+          } else if (memory_form == Form::Global) {
+            encoded_instruction = cdna5::build_vglobal(
+                is_64bit ? cdna5::kGlobalAtomicAddU64Vglobal : cdna5::kGlobalAtomicAddU32Vglobal,
+                {.saddr = 4, .vdst = 0, .scope = memory_scope, .th = th, .vsrc = 8, .vaddr = 2});
+          } else {
+            encoded_instruction = cdna5::build_vflat(is_64bit ? cdna5::kFlatAtomicAddU64Vflat
+                                                              : cdna5::kFlatAtomicAddU32Vflat,
+                                                     {.saddr = amdgpu::kModernNullSelector,
+                                                      .vdst = 0,
+                                                      .scope = memory_scope,
+                                                      .th = th,
+                                                      .vsrc = 8,
+                                                      .vaddr = 2});
+          }
+          std::unique_ptr<Instruction> instruction(
+              decode_valid(*decoder, encoded_instruction.data()));
+          ASSERT_NE(instruction, nullptr);
+          const uint32_t result_vgpr = memory_form == Form::Buffer ? 8 : 0;
+          bool has_vgpr_result = false;
+          for (int i = 0; i < instruction->num_dst_operands(); ++i)
+            has_vgpr_result |= instruction->dst_operand(i)->is_vgpr();
+          EXPECT_EQ(has_vgpr_result, returns_value);
+          ASSERT_NE(instruction->amdgpu_memory_issue_info(), nullptr);
+          const auto counter_obligations =
+              instruction->amdgpu_memory_issue_info()->counter_obligations();
+          EXPECT_TRUE(std::ranges::any_of(counter_obligations, [&](const auto &obligation) {
+            return obligation.wait_counter_type() == expected_counter;
+          }));
+          ASSERT_TRUE(compute_unit->execute_instruction(instruction.get(), *wave).succeeded());
+          const auto *memory_state = instruction->data_as<amdgpu::VectorMemState>();
+          ASSERT_NE(memory_state, nullptr);
+          EXPECT_EQ(memory_state->is_load, returns_value);
+          EXPECT_EQ(memory_state->wait_counter_type, expected_counter);
+          ASSERT_EQ(pipeline.issue(instruction.release(), *wave),
+                    amdgpu::VmAccessOutcome::Complete);
+          EXPECT_EQ(is_64bit ? memory.read64(kAddress) : memory.read32(kAddress), old_value + 5);
+          EXPECT_EQ(compute_unit->read_vgpr(vgpr_base + result_vgpr, 0),
+                    returns_value                 ? static_cast<uint32_t>(old_value)
+                    : memory_form == Form::Buffer ? 5u
+                                                  : kSentinel);
+          if (is_64bit) {
+            EXPECT_EQ(compute_unit->read_vgpr(vgpr_base + result_vgpr + 1, 0),
+                      returns_value                 ? static_cast<uint32_t>(old_value >> 32)
+                      : memory_form == Form::Buffer ? 0u
+                                                    : kSentinel);
+          }
+          for (uint32_t reg : {0u, 1u, 8u, 9u}) {
+            EXPECT_EQ(compute_unit->read_vgpr(vgpr_base + reg, 1), kSentinel);
+          }
+        }
+      }
+    }
+  }
+  wave->halt();
+}
+
+INSTANTIATE_TEST_SUITE_P(Gfx12Targets, Gfx12AtomicTemporalHintTest,
+                         testing::Values(ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5));
+
 } // namespace

@@ -85,6 +85,10 @@ struct kernel_symbol_record_t
 {
     std::string kernel_name;
     std::string kernel_short_name;
+    /// The ELF symbol name without its ".kd" suffix; with code_object_id it
+    /// identifies the kernel's disassembly.
+    std::string mangled_name;
+    uint64_t    code_object_id   = 0;
     uint32_t    arch_vgpr_count  = 0;
     uint32_t    accum_vgpr_count = 0;
     uint32_t    sgpr_count       = 0;

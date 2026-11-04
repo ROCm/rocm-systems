@@ -127,6 +127,13 @@ function(
             ERROR_QUIET
             OUTPUT_STRIP_TRAILING_WHITESPACE
         )
+        execute_process(
+            COMMAND ${_compiler_command} --print-runtime-dir
+            RESULT_VARIABLE _runtime_dir_result
+            OUTPUT_VARIABLE _runtime_dir
+            ERROR_QUIET
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
     endif()
 
     foreach(_sanitizer IN LISTS RJ_SANI_LIB_SANITIZERS)
@@ -163,8 +170,27 @@ function(
             OUTPUT_STRIP_TRAILING_WHITESPACE
         )
         set(_runtime_library "")
+        # Recent Clang installs select unsuffixed runtimes in a target-triple
+        # directory. Prefer that layout over legacy arch-suffixed copies: the
+        # linker-selected SONAME must be reachable even with an empty environment.
         if(
-            _runtime_result EQUAL 0
+            RJ_SANI_LIB_COMPILER_ID MATCHES "Clang"
+            AND _runtime_dir_result EQUAL 0
+        )
+            string(
+                REPLACE
+                "-${_sanitizer_arch}.so"
+                ".so"
+                _target_runtime_name
+                "${_runtime_name}"
+            )
+            if(EXISTS "${_runtime_dir}/${_target_runtime_name}")
+                set(_runtime_library "${_runtime_dir}/${_target_runtime_name}")
+            endif()
+        endif()
+        if(
+            NOT _runtime_library
+            AND _runtime_result EQUAL 0
             AND IS_ABSOLUTE "${_runtime_output}"
             AND EXISTS "${_runtime_output}"
         )

@@ -59,7 +59,9 @@ ncclResult_t g_allGatherResult = ncclSuccess;
 float g_peerLatency = 5.0f;  // every other rank reports this for every collective
 }  // namespace
 
-int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t, int64_t*, int8_t*) {
+// env_fakes.cc owns the ncclLoadParam symbol, so this suite scripts params through its g_ncclLoadParam
+// seam (installed in SetUp) rather than defining a second copy of the symbol.
+static int64_t CollTraceLoadParam(char const* env, int64_t deftVal, int64_t, int64_t*, int8_t*) {
   std::lock_guard<std::mutex> lock(g_mutex);
   auto it = g_params.find(env);
   return it == g_params.end() ? deftVal : it->second;
@@ -67,7 +69,7 @@ int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t, int64_t*, int8_
 // collectives_fakes.cc's rcclParamAlltoAllPivotEnable reads this. Nothing here calls it, but the ppc64le link keeps
 // the reference that --gc-sections drops on x86.
 std::function<int64_t(const char*, int64_t)> g_loadParam = [](const char* env, int64_t deftVal) {
-  return ncclLoadParam(env, deftVal, 0, nullptr, nullptr);
+  return CollTraceLoadParam(env, deftVal, 0, nullptr, nullptr);
 };
 
 hipError_t hipEventCreate(hipEvent_t* event) {
@@ -166,6 +168,7 @@ class CollTraceMicrotest : public ::testing::Test {
   void SetUp() override {
     ResetDebugLog();
     ResetEnvFakes();
+    g_ncclLoadParam = CollTraceLoadParam;
     std::lock_guard<std::mutex> lock(g_mutex);
     g_params = {{"NCCL_COLLTRACE_CHECK_INTERVAL_MS", 0}};
     g_eventCreateResult = hipSuccess;

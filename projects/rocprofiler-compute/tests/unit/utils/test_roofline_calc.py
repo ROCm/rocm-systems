@@ -12,7 +12,6 @@ import pandas as pd
 import pytest
 
 from utils import schema
-from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import (
     XMAX_DEFAULT,
     GraphPoints,
@@ -258,15 +257,12 @@ def test_sanitize_ai_value_replaces_invalid_values_with_zero() -> None:
 ##############################################################################
 
 
-def test_roofline_mem_levels_is_the_model_hierarchy() -> None:
-    """A model without MALL gets its full memory hierarchy."""
-    assert roofline_mem_levels("mi210") == mi_gpu_specs.get_memory_levels("mi210")
-
-
-def test_roofline_mem_levels_skips_mall() -> None:
-    """MALL is left out because the roofline benchmark does not measure it."""
-    expected = [m for m in mi_gpu_specs.get_memory_levels("rdna35_halo") if m != "MALL"]
-    assert roofline_mem_levels("rdna35_halo") == expected
+def test_roofline_mem_levels_are_measured_levels_in_hierarchy_order() -> None:
+    """MALL (measured, not plotted) and levels without a measured ceiling (gfx1250's
+    L1) are left out."""
+    assert roofline_mem_levels("gfx90a", "mi210") == ["LDS", "L1", "L2", "HBM"]
+    assert roofline_mem_levels("gfx1151", "rdna35_halo") == ["LDS", "L0", "L1", "L2"]
+    assert roofline_mem_levels("gfx1250", "gfx1250") == ["LDS", "L0", "L2", "HBM"]
 
 
 ##############################################################################

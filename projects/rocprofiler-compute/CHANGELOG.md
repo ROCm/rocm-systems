@@ -20,6 +20,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Scalar data cache utilization, latency, stall rate, and bandwidth.
   * GL1 request latency.
 
+* Added PC sampling counts per source line.
+  * `rocprof-compute analyze --output-format csv` writes `<file>_pc_sampling.csv` beside each captured source file. It lists every source line of the file with the samples of the instructions compiled from it, and where those instructions sit in the per-kernel ISA files.
+  * The analysis database stores the per-source-line counts in `compute_pc_sample_state`, next to the per-instruction counts.
+  * If some instructions of a source file have no source line number, the file's CSV starts with an `Unattributable instructions` row. It counts the samples lost because the compiler wrote no source line number for those instructions.
+
 ### Changed
 
 * `--triton-trace` no longer captures the Triton kernels that `torch.compile` generates. Use `--torch-trace` for those kernels.
@@ -49,6 +54,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Renamed the PC sampling analyze table columns `count_issued` and `count_stalled` to `issue_count` and `stall_count`, so the terminal table uses the same column names as `pc_sampling_summary.csv` and `compute_pc_sampling_summary_view`.
 
+* The PC sampling analyze table, `compute_pc_sampling_summary_view`, and `pc_sampling_summary.csv` now show one row per kernel instead of one row per instruction.
+  * `--pc-sampling-rows` now sets the number of kernels shown.
+  * Per-instruction counts are in the per-kernel ISA CSV files.
+
+* `--list-metrics` no longer takes a GPU architecture. It lists the blocks of the current GPU, or the metrics of the blocks and metrics you name, for example `rocprof-compute --list-metrics sol`. Use `--list-metrics-gfx-id <arch>` to list another GPU.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
@@ -70,9 +81,13 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the `--include-cols` and `--cols` analyze options.
 
+* Removed the `analyze --pc-sampling-sorting-type` option. The PC sampling table is always sorted by sample count.
+
 ### Optimized
 
 * Profile mode collects only the counters that metric equations use, which can reduce the number of profiling passes.
+
+* PC sampling now writes disassembly only for dispatched kernels, so profiling output is much smaller.
 
 ### Resolved issues
 
@@ -92,6 +107,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed PC sampling stall reasons counting samples where the wave issued an instruction.
 
 ### Upcoming changes
+
+* `--list-blocks` and `--list-available-metrics` will be removed in a future release.
 
 ### Known issues
 
