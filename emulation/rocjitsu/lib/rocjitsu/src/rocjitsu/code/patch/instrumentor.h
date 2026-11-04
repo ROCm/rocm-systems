@@ -73,8 +73,9 @@ class LivenessAnalysis;
 /// BeforeInst relocates an ordinary instruction. KernelEntry runs once through
 /// the descriptor's dispatch-only stub; KernelExit runs before s_endpgm. Both
 /// boundary kinds require a callable probe. AfterInst calls a probe after a
-/// relocated instruction, observing its resulting state; bank-changing anchors
-/// are rejected. BlockEntry and BlockExit remain reserved.
+/// relocated instruction, observing its resulting state. Anchors changing VGPR
+/// addressing state or deallocating VGPRs and scratch are rejected. BlockEntry and BlockExit remain
+/// reserved.
 enum class InstrumentationKind {
   BeforeInst,
   AfterInst,
@@ -269,7 +270,8 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 ///     a probe; KernelExit must name s_endpgm. The orchestrator separately checks
 ///     that KernelEntry names the sole kernel's descriptor entry.
 ///   - AfterInst requires a callable probe and an anchor that preserves VGPR
-///     bank selection, since liveness proves bank state before the anchor.
+///     bank selection, cannot enable GPR indexing, and does not deallocate VGPRs
+///     or scratch. Liveness proves addressing state before the anchor.
 ///     @p setreg_vgpr_msb_fixup selects the concrete target's MODE-write behavior;
 ///     the default conservatively applies gfx1250's clobber semantics on CDNA5.
 ///   - @p pt.probe_obj and @p pt.probe_symbol are consistent: both set (a probe

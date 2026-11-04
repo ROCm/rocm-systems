@@ -32,11 +32,10 @@ bool may_change_vgpr_msb(const Instruction &instruction, rj_code_arch_t arch,
   const Operand *hwreg = instruction.dst_operand(0);
   if (hwreg == nullptr)
     return true;
-  const amdgpu::HwregSlice slice =
-      amdgpu::decode_vgpr_msb_hwreg(static_cast<uint16_t>(hwreg->encoding_value()));
-  return slice.id == amdgpu::MODE_HWREG &&
-         (setreg_vgpr_msb_fixup || (slice.begin < amdgpu::VGPR_MSB_MODE_SHIFT + 8 &&
-                                    slice.begin + slice.width > amdgpu::VGPR_MSB_MODE_SHIFT));
+  const uint16_t encoding = static_cast<uint16_t>(hwreg->encoding_value());
+  return (setreg_vgpr_msb_fixup &&
+          amdgpu::decode_vgpr_msb_hwreg(encoding).id == amdgpu::MODE_HWREG) ||
+         amdgpu::hwreg_slice_overlaps_vgpr_msb(encoding);
 }
 
 namespace {

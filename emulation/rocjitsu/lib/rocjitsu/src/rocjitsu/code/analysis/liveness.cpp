@@ -104,6 +104,14 @@ void dfs_reverse_post_order(const BasicBlock &start,
   if (mnemonic.starts_with("v_movrel") || mnemonic.starts_with("v_swaprel")) {
     return true;
   }
+  return may_enable_gpr_indexing(inst, text, arch);
+}
+
+} // namespace
+
+bool may_enable_gpr_indexing(const Instruction &inst, std::span<const uint8_t> text,
+                             rj_code_arch_t arch) {
+  const std::string_view mnemonic = inst.mnemonic();
   if (!isa_properties(arch).mode_has_gpr_idx_en)
     return false;
   if (mnemonic == "s_set_gpr_idx_on")
@@ -139,8 +147,6 @@ void dfs_reverse_post_order(const BasicBlock &start,
     return true;
   return ((*literal >> (kGprIdxEnableBit - begin)) & 1u) != 0;
 }
-
-} // namespace
 
 LivenessAnalysis::LivenessAnalysis(UnavailableTag) : available_(false) {}
 
