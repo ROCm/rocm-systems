@@ -36,11 +36,12 @@ def run_roofline_benchmark(
 
 
 def bench_class(gpu_arch: str) -> type:
-    """Return the benchmark class of gpu_arch, e.g. Bench_gfx942 for "gfx940"."""
-    device = mi_gpu_specs.get_roofline_benchmark(gpu_arch)
+    """Return the benchmark class of gpu_arch, e.g. Bench_gfx942 for "gfx942"."""
     family = mi_gpu_specs.get_roofline_family(gpu_arch)
-    module = importlib.import_module(f"roofline.benchmark.{family}.benchmark_{device}")
-    return getattr(module, f"Bench_{device}")
+    module = importlib.import_module(
+        f"roofline.benchmark.{family}.benchmark_{gpu_arch}"
+    )
+    return getattr(module, f"Bench_{gpu_arch}")
 
 
 def load_bench(device_id: int, cache_sizes: dict, gpu_arch: str) -> object:

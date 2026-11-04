@@ -451,15 +451,9 @@ class MIGPUSpecs:
         return tuple(cls._roofline)
 
     @classmethod
-    def get_roofline_benchmark(cls, gpu_arch: str) -> str:
-        """Return the arch whose benchmark class gpu_arch runs, e.g. "gfx942" for
-        "gfx940"."""
-        return cls._roofline[gpu_arch].get("benchmark", gpu_arch)
-
-    @classmethod
     def get_roofline_family(cls, gpu_arch: str) -> str:
         """Return the roofline/benchmark/ package of gpu_arch, e.g. "gfx9"."""
-        return cls.get_roofline_benchmark(gpu_arch)[:-2]
+        return gpu_arch[:-2]
 
     @classmethod
     def get_roofline_matrix_type(cls, gpu_arch: str) -> str:
