@@ -15,7 +15,6 @@
 namespace hip {
 
 // Forward declaraiton of a function
-hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocation location,
                                 hipStream_t stream);
 hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
@@ -453,7 +452,8 @@ hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t len
 }
 
 // ================================================================================================
-hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align, bool use_host_ptr) {
+hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align, bool use_host_ptr,
+                             ManagedMemOwner owner) {
   if (ptr == nullptr) {
     return hipErrorInvalidValue;
   } else if (size == 0) {
@@ -466,16 +466,26 @@ hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align, bool use_hos
 
   const amd::Device& dev = *ctx.devices()[0];
 
+  // A module-scope __managed__ variable's storage has to outlive hipDeviceReset(), so keep it
+  // out of the purge there. ROCCLR_MEM_INTERNAL_MEMORY is what MemObjMap::Purge() skips, and
+  // it already covers the analogous case in roc::Program, where a buffer wraps device globals
+  // the program owns rather than storage the buffer allocated. Teardown is unaffected:
+  // removeFatBinary() still frees the storage through ihipFree().
+  const cl_svm_mem_flags keep_across_reset =
+      (owner == ManagedMemOwner::kModuleVariable) ? ROCCLR_MEM_INTERNAL_MEMORY : 0;
+
   // Allocate SVM fine grain buffer with the forced host pointer, avoiding explicit memory
   // allocation in the device driver
   if (use_host_ptr) {
-    // If the host pointer is already allocated, map it to svm fine grain buffer
-    *ptr =
-        amd::SvmBuffer::malloc(ctx, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR, size,
-                               (align == 0) ? dev.info().memBaseAddrAlign_ : align, nullptr, *ptr);
+    // If the host pointer is already allocated, map it to svm fine grain buffer. The range
+    // belongs to the caller, not to this buffer, and releasing the buffer would unmap it.
+    *ptr = amd::SvmBuffer::malloc(
+        ctx, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR | keep_across_reset, size,
+        (align == 0) ? dev.info().memBaseAddrAlign_ : align, nullptr, *ptr);
   } else {
-    *ptr = amd::SvmBuffer::malloc(ctx, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR, size,
-                                  (align == 0) ? dev.info().memBaseAddrAlign_ : align);
+    *ptr = amd::SvmBuffer::malloc(
+        ctx, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR | keep_across_reset, size,
+        (align == 0) ? dev.info().memBaseAddrAlign_ : align);
   }
   if (*ptr == nullptr) {
     return hipErrorMemoryAllocation;
