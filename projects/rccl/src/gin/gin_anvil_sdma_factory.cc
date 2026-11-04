@@ -48,6 +48,12 @@ static int ginAnvilSpreadChannelsFromEnv() {
   return atoi(e) != 0 ? 1 : 0;
 }
 
+// Names a GPU on another host for Anvil's remote-peer queues. A collision would
+// only make two such peers share a queue.
+static uint64_t ginAnvilRemotePeerKey(const gin_anvil_sdma_peer_t& p) {
+  return p.host_id ^ ((static_cast<uint64_t>(p.device_id) + 1) * 0x9E3779B97F4A7C15ull);
+}
+
 extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id, uint64_t my_host_id,
                                      int remote_hosts_ok,
                                      int (*allgather)(void* ctx, void* buf, size_t bytes_per_rank),
@@ -75,14 +81,12 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id, u
   }
 
   const int myDev = peers[static_cast<size_t>(myRank)].device_id;
-  int nLocalDevs = 0;
-  if (checkHip(hipGetDeviceCount(&nLocalDevs), "hipGetDeviceCount") != 0 || nLocalDevs < 1) return -1;
 
-  // A peer's ordinal names a GPU on its own host. For a peer on another host it
-  // only picks which local SDMA engine carries the copy; the destination is the
-  // peer's fabric-mapped address, so no peer access is set up for it.
-  std::vector<int> devs(static_cast<size_t>(nRanks), -1);
+  // A peer's ordinal names a GPU on its own host, so a peer on another host is
+  // identified by host and ordinal and gets queues of its own; the destination
+  // is its fabric-mapped address, so no peer access is set up for it.
   std::vector<char> sameHost(static_cast<size_t>(nRanks), 1);
+  std::vector<uint64_t> remoteKeys(static_cast<size_t>(nRanks), 0);
   int remotePeers = 0;
   for (int i = 0; i < nRanks; ++i) {
     const gin_anvil_sdma_peer_t& p = peers[static_cast<size_t>(i)];
@@ -92,11 +96,11 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id, u
       return -1;
     }
     sameHost[static_cast<size_t>(i)] = remote ? 0 : 1;
-    devs[static_cast<size_t>(i)] = remote ? p.device_id % nLocalDevs : p.device_id;
+    if (remote) remoteKeys[static_cast<size_t>(i)] = ginAnvilRemotePeerKey(p);
     remotePeers += remote ? 1 : 0;
   }
   if (remotePeers > 0) {
-    INFO(NCCL_INIT, "GIN anvil-sdma: %d of %d peers are on other hosts; using local engines for fabric copies",
+    INFO(NCCL_INIT, "GIN anvil-sdma: %d of %d peers are on other hosts; each gets its own SDMA queue",
          remotePeers, nRanks);
   }
 
@@ -110,20 +114,28 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id, u
   // communicator gets its own ginState and the loop below deliberately reuses queues a previous
   // create left behind, whose device handles are already published to the GPU.
   std::vector<int> connectedDevs;
-  auto abandon = [&connectedDevs]() {
+  std::vector<uint64_t> connectedRemotes;
+  auto abandon = [&connectedDevs, &connectedRemotes]() {
     for (int dev : connectedDevs) sdma_anvil::anvil.disconnectDevice(dev);
+    for (uint64_t key : connectedRemotes) sdma_anvil::anvil.disconnectRemotePeer(key);
     return -1;
   };
 
   try {
     for (int local_pe = 0; local_pe < nRanks; ++local_pe) {
-      const int remoteDev = devs[static_cast<size_t>(local_pe)];
-      // Before the reuse check: a cross-host peer folded onto this device may
-      // have created the queue already without enabling access to it.
-      if (myDev != remoteDev && sameHost[static_cast<size_t>(local_pe)]) {
-        sdma_anvil::EnablePeerAccess(myDev, remoteDev);
+      if (!sameHost[static_cast<size_t>(local_pe)]) {
+        const uint64_t key = remoteKeys[static_cast<size_t>(local_pe)];
+        if (sdma_anvil::anvil.getRemotePeerQueue(key, 0) != nullptr) continue;
+        if (!sdma_anvil::anvil.connectRemotePeer(myDev, key, numChannels)) {
+          WARN("GIN anvil-sdma: connect(%d -> rank %d on another host) failed", myDev, local_pe);
+          return abandon();
+        }
+        connectedRemotes.push_back(key);
+        continue;
       }
+      const int remoteDev = peers[static_cast<size_t>(local_pe)].device_id;
       if (sdma_anvil::anvil.getSdmaQueue(myDev, remoteDev, 0) != nullptr) continue;
+      if (myDev != remoteDev) sdma_anvil::EnablePeerAccess(myDev, remoteDev);
       if (!sdma_anvil::anvil.connect(myDev, remoteDev, numChannels)) {
         WARN("GIN anvil-sdma: connect(%d -> %d) failed", myDev, remoteDev);
         return abandon();
@@ -140,9 +152,12 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id, u
       static_cast<size_t>(total), nullptr);
   int validHandles = 0;
   for (int local_pe = 0; local_pe < nRanks; ++local_pe) {
-    const int remoteDev = devs[static_cast<size_t>(local_pe)];
+    const bool local = sameHost[static_cast<size_t>(local_pe)];
+    const int remoteDev = peers[static_cast<size_t>(local_pe)].device_id;
     for (int c = 0; c < numChannels; ++c) {
-      sdma_anvil::SdmaQueue* q = sdma_anvil::anvil.getSdmaQueue(myDev, remoteDev, c);
+      sdma_anvil::SdmaQueue* q =
+          local ? sdma_anvil::anvil.getSdmaQueue(myDev, remoteDev, c)
+                : sdma_anvil::anvil.getRemotePeerQueue(remoteKeys[static_cast<size_t>(local_pe)], c);
       auto* h = q ? q->deviceHandle() : nullptr;
       host_handles[static_cast<size_t>(local_pe * numChannels + c)] = h;
       if (h != nullptr) validHandles++;

@@ -41,10 +41,10 @@ typedef struct {
  * rank r's device ordinal and host id.
  *
  * Peers on another host (a different host_id) are only reachable through
- * fabric-mapped memory (an MI450 pod). With remote_hosts_ok set, their queue
- * runs on a local SDMA engine picked from the peer's device ordinal folded onto
- * this host's devices, and no peer access is enabled for them. Without it, any
- * such peer fails creation, which is the only safe outcome on MI300/MI350.
+ * fabric-mapped memory (an MI450 pod). With remote_hosts_ok set, each such peer
+ * gets SDMA queues of its own on this GPU, keyed by its host and ordinal and
+ * reused by later creates, and no peer access is enabled for it. Without it,
+ * any such peer fails creation, which is the only safe outcome on MI300/MI350.
  *
  * @param my_device_id  HIP ordinal for this rank (typically hipGetDevice).
  * @param my_host_id    Host identity for this rank; 0 makes every peer local.

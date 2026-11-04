@@ -136,7 +136,9 @@ can address, so how far the backend reaches depends on the system:
 | MI450 (gfx1250) | Anvil SDMA | Anvil SDMA when every rank is in one fabric pod (MNNVL, one clique covering the communicator, cuMem), the communicator has at most 16 ranks, and every rank sets `RCCL_GIN_ANVIL_FABRIC_POD=1` and `RCCL_GIN_ANVIL_FABRIC_MEM=1`; otherwise PROXY or rocSHMEM GDA |
 
 In an MI450 pod, peers on other hosts are written through their fabric-mapped
-memory using this host's SDMA engines. When Anvil SDMA cannot reach every rank,
+memory using this host's SDMA engines. Each such peer has its own SDMA queue: a
+queue is an in-order ring, so a peer sharing one with a same-host peer would
+serialize their copies. When Anvil SDMA cannot reach every rank,
 RCCL removes it from the communicator's active backends and logs the reason at
 `NCCL_DEBUG=INFO` (subsystem `INIT`). The policy is in `src/include/gin/gin_anvil_reach.h`.
 

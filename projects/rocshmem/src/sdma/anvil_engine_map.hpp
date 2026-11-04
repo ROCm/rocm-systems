@@ -29,6 +29,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace sdma_anvil {
 
@@ -115,6 +116,17 @@ inline bool queueBudgetExceeded(uint32_t used, int requested, uint32_t numEngine
                                 uint32_t queuesPerEngine) {
   const uint32_t budget = numEnginesTotal * queuesPerEngine;
   return requested > 0 && budget > 0 && used + static_cast<uint32_t>(requested) > budget;
+}
+
+// The usable engine carrying the fewest queues, lowest id on a tie. queuesPerEngine[e] counts this
+// process's queues on engine e, sized to the node's engine total; an empty vector means the total
+// is unknown and returns engine 0.
+inline int leastLoadedUsableEngine(const std::vector<uint32_t>& queuesPerEngine) {
+  int best = 0;
+  for (size_t e = 0; e < queuesPerEngine.size(); e += 2) {
+    if (queuesPerEngine[e] < queuesPerEngine[static_cast<size_t>(best)]) best = static_cast<int>(e);
+  }
+  return best;
 }
 
 }  // namespace sdma_anvil
