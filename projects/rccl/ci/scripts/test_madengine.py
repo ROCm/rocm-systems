@@ -2701,7 +2701,10 @@ def main() -> None:
     # Override exit_code if training actually completed successfully.
     # madengine can report failure (exit code 3) when its perf collector
     # can't parse the output format, even though training ran to completion.
-    if exit_code != 0 and not rccl_verification_failed and all_rows:
+    # Not for MaxText: its wrapper parses a crashed run's partial steps too and
+    # exits with the training's own code, so metrics do not prove completion.
+    if (exit_code != 0 and not rccl_verification_failed and all_rows
+            and family != "maxtext"):
         every_phase_scored = all(phase_results.get(p) for p, _ in phases)
         all_pass = all(r["status"] == "pass" for r in all_rows)
         has_metric = all(r.get("metric_value") is not None for r in all_rows)
