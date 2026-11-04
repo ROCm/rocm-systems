@@ -28,6 +28,7 @@
 #include "plugin/nccl_tuner.h"
 #include "rccl_common.h"
 #include "rocmwrap.h"
+#include "warp_speed_plan.h"
 
 #include <algorithm>
 #include <chrono>
@@ -2062,6 +2063,123 @@ TEST(Rcclwrap, WarpSpeedSupported_RejectsIneligibleTask)
     second.useWarpSpeed = false;
 
     EXPECT_FALSE(rcclWarpSpeedSupported(&comm, &plan, &first, /*nCollTasks=*/2));
+}
+
+TEST(Rcclwrap, WarpSpeedPlanCap_LeadingPrefixPreservesWarpSpeed)
+{
+    auto comm = std::make_unique<ncclComm>();
+    auto topo = std::make_unique<ncclTopoSystem>();
+    auto plan = std::make_unique<ncclKernelPlan>();
+    comm->topo = topo.get();
+    comm->nNodes = 2;
+    topo->warpSpeedEnabled = true;
+    ncclIntruQueueConstruct(&plan->p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan->bcastTaskQueue);
+
+    struct
+    {
+        int nTasks;
+        int ordinaryTask;
+        int treeTask;
+        bool expectPlanEligible;
+        bool expectCap;
+    } const cases[] = {
+        {4, -1, -1, true, true},
+        {4, 0, -1, false, false},
+        {4, 3, -1, false, true},
+        {4, -1, 1, false, false},
+        {5, -1, -1, true, true},
+        {5, 4, -1, false, true},
+        {4, 2, -1, false, false},
+        {3, 2, -1, false, false},
+    };
+
+    for(const auto& c : cases)
+    {
+        ncclTaskColl tasks[5]{};
+        for(int i = 0; i < c.nTasks; ++i)
+        {
+            tasks[i].algorithm = i == c.treeTask ? NCCL_ALGO_TREE : NCCL_ALGO_RING;
+            tasks[i].useWarpSpeed = i != c.ordinaryTask;
+            tasks[i].next = i + 1 < c.nTasks ? &tasks[i + 1] : nullptr;
+        }
+
+        EXPECT_EQ(c.expectPlanEligible, rcclWarpSpeedSupported(comm.get(), plan.get(), &tasks[0], c.nTasks));
+        EXPECT_EQ(c.expectCap, rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], c.nTasks));
+        EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/3));
+    }
+}
+
+TEST(Rcclwrap, WarpSpeedPlanCap_Ordinary58LayerGraphDoesNotSplitAtThree)
+{
+    auto comm = std::make_unique<ncclComm>();
+    auto topo = std::make_unique<ncclTopoSystem>();
+    auto plan = std::make_unique<ncclKernelPlan>();
+    comm->topo = topo.get();
+    comm->nNodes = 2;
+    topo->warpSpeedEnabled = true;
+    ncclIntruQueueConstruct(&plan->p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan->bcastTaskQueue);
+
+    ncclTaskColl tasks[58]{};
+    for(int i = 0; i < 58; ++i)
+    {
+        tasks[i].algorithm = NCCL_ALGO_RING;
+        tasks[i].useWarpSpeed = false;
+        tasks[i].next = i + 1 < 58 ? &tasks[i + 1] : nullptr;
+    }
+
+    for(int nPlanColls = 0; nPlanColls <= 58; ++nPlanColls)
+    {
+        EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], nPlanColls))
+            << "nPlanColls=" << nPlanColls;
+    }
+}
+
+TEST(Rcclwrap, GroupedPlanCap_SingleNodeGfx950CapsEveryPrefix)
+{
+    auto comm = std::make_unique<ncclComm>();
+    auto topo = std::make_unique<ncclTopoSystem>();
+    auto plan = std::make_unique<ncclKernelPlan>();
+    char arch[] = "gfx950";
+    char archWithSuffix[] = "gfx950:sramecc+:xnack-";
+    char otherArch[] = "gfx942";
+    comm->topo = topo.get();
+    comm->archName = arch;
+    comm->nNodes = 1;
+    topo->warpSpeedEnabled = false;
+    ncclIntruQueueConstruct(&plan->p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan->bcastTaskQueue);
+
+    ncclTaskColl tasks[5]{};
+    for(int i = 0; i < 5; ++i)
+    {
+        tasks[i].func = i == 0 ? ncclFuncReduce : ncclFuncAllReduce;
+        tasks[i].datatype = i == 1 ? ncclFloat16 : ncclFloat;
+        tasks[i].count = 1048575 + i;
+        tasks[i].opHost = i == 2 ? ncclMax : ncclSum;
+        tasks[i].algorithm = i == 3 ? NCCL_ALGO_TREE : NCCL_ALGO_RING;
+        tasks[i].useWarpSpeed = false;
+        tasks[i].next = i + 1 < 5 ? &tasks[i + 1] : nullptr;
+    }
+
+    for(int ranks : {2, 8})
+    {
+        comm->nRanks = ranks;
+        for(char* gfx950Arch : {arch, archWithSuffix})
+        {
+            comm->archName = gfx950Arch;
+            EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/3));
+            EXPECT_TRUE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/4));
+            EXPECT_TRUE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/5));
+        }
+    }
+
+    comm->archName = otherArch;
+    EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/4));
+    comm->archName = archWithSuffix;
+    comm->nNodes = 2;
+    EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/4));
 }
 
 TEST(Rcclwrap, WarpSpeedSupported_OnlyChecksBudgetedPrefix)
