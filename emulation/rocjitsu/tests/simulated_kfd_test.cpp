@@ -52,7 +52,7 @@ RJ_DIAGNOSTIC_POP
 
 namespace {
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi350x.json";
 
 struct TestVM {
   rocjitsu::config::LoadedConfig loaded;
@@ -107,9 +107,11 @@ util::FailureOr<TestVM> create_test_vm(util::DiagnosticEmitter emit_error,
   vm->driver()->setup_topology(t.loaded.device, soc->num_xcds());
 
   t.engine->topology().set_root(std::move(vm));
-  t.loaded.wire_links(t.engine->topology());
+  if (t.loaded.wire_links(t.engine->topology(), emit_error).failed())
+    return util::Result::failure();
   soc->wire_backing(t.engine->topology());
-  t.engine->create();
+  if (t.engine->create(emit_error).failed())
+    return util::Result::failure();
   t.engine->register_as_primary();
 
   return t;
@@ -2588,7 +2590,7 @@ TEST_F(SimulatedKfdTest, UnresolvedGpuAddressRaisesMemoryExceptionEvent) {
 // violation as the first one is misattribution the caller can see, not just
 // untidy metadata.
 TEST_F(SimulatedKfdTest, MemoryExceptionNamesTheFaultingGpu) {
-  const std::string config = std::string(CONFIG_DIR) + "/gfx950_mi355x_kmd_2gpu.json";
+  const std::string config = std::string(CONFIG_DIR) + "/gfx950_mi350x_kmd_2gpu.json";
   rj_vm_t *vm = nullptr;
   ASSERT_EQ(rj_vm_create(config.c_str(), RJ_VM_MODE_LOCAL, &vm), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(vm, nullptr);

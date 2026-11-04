@@ -18,13 +18,9 @@
 #include "ScopedHook.h"
 #include "fakes/ibvwrap_fakes.h"
 #include "fakes/mlx5dvwrap_fakes.h"
-#include "fakes/signature-drift.h"
 #include "fakes/socket_fakes.h"
 
 namespace {
-
-template <typename Slot>
-using HookOf = ScopedHook<rccl_test_host::FnSigOf_t<Slot>>;
 
 // One fake HCA: the verbs objects device discovery opens and queries. Port n is ports[n - 1].
 struct FakeHca {

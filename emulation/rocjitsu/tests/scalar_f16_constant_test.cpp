@@ -51,8 +51,10 @@ TEST(ScalarF16CompatibilityTest, Rdna35MinFormatsNumericInlineFloats) {
   auto *wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
   ASSERT_NE(wave, nullptr);
   wave->set_exec(0);
-  const std::array<uint32_t, 2> words{
-      build_sop2_encoding(config.arch, rdna3_5::kSMinF16Sop2, 4, 242, 244), 0};
+  util::FailureOr<uint32_t> encoding =
+      build_sop2_encoding(config.arch, rdna3_5::kSMinF16Sop2, 4, 242, 244);
+  ASSERT_TRUE(encoding.succeeded());
+  const std::array<uint32_t, 2> words{encoding.value(), 0};
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
   ASSERT_NE(instruction, nullptr);
   cu->write_sgpr(wave->sgpr_alloc().base + 4, 0xDEADBEEFu);
@@ -127,18 +129,20 @@ protected:
 
   void expect_sop1(const ScalarOperation &operation, uint16_t source, uint32_t expected,
                    std::optional<uint32_t> literal = std::nullopt) {
-    const std::array<uint32_t, 2> words{
-        build_sop1_encoding(GetParam().arch, opcode(operation), kDestination, source),
-        literal.value_or(0)};
+    util::FailureOr<uint32_t> encoding =
+        build_sop1_encoding(GetParam().arch, opcode(operation), kDestination, source);
+    ASSERT_TRUE(encoding.succeeded());
+    const std::array<uint32_t, 2> words{encoding.value(), literal.value_or(0)};
     ASSERT_NO_FATAL_FAILURE(
         expect_execution(words, literal ? 8u : 4u, operation.mnemonic, expected));
   }
 
   void expect_sop2(const ScalarOperation &operation, uint16_t source0, uint16_t source1,
                    uint32_t expected, std::optional<uint32_t> literal = std::nullopt) {
-    const std::array<uint32_t, 2> words{
-        build_sop2_encoding(GetParam().arch, opcode(operation), kDestination, source0, source1),
-        literal.value_or(0)};
+    util::FailureOr<uint32_t> encoding =
+        build_sop2_encoding(GetParam().arch, opcode(operation), kDestination, source0, source1);
+    ASSERT_TRUE(encoding.succeeded());
+    const std::array<uint32_t, 2> words{encoding.value(), literal.value_or(0)};
     ASSERT_NO_FATAL_FAILURE(
         expect_execution(words, literal ? 8u : 4u, operation.mnemonic, expected));
   }
@@ -247,8 +251,10 @@ TEST_P(ScalarF16ConstantTest, DelegationUsesTheEffectiveRegisterSource) {
   ScopedIsaExecutionBackend execution_backend_scope{GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4
                                                         ? &rdna4::execution_backend()
                                                         : &cdna5::execution_backend()};
-  const std::array<uint32_t, 2> words{
-      build_sop2_encoding(GetParam().arch, opcode(kAdd), kDestination, 242, 242), 0u};
+  util::FailureOr<uint32_t> encoding =
+      build_sop2_encoding(GetParam().arch, opcode(kAdd), kDestination, 242, 242);
+  ASSERT_TRUE(encoding.succeeded());
+  const std::array<uint32_t, 2> words{encoding.value(), 0u};
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
   ASSERT_NE(instruction, nullptr);
   std::unique_ptr<Operand> replacement;
