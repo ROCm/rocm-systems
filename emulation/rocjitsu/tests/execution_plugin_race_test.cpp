@@ -547,6 +547,10 @@ protected:
     execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfcb0000u | count);
   }
 
+  void wait_dscnt(int wave) {
+    execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfc60000u); // s_wait_dscnt 0.
+  }
+
   void barrier() { fixture.plugin_group_->onAmdgpuBarrierResolved(waves); }
 
   /// Wave 0 issues a tensor load at 0x2010 that overwrites bytes wave 1 is
@@ -614,6 +618,27 @@ TEST_F(TensorDmaRaceTest, TransferIsCheckedAgainstPendingLdsAccesses) {
   const std::string report = sink->str().substr(previous);
   EXPECT_NE(report.find("type=LDS access=write"), std::string::npos) << report;
   EXPECT_NE(report.find("wave=0 lane=-1"), std::string::npos) << report;
+}
+
+TEST_F(TensorDmaRaceTest, StoreIsCheckedAgainstAPendingDsWrite) {
+  // DS writes and tensor transfers complete independently, so the store may
+  // read the bytes before the earlier write lands.
+  EXPECT_FALSE(ds_write(0, 4));
+  waves[0]->pc = kTensorPc - 16; // transfer() advances the PC by 16.
+  const size_t previous = sink->str().size();
+  EXPECT_TRUE(tensor_store(0, {{.address = 0, .bytes = 16}}));
+  const std::string report = sink->str().substr(previous);
+  EXPECT_NE(report.find("type=LDS access=read"), std::string::npos) << report;
+  EXPECT_NE(report.find("wave=0 lane=-1"), std::string::npos) << report;
+  EXPECT_NE(report.find(std::format("==>  0x{:x}  tensor_store_from_lds", kTensorPc)),
+            std::string::npos)
+      << report;
+}
+
+TEST_F(TensorDmaRaceTest, StoreAfterDscntIsSafe) {
+  EXPECT_FALSE(ds_write(0, 4));
+  wait_dscnt(0);
+  EXPECT_FALSE(tensor_store(0, {{.address = 0, .bytes = 16}}));
 }
 
 TEST_F(TensorDmaRaceTest, RaceFoundByTheTransferIsReportedAtItsInstruction) {
