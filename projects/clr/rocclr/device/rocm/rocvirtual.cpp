@@ -2851,11 +2851,11 @@ void VirtualGPU::WaitCompleteSignal(hsa_signal_t signal) {
 
 // ================================================================================================
 void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
-                                       hsa_signal_t signal) {
+                                       hsa_signal_t signal, bool depSignalsSet) {
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
 
-  if (!skipSignal) {
+  if (!skipSignal && !depSignalsSet) {
     // Make sure the wait is issued before queue index reservation
     auto wait_signals = Barriers().WaitingSignal();
     for (uint32_t i = 0; i < wait_signals.size(); ++i) {
@@ -2935,6 +2935,22 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   assert((resolveDepSignal && (signal.handle != 0)) == false);
   if (resolveDepSignal) {
     auto wait_signals = Barriers().WaitingSignal();
+    // DEBUG_CLR_GRAPH_FAST_LAUNCH: 2 to 5 waits fit one barrier-AND with the same scopes
+    // and completion signal, instead of a nop barrier-AND and the barrier-value
+    if (DEBUG_CLR_GRAPH_FAST_LAUNCH && (wait_signals.size() >= 2) &&
+        (wait_signals.size() <= 5) && (!skipTs || (completionSignal.handle != 0))) {
+      for (uint32_t i = 0; i < wait_signals.size(); ++i) {
+        barrier_packet_.dep_signal[i] = wait_signals[i];
+      }
+      constexpr uint16_t kTypeMask = ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1)
+                                     << HSA_PACKET_HEADER_TYPE;
+      const uint16_t header = (packetHeader & ~kTypeMask) |
+                              (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE);
+      constexpr bool kDepSignalsSet = true;
+      dispatchBarrierPacket(header, false, completionSignal, kDepSignalsSet);
+      barrier_value_packet_.signal = hsa_signal_t{};
+      return;
+    }
     if (wait_signals.size() > 0) {
       barrier_value_packet_.signal = wait_signals[0];
       barrier_value_packet_.value = kInitSignalValueOne;
@@ -6192,7 +6208,29 @@ void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
   profilingBegin(vcmd);
 
   const Settings& settings = dev().settings();
-  if (settings.barrier_value_packet_) {
+  // DEBUG_CLR_GRAPH_FAST_LAUNCH: the end marker of a graph launch carries the batch, so its
+  // completion signal is an interrupt signal in host memory, and the next launch's side queues
+  // wait on it. The waits are resolved on a first packet instead, which completes a gate signal
+  // without interrupt in device memory, the command's HW event for the waiters on other queues;
+  // the interrupt signal goes on a nop barrier after it, which no GPU waiter reads
+  // Only a launch with segments on other queues has waiters to gate; a single-stream launch keeps
+  // the single packet
+  const bool fast_gate = DEBUG_CLR_GRAPH_FAST_LAUNCH && vcmd.multiStream() &&
+                         settings.barrier_value_packet_ &&
+                         dev().ActiveWait() && (timestamp_ != nullptr) &&
+                         ((vcmd.Callback() != nullptr) || (vcmd.GetBatchHead() != nullptr)) &&
+                         !vcmd.CpuWaitRequested();
+  ProfilingSignal* gate = fast_gate ? AcquireGateSignal() : nullptr;
+  if (gate != nullptr) {
+    constexpr bool kSkipTs = true;
+    dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true, hsa_signal_t{0}, 0, 0,
+                               HSA_SIGNAL_CONDITION_EQ, kSkipTs, gate->PacketHandle(false));
+    // No waits left: in order after the gate, it completes the batch with the interrupt
+    dispatchBarrierPacket(kNopPacketHeader, false);
+    AttachHwEvent(&vcmd, gate);
+    // The command holds the gate now: return the checkout reference
+    gate->release();
+  } else if (settings.barrier_value_packet_) {
     dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true);
   } else {
     dispatchBarrierPacket(kNopPacketHeader, false);
@@ -6200,6 +6238,9 @@ void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
 
   profilingEnd();
 }
+
+// ================================================================================================
+ProfilingSignal* VirtualGPU::AcquireGateSignal() { return roc_device_.AcquireGateSignal(); }
 
 // ================================================================================================
 void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
