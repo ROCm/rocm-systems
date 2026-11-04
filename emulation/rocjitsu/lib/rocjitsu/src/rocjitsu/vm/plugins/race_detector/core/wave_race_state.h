@@ -133,14 +133,21 @@ public:
   /// in whole elements of elementBytes that fit the LDS backing.
   ///
   /// This only registers the event; validate its ranges first with
-  /// RaceDetector::validateRead() or validateWrite(). Callers choose the two
-  /// orderings independently. memoryOrder is the event's completion order,
-  /// which partial waits rely on: TENSOR for tensor DMA, whose transfers from
-  /// one wave complete in issue order. The order passed to validation decides
-  /// which pending same-wave accesses the new ranges are checked against:
-  /// UNORDERED for tensor DMA, since the ISA does not specify the timing of
-  /// their LDS accesses. Passing TENSOR to validation would skip conflicts with
-  /// the wave's own pending transfers.
+  /// RaceDetector::validateRead() or validateWrite(). Callers choose three
+  /// orderings independently:
+  /// - Partial waits use the completion class of each obligation in
+  ///   counterObligations. Tensor DMA passes TENSOR on TENSORCNT, since its
+  ///   transfers from one wave complete in issue order, so a partial
+  ///   s_wait_tensorcnt retires the oldest.
+  /// - memoryOrder is stored on the event and compared with the order a later
+  ///   same-wave access validates with: only an access in the same class,
+  ///   other than UNORDERED, is treated as ordered with the event. Tensor DMA
+  ///   passes TENSOR.
+  /// - The order passed to validation decides which of the wave's pending
+  ///   accesses the new ranges are checked against. Tensor DMA passes
+  ///   UNORDERED, since the ISA does not specify the timing of its LDS
+  ///   accesses; passing TENSOR would skip conflicts with the wave's own
+  ///   pending transfers.
   void registerLdsRangeEvent(InstructionSnapshot instruction, MemoryEventType type,
                              std::span<const LdsByteRange> ranges, int elementBytes,
                              std::span<const amdgpu::MemoryCounterObligation> counterObligations,

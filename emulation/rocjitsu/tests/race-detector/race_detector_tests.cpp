@@ -1345,6 +1345,42 @@ TEST(RaceDetector, TensorDma_OnlyTransferredRangesAreTracked) {
   EXPECT_TRUE(b.hasLdsRace(12));
 }
 
+// Partial waits retire by the completion class of each counter obligation; the
+// event's own memory order is only compared with later accesses. Two tensor
+// events with a TENSOR obligation complete in issue order whatever their memory
+// order, and with an UNORDERED obligation they do not.
+TEST(RaceDetector, TensorDma_PartialWaitsUseTheObligationClassNotTheEventOrder) {
+  struct Case {
+    MemoryOrderClass obligationClass;
+    MemoryOrderClass eventOrder;
+    EventStatus olderAfterWait;
+  };
+  for (const Case c :
+       {Case{MemoryOrderClass::TENSOR, MemoryOrderClass::UNORDERED, EventStatus::WAVE_COMPLETE},
+        Case{MemoryOrderClass::UNORDERED, MemoryOrderClass::TENSOR, EventStatus::ACTIVE}}) {
+    SCOPED_TRACE(c.olderAfterWait == EventStatus::WAVE_COMPLETE ? "TENSOR obligation"
+                                                                : "UNORDERED obligation");
+    std::vector<RaceViolation> violations;
+    RaceDetector detector(
+        1, 4, 4, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
+        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5), /*ldsSizeBytes=*/64 * 1024);
+    auto &wave = detector.getWaveRaceState(0);
+    const std::array obligations{
+        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, c.obligationClass}};
+    for (uint32_t address : {0u, 64u}) {
+      const std::array ranges{LdsByteRange{.address = address, .bytes = 16}};
+      wave.registerLdsRangeEvent(testInstruction(address), MemoryEventType::GLOBAL_TO_LDS, ranges,
+                                 /*elementBytes=*/4, obligations, c.eventOrder);
+    }
+    PendingWaitCount wait;
+    wait.add(amdgpu::WaitCounterType::TENSORCNT, 1);
+    wave.dispatch(wait);
+    const auto &events = detector.events();
+    EXPECT_EQ(events.status(EventId{0}), c.olderAfterWait);
+    EXPECT_EQ(events.status(EventId{1}), EventStatus::ACTIVE);
+  }
+}
+
 TEST(RaceDetector, TensorDma_SameWavePartialTensorcntRetiresOldest) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
   b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
