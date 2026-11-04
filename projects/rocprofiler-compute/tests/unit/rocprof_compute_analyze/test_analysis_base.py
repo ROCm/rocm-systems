@@ -35,7 +35,9 @@ def write_traced_workload(parent: Path, workload_name: str, backend: str) -> Pat
     """Create a workload directory with profiling_config.yaml for one ML backend."""
     workload = parent / workload_name / "MI350"
     workload.mkdir(parents=True)
-    (workload / "profiling_config.yaml").write_text(f"trace_ml_api:\n- {backend}\n")
+    (workload / "profiling_config.yaml").write_text(
+        f"trace_ml_api:\n- {backend}\n", encoding="utf-8"
+    )
     return workload
 
 
@@ -207,7 +209,9 @@ def test_sanitize_authorizes_trace_ml_api_selectors(tmp_path, monkeypatch) -> No
     """trace_ml_api [torch] allows torch and user; rejects triton."""
     workload = tmp_path / "app" / "MI300"
     workload.mkdir(parents=True)
-    (workload / "profiling_config.yaml").write_text("trace_ml_api:\n- torch\n")
+    (workload / "profiling_config.yaml").write_text(
+        "trace_ml_api:\n- torch\n", encoding="utf-8"
+    )
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_base.validate_workload",
         lambda path: None,
