@@ -66,6 +66,8 @@ public:
 
         valid.store(false);
         cv.notify_all();
+        // A drain waiting on a consumer that is shutting down would otherwise never be woken.
+        drain_cv.notify_all();
 
         if(!exited) cv.wait(lk, [&] { return exited.load(); });
         if(consumer.joinable()) consumer.join();
@@ -82,10 +84,26 @@ public:
                 selfconsume                                       = false;
             }
         }
+        // A self-consumed sample never enters the ring, so it is not counted: consume_fn has
+        // already run by the time this returns, and counting it would push consumed_ptr past
+        // write_ptr and make drain() return without waiting.
         if(selfconsume)
             consume_fn(std::move(params));
         else
             cv.notify_all();
+    }
+
+    // Blocks until samples enqueued before this call have been consumed. Stops nothing: no exit,
+    // no join, no pause on submission -- samples arriving during the wait are post-call work and
+    // are deliberately not waited for, which is what makes this terminate.
+    void drain()
+    {
+        auto         lk     = std::unique_lock{mut};
+        const size_t target = write_ptr.load(std::memory_order_acquire);
+        drain_cv.wait(lk, [&] {
+            return consumed_ptr.load(std::memory_order_acquire) >= target ||
+                   !valid.load(std::memory_order_acquire);
+        });
     }
 
 protected:
@@ -100,6 +118,7 @@ protected:
                 {
                     exited.store(true);
                     cv.notify_all();
+                    drain_cv.notify_all();
                     return;
                 }
             }
@@ -107,18 +126,32 @@ protected:
             auto retrieved = std::move(buffer.at(read_ptr % buffer.size()));
             read_ptr.fetch_add(1);
             consume_fn(std::move(retrieved));
+
+            // Counted under mut, after consume_fn: a drain holds mut while evaluating its
+            // predicate, so incrementing outside the lock could land between that check and
+            // the wait and lose the wakeup.
+            {
+                auto lk = std::unique_lock{mut};
+                consumed_ptr.fetch_add(1, std::memory_order_release);
+            }
+            drain_cv.notify_all();
         }
     }
 
-    consume_func_t             consume_fn;
-    std::atomic<bool>          valid{false};
-    std::atomic<bool>          exited{true};
-    std::mutex                 mut;
-    std::atomic<size_t>        write_ptr{0};
-    std::atomic<size_t>        read_ptr{0};
+    consume_func_t      consume_fn;
+    std::atomic<bool>   valid{false};
+    std::atomic<bool>   exited{true};
+    std::mutex          mut;
+    std::atomic<size_t> write_ptr{0};
+    std::atomic<size_t> read_ptr{0};
+    // Ring consumption only, and it pairs with write_ptr: advanced after consume_fn returns,
+    // where read_ptr advances before it. A self-consumed sample is counted by neither, since
+    // it never enters the ring.
+    std::atomic<size_t>        consumed_ptr{0};
     std::array<DataType, SIZE> buffer;
     std::thread                consumer{};
     std::condition_variable    cv;
+    std::condition_variable    drain_cv;
 };
 
 }  // namespace counters

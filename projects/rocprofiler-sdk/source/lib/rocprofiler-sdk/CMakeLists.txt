@@ -11,6 +11,7 @@ set(ROCPROFILER_LIB_HEADERS
     intercept_table.hpp
     internal_threading.hpp
     ompt.hpp
+    record_producer.hpp
     registration.hpp
     runtime_initialization.hpp)
 set(ROCPROFILER_LIB_SOURCES

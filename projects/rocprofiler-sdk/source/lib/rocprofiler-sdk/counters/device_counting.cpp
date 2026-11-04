@@ -35,6 +35,7 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
+#include "lib/rocprofiler-sdk/record_producer.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -180,6 +181,11 @@ bool
 agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
 {
     if(!data) return false;
+
+    // Counter records are emplaced here, so a drain entered from this thread would be waiting
+    // on this thread.
+    auto _producer = scoped_record_producer{};
+
     auto& callback_data = *static_cast<rocprofiler::counters::agent_callback_data*>(data);
 
     const auto& prof_config = callback_data.profile;
@@ -415,6 +421,26 @@ read_agent_ctx(const context::context*                    ctx,
  * Special Case: if constants are the only counters being collected, we skip
  * packet injection.
  */
+void
+drain_device_counting_samples()
+{
+    // Before HSA is up no sample can be in flight and the agent data is not constructed.
+    if(hsa_inited().load() == false) return;
+
+    for(const auto* itr : context::get_registered_contexts_snapshot())
+    {
+        if(itr == nullptr || !itr->device_counter_collection) continue;
+
+        // Waits only: no status transition and no end packet, so a context sampling before
+        // this call is still sampling after it.
+        for(auto& _cb_data : itr->device_counter_collection->agent_data)
+        {
+            if(!_cb_data.packet) continue;
+            wait_for_sample_handler(_cb_data);
+        }
+    }
+}
+
 rocprofiler_status_t
 start_agent_ctx(const context::context* ctx)
 {

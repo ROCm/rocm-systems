@@ -13,6 +13,21 @@ Supported buffer record categories are enumerated in ``rocprofiler_buffer_catego
 a buffered tracing service requires buffer creation. Flushing the buffer implicitly or explicitly invokes a callback to the tool, which provides an array of one or more buffer records.
 To flush a buffer explicitly, use ``rocprofiler_flush_buffer`` function.
 
+Records for asynchronous GPU operations, such as kernel dispatches and memory copies, are
+written by runtime-owned threads after the operation retires. Synchronizing on the operation
+is therefore not sufficient for its record to exist, and a flush issued at that point can
+return nothing for it. Call ``rocprofiler_synchronize_contexts`` before the flush when every
+completed operation must be accounted for.
+
+.. warning::
+
+   ``rocprofiler_synchronize_contexts`` is expensive and slows tracing while it runs. It blocks
+   until record production has caught up and stalls queue creation and destruction for its
+   duration. Use it only where a window of records must be complete, typically once before
+   reading a buffer. Calling it per dispatch, or anywhere on a hot path, will dominate the cost
+   of tracing. If it returns ``ROCPROFILER_STATUS_ERROR_RECORDS_OUTSTANDING``, records remain
+   outstanding but nothing was discarded and the call may be retried.
+
 Subscribing to buffer tracing services
 --------------------------------------
 

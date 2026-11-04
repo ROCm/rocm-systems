@@ -47,6 +47,11 @@ callback_thread_start();
 void
 callback_thread_stop();
 
+// Blocks until counter records for samples handed off before this call have been written.
+// Non-destructive: the consumer keeps running and collecting contexts keep collecting.
+void
+callback_thread_drain();
+
 void
 process_callback_data(completed_cb_params_t&& params);
 }  // namespace counters

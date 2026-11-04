@@ -43,7 +43,6 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
-#include "lib/rocprofiler-sdk/hsa/record_producer.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
@@ -51,6 +50,7 @@
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
+#include "lib/rocprofiler-sdk/record_producer.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -1734,7 +1734,9 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     auto* state_ptr            = state.get();
     auto  deferred_completions = pending_completion_vector_t{};
 
-    // gate_lock serializes doorbell processing; producers never take it, so no deadlock.
+    // gate_lock serializes doorbell processing. write_interceptor below runs the tool's
+    // dispatch-enqueue callbacks with this lock held, so anything reachable from them must not
+    // acquire a queue gate -- a drain that fences every gate self-deadlocks here.
     std::unique_lock<std::mutex> lock{state_ptr->gate_lock};
 
     const uint64_t scan_pos = state_ptr->next_scan_pos;

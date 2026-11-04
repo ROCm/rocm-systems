@@ -25,7 +25,6 @@ set(ROCPROFILER_LIB_HSA_HEADERS
     hsa.hpp
     pc_sampling.cpp
     profile_serializer.hpp
-    record_producer.hpp
     queue_controller.hpp
     queue_interposition.hpp
     queue.hpp

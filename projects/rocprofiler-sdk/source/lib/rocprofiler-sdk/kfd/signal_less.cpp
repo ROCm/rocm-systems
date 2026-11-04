@@ -505,14 +505,41 @@ signal_less_teardown()
         _leaked);
 }
 
+namespace
+{
+// True when this process holds signal-less state worth acting on. The order is deliberate:
+// kfd_profiler_state_constructed() is tested before signal_less_feature_enabled(), whose first
+// call registers the fork handler and logs. A forked child owns none of this state.
+bool
+signal_less_state_present()
+{
+    if(g_child_stale.load(std::memory_order_acquire)) return false;
+    if(!kfd_profiler_state_constructed()) return false;
+    return signal_less_feature_enabled();
+}
+}  // namespace
+
+bool
+drain_signal_less_completions()
+{
+    // Nothing outstanding is success, not failure: no state means no completion to wait for.
+    if(!signal_less_state_present()) return true;
+
+    // The registration set is deliberately not closed first: registrations landing during the
+    // wait are post-call work, and the reader wait below already tolerates a pass in flight.
+    bool _drained = wait_for_reader_quiesce(quiesce_budget_ns());
+    if(!_drained && !reader_unavailable()) _drained = wait_for_reader_quiesce(quiesce_budget_ns());
+
+    // Reports the failure through the return value; never abandons, stops or disables, so the
+    // signal-less path is left in the state it was found in.
+    join_signal_less_tasks();
+    return _drained;
+}
+
 void
 signal_less_fence_completions()
 {
-    if(g_child_stale.load(std::memory_order_acquire)) return;
-    // No dispatch-log state in this process means nothing to fence. Ordered before
-    // signal_less_feature_enabled(), whose first call registers the fork handler and logs.
-    if(!kfd_profiler_state_constructed()) return;
-    if(!signal_less_feature_enabled()) return;
+    if(!signal_less_state_present()) return;
     // Finalization already ran: our atexit finalize()+destroy_static_objects() has
     // nulled the queue-registry static_object, so a second F24 call (from another
     // DSO's __cxa_finalize teardown) must not rlock it -> NULL deref. finalize() sets
