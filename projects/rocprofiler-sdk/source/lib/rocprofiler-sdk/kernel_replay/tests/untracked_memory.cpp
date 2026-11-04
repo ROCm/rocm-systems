@@ -33,6 +33,7 @@
 #include <fstream>
 #include <memory>
 #include <new>
+#include <sstream>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -56,6 +57,7 @@ facts_of(type_t type, bool owner_is_cpu = false, bool in_host_mapping = false)
     f.owner_is_cpu             = owner_is_cpu;
     f.in_writable_host_mapping = in_host_mapping;
     f.pointer_info_succeeded   = true;
+    f.host_mappings_ok         = true;
     return f;
 }
 
@@ -151,6 +153,9 @@ TEST(kernel_replay_untracked_memory, classifies_memory_the_snapshot_does_not_res
     auto unavailable_query                   = facts_of(type_t::unknown, false, true);
     unavailable_query.pointer_info_succeeded = false;
     EXPECT_EQ(um::classify_pointer(unavailable_query), um::kind_t::unclassified);
+    unavailable_query.pointer_info_succeeded = true;
+    unavailable_query.host_mappings_ok       = false;
+    EXPECT_EQ(um::classify_pointer(unavailable_query), um::kind_t::unclassified);
 }
 
 TEST(kernel_replay_untracked_memory, ignores_scalars_and_covered_memory)
@@ -241,7 +246,9 @@ TEST(kernel_replay_untracked_memory, only_the_runtime_copy_and_fill_kernels_are_
 
 TEST(kernel_replay_untracked_memory, host_mappings_hold_the_memory_a_kernel_could_be_handed)
 {
-    const auto mappings = um::read_writable_host_mappings();
+    const auto result = um::read_writable_host_mappings();
+    ASSERT_TRUE(result.ok);
+    const auto& mappings = result.spans;
     ASSERT_FALSE(mappings.empty());
     const auto by_address = [](const um::address_span_t& lhs, const um::address_span_t& rhs) {
         return lhs.begin < rhs.begin;
@@ -270,9 +277,25 @@ TEST(kernel_replay_untracked_memory, host_mappings_hold_the_memory_a_kernel_coul
     constexpr auto page = size_t{4096};
     void* write_only    = ::mmap(nullptr, page, PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     ASSERT_NE(write_only, MAP_FAILED);
-    EXPECT_TRUE(covers(um::read_writable_host_mappings(), reinterpret_cast<uint64_t>(write_only)))
+    const auto updated = um::read_writable_host_mappings();
+    EXPECT_TRUE(updated.ok);
+    EXPECT_TRUE(covers(updated.spans, reinterpret_cast<uint64_t>(write_only)))
         << "a writable-only mapping is host memory a kernel can be handed";
     ::munmap(write_only, page);
+
+    auto       empty_file = std::istringstream{};
+    const auto empty      = um::read_writable_host_mappings(empty_file);
+    EXPECT_TRUE(empty.ok);
+    EXPECT_TRUE(empty.spans.empty());
+
+    for(const auto state : {std::ios::failbit, std::ios::badbit})
+    {
+        auto file = std::istringstream{};
+        file.setstate(state);
+        const auto failed = um::read_writable_host_mappings(file);
+        EXPECT_FALSE(failed.ok);
+        EXPECT_TRUE(failed.spans.empty());
+    }
 }
 
 TEST(kernel_replay_untracked_memory, addresses_in_the_56_bit_user_range_are_classified)
@@ -320,12 +343,16 @@ TEST(kernel_replay_untracked_memory, memory_that_cannot_be_saved_runs_the_dispat
     EXPECT_TRUE(runs_once(facts_for(buf, this_agent, true), address_of(buf))) << "host-pinned";
     EXPECT_TRUE(runs_once(facts_for(buf, other_agent), address_of(buf))) << "another agent's";
     EXPECT_TRUE(runs_once(facts_for(buf), vmem_addr)) << "extent unknown";
-    const auto query_failed = [](uint64_t) {
-        auto facts                   = facts_of(type_t::unknown);
-        facts.pointer_info_succeeded = false;
-        return facts;
+    const auto query_failed = [](bool pointer_info_succeeded) {
+        return [pointer_info_succeeded](uint64_t) {
+            auto facts                   = facts_of(type_t::unknown);
+            facts.pointer_info_succeeded = pointer_info_succeeded;
+            facts.host_mappings_ok       = false;
+            return facts;
+        };
     };
-    EXPECT_TRUE(runs_once(query_failed, vmem_addr)) << "pointer info query failed";
+    EXPECT_TRUE(runs_once(query_failed(false), vmem_addr)) << "pointer info query failed";
+    EXPECT_TRUE(runs_once(query_failed(true), vmem_addr)) << "host mapping query failed";
 
     auto failing = host_copy_set(false);
     EXPECT_FALSE(save(failing, {address_of(buf)}, facts_for(buf))) << "copy failed";
