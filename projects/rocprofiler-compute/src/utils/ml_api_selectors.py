@@ -87,15 +87,13 @@ def _patterns_by_backend(tokens: List[str]) -> Dict[str, List[str]]:
     prefix: Optional[str] = None
     selections: Dict[str, List[str]] = {}
 
-    def _save(backend: Optional[str], pattern: str) -> None:
-        key = backend if backend else UNSCOPED_OPERATOR_KEY
-        selections.setdefault(key, []).append(pattern)
-
     for selector_token in tokens:
         if "::" in selector_token and selector_token.find("::") <= selector_token.find(
             ":"
         ):
-            _save(prefix, selector_token)
+            selections.setdefault(
+                prefix or UNSCOPED_OPERATOR_KEY, []
+            ).append(selector_token)
             continue
         if ":" in selector_token:
             prefix, rest = selector_token.split(":", 1)
@@ -105,9 +103,13 @@ def _patterns_by_backend(tokens: List[str]) -> Dict[str, List[str]]:
                         "--operator prefix", prefix, OPERATOR_SELECTORS
                     )
                 )
-            _save(prefix, rest.strip() or "**")
+            selections.setdefault(
+                prefix or UNSCOPED_OPERATOR_KEY, []
+            ).append(rest.strip() or "**")
             continue
-        _save(prefix, selector_token)
+        selections.setdefault(
+            prefix or UNSCOPED_OPERATOR_KEY, []
+        ).append(selector_token)
     return selections
 
 
