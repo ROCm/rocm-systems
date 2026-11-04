@@ -417,6 +417,16 @@ HRR_TEST_CASE(Unit_HRR_Sign_KeyOptionsAreNotIgnored) {
   Archive a("options", /*sign=*/false);
   CHECK(hrr_playback_merged(a.dir, "--info --trusted-key").first != 0);
   CHECK(hrr_playback_merged(a.dir, "--info", {{"HIP_HRR_TRUSTED_KEY", ""}}).first != 0);
+  // --gen-signing-key with 0 or 1 path must fail rather than fall through and
+  // treat the sole path as archive_path (here a.dir is a valid archive, so
+  // falling through with --info would exit 0).
+  CHECK(hrr_playback_merged(a.dir, "--info --gen-signing-key").first != 0);
+  {
+    hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
+    set_proc_search_path(proc);
+    CHECK(proc.run("--info --gen-signing-key " + hrr_quote_path(a.dir)) != 0);
+    CHECK(proc.getOutput().find("--gen-signing-key needs") != std::string::npos);
+  }
   write_bytes(a.root / "trusted.pub", a.hex_pub());
   // A signed archive that verifies under the key: only the --repair guard can
   // refuse it, since load_archive would accept it.

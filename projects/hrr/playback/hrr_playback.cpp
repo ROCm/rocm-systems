@@ -1789,7 +1789,11 @@ int main(int argc, char** argv) {
       else signing_key_path = argv[i + 1];
       ++i;
     }
-    else if (!strcmp(argv[i], "--gen-signing-key") && i + 2 < argc) {
+    else if (!strcmp(argv[i], "--gen-signing-key")) {
+      if (i + 2 >= argc || argv[i + 1][0] == '\0' || argv[i + 2][0] == '\0') {
+        fprintf(stderr, "[HRR] --gen-signing-key needs SEED and PUB file paths\n");
+        return 1;
+      }
 #ifdef HRR_HAVE_ARCHIVE_SIGN
       std::string err;
       if (!hrr_sign::generate_key_pair(argv[i + 1], argv[i + 2], &err)) {
