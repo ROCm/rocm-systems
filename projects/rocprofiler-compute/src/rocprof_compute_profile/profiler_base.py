@@ -169,6 +169,7 @@ class RocProfCompute_Base:
         self.__args = args
         self.__profiler = profiler_mode
         self._soc = soc  # OmniSoC obj
+        self._ml_api_trace_enabled = False
 
     def get_args(self) -> argparse.Namespace:
         return self.__args
@@ -424,7 +425,7 @@ class RocProfCompute_Base:
             fnames=str_fnames,
             profiler_options=options,
             workload_dir=args.output_directory,
-            ml_api_trace_enabled=bool(getattr(self, "_ml_api_trace_enabled", False)),
+            ml_api_trace_enabled=self._ml_api_trace_enabled,
             retain_rocpd_output=args.retain_rocpd_output,
         )
 
