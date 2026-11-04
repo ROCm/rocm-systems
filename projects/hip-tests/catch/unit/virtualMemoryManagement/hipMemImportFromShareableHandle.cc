@@ -701,7 +701,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl) {
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
   std::string socketName =
-    ipcSocketCom::generateIPCObjName(Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
 
   auto pid = fork();
   REQUIRE(pid >= 0);
@@ -830,7 +830,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
   std::string socketName =
-    ipcSocketCom::generateIPCObjName(Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
 
   // Create data buffer
   std::vector<int> A_h(N), B_h(N), C_h(N);
@@ -983,7 +983,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
   REQUIRE(pipe(fdSig) == 0);
   REQUIRE(pipe(fdpid) == 0);
   std::string socketName =
-    ipcSocketCom::generateIPCObjName(Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
   auto pid = fork();
   REQUIRE(pid >= 0);
 

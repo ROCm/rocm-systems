@@ -683,7 +683,7 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem) {
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
   std::string socketName =
-    ipcSocketCom::generateIPCObjName(Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
 
   auto pid = fork();
   REQUIRE(pid >= 0);
@@ -791,7 +791,7 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM) {
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
   std::string socketName =
-    ipcSocketCom::generateIPCObjName(Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
 
   auto pid = fork();
   REQUIRE(pid >= 0);

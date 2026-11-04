@@ -131,7 +131,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldUseHdl) {
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
   std::string socketName =
-    ipcSocketCom::generateIPCObjName(Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
 
   auto pid = fork();
   REQUIRE(pid >= 0);
@@ -240,7 +240,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess) {
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
   std::string socketName =
-    ipcSocketCom::generateIPCObjName(Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
 
   auto pid = fork();
   REQUIRE(pid >= 0);
@@ -350,7 +350,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl) {
   REQUIRE(pipe(fdSig) == 0);
   REQUIRE(pipe(fdpid) == 0);
   std::string socketName =
-    ipcSocketCom::generateIPCObjName(Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
   auto pid = fork();
   REQUIRE(pid >= 0);
 
@@ -521,7 +521,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc) {
 #endif
 
   std::string socketName =
-    ipcSocketCom::generateIPCObjName(Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
   REQUIRE(socketName.size() <= sizeof(mempoolIpcShmStruct::socketName));
 
   SharedMemory shm;

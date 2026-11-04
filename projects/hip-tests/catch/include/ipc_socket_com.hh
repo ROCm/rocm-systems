@@ -37,9 +37,11 @@ struct ipcHdl {
 
 // Creates a UNIX domain socket (Linux) or a mailslot (Windows) and allows to receive or send
 // handles through it. Users of this class must call initialize() and check its result
-// The static method generateIPCObjName() generates a unique name and can optionally be used to
+// The static method generateIPCPrefixName() generates a unique name and can optionally be used to
 // name the IPC objects, to be called from the parent before spawning children, to make sure all
-// participants use the same name. Note that direction of communication is always parent -> child
+// participants use the same prefix. The PID will be appended to the prefix so parent and children
+// will actually have different IPC object names
+// Note that direction of communication is always parent -> child
 class ipcSocketCom {
   static constexpr int kPidBufferSize = 16;
   static constexpr int kNonceDigitsSize = 6;
@@ -77,10 +79,10 @@ public:
 
   // @isServer   Only makes a difference on Windows; if false, a mailslot is created. If true,
   //             a mailslot is created
-  ipcSocketCom(bool isServer, const std::string& name) :
+  ipcSocketCom(bool isServer, const std::string& prefix) :
     isServer_(isServer),
     serverFd_(-1),
-    name_(name)
+    prefix_(prefix)
   {
   }
 
@@ -93,7 +95,7 @@ public:
     handle->mailslot = INVALID_HANDLE_VALUE;
 
     if (!isServer_) {
-      std::string name = "\\\\.\\mailslot\\hipMemPoolIPC_"s + name_ +
+      std::string name = "\\\\.\\mailslot\\hipMemPoolIPC_"s + prefix_ +
                          std::to_string((unsigned long)GetCurrentProcessId());
 
       handle->mailslot = CreateMailslot(name.c_str(), 0, MAILSLOT_WAIT_FOREVER, NULL);
@@ -223,6 +225,7 @@ public:
     struct msghdr msg = {};
     struct iovec iov[1];
     int dummy_data = 0;
+    std::string name = prefix_ + std::to_string(process);
 
     union {
       struct cmsghdr cm;
@@ -234,7 +237,7 @@ public:
 
     bzero(&cliaddr, sizeof(cliaddr));
     cliaddr.sun_family = AF_UNIX;
-    strcpy(cliaddr.sun_path, std::to_string(process).c_str());
+    strcpy(cliaddr.sun_path, name.c_str());
 
     int sendfd = (int)shareableHdl;
 
@@ -265,21 +268,21 @@ public:
 #endif
 
   // @userPrefix a user-provided string that will be prepended to the name; must be less than
-  //             kSocketPrefixMaxSize characters; otherwise it will be truncated before used
+  //             kSocketPrefixMaxSize characters; otherwise it will be truncated before used.
+  //             e.g. a test name
   // @return     UNIX: an abstract name containing \0, the user prefix, a 6 hex-digit random
-  //             number and the PID
-  //             Windows: a mailsot name the user prefix and a 6 hex-digit random number and the PID
-  static std::string generateIPCObjName(const std::string& userPrefix)
+  //             number and '.'
+  //             Windows: a mailsot name the user prefix and a 6 hex-digit random number and '.'
+  static std::string generateIPCObjPrefix(const std::string& userPrefix)
   {
     using namespace std::string_literals;
     std::string commonSuffix = userPrefix.substr(0, kSocketPrefixMaxSize) +
-                              generateRandomHex() +
-                              ".";
+                               generateRandomHex() +
+                               ".";
 #if HT_WIN
-    return "\\\\.\\mailslot\\hipMemPoolIPC_"s + commonSuffix + 
-           std::to_string(static_cast<unsigned long>(GetCurrentProcessId()));
+    return "\\\\.\\mailslot\\hipMemPoolIPC_"s + commonSuffix;
 #else
-    return "\0"s + commonSuffix + std::to_string(getpid());
+    return "\0"s + commonSuffix;
 #endif
   }
 
@@ -317,18 +320,20 @@ private:
     sockaddr_un servaddr = {};
     socklen_t addr_len;
     int code;
+    std::string name = prefix_ + std::to_string(getpid());
 
-    strncpy(servaddr.sun_path, name_.c_str(), name_.size());
+    std::strncpy(servaddr.sun_path, name.c_str(), name.size());
+
     // Address length is sizeof(sun_family) + 1 (null byte) + string length
-    addr_len = offsetof(struct sockaddr_un, sun_path) + 1 + name_.size();
+    addr_len = offsetof(struct sockaddr_un, sun_path) + 1 + name.size();
     servaddr.sun_family = AF_UNIX;
 
-    // TODO change bind so it only opens on the child?
-    if ((code = bind(serverFd_, (struct sockaddr *)&servaddr, addr_len)) < 0) {
-      UNSCOPED_INFO("bind failed: " << strerror(errno) << " when binding with name: " << name_);
+    UNSCOPED_INFO("Binding IPC socket with name: " << name);
+    if ((code = bind(serverFd_, reinterpret_cast<sockaddr *>(&servaddr), addr_len)) < 0) {
+      UNSCOPED_INFO("bind failed: " << strerror(errno) << " when binding with name: " << name);
       return -1;
     } else {
-      handle->name = name_;
+      handle->name = name;
     }
 
     return code;
@@ -336,5 +341,5 @@ private:
   
   bool isServer_;
   int serverFd_;
-  std::string name_;
+  std::string prefix_;
 };
