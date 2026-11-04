@@ -117,9 +117,11 @@ __global__ void ncclGinA2AKernel(ncclWindow_t sendWin, size_t sendOff, ncclWindo
     ncclBarrierSession<ncclCoopCta> bar{ncclCoopCta(), ncclTeamTagWorld(), gin, slot};
     bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::None);
 
+    // Weak: each put carries its own signal and the wait counts one per peer,
+    // so nothing earlier needs ordering. Strong would drain every peer queue.
     for (int peer = threadIdx.x; peer < devComm.nRanks; peer += blockDim.x) {
       gin.put(ncclTeamWorld(devComm), peer, recvWin, recvOff + devComm.rank * bytesPerPeer, sendWin,
-              sendOff + peer * bytesPerPeer, bytesPerPeer, ncclGin_SignalInc{slot});
+              sendOff + peer * bytesPerPeer, bytesPerPeer, ncclGin_WeakSignalInc{slot});
     }
 
     gin.waitSignal(ncclCoopCta(), slot, signalValue + devComm.nRanks);

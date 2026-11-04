@@ -87,11 +87,15 @@ def test_tool_b1_dispatch_count_is_phase2(tool_b1_data, phase2_dispatches):
     ), f"expected {phase2_dispatches} dispatches (phase 2), got {captured}"
 
 
-def test_tool_b2_copy_count_is_phase2(tool_b2_data, phase2_copies):
-    captured = len(_buf(tool_b2_data, "memory_copies"))
+def test_tool_b2_copy_volume_is_phase2(tool_b2_data, phase2_copies, copy_bytes):
+    """Tool B2 captured the phase 2 copies, measured in bytes."""
+    copies = _buf(tool_b2_data, "memory_copies")
+    captured = sum(itr["bytes"] for itr in copies)
+    expected = phase2_copies * copy_bytes
+
     assert (
-        captured == phase2_copies
-    ), f"expected {phase2_copies} memory copies (phase 2), got {captured}"
+        captured == expected
+    ), f"expected {expected} bytes of memory copies (phase 2), got {captured}"
 
 
 # ---- timing proof for both late tools -------------------------------------

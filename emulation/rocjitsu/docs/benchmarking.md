@@ -82,6 +82,10 @@ SDK during the comparison.
 
 ## Prepare the host
 
+For dedicated Actions benchmark runners, see the
+[benchmark runner setup guide](benchmark-runner-setup.md) for CPU reservation,
+fixed frequency and idle settings, and Bpfland.
+
 Prefer a quiet host. If background work cannot be stopped, reserve complete
 physical cores with disjoint systemd cgroup cpusets. `taskset` constrains only
 the benchmark and does not stop an unrestricted build from using the same CPUs.

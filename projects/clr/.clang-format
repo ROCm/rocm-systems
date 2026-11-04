@@ -3,7 +3,7 @@ BasedOnStyle: Google
 AlignEscapedNewlinesLeft: false
 AlignOperands: Align
 ColumnLimit: 100
-BreakTemplateDeclarations: No
+AlwaysBreakTemplateDeclarations: No
 DerivePointerAlignment: false
 IndentFunctionDeclarationAfterType: false
 MaxEmptyLinesToKeep: 2

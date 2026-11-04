@@ -32,6 +32,7 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/plugins/instruction_family.h"
+#include "util/diagnostic.h"
 #include "util/except.h"
 
 #include <gtest/gtest.h>
@@ -337,8 +338,8 @@ TEST_P(DsGwsTest, StructuralModelExecutesAndAccounts) {
 // generated body would park a wave while the instruction's completion is classified
 // as LDS and omits the GDS wait obligation, so the stateful behavior and the
 // memory-wait accounting would disagree. The inverse GDS guard (ds_gws rejects
-// gds=0, the mirror of the other DS classes rejecting gds=1) raises
-// UnimplementedInst at execution instead.
+// gds=0, the mirror of the other DS classes rejecting gds=1) reports an
+// invalid-instruction-encoding execution failure instead.
 TEST_P(DsGwsTest, RejectsExecutionWithoutGdsBit) {
   auto cfg = cu_config(1);
   auto cu = amdgpu::ComputeUnitCore::create("ds_gws_nogds", cfg, &mem, &l2);
@@ -355,7 +356,10 @@ TEST_P(DsGwsTest, RejectsExecutionWithoutGdsBit) {
     // Decode is unaffected by the GDS bit, so the op still classifies as a memory op.
     EXPECT_TRUE(inst->is_memory_op()) << variant.mnemonic;
     // Execution must be rejected: no wave is parked and no stateful side effect runs.
-    EXPECT_THROW((void)cu->execute_instruction(inst.get(), *wf), util::UnimplementedInst)
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed())
+        << variant.mnemonic << " on arch " << unsigned(arch);
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::InvalidInstructionEncoding)
         << variant.mnemonic << " on arch " << unsigned(arch);
     EXPECT_NE(wf->state(), amdgpu::WfState::GWS_WAIT) << variant.mnemonic;
   }
@@ -1842,13 +1846,28 @@ TEST_P(DsGwsTest, XcdAndCpRejectStoreReplacementBeforeAnyMutation) {
   auto *wave = cu1->dispatch_wf(0, 0, 102, 16);
   ASSERT_NE(wave, nullptr);
   cu1->begin_workgroup(0, 0, 1);
-  EXPECT_THROW(xcd.adopt_gws_store(replacement), std::logic_error);
-  EXPECT_THROW(xcd.command_processor()->set_gws_device(replacement), std::logic_error);
+  cu1->gws_sema_p(*wave, 0);
+  ASSERT_EQ(wave->state(), amdgpu::WfState::GWS_WAIT);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(xcd.adopt_gws_store(replacement, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "Cannot replace XCD GWS store with active waves or workgroups");
+  EXPECT_TRUE(xcd.command_processor()->set_gws_device(replacement, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "Cannot replace GWS store with active waves or workgroups");
+  // Exercise no-CP store replacement using the same live CUs.
+  amdgpu::Xcd standalone("standalone");
+  standalone.add_shader_engine(xcd.shader_engine(0));
+  const auto standalone_store = standalone.gws_device();
+  EXPECT_TRUE(standalone.adopt_gws_store(replacement, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "Cannot replace XCD GWS store with active waves or workgroups");
+  EXPECT_EQ(standalone.gws_device(), standalone_store);
+  EXPECT_EQ(wave->state(), amdgpu::WfState::GWS_WAIT);
+  cu1->gws_sema_v(*wave, 0);
+  EXPECT_EQ(wave->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(xcd.gws_device(), old);
   EXPECT_EQ(&cu0->gws_device(), old.get());
   EXPECT_EQ(&cu1->gws_device(), old.get());
   wave->halt();
-  EXPECT_NO_THROW(xcd.adopt_gws_store(replacement));
+  ASSERT_TRUE(xcd.adopt_gws_store(replacement).succeeded());
   EXPECT_EQ(&cu0->gws_device(), replacement.get());
   EXPECT_EQ(&cu1->gws_device(), replacement.get());
 }

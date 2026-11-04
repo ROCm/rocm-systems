@@ -96,6 +96,58 @@ static const std::map<amdsmi_memory_partition_type_t, rsmi_memory_partition_type
                           {AMDSMI_MEMORY_PARTITION_NPS4, RSMI_MEMORY_PARTITION_NPS4},
                           {AMDSMI_MEMORY_PARTITION_NPS8, RSMI_MEMORY_PARTITION_NPS8}};
 
+// Switch (not a table) so a missing case warns at compile time when a new block is added.
+#define AMDSMI_BLOCK_CASE(name) \
+  case AMDSMI_GPU_BLOCK_##name: \
+    return #name
+static const char* get_gpu_block_name(amdsmi_gpu_block_t block) {
+  switch (block) {
+    AMDSMI_BLOCK_CASE(INVALID);
+    AMDSMI_BLOCK_CASE(UMC);
+    AMDSMI_BLOCK_CASE(SDMA);
+    AMDSMI_BLOCK_CASE(GFX);
+    AMDSMI_BLOCK_CASE(MMHUB);
+    AMDSMI_BLOCK_CASE(ATHUB);
+    AMDSMI_BLOCK_CASE(PCIE_BIF);
+    AMDSMI_BLOCK_CASE(HDP);
+    AMDSMI_BLOCK_CASE(XGMI_WAFL);
+    AMDSMI_BLOCK_CASE(DF);
+    AMDSMI_BLOCK_CASE(SMN);
+    AMDSMI_BLOCK_CASE(SEM);
+    AMDSMI_BLOCK_CASE(MP0);
+    AMDSMI_BLOCK_CASE(MP1);
+    AMDSMI_BLOCK_CASE(FUSE);
+    AMDSMI_BLOCK_CASE(MCA);
+    AMDSMI_BLOCK_CASE(VCN);
+    AMDSMI_BLOCK_CASE(JPEG);
+    AMDSMI_BLOCK_CASE(IH);
+    AMDSMI_BLOCK_CASE(MPIO);
+    AMDSMI_BLOCK_CASE(MMSCH);
+    AMDSMI_BLOCK_CASE(MP5);
+    AMDSMI_BLOCK_CASE(ATU);
+    AMDSMI_BLOCK_CASE(DACC_BE);
+    AMDSMI_BLOCK_CASE(ECLR);
+    AMDSMI_BLOCK_CASE(KPX_SERDES);
+    AMDSMI_BLOCK_CASE(LSDMA);
+    AMDSMI_BLOCK_CASE(MPART);
+    AMDSMI_BLOCK_CASE(MPIFOE);
+    AMDSMI_BLOCK_CASE(MPRAS);
+    AMDSMI_BLOCK_CASE(NBIF);
+    AMDSMI_BLOCK_CASE(NBIO);
+    AMDSMI_BLOCK_CASE(OXRP);
+    AMDSMI_BLOCK_CASE(PCIE_PL);
+    AMDSMI_BLOCK_CASE(PCS_XGMI);
+    AMDSMI_BLOCK_CASE(PIE);
+    AMDSMI_BLOCK_CASE(CS);
+    AMDSMI_BLOCK_CASE(SHUB);
+    AMDSMI_BLOCK_CASE(SSBDCI);
+    AMDSMI_BLOCK_CASE(UCIE_PCS);  // == AMDSMI_GPU_BLOCK_LAST
+    AMDSMI_BLOCK_CASE(RESERVED);
+  }
+  return "UNKNOWN";
+}
+#undef AMDSMI_BLOCK_CASE
+
 template <typename F, typename... Args>
 amdsmi_status_t rsmi_wrapper(F&& f, amdsmi_processor_handle processor_handle,
                              uint32_t increment_gpu_id, Args&&... args) {
@@ -1947,9 +1999,10 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
 
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "[Before rocm smi correction] "
-     << "Returning status = AMDSMI_STATUS_SUCCESS" << "\n; info->model_number: |"
-     << board_info->model_number << "|" << "\n; info->product_serial: |"
-     << board_info->product_serial << "|" << "\n; info->fru_id: |" << board_info->fru_id << "|"
+     << "Returning status = AMDSMI_STATUS_SUCCESS"
+     << "\n; info->model_number: |" << board_info->model_number << "|"
+     << "\n; info->product_serial: |" << board_info->product_serial << "|"
+     << "\n; info->fru_id: |" << board_info->fru_id << "|"
      << "\n; info->manufacturer_name: |" << board_info->manufacturer_name << "|"
      << "\n; info->product_name: |" << board_info->product_name << "|";
   LOG_INFO(ss);
@@ -2000,9 +2053,10 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
   }
 
   ss << __PRETTY_FUNCTION__ << " | [After rocm smi correction] "
-     << "Returning status = AMDSMI_STATUS_SUCCESS" << "\n; info->model_number: |"
-     << board_info->model_number << "|" << "\n; info->product_serial: |"
-     << board_info->product_serial << "|" << "\n; info->fru_id: |" << board_info->fru_id << "|"
+     << "Returning status = AMDSMI_STATUS_SUCCESS"
+     << "\n; info->model_number: |" << board_info->model_number << "|"
+     << "\n; info->product_serial: |" << board_info->product_serial << "|"
+     << "\n; info->fru_id: |" << board_info->fru_id << "|"
      << "\n; info->manufacturer_name: |" << board_info->manufacturer_name << "|"
      << "\n; info->product_name: |" << board_info->product_name << "|";
   LOG_INFO(ss);
@@ -2584,14 +2638,14 @@ static void system_wait(int milli_seconds) {
   // 1 ms = 1000 us
   int waitTime = milli_seconds * 1000;
 
-  ss << __PRETTY_FUNCTION__ << " | " << "** Waiting for " << std::dec << waitTime << " us ("
-     << waitTime / 1000 << " seconds) **";
+  ss << __PRETTY_FUNCTION__ << " | "
+     << "** Waiting for " << std::dec << waitTime << " us (" << waitTime / 1000 << " seconds) **";
   LOG_DEBUG(ss);
   usleep(static_cast<unsigned int>(waitTime));
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-  ss << __PRETTY_FUNCTION__ << " | " << "** Waiting took " << duration.count() / 1000
-     << " milli-seconds **";
+  ss << __PRETTY_FUNCTION__ << " | "
+     << "** Waiting took " << duration.count() / 1000 << " milli-seconds **";
   LOG_DEBUG(ss);
 }
 
@@ -2828,9 +2882,9 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     } else {
       violation_status->active_ppt_pwr = 0;
     }
-    ss << __PRETTY_FUNCTION__ << " | " << "ENTERED ppt_residency_acc | per_ppt_pwr: " << std::dec
-       << violation_status->per_ppt_pwr << "%; active_ppt_pwr = " << std::dec
-       << violation_status->active_ppt_pwr << "\n";
+    ss << __PRETTY_FUNCTION__ << " | "
+       << "ENTERED ppt_residency_acc | per_ppt_pwr: " << std::dec << violation_status->per_ppt_pwr
+       << "%; active_ppt_pwr = " << std::dec << violation_status->active_ppt_pwr << "\n";
     LOG_DEBUG(ss);
   }
   if ((metric_info_b.socket_thm_residency_acc != std::numeric_limits<uint64_t>::max() ||
@@ -2865,7 +2919,8 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     } else {
       violation_status->active_vr_thrm = 0;
     }
-    ss << __PRETTY_FUNCTION__ << " | " << "ENTERED vr_thm_residency_acc | per_vr_thrm: " << std::dec
+    ss << __PRETTY_FUNCTION__ << " | "
+       << "ENTERED vr_thm_residency_acc | per_vr_thrm: " << std::dec
        << violation_status->per_vr_thrm << "%; active_ppt_pwr = " << std::dec
        << violation_status->active_vr_thrm << "\n";
     LOG_DEBUG(ss);
@@ -2994,7 +3049,8 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
        std::ref(violation_status->active_low_utilization),
        std::ref(violation_status->active_gfx_clk_below_host_limit_total)});
 
-  ss << __PRETTY_FUNCTION__ << " | " << "RETURNING AMDSMI_STATUS_SUCCESS | "
+  ss << __PRETTY_FUNCTION__ << " | "
+     << "RETURNING AMDSMI_STATUS_SUCCESS | "
      << "violation_status->reference_timestamp (time since epoch): " << std::dec
      << violation_status->reference_timestamp
      << "; violation_status->violation_timestamp (ms): " << std::dec
@@ -4193,7 +4249,8 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle p
                                       0, memory_caps, kLenCapsSize);
   ss << __PRETTY_FUNCTION__ << " | rsmi_dev_memory_partition_capabilities_get Returning: "
      << smi_amdgpu_get_status_string(status_mem_caps, false)
-     << " | Type: memory_partition_capabilities" << " | Data: " << memory_caps;
+     << " | Type: memory_partition_capabilities"
+     << " | Data: " << memory_caps;
   LOG_DEBUG(ss);
   std::string memory_caps_str = "N/A";
   if (status_mem_caps == AMDSMI_STATUS_SUCCESS) {  // older kernels may not support this
@@ -4927,7 +4984,8 @@ amdsmi_status_t amdsmi_set_gpu_accelerator_partition_profile(
       partition_type_str = it->second;
     }
 
-    ss << __PRETTY_FUNCTION__ << " | " << "config.profiles[" << i
+    ss << __PRETTY_FUNCTION__ << " | "
+       << "config.profiles[" << i
        << "].profile_type: " << static_cast<int>(config.profiles[i].profile_type) << "\n"
        << "| config.profiles[" << i << "].profile_type (str): " << partition_type_str << "\n"
        << "| config.profiles[" << i
@@ -6170,22 +6228,53 @@ amdsmi_status_t amdsmi_get_gpu_total_ecc_count(amdsmi_processor_handle processor
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
-  amdsmi_ras_err_state_t state = {};
+  // Read the enabled-blocks mask once and reuse it for every block below; calling
+  // amdsmi_get_gpu_ras_block_features_enabled() per block re-reads ras/features from
+  // sysfs on each call, which can trip host-side RAS read throttling on SR-IOV guests.
+  //
+  // The mask is read once for the entire call; only each enabled block's error-count
+  // fetch happens per block.
+  uint64_t features_mask = 0;
+  amdsmi_status_t mask_status = smi_amdgpu_get_enabled_blocks(gpu_device, &features_mask);
+  if (mask_status != AMDSMI_STATUS_SUCCESS) {
+    // Propagate the failure so callers can distinguish "couldn't read RAS state"
+    // from a genuine zero-error total.
+    return mask_status;
+  }
+  // The loop below only adds to *ec; without this it returns garbage for any
+  // caller whose struct wasn't already zeroed (or is being reused).
+  *ec = {};
+
   // Iterate through the ecc blocks
   for (auto block = AMDSMI_GPU_BLOCK_FIRST; block <= AMDSMI_GPU_BLOCK_LAST;
        block = (amdsmi_gpu_block_t)(block * 2)) {
+    if (!(features_mask & block)) {
+      continue;
+    }
     // Clear the previous ecc block counts
     amdsmi_error_count_t block_ec = {};
-    // Check if the current ecc block is enabled
-    status = amdsmi_get_gpu_ras_block_features_enabled(processor_handle, block, &state);
-    if (status == AMDSMI_STATUS_SUCCESS && state == AMDSMI_RAS_ERR_STATE_ENABLED) {
-      // Increment the total ecc counts by the ecc block counts
-      status = amdsmi_get_gpu_ecc_count(processor_handle, block, &block_ec);
-      if (status == AMDSMI_STATUS_SUCCESS) {
-        // Increase the total ecc counts
-        ec->correctable_count += block_ec.correctable_count;
-        ec->uncorrectable_count += block_ec.uncorrectable_count;
-        ec->deferred_count += block_ec.deferred_count;
+    status = amdsmi_get_gpu_ecc_count(processor_handle, block, &block_ec);
+    if (status == AMDSMI_STATUS_SUCCESS) {
+      // Increase the total ecc counts
+      ec->correctable_count += block_ec.correctable_count;
+      ec->uncorrectable_count += block_ec.uncorrectable_count;
+      ec->deferred_count += block_ec.deferred_count;
+    } else {
+      // Not propagated to the overall return status: AMDSMI_STATUS_NOT_SUPPORTED
+      // here is ambiguous (covers both "block genuinely unsupported" and "GPU
+      // mid-reset," both benign) and any other status would mean *ec below is a
+      // real undercount with no caller-visible signal -- tracked as a follow-up
+      // to properly distinguish and propagate the latter case.
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | block 0x" << std::hex << block << std::dec << " ("
+         << get_gpu_block_name(block) << ")"
+         << " enabled per mask but amdsmi_get_gpu_ecc_count() returned "
+         << smi_amdgpu_get_status_string(status, false)
+         << "; total ecc count below may be incomplete";
+      if (status == AMDSMI_STATUS_NOT_SUPPORTED) {
+        LOG_DEBUG(ss);
+      } else {
+        LOG_ERROR(ss);
       }
     }
   }
@@ -6519,20 +6608,9 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
 
   std::memset(info, 0, sizeof(*info));
   int length = AMDSMI_MAX_STRING_LENGTH;
-  char module_version[AMDSMI_MAX_STRING_LENGTH] = {};
 
   // Get the driver version
-  status = smi_amdgpu_get_driver_version(gpu_device, &length, module_version);
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    return status;
-  }
-
-  auto package_version = std::string{};
-  auto uts = utsname{};
-  if (uname(&uts) == 0) {
-    smi_amdgpu_get_active_dkms_version(kAmdgpuDkmsRoot, uts.release, uts.machine, &package_version);
-  }
-  status = smi_amdgpu_parse_driver_versions(module_version, package_version, info);
+  status = smi_amdgpu_get_driver_version(gpu_device, &length, info->driver_version);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
@@ -6604,11 +6682,7 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
   snprintf(info->driver_name, AMDSMI_MAX_STRING_LENGTH, "%s", driver_name.c_str());
   drm_free_version(version);
   libdrm.unload();
-  ss << __PRETTY_FUNCTION__ << " | Driver kernel version: " << info->driver_kernel_version << "\n"
-     << " | amdgpu driver version: " << info->amdgpu_driver_version << "\n"
-     << " | Driver version: " << info->driver_version << "\n"
-     << " | Driver build version: " << info->driver_build_version << "\n"
-     << " | Driver full version: " << info->driver_full_version << "\n"
+  ss << __PRETTY_FUNCTION__ << " | Driver version: " << info->driver_version << "\n"
      << " | Driver date: " << info->driver_date << "\n"
      << " | Driver name: " << info->driver_name << "\n"
      << " | Returning: " << smi_amdgpu_get_status_string(status, false);

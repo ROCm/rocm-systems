@@ -70,7 +70,8 @@ print_log_entries(std::ostream& _os, std::int64_t _count,
 {
     const size_t i0 =
         (_count < 0) ? 0 : std::max<std::int64_t>(log_entries.size() - _count, 0);
-    const size_t _w = std::log10(log_entries.size()) + 1;
+    const auto width =
+        static_cast<int>(rocprofsys::utility::string::decimal_width(log_entries.size()));
 
     if(dynamic_cast<std::ofstream*>(&_os) ||
        (&_os != &std::cout && &_os != &std::cerr && &_os != &std::clog))
@@ -110,14 +111,14 @@ print_log_entries(std::ostream& _os, std::int64_t _count,
             {
                 if(_last_n > 0 && !_last.empty())
                 {
-                    _os << "[" << _color << std::setw(_w) << _last_i << "/"
+                    _os << "[" << _color << std::setw(width) << _last_i << "/"
                         << log_entries.size() << _end << "] ... repeated " << _last_n
                         << " times ...\n";
                 }
                 _last_n = 0;
                 _last_i = i;
                 _last   = _msg;
-                _os << "[" << _color << std::setw(_w) << i << "/" << log_entries.size()
+                _os << "[" << _color << std::setw(width) << i << "/" << log_entries.size()
                     << _end << "]" << _msg << "\n";
             }
             else
@@ -129,7 +130,7 @@ print_log_entries(std::ostream& _os, std::int64_t _count,
 
     if(_last_n > 0)
     {
-        _os << "[" << _color << std::setw(_w) << _last_i << "/" << log_entries.size()
+        _os << "[" << _color << std::setw(width) << _last_i << "/" << log_entries.size()
             << _end << "] ... repeated " << _last_n << " times ...\n";
     }
 }

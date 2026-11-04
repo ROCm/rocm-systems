@@ -43,6 +43,7 @@ OCCUPANCY_FIELDS = (
     "is_ext",
     "workgroup_id",
     "cluster_id",
+    "dispatch_id",
 )
 
 OCCUPANCY_VERSION = "3.1.0"
@@ -76,6 +77,7 @@ DISPATCH_FIELDS = (
     "dispatch_pkt_addr",
     "byte_offset",
     "flags",
+    "dispatch_id",
 )
 
 
@@ -160,6 +162,7 @@ def validate_dispatch_event(dispatch, dispatches, occupancy_file):
         "dispatch_pkt_addr",
         "byte_offset",
         "flags",
+        "dispatch_id",
     ):
         assert_json_int(dispatch[field], f"dispatch.{field}")
 
