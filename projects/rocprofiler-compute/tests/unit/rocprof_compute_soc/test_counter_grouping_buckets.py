@@ -3,6 +3,7 @@
 
 import pytest
 
+from rocprof_compute_soc.counter_file import CounterFile
 from rocprof_compute_soc.counter_grouping_buckets import (
     count_multi_bucket_metrics,
     count_single_pass_metrics_split_across_buckets,
@@ -62,6 +63,21 @@ def test_sp_valu_and_sq_vmem_do_not_fit_one_pass():
     assert counters_fit_one_bucket(vmem_only, sq_budget)
     assert not counters_fit_one_bucket(mixed, sq_budget)
     assert rebuild_counter_file("0", sq_budget, set(mixed)) is None
+
+
+@pytest.mark.misc
+def test_one_family_still_accepts_counters_outside_the_other():
+    """A pass records its family and still takes counters that are not the other."""
+    bucket = CounterFile("0", {"SQ": 8, "GRBM": 2, "TA": 2})
+    assert bucket.add("SP_VALU_FLOPS_FP32")
+    assert bucket.add("GRBM_GUI_ACTIVE")
+    assert bucket.add("TA_BUSY")
+    assert bucket.add("SQ_INSTS")
+    assert bucket.add("SQ_WAVES")
+    assert not bucket.add("SQ_VMEM_REQ")
+    stored = set(flat_counters_in_perfmon_file(bucket))
+    assert "SQ_VMEM_REQ" not in stored
+    assert {"SP_VALU_FLOPS_FP32", "GRBM_GUI_ACTIVE", "TA_BUSY", "SQ_INSTS"} <= stored
 
 
 @pytest.mark.misc
