@@ -191,7 +191,7 @@ def _warn_skipped_dispatches(kind: str, used: int, total: int) -> None:
         console_warning(
             "metrics",
             f"{kind}: used {used} of {total} dispatches; "
-            "skipped dispatches with a missing or NaN fragment",
+            "skipped dispatches whose fragment was missing or NaN",
         )
 
 
