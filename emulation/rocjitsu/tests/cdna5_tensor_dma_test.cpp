@@ -1333,6 +1333,49 @@ TEST(Gfx1250ExecutionTest, TensorDmaGatherWithoutRowsIsANop) {
   }
 }
 
+// A zero-width gather is a NOP, but its descriptor is still checked: with 32-bit
+// indices it may name at most 8. Eight issues and arrives once; nine fails
+// before issue and leaves the barrier untouched, so a NOP shortcut cannot
+// bypass the index limit.
+TEST(Gfx1250ExecutionTest, TensorDmaZeroWidthGatherStillChecksItsIndexLimit) {
+  constexpr uint64_t kGlobal = 0x18e000;
+  constexpr uint32_t kBarrierLdsAddr = 64;
+  const uint64_t kUnarrived = amdgpu::lds_barrier_cell_init_state(3);
+  const uint64_t kArrivedOnce = amdgpu::lds_barrier_cell_update_arrive(kUnarrived);
+  for (const uint32_t indices : {8u, 9u}) {
+    SCOPED_TRACE(testing::Message() << indices << " indices");
+    const bool accepted = indices <= 8;
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
+    auto &observer = install_tensor_dma_issue_observer(sim);
+    auto *cu = sim.cu();
+    auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_lds_base(cu->allocate_lds(256));
+    wf->set_lds_size(256);
+    cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, kUnarrived);
+
+    write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+    write_wave_sgpr(*cu, *wf, 0, 1u | (1u << 30) | (1u << 31)); // 32-bit gather indices.
+    write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 18));     // i32, atomic barrier enabled.
+    write_wave_sgpr(*cu, *wf, 13, (2u << 16) | (kBarrierLdsAddr >> 3)); // tensor dim0, barrier.
+    write_wave_sgpr(*cu, *wf, 14, 16u << 16);                           // tensor dim1.
+    write_wave_sgpr(*cu, *wf, 15, 0);                                   // tile dim0 = 0.
+    write_wave_sgpr(*cu, *wf, 16, indices);                             // valid indices.
+    write_wave_sgpr(*cu, *wf, 17, 2u);                                  // tensor dim0 stride.
+    for (uint32_t reg = 18; reg < 28; ++reg)
+      write_wave_sgpr(*cu, *wf, reg, 0);
+
+    const std::array<uint32_t, 3> words = {0xd0710001u, 0x7c000000u, 0x18140c00u};
+    auto inst = decode_gfx1250(words, "tensor_load_to_lds");
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(cu->execute_instruction(inst.get(), *wf).succeeded(), accepted);
+    EXPECT_EQ(observer.issues.size(), accepted ? 1u : 0u);
+    EXPECT_EQ(cu->lds().read64(wf->lds_base() + kBarrierLdsAddr),
+              accepted ? kArrivedOnce : kUnarrived);
+  }
+}
+
 // With atomic_barrier set, a NOP tile or a gather with no valid indices moves
 // no data but still sends exactly one barrier arrival; a NULL tensor sends
 // none (see tensor_element_count). A barrier cell expecting three arrivals per
