@@ -140,9 +140,8 @@ bool ncclAllToAllDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, vo
   if (comm->ddaLLEpochDev == nullptr || comm->ddaLLEpochLen < comm->nRanks - 1) {
     return false;
   }
-  // In place, accept dword-aligned buffers (the 16B accesses tolerate it), since p2p is wrong in place on gfx1250.
-  if (sendbuff == recvbuff ? reinterpret_cast<uintptr_t>(sendbuff) % 4 != 0 :
-                             !dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff)) {
+  // Dword alignment is enough for the 16B accesses; only 1- and 2-byte types can miss it.
+  if ((reinterpret_cast<uintptr_t>(sendbuff) | reinterpret_cast<uintptr_t>(recvbuff)) % 4 != 0) {
     return false;
   }
   return perChunkBytes <= ddaLL128A2AMaxPerChunkBytes(comm);

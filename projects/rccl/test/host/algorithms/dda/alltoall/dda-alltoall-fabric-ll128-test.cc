@@ -169,16 +169,14 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_NeedsAnEpochCellPerPeer) {
   EXPECT_FALSE(Eligible(4));
 }
 
-TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_OutOfPlaceNeeds16ByteAlignedBuffers) {
+// Dword alignment is enough in and out of place.
+TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_BuffersNeedDwordAlignment) {
   char* const base = reinterpret_cast<char*>(0x10000);
   EXPECT_TRUE(ncclAllToAllDdaFabricLL128Eligible(mock_.get(), base, base + 16, 4, ncclFloat32));
-  EXPECT_FALSE(ncclAllToAllDdaFabricLL128Eligible(mock_.get(), base + 8, base + 16, 4, ncclFloat32));
-  EXPECT_FALSE(ncclAllToAllDdaFabricLL128Eligible(mock_.get(), base, base + 4, 4, ncclFloat32));
-}
-
-// In place, dword alignment is enough.
-TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_InPlaceNeedsDwordAlignment) {
-  char* const base = reinterpret_cast<char*>(0x10000);
+  EXPECT_TRUE(ncclAllToAllDdaFabricLL128Eligible(mock_.get(), base + 8, base + 16, 4, ncclFloat32));
+  EXPECT_TRUE(ncclAllToAllDdaFabricLL128Eligible(mock_.get(), base, base + 4, 4, ncclFloat32));
+  EXPECT_FALSE(ncclAllToAllDdaFabricLL128Eligible(mock_.get(), base + 2, base + 16, 8, ncclBfloat16));
+  EXPECT_FALSE(ncclAllToAllDdaFabricLL128Eligible(mock_.get(), base, base + 1, 16, ncclFloat8e4m3));
   EXPECT_TRUE(ncclAllToAllDdaFabricLL128Eligible(mock_.get(), base, base, 4, ncclFloat32));
   EXPECT_TRUE(ncclAllToAllDdaFabricLL128Eligible(mock_.get(), base + 4, base + 4, 4, ncclFloat32));
   EXPECT_TRUE(ncclAllToAllDdaFabricLL128Eligible(mock_.get(), base + 12, base + 12, 8, ncclBfloat16));
