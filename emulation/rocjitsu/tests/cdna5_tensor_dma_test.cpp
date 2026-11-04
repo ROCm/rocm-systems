@@ -1282,7 +1282,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
   }
 }
 
-TEST(Gfx1250ExecutionTest, TensorDmaGatherWithoutRowsIsANop) {
+TEST(Gfx1250ExecutionTest, TensorDmaGatherAndScatterAreNopsWithZeroWidthOrNoValidIndices) {
   // A gather may have zero valid indices (CDNA5 ISA 10.11.4, D# field
   // tile_dim1, which gather mode uses as the valid-index count), and a zero
   // tile_dim0 makes it a NOP like any other tile.
@@ -1473,45 +1473,69 @@ TEST(Gfx1250ExecutionTest, TensorDmaEmptyInstructionsNeedNoGpuMemory) {
       {.name = "zero-width gather", .gather = true, .tile_dim1 = 2},
       {.name = "one-element tile", .tile_dim0 = 1, .tile_dim1 = 1, .succeeds = false},
   };
-  for (const Case &c : kCases) {
-    for (const bool store : {false, true}) {
-      SCOPED_TRACE(testing::Message() << c.name << (store ? ", store" : ", load"));
-      Gfx1250Sim sim;
-      ASSERT_NO_FATAL_FAILURE(sim.initialize());
-      auto &observer = install_tensor_dma_issue_observer(sim);
-      auto *cu = sim.cu();
-      auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
-      ASSERT_NE(wf, nullptr);
-      wf->set_lds_base(cu->allocate_lds(256));
-      wf->set_lds_size(256);
-      cu->set_memory(nullptr);
-      ASSERT_FALSE(wf->has_gpu_memory());
+  constexpr uint32_t kProcessId = 1255;
+  constexpr uint32_t kBarrierLdsAddr = 64;
+  const uint64_t kUnarrived = amdgpu::lds_barrier_cell_init_state(3);
+  const uint64_t kArrivedOnce = amdgpu::lds_barrier_cell_update_arrive(kUnarrived);
+  for (const Case &c : kCases)
+    for (const bool store : {false, true})
+      // A wave with an address space whose VM binding is gone also needs none.
+      for (const bool unregistered_binding : {false, true}) {
+        SCOPED_TRACE(testing::Message() << c.name << (store ? ", store" : ", load")
+                                        << (unregistered_binding ? ", unregistered binding" : ""));
+        KfdProcess process(kProcessId);
+        Gfx1250Sim sim;
+        ASSERT_NO_FATAL_FAILURE(sim.initialize());
+        auto &observer = install_tensor_dma_issue_observer(sim);
+        auto *cu = sim.cu();
+        auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+        ASSERT_NE(wf, nullptr);
+        wf->set_lds_base(cu->allocate_lds(256));
+        wf->set_lds_size(256);
+        cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, kUnarrived);
+        if (unregistered_binding) {
+          amdgpu::LegacyGpuVmAdapter legacy_vm(sim.soc->gpu_vm(), sim.soc->memory());
+          const amdgpu::AddressSpaceHandle address_space = legacy_vm.register_address_space(
+              kProcessId, &process.page_table_, &process.page_table_mutex_,
+              process.page_table_generation());
+          ASSERT_TRUE(address_space);
+          wf->set_process_id(kProcessId);
+          wf->set_address_space(address_space);
+          ASSERT_TRUE(legacy_vm.unregister_address_space(address_space));
+        }
+        cu->set_memory(nullptr);
+        ASSERT_FALSE(wf->has_gpu_memory());
 
-      write_tensor_dma_d0(*cu, *wf, 0, 0x18d000);
-      const uint32_t gather_bits = c.gather ? (1u << 30) | (1u << 31) : 0; // 32-bit indices.
-      write_wave_sgpr(*cu, *wf, 0, 1u | gather_bits);
-      write_wave_sgpr(*cu, *wf, 12, 2u << 16); // i32 elements.
-      write_wave_sgpr(*cu, *wf, 13, 4u << 16); // tensor dim0.
-      write_wave_sgpr(*cu, *wf, 14, 4u << 16); // tensor dim1.
-      write_wave_sgpr(*cu, *wf, 15, c.tile_dim0 << 16);
-      write_wave_sgpr(*cu, *wf, 16, c.tile_dim1);
-      write_wave_sgpr(*cu, *wf, 17, 4u); // tensor dim0 stride.
-      for (uint32_t reg = 18; reg < 28; ++reg)
-        write_wave_sgpr(*cu, *wf, reg, 0);
+        write_tensor_dma_d0(*cu, *wf, 0, 0x18d000);
+        const uint32_t gather_bits = c.gather ? (1u << 30) | (1u << 31) : 0; // 32-bit indices.
+        write_wave_sgpr(*cu, *wf, 0, 1u | gather_bits);
+        write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 18)); // i32, atomic barrier enabled.
+        write_wave_sgpr(*cu, *wf, 13, (4u << 16) | (kBarrierLdsAddr >> 3)); // tensor dim0, barrier.
+        write_wave_sgpr(*cu, *wf, 14, 4u << 16);                            // tensor dim1.
+        write_wave_sgpr(*cu, *wf, 15, c.tile_dim0 << 16);
+        write_wave_sgpr(*cu, *wf, 16, c.tile_dim1);
+        write_wave_sgpr(*cu, *wf, 17, 4u); // tensor dim0 stride.
+        for (uint32_t reg = 18; reg < 28; ++reg)
+          write_wave_sgpr(*cu, *wf, reg, 0);
 
-      const std::array<uint32_t, 3> words = {store ? 0xd0714001u : 0xd0710001u, 0x7c000000u,
-                                             c.gather ? 0x18140c00u : 0x7c7c0c00u};
-      auto inst = decode_gfx1250(words, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
-      ASSERT_NE(inst, nullptr);
-      EXPECT_EQ(cu->execute_instruction(inst.get(), *wf).succeeded(), c.succeeds);
-      if (c.succeeds) {
-        EXPECT_EQ(observer.issues.size(), 1u);
-        if (observer.issues.size() == 1) {
-          EXPECT_TRUE(observer.issues[0].lds_ranges.empty());
+        const std::array<uint32_t, 3> words = {store ? 0xd0714001u : 0xd0710001u, 0x7c000000u,
+                                               c.gather ? 0x18140c00u : 0x7c7c0c00u};
+        auto inst = decode_gfx1250(words, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
+        ASSERT_NE(inst, nullptr);
+        EXPECT_EQ(cu->execute_instruction(inst.get(), *wf).succeeded(), c.succeeds);
+        if (c.succeeds) {
+          EXPECT_EQ(observer.issues.size(), 1u);
+          if (observer.issues.size() == 1) {
+            EXPECT_TRUE(observer.issues[0].lds_ranges.empty());
+          }
+          EXPECT_EQ(amdgpu::tensor_dma_outcome(*inst), amdgpu::VmAccessOutcome::Complete);
+          EXPECT_EQ(cu->lds().read64(wf->lds_base() + kBarrierLdsAddr), kArrivedOnce);
+        } else {
+          // Rejected before issue: nothing is recorded and nothing arrives.
+          EXPECT_TRUE(observer.issues.empty());
+          EXPECT_EQ(cu->lds().read64(wf->lds_base() + kBarrierLdsAddr), kUnarrived);
         }
       }
-    }
-  }
 }
 
 // Because it still arrives, a NOP tile validates its barrier address: one past

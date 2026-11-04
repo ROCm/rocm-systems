@@ -666,8 +666,7 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   const auto element_count = tensor_element_count(desc, layout);
   if (!element_count) [[unlikely]]
     return util::Result::failure();
-  // Only a transfer with elements touches global memory; a NOP tile or an empty
-  // gather does not need any.
+  // A transfer with zero elements needs no GPU memory.
   if (*element_count != 0 && !wf.has_gpu_memory()) [[unlikely]]
     return util::Result::failure();
   // Iterations may legally reuse LDS through a zero or overlapping increment.
@@ -686,7 +685,9 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   };
   for_each_tensor_element(desc, layout, append_element);
 
-  if (wf.address_space()) {
+  // A transfer with zero elements makes no global request, so it needs no VM
+  // binding either.
+  if (*element_count != 0 && wf.address_space()) {
     state.access = wf.snapshot_vm_access();
     if (!state.access)
       state.outcome = VmAccessOutcome::Faulted;
