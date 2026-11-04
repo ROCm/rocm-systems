@@ -44,7 +44,6 @@
 #include <rocprofiler-sdk/hsa/table_id.h>
 #include <rocprofiler-sdk/cxx/constants.hpp>
 
-#include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 
 #include <chrono>
@@ -174,14 +173,13 @@ struct async_copy_data
 {
     using pooled_signal_t = common::container::pool_object<signal_t>;
 
-    hsa_signal_t             orig_signal          = {};
-    hsa_signal_t             rocp_signal          = {};
-    pooled_signal_t*         rocp_pooled_signal   = nullptr;
-    rocprofiler_thread_id_t  tid                  = common::get_tid();
-    uint64_t                 start_ts             = 0;
-    uint64_t                 copy_time_generation = 0;
-    context::correlation_id* correlation_id       = nullptr;
-    traced_copy_data_vec_t   traced_copies        = {};
+    hsa_signal_t             orig_signal        = {};
+    hsa_signal_t             rocp_signal        = {};
+    pooled_signal_t*         rocp_pooled_signal = nullptr;
+    rocprofiler_thread_id_t  tid                = common::get_tid();
+    uint64_t                 start_ts           = 0;
+    context::correlation_id* correlation_id     = nullptr;
+    traced_copy_data_vec_t   traced_copies      = {};
 
     auto get_lock() { return std::make_unique<std::unique_lock<std::mutex>>(m_mtx); }
 
@@ -353,21 +351,7 @@ get_active_signals()
 
 using copy_time_value_t = std::pair<hsa_status_t, hsa_amd_profiling_async_copy_time_t>;
 
-struct copy_time_entry
-{
-    uint64_t                         generation    = 0;
-    bool                             runtime_owned = false;
-    std::optional<copy_time_value_t> value         = std::nullopt;
-};
-
-using copy_time_map_t = std::unordered_map<uint64_t, copy_time_entry>;
-
-struct copy_time_submission
-{
-    hsa_signal_t                   signal     = {};
-    uint64_t                       generation = 0;
-    std::optional<copy_time_entry> previous   = std::nullopt;
-};
+using copy_time_map_t = std::unordered_map<uint64_t, copy_time_value_t>;
 
 /**
  * @brief Copy times of completed copies whose completion signal was replaced, keyed by the handle
@@ -380,65 +364,17 @@ get_copy_time_map()
     return _v;
 }
 
-/**
- * @brief Starts a signal submission. A runtime-owned entry prevents a traced operation sharing
- * the signal from hiding the runtime's timing result.
- */
-copy_time_submission
-begin_copy_time_submission(hsa_signal_t _signal, bool _runtime_owned)
-{
-    auto _submission = copy_time_submission{.signal = _signal};
-    if(auto* _map = get_copy_time_map())
-        _map->wlock([&_submission, _runtime_owned](copy_time_map_t& _data) {
-            auto itr = _data.find(_submission.signal.handle);
-            if(itr != _data.end()) _submission.previous = itr->second;
-
-            _submission.generation =
-                (_submission.previous) ? (_submission.previous->generation + 1) : 1;
-            _data[_submission.signal.handle] = {.generation    = _submission.generation,
-                                                .runtime_owned = _runtime_owned};
-        });
-    return _submission;
-}
-
-/**
- * @brief Commits a successfully submitted copy, or restores the preceding cache state when ROCr
- * rejected the submission. A newer submission always wins over an older rollback.
- */
-void
-complete_copy_time_submission(const copy_time_submission& _submission, hsa_status_t _status)
-{
-    if(_status == HSA_STATUS_SUCCESS) return;
-
-    if(auto* _map = get_copy_time_map())
-        _map->wlock([&_submission](copy_time_map_t& _data) {
-            auto itr = _data.find(_submission.signal.handle);
-            if(itr == _data.end() || itr->second.generation != _submission.generation) return;
-
-            if(_submission.previous)
-                itr->second = *_submission.previous;
-            else
-                _data.erase(itr);
-        });
-}
-
 void
 record_copy_time(hsa_signal_t                        _signal,
-                 uint64_t                            _generation,
                  hsa_status_t                        _status,
                  hsa_amd_profiling_async_copy_time_t _time)
 {
     if(auto* _map = get_copy_time_map())
         _map->wlock([=](copy_time_map_t& _times) {
             auto itr = _times.find(_signal.handle);
-            if(itr == _times.end() || itr->second.generation != _generation ||
-               itr->second.runtime_owned)
-                return;
-
-            auto& _value = itr->second.value;
-            if(!_value || _value->first != HSA_STATUS_SUCCESS ||
-               (_status == HSA_STATUS_SUCCESS && _time.end >= _value->second.end))
-                _value = {_status, _time};
+            if(itr == _times.end() || itr->second.first != HSA_STATUS_SUCCESS ||
+               (_status == HSA_STATUS_SUCCESS && _time.end >= itr->second.second.end))
+                _times[_signal.handle] = {_status, _time};
         });
 }
 
@@ -447,16 +383,6 @@ forget_copy_time(hsa_signal_t _signal)
 {
     if(auto* _map = get_copy_time_map())
         _map->wlock([_signal](copy_time_map_t& _data) { _data.erase(_signal.handle); });
-}
-
-template <typename Tp, typename Up>
-constexpr Tp*
-convert_hsa_handle(Up _hsa_object)
-{
-    static_assert(!std::is_pointer<Up>::value, "pass opaque struct");
-    static_assert(!std::is_pointer<Tp>::value, "pass non-pointer type");
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    return reinterpret_cast<Tp*>(_hsa_object.handle);
 }
 
 struct copy_metadata
@@ -885,21 +811,10 @@ async_copy_handler(hsa_signal_value_t, void* arg)
         }
     }
 
-    auto* orig_amd_signal = convert_hsa_handle<amd_signal_t>(_data->orig_signal);
-
     // Original intercepted signal completion
-    if(orig_amd_signal)
+    if(_data->orig_signal.handle != 0)
     {
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        auto* rocp_amd_signal = convert_hsa_handle<amd_signal_t>(_data->rocp_signal);
-
-        std::tie(orig_amd_signal->start_ts, orig_amd_signal->end_ts) =
-            std::tie(rocp_amd_signal->start_ts, rocp_amd_signal->end_ts);
-
-        // Operations of a fully traced batch share a generation; retain the one that finishes
-        // last. For a mixed batch, the runtime owns the application's signal timing instead.
-        record_copy_time(
-            _data->orig_signal, _data->copy_time_generation, copy_time_status, copy_time);
+        record_copy_time(_data->orig_signal, copy_time_status, copy_time);
 
         ROCP_TRACE << "Decrementing Signal: " << std::hex << _data->orig_signal.handle << std::dec;
         get_core_table()->hsa_signal_subtract_screlease_fn(_data->orig_signal, 1);
@@ -928,8 +843,7 @@ get_next_dispatch()
 }
 
 /**
- * @brief The copy ran on a rocprofiler-owned signal, so the caller's signal carries no copy
- * profiling state in the runtime: answer from the time recorded before the caller was signaled.
+ * @brief Reconciles native and intercepted completions in the HSA system clock domain.
  */
 hsa_status_t
 get_async_copy_time_impl(hsa_signal_t _signal, hsa_amd_profiling_async_copy_time_t* _time)
@@ -937,25 +851,27 @@ get_async_copy_time_impl(hsa_signal_t _signal, hsa_amd_profiling_async_copy_time
     auto& _next =
         get_next_dispatch<ROCPROFILER_HSA_TABLE_ID_AmdExt,
                           ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_profiling_get_async_copy_time>();
+    auto _status = _next(_signal, _time);
+    if(!_time) return _status;
 
-    if(auto* _map = get_copy_time_map(); _map && _time)
+    if(auto* _map = get_copy_time_map())
     {
         auto _entry = _map->rlock(
             [_signal](const copy_time_map_t& _data) -> std::optional<copy_time_value_t> {
-                if(auto itr = _data.find(_signal.handle);
-                   itr != _data.end() && !itr->second.runtime_owned && itr->second.value)
-                    return itr->second.value;
+                if(auto itr = _data.find(_signal.handle); itr != _data.end()) return itr->second;
                 return std::nullopt;
             });
 
-        if(_entry)
+        if(_entry && (_status == HSA_STATUS_ERROR ||
+                      (_status == HSA_STATUS_SUCCESS && _entry->first == HSA_STATUS_SUCCESS &&
+                       (_time->end <= _time->start || _entry->second.end > _time->end))))
         {
             *_time = _entry->second;
             return _entry->first;
         }
     }
 
-    return _next(_signal, _time);
+    return _status;
 }
 
 hsa_status_t
@@ -974,7 +890,16 @@ save_table_func(TableT* _orig, uint64_t _tbl_instance)
     auto& _orig_func = _meta.get_table_func(_meta.get_table(_orig));
     auto& _next_func = get_next_dispatch<TableIdx, OpIdx>();
 
-    if(_tbl_instance == 0 && _orig_func != _next_func) _next_func = _orig_func;
+    if(_tbl_instance == 0 && _orig_func != _next_func)
+    {
+        ROCP_TRACE << "copying table entry for " << _meta.name;
+        _next_func = _orig_func;
+    }
+    else
+    {
+        ROCP_TRACE << "skipping copying table entry for " << _meta.name << " from table instance "
+                   << _tbl_instance;
+    }
 }
 
 template <size_t TableIdx, size_t OpIdx, typename TableT, typename FuncT>
@@ -1216,19 +1141,7 @@ async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
         return _dispatch(copy_ops, num_copy_ops, num_dep_signals, dep_signals);
 
     auto _submit_runtime_batch = [&]() {
-        auto _submissions = std::vector<copy_time_submission>{};
-        auto _signals     = std::unordered_map<uint64_t, hsa_signal_t>{};
-        for(uint32_t i = 0; i < num_copy_ops; ++i)
-            _signals.emplace(copy_ops[i].completion_signal.handle, copy_ops[i].completion_signal);
-
-        _submissions.reserve(_signals.size());
-        for(const auto& [_, _signal] : _signals)
-            _submissions.emplace_back(begin_copy_time_submission(_signal, true));
-
-        auto _status = _dispatch(copy_ops, num_copy_ops, num_dep_signals, dep_signals);
-        for(const auto& _submission : _submissions)
-            complete_copy_time_submission(_submission, _status);
-        return _status;
+        return _dispatch(copy_ops, num_copy_ops, num_dep_signals, dep_signals);
     };
 
     auto _intercept_data  = std::vector<intercept_data_t>{};
@@ -1319,33 +1232,7 @@ async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
         initialize_async_copy_tracing(_data);
     }
 
-    // ROCr owns timing for every signal that has at least one untraced operation in this batch.
-    // Otherwise, all replacement-signal handlers share the same cache generation.
-    auto _signal_modes = std::unordered_map<uint64_t, std::pair<hsa_signal_t, bool>>{};
-    auto _intercepted  = std::vector<bool>(num_copy_ops, false);
-    for(const auto& [_idx, _data] : _intercept_data)
-        _intercepted.at(_idx) = true;
-    for(uint32_t i = 0; i < num_copy_ops; ++i)
-    {
-        auto itr = _signal_modes
-                       .emplace(copy_ops[i].completion_signal.handle,
-                                std::make_pair(copy_ops[i].completion_signal, false))
-                       .first;
-        itr->second.second = itr->second.second || !_intercepted.at(i);
-    }
-
-    auto _submissions = std::unordered_map<uint64_t, copy_time_submission>{};
-    for(const auto& [_, _signal_mode] : _signal_modes)
-        _submissions.emplace(_signal_mode.first.handle,
-                             begin_copy_time_submission(_signal_mode.first, _signal_mode.second));
-
-    for(auto& [_idx, _data] : _intercept_data)
-        _data->copy_time_generation =
-            _submissions.at(copy_ops[_idx].completion_signal.handle).generation;
-
     auto _status = _dispatch(_wrapped_copy_ops.data(), num_copy_ops, num_dep_signals, dep_signals);
-    for(const auto& [_, _submission] : _submissions)
-        complete_copy_time_submission(_submission, _status);
 
     if(_corr_id_pop)
     {
@@ -1384,12 +1271,9 @@ async_copy_impl(Args... args)
     constexpr auto completion_signal_idx = arg_indices<OpIdx>::completion_signal_idx;
     auto&          _completion_signal    = std::get<completion_signal_idx>(_tied_args);
     auto           _submit_untraced      = [&]() {
-        auto _submission = begin_copy_time_submission(_completion_signal, true);
-        auto _status     = invoke(get_next_dispatch<TableIdx, OpIdx>(),
-                              std::move(_tied_args),
-                              std::make_index_sequence<N>{});
-        complete_copy_time_submission(_submission, _status);
-        return _status;
+        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                      std::move(_tied_args),
+                      std::make_index_sequence<N>{});
     };
 
     async_copy_data* _data = nullptr;
@@ -1448,10 +1332,8 @@ async_copy_impl(Args... args)
     // increase the reference count to denote that this correlation id is being used in a kernel
     _data->correlation_id->add_ref_count();
 
-    _data->orig_signal          = _completion_signal;
-    _completion_signal          = _data->rocp_signal;
-    auto _submission            = begin_copy_time_submission(_data->orig_signal, false);
-    _data->copy_time_generation = _submission.generation;
+    _data->orig_signal = _completion_signal;
+    _completion_signal = _data->rocp_signal;
 
     ROCP_TRACE << "Memcpy Original Signal " << std::hex << _data->orig_signal.handle << std::dec
                << ": " << original_value << " | Replacement Signal: " << std::hex
@@ -1464,7 +1346,6 @@ async_copy_impl(Args... args)
 
     auto _status = invoke(
         get_next_dispatch<TableIdx, OpIdx>(), std::move(_tied_args), std::make_index_sequence<N>{});
-    complete_copy_time_submission(_submission, _status);
 
     if(_corr_id_pop)
     {
@@ -1497,35 +1378,6 @@ auto get_async_copy_impl(RetT (*)(Args...))
         return &async_copy_impl<TableIdx, OpIdx, Args...>;
 }
 
-template <size_t TableIdx, size_t OpIdx>
-void
-async_copy_save(hsa_amd_ext_table_t* _orig, uint64_t _tbl_instance)
-{
-    static_assert(
-        std::is_same<hsa_amd_ext_table_t, typename hsa_table_lookup<TableIdx>::type>::value,
-        "unexpected type");
-
-    auto _meta = hsa_api_meta<TableIdx, OpIdx>{};
-
-    // original table and function
-    auto& _orig_table = _meta.get_table(_orig);
-    auto& _orig_func  = _meta.get_table_func(_orig_table);
-
-    // table with copy function
-    auto& _copy_func = get_next_dispatch<TableIdx, OpIdx>();
-
-    if(_tbl_instance == 0 && _orig_func != _copy_func)
-    {
-        ROCP_TRACE << "copying table entry for " << _meta.name;
-        _copy_func = _orig_func;
-    }
-    else
-    {
-        ROCP_TRACE << "skipping copying table entry for " << _meta.name << " from table instance "
-                   << _tbl_instance;
-    }
-}
-
 template <size_t TableIdx, size_t... OpIdx>
 void
 async_copy_save(hsa_amd_ext_table_t* _orig, uint64_t _tbl_instance, std::index_sequence<OpIdx...>)
@@ -1534,7 +1386,7 @@ async_copy_save(hsa_amd_ext_table_t* _orig, uint64_t _tbl_instance, std::index_s
         std::is_same<hsa_amd_ext_table_t, typename hsa_table_lookup<TableIdx>::type>::value,
         "unexpected type");
 
-    (async_copy_save<TableIdx, OpIdx>(_orig, _tbl_instance), ...);
+    (save_table_func<TableIdx, OpIdx>(_orig, _tbl_instance), ...);
 }
 
 template <size_t TableIdx, size_t OpIdx>
