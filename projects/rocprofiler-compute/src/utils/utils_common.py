@@ -1354,6 +1354,8 @@ def _iter_metric_table_rows(
     descriptions = panel.get("metrics_description") or {}
     metric_ids = metric_ids_by_name(data_config)
     for name, entries in data_config["metric"].items():
+        if isinstance(name, str) and name.startswith("_collect."):
+            continue
         if not _metric_has_valid_expr(entries, data_config):
             continue
         unit = entries.get("unit")
