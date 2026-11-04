@@ -138,6 +138,7 @@ EXPORTS
   hsa_amd_profiling_get_async_copy_time
   hsa_amd_profiling_convert_tick_to_system_domain
   hsa_amd_signal_create
+  hsa_amd_signal_create_v2
   hsa_amd_signal_wait_any
   hsa_amd_signal_async_handler
   hsa_amd_async_function

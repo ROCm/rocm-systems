@@ -212,6 +212,11 @@ class SharedSignalPool_t : private BaseShared {
   ~SharedSignalPool_t() { clear(); }
 
   SharedSignal* alloc();
+
+  /// @brief This pool's blocks are process-global host kernarg memory, so
+  /// agent_node_id == 0 is the only placement it can honour; anything else throws.
+  SharedSignal* alloc(int agent_node_id, int flags);
+
   void free(SharedSignal* ptr);
   void clear();
 
@@ -304,13 +309,23 @@ class LocalSignal {
   /// this object is destroyed.
   LocalSignal(hsa_signal_value_t initial_value, SignalBatch* batch, SharedSignal* slot);
 
+  /// @brief Place the whole ABI block in device_agent's local memory, so a GPU
+  /// waiting on the value word reads locally.  The caller must have checked the
+  /// agent supports it.  The block is one slot of that agent's ordering edge slab
+  /// and returns to its free list on destruction.
+  LocalSignal(hsa_signal_value_t initial_value, core::Agent& device_agent);
+
   ~LocalSignal();
 
   SharedSignal* signal() const { return shared_signal_; }
 
+  bool device_resident_value() const { return device_agent_ != nullptr; }
+
  private:
   std::optional<Shared<SharedSignal, SharedSignalPool_t>> local_signal_;
   SignalBatch* batch_ = nullptr;
+  /// @brief Owner of a device resident block; null otherwise.
+  core::Agent* device_agent_ = nullptr;
   SharedSignal* shared_signal_;
 };
 
@@ -321,8 +336,12 @@ class LocalSignal {
 class Signal {
  public:
   /// @brief Constructor Links and publishes the signal interface object.
-  explicit Signal(SharedSignal* abi_block, bool enableIPC = false)
-      : signal_(abi_block->amd_signal), async_copy_agent_(NULL), refcount_(1) {
+  explicit Signal(SharedSignal* abi_block, bool enableIPC = false,
+                  bool device_resident_value = false)
+      : signal_(abi_block->amd_signal),
+        async_copy_agent_(NULL),
+        refcount_(1),
+        device_resident_value_(device_resident_value) {
     assert(abi_block != nullptr && "Signal abi_block must not be NULL");
 
     waiting_ = 0;
@@ -336,12 +355,26 @@ class Signal {
     }
   }
 
+  /// @brief True iff the value word lives in device memory.  A host atomic
+  /// read-modify-write of such a word is not promoted to a bus atomic and can
+  /// silently lose a concurrent device update.
+  bool IsDeviceResidentValue() const { return device_resident_value_; }
+
   /// @brief Interface to discard a signal handle (hsa_signal_t)
   /// Decrements signal ref count and invokes doDestroySignal() when
   /// Signal is no longer in use.
   void DestroySignal() {
-    // If handle is now invalid wake any retained sleepers.
-    if (--refcount_ == 0) CasRelaxed(0, 0);
+    // If the handle is now invalid, wake any retained sleepers.  The CAS does
+    // not change the value; the write to the value word's cache line is what
+    // breaks a monitor parked on it.
+    //
+    // Skipped on a device resident word, where that CAS is not a bus atomic (see
+    // IsDeviceResidentValue).  Nothing is stranded: such a signal is always a
+    // core::DefaultSignal, whose waiters spin rather than park in MWAITX on such
+    // a word, so there is no monitor to break.
+    assert((!device_resident_value_ || waiting_ == 0) &&
+           "ordering edge signal destroyed with a registered waiter");
+    if (--refcount_ == 0 && !device_resident_value_) CasRelaxed(0, 0);
     // Release signal, last release will destroy the object.
     Release();
   }
@@ -619,6 +652,8 @@ class Signal {
 
   /// @variable Count of handle references and Retain() calls for this handle (see IPC APIs)
   std::atomic<uint32_t> retained_;
+
+  const bool device_resident_value_ = false;
 
   void registerIpc();
   bool deregisterIpc();
