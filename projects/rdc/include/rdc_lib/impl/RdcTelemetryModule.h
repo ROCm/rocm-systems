@@ -53,7 +53,7 @@ class RdcTelemetryModule : public RdcTelemetry {
   void get_fields_for_module(
       rdc_gpu_field_t* fields, uint32_t fields_count,
       std::map<RdcTelemetryPtr, std::vector<rdc_gpu_field_t>>& fields_in_module,
-      std::vector<rdc_gpu_field_value_t>& unsupport_fields);  // NOLINT
+      std::vector<rdc_gpu_field_value_t>& unsupport_fields) const;  // NOLINT
   std::list<RdcTelemetryPtr> telemetry_modules_;
   std::map<uint32_t, RdcTelemetryPtr> fields_id_module_;
 };
