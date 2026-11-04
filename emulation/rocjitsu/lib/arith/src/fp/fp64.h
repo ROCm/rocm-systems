@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // FP64 arithmetic with split-word VGPR operands and guest FP policies.
+// Also implements legacy, number-preferring and NaN-propagating min/max selection.
 // Internal helpers shared by instruction implementations; not part of the public C API.
 
 #pragma once
@@ -10,7 +11,26 @@
 
 namespace rocjitsu::arith {
 
-enum class Fp64 { Add, Mul, Fma, Trunc, Ceil, Rndne, Floor, Fract, Sqrt, Rcp, FrexpMant, Rsq };
+enum class Fp64 {
+  Add,
+  Mul,
+  Fma,
+  MinLegacy,
+  MaxLegacy,
+  MinNum,
+  MaxNum,
+  Minimum,
+  Maximum,
+  Trunc,
+  Ceil,
+  Rndne,
+  Floor,
+  Fract,
+  Sqrt,
+  Rcp,
+  FrexpMant,
+  Rsq
+};
 
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
 // Evaluate FP64 arithmetic. Preserve destination lanes outside exec_mask.
