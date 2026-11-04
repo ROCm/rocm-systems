@@ -1722,12 +1722,12 @@ TEST(RaceDetector, TensorDma_RetiredTransferWithoutRangesNoLongerCounts) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
   b.tensorLoadToLds(/*wave=*/0, {});
   b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/0);
-  b.barrier();
-  // The wait and barrier retire the transfer itself; later loads alone could
-  // not show that, since they are newer than it.
+  // Without LDS bytes, the wait alone finishes the transfer; it needs no
+  // barrier. Later loads alone could not show that, since they are newer.
   const EventId empty{0};
   ASSERT_EQ(b.events().totalAllocated(), 1);
-  EXPECT_EQ(b.events().status(empty), EventStatus::RETIRED);
+  EXPECT_TRUE(b.events().isTrimmable(empty));
+  b.barrier();
   b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
   b.tensorLoadToLds(/*wave=*/0, {{.address = 64, .bytes = 16}});
   b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/1);
