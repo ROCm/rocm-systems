@@ -79,6 +79,7 @@ gpu_workload()
 
     // Launch the kernel
     hipLaunchKernelGGL(HIP_KERNEL_NAME(hipKernelLaunch), dim3(1), dim3(N), 0, 0, d_data);
+    HIP_API_CALL(hipGetLastError());
 
     // Wait for GPU to finish
     HIP_API_CALL(hipDeviceSynchronize());
