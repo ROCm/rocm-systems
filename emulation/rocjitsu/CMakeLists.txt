@@ -389,12 +389,12 @@ if(ROCJITSU_ENABLE_VFIO)
     include(rj_libvfio_user)
 endif()
 
-# Configure arithmetic before applying the parent host CPU flags.
 if(BUILD_TESTING)
     include(rj_test_registration)
 endif()
 
-# Keep library and tests ahead of rj_host_cpu to avoid inheriting its -march policy.
+# rj-arith selects its own baseline and runtime-dispatched SIMD implementations.
+# Configure it before rj_host_cpu so neither library nor tests inherit its -march policy.
 add_subdirectory(lib/arith)
 
 # Apply the host CPU policy to rocjitsu targets, after configuring dependencies.

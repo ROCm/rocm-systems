@@ -710,11 +710,12 @@ def test_scalar_fmamk_generated_execute_uses_literal_multiplier():
     )
 
 
-def test_vector_fmaak_execute_uses_fieldless_simm32_operand():
+@pytest.mark.parametrize('arch', ['rdna4', 'cdna5'])
+def test_vector_fmaak_execute_uses_fieldless_simm32_operand(arch):
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
-        arch_name='rdna4',
-        profile=Rdna4Profile(),
+        arch_name=arch,
+        profile=Rdna4Profile() if arch == 'rdna4' else Cdna5Profile(),
         inst_encodings=[],
         encoding_map={},
     )
@@ -733,7 +734,11 @@ def test_vector_fmaak_execute_uses_fieldless_simm32_operand():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_VOP2')
 
-    assert 'std::bit_cast<float>(simm32.encoding_value_)' in body
+    if arch == 'rdna4':
+        assert 'amdgpu::arith::execute_float_fma32' in body
+        assert 'vdst, src0, vsrc1, simm32,' in body
+    else:
+        assert 'std::bit_cast<float>(simm32.encoding_value_)' in body
     assert 'simm32_' not in body
 
 
@@ -1078,4 +1083,5 @@ def test_inline_literal_fma_emits_body_with_literal_source():
     cg = _fma_codegen()
     sem = InstructionSemantics('V_FMAMK_F32', 'vector_fmamk', data_type='f32')
     body = cg._gen_execute_body(_fma_inst(with_simm32=True), sem, 'ENC_VOP2')
-    assert 'simm32.encoding_value_' in body
+    assert 'amdgpu::arith::execute_float_fma32' in body
+    assert 'vdst, src0, simm32, vsrc1,' in body
