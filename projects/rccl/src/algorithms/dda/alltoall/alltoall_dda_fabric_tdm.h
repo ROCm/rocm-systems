@@ -18,7 +18,8 @@ constexpr int kDdaA2ATdmMaxWarpsPerBlock = 16;
 constexpr int kDdaA2ATdmWindowBytes = 16 << 10;
 constexpr int kDdaA2ATdmMaxSmemBytes = kDdaA2ATdmMaxWarpsPerBlock * kDdaA2ATdmWindowBytes;
 constexpr size_t kDdaA2ATdmAlign = 256;
-constexpr CachePolicy kDdaA2ATdmPolicy = createCachePolicy(TemporalHint::NT, MemScope::SYS);
+constexpr CachePolicy kDdaA2ATdmSysPolicy = createCachePolicy(TemporalHint::NT, MemScope::SYS);
+constexpr CachePolicy kDdaA2ATdmDevPolicy = createCachePolicy(TemporalHint::NT, MemScope::DEV);
 
 // Push the same exchange as ddaAllToAllFabricPush, but each tile moves through TDM: global -> this wave's
 // LDS window -> the peer's scratch slot. Items are numbered item = tileIdx * nRanks + k and item k goes to
@@ -58,7 +59,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
         const int peer = (selfRank + static_cast<int>(item % nRanks)) % nRanks;
         const size_t off = (item / nRanks) * TileBytes;
         const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
-        tdm::asyncLoadToLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/false>(
+        tdm::asyncLoadToLDS<SyncPolicy::Async, kDdaA2ATdmDevPolicy, /*Aligned=*/false>(
             sendbuff + static_cast<size_t>(peer) * bytesPerRank + off, window + u * TileBytes, n);
       }
     }
@@ -70,7 +71,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
         const int peer = (selfRank + static_cast<int>(item % nRanks)) % nRanks;
         const size_t off = (item / nRanks) * TileBytes;
         const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
-        tdm::asyncStoreFromLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/false>(
+        tdm::asyncStoreFromLDS<SyncPolicy::Async, kDdaA2ATdmSysPolicy, /*Aligned=*/false>(
             window + u * TileBytes, peerScratch[peer] + selfSlot + off, n);
       }
     }
@@ -91,7 +92,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
         const int src = (selfRank - static_cast<int>(item % nRanks) + nRanks) % nRanks;
         const size_t off = (item / nRanks) * TileBytes;
         const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
-        tdm::asyncLoadToLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/false>(
+        tdm::asyncLoadToLDS<SyncPolicy::Async, kDdaA2ATdmSysPolicy, /*Aligned=*/false>(
             selfScratch + static_cast<size_t>(src) * bytesPerRank + off, window + u * TileBytes, n);
       }
     }
@@ -103,7 +104,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
         const int src = (selfRank - static_cast<int>(item % nRanks) + nRanks) % nRanks;
         const size_t off = (item / nRanks) * TileBytes;
         const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
-        tdm::asyncStoreFromLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/false>(
+        tdm::asyncStoreFromLDS<SyncPolicy::Async, kDdaA2ATdmDevPolicy, /*Aligned=*/false>(
             window + u * TileBytes, recvbuff + static_cast<size_t>(src) * bytesPerRank + off, n);
       }
     }
@@ -123,6 +124,38 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
   __builtin_trap();
 #endif
 }
+
+#if TDM_SUPPORTED
+// Copies, from src to dst, the tile groups that start at begin, begin + stride, ... below limit (UnrollPeers tiles per
+// group, clipped to nTiles), staging each group through this wave's LDS window. Load and Store are the cache policies
+// of the TDM load and store.
+template <CachePolicy Load, CachePolicy Store, int TileBytes, int UnrollPeers>
+__device__ __forceinline__ void ddaA2ATdmPeerCopy(uint8_t* window, uint8_t* dst, const uint8_t* src, size_t begin,
+                                                  size_t limit, size_t stride, size_t nTiles, size_t bytesPerRank) {
+  for (size_t base = begin; base < nTiles && base < limit; base += stride) {
+#pragma unroll
+    for (int u = 0; u < UnrollPeers; ++u) {
+      const size_t t = base + u;
+      if (t < nTiles) {
+        const size_t off = t * TileBytes;
+        const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
+        tdm::asyncLoadToLDS<SyncPolicy::Async, Load, /*Aligned=*/false>(src + off, window + u * TileBytes, n);
+      }
+    }
+    tdm::tdmWait();
+#pragma unroll
+    for (int u = 0; u < UnrollPeers; ++u) {
+      const size_t t = base + u;
+      if (t < nTiles) {
+        const size_t off = t * TileBytes;
+        const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
+        tdm::asyncStoreFromLDS<SyncPolicy::Async, Store, /*Aligned=*/false>(window + u * TileBytes, dst + off, n);
+      }
+    }
+    tdm::tdmWait();
+  }
+}
+#endif
 
 // Peer-major TDM push: nRanks * blocksPerPeer blocks; block b pushes only to peer (selfRank + k) % nRanks with
 // k = b / blocksPerPeer, its waves taking UnrollPeers consecutive tiles round-robin over the chunk, and drains the slot
@@ -155,35 +188,8 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
   const size_t perPiece = (nRounds + pieces - 1) / pieces;
   const size_t nPieces = (nRounds + perPiece - 1) / perPiece;
 
-  // Copies this wave's rounds [p * perPiece, (p + 1) * perPiece) of a bytesPerRank chunk from src to dst through its
-  // LDS window, starting at tile `first`.
-  auto passFrom = [&](size_t first, const uint8_t* src, uint8_t* dst, size_t p) {
-    const size_t limit = first + (p + 1) * perPiece * stride;
-    for (size_t base = first + p * perPiece * stride; base < nTiles && base < limit; base += stride) {
-#pragma unroll
-      for (int u = 0; u < UnrollPeers; ++u) {
-        const size_t t = base + u;
-        if (t < nTiles) {
-          const size_t off = t * TileBytes;
-          const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
-          tdm::asyncLoadToLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/false>(src + off,
-                                                                                      window + u * TileBytes, n);
-        }
-      }
-      tdm::tdmWait();
-#pragma unroll
-      for (int u = 0; u < UnrollPeers; ++u) {
-        const size_t t = base + u;
-        if (t < nTiles) {
-          const size_t off = t * TileBytes;
-          const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
-          tdm::asyncStoreFromLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/false>(window + u * TileBytes,
-                                                                                         dst + off, n);
-        }
-      }
-      tdm::tdmWait();
-    }
-  };
+  // Start of this wave's rounds [p * perPiece, (p + 1) * perPiece), counted from tile `first`.
+  auto pieceBegin = [&](size_t first, size_t p) { return first + p * perPiece * stride; };
 
   const uint32_t epoch = barrier.epochBegin();
   if (blockIdx.x >= pushBlocks) {
@@ -195,8 +201,10 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
     for (size_t p = 0; p < nPieces; ++p) {
       for (unsigned j = idx % drain; j < static_cast<unsigned>(blocksPerPeer); j += drain) {
         barrier.waitPeer(fromRank, epoch, static_cast<unsigned>(p), r * blocksPerPeer + static_cast<int>(j));
-        passFrom((static_cast<size_t>(j) * warps + warp) * UnrollPeers, peerScratch[selfRank] + fromOff,
-                 recvbuff + fromOff, p);
+        const size_t jFirst = (static_cast<size_t>(j) * warps + warp) * UnrollPeers;
+        ddaA2ATdmPeerCopy<kDdaA2ATdmSysPolicy, kDdaA2ATdmDevPolicy, TileBytes, UnrollPeers>(
+            window, recvbuff + fromOff, peerScratch[selfRank] + fromOff, pieceBegin(jFirst, p),
+            pieceBegin(jFirst, p + 1), stride, nTiles, bytesPerRank);
       }
     }
     barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
@@ -224,10 +232,14 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
   // Every TDM store of a piece has drained (tdmWait) before epochPostPiece, which also waits for the wave's stores and
   // syncs the block before thread 0 posts. Every wave polls the source's flag itself.
   for (size_t p = 0; p <= nPieces; ++p) {
-    if (p < nPieces) passFrom(first, src, dst, p);
+    if (p < nPieces) {
+      ddaA2ATdmPeerCopy<kDdaA2ATdmDevPolicy, kDdaA2ATdmSysPolicy, TileBytes, UnrollPeers>(
+          window, dst, src, pieceBegin(first, p), pieceBegin(first, p + 1), stride, nTiles, bytesPerRank);
+    }
     if (p > 0 && drainHere) {
       barrier.waitPeer(from, epoch, static_cast<unsigned>(p - 1));
-      passFrom(first, slot, out, p - 1);
+      ddaA2ATdmPeerCopy<kDdaA2ATdmSysPolicy, kDdaA2ATdmDevPolicy, TileBytes, UnrollPeers>(
+          window, out, slot, pieceBegin(first, p - 1), pieceBegin(first, p), stride, nTiles, bytesPerRank);
     }
     if (p < nPieces) barrier.postPeer(peer, epoch, static_cast<unsigned>(p));
   }
