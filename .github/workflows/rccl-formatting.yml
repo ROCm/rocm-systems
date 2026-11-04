@@ -33,26 +33,7 @@ jobs:
 
       - name: Run pre-commit on changed files
         run: |
-          # Diff against the merge base so that files changed only on the
-          # target branch are left alone. HEAD here is the pull-request merge
-          # commit, so compare with the PR head SHA directly.
-          MERGE_BASE=$(git merge-base \
-            ${{ github.event.pull_request.base.sha }} \
-            ${{ github.event.pull_request.head.sha }})
-
-          # Added, copied, modified or renamed only: a deleted file cannot be
-          # linted, and a path outside the sparse checkout is not on disk.
-          FILES=$(git diff --name-only --diff-filter=ACMR \
-            "$MERGE_BASE" ${{ github.event.pull_request.head.sha }} \
-            | while IFS= read -r f; do if [ -f "$f" ]; then echo "$f"; fi; done)
-
-          if [ -z "$FILES" ]; then
-            echo "No checked-in files changed in the sparse checkout, skipping."
-            exit 0
-          fi
-
-          echo "Checking files:"
-          echo "$FILES"
           pre-commit run \
             --config projects/rccl/.pre-commit-config.yaml \
-            --files $FILES
+            --from-ref ${{ github.event.pull_request.base.sha }} \
+            --to-ref ${{ github.event.pull_request.head.sha }}
