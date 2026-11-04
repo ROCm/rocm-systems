@@ -948,6 +948,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaIssueReportsEveryIssuedInstruction) {
     uint32_t tensor_dim0;
     bool store;
     std::vector<amdgpu::TensorDmaLdsRange> lds_ranges;
+    uint32_t tile_dim0 = 1;
+    uint32_t tile_dim1 = 0;
   };
   const Case cases[] = {
       {"in-bounds load", 1, 1, false, {first_element}},
@@ -957,12 +959,16 @@ TEST(Gfx1250ExecutionTest, TensorDmaIssueReportsEveryIssuedInstruction) {
       {"store outside the tensor", 1, 0, true, {}},
       {"NULL load", 0, 1, false, {}},
       {"NULL store", 0, 1, true, {}},
+      // An active NOP tile issues, but makes no global request to complete.
+      {"active {0,1} NOP load", 1, 1, false, {}, /*tile_dim0=*/0, /*tile_dim1=*/1},
   };
   for (const Case &c : cases) {
     SCOPED_TRACE(c.name);
     observer.issues.clear();
     write_wave_sgpr(*cu, *wf, 0, c.count);
     write_wave_sgpr(*cu, *wf, 13, c.tensor_dim0 << 16);
+    write_wave_sgpr(*cu, *wf, 15, c.tile_dim0 << 16);
+    write_wave_sgpr(*cu, *wf, 16, c.tile_dim1);
     Instruction &inst = c.store ? *store : *load;
     EXPECT_TRUE(cu->execute_instruction(&inst, *wf).succeeded());
     ASSERT_EQ(observer.issues.size(), 1u);
@@ -977,6 +983,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaIssueReportsEveryIssuedInstruction) {
   observer.issues.clear();
   write_wave_sgpr(*cu, *wf, 0, 2);
   write_wave_sgpr(*cu, *wf, 13, 1u << 16);
+  write_wave_sgpr(*cu, *wf, 15, 1u << 16);
+  write_wave_sgpr(*cu, *wf, 16, 0);
   EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).failed());
   EXPECT_TRUE(observer.issues.empty());
 }
