@@ -351,8 +351,30 @@ __launch_bounds__(512)
     const size_t wireOff = s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
     uint64_t acc[kDdaLL128WordsPerThread] = {};
     ddaLL128LoadRegs<int8_t>(acc, srcBytes + (size_t)selfRank * shardBytes + sliceByte, eltIn(s), lane, flagLane);
+    // Two copies per round trip, folded in peer order.
+    int r = 1;
 #pragma unroll 1
-    for (int r = 1; r < nRanks; ++r) {
+    for (; r + 1 < nRanks; r += 2) {
+      const int pa = (selfRank + r) % nRanks;
+      const int pb = (selfRank + r + 1) % nRanks;
+      uint64_t va[kDdaLL128WordsPerThread];
+      uint64_t vb[kDdaLL128WordsPerThread];
+      if (!ddaLL128PollWire2(selfBase + bankWords + (uint64_t)pa * (uint64_t)slotWords + wireOff,
+                             selfBase + bankWords + (uint64_t)pb * (uint64_t)slotWords + wireOff, va, vb, flag, lane,
+                             params)) {
+        quit();
+        return;
+      }
+#pragma unroll
+      for (int k = 0; k < kDdaLL128WordsPerThread; ++k) {
+        acc[k] = ddaLL128AddWord<T>(acc[k], va[k]);
+      }
+#pragma unroll
+      for (int k = 0; k < kDdaLL128WordsPerThread; ++k) {
+        acc[k] = ddaLL128AddWord<T>(acc[k], vb[k]);
+      }
+    }
+    if (r < nRanks) {
       const int peer = (selfRank + r) % nRanks;
       uint64_t vr[kDdaLL128WordsPerThread];
       if (!ddaLL128PollWire(selfBase + bankWords + (uint64_t)peer * (uint64_t)slotWords + wireOff, vr, flag, lane,
@@ -393,18 +415,29 @@ __launch_bounds__(512)
   }
 
   // D. gather the peers' reduced slices; in place is safe, as D writes a slice only after A read it.
-  for (size_t u = gwarp; u < units; u += wstride) {
-    const size_t s = u % slicesTotal;
-    const int peer = (selfRank + 1 + (int)(u / slicesTotal)) % nRanks;
-    uint64_t vr[kDdaLL128WordsPerThread];
-    if (!ddaLL128PollWire(selfBase + bankWordsNext + (uint64_t)peer * (uint64_t)slotWords +
-                            s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
-                          vr, flag, lane, params)) {
+  // Two units per round trip; a lone last unit polls its slice twice.
+  auto gatherAt = [&](size_t u) {
+    return selfBase + bankWordsNext + (uint64_t)((selfRank + 1 + (int)(u / slicesTotal)) % nRanks) * slotWords +
+           (u % slicesTotal) * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
+  };
+  for (size_t u = gwarp; u < units; u += 2 * wstride) {
+    const size_t u2 = u + wstride < units ? u + wstride : u;
+    uint64_t va[kDdaLL128WordsPerThread];
+    uint64_t vb[kDdaLL128WordsPerThread];
+    if (!ddaLL128PollWire2(gatherAt(u), gatherAt(u2), va, vb, flag, lane, params)) {
       quit();
       return;
     }
-    ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)peer * shardBytes + s * (size_t)kDdaLL128DataBytesPerSlice, vr,
+    const size_t s = u % slicesTotal;
+    const int peer = (selfRank + 1 + (int)(u / slicesTotal)) % nRanks;
+    ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)peer * shardBytes + s * (size_t)kDdaLL128DataBytesPerSlice, va,
                               eltIn(s), lane, flagLane);
+    if (u2 != u) {
+      const size_t s2 = u2 % slicesTotal;
+      const int peer2 = (selfRank + 1 + (int)(u2 / slicesTotal)) % nRanks;
+      ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)peer2 * shardBytes + s2 * (size_t)kDdaLL128DataBytesPerSlice, vb,
+                                eltIn(s2), lane, flagLane);
+    }
   }
 
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)

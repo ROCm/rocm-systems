@@ -427,6 +427,37 @@ __device__ __forceinline__ bool ddaLL128PollWireBatched(const uint64_t* wire, ui
   return true;
 }
 
+// ddaLL128PollWire for two slices at once: both slices' loads share each round trip. Returns false if aborted.
+__device__ __forceinline__ bool ddaLL128PollWire2(const uint64_t* wireA, const uint64_t* wireB,
+                                                  uint64_t (&va)[kDdaLL128WordsPerThread],
+                                                  uint64_t (&vb)[kDdaLL128WordsPerThread], uint64_t flag, int wid,
+                                                  DdaKernelParams params) {
+  const bool flagLane = ddaLL128IsFlagLane(wid);
+  int spins = 0;
+  bool needReload;
+  do {
+    if (params.abortSpinTick(spins)) return false;
+    needReload = false;
+#pragma unroll
+    for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
+      ddaLL128LoadAtomic16B(wireA + u * kDdaLL128Warp, va[u], va[u + 1]);
+      ddaLL128LoadAtomic16B(wireB + u * kDdaLL128Warp, vb[u], vb[u + 1]);
+    }
+#pragma unroll
+    for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
+      needReload |= flagLane && (va[u + 1] != flag || vb[u + 1] != flag);
+    }
+  } while (__any(needReload));
+#if !RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
+#pragma unroll
+  for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
+    ddaLL128LoadAtomic16B(wireA + u * kDdaLL128Warp, va[u], va[u + 1]);
+    ddaLL128LoadAtomic16B(wireB + u * kDdaLL128Warp, vb[u], vb[u + 1]);
+  }
+#endif
+  return true;
+}
+
 // Flag-lane un-shuffle then store of registers into `dst`
 template <typename T>
 __device__ __forceinline__ void ddaLL128StoreRegs(
