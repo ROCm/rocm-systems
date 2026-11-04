@@ -24,15 +24,12 @@ from utils.metrics.collectable import (
     COLLECT_SUM_SPECS_ATTR,
     COLLECTABLE_IDS_ATTR,
     COMPOSITE_FINISH_ATTR,
-    WEIGHTED_AVG_ATTR,
-    WEIGHTED_AVG_SUBS_ATTR,
 )
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import (
     is_composite_avg_formula,
     parse_collect_ratio_parts,
     parse_collect_sum_submetrics,
-    parse_weighted_avg_submetrics,
     reject_counter_bearing_composite_extents,
     split_composite_finish,
 )
@@ -217,9 +214,6 @@ def _composite_ref_names(entries: dict[str, Any]) -> list[str]:
     if not isinstance(formula, str):
         return []
     refs: list[str] = []
-    weighted = parse_weighted_avg_submetrics(formula)
-    if weighted:
-        refs.extend(weighted)
     summed = parse_collect_sum_submetrics(formula)
     if summed:
         refs.extend(summed)
@@ -295,8 +289,6 @@ def _build_metric_table_df(
 
     rows: list[list[Any]] = []
     expressions: list[str] = []
-    weighted_avg_specs: dict[str, dict[str, Any]] = {}
-    weighted_avg_subs: dict[str, list[str]] = {}
     collectable_ids: dict[str, str] = {}
     collect_sum_specs: dict[str, list[str]] = {}
     collect_ratio_specs: dict[str, dict[str, list[str]]] = {}
@@ -327,9 +319,6 @@ def _build_metric_table_df(
         if not isinstance(composite_entry, str):
             composite_entry = entries.get("value")
         if isinstance(composite_entry, str):
-            weighted_subs = parse_weighted_avg_submetrics(composite_entry)
-            if weighted_subs:
-                weighted_avg_subs[metric_idx] = weighted_subs
             sum_refs = parse_collect_sum_submetrics(composite_entry)
             if sum_refs:
                 collect_sum_specs[metric_idx] = sum_refs
@@ -343,9 +332,6 @@ def _build_metric_table_df(
             _inner, finish = split_composite_finish(composite_entry)
             if finish is not None and is_composite_avg_formula(composite_entry):
                 composite_finish[metric_idx] = finish
-        weighted_meta = entries.get("_weighted_avg")
-        if isinstance(weighted_meta, dict):
-            weighted_avg_specs[metric_idx] = weighted_meta
 
         values: list[Any] = [metric_idx, key]
         for k, v in entries.items():
@@ -361,8 +347,6 @@ def _build_metric_table_df(
 
     df = pd.DataFrame(rows, columns=headers)
     df.set_index("Metric_ID", inplace=True)
-    df.attrs[WEIGHTED_AVG_ATTR] = weighted_avg_specs
-    df.attrs[WEIGHTED_AVG_SUBS_ATTR] = weighted_avg_subs
     df.attrs[COLLECTABLE_IDS_ATTR] = collectable_ids
     df.attrs[COLLECT_SUM_SPECS_ATTR] = collect_sum_specs
     df.attrs[COLLECT_RATIO_SPECS_ATTR] = collect_ratio_specs
