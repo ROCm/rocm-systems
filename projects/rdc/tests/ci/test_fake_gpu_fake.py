@@ -179,6 +179,19 @@ print(json.dumps([first, time.monotonic() - t, lib.amdsmi_init(2)]))
     assert out[1] >= 0.3, out
 
 
+def test_init_accepts_the_cpu_flag(fake):
+    # As amd-smi, whose CPU init is not fatal: the flag is accepted and every GPU is there.
+    out = _child(
+        fake,
+        r"""
+st = lib.amdsmi_init(3)  # AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS
+print(json.dumps([st, len(handles())]))
+""",
+        prelude=_LOAD,
+    )
+    assert out == [AMDSMI_STATUS_SUCCESS, 2], out  # _run simulates 2 GPUs
+
+
 def test_delay_slows_down_the_call(fake):
     out = _child(
         fake,
