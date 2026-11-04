@@ -2,7 +2,6 @@ import RunOptionDetails from '../shared/RunOptionDetails';
 import { runSelectionLabel } from '../shared/runOptionPresentation';
 import { commitTimestampFor } from '../../data/runOrdering';
 import { formatDuration, formatRunTime } from '../../utils/formatters';
-import { matchAnchorWidth } from '../shared/dropdownGeometry';
 import {
   Autocomplete,
   Box,
@@ -43,7 +42,7 @@ export default function ChartPointSelector({
         disableClearable
         openOnFocus
         options={options}
-        slotProps={{ popper: { modifiers: [matchAnchorWidth] }, listbox: { sx: { overflowWrap: 'anywhere' } } }}
+        slotProps={{ listbox: { sx: { overflowWrap: 'anywhere' } } }}
         filterOptions={filterOptions}
         getOptionKey={(option) => option.id}
         getOptionLabel={(option) => option.run ? `${runSelectionLabel(option.run)} · ${option.target} · ${option.mode} · ${option.status}` : option.label}

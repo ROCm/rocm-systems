@@ -44,12 +44,9 @@ export const textStyles = Object.freeze({
   tooltip: role('regular', 'body', 21),
 });
 
-// Plain CSS and portal-density correction derive from the same definitions.
+// Plain CSS derives from the same definitions.
 export const typographyCssVariables = Object.freeze({
-  ...Object.fromEntries(Object.entries(fontSizes).map(([name, value]) => [`--font-size-${name}`, `${value}px`])),
   '--font-family-text': sansFont,
   '--font-family-numeric': sansFont,
   '--font-weight-emphasized': fontWeights.emphasized,
-  '--line-height-body': textStyles.body.lineHeight,
-  '--line-height-caption': textStyles.caption.lineHeight,
 });

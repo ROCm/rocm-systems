@@ -1,4 +1,3 @@
-import { matchAnchorWidth } from '../shared/dropdownGeometry';
 import RunOptionDetails from '../shared/RunOptionDetails';
 import { runSelectionLabel } from '../shared/runOptionPresentation';
 import { useMemo } from 'react';
@@ -23,7 +22,7 @@ export default function BranchRunSelector({ label, options, value, selectedId, o
         <RunOptionDetails run={run} />
       </Box>}
       renderInput={(params) => <TextField {...params} label={label} slotProps={{ ...params.slotProps, inputLabel: { ...params.slotProps.inputLabel, shrink: true } }} placeholder={label === 'Reference' ? 'Choose reference' : 'Choose candidate'} />}
-      slotProps={{ listbox: { sx: { maxHeight: 360, '& li': { minHeight: 44 } } }, popper: { modifiers: [matchAnchorWidth], sx: { maxWidth: 'calc(100vw - 24px)' } }, clearIndicator: { sx: { minWidth: 44, minHeight: 44 } }, popupIndicator: { sx: { minWidth: 44, minHeight: 44 } } }}
+      slotProps={{ listbox: { sx: { maxHeight: 360, '& li': { minHeight: 44 } } }, popper: { sx: { maxWidth: 'calc(100vw - 24px)' } }, clearIndicator: { sx: { minWidth: 44, minHeight: 44 } }, popupIndicator: { sx: { minWidth: 44, minHeight: 44 } } }}
       sx={{ '& .MuiInputBase-root': { minHeight: 44 }, ...(selected?.unavailable ? { '& .MuiOutlinedInput-notchedOutline': { borderColor: 'warning.main' } } : {}), minWidth: 0 }} />
     {!value && <Typography component="div" variant="caption" sx={{ mt: '6px', overflowWrap: 'anywhere', color: 'text.secondary' }}>
       {selectedId ? `Unavailable attempt: ${selectedId}` : 'No reference selected · Choose reference above'}

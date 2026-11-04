@@ -118,7 +118,6 @@ for (const width of [1440, 390]) test(`keyboard slots expose truthful gaps and p
   await expect(trend.getByRole('img')).toHaveCount(0);
   await expect(trend.getByTestId('speedup-empty-state')).toHaveText('No complete runs for selected comparison in this week.');
   await expect(trend.getByTestId('speedup-empty-state')).toBeVisible();
-  // Fractional desktop CSS zoom can round the resolved height by a subpixel.
   expect(await trend.getByTestId('speedup-empty-state').evaluate((element) => parseFloat(getComputedStyle(element).height))).toBeCloseTo(300, 0);
   await group.focus(); await page.keyboard.press('End');
   await expect(status).toContainText('No eligible plotted run');

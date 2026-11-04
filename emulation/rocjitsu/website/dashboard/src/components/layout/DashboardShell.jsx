@@ -62,13 +62,12 @@ export default function DashboardShell({ data, state, loading = false, header, c
   const summary = `${targets.length} ${targets.length === 1 ? 'target' : 'targets'} / ${suites.length} ${suites.length === 1 ? 'suite' : 'suites'} / ${modes.length ? modes.join(' + ') : 'no thread policies'}`;
 
   return (
-    <Box data-testid="dashboard-shell" sx={{ display: { xs: 'flex', md: 'grid' }, flexDirection: 'column', gridTemplateColumns: '256px minmax(0, 1fr)', minHeight: 'calc(100dvh / var(--dashboard-density, 1))' }}>
+    <Box data-testid="dashboard-shell" sx={{ display: { xs: 'flex', md: 'grid' }, flexDirection: 'column', gridTemplateColumns: '256px minmax(0, 1fr)', minHeight: '100dvh' }}>
       <Box component="aside" aria-label="Dashboard navigation and filters" sx={{
         bgcolor: 'background.paper', borderRight: { md: `1px solid ${theme.palette.dashboard.border}` }, borderBottom: { xs: `1px solid ${theme.palette.dashboard.border}`, md: 0 },
         px: { xs: 2, md: '14px' }, pt: { md: '16px' }, minWidth: 0,
         position: { md: 'sticky' }, top: { md: 0 },
-        // Avoid a bottom-edge sticky shift when zoomed document height rounds up.
-        height: { md: 'calc((100vh - 1px) / var(--dashboard-density, 1))' },
+        height: { md: '100dvh' },
         overflowY: { md: 'auto' }, overflowX: { md: 'hidden' },
         scrollbarGutter: { md: 'stable' }, alignSelf: { xs: 'stretch', md: 'start' },
         '--sidebar-navigation-gap': '6px',

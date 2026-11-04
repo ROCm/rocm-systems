@@ -27,7 +27,7 @@ export default function HoverTooltip({ title, children }) {
       { name: 'preventOverflow', options: { padding: 8 } },
       { name: 'flip', options: { padding: 8 } },
     ]} sx={{ zIndex: (theme) => theme.zIndex.tooltip, pointerEvents: 'none' }}>
-      <Box id={id} role="tooltip" sx={{ zoom: 'var(--dashboard-density, 1)', bgcolor: 'background.paper', color: 'text.primary', border: 1, borderColor: 'dashboard.border', borderRadius: '6px', padding: '6px 9px', ...textStyles.tooltip, maxWidth: 'min(340px, calc(100vw - 16px))', overflowWrap: 'anywhere', boxShadow: (theme) => `0 4px 16px ${alpha(theme.palette.dashboard.shadowColor, 0.18)}` }}>{title}</Box>
+      <Box id={id} role="tooltip" sx={{ bgcolor: 'background.paper', color: 'text.primary', border: 1, borderColor: 'dashboard.border', borderRadius: '6px', padding: '6px 9px', ...textStyles.tooltip, maxWidth: 'min(340px, calc(100vw - 16px))', overflowWrap: 'anywhere', boxShadow: (theme) => `0 4px 16px ${alpha(theme.palette.dashboard.shadowColor, 0.18)}` }}>{title}</Box>
     </Popper>
   </>;
 }

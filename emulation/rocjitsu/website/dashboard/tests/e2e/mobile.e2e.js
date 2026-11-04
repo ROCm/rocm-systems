@@ -89,9 +89,8 @@ test('phone filters, all-page navigation, trend tap and result details stay usab
   expect(errors).toEqual([]);
 });
 
-test('phone unscaled direct chart input opens the exact attempt and preserves selected markers', async ({ page }) => {
+test('phone direct chart input opens the exact attempt and preserves selected markers', async ({ page }) => {
   await openDashboard(page, '/?view=benchmarks');
-  expect(await page.evaluate(() => getComputedStyle(document.body).zoom)).toBe('1');
   await ensureGridBenchmark(page, 'Fictional GEMM');
   const chart = page.getByRole('img', { name: 'Fictional GEMM duration history', exact: true });
   const clicked = await clickLastCompletedChartPoint(chart);

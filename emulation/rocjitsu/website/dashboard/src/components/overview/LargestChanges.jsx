@@ -42,8 +42,8 @@ export default function LargestChanges({ projection, catalogs = [] }) {
           <Typography variant="numeric" sx={{ flexShrink: 0, color: tone === 'neutral' ? 'text.secondary' : `${tone}.main` }}>{formatPercent(delta)}</Typography>
         </Box>
         {/* The line is a border: the browser snaps borders to a whole number of device pixels, so every
-            bar paints the same thickness at any row position and display density. 2px is divided by the page zoom. */}
-        <Box aria-hidden="true" sx={{ '--bar': 'calc(2px / var(--dashboard-density, 1))', position: 'relative', mt: 1, height: 0, borderTop: 'var(--bar) solid', borderColor: 'dashboard.barTrack' }}>
+            bar paints the same thickness at any row position. */}
+        <Box aria-hidden="true" sx={{ '--bar': '2px', position: 'relative', mt: 1, height: 0, borderTop: 'var(--bar) solid', borderColor: 'dashboard.barTrack' }}>
           <Box data-testid="change-magnitude-bar" sx={{ position: 'absolute', top: 'calc(-1 * var(--bar))', left: 0, height: 0, width: `${maximum ? Math.abs(delta) / maximum * 100 : 0}%`, borderTop: 'var(--bar) solid', borderColor: tone === 'neutral' ? 'text.secondary' : `${tone}.main` }} />
         </Box>
       </Box>;

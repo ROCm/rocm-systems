@@ -43,12 +43,12 @@ test('pull request filter uses the styled anchored menu and keeps filtering beha
   }
 });
 
-test('Add benchmarks popup uses density-matched text, icons and row spacing', async ({ page }) => {
+test('Add benchmarks popup uses the standard text, icon and row sizes', async ({ page }) => {
   await openDashboard(page, '/?view=benchmarks');
   await page.getByRole('button', { name: 'Add benchmarks', exact: true }).click();
   await page.getByRole('combobox', { name: 'Benchmarks to graph' }).click();
   const option = page.getByRole('listbox').getByRole('option').first();
-  const expectedSize = await page.locator('body').evaluate((body) => 20 * Number(getComputedStyle(body).zoom));
+  const expectedSize = 20;
   await expect.poll(() => option.locator('.MuiListItemText-primary').evaluate((node) => parseFloat(getComputedStyle(node).lineHeight)))
     .toBeCloseTo(expectedSize, 3);
   await expect.poll(() => option.locator('svg').evaluate((node) => parseFloat(getComputedStyle(node).fontSize)))

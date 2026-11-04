@@ -1,6 +1,5 @@
 import RunOptionDetails from '../shared/RunOptionDetails';
 import { runSearchFields, runSelectionLabelWithBranch as optionLabel } from '../shared/runOptionPresentation';
-import { matchAnchorWidth } from '../shared/dropdownGeometry';
 import {
   Autocomplete,
   Box,
@@ -56,7 +55,7 @@ export default function RunSelector({ label, options, value, onChange }) {
       )}
       slotProps={{
         listbox: { sx: { maxHeight: 360, '& li': { overflowWrap: 'anywhere' } } },
-        popper: { modifiers: [matchAnchorWidth], sx: { maxWidth: 'calc(100vw - 24px)' } },
+        popper: { sx: { maxWidth: 'calc(100vw - 24px)' } },
       }}
     />
     </Box>

@@ -29,7 +29,7 @@ pre {
 }
 
 #root {
-  min-height: calc(100dvh / var(--dashboard-density, 1));
+  min-height: 100dvh;
 }
 
 /* Keep chart tooltip text on the normal paint path, not a scaled GPU bitmap.
@@ -44,9 +44,9 @@ pre {
 }
 
 /* The trend compares several configurations; size to the longest summary row.
-   The viewport cap preserves phone wrapping and the existing density layer. */
+   The viewport cap preserves phone wrapping. */
 .performance-trend-tooltip {
-  --chart-tooltip-max-width: min(760px, calc(100vw / var(--dashboard-density, 1) - 24px));
+  --chart-tooltip-max-width: min(760px, calc(100vw - 24px));
   width: max-content;
 }
 
@@ -73,45 +73,6 @@ pre {
 
 @media (prefers-reduced-motion: reduce) {
   .MuiSkeleton-root.MuiSkeleton-wave::after { animation: none; }
-}
-
-/* One responsive desktop density layer; phones stay native size. */
-@supports (zoom: 0.8) {
-  @media (min-width: 900px) {
-    body {
-      --dashboard-density: var(--dashboard-scale, 0.75);
-      zoom: var(--dashboard-density);
-    }
-    /* Popper/Popover receive viewport pixel anchors; cancel inherited zoom there
-       so those coordinates are not scaled a second time. Dialog flex centering
-       and in-chart tooltips stay in the shared density layer. */
-    .MuiPopover-root, .MuiPopper-root { zoom: calc(1 / var(--dashboard-density)); }
-    /* Only portal coordinates escape the density layer. Match the surrounding
-       body / caption text using the same scale without scaling geometry again. */
-    .MuiAutocomplete-popper .MuiAutocomplete-listbox .MuiAutocomplete-option,
-    .MuiAutocomplete-popper .MuiAutocomplete-option .MuiTypography-body1,
-    .MuiAutocomplete-popper .MuiAutocomplete-option .MuiTypography-body2,
-    .MuiAutocomplete-popper .MuiAutocomplete-groupLabel,
-    .MuiAutocomplete-popper .MuiAutocomplete-noOptions,
-    .MuiAutocomplete-popper .MuiAutocomplete-loading,
-    .MuiMenu-root .MuiMenu-list .MuiMenuItem-root {
-      font-size: calc(var(--font-size-body) * var(--dashboard-density));
-      line-height: calc(var(--line-height-body) * var(--dashboard-density));
-    }
-    .MuiAutocomplete-popper .MuiAutocomplete-option .MuiTypography-caption {
-      font-size: calc(var(--font-size-caption) * var(--dashboard-density));
-      line-height: calc(var(--line-height-caption) * var(--dashboard-density));
-    }
-    .MuiAutocomplete-popper .MuiAutocomplete-option .MuiSvgIcon-fontSizeSmall {
-      font-size: calc(20px * var(--dashboard-density));
-    }
-    .MuiAutocomplete-popper .MuiAutocomplete-groupLabel {
-      line-height: calc(48px * var(--dashboard-density));
-    }
-    .MuiAutocomplete-popper .MuiAutocomplete-option .MuiListItemText-root {
-      margin-block: calc(6px * var(--dashboard-density));
-    }
-  }
 }
 
 ::-webkit-scrollbar {

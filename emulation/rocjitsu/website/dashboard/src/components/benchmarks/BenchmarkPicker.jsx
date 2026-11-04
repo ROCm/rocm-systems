@@ -1,5 +1,4 @@
 import { fontWeights } from '../../theme/typography';
-import { matchAnchorWidth } from '../shared/dropdownGeometry';
 import {
   Autocomplete,
   Box,
@@ -93,7 +92,7 @@ export function BenchmarkGridPicker({
       )}
       slots={{ paper: Paper }}
       slotProps={{
-        popper: { placement: 'bottom-start', modifiers: [matchAnchorWidth, benchmarkViewport, { name: 'flip', enabled: false }, { name: 'preventOverflow', options: { padding: 8, altAxis: false } }] },
+        popper: { placement: 'bottom-start', modifiers: [benchmarkViewport, { name: 'flip', enabled: false }, { name: 'preventOverflow', options: { padding: 8, altAxis: false } }] },
         listbox: { sx: { maxHeight: 'min(340px, var(--benchmark-listbox-height, calc(100dvh - 16px)))', overflowY: 'auto', overscrollBehavior: 'contain', '& .MuiAutocomplete-option': { overflowWrap: 'anywhere' } } },
       }}
       sx={{ width: '100%', maxWidth: 720, '& .MuiAutocomplete-inputRoot': { height: 'min(120px, 20dvh)', minHeight: 44, alignContent: 'flex-start', alignItems: 'flex-start', overflowY: 'auto', overscrollBehavior: 'contain' }, '& .MuiAutocomplete-tag': { maxWidth: 'calc(100% - 6px)' } }}

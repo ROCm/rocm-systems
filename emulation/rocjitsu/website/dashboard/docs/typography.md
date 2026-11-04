@@ -47,7 +47,7 @@ Use the shared MUI `h3` variant for equivalent subsection headings, rather than 
 
 ## CSS and exceptions
 
-- Plain CSS uses the typography custom properties installed by the theme. Portal text density correction derives from those same properties; it is not a second size scale.
+- Plain CSS uses the font family and weight custom properties installed by the theme; they are not a second size scale.
 - Floating labels and their notches use the same caption role without fractional text scaling, so their glyph widths and side gaps match. Preserve the shared inset/gap geometry and transparent backgrounds.
 - Icon dimensions, chart symbols and layout measurements are not text sizes and keep their own geometry.
 - No font files are bundled or registered. `fontWeights` has three tiers: `regular` 500, `medium` 600, `emphasized` 700. The native family decides which faces exist, so the result depends on the installed faces: on one Linux setup 500 renders as Regular and 600/700 as Bold, on another Chromium picks Medium for 500 and Bold for 600 and 700, and variable system fonts render all three. Do not rely on weight alone to tell roles apart, and do not declare a local family or weight for an exception.

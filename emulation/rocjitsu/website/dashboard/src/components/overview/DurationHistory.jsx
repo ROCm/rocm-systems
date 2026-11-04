@@ -142,7 +142,7 @@ export default function DurationHistory({ projection, catalogs, onRangeChange, o
     if (!chart || chart.isDisposed()) return;
     const rect = chart.getDom().getBoundingClientRect();
     const pixel = [(event.clientX - rect.left) * chart.getWidth() / rect.width, (event.clientY - rect.top) * chart.getHeight() / rect.height];
-    // A point on the plot edge can round just outside it after CSS zoom.
+    // A point on the plot edge can round just outside it.
     // Accept one viewport pixel of rounding, then clamp back into the grid.
     const grid = chart.getModel().getComponent('grid').coordinateSystem.getRect();
     const tolerance = Math.max(chart.getWidth() / rect.width, chart.getHeight() / rect.height);
