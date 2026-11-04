@@ -24,8 +24,6 @@
 
 namespace rocprofiler
 {
-namespace hsa
-{
 /// Depth rather than a flag: buffer delivery can happen from inside record emission.
 inline thread_local int record_producer_depth = 0;  // NOLINT(misc-definitions-in-headers)
 
@@ -48,5 +46,4 @@ struct scoped_record_producer
     scoped_record_producer& operator=(const scoped_record_producer&) = delete;
     scoped_record_producer& operator=(scoped_record_producer&&) = delete;
 };
-}  // namespace hsa
 }  // namespace rocprofiler

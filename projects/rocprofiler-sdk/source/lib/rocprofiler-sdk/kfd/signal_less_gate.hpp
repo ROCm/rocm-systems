@@ -61,14 +61,17 @@ note_signal_less_losses();
 void
 signal_less_teardown();
 
-// The two-stage completion fence: on return, every kernel-dispatch
-// completion whose firmware record had reached the ring before this call has been
-// emitted or accounted, and no completion task is still executing. Does not stop
-// the reader; on timeout it abandons signal-less process-wide. Must be
-// called holding NO lock -- in particular not a queue gate_lock, which it
-// acquires, and not the hub lock.
+// Two-stage completion fence: on return every completion whose firmware record reached the
+// ring has been emitted or accounted. TERMINAL -- stops and joins the reader unconditionally,
+// so signal-less stays off afterwards. Must hold NO lock: it acquires queue gate_locks.
 void
 signal_less_fence_completions();
+
+// Waits out the reader and joins outstanding completion tasks, leaving signal-less running.
+// Returns whether it finished within its budget; never abandons, stops or disables. True when
+// signal-less is inactive, since nothing is then outstanding to wait for.
+bool
+drain_signal_less_completions();
 
 // Every stage of eligible-batch -> registered -> EOP proven -> handed off ->
 // finalized bumps a counter, so a break in the chain is visible without a

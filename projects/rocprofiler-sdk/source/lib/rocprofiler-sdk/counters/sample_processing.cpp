@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/counters/sample_consumer.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
+#include "lib/rocprofiler-sdk/record_producer.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -59,6 +60,10 @@ namespace
 void
 process_completed_cb(completed_cb_params_t&& params)
 {
+    // Counter records are emplaced here and the tool's record_callback runs here, so a drain
+    // entered from this thread would be waiting on this thread.
+    auto _producer = scoped_record_producer{};
+
     auto&       info          = params.info;
     auto&       session       = *params.session;
     const auto& packet        = *params.packet_data;
@@ -247,6 +252,15 @@ callback_thread_stop()
     // consumer thread for the rest of the process.
     if(callback_thread_refcount > 0 && --callback_thread_refcount == 0)
         callback_thread_get().exit();
+}
+
+void
+callback_thread_drain()
+{
+    // Deliberately not holding callback_thread_mut: the wait is open-ended and the consumer
+    // synchronizes the drain internally, so taking it here would stall any concurrent
+    // context stop for the duration of the wait.
+    callback_thread_get().drain();
 }
 
 /**
