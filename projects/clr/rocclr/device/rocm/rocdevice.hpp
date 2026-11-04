@@ -66,6 +66,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   hsa_signal_t signal_;   //!< HSA signal to track profiling information
   Timestamp* ts_;         //!< Timestamp object associated with the signal
   HwQueueEngine engine_;  //!< Engine used with this signal
+  const bool hints_;      //!< The CP firmware of the device decodes handle hints
   //! AccumulateCommand dispatch record this signal supplies timing for.
   uint32_t dispatch_slot_ = kNoDispatchSlot;
   std::recursive_mutex lock_;  //!< Signal lock for update
@@ -80,6 +81,8 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   bool use_retired_ = true;      //!< The last use is known to be complete
   bool armed_ = false;           //!< The value holds kInitSignalValueOne, visible to the GPU
   bool in_device_memory_ = false;  //!< Host stores to the value need FlushSignalStores
+  bool binary_use_ = false;  //!< The current use starts at 1 and only its packet decrements it
+  bool timed_use_ = true;    //!< The current use captures timestamps
   //! Bit 0: a host check on any thread loaded the current use's value as 0, unlike use_retired_,
   //! which only the owning tracker updates. The other bits count uses, so a check that loaded the
   //! previous use can't mark this one. Holders keep the signal from being reused, so the value
@@ -115,7 +118,8 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   };
   CachedTiming cached_timing_;
 
-  ProfilingSignal() : ts_(nullptr), engine_(HwQueueEngine::Compute) {
+  explicit ProfilingSignal(bool hints)
+      : ts_(nullptr), engine_(HwQueueEngine::Compute), hints_(hints) {
     signal_.handle = 0;
     flags_.data_ = 0;
     flags_.timing_processed_ = true;
@@ -150,6 +154,28 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
     std::scoped_lock lock(lock_);
     start = cached_timing_.start_;
     end = cached_timing_.end_;
+  }
+
+  //! The handle for the completion_signal of the AQL packet ending the current use. Without
+  //! timestamps the CP may skip capturing them; with them it captures them even when the queue
+  //! doesn't profile. Only AQL packets accept the hinted handle.
+  hsa_signal_t PacketHandle(bool timestamps) {
+    // A skipped capture leaves the timestamps of an earlier use in the signal
+    timed_use_ = timestamps;
+    if (!hints_) {
+      return signal_;
+    }
+    uint64_t hints = AMD_SIGNAL_HINT_INTR_NONE;
+    if (flags_.interrupt_) {
+      // A use that starts above 1, such as a blocking callback at 2, has a waiter that wakes
+      // before the value reaches 0
+      hints = binary_use_ ? AMD_SIGNAL_HINT_INTR_ON_ZERO : AMD_SIGNAL_HINT_INTR_DEFAULT;
+    }
+    if (binary_use_) {
+      hints |= AMD_SIGNAL_HINT_VALUE_BINARY;
+    }
+    hints |= timestamps ? AMD_SIGNAL_HINT_TS_ON : AMD_SIGNAL_HINT_TS_OFF;
+    return hsa_amd_signal_set_hints(signal_, hints);
   }
 };
 
@@ -205,7 +231,8 @@ class NullDevice : public amd::Device {
   // List of dummy functions which are disabled for NullDevice
 
   //! Create a new virtual device environment.
-  device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr) override {
+  device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr,
+                                             bool cooperative = false) override {
     ShouldNotReachHere();
     return nullptr;
   }
@@ -302,6 +329,12 @@ class NullDevice : public amd::Device {
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override {
     ShouldNotReachHere();
     return true;
+  }
+
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                       const void* src) const override {
+    ShouldNotReachHere();
+    return false;
   }
 
   //! Determine if we can use device memory for SVM
@@ -444,7 +477,8 @@ class Device : public NullDevice {
   ///////////////////////////////////////////////////////////////////////////////
 
   //! Instantiate a new virtual device
-  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr) override;
+  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr,
+                                                     bool cooperative = false) override;
 
   //! Construct an device program object from the ELF assuming it is valid
   virtual device::Program* createProgram(amd::Program& owner,
@@ -594,6 +628,8 @@ class Device : public NullDevice {
   //! reports that stores to device memory come over PCIe, re-store the last one and read it back.
   //! last_stored must be in device memory, or the readback does not drain HDP.
   void FlushSignalStores(hsa_signal_t last_stored, hsa_signal_value_t value) const;
+  //! AQL completion signal handles carry hints the CP firmware decodes
+  bool SignalHints() const { return signal_hints_; }
   //! AQL queue ring buffers are placed in device memory. A profiler tool scans and rewrites the
   //! packets from the host, so its queues keep system-memory rings.
   bool AqlRingsInDeviceMemory() const {
@@ -608,7 +644,8 @@ class Device : public NullDevice {
   virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
   virtual uint8_t* CreateBarrierPacket(int num_deps) const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                   const std::vector<void*>& hw_events) const override;
+                                   const std::vector<void*>& hw_events,
+                                   bool profiled) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
 
@@ -622,6 +659,9 @@ class Device : public NullDevice {
   //! Pin a host pointer allocated by C/C++ or OS allocator (i.e. ordinary system DRAM) and
   //! return a new device pointer accessible by the GPU agent.
   void* hostLock(void* hostMem, size_t size, MemorySegment memSegment) const;
+
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                       const void* src) const override;
 
   //! Returns transfer engine object
   const device::BlitManager& xferMgr() const { return xferQueue()->blitMgr(); }
@@ -670,6 +710,9 @@ class Device : public NullDevice {
   VirtualGPUs vgpus_;  //!< The list of all running virtual gpus (lock protected)
 
   VirtualGPU* xferQueue() const;
+
+  //! Cooperative-launch queue, created on first cooperative launch
+  VirtualGPU* coopQueue() const;
 
   struct QueueExtras {
     void* metadataRingBuffer = nullptr;
@@ -828,6 +871,7 @@ class Device : public NullDevice {
   mutable std::vector<void*> graph_hw_events_;
   mutable std::mutex graph_hw_events_lock_;
   bool pcie_stores_need_flush_ = true;  //!< Stores to device memory come over PCIe through HDP
+  bool signal_hints_ = false;           //!< AQL completion signal handles carry hints
   hsa_signal_t prefetch_signal_;  //!< Prefetch signal, used to explicitly prefetch SVM on device
   std::atomic<int> cache_state_;  //!< State of cache, kUnknown/kFlushedToDevice/kFlushedToSystem
 
@@ -836,6 +880,8 @@ class Device : public NullDevice {
   static constexpr bool offlineDevice_ = false;
   VirtualGPU* xferQueue_;  //!< Transfer queue, created on demand
   mutable std::once_flag xferQueueOnce_;  //!< Serialises lazy creation of xferQueue_
+  VirtualGPU* coopQueue_;  //!< Cooperative-launch queue, created on demand
+  mutable std::once_flag coopQueueOnce_;  //!< Serialises lazy creation of coopQueue_
 
   std::atomic<size_t> freeMem_;       //!< Total of free memory available
   mutable std::recursive_mutex vgpusAccess_;  //!< Lock to serialise virtual gpu list access

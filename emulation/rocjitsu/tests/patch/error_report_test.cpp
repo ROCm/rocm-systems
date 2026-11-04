@@ -5,6 +5,8 @@
 
 #include <gtest/gtest.h>
 
+#include "util/diagnostic.h"
+
 #include <string>
 
 namespace rocjitsu {
@@ -29,6 +31,36 @@ TEST(ErrorReport, OverwritesPriorContents) {
   report(&err, "first");
   report(&err, "second");
   EXPECT_EQ(err, "second");
+}
+
+TEST(ErrorReport, OptionalStringSinkReceivesBorrowedEmitterDiagnostics) {
+  std::string message = "previous";
+  OptionalStringDiagnosticSink record(&message);
+  const util::DiagnosticEmitter error(record);
+  error.emit() << "first";
+  EXPECT_EQ(message, "first");
+  error.emit() << "second";
+  EXPECT_EQ(message, "second");
+
+  OptionalStringDiagnosticSink discard(nullptr);
+  const util::DiagnosticEmitter ignored(discard);
+  ignored.emit() << "ignored";
+}
+
+TEST(ErrorReport, OptionalStringSinkOwnsPrefixAndReplacesPriorContents) {
+  std::string message = "previous";
+  std::string prefix = "planning: ";
+  OptionalStringDiagnosticSink record(&message, prefix);
+  prefix = "changed: ";
+  const util::DiagnosticEmitter error(record);
+  error.emit() << "first";
+  EXPECT_EQ(message, "planning: first");
+  error.emit() << "second";
+  EXPECT_EQ(message, "planning: second");
+
+  OptionalStringDiagnosticSink discard(nullptr, "ignored: ");
+  const util::DiagnosticEmitter ignored(discard);
+  ignored.emit() << "ignored";
 }
 
 } // namespace
