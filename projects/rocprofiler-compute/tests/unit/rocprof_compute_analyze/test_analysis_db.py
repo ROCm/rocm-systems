@@ -812,7 +812,6 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
             "Min": [" 5 "],
             "Max": [" 20 "],
             "Unit": ["Work items"],
-            "Description": ["Grid size desc"],
         },
         index=pd.Index(["7.1.0"], name="Metric_ID"),
     )
@@ -830,6 +829,7 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
             "data source": [
                 {"metric_table": {"id": 701, "title": "Wavefront Launch Stats"}}
             ],
+            "metrics_description": {"Grid Size": "Grid size desc"},
         }
     }
 
@@ -848,11 +848,12 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
     assert list(info["name"]) == ["Grid Size"]
     assert list(info["table_name"]) == ["Wavefront"]
     assert list(info["sub_table_name"]) == ["Wavefront Launch Stats"]
+    assert list(info["description"]) == ["Grid size desc"]
     assert not bool(info["pct_of_peak"].iloc[0])
 
     exprs = expressions[workload_path]
     assert list(exprs.columns) == ["metric_id", "value_name", "value"]
-    # Metric/Unit/Description are non-expression columns, so only Avg/Min/Max
+    # Metric/Unit are non-expression columns, so only Avg/Min/Max
     # expand into expression rows, stripped and in dataframe-column order.
     assert list(exprs["value_name"]) == ["Avg", "Min", "Max"]
     assert list(exprs["value"]) == ["10", "5", "20"]

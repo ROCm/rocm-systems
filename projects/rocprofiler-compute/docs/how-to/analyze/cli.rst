@@ -444,12 +444,6 @@ More analysis options
 
    $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics sol 12
 
-**Show Description column which is excluded by default in cli output**
-
-.. code-block:: shell
-
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/  --include-cols Description
-
 .. _cli-view-table:
 
 **TTY output view (plain tables)**
