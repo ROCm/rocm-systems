@@ -26,9 +26,12 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   instrumenting binaries are now installed in `share/rocprofiler-systems/skills`. Run the
   bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
   agent's personal skills folder.
+- Perfetto traces now contain a `system_info` packet with the host's system name, kernel
+  release, kernel version, and machine, so trace readers can show them.
 
 ### Resolved issues
 
+- Sampled PAPI hardware-counter tracks use the short description instead of the raw event symbol.
 - Fixed missing OpenMP (OMPT) events on non-main threads when a region was still open at
   finalization. Regions that never received their end callback are now emitted with the
   finalization timestamp and an `[incomplete]` name suffix instead of being dropped.
