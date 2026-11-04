@@ -27,7 +27,9 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
 
+#include <barrier>
 #include <map>
+#include <thread>
 
 namespace {
 
@@ -1034,6 +1036,59 @@ TEST(RaceDetectorPluginTest, CompletedWorkgroupReleasesOnlyItsDetector) {
   f.plugin_group_->onAmdgpuWorkgroupCompleted(/*dispatch_id=*/1, /*wg_id=*/1);
   EXPECT_EQ(race->retainedWorkgroupCount(), 0u);
   EXPECT_EQ(race->getSummary(), summary);
+}
+
+TEST(RaceDetectorPluginTest, ConcurrentDetectorStoreLifecycle) {
+  constexpr uint32_t kWorkers = 4;
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, "cdna4", /*wavefront_size=*/64,
+                                       /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256,
+                                       /*num_cus=*/kWorkers));
+  PluginSinkConfig sink_config;
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  auto *race = plugin.get();
+  ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  std::array<Wavefront *, kWorkers> waves{};
+  for (uint32_t i = 0; i < kWorkers; ++i) {
+    waves[i] = f.cu(i)->dispatch_wf(/*wg_id=*/i % 2, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(waves[i], nullptr);
+  }
+
+  // Bypass the plugin group's lifecycle lock to exercise the store's own lock.
+  // Each worker owns its wave slot, and no instructions run during rebinding.
+  std::barrier phase(kWorkers);
+  std::vector<std::thread> workers;
+  for (uint32_t i = 0; i < kWorkers; ++i) {
+    workers.emplace_back([&, i] {
+      SCOPED_TRACE(i);
+      const uint32_t dispatch_id = 1 + i / 2;
+      const uint32_t wg_id = i % 2;
+      std::array<Wavefront *, 1> workgroup{waves[i]};
+      for (uint32_t repeat = 0; repeat < 32; ++repeat) {
+        SCOPED_TRACE(repeat);
+        race->onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, 256, 104, workgroup);
+        EXPECT_NE(waves[i]->plugin_state(race->slot_index()), nullptr);
+        EXPECT_GE(race->retainedWorkgroupCount(), 1u);
+        EXPECT_LE(race->retainedWorkgroupCount(), kWorkers);
+        phase.arrive_and_wait();
+        EXPECT_EQ(race->retainedWorkgroupCount(), kWorkers);
+        phase.arrive_and_wait();
+
+        race->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
+        EXPECT_LT(race->retainedWorkgroupCount(), kWorkers);
+        phase.arrive_and_wait();
+        EXPECT_EQ(race->retainedWorkgroupCount(), 0u);
+        phase.arrive_and_wait();
+      }
+    });
+  }
+  for (auto &worker : workers)
+    worker.join();
+  EXPECT_EQ(race->retainedWorkgroupCount(), 0u);
 }
 
 TEST(RaceDetectorPluginTest, SchedulerReleasesDetectorsAcrossWaveSlotReuse) {
