@@ -627,6 +627,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#cpu-arithmetic-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPU arithmetic policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#memory-wait-diagnostics" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1826,6 +1837,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#cpu-arithmetic-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPU arithmetic policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#memory-wait-diagnostics" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2091,6 +2113,11 @@ and simulated host execution:</p>
 <td><code>async_helper_threads</code></td>
 <td>int</td>
 <td>Shared MMA helpers per VM. Omitted/-1 selects the table; 0 disables; explicit values are 0–128.</td>
+</tr>
+<tr>
+<td><code>arithmetic</code></td>
+<td>object</td>
+<td>CPU arithmetic policy; see <a href="#cpu-arithmetic-policy">CPU arithmetic policy</a>.</td>
 </tr>
 <tr>
 <td><code>wait_checking</code></td>
@@ -2415,6 +2442,102 @@ For gfx1250 shader engines, KFD CU-mask bit order varies XCD fastest, followed
 by shader engine, array, and WGP. Within an engine, array <code>a</code> and WGP <code>w</code> select
 CU child <code>a * num_cu_per_sh + w</code>, which reports <code>WGP_ID = w</code>. The KFD mask loop
 does not select direct-CU groups; their WGP IDs still follow CU child order.</p>
+<h3 id="cpu-arithmetic-policy">CPU arithmetic policy<a class="headerlink" href="#cpu-arithmetic-policy" title="Permanent link">&para;</a></h3>
+<p>This policy currently applies to RDNA3/RDNA4 dense WMMA and RDNA4 sparse WMMA, fused floating-point arithmetic,
+basic floating-point arithmetic and selection, division and dot products. Other
+instructions retain their existing implementations while integration proceeds by
+instruction family.</p>
+<p>The optional top-level <code>arithmetic</code> object selects one semantics mode for
+RDNA3/RDNA4 instructions executed through rj-arith:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">"arithmetic"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">"semantics"</span><span class="p">:</span><span class="w"> </span><span class="s2">"compatibility"</span>
+<span class="p">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th><code>semantics</code></th>
+<th style="text-align: right;">rj-arith mode</th>
+<th>Loose fallback</th>
+<th>FP status reporting</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>loose</code></td>
+<td style="text-align: right;">0</td>
+<td>Loose arithmetic</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>bit_exact_empirical_allow_loose</code></td>
+<td style="text-align: right;">1</td>
+<td>Allowed</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>bit_exact_empirical_no_fp_status</code></td>
+<td style="text-align: right;">2</td>
+<td>Forbidden</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>bit_exact_empirical</code></td>
+<td style="text-align: right;">3</td>
+<td>Forbidden</td>
+<td>Required</td>
+</tr>
+<tr>
+<td><code>compatibility</code> (temporary default)</td>
+<td style="text-align: right;">7</td>
+<td>Per instruction</td>
+<td>Per instruction</td>
+</tr>
+</tbody>
+</table>
+<p>These names map directly to the corresponding <code>RJ_ARITH_SEMANTICS_*</code> constants.
+Modes 4–6 are reserved and unavailable. Strict requests fail through the
+instruction-execution error mechanism when exact arithmetic or required FP
+status is unavailable for that instruction or guest mode.</p>
+<p>A supplied top-level object overrides every CU's policy; an omitted <code>semantics</code>
+field uses mode 7. Without that object, CU topology <code>config</code> entries may set
+<code>arithmetic_semantics</code> individually. Unknown semantics names and per-CU keys starting with <code>arithmetic_</code> other than
+<code>arithmetic_semantics</code> are rejected, including invalid per-CU policies hidden by a top-level
+override. Unknown fields within <code>arithmetic</code> are rejected; <code>semantics</code> is its
+only supported field. Unrelated objects retain their existing parsing policy.</p>
+<p>The effective per-CU semantics is preserved in checkpoints. Checkpoints without
+an arithmetic policy use mode 7; existing configurations need no migration.
+CPU capabilities are detected during initialization and cached in each CU,
+without synchronized initialization during instruction execution.</p>
+<p>Modes 0–3 are totally ordered: larger values impose stricter requirements.
+Temporary compatibility mode 7 is excluded from that ordering. Handlers forward
+it unchanged to rj-arith, whose entry points choose the mode closest to old rocjitsu
+behavior. Exact arithmetic with/without reporting becomes mode 3/2; loose becomes
+mode 0. Old loose arithmetic with reporting also becomes mode 0, so it remains
+executable but may lose FP status. This mode exists only for the rj-arith transition.
+See <a href="../arith-design/#compatibility-mode">rj-arith's design</a>
+for the instruction-dependent policy and remaining gaps.
+For migrated instructions with architectural FP status, mode 3 requires faithful reporting.
+Modes 0–2 leave FP status untouched; ordinary results such as comparison masks,
+SCC, EXEC and explicit register writes remain required in every mode. Matrix
+instructions and DIV_SCALE have no FP status output. DIV_SCALE still writes its
+ordinary per-lane condition mask in every semantics mode. On observed gfx1201,
+FP8/BF8 DOT4 and FP32-output DOT2 likewise leave FP status unchanged, including
+invalid and inexact cases; mode 3 accepts those instructions.</p>
+<p>Decoding, register
+addressing, memory operations, scheduling, HWREG access and trap delivery remain
+rocjitsu responsibilities.
+VOPD pairs still use legacy execution and do not yet enforce strict rj-arith policies.</p>
+<p>Matrix adapters forward FP16_OVFL where applicable. Floating-point WMMA ignores
+guest rounding and denormal controls; integer WMMA does not accept those controls.
+rj-arith never explicitly changes host FP controls. It assumes the default host FP
+environment: round-to-nearest, FTZ/DAZ disabled, and exceptions masked. In local mode,
+the executable must satisfy this precondition too: linking with <code>-ffast-math</code> can
+enable FTZ/DAZ before emulation starts. Arithmetic may set host sticky exception flags. Compatibility deliberately
+does not retain legacy host-environment isolation; nondefault host controls are
+outside the contract in every semantics mode. <code>RJ_FORCE_SCALAR</code>
+selects rj-arith's baseline CPU path; the test override also applies to existing CUs.
+It does not change semantics.</p>
 <h3 id="memory-wait-diagnostics">Memory wait diagnostics<a class="headerlink" href="#memory-wait-diagnostics" title="Permanent link">&para;</a></h3>
 <p>Ordinary memory wait diagnostics are enabled by default; gfx1250 XCNT replay-source
 checks are off. Compute units warn when an instruction reads or overwrites a pending
