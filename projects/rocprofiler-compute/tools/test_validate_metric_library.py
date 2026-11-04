@@ -21,6 +21,7 @@ from validate_metric_library import main, validate
 
 import config
 from utils.metric_library import MetricLibrary, arch_chain, default_metric_library_dir
+from utils.mi_gpu_spec import mi_gpu_specs
 
 BASE_METRIC = """\
 compute.valu_util:
@@ -237,6 +238,17 @@ def test_metrics_cannot_share_a_value(tree, formula, second_formula):
 def test_values_that_differ_or_are_not_numbers_pass(tree, formula, second_formula):
     write_base_metric_pair(tree, formula, second_formula)
     assert not any("share a value" in error for error in base_errors(tree))
+
+
+@pytest.mark.parametrize("gpu_arch", sorted(mi_gpu_specs.get_gpu_series_dict()))
+def test_xcd_count_is_fixed_where_every_device_has_it(tree, monkeypatch, gpu_arch):
+    monkeypatch.setattr(validate_metric_library, "_member_arch", lambda arch: gpu_arch)
+    xcd_counts = validate_metric_library._spx_xcd_counts(gpu_arch)
+    write_base_metric_pair(
+        tree, f"{max(xcd_counts)} * SUM(SQ_WAVES)", "$num_xcd * SUM(SQ_WAVES)"
+    )
+    shared = any("share a value" in error for error in base_errors(tree))
+    assert shared == (len(xcd_counts) == 1)
 
 
 def test_same_value_ids_must_share_a_value(tree, monkeypatch):

@@ -81,7 +81,7 @@ from utils.metrics.expression import (
 )
 from utils.metrics.metric_evaluator import MetricEvaluator
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.specs import total_sqc, totall2_banks
+from utils.specs import total_sqc
 from utils.utils_analysis import add_unit_counter
 from utils.utils_common import MEMBW_ANALYSIS_PANEL_ID, canonical_config_arch
 from utils.utils_counter_defs import (
@@ -136,7 +136,8 @@ SAME_VALUE_IDS = {}
 # The same-value check evaluates each formula on one dispatch per normalization
 # ($denom), with counters drawn from this seed. Machine values with no static source are
 # drawn too: the ones each device reports (CU, SE and SIMD counts, waves per CU, clocks,
-# memory channels, GL1 caches) and gfx908's wave size (it has no roofline benchmark).
+# memory channels, GL1 caches), the XCD count of an arch whose devices differ in it, and
+# gfx908's wave size (it has no roofline benchmark).
 # Counters within one decade keep built-in variables such as $numActiveCUs positive.
 SAME_VALUE_SEED = 0
 COUNTER_VALUE_RANGE = (1e5, 1e6)
@@ -657,15 +658,16 @@ def _machine_values(
     """Return each machine value names lists, and the CU and SE counts.
 
     A value is its static spec, if any, or a random size; the SQC count is derived from
-    the CU and SE counts, as on a device.
+    the CU and SE counts, and the L2 channels from the XCD count, as on a device.
     """
     values = {
         name: static_specs.get(name, int(random.integers(*MACHINE_VALUE_RANGE)))
-        for name in sorted({*names, "cu_per_gpu", "se_per_gpu"})
+        for name in sorted({*names, "cu_per_gpu", "se_per_gpu", "num_xcd"})
     }
     values["sqc_per_gpu"] = total_sqc(
         gpu_arch, values["cu_per_gpu"], values["se_per_gpu"]
     )
+    values["total_l2_chan"] = int(static_specs["l2_banks"]) * values["num_xcd"]
     return values
 
 
@@ -673,20 +675,30 @@ def _static_machine_specs(gpu_arch: str) -> Dict[str, Any]:
     """Return the machine values every device of gpu_arch shares.
 
     The SoC class sets the LDS banks, pipes and L2 banks per XCD; the roofline benchmark
-    sets the wave size. The XCD count and L2 channels are those of the SPX partition;
-    on gfx942 and gfx950, whose devices differ, get_num_xcds() gives its default, 8.
+    sets the wave size. The XCD count is that of the SPX partition where every device
+    has the same one; where devices differ, it is drawn.
     """
     machine_specs = SimpleNamespace(rocminfo_lines=None)
     soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{gpu_arch}")
     getattr(soc_module, f"{gpu_arch}_soc")(SimpleNamespace(), machine_specs)
-    machine_specs.num_xcd = mi_gpu_specs.get_num_xcds(gpu_arch, None, "SPX")
-    machine_specs.total_l2_chan = int(
-        totall2_banks(gpu_arch, None, machine_specs.l2_banks, "SPX")
-    )
+    xcd_counts = _spx_xcd_counts(gpu_arch)
+    if len(xcd_counts) == 1:
+        (machine_specs.num_xcd,) = xcd_counts
     if gpu_arch in mi_gpu_specs.get_roofline_archs():
         benchmark = bench_class(gpu_arch)(0, {}, gpu_arch)
         machine_specs.wave_size = benchmark.WAVEFRONT_SIZE
     return vars(machine_specs)
+
+
+def _spx_xcd_counts(gpu_arch: str) -> Set[int]:
+    """Return the SPX XCD counts of the devices that use gpu_arch's analysis configs."""
+    config_arch = canonical_config_arch(gpu_arch)
+    return {
+        mi_gpu_specs.get_num_xcds(None, gpu_model, "SPX")
+        for member_arch in mi_gpu_specs.get_gpu_series_dict()
+        if canonical_config_arch(member_arch) == config_arch
+        for gpu_model in mi_gpu_specs._gpu_model_dict.get(member_arch, [])
+    }
 
 
 @functools.lru_cache(maxsize=None)

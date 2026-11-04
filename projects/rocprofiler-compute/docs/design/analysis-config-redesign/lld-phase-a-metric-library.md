@@ -535,8 +535,9 @@ flowchart TD
   `MetricEvaluator` and the built-in variables) on one seeded random dispatch per
   normalization (`$denom`). Machine values every device of the arch shares are real:
   the SoC class's (`$lds_banks_per_cu`), the roofline benchmark's `$wave_size`, and the
-  SPX `$num_xcd` and `$total_l2_chan`; the values each device reports (`$cu_per_gpu`,
-  clocks, ...) are random. `NOISE_CLAMP(x, reference)` counts as `x`,
+  SPX `$num_xcd` and `$total_l2_chan` where every device has the same XCD count; the
+  values each device reports (`$cu_per_gpu`, clocks, ...) and the XCD count of an arch
+  whose devices differ in it are random. `NOISE_CLAMP(x, reference)` counts as `x`,
   and formulas that give no number (per-channel templates, `CONCAT`) are skipped.
   `SAME_VALUE_IDS` lists, per arch, the pairs that are different quantities whose
   formulas coincide there.
