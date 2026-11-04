@@ -1882,19 +1882,19 @@ _SMEM_NARROW_LOAD_MAP = {
 # scalar atomic derives nop, even when the flat tables know its operation.
 _SMEM_ATOMIC_OPS = frozenset(
     {
-        'swap',
-        'cmpswap',
-        'add',
-        'sub',
-        'smin',
-        'umin',
-        'smax',
-        'umax',
-        'and',
-        'or',
-        'xor',
-        'inc',
-        'dec',
+        'SWAP',
+        'CMPSWAP',
+        'ADD',
+        'SUB',
+        'SMIN',
+        'UMIN',
+        'SMAX',
+        'UMAX',
+        'AND',
+        'OR',
+        'XOR',
+        'INC',
+        'DEC',
     }
 )
 
@@ -1934,7 +1934,7 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
         is_x2 = suffix.endswith('_X2')
         if is_x2:
             suffix = suffix[:-3]
-        if suffix.lower() in _SMEM_ATOMIC_OPS:
+        if suffix in _SMEM_ATOMIC_OPS:
             op, elem_size, data_dw_actual = _derive_flat_atomic_info(suffix, is_x2)
             return InstructionSemantics(
                 name,
