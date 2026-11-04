@@ -224,7 +224,7 @@ rewriter can sign again. `hrr-playback --repair --signing-key <seed>` does that
 without `--signing-key`, `--repair` deletes the now-stale pair and says so.
 Signing refuses a manifest over 256 MiB, the size verification accepts, so an
 archive that is signed can always be verified. The
-format is additive: `events.bin` is unchanged, `HRR_VERSION` stays 10, and a
+format is additive: `events.bin` is unchanged, the wire version is unchanged, and a
 reader that does not know the files ignores them.
 
 **Keys.** The private key is a 32-byte seed in a file (64 hex digits, mode 0600;
