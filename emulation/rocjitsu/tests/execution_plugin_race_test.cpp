@@ -27,6 +27,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
 
+#include <map>
+
 namespace {
 
 using namespace rocjitsu;
@@ -1028,8 +1030,105 @@ TEST(RaceDetectorPluginTest, CompletedWorkgroupReleasesOnlyItsDetector) {
                                          /*lane_mask=*/1);
   EXPECT_NE(sink.str().find("RACE "), std::string::npos);
 
+  const std::string summary = race->getSummary();
   f.plugin_group_->onAmdgpuWorkgroupCompleted(/*dispatch_id=*/1, /*wg_id=*/1);
   EXPECT_EQ(race->retainedWorkgroupCount(), 0u);
+  EXPECT_EQ(race->getSummary(), summary);
+}
+
+TEST(RaceDetectorPluginTest, SchedulerReleasesDetectorsAcrossWaveSlotReuse) {
+  class LifetimeObserver : public ExecutionPlugin {
+  public:
+    explicit LifetimeObserver(RaceDetectorPlugin &race)
+        : ExecutionPlugin("detector_lifetime"), race_(race) {}
+
+    void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, uint32_t, uint32_t,
+                                     std::span<Wavefront *> waves) override {
+      ++dispatched;
+      const size_t retained = race_.retainedWorkgroupCount();
+      EXPECT_EQ(retained, dispatched - completed);
+      peak_retained = std::max(peak_retained, retained);
+      for (auto *wave : waves)
+        ++slot_uses[wave];
+    }
+
+    void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override {
+      ++completed;
+      EXPECT_EQ(race_.retainedWorkgroupCount(), dispatched - completed);
+    }
+
+    uint32_t dispatched = 0;
+    uint32_t completed = 0;
+    size_t peak_retained = 0;
+    std::map<Wavefront *, uint32_t> slot_uses;
+
+  private:
+    RaceDetectorPlugin &race_;
+  };
+
+  for (uint32_t dispatch_threads : {1u, 2u}) {
+    SCOPED_TRACE(dispatch_threads);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2, "cdna4", /*wavefront_size=*/64,
+                                         /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256,
+                                         /*num_cus=*/2));
+    f.cp()->set_dispatch_threads(dispatch_threads);
+    PluginSinkConfig sink_config;
+    auto &sink = sink_config.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    auto plugin = std::make_unique<RaceDetectorPlugin>();
+    auto *race = plugin.get();
+    ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+    auto observer = std::make_unique<LifetimeObserver>(*race);
+    auto *lifetime = observer.get();
+    // Observe counts after the race plugin processes each lifecycle callback.
+    ASSERT_TRUE(f.plugin_group_->add(std::move(observer)));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+
+    const auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
+    const auto read = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 264, .vdst = 9});
+    // Reading v8 without a wait must still report a race after slots are reused.
+    const uint32_t code[] = {S_NOP, load[0], load[1], read[0], S_ENDPGM};
+    const uint64_t kernel = f.write_kernel(0x1000, code, std::size(code));
+    test::AqlQueue queue(f.mem, f.cp());
+    EXPECT_EQ(race->retainedWorkgroupCount(), 0u);
+
+    std::string previous_output;
+    std::string previous_summary;
+    std::map<Wavefront *, uint32_t> previous_slot_uses;
+    for (uint32_t dispatch = 1; dispatch <= 2; ++dispatch) {
+      SCOPED_TRACE(dispatch);
+      // Each workgroup fills one CU's two slots, so four groups require refills.
+      queue.dispatch(kernel, /*grid_size_x=*/512, /*workgroup_size_x=*/128);
+      for (uint32_t step = 0;
+           step < 100000 && lifetime->completed < dispatch * 4 && f.engine->step(); ++step) {
+      }
+
+      EXPECT_EQ(lifetime->dispatched, dispatch * 4);
+      ASSERT_EQ(lifetime->completed, dispatch * 4);
+      EXPECT_EQ(lifetime->peak_retained, 2u);
+      EXPECT_EQ(race->retainedWorkgroupCount(), 0u);
+      EXPECT_TRUE(f.cu(0)->is_idle());
+      EXPECT_TRUE(f.cu(1)->is_idle());
+      ASSERT_EQ(lifetime->slot_uses.size(), 4u);
+      for (const auto &[slot, uses] : lifetime->slot_uses)
+        EXPECT_GT(uses, previous_slot_uses[slot]);
+      previous_slot_uses = lifetime->slot_uses;
+
+      const std::string output = sink.str();
+      EXPECT_TRUE(output.starts_with(previous_output));
+      const size_t report = output.find("RACE ", previous_output.size());
+      ASSERT_NE(report, std::string::npos) << output;
+      EXPECT_EQ(output.find("RACE ", report + 5), std::string::npos) << output;
+      previous_output = output;
+
+      const std::string summary = race->getSummary();
+      EXPECT_NE(summary.find(" race(s) detected"), std::string::npos) << summary;
+      EXPECT_NE(summary, previous_summary);
+      previous_summary = summary;
+    }
+  }
 }
 
 TEST(RaceDetectorPluginTest, InvalidVectorLoadDestinationIsRejectedBeforeWawChecks) {
