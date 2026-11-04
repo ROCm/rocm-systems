@@ -534,12 +534,7 @@ def test_embedded_start_read_stop(tools):
     bootstrap = _first_file(os.path.join(PREFIX, "lib", "librdc_bootstrap.so"))
     if bootstrap is None:
         _missing("librdc_bootstrap.so")
-    env = dict(
-        os.environ,
-        LD_PRELOAD=tools[2],
-        RDC_FAKE_GPUS=str(NUM_GPUS),
-        RDC_DISABLE_ROCP="yes",
-    )
+    env = dict(os.environ, LD_PRELOAD=tools[2], RDC_FAKE_GPUS=str(NUM_GPUS), RDC_DISABLE_ROCP="yes")
     try:
         r = subprocess.run(
             [sys.executable, "-c", _EMBEDDED, bootstrap],
