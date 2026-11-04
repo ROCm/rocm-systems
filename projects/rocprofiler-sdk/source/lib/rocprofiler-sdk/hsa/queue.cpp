@@ -174,7 +174,7 @@ dispatch_time_cache::track(hsa_signal_t signal, hsa_signal_t pending, hsa_agent_
 }
 
 void
-dispatch_time_cache::store(hsa_signal_t signal, hsa_signal_t pending, query_type query)
+dispatch_time_cache::store(hsa_signal_t signal, hsa_signal_t pending, query_type _query)
 {
     signal  = plain_signal(signal);
     pending = plain_signal(pending);
@@ -185,7 +185,7 @@ dispatch_time_cache::store(hsa_signal_t signal, hsa_signal_t pending, query_type
             return;
 
         auto& value          = *itr->second.dispatch;
-        value.status         = query(value.agent, pending, &value.time);
+        value.status         = _query(value.agent, pending, &value.time);
         value.pending_signal = {};
     });
 }

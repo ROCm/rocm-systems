@@ -70,7 +70,7 @@ public:
     void                        release(hsa_signal_t signal);
     void                        forget(hsa_signal_t signal);
     void                        track(hsa_signal_t signal, hsa_signal_t pending, hsa_agent_t agent);
-    void                        store(hsa_signal_t signal, hsa_signal_t pending, query_type query);
+    void                        store(hsa_signal_t signal, hsa_signal_t pending, query_type _query);
     std::optional<hsa_status_t> query(hsa_agent_t                        agent,
                                       hsa_signal_t                       signal,
                                       hsa_amd_profiling_dispatch_time_t* time,
