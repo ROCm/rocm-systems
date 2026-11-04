@@ -270,6 +270,16 @@ def test_reconstruct_specs_from_sysinfo_missing_version_raises():
 
 
 @pytest.mark.misc
+def test_reconstruct_specs_from_sysinfo_unsupported_arch_exits(caplog):
+    """A workload from an arch without a spec entry stops with an error naming
+    the arch, not a traceback."""
+    with patch.object(specs, "get_version", return_value={"version": "3.0.0"}):
+        with pytest.raises(SystemExit):
+            generate_machine_specs(None, {"version": "3", "gpu_arch": "gfx1030"})
+    assert "profiled on gfx1030, which is not supported" in caplog.text
+
+
+@pytest.mark.misc
 def test_detect_arch_dash_variant_maps_to_base():
     """A Name line with a dash-suffixed variant (e.g. gfx1250-strict) should
     resolve to the base arch (gfx1250) because the regex stops at `-`."""
