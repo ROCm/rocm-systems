@@ -240,7 +240,7 @@ The risk is covered instead by:
   child file that does not inherit from its parent's file, an expression that does not
   parse and two ids that share a value however written are reported.
 - Inheritance loader: single-level inheritance, multi-level chain (4+ deep, matching
-  the real `gfx908 -> gfx90a -> gfx940 -> gfx942` chain), cycle detection error.
+  the real `gfx908 -> gfx90a -> gfx942 -> gfx950` chain), cycle detection error.
 - Merge operations: key modification (override), key addition (new metric in child),
   removal of a metric or a field (`!remove` deletes from merged result), deep-merge of
   maps, lists replaced, and errors for removing a missing key, for a duplicate key and
@@ -264,10 +264,8 @@ New module `src/utils/metric_library.py`.
    ```python
    METRIC_LIBRARY_PARENT_ARCH = {
        "gfx908": None,         # CDNA base -- no parent
-       "gfx90a": "gfx908",
-       "gfx940": "gfx90a",     # each arch inherits from its immediate predecessor
-       "gfx941": "gfx940",
-       "gfx942": "gfx940",
+       "gfx90a": "gfx908",     # each arch inherits from its immediate predecessor
+       "gfx942": "gfx90a",
        "gfx950": "gfx942",
        "gfx115x": None,        # RDNA base -- no parent
        "gfx1250": None,        # own base -- shares no file with gfx115x
@@ -447,8 +445,6 @@ metric_library/          # sibling of analysis_configs/ (see Stage 3)
     vl1d.yaml            # vector L1 data cache (TCP)
     wave.yaml            # SQ wave state
   gfx90a/                # override files only, for each child arch
-  gfx940/
-  gfx941/
   gfx942/
   gfx950/
   gfx115x/               # RDNA base -- complete standalone definitions
@@ -478,14 +474,11 @@ Which arch is a base and which arch each child inherits from is set in the
    format with string IDs, single formulas, and descriptions. This is the largest
    single-arch conversion but produces the foundation for the inheritance chain.
 2. **gfx90a** -- inherits gfx908. Override files for metrics added or modified in MI200.
-3. **gfx940** -- inherits gfx90a. MI300 generation -- adds MFMA FLOPs variants,
+3. **gfx942** -- inherits gfx90a. MI300 generation -- adds MFMA FLOPs variants,
    modifies formulas for new counter names.
-4. **gfx941** -- inherits gfx940. Differs in 2 files (one unit override and three
-   roofline formulas). The smallest override, ideal for validating the inheritance
-   mechanism.
-5. **gfx942, gfx950** -- inherits gfx940/gfx942 respectively.
-6. **gfx115x** -- RDNA base. Separate standalone definitions, no inheritance from CDNA.
-7. **gfx1250** -- own base. Separate standalone definitions.
+4. **gfx950** -- inherits gfx942.
+5. **gfx115x** -- RDNA base. Separate standalone definitions, no inheritance from CDNA.
+6. **gfx1250** -- own base. Separate standalone definitions.
 
 Each step is validated: run the Stage 3 equivalence check for the migrated architecture
 before proceeding to the next.
@@ -659,8 +652,7 @@ sets:
 - **References only.** A set entry references a metric id and carries no metric fields,
   so a metric is still defined exactly once per architecture. Every referenced id must
   exist on that architecture.
-- **Inheritance.** `sets.yaml` follows the same `inherit` chain as the metric files; for
-  example, gfx941 and gfx942 use gfx940's sets unchanged.
+- **Inheritance.** `sets.yaml` follows the same `inherit` chain as the metric files.
 - **Single-pass check.** Validation uses `get_counters_for_metrics()` to confirm that each
   set's counters fit in one pass.
 - **Transition.** Production `--set` and `--list-sets` keep reading

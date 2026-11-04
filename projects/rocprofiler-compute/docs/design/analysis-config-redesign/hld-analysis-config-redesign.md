@@ -417,7 +417,7 @@ render: roofline_chart
 metrics:
   - fabric.hbm_bw                        # available on all archs in scope
   - l2.bw
-  - compute.mfma_flops_f8    archs: [gfx942, gfx950]  # metric-level: not on gfx908/gfx90a
+  - compute.mfma_flops_f8    archs: [gfx942, gfx950]                  # metric-level: not on gfx908/gfx90a
   - compute.mfma_flops_f6f4  archs: [gfx950]                           # metric-level: gfx950 only
   - ...
 

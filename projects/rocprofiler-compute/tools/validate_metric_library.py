@@ -161,7 +161,7 @@ SECONDS_SCALE_UNITS = {"GB/s": "Bytes/s"}
 # Rows that write a metric's formula differently (positional id -> label, metric id,
 # row equation). A row whose time is in seconds needs no entry: it shows a GB/s formula
 # scaled by 1e9, and its unit must say Bytes/s.
-# The roofline's L2 bandwidth at its bytes per request (64 up to gfx941, then 128).
+# The roofline's L2 bandwidth at its bytes per request (64 up to gfx90a, then 128).
 _ROOFLINE_L2_BW_EQUATION = (
     "{} * SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
     "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) "

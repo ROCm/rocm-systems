@@ -47,8 +47,7 @@ def tree(tmp_path, monkeypatch):
 
 
 def test_arch_chain_of_real_archs():
-    assert arch_chain("gfx950") == ["gfx908", "gfx90a", "gfx940", "gfx942", "gfx950"]
-    assert arch_chain("gfx941") == ["gfx908", "gfx90a", "gfx940", "gfx941"]
+    assert arch_chain("gfx950") == ["gfx908", "gfx90a", "gfx942", "gfx950"]
     assert arch_chain("gfx1151") == ["gfx115x"]
     assert arch_chain("gfx1250") == ["gfx1250"]
 
