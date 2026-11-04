@@ -353,6 +353,8 @@ struct ReportTotals {
     return "kernel-skipped";
   case DiagnosticKind::ResidualRewrite:
     return "residual-rewrite";
+  case DiagnosticKind::InternalError:
+    return "internal-error";
   }
   return "unknown";
 }

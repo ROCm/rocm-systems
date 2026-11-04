@@ -1,8 +1,6 @@
-#!/usr/bin/env python@_VERSION@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-from __future__ import absolute_import
 
 __author__ = "AMD ROCm"
 __copyright__ = "Copyright 2026, Advanced Micro Devices, Inc."
@@ -15,12 +13,12 @@ __status__ = "Development"
 Command line execution for profiler
 """
 
+import argparse
 import os
 import sys
-import argparse
 import traceback
 
-PY3 = sys.version_info[0] == 3
+PY3 = sys.version_info[0] >= 3
 _ROCPROFSYS_PYTHON_SCRIPT_FILE = None
 
 # Maps a parse_args() destination onto the profiler config attribute it sets.
@@ -40,12 +38,12 @@ _CONFIG_OPTION_MAP = {
 
 # Python 3.x compatibility utils: execfile
 try:
-    execfile
+    execfile  # noqa: B018 probing for the Python 2 builtin
 except NameError:
     # Python 3.x doesn't have 'execfile' builtin
     import builtins
 
-    exec_ = getattr(builtins, "exec")
+    exec_ = builtins.exec
 
     def execfile(filename, globals=None, locals=None):
         with open(filename, "rb") as f:
@@ -67,7 +65,7 @@ def find_script(script_name):
         if os.path.isfile(fn):
             return fn
 
-    sys.stderr.write("Could not find script %s\n" % script_name)
+    sys.stderr.write(f"Could not find script {script_name}\n")
     raise SystemExit(1)
 
 
@@ -96,9 +94,7 @@ def parse_args(args=None):
         "rocprofsys",
         add_help=True,
         allow_abbrev=False,
-        epilog="usage: {} -m rocprofsys <ROCPROFSYS_ARGS> -- <SCRIPT> <SCRIPT_ARGS>".format(
-            os.path.basename(sys.executable)
-        ),
+        epilog=f"usage: {os.path.basename(sys.executable)} -m rocprofsys <ROCPROFSYS_ARGS> -- <SCRIPT> <SCRIPT_ARGS>",
     )
     parser.add_argument(
         "-v",
@@ -232,7 +228,7 @@ def get_value(env_var, default_value, dtype, arg=None):
     else:
         val = os.environ.get(env_var)
         if val is None:
-            os.environ[env_var] = "{}".format(default_value)
+            os.environ[env_var] = f"{default_value}"
             return dtype(default_value)
         else:
             return dtype(val)
@@ -250,7 +246,7 @@ def run(prof, cmd):
     import __main__
 
     dict = __main__.__dict__
-    print("code: {} {}".format(type(code).__name__, code))
+    print(f"code: {type(code).__name__} {code}")
     globs = {
         "__file__": progname,
         "__name__": "__main__",
@@ -346,7 +342,7 @@ def main(main_args=sys.argv):
         _profiler_config.include_line = "line" in opts.label
         _profiler_config.include_filename = "file" in opts.label
 
-    print("[rocprofsys]> profiling: {}".format(argv))
+    print(f"[rocprofsys]> profiling: {argv}")
 
     main_args[:] = argv
     if opts.setup is not None:
@@ -360,7 +356,7 @@ def main(main_args=sys.argv):
         ns = locals()
         execfile(setup_file, ns, ns)
 
-    from . import Profiler, FakeProfiler
+    from . import FakeProfiler, Profiler
 
     script_file = find_script(main_args[0])
     __file__ = script_file
@@ -392,7 +388,7 @@ def main(main_args=sys.argv):
             if opts.builtin:
                 execfile(script_file, ns, ns)
             else:
-                prof.runctx("execfile_(%r, globals())" % (script_file,), ns, ns)
+                prof.runctx(f"execfile_({script_file!r}, globals())", ns, ns)
         except (KeyboardInterrupt, SystemExit):
             pass
         finally:
@@ -403,7 +399,7 @@ def main(main_args=sys.argv):
     except Exception as e:
         exc_type, exc_value, exc_traceback = sys.exc_info()
         traceback.print_exception(exc_type, exc_value, exc_traceback, limit=10)
-        print("Exception - {}".format(e))
+        print(f"Exception - {e}")
 
 
 if __name__ == "__main__":

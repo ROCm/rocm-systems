@@ -10,21 +10,21 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstring>
+#include <functional>
 #include <memory>
 #include <set>
 #include <string>
-#include <type_traits>
 #include <vector>
 
-#include "HipVmmLedger.h"
+#include "FailWhen.h"
 #include "ScopedHook.h"
 #include "fakes/bootstrap_stubs.h"
 #include "fakes/env_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 
-#include "mem_manager.h"
+#include "algorithms/dda/fabric/FabricGpuBarrierState.h"
+#include "algorithms/dda/fabric/FabricTestFixture.h"
 
 #include FABRIC_GPU_BARRIER_CC_PATH
 
@@ -35,98 +35,46 @@ using dda::common::FabricGpuBarrierResources;
 using dda::common::kDdaMaxNranks;
 using FlagType = FabricGpuBarrier::FlagType;
 
-constexpr int kNRanks = 4;
-constexpr int kRank = 1;
+using dda_fabric_test::FabricLedgerTest;
+using dda_fabric_test::kBootstrap;
+using dda_fabric_test::kHandleType;
+using dda_fabric_test::kNRanks;
+using dda_fabric_test::kRank;
+using dda_fabric_test::MemManagerSpy;
+using dda_fabric_test::ParamName;
+using dda_fabric_test::PeerRanks;
+
 constexpr int kNBlocks = 3;
-void* const kBootstrap = reinterpret_cast<void*>(0xB007);
+const uint32_t* const kAbortFlag = reinterpret_cast<const uint32_t*>(0xAB047);
 
 size_t FlagBytes(int nRanks, int nBlocks) { return static_cast<size_t>(nRanks) * nBlocks * sizeof(FlagType); }
 
-// Mirrors FabricGpuBarrier's private layout.
-struct BarrierState {
-  int nBlocks;
-  int selfRank;
-  int nRanks;
-  FlagType** peerFlags;
-};
-static_assert(sizeof(BarrierState) == sizeof(FabricGpuBarrier), "FabricGpuBarrier layout changed");
-static_assert(std::is_standard_layout<FabricGpuBarrier>::value, "FabricGpuBarrier layout is no longer fixed");
-static_assert(std::is_trivially_copyable<FabricGpuBarrier>::value, "FabricGpuBarrier is no longer a plain value");
-BarrierState StateOf(const FabricGpuBarrier& barrier) {
-  BarrierState state;
-  std::memcpy(&state, &barrier, sizeof(state));
-  return state;
-}
-
 using InitResult = std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier>;
 
-class FabricGpuBarrierMicrotest : public ::testing::Test {
+class FabricGpuBarrierMicrotest : public FabricLedgerTest {
  protected:
   void SetUp() override {
-    SetMicroEnvAbsent("NCCL_CUMEM_SKIP_FREE");
-    ledger_.Install();
-    ASSERT_FALSE(rcclSkipCuMemFree());  // alloc.h caches this once per process
-    g_cuMemEnable = [] { return 1; };
-    auto ledgerMemset = g_hipMemset;
-    g_hipMemset = [this, ledgerMemset](void* dst, int value, size_t bytes) {
-      events_.push_back("memset");
-      memsets_.push_back({dst, value, bytes});
-      return ledgerMemset(dst, value, bytes);
-    };
-    // Every peer publishes what this rank published.
-    g_bootstrapAllGather = [this](void* state, void* allData, int size) {
-      events_.push_back("allgather");
-      gatherStates_.push_back(state);
-      auto* slots = static_cast<char*>(allData);
-      for (int r = 0; r < nRanks_; ++r) {
-        if (r != selfRank_) std::memcpy(slots + r * size, slots + selfRank_ * size, size);
-      }
-      return ncclSuccess;
-    };
+    FabricLedgerTest::SetUp();
+    if (HasFatalFailure()) return;
+    MirrorAllGather(&nRanks_, &selfRank_);
   }
 
   void TearDown() override {
     result_.first.reset();
-    EXPECT_TRUE(ledger_.Clean()) << ledger_.Summary();
-    ResetBootstrapStubs();
-    ResetHipFakes();
-    ResetNcclFakes();
-    ResetEnvFakes();
+    FabricLedgerTest::TearDown();
   }
 
   InitResult& Init(int nRanks = kNRanks, int selfRank = kRank, int nBlocks = kNBlocks,
                    struct ncclMemManager* manager = nullptr) {
     nRanks_ = nRanks;
     selfRank_ = selfRank;
-    result_ = FabricGpuBarrier::mallocAndInit(nRanks, nBlocks, selfRank, kBootstrap, manager);
+    result_ = FabricGpuBarrier::mallocAndInit(nRanks, nBlocks, selfRank, kBootstrap, manager,
+                                              dda::common::DdaKernelParams{kAbortFlag});
     return result_;
   }
 
-  void ExpectFailsWithoutLeaking(int nRanks = kNRanks, int selfRank = kRank) {
-    Init(nRanks, selfRank);
-    EXPECT_EQ(result_.first, nullptr);
-    EXPECT_TRUE(ledger_.Clean()) << ledger_.Summary();
-  }
-
-  size_t EventIndex(const std::string& event, size_t nth = 0) const {
-    for (size_t i = 0; i < events_.size(); ++i) {
-      if (events_[i] == event && nth-- == 0) return i;
-    }
-    return events_.size();
-  }
-
-  struct Memset {
-    void* dst;
-    int value;
-    size_t bytes;
-  };
-
   int nRanks_ = kNRanks;
   int selfRank_ = kRank;
-  HipVmmLedger ledger_;
-  std::vector<std::string> events_;
-  std::vector<Memset> memsets_;
-  std::vector<void*> gatherStates_;
   InitResult result_{nullptr, FabricGpuBarrier{}};
 };
 
@@ -140,7 +88,6 @@ struct Geometry {
   int selfRank;
   int nBlocks;
 };
-std::string GeometryName(const ::testing::TestParamInfo<Geometry>& info) { return info.param.name; }
 
 class FabricGpuBarrierInvalidGeometryMicrotest : public FabricGpuBarrierMicrotest,
                                                  public ::testing::WithParamInterface<Geometry> {};
@@ -164,7 +111,7 @@ INSTANTIATE_TEST_SUITE_P(FabricGpuBarrierGeometry, FabricGpuBarrierInvalidGeomet
                                            Geometry{"SelfPastLastRank", kNRanks, kNRanks, kNBlocks},
                                            Geometry{"NoBlocks", kNRanks, kRank, 0},
                                            Geometry{"NegativeBlocks", kNRanks, kRank, -1}),
-                         GeometryName);
+                         ParamName<Geometry>);
 
 class FabricGpuBarrierValidGeometryMicrotest : public FabricGpuBarrierMicrotest,
                                                public ::testing::WithParamInterface<Geometry> {};
@@ -180,7 +127,7 @@ INSTANTIATE_TEST_SUITE_P(FabricGpuBarrierGeometry, FabricGpuBarrierValidGeometry
                                            Geometry{"RanksAtCap", kDdaMaxNranks, kDdaMaxNranks - 1, 1},
                                            Geometry{"SelfFirst", kNRanks, 0, kNBlocks},
                                            Geometry{"SelfLast", kNRanks, kNRanks - 1, kNBlocks}),
-                         GeometryName);
+                         ParamName<Geometry>);
 
 // ---------------------------------------------------------------------------
 // Success
@@ -203,12 +150,12 @@ TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_AllSucceed_ZeroesFlagBufferBefor
   ASSERT_NE(r.first, nullptr);
   void* const flags = r.first->selfFlagBuf->get();
 
-  auto zeroing = std::find_if(memsets_.begin(), memsets_.end(), [flags](const Memset& m) {
+  const auto& memsets = ledger_.memsets;
+  auto zeroing = std::find_if(memsets.begin(), memsets.end(), [flags](const HipVmmLedger::Memset& m) {
     return m.dst == flags && m.value == 0 && m.bytes == FlagBytes(kNRanks, kNBlocks);
   });
-  ASSERT_NE(zeroing, memsets_.end()) << "no zeroing of the whole flag buffer";
-  const size_t nth = static_cast<size_t>(zeroing - memsets_.begin());
-  EXPECT_LT(EventIndex("memset", nth), EventIndex("allgather"));
+  ASSERT_NE(zeroing, memsets.end()) << "no zeroing of the whole flag buffer";
+  EXPECT_LT(static_cast<size_t>(zeroing - memsets.begin()), memsetsBeforeFirstGather_);
 }
 
 TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_AllSucceed_SharesTheFlagBuffersHandle) {
@@ -242,8 +189,7 @@ TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_AllSucceed_PeersMapTheWholeFlagB
   const size_t ownSize = ledger_.mappedSize.at(r.first->selfFlagBuf->get());
   ASSERT_GE(ownSize, FlagBytes(kNRanks, kManyBlocks));
 
-  for (int i = 0; i < kNRanks; ++i) {
-    if (i == kRank) continue;
+  for (int i : PeerRanks()) {
     ASSERT_EQ(ledger_.mappedSize.count(table[i]), 1u) << "peer " << i;
     EXPECT_EQ(ledger_.mappedSize.at(table[i]), ownSize) << "peer " << i;
   }
@@ -267,8 +213,7 @@ TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_AllSucceed_PeerTableHoldsOwnFlag
     if (entry.first != flags) peerMappings.insert(entry.first);
   }
   std::set<void*> peerSlots;
-  for (int i = 0; i < kNRanks; ++i) {
-    if (i == kRank) continue;
+  for (int i : PeerRanks()) {
     peerSlots.insert(table[i]);
     void* mapped = nullptr;
     ASSERT_EQ(r.first->fabricMemHandler->getPeerDeviceMemPtr(i, &mapped), ncclSuccess);
@@ -283,133 +228,134 @@ TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_AllSucceed_BarrierCarriesGeometr
   InitResult& r = Init();
   ASSERT_NE(r.first, nullptr);
 
-  const BarrierState state = StateOf(r.second);
+  const FabricGpuBarrierState state = StateOf(r.second);
   EXPECT_EQ(state.nBlocks, kNBlocks);
   EXPECT_EQ(state.selfRank, kRank);
   EXPECT_EQ(state.nRanks, kNRanks);
   EXPECT_EQ(state.peerFlags, r.first->peerFlagsDev->get());
+  EXPECT_EQ(state.params.flag, kAbortFlag);
 }
 
-TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_WithManager_TracksFlagBufferAndUntracksPeerMappingsInIt) {
+TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_WithManager_TracksAndUntracksEveryAllocationInIt) {
   auto manager = std::make_unique<ncclMemManager>();
-  std::vector<std::pair<ncclMemManager*, void*>> tracked;
-  std::vector<std::pair<ncclMemManager*, void*>> untracked;
-  std::vector<hipMemAllocationHandleType> types;
-  ScopedHook track(g_memTrack, [&tracked, &types](ncclMemManager* m, void* ptr, size_t,
-                                                  hipMemGenericAllocationHandle_t, hipMemAllocationHandleType type,
-                                                  ncclMemType_t) {
-    tracked.push_back({m, ptr});
-    types.push_back(type);
-    return ncclSuccess;
-  });
-  auto untrackLive = g_memUntrackDynamic;
-  ScopedHook untrack(g_memUntrackDynamic,
-                     [&untracked, untrackLive](ncclMemManager* m, void* ptr, ncclMemUntrackInfo* info) {
-                       untracked.push_back({m, ptr});
-                       return untrackLive(m, ptr, info);
-                     });
+  MemManagerSpy spy;
   InitResult& r = Init(kNRanks, kRank, kNBlocks, manager.get());
   ASSERT_NE(r.first, nullptr);
   void* const flags = r.first->selfFlagBuf->get();
-  std::set<void*> peers;
-  for (int i = 0; i < kNRanks; ++i) {
+  std::vector<void*> peers;
+  for (int i : PeerRanks()) {
     void* mapped = nullptr;
-    if (i != kRank && r.first->fabricMemHandler->getPeerDeviceMemPtr(i, &mapped) == ncclSuccess) peers.insert(mapped);
+    ASSERT_EQ(r.first->fabricMemHandler->getPeerDeviceMemPtr(i, &mapped), ncclSuccess);
+    peers.push_back(mapped);
   }
 
   result_.first.reset();
 
-  auto it = std::find(tracked.begin(), tracked.end(), std::make_pair(manager.get(), flags));
-  ASSERT_NE(it, tracked.end()) << "flag buffer not tracked in the given manager";
-  EXPECT_EQ(types[it - tracked.begin()], ncclCuMemHandleType);
-  for (void* peer : peers) {
-    EXPECT_NE(std::find(untracked.begin(), untracked.end(), std::make_pair(manager.get(), peer)), untracked.end())
-        << "peer mapping " << peer << " not untracked from the given manager";
-  }
-}
-
-TEST_F(FabricGpuBarrierMicrotest, HipVmmLedger_FreeOfUntrackedBuffer_IsRefused) {
-  int notAllocated = 0;
-
-  EXPECT_NE(hipFree(&notAllocated), hipSuccess);
-
-  EXPECT_EQ(ledger_.rejected.size(), 1u);
-  ledger_.rejected.clear();
+  EXPECT_TRUE(spy.Tracked(manager.get(), flags, kHandleType)) << "flag buffer not tracked in the given manager";
+  EXPECT_TRUE(spy.Untracked(manager.get(), flags)) << "flag buffer not untracked from the given manager";
+  for (void* peer : peers) EXPECT_TRUE(spy.Untracked(manager.get(), peer)) << "peer mapping " << peer;
 }
 
 // ---------------------------------------------------------------------------
 // Failure: each returns no resources and leaves nothing allocated
 // ---------------------------------------------------------------------------
 
-TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_VmmUnavailable_ReturnsNullWithoutLeaking) {
-  ScopedHook vmm(g_cuMemEnable, [] { return 0; });
+struct FailCase {
+  const char* name;
+  // Installs the failure; may return an extra check to run afterwards.
+  std::function<std::function<void(const HipVmmLedger&)>()> install;
+  int nRanks = kNRanks;
+  int selfRank = kRank;
+};
 
-  ExpectFailsWithoutLeaking();
+class FabricGpuBarrierFailMicrotest : public FabricGpuBarrierMicrotest,
+                                      public ::testing::WithParamInterface<FailCase> {};
+
+TEST_P(FabricGpuBarrierFailMicrotest, MallocAndInit_StepFails_ReturnsNullWithoutLeaking) {
+  auto check = GetParam().install();
+
+  EXPECT_EQ(Init(GetParam().nRanks, GetParam().selfRank).first, nullptr);
+
+  EXPECT_TRUE(LedgerClean());
+  if (check) check(ledger_);
 }
 
-TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_FlagBufferAllocationFails_ReturnsNullWithoutLeaking) {
-  ScopedHook vmm(g_cuMemEnable, [] { return 0; });
-  ScopedHook extMalloc(g_hipExtMallocWithFlags, [](void** ptr, size_t, unsigned) {
-    *ptr = nullptr;
-    return hipErrorOutOfMemory;
-  });
+constexpr size_t kTableBytes = kNRanks * sizeof(FlagType*);
 
-  ExpectFailsWithoutLeaking();
+INSTANTIATE_TEST_SUITE_P(
+    FabricGpuBarrierStep, FabricGpuBarrierFailMicrotest,
+    ::testing::Values(
+        FailCase{"VmmUnavailable",
+                 [] {
+                   g_cuMemEnable = [] { return 0; };
+                   return std::function<void(const HipVmmLedger&)>();
+                 }},
+        FailCase{"FlagBufferAllocation",
+                 [] {
+                   g_cuMemEnable = [] { return 0; };
+                   FailWhen(
+                       g_hipExtMallocWithFlags, [](void**, size_t, unsigned) { return true; }, hipErrorOutOfMemory);
+                   // The null-buffer guard returns before the zeroing.
+                   return std::function<void(const HipVmmLedger&)>(
+                       [](const HipVmmLedger& l) { EXPECT_TRUE(l.memsets.empty()); });
+                 }},
+        FailCase{"FlagBufferZeroing",
+                 [] {
+                   FailWhen(g_hipMemset, [](void*, int, size_t) { return true; }, hipErrorInvalidValue);
+                   return std::function<void(const HipVmmLedger&)>();
+                 }},
+        FailCase{"Exchange",
+                 [] {
+                   FailWhen(g_bootstrapAllGather, [](void*, void*, int) { return true; }, ncclRemoteError);
+                   return std::function<void(const HipVmmLedger&)>();
+                 }},
+        // With no peers to look up afterwards, only the exchange's own result can stop it.
+        FailCase{"SingleRankExchange",
+                 [] {
+                   FailWhen(g_bootstrapAllGather, [](void*, void*, int) { return true; }, ncclRemoteError);
+                   return std::function<void(const HipVmmLedger&)>();
+                 },
+                 1, 0},
+        FailCase{"ExchangeAfterMappingPeers",
+                 [] {
+                   int imports = 0;
+                   FailWhen(
+                       g_hipMemImportFromShareableHandle,
+                       [imports](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) mutable {
+                         return ++imports == kNRanks - 1;
+                       },
+                       hipErrorInvalidValue);
+                   return std::function<void(const HipVmmLedger&)>();
+                 }},
+        FailCase{"PeerTableAllocation",
+                 [] {
+                   auto tableRequests = std::make_shared<int>(0);
+                   FailWhen(
+                       g_hipExtMallocWithFlags,
+                       [tableRequests](void**, size_t size, unsigned) {
+                         return size == kTableBytes && ++*tableRequests > 0;
+                       },
+                       hipErrorOutOfMemory);
+                   return std::function<void(const HipVmmLedger&)>(
+                       [tableRequests](const HipVmmLedger&) { EXPECT_EQ(*tableRequests, 1); });
+                 }},
+        FailCase{"PeerTableCopy",
+                 [] {
+                   FailWhen(g_hipMemcpy, [](void*, const void*, size_t, hipMemcpyKind) { return true; },
+                            hipErrorInvalidValue);
+                   return std::function<void(const HipVmmLedger&)>();
+                 }}),
+    ParamName<FailCase>);
 
-  EXPECT_TRUE(memsets_.empty()) << "zeroed a buffer that was never allocated";
-}
+TEST(HipVmmLedgerMicrotest, FreeOfUntrackedBuffer_IsRefused) {
+  HipVmmLedger ledger;
+  ledger.Install();
+  int notAllocated = 0;
 
-TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_FlagBufferZeroingFails_ReturnsNullWithoutLeaking) {
-  ScopedHook zeroing(g_hipMemset, [](void*, int, size_t) { return hipErrorInvalidValue; });
+  EXPECT_NE(hipFree(&notAllocated), hipSuccess);
 
-  ExpectFailsWithoutLeaking();
-}
-
-TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_ExchangeFails_ReturnsNullWithoutLeaking) {
-  ScopedHook gather(g_bootstrapAllGather, [](void*, void*, int) { return ncclRemoteError; });
-
-  ExpectFailsWithoutLeaking();
-}
-
-TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_SingleRankExchangeFails_ReturnsNullWithoutLeaking) {
-  ScopedHook gather(g_bootstrapAllGather, [](void*, void*, int) { return ncclRemoteError; });
-
-  ExpectFailsWithoutLeaking(/*nRanks=*/1, /*selfRank=*/0);
-}
-
-TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_ExchangeFailsAfterMappingPeers_ReturnsNullWithoutLeaking) {
-  int imports = 0;
-  ScopedHook import(g_hipMemImportFromShareableHandle,
-                    [&imports](hipMemGenericAllocationHandle_t* handle, void*, hipMemAllocationHandleType) {
-                      if (++imports == kNRanks - 1) return hipErrorInvalidValue;
-                      *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
-                      return hipSuccess;
-                    });
-
-  ExpectFailsWithoutLeaking();
-}
-
-TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_PeerTableAllocationFails_ReturnsNullWithoutLeaking) {
-  constexpr size_t kTableBytes = kNRanks * sizeof(FlagType*);
-  auto ledgerMalloc = g_hipExtMallocWithFlags;
-  int tableRequests = 0;
-  ScopedHook extMalloc(g_hipExtMallocWithFlags,
-                       [ledgerMalloc, &tableRequests](void** ptr, size_t size, unsigned flags) {
-                         if (size != kTableBytes) return ledgerMalloc(ptr, size, flags);
-                         ++tableRequests;
-                         *ptr = nullptr;
-                         return hipErrorOutOfMemory;
-                       });
-
-  ExpectFailsWithoutLeaking();
-
-  EXPECT_EQ(tableRequests, 1);
-}
-
-TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_PeerTableCopyFails_ReturnsNullWithoutLeaking) {
-  ScopedHook copy(g_hipMemcpy, [](void*, const void*, size_t, hipMemcpyKind) { return hipErrorInvalidValue; });
-
-  ExpectFailsWithoutLeaking();
+  EXPECT_EQ(ledger.rejected.size(), 1u);
+  ResetHipFakes();
 }
 
 }  // namespace

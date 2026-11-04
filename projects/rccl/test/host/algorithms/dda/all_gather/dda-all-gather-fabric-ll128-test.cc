@@ -208,7 +208,7 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_PassesBuffersBytesEpochSlicesAnd
   EXPECT_EQ(comm().addonStopEvent, nullptr);
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
-  ASSERT_EQ(launch.args.size(), 10u);
+  ASSERT_EQ(launch.args.size(), 11u);
   EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
   EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const int8_t*>(2), kSendbuff);
@@ -217,7 +217,8 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_PassesBuffersBytesEpochSlicesAnd
   EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
   EXPECT_EQ(launch.Arg<size_t>(8), 2u);
-  EXPECT_EQ(launch.Arg<size_t>(9), 2064u);
+  EXPECT_EQ(launch.Arg<size_t>(9), 2048u);
+  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
 }
 
 // A warp per slice: 512 threads give 16 warps, so a column grows past one block at 17 slices.
