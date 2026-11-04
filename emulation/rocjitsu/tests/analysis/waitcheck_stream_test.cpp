@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/analysis/waitcheck/stream.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
@@ -42,13 +46,47 @@ void load(Program &program, uint8_t dst = 0) {
   append(program, inst); // global_load_b32 vdst, v8, s[0:1].
 }
 
-void ds_load(Program &program, uint8_t dst = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-    append(program, rdna3::build_ds(rdna3::kDsLoadB32Ds, {.addr = 8, .vdst = dst}));
-  else if (arch == ROCJITSU_CODE_ARCH_RDNA3_5)
-    append(program, rdna3_5::build_ds(rdna3_5::kDsLoadB32Ds, {.addr = 8, .vdst = dst}));
+// ds_load_b32 (ds_read_b32 on CDNA3/4) v<dst>, v<addr>.
+void ds_load(Program &program, rj_code_arch_t arch, uint8_t dst = 0, bool gds = false,
+             uint8_t addr = 8) {
+  const uint8_t gds_bit = gds ? 1 : 0;
+  std::array<uint32_t, 2> words{};
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    words = cdna3::build_ds(cdna3::kDsReadB32Ds, {.gds = gds_bit, .addr = addr, .vdst = dst});
+    break;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    words = cdna4::build_ds(cdna4::kDsReadB32Ds, {.gds = gds_bit, .addr = addr, .vdst = dst});
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    words = rdna3::build_ds(rdna3::kDsLoadB32Ds, {.gds = gds_bit, .addr = addr, .vdst = dst});
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    words = rdna3_5::build_ds(rdna3_5::kDsLoadB32Ds, {.gds = gds_bit, .addr = addr, .vdst = dst});
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    EXPECT_FALSE(gds) << "GFX12 has no GDS";
+    words = rdna4::build_vds(rdna4::kDsLoadB32Vds, {.addr = addr, .vdst = dst});
+    break;
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    EXPECT_FALSE(gds) << "GFX12 has no GDS";
+    words = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = addr, .vdst = dst});
+    break;
+  default:
+    ADD_FAILURE() << "no DS encoding for arch " << arch;
+    return;
+  }
+  program.insert(program.end(), words.begin(), words.end());
+}
+
+// flat_load_dword (flat_load_b32 on RDNA4) v0, v[8:9].
+void flat_load(Program &program, rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+    append(program, cdna3::build_flat(cdna3::kFlatLoadDwordFlat, {.addr = 8, .saddr = 127}));
+  else if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+    append(program, rdna4::build_vflat(rdna4::kFlatLoadB32Vflat, {.saddr = 124, .vaddr = 8}));
   else
-    append(program, rdna4::build_vds(rdna4::kDsLoadB32Vds, {.addr = 8, .vdst = dst}));
+    ADD_FAILURE() << "no FLAT encoding for arch " << arch;
 }
 
 void direct_load(Program &program, rj_code_arch_t arch, bool parameter) {
@@ -268,7 +306,7 @@ TEST(WaitcheckStream, DirectAndIndexedLdsKeepIndependentWritebackOrder) {
         if (direct_first != static_cast<bool>(i))
           direct_load(program, arch, /*parameter=*/false);
         else
-          ds_load(program, 2, arch);
+          ds_load(program, arch, 2);
       }
       const auto report = analyze(program, arch);
       ASSERT_FALSE(report.incomplete);
@@ -279,15 +317,67 @@ TEST(WaitcheckStream, DirectAndIndexedLdsKeepIndependentWritebackOrder) {
     }
 }
 
-TEST(WaitcheckStream, DsOverwritesRequireAWait) {
-  Program program;
-  ds_load(program);
-  ds_load(program);
-  auto report = analyze(program);
-  ASSERT_FALSE(report.incomplete);
-  ASSERT_EQ(report.diagnostics.size(), 1u);
-  EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::Ds);
-  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Write);
+TEST(WaitcheckStream, LdsOverwritesKeepIssueOrder) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5,
+        ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    Program program;
+    ds_load(program, arch);
+    ds_load(program, arch);
+    auto report = analyze(program, arch);
+    ASSERT_FALSE(report.incomplete);
+    EXPECT_TRUE(report.diagnostics.empty());
+  }
+}
+
+TEST(WaitcheckStream, GdsAndLdsOverwritesRequireAWait) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
+    for (bool gds_first : {false, true}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(gds_first);
+      Program program;
+      ds_load(program, arch, 0, /*gds=*/gds_first);
+      ds_load(program, arch, 0, /*gds=*/!gds_first);
+      auto report = analyze(program, arch);
+      ASSERT_FALSE(report.incomplete);
+      ASSERT_EQ(report.diagnostics.size(), 1u);
+      EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::Ds);
+      EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Write);
+    }
+}
+
+TEST(WaitcheckStream, FlatAndLdsOverwritesRequireAWait) {
+  // The analyzer cannot tell which FLAT lanes LDS services, so these overwrites
+  // need a wait even where the runtime checker exempts LDS-serviced lanes.
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_RDNA4})
+    for (bool flat_first : {false, true}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(flat_first);
+      Program program;
+      for (bool flat : {flat_first, !flat_first})
+        flat ? flat_load(program, arch) : ds_load(program, arch);
+      auto report = analyze(program, arch);
+      ASSERT_FALSE(report.incomplete);
+      ASSERT_FALSE(report.diagnostics.empty());
+      for (const auto &diagnostic : report.diagnostics)
+        EXPECT_EQ(diagnostic.access, WaitcheckAccess::Write);
+    }
+}
+
+TEST(WaitcheckStream, LdsOrderDoesNotEndExpertModeDsSourceLifetimes) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    Program program;
+    ds_load(program, arch, /*dst=*/0);
+    ds_load(program, arch, /*dst=*/8, /*gds=*/false, /*addr=*/9); // Overwrites the first address.
+    EXPECT_TRUE(analyze(program, arch).diagnostics.empty());
+    auto report = analyze(program, arch, /*expert_scheduling=*/true);
+    ASSERT_FALSE(report.incomplete);
+    ASSERT_EQ(report.diagnostics.size(), 1u);
+    EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::VmVsrc);
+    EXPECT_EQ(report.diagnostics[0].reg.index, 8u);
+  }
 }
 
 TEST(WaitcheckStream, UnorderedVmemWritebackRequiresAWait) {
@@ -583,6 +673,41 @@ TEST(WaitcheckStream, LegacyTargetsDecodeTheirOwnPackedWaitLayouts) {
     EXPECT_FALSE(report.incomplete);
     EXPECT_TRUE(report.diagnostics.empty());
   }
+}
+
+TEST(WaitcheckStream, CdnaGdsSourceReuseNeedsExpcntOnlyBeforeCdna4) {
+  // GDS=1 is reserved on CDNA4 (ISA Table 57); that half of the test checks
+  // defensive classification rather than an executable CDNA4 GDS contract.
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    // ds_read_b32 v0, v1 gds; s_waitcnt lgkmcnt(0); read v0; overwrite v1.
+    Program program{0xd86d0000u, 1u, 0xbf8cc07fu, v_mov(3, 0), v_mov(1, 2)};
+    const auto report = analyze(program, arch);
+    ASSERT_FALSE(report.incomplete);
+    EXPECT_EQ(report.instructions_analyzed, 4u);
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      EXPECT_TRUE(report.diagnostics.empty());
+    } else {
+      ASSERT_EQ(report.diagnostics.size(), 1u);
+      EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::Exp);
+      EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Write);
+      EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 1, 1}));
+      EXPECT_EQ(report.diagnostics[0].required_wait, "s_waitcnt expcnt(0)");
+      program.insert(program.end() - 1, 0xbf8ccf0fu); // s_waitcnt expcnt(0).
+      const auto waited = analyze(program, arch);
+      ASSERT_FALSE(waited.incomplete);
+      EXPECT_TRUE(waited.diagnostics.empty());
+    }
+  }
+
+  // Removing EXP must preserve the CDNA4 returned-value dependency on LGKM.
+  const auto missing_wait = analyze({0xd86d0000u, 1u, v_mov(3, 0)}, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_FALSE(missing_wait.incomplete);
+  ASSERT_EQ(missing_wait.diagnostics.size(), 1u);
+  EXPECT_EQ(missing_wait.diagnostics[0].counter, amdgpu::WaitCounterKind::Ds);
+  EXPECT_EQ(missing_wait.diagnostics[0].access, WaitcheckAccess::Read);
+  EXPECT_EQ(missing_wait.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
+  EXPECT_EQ(missing_wait.diagnostics[0].required_wait, "s_waitcnt lgkmcnt(0)");
 }
 
 TEST(WaitcheckStream, CdnaPreservesCommittedAndLiveInGenerations) {

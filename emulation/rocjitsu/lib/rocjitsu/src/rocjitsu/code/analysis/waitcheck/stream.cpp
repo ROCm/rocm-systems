@@ -71,6 +71,8 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
     if (!name.starts_with("global_") && !name.starts_with("scratch_"))
       return false;
     for (int i = 1; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i))
+        continue;
       const auto *op = inst.src_operand(i);
       if (op) {
         const auto ref = op->to_register_ref();
@@ -91,6 +93,8 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
   }
   inst.implicit_defs(effects.defs);
   for (int i = 0; i < inst.num_src_operands(); ++i) {
+    if (!inst.tracks_explicit_source(i))
+      continue;
     const auto *op = inst.src_operand(i);
     if (!op)
       continue;
@@ -116,6 +120,8 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst,
   // dropping either a pending result or one of its consumers.
   for (int i = 0; i < inst.num_src_operands() + inst.num_dst_operands(); ++i) {
     const bool destination = i >= inst.num_src_operands();
+    if (!destination && !inst.tracks_explicit_source(i))
+      continue;
     const auto *op =
         destination ? inst.dst_operand(i - inst.num_src_operands()) : inst.src_operand(i);
     if (!op)
@@ -177,9 +183,11 @@ RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffe
     const auto name = inst.mnemonic();
     const int index = name.starts_with("buffer_") || name.starts_with("tbuffer_") ? 0 : 1;
     RegisterSet regs;
-    if (const auto *op = inst.src_operand(index)) {
-      if (auto ref = op->to_register_ref())
-        regs.expand(*ref);
+    if (inst.tracks_explicit_source(index)) {
+      if (const auto *op = inst.src_operand(index)) {
+        if (auto ref = op->to_register_ref())
+          regs.expand(*ref);
+      }
     }
     return regs;
   }
@@ -195,6 +203,14 @@ bool ordered_waw(const PendingEvent &event, std::span<const ClassifiedEvent> cur
       return other.counter == WaitCounterKind::Exp && other.kind == WaitEventKind::LdsDirect;
     });
   }
+  // LDS instructions stay in order with other LDS instructions from the same
+  // wave. GDS and SMEM are separate event kinds that are not ordered with LDS.
+  // Only DS-counter results qualify: expert scheduling also tracks DS sources
+  // on VmVsrc, and result ordering does not end those source lifetimes.
+  if (event.counter == WaitCounterKind::Ds && event.kind == WaitEventKind::Ds)
+    return std::ranges::any_of(current, [](const auto &other) {
+      return other.counter == WaitCounterKind::Ds && other.kind == WaitEventKind::Ds;
+    });
   if (!amdgpu::has_ordered_vmem_writeback(arch))
     return false;
   if (event.kind == WaitEventKind::FlatLoad) {
