@@ -25,9 +25,8 @@ enum class MemoryCompletionClass : uint8_t {
   ASYNC_LOAD,
   ASYNC_STORE,
   /// Tensor DMA transfers, which complete on TENSORCNT in issue order. Tensor
-  /// DMA instructions carry no MemoryIssueInfo; the race detector's tensor DMA
-  /// callback assigns this class itself, so it does not yet appear in
-  /// instruction metadata.
+  /// DMA instructions carry no MemoryIssueInfo, so no instruction metadata uses
+  /// this class yet.
   TENSOR,
   UNORDERED,
 };
