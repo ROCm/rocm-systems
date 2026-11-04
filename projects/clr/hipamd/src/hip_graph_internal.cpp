@@ -2786,6 +2786,12 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
   // addKernelDispatch in dispatchAqlPacketBatchFlat) — no string borrowing,
   // no GraphExecBase pin.
   auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
+  // A launch whose segments all run on the launch stream (one segment, or collapsed to a single
+  // stream) has no side queue to gate (DEBUG_CLR_GRAPH_FAST_LAUNCH)
+  graph_accumulate->setMultiStream(
+      std::any_of(segments_.begin(), segments_.end(), [&](const Segment& seg) {
+        return resolveSegmentStream(seg) != launch_stream;
+      }));
 
   // Apply pre-computed patches -- writes HW events directly into flatPacketData
   // via the flat_packet pointers resolved at instantiate time, so no rebuild needed.
