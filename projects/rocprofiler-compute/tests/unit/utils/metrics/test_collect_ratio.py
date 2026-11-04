@@ -3,6 +3,7 @@
 
 """Unit tests for COLLECT_RATIO / COLLECT_SUM Phase 2 production wiring."""
 
+import logging
 from collections import OrderedDict
 from pathlib import Path
 
@@ -101,10 +102,14 @@ def test_merge_dispatch_collect_ratio_pools_unequal_dispatches():
 
 
 @pytest.mark.misc
-def test_merge_dispatch_collect_ratio_keeps_numerator_when_denominator_is_zero():
+def test_merge_dispatch_collect_ratio_keeps_numerator_when_denominator_is_zero(
+    caplog,
+):
     nums = [pd.Series({1: 1000.0, 2: 1000.0})]
     dens = [pd.Series({1: 100.0, 2: 0.0})]
-    assert merge_dispatch_collect_ratio(nums, dens) == pytest.approx(20.0)
+    with caplog.at_level(logging.WARNING):
+        assert merge_dispatch_collect_ratio(nums, dens) == pytest.approx(20.0)
+    assert "missing" not in caplog.text
 
 
 @pytest.mark.misc
@@ -115,6 +120,22 @@ def test_merge_dispatch_collect_ratio_is_unset_when_pooled_denominator_is_zero()
 
 
 @pytest.mark.misc
+def test_unset_collectables_are_one_summary(caplog):
+    table = _two_piece_table(
+        COLLECT_RATIO_SPECS_ATTR,
+        _RATIO_SPEC,
+        {},
+        ("pmc_perf_0", "pmc_perf_1"),
+    )
+    table.loc["1", "Avg"] = ""
+    table.loc["2", "Avg"] = ""
+    raw = pd.DataFrame({"Dispatch_ID": [1], "A": [10.0], "B": [0.0]})
+    with caplog.at_level(logging.WARNING):
+        apply_composite_metrics({1: table}, {1: "metric_table"}, raw, {}, {})
+    assert caplog.text.count("were left unset") == 1
+    assert "not found" not in caplog.text
+
+
 def test_gfx942_hbm_bandwidth_is_collect_sum():
     doc = yaml.safe_load((_GFX942 / "0400_roofline.yaml").read_text())
     hbm = doc["Panel Config"]["data source"][0]["metric_table"]["metric"][
