@@ -35,19 +35,28 @@ jobs:
           sparse-checkout: projects/rccl
 
       - name: Install build deps
-        # The ROCm image ships hipcc and hipify-perl but not a host toolchain
-        # or cmake. This is only what configure + hipify need; nothing is
-        # compiled and the tests are not built, so the test libraries are not
-        # installed either.
+        # Only what configure + hipify need. Nothing is compiled and the tests
+        # are not built, so the test libraries, lcov and ccache are not
+        # installed.
         #
-        #   build-essential  host compiler and make
-        #   cmake            configure
-        #   git              rocm-cmake and version queries at configure time
-        #   perl             hipify-perl, which stages the sources to analyse
-        #   python3          find_package(Python3 ... REQUIRED) and the
-        #                    embedded tuner config header
-        #   rocm-cmake       find_package(ROCM); without it CMake falls back to
-        #                    downloading and building rocm-cmake from GitHub
+        # Checked against rocm/dev-ubuntu-26.04:10.1.0-full; the three already
+        # present are listed anyway, so the job keeps working if a later image
+        # drops them.
+        #
+        #   build-essential  host compiler and make            (preinstalled)
+        #   perl             hipify-perl, which stages the
+        #                    sources to analyse                (preinstalled)
+        #   python3          find_package(Python3 ... REQUIRED)
+        #                    and the embedded tuner header     (preinstalled)
+        #   cmake            configure                         (missing)
+        #   git              rocm-cmake and version queries
+        #                    at configure time                 (missing)
+        #   rocm-cmake       find_package(ROCM); without it CMake
+        #                    downloads and builds it from GitHub (missing)
+        #
+        # clang-tidy itself needs no package: the image carries it at both
+        # /opt/rocm/lib/llvm/bin and /opt/rocm/llvm/bin, though neither is on
+        # PATH, which is why run-clang-tidy.sh looks for it by absolute path.
         run: |
           apt-get update
           apt-get install --assume-yes --no-install-recommends \
