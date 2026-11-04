@@ -251,6 +251,10 @@ DISPLAY_VARIANTS["gfx940"] = {
         " * $lds_banks_per_cu) )",
     ),
 }
+# Panel 3000's TA and TD stalls as a percentage of all CU cycles.
+_NORMALIZED_STALL_EQUATION = (
+    "100 * SUM({}) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)"
+)
 DISPLAY_VARIANTS["gfx950"] = {
     "2.1.23": (
         "L2-Fabric Read BW",
@@ -323,6 +327,40 @@ DISPLAY_VARIANTS["gfx950"] = {
         "l2.util",
         "100 * SUM(TCC_BUSY_sum) "
         "/ (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))",
+    ),
+    # Panel 3000 sums the TA and TD stalls' CU cycles before multiplying by the CU
+    # count, and clamps the 32B count of the write and atomic bandwidth.
+    "30.4.1": (
+        "Normalized L1 Cache - TA addr stalled by TCP",
+        "ta.address_stall",
+        _NORMALIZED_STALL_EQUATION.format("TA_ADDR_STALLED_BY_TC_CYCLES_sum"),
+    ),
+    "30.4.2": (
+        "Normalized L1 Cache - TA addr stalled by TD",
+        "ta.data_processor_address_stall",
+        _NORMALIZED_STALL_EQUATION.format("TA_ADDR_STALLED_BY_TD_CYCLES_sum"),
+    ),
+    "30.4.3": (
+        "Normalized L1 Cache - TA data stalled by TCP",
+        "ta.data_stall",
+        _NORMALIZED_STALL_EQUATION.format("TA_DATA_STALLED_BY_TC_CYCLES_sum"),
+    ),
+    "30.4.10": (
+        "Normalized TD - stalled by TCP",
+        "td.tc_stall",
+        _NORMALIZED_STALL_EQUATION.format("TD_TC_STALL_sum"),
+    ),
+    "30.4.13": (
+        "Normalized TD - stalled by SPI",
+        "td.spi_stall",
+        _NORMALIZED_STALL_EQUATION.format("TD_SPI_STALL_sum"),
+    ),
+    "30.8.12": (
+        "L2 to EA write and atomic BW",
+        "fabric.wr_atomic_bw",
+        "SUM(TCC_EA0_WRREQ_64B_sum * 64 + NOISE_CLAMP(TCC_EA0_WRREQ_sum "
+        "- TCC_EA0_WRREQ_64B_sum, TCC_EA0_WRREQ_sum) * 32) "
+        "/ SUM(End_Timestamp - Start_Timestamp)",
     ),
 }
 DISPLAY_VARIANTS["gfx942"] = {

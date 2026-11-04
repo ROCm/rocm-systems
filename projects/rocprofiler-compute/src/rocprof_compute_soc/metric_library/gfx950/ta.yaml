@@ -70,22 +70,6 @@ ta.l1_cache_ta_data_stalled_by_tcp:
   description: >-
     Measures cycles the TA data path is stalled by TCP (L1 cache). A high rate indicates
     TCP write data backpressure.
-ta.normalized_l1_cache_ta_addr_stalled_by_tcp:
-  name: Normalized L1 Cache - TA Address Stalled by TCP
-  formula: 100 * SUM(TA_ADDR_STALLED_BY_TC_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
-  unit: Percent
-  description: >-
-    Percentage of GPU active time that TA could not send addresses to TCP (L1 Cache)
-    because TCP was not ready. Averaged across all CUs. High values indicate L1 cache
-    congestion backing up into the address path.
-ta.normalized_l1_cache_ta_addr_stalled_by_td:
-  name: Normalized L1 Cache - TA Address Stalled by TD
-  formula: 100 * SUM(TA_ADDR_STALLED_BY_TD_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
-  unit: Percent
-  description: >-
-    Percentage of GPU active time that TA could not process new addresses because
-    the TD (texture data) return path was backed up. Averaged across all CUs. High
-    values indicate congestion in the data return path.
 ta.normalized_l1_cache_ta_addresser_stalled:
   name: Normalized L1 Cache - TA Addresser Stalled
   formula: 100 * SUM(TA_ADDRESSER_STALLED_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
@@ -94,14 +78,6 @@ ta.normalized_l1_cache_ta_addresser_stalled:
     Percentage of GPU active time that TA's address generation logic was stalled for
     any reason. Averaged across all CUs. High values indicate address computation
     bottlenecks in the L1 front-end.
-ta.normalized_l1_cache_ta_data_stalled_by_tcp:
-  name: Normalized L1 Cache - TA Data Stalled by TCP
-  formula: 100 * SUM(TA_DATA_STALLED_BY_TC_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
-  unit: Percent
-  description: >-
-    Percentage of GPU active time that TA could not send write or store data to TCP
-    (L1 Cache) because TCP's data path was full. Averaged across all CUs. High values
-    indicate L1 cache write-side congestion.
 ta.normalized_ta_processing_rate:
   name: Normalized TA Processing Rate
   formula: SUM(TA_TOTAL_WAVEFRONTS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
