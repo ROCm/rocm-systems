@@ -73,9 +73,10 @@ if [ -e /proc/sys/kernel/yama/ptrace_scope ]                             \
     exit 0
 fi
 
-# Start the test application in the background
+# Start one worker on the first ROCr-visible GPU. CU 0-1 is one WGP on RDNA and
+# remains a valid pair of target CUs on CDNA.
 echo "Launching test application: ${TEST_APP}"
-LD_PRELOAD=${ROCPROF_PRELOAD} ${TEST_APP} &
+HSA_CU_MASK=0:0-1 LD_PRELOAD=${ROCPROF_PRELOAD} ${TEST_APP} 1 1 &
 APP_PID=$!
 
 # Wait for the application to be ready for attachment
@@ -102,7 +103,9 @@ if [ -n "${ATT_LIB_DIR}" ]; then
 fi
 
 # Attachment with ATT enabled.
-# Target CU defaults to 1 (rocprofv3 default); shader engine mask 0x1 selects SE0.
+# Trace the first three simple_kernel launches on target CU/WGP 0 across every
+# shader engine. Leave GPU selection unrestricted so ROCr device visibility
+# cannot select a different physical GPU for the application and profiler.
 # Small buffer (16MB) to keep the test fast.
 # --attach-sync-output ensures ATT output is fully written before rocprofv3 exits.
 # Note: ATT mode does not produce standard kernel_dispatch/memory_copy/hsa_api
@@ -115,7 +118,10 @@ LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} \
     --attach-duration-msec 500 \
     --att \
     ${ATT_LIB_ARG} \
-    --att-shader-engine-mask 0x1 \
+    --kernel-include-regex simple_kernel \
+    --kernel-iteration-range 1-3 \
+    --att-target-cu 0 \
+    --att-shader-engine-mask 0xFFFFFFFF \
     --att-buffer-size 0x1000000 \
     -f json rocpd \
     --attach-sync-output \
