@@ -573,8 +573,11 @@ low half. A buffer atomic's address is the V# base plus the offset; stride
 only scales the bound. A buffer atomic whose element is not wholly in range
 performs no access and returns zero when GLC is set. A misaligned `_x2` buffer
 atomic faults even when out of range. The CDNA ISA manuals do not describe
-these bounds and fault-order rules; they are observed on gfx90a and modeled
-the same way on every CDNA target.
+these bounds and fault-order rules. They are observed on gfx90a with
+`s_buffer_atomic_inc[_x2]`, and the fault order also with
+`s_buffer_atomic_dec_x2`. The other operations and CDNA targets are modeled
+the same way by extrapolation, including `s_buffer_atomic_cmpswap_x2`, whose
+bound covers its 8-byte memory element although SDATA holds 16 bytes.
 
 **Cache management instructions:**
 
