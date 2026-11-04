@@ -56,12 +56,40 @@ namespace blit
 {
 namespace
 {
-constexpr auto kernel_name = "kernel_replay_blit";
-
+using kernel_abi::chunks_for;
 using kernel_abi::copy_descriptor_t;
-using kernel_abi::items_for_size;
-using kernel_abi::kernel_args_t;
+using kernel_abi::copy_tiles_args_t;
+using kernel_abi::copy_workgroups_per_cu;
+using kernel_abi::count_tiles_args_t;
+using kernel_abi::expand_tiles_args_t;
+using kernel_abi::scan_tiles_args_t;
+using kernel_abi::tiles_for;
 using kernel_abi::workgroup_size;
+
+// The restore runs as four dispatches, in this order: three build the tile list on the GPU from
+// the region descriptors, and the last copies it.
+enum kernel_index : size_t
+{
+    count_tiles = 0,
+    scan_tiles,
+    expand_tiles,
+    copy_tiles,
+    kernel_count
+};
+
+constexpr auto kernel_names = std::array<const char*, kernel_count>{
+    "kernel_replay_count_tiles",
+    "kernel_replay_scan_tiles",
+    "kernel_replay_expand_tiles",
+    "kernel_replay_copy_tiles",
+};
+
+constexpr auto kernel_arg_sizes = std::array<size_t, kernel_count>{
+    sizeof(count_tiles_args_t),
+    sizeof(scan_tiles_args_t),
+    sizeof(expand_tiles_args_t),
+    sizeof(copy_tiles_args_t),
+};
 
 struct kernel_info_t
 {
@@ -73,17 +101,49 @@ struct kernel_info_t
 
 struct kernel_state_t
 {
-    int                      file = -1;
-    hsa_code_object_reader_t reader{};
-    hsa_executable_t         executable{};
-    kernel_info_t            kernel{};
-    hsa_signal_t             completion{};
-    void*                    kernarg           = nullptr;
-    size_t                   kernarg_capacity  = 0;
-    bool                     kernarg_on_device = false;
-    std::vector<void*>       retired_kernargs{};
-    std::atomic<bool>        resource_in_use{false};
+    int                                     file = -1;
+    hsa_code_object_reader_t                reader{};
+    hsa_executable_t                        executable{};
+    std::array<kernel_info_t, kernel_count> kernels{};
+    hsa_signal_t                            completion{};
+    void*                                   kernarg           = nullptr;
+    size_t                                  kernarg_capacity  = 0;
+    bool                                    kernarg_on_device = false;
+    std::vector<void*>                      retired_kernargs{};
+    void*                                   workspace          = nullptr;
+    size_t                                  workspace_capacity = 0;
+    std::atomic<bool>                       resource_in_use{false};
 };
+
+// Where the tile-list kernels keep their intermediate results, in one device allocation.
+struct workspace_layout_t
+{
+    size_t first_tiles  = 0;
+    size_t chunk_totals = 0;
+    size_t tile_count   = 0;
+    size_t tiles        = 0;
+    size_t size         = 0;
+};
+
+constexpr size_t
+align_up(size_t value, size_t alignment)
+{
+    return (value + alignment - 1) / alignment * alignment;
+}
+
+workspace_layout_t
+workspace_layout(uint32_t descriptor_count, uint32_t tile_count)
+{
+    constexpr auto alignment = size_t{256};
+    auto           layout    = workspace_layout_t{};
+    layout.chunk_totals      = align_up(size_t{descriptor_count} * sizeof(uint32_t), alignment);
+    layout.tile_count =
+        layout.chunk_totals +
+        align_up(size_t{chunks_for(descriptor_count)} * sizeof(uint32_t), alignment);
+    layout.tiles = layout.tile_count + alignment;
+    layout.size  = layout.tiles + size_t{tile_count} * sizeof(copy_descriptor_t);
+    return layout;
+}
 
 using state_map_t = std::unordered_map<uint64_t, kernel_state_t*>;
 
@@ -141,11 +201,8 @@ initialize_kernel(hsa_executable_t executable,
     status = get_symbol_info(
         symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &info.group_segment_size);
     if(status != HSA_STATUS_SUCCESS) return status;
-    status = get_symbol_info(
+    return get_symbol_info(
         symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &info.kernarg_size);
-    if(status != HSA_STATUS_SUCCESS) return status;
-    return (info.kernarg_size >= sizeof(void*)) ? HSA_STATUS_SUCCESS
-                                                : HSA_STATUS_ERROR_INVALID_ARGUMENT;
 }
 
 hsa_status_t
@@ -181,8 +238,22 @@ initialize_state(const hsa::AgentCache& agent, kernel_state_t& state)
     if(status != HSA_STATUS_SUCCESS) return status;
 
     const auto hsa_agent = agent.get_hsa_agent();
-    status = initialize_kernel(state.executable, hsa_agent, kernel_name, state.kernel);
-    if(status != HSA_STATUS_SUCCESS) return status;
+    for(size_t index = 0; index < kernel_count; ++index)
+    {
+        auto& kernel = state.kernels.at(index);
+        status = initialize_kernel(state.executable, hsa_agent, kernel_names.at(index), kernel);
+        if(status != HSA_STATUS_SUCCESS) return status;
+        // The kernels are dispatched with only their explicit arguments; a larger segment would
+        // mean they read implicit arguments that are never written.
+        if(kernel.kernarg_size != kernel_arg_sizes.at(index))
+        {
+            ROCP_ERROR << fmt::format("kernel replay blit: {} takes {}B of arguments, expected {}B",
+                                      kernel_names.at(index),
+                                      kernel.kernarg_size,
+                                      kernel_arg_sizes.at(index));
+            return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+    }
 
     status = ext->hsa_amd_signal_create_fn(1, 0, nullptr, 0, &state.completion);
     if(status != HSA_STATUS_SUCCESS) return status;
@@ -284,13 +355,13 @@ prepare(const hsa::Queue& queue)
 
 struct packet_info::implementation
 {
-    std::array<hsa::rocprofiler_packet, 2> packets{};
-    kernel_state_t*                        state = nullptr;
-    hsa_signal_t                           completion{};
-    void*                                  kernarg   = nullptr;
-    bool                                   submitted = false;
-    bool                                   completed = false;
-    hsa_status_t                           status    = HSA_STATUS_SUCCESS;
+    std::array<hsa::rocprofiler_packet, kernel_count + 1> packets{};
+    kernel_state_t*                                       state = nullptr;
+    hsa_signal_t                                          completion{};
+    void*                                                 kernarg   = nullptr;
+    bool                                                  submitted = false;
+    bool                                                  completed = false;
+    hsa_status_t                                          status    = HSA_STATUS_SUCCESS;
 
     ~implementation()
     {
@@ -382,42 +453,51 @@ create(const hsa::Queue& queue, const std::vector<copy_region_t>& regions)
     auto* ext   = hsa::get_amd_ext_table();
     if(!state || !core || !ext || !core->hsa_signal_store_screlease_fn) return std::nullopt;
 
+    const auto cu_count = agent.get_rocp_agent()->cu_count;
+    if(cu_count == 0) return std::nullopt;
+
+    // Descriptor and tile indices are 32-bit on the GPU, and the copy kernel's work items must not
+    // wrap when a wave steps past the last one.
+    constexpr auto max_count = uint64_t{std::numeric_limits<uint32_t>::max()} / 2;
+    if(regions.size() > max_count) return std::nullopt;
+
     auto descriptor_data = std::vector<copy_descriptor_t>{};
     descriptor_data.reserve(regions.size());
-    auto total_items = uint64_t{0};
+    auto total_tiles = uint64_t{0};
     for(const auto& region : regions)
     {
         if(region.size == 0 || !region.source || !region.dest) return std::nullopt;
-        const auto item_count = items_for_size(region.size);
-        if(item_count > std::numeric_limits<uint64_t>::max() - total_items) return std::nullopt;
+        total_tiles += tiles_for(region.size);
+        if(total_tiles > max_count) return std::nullopt;
         descriptor_data.emplace_back(copy_descriptor_t{
             region.size,
             reinterpret_cast<uint64_t>(region.source),
             reinterpret_cast<uint64_t>(region.dest),
         });
-        total_items += item_count;
     }
 
-    constexpr auto max_workgroups = uint64_t{std::numeric_limits<uint32_t>::max()} / workgroup_size;
-    const auto     requested_workgroups =
-        total_items / workgroup_size + static_cast<uint64_t>(total_items % workgroup_size != 0);
-    constexpr auto blocks_per_cu = uint64_t{2};
-    const auto     cu_count      = agent.get_rocp_agent()->cu_count;
-    if(cu_count == 0) return std::nullopt;
-    const auto occupancy_workgroups = static_cast<uint64_t>(cu_count) * blocks_per_cu;
-    const auto launched_workgroups =
-        std::min({requested_workgroups, max_workgroups, occupancy_workgroups});
-    if(launched_workgroups == 0) return std::nullopt;
-    const auto launched_items = launched_workgroups * workgroup_size;
+    const auto descriptor_count = static_cast<uint32_t>(descriptor_data.size());
+    const auto tile_count       = static_cast<uint32_t>(total_tiles);
+    const auto chunk_count      = chunks_for(descriptor_count);
+    const auto copy_workgroups  = static_cast<uint32_t>(cu_count) * copy_workgroups_per_cu;
+    const auto expand_workgroups =
+        std::min(static_cast<uint32_t>((total_tiles + workgroup_size - 1) / workgroup_size),
+                 copy_workgroups);
+    const auto workgroups = std::array<uint32_t, kernel_count>{
+        chunk_count, chunk_count, expand_workgroups, copy_workgroups};
 
-    const auto& kernel = state->kernel;
-    if(kernel.kernarg_size < sizeof(kernel_args_t)) return std::nullopt;
-    const auto descriptor_offset = (kernel.kernarg_size + 15) & ~size_t{15};
-    if(regions.size() > std::numeric_limits<uint32_t>::max() ||
-       regions.size() >
-           (std::numeric_limits<size_t>::max() - descriptor_offset) / sizeof(copy_descriptor_t))
-        return std::nullopt;
-    const auto allocation_size = descriptor_offset + regions.size() * sizeof(copy_descriptor_t);
+    // One 16-byte aligned argument segment per kernel, then the descriptors.
+    auto kernarg_offsets = std::array<size_t, kernel_count>{};
+    auto kernarg_end     = size_t{0};
+    for(size_t index = 0; index < kernel_count; ++index)
+    {
+        kernarg_offsets.at(index) = kernarg_end;
+        kernarg_end = align_up(kernarg_end + state->kernels.at(index).kernarg_size, 16);
+    }
+    const auto descriptor_offset = kernarg_end;
+    const auto allocation_size =
+        descriptor_offset + size_t{descriptor_count} * sizeof(copy_descriptor_t);
+    const auto layout = workspace_layout(descriptor_count, tile_count);
 
     auto impl     = std::make_unique<packet_info::implementation>();
     auto expected = false;
@@ -455,6 +535,24 @@ create(const hsa::Queue& queue, const std::vector<copy_region_t>& regions)
     }
     impl->kernarg = state->kernarg;
 
+    if(layout.size > state->workspace_capacity)
+    {
+        // This blit holds resource_in_use, so no earlier one can still be reading the workspace.
+        if(state->workspace) ext->hsa_amd_memory_pool_free_fn(state->workspace);
+        state->workspace          = nullptr;
+        state->workspace_capacity = 0;
+
+        const auto capacity  = align_up(layout.size, size_t{2} << 20);
+        void*      workspace = nullptr;
+        if(ext->hsa_amd_memory_pool_allocate_fn(agent.gpu_pool(), capacity, 0, &workspace) !=
+           HSA_STATUS_SUCCESS)
+            return std::nullopt;
+        ROCP_INFO << fmt::format(
+            "kernel replay blit: {}B tile workspace for agent '{}'", capacity, agent.name());
+        state->workspace          = workspace;
+        state->workspace_capacity = capacity;
+    }
+
     auto image = std::vector<std::byte>{};
     try
     {
@@ -463,14 +561,34 @@ create(const hsa::Queue& queue, const std::vector<copy_region_t>& regions)
     {
         return std::nullopt;
     }
-    const auto descriptor_address =
-        reinterpret_cast<uint64_t>(static_cast<std::byte*>(impl->kernarg) + descriptor_offset);
-    const auto kernel_args = kernel_args_t{
-        descriptor_address,
-        static_cast<uint64_t>(descriptor_data.size()),
-        launched_items,
+
+    const auto kernarg_base       = reinterpret_cast<uint64_t>(impl->kernarg);
+    const auto workspace_base     = reinterpret_cast<uint64_t>(state->workspace);
+    const auto descriptors        = kernarg_base + descriptor_offset;
+    const auto first_tiles        = workspace_base + layout.first_tiles;
+    const auto chunk_totals       = workspace_base + layout.chunk_totals;
+    const auto tile_count_address = workspace_base + layout.tile_count;
+    const auto tiles              = workspace_base + layout.tiles;
+
+    const auto write_args = [&](kernel_index index, const auto& args) {
+        std::memcpy(image.data() + kernarg_offsets.at(index), &args, sizeof(args));
     };
-    std::memcpy(image.data(), &kernel_args, sizeof(kernel_args));
+    write_args(count_tiles, count_tiles_args_t{descriptors, chunk_totals, descriptor_count, 0});
+    write_args(scan_tiles,
+               scan_tiles_args_t{descriptors,
+                                 chunk_totals,
+                                 first_tiles,
+                                 tile_count_address,
+                                 descriptor_count,
+                                 chunk_count});
+    write_args(expand_tiles,
+               expand_tiles_args_t{descriptors,
+                                   first_tiles,
+                                   tile_count_address,
+                                   tiles,
+                                   descriptor_count,
+                                   expand_workgroups});
+    write_args(copy_tiles, copy_tiles_args_t{tiles, tile_count_address, copy_workgroups, 0});
     std::memcpy(image.data() + descriptor_offset,
                 descriptor_data.data(),
                 descriptor_data.size() * sizeof(descriptor_data[0]));
@@ -478,34 +596,43 @@ create(const hsa::Queue& queue, const std::vector<copy_region_t>& regions)
     core->hsa_signal_store_screlease_fn(impl->completion, 1);
     write_kernarg(impl->kernarg, image, state->kernarg_on_device);
 
-    const auto grid_size_x = static_cast<uint32_t>(launched_items);
+    // Each dispatch waits for the one before it. The first acquires at system scope because the
+    // CPU wrote the descriptors; the copy releases at system scope and signals completion.
+    for(size_t index = 0; index < kernel_count; ++index)
+    {
+        const auto& kernel = state->kernels.at(index);
+        const auto  first  = (index == 0);
+        const auto  last   = (index + 1 == kernel_count);
 
-    auto packet   = hsa_kernel_dispatch_packet_t{};
-    packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
-    packet.header |= 1 << HSA_PACKET_HEADER_BARRIER;
-    packet.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE;
-    packet.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE;
-    packet.setup                = 1;
-    packet.workgroup_size_x     = workgroup_size;
-    packet.workgroup_size_y     = 1;
-    packet.workgroup_size_z     = 1;
-    packet.grid_size_x          = grid_size_x;
-    packet.grid_size_y          = 1;
-    packet.grid_size_z          = 1;
-    packet.private_segment_size = kernel.private_segment_size;
-    packet.group_segment_size   = kernel.group_segment_size;
-    packet.kernel_object        = kernel.object;
-    packet.kernarg_address      = impl->kernarg;
-    packet.completion_signal    = impl->completion;
-    impl->packets[0]            = hsa::rocprofiler_packet{packet};
+        auto packet   = hsa_kernel_dispatch_packet_t{};
+        packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+        packet.header |= 1 << HSA_PACKET_HEADER_BARRIER;
+        packet.header |= (first ? HSA_FENCE_SCOPE_SYSTEM : HSA_FENCE_SCOPE_AGENT)
+                         << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE;
+        packet.header |= (last ? HSA_FENCE_SCOPE_SYSTEM : HSA_FENCE_SCOPE_AGENT)
+                         << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE;
+        packet.setup                = 1;
+        packet.workgroup_size_x     = static_cast<uint16_t>(workgroup_size);
+        packet.workgroup_size_y     = 1;
+        packet.workgroup_size_z     = 1;
+        packet.grid_size_x          = workgroups.at(index) * workgroup_size;
+        packet.grid_size_y          = 1;
+        packet.grid_size_z          = 1;
+        packet.private_segment_size = kernel.private_segment_size;
+        packet.group_segment_size   = kernel.group_segment_size;
+        packet.kernel_object        = kernel.object;
+        packet.kernarg_address = static_cast<std::byte*>(impl->kernarg) + kernarg_offsets.at(index);
+        packet.completion_signal = last ? impl->completion : hsa_signal_t{0};
+        impl->packets.at(index)  = hsa::rocprofiler_packet{packet};
+    }
 
     auto barrier   = hsa_barrier_and_packet_t{};
     barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
     barrier.header |= 1 << HSA_PACKET_HEADER_BARRIER;
     barrier.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE;
     barrier.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE;
-    barrier.dep_signal[0] = impl->completion;
-    impl->packets[1]      = hsa::rocprofiler_packet{barrier};
+    barrier.dep_signal[0]          = impl->completion;
+    impl->packets.at(kernel_count) = hsa::rocprofiler_packet{barrier};
 
     return packet_info{std::move(impl)};
 }

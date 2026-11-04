@@ -33,20 +33,16 @@ namespace blit
 namespace kernel_abi
 {
 inline constexpr auto bytes_per_item = std::uint64_t{16};
-inline constexpr auto workgroup_size = std::uint16_t{1024};
+inline constexpr auto workgroup_size = std::uint32_t{1024};
 
-constexpr std::uint64_t
-items_for_size(std::uint64_t size)
-{
-    return size / bytes_per_item + static_cast<std::uint64_t>(size % bytes_per_item != 0);
-}
-
-constexpr std::uint64_t
-first_local_item(std::uint64_t thread, std::uint64_t stride, std::uint64_t logical_base)
-{
-    const auto base_mod = logical_base % stride;
-    return (thread >= base_mod) ? (thread - base_mod) : (stride - (base_mod - thread));
-}
+// Regions are cut into 16 KiB tiles from their start, copied one wave per tile. A list too short
+// to give every wave about four tiles is split into pieces, down to 4 KiB.
+inline constexpr auto tile_shift             = std::uint32_t{14};
+inline constexpr auto tile_bytes             = std::uint64_t{1} << tile_shift;
+inline constexpr auto min_piece_shift        = std::uint32_t{12};
+inline constexpr auto pieces_per_wave        = std::uint64_t{4};
+inline constexpr auto copy_unroll            = std::uint32_t{2};
+inline constexpr auto copy_workgroups_per_cu = std::uint32_t{2};
 
 struct copy_descriptor_t
 {
@@ -55,15 +51,85 @@ struct copy_descriptor_t
     std::uint64_t dest_address   = 0;
 };
 
-struct kernel_args_t
+constexpr std::uint64_t
+tiles_for(std::uint64_t size)
 {
-    std::uint64_t descriptors_address = 0;
-    std::uint64_t descriptor_count    = 0;
-    std::uint64_t launched_items      = 0;
+    return (size + tile_bytes - 1) >> tile_shift;
+}
+
+constexpr std::uint32_t
+chunks_for(std::uint32_t descriptor_count)
+{
+    return (descriptor_count + workgroup_size - 1) / workgroup_size;
+}
+
+// Tile `index` of `region`: 16 KiB at index * 16 KiB, or what is left of the region.
+constexpr copy_descriptor_t
+tile_of(const copy_descriptor_t& region, std::uint64_t index)
+{
+    const auto offset = index << tile_shift;
+    const auto left   = region.size - offset;
+    return copy_descriptor_t{left < tile_bytes ? left : tile_bytes,
+                             region.source_address + offset,
+                             region.dest_address + offset};
+}
+
+// Each tile becomes 2^split pieces, so that `tile_count` tiles give `waves` waves about
+// pieces_per_wave pieces each.
+constexpr std::uint32_t
+split_for(std::uint32_t tile_count, std::uint32_t waves)
+{
+    auto split = std::uint32_t{0};
+    while(split < tile_shift - min_piece_shift &&
+          (std::uint64_t{tile_count} << split) < pieces_per_wave * waves)
+        ++split;
+    return split;
+}
+
+// One argument block per kernel, passed by value. The SDK dispatches raw AQL packets and does not
+// fill the implicit kernel arguments, so the kernels never read gridDim or blockDim: workgroup
+// counts are passed here instead.
+struct count_tiles_args_t
+{
+    std::uint64_t descriptors      = 0;
+    std::uint64_t chunk_totals     = 0;
+    std::uint32_t descriptor_count = 0;
+    std::uint32_t reserved         = 0;
+};
+
+struct scan_tiles_args_t
+{
+    std::uint64_t descriptors      = 0;
+    std::uint64_t chunk_totals     = 0;
+    std::uint64_t first_tiles      = 0;
+    std::uint64_t tile_count       = 0;
+    std::uint32_t descriptor_count = 0;
+    std::uint32_t chunk_count      = 0;
+};
+
+struct expand_tiles_args_t
+{
+    std::uint64_t descriptors      = 0;
+    std::uint64_t first_tiles      = 0;
+    std::uint64_t tile_count       = 0;
+    std::uint64_t tiles            = 0;
+    std::uint32_t descriptor_count = 0;
+    std::uint32_t workgroups       = 0;
+};
+
+struct copy_tiles_args_t
+{
+    std::uint64_t tiles      = 0;
+    std::uint64_t tile_count = 0;
+    std::uint32_t workgroups = 0;
+    std::uint32_t reserved   = 0;
 };
 
 static_assert(sizeof(copy_descriptor_t) == 24);
-static_assert(sizeof(kernel_args_t) == 24);
+static_assert(sizeof(count_tiles_args_t) == 24);
+static_assert(sizeof(scan_tiles_args_t) == 40);
+static_assert(sizeof(expand_tiles_args_t) == 40);
+static_assert(sizeof(copy_tiles_args_t) == 24);
 }  // namespace kernel_abi
 }  // namespace blit
 }  // namespace kernel_replay
