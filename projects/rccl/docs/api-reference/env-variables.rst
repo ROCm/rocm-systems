@@ -1297,13 +1297,6 @@ threshold table introduced for gfx1250.
           eligible the selector falls back normally. Off by default.
       - | ``0``: Disabled (default).
         | ``1``: Prefer symmetric kernel for AllReduce.
-    * - | ``RCCL_FORCE_CE_REDUCESCATTER``
-        | Runs CE ReduceScatter without ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``).
-          Force mode also preempts an otherwise-eligible symmetric kernel so the
-          staged CE path is used. Requires ``RCCL_CE_REDUCESCATTER=1``.
-      - | ``0``: Disabled (default).
-        | ``1``: Force-enabled (CTA-policy gate bypassed; preempts symk).
-
     * - | ``RCCL_CE_REDUCE_PER_CHUNK``
         | Selects a finite reducer for each staged ReduceScatter chunk instead of
           keeping a persistent reduction grid resident across the pipeline. The

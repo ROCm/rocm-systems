@@ -103,16 +103,14 @@ inline bool isCeAllReduceDispatchConfigured(const ncclComm* comm)
     return isCeDispatchConfigured(comm) && isCeAllReduceDispatchConfigured();
 }
 
-// Returns true when forced CE ReduceScatter dispatch is expected. The MPI
-// coverage uses the forced path with ordinary device buffers so symmetric-SM
-// selection cannot hide the CE path being tested.
+// Returns true when CE ReduceScatter dispatch is expected (CE prerequisites +
+// RCCL_CE_REDUCESCATTER=1). Requires NCCL_CTA_POLICY=2 via isCeDispatchConfigured.
 inline bool isCeReduceScatterDispatchConfigured()
 {
     constexpr int kDisabled = 0;
     constexpr int kEnabled  = 1;
     return isCeDispatchConfigured() &&
-           MPIHelpers::getEnvParam("RCCL_CE_REDUCESCATTER", kDisabled) == kEnabled &&
-           MPIHelpers::getEnvParam("RCCL_FORCE_CE_REDUCESCATTER", kDisabled) == kEnabled;
+           MPIHelpers::getEnvParam("RCCL_CE_REDUCESCATTER", kDisabled) == kEnabled;
 }
 
 // Batch path prediction helpers

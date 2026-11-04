@@ -96,7 +96,6 @@ test_categories:
       - "NCCL_CUMEM_ENABLE=1"
       - "NCCL_LOCAL_REGISTER=0"
       - "RCCL_CE_REDUCESCATTER=1"
-      - "RCCL_FORCE_CE_REDUCESCATTER=1"
   quick_env_ce_reducescatter_per_chunk:
     description: "CE ReduceScatter finite per-chunk reducer correctness on a multi-chunk BF16 Avg workload."
     test_patterns:
@@ -115,7 +114,6 @@ test_categories:
       - "NCCL_CUMEM_ENABLE=1"
       - "NCCL_LOCAL_REGISTER=0"
       - "RCCL_CE_REDUCESCATTER=1"
-      - "RCCL_FORCE_CE_REDUCESCATTER=1"
       - "RCCL_CE_REDUCE_PER_CHUNK=1"
       - "RCCL_CE_REDUCE_MAX_BLOCKS=64"
   quick_env_ce_alltoall:

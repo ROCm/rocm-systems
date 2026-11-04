@@ -1114,28 +1114,24 @@ TEST_F(CeMPI_AllReduce, MinOp128MiB)
 }
 
 // ===========================================================================
-// CeMPI_ReduceScatter – forced CE correctness, including rank-varying in-place
-// output alignment.
+// CeMPI_ReduceScatter – CE correctness with CTA_POLICY_ZERO, including
+// rank-varying in-place output alignment.
 // ===========================================================================
 
 class CeMPI_ReduceScatter : public CeMPITest
 {
 protected:
     std::unique_ptr<MPIHelpers::MpiEnvGuard> ceReduceScatterGuard_;
-    std::unique_ptr<MPIHelpers::MpiEnvGuard> forceCeReduceScatterGuard_;
 
     void SetUp() override
     {
         CeMPITest::SetUp();
         ceReduceScatterGuard_ =
             std::make_unique<MPIHelpers::MpiEnvGuard>("RCCL_CE_REDUCESCATTER", "1");
-        forceCeReduceScatterGuard_ =
-            std::make_unique<MPIHelpers::MpiEnvGuard>("RCCL_FORCE_CE_REDUCESCATTER", "1");
     }
 
     void TearDown() override
     {
-        forceCeReduceScatterGuard_.reset();
         ceReduceScatterGuard_.reset();
         CeMPITest::TearDown();
     }
