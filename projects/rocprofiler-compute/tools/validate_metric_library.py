@@ -63,6 +63,7 @@ from format_yaml import normalize_equation
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base, iter_analysis_config_metrics
+from roofline.run_benchmark import bench_class
 from utils import metric_library
 from utils.metric_library import (
     VARIABLES_FILENAME,
@@ -80,6 +81,7 @@ from utils.metrics.expression import (
 )
 from utils.metrics.metric_evaluator import MetricEvaluator
 from utils.mi_gpu_spec import mi_gpu_specs
+from utils.specs import total_sqc, totall2_banks
 from utils.utils_analysis import add_unit_counter
 from utils.utils_common import MEMBW_ANALYSIS_PANEL_ID, canonical_config_arch
 from utils.utils_counter_defs import (
@@ -132,7 +134,9 @@ SPLIT_FORMULA_IDS = {}
 # pairs): different quantities whose formulas coincide there.
 SAME_VALUE_IDS = {}
 # The same-value check evaluates each formula on one dispatch per normalization
-# ($denom), with counters and the machine values no SoC class sets drawn from this seed.
+# ($denom), with counters drawn from this seed. Machine values with no static source are
+# drawn too: the ones each device reports (CU, SE and SIMD counts, waves per CU, clocks,
+# memory channels, GL1 caches) and gfx908's wave size (it has no roofline benchmark).
 # Counters within one decade keep built-in variables such as $numActiveCUs positive.
 SAME_VALUE_SEED = 0
 COUNTER_VALUE_RANGE = (1e5, 1e6)
@@ -591,18 +595,18 @@ def _metric_values(
     None marks a metric that gives no finite number on some dispatch.
     """
     random = np.random.default_rng(SAME_VALUE_SEED)
-    soc_specs = _soc_specs(gpu_arch)
     samples = defaultdict(list)
     previous_disable = logging.root.manager.disable
     logging.disable(logging.CRITICAL)  # the evaluator warns about skipped formulas
     try:
+        static_specs = _static_machine_specs(gpu_arch)
         for normal_unit in SUPPORTED_DENOM:
             formulas = {
                 metric_id: update_denominator_string(metric["formula"], normal_unit)
                 for metric_id, metric in library.metrics.items()
             }
             evaluator = _dispatch_evaluator(
-                gpu_arch, list(formulas.values()), soc_specs, random
+                gpu_arch, list(formulas.values()), static_specs, random
             )
             for metric_id, formula in formulas.items():
                 samples[metric_id].append(
@@ -619,12 +623,11 @@ def _metric_values(
 def _dispatch_evaluator(
     gpu_arch: str,
     formulas: List[str],
-    soc_specs: Dict[str, Any],
+    static_specs: Dict[str, Any],
     random: np.random.Generator,
 ) -> MetricEvaluator:
     """Return the production evaluator for one random dispatch that formulas can read.
 
-    $variables take the value gpu_arch's SoC class sets, if any, or a random size.
     Built-in variables are computed from the dispatch, as at runtime.
     """
     builtin_vars = get_build_in_vars(mi_gpu_specs.get_gpu_series(gpu_arch))
@@ -634,21 +637,55 @@ def _dispatch_evaluator(
         for column in sorted(set(EVAL_COLUMN_RE.findall(text)))
     })
     add_unit_counter(pmc_df)
+    machine_names = set(EVAL_VARIABLE_RE.findall(text)) - set(builtin_vars)
     sys_vars = {
-        f"ammolite__{name}": soc_specs.get(
-            name, int(random.integers(*MACHINE_VALUE_RANGE))
-        )
-        for name in sorted(set(EVAL_VARIABLE_RE.findall(text)) - set(builtin_vars))
+        f"ammolite__{name}": value
+        for name, value in _machine_values(
+            gpu_arch, machine_names, static_specs, random
+        ).items()
     }
     sys_vars.update(calc_builtin_vars(pmc_df, sys_vars, gpu_arch, formulas))
     return MetricEvaluator(pmc_df, sys_vars, {})
 
 
-def _soc_specs(gpu_arch: str) -> Dict[str, Any]:
-    """Return the machine specs gpu_arch's SoC class sets, such as lds_banks_per_cu."""
+def _machine_values(
+    gpu_arch: str,
+    names: Set[str],
+    static_specs: Dict[str, Any],
+    random: np.random.Generator,
+) -> Dict[str, Any]:
+    """Return each machine value names lists, and the CU and SE counts.
+
+    A value is its static spec, if any, or a random size; the SQC count is derived from
+    the CU and SE counts, as on a device.
+    """
+    values = {
+        name: static_specs.get(name, int(random.integers(*MACHINE_VALUE_RANGE)))
+        for name in sorted({*names, "cu_per_gpu", "se_per_gpu"})
+    }
+    values["sqc_per_gpu"] = total_sqc(
+        gpu_arch, values["cu_per_gpu"], values["se_per_gpu"]
+    )
+    return values
+
+
+def _static_machine_specs(gpu_arch: str) -> Dict[str, Any]:
+    """Return the machine values every device of gpu_arch shares.
+
+    The SoC class sets the LDS banks, pipes and L2 banks per XCD; the roofline benchmark
+    sets the wave size. The XCD count and L2 channels are those of the SPX partition;
+    on gfx942 and gfx950, whose devices differ, get_num_xcds() gives its default, 8.
+    """
     machine_specs = SimpleNamespace(rocminfo_lines=None)
     soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{gpu_arch}")
     getattr(soc_module, f"{gpu_arch}_soc")(SimpleNamespace(), machine_specs)
+    machine_specs.num_xcd = mi_gpu_specs.get_num_xcds(gpu_arch, None, "SPX")
+    machine_specs.total_l2_chan = int(
+        totall2_banks(gpu_arch, None, machine_specs.l2_banks, "SPX")
+    )
+    if gpu_arch in mi_gpu_specs.get_roofline_archs():
+        benchmark = bench_class(gpu_arch)(0, {}, gpu_arch)
+        machine_specs.wave_size = benchmark.WAVEFRONT_SIZE
     return vars(machine_specs)
 
 

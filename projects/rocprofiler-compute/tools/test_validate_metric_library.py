@@ -212,6 +212,7 @@ def test_expressions_must_parse(tree, old, new, message):
             "SUM(SQ_ACTIVE_INST_VALU * $cu_per_gpu)",
             "SUM(SQ_ACTIVE_INST_VALU) * $cu_per_gpu",
         ),
+        ("64 * SUM(SQ_WAVES)", "SUM(SQ_WAVES * $wave_size)"),
         (
             "SUM(SQ_WAVES - SQ_INSTS_SALU) / SUM($denom)",
             "SUM(NOISE_CLAMP(SQ_WAVES - SQ_INSTS_SALU, SQ_WAVES)) / SUM($denom)",
