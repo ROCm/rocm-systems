@@ -80,10 +80,12 @@ class TestParenthesesMinimization:
         assert normalize_equation("(a + b) + c") == "a + b + c"
         assert normalize_equation("(a * b) * c") == "a * b * c"
 
-    def test_necessary_parens_preserved(self):
-        """Right-associative ops need parens."""
+    def test_right_operand_parens_preserved(self):
+        """A right operand keeps its parens, so the evaluation order stays the same."""
         assert normalize_equation("a - (b - c)") == "a - (b - c)"
         assert normalize_equation("a / (b / c)") == "a / (b / c)"
+        assert normalize_equation("a + (b + c)") == "a + (b + c)"
+        assert normalize_equation("a * (b / c)") == "a * (b / c)"
 
     def test_precedence_parens_preserved(self):
         """Precedence parens must stay."""
