@@ -83,8 +83,10 @@ if (USE_IPC AND USE_TDM)
     ${PROJECT_NAME}
     PRIVATE
       tdm_raw_put_gtest.cpp
+      tdm_raw_get_gtest.cpp
       tdm_struct_put_gtest.cpp
       tdm_wave_put_gtest.cpp
+      tdm_wave_get_gtest.cpp
   )
 endif()
 
