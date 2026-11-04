@@ -464,6 +464,7 @@ add_executable(
     canonical_line_freshness_test.cpp
     legacy_page_table_cache_test.cpp
     config_test.cpp
+    rj_vm_config_test.cpp
     checkpoint_restore_errors_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
@@ -2369,6 +2370,21 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         COMMAND
             register_observer_abi_test $<TARGET_FILE:rocjitsu_shared>
             $<TARGET_FILE:register_observer_probe>
+    )
+
+    # Compile as C and link only the shared library's public ABI.
+    add_executable(vm_config_c_api_test vm_config_c_api_test.c)
+    target_link_libraries(vm_config_c_api_test PRIVATE rocjitsu_shared)
+    target_include_directories(
+        vm_config_c_api_test
+        PRIVATE ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include
+    )
+    rj_configure_target(vm_config_c_api_test WARNINGS)
+    add_test(
+        NAME VmConfigCApi
+        COMMAND
+            vm_config_c_api_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/race-detector/race_test_config.json
     )
 
     # Resolve only public C symbols through RTLD_LOCAL. Linking simulator
