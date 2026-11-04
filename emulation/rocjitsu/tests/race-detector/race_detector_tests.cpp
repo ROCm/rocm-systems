@@ -1723,6 +1723,11 @@ TEST(RaceDetector, TensorDma_RetiredTransferWithoutRangesNoLongerCounts) {
   b.tensorLoadToLds(/*wave=*/0, {});
   b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/0);
   b.barrier();
+  // The wait and barrier retire the transfer itself; later loads alone could
+  // not show that, since they are newer than it.
+  const EventId empty{0};
+  ASSERT_EQ(b.events().totalAllocated(), 1);
+  EXPECT_EQ(b.events().status(empty), EventStatus::RETIRED);
   b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
   b.tensorLoadToLds(/*wave=*/0, {{.address = 64, .bytes = 16}});
   b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/1);
@@ -1733,14 +1738,17 @@ TEST(RaceDetector, TensorDma_RetiredTransferWithoutRangesNoLongerCounts) {
 }
 
 TEST(RaceDetector, TensorDma_UnwaitedTransferWithoutRangesKeepsItsSlotAcrossBarrier) {
-  // A barrier retires only transfers that their wave has waited for.
+  // A barrier retires only transfers that their wave has waited for, so the
+  // unwaited transfer without ranges still holds the newest slot afterwards:
+  // waiting for all but one completes the load before it. Had it lost its
+  // slot, the load would still be pending and the read would race.
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
   b.tensorLoadToLds(/*wave=*/0, {});
   b.barrier();
-  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
   b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/1);
   b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
-  EXPECT_TRUE(b.hasLdsRace(4));
+  EXPECT_FALSE(b.hasRace());
 }
 
 TEST(RaceDetector, TensorDma_RangeEdgesAreBytePrecise) {
