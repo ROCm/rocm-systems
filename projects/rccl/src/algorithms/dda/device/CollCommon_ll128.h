@@ -267,4 +267,15 @@ constexpr size_t ddaLL128Slices(size_t bytes) {
   return (bytes + kDdaLL128DataBytesPerSlice - 1) / kDdaLL128DataBytesPerSlice;
 }
 
+
+// Zero one slice in local scratch after consumption to prevent stale-flag matches.
+// Must use the cooperative atomic store (not plain store) so the zero is ordered
+// with respect to the cooperative_atomic_load_8x16B used by ddaLL128PollWire.
+__device__ __forceinline__ void ddaLL128ClearWire(uint64_t* wire, int lane) {
+  (void)lane;
+#pragma unroll
+  for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
+    ddaLL128StoreAtomic16B(wire + u * kDdaLL128Warp, 0, 0);
+}
+
 } // namespace dda::common
