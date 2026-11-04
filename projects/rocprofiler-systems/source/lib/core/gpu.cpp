@@ -16,6 +16,7 @@
 #include "common/defines.h"
 #include "common/environment.hpp"
 #include "common/pci_bdf.hpp"
+#include "core/cpu.hpp"
 #include "core/gpu_visibility.hpp"
 #include "gpu.hpp"
 
@@ -150,6 +151,11 @@ query_rocm_agents()
     {
         LOG_ERROR("Exception thrown getting the rocm agents: {}. _dev_cnt={}", _e.what(),
                   _dev_cnt);
+    }
+    if(get_agent_manager_instance().get_cpu_agents_count() == 0)
+    {
+        // CPU agents otherwise come only from rocprofiler-sdk
+        cpu::query_cpu_agents();
     }
     _dev_cnt = get_agent_manager_instance().get_gpu_agents_count();
     return _dev_cnt;
