@@ -19,6 +19,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.ml_api_selectors import USER_REGION_BACKEND
 from utils.ml_api_trace_errors import (
     KernelSequenceLengthMismatchError,
     LauncherThreadNotFoundError,
@@ -437,7 +438,7 @@ def parse_marker_function(function_value: object) -> dict[str, Any]:
         "ltid": "n/a",
         "args": "n/a",
     }
-    backend = "user"
+    backend = USER_REGION_BACKEND
     for token in tokens[1:]:
         if token in KNOWN_ML_API_BACKENDS:
             backend = token
@@ -1034,7 +1035,7 @@ def _copy_scoped_operator_node(
 ) -> Optional[CallTreeNode]:
     """Copy one node, keeping match kernels and in-scope descendant kernels."""
     node_is_match = id(node) in matched_node_ids
-    if node_is_match and node.backend == "user":
+    if node_is_match and node.backend == USER_REGION_BACKEND:
         return _copy_full_operator_subtree(node)
     descendant_backends = inherited_backends
     if node_is_match and node.backend is not None:

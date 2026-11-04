@@ -7,11 +7,12 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 
-OPERATOR_SELECTORS: Tuple[str, ...] = KNOWN_ML_API_BACKENDS + ("user",)
+USER_REGION_BACKEND = "user"
+OPERATOR_SELECTORS: Tuple[str, ...] = KNOWN_ML_API_BACKENDS + (USER_REGION_BACKEND,)
 OPERATOR_LABELS = {
     "torch": "PyTorch",
     "triton": "Triton",
-    "user": "User",
+    USER_REGION_BACKEND: "User",
 }
 UNSCOPED_OPERATOR_KEY = "all_supported_backends"
 
@@ -41,9 +42,9 @@ def resolve_profile_selection(raw: Optional[List[str]]) -> List[str]:
         return list(KNOWN_ML_API_BACKENDS)
 
     for name in tokens:
-        if name == "user":
+        if name == USER_REGION_BACKEND:
             raise ValueError(
-                "user is not a --trace-ml-api value. "
+                f"{USER_REGION_BACKEND} is not a --trace-ml-api value. "
                 "User-defined ROCTx regions are included with every --trace-ml-api run."
             )
         if name not in KNOWN_ML_API_BACKENDS:
@@ -148,7 +149,9 @@ def operator_patterns_for_traced_frameworks(
             continue
         patterns_by_backend.setdefault(backend, []).extend(patterns)
     if unscoped_patterns:
-        for operator_backend in dict.fromkeys(traced_frameworks + ["user"]):
+        for operator_backend in dict.fromkeys(
+            traced_frameworks + [USER_REGION_BACKEND]
+        ):
             patterns_by_backend.setdefault(operator_backend, []).extend(
                 unscoped_patterns
             )
