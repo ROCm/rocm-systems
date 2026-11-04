@@ -591,7 +591,13 @@ jobs:
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         run: |
-          uv pip install -r requirements.txt
+          # pytest 9.2 node IDs break loadgroup in pytest-xdist 3.8. The
+          # corpus requirements carry these bounds from 8618174; keep them here
+          # for manual corpus_ref overrides that predate it. The DBT venv
+          # below needs the same pair.
+          uv pip install -r requirements.txt \
+            "pytest>=5.4.1,<9.2" \
+            "pytest-xdist>=1.32.0,<3.9"
           ROCM_SDK_DEVICE_PACKAGES=()
           for gfx in ${ROCM_SDK_DEVICE_GFX_GROUP}; do
             ROCM_SDK_DEVICE_PACKAGES+=(
@@ -727,6 +733,9 @@ jobs:
         shell: bash
         run: |
           uv venv --python 3.12 "${ROCJITSU_DBT_VENV}"
+          # This venv skips the corpus requirements, but its -n run still uses
+          # the corpus's loadgroup scheduling. Keep these bounds equal to the
+          # corpus install above.
           uv pip install \
             --python "${ROCJITSU_DBT_VENV}/bin/python" \
             "pytest>=5.4.1,<9.2" \
