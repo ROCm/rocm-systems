@@ -65,7 +65,7 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
+const std::string CONFIG_PATH = test::config_path("gfx950_mi350x.json");
 const std::string CDNA5_CONFIG_PATH = test::config_path("gfx1250_mi455x.json");
 // CDNA3 (GWS-capable, multi-XCD) for the cross-XCD GWS rendezvous regressions.
 const std::string CDNA3_CONFIG_PATH = test::config_path("gfx942_cdna3.json");
@@ -116,6 +116,8 @@ struct XcdDistributionFixture {
     engine->topology().set_root(loaded.take_root());
     ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
         << admission_diagnostic.message();
+    util::FailureOr<uint32_t> maybe_s_endpgm_4 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_TRUE(maybe_s_endpgm_4.succeeded());
     if (loaded.engine_config.num_threads > 1 &&
         !amdgpu::partition_topology_by_xcds(engine->topology(), soc,
                                             loaded.engine_config.num_threads))
@@ -132,8 +134,7 @@ struct XcdDistributionFixture {
                        ((104 / 8) - 1));
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
     memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kKdAddr);
-    memory->write32(kKdAddr + sizeof(kernel_descriptor_t),
-                    build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+    memory->write32(kKdAddr + sizeof(kernel_descriptor_t), maybe_s_endpgm_4.value());
   }
 };
 
@@ -151,6 +152,10 @@ struct Cdna5ScratchTopologyFixture {
     soc = loaded.soc();
     memory = loaded.memory();
     loaded.engine_config.num_threads = 1;
+    util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_TRUE(maybe_s_endpgm_2.succeeded());
+    util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
     ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
@@ -163,12 +168,10 @@ struct Cdna5ScratchTopologyFixture {
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
     kd.private_segment_fixed_size = 64;
     memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kCdna5ScratchKdAddr);
-    memory->write32(kCdna5ScratchKdAddr + sizeof(kernel_descriptor_t),
-                    build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
+    memory->write32(kCdna5ScratchKdAddr + sizeof(kernel_descriptor_t), maybe_s_endpgm_3.value());
     kd.private_segment_fixed_size = 0;
     memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kCdna5PlainKdAddr);
-    memory->write32(kCdna5PlainKdAddr + sizeof(kernel_descriptor_t),
-                    build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
+    memory->write32(kCdna5PlainKdAddr + sizeof(kernel_descriptor_t), maybe_s_endpgm_2.value());
   }
 };
 
@@ -186,7 +189,9 @@ void install_scratch_kernel(amdgpu::GpuMemory &memory, uint32_t private_bytes,
   RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
   kd.private_segment_fixed_size = private_bytes;
   memory.load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kScratchKdAddr);
-  memory.write32(kScratchKdAddr + sizeof(kernel_descriptor_t), build_s_endpgm(arch));
+  util::FailureOr<uint32_t> maybe_s_endpgm_1 = build_s_endpgm(arch);
+  ASSERT_TRUE(maybe_s_endpgm_1.succeeded());
+  memory.write32(kScratchKdAddr + sizeof(kernel_descriptor_t), maybe_s_endpgm_1.value());
 }
 
 // Minimal CDNA3 (GFX9) DS GWS op issue for the cross-XCD rendezvous regressions.
@@ -1466,8 +1471,11 @@ TEST(XcdDistributionTest, RuntimeQueueScratchUsesItsOwnBackingWithoutSyntheticAl
   using namespace rocjitsu::amdhsa;
   struct alignas(64) Kernel {
     kernel_descriptor_t kd{};
-    uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+    uint32_t endpgm = 0;
   } kernel;
+  util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_endpgm.succeeded());
+  kernel.endpgm = maybe_s_endpgm.value();
   constexpr uint64_t kKernelVa = 0x20000;
   constexpr uint64_t kRingVa = 0x30000;
   constexpr uint64_t kQueueVa = 0x40000;
@@ -1543,7 +1551,7 @@ TEST(XcdDistributionTest, FanoutSizesScratchForTheWholeGridNotOneShare) {
   constexpr uint64_t kPerWave = uint64_t{kPrivateBytes} * kWavefrontSize;
   constexpr uint64_t kWavesPerWg = 1;
   constexpr uint64_t kGridWide = kPerWave * kTotalCus * kWavesPerWg;
-  install_scratch_kernel(*fx.memory, kPrivateBytes);
+  ASSERT_NO_FATAL_FAILURE(install_scratch_kernel(*fx.memory, kPrivateBytes));
 
   auto vm_access = std::make_shared<SparseGpuVmAccess>(
       *fx.memory,
@@ -1744,8 +1752,8 @@ TEST(XcdDistributionTest, GrowingScratchPreservesAlreadyAdmittedWaves) {
         scratch_slots += cu->scratch_slots_per_cu();
     }
     const size_t pool_bytes = per_wave * scratch_slots;
-    install_scratch_kernel(*fx.memory, kPrivateBytes,
-                           cdna5 ? ROCJITSU_CODE_ARCH_CDNA5 : ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NO_FATAL_FAILURE(install_scratch_kernel(
+        *fx.memory, kPrivateBytes, cdna5 ? ROCJITSU_CODE_ARCH_CDNA5 : ROCJITSU_CODE_ARCH_CDNA4));
 
     // A preceding dispatch left enough backing for the first wave, but not the
     // new grid. Provision the missing tail before admitting any new waves.
@@ -1819,7 +1827,7 @@ TEST(XcdDistributionTest, ScratchAllocatorFailureStopsBeforeWaveAdmission) {
   XcdDistributionFixture fx;
   ASSERT_NO_FATAL_FAILURE(fx.initialize());
   constexpr uint32_t kPrivateBytes = 64;
-  install_scratch_kernel(*fx.memory, kPrivateBytes);
+  ASSERT_NO_FATAL_FAILURE(install_scratch_kernel(*fx.memory, kPrivateBytes));
 
   auto vm_access = std::make_shared<SparseGpuVmAccess>(
       *fx.memory, SparseGpuVmAccess::HostWindow{.base = kDefaultScratchPool, .size = 0});
@@ -1853,7 +1861,7 @@ TEST(XcdDistributionTest, ScratchRequiresTheCompleteWaveSlice) {
   XcdDistributionFixture fx;
   ASSERT_NO_FATAL_FAILURE(fx.initialize());
   constexpr uint32_t kPrivateBytes = 64;
-  install_scratch_kernel(*fx.memory, kPrivateBytes);
+  ASSERT_NO_FATAL_FAILURE(install_scratch_kernel(*fx.memory, kPrivateBytes));
 
   // The first byte resolves, which is enough for the old point probe, while the
   // rest of this wave's 4 KiB scratch slice is deliberately absent.
