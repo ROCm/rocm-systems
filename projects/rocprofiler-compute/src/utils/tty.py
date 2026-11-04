@@ -283,13 +283,14 @@ def is_roofline_shown(
                 }
 
                 for table_id, (table_name, df) in tables.items():
-                    if df.empty:
+                    visible = _visible_cli_table_rows(df, "metric_table")
+                    if visible.empty:
                         continue
 
                     print(f"{base_indent}├─ {table_name}", file=output)
 
                     table_string = get_table_string(
-                        df, transpose=False, decimal=args.decimal
+                        visible, transpose=False, decimal=args.decimal
                     )
                     indented_table = textwrap.indent(table_string, table_indent_prefix)
                     print(indented_table, file=output)
