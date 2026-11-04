@@ -31,6 +31,9 @@ downstream consumer of the library.
   `#include <profiler-hub/cpp/storage.hpp>`). Groups the public C++ API
   headers under their own subdirectory, mirroring the language-scoped
   layout other public interfaces (e.g. a future C ABI) will use.
+- The installed `profiler-hub-config.cmake` now only looks up `fmt` and `spdlog`
+  when the `static` component is requested, so shared-only consumers no longer get
+  `fmt::fmt` / `spdlog::spdlog` imported into their project.
 
 ## [0.2.0] - 2026-09-02
 

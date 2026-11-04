@@ -292,6 +292,10 @@ release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \
         "(1=enabled (default), 0=non-temporal store path)")                   \
 release(bool, DEBUG_CLR_ENABLE_KDQ, true,                                     \
         "Kernel dispatch metadata (prefetch) queue, 0 = disable")             \
+release(bool, DEBUG_CLR_GRAPH_DEV_SIGNALS, true,                              \
+        "Place graph signals in device memory (large BAR only)")              \
+release(bool, DEBUG_CLR_DEV_SIGNALS, false,                                   \
+        "Place queue signals in device memory (large BAR only)")              \
 
 namespace amd {
 

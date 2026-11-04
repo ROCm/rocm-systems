@@ -2,17 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 /// @file amdgpu_code_object_test.cpp
-/// @brief Unit tests for AmdGpuCodeObject queries not covered by the target-id
-///        tests -- currently min_kernel_sgpr_count(), which decodes each kernel
-///        descriptor's GRANULATED_WAVEFRONT_SGPR_COUNT. The RDNA sentinel branch
-///        is only reachable here (no RDNA hardware in CI).
+/// @brief Unit tests for AmdGpuCodeObject SGPR queries, section classification,
+///        and malformed-input handling.
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 
 #include <gtest/gtest.h>
 
@@ -20,6 +18,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -29,7 +28,7 @@
 namespace rocjitsu {
 namespace {
 
-namespace kd = rocr::llvm::amdhsa;
+namespace kd = rocjitsu::amdhsa;
 using KD = kd::kernel_descriptor_t;
 
 uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
@@ -47,8 +46,8 @@ uint64_t align_up(uint64_t value, uint64_t alignment) {
 // `granulated`; everything else zero.
 KD make_kd(uint32_t granulated) {
   KD desc{};
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  granulated);
+  RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     granulated);
   return desc;
 }
 
@@ -183,6 +182,20 @@ void set_section_type_and_offset(std::vector<uint8_t> &image, size_t section_ind
   std::memcpy(image.data() + shdr_offset, &shdr, sizeof(shdr));
 }
 
+struct RecordedLoad {
+  std::size_t size;
+  uint64_t address;
+};
+
+struct RecordingMemory {
+  void load_image(const uint8_t *data, std::size_t size, uint64_t address) {
+    EXPECT_NE(data, nullptr);
+    loads.push_back({size, address});
+  }
+
+  std::vector<RecordedLoad> loads;
+};
+
 // CDNA: a granulated field of 0 encodes a real 8-SGPR allocation.
 TEST(AmdGpuCodeObjectSgpr, CdnaGranulatedZeroIsEightSgprs) {
   const auto image = make_elf_with_kds({{"k", 0}});
@@ -259,6 +272,187 @@ TEST(AmdGpuCodeObjectSections, ContinuesToSkipOrdinaryNobits) {
   EXPECT_TRUE(std::ranges::none_of(obj.all_sections(), [](const auto &section) {
     return section != nullptr && section->name() == ".rodata";
   }));
+}
+
+TEST(AmdGpuCodeObjectInput, RejectsNullStorageWithNonzeroSize) {
+  const AmdGpuCodeObject obj(nullptr, sizeof(Elf64_Ehdr));
+  EXPECT_FALSE(obj.is_valid());
+}
+
+TEST(AmdGpuCodeObjectInput, RejectsMalformedProgramHeaderTable) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  ehdr.e_phoff = std::numeric_limits<uint64_t>::max();
+  ehdr.e_phnum = std::numeric_limits<uint16_t>::max();
+  ehdr.e_phentsize = sizeof(Elf64_Phdr);
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  const AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_FALSE(obj.is_valid());
+}
+
+TEST(AmdGpuCodeObjectInput, RejectsOutOfBoundsLoadSegment) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  ehdr.e_phoff = sizeof(Elf64_Ehdr);
+  ehdr.e_phnum = 2;
+  ehdr.e_phentsize = sizeof(Elf64_Phdr);
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  std::array<Elf64_Phdr, 2> phdrs{};
+  phdrs[0].p_type = PT_LOAD;
+  phdrs[0].p_offset = 0x100;
+  phdrs[0].p_vaddr = 0x1000;
+  phdrs[0].p_filesz = sizeof(uint32_t);
+  phdrs[0].p_memsz = sizeof(uint32_t);
+  phdrs[1].p_type = PT_LOAD;
+  phdrs[1].p_offset = image.size() + 1;
+  phdrs[1].p_vaddr = 0x2000;
+  phdrs[1].p_filesz = 1;
+  phdrs[1].p_memsz = 1;
+  std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), sizeof(phdrs));
+
+  const AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_FALSE(obj.is_valid());
+}
+
+TEST(AmdGpuCodeObjectInput, AcceptsMemoryOnlyLoadSegmentBeyondFile) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  ehdr.e_phoff = sizeof(Elf64_Ehdr);
+  ehdr.e_phnum = 1;
+  ehdr.e_phentsize = sizeof(Elf64_Phdr);
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  Elf64_Phdr phdr{};
+  phdr.p_type = PT_LOAD;
+  phdr.p_offset = image.size() + 0x1000;
+  phdr.p_vaddr = 0x2000;
+  phdr.p_filesz = 0;
+  phdr.p_memsz = 0x1000;
+  std::memcpy(image.data() + ehdr.e_phoff, &phdr, sizeof(phdr));
+
+  const AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.mem_size(), 0x3000u);
+  RecordingMemory memory;
+  EXPECT_TRUE(obj.load_to_memory(&memory, 0x4000));
+  EXPECT_TRUE(memory.loads.empty());
+}
+
+TEST(AmdGpuCodeObjectInput, RejectsLoadSegmentLargerThanMemory) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  ehdr.e_phoff = sizeof(Elf64_Ehdr);
+  ehdr.e_phnum = 1;
+  ehdr.e_phentsize = sizeof(Elf64_Phdr);
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  Elf64_Phdr phdr{};
+  phdr.p_type = PT_LOAD;
+  phdr.p_offset = 0x100;
+  phdr.p_vaddr = 0x1000;
+  phdr.p_filesz = 2 * sizeof(uint32_t);
+  phdr.p_memsz = sizeof(uint32_t);
+  std::memcpy(image.data() + ehdr.e_phoff, &phdr, sizeof(phdr));
+
+  const AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_FALSE(obj.is_valid());
+}
+
+TEST(AmdGpuCodeObjectInput, MemorySizeBoundsValidatedSegmentLoads) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  ehdr.e_phoff = sizeof(Elf64_Ehdr);
+  ehdr.e_phnum = 1;
+  ehdr.e_phentsize = sizeof(Elf64_Phdr);
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  Elf64_Phdr phdr{};
+  phdr.p_type = PT_LOAD;
+  phdr.p_offset = 0x100;
+  phdr.p_vaddr = 0x1000;
+  phdr.p_filesz = sizeof(uint32_t);
+  phdr.p_memsz = sizeof(uint32_t);
+  std::memcpy(image.data() + ehdr.e_phoff, &phdr, sizeof(phdr));
+
+  const AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.mem_size(), 0x1000u + sizeof(uint32_t));
+  RecordingMemory memory;
+  obj.load_to_memory(&memory, 0x4000);
+  ASSERT_EQ(memory.loads.size(), 1u);
+  EXPECT_EQ(memory.loads[0].size, sizeof(uint32_t));
+  EXPECT_EQ(memory.loads[0].address, 0x5000u);
+}
+
+TEST(AmdGpuCodeObjectInput, RejectsLoadAddressOverflowBeforeWritingAnySegment) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+  header.e_phoff = sizeof(Elf64_Ehdr);
+  header.e_phnum = 2;
+  header.e_phentsize = sizeof(Elf64_Phdr);
+  std::memcpy(image.data(), &header, sizeof(header));
+  std::array<Elf64_Phdr, 2> segments{};
+  for (size_t index = 0; index < segments.size(); ++index) {
+    segments[index].p_type = PT_LOAD;
+    segments[index].p_offset = 0x100;
+    segments[index].p_vaddr = (index + 1) * 0x1000;
+    segments[index].p_filesz = sizeof(uint32_t);
+    segments[index].p_memsz = 2 * sizeof(uint32_t);
+  }
+  std::memcpy(image.data() + header.e_phoff, segments.data(), sizeof(segments));
+  const AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  // The first range fits in each case; only the second start or end wraps.
+  for (const uint64_t base : {std::numeric_limits<uint64_t>::max() - 0x1fff,
+                              std::numeric_limits<uint64_t>::max() - 0x2003}) {
+    RecordingMemory memory;
+    EXPECT_FALSE(obj.load_to_memory(&memory, base));
+    EXPECT_TRUE(memory.loads.empty());
+  }
+  RecordingMemory memory;
+  EXPECT_TRUE(obj.load_to_memory(&memory, 0x4000));
+  EXPECT_EQ(memory.loads.size(), 2u);
+}
+
+TEST(AmdGpuCodeObjectInput, MovePreservesKernelDescriptorOffsets) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  AmdGpuCodeObject original(image.data(), image.size());
+  ASSERT_TRUE(original.is_valid());
+  const uint64_t descriptor = original.kernel_descriptor_offset("k");
+  ASSERT_NE(descriptor, 0u);
+  const AmdGpuCodeObject moved(std::move(original));
+  EXPECT_TRUE(moved.is_valid());
+  EXPECT_EQ(moved.kernel_descriptor_offset("k"), descriptor);
+}
+
+TEST(AmdGpuCodeObjectInput, UnalignedSymbolTableIsReadSafely) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  std::vector<Elf64_Shdr> shdrs(ehdr.e_shnum);
+  std::memcpy(shdrs.data(), image.data() + ehdr.e_shoff, shdrs.size() * sizeof(Elf64_Shdr));
+  auto symbol_table = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &section) {
+    return section.sh_type == SHT_SYMTAB;
+  });
+  ASSERT_NE(symbol_table, shdrs.end());
+  std::vector<uint8_t> symbols(symbol_table->sh_size);
+  std::memcpy(symbols.data(), image.data() + symbol_table->sh_offset, symbols.size());
+  image.push_back(0);
+  symbol_table->sh_offset = image.size();
+  image.insert(image.end(), symbols.begin(), symbols.end());
+  std::memcpy(image.data() + ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+
+  const AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA2), std::optional<uint32_t>(8u));
 }
 
 } // namespace

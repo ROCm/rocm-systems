@@ -166,33 +166,51 @@ constexpr uint16_t kInlineZero = scalar_positive_inline_u32(0);
 
 // Copies the dword at kSource to kSource + kDestinationDelta, addressing both
 // through s[2:3] and a zero per-lane offset in v0. Without @p with_store the
-// store is replaced by s_nops of the same length.
-std::vector<uint32_t> make_copy_kernel(rj_code_arch_t arch, bool with_store) {
-  std::vector<uint32_t> code{build_s_mov_b32(2, kScalarSrcLiteral, arch),
-                             static_cast<uint32_t>(kSource), build_s_mov_b32(3, kInlineZero, arch),
-                             build_v_mov_b32_src(0, kInlineZero, arch)};
+// store is replaced by s_nops of the same length. Replaces @p code with the
+// kernel words.
+void make_copy_kernel(rj_code_arch_t arch, bool with_store, std::vector<uint32_t> &code) {
+  const auto zero = build_v_mov_b32_src(0, kInlineZero, arch);
+  ASSERT_TRUE(zero.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32_5 = build_s_mov_b32(3, kInlineZero, arch);
+  ASSERT_TRUE(maybe_s_mov_b32_5.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32_6 = build_s_mov_b32(2, kScalarSrcLiteral, arch);
+  ASSERT_TRUE(maybe_s_mov_b32_6.succeeded());
+  code = {maybe_s_mov_b32_6.value(), static_cast<uint32_t>(kSource), maybe_s_mov_b32_5.value(),
+          zero.value()};
   const std::vector<uint32_t> load = build_global_load_dword(1, 0, 2, 0, arch);
   code.insert(code.end(), load.begin(), load.end());
-  code.push_back(build_wait_loads_complete(arch));
+  const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(arch);
+  ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
+  code.push_back(maybe_wait_loads_complete.value());
   const std::vector<uint32_t> store = build_global_store_dword(1, 0, 2, kDestinationDelta, arch);
   if (with_store)
     code.insert(code.end(), store.begin(), store.end());
-  else
-    code.insert(code.end(), store.size(), build_s_nop(0, arch));
-  code.push_back(build_s_endpgm(arch));
-  return code;
+  else {
+    util::FailureOr<uint32_t> maybe_s_nop_4 = build_s_nop(0, arch);
+    ASSERT_TRUE(maybe_s_nop_4.succeeded());
+    code.insert(code.end(), store.size(), maybe_s_nop_4.value());
+  }
+  util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(arch);
+  ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
+  code.push_back(maybe_s_endpgm_3.value());
 }
 
 // Seeds kSource, runs the copy kernel, and returns the destination dword, or
 // std::nullopt when no wave halted.
 std::optional<uint32_t> run_copy(const SimArch &target, bool with_store) {
-  DbiSim sim(target.name, target.wave_size);
+  DbiSim sim;
+  sim.initialize(target.name, target.wave_size);
+  if (testing::Test::HasFatalFailure())
+    return std::nullopt;
   std::array<uint8_t, sizeof(kSeed)> seed{};
   std::memcpy(seed.data(), &kSeed, sizeof(kSeed));
   sim.write_memory(kSource, seed);
-  const std::optional<std::vector<uint8_t>> bytes =
-      sim.run_and_read_memory(make_copy_kernel(target.arch, with_store), /*private_bytes=*/0,
-                              kSource + kDestinationDelta, sizeof(uint32_t));
+  std::vector<uint32_t> code;
+  make_copy_kernel(target.arch, with_store, code);
+  if (testing::Test::HasFatalFailure())
+    return std::nullopt;
+  const std::optional<std::vector<uint8_t>> bytes = sim.run_and_read_memory(
+      code, /*private_bytes=*/0, kSource + kDestinationDelta, sizeof(uint32_t));
   if (!bytes)
     return std::nullopt;
   uint32_t value = 0;
@@ -217,8 +235,11 @@ void expect_destination_untouched_without_the_store(const SimArch &target) {
 // A DbiSim runs only its first dispatch, so a second one reads back nothing even
 // though its kernel would halt, rather than the first dispatch's memory.
 void expect_reuse_is_rejected(const SimArch &target) {
-  DbiSim sim(target.name, target.wave_size);
-  const std::vector<uint32_t> halt{build_s_endpgm(target.arch)};
+  DbiSim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize(target.name, target.wave_size));
+  util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(target.arch);
+  ASSERT_TRUE(maybe_s_endpgm_2.succeeded());
+  const std::vector<uint32_t> halt{maybe_s_endpgm_2.value()};
   ASSERT_TRUE(
       sim.run_and_read_memory(halt, /*private_bytes=*/0, kSource, sizeof(uint32_t)).has_value())
       << "the first dispatch did not halt";
@@ -229,10 +250,13 @@ void expect_reuse_is_rejected(const SimArch &target) {
 // A kernel that never halts reads back nothing, so its untouched memory cannot
 // pass a "stays zero" control.
 void expect_no_read_back_without_a_halt(const SimArch &target) {
-  DbiSim sim(target.name, target.wave_size);
+  DbiSim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize(target.name, target.wave_size));
   // s_branch to itself.
-  EXPECT_FALSE(sim.run_and_read_memory({build_s_branch(-1, target.arch)}, /*private_bytes=*/0,
-                                       kSource, sizeof(uint32_t))
+  util::FailureOr<uint32_t> maybe_s_branch_1 = build_s_branch(-1, target.arch);
+  ASSERT_TRUE(maybe_s_branch_1.succeeded());
+  EXPECT_FALSE(sim.run_and_read_memory({maybe_s_branch_1.value()},
+                                       /*private_bytes=*/0, kSource, sizeof(uint32_t))
                    .has_value());
 }
 

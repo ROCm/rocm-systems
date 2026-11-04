@@ -35,7 +35,7 @@ namespace dda::common {
 // (compile-time, so the double-buffered layout is identical on every rank and
 // call). The effective size gate is the runtime LL128 threshold; this cap
 // bounds the scratch footprint.
-constexpr size_t kDdaLL128A2AMaxPerChunkBytes = 524288;              // 512 KiB
+constexpr size_t kDdaLL128A2AMaxPerChunkBytes = 2097152;             // 2 MiB
 constexpr size_t kDdaLL128A2ASlotStrideLines =
   (kDdaLL128A2AMaxPerChunkBytes / 8 + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems; // ceil(nWords/15)
 
@@ -55,7 +55,8 @@ __launch_bounds__(1024)
                                          size_t perChunkBytes, // per-peer chunk payload; multiple of 16
                                          int selfRank, int nRanksRt,
                                          uint32_t* __restrict__ epochDev, // per-block LL epoch cells
-                                         int epochLen) { // number of cells in epochDev
+                                         int epochLen, // number of cells in epochDev
+                                         DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x; // grid.x == nRanks: one column/peer
@@ -134,7 +135,8 @@ __launch_bounds__(1024)
     for (size_t ln = lnBegin + group; ln < lnEnd; ln += groups) {
       const size_t base = ln * (size_t)kDdaLL128DataElems;
       // all 16 lanes poll the shared flag word (broadcast); unfenced.
-      while (ddaLL128LoadWord(&src[ln].w[kDdaLL128FlagElem]) != (uint64_t)flag) {
+      if (!ddaLL128WaitFlag(&src[ln].w[kDdaLL128FlagElem], (uint64_t)flag, params)) {
+        break; // poll is the outermost loop; the ddaSetLLEpoch below still runs
       }
       if (lane < kDdaLL128DataElems) {
         const size_t e = base + (size_t)lane;

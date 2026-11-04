@@ -757,6 +757,9 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors(
   return image;
 }
 std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
+  constexpr util::FailureOr<uint32_t> kNopCdna4Result = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(kNopCdna4Result.succeeded());
+
   constexpr uint64_t rodata_offset = 0x100;
   constexpr uint64_t rodata_vaddr = 0x100;
   constexpr uint64_t text_offset = 0x1000;
@@ -826,8 +829,7 @@ std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
                                                        static_cast<int64_t>(rodata_vaddr));
   std::memcpy(image.data() + rodata_offset, descriptor.data(), descriptor.size());
 
-  std::vector<uint32_t> text_words(text_size / sizeof(uint32_t),
-                                   build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  std::vector<uint32_t> text_words(text_size / sizeof(uint32_t), kNopCdna4Result.value());
   text_words[0] = cdna4::build_sopp(cdna4::kSWaitcntSopp)[0]; // Expands on RDNA4.
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
@@ -868,7 +870,7 @@ std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
   return image;
 }
 void enable_workgroup_id_x_sgpr(std::vector<uint8_t> &image) {
-  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 
   AmdGpuCodeObject layout(image.data(), image.size());
   ASSERT_TRUE(layout.is_valid());
@@ -878,7 +880,7 @@ void enable_workgroup_id_x_sgpr(std::vector<uint8_t> &image) {
 
   KD kd{};
   std::memcpy(&kd, image.data() + rodata->sectionOffset(), sizeof(kd));
-  kd.compute_pgm_rsrc2 |= rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X;
+  kd.compute_pgm_rsrc2 |= rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X;
   std::memcpy(image.data() + rodata->sectionOffset(), &kd, sizeof(kd));
 }
 

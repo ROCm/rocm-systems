@@ -23,6 +23,7 @@
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <hip/amd_detail/amd_hip_bf16.h>
+#include "rccl_float8.h"
 using bf16 = __hip_bfloat16;
 #else
 #include <cuda.h>
@@ -32,21 +33,60 @@ using bf16 = __nv_bfloat16;
 using bf162 = __nv_bfloat162;
 #endif
 
+#include "algorithms/dda/device/dda_kernel_params.h"
 #include "nccl_device/rccl_ptr.h"
 
 namespace dda::common {
+
+// fp8 element tags. rccl_float8 / rccl_bfloat8 are different types in the host
+// pass and the gfx942 device pass (FNUZ vs OCP), so a kernel templated on them
+// would be registered under a name the gfx942 code object does not contain. The
+// kernels are instantiated on these instead, and vecElementAdd resolves the
+// device's encoding.
+struct fp8e4m3 {
+  uint8_t bits;
+};
+struct fp8e5m2 {
+  uint8_t bits;
+};
+static_assert(sizeof(fp8e4m3) == 1 && sizeof(fp8e5m2) == 1, "fp8 tags must be one byte");
+
+template <typename T>
+inline constexpr bool is_fp8_v = std::is_same<T, fp8e4m3>::value || std::is_same<T, fp8e5m2>::value;
 
 template <typename T>
 inline constexpr bool is_supported_type_v = (std::is_same<T, float>::value || std::is_same<T, half>::value ||
                                              std::is_same<T, int8_t>::value || std::is_same<T, bf16>::value
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
-                                             || std::is_same<T, __hip_bfloat16>::value
+                                             || std::is_same<T, __hip_bfloat16>::value ||
+                                             std::is_same<T, fp8e4m3>::value || std::is_same<T, fp8e5m2>::value
 #endif
 );
+
+// Adds the eight fp8 lanes of an 8-byte word with the pk8 add the core reduce
+// kernels use (hadd8 / hadd8_b), so DDA rounds as they do. Only gfx1250 admits
+// fp8 to DDA; other arches compile these kernels but never launch them.
+template <typename T>
+static inline __device__ uint64_t vecElementAddFp8x8(uint64_t a, uint64_t b) {
+  static_assert(is_fp8_v<T>, "dda: vecElementAddFp8x8 takes an fp8 tag");
+#if defined(RCCL_FP8_HAS_PK8)
+  const auto x = __builtin_bit_cast(fp8x8_storage_t, a);
+  const auto y = __builtin_bit_cast(fp8x8_storage_t, b);
+  if constexpr (std::is_same<T, fp8e4m3>::value) {
+    return __builtin_bit_cast(uint64_t, hadd8(x, y));
+  } else {
+    return __builtin_bit_cast(uint64_t, hadd8_b(x, y));
+  }
+#else
+  __builtin_trap();
+  return 0;
+#endif
+}
 
 template <typename T>
 static inline __device__ uint32_t vecElementAdd(const uint32_t& a, const uint32_t& b) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
+  static_assert(!is_fp8_v<T>, "dda: fp8 adds eight lanes at a time; use vecElementAddFp8x8");
   if constexpr (std::is_same<T, float>::value) {
     const float* x = reinterpret_cast<const float*>(&a);
     const float* y = reinterpret_cast<const float*>(&b);
@@ -82,10 +122,19 @@ template <typename T>
 static inline __device__ uint4 vecElementAdd(const uint4& a, const uint4& b) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
   uint4 res{0, 0, 0, 0};
-  res.x = vecElementAdd<T>(a.x, b.x);
-  res.y = vecElementAdd<T>(a.y, b.y);
-  res.z = vecElementAdd<T>(a.z, b.z);
-  res.w = vecElementAdd<T>(a.w, b.w);
+  if constexpr (is_fp8_v<T>) {
+    const uint64_t lo = vecElementAddFp8x8<T>(((uint64_t)a.y << 32) | a.x, ((uint64_t)b.y << 32) | b.x);
+    const uint64_t hi = vecElementAddFp8x8<T>(((uint64_t)a.w << 32) | a.z, ((uint64_t)b.w << 32) | b.z);
+    res.x = (uint32_t)lo;
+    res.y = (uint32_t)(lo >> 32);
+    res.z = (uint32_t)hi;
+    res.w = (uint32_t)(hi >> 32);
+  } else {
+    res.x = vecElementAdd<T>(a.x, b.x);
+    res.y = vecElementAdd<T>(a.y, b.y);
+    res.z = vecElementAdd<T>(a.z, b.z);
+    res.w = vecElementAdd<T>(a.w, b.w);
+  }
   return res;
 }
 
@@ -248,11 +297,12 @@ inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, siz
 constexpr size_t kDdaLLMaxBytes = (size_t)(32) * 1024 * 1024;
 
 // Scratch is double buffered under a single epoch counter, so a bank is half of
-// it, floored to 16B. Every LL/LL128 tier that derives its slot stride from the
-// bank rather than a fixed constant puts bank 1 at the same byte offset, which
-// is what stops one tier landing on flag words another is still polling.
+// it, floored to 128B so LL128 lines in bank 1 stay 128B-aligned. Every LL/LL128
+// tier that derives its slot stride from the bank rather than a fixed constant
+// puts bank 1 at the same byte offset, which is what stops one tier landing on
+// flag words another is still polling.
 constexpr size_t ddaBankSize(size_t bytes) {
-  return (bytes / 2) / 16 * 16;
+  return (bytes / 2) / 128 * 128;
 }
 
 // Per-rank slot carved out of a bank, counted in whatever unit the protocol
@@ -269,6 +319,10 @@ constexpr size_t ddaLLSlotPkts(size_t bankSize, size_t div, size_t align) {
   return (slotUnits / align) * align;
 }
 
+// Peers staged in one pass. A runtime-sized array, or a runtime index into
+// one, is placed in scratch. 8 covers rank counts 4 and 8 in a single pass.
+constexpr int kDdaLLPeerBatch = 8;
+
 // 16-byte LL line: two (4B data, 4B flag) pairs carrying 8B of payload.
 union LLPacket16 {
   struct {
@@ -280,6 +334,19 @@ union LLPacket16 {
   uint4 raw;
 };
 static_assert(sizeof(LLPacket16) == 16, "LLPacket16 must be exactly 16 bytes");
+
+// Folds one packet's 8B payload (d0, d1) into the accumulator (acc0, acc1).
+template <typename T>
+__device__ __forceinline__ void ddaLLAddPayload(uint32_t& acc0, uint32_t& acc1, uint32_t d0, uint32_t d1) {
+  if constexpr (is_fp8_v<T>) {
+    const uint64_t sum = vecElementAddFp8x8<T>(((uint64_t)acc1 << 32) | acc0, ((uint64_t)d1 << 32) | d0);
+    acc0 = (uint32_t)sum;
+    acc1 = (uint32_t)(sum >> 32);
+  } else {
+    acc0 = vecElementAdd<T>(acc0, d0);
+    acc1 = vecElementAdd<T>(acc1, d1);
+  }
+}
 
 __device__ __forceinline__ void ddaLLStoreLineB128(uint32_t* dst, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
@@ -320,6 +387,175 @@ __device__ __forceinline__ void ddaLLLoadLineB128(const uint32_t* src, uint32_t&
   o2 = __builtin_nontemporal_load((u32_gptr)src + 2);
   o3 = __builtin_nontemporal_load((u32_gptr)src + 3);
 #endif
+}
+
+// Poll one 16B LL line until both flags match, or the comm abort flag is set.
+// Returns false if the wait was aborted so the kernel can exit.
+__device__ __forceinline__ bool ddaLLWaitLineFlags(const volatile LLPacket16* src, uint32_t flag,
+                                                   DdaKernelParams params, uint32_t& d0, uint32_t& f0, uint32_t& d1,
+                                                   uint32_t& f1) {
+  const uint32_t* line = reinterpret_cast<const uint32_t*>(const_cast<const LLPacket16*>(src));
+  int spins = 0;
+  do {
+    ddaLLLoadLineB128(line, d0, f0, d1, f1);
+    if (f0 == flag && f1 == flag) return true;
+  } while (!params.abortSpinTick(spins));
+  return false;
+}
+
+// Lines one sweep of ddaLLWaitLineFlagsBatched polls at most: a 4- or 8-rank comm's peers fit one sweep.
+constexpr int kDdaLLRecvBatch = 8;
+
+// Sweep size for n lines known at compile time (0 < n <= kDdaLLRecvBatch), else kDdaLLRecvBatch.
+constexpr int ddaLLRecvBatch(int n) {
+  return n > 0 && n <= kDdaLLRecvBatch ? n : kDdaLLRecvBatch;
+}
+
+// Polled lines from which a waiting lane spins on one stale line between sweeps: with many loads per sweep the re-sweep
+// crowds the CU memory path its remote stores also use; with few the extra sweep costs more than it saves.
+constexpr int kDdaLLSpinOneMinLines = 5;
+
+// Payload bytes one LL packet carries; the send buffer is read one packet per thread.
+constexpr int kDdaLLPayloadBytes = 8;
+static_assert(sizeof(LLPacket16) == 2 * kDdaLLPayloadBytes, "an LL line is payload plus one flag per 4B word");
+
+// Bytes one global_prefetch pulls into L2: a 128B cache line.
+constexpr int kDdaLLPrefetchLineBytes = 128;
+
+// Consecutive threads whose packets share a prefetch line; one per group issues it, for any wave size.
+constexpr int kDdaLLPrefetchThreadsPerLine = kDdaLLPrefetchLineBytes / kDdaLLPayloadBytes;
+static_assert((kDdaLLPrefetchThreadsPerLine & (kDdaLLPrefetchThreadsPerLine - 1)) == 0, "thread group is a power of 2");
+
+// L2-prefetches send packets first + k * step (k < count, below limit) before the LL epoch barrier; gfx1250 only.
+__device__ __forceinline__ void ddaLLPrefetchSend(const void* sendbuff, size_t first, size_t step, int count,
+                                                  size_t limit) {
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __has_builtin(__builtin_amdgcn_global_prefetch)
+  if (threadIdx.x % kDdaLLPrefetchThreadsPerLine != 0) {
+    return;
+  }
+  const char* base = reinterpret_cast<const char*>(sendbuff);
+#pragma unroll 1
+  for (int k = 0; k < count && first + (size_t)k * step < limit; ++k) {
+    const char* pkt = base + (first + (size_t)k * step) * kDdaLLPayloadBytes;
+    // th 1 also walks the page tables, so the first post-barrier read of the line does not.
+    __builtin_amdgcn_global_prefetch((const __attribute__((address_space(1))) void*)pkt, 0x11);
+  }
+#else
+  (void)sendbuff;
+  (void)first;
+  (void)step;
+  (void)count;
+  (void)limit;
+#endif
+}
+
+// Spins on the first stale line alone until both its flags land, so a waiting lane keeps one load in flight, not kN.
+// Returns false if aborted.
+template <int kN>
+__device__ __forceinline__ bool ddaLLSpinOneStale(const uint32_t* const (&line)[kN], const bool (&stale)[kN],
+                                                  uint32_t flag, DdaKernelParams params, int& spins) {
+  const uint32_t* wait = line[0];
+  bool found = false;
+#pragma unroll
+  for (int i = 0; i < kN; ++i) {
+    wait = stale[i] && !found ? line[i] : wait;
+    found |= stale[i];
+  }
+  if (!found) {
+    return true;
+  }
+  while (true) {
+    uint32_t d0, f0, d1, f1;
+    ddaLLLoadLineB128(wait, d0, f0, d1, f1);
+    if (f0 == flag && f1 == flag) {
+      return true;
+    }
+    if (params.abortSpinTick(spins)) {
+      return false;
+    }
+  }
+}
+
+// Waits until both flags of every line selected by mask (wave uniform) match. Each sweep issues kN loads before testing
+// any flag, so they share one wait (a load under a per-line branch would wait on its own); a slot outside mask reloads
+// the first selected line, so only selected lines are read. Sweeps repeat until every selected line is fresh, one abort
+// spin tick per sweep; with kDdaLLSpinOneMinLines or more selected lines a waiting lane spins on one stale line between
+// sweeps. A single selected line is polled alone: there is no other load to share its wait, and a sweep would issue kN
+// loads of it. d0/d1 of slots outside mask are overwritten. Returns false if aborted.
+template <int kN>
+__device__ __forceinline__ bool ddaLLWaitLineFlagsBatched(const uint32_t* const (&line)[kN], uint32_t mask,
+                                                          uint32_t flag, DdaKernelParams params, uint32_t (&d0)[kN],
+                                                          uint32_t (&d1)[kN]) {
+  static_assert(kN > 0 && kN <= 32, "one mask bit per line");
+  if (mask == 0) {
+    return true;
+  }
+  const uint32_t* first = line[0];
+#pragma unroll
+  for (int i = kN - 1; i >= 0; --i) {
+    first = ((mask >> i) & 1u) != 0 ? line[i] : first;
+  }
+  if (__builtin_popcount(mask) == 1) {
+    uint32_t w0, f0, w1, f1;
+    const auto* only = reinterpret_cast<const volatile LLPacket16*>(first);
+    const bool ok = ddaLLWaitLineFlags(only, flag, params, w0, f0, w1, f1);
+#pragma unroll
+    for (int i = 0; i < kN; ++i) {
+      d0[i] = w0;
+      d1[i] = w1;
+    }
+    return ok;
+  }
+  const uint32_t* src[kN];
+#pragma unroll
+  for (int i = 0; i < kN; ++i) {
+    src[i] = ((mask >> i) & 1u) != 0 ? line[i] : first;
+  }
+  const bool spinOne = __builtin_popcount(mask) >= kDdaLLSpinOneMinLines;
+  int spins = 0;
+  while (true) {
+    uint32_t f0[kN], f1[kN];
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+    asm volatile("" ::: "memory");
+    v4u got[kN];
+#pragma unroll
+    for (int i = 0; i < kN; ++i) {
+      got[i] = __builtin_amdgcn_global_load_b128((v4u_gptr)src[i], RCCL_SYSTEM_SYNCSCOPE);
+    }
+    // Keep every load above this point so the flag tests cannot sink one between them.
+    asm volatile("" ::: "memory");
+#pragma unroll
+    for (int i = 0; i < kN; ++i) {
+      d0[i] = got[i][0];
+      f0[i] = got[i][1];
+      d1[i] = got[i][2];
+      f1[i] = got[i][3];
+    }
+#else
+#pragma unroll
+    for (int i = 0; i < kN; ++i) {
+      ddaLLLoadLineB128(src[i], d0[i], f0[i], d1[i], f1[i]);
+    }
+    // Keep every load above this point so none sinks past the flag tests or out of the loop.
+    asm volatile("" ::: "memory");
+#endif
+    bool stale = false;
+    bool staleLine[kN];
+#pragma unroll
+    for (int i = 0; i < kN; ++i) {
+      staleLine[i] = ((mask >> i) & 1u) != 0 && ((f0[i] != flag) | (f1[i] != flag));
+      stale |= staleLine[i];
+    }
+    if (!stale) {
+      return true;
+    }
+    if (params.abortSpinTick(spins)) {
+      return false;
+    }
+    if (spinOne && !ddaLLSpinOneStale(src, staleLine, flag, params, spins)) {
+      return false;
+    }
+  }
 }
 
 __device__ __forceinline__ uint32_t ddaGetLLEpochInc(const uint32_t* __restrict__ epochDev, int flatBlockId, uint32_t inc) {

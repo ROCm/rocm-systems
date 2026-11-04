@@ -232,7 +232,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 
   assert(isa != nullptr && "ISA registry inconsistency.");
 
-  // A0 silicon requires the "strict" ISA variant. Re-point A0 devices to the 
+  // A0 silicon requires the "strict" ISA variant. Re-point A0 devices to the
   // strict variant by name so the reported ISA and code-object
   // selection target the A0-safe ISA. Later steppings keep the base target.
   if (properties_.Capability.ui32.ASICRevision == 0 &&
@@ -349,6 +349,13 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     ASICShader compute_11;
     ASICShader compute_12;
     ASICShader compute_1250;
+    // Only populated where a gfx1250 revision 0 part needs a different blob.
+    // Left zeroed elsewhere, in which case compute_1250 is used for every
+    // revision.  Note that compute_1250 is the blob WITHOUT the revision 0
+    // instruction fixup, so any entry that supplies a gfx1250 trap handler
+    // must fill this slot as well; leaving it zeroed hands a revision 0 part
+    // a handler that is missing the fixup it requires.
+    ASICShader compute_1250_rev0;
   };
 
   std::map<std::string, CompiledShader> compiled_shaders = {
@@ -377,7 +384,8 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeTrapHandlerV2_10, sizeof(kCodeTrapHandlerV2_10), 2, 4},    // gfx10
            {kCodeTrapHandlerV2_11, sizeof(kCodeTrapHandlerV2_11), 2, 4},    // gfx11
            {kCodeTrapHandlerV2_12, sizeof(kCodeTrapHandlerV2_12), 2, 4},    // gfx12
-           {kCodeTrapHandlerV2_1250, sizeof(kCodeTrapHandlerV2_1250), 2, 4},  // gfx1250
+           {kCodeTrapHandlerV2_1250, sizeof(kCodeTrapHandlerV2_1250), 2, 4},  // gfx1250 rev 1+
+           {kCodeTrapHandlerV2_1250_rev0, sizeof(kCodeTrapHandlerV2_1250_rev0), 2, 4},  // gfx1250 rev 0
        }},
       {"CopyAligned",
        {
@@ -451,10 +459,27 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
         asic_shader = &compiled_shader_it->second.compute_11;
       break;
     case 12:
-        if(supported_isas()[0]->GetMinorVersion() >= 5)
+        if (supported_isas()[0]->GetMinorVersion() == 5 &&
+            properties_.Capability.ui32.ASICRevision == 0) {
+          // The trap-during-VOP3PX PC fixup in the second-level trap handler
+          // applies to minor version 5 revision 0 only.  Every later revision,
+          // and every later minor version, uses the blob assembled without it.
+          // Shaders that do not vary by revision leave this slot zeroed.
+          ASICShader& rev0 = compiled_shader_it->second.compute_1250_rev0;
+          // An entry that supplies the later-revision blob must supply the
+          // revision 0 blob too.  Falling back would hand a revision 0 part
+          // the blob assembled without the fixup, and the check below cannot
+          // catch it because the fallback pointer is valid.
+          assert((rev0.code != NULL ||
+                  compiled_shader_it->second.compute_1250.code == NULL) &&
+                 "Incomplete shader table entry for this revision");
+          asic_shader =
+              (rev0.code != NULL) ? &rev0 : &compiled_shader_it->second.compute_1250;
+        } else if (supported_isas()[0]->GetMinorVersion() >= 5) {
           asic_shader = &compiled_shader_it->second.compute_1250;
-        else
+        } else {
           asic_shader = &compiled_shader_it->second.compute_12;
+        }
       break;
     default:
       assert(false && "Precompiled shader unavailable for target");
@@ -1284,7 +1309,7 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
   }
 
   // For non-gang H2D/D2H copies, bypass the gang lock entirely.
-  // H2D uses BlitHostToDev, D2H uses BlitDevToHost. Since they use separate engines 
+  // H2D uses BlitHostToDev, D2H uses BlitDevToHost. Since they use separate engines
   // and separate blit objects, no serialization needed.
   if (gang_factor == 1) {
     const bool is_h2d = (src_agent.device_type() == core::Agent::kAmdCpuDevice);
@@ -1565,7 +1590,8 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
     const hsa_agent_t* dst_agent_list,
     const size_t* size_list,
     uint32_t coord_engine,
-    uint32_t max_engines) {
+    uint32_t max_engines,
+    const size_t* dst_size_list) {
 
   SetCopyRequestRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
@@ -1691,6 +1717,14 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
     }
   }
 
+  // Reject asymmetric swaps before this op submits; the caller decomposes them.
+  if (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP && dst_size_list != nullptr) {
+    for (uint32_t d = 0; d < num_entries; ++d) {
+      if (dst_size_list[d] != size_list[d] && !engines[d].blit->NativeAsymmetricSwapSupported())
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+  }
+
   const bool is_indirect =
       (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC) ||
       (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST) ||
@@ -1787,7 +1821,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
           coord_dsts.push_back(dst_list[d]);
           coord_srcs.push_back(src_list[d]);
           coord_sizes_a.push_back(size_list[d]);
-          coord_sizes_b.push_back(size_list[d]);
+          coord_sizes_b.push_back(dst_size_list ? dst_size_list[d] : size_list[d]);
         }
       }
     }
@@ -1804,7 +1838,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
                core::Signal::Convert(&out_signal).handle);
       stat = engines[idxs[0]].blit->SubmitBodies(
           op, dst_list, src_list, size_list, idxs,
-          ind_src, ind_dst, body_deps, out_signal, nullptr);
+          ind_src, ind_dst, body_deps, out_signal, nullptr, dst_size_list);
       if (stat != HSA_STATUS_SUCCESS) return stat;
     }
 
@@ -1865,7 +1899,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
                body_sig);
       stat = engines[idxs[0]].blit->SubmitBodies(
           op, dst_list, src_list, size_list, idxs,
-          ind_src, ind_dst, body_deps, out_signal, body_sig);
+          ind_src, ind_dst, body_deps, out_signal, body_sig, dst_size_list);
       if (stat != HSA_STATUS_SUCCESS) return stat;
       ++grp_idx;
     }
@@ -2049,19 +2083,18 @@ hsa_status_t GpuAgent::DmaCopySwap(
   core::Signal& out_signal = *out_signal_obj;
 
   if (op.num_entries == 0) {
-    // Asymmetric swap is not yet supported here.
-    if (op.src_size != op.dst_size)
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-
     const void* src_arr[1] = { op.src };
     void* dst_arr[1] = { op.dst };
     hsa_agent_t dst_agent_arr[1] = { op.dst_agent };
     size_t size_arr[1] = { op.src_size };
+    size_t dst_size_arr[1] = { op.dst_size };
     return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal,
                            dep_signals, 1,
-                           src_arr, dst_arr, dst_agent_arr, size_arr);
+                           src_arr, dst_arr, dst_agent_arr, size_arr,
+                           /*coord_engine=*/0, /*max_engines=*/0, dst_size_arr);
   }
 
+  // Multi-entry swaps are symmetric only.
   return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal,
                          dep_signals, op.num_entries,
                          const_cast<const void* const*>(op.src_list),
@@ -2136,8 +2169,9 @@ hsa_status_t GpuAgent::DmaCopyBatchFallback(
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
-    // No shader-blit equivalent for broadcast/swap/indirect yet; these are the
-    // slots for the 1-to-N / swap / indirect blit shaders once added. Until
+  case HSA_AMD_MEMORY_COPY_OP_RECT:
+    // No shader-blit equivalent for broadcast/swap/indirect/rect yet; these are the
+    // slots for the 1-to-N / swap / indirect / rect blit shaders once added. Until
     // then, reject under SDMA=0 (same as the SDMA fan-out path would), leaving
     // the completion signal untouched as above.
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -2235,6 +2269,14 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
       status = DmaCopyIndirect(op, dep_signals);
       break;
+    case HSA_AMD_MEMORY_COPY_OP_RECT: {
+      const bool from_host =
+          core::Agent::Convert(op.src_agent)->device_type() == core::Agent::kAmdCpuDevice;
+      status =
+          DmaCopyRect(op.rect_src, op.rect_dst, op.range_list, op.num_entries,
+                      from_host ? hsaHostToDevice : hsaDeviceToDevice, dep_signals, out_signal);
+      break;
+    }
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
@@ -2246,9 +2288,10 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
-                                   const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
-                                   const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,
+hsa_status_t GpuAgent::DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
+                                   const hsa_amd_memory_copy_rect_ptr_t* dsts,
+                                   const hsa_dim3_t* ranges, uint16_t num_rects,
+                                   hsa_amd_copy_direction_t dir,
                                    std::vector<core::Signal*>& dep_signals,
                                    core::Signal& out_signal) {
   if (supported_isas()[0]->GetMajorVersion() < 9) return HSA_STATUS_ERROR_INVALID_AGENT;
@@ -2269,8 +2312,8 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_
   }
 
   BlitSdmaBase* sdmaBlit = static_cast<BlitSdmaBase*>((*blit).get());
-  hsa_status_t stat = sdmaBlit->SubmitCopyRectCommand(dst, dst_offset, src, src_offset, range,
-                                                      dep_signals, out_signal);
+  hsa_status_t stat =
+      sdmaBlit->SubmitCopyRectCommand(srcs, dsts, ranges, num_rects, dep_signals, out_signal);
 
   return stat;
 }
@@ -3550,9 +3593,26 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
           PM4_ACQUIRE_MEM_COHER_CNTL_TC_WB_ACTION_ENA);
 
       cache_inv_size_dw = 7;
+  } else if (supported_isas()[0]->GetMajorVersion() == 12 &&
+             supported_isas()[0]->GetMinorVersion() == 5) {
+      // K$/V$ are maintained by dispatch; GCR_CNTL[9] is reserved.
+      // Select only I$/GL2 maintenance, using the common base/size encoding.
+      cache_inv[7] = PM4_ACQUIRE_MEM_DW7_GCR_CNTL(
+          PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV(
+              ptr ? PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV_RANGE
+                  : PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV_ALL) |
+          PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE(
+              ptr ? PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE_RANGE
+                  : PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE_ALL) |
+          PM4_ACQUIRE_MEM_GCR_CNTL_GL2_INV |
+          PM4_ACQUIRE_MEM_GCR_CNTL_SEQ(
+              PM4_ACQUIRE_MEM_GCR_CNTL_SEQ_REVERSE));
+
+      cache_inv_size_dw = 8;
   } else {
       cache_inv[7] = PM4_ACQUIRE_MEM_DW7_GCR_CNTL(
-          PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV(1) |
+          PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV(
+              PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV_ALL) |
           PM4_ACQUIRE_MEM_GCR_CNTL_GLK_INV |
           PM4_ACQUIRE_MEM_GCR_CNTL_GLV_INV |
           PM4_ACQUIRE_MEM_GCR_CNTL_GL1_INV |

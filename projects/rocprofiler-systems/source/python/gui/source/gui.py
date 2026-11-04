@@ -1,8 +1,6 @@
-#!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-from __future__ import absolute_import
 
 __author__ = "AMD Research"
 __copyright__ = "Copyright 2023, Advanced Micro Devices, Inc."
@@ -10,23 +8,20 @@ __license__ = "MIT"
 __maintainer__ = "AMD Research"
 __status__ = "Development"
 
-import glob
-import re
 import base64
+import glob
 import os
-import pandas as pd
-import dash_bootstrap_components as dbc
-import plotly.express as px
+import re
 
-from dash import html
+import dash_bootstrap_components as dbc
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from dash import ctx, dcc, html
 from dash.dependencies import Input, Output, State
-from dash import dcc, ctx
 
 from .header import get_header
-from .parser import parse_files
-from .parser import parse_uploaded_file
-from .parser import find_causal_files
-import plotly.graph_objects as go
+from .parser import find_causal_files, parse_files, parse_uploaded_file
 
 file_timestamp = 0
 global_data = pd.DataFrame()
@@ -42,9 +37,9 @@ pd.set_option(
 
 
 def print_speedup_info(data):
-    for idx in set(list(data.idx)):
+    for idx in set(data.idx):
         sub_data = data[data["idx"] == idx]
-        print("")
+        print()
         for sub_idx, row in sub_data.iterrows():
             print(
                 f"""[{row["point"]}][{row["progress points"]}][{row["line speedup"]}] speedup: {row["program speedup"]:6.1f} +/- {row["speedup err"]:6.2f}%"""
@@ -139,9 +134,10 @@ def update_line_graph(
                 go.Scatter(
                     x=sub_data_prog["line speedup"],
                     y=sub_data_prog["program speedup"],
-                    error_y=dict(
-                        type="data", array=sub_data_prog["speedup err"].tolist()
-                    ),
+                    error_y={
+                        "type": "data",
+                        "array": sub_data_prog["speedup err"].tolist(),
+                    },
                     line_shape="spline",
                     name=prog,
                     mode="lines+markers",
@@ -309,8 +305,8 @@ def build_causal_layout(
             global_data, global_samples, global_filenames = parse_files(
                 workload_path, verbose=verbose
             )
-            experiment_list = sorted(list(global_data.point.unique()))
-            progpt_list = sorted(list(global_data["progress points"].unique()))
+            experiment_list = sorted(global_data.point.unique())
+            progpt_list = sorted(global_data["progress points"].unique())
 
             max_points = global_data.point.value_counts().max().max()
 
@@ -341,8 +337,8 @@ def build_causal_layout(
 
                 max_points = new_data.point.value_counts().max().max()
 
-                experiment_list = sorted(list(global_data.point.unique()))
-                progpt_list = sorted(list(global_data["progress points"].unique()))
+                experiment_list = sorted(global_data.point.unique())
+                progpt_list = sorted(global_data["progress points"].unique())
 
                 # reset input_filters
                 global_input_filters = reset_input_filters(
@@ -411,8 +407,8 @@ def build_causal_layout(
                 if verbose >= 3:
                     print(global_data.keys())
 
-                experiment_list = sorted(list(global_data.point.unique()))
-                progpt_list = sorted(list(global_data["progress points"].unique()))
+                experiment_list = sorted(global_data.point.unique())
+                progpt_list = sorted(global_data["progress points"].unique())
 
                 screen_data, fig1, fig2 = update_line_graph(
                     sort_filter,
@@ -429,8 +425,8 @@ def build_causal_layout(
             if not global_data.empty:
                 if verbose == 3:
                     print(global_data)
-                experiment_list = sorted(list(global_data.point.unique()))
-                progpt_list = sorted(list(global_data["progress points"].unique()))
+                experiment_list = sorted(global_data.point.unique())
+                progpt_list = sorted(global_data["progress points"].unique())
                 screen_data, fig1, fig2 = update_line_graph(
                     sort_filter,
                     experiment_list,
