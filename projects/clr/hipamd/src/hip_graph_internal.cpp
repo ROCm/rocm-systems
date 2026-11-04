@@ -2733,6 +2733,16 @@ hipError_t GraphExecSegmented::UpdatePacketBatchesForNodeEnableDisable(hip::Grap
 void GraphExecBase::OnLaunchComplete(cl_event event, cl_int command_exec_status, void* user_data) {
   auto* cleanup = reinterpret_cast<GraphLaunchCleanup*>(user_data);
   GraphExecBase* execBase = cleanup->exec;
+  // DEBUG_CLR_GRAPH_FAST_LAUNCH: the launch's end marker holds the command its side queues' fork
+  // waits waited on. The launch completed, so those waits are done: drop it now rather than when
+  // the end marker is destroyed, which the next launch's end marker holding this one would defer,
+  // launch after launch
+  if (event != nullptr) {
+    auto* accumulate = dynamic_cast<amd::AccumulateCommand*>(&as_amd(event)->command());
+    if (accumulate != nullptr) {
+      accumulate->releaseHeldCommands();
+    }
+  }
   // Re-arm and recycle the launch's signals while the GraphExecBase (and thus its
   // signal pool) is still alive, then drop the launch's reference.
   execBase->RecycleLaunchSignals(cleanup->device, cleanup->signal_set);
@@ -2837,6 +2847,14 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
         for (int segment_id : segments_at_level) {
           hip::Stream* seg_stream = resolveSegmentStream(segments_[segment_id]);
           if (seg_stream != launch_stream) {
+            // DEBUG_CLR_GRAPH_FAST_LAUNCH: the marker is a batch head, so its completion signal
+            // is an interrupt signal, ahead of the segment's first kernel. The wait goes on the
+            // side queue without a command instead; graph_accumulate, which completes after
+            // every segment, holds the waited command
+            if (DEBUG_CLR_GRAPH_FAST_LAUNCH &&
+                seg_stream->vdev()->dispatchGraphForkWait(launch_last_cmd, graph_accumulate)) {
+              continue;
+            }
             auto marker = new amd::Marker(*seg_stream, true, launch_wait_list);
             if (marker != nullptr) {
               // Like hipStreamWaitEvent, the fork only orders the side stream after the
