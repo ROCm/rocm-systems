@@ -408,6 +408,37 @@ def test_sdk_profiler_options_preserve_ld_preload_and_set_env(tmp_path, monkeypa
     assert options["ROCPROF_COUNTER_COLLECTION"] == "1"
 
 
+def test_ml_api_trace_enables_marker_tier_on_both_backends(tmp_path, monkeypatch):
+    """--trace-ml-api uses marker trace on rocprofv3 and the SDK."""
+    args = argparse.Namespace(
+        remaining="my_app",
+        rocprofiler_sdk_tool_path="/opt/sdk/tool.so",
+        output_directory=str(tmp_path / "workload"),
+        iteration_multiplexing=None,
+        attach_pid=None,
+        attach_duration_msec=None,
+        kernel=None,
+        kernel_iteration_range=None,
+        trace_ml_api=None,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_profile.profiler_rocprofiler_sdk.resolve_rocm_library_path",
+        lambda path: path,
+    )
+
+    v3 = rocprof_v3_profiler(args, profiler_mode="rocprofv3", soc=None)
+    v3._ml_api_trace_enabled = True
+    v3_opts = v3.get_profiler_options()
+    assert "--marker-trace" in v3_opts
+    assert "--kernel-trace" not in v3_opts
+
+    sdk = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
+    sdk._ml_api_trace_enabled = True
+    sdk_opts = sdk.get_profiler_options()
+    assert sdk_opts["ROCPROF_MARKER_API_TRACE"] == "1"
+    assert "librocprofiler-sdk-roctx.so" in sdk_opts["LD_PRELOAD"]
+
+
 def test_rocprofv3_live_attach_uses_sync_output():
     """Unit test: rocprofv3 live attach requests synchronous output generation."""
     args = _make_sanitize_args(
