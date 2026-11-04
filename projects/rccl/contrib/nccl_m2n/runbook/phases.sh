@@ -5,7 +5,7 @@
 #   a2a:<label>:<np>:<hf>                                      rccl-tests alltoall_perf reference
 D=$(dirname "$(readlink -f "$0")")
 . $D/env.sh
-R=$WORK/logs/bench
+R=$WORK/logs/bench; mkdir -p $R
 SSHA="ssh -p $SSH_PORT -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 mpi() { local np=$1 hf=$2; shift 2; local P=(); [[ $hf == 1 ]] && P=(--hostfile $HF)
   mpirun -np $np "${P[@]}" --map-by ppr:8:node --bind-to none --mca pml ob1 --mca btl ^vader,openib \

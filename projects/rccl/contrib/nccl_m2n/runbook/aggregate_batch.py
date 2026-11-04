@@ -20,7 +20,7 @@ for f in sorted(glob.glob(os.path.join(root, '*_c*_r*.log'))):
         p = line.split()
         if len(p) == 8 and p[0].startswith('['):
             d[(lab, p[1], p[0].replace(',', 'x'), cp, nc)].append((float(p[6]), float(p[7]), float(p[4])))
-labs = sorted({k[0] for k in d})
+labs = sorted({k[0] for k in st})   # from statuses, so scales where every launch failed still show
 for lab in labs:
     print(f'\n#### {lab}: 4 tensors, sequential vs concurrent, GiB/s (median of 3 launches); speedup = seq ms / con ms\n')
     print('| pattern | tensor (int8) | copy | ' + ' | '.join(f'C={c} seq / con / x' for c in ('1', '2', '4')) + ' | validate |')

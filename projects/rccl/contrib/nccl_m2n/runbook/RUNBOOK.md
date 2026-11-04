@@ -324,6 +324,7 @@ Build (section 5) first. The two `sudo docker exec` lines run on the node (root 
 runs in your shell inside the container.
 
 ```bash
+SRC=~/m2n-ruby/rocm-systems
 cd ~/m2n-ruby && git clone https://github.com/NVIDIA/nccl-extensions.git && cd nccl-extensions
 git checkout $(awk '/^commit:/{print $2}' $SRC/projects/rccl/contrib/nccl_m2n/UPSTREAM_VERSION)
 git apply --directory=python /path/to/m2n-pytorch-rocm-shim.patch
@@ -361,7 +362,9 @@ cd /tmp
 
 Expected: `VALIDATION PASSED` with the same bandwidth as the C bench at 1 GiB (PACK cross-dim ~170 GiB/s per
 source rank); the DTensor check (TP4 on ranks 0-3 -> DP2 x TP2 on 4-7, 3 placements x bf16/fp32/int8) ends
-with `RESULT PASS failures=0` for both `--comm rccl` and `--comm pg`. For 2 nodes use `-np 16 --hostfile`.
+with `RESULT PASS failures=0` for both `--comm rccl` and `--comm pg`. For 2 nodes replace `-np 8` with
+`-np 16 --hostfile ~/m2n-ruby/hostfile` and use 8-rank meshes in the bench (`--src-mesh-dims 1,8
+--dst-mesh-dims 1,8`, node 1 -> node 2); the DTensor check sizes itself from the world size (TP8 -> DP2 x TP4).
 Only `--buffer-provider torch` is supported on ROCm.
 
 ## Troubleshooting
