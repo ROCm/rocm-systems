@@ -1100,6 +1100,117 @@ TEST(Gfx1250ExecutionTest, SetregB32ClobbersVgprMsbWithoutArmingImmediateHazard)
   EXPECT_EQ(wave->vgpr_msb_mode(), kFollowingSetLayout);
 }
 
+TEST(Gfx1250ExecutionTest, SRoundModeAndSDenormModeThenFmaRespectsModes) {
+  amdgpu::GpuMemory memory("gfx1250_round_mode_fma_memory");
+  amdgpu::L2Cache l2("gfx1250_round_mode_fma_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.target = ROCJITSU_CODE_TARGET_GFX1250;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = kGfx1250ScalarSlots;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = kGfx1250LdsSizeKb;
+  auto compute_unit =
+      std::make_unique<Gfx1250MemoryTestCu>("gfx1250_round_mode_fma_cu", config, &memory, &l2);
+  auto *wave = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(1u);
+
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1250IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+
+  const uint32_t vgpr_base = wave->vgpr_alloc().base;
+  // v_fma_f32 v3, v1, v2, v0 with a = b = 1 and c = 3 * 2^-24. The exact
+  // result 1 + 3 * 2^-24 is halfway between 1 + 2^-23 (odd mantissa) and
+  // 1 + 2^-22 (even mantissa): round-to-nearest-even and upward select the
+  // upper neighbour, toward-zero and downward select the lower one.
+  compute_unit->write_vgpr(vgpr_base + 0, 0, std::bit_cast<uint32_t>(std::ldexp(3.0f, -24)));
+  compute_unit->write_vgpr(vgpr_base + 1, 0, std::bit_cast<uint32_t>(1.0f));
+  compute_unit->write_vgpr(vgpr_base + 2, 0, std::bit_cast<uint32_t>(1.0f));
+  const uint32_t kLower = std::bit_cast<uint32_t>(1.0f + std::ldexp(1.0f, -23));
+  const uint32_t kUpper = std::bit_cast<uint32_t>(1.0f + std::ldexp(1.0f, -22));
+
+  const auto execute_vgpr3_fma = [&](uint8_t c_reg, uint8_t a_reg, uint8_t b_reg) {
+    const auto words =
+        cdna5::build_vop3(cdna5::kVFmaF32Vop3, {.vdst = 3,
+                                                .src0 = static_cast<uint16_t>(256 + a_reg),
+                                                .src1 = static_cast<uint16_t>(256 + b_reg),
+                                                .src2 = static_cast<uint16_t>(256 + c_reg)});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    compute_unit->execute_and_route(std::move(inst), *wave);
+    return compute_unit->read_vgpr(vgpr_base + 3, 0);
+  };
+  const auto execute_round_mode = [&](uint16_t simm16) {
+    const auto words = cdna5::build_sopp(cdna5::kSRoundModeSopp, {.simm16 = simm16});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    compute_unit->execute_and_route(std::move(inst), *wave);
+  };
+  const auto execute_denorm_mode = [&](uint16_t simm16) {
+    const auto words = cdna5::build_sopp(cdna5::kSDenormModeSopp, {.simm16 = simm16});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    compute_unit->execute_and_route(std::move(inst), *wave);
+  };
+
+  // Seed FP_DENORM (bits 7:4) and FP16_OVFL so every case also proves the
+  // mode writes preserve unrelated MODE bits.
+  constexpr uint32_t kSeededMode = 0x50u | amdgpu::Wavefront::FP16_OVFL_BIT;
+  wave->set_mode_raw(kSeededMode);
+  struct RoundCase {
+    uint16_t simm16;
+    uint32_t mode;
+    uint32_t expected;
+  };
+  const RoundCase kRoundCases[] = {
+      {0xFu, 3u, kLower}, {0x5u, 1u, kUpper}, {0xAu, 2u, kLower}, {0x0u, 0u, kUpper}};
+  for (const RoundCase &round_case : kRoundCases) {
+    SCOPED_TRACE(static_cast<unsigned>(round_case.simm16));
+    execute_round_mode(round_case.simm16);
+    EXPECT_EQ(wave->fp_round_mode_f32(), round_case.mode);
+    EXPECT_EQ(wave->fp_round_mode_f16_f64(), round_case.mode);
+    EXPECT_EQ(wave->mode_raw() & ~amdgpu::Wavefront::FP_ROUND_MASK, kSeededMode);
+    EXPECT_EQ(execute_vgpr3_fma(0, 1, 2), round_case.expected);
+  }
+
+  // Asymmetric immediate: F32 rounds downward (2) while F16/F64 rounds upward
+  // (1). The F32 witness must follow the F32 field, not a copy of it. The
+  // nonzero rounding value and seeded flag carry into the denorm cases below.
+  execute_round_mode(0x6u);
+  EXPECT_EQ(wave->fp_round_mode_f32(), 2u);
+  EXPECT_EQ(wave->fp_round_mode_f16_f64(), 1u);
+  EXPECT_EQ(wave->mode_raw() & ~amdgpu::Wavefront::FP_ROUND_MASK, kSeededMode);
+  EXPECT_EQ(execute_vgpr3_fma(0, 1, 2), kLower);
+
+  // Decoded S_DENORM_MODE with independent precision fields. Rounding stays
+  // at 0x6 (F32 downward); the exact 2^-127 result below is representable, so
+  // only the denorm field decides whether it survives.
+  compute_unit->write_vgpr(vgpr_base + 4, 0, std::bit_cast<uint32_t>(std::ldexp(1.0f, -126)));
+  compute_unit->write_vgpr(vgpr_base + 5, 0, std::bit_cast<uint32_t>(0.5f));
+  compute_unit->write_vgpr(vgpr_base + 6, 0, 0u);
+  // v_fma_f32(2^-126, 0.5, 0) is exactly 2^-127: kept as a subnormal when
+  // F32 denorms are enabled, flushed to zero otherwise.
+  constexpr uint32_t kSubnormal = 0x00400000u;
+  struct DenormCase {
+    uint16_t simm16;
+    uint32_t f32_mode;
+    uint32_t f16_f64_mode;
+    uint32_t expected;
+  };
+  const DenormCase kDenormCases[] = {
+      {0x3u, 3u, 0u, kSubnormal}, {0xCu, 0u, 3u, 0u}, {0x0u, 0u, 0u, 0u}};
+  for (const DenormCase &denorm_case : kDenormCases) {
+    SCOPED_TRACE(static_cast<unsigned>(denorm_case.simm16));
+    execute_denorm_mode(denorm_case.simm16);
+    EXPECT_EQ(wave->fp_denorm_mode_f32(), denorm_case.f32_mode);
+    EXPECT_EQ(wave->fp_denorm_mode_f16_f64(), denorm_case.f16_f64_mode);
+    EXPECT_EQ(wave->fp_round_mode_f32(), 2u);
+    EXPECT_EQ(wave->fp_round_mode_f16_f64(), 1u);
+    EXPECT_EQ(wave->mode_raw() & ~amdgpu::Wavefront::FP_DENORM_MASK,
+              amdgpu::Wavefront::FP16_OVFL_BIT | 0x6u);
+    EXPECT_EQ(execute_vgpr3_fma(6, 4, 5), denorm_case.expected);
+  }
+}
+
 TEST(Gfx1251ExecutionTest, SetregModeUsesOrdinarySliceAndFollowingSetVgprMsbExecutes) {
   amdgpu::GpuMemory memory("gfx1251_setreg_memory");
   amdgpu::L2Cache l2("gfx1251_setreg_l2");
@@ -4949,8 +5060,8 @@ TEST(Gfx1251PackedU64ExecutionTest, RejectsUnprovenShiftCountsBeforeAnyDestinati
 TEST(Gfx1251PackedU64ExecutionTest, RejectedCountTerminatesDispatchWithSimulatorFailure) {
   constexpr uint32_t kLiteral = 101u;
   // Public LLVM gfx1251_asm_vop3p.s encoding for
-  // v_pk_lshl_add_u64 v[4:7], v[8:11], 101, v[16:19]. The s_endpgm must never
-  // be needed to retire the rejected instruction's workgroup.
+  // v_pk_lshl_add_u64 v[4:7], v[8:11], 101, v[16:19]. Cancel the rejected
+  // dispatch without executing s_endpgm or publishing successful completion.
   constexpr std::array<uint32_t, 4> kCode{0xCC7E4004u, 0x1C41FF08u, kLiteral, S_ENDPGM_GFX12};
   constexpr uint64_t kSignalAddress = 0x20000;
   constexpr uint32_t kSignalValueOffset = 8;
@@ -4978,6 +5089,10 @@ TEST(Gfx1251PackedU64ExecutionTest, RejectedCountTerminatesDispatchWithSimulator
   packet.completion_signal.handle = kSignalAddress;
   queue.submit(packet);
 
+  ASSERT_TRUE(sim.engine->step());
+  ASSERT_NE(sim.cu()->wf(0), nullptr);
+  const uint32_t dispatch_id = sim.cu()->wf(0)->dispatch_id();
+  ASSERT_TRUE(sim.cp()->has_dispatch_for_test(1, 0, dispatch_id));
   while (sim.engine->step()) {
   }
 
@@ -4986,8 +5101,10 @@ TEST(Gfx1251PackedU64ExecutionTest, RejectedCountTerminatesDispatchWithSimulator
   EXPECT_EQ(exit.code, 1);
   EXPECT_NE(exit.message.find("v_pk_lshl_add_u64"), std::string::npos);
   EXPECT_FALSE(sim.cu()->has_active_wfs());
-  EXPECT_EQ(sim.memory->read64(kSignalAddress + kSignalValueOffset), 0u)
-      << "the rejected dispatch must still publish its workgroup completion";
+  EXPECT_TRUE(sim.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_FALSE(sim.cp()->has_dispatch_for_test(1, 0, dispatch_id));
+  EXPECT_EQ(sim.memory->read64(kSignalAddress + kSignalValueOffset), 1u)
+      << "the rejected dispatch must not publish successful completion";
 }
 
 TEST(Gfx1251PackedU64ExecutionTest, ExecutesEveryPublicLlvmSourceForm) {

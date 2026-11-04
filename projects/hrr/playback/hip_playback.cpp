@@ -1983,6 +1983,35 @@ static bool dep_array(PlaybackContext& ctx, const char* api, const uint8_t* byte
     return true;
 }
 
+// Resolve the symbol a symbol-copy record names and check that the copy stays
+// inside it. The record's offset and count are archive data: without this the
+// handlers add the offset to the live address and hand the sum to HIP, which
+// does not bound a copy against the symbol and can reach a host memcpy at an
+// address the symbol does not own. The comparison is written so offset + count
+// is never formed and cannot wrap. On success *out is the symbol's live base address.
+static hipError_t resolve_symbol_range(PlaybackContext& ctx, uint64_t rec,
+                                       uint64_t offset, uint64_t count,
+                                       const char* api, void** out) {
+    size_t size = 0;
+    void* symbol = ctx.translate_symbol(rec, &size);
+    if (!symbol) {
+        fprintf(stderr,
+                "[HRR] %s: symbol 0x%llx is not in this archive's symbol "
+                "registry.\n", api, (unsigned long long)rec);
+        return hipErrorInvalidSymbol;
+    }
+    if (offset > size || count > size - offset) {
+        fprintf(stderr,
+                "[HRR] %s: copy of %llu bytes at offset %llu does not fit "
+                "symbol 0x%llx (%zu bytes registered); refusing the call\n",
+                api, (unsigned long long)count, (unsigned long long)offset,
+                (unsigned long long)rec, size);
+        return hipErrorInvalidValue;
+    }
+    *out = symbol;
+    return hipSuccess;
+}
+
 // True, having refused the call by name, when `size` bytes of host memory a call
 // reads have no blob: capture left them out, as it does for a blob over
 // HIP_HRR_CAPTURE_MAX_BLOB_MB.
@@ -2032,15 +2061,6 @@ static const void* to_symbol_source(PlaybackContext& ctx, const A* a,
     return src;
 }
 
-static void* symbol_or_complain(PlaybackContext& ctx, uint64_t rec,
-                                const char* api) {
-    void* symbol = ctx.translate_symbol(rec);
-    if (!symbol)
-        fprintf(stderr, "[HRR] %s: symbol 0x%llx is not in this archive's "
-                "symbol registry.\n", api, (unsigned long long)rec);
-    return symbol;
-}
-
 }  // namespace
 
 hipError_t playback_hipGraphAddMemcpyNodeToSymbol(PlaybackContext& ctx,
@@ -2048,8 +2068,11 @@ hipError_t playback_hipGraphAddMemcpyNodeToSymbol(PlaybackContext& ctx,
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphAddMemcpyNodeToSymbol*>(payload);
     const auto kind = static_cast<hipMemcpyKind>(a->kind);
-    void* symbol = symbol_or_complain(ctx, a->symbol, "hipGraphAddMemcpyNodeToSymbol");
-    if (!symbol) return hipErrorInvalidSymbol;
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            "hipGraphAddMemcpyNodeToSymbol", &symbol);
+        e != hipSuccess)
+        return e;
     const void* src = to_symbol_source(ctx, a, "hipGraphAddMemcpyNodeToSymbol");
     if (!src) return hipErrorInvalidValue;
 
@@ -2076,14 +2099,11 @@ hipError_t playback_hipGraphAddMemcpyNodeFromSymbol(PlaybackContext& ctx,
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphAddMemcpyNodeFromSymbol*>(payload);
     const auto kind = static_cast<hipMemcpyKind>(a->kind);
-    void* symbol = ctx.translate_symbol(a->symbol);
-    if (!symbol) {
-        fprintf(stderr,
-                "[HRR] hipGraphAddMemcpyNodeFromSymbol: symbol 0x%llx is not in "
-                "this archive's symbol registry.\n",
-                (unsigned long long)a->symbol);
-        return hipErrorInvalidSymbol;
-    }
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            "hipGraphAddMemcpyNodeFromSymbol", &symbol);
+        e != hipSuccess)
+        return e;
 
     void* dst = nullptr;
     if (kind == hipMemcpyDeviceToHost || kind == hipMemcpyHostToHost) {
@@ -2134,8 +2154,11 @@ hipError_t playback_hipGraphMemcpyNodeSetParamsToSymbol(PlaybackContext& ctx,
     const char* kApi = "hipGraphMemcpyNodeSetParamsToSymbol";
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphMemcpyNodeSetParamsToSymbol*>(payload);
-    void* symbol = symbol_or_complain(ctx, a->symbol, kApi);
-    if (!symbol) return hipErrorInvalidSymbol;
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            kApi, &symbol);
+        e != hipSuccess)
+        return e;
     const void* src = to_symbol_source(ctx, a, kApi);
     if (!src) return hipErrorInvalidValue;
     hipGraphNode_t node = ctx.translate_graph_node(a->node);
@@ -2154,8 +2177,11 @@ hipError_t playback_hipGraphMemcpyNodeSetParamsFromSymbol(PlaybackContext& ctx,
     const char* kApi = "hipGraphMemcpyNodeSetParamsFromSymbol";
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphMemcpyNodeSetParamsFromSymbol*>(payload);
-    void* symbol = symbol_or_complain(ctx, a->symbol, kApi);
-    if (!symbol) return hipErrorInvalidSymbol;
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            kApi, &symbol);
+        e != hipSuccess)
+        return e;
     hipGraphNode_t node = ctx.translate_graph_node(a->node);
     if (!node) {
         fprintf(stderr, "[HRR] %s: node 0x%llx was never built at replay.\n",
@@ -2181,8 +2207,11 @@ hipError_t playback_hipGraphExecMemcpyNodeSetParamsToSymbol(
     const char* kApi = "hipGraphExecMemcpyNodeSetParamsToSymbol";
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphExecMemcpyNodeSetParamsToSymbol*>(payload);
-    void* symbol = symbol_or_complain(ctx, a->symbol, kApi);
-    if (!symbol) return hipErrorInvalidSymbol;
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            kApi, &symbol);
+        e != hipSuccess)
+        return e;
     const void* src = to_symbol_source(ctx, a, kApi);
     if (!src) return hipErrorInvalidValue;
     hipGraphExec_t exec = ctx.translate_graph_exec(a->hGraphExec);
@@ -2203,8 +2232,11 @@ hipError_t playback_hipGraphExecMemcpyNodeSetParamsFromSymbol(
     const char* kApi = "hipGraphExecMemcpyNodeSetParamsFromSymbol";
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphExecMemcpyNodeSetParamsFromSymbol*>(payload);
-    void* symbol = symbol_or_complain(ctx, a->symbol, kApi);
-    if (!symbol) return hipErrorInvalidSymbol;
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            kApi, &symbol);
+        e != hipSuccess)
+        return e;
     hipGraphExec_t exec = ctx.translate_graph_exec(a->hGraphExec);
     hipGraphNode_t node = ctx.translate_graph_node(a->node);
     if (!exec || !node) {
@@ -3312,10 +3344,15 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 // the address without a free. The entry being replaced keeps a live pinned
 // buffer, so free it, and give its charge back, before the new one is charged.
 // Otherwise the old buffer would stay allocated with no charge against it.
+// A buffer the runtime refuses to release (hipHostFree or hipHostUnregister
+// fails, as it does under a capture on another thread) is left alone, buffer
+// and charge both: the charge goes back only once the runtime has let go.
+// Freeing a registration would leave it aimed at freed heap.
 static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
     std::unique_lock host_free(ctx.host_free_mu);
     void* host_ptr = nullptr;
     void* reg_buf = nullptr;
+    size_t size = 0;
     AllocKind kind = AllocKind::Device;
     {
         std::unique_lock lk(ctx.map_mutex);
@@ -3324,7 +3361,7 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
         kind = it->second.kind;
         if (kind != AllocKind::HostMalloc && kind != AllocKind::HostRegister) return;
         host_ptr = it->second.live_ptr;
-        ctx.host_budget.release(it->second.size);
+        size = it->second.size;
         ctx.alloc_map.erase(it);
         auto rb = ctx.host_reg_bufs.find(rec);
         if (rb != ctx.host_reg_bufs.end()) {
@@ -3333,11 +3370,12 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
         }
     }
     if (kind == AllocKind::HostMalloc) {
-        (void)hipHostFree(host_ptr);
+        if (hipHostFree(host_ptr) == hipSuccess) ctx.host_budget.release(size);
         return;
     }
     void* buf = reg_buf ? reg_buf : host_ptr;
-    (void)hipHostUnregister(buf);
+    if (hipHostUnregister(buf) != hipSuccess) return;
+    ctx.host_budget.release(size);
 #ifdef _WIN32
     _aligned_free(buf);
 #else
@@ -4385,6 +4423,43 @@ hipError_t playback_hipEventCreateWithFlags(PlaybackContext& ctx,
     hipEvent_t e  = nullptr;
     hipError_t r  = hipEventCreateWithFlags(&e, a->flags);
     if (r == hipSuccess) ctx.record_event(a->event, e);
+    return r;
+}
+
+hipError_t playback_hipEventElapsedTime(PlaybackContext& ctx,
+                                         const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipEventElapsedTime*>(pl);
+    float ms = 0.f;
+    hipEvent_t start = ctx.translate_event(a->start);
+    hipEvent_t stop  = ctx.translate_event(a->stop);
+    hipError_t r = hipEventElapsedTime(&ms, start, stop);
+    if (r == hipSuccess) return hipSuccess;
+    // HIP returns hipErrorInvalidHandle when either event has no marker.
+    // hipExtModuleLaunchKernel sets those markers inside the runtime. An
+    // archive recorded before that side effect was stored has no
+    // hipEventRecord for the pair, and the captured call still succeeded.
+    // Both handles resolving means the events are still live, so this is not
+    // a destroyed event. The milliseconds were not stored. Warn once and clear
+    // the sticky error — the next call would otherwise report it.
+    // Only such an archive gets this: one with
+    // HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS stored the markers, so a missing
+    // one there is a capture or replay fault and fails the replay.
+    if (r == hipErrorInvalidHandle && a->ret == 0 && start && stop &&
+        !ctx.ext_launch_event_markers) {
+        static std::atomic<bool> warned{false};
+        if (!warned.exchange(true)) {
+            fprintf(stderr,
+                    "[HRR] hipEventElapsedTime: no marker on a live pair "
+                    "(start=0x%llx stop=0x%llx; archive predates ext-launch "
+                    "event markers, recorded success, replay returned "
+                    "hipErrorInvalidHandle); continuing\n",
+                    (unsigned long long)a->start, (unsigned long long)a->stop);
+        }
+        (void)hipGetLastError();
+        return hipSuccess;
+    }
+    if (hrr_replayed_recorded_error(ctx, "hipEventElapsedTime", a->ret, r))
+        return hipSuccess;
     return r;
 }
 
