@@ -33,7 +33,6 @@
 #include "lib/rocprofiler-sdk/counters/sample_consumer.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
-#include "lib/rocprofiler-sdk/record_producer.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -60,10 +59,6 @@ namespace
 void
 process_completed_cb(completed_cb_params_t&& params)
 {
-    // Counter records are emplaced here and the tool's record_callback runs here, so a drain
-    // entered from this thread would be waiting on this thread.
-    auto _producer = scoped_record_producer{};
-
     auto&       info          = params.info;
     auto&       session       = *params.session;
     const auto& packet        = *params.packet_data;

@@ -102,7 +102,8 @@ rocprofiler_context_is_valid(rocprofiler_context_id_t context_id, int* status) R
  *
  * @warning Expensive, and it slows tracing while it runs: it blocks until record production
  * catches up and stalls queue creation and destruction. Call it once before reading a buffer,
- * never per dispatch or on a hot path.
+ * never per dispatch or on a hot path. Calling it from a buffer or record callback deadlocks:
+ * those run on the threads it waits for.
  *
  * Covers kernel dispatch, memory copy, HIP event tracing, dispatch and device counter collection,
  * signal-less dispatch, and services extracted inline at dispatch completion; PC sampling agent
@@ -115,8 +116,6 @@ rocprofiler_context_is_valid(rocprofiler_context_id_t context_id, int* status) R
  * @retval ::ROCPROFILER_STATUS_SUCCESS Record writing is caught up for the covered kinds
  * @retval ::ROCPROFILER_STATUS_ERROR_RECORDS_OUTSTANDING Records remain outstanding; nothing was
  * discarded and the call may be retried
- * @retval ::ROCPROFILER_STATUS_ERROR_REENTRANT_CALL Invoked from a callback run by the threads this
- * waits for; prefer a HIP API exit callback over a dispatch callback
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND A context in @p contexts does not exist
  */
 rocprofiler_status_t
