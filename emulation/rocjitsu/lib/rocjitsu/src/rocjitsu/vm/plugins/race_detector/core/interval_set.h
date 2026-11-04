@@ -4,6 +4,7 @@
 #pragma once
 #include <algorithm>
 #include <cassert>
+#include <optional>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -101,6 +102,18 @@ public:
     }
     --it;
     return it->end > qStart;
+  }
+
+  /// Return the lowest byte of [qStart, qEnd) that some interval covers, or
+  /// nullopt if none does. Requires intervals to be sorted (finalize()).
+  ///
+  /// Sorted non-overlapping intervals also have sorted ends, so the first
+  /// interval ending after qStart is the only candidate for the lowest byte.
+  std::optional<int> firstOverlap(int qStart, int qEnd) const {
+    auto it = std::ranges::upper_bound(intervals, qStart, {}, &Interval::end);
+    if (it == intervals.end() || it->start >= qEnd)
+      return std::nullopt;
+    return std::max(it->start, qStart);
   }
 
   auto begin() const { return intervals.begin(); }

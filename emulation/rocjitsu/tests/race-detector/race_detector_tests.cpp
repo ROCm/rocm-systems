@@ -1438,14 +1438,14 @@ TEST(RaceDetector, TensorDma_StoreReadsPendingCrossWaveWriteRace) {
   RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
   b.ldsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/36, /*bytes=*/4);
   b.tensorStoreFromLds(/*wave=*/0, {{.address = 32, .bytes = 16}});
-  EXPECT_TRUE(b.hasLdsRace(32));
+  EXPECT_TRUE(b.hasLdsRace(36));
 }
 
 TEST(RaceDetector, TensorDma_LoadOverwritesPendingCrossWaveReadRace) {
   RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
   b.ldsRead(/*wave=*/1, /*lane=*/0, /*addr=*/4, /*bytes=*/4, /*vgprDst=*/0);
   b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
-  EXPECT_TRUE(b.hasLdsRace(0));
+  EXPECT_TRUE(b.hasLdsRace(4));
 }
 
 TEST(RaceDetector, TensorDma_LoadAfterCrossWaveReadRetiredSafe) {
@@ -1462,7 +1462,17 @@ TEST(RaceDetector, TensorDma_StoreReadsSameWavePendingDsWriteRace) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
   b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/36, /*bytes=*/4);
   b.tensorStoreFromLds(/*wave=*/0, {{.address = 32, .bytes = 16}});
-  EXPECT_TRUE(b.hasLdsRace(32));
+  EXPECT_TRUE(b.hasLdsRace(36));
+}
+
+TEST(RaceDetector, TensorDma_RaceIsReportedAtAByteBothAccessesTouch) {
+  // The store reads bytes 0-127 but shares only bytes 120-123 with the DS
+  // write, so the report names byte 120, not the start of the store.
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/120, /*bytes=*/4);
+  b.tensorStoreFromLds(/*wave=*/0, {{.address = 0, .bytes = 128}});
+  EXPECT_TRUE(b.hasLdsRace(120));
+  EXPECT_FALSE(b.hasLdsRace(0));
 }
 
 TEST(RaceDetector, TensorDma_StoreReadsSameWaveCompletedDsWriteSafe) {
@@ -1487,7 +1497,7 @@ TEST(RaceDetector, TensorDma_TensorcntDoesNotRetireDsWrite) {
   b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/36, /*bytes=*/4);
   b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/0);
   b.tensorStoreFromLds(/*wave=*/0, {{.address = 32, .bytes = 16}});
-  EXPECT_TRUE(b.hasLdsRace(32));
+  EXPECT_TRUE(b.hasLdsRace(36));
 }
 
 TEST(RaceDetector, TensorDma_CrossWaveLoadBarrierWithoutTensorcntRace) {

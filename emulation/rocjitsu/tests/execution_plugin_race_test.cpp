@@ -637,6 +637,16 @@ TEST_F(TensorDmaRaceTest, StoreIsCheckedAgainstAPendingDsWrite) {
       << report;
 }
 
+TEST_F(TensorDmaRaceTest, RaceIsReportedAtAByteBothAccessesTouch) {
+  // The store reads bytes 0-127 but shares only bytes 120-123 with the DS write.
+  EXPECT_FALSE(ds_write(0, 120));
+  const size_t previous = sink->str().size();
+  EXPECT_TRUE(tensor_store(0, {{.address = 0, .bytes = 128}}));
+  const std::string report = sink->str().substr(previous);
+  EXPECT_NE(report.find("Race on LDS byte 120 ["), std::string::npos) << report;
+  EXPECT_NE(report.find(" reg=120 "), std::string::npos) << report;
+}
+
 TEST_F(TensorDmaRaceTest, StoreAfterDscntIsSafe) {
   EXPECT_FALSE(ds_write(0, 4));
   wait_dscnt(0);
