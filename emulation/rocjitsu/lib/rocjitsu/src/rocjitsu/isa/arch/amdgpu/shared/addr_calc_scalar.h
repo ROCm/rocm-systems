@@ -28,8 +28,9 @@ namespace rocjitsu {
 namespace amdgpu {
 namespace addr_calc {
 
-/// Mark each in-range DWORD separately so partial buffer loads zero only the
-/// out-of-range destinations. Byte and halfword loads use one destination DWORD.
+/// Set the mask bit of each DWORD that starts below @p bound and clear the rest.
+/// A load returns zero for a clear DWORD and a store skips it. Byte and halfword
+/// loads use one destination DWORD.
 inline void scalar_buffer_load_mask(ScalarMemState *state, int64_t offset, uint64_t bound) {
   if (!state)
     return;
@@ -50,6 +51,11 @@ inline void scalar_buffer_load_mask(ScalarMemState *state, int64_t offset, uint6
 /// is. GFX9 passes 3, so a DWORD must lie wholly in range, and RDNA4 passes its
 /// access alignment. RDNA1 through RDNA3.5 pass zero; their hardware rule is
 /// unverified.
+///
+/// An atomic's mask is all set or all clear. An aligned atomic is accessed only
+/// if every DWORD of its element is in range. A misaligned atomic keeps its full
+/// mask so the access path faults, because alignment is checked before bounds.
+/// The CDNA ISA manuals do not describe these rules; they are observed on gfx90a.
 inline std::optional<uint64_t> scalar_buffer_address(Wavefront &wf, uint32_t selector,
                                                      uint64_t base, int64_t offset,
                                                      ScalarMemState *state, uint64_t align_mask,
@@ -61,12 +67,10 @@ inline std::optional<uint64_t> scalar_buffer_address(Wavefront &wf, uint32_t sel
   scalar_buffer_load_mask(state, offset, (*records * (stride ? stride : 1)) & ~size_align_mask);
   const uint64_t address = buffer_virtual_address(base + offset) & ~align_mask;
   if (state && state->atomic_op != AtomicOp::NONE) {
-    // An atomic accesses its whole element or nothing. Hardware checks atomic
-    // alignment before bounds, so a misaligned atomic keeps its full mask and
-    // faults in the access path.
     const uint16_t element_mask = (1u << state->num_dwords) - 1;
     const bool aligned = address % state->elem_size == 0;
-    state->load_dword_mask = state->load_dword_mask == element_mask || !aligned ? element_mask : 0;
+    state->load_dword_mask =
+        (state->load_dword_mask == element_mask || !aligned) ? element_mask : 0;
   }
   return address;
 }
