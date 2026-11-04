@@ -229,12 +229,6 @@ Hip::hipDeviceGetUuid(int device_id) const
 }
 
 hipError_t
-Hip::hipPeekAtLastError() const
-{
-    return ::hipPeekAtLastError();
-}
-
-hipError_t
 Hip::hipGetLastError() const
 {
     return ::hipGetLastError();

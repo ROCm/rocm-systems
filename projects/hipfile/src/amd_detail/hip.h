@@ -79,7 +79,6 @@ struct Hip {
     virtual void        hipSetDevice(int device_id) const;
     virtual int         hipGetDeviceCount() const;
     virtual hipUUID     hipDeviceGetUuid(int device_id) const;
-    virtual hipError_t  hipPeekAtLastError() const;
     virtual hipError_t  hipGetLastError() const;
 
     struct RuntimeError : public std::runtime_error {
