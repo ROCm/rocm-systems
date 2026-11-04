@@ -23,23 +23,6 @@
 
 #include NET_IB_COMMON_CC_PATH
 
-void NetIbResetGlobals() {
-  for (ncclIbDev& dev : ncclIbDevs) {
-    std::free(dev.pciPath);
-    std::free(dev.mrCache.slots);
-    dev.~ncclIbDev();
-    new (&dev) ncclIbDev();
-  }
-  std::memset(ncclIbMergedDevs, 0, sizeof(ncclIbMergedDevs));
-  ncclNIbDevs = -1;
-  ncclNMergedIbDevs = -1;
-  std::memset(ncclIbIfName, 0, sizeof(ncclIbIfName));
-  std::memset(&ncclIbIfAddr, 0, sizeof(ncclIbIfAddr));
-  ncclIbRelaxedOrderingEnabled = 0;
-  ncclIbSpeedChangeCounter = 0;
-  ncclProfilerFunction = nullptr;
-}
-
 namespace {
 
 // ncclIbResiliencyInit hands out `resiliency` (null for none) and returns `result`.
