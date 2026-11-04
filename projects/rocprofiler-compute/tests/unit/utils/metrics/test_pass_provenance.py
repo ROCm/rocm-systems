@@ -486,7 +486,8 @@ def test_denom_choice_uses_only_the_counter_on_the_selected_pass(caplog) -> None
 
     Packing does not add SQ_WAVES or GRBM_GUI_ACTIVE for $denom. per_kernel
     and per_second still use the pass that holds the metric counter. per_wave
-    and per_cycle stay unset when that counter is only on another pass.
+    and per_cycle choose no pass when that counter is only on another pass.
+    This profile copied nothing, so those expressions stay.
     """
     formula = "SUM(TA_BUSY) / SUM($denom)"
     packing_counters, _variables = extract_counters_and_variables(
@@ -522,7 +523,7 @@ def test_denom_choice_uses_only_the_counter_on_the_selected_pass(caplog) -> None
             )
             assert choose_metric_pass(required, layout, "MI300", unit) == chosen_pass
             if chosen_pass is None:
-                assert frame.at[0, "Avg"] == ""
+                assert frame.at[0, "Avg"] == built
             else:
                 assert "raw_pmc_df['TA_BUSY']" in frame.at[0, "Avg"]
     assert "contract violation" not in caplog.text
@@ -530,7 +531,7 @@ def test_denom_choice_uses_only_the_counter_on_the_selected_pass(caplog) -> None
 
 
 def test_unbound_metrics_are_one_summary(caplog) -> None:
-    """Several unset rows produce one warning, not one per row."""
+    """Several spanning rows produce one warning, and the merged expressions stay."""
     layout = PassLayout(
         pass_keys=("pmc_perf_0", "pmc_perf_1"),
         counters_by_pass={
@@ -556,6 +557,10 @@ def test_unbound_metrics_are_one_summary(caplog) -> None:
     assert caplog.text.count("profile again") == 1
     assert "2 metric(s)" in caplog.text
     assert "contract violation" not in caplog.text
+    assert frame["Avg"].tolist() == [
+        "to_sum(raw_pmc_df['TA_BUSY']) / to_sum(raw_pmc_df['SQ_WAVES'])",
+        "to_sum(raw_pmc_df['SQ_WAVES']) / to_sum(raw_pmc_df['TA_BUSY'])",
+    ]
 
 
 def test_copied_counters_say_the_metrics_were_left_unset(caplog) -> None:
@@ -583,6 +588,7 @@ def test_copied_counters_say_the_metrics_were_left_unset(caplog) -> None:
     assert "were left unset" in caplog.text
     assert "profile again" not in caplog.text
     assert caplog.text.count("were left unset") == 1
+    assert frame.at[0, "Avg"] == ""
 
 
 def test_formula_that_spans_passes_stays_unset_with_its_denominator() -> None:
@@ -1135,7 +1141,8 @@ def test_eval_metric_rate_divides_by_the_selected_pass_duration() -> None:
     assert float(metric_df.at["9.9.9", "Avg"]) == 2.0
 
 
-def test_eval_metric_leaves_a_metric_unset_when_no_pass_holds_its_counters() -> None:
+def test_eval_metric_keeps_merged_value_when_profile_copied_nothing(caplog) -> None:
+    """TA_BUSY and TD_BUSY are each collected once, so the merged ratio stays."""
     long_df = _two_pass_long_df(
         counters=["TA_BUSY", "TD_BUSY"],
         values=[50, 25],
@@ -1145,12 +1152,14 @@ def test_eval_metric_leaves_a_metric_unset_when_no_pass_holds_its_counters() -> 
     )
     expr = "to_avg(100 * raw_pmc_df['TA_BUSY'] / raw_pmc_df['TD_BUSY'])"
 
-    metric_df = _eval_one_metric(long_df, expr)
+    with caplog.at_level(logging.WARNING):
+        metric_df = _eval_one_metric(long_df, expr)
 
-    assert metric_df.at["9.9.9", "Avg"] == ""
+    assert float(metric_df.at["9.9.9", "Avg"]) == 200.0
+    assert caplog.text.count("profile again") == 1
 
 
-def test_bind_expression_dataframe_unsets_a_metric_that_spans_passes() -> None:
+def test_bind_keeps_merged_expression_when_profile_copied_nothing() -> None:
     layout = PassLayout(
         pass_keys=("pmc_perf_0", "pmc_perf_1"),
         counters_by_pass={
@@ -1167,7 +1176,9 @@ def test_bind_expression_dataframe_unsets_a_metric_that_spans_passes() -> None:
 
     bind_expression_dataframe(expression_df, layout, "MI300")
 
-    assert expression_df.at[0, "value"] == UNSET_EXPRESSION
+    assert expression_df.at[0, "value"] == (
+        "to_avg(100 * raw_pmc_df['TA_BUSY'] / raw_pmc_df['TD_BUSY'])"
+    )
 
 
 def test_pass_scoped_builtins_evaluate_per_xcd_first_in_pass_order() -> None:
