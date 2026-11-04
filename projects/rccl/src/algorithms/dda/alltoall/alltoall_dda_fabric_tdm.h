@@ -80,7 +80,6 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
 
   // tdmWait is per wave. Drain the whole block's stores before any peer is told to read its scratch.
   barrier.orderDestWrites();
-  __syncthreads();
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   const uint8_t* selfScratch = peerScratch[selfRank];

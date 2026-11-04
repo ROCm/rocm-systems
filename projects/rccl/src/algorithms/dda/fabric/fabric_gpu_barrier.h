@@ -117,7 +117,7 @@ public:
   }
 
   // Waits until every store this wave has issued has completed, so a system-scope store has reached its
-  // destination.
+  // destination and then syncs the block so every wave's stores are done.
   __device__ __forceinline__ void orderDestWrites() {
 #if defined(__gfx1250__)
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
@@ -126,6 +126,8 @@ public:
 #else
     __threadfence_system();
 #endif
+    __builtin_amdgcn_s_barrier();
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
   }
 
   // Two-rank form of syncOnSameBlockIdx<true, true>: posts this rank's flag into dstRank's slot for block dstBlock
@@ -134,7 +136,6 @@ public:
   __device__ __forceinline__ void signalWaitPeer(int dstRank, int srcRank, int dstBlock) {
     // Every wave drains its own stores, then the block syncs so thread 0 only posts once all of them are done.
     orderDestWrites();
-    __syncthreads();
     if (threadIdx.x == 0) {
       putFlag<std::memory_order_release>(peerFlags_[dstRank] + getFlagIdx(selfRank_, dstBlock), params_);
       waitFlag<std::memory_order_acquire>(peerFlags_[selfRank_] + getFlagIdx(srcRank, blockIdx.x), params_);
@@ -147,7 +148,6 @@ public:
   // the receiving rank within the same kernel.
   __device__ __forceinline__ void postPeer(int dstRank, int dstBlock) {
     orderDestWrites();
-    __syncthreads();
     if (threadIdx.x == 0) {
       putFlag<std::memory_order_release>(peerFlags_[dstRank] + getFlagIdx(selfRank_, dstBlock), params_);
     }
@@ -182,7 +182,6 @@ public:
   // Entry handshake: posts epoch to rank `to` and waits for rank `from` to post at least epoch.
   __device__ __forceinline__ void epochSignalWait(int to, int from, FlagType epoch) {
     orderDestWrites();
-    __syncthreads();
     if (threadIdx.x == 0) {
       __scoped_atomic_store_n(peerFlags_[to] + getEpochFlagIdx(selfRank_, blockIdx.x), epoch, __ATOMIC_RELEASE,
                               __MEMORY_SCOPE_SYSTEM);
@@ -198,7 +197,6 @@ public:
   // Posts value to rank `to` once every store of the block has completed.
   __device__ __forceinline__ void epochPost(int to, FlagType value) {
     orderDestWrites();
-    __syncthreads();
     if (threadIdx.x == 0) {
       cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
       __scoped_atomic_store_n(peerFlags_[to] + getEpochFlagIdx(selfRank_, blockIdx.x), value, __ATOMIC_RELAXED,
