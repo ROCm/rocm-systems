@@ -248,6 +248,9 @@ TEST_CASE("Unit_HRR_PinnedHostStructLowBits_Direct", "[.][hrr-direct]") {
 // land while it holds the pinned tracking lock. Each child frees an address
 // capture does not track, which takes that lock and fails without device work.
 // A child that inherited the lock held never exits.
+// The forks wait for the launcher's first launches to finish: the first loads
+// the code object and creates the null stream, which take ROCr's memory lock,
+// and a child forked then hangs in hipFree on a lock capture does not own.
 TEST_CASE("Unit_HRR_PinnedHostFork_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   constexpr size_t kBig = 32u << 20;
@@ -256,14 +259,16 @@ TEST_CASE("Unit_HRR_PinnedHostFork_Direct", "[.][hrr-direct]") {
   std::memset(p, 1, kBig);
   // Nothing may REQUIRE before the join.
   std::atomic<bool> stop{false};
+  std::atomic<int>  launched{0};
   std::thread launcher([&] {
     while (!stop.load()) {
       hipLaunchKernelGGL(hrr_pinned_ignore, dim3(1), dim3(1), 0, nullptr,
                          reinterpret_cast<uint64_t>(p));
       (void)hipStreamSynchronize(nullptr);
+      ++launched;
     }
   });
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  while (launched.load() < 2) std::this_thread::sleep_for(std::chrono::milliseconds(1));
   int hung = 0, failed = 0;
   for (int i = 0; i < 20 && !hung; ++i) {
     const pid_t pid = fork();
@@ -381,8 +386,9 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostSnapshotCap) {
   }
 }
 
-// A snapshot blob over --max-file-bytes ends the replay before the kernel that
-// reads it is launched on input replay never restored.
+// A snapshot blob over --max-file-bytes, or one capture left out over
+// HIP_HRR_CAPTURE_MAX_BLOB_MB, ends the replay before the kernel that reads it
+// is launched on input replay never restored.
 HRR_TEST_CASE(Unit_HRR_PinnedHostBlobRefused) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_refused"};
   hrr_capture_direct("Unit_HRR_PinnedHostLarge_Direct", cap.path, 5);
@@ -391,6 +397,16 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostBlobRefused) {
   CHECK(ret != 0);
   CHECK(out.find("refusing to read") != std::string::npos);
   CHECK(out.find("[HRR launch]") == std::string::npos);
+
+  ScopedDir capped{hrr_temp_dir("hrr_pinned_host_blob_cap")};
+  hrr_capture_direct("Unit_HRR_PinnedHostLarge_Direct", capped.path, 5,
+                     {{"HIP_HRR_CAPTURE_MAX_BLOB_MB", "1"}});
+  auto [capped_ret, capped_out] = hrr_playback_merged(capped.path, "--trace-kernels");
+  INFO("Playback exit " << capped_ret << ", output:\n" << capped_out);
+  CHECK(capped_ret != 0);
+  CHECK(capped_out.find("pinned host snapshot 0 was captured without its contents; "
+                        "refusing the launch") != std::string::npos);
+  CHECK(capped_out.find("[HRR launch]") == std::string::npos);
 }
 
 // Capture stops tracking an allocation on hipHostFree, hipFree, hipFreeHost and

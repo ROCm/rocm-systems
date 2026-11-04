@@ -2305,6 +2305,19 @@ class Device : public RuntimeObject {
   }
   virtual void DestroyHwEvent(void* hw_event) const {}
 
+  //! Takes count armed HW events for a pooled graph set
+  virtual bool AcquireHwEvents(int count, std::vector<void*>& hw_events) const {
+    return CreateHwEvents(count, /*batched=*/true, hw_events);
+  }
+  //! Gives back armed HW events from AcquireHwEvents
+  virtual void ReturnHwEvents(std::vector<void*>& hw_events) const {
+    QuiesceHwEvents(hw_events);
+    for (void* hw_event : hw_events) {
+      DestroyHwEvent(hw_event);
+    }
+    hw_events.clear();
+  }
+
   //! Re-arm already-allocated HW event signals so they can be reused by a new
   //! graph launch (resets the signal value and cached timing). Used by the
   //! graph signal pool to avoid create/destroy on every launch.
@@ -2335,8 +2348,9 @@ class Device : public RuntimeObject {
   //! single-signal field share an offset, so callers patch slot 0 either way.
   //! num_deps == 0 is a completion-only barrier.
   virtual uint8_t* CreateBarrierPacket(int num_deps = 0) const { return nullptr; }
+  //! profiled means the launch reads the timing of its patched completion signals
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                   const std::vector<void*>& hw_events) const {}
+                                   const std::vector<void*>& hw_events, bool profiled) const {}
 
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
