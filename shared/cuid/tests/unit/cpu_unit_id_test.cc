@@ -36,7 +36,9 @@ std::string PrimaryOf(const amdcuid_cpu_info& info) {
 // package's lowest is 0); the next case catches that.
 TEST(cuidtst, CpuUnitIdIsZeroForAWholePackage) {
   std::vector<DevicePtr> cpus;
-  ASSERT_EQ(CuidCpu::discover(cpus), AMDCUID_STATUS_SUCCESS);
+  const amdcuid_status_t status = CuidCpu::discover(cpus);
+  if (status == AMDCUID_STATUS_UNSUPPORTED) GTEST_SKIP() << "CPU vendor has no CUID";
+  ASSERT_EQ(status, AMDCUID_STATUS_SUCCESS);
   if (cpus.empty()) GTEST_SKIP() << "no CPU discovered";
 
   for (const auto& device : cpus) {
@@ -49,7 +51,9 @@ TEST(cuidtst, CpuUnitIdIsZeroForAWholePackage) {
 
 TEST(cuidtst, OneSocketHasOneIdentityWhicheverCpuFoundIt) {
   std::vector<DevicePtr> cpus;
-  ASSERT_EQ(CuidCpu::discover(cpus), AMDCUID_STATUS_SUCCESS);
+  const amdcuid_status_t status = CuidCpu::discover(cpus);
+  if (status == AMDCUID_STATUS_UNSUPPORTED) GTEST_SKIP() << "CPU vendor has no CUID";
+  ASSERT_EQ(status, AMDCUID_STATUS_SUCCESS);
   if (cpus.empty()) GTEST_SKIP() << "no CPU discovered";
 
   std::vector<std::string> paths;
@@ -204,4 +208,30 @@ TEST(cuidtstUnprivileged, CpuPathLookupReportsTheFailure) {
       amdcuid_get_handle_by_dev_path(cpu.c_str(), AMDCUID_DEVICE_TYPE_CPU, &handle);
   if (status == AMDCUID_STATUS_UNSUPPORTED) GTEST_SKIP() << "CPU vendor has no CUID";
   EXPECT_EQ(status, AMDCUID_STATUS_INVALID_FORMAT);
+}
+
+// A POWER /proc/cpuinfo names the machine in "model" and has no "physical id";
+// discovery must report no CPU components, never throw through the C API
+// (ROCm/rocm-systems#14177).
+TEST(cuidtstUnprivileged, CpuDiscoveryWithAPowerCpuinfoDoesNotThrow) {
+  const ScopedTempDir dir("cuid_cpus_");
+  ASSERT_FALSE(dir.path().empty());
+  const std::string base = dir.path() + "/cpu";
+  ASSERT_EQ(mkdir(base.c_str(), 0700), 0);
+  for (const auto& c : {std::make_pair("cpu0", "-1"), std::make_pair("cpu8", "0")}) {
+    const std::string cpu = base + "/" + c.first;
+    ASSERT_EQ(mkdir(cpu.c_str(), 0700), 0);
+    ASSERT_EQ(mkdir((cpu + "/topology").c_str(), 0700), 0);
+    std::ofstream(cpu + "/topology/physical_package_id") << c.second << "\n";
+  }
+  const std::string cpuinfo = dir.path() + "/cpuinfo";
+  std::ofstream(cpuinfo) << "processor\t: 0\ncpu\t\t: POWER10 (architected), altivec supported\n"
+                            "revision\t: 2.0 (pvr 0080 0200)\n\nprocessor\t: 8\n"
+                            "cpu\t\t: POWER10 (architected), altivec supported\n\n"
+                            "platform\t: pSeries\nmodel\t\t: IBM,9105-42A\n";
+  std::vector<DevicePtr> cpus;
+  amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
+  EXPECT_NO_THROW(status = CuidCpu::discover(base, cpuinfo, cpus));
+  EXPECT_NE(status, AMDCUID_STATUS_SUCCESS);
+  EXPECT_TRUE(cpus.empty());
 }
