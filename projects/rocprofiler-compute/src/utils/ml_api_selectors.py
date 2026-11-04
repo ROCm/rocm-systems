@@ -16,17 +16,6 @@ OPERATOR_LABELS = {
 UNSCOPED_OPERATOR_KEY = "all_supported_backends"
 
 
-def _unique_keep_order(names: List[str]) -> List[str]:
-    seen = set()
-    unique: List[str] = []
-    for name in names:
-        if name in seen:
-            continue
-        seen.add(name)
-        unique.append(name)
-    return unique
-
-
 def _argv_tokens(raw: List[str]) -> List[str]:
     return [str(value).strip() for value in raw if str(value).strip()]
 
@@ -64,7 +53,7 @@ def resolve_profile_selection(raw: Optional[List[str]]) -> List[str]:
                 )
             )
 
-    return _unique_keep_order(tokens)
+    return list(dict.fromkeys(tokens))
 
 
 def resolve_list_selectors(raw: Optional[List[str]]) -> Optional[List[str]]:
@@ -79,7 +68,7 @@ def resolve_list_selectors(raw: Optional[List[str]]) -> Optional[List[str]]:
                     "--list-operators value", name, OPERATOR_SELECTORS
                 )
             )
-    return _unique_keep_order(tokens)
+    return list(dict.fromkeys(tokens))
 
 
 def _patterns_by_backend(tokens: List[str]) -> Dict[str, List[str]]:

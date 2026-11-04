@@ -4,7 +4,7 @@
 import argparse
 import sys
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Tuple
 
 import pandas as pd
 
@@ -60,21 +60,6 @@ def _bind_operator_patterns_for_workload(
     return _restrict_patterns_to_operator_backends(
         operator_patterns_for_traced_frameworks(operator_patterns, traced_frameworks)
     )
-
-
-def _join_unique_operator_patterns(
-    operator_patterns_by_backend: Dict[str, List[str]],
-) -> str:
-    """Join unique operator patterns."""
-    seen: Set[str] = set()
-    ordered: List[str] = []
-    for patterns in operator_patterns_by_backend.values():
-        for pattern in patterns:
-            if pattern in seen:
-                continue
-            seen.add(pattern)
-            ordered.append(pattern)
-    return ", ".join(ordered)
 
 
 def _collect_nodes_matching_operator_patterns(
@@ -474,8 +459,12 @@ class cli_analysis(OmniAnalyze_Base):
             workload.ml_api_call_trees, operator_patterns_by_backend
         )
         if not nodes_matching_operator_patterns:
-            operator_pattern_text = _join_unique_operator_patterns(
-                operator_patterns_by_backend
+            operator_pattern_text = ", ".join(
+                dict.fromkeys(
+                    pattern
+                    for patterns in operator_patterns_by_backend.values()
+                    for pattern in patterns
+                )
             )
             console_error(
                 "ml api trace",
@@ -520,8 +509,12 @@ class cli_analysis(OmniAnalyze_Base):
             )
         except ValueError as error:
             console_error("ml api trace", f"{workload_path}: {error}")
-        operator_pattern_text = _join_unique_operator_patterns(
-            operator_patterns_by_backend
+        operator_pattern_text = ", ".join(
+            dict.fromkeys(
+                pattern
+                for patterns in operator_patterns_by_backend.values()
+                for pattern in patterns
+            )
         )
         labels = _labels_for_backends(list(operator_patterns_by_backend))
         print(f"\n{'=' * 80}")
