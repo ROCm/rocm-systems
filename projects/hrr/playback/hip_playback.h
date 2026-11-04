@@ -942,6 +942,20 @@ struct PlaybackContext {
         std::unique_lock lk(map_mutex);
         auto it = alloc_map.find(rec);
         if (it == alloc_map.end()) return;
+        erase_alloc_locked(it);
+    }
+    // Removes the entry only while it still maps to `live`. The check and the
+    // erase hold one lock, so an allocation another thread records at the same
+    // address in between keeps its entry and its charge.
+    bool remove_alloc_if_live(uint64_t rec, void* live) {
+        std::unique_lock lk(map_mutex);
+        auto it = alloc_map.find(rec);
+        if (it == alloc_map.end() || it->second.live_ptr != live) return false;
+        erase_alloc_locked(it);
+        return true;
+    }
+    // Caller holds map_mutex exclusively.
+    void erase_alloc_locked(std::unordered_map<uint64_t, AllocEntry>::iterator it) {
         // Host allocations (and managed memory, which the runtime may back
         // from host memory) were charged to host_budget before they were made.
         if (it->second.kind == AllocKind::HostMalloc ||

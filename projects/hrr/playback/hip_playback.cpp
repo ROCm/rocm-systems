@@ -2615,13 +2615,7 @@ void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live) {
     // Only the entry for the stand-in buffer goes: the archive may have
     // allocated something else at this address since (a managed buffer, a host
     // allocation), and that entry keeps its charge and its buffer.
-    {
-        std::shared_lock lk(ctx.map_mutex);
-        auto it = ctx.alloc_map.find(rec_base);
-        const bool standin = it != ctx.alloc_map.end() && it->second.live_ptr == live;
-        lk.unlock();
-        if (standin) ctx.remove_alloc(rec_base);
-    }
+    (void)ctx.remove_alloc_if_live(rec_base, live);
     if (live) (void)hipFree(live);
 }
 
