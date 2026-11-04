@@ -17,8 +17,10 @@ from utils.metrics.collectable import (
     _avg_column_name,
     _collect_piece_dispatch_series,
     apply_composite_metrics,
+    begin_collectable_warnings,
     build_metric_eval_graph,
     cache_collectable_expressions,
+    flush_collectable_warnings,
 )
 from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
@@ -446,7 +448,45 @@ def eval_metric(
 
     exprs_to_eval = []
     debug_tracker = DebugRowTracker() if debug else None
+    begin_collectable_warnings()
+    try:
+        _fill_and_evaluate_metric_rows(
+            dfs,
+            dfs_type,
+            raw_pmc_df,
+            sys_vars,
+            empirical_peaks,
+            metric_evaluator,
+            exprs_to_eval,
+            debug,
+            debug_tracker,
+            pass_layout,
+        )
+    finally:
+        flush_collectable_warnings()
 
+    # Print aggregated summary of any noise clamping warnings
+    print_noise_clamp_summary()
+
+    # Derive Percent of Peak from evaluated Value and Peak columns
+    compute_pct_of_peak(dfs, dfs_type)
+
+    # Check for metrics exceeding theoretical peak due to dual-issue
+    validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)
+
+
+def _fill_and_evaluate_metric_rows(
+    dfs: dict,
+    dfs_type: dict,
+    raw_pmc_df: pd.DataFrame,
+    sys_vars: dict[str, Any],
+    empirical_peaks: dict[str, Any],
+    metric_evaluator: MetricEvaluator,
+    exprs_to_eval: list,
+    debug: bool,
+    debug_tracker: Optional[DebugRowTracker],
+    pass_layout: Optional[PassLayout],
+) -> None:
     # Hmmm... apply + lambda should just work
     # df['Value'] = df['Value'].apply(
     #     lambda s: eval(
@@ -512,15 +552,6 @@ def eval_metric(
         empirical_peaks,
         pass_layout=pass_layout,
     )
-
-    # Print aggregated summary of any noise clamping warnings
-    print_noise_clamp_summary()
-
-    # Derive Percent of Peak from evaluated Value and Peak columns
-    compute_pct_of_peak(dfs, dfs_type)
-
-    # Check for metrics exceeding theoretical peak due to dual-issue
-    validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)
 
 
 def compute_pct_of_peak(dfs: dict, dfs_type: dict) -> None:

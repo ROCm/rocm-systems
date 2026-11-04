@@ -435,8 +435,7 @@ def test_denominator_only_on_another_pass_does_not_bind(caplog) -> None:
             "row sq",
         )
     assert warned is None
-    assert "leaving the metric unset" in caplog.text
-    assert "SQ_WAVES" in caplog.text
+    assert "contract violation" not in caplog.text
 
 
 def test_same_pass_denominator_still_selects_that_pass() -> None:
@@ -526,8 +525,64 @@ def test_denom_choice_uses_only_the_counter_on_the_selected_pass(caplog) -> None
                 assert frame.at[0, "Avg"] == ""
             else:
                 assert "raw_pmc_df['TA_BUSY']" in frame.at[0, "Avg"]
-    assert "SQ_WAVES" in caplog.text
-    assert "GRBM_GUI_ACTIVE" in caplog.text
+    assert "contract violation" not in caplog.text
+    assert caplog.text.count("profile again") == 2
+
+
+def test_unbound_metrics_are_one_summary(caplog) -> None:
+    """Several unset rows produce one warning, not one per row."""
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TA_BUSY"}),
+            "pmc_perf_1": frozenset({"SQ_WAVES"}),
+        },
+        duplicated=frozenset(),
+    )
+    frame = pd.DataFrame({
+        "Avg": [
+            "to_sum(raw_pmc_df['TA_BUSY']) / to_sum(raw_pmc_df['SQ_WAVES'])",
+            "to_sum(raw_pmc_df['SQ_WAVES']) / to_sum(raw_pmc_df['TA_BUSY'])",
+        ]
+    })
+    with caplog.at_level(logging.WARNING):
+        bind_metric_tables_to_passes(
+            {1: frame},
+            {1: "metric_table"},
+            layout,
+            "MI300",
+            frozenset({"Avg"}),
+        )
+    assert caplog.text.count("profile again") == 1
+    assert "2 metric(s)" in caplog.text
+    assert "contract violation" not in caplog.text
+
+
+def test_copied_counters_say_the_metrics_were_left_unset(caplog) -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TA_BUSY"}),
+            "pmc_perf_1": frozenset({"SQ_WAVES"}),
+        },
+        duplicated=frozenset({"TA_BUSY"}),
+    )
+    frame = pd.DataFrame({
+        "Avg": [
+            "to_sum(raw_pmc_df['TA_BUSY']) / to_sum(raw_pmc_df['SQ_WAVES'])",
+        ]
+    })
+    with caplog.at_level(logging.WARNING):
+        bind_metric_tables_to_passes(
+            {1: frame},
+            {1: "metric_table"},
+            layout,
+            "MI300",
+            frozenset({"Avg"}),
+        )
+    assert "were left unset" in caplog.text
+    assert "profile again" not in caplog.text
+    assert caplog.text.count("were left unset") == 1
 
 
 def test_formula_that_spans_passes_stays_unset_with_its_denominator() -> None:

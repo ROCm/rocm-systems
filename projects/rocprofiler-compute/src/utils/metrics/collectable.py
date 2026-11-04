@@ -32,6 +32,11 @@ from utils.metrics.pass_provenance import resolve_weight_counter_column
 if TYPE_CHECKING:
     from utils.metrics.pass_provenance import PassLayout
 
+# Names recorded while one analyze run is open, then printed once.
+_pending_unset_collectables: Set[str] = set()
+_pending_missing_collectables: Set[str] = set()
+_collectable_warning_depth = 0
+
 METRIC_EVAL_GRAPH_ATTR = "metric_eval_graph"
 COLLECTABLE_EXPR_CACHE_ATTR = "collectable_expr_cache"
 COLLECTABLE_IDS_ATTR = "collectable_ids"
@@ -333,6 +338,77 @@ def cache_collectable_expressions(
         df.attrs[COLLECTABLE_EXPR_CACHE_ATTR] = by_name
 
 
+def begin_collectable_warnings() -> None:
+    """Start one analyze run's collectable summary."""
+    global _collectable_warning_depth
+    if _collectable_warning_depth == 0:
+        _pending_unset_collectables.clear()
+        _pending_missing_collectables.clear()
+    _collectable_warning_depth += 1
+
+
+def flush_collectable_warnings() -> None:
+    """Print one summary for the collectable problems recorded since begin."""
+    global _collectable_warning_depth
+    if _collectable_warning_depth == 0:
+        return
+    _collectable_warning_depth -= 1
+    if _collectable_warning_depth:
+        return
+    if _pending_unset_collectables:
+        console_warning(
+            "metrics",
+            f"{len(_pending_unset_collectables)} collectable part(s) were left unset",
+        )
+    if _pending_missing_collectables:
+        console_warning(
+            "metrics",
+            f"{len(_pending_missing_collectables)} collectable part(s) "
+            "were not in the metric table",
+        )
+    _pending_unset_collectables.clear()
+    _pending_missing_collectables.clear()
+
+
+def _note_collectable_problem(ref_name: str, kind: str) -> None:
+    """Record a collectable problem, or print it when no run is open."""
+    if _collectable_warning_depth:
+        bucket = (
+            _pending_unset_collectables
+            if kind == "unset"
+            else _pending_missing_collectables
+        )
+        bucket.add(ref_name)
+        return
+    if kind == "unset":
+        console_warning("metrics", f"collectable '{ref_name}' was left unset")
+        return
+    console_warning(
+        "metrics",
+        f"collectable '{ref_name}' was not in the metric table",
+    )
+
+
+def _collectable_expr_state(df: pd.DataFrame, metric_name: str, avg_col: str) -> str:
+    """``ready``, ``unset`` when the row has no expression, or ``missing``."""
+    cached = df.attrs.get(COLLECTABLE_EXPR_CACHE_ATTR, {})
+    if isinstance(cached, dict) and metric_name in cached:
+        built = cached[metric_name]
+        if isinstance(built, str) and built:
+            return "ready"
+        return "unset"
+    name_col = _metric_column_name(df)
+    if name_col is None:
+        return "missing"
+    matches = df[df[name_col] == metric_name]
+    if matches.empty:
+        return "missing"
+    built = matches.iloc[0][avg_col]
+    if isinstance(built, str) and built:
+        return "ready"
+    return "unset"
+
+
 def _lookup_collectable_built_avg(
     df: pd.DataFrame,
     metric_name: str,
@@ -398,7 +474,8 @@ def _collectable_series(
     lookup_name = _resolve_collectable_name(df, _ref_base_name(ref_name))
     built = _lookup_collectable_built_avg(df, lookup_name, avg_col)
     if built is None:
-        console_warning(f"{role}: collectable '{ref_name}' not found in metric table.")
+        state = _collectable_expr_state(df, lookup_name, avg_col)
+        _note_collectable_problem(ref_name, "unset" if state == "unset" else "missing")
         return None
     series = per_dispatch_ratio_series(built, raw_pmc_df, sys_vars, empirical_peaks)
     if negate:
@@ -435,8 +512,9 @@ def _evaluate_weighted_composite(
 
         built_avg = _lookup_collectable_built_avg(df, ref_name, avg_col)
         if built_avg is None:
-            console_warning(
-                f"WEIGHTED_AVG: collectable '{ref_name}' not found in metric table."
+            state = _collectable_expr_state(df, ref_name, avg_col)
+            _note_collectable_problem(
+                ref_name, "unset" if state == "unset" else "missing"
             )
             return "N/A"
 
@@ -487,10 +565,8 @@ def _piece_value_on_dispatch_filter(
     lookup_name = _resolve_collectable_name(df, _ref_base_name(ref_name))
     built = _lookup_collectable_built_avg(df, lookup_name, avg_col)
     if not built:
-        console_warning(
-            "metrics",
-            f"COLLECT_SUM: collectable '{ref_name}' not found in metric table.",
-        )
+        state = _collectable_expr_state(df, lookup_name, avg_col)
+        _note_collectable_problem(ref_name, "unset" if state == "unset" else "missing")
         return None
     scalar = _eval_built_expr_on_frame(built, raw_pmc_df, sys_vars, empirical_peaks)
     if isinstance(scalar, (str, bool)):
@@ -602,6 +678,26 @@ def apply_composite_metrics(
     pass_layout: Optional["PassLayout"] = None,
 ) -> None:
     """Evaluate composite parents after collectable rows (graph order)."""
+    own_batch = _collectable_warning_depth == 0
+    if own_batch:
+        begin_collectable_warnings()
+    try:
+        _apply_composite_metrics(
+            dfs, dfs_type, raw_pmc_df, sys_vars, empirical_peaks, pass_layout
+        )
+    finally:
+        if own_batch:
+            flush_collectable_warnings()
+
+
+def _apply_composite_metrics(
+    dfs: Dict[int, pd.DataFrame],
+    dfs_type: Dict[int, str],
+    raw_pmc_df: pd.DataFrame,
+    sys_vars: Dict[str, Any],
+    empirical_peaks: Dict[str, Any],
+    pass_layout: Optional["PassLayout"],
+) -> None:
     for df_id, df in dfs.items():
         if dfs_type.get(df_id) != "metric_table":
             continue
