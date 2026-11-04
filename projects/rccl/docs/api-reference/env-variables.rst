@@ -1406,14 +1406,18 @@ threshold table introduced for gfx1250.
         | ``0``: Use vector loads and stores.
 
     * - | ``RCCL_DDA_BC``
-        | Opt-in for DDA ``ncclBroadcast`` on the gfx1250 fabric path. When ``-1``
-          (default), Broadcast follows the per-architecture table, which has no
-          Broadcast DDA tier, so Broadcast keeps its previous path. When enabled, the
-          DDA LL and LL128 tier ceilings still apply; the table sets both to ``0`` for
-          Broadcast, so also set ``RCCL_DDA_LL_THRESHOLD`` or
-          ``RCCL_DDA_LL128_THRESHOLD``, which apply to every collective. Ignored when
+        | Controls DDA ``ncclBroadcast`` on the gfx1250 fabric path. When ``-1``
+          (default), Broadcast follows the per-architecture table. On gfx1250 DPX
+          the table sets the DDA LL ceiling to 16 KiB and the DDA LL128 ceiling to
+          128 KiB, so DDA Broadcast is on by default there; the other tables have no
+          Broadcast DDA tier, so Broadcast keeps its previous path. The DDA LL and LL128
+          tier ceilings always apply, and ``RCCL_DDA_LL_THRESHOLD`` and
+          ``RCCL_DDA_LL128_THRESHOLD`` apply to every collective: when set they
+          replace the table ceilings, so setting them for another collective also
+          changes the Broadcast ceilings. Where the table has no Broadcast tier,
+          enabling DDA Broadcast also needs one of those thresholds. Ignored when
           ``NCCL_ALGO`` is set or ``RCCL_DDA_ENABLE=0``.
-      - | ``-1``: Follow the per-arch table; currently off (default).
+      - | ``-1``: Follow the per-arch table; on for gfx1250 DPX, off elsewhere (default).
         | ``0``: Disable DDA Broadcast.
         | ``1`` (or any positive value): Enable DDA Broadcast, subject to the tier
           ceilings and eligibility checks.
