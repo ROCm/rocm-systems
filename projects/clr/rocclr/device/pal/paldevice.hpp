@@ -54,7 +54,8 @@ class NullDevice : public amd::Device {
   );
 
   //! Instantiate a new virtual device
-  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr) {
+  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr,
+                                                     bool cooperative = false) {
     return nullptr;
   }
 
@@ -386,7 +387,8 @@ class Device : public NullDevice {
   virtual ~Device();
 
   //! Instantiate a new virtual device
-  device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = NULL);
+  device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = NULL,
+                                             bool cooperative = false);
 
   //! Memory allocation
   virtual device::Memory* createMemory(
