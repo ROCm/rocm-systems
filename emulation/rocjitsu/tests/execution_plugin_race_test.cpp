@@ -745,6 +745,10 @@ TEST_F(TensorDmaRaceTest, ExecutedTensorLoadIsRegisteredWhenItIssues) {
   const std::array<uint32_t, 3> words{0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
+  // Tensor instructions ignore EXEC (CDNA5 ISA 10.11.1), so the load is still
+  // registered with every lane of the issuing wave disabled. Wave 1 keeps lane
+  // 0 enabled for its DS reads.
+  waves[0]->set_exec(0);
   fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0]);
   ASSERT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[0]).succeeded());
 
