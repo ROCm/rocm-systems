@@ -59,6 +59,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
   size and communicator the selector falls back normally.
 * `hipcc` is no longer accepted as the CMake CXX compiler for RCCL builds. Use `amdclang++` directly (`-DCMAKE_CXX_COMPILER=amdclang++` or set `ROCM_PATH`). `hipcc` was a wrapper around `amdclang++` that is being phased out across the ROCm stack.
 * gfx1250 DDA LL128 `ncclAlltoAll` (SPX table) launches 256-thread blocks, up to 64 blocks per peer and up to 2 MiB per peer chunk, and takes messages up to 8 MiB total (was 1 MiB); larger messages take per-peer Send/Recv as before. The defaults of the tuning variables change to match: `RCCL_DDA_LL128_A2A_THREADS` 1024 -> 256 and `RCCL_DDA_LL128_A2A_MAXBPP` 8 -> 64.
+* On gfx1250 DPX, the DDA LL128 `ncclAllGather` takes its block size and block cap from the DPX tuning table: 256 threads for gathered sizes of 4 MiB to 32 MiB, and at most 75 blocks from 1 MiB to 32 MiB. `RCCL_DDA_LL128_AG_THREADS` now defaults to `0` (unset) instead of `512`, so the table picks the block size, and 512 threads are used where it sets none. Setting it to a multiple of 32 up to 1024 still overrides the table. SPX, CPX and `RCCL_IGNORE_ARCH_TABLE=1` keep 512 threads and the fabric block cap.
 
 ### Removed
 
