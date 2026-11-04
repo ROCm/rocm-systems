@@ -17,22 +17,6 @@ OPERATOR_LABELS = {
 UNSCOPED_OPERATOR_KEY = "all_supported_backends"
 
 
-def _argv_tokens(raw: List[str]) -> List[str]:
-    return [str(value).strip() for value in raw if str(value).strip()]
-
-
-def _unknown_ml_api_name_message(
-    label: str, token: str, values: Tuple[str, ...]
-) -> str:
-    """Error text for an unknown selector name or prefix."""
-    if "," in token:
-        return (
-            f"Unknown {label} {token!r}. "
-            "To pass several values, list them after the flag, separated by spaces."
-        )
-    return f"Unknown {label} {token!r}. Values: {', '.join(values)}."
-
-
 def resolve_profile_selection(raw: Optional[List[str]]) -> List[str]:
     """Resolve --trace-ml-api."""
     if raw is None:
@@ -70,37 +54,6 @@ def resolve_list_selectors(raw: Optional[List[str]]) -> Optional[List[str]]:
                 )
             )
     return list(dict.fromkeys(tokens))
-
-
-def _patterns_by_backend(tokens: List[str]) -> Dict[str, List[str]]:
-    """Assign each --operator argv word to a backend glob."""
-    prefix: Optional[str] = None
-    selections: Dict[str, List[str]] = {}
-
-    for selector_token in tokens:
-        if "::" in selector_token and selector_token.find("::") <= selector_token.find(
-            ":"
-        ):
-            selections.setdefault(
-                prefix or UNSCOPED_OPERATOR_KEY, []
-            ).append(selector_token)
-            continue
-        if ":" in selector_token:
-            prefix, rest = selector_token.split(":", 1)
-            if prefix not in OPERATOR_SELECTORS:
-                raise ValueError(
-                    _unknown_ml_api_name_message(
-                        "--operator prefix", prefix, OPERATOR_SELECTORS
-                    )
-                )
-            selections.setdefault(
-                prefix or UNSCOPED_OPERATOR_KEY, []
-            ).append(rest.strip() or "**")
-            continue
-        selections.setdefault(
-            prefix or UNSCOPED_OPERATOR_KEY, []
-        ).append(selector_token)
-    return selections
 
 
 def resolve_operator_patterns(
@@ -156,6 +109,53 @@ def operator_patterns_for_traced_frameworks(
                 unscoped_patterns
             )
     return patterns_by_backend
+
+
+def _argv_tokens(raw: List[str]) -> List[str]:
+    return [str(value).strip() for value in raw if str(value).strip()]
+
+
+def _unknown_ml_api_name_message(
+    label: str, token: str, values: Tuple[str, ...]
+) -> str:
+    """Error text for an unknown selector name or prefix."""
+    if "," in token:
+        return (
+            f"Unknown {label} {token!r}. "
+            "To pass several values, list them after the flag, separated by spaces."
+        )
+    return f"Unknown {label} {token!r}. Values: {', '.join(values)}."
+
+
+def _patterns_by_backend(tokens: List[str]) -> Dict[str, List[str]]:
+    """Assign each --operator argv word to a backend glob."""
+    prefix: Optional[str] = None
+    selections: Dict[str, List[str]] = {}
+
+    for selector_token in tokens:
+        if "::" in selector_token and selector_token.find("::") <= selector_token.find(
+            ":"
+        ):
+            selections.setdefault(
+                prefix or UNSCOPED_OPERATOR_KEY, []
+            ).append(selector_token)
+            continue
+        if ":" in selector_token:
+            prefix, rest = selector_token.split(":", 1)
+            if prefix not in OPERATOR_SELECTORS:
+                raise ValueError(
+                    _unknown_ml_api_name_message(
+                        "--operator prefix", prefix, OPERATOR_SELECTORS
+                    )
+                )
+            selections.setdefault(
+                prefix or UNSCOPED_OPERATOR_KEY, []
+            ).append(rest.strip() or "**")
+            continue
+        selections.setdefault(
+            prefix or UNSCOPED_OPERATOR_KEY, []
+        ).append(selector_token)
+    return selections
 
 
 def _require_ml_api_trace(traced_frameworks: List[str]) -> None:
