@@ -25,12 +25,17 @@
 #include "sdma_put_nbi_tester.hpp"
 
 #include <rocshmem/rocshmem.hpp>
+#include "backend_bc.hpp"
 #include "context.hpp"
 #include "ipc_policy.hpp"
 #include "sdma/anvil_device.hpp"
 #include "verify_results_kernels.hpp"
 
 using namespace rocshmem;
+
+namespace rocshmem {
+extern Backend *backend;
+}
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -55,7 +60,7 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
                                long long int *end_time,
                                char *source, char *dest, size_t size,
                                int batch, ShmemContextType ctx_type,
-                               bool poll, bool *sdma_unavailable) {
+                               bool poll) {
   __shared__ rocshmem_ctx_t ctx;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
@@ -69,13 +74,6 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
 
     sdma_anvil::SdmaQueueDeviceHandle *handle =
         sdma.deviceHandles_d[target_local * sdma.numChannels + sdma.sdmaChannel];
-
-    // Null when SDMA failed to connect (e.g. no xGMI) and fell back to IPC.
-    if (handle == nullptr) {
-      *sdma_unavailable = true;
-      rocshmem_wg_ctx_destroy(&ctx);
-      return;
-    }
 
     char *my_base = ipc.ipc_bases[my_local];
     char *remote_base = ipc.ipc_bases[target_local];
@@ -119,40 +117,42 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
 SdmaPutNbiTester::SdmaPutNbiTester(TesterArguments args) : Tester(args) {
   s_buf = (char *)alloc_test_buffer(max_msg_size);
   r_buf = (char *)alloc_test_buffer(max_msg_size * batch_size);
-  CHECK_HIP(hipHostMalloc((void**)&sdma_unavailable, sizeof(bool)));
+
+  // False if SDMA failed to connect (e.g. no xGMI) and fell back to IPC.
+  sdma_unavailable = !backend->ipcImpl.sdmaImpl_.sdmaEnabled;
+  if (sdma_unavailable && args.myid == 0) {
+    std::cout << "sdma_putnbi: SKIPPED (SDMA did not connect on this "
+                 "topology; fell back to IPC memcpy)\n";
+  }
 }
 
 SdmaPutNbiTester::~SdmaPutNbiTester() {
   free_test_buffer(s_buf);
   free_test_buffer(r_buf);
-  CHECK_HIP(hipFree(sdma_unavailable));
 }
 
 void SdmaPutNbiTester::resetBuffers(size_t size) {
   CHECK_HIP(hipMemset(s_buf, 'a', size));
   CHECK_HIP(hipMemset(r_buf, 0, size * batch_size));
-  *sdma_unavailable = false;
 }
 
 void SdmaPutNbiTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                     size_t size) {
+  if (sdma_unavailable) return;
+
   size_t shared_bytes = 0;
 
   hipLaunchKernelGGL(SdmaPutNbiTest, gridSize, blockSize, shared_bytes,
                      stream, loop, args.skip, start_time, end_time,
                      s_buf, r_buf, size, batch_size, _shmem_context,
-                     _type == SdmaPutNbiPollTestType, sdma_unavailable);
+                     _type == SdmaPutNbiPollTestType);
 
   num_msgs = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
 }
 
 void SdmaPutNbiTester::verifyResults(size_t size) {
-  if (*sdma_unavailable) {
-    if (args.myid == 0) {
-      std::cout << "sdma_putnbi: SKIPPED (SDMA did not connect on this "
-                   "topology; fell back to IPC memcpy)\n";
-    }
+  if (sdma_unavailable) {
     _print_results = false;
     return;
   }

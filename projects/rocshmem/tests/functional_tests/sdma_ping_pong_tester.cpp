@@ -25,6 +25,7 @@
 #include "sdma_ping_pong_tester.hpp"
 
 #include <rocshmem/rocshmem.hpp>
+#include "backend_bc.hpp"
 #include "context.hpp"
 #include "ipc_policy.hpp"
 #include "sdma/anvil_device.hpp"
@@ -32,6 +33,10 @@
 #include "verify_results_kernels.hpp"
 
 using namespace rocshmem;
+
+namespace rocshmem {
+extern Backend *backend;
+}
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -50,8 +55,7 @@ __global__ void SdmaPingPongTest(int loop, int skip,
                                  char *s_buf, char *r_buf,
                                  uint64_t *sig_addr, size_t size,
                                  unsigned op_type,
-                                 ShmemContextType ctx_type,
-                                 bool *sdma_unavailable) {
+                                 ShmemContextType ctx_type) {
   __shared__ rocshmem_ctx_t ctx;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
@@ -66,13 +70,6 @@ __global__ void SdmaPingPongTest(int loop, int skip,
 
     sdma_anvil::SdmaQueueDeviceHandle *handle =
         sdma.deviceHandles_d[target_local * sdma.numChannels + sdma.sdmaChannel];
-
-    // Null when SDMA failed to connect (e.g. no xGMI) and fell back to IPC.
-    if (handle == nullptr) {
-      *sdma_unavailable = true;
-      rocshmem_wg_ctx_destroy(&ctx);
-      return;
-    }
 
     int wg_id = hipBlockIdx_x;
 
@@ -151,44 +148,46 @@ SdmaPingPongTester::SdmaPingPongTester(TesterArguments args) : Tester(args) {
   s_buf = (char *)alloc_test_buffer(max_msg_size * args.num_wgs);
   r_buf = (char *)alloc_test_buffer(max_msg_size * args.num_wgs);
   sig_addr = (uint64_t *)alloc_test_buffer(sizeof(uint64_t) * args.num_wgs);
-  CHECK_HIP(hipHostMalloc((void**)&sdma_unavailable, sizeof(bool)));
   rtt_factor = 2;
   bw_factor = 2;
+
+  // False if SDMA failed to connect (e.g. no xGMI) and fell back to IPC.
+  sdma_unavailable = !backend->ipcImpl.sdmaImpl_.sdmaEnabled;
+  if (sdma_unavailable && args.myid == 0) {
+    std::cout << "sdma_pingpong: SKIPPED (SDMA did not connect on this "
+                 "topology; fell back to IPC memcpy)\n";
+  }
 }
 
 SdmaPingPongTester::~SdmaPingPongTester() {
   free_test_buffer(s_buf);
   free_test_buffer(r_buf);
   free_test_buffer(sig_addr);
-  CHECK_HIP(hipFree(sdma_unavailable));
 }
 
 void SdmaPingPongTester::resetBuffers(size_t size) {
   CHECK_HIP(hipMemset(s_buf, 'a', size * args.num_wgs));
   CHECK_HIP(hipMemset(r_buf, 0, size * args.num_wgs));
   CHECK_HIP(hipMemset(sig_addr, 0, sizeof(uint64_t) * args.num_wgs));
-  *sdma_unavailable = false;
 }
 
 void SdmaPingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                       size_t size) {
+  if (sdma_unavailable) return;
+
   size_t shared_bytes = 0;
 
   hipLaunchKernelGGL(SdmaPingPongTest, gridSize, blockSize, shared_bytes,
                      stream, loop, args.skip, start_time, end_time,
                      s_buf, r_buf, sig_addr, size, args.op_type,
-                     _shmem_context, sdma_unavailable);
+                     _shmem_context);
 
   num_msgs = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
 }
 
 void SdmaPingPongTester::verifyResults(size_t size) {
-  if (*sdma_unavailable) {
-    if (args.myid == 0) {
-      std::cout << "sdma_pingpong: SKIPPED (SDMA did not connect on this "
-                   "topology; fell back to IPC memcpy)\n";
-    }
+  if (sdma_unavailable) {
     _print_results = false;
     return;
   }
