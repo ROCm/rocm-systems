@@ -456,8 +456,11 @@ INSTANTIATE_TEST_SUITE_P(BlockLoads, BlockLoadRaceTest,
                                            BlockLoadCase{"rdna4", true}));
 
 /// Drives the race detector's tensor DMA hook for two gfx1250 waves of one
-/// workgroup, probing LDS with ordinary DS accesses. Race semantics are covered
-/// in race_detector_tests.cpp; these tests cover the hook's translation.
+/// workgroup, probing LDS with ordinary DS accesses. The Dtl tests also drive
+/// the routed-memory hook with direct-to-LDS writes, checked against a pending
+/// tensor store or, without any tensor instruction, a pending DS read. Race
+/// semantics are covered in race_detector_tests.cpp; these tests cover the
+/// hooks' translation.
 class TensorDmaRaceTest : public ::testing::Test {
 protected:
   static constexpr uint64_t kTensorPc = 0x2010;
