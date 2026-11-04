@@ -6754,6 +6754,12 @@ class CodeGenerator:
             gen_packed_binary16,
         )
 
+        from amdisa.codegen.execute.rj_arith_division import gen_division
+
+        rj_arith_division = gen_division(ctx)
+        if rj_arith_division is not None:
+            return RjArithBody(rj_arith_division)
+
         if result_writer is None:
             for handler in (
                 gen_packed_binary16,
@@ -14804,6 +14810,18 @@ class CodeGenerator:
                 if enc.enc_name.upper() in ('ENC_LDSDIR', 'ENC_VDSDIR'):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/lds_direct.h', False)
+                    )
+
+                from amdisa.codegen.execute.rj_arith_division import DIVISION_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in DIVISION_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_division_exec.h',
+                            False,
+                        )
                     )
 
                 from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES
