@@ -414,6 +414,25 @@ constexpr size_t ddaLL128Slices(size_t bytes) {
   return (bytes + kDdaLL128DataBytesPerSlice - 1) / kDdaLL128DataBytesPerSlice;
 }
 
+// Payload a slot of slotWords wire words carries, in whole slices.
+constexpr size_t ddaLL128SlotPayloadBytes(size_t slotWords) {
+  return slotWords / (size_t)kDdaLL128WireWordsPerSlice * (size_t)kDdaLL128DataBytesPerSlice;
+}
+
+// True for a block size the LL128 kernels accept: a multiple of the warp in [warp, 1024].
+constexpr bool ddaLL128ValidThreads(int64_t threads) {
+  return threads >= kDdaLL128Warp && threads <= 1024 && threads % kDdaLL128Warp == 0;
+}
+
+// Blocks in one peer column: a warp per slice, capped by the column's share of
+// totalBlockCap, and at least one.
+constexpr unsigned ddaLL128BlocksPerPeer(size_t slices, size_t warps, int nPeers, size_t totalBlockCap) {
+  const size_t cap = totalBlockCap / (size_t)nPeers;
+  const size_t want = (slices + warps - 1) / warps;
+  const size_t bpp = want < cap ? want : cap;
+  return bpp < 1 ? 1u : (unsigned)bpp;
+}
+
 // Payload bytes of slice s in a buffer of `bytes`: a full slice, or the remainder for the last.
 __device__ __forceinline__ int ddaLL128SliceBytes(size_t bytes, size_t s) {
   const size_t rem = bytes - s * (size_t)kDdaLL128DataBytesPerSlice;

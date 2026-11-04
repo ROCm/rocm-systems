@@ -18,6 +18,7 @@
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib> // getenv (grid-shape tuning overrides)
@@ -32,10 +33,11 @@ namespace {
 
 using dda::common::kDdaLL128Warp;
 using dda::common::ddaBankSize;
-using dda::common::ddaLL128Slices;
 using dda::common::ddaLL128A2ASlotWords;
-using dda::common::kDdaLL128WireWordsPerSlice;
-using dda::common::kDdaLL128DataBytesPerSlice;
+using dda::common::ddaLL128BlocksPerPeer;
+using dda::common::ddaLL128Slices;
+using dda::common::ddaLL128SlotPayloadBytes;
+using dda::common::ddaLL128ValidThreads;
 using dda::common::kDdaLL128DataElems;
 
 static inline size_t ddaLL128A2ALinesPerBlockEnv(size_t dflt) {
@@ -56,16 +58,12 @@ static inline int ddaLL128A2AMaxBppEnv(int dflt) {
 }
 static inline unsigned ddaLL128A2AThreads(unsigned dflt) {
   const int64_t v = rcclParamDdaLL128A2AThreads();
-  if (v >= kDdaLL128Warp && v <= 1024 && (v % kDdaLL128Warp) == 0) {
-    return (unsigned)v;
-  }
-  return dflt;
+  return ddaLL128ValidThreads(v) ? (unsigned)v : dflt;
 }
 
 // Largest per-peer chunk the slot (carved from one scratch bank) can carry.
 static inline size_t ddaLL128A2AMaxPerChunkBytes(ncclComm* comm) {
-  const size_t slotWords = ddaLL128A2ASlotWords(ddaBankSize(comm->ddaScratchBytes), comm->nRanks);
-  return slotWords / (size_t)kDdaLL128WireWordsPerSlice * (size_t)kDdaLL128DataBytesPerSlice;
+  return ddaLL128SlotPayloadBytes(ddaLL128A2ASlotWords(ddaBankSize(comm->ddaScratchBytes), comm->nRanks));
 }
 
 // Geometry: grid.x = remote peers, grid.y = warp-per-slice split capped by the comm block budget
@@ -76,23 +74,21 @@ static inline std::pair<dim3, dim3> ddaAllToAllFabricLL128Geom(ncclComm* comm, s
   const unsigned threads = ddaLL128A2AThreads(tuned > 0 ? (unsigned)tuned : kDdaLL128A2ADefaultThreads);
   const size_t warps = threads / (unsigned)kDdaLL128Warp;
   const int nPeers = comm->nRanks - 1;
-  int cap = rcclDdaFabricA2aLL128Blocks(comm, totalBytes);
-  if (comm->ddaLLEpochLen < cap) cap = comm->ddaLLEpochLen;
-  cap /= nPeers;
-  const int envCap = ddaLL128A2AMaxBppEnv(0);
-  if (envCap > 0 && envCap < cap) cap = envCap;
-  if (cap < 1) cap = 1;
-  size_t bpp = (ddaLL128Slices(perChunkBytes) + warps - 1) / warps;
+  int cap = std::min(rcclDdaFabricA2aLL128Blocks(comm, totalBytes), comm->ddaLLEpochLen);
+  const int maxBpp = ddaLL128A2AMaxBppEnv(0);
+  if (maxBpp > 0 && (int64_t)maxBpp * nPeers < cap) cap = maxBpp * nPeers;
+  const size_t totalCap = cap < 0 ? 0 : (size_t)cap;
   // A warp moves a whole 16-line slice, so fewer than 16 lines per warp only adds idle blocks.
   const size_t linesPerBlock = ddaLL128A2ALinesPerBlockEnv(0);
+  unsigned bpp;
   if (linesPerBlock > 0) {
     const size_t nWords = perChunkBytes >> 3;
     const size_t numLines = (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
-    bpp = (numLines + linesPerBlock - 1) / linesPerBlock;
+    bpp = ddaLL128BlocksPerPeer(numLines, linesPerBlock, nPeers, totalCap);
+  } else {
+    bpp = ddaLL128BlocksPerPeer(ddaLL128Slices(perChunkBytes), warps, nPeers, totalCap);
   }
-  if (bpp > (size_t)cap) bpp = (size_t)cap;
-  if (bpp < 1) bpp = 1;
-  return std::make_pair(dim3((unsigned)nPeers, (unsigned)bpp), dim3(threads));
+  return std::make_pair(dim3((unsigned)nPeers, bpp), dim3(threads));
 }
 
 static ncclResult_t ddaAllToAllFabricLL128Launch(const void* sendbuff, void* recvbuff, size_t perChunkBytes,
