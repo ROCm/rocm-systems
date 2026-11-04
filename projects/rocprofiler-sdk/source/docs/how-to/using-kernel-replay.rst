@@ -194,12 +194,10 @@ Between passes, kernel replay restores:
 * Coarse-grained device (VRAM) allocations from ``hipMalloc`` /
   ``hsa_amd_memory_pool_allocate`` / ``hsa_memory_allocate``.
 * Module-scope ``__device__`` and ``__constant__`` variables in loaded executables.
-* Fine-grained device memory of the same GPU that a kernel argument points at, up to 512 MiB per
-  dispatch. A host thread must not write it while the dispatch is being replayed: the restore
-  reverts the other writer's update along with the pass's own.
 
 It does **not** restore:
 
+* Fine-grained device memory.
 * Unified or managed memory.
 * ``hipMallocAsync`` and other pool-backed, stream-ordered allocations.
 * Host memory, or another GPU's memory.
