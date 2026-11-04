@@ -63,7 +63,7 @@ from amdisa.semantics import (
     takes_output_modifiers,
     takes_source_modifiers,
 )
-from amdisa.isa_profile import DppOpcodeRule, FloatDotAccumulation
+from amdisa.isa_profile import DppOpcodeRule, FloatDotAccumulation, SwmmacLayout
 
 from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.cpp_file import CppFile
@@ -14776,6 +14776,21 @@ class CodeGenerator:
                 if requires_compute_unit:
                     cpp_includes.append(('rocjitsu/vm/amdgpu/compute_unit.h', False))
                 if has_matrix_exec:
+                    if self.isa_spec.profile.uses_rj_arith_matrix:
+                        cpp_includes.append(
+                            ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_exec.h', False)
+                        )
+                    if (
+                        self.isa_spec.profile.uses_rj_arith_matrix
+                        and self.isa_spec.profile.swmmac_layout
+                        == SwmmacLayout.RUNTIME_WAVE
+                    ):
+                        cpp_includes.append(
+                            (
+                                'rocjitsu/isa/arch/amdgpu/shared/rj_arith_sparse_exec.h',
+                                False,
+                            )
+                        )
                     cpp_includes.append(
                         (
                             self.config.handwritten_include(
