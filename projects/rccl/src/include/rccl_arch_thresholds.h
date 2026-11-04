@@ -117,6 +117,15 @@ struct rcclArchThresholds {
   int ddaVmmMinBlocks;
   int ddaVmmMaxBlocks;
 
+  // DDA LL128 AllGather block size and block cap, each applied to totals inside its inclusive
+  // byte window. 0 keeps 512 threads and the init block cap.
+  int ddaAgLL128Threads;
+  size_t ddaAgLL128ThreadsMinBytes;
+  size_t ddaAgLL128ThreadsMaxBytes;
+  int ddaAgLL128MaxBlocks;
+  size_t ddaAgLL128MaxBlocksMinBytes;
+  size_t ddaAgLL128MaxBlocksMaxBytes;
+
   // Ring / Tree crossovers that replace the tuning model's ranges on single-node
   // comms (nNodes == 1). Sizes are per rank as rcclGetSizePerRank() reports them
   // (AllReduce: the whole message, hence nRanks x the entry). 0 = keep the
@@ -138,6 +147,13 @@ struct rcclArchThresholds {
   // NCCL_CTA_POLICY_ZERO forces it on every arch (it is the one zero-CU path for
   // unregistered buffers). RCCL_FORCE_CE=0 turns it off everywhere. A null table forces it.
   bool forceCeScratch;
+
+  // Broadcast Ring ceilings in total message bytes, not per rank, at any node
+  // count. LL while 0 < nBytes <= bcRingLLMaxBytes; LL128 while that is
+  // exceeded and nBytes <= bcRingLL128MaxBytes; Simple above that. 0 keeps the
+  // tuning model's per-rank ranges. gfx1250 DPX sets both; other tables leave them 0.
+  size_t bcRingLLMaxBytes;
+  size_t bcRingLL128MaxBytes;
 };
 
 // Compute-partition mode a gfx1250 comm is tuned for (RCCL_TUNING_PARTITION_MODE). It picks

@@ -773,6 +773,39 @@ pub unsafe extern "C" fn hsa_amd_queue_set_priority(queue: *mut HsaQueue, priori
     })
 }
 
+/// Inactivates a public queue after the intercept case has been handled.
+/// Counted handles are rejected before touching their shared native queue.
+pub(crate) fn inactivate_unintercepted_queue(
+    state: &mut QueueState,
+    queue: *mut HsaQueue,
+) -> Status {
+    if state.counted_queues.contains_key(&(queue as usize)) {
+        // Its public header still points at the shared AQL ring and
+        // doorbell. Index sentinels cannot isolate this handle from peers.
+        return INVALID_QUEUE;
+    }
+    if let Some(record) = state.queues.get_mut(&(queue as usize)) {
+        // A shared cooperative queue must not be returned by a later
+        // create once any holder starts inactivating it.
+        record.inactivated = true;
+        return record
+            .native
+            .inactivate()
+            .map_or_else(map_error, |()| SUCCESS);
+    }
+    if let Some(record) = state.sdma_queues.get_mut(&(queue as usize)) {
+        return record
+            .native
+            .inactivate()
+            .map_or_else(map_error, |()| SUCCESS);
+    }
+    if let Some(record) = state.soft_queues.get_mut(&(queue as usize)) {
+        record.inactivate();
+        return SUCCESS;
+    }
+    INVALID_QUEUE
+}
+
 #[cfg_attr(
     all(target_arch = "x86_64", not(test)),
     unsafe(export_name = "__hsa_impl_hsa_queue_inactivate")
@@ -824,28 +857,7 @@ pub unsafe extern "C" fn hsa_queue_inactivate(queue: *mut HsaQueue) -> Status {
                 },
             );
         }
-        if let Some(hardware_key) = hardware_queue_key(runtime, queue) {
-            if let Some(record) = runtime.queue_state.queues.get_mut(&hardware_key) {
-                // A shared cooperative queue must not be returned by a later
-                // create once any holder starts inactivating it.
-                record.inactivated = true;
-                return record
-                    .native
-                    .inactivate()
-                    .map_or_else(map_error, |()| SUCCESS);
-            }
-        }
-        if let Some(record) = runtime.queue_state.sdma_queues.get_mut(&(queue as usize)) {
-            return record
-                .native
-                .inactivate()
-                .map_or_else(map_error, |()| SUCCESS);
-        }
-        if let Some(record) = runtime.queue_state.soft_queues.get_mut(&(queue as usize)) {
-            record.inactivate();
-            return SUCCESS;
-        }
-        INVALID_QUEUE
+        inactivate_unintercepted_queue(&mut runtime.queue_state, queue)
     })
 }
 
@@ -922,10 +934,11 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
             } else {
                 None
             };
-            let in_flight = match InFlightGeneration::enter(generation, &runtime.inflight) {
-                Ok(in_flight) => in_flight,
-                Err(status) => return status,
-            };
+            let in_flight =
+                match InFlightGeneration::enter(generation, &runtime.inflight, &runtime.health) {
+                    Ok(in_flight) => in_flight,
+                    Err(status) => return status,
+                };
             if let Some(agent) = cooperative_agent {
                 if runtime
                     .queue_state
