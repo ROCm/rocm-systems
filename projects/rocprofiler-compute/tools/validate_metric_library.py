@@ -20,6 +20,7 @@ For every arch in METRIC_LIBRARY_PARENT_ARCH, check that:
 src/rocprof_compute_soc/metric_library/README.md explains the rules.
 """
 
+import contextlib
 import re
 import sys
 from collections import defaultdict
@@ -127,7 +128,10 @@ def canonical_formula(equation: object) -> Optional[str]:
     if equation is None or str(equation) == "None":
         return None
     match = ROUND_RE.match(str(equation))
-    text = normalize_equation(match.group(1) if match else str(equation))
+    text = match.group(1) if match else str(equation)
+    # _parse_errors() reports an equation that does not parse
+    with contextlib.suppress(ValueError):
+        text = normalize_equation(text)
     return re.sub(r"\s+", "", text)
 
 

@@ -50,6 +50,13 @@ AGGREGATION_FUNCTIONS = {"SUM", "MIN", "MAX", "AVG"}
 # Operator precedence for parentheses minimization
 OPERATOR_PRECEDENCE = {"+": 1, "-": 1, "*": 2, "/": 2}
 
+# Index suffix of a per-channel counter name, such as TCC_HIT[0]
+COUNTER_INDEX_SUFFIX = re.compile(r"\[\d+\]")
+
+# Channel placeholder of a per-channel template, such as TCC_HIT[::_1]; analyze
+# expands the template once per channel, so the formatter leaves it as written
+CHANNEL_PLACEHOLDER = "::_"
+
 # =============================================================================
 # Tokenizer / Parser / AST
 # =============================================================================
@@ -112,6 +119,9 @@ class Tokenizer:
             self.text[self.pos].isalnum() or self.text[self.pos] == "_"
         ):
             self.pos += 1
+        index_suffix = COUNTER_INDEX_SUFFIX.match(self.text, self.pos)
+        if index_suffix:
+            self.pos = index_suffix.end()
         return self.text[start : self.pos]
 
     def _read_variable(self) -> str:
@@ -382,17 +392,21 @@ def _serialize_ast(
 
 
 def normalize_equation(equation: str) -> str:
-    """Parse, normalize, and serialize a metric equation string."""
+    """Parse, normalize, and serialize a metric equation string.
+
+    Raises ValueError when the equation cannot be parsed.
+    """
     stripped = equation.strip()
-    if stripped in LITERAL_VALUES or stripped.startswith(('"', "'")):
+    if (
+        stripped in LITERAL_VALUES
+        or stripped.startswith(('"', "'"))
+        or CHANNEL_PLACEHOLDER in stripped
+    ):
         return equation
 
-    try:
-        tokens = Tokenizer(equation).tokenize()
-        ast = Parser(tokens).parse()
-        return _serialize_ast(_normalize_ast(ast))
-    except (ValueError, IndexError):
-        return equation
+    tokens = Tokenizer(equation).tokenize()
+    ast = Parser(tokens).parse()
+    return _serialize_ast(_normalize_ast(ast))
 
 
 def extract_metric_equations(
@@ -444,14 +458,12 @@ def _should_skip_file(path: Path) -> bool:
     return False
 
 
-def _apply_fixes(content: str, equations: list[tuple[str, str, str]]) -> str:
-    """Apply equation normalizations using regex to handle multi-line YAML."""
+def _apply_fixes(content: str, fixes: list[tuple[str, str]]) -> str:
+    """Replace each original equation with its normalized form in the YAML text."""
     result = content
-    for _, _, original in equations:
-        normalized = normalize_equation(original)
-        if normalized != original:
-            pattern = re.escape(original).replace(r"\ ", r"\s+")
-            result = re.sub(pattern, normalized, result, count=1)
+    for original, normalized in fixes:
+        pattern = re.escape(original).replace(r"\ ", r"\s+")
+        result = re.sub(pattern, normalized, result, count=1)
     return result
 
 
@@ -472,25 +484,30 @@ def check_file(
     if data is None or not _should_check_equations(path):
         return True, []
 
-    equations = extract_metric_equations(data)
-    issues = []
-    equations_to_fix = []
+    parse_errors = []
+    format_issues = []
+    fixes = []
 
-    for eq_path, key, value in equations:
-        normalized = normalize_equation(value)
+    for eq_path, _, value in extract_metric_equations(data):
+        try:
+            normalized = normalize_equation(value)
+        except ValueError as e:
+            parse_errors.append(f"  {eq_path}: cannot parse equation: {e}\n    {value}")
+            continue
         if normalized != value:
-            equations_to_fix.append((eq_path, key, value))
-            issues.append(f"  {eq_path}: equation needs normalization")
+            fixes.append((value, normalized))
+            format_issues.append(f"  {eq_path}: equation needs normalization")
             if show_diff:
-                issues.append(f"    - {value}")
-                issues.append(f"    + {normalized}")
+                format_issues.append(f"    - {value}")
+                format_issues.append(f"    + {normalized}")
 
-    if fix and equations_to_fix:
+    if fix and fixes:
         with open(path, "w", encoding="utf-8") as f:
-            f.write(_apply_fixes(content, equations_to_fix))
-        return True, [f"  Fixed {len(equations_to_fix)} equation(s)"]
+            f.write(_apply_fixes(content, fixes))
+        format_issues = []
 
-    return len(issues) == 0, issues
+    issues = parse_errors + format_issues
+    return not issues, issues
 
 
 def main() -> int:
