@@ -325,6 +325,9 @@ TEST_P(ScalarAtomicTest, CompareSwapReturnsOldAndPreservesCompare) {
         const uint64_t guard_address = kAddress + dwords * 4;
         const unsigned compare_sgpr = 4 + dwords;
         const unsigned guard_sgpr = 4 + 2 * dwords;
+        // The buffer bound fits only the memory element: CMPSWAP_X2 reads 16
+        // bytes of SGPRs but accesses 8 bytes of memory.
+        write_descriptor(dwords * 4);
         write_memory(kAddress, dwords, old);
         memory.write32(guard_address, 0xdeadbeef);
         write_sgprs(4, dwords, source);
@@ -582,7 +585,7 @@ TEST_P(ScalarAtomicTest, BufferAtomicRunsOnlyWhenWhollyInRange) {
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Complete);
       EXPECT_EQ(read_memory(address, dwords), in_range ? 7u : 6u);
-      EXPECT_EQ(read_sgprs(4, dwords), !glc ? 7u : in_range ? 6u : 0u);
+      EXPECT_EQ(read_sgprs(4, dwords), !glc ? 7u : (in_range ? 6u : 0u));
       EXPECT_TRUE(wf->wait_counters().empty());
       if (backing && !in_range) {
         EXPECT_EQ(backing->load_attempts, 0u);
