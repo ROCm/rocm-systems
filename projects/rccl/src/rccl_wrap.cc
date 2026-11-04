@@ -2862,11 +2862,6 @@ bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan,
   return !hasP2p && !hasBcast && nCollTasks <= 0;
 }
 
-bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) {
-  return rcclWarpSpeedSupported(comm, plan, ncclIntruQueueHead(&plan->collTaskQueue),
-                                /*nCollTasks=*/-1);
-}
-
 bool rcclIsAboveWarpSpeedThreshold(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
   // single node, full subscription thresholds for AllGather and ReduceScatter
   if (info->func == ncclFuncAllReduce && nBytes >= rcclParamWarpSpeedARThreshold()) {
