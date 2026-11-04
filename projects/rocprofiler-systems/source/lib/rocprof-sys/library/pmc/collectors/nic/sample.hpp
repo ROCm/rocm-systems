@@ -8,7 +8,6 @@
 
 #include <cstdint>
 #include <string>
-#include <string_view>
 
 namespace rocprofsys::pmc::collectors::nic
 {
@@ -17,9 +16,8 @@ namespace rocprofsys::pmc::collectors::nic
  * @brief NIC RDMA sample type for trace cache.
  *
  * This struct represents a sample of NIC RDMA metrics collected by the PMC.
- * It inherits from cacheable_t to support serialization to the trace cache.
  */
-struct sample : trace_cache::cacheable_t
+struct sample
 {
     static constexpr trace_cache::type_identifier_t type_identifier{
         trace_cache::type_identifier_t::ainic_pmc_sample
@@ -40,6 +38,12 @@ struct sample : trace_cache::cacheable_t
     std::string     device_name;
     std::uint64_t   timestamp;
     metrics         metric_values;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(enabled_metric, device_id, device_name, timestamp, metric_values);
+    }
 };
 
 }  // namespace rocprofsys::pmc::collectors::nic
@@ -49,52 +53,5 @@ namespace rocprofsys::trace_cache
 
 /// @brief AINIC PMC sample type alias
 using ainic_pmc_sample = pmc::collectors::nic::sample;
-
-template <>
-inline void
-serialize(std::uint8_t* buffer, const pmc::collectors::nic::sample& item)
-{
-    utility::store_value(
-        buffer, static_cast<std::uint32_t>(item.enabled_metric.value), item.device_id,
-        std::string_view(item.device_name), item.timestamp,
-        item.metric_values.rx_rdma_ucast_bytes, item.metric_values.tx_rdma_ucast_bytes,
-        item.metric_values.rx_rdma_ucast_pkts, item.metric_values.tx_rdma_ucast_pkts,
-        item.metric_values.rx_rdma_cnp_pkts, item.metric_values.tx_rdma_cnp_pkts,
-        item.metric_values.tx_rdma_ack_timeout, item.metric_values.resp_tx_pkt_seq_err,
-        item.metric_values.req_rx_pkt_seq_err,
-        item.metric_values.req_rx_impl_nak_seq_err);
-}
-
-template <>
-inline pmc::collectors::nic::sample
-deserialize(std::uint8_t*& buffer)
-{
-    pmc::collectors::nic::sample item;
-    std::string_view             device_name_view;
-    utility::parse_value(
-        buffer, item.enabled_metric.value, item.device_id, device_name_view,
-        item.timestamp, item.metric_values.rx_rdma_ucast_bytes,
-        item.metric_values.tx_rdma_ucast_bytes, item.metric_values.rx_rdma_ucast_pkts,
-        item.metric_values.tx_rdma_ucast_pkts, item.metric_values.rx_rdma_cnp_pkts,
-        item.metric_values.tx_rdma_cnp_pkts, item.metric_values.tx_rdma_ack_timeout,
-        item.metric_values.resp_tx_pkt_seq_err, item.metric_values.req_rx_pkt_seq_err,
-        item.metric_values.req_rx_impl_nak_seq_err);
-    item.device_name = std::string(device_name_view);
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const pmc::collectors::nic::sample& item)
-{
-    return utility::get_size(
-        item.enabled_metric.value, item.device_id, std::string_view(item.device_name),
-        item.timestamp, item.metric_values.rx_rdma_ucast_bytes,
-        item.metric_values.tx_rdma_ucast_bytes, item.metric_values.rx_rdma_ucast_pkts,
-        item.metric_values.tx_rdma_ucast_pkts, item.metric_values.rx_rdma_cnp_pkts,
-        item.metric_values.tx_rdma_cnp_pkts, item.metric_values.tx_rdma_ack_timeout,
-        item.metric_values.resp_tx_pkt_seq_err, item.metric_values.req_rx_pkt_seq_err,
-        item.metric_values.req_rx_impl_nak_seq_err);
-}
 
 }  // namespace rocprofsys::trace_cache
