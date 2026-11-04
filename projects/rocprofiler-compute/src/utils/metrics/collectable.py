@@ -13,24 +13,17 @@ does its parent.
 import math
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import pandas as pd
 
 from utils.logger import console_warning
-from utils.metrics.aggregation import (
-    merge_dispatch_collect_ratio,
-    merge_dispatch_weighted_avg,
-)
+from utils.metrics.aggregation import merge_dispatch_collect_ratio
 from utils.metrics.expression import (
     is_composite_avg_formula,
 )
 from utils.metrics.metric_evaluator import MetricEvaluator
 from utils.metrics.noise_clamper import to_noise_clamp
-from utils.metrics.pass_provenance import resolve_weight_counter_column
-
-if TYPE_CHECKING:
-    from utils.metrics.pass_provenance import PassLayout
 
 # Names recorded while one analyze run is open, then printed once.
 _pending_unset_collectables: Set[str] = set()
@@ -42,14 +35,11 @@ COLLECTABLE_EXPR_CACHE_ATTR = "collectable_expr_cache"
 COLLECTABLE_IDS_ATTR = "collectable_ids"
 COLLECT_SUM_SPECS_ATTR = "collect_sum_specs"
 COLLECT_RATIO_SPECS_ATTR = "collect_ratio_specs"
-WEIGHTED_AVG_ATTR = "weighted_avg_specs"
-WEIGHTED_AVG_SUBS_ATTR = "weighted_avg_subs"
 COMPOSITE_FINISH_ATTR = "composite_finish"
 METRIC_NAME_COLUMN = "Metric"
 
 
 class CompositeKind(str, Enum):
-    WEIGHTED_AVG = "weighted_avg"
     COLLECT_SUM = "collect_sum"
     COLLECT_RATIO = "collect_ratio"
 
@@ -184,24 +174,6 @@ def build_metric_eval_graph(df: pd.DataFrame) -> MetricEvalGraph:
                     graph.collectable_ids[collect_id] = row_name
                     graph.collectable_row_names.add(row_name)
 
-    weighted_specs = df.attrs.get(WEIGHTED_AVG_ATTR)
-    subs_by_id = df.attrs.get(WEIGHTED_AVG_SUBS_ATTR, {})
-    if isinstance(weighted_specs, dict) and isinstance(subs_by_id, dict):
-        for metric_id, weight_meta in weighted_specs.items():
-            refs = subs_by_id.get(metric_id)
-            if not isinstance(refs, list) or metric_id not in df.index:
-                continue
-            graph.collectable_row_names.update(refs)
-            graph.composites.append(
-                CompositeDef(
-                    metric_id=metric_id,
-                    kind=CompositeKind.WEIGHTED_AVG,
-                    refs=refs,
-                    weight_meta=weight_meta if isinstance(weight_meta, dict) else {},
-                    metric_name=_row_metric_name(df, metric_id),
-                )
-            )
-
     collect_sum_specs = df.attrs.get(COLLECT_SUM_SPECS_ATTR)
     if isinstance(collect_sum_specs, dict):
         for metric_id, refs in collect_sum_specs.items():
@@ -296,15 +268,6 @@ def per_dispatch_ratio_series(
             continue
         values[dispatch_id] = float(scalar)
     return pd.Series(values, dtype=float)
-
-
-def _weight_counter_per_dispatch(counter: str, raw_pmc_df: pd.DataFrame) -> pd.Series:
-    if counter not in raw_pmc_df.columns:
-        return pd.Series(dtype=float)
-    if "Dispatch_ID" in raw_pmc_df.columns:
-        return raw_pmc_df.groupby("Dispatch_ID", dropna=False)[counter].sum()
-    total = raw_pmc_df[counter].sum()
-    return pd.Series({0: float(total)})
 
 
 def cache_collectable_expressions(
@@ -483,70 +446,6 @@ def _collectable_series(
     return series
 
 
-def _evaluate_weighted_composite(
-    composite: CompositeDef,
-    df: pd.DataFrame,
-    raw_pmc_df: pd.DataFrame,
-    sys_vars: Dict[str, Any],
-    empirical_peaks: Dict[str, Any],
-    pass_layout: Optional["PassLayout"] = None,
-) -> Union[float, str]:
-    avg_col = _avg_column_name(df)
-    if avg_col is None:
-        return "N/A"
-
-    ratio_series_list: List[pd.Series] = []
-    weight_series_list: List[pd.Series] = []
-
-    for ref_name in composite.refs:
-        sub_meta = composite.weight_meta.get(ref_name)
-        if not isinstance(sub_meta, dict):
-            console_warning(
-                f"WEIGHTED_AVG: missing _weighted_avg entry for '{ref_name}'."
-            )
-            return "N/A"
-        weight_counter = sub_meta.get("weight_counter")
-        if not isinstance(weight_counter, str) or not weight_counter:
-            console_warning(f"WEIGHTED_AVG: missing weight_counter for '{ref_name}'.")
-            return "N/A"
-
-        built_avg = _lookup_collectable_built_avg(df, ref_name, avg_col)
-        if built_avg is None:
-            state = _collectable_expr_state(df, ref_name, avg_col)
-            _note_collectable_problem(
-                ref_name, "unset" if state == "unset" else "missing"
-            )
-            return "N/A"
-
-        bound_weight = resolve_weight_counter_column(
-            weight_counter, ref_name, df, pass_layout
-        )
-        if not bound_weight:
-            console_warning(
-                "metrics",
-                f"WEIGHTED_AVG: weight {weight_counter!r} for '{ref_name}' "
-                "is not on the sub-metric pass; leaving the composite unset",
-            )
-            return "N/A"
-        weight_series = _weight_counter_per_dispatch(bound_weight, raw_pmc_df)
-        if weight_series.empty:
-            console_warning(
-                "metrics",
-                f"WEIGHTED_AVG: weight column {bound_weight!r} for '{ref_name}' "
-                "is missing; leaving the composite unset",
-            )
-            return "N/A"
-        ratio_series_list.append(
-            per_dispatch_ratio_series(built_avg, raw_pmc_df, sys_vars, empirical_peaks)
-        )
-        weight_series_list.append(weight_series)
-
-    merged = merge_dispatch_weighted_avg(ratio_series_list, weight_series_list)
-    if pd.isna(merged):
-        return "N/A"
-    return float(merged)
-
-
 def _piece_value_on_dispatch_filter(
     df: pd.DataFrame,
     ref_name: str,
@@ -675,16 +574,13 @@ def apply_composite_metrics(
     raw_pmc_df: pd.DataFrame,
     sys_vars: Dict[str, Any],
     empirical_peaks: Dict[str, Any],
-    pass_layout: Optional["PassLayout"] = None,
 ) -> None:
     """Evaluate composite parents after collectable rows (graph order)."""
     own_batch = _collectable_warning_depth == 0
     if own_batch:
         begin_collectable_warnings()
     try:
-        _apply_composite_metrics(
-            dfs, dfs_type, raw_pmc_df, sys_vars, empirical_peaks, pass_layout
-        )
+        _apply_composite_metrics(dfs, dfs_type, raw_pmc_df, sys_vars, empirical_peaks)
     finally:
         if own_batch:
             flush_collectable_warnings()
@@ -696,7 +592,6 @@ def _apply_composite_metrics(
     raw_pmc_df: pd.DataFrame,
     sys_vars: Dict[str, Any],
     empirical_peaks: Dict[str, Any],
-    pass_layout: Optional["PassLayout"],
 ) -> None:
     for df_id, df in dfs.items():
         if dfs_type.get(df_id) != "metric_table":
@@ -720,16 +615,7 @@ def _apply_composite_metrics(
         for composite in ordered:
             if composite.metric_id not in df.index:
                 continue
-            if composite.kind is CompositeKind.WEIGHTED_AVG:
-                result = _evaluate_weighted_composite(
-                    composite,
-                    df,
-                    raw_pmc_df,
-                    sys_vars,
-                    empirical_peaks,
-                    pass_layout=pass_layout,
-                )
-            elif composite.kind is CompositeKind.COLLECT_SUM:
+            if composite.kind is CompositeKind.COLLECT_SUM:
                 result = _evaluate_collect_sum_composite(
                     composite, df, raw_pmc_df, sys_vars, empirical_peaks
                 )
@@ -745,10 +631,9 @@ def _apply_composite_metrics(
 
 
 def composite_parent_ids(df: pd.DataFrame) -> Set[str]:
-    """Metric ids of the WEIGHTED_AVG, COLLECT_SUM, and COLLECT_RATIO parents."""
+    """Metric ids of the COLLECT_SUM and COLLECT_RATIO parents."""
     parent_ids: Set[str] = set()
     for attr in (
-        WEIGHTED_AVG_SUBS_ATTR,
         COLLECT_SUM_SPECS_ATTR,
         COLLECT_RATIO_SPECS_ATTR,
     ):

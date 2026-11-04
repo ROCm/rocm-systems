@@ -68,10 +68,6 @@ ALLOWED_AST_NODES: frozenset[type] = frozenset({
     ast.Or,
 })
 
-_WEIGHTED_AVG_CALL_RE = re.compile(
-    r"^WEIGHTED_AVG\s*\(\s*([^)]+)\s*\)$",
-    re.IGNORECASE,
-)
 _COLLECT_SUM_CALL_RE = re.compile(
     r"^COLLECT_SUM\s*\(\s*([^)]+)\s*\)$",
     re.IGNORECASE,
@@ -82,7 +78,7 @@ _COLLECT_SUM_CALL_RE = re.compile(
 # floored at zero after its pieces combine, e.g. ROUND(COLLECT_SUM(a, b), 0).
 _COMPOSITE_FINISH_RE = re.compile(
     r"^(?P<func>ROUND|NOISE_CLAMP)\s*\(\s*"
-    r"(?P<inner>(?:WEIGHTED_AVG|COLLECT_SUM|COLLECT_RATIO)\s*\(.+\))"
+    r"(?P<inner>(?:COLLECT_SUM|COLLECT_RATIO)\s*\(.+\))"
     r"\s*,\s*(?P<arg>\d+(?:\.\d+)?)\s*\)$",
     re.IGNORECASE,
 )
@@ -100,16 +96,6 @@ def split_composite_finish(formula: str) -> tuple[str, tuple[str, float] | None]
         return text, None
     finish = (match.group("func").upper(), float(match.group("arg")))
     return match.group("inner").strip(), finish
-
-
-def parse_weighted_avg_submetrics(formula: str) -> list[str] | None:
-    """Return submetric names from WEIGHTED_AVG(a, b, ...) or None if not a match."""
-    if not formula or not isinstance(formula, str):
-        return None
-    match = _WEIGHTED_AVG_CALL_RE.match(split_composite_finish(formula)[0])
-    if not match:
-        return None
-    return [part.strip() for part in match.group(1).split(",") if part.strip()]
 
 
 def parse_collect_sum_submetrics(formula: str) -> list[str] | None:
@@ -218,20 +204,17 @@ def reject_counter_bearing_composite_extents(
         if counters:
             raise ValueError(
                 f"Composite metric {metric_name!r} {extent_key} references "
-                f"counters {sorted(counters)}; min, max, and peak on COLLECT_SUM, "
-                "COLLECT_RATIO, and WEIGHTED_AVG must not reintroduce a PMC set"
+                f"counters {sorted(counters)}; min, max, and peak on COLLECT_SUM "
+                "and COLLECT_RATIO must not reintroduce a PMC set"
             )
 
 
 def composite_part_refs(formula: str) -> list[str]:
     """Names of the metrics a composite formula combines, without their sign.
 
-    Returns an empty list when formula is not a WEIGHTED_AVG, COLLECT_SUM, or
-    COLLECT_RATIO call.
+    Returns an empty list when formula is not a COLLECT_SUM or COLLECT_RATIO call.
     """
-    refs = parse_weighted_avg_submetrics(formula) or parse_collect_sum_submetrics(
-        formula
-    )
+    refs = parse_collect_sum_submetrics(formula)
     if refs is None:
         ratio = parse_collect_ratio_parts(formula)
         refs = ratio[0] + ratio[1] if ratio is not None else []
@@ -243,8 +226,7 @@ def is_composite_avg_formula(formula: str) -> bool:
         return False
     text = formula.strip()
     return (
-        parse_weighted_avg_submetrics(text) is not None
-        or parse_collect_sum_submetrics(text) is not None
+        parse_collect_sum_submetrics(text) is not None
         or parse_collect_ratio_parts(text) is not None
     )
 
