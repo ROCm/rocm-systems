@@ -1353,7 +1353,9 @@ def amdsmi_get_cpu_core_ccd_power(processor_handle: processor_handle_t) -> int:
 
     power = ctypes.c_uint32()
 
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_core_ccd_power(processor_handle, ctypes.byref(power)))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpu_core_ccd_power")(processor_handle, ctypes.byref(power))
+    )
 
     return power.value  # in mW
 
@@ -1478,7 +1480,9 @@ def amdsmi_get_cpu_socket_power(processor_handle: processor_handle_t) -> int:
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     ppower = ctypes.c_uint32()
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_socket_power(processor_handle, ctypes.byref(ppower)))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpu_socket_power")(processor_handle, ctypes.byref(ppower))
+    )
 
     return ppower.value  # in mW
 
@@ -1488,7 +1492,9 @@ def amdsmi_get_cpu_socket_power_cap(processor_handle: processor_handle_t) -> int
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     pcap = ctypes.c_uint32()
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_socket_power_cap(processor_handle, ctypes.byref(pcap)))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpu_socket_power_cap")(processor_handle, ctypes.byref(pcap))
+    )
 
     return pcap.value  # in mW
 
@@ -1499,7 +1505,9 @@ def amdsmi_get_cpu_socket_power_cap_max(processor_handle: processor_handle_t) ->
 
     pmax = ctypes.c_uint32()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_socket_power_cap_max(processor_handle, ctypes.byref(pmax))
+        _amdsmi_entry_point("amdsmi_get_cpu_socket_power_cap_max")(
+            processor_handle, ctypes.byref(pmax)
+        )
     )
 
     return pmax.value  # in mW
@@ -1511,7 +1519,7 @@ def amdsmi_get_cpu_pwr_svi_telemetry_all_rails(processor_handle: processor_handl
 
     power = ctypes.c_uint32()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_pwr_svi_telemetry_all_rails(
+        _amdsmi_entry_point("amdsmi_get_cpu_pwr_svi_telemetry_all_rails")(
             processor_handle, ctypes.byref(power)
         )
     )
@@ -1527,7 +1535,9 @@ def amdsmi_set_cpu_socket_power_cap(processor_handle: processor_handle_t, power_
 
     power_cap_32 = ctypes.c_uint32(power_cap)
 
-    _check_res(amdsmi_wrapper.amdsmi_set_cpu_socket_power_cap(processor_handle, power_cap_32))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_set_cpu_socket_power_cap")(processor_handle, power_cap_32)
+    )
 
 
 def amdsmi_set_cpu_pwr_efficiency_mode(
@@ -1550,7 +1560,7 @@ def amdsmi_set_cpu_pwr_efficiency_mode(
     ppt_limit_32 = ctypes.c_uint32(ppt_limit)
 
     _check_res(
-        amdsmi_wrapper.amdsmi_set_cpu_pwr_efficiency_mode(
+        _amdsmi_entry_point("amdsmi_set_cpu_pwr_efficiency_mode")(
             processor_handle, mode_8, ctypes.byref(util_32), ctypes.byref(ppt_limit_32)
         )
     )
@@ -1567,7 +1577,7 @@ def amdsmi_get_cpu_pwr_efficiency_mode(processor_handle: processor_handle_t) -> 
     ppt_limit = ctypes.c_uint32()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_pwr_efficiency_mode(
+        _amdsmi_entry_point("amdsmi_get_cpu_pwr_efficiency_mode")(
             processor_handle, ctypes.byref(mode), ctypes.byref(util), ctypes.byref(ppt_limit)
         )
     )
