@@ -2390,8 +2390,9 @@ private:
   /// access that caused it, which is the whole problem: this class turns other
   /// components' bugs into host crashes.
   ///
-  /// Probe through the guarded host-access path rather than trusting the
-  /// address. This reports failure for a hole, for a PROT_NONE reservation --
+  /// Recovery-enabled builds probe through the guarded host-access path;
+  /// otherwise consult host mapping metadata. This reports failure for a hole,
+  /// for a PROT_NONE reservation --
   /// the shape the ROCm runtime leaves behind when it reserves a VA aperture,
   /// and the shape an unresolved GPU VA most often lands in -- and for an
   /// address never mapped at all. It also works when a container security
@@ -2408,11 +2409,11 @@ private:
   static bool identity_page_is_accessible(const uint8_t *page) {
     if (page == nullptr)
       return false;
-#if defined(RJ_GPU_MEMORY_WITH_TSAN)
-    // A probe is metadata-only. Touching an application byte merely to ask
-    // whether its VMA is readable creates an unsynchronized read in TSan when
-    // the host is still initializing that allocation. Consult the kernel's
-    // mapping metadata instead; the actual GPU access remains guarded.
+#if defined(RJ_GPU_MEMORY_WITH_TSAN) || defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
+    // Without recovery, an availability probe must not dereference an unknown
+    // page. TSan also requires a metadata-only probe: touching an application
+    // byte races host initialization. Actual transfers use the configured
+    // host-access policy.
     const PageWritability writability = host_page_writability(page);
     return writability == PageWritability::Writable || writability == PageWritability::ReadOnly;
 #else

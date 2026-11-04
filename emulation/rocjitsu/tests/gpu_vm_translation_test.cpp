@@ -419,6 +419,7 @@ TEST(GpuVmTranslation, LegacyStepsKeepPageProgressAndResumeWithoutReplayingPrefi
   }
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(GpuVmTranslation, LegacyApplicationStepPrevalidatesCrossHostPageWrites) {
   GpuMemory memory("memory");
   KfdProcess process(7);
@@ -533,6 +534,7 @@ TEST(GpuVmTranslation, LegacyStepFaultCallbacksCanMutatePolicyAndHostMappings) {
       }()),
       ::testing::ExitedWithCode(0), "");
 }
+#endif
 
 TEST(GpuVmTranslation, LegacyStepKeepsOneMappedSpanStableDuringConcurrentRemap) {
   EXPECT_EXIT(
@@ -2274,6 +2276,7 @@ TEST(GpuVmTranslation, LegacyAtomicTranslationFaultsReportExactlyOncePerOperatio
   EXPECT_TRUE(gpu_vm.unregister_address_space(handle));
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(GpuVmTranslation, LegacyBackingFaultsForInaccessibleMappedPage) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
@@ -2307,7 +2310,9 @@ TEST(GpuVmTranslation, LegacyBackingFaultsForInaccessibleMappedPage) {
   ASSERT_EQ(mprotect(backing.data(), KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
   EXPECT_TRUE(gpu_vm.unregister_address_space(handle));
 }
+#endif
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(GpuVmTranslation, FaultedLegacyAtomicModifyDoesNotInvokeMutation) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
@@ -2353,6 +2358,7 @@ TEST(GpuVmTranslation, FaultedLegacyAtomicModifyDoesNotInvokeMutation) {
   EXPECT_EQ(observed, initial_value);
   EXPECT_TRUE(gpu_vm.unregister_address_space(handle));
 }
+#endif
 
 TEST(GpuVmTranslation, StrictLegacyBackingReportsWrappingRange) {
   GpuMemory memory("memory");

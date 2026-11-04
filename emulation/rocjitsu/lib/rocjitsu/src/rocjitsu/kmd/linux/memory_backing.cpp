@@ -413,15 +413,16 @@ public:
     __builtin_unreachable();
   }
 
-  void retire() {
+  bool retire() {
     if (owner_ != getpid()) {
       // The lease mapping is MADV_DONTFORK. Neither its address nor the mutex
       // inherited from a vanished parent thread belongs to this child.
-      return;
+      return false;
     }
     std::lock_guard lock(mutex_);
     retired_ = true;
     release_lease();
+    return true;
   }
 
 private:
@@ -755,10 +756,21 @@ private:
   bool retired_ = false;
 };
 
-// Intentionally process-lifetime: the keeper watches its owner pidfd and an
-// exec-sensitive lease, then exits once externally held tokens are gone.
+// Interposer builds retain the manager for the process lifetime; explicit hosts
+// release it when unloading. The keeper watches its owner pidfd and lease, then
+// exits once externally held tokens are gone.
 // A forked child never locks a mutex inherited from the parent's threads.
 std::atomic<Keeper *> keeper{};
+
+#if defined(RJ_DISABLE_INTERPOSER)
+__attribute__((destructor)) void release_keeper() {
+  // Explicit hosts retire all callers before unloading. A forked child must
+  // not destroy a mutex inherited from a vanished parent thread.
+  auto *current = keeper.exchange(nullptr, std::memory_order_relaxed);
+  if (current && current->retire())
+    delete current;
+}
+#endif
 
 Keeper *get_keeper() {
   auto *current = keeper.load(std::memory_order_acquire);
