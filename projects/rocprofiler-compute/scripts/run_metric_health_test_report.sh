@@ -311,20 +311,22 @@ esac
 
 LOG=${LOG_ARG:-${HOME}/metric_health_${TAG}.log}
 
-: >"$LOG"
-exec >>"$LOG" 2>&1
+start_log() {
+  : >"$LOG"
+  exec >>"$LOG" 2>&1
 
-echo "=== START $(date -u) tag=$TAG arch=$ARCH run=$RUN iters=$ITERS no_roof=$NO_ROOF root=$ROOT profiler_root=$PROFILER_ROOT therock=$THEROCK ==="
-if [[ "$META_SITE" == "1" ]]; then
-  echo "host=$(hostname) ROCR_VISIBLE_DEVICES=${ROCR_VISIBLE_DEVICES:-} HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES:-}"
-else
-  echo "ROCR_VISIBLE_DEVICES=${ROCR_VISIBLE_DEVICES:-} HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES:-}"
-fi
-if [[ "$SMOKE_FOLLOWS_MEGA_BATCH" == "1" ]]; then
-  echo "WORKLOAD_ITERS vcopy=-i ${ITERS} nbody=arg2 ${ITERS} mega_kernel=-n ${ITERS} mega_batch=${MEGA_BATCH}"
-else
-  echo "WORKLOAD_ITERS vcopy=-i ${ITERS} nbody=arg2 ${ITERS} mega_kernel=-n ${ITERS}"
-fi
+  echo "=== START $(date -u) tag=$TAG arch=$ARCH run=$RUN iters=$ITERS no_roof=$NO_ROOF root=$ROOT profiler_root=$PROFILER_ROOT therock=$THEROCK ==="
+  if [[ "$META_SITE" == "1" ]]; then
+    echo "host=$(hostname) ROCR_VISIBLE_DEVICES=${ROCR_VISIBLE_DEVICES:-} HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES:-}"
+  else
+    echo "ROCR_VISIBLE_DEVICES=${ROCR_VISIBLE_DEVICES:-} HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES:-}"
+  fi
+  if [[ "$SMOKE_FOLLOWS_MEGA_BATCH" == "1" ]]; then
+    echo "WORKLOAD_ITERS vcopy=-i ${ITERS} nbody=arg2 ${ITERS} mega_kernel=-n ${ITERS} mega_batch=${MEGA_BATCH}"
+  else
+    echo "WORKLOAD_ITERS vcopy=-i ${ITERS} nbody=arg2 ${ITERS} mega_kernel=-n ${ITERS}"
+  fi
+}
 
 link_pkg_config() {
   if [[ ! -x "${LOCAL_PREFIX}/bin/pkg-config" && -x "${LOCAL_PREFIX}/bin/pkgconf" ]]; then
@@ -501,37 +503,33 @@ resolve_rocprof_compute() {
       "\${PROFILER_ROOT}/bin, \${THEROCK}/bin, or PATH — falling back to source tree" \
       "(build + install rocprof-compute into one of those locations to use the built binary)"
   fi
+  # The driver refuses a comparison whose two runs resolve to the same file,
+  # such as one shared TheRock or PATH install.
+  ROCPROF_COMPUTE_RESOLVED=$(readlink -f "${ROCPROF_COMPUTE_CMD[-1]}" || true)
   echo "rocprof-compute: ${ROCPROF_COMPUTE_SOURCE}"
+  echo "rocprof-compute resolved: ${ROCPROF_COMPUTE_RESOLVED}"
 }
 
 decide_native() {
   PROFILE_EXTRA=()
   USE_NATIVE_TOOL=false
-  if [[ "$NATIVE_MODE" == "force" ]]; then
-    if [[ "$FORCE_NO_NATIVE_TOOL" == "1" ]]; then
-      PROFILE_EXTRA=(--no-native-tool)
-      echo "native-tool: forced off (--no-native-tool)"
-    elif ! command -v cmake >/dev/null 2>&1; then
-      echo "WARN: cmake missing — using --no-native-tool"
-      PROFILE_EXTRA=(--no-native-tool)
-    fi
+  # FORCE_NO_NATIVE_TOOL covers --no-native-tool and NATIVE_MODE=force, so it
+  # must win before the probe turns the native tool on.
+  if [[ "$FORCE_NO_NATIVE_TOOL" == "1" ]]; then
+    PROFILE_EXTRA=(--no-native-tool)
+    echo "native-tool: forced off (--no-native-tool)"
+  elif ! command -v cmake >/dev/null 2>&1; then
+    echo "WARN: cmake missing — using --no-native-tool"
+    PROFILE_EXTRA=(--no-native-tool)
+  elif ! command -v pkg-config >/dev/null 2>&1; then
+    echo "WARN: pkg-config missing — using --no-native-tool"
+    PROFILE_EXTRA=(--no-native-tool)
+  elif ! pkg-config --exists libdw 2>/dev/null; then
+    echo "WARN: libdw.pc missing — using --no-native-tool"
+    PROFILE_EXTRA=(--no-native-tool)
   else
-    if ! command -v cmake >/dev/null 2>&1; then
-      echo "WARN: cmake missing — using --no-native-tool"
-      PROFILE_EXTRA=(--no-native-tool)
-    elif ! command -v pkg-config >/dev/null 2>&1; then
-      echo "WARN: pkg-config missing — using --no-native-tool"
-      PROFILE_EXTRA=(--no-native-tool)
-    elif ! pkg-config --exists libdw 2>/dev/null; then
-      echo "WARN: libdw.pc missing — using --no-native-tool"
-      PROFILE_EXTRA=(--no-native-tool)
-    else
-      echo "native-tool: cmake + pkg-config libdw OK — will attempt native-tool first"
-    fi
+    echo "native-tool: cmake + pkg-config libdw OK — will attempt native-tool first"
     USE_NATIVE_TOOL=true
-    if ((${#PROFILE_EXTRA[@]})) && [[ "${PROFILE_EXTRA[0]}" == "--no-native-tool" ]]; then
-      USE_NATIVE_TOOL=false
-    fi
   fi
   if [[ "$NO_ROOF" == "1" ]]; then
     PROFILE_EXTRA+=(--no-roof)
@@ -591,6 +589,7 @@ write_run_meta() {
     echo "RUN=${RUN}"
     echo "PROFILER_ROOT=${PROFILER_ROOT}"
     echo "ROCPROF_COMPUTE_SOURCE=${ROCPROF_COMPUTE_SOURCE}"
+    echo "ROCPROF_COMPUTE_RESOLVED=${ROCPROF_COMPUTE_RESOLVED}"
     echo "ITERS=${ITERS}"
     echo "NO_ROOF=${NO_ROOF}"
     if [[ "$META_SITE" == "1" ]]; then
@@ -707,6 +706,12 @@ run_one() {
   echo "WORKLOAD_DONE name=$name mode=$mode profile=$prof_status analyze=$anal_status duration_s=$dur iters=$ITERS"
 }
 
+# Tests source this file to call its functions. An executed run falls through.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
+
+start_log
 setup_env
 if [[ "$NATIVE_MODE" == "probe" ]]; then
   toolchain_probe
