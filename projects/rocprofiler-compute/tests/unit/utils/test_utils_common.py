@@ -1115,6 +1115,34 @@ class TestBuildMetricDetails:
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Partial Metric" in leaf_entries.values()
 
+    def test_collectable_names_are_omitted_and_later_ids_stay(self):
+        from collections import OrderedDict
+
+        table = {
+            "id": 201,
+            "title": "Speed-of-Light",
+            "header": {"metric": "Metric", "value": "Value"},
+            "metric": {
+                "VALU FLOPs": {"value": "SUM(SQ_A)"},
+                "_collect.valu_flops_f16": {"value": "SUM(SQ_B)"},
+                "MFMA FLOPs": {"value": "SUM(SQ_C)"},
+            },
+        }
+        panel_configs = OrderedDict()
+        panel_configs[200] = {
+            "id": 200,
+            "title": "System Speed-of-Light",
+            "data source": [{"metric_table": table}],
+        }
+
+        metric_list = self.build_metric_details(panel_configs, None)
+        leaf_entries = self._extract_leaf_metric_entries(metric_list)
+
+        assert leaf_entries["2.1.0"] == "VALU FLOPs"
+        assert leaf_entries["2.1.2"] == "MFMA FLOPs"
+        assert "2.1.1" not in leaf_entries
+        assert "_collect.valu_flops_f16" not in leaf_entries.values()
+
     def test_given_metric_with_all_none_avg_min_max__it_doesnt_present_in_metric_list(
         self,
     ):
