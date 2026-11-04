@@ -159,21 +159,27 @@ static ncclResult_t ginAnvilAllgatherFabricVote(struct ncclComm* comm, GinAnvilF
 // LSA's barriers are collective, so ranks with different values would split
 // between the two bodies and hang. *allEnabled is 0 unless the allgather
 // succeeded and every vote matched; a non-success return is the allgather's own
-// failure, not a negative vote.
-static ncclResult_t ginAnvilAgreeLsaA2A(struct ncclComm* comm, int localEnabled, size_t localThreshold,
-                                        int* allEnabled) {
+// failure, not a negative vote. localSetupOk carries a rank-local context setup
+// failure into the same allgather, so a failing rank still joins it; any such
+// failure returns ncclSystemError on every rank.
+static ncclResult_t ginAnvilAgreeLsaA2A(struct ncclComm* comm, int localSetupOk, int localEnabled,
+                                        size_t localThreshold, int* allEnabled) {
   *allEnabled = 0;
   struct Vote {
     size_t threshold;
     int enabled;
+    int setupOk;
   };
-  const Vote local{localThreshold, localEnabled ? 1 : 0};
+  const Vote local{localThreshold, localEnabled ? 1 : 0, localSetupOk ? 1 : 0};
   int agreed = 1;
-  NCCLCHECK(ncclGinBootstrapAgree(comm, local, [&agreed](Vote const* votes, int n) {
+  int setupOk = 1;
+  NCCLCHECK(ncclGinBootstrapAgree(comm, local, [&agreed, &setupOk](Vote const* votes, int n) {
     for (int i = 0; i < n; ++i) {
+      if (!votes[i].setupOk) setupOk = 0;
       if (!votes[i].enabled || votes[i].threshold != votes[0].threshold) agreed = 0;
     }
   }));
+  if (!setupOk) return ncclSystemError;
   *allEnabled = agreed;
   return ncclSuccess;
 }
@@ -1431,14 +1437,16 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
   ctx->numChannels = cctx->numChannels;
   ctx->sdmaChannelStride = cctx->sdmaChannelStride;
 
+  // Failures before the LSA vote go to `agree`, not `fail`: the vote is
+  // collective, so peers would block in it if this rank returned first.
   if (!cctx->gpu_queue_handles || !cctx->sdma_dirty_d) {
     WARN("GIN anvil-sdma: missing SDMA infrastructure (handles=%p dirty=%p)", cctx->gpu_queue_handles,
          (void*)cctx->sdma_dirty_d);
     ret = ncclSystemError;
-    goto fail;
+    goto agree;
   }
 
-  NCCLCHECK(ncclCalloc(&ctx->devHandle, 1));
+  NCCLCHECKGOTO(ncclCalloc(&ctx->devHandle, 1), ret, agree);
   ctx->devHandle->netDeviceType = NCCL_NET_DEVICE_GIN_ANVIL_SDMA;
   ctx->devHandle->netDeviceVersion = NCCL_GIN_ANVIL_SDMA_NET_VERSION;
   ctx->devHandle->needsProxyProgress = 0;
@@ -1447,22 +1455,22 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
   ctx->signal_remote_addrs_dev = (uintptr_t**)calloc((size_t)ctx->nContexts, sizeof(uintptr_t*));
   if (!ctx->signal_remote_addrs_dev) {
     ret = ncclSystemError;
-    goto fail;
+    goto agree;
   }
   if (hipMalloc(&ctx->gpuCtxDev, (size_t)ctx->nContexts * sizeof(ncclGinAnvilSdmaGPUContext)) != hipSuccess) {
     ret = ncclSystemError;
-    goto fail;
+    goto agree;
   }
 
   if (config->nCounters > 0) {
     const size_t countersBytes = sizeof(uint64_t) * (size_t)config->nCounters * (size_t)ctx->nContexts;
     if (hipExtMallocWithFlags((void**)&ctx->counters, countersBytes, hipDeviceMallocFinegrained) != hipSuccess) {
       ret = ncclSystemError;
-      goto fail;
+      goto agree;
     }
     if (hipMemset(ctx->counters, 0, countersBytes) != hipSuccess) {
       ret = ncclSystemError;
-      goto fail;
+      goto agree;
     }
   }
 
@@ -1492,17 +1500,27 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
   // Only context 0 (what devComm.ginHandles[0] points at) gets the fabric LSA
   // lane, since that is the context the device-API AllToAll reads. The others
   // use gin.put.
+agree:
   if (cctx->fabricMem) {
-    ncclGinAnvilSdmaGPUContext* gpuCtx = &ctx->gpuCtxHost[0];
-    const size_t lsaThreshold = gin::fabric::resolveGinFabricLsaThresholdAlltoAll(ctx->nRanks);
-    const bool lsaCapable = ginFabricLsaA2ACapable(cctx->comm, ctx->nRanks) && lsaThreshold > 0;
+    const bool setupOk = ret == ncclSuccess;
+    const size_t lsaThreshold = setupOk ? gin::fabric::resolveGinFabricLsaThresholdAlltoAll(ctx->nRanks) : 0;
+    const bool lsaCapable = setupOk && ginFabricLsaA2ACapable(cctx->comm, ctx->nRanks) && lsaThreshold > 0;
     const int localLsaEnabled = gin::fabric::ginFabricLsaA2AWantEnabled(lsaCapable) ? 1 : 0;
     int allLsaEnabled = 0;
-    NCCLCHECKGOTO(ginAnvilAgreeLsaA2A(cctx->comm, localLsaEnabled, lsaThreshold, &allLsaEnabled), ret, fail);
-    if (allLsaEnabled) {
-      gpuCtx->fabricA2ALsaEnabled = 1;
-      gpuCtx->fabricA2ALsaThreshold = lsaThreshold;
+    const ncclResult_t agreeRet =
+        ginAnvilAgreeLsaA2A(cctx->comm, setupOk ? 1 : 0, localLsaEnabled, lsaThreshold, &allLsaEnabled);
+    if (!setupOk) goto fail;
+    if (agreeRet != ncclSuccess) {
+      WARN("GIN anvil-sdma: context setup vote failed or another rank failed context setup");
+      ret = agreeRet;
+      goto fail;
     }
+    if (allLsaEnabled) {
+      ctx->gpuCtxHost[0].fabricA2ALsaEnabled = 1;
+      ctx->gpuCtxHost[0].fabricA2ALsaThreshold = lsaThreshold;
+    }
+  } else if (ret != ncclSuccess) {
+    goto fail;
   } else if (gin::fabric::ginFabricLsaA2AEnvMode() == 1) {
     INFO(NCCL_INIT, "GIN anvil-sdma: RCCL_GIN_FABRIC_LSA_A2A=1 needs fabric registration (RCCL_GIN_ANVIL_FABRIC_MEM=1 "
                     "on every rank of an MI450 MNNVL clique); LSA AllToAll lane off");

@@ -432,6 +432,54 @@ TEST_F(GinAnvilPluginTest, CreateContext_FabricAgreeBootstrapFail) {
   plugin_.finalize(ictx);
 }
 
+// The LSA vote is collective, so a rank whose own setup fails before it must
+// still join it rather than leave its peers blocked, then fail and free.
+TEST_F(GinAnvilPluginTest, CreateContext_LocalSetupFailureStillJoinsLsaVote) {
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  setupFabricComm(4);
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 4);
+  const int hipAllocsBefore = liveHipAllocsExcludingIpcTable();
+  const int callsBefore = GinAnvilPluginStubs::GetBootstrapAllGatherCalls();
+
+  ncclGinConfig_t cfg{};
+  cfg.nCounters = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  GinAnvilPluginStubs::SetFailNextExtMalloc(true);
+  EXPECT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSystemError);
+  EXPECT_EQ(GinAnvilPluginStubs::GetBootstrapAllGatherCalls() - callsBefore, 1);
+  EXPECT_EQ(ginCtx, nullptr);
+  EXPECT_EQ(liveHipAllocsExcludingIpcTable(), hipAllocsBefore);
+
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// A peer that failed its own setup fails context creation here too.
+TEST_F(GinAnvilPluginTest, CreateContext_PeerSetupFailureFailsEveryRank) {
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  setupFabricComm(4);
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 4);
+  const int hipAllocsBefore = liveHipAllocsExcludingIpcTable();
+  GinAnvilPluginStubs::SetBootstrapPeerLsaSetupFail(true);
+
+  ncclGinConfig_t cfg{};
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  EXPECT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSystemError);
+  EXPECT_EQ(ginCtx, nullptr);
+  EXPECT_EQ(liveHipAllocsExcludingIpcTable(), hipAllocsBefore);
+
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
 // AICOMRCCL-2339: the counter span is allocated after the nContexts-slot GPU
 // context array, so its failure must take the array down with it.
 TEST_F(GinAnvilPluginTest, CreateContext_CounterAllocFailureReleasesContextArray) {
