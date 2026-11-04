@@ -903,6 +903,11 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitInTheVmmFirstWindowTakes
   EXPECT_EQ(l.kernel, (LL128Split<float, 0>()));
   EXPECT_EQ(l.grid.x, std::min<unsigned>(vmm, 134)) << "the VMM launch's blocks";
   EXPECT_EQ(l.block.x, 512u);
+  // Without a VMM-eligible comm (no fabric barrier) the selector would not run VMM: the LL two-shot's grid stays.
+  auto* const barrier = comm().ddaFabricBarrierState;
+  comm().ddaFabricBarrierState = nullptr;
+  EXPECT_EQ(RunOneLL128(count).grid.x, llTwoShot);
+  comm().ddaFabricBarrierState = barrier;
   // A smaller VMM grid than the LL two-shot's still caps the split.
   g_rcclDdaFabricVmmBlocks = [](const ncclComm*) { return 4; };
   ASSERT_LT(ncclAllReduceDdaFabricBlocks(mock_.get(), count, ncclFloat32), llTwoShot);
