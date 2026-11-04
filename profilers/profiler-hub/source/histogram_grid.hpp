@@ -23,7 +23,30 @@ struct histogram_grid_t
 };
 
 // max_buckets is an upper bound. The grid never has more buckets than
-// requested, and a short trace has fewer.
+// requested, and a short trace has fewer. any is false when the span is empty.
+inline histogram_grid_t
+make_histogram_grid(reader_types::timestamp_ns_t origin,
+                    reader_types::timestamp_ns_t end,
+                    bool                         any,
+                    size_t                       max_buckets)
+{
+    if(max_buckets == 0)
+    {
+        throw std::invalid_argument{ "max_buckets must be non-zero" };
+    }
+    if(!any || end < origin)
+    {
+        return {};
+    }
+
+    const reader_types::timestamp_ns_t duration = end - origin;
+    reader_types::timestamp_ns_t bucket_size    = (duration + max_buckets) / max_buckets;
+    if(bucket_size == 0) bucket_size = 1;
+    const size_t bucket_count =
+        duration == 0 ? 1 : (duration + bucket_size) / bucket_size;
+    return { origin, bucket_size, bucket_count };
+}
+
 inline histogram_grid_t
 make_histogram_grid(const reader_catalog_t& catalog, size_t max_buckets)
 {
@@ -42,17 +65,7 @@ make_histogram_grid(const reader_catalog_t& catalog, size_t max_buckets)
         if(!any || track->end_ts > end) end = track->end_ts;
         any = true;
     }
-    if(!any || end < origin)
-    {
-        return {};
-    }
-
-    const reader_types::timestamp_ns_t duration = end - origin;
-    reader_types::timestamp_ns_t bucket_size    = (duration + max_buckets) / max_buckets;
-    if(bucket_size == 0) bucket_size = 1;
-    const size_t bucket_count =
-        duration == 0 ? 1 : (duration + bucket_size) / bucket_size;
-    return { origin, bucket_size, bucket_count };
+    return make_histogram_grid(origin, end, any, max_buckets);
 }
 
 /** @brief Counts the rows overlapping each bucket and sums the overlap.

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocpd_v3_reader.hpp"
+#include "catalog_aggregate_store.hpp"
 #include "json_serializers.hpp"
 #include "profiler-hub/cpp/reader.hpp"
 #include "profiler-hub/cpp/storage.hpp"
@@ -313,9 +314,11 @@ rocpd_v3_reader::build_catalog_category(catalog_category_t category,
             catalog.build_agents(*m_read_statements);
             break;
         case catalog_category_t::tracks:
+            if(load_derived_tracks(catalog)) return;
             catalog.build_tracks(*m_read_statements);
             break;
         case catalog_category_t::stream_hardware_links:
+            if(catalog.derived_aggregates_ready) return;
             catalog.build_stream_hardware_links(*m_read_statements);
             break;
         case catalog_category_t::code_objects:

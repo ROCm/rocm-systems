@@ -1,3 +1,4 @@
+#include "cache_directory.hpp"
 #include "event_query.hpp"
 #include "file_probe_failure.hpp"
 #include "ph_ctx.hpp"
@@ -6,7 +7,10 @@
 #include "profiler-hub/c/profiler_hub_trim.h"
 #include "profiler-hub/cpp/reader.hpp"
 
+#include <cstdint>
+#include <cstring>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -151,6 +155,16 @@ ph_ctx_create_files(ph_ctx_t*           ctx,
                     uint32_t           path_count,
                     ph_future_t        future)
 {
+    return ph_ctx_create_files_cached(ctx, paths, path_count, nullptr, future);
+}
+
+ph_result_t
+ph_ctx_create_files_cached(ph_ctx_t*           ctx,
+                           const char* const* paths,
+                           uint32_t           path_count,
+                           const char*        cache_directory,
+                           ph_future_t        future)
+{
     if(ctx == nullptr)
     {
         return PH_RESULT_INVALID_CONTEXT;
@@ -176,7 +190,9 @@ ph_ctx_create_files(ph_ctx_t*           ctx,
     std::unique_ptr<ph_ctx> created;
     try
     {
-        created = std::make_unique<ph_ctx>(std::move(files));
+        const std::string cache =
+            cache_directory == nullptr ? std::string{} : std::string{ cache_directory };
+        created = std::make_unique<ph_ctx>(std::move(files), cache);
         if(future == nullptr)
         {
             created->load();
@@ -199,6 +215,58 @@ ph_ctx_create_files(ph_ctx_t*           ctx,
 
     *ctx = created.release();
     return PH_RESULT_SUCCESS;
+}
+
+ph_result_t
+ph_trace_cache_directory(const char*        cache_root,
+                         const char* const* paths,
+                         uint32_t           path_count,
+                         char*              directory,
+                         uint32_t*          capacity)
+{
+    return guard_call([&]() -> ph_result_t {
+        if(capacity == nullptr) return PH_RESULT_INVALID_ARGUMENT;
+        if(path_count > 0 && paths == nullptr) return PH_RESULT_INVALID_ARGUMENT;
+
+        const bool no_cache =
+            cache_root == nullptr || cache_root[0] == '\0' || path_count == 0;
+        std::string result;
+        if(!no_cache)
+        {
+            std::vector<std::string> files;
+            files.reserve(path_count);
+            for(uint32_t index = 0; index < path_count; ++index)
+            {
+                if(paths[index] == nullptr) return PH_RESULT_INVALID_ARGUMENT;
+                files.emplace_back(paths[index]);
+            }
+            result = profiler_hub::trace_cache_directory(cache_root, files);
+            if(result.empty())
+            {
+                *capacity = 0;
+                return PH_RESULT_INVALID_FILE;
+            }
+        }
+
+        if(result.size() >= std::numeric_limits<uint32_t>::max())
+        {
+            return PH_RESULT_INTERNAL_ERROR;
+        }
+        const uint32_t required = static_cast<uint32_t>(result.size() + 1);
+        if(directory == nullptr)
+        {
+            *capacity = required;
+            return PH_RESULT_SUCCESS;
+        }
+        if(*capacity < required)
+        {
+            *capacity = required;
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
+        std::memcpy(directory, result.c_str(), required);
+        *capacity = required;
+        return PH_RESULT_SUCCESS;
+    });
 }
 
 ph_result_t
@@ -425,6 +493,17 @@ ph_get_track_events(ph_ctx_t         ctx,
 }
 
 ph_result_t
+ph_release_track_events(ph_ctx_t ctx, ph_event_list_t* events)
+{
+    if(ctx == nullptr) return PH_RESULT_INVALID_CONTEXT;
+    if(events == nullptr) return PH_RESULT_INVALID_ARGUMENT;
+    return guard_call([ctx, events]() {
+        ctx->release_track_events(events);
+        return PH_RESULT_SUCCESS;
+    });
+}
+
+ph_result_t
 ph_get_correlated_events(ph_ctx_t          ctx,
                          const ph_event_t* event,
                          ph_event_list_t*  events,
@@ -601,6 +680,17 @@ ph_get_track_samples(ph_ctx_t          ctx,
 
             return PH_RESULT_SUCCESS;
         });
+}
+
+ph_result_t
+ph_release_track_samples(ph_ctx_t ctx, ph_sample_list_t* samples)
+{
+    if(ctx == nullptr) return PH_RESULT_INVALID_CONTEXT;
+    if(samples == nullptr) return PH_RESULT_INVALID_ARGUMENT;
+    return guard_call([ctx, samples]() {
+        ctx->release_track_samples(samples);
+        return PH_RESULT_SUCCESS;
+    });
 }
 
 ph_result_t

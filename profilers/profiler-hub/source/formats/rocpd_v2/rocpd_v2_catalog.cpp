@@ -3,6 +3,8 @@
 
 #include "rocpd_v2_reader.hpp"
 
+#include "catalog_aggregate_store.hpp"
+
 #include <fmt/format.h>
 
 #include <filesystem>
@@ -160,21 +162,27 @@ rocpd_v2_reader::build_catalog_category(catalog_category_t category,
             build_nodes(catalog);
             break;
         case catalog_category_t::processes:
+            if(load_catalog_aggregates(catalog)) return;
             build_processes(catalog);
             break;
         case catalog_category_t::threads:
+            if(catalog.derived_aggregates_ready) return;
             build_threads(catalog);
             break;
         case catalog_category_t::agents:
+            if(catalog.derived_aggregates_ready) return;
             build_agents(catalog);
             break;
         case catalog_category_t::tracks:
+            if(catalog.derived_aggregates_ready) return;
             build_tracks(catalog);
             break;
         case catalog_category_t::queues:
+            if(catalog.derived_aggregates_ready) return;
             build_queues(catalog);
             break;
         case catalog_category_t::pmc_infos:
+            if(catalog.derived_aggregates_ready) return;
             build_pmc_infos(catalog);
             break;
         // The schema records no streams, code objects, or kernel symbols.

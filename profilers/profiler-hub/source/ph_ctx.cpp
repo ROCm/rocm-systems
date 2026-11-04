@@ -1,9 +1,11 @@
 #include "ph_ctx.hpp"
 #include "event_query.hpp"
+#include "track_file_store.hpp"
 #include "trace_trim.hpp"
 #include "debug.hpp"
 #include "file_probe_failure.hpp"
 #include "ph_future.hpp"
+#include "catalog_aggregate_store.hpp"
 #include "populate_reader_catalog.hpp"
 #include "profiler-hub/cpp/reader.hpp"
 #include "reader_catalog.hpp"
@@ -490,11 +492,16 @@ ph_ctx::ph_ctx(std::string_view trace_path)
 {}
 
 ph_ctx::ph_ctx(std::vector<std::string> trace_paths)
-: ph_ctx{ accept_traces(trace_paths) }
+: ph_ctx{ std::move(trace_paths), std::string{} }
 {}
 
-ph_ctx::ph_ctx(std::vector<accepted_source_t> accepted)
+ph_ctx::ph_ctx(std::vector<std::string> trace_paths, std::string cache_directory)
+: ph_ctx{ accept_traces(trace_paths), std::move(cache_directory) }
+{}
+
+ph_ctx::ph_ctx(std::vector<accepted_source_t> accepted, std::string cache_directory)
 : m_accepted{ std::move(accepted) }
+, m_cache_directory{ std::move(cache_directory) }
 , m_file_path{ m_accepted.empty() ? std::string{} : m_accepted.front().path }
 , m_schema_version{ m_accepted.empty() ? ph_schema_version_t{} : m_accepted.front().version }
 , m_trace_schema{ m_accepted.empty()
@@ -636,16 +643,44 @@ ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& p
     open_sources();
 
     if(progress) progress(0.0, "Building reader catalog");
-    for(const std::unique_ptr<trace_source_t>& source : m_sources)
+    std::vector<std::string> cache_paths;
+    cache_paths.reserve(m_accepted.size());
+    for(const accepted_source_t& accepted : m_accepted)
     {
-        populate_reader_catalog(m_thread_pool, *source->pool, *source->catalog);
-        source->catalog->publish_memory_activity_pmc_infos();
+        cache_paths.push_back(accepted.path);
+    }
+    for(uint32_t index = 0; index < m_sources.size(); ++index)
+    {
+        trace_source_t& source = *m_sources[index];
+        const bool      rocpd_source =
+            index < m_accepted.size() &&
+            m_accepted[index].schema == profiler_hub::reader_types::trace_schema_t::rocpd;
+        const bool legacy_rocpd = rocpd_source && m_accepted[index].version.major == 2;
+        const bool modern_rocpd = rocpd_source && m_accepted[index].version.major >= 3;
+        if(legacy_rocpd || modern_rocpd)
+        {
+            source.catalog->aggregate_cache_root   = m_cache_directory;
+            source.catalog->aggregate_cache_paths  = cache_paths;
+            source.catalog->aggregate_cache_source = index;
+        }
+        populate_reader_catalog(m_thread_pool, *source.pool, *source.catalog);
+        if(legacy_rocpd && !source.catalog->derived_aggregates_ready)
+        {
+            save_catalog_aggregates(*source.catalog);
+        }
+        if(modern_rocpd && !source.catalog->derived_aggregates_ready)
+        {
+            save_derived_tracks(*source.catalog);
+        }
+        source.catalog->publish_memory_activity_pmc_infos();
         if(stop_requested()) return false;
     }
 
     if(progress) progress(0.0, "Building track list");
     initialize_track_list();
+    prepare_track_store();
     if(!load_all_tracks(stop_requested, progress)) return false;
+    attach_track_store();
 
     if(progress) progress(1.0, "Reading node agents");
     initialize_node_agents();
@@ -758,6 +793,11 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
         return ph_event_list_t{ .list_size = 0, .events = nullptr };
     }
 
+    if(m_track_store && m_track_store->ready() && m_track_store->has_events(track_id))
+    {
+        return m_track_store->events(track_id, start_ts, end_ts);
+    }
+
     ph_event_list_t loaded =
         source_at(place->source_index).reader->events(place->track, start_ts, end_ts);
     if(loaded.events != nullptr)
@@ -768,6 +808,22 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
         }
     }
     return loaded;
+}
+
+void
+ph_ctx::release_track_events(ph_event_list_t* events)
+{
+    if(events == nullptr) return;
+    if(m_track_store) m_track_store->release_events(events->events);
+    *events = ph_event_list_t{ .list_size = 0, .events = nullptr };
+}
+
+void
+ph_ctx::release_track_samples(ph_sample_list_t* samples)
+{
+    if(samples == nullptr) return;
+    if(m_track_store) m_track_store->release_samples(samples->samples);
+    *samples = ph_sample_list_t{ .list_size = 0, .samples = nullptr };
 }
 
 const char*
@@ -1213,6 +1269,11 @@ ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
         return ph_sample_list_t{ .list_size = 0, .samples = nullptr };
     }
 
+    if(m_track_store && m_track_store->ready() && m_track_store->has_samples(track_id))
+    {
+        return m_track_store->samples(track_id, start_ts, end_ts);
+    }
+
     return source_at(place->source_index).reader->samples(place->track, start_ts, end_ts);
 }
 
@@ -1232,6 +1293,38 @@ narrow_histogram_count(std::size_t value)
 void
 ph_ctx::build_histogram(uint32_t max_buckets, ph_histogram_t& output)
 {
+    if(m_track_store && m_track_store->ready())
+    {
+        const profiler_hub::histogram_grid_t grid = histogram_grid(max_buckets);
+        const profiler_hub::stored_histogram_t stored = m_track_store->histogram(
+            static_cast<uint64_t>(grid.origin),
+            static_cast<uint64_t>(grid.bucket_size),
+            static_cast<uint64_t>(grid.bucket_count));
+
+        auto storage = std::make_unique<c_histogram_storage_t>();
+        storage->tracks.reserve(stored.tracks.size());
+        storage->buckets.reserve(stored.tracks.size());
+        for(const auto& source_track : stored.tracks)
+        {
+            storage->buckets.push_back(source_track.buckets);
+            auto& destination = storage->buckets.back();
+            storage->tracks.push_back(ph_track_histogram_t{
+                source_track.track_id,
+                narrow_histogram_count(destination.size()),
+                destination.empty() ? nullptr : destination.data() });
+        }
+        storage->histogram = ph_histogram_t{
+            stored.origin_ts,
+            stored.bucket_size,
+            narrow_histogram_count(stored.bucket_count),
+            narrow_histogram_count(storage->tracks.size()),
+            storage->tracks.empty() ? nullptr : storage->tracks.data() };
+        output = storage->histogram;
+        const std::lock_guard<std::mutex> lock{ m_histogram_mutex };
+        m_histograms.push_back(std::move(storage));
+        return;
+    }
+
     std::vector<profiler_hub::reader_types::histogram_t> parts;
     parts.reserve(m_sources.size());
     for(const std::unique_ptr<trace_source_t>& held : m_sources)
@@ -1365,6 +1458,96 @@ ph_ctx::initialize_track_list()
     }
 }
 
+namespace
+{
+constexpr uint32_t k_stored_histogram_buckets = 500;
+
+uint32_t
+narrow_event_count(uint64_t value)
+{
+    if(value > std::numeric_limits<uint32_t>::max())
+    {
+        throw std::length_error{ "track has more events than the C API can report" };
+    }
+    return static_cast<uint32_t>(value);
+}
+}  // namespace
+
+profiler_hub::histogram_grid_t
+ph_ctx::histogram_grid(size_t max_buckets) const
+{
+    using profiler_hub::reader_types::timestamp_ns_t;
+    bool         any    = false;
+    timestamp_ns_t origin = 0;
+    timestamp_ns_t end    = 0;
+    for(const std::unique_ptr<trace_source_t>& source : m_sources)
+    {
+        for(const auto& track : source->catalog->tracks)
+        {
+            if(!track || track->event_count == 0) continue;
+            if(!any || track->start_ts < origin) origin = track->start_ts;
+            if(!any || track->end_ts > end) end = track->end_ts;
+            any = true;
+        }
+    }
+    return profiler_hub::make_histogram_grid(origin, end, any, max_buckets);
+}
+
+void
+ph_ctx::prepare_track_store()
+{
+    if(m_cache_directory.empty() || m_sources.empty()) return;
+
+    auto store = std::make_unique<profiler_hub::track_file_store>();
+    std::vector<std::string> paths;
+    paths.reserve(m_sources.size());
+    for(const std::unique_ptr<trace_source_t>& source : m_sources)
+    {
+        paths.push_back(source->path);
+    }
+
+    const bool opened = store->open(m_cache_directory,
+                                    paths,
+                                    static_cast<uint32_t>(m_trace_schema),
+                                    m_schema_version.major,
+                                    m_schema_version.minor,
+                                    m_schema_version.patch);
+    if(!opened)
+    {
+        LOG_WARNING("[Profiler-Hub] Track cache is not available. Timeline data stays in memory.");
+        return;
+    }
+    if(!store->ready() && !store->begin_write())
+    {
+        LOG_WARNING("[Profiler-Hub] Track cache {} cannot be created. Timeline data stays in memory.",
+                    store->directory());
+        return;
+    }
+    if(store->writing())
+    {
+        const profiler_hub::histogram_grid_t grid = histogram_grid(k_stored_histogram_buckets);
+        store->set_histogram_grid(static_cast<uint64_t>(grid.origin),
+                                  static_cast<uint64_t>(grid.bucket_size),
+                                  static_cast<uint64_t>(grid.bucket_count));
+        LOG_INFO("[Profiler-Hub] Writing track cache {}", store->directory());
+    }
+    else
+    {
+        LOG_INFO("[Profiler-Hub] Using track cache {}", store->directory());
+    }
+    m_track_store = std::move(store);
+}
+
+void
+ph_ctx::attach_track_store()
+{
+    if(!m_track_store || !m_track_store->ready()) return;
+    for(uint32_t index = 0; index < m_sources.size(); ++index)
+    {
+        source_at(index).reader->set_track_store(m_track_store.get(), index);
+    }
+}
+
 bool
 ph_ctx::load_all_tracks(const stop_requested_fn& stop_requested,
                         const progress_fn&       progress)
@@ -1375,22 +1558,67 @@ ph_ctx::load_all_tracks(const stop_requested_fn& stop_requested,
         uint64_t{ 0 },
         [](uint64_t sum, const auto& track) { return sum + track.event_count; });
 
-    uint64_t loaded_events = 0;
+    const bool writing = m_track_store && m_track_store->writing();
+    const bool cached  = m_track_store && m_track_store->ready();
+    uint64_t   loaded_events = 0;
     for(auto& c_track : m_c_tracks)
     {
         if(stop_requested()) return false;
 
         const placed_track_t* place = place_of(c_track.id);
         if(place == nullptr) return false;
-        const auto& track = place->track;
+        const auto& track  = place->track;
         auto&       reader = *source_at(place->source_index).reader;
-        const auto kind = track->category;
-        if(kind == profiler_hub::reader_types::track_kind_t::pmc_agent ||
-           kind == profiler_hub::reader_types::track_kind_t::pmc_kernel ||
-           kind == profiler_hub::reader_types::track_kind_t::pmc_memory)
+        const auto  kind   = track->category;
+        const bool  samples =
+            kind == profiler_hub::reader_types::track_kind_t::pmc_agent ||
+            kind == profiler_hub::reader_types::track_kind_t::pmc_memory;
+        const bool duration =
+            kind != profiler_hub::reader_types::track_kind_t::pmc_agent &&
+            kind != profiler_hub::reader_types::track_kind_t::pmc_kernel &&
+            kind != profiler_hub::reader_types::track_kind_t::pmc_memory;
+
+        if(cached)
         {
-            if(kind == profiler_hub::reader_types::track_kind_t::pmc_agent ||
-               kind == profiler_hub::reader_types::track_kind_t::pmc_memory)
+            if(duration && m_track_store->has_events(c_track.id))
+            {
+                c_track.nesting_depth = m_track_store->nesting_depth(c_track.id);
+                c_track.event_count =
+                    narrow_event_count(m_track_store->record_count(c_track.id));
+            }
+        }
+        else if(writing)
+        {
+            if(samples)
+            {
+                const std::vector<ph_sample_t> loaded = reader.load_samples(track);
+                m_track_store->write_samples(
+                    c_track.id,
+                    place->source_index,
+                    static_cast<uint32_t>(track->id),
+                    loaded,
+                    static_cast<uint64_t>(track->end_ts));
+            }
+            else if(duration)
+            {
+                const std::vector<ph_event_t> loaded = reader.load_events(
+                    track, [this](std::string_view text) { return m_track_store->intern(text); });
+                uint32_t deepest = 0;
+                for(const ph_event_t& event : loaded)
+                {
+                    deepest = std::max(deepest, event.nesting_depth);
+                }
+                m_track_store->write_events(c_track.id,
+                                            place->source_index,
+                                            static_cast<uint32_t>(track->id),
+                                            loaded);
+                c_track.nesting_depth = deepest;
+                c_track.event_count   = narrow_event_count(loaded.size());
+            }
+        }
+        else if(samples || kind == profiler_hub::reader_types::track_kind_t::pmc_kernel)
+        {
+            if(samples)
             {
                 std::ignore = reader.samples(track, 0, 0);
             }
@@ -1405,9 +1633,17 @@ ph_ctx::load_all_tracks(const stop_requested_fn& stop_requested,
         loaded_events += c_track.event_count;
         if(progress && total_events != 0)
         {
-            progress(static_cast<double>(loaded_events) /
-                         static_cast<double>(total_events),
-                     "Loading tracks");
+            progress(static_cast<double>(loaded_events) / static_cast<double>(total_events),
+                     writing ? "Writing track files" : "Loading tracks");
+        }
+    }
+
+    if(writing)
+    {
+        if(stop_requested()) return false;
+        if(!m_track_store->finish_write())
+        {
+            throw std::runtime_error{ "the track cache could not be saved" };
         }
     }
     return true;

@@ -21,6 +21,8 @@ option(PROFILER_HUB_BUILD_TESTS "Build unit tests" ON)
 option(PROFILER_HUB_BUILD_BENCHMARKS "Build performance benchmarks" OFF)
 option(PROFILER_HUB_BUILD_EXAMPLES "Build examples" ON)
 option(PROFILER_HUB_ENABLE_LOGGING "Enable logging" OFF)
+option(PROFILER_HUB_ENABLE_ROCPD_V2 "Read legacy rocpd schema 2 traces" ON)
+option(PROFILER_HUB_ENABLE_ROCPD_V3 "Read rocpd schema 3 traces" ON)
 option(PROFILER_HUB_ENABLE_COVERAGE "Enable code coverage" OFF)
 option(
     PH_USE_NOMUTEX_OPTIMIZATION
@@ -73,6 +75,13 @@ if(PH_USE_NOMUTEX_OPTIMIZATION)
         PRIVATE PH_USE_NOMUTEX_OPTIMIZATION
     )
 endif()
+
+target_compile_definitions(
+    profiler-hub-objects
+    PRIVATE
+        PROFILER_HUB_ENABLE_ROCPD_V2=$<BOOL:${PROFILER_HUB_ENABLE_ROCPD_V2}>
+        PROFILER_HUB_ENABLE_ROCPD_V3=$<BOOL:${PROFILER_HUB_ENABLE_ROCPD_V3}>
+)
 
 target_compile_options(
     profiler-hub-objects

@@ -17,8 +17,6 @@ namespace profiler_hub
 
 namespace
 {
-// A path the probe does not recognize, such as a database the writer has not
-// flushed yet, keeps the original rocpd schema 3 reader.
 reader_types::trace_format_t
 format_of(const std::string& path)
 {
@@ -27,7 +25,13 @@ format_of(const std::string& path)
     {
         return { probe.trace_schema, probe.schema_version };
     }
+#if PROFILER_HUB_ENABLE_ROCPD_V3
+    // A path the probe does not recognize, such as a database the writer has
+    // not flushed yet, keeps the rocpd schema 3 reader.
     return { reader_types::trace_schema_t::rocpd, version_t{ 3, 0, 0 } };
+#else
+    throw std::invalid_argument{ "trace format is not supported" };
+#endif
 }
 }  // namespace
 

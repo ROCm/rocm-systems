@@ -18,8 +18,11 @@ struct reader_catalog_t;
  *
  * One entry per schema family and major version. The probe accepts a file only
  * when an entry exists, connections build their reader from it, and the
- * trimmer takes its row filter from it. A new format adds a detector in
- * file_probe.cpp and an entry in trace_formats.cpp.
+ * trimmer takes its row filter from it. A new format adds a
+ * PROFILER_HUB_ENABLE_<FORMAT> CMake option, a detector in file_probe.cpp,
+ * and an entry in trace_formats.cpp. The option defaults to ON. Turning it
+ * off leaves that format's sources out of the build, and the probe reports
+ * the file as unsupported.
  */
 [[nodiscard]] bool is_supported_format(const reader_types::trace_format_t& format);
 

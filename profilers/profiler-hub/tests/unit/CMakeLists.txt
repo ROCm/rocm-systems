@@ -26,6 +26,7 @@ set(UNIT_TEST_SOURCES
     natural_merge_sort_test.cpp
     thread_pool_test.cpp
     track_window_test.cpp
+    track_file_store_test.cpp
 )
 
 add_executable(profiler-hub_unit_tests ${UNIT_TEST_SOURCES})

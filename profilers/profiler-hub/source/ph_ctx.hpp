@@ -2,6 +2,7 @@
 
 #include "cached_track_reader.hpp"
 #include "common/connection_pool.hpp"
+#include "histogram_grid.hpp"
 #include "common/thread_pool.hpp"
 #include "pending_futures.hpp"
 #include "pooled_connection_source.hpp"
@@ -23,12 +24,18 @@
 
 struct ph_future;
 
+namespace profiler_hub
+{
+class track_file_store;
+}
+
 struct ph_ctx
 {
     /** Rejects an unsupported database before any reader is opened. The trace
      *  catalog is still read by load() or load_async(). */
     explicit ph_ctx(std::string_view trace_path);
     explicit ph_ctx(std::vector<std::string> trace_paths);
+    ph_ctx(std::vector<std::string> trace_paths, std::string cache_directory);
     ~ph_ctx();
 
     ph_ctx(const ph_ctx&)            = delete;
@@ -88,6 +95,8 @@ struct ph_ctx
     [[nodiscard]] ph_event_list_t get_track_events(uint32_t track_id,
                                                    uint64_t start_ts,
                                                    uint64_t end_ts);
+    void release_track_events(ph_event_list_t* events);
+    void release_track_samples(ph_sample_list_t* samples);
     [[nodiscard]] std::optional<ph_event_list_t> get_correlated_events(
         uint32_t        track_id,
         uint64_t        event_id,
@@ -140,6 +149,9 @@ private:
     void               set_load_state_if_loading(load_state_t state);
 
     void               initialize_track_list();
+    void               prepare_track_store();
+    void               attach_track_store();
+    [[nodiscard]] profiler_hub::histogram_grid_t histogram_grid(size_t max_buckets) const;
     [[nodiscard]] bool load_all_tracks(const stop_requested_fn& stop_requested,
                                        const progress_fn&       progress);
     void               initialize_node_info();
@@ -195,7 +207,7 @@ private:
         ph_node_t                                           node{};
     };
 
-    explicit ph_ctx(std::vector<accepted_source_t> accepted);
+    ph_ctx(std::vector<accepted_source_t> accepted, std::string cache_directory);
     [[nodiscard]] static std::vector<accepted_source_t> accept_traces(
         const std::vector<std::string>& trace_paths);
 
@@ -211,6 +223,8 @@ private:
         const profiler_hub::reader_types::track_info_ptr_t& track) const;
 
     std::vector<accepted_source_t>   m_accepted;
+    std::string                      m_cache_directory;
+    std::unique_ptr<profiler_hub::track_file_store> m_track_store;
     std::vector<std::unique_ptr<trace_source_t>> m_sources;
     std::string                      m_file_path;
     profiler_hub::track_read_options m_read_options;

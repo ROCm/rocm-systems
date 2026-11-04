@@ -89,6 +89,51 @@ extern "C"
                                     ph_future_t        future);
 
     /**
+     * @brief Opens every trace file and keeps timeline data in a cache under
+     *        @p cache_directory. Null or empty leaves timeline data in memory,
+     *        the same as ph_ctx_create_files().
+     * @param cache_directory Application configuration folder. The cache is
+     *        created at <cache_directory>/<hex>/timeline, where the hex name
+     *        is a hash of each source path, size, and last-write time.
+     *        A later open of the same files reads the timeline from that
+     *        cache. Table queries still read the trace database.
+     */
+    ph_result_t ph_ctx_create_files_cached(ph_ctx_t*           ctx,
+                                           const char* const* paths,
+                                           uint32_t           path_count,
+                                           const char*        cache_directory,
+                                           ph_future_t        future);
+
+    /**
+     * @brief Folder created by ph_ctx_create_files_cached() for these files.
+     *        It is <cache_directory>/<hex>, and holds timeline/ and catalog/.
+     *        The hex name uses the same path, size, and last-write time hash
+     *        as the cache writer, so @p paths must be the same files in the
+     *        same order.
+     * @param cache_root Application configuration folder. Null or empty
+     *        yields an empty path.
+     * @param paths Source files. Null only when @p path_count is 0.
+     * @param path_count Number of entries in @p paths. Zero yields an empty
+     *        path.
+     * @param directory Out buffer. Null asks only for the required size.
+     * @param capacity In: size of @p directory in bytes, ignored when
+     *        @p directory is null. Out: bytes required to hold the path and
+     *        its terminating NUL, or 0 when a source file cannot be read.
+     * @return PH_RESULT_SUCCESS when @p directory receives the path, or when
+     *         @p directory is null and @p capacity receives the required size.
+     *         PH_RESULT_INVALID_ARGUMENT if @p capacity is null, a path entry
+     *         is null, or @p directory is too small (the required size is
+     *         still written to @p capacity). PH_RESULT_INVALID_FILE if a
+     *         source is missing or not a regular file. PH_RESULT_INTERNAL_ERROR
+     *         on an unexpected failure.
+     */
+    ph_result_t ph_trace_cache_directory(const char*        cache_root,
+                                         const char* const* paths,
+                                         uint32_t           path_count,
+                                         char*              directory,
+                                         uint32_t*          capacity);
+
+    /**
      * @brief Number of file-and-GUID sources opened by the context.
      * @param count Out parameter. One for a single-GUID file.
      */
@@ -218,21 +263,27 @@ extern "C"
      *         null or @p track_id does not identify a known track,
      *         PH_RESULT_INTERNAL_ERROR on failure.
      * @note @p events->events and every ph_event_t::name in it point into
-     *       memory owned by @p ctx and remain valid until @p ctx is freed.
-     *       Unlike ph_get_track_list()/ph_get_node(), a later call to this
-     *       function does NOT invalidate an earlier one's result, and the
-     *       arrays are safe to read concurrently from multiple calls
-     *       (including calls made through a future).
+     *       memory owned by @p ctx. A list read from the on-disk track cache
+     *       stays valid until ph_release_track_events() or ph_ctx_free().
+     *       Releasing it frees that window. Names stay valid until
+     *       ph_ctx_free(). A list served from the in-memory track cache stays
+     *       valid until ph_ctx_free(), and ph_release_track_events() only
+     *       clears the caller's struct. A later call does not invalidate an
+     *       earlier result that has not been released. The arrays are safe
+     *       to read concurrently from multiple calls (including calls made
+     *       through a future).
      * @note ph_event_t::track_id is @p track_id. A host thread omits rows
      *       that resolve to a device queue or stream. A stream or queue
      *       track keeps the rows its own query selected.
      * @note A request for a whole track (@p start_ts and @p end_ts both 0)
-     *       is answered from memory after the first call: repeated calls for
-     *       the same track return the same storage, so the arrays must be
-     *       treated as read-only. Events of a whole track are ordered by
-     *       ph_event_t::start. A request with a time window gets its own
-     *       private storage; its events are the overlapping ones of the whole
-     *       track, in the same order, with the same ph_event_t::nesting_depth.
+     *       from the in-memory track cache is answered from memory after the
+     *       first call: repeated calls for the same track return the same
+     *       storage, so the arrays must be treated as read-only. The on-disk
+     *       track cache reads that range again and the caller releases it.
+     *       Events of a whole track are ordered by ph_event_t::start. A
+     *       request with a time window gets its own private storage; its
+     *       events are the overlapping ones of the whole track, in the same
+     *       order, with the same ph_event_t::nesting_depth.
      */
     ph_result_t ph_get_track_events(ph_ctx_t         ctx,
                                     uint32_t         track_id,
@@ -240,6 +291,17 @@ extern "C"
                                     uint64_t         end_ts,
                                     ph_event_list_t* events,
                                     ph_future_t      future);
+
+    /**
+     * @brief Frees a track-event list read from the on-disk track cache.
+     * @param events List returned by ph_get_track_events(). Cleared on
+     *        success. May be empty.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p events is null.
+     * @note A list from the in-memory track cache is not freed. The caller's
+     *       struct is still cleared. Names are not freed.
+     */
+    ph_result_t ph_release_track_events(ph_ctx_t ctx, ph_event_list_t* events);
 
     /**
      * @brief Retrieves events correlated with @p event by matching stack id.
@@ -404,20 +466,24 @@ extern "C"
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p samples is
      *         null or @p track_id does not identify a known track,
      *         PH_RESULT_INTERNAL_ERROR on failure.
-     * @note @p samples->samples points into memory owned by @p ctx and
-     *       remains valid until @p ctx is freed. Unlike
-     *       ph_get_track_list()/ph_get_node(), a later call to this
-     *       function does NOT invalidate an earlier one's result -- each
-     *       call gets its own private storage, safe to read concurrently
-     *       from multiple calls (including calls made through a future).
+     * @note @p samples->samples points into memory owned by @p ctx. A list
+     *       read from the on-disk track cache stays valid until
+     *       ph_release_track_samples() or ph_ctx_free(). A list served from
+     *       the in-memory track cache stays valid until ph_ctx_free(). A
+     *       later call does not invalidate an earlier result that has not
+     *       been released. Each call gets its own private storage, safe to
+     *       read concurrently from multiple calls (including calls made
+     *       through a future).
      * @note A request for a whole track (@p start_ts and @p end_ts both 0)
-     *       is answered from memory after the first call: repeated calls for
-     *       the same track return the same storage, so the array must be
-     *       treated as read-only. Samples of a whole track are ordered by
-     *       ph_sample_t::timestamp. A request with a time window gets its own
-     *       private storage and includes the nearest sample before the window
-     *       and the nearest sample after it. When no sample follows the
-     *       window, the last value is repeated at the track end.
+     *       from the in-memory track cache is answered from memory after the
+     *       first call: repeated calls for the same track return the same
+     *       storage, so the array must be treated as read-only. The on-disk
+     *       track cache reads that range again and the caller releases it.
+     *       Samples of a whole track are ordered by ph_sample_t::timestamp.
+     *       A request with a time window gets its own private storage and
+     *       includes the nearest sample before the window and the nearest
+     *       sample after it. When no sample follows the window, the last
+     *       value is repeated at the track end.
      */
     ph_result_t ph_get_track_samples(ph_ctx_t          ctx,
                                      uint32_t          track_id,
@@ -425,6 +491,17 @@ extern "C"
                                      uint64_t          end_ts,
                                      ph_sample_list_t* samples,
                                      ph_future_t       future);
+
+    /**
+     * @brief Frees a sample list read from the on-disk track cache.
+     * @param samples List returned by ph_get_track_samples(). Cleared on
+     *        success. May be empty.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p samples is null.
+     * @note A list from the in-memory track cache is not freed. The caller's
+     *       struct is still cleared.
+     */
+    ph_result_t ph_release_track_samples(ph_ctx_t ctx, ph_sample_list_t* samples);
 
     /**
      * @brief Builds one histogram per track on a shared time grid.
