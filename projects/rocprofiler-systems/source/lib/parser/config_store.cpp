@@ -16,8 +16,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace rocprofsys::parser
@@ -42,46 +42,6 @@ notify(std::string_view param_id, std::string_view value,
     for(const auto& callback : callbacks)
     {
         callback(param_id, value);
-    }
-}
-
-template <typename ValueT>
-struct dependent_false : std::false_type
-{};
-
-template <typename ValueT>
-std::optional<ValueT>
-convert(param_type type, std::string_view text, std::string_view separator)
-{
-    if constexpr(std::is_same_v<ValueT, bool>)
-    {
-        return type == param_type::boolean ? parse_boolean(text) : std::nullopt;
-    }
-    else if constexpr(std::is_same_v<ValueT, std::int64_t>)
-    {
-        return type == param_type::integer ? parse_integer(text) : std::nullopt;
-    }
-    else if constexpr(std::is_same_v<ValueT, double>)
-    {
-        return type == param_type::number ? parse_number(text) : std::nullopt;
-    }
-    else if constexpr(std::is_same_v<ValueT, std::string>)
-    {
-        const bool is_text = type == param_type::string || type == param_type::path ||
-                             type == param_type::enumeration;
-        return is_text ? std::optional<std::string>{ text } : std::nullopt;
-    }
-    else if constexpr(std::is_same_v<ValueT, std::vector<std::string>>)
-    {
-        if(type != param_type::enumeration_list)
-        {
-            return std::nullopt;
-        }
-        return split_list(text, separator);
-    }
-    else
-    {
-        static_assert(dependent_false<ValueT>::value, "unsupported config value type");
     }
 }
 }  // namespace
@@ -112,7 +72,8 @@ config_store::set(std::string_view param_id, std::string_view value, config_sour
 {
     const auto  config_schema = locked_schema();
     const auto& param         = require_param(*config_schema, param_id);
-    if(!is_valid_value(param, value))
+    const auto  parsed        = parse_value(param, value);
+    if(!parsed)
     {
         throw std::runtime_error(
             fmt::format("invalid value '{}' for parameter '{}'", value, param_id));
@@ -125,8 +86,8 @@ config_store::set(std::string_view param_id, std::string_view value, config_sour
 
         const auto key           = std::string{ param_id };
         auto [entry, inserted]   = m_values.try_emplace(key);
-        const bool value_changed = inserted || entry->second.value != value;
-        entry->second.value      = std::string{ value };
+        const bool value_changed = inserted || entry->second.value != *parsed;
+        entry->second.value      = *parsed;
         entry->second.source     = source;
         const auto registered    = m_callbacks.find(key);
         if(value_changed && registered != m_callbacks.end())
@@ -135,10 +96,10 @@ config_store::set(std::string_view param_id, std::string_view value, config_sour
         }
     }
 
-    notify(param_id, value, callbacks);
+    notify(param_id, format_value(*parsed), callbacks);
 }
 
-std::optional<config_store::stored_text>
+std::optional<config_store::stored_value>
 config_store::lookup(std::string_view param_id) const
 {
     const std::shared_lock<std::shared_mutex> lock{ m_mutex };
@@ -147,21 +108,14 @@ config_store::lookup(std::string_view param_id) const
     {
         return std::nullopt;
     }
-    const auto* param = m_schema->find_param(param_id);
-    if(param == nullptr)
-    {
-        return std::nullopt;
-    }
-    return stored_text{ .type      = param->type,
-                        .text      = entry->second.value,
-                        .separator = std::string{ list_separator(*param) } };
+    return entry->second;
 }
 
 std::optional<std::string>
 config_store::get(std::string_view param_id) const
 {
     const auto stored = lookup(param_id);
-    return stored ? std::optional{ stored->text } : std::nullopt;
+    return stored ? std::optional{ format_value(stored->value) } : std::nullopt;
 }
 
 bool
@@ -184,8 +138,12 @@ std::optional<ValueT>
 config_store::get_as(std::string_view param_id) const
 {
     const auto stored = lookup(param_id);
-    return stored ? convert<ValueT>(stored->type, stored->text, stored->separator)
-                  : std::nullopt;
+    if(!stored)
+    {
+        return std::nullopt;
+    }
+    const auto* value = std::get_if<ValueT>(&stored->value);
+    return value == nullptr ? std::nullopt : std::optional<ValueT>{ *value };
 }
 
 template std::optional<bool>         config_store::get_as<bool>(std::string_view) const;
@@ -220,7 +178,7 @@ config_store::values() const
     value_map_t                               result;
     for(const auto& [param_id, stored] : m_values)
     {
-        result.emplace(param_id, stored.value);
+        result.emplace(param_id, format_value(stored.value));
     }
     return result;
 }
