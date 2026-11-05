@@ -690,13 +690,23 @@ bool Device::create() {
   info_.hdpMemFlushCntl = hdpInfo.HDP_MEM_FLUSH_CNTL;
   info_.hdpRegFlushCntl = hdpInfo.HDP_REG_FLUSH_CNTL;
 
+  // The AQL extensions ROCr reports for the agent; unknown to a runtime without the query
+  int aql_ext_dispatch = -1;
+  uint8_t aql_extensions[8] = {};
+  if (Hsa::agent_get_info(bkendDevice_,
+                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_AQL_EXTENSIONS),
+                          aql_extensions) == HSA_STATUS_SUCCESS) {
+    aql_ext_dispatch =
+        hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_EXT_DISPATCH) ? 1 : 0;
+  }
+
   // Create HSA settings
   assert(!settings_);
   roc::Settings* hsaSettings = new roc::Settings();
   settings_ = hsaSettings;
   if (!hsaSettings || !hsaSettings->create((agent_profile_ == HSA_PROFILE_FULL), *isa,
                                            isa->xnack() == amd::Isa::Feature::Enabled, coop_groups,
-                                           isXgmi_, isAPU_)) {
+                                           isXgmi_, isAPU_, aql_ext_dispatch)) {
     LogPrintfError("Unable to create settings for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
     return false;
@@ -753,6 +763,8 @@ bool Device::create() {
                    pciDeviceId_);
     return false;
   }
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Ext kernel dispatch packet: %d",
+          hsaSettings->ext_dispatch_packet_);
   hsaSettings->limit_blit_wg_ = info().maxComputeUnits_;
   if (!flagIsDefault(DEBUG_CLR_LIMIT_BLIT_WG)) {
     hsaSettings->limit_blit_wg_ = std::max(DEBUG_CLR_LIMIT_BLIT_WG, 0x1U);
