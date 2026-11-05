@@ -394,6 +394,9 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         }
     }
 
+    // Last: this releases the dispatch, and the dispatch-scoped profiling services above extract
+    // their data inline before it. Deferring this call past them, or them past it, drops their
+    // coverage with nothing failing.
     queue_info_session.queue.async_complete();
 
     return false;

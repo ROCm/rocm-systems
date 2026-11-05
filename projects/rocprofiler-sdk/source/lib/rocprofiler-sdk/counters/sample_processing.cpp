@@ -249,6 +249,15 @@ callback_thread_stop()
         callback_thread_get().exit();
 }
 
+void
+callback_thread_drain()
+{
+    // Deliberately not holding callback_thread_mut: the wait is open-ended and the consumer
+    // synchronizes the drain internally, so taking it here would stall any concurrent
+    // context stop for the duration of the wait.
+    callback_thread_get().drain();
+}
+
 /**
  * Callback called by HSA interceptor when the kernel has completed processing.
  * Hands the work off to the dedicated consumer thread so that the HSA async

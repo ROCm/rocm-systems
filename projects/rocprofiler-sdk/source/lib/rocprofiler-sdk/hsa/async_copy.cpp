@@ -242,9 +242,11 @@ struct active_signals
     active_signals& operator=(const active_signals&) = delete;
     active_signals& operator=(active_signals&&) noexcept = delete;
 
-    void create();          // create hsa signal
-    void destroy();         // destroy hsa signal
-    void sync();            // wait for outstanding signal completion callbacks
+    void create();   // create hsa signal
+    void destroy();  // destroy hsa signal
+    // Wait for outstanding signal completion callbacks. False if the wait expired with
+    // callbacks still undelivered.
+    bool sync();
     void fetch_add(int v);  // increment hsa signal value
     void fetch_sub(int v);  // decrement hsa signal value
 
@@ -285,10 +287,10 @@ active_signals::destroy()
     }
 }
 
-void
+bool
 active_signals::sync()
 {
-    if(m_signal.handle == 0) return;
+    if(m_signal.handle == 0) return true;
 
 #if defined(ROCPROFILER_CI_STRICT_TIMESTAMPS) && ROCPROFILER_CI_STRICT_TIMESTAMPS > 0
     constexpr auto timeout_sec = std::chrono::seconds{5};
@@ -314,7 +316,10 @@ active_signals::sync()
                 << " completion callbacks from HSA for async memory copy tracing. " << _cnt_end
                 << " completion callbacks were not delivered";
         }
+        return _cnt_end == 0;
     }
+
+    return true;
 }
 
 void
@@ -627,6 +632,8 @@ async_copy_handler(hsa_signal_value_t, void* arg)
         delete _data;
         return false;
     }
+
+    // Writes the copy record and runs tool callbacks; the scope destructor below releases it.
 
     auto  ts               = common::timestamp_ns();
     auto* _data            = static_cast<async_copy_data*>(arg);
@@ -1326,12 +1333,12 @@ async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance)
     }
 }
 
-void
+bool
 async_copy_sync()
 {
-    if(!async_copy::get_active_signals()) return;
+    if(!async_copy::get_active_signals()) return true;
 
-    async_copy::get_active_signals()->sync();
+    return async_copy::get_active_signals()->sync();
 }
 
 void
