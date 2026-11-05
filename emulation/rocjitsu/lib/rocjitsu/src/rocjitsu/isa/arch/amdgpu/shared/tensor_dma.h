@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/plugins/tensor_dma_issue_observation.h"
 #include "rocjitsu/vm/plugins/tensor_dma_memory_access_observation.h"
 #include "util/bit.h"
 #include "util/log.h"
@@ -309,11 +310,19 @@ private:
 
 /// @brief Count the elements materialized by a tensor DMA instruction.
 /// @details Gather mode uses valid_indices * tile_dims[0]. Dense mode includes
-/// every iteration. Arithmetic overflow and empty dense tile dimensions return
-/// std::nullopt.
+/// every iteration. A zero tile_dims[0] makes the instruction a NOP whatever the
+/// higher tile dimensions (CDNA5 ISA 10.11.4, D# field tile_dim0). Arithmetic
+/// overflow and a zero higher dimension below the rank return std::nullopt.
+///
+/// A NOP tile and a gather with no valid indices are still active descriptors:
+/// with atomic_barrier set, they validate the barrier address and send exactly
+/// one barrier arrival. Only a NULL tensor skips both, as the ISA specifies
+/// (CDNA5 ISA 10.11.4, D# field count). The published ISA does not state the
+/// barrier behavior of a NOP tile; this is the emulator's chosen semantics, not
+/// established hardware behavior.
 inline std::optional<uint64_t> tensor_element_count(const TensorDmaDescriptor &desc,
                                                     const TensorDmaLayout &layout) {
-  if (layout.rank() == 0)
+  if (layout.rank() == 0 || desc.tile_dims[0] == 0)
     return uint64_t{0};
   if (desc.gather)
     return util::checked_mul(uint64_t{desc.valid_indices}, uint64_t{desc.tile_dims[0]});
@@ -344,15 +353,17 @@ inline util::Result validate_supported_descriptor(const TensorDmaDescriptor &des
   if (desc.gather) {
     if (rank != 2) [[unlikely]]
       return util::Result::failure();
-    if (desc.tile_dims[0] == 0) [[unlikely]]
-      return util::Result::failure();
-    if (desc.valid_indices == 0) [[unlikely]]
-      return util::Result::failure();
+    // Zero valid indices or a zero tile_dims[0] is a NOP; see tensor_element_count.
     const uint32_t max_indices = desc.gather_indices_32bit ? 8 : 16;
     if (desc.valid_indices > max_indices) [[unlikely]]
       return util::Result::failure();
     return tensor_element_count(desc, layout) ? util::Result::success() : util::Result::failure();
   }
+  // A dense tile with no elements is a NOP (see tensor_element_count). It
+  // visits no iteration origins, so its iteration fields need not describe a
+  // valid walk; pipelines drain an iterating prefetch this way.
+  if (rank == 0 || desc.tile_dims[0] == 0)
+    return util::Result::success();
   if (desc.iterate && (rank < 2 || rank > 3)) [[unlikely]]
     return util::Result::failure();
   if (desc.iterate && desc.iteration_count > 1 && desc.global_increment != 0) {
@@ -384,6 +395,9 @@ public:
   std::optional<GpuVmAccess> access;
   std::vector<TensorDmaTransferElement> elements;
   std::size_t next_element = 0;
+  /// PC of the tensor DMA instruction. A deferred transfer completes after the
+  /// wave's PC has advanced past it.
+  uint64_t pc = 0;
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   bool store_from_lds = false;
   bool completion_committed = false;
@@ -587,6 +601,12 @@ inline void for_each_dense_tensor_element(const TensorDmaDescriptor &desc,
   uint64_t element_count = 1;
   for (uint32_t dim = 0; dim < rank; ++dim)
     element_count *= desc.tile_dims[dim];
+  // Without elements there is nothing to visit, so reconstruct no origins.
+  // validate_supported_descriptor accepts an empty tile without validating its
+  // iteration inverse, so its layout may hold a zero stride, which
+  // origin_from_linear_offset would divide by.
+  if (element_count == 0)
+    return;
 
   const uint32_t iteration_count = desc.iterate ? desc.iteration_count : 1;
   for (uint32_t iter = 0; iter < iteration_count; ++iter) {
@@ -643,10 +663,11 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   const TensorDmaLayout layout(desc);
   if (validate_supported_descriptor(desc, layout).failed()) [[unlikely]]
     return util::Result::failure();
-  if (layout.rank() != 0 && !wf.has_gpu_memory()) [[unlikely]]
-    return util::Result::failure();
   const auto element_count = tensor_element_count(desc, layout);
   if (!element_count) [[unlikely]]
+    return util::Result::failure();
+  // A transfer with zero elements needs no GPU memory.
+  if (*element_count != 0 && !wf.has_gpu_memory()) [[unlikely]]
     return util::Result::failure();
   // Iterations may legally reuse LDS through a zero or overlapping increment.
   // This separate simulator limit bounds the eager host representation.
@@ -664,7 +685,9 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   };
   for_each_tensor_element(desc, layout, append_element);
 
-  if (wf.address_space()) {
+  // A transfer with zero elements makes no global request, so it needs no VM
+  // binding either.
+  if (*element_count != 0 && wf.address_space()) {
     state.access = wf.snapshot_vm_access();
     if (!state.access)
       state.outcome = VmAccessOutcome::Faulted;
@@ -696,6 +719,41 @@ inline bool materialize_observed_addresses(const void *context, std::span<uint64
   return fits && next_address == addresses.size();
 }
 
+/// @brief Merge the LDS bytes a transfer touches into runs, in element order.
+/// @details Loads write every element; out-of-tensor elements are zero-filled.
+/// Stores read only in-bounds elements.
+inline std::vector<TensorDmaLdsRange> tensor_dma_lds_ranges(const TensorDmaState &state) {
+  std::vector<TensorDmaLdsRange> ranges;
+  ranges.reserve(state.elements.size());
+  const uint32_t size = state.desc.elem_size;
+  for (const TensorDmaTransferElement &element : state.elements) {
+    if (state.store_from_lds && !element.in_bounds)
+      continue;
+    if (!ranges.empty() && ranges.back().address + ranges.back().bytes == element.lds_address)
+      ranges.back().bytes += size;
+    else
+      ranges.push_back({.address = element.lds_address, .bytes = size});
+  }
+  return ranges;
+}
+
+/// @brief Report a tensor DMA instruction as it issues, before its global
+/// requests and LDS writes.
+/// @details Called once per instruction, after prepare_tensor has sampled a
+/// store's LDS source bytes. A NULL descriptor has no elements and
+/// reports no LDS ranges; the emulator still counts it on TENSORcnt, which is an
+/// assumption rather than established hardware behavior.
+inline void report_issued_tensor_dma(Wavefront &wf, const TensorDmaState &state) {
+  if (!wf.cu().observes_tensor_dma_issue())
+    return;
+  const std::vector<TensorDmaLdsRange> lds_ranges = tensor_dma_lds_ranges(state);
+  wf.cu().report_tensor_dma_issue({
+      .is_load = !state.store_from_lds,
+      .element_size_bytes = state.desc.elem_size,
+      .lds_ranges = lds_ranges,
+  });
+}
+
 inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
                                         TensorDmaState &state) {
   if (state.outcome != VmAccessOutcome::Complete || state.observation_reported)
@@ -712,7 +770,7 @@ inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
 
   const TensorDmaMemoryAccessObservation access{
       .mnemonic = inst.mnemonic(),
-      .pc = wf.pc,
+      .pc = state.pc,
       .compute_unit_id = wf.cu().id(),
       .dispatch_id = wf.dispatch_id(),
       .queue_id = wf.queue_id(),
@@ -915,8 +973,12 @@ util::Result execute_tensor_dma(Inst &inst, Wavefront &wf, bool store_from_lds) 
       return util::Result::failure();
     std::unique_ptr<TensorDmaState> state =
         std::make_unique<TensorDmaState>(desc.value(), store_from_lds);
+    state->pc = wf.pc;
     if (desc.value().active() && prepare_tensor(*state, wf).failed()) [[unlikely]]
       return util::Result::failure();
+    // Only a fresh instruction reaches this block: a deferred transfer resumes
+    // from its retained state, so each instruction is reported once.
+    report_issued_tensor_dma(wf, *state);
     inst.set_data(std::move(state));
   }
   TensorDmaState &state = *inst.template data_as<TensorDmaState>();

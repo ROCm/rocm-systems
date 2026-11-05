@@ -892,7 +892,7 @@ function(rccl_define_micro_source_lists)
     fakes/utils_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
-    
+
   # rccl-UnitTestsMicroDdaIpc -- src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu. Own binary:
   # rccl-UnitTestsMicro links fakes/dda_fakes.cc, which defines the same ncclAllReduceDdaIpc* symbols.
   set(TEST_MICRO_DDA_IPC_SOURCE_FILES
@@ -1059,6 +1059,19 @@ function(rccl_define_micro_source_lists)
     ../common/ProcessIsolatedTestRunner.cpp
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroDdaIpcLifecycle -- src/algorithms/dda/ipc/{ipc_init.cu,ipc_mem_handler.cc,ipc_gpu_barrier.cu},
+  # included by the test TU so teardown ordering can be tested with host fakes.
+  set(TEST_MICRO_DDA_IPC_LIFECYCLE_SOURCE_FILES
+    dda-ipc-lifecycle-test.cc
+    fakes/bootstrap_stubs.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/utils_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/device/device_buffer.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1106,7 +1119,7 @@ function(rccl_add_micro_binary _name)
       endif()
     endif()
   else()
-    # Mirror add_test_executable(): record for the HOST_TEST_COVERAGE loop.
+    # Mirror add_test_executable(): record for the standalone coverage loop.
     if(_ramb_OBJECT)
       list(APPEND HOST_TEST_OBJECT_LIBS ${_name})
       set(HOST_TEST_OBJECT_LIBS "${HOST_TEST_OBJECT_LIBS}" PARENT_SCOPE)
@@ -1448,8 +1461,8 @@ endfunction()
 # Standalone Coverage
 # =====================================================================
 function(rccl_standalone_coverage)
-  option(HOST_TEST_COVERAGE "Build the host-only test binaries with llvm source-based coverage" ON)
-  if(HOST_TEST_COVERAGE)
+  option(ENABLE_CODE_COVERAGE "Enable code coverage" OFF)
+  if(ENABLE_CODE_COVERAGE)
     # HOST_TEST_BINARIES is populated by add_test_executable() and by
     # rccl_add_micro_binary(), so new test binaries are instrumented automatically.
     foreach(_cov_tgt ${HOST_TEST_BINARIES})
@@ -2269,6 +2282,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTopo
     CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/connect.cc"
     RINGS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rings.cc"
     TREES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/trees.cc"
+    TOPO_EXPL_MODELS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tools/topo_expl/models"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_topo.yaml")
 
 # ---------------------------------------------------------------------------
@@ -3046,6 +3060,18 @@ rccl_add_micro_binary(rccl-UnitTestsMicroHostDispatch
   SOURCES ${TEST_MICRO_HOST_DISPATCH_SOURCE_FILES}
   EXTRA_DEFS ${_MICRO_MODE_DEFS}
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroDdaIpcLifecycle -- host-only DDA IPC init/teardown lifecycle
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroDdaIpcLifecycle
+  SOURCES ${TEST_MICRO_DDA_IPC_LIFECYCLE_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    DDA_IPC_INIT_CU_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/ipc/ipc_init.cu.cpp"
+    DDA_IPC_MEM_HANDLER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/ipc/ipc_mem_handler.cc"
+    DDA_IPC_GPU_BARRIER_CU_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/ipc/ipc_gpu_barrier.cu.cpp"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda_ipc_lifecycle.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsHostAll
