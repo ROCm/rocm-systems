@@ -76,7 +76,8 @@ public:
   {
   }
 
-  // @return true if the initialization failed (e.g. the IPC objects could not be created)
+  // @return true if the initialization succeeded or false otherwise (e.g. the IPC objects could
+  //         not be created)
   [[nodiscard]] bool initialize()
   {
     handle.reset(new ipcHdl());
