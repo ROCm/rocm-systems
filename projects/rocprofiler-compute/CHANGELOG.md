@@ -35,6 +35,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `analyze --debug-table-view`: print every block as plain tables.
   * `analyze --debug-verify-deps`: check that the Python dependencies of analyze mode are installed, then exit.
 
+* Added metric IDs to `--block` and `--list-metrics`, for example `--block compute.salu_util`, which selects every row that shows the metric. Numeric metric IDs such as `11.2.2` still work, but print a deprecation warning.
+
 ### Changed
 
 * Improved the standalone roofline HTML kernel hover tooltip: it now shows the limiting roof, percent of roofline, achieved and peak bandwidth per memory level, dispatch count and share of total application dispatches, and kernel duration and share of total application time. Kernel names longer than 200 characters are truncated in the sidebar, with the full name shown on hover.
@@ -156,6 +158,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * The old roofline option names (`--roof-only`, `--bench-only`, and `--device`) will be removed in a future release. Use the new `--roofline-*` names instead.
 
 * `--no-roof` is deprecated and will be removed in a future release. To skip roofline, select blocks with `-b` or `--set` that do not include block 4.
+
+* Numeric metric IDs in `--block`, such as `11.2.2`, will be removed in a future release. Use metric IDs such as `compute.salu_util` instead.
 
 ### Known issues
 

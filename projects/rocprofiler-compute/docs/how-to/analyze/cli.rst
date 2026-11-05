@@ -410,6 +410,12 @@ Open the saved HTML file in a browser for the interactive roofline plot. See :re
       ├─────────────┼───────────────────────────┼─────────┼────────────────────────┼──────────┼───────────────────┤
       │ 2.1.29      │ CU Utilization            │ 65.01   │ Percent                │ 100.0    │ N/A               │
       ╘═════════════╧═══════════════════════════╧═════════╧════════════════════════╧══════════╧═══════════════════╛
+
+   A metric id from ``--list-metrics``, such as ``-b compute.salu_util``, shows
+   every row of the report that shows that metric. Numeric metric ids such as
+   ``-b 2.1.7`` still work, but are deprecated and print the metric id to use
+   instead.
+
    .. note::
 
       Some cells may be blank indicating a missing or unavailable hardware
