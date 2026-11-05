@@ -29,7 +29,7 @@ TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithMultiplexingDisabled_Dispat
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc0);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithMultiplexing_DispatchCbReturnsFirstPmc)
+TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithMultiplexing_DispatchCbRotatesPmcPerKernel)
 {
     m_tool_data->iteration_multiplexing = true;
     const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
@@ -44,7 +44,7 @@ TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithMultiplexing_DispatchCbRetu
     EXPECT_EQ(created_config_info[config_index_3].counter_names, m_counters_pmc1);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedSameKernelSameParamsWithLaunchMultiplexing_DispatchCbReturnsEachPmc)
+TEST_F(TestSdkCallbacks, ProvidedSameKernelSameParamsWithMultiplexing_DispatchCbReturnsEachPmc)
 {
     m_tool_data->iteration_multiplexing   = true;
     constexpr kernel_dispatch_info_t info = {1, 2, {3, 3, 3}, {4, 4, 4}, 5};
@@ -57,7 +57,7 @@ TEST_F(TestSdkCallbacks, ProvidedSameKernelSameParamsWithLaunchMultiplexing_Disp
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc1);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedSameKernelDifferentParamsWithLaunchMultiplexing_DispatchCbReturnsSamePmc)
+TEST_F(TestSdkCallbacks, ProvidedSameKernelDifferentParamsWithMultiplexing_DispatchCbReturnsSamePmc)
 {
     m_tool_data->iteration_multiplexing        = true;
     kernel_dispatch_info_t info                = {1, 2, {3, 3, 3}, {4, 4, 4}, 5};
