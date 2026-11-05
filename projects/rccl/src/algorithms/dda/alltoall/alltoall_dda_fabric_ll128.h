@@ -85,8 +85,14 @@ __launch_bounds__(1024)
     const size_t rem = perChunkBytes - dataByte;
     const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     uint64_t vr[kDdaLL128WordsPerThread];
-    if (!ddaLL128PollWireBatched(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane,
-                                 params)) {
+    const uint64_t* wire = gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
+#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
+    const bool landed = ddaLL128PollWireBatched(wire, vr, flag, lane, params);
+#else
+    // Plain 16B loads can see a line's flag before its payload; only this poll reads it again.
+    const bool landed = ddaLL128PollWire(wire, vr, flag, lane, params);
+#endif
+    if (!landed) {
       break; // aborted; the epoch update below still runs
     }
     ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, vr, eltInSlice, lane, flagLane);
