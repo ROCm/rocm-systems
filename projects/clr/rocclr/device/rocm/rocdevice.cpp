@@ -136,6 +136,7 @@ Device::Device(hsa_agent_t bkendDevice)
       gpuvm_segment_max_alloc_(0),
       alloc_granularity_(0),
       xferQueue_(nullptr),
+      coopQueue_(nullptr),
       freeMem_(0),
       hsa_exclusive_gpu_access_(false),
       numOfVgpus_(0),
@@ -264,8 +265,10 @@ Device::~Device() {
     glb_ctx_ = nullptr;
   }
 
-  // Destroy transfer queue FIRST (before destroying queues in pool)
-  // because its destructor will call releaseQueue()
+  // Destroy internal queues FIRST (before destroying queues in pool)
+  // because their destructors will call releaseQueue()
+  delete coopQueue_;
+  coopQueue_ = nullptr;
   delete xferQueue_;
   xferQueue_ = nullptr;
 
@@ -1284,15 +1287,23 @@ bool Device::populateOCLDeviceConstants() {
       amd::IS_HIP && info_.largeBar_ && (device_signal_pool_.handle != 0) && !tool_attached;
   graph_device_signals_ = DEBUG_CLR_GRAPH_DEV_SIGNALS && device_signals;
   queue_device_signals_ = DEBUG_CLR_DEV_SIGNALS && device_signals;
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT,
-          "Signal pool: %s. Device memory: graph signals %d, queue signals %d, "
-          "AQL rings %d (profiler tool: %d)",
-          signal_pool_name, graph_device_signals_, queue_device_signals_,
-          AqlRingsInDeviceMemory(), tool_attached);
   // Left true by a runtime without the query, since flushing is always correct
   Hsa::agent_get_info(bkendDevice_,
                       static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH),
                       &pcie_stores_need_flush_);
+  // CP firmware without hint support takes a hinted handle as the signal address. Left false by
+  // a runtime without the query. A profiler tool hands packet completion signals to ROCr, which
+  // rejects a hinted handle.
+  if (!tool_attached) {
+    Hsa::agent_get_info(bkendDevice_,
+                        static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED),
+                        &signal_hints_);
+  }
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT,
+          "Signal pool: %s. Device memory: graph signals %d, queue signals %d, "
+          "AQL rings %d. Signal hints %d (profiler tool: %d)",
+          signal_pool_name, graph_device_signals_, queue_device_signals_, AqlRingsInDeviceMemory(),
+          signal_hints_, tool_attached);
 
   for (auto agent : gpu_agents_) {
     if (agent.handle != bkendDevice_.handle) {
@@ -1931,18 +1942,15 @@ bool Device::populateOCLDeviceConstants() {
 }
 
 // ================================================================================================
-device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
+device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue, bool cooperative) {
   std::scoped_lock lock(vgpusAccess());
 
   bool profiling = (queue != nullptr) && queue->properties().test(CL_QUEUE_PROFILING_ENABLE);
-  bool cooperative = false;
   bool dedicated_queue = (queue != nullptr) && queue->isDedicatedQueue() &&
                          (settings().dynamic_queues_ >= 2);
 
   // If amd command queue is null, then it's an internal device queue
   if (queue == nullptr) {
-    // In HIP mode the device queue will be allocated for the cooperative launches only
-    cooperative = amd::IS_HIP && settings().enableCoopGroups_;
     profiling = amd::IS_HIP;
   }
   // Initialization of heap and other resources occur during the command
@@ -1953,6 +1961,10 @@ device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
       new VirtualGPU(*this, profiling, cooperative, q ? queue->cuMask() : defaultCuMask,
                      q ? queue->priority() : amd::CommandQueue::Priority::Normal,
                      dedicated_queue);
+
+  if (!q && !cooperative) {
+    virtualDevice->PinQueue();
+  }
 
   if (!virtualDevice->create()) {
     delete virtualDevice;
@@ -2682,6 +2694,24 @@ void Device::updateFreeMemory(size_t size, bool free) {
 }
 
 // ================================================================================================
+[[nodiscard]] bool Device::writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                             const void* src) const {
+  address target = reinterpret_cast<address>(dst.getSvmPtr());
+  if (target == nullptr || src == nullptr) {
+    return false;
+  }
+  // ROCr runs this as a blit on its own utility queue and blocks until it completes.
+  hsa_status_t status = Hsa::memory_copy(target + offset, src, size);
+  if (status != HSA_STATUS_SUCCESS) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_MEM,
+            "hsa_memory_copy into device global %p failed with hsa_status: %d", target + offset,
+            status);
+    return false;
+  }
+  return true;
+}
+
+// ================================================================================================
 void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_svm_mem_flags flags,
                        void* svmPtr) const {
   amd::Memory* mem = nullptr;
@@ -3383,9 +3413,9 @@ VirtualGPU* Device::xferQueue() const {
   Device* thisDevice = const_cast<Device*>(this);
   std::call_once(xferQueueOnce_, [thisDevice]() {
     // Create virtual device for internal memory transfer
-    thisDevice->xferQueue_ = reinterpret_cast<VirtualGPU*>(thisDevice->createVirtualDevice());
+    thisDevice->xferQueue_ =
+        reinterpret_cast<VirtualGPU*>(thisDevice->createVirtualDevice(nullptr, /*cooperative=*/false));
     if (!thisDevice->xferQueue_) {
-      LogError("Couldn't create the device transfer manager!");
       return;
     }
     if (thisDevice->xferQueue_->gpu_queue() == nullptr) {
@@ -3399,6 +3429,29 @@ VirtualGPU* Device::xferQueue() const {
   }
   xferQueue_->enableSyncBlit();
   return xferQueue_;
+}
+
+// ================================================================================================
+VirtualGPU* Device::coopQueue() const {
+  Device* thisDevice = const_cast<Device*>(this);
+  std::call_once(coopQueueOnce_, [thisDevice]() {
+    // Create virtual device for cooperative launches
+    thisDevice->coopQueue_ = reinterpret_cast<VirtualGPU*>(
+        thisDevice->createVirtualDevice(nullptr, amd::IS_HIP && thisDevice->settings().enableCoopGroups_));
+    if (!thisDevice->coopQueue_) {
+      return;
+    }
+    if (thisDevice->coopQueue_->gpu_queue() == nullptr) {
+      thisDevice->coopQueue_->SetGpuQueue(
+          thisDevice->AcquireActiveQueue(amd::CommandQueue::Priority::Normal));
+    }
+  });
+  if (!coopQueue_) {
+    LogError("Couldn't create the cooperative queue!");
+    return nullptr;
+  }
+  coopQueue_->enableSyncBlit();
+  return coopQueue_;
 }
 
 // ================================================================================================
@@ -4232,7 +4285,7 @@ bool Device::CreateHwEvents(int count, bool batched, std::vector<void*>& hw_even
   }
   hw_events.resize(count);
   for (int event_idx = 0; event_idx < count; ++event_idx) {
-    ProfilingSignal* profiling_signal = new ProfilingSignal();
+    ProfilingSignal* profiling_signal = new ProfilingSignal(SignalHints());
     profiling_signal->signal_ = signals[event_idx];
     profiling_signal->in_device_memory_ = in_device_memory;
     hw_events[event_idx] = profiling_signal;
@@ -4409,7 +4462,7 @@ uint8_t* Device::CreateBarrierPacket(int num_deps) const {
 
 // ================================================================================================
 void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                 const std::vector<void*>& hw_events) const {
+                                 const std::vector<void*>& hw_events, bool profiled) const {
   // Starts no use: the set comes new from CreateHwEvents or re-armed by ResetHwEvents, which did
   for (const auto& patch : patches) {
     auto* ps = reinterpret_cast<ProfilingSignal*>(hw_events[patch.hw_event_index]);
@@ -4425,8 +4478,10 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
           offsetof(hsa_amd_ext_kernel_dispatch_packet_t, dep_signal);
       memcpy(raw + kExtDepSignalOffset, &sig, sizeof(sig));
     } else if (patch.dep_slot == HwEventPatch::kCompletionSignal) {
+      // Pooled signals rest armed at 1, and only this packet completes them
+      ps->binary_use_ = true;
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
-      pkt->completion_signal = sig;
+      pkt->completion_signal = ps->PacketHandle(profiled);
 
       // Prepare this signal for profiling. The dispatch path assigns this
       // launch's slot only when the actual carrier is a kernel dispatch.
@@ -4443,7 +4498,7 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
 
 // ================================================================================================
 bool Device::CreateUserEvent(amd::UserEvent* event) const {
-  std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
+  std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal(SignalHints()));
   if ((signal == nullptr) ||
       (HSA_STATUS_SUCCESS != Hsa::signal_create(0, 0, nullptr, &signal->signal_))) {
     return false;
