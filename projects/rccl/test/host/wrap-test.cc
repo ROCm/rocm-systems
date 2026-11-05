@@ -6288,7 +6288,6 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerKeepsEveryOtherChoice
         ar.table_.ceRegMax[ncclFuncAllReduce] = kCeVsSymkRegCapBytes;
         ar.mustEnqueue_ = true;
         ar.ExpectUnchanged(8 * kMiB, false, ceReg, "enqueue runs CE for a CE decision");
-        EXPECT_EQ(96u, ar.Select(16 * kMiB, /*capturing=*/true).ddaCap.blocks) << "capture replaces Ring either way";
         ar.mustEnqueue_ = false;
         ar.ll128Eligible_ = false;
         ar.llEligible_ = true;
@@ -6471,6 +6470,30 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureCapFollowsThePlanne
         d = ar.Select(16 * kMiB, true);
         EXPECT_EQ(24u, d.ddaCap.blocks) << "the channels the packed plan launches";
         EXPECT_EQ(24u, d.nMaxChannels);
+      });
+}
+
+// Check-mode, suspended and revoked comms divert to enqueue, which plans Ring itself, so capture keeps Ring for them.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureKeepsRingOnEnqueueComms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredCaptureKeepsRingOnEnqueueComms",
+      []() {
+        RegisteredAr ar(8);
+        ar.mustEnqueue_ = true;
+        for (bool query : {true, false}) {
+          SCOPED_TRACE(query ? "query" : "live: stream probe");
+          const rcclCollDecision d = ar.Select(16 * kMiB, /*capturing=*/true, query);
+          EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+          if (query) {
+            EXPECT_EQ(NCCL_PROTO_LL128, d.protocol) << "the planner's Ring";
+          }
+          EXPECT_EQ(0u, d.ddaCap.blocks);
+          EXPECT_EQ(0u, d.ddaCap.threads);
+          EXPECT_EQ(0u, ar.reportedCap_.blocks) << "no DDA reporter ran";
+          EXPECT_EQ(0u, ar.reportedCap_.threads);
+        }
+        ar.mustEnqueue_ = false;
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, ar.Select(16 * kMiB, true).algo) << "a ready comm";
       });
 }
 

@@ -2030,11 +2030,13 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     const bool symkWithdrawn =
       ddaFabricArch1250 && symkRequested && !symSuppressedByMin && symSuppressedByMax && !ginYield;
     // In graph capture that backend is Ring (no CE); re-route only where the planner picks Ring (fp8 plans Tree).
+    // Check-mode, suspended and revoked comms divert to enqueue, which plans Ring itself.
     struct rcclCollDecision ringChoice;
     memset(&ringChoice, 0, sizeof(ringChoice));
     uint32_t ringThreads = 0;
     bool ddaReplacesRing = false;
-    if (symkWithdrawn && ceCapturing && msgBytes <= rcclDdaArRegCaptureMaxBytesTab(archTable, comm->nRanks)) {
+    if (symkWithdrawn && ceCapturing && msgBytes <= rcclDdaArRegCaptureMaxBytesTab(archTable, comm->nRanks) &&
+        !rcclCollectiveMustUseEnqueuePath(comm)) {
       NCCLCHECK(rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncAllReduce, count, datatype, /*query=*/true,
                                  &ringChoice, &ringThreads));
       ddaReplacesRing = ringChoice.algo == NCCL_ALGO_RING;
