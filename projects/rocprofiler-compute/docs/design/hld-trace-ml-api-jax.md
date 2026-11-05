@@ -135,12 +135,16 @@ node. Its kernels are listed under `jax.jit.train_step`.
 # jax_workload.py
 @jax.jit
 def matmul_relu(a, b):
-    return jnp.maximum(a @ b, 0.0)   # line 7
+    return jnp.maximum(a @ b, 0.0)
 
 @jax.jit
 def train_step(w, x):
-    y = matmul_relu(x, w)            # line 12
-    return jnp.sum(y * y)            # line 13
+    y = matmul_relu(x, w)
+    return jnp.sum(y * y)
+
+w = jnp.ones((512, 512))
+x = jnp.ones((512, 512))
+train_step(w, x)                 # line 13
 ```
 
 `--list-operators jax` prints the call tree the ML API trace already prints for
@@ -156,7 +160,7 @@ JAX Operator Call Tree: <workload>
 Sorted by total GPU kernel duration.
 ================================================================================
 
-jax.jit.train_step jax_workload.py:26 (calls: N, dispatches: M, total: T)
+jax.jit.train_step jax_workload.py:13 (calls: N, dispatches: M, total: T)
 ├─ gemm_fusion_dot_general_0 (dispatches: M, total: T)
 ├─ Cijk_..._WGM6 (dispatches: M, total: T)
 ├─ input_reduce_fusion (dispatches: M, total: T)
