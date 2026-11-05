@@ -58,6 +58,7 @@ GpuMemory::~GpuMemory() {
   // Release the Lock2 pin before tearing down the allocation handles, since
   // DestroyAllocation invalidates the handles Unlock2 needs.
   UnlockSystemMemory();
+  CpuUnmap();
   // A peer view maps the owner's VA. The owner frees that reservation.
   if (owner_ == nullptr) {
     FreeGpuVirtualAddress(GpuAddress(), Size());
@@ -515,6 +516,60 @@ ErrorCode GpuMemory::UnlockSystemMemory() {
 
   is_sysmem_locked_ = false;
   return final_code;
+}
+
+ErrorCode GpuMemory::CpuMap(void** out_cpu_addr) {
+  *out_cpu_addr = nullptr;
+
+  // kSystem recorded its host pointer at Init().
+  if (desc_.cpu_addr) {
+    *out_cpu_addr = desc_.cpu_addr;
+    return ErrorCode::Success;
+  }
+
+  // The caller relocates the mapping, so drop any earlier one.
+  if (is_cpu_mapped_)
+    CpuUnmap();
+
+  // Lock2 maps one handle, so chunks cannot form a contiguous CPU range.
+  if (NumChunks() != 1) {
+    pr_err("[cpu-map] cannot map a %zu-chunk allocation as one CPU range\n", NumChunks());
+    return ErrorCode::UnSupported;
+  }
+
+  D3DKMT_LOCK2 args = {};
+  args.hDevice = device_->DeviceHandle();
+  args.hAllocation = GetAllocationHandle(0);
+
+  auto code = d3dthunk::Lock2(&args);
+  if (code != ErrorCode::Success) {
+    // Expected when the allocation was not created lockable.
+    pr_err("[cpu-map] D3DKMTLock2 failed (code=%d) size=%llu mem_flags=0x%x\n",
+           static_cast<int>(code), static_cast<unsigned long long>(desc_.size),
+           static_cast<unsigned>(desc_.mem_flags));
+    return code;
+  }
+
+  // Not desc_.cpu_addr: that is the thunk's own kSystem mapping; this one moves.
+  is_cpu_mapped_ = true;
+  *out_cpu_addr = args.pData;
+  return ErrorCode::Success;
+}
+
+ErrorCode GpuMemory::CpuUnmap() {
+  if (!is_cpu_mapped_)
+    return ErrorCode::Success;
+
+  D3DKMT_UNLOCK2 args = {};
+  args.hDevice = device_->DeviceHandle();
+  args.hAllocation = GetAllocationHandle(0);
+
+  auto code = d3dthunk::Unlock2(&args);
+  if (code != ErrorCode::Success)
+    pr_err("[cpu-map] D3DKMTUnlock2 failed (code=%d)\n", static_cast<int>(code));
+
+  is_cpu_mapped_ = false;
+  return code;
 }
 
 ErrorCode GpuMemory::Evict() {
