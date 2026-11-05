@@ -2633,6 +2633,8 @@ ib_recv:
             pfn_hsa_amd_portable_export_dmabuf(aligned_ptr, alignedSize, &rCommDev->gpuFlush.dmabufFd, &exportOffset);
           if (rCommDev->gpuFlush.dmabufFd < 0 || exportStatus != HSA_STATUS_SUCCESS) {
             WARN("Failed to export DMA BUF");
+            // Success with a null recv comm means "not connected yet".
+            ret = ncclSystemError;
             goto fail;
           }
           NCCLCHECKGOTO(
