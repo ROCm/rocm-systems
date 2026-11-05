@@ -2010,7 +2010,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
     endif()
     add_dependencies(rocjitsu_tests operand_delegate_probe)
-    rj_add_test_path(rocjitsu_tests RJ_OPERAND_DELEGATE_PROBE_MODULE "$<TARGET_FILE:operand_delegate_probe>")
+    rj_add_test_path(rocjitsu_tests RJ_OPERAND_DELEGATE_PROBE_MODULE "$<TARGET_FILE_NAME:operand_delegate_probe>")
+    if(RJ_INSTALL_TESTS)
+        install(
+            TARGETS operand_delegate_probe
+            LIBRARY DESTINATION ${RJ_INSTALL_TEST_BIN_DIR}
+        )
+    endif()
 endif()
 
 # --- Interposer loader initialization regression tests ---

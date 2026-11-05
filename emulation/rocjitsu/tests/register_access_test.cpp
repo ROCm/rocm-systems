@@ -13,6 +13,7 @@
 #include "decode_test_util.h"
 #ifdef __linux__
 #include <dlfcn.h>
+#include <filesystem>
 #endif
 
 #include "rocjitsu/code/rj_code.h"
@@ -362,7 +363,12 @@ TEST(RegisterAccessTest, ExecutionCallbackRejectsLateMissingBackendDelegateBefor
 
 #ifdef __linux__
 TEST(RegisterAccessTest, ModuleBindingRejectsMissingBackendBeforeEffects) {
-  void *module = dlopen(RJ_OPERAND_DELEGATE_PROBE_MODULE, RTLD_NOW | RTLD_LOCAL);
+  std::error_code error;
+  const std::filesystem::path executable = std::filesystem::read_symlink("/proc/self/exe", error);
+  ASSERT_FALSE(error) << error.message();
+  const std::filesystem::path module_path =
+      executable.parent_path() / RJ_OPERAND_DELEGATE_PROBE_MODULE;
+  void *module = dlopen(module_path.c_str(), RTLD_NOW | RTLD_LOCAL);
   ASSERT_NE(module, nullptr) << dlerror();
   using Probe = void (*)(Operand *, Operand *, void *, void (*)(void *, bool));
   auto probe = reinterpret_cast<Probe>(dlsym(module, "rj_probe_operand_delegate"));
