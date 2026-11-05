@@ -14,10 +14,29 @@
 
 namespace rocprofsys::parser
 {
-std::string_view
-list_separator(const schema_param& param) noexcept
+namespace
 {
-    return param.env ? std::string_view{ param.env->separator } : std::string_view{ "," };
+bool
+accepts_backend(const schema_param& param)
+{
+    if(!param.backend.has_value())
+    {
+        return true;
+    }
+    if(param.backend->empty())
+    {
+        return false;
+    }
+    const auto type = param.type;
+    return type == param_type::string || type == param_type::enumeration ||
+           type == param_type::enumeration_list;
+}
+}  // namespace
+
+std::string_view
+list_separator(const schema_param&) noexcept
+{
+    return ",";
 }
 
 std::optional<std::vector<std::string>>
@@ -49,6 +68,72 @@ split_list(std::string_view value, std::string_view separator)
     return parts;
 }
 
+namespace
+{
+[[nodiscard]] bool
+alias_matches(const choice& item, std::string_view token)
+{
+    for(const auto& alias : item.aliases)
+    {
+        if(alias == token)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::string
+canonical_token(const schema_param& param, std::string_view token)
+{
+    for(const auto& item : param.choices)
+    {
+        if(item.value == token)
+        {
+            return item.value;
+        }
+    }
+    for(const auto& item : param.choices)
+    {
+        if(alias_matches(item, token))
+        {
+            return item.value;
+        }
+    }
+    return std::string{ token };
+}
+}  // namespace
+
+std::string
+canonical_choice(const schema_param& param, std::string_view value)
+{
+    if(param.type == param_type::enumeration)
+    {
+        return canonical_token(param, value);
+    }
+    if(param.type != param_type::enumeration_list)
+    {
+        return std::string{ value };
+    }
+
+    const auto parts = split_list(value, list_separator(param));
+    if(!parts)
+    {
+        return std::string{ value };
+    }
+
+    std::string joined;
+    for(std::size_t index = 0; index < parts->size(); ++index)
+    {
+        if(index != 0)
+        {
+            joined.append(list_separator(param));
+        }
+        joined.append(canonical_token(param, (*parts)[index]));
+    }
+    return joined;
+}
+
 void
 schema::set_version(std::string version)
 {
@@ -56,53 +141,30 @@ schema::set_version(std::string version)
 }
 
 bool
-schema::add_category(category value)
-{
-    if(m_category_index.contains(value.id))
-    {
-        return false;
-    }
-
-    m_category_index.emplace(value.id, m_categories.size());
-    m_categories.push_back(std::move(value));
-    return true;
-}
-
-bool
 schema::add_param(schema_param param)
 {
-    const bool env_taken = param.env && m_env_index.contains(param.env->name);
-    const bool arg_taken = param.arg && m_arg_index.contains(param.arg->name);
-    if(m_param_index.contains(param.id) || env_taken || arg_taken)
+    const bool env_taken =
+        param.env && !param.env->empty() && m_env_index.contains(*param.env);
+    const bool arg_taken =
+        param.arg && !param.arg->empty() && m_arg_index.contains(*param.arg);
+    if(param.id.empty() || m_param_index.contains(param.id) || env_taken || arg_taken ||
+       !accepts_backend(param))
     {
         return false;
     }
 
     const auto position = m_params.size();
     m_param_index.emplace(param.id, position);
-    if(param.env)
+    if(param.env && !param.env->empty())
     {
-        m_env_index.emplace(param.env->name, position);
+        m_env_index.emplace(*param.env, position);
     }
-    if(param.arg)
+    if(param.arg && !param.arg->empty())
     {
-        m_arg_index.emplace(param.arg->name, position);
+        m_arg_index.emplace(*param.arg, position);
     }
     m_params.push_back(std::move(param));
     return true;
-}
-
-void
-schema::add_constraint(constraint value)
-{
-    m_constraints.push_back(std::move(value));
-}
-
-const category*
-schema::find_category(std::string_view category_id) const
-{
-    auto itr = m_category_index.find(category_id);
-    return (itr != m_category_index.end()) ? &m_categories.at(itr->second) : nullptr;
 }
 
 const schema_param*

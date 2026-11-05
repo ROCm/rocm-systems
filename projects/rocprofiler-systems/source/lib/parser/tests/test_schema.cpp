@@ -22,11 +22,11 @@ make_param(std::string param_id, std::string env_name = {}, std::string arg_name
     param.id   = std::move(param_id);
     if(!env_name.empty())
     {
-        param.env = env_spec{ .name = std::move(env_name) };
+        param.env = std::move(env_name);
     }
     if(!arg_name.empty())
     {
-        param.arg = arg_spec{ .name = std::move(arg_name) };
+        param.arg = std::move(arg_name);
     }
     return param;
 }
@@ -37,11 +37,8 @@ TEST(parser_schema, empty_schema)
     const schema value{};
 
     EXPECT_TRUE(value.version().empty());
-    EXPECT_TRUE(value.categories().empty());
     EXPECT_TRUE(value.params().empty());
-    EXPECT_TRUE(value.constraints().empty());
     EXPECT_EQ(value.find_param("missing"), nullptr);
-    EXPECT_EQ(value.find_category("missing"), nullptr);
 }
 
 TEST(parser_schema, params_keep_insertion_order)
@@ -115,16 +112,11 @@ TEST(parser_schema, indexes_stay_valid_after_growth)
     EXPECT_EQ(value.find_param_by_arg("--first"), first);
 }
 
-TEST(parser_schema, categories_reject_duplicates)
+TEST(parser_schema, rejects_an_empty_id)
 {
     schema value{};
-    EXPECT_TRUE(value.add_category({ .id = "general", .name = "General" }));
-    EXPECT_FALSE(value.add_category({ .id = "general", .name = "Other" }));
-
-    ASSERT_EQ(value.categories().size(), 1U);
-    const auto* found = value.find_category("general");
-    ASSERT_NE(found, nullptr);
-    EXPECT_EQ(found->name, "General");
+    EXPECT_FALSE(value.add_param(make_param("")));
+    EXPECT_TRUE(value.params().empty());
 }
 
 TEST(parser_schema, params_in_category)
@@ -149,42 +141,88 @@ TEST(parser_schema, params_in_category)
 
 TEST(parser_schema, effect_fields_round_trip)
 {
-    auto param           = make_param("flat_profile", "", "--flat-profile");
-    param.copy_to        = { "profile" };
-    param.assigns        = { { "log_level", "debug" } };
-    param.fills          = { "trace_delay" };
-    param.maps_to        = { value_mapping{
-               .when = "0", .target = "log_level", .value = "info" } };
-    param.choices        = { choice{
-               .value       = "pftrace",
-               .name        = "Perfetto",
-               .description = "Trace",
-               .sets        = { { "trace", "true" } },
-               .aliases     = { "proto" },
+    auto param          = make_param("flat_profile", "", "--flat-profile");
+    param.assigns       = { { "log_level", "debug" } };
+    param.choices       = { choice{
+              .value   = "pftrace",
+              .aliases = { "proto" },
     } };
-    param.arg->min_count = 1;
-    param.arg->max_count = 2;
-    param.arg->binds     = { "output_path", "output_prefix" };
+    param.arg_min_count = 1;
+    param.arg_max_count = 2;
 
     schema value{};
     ASSERT_TRUE(value.add_param(std::move(param)));
     const auto* stored = value.find_param("flat_profile");
     ASSERT_NE(stored, nullptr);
-    EXPECT_EQ(stored->copy_to, std::vector<std::string>({ "profile" }));
     EXPECT_EQ(stored->assigns.at("log_level"), "debug");
-    EXPECT_EQ(stored->fills, std::vector<std::string>({ "trace_delay" }));
-    ASSERT_EQ(stored->maps_to.size(), 1U);
-    EXPECT_EQ(stored->maps_to.front().target, "log_level");
     ASSERT_EQ(stored->choices.size(), 1U);
-    EXPECT_EQ(stored->choices.front().sets.at("trace"), "true");
     EXPECT_EQ(stored->choices.front().aliases, std::vector<std::string>({ "proto" }));
     ASSERT_TRUE(stored->arg.has_value());
-    ASSERT_TRUE(stored->arg->min_count.has_value());
-    ASSERT_TRUE(stored->arg->max_count.has_value());
-    EXPECT_EQ(*stored->arg->min_count, 1U);
-    EXPECT_EQ(*stored->arg->max_count, 2U);
-    EXPECT_EQ(stored->arg->binds,
-              (std::vector<std::string>{ "output_path", "output_prefix" }));
+    EXPECT_EQ(*stored->arg, "--flat-profile");
+    ASSERT_TRUE(stored->arg_min_count.has_value());
+    ASSERT_TRUE(stored->arg_max_count.has_value());
+    EXPECT_EQ(*stored->arg_min_count, 1U);
+    EXPECT_EQ(*stored->arg_max_count, 2U);
+}
+
+TEST(parser_schema, records_a_backend_name)
+{
+    auto param    = make_param("domains");
+    param.type    = param_type::enumeration;
+    param.backend = "rocprofiler-sdk";
+
+    schema value{};
+    ASSERT_TRUE(value.add_param(std::move(param)));
+    const auto* stored = value.find_param("domains");
+    ASSERT_NE(stored, nullptr);
+    EXPECT_EQ(stored->backend.value_or(""), "rocprofiler-sdk");
+}
+
+TEST(parser_schema, rejects_an_empty_backend_or_a_backend_on_the_wrong_type)
+{
+    schema value{};
+    auto   empty  = make_param("domains");
+    empty.backend = "";
+    EXPECT_FALSE(value.add_param(std::move(empty)));
+
+    for(const auto type : { param_type::boolean, param_type::integer, param_type::number,
+                            param_type::path })
+    {
+        auto param    = make_param("domains");
+        param.type    = type;
+        param.backend = "rocprofiler-sdk";
+        EXPECT_FALSE(value.add_param(std::move(param))) << static_cast<int>(type);
+    }
+    EXPECT_EQ(value.find_param("domains"), nullptr);
+
+    for(const auto type :
+        { param_type::string, param_type::enumeration, param_type::enumeration_list })
+    {
+        auto param =
+            make_param(std::string{ "row_" } + std::to_string(static_cast<int>(type)));
+        param.type    = type;
+        param.backend = "papi";
+        EXPECT_TRUE(value.add_param(std::move(param))) << static_cast<int>(type);
+    }
+}
+
+TEST(parser_schema, canonical_choice_rewrites_aliases)
+{
+    auto param    = make_param("format");
+    param.type    = param_type::enumeration;
+    param.choices = { choice{ .value = "pftrace", .aliases = { "proto" } },
+                      choice{ .value = "text", .aliases = { "txt" } } };
+
+    EXPECT_EQ(canonical_choice(param, "proto"), "pftrace");
+    EXPECT_EQ(canonical_choice(param, "pftrace"), "pftrace");
+    EXPECT_EQ(canonical_choice(param, "other"), "other");
+
+    param.type = param_type::enumeration_list;
+    EXPECT_EQ(canonical_choice(param, " proto , txt "), "pftrace,text");
+    EXPECT_EQ(canonical_choice(param, ""), "");
+
+    param.type = param_type::string;
+    EXPECT_EQ(canonical_choice(param, "proto"), "proto");
 }
 
 TEST(parser_schema, split_list_trims_and_rejects_an_empty_separator)
@@ -197,11 +235,8 @@ TEST(parser_schema, split_list_trims_and_rejects_an_empty_separator)
     EXPECT_FALSE(split_list("alpha", "").has_value());
 }
 
-TEST(parser_schema, list_separator_defaults_to_comma)
+TEST(parser_schema, list_separator_is_a_comma)
 {
-    auto param = make_param("list");
+    const auto param = make_param("list", "ROCPROFSYS_LIST");
     EXPECT_EQ(list_separator(param), ",");
-
-    param.env = env_spec{ .name = "ROCPROFSYS_LIST", .separator = ":" };
-    EXPECT_EQ(list_separator(param), ":");
 }
