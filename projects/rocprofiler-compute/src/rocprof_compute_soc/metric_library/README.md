@@ -5,10 +5,10 @@ id such as `compute.salu_util`. The files hold what a metric is (its formula, un
 peaks), not how a panel shows it. The design is in
 [`lld-phase-a-metric-library.md`](../../../docs/design/analysis-config-redesign/lld-phase-a-metric-library.md).
 
-Production does not read these files yet: `analyze` and `profile` still use
-[`analysis_configs/`](../analysis_configs/). Until the cutover, a metric change goes into
-both trees, and a row added, moved or renamed in a panel also goes into the arch's views
-in [`views/`](../views/).
+`analyze` shows these metrics through the views in [`views/`](../views/); `profile` still
+collects counters from [`analysis_configs/`](../analysis_configs/). Until profile switches
+too, a metric change goes into both trees, and a row added, moved or renamed in a panel
+also goes into the arch's views.
 
 ## Layout
 
