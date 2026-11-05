@@ -314,37 +314,49 @@ protected:
         const size_t totalCount = countPerPeer * static_cast<size_t>(nRanks_);
         void*        sendBuf    = nullptr;
         void*        recvBuf    = nullptr;
+        void*        sendBuf2   = nullptr;
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, totalCount));
         DeviceBufferAutoGuard sendGuard(sendBuf);
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf2, totalCount));
+        DeviceBufferAutoGuard sendGuard2(sendBuf2);
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, totalCount));
         DeviceBufferAutoGuard recvGuard(recvBuf);
 
         expectAlgo(ncclFuncAlltoAll, countPerPeer, datatype, sendBuf, recvBuf, expectedAlgo);
 
-        // Element i of the chunk rank s sends to rank d is copyPattern(s * nRanks + d, i).
-        const int nRanks = nRanks_;
-        ASSERT_MPI_EQ(hipSuccess,
-                      initializeBufferWithPattern<uint8_t>(
-                          sendBuf, totalCount, [this, nRanks, countPerPeer](size_t i) {
-                              const int dest = static_cast<int>(i / countPerPeer);
-                              return copyPattern(rank_ * nRanks + dest, i % countPerPeer);
-                          }));
+        // Element i of the chunk rank s sends to rank d is copyPattern(s * nRanks + d, i) in the
+        // first call and its complement in the second, so every byte differs between the calls.
+        const int  nRanks    = nRanks_;
+        const auto chunkByte = [nRanks](int src, int dest, size_t i, bool second) {
+            const uint8_t v = copyPattern(src * nRanks + dest, i);
+            return second ? static_cast<uint8_t>(~v) : v;
+        };
+        for(void* buf : {sendBuf, sendBuf2})
+        {
+            const bool second = buf == sendBuf2;
+            ASSERT_MPI_EQ(hipSuccess,
+                          initializeBufferWithPattern<uint8_t>(
+                              buf, totalCount, [this, countPerPeer, chunkByte, second](size_t i) {
+                                  return chunkByte(rank_, static_cast<int>(i / countPerPeer), i % countPerPeer,
+                                                   second);
+                              }));
+        }
         ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, totalCount));
-        // Two back-to-back calls flip the scratch bank; the memset between them, ordered on the
-        // stream, leaves only the second call's bytes to verify.
+        // Two back-to-back calls flip the scratch bank. The second sends different bytes, so a call
+        // that reads the previous call's bank fails the check; the memset between them, ordered on
+        // the stream, also catches a chunk the second call never stores.
         ASSERT_MPI_EQ(ncclSuccess,
                       ncclAlltoAll(sendBuf, recvBuf, countPerPeer, datatype,
                                    getActiveCommunicator(), getActiveStream()));
         ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(recvBuf, 0, totalCount, getActiveStream()));
         ASSERT_MPI_EQ(ncclSuccess,
-                      ncclAlltoAll(sendBuf, recvBuf, countPerPeer, datatype,
+                      ncclAlltoAll(sendBuf2, recvBuf, countPerPeer, datatype,
                                    getActiveCommunicator(), getActiveStream()));
         ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
         EXPECT_TRUE(verifyBufferData<uint8_t>(
-            recvBuf, totalCount, [this, nRanks, countPerPeer](size_t i) {
-                const int src = static_cast<int>(i / countPerPeer);
-                return copyPattern(src * nRanks + rank_, i % countPerPeer);
+            recvBuf, totalCount, [this, countPerPeer, chunkByte](size_t i) {
+                return chunkByte(static_cast<int>(i / countPerPeer), rank_, i % countPerPeer, true);
             }))
             << "Rank " << rank_ << ": " << fp8Name(datatype) << " AlltoAll data mismatch";
     }
