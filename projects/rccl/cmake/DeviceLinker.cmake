@@ -696,13 +696,29 @@ add_custom_command(
 set(DEVICE_LINKER_OBJECTS ${COMMON_FAT_OBJ})
 
 # dl_add_fat_object(<name> <source> [SUPPRESS_WARNINGS] [DEPFILE_TRACKING]
-#                   [DEFINES ...] [EXTRA_FLAGS ...] [EXTRA_DEPENDS ...])
+#                   [GPU_TARGETS ...] [DEFINES ...] [EXTRA_FLAGS ...]
+#                   [EXTRA_DEPENDS ...])
 # Builds ${DEVICE_BUILD_DIR}/<name>.o and appends it to DEVICE_LINKER_OBJECTS.
+# GPU_TARGETS (bare names, e.g. gfx942) limits the object to those of the
+# build's targets; if none of them are being built, the object is skipped.
 function(dl_add_fat_object NAME SRC)
   cmake_parse_arguments(FO "SUPPRESS_WARNINGS;DEPFILE_TRACKING" ""
-    "DEFINES;EXTRA_FLAGS;EXTRA_DEPENDS" ${ARGN})
+    "GPU_TARGETS;DEFINES;EXTRA_FLAGS;EXTRA_DEPENDS" ${ARGN})
   if(FO_UNPARSED_ARGUMENTS)
     message(FATAL_ERROR "dl_add_fat_object(${NAME}): unknown arguments: ${FO_UNPARSED_ARGUMENTS}")
+  endif()
+  set(_arch_flags ${DL_OFFLOAD_ARCH_FLAGS})
+  if(FO_GPU_TARGETS)
+    set(_arch_flags "")
+    foreach(_gpu ${DL_GPU_TARGETS})
+      if(_gpu IN_LIST FO_GPU_TARGETS)
+        list(APPEND _arch_flags "--offload-arch=${DL_TARGET_ID_${_gpu}}")
+      endif()
+    endforeach()
+    if(NOT _arch_flags)
+      message(STATUS "Device Linker: skipping ${NAME}, none of ${FO_GPU_TARGETS} in GPU_TARGETS")
+      return()
+    endif()
   endif()
   set(_obj "${DEVICE_BUILD_DIR}/${NAME}.o")
   list(TRANSFORM FO_DEFINES PREPEND "-D")
@@ -720,7 +736,7 @@ function(dl_add_fat_object NAME SRC)
   add_custom_command(
     OUTPUT  ${_obj}
     COMMAND ${DL_CLANG}
-      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+      -x hip ${_arch_flags}
       ${DL_HIP_COMPILER_FLAGS}
       -DRCCL_DEVICE_LINKER
       ${FO_DEFINES}
