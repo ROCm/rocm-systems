@@ -43,8 +43,14 @@ The check runs inside every communicator initialization, including
 application that creates several communicators prints one report per
 communicator.
 
-Diagnostics are informational. A reported problem does not make communicator
-initialization fail, and the communicator remains usable after the check.
+Problems found on the tested paths are informational. A failed edge does not
+make communicator initialization fail, and the communicator remains usable
+after the check. A failure of the check itself is different: when the
+transport scan, the setup of the test resources on any rank, or an exchange
+between the ranks fails, the ranks can no longer run the check in step.
+Communicator initialization then fails with that error, and the report has no
+``completed`` line. The lines that report such a failure end with
+``aborting diagnostics``, see `Troubleshoot failed edges`_.
 
 Read the report
 ===============
@@ -150,7 +156,7 @@ them. It runs ``ib_write_bw`` from the ``perftest`` package between the nodes,
 so the tool must be installed on every node and host names must be resolvable
 between the nodes. Rank 0 prints the minimum, median, and maximum bandwidth on
 a ``net bw:`` line and lists the ranks that are more than 30 percent off the
-median. Like the P2P check, it never makes initialization fail. On a single
+median. Its result never makes initialization fail. On a single
 host, or without a network transport, the check does not run and rank 0 prints:
 
 .. code:: none
@@ -216,13 +222,17 @@ edge fields:
    * - Message
      - Meaning
    * - ``p2p: setup failed on rank <r>``
-     - The check could not set up on that rank, so its edges were not tested.
+     - The check could not set up on that rank. No edge is tested, the report
+       continues with ``p2p: check returned <n>``, and initialization fails.
    * - ``p2p: resource cleanup failed rank=<r>``
      - Temporary test resources may not have been released on that rank.
-   * - ``transport detect returned <n>``
-     - The transport scan failed.
-   * - ``p2p: check returned <n>``
-     - The P2P check stopped before it completed.
+       Initialization does not fail because of it.
+   * - ``transport detect returned <n>; aborting diagnostics``
+     - The transport scan failed. Initialization fails with this
+       ``ncclResult_t`` code.
+   * - ``p2p: check returned <n>; aborting diagnostics``
+     - The P2P check stopped before it completed. Initialization fails with
+       this ``ncclResult_t`` code.
 
 This table explains the edge fields:
 
