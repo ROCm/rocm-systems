@@ -2208,7 +2208,8 @@ socket timeouts.
 
 Values accepted
 ^^^^^^^^^^^^^^^
-Default is 1. A positive floating-point number. Values less than or equal to 0 are ignored and replaced with 1.
+Default is 1. A floating-point number between 0.001 and 1000000 (inclusive). Values outside this range, or that are
+not valid numbers, are ignored and replaced with 1.
 
 NCCL_PROGRESS_COUNTERS
 ----------------------
