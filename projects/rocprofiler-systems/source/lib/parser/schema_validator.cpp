@@ -39,63 +39,6 @@ exact_integer_bound(double bound)
     return as_integer;
 }
 
-bool
-is_within_bounds(double value, const schema_param& param)
-{
-    return (!param.min || value >= *param.min) && (!param.max || value <= *param.max);
-}
-
-bool
-integer_bound_holds(std::int64_t value, const std::optional<double>& bound, bool minimum)
-{
-    if(!bound)
-    {
-        return true;
-    }
-    const auto exact = exact_integer_bound(*bound);
-    if(!exact)
-    {
-        return false;
-    }
-    return minimum ? value >= *exact : value <= *exact;
-}
-
-bool
-is_valid_integer(const schema_param& param, std::string_view value)
-{
-    const auto parsed = parse_integer(value);
-    return parsed && integer_bound_holds(*parsed, param.min, true) &&
-           integer_bound_holds(*parsed, param.max, false);
-}
-
-bool
-is_valid_number(const schema_param& param, std::string_view value)
-{
-    const auto parsed = parse_number(value);
-    return parsed && is_within_bounds(*parsed, param);
-}
-
-bool
-is_valid_choice(const schema_param& param, std::string_view value)
-{
-    const bool is_listed = std::ranges::any_of(
-        param.choices, [value](const choice& item) { return item.value == value; });
-    return is_listed || (param.allow_custom && !value.empty());
-}
-
-bool
-is_valid_list(const schema_param& param, std::string_view value)
-{
-    const auto parts = split_list(value, list_separator(param));
-    if(!parts)
-    {
-        return false;
-    }
-    return std::ranges::all_of(*parts, [&param](const std::string& element) {
-        return !element.empty() && is_valid_choice(param, element);
-    });
-}
-
 class configuration_checker
 {
 public:
@@ -305,17 +248,7 @@ check_param_shape(const schema& config_schema, const schema_param& param,
 bool
 is_valid_value(const schema_param& param, std::string_view value)
 {
-    switch(param.type)
-    {
-        case param_type::boolean: return parse_boolean(value).has_value();
-        case param_type::integer: return is_valid_integer(param, value);
-        case param_type::number: return is_valid_number(param, value);
-        case param_type::string: return true;
-        case param_type::path: return !value.empty();
-        case param_type::enumeration: return is_valid_choice(param, value);
-        case param_type::enumeration_list: return is_valid_list(param, value);
-    }
-    return false;
+    return accepts_text(param, value);
 }
 
 std::vector<violation>

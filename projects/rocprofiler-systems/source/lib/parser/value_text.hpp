@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "parser/schema.hpp"
+
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -23,5 +25,9 @@ parse_integer(std::string_view value);
 /// rejected.
 [[nodiscard]] std::optional<double>
 parse_number(std::string_view value);
+
+/// True when @p value is text the parameter accepts.
+[[nodiscard]] bool
+accepts_text(const schema_param& param, std::string_view value);
 
 }  // namespace rocprofsys::parser
