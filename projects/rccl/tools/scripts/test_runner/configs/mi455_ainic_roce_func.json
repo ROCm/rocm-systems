@@ -158,6 +158,22 @@
         }
       ]
     },
+    "net_plugin_selection": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "description": "NCCL_NET name resolution. Pure logic, single rank, no NIC required.",
+      "tests": [
+        {
+          "name": "NetPlugin_Selection",
+          "description": "NCCL_NET resolves case-insensitively, ROCM-IB selects the ib-cast plugin, unset follows the detected NIC, and unknown names resolve to nothing instead of falling back to plain IB",
+          "test_filter": "NetPluginSelection.*"
+        }
+      ]
+    },
     "net_ib_base": {
       "extends": "default",
       "is_gtest": true,
@@ -388,6 +404,16 @@
           "name": "NetIB_Init_GetDeviceCount",
           "description": "Query and validate InfiniBand device count",
           "test_filter": "NetIbMPITest.GetDeviceCount"
+        },
+        {
+          "name": "NetIB_Init_PluginMatchesEnv",
+          "description": "The plugin the fixture loaded is the one NCCL_NET names; inherited by the ib-cast and rocm-ib variants, which is where the strcmp mismatch used to go unnoticed",
+          "test_filter": "NetIbMPITest.PluginMatchesNcclNetEnv"
+        },
+        {
+          "name": "NetIB_Init_DefaultPluginIsIbCastOnAinic",
+          "description": "With NCCL_NET unset the fixture picks IB-CAST, the AINIC default; skips in the variants that set NCCL_NET",
+          "test_filter": "NetIbMPITest.DefaultPluginIsIbCastOnAinic"
         }
       ]
     },
@@ -1559,6 +1585,18 @@
       "extends": "net_ib_connection",
       "env_variables": {
         "NCCL_NET": "IB-CAST"
+      }
+    },
+    "net_ib_initialization_rocm_ib": {
+      "extends": "net_ib_initialization",
+      "env_variables": {
+        "NCCL_NET": "ROCM-IB"
+      }
+    },
+    "net_ib_connection_rocm_ib": {
+      "extends": "net_ib_connection",
+      "env_variables": {
+        "NCCL_NET": "ROCM-IB"
       }
     },
     "net_ib_memory_cast": {
@@ -2839,6 +2877,21 @@
         {
           "name": "GinSdmaPolicy_AllTests",
           "description": "All GIN-SDMA AllReduce/put policy unit tests",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_gin_scatter_reduce_gpu": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGinScatterReduceGpu",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "GinScatterReduceGpu_AllTests",
+          "description": "GinScatter local reduce, including 64 MiB and 1 GiB multi-rank sums",
           "test_filter": "*"
         }
       ]
@@ -5121,7 +5174,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall/recycle/splitShare)",
-          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext",
+          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.GinContextCount_ReportsRoundedUp",
           "timeout": 600
         },
         {
@@ -5138,6 +5191,14 @@
           "test_filter": "GinMPIDeviceTests.MultiContext_NonPowerOf2",
           "env_variables": {
             "NCCL_GIN_NCONTEXTS": "3"
+          }
+        },
+        {
+          "name": "GIN_ContextCount_ReportsRoundedUp",
+          "description": "ginContextCount reports the allocation after rounding up to NCCL_GIN_NCONNECTIONS=2",
+          "test_filter": "GinMPIDeviceTests.GinContextCount_ReportsRoundedUp",
+          "env_variables": {
+            "NCCL_GIN_NCONNECTIONS": "2"
           }
         },
         {
@@ -5712,6 +5773,44 @@
       "num_ranks": 8,
       "num_gpus": 8
     },
+    "symmetric_all_gather_tdm_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "timeout": 300,
+      "env_variables": {
+        "UT_DDA_FABRIC_REQUIRE_INIT": "1"
+      },
+      "tests": [
+        {
+          "name": "Symmetric_AllGather_TDM_Window",
+          "description": "Registered AllGather on symmetric windows around the gfx1250 TDM window: floor, just below, in place, past the eager ceiling, and under graph capture at 512 MiB and just past it, and 1 MiB below the window; checks the reported algorithm, the logged kernel and every rank's data",
+          "test_filter": "SymWin_AllGatherTdm.*"
+        }
+      ]
+    },
+    "symmetric_all_gather_tdm_2rank": {
+      "extends": "symmetric_all_gather_tdm_base",
+      "num_ranks": 2,
+      "num_gpus": 2
+    },
+    "symmetric_all_gather_tdm_4rank": {
+      "extends": "symmetric_all_gather_tdm_base",
+      "num_ranks": 4,
+      "num_gpus": 4
+    },
+    "symmetric_all_gather_tdm_8rank": {
+      "extends": "symmetric_all_gather_tdm_base",
+      "num_ranks": 8,
+      "num_gpus": 8
+    },
+    "symmetric_all_gather_tdm_2node": {
+      "extends": "symmetric_all_gather_tdm_base",
+      "num_ranks": 8,
+      "num_nodes": 2,
+      "num_gpus": 4
+    },
     "dda_fabric_allreduce_ll_base": {
       "extends": "default",
       "is_gtest": true,
@@ -5844,6 +5943,12 @@
       "name": "GDR Flush - cuMem AllGather (Multi-Node)",
       "description": "Cross-node AllGather over cuMem/DMA-BUF GDR exercising the base recv+flush path with the RO=0 scratchpad write+read fence",
       "config": "gdr_flush_cumem_multinode",
+      "enabled": true
+    },
+    {
+      "name": "NET - Plugin selection from NCCL_NET",
+      "description": "NCCL_NET name resolution guardrails: case-insensitive matching, the ROCM-IB alias, and no silent fallback to plain IB on an unknown name (single rank, no NIC required)",
+      "config": "net_plugin_selection",
       "enabled": true
     },
     {
@@ -6069,6 +6174,18 @@
       "config": "net_ib_connection_cast"
     },
     {
+      "name": "NET IB - Initialization (rocm-ib)",
+      "description": "InfiniBand plugin initialization via ib-cast plugin (NCCL_NET=ROCM-IB); ROCM-IB selects the same plugin but configures it differently, so this is not a duplicate of the ib-cast suite. AINIC-only: ROCM-IB forces AINIC mode, which makes libionic.so a hard requirement in the cast plugin's init",
+      "config": "net_ib_initialization_rocm_ib",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Connection Setup (rocm-ib)",
+      "description": "InfiniBand listen/connect/accept via ib-cast plugin (NCCL_NET=ROCM-IB)",
+      "config": "net_ib_connection_rocm_ib",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Memory Registration (ib-cast)",
       "description": "InfiniBand memory registration via ib-cast plugin (NCCL_NET=IB-CAST)",
       "config": "net_ib_memory_cast"
@@ -6237,6 +6354,12 @@
       "name": "Unit Tests - GIN-SDMA policy",
       "description": "All rccl-UnitTestsGinSdmaPolicy cases",
       "config": "unit_tests_gin_sdma_policy",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - GinScatter reduce GPU",
+      "description": "All rccl-UnitTestsGinScatterReduceGpu cases",
+      "config": "unit_tests_gin_scatter_reduce_gpu",
       "enabled": true
     },
     {
@@ -6631,6 +6754,30 @@
       "name": "DDA Fabric ReduceScatter LL/LL128 - 8-Rank",
       "description": "DDA fabric ReduceScatter LL and LL128 tiers on 8 GPUs, unrolled NRANKS_CT=8 kernel. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
       "config": "dda_fabric_reduce_scatter_8rank",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric AllGather TDM window - 2-Rank",
+      "description": "Symmetric AllGather TDM window on 2 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with symmetric memory, one UALink LSA team and the TDM toolchain.",
+      "config": "symmetric_all_gather_tdm_2rank",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric AllGather TDM window - 4-Rank",
+      "description": "Symmetric AllGather TDM window on 4 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with symmetric memory, one UALink LSA team and the TDM toolchain.",
+      "config": "symmetric_all_gather_tdm_4rank",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric AllGather TDM window - 8-Rank",
+      "description": "Symmetric AllGather TDM window on 8 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with symmetric memory, one UALink LSA team and the TDM toolchain.",
+      "config": "symmetric_all_gather_tdm_8rank",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric AllGather TDM window - 2 Nodes",
+      "description": "Symmetric AllGather TDM window on 8 GPUs across two UALink trays, where the graph-capture window ends at 512 MiB and is the only symmetric AllGather path. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with symmetric memory, one UALink LSA team and the TDM toolchain.",
+      "config": "symmetric_all_gather_tdm_2node",
       "enabled": true
     },
     {

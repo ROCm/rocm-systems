@@ -377,7 +377,7 @@ Normal builds generate temporary files and verify them against the checked-in co
 
 The generator classifies each API:
 - **`MANUAL_CAPTURE_APIS`**: kernel launches ×4, memcpy H2D+D2H ×8, module load ×3, `__hipRegisterFatBinary`, `hipHostRegister/Unregister`, `hipMemcpy3D` variants ×4, array creation ×2, VMM, stream/memory attribute APIs, `hipMemcpyWithStream`
-- **`MANUAL_PLAYBACK_APIS`**: above plus malloc ×4, free ×2, stream create/destroy ×4, event create/destroy ×3, `hipModuleGetFunction`, the full graph chain ×4, VMM APIs ×6, and other APIs requiring non-trivial handle translation or replay logic
+- **`MANUAL_PLAYBACK_APIS`**: above plus malloc ×4, free ×2, stream create/destroy ×4, event create/destroy ×3, `hipEventElapsedTime`, `hipModuleGetFunction`, the full graph chain ×4, VMM APIs ×6, and other APIs requiring non-trivial handle translation or replay logic
 - **`NOOP_PLAYBACK_APIS`**: APIs where replay is not meaningful (stale handles, context-destroying calls, missing in ROCm SDK 6.4) — emit `return hipSuccess;` without calling the real function. These are **not replay-tested**; tests that exercise only these APIs verify capture does not crash, not that replay works.
 
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
@@ -573,8 +573,12 @@ embedded device pointers, and replay translates them without the device-address 
 check. Replay checks each record names the base of a pinned host
 allocation it made, lies inside it and matches its blob's length, refusing and counting it
 otherwise; then it queues a host function that copies the blobs in on the launch stream,
-ahead of the kernel, without waiting for the stream. `hipHostFree` and `hipHostUnregister`
-wait for every stream, so the allocation outlives a queued copy. The summary prints
+ahead of the kernel, without waiting for the stream. Replay does not rely on the runtime's
+wait inside a free, which covers only the allocating device's streams. A kernel launch
+takes `host_free_mu` shared before it hands the global turn on and holds it until its
+launch call returns; `hipHostFree`, `hipFreeHost` and `hipHostUnregister` (and `hipFree`) take it
+exclusive across the map removal and the free. A free on the next sequence number therefore
+waits until the launch has resolved the destination and queued its copy. The summary prints
 restored, refused and skipped counts.
 
 Kept deliberately simple:
@@ -628,6 +632,26 @@ the kernarg buffer into the per-thread exec stack (`hip::tls.exec_stack_.top().a
 before the launch, and `capture_hipLaunchByPtr` snapshots it (a copy, since the real
 `hipLaunchByPtr` moves the exec out via `PopExec`) and feeds it through the same
 signature-driven serialization path.
+
+#### Start and stop events of `hipExtModuleLaunchKernel`
+
+The runtime marks `startEvent` and `stopEvent` inside the launch, so an app never
+calls `hipEventRecord` on them and `hipEventElapsedTime` still succeeds. Capture
+writes that side effect as a `hipEventRecord` for a non-null start event before
+the launch record and one for a non-null stop event after it, and sets
+`HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS` in `hrr_file_header.reserved` (no version
+bump: an older reader replays the extra events like any others).
+`playback_hipEventElapsedTime` returns `hipErrorInvalidHandle` for such an
+archive, so a missing marker fails the replay. Only an archive without the flag,
+captured before the markers were stored, gets the fallback: a captured success
+with both handles live continues, warns once and clears the sticky error.
+`Unit_HRR_ExtLaunchEventMarkers` checks the order on a real capture and both
+replay outcomes.
+
+Follow-up: `hipExtLaunchKernel` and `hipHccModuleLaunchKernel` also take start and
+stop events, but their playback is a no-op (the launch itself is not replayed), so
+no marker is applied at replay either. Replaying those launches is the fix; the
+capture shim records no marker for them.
 
 ### Pointers Embedded in By-Value Struct Args (`value_kind == 3`)
 

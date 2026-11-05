@@ -290,7 +290,9 @@ TEST_F(ConSanInputFixture, PrivateFrameAndMissingKernargCannotUseBootstrap) {
 TEST_F(ConSanInputFixture, BackedgeFailsClosed) {
   // Replace the original entry with an unconditional self-loop. No GPU executes
   // this input; it tests the production preparation admission gate.
-  put_word(text_offset_, build_s_branch(-1, ROCJITSU_CODE_ARCH_RDNA3));
+  constexpr util::FailureOr<uint32_t> branch = build_s_branch(-1, ROCJITSU_CODE_ARCH_RDNA3);
+  static_assert(branch.succeeded());
+  put_word(text_offset_, branch.value());
   EXPECT_TRUE(inspect(image_).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedFlow);
 }

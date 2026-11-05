@@ -170,6 +170,16 @@
           }
         },
         {
+          "name": "P2P_RegBasicBuffers_CuMem",
+          "description": "ROCM-33799: registered send/recv on hipMalloc buffers with cuMem enabled must not leave a stale HIP error",
+          "test_filter": "P2pMPITest.P2pRegistrationBasicBuffersTest",
+          "env_variables": {
+            "NCCL_P2P_USE_CUDA_MEMCPY": "0",
+            "NCCL_LEGACY_CUDA_REGISTER": "0",
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        },
+        {
           "name": "P2P_AllTests",
           "description": "All peer-to-peer transport tests",
           "test_filter": "P2pMPITest.*"
@@ -1616,6 +1626,21 @@
         {
           "name": "GinSdmaPolicy_AllTests",
           "description": "All GIN-SDMA AllReduce/put policy unit tests",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_gin_scatter_reduce_gpu": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGinScatterReduceGpu",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "GinScatterReduceGpu_AllTests",
+          "description": "GinScatter local reduce, including 64 MiB and 1 GiB multi-rank sums",
           "test_filter": "*"
         }
       ]
@@ -4938,7 +4963,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall/recycle/splitShare)",
-          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong:GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv:GinMPIDeviceTests.Log_ReportsUsedBackend:GinMPIDeviceTests.Timeout_*",
+          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong:GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv:GinMPIDeviceTests.Log_ReportsUsedBackend:GinMPIDeviceTests.Timeout_*:GinMPIDeviceTests.GinContextCount_ReportsRoundedUp",
           "timeout": 600
         },
         {
@@ -4965,6 +4990,14 @@
           "test_filter": "GinMPIDeviceTests.MultiContext_NonPowerOf2",
           "env_variables": {
             "NCCL_GIN_NCONTEXTS": "3"
+          }
+        },
+        {
+          "name": "GIN_ContextCount_ReportsRoundedUp",
+          "description": "ginContextCount reports the allocation after rounding up to NCCL_GIN_NCONNECTIONS=2",
+          "test_filter": "GinMPIDeviceTests.GinContextCount_ReportsRoundedUp",
+          "env_variables": {
+            "NCCL_GIN_NCONNECTIONS": "2"
           }
         },
         {
@@ -5574,6 +5607,12 @@
       "name": "Unit Tests - GIN-SDMA policy",
       "description": "All rccl-UnitTestsGinSdmaPolicy cases",
       "config": "unit_tests_gin_sdma_policy",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - GinScatter reduce GPU",
+      "description": "All rccl-UnitTestsGinScatterReduceGpu cases",
+      "config": "unit_tests_gin_scatter_reduce_gpu",
       "enabled": true
     },
     {
