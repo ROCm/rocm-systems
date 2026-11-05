@@ -1262,6 +1262,22 @@ threshold table introduced for gfx1250.
         | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
           multiple of 32 from 32 to 1024. Pre-table default: ``512``.
 
+    * - | ``RCCL_DDA_A2A_PUSH``
+        | Selects the ``ncclAllToAll`` kernel on the DDA fabric (VMM) tier. The push
+          kernels write each rank's chunks straight into its peers' DDA scratch
+          buffers and sync all ranks before finishing.
+      - | ``1``: Push kernels (default).
+        | ``0``: The previous pull kernel, where each rank reads its chunks from its
+          peers' DDA scratch buffers.
+
+    * - | ``RCCL_DDA_A2A_TDM``
+        | Moves the data of the DDA fabric ``ncclAllToAll`` push kernels through the
+          tensor data mover (TDM) on gfx1250. In-place calls, and builds or devices
+          without TDM support, use vector loads and stores. Has no effect when
+          ``RCCL_DDA_A2A_PUSH=0``.
+      - | ``1``: Use the TDM (default).
+        | ``0``: Use vector loads and stores.
+
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),
           CE AllReduce is on by default for gfx1250 communicators that meet all
