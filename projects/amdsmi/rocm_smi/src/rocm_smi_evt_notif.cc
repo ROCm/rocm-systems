@@ -17,7 +17,6 @@ namespace amd::smi {
 namespace {
 
 constexpr const char* kNotAvailable = "N/A";
-constexpr int kProcessPayloadFieldCount = 2;  // pid and task name
 
 // Counts the values a scanf format stores, which is also the number of sscanf arguments.
 constexpr int CountConversions(const char* format) {
@@ -39,6 +38,7 @@ constexpr int CountConversions(const char* format) {
 static_assert(CountConversions("%x:%255[^\n]\n") == 2, "two conversions");
 static_assert(CountConversions("%d%%") == 1, "%% is not a conversion");
 static_assert(CountConversions("%*d %d") == 1, "%* is not counted");
+static_assert(CountConversions("%x%*1[ ]%255[^\n]") == 2, "%*1[ ] is not counted");
 
 // Formats the fields of one KFD event line. sscanf converts fields left to right and returns how
 // many it converted, so field n is valid only if n <= that count; later fields read N/A. Add
@@ -140,6 +140,11 @@ class EvtMessageBuilder {
 // Each sscanf format below mirrors the matching KFD_EVENT_FMT_* macro in the kernel's
 // kfd_ioctl.h; widths and bases (%lx is hex, 64-bit) must match it.
 //
+// Match what the kernel prints, not how its macro would be scanned. Use a literal character where
+// the kernel prints one (the ':' in VMFAULT). Where it prints one space before free text, use
+// %*1[ ] and then %255[^\n]: a plain space in a scanf format skips any amount of whitespace, so
+// it drops an empty name's PID and a name's leading spaces. Capture that text with AddText().
+//
 // To add or change an event: declare the variable, update the sscanf format and its arguments, and
 // add the matching Add...() call in the same position as the argument (the builder numbers fields
 // by call order). A field that older kernels do not send goes after MarkRemainingOptional(). Then
@@ -175,7 +180,8 @@ std::string FormatEvtNotifMessage(uint32_t event, const std::string& payload) {
       char reset_cause[MAX_EVENT_NOTIFICATION_MSG_SIZE];
       memset(reset_cause, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
 
-      EvtMessageBuilder builder = EVT_SCAN(message, "%x %255[^\n]\n", &reset_seq_num, reset_cause);
+      EvtMessageBuilder builder =
+          EVT_SCAN(message, "%x%*1[ ]%255[^\n]", &reset_seq_num, reset_cause);
       return builder.AddDecimal("reset sequence number", reset_seq_num)
           .AddText("reset cause", reset_cause)
           .BuildAndLogIfShort("GPU_PRE_RESET", payload);
@@ -323,11 +329,10 @@ std::string FormatEvtNotifMessage(uint32_t event, const std::string& payload) {
       char task[MAX_EVENT_NOTIFICATION_MSG_SIZE];
       memset(task, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
 
-      if (sscanf(message, "%x %255[^\n]", &pid, task) != kProcessPayloadFieldCount) {
-        LOG_ERROR("Failed to parse process event payload");
-        return "PID:UNKNOWN  task:UNKNOWN";
-      }
-      return "PID: " + std::to_string(pid) + "  task: " + task;
+      EvtMessageBuilder builder = EVT_SCAN(message, "%x%*1[ ]%255[^\n]", &pid, task);
+      return builder.AddDecimal("PID", pid)
+          .AddText("task", task)
+          .BuildAndLogIfShort("PROCESS", payload);
     }
     default:
       return "Unknown event received";

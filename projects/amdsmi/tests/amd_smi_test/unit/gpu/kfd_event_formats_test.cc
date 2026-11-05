@@ -937,6 +937,26 @@ TEST(GpuUnit, KFD_EVENT_FMT__ProcessTaskNameWithSpace) {
                    "PID: 12345  task: Web Content");
 }
 
+// The kernel prints a task name or reset cause with %s after a single separator. Text that is
+// empty or starts with spaces must come back as sent, and the number before it must survive.
+TEST(GpuUnit, KFD_EVENT_FMT__FreeTextIsReportedExactly) {
+  for (const char* text : {"", "  lead", "Web Content"}) {
+    const std::string label = std::string(" with text [") + text + "]";
+    ExpectEvtMessage(("VMFAULT" + label).c_str(), AMDSMI_EVT_NOTIF_VMFAULT,
+                     KFD_PAYLOAD(KFD_EVENT_FMT_VMFAULT(/*pid=*/0x1a2bu, text)),
+                     std::string("PID: 6699  task name: ") + text);
+    ExpectEvtMessage(("GPU_PRE_RESET" + label).c_str(), AMDSMI_EVT_NOTIF_GPU_PRE_RESET,
+                     KFD_PAYLOAD(KFD_EVENT_FMT_UPDATE_GPU_RESET(/*reset_seq_num=*/0x1fu, text)),
+                     std::string("reset sequence number: 31  reset cause: ") + text);
+    ExpectEvtMessage(("PROCESS_START" + label).c_str(), AMDSMI_EVT_NOTIF_PROCESS_START,
+                     KFD_PAYLOAD(KFD_EVENT_FMT_PROCESS(/*pid=*/0x3039u, text)),
+                     std::string("PID: 12345  task: ") + text);
+    ExpectEvtMessage(("PROCESS_END" + label).c_str(), AMDSMI_EVT_NOTIF_PROCESS_END,
+                     KFD_PAYLOAD(KFD_EVENT_FMT_PROCESS(/*pid=*/0x3039u, text)),
+                     std::string("PID: 12345  task: ") + text);
+  }
+}
+
 // Literal payloads, not built from kfd_event_formats.h, so they also catch a wrong macro there.
 // Modelled on a GPU reset run on a Navi 21 host, with the values copied by hand; node 0x56c7 is
 // the KFD gpu_id of that host's second GPU. Kernel line layouts:
