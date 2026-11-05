@@ -1,8 +1,7 @@
 # pre-commit configuration for projects/rccl.
 #
-# Hooks are adopted one at a time. Where a check needs a one-time cleanup of
-# existing code, that cleanup lands as its own separate, reviewable commit
-# recorded in .git-blame-ignore-revs, rather than being mixed in here.
+# Hooks are adopted one at a time; any one-time cleanup a check needs lands as
+# its own commit, recorded in .git-blame-ignore-revs.
 #
 # Run it locally, from the repository root:
 #

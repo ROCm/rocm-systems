@@ -3,12 +3,8 @@
 # run-clang-tidy.sh — Run clang-tidy over RCCL's hipified sources.
 #
 # The enabled checks live in projects/rccl/.clang-tidy, which currently enables
-# exactly one. That file is passed to clang-tidy explicitly rather than being
-# found by walking up from each source, because the sources analysed are the
-# hipified copies under the build directory, which may be outside the tree.
-#
-# Findings are advisory: this script exits 0 even when clang-tidy reports
-# something, unless --strict is given.
+# exactly one. Findings are advisory: this script exits 0 even when clang-tidy
+# reports something, unless --strict is given.
 #
 # Unlike clang-format, clang-tidy needs a parsed translation unit, which means
 # a compile_commands.json and hipified sources on disk. That is why this is a
@@ -91,14 +87,9 @@ done
 # ---------------------------------------------------------------------------
 # Locate clang-tidy and verify version
 # ---------------------------------------------------------------------------
-# Prefer the clang-tidy that ships with ROCm. A stock upstream clang-tidy is
-# built against its own headers and cannot parse ROCm's HIP headers: clang-tidy
-# 22.1.8 from PyPI reports 25 clang-diagnostic-errors ("builtin functions must
-# be directly called") inside /opt/rocm/include before reaching any RCCL code.
-# That is the breakage MIOpen works around with -nogpulib and __builtin_*
-# redefinitions; using ROCm's own build means needing none of it.
-#
-# The LLVM location moved between ROCm releases, hence the candidate list.
+# Prefer ROCm's clang-tidy: a stock upstream build cannot parse ROCm's HIP
+# headers and reports 25 errors inside /opt/rocm/include before reaching any
+# RCCL code. Two paths, because the LLVM location moved between releases.
 CLANG_TIDY_CANDIDATES=(
   "${CLANG_TIDY:-}"
   /opt/rocm/lib/llvm/bin/clang-tidy
@@ -129,8 +120,7 @@ if [[ -z "$VERSION" || "$VERSION" -lt "$MIN_VERSION" ]]; then
   exit 2
 fi
 
-# LLVM and ROCm ship this driver as `run-clang-tidy`, but the PyPI clang-tidy
-# package (which is how ROCm CI jobs install a pinned version) names it
+# LLVM ships this driver as `run-clang-tidy`, the PyPI package as
 # `run-clang-tidy.py`. Accept either.
 CLANG_TIDY_BIN_DIR="$(dirname "$(command -v "$CLANG_TIDY")")"
 RUN_CLANG_TIDY=""
@@ -146,8 +136,7 @@ if [[ -z "$RUN_CLANG_TIDY" ]]; then
   exit 2
 fi
 
-# run-clang-tidy defaults to whatever `clang-tidy` is on PATH, which is not
-# necessarily the one we just version-checked.
+# Pin the binary: run-clang-tidy otherwise takes whatever is first on PATH.
 RUN_CLANG_TIDY_ARGS=(-clang-tidy-binary "$(command -v "$CLANG_TIDY")")
 
 # ---------------------------------------------------------------------------
@@ -155,12 +144,9 @@ RUN_CLANG_TIDY_ARGS=(-clang-tidy-binary "$(command -v "$CLANG_TIDY")")
 # ---------------------------------------------------------------------------
 if [[ ! -f "${BUILD_DIR}/compile_commands.json" ]]; then
   echo "No compile database in ${BUILD_DIR}; configuring (no GPU needed, compiles nothing)..."
-  # GPU_TARGETS must be passed as a cache variable; CMake does not read it
-  # from the environment, and left unset the configure falls back to probing
-  # every architecture in DEFAULT_GPUS. One is enough: hipify stages host
-  # sources and compiles no device code, so the arch only has to be valid, and
-  # pinning it also stops the configure probing for a local GPU on machines
-  # that have none.
+  # GPU_TARGETS must be a cache variable; CMake ignores the environment, and
+  # unset it probes every arch in DEFAULT_GPUS. Any valid arch does, since
+  # nothing device-side is compiled.
   cmake \
     -S "$RCCL_ROOT" \
     -B "$BUILD_DIR" \
@@ -170,12 +156,9 @@ if [[ ! -f "${BUILD_DIR}/compile_commands.json" ]]; then
     -DGPU_TARGETS="$GPU_TARGETS"
 fi
 
-# Every run, not just the first: clang-tidy reads the hipified copies, so
-# skipping this analyses whatever the previous run staged and silently misses
-# any edit made since. Both targets are incremental and cost about two seconds
-# when nothing has changed. rccl_embedded_tuner_configs generates a header
-# csv_tuner.cc includes; without it that one file reports a
-# clang-diagnostic-error instead of being analysed.
+# Every run: skipping this analyses the previous run's hipified copies and
+# misses any edit since. Incremental, ~2s when nothing changed. The tuner
+# target generates a header csv_tuner.cc includes.
 cmake --build "$BUILD_DIR" \
   --target hipify_all rccl_embedded_tuner_configs \
   -j "$(nproc)"
@@ -200,10 +183,9 @@ if [[ "$INCLUDE_UPSTREAM" -eq 0 ]]; then
   UPSTREAM_LIST="$(mktemp)"
   # shellcheck disable=SC2064
   trap "rm -f '$UPSTREAM_LIST'" EXIT
-  # --full-tree matters: without it git ls-tree reports paths relative to the
-  # current directory and restricts itself to that subtree, and this script
-  # runs from projects/rccl, which does not exist in NCCL's tree. The result
-  # would be an empty list and silently unfiltered output.
+  # --full-tree matters: otherwise ls-tree restricts itself to the current
+  # directory, which does not exist in NCCL's tree, giving an empty list and
+  # silently unfiltered output.
   git -C "$RCCL_ROOT" ls-tree -r --full-tree --name-only "$NCCL_REF" \
     | grep -E '\.(c|cc|cpp|h|hpp|cu|cuh)$' \
     | sed 's|^|/|' \
@@ -212,24 +194,18 @@ fi
 
 # ---------------------------------------------------------------------------
 # Analyse
-#
-# clang-tidy sees the hipified copies under ${BUILD_DIR}/hipify, whose paths
-# and line numbers correspond to the originals under src/. Rewrite the paths
-# back so the output names files you can actually open.
 # ---------------------------------------------------------------------------
-# Pass the config explicitly. clang-tidy finds .clang-tidy by walking up from
-# each analysed file, and the files it analyses are the hipified copies in the
-# build directory, which may be outside the source tree entirely. Relying on
-# the walk-up silently yields zero findings.
+# Explicit -config-file: clang-tidy finds .clang-tidy by walking up from each
+# analysed file, and those are the hipified copies in the build directory,
+# possibly outside the tree. Relying on the walk-up silently yields nothing.
 ARGS=(-p "$BUILD_DIR" -quiet -j "$(nproc)" -config-file "${RCCL_ROOT}/.clang-tidy"
   "${RUN_CLANG_TIDY_ARGS[@]}")
 if [[ -n "$FILTER" ]]; then
   ARGS+=("$FILTER")
 fi
 
-# Keep stderr rather than discarding it, and check the driver's own exit
-# status via PIPESTATUS: a driver that dies early produces no matching lines,
-# which is indistinguishable from a clean run if you only look at the output.
+# Keep stderr and check the driver's own status via PIPESTATUS: a driver that
+# dies early produces no output, which otherwise reads as a clean run.
 STDERR_LOG="${BUILD_DIR}/clang-tidy-stderr.txt"
 set +e
 "$RUN_CLANG_TIDY" "${ARGS[@]}" 2>"$STDERR_LOG" \
@@ -240,8 +216,8 @@ set +e
 DRIVER_STATUS=${PIPESTATUS[0]}
 set -e
 
-# run-clang-tidy exits non-zero merely because clang-tidy reported something,
-# so a non-zero status only means trouble when it also produced nothing.
+# Non-zero merely means findings were reported; only no output as well is a
+# genuine failure to run.
 if [[ "$DRIVER_STATUS" -ne 0 && ! -s "${BUILD_DIR}/clang-tidy-all.txt" ]]; then
   echo "ERROR: run-clang-tidy exited ${DRIVER_STATUS} and produced no findings;" >&2
   echo "       this is a failure to run, not a clean result. stderr:" >&2
