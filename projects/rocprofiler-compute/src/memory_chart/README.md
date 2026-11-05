@@ -136,7 +136,7 @@ The value the terminal chart shows is in `compute_workload_metric_value`, in the
 for that definition with `value_name` `Value`. `compute_kernel_metric_value` has the
 same value for each kernel.
 
-Values are raw, in the unit of the definition, such as `Bytes/s` or `Percent`. A metric
+Values are raw, in the unit of the definition, such as `GB/s` or `Percent`. A metric
 with no row, for example when `--block` leaves out panel 3, has no value; show it as
 missing.
 

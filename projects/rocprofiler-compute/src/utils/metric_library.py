@@ -9,14 +9,15 @@ child arch keeps only the files that differ from its parent; each names its pare
 an "inherit" key. variables.yaml holds the built-in variables, and sets.yaml the
 metric sets (`--set`), each a list of metric ids that fits in one profiling pass.
 
-Only tests and tools use this module so far. At the cutover it becomes the source of
-metrics for analyze and profile, so its scope grows past loading. The file contents are
-checked by tools/validate_metric_library.py; loading only rejects an id that two files
-define. Every load failure raises InheritanceError.
+load_metric_library() caches each arch's library, and every caller shares it, so the
+library it hands out is read-only. The file contents are checked by
+tools/validate_metric_library.py; loading only rejects an id that two files define.
+Every load failure raises InheritanceError.
 """
 
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from types import MappingProxyType
+from typing import Any, Dict, Iterator, List, Mapping, Optional, Set, Tuple
 
 import config
 from utils.utils_common import canonical_config_arch
@@ -96,9 +97,7 @@ def load_metric_library(metric_dir: Path, arch: str) -> "MetricLibrary":
         arch: A GPU arch.
 
     Returns:
-        The arch's metrics, built-in variables and sets. Every caller shares the
-        cached library, so callers must not change it; read-only views come with the
-        cutover.
+        The arch's metrics, built-in variables and sets, read-only: callers share it.
     """
     key = (str(Path(metric_dir).resolve()), canonical_config_arch(arch))
     if key not in MetricLibrary._cache:
@@ -147,7 +146,21 @@ def _read_metric_library(metric_dir: Path, arch: str) -> "MetricLibrary":
             sets = document
             continue
         metrics.update(document)
-    return MetricLibrary(canonical_config_arch(arch), metrics, variables, sets)
+    return MetricLibrary(
+        canonical_config_arch(arch),
+        _read_only(metrics),
+        _read_only(variables),
+        _read_only(sets),
+    )
+
+
+def _read_only(value: object) -> object:
+    """Return value with its dicts as read-only mappings and its lists as tuples."""
+    if isinstance(value, dict):
+        return MappingProxyType({key: _read_only(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_read_only(item) for item in value)
+    return value
 
 
 class MetricLibrary:
@@ -158,9 +171,9 @@ class MetricLibrary:
     def __init__(
         self,
         arch: str,
-        metrics: Dict[str, Dict[str, Any]],
-        variables: Dict[str, Dict[str, Any]],
-        sets: Dict[str, Dict[str, Any]],
+        metrics: Mapping[str, Mapping[str, Any]],
+        variables: Mapping[str, Mapping[str, Any]],
+        sets: Mapping[str, Mapping[str, Any]],
     ) -> None:
         self.arch = arch
         self.metrics = metrics

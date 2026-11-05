@@ -62,13 +62,10 @@ TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
 
 
 class OmniAnalyze_Base:
-    def __init__(
-        self, args: argparse.Namespace, supported_archs: dict[str, str]
-    ) -> None:
+    def __init__(self, args: argparse.Namespace) -> None:
         self.__args = args
         self._runs: OrderedDict[str, schema.Workload] = OrderedDict()
         self._arch_configs: dict[str, schema.ArchConfig] = {}
-        self.__supported_archs = supported_archs
         self._output: Optional[TextIO] = None
         self.__socs: Optional[dict[str, OmniSoC_Base]] = None
 
@@ -164,23 +161,16 @@ class OmniAnalyze_Base:
     def generate_configs(
         self,
         arch: str,
-        config_dir: str,
         list_stats: bool,
         filter_metrics: Optional[list[str]],
         sys_info: pd.Series,
         profiling_config: dict[str, Any],
     ) -> dict[str, schema.ArchConfig]:
-        single_panel_config = file_io.is_single_panel_config(
-            config_dir, self.__supported_archs
-        )
-
         ac = schema.ArchConfig()
         if list_stats:
             ac.panel_configs = TOP_STATS_BUILD_IN_CONFIG
         else:
-            ac.panel_configs = arch_panel_configs(
-                arch, config_dir, bool(single_panel_config)
-            )
+            ac.panel_configs = arch_panel_configs(arch)
 
         parser.build_dfs(
             arch_configs=ac,
@@ -224,7 +214,6 @@ class OmniAnalyze_Base:
                 arch = sys_info.iloc[0]["gpu_arch"]
                 self.generate_configs(
                     arch,
-                    args.config_dir,
                     args.list_stats,
                     args.filter_metrics,
                     sys_info.iloc[0],

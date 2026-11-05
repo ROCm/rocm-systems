@@ -14,7 +14,6 @@ from utils import file_io
 from utils.file_io import (
     create_df_kernel_top_stats,
     create_df_pmc,
-    is_single_panel_config,
     load_kernel_short_names,
     rank_kernels_by_total_duration,
     validate_kernel_filter_ids,
@@ -631,17 +630,3 @@ def test_load_kernel_short_names_falls_back_past_an_empty_csv(tmp_path):
 def test_load_kernel_short_names_tolerates_a_record_without_symbols(tmp_path):
     """The fallback runs when things went wrong, so a bare record is not fatal."""
     assert load_kernel_short_names(str(tmp_path), [{"metadata": {"pid": 1}}]) == {}
-
-
-@pytest.mark.misc
-def test_is_single_panel_config_accepts_shared_gfx115x_dir(tmp_path):
-    (tmp_path / "gfx115x").mkdir()
-
-    supported_archs = {
-        "gfx1150": "rdna35_point_1",
-        "gfx1151": "rdna35_halo",
-        "gfx1152": "rdna35_point_2",
-        "gfx1153": "rdna35_gorgon_point",
-    }
-
-    assert is_single_panel_config(str(tmp_path), supported_archs) is False
