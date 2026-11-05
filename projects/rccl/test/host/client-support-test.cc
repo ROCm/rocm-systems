@@ -1664,6 +1664,10 @@ TEST_F(RasClientSupportMicrotest, RunComms_NegativeCounts_ReturnsInternalError) 
   ExpectRunCommsRejects(std::move(data));
 }
 
+TEST_F(RasClientSupportMicrotest, RunComms_ReportShorterThanHeader_ReturnsInternalError) {
+  ExpectRunCommsRejects(std::vector<char>(offsetof(struct rasCollComms, comms) - 1, 0));
+}
+
 TEST_F(RasClientSupportMicrotest, RunComms_TruncatedRecord_ReturnsInternalError) {
   std::vector<char> data = BuildRasCollComms({MakeCommSpec(2, {MakeRankSpec(0, 0), MakeRankSpec(1, 0)})});
   data.resize(data.size() - sizeof(struct rasCollComms::comm::rank));
