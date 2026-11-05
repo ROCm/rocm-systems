@@ -7993,7 +7993,7 @@ TEST(Cdna4CvtScaleTest, DirectOperandRejectionsReturnBeforeDestinationWrites) {
     // Execute below the CU's legacy exception boundary.
     instruction->execute(*instruction, wf);
     EXPECT_EQ(wf->instruction_execution_error(),
-              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+              amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     for (uint32_t offset = 0; offset < 32; ++offset)
       EXPECT_EQ(cu->read_vgpr_storage(base + kDestination + offset, 0), kSentinel) << offset;
   }

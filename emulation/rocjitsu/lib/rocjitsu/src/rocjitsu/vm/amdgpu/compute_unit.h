@@ -1339,7 +1339,8 @@ public:
   /// `UnimplementedInst::what()` when that legacy exception is translated.
   /// Otherwise the pointed-to string is unchanged.
   /// @returns Failure for an unimplemented instruction stub or a reported operand
-  /// failure. The wavefront retains the reason for caller-owned diagnostics.
+  /// or register-access failure. The wavefront retains the reason for caller-owned
+  /// diagnostics.
   /// Each call clears the previous error; a failed call does not halt the wavefront.
   /// Other host failures inside implemented instructions still raise exceptions.
   util::Result execute_instruction(Instruction *inst, Wavefront &wf,
@@ -1903,6 +1904,13 @@ inline bool InstructionComputeUnitView::observes_tensor_dma_memory_access() cons
 inline void InstructionComputeUnitView::report_tensor_dma_memory_access(
     const TensorDmaMemoryAccessObservation &access) {
   raw_cu().plugin_group().onAmdgpuTensorDmaMemoryAccess(access, raw_wavefront());
+}
+inline bool InstructionComputeUnitView::observes_tensor_dma_issue() const {
+  return raw_cu().plugin_group().observes_tensor_dma_issue(raw_wavefront());
+}
+inline void
+InstructionComputeUnitView::report_tensor_dma_issue(const TensorDmaIssueObservation &issue) {
+  raw_cu().plugin_group().onAmdgpuTensorDmaIssued(issue, raw_wavefront());
 }
 
 /// @brief Execution-mode-aware compute unit shell.
