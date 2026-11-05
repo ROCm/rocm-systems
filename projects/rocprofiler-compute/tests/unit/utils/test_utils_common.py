@@ -12,10 +12,18 @@ from collections import OrderedDict
 from pathlib import Path
 from unittest import mock
 
+import common
 import pytest
 
 import utils.utils_common as utils_common
-from utils.utils_common import canonical_config_arch
+from utils.utils_common import (
+    canonical_config_arch,
+    convert_filter_blocks_to_panel_ids,
+    expand_metric_ids,
+    metric_placements,
+    row_ids_as_metric_ids,
+    warn_numeric_metric_ids,
+)
 
 LISTED_METRIC_IDS = ["0", "2", "2.1", "2.1.0", "2.1.1", "18", "18.1", "18.1.0", "18.2"]
 LISTED_METRIC_DETAILS = {
@@ -1339,3 +1347,60 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
 def test_roofline_selection(filter_blocks, selects):
     """4, 4.x and the roof alias all count as roofline."""
     assert utils_common.selects_roofline(filter_blocks) is selects
+
+
+def test_metric_ids_select_every_row_that_shows_them():
+    """compute.salu_util is in Speed of Light and Compute Pipeline on gfx942; aliases
+    and numeric ids pass through."""
+    assert expand_metric_ids(["compute.salu_util", "lds", "11.2.3"], "gfx942") == [
+        "2.1.7",
+        "11.2.2",
+        "lds",
+        "11.2.3",
+    ]
+    assert convert_filter_blocks_to_panel_ids(["compute.salu_util"], "gfx942") == {
+        200,
+        1100,
+    }
+
+
+def test_saved_row_id_of_a_left_out_row_keeps_its_panel(monkeypatch):
+    """gfx908 Speed of Light 2.1.0 has no metric, so the views leave it out; a workload
+    saved with -b 2.1.0 still shows panel 2, without a warning."""
+    warning = common.patch_console(monkeypatch, "utils.utils_common", "warning")
+    assert convert_filter_blocks_to_panel_ids(["2.1.0", "lds"], "gfx908") == {200, 1200}
+    warning["warning"].assert_not_called()
+
+
+def test_unknown_metric_id_names_the_id_and_arch(monkeypatch):
+    """gfx1151 (gfx115x views) has no SALU utilization metric."""
+    error = common.patch_console(monkeypatch, "utils.utils_common", "error")["error"]
+    assert metric_placements("compute.salu_util", "gfx1151") == []
+    message = error.call_args.args[0]
+    assert "'compute.salu_util'" in message and "gfx115x" in message
+
+
+def test_typed_numeric_row_ids_are_the_ids_analyze_shows(monkeypatch):
+    """gfx908's views leave out the Speed of Light rows without a metric, so view row
+    2.1.7 shows vL1D hit rate (panel file row 2.1.16). A typed row id means the view
+    row; block and table ids are not deprecated, a row id is, naming its metric id."""
+    warning = common.patch_console(monkeypatch, "utils.utils_common", "warning")
+    tokens = ["11", "11.2", "2.1.7", "lds"]
+    assert expand_metric_ids(tokens, "gfx908") == tokens
+    warn_numeric_metric_ids(tokens, "gfx908")
+    assert [call.args[0] for call in warning["warning"].call_args_list] == [
+        "Numeric metric id '2.1.7' is deprecated. Use 'vl1d.hit_rate' instead.",
+    ]
+
+
+def test_typed_row_ids_are_saved_as_metric_ids():
+    """Profile saves the metric ids of typed row ids, once each, so the workload keeps
+    its rows when later views renumber them; other tokens stay as typed."""
+    tokens = ["11", "2.1.7", "lds", "compute.salu_util", "2.1.7", "99.9.9"]
+    assert row_ids_as_metric_ids(tokens, "gfx908") == [
+        "11",
+        "vl1d.hit_rate",
+        "lds",
+        "compute.salu_util",
+        "99.9.9",
+    ]
