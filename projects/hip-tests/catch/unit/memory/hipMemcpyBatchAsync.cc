@@ -1589,6 +1589,126 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_MixedDirections_BackToBack) {
   }
 }
 
+#if HT_AMD
+namespace {
+// Lets a host function block its stream until the host opens the gate
+struct HostFuncGate {
+  int open = 0;
+  int passed = 0;
+};
+
+void HoldUntilGateOpens(void* arg) {
+  auto* gate = static_cast<HostFuncGate*>(arg);
+  while (__atomic_load_n(&gate->open, __ATOMIC_ACQUIRE) == 0) {
+  }
+  __atomic_store_n(&gate->passed, 1, __ATOMIC_RELEASE);
+}
+}  // namespace
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies a batch whose shader copy waits on the stream's prior work behind another stream's
+ * kernel on the shared hardware queue. Each batch copies pinned host memory to the device on the
+ * copy engines and copies within the device as a shader copy, and both wait on the stream's prior
+ * work, here a host function that holds it until the batch is enqueued. Kernels spinning on a host
+ * flag on many other streams are launched between them, so one lands on the stream's hardware
+ * queue ahead of the shader copy's wait and holds that wait queued. The copy engine copy then
+ * finishes while the wait is still queued, and about two hundred more batches and another host
+ * function follow before the host releases the kernels, so the stream's completion signals are
+ * reused several times over meanwhile. The sources alternate between two patterns from batch to
+ * batch, so the final contents show that the last batch landed after all the others.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack) {
+  // More streams than hardware queues, so some stream shares the tested stream's queue
+  constexpr size_t kNumSpinStreams = 16;
+  constexpr size_t kHeldIteration = 2;
+  // Once the stream's signals wrapped around, so the second host function reuses the interrupt
+  // signals the first one returned
+  constexpr size_t kSecondHostFuncIteration = kHeldIteration + 100;
+  // Few enough that the queued batches do not exhaust the stream's signals while held
+  constexpr size_t kIterations = 200;
+  constexpr int kWatchdogSeconds = 30;
+  constexpr size_t kNumPatterns = 2;
+  const auto pattern = [](size_t copy_idx, size_t pattern_idx) {
+    return std::vector<unsigned char>(
+        kBackToBackCopySize, static_cast<unsigned char>(1 + copy_idx * kNumPatterns + pattern_idx));
+  };
+  // The host-to-device copy runs on the copy engines and the device-to-device copy as a shader copy
+  const std::array<std::pair<LinearAllocs, LinearAllocs>, 2> copies{
+      {{LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc},
+       {LinearAllocs::hipMalloc, LinearAllocs::hipMalloc}}};
+
+  StreamGuard stream_guard(Streams::created);
+  std::vector<StreamGuard> spin_streams;
+  for (size_t i = 0; i < kNumSpinStreams; ++i) {
+    spin_streams.emplace_back(Streams::created);
+  }
+  LinearAllocGuard<int> release(LinearAllocs::hipHostMalloc, sizeof(int));
+  *release.ptr() = 0;
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  const std::vector<unsigned char> zeros(kBackToBackCopySize, 0);
+  std::array<std::vector<void*>, kNumPatterns> batch_srcs;
+  std::vector<void*> dst_ptrs;
+  for (size_t copy_idx = 0; copy_idx < copies.size(); ++copy_idx) {
+    for (size_t pattern_idx = 0; pattern_idx < kNumPatterns; ++pattern_idx) {
+      batch_srcs[pattern_idx].push_back(
+          addBuffer(allocations, pattern(copy_idx, pattern_idx), copies[copy_idx].first));
+    }
+    dst_ptrs.push_back(addBuffer(allocations, zeros, copies[copy_idx].second));
+  }
+
+  std::vector<size_t> sizes(dst_ptrs.size(), kBackToBackCopySize);
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault};
+  size_t attrs_idx = 0;
+  const long long timeout_ticks =
+      static_cast<long long>(kWatchdogSeconds) * 1000000 * SpinTicksPerUs();
+  HostFuncGate gate;
+  HIP_CHECK(hipDeviceSynchronize());
+
+  for (size_t iteration = 0; iteration < kIterations; ++iteration) {
+    if (iteration == kHeldIteration) {
+      HIP_CHECK(hipLaunchHostFunc(stream_guard.stream(), HoldUntilGateOpens, &gate));
+      for (StreamGuard& spin_stream : spin_streams) {
+        WaitForHostReleaseWithTimeout<<<1, 1, 0, spin_stream.stream()>>>(release.ptr(),
+                                                                         timeout_ticks);
+      }
+    }
+    if (iteration == kSecondHostFuncIteration) {
+      HIP_CHECK(hipLaunchHostFunc(stream_guard.stream(), [](void*) {}, nullptr));
+    }
+    const hipError_t batch_status = hipMemcpyBatchAsync(
+        dst_ptrs.data(), batch_srcs[iteration % kNumPatterns].data(), sizes.data(), sizes.size(),
+        &attr, &attrs_idx, 1, nullptr, stream_guard.stream());
+    if (iteration == kHeldIteration) {
+      // Completes the prior work only after the batch waits on it, then lets the copy engine copy
+      // finish before the stream's signals wrap around
+      __atomic_store_n(&gate.open, 1, __ATOMIC_RELEASE);
+      while (__atomic_load_n(&gate.passed, __ATOMIC_ACQUIRE) == 0) {
+      }
+    }
+    HIP_CHECK(batch_status);
+  }
+  __atomic_store_n(release.ptr(), 1, __ATOMIC_RELEASE);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  const size_t last_pattern_idx = (kIterations - 1) % kNumPatterns;
+  for (size_t copy_idx = 0; copy_idx < copies.size(); ++copy_idx) {
+    INFO("Copy " << copy_idx);
+    requireBufferEquals(dst_ptrs[copy_idx], pattern(copy_idx, last_pattern_idx),
+                        copies[copy_idx].second);
+  }
+}
+#endif
+
 /**
  * Test Description
  * ------------------------
