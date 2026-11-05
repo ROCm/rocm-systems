@@ -52,6 +52,7 @@ rocprof-compute profile \
     --pc-sampling \
     --pc-sampling-method stochastic \
     --pc-sampling-interval <interval-from-the-query> \
+    --no-roof \
     --name <workload_name> \
     -- <application> <args>
 ```

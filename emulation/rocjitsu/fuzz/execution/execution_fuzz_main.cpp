@@ -72,11 +72,16 @@ void emit_seeds(const std::filesystem::path &directory, uint64_t first_seed,
   constexpr uint64_t kSeedCount = 128;
   if (seed_range_overflows(first_seed, kSeedCount))
     throw std::invalid_argument("seed range exceeds uint64");
-  constexpr std::array<size_t, 4> kSeedSizes = {8, 32, 256, kMaxInputSize};
+  constexpr std::array<size_t, 4> kSeedSizes = {8, 32, kGeneratedKernelSeedSize, kMaxInputSize};
+  const size_t kernel_seeds = target ? 1 : static_cast<size_t>(FuzzTarget::Count);
   for (uint64_t index = 0; index != kSeedCount; ++index) {
     const uint64_t seed = first_seed + index;
-    write_input(directory / std::format("seed-{:04}.bin", index),
-                random_input(seed, kSeedSizes[index % kSeedSizes.size()], target));
+    const std::vector<uint8_t> input =
+        index < kernel_seeds
+            ? generated_kernel_input(seed, kGeneratedKernelSeedSize,
+                                     target.value_or(static_cast<FuzzTarget>(index)))
+            : random_input(seed, kSeedSizes[index % kSeedSizes.size()], target);
+    write_input(directory / std::format("seed-{:04}.bin", index), input);
   }
   std::cout << "wrote " << kSeedCount << " execution seeds to " << directory << '\n';
 }
