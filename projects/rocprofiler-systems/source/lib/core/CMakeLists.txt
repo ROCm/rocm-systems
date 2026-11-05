@@ -12,6 +12,7 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/exception.cpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu.cpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu_metrics.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/library_checker.cpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.cpp
     ${CMAKE_CURRENT_LIST_DIR}/node_info.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
@@ -38,6 +39,7 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/exception.hpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu.hpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu_metrics.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/library_checker.hpp
     ${CMAKE_CURRENT_LIST_DIR}/locking.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mpi.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.hpp

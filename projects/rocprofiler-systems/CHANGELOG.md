@@ -36,6 +36,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   agent's personal skills folder.
 - Perfetto traces now contain a `system_info` packet with the host's system name, kernel
   release, kernel version, and machine, so trace readers can show them.
+- The `profiler-hub` version is shown in the `rocprof-sys-*` version output. The tool now
+  aborts at startup with an error if the loaded `libprofiler-hub` version differs from the
+  version it was built against.
 
 ### Resolved issues
 
