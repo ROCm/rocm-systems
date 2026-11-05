@@ -119,43 +119,33 @@ TEST(RaceReportTraceTest, FullAddressRangeAndSelfLoopHaveCorrectJumpMarkers) {
   EXPECT_EQ(printed[3].transition, "same PC executed again");
 }
 
-TEST(RaceReportTraceTest, ContextLimitsAndRingWrapPreserveRowsAndAccountForEveryGap) {
-  for (size_t length : {1u, 2u, 31u, 32u, 33u, 127u, 128u, 129u, 255u, 256u, 257u, 513u}) {
+TEST(RaceReportTraceTest, ContextLimitAndRingWrapPreserveRowsAndAccountForEveryGap) {
+  for (size_t length : {1u, 2u, 127u, 128u, 129u, 255u, 256u, 257u, 513u}) {
+    SCOPED_TRACE(std::format("length={}", length));
     Trace trace;
     for (uint32_t i = 0; i < length; ++i)
       trace.push(snapshot(0x100 + i * 4, i, 1));
-    for (size_t limit : {2u, 3u, 32u, 127u, 128u, 129u, 255u, 256u}) {
-      SCOPED_TRACE(std::format("length={} limit={}", length, limit));
-      const auto report =
-          formatTrace(trace, text, mark(trace, 0), mark(trace, trace.size() - 1), limit);
-      const auto printed = rows(report);
-      ASSERT_EQ(printed.size(), std::min(trace.size(), limit));
-      ASSERT_TRUE(printed.front().marked);
-      ASSERT_TRUE(printed.back().marked);
-      EXPECT_EQ(printed.front().sequence, length - trace.size());
-      EXPECT_EQ(printed.back().sequence, length - 1);
-      for (const auto &row : printed)
-        EXPECT_TRUE(row.transition.empty());
-      EXPECT_EQ(printed.size() + elided_count(report), trace.size());
-    }
+    const auto report = formatTrace(trace, text, mark(trace, 0), mark(trace, trace.size() - 1));
+    const auto printed = rows(report);
+    ASSERT_EQ(printed.size(), std::min(trace.size(), kTraceContextRows));
+    ASSERT_TRUE(printed.front().marked);
+    ASSERT_TRUE(printed.back().marked);
+    EXPECT_EQ(printed.front().sequence, length - trace.size());
+    EXPECT_EQ(printed.back().sequence, length - 1);
+    for (const auto &row : printed)
+      EXPECT_TRUE(row.transition.empty());
+    EXPECT_EQ(printed.size() + elided_count(report), trace.size());
   }
-}
-
-TEST(RaceReportTraceTest, DefaultShows128AndFullHistoryOptionShows256) {
-  Trace trace;
-  for (uint32_t i = 0; i < 256; ++i)
-    trace.push(snapshot(0x100 + i * 4, i, 1));
-  EXPECT_EQ(rows(formatTrace(trace, text, mark(trace, 0), mark(trace, 255))).size(), 128u);
-  EXPECT_EQ(rows(formatTrace(trace, text, mark(trace, 0), mark(trace, 255), 256)).size(), 256u);
 }
 
 TEST(RaceReportTraceTest, ElisionNeverHidesSynchronizationOrEitherSideOfAJump) {
   Trace trace;
   for (uint32_t i = 0; i < 200; ++i)
-    trace.push(snapshot((i < 100 ? 0x1000u : 0x800u) + i * 4, i, 1, i == 60 || i == 140));
-  const auto report = formatTrace(trace, text, mark(trace, 0), mark(trace, 199), 32);
+    trace.push(snapshot((i < 100 ? 0x1000u : 0x800u) + i * 4, i, 1, i == 80 || i == 120));
+  const auto report = formatTrace(trace, text, mark(trace, 0), mark(trace, 199));
   const auto printed = rows(report);
-  for (size_t required : {0u, 60u, 99u, 100u, 140u, 199u})
+  ASSERT_GT(elided_count(report), 0u);
+  for (size_t required : {0u, 80u, 99u, 100u, 120u, 199u})
     EXPECT_TRUE(
         std::ranges::any_of(printed, [=](const auto &row) { return row.sequence == required; }));
   EXPECT_NE(report.find("instruction 99\n       --- jump backward ---\n       0x"),
@@ -227,13 +217,10 @@ TEST(RaceReportTraceTest, EmptyAndMissingCurrentTraceDoNotFabricateExecutionCont
   EXPECT_NE(report.find("outside recorded trace"), std::string::npos);
 }
 
-TEST(RaceReportTraceTest, RejectsInvalidLimitAndReversedExecutionOrder) {
+TEST(RaceReportTraceTest, RejectsReversedExecutionOrder) {
   Trace trace;
   trace.push(snapshot(0x100, 0, 1));
   trace.push(snapshot(0x104, 1, 1));
-  for (size_t limit : {0u, 1u, 257u})
-    EXPECT_THROW(formatTrace(trace, text, mark(trace, 0), mark(trace, 1), limit),
-                 std::invalid_argument);
   EXPECT_THROW(formatTrace(trace, text, mark(trace, 1), mark(trace, 0)), std::invalid_argument);
 }
 
@@ -251,8 +238,7 @@ TEST(RaceReportTraceTest, SeededExecutionPathsPreserveEveryControlTransferAndMar
       previous_width = 1 + generator() % 4;
       trace.push(snapshot(pc, i, previous_width, generator() % 13 == 0));
     }
-    const auto report =
-        formatTrace(trace, text, mark(trace, 0), mark(trace, 255), 2 + generator() % 255);
+    const auto report = formatTrace(trace, text, mark(trace, 0), mark(trace, 255));
     const auto printed = rows(report);
     ASSERT_FALSE(printed.empty());
     EXPECT_EQ(printed.size() + elided_count(report), 256u);
@@ -448,26 +434,6 @@ TEST(RaceReportDescriptionTest, RejectsUnavailableAndRetiredConflicts) {
   detector.retireEvent(violation.conflictingEvent);
   EXPECT_THROW(formatRaceDescription(violation, detector.events(), 0x200, ROCJITSU_CODE_ARCH_CDNA4),
                std::logic_error);
-}
-
-TEST(RaceReportConfigTest, AcceptsDefaultAndBoundaryContextLimits) {
-  for (const char *config :
-       {static_cast<const char *>(nullptr), "{}", "{\"trace_context_instructions\":2}",
-        "{\"trace_context_instructions\":128}", "{\"trace_context_instructions\":256}"})
-    EXPECT_NO_THROW(RaceDetectorPlugin plugin(config));
-}
-
-TEST(RaceReportConfigTest, RejectsMalformedObjectsUnknownKeysAndNonIntegerOrOutOfRangeLimits) {
-  for (const char *config :
-       {"{", "[]", "true", "null", "{\"max_trace_instruction\":256}",
-        "{\"trace_context_instructions\":null}", "{\"trace_context_instructions\":true}",
-        "{\"trace_context_instructions\":\"128\"}", "{\"trace_context_instructions\":2.5}",
-        "{\"trace_context_instructions\":-1}", "{\"trace_context_instructions\":0}",
-        "{\"trace_context_instructions\":1}", "{\"trace_context_instructions\":257}",
-        "{\"trace_context_instructions\":18446744073709551615}"}) {
-    SCOPED_TRACE(config);
-    EXPECT_THROW(RaceDetectorPlugin plugin(config), std::invalid_argument);
-  }
 }
 
 static_assert(sizeof(InstructionSnapshot) == 32);

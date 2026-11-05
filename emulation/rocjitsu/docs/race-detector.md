@@ -174,20 +174,11 @@ Instruction lengths vary. A transition is nonsequential only when the next PC
 differs from the end of the previous captured instruction. Sequential progress
 by 4, 8, 12 or 16 bytes does not introduce a marker.
 
-Each wave retains 256 instruction records. By default, a long excerpt shows the
-first 64 and last 64 records. Synchronization and control-flow instructions, and
-both sides of nonsequential transitions, remain visible in the middle. The
+Each wave retains 256 instruction records. An excerpt longer than 128 records
+shows the first 64 and last 64. Synchronization and control-flow instructions,
+and both sides of nonsequential transitions, remain visible in the middle. The
 number of elided instructions is shown at each gap. Older unrecorded history
 is identified separately.
-
-Set `trace_context_instructions` in the race plugin's configuration to change
-the excerpt size. It accepts an integer from 2 through 256; synchronization and
-control-flow context can add rows beyond this setting. A value of 256 shows the
-entire retained window without changing how much history the detector records.
-
-```json
-{ "plugins": { "race": { "trace_context_instructions": 256 } } }
-```
 
 The final summary counts emitted reports and observations suppressed by the
 existing PC-based deduplication. These counts are not the number of affected

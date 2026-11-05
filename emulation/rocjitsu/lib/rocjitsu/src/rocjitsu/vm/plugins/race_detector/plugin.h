@@ -53,15 +53,18 @@ private:
 /// Throws std::out_of_range if the detector no longer holds the conflicting event.
 MarkedInstruction findConflict(const RaceViolation &, RaceDetector &);
 
+/// Maximum trace rows printed before formatTrace elides the middle of a report.
+inline constexpr size_t kTraceContextRows = 128;
+
 /// Format the reporting wave's trace, marking the first matching same-wave
 /// conflict and the last matching current access by PC and encoding. Identical
-/// producer executions are not distinguished. Other-wave and missing records
-/// are printed separately. Retain synchronization and control-flow rows even
-/// when the context limit elides other rows. Disassemble only printed records.
+/// producer executions are not distinguished. A conflict from another wave, or
+/// one no longer retained, is printed separately before the trace. A span longer
+/// than kTraceContextRows keeps its first and last rows, synchronization and
+/// control-flow rows, and both sides of each jump. Disassemble only printed rows.
 std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
                         const std::function<std::string(const InstructionSnapshot &)> &disassemble,
-                        std::optional<MarkedInstruction> conflict, MarkedInstruction read,
-                        size_t trace_context_instructions = 128);
+                        std::optional<MarkedInstruction> conflict, MarkedInstruction read);
 
 /// Explain the exact conflicting event and its synchronization state.
 std::string formatRaceDescription(const RaceViolation &violation, const EventRegistry &events,
@@ -77,7 +80,8 @@ struct RaceWavefrontState : WavefrontState {
 
 class RaceDetectorPlugin : public ExecutionPlugin {
 public:
-  /// @param config_json Optional JSON object with trace_context_instructions (2..256).
+  /// @param config_json Plugin configuration object as a JSON string (unused;
+  ///        this plugin takes no configuration). May be null.
   explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
@@ -143,7 +147,6 @@ private:
   std::mutex dispatch_mutex_;
   std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;
 
-  const size_t trace_context_instructions_;
   mutable std::mutex report_mutex_;
   uint64_t reports_emitted_ = 0;
   uint64_t observations_suppressed_ = 0;

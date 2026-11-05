@@ -20,8 +20,6 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
-#include <flatbuffers/flexbuffers.h>
-#include <flatbuffers/idl.h>
 #include <format>
 #include <mutex>
 #include <optional>
@@ -163,10 +161,7 @@ MarkedInstruction findConflict(const RaceViolation &v, RaceDetector &detector) {
 
 std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
                         const std::function<std::string(const InstructionSnapshot &)> &disassemble,
-                        std::optional<MarkedInstruction> conflict, MarkedInstruction read,
-                        size_t trace_context_instructions) {
-  if (trace_context_instructions < 2 || trace_context_instructions > 256)
-    throw std::invalid_argument("race trace_context_instructions must be an integer from 2 to 256");
+                        std::optional<MarkedInstruction> conflict, MarkedInstruction read) {
   const size_t n = trace.size();
   std::optional<size_t> read_index;
   for (size_t i = 0; i < n; ++i)
@@ -191,11 +186,11 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
     return (trace[i].pc() < previous.pc() ||
             trace[i].pc() - previous.pc() != previous.encoding().size_bytes());
   };
-  std::array<bool, 256> shown{};
-  const size_t head = (trace_context_instructions + 1) / 2;
-  const size_t tail = trace_context_instructions / 2;
+  std::vector<bool> shown(n);
+  constexpr size_t head = kTraceContextRows / 2;
+  constexpr size_t tail = kTraceContextRows - head;
   for (size_t i = first; i < last; ++i) {
-    shown[i] = span <= trace_context_instructions || i - first < head || last - i <= tail ||
+    shown[i] = span <= kTraceContextRows || i - first < head || last - i <= tail ||
                trace[i].keep_in_trace();
     if (nonsequential(i))
       shown[i - 1] = shown[i] = true;
@@ -286,28 +281,6 @@ std::string_view event_description(MemoryEventType type) {
   throw std::logic_error("race event has an unknown memory operation");
 }
 
-size_t parse_trace_limit(const char *config_json) {
-  if (!config_json)
-    return 128;
-  flexbuffers::Builder builder;
-  flatbuffers::Parser parser;
-  if (!parser.ParseFlexBuffer(config_json, nullptr, &builder))
-    throw std::invalid_argument("race plugin configuration is not valid JSON");
-  const auto root = flexbuffers::GetRoot(builder.GetBuffer());
-  if (!root.IsMap())
-    throw std::invalid_argument("race plugin configuration must be an object");
-  const auto config = root.AsMap();
-  if (config.size() == 0)
-    return 128;
-  for (size_t i = 0; i < config.size(); ++i)
-    if (std::string_view(config.Keys()[i].AsKey()) != "trace_context_instructions")
-      throw std::invalid_argument("race plugin configuration has an unknown option");
-  const auto value = config["trace_context_instructions"];
-  if (!value.IsIntOrUint() || (value.IsInt() && value.AsInt64() < 2) || value.AsUInt64() > 256)
-    throw std::invalid_argument("race trace_context_instructions must be an integer from 2 to 256");
-  return static_cast<size_t>(value.AsUInt64());
-}
-
 } // namespace
 
 std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &events,
@@ -377,8 +350,7 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
   return oss.str();
 }
 
-RaceDetectorPlugin::RaceDetectorPlugin(const char *config_json)
-    : ExecutionPlugin("race"), trace_context_instructions_(parse_trace_limit(config_json)) {}
+RaceDetectorPlugin::RaceDetectorPlugin(const char * /*config_json*/) : ExecutionPlugin("race") {}
 
 RaceDetectorPlugin::~RaceDetectorPlugin() { sink().write(getSummary()); }
 
@@ -442,7 +414,7 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
         [wf](const InstructionSnapshot &instruction) {
           return wf->disassemble_instruction(instruction.encoding(), instruction.pc());
         },
-        conflict, access_mark, trace_context_instructions_);
+        conflict, access_mark);
 
     {
       std::lock_guard<std::mutex> lock(report_mutex_);

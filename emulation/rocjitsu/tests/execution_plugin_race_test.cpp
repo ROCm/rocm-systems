@@ -3100,7 +3100,7 @@ TEST(FormatTraceTest, ConflictBeforeTraceWindow) {
 
 TEST(FormatTraceTest, ResolvesOnlyPrintedInstructions) {
   RingBuffer<InstructionSnapshot, 256> trace;
-  for (uint64_t pc = 0x100; pc <= 0x300; pc += 4)
+  for (uint64_t pc = 0x100; pc < 0x500; pc += 4)
     trace.push(testInstruction(pc));
   std::vector<uint64_t> requested;
   auto resolve = [&](const InstructionSnapshot &instruction) {
@@ -3108,10 +3108,10 @@ TEST(FormatTraceTest, ResolvesOnlyPrintedInstructions) {
     return "s_nop 0";
   };
   const auto report =
-      formatTrace(trace, resolve, MarkedInstruction{trace[2], 0, -1}, {trace[128], 0, 0}, 32);
-  ASSERT_EQ(requested.size(), 32u);
+      formatTrace(trace, resolve, MarkedInstruction{trace[2], 0, -1}, {trace[255], 0, 0});
+  ASSERT_EQ(requested.size(), kTraceContextRows);
   EXPECT_EQ(requested.front(), 0x108u);
-  EXPECT_EQ(requested.back(), 0x300u);
+  EXPECT_EQ(requested.back(), 0x4fcu);
   EXPECT_NE(report.find("instructions elided"), std::string::npos);
 }
 
@@ -3473,49 +3473,6 @@ TEST(RaceDetectorPluginOutputTest, CapturesSplitWaitBarrierAndBranchMetadataForE
   ASSERT_TRUE(nop.succeeded());
   f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *nop.value(), *wave);
   EXPECT_FALSE(state->trace[state->trace.size() - 1].keep_in_trace());
-}
-
-TEST(RaceDetectorPluginOutputTest, ConfiguredContextLimitControlsAnExecutedRaceReport) {
-  for (const auto [limit, head_nops, tail_start] :
-       {std::array<size_t, 3>{2, 0, 201}, {128, 63, 138}, {256, 200, 201}}) {
-    SCOPED_TRACE(limit);
-    PluginFixture f;
-    ASSERT_NO_FATAL_FAILURE(f.initialize(1));
-    PluginSinkConfig sink_config;
-    StringSink &sink = sink_config.emplace<StringSink>();
-    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
-    const auto config = std::format("{{\"trace_context_instructions\":{}}}", limit);
-    ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>(config.c_str())));
-    f.soc->set_plugin_group(f.plugin_group_);
-    f.plugin_group_->onInit();
-    const auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
-    const auto read = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 264, .vdst = 9});
-    std::vector<uint32_t> code{S_NOP, load[0], load[1]};
-    code.insert(code.end(), 200, S_NOP);
-    code.push_back(read[0]);
-    code.push_back(S_ENDPGM);
-    f.run_kernel(code.data(), code.size());
-    const auto &report = sink.str();
-    EXPECT_NE(report.find("  ==>  0x1044  ds_read_b32 v8, v0"), std::string::npos) << report;
-    EXPECT_NE(report.find("  ==>  0x136c  v_mov_b32_e32 v9, v8"), std::string::npos) << report;
-    size_t shown = 2;
-    for (size_t i = 1; i <= 200; ++i) {
-      const bool expected = i <= head_nops || i >= tail_start;
-      const auto row = std::format("       0x{:x}  s_nop 0\n", 0x1048 + i * 4);
-      const bool present = report.find(row) != std::string::npos;
-      EXPECT_EQ(present, expected) << row << report;
-      shown += present;
-    }
-    EXPECT_EQ(shown, std::min(limit, size_t{202}));
-    if (shown < 202)
-      EXPECT_NE(report.find(std::format("... {} instructions elided ...", 202 - shown)),
-                std::string::npos)
-          << report;
-    else
-      EXPECT_EQ(report.find("instructions elided"), std::string::npos);
-    EXPECT_EQ(report.find("Trace window:"), std::string::npos);
-    EXPECT_EQ(report.find("Same-wave instruction distance:"), std::string::npos);
-  }
 }
 
 TEST(RaceDetectorPluginOutputTest, ConcurrentReportsStayWholeAndSummaryCountsStayConsistent) {
