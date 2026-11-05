@@ -64,10 +64,15 @@ CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops", "MALLBw")
 # Measured ceilings with no metric on one arch.
 ARCH_CEILINGS_WITHOUT_METRIC = {
     "gfx950": ("MFMAF4Flops", "MFMAF6Flops"),
+    # The roofline shows the F32 and F64 VALU rates only.
+    "gfx115x": ("FP16Flops", "BF16Flops"),
+    # The VALU rows show theoretical peaks.
+    "gfx1250": ("FP16Flops", "FP32Flops", "FP64Flops"),
 }
 # Ids that may share the formula of another id (id -> that id).
 SHARED_FORMULA_IDS = {
     "compute.mfma_flops_mxf8": "compute.mfma_flops_f8",
+    "compute.wmma_flops_mxfp8": "compute.wmma_flops_fp8",
 }
 # Ids that may hold the formula of another id on another arch (id -> that id).
 SPLIT_FORMULA_IDS = {}
