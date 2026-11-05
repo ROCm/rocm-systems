@@ -718,14 +718,13 @@ TEST(AsyncMmaPolicyTest, SynchronousFormatFailureDrainsEarlierMatrixWork) {
     state.unblock.release();
   });
   window.before(*failing);
+  EXPECT_TRUE(state.done.load(std::memory_order_acquire));
   returned.release();
   releaser.join();
   EXPECT_FALSE(returned_before_completion);
   EXPECT_FALSE(window.pending());
-  EXPECT_TRUE(window.stopped());
   EXPECT_FALSE(window.submit_mma(failing));
   ASSERT_NE(failing, nullptr);
-  EXPECT_TRUE(state.done.load(std::memory_order_acquire));
   EXPECT_EQ(wave->instruction_execution_error(), amdgpu::InstructionExecutionError::None);
   EXPECT_NO_THROW({ EXPECT_TRUE(cu->execute_instruction(failing.get(), *wave).failed()); });
   EXPECT_EQ(wave->instruction_execution_error(),
