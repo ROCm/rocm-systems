@@ -10,10 +10,11 @@
 
 namespace rocjitsu::test {
 
-// ds_add_u32 v0, v0 gds. CDNA4 reserves the DS GDS bit and the simulator does
-// not model GDS on CDNA3 either, so this decodes but never executes. A reserved
-// encoding stays unimplemented; an ordinary unimplemented instruction does not
-// once someone implements it.
+// ds_add_u32 v0, v0 gds. It decodes, and the generated DS body rejects gds=1
+// with UnimplementedInstruction before any side effect (_gen_ds_gds_guard();
+// test_ds_mode_rejection_precedes_execution pins it for CDNA4 DS_ADD_U32).
+// Callers assert that diagnostic, so they depend on that guard, not merely on
+// CDNA4 reserving the GDS bit.
 inline constexpr std::array<uint32_t, 2> kUnimplementedInstruction = {0xd8010000u, 0x00000000u};
 inline constexpr char kUnimplementedInstructionMnemonic[] = "ds_add_u32";
 inline constexpr uint32_t kUndecodableInstruction = 0xbfff0000u;

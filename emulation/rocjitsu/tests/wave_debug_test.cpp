@@ -345,7 +345,8 @@ TEST(WaveDebugTest, RfeRestoreReturnsFromTheTrapHandlerLikeRfe) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
                     ROCJITSU_CODE_ARCH_CDNA4}) {
     for (const auto &form : forms) {
-      SCOPED_TRACE(std::string(form.name) + " arch=" + std::to_string(arch));
+      SCOPED_TRACE(form.name);
+      SCOPED_TRACE(static_cast<int>(arch));
       WaveDebugFixture fx(arch);
       fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
       fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);

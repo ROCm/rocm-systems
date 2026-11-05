@@ -6455,8 +6455,10 @@ class CodeGenerator:
     # generated execute_impl() comes out an empty body, which leaves that ISA's
     # trap handlers unable to return at all. GFX1250 spells the return
     # S_RFE_I64 (SOP1 opcode 74). GFX9 also keeps S_RFE_RESTORE_B64 (SOP2
-    # opcode 43), which the GFX9 manuals define as S_RFE_B64 with its second
-    # operand ignored.
+    # opcode 43), which the CDNA1/2 manuals define as S_RFE_B64 with its second
+    # operand ignored. The CDNA3/4 SOP2 tables omit opcode 43, but LLVM still
+    # encodes it there (isGFX8GFX9) and the MR ISA lists it, so CDNA3/4 take
+    # the same legacy return.
     _TRAP_RETURN_NAMES = ('S_RFE', 'S_RFE_B64', 'S_RFE_I64', 'S_RFE_RESTORE_B64')
     _TRAP_SENDMSG_NAMES = ('S_SENDMSG', 'S_SENDMSGHALT')
 

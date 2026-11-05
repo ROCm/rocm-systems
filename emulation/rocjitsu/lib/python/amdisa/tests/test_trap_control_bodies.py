@@ -74,7 +74,7 @@ class TestSRfeBody:
         assert _body('S_RFE_RESTORE_B64') == _body('S_RFE_B64')
         assert 'ssrc1' not in _body('S_RFE_RESTORE_B64')
 
-    def test_rfe_restore_derives_to_the_trap_return(self):
+    def test_rfe_restore_derives_as_true_nop(self):
         """It used to fall through to the unrecognised-SOP2 `nop`, which the
         generator emits as an unimplemented-instruction stub."""
         sem = derive_semantics('S_RFE_RESTORE_B64', 'ENC_SOP2')
