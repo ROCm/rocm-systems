@@ -221,13 +221,18 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Link with stdc++fs for filesystem support (only for GCC < 9.0)
+# std::filesystem is in stdc++fs with the libstdc++ of GCC < 9. Probe the
+# library, not the compiler: Clang can use that libstdc++ too (RHEL 8 without
+# a newer GCC toolset).
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles(
+    "#include <filesystem>\nint main() { return std::filesystem::exists(\"/\") ? 0 : 1; }"
+    AMDSMI_FILESYSTEM_WITHOUT_LIB
+)
 set(FILESYSTEM_LIB "")
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
-        set(FILESYSTEM_LIB stdc++fs)
-        message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION} detected, linking with stdc++fs for filesystem support")
-    endif()
+if(NOT AMDSMI_FILESYSTEM_WITHOUT_LIB)
+    set(FILESYSTEM_LIB stdc++fs)
+    message(STATUS "Linking with stdc++fs for std::filesystem")
 endif()
 
 include(GNUInstallDirs)
