@@ -252,12 +252,14 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   return g_rcclSelectAlltoAll(comm, sendbuff, recvbuff, count, datatype, stream, query, graphCapturingHint, decision);
 }
 
-static bool DefaultDdaEnabled(const struct ncclComm*, size_t, size_t, bool, const char*) {
+static bool DefaultDdaEnabled(const struct ncclComm*, size_t, size_t, bool, const char*, int) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclDdaEnabled");
 }
-std::function<bool(const struct ncclComm*, size_t, size_t, bool, const char*)> g_rcclDdaEnabled = DefaultDdaEnabled;
-bool rcclDdaEnabled(const struct ncclComm* comm, size_t totalBytes, size_t threshold, bool query, const char* prefix) {
-  return g_rcclDdaEnabled(comm, totalBytes, threshold, query, prefix);
+std::function<bool(const struct ncclComm*, size_t, size_t, bool, const char*, int)> g_rcclDdaEnabled =
+    DefaultDdaEnabled;
+bool rcclDdaEnabled(const struct ncclComm* comm, size_t totalBytes, size_t threshold, bool query, const char* prefix,
+                    int minRanks) {
+  return g_rcclDdaEnabled(comm, totalBytes, threshold, query, prefix, minRanks);
 }
 
 static size_t DefaultDdaEntryThreshold(const struct ncclComm*, ncclFunc_t) {

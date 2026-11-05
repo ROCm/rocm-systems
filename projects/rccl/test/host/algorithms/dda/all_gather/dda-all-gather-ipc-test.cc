@@ -14,6 +14,7 @@
 
 #include "../common/DdaIpcTestHelpers.hpp"
 #include "algorithms/dda/DdaCollSeams.h"
+#include "fakes/dda_ipc_nranks_fakes.h"
 
 #include DDA_ALL_GATHER_IPC_CC_PATH
 
@@ -30,8 +31,10 @@ void* const kRecvbuff = reinterpret_cast<void*>(0x2000);
 const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x88);
 const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
 
+// NRANKS 8 is the compile-time clique kernel; NRANKS 0 is the runtime-rank kernel every other count uses.
+template <int NRANKS = 8>
 const void* Kernel() {
-  return KernelPtr(&dda::common::ddaAllGatherIpc<int8_t, 8, false>);
+  return KernelPtr(&dda::common::ddaAllGatherIpc<int8_t, NRANKS, false>);
 }
 
 class DdaAllGatherIpcMicrotest : public ::testing::Test {
@@ -46,6 +49,7 @@ class DdaAllGatherIpcMicrotest : public ::testing::Test {
   void TearDown() override {
     ResetDdaCollSeams();
     ResetHipFakes();
+    g_ddaIpcNranksRelaxed = false;
   }
 
   ncclComm& comm() { return mock_.comm; }
@@ -146,7 +150,7 @@ TEST_F(DdaAllGatherIpcMicrotest, Launch_GatheredTotalMayFillScratchExactly) {
   EXPECT_EQ(g_ddaLaunches.size(), 1u);
 }
 
-TEST_F(DdaAllGatherIpcMicrotest, Launch_PassesBuffersByteCountRankAndBarrier) {
+TEST_F(DdaAllGatherIpcMicrotest, Launch_PassesBuffersByteCountRankRankCountAndBarrier) {
   ASSERT_EQ(Run(8, ncclFloat16), ncclSuccess);
   ASSERT_EQ(g_ddaLaunches.size(), 1u);
   const DdaLaunch& launch = g_ddaLaunches[0];
@@ -157,13 +161,14 @@ TEST_F(DdaAllGatherIpcMicrotest, Launch_PassesBuffersByteCountRankAndBarrier) {
   EXPECT_EQ(comm().addonStopEvent, nullptr);
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
-  ASSERT_EQ(launch.args.size(), 6u);
+  ASSERT_EQ(launch.args.size(), 7u);
   EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
   EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<size_t>(2), 16u);
   EXPECT_EQ(launch.Arg<const int8_t*>(3), kSendbuff);
   EXPECT_EQ(launch.Arg<int>(4), 6);
-  EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(5), barrier_->barrierHost));
+  EXPECT_EQ(launch.Arg<int>(5), comm().nRanks);
+  EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(6), barrier_->barrierHost));
 }
 
 // The 24-block cap is spelled out rather than read from DDA_IPC_MAXBLOCKS, so a changed cap fails here.
@@ -186,6 +191,85 @@ TEST_F(DdaAllGatherIpcMicrotest, Blocks_SizedOnBytesNotElements) {
 TEST_F(DdaAllGatherIpcMicrotest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
   EXPECT_EQ(Run(4), ncclUnhandledCudaError);
+}
+
+// RCCL_DDA_NRANKS_RELAX: 8 ranks keep the compile-time kernel, any other 2..8 count takes the runtime-rank one.
+// Forcing either instantiation for every count, or dropping the rank-count argument, fails one of these.
+TEST_F(DdaAllGatherIpcMicrotest, Eligible_RelaxAdmitsTwoToEightRanksOnly) {
+  g_ddaIpcNranksRelaxed = true;
+  for (int nRanks = 2; nRanks <= 8; ++nRanks) {
+    comm().nRanks = nRanks;
+    EXPECT_TRUE(Eligible(4)) << "nRanks " << nRanks;
+  }
+  for (int nRanks : {1, 9}) {
+    comm().nRanks = nRanks;
+    EXPECT_FALSE(Eligible(4)) << "nRanks " << nRanks;
+  }
+}
+
+TEST_F(DdaAllGatherIpcMicrotest, Launch_EightRanksKeepTheCompileTimeKernelWithOrWithoutRelax) {
+  ASSERT_EQ(comm().nRanks, 8);
+  for (bool relaxed : {false, true}) {
+    g_ddaLaunches.clear();
+    g_ddaIpcNranksRelaxed = relaxed;
+    ASSERT_EQ(Run(16), ncclSuccess) << "relaxed " << relaxed;
+    ASSERT_EQ(g_ddaLaunches.size(), 1u);
+    EXPECT_EQ(g_ddaLaunches[0].kernel, Kernel<8>()) << "relaxed " << relaxed;
+    ASSERT_EQ(g_ddaLaunches[0].args.size(), 7u);
+    EXPECT_EQ(g_ddaLaunches[0].Arg<int>(5), 8);
+  }
+}
+
+TEST_F(DdaAllGatherIpcMicrotest, Launch_RelaxedFourRanksLaunchTheRuntimeRankKernel) {
+  g_ddaIpcNranksRelaxed = true;
+  comm().nRanks = 4;
+  comm().rank = 1;
+  ASSERT_EQ(Run(8, ncclFloat16), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  const DdaLaunch& launch = g_ddaLaunches[0];
+  EXPECT_EQ(launch.kernel, Kernel<0>());
+  EXPECT_EQ(launch.stopEvent, kStopEvent);
+  ASSERT_EQ(launch.args.size(), 7u);
+  EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
+  EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
+  EXPECT_EQ(launch.Arg<size_t>(2), 16u);
+  EXPECT_EQ(launch.Arg<const int8_t*>(3), kSendbuff);
+  EXPECT_EQ(launch.Arg<int>(4), 1);
+  EXPECT_EQ(launch.Arg<int>(5), 4);
+  EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(6), barrier_->barrierHost));
+}
+
+TEST_F(DdaAllGatherIpcMicrotest, Launch_RelaxedEveryOtherCountUsesTheRuntimeRankKernel) {
+  g_ddaIpcNranksRelaxed = true;
+  comm().rank = 0;
+  for (int nRanks = 2; nRanks <= 7; ++nRanks) {
+    g_ddaLaunches.clear();
+    comm().nRanks = nRanks;
+    ASSERT_EQ(Run(4), ncclSuccess) << "nRanks " << nRanks;
+    ASSERT_EQ(g_ddaLaunches.size(), 1u);
+    EXPECT_EQ(g_ddaLaunches[0].kernel, Kernel<0>()) << "nRanks " << nRanks;
+    ASSERT_EQ(g_ddaLaunches[0].args.size(), 7u);
+    EXPECT_EQ(g_ddaLaunches[0].Arg<int>(5), nRanks);
+  }
+}
+
+// The gathered total is sized on the live rank count, not the 8-rank clique.
+TEST_F(DdaAllGatherIpcMicrotest, Launch_RelaxedScratchCheckScalesWithTheRankCount) {
+  g_ddaIpcNranksRelaxed = true;
+  comm().nRanks = 4;
+  comm().ddaScratchBytes = 4 * 64;
+  EXPECT_EQ(Run(16), ncclSuccess);
+  EXPECT_EQ(Run(20), ncclInvalidArgument);
+  EXPECT_EQ(g_ddaLaunches.size(), 1u);
+}
+
+// Refused by the rank gate before the stop event is taken.
+TEST_F(DdaAllGatherIpcMicrotest, Launch_FourRanksWithoutRelaxAreRefusedWithoutLaunching) {
+  comm().nRanks = 4;
+  EXPECT_FALSE(Eligible(4));
+  EXPECT_EQ(Run(4), ncclInvalidUsage);
+  EXPECT_TRUE(g_ddaLaunches.empty());
+  EXPECT_EQ(comm().addonStopEvent, kStopEvent);
 }
 
 }  // namespace

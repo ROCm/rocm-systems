@@ -93,6 +93,7 @@ struct DdaEnabledCall {
   size_t totalBytes;
   size_t threshold;
   bool query;
+  int minRanks;
 };
 
 struct SymkQuery {
@@ -448,9 +449,9 @@ struct SharedHooks {
                                               hipStream_t st, bool q, bool h, rcclCollDecision* d) {
         return RecordSelect("AlltoAll", s, r, n, ncclNumOps, st, q, h, d);
       }};
-  ScopedHook<bool(const ncclComm*, size_t, size_t, bool, const char*)> ddaEnabled{
-      g_rcclDdaEnabled, [](const ncclComm*, size_t totalBytes, size_t threshold, bool query, const char*) {
-        fake.ddaEnabledCalls.push_back({totalBytes, threshold, query});
+  ScopedHook<bool(const ncclComm*, size_t, size_t, bool, const char*, int)> ddaEnabled{
+      g_rcclDdaEnabled, [](const ncclComm*, size_t totalBytes, size_t threshold, bool query, const char*, int minRanks) {
+        fake.ddaEnabledCalls.push_back({totalBytes, threshold, query, minRanks});
         return fake.ddaEnabled;
       }};
   ScopedHook<size_t(const ncclComm*, ncclFunc_t)> ddaThreshold{g_rcclDdaEntryThreshold,
@@ -742,6 +743,21 @@ TEST_F(CollectivesMicrotest, AllReduceDda_TakesDdaWhenNothingElseServesTheCall) 
   fake.ddaEnabled = true;
   EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false));
   EXPECT_EQ(1u, fake.thresholdFuncs.size());
+}
+
+// The participant-count floor the AllReduce gate hands rcclDdaEnabled(): the full
+// 8-rank clique by default, 2 with RCCL_DDA_NRANKS_RELAX. Hardcoding either value
+// in collectives.cc fails one half of this pair.
+TEST_F(CollectivesMicrotest, AllReduceDda_RankFloorFollowsNranksRelax) {
+  fake.ddaEnabled = true;
+  g_ncclDdaNranksRelaxEnabled = false;
+  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false));
+  g_ncclDdaNranksRelaxEnabled = true;
+  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false));
+  g_ncclDdaNranksRelaxEnabled = false;
+  ASSERT_EQ(2u, fake.ddaEnabledCalls.size());
+  EXPECT_EQ(8, fake.ddaEnabledCalls[0].minRanks);
+  EXPECT_EQ(2, fake.ddaEnabledCalls[1].minRanks);
 }
 
 TEST_F(CollectivesMicrotest, AlltoAllDda_YieldsToCe) {

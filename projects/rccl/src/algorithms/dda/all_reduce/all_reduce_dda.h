@@ -14,13 +14,20 @@
 
 namespace dda::common {
 
+// NRANKS semantics match the fabric kernels and the CollCommon helpers:
+//   - NRANKS  > 0 : compile-time clique size; the peer loop is fully unrolled.
+//                   nRanksRuntime is ignored.
+//   - NRANKS == 0 : runtime fallback; the clique size comes from nRanksRuntime and
+//                   the peer loop is partially unrolled 8-wide. One instantiation
+//                   then covers every clique size instead of one kernel per count.
 template <typename T, int NRANKS, bool hasAcc>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
   __global__ void ddaAllReduceFlatIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
-                                      const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier,
-                                      const T* __restrict__ acc) {
+                                      const T* __restrict__ sendbuff, int selfRank, int nRanksRuntime,
+                                      IpcGpuBarrier barrier, const T* __restrict__ acc) {
+  const int nRanks = (NRANKS > 0) ? NRANKS : nRanksRuntime;
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -30,12 +37,12 @@ __launch_bounds__(512)
 
   copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, idxEnd, idxStride);
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */, NRANKS>(nRanks);
 
   // pattern=2: full reduce into recvbuff (one-shot, not scatter)
-  reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, recvbuff, acc, selfRank, NRANKS, idxStart, idxEnd, idxStride, 2);
+  reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, recvbuff, acc, selfRank, nRanks, idxStart, idxEnd, idxStride, 2);
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */, NRANKS>(nRanks);
 }
 
 template <typename T, int NRANKS, bool hasAcc>
@@ -43,11 +50,12 @@ template <typename T, int NRANKS, bool hasAcc>
 __launch_bounds__(512)
 #endif
   __global__ void ddaAllReduceTreeIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
-                                      const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier,
-                                      const T* __restrict__ acc) {
-  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+                                      const T* __restrict__ sendbuff, int selfRank, int nRanksRuntime,
+                                      IpcGpuBarrier barrier, const T* __restrict__ acc) {
+  const int nRanks = (NRANKS > 0) ? NRANKS : nRanksRuntime;
+  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */, NRANKS>(nRanks);
 
-  const size_t countPerRank = count / NRANKS;
+  const size_t countPerRank = count / nRanks;
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -55,13 +63,13 @@ __launch_bounds__(512)
   const auto idxEnd = countPerRank;
   const size_t idxStride = gridDim.x * blockDim.x * countPerThread;
 
-  reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, ipcbuffs[selfRank], acc, selfRank, NRANKS, idxStart, idxEnd, idxStride, 1);
+  reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, ipcbuffs[selfRank], acc, selfRank, nRanks, idxStart, idxEnd, idxStride, 1);
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */, NRANKS>(nRanks);
 
-  allGather<T, NRANKS>(ipcbuffs, recvbuff, selfRank, NRANKS, idxStart, idxEnd, idxStride, true);
+  allGather<T, NRANKS>(ipcbuffs, recvbuff, selfRank, nRanks, idxStart, idxEnd, idxStride, true);
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */, NRANKS>(nRanks);
 }
 
 } // namespace dda::common

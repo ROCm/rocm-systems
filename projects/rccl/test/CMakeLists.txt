@@ -848,6 +848,9 @@ if(BUILD_TESTS)
       ChannelDefaultsTests.cpp
       DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
+      DdaNranksRelax_test.cpp
+      DdaNranksRelaxCollectives_test.cpp
+      DdaNranksRelaxConsensusTests.cpp
       DdaFabricEligibilityTests.cpp
       CeAllReduceEligibilityTests.cpp
       CeReduceScatterEligibilityTests.cpp
