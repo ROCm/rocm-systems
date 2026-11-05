@@ -41,11 +41,11 @@ env_parser::parse(const schema& config_schema) const
     parse_result result{};
     for(const auto& param : config_schema.params())
     {
-        if(!param.env)
+        if(!param.env || param.env->empty())
         {
             continue;
         }
-        const auto value = m_lookup(param.env->name);
+        const auto value = m_lookup(*param.env);
         if(!value)
         {
             continue;
