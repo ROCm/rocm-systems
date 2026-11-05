@@ -118,6 +118,7 @@ static inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* manager
 #include <gtest/gtest.h>
 
 #include "ScopedHook.h"
+#include "StickyHipLastError.h"
 #include "../common/LogCapture.hpp"  // CaptureLog: assert on WARN text
 
 #include <malloc.h>  // mallinfo2: heap in-use bytes for the DevCommCreate leak checks
@@ -3766,6 +3767,22 @@ TEST_F(WindowRegisterNonSymIpcTest, MapsPeersAndReusesSelf) {
   EXPECT_EQ(win->ipcPeerPtrs[2], static_cast<char*>(reinterpret_cast<void*>(0x900000)) + 128);
 }
 
+// ROCM-33799: with cuMem off no probe runs, so an error the application has not read yet
+// must survive registration.
+TEST_F(WindowRegisterNonSymIpcTest, NoCuMemProbe_KeepsCallerLastError) {
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    *ptr = reinterpret_cast<void*>(0x900000);
+    return hipSuccess;
+  });
+  StickyHipLastError lastError;
+  lastError.pending = hipErrorOutOfMemory;
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  EXPECT_EQ(lastError.pending, hipErrorOutOfMemory);
+}
+
 // Branch: a peer in our own process is left unmapped -- opening an IPC handle
 // against the same address space is not supported here.
 TEST_F(WindowRegisterNonSymIpcTest, SameProcessPeer_IsLeftUnmapped) {
@@ -4251,8 +4268,9 @@ TEST_F(WindowRegisterNonSymCuMemTest, VmmWindow_ExportsHandleAndImportsPeers) {
 TEST_F(WindowRegisterNonSymCuMemTest, RetainFails_FallsBackToLegacyIpc) {
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(8192));
-  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t*, void*) {
-    return hipErrorInvalidValue;
+  StickyHipLastError lastError;
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [&](hipMemGenericAllocationHandle_t*, void*) {
+    return lastError.Fail(hipErrorInvalidValue);
   });
   ScopedHook ipcGet(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t*, void*) { return hipSuccess; });
   ScopedHook import(g_hipMemImportFromShareableHandle,
@@ -4293,6 +4311,8 @@ TEST_F(WindowRegisterNonSymCuMemTest, RetainFails_FallsBackToLegacyIpc) {
   EXPECT_EQ(win->ipcPeerIsCuMem[1], 0);
   EXPECT_EQ(win->ipcPeerIsCuMem[2], 0);
   EXPECT_EQ(open.calls, 2);
+  // ROCM-33799: the expected retain failure must not reach the application.
+  EXPECT_EQ(lastError.pending, hipSuccess);
 }
 
 // Branch: a cuMem peer is already mapped when a later one fails, so cleanup has
@@ -6781,7 +6801,7 @@ protected:
 
   void ExpectRejectedWithoutLeak(bool rearch, const char* warning) {
     // ScopedHook's own counter sees every g_loadParam call, so count the reads of
-    // this param separately: each call must branch on it (dev_runtime.cc:2809).
+    // this param separately: each call must branch on it (dev_runtime.cc:2813).
     int rearchReads = 0;
     auto prevLoadParam = g_loadParam;
     ScopedHook rearchParam(g_loadParam, [rearch, prevLoadParam, &rearchReads](const char* env, int64_t deft) {

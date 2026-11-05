@@ -563,7 +563,7 @@ static void runDevCommCreateRejectedAfterCopyTest()
     ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
     ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
     // Without device API support the request is turned away before the copy
-    // (dev_runtime.cc:2798), so the loop below would prove nothing.
+    // (dev_runtime.cc:2802), so the loop below would prove nothing.
     if(!props.deviceApiSupport)
         GTEST_SKIP() << "Device API unsupported here; the request is rejected before the "
                         "requirements are copied.";
