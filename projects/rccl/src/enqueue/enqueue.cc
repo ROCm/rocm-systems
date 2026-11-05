@@ -358,6 +358,8 @@ static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   plan->kernelArgs->comm = comm->devComm;
   plan->kernelArgs->channelMask = plan->channelMask;
   plan->kernelArgs->workStorageType = plan->workStorageType;
+  plan->kernelArgs->devFlags = (ncclProfilerPluginLoaded() ? RCCL_DEV_FLAG_PROFILER : 0) |
+                               (comm->deviceCountersBlock != nullptr ? RCCL_DEV_FLAG_PROGRESS : 0);
 #ifdef ENABLE_WARP_SPEED
   plan->kernelArgs->warpLevelComm = rcclWarpSpeedSupported(comm, plan);
 #endif
@@ -2252,10 +2254,6 @@ static void persistentDestructor(void* plans_) {
 }
 
 NCCL_PARAM(GraphStreamOrdering, "GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT);
-
-// Biased so the default stream (nullptr) tags as 1, leaving 0 free as the "no launch yet"
-// sentinel. See ncclComm::lastStreamTag.
-static inline uintptr_t ncclStreamTag(hipStream_t s) { return (uintptr_t)s + 1; }
 
 namespace {
 enum ncclImplicitOrder {
