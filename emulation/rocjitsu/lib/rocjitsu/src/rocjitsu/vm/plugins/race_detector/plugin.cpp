@@ -463,8 +463,19 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
         uint32_t peerMask = d.cluster_mcast_mask & ~selfMask;
         if (peerMask != 0)
           warn_cluster_peer_writes_ignored_once();
-        if ((d.cluster_mcast_mask & selfMask) == 0)
+        if ((d.cluster_mcast_mask & selfMask) == 0) {
+          // A peer-only multicast writes no local LDS, but the issuing wave still
+          // gets its completion (CDNA5 ISA 10.7), in issue order with its other
+          // async loads (10.8). Register an event without LDS lanes so it takes
+          // its counter slot.
+          if (!obligations.empty()) {
+            const uint32_t noAddrs[64] = {};
+            rs->registerLdsEvent(instruction, MemoryEventType::GLOBAL_TO_LDS, {}, /*execMask=*/0,
+                                 wf.wf_size(), std::span<const uint32_t>(noAddrs, wf.wf_size()),
+                                 perLaneBytes, 0xF, obligations, memoryOrder);
+          }
           return;
+        }
       }
       uint32_t ldsAddrs[64];
       const uint64_t validLaneMask = amdgpu::lds_destination_write_mask(d, wf.cu().arch());

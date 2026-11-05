@@ -577,6 +577,10 @@ protected:
     execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfcb0000u | count);
   }
 
+  void wait_asynccnt(int wave, uint16_t count) {
+    execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfca0000u | count);
+  }
+
   void wait_dscnt(int wave) {
     execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfc60000u); // s_wait_dscnt 0.
   }
@@ -692,6 +696,8 @@ TEST_F(TensorDmaRaceTest, ClusterLoadOutsideAClusterOverwritingAPendingStoreSour
 }
 
 TEST_F(TensorDmaRaceTest, ClusterLoadToItsOwnRankOverwritingAPendingStoreSourceRaces) {
+  // Inside a cluster, so the mask applies and M0 = 1 selects the wave's rank.
+  waves[0]->set_cluster_info(/*rank=*/0, /*size=*/2);
   tensor_store(0, {{.address = 0, .bytes = 16}});
   EXPECT_TRUE(dtl_write(0, 4, /*cluster_mcast_mask=*/1));
 }
@@ -702,6 +708,26 @@ TEST_F(TensorDmaRaceTest, ClusterLoadToOnlyAPeerLeavesTheLocalStoreSourceAlone) 
   waves[0]->set_cluster_info(/*rank=*/0, /*size=*/2);
   tensor_store(0, {{.address = 0, .bytes = 16}});
   EXPECT_FALSE(dtl_write(0, 4, /*cluster_mcast_mask=*/2));
+}
+
+// A peer-only cluster load writes no local LDS but still takes the issuing
+// wave's next ASYNCcnt slot. After an ordinary async load to byte 0 and a
+// cluster load to rank 0 only, waiting for all but one completes the first load,
+// so a tensor store reading byte 0 is safe; waiting for all but two is not.
+TEST_F(TensorDmaRaceTest, PeerOnlyClusterLoadKeepsItsAsynccntSlot) {
+  waves[0]->set_cluster_info(/*rank=*/1, /*size=*/2);
+  EXPECT_FALSE(dtl_write(0, 0));
+  EXPECT_FALSE(dtl_write(0, 64, /*cluster_mcast_mask=*/1));
+  wait_asynccnt(0, 1);
+  EXPECT_FALSE(tensor_store(0, {{.address = 0, .bytes = 16}}));
+}
+
+TEST_F(TensorDmaRaceTest, PeerOnlyClusterLoadLeavesTheEarlierLoadPendingUntilTheWaitCoversIt) {
+  waves[0]->set_cluster_info(/*rank=*/1, /*size=*/2);
+  EXPECT_FALSE(dtl_write(0, 0));
+  EXPECT_FALSE(dtl_write(0, 64, /*cluster_mcast_mask=*/1));
+  wait_asynccnt(0, 2);
+  EXPECT_TRUE(tensor_store(0, {{.address = 0, .bytes = 16}}));
 }
 
 TEST_F(TensorDmaRaceTest, DtlAfterTensorcntIsSafe) {
