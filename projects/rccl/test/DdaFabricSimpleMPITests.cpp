@@ -13,11 +13,12 @@
  * SIMPLE kernel. Each test checks both output data and the COLL log so a
  * correct fallback cannot hide a DDA regression.
  *
- * AllToAll is the exception: the gfx1250 tables leave its DDA SIMPLE tier off,
- * so AllToAllOutOfPlace, RepeatedAllToAll, the AllToAll step of
- * AlternatingCollectivesOnSameCommunicator and the AllToAll barrier stress run
- * its LL tier. The AllToAll SIMPLE kernel tests skip unless RCCL_DDA_THRESHOLD
- * covers their payload. Their kernel is chosen by RCCL_DDA_A2A_PUSH,
+ * AllToAll is the exception: AllToAllOutOfPlace, RepeatedAllToAll, the AllToAll
+ * step of AlternatingCollectivesOnSameCommunicator and the AllToAll barrier
+ * stress run its LL tier. The AllToAll SIMPLE kernel tests need the DDA SIMPLE
+ * tier to cover their payload: the gfx1250 DPX table enables it up to 256 MiB,
+ * while the SPX table leaves it off, so there they skip unless
+ * RCCL_DDA_THRESHOLD covers it. Their kernel is chosen by RCCL_DDA_A2A_PUSH,
  * RCCL_DDA_A2A_PUSH_PEER and RCCL_DDA_A2A_TDM, which are cached per process, so
  * the peer-major vector push, all-peer TDM push and pull tests also skip unless
  * the binary is launched with RCCL_DDA_A2A_TDM=0, RCCL_DDA_A2A_PUSH_PEER=0 or
@@ -337,7 +338,8 @@ protected:
         const size_t bytes =
             simpleAllToAllCount() * static_cast<size_t>(nRanks_) * sizeof(float);
         if(rcclDdaVmmThreshold(getActiveCommunicator(), ncclFuncAlltoAll) < bytes)
-            return "the AllToAll DDA SIMPLE tier is off; launch with RCCL_DDA_THRESHOLD >= "
+            return "the AllToAll DDA SIMPLE tier does not cover the payload; launch with "
+                   "RCCL_DDA_THRESHOLD >= "
                    + std::to_string(bytes);
         auto unmet = [](const char* name, int64_t want, int64_t have) {
             return want >= 0 && want != have

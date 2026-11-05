@@ -465,9 +465,10 @@ test_categories:
       - "NCCL_DEBUG=INFO"
       - "RCCL_DDA_LL=0"
       - "RCCL_DDA_THRESHOLD=67108864"
-  # DDA fabric AllToAll SIMPLE kernels, one category per kernel choice. The gfx1250 tables leave the AllToAll SIMPLE
-  # tier off, so RCCL_DDA_THRESHOLD turns it on; RCCL_PARAM caches it and the RCCL_DDA_A2A_* kernel choice for the
-  # process lifetime, so they are set before launch. Outside these categories the tests skip.
+  # DDA fabric AllToAll SIMPLE kernels, one category per kernel choice. The gfx1250 SPX table leaves the AllToAll
+  # SIMPLE tier off (DPX enables it up to 256 MiB), so RCCL_DDA_THRESHOLD turns it on; RCCL_PARAM caches it and the
+  # RCCL_DDA_A2A_* kernel choice for the process lifetime, so they are set before launch. Outside these categories the
+  # tests skip on SPX; on DPX only the ones that need a non-default kernel choice skip.
   standard_env_dda_a2a_push:
     description: "DDA fabric AllToAll with the default push settings: peer-major TDM push (alternating with LL, and with chunks that are not a multiple of 256 B) and the all-peer vector push in place."
     test_patterns:
