@@ -944,9 +944,11 @@ struct PlaybackContext {
         if (it == alloc_map.end()) return;
         erase_alloc_locked(it);
     }
-    // Removes the entry only while it still maps to `live`. The check and the
-    // erase hold one lock, so an allocation another thread records at the same
-    // address in between keeps its entry and its charge.
+    // Removes the entry only while it still maps to `live`. An archive
+    // allocation recorded at the same address earlier in the stream replaces the
+    // entry, so a later release of the old pointer must leave the new entry and
+    // its charge alone. Region tracking is single-threaded (off under
+    // --multi-thread), so no other thread races this check.
     bool remove_alloc_if_live(uint64_t rec, void* live) {
         std::unique_lock lk(map_mutex);
         auto it = alloc_map.find(rec);
