@@ -30,7 +30,7 @@ detect_architecture(const char* arch, char* out_name, size_t out_name_sz, int* o
         {"gfx1153", 6}, {"gfx1152", 6}, {"gfx1151", 6}, {"gfx1150", 6},
         {"gfx1201", 5}, {"gfx1200", 4},
         {"gfx950", 3},
-        {"gfx942", 2}, {"gfx941", 2}, {"gfx940", 2}, {"gfx94", 2},
+        {"gfx942", 2},
         {"gfx90a", 1}, {"gfx908", 1},
     };
 

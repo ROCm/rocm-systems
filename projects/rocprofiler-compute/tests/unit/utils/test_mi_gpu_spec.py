@@ -91,13 +91,9 @@ class TestMIGPUSpecs:
 
     def test_is_partition_supported_true(self):
         for arch in (
-            "gfx940",
-            "gfx941",
             "gfx942",
             "gfx950",
             "gfx1250",
-            "GFX940",
-            "GFX941",
             "GFX942",
             "GFX950",
             "GFX1250",

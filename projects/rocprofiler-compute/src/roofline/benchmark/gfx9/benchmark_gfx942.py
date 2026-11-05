@@ -4,7 +4,7 @@
 # -----------------------------------------------------------------------------
 # benchmark_gfx942.py
 #
-# Benchmarking class for all gfx942 product (also supports gfx940 and gfx941)
+# Benchmarking class for all gfx942 product
 # MI300A, MI300X, MI308, MI325X
 #
 # -----------------------------------------------------------------------------
@@ -53,7 +53,7 @@ class Bench_gfx942(benchmark_gfx9_base.Bench_gfx9):
             + """
         extern "C" __global__ void mfma_f8(int iter, float *dummy)
         {
-            // MI300 series only - note gfx940/gfx941/gfx942 only uses fnuz f8
+            // MI300 series only - note gfx942 only uses fnuz f8
             long a =  threadIdx.x;
 
             vec16<float> result = {0};
