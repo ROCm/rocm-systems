@@ -14,8 +14,7 @@
     with the same signature reuse it.
   - `jax.jit` / `jax.pmap`: the module is the compiled function that eventually
     runs:
-    - Fusion chooses the kernel names and boundaries (`gemm_fusion_dot_general_0`,
-      `Cijk_...`).
+    - Fusion decides the kernel names and which operators' work goes into a kernel.
     - Operators inside the jit function code have no Python call and no marker.
     - The only identity available at the call, which is where a marker can be
       placed, is the compiled function.
@@ -47,9 +46,10 @@
   - `Execute` does not know the Python function or caller `file:line`. It
     cannot link kernels to `jax.jit.<fn>` without another channel from the
     Python call.
-  - When the Python wrapper already has a range open, `Execute` runs inside
-    that range and the kernels already inherit `Correlation_ID`. A native
-    range adds nothing to that join.
+  - When the Python wrapper already has a range open, kernels inherit that
+    marker's `Correlation_ID`. A nested native range becomes current, so
+    kernels inherit `Execute`'s id instead. The join then attaches to the
+    module, not `jax.jit.<fn>`.
 
 ## Design
 
@@ -93,7 +93,8 @@
   - A direct call to an inner jitted function is its own outer call, so it
     gets its own range.
 - Primitive wrap: `inject_roctx` wraps `jax.extend.core.Primitive`, not `jnp.*`.
-  - If a JAX range is already open, or JAX is tracing, call through.
+  - If a JAX range is already open, do not open another; run the original
+    dispatch.
   - Otherwise read the primitive's name from that call, push `jax.{name}` with
     the caller `file:line`, run the original dispatch (the one-op `Execute`),
     then pop. `x @ x` therefore marks `jax.dot_general`; `jnp.sum` marks
@@ -103,7 +104,7 @@
   - Those enqueues inherit the marker's correlation id.
 
 ```
-launching CPU thread (time →)
+time →
 
   ROCTX range open  "jax.jit.train_step"          [Correlation_Id = C]
   │
@@ -124,13 +125,12 @@ rocprofv3 kernel trace :  gemm_fusion_dot_general_0   Correlation_Id = C
 
 ### Difference from the Torch/Triton backends
 
-- Torch and Triton mark at operator or kernel granularity (Torch wraps each ATen
-  op, Triton each kernel launch), so the marker names the operation.
-- After `jit` the ops are fused into one executable with no per-op Python call,
-  so that marker names the function.
-- Eager JAX is one primitive per `Execute`, so the eager dispatch hook marks
-  like an ATen op (`jax.dot_general`).
-- Kernels are direct children of that marker.
+- Torch nests markers (module, then each ATen op). Triton does not: one marker
+  per kernel launch, and that kernel is a direct child.
+- JAX also does not nest markers. After `jit` the ops are fused into one
+  executable with no per-op Python call, so one marker names the function and
+  several kernels sit directly under it. Eager JAX is one primitive per
+  `Execute`, closer to Triton's one-launch marker.
 
 ### Analyze display
 
@@ -182,14 +182,21 @@ jax.jit.train_step jax_workload.py:13 (calls: N, dispatches: M, total: T)
 
 ## Validation, security and debuggability
 
-- **Marker wrapper.** An outer `jax.jit` / `jax.pmap` call emits one range
-  named `jax.jit.<fn>` or `jax.pmap.<fn>`. An outer eager op emits
-  `jax.{primitive}`. Nested or inner calls do not emit a second range.
-- **Call tree.** On a profiled workload, the kernels launched by a call appear
-  under that marker, with the caller `file:line` and the call's dispatch
-  count and GPU time.
-- **Security.** The launcher is the same in-process injector used for other backends.
+- Extend the existing `--trace-ml-api` integration tests (Torch / Triton) with
+  a JAX backend. Same profile → analyze path; no separate harness.
+- Those tests assert the following on a profiled workload:
+  - An outer `jax.jit` / `jax.pmap` call emits one range `jax.jit.<fn>` or
+    `jax.pmap.<fn>`. An outer eager op emits `jax.{primitive}`. Nested or
+    inner calls do not emit a second range.
+  - Kernels launched by that call appear under that marker, with the caller
+    `file:line` and the call's dispatch count and GPU time.
+- Unit tests cover marker naming and the "range already open" skip, without a
+  GPU workload.
+- **Security.** Same in-process `inject_roctx` injector as the other backends.
   Analysis reads the trace files the workload produced.
+- **Debug.** The injector logs which entry points it wrapped during profile
+  (`ml api trace` on the profile stdout). A wrap miss is an absent `jax.*`
+  node in the `--list-operators jax` tree (analyze stdout).
 
 Coverage gaps:
 
@@ -199,6 +206,5 @@ Coverage gaps:
 Design trade-offs:
 
 - A `jit` / `pmap` marker is the compiled function. Every kernel that call
-  launches — fused kernels, library GEMM (`Cijk_...`), runtime copy/fill
-  helpers, and autotuning kernels — is a direct child of that node. One
-  function name covers every input signature.
+  launches is a direct child of that node.
+- One function name covers every input signature.
