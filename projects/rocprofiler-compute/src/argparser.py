@@ -730,7 +730,7 @@ Examples:
             "\t\tOmitting the flag does not filter.\n"
             "\t\tRequires --output-format stdout.\n"
             "\t\tIgnored when --list-operators is set.\n"
-            f"\t\tValues: {', '.join(OPERATOR_SELECTORS)}."
+            f"\t\tPrefixes: {', '.join(OPERATOR_SELECTORS)}."
         ),
     )
     analyze_group.add_argument(
