@@ -66,3 +66,12 @@ ncclResult_t ncclIbWqeLatTestHandleCompletion(struct ncclIbWqeLatMon* m, enum ib
   free(base);
   return ncclSuccess;
 }
+
+ncclResult_t ncclIbGdrFlushGetScratch(void* recvComm, int dev, int** hostMem, int** gpuMem) {
+  if (recvComm == NULL || hostMem == NULL || gpuMem == NULL) return ncclInvalidArgument;
+  struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
+  if (dev < 0 || dev >= comm->base.vProps.ndevs) return ncclInvalidArgument;
+  *hostMem = &comm->gpuFlushHostMem;
+  *gpuMem = comm->devs[dev].gpuFlush.gpuFlushGpuMem;
+  return ncclSuccess;
+}
