@@ -1,0 +1,272 @@
+view: L2 Cache
+legacy_panel_id: 1700
+alias: l2
+tables:
+- id: 1701
+  title: L2 Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: l2.util
+    label: Utilization
+    legacy_id: 17.1.0
+  - metric: l2.peak_bw
+    label: Peak Bandwidth
+    legacy_id: 17.1.1
+  - metric: l2.hit_rate
+    label: Hit Rate
+  - metric: fabric.rd_bw
+    label: L2-Fabric Read BW
+  - metric: fabric.wr_atomic_bw
+    label: L2-Fabric Write and Atomic BW
+  - metric: fabric.hbm_peak_bw
+    label: HBM Bandwidth
+    legacy_id: 17.1.5
+- id: 1702
+  title: L2-Fabric interface metrics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: fabric.rd_bw
+    label: Read BW
+  - metric: fabric.hbm_rd_traffic
+    legacy_id: 17.2.1
+  - metric: fabric.remote_rd_traffic
+    label: Remote Read Traffic
+    legacy_id: 17.2.2
+  - metric: fabric.uncached_rd_traffic
+    label: Uncached Read Traffic
+    legacy_id: 17.2.3
+  - metric: fabric.wr_atomic_bw
+    label: Write and Atomic BW
+  - metric: fabric.hbm_wr_atomic_traffic
+    legacy_id: 17.2.5
+  - metric: fabric.remote_wr_atomic_traffic
+    label: Remote Write and Atomic Traffic
+    legacy_id: 17.2.6
+  - metric: fabric.atomic_traffic
+    label: Atomic Traffic
+    legacy_id: 17.2.7
+  - metric: fabric.uncached_wr_atomic_traffic
+    label: Uncached Write and Atomic Traffic
+    legacy_id: 17.2.8
+  - metric: fabric.rd_lat
+    label: Read Latency
+  - metric: fabric.wr_lat
+    label: Write and Atomic Latency
+  - metric: fabric.atomic_lat
+    label: Atomic Latency
+    legacy_id: 17.2.11
+  - metric: fabric.rd_stall
+    label: Read Stall
+    legacy_id: 17.2.12
+  - metric: fabric.wr_stall
+    label: Write Stall
+    legacy_id: 17.2.13
+- id: 1703
+  title: L2 Cache Accesses
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l2.bw
+    label: Bandwidth
+  - metric: l2.rd_bw
+    label: Read Bandwidth
+    legacy_id: 17.3.1
+  - metric: l2.wr_bw
+    label: Write Bandwidth
+    legacy_id: 17.3.2
+  - metric: l2.atomic_bw
+    label: Atomic Bandwidth
+    legacy_id: 17.3.3
+  - metric: l2.req
+    label: Req
+    legacy_id: 17.3.4
+  - metric: l2.rd_req
+    label: Read Req
+    legacy_id: 17.3.5
+  - metric: l2.wr_req
+    label: Write Req
+    legacy_id: 17.3.6
+  - metric: l2.atomic_req
+    label: Atomic Req
+    legacy_id: 17.3.7
+  - metric: l2.streaming_req
+    label: Streaming Req
+    legacy_id: 17.3.8
+  - metric: l2.bypass_req
+    label: Bypass Req
+    legacy_id: 17.3.9
+  - metric: l2.probe_req
+    label: Probe Req
+    legacy_id: 17.3.10
+  - metric: l2.input_buffer_req
+    label: Input Buffer Req
+    legacy_id: 17.3.11
+  - metric: l2.hit_rate
+    label: Cache Hit
+  - metric: l2.hits
+    label: Hits
+    legacy_id: 17.3.13
+  - metric: l2.misses
+    label: Misses
+    legacy_id: 17.3.14
+  - metric: l2.writeback
+    label: Writeback
+    legacy_id: 17.3.15
+  - metric: l2.writeback_internal
+    label: Writeback (Internal)
+    legacy_id: 17.3.16
+  - metric: l2.writeback_vl1d_req
+    label: Writeback (vL1D Req)
+    legacy_id: 17.3.17
+  - metric: l2.evict_internal
+    label: Evict (Internal)
+    legacy_id: 17.3.18
+  - metric: l2.evict_vl1d_req
+    label: Evict (vL1D Req)
+    legacy_id: 17.3.19
+  - metric: l2.nc_req
+    label: NC Req
+    legacy_id: 17.3.20
+  - metric: l2.uc_req
+    label: UC Req
+    legacy_id: 17.3.21
+  - metric: l2.cc_req
+    label: CC Req
+    legacy_id: 17.3.22
+  - metric: l2.rw_req
+    label: RW Req
+    legacy_id: 17.3.23
+- id: 1704
+  title: L2 Cache Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l2.stalled_on_lat_fifo
+    label: Stalled on Latency FIFO
+    legacy_id: 17.4.0
+  - metric: l2.stalled_on_wr_data_fifo
+    label: Stalled on Write Data FIFO
+    legacy_id: 17.4.1
+  - metric: l2.input_buffer_stalled_on_l2
+    label: Input Buffer Stalled on L2
+    legacy_id: 17.4.2
+- id: 1705
+  title: L2 - Fabric Interface stalls
+  header:
+    metric: Metric
+    type: Type
+    transaction: Transaction
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: fabric.rd_pcie_stall
+    label: Read - PCIe Stall
+    values:
+      type: PCIe Stall
+      transaction: Read
+    legacy_id: 17.5.0
+  - metric: fabric.rd_infinity_fabric_stall
+    label: Read - Infinity Fabric Stall
+    values:
+      type: "Infinity Fabric\u2122 Stall"
+      transaction: Read
+    legacy_id: 17.5.1
+  - metric: fabric.rd_hbm_stall
+    label: Read - HBM Stall
+    values:
+      type: HBM Stall
+      transaction: Read
+    legacy_id: 17.5.2
+  - metric: fabric.wr_pcie_stall
+    label: Write - PCIe Stall
+    values:
+      type: PCIe Stall
+      transaction: Write
+    legacy_id: 17.5.3
+  - metric: fabric.wr_infinity_fabric_stall
+    label: Write - Infinity Fabric Stall
+    values:
+      type: "Infinity Fabric\u2122 Stall"
+      transaction: Write
+    legacy_id: 17.5.4
+  - metric: fabric.wr_hbm_stall
+    label: Write - HBM Stall
+    values:
+      type: HBM Stall
+      transaction: Write
+    legacy_id: 17.5.5
+  - metric: fabric.wr_credit_starvation
+    label: Write - Credit Starvation
+    values:
+      type: Credit Starvation
+      transaction: Write
+    legacy_id: 17.5.6
+- id: 1706
+  title: L2 - Fabric interface detailed metrics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: fabric.rd_32b
+    label: Read (32B)
+    legacy_id: 17.6.0
+  - metric: fabric.rd_64b
+    label: Read (64B)
+    legacy_id: 17.6.1
+  - metric: fabric.rd_128b_ea0
+    label: Read (128B)
+    legacy_id: 17.6.2
+  - metric: fabric.rd_uncached
+    label: Read (Uncached)
+    legacy_id: 17.6.3
+  - metric: fabric.pcie_rd_bw
+    label: Read Bandwidth - PCIe
+  - metric: fabric.xgmi_rd_bw
+    label: "Read Bandwidth - Infinity Fabric\u2122"
+  - metric: fabric.hbm_rd_bw
+    label: Read Bandwidth - HBM
+  - metric: fabric.wr_atomic_32b
+    label: Write and Atomic (32B)
+    legacy_id: 17.6.7
+  - metric: fabric.wr_atomic_uncached
+    label: Write and Atomic (Uncached)
+    legacy_id: 17.6.8
+  - metric: fabric.wr_atomic_64b
+    label: Write and Atomic (64B)
+    legacy_id: 17.6.9
+  - metric: fabric.pcie_wr_bw
+    label: Write Bandwidth - PCIe
+  - metric: fabric.xgmi_wr_bw
+    label: "Write Bandwidth - Infinity Fabric\u2122"
+  - metric: fabric.hbm_wr_bw
+    label: Write Bandwidth - HBM
+  - metric: fabric.atomic
+    label: Atomic
+    legacy_id: 17.6.13
+  - metric: fabric.pcie_atomic_bw
+    label: Atomic Bandwidth - PCIe
+  - metric: fabric.xgmi_atomic_bw
+    label: "Atomic Bandwidth - Infinity Fabric\u2122"
+  - metric: fabric.hbm_atomic_bw
+    label: Atomic Bandwidth - HBM

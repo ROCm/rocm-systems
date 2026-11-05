@@ -1,0 +1,75 @@
+view: Roofline
+legacy_panel_id: 400
+alias: roof
+tables:
+- id: 401
+  title: Roofline Performance Rates
+  cli_style: Roofline
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+    peak: Peak (Empirical)
+  metrics:
+  - metric: compute.valu_flops_f16
+    peak: empirical
+    legacy_id: 4.1.0
+  - metric: compute.valu_flops_f32
+    peak: empirical
+    legacy_id: 4.1.1
+  - metric: compute.valu_flops_f64
+    peak: empirical
+    legacy_id: 4.1.2
+  - metric: compute.mfma_flops_f64
+    peak: empirical
+    legacy_id: 4.1.3
+  - metric: compute.mfma_flops_f32
+    peak: empirical
+    legacy_id: 4.1.4
+  - metric: compute.mfma_flops_f16
+    peak: empirical
+    legacy_id: 4.1.5
+  - metric: compute.mfma_flops_bf16
+    peak: empirical
+    legacy_id: 4.1.6
+  - metric: compute.mfma_iops_int8
+    label: MFMA IOPs (Int8)
+    peak: empirical
+    legacy_id: 4.1.7
+  - metric: fabric.hbm_bw
+    peak: empirical
+    legacy_id: 4.1.8
+  - metric: vl1d.l2_bw
+    label: L2 Cache Bandwidth
+    peak: empirical
+    legacy_id: 4.1.9
+  - metric: vl1d.cache_bw
+    label: L1 Cache Bandwidth
+    peak: empirical
+    legacy_id: 4.1.10
+  - metric: lds.theoretical_bw
+    label: LDS Bandwidth
+    peak: empirical
+    legacy_id: 4.1.11
+- id: 402
+  title: Roofline Plot Points
+  cli_style: Roofline
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: fabric.ai_hbm
+    label: AI HBM
+    legacy_id: 4.2.0
+  - metric: l2.ai
+    label: AI L2
+    legacy_id: 4.2.1
+  - metric: vl1d.ai
+    label: AI L1
+    legacy_id: 4.2.2
+  - metric: lds.ai
+    label: AI LDS
+    legacy_id: 4.2.3
+  - metric: compute.total_flops
+    legacy_id: 4.2.4
