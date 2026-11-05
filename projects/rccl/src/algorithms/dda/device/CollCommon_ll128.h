@@ -262,6 +262,8 @@ constexpr CachePolicy kDdaLL128StagePolicy = createCachePolicy(TemporalHint::RT,
 #if ASYNC_COPY_SUPPORTED
 // Async stores a lane issues per push of one slice; lastOps and the wait ladder count in these.
 constexpr int kDdaLL128StagePushOps = asyncAlignedCopyOps<kDdaLL128WireBytesPerSlice, kDdaLL128Warp>();
+// A phase 2 fill waits on nRanks - 1 pushes: rungs at 1, 3, 7 and 15 pushes are exact at 2, 4, 8 and 16 ranks.
+constexpr int kDdaLL128StageWaitRungs = 4;
 #endif
 
 template <int WIRE>
@@ -274,17 +276,7 @@ template <int WIRE>
 __device__ __forceinline__ void ddaLL128StageWaitAtMost(int keep) {
 #if ASYNC_COPY_SUPPORTED
   if constexpr (ddaLL128Staged<WIRE>()) {
-    if (keep >= 60) {
-      asyncWait<60>();
-    } else if (keep >= 28) {
-      asyncWait<28>();
-    } else if (keep >= 12) {
-      asyncWait<12>();
-    } else if (keep >= 4) {
-      asyncWait<4>();
-    } else {
-      asyncWait<0>();
-    }
+    asyncWaitAtMost<kDdaLL128StagePushOps, kDdaLL128StageWaitRungs>(keep);
     // The wait intrinsic touches no memory; the fence keeps the window stores that follow below it, and emits nothing.
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
   }
