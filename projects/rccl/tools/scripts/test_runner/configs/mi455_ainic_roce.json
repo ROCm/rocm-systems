@@ -382,7 +382,8 @@
     "net_ib_gdr_flush_cast": {
       "extends": "net_ib_gdr_flush",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "ib-cast",
+        "NCCL_GDR_FLUSH_DISABLE": "0"
       }
     },    "gdr_flush_cumem_multinode": {
       "extends": "default",
