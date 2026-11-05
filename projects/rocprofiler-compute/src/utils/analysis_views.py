@@ -28,7 +28,7 @@ from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 import config
 from rocprof_compute_soc.metric_library import loader
 from utils.equation_format import normalize_equation
-from utils.logger import console_error
+from utils.logger import console_error, console_warning
 from utils.utils_common import (
     INVALID_BLOCK_HINT,
     METRIC_ID_RE,
@@ -175,9 +175,21 @@ def convert_filter_blocks_to_panel_ids(
 ) -> Set[int]:
     """Inverse of convert_metric_id_to_panel_info: map metric ids like
     "2" or "11.1" to the set of file_id integers (e.g. {200, 1100}).
-    Tokens that are not metric ids are looked up as panel aliases (e.g.
-    "lds", "roofline") for the given arch.
+    Metric library ids (e.g. "compute.salu_util") select the panels that show the
+    metric, and other tokens are looked up as panel aliases (e.g. "lds",
+    "roofline") for the given arch. A numeric id selects its own panel, also when the
+    views leave its row out, so workloads saved by older versions keep their panels.
     """
+    if arch:
+        filter_blocks = [
+            placement
+            for bid in map(str, filter_blocks)
+            for placement in (
+                metric_placements(bid, arch)
+                if loader.METRIC_LIBRARY_ID_RE.match(bid)
+                else [bid]
+            )
+        ]
     alias_map: Dict[str, str] = (
         get_arch_alias_to_panel_id(arch)
         if arch and any(not METRIC_ID_RE.match(str(bid)) for bid in filter_blocks)
@@ -190,6 +202,76 @@ def convert_filter_blocks_to_panel_ids(
             console_error(f"Invalid --block value {str(bid)!r}.{INVALID_BLOCK_HINT}")
         resolved.add(int(convert_metric_id_to_panel_info(metric_id)[0]))
     return resolved
+
+
+def metric_placements(metric_id: str, arch: str) -> List[str]:
+    """Return the numeric ids of the rows that show a metric library id on arch.
+
+    Args:
+        metric_id: A metric library id, e.g. "compute.salu_util".
+        arch: A GPU arch with views.
+
+    Returns:
+        Every row's "block.table.row" id, in view order; an unknown id is an error.
+    """
+    if not has_views(arch):
+        console_error(f"Metric ids such as {metric_id!r} are not supported on {arch}.")
+    placements = [
+        position
+        for position, row in iter_view_rows(load_views(arch))
+        if metric_id in row_metric_ids(row)
+    ]
+    if not placements:
+        console_error(
+            f"Unknown metric id {metric_id!r} for {canonical_config_arch(arch)}."
+            f"{INVALID_BLOCK_HINT}"
+        )
+    return placements
+
+
+def expand_metric_ids(tokens: List[str], arch: str) -> List[str]:
+    """Return -b tokens as the numeric ids of arch's views.
+
+    A metric library id becomes the ids of the rows that show it. Numeric ids are the
+    ids analyze shows and are returned unchanged, as are block aliases.
+    """
+    expanded: List[str] = []
+    for token in tokens:
+        if loader.METRIC_LIBRARY_ID_RE.match(token):
+            expanded.extend(metric_placements(token, arch))
+        else:
+            expanded.append(token)
+    return expanded
+
+
+def row_ids_as_metric_ids(tokens: List[str], arch: str) -> List[str]:
+    """Return -b tokens with each numeric row id replaced by the metric library ids its
+    row shows, so a saved workload keeps its rows when later views renumber them. Other
+    tokens, and row ids no view row has, are returned unchanged; each token once."""
+    rows = _rows_by_position(arch)
+    replaced: List[str] = []
+    for token in tokens:
+        for new in (
+            row_metric_ids(rows[token])
+            if _is_row_id(token) and token in rows
+            else [token]
+        ):
+            if new not in replaced:
+                replaced.append(new)
+    return replaced
+
+
+def warn_numeric_metric_ids(tokens: List[str], arch: str) -> None:
+    """Warn that each numeric row id ("block.table.row") is deprecated, naming the
+    metric library id its row shows."""
+    rows = _rows_by_position(arch)
+    for token in tokens:
+        if not _is_row_id(token) or token not in rows:
+            continue
+        hint = " or ".join(repr(metric_id) for metric_id in row_metric_ids(rows[token]))
+        console_warning(
+            f"Numeric metric id {token!r} is deprecated. Use {hint} instead."
+        )
 
 
 def iter_view_rows(views: List[Dict[str, Any]]) -> Iterator[Tuple[str, Dict[str, Any]]]:
@@ -248,6 +330,22 @@ def view_metric_errors(
             f"{position} {error}" for error in _row_metric_errors(row, metrics)
         )
     return errors
+
+
+# ---------------------------------------------------------------------------
+# Metric ids
+# ---------------------------------------------------------------------------
+
+
+def _is_row_id(token: str) -> bool:
+    return bool(METRIC_ID_RE.match(token)) and token.count(".") == 2
+
+
+def _rows_by_position(arch: str) -> Dict[str, Dict[str, Any]]:
+    """Return view row id (the id analyze shows) -> row of arch's views."""
+    if not has_views(arch):
+        return {}
+    return dict(iter_view_rows(load_views(arch)))
 
 
 # ---------------------------------------------------------------------------

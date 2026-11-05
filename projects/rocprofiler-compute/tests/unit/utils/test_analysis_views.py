@@ -5,24 +5,31 @@
 
 tools/validate_views.py checks that the shipped views keep the panels' structure; these
 tests cover what that check does not compare: the values a view row gives, the errors
-for broken views, and the profile mode imports.
+for broken views, the metric id resolver of -b and --list-metrics, and the profile mode
+imports.
 """
 
 import copy
 import importlib
 import sys
 
+import common
 from conftest import ProfileModeImportGuard
 
 import utils
 from rocprof_compute_soc.metric_library import loader
 from utils.analysis_views import (
+    convert_filter_blocks_to_panel_ids,
+    expand_metric_ids,
     get_arch_alias_to_panel_id,
     iter_view_rows,
     load_views,
+    metric_placements,
+    row_ids_as_metric_ids,
     view_metric_errors,
     view_schema_errors,
     views_to_panel_configs,
+    warn_numeric_metric_ids,
 )
 
 ARCH = "gfx942"
@@ -153,6 +160,63 @@ def test_an_arch_reads_only_the_aliases_of_its_own_views():
     unknown on gfx942."""
     assert get_arch_alias_to_panel_id("gfx950")["membw_analysis"] == "30"
     assert "membw_analysis" not in get_arch_alias_to_panel_id("gfx942")
+
+
+def test_metric_ids_select_every_row_that_shows_them():
+    """compute.salu_util is in Speed of Light and Compute Pipeline on gfx942; aliases
+    and numeric ids pass through."""
+    assert expand_metric_ids(["compute.salu_util", "lds", "11.2.3"], "gfx942") == [
+        "2.1.7",
+        "11.2.2",
+        "lds",
+        "11.2.3",
+    ]
+    assert convert_filter_blocks_to_panel_ids(["compute.salu_util"], "gfx942") == {
+        200,
+        1100,
+    }
+
+
+def test_saved_row_id_of_a_left_out_row_keeps_its_panel(monkeypatch):
+    """gfx908 Speed of Light 2.1.0 has no metric, so the views leave it out; a workload
+    saved with -b 2.1.0 still shows panel 2, without a warning."""
+    warning = common.patch_console(monkeypatch, "utils.analysis_views", "warning")
+    assert convert_filter_blocks_to_panel_ids(["2.1.0", "lds"], "gfx908") == {200, 1200}
+    warning["warning"].assert_not_called()
+
+
+def test_unknown_metric_id_names_the_id_and_arch(monkeypatch):
+    """gfx1151 (gfx115x views) has no SALU utilization metric."""
+    error = common.patch_console(monkeypatch, "utils.analysis_views", "error")["error"]
+    assert metric_placements("compute.salu_util", "gfx1151") == []
+    message = error.call_args.args[0]
+    assert "'compute.salu_util'" in message and "gfx115x" in message
+
+
+def test_typed_numeric_row_ids_are_the_ids_analyze_shows(monkeypatch):
+    """gfx908's views leave out the Speed of Light rows without a metric, so view row
+    2.1.7 shows vL1D hit rate (panel file row 2.1.16). A typed row id means the view
+    row; block and table ids are not deprecated, a row id is, naming its metric id."""
+    warning = common.patch_console(monkeypatch, "utils.analysis_views", "warning")
+    tokens = ["11", "11.2", "2.1.7", "lds"]
+    assert expand_metric_ids(tokens, "gfx908") == tokens
+    warn_numeric_metric_ids(tokens, "gfx908")
+    assert [call.args[0] for call in warning["warning"].call_args_list] == [
+        "Numeric metric id '2.1.7' is deprecated. Use 'vl1d.hit_rate' instead.",
+    ]
+
+
+def test_typed_row_ids_are_saved_as_metric_ids():
+    """Profile saves the metric ids of typed row ids, once each, so the workload keeps
+    its rows when later views renumber them; other tokens stay as typed."""
+    tokens = ["11", "2.1.7", "lds", "compute.salu_util", "2.1.7", "99.9.9"]
+    assert row_ids_as_metric_ids(tokens, "gfx908") == [
+        "11",
+        "vl1d.hit_rate",
+        "lds",
+        "compute.salu_util",
+        "99.9.9",
+    ]
 
 
 def test_imports_only_profile_mode_dependencies(monkeypatch):

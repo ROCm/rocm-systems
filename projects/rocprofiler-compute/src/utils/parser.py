@@ -17,7 +17,11 @@ from pc_sampling.pc_sampling_analysis import (
     load_aggregated_pc_sampling,
 )
 from utils import schema
-from utils.analysis_views import convert_filter_blocks_to_panel_ids
+from utils.analysis_views import (
+    convert_filter_blocks_to_panel_ids,
+    expand_metric_ids,
+    warn_numeric_metric_ids,
+)
 from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
@@ -62,7 +66,8 @@ def build_dfs(
     """Build a dataframe template for each table in each panel. Analyze-mode
     filter_metrics overrides profile-mode filter_blocks; tables that fail the
     active filter are omitted from arch_configs.dfs. Alias tokens (e.g. "lds",
-    "roofline") in either filter are resolved against arch's panel aliases.
+    "roofline") in either filter are resolved against arch's panel aliases, and a
+    metric library id (e.g. "compute.salu_util") selects every row that shows it.
     """
 
     simple_box = {
@@ -77,6 +82,9 @@ def build_dfs(
     dfs_type: dict[int, str] = {}
     dfs_expressions: dict[int, list[str]] = {}
 
+    if filter_metrics and arch:
+        warn_numeric_metric_ids(filter_metrics, arch)
+        filter_metrics = expand_metric_ids(filter_metrics, arch)
     if filter_metrics:
         numeric_tokens = [t for t in filter_metrics if METRIC_ID_RE.match(str(t))]
         alias_tokens = [t for t in filter_metrics if not METRIC_ID_RE.match(str(t))]

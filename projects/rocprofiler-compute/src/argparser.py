@@ -84,7 +84,8 @@ def add_general_group(
             "Add block or metric [ids] or aliases to list their metrics with units\n"
             'and descriptions, or "all" to list every metric. Each id or alias adds\n'
             "to the list: --list-metrics sol 12.1 lists all of block 2 (sol) and\n"
-            "table 12.1.\n"
+            "table 12.1. A metric id such as compute.salu_util lists every row\n"
+            "that shows the metric.\n"
             "With analyze -p <workload>, list the workload's blocks and metrics."
         ),
     )
@@ -363,10 +364,11 @@ Examples:
         default=[],
         help=(
             "Specify metric id(s) from --list-metrics for filtering "
-            "(e.g. 12 12.1 12.1.1).\n"
-            "Alternatively, specify block id(s) for filtering "
-            "(e.g. 12 13 14).\n"
+            "(e.g. compute.salu_util).\n"
+            "Alternatively, specify block or table id(s) for filtering "
+            "(e.g. 12 12.1).\n"
             "Alternatively, specify block alias(es) for filtering.\n"
+            "Numeric metric ids (e.g. 12.1.1) are deprecated.\n"
             "Aliases are arch-specific; run --list-metrics to see\n"
             "all valid block ids and aliases.\n"
             "Cannot be used with --set or --roofline-bench-only."
@@ -722,7 +724,9 @@ Examples:
         type=block_token_or_alias,
         action="extend",
         help=(
-            "Specify metric id(s) or block alias(es) from --list-metrics for filtering."
+            "Specify metric id(s) (e.g. compute.salu_util), block or table id(s)\n"
+            "(e.g. 12 12.1) or block alias(es) from --list-metrics for filtering.\n"
+            "Numeric metric ids (e.g. 12.1.1) are deprecated."
         ),
     )
     analyze_group.add_argument(
