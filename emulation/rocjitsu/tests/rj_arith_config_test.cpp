@@ -12,15 +12,18 @@
 #include "rocjitsu/vm/amdgpu/shader_engine.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/soc.h"
+#include "rocjitsu/vm/virtual_machine.h"
 #include "scoped_temp.h"
 #include "test_paths.h"
 #include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace rocjitsu {
 namespace {
@@ -248,13 +251,51 @@ TEST(ArithConfigTest, CheckpointRejectsUnserializedCus) {
                 children + "]},\"links\":[]}}";
     config::LoadedConfig loaded;
     ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
-    test::ScopedTempFile file("rocjitsu-unserialized-cu-");
+    auto *soc = loaded.soc();
+    std::unique_ptr<VirtualMachine> vm;
+    for (bool wrapped : {false, true}) {
+      SCOPED_TRACE(wrapped);
+      if (wrapped) {
+        loaded.take_root().release();
+        vm = std::make_unique<VirtualMachine>(std::unique_ptr<SoC>(soc), false);
+      }
+      test::ScopedTempFile file("rocjitsu-unserialized-cu-");
+      util::StringDiagnostic diagnostic;
+      EXPECT_TRUE(config::save_checkpoint(file.path(), *soc, 0, loaded.engine_config,
+                                          loaded.cpu_dispatch_threads, diagnostic.emitter())
+                      .failed());
+      EXPECT_NE(diagnostic.message().find("serialization does not cover every CU"),
+                std::string::npos);
+    }
+  }
+}
+
+TEST(ArithConfigTest, CheckpointUsesPerGpuComponentRoot) {
+  const char *json = R"({"num_threads":1,"vm":{"arch":"rdna4"},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd0","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},
+        {"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu0","type":"compute_unit"}]}]}]},"links":[]}})";
+  config::LoadedConfig loaded;
+  std::vector<std::unique_ptr<SoC>> socs;
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
+    auto *soc = loaded.soc();
+    loaded.take_root().release();
+    socs.emplace_back(soc);
+  }
+  VirtualMachine vm(std::move(socs), {0, 1}, false);
+  for (int i = 0; i < 2; ++i) {
+    SCOPED_TRACE(i);
+    test::ScopedTempFile file("rocjitsu-per-gpu-checkpoint-");
     util::StringDiagnostic diagnostic;
-    EXPECT_TRUE(config::save_checkpoint(file.path(), *loaded.soc(), 0, loaded.engine_config,
+    EXPECT_TRUE(config::save_checkpoint(file.path(), *vm.soc(i), 0, loaded.engine_config,
                                         loaded.cpu_dispatch_threads, diagnostic.emitter())
-                    .failed());
-    EXPECT_NE(diagnostic.message().find("serialization does not cover every CU"),
-              std::string::npos);
+                    .succeeded())
+        << diagnostic.message();
   }
 }
 
