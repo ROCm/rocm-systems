@@ -18,111 +18,54 @@
 // ones that specifically exercise the *absence* of that registration call,
 // and must not call amdsmi_test_register_node_handle().
 //
-// rsmi_dev_npm_balancing_mode_set() applies REQUIRE_ROOT_ACCESS before
-// touching any file, so:
-//   - non-root callers always observe AMDSMI_STATUS_NO_PERM, verifiable
-//     without root and asserted unconditionally below.
-//   - success / not-supported branches (reached only past the root gate)
-//     require root and are gated with GTEST_SKIP_ following the existing
-//     is_sudo_user() convention used throughout tests/amd_smi_test/main.cc.
-// Since set_npm_board_mode()/get_npm_board_mode() operate on an arbitrary
-// board_path string (not hardcoded to /sys), the root-gated cases use a
-// plain std::filesystem temp directory instead of real /sys mocking.
+// Permission failures are tested with file modes, as in ras_features_test.cc: see
+// SetNpmBalancingModeUnwritableModeFileIsNoPerm. The board directory is a FakeSysfsTree, since
+// set_npm_board_mode()/get_npm_board_mode() take an arbitrary board_path string.
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <cstdlib>
-#include <filesystem>
-#include <fstream>
 #include <memory>
+#include <optional>
 #include <string>
-#include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_test_internal.h"
-#include "rocm_smi/rocm_smi_utils.h"
-
-#if defined(ENABLE_WSL_BACKEND)
-#include "amd_smi/impl/amd_smi_wsl_device.h"
-#endif  // ENABLE_WSL_BACKEND
-
-namespace fs = std::filesystem;
-
-// On a real WSL2 CI runner, WSLGPUBackend::IsActive() makes every NPM call
-// short-circuit to AMDSMI_STATUS_NOT_SUPPORTED before ever consulting this
-// test's fabricated board_path content (see the ENABLE_WSL_BACKEND guard at
-// the top of each amdsmi_*npm* function in amd_smi.cc). A plain helper
-// function would not work here: GTEST_SKIP_() expands to a `return`, which
-// would only exit the helper, not the TEST() body -- hence a macro.
-#if defined(ENABLE_WSL_BACKEND)
-#define SKIP_IF_WSL_BACKEND_ACTIVE()                                   \
-  do {                                                                 \
-    if (amd::smi::WSLGPUBackend::IsActive()) {                         \
-      GTEST_SKIP_(                                                     \
-          "WSLGPUBackend is active: this NPM call short-circuits to "  \
-          "AMDSMI_STATUS_NOT_SUPPORTED before this test's fabricated " \
-          "board content is ever consulted");                          \
-    }                                                                  \
-  } while (0)
-#else
-#define SKIP_IF_WSL_BACKEND_ACTIVE() \
-  do {                               \
-  } while (0)
-#endif  // ENABLE_WSL_BACKEND
+#include "test_fixture_utils.h"
 
 namespace {
 
-// RAII helper identical in spirit to kfd_numa_node_test.cc's ScopedTempDir:
-// mkdtemp()-based (atomic, 0700, fails if the name already exists) rather
-// than fs::create_directories() on a predictable path, which would succeed
-// silently through a pre-planted symlink.
-class TempBoardDir {
+// amdsmi_init() without hardware discovery, plus a fake ROCm SMI device 0: the NPM entry points
+// call rsmi_dev_npm_*(0, ...), which needs a device 0 even though the board path comes from the
+// handle. For the setters: ROCm SMI is never initialized, so its cached euid stays 0 and the
+// root-only setters run unprivileged. A real init would make them return NO_PERM.
+class NpmTestEnv {
  public:
-  TempBoardDir() {
-    std::string tmpl =
-        (fs::temp_directory_path() / "amdsmi_npm_balancing_mode_test_XXXXXX").string();
-    std::vector<char> buf(tmpl.begin(), tmpl.end());
-    buf.push_back('\0');
-    if (char* result = mkdtemp(buf.data())) {
-      path_ = result;
-    }
-  }
-  ~TempBoardDir() {
-    if (!path_.empty()) {
-      std::error_code ec;
-      fs::remove_all(path_, ec);
-    }
-  }
-  const fs::path& path() const { return path_; }
-  void WriteFile(const std::string& filename, const std::string& contents) const {
-    std::ofstream ofs(path_ / filename);
-    ofs << contents;
-  }
-  std::string ReadFile(const std::string& filename) const {
-    std::ifstream ifs(path_ / filename);
-    std::string line;
-    std::getline(ifs, line);
-    return line;
-  }
+  NpmTestEnv() : device_(tree_.root() + "/card0") {}
 
  private:
-  fs::path path_;
+  ScopedAmdsmiInit init_;
+  FakeSysfsTree tree_;
+  ScopedRocmSmiDevice device_;
 };
 
-// Small RAII wrapper around amdsmi_init()/amdsmi_shut_down() so each test is
-// self-contained regardless of test execution order.
-class ScopedAmdSmiInit {
+// The real amdsmi_init() over a fake KFD and DRM tree with one GPU, for the getters, which need
+// no root.
+class NpmDiscoveredGpuEnv {
  public:
-  ScopedAmdSmiInit() { status_ = amdsmi_init(AMDSMI_INIT_AMD_GPUS); }
-  ~ScopedAmdSmiInit() {
-    if (status_ == AMDSMI_STATUS_SUCCESS) {
-      amdsmi_shut_down();
-    }
+  NpmDiscoveredGpuEnv() {
+    WriteGpuNode(tree_, kGpuNode, kGpuCard, kGpuId);
+    topology_.emplace(tree_);
   }
-  amdsmi_status_t status() const { return status_; }
 
  private:
-  amdsmi_status_t status_;
+  static constexpr uint32_t kGpuNode = 1;
+  static constexpr uint32_t kGpuCard = 0;
+  static constexpr uint64_t kGpuId = 4242;
+
+  FakeSysfsTree tree_;
+  std::optional<FakeKfdTopology> topology_;
 };
 
 }  // namespace
@@ -132,24 +75,17 @@ class ScopedAmdSmiInit {
 // ---------------------------------------------------------------------
 
 TEST(GpuUnit, GetNpmBalancingModeNullHandleIsInval) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  NpmDiscoveredGpuEnv env;
 
   amdsmi_npm_balancing_mode_t mode;
   EXPECT_EQ(amdsmi_get_npm_balancing_mode(nullptr, &mode), AMDSMI_STATUS_INVAL);
 }
 
 TEST(GpuUnit, GetNpmBalancingModeNullModeIsInval) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  NpmDiscoveredGpuEnv env;
 
-  std::string board_path = "/tmp/amdsmi_npm_balancing_mode_test_null_mode_probe";
+  FakeSysfsTree board;  // the board directory below is never created
+  std::string board_path = board.root() + "/missing_board";
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -157,17 +93,12 @@ TEST(GpuUnit, GetNpmBalancingModeNullModeIsInval) {
 }
 
 TEST(GpuUnit, GetNpmBalancingModeDisabledStillReportsLastSelectedMode) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+  NpmDiscoveredGpuEnv env;
 
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "disabled");
   board.WriteFile("mode", "1");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -179,21 +110,16 @@ TEST(GpuUnit, GetNpmBalancingModeDisabledStillReportsLastSelectedMode) {
 }
 
 TEST(GpuUnit, GetNpmBalancingModeEnabledDefaultsToPowerBalancing) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+  NpmDiscoveredGpuEnv env;
 
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "enabled");
   // The platform/driver creates board/mode with its default value ("1")
   // when NPM is enabled; simulate that here rather than leaving the file
   // absent, since a genuinely missing/unreadable file now reports
   // AMDSMI_STATUS_SUCCESS + AMDSMI_NPM_BALANCING_MODE_INVALID (N/A).
   board.WriteFile("mode", "1");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -203,19 +129,14 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledDefaultsToPowerBalancing) {
 }
 
 TEST(GpuUnit, GetNpmBalancingModeEnabledMissingModeFileIsNotSupported) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+  NpmDiscoveredGpuEnv env;
 
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "enabled");
   // Deliberately do not create board/mode: the sysfs node absent/unreadable
   // must report NOT_SUPPORTED, agreeing with amdsmi_set_npm_balancing_mode()
-  // for the identical state (see SetNpmBalancingModeRootMissingModeFileIsNotSupported).
-  std::string board_path = board.path().string();
+  // for the identical state (see SetNpmBalancingModeMissingModeFileIsNotSupported).
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -224,17 +145,12 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledMissingModeFileIsNotSupported) {
 }
 
 TEST(GpuUnit, GetNpmBalancingModeGarbageValueIsUnexpectedData) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+  NpmDiscoveredGpuEnv env;
 
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "enabled");
   board.WriteFile("mode", "0");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -245,17 +161,12 @@ TEST(GpuUnit, GetNpmBalancingModeGarbageValueIsUnexpectedData) {
 }
 
 TEST(GpuUnit, GetNpmBalancingModeEnabledReadsFrequencyBalancing) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+  NpmDiscoveredGpuEnv env;
 
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "enabled");
   board.WriteFile("mode", "2");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -269,24 +180,17 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledReadsFrequencyBalancing) {
 // ---------------------------------------------------------------------
 
 TEST(GpuUnit, SetNpmBalancingModeNullHandleIsInval) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  NpmTestEnv env;
 
   EXPECT_EQ(amdsmi_set_npm_balancing_mode(nullptr, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING),
             AMDSMI_STATUS_INVAL);
 }
 
 TEST(GpuUnit, SetNpmBalancingModeInvalidModeIsInval) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  NpmTestEnv env;
 
-  std::string board_path = "/tmp/amdsmi_npm_balancing_mode_test_invalid_mode_probe";
+  FakeSysfsTree board;  // the board directory below is never created
+  std::string board_path = board.root() + "/missing_board";
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -295,47 +199,32 @@ TEST(GpuUnit, SetNpmBalancingModeInvalidModeIsInval) {
             AMDSMI_STATUS_INVAL);
 }
 
-TEST(GpuUnit, SetNpmBalancingModeNonRootIsNoPerm) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmBalancingModeUnwritableModeFileIsNoPerm) {
+  NpmTestEnv env;
 
-  if (amd::smi::is_sudo_user()) {
-    GTEST_SKIP_(
-        "Running as root: REQUIRE_ROOT_ACCESS gate cannot be exercised here; "
-        "see SetNpmBalancingModeRoot* tests instead");
-  }
-
-  // Any non-empty board path is sufficient: REQUIRE_ROOT_ACCESS in
-  // rsmi_dev_npm_balancing_mode_set() rejects before the path is ever
-  // touched.
-  std::string board_path = "/tmp/amdsmi_npm_balancing_mode_test_nonroot_probe";
+  FakeSysfsTree board;
+  board.WriteFile("npm_status", "enabled");
+  board.WriteFile("mode", "1");
+  board.SetPermissions("mode", 0444);
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
-  EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
-            AMDSMI_STATUS_NO_PERM);
+  auto set_mode = [&] {
+    return amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING);
+  };
+  EXPECT_EQ(amd::smi::testing::RunAsUnprivilegedUser(set_mode), AMDSMI_STATUS_NO_PERM);
+  // A rejected write leaves the file unchanged.
+  EXPECT_EQ(board.ReadFile("mode"), "1");
 }
 
-TEST(GpuUnit, SetNpmBalancingModeRootRejectsWhenNpmDisabled) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmBalancingModeRejectsWhenNpmDisabled) {
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
-
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "disabled");
   board.WriteFile("mode", "1");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -348,22 +237,13 @@ TEST(GpuUnit, SetNpmBalancingModeRootRejectsWhenNpmDisabled) {
   EXPECT_EQ(board.ReadFile("mode"), "1");
 }
 
-TEST(GpuUnit, SetNpmBalancingModeRootRoundTrip) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmBalancingModeRoundTrip) {
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
-
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "enabled");
   board.WriteFile("mode", "1");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -384,24 +264,15 @@ TEST(GpuUnit, SetNpmBalancingModeRootRoundTrip) {
   EXPECT_EQ(readback, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING);
 }
 
-TEST(GpuUnit, SetNpmBalancingModeRootMissingModeFileIsNotSupported) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmBalancingModeMissingModeFileIsNotSupported) {
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
-
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "enabled");
   // Deliberately do not create board/mode: set_npm_board_mode() requires
   // the file to already exist (it does not create it), mirroring
   // set_npm_board_limit()'s missing-file handling.
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -409,28 +280,11 @@ TEST(GpuUnit, SetNpmBalancingModeRootMissingModeFileIsNotSupported) {
             AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
-TEST(GpuUnit, SetNpmBalancingModeRootMissingBoardDirIsNotSupported) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmBalancingModeMissingBoardDirIsNotSupported) {
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
-
-  // Get a unique, mkdtemp()-allocated path (unpredictable, not plantable in
-  // advance), then remove it so the path itself is missing for the test --
-  // avoids a fixed/predictable name for the root-privileged remove_all().
-  TempBoardDir board;
-  ASSERT_FALSE(board.path().empty());
-  std::string board_path = board.path().string();
-  {
-    std::error_code ec;
-    fs::remove_all(board.path(), ec);
-  }
+  FakeSysfsTree board;  // the board directory below is never created
+  std::string board_path = board.root() + "/missing_board";
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -438,24 +292,15 @@ TEST(GpuUnit, SetNpmBalancingModeRootMissingBoardDirIsNotSupported) {
             AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
-TEST(GpuUnit, SetNpmBalancingModeRootRejectsModeAbsentFromSupportedBitmask) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmBalancingModeRejectsModeAbsentFromSupportedBitmask) {
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
-
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "enabled");
   board.WriteFile("mode", "1");
   // bit 2 (FREQUENCY_BALANCING) only -- POWER_BALANCING (bit 1) is absent.
   board.WriteFile("supported_mode", "0x4");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -465,24 +310,15 @@ TEST(GpuUnit, SetNpmBalancingModeRootRejectsModeAbsentFromSupportedBitmask) {
   EXPECT_EQ(board.ReadFile("mode"), "1");
 }
 
-TEST(GpuUnit, SetNpmBalancingModeRootAllowsModePresentInSupportedBitmask) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmBalancingModeAllowsModePresentInSupportedBitmask) {
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
-
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "enabled");
   board.WriteFile("mode", "1");
   // bits 1+2 -- both modes supported, matching today's real platforms.
   board.WriteFile("supported_mode", "0x6");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -491,26 +327,17 @@ TEST(GpuUnit, SetNpmBalancingModeRootAllowsModePresentInSupportedBitmask) {
   EXPECT_EQ(board.ReadFile("mode"), "2");
 }
 
-TEST(GpuUnit, SetNpmBalancingModeRootRejectsCorruptSupportedModesFile) {
+TEST(GpuUnit, SetNpmBalancingModeRejectsCorruptSupportedModesFile) {
   // A read failure other than NOT_SUPPORTED (e.g. corrupt/unparsable
   // content) must fail closed as SETTING_UNAVAILABLE and reject the write --
   // it must not be treated like a missing file.
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
-
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "enabled");
   board.WriteFile("mode", "1");
   board.WriteFile("supported_mode", "-1");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -520,25 +347,16 @@ TEST(GpuUnit, SetNpmBalancingModeRootRejectsCorruptSupportedModesFile) {
   EXPECT_EQ(board.ReadFile("mode"), "1");
 }
 
-TEST(GpuUnit, SetNpmBalancingModeRootToleratesMissingSupportedModesFile) {
+TEST(GpuUnit, SetNpmBalancingModeToleratesMissingSupportedModesFile) {
   // The supported_mode sysfs file is not yet implemented on all driver
   // versions; its absence must not block an otherwise-valid set.
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
-
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "enabled");
   board.WriteFile("mode", "1");
   // Deliberately do not create board/supported_mode.
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -552,11 +370,7 @@ TEST(GpuUnit, SetNpmBalancingModeRootToleratesMissingSupportedModesFile) {
 // ---------------------------------------------------------------------
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesNullHandleIsInval) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  NpmDiscoveredGpuEnv env;
 
   amdsmi_bit_field_t supported_modes;
   EXPECT_EQ(amdsmi_get_npm_supported_balancing_modes(nullptr, &supported_modes),
@@ -564,13 +378,10 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesNullHandleIsInval) {
 }
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesNullOutputIsInval) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  NpmDiscoveredGpuEnv env;
 
-  std::string board_path = "/tmp/amdsmi_npm_supported_balancing_modes_test_null_out_probe";
+  FakeSysfsTree board;  // the board directory below is never created
+  std::string board_path = board.root() + "/missing_board";
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -578,17 +389,12 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesNullOutputIsInval) {
 }
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesMissingFileIsNotSupported) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+  NpmDiscoveredGpuEnv env;
 
-  TempBoardDir board;
+  FakeSysfsTree board;
   // Deliberately do not create board/supported_mode: not yet implemented
   // by the driver on all platforms.
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -598,17 +404,12 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesMissingFileIsNotSupported) {
 }
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesNotGatedOnNpmEnablement) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+  NpmDiscoveredGpuEnv env;
 
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "disabled");
   board.WriteFile("supported_mode", "0x6");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -619,16 +420,11 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesNotGatedOnNpmEnablement) {
 }
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesDecodesHexBitmask) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+  NpmDiscoveredGpuEnv env;
 
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("supported_mode", "0x2");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -639,16 +435,11 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesDecodesHexBitmask) {
 }
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesGarbageValueIsUnexpectedData) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+  NpmDiscoveredGpuEnv env;
 
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("supported_mode", "not-a-hex-number");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -669,18 +460,14 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesGarbageValueIsUnexpectedData) {
 // ---------------------------------------------------------------------
 
 TEST(GpuUnit, GetNpmBalancingModeRejectsUnregisteredHandle) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  NpmDiscoveredGpuEnv env;
 
   // Heap-allocated so this address cannot alias a stack slot some other test
   // in this binary already passed to amdsmi_test_register_node_handle() --
   // see GetNpmInfoRejectsUnregisteredHandle in amdsmi_npm_limit_test.cc for
   // the full rationale.
-  auto unregistered_board_path =
-      std::make_unique<std::string>("/tmp/amdsmi_npm_balancing_mode_test_unregistered_probe1");
+  FakeSysfsTree board;  // the board directory below is never created
+  auto unregistered_board_path = std::make_unique<std::string>(board.root() + "/missing_board");
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(unregistered_board_path.get());
 
   amdsmi_npm_balancing_mode_t mode = AMDSMI_NPM_BALANCING_MODE_INVALID;
@@ -688,31 +475,22 @@ TEST(GpuUnit, GetNpmBalancingModeRejectsUnregisteredHandle) {
 }
 
 TEST(GpuUnit, SetNpmBalancingModeRejectsUnregisteredHandle) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  NpmTestEnv env;
 
-  auto unregistered_board_path =
-      std::make_unique<std::string>("/tmp/amdsmi_npm_balancing_mode_test_unregistered_probe2");
+  FakeSysfsTree board;  // the board directory below is never created
+  auto unregistered_board_path = std::make_unique<std::string>(board.root() + "/missing_board");
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(unregistered_board_path.get());
 
-  // AMDSMI_STATUS_INVAL must be returned regardless of caller privilege: the
-  // registry check runs before REQUIRE_ROOT_ACCESS is ever reached.
+  // The registry check runs first, before any board file is touched.
   EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
             AMDSMI_STATUS_INVAL);
 }
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesRejectsUnregisteredHandle) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  NpmDiscoveredGpuEnv env;
 
-  auto unregistered_board_path =
-      std::make_unique<std::string>("/tmp/amdsmi_npm_balancing_mode_test_unregistered_probe3");
+  FakeSysfsTree board;  // the board directory below is never created
+  auto unregistered_board_path = std::make_unique<std::string>(board.root() + "/missing_board");
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(unregistered_board_path.get());
 
   amdsmi_bit_field_t supported_modes = 0;
@@ -721,18 +499,13 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesRejectsUnregisteredHandle) {
 }
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesNegativeValueIsUnexpectedData) {
-  ScopedAmdSmiInit init;
-  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
-    GTEST_SKIP_("No GPU driver loaded");
-  }
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+  NpmDiscoveredGpuEnv env;
 
-  TempBoardDir board;
+  FakeSysfsTree board;
   // std::stoull("-1", ..., 16) would otherwise silently parse as UINT64_MAX;
   // must be rejected as a parse error instead.
   board.WriteFile("supported_mode", "-1");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
