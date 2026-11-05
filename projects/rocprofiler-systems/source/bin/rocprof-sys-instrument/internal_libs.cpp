@@ -12,6 +12,7 @@
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
+#include "common/regex_utility.hpp"
 #include "core/demangler.hpp"
 #include "core/utility.hpp"
 #include "fwd.hpp"
@@ -27,8 +28,10 @@
 #include <algorithm>
 #include <dlfcn.h>
 #include <initializer_list>
+#include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -87,96 +90,40 @@ close_symtab_file(const std::string& _name)
     return false;
 }
 
-template <template <typename, typename...> class ContainerT, typename... TailT>
+template <typename ContainerT>
 bool
-check_regex_restrictions(const ContainerT<std::string, TailT...>& _names,
-                         const regexvec_t&                        _regexes)
+check_regex_restrictions(const ContainerT& names, const regexvec_t& regexes)
 {
-    for(const auto& nitr : _names)
-    {
-        for(const auto& ritr : _regexes)
-        {
-            if(std::regex_search(nitr, ritr))
-            {
-                return true;
-            }
-        }
-    }
-    return false;
+    return std::ranges::any_of(names, [&regexes](const std::string& name) {
+        return rocprofsys::utility::regex_match_any(name, regexes);
+    });
 }
 
 std::optional<std::string>
 get_linked_path(const char*        _name,
                 open_modes_vec_t&& _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) })
 {
-    void* _handle = nullptr;
-    // NOLINTNEXTLINE(misc-const-correctness)
-    bool _noload = false;
-    for(auto const _mode : _open_modes)
+    // the first link_map entry is the library that was opened itself
+    auto const chain =
+        rocprofsys::path::get_link_map(_name, std::move(_open_modes), true);
+    if(chain.empty())
     {
-        _handle = dlopen(_name, _mode);
-        _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-        if(_handle)
-        {
-            break;
-        }
+        return std::nullopt;
     }
-
-    const tim::scope::destructor _dtor{ [&_noload, &_handle]() {
-        if(!_noload)
-        {
-            dlclose(_handle);
-        }
-    } };
-
-    if(_handle)
-    {
-        struct link_map* _link_map = nullptr;
-        dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
-        if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
-        {
-            return rocprofsys::path::realpath(_link_map->l_name);
-        }
-    }
-
-    return std::optional<std::string>{};
+    return rocprofsys::path::realpath(chain.front());
 }
 
 std::set<std::string>
 get_link_map(const std::string& _lib,
              open_modes_vec_t&& _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) })
 {
-    void* _handle = nullptr;
-    bool  _noload = false;
-    for(auto const _mode : _open_modes)
-    {
-        _handle = dlopen(_lib.c_str(), _mode);
-        _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-        if(_handle)
-        {
-            break;
-        }
-    }
-
     auto _chain = std::set<std::string>{};
-    if(_handle)
+    for(const auto& itr :
+        rocprofsys::path::get_link_map(_lib.c_str(), std::move(_open_modes), true))
     {
-        struct link_map* _link_map = nullptr;
-        dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
-        struct link_map const* _next = _link_map;
-        while(_next)
+        if(itr != _lib)
         {
-            if(!std::string_view{ _next->l_name }.empty() &&
-               std::string_view{ _next->l_name } != _lib)
-            {
-                _chain.emplace(rocprofsys::path::realpath(_next->l_name));
-            }
-            _next = _next->l_next;
-        }
-
-        if(!_noload)
-        {
-            dlclose(_handle);
+            _chain.emplace(rocprofsys::path::realpath(itr));
         }
     }
     return _chain;

@@ -58,6 +58,9 @@ panels:
   - type: metric_table
     id: 9
     title: Graphics Core Efficiency Arbiter (GCEA) to System Memory
+  - type: metric_table
+    id: 10
+    title: Workgroup Processors (WGPs)
 - file: roofline.yaml
   panel_id: 4
   panel_title: Roofline

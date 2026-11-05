@@ -12,12 +12,14 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -482,7 +484,8 @@ TEST(GpuVmPipeline, QuantumRetainsAdmissionSnapshotAcrossReturnAndException) {
     {
       auto admitted = vm.snapshot_pinned(context.address_space);
       ASSERT_TRUE(admitted);
-      context.wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(std::move(*admitted)));
+      context.wf->set_vm_access(
+          util::IntrusiveSharedPtr<amdgpu::GpuVmAccessSnapshot>::make(std::move(*admitted)));
     }
     auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto plugin = std::make_unique<InstructionVmPlugin>();
@@ -532,7 +535,8 @@ TEST(GpuVmPipeline, WaveUsesAdmissionSnapshotAcrossRootReplacement) {
   std::optional<amdgpu::GpuVmAccess> admitted =
       context.sim.soc->gpu_vm().snapshot_pinned(context.address_space);
   ASSERT_TRUE(admitted);
-  context.wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(std::move(*admitted)));
+  context.wf->set_vm_access(
+      util::IntrusiveSharedPtr<amdgpu::GpuVmAccessSnapshot>::make(std::move(*admitted)));
 
   auto replacement = std::make_shared<TestExternalAddressSpace>();
   replacement->store(kAddress, kReplacement);
@@ -555,7 +559,8 @@ TEST(GpuVmPipeline, WaveAdmissionSnapshotRevocationTerminatesAfterUnregister) {
   std::optional<amdgpu::GpuVmAccess> admitted =
       context.sim.soc->gpu_vm().snapshot_pinned(context.address_space);
   ASSERT_TRUE(admitted);
-  context.wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(std::move(*admitted)));
+  context.wf->set_vm_access(
+      util::IntrusiveSharedPtr<amdgpu::GpuVmAccessSnapshot>::make(std::move(*admitted)));
   ASSERT_TRUE(context.sim.soc->gpu_vm().unregister_address_space(context.address_space));
 
   std::array<uint8_t, sizeof(uint32_t)> bytes{};
@@ -1331,7 +1336,8 @@ TEST(GpuVmPipeline, RevokedDataRetryTerminatesInsteadOfSpinning) {
   std::optional<amdgpu::GpuVmAccess> admitted =
       context.sim.soc->gpu_vm().snapshot_pinned(context.address_space);
   ASSERT_TRUE(admitted);
-  context.wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(std::move(*admitted)));
+  context.wf->set_vm_access(
+      util::IntrusiveSharedPtr<amdgpu::GpuVmAccessSnapshot>::make(std::move(*admitted)));
 
   constexpr uint64_t kAddress = 0x2000;
   constexpr uint32_t kDestination = 1;
@@ -2143,6 +2149,78 @@ TEST(GpuVmPipeline, TranslatedAtomicsUseStrongBackingOperationsForBothWidths) {
   EXPECT_EQ(context.external->compare_exchange_calls, kCases.size());
 }
 
+// Synthetic requests exercise both backends on a CDNA5 fixture, which has no decoded
+// FCMPSWAP instruction. Expected bits come from gfx1100 global F32 and gfx1010/gfx1030/gfx1100
+// LDS F32/F64 captures; this is pipeline coverage, not a hardware capture of cache F64 atomics.
+template <typename Float, typename Bits>
+void check_float_compare_swap(bool legacy_cache_compatible, bool flush_denormals) {
+  SCOPED_TRACE(testing::Message() << "legacy_cache_compatible=" << legacy_cache_compatible
+                                  << " width=" << sizeof(Bits) << " flush=" << flush_denormals);
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize(legacy_cache_compatible));
+  ASSERT_TRUE(context.address_space);
+  ASSERT_NE(context.wf, nullptr);
+  auto &wf = *context.wf;
+  constexpr uint32_t lanes = 7;
+  wf.set_exec((1u << lanes) - 1);
+  const Bits nan = std::bit_cast<Bits>(std::numeric_limits<Float>::quiet_NaN());
+  const Bits denorm = std::bit_cast<Bits>(std::numeric_limits<Float>::denorm_min());
+  const auto bits = [](Float value) { return std::bit_cast<Bits>(value); };
+  // Equal, unequal, signed zeros that compare equal, and NaNs that never do.
+  // Flushing makes a denormal equal +0 but never changes the bits written or
+  // kept: a mismatch leaves memory alone and a denormal source is stored as is.
+  const std::array<Bits, lanes> initial = {bits(1.0), bits(1.0), bits(-0.0), nan,
+                                           denorm,    denorm,    bits(1.0)};
+  const std::array<Bits, lanes> source = {bits(2.0), bits(2.0), bits(4.0), bits(5.0),
+                                          bits(6.0), bits(8.0), denorm};
+  const std::array<Bits, lanes> compare = {bits(1.0), bits(3.0), bits(0.0), nan,
+                                           bits(0.0), bits(3.0), bits(1.0)};
+  const std::array<Bits, lanes> expected = {
+      bits(2.0), bits(1.0), bits(4.0), nan, flush_denormals ? bits(6.0) : denorm, denorm, denorm};
+  const auto address = [](uint32_t lane) { return uint64_t{0x100} + lane * 0x40; };
+  for (uint32_t lane = 0; lane < lanes; ++lane)
+    context.external->store(address(lane), initial[lane]);
+
+  auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  state->elem_size = sizeof(Bits);
+  state->num_elems = 1;
+  state->is_load = true;
+  state->atomic_op = amdgpu::AtomicOp::FCMPSWAP;
+  state->atomic_denorm_mode = flush_denormals ? 0 : 3;
+  state->wf_size = wf.wf_size();
+  state->exec_mask = state->lane_mask = (1u << lanes) - 1;
+  state->dst_reg_base = wf.vgpr_alloc().base + 4;
+  state->store_data.resize(wf.wf_size() * 2 * sizeof(Bits));
+  for (uint32_t lane = 0; lane < lanes; ++lane) {
+    state->per_lane_addr[lane] = address(lane);
+    std::memcpy(&state->store_data[lane * 2 * sizeof(Bits)], &source[lane], sizeof(Bits));
+    std::memcpy(&state->store_data[(lane * 2 + 1) * sizeof(Bits)], &compare[lane], sizeof(Bits));
+  }
+
+  amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
+  ASSERT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), wf),
+            amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(wf.state(), amdgpu::WfState::RUNNING);
+  EXPECT_TRUE(wf.wait_counters().empty());
+  for (uint32_t lane = 0; lane < lanes; ++lane) {
+    SCOPED_TRACE(lane);
+    EXPECT_EQ(context.external->load<Bits>(address(lane)), expected[lane]);
+    uint64_t returned = context.cu->read_vgpr(wf.vgpr_alloc().base + 4, lane);
+    if constexpr (sizeof(Bits) == 8)
+      returned |= uint64_t{context.cu->read_vgpr(wf.vgpr_alloc().base + 5, lane)} << 32;
+    EXPECT_EQ(returned, initial[lane]);
+  }
+}
+
+TEST(GpuVmPipeline, FloatCompareSwapMatchesAcrossBackends) {
+  for (bool legacy_cache_compatible : {false, true}) {
+    for (bool flush : {false, true}) {
+      check_float_compare_swap<float, uint32_t>(legacy_cache_compatible, flush);
+      check_float_compare_swap<double, uint64_t>(legacy_cache_compatible, flush);
+    }
+  }
+}
+
 TEST(GpuVmPipeline, UnavailableAtomicDoesNotCompleteArchitecturalState) {
   TranslatedPipelineContext context;
   ASSERT_NO_FATAL_FAILURE(context.initialize());
@@ -2462,6 +2540,142 @@ TEST(GpuVmPipeline, TranslatedTensorLoadRetriesBeforeCommittingLdsOrBarrier) {
   EXPECT_EQ(context.external->read_history[0].address, kGlobalAddress);
   EXPECT_EQ(context.external->read_history[1].address, kGlobalAddress + sizeof(uint32_t));
   EXPECT_EQ(context.external->read_history[2].address, kGlobalAddress + sizeof(uint32_t));
+}
+
+TEST(GpuVmPipeline, DeferredTensorLoadReportsInstructionPcAtCompletion) {
+  class TensorDmaPcObserver final : public ExecutionPlugin {
+  public:
+    TensorDmaPcObserver() : ExecutionPlugin("tensor-dma-pc") {}
+    bool observes_tensor_dma_memory_access() const override { return true; }
+    void
+    onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override {
+      pcs.push_back(access.pc);
+    }
+    std::vector<uint64_t> pcs;
+  };
+
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_TRUE(context.address_space);
+  ASSERT_NE(context.wf, nullptr);
+  context.wf->set_lds_base(context.cu->allocate_lds(256));
+
+  auto plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<TensorDmaPcObserver>();
+  TensorDmaPcObserver *observer = plugin.get();
+  ASSERT_TRUE(plugin_group->add(std::move(plugin)));
+  context.sim.soc->set_plugin_group(plugin_group);
+
+  constexpr uint64_t kGlobalAddress = 0x500;
+  constexpr uint64_t kIssuePc = 0x1000;
+  for (uint32_t index = 0; index < 2; ++index)
+    context.external->store(kGlobalAddress + index * sizeof(uint32_t), 0x11223344u + index);
+  context.external->unavailable_read_call = 2;
+
+  amdgpu::tensor_dma_detail::TensorDmaDescriptor descriptor;
+  descriptor.elem_size = sizeof(uint32_t);
+  auto state = std::make_unique<amdgpu::tensor_dma_detail::TensorDmaState>(descriptor, false);
+  state->pc = kIssuePc;
+  state->access = context.wf->snapshot_vm_access();
+  ASSERT_TRUE(state->access);
+  for (uint32_t index = 0; index < 2; ++index) {
+    state->elements.push_back(
+        {.global_address = kGlobalAddress + index * sizeof(uint32_t),
+         .lds_address = context.wf->lds_base() + index * static_cast<uint32_t>(sizeof(uint32_t)),
+         .in_bounds = true});
+  }
+
+  amdgpu::TensorDmaPipeline pipeline;
+  EXPECT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), *context.wf),
+            amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+  EXPECT_TRUE(observer->pcs.empty());
+
+  // The issuing wave's PC has moved past the instruction by the time it completes.
+  context.wf->pc = kIssuePc + 8;
+  pipeline.tick();
+
+  EXPECT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(observer->pcs, (std::vector<uint64_t>{kIssuePc}));
+}
+
+// A tensor load whose global read is unavailable is deferred: its wave waits in
+// VM_RETRY with its PC past the instruction, and the next step completes it. It
+// issues once, before any data moves, and its completion reports its own PC.
+TEST(GpuVmPipeline, DeferredTensorLoadIssuesOnceAndCompletesAtItsInstructionPc) {
+  class TensorDmaStepObserver final : public ExecutionPlugin {
+  public:
+    TensorDmaStepObserver() : ExecutionPlugin("tensor-dma-step") {}
+    bool observes_tensor_dma_issue() const override { return true; }
+    bool observes_tensor_dma_memory_access() const override { return true; }
+    void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &issue,
+                                 const amdgpu::Wavefront &) override {
+      ++issues;
+      lds_ranges.assign(issue.lds_ranges.begin(), issue.lds_ranges.end());
+      if (on_issue)
+        on_issue();
+    }
+    void
+    onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override {
+      completion_pcs.push_back(access.pc);
+    }
+    int issues = 0;
+    std::vector<amdgpu::TensorDmaLdsRange> lds_ranges;
+    std::vector<uint64_t> completion_pcs;
+    std::function<void()> on_issue;
+  };
+
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_NE(context.wf, nullptr);
+  context.wf->set_lds_base(context.cu->allocate_lds(256));
+  context.wf->set_lds_size(256);
+  auto plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<TensorDmaStepObserver>();
+  TensorDmaStepObserver *observer = plugin.get();
+  ASSERT_TRUE(plugin_group->add(std::move(plugin)));
+  context.sim.soc->set_plugin_group(plugin_group);
+
+  constexpr uint64_t kCodeAddress = 0x1000;
+  constexpr uint64_t kDataAddress = 0x2000;
+  constexpr uint32_t kValue = 0x12345678u;
+  constexpr uint32_t kSentinel = 0xa5a55a5au;
+  constexpr uint32_t kSNopGfx12 = 0xBF800000u;
+  // tensor_load_to_lds of one i32 element into LDS offset 0.
+  const std::array<uint32_t, 4> code = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u, kSNopGfx12};
+  context.external->store(kCodeAddress, code);
+  context.external->store(kDataAddress, kValue);
+  const uint32_t sgprs = context.wf->sgpr_alloc().base;
+  const std::array<uint32_t, 4> group0{1, 0, static_cast<uint32_t>(kDataAddress),
+                                       static_cast<uint32_t>(kDataAddress >> 32) | 0x80000000u};
+  const std::array<uint32_t, 8> group1{2u << 16, 1u << 16, 0, 1u << 16, 0, 0, 0, 0};
+  for (uint32_t reg = 0; reg < group0.size(); ++reg)
+    context.cu->write_sgpr(sgprs + reg, group0[reg]);
+  for (uint32_t reg = 0; reg < group1.size(); ++reg)
+    context.cu->write_sgpr(sgprs + 12 + reg, group1[reg]);
+  const uint32_t lds_address = context.wf->lds_base();
+  context.wf->lds().write32(lds_address, kSentinel);
+  bool lds_untouched_at_issue = false;
+  observer->on_issue = [&] {
+    lds_untouched_at_issue = context.wf->lds().read32(lds_address) == kSentinel;
+  };
+  context.wf->pc = kCodeAddress;
+  context.wf->set_exec(1);
+  context.external->unavailable_read_call = 2;
+
+  EXPECT_TRUE(context.cu->step());
+  EXPECT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+  EXPECT_EQ(observer->issues, 1);
+  EXPECT_TRUE(lds_untouched_at_issue);
+  EXPECT_EQ(observer->lds_ranges,
+            (std::vector<amdgpu::TensorDmaLdsRange>{{.address = lds_address, .bytes = 4}}));
+  EXPECT_EQ(context.wf->lds().read32(lds_address), kSentinel);
+  EXPECT_TRUE(observer->completion_pcs.empty());
+
+  static_cast<void>(context.cu->step());
+  EXPECT_EQ(observer->issues, 1);
+  EXPECT_EQ(context.wf->lds().read32(lds_address), kValue);
+  EXPECT_EQ(observer->completion_pcs, (std::vector<uint64_t>{kCodeAddress}));
 }
 
 TEST(GpuVmPipeline, TranslatedTensorStoreRetriesWithoutReplayingOrResnapshottingLds) {

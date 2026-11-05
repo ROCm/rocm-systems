@@ -338,6 +338,31 @@ TEST(ScopedHookMicrotest, CallsCounterIsExactUnderConcurrentInvocation) {
   EXPECT_EQ(hook.calls, kThreads * kPerThread);
 }
 
+// Cross-tray AllGather rules need UALink, one LSA team over 2+ hosts, and an AllGather TDM window. One clique
+// per tray (NCCL_MNNVL_CROSS_CLIQUE=0) gives one LSA team per tray; gfx1250 DPX has no window.
+TEST_F(InitMicrotest, CommSpansTrays_NeedsUalinkOneLsaTeamTwoHostsAndATdmWindow) {
+  auto topo = std::make_unique<ncclTopoSystem>();
+  auto comm = std::make_unique<ncclComm>();
+  rcclArchThresholds table{};
+  table.symTdmMinR2[ncclFuncAllGather] = 64 * 1024 * 1024;
+  comm->archThresholds = &table;
+  comm->topo = topo.get();
+  comm->MNNVL = 1;
+  topo->nHosts = 2;
+  EXPECT_TRUE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true));
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/false)) << "one LSA team per tray";
+  topo->nHosts = 1;
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true)) << "one host";
+  topo->nHosts = 2;
+  comm->MNNVL = 0;
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true)) << "no UALink";
+  comm->MNNVL = 1;
+  table.symTdmMinR2[ncclFuncAllGather] = 0;
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true)) << "no AllGather TDM window";
+  comm->archThresholds = nullptr;
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true)) << "no arch table";
+}
+
 TEST_F(InitMicrotest, UniformRanksPerHost_TwoHostsTwoRanksEach_ReturnsTrue) {
   HostPattern p{1, 1, 2, 2};
   EXPECT_TRUE(uniformRanksPerHost(p.comm(), p.nranks()));
@@ -1759,7 +1784,7 @@ class FillInfoComm {
   std::unique_ptr<ncclNet_t> net_;
 };
 
-hsa_status_t FakeExportDmaBuf(const void*, size_t, int*, uint64_t*) {
+hsa_status_t FakeInitExportDmaBuf(const void*, size_t, int*, uint64_t*) {
   return hsa_status_t(0);
 }
 }  // namespace
@@ -1787,7 +1812,7 @@ TEST_F(InitMicrotest, FillInfo_AllocOk_DmaBufSupported_EnablesGdrDirectly) {
   // AMD dmaBufSupported arm: regMrDmaBuf present + pfn_hsa non-null -> ncclSuccess.
   c.net()->regMrDmaBuf =
       reinterpret_cast<decltype(c.net()->regMrDmaBuf)>(static_cast<uintptr_t>(0x1));
-  pfn_hsa_amd_portable_export_dmabuf = &FakeExportDmaBuf;
+  pfn_hsa_amd_portable_export_dmabuf = &FakeInitExportDmaBuf;
   ncclPeerInfo info{};
   EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
   EXPECT_TRUE(info.hasFineGrain);
@@ -3224,6 +3249,30 @@ TEST_F(InitMicrotest, GinGate_NoSupportedGinTypeOrNoCuMemGdr_RefusesGin) {
   auto noGdr = GinGateComm(/*cuMemGdrSupport=*/false, /*hasMloPart=*/false);
   EXPECT_FALSE(ginGateAllows(/*ginTypeBitMask=*/0, noType.get()));
   EXPECT_FALSE(ginGateAllows(UINT64_MAX, noGdr.get()));
+}
+
+// The connection type chosen after ncclGinSetDefaultBackend. AICOMRCCL-3417: dropping Anvil SDMA on
+// a multi-host communicator can leave no backend, and that communicator must stay NONE.
+TEST_F(InitMicrotest, GinConnectionType_NoBackendLeft_StaysNone) {
+  auto comm = std::make_unique<ncclComm>();
+  auto sr = std::make_unique<ncclSharedResources>();
+  comm->sharedRes = sr.get();
+  comm->contiguousRanksPerHost = 8;
+  sr->ginState.supported = false;
+  EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/true), NCCL_GIN_CONNECTION_NONE);
+  EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/false), NCCL_GIN_CONNECTION_NONE);
+}
+
+TEST_F(InitMicrotest, GinConnectionType_BackendLeft_FullOrRail) {
+  auto comm = std::make_unique<ncclComm>();
+  auto sr = std::make_unique<ncclSharedResources>();
+  comm->sharedRes = sr.get();
+  sr->ginState.supported = true;
+  comm->contiguousRanksPerHost = 8;
+  EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/true), NCCL_GIN_CONNECTION_FULL);
+  EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/false), NCCL_GIN_CONNECTION_RAIL);
+  comm->contiguousRanksPerHost = INT_MAX;
+  EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/false), NCCL_GIN_CONNECTION_NONE);
 }
 
 // NOT ASSERTABLE FROM THIS RUNG, deliberately: the four `global*Support` accumulators at :1491-1494 are
@@ -6128,6 +6177,40 @@ TEST_F(InitMicrotest, CommDestroySync_InitStateSuccess_SetsDeviceStopsProxyAndDe
   EXPECT_EQ(1, proxyStop.calls);
 }
 
+TEST_F(InitMicrotest, CommDestroySync_ClosesDdaIpcPeerMappingsBeforeProxyStop) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  std::vector<std::string> callOrder;
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook closeMappings(g_ncclDdaIpcCommClosePeerMappings, [&](ncclComm*) {
+    callOrder.push_back("closeMappings");
+    return ncclSuccess;
+  });
+  ScopedHook barrier(g_bootstrapIntraNodeBarrier, [&](void*, int*, int, int, int) {
+    callOrder.push_back("intraNodeBarrier");
+    return ncclSuccess;
+  });
+  ScopedHook proxyStop(g_ncclProxyStop, [&](ncclComm*) {
+    callOrder.push_back("proxyStop");
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ((std::vector<std::string>{"closeMappings", "intraNodeBarrier", "proxyStop"}), callOrder);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_AbortedCommStillClosesDdaIpcPeerMappingsLocally) {
+  Teardown_LifecycleComm c;
+  *c.get()->abortFlag = 1;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook closeMappings(g_ncclDdaIpcCommClosePeerMappings, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(1, closeMappings.calls);
+}
+
 TEST_F(InitMicrotest, CommDestroySync_SetDeviceFails_ReturnsErrorWithoutDestroyingCollTrace) {
   Teardown_LifecycleComm c;
   ScopedHook setDevice(g_hipSetDevice, [](int) { return hipErrorInvalidDevice; });
@@ -6252,6 +6335,9 @@ constexpr uint64_t Teardown_kTunerMagic = 0xC0FFEE01u;
 struct Teardown_TunerRecord {
   uint64_t magic = Teardown_kTunerMagic;
   int finalizeCalls = 0;
+  std::atomic<int>* ddaCloseCalls = nullptr;
+  int expectedDdaCloseCalls = 0;
+  bool allDdaMappingsClosedBeforeCleanup = false;
 };
 
 // Returning an error unless the magic survives is what makes "passed the wrong context" a failing test.
@@ -6259,6 +6345,10 @@ ncclResult_t Teardown_TunerFinalize(void* context) {
   auto* rec = static_cast<Teardown_TunerRecord*>(context);
   if (rec == nullptr || rec->magic != Teardown_kTunerMagic) return ncclInternalError;
   rec->finalizeCalls++;
+  if (rec->ddaCloseCalls != nullptr) {
+    rec->allDdaMappingsClosedBeforeCleanup =
+        rec->ddaCloseCalls->load(std::memory_order_acquire) == rec->expectedDdaCloseCalls;
+  }
   return ncclSuccess;
 }
 
@@ -6342,6 +6432,59 @@ TEST_F(InitMicrotest, CommReclaim_LastIntraRank_SyncsAndCleansEveryCommInTheChai
   for (int i = 0; i < kChainLength; ++i) {
     EXPECT_EQ(1, members[i].rec.finalizeCalls) << "chain member " << i << " was not cleaned up";
     EXPECT_EQ(1, members[i].abortRefCount);
+  }
+}
+
+TEST_F(InitMicrotest, CommReclaim_ClosesAllDdaMappingsBeforeSerialCommCleanup) {
+  Teardown_AllowStreamCaptureExchange();
+  constexpr int kChainLength = 3;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
+  members[0].comm->finalizeRankCnt = kChainLength - 1;
+
+  std::atomic<int> ddaCloseCalls{0};
+  for (auto& member : members) {
+    member.rec.ddaCloseCalls = &ddaCloseCalls;
+    member.rec.expectedDdaCloseCalls = kChainLength;
+  }
+  ScopedHook closeMappings(g_ncclDdaIpcCommClosePeerMappings, [&](ncclComm*) {
+    ddaCloseCalls.fetch_add(1, std::memory_order_release);
+    return ncclSuccess;
+  });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[kChainLength - 1].comm));
+  EXPECT_EQ(kChainLength, closeMappings.calls);
+  for (int i = 0; i < kChainLength; ++i) {
+    EXPECT_TRUE(members[i].rec.allDdaMappingsClosedBeforeCleanup) << "chain member " << i;
+  }
+}
+
+TEST_F(InitMicrotest, CommReclaim_RevokedChain_ClosesAllDdaMappingsBeforeSerialCommCleanup) {
+  constexpr int kChainLength = 3;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
+  members[0].comm->finalizeRankCnt = kChainLength - 1;
+
+  std::atomic<int> ddaCloseCalls{0};
+  for (auto& member : members) {
+    member.comm->finalizeCalled = true;
+    member.comm->revokedFlag = 1;
+    member.rec.ddaCloseCalls = &ddaCloseCalls;
+    member.rec.expectedDdaCloseCalls = kChainLength;
+  }
+  ScopedHook closeMappings(g_ncclDdaIpcCommClosePeerMappings, [&](ncclComm*) {
+    ddaCloseCalls.fetch_add(1, std::memory_order_release);
+    return ncclSuccess;
+  });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[kChainLength - 1].comm));
+  EXPECT_EQ(kChainLength, closeMappings.calls);
+  EXPECT_EQ(0, proxyStop.calls);
+  for (int i = 0; i < kChainLength; ++i) {
+    EXPECT_TRUE(members[i].rec.allDdaMappingsClosedBeforeCleanup) << "chain member " << i;
+    EXPECT_EQ(1, members[i].rec.finalizeCalls) << "chain member " << i;
   }
 }
 

@@ -175,6 +175,16 @@ static bool ginGateAllows(uint64_t ginTypeBitMask, const struct ncclComm* comm) 
   return comm->nNodes <= 1;
 }
 
+// GIN connection type once ncclGinSetDefaultBackend has run. That can drop every active backend
+// (Anvil SDMA alone on a multi-host communicator), and FULL or RAIL with none left would make
+// query and connect report a backend that is gone.
+static ncclGinConnectionType_t ginConnectionType(const struct ncclComm* comm, bool globalCrossNicSupport) {
+  if (!comm->sharedRes->ginState.supported) return NCCL_GIN_CONNECTION_NONE;
+  if (globalCrossNicSupport) return NCCL_GIN_CONNECTION_FULL;
+  if (comm->contiguousRanksPerHost != INT_MAX) return NCCL_GIN_CONNECTION_RAIL;
+  return NCCL_GIN_CONNECTION_NONE;
+}
+
 static bool ctaPolicyIsValid(int ctaPolicy) {
   int availCtaPolicies[3] = {NCCL_CTA_POLICY_DEFAULT, NCCL_CTA_POLICY_EFFICIENCY, NCCL_CTA_POLICY_ZERO};
   int maxPolicy = 0;
@@ -1710,6 +1720,14 @@ static ncclResult_t initNvlDomainInfo(struct ncclComm* comm) {
   return ncclSuccess;
 }
 
+// [RCCL] True when one UALink LSA team holds every rank on more than one host (tray) and the arch table has an
+// AllGather TDM window. Across trays AllGather symk then runs only through that window.
+static bool commSpansTrays(const struct ncclComm* comm, bool isOneLsaTeam) {
+  const rcclArchThresholds* table = comm->archThresholds;
+  return comm->MNNVL && isOneLsaTeam && comm->topo->nHosts > 1 && table != nullptr &&
+         table->symTdmMinR2[ncclFuncAllGather] != 0;
+}
+
 // True when every host has the same number of ranks and those partitions sum to nranks.
 static bool uniformRanksPerHost(const struct ncclComm* comm, int nranks) {
   int ranksPerHost = -1;
@@ -2759,7 +2777,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclCalloc(&comm->gproxyConn, comm->nRanks), ret, fail);
 
   if (ncclParamRasDiagnostics() && comm->rank == 0) ncclRunRasDiagnostics(comm);
-  if (ncclParamDiagnostics()) ncclRunDiagnostics(comm);
+  if (ncclParamDiagnostics()) NCCLCHECKGOTO(ncclRunDiagnostics(comm), ret, fail);
 
   timers[TIMER_INIT_CONNECT] = clockNano();
   // Build p2p schedule
@@ -2932,14 +2950,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->globalGinSupport = NCCL_GIN_CONNECTION_NONE;
   if (ginGateAllows(globalGinTypeBitMask, comm)) {
     NCCLCHECKGOTO(ncclGinSetDefaultBackend(comm, globalGinTypeBitMask), ret, fail);
-    if (globalCrossNicSupport) {
-      comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
-    } else if (comm->contiguousRanksPerHost != INT_MAX) {
-      comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
-    }
+    comm->globalGinSupport = ginConnectionType(comm, globalCrossNicSupport);
   }
   comm->globalRmaProxySupport = globalRmaPluginSupport && globalCrossNicSupport && comm->cuMemGdrSupport;
   isOneLsaTeams = ncclDevrIsOneLsaTeam(comm);
+  comm->spansTrays = commSpansTrays(comm, isOneLsaTeams); // [RCCL]
   comm->symmetricSupport = comm->isAllCudaP2p && ncclParamWinEnable() && ncclCuMemEnable() &&
                            (comm->globalGinSupport != NCCL_GIN_CONNECTION_NONE || isOneLsaTeams);
   // hostRmaSupport must not require symmetricSupport: multi-node GIN proxy RMA
@@ -3685,8 +3700,7 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
 
   envNetName = ncclGetEnv("NCCL_NET");
   if (envNetName) {
-    if (strcasecmp(envNetName, "ROCM-IB") == 0) tmpNetName = "IB-CAST";
-    else tmpNetName = envNetName;
+    tmpNetName = rcclCanonicalNetName(envNetName);
   }
   if (tmpNetName != NULL) {
     if (comm->config.netName != NCCL_CONFIG_UNDEF_PTR) {
@@ -4428,6 +4442,12 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
              comm->commHash, comm->rank);
       }
     }
+    // Close imported DDA IPC mappings while commDestroySync is still running
+    // concurrently for every local rank. The existing intranode barrier below
+    // then guarantees all mappings are closed before serial commFree releases
+    // any rank's exported allocations. Revoked comms close in commReclaim.
+    ncclResult_t ddaCloseRet = ncclSuccess;
+    NCCLCHECKIGNORE(ncclDdaIpcCommClosePeerMappings(comm), ddaCloseRet);
     if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) == 0) {
       int* hostRanks;
       int hostRank = 0;
@@ -4624,6 +4644,11 @@ static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
                    cb);
             }
           }
+          // Revoke skips commDestroySync, so close this rank's DDA IPC imports
+          // here, before the serial commCleanup loop below frees any local rank's
+          // exported allocations.
+          ncclResult_t ddaCloseRet = ncclSuccess;
+          NCCLCHECKIGNORE(ncclDdaIpcCommClosePeerMappings(curIntraComm), ddaCloseRet);
         }
       }
       for (int i = 0; i < nIntraThreads; i++) {

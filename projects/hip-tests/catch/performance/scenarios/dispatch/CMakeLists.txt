@@ -5,6 +5,7 @@
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
     hipPerfDispatchSpeed.cc
+    hipPerfBlockingStreamDispatch.cc
 )
 
 hip_add_exe_to_target(NAME DispatchPerformance

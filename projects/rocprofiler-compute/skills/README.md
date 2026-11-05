@@ -53,7 +53,10 @@ Every skill directory holds:
 <skill-name>/
 ├── SKILL.md            # frontmatter (name, description) plus the instructions
 ├── skill-card.md       # human-facing card: description, owner, license
-└── evals/evals.json    # prompts that must and must not route to this skill
+└── evals/
+    ├── evals.json      # prompts that must and must not route to this skill
+    ├── machine.yml     # hardware the behavioral cases need
+    └── samples/        # copies of the samples the cases use
 ```
 
 `SKILL.md` states the decision: which command to run, when, and where the
@@ -64,8 +67,12 @@ skills, so they keep working offline.
 
 ## Tests
 
-There is no CI for skills. `run_evals.py` is the gate, and it is meant to be
-run by hand before a release:
+CI runs the [skillscope](https://github.com/amd/skillscope) structural checks
+on every pull request that changes the skills or `docs/`, the same checks the
+AMD skills repo runs on its copy. CI does not grade routing or behavior:
+routing needs a model API key, and behavior needs a supported GPU.
+
+`run_evals.py` grades both and is the release gate:
 
 ```bash
 ./skills/run_evals.py --list                         # validate the datasets
@@ -78,7 +85,8 @@ Routing mode denies the agent its tools and only checks which skill it chose,
 so it is quick and needs no GPU. Behavioral mode lets the agent work and grades
 `logs_contain`, `files_exist`, and the plain-language `expected_behavior` and
 `unexpected_behavior` claims, so it needs a supported GPU and real time. It
-also fails a case when any `rocprof-compute` command the agent ran failed.
+also fails a case when any `rocprof-compute` command the agent ran failed. The
+agent runs commands without asking for approval, so use a test machine.
 
 Both modes install the skills with `install-skills.sh`, so they also test the
 install script and its docs links. Both drive the `claude` CLI. The script
@@ -89,9 +97,30 @@ Each dataset needs at least three cases that should trigger the skill, two that
 should not, and one triggering case with judged behavior. Negative cases carry
 only an id, a prompt, and an optional note.
 
+A triggering case that needs an application sets `workspace` to
+`evals/samples`, and its prompt names the application. The contents of the
+workspace directory are copied to the workspace root when the case runs, as
+skillscope does. The AMD skills repo copies only the skill directory, so
+`evals/samples/` holds copies of the samples from `sample/`. Each copy and its
+original name each other in a header comment; change them together.
+
+`evals/machine.yml` tells the AMD skills repo where to run the behavioral
+cases. Every skill asks for Linux. Only a skill whose cases need an Instinct GPU
+also asks for one; the others run on that repo's default GPU runners, which
+cost less.
+
 ## Keeping skills correct
 
-There is no CI to catch drift, so it falls to each change. A PR that alters CLI
-options, output layout, supported architectures, or the experimental status of
-a feature updates the matching skill in the same PR, exactly as it updates docs
-and tests.
+CI checks only structure and links, so keeping the content correct falls to
+each change. A PR that alters CLI options, output layout, supported
+architectures, or the experimental status of a feature updates the matching
+skill in the same PR, exactly as it updates docs and tests.
+
+Every skill that collects counters has the same "Collect only what the question
+needs" section: kernel-bottleneck, memory, roofline, speed-of-light, and
+torch-trace. Keep that section identical in all five. Put a tip that only one
+skill needs in that skill's own steps.
+
+Skills must also serve users on the two previous ROCm releases. When a change
+alters how a feature behaves, keep a short note in the skill saying how it
+worked before and in which release.

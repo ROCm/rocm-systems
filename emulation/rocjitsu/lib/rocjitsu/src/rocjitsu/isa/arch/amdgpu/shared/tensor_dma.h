@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/plugins/tensor_dma_issue_observation.h"
 #include "rocjitsu/vm/plugins/tensor_dma_memory_access_observation.h"
 #include "util/bit.h"
 #include "util/log.h"
@@ -384,6 +385,9 @@ public:
   std::optional<GpuVmAccess> access;
   std::vector<TensorDmaTransferElement> elements;
   std::size_t next_element = 0;
+  /// PC of the tensor DMA instruction. A deferred transfer completes after the
+  /// wave's PC has advanced past it.
+  uint64_t pc = 0;
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   bool store_from_lds = false;
   bool completion_committed = false;
@@ -696,6 +700,41 @@ inline bool materialize_observed_addresses(const void *context, std::span<uint64
   return fits && next_address == addresses.size();
 }
 
+/// @brief Merge the LDS bytes a transfer touches into runs, in element order.
+/// @details Loads write every element; out-of-tensor elements are zero-filled.
+/// Stores read only in-bounds elements.
+inline std::vector<TensorDmaLdsRange> tensor_dma_lds_ranges(const TensorDmaState &state) {
+  std::vector<TensorDmaLdsRange> ranges;
+  ranges.reserve(state.elements.size());
+  const uint32_t size = state.desc.elem_size;
+  for (const TensorDmaTransferElement &element : state.elements) {
+    if (state.store_from_lds && !element.in_bounds)
+      continue;
+    if (!ranges.empty() && ranges.back().address + ranges.back().bytes == element.lds_address)
+      ranges.back().bytes += size;
+    else
+      ranges.push_back({.address = element.lds_address, .bytes = size});
+  }
+  return ranges;
+}
+
+/// @brief Report a tensor DMA instruction as it issues, before its global
+/// requests and LDS writes.
+/// @details Called once per instruction, after prepare_tensor has sampled a
+/// store's LDS source bytes. A NULL descriptor has no elements and
+/// reports no LDS ranges; the emulator still counts it on TENSORcnt, which is an
+/// assumption rather than established hardware behavior.
+inline void report_issued_tensor_dma(Wavefront &wf, const TensorDmaState &state) {
+  if (!wf.cu().observes_tensor_dma_issue())
+    return;
+  const std::vector<TensorDmaLdsRange> lds_ranges = tensor_dma_lds_ranges(state);
+  wf.cu().report_tensor_dma_issue({
+      .is_load = !state.store_from_lds,
+      .element_size_bytes = state.desc.elem_size,
+      .lds_ranges = lds_ranges,
+  });
+}
+
 inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
                                         TensorDmaState &state) {
   if (state.outcome != VmAccessOutcome::Complete || state.observation_reported)
@@ -712,7 +751,7 @@ inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
 
   const TensorDmaMemoryAccessObservation access{
       .mnemonic = inst.mnemonic(),
-      .pc = wf.pc,
+      .pc = state.pc,
       .compute_unit_id = wf.cu().id(),
       .dispatch_id = wf.dispatch_id(),
       .queue_id = wf.queue_id(),
@@ -915,8 +954,12 @@ util::Result execute_tensor_dma(Inst &inst, Wavefront &wf, bool store_from_lds) 
       return util::Result::failure();
     std::unique_ptr<TensorDmaState> state =
         std::make_unique<TensorDmaState>(desc.value(), store_from_lds);
+    state->pc = wf.pc;
     if (desc.value().active() && prepare_tensor(*state, wf).failed()) [[unlikely]]
       return util::Result::failure();
+    // Only a fresh instruction reaches this block: a deferred transfer resumes
+    // from its retained state, so each instruction is reported once.
+    report_issued_tensor_dma(wf, *state);
     inst.set_data(std::move(state));
   }
   TensorDmaState &state = *inst.template data_as<TensorDmaState>();

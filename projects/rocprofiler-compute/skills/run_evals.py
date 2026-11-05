@@ -4,14 +4,16 @@
 
 """Run the skill evaluation datasets through Claude Code.
 
-There is no CI for skills, so this is the manual gate: run it before a release
-to check that each skill still routes on the prompts it should and stays quiet
-on the ones it should not.
+CI runs only the skillscope structural checks. This script is the manual gate
+for routing and behavior: run it before a release to check that
+each skill still routes on the prompts it should and stays quiet on the ones
+it should not.
 
 Usage:
     ./skills/run_evals.py                      # routing only, no tools
     ./skills/run_evals.py --mode behavioral    # also grade what the agent did
     ./skills/run_evals.py --skill rocprof-compute-memory  # one skill
+    ./skills/run_evals.py --only kb-kernel-name-filter    # one case
     ./skills/run_evals.py --list               # validate datasets, run nothing
 
 Exits 0 when every case passes, 1 on a failure, and 77 when the `claude` CLI
@@ -44,9 +46,13 @@ KNOWN_KEYS = {
     "unexpected_behavior",
     "logs_contain",
     "files_exist",
+    "workspace",
 }
 JUDGED_KEYS = ("expected_behavior", "unexpected_behavior")
 BEHAVIORAL_KEYS = (*JUDGED_KEYS, "logs_contain", "files_exist")
+
+# Keep the agent off the user's own CLAUDE.md, skills, and settings.
+ISOLATED_SETTINGS = ["--setting-sources", "project,local"]
 
 JUDGE_SCHEMA = {
     "type": "object",
@@ -94,6 +100,8 @@ def load_cases(skill: Path) -> list[dict[str, Any]]:
         if case["id"] in seen:
             sys.exit(f"{skill.name}: duplicate case id {case['id']!r}")
         seen.add(case["id"])
+        if "workspace" in case and not workspace_dir(skill, case["workspace"]).is_dir():
+            sys.exit(f"{skill.name}: {case['id']} names a missing workspace")
 
         if case["skill_should_trigger"]:
             positive += 1
@@ -114,8 +122,17 @@ def load_cases(skill: Path) -> list[dict[str, Any]]:
     return cases
 
 
-def build_workspace(root: Path) -> Path:
-    """Install every skill into a scratch workspace with install-skills.sh."""
+def workspace_dir(skill: Path, workspace: str) -> Path:
+    """Join ``workspace`` onto the skill directory the way skillscope does."""
+    return skill / workspace
+
+
+def build_workspace(root: Path, skill: Path, case: dict[str, Any]) -> Path:
+    """Install every skill and seed a scratch workspace with the case's files.
+
+    Like skillscope, the contents of the case's workspace directory, relative
+    to the skill, land at the workspace root.
+    """
     workspace = root / "workspace"
     workspace.mkdir(parents=True)
     subprocess.run(
@@ -124,15 +141,26 @@ def build_workspace(root: Path) -> Path:
         stdout=subprocess.DEVNULL,
         check=True,
     )
+    if "workspace" in case:
+        shutil.copytree(
+            workspace_dir(skill, case["workspace"]),
+            workspace,
+            dirs_exist_ok=True,
+        )
     return workspace
 
 
+def case_prompt(case: dict[str, Any]) -> str:
+    """Return the prompt. A case that needs an application already names it."""
+    return case["prompt"]
+
+
 def run_agent(prompt: str, workspace: Path, behavioral: bool) -> tuple[str, list[str]]:
-    """Run one prompt and return the transcript text and the skills it loaded."""
-    command = [
-        "claude",
-        "-p",
-        prompt,
+    """Run one prompt and return the transcript text and the skills it loaded.
+
+    Raises RuntimeError when the claude CLI itself fails.
+    """
+    options = [
         "--output-format",
         "stream-json",
         "--verbose",
@@ -140,23 +168,22 @@ def run_agent(prompt: str, workspace: Path, behavioral: bool) -> tuple[str, list
         str(workspace),
     ]
     if behavioral:
-        command += ["--permission-mode", "acceptEdits"]
+        # The agent has to build and profile the sample, so these tools run
+        # without asking. Unlike bypassPermissions, this also works as root.
+        options += ["--permission-mode", "dontAsk", "--allowedTools"]
+        options += ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill"]
     else:
         # Routing only: the decision to load a skill is all we grade, so deny
         # the agent the tools that would make it start doing the work.
-        command += ["--disallowedTools", "Bash", "Edit", "Write", "NotebookEdit"]
+        options += ["--disallowedTools", "Bash", "Edit", "Write", "NotebookEdit"]
 
-    result = subprocess.run(
-        command,
-        cwd=workspace,
-        capture_output=True,
-        text=True,
-        timeout=900 if behavioral else 300,
+    output = _run_claude(
+        options, prompt, cwd=workspace, timeout=900 if behavioral else 300
     )
 
     transcript: list[str] = []
     loaded: list[str] = []
-    for line in result.stdout.splitlines():
+    for line in output.splitlines():
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
@@ -167,17 +194,23 @@ def run_agent(prompt: str, workspace: Path, behavioral: bool) -> tuple[str, list
     return "\n".join(transcript), loaded
 
 
-def _skills_in(event: dict[str, Any]) -> list[str]:
-    """Pull skill names out of Skill tool calls and SKILL.md reads."""
+def _skills_in(event: Any) -> list[str]:
+    """Pull skill names out of Skill tool calls and SKILL.md reads.
+
+    Events of any other shape are skipped, so new CLI event types are ignored.
+    """
     names: list[str] = []
-    content = event.get("message", {}).get("content")
+    message = event.get("message") if isinstance(event, dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
     if not isinstance(content, list):
         return names
 
     for block in content:
         if not isinstance(block, dict) or block.get("type") != "tool_use":
             continue
-        payload = block.get("input", {})
+        payload = block.get("input")
+        if not isinstance(payload, dict):
+            continue
         if block.get("name") == "Skill":
             skill = str(payload.get("skill", ""))
             names.append(skill.split(":")[-1])
@@ -188,31 +221,57 @@ def _skills_in(event: dict[str, Any]) -> list[str]:
     return names
 
 
+def _run_claude(
+    options: list[str], prompt: str, cwd: Optional[Path] = None, timeout: int = 300
+) -> str:
+    """Run claude -p with the prompt on stdin and return its stdout.
+
+    Raises RuntimeError with the CLI's own error text when it exits non-zero.
+    """
+    result = subprocess.run(
+        ["claude", "-p", *options, *ISOLATED_SETTINGS],
+        input=prompt,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    if result.returncode != 0:
+        reason = _error_text(result.stdout) or result.stderr.strip()[-500:]
+        raise RuntimeError(f"claude exited {result.returncode}: {reason}")
+    return result.stdout
+
+
+def _error_text(output: str) -> str:
+    """Return the result text of the last JSON event in claude output, if any."""
+    for line in reversed(output.splitlines()):
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict):
+            return str(event.get("result", ""))
+    return ""
+
+
 def grade_judged(claim: str, transcript: str, should_hold: bool) -> tuple[bool, str]:
-    """Ask a second agent whether a plain-language claim holds in the transcript."""
+    """Ask a second agent whether a plain-language claim holds in the transcript.
+
+    Raises RuntimeError when the claude CLI itself fails.
+    """
     question = (
-        "You are grading an AI agent transcript against one expectation.\n"
-        f"Expectation: {claim}\n"
-        f"The expectation should be {'met' if should_hold else 'NOT met'}.\n"
+        "You are grading an AI agent transcript against one claim.\n"
+        f"Claim: {claim}\n"
+        "Set pass to true if the claim holds in the transcript, false if not.\n"
         "Answer only with the JSON object.\n\n"
         f"Transcript:\n{transcript[:200000]}"
     )
-    result = subprocess.run(
-        [
-            "claude",
-            "-p",
-            question,
-            "--output-format",
-            "json",
-            "--json-schema",
-            json.dumps(JUDGE_SCHEMA),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=300,
+    output = _run_claude(
+        ["--output-format", "json", "--json-schema", json.dumps(JUDGE_SCHEMA)],
+        question,
     )
     try:
-        payload = json.loads(result.stdout)
+        payload = json.loads(output)
         verdict = payload if "pass" in payload else json.loads(payload["result"])
     except (json.JSONDecodeError, KeyError, TypeError):
         return False, "judge returned unparseable output"
@@ -265,12 +324,14 @@ def run_case(
     name: str, case: dict[str, Any], tmp: Path, behavioral: bool
 ) -> tuple[str, str, list[str]]:
     """Run and grade one case. Returns (skill, case id, failure messages)."""
-    workspace = build_workspace(tmp / f"{name}-{case['id']}")
+    workspace = build_workspace(tmp / f"{name}-{case['id']}", SKILLS_ROOT / name, case)
     try:
-        transcript, loaded = run_agent(case["prompt"], workspace, behavioral)
+        transcript, loaded = run_agent(case_prompt(case), workspace, behavioral)
+        failures = grade(case, name, transcript, loaded, workspace, behavioral)
     except subprocess.TimeoutExpired:
         return name, case["id"], ["timed out"]
-    failures = grade(case, name, transcript, loaded, workspace, behavioral)
+    except RuntimeError as error:
+        return name, case["id"], [str(error)]
     return name, case["id"], failures
 
 
@@ -278,6 +339,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=["routing", "behavioral"], default="routing")
     parser.add_argument("--skill", help="Run one skill instead of all of them.")
+    parser.add_argument("--only", help="Comma-separated case ids to run.")
     parser.add_argument("--list", action="store_true", help="Validate datasets only.")
     parser.add_argument(
         "--jobs",
@@ -308,8 +370,14 @@ def main() -> int:
                     case.pop(key, None)
 
     queued = [(name, case) for name, cases in datasets.items() for case in cases]
+    if args.only:
+        wanted = set(args.only.split(","))
+        queued = [(name, case) for name, case in queued if case["id"] in wanted]
+        missing = wanted - {case["id"] for _, case in queued}
+        if missing:
+            sys.exit(f"--only names unknown case ids: {', '.join(sorted(missing))}")
     started = time.monotonic()
-    results: dict[str, list[tuple[str, list[str]]]] = {name: [] for name in datasets}
+    results: dict[str, list[tuple[str, list[str]]]] = {name: [] for name, _ in queued}
 
     # Each case gets its own workspace and its own agent, so they are
     # independent. The work is waiting on a subprocess, not on Python.

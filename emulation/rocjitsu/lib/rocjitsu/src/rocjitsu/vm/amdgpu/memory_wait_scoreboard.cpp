@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
@@ -219,8 +220,15 @@ void MemoryWaitScoreboard::check_instruction(const Instruction &inst, Wavefront 
       return pending_.pending_vgpr(static_cast<uint16_t>(index), reg->width);
     };
     bool hit = false;
-    for (int i = 0; i < inst.num_src_operands(); ++i)
+    for (int i = 0; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i)) {
+        // The instruction's implicit uses replace this decoded placeholder, so
+        // the explicit-only prefilter cannot prove that the instruction misses.
+        hit = true;
+        continue;
+      }
       hit |= pending(*inst.src_operand(i));
+    }
     for (int i = 0; i < inst.num_dst_operands(); ++i)
       hit |= pending(*inst.dst_operand(i));
     if (!hit)
@@ -313,11 +321,14 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     return;
   }
   if (!pending_scalar_ && inst.is_memory_op() && name.starts_with("ds_")) {
-    for (int i = 0; i < inst.num_src_operands(); ++i)
+    for (int i = 0; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i))
+        continue;
       if (const auto *op = inst.src_operand(i); op && op->is_vgpr())
         if (auto reg = registers.source_register(*op, op == modifiers.wordwise_source0 ||
                                                           op == modifiers.wordwise_source1))
           access(*reg, lanes, op->register_byte_mask(), false);
+    }
     return;
   }
   const bool hwreg_read = name == "s_getreg_b32";
@@ -528,6 +539,8 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
                    : registers.scalar_control_value(selector->encoding_value()).value_or(0)) &
                   (wf.wf_size() - 1);
     for (int i = 0; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i))
+        continue;
       const auto *op = inst.src_operand(i);
       if (op == selector || (scalar_lane_write && op == inst.dst_operand(0)))
         continue;
@@ -580,8 +593,11 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       access(*reg, accessed_lanes, bytes, write);
     }
   };
-  for (int i = 0; i < inst.num_src_operands(); ++i)
+  for (int i = 0; i < inst.num_src_operands(); ++i) {
+    if (!inst.tracks_explicit_source(i))
+      continue;
     check_operand(inst.src_operand(i), false);
+  }
   const bool partial_destination =
       inst.dst_operand(0) && inst.dst_operand(0)->register_byte_mask() != 0xf;
   // Liveness models preservation as a use; preserving an untouched byte or
@@ -622,9 +638,28 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
         access(scratch, ~uint64_t{0}, 0xf, false);
     }
   }
-  RegisterSet implicit;
-  if (!preserves_destination)
+  // A fork or join touches at most one branch stack entry, chosen by MODE.CSP at
+  // run time. Its implicit registers are the static superset of every entry, kept
+  // for liveness; checking them all would report unrelated pending SGPRs.
+  const bool branch_stack = inst.flags() & BRANCH_STACK;
+  std::optional<BranchStackAccess> stack_access;
+  if (branch_stack && inst.src_operand(0)) {
+    const Operand &src0 = *inst.src_operand(0);
+    stack_access = name == "s_cbranch_join" ? join_stack_access(wf, registers.read_scalar(src0))
+                                            : fork_stack_access(wf, registers.read_scalar64(src0));
+  }
+  const auto stack_entry = [&]() {
+    return RegisterRef{RegClass::SGPR, static_cast<uint16_t>(stack_access->first_wave_sgpr), 4};
+  };
+  RegisterSet implicit, preservation_uses;
+  const bool distinguishes_preservation = inst.implicit_preservation_uses(preservation_uses);
+  // Legacy partial-destination hooks do not distinguish preservation from
+  // genuine hidden reads. Instructions that do provide the distinction retain
+  // their real implicit dependencies while dropping only preservation uses.
+  if (!branch_stack && (!preserves_destination || distinguishes_preservation)) {
     inst.implicit_uses(implicit);
+    implicit -= preservation_uses;
+  }
   implicit.for_each([&](RegisterRef reg) {
     // Operand-derived reads preserve their bank roles above.
     if (reg.cls == RegClass::VGPR && !implicit_operands.empty())
@@ -633,16 +668,43 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       return;
     access(reg, reg.cls == RegClass::VGPR ? lanes : ~uint64_t{0}, 0xf, false);
   });
+  if (stack_access && !stack_access->write)
+    access(stack_entry(), ~uint64_t{0}, 0xf, false);
   if (!inst.is_memory_wait_producer()) {
     for (int i = 0; i < inst.num_dst_operands(); ++i)
       check_operand(inst.dst_operand(i), true);
     implicit = RegisterSet{};
-    inst.implicit_defs(implicit);
+    if (!branch_stack)
+      inst.implicit_defs(implicit);
     implicit.for_each([&](RegisterRef reg) {
       access(reg, reg.cls == RegClass::VGPR ? lanes : ~uint64_t{0}, 0xf, true);
     });
+    if (stack_access && stack_access->write)
+      access(stack_entry(), ~uint64_t{0}, 0xf, true);
   }
 }
+
+namespace {
+// Whether loads producing this event write their results to registers in issue
+// order within their order class, so overwriting a pending result of the same
+// class does not require a wait.
+bool has_ordered_writeback(const waitcheck_detail::ClassifiedEvent &event, rj_code_arch_t arch) {
+  using namespace waitcheck_detail;
+  switch (event.counter) {
+  case WaitCounterKind::Load:
+    return has_ordered_vmem_writeback(arch);
+  case WaitCounterKind::Ds:
+    // LDS writeback is in-order on all targets.
+    return event.kind == WaitEventKind::Ds;
+  case WaitCounterKind::Exp:
+    // LDS direct and parameter loads use EXP independently of exports and
+    // indexed LDS accesses.
+    return event.kind == WaitEventKind::LdsDirect && has_ordered_lds_direct_writeback(arch);
+  default:
+    return false;
+  }
+}
+} // namespace
 
 void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefront &wf,
                                                uint64_t vector_lanes,
@@ -697,10 +759,8 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
     xcnt_group(xevent->kind == WaitEventKind::Smem);
   const auto defs = std::ranges::find(classified.value(), TrackedRegisterSource::Defs,
                                       &ClassifiedEvent::registers);
-  const auto model = waitcnt_model(wf.cu().arch());
-  const uint16_t order = model.succeeded() && uses_legacy_waitcnt(model.value()) &&
-                                 defs != classified.value().end() &&
-                                 defs->counter == WaitCounterKind::Load
+  const bool has_defs = defs != classified.value().end();
+  const uint16_t order = has_defs && has_ordered_writeback(*defs, wf.cu().arch())
                              ? ordered_write_order(*defs, wf.cu().arch())
                              : kUnordered;
   const bool vector_replay =
@@ -711,7 +771,7 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
       access(reg, ~uint64_t{0}, 0xf, true);
       continue;
     }
-    if (defs == classified.value().end())
+    if (!has_defs)
       continue;
     auto check = [&](RegisterRef range, uint8_t bytes) {
       if (vector_replay)
@@ -1153,7 +1213,8 @@ void MemoryWaitScoreboard::access_pending(RegisterRef reg, uint64_t lanes, uint8
     // Sharing a counter does not prove ordered writeback. The old result and
     // incoming write must belong to the same FIFO class, even in a mixed queue.
     if (event.reported || (!write && event.counter == WaitCounterKind::X) ||
-        (write && ordered_write_order != kUnordered && event.order == ordered_write_order) ||
+        (write && ordered_write_order != kUnordered && event.order == ordered_write_order &&
+         event.ordered_overwrite) ||
         event.reg.cls != reg.cls || !(event.lanes & lanes) || !(event.bytes & bytes) ||
         reg.index >= event.reg.index + event.reg.width || event.reg.index >= reg.index + reg.width)
       continue;
