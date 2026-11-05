@@ -615,7 +615,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadTakesUnevenShards) {
 }
 
 // The shard must fit the two-shot slot: a scratch whose two-shot slot is below a shard keeps the one-shot.
-TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadNeedsTheShardInTheTwoShotSlot) {
+TEST_F(DdaAllReduceFabricLLMicrotest, SpreadSelected_ShardMustFitTheTwoShotSlot) {
   comm().nRanks = 32;
   comm().ddaScratchBytes = 2 * 32 * 16 * 2 * 16;  // bank 16 KiB: one-shot slot 32 packets, two-shot slot 16
   ASSERT_EQ(dda::common::ddaLLArSlotPkts(dda::common::ddaBankSize(comm().ddaScratchBytes), 32), 32u);
