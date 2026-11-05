@@ -428,7 +428,8 @@ def sort_top_level_keys(content: str) -> str:
 
     A block is a top-level key line and the lines under it: indented lines and sequence
     items written at column 0. Comment and blank lines stay with the key that follows
-    them, and a leading "---" stays first.
+    them, and a leading "---" stays first. So a column-0 comment belongs to the next
+    key: a comment meant for the key above it moves away when the keys are re-sorted.
     """
     header = ""
     blocks: List[Tuple[str, str]] = []
