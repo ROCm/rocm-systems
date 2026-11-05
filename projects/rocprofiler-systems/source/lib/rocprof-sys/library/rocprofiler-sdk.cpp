@@ -26,7 +26,7 @@
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
-#include "library/pmc/sampler.hpp"
+#include "library/pmc/sources.hpp"
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
@@ -1322,18 +1322,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     if(!gpu_perf_counters_setting.empty() &&
        get_agent_manager_instance().get_gpu_agents_count() > 0)
     {
-        pmc::register_gpu_perf_counter_source(
-            get_agent_manager_instance().get_agents_by_type(agent_type::gpu));
+        if(auto source = pmc::register_gpu_perf_counter_source(
+               get_agent_manager_instance().get_agents_by_type(agent_type::gpu)))
+        {
+            ::rocprofsys::process_sampler::add_source(std::move(source));
+        }
     }
 #endif
 
     gpu::add_device_metadata();
-
-    if(config::get_use_process_sampling())
-    {
-        LOG_DEBUG("Setting PMC sampler state to active...");
-        pmc::set_state(state::process::Active);
-    }
 
     assert(g_session);
     create_roctx_trigger();

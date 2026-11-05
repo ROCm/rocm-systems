@@ -3,89 +3,53 @@
 
 #pragma once
 
-#include "common/defines.h"
-#include "core/common.hpp"
-#include "core/components/fwd.hpp"
-#include "core/state.hpp"
-#include "library/thread_data.hpp"
+#include "core/collection/scheduler.hpp"
+#include "core/collection/source_interface.hpp"
 
-#include <atomic>
 #include <chrono>
-#include <cstdint>
 #include <functional>
-#include <future>
 #include <memory>
-#include <type_traits>
-#include <vector>
 
 namespace rocprofsys::process_sampler
 {
-struct instance
-{
-    std::function<void()> setup               = []() {};
-    std::function<void()> shutdown            = []() {};
-    std::function<void()> config              = []() {};
-    std::function<void()> sample              = []() {};
-    std::function<void()> post_process        = []() {};
-    std::function<void()> pause               = []() {};
-    std::function<void()> flush_pending_pause = []() {};
-};
-//
-struct sampler
-{
-    using msec_t    = std::chrono::milliseconds;
-    using usec_t    = std::chrono::microseconds;
-    using nsec_t    = std::chrono::nanoseconds;
-    using promise_t = std::promise<void>;
-    using future_t  = std::future<void>;
-    using state_t   = state::process::State;
+/** Creates a source for the sampler: its polling interval and the factory of its
+ * scheduler. */
+using source_factory = std::function<std::unique_ptr<collection::source_interface>(
+    std::chrono::nanoseconds interval, collection::scheduler_factory<> make_scheduler)>;
 
-    using timestamp_t = std::int64_t;
+/**
+ * Adds a source that cannot exist when `setup()` runs (it needs the SDK, which is
+ * configured later). Used at once when the sampler runs, by the next `setup()` otherwise;
+ * either way only once.
+ */
+void
+add_source(source_factory factory);
 
-    template <typename Tp = nsec_t>
-        requires(!std::is_same_v<std::decay_t<Tp>, nsec_t>)
-    static void poll(std::atomic<state_t>* _state, Tp&& _interval, promise_t* _prom)
-    {
-        poll(_state, std::chrono::duration_cast<nsec_t>(_interval), _prom);
-    }
+void
+setup();
 
-    static void setup();
-    static void shutdown();
-    static void post_process();
-    static void pause();
-    static void resume();
-    static void set_state(state_t);
-    static void poll(std::atomic<state_t>* _state, nsec_t _interval, promise_t*);
-};
-//
-inline void
-setup()
-{
-    sampler::setup();
-}
+void
+shutdown();
 
-inline void
-shutdown()
-{
-    sampler::shutdown();
-}
+void
+post_process();
 
-inline void
-post_process()
-{
-    sampler::post_process();
-}
+void
+pause();
 
-inline void
-pause()
-{
-    sampler::pause();
-}
+void
+resume();
 
-inline void
-resume()
-{
-    sampler::resume();
-}
-//
+/** Before a fork: waits for the polls that are running and keeps new ones from starting
+ * until `unblock()`. */
+void
+block();
+
+void
+unblock();
+
+/** Forked child: drops the collector without destroying it (its thread does not exist
+ * here). */
+void
+postfork_child();
 }  // namespace rocprofsys::process_sampler
