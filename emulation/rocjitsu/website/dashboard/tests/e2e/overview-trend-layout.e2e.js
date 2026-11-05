@@ -54,6 +54,43 @@ for (const range of ['1W', '1M', '3M', 'ALL']) {
   });
 }
 
+// The tooltip is as wide as its longest row, so on a narrow chart it must be capped at the chart width
+// or the card clips the end of the reference time.
+for (const width of [390, 900]) {
+  test(`the trend tooltip stays inside the chart at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/?view=overview&range=ALL');
+    const chart = page.getByTestId('performance-trend').getByRole('img');
+    const last = await readChart(chart, (instance) => {
+      const option = instance.getOption();
+      let best = null;
+      option.series.forEach((series, seriesIndex) => {
+        if (series.type !== 'line') return;
+        for (const point of series.data ?? []) {
+          const value = point && (point.value ?? point);
+          if (!Array.isArray(value) || !Number.isFinite(value[1])) continue;
+          const pixel = instance.convertToPixel({ seriesIndex }, value);
+          if (!best || pixel[0] > best.pixel[0]) best = { pixel };
+        }
+      });
+      return { pixel: best.pixel, width: instance.getWidth(), height: instance.getHeight() };
+    });
+    await chart.scrollIntoViewIfNeeded();
+    const box = await chart.boundingBox();
+    await page.mouse.move(box.x + last.pixel[0] * box.width / last.width, box.y + last.pixel[1] * box.height / last.height);
+    const tooltip = chart.locator('.performance-trend-tooltip');
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip).toContainText(/ref (?:\d+m )?\d+\.\d{1,2}s/);
+    const overflow = await tooltip.evaluate((element) => {
+      const tip = element.getBoundingClientRect();
+      const frame = element.parentElement.getBoundingClientRect();
+      return { right: tip.right - frame.right, left: frame.left - tip.left };
+    });
+    expect(overflow.right).toBeLessThanOrEqual(0.5);
+    expect(overflow.left).toBeLessThanOrEqual(0.5);
+  });
+}
+
 test('an all-above-baseline configuration has a solid bottom axis and keeps the baseline reference line', async ({ page }) => {
   await page.goto('/?view=overview&range=1W');
   const trend = page.getByTestId('performance-trend');

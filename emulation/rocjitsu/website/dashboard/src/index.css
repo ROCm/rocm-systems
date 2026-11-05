@@ -44,9 +44,9 @@ pre {
 }
 
 /* The trend compares several configurations; size to the longest summary row.
-   The viewport cap preserves phone wrapping. */
+   The chart-width cap makes a long row wrap instead of being clipped by the card. */
 .performance-trend-tooltip {
-  --chart-tooltip-max-width: min(760px, calc(100vw - 24px));
+  --chart-tooltip-max-width: min(760px, 100%);
   width: max-content;
 }
 
