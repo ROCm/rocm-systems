@@ -179,6 +179,7 @@ signal_less_counter_name(signal_less_counter which)
         case signal_less_counter::finalizer_no_timing: return "no-timing";
         case signal_less_counter::register_refused: return "register-refused";
         case signal_less_counter::cap_evicted: return "cap-evicted";
+        case signal_less_counter::stale_reaped: return "stale-reaped";
         case signal_less_counter::kCount: break;
     }
     return "?";
@@ -509,6 +510,8 @@ signal_less_teardown()
                               i == 0 ? "" : " ",
                               signal_less_counter_name(static_cast<signal_less_counter>(i)),
                               _c[i]);
+    // Not a counter: the most entries the pending map ever held at once.
+    _chain += fmt::format(" pending-peak={}", signal_less_hub().pending_peak());
 
     ROCP_WARNING << fmt::format(
         "KFD dispatch-log signal-less summary: {}; teardown finalized {} deferred and stranded {}",

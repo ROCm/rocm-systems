@@ -134,7 +134,7 @@ thread_minflt(long* out)
 {
     rusage ru{};
     if(getrusage(RUSAGE_THREAD, &ru) != 0) return false;
-    *out = static_cast<long>(ru.ru_minflt);
+    *out = ru.ru_minflt;
     return true;
 }
 }  // namespace

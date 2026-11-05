@@ -398,6 +398,154 @@ TEST(DispatchHub, gc_closed_windows_spares_open_windows_and_kept_keys)
     EXPECT_EQ(hub.pending_count(), 1u);
 }
 
+namespace
+{
+constexpr uint64_t kSec = 1'000'000'000ull;
+
+bool
+register_at(hub_t& hub, uint64_t now_ns, std::vector<hub_t::registration>&& batch)
+{
+    return hub.register_batch(std::move(batch), now_ns);
+}
+}  // namespace
+
+// An entry on a window that never closes leaves the hub only through its EOP; if
+// the EOP is lost, the stale-entry reaper is the backstop. It reaps only entries
+// older than max_age, only once their whole age bucket is past the cutoff, never
+// a kept key, and ledgers what it reaps.
+TEST(DispatchHub, reap_stale_pending_reaps_old_entries_on_open_windows)
+{
+    reset_disable();
+    const int live_before = tracked_payload::live.load();
+    auto      hub         = hub_t{};
+    auto      open        = mk_window(9, 100);
+    {
+        auto batch = std::vector<hub_t::registration>{};
+        batch.emplace_back(reg_of(key_of(9, 1), open, /*corr_id=*/91));
+        batch.emplace_back(reg_of(key_of(9, 2), open, /*corr_id=*/91));
+        ASSERT_TRUE(register_at(hub, 10 * kSec, std::move(batch)));
+    }
+    {
+        auto batch = std::vector<hub_t::registration>{};
+        batch.emplace_back(reg_of(key_of(9, 3), open, /*corr_id=*/93));
+        ASSERT_TRUE(register_at(hub, 50 * kSec, std::move(batch)));
+    }
+    constexpr uint64_t kMaxAge = 30 * kSec;
+
+    EXPECT_EQ(hub.reap_stale_pending(10 * kSec, kMaxAge).second.dispatches, 0u)
+        << "now earlier than max_age: no cutoff, no underflow";
+    EXPECT_EQ(hub.reap_stale_pending(40 * kSec, kMaxAge).second.dispatches, 0u)
+        << "cutoff 10 s: the 10 s bucket is not wholly past it yet";
+    EXPECT_EQ(hub.pending_count(), 3u);
+
+    {
+        auto [leaked, stats] = hub.reap_stale_pending(41 * kSec, kMaxAge);
+        EXPECT_EQ(stats.dispatches, 2u);
+        EXPECT_EQ(stats.correlation_ids, 1u) << "two dispatches of one batch share an id";
+        EXPECT_EQ(leaked.size(), 2u) << "payloads come back for release outside the lock";
+        EXPECT_TRUE(hub.is_ledgered(91)) << "reaped entries are ledgered, not force-retired";
+        EXPECT_FALSE(hub.is_ledgered(93)) << "registered at 50 s: not stale at 41 s";
+        EXPECT_EQ(hub.pending_count(), 1u);
+    }
+    EXPECT_EQ(tracked_payload::live.load(), live_before + 1)
+        << "the reaped payloads were released exactly once";
+
+    const auto keep = hub_t::key_set{key_of(9, 3)};
+    EXPECT_EQ(hub.reap_stale_pending(1000 * kSec, kMaxAge, &keep).second.dispatches, 0u)
+        << "kept: its EOP is in the processor's hands";
+    EXPECT_FALSE(hub.is_ledgered(93));
+
+    auto kept = end_start(hub, key_of(9, 3), 150, 600);
+    ASSERT_TRUE(kept.has_value()) << "a kept entry is still retired by its own EOP";
+    EXPECT_EQ(kept->correlation_id, 93u);
+    EXPECT_EQ(hub.pending_count(), 0u);
+}
+
+// The age index moves in step with every removal path: an entry retired by its
+// EOP or drained at teardown is never reaped later, and a new registration with
+// the same key starts its own age.
+TEST(DispatchHub, reap_stale_pending_tracks_every_removal_path)
+{
+    reset_disable();
+    auto               hub     = hub_t{};
+    auto               open    = mk_window(10, 100);
+    constexpr uint64_t kMaxAge = 30 * kSec;
+
+    ASSERT_TRUE(register_at(hub, 10 * kSec, [&] {
+        auto b = std::vector<hub_t::registration>{};
+        b.emplace_back(reg_of(key_of(10, 1), open, /*corr_id=*/101));
+        return b;
+    }()));
+    ASSERT_TRUE(end_start(hub, key_of(10, 1), 150, 600).has_value());
+    EXPECT_EQ(hub.reap_stale_pending(UINT64_MAX / 2, kMaxAge).second.dispatches, 0u)
+        << "an EOP-retired entry is gone from the age index";
+    EXPECT_FALSE(hub.is_ledgered(101));
+
+    ASSERT_TRUE(register_at(hub, 2000 * kSec, [&] {
+        auto b = std::vector<hub_t::registration>{};
+        b.emplace_back(reg_of(key_of(10, 1), open, /*corr_id=*/102));
+        return b;
+    }()));
+    EXPECT_EQ(hub.reap_stale_pending(2020 * kSec, kMaxAge).second.dispatches, 0u)
+        << "the same key registered later carries its own registration time";
+    EXPECT_EQ(hub.pending_count(), 1u);
+
+    EXPECT_EQ(hub.drain_for_teardown().second.dispatches, 1u);
+    EXPECT_EQ(hub.reap_stale_pending(UINT64_MAX / 2, kMaxAge).second.dispatches, 0u)
+        << "teardown clears the age index with the entries";
+}
+
+// The high-water mark survives retirement and teardown, so the finalize summary
+// reports the largest pending map the run ever held.
+TEST(DispatchHub, pending_peak_tracks_the_high_water_mark)
+{
+    reset_disable();
+    auto hub  = hub_t{};
+    auto open = mk_window(11, 100);
+    EXPECT_EQ(hub.pending_peak(), 0u);
+    {
+        auto batch = std::vector<hub_t::registration>{};
+        for(uint32_t i = 1; i <= 3; ++i)
+            batch.emplace_back(reg_of(key_of(11, i), open, /*corr_id=*/110 + i));
+        ASSERT_TRUE(hub.register_batch(std::move(batch)));
+    }
+    EXPECT_EQ(hub.pending_peak(), 3u);
+    ASSERT_TRUE(end_start(hub, key_of(11, 1), 150, 600).has_value());
+    ASSERT_TRUE(end_start(hub, key_of(11, 2), 150, 600).has_value());
+    {
+        auto batch = std::vector<hub_t::registration>{};
+        batch.emplace_back(reg_of(key_of(11, 4), open, /*corr_id=*/114));
+        ASSERT_TRUE(hub.register_batch(std::move(batch)));
+    }
+    EXPECT_EQ(hub.pending_count(), 2u);
+    EXPECT_EQ(hub.pending_peak(), 3u) << "a lower occupancy does not lower the peak";
+    {
+        auto batch = std::vector<hub_t::registration>{};
+        for(uint32_t i = 5; i <= 8; ++i)
+            batch.emplace_back(reg_of(key_of(11, i), open, /*corr_id=*/110 + i));
+        ASSERT_TRUE(hub.register_batch(std::move(batch)));
+    }
+    EXPECT_EQ(hub.pending_peak(), 6u);
+    hub.drain_for_teardown();
+    EXPECT_EQ(hub.pending_count(), 0u);
+    EXPECT_EQ(hub.pending_peak(), 6u) << "teardown keeps the peak for the summary line";
+}
+
+// A forked child never touches the inherited hub, the reaper included.
+TEST(DispatchHub, reap_stale_pending_is_inert_after_abandon)
+{
+    reset_disable();
+    auto hub = hub_t{};
+    ASSERT_TRUE(register_at(hub, 10 * kSec, [] {
+        auto b = std::vector<hub_t::registration>{};
+        b.emplace_back(reg_of(key_of(12, 1), mk_window(12, 100), /*corr_id=*/121));
+        return b;
+    }()));
+    hub.abandon_in_child();
+    EXPECT_EQ(hub.reap_stale_pending(UINT64_MAX / 2, kSec).second.dispatches, 0u);
+    EXPECT_EQ(hub.pending_peak(), 0u);
+}
+
 // record_kernel_ends resolves a run of EOPs under one lock with exactly the same
 // rule as record_kernel_end: matches come back in input order, misses consume
 // nothing.

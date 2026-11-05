@@ -123,6 +123,16 @@ start_max_age_ns()
     return _cached;
 }
 
+// Age past which a hub entry with no EOP is reaped as a loss. start_max_age_ns()
+// already bounds the longest real dispatch, and an entry whose START was evicted
+// at that age can still be matched by its EOP alone for a while, so the reaper
+// waits twice as long: it only removes what the design already treats as dead.
+uint64_t
+stale_pending_age_ns()
+{
+    return 2 * start_max_age_ns();
+}
+
 // Hard size cap on a GPU's retained-START map. start_max_age_ns() above is only
 // the slow age backstop, so this is the bound that actually holds under a
 // sustained EOP loss -- the same role and sizing as the hub's cap (the map is
@@ -833,8 +843,9 @@ processor_loop()
     auto  proc = processor_state{};
     st.processor_deferred_epoch.store(UINT64_MAX, std::memory_order_release);
 
-    uint64_t last_gc_ns = common::timestamp_ns();
-    size_t   _rr        = 0;
+    uint64_t last_gc_ns        = common::timestamp_ns();
+    uint64_t stale_reap_events = 0;  // processor thread only; rate-limits the reap warning
+    size_t   _rr               = 0;
 
     // Drained EOPs are resolved against the hub in runs of up to
     // kCompletionRunLength under ONE hub lock each, and each run's proven
@@ -918,6 +929,27 @@ processor_loop()
             const auto _keep = proc.held_eop_keys();
             auto       _gc   = signal_less_hub().gc_closed_windows(steady_now_ns(), &_keep);
             if(_gc.second.dispatches > 0) note_signal_less_losses();
+
+            // Same gate and keep set as the closed-window GC: an EOP still in a
+            // backlog or held for lookahead must retire its entry, not race it.
+            auto _stale = signal_less_hub().reap_stale_pending(
+                steady_now_ns(), stale_pending_age_ns(), &_keep);
+            if(_stale.second.dispatches > 0)
+            {
+                note_signal_less(signal_less_counter::stale_reaped, _stale.second.dispatches);
+                note_signal_less_losses();
+                // Log the 1st, 2nd, 4th, 8th, ... reap; the exact total is in the
+                // stale-reaped counter of the summary line.
+                const uint64_t _nth = ++stale_reap_events;
+                ROCP_WARNING_IF((_nth & (_nth - 1)) == 0) << fmt::format(
+                    "KFD dispatch-log: reaped {} signal-less dispatch(es) across {} correlation "
+                    "id(s) still pending after {} s with no EOP; they emit no record ({} reap(s) "
+                    "so far)",
+                    _stale.second.dispatches,
+                    _stale.second.correlation_ids,
+                    stale_pending_age_ns() / 1'000'000'000ull,
+                    _nth);
+            }
         }
 
         const size_t _n = st.session_count.load(std::memory_order_acquire);

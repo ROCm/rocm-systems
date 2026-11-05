@@ -83,6 +83,7 @@ enum class signal_less_counter
     register_refused,      // hub refused a batch eligibility had accepted; id retired here
     cap_evicted,           // always 0: admission no longer evicts; kept so the summary
                            // line keeps the field tools already parse
+    stale_reaped,          // pending entry older than the stale age with no EOP; ledgered
     kCount
 };
 
