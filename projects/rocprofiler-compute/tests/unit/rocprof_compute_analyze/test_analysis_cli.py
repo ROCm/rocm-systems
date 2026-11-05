@@ -66,7 +66,7 @@ def workload_with_operator_forest():
 
 
 def apply_torch_operator_glob(pattern):
-    cli = cli_analysis(argparse.Namespace(), {})
+    cli = cli_analysis(argparse.Namespace())
     workload = workload_with_operator_forest()
     workload.operator_patterns = {"torch": [pattern]}
     pmc_group_keys = cli.apply_operator_filter(workload, "/workload")
@@ -209,7 +209,7 @@ def test_list_operators_joint_backend_heading(capsys):
 
 
 def test_handle_operator_prints_matched_subtree(capsys):
-    cli = cli_analysis(argparse.Namespace(), {})
+    cli = cli_analysis(argparse.Namespace())
     workload = workload_with_operator_forest()
     workload.operator_patterns = {"torch": ["*addmm*"]}
     cli.apply_operator_filter(workload, "/workload")
@@ -225,7 +225,7 @@ def test_apply_operator_filter_missed_glob_errors(monkeypatch):
         "rocprof_compute_analyze.analysis_cli.console_error",
         functools.partial(append_args_and_exit, errors),
     )
-    cli = cli_analysis(argparse.Namespace(), {})
+    cli = cli_analysis(argparse.Namespace())
     workload = workload_with_operator_forest()
     workload.operator_patterns = {"torch": ["nomatch"]}
     with pytest.raises(SystemExit) as excinfo:
@@ -254,7 +254,7 @@ def test_dispatch_filter_outside_operator_dispatches_errors(monkeypatch):
 
 
 def test_apply_operator_filter_keeps_nodes_from_requested_backend():
-    cli = cli_analysis(argparse.Namespace(), {})
+    cli = cli_analysis(argparse.Namespace())
     workload = schema.Workload()
     workload.ml_api_call_trees = torch_parent_triton_child_forest()
     workload.operator_patterns = {"torch": ["*"]}

@@ -14,18 +14,28 @@ views/<arch>/ holds the views of one metric library arch. "legacy_id" marks the 
 numeric id (11.2.3) each metric keeps from the panel files until numeric ids are
 retired.
 
-arch_panel_configs() returns the panel configs analyze shows; tools/validate_views.py
-checks the view files.
+Analyze, its listings and the memory chart read their panel configs here
+(arch_panel_configs()), and the -b panel aliases come from the views. Profile counters
+still come from analysis_configs/, whose structure tools/validate_views.py keeps equal
+to the views'.
 Standard library and the vendored YAML only: profile mode imports it.
 """
 
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import config
+from rocprof_compute_soc.metric_library import loader
 from utils.equation_format import normalize_equation
-from utils.utils_common import canonical_config_arch, load_panel_configs
+from utils.logger import console_error
+from utils.utils_common import (
+    INVALID_BLOCK_HINT,
+    METRIC_ID_RE,
+    canonical_config_arch,
+    convert_metric_id_to_panel_info,
+    resolve_block_token,
+)
 from vendored import yaml
 
 # Table kinds, as the panel configs' data source keys; a table without "render" is a
@@ -116,17 +126,70 @@ def views_to_panel_configs(
     return OrderedDict(sorted(configs.items()))
 
 
+def has_views(arch: str) -> bool:
+    """Return whether rocprof-compute ships views for arch."""
+    return canonical_config_arch(arch) in loader.METRIC_LIBRARY_PARENT_ARCH
+
+
 def arch_panel_configs(arch: str) -> "OrderedDict[int, Dict[str, Any]]":
-    """Return the panel configs analyze shows for an arch."""
-    config_arch = canonical_config_arch(arch) or arch
-    return load_panel_configs([str(config.analysis_configs_dir / config_arch)])
+    """Return the panel configs analyze shows for arch, from the shipped views.
+
+    Args:
+        arch: A GPU arch with views (has_views()).
+
+    Returns:
+        Each panel config, keyed by panel id, in panel id order.
+    """
+    metrics = loader.MetricLibrary.load(
+        loader.default_metric_library_dir(), arch
+    ).metrics
+    return views_to_panel_configs(load_views(arch), metrics)
 
 
 def panel_aliases(views: List[Dict[str, Any]]) -> Dict[str, str]:
-    """Return panel number -> -b alias, "" for none (get_arch_panel_id_to_alias())."""
+    """Return panel number -> -b alias, "" for none, of an arch's views."""
     return {
         str(view["legacy_panel_id"] // 100): view.get("alias") or "" for view in views
     }
+
+
+def get_arch_panel_id_to_alias(
+    arch: str, views_dir: Optional[Path] = None
+) -> Dict[str, str]:
+    """Return panel number -> -b alias of arch's views, "" for none; {} for an arch
+    without views."""
+    if not has_views(arch):
+        return {}
+    return panel_aliases(load_views(arch, views_dir))
+
+
+def get_arch_alias_to_panel_id(arch: str) -> Dict[str, str]:
+    """Return -b alias -> panel number, for the panels that have an alias."""
+    return {
+        alias: pid for pid, alias in get_arch_panel_id_to_alias(arch).items() if alias
+    }
+
+
+def convert_filter_blocks_to_panel_ids(
+    filter_blocks: List[str], arch: Optional[str] = None
+) -> Set[int]:
+    """Inverse of convert_metric_id_to_panel_info: map metric ids like
+    "2" or "11.1" to the set of file_id integers (e.g. {200, 1100}).
+    Tokens that are not metric ids are looked up as panel aliases (e.g.
+    "lds", "roofline") for the given arch.
+    """
+    alias_map: Dict[str, str] = (
+        get_arch_alias_to_panel_id(arch)
+        if arch and any(not METRIC_ID_RE.match(str(bid)) for bid in filter_blocks)
+        else {}
+    )
+    resolved: Set[int] = set()
+    for bid in filter_blocks:
+        metric_id = resolve_block_token(str(bid), alias_map)
+        if metric_id is None:
+            console_error(f"Invalid --block value {str(bid)!r}.{INVALID_BLOCK_HINT}")
+        resolved.add(int(convert_metric_id_to_panel_info(metric_id)[0]))
+    return resolved
 
 
 def iter_view_rows(views: List[Dict[str, Any]]) -> Iterator[Tuple[str, Dict[str, Any]]]:

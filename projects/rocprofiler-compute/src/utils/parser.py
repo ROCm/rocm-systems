@@ -17,6 +17,7 @@ from pc_sampling.pc_sampling_analysis import (
     load_aggregated_pc_sampling,
 )
 from utils import schema
+from utils.analysis_views import convert_filter_blocks_to_panel_ids
 from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
@@ -26,7 +27,6 @@ from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
     METRIC_ID_RE,
     SUPPORTED_FIELD,
-    convert_filter_blocks_to_panel_ids,
     convert_metric_id_to_panel_info,
     expand_placeholder_ranges,
     format_table_id,

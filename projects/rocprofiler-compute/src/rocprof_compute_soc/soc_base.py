@@ -23,6 +23,7 @@ from typing import (
 import config
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils import amdsmi_interface, rocprofv3_avail_interface
+from utils.analysis_views import get_arch_alias_to_panel_id
 from utils.logger import (
     console_debug,
     console_error,
@@ -40,7 +41,6 @@ from utils.utils_common import (
     canonical_config_arch,
     convert_metric_id_to_panel_info,
     create_temp_rocprofiler_metrics_path,
-    get_arch_alias_to_panel_id,
     is_only_pc_sampling,
     is_tcc_channel_counter,
     parse_sets_yaml,

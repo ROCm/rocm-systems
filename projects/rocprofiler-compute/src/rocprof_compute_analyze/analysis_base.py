@@ -61,13 +61,10 @@ TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
 
 
 class OmniAnalyze_Base:
-    def __init__(
-        self, args: argparse.Namespace, supported_archs: dict[str, str]
-    ) -> None:
+    def __init__(self, args: argparse.Namespace) -> None:
         self.__args = args
         self._runs: OrderedDict[str, schema.Workload] = OrderedDict()
         self._arch_configs: dict[str, schema.ArchConfig] = {}
-        self.__supported_archs = supported_archs
         self._output: Optional[TextIO] = None
         self.__socs: Optional[dict[str, OmniSoC_Base]] = None
 

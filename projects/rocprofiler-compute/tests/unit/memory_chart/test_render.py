@@ -29,7 +29,7 @@ def sample_values(arch: str) -> dict[str, float]:
         if kind == "percent":
             values[metric_id] = 1.5 + seed
         elif kind == "bandwidth":
-            values[metric_id] = (seed + 1) * 4.25e9
+            values[metric_id] = (seed + 1) * 4.25
         else:
             values[metric_id] = seed + 2.0
     return values
@@ -236,7 +236,7 @@ def test_drawn_arrows_sit_between_the_box_borders(gpu_arch, box, outer, side):
 
 
 def test_gfx950_shows_io_bandwidth_above_and_below_the_grid():
-    output = render("gfx950", {"3.1.35": 2e9, "3.1.40": 3e9})  # xGMI Read, PCIe Atomic
+    output = render("gfx950", {"3.1.35": 2.0, "3.1.40": 3.0})  # xGMI Read, PCIe Atomic
     assert re.search(r"\|\|  Read BW\s+2\.000 GB/s", output)
     assert re.search(r"\|\|  Atomic BW\s+3\.000 GB/s", output)
     assert output.index("xGMI") < output.index("Compute Units") < output.index("PCIe")
