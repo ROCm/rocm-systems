@@ -165,9 +165,11 @@ public:
     {
         static constexpr size_t kRecords = 16 * 1024;
 
-        // User-provided on purpose: even `chunk()` never zeroes the slots, so
-        // value-initialization cannot hide a missing explicit page touch.
-        chunk() noexcept {}
+        // Construct only by default-initialization (`new (p) chunk`), which leaves
+        // the slots untouched. Value-initialization (`chunk()`, `chunk{}`) would
+        // zero every slot and hide a missing explicit page touch; the
+        // allocate_constructs_only_the_chunk_header test fails if that happens.
+        chunk() noexcept = default;
 
         uint64_t            base_pos = 0;          // stream position of slots[0]
         std::atomic<chunk*> next     = {nullptr};  // non-owning; stored once by the reader

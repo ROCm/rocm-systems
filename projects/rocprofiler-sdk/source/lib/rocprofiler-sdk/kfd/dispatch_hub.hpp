@@ -31,6 +31,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -87,10 +88,15 @@ struct loss_stats
     uint64_t correlation_ids = 0;
 };
 
-// No admission cap: hub growth is bounded only by completion (EOP retirement) and
-// lifecycle cleanup (closed-window GC, quarantine, teardown) -- the pending-START
-// registry stays separately bounded by pending_starts_cap()
-// (ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_STARTS, kfd/kfd_reader.cpp).
+// No admission cap: an entry leaves the hub through completion (EOP retirement),
+// lifecycle cleanup (closed-window GC, quarantine, teardown), or the stale-entry
+// reaper. The reaper is what bounds an OPEN window: an entry whose EOP was lost
+// (e.g. an undetectable ring lap) would otherwise stay until exit, so entries
+// older than the processor's stale age are leaked and ledgered as losses
+// (reap_stale_pending). The pending high-water mark (pending_peak) is reported at
+// finalize. The pending-START registry stays separately bounded by
+// pending_starts_cap() (ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_STARTS,
+// kfd/kfd_reader.cpp).
 
 template <typename PayloadT>
 class DispatchHub
@@ -144,8 +150,9 @@ public:
     //
     // Admission never evicts existing entries: an entry's completion record may
     // still be in the ring or the processor backlog. On refusal the batch and the
-    // pending map are unmutated.
-    bool register_batch(std::vector<registration>&& batch)
+    // pending map are unmutated. `now_ns` stamps every entry for the stale-entry
+    // reaper; it is read by the caller, outside the lock.
+    bool register_batch(std::vector<registration>&& batch, uint64_t now_ns = steady_now_ns())
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
 
@@ -174,11 +181,14 @@ public:
             auto e           = entry{};
             e.correlation_id = reg.correlation_id;
             e.window         = std::move(reg.window);
+            e.registered_ns  = now_ns;
             e.payload        = std::move(reg.payload);
             const auto* _w   = e.window.get();
             m_entries.emplace(reg.key, std::move(e));
             if(_w != nullptr) ++m_pending_by_window[_w];
         }
+        if(!batch.empty()) m_pending_by_age[age_bucket(now_ns)] += batch.size();
+        m_pending_peak = std::max(m_pending_peak, m_entries.size());
         return true;
     }
 
@@ -410,6 +420,51 @@ public:
         return {std::move(out), stats};
     }
 
+    // Stale-entry reaper: leak+ledger every entry registered more than max_age_ns
+    // before now_ns, whatever its window state. This is the only exit for an
+    // entry on a window that never closes whose EOP was lost, so without it such
+    // entries would accumulate until teardown. Called on the processor's periodic
+    // tick under the same gate and `keep` set as gc_closed_windows(); the caller
+    // releases the returned payloads outside the lock.
+    //
+    // Cost: O(1) on every tick, and O(entries) only once the OLDEST age bucket is
+    // wholly past the cutoff -- i.e. only when something is certainly stale -- so
+    // live traffic is never walked under the lock. Using whole buckets delays a
+    // reap by at most kAgeBucketNs past max_age_ns.
+    std::pair<std::vector<leaked>, loss_stats> reap_stale_pending(uint64_t       now_ns,
+                                                                  uint64_t       max_age_ns,
+                                                                  const key_set* keep = nullptr)
+    {
+        if(m_abandoned.load(std::memory_order_acquire)) return {};
+        if(now_ns < max_age_ns) return {};
+        const uint64_t cutoff_ns = now_ns - max_age_ns;
+
+        auto lk = std::lock_guard<std::mutex>{m_mu};
+        if(m_pending_by_age.empty()) return {};
+        if((m_pending_by_age.begin()->first + 1) * kAgeBucketNs > cutoff_ns) return {};
+
+        auto out = std::vector<leaked>{};
+        auto ids = correlation_id_set{};
+        for(auto it = m_entries.begin(); it != m_entries.end();)
+        {
+            if(it->second.registered_ns < cutoff_ns &&
+               (keep == nullptr || keep->count(it->first) == 0))
+            {
+                ids.insert(it->second.correlation_id);
+                out.emplace_back(leak_locked(it));
+                it = erase_entry_locked(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        auto stats            = loss_stats{};
+        stats.dispatches      = out.size();
+        stats.correlation_ids = ids.size();
+        return {std::move(out), stats};
+    }
+
     // Teardown step 5: everything still PENDING becomes LEAKED before the task
     // group is joined and correlation ids are finalized.
     std::pair<std::vector<leaked>, loss_stats> drain_for_teardown()
@@ -457,6 +512,16 @@ public:
         return m_entries.size();
     }
 
+    // High-water mark of live PENDING entries over the hub's lifetime, sampled at
+    // every registration. Reported in the finalize summary line, so pending-map
+    // growth is visible without the admission cap.
+    size_t pending_peak() const
+    {
+        if(m_abandoned.load(std::memory_order_acquire)) return 0;
+        auto lk = std::lock_guard<std::mutex>{m_mu};
+        return m_pending_peak;
+    }
+
     session_mode mode() const
     {
         if(m_abandoned.load(std::memory_order_acquire)) return session_mode::child_stale;
@@ -484,8 +549,14 @@ private:
     {
         uint64_t   correlation_id = 0;
         window_ptr window         = {};
+        uint64_t   registered_ns  = 0;  // steady_now_ns() at register_batch
         PayloadT   payload        = {};
     };
+
+    // Granularity of the age index m_pending_by_age.
+    static constexpr uint64_t kAgeBucketNs = 1'000'000'000ull;  // 1 s
+
+    static constexpr uint64_t age_bucket(uint64_t ns) { return ns / kAgeBucketNs; }
 
     // A batch's per-GPU dispatch counts, kept off the heap. A production batch
     // comes from one queue and so spans one GPU; a batch spanning more GPUs than
@@ -618,6 +689,7 @@ private:
         }
         m_entries.clear();
         m_pending_by_window.clear();
+        m_pending_by_age.clear();
         auto stats            = loss_stats{};
         stats.dispatches      = out.size();
         stats.correlation_ids = ids.size();
@@ -649,10 +721,16 @@ private:
     // on every erase path via erase_entry_locked. The window keys stay valid
     // while counted: each counted entry owns a window_ptr to the same window.
     std::unordered_map<const owner_window*, size_t> m_pending_by_window = {};
+    // Live PENDING count per age_bucket(registered_ns), ordered so the reaper can
+    // tell in O(1) whether the oldest entry is stale. Maintained alongside
+    // m_pending_by_window, with the same single removal point.
+    std::map<uint64_t, size_t> m_pending_by_age = {};
+    // Largest m_entries.size() seen at registration; see pending_peak().
+    size_t m_pending_peak = 0;
 
-    // Caller holds m_mu. Erase an entry and keep the per-window count in step;
-    // the single removal point every path funnels through so the count cannot
-    // drift. Returns the iterator following the erased element.
+    // Caller holds m_mu. Erase an entry and keep the per-window and per-age counts
+    // in step; the single removal point every path funnels through so the counts
+    // cannot drift. Returns the iterator following the erased element.
     typename pending_entry_map::iterator erase_entry_locked(typename pending_entry_map::iterator it)
     {
         if(const auto* _w = it->second.window.get())
@@ -662,6 +740,11 @@ private:
             {
                 if(--_c->second == 0) m_pending_by_window.erase(_c);
             }
+        }
+        auto _a = m_pending_by_age.find(age_bucket(it->second.registered_ns));
+        if(_a != m_pending_by_age.end() && _a->second > 0)
+        {
+            if(--_a->second == 0) m_pending_by_age.erase(_a);
         }
         return m_entries.erase(it);
     }
