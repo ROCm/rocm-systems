@@ -410,8 +410,10 @@ Filtering options
 -----------------
 
 ``-b``, ``--block <block-id|block-alias|metric-id>``
-   Allows system profiling on one or more selected analysis report blocks to speed
-   up the profiling process. See :ref:`profiling-hw-component-filtering`.
+   Allows system profiling on one or more selected analysis report blocks or
+   metrics to speed up the profiling process. A metric id names a metric, for
+   example ``compute.salu_util``; numeric metric ids such as ``11.2.2`` are
+   deprecated. See :ref:`profiling-hw-component-filtering`.
    Note that this option cannot be used with ``--roof-only`` or ``--set``.
 
 ``-k``, ``--kernel <kernel-substr>``
@@ -475,12 +477,13 @@ for ``Compute Unit - Instruction Mix`` (block 10) and ``Wavefront Launch Statist
    ...
 
 
-It is also possible to collect individual metrics from the analysis report by providing metric ids.
-The following example only collects the counters required to calculate ``Total VALU FLOPs`` (metric id 11.1.0) and ``LDS Utilization`` (metric id 12.1.0).
+It is also possible to collect individual metrics from the analysis report by providing metric ids,
+which ``--list-metrics`` shows. The following example only collects the counters required to calculate
+``VALU FLOPs`` (metric id ``compute.valu_flops``) and ``LDS Utilization`` (metric id ``lds.util``).
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name vcopy -b 11.1.1 12.1.1 -- ./vcopy -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy -b compute.valu_flops lds.util -- ./vcopy -n 1048576 -b 256
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -496,7 +499,7 @@ The following example only collects the counters required to calculate ``Total V
    INFO Command: ./vcopy -n 1048576 -b 256
    INFO Kernel Selection: None
    INFO Kernel Iteration Range: None
-   INFO Filtered sections: ['11.1.1', '12.1.1']
+   INFO Filtered sections: ['compute.valu_flops', 'lds.util']
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    INFO Collecting Performance Counters

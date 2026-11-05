@@ -25,6 +25,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * The analysis database stores the per-source-line counts in `compute_pc_sample_state`, next to the per-instruction counts.
   * If some instructions of a source file have no source line number, the file's CSV starts with an `Unattributable instructions` row. It counts the samples lost because the compiler wrote no source line number for those instructions.
 
+* Added metric IDs to `--block` and `--list-metrics`, for example `--block compute.salu_util`, which selects every row that shows the metric. Numeric metric IDs such as `11.2.2` still work, but print a deprecation warning.
+
 ### Changed
 
 * `--triton-trace` no longer captures the Triton kernels that `torch.compile` generates. Use `--torch-trace` for those kernels.
@@ -117,6 +119,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Upcoming changes
 
 * `--list-blocks` and `--list-available-metrics` will be removed in a future release.
+
+* Numeric metric IDs in `--block`, such as `11.2.2`, will be removed in a future release. Use metric IDs such as `compute.salu_util` instead.
 
 ### Known issues
 
