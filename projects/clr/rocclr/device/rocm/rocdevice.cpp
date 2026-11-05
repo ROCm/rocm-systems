@@ -544,6 +544,18 @@ bool Device::init() {
       }
     }
 
+    // Staging is needed whenever at least one directed pair cannot be reached
+    // directly. A fully connected topology never falls back to staging.
+    bool staging_required = false;
+    for (auto device : devices) {
+      // p2pDevices_ lists the devices that can access this device, excluding
+      // itself. A fully connected fabric has devices.size() - 1 entries.
+      if (device->p2pDevices_.size() + 1 < devices.size()) {
+        staging_required = true;
+        break;
+      }
+    }
+
     // Create a dummy context for internal memory allocations on all reported devices
     glb_ctx_ = new amd::Context(devices, amd::Context::Info());
     if (glb_ctx_ == nullptr) {
@@ -564,9 +576,14 @@ bool Device::init() {
         p2p_stage_ = buf;
       } else {
         delete buf;
-        // Staging is optional on a fully connected fabric. Keep the runtime
-        // usable and let the copy path report the failure if it needs staging.
-        LogError("p2p stg buffer alloc failed, peer staging disabled");
+        LogError("p2p stg buffer alloc failed");
+        // A topology that needs staging cannot complete those copies without
+        // the buffer. Fail init instead of silently turning every such copy
+        // into a no-op. On a fully connected fabric the buffer is unused, so
+        // the runtime stays usable.
+        if (staging_required) {
+          return false;
+        }
       }
     }
 

@@ -4301,13 +4301,13 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
   const bool p2pAllowed =
       ::roc::p2p::CanBlit(role, canReach(srcDevMem->dev()), canReach(dstDevMem->dev()));
 
-  // A topology with at least one usable direction does not require staging, so
-  // the buffer is optional. Do not dereference a null P2PStage() if it could
-  // not be allocated; fail the copy instead.
+  // Device init allocates the staging buffer whenever the topology has a
+  // directed pair that cannot be reached directly, and fails init if that
+  // allocation fails. If the buffer is still missing the copy cannot be
+  // completed; report the failure without marking the destination as written.
   if (!p2pAllowed && (dev().P2PStage() == nullptr)) {
     LogError("P2P staging buffer is not available");
     cmd.setStatus(CL_OUT_OF_RESOURCES);
-    cmd.destination().signalWrite(&dstDevMem->dev());
     profilingEnd();
     return;
   }

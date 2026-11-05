@@ -216,6 +216,12 @@ contract:
   Contract_PeerCopy_HipMemcpyPeer_InvalidDevice_IsRejected:
     <<: *level_0
     tags: [peer_copy, P0]
+  Contract_PeerCopy_HipMemcpyPeer_DeniedDirection_StagesCopy:
+    <<: *level_0
+    tags: [peer_copy, multigpu, P0]
+  Contract_PeerCopy_HipMemcpyPeerAsync_DeniedDirection_StagesCopy:
+    <<: *level_0
+    tags: [peer_copy, multigpu, P0]
   Contract_Stream_HipStreamCreate_Destroy_Succeeds:
     <<: *level_0
     tags: [stream_event, P0]

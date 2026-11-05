@@ -51,5 +51,36 @@ constexpr bool NeedsStaging(CopyRole role, bool can_reach_src, bool can_reach_ds
   return !CanBlit(role, can_reach_src, can_reach_dst);
 }
 
+// Compile-time truth table. Keeping it next to the helper makes the decision
+// testable without pulling a private ROCclr header into hip-tests.
+static_assert(SelectRole(false, false) == CopyRole::kThirdParty);
+static_assert(SelectRole(true, false) == CopyRole::kLocalToPeer);
+static_assert(SelectRole(false, true) == CopyRole::kPeerToLocal);
+static_assert(SelectRole(true, true) == CopyRole::kLocalToLocal);
+
+// Local read, peer write: only the destination has to be addressable.
+static_assert(!CanBlit(CopyRole::kLocalToPeer, false, false));
+static_assert(CanBlit(CopyRole::kLocalToPeer, false, true));
+static_assert(!CanBlit(CopyRole::kLocalToPeer, true, false));
+static_assert(CanBlit(CopyRole::kLocalToPeer, true, true));
+
+// Peer read, local write: only the source has to be addressable.
+static_assert(!CanBlit(CopyRole::kPeerToLocal, false, false));
+static_assert(!CanBlit(CopyRole::kPeerToLocal, false, true));
+static_assert(CanBlit(CopyRole::kPeerToLocal, true, false));
+static_assert(CanBlit(CopyRole::kPeerToLocal, true, true));
+
+// Both buffers are local: no peer address is touched.
+static_assert(CanBlit(CopyRole::kLocalToLocal, false, false));
+static_assert(CanBlit(CopyRole::kLocalToLocal, false, true));
+static_assert(CanBlit(CopyRole::kLocalToLocal, true, false));
+static_assert(CanBlit(CopyRole::kLocalToLocal, true, true));
+
+// Third device: both peer buffers have to be addressable.
+static_assert(!CanBlit(CopyRole::kThirdParty, false, false));
+static_assert(!CanBlit(CopyRole::kThirdParty, false, true));
+static_assert(!CanBlit(CopyRole::kThirdParty, true, false));
+static_assert(CanBlit(CopyRole::kThirdParty, true, true));
+
 }  // namespace p2p
 }  // namespace roc
