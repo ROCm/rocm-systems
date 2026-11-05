@@ -203,7 +203,7 @@ const memory_source::track_rows_t&
 memory_source::track_rows(const reader_types::track_info_t& track) const
 {
     if(m_released) throw std::logic_error{ "PyTorch rows were released" };
-    return m_tracks.at(track.id - 1);
+    return m_tracks.at(track.id);
 }
 
 }  // namespace profiler_hub::pytorch

@@ -59,7 +59,7 @@ private:
     [[nodiscard]] const track_rows_t& track_rows(
         const reader_types::track_info_t& track) const;
 
-    std::vector<track_rows_t> m_tracks;  // track id - 1
+    std::vector<track_rows_t> m_tracks;  // by track id
     std::vector<const char*>  m_names;   // by name id
     std::atomic<bool>         m_released{ false };
 };

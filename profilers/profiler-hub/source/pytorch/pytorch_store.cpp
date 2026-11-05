@@ -111,7 +111,7 @@ load_store(const std::string& path)
     for(auto& [key, idxs] : host_groups)
     {
         store_track_t track{};
-        track.id = static_cast<std::uint32_t>(store.tracks.size() + 1);
+        track.id = static_cast<std::uint32_t>(store.tracks.size());
         {
             std::vector<event_t> thread_events;
             thread_events.reserve(idxs.size());
@@ -147,7 +147,7 @@ load_store(const std::string& path)
             }
         }
         store_track_t track{};
-        track.id        = static_cast<std::uint32_t>(store.tracks.size() + 1);
+        track.id        = static_cast<std::uint32_t>(store.tracks.size());
         track.name      = fmt::format("GPU {} / Stream {}", key.first, key.second);
         track.category  = reader_types::track_kind_t::stream;
         track.pid       = launcher_pid < 0 ? busiest_pid : launcher_pid;
