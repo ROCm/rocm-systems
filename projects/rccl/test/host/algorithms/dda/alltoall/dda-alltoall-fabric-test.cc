@@ -283,6 +283,8 @@ class DdaAlltoallFabricPushMicrotest : public ::testing::Test {
     };
     RecordDdaCopies(&copies_);
     comm().ddaFabricBarrierState = barrier_;
+    // The 0x5a fill is not a valid bool; start from the default epoch flags.
+    barrier_->barrierHost.setEpochFlags(true);
     comm().rank = 3;
     comm().addonStopEvent = kStopEvent;
   }
