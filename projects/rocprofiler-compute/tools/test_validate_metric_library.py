@@ -20,6 +20,7 @@ from common import use_metric_library_family, write_text_file
 from validate_metric_library import main, validate
 
 import config
+from utils import metric_library
 from utils.metric_library import MetricLibrary, arch_chain, default_metric_library_dir
 from utils.mi_gpu_spec import mi_gpu_specs
 
@@ -52,20 +53,28 @@ def measured(monkeypatch):
 def shipped_copy(tmp_path, monkeypatch):
     """copy_shipped_trees() into tmp_path, with an empty metric library cache."""
     monkeypatch.setattr(MetricLibrary, "_cache", {})
-    return functools.partial(copy_shipped_trees, tmp_path)
+    return functools.partial(copy_shipped_trees, tmp_path, monkeypatch)
 
 
-def copy_shipped_trees(root, arch):
+def copy_shipped_trees(root, monkeypatch, arch):
     """Copy the shipped metric library and analysis configs of arch and its ancestors
-    under root, and return the (library, configs) copies."""
+    under root, make that chain the only known one, and return the (library, configs)
+    copies."""
     library = root / "metric_library"
     configs = root / "analysis_configs"
+    chain = arch_chain(arch)
     for source, target in (
         (default_metric_library_dir(), library),
         (config.analysis_configs_dir, configs),
     ):
-        for chain_arch in arch_chain(arch):
+        for chain_arch in chain:
             shutil.copytree(source / chain_arch, target / chain_arch)
+    parents = metric_library.METRIC_LIBRARY_PARENT_ARCH
+    monkeypatch.setattr(
+        metric_library,
+        "METRIC_LIBRARY_PARENT_ARCH",
+        {chain_arch: parents[chain_arch] for chain_arch in chain},
+    )
     return library, configs
 
 
@@ -441,6 +450,14 @@ def test_an_id_has_one_name_and_unit_on_every_arch(tree, field, shown):
 def test_unknown_arch_directory(tree):
     (tree / "gfx_other").mkdir()
     assert "[gfx_other] is not a known metric library arch" in validate(tree)
+
+
+def test_mapped_arch_needs_a_directory(tree):
+    """Only the missing arch is reported; its descendants are not checked."""
+    shutil.rmtree(tree / "gfx_c3")
+    assert validate(tree) == [
+        "[gfx_c3] is in METRIC_LIBRARY_PARENT_ARCH but has no directory"
+    ]
 
 
 # =============================================================================

@@ -5,7 +5,9 @@
 """Pre-commit hook: validate the metric library.
 
 For every arch in src/rocprof_compute_soc/metric_library/, check that:
-  1. each file loads, and a child file inherits from its parent arch's file;
+  1. each arch of METRIC_LIBRARY_PARENT_ARCH has a directory and each directory is
+     such an arch, each file loads, and a child file inherits from its parent arch's
+     file;
   2. metrics and variables have the required fields and types; "peak" is a
      theoretical peak and "peak_empirical" a roofline benchmark ceiling;
   3. every ceiling the roofline benchmark measures on the arch is the
@@ -68,6 +70,7 @@ from utils import metric_library
 from utils.metric_library import (
     VARIABLES_FILENAME,
     MetricLibrary,
+    arch_chain,
     arch_files,
     default_metric_library_dir,
     iter_library_documents,
@@ -206,10 +209,18 @@ def validate(metric_dir: Path, analysis_dir: Optional[Path] = None) -> List[str]
 
     With analysis_dir, also check each valid arch against its analysis configs.
     """
-    errors: List[str] = []
+    missing_archs = {
+        arch
+        for arch in metric_library.METRIC_LIBRARY_PARENT_ARCH
+        if not (metric_dir / arch).is_dir()
+    }
+    errors = [
+        f"[{arch}] is in METRIC_LIBRARY_PARENT_ARCH but has no directory"
+        for arch in sorted(missing_archs)
+    ]
     valid_archs = []
     for arch in metric_library.METRIC_LIBRARY_PARENT_ARCH:
-        if not (metric_dir / arch).is_dir():
+        if missing_archs.intersection(arch_chain(arch)):
             continue
         arch_errors = validate_arch(metric_dir, arch)
         if not arch_errors:
