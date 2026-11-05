@@ -66,11 +66,13 @@ compute_thruput_util:
 ## Inheritance
 
 A child arch lists only what differs from its parent; the chain is
-`METRIC_LIBRARY_PARENT_ARCH` in `src/utils/metric_library.py`. Each child file starts
-with `inherit: <path to the parent's file>` and is merged on it:
+`METRIC_LIBRARY_PARENT_ARCH` in `src/utils/metric_library.py`. A new arch adds its entry
+there and its directory here; the validator reports one without the other. Each child
+file starts with `inherit: <path to the parent's file>` and is merged on it:
 
 - a mapping merges key by key, so a changed metric lists only its changed fields;
-- a scalar or a list replaces the parent's value;
+- a scalar or a list replaces the parent's value, but a mapping, a list and a scalar
+  cannot replace one another;
 - `<id>: !remove` deletes a metric, and `<field>: !remove` deletes a field.
 
 A file the child does not have comes from its nearest ancestor.
