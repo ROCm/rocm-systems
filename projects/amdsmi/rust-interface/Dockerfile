@@ -37,3 +37,7 @@ RUN curl -sSf -O https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-g
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /src
+
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root
