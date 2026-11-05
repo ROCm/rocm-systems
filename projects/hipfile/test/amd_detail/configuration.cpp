@@ -202,14 +202,18 @@ TEST_F(HipFileConfiguration, FastpathEnabledIfDxgPathHasNonDirectoryComponent)
 {
     expect_configuration_dxg_statx_fails(ENOTDIR);
     expect_configuration_fastpath(nullptr);
+    testing::internal::CaptureStderr();
     ASSERT_TRUE(Configuration().fastpath());
+    ASSERT_THAT(testing::internal::GetCapturedStderr(), IsEmpty());
 }
 
 TEST_F(HipFileConfiguration, FastpathDisabledIfDxgProbeIsInconclusive)
 {
     expect_configuration_dxg_statx_fails(ENOMEM);
     expect_configuration_fastpath(nullptr);
+    testing::internal::CaptureStderr();
     ASSERT_FALSE(Configuration().fastpath());
+    ASSERT_THAT(testing::internal::GetCapturedStderr(), HasSubstr("disabling the fastpath"));
 }
 
 TEST_F(HipFileConfiguration, FastpathDisabledOnWslIfDxgDetectionIsNotZero)

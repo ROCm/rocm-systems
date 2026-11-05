@@ -34,8 +34,18 @@ rocrUsesDxg() noexcept
         Context<Sys>::get()->statx(AT_FDCWD, "/dev/dxg", 0, 0);
     }
     catch (const std::system_error &e) {
-        // We only conclude the user is using KFD if /dev/dxg/ does not exist.
-        return e.code() != std::errc::no_such_file_or_directory && e.code() != std::errc::not_a_directory;
+        // Only ENOENT/ENOTDIR prove /dev/dxg does not exist, i.e. ROCr is using KFD (allow fastpath).
+        if (e.code() == std::errc::no_such_file_or_directory || e.code() == std::errc::not_a_directory) {
+            return false;
+        }
+
+        // Any other error is unexpected and leaves us unable to tell, so fail safe, i.e. assume dxg
+        // (disable fastpath).
+        // TODO: replace with logging, e.g., hipfilelog(WARN, ...)
+        fprintf(stderr,
+                "hipFile: unable to check for /dev/dxg (%s); assuming ROCr is using dxg and disabling "
+                "the fastpath.\n",
+                e.code().message().c_str());
     }
     return true;
 }
