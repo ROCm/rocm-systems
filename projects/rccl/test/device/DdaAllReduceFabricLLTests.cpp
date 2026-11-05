@@ -443,9 +443,10 @@ TEST_F(DdaAllReduceFabricLL, SpreadPassesIdleBlocksAndShortShards) {
 }
 
 // Rank 0's copy of my shard lands only once the kernel is polling (phase 2), then a peer's reduced shard (phase 3).
+// On one block the phase-3 poll masks carry 2 or 3 lines, so the late reduced shard waits in the batched sweep.
 TEST_F(DdaAllReduceFabricLL, SpreadWaitsForLateCopiesAndLateReducedShards) {
   spreadCase<float, 0>(6, kSelf, kOneShotBytes, 3, kCopyArea);
-  spreadCase<float, 0>(5, kSelf, kOneShotBytes, 3, kReducedArea);
+  spreadCase<float, 0>(5, kSelf, kOneShotBytes, 1, kReducedArea);
 }
 
 // An abort in the phase-2 wait publishes no partial sum; one in the phase-3 wait leaves the missing shard untouched.
@@ -465,6 +466,7 @@ TEST_F(DdaAllReduceFabricLL, SpreadInPlaceSendsBeforeOverwriting) {
 }
 
 // No reset after the one-shot: flag 3 runs on bank 1, then flag 4 on bank 0 over its flag-2 lines, one copy held late.
+// One block, so every poll mask carries 2 or 3 lines and the stale lines meet the batched sweep's exact flag test.
 TEST_F(DdaAllReduceFabricLL, SpreadFollowsTheOneShotAndSkipsStaleLines) {
   ASSERT_NO_FATAL_FAILURE((spreadReference<float, 0>(5, kSelf, kOneShotBytes, 1)));
   for (const uint32_t flag : {kFlag + 1, kFlag + 2}) {
@@ -472,10 +474,10 @@ TEST_F(DdaAllReduceFabricLL, SpreadFollowsTheOneShotAndSkipsStaleLines) {
     flag_ = flag;
     clearRecv();
     const int held = flag == kFlag + 1 ? kHoldNothing : kCopyArea;
-    ASSERT_NO_FATAL_FAILURE((spreadRun<float, 0>(oneShotGrid(), held, false, dSend_)));
+    ASSERT_NO_FATAL_FAILURE((spreadRun<float, 0>(1, held, false, dSend_)));
     ASSERT_NO_FATAL_FAILURE(expectSpreadRecv(held, false));
     ASSERT_NO_FATAL_FAILURE(expectSpreadPublished(true));
-    expectEpochAdvanced(oneShotGrid(), flag);
+    expectEpochAdvanced(1, flag);
   }
 }
 
