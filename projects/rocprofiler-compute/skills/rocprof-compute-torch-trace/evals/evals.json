@@ -42,7 +42,6 @@
       "id": "tt-filter-by-operator",
       "skill_should_trigger": true,
       "prompt": "show me the counters for just the relu operators in this traced PyTorch workload",
-      "sample": "simple_net.py",
       "expected_behavior": [
         "filters with --experimental --operator",
         "treats the pattern as a shell-style glob rather than a regex"
