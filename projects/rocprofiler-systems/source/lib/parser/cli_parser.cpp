@@ -35,20 +35,19 @@ struct token_limit
 std::string_view
 option_name(const schema_param& param)
 {
-    return param.arg ? std::string_view{ param.arg->name } : std::string_view{ param.id };
+    return param.arg ? std::string_view{ *param.arg } : std::string_view{ param.id };
 }
 
 token_limit
 limits_for(const schema_param& param)
 {
-    const bool is_flag  = param.arg && param.arg->form == arg_form::flag;
-    const auto fallback = is_flag ? std::size_t{ 0 } : k_single_value;
-    const auto minimum  = param.arg ? param.arg->min_count.value_or(fallback) : fallback;
-    if(param.type == param_type::enumeration_list && param.arg && !param.arg->max_count)
+    const auto fallback = param.flag ? std::size_t{ 0 } : k_single_value;
+    const auto minimum  = param.arg_min_count.value_or(fallback);
+    if(param.type == param_type::enumeration_list && param.arg && !param.arg_max_count)
     {
         return { .minimum = minimum, .maximum = std::numeric_limits<std::size_t>::max() };
     }
-    const auto maximum = param.arg ? param.arg->max_count.value_or(minimum) : minimum;
+    const auto maximum = param.arg_max_count.value_or(minimum);
     return { .minimum = minimum, .maximum = maximum };
 }
 
@@ -189,7 +188,7 @@ private:
         }
         if(equals_at != std::string_view::npos)
         {
-            store_target(*param, param->id, token.substr(equals_at + 1));
+            m_result.store_if_valid(*param, token.substr(equals_at + 1));
             return true;
         }
         return consume_counted(*param);
@@ -212,25 +211,18 @@ private:
             }
             return true;
         }
-        const auto binds = param.arg.value_or(arg_spec{}).binds;
-        if(!binds.empty())
-        {
-            store_binds(param, binds, tokens);
-            return true;
-        }
-        store_target(param, param.id,
-                     join_tokens(tokens, 0, tokens.size(), list_separator(param)));
+        m_result.store_if_valid(
+            param, join_tokens(tokens, 0, tokens.size(), list_separator(param)));
         return true;
     }
 
     [[nodiscard]] bool store_bare_flag(const schema_param& param)
     {
-        const auto form = param.arg.value_or(arg_spec{}).form;
-        if(form != arg_form::flag)
+        if(!param.flag)
         {
             return false;
         }
-        store_target(param, param.id, "true");
+        m_result.store_if_valid(param, "true");
         return true;
     }
 
@@ -258,34 +250,6 @@ private:
             fmt::format("option '{}' requires a value", option_name(param)));
     }
 
-    void store_binds(const schema_param& option, const std::vector<std::string>& binds,
-                     const std::vector<std::string>& tokens)
-    {
-        std::size_t start = 0;
-        for(std::size_t slot = 0; slot < binds.size() && start < tokens.size(); ++slot)
-        {
-            const bool last  = slot + 1 == binds.size();
-            const auto count = last ? tokens.size() - start : k_single_value;
-            const auto value = join_tokens(tokens, start, count, list_separator(option));
-            store_target(option, binds[slot], value);
-            start += count;
-        }
-    }
-
-    void store_target(const schema_param& option, std::string_view target_id,
-                      std::string_view value)
-    {
-        const auto* target = m_schema.find_param(target_id);
-        if(target == nullptr)
-        {
-            m_result.errors.push_back(
-                fmt::format("unknown parameter '{}' for option '{}'", target_id,
-                            option_name(option)));
-            return;
-        }
-        m_result.store_if_valid(*target, value);
-    }
-
     [[nodiscard]] bool store_bundle(std::string_view token)
     {
         if(token.size() < k_min_bundle_length || token[1] == '-')
@@ -298,7 +262,7 @@ private:
         {
             const auto  name  = std::string{ '-' } + token[index];
             const auto* param = m_schema.find_param_by_arg(name);
-            if(param == nullptr || !param->arg || param->arg->form != arg_form::flag)
+            if(param == nullptr || !param->flag)
             {
                 return false;
             }
@@ -306,7 +270,7 @@ private:
         }
         for(const auto* param : flags)
         {
-            store_target(*param, param->id, "true");
+            m_result.store_if_valid(*param, "true");
         }
         return true;
     }
