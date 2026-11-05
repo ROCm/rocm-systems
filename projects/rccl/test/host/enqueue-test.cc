@@ -5841,9 +5841,9 @@ TEST_F(EnqueueMicrotest, AddPersistentPlanRef_DropsNonLiveRefsAndKeepsLiveOnes) 
 }
 
 // Pin the numeric cutoff through the redirected ncclParamP2pLLThreshold (g_loadParam,
-// no cache). Presence of NCCL_P2P_LL_THRESHOLD is a separate ncclGetEnv read: the
-// widen applies only when that name is absent, so an explicit 4096 stays on the
-// stock per-channel rule even though the number matches the default.
+// no cache). Whether the user set NCCL_P2P_LL_THRESHOLD is a separate ncclGetEnv
+// read: the widen applies when that name is absent or empty, so an explicit 4096
+// stays on the stock per-channel rule even though the number matches the default.
 void PinP2pLlThreshold(bool userSet) {
   if (userSet) SetMicroEnv("NCCL_P2P_LL_THRESHOLD", "4096");
   else SetMicroEnvAbsent("NCCL_P2P_LL_THRESHOLD");
@@ -5885,6 +5885,14 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94UserLlThreshold_KeepsPerChannelRule) 
   PinP2pLlThreshold(/*userSet=*/true);
   ExpectGfx94RecvProtoLL(940, 16 << 10, 0);
   ExpectGfx94RecvProtoLL(950, 16 << 10, 0);
+}
+
+// NCCL_P2P_LL_THRESHOLD= is present but empty. ncclLoadParam uses the default, so
+// the widen still applies. A nullptr-only check would treat this as user-set.
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94EmptyLlThreshold_Widens) {
+  SetMicroEnv("NCCL_P2P_LL_THRESHOLD", "");
+  SetParam("P2P_LL_THRESHOLD", 4096);
+  ExpectGfx94RecvProtoLL(940, 16 << 10, 1);
 }
 
 // 32 KiB is inside the widen (stock cutoff is 4 KiB). Each gate that is off must
