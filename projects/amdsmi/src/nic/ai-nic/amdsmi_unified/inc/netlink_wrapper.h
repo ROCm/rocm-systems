@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -161,6 +162,13 @@ class NLAttributes {
   // attr's payload is a packed array of u64 (nla_len(attr) / 8 elements), not
   // a single scalar; the ethtool netlink FEC-stat attributes use this shape.
   static std::vector<uint64_t> get_u64_array(struct nlattr* attr);
+
+  // Every direct child of nested with the given type. A multi-attribute repeats its id, which
+  // parse_nested() collapses to the last occurrence.
+  static std::vector<struct nlattr*> get_nested_of_type(struct nlattr* nested, int type);
+
+  // A kernel "uint": a 4 or 8 byte payload. nullopt for any other length.
+  static std::optional<uint64_t> get_uint(struct nlattr* attr);
 
  private:
   NLMessage& msg_;

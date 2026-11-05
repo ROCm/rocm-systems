@@ -7,9 +7,12 @@
  */
 
 #include <cerrno>
+#include <cstddef>
+#include <cstdint>
 #include <string>
 
 #include "netlink_ethtool.h"
+#include "smi_nic_fec_testing.h"
 
 namespace amd::nic::netlink {
 
@@ -43,3 +46,8 @@ transport::Result<transport::FecStatistics_t> EthtoolNetlinkClient::get_fec_stat
 }
 
 }  // namespace amd::nic::netlink
+
+amd::smi::nic::transport::Result<amd::smi::nic::transport::FecStatistics_t>
+smi_nic_fec_stats_from_reply_for_testing(const uint8_t* /* reply */, size_t /* size */) {
+  return {false, {}, ENOTSUP};
+}

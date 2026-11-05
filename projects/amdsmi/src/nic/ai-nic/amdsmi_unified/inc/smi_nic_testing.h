@@ -13,6 +13,7 @@
 #include "amd_smi/impl/nic/amd_smi_nic_interface.h"
 #include "smi_devlink_netlink.h"
 #include "smi_ibverbs.h"
+#include "smi_nic_fec_testing.h"
 #include "smi_nic_hwmon.h"
 // Included bare: the header opens its own extern "C".
 #include "smi_nic_interface.h"

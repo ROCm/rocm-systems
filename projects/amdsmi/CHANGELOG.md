@@ -46,6 +46,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added ``amd-smi metric --nic --sensors`` and ``amdsmi_get_nic_hwmon_sensors()``**.  
   - Shows every temperature, voltage and power sensor of a NIC with its limits, as the ``sensors`` command does. Also available from Python.
 
+- **Added the FEC symbol-error histogram to ``metric --nic --port --extended``**.  
+  - ionic ports on a kernel that reports it now show ``FEC_SYMBOLS_ERR_0`` to ``FEC_SYMBOLS_ERR_15`` next to the existing FEC counters.
+
 - **Added debug logging of NIC reads**.  
   - With ``RSMI_LOGGING`` set, each NIC read is logged with its source and result, and serial numbers and MAC addresses are masked to their last four characters.
 

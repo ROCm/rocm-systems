@@ -251,4 +251,33 @@ std::vector<uint64_t> NLAttributes::get_u64_array(struct nlattr* attr) {
   return result;
 }
 
+std::vector<struct nlattr*> NLAttributes::get_nested_of_type(struct nlattr* nested, int type) {
+  std::vector<struct nlattr*> children;
+  struct nlattr* child = nullptr;
+  int remaining = 0;
+  nla_for_each_nested(child, nested, remaining) {
+    if (nla_type(child) == type) {
+      children.push_back(child);
+    }
+  }
+  return children;
+}
+
+std::optional<uint64_t> NLAttributes::get_uint(struct nlattr* attr) {
+  if (!attr) {
+    return std::nullopt;
+  }
+  const auto length = static_cast<size_t>(nla_len(attr));
+  if (length == sizeof(uint32_t)) {
+    return nla_get_u32(attr);
+  }
+  if (length == sizeof(uint64_t)) {
+    // nla_data() is only 4-byte aligned, so read through memcpy as nla_get_u64() does.
+    uint64_t value = 0;
+    std::memcpy(&value, nla_data(attr), sizeof(value));
+    return value;
+  }
+  return std::nullopt;
+}
+
 }  // namespace amd::nic::netlink

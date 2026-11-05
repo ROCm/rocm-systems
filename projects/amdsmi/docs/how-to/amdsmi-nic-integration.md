@@ -981,6 +981,14 @@ amd-smi metric --nic <ID | BDF | UUID> --port [PORT_NUM] [--extended] [--json]
 ``STATISTICS`` (the standard driver counters, e.g. ``RX_PACKETS``, ``TX_PACKETS``,
 ``RX_BYTES``) is a separate, untiered block; it isn't affected by scope.
 
+**ionic FEC counters.** ``EXTENDED`` adds up to 19 FEC names for an ionic port, all read over
+ethtool netlink (``ethtool -I --show-fec``), never through ``ethtool -S``:
+``corrected_blocks``, ``uncorrectable_blocks``, ``corrected_bits`` and the 16-bin symbol-error
+histogram ``fec_symbols_err_0`` to ``fec_symbols_err_15``. A port shows only the names its kernel
+and driver report. A kernel without FEC statistics (for example 6.8 with driver 25.12) reports
+none, and the histogram needs a kernel that carries it (upstream since 6.18). Each histogram bin
+is named after its symbol-error count; a bin spanning several counts is skipped.
+
 **Output structure:**
 
 ```

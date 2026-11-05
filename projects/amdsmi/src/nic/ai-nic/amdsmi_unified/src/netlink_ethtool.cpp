@@ -15,6 +15,9 @@
 #include <cstring>
 #include <string>
 #include <utility>
+#include <vector>
+
+#include "smi_nic_fec_testing.h"
 
 namespace amd::nic::netlink {
 
@@ -23,6 +26,37 @@ template <typename T>
 struct QueryContext {
   transport::Result<T>* result;
 };
+
+// Histogram attributes: upstream since kernel 6.18, and some vendor kernels carry them earlier.
+// UAPI headers of older kernels lack the enumerators, so the ids are spelled out; they are kernel
+// ABI.
+constexpr int kFecStatHist = 5;
+constexpr int kFecHistBinLow = 2;
+constexpr int kFecHistBinHigh = 3;
+constexpr int kFecHistBinVal = 4;
+constexpr char kFecBinNamePrefix[] = "fec_symbols_err_";
+
+// The kernel sends one nested attribute per histogram bin. A bin that counts a single symbol-error
+// total is named after it; a wider bin has no fec_symbols_err_<n> name and is skipped.
+auto add_fec_histogram(struct nlattr* stats_nest, transport::FecStatistics_t& stats) -> void {
+  for (auto* bin : NLAttributes::get_nested_of_type(stats_nest, kFecStatHist)) {
+    struct nlattr* bin_tb[kFecHistBinVal + 1];
+    if (NLAttributes::parse_nested(bin, bin_tb, kFecHistBinVal, nullptr) < 0) {
+      continue;
+    }
+    const auto low = NLAttributes::get_uint(bin_tb[kFecHistBinLow]);
+    const auto high = NLAttributes::get_uint(bin_tb[kFecHistBinHigh]);
+    const auto value = NLAttributes::get_uint(bin_tb[kFecHistBinVal]);
+    if ((!low.has_value()) || (!high.has_value()) || (!value.has_value())) {
+      continue;
+    }
+    if (low.value() != high.value()) {
+      continue;
+    }
+    stats.names.emplace_back(std::string{kFecBinNamePrefix} + std::to_string(low.value()));
+    stats.values.push_back(value.value());
+  }
+}
 }  // namespace
 
 EthtoolNetlinkClient::EthtoolNetlinkClient() : client_(), family_id_(-1), is_initialized_(false) {}
@@ -235,40 +269,32 @@ transport::Result<transport::VendorStatistics> EthtoolNetlinkClient::get_statist
  * ETHTOOL_A_FEC_STAT_CORRECTED/_UNCORR/_CORR_BITS are each a packed array of
  * u64 (index 0 is the port total; further elements are per-lane, only present
  * on some drivers/kernels). This slice reads index 0 only. The 16-entry
- * per-lane symbol-error histogram (fec_symbols_err_0..15, kernel 6.18+) has no
- * netlink attribute in headers available to build against here
- * (verified: absent from /usr/include/linux/ethtool_netlink.h on this host,
- * kernel 6.8); the ionic StatTable_t lists those 16 names so they will
- * surface automatically once a future change adds the histogram attribute and
- * this kernel floor moves; until then they are silently absent, same as any
- * other table entry the driver does not expose.
+ * per-lane symbol-error histogram (fec_symbols_err_0..15, upstream kernel 6.18+) arrives
+ * as one nested ETHTOOL_A_FEC_STAT_HIST attribute per bin, read by
+ * add_fec_histogram(). A kernel that does not report it simply yields no such
+ * names, same as any other table entry the driver does not expose.
  */
-static int fec_stats_handler(struct nl_msg* msg, void* arg) {
-  auto* ctx = static_cast<QueryContext<transport::FecStatistics_t>*>(arg);
-  if (!ctx || !ctx->result) {
-    return NL_SKIP;
-  }
-
-  struct nlmsghdr* nlh = nlmsg_hdr(msg);
+static int fill_fec_stats(struct nlmsghdr* nlh,
+                          transport::Result<transport::FecStatistics_t>& result) {
   struct nlattr* tb[ETHTOOL_A_FEC_MAX + 1];
 
   if (NLAttributes::parse(nlh, GENL_HDRLEN, tb, ETHTOOL_A_FEC_MAX, nullptr) < 0) {
-    ctx->result->success = false;
-    ctx->result->error_code = EINVAL;
+    result.success = false;
+    result.error_code = EINVAL;
     return NL_SKIP;
   }
 
   if (!NLAttributes::is_present(tb[ETHTOOL_A_FEC_STATS])) {
-    ctx->result->success = false;
-    ctx->result->error_code = ENODATA;
+    result.success = false;
+    result.error_code = ENODATA;
     return NL_SKIP;
   }
 
   struct nlattr* stat_tb[ETHTOOL_A_FEC_STAT_MAX + 1];
   if (NLAttributes::parse_nested(tb[ETHTOOL_A_FEC_STATS], stat_tb, ETHTOOL_A_FEC_STAT_MAX,
                                  nullptr) < 0) {
-    ctx->result->success = false;
-    ctx->result->error_code = EINVAL;
+    result.success = false;
+    result.error_code = EINVAL;
     return NL_SKIP;
   }
 
@@ -288,12 +314,22 @@ static int fec_stats_handler(struct nl_msg* msg, void* arg) {
   add_stat(ETHTOOL_A_FEC_STAT_CORRECTED, "corrected_blocks");
   add_stat(ETHTOOL_A_FEC_STAT_UNCORR, "uncorrectable_blocks");
   add_stat(ETHTOOL_A_FEC_STAT_CORR_BITS, "corrected_bits");
+  add_fec_histogram(tb[ETHTOOL_A_FEC_STATS], stats);
 
-  ctx->result->success = true;
-  ctx->result->value = std::move(stats);
-  ctx->result->error_code = 0;
+  result.success = true;
+  result.value = std::move(stats);
+  result.error_code = 0;
 
   return NL_OK;
+}
+
+static int fec_stats_handler(struct nl_msg* msg, void* arg) {
+  auto* ctx = static_cast<QueryContext<transport::FecStatistics_t>*>(arg);
+  if (!ctx || !ctx->result) {
+    return NL_SKIP;
+  }
+
+  return fill_fec_stats(nlmsg_hdr(msg), *ctx->result);
 }
 
 transport::Result<transport::FecStatistics_t> EthtoolNetlinkClient::get_fec_statistics(
@@ -322,3 +358,17 @@ transport::Result<transport::FecStatistics_t> EthtoolNetlinkClient::get_fec_stat
 }
 
 }  // namespace amd::nic::netlink
+
+amd::smi::nic::transport::Result<amd::smi::nic::transport::FecStatistics_t>
+smi_nic_fec_stats_from_reply_for_testing(const uint8_t* reply, size_t size) {
+  auto result = amd::smi::nic::transport::Result<amd::smi::nic::transport::FecStatistics_t>{
+      false, {}, EINVAL};
+  // A caller's array is not guaranteed to be aligned for the netlink header.
+  auto aligned = std::vector<uint8_t>(reply, (reply + size));
+  auto* nlh = reinterpret_cast<struct nlmsghdr*>(aligned.data());
+  if ((size < sizeof(struct nlmsghdr)) || (nlh->nlmsg_len > size)) {
+    return result;
+  }
+  amd::nic::netlink::fill_fec_stats(nlh, result);
+  return result;
+}
