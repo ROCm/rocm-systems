@@ -37,7 +37,6 @@
 #include <functional>
 #include <set>
 #include <string>
-#include <unistd.h>
 
 #include "comm.h"        // struct ncclComm, struct ncclPeerInfo
 #include "graph.h"       // ncclTopoGetNetDev(), ncclTopoComputePaths(), ncclTopoFree()

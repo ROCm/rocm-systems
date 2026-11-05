@@ -7,9 +7,10 @@
 
 #include <gtest/gtest.h>
 
-#include <climits>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <unistd.h>
 
 namespace RcclUnitTesting {
@@ -23,11 +24,12 @@ inline std::string topoFixtureDir() {
   const char* overrideDir = std::getenv("RCCL_TEST_TOPO_DIR");
   if (overrideDir != nullptr && overrideDir[0] != '\0') return overrideDir;
 
-  char exe[PATH_MAX];
-  const ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-  if (len <= 0) return kTopoFixtureDirName;
-  const std::string exePath(exe, static_cast<size_t>(len));
-  return exePath.substr(0, exePath.find_last_of('/') + 1) + kTopoFixtureDirName;
+  // canonical() sizes its own buffer and reports failure, including a binary replaced
+  // mid-run, through ec.
+  std::error_code ec;
+  const std::filesystem::path exe = std::filesystem::canonical("/proc/self/exe", ec);
+  if (ec) return kTopoFixtureDirName;
+  return (exe.parent_path() / kTopoFixtureDirName).string();
 }
 
 inline std::string topoFixturePath(const char* name) { return topoFixtureDir() + "/" + name; }

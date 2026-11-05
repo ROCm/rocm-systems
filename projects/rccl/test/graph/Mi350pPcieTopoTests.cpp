@@ -27,7 +27,6 @@
 #include <cstring>
 #include <memory>
 #include <string>
-#include <unistd.h>
 
 #include "graph.h"
 #include "graph/topo.h"

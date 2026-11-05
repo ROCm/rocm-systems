@@ -912,12 +912,7 @@ if(BUILD_TESTS)
       COMPILE_DEFINITIONS
         "SEARCH_CC_PATH=\"${PROJECT_BINARY_DIR}/hipify/src/graph/search.cc\"")
 
-    # TopoEnvPolicyTests, NetDevsPolicyP2pNetTests and Mi350pPcieTopoTests load
-    # topology XML fixtures from tools/topo_expl/models. Copy them into
-    # rccl-test-topo-models/ beside the binary, in the build tree and in the
-    # install, so the tests never depend on a source tree being present at run
-    # time (TheRock and CoCo run the binary from an install or a separate
-    # package). common/TopoFixtures.hpp resolves the directory.
+    # Stage the topo_expl fixtures beside the binary (build and install); common/TopoFixtures.hpp finds them.
     set(RCCL_TEST_TOPO_FIXTURE_NAMES
       topo_8p6l_5nic.xml
       topo_8p_ts1.xml
@@ -939,7 +934,8 @@ if(BUILD_TESTS)
       VERBATIM)
     add_custom_target(rccl-test-topo-fixtures DEPENDS ${RCCL_TEST_TOPO_FIXTURES_STAGED})
     add_dependencies(rccl-UnitTestsFixturesDebug rccl-test-topo-fixtures)
-    # The staged directory has to sit beside the binary.
+    # Pin the binary to this directory, where the fixtures are staged and where this
+    # target already lands. In an RCCL top-level build that is ${CMAKE_BINARY_DIR}/test.
     set_target_properties(rccl-UnitTestsFixturesDebug PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
     install(FILES ${RCCL_TEST_TOPO_FIXTURES}
