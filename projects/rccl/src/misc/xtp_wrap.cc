@@ -3,6 +3,7 @@
 #include "xtp_wrap.h"
 
 #include <dlfcn.h>
+#include <climits>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -190,9 +191,10 @@ xtp_descriptor fillDescriptor(struct ncclComm* comm) {
     desc.n_domains = comm->nvlDomainInfo.nNvlDomains;
     desc.ranks_per_domain = comm->nvlDomainInfo.maxRanksPerNvlDomain;
   }
-  // NET.count before topo trim is the XML NIC inventory, not the comm's
-  // working set. Only copy it once nNodes is known (after trim / allgather).
-  if (comm->nNodes > 0) desc.nic_count = comm->topo->nodes[NET].count;
+  // Per-rank trimmed NET.count can differ across nodes (trim drops a slower
+  // port on a shared asic). Class A matching on nic_count would then bind
+  // ranks to different profiles. minNetCount is already reduced across ranks.
+  if (comm->nNodes > 0 && comm->minNetCount != INT_MAX) desc.nic_count = comm->minNetCount;
   return desc;
 }
 

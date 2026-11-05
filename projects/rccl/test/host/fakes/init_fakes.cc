@@ -79,6 +79,7 @@ void ResetInitFakes() {
   ResetNcclStubs();
   ResetOsFakes();
   ResetRcclWrapFakes();
+  ResetXtpWrapFakes();
   ResetRecorderFakes();
   ResetRocmWrapFakes();
   ResetStrongStreamStubs();

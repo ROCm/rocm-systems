@@ -36,10 +36,7 @@ struct ncclComm;
 // enforce, because only the caller knows which variable overrides which knob.
 bool rcclXtpClassAInt(struct ncclComm* comm, const char* key, int64_t* out);
 
-// Re-bind once nNodes, localRanks, and NVL domain counts are known. PXN is
-// decided in ncclTopoComputePaths, before those fields exist, so the first
-// bind is incomplete. Later knob lookups re-bind on their own; 1-node jobs
-// never consult P2P_NET_CHUNKSIZE, so they need this explicit refresh.
+// Re-bind with the full topology once initNvlDomainInfo has run.
 // No-op when RCCL_XTP is unset. Safe on a comm that was never bound.
 void rcclXtpRefreshComm(struct ncclComm* comm);
 
