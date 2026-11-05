@@ -4,6 +4,7 @@
 #pragma once
 
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -25,11 +26,18 @@ failure(E) -> failure<E>;
 /**
  * @brief Holds either a success value `T` or an error `E`, never both.
  *
- * Use it for operations that can fail with a reason the caller may need.
+ * Use it for operations that can fail with a reason the caller may need. `T` and `E`
+ * must be nothrow move-constructible.
  */
 template <typename T, typename E>
 class [[nodiscard]] result
 {
+    // A throwing move during assignment between alternatives would leave the variant
+    // valueless, making is_ok() and is_error() both false.
+    static_assert(std::is_nothrow_move_constructible_v<T> &&
+                      std::is_nothrow_move_constructible_v<E>,
+                  "result<T, E> requires nothrow move-constructible T and E");
+
 public:
     constexpr explicit result(T value)
     : m_data{ std::in_place_index<0>, std::move(value) }

@@ -325,18 +325,10 @@ TEST(safe_stol, value_or_substitutes_fallback_on_failure)
     EXPECT_EQ(safe_stol("5").value_or(-1L), 5L);
 }
 
-TEST(safe_stod, parses_whole_string)
+TEST(safe_from_chars, trailing_garbage_wins_over_out_of_range)
 {
-    EXPECT_DOUBLE_EQ(safe_stod("1.5").value(), 1.5);
-    EXPECT_DOUBLE_EQ(safe_stod("-2").value(), -2.0);
-}
-
-TEST(safe_stod, reports_why_input_was_rejected)
-{
-    EXPECT_EQ(safe_stod("").error(), parse_error::empty);
-    EXPECT_EQ(safe_stod("1.5x").error(), parse_error::not_a_number);
-    EXPECT_EQ(safe_stod("abc").error(), parse_error::not_a_number);
-    EXPECT_EQ(safe_stod("1e999").error(), parse_error::out_of_range);
+    EXPECT_EQ(safe_stoi("99999999999x").error(), parse_error::not_a_number);
+    EXPECT_EQ((safe_from_chars<double>("1e999x").error()), parse_error::not_a_number);
 }
 
 TEST(parse_error_formatter, describes_every_error)

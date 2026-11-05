@@ -183,14 +183,16 @@ safe_from_chars(std::string_view number_str)
     const char* const end    = number_str.data() + number_str.size();
     Tp                value  = 0;
     const auto        parsed = std::from_chars(number_str.data(), end, value);
+    // Reject partial parses (e.g. "12.5" -> 12) by checking entire string was consumed.
+    // Checked before out-of-range so "99999999999x" is reported as not a number.
+    if(parsed.ptr != end ||
+       (parsed.ec != std::errc{} && parsed.ec != std::errc::result_out_of_range))
+    {
+        return parse_result{ failure{ parse_error::not_a_number } };
+    }
     if(parsed.ec == std::errc::result_out_of_range)
     {
         return parse_result{ failure{ parse_error::out_of_range } };
-    }
-    // Reject partial parses (e.g. "12.5" -> 12) by checking entire string was consumed
-    if(parsed.ec != std::errc{} || parsed.ptr != end)
-    {
-        return parse_result{ failure{ parse_error::not_a_number } };
     }
     return parse_result{ value };
 }
@@ -207,13 +209,6 @@ safe_stoi(std::string_view number_str)
 safe_stol(std::string_view number_str)
 {
     return safe_from_chars<long>(number_str);
-}
-
-/// @brief Strictly parse a whole string as a double. See safe_from_chars.
-[[nodiscard]] inline result<double, parse_error>
-safe_stod(std::string_view number_str)
-{
-    return safe_from_chars<double>(number_str);
 }
 
 /// @brief Parse a string into a boolean.
