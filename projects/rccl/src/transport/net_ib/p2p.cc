@@ -713,9 +713,7 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = (uint64_t)(req - comm->base.reqs) + NCCL_IB_FLUSH_REQ_WR_ID_OFFSET;
 
-    // The RO=0 scratchpad write and the following read are one fence. Link them
-    // and post once: an RC send queue still executes the unsignaled write before
-    // the signaled read, and the proxy rings one doorbell instead of two.
+    // Chain the unsignaled write to the signaled read: one post, RC send-queue order keeps the fence.
     struct ibv_send_wr writeWr;
     if (useGpuFlushMem) {
       memset(&writeWr, 0, sizeof(writeWr));
