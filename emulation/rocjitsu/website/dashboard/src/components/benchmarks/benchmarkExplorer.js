@@ -33,7 +33,8 @@ export function benchmarkRangeData(data, range = 'ALL') {
   const latest = Math.max(...data.runs.filter(hasCommitTimestamp).map((run) => Date.parse(commitTimestampFor(run))));
   if (!Number.isFinite(latest)) return { ...data, runs: [] };
   const anchor = new Date(latest);
-  anchor.setUTCHours(0, 0, 0, 0);
-  const cutoff = anchor.getTime() - (days - 1) * 86400000;
+  anchor.setHours(0, 0, 0, 0);
+  anchor.setDate(anchor.getDate() - (days - 1));
+  const cutoff = anchor.getTime();
   return { ...data, runs: data.runs.filter((run) => Date.parse(commitTimestampFor(run)) >= cutoff) };
 }

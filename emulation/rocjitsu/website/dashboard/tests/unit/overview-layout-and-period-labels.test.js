@@ -50,7 +50,7 @@ test('overview exposes compact catalog scope without anchor estimates', () => {
 test('catalog labels expose exact names, truthful date context and unavailable identity', () => {
   const known = renderOverview(filters, 'ALL', 'fictional-old');
   expect(known).toContain('fictional-old');
-  expect(known).toContain('Latest published develop commit using this benchmark set (UTC)');
+  expect(known).toContain('Latest published develop commit using this benchmark set (local time)');
   expect(known).not.toMatch(/Catalog \d+ ·/);
   const unknown = renderOverview(filters, '1M', 'historical-hash');
   expect(unknown).toContain('Unavailable benchmark set: historical-hash');

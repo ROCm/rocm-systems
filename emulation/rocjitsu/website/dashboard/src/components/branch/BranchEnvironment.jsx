@@ -4,7 +4,7 @@ import { runEnvironmentDetails } from '../../data/provenance';
 import { groupMetadataFacts, metadataLabel } from '../shared/metadataPresentation';
 import { safeExternalUrl } from './branchPresentation';
 import { monoFont } from '../../theme/tokens';
-import { formatMetadataValue } from '../../utils/formatters';
+import { formatFullDate, formatMetadataValue } from '../../utils/formatters';
 
 export default function BranchEnvironment({ candidate, reference, selection, repository }) {
   const baselineFacts = runEnvironmentDetails(reference);
@@ -26,10 +26,10 @@ export default function BranchEnvironment({ candidate, reference, selection, rep
       ['baseBranch', 'Recorded base branch', (run) => run?.sourceBase?.branch], ['baseCommit', 'Recorded base SHA', (run) => run?.sourceBase?.commit],
     ]],
     ['Execution', [
-      ['committedAt', 'Commit time (UTC)', (run) => run?.commitTimestamp], ['completedAt', 'Execution completed (UTC)', (run) => run?.timestamp],
+      ['committedAt', 'Commit time', (run) => run?.commitTimestamp, formatFullDate], ['completedAt', 'Execution completed', (run) => run?.timestamp, formatFullDate],
       ['machine', 'Machine', (run) => run?.machineId], ['trigger', 'Trigger', (run) => run?.trigger],
     ]],
-  ].map(([label, fields]) => ({ label, facts: fields.map(([key, label, value]) => ({ key, label, baseline: value(reference), candidate: value(candidate) })) }));
+  ].map(([label, fields]) => ({ label, facts: fields.map(([key, label, value, format]) => ({ key, label, format, baseline: value(reference), candidate: value(candidate) })) }));
   const rows = (items, prefix) => items.map((fact) => {
     const changed = Boolean(reference && candidate) && JSON.stringify(fact.baseline ?? null) !== JSON.stringify(fact.candidate ?? null);
     return <TableRow key={fact.key} data-testid={`branch-${prefix}-${fact.key}`} data-different={changed} sx={changed ? { '& > .MuiTableCell-root': { bgcolor: 'action.selected', color: 'text.primary' } } : undefined}>
@@ -37,8 +37,8 @@ export default function BranchEnvironment({ candidate, reference, selection, rep
         {metadataLabel(fact.label, fact.key)}
         {fact.baselineLabel && fact.candidateLabel && fact.baselineLabel !== fact.candidateLabel && <Typography variant="caption">Reference label: {fact.baselineLabel}</Typography>}
       </TableCell>
-      <TableCell sx={{ fontFamily: monoFont }}>{formatMetadataValue(fact.baseline)}</TableCell>
-      <TableCell sx={{ fontFamily: monoFont }}>{formatMetadataValue(fact.candidate)}</TableCell>
+      <TableCell sx={{ fontFamily: monoFont }}>{(fact.format ?? formatMetadataValue)(fact.baseline)}</TableCell>
+      <TableCell sx={{ fontFamily: monoFont }}>{(fact.format ?? formatMetadataValue)(fact.candidate)}</TableCell>
     </TableRow>;
   });
   return <Box component="details" data-testid="branch-environment" sx={{ borderTop: 1, borderColor: 'divider', mt: 1 }}>
