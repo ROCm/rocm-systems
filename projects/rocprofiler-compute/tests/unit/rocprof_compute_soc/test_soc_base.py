@@ -11,9 +11,10 @@ perfmon_coalesce. No GPU hardware required.
 from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, List, Optional
 from unittest.mock import MagicMock, patch
 
+import common
 import pytest
 import yaml
 
@@ -106,7 +107,11 @@ CONFIG_ARCHS = sorted(
 
 
 def offline_soc(
-    config_dir: Path, gpu_arch: str, filter_blocks: list[str], membw_analysis: bool
+    config_dir: Path,
+    gpu_arch: str,
+    filter_blocks: List[str],
+    membw_analysis: bool,
+    set_selected: Optional[str] = None,
 ) -> OmniSoC_Base:
     """OmniSoC_Base that detects counters from the analysis configs in config_dir
     without a GPU. With one XCD and one L2 bank, each TCC channel template
@@ -116,7 +121,7 @@ def offline_soc(
         filter_blocks=filter_blocks,
         membw_analysis=membw_analysis,
         roof_only=False,
-        set_selected=None,
+        set_selected=set_selected,
     )
     machine_specs = SimpleNamespace(
         gpu_arch=gpu_arch,
@@ -832,6 +837,29 @@ def test_panel_counters_add_up_to_full_profile(gpu_arch: str) -> None:
         *(counters for file, counters in counters_by_file.items() if file != membw_file)
     )
     assert membw == set().union(*counters_by_file.values())
+
+
+@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
+def test_live_attach_set_fits_one_pass_on_each_architecture(gpu_arch: str) -> None:
+    """Live attachment cannot replay the workload for additional counter passes."""
+    soc = offline_soc(
+        config.analysis_configs_dir,
+        gpu_arch,
+        [],
+        membw_analysis=False,
+        set_selected=common.SINGLE_PASS_SET,
+    )
+    soc.set_perfmon_config(mi_gpu_specs.get_perfmon_config(gpu_arch))
+    requested_counters, selected_blocks = soc.detect_counters()
+    assert selected_blocks
+    assert requested_counters
+
+    counter_files, _, accumulator_count = soc._allocate_perfmon_counter_files(
+        requested_counters
+    )
+    assert len(counter_files) == 1, f"{gpu_arch}: live attachment needs one pass"
+    assert set(flat_counters_in_perfmon_file(counter_files[0])) == requested_counters
+    assert accumulator_count == 0, f"{gpu_arch}: live attachment set uses accumulators"
 
 
 # =============================================================================
