@@ -2618,12 +2618,15 @@ LDS in the callback does not change what the store writes to global memory; no
 global request has been made and a load has written no LDS. Its <code>lds_ranges</code>
 member is a callback-lifetime span of the LDS byte runs the transfer will write
 (loads) or read (stores), with adjacent elements merged and padding bytes
-excluded. A load covers every element of its tile, zero-filling those outside
-the tensor; a store covers only in-bounds elements. The observation's
-<code>element_size_bytes</code> describes the transfer only when <code>lds_ranges</code> is nonempty;
-when it is empty, consumers must not rely on it, since the instruction may be a
-NULL descriptor, which is not validated, and the observation carries no field
-that distinguishes one. Consumers must opt in through
+excluded. Bytes outside the wave's LDS allocation are not transferred and are
+omitted, so a range can end mid-element when an element straddles the end of
+the allocation; consumers must treat ranges as byte ranges, not as whole
+elements. A load covers every element of its tile, zero-filling those outside
+the tensor; a store covers only in-bounds elements. Empty <code>lds_ranges</code> mean
+only that the transfer touches no LDS payload bytes, not that it makes no global
+accesses: for a tile wholly past the allocation, a load still reads its
+in-bounds tensor elements from global memory and can fault there, and a store
+still writes zeros to its global destination. Consumers must opt in through
 <code>observes_tensor_dma_issue()</code>.</p>
 <p>SGPR owner resolution is skipped when no contained plugin observes scalar
 register reads. Plugins that consume neither <code>onAmdgpuReadScalarRegister</code> nor
