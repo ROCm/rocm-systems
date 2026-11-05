@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "sdxi-cli"
+version = "0.1.0"
+description = "Command-line tool for the SDXI char device"
+requires-python = ">=3.11"
+dependencies = [
+    "argcomplete>=3",
+]
+
+[project.scripts]
+sdxi-cli = "sdxi_cli.__main__:main"
+
+[tool.setuptools.package-dir]
+sdxi_cli = "sdxi_cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sdxi_cli*"]
