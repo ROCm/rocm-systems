@@ -126,7 +126,8 @@ ncclResult_t ncclSymkLsaModel(struct ncclTuningInput_t* input, enum ncclSymkKern
 
   // TDM throughput keeps scaling with resident blocks, so launch it at the widest allowed count.
   if (usesTdm(comm, kernelId)) *nBlocks = nMaxBlocks;
-  if (kernelId == ncclSymkKernelId_AllGather_HierLsaST || kernelId == ncclSymkKernelId_AllGather_HierLsaTmaST)
+  if (kernelId == ncclSymkKernelId_AllGather_HierLsaST || kernelId == ncclSymkKernelId_AllGather_HierLsaTmaST) {
     *nBlocks = ncclSymkAgHierLaunchBlocks(comm, *nBlocks);
+  }
   return ncclSuccess;
 }
