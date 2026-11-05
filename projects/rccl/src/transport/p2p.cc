@@ -1221,6 +1221,8 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
           } else {
             CUmemGenericAllocationHandle handle;
             if (CUPFN(cuMemRetainAllocationHandle(&handle, baseAddr)) != CUDA_SUCCESS) {
+              // RCCL: HIP keeps this expected failure for a cudaMalloc buffer as the thread's last error
+              (void)cudaGetLastError();
               // if cuMem* export fails, retry legacy export
               if (comm->directMode || !ncclParamLegacyCudaRegister()) goto fail;
               CUDACHECKGOTO(cudaIpcGetMemHandle(&ipcInfo->ipcDesc.devIpc, baseAddr), ret, fail);
@@ -1242,6 +1244,8 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
                   // Allow this to silently fail for cases where the user buff cannot be registered
                   if (CUPFN(cuMemExportToShareableHandle(&ipcInfo->ipcDesc.cuDesc.handle, handle, ncclCuMemHandleType,
                                                          0)) != CUDA_SUCCESS) {
+                    // RCCL: HIP keeps the failed export as the thread's last error
+                    (void)cudaGetLastError();
                     CUCHECKGOTO(cuMemRelease(handle), ret, fail);
                     goto fail;
                   }
