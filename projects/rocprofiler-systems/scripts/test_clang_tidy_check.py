@@ -293,6 +293,23 @@ def test_get_default_base_falls_back_to_head_with_warning(monkeypatch, capsys):
 
 
 # --------------------------------------------------------------------------- #
+# parse_args  (--base)
+# --------------------------------------------------------------------------- #
+def test_parse_args_base_defaults_to_merge_base(monkeypatch):
+    monkeypatch.setattr(ctc, "get_default_base", lambda: "default123")
+    monkeypatch.setattr(sys, "argv", ["prog", "--build-path", "/build"])
+    assert ctc.parse_args().base == "default123"
+
+
+def test_parse_args_explicit_base_overrides_default(monkeypatch):
+    monkeypatch.setattr(ctc, "get_default_base", lambda: "default123")
+    monkeypatch.setattr(
+        sys, "argv", ["prog", "--build-path", "/build", "--base", "origin/release"]
+    )
+    assert ctc.parse_args().base == "origin/release"
+
+
+# --------------------------------------------------------------------------- #
 # get_diff_changed_files
 # --------------------------------------------------------------------------- #
 _DIFF = """\
@@ -321,6 +338,18 @@ def test_get_diff_changed_files_parses_ranges_and_filters(monkeypatch):
     assert set(changed) == {"src/foo.cpp"}
     # +11,3 -> (11, 13); the pure-deletion hunk (+34,0) is skipped
     assert changed["src/foo.cpp"].line_ranges == [(11, 13)]
+
+
+def test_get_diff_changed_files_diffs_against_given_base(monkeypatch):
+    calls = []
+
+    def fake_git(git_args, cwd=None):
+        calls.append(git_args)
+        return ""
+
+    monkeypatch.setattr(ctc, "_git", fake_git)
+    ctc.get_diff_changed_files("/repo", "origin/release")
+    assert calls == [["diff", "--no-color", "-U0", "origin/release"]]
 
 
 def test_get_diff_changed_files_skips_missing_files(monkeypatch):
