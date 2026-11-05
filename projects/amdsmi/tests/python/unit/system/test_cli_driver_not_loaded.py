@@ -371,9 +371,7 @@ class TestNotesStream(unittest.TestCase):
     def _run(self, present):
         payload = json.dumps([{"gpu": 0}])
         args = types.SimpleNamespace(
-            loglevel="ERROR",
-            note_drivers=("amdgpu", "ionic"),
-            func=lambda _args: print(payload),
+            loglevel="ERROR", note_drivers=("amdgpu", "ionic"), func=lambda _args: print(payload)
         )
         helpers = _FakeHelpers(loaded=(), present=present)
         helpers.get_driver_notes = types.MethodType(
