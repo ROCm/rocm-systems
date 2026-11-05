@@ -22,6 +22,7 @@ namespace {
 void runWithOneVisibleDevice(const char* deferredLoading) {
   hip::SpawnProc proc("managedVarAfterDeviceReset_exe", true);
   proc.setEnv("HIP_VISIBLE_DEVICES", "0");
+  proc.setEnv("CUDA_VISIBLE_DEVICES", "0");
   proc.setEnv("HIP_ENABLE_DEFERRED_LOADING", deferredLoading);
   const int exitCode = proc.run();
   INFO(proc.getOutput());
