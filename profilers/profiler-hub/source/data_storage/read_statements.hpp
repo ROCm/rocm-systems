@@ -1181,6 +1181,31 @@ private:
             make_sample_stmt("rocpd_memory_copy");
     }
 
+    // A prepared statement whose executor binds N values. WHERE 0 returns no
+    // rows, and each AND ? keeps sqlite3_bind from returning SQLITE_RANGE.
+    [[nodiscard]] static std::string no_row_sql(size_t binds)
+    {
+        std::string sql = "SELECT NULL WHERE 0";
+        for(size_t index = 0; index < binds; ++index) sql += " AND ?";
+        return sql;
+    }
+
+    // no_rows deduces its return type, so GCC and Clang need it defined above
+    // the first member function that calls it.
+    template <typename Row, typename... Members>
+    auto no_rows(Members Row::*... members)
+    {
+        return m_backend->create_read_statement_executor<Row>(no_row_sql(0),
+                                                              members...);
+    }
+
+    template <typename Row, typename... BindTypes, typename... Members>
+    auto no_rows(bind_types<BindTypes...>, Members Row::*... members)
+    {
+        return m_backend->create_read_statement_executor<Row, bind_types<BindTypes...>>(
+            no_row_sql(sizeof...(BindTypes)), members...);
+    }
+
     void initialize_track_category_statements()
     {
         // NULL agent_id/queue_id stays its own GROUP BY row. The reader stores
@@ -1345,29 +1370,6 @@ private:
                     &present_row::one)()
                 .to_vector();
         return !rows.empty();
-    }
-
-    // A prepared statement whose executor binds N values. WHERE 0 returns no
-    // rows, and each AND ? keeps sqlite3_bind from returning SQLITE_RANGE.
-    [[nodiscard]] static std::string no_row_sql(size_t binds)
-    {
-        std::string sql = "SELECT NULL WHERE 0";
-        for(size_t index = 0; index < binds; ++index) sql += " AND ?";
-        return sql;
-    }
-
-    template <typename Row, typename... Members>
-    auto no_rows(Members Row::*... members)
-    {
-        return m_backend->create_read_statement_executor<Row>(no_row_sql(0),
-                                                              members...);
-    }
-
-    template <typename Row, typename... BindTypes, typename... Members>
-    auto no_rows(bind_types<BindTypes...>, Members Row::*... members)
-    {
-        return m_backend->create_read_statement_executor<Row, bind_types<BindTypes...>>(
-            no_row_sql(sizeof...(BindTypes)), members...);
     }
 
     bool table_has_row(const std::string& name)
