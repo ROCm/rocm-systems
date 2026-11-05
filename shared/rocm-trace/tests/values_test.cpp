@@ -184,6 +184,16 @@ TEST(rocm_trace_tests, levels_order_information_before_verbose) {
   EXPECT_LT(ROCM_TRACE_LTTNG_LEVEL_INFORMATION, ROCM_TRACE_LTTNG_LEVEL_VERBOSE);
 }
 
+TEST(rocm_trace_tests, capture_levels_order_none_scalars_full) {
+  EXPECT_EQ(ROCM_TRACE_CAPTURE_NONE, 0);
+  EXPECT_LT(ROCM_TRACE_CAPTURE_NONE, ROCM_TRACE_CAPTURE_SCALARS);
+  EXPECT_LT(ROCM_TRACE_CAPTURE_SCALARS, ROCM_TRACE_CAPTURE_FULL);
+}
+
+TEST(rocm_trace_tests, string_cap_matches_the_contract) {
+  EXPECT_EQ(ROCM_TRACE_STRING_CAP, 256); // RC-GEN-8
+}
+
 TEST(rocm_trace_tests, c_and_cpp_see_the_same_values) {
   EXPECT_EQ(rocm_trace_test_c_keywords(),
             ROCM_TRACE_KW_API | ROCM_TRACE_KW_DISPATCH | ROCM_TRACE_KW_STATE |
@@ -194,4 +204,6 @@ TEST(rocm_trace_tests, c_and_cpp_see_the_same_values) {
   EXPECT_EQ(std::string{rocm_trace_test_c_hsa_guid()},
             ROCM_TRACE_PROVIDER_HSA_GUID);
   EXPECT_EQ(rocm_trace_test_c_values_version(), ROCM_TRACE_VALUES_VERSION);
+  EXPECT_EQ(rocm_trace_test_c_capture_full(), ROCM_TRACE_CAPTURE_FULL);
+  EXPECT_EQ(rocm_trace_test_c_string_cap(), ROCM_TRACE_STRING_CAP);
 }

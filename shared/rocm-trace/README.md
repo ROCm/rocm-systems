@@ -10,9 +10,9 @@ Windows). Header-only.
 | `rocm/trace/values.h` | runtimes and tools | nothing (C99, C++) |
 | `rocm/trace/trace.h` | runtimes that write events | a TraceLogging implementation (C11, C++) |
 
-The values are a contract between runtimes and tools: once released they never
-change. New values are only added, and each addition increments
-`ROCM_TRACE_VALUES_VERSION` and the package's minor version.
+The values are a contract between runtimes and tools. Once a ROCm release ships a
+value, it never changes; later releases may add values, and each addition
+increments `ROCM_TRACE_VALUES_VERSION` and the package's minor version.
 
 ## Values
 
@@ -44,6 +44,13 @@ each has its own keyword.
 **Levels.** Information for every event except hot paths; verbose for functions
 called in tight loops (HSA signal and queue-index functions). ETW: 4 and 5.
 LTTng: `TRACE_INFO` (6) and `TRACE_DEBUG` (14).
+
+**Arguments.** `ROCM_TRACE_CAPTURE_NONE`, `_SCALARS` and `_FULL` (0, 1, 2) are the
+levels of the `ROCM_TRACE_CAPTURE` environment variable (`none`, `scalars`, `full`;
+default `full`). Events keep their fields at every level and record 0 or "" for what
+is not captured: `scalars` drops strings and values written through output
+pointers, `none` keeps only return values. `ROCM_TRACE_STRING_CAP` (256) is the
+most bytes a string field records, except URIs and kernel names.
 
 ## Use
 

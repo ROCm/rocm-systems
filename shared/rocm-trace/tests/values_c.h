@@ -17,6 +17,8 @@ uint64_t rocm_trace_test_c_keywords(void);
 const char *rocm_trace_test_c_hip_name(void);
 const char *rocm_trace_test_c_hsa_guid(void);
 int rocm_trace_test_c_values_version(void);
+int rocm_trace_test_c_capture_full(void);
+int rocm_trace_test_c_string_cap(void);
 
 #ifdef __cplusplus
 }

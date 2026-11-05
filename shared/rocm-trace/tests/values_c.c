@@ -22,3 +22,7 @@ const char *rocm_trace_test_c_hsa_guid(void) {
 }
 
 int rocm_trace_test_c_values_version(void) { return ROCM_TRACE_VALUES_VERSION; }
+
+int rocm_trace_test_c_capture_full(void) { return ROCM_TRACE_CAPTURE_FULL; }
+
+int rocm_trace_test_c_string_cap(void) { return ROCM_TRACE_STRING_CAP; }

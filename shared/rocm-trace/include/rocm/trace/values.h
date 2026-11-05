@@ -8,9 +8,9 @@
  * C++, no dependencies. Runtimes include <rocm/trace/trace.h>, which adds the
  * enable check; tools need only this header.
  *
- * These values are part of the contract between runtimes and tools: once
- * released they never change. New values are only added, and each addition
- * increments ROCM_TRACE_VALUES_VERSION. */
+ * These values are part of the contract between runtimes and tools. Once a
+ * ROCm release ships a value, it never changes; later releases may add
+ * values, and each addition increments ROCM_TRACE_VALUES_VERSION. */
 
 #ifndef ROCM_TRACE_VALUES_H
 #define ROCM_TRACE_VALUES_H
@@ -113,5 +113,23 @@
 #define ROCM_TRACE_ETW_LEVEL_VERBOSE 5
 #define ROCM_TRACE_LTTNG_LEVEL_INFORMATION 6 /* TRACE_INFO */
 #define ROCM_TRACE_LTTNG_LEVEL_VERBOSE 14    /* TRACE_DEBUG */
+
+/* ---------------------------------------------------------------- arguments
+ *
+ * How much of each API call's arguments a process records, set from the
+ * ROCM_TRACE_CAPTURE environment variable (none, scalars, full; default full).
+ * Events keep their fields at every level; what is not captured is recorded
+ * as 0 or an empty string. scalars drops strings and the values a call wrote
+ * through output pointers, so no data the caller passed or received by
+ * address leaves the process; none also drops scalars and addresses, keeping
+ * only return values. */
+
+#define ROCM_TRACE_CAPTURE_NONE 0
+#define ROCM_TRACE_CAPTURE_SCALARS 1
+#define ROCM_TRACE_CAPTURE_FULL 2
+
+/* String fields record at most this many bytes, except URIs and kernel
+ * names. */
+#define ROCM_TRACE_STRING_CAP 256
 
 #endif /* ROCM_TRACE_VALUES_H */
