@@ -176,10 +176,22 @@ ncclResult_t ncclRasCommFini(const struct ncclComm* comm) {
 // and terminate.  Waits for the thread to terminate.
 static void rasTerminate() {
   struct rasNotification msg;
-  if (!rasInitialized) return;
-  memset(&msg, '\0', sizeof(msg));
-  msg.type = RAS_TERMINATE;
-  if (rasLocalNotify(&msg) == ncclSuccess) rasThread.join();
+  if (!rasThread.joinable()) return;
+  if (rasInitialized) {
+    memset(&msg, '\0', sizeof(msg));
+    msg.type = RAS_TERMINATE;
+    if (rasLocalNotify(&msg) != ncclSuccess) {
+      // The thread never saw the request, so joining it would block the exit
+      // forever. It is still joinable, though, and ~std::thread() on a
+      // joinable thread calls std::terminate. Detach it instead; the process
+      // is exiting and the OS will reclaim the thread.
+      rasThread.detach();
+      return;
+    }
+  }
+  // Either the notification was delivered, or the thread already ran
+  // rasThreadCleanup() (which clears rasInitialized) and is about to return.
+  rasThread.join();
 }
 
 // Invoked by regular NCCL threads on every (non-split) comm initialization.  Provides info on all the ranks within

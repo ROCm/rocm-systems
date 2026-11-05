@@ -799,14 +799,15 @@ TEST_F(RasMicrotest, TerminateNotifiesAndJoinsThread) {
   EXPECT_EQ(RAS_TERMINATE, reinterpret_cast<const rasNotification*>(g_pairBytes.data())->type);
 }
 
-TEST_F(RasMicrotest, TerminateWriteFailureLeavesThreadForCallerToJoin) {
+TEST_F(RasMicrotest, TerminateWriteFailureDetachesThread) {
   rasInitialized = true;
   rasNotificationPipe[1] = 52;
   g_pairWriteResult = ncclSystemError;
   rasThread = std::thread([] {});
   rasTerminate();
-  EXPECT_TRUE(rasThread.joinable());
-  rasThread.join();
+  // atexit is the only caller: leaving the thread joinable would make the
+  // static std::thread destructor call std::terminate.
+  EXPECT_FALSE(rasThread.joinable());
 }
 
 TEST_F(RasMicrotest, MessageDispatchRoutesExternalTypesAndPropagatesErrors) {
