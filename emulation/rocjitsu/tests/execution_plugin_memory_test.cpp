@@ -767,20 +767,21 @@ TEST(RoutedMemoryObservationTest, AScalarAccessCarriesItsFullIdentity) {
 }
 
 TEST(RoutedMemoryObservationTest, AScalarBufferAccessOutOfRangeRequestsNothing) {
-  // A scalar buffer access whose bounds mask clears every DWORD is still
-  // reported with its return metadata, but its one lane is not valid and
+  // A scalar buffer load, store or atomic whose bounds mask clears every DWORD
+  // is still reported with its metadata, but its one lane is not valid and
   // requests nothing. A partly in-range load still requests.
   struct Case {
     AtomicOp atomic_op;
+    bool is_load;
     uint16_t load_dword_mask;
     bool requests;
   };
-  for (const auto &[atomic_op, load_dword_mask, requests] :
-       {Case{AtomicOp::NONE, 0x3, true}, Case{AtomicOp::NONE, 0x1, true},
-        Case{AtomicOp::NONE, 0x0, false}, Case{AtomicOp::INC, 0x3, true},
-        Case{AtomicOp::INC, 0x0, false}}) {
-    SCOPED_TRACE(testing::Message()
-                 << "atomic=" << (atomic_op != AtomicOp::NONE) << " mask=" << load_dword_mask);
+  for (const auto &[atomic_op, is_load, load_dword_mask, requests] :
+       {Case{AtomicOp::NONE, true, 0x3, true}, Case{AtomicOp::NONE, true, 0x1, true},
+        Case{AtomicOp::NONE, true, 0x0, false}, Case{AtomicOp::NONE, false, 0x0, false},
+        Case{AtomicOp::INC, true, 0x3, true}, Case{AtomicOp::INC, true, 0x0, false}}) {
+    SCOPED_TRACE(testing::Message() << "atomic=" << (atomic_op != AtomicOp::NONE)
+                                    << " load=" << is_load << " mask=" << load_dword_mask);
     PluginFixture fixture;
     ASSERT_NO_FATAL_FAILURE(fixture.initialize());
     auto *plugin = fixture.attach_memory_observation_plugin();
@@ -792,7 +793,7 @@ TEST(RoutedMemoryObservationTest, AScalarBufferAccessOutOfRangeRequestsNothing) 
     state->addr = 0x4000;
     state->num_dwords = 2;
     state->elem_size = atomic_op == AtomicOp::NONE ? 4 : 8;
-    state->is_load = true;
+    state->is_load = is_load;
     state->dst_register = {ScalarRegisterStorage::SGPR, 0, 2};
     state->atomic_op = atomic_op;
     state->load_dword_mask = load_dword_mask;
@@ -804,7 +805,7 @@ TEST(RoutedMemoryObservationTest, AScalarBufferAccessOutOfRangeRequestsNothing) 
     EXPECT_EQ(access.mnemonic, "test_mem");
     EXPECT_EQ(access.route, MemoryRoute::SCALAR);
     EXPECT_EQ(access.atomic_op, atomic_op);
-    EXPECT_TRUE(access.is_load);
+    EXPECT_EQ(access.is_load, is_load);
     EXPECT_EQ(access.active_lane_mask, 1u);
     EXPECT_EQ(access.valid_lane_mask, requests ? 1u : 0u);
     EXPECT_EQ(access.request_lane_mask, requests ? 1u : 0u);
