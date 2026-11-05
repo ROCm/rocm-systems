@@ -213,6 +213,14 @@ static const rcclArchThresholds* rcclRingTreeTable(const struct ncclComm* comm, 
   return t;
 }
 
+// Null when this comm keeps the tuning model's per-rank broadcast ranges.
+// Semantics of the ceilings live on rcclArchThresholds.
+static const rcclArchThresholds* rcclBroadcastTotalByteTable(const struct ncclComm* comm) {
+  const rcclArchThresholds* t = extAlgoArchTable(comm);
+  if (t == nullptr || t->bcRingLL128MaxBytes == 0) return nullptr;
+  return t;
+}
+
 // Arch-table replacements for the tuning model's LL / LL128 ranges (rank-scaled entries).
 static void rcclArchProtoRanges(const struct ncclComm* comm, const struct ncclTaskColl* info, uint64_t& llMax,
                                 uint64_t& ll128Min, uint64_t& ll128Max) {
@@ -258,6 +266,22 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
   // Honor user input for protocol choice
   const bool userProtocolInput = rcclNcclProtoEnvIsSet();
   size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
+
+  // Broadcast on a table with total-byte ceilings (gfx1250 DPX). NCCL_PROTO still wins.
+  if (!userProtocolInput && info->func == ncclFuncBroadcast) {
+    if (const rcclArchThresholds* t = rcclBroadcastTotalByteTable(comm)) {
+      info->protocol = NCCL_PROTO_SIMPLE;
+      if (nBytes > 0 && nBytes <= t->bcRingLLMaxBytes) {
+        info->protocol = NCCL_PROTO_LL;
+      }
+#if defined(ENABLE_LL128)
+      if (comm->topo->ll128Enabled && nBytes > t->bcRingLLMaxBytes && nBytes <= t->bcRingLL128MaxBytes) {
+        info->protocol = NCCL_PROTO_LL128;
+      }
+#endif
+      return;
+    }
+  }
 
   if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 &&
       (info->func == ncclFuncAllGather) && sizePerRank <= 88448) {
@@ -1883,10 +1907,13 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // it does not hand registered operands to DDA.
     //
     // GIN AllReduce is selected first in this function and requires symmetric
-    // windows. By default it only claims messages >= 256 MiB, so DDA must still be
-    // allowed for smaller symmetric AllReduces (otherwise they would hit the
-    // symmetric kernel instead of DDA). FORCE_ENABLE=1 keeps the original
-    // !symEligible gate because GIN already returned above for those sizes.
+    // windows. By default gfx950 claims messages >= 256 MiB. gfx1250 claims
+    // [64 MiB, 4 GiB] only when NCCL_GIN_ALLREDUCE_GFX1250_ENABLE=1, so DDA must
+    // still be allowed for smaller symmetric AllReduces (otherwise they would
+    // hit the symmetric kernel instead of DDA). The yield has no lower bound.
+    // Below symMinR2 (8 MiB) DDA already won. From there up to 64 MiB, clearing
+    // ddaSymEligible lets DDA LL/LL128 claim the sum. FORCE_ENABLE=1 keeps the
+    // original gate because GIN already returned above for those sizes.
     // symSuppressedByMin: DDA wins below symMinR2[AR]; do not block it with symkRequested.
     bool ddaSymEligible = symkRequested && !symSuppressedByMin;
   #if defined(ENABLE_ROCSHMEM_GIN)
@@ -3032,6 +3059,17 @@ void rcclOptThreadBlockSize(struct ncclComm* comm, struct ncclTaskColl* info, si
       nThreads = 3 * comm->WarpSize; // min requirement for tree
       INFO(NCCL_INIT, "RCCL Threads per block increased to %d to be at least one warp", nThreads);
     }
+    return;
+  }
+  // gfx1250 DPX: cap the block at 192. A lower NCCL_NTHREADS / NCCL_LL128_NTHREADS,
+  // already in nThreads, still wins. PAT is excluded: its maxThreads entry is
+  // unset on HIP, and the kernel's compute thread is NCCL_MAX_NTHREADS-1, so a
+  // short block leaves the workers spinning. SPX stays on the 256 path below.
+  // RCCL_THREADS_PER_BLOCK is handled above. Channel selection still uses maxThreads.
+  if (info->algorithm != NCCL_ALGO_PAT && comm->archName && IsArchMatch(comm->archName, "gfx1250") &&
+      comm->archThresholds != nullptr &&
+      comm->archThresholds == rcclGetArchThresholds(comm->archName, RCCL_TUNING_PARTITION_DPX)) {
+    nThreads = std::min(nThreads, RCCL_GFX1250_DEFAULT_NTHREADS);
     return;
   }
   if (info->algorithm == NCCL_ALGO_TREE) nThreads = maxNthreads[NCCL_PROTO_SIMPLE]; // Tree now uses all threads always.

@@ -1015,7 +1015,7 @@ TEST(InstructionCacheCuTest, AsyncTranslatedLookaheadPreservesCodeCoherence) {
     ASSERT_NE(wf, nullptr);
     wf->set_process_id(7);
     wf->set_address_space(handle);
-    wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(*access));
+    wf->set_vm_access(util::IntrusiveSharedPtr<amdgpu::GpuVmAccessSnapshot>::make(*access));
     wf->set_exec(~uint64_t{0});
 
     fixture.cu()->step();
@@ -1060,7 +1060,7 @@ TEST(InstructionCacheCuTest, AsyncTranslatedLookaheadPreservesFullFetchValidatio
     ASSERT_NE(wf, nullptr);
     wf->set_process_id(7);
     wf->set_address_space(handle);
-    wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(*access));
+    wf->set_vm_access(util::IntrusiveSharedPtr<amdgpu::GpuVmAccessSnapshot>::make(*access));
     wf->set_exec(~uint64_t{0});
     fixture.cu()->step();
     ASSERT_EQ(wf->pc, kCodeBase + 4);
@@ -1113,7 +1113,7 @@ TEST(InstructionCacheCuTest, AsyncTranslatedLookaheadSelectsInlineOrAsyncMfma) {
     ASSERT_NE(wf, nullptr);
     wf->set_process_id(7);
     wf->set_address_space(handle);
-    wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(*access));
+    wf->set_vm_access(util::IntrusiveSharedPtr<amdgpu::GpuVmAccessSnapshot>::make(*access));
     wf->set_exec(~uint64_t{0});
     fixture.cu()->step();
     ASSERT_EQ(wf->pc, kCodeBase + 4);

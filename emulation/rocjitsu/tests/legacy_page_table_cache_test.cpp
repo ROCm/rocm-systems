@@ -219,7 +219,8 @@ TEST(LegacyPageTableCacheStateTest, InvalidationDrainsEveryNestedReader) {
 
 TEST(LegacyPageTableCacheStateTest, ConcurrentAdmissionsObserveOnlyPublishedCopies) {
   EXPECT_EXIT(([] {
-                alarm(10);
+                // TSan plus concurrent CTest jobs can exceed ten seconds without a deadlock.
+                alarm(60);
                 LegacyPageTableCacheState state;
                 std::atomic<uint64_t> published{state.generation()};
                 uint64_t payload = published.load();

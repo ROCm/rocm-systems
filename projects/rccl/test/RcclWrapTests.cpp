@@ -2980,19 +2980,21 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
             // 4 ranks: totals.
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), 32 * MiB);
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), 128 * KiB);
-            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 1 * MiB);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 4 * MiB);
             EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), 128 * MiB);
-            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), 64 * MiB);
+            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), 224 * MiB);
             EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), 0ul);
             for (int nRanks : {8, 16, 32, 64}) {
                 comm->nRanks = nRanks;
                 const size_t n = static_cast<size_t>(nRanks);
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), n * MiB) << nRanks;
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), n * 16 * KiB) << nRanks;
-                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), n * 256 * KiB) << nRanks;
+                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), n * MiB) << nRanks;
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), std::min(n * 16 * MiB, 256 * MiB))
                     << nRanks;
-                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), n * 2 * MiB) << nRanks;
+                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter),
+                          std::min(n * 15 * MiB / 2, 256 * MiB))
+                    << nRanks;
                 EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), n * 2 * MiB) << nRanks;
                 // Unscaled tiers keep their totals.
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce), 256 * MiB) << nRanks;
@@ -3059,6 +3061,11 @@ TEST(RcclDdaTierThresholds, TuningPartitionTablePerArch)
     EXPECT_EQ(dpx->arTreeLLMaxPerRank, (size_t)256 * 1024);
     EXPECT_EQ(dpx->ddaLLMax[ncclFuncAlltoAll], (size_t)2 * 1024 * 1024);
     EXPECT_NE(spx->agRingLL128MaxPerRank, dpx->agRingLL128MaxPerRank);
+    // DPX sets total-byte broadcast ceilings. SPX leaves them 0.
+    EXPECT_EQ(dpx->bcRingLLMaxBytes, (size_t)16 * 1024);
+    EXPECT_EQ(dpx->bcRingLL128MaxBytes, (size_t)512 * 1024 * 1024);
+    EXPECT_EQ(spx->bcRingLLMaxBytes, (size_t)0);
+    EXPECT_EQ(spx->bcRingLL128MaxBytes, (size_t)0);
     for (const char* arch : {"gfx950", "gfx942"})
     {
         EXPECT_EQ(rcclGetArchThresholds(arch), rcclGetArchThresholds(arch, RCCL_TUNING_PARTITION_DPX)) << arch;
@@ -3225,7 +3232,7 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 }
 
 // gfx1250, message just above the LL ceiling and within the LL128 band
-// (ddaLL128Max[A2A] = 1 MiB total):
+// (ddaLL128Max[A2A] = 8 MiB total):
 // rcclSelectAlltoAll must choose RCCL_DDA_FABRIC_LL128.
 // gfx1250, LL128 tier disabled (ddaLL128Max[A2A] = 0 after commit 363b197e):
 // a message just above the LL ceiling must fall to Direct p2p, not LL128.
@@ -3249,8 +3256,7 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
     EXPECT_EQ(dec.algo, RCCL_DDA_FABRIC_LL128);
 }
 
-// gfx1250, message above all DDA caps (ddaVmmMax[A2A] = 0, ddaLL128Max[A2A] = 1 MiB):
-// anything above the LL128 ceiling falls to Direct p2p.
+// gfx1250: above the 8 MiB LL128 cap (VMM off), AlltoAll falls to Direct p2p.
 TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
