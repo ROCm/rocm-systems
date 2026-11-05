@@ -8027,7 +8027,9 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     cpp = (tmp_path / 'cdna5' / 'vopd.cpp').read_text()
     exec_cpp = (tmp_path / 'cdna5' / 'vopd_exec.cpp').read_text()
 
-    assert '(word0_ >> 24) == 0xCF' in cpp
+    # validate_encoding() tests the same prefix; only the constructor decodes VOPD3.
+    constructor = _generated_function_body(cpp, 'Vopd::Vopd(const MachineInst *inst)')
+    assert '(word0 >> 24) == 0xCF' in constructor
     assert '[[maybe_unused]] bool vopd3' not in cpp
     assert 'vopd3 ? OperandType::OPR_SRC_SIMPLE : OperandType::OPR_SRC' in cpp
     assert 'literal_uses_f64_high_bits' not in cpp
@@ -8175,7 +8177,7 @@ def test_rdna4_vopd_template_uses_available_src_operand_type(tmp_path):
     assert 'OperandType::OPR_SRC_SIMPLE' not in cpp
     assert 'vopd3 ? OperandType::OPR_SRC : OperandType::OPR_SRC' not in cpp
     assert 'return Operand(bits, OperandType::OPR_SRC, encoded);' in cpp
-    assert '(word0_ >> 24) == 0xCF' not in cpp
+    assert '(word0 >> 24) == 0xCF' not in cpp
     assert 'Format::Vopd3' not in cpp
     assert 'literal_uses_f64_high_bits' not in cpp
     assert 'is_float64_op' not in cpp
