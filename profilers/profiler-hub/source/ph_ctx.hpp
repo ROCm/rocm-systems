@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cached_track_reader.hpp"
+#include "event_query.hpp"
 #include "common/connection_pool.hpp"
 #include "histogram_grid.hpp"
 #include "common/thread_pool.hpp"
@@ -82,6 +83,10 @@ struct ph_ctx
         uint64_t                                  last_id,
         ph_table_event*                           rows,
         uint32_t                                  capacity);
+    [[nodiscard]] bool summarize_name_durations(
+        const profiler_hub::resolved_event_query&           query,
+        uint32_t                                            event_type,
+        std::vector<profiler_hub::name_duration_summary_t>& rows);
     [[nodiscard]] bool table_event_id_span(const profiler_hub::resolved_event_query& query,
                                            uint32_t event_type,
                                            uint64_t& first_id,

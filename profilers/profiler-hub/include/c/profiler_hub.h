@@ -106,7 +106,7 @@ extern "C"
 
     /**
      * @brief Folder created by ph_ctx_create_files_cached() for these files.
-     *        It is <cache_directory>/<hex>, and holds timeline/ and catalog/.
+     *        It is <cache_directory>/<hex>, and holds timeline/, catalog/, and summary.bin.
      *        The hex name uses the same path, size, and last-write time hash
      *        as the cache writer, so @p paths must be the same files in the
      *        same order.
@@ -658,6 +658,37 @@ extern "C"
                                        uint64_t*        first_id,
                                        uint64_t*        last_id,
                                        ph_future_t      future);
+
+    /** @brief One display name and the duration aggregates of its events.
+     *         @p name is valid only for the duration of the callback. */
+    typedef struct ph_name_duration_summary
+    {
+        const char* name;
+        uint64_t    count;
+        uint64_t    min_duration;
+        uint64_t    max_duration;
+        uint64_t    total_duration;
+    } ph_name_duration_summary_t;
+
+    typedef void (*ph_name_duration_summary_callback_t)(
+        const ph_name_duration_summary_t* row,
+        void*                             user_data);
+
+    /**
+     * @brief Aggregates matching events by display name inside SQLite.
+     *        Durations are end minus start, in trace ticks.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if a
+     *         pointer is null or @p event_type is unknown,
+     *         PH_RESULT_INVALID_CONTEXT if the query has no trace,
+     *         PH_RESULT_UNSUPPORTED_FILE if this trace format has no summary
+     *         query, PH_RESULT_CANCELLED if @p future was cancelled.
+     */
+    ph_result_t ph_event_query_summarize_durations(
+        ph_event_query_t                      query,
+        uint32_t                              event_type,
+        ph_name_duration_summary_callback_t   callback,
+        void*                                 user_data,
+        ph_future_t                           future);
 
     /**
      * @brief Looks up text the trace catalog already loaded.

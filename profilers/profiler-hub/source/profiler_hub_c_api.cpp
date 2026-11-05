@@ -1007,6 +1007,51 @@ ph_event_query_id_span(ph_event_query_t query,
     });
 }
 
+ph_result_t
+ph_event_query_summarize_durations(ph_event_query_t                    query,
+                                   uint32_t                            event_type,
+                                   ph_name_duration_summary_callback_t callback,
+                                   void*                               user_data,
+                                   ph_future_t                         future)
+{
+    if(query == nullptr || query->ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(callback == nullptr || !known_event_type(event_type))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_call([query, event_type, callback, user_data, future]() {
+        if(future != nullptr && future->stop_token().stop_requested())
+        {
+            return PH_RESULT_CANCELLED;
+        }
+        std::vector<profiler_hub::name_duration_summary_t> rows;
+        if(!query->ctx->summarize_name_durations(query->query, event_type, rows))
+        {
+            return PH_RESULT_UNSUPPORTED_FILE;
+        }
+        if(future != nullptr && future->stop_token().stop_requested())
+        {
+            return PH_RESULT_CANCELLED;
+        }
+        for(const profiler_hub::name_duration_summary_t& row : rows)
+        {
+            const ph_name_duration_summary_t view = {
+                row.name.c_str(),
+                row.count,
+                row.min_duration,
+                row.max_duration,
+                row.total_duration,
+            };
+            callback(&view, user_data);
+        }
+        return PH_RESULT_SUCCESS;
+    });
+}
+
 namespace
 {
 ph_result_t

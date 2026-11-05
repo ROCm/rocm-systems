@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 extern "C"
 {
@@ -21,6 +22,17 @@ namespace profiler_hub
 
 struct reader_catalog_t;
 struct resolved_event_query;
+
+/** @brief One display name and its duration aggregates. Durations are
+ *         end - start in trace ticks. */
+struct name_duration_summary_t
+{
+    std::string name;
+    uint64_t    count{};
+    uint64_t    min_duration{};
+    uint64_t    max_duration{};
+    uint64_t    total_duration{};
+};
 
 namespace common
 {
@@ -367,6 +379,13 @@ struct reader_t
                                              uint64_t                    last_id,
                                              ph_table_event*             rows,
                                              uint32_t                    capacity);
+
+    /** @brief Groups matching rows by display name. Returns false when this
+     *         format has no summary query. */
+    [[nodiscard]] bool summarize_name_durations(
+        const resolved_event_query&           query,
+        uint32_t                              event_type,
+        std::vector<name_duration_summary_t>& rows);
 
     /** @brief Reads the smallest and largest row id of the table that holds
      *         @p event_type. Returns false if the table is empty. */

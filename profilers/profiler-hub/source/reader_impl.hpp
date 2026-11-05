@@ -8,18 +8,19 @@
 #include "profiler-hub/cpp/storage.hpp"
 
 #include "data_storage/backends/sqlite_backend.hpp"
+#include "event_query.hpp"
 #include "reader_catalog.hpp"
 
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 struct ph_table_event;
 
 namespace profiler_hub
 {
-struct resolved_event_query;
 
 /**
  * @brief One trace format's read path behind reader_t.
@@ -130,6 +131,14 @@ struct reader_t::impl
                                                      uint64_t        last_id,
                                                      ph_table_event* rows,
                                                      uint32_t        capacity) = 0;
+
+    /** @brief Groups matching rows by display name inside SQLite.
+     *         Returns false when this format has no summary query. An empty
+     *         @p rows with true means the filter matched no events. */
+    [[nodiscard]] virtual bool summarize_name_durations(
+        const resolved_event_query&          query,
+        uint32_t                             event_type,
+        std::vector<name_duration_summary_t>& rows);
     [[nodiscard]] virtual bool     table_event_id_span(uint32_t  event_type,
                                                        uint64_t& first_id,
                                                        uint64_t& last_id) = 0;

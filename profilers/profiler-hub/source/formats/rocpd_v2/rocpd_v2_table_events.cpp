@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace profiler_hub
@@ -421,6 +422,157 @@ rocpd_v2_reader::table_event_id_span(uint32_t event_type, uint64_t& first_id, ui
             found    = true;
         });
     return found;
+}
+
+namespace
+{
+
+struct duration_summary_row
+{
+    std::optional<std::string> name;
+    int64_t                    count{};
+    std::optional<int64_t>     min_duration;
+    std::optional<int64_t>     max_duration;
+    std::optional<int64_t>     total_duration;
+};
+
+uint64_t
+non_negative(int64_t value)
+{
+    return value < 0 ? 0 : static_cast<uint64_t>(value);
+}
+
+void
+add_summary(std::unordered_map<std::string, name_duration_summary_t>& groups,
+            std::string                                               name,
+            uint64_t                                                  count,
+            uint64_t                                                  min_duration,
+            uint64_t                                                  max_duration,
+            uint64_t                                                  total_duration)
+{
+    if(count == 0) return;
+    name_duration_summary_t& group = groups[std::move(name)];
+    if(group.count == 0)
+    {
+        group.min_duration = min_duration;
+        group.max_duration = max_duration;
+    }
+    else
+    {
+        group.min_duration = std::min(group.min_duration, min_duration);
+        group.max_duration = std::max(group.max_duration, max_duration);
+    }
+    group.count += count;
+    group.total_duration += total_duration;
+}
+
+}  // namespace
+
+bool
+rocpd_v2_reader::summarize_name_durations(const resolved_event_query&           query,
+                                          uint32_t                              event_type,
+                                          std::vector<name_duration_summary_t>& rows)
+{
+    rows.clear();
+    if(m_backend == nullptr || m_catalog == nullptr) return false;
+    if(!query.event_types.empty() &&
+       std::find(query.event_types.begin(), query.event_types.end(), event_type) ==
+           query.event_types.end())
+    {
+        return true;
+    }
+    if(query.node_id.has_value() && *query.node_id != rocpd_v2::k_node_id) return true;
+
+    const auto type = reader_event_type(event_type);
+    if(!type.has_value()) return true;
+    const bool        is_region = type.value() == event_type_t::region;
+    const std::string alias     = is_region ? "A" : "O";
+
+    std::string where = is_region ? std::string{ "1" }
+                                  : rocpd_v2::op_kind_where(
+                                        "O", type.value() == event_type_t::memory_copy);
+    add_and(where, time_clause(alias, query));
+    if(query.process_id.has_value())
+    {
+        add_and(where, fmt::format("A.pid = {}", *query.process_id));
+    }
+    if(query.thread_id.has_value())
+    {
+        const auto thread = m_catalog->threads_by_id.find(*query.thread_id);
+        if(thread == m_catalog->threads_by_id.end() || !thread->second) return true;
+        add_and(where,
+                fmt::format("A.pid = {} AND A.tid = {}",
+                            thread->second->parent_process_id.value_or(0),
+                            thread->second->thread_id));
+    }
+    if(query.agent_id.has_value())
+    {
+        if(is_region) return true;
+        add_and(where, fmt::format("O.gpuId = {}", *query.agent_id));
+    }
+    std::string tracks;
+    if(!track_clause(*m_catalog, type.value(), query, tracks)) return true;
+    add_and(where, tracks);
+    if(query.has_string_filter)
+    {
+        const std::string strings = string_clause(type.value(), query);
+        if(strings.empty()) return true;
+        add_and(where, strings);
+    }
+
+    std::string name_expr;
+    std::string from;
+    if(is_region)
+    {
+        name_expr = "IFNULL(N.string, '')";
+        from      = "rocpd_api A LEFT JOIN rocpd_string N ON N.id = A.apiName_id";
+    }
+    else
+    {
+        name_expr = m_has_kernel_api
+                        ? "CASE WHEN IFNULL(KN.string, '') != '' THEN KN.string "
+                          "WHEN IFNULL(SD.string, '') != '' THEN SD.string "
+                          "ELSE IFNULL(ST.string, '') END"
+                        : "CASE WHEN IFNULL(SD.string, '') != '' THEN SD.string "
+                          "ELSE IFNULL(ST.string, '') END";
+        from = "rocpd_op O " + op_api_joins() +
+               " LEFT JOIN rocpd_string SD ON SD.id = O.description_id"
+               " LEFT JOIN rocpd_string ST ON ST.id = O.opType_id";
+        if(m_has_kernel_api)
+        {
+            from += " LEFT JOIN rocpd_string KN ON KN.id = K.kernelName_id";
+        }
+    }
+
+    const std::string duration = alias + ".end - " + alias + ".start";
+    const std::string sql      = "SELECT " + name_expr + ", COUNT(*), MIN(" + duration +
+                            "), MAX(" + duration + "), SUM(" + duration + ") FROM " + from +
+                            " WHERE " + where + " GROUP BY 1";
+
+    std::unordered_map<std::string, name_duration_summary_t> groups;
+    m_backend
+        ->create_read_statement_executor<duration_summary_row>(
+            sql,
+            &duration_summary_row::name,
+            &duration_summary_row::count,
+            &duration_summary_row::min_duration,
+            &duration_summary_row::max_duration,
+            &duration_summary_row::total_duration)()
+        .for_each([&](const duration_summary_row& row) {
+            add_summary(groups,
+                        row.name.value_or(""),
+                        row.count > 0 ? static_cast<uint64_t>(row.count) : 0,
+                        non_negative(row.min_duration.value_or(0)),
+                        non_negative(row.max_duration.value_or(0)),
+                        non_negative(row.total_duration.value_or(0)));
+        });
+    rows.reserve(groups.size());
+    for(auto& entry : groups)
+    {
+        entry.second.name = entry.first;
+        rows.push_back(std::move(entry.second));
+    }
+    return true;
 }
 
 }  // namespace profiler_hub

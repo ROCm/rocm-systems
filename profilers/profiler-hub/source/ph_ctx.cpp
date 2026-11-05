@@ -1236,6 +1236,52 @@ ph_ctx::read_table_events(const profiler_hub::resolved_event_query& query,
 }
 
 bool
+ph_ctx::summarize_name_durations(
+    const profiler_hub::resolved_event_query&           query,
+    uint32_t                                            event_type,
+    std::vector<profiler_hub::name_duration_summary_t>& rows)
+{
+    rows.clear();
+    uint32_t source_index = 0;
+    if(query.source_index.has_value())
+    {
+        source_index = query.source_index.value();
+    }
+    else if(!query.tracks.empty())
+    {
+        const placed_track_t* place = place_of(query.tracks.front());
+        if(place == nullptr) return true;
+        source_index = place->source_index;
+    }
+    else if(m_sources.size() != 1)
+    {
+        return true;
+    }
+    if(source_index >= m_sources.size()) return true;
+
+    profiler_hub::resolved_event_query local = query;
+    trace_source_t&                    origin = source_at(source_index);
+    local.tracks.clear();
+    local.tracks.reserve(query.tracks.size());
+    for(const uint32_t global_id : query.tracks)
+    {
+        const placed_track_t* place = place_of(global_id);
+        if(place == nullptr || place->source_index != source_index) continue;
+        local.tracks.push_back(static_cast<uint32_t>(place->track->id));
+    }
+    if(!query.tracks.empty() && local.tracks.empty()) return true;
+    if(!local.search_strings.empty())
+    {
+        profiler_hub::resolve_event_query_strings(
+            *origin.catalog, local, local.match_substring, local.match_partial);
+    }
+    return origin.pool->with_connection(
+        [&](profiler_hub::common::connection& connection) {
+            return connection.reader().summarize_name_durations(local, event_type, rows);
+        });
+}
+
+bool
 ph_ctx::table_event_id_span(const profiler_hub::resolved_event_query& query,
                             uint32_t                                  event_type,
                             uint64_t&                                 first_id,

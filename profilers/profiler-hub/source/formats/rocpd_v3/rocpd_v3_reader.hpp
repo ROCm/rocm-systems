@@ -97,6 +97,10 @@ public:
     [[nodiscard]] bool     table_event_id_span(uint32_t  event_type,
                                                uint64_t& first_id,
                                                uint64_t& last_id) override;
+    [[nodiscard]] bool     summarize_name_durations(
+        const resolved_event_query&           query,
+        uint32_t                              event_type,
+        std::vector<name_duration_summary_t>& rows) override;
 
 private:
     // Resolve event metadata from event-specific table by db_id and type.

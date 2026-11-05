@@ -173,6 +173,15 @@ reader_t::impl::get_region_details(const reader_types::timeline_event_t&)
     return std::nullopt;
 }
 
+bool
+reader_t::impl::summarize_name_durations(const resolved_event_query&,
+                                         uint32_t,
+                                         std::vector<name_duration_summary_t>& rows)
+{
+    rows.clear();
+    return false;
+}
+
 std::optional<reader_types::kernel_dispatch_data_t>
 reader_t::impl::get_kernel_dispatch_details(const reader_types::timeline_event_t&)
 {
@@ -475,6 +484,14 @@ reader_t::read_table_events(const resolved_event_query& query,
                             uint32_t                    capacity)
 {
     return m_impl->read_table_events(query, event_type, after_id, last_id, rows, capacity);
+}
+
+bool
+reader_t::summarize_name_durations(const resolved_event_query&           query,
+                                   uint32_t                              event_type,
+                                   std::vector<name_duration_summary_t>& rows)
+{
+    return m_impl->summarize_name_durations(query, event_type, rows);
 }
 
 bool
