@@ -1,5 +1,4 @@
 {
-  "comment": "Minimum dataset graded by the AMD skills catalog. Cases that profile a sample and read the report live in extended_evals.json.",
   "evaluations": [
     {
       "id": "tt-triton-inductor-kernels",
@@ -11,9 +10,7 @@
       "unexpected_behavior": [
         "relies on --triton-trace alone to capture torch.compile kernels"
       ],
-      "logs_contain": [
-        "--torch-trace"
-      ]
+      "logs_contain": ["--torch-trace"]
     },
     {
       "id": "tt-filter-by-operator",
@@ -23,9 +20,7 @@
         "filters with --torch-operator",
         "treats the pattern as a shell-style glob rather than a regex"
       ],
-      "logs_contain": [
-        "--torch-operator"
-      ]
+      "logs_contain": ["--torch-operator"]
     },
     {
       "id": "tt-custom-roctx-unsupported",
@@ -59,7 +54,6 @@
     {
       "id": "tt-model-accuracy",
       "skill_should_trigger": false,
-      "note": "PyTorch question with no performance profiling in it.",
       "prompt": "why is my PyTorch model's validation accuracy dropping?"
     }
   ]

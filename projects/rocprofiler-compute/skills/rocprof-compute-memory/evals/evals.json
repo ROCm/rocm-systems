@@ -1,35 +1,52 @@
 {
-  "comment": "Minimum dataset graded by the AMD skills catalog. Cases that profile a sample and read the report live in extended_evals.json.",
   "evaluations": [
     {
-      "id": "mem-which-blocks",
+      "id": "mem-access-inefficiency",
       "skill_should_trigger": true,
-      "note": "Catalog behavioral check. Asks which blocks to collect and does not stage a sample.",
-      "prompt": "which rocprof-compute blocks should I collect to inspect cache hit rates and LDS bank conflicts, without a full profile?",
+      "prompt": "find the memory access inefficiencies in this rocprofiler-compute capture\n\nThe application is ./vrandom_access.cpp.",
+      "workspace": "evals/samples",
       "expected_behavior": [
-        "names the memory chart, or -b memchart, as the place to start",
-        "collects only the memory blocks the question needs, such as memchart, vl1d, l2, or lds"
+        "reads the memory chart before opening an individual cache level",
+        "cites hit rates or request counts from the report",
+        "ties any coalescing or tiling advice to those numbers"
       ],
       "unexpected_behavior": [
-        "starts a full multi-pass profile or the roofline benchmarks"
-      ]
+        "recommends an optimization without citing a metric from the report"
+      ],
+      "logs_contain": ["-b memchart"]
     },
     {
-      "id": "mem-where-hit-rates",
+      "id": "mem-cache-hit-rates-gfx115x",
       "skill_should_trigger": true,
-      "note": "Catalog trigger check. The profiled version is mem-cache-hit-rates in extended_evals.json.",
-      "prompt": "where do I read L2 and vL1D hit rates for one kernel in rocprof-compute?"
+      "prompt": "what are my GL1 and GL2 hit rates for this kernel and are they bad?\n\nThe application is ./vsequential_access.cpp.",
+      "workspace": "evals/samples",
+      "expected_behavior": [
+        "checks the cache block names this GPU uses before choosing -b",
+        "opens the gl1 and gl2 blocks for a single kernel id",
+        "judges the rates against what the algorithm should do rather than a fixed cutoff"
+      ],
+      "unexpected_behavior": [
+        "applies a remembered threshold such as L2 below 50% being bad, as if the tool defined one"
+      ],
+      "logs_contain": ["gl2"]
     },
     {
-      "id": "mem-where-bandwidth-goes",
+      "id": "mem-bandwidth-bound-gfx115x",
       "skill_should_trigger": true,
-      "note": "Catalog trigger check. The profiled version is mem-bandwidth-bound in extended_evals.json.",
-      "prompt": "this AMD GPU kernel looks memory bound, which rocprof-compute view shows where the bandwidth goes?"
+      "prompt": "this kernel looks memory bound, where is the bandwidth going?\n\nThe application is ./vcopy.cpp.",
+      "workspace": "evals/samples",
+      "expected_behavior": [
+        "walks the hierarchy from the memory chart down to the level responsible",
+        "distinguishes traffic that caches absorbed from traffic that reached system memory"
+      ],
+      "unexpected_behavior": [
+        "describes the GPU memory as HBM"
+      ],
+      "logs_contain": ["memchart"]
     },
     {
       "id": "mem-host-memory",
       "skill_should_trigger": false,
-      "note": "Memory question, but host-side allocation is not GPU counter analysis.",
       "prompt": "my application is leaking host memory, help me find it"
     },
     {
@@ -40,7 +57,6 @@
     {
       "id": "mem-gpu-oom",
       "skill_should_trigger": false,
-      "note": "About allocation failure, not bandwidth or cache behaviour.",
       "prompt": "why does my model run out of GPU memory during training?"
     }
   ]

@@ -1,5 +1,4 @@
 {
-  "comment": "Profile-and-read cases. The AMD skills catalog does not grade this file. Run it here with ./skills/run_evals.py --extended.",
   "evaluations": [
     {
       "id": "tt-which-operator-is-slow",
@@ -14,10 +13,7 @@
       "unexpected_behavior": [
         "guesses an operator pattern without listing the captured operators first"
       ],
-      "logs_contain": [
-        "--torch-trace",
-        "--list-torch-operators"
-      ]
+      "logs_contain": ["--torch-trace", "--list-torch-operators"]
     },
     {
       "id": "tt-map-kernels-to-model-code",
@@ -28,9 +24,7 @@
         "profiles the Python script with torch tracing enabled",
         "advises profiling a few steady-state iterations rather than a full run"
       ],
-      "logs_contain": [
-        "--torch-trace"
-      ]
+      "logs_contain": ["--torch-trace"]
     }
   ]
 }
