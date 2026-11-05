@@ -16,14 +16,14 @@ namespace rocprofsys::parser
 /// One source's accepted values. config_source order is lowest to highest precedence.
 struct sourced_values
 {
-    config_source source = config_source::default_value;
-    value_map_t   values;
+    config_source  source = config_source::default_value;
+    typed_values_t values;
 };
 
 struct resolved_value
 {
-    std::string   value;
-    config_source source = config_source::default_value;
+    config_value_t value;
+    config_source  source = config_source::default_value;
 };
 
 using resolved_config = std::map<std::string, resolved_value, std::less<>>;

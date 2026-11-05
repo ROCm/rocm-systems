@@ -6,6 +6,7 @@
 #include "parser/precedence.hpp"
 #include "parser/preset_parser.hpp"
 #include "parser/schema.hpp"
+#include "parser/value_text.hpp"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>  // NOLINT(misc-include-cleaner): json::parse
@@ -45,30 +46,34 @@ add_param(schema& value, schema_param param)
     ASSERT_TRUE(value.add_param(std::move(param)));
 }
 
-void
-add_category(schema& value, std::string category_id)
+config_value_t
+str_value(std::string value)
 {
-    ASSERT_TRUE(value.add_category(category{ .id = std::move(category_id) }));
+    return config_value_t{ std::move(value) };
+}
+
+config_value_t
+int_value(std::int64_t value)
+{
+    return config_value_t{ value };
 }
 
 schema
 make_schema()
 {
     schema value{};
-    add_category(value, "tracing");
-    add_category(value, "sampling");
-    auto trace          = make_param("trace", param_type::boolean);
+    auto   trace        = make_param("trace", param_type::boolean);
     trace.category      = "tracing";
-    trace.env           = env_spec{ .name = "ROCPROFSYS_TRACE" };
+    trace.env           = "ROCPROFSYS_TRACE";
     auto freq           = make_param("freq", param_type::integer);
     freq.category       = "sampling";
     freq.max            = k_frequency_limit;
-    freq.env            = env_spec{ .name = "ROCPROFSYS_FREQ" };
+    freq.env            = "ROCPROFSYS_FREQ";
     auto components     = make_param("components", param_type::enumeration_list);
     components.category = "sampling";
     components.choices  = { choice{ .value = "wall_clock" },
                             choice{ .value = "cpu_clock" } };
-    components.env      = env_spec{ .name = "ROCPROFSYS_COMPONENTS", .separator = ";" };
+    components.env      = "ROCPROFSYS_COMPONENTS";
     add_param(value, std::move(trace));
     add_param(value, std::move(freq));
     add_param(value, std::move(components));
@@ -111,7 +116,7 @@ private:
 };
 
 sourced_values
-source_with(config_source source, value_map_t values)
+source_with(config_source source, typed_values_t values)
 {
     return sourced_values{ .source = source, .values = std::move(values) };
 }
@@ -119,10 +124,10 @@ source_with(config_source source, value_map_t values)
 void
 expect_mentions(const std::vector<std::string>& errors, std::string_view fragment)
 {
-    const auto found =
-        std::ranges::any_of(errors, [&fragment](const std::string& message) {
-            return message.find(fragment) != std::string::npos;
-        });
+    const auto found = std::any_of(errors.begin(), errors.end(),
+                                   [&fragment](const std::string& message) {
+                                       return message.find(fragment) != std::string::npos;
+                                   });
     EXPECT_TRUE(found) << fragment;
 }
 }  // namespace
@@ -137,9 +142,9 @@ TEST(parser_file, reads_categories_scalars_and_lists)
 
     const auto parsed = file_parser{}.parse(make_schema(), document);
     EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values.at("trace"), "true");
-    EXPECT_EQ(parsed.values.at("freq"), "2");
-    EXPECT_EQ(parsed.values.at("components"), "wall_clock;cpu_clock");
+    EXPECT_EQ(parsed.values.at("trace"), config_value_t{ true });
+    EXPECT_EQ(parsed.values.at("freq"), int_value(2));
+    EXPECT_EQ(parsed.text("components"), "wall_clock,cpu_clock");
     EXPECT_EQ(parsed.values.find("unused"), parsed.values.end());
 }
 
@@ -161,7 +166,7 @@ TEST(parser_file, reads_a_file_and_reports_io_errors)
     const scoped_temp_file file{ R"({ "tracing": { "trace": false } })" };
     const auto             parsed = file_parser{}.parse_file(make_schema(), file.path());
     EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values.at("trace"), "false");
+    EXPECT_EQ(parsed.text("trace"), "false");
 
     const auto missing =
         file_parser{}.parse_file(make_schema(), "/nonexistent/config.json");
@@ -177,15 +182,13 @@ TEST(parser_file, reads_a_file_and_reports_io_errors)
 TEST(parser_file, stores_a_choice_alias_as_the_choice_value)
 {
     schema value{};
-    add_category(value, "output");
-    add_category(value, "sampling");
-    auto format         = make_param("format", param_type::enumeration);
+    auto   format       = make_param("format", param_type::enumeration);
     format.category     = "output";
-    format.env          = env_spec{ .name = "ROCPROFSYS_FORMAT" };
+    format.env          = "ROCPROFSYS_FORMAT";
     format.choices      = { choice{ .value = "pftrace", .aliases = { "proto" } } };
     auto components     = make_param("components", param_type::enumeration_list);
     components.category = "sampling";
-    components.env      = env_spec{ .name = "ROCPROFSYS_COMPONENTS", .separator = ";" };
+    components.env      = "ROCPROFSYS_COMPONENTS";
     components.choices  = { choice{ .value = "wall_clock", .aliases = { "wall" } },
                             choice{ .value = "cpu_clock" } };
     add_param(value, std::move(format));
@@ -197,8 +200,8 @@ TEST(parser_file, stores_a_choice_alias_as_the_choice_value)
     })");
     const auto parsed   = file_parser{}.parse(value, document);
     EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values.at("format"), "pftrace");
-    EXPECT_EQ(parsed.values.at("components"), "wall_clock;cpu_clock");
+    EXPECT_EQ(parsed.text("format"), "pftrace");
+    EXPECT_EQ(parsed.text("components"), "wall_clock,cpu_clock");
 }
 
 TEST(parser_file, rejects_an_array_for_a_scalar_parameter)
@@ -209,7 +212,7 @@ TEST(parser_file, rejects_an_array_for_a_scalar_parameter)
     })");
 
     const auto parsed = file_parser{}.parse(make_schema(), document);
-    EXPECT_EQ(parsed.values.at("components"), "wall_clock");
+    EXPECT_EQ(parsed.text("components"), "wall_clock");
     EXPECT_EQ(parsed.values.find("trace"), parsed.values.end());
     EXPECT_EQ(parsed.values.find("freq"), parsed.values.end());
     ASSERT_EQ(parsed.errors.size(), 2U);
@@ -249,46 +252,49 @@ TEST(parser_file, a_directory_path_throws)
 
 TEST(parser_file, catalog_document_omits_defaults_and_round_trips)
 {
-    auto value = make_schema();
-    auto label = make_param("label", param_type::string);
+    auto value     = make_schema();
+    auto label     = make_param("label", param_type::string);
+    label.category = "tracing";
     add_param(value, std::move(label));
 
     const auto resolved = resolved_config{
-        { "trace", resolved_value{ .value = "true", .source = config_source::file } },
-        { "freq",
-          resolved_value{ .value = "1", .source = config_source::default_value } },
-        { "components", resolved_value{ .value  = "wall_clock;cpu_clock",
+        { "trace", resolved_value{ .value  = config_value_t{ true },
+                                   .source = config_source::file } },
+        { "freq", resolved_value{ .value  = int_value(1),
+                                  .source = config_source::default_value } },
+        { "components", resolved_value{ .value = config_value_t{ std::vector<std::string>{
+                                            "wall_clock", "cpu_clock" } },
                                         .source = config_source::environment } },
-        { "label", resolved_value{ .value = "hello", .source = config_source::file } },
+        { "label",
+          resolved_value{ .value = str_value("hello"), .source = config_source::file } },
     };
 
     const auto document = catalog_document(value, resolved);
     EXPECT_EQ(document["tracing"]["trace"], true);
+    EXPECT_EQ(document["tracing"]["label"], "hello");
     EXPECT_FALSE(document["sampling"].contains("freq"));
     EXPECT_EQ(document["sampling"]["components"],
               (nlohmann::json::array({ "wall_clock", "cpu_clock" })));
-    EXPECT_FALSE(document.contains("label"));
 
     const auto parsed = file_parser{}.parse(value, document);
     EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values.at("trace"), "true");
-    EXPECT_EQ(parsed.values.at("components"), "wall_clock;cpu_clock");
+    EXPECT_EQ(parsed.text("trace"), "true");
+    EXPECT_EQ(parsed.text("components"), "wall_clock,cpu_clock");
     EXPECT_EQ(parsed.values.find("freq"), parsed.values.end());
-    EXPECT_EQ(parsed.values.find("label"), parsed.values.end());
 }
 
 TEST(parser_preset, stores_a_choice_alias_as_the_choice_value)
 {
     schema value{};
     auto   format  = make_param("format", param_type::enumeration);
-    format.env     = env_spec{ .name = "ROCPROFSYS_FORMAT" };
+    format.env     = "ROCPROFSYS_FORMAT";
     format.choices = { choice{ .value = "pftrace", .aliases = { "proto" } } };
     add_param(value, std::move(format));
 
     const auto parsed =
         preset_parser{}.parse(value, { { "ROCPROFSYS_FORMAT", "proto" } });
     EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values.at("format"), "pftrace");
+    EXPECT_EQ(parsed.text("format"), "pftrace");
 }
 
 TEST(parser_preset, maps_environment_settings_to_parameters)
@@ -298,7 +304,7 @@ TEST(parser_preset, maps_environment_settings_to_parameters)
                                               { "ROCPROFSYS_FREQ", "9" } };
 
     const auto parsed = preset_parser{}.parse(make_schema(), settings);
-    EXPECT_EQ(parsed.values, (value_map_t{ { "trace", "on" } }));
+    EXPECT_EQ(parsed.values, (typed_values_t{ { "trace", config_value_t{ true } } }));
     ASSERT_EQ(parsed.errors.size(), 2U);
     EXPECT_NE(parsed.errors.front().find("invalid value '9' for parameter 'freq'"),
               std::string::npos);
@@ -307,18 +313,18 @@ TEST(parser_preset, maps_environment_settings_to_parameters)
 TEST(parser_precedence, higher_source_replaces_lower_source)
 {
     const auto resolved = resolve_precedence({
-        source_with(config_source::command_line, { { "trace", "cli" } }),
+        source_with(config_source::command_line, { { "trace", str_value("cli") } }),
         source_with(config_source::default_value,
-                    { { "trace", "default" }, { "freq", "1" } }),
-        source_with(config_source::file, { { "trace", "file" } }),
-        source_with(config_source::preset,
-                    { { "trace", "preset" }, { "output", "preset" } }),
-        source_with(config_source::environment, { { "trace", "env" } }),
+                    { { "trace", str_value("default") }, { "freq", int_value(1) } }),
+        source_with(config_source::file, { { "trace", str_value("file") } }),
+        source_with(config_source::preset, { { "trace", str_value("preset") },
+                                             { "output", str_value("preset") } }),
+        source_with(config_source::environment, { { "trace", str_value("env") } }),
     });
 
-    EXPECT_EQ(resolved.at("trace").value, "cli");
+    EXPECT_EQ(format_value(resolved.at("trace").value), "cli");
     EXPECT_EQ(resolved.at("trace").source, config_source::command_line);
-    EXPECT_EQ(resolved.at("freq").value, "1");
+    EXPECT_EQ(format_value(resolved.at("freq").value), "1");
     EXPECT_EQ(resolved.at("freq").source, config_source::default_value);
     EXPECT_EQ(resolved.at("output").source, config_source::preset);
 }
@@ -326,14 +332,15 @@ TEST(parser_precedence, higher_source_replaces_lower_source)
 TEST(parser_precedence, preset_overrides_file_and_environment)
 {
     const auto resolved = resolve_precedence({
-        source_with(config_source::file, { { "trace", "file" } }),
-        source_with(config_source::environment, { { "trace", "env" }, { "freq", "2" } }),
-        source_with(config_source::preset, { { "trace", "preset" } }),
+        source_with(config_source::file, { { "trace", str_value("file") } }),
+        source_with(config_source::environment,
+                    { { "trace", str_value("env") }, { "freq", int_value(2) } }),
+        source_with(config_source::preset, { { "trace", str_value("preset") } }),
     });
 
-    EXPECT_EQ(resolved.at("trace").value, "preset");
+    EXPECT_EQ(format_value(resolved.at("trace").value), "preset");
     EXPECT_EQ(resolved.at("trace").source, config_source::preset);
-    EXPECT_EQ(resolved.at("freq").value, "2");
+    EXPECT_EQ(format_value(resolved.at("freq").value), "2");
     EXPECT_EQ(resolved.at("freq").source, config_source::environment);
 }
 
@@ -341,12 +348,13 @@ TEST(parser_precedence, apply_resolved_keeps_the_winning_source)
 {
     auto       store    = config_store{ make_schema() };
     const auto resolved = resolve_precedence({
-        source_with(config_source::environment, { { "trace", "on" }, { "freq", "2" } }),
-        source_with(config_source::preset, { { "trace", "off" } }),
+        source_with(config_source::environment,
+                    { { "trace", config_value_t{ true } }, { "freq", int_value(2) } }),
+        source_with(config_source::preset, { { "trace", config_value_t{ false } } }),
     });
     apply_resolved(store, resolved);
 
-    EXPECT_EQ(store.get("trace"), "off");
+    EXPECT_EQ(store.get("trace"), "false");
     EXPECT_EQ(store.source_of("trace"), config_source::preset);
     EXPECT_EQ(store.source_of("freq"), config_source::environment);
 }
@@ -355,9 +363,10 @@ TEST(parser_precedence, apply_resolved_writes_nothing_when_a_value_is_invalid)
 {
     auto       store    = config_store{ make_schema() };
     const auto resolved = resolved_config{
-        { "trace",
-          resolved_value{ .value = "on", .source = config_source::environment } },
-        { "freq", resolved_value{ .value = "9", .source = config_source::environment } }
+        { "trace", resolved_value{ .value  = str_value("on"),
+                                   .source = config_source::environment } },
+        { "freq",
+          resolved_value{ .value = int_value(9), .source = config_source::environment } }
     };
 
     EXPECT_THROW(apply_resolved(store, resolved), std::runtime_error);
