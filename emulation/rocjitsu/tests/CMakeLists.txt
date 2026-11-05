@@ -1987,7 +1987,20 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_library(operand_delegate_probe MODULE operand_delegate_probe.cpp)
     target_link_libraries(operand_delegate_probe PRIVATE util simdojo_headers)
     rj_configure_target(operand_delegate_probe LIB)
-    set_target_properties(rocjitsu_tests PROPERTIES ENABLE_EXPORTS ON)
+    # The probe enters the executable's delegate scope without linking another
+    # simulator image. Keep the export limited to that shared state accessor.
+    target_link_options(
+        rocjitsu_tests
+        PRIVATE
+            "LINKER:--export-dynamic-symbol=_ZN8rocjitsu21ScopedOperandDelegate12active_countEv"
+    )
+    if(RJ_ENABLE_UBSAN AND RJ_UBSAN_VPTR)
+        # Header-only operand access must not reference the simulator's hidden RTTI.
+        target_compile_options(
+            operand_delegate_probe
+            PRIVATE -fno-sanitize=vptr
+        )
+    endif()
     add_dependencies(rocjitsu_tests operand_delegate_probe)
     rj_add_test_path(rocjitsu_tests RJ_OPERAND_DELEGATE_PROBE_MODULE "$<TARGET_FILE:operand_delegate_probe>")
 endif()
