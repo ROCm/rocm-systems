@@ -158,11 +158,11 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_PerPeerBytesUpToTheSlotCapacity
   EXPECT_TRUE(Eligible((kSlices - 1) * kSliceFloats));
 }
 
-// Eligibility asks for an epoch cell per peer (nRanks - 1).
-TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_NeedsAnEpochCellPerPeer) {
-  comm().ddaLLEpochLen = 3;
+// The grid is capped at the epoch cells and a column serves several peers, so one cell is enough.
+TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_NeedsAnEpochCell) {
+  comm().ddaLLEpochLen = 1;
   EXPECT_TRUE(Eligible(4));
-  comm().ddaLLEpochLen = 2;
+  comm().ddaLLEpochLen = 0;
   EXPECT_FALSE(Eligible(4));
   comm().ddaLLEpochLen = 256;
   comm().ddaLLEpochDev = nullptr;
@@ -224,7 +224,7 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_PassesBuffersSlicesBankAndAbortFl
 }
 
 // One warp per slice: blocks per column = ceil(slices / 8), within the column's share of the CU budget.
-TEST_F(DdaAlltoallFabricLL128Microtest, Launch_BlocksPerPeerFollowSlicesPerWarp) {
+TEST_F(DdaAlltoallFabricLL128Microtest, Launch_BlocksPerColumnFollowSlicesPerWarp) {
   const size_t perBlock = kWarpsPerBlock * kSliceFloats;
   const unsigned cap = 256 / 3;
   const std::pair<size_t, unsigned> cases[] = {
