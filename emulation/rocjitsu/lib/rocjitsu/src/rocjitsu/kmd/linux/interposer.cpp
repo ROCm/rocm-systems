@@ -2314,8 +2314,11 @@ public:
   }
 
   bool create_local_vm(const std::string &config_path) {
+    util::FailureOr<std::string> config_json = read_file_passthrough(config_path.c_str());
+    if (config_json.failed())
+      return false;
     rj_vm_t *created_vm = nullptr;
-    if (rj_vm_create(config_path.c_str(), RJ_VM_MODE_LOCAL, &created_vm) !=
+    if (rj_vm_create_from_string(config_json.value().c_str(), RJ_VM_MODE_LOCAL, &created_vm) !=
         ROCJITSU_STATUS_SUCCESS) {
       util::Logger::debug_print("rocjitsu: failed to create VM from ", config_path);
       return false;
@@ -2358,11 +2361,6 @@ public:
       return false;
     }
 
-    util::FailureOr<std::string> config_json = read_file_passthrough(config_path.c_str());
-    if (config_json.failed()) {
-      local_vm_.reset();
-      return false;
-    }
     if (rj_vm_load_plugins(local_vm_.get(), config_json.value().c_str(), nullptr) !=
         ROCJITSU_STATUS_SUCCESS) {
       util::Logger::debug_print("rocjitsu: failed to configure execution plugins");
@@ -3632,8 +3630,7 @@ public:
   /// return failure, distinct from a successfully read empty file.
   static util::FailureOr<std::string> read_file_passthrough(const char *path) {
     if (!real().ready()) {
-      util::Logger::warn(
-          "rocjitsu: cannot reread plugin configuration: libc passthrough is unavailable");
+      util::Logger::warn("rocjitsu: cannot read VM configuration: libc passthrough is unavailable");
       return util::Result::failure();
     }
     int fd;

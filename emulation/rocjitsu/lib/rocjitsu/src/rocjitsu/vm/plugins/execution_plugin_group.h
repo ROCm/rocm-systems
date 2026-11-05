@@ -94,6 +94,20 @@ public:
 
   ~ExecutionPluginGroup() = default;
 
+  /// Defer file creation until plugin admission is complete. Call before add().
+  void defer_file_sinks() { file_sinks_deferred_ = !sink_dir_.empty(); }
+
+  /// Open the deferred files only after the candidate group has been admitted.
+  void activate_file_sinks() {
+    if (!file_sinks_deferred_)
+      return;
+    file_sinks_deferred_ = false;
+    for (auto &entry : plugins_) {
+      entry.sink = build_sink_bundle(entry.plugin->name() + ".log");
+      entry.plugin->sink_ = entry.sink.get();
+    }
+  }
+
   /// Add a plugin owned with a boundary-aware deleter (see OwnedPlugin).
   bool add(OwnedPlugin p) {
     if (!p)
@@ -637,7 +651,7 @@ private:
   /// Build a sink combining configured sinks + optional file sink.
   /// Returns an empty bundle if no sinks are configured.
   [[nodiscard]] SinkBundle build_sink_bundle(const std::string &file_name) {
-    bool has_file = !sink_dir_.empty() && !file_name.empty();
+    bool has_file = !file_sinks_deferred_ && !sink_dir_.empty() && !file_name.empty();
     if (configured_sinks_.empty() && !has_file)
       return {};
 
@@ -668,6 +682,7 @@ private:
   std::mutex sink_mutex_;
   std::vector<std::unique_ptr<PluginSink>> configured_sinks_;
   std::string sink_dir_;
+  bool file_sinks_deferred_ = false;
   /// Owns the sink assigned to one plugin. The plugin is declared last and is
   /// therefore destroyed before its sink bundle.
   struct PluginEntry {

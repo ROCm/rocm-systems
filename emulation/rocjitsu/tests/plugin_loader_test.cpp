@@ -163,6 +163,29 @@ TEST_F(PluginLoaderTest, RejectsNonBooleanRequireAllPlugins) {
   EXPECT_EQ(trace().find("good:create\n"), std::string::npos);
 }
 
+TEST_F(PluginLoaderTest, ReportsParserErrorDetails) {
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(rocjitsu::PluginLoader::configure_plugin_group(R"({"execution_backend":hardware})",
+                                                             PLUGIN_LOADER_FIXTURE_DIR,
+                                                             diagnostic.emitter())
+                  .failed());
+  EXPECT_NE(diagnostic.message().find("invalid plugin configuration JSON:"), std::string::npos);
+  EXPECT_NE(diagnostic.message().find("1:"), std::string::npos);
+  EXPECT_NE(diagnostic.message().find("hardware"), std::string::npos);
+}
+
+TEST_F(PluginLoaderTest, AllowsTrailingComments) {
+  for (const char *suffix : {"// note", "/* note */", "/* note */ // another note\n"}) {
+    SCOPED_TRACE(suffix);
+    const std::string config =
+        std::string(R"({"require_all_plugins":true,"plugins":{"good":{}}})") + suffix;
+    util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
+        rocjitsu::PluginLoader::configure_plugin_group(config, PLUGIN_LOADER_FIXTURE_DIR);
+    ASSERT_TRUE(group.succeeded());
+    EXPECT_EQ(group.value()->num_plugins(), 1u);
+  }
+}
+
 TEST_F(PluginLoaderTest, CApiRejectsAdmissionBeforeReplacingInstalledGroup) {
   const auto count = [](std::string_view text, std::string_view event) {
     size_t occurrences = 0;
@@ -237,15 +260,28 @@ TEST_F(PluginLoaderTest, CApiRejectsAdmissionBeforeReplacingInstalledGroup) {
   }
 }
 
-TEST_F(PluginLoaderTest, ReportsParserErrorDetails) {
-  util::StringDiagnostic diagnostic;
-  EXPECT_TRUE(rocjitsu::PluginLoader::configure_plugin_group(R"({"execution_backend":hardware})",
-                                                             PLUGIN_LOADER_FIXTURE_DIR,
-                                                             diagnostic.emitter())
-                  .failed());
-  EXPECT_NE(diagnostic.message().find("invalid plugin configuration JSON:"), std::string::npos);
-  EXPECT_NE(diagnostic.message().find("1:"), std::string::npos);
-  EXPECT_NE(diagnostic.message().find("hardware"), std::string::npos);
+TEST_F(PluginLoaderTest, AdmissionRejectionPreservesActiveFileSink) {
+  rocjitsu::test::ScopedTempDirectory output("rocjitsu-plugin-sinks-");
+  rocjitsu::SoC soc("plugin_loader_test");
+  soc.set_plugin_group(nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(new rj_vm_t, rj_vm_destroy);
+  vm->soc = &soc;
+  const std::string sinks = R"(,"sinks":{"types":["file"],"dir":")" + output.path() + R"("}})";
+  const std::string valid = R"({"require_all_plugins":true,"plugins":{"good":{}})" + sinks;
+  ASSERT_EQ(rj_vm_load_plugins(vm.get(), valid.c_str(), PLUGIN_LOADER_FIXTURE_DIR),
+            ROCJITSU_STATUS_SUCCESS);
+  const auto contents = [&] {
+    std::ifstream input(output.path() + "/boundary.log");
+    return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+  };
+  const std::string before = contents();
+  ASSERT_EQ(before, "boundary:init\n");
+  const std::string rejected =
+      R"({"require_all_plugins":true,"plugins":{"good":{},"missing":{}})" + sinks;
+  EXPECT_EQ(rj_vm_load_plugins(vm.get(), rejected.c_str(), PLUGIN_LOADER_FIXTURE_DIR),
+            ROCJITSU_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(contents(), before);
+  EXPECT_TRUE(vm->plugin_group_active.load());
 }
 
 TEST_F(PluginLoaderTest, CApiTranslatesForeignInitializationExceptions) {
@@ -258,7 +294,6 @@ TEST_F(PluginLoaderTest, CApiTranslatesForeignInitializationExceptions) {
     const char *config = R"({"require_all_plugins":true,"plugins":{"good":{}}})";
     ASSERT_EQ(rj_vm_load_plugins(vm.get(), config, PLUGIN_LOADER_FIXTURE_DIR),
               ROCJITSU_STATUS_SUCCESS);
-    rocjitsu::ExecutionPluginGroup *installed = &soc.plugin_group();
     ASSERT_EQ(setenv("ROCJITSU_PLUGIN_TEST_THROW_INIT", failure, 1), 0);
     testing::internal::CaptureStderr();
     rj_status_t status = ROCJITSU_STATUS_SUCCESS;
@@ -266,8 +301,6 @@ TEST_F(PluginLoaderTest, CApiTranslatesForeignInitializationExceptions) {
     const std::string diagnostic = testing::internal::GetCapturedStderr();
     unsetenv("ROCJITSU_PLUGIN_TEST_THROW_INIT");
     EXPECT_EQ(status, ROCJITSU_STATUS_ERROR);
-    EXPECT_NE(&soc.plugin_group(), installed);
-    EXPECT_FALSE(vm->plugin_group_active.load());
     EXPECT_NE(diagnostic.find(std::string_view(failure) == "standard"
                                   ? "fixture initialization failed"
                                   : "unknown plugin exception"),

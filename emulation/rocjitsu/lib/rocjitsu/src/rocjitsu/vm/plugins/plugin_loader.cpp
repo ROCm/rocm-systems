@@ -265,10 +265,26 @@ PluginLoader::configure_plugin_group(const std::string &config_json, const std::
   bool parsed =
       !config_json.empty() && parser.ParseFlexBuffer(config_json.c_str(), nullptr, &root_fbb);
   // ParseFlexBuffer accepts a single value without checking the following token.
-  if (parsed &&
-      config_json.find_first_not_of(" \t\r\n", parser.BytesConsumed()) != std::string::npos) {
-    (void)parser.Error("unexpected content after plugin configuration").Check();
-    parsed = false;
+  // Match the VM parser's whitespace and comment rules after that value.
+  if (parsed) {
+    size_t offset = static_cast<size_t>(parser.BytesConsumed());
+    while ((offset = config_json.find_first_not_of(" \t\r\n", offset)) != std::string::npos) {
+      if (config_json.compare(offset, 2, "//") == 0) {
+        offset = config_json.find_first_of("\r\n", offset + 2);
+        if (offset == std::string::npos)
+          break;
+      } else if (config_json.compare(offset, 2, "/*") == 0) {
+        const size_t end = config_json.find("*/", offset + 2);
+        if (end == std::string::npos)
+          return emit_error.emit() << "invalid plugin configuration JSON: unterminated comment at "
+                                      "offset "
+                                   << offset;
+        offset = end + 2;
+      } else {
+        return emit_error.emit()
+               << "invalid plugin configuration JSON: unexpected content at offset " << offset;
+      }
+    }
   }
   // Empty input intentionally configures an empty group.
   if (!parsed && !config_json.empty())
@@ -291,11 +307,13 @@ PluginLoader::configure_plugin_group(const std::string &config_json, const std::
     return util::Result::failure();
   const size_t requested_plugins = requested.value();
   auto group = std::make_shared<ExecutionPluginGroup>(parse_sink_config(root));
+  group->defer_file_sinks();
   const int loaded_plugins = load_from_config(config_json, *group, plugin_dir);
   if (require_all_plugins && static_cast<size_t>(loaded_plugins) != requested_plugins) {
     return emit_error.emit() << "required plugin loading failed: loaded " << loaded_plugins
                              << " of " << requested_plugins << " configured plugins";
   }
+  group->activate_file_sinks();
   return group;
 }
 
