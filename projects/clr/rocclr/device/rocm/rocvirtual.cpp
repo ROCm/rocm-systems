@@ -736,6 +736,10 @@ void VirtualGPU::MemoryDependency::clear(bool all) {
 VirtualGPU::HwQueueTracker::~HwQueueTracker() {
   for (auto& signal : signal_list_) {
     CpuWaitForSignal(signal);
+  }
+  // Every consumer of a pinned wait owns a use, or precedes one, on this queue
+  ReleaseAllPins();
+  for (auto& signal : signal_list_) {
     signal->release();
   }
   // Destroy all extra signals. Note: these signals must be idle already
@@ -902,9 +906,9 @@ void VirtualGPU::RetiringSignalTracker::NoteQueueChange() {
 // ================================================================================================
 void VirtualGPU::RetiringSignalTracker::NoteQueueDrained() {
   ClosePins();
-  for (PinnedWaits& pins : closed_pins_) {
-    if (pins.queue_gen == queue_gen_) {
-      pins.consumers_passed = true;
+  for (PinnedWait& pin : pins_) {
+    if (pin.close_seq != 0 && pin.queue_gen == queue_gen_) {
+      pin.consumers_passed = true;
     }
   }
   ReleasePins();
@@ -1161,37 +1165,30 @@ void VirtualGPU::RetiringSignalTracker::AcquireSlot() {
 
 // ================================================================================================
 void VirtualGPU::RetiringSignalTracker::ClosePins() {
-  if (open_pins_.signals.empty() || gpu_.gpu_queue_ == nullptr) {
+  if (num_open_pins_ == 0 || gpu_.gpu_queue_ == nullptr) {
     return;
   }
-  open_pins_.close_seq = next_use_seq_;
-  open_pins_.close_aql = Hsa::queue_load_write_index_relaxed(gpu_.gpu_queue_);
-  open_pins_.queue_gen = queue_gen_;
-  closed_pins_.push_back(std::move(open_pins_));
-  open_pins_ = PinnedWaits{};
+  CloseOpenPins(Hsa::queue_load_write_index_relaxed(gpu_.gpu_queue_), queue_gen_);
 }
 
 // ================================================================================================
 void VirtualGPU::RetiringSignalTracker::ReleasePins(bool release_all) {
-  for (auto pins = closed_pins_.begin(); pins != closed_pins_.end();) {
+  if (release_all) {
+    ReleaseAllPins();
+    return;
+  }
+  const size_t num_closed = pins_.size() - num_open_pins_;
+  auto pin = pins_.begin();
+  for (size_t closed_idx = 0; closed_idx < num_closed; ++closed_idx) {
     // AQL consumers precede close_aql and the others own a use below close_seq
     const bool consumers_passed =
-        pins->consumers_passed ||
-        (pins->queue_gen == queue_gen_ && pins->close_aql <= retired_below_);
-    if (release_all || (consumers_passed && oldest_unretired_seq_ >= pins->close_seq)) {
-      for (ProfilingSignal* signal : pins->signals) {
-        signal->release();
-      }
-      pins = closed_pins_.erase(pins);
+        pin->consumers_passed || (pin->queue_gen == queue_gen_ && pin->close_aql <= retired_below_);
+    if (consumers_passed && oldest_unretired_seq_ >= pin->close_seq) {
+      pin->signal->release();
+      pin = pins_.erase(pin);
     } else {
-      ++pins;
+      ++pin;
     }
-  }
-  if (release_all) {
-    for (ProfilingSignal* signal : open_pins_.signals) {
-      signal->release();
-    }
-    open_pins_.signals.clear();
   }
 }
 
@@ -1401,6 +1398,33 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
 }
 
 // ================================================================================================
+void VirtualGPU::HwQueueTracker::NoteGpuWait(ProfilingSignal* signal) {
+  // Keep the owner from rearming the signal before the GPU waiter reads it
+  signal->retain();
+  pins_.push_back(PinnedWait{signal});
+  ++num_open_pins_;
+}
+
+// ================================================================================================
+void VirtualGPU::HwQueueTracker::CloseOpenPins(uint64_t close_aql, uint64_t queue_gen) {
+  for (auto pin = pins_.end() - num_open_pins_; pin != pins_.end(); ++pin) {
+    pin->close_seq = next_use_seq_;
+    pin->close_aql = close_aql;
+    pin->queue_gen = queue_gen;
+  }
+  num_open_pins_ = 0;
+}
+
+// ================================================================================================
+void VirtualGPU::HwQueueTracker::ReleaseAllPins() {
+  for (PinnedWait& pin : pins_) {
+    pin.signal->release();
+  }
+  pins_.clear();
+  num_open_pins_ = 0;
+}
+
+// ================================================================================================
 bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
   // Wait for the current signal to complete
   if (Hsa::signal_load_relaxed(signal->signal_) > 0) {
@@ -1462,11 +1486,22 @@ void VirtualGPU::LegacySignalTracker::AcquireSlot() {
     // Find valid index
     ++current_id_ %= signal_list_.size();
     // Make sure the previous operation on the current signal is done
-    WaitCurrent();
+    if (WaitCurrent()) {
+      NoteCompleted(signal_list_[current_id_]);
+    }
 
     // Have to wait the next signal in the queue to avoid a race condition between
     // a GPU waiter(which may be not triggered yet) and CPU signal reset below
     WaitNext();
+
+    // The GPU waiters, beyond the one owning the next slot, that a pin protects may be done
+    ReleasePins();
+    if (signal_list_[current_id_]->referenceCount() > 1 && pins_.size() > num_open_pins_) {
+      // Several operations polled the signal, such as the ops of one batch copy. They are
+      // usually long done, which saves replacing the signal.
+      ProbeCompleted();
+      ReleasePins();
+    }
   }
 
   if (signal_list_[current_id_]->referenceCount() > 1) {
@@ -1499,6 +1534,7 @@ void VirtualGPU::LegacySignalTracker::ArmForUse(ProfilingSignal* signal,
                                                 bool /*barrier_bit*/, bool /*blocking_callback*/) {
   // Reset the signal and return
   Hsa::signal_silent_store_relaxed(signal->signal_, init_val);
+  signal->use_seq_ = next_use_seq_++;
 }
 
 // ================================================================================================
@@ -1520,13 +1556,52 @@ void VirtualGPU::LegacySignalTracker::WaitNext() {
   ProfilingSignal* signal = signal_list_[next];
   // Only wait, there is no need to save timestamp for the next signal
   // It will be saved when the signal is actually used
-  WaitForSignal(signal->signal_, gpu_.ActiveWait(), /*yield=*/false, signal->in_device_memory_);
+  if (WaitForSignal(signal->signal_, gpu_.ActiveWait(), /*yield=*/false,
+                    signal->in_device_memory_)) {
+    NoteCompleted(signal);
+  }
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::NoteCompleted(const ProfilingSignal* signal) {
+  completed_below_seq_ = std::max(completed_below_seq_, signal->use_seq_ + 1);
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::ProbeCompleted() {
+  // close_seq never decreases along pins_, so the newest closed pin needs the most uses
+  const uint64_t needed_seq = pins_[pins_.size() - num_open_pins_ - 1].close_seq;
+  const size_t size = signal_list_.size();
+  // From the use after the next slot's toward the newest
+  for (size_t offset = 2; offset < size && completed_below_seq_ < needed_seq; ++offset) {
+    const ProfilingSignal* signal = signal_list_[(current_id_ + offset) % size];
+    // Signals without a use in flight, unused or rolled back, prove nothing
+    if (signal->use_seq_ < completed_below_seq_) {
+      continue;
+    }
+    if (IsBusy(signal)) {
+      break;
+    }
+    NoteCompleted(signal);
+  }
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::ReleasePins() {
+  // The consumers of a pin own a use below its close_seq. A consumer without one, such as an
+  // AQL barrier, is covered by the wait on the next slot, as before pinning.
+  while (pins_.size() > num_open_pins_ && pins_.front().close_seq <= completed_below_seq_) {
+    pins_.front().signal->release();
+    pins_.pop_front();
+  }
 }
 
 // ================================================================================================
 void VirtualGPU::LegacySignalTracker::ResetCurrentSignal() {
   // Reset the signal and return
   Hsa::signal_silent_store_relaxed(signal_list_[current_id_]->signal_, 0);
+  // The use never ran. Its slot is reused next, out of use order, so its wait proves nothing.
+  signal_list_[current_id_]->use_seq_ = 0;
   // Fallback to the previous signal
   current_id_ = (current_id_ == 0) ? (signal_list_.size() - 1) : (current_id_ - 1);
 }
@@ -1581,13 +1656,6 @@ bool VirtualGPU::RetiringSignalTracker::IsBusy(const ProfilingSignal* signal) co
 
 // ================================================================================================
 void VirtualGPU::RetiringSignalTracker::NoteWaitsSubmitted() { ClosePins(); }
-
-// ================================================================================================
-void VirtualGPU::RetiringSignalTracker::NoteGpuWait(ProfilingSignal* signal) {
-  // Keep the owner from rearming the signal before the GPU waiter reads it
-  signal->retain();
-  open_pins_.signals.push_back(signal);
-}
 
 // ================================================================================================
 bool VirtualGPU::RetiringSignalTracker::WaitCurrent() {
