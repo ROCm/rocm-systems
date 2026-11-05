@@ -1370,7 +1370,7 @@ TEST(RaceDetector, TensorDma_PartialWaitsUseTheObligationClassNotTheEventOrder) 
     for (uint32_t address : {0u, 64u}) {
       const std::array ranges{LdsByteRange{.address = address, .bytes = 16}};
       wave.registerLdsRangeEvent(testInstruction(address), MemoryEventType::GLOBAL_TO_LDS, ranges,
-                                 /*elementBytes=*/4, obligations, c.eventOrder);
+                                 obligations, c.eventOrder);
     }
     PendingWaitCount wait;
     wait.add(amdgpu::WaitCounterType::TENSORCNT, 1);
@@ -1394,8 +1394,8 @@ TEST(RaceDetector, TensorDma_WaitedTransfersWithoutRangesDoNotAccumulate) {
                                                                MemoryOrderClass::TENSOR}};
   constexpr int kTransfers = 4096;
   for (int i = 0; i < kTransfers; ++i) {
-    wave.registerLdsRangeEvent(testInstruction(i), MemoryEventType::LDS_TO_GLOBAL, {},
-                               /*elementBytes=*/4, obligations, MemoryOrderClass::TENSOR);
+    wave.registerLdsRangeEvent(testInstruction(i), MemoryEventType::LDS_TO_GLOBAL, {}, obligations,
+                               MemoryOrderClass::TENSOR);
     PendingWaitCount wait;
     wait.add(amdgpu::WaitCounterType::TENSORCNT, 0);
     wave.dispatch(wait);
@@ -1760,6 +1760,15 @@ TEST(RaceDetector, TensorDma_RangeEdgesAreBytePrecise) {
   EXPECT_TRUE(b.hasLdsRace(15));
   b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/14, /*bytes=*/4);
   EXPECT_TRUE(b.hasLdsRace(14));
+}
+
+TEST(RaceDetector, TensorDma_RangeEndingMidElementTracksItsTailBytes) {
+  // A range can end mid-element, as when an element straddles the end of the
+  // wave's LDS allocation. Its trailing bytes are tracked, not rounded away.
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 6}});
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/4, /*bytes=*/2);
+  EXPECT_TRUE(b.hasLdsRace(4));
 }
 
 // ---- Exec mask ----

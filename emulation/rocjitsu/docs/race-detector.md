@@ -210,7 +210,10 @@ races. Some examples:
   store's source before `s_wait_tensorcnt` is reported; other waves also need an
   `s_barrier`. A load covers every element of its tile, including elements
   outside the tensor, which it zero-fills; padding bytes are excluded. A store
-  covers only the elements inside the tensor. Transfers from one wave complete
+  covers only the elements inside the tensor. Either way, only bytes inside the
+  wave's LDS allocation are tracked, because bytes past it are not transferred:
+  an i32 at offset 254 of a 256-byte allocation contributes only bytes 254 and
+  255. Transfers from one wave complete
   on `tensorcnt` in issue order (CDNA5 ISA 10.11.1), so a partial
   `s_wait_tensorcnt` retires the oldest. The ISA does not specify the relative
   timing of their LDS reads and writes, so as a conservative rule the detector
