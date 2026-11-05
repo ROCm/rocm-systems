@@ -24,6 +24,7 @@
 #include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/kfd/correlation_types.hpp"
 
 #include <gtest/gtest.h>
 
@@ -361,6 +362,146 @@ TEST(queue_interposition, doorbell_backpressure_waits_when_ring_full_k0)
     EXPECT_EQ(doorbell_value, 4);
     EXPECT_LE(state->next_submit_pos - real_rdid, state->ring_size);
     EXPECT_EQ(get_pkt(ring, 4, 3)->kernel_object, static_cast<uint64_t>(0xABCD));
+}
+
+namespace
+{
+constexpr uint16_t k_dispatch_header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+constexpr uint16_t k_retired_header  = HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE;
+
+uint64_t
+deadline_in(std::chrono::milliseconds budget)
+{
+    return kfd::steady_now_ns() + static_cast<uint64_t>(std::chrono::nanoseconds{budget}.count());
+}
+}  // namespace
+
+// The read index lags a finished burst (gfx1250 defers its write-back while the
+// queue idles), but the CP has reset every slot it retired: the drain must not
+// spend its budget waiting for a read index that will not move.
+TEST(queue_interposition, hw_drain_accepts_retired_slots_behind_stale_read_index)
+{
+    QueueState       state{};
+    alignas(64) char ring[64 * 64];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_rdid = 16;
+
+    state.ring_buf  = ring;
+    state.ring_size = 64;
+    state.ring_mask = 63;
+    state.real_rdid = &real_rdid;
+
+    for(uint64_t i = 16; i < 19; ++i)
+        get_pkt(ring, i, 63)->header = k_retired_header;
+
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_TRUE(wait_queue_hw_drained_locked(state, 19, deadline_in(std::chrono::seconds{10})));
+    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds{1});
+}
+
+TEST(queue_interposition, hw_drain_times_out_while_a_packet_is_in_flight)
+{
+    QueueState       state{};
+    alignas(64) char ring[64 * 64];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_rdid = 0;
+
+    state.ring_buf  = ring;
+    state.ring_size = 64;
+    state.ring_mask = 63;
+    state.real_rdid = &real_rdid;
+
+    // Older packets retired, the newest still running; a zero-filled header
+    // (type VENDOR_SPECIFIC) is not retired either.
+    get_pkt(ring, 0, 63)->header = k_retired_header;
+    get_pkt(ring, 1, 63)->header = k_retired_header;
+    get_pkt(ring, 2, 63)->header = k_dispatch_header;
+    EXPECT_FALSE(
+        wait_queue_hw_drained_locked(state, 3, deadline_in(std::chrono::milliseconds{20})));
+
+    get_pkt(ring, 2, 63)->header = k_retired_header;
+    get_pkt(ring, 0, 63)->header = 0;
+    EXPECT_FALSE(
+        wait_queue_hw_drained_locked(state, 3, deadline_in(std::chrono::milliseconds{20})));
+}
+
+TEST(queue_interposition, hw_drain_completes_when_the_last_packet_retires)
+{
+    QueueState       state{};
+    alignas(64) char ring[64 * 64];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_rdid = 0;
+
+    state.ring_buf  = ring;
+    state.ring_size = 64;
+    state.ring_mask = 63;
+    state.real_rdid = &real_rdid;
+
+    get_pkt(ring, 0, 63)->header = k_retired_header;
+    get_pkt(ring, 1, 63)->header = k_dispatch_header;
+
+    auto* last_hdr = &get_pkt(ring, 1, 63)->header;
+    auto  retire   = std::async(std::launch::async, [last_hdr]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        __atomic_store_n(last_hdr, k_retired_header, __ATOMIC_RELEASE);
+    });
+
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_TRUE(wait_queue_hw_drained_locked(state, 2, deadline_in(std::chrono::seconds{10})));
+    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds{1});
+    retire.get();
+}
+
+// A read index that has caught up is sufficient on its own: slots it has passed
+// may already hold the producer's next packets.
+TEST(queue_interposition, hw_drain_trusts_a_caught_up_read_index)
+{
+    QueueState       state{};
+    alignas(64) char ring[64 * 64];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_rdid = 3;
+
+    state.ring_buf  = ring;
+    state.ring_size = 64;
+    state.ring_mask = 63;
+    state.real_rdid = &real_rdid;
+
+    for(uint64_t i = 0; i < 3; ++i)
+        get_pkt(ring, i, 63)->header = k_dispatch_header;
+
+    EXPECT_TRUE(wait_queue_hw_drained_locked(state, 3, deadline_in(std::chrono::milliseconds{20})));
+}
+
+// The window [read index, P) wraps the ring: only the slots it covers count, so a
+// live packet in a slot outside it does not hold the drain.
+TEST(queue_interposition, hw_drain_checks_the_window_across_ring_wrap)
+{
+    QueueState       state{};
+    alignas(64) char ring[64 * 4];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_rdid = 6;
+
+    state.ring_buf  = ring;
+    state.ring_size = 4;
+    state.ring_mask = 3;
+    state.real_rdid = &real_rdid;
+
+    // indices 6, 7, 8 -> slots 2, 3, 0; slot 1 holds the next, unpublished packet
+    get_pkt(ring, 6, 3)->header = k_retired_header;
+    get_pkt(ring, 7, 3)->header = k_retired_header;
+    get_pkt(ring, 8, 3)->header = k_retired_header;
+    get_pkt(ring, 9, 3)->header = k_dispatch_header;
+    EXPECT_TRUE(wait_queue_hw_drained_locked(state, 9, deadline_in(std::chrono::milliseconds{20})));
+
+    // a window longer than the ring cannot be decided from headers
+    real_rdid = 4;
+    EXPECT_FALSE(
+        wait_queue_hw_drained_locked(state, 9, deadline_in(std::chrono::milliseconds{20})));
+
+    real_rdid                   = 6;
+    get_pkt(ring, 8, 3)->header = k_dispatch_header;
+    EXPECT_FALSE(
+        wait_queue_hw_drained_locked(state, 9, deadline_in(std::chrono::milliseconds{20})));
 }
 
 TEST(queue_interposition, doorbell_out_of_order_does_not_hang)
