@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 // AVX2 FP64 arithmetic with split-word VGPR operands and guest FP policies.
+// Also implements legacy, number-preferring and NaN-propagating min/max selection.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
 #include "common/x86_64/alu_x86_64_v3.h"
 #include "fp/fp64_impl.h"
+#include "fp/x86_64/minmax_x86_64_v3.h"
 #include "rj_arith/rj_arith.h"
 
 #include <immintrin.h>
@@ -23,17 +25,7 @@ __m256d load(const uint32_t *const *v, int lane, __m256i keep, __m256i flip) {
   return _mm256_castsi256_pd(_mm256_xor_si256(_mm256_and_si256(bits, keep), flip));
 }
 
-// Guest denormal handling is a value transform, independent of host DAZ/FTZ.
-__m256d flush_denorm(__m256d value) {
-  auto bits = _mm256_castpd_si256(value);
-  auto magnitude = _mm256_and_si256(bits, _mm256_set1_epi64x(INT64_MAX));
-  auto tiny = _mm256_cmpgt_epi64(_mm256_set1_epi64x(0x0010000000000000LL), magnitude);
-  auto sign = _mm256_and_si256(bits, _mm256_set1_epi64x(INT64_MIN));
-  return _mm256_castsi256_pd(_mm256_blendv_epi8(bits, sign, tiny));
-}
-
-// Evaluate FP64 arithmetic for the selected lanes. Requires validated controls; preserve
-// inactive destination lanes.
+// Execute with already-validated controls, preserving inactive destination lanes.
 template <Fp64 Op>
 void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
          const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
@@ -53,19 +45,58 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
       y = load(b, lane, kb, nb);
     }
     if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
-      x = flush_denorm(x);
-      y = flush_denorm(y);
+      x = flush_denorm_f64(x);
+      y = flush_denorm_f64(y);
     }
     __m256d value;
-
+    if constexpr (Op == Fp64::Add) {
+      value = _mm256_add_pd(x, y);
+    }
+    if constexpr (Op == Fp64::Mul) {
+      value = _mm256_mul_pd(x, y);
+    }
     if constexpr (Op == Fp64::Fma) {
       auto z = load(c, lane, kc, nc);
       if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
-        z = flush_denorm(z);
+        z = flush_denorm_f64(z);
       }
       value = _mm256_fmadd_pd(x, y, z);
     }
-
+    if constexpr (Op == Fp64::MinLegacy || Op == Fp64::MaxLegacy) {
+      value = minmax_rdna3<Op == Fp64::MaxLegacy>(x, y, flags & RJ_ARITH_FP_IEEE_MODE);
+    }
+    if constexpr (Op == Fp64::MinNum) {
+      value = minmax<false, false>(x, y);
+    }
+    if constexpr (Op == Fp64::MaxNum) {
+      value = minmax<true, false>(x, y);
+    }
+    if constexpr (Op == Fp64::Minimum) {
+      value = minmax<false, true>(x, y);
+    }
+    if constexpr (Op == Fp64::Maximum) {
+      value = minmax<true, true>(x, y);
+    }
+    if constexpr (Op == Fp64::FrexpMant) {
+      auto original = _mm256_castpd_si256(x);
+      auto magnitude = _mm256_and_si256(original, _mm256_set1_epi64x(INT64_MAX));
+      auto subnormal =
+          _mm256_cmpgt_epi64(_mm256_set1_epi64x(INT64_C(0x0010000000000000)), magnitude);
+      auto normalized = _mm256_blendv_pd(x, _mm256_mul_pd(x, _mm256_set1_pd(0x1p54)),
+                                         _mm256_castsi256_pd(subnormal));
+      auto mantissa =
+          _mm256_or_si256(_mm256_and_si256(_mm256_castpd_si256(normalized),
+                                           _mm256_set1_epi64x(int64_t(0x800fffffffffffffULL))),
+                          _mm256_set1_epi64x(INT64_C(0x3fe0000000000000)));
+      auto special = _mm256_or_si256(
+          _mm256_cmpeq_epi64(magnitude, _mm256_setzero_si256()),
+          _mm256_cmpgt_epi64(magnitude, _mm256_set1_epi64x(INT64_C(0x7ff0000000000000) - 1)));
+      // Quiet NaNs while preserving their sign and payload, as the scalar path does.
+      auto nan = _mm256_cmpgt_epi64(magnitude, _mm256_set1_epi64x(0x7ff0000000000000LL));
+      original = _mm256_or_si256(original,
+                                 _mm256_and_si256(nan, _mm256_set1_epi64x(0x0008000000000000LL)));
+      value = _mm256_castsi256_pd(_mm256_blendv_epi8(mantissa, original, special));
+    }
     if constexpr (Op == Fp64::Trunc) {
       value = _mm256_round_pd(x, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     }
@@ -89,12 +120,20 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
     }
     if constexpr (Op == Fp64::Fract) {
       value = _mm256_sub_pd(x, _mm256_floor_pd(x));
+      value = _mm256_blendv_pd(value, _mm256_setzero_pd(),
+                               _mm256_cmp_pd(value, _mm256_setzero_pd(), _CMP_EQ_OQ));
       auto limit = _mm256_castsi256_pd(_mm256_set1_epi64x(INT64_C(0x3fefffffffffffff)));
       value = _mm256_blendv_pd(value, limit, _mm256_cmp_pd(value, limit, _CMP_GT_OQ));
     }
     if (mode & RJ_ARITH_ALU_OMOD_MASK) {
       value = prepare_omod_f64(value, mode);
-      value = _mm256_mul_pd(value, scale);
+      if constexpr (rocjitsu::arith::is_selection(Op) || Op == Fp64::Trunc || Op == Fp64::Ceil ||
+                    Op == Fp64::Rndne || Op == Fp64::Floor || Op == Fp64::Fract ||
+                    Op == Fp64::FrexpMant) {
+        value = selection_omod_round(value, _mm256_mul_pd(value, scale), flags);
+      } else {
+        value = _mm256_mul_pd(value, scale);
+      }
     }
     if (mode & RJ_ARITH_ALU_CLAMP) {
       auto clamped = _mm256_min_pd(_mm256_max_pd(value, _mm256_setzero_pd()), _mm256_set1_pd(1));
@@ -103,8 +142,10 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
       }
       value = clamped;
     }
-    if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
-      value = flush_denorm(value);
+    // Selection preserves a selected subnormal; arithmetic/unary outputs flush.
+    constexpr bool selection = rocjitsu::arith::is_selection(Op);
+    if (!selection && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
+      value = flush_denorm_f64(value);
     }
 
     // Gather low words and high words into separate 128-bit halves.
@@ -128,12 +169,13 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
 
 } // namespace
 
-// Evaluate FP64 arithmetic. Preserve destination lanes outside exec_mask.
+// Evaluate FP64 arithmetic or selection. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
 void fp64_x86_64_v3(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
                     const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   switch (op) {
-
+  case Fp64::FrexpMant:
+    return run<Fp64::FrexpMant>(flags, exec_mask, mode, d, a, b, c);
   case Fp64::Trunc:
     return run<Fp64::Trunc>(flags, exec_mask, mode, d, a, b, c);
   case Fp64::Ceil:
@@ -150,7 +192,22 @@ void fp64_x86_64_v3(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t mode, 
     return run<Fp64::Rcp>(flags, exec_mask, mode, d, a, b, c);
   case Fp64::Rsq:
     return run<Fp64::Rsq>(flags, exec_mask, mode, d, a, b, c);
-
+  case Fp64::MinLegacy:
+    return run<Fp64::MinLegacy>(flags, exec_mask, mode, d, a, b, c);
+  case Fp64::MaxLegacy:
+    return run<Fp64::MaxLegacy>(flags, exec_mask, mode, d, a, b, c);
+  case Fp64::MinNum:
+    return run<Fp64::MinNum>(flags, exec_mask, mode, d, a, b, c);
+  case Fp64::MaxNum:
+    return run<Fp64::MaxNum>(flags, exec_mask, mode, d, a, b, c);
+  case Fp64::Minimum:
+    return run<Fp64::Minimum>(flags, exec_mask, mode, d, a, b, c);
+  case Fp64::Maximum:
+    return run<Fp64::Maximum>(flags, exec_mask, mode, d, a, b, c);
+  case Fp64::Add:
+    return run<Fp64::Add>(flags, exec_mask, mode, d, a, b, c);
+  case Fp64::Mul:
+    return run<Fp64::Mul>(flags, exec_mask, mode, d, a, b, c);
   case Fp64::Fma:
     return run<Fp64::Fma>(flags, exec_mask, mode, d, a, b, c);
   }

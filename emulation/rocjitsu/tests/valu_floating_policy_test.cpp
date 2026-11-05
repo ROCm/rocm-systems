@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "instruction_failure_test_util.h"
+#include "restore_rounding.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
@@ -108,6 +110,8 @@ public:
     return compute_unit_->read_sgpr(base + 6);
   }
 
+  uint32_t destination() const { return compute_unit_->read_vgpr(base_ + 6, 0); }
+
 private:
   template <size_t N> util::Result execute(const std::array<uint32_t, N> &words) {
     std::array<uint32_t, 4> padded{};
@@ -127,8 +131,20 @@ private:
 };
 TEST(ValuFloatingPolicy, RejectsInvalidFixtureInstruction) {
   InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
-  const std::array<uint32_t, 4> invalid_words{0xffffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu};
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  const std::array<uint32_t, 1> invalid_words{test::kUndecodableInstruction};
   EXPECT_TRUE(machine.run(invalid_words, 0).failed());
+}
+
+TEST(ValuFloatingPolicy, RejectsFailedFixtureExecution) {
+  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_RDNA4, 256, 64);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  // VOPD instructions decode successfully but require wave32.
+  const std::array<uint32_t, 2> words{0xc9080300u, 0x06060702u};
+  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_FALSE(decoder->decode(words.data()).failed());
+  EXPECT_TRUE(machine.run(words, 0).failed());
+  EXPECT_EQ(machine.destination(), 0xfacebeefu);
 }
 
 void witness(const char *name, rj_code_arch_t arch, uint32_t got, uint32_t expected) {
@@ -609,22 +625,18 @@ TEST(ValuFloatingPolicy, PackedF32Mode) {
     // src1 is v1:v2; testing the low result makes the high component immaterial.
     const std::array<uint32_t, 2> words =
         packed_words(arch, arch == ROCJITSU_CODE_ARCH_CDNA5 ? 41 : 50);
-    {
-      util::FailureOr<uint32_t> result = machine.run(words, 1, 1, 0, 0);
-      ASSERT_TRUE(result.succeeded());
-      witness("packed_f32_denorm", arch, result.value(), 0);
-    }
-    {
-      util::FailureOr<uint32_t> result = machine.run(words, 0x3f800000, 0x33800000, 0, 0xf1);
-      ASSERT_TRUE(result.succeeded());
-      witness("packed_f32_round_up", arch, result.value(), 0x3f800001);
-    }
-    const int saved = std::fegetround();
+    util::FailureOr<uint32_t> denorm = machine.run(words, 1, 1, 0, 0);
+    ASSERT_TRUE(denorm.succeeded());
+    witness("packed_f32_denorm", arch, denorm.value(), 0);
+    util::FailureOr<uint32_t> round_up = machine.run(words, 0x3f800000, 0x33800000, 0, 0xf1);
+    ASSERT_TRUE(round_up.succeeded());
+    witness("packed_f32_round_up", arch, round_up.value(), 0x3f800001);
+    const rocjitsu::test::RestoreRounding restore_rounding;
     std::fesetround(FE_UPWARD);
     util::FailureOr<uint32_t> maybe_got = machine.run(words, 0x3f800000, 0x33800000, 0, 0xf0);
     ASSERT_TRUE(maybe_got.succeeded());
     const uint32_t got = maybe_got.value();
-    std::fesetround(saved);
+    std::fesetround(restore_rounding.saved());
     witness("packed_f32_host_round", arch, got, 0x3f800000);
   }
 }
@@ -634,25 +646,21 @@ TEST(ValuFloatingPolicy, PackedF16Clamp) {
     for (uint16_t opcode :
          {cdna5::kVPkFmaF16Vop3p, cdna5::kVPkAddF16Vop3p, cdna5::kVPkMulF16Vop3p}) {
       const std::array<uint32_t, 2> words = packed_words(arch, opcode, 1);
-      {
-        util::FailureOr<uint32_t> result = machine.run(words, 0xc0004000, 0x40004000, 0);
-        ASSERT_TRUE(result.succeeded());
-        witness("packed_f16_clamp", arch, result.value(), 0x00003c00);
-      }
+      util::FailureOr<uint32_t> result = machine.run(words, 0xc0004000, 0x40004000, 0);
+      ASSERT_TRUE(result.succeeded());
+      witness("packed_f16_clamp", arch, result.value(), 0x00003c00);
     }
     if (arch != ROCJITSU_CODE_ARCH_CDNA5 && arch != ROCJITSU_CODE_ARCH_RDNA4)
       continue;
     for (uint16_t opcode : {cdna5::kVPkMinNumF16Vop3p, cdna5::kVPkMaxNumF16Vop3p,
                             cdna5::kVPkMinimumF16Vop3p, cdna5::kVPkMaximumF16Vop3p}) {
       const std::array<uint32_t, 2> words = packed_words(arch, opcode, 1);
-      {
-        util::FailureOr<uint32_t> result = machine.run(words, 0xc0004000, 0x40004000, 0);
-        ASSERT_TRUE(result.succeeded());
-        witness("packed_f16_minmax_clamp", arch, result.value(),
-                opcode == cdna5::kVPkMaxNumF16Vop3p || opcode == cdna5::kVPkMaximumF16Vop3p
-                    ? 0x3c003c00
-                    : 0x00003c00);
-      }
+      util::FailureOr<uint32_t> result = machine.run(words, 0xc0004000, 0x40004000, 0);
+      ASSERT_TRUE(result.succeeded());
+      witness("packed_f16_minmax_clamp", arch, result.value(),
+              opcode == cdna5::kVPkMaxNumF16Vop3p || opcode == cdna5::kVPkMaximumF16Vop3p
+                  ? 0x3c003c00
+                  : 0x00003c00);
     }
   }
 }
@@ -660,16 +668,12 @@ TEST(ValuFloatingPolicy, PackedF16Mode) {
   for (rj_code_arch_t arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
     const std::array<uint32_t, 2> words = packed_words(arch, cdna5::kVPkAddF16Vop3p);
-    {
-      util::FailureOr<uint32_t> result = machine.run(words, 0x00010001, 0x00010001, 0, 0);
-      ASSERT_TRUE(result.succeeded());
-      witness("packed_f16_denorm", arch, result.value(), 0);
-    }
-    {
-      util::FailureOr<uint32_t> result = machine.run(words, 0x3c003c00, 0x10001000, 0, 0xf4);
-      ASSERT_TRUE(result.succeeded());
-      witness("packed_f16_round_up", arch, result.value(), 0x3c013c01);
-    }
+    util::FailureOr<uint32_t> denorm = machine.run(words, 0x00010001, 0x00010001, 0, 0);
+    ASSERT_TRUE(denorm.succeeded());
+    witness("packed_f16_denorm", arch, denorm.value(), 0);
+    util::FailureOr<uint32_t> round_up = machine.run(words, 0x3c003c00, 0x10001000, 0, 0xf4);
+    ASSERT_TRUE(round_up.succeeded());
+    witness("packed_f16_round_up", arch, round_up.value(), 0x3c013c01);
     const std::array<uint32_t, 2> fma = packed_words(arch, cdna5::kVPkFmaF16Vop3p);
     {
       util::FailureOr<uint32_t> result = machine.run(fma, 0x00010001, 0x3c003c00, 0, 0);
@@ -689,7 +693,7 @@ TEST(ValuFloatingPolicy, PackedF16FmaZeroSignUsesGuestRounding) {
     const std::array<uint32_t, 2> words = packed_words(arch, cdna5::kVPkFmaF16Vop3p);
     for (uint32_t guest_round = 0; guest_round < 4; ++guest_round) {
       for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-        const int saved_round = std::fegetround();
+        const rocjitsu::test::RestoreRounding restore_rounding;
         ASSERT_EQ(std::fesetround(host_round), 0);
         const uint32_t mode = 0xf0u | (guest_round << 2);
         util::FailureOr<uint32_t> maybe_cancellation =
@@ -705,7 +709,7 @@ TEST(ValuFloatingPolicy, PackedF16FmaZeroSignUsesGuestRounding) {
         ASSERT_TRUE(maybe_negative_zeros.succeeded());
         const uint32_t negative_zeros = maybe_negative_zeros.value();
         const int restored_round = std::fegetround();
-        std::fesetround(saved_round);
+        std::fesetround(restore_rounding.saved());
         SCOPED_TRACE(arch);
         SCOPED_TRACE(guest_round);
         SCOPED_TRACE(host_round);
@@ -718,23 +722,29 @@ TEST(ValuFloatingPolicy, PackedF16FmaZeroSignUsesGuestRounding) {
   }
 }
 
-TEST(ValuFloatingPolicy, F16Dot2HostIndependence) {
+TEST(ValuFloatingPolicy, F16Dot2HostContract) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
     InstructionPolicyMachine machine(arch);
     const std::array<uint32_t, 2> words = rdna4::build_vop3(
         rdna4::kVDot2F16F16Vop3, {.vdst = 6, .src0 = 256, .src1 = 257, .src2 = 258});
-    const int saved = std::fegetround();
+    const rocjitsu::test::RestoreRounding restore_rounding;
     std::fesetround(FE_TONEAREST);
     util::FailureOr<uint32_t> maybe_nearest = machine.run(words, 0x10003c00, 0x3c003c00, 0x0001);
     ASSERT_TRUE(maybe_nearest.succeeded());
     const uint32_t nearest = maybe_nearest.value();
-    std::fesetround(FE_UPWARD);
-    util::FailureOr<uint32_t> maybe_upward = machine.run(words, 0x10003c00, 0x3c003c00, 0x0001);
-    ASSERT_TRUE(maybe_upward.succeeded());
-    const uint32_t upward = maybe_upward.value();
-    std::fesetround(saved);
-    witness("dot2_f16_host_independence", arch, upward, nearest);
+    // Compatibility rounds 1 + 2^-11 + 2^-24 once, just above the FP16
+    // halfway point. Migrated paths require default host controls.
+    witness("dot2_f16_default_host", arch, nearest & 0xffffu, 0x3c01u);
+    EXPECT_EQ(std::fegetround(), FE_TONEAREST);
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3_5) {
+      // This architecture still uses the legacy builtin implementation.
+      std::fesetround(FE_UPWARD);
+      util::FailureOr<uint32_t> maybe_upward = machine.run(words, 0x10003c00, 0x3c003c00, 0x0001);
+      ASSERT_TRUE(maybe_upward.succeeded());
+      witness("dot2_f16_host_independence", arch, maybe_upward.value(), nearest);
+    }
+    std::fesetround(restore_rounding.saved());
   }
 }
 TEST(ValuFloatingPolicy, F32UnaryDenormControls) {

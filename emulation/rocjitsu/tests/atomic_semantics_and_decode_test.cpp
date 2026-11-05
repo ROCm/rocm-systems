@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "decode_test_util.h"
+#include "instruction_failure_test_util.h"
+#include "restore_rounding.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_rdna3_5_to_rdna4.h"
@@ -92,7 +94,8 @@ public:
     if (memory_op) {
       amdgpu::L1VectorCache l1(&cache);
       amdgpu::GlobalMemPipeline pipeline(&l1, &cache);
-      pipeline.issue(instruction.release(), *wave);
+      if (pipeline.issue(instruction.release(), *wave) != amdgpu::VmAccessOutcome::Complete)
+        return util::Result::failure();
       l1.flush_all();
       cache.flush_all();
     }
@@ -125,8 +128,34 @@ public:
 };
 TEST(AtomicSemanticsAndDecode, RejectsInvalidFixtureInstruction) {
   InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
-  const std::array<uint32_t, 4> invalid_words{0xffffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu};
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  const std::array<uint32_t, 1> invalid_words{test::kUndecodableInstruction};
   EXPECT_TRUE(machine.run(invalid_words, 0).failed());
+}
+
+TEST(AtomicSemanticsAndDecode, RejectsFailedFixtureExecutionBeforeMemoryIssue) {
+  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_RDNA2);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  const uint32_t scalar_base = machine.wave->sgpr_alloc().base;
+  machine.cu->write_sgpr(scalar_base + 4, 0x1000);
+  machine.cu->write_sgpr(scalar_base + 5, 4u << 16);
+  machine.cu->write_sgpr(scalar_base + 6, 4);
+  // Format 34 is reserved, so execution must fail before preparing a memory request.
+  machine.cu->write_sgpr(scalar_base + 7, 4u | (5u << 3) | (6u << 6) | (7u << 9) | (34u << 12));
+  // buffer_load_format_xyzw v[6:9], off, s[4:7], 0.
+  const std::array<uint32_t, 2> words{0xe00c0000u, 0x80010600u};
+  ASSERT_FALSE(machine.decoder->decode(words.data()).failed());
+  EXPECT_TRUE(machine.run(words, 0, 0, 0, 0xf0, true).failed());
+  EXPECT_EQ(machine.cu->read_vgpr(machine.base + 6, 0), 0xfacebeefu);
+}
+
+TEST(AtomicSemanticsAndDecode, RejectsFailedFixtureMemoryIssue) {
+  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  machine.wave->set_address_space({.slot = 0, .generation = 1});
+  const std::array<uint32_t, 2> words = rdna3::build_flat(40, {.seg = 2, .saddr = 4, .vdst = 6});
+  EXPECT_TRUE(machine.run(words, 0, 0, 0, 0xf0, true).failed());
+  EXPECT_EQ(machine.cu->read_vgpr(machine.base + 6, 0), 0xfacebeefu);
 }
 
 void witness(const char *name, rj_code_arch_t arch, uint32_t got, uint32_t expected) {
@@ -394,14 +423,14 @@ TEST(AtomicSemanticsAndDecode, PackedAtomicsAcrossOlderTargets) {
       ASSERT_TRUE(result.succeeded());
       EXPECT_EQ(result.value(), 0x00020002u);
     }
-    const int saved = std::fegetround();
+    const rocjitsu::test::RestoreRounding restore_rounding;
     std::fesetround(FE_UPWARD);
     {
       util::FailureOr<uint32_t> result = machine.global(buffer, 0x3c003c00, 0x10001000, true);
       ASSERT_TRUE(result.succeeded());
       EXPECT_EQ(result.value(), 0x3c003c00u);
     }
-    std::fesetround(saved);
+    std::fesetround(restore_rounding.saved());
     if (arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2)
       continue;
     for (bool bf16 : {false, true}) {

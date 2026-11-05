@@ -20,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -34,6 +35,14 @@ protected:
   rocjitsu::GpuDiscoveryTopology gfx1250_topology() const { return generation_->topology_defaults; }
   rocjitsu::IpDiscoverySpec gfx1250_spec() const {
     return generation_->discovery_factory(generation_->topology_defaults);
+  }
+
+  void build_table(std::vector<std::byte> &table) const { build_table(table, gfx1250_spec()); }
+
+  void build_table(std::vector<std::byte> &table, const rocjitsu::IpDiscoverySpec &spec) const {
+    rocjitsu::IpDiscoveryBuild built = rocjitsu::build_ip_discovery_table(spec);
+    ASSERT_TRUE(built.ok()) << built.problem;
+    table = std::move(built.table);
   }
 
 private:
@@ -103,18 +112,16 @@ void reseal_binary(std::vector<std::byte> &table) {
 }
 
 TEST_F(IpDiscoveryTable, BuildsATableTheDriverWouldAccept) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  const std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
 
   const rocjitsu::IpDiscoveryValidation checked = rocjitsu::validate_ip_discovery_table(table);
   EXPECT_TRUE(checked.valid) << checked.problem;
 }
 
 TEST_F(IpDiscoveryTable, PublishesConfiguredGraphicsTopology) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  const std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   const std::size_t graphics = read16(table, 12 + 8);
 
   ASSERT_NE(graphics, 0u);
@@ -241,9 +248,8 @@ TEST_F(IpDiscoveryProfile, PublishesEverySegmentTheDriverIndexesInto) {
 }
 
 TEST_F(IpDiscoveryTable, StartsWithTheSignatureTheDriverLooksFor) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  const std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
 
   ASSERT_GE(table.size(), 4u);
   const auto byte_at = [&table](std::size_t index) {
@@ -260,9 +266,8 @@ TEST_F(IpDiscoveryTable, StartsWithTheSignatureTheDriverLooksFor) {
 // The driver checksums the binary and the block list separately, so a table
 // corrupted anywhere has to be caught here rather than in a guest's dmesg.
 TEST_F(IpDiscoveryTable, RejectsACorruptedBlockList) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   ASSERT_TRUE(rocjitsu::validate_ip_discovery_table(table).valid);
 
   table[table.size() - 1] = static_cast<std::byte>(std::to_integer<uint8_t>(table.back()) ^ 0xff);
@@ -271,9 +276,8 @@ TEST_F(IpDiscoveryTable, RejectsACorruptedBlockList) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsATableWithTheWrongSignature) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   table[0] = std::byte{0};
 
   const rocjitsu::IpDiscoveryValidation checked = rocjitsu::validate_ip_discovery_table(table);
@@ -283,9 +287,8 @@ TEST_F(IpDiscoveryTable, RejectsATableWithTheWrongSignature) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsATruncatedTable) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   table.resize(table.size() - 8);
 
   EXPECT_FALSE(rocjitsu::validate_ip_discovery_table(table).valid);
@@ -293,7 +296,7 @@ TEST_F(IpDiscoveryTable, RejectsATruncatedTable) {
 
 // Every length inside the table is the thing under test, so none of them may
 // bound a read of it. Each of these once walked off the end of the buffer.
-TEST_F(IpDiscoveryTable, RejectsInputTooShortToHoldAHeader) {
+TEST(IpDiscoveryValidation, RejectsInputTooShortToHoldAHeader) {
   for (std::size_t size = 0; size < 60; ++size) {
     const std::vector<std::byte> table(size, std::byte{0});
     EXPECT_FALSE(rocjitsu::validate_ip_discovery_table(table).valid) << "at " << size << " bytes";
@@ -301,9 +304,8 @@ TEST_F(IpDiscoveryTable, RejectsInputTooShortToHoldAHeader) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsABlockListShorterThanItsOwnHeader) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   // Point the block list one byte before the end, so the range check on its
   // recorded size passes while its fixed header does not fit.
   write16(table, 12, static_cast<uint16_t>(table.size() - 1));
@@ -314,9 +316,8 @@ TEST_F(IpDiscoveryTable, RejectsABlockListShorterThanItsOwnHeader) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsMoreDiesThanTheHeaderHasRoomFor) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write16(table, ip_table_offset(table) + 12, 17);
   reseal_block_list(table);
   reseal_binary(table);
@@ -327,9 +328,8 @@ TEST_F(IpDiscoveryTable, RejectsMoreDiesThanTheHeaderHasRoomFor) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsADiePointedPastTheEnd) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write16(table, ip_table_offset(table) + 14 + 2, static_cast<uint16_t>(table.size() - 2));
   reseal_block_list(table);
   reseal_binary(table);
@@ -341,9 +341,8 @@ TEST_F(IpDiscoveryTable, RejectsADiePointedPastTheEnd) {
 // the binary still lands inside the table, so only reading what it points at
 // catches it.
 TEST_F(IpDiscoveryTable, RejectsADieOffsetMeasuredFromTheWrongPlace) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   const std::size_t ip_table = ip_table_offset(table);
   const uint16_t correct = read16(table, ip_table + 14 + 2);
   write16(table, ip_table + 14 + 2, static_cast<uint16_t>(correct - ip_table));
@@ -354,9 +353,8 @@ TEST_F(IpDiscoveryTable, RejectsADieOffsetMeasuredFromTheWrongPlace) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsDisagreeingEmbeddedAndOuterSizes) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   const std::size_t ip_table = ip_table_offset(table);
   write16(table, ip_table + 6, static_cast<uint16_t>(read16(table, ip_table + 6) - 8));
   reseal_binary(table);
@@ -367,9 +365,8 @@ TEST_F(IpDiscoveryTable, RejectsDisagreeingEmbeddedAndOuterSizes) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsBlockRecordsThatRunPastTheEnd) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   const std::size_t ip_table = ip_table_offset(table);
   const uint16_t die = read16(table, ip_table + 14 + 2);
   // Claim far more blocks than the records behind the die can supply.
@@ -381,9 +378,8 @@ TEST_F(IpDiscoveryTable, RejectsBlockRecordsThatRunPastTheEnd) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsAGraphicsBlockWithNoTopologyTable) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write16(table, 12 + 8, 0);
   write16(table, 12 + 8 + 2, 0);
   write16(table, 12 + 8 + 4, 0);
@@ -395,9 +391,8 @@ TEST_F(IpDiscoveryTable, RejectsAGraphicsBlockWithNoTopologyTable) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsAGraphicsTableWithTheWrongIdentifier) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write32(table, graphics_table_offset(table), 0);
   reseal_graphics_table(table);
   reseal_binary(table);
@@ -408,9 +403,8 @@ TEST_F(IpDiscoveryTable, RejectsAGraphicsTableWithTheWrongIdentifier) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsAGraphicsTableWithTheWrongEmbeddedSize) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write32(table, graphics_table_offset(table) + 8, 12);
   reseal_graphics_table(table);
   reseal_binary(table);
@@ -421,9 +415,8 @@ TEST_F(IpDiscoveryTable, RejectsAGraphicsTableWithTheWrongEmbeddedSize) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsAGraphicsTableWithTheWrongChecksum) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   table[graphics_table_offset(table) + 12] ^= std::byte{1};
   reseal_binary(table);
 
@@ -433,9 +426,8 @@ TEST_F(IpDiscoveryTable, RejectsAGraphicsTableWithTheWrongChecksum) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsAnUnsupportedGraphicsTableVersion) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write16(table, graphics_table_offset(table) + 4, 3);
   reseal_graphics_table(table);
   reseal_binary(table);
@@ -446,9 +438,8 @@ TEST_F(IpDiscoveryTable, RejectsAnUnsupportedGraphicsTableVersion) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsASelfConsistentShortGraphicsTable) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   constexpr uint16_t kShortSize = 12;
   write16(table, 12 + 8 + 4, kShortSize);
   write32(table, graphics_table_offset(table) + 8, kShortSize);
@@ -461,9 +452,8 @@ TEST_F(IpDiscoveryTable, RejectsASelfConsistentShortGraphicsTable) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsAZeroGraphicsGeometryField) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write32(table, graphics_table_offset(table) + 12, 0);
   reseal_graphics_table(table);
   reseal_binary(table);
@@ -474,9 +464,8 @@ TEST_F(IpDiscoveryTable, RejectsAZeroGraphicsGeometryField) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsIndivisibleGraphicsGeometry) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write32(table, graphics_table_offset(table) + 24, 3);
   reseal_graphics_table(table);
   reseal_binary(table);
@@ -487,9 +476,8 @@ TEST_F(IpDiscoveryTable, RejectsIndivisibleGraphicsGeometry) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsIndivisibleShaderComplexGeometry) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write32(table, graphics_table_offset(table) + 72, 3);
   reseal_graphics_table(table);
   reseal_binary(table);
@@ -500,9 +488,8 @@ TEST_F(IpDiscoveryTable, RejectsIndivisibleShaderComplexGeometry) {
 }
 
 TEST_F(IpDiscoveryTable, RejectsACorruptedHarvestTable) {
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(gfx1250_spec());
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   const uint16_t harvest = read16(table, 12 + 2 * 8);
   ASSERT_NE(harvest, 0u);
   table[harvest] = static_cast<std::byte>(std::to_integer<uint8_t>(table[harvest]) ^ 0xff);
@@ -521,9 +508,8 @@ TEST_F(IpDiscoveryTable, RejectsACorruptedHarvestTable) {
 // read zero of them and refused the device with no diagnostic.
 TEST_F(IpDiscoveryTable, PutsItsDieWhereTheDriverLooksForIt) {
   const rocjitsu::IpDiscoverySpec spec = gfx1250_spec();
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(spec);
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  const std::vector<std::byte> table = built_table.table;
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table, spec));
 
   const unsigned ip_table = read16(table, 12);           // table_list[0].offset
   const unsigned die = read16(table, ip_table + 14 + 2); // die_info[0].die_offset
@@ -585,9 +571,9 @@ TEST_F(IpDiscoveryProfile, AdvertisesTheRequestedGraphicsInstances) {
   }
 
   EXPECT_EQ(graphics, 4);
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(spec);
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  EXPECT_TRUE(rocjitsu::validate_ip_discovery_table(built_table.table).valid);
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table, spec));
+  EXPECT_TRUE(rocjitsu::validate_ip_discovery_table(table).valid);
 }
 
 TEST_F(IpDiscoveryProfile, AdvertisesNoMediaBlocks) {
@@ -596,9 +582,9 @@ TEST_F(IpDiscoveryProfile, AdvertisesNoMediaBlocks) {
   for (const rocjitsu::IpBlock &block : spec.blocks) {
     EXPECT_NE(static_cast<uint16_t>(block.hardware_id), 12u);
   }
-  const rocjitsu::IpDiscoveryBuild built_table = rocjitsu::build_ip_discovery_table(spec);
-  ASSERT_TRUE(built_table.ok()) << built_table.problem;
-  EXPECT_TRUE(rocjitsu::validate_ip_discovery_table(built_table.table).valid);
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table, spec));
+  EXPECT_TRUE(rocjitsu::validate_ip_discovery_table(table).valid);
 }
 
 } // namespace
