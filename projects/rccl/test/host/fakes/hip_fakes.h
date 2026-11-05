@@ -244,6 +244,7 @@ extern std::function<hipError_t(hipEvent_t /*event*/, hipStream_t /*stream*/)>
 extern std::function<hipError_t(hipStream_t /*stream*/, hipEvent_t /*event*/,
                                 unsigned int /*flags*/)>
     g_hipStreamWaitEvent;
+extern std::function<hipError_t(hipEvent_t /*event*/)> g_hipEventSynchronize;
 
 extern std::function<hipError_t(hipStream_t /*stream*/, unsigned int /*count*/,
                                 hipStreamBatchMemOpParams* /*params*/, unsigned int /*flags*/)>
