@@ -23,10 +23,10 @@
 #include <cstdlib> // getenv (grid-shape tuning overrides)
 #include <utility>
 
-// Runtime-adjustable LL128 AllToAll block size (threads/block). Must be a
-// multiple of 32 (one warp per 2 KiB slice) in [32, 1024]; invalid values fall
-// back to the tuned default. Env: RCCL_DDA_LL128_A2A_THREADS.
-RCCL_PARAM(DdaLL128A2AThreads, "DDA_LL128_A2A_THREADS", 256);
+constexpr unsigned kDdaLL128A2ADefaultThreads = 256;
+
+// Threads per block, overriding the arch table: a multiple of 32 in [32, 1024], else ignored.
+RCCL_PARAM(DdaLL128A2AThreads, "DDA_LL128_A2A_THREADS", 0);
 
 namespace {
 
@@ -54,10 +54,9 @@ static inline int ddaLL128A2AMaxBppEnv(int dflt) {
   }
   return dflt;
 }
-// Validated block size from the runtime flag; falls back to `dflt`.
 static inline unsigned ddaLL128A2AThreads(unsigned dflt) {
   const int64_t v = rcclParamDdaLL128A2AThreads();
-  if (v >= 32 && v <= 1024 && (v % 32) == 0) {
+  if (v >= kDdaLL128Warp && v <= 1024 && (v % kDdaLL128Warp) == 0) {
     return (unsigned)v;
   }
   return dflt;
@@ -69,15 +68,15 @@ static inline size_t ddaLL128A2AMaxPerChunkBytes(ncclComm* comm) {
   return slotWords / (size_t)kDdaLL128WireWordsPerSlice * (size_t)kDdaLL128DataBytesPerSlice;
 }
 
-// Geometry: grid.x = remote peers, grid.y = warp-per-slice split capped by the
-// fabric block budget and the epoch array; threads multiple of 32.
+// Geometry: grid.x = remote peers, grid.y = warp-per-slice split capped by the comm block budget
+// (rcclDdaFabricA2aLL128Blocks) and the epoch array, with at least one block per peer.
 static inline std::pair<dim3, dim3> ddaAllToAllFabricLL128Geom(ncclComm* comm, size_t perChunkBytes) {
-  // 256 (8 warps) x 13 blocks/peer measured best on gfx1250 DPX: 1024-thread blocks put
-  // too much in flight per CU (8M: 38 vs 25 us kernel), 384 already loses at 4M/8M.
-  const unsigned threads = ddaLL128A2AThreads(256);
+  const size_t totalBytes = perChunkBytes * (size_t)comm->nRanks;
+  const int tuned = rcclDdaFabricA2aLL128Threads(comm, totalBytes);
+  const unsigned threads = ddaLL128A2AThreads(tuned > 0 ? (unsigned)tuned : kDdaLL128A2ADefaultThreads);
   const size_t warps = threads / (unsigned)kDdaLL128Warp;
   const int nPeers = comm->nRanks - 1;
-  int cap = comm->ddaFabricMaxBlocks;
+  int cap = rcclDdaFabricA2aLL128Blocks(comm, totalBytes);
   if (comm->ddaLLEpochLen < cap) cap = comm->ddaLLEpochLen;
   cap /= nPeers;
   const int envCap = ddaLL128A2AMaxBppEnv(0);
