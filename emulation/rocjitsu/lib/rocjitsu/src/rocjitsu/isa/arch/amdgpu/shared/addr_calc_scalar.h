@@ -43,10 +43,17 @@ inline void scalar_buffer_load_mask(ScalarMemState *state, int64_t offset, uint6
 
 /// Scalar buffer resource layout shared by GFX9 and RDNA: a 48-bit base,
 /// 14-bit stride and 32-bit record count. Stride affects bounds, not the address.
+///
+/// @p align_mask clears low bits of the returned address. @p size_align_mask
+/// clears low bits of the byte bound before the per-DWORD mask is built; zero
+/// leaves the bound unrounded, so a DWORD counts as in range when its first byte
+/// is. GFX9 passes 3, so a DWORD must lie wholly in range, and RDNA4 passes its
+/// access alignment. RDNA1 through RDNA3.5 pass zero; their hardware rule is
+/// unverified.
 inline std::optional<uint64_t> scalar_buffer_address(Wavefront &wf, uint32_t selector,
                                                      uint64_t base, int64_t offset,
-                                                     ScalarMemState *state, uint64_t align_mask = 3,
-                                                     uint64_t size_align_mask = 0) {
+                                                     ScalarMemState *state, uint64_t align_mask,
+                                                     uint64_t size_align_mask) {
   auto records = try_read_scalar_selector(wf, selector + 2);
   if (!records)
     return std::nullopt;
@@ -114,8 +121,10 @@ std::optional<uint64_t> smem_calculate_address(const SmemInst &inst, amdgpu::Wav
     wf.report_undefined_behavior("negative combined scalar-memory offset");
   inst_offset &= ~0x3LL;
   reg_offset &= kDwordMask;
+  // A DWORD is in range only if all four bytes are, so round the bound down.
   if (gfx9_smem_is_buffer_op(inst.op))
-    return scalar_buffer_address(wf, inst.sbase * 2, *base, inst_offset + reg_offset, state);
+    return scalar_buffer_address(wf, inst.sbase * 2, *base, inst_offset + reg_offset, state,
+                                 /*align_mask=*/3, /*size_align_mask=*/3);
   const uint64_t addr = *base + inst_offset + reg_offset;
   util::Logger::vm([&](auto &os) {
     static thread_local uint64_t smem_count = 0;

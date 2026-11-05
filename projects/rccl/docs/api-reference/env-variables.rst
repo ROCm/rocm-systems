@@ -806,6 +806,14 @@ in the following table.
       - | ``536870912`` (512 MiB) by default, matching the CE AllReduce pool
         | ``0``: do not allocate scratch, and do not select GinScatter
 
+    * - | ``NCCL_GIN_PROXY_POLL_BATCH``
+        | Maximum GIN operations the proxy thread issues per peer in each
+          progress iteration. Larger values cut polling overhead when queues
+          are deep.
+      - | Integer value (default: ``32``)
+        | Values below ``1`` are treated as ``1``, which issues one operation
+          per iteration and never sends the RMA aggregation hint
+
     * - | ``NCCL_RMA_PLUGIN``
         | Selects external one-sided RMA plugins, which are also the backend
           the built-in GIN proxy forwards to.
@@ -1251,6 +1259,16 @@ threshold table introduced for gfx1250.
         | ``0``: Disable the DDA LL128 tier.
         | ``N`` (bytes): Use ``N`` as the LL128 tier ceiling, overriding the table.
           Pre-table default: ``0`` (LL128 tier was off before the arch table).
+
+    * - | ``RCCL_DDA_LL128_AG_THREADS``
+        | Threads per block for the DDA LL128 ``ncclAllGather`` kernel. When ``0``
+          (default), resolved from ``ddaAgLL128Threads`` in the arch table: the
+          gfx1250 DPX table uses 256 threads for gathered sizes (``nRanks`` x
+          per-rank bytes) of 4 MiB to 32 MiB, and every other case uses 512.
+          Values that are not a multiple of 32 from 32 to 1024 are ignored.
+      - | ``0``: Resolved from the per-arch table at runtime (default).
+        | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
+          multiple of 32 from 32 to 1024. Pre-table default: ``512``.
 
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),

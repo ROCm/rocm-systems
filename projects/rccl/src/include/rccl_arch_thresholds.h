@@ -89,6 +89,14 @@ struct rcclArchThresholds {
   // can win in that sub-range while symk still wins above it.
   // 0 means no suppression (symk may win at any size for that collective).
   size_t symMinR2[RCCL_DDA_FUNC_COUNT];
+  // AllGather only. R2 sizes, total bytes, where symk runs if the cost model picks a TDM kernel,
+  // whatever symMinR2 / symMaxR2 say. symTdmMaxR2Graph applies under graph capture. 0 = no window, and no
+  // cross-tray AllGather rules.
+  size_t symTdmMinR2[RCCL_DDA_FUNC_COUNT];
+  size_t symTdmMaxR2[RCCL_DDA_FUNC_COUNT];
+  size_t symTdmMaxR2Graph[RCCL_DDA_FUNC_COUNT];
+  // Upper edge across UALink trays; it only lowers the window. 0 = no cap.
+  size_t symTdmCrossTrayMaxR2[RCCL_DDA_FUNC_COUNT];
 
   // Rank-scaled tier caps, bytes per rank. On a comm of at least
   // rankScaledMinRanks ranks, a non-zero entry replaces the matching
@@ -116,6 +124,15 @@ struct rcclArchThresholds {
   int ddaVmmBlockBudget;
   int ddaVmmMinBlocks;
   int ddaVmmMaxBlocks;
+
+  // DDA LL128 AllGather block size and block cap, each applied to totals inside its inclusive
+  // byte window. 0 keeps 512 threads and the init block cap.
+  int ddaAgLL128Threads;
+  size_t ddaAgLL128ThreadsMinBytes;
+  size_t ddaAgLL128ThreadsMaxBytes;
+  int ddaAgLL128MaxBlocks;
+  size_t ddaAgLL128MaxBlocksMinBytes;
+  size_t ddaAgLL128MaxBlocksMaxBytes;
 
   // Ring / Tree crossovers that replace the tuning model's ranges on single-node
   // comms (nNodes == 1). Sizes are per rank as rcclGetSizePerRank() reports them

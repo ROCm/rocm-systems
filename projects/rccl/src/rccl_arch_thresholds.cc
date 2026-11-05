@@ -187,6 +187,12 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     kThreshUnlimited,     // [7] Recv            -- not used on gfx1250
     kThreshUnlimited,     // [8] AlltoAll        -- not used on gfx1250
   },
+  // symTdm*: [2] AllGather -- TDM beats DDA LL128 from 64M; eagerly CE-registered wins past 128M.
+  // Under graph capture TDM beats Ring to 4G in one tray and to 512M across trays.
+  .symTdmMinR2 = {0, 0, 64ULL*1024*1024, 0, 0, 0, 0, 0, 0},
+  .symTdmMaxR2 = {0, 0, 128ULL*1024*1024, 0, 0, 0, 0, 0, 0},
+  .symTdmMaxR2Graph = {0, 0, 4096ULL*1024*1024, 0, 0, 0, 0, 0, 0},
+  .symTdmCrossTrayMaxR2 = {0, 0, 512ULL*1024*1024, 0, 0, 0, 0, 0, 0},
   // Rank-scaled caps from the 8-64 rank H13 sweep, AICOMRCCL-1756. The
   // crossovers move with the per-rank share, so on 8+ rank comms these replace the
   // totals above (which stay in force for smaller comms).
@@ -462,6 +468,13 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .ddaVmmBlockBudget = 2048,
   .ddaVmmMinBlocks = 32,
   .ddaVmmMaxBlocks = 128,
+  // AllGather LL128 block size and block cap (DPX).
+  .ddaAgLL128Threads = 256,
+  .ddaAgLL128ThreadsMinBytes = 4ULL*1024*1024,
+  .ddaAgLL128ThreadsMaxBytes = 32ULL*1024*1024,
+  .ddaAgLL128MaxBlocks = 75,
+  .ddaAgLL128MaxBlocksMinBytes = 1ULL*1024*1024,
+  .ddaAgLL128MaxBlocksMaxBytes = 32ULL*1024*1024,
   // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
   .arRingLL128MaxPerRank = 16ULL*1024*1024,       // Ring Simple beats LL128 1.1-1.3x from 256M/512M/1G
                                                   // at 8/16/32 (DPX)

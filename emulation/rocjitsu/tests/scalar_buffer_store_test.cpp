@@ -78,6 +78,18 @@ TEST_P(ScalarBufferStore, BufferStoresRespectPerDwordBounds) {
   EXPECT_EQ(memory_.read32(0x400c), 10u);
 }
 
+// gfx90a: a DWORD only partly inside the buffer is not written.
+TEST_P(ScalarBufferStore, BufferStoreSkipsDwordThatEndsPastTheBuffer) {
+  for (uint32_t records : {13u, 16u}) {
+    SCOPED_TRACE(records);
+    base(records);
+    memory_.write32(0x400c, 10);
+    put(32, 100);
+    ASSERT_NO_FATAL_FAILURE(issue(24, true, 12)); // S_BUFFER_STORE_DWORD at offset 12.
+    EXPECT_EQ(memory_.read32(0x400c), records == 16 ? 100u : 10u);
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(Cdna, ScalarBufferStore,
                          testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
                                          ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4));
