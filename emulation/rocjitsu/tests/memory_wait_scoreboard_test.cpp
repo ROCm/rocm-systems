@@ -1408,14 +1408,15 @@ TEST(MemoryWaitExecutionTest, ScalarMissingWaitWarnsWithoutChangingTheResult) {
 // decoded instructions in the core issuer.
 class TestMemoryLoad final : public Instruction {
 public:
-  TestMemoryLoad(std::string_view mnemonic, uint16_t reg) : Instruction(mnemonic, nullptr) {
+  TestMemoryLoad(std::string_view mnemonic) : Instruction(mnemonic, nullptr) {}
+
+  void initialize(uint16_t reg) {
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
     const auto words = rdna3::build_flat(
         rdna3::kFlatLoadB32Flat, {.addr = 0, .saddr = 124, .vdst = static_cast<uint8_t>(reg)});
     util::StringDiagnostic error;
     auto decoded = decoder->decode_window(words, 0, error.emitter());
-    if (!decoded.succeeded())
-      throw std::runtime_error(error.message());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
     backing_ = std::move(decoded.value());
     flags_ |= MEMORY_WAIT_PRODUCER;
     dst_operands_[0] = const_cast<Operand *>(backing_->dst_operand(0));
@@ -1465,7 +1466,8 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndCounterPartici
         ASSERT_NE(wf, nullptr);
         wf->set_exec(0b1111);
         set_test_flat_domains(*cu, *wf, shared_lanes);
-        TestMemoryLoad inst("flat_load_b32", 2);
+        TestMemoryLoad inst("flat_load_b32");
+        ASSERT_NO_FATAL_FAILURE(inst.initialize(2));
         cu->track_memory_wait(inst, *wf);
         auto &state = *wf->memory_wait_scoreboard();
         EXPECT_EQ(state.outstanding(WaitCounterKind::Load), shared_lanes != 0b1111 ? 1u : 0u);
@@ -1917,7 +1919,8 @@ TEST_F(MemoryWaitOrderingTest, PartialWaitRetiresFlatResultFromGfx10) {
       if (lds_route) {
         lds_load(younger_dst);
       } else {
-        TestMemoryLoad global("global_load_dword", younger_dst);
+        TestMemoryLoad global("global_load_dword");
+        ASSERT_NO_FATAL_FAILURE(global.initialize(younger_dst));
         track(global);
       }
       auto &state = *wf->memory_wait_scoreboard();
@@ -2123,7 +2126,8 @@ TEST(MemoryWaitExecutionTest, IncomingFlatOverwriteUsesItsOwnOrderingAndRoutedLa
         wf->set_exec(0b1111);
         set_test_flat_domains(*cu, *wf, shared_lanes);
         for (bool flat : {false, true}) {
-          TestMemoryLoad inst(flat ? "flat_load_dword" : "global_load_dword", 2);
+          TestMemoryLoad inst(flat ? "flat_load_dword" : "global_load_dword");
+          ASSERT_NO_FATAL_FAILURE(inst.initialize(2));
           if (flat && wait)
             wf->memory_wait_scoreboard()->wait(WaitCounterKind::Load, 0);
           wf->ensure_memory_wait_scoreboard().check_instruction(inst, *wf);
@@ -2232,17 +2236,18 @@ TEST(MemoryWaitExecutionTest, LegacyImageOverwritesCheckTheIncomingCompletionCla
         // Exercise the runtime tracking path with decoded destinations; this
         // does not depend on functional support for image sampling or BVH.
         auto track = [&](std::string_view mnemonic, unsigned reg) {
-          TestMemoryLoad inst(mnemonic, reg);
+          TestMemoryLoad inst(mnemonic);
+          ASSERT_NO_FATAL_FAILURE(inst.initialize(reg));
           wf->ensure_memory_wait_scoreboard().check_instruction(inst, *wf);
           cu->track_memory_wait(inst, *wf);
           wf->pc += 8;
         };
         // An unrelated load makes the image/image control a mixed counter.
-        track("global_load_dword", 3);
-        track(first, 2);
+        ASSERT_NO_FATAL_FAILURE(track("global_load_dword", 3));
+        ASSERT_NO_FATAL_FAILURE(track(first, 2));
         if (wait)
           wf->memory_wait_scoreboard()->wait(WaitCounterKind::Load, 0);
-        track(second, 2);
+        ASSERT_NO_FATAL_FAILURE(track(second, 2));
         const bool same_class = std::string_view(first) == second;
         EXPECT_EQ(cu->memory_wait_diagnostic_count(), wait || same_class ? 0u : 1u);
       }
@@ -2343,7 +2348,8 @@ TEST(MemoryWaitExecutionTest, LdsLoadsOverwriteInIssueOrder) {
         if (wait)
           state.wait(WaitCounterKind::Ds, 0);
         if (sequence == Sequence::LdsThenGlobal) {
-          TestMemoryLoad global("global_load_dword", 2);
+          TestMemoryLoad global("global_load_dword");
+          ASSERT_NO_FATAL_FAILURE(global.initialize(2));
           track(global);
         } else {
           auto second = ds_load(/*high=*/true, gds_second);
@@ -5441,6 +5447,48 @@ TEST(MemoryWaitExecutionTest, ScalarBufferStoreChecksItsConsumedBaseWords) {
       ASSERT_TRUE(cu->execute_instruction(consumer.value().get(), *wf).succeeded());
       ASSERT_NE(consumer.value()->data(), nullptr);
       EXPECT_EQ(consumer.value()->data_as<ScalarMemState>()->addr, 0x400000u);
+    }
+}
+
+TEST(MemoryWaitExecutionTest, ScalarBufferAtomicChecksItsConsumedDescriptorWords) {
+  GpuMemory memory("smem_atomic_wait_memory");
+  L2Cache l2("smem_atomic_wait_l2");
+  ComputeUnitCore::Config config{};
+  config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+  config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 32;
+  auto cu = ComputeUnitCore::create("smem_atomic_wait_cu", config, &memory, &l2);
+  auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, 64);
+  ASSERT_NE(wf, nullptr);
+  auto decoder = Decoder::create(config.arch);
+  // s_buffer_atomic_inc s4, s[8:11], 0 glc
+  const auto words =
+      cdna4::build_smem(cdna4::kSBufferAtomicIncSmem, {.sbase = 4, .sdata = 4, .glc = 1, .imm = 1});
+  util::StringDiagnostic error;
+  auto consumer = decoder->decode_window(words, 0, error.emitter());
+  ASSERT_TRUE(consumer.succeeded()) << error.message();
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  // The base and NUM_RECORDS are consumed; descriptor word 3 is unused.
+  for (uint8_t pending : {8, 9, 10, 11})
+    for (bool waited : {false, true}) {
+      SCOPED_TRACE(unsigned(pending));
+      SCOPED_TRACE(waited);
+      const auto producer_words =
+          cdna4::build_smem(cdna4::kSLoadDwordSmem, {.sdata = pending, .imm = 1});
+      auto producer = decoder->decode_window(producer_words, 0, error.emitter());
+      ASSERT_TRUE(producer.succeeded()) << error.message();
+      state.clear();
+      cu->track_memory_wait(*producer.value(), *wf);
+      ASSERT_EQ(state.events().size(), 1u);
+      if (waited)
+        state.wait(state.events().front().counter, 0);
+      unsigned reports = 0;
+      state.bind(0x200, &reports,
+                 [](void *context, const auto &) { ++*static_cast<unsigned *>(context); });
+      state.check_instruction(*consumer.value(), *wf);
+      EXPECT_EQ(reports, pending < 11 && !waited ? 1u : 0u);
     }
 }
 

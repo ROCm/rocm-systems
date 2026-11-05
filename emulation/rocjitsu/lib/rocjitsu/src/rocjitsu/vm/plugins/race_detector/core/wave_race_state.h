@@ -41,10 +41,10 @@ struct CounterCapacities {
 /// event allocation and lifecycle transitions.
 ///
 /// Every event registration method (registerEvent, registerScalarLoad,
-/// registerLdsEvent and registerDualOffsetLdsEvent) takes the producing
-/// instruction as an InstructionSnapshot; the event's PC comes from the
-/// snapshot. The encoding is decoded only if a plugin report needs its
-/// disassembly.
+/// registerLdsEvent, registerLdsRangeEvent and registerDualOffsetLdsEvent)
+/// takes the producing instruction as an InstructionSnapshot; the event's PC
+/// comes from the snapshot. The encoding is decoded only if a plugin report
+/// needs its disassembly.
 class WaveRaceState {
 public:
   WaveRaceState(int vgprCount, int sgprCount, WaveId, RaceDetector *, CounterCapacities);
@@ -127,6 +127,31 @@ public:
                         uint8_t byteMask,
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                         MemoryOrderClass memoryOrder, int elementBytes = 0);
+
+  /// Register an LDS event described by byte ranges rather than lanes, such as
+  /// a tensor DMA transfer. The event has no registers. Each range is retained
+  /// in whole elements of elementBytes that fit the LDS backing.
+  ///
+  /// This only registers the event; validate its ranges first with
+  /// RaceDetector::validateRead() or validateWrite(). Callers choose three
+  /// orderings independently:
+  /// - Partial waits use the completion class of each obligation in
+  ///   counterObligations. Tensor DMA passes TENSOR on TENSORCNT, since its
+  ///   transfers from one wave complete in issue order, so a partial
+  ///   s_wait_tensorcnt retires the oldest.
+  /// - memoryOrder is stored on the event and compared with the order a later
+  ///   same-wave access validates with: only an access in the same class,
+  ///   other than UNORDERED, is treated as ordered with the event. Tensor DMA
+  ///   passes TENSOR.
+  /// - The order passed to validation decides which of the wave's pending
+  ///   accesses the new ranges are checked against. Tensor DMA passes
+  ///   UNORDERED, since the ISA does not specify the timing of its LDS
+  ///   accesses; passing TENSOR would skip conflicts with the wave's own
+  ///   pending transfers.
+  void registerLdsRangeEvent(InstructionSnapshot instruction, MemoryEventType type,
+                             std::span<const LdsByteRange> ranges, int elementBytes,
+                             std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                             MemoryOrderClass memoryOrder);
 
   /// Register an LDS event with dual-offset intervals. Each active lane
   /// contributes two 8-byte intervals at laneBaseAddresses[lane] + offset0*8

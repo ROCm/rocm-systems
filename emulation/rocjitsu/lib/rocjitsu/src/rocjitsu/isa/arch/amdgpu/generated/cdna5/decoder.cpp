@@ -2355,10 +2355,9 @@ bool isGfx1250WmmaScalePairValid(const MachineInst *opcode) {
 
   const uint32_t scale_a_fmt = scale->neg & 0x3u;
   const uint32_t scale_b_fmt = scale->neg_hi & 0x3u;
-  if (matrix->op == 0x88u)
-    return isGfx1250WmmaScaleFormatPairLegal(4u, 4u, scale_a_fmt, scale_b_fmt);
-  const uint32_t matrix_a_fmt = matrix->opsel;
-  const uint32_t matrix_b_fmt = (matrix->opsel_hi_2 << 2u) | matrix->opsel_hi;
+  const uint32_t matrix_a_fmt = matrix->op == 0x88u ? 4u : matrix->opsel;
+  const uint32_t matrix_b_fmt =
+      matrix->op == 0x88u ? 4u : (matrix->opsel_hi_2 << 2u) | matrix->opsel_hi;
   return isGfx1250WmmaScaleFormatPairLegal(matrix_a_fmt, matrix_b_fmt, scale_a_fmt, scale_b_fmt);
 }
 
