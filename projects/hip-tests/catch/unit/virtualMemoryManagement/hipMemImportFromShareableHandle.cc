@@ -701,7 +701,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl) {
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
   std::string socketName =
-    ipcSocketCom::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom<>::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
 
   auto pid = fork();
   REQUIRE(pid >= 0);
@@ -714,7 +714,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl) {
     size_t size_mem = 0;
     REQUIRE(read(fd[0], &size_mem, sizeof(size_t)) >= 0);
     // Open Socket as client
-    ipcSocketCom sockObj(false, socketName);
+    ipcSocketCom<hipShareableHdl> sockObj(false, socketName);
     REQUIRE(sockObj.initialize());
     hipShareableHdl shHandle;
     // Signal Parent process that Child is ready to receive msg
@@ -788,7 +788,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl) {
     HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, handle,
                                             hipMemHandleTypePosixFileDescriptor, 0));
     // Create the socket for communication as Server
-    ipcSocketCom sockObj(true, socketName);
+    ipcSocketCom<hipShareableHdl> sockObj(true, socketName);
     REQUIRE(sockObj.initialize());
     // Signal child process that socket is ready
     REQUIRE(write(fd[1], &size_mem, sizeof(size_t)) >= 0);
@@ -830,7 +830,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
   std::string socketName =
-    ipcSocketCom::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom<>::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
 
   // Create data buffer
   std::vector<int> A_h(N), B_h(N), C_h(N);
@@ -852,7 +852,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
     REQUIRE(read(fd[0], &size_mem, sizeof(size_t)) >= 0);
 
     // Open Socket as client
-    ipcSocketCom sockObj(false, socketName);
+    ipcSocketCom<hipShareableHdl> sockObj(false, socketName);
     REQUIRE(sockObj.initialize());
     hipShareableHdl shHandle;
 
@@ -932,7 +932,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
     HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
 
     // Create the socket for communication as Server
-    ipcSocketCom sockObj(true, socketName);
+    ipcSocketCom<hipShareableHdl> sockObj(true, socketName);
     REQUIRE(sockObj.initialize());
     // Signal child process that socket is ready
     REQUIRE(write(fd[1], &size_mem, sizeof(size_t)) >= 0);
@@ -983,7 +983,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
   REQUIRE(pipe(fdSig) == 0);
   REQUIRE(pipe(fdpid) == 0);
   std::string socketName =
-    ipcSocketCom::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom<>::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
   auto pid = fork();
   REQUIRE(pid >= 0);
 
@@ -998,7 +998,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
       CTX_CREATE();
 
       // Open Socket as client
-      ipcSocketCom sockObj(false, socketName);
+      ipcSocketCom<hipShareableHdl> sockObj(false, socketName);
       REQUIRE(sockObj.initialize());
       hipShareableHdl shHandle;
 
@@ -1087,7 +1087,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
                                             hipMemHandleTypePosixFileDescriptor, 0));
 
     // Create the socket for communication as Server
-    ipcSocketCom sockObj(true, socketName);
+    ipcSocketCom<hipShareableHdl> sockObj(true, socketName);
     REQUIRE(sockObj.initialize());
     // Signal child process that socket is ready
     REQUIRE(write(fd[1], &size_mem, sizeof(size_t)) >= 0);
@@ -1176,7 +1176,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_CloseFdBeforeMapAndBa
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
   std::string socketName =
-    ipcSocketCom::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
+    ipcSocketCom<>::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
 
   auto pid = fork();
   REQUIRE(pid >= 0);
@@ -1202,7 +1202,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_CloseFdBeforeMapAndBa
         REQUIRE(close(fdSig[1]) == 0);
         exit(0);
       }
-      ipcSocketCom sockObj(false, socketName);
+      ipcSocketCom<hipShareableHdl> sockObj(false, socketName);
       hipShareableHdl shHandle;
       int sig = 0;
       REQUIRE(sockObj.initialize());
@@ -1356,7 +1356,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_CloseFdBeforeMapAndBa
     hipShareableHdl shareable_handle;
     HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, handle,
                                             hipMemHandleTypePosixFileDescriptor, 0));
-    ipcSocketCom sockObj(true, socketName);
+    ipcSocketCom<hipShareableHdl> sockObj(true, socketName);
     REQUIRE(sockObj.initialize());
     REQUIRE(write(fd[1], &size_mem, sizeof(size_t)) == static_cast<ssize_t>(sizeof(size_t)));
     int sig = 0;

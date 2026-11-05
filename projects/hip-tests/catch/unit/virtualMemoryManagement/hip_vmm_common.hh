@@ -65,5 +65,6 @@
   }
 
 typedef pid_t Process;
+typedef int hipShareableHdl;
 #endif
 constexpr int threadsPerBlk = 64;

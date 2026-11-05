@@ -15,16 +15,6 @@
 #include <memory>
 #include <string>
 
-#if HT_WIN
-typedef HANDLE hipShareableHdl;
-#else
-#ifdef HT_AMD
-typedef int64_t hipShareableHdl;
-#else
-typedef int hipShareableHdl;
-#endif
-#endif
-
 struct ipcHdl {
 #if HT_WIN
     HANDLE mailslot;
@@ -41,6 +31,7 @@ struct ipcHdl {
 // participants use the same prefix. The PID will be appended to the prefix so parent and children
 // will actually have different IPC object names
 // Note that direction of communication is always parent -> child
+template <class ShareableHandleT = int>
 class ipcSocketCom {
   static constexpr int kPidBufferSize = 16;
   static constexpr int kNonceDigitsSize = 6;
@@ -130,7 +121,7 @@ public:
     return closeSocket();
   }
 
-  int recvShareableHdl(hipShareableHdl *shHandle) {
+  int recvShareableHdl(ShareableHandleT* shHandle) {
 #if HT_WIN
     DWORD cbRead = 0;
     if (!ReadFile(handle->mailslot, shHandle, sizeof(*shHandle), &cbRead, NULL)) {
@@ -187,7 +178,7 @@ public:
 #endif
   }
 
-  int sendShareableHdl(hipShareableHdl shareableHdl, Process process) {
+  int sendShareableHdl(ShareableHandleT shareableHdl, Process process) {
 #if HT_WIN
     HANDLE hProcess = OpenProcess(PROCESS_DUP_HANDLE, FALSE, process.dwProcessId);
     if (hProcess == NULL) {
