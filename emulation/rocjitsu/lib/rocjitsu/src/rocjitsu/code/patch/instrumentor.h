@@ -29,7 +29,9 @@
 ///                                  + per-site InstrumentationPatch (test/debug)
 ///
 /// Current pipeline is all-or-nothing across all queued points: any per-site
-/// failure aborts the whole patch.
+/// failure aborts the whole patch. ReplaceWithInst takes a separate early path:
+/// source-bound bytes -> shared edit preflight -> private in-place writes -> emit.
+/// It never builds a trampoline and cannot be mixed with observational points.
 /// Future work: predicate-based anchor selection (Instrumentor walks blocks
 /// itself), per-site failure tolerance,
 /// AfterInst / BlockEntry / BlockExit kinds.
@@ -78,7 +80,8 @@ class LivenessAnalysis;
 /// BeforeInst relocates an ordinary instruction. KernelEntry runs once through
 /// the descriptor's dispatch-only stub; KernelExit runs before s_endpgm. Both
 /// boundary kinds require a callable probe. AfterInst, BlockEntry, and BlockExit
-/// remain reserved and are rejected.
+/// remain reserved and are rejected. ReplaceWithInst performs an in-place,
+/// equal-length instruction replacement without a trampoline or probe.
 enum class InstrumentationKind {
   BeforeInst,
   AfterInst,
@@ -86,6 +89,16 @@ enum class InstrumentationKind {
   BlockExit,
   KernelEntry,
   KernelExit,
+  ReplaceWithInst,
+};
+
+/// @brief Complete source encoding and its equal-length replacement.
+/// @details Expected bytes are mandatory. The source is one complete 4/8/12-byte
+/// instruction; replacement bytes may encode multiple complete instructions.
+/// Both vectors are copied into the Instrumentor's source-bound request queue.
+struct InstructionReplacement {
+  std::vector<uint8_t> expected_bytes;
+  std::vector<uint8_t> replacement_bytes;
 };
 
 /// @brief A request to instrument one site.
@@ -126,6 +139,8 @@ struct InstrumentationPoint {
   // The envelope already widens EXEC around the spill and argument writes; this
   // holds that window open across the call instead of closing it first.
   bool force_full_exec = false;
+  /// Required only for ReplaceWithInst; incompatible with probes and filter flags.
+  std::optional<InstructionReplacement> replacement = std::nullopt;
   // TODO: SCC will eventually need a per-point knob mirroring force_full_exec
   // (e.g. probe_consumes_scc) since the probe call clobbers it
 };
@@ -177,9 +192,13 @@ struct InstrumentationPatch {
 /// @brief Production attribution from an original anchor to its emitted bytes.
 /// @details Offsets are relative to .text. KernelEntry has no relocated guest
 /// instruction, so guest_size is zero and guest_offset names its return branch.
+/// ReplaceWithInst has no relocated guest either: guest_size is zero; original,
+/// guest and instrumentation offsets name the unchanged source position, and
+/// instrumentation_size equals original_size.
 struct InstrumentedSite {
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
   uint64_t original_offset = 0;
+  uint32_t original_size = 0;
   uint64_t guest_offset = 0;
   uint32_t guest_size = 0;
   uint64_t instrumentation_offset = 0;
@@ -226,7 +245,8 @@ struct InstrumentationOptions {
 /// @brief Result of Instrumentor::patch_with_debug_summaries().
 ///
 /// Extends InstrumentedCodeObject with one InstrumentationPatch per applied
-/// site. Test / debug surface only; the per-site schema is unstable.
+/// trampoline site. ReplaceWithInst uses production sites only and leaves patches
+/// empty because no trampoline exists. Test / debug surface only; the schema is unstable.
 struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
   std::vector<InstrumentationPatch> patches;
 };
@@ -447,8 +467,8 @@ make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arc
 /// is a much more difficult task.
 ///
 /// Block decoding is lazy so the CFG is built on the first call that needs
-/// it (validate_points / find_instruction_at_offset). An Instrumentor that
-/// never gets patched also never decodes.
+/// it (validate_points / find_instruction_at_offset). Structural facts are also
+/// lazy; replacement batches and instruction_boundaries() need no CFG or liveness.
 class Instrumentor {
 public:
   /// @param obj  The code object to instrument. Borrowed; must outlive the
@@ -477,6 +497,7 @@ public:
   struct ValidationResult {
     std::vector<ResolvedInstrumentationSite> sites;
     std::vector<std::string> errors; // Fatal; sites is empty when non-empty.
+    std::optional<TextEditError> edit_error;
   };
 
   /// @brief Look up each queued point's anchor and validate it.
@@ -485,6 +506,20 @@ public:
   /// lists every fatal diagnostic encountered. On success, `sites` contains
   /// one record per queued point in insertion order and `errors` is empty.
   [[nodiscard]] ValidationResult validate_points();
+
+  /// @brief Full-source instruction, clause and direct-reference facts.
+  /// @details Performs shared structural admission without CFG ownership or liveness.
+  /// Returns null and sets error on failure. The borrowed result remains valid until
+  /// this Instrumentor is destroyed; neither source nor index may be mutated.
+  [[nodiscard]] const InstructionBoundaries *instruction_boundaries(TextEditError &error);
+
+  /// @brief Create an empty single-attempt queue for the same source and options.
+  /// @details Initializes and shares immutable full-text structural facts only;
+  /// queued points, patch-attempt state, CFG and liveness are never inherited.
+  /// This works before or after the parent's patch attempt. The child may outlive
+  /// the parent, but the borrowed source must outlive both and remain immutable
+  /// and unmoved. A different source or architecture requires a new Instrumentor.
+  [[nodiscard]] FailureOr<std::unique_ptr<Instrumentor>> fork(TextEditError &error);
 
   /// @brief Validate, plan, build, and apply the queued points; emit a
   ///        patched ELF.
@@ -500,7 +535,10 @@ public:
   ///
   /// Entry-storage arguments require CallerSuppliedWrapper. The caller must
   /// bind that wrapper for every instrumented dispatch. Resource edits require
-  /// an existing supported AMDHSA metadata note.
+  /// an existing supported AMDHSA metadata note. ReplaceWithInst batches preserve
+  /// layout and resource metadata, and reject non-default resource options or any
+  /// mixture with observational points. For a later observation pass, construct a
+  /// fresh Instrumentor over the emitted replacement image.
   [[nodiscard]] InstrumentedCodeObject patch();
 
   /// @brief Same as patch(), plus per-site InstrumentationPatch summaries.
@@ -576,7 +614,9 @@ private:
   struct ResolvedPoints {
     std::vector<ResolvedInstrumentationSite> sites;
     std::vector<ProbeCallable> probes;
+    std::vector<CheckedTextEdit> replacement_edits;
     std::vector<std::string> errors;
+    std::optional<TextEditError> edit_error;
     // The object's kernel descriptors and the wave size they share. A probe-call
     // site is resolved only when there is at least one kernel and one wave size.
     std::vector<KernelDescriptorInfo> kernels;
@@ -585,6 +625,7 @@ private:
 
   // Validate and resolve every queued point in one pass.
   [[nodiscard]] ResolvedPoints resolve_points();
+  [[nodiscard]] ResolvedPoints resolve_replacements();
 };
 
 } // namespace rocjitsu

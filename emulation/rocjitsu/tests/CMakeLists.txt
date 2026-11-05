@@ -1032,8 +1032,12 @@ if(RJ_BUILD_CONSAN_ANALYZER)
     endif()
 endif()
 
-# Host-only checked anchor regressions use model ISA providers.
-add_executable(rocjitsu_text_edit_tests patch/checked_text_edits_test.cpp)
+# Host-only instruction replacement and checked-edit regressions use model ISA providers.
+add_executable(
+    rocjitsu_text_edit_tests
+    patch/checked_text_edits_test.cpp
+    patch/instrumentor_replacement_test.cpp
+)
 target_include_directories(
     rocjitsu_text_edit_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

@@ -342,6 +342,10 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
     fail("InstrumentationPoint::kind must be BeforeInst, KernelEntry, or KernelExit");
     return std::nullopt;
   }
+  if (pt.replacement) {
+    fail("replacement payload requires ReplaceWithInst");
+    return std::nullopt;
+  }
   // A probe call needs both halves of the request: the object to resolve the
   // symbol in, and the symbol name
   if ((pt.probe_obj != nullptr) != (!pt.probe_symbol.empty())) {
@@ -896,7 +900,8 @@ bool Instrumentor::ensure_text_edits(TextEditError &error, const CodeObjectPatch
              .message = "expected one allocated executable .text section"};
     return false;
   }
-  // Reuse the private full-section index after coverage is checked.
+  // A source-only query or replacement batch needs no CFG. Observational paths
+  // can reuse their private full-section index after coverage is checked.
   // The existing anchor path already owns a private writer. Reuse its shared
   // ELF queries before text/layout changes rather than copying another ELF.
   std::optional<CodeObjectPatcher> source_patcher;
@@ -910,6 +915,18 @@ bool Instrumentor::ensure_text_edits(TextEditError &error, const CodeObjectPatch
     return false;
   text_edits_ = std::move(facts).value();
   return true;
+}
+
+const InstructionBoundaries *Instrumentor::instruction_boundaries(TextEditError &error) {
+  return ensure_text_edits(error) ? &text_edits_->instruction_boundaries() : nullptr;
+}
+
+FailureOr<std::unique_ptr<Instrumentor>> Instrumentor::fork(TextEditError &error) {
+  if (!ensure_text_edits(error))
+    return Result::failure();
+  std::unique_ptr<Instrumentor> child = std::make_unique<Instrumentor>(obj_, arch_, options_);
+  child->text_edits_ = text_edits_;
+  return child;
 }
 
 bool Instrumentor::ensure_blocks_built(std::string *error_out) {
@@ -995,7 +1012,64 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
   return true;
 }
 
+Instrumentor::ResolvedPoints Instrumentor::resolve_replacements() {
+  ResolvedPoints out;
+  const auto reject = [&](std::string message, uint64_t offset = 0) {
+    out.edit_error = TextEditError{
+        .code = TextEditErrorCode::InvalidRange, .offset = offset, .message = message};
+    out.errors.push_back(std::move(message));
+  };
+  if (options_.kernarg_binding != DbiKernargBinding::None ||
+      options_.preservation != GuestStatePreservation::LiveRegisters || options_.register_growth) {
+    reject("ReplaceWithInst does not accept probe or resource options");
+    return out;
+  }
+  std::vector<CheckedTextEdit> edits;
+  edits.reserve(points_.size());
+  for (const InstrumentationPoint &point : points_) {
+    if (point.kind != InstrumentationKind::ReplaceWithInst) {
+      reject("ReplaceWithInst cannot be mixed with observational points", point.anchor_offset);
+      return out;
+    }
+    if (!point.replacement) {
+      reject("ReplaceWithInst requires expected and replacement bytes", point.anchor_offset);
+      return out;
+    }
+    if (point.filter_flags != 0 || point.probe_obj || !point.probe_symbol.empty() ||
+        !point.probe_args.empty() || point.force_full_exec) {
+      reject("ReplaceWithInst does not accept filters or probe fields", point.anchor_offset);
+      return out;
+    }
+    edits.push_back({.offset = point.anchor_offset,
+                     .expected = point.replacement->expected_bytes,
+                     .replacement = point.replacement->replacement_bytes});
+  }
+  TextEditError error;
+  if (!ensure_text_edits(error) || text_edits_->validate(edits, error).failed()) {
+    out.errors.push_back("replacement edit transaction: " + error.message);
+    out.edit_error = std::move(error);
+    return out;
+  }
+  // Resolved bytes are private snapshots from this Instrumentor's immutable source.
+  // Public validation results are descriptive and cannot be submitted for patching.
+  for (const CheckedTextEdit &edit : edits) {
+    out.sites.push_back({.kind = InstrumentationKind::ReplaceWithInst,
+                         .anchor_offset = edit.offset,
+                         .original_size = static_cast<uint32_t>(edit.expected.size()),
+                         .original_bytes = edit.expected,
+                         .mnemonic = {},
+                         .probe_index = std::nullopt,
+                         .probe_args = {}});
+  }
+  out.replacement_edits = std::move(edits);
+  return out;
+}
+
 Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
+  if (std::ranges::any_of(points_, [](const InstrumentationPoint &point) {
+        return point.kind == InstrumentationKind::ReplaceWithInst;
+      }))
+    return resolve_replacements();
   ResolvedPoints out;
 
   std::string err;
@@ -1266,6 +1340,7 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
   ResolvedPoints resolved = resolve_points();
   ValidationResult result;
   result.errors = std::move(resolved.errors);
+  result.edit_error = std::move(resolved.edit_error);
   result.sites = std::move(resolved.sites);
   return result;
 }
@@ -1285,6 +1360,38 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     return result;
   }
   patched_ = true;
+
+  // Replacement-only batches do not allocate registers, inspect liveness, resolve
+  // probes, relocate anchors, or grow text. Resolve before creating the private
+  // writer so rejected requests publish neither partial bytes nor success sites.
+  if (std::ranges::any_of(points_, [](const InstrumentationPoint &point) {
+        return point.kind == InstrumentationKind::ReplaceWithInst;
+      })) {
+    ResolvedPoints resolved = resolve_replacements();
+    if (!resolved.errors.empty()) {
+      result.errors = std::move(resolved.errors);
+      result.edit_error = std::move(resolved.edit_error);
+      return result;
+    }
+    CodeObjectPatcher patcher(obj_);
+    TextEditError error;
+    if (text_edits_->apply(resolved.replacement_edits, patcher.text_bytes(), error).failed()) {
+      result.errors.push_back("replacement edit transaction: " + error.message);
+      result.edit_error = std::move(error);
+      return result;
+    }
+    result.elf_bytes = std::move(patcher).emit();
+    for (const ResolvedInstrumentationSite &site : resolved.sites) {
+      result.sites.push_back({.kind = site.kind,
+                              .original_offset = site.anchor_offset,
+                              .original_size = site.original_size,
+                              .guest_offset = site.anchor_offset,
+                              .guest_size = 0,
+                              .instrumentation_offset = site.anchor_offset,
+                              .instrumentation_size = site.original_size});
+    }
+    return result;
+  }
 
   if (options_.preservation == GuestStatePreservation::DeclaredRegisters &&
       !options_.register_growth) {
@@ -1962,6 +2069,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     }
     result.sites.push_back({.kind = a.site->kind,
                             .original_offset = a.site->anchor_offset,
+                            .original_size = a.site->original_size,
                             .guest_offset = a.trampoline_offset + a.bytes.original_byte_offset,
                             .guest_size = a.site->kind == InstrumentationKind::KernelEntry
                                               ? 0u
