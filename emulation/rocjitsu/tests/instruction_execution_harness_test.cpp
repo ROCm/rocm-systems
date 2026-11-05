@@ -357,33 +357,34 @@ TEST(ScalarControlTest, SetkillHonorsLowImmediateBitAndDrainsMemory) {
 }
 
 TEST(ScalarControlTest, OnlySTrapCarriesTheSoftwareTrapFlag) {
-  // The issue loop enters the trap handler on this flag instead of the mnemonic.
-  struct TrapArch {
-    rj_code_arch_t arch;
-    uint32_t trap, nop;
-  };
-  constexpr TrapArch kArches[] = {
-      {ROCJITSU_CODE_ARCH_CDNA1, cdna1::kSTrapSopp, cdna1::kSNopSopp},
-      {ROCJITSU_CODE_ARCH_CDNA2, cdna2::kSTrapSopp, cdna2::kSNopSopp},
-      {ROCJITSU_CODE_ARCH_CDNA3, cdna3::kSTrapSopp, cdna3::kSNopSopp},
-      {ROCJITSU_CODE_ARCH_CDNA4, cdna4::kSTrapSopp, cdna4::kSNopSopp},
-      {ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSTrapSopp, cdna5::kSNopSopp},
-      {ROCJITSU_CODE_ARCH_RDNA1, rdna1::kSTrapSopp, rdna1::kSNopSopp},
-      {ROCJITSU_CODE_ARCH_RDNA2, rdna2::kSTrapSopp, rdna2::kSNopSopp},
-      {ROCJITSU_CODE_ARCH_RDNA3, rdna3::kSTrapSopp, rdna3::kSNopSopp},
-      {ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::kSTrapSopp, rdna3_5::kSNopSopp},
-      {ROCJITSU_CODE_ARCH_RDNA4, rdna4::kSTrapSopp, rdna4::kSNopSopp},
-  };
-  for (const auto &arch : kArches) {
-    SCOPED_TRACE(testing::Message() << "arch=" << arch.arch);
-    auto decoder = Decoder::create(arch.arch);
-    for (const auto &[opcode, trap] : {std::pair{arch.trap, true}, std::pair{arch.nop, false}}) {
-      const uint32_t words[] = {0xbf800000u | (opcode << 16) | 7u};
-      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
-      ASSERT_NE(inst, nullptr);
-      EXPECT_EQ(bool(inst->flags() & SOFTWARE_TRAP), trap) << inst->mnemonic();
+  // The issue loop enters the trap handler, and CFG construction ends a path, on
+  // this flag instead of the mnemonic. Any other instruction carrying it (for
+  // example s_rfe_b64, which returns from the handler) would be taken as a trap.
+  const auto check = [](rj_code_arch_t arch, const auto &encodings) {
+    SCOPED_TRACE(testing::Message() << "arch=" << arch);
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    size_t traps = 0;
+    for (const auto &encoding : encodings) {
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoding.words.data()));
+      if (!inst)
+        continue;
+      const bool trap = (inst->flags() & SOFTWARE_TRAP) != 0;
+      EXPECT_EQ(trap, inst->mnemonic() == "s_trap") << inst->mnemonic();
+      traps += trap;
     }
-  }
+    EXPECT_EQ(traps, 1u);
+  };
+  check(ROCJITSU_CODE_ARCH_CDNA1, cdna1::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_CDNA2, cdna2::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_CDNA3, cdna3::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_CDNA4, cdna4::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_CDNA5, cdna5::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_RDNA1, rdna1::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_RDNA2, rdna2::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_RDNA3, rdna3::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_RDNA4, rdna4::test_data::ENCODINGS);
 }
 
 TEST(ScreenPartitionTest, RectangleCoverageMatchesAllSelectorsAndRespectsExec) {
