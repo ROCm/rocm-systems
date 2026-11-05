@@ -130,7 +130,7 @@ python tools/config_management/hash_manager.py --compute-all src/rocprof_compute
 
 The first command verifies structural conformance. The second refreshes the hash DB so `hash_checker.py` agrees.
 
-Each panel also has a view per arch under `src/rocprof_compute_soc/views/<arch>/`, which lists the panel's rows by metric library id. When you add, move or rename a row, table or panel, make the same change in the views of every arch that has the panel, then check them:
+Analyze shows the views under `src/rocprof_compute_soc/views/<arch>/`, which list each panel's rows by metric library id; profile still collects counters from the panel YAMLs. When you add, move or rename a row, table or panel, make the same change in the views of every arch that has the panel, then check them:
 ```bash
 python3 tools/validate_views.py
 python3 -m pytest tests/unit/rocprof_compute_soc/metric_library/test_analysis_views_sync.py
@@ -177,24 +177,24 @@ This check:
 
 ## Metric Descriptions
 
-Metric descriptions flow unidirectionally from panel YAMLs to documentation:
+Metric descriptions flow unidirectionally from the metric library, through the analysis views, to documentation:
 
 ```
-Panel YAMLs (src/) → Per-Arch YAMLs (tools/) → Docs YAMLs (docs/) → Sphinx HTML
+Views and metric library (src/) → Per-Arch YAMLs (tools/) → Docs YAMLs (docs/) → Sphinx HTML
 ```
 
 **Files:**
 ```bash
 tools/per_arch_metric_definitions/
-  ├── gfx{908,90a,940,941,942,950,115x,1250}_metrics_description.yaml   # plain + rst + unit
+  ├── gfx{908,90a,942,950,115x,1250}_metrics_description.yaml   # plain + rst + unit
 
 docs/data/metrics/
   └── <arch>_metrics.yaml                                  # per-arch rst + unit (generated)
 ```
 
-**After editing panel `metrics_description` sections:**
+**After editing a metric's `description` in the metric library:**
 ```bash
-python tools/config_management/metric_description_manager.py --sync-all src/rocprof_compute_soc/analysis_configs
+python tools/config_management/metric_description_manager.py --sync-all
 python tools/config_management/metric_description_manager.py --generate-docs
 ```
 

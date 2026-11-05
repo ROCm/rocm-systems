@@ -91,6 +91,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Roofline metric ids such as `-b 4.1` now count as selecting roofline, like `-b 4` and `-b roof`. In profile mode they run the roofline benchmark, and in analyze mode they show the roofline section.
 
+* Analyze shows each metric's formula, unit, peak and description from the metric library, so some panels change, for example `Gbps` is shown as `GB/s` and bandwidths shown in `Bytes/s` are now in `GB/s`. Rows that never showed a value are gone, so later gfx908 Speed-of-Light IDs such as `2.1.11` are renumbered, and the gfx1250 roofline `WMMA FLOPs (FP64)` row shows its theoretical peak. `-b membw_analysis` fails on gfx908, gfx90a, and gfx942, which have no Memory Bandwidth Analysis block, like any unknown block alias.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
