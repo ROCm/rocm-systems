@@ -186,6 +186,11 @@ To load a file:
 | Deep merge | Map + map | Recursive deep merge. Override keys win; base-only keys preserved, in file order. A metric in a child file lists only the fields that change. |
 | Replace | List in override | A list replaces the base list as a whole. |
 
+A mapping or a list cannot be replaced by a value of another kind, nor a scalar by a
+mapping or a list; the loader raises `InheritanceError` naming the file and key. A scalar
+may replace a scalar of another type (gfx90a overrides a string `peak` with a number),
+and a null value on either side may be replaced.
+
 Example, from the gfx90a files:
 
 ```yaml
@@ -243,8 +248,8 @@ The risk is covered instead by:
   the real `gfx908 -> gfx90a -> gfx942 -> gfx950` chain), cycle detection error.
 - Merge operations: key modification (override), key addition (new metric in child),
   removal of a metric or a field (`!remove` deletes from merged result), deep-merge of
-  maps, lists replaced, and errors for removing a missing key, for a duplicate key and
-  for `!remove` with a value.
+  maps, lists replaced, and errors for removing a missing key, for a duplicate key, for
+  `!remove` with a value and for a mapping or list replaced by another kind.
 - Round-trip: a minimal synthetic YAML family (base + chain of overrides with
   additions, modifications, and removals) loads correctly and produces the expected
   merged structure.
@@ -272,14 +277,16 @@ New module `src/utils/metric_library.py`.
    }
    ```
    gfx1150-gfx1153 map to the `gfx115x` directory through `canonical_config_arch()`.
+   Each arch's PR adds its own entries to the map. The validator reports an arch in the
+   map that has no directory, and a directory that is not in the map.
 2. Load YAML files from `{metric_dir}/{arch}/`. Each file either stands alone (base
    arch) or has an `inherit` key pointing to the parent arch's file.
 3. The `InheritLoader` (Stage 1) resolves the `inherit` chain recursively and
    deep-merges overrides on top of the base.
 4. Do not re-validate: `tools/validate_metric_library.py` checks the files at commit
    time.
-5. Collect all metrics into `MetricLibrary.metrics`, keyed by string `id`. Raise on
-   duplicate ids. In Phase A the entries are the loaded mappings, as
+5. Collect all metrics into `MetricLibrary.metrics`, keyed by string `id`. Raise
+   `InheritanceError` on duplicate ids, like any other load failure. In Phase A the entries are the loaded mappings, as
    `load_panel_configs()` returns today; a typed model can come with the cutover.
 6. Load `variables.yaml` (inherited like the metric files) into
    `MetricLibrary.variables`, in file order.
@@ -292,6 +299,7 @@ New module `src/utils/metric_library.py`.
 
 ```python
 class MetricLibrary:
+    arch: str                       # the canonical arch, e.g. "gfx115x"
     metrics: dict[str, dict]        # metric id -> its fields
     variables: dict[str, dict]      # variable name -> {formula}, in file order
     sets: dict[str, SetDefinition]  # Stage 4, sets migration
@@ -301,7 +309,11 @@ class MetricLibrary:
     ) -> set[str]: ...
 ```
 
-`get_counters_for_metrics()` extracts HW counters from the requested metrics:
+The library is cached per arch and shared by every caller, so callers must not change
+it; read-only views come with the cutover (Stage 8).
+
+`get_counters_for_metrics()` extracts HW counters from the requested metrics (an id that
+is not a metric of the arch raises `ValueError` naming the ids and the arch):
 
 1. **Concatenate formula strings** for the requested metrics.
 2. **Include `peak` values** in the text passed to the extractor, as `detect_counters()`
