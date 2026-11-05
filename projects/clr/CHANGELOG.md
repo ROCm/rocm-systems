@@ -8,6 +8,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
 * `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
+* A kernel launch that exceeds the device's `hipDeviceProp_t.maxGridSize` limits is now rejected and reports `hipErrorInvalidValue`, matching CUDA. The workgroup count is rounded up, so a non-uniform launch cannot bypass the limit with a partial final workgroup.
 
 ### Changed
 
