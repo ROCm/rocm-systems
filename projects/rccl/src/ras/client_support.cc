@@ -1239,15 +1239,16 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
   };
 
   TRACE(NCCL_RAS, "RAS: rasClientRunComms: starting");
-  TRACE(NCCL_RAS, "RAS: coll nLegTimeouts %d, nPeers %d, nData %d; commsData nComms %d", coll->nLegTimeouts,
-        coll->nPeers, coll->nData, commsData->nComms);
 
   if (coll->nFwdSent != coll->nFwdRecv) {
     INFO(NCCL_RAS, "RAS invalid collective operation status; client status %d -- internal error?", client->status);
     return ncclInternalError;
   }
-  // Like the check above, return while client->coll is still set, so that rasClientRun frees it.
+  // Like the check above, return while client->coll is still set, so that rasClientRun frees it. This must
+  // precede any read of commsData, including the TRACE below.
   NCCLCHECK(rasClientValidateComms(coll));
+  TRACE(NCCL_RAS, "RAS: coll nLegTimeouts %d, nPeers %d, nData %d; commsData nComms %d", coll->nLegTimeouts,
+        coll->nPeers, coll->nData, commsData->nComms);
   client->coll = nullptr;
 
   rasOutReset();
