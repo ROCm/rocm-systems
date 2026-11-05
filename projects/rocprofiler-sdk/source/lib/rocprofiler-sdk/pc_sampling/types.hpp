@@ -37,8 +37,10 @@
 #endif
 
 #include <atomic>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 namespace rocprofiler
 {
@@ -70,15 +72,22 @@ struct PCSAgentSession
     // Client index from the context (tool's id)
     uint32_t client_idx = 0;
 
-    // The context-level service flag records the tool's global start/stop intent. Kernel replay
-    // can temporarily suspend one agent's ROCr session without changing that global state.
-    // Transitions are serialized because ROCr start/stop and the stop-time flush must complete
-    // before a replay pass can use another clock-gating-sensitive service.
-    std::mutex        state_mutex{};
-    bool              transition_in_progress = false;
-    bool              transition_target      = false;
-    std::atomic<bool> active{false};
-    std::atomic<bool> replay_suspended{false};
+    // Lifecycle, in order:
+    // 1. configure_pc_sampling_service creates the session and records the owning context.
+    // 2. start_service / stop_service are the tool's global intent (context start/stop).
+    // 3. sync_replay_service / restore_replay_service suspend and restore one agent's ROCr
+    //    session around a kernel-replay pass without changing that global intent.
+    // 4. service_fini tears the session down.
+    // Transitions are serialized. ROCr start/stop and the stop-time flush must finish before a
+    // replay pass uses another clock-gating-sensitive service. replay_suspended is read under
+    // state_mutex so a global start cannot resurrect sampling during a counter pass.
+    std::mutex              state_mutex{};
+    std::condition_variable state_cv{};
+    bool                    transition_in_progress = false;
+    bool                    transition_target      = false;
+    std::thread::id         transition_owner{};
+    std::atomic<bool>       active{false};
+    std::atomic<bool>       replay_suspended{false};
 };
 
 // TODO static assertions

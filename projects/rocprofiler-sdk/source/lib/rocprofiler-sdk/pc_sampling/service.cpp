@@ -32,8 +32,10 @@
 #    include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
 #    include "lib/rocprofiler-sdk/pc_sampling/utils.hpp"
 
+#    include <condition_variable>
 #    include <mutex>
 #    include <optional>
+#    include <thread>
 
 namespace rocprofiler
 {
@@ -60,29 +62,44 @@ set_session_active(const session_ptr_t& session, bool active)
 {
     if(!session) return ROCPROFILER_STATUS_SUCCESS;
 
-    // A global context start must not override a replay-local suspension.
-    active = active && !session->replay_suspended.load();
+    const bool requested = active;
+    auto       state_lock = std::unique_lock{session->state_mutex};
+    for(;;)
+    {
+        // Read the suspension under the lock. A global start that stalled before taking the
+        // lock must observe a suspension the replay loop already published.
+        const bool effective = requested && !session->replay_suspended.load();
+        if(session->transition_in_progress)
+        {
+            // A tool callback on this thread is inside the ROCr start/stop we are running.
+            // Waiting here deadlocks. An independent caller waits for the real outcome.
+            if(session->transition_owner == std::this_thread::get_id())
+                return ROCPROFILER_STATUS_ERROR;
+            session->state_cv.wait(state_lock,
+                                   [&]() { return !session->transition_in_progress; });
+            continue;
+        }
+        if(session->active.load() == effective) return ROCPROFILER_STATUS_SUCCESS;
 
-    auto state_lock = std::unique_lock{session->state_mutex};
-    if(session->active.load() == active) return ROCPROFILER_STATUS_SUCCESS;
-    if(session->transition_in_progress)
-        return session->transition_target == active ? ROCPROFILER_STATUS_SUCCESS
-                                                    : ROCPROFILER_STATUS_ERROR;
-    session->transition_in_progress = true;
-    session->transition_target      = active;
-    state_lock.unlock();
+        session->transition_in_progress = true;
+        session->transition_target      = effective;
+        session->transition_owner       = std::this_thread::get_id();
+        state_lock.unlock();
 
-    // Do not hold state_mutex across ROCr calls. Stopping flushes samples and can invoke a tool
-    // buffer callback; a callback that controls a context must fail its overlapping transition
-    // rather than deadlock on this session.
-    auto       transitioned = false;
-    const auto status       = active ? hsa::pc_sampling_session_start(session.get())
-                                     : hsa::pc_sampling_session_stop(session.get(), &transitioned);
-    if(active) transitioned = status == ROCPROFILER_STATUS_SUCCESS;
-    state_lock.lock();
-    if(transitioned) session->active.store(active);
-    session->transition_in_progress = false;
-    return status;
+        // Do not hold state_mutex across ROCr calls. Stopping flushes samples and can invoke a
+        // tool buffer callback.
+        auto       transitioned = false;
+        const auto status       = effective ? hsa::pc_sampling_session_start(session.get())
+                                           : hsa::pc_sampling_session_stop(session.get(),
+                                                                           &transitioned);
+        if(effective) transitioned = status == ROCPROFILER_STATUS_SUCCESS;
+        state_lock.lock();
+        if(transitioned) session->active.store(effective);
+        session->transition_in_progress = false;
+        session->transition_owner       = {};
+        session->state_cv.notify_all();
+        return status;
+    }
 }
 
 rocprofiler_status_t
