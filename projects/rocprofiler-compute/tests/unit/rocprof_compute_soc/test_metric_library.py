@@ -91,7 +91,12 @@ def family(tmp_path, monkeypatch):
 
 
 def test_arch_chain_of_real_archs():
-    assert metric_library.arch_chain("gfx90a") == ["gfx908", "gfx90a"]
+    assert metric_library.arch_chain("gfx950") == [
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950",
+    ]
 
 
 def test_arch_chain_rejects_unknown_arch():

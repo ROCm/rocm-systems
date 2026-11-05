@@ -71,6 +71,11 @@ ROOFLINE_L2_BW = (
     "vl1d.l2_bw",
     ROOFLINE_L2_BW_EQUATION.format(64),
 )
+ROOFLINE_L2_BW_128B = (
+    "L2 Cache Bandwidth",
+    "vl1d.l2_bw",
+    ROOFLINE_L2_BW_EQUATION.format(128),
+)
 ROOFLINE_LDS_BW = (
     "LDS Bandwidth",
     "lds.theoretical_bw",
@@ -92,10 +97,38 @@ DISPLAY_VARIANTS = {
         "4.1.11": ROOFLINE_LDS_BW,
         "11.2.7": PIPELINE_MFMA_UTIL,
     },
+    "gfx942": {
+        "4.1.10": ROOFLINE_L2_BW_128B,
+        "4.1.12": ROOFLINE_LDS_BW,
+        "11.2.7": PIPELINE_MFMA_UTIL,
+        # TODO(AIPROFCOMP-820): the clamp is deferred (FOLLOWUPS); the other vL1D hit
+        # rate rows have no NOISE_CLAMP.
+        "16.3.5": (
+            "Cache Hit Rate",
+            "vl1d.hit_rate",
+            "100 * SUM(NOISE_CLAMP(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum"
+            " + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
+            "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), TCP_TOTAL_CACHE_ACCESSES_sum)) "
+            "/ SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
+        ),
+    },
+    "gfx950": {
+        "2.1.23": (
+            "L2-Fabric Read BW",
+            "fabric.rd_bw",
+            "SUM(128 * TCC_EA0_RDREQ_128B_sum + 64 * TCC_EA0_RDREQ_64B_sum "
+            "+ 32 * TCC_EA0_RDREQ_32B_sum) / SUM(End_Timestamp - Start_Timestamp)",
+        ),
+        "4.1.12": ROOFLINE_L2_BW_128B,
+        "4.1.14": ROOFLINE_LDS_BW,
+        "11.2.9": PIPELINE_MFMA_UTIL,
+    },
 }
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
-UNIT_VARIANTS = {arch: CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a")}
+UNIT_VARIANTS = {
+    arch: CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx942", "gfx950")
+}
 
 
 def member_arch(arch: str) -> str:

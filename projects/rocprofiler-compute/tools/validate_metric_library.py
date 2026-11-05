@@ -61,12 +61,18 @@ VARIABLE_FIELDS = ("formula",)
 # A roofline benchmark ceiling, the measured peak in "peak_empirical".
 EMPIRICAL_PEAK_RE = re.compile(r"\$(\w+)_empirical_peak")
 # Ceilings the roofline benchmark measures that no row shows as a peak: on every arch,
-# the VALU integer rates; per arch, the rates the roofline combines or does not show.
-CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops")
-ARCH_CEILINGS_WITHOUT_METRIC = {}
+# the VALU integer rates and MALL bandwidth (analyze skips MALL, roofline_calc.py); per
+# arch, the rates the roofline combines or does not show.
+CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops", "MALLBw")
+ARCH_CEILINGS_WITHOUT_METRIC = {
+    # The roofline shows the combined F6F4 MFMA rate.
+    "gfx950": ("MFMAF4Flops", "MFMAF6Flops"),
+}
 # Ids allowed to share another id's formula (id -> that id): the same counters bounded
-# by a different measured ceiling.
-SHARED_FORMULA_IDS = {}
+# by a different measured ceiling. gfx950 counts MXF8 matrix work in the F8 counter.
+SHARED_FORMULA_IDS = {
+    "compute.mfma_flops_mxf8": "compute.mfma_flops_f8",
+}
 # Ids that hold another id's formula on a different arch (id -> that id): one label
 # shows two equations on an arch, and the parent arch's equation keeps the id until
 # the metric owners choose one.
