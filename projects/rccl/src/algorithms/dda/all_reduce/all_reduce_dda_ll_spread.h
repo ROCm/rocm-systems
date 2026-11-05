@@ -32,6 +32,7 @@
 #endif
 
 #include "algorithms/dda/device/CollCommon.h"
+
 #include "algorithms/dda/all_reduce/all_reduce_dda_ll_twoshot.h"
 
 namespace dda::common {
@@ -51,6 +52,9 @@ constexpr int kDdaLLSpreadMaxRanks = 144;
 // Units (one LL line each) a thread keeps in flight per sweep.
 constexpr int kDdaLLSpreadBatch = 4;
 
+// A pass polls (nRanks - 1) * slice < kDdaLLSpreadLdsPkts lines, so one sweep of a full block covers them.
+static_assert(kDdaLLSpreadLdsPkts <= kDdaLLSpreadThreads * kDdaLLSpreadBatch, "a reduce pass needs one poll sweep");
+
 // Packets of one shard a single reduce pass covers for nRanks ranks.
 __host__ __device__ constexpr size_t ddaLLSpreadPassPkts(int nRanks) {
   return (size_t)kDdaLLSpreadLdsPkts / (size_t)nRanks;
@@ -69,9 +73,13 @@ __host__ __device__ constexpr size_t ddaLLSpreadShardLen(size_t nPk, size_t shar
 
 // Workgroup barrier for LDS only: on gfx1250 __syncthreads() would also wait for every remote store in flight.
 __device__ __forceinline__ void ddaLLSpreadLdsBarrier() {
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
   __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
   __builtin_amdgcn_s_barrier();
   __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+#else
+  __syncthreads();
+#endif
 }
 
 // Polls the lines of up to kDdaLLSpreadBatch units this thread owns (mask bit i = unit i valid); false if aborted.
@@ -125,7 +133,7 @@ __launch_bounds__(kDdaLLSpreadThreads)
   // Peer of unit u in runs of run32 packets per peer, counted from selfRank + 1.
   auto unitPeer = [&](size_t u, uint32_t run32) { return (selfRank + 1 + (int)((uint32_t)u / run32)) % nRanks; };
 
-  // Unit u of phase 1 (peer offset r, packet k): peer and packet, and its payload loaded from sendbuff.
+  // Unit u of phase 1 (peer, packet pk): peer and packet, and its payload loaded from sendbuff.
   auto sendUnit = [&](size_t u, int& peer, size_t& pk, uint32_t& d0, uint32_t& d1) {
     peer = -1;
     if (u < peerUnits) {
@@ -272,7 +280,7 @@ __launch_bounds__(kDdaLLSpreadThreads)
     }
   }
 
-  // Phase 3: unit u = (peer offset r, packet k): poll that peer's reduced packet and write it to its part of recvbuff.
+  // Phase 3: unit u = (peer, packet pk): poll that peer's reduced packet and write it to its part of recvbuff.
   for (size_t base = tid; base < peerUnits; base += nthr * kDdaLLSpreadBatch) {
     const uint32_t* line[kDdaLLSpreadBatch];
     size_t w[kDdaLLSpreadBatch];
