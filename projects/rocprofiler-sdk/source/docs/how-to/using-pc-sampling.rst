@@ -545,5 +545,5 @@ dispatch metadata:
     GROUP BY K.guid, K.dispatch_id, KS.display_name
   ORDER BY sample_count DESC;
 
-The ROCPD schema version containing PC sampling support is **3.0.6**. For the
+The ROCPD schema version containing PC sampling support is **3.1.0**. For the
 full ROCPD format documentation, see :ref:`using-rocpd-output-format`.

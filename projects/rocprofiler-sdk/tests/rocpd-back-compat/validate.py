@@ -38,8 +38,8 @@ Key invariants verified:
   * CSV  — graph_exec_id / graph_node_id columns absent for pre-latest schemas;
            out_graph_launch_trace.csv not created for pre-latest schemas.
   * CSV  — above columns / file ARE present for the latest schema.
-  * CSV  — PC-sampling files absent before 3.0.6; present with their documented
-           columns from 3.0.6.
+    * CSV  — PC-sampling files absent before 3.1.0; present with their documented
+                     columns from 3.1.0.
   * Perfetto — .pftrace exists and is non-empty for every schema.
   * OTF2 — "HIP Graph Launch" locations absent for pre-latest schemas;
             present for the latest schema (requires the ``otf2`` package).
@@ -308,7 +308,7 @@ def test_csv_for_schema_3_0_5_changes_present(output_root, latest_schema):
 
 
 # ---------------------------------------------------------------------------
-# CSV tests — schema 3.0.6 (PC sampling output)
+# CSV tests — schema 3.1.0 (PC sampling output)
 # ---------------------------------------------------------------------------
 
 _PC_SAMPLING_CSVS = (
@@ -332,10 +332,10 @@ _PC_SAMPLING_STOCHASTIC_COLUMNS = _PC_SAMPLING_COLUMNS + [
 ]
 
 
-def test_csv_for_schema_3_0_6_changes_absent(output_root, old_schema):
-    """PC-sampling CSVs must not be produced for pre-3.0.6 schemas."""
-    if tuple(map(int, old_schema.split("."))) >= (3, 0, 6):
-        return test_csv_for_schema_3_0_6_changes_present(output_root, old_schema)
+def test_csv_for_schema_3_1_0_changes_absent(output_root, old_schema):
+    """PC-sampling CSVs must not be produced for pre-3.1.0 schemas."""
+    if tuple(map(int, old_schema.split("."))) >= (3, 1, 0):
+        return test_csv_for_schema_3_1_0_changes_present(output_root, old_schema)
 
     for name in _PC_SAMPLING_CSVS:
         assert not (
@@ -343,8 +343,8 @@ def test_csv_for_schema_3_0_6_changes_absent(output_root, old_schema):
         ).exists(), f"{name} should not be created for schema {old_schema}"
 
 
-def test_csv_for_schema_3_0_6_changes_present(output_root, latest_schema):
-    """Schema 3.0.6 PC samples are exported with their documented columns."""
+def test_csv_for_schema_3_1_0_changes_present(output_root, latest_schema):
+    """Schema 3.1.0 PC samples are exported with their documented columns."""
     csv_dir = output_root / latest_schema / "csv"
     host_trap, stochastic = (csv_dir / name for name in _PC_SAMPLING_CSVS)
     for path in (host_trap, stochastic):

@@ -43,7 +43,7 @@ rocprofiler-sdk-rocpd:
       rocpd_indexes: versions/3.0.5/rocpd_indexes.sql
       rocpd_data_views: versions/3.0.5/data_views.sql
       rocpd_summary_views: versions/3.0.5/summary_views.sql
-    - version: "3.0.6"
+    - version: "3.1.0"
       rocpd_metadata: rocpd_metadata.sql
       rocpd_tables: rocpd_tables.sql
       rocpd_views: rocpd_views.sql
@@ -82,7 +82,7 @@ rocprofiler-sdk-rocpd:
 #   instance is always set on a location row
 # - spm_counters view reads those fields from rocpd_info_pmc
 
-# Version 3.0.6
+# Version 3.1.0
 # - Added rocpd_info_blob_schema table (self-describing binary blob layout)
 # - Added rocpd_info_blob_field table (per-field descriptor for blob schemas)
 # - Added rocpd_blob_event table (schema-tagged binary blob instances)

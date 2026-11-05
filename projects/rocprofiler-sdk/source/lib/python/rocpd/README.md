@@ -570,7 +570,7 @@ Purpose: One memory allocation event (ALLOC, FREE, REALLOC, or RECLAIM) at REAL,
 
 **rocpd_info_blob_schema**
 
-Purpose: Self-describing layout for a packed binary blob (schema 3.0.6+). Describes the source table the blob augments, its byte order, alignment, and total size; rocpd_info_blob_field lists the individual fields. Consumers decode blobs from this metadata without hard-coding struct layouts.
+Purpose: Self-describing layout for a packed binary blob (schema 3.1.0+). Describes the source table the blob augments, its byte order, alignment, and total size; rocpd_info_blob_field lists the individual fields. Consumers decode blobs from this metadata without hard-coding struct layouts.
 
 | Field | Meaning |
 | ----- | ------- |
@@ -620,7 +620,7 @@ Purpose: A packed binary blob instance tagged by schema and linked to an event; 
 
 **rocpd_gpu_pc_sample**
 
-Purpose: One GPU PC (program counter) sample (schema 3.0.6+). Stores the sampled program counter, dispatch, execution mask, and stochastic-only fields; architecture-specific hardware state is stored in a companion rocpd_blob_event row and surfaced by the rocpd_gpu_pc_sample_decoded view.
+Purpose: One GPU PC (program counter) sample (schema 3.1.0+). Stores the sampled program counter, dispatch, execution mask, and stochastic-only fields; architecture-specific hardware state is stored in a companion rocpd_blob_event row and surfaced by the rocpd_gpu_pc_sample_decoded view.
 
 | Field | Meaning |
 | ----- | ------- |
@@ -644,7 +644,7 @@ Purpose: One GPU PC (program counter) sample (schema 3.0.6+). Stores the sampled
 
 **rocpd_disassembly_data**
 
-Purpose: Disassembled instruction text for sampled program counters (schema 3.0.6+). Populated at collection time with --complete-isa-decode, and by default during post-processing where instructions lazily decoded from a code object whose bytes match its recorded content_hash (rocpd_info_code_object.extdata) are written back at exit (disable with --no-cache-disassembly). Rows are deduplicated per (guid, code_object_id, code_object_offset).
+Purpose: Disassembled instruction text for sampled program counters (schema 3.1.0+). Populated at collection time with --complete-isa-decode, and by default during post-processing where instructions lazily decoded from a code object whose bytes match its recorded content_hash (rocpd_info_code_object.extdata) are written back at exit (disable with --no-cache-disassembly). Rows are deduplicated per (guid, code_object_id, code_object_offset).
 
 | Field | Meaning |
 | ----- | ------- |

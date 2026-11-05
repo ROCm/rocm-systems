@@ -624,8 +624,8 @@ def insert_minimal_data(
         )
 
     # PC sampling (blob tables, rocpd_gpu_pc_sample, rocpd_disassembly_data, and
-    # rocpd_event.parent_id) was introduced in schema 3.0.6.
-    if ver >= (3, 0, 6):
+    # rocpd_event.parent_id) was introduced in schema 3.1.0.
+    if ver >= (3, 1, 0):
         conn.executemany(
             f"INSERT INTO {tbl('rocpd_info_blob_schema')} "
             "(id, guid, nid, pid, name, source_table, byte_order, alignment, "

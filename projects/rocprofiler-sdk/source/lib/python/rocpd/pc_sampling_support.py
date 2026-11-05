@@ -1,3 +1,27 @@
+###############################################################################
+# MIT License
+#
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+###############################################################################
+
 """PC-sampling blob views, ISA decoding, and SQL query rewriting."""
 
 import atexit
@@ -389,7 +413,7 @@ def _setup_isa_decode_views(conn, codeobj_path_prefix_map, cache_disassembly):
     # into rocpd_disassembly_data at interpreter exit, so a later open serves the
     # stored text through the decoded view's COALESCE instead of decoding it
     # again.  Strictly best-effort: any problem (read-only or deleted database,
-    # lock contention, a pre-3.0.6 input without the table, ...) skips the
+    # lock contention, a pre-3.1.0 input without the table, ...) skips the
     # write-back and leaves the database untouched.
     # ------------------------------------------------------------------
     writeback_enabled = bool(cache_disassembly) and bool(has_samples)

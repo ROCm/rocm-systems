@@ -1862,14 +1862,14 @@ You can use the following methods to access the data in the rocpd database:
 
 .. _rocpd-pc-sampling:
 
-PC sampling data (schema 3.0.6)
+PC sampling data (schema 3.1.0)
 ---------------------------------
 
-PC sampling support was introduced in schema version **3.0.6**. When
+PC sampling support was introduced in schema version **3.1.0**. When
 ``rocprofv3`` is run with ``--pc-sampling-beta-enabled`` and
 ``--output-format rocpd``, the following tables are populated.
 Schema 3.0.5 remains frozen under ``versions/3.0.5``; the top-level SQL files
-describe 3.0.6. Older schema snapshots are not changed by PC-sampling support.
+describe 3.1.0. Older schema snapshots are not changed by PC-sampling support.
 
 rocpd_gpu_pc_sample
 ++++++++++++++++++++
@@ -2205,7 +2205,7 @@ only those that resolved to an instruction.
      cached.
    - It is skipped silently when the database cannot be written (a read-only
      file or filesystem, lock contention, a database deleted or replaced after
-     it was opened, or a pre-3.0.6 database without the
+    it was opened, or a pre-3.1.0 database without the
      ``rocpd_disassembly_data`` table); the database is left untouched.
    - Writes are de-duplicated per ``guid``, ``code_object_id``, and
      ``code_object_offset``, so the cache never changes query results.

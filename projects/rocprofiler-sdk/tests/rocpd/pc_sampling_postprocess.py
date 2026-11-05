@@ -24,7 +24,7 @@
 
 """GPU-independent tests for rocpd PC-sampling post-processing.
 
-Each test writes schema-3.0.6 databases holding synthetic PC samples and replaces
+Each test writes schema-3.1.0 databases holding synthetic PC samples and replaces
 the COMGR-backed ``libpyrocpd.isa_decoder`` with :class:`FakeDecoder`, whose
 instruction text is derived from the code-object bytes.  Write-back happens at
 interpreter exit, so tests that inspect it run the importer in a subprocess.
@@ -42,9 +42,10 @@ import uuid as uuidlib
 import pytest
 
 from rocpd import libpyrocpd
+from rocpd.features import get_supported_features_from_version
 from rocpd.importer import RocpdImportData
 
-SCHEMA_VERSION = "3.0.6"
+SCHEMA_VERSION = "3.1.0"
 NID = 1
 PID = 100
 TID = 200
@@ -52,6 +53,16 @@ AGENT_ID = 1
 PC_SCHEMA_ID = 1
 REGION_SCHEMA_ID = 2
 FULL_EXEC_MASK = "18446744073709551615"
+
+
+@pytest.mark.parametrize(
+    "version,pc_sampling_available",
+    [((3, 0, 5), False), ((3, 0, 99), False), ((3, 1, 0), True), ((3, 1, 1), True)],
+)
+def test_pc_sampling_schema_version_boundary(version, pc_sampling_available):
+    features = get_supported_features_from_version(libpyrocpd.schema_version(*version))
+    assert ("pc_sampling" in features) == pc_sampling_available
+    assert "spm_counter_location" in features
 
 
 class FakeDecoder:
@@ -207,7 +218,7 @@ def file_code_object(path, data):
 
 
 def build_db(path, *, code_objects=(), samples=(), regions=(), guid=None):
-    """Write a schema-3.0.6 database and return its guid.
+    """Write a schema-3.1.0 database and return its guid.
 
     ``code_objects``: dicts with id, uri and optional storage_type, memory_size, content_hash.
     ``samples``: dicts with timestamp and optional offset, code_object_id, exec_mask, event_id.
