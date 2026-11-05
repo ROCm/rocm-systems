@@ -196,8 +196,21 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
     if (nonsequential(i))
       shown[i - 1] = shown[i] = true;
   }
+  // Pad PCs to the widest printed one so the instruction column lines up.
+  uint64_t widest_pc = 0;
+  for (size_t i = first; i < last; ++i)
+    if (shown[i])
+      widest_pc = std::max(widest_pc, trace[i].pc());
+  if (conflict && !conflict_index)
+    widest_pc = std::max(widest_pc, conflict->instruction.pc());
+  if (!read_index)
+    widest_pc = std::max(widest_pc, read.instruction.pc());
+  const size_t pc_width = std::format("{:#x}", widest_pc).size();
+  auto format_pc = [&](uint64_t pc) {
+    return std::format("{:<{}}", std::format("{:#x}", pc), pc_width);
+  };
   std::ostringstream oss;
-  oss << "       PC  Instruction\n";
+  oss << "       " << std::format("{:<{}}", "PC", pc_width) << "  Instruction\n";
   auto annotation = [&](const MarkedInstruction &mark) {
     oss << "  ; <-- wave " << mark.wave;
     if (mark.lane >= 0)
@@ -205,8 +218,7 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
   };
   auto external = [&](const MarkedInstruction &mark, std::string_view note) {
     const auto &instruction = mark.instruction;
-    oss << "  ==>  0x" << std::hex << instruction.pc() << std::dec << "  "
-        << disassemble(instruction) << note;
+    oss << "  ==>  " << format_pc(instruction.pc()) << "  " << disassemble(instruction) << note;
     annotation(mark);
     oss << '\n';
   };
@@ -230,8 +242,8 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
                                                : "same PC executed again")
           << " ---\n";
     }
-    oss << ((is_conflict || is_read) ? "  ==>  " : "       ") << "0x" << std::hex
-        << instruction.pc() << std::dec << "  " << disassemble(instruction);
+    oss << ((is_conflict || is_read) ? "  ==>  " : "       ") << format_pc(instruction.pc()) << "  "
+        << disassemble(instruction);
     if (is_conflict)
       annotation(*conflict);
     if (is_read)

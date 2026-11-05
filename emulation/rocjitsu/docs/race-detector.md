@@ -102,7 +102,7 @@ Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]: read-after-write (RA
   Current access: read at PC 0x1018.
   Conflict: store from VGPRs into LDS at PC 0x1010, wave 1.
   Completed for wave 1, but not synchronized with wave 0.
-       PC  Instruction
+       PC      Instruction
   ==>  0x1010  ds_write_b32 v0, v1  (outside this wave's trace)  ; <-- wave 1
        Execution trace below is for wave 0.
        0x1014  v_sub_u32_e32 v1, 0, v0

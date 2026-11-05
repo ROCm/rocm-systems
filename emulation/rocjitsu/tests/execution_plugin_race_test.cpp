@@ -3048,7 +3048,7 @@ TEST(FormatTraceTest, WaveLaneAnnotations) {
   EXPECT_NE(result.find("; <-- wave 3"), std::string::npos);
   EXPECT_NE(result.find("; <-- wave 0 lane 5"), std::string::npos);
   EXPECT_EQ(result,
-            "       PC  Instruction\n"
+            "       PC     Instruction\n"
             "  ==>  0x100  ds_write_b32 v9, v12  (outside this wave's trace)  ; <-- wave 3\n"
             "       Execution trace below is for wave 0.\n"
             "       0x100  ds_write_b32 v9, v12\n"
@@ -3120,7 +3120,7 @@ TEST(FormatTraceTest, IdenticalEncodingsKeepTheFirstProducerAndLastAccess) {
   auto resolve = [](const InstructionSnapshot &) { return "s_nop 0"; };
   const auto report =
       formatTrace(trace, resolve, MarkedInstruction{trace[3], 0, -1}, {trace[4], 0, 0});
-  EXPECT_EQ(report, "       PC  Instruction\n"
+  EXPECT_EQ(report, "       PC     Instruction\n"
                     "  ==>  0x100  s_nop 0  ; <-- wave 0\n"
                     "       0x104  s_nop 0\n"
                     "       0x108  s_nop 0\n"
@@ -3145,7 +3145,7 @@ TEST(FormatTraceTest, RepeatedPcKeepsEachCapturedEncoding) {
                     return decoded.succeeded() ? decoded.value()->disassemble() : std::string{};
                   },
                   MarkedInstruction{load, 0, -1}, {trace[3], 0, 0});
-  EXPECT_EQ(report, "       PC  Instruction\n"
+  EXPECT_EQ(report, "       PC     Instruction\n"
                     "  ==>  0x100  ds_read_b32 v8, v0  ; <-- wave 0\n"
                     "       --- jump forward ---\n"
                     "       0x104  s_nop 0\n"
@@ -3167,7 +3167,7 @@ TEST(FormatTraceTest, RewrittenReadPcDoesNotTrimAtAnEarlierEncoding) {
                     return std::format("s_nop {}", instruction.encoding()[0] & 0xffff);
                   },
                   MarkedInstruction{producer, 0, -1}, {read, 0, 0});
-  EXPECT_EQ(report, "       PC  Instruction\n"
+  EXPECT_EQ(report, "       PC     Instruction\n"
                     "  ==>  0x100  s_nop 0  ; <-- wave 0\n"
                     "       0x104  s_nop 0\n"
                     "       --- jump backward ---\n"
@@ -3185,7 +3185,7 @@ TEST(FormatTraceTest, DifferentEncodingAtConflictPcIsNotTheProducer) {
                     return std::format("s_nop {}", instruction.encoding()[0] & 0xffff);
                   },
                   MarkedInstruction{producer, 1, -1}, {trace[1], 0, 0});
-  EXPECT_EQ(report, "       PC  Instruction\n"
+  EXPECT_EQ(report, "       PC     Instruction\n"
                     "  ==>  0x100  s_nop 7  (outside this wave's trace)  ; <-- wave 1\n"
                     "       Execution trace below is for wave 0.\n"
                     "       0x100  s_nop 0\n"

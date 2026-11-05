@@ -96,7 +96,7 @@ TEST(RaceReportTraceTest, ExactForwardBackwardAndRepeatedPcSeparators) {
   for (uint32_t i = 0; auto pc : {0x100u, 0x120u, 0x108u, 0x108u})
     trace.push(snapshot(pc, i++, 1));
   EXPECT_EQ(formatTrace(trace, text, mark(trace, 0), mark(trace, 3)),
-            "       PC  Instruction\n"
+            "       PC     Instruction\n"
             "  ==>  0x100  instruction 0  ; <-- wave 0 lane 0\n"
             "       --- jump forward ---\n"
             "       0x120  instruction 1\n"
@@ -104,6 +104,19 @@ TEST(RaceReportTraceTest, ExactForwardBackwardAndRepeatedPcSeparators) {
             "       0x108  instruction 2\n"
             "       --- same PC executed again ---\n"
             "  ==>  0x108  instruction 3  ; <-- wave 0 lane 0\n");
+}
+
+TEST(RaceReportTraceTest, PadsPcsSoInstructionsShareAColumn) {
+  Trace trace;
+  trace.push(snapshot(0xfc, 0, 1));
+  trace.push(snapshot(0x100, 1, 1));
+  EXPECT_EQ(
+      formatTrace(trace, text, MarkedInstruction{snapshot(0x2000, 9, 1), 1, 0}, mark(trace, 1)),
+      "       PC      Instruction\n"
+      "  ==>  0x2000  instruction 9  (outside this wave's trace)  ; <-- wave 1 lane 0\n"
+      "       Execution trace below is for wave 0.\n"
+      "       0xfc    instruction 0\n"
+      "  ==>  0x100   instruction 1  ; <-- wave 0 lane 0\n");
 }
 
 TEST(RaceReportTraceTest, FullAddressRangeAndSelfLoopHaveCorrectJumpMarkers) {
