@@ -99,7 +99,8 @@
     the caller `file:line`, run the original dispatch (the one-op `Execute`),
     then pop. `x @ x` therefore marks `jax.dot_general`; `jnp.sum` marks
     `jax.reduce_sum`.
-- JAX dispatch is asynchronous: the callable returns before the GPU finishes.
+- JAX dispatch is asynchronous: the callable returns before the GPU finishes
+  ([Asynchronous dispatch](https://docs.jax.dev/en/latest/async_dispatch.html)).
   - The range encloses the host-side launch enqueue, not GPU completion.
   - Those enqueues inherit the marker's correlation id.
   - `GUID` is the rocprofiler-sdk database/import identifier
