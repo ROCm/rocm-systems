@@ -358,6 +358,8 @@ static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   plan->kernelArgs->comm = comm->devComm;
   plan->kernelArgs->channelMask = plan->channelMask;
   plan->kernelArgs->workStorageType = plan->workStorageType;
+  plan->kernelArgs->devFlags = (ncclProfilerPluginLoaded() ? RCCL_DEV_FLAG_PROFILER : 0) |
+                               (comm->deviceCountersBlock != nullptr ? RCCL_DEV_FLAG_PROGRESS : 0);
 #ifdef ENABLE_WARP_SPEED
   plan->kernelArgs->warpLevelComm = rcclWarpSpeedSupported(comm, plan);
 #endif
@@ -4086,8 +4088,10 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     // withdrew symk (NCCL_ALGO, or AllReduce/AllGather size windows).
     t->symkExtract = RCCL_SYMK_EXTRACT_NONE;
     if (info->decisionValid) {
-      t->symkExtract =
-        (info->decision.algo == RCCL_SYMMETRIC) ? RCCL_SYMK_EXTRACT_ALLOW : RCCL_SYMK_EXTRACT_DENY;
+      t->symkExtract = RCCL_SYMK_EXTRACT_DENY;
+      if (info->decision.algo == RCCL_SYMMETRIC) {
+        t->symkExtract = info->decision.symkTdmOnly ? RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY : RCCL_SYMK_EXTRACT_ALLOW;
+      }
     }
 
     planner->nTasksColl += 1;

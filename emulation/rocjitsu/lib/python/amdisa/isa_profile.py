@@ -428,6 +428,11 @@ class IsaProfile(ABC):
     """
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        """Opt into rj-arith matrix execution independently of operand layout."""
+        return False
+
+    @property
     @abstractmethod
     def supported_versions(self) -> list[str]:
         """Schema versions this profile supports."""
@@ -2543,6 +2548,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return FloatDotAccumulation.GFX11
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        return True
+
+    @property
     def matrix_layout(self) -> MatrixLayout:
         return MatrixLayout.WMMA_REPLICATED_HALFWAVE
 
@@ -2617,6 +2626,11 @@ class Rdna3_5Profile(Rdna3Profile):
     class so the codegen pipeline can auto-detect RDNA3.5 XML files
     separately from RDNA3.
     """
+
+    @property
+    def uses_rj_arith_matrix(self) -> bool:
+        # RDNA3.5 retains its legacy implementation despite sharing the RDNA3 layout.
+        return False
 
     @property
     def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
@@ -2883,6 +2897,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        return True
+
+    @property
     def matrix_layout(self) -> MatrixLayout:
         return MatrixLayout.WMMA_SPLIT_K
 
@@ -3009,6 +3027,11 @@ class Cdna5Profile(Rdna4Profile):
     """
 
     flat_saddr_null_aliases = ()
+
+    @property
+    def uses_rj_arith_matrix(self) -> bool:
+        # CDNA5 needs its own matrix bindings, including fixed-wave sparse forms.
+        return False
 
     @property
     def bf16_inline_uses_f32_carrier(self) -> bool:
