@@ -29,6 +29,8 @@ METRIC_LIBRARY_PARENT_ARCH: Dict[str, Optional[str]] = {
     "gfx90a": "gfx908",
     "gfx942": "gfx90a",
     "gfx950": "gfx942",
+    "gfx115x": None,
+    "gfx1250": None,
 }
 VARIABLES_FILENAME = "variables.yaml"
 
