@@ -16,9 +16,7 @@
 /// translate.
 ///
 /// Storage operations are best effort. Unusable storage, malformed entries and
-/// native I/O failures leave the caller to translate normally. Standard-library
-/// exceptions in key derivation, lookup and storage are fatal; they are not
-/// treated as cache misses or refused writes.
+/// native I/O failures leave the caller to translate normally.
 ///
 /// Nothing here is specific to one translation pair. A consumer names its own
 /// domain, which selects an independent tree, and describes its configuration
