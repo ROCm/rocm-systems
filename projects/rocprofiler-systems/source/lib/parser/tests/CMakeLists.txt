@@ -11,6 +11,7 @@ add_library(
     test_source_parsers.cpp
     test_file_preset.cpp
     test_backend.cpp
+    test_configuration_parser.cpp
 )
 
 target_link_libraries(
