@@ -11,7 +11,6 @@
 #include <gtest/gtest.h>
 
 #include <cstdlib>
-#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <memory>
@@ -295,8 +294,7 @@ TEST_F(PluginLoaderTest, AdmissionRejectionPreservesActiveFileSink) {
 
 TEST_F(PluginLoaderTest, RejectedFileOnlyCandidateDiscardsSimulationSummary) {
   rocjitsu::test::ScopedTempDirectory output("rocjitsu-plugin-sinks-");
-  const std::string plugin_dir =
-      std::filesystem::path(PLUGIN_LOADER_FIXTURE_DIR).parent_path().parent_path().string();
+  const std::string plugin_dir = PLUGIN_LOADER_RACE_DIR;
   rocjitsu::ExecutionPluginGroup probe(rocjitsu::PluginSinkConfig{});
   ASSERT_EQ(
       rocjitsu::PluginLoader::load_from_config(R"({"plugins":{"race":{}}})", probe, plugin_dir), 1);
