@@ -54,9 +54,10 @@ also runs the roofline benchmarks.
 - Add `-k <kernel_name>` when the user names the kernels that matter.
 - Add `--no-roof` unless the question is about roofline. A `-b` list without
   block 4 (`roof`) already skips it.
-- `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
-  each kernel, so it only helps when every profiled kernel is dispatched many
-  times. Pair it with `-k`. See Iteration multiplexing in
+- `--iteration-multiplexing` spreads counters over repeated dispatches of each
+  kernel with the same launch parameters, so it only helps when each profiled
+  kernel runs many times with the same launch parameters. Pair it with `-k`.
+  See Iteration multiplexing in
   [profile mode](../../docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
 

@@ -746,32 +746,6 @@ def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute):
             break
 
 
-@pytest.mark.iteration_multiplexing
-def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
-    workload = "tests/workloads/vcopy_iteration_multiplexing/MI350"
-    workload_dir = integration_common.setup_workload_dir(workload)
-
-    # Test with dispatch filtering
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--dispatch",
-        "1",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    # Test without dispatch filtering
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
 def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute, capsys):
     """Test --list-torch-operators fails gracefully without --path"""
     code = binary_handler_analyze_rocprof_compute([

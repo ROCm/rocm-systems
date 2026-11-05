@@ -242,3 +242,27 @@ def test_sanitize_errors_when_operator_flag_without_trace(
         ).sanitize()
     assert "was not profiled" in errors[-1][1]
     assert expected_trace in errors[-1][1]
+
+
+def test_sanitize_errors_when_workload_profiled_with_kernel_multiplexing(
+    tmp_path, monkeypatch
+):
+    workload = tmp_path / "app" / "MI300"
+    workload.mkdir(parents=True)
+    (workload / "profiling_config.yaml").write_text(
+        "iteration_multiplexing: kernel\n", encoding="utf-8"
+    )
+    errors = []
+    monkeypatch.setattr(
+        f"{MODULE}.console_error", functools.partial(record_error_and_exit, errors)
+    )
+    with pytest.raises(SystemExit):
+        OmniAnalyze_Base(
+            argparse.Namespace(tui=False, path=[[str(workload)]]), {}
+        ).sanitize()
+    assert errors[-1] == (
+        "analysis",
+        'This workload was profiled with "--iteration-multiplexing kernel", '
+        "which is no longer supported. "
+        'Profile it again with "--iteration-multiplexing".',
+    )

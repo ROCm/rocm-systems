@@ -87,6 +87,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed unnecessary gfx950 Memory Bandwidth Analysis (block 30) metrics. Block 30 now shows only the L1 cache, L2 bottleneck, and EA bottleneck indicators, as tables 30.1, 30.2, and 30.3.
 
+* Removed the `kernel` policy of `--iteration-multiplexing`. The option no longer takes a value and always spreads counters over repeated dispatches of each kernel with the same launch parameters, as it did by default.
+
 ### Optimized
 
 * Profile mode collects only the counters that metric equations use, which can reduce the number of profiling passes.

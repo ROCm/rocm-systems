@@ -247,10 +247,9 @@ class cli_analysis(OmniAnalyze_Base):
                     path_info[0],
                     args.verbose,
                 )
-                if self._profiling_config.get("iteration_multiplexing") is not None:
+                if self._profiling_config.get("iteration_multiplexing"):
                     workload.raw_pmc = self.iteration_multiplex_impute_counters(
                         workload.raw_pmc,
-                        policy=self._profiling_config["iteration_multiplexing"],
                         workload_dir=Path(path_info[0]),
                     )
                 kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
@@ -297,10 +296,9 @@ class cli_analysis(OmniAnalyze_Base):
                     args.verbose,
                 )
 
-            if self._profiling_config.get("iteration_multiplexing") is not None:
+            if self._profiling_config.get("iteration_multiplexing"):
                 workload.raw_pmc = self.iteration_multiplex_impute_counters(
                     workload.raw_pmc,
-                    policy=self._profiling_config["iteration_multiplexing"],
                     workload_dir=Path(path_info[0]),
                 )
 
