@@ -26,13 +26,6 @@
 
 hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl);
 
-namespace {
-bool have_device() {
-  int n = 0;
-  return hipGetDeviceCount(&n) == hipSuccess && n > 0;
-}
-}  // namespace
-
 /**
  * Test Description
  * ----------------
@@ -41,7 +34,7 @@ bool have_device() {
  *     must still name it afterwards, so a later snapshot can write it.
  */
 TEST_CASE("Unit_HRR_HostUnregister_FailedCallKeepsBuffer", "[hrr]") {
-  if (!have_device()) SKIP("needs a GPU: without one the call fails with hipErrorNoDevice");
+  if (!hrr_test::have_device()) SKIP("needs a GPU: without one the call fails with hipErrorNoDevice");
 
   void* buf = nullptr;
   REQUIRE(posix_memalign(&buf, 64, 256) == 0);
