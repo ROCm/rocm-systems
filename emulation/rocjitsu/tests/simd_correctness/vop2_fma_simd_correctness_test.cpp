@@ -192,7 +192,7 @@ void check_case(const FmaCase &c, uint64_t exec) {
     Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.label << ": decode failed";
     seeded = fx.seed_inputs(SEED, c.is_f16, exec, &nan_lane);
-    fx.cu->execute_instruction(inst, *fx.wf);
+    EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
     auto out = fx.snapshot_dst();
     delete inst;
     return out;
@@ -201,13 +201,12 @@ void check_case(const FmaCase &c, uint64_t exec) {
   const auto scalar_out = run_mode(/*force_scalar=*/true);
   const auto simd_out = run_mode(/*force_scalar=*/false);
 
-  // Core A/B equivalence per active, non-skipped lane. NaN-input lanes carry an
-  // accepted NaN-payload divergence and are excluded identically in both runs
-  // (the skip condition is input-derived).
+  // F32 compares every active lane, including the selected NaN payload.
+  // Legacy F16 forms retain their separate host-arithmetic behavior.
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (active) {
-      if (nan_lane[lane])
+      if (c.is_f16 && nan_lane[lane])
         continue;
       EXPECT_EQ(scalar_out[lane], simd_out[lane])
           << c.label << " lane " << lane << ": SIMD path diverged from scalar body";

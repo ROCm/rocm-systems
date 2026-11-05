@@ -31,6 +31,8 @@ extern int g_TestNodeId;
 extern int g_TestDstNodeId;
 extern bool g_IsChildProcess;
 extern bool g_IsEmuMode;
+extern unsigned int g_AisThreads;
+extern unsigned int g_AisSizeMB;
 
 // Each test should call TEST_START with the test custom profile and HW scheduling
 enum TESTPROFILE{

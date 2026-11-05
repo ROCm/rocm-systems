@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <string>
 
 #ifdef MPI_TESTS_ENABLED
@@ -507,6 +508,9 @@ public:
         // Step 5: Perform ncclSend/ncclRecv which internally triggers ncclRegisterP2pIpcBuffer
         const size_t count = num_floats;
 
+        // Drain setup leftovers so the check after the send/recv covers only that operation.
+        (void)hipGetLastError();
+
         auto nccl_result = ncclGroupStart();
         ASSERT_EQ(ncclSuccess, nccl_result)
             << "Rank " << config.world_rank << ": ncclGroupStart failed";
@@ -542,6 +546,13 @@ public:
         hip_result = hipStreamSynchronize(getActiveStream());
         ASSERT_EQ(hipSuccess, hip_result)
             << "Rank " << config.world_rank << ": hipStreamSynchronize failed";
+
+        // ROCM-33799: registration falls back silently for hipMalloc buffers and must not
+        // leave an error behind for the application's next hipGetLastError.
+        hip_result = hipGetLastError();
+        EXPECT_EQ(hipSuccess, hip_result)
+            << "Rank " << config.world_rank
+            << ": registered send/recv left a stale HIP error: " << hipGetErrorString(hip_result);
 
         if(config.world_rank == 0)
         {
@@ -954,6 +965,16 @@ TEST_F(P2pMPITest, P2pRegistrationBasicBuffersTest)
                                           1,
                                           kRequireSingleNode))
         << "Test requirements not met - all ranks must meet requirements";
+
+    // The IPC graph-registration path owns and reopens its POSIX SHM segment.
+    // CE memcpy mode uses a separate proxy SHM lifetime and unlinks that name
+    // before ncclIpcGraphRegisterBuffer can attach, leaving one rank blocked in
+    // the following collectives. The CE transport itself is covered by
+    // P2pWithMemcpyTest; run this registration test only on the normal P2P path.
+    const char* ceMemcpy = std::getenv("NCCL_P2P_USE_CUDA_MEMCPY");
+    if (ceMemcpy != nullptr && std::strtoll(ceMemcpy, nullptr, 0) != 0) {
+        GTEST_SKIP() << "IPC graph registration is incompatible with NCCL_P2P_USE_CUDA_MEMCPY";
+    }
 
     // Allocate P2P resources
     setupP2PBuffers();

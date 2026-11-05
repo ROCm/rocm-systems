@@ -19,6 +19,7 @@
 #include "amd_smi/impl/amd_smi_drm.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_socket.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_uuid.h"
 #include "amd_smi/impl/amd_smi_wsl_syms.h"
 #include "rocm_smi/rocm_smi_logger.h"
@@ -285,7 +286,7 @@ amdsmi_status_t WSLGPUBackend::GetAsicInfo(amdsmi_asic_info_t* info) {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
   if (r == AMDSMI_STATUS_SUCCESS) {
     const auto& a = device_info_.asic;
-    std::memset(info, 0, sizeof(*info));
+    init_asic_info_defaults(info);
     copy_rocdxg_string(info->market_name, a.market_name);
     info->vendor_id = a.vendor_id;
     if (info->vendor_id == 0x1002)
@@ -294,7 +295,8 @@ amdsmi_status_t WSLGPUBackend::GetAsicInfo(amdsmi_asic_info_t* info) {
     info->device_id = a.device_id;
     info->rev_id = a.rev_id;
     std::snprintf(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, "%016lx", a.asic_serial);
-    info->oam_id = gpu_id_;
+    // oam_id and physical_acc_id stay N/A from the defaults; gpu_id_ is only an
+    // enumeration index, not real hardware data.
     info->num_of_compute_units = a.num_of_compute_units;
     // Convert IP version (major<<16|minor<<8|stepping) to the nibble-packed
     // hex format Python expects: hex(value)[2:] == "MMSS" (e.g. 0x1100 → "gfx1100").
@@ -308,20 +310,16 @@ amdsmi_status_t WSLGPUBackend::GetAsicInfo(amdsmi_asic_info_t* info) {
     return AMDSMI_STATUS_SUCCESS;
   }
   if (r != AMDSMI_STATUS_NOT_SUPPORTED) return r;
-  std::memset(info, 0, sizeof(*info));
+  init_asic_info_defaults(info);
   copy_string(info->market_name, marketing_name_);
   info->vendor_id = vendor_id_;
   if (vendor_id_ == 0x1002)
     copy_string(info->vendor_name, "Advanced Micro Devices, Inc. [AMD/ATI]");
-  info->subvendor_id = std::numeric_limits<uint32_t>::max();
   info->device_id = device_id_;
-  info->rev_id = std::numeric_limits<uint32_t>::max();
-  copy_string(info->asic_serial, "ffffffffffffffff");
-  info->oam_id = gpu_id_;
+  // oam_id and physical_acc_id stay N/A from the defaults; gpu_id_ is only an
+  // enumeration index, not real hardware data.
   info->num_of_compute_units =
       num_compute_units_ ? num_compute_units_ : std::numeric_limits<uint32_t>::max();
-  info->target_graphics_version = std::numeric_limits<uint64_t>::max();
-  info->subsystem_id = std::numeric_limits<uint32_t>::max();
   info->flags = family_id_;
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -459,8 +457,15 @@ amdsmi_status_t WSLGPUBackend::GetGpuActivity(amdsmi_engine_usage_t* info) {
   // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL.
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
   std::memset(info, 0, sizeof(*info));
-  info->gfx_activity = metrics.average_gfx_activity;
-  info->umc_activity = metrics.average_umc_activity;
+  // amdsmi_engine_usage_t's activity fields use the 16-bit sentinel 0xFFFF (not
+  // 0xFFFFFFFF) per their doc comment in amdsmi.h, inherited from the uint16_t
+  // average_*_activity fields on bare metal. Guard against rocdxg's uint32
+  // UINT32_MAX sentinel so it isn't passed through as a bogus ~4.29 billion %
+  // reading.
+  info->gfx_activity =
+      (metrics.average_gfx_activity <= 0xFFFEU) ? metrics.average_gfx_activity : 0xFFFFU;
+  info->umc_activity =
+      (metrics.average_umc_activity <= 0xFFFEU) ? metrics.average_umc_activity : 0xFFFFU;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -486,19 +491,16 @@ amdsmi_status_t WSLGPUBackend::GetPcieInfo(amdsmi_pcie_info_t* info) {
   if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
   // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL.
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  std::memset(info, 0, sizeof(*info));
+  // Init all numeric fields to sentinel (0xFF = max for all uint types). rocdxg
+  // never populates pcie_bandwidth/replay counters at all, so those stay at
+  // this N/A sentinel instead of being copied through as a bogus zero.
+  std::memset(info, 0xFF, sizeof(*info));
   info->pcie_static.max_pcie_width = rocdxg_info.max_pcie_width;
   info->pcie_static.max_pcie_speed = rocdxg_info.max_pcie_speed;
   info->pcie_static.pcie_interface_version = rocdxg_info.pcie_interface_version;
   info->pcie_static.slot_type = static_cast<amdsmi_card_form_factor_t>(rocdxg_info.slot_type);
   info->pcie_metric.pcie_width = rocdxg_info.pcie_width;
   info->pcie_metric.pcie_speed = rocdxg_info.pcie_speed;
-  info->pcie_metric.pcie_bandwidth = rocdxg_info.pcie_bandwidth;
-  info->pcie_metric.pcie_replay_count = rocdxg_info.pcie_replay_count;
-  info->pcie_metric.pcie_l0_to_recovery_count = rocdxg_info.pcie_l0_to_recovery_count;
-  info->pcie_metric.pcie_replay_roll_over_count = rocdxg_info.pcie_replay_roll_over_count;
-  info->pcie_metric.pcie_nak_sent_count = rocdxg_info.pcie_nak_sent_count;
-  info->pcie_metric.pcie_nak_received_count = rocdxg_info.pcie_nak_received_count;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -575,6 +577,11 @@ amdsmi_status_t WSLGPUBackend::GetFanSpeed(uint32_t /* sensor_ind */, int64_t* s
   HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_gpu_metrics_info(node_id_, &metrics);
   if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
   // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL.
+  // amdsmi_get_gpu_fan_speed() has no N/A translation downstream (unlike e.g.
+  // clock/power info), so an unavailable sensor must surface as NOT_SUPPORTED
+  // rather than a raw uint32 sentinel value passed through an int64_t.
+  if (metrics.current_fan_speed_percent == std::numeric_limits<uint32_t>::max())
+    return AMDSMI_STATUS_NOT_SUPPORTED;
   if (speed == nullptr) return AMDSMI_STATUS_INVAL;
   *speed = static_cast<int64_t>(metrics.current_fan_speed_percent);
   return AMDSMI_STATUS_SUCCESS;
@@ -592,7 +599,10 @@ amdsmi_status_t WSLGPUBackend::GetPowerCapInfo(amdsmi_power_cap_info_t* info) {
   if (r != AMDSMI_STATUS_SUCCESS) return r;
   // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL.
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  std::memset(info, 0, sizeof(*info));
+  // rocdxg has no data source at all for default_power_cap/dpm_cap/
+  // min_power_cap/max_power_cap, so those stay at the N/A sentinel rather
+  // than a bogus zero from memset.
+  std::memset(info, 0xFF, sizeof(*info));
   if (power.power_limit != std::numeric_limits<uint32_t>::max())
     info->power_cap = power.power_limit;
   return AMDSMI_STATUS_SUCCESS;

@@ -171,9 +171,8 @@ OS_VARIANTS = (
     "Ubuntu20",
     "Ubuntu22",
     "Ubuntu24",
-    "Debian10",
-    "Debian11",
     "Debian12",
+    "Debian13",
 )
 
 # Variants that need QA_RPATHS to silence rpath-related QA failures.

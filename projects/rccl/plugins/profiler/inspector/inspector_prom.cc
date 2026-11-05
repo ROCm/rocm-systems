@@ -29,6 +29,7 @@ extern inspectorResult_t inspectorCommInfoListFinalize(struct inspectorCommInfoL
 extern const char* inspectorTimingSourceToString(inspectorTimingSource_t timingSource);
 
 extern const char* ncclFuncToString(ncclFunc_t fn);
+extern bool enableNcclInspectorPromStats;
 
 struct inspectorPromBucketAgg {
   uint64_t count = 0;
@@ -88,6 +89,12 @@ struct inspectorPromDevice {
   inspectorPromCollBucketMap collBuckets;
   inspectorPromP2pBucketMap p2pBuckets;
   bool hasData = false;
+  // Cumulative counts summed across this device's communicators: total ops
+  // ever enqueued and total dropped (overwritten before being dumped).
+  uint64_t collTotal = 0;
+  uint64_t collDroppedTotal = 0;
+  uint64_t p2pTotal = 0;
+  uint64_t p2pDroppedTotal = 0;
 };
 static const int kInspectorPromFormatMinor = 1;
 
@@ -238,17 +245,19 @@ static inspectorResult_t inspectorPromGetLabelsColl(char* labels,
                                                     ncclFunc_t func,
                                                     const char* algoProto,
                                                     size_t msgSizeRangeBytes) {
-  const char* jobId = getenv("SLURM_JOB_ID");
+  const char* jobId = inspectorGetJobId();
+  const char* cluster = inspectorGetCluster();
   char msgSizeStr[32];
   inspectorPromFormatMessageSizeRange(msgSizeRangeBytes,
                                       msgSizeStr,
                                       sizeof(msgSizeStr));
 
   int ret = snprintf(labels, labelSize,
-                     "version=\"%s\",slurm_job_id=\"%s\",node=\"%s\",gpu=\"%s\","
+                     "version=\"%s\",cluster=\"%s\",slurm_job_id=\"%s\",node=\"%s\",gpu=\"%s\","
                      "comm_name=\"%s\",n_nodes=\"%d\",nranks=\"%d\","
                      "collective=\"%s\",message_size=\"%s\",algo_proto=\"%s\"",
                      (version && version[0]) ? version : "unknown",
+                     cluster ? cluster : "unknown",
                      jobId ? jobId : "unknown",
                      (nodeName && nodeName[0]) ? nodeName : "unknown",
                      (gpuName && gpuName[0]) ? gpuName : "unknown",
@@ -297,7 +306,8 @@ static inspectorResult_t inspectorPromGetLabelsP2p(char* labels,
                                                    int nnodes,
                                                    ncclFunc_t func,
                                                    size_t msgSizeRangeBytes) {
-  const char* jobId = getenv("SLURM_JOB_ID");
+  const char* jobId = inspectorGetJobId();
+  const char* cluster = inspectorGetCluster();
   char msgSizeStr[32];
   inspectorPromFormatMessageSizeRange(msgSizeRangeBytes,
                                       msgSizeStr,
@@ -305,10 +315,11 @@ static inspectorResult_t inspectorPromGetLabelsP2p(char* labels,
 
   int ret = snprintf(labels,
                      labelSize,
-                     "version=\"%s\",slurm_job_id=\"%s\",node=\"%s\",gpu=\"%s\","
+                     "version=\"%s\",cluster=\"%s\",slurm_job_id=\"%s\",node=\"%s\",gpu=\"%s\","
                      "comm_name=\"%s\",n_nodes=\"%d\",nranks=\"%d\","
                      "p2p_operation=\"%s\",message_size=\"%s\"",
                      (version && version[0]) ? version : "unknown",
+                     cluster ? cluster : "unknown",
                      jobId ? jobId : "unknown",
                      (nodeName && nodeName[0]) ? nodeName : "unknown",
                      (gpuName && gpuName[0]) ? gpuName : "unknown",
@@ -409,6 +420,31 @@ static inspectorResult_t inspectorPromGetDeviceFile(inspectorPromDevice& device,
 
   device.file = file;
   *fileOut = file;
+  return inspectorSuccess;
+}
+
+static inspectorResult_t inspectorPromWriteFileHeader(FILE* file) {
+  if (!file) {
+    return inspectorFileOpenError;
+  }
+  if (ftell(file) != 0) {
+    return inspectorSuccess;
+  }
+
+  static const char header[] =
+    "# HELP nccl_bus_bandwidth_gbs RCCL collective bus bandwidth in GB/s\n"
+    "# TYPE nccl_bus_bandwidth_gbs gauge\n"
+    "# HELP nccl_collective_exec_time_microseconds RCCL collective execution time in microseconds\n"
+    "# TYPE nccl_collective_exec_time_microseconds gauge\n"
+    "# HELP nccl_p2p_bus_bandwidth_gbs RCCL point-to-point bus bandwidth in GB/s\n"
+    "# TYPE nccl_p2p_bus_bandwidth_gbs gauge\n"
+    "# HELP nccl_p2p_exec_time_microseconds RCCL point-to-point execution time in microseconds\n"
+    "# TYPE nccl_p2p_exec_time_microseconds gauge\n";
+
+  size_t len = sizeof(header) - 1;
+  if (fwrite(header, 1, len, file) != len) {
+    return inspectorFileOpenError;
+  }
   return inspectorSuccess;
 }
 
@@ -547,7 +583,7 @@ static inspectorResult_t inspectorPromWriteP2pBucket(FILE* file,
  *   inspectorResult_t - success or error code.
  */
 static inspectorResult_t inspectorPromCommInfoDumpColl(struct inspectorCommInfo* commInfo,
-                                                       inspectorPromCollBucketMap& buckets,
+                                                       inspectorPromDevice& device,
                                                        bool* needs_writing) {
   if (commInfo == nullptr) {
     return inspectorSuccess;
@@ -566,6 +602,8 @@ static inspectorResult_t inspectorPromCommInfoDumpColl(struct inspectorCommInfo*
                                                         drainedColl));
     commInfo->dump_coll = inspectorRingNonEmpty(&commInfo->completedCollRing);
   }
+  device.collTotal += commInfo->completedCollRing.enqueued;
+  device.collDroppedTotal += commInfo->completedCollRing.dropped;
   inspectorUnlockRWLock(&commInfo->guard);
 
   if (!drainedColl.empty()) {
@@ -587,7 +625,7 @@ static inspectorResult_t inspectorPromCommInfoDumpColl(struct inspectorCommInfo*
         commName,
         algoProto
       };
-      inspectorPromAggUpdate(buckets[key],
+      inspectorPromAggUpdate(device.collBuckets[key],
                              collInfo.algoBwGbs,
                              collInfo.busBwGbs,
                              collInfo.execTimeUsecs);
@@ -598,7 +636,7 @@ static inspectorResult_t inspectorPromCommInfoDumpColl(struct inspectorCommInfo*
 }
 
 static inspectorResult_t inspectorPromCommInfoDumpP2p(struct inspectorCommInfo* commInfo,
-                                                      inspectorPromP2pBucketMap& buckets,
+                                                      inspectorPromDevice& device,
                                                       bool* needs_writing) {
   if (commInfo == nullptr) {
     return inspectorSuccess;
@@ -617,6 +655,8 @@ static inspectorResult_t inspectorPromCommInfoDumpP2p(struct inspectorCommInfo* 
                                                         drainedP2p));
     commInfo->dump_p2p = inspectorRingNonEmpty(&commInfo->completedP2pRing);
   }
+  device.p2pTotal += commInfo->completedP2pRing.enqueued;
+  device.p2pDroppedTotal += commInfo->completedP2pRing.dropped;
   inspectorUnlockRWLock(&commInfo->guard);
 
   if (!drainedP2p.empty()) {
@@ -634,7 +674,7 @@ static inspectorResult_t inspectorPromCommInfoDumpP2p(struct inspectorCommInfo* 
         msgSizeRangeBytes,
         commName
       };
-      inspectorPromAggUpdate(buckets[key],
+      inspectorPromAggUpdate(device.p2pBuckets[key],
                              p2pInfo.algoBwGbs,
                              p2pInfo.busBwGbs,
                              p2pInfo.execTimeUsecs);
@@ -645,13 +685,16 @@ static inspectorResult_t inspectorPromCommInfoDumpP2p(struct inspectorCommInfo* 
 }
 
 static inspectorResult_t inspectorPromCommInfoDump(struct inspectorCommInfo* commInfo,
-                                                   inspectorPromCollBucketMap& collBuckets,
-                                                   inspectorPromP2pBucketMap& p2pBuckets,
+                                                   inspectorPromDevice& device,
                                                    bool* needs_writing) {
   *needs_writing = false;
 
-  INS_CHK(inspectorPromCommInfoDumpColl(commInfo, collBuckets, needs_writing));
-  INS_CHK(inspectorPromCommInfoDumpP2p(commInfo, p2pBuckets, needs_writing));
+  INS_CHK(inspectorPromCommInfoDumpColl(commInfo,
+                                        device,
+                                        needs_writing));
+  INS_CHK(inspectorPromCommInfoDumpP2p(commInfo,
+                                       device,
+                                       needs_writing));
 
   return inspectorSuccess;
 }
@@ -693,8 +736,7 @@ static inspectorResult_t inspectorPromFillDeviceBuckets(struct inspectorCommInfo
     }
 
     INS_CHK(inspectorPromCommInfoDump(itr,
-                                      device.collBuckets,
-                                      device.p2pBuckets,
+                                      device,
                                       &needs_writing));
 
     if (needs_writing) {
@@ -716,6 +758,78 @@ static inspectorResult_t inspectorPromFillDeviceBuckets(struct inspectorCommInfo
  * Thread Safety:
  *   Not thread-safe (caller must hold commList lock).
  */
+/*
+ * Description:
+ *   Formats device-level labels (node/gpu/version only, no bucket-key fields)
+ *   for the per-device Prometheus stats metrics.
+ *
+ * Thread Safety:
+ *   Not thread-safe. Onus of thread safety is on the caller.
+ */
+static inspectorResult_t inspectorPromGetLabelsDevice(char* labels,
+                                                      size_t labelSize,
+                                                      const char* nodeName,
+                                                      const char* gpuName,
+                                                      const char* version) {
+  const char* jobId = getenv("SLURM_JOB_ID");
+  int ret = snprintf(labels, labelSize,
+                     "version=\"%s\",slurm_job_id=\"%s\",node=\"%s\",gpu=\"%s\"",
+                     (version && version[0]) ? version : "unknown",
+                     jobId ? jobId : "unknown",
+                     (nodeName && nodeName[0]) ? nodeName : "unknown",
+                     (gpuName && gpuName[0]) ? gpuName : "unknown");
+  if (ret < 0 || (size_t)ret >= labelSize) {
+    return inspectorMemoryError;
+  }
+  return inspectorSuccess;
+}
+
+/*
+ * Description:
+ *   Writes the opt-in per-device stats metrics: cumulative op totals and
+ *   ring-buffer drop counters. Counters (not per-window gauges), so rate()
+ *   and rate(dropped)/rate(total) work.
+ *
+ * Thread Safety:
+ *   Not thread-safe. Onus of thread safety is on the caller/owner of the file.
+ */
+static inspectorResult_t inspectorPromWriteDeviceTotals(FILE* file,
+                                                        const inspectorPromDevice& device) {
+  if (!file) {
+    return inspectorFileOpenError;
+  }
+
+  char version[16];
+  inspectorPromGetVersion(version, sizeof(version));
+
+  char labels[1024];
+  memset(labels, 0, sizeof(labels));
+  INS_CHK(inspectorPromGetLabelsDevice(labels,
+                                       sizeof(labels),
+                                       device.nodeName.c_str(),
+                                       device.gpuName.c_str(),
+                                       version));
+
+  char buffer[2048];
+  int written = snprintf(buffer, sizeof(buffer),
+                         "nccl_collectives_total{%s} %llu\n"
+                         "nccl_collectives_dropped_total{%s} %llu\n"
+                         "nccl_p2p_total{%s} %llu\n"
+                         "nccl_p2p_dropped_total{%s} %llu\n",
+                         labels, (unsigned long long)device.collTotal,
+                         labels, (unsigned long long)device.collDroppedTotal,
+                         labels, (unsigned long long)device.p2pTotal,
+                         labels, (unsigned long long)device.p2pDroppedTotal);
+  if (written < 0 || (size_t)written >= sizeof(buffer)) {
+    return inspectorMemoryError;
+  }
+  if (fwrite(buffer, 1, written, file) != (size_t)written) {
+    return inspectorFileOpenError;
+  }
+  fflush(file);
+  return inspectorSuccess;
+}
+
 static inspectorResult_t inspectorPromWriteDeviceBuckets(std::map<std::string,
                                                          inspectorPromDevice>& devices,
                                                          const char* output_root,
@@ -723,7 +837,11 @@ static inspectorResult_t inspectorPromWriteDeviceBuckets(std::map<std::string,
                                                          struct inspectorDumpThread* dumpThread) {
   for (auto& entry : devices) {
     inspectorPromDevice& device = entry.second;
-    if (!device.hasData) {
+    // Per-device stats metrics are opt-in; when enabled they are emitted for
+    // every known device so the counters stay continuous (usable with rate())
+    // even across dumps where a GPU produced no new records.
+    bool writeStats = enableNcclInspectorPromStats;
+    if (!device.hasData && !writeStats) {
       continue;
     }
     FILE* file = nullptr;
@@ -735,6 +853,7 @@ static inspectorResult_t inspectorPromWriteDeviceBuckets(std::map<std::string,
     if (!file) {
       continue;
     }
+    INS_CHK(inspectorPromWriteFileHeader(file));
     for (const auto& collEntry : device.collBuckets) {
       INS_CHK(inspectorPromWriteCollBucket(file,
                                            device,
@@ -747,10 +866,12 @@ static inspectorResult_t inspectorPromWriteDeviceBuckets(std::map<std::string,
                                           p2pEntry.first,
                                           p2pEntry.second));
     }
+    if (writeStats) {
+      INS_CHK(inspectorPromWriteDeviceTotals(file, device));
+    }
   }
   return inspectorSuccess;
 }
-
 
 /*
  * Description:

@@ -14,6 +14,8 @@
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 
+#include <comm.h>
+
 #include <hip/hip_runtime.h>
 #include <cstdlib>
 #include <string>
@@ -48,6 +50,8 @@ inline bool isCeRuntimeDriverSupported()
 //   4. NCCL_LOCAL_REGISTER=0      (explicit buffer registration only).
 //   5. NCCL_CUMEM_ENABLE=1        (VMM-backed symmetric memory; default is 0).
 //      Without this, comm->symmetricSupport is false and CE is never dispatched.
+//      RCCL can still leave it false (cuMem runtime check failed), so once a
+//      communicator exists, gate on the overload that takes it.
 //
 // Use this single check wherever a test needs to decide between asserting the
 // CE path or the SM fallback path.
@@ -68,6 +72,21 @@ inline bool isCeDispatchConfigured()
            MPIHelpers::getEnvParam("NCCL_CUMEM_ENABLE",          kCuMemEnableDefault)       == kCuMemEnable;
 }
 
+// Same gate for a live communicator: ncclCeAvailable also requires its symmetric memory support.
+inline bool isCeDispatchConfigured(const ncclComm* comm)
+{
+    return isCeDispatchConfigured() && comm != nullptr && comm->symmetricSupport;
+}
+
+// Returns true when CE AlltoAll dispatch is expected (CE prerequisites + RCCL_DDA_ENABLE=0).
+inline bool isCeAlltoAllDispatchConfigured()
+{
+    constexpr int kDdaEnableDefault = 1; // RCCL_DDA_ENABLE defaults on
+    constexpr int kDdaDisabled      = 0;
+    return isCeDispatchConfigured() &&
+           MPIHelpers::getEnvParam("RCCL_DDA_ENABLE", kDdaEnableDefault) == kDdaDisabled;
+}
+
 // Returns true when CE AllReduce dispatch is expected (CE prerequisites + RCCL_CE_ALLREDUCE=1).
 inline bool isCeAllReduceDispatchConfigured()
 {
@@ -75,6 +94,12 @@ inline bool isCeAllReduceDispatchConfigured()
     constexpr int kCeAllReduceEnabled = 1;
     return isCeDispatchConfigured() &&
            MPIHelpers::getEnvParam("RCCL_CE_ALLREDUCE", kCeAllReduceDefault) == kCeAllReduceEnabled;
+}
+
+// CE AllReduce gate for a live communicator; see isCeDispatchConfigured(const ncclComm*).
+inline bool isCeAllReduceDispatchConfigured(const ncclComm* comm)
+{
+    return isCeDispatchConfigured(comm) && isCeAllReduceDispatchConfigured();
 }
 
 // Batch path prediction helpers
@@ -105,9 +130,13 @@ inline hipError_t ceFillRankScalarFloat(void* buf, size_t nElem, int rank)
 }
 
 // True when NCCL logs indicate the CE AllReduce pipeline ran.
+// Match the execution INFO lines from ncclCeAllReduce(), not the
+// "Skipping CE AllReduce: ..." WARN that rcclUseCeAr2Shot() emits
+// when nNodes > 1 (that substring used to fail multi-node EightRanks).
 inline bool ceLogShowsAllReducePath(const std::string& log)
 {
-    return log.find("CE AllReduce:") != std::string::npos ||
+    return log.find("CE AllReduce: rank") != std::string::npos ||
+           log.find("CE AllReduce: Phase") != std::string::npos ||
            log.find("CE 2-shot AllReduce") != std::string::npos;
 }
 

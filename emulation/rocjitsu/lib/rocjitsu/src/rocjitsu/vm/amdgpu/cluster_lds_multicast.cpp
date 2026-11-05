@@ -109,7 +109,7 @@ ImmediateClusterLdsMulticastEngine::submit(ClusterLdsMulticastTransaction txn,
   if (!cluster_lds_source_rank_selected(txn))
     return ClusterLdsMulticastResult::Complete;
 
-  auto target_it = std::find_if(txn.targets.begin(), txn.targets.end(), [&](const auto &target) {
+  auto target_it = std::ranges::find_if(txn.targets, [&](const auto &target) {
     return target.wg_id == txn.source_wg_id && target.cluster_rank == txn.source_cluster_rank;
   });
 

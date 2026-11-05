@@ -51,6 +51,41 @@ turns a multithread configuration into a single-threaded run:
 - reduce the value across all ranks and fail before the suite starts unless
   every rank resolved the same one.
 
+## Choose which tests get a threaded variant
+
+Pick by the state concurrency would actually stress, not by how easy the body is
+to convert. In descending order of value:
+
+- **Registration paths.** The MR cache and protection domain are per physical
+  device behind one mutex, so registration storms, refcount churn on a single
+  shared address, and fused-device cycling (where one registration fans out
+  across both members) are the only way to race insert, lookup and eviction.
+- **Fault injection whose state is per communicator.** One worker breaking its
+  own connection while the others keep transferring is an assertion no serial
+  test can make. Concurrent link failures are also the only way to load a
+  process-global recovery thread.
+- **Per-communicator scheduler state**, such as WRR tokens and cursor: every
+  worker arms and audits its own ledger, so N schedulers advance at once while
+  sharing nothing.
+- **Data paths under pressure** — size ladders, multi-QP splits, request-pool
+  churn, GPU buffers. There is no software race to find in per-comm state; the
+  value is real queue contention plus proof that completion routing never
+  crosses communicators.
+
+Give every worker a distinct payload seed. A transfer delivered on the wrong
+connection then fails verification instead of passing silently, which is the one
+cheap defence against the whole model being wrong.
+
+Leave alone anything that asserts on process-global state: device and merged-NIC
+tables, counters snapshotted process-wide, and timing claims about a shared
+background thread. Resource-leak checks still work, but only on the main thread
+around the entire run — an in-loop snapshot sees other workers' live resources
+and reports a leak that is not there.
+
+Spread workers across devices when the suite has several NICs. Pinning every
+worker to device 0 leaves the other devices' protection domains and caches
+untouched.
+
 ## Harness structure
 
 - The main thread creates every context and connection, exchanges handles over

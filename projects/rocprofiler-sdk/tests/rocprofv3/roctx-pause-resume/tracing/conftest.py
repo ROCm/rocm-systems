@@ -23,7 +23,6 @@
 # THE SOFTWARE.
 
 import json
-import os
 import pytest
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict

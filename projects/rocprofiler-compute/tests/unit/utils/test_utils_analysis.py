@@ -4,23 +4,226 @@
 """Unit tests for utils/utils_analysis.py."""
 
 import gzip
-import math
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
+import common
 import pandas as pd
 import pytest
 
 import utils.utils_analysis as utils_analysis
+from utils import csv_compression, schema
+from utils.ml_api_trace_errors import (
+    KernelSequenceLengthMismatchError,
+    MissingSourceLocationError,
+    OverlappingMarkerRangeError,
+    UncorrelatedLauncherIntervalError,
+)
 from utils.utils_analysis import (
+    COUNTER_RESULTS_COLUMNS,
     CallTreeNode,
     KernelStats,
     NodeRollup,
-    build_call_trees,
+    assign_native_ids,
+    attach_unlocated_trees_by_launcher_thread,
     build_operator_summary,
-    parse_top_level_location,
+    copy_matched_operator_subtree,
+    filter_forest_by_backends,
+    find_native_artifacts,
+    fold_identical_sibling_subtrees,
+    format_operator_args,
+    join_native_counters,
+    nest_marker_intervals,
+    number_gpus_by_node,
+    parse_marker_function,
+    process_ml_api_trace_output,
     rollup_node_stats,
+    split_operator_args,
 )
+
+ALL_NATIVE_KINDS = ("counters", "dispatch", "kernel_symbols", "agents")
+LINEAR_FORWARD_WIRE = (
+    "nn.Module.Linear.forward:simple_torch_code.py:19"
+    "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=()|torch"
+)
+ADDMM_WIRE = "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|scope=FUNCTION|args=()|torch"
+TEST_GUID = "00000000-0000-0000-0000-000000000001"
+TEST_GUID_OTHER = "00000000-0000-0000-0000-000000000002"
+
+
+def native_counters(*rows):
+    """Native counter rows as (dispatch_id, counter_name, counter_value)."""
+    return pd.DataFrame([
+        {
+            "dispatch_id": dispatch_id,
+            "counter_name": counter_name,
+            "counter_value": counter_value,
+        }
+        for dispatch_id, counter_name, counter_value in rows
+    ])
+
+
+def native_dispatches(*dispatch_ids, kernel_id=7, start=1000):
+    # The correlation id is offset so a test cannot mistake it for the
+    # dispatch id.
+    return pd.DataFrame([
+        {
+            "dispatch_id": dispatch_id,
+            "gpu_id": 2,
+            "kernel_id": kernel_id,
+            "grid_size": 1048576,
+            "workgroup_size": 256,
+            "lds_per_workgroup": 0,
+            "scratch_per_workitem": 0,
+            "start_timestamp": start + dispatch_id,
+            "end_timestamp": start + dispatch_id + 500,
+            "correlation_id": dispatch_id + 500,
+        }
+        for dispatch_id in dispatch_ids
+    ])
+
+
+def native_symbols(kernel_id=7):
+    return pd.DataFrame([
+        {
+            "kernel_id": kernel_id,
+            "kernel_name": "vecCopy(double*, int)",
+            "kernel_short_name": "vecCopy",
+            "arch_vgpr": 4,
+            "accum_vgpr": 4,
+            "sgpr": 16,
+        }
+    ])
+
+
+def touch_native_process(workload_dir, fbase, pid, kinds):
+    for kind in kinds:
+        (workload_dir / f"{kind}_{fbase}_{pid}.csv.gz").touch()
+
+
+def leaf_operator(
+    name: str,
+    start: str,
+    duration_ns: float,
+    kernel: str = "k",
+    file_name: str = "net.py",
+    line_number: int = 10,
+    backend: str = "torch",
+) -> CallTreeNode:
+    node = CallTreeNode(
+        name=name,
+        file_name=file_name,
+        line_number=line_number,
+        backend=backend,
+    )
+    node.invocation_ids.add(start)
+    node.kernels[kernel] = KernelStats(
+        launches=1,
+        total_duration_ns=duration_ns,
+        min_duration_ns=duration_ns,
+        max_duration_ns=duration_ns,
+    )
+    rollup_node_stats(node)
+    return node
+
+
+def record_console_error_and_exit(monkeypatch):
+    """Replace console_error so tests see the message and SystemExit."""
+    messages = []
+
+    def _console_error(*argv, exit=True, exit_code=1):
+        if len(argv) > 1:
+            messages.append(str(argv[1]))
+        elif argv:
+            messages.append(str(argv[0]))
+        else:
+            messages.append("")
+        if exit:
+            raise SystemExit(exit_code)
+
+    monkeypatch.setattr(utils_analysis, "console_error", _console_error)
+    return messages
+
+
+def write_ml_api_pass(workload_dir, pass_id, marker_rows, counter_rows):
+    """Write one gzip marker/counter pair for process_ml_api_trace_output."""
+    workload_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"ml_api_trace_pmc_perf_{pass_id}"
+    marker_path = csv_compression.compressed_name(
+        workload_dir / f"{stem}_marker_api_trace.csv"
+    )
+    counter_path = csv_compression.compressed_name(
+        workload_dir / f"{stem}_counter_collection.csv"
+    )
+    pd.DataFrame(marker_rows).to_csv(marker_path, index=False, compression="gzip")
+    pd.DataFrame(counter_rows).to_csv(counter_path, index=False, compression="gzip")
+
+
+def parsed_marker_row(
+    operator_name,
+    start,
+    end,
+    thread_id=1,
+    file_name="",
+    line_number="",
+    backend="torch",
+    kernel_names=None,
+    kernel_starts=None,
+    kernel_ends=None,
+    launcher_thread_id="",
+):
+    """One already-parsed marker interval for nest_marker_intervals."""
+    return {
+        "Operator_Name": operator_name,
+        "Thread_Id": thread_id,
+        "Start_Timestamp": start,
+        "End_Timestamp": end,
+        "File_Name": file_name,
+        "Line_Number": line_number,
+        "Backend": backend,
+        "Kernel_Names": [] if kernel_names is None else kernel_names,
+        "Kernel_Start_Timestamps": [] if kernel_starts is None else kernel_starts,
+        "Kernel_End_Timestamps": [] if kernel_ends is None else kernel_ends,
+        "launcher_thread_id": launcher_thread_id,
+    }
+
+
+def linear_marker_row(
+    correlation_id, start, end, thread_id=1, function=None, guid=TEST_GUID
+):
+    return {
+        "Function": LINEAR_FORWARD_WIRE if function is None else function,
+        "Thread_Id": thread_id,
+        "Correlation_ID": correlation_id,
+        "GUID": guid,
+        "Start_Timestamp": start,
+        "End_Timestamp": end,
+    }
+
+
+def counter_row(
+    correlation_id,
+    kernel_name,
+    start,
+    end,
+    dispatch_id=1,
+    counter_name="SQ_WAVES",
+    guid=TEST_GUID,
+):
+    return {
+        "Correlation_ID": correlation_id,
+        "GUID": guid,
+        "Kernel_Name": kernel_name,
+        "Dispatch_ID": dispatch_id,
+        "Grid_Size": 256,
+        "Workgroup_Size": 64,
+        "LDS_Per_Workgroup": 0,
+        "Start_Timestamp": start,
+        "End_Timestamp": end,
+        "Counter_Name": counter_name,
+    }
+
 
 # =============================================================================
 # TESTS FOR EMPTY WORKLOAD
@@ -37,7 +240,7 @@ from utils.utils_analysis import (
 # CSV with only headers
 # Files with all NaN values that become empty after dropna()
 # Malformed CSV files
-# Missing pmc_perf.csv file
+# Missing result artifact
 # Nonexistent directories
 # Error Conditions:
 #
@@ -61,7 +264,7 @@ from utils.utils_analysis import (
 
 def test_validate_workload_valid_data_file(tmp_path):
     """
-    Test validate_workload with a valid pmc_perf.csv file containing data.
+    Test validate_workload with a valid result artifact containing data.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -74,12 +277,13 @@ def test_validate_workload_valid_data_file(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
-    valid_data = """Kernel_Name,GPU_ID,Counter1,Counter2
+    common.write_result_csv(
+        workload_dir,
+        """Kernel_Name,GPU_ID,Counter1,Counter2
 kernel1,0,100,200
 kernel2,1,150,250
-kernel3,0,120,220"""
-    pmc_perf_file.write_text(valid_data)
+kernel3,0,120,220""",
+    )
 
     console_error_calls = []
 
@@ -94,7 +298,7 @@ kernel3,0,120,220"""
 
 def test_validate_workload_file_with_nan_values(tmp_path):
     """
-    Test validate_workload with pmc_perf.csv containing NaN values.
+    Test validate_workload with a result artifact containing NaN values.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -107,12 +311,13 @@ def test_validate_workload_file_with_nan_values(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
-    nan_data = """Kernel_Name,GPU_ID,Counter1,Counter2
+    result_file = common.write_result_csv(
+        workload_dir,
+        """Kernel_Name,GPU_ID,Counter1,Counter2
 ,,NaN,
 ,NaN,,NaN
-NaN,,,"""
-    pmc_perf_file.write_text(nan_data)
+NaN,,,""",
+    )
 
     console_error_calls = []
 
@@ -126,7 +331,7 @@ NaN,,,"""
     error_args = console_error_calls[0][0]
     assert "profiling" in error_args[0]
     assert "Found empty cells" in error_args[1]
-    assert "pmc_perf.csv" in error_args[1]
+    assert str(result_file) in error_args[1]
     assert "Profiling data could be corrupt" in error_args[1]
 
 
@@ -179,9 +384,7 @@ def test_validate_workload_headers_only_csv(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
-    headers_only = "Kernel_Name,GPU_ID,Counter1,Counter2"
-    pmc_perf_file.write_text(headers_only)
+    common.write_result_csv(workload_dir, "Kernel_Name,GPU_ID,Counter1,Counter2")
 
     console_error_calls = []
 
@@ -197,9 +400,9 @@ def test_validate_workload_headers_only_csv(tmp_path):
     assert "Found empty cells" in error_args[1]
 
 
-def test_validate_workload_no_pmc_perf_file(tmp_path):
+def test_validate_workload_no_result_files(tmp_path):
     """
-    Test validate_workload when pmc_perf.csv file doesn't exist.
+    Test validate_workload when no result artifact exists.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -264,12 +467,13 @@ def test_validate_workload_malformed_csv(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
-    malformed_data = """Kernel_Name,GPU_ID,Counter1,Counter2
+    common.write_result_csv(
+        workload_dir,
+        """Kernel_Name,GPU_ID,Counter1,Counter2
 kernel1,0,100,200,extra_column_data
 kernel2,1,150
-incomplete_row"""
-    pmc_perf_file.write_text(malformed_data)
+incomplete_row""",
+    )
 
     console_error_calls = []
 
@@ -298,13 +502,14 @@ def test_validate_workload_mixed_valid_invalid_data(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
-    mixed_data = """Kernel_Name,GPU_ID,Counter1,Counter2
+    common.write_result_csv(
+        workload_dir,
+        """Kernel_Name,GPU_ID,Counter1,Counter2
 kernel1,0,100,200
 kernel2,,NaN,250
 kernel3,1,120,
-,0,110,240"""
-    pmc_perf_file.write_text(mixed_data)
+,0,110,240""",
+    )
 
     console_error_calls = []
 
@@ -332,13 +537,10 @@ def test_validate_workload_large_dataset_with_nans(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
     headers = "Kernel_Name,GPU_ID,Counter1,Counter2\n"
-    nan_rows = []
-    for i in range(1000):
-        nan_rows.append("NaN,NaN,NaN,NaN")
-    large_nan_data = headers + "\n".join(nan_rows)
-    pmc_perf_file.write_text(large_nan_data)
+    common.write_result_csv(
+        workload_dir, headers + "\n".join(["NaN,NaN,NaN,NaN"] * 1000)
+    )
 
     console_error_calls = []
 
@@ -369,12 +571,13 @@ def test_validate_workload_unicode_content(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
-    unicode_data = """Kernel_Name,GPU_ID,Counter1,Counter2
+    common.write_result_csv(
+        workload_dir,
+        """Kernel_Name,GPU_ID,Counter1,Counter2
 kernel_测试,0,100,200
 kernel_тест,1,150,250
-kernel_tëst,0,120,220"""
-    pmc_perf_file.write_text(unicode_data, encoding="utf-8")
+kernel_tëst,0,120,220""",
+    )
 
     console_error_calls = []
 
@@ -402,10 +605,11 @@ def test_validate_workload_special_path_characters(tmp_path):
     workload_dir = tmp_path / "workload-test_dir.with.dots"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
-    valid_data = """Kernel_Name,GPU_ID,Counter1,Counter2
-kernel1,0,100,200"""
-    pmc_perf_file.write_text(valid_data)
+    common.write_result_csv(
+        workload_dir,
+        """Kernel_Name,GPU_ID,Counter1,Counter2
+kernel1,0,100,200""",
+    )
 
     console_error_calls = []
 
@@ -436,9 +640,8 @@ def test_validate_workload_csv_read_permission_error(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
-    pmc_perf_file.write_text("Kernel_Name,GPU_ID\nkernel1,0")
-    pmc_perf_file.chmod(0o000)  # Remove all permissions
+    result_file = common.write_result_csv(workload_dir, "Kernel_Name,GPU_ID\nkernel1,0")
+    result_file.chmod(0o000)  # Remove all permissions
 
     console_error_calls = []
 
@@ -453,7 +656,7 @@ def test_validate_workload_csv_read_permission_error(tmp_path):
     except PermissionError:
         pass
     finally:
-        pmc_perf_file.chmod(0o644)
+        result_file.chmod(0o644)
 
 
 def test_validate_workload_string_path_input():
@@ -494,8 +697,7 @@ def test_validate_workload_console_error_string_formatting(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
-    pmc_perf_file.write_text("Kernel_Name,GPU_ID\nNaN,NaN")
+    result_file = common.write_result_csv(workload_dir, "Kernel_Name,GPU_ID\nNaN,NaN")
 
     console_error_calls = []
 
@@ -507,8 +709,7 @@ def test_validate_workload_console_error_string_formatting(tmp_path):
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
-    expected_path = str(workload_dir / "pmc_perf.csv")
-    assert expected_path in error_args[1]
+    assert str(result_file) in error_args[1]
     assert "profiling" in error_args[0]
     assert "Found empty cells" in error_args[1]
     assert "Profiling data could be corrupt" in error_args[1]
@@ -529,8 +730,7 @@ def test_validate_workload_function_return_value(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
-    pmc_perf_file.write_text("Kernel_Name,GPU_ID\nkernel1,0")
+    common.write_result_csv(workload_dir, "Kernel_Name,GPU_ID\nkernel1,0")
 
     with patch("utils.utils_analysis.console_error"):
         result = utils_analysis.validate_workload(str(workload_dir))
@@ -563,7 +763,7 @@ def test_validate_workload_pandas_import_dependency():
     with patch.dict("sys.modules", {"pandas": mock_pandas}):
         with patch("utils.utils_analysis.pd", mock_pandas):
             with patch("utils.utils_analysis.console_error"):
-                with patch("pathlib.Path.is_file", return_value=True):
+                with patch("pathlib.Path.glob", return_value=[Path("results.csv.gz")]):
                     utils_analysis.validate_workload("/test/path")
 
     mock_pandas.read_csv.assert_called_once()
@@ -782,35 +982,6 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_parse_location_normal():
-    assert parse_top_level_location("10@main.py:60/#10@main.py:21") == "main.py:60"
-
-
-def test_parse_location_single_entry():
-    assert parse_top_level_location("5@train.py:42") == "train.py:42"
-
-
-def test_parse_location_nan():
-    assert parse_top_level_location(float("nan")) == "unknown:0"
-
-
-def test_parse_location_none():
-    assert parse_top_level_location(None) == "unknown:0"
-
-
-def test_parse_location_empty():
-    assert parse_top_level_location("") == "unknown:0"
-    assert parse_top_level_location("   ") == "unknown:0"
-
-
-def test_parse_location_no_at_sign():
-    assert parse_top_level_location("no_at_sign") == "unknown:0"
-
-
-def test_parse_location_no_colon():
-    assert parse_top_level_location("10@mainpy") == "unknown:0"
-
-
 def test_kernel_stats_defaults_min_max_to_none():
     stats = KernelStats()
     assert stats.min_duration_ns is None
@@ -830,6 +1001,276 @@ def test_call_tree_node_call_count_is_property_of_invocation_ids():
     node.invocation_ids.add("ctx1")
     node.invocation_ids.add("ctx2")
     assert node.call_count == 2
+
+
+def test_fold_identical_sibling_subtrees_empty():
+    assert fold_identical_sibling_subtrees([]) == []
+
+
+def test_fold_identical_sibling_subtrees_merges_matching_leaves():
+    folded = fold_identical_sibling_subtrees([
+        leaf_operator("aten::addmm", "1", 2_000_000.0),
+        leaf_operator("aten::addmm", "2", 3_000_000.0),
+    ])
+    assert len(folded) == 1
+    node = folded[0]
+    assert node.call_count == 2
+    assert node.kernels["k"].launches == 2
+    assert node.kernels["k"].total_duration_ns == 5_000_000.0
+    assert node.kernels["k"].min_duration_ns == 2_000_000.0
+    assert node.kernels["k"].max_duration_ns == 3_000_000.0
+    assert node.kernel_launches == 2
+
+
+def test_fold_identical_sibling_subtrees_keeps_different_kernels_apart():
+    folded = fold_identical_sibling_subtrees([
+        leaf_operator("aten::addmm", "1", 1_000_000.0, kernel="addmm"),
+        leaf_operator("aten::addmm", "2", 1_000_000.0, kernel="copy"),
+    ])
+    assert len(folded) == 2
+
+
+def test_fold_identical_sibling_subtrees_keeps_different_locations_apart():
+    folded = fold_identical_sibling_subtrees([
+        leaf_operator("aten::addmm", "1", 1_000_000.0, line_number=10),
+        leaf_operator("aten::addmm", "2", 1_000_000.0, line_number=20),
+    ])
+    assert len(folded) == 2
+
+
+def test_fold_identical_sibling_subtrees_keeps_different_child_shapes_apart():
+    nested = CallTreeNode(
+        name="aten::addmm", file_name="net.py", line_number=10, backend="torch"
+    )
+    nested.invocation_ids.add("1")
+    nested.children = [leaf_operator("aten::relu", "1a", 500_000.0)]
+    rollup_node_stats(nested)
+    folded = fold_identical_sibling_subtrees([
+        nested,
+        leaf_operator("aten::addmm", "2", 1_000_000.0),
+    ])
+    assert len(folded) == 2
+
+
+def test_fold_identical_sibling_subtrees_does_not_mutate_input():
+    first = leaf_operator("aten::addmm", "1", 1_000_000.0)
+    second = leaf_operator("aten::addmm", "2", 1_000_000.0)
+    original = [first, second]
+    fold_identical_sibling_subtrees(original)
+    assert original == [first, second]
+    assert first.call_count == 1
+    assert second.call_count == 1
+
+
+def test_fold_identical_sibling_subtrees_merges_nested_children():
+    parent = CallTreeNode(name="forward", backend="torch")
+    parent.invocation_ids.add("0")
+    parent.children = [
+        leaf_operator("aten::addmm", "1", 1_000_000.0),
+        leaf_operator("aten::addmm", "2", 2_000_000.0),
+    ]
+    rollup_node_stats(parent)
+    folded = fold_identical_sibling_subtrees([parent])
+    assert len(folded) == 1
+    assert folded[0].call_count == 1
+    assert len(parent.children) == 2
+    assert len(folded[0].children) == 1
+    assert folded[0].children[0].call_count == 2
+    assert folded[0].children[0].kernels["k"].launches == 2
+
+
+def test_filter_forest_by_backends_strips_scaffolding_kernels():
+    child = leaf_operator(
+        "triton.JITFunction.matmul_kernel",
+        "1",
+        40.0,
+        kernel="triton_matmul_kernel",
+        backend="triton",
+    )
+    parent = leaf_operator(
+        "nn.Module.Linear.forward",
+        "0",
+        10.0,
+        kernel="torch_gemm_kernel",
+        backend="torch",
+    )
+    parent.children = [child]
+    forest = {"1": [parent]}
+
+    filtered = filter_forest_by_backends(forest, ["triton"])
+    filtered_parent = filtered["1"][0]
+    assert filtered_parent.kernels == {}
+    assert "triton_matmul_kernel" in filtered_parent.children[0].kernels
+    assert "torch_gemm_kernel" in forest["1"][0].kernels
+    assert "triton_matmul_kernel" in forest["1"][0].children[0].kernels
+
+
+def test_copy_matched_operator_subtree_keeps_ancestors_and_descendants():
+    node_c = leaf_operator("C", "2", 30.0, kernel="c_kernel")
+    node_b = leaf_operator("B", "1", 20.0, kernel="b_kernel")
+    node_d = leaf_operator("D", "3", 40.0, kernel="d_kernel")
+    node_a = leaf_operator("A", "0", 10.0, kernel="a_kernel")
+    node_b.children = [node_c]
+    node_a.children = [node_b, node_d]
+    forest = {"1": [node_a]}
+
+    copied = copy_matched_operator_subtree(forest, [node_b])
+    copied_a = copied["1"][0]
+    assert copied_a.name == "A"
+    assert copied_a.kernels == {}
+    assert [child.name for child in copied_a.children] == ["B"]
+    assert [child.name for child in copied_a.children[0].children] == ["C"]
+
+
+def test_kernel_stats_length_mismatch_records_error():
+    row = SimpleNamespace(
+        Operator_Name="aten::addmm",
+        Kernel_Names=["gemm", "add"],
+        Kernel_Start_Timestamps=[0, 10],
+        Kernel_End_Timestamps=[5],
+    )
+    errors = []
+    kernels = utils_analysis._kernel_stats_from_marker_row(row, errors)
+    assert kernels == {}
+    assert any(isinstance(err, KernelSequenceLengthMismatchError) for err in errors)
+
+
+def test_split_operator_args_respects_nested_commas():
+    tokens = split_operator_args("(self=float32[2, 2], other=(1, 2), name='a,b')")
+    assert tokens == ["self=float32[2, 2]", "other=(1, 2)", "name='a,b'"]
+
+
+def test_split_operator_args_empty_blob():
+    assert split_operator_args("") == []
+    assert split_operator_args("()") == []
+    assert split_operator_args("  (  )  ") == []
+
+
+def test_format_operator_args_caps_item_count():
+    args_blob = "(" + ", ".join(f"a{i}={i}" for i in range(12)) + ")"
+    formatted_args = format_operator_args(args_blob, max_items=3, max_chars=200)
+    assert formatted_args == "(a0=0, a1=1, a2=2, ...)"
+
+
+def test_format_operator_args_caps_length():
+    long_token = "x" * 80
+    formatted_args = format_operator_args(f"({long_token})", max_items=8, max_chars=20)
+    assert len(formatted_args) <= 20
+    assert formatted_args.endswith("...)")
+
+
+def test_format_operator_args_empty_blob():
+    assert format_operator_args("") == ""
+    assert format_operator_args("()") == ""
+
+
+def test_args_variants_orders_by_call_count():
+    node = CallTreeNode(name="aten::mm")
+    node.args_invocations["(self=float32[2x2])"] = {"1"}
+    node.args_invocations["(self=float32[4x4])"] = {"2", "3"}
+    assert node.args_variants == [
+        ("(self=float32[4x4])", 2),
+        ("(self=float32[2x2])", 1),
+    ]
+
+
+def test_fold_identical_sibling_subtrees_merges_args_variants():
+    first = leaf_operator("aten::addmm", "1", 2_000_000.0)
+    first.args_invocations["(self=float32[2x2])"] = {"1"}
+    second = leaf_operator("aten::addmm", "2", 3_000_000.0)
+    second.args_invocations["(self=float32[4x4])"] = {"2"}
+    folded = fold_identical_sibling_subtrees([first, second])
+    assert len(folded) == 1
+    assert folded[0].args_variants == [
+        ("(self=float32[2x2])", 1),
+        ("(self=float32[4x4])", 1),
+    ]
+    assert first.args_invocations == {"(self=float32[2x2])": {"1"}}
+
+
+def test_nest_marker_intervals_records_operator_args():
+    trace_df = pd.DataFrame({
+        "Thread_Id": ["1"],
+        "Start_Timestamp": [0.0],
+        "End_Timestamp": [10.0],
+        "Operator_Name": ["aten::mm"],
+        "args": ["(self=float32[2x2])"],
+    })
+    forest = nest_marker_intervals(trace_df)
+    node = forest["1"][0]
+    assert node.args_invocations == {"(self=float32[2x2])": {"0.0"}}
+
+
+def test_nest_marker_intervals_skips_unavailable_args():
+    trace_df = pd.DataFrame({
+        "Thread_Id": ["1"],
+        "Start_Timestamp": [0.0],
+        "End_Timestamp": [10.0],
+        "Operator_Name": ["aten::mm"],
+        "args": ["n/a"],
+    })
+    forest = nest_marker_intervals(trace_df)
+    assert forest["1"][0].args_invocations == {}
+
+
+def test_attach_defers_uncorrelated_interval_and_keeps_worker_root():
+    backward = CallTreeNode(
+        name="torch.Tensor.backward",
+        file_name="simple.py",
+        line_number=28,
+        backend="torch",
+        start_timestamp=0.0,
+        end_timestamp=10.0,
+    )
+    backward.invocation_ids.add("bw")
+    child = CallTreeNode(
+        name="SumBackward0",
+        backend="torch",
+        start_timestamp=51.0,
+        end_timestamp=59.0,
+    )
+    child.invocation_ids.add("sum_bw")
+    engine = CallTreeNode(
+        name="autograd::engine::evaluate_function: SumBackward0",
+        backend="torch",
+        start_timestamp=50.0,
+        end_timestamp=60.0,
+        launcher_thread_id="14444",
+    )
+    engine.invocation_ids.add("eval")
+    engine.children = [child]
+    forest = {"14444": [backward], "14611": [engine]}
+    errors = []
+    attach_unlocated_trees_by_launcher_thread(forest, errors)
+    assert len(errors) == 1
+    assert isinstance(errors[0], UncorrelatedLauncherIntervalError)
+    assert engine in forest["14611"]
+    assert engine not in backward.children
+
+
+def test_nest_overlap_collects_error_and_keeps_first_marker():
+    trace_df = pd.DataFrame({
+        "Thread_Id": ["1", "1"],
+        "Start_Timestamp": [0.0, 5.0],
+        "End_Timestamp": [10.0, 15.0],
+        "Operator_Name": ["outer", "overlap"],
+    })
+    errors = []
+    forest = nest_marker_intervals(trace_df, errors)
+    assert len(errors) == 1
+    assert isinstance(errors[0], OverlappingMarkerRangeError)
+    assert [node.name for node in forest["1"]] == ["outer"]
+
+
+def test_nest_overlap_raises_without_error_list():
+    trace_df = pd.DataFrame({
+        "Thread_Id": ["1", "1"],
+        "Start_Timestamp": [0.0, 5.0],
+        "End_Timestamp": [10.0, 15.0],
+        "Operator_Name": ["outer", "overlap"],
+    })
+    with pytest.raises(OverlappingMarkerRangeError):
+        nest_marker_intervals(trace_df)
 
 
 def test_rollup_leaf_node():
@@ -874,157 +1315,6 @@ def test_rollup_propagates_min_max_from_kernel_stats():
     assert node.mean_dispatch_ns == 1500.0
 
 
-def test_rollup_parent_rolls_up_children():
-    child = CallTreeNode(name="child")
-    child.kernels["kern_a"] = KernelStats(launches=3, total_duration_ns=3000.0)
-    parent = CallTreeNode(name="parent")
-    parent.children["child"] = child
-    parent.kernels["kern_b"] = KernelStats(launches=1, total_duration_ns=500.0)
-    rollup_node_stats(parent)
-    assert parent.kernel_launches == 4
-    assert child.kernel_launches == 3
-
-
-def test_rollup_deep_hierarchy():
-    grandchild = CallTreeNode(name="grandchild")
-    grandchild.kernels["k"] = KernelStats(launches=1, total_duration_ns=100.0)
-    child = CallTreeNode(name="child")
-    child.children["grandchild"] = grandchild
-    child.kernels["k2"] = KernelStats(launches=2, total_duration_ns=200.0)
-    root = CallTreeNode(name="root")
-    root.children["child"] = child
-    rollup_node_stats(root)
-    assert grandchild.kernel_launches == 1
-    assert child.kernel_launches == 3
-    assert root.kernel_launches == 3
-
-
-def test_build_call_trees_empty_df():
-    assert build_call_trees(pd.DataFrame()) == {}
-
-
-def test_build_call_trees_missing_columns():
-    assert build_call_trees(pd.DataFrame([{"Operator_Name": "a"}])) == {}
-
-
-def test_build_call_trees_single_dispatch():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "torch.nn.Linear",
-            "Kernel_Name": "gemm_kernel",
-            "Context_Id": "10@train.py:42",
-            "Start_Timestamp_kernel": 1000,
-            "End_Timestamp_kernel": 2000,
-        }
-    ])
-    call_trees = build_call_trees(df)
-    assert "train.py:42" in call_trees
-    assert call_trees["train.py:42"].kernel_launches == 1
-    assert "torch.nn.Linear" in call_trees["train.py:42"].children
-
-
-def test_build_call_trees_hierarchy_split():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "aten/linear/addmm",
-            "Kernel_Name": "gemm_kernel",
-            "Context_Id": "10@file.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1000,
-        }
-    ])
-    call_trees = build_call_trees(df)
-    root = call_trees["file.py:1"]
-    assert "aten" in root.children
-    assert "linear" in root.children["aten"].children
-    assert "addmm" in root.children["aten"].children["linear"].children
-
-
-def test_build_call_trees_multiple_dispatches_same_kernel():
-    rows = [
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": i * 1000,
-            "End_Timestamp_kernel": (i + 1) * 1000,
-        }
-        for i in range(3)
-    ]
-    call_trees = build_call_trees(pd.DataFrame(rows))
-    assert call_trees["f.py:1"].kernel_launches == 3
-    assert call_trees["f.py:1"].children["op_a"].kernels["kern"].launches == 3
-
-
-def test_build_call_trees_dedup_identical_timestamps():
-    row = {
-        "Operator_Name": "op",
-        "Kernel_Name": "kern",
-        "Context_Id": "10@f.py:1",
-        "Start_Timestamp_kernel": 1000,
-        "End_Timestamp_kernel": 2000,
-    }
-    assert build_call_trees(pd.DataFrame([row, row]))["f.py:1"].kernel_launches == 1
-
-
-def test_build_call_trees_no_context_id():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "op",
-            "Kernel_Name": "kern",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1000,
-        }
-    ])
-    assert "unknown:0" in build_call_trees(df)
-
-
-def test_build_call_trees_duration_rollup():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "parent/child",
-            "Kernel_Name": "kern_a",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1_000_000,
-        },
-        {
-            "Operator_Name": "parent",
-            "Kernel_Name": "kern_b",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 2_000_000,
-            "End_Timestamp_kernel": 3_000_000,
-        },
-    ])
-    call_trees = build_call_trees(df)
-    root = call_trees["f.py:1"]
-    assert root.kernel_launches == 2
-    assert root.children["parent"].kernel_launches == 2
-    assert root.children["parent"].children["child"].kernel_launches == 1
-
-
-def test_build_call_trees_multiple_source_locations():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@a.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1000,
-        },
-        {
-            "Operator_Name": "op_b",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@b.py:2",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1000,
-        },
-    ])
-    call_trees = build_call_trees(df)
-    assert "a.py:1" in call_trees
-    assert "b.py:2" in call_trees
-
-
 # ---------------------------------------------------------------------------
 # build_operator_summary
 # ---------------------------------------------------------------------------
@@ -1045,139 +1335,10 @@ _OPERATOR_SUMMARY_COLUMNS = [
 ]
 
 
-def _build_summary_from_dataframe(rows):
-    call_trees = build_call_trees(pd.DataFrame(rows))
-    return build_operator_summary(call_trees)
-
-
 def test_build_operator_summary_empty_input_returns_empty_with_full_schema():
     summary = build_operator_summary({})
     assert list(summary.columns) == _OPERATOR_SUMMARY_COLUMNS
     assert summary.empty
-
-
-def test_build_operator_summary_skips_synthetic_location_root():
-    summary = _build_summary_from_dataframe([
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1_000_000,
-        }
-    ])
-    assert "f.py:1" not in summary["Operator"].tolist()
-    assert "op_a" in summary["Operator"].tolist()
-
-
-def test_build_operator_summary_row_values_for_single_dispatch():
-    summary = _build_summary_from_dataframe([
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 2_000_000,
-        }
-    ])
-    row = summary.loc[summary["Operator"] == "op_a"].iloc[0]
-    assert row["Location"] == "f.py:1"
-    assert row["Calls"] == 1
-    assert row["Dispatches"] == 1
-    assert row["Dispatches_Per_Call"] == 1.0
-    assert row["Total_GPU"] == pytest.approx(2.0)
-    assert row["Pct_Total_GPU"] == pytest.approx(100.0)
-    assert row["Mean_Per_Call"] == pytest.approx(2.0)
-    assert row["Mean_Per_Dispatch"] == pytest.approx(2.0)
-    assert row["Min_Dispatch"] == pytest.approx(2.0)
-    assert row["Max_Dispatch"] == pytest.approx(2.0)
-
-
-def test_build_operator_summary_sort_by_total_descending():
-    summary = _build_summary_from_dataframe([
-        {
-            "Operator_Name": "small_op",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1_000_000,
-        },
-        {
-            "Operator_Name": "big_op",
-            "Kernel_Name": "kern",
-            "Context_Id": "20@f.py:2",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 10_000_000,
-        },
-    ])
-    operators_in_order = summary["Operator"].tolist()
-    assert operators_in_order.index("big_op") < operators_in_order.index("small_op")
-
-
-def test_build_operator_summary_pct_total_gpu_sums_to_100_at_top_level():
-    summary = _build_summary_from_dataframe([
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 3_000_000,
-        },
-        {
-            "Operator_Name": "op_b",
-            "Kernel_Name": "kern",
-            "Context_Id": "20@f.py:2",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1_000_000,
-        },
-    ])
-    op_a_pct = summary.loc[summary["Operator"] == "op_a", "Pct_Total_GPU"].iloc[0]
-    op_b_pct = summary.loc[summary["Operator"] == "op_b", "Pct_Total_GPU"].iloc[0]
-    assert op_a_pct == pytest.approx(75.0)
-    assert op_b_pct == pytest.approx(25.0)
-
-
-def test_build_operator_summary_pct_total_gpu_is_nan_when_grand_total_zero():
-    root = CallTreeNode(name="f.py:1")
-    op = CallTreeNode(name="op")
-    op.kernel_launches = 1
-    op.total_duration_ms = 0.0
-    op.invocation_ids.add("ctx")
-    root.children["op"] = op
-    summary = build_operator_summary({"f.py:1": root})
-    pct = summary.loc[summary["Operator"] == "op", "Pct_Total_GPU"].iloc[0]
-    assert math.isnan(pct)
-
-
-def test_build_operator_summary_min_max_mean_are_nan_when_no_dispatch_stats():
-    root = CallTreeNode(name="f.py:1")
-    op = CallTreeNode(name="op")
-    op.kernel_launches = 1
-    op.total_duration_ms = 5.0
-    op.invocation_ids.add("ctx")
-    root.children["op"] = op
-    summary = build_operator_summary({"f.py:1": root})
-    row = summary.loc[summary["Operator"] == "op"].iloc[0]
-    assert math.isnan(row["Min_Dispatch"])
-    assert math.isnan(row["Max_Dispatch"])
-    assert math.isnan(row["Mean_Per_Dispatch"])
-
-
-def test_build_operator_summary_calls_nan_when_no_invocation_ids():
-    root = CallTreeNode(name="f.py:1")
-    op = CallTreeNode(name="torch.ops.x")
-    op.kernel_launches = 2
-    op.total_duration_ms = 4.0
-    op.mean_dispatch_ns = 2_000_000.0
-    op.min_dispatch_ns = 2_000_000.0
-    op.max_dispatch_ns = 2_000_000.0
-    root.children["torch.ops.x"] = op
-    summary = build_operator_summary({"f.py:1": root})
-    row = summary.loc[summary["Operator"] == "torch.ops.x"].iloc[0]
-    assert math.isnan(row["Calls"])
-    assert math.isnan(row["Dispatches_Per_Call"])
-    assert math.isnan(row["Mean_Per_Call"])
-    assert row["Dispatches"] == 2
 
 
 # get_matrix_ops_type Tests
@@ -2694,3 +2855,773 @@ def test_undersampled_kernel_nullified_against_perfmon_file_count(
     # Timestamps and kernel name preserved for Top Stats.
     assert result["Start_Timestamp"].iloc[0] == 1000
     assert result["Kernel_Name"].iloc[0] == "kernel_a"
+
+
+# =============================================================================
+# TESTS FOR NATIVE COUNTER ARTIFACTS
+# =============================================================================
+
+
+def test_find_native_artifacts_sorts_by_counter_set_then_pid(tmp_path):
+    touch_native_process(tmp_path, "pmc_perf_0", 200, ALL_NATIVE_KINDS)
+    touch_native_process(tmp_path, "pmc_perf_0", 100, ALL_NATIVE_KINDS)
+    touch_native_process(tmp_path, "pmc_perf_1", 300, ALL_NATIVE_KINDS)
+
+    artifacts = find_native_artifacts(tmp_path)
+
+    assert [(a.fbase, a.pid) for a in artifacts] == [
+        ("pmc_perf_0", 100),
+        ("pmc_perf_0", 200),
+        ("pmc_perf_1", 300),
+    ]
+
+
+def test_find_native_artifacts_ignores_the_rocpd_csvs(tmp_path):
+    (tmp_path / "results_pmc_perf_0.csv.gz").touch()
+    (tmp_path / "rocpd_kernel_symbols_pmc_perf_0.csv.gz").touch()
+
+    assert find_native_artifacts(tmp_path) == []
+
+
+def test_find_native_artifacts_skips_an_incomplete_set(tmp_path):
+    touch_native_process(tmp_path, "pmc_perf_0", 100, ("counters",))
+
+    assert find_native_artifacts(tmp_path) == []
+
+
+def test_number_gpus_by_node_numbers_every_node_once_in_order():
+    agents = pd.DataFrame({"node_id": [5, 2, 3, 2]})
+
+    assert number_gpus_by_node(agents) == {2: 0, 3: 1, 5: 2}
+
+
+def test_join_native_counters_takes_dispatch_and_symbol_columns():
+    row = join_native_counters(
+        native_counters((1, "SQ_WAVES", 10)),
+        native_dispatches(1),
+        native_symbols(),
+        pid=100,
+    ).iloc[0]
+
+    assert row["Correlation_Id"] == 501
+    assert row["Grid_Size"] == 1048576
+    assert row["Kernel_Name"] == "vecCopy(double*, int)"
+    assert row["Arch_VGPR"] == 4
+    assert row["SGPR"] == 16
+    assert row["Start_Timestamp"] == 1001
+    assert row["GUID"] == 100
+
+
+def test_join_native_counters_drops_a_counter_without_a_dispatch():
+    joined = join_native_counters(
+        native_counters((1, "SQ_WAVES", 10), (2, "SQ_WAVES", 20)),
+        native_dispatches(1),
+        native_symbols(),
+        pid=100,
+    )
+
+    assert joined["Counter_Value"].tolist() == [10]
+
+
+def test_join_native_counters_drops_a_dispatch_without_a_symbol():
+    joined = join_native_counters(
+        native_counters((1, "SQ_WAVES", 10)),
+        native_dispatches(1, kernel_id=9),
+        native_symbols(kernel_id=7),
+        pid=100,
+    )
+
+    assert joined.empty
+
+
+def test_assign_native_ids_numbers_dispatches_across_processes():
+    # Both processes number their own dispatches from 1.
+    counter_set = pd.concat(
+        [
+            join_native_counters(
+                native_counters((1, "SQ_WAVES", 10)),
+                native_dispatches(1, start=start),
+                native_symbols(),
+                pid=pid,
+            )
+            for pid, start in ((100, 1000), (200, 5000))
+        ],
+        ignore_index=True,
+    )
+
+    numbered = assign_native_ids(counter_set)
+
+    assert numbered["Dispatch_ID"].tolist() == [1, 2]
+    # Same kernel in both processes, so one kernel id.
+    assert numbered["Kernel_ID"].tolist() == [0, 0]
+    assert numbered.columns.tolist() == COUNTER_RESULTS_COLUMNS
+
+
+def test_assign_native_ids_numbers_dispatches_in_launch_order():
+    # Rows arrive in completion order, and dispatch ids restart in each process.
+    counter_set = pd.concat(
+        [
+            join_native_counters(
+                native_counters((dispatch_id, "SQ_WAVES", pid + dispatch_id)),
+                native_dispatches(dispatch_id, start=pid * 10),
+                native_symbols(),
+                pid=pid,
+            )
+            for pid, dispatch_id in ((200, 1), (100, 2), (100, 1), (200, 2))
+        ],
+        ignore_index=True,
+    )
+
+    numbered = assign_native_ids(counter_set)
+
+    assert numbered["Dispatch_ID"].tolist() == [1, 2, 3, 4]
+    assert numbered["Counter_Value"].tolist() == [101, 102, 201, 202]
+
+
+def test_parse_marker_function_aten_addmm_n_a():
+    parsed = parse_marker_function(
+        "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|scope=FUNCTION|args=()|torch"
+    )
+    assert parsed["Operator_Name"] == "aten::addmm"
+    assert parsed["File_Name"] == ""
+    assert parsed["Line_Number"] is None
+    assert parsed["Backend"] == "torch"
+    assert parsed["launcher_thread_id"] == ""
+    assert parsed["args"] == "()"
+
+
+def test_parse_marker_function_autograd_keeps_inner_colon_and_space():
+    parsed = parse_marker_function(
+        "autograd::engine::evaluate_function: SumBackward0:n/a"
+        "|seqNr=n/a|tid=2|ftid=0|scope=FUNCTION|args=n/a|torch"
+    )
+    assert (
+        parsed["Operator_Name"] == "autograd::engine::evaluate_function: SumBackward0"
+    )
+    assert parsed["File_Name"] == ""
+    assert parsed["Line_Number"] is None
+
+
+def test_parse_marker_function_linear_forward_file_and_line():
+    parsed = parse_marker_function(
+        "nn.Module.Linear.forward:simple_torch_code.py:19"
+        "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=()|torch"
+    )
+    assert parsed["Operator_Name"] == "nn.Module.Linear.forward"
+    assert parsed["File_Name"] == "simple_torch_code.py"
+    assert parsed["Line_Number"] == 19
+
+
+def test_parse_marker_function_triton_backend_and_location():
+    parsed = parse_marker_function(
+        "triton.JITFunction.rmsnorm_kernel:llama_triton_layer.py:381"
+        "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=n/a|triton"
+    )
+    assert parsed["Backend"] == "triton"
+    assert parsed["File_Name"] == "llama_triton_layer.py"
+    assert parsed["Line_Number"] == 381
+
+
+def test_parse_marker_function_user_range_without_keys():
+    parsed = parse_marker_function("training_loop")
+    assert parsed["Operator_Name"] == "training_loop"
+    assert parsed["File_Name"] == ""
+    assert parsed["Line_Number"] is None
+    assert parsed["Backend"] == "user"
+
+
+def test_parse_marker_function_decodes_name_and_args():
+    parsed = parse_marker_function(
+        "aten::foo%2Fbar%25baz:n/a"
+        "|seqNr=1|tid=1|ftid=0|scope=FUNCTION"
+        "|args=a%7Cb%3Bc%0Dd%0Ae%25f|torch"
+    )
+    assert parsed["Operator_Name"] == "aten::foo/bar%baz"
+    assert parsed["args"] == "a|b;c\rd\ne%f"
+
+
+def test_stacked_marker_wire_exits(monkeypatch):
+    messages = record_console_error_and_exit(monkeypatch)
+    stacked = pd.DataFrame({
+        "Function": ["triton.JITFunction.foo:#1@file.py:1"],
+    })
+    with pytest.raises(SystemExit) as excinfo:
+        utils_analysis._apply_parsed_function_columns(stacked)
+    assert excinfo.value.code == 1
+    assert "Stacked marker wire is not supported" in messages[0]
+    for function in (
+        "triton.JITFunction.foo@file.py",
+        "triton.JITFunction.foo:#file.py",
+    ):
+        parsed = utils_analysis._apply_parsed_function_columns(
+            pd.DataFrame({"Function": [function]})
+        )
+        assert parsed["Operator_Name"].tolist() == [function]
+    assert len(messages) == 1
+
+
+def test_parse_marker_function_ltid_and_thread_id_unchanged(tmp_path):
+    parsed = parse_marker_function(
+        "aten::addmm:n/a|seqNr=1|tid=1|ftid=1|ltid=7|scope=FUNCTION|args=()|torch"
+    )
+    assert parsed["launcher_thread_id"] == "7"
+    workload_dir = tmp_path / "ltid_thread"
+    function = (
+        "nn.Module.Linear.forward:simple_torch_code.py:19"
+        "|seqNr=n/a|tid=n/a|ftid=1|ltid=7|scope=n/a|args=()|torch"
+    )
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [
+            {
+                "Function": function,
+                "Thread_Id": 42,
+                "Correlation_ID": 8,
+                "GUID": TEST_GUID,
+                "Start_Timestamp": 20,
+                "End_Timestamp": 70,
+            }
+        ],
+        [counter_row(8, "addmm_kernel", 30, 60, dispatch_id=1)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert workload.ml_api_trace_df["Thread_Id"].tolist() == [42]
+    assert workload.ml_api_trace_df["launcher_thread_id"].tolist() == ["7"]
+
+
+def test_nest_marker_intervals_three_deep_with_file_line():
+    forest = nest_marker_intervals(
+        pd.DataFrame([
+            parsed_marker_row(
+                "nn.Module.SimpleModel.forward",
+                0,
+                100,
+                file_name="simple_torch_code.py",
+                line_number=27,
+            ),
+            parsed_marker_row(
+                "nn.Module.Linear.forward",
+                10,
+                80,
+                file_name="simple_torch_code.py",
+                line_number=19,
+            ),
+            parsed_marker_row("aten::addmm", 20, 70),
+        ])
+    )
+    roots = forest["1"]
+    assert len(roots) == 1
+    simple = roots[0]
+    linear = simple.children[0]
+    addmm = linear.children[0]
+    assert simple.name == "nn.Module.SimpleModel.forward"
+    assert simple.file_name == "simple_torch_code.py"
+    assert simple.line_number == 27
+    assert linear.name == "nn.Module.Linear.forward"
+    assert linear.file_name == "simple_torch_code.py"
+    assert linear.line_number == 19
+    assert addmm.name == "aten::addmm"
+    assert addmm.file_name is None
+    assert addmm.line_number is None
+
+
+def test_nest_marker_intervals_nests_when_child_row_precedes_parent():
+    forest = nest_marker_intervals(
+        pd.DataFrame([
+            parsed_marker_row("aten::addmm", 20, 70),
+            parsed_marker_row(
+                "nn.Module.Linear.forward",
+                10,
+                80,
+                file_name="simple_torch_code.py",
+                line_number=19,
+            ),
+        ])
+    )
+    assert forest["1"][0].name == "nn.Module.Linear.forward"
+    assert [child.name for child in forest["1"][0].children] == ["aten::addmm"]
+
+
+def test_nest_marker_intervals_same_start_nests_contained_interval():
+    forest = nest_marker_intervals(
+        pd.DataFrame([
+            parsed_marker_row("outer", 10, 100),
+            parsed_marker_row("inner", 10, 40),
+        ])
+    )
+    assert [node.name for node in forest["1"]] == ["outer"]
+    assert [child.name for child in forest["1"][0].children] == ["inner"]
+
+
+def test_nest_marker_intervals_disjoint_linear_siblings():
+    forest = nest_marker_intervals(
+        pd.DataFrame([
+            parsed_marker_row(
+                "nn.Module.SimpleModel.forward",
+                0,
+                200,
+                file_name="simple_torch_code.py",
+                line_number=27,
+            ),
+            parsed_marker_row(
+                "nn.Module.Linear.forward",
+                10,
+                80,
+                file_name="simple_torch_code.py",
+                line_number=19,
+            ),
+            parsed_marker_row(
+                "nn.Module.Linear.forward",
+                90,
+                160,
+                file_name="simple_torch_code.py",
+                line_number=19,
+            ),
+        ])
+    )
+    siblings = forest["1"][0].children
+    assert [child.name for child in siblings] == [
+        "nn.Module.Linear.forward",
+        "nn.Module.Linear.forward",
+    ]
+    assert siblings[0].call_count == 1
+    assert siblings[1].call_count == 1
+    assert siblings[0] is not siblings[1]
+
+
+def test_nest_marker_intervals_adjacent_ranges_are_siblings():
+    forest = nest_marker_intervals(
+        pd.DataFrame([
+            parsed_marker_row("A", 0, 50, backend="user"),
+            parsed_marker_row("B", 50, 80, backend="user"),
+        ])
+    )
+    roots = forest["1"]
+    assert [root.name for root in roots] == ["A", "B"]
+
+
+def test_nest_marker_intervals_tensor_backward_and_autograd_worker():
+    forest = nest_marker_intervals(
+        pd.DataFrame([
+            parsed_marker_row(
+                "torch.Tensor.backward",
+                0,
+                100,
+                file_name="simple_torch_code.py",
+                line_number=52,
+            ),
+            parsed_marker_row(
+                "autograd::engine::evaluate_function: AddmmBackward0",
+                10,
+                40,
+                thread_id=2,
+                launcher_thread_id="1",
+            ),
+        ])
+    )
+    assert forest["1"][0].name == "torch.Tensor.backward"
+    worker = forest["2"][0]
+    assert worker.name == "autograd::engine::evaluate_function: AddmmBackward0"
+    errors = []
+    attach_unlocated_trees_by_launcher_thread(forest, errors)
+    assert errors == []
+    assert worker in forest["1"][0].children
+    assert "2" not in forest
+
+
+def test_nest_marker_intervals_user_root_without_file():
+    forest = nest_marker_intervals(
+        pd.DataFrame([parsed_marker_row("training_loop", 0, 100, backend="user")])
+    )
+    root = forest["1"][0]
+    assert root.name == "training_loop"
+    assert root.backend == "user"
+    assert root.file_name is None
+
+
+def test_nest_marker_intervals_torch_root_without_file_stays_unlocated():
+    forest = nest_marker_intervals(
+        pd.DataFrame([parsed_marker_row("aten::addmm", 0, 50)])
+    )
+    root = forest["1"][0]
+    assert root.name == "aten::addmm"
+    assert root.file_name is None
+    errors = []
+    attach_unlocated_trees_by_launcher_thread(forest, errors)
+    assert errors == []
+    utils_analysis._record_missing_source_location_errors(forest, errors)
+    assert len(errors) == 1
+    assert isinstance(errors[0], MissingSourceLocationError)
+    assert errors[0].operator_name == "aten::addmm"
+    assert root in forest["1"]
+
+
+def test_build_operator_summary_location_from_node_file_line():
+    located = CallTreeNode(
+        name="linear",
+        file_name="simple_torch_code.py",
+        line_number=19,
+    )
+    located.kernel_launches = 1
+    located.total_duration_ms = 1.0
+    located.invocation_ids.add("10")
+    missing = CallTreeNode(name="addmm")
+    missing.kernel_launches = 1
+    missing.total_duration_ms = 0.5
+    missing.invocation_ids.add("20")
+    located.children = [missing]
+    summary = build_operator_summary({"1": [located]})
+    by_name = summary.set_index("Operator")
+    assert by_name.loc["linear", "Location"] == "simple_torch_code.py:19"
+    assert by_name.loc["linear/addmm", "Location"] == ""
+
+
+def test_process_outer_join_keeps_wrap_with_empty_kernel_names(tmp_path):
+    workload_dir = tmp_path / "empty_kernels"
+    workload_dir.mkdir()
+    pd.DataFrame([linear_marker_row(1, 10, 80)]).to_csv(
+        csv_compression.compressed_name(
+            workload_dir / "ml_api_trace_pmc_perf_0_marker_api_trace.csv"
+        ),
+        index=False,
+        compression="gzip",
+    )
+    pd.DataFrame(
+        columns=[
+            "Correlation_ID",
+            "GUID",
+            "Kernel_Name",
+            "Dispatch_ID",
+            "Grid_Size",
+            "Workgroup_Size",
+            "LDS_Per_Workgroup",
+            "Start_Timestamp",
+            "End_Timestamp",
+            "Counter_Name",
+        ]
+    ).to_csv(
+        csv_compression.compressed_name(
+            workload_dir / "ml_api_trace_pmc_perf_0_counter_collection.csv"
+        ),
+        index=False,
+        compression="gzip",
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert list(workload.ml_api_trace_df["Kernel_Names"].iloc[0]) == []
+    assert workload.ml_api_call_trees == {}
+
+
+def test_process_collapses_two_counter_rows_to_one_dispatch_duration(tmp_path):
+    workload_dir = tmp_path / "two_counters"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 200)],
+        [
+            counter_row(
+                1,
+                "addmm_kernel",
+                100,
+                150,
+                dispatch_id=7,
+                counter_name="SQ_WAVES",
+            ),
+            counter_row(
+                1,
+                "addmm_kernel",
+                100,
+                150,
+                dispatch_id=7,
+                counter_name="GRBM_GUI_ACTIVE",
+            ),
+        ],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    stats = workload.ml_api_call_trees["1"][0].kernels["addmm_kernel"]
+    assert stats.launches == 1
+    assert stats.total_duration_ns == 50
+
+
+def test_process_two_dispatches_same_marker_keep_both_kernel_names(tmp_path):
+    workload_dir = tmp_path / "two_kernels"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(5, 0, 200)],
+        [
+            counter_row(5, "kernel_a", 10, 20, dispatch_id=1),
+            counter_row(5, "kernel_b", 30, 40, dispatch_id=2),
+        ],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    names = list(workload.ml_api_trace_df["Kernel_Names"].iloc[0])
+    assert names == ["kernel_a", "kernel_b"]
+    assert set(workload.ml_api_call_trees["1"][0].kernels) == {"kernel_a", "kernel_b"}
+
+
+def test_process_unmatched_kernel_warns_and_continues(tmp_path, monkeypatch):
+    warnings = []
+    monkeypatch.setattr(
+        utils_analysis,
+        "console_warning",
+        lambda *argv: warnings.append(argv),
+    )
+    workload_dir = tmp_path / "unmatched"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [counter_row(99, "orphan_kernel", 10, 20)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert len(workload.unmatched_kernel_frames) == 1
+    assert not workload.unmatched_kernel_frames[0].empty
+    warning_text = str(warnings)
+    assert "orphan_kernel" in warning_text
+    assert "unmatched dispatches" in warning_text
+    assert not workload.ml_api_trace_df.empty
+
+
+def test_process_unmatched_dispatch_two_counter_rows_is_one_row(tmp_path):
+    workload_dir = tmp_path / "unmatched_two_counters"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [
+            counter_row(
+                99,
+                "orphan_kernel",
+                10,
+                20,
+                dispatch_id=3,
+                counter_name="SQ_WAVES",
+            ),
+            counter_row(
+                99,
+                "orphan_kernel",
+                10,
+                20,
+                dispatch_id=3,
+                counter_name="GRBM_GUI_ACTIVE",
+            ),
+        ],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    unmatched = workload.unmatched_kernel_frames[0]
+    assert len(unmatched) == 1
+    assert unmatched.iloc[0]["Kernel_Name"] == "orphan_kernel"
+
+
+def test_process_joins_on_guid_and_correlation_id(tmp_path):
+    workload_dir = tmp_path / "guid_join"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100, guid=TEST_GUID)],
+        [counter_row(1, "addmm_kernel", 10, 40, guid=TEST_GUID)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert list(workload.ml_api_trace_df["Kernel_Names"].iloc[0]) == ["addmm_kernel"]
+
+
+def test_process_same_correlation_id_different_guid_does_not_join(tmp_path):
+    workload_dir = tmp_path / "guid_mismatch"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100, guid=TEST_GUID)],
+        [counter_row(1, "addmm_kernel", 10, 40, guid=TEST_GUID_OTHER)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert list(workload.ml_api_trace_df["Kernel_Names"].iloc[0]) == []
+    unmatched = workload.unmatched_kernel_frames[0]
+    assert unmatched.iloc[0]["Kernel_Name"] == "addmm_kernel"
+
+
+def test_process_one_pass_builds_ml_api_trace_df(tmp_path):
+    workload_dir = tmp_path / "one_pass"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [counter_row(1, "addmm_kernel", 10, 40)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert len(workload.ml_api_trace_df) == 1
+    assert workload.ml_api_call_trees["1"][0].kernel_launches == 1
+
+
+@pytest.mark.parametrize("csv_kind", ["marker", "counter"])
+def test_process_exits_when_guid_column_is_missing(tmp_path, monkeypatch, csv_kind):
+    messages = record_console_error_and_exit(monkeypatch)
+    marker = linear_marker_row(1, 0, 100)
+    counter = counter_row(1, "addmm_kernel", 10, 40)
+    row_without_guid = marker if csv_kind == "marker" else counter
+    del row_without_guid["GUID"]
+    write_ml_api_pass(tmp_path, 0, [marker], [counter])
+    with pytest.raises(SystemExit):
+        process_ml_api_trace_output(schema.Workload(), str(tmp_path))
+    assert "missing required columns ['GUID']" in messages[-1]
+
+
+def test_process_two_passes_collapse_to_one_launch(tmp_path):
+    workload_dir = tmp_path / "two_pass_collapse"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(11, 0, 100)],
+        [counter_row(11, "addmm_kernel", 10, 40, dispatch_id=1)],
+    )
+    write_ml_api_pass(
+        workload_dir,
+        1,
+        [linear_marker_row(22, 1000, 1100)],
+        [counter_row(22, "addmm_kernel", 1010, 1040, dispatch_id=9)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert len(workload.ml_api_trace_df) == 1
+    assert workload.ml_api_call_trees["1"][0].kernel_launches == 1
+
+
+def test_process_collapse_keeps_pass0_gpu_time(tmp_path):
+    workload_dir = tmp_path / "pass0_gpu_time"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(11, 0, 100)],
+        [counter_row(11, "addmm_kernel", 10, 40, dispatch_id=1)],
+    )
+    write_ml_api_pass(
+        workload_dir,
+        1,
+        [linear_marker_row(22, 1000, 1100)],
+        [counter_row(22, "addmm_kernel", 1010, 1100, dispatch_id=9)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    stats = workload.ml_api_call_trees["1"][0].kernels["addmm_kernel"]
+    assert stats.total_duration_ns == 30
+
+
+def test_marker_stitch_key_keeps_seqnr_tid_ftid_omits_ltid():
+    with_ltid = (
+        "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|ltid=7|scope=FUNCTION|args=()|torch"
+    )
+    other_ltid = (
+        "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|ltid=9|scope=FUNCTION|args=()|torch"
+    )
+    expected = "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|scope=FUNCTION|args=()|torch"
+    assert utils_analysis._marker_stitch_key(with_ltid) == expected
+    assert utils_analysis._marker_stitch_key(other_ltid) == expected
+
+
+def test_process_two_wraps_same_stitch_key_keep_ordinals(tmp_path):
+    workload_dir = tmp_path / "two_ordinals"
+    first = linear_marker_row(1, 0, 50)
+    second = linear_marker_row(2, 60, 110)
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [first, second],
+        [
+            counter_row(1, "kernel_a", 10, 20, dispatch_id=1),
+            counter_row(2, "kernel_b", 70, 80, dispatch_id=2),
+        ],
+    )
+    write_ml_api_pass(
+        workload_dir,
+        1,
+        [linear_marker_row(8, 200, 250), linear_marker_row(9, 260, 310)],
+        [
+            counter_row(8, "kernel_a", 210, 220, dispatch_id=1),
+            counter_row(9, "kernel_b", 270, 280, dispatch_id=2),
+        ],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert len(workload.ml_api_trace_df) == 2
+    roots = workload.ml_api_call_trees["1"]
+    assert len(roots) == 2
+    assert [root.call_count for root in roots] == [1, 1]
+
+
+def test_process_pass_null_kernel_name_mismatch_exits(tmp_path, monkeypatch):
+    messages = record_console_error_and_exit(monkeypatch)
+    workload_dir = tmp_path / "kernel_mismatch"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [counter_row(1, "kernel_a", 10, 40)],
+    )
+    workload_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([linear_marker_row(1, 0, 100)]).to_csv(
+        csv_compression.compressed_name(
+            workload_dir / "ml_api_trace_pmc_perf_1_marker_api_trace.csv"
+        ),
+        index=False,
+        compression="gzip",
+    )
+    pd.DataFrame(
+        columns=[
+            "Correlation_ID",
+            "GUID",
+            "Kernel_Name",
+            "Dispatch_ID",
+            "Grid_Size",
+            "Workgroup_Size",
+            "LDS_Per_Workgroup",
+            "Start_Timestamp",
+            "End_Timestamp",
+            "Counter_Name",
+        ]
+    ).to_csv(
+        csv_compression.compressed_name(
+            workload_dir / "ml_api_trace_pmc_perf_1_counter_collection.csv"
+        ),
+        index=False,
+        compression="gzip",
+    )
+    workload = schema.Workload()
+    with pytest.raises(SystemExit) as excinfo:
+        process_ml_api_trace_output(workload, str(workload_dir))
+    assert excinfo.value.code == 1
+    assert "Pass marker mismatch" in messages[0]
+    assert "Kernel_Names" in messages[0]
+
+
+def test_process_pass_marker_count_mismatch_exits(tmp_path, monkeypatch):
+    messages = record_console_error_and_exit(monkeypatch)
+    workload_dir = tmp_path / "count_mismatch"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 50), linear_marker_row(2, 60, 110)],
+        [
+            counter_row(1, "kernel_a", 10, 20, dispatch_id=1),
+            counter_row(2, "kernel_b", 70, 80, dispatch_id=2),
+        ],
+    )
+    write_ml_api_pass(
+        workload_dir,
+        1,
+        [linear_marker_row(1, 0, 50)],
+        [counter_row(1, "kernel_a", 10, 20)],
+    )
+    workload = schema.Workload()
+    with pytest.raises(SystemExit) as excinfo:
+        process_ml_api_trace_output(workload, str(workload_dir))
+    assert excinfo.value.code == 1
+    assert "per-pass marker counts" in messages[0]

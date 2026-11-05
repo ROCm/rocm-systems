@@ -47,6 +47,7 @@ THE SOFTWARE.
 #include <thread>
 #include <sstream>
 #include <iomanip>
+#include <vector>
 
 #define MSG(X) std::clog << X << std::endl;
 #define MSG_NO_NEWLINE(X) std::clog << X;
@@ -64,7 +65,12 @@ enum RocDecLogLevel {
     kRocDecLogLevelMax       = 4
 };
 
-#ifdef _WIN32
+#ifndef _WIN32
+#define GET_TIME_NS() ([]() -> uint64_t { struct timespec ts_; clock_gettime(CLOCK_MONOTONIC, &ts_); return static_cast<uint64_t>(ts_.tv_sec) * 1000000000LL + ts_.tv_nsec; }())
+#define FILENAME_ONLY (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
+#define GET_THREAD_ID() (static_cast<pid_t>(syscall(SYS_gettid)))
+#define GET_PID() (getpid())
+#else
 #define GET_TIME_NS() ([]() -> uint64_t { \
     static const LARGE_INTEGER freq = []() { LARGE_INTEGER f{}; QueryPerformanceFrequency(&f); return f; }(); \
     LARGE_INTEGER cnt{}; QueryPerformanceCounter(&cnt); \
@@ -75,11 +81,6 @@ enum RocDecLogLevel {
 #define FILENAME_ONLY (strrchr(__FILE__, '\\') ? strrchr(__FILE__, '\\') + 1 : (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__))
 #define GET_THREAD_ID() (static_cast<uint32_t>(GetCurrentThreadId()))
 #define GET_PID() (_getpid())
-#else
-#define GET_TIME_NS() ([]() -> uint64_t { struct timespec ts_; clock_gettime(CLOCK_MONOTONIC, &ts_); return static_cast<uint64_t>(ts_.tv_sec) * 1000000000LL + ts_.tv_nsec; }())
-#define FILENAME_ONLY (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
-#define GET_THREAD_ID() (static_cast<pid_t>(syscall(SYS_gettid)))
-#define GET_PID() (getpid())
 #endif
 #define GET_HASHED_THREAD_ID() ([]() -> std::string { std::ostringstream oss; oss << "0x" << std::hex << std::setw(5) << std::setfill('0') << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); return oss.str(); }())
 #define MakeMsg(msg) ROCDEC_STR(FILENAME_ONLY) + ":" + ROCDEC_TOSTR(__LINE__) + ": " + ROCDEC_TOSTR(GET_TIME_NS() / 1000ULL) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(GET_PID()) + ROCDEC_STR(" tid:") + ROCDEC_TOSTR(GET_THREAD_ID()) + ROCDEC_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCDEC_STR("] ") + ROCDEC_STR(__func__) + "(): " + msg
@@ -223,3 +224,28 @@ private:
 };
 
 #define THROW(X) throw rocDecodeException(" { "+std::string(__func__)+" } " + X);
+
+// Parse a comma-separated list of device indices, e.g. the value of
+// ROCR_VISIBLE_DEVICES or HIP_VISIBLE_DEVICES. The argument is typically the
+// result of std::getenv(); that pointer aliases the process environment and
+// must not be written through (undefined behaviour, C11 7.22.4.6 / C++
+// [c.strings]). The input is copied into a stream before tokenising so the
+// caller's buffer is never modified. Comma-delimited tokens are converted with
+// std::atoi; empty tokens (leading/trailing/consecutive commas) are skipped.
+// The result is not sorted; callers apply their own ordering.
+inline std::vector<int> ParseVisibleDevicesCsv(const char* env) {
+    std::vector<int> devices;
+    if (env == nullptr) {
+        return devices;
+    }
+    // Copy into a stream: never write through the caller's pointer. The loop
+    // exits when std::getline can no longer extract a field (stream exhausted).
+    std::istringstream csv{std::string(env)};
+    std::string token;
+    while (std::getline(csv, token, ',')) {
+        if (!token.empty()) {  // skip empty tokens
+            devices.push_back(std::atoi(token.c_str()));
+        }
+    }
+    return devices;
+}

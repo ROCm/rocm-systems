@@ -3,7 +3,6 @@
 
 import argparse
 import copy
-import csv
 import re
 import sys
 from abc import abstractmethod
@@ -13,9 +12,8 @@ from typing import Any, Optional, TextIO
 
 import pandas as pd
 
-import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import csv_compression, file_io, parser, schema
+from utils import file_io, parser, schema
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
@@ -116,7 +114,6 @@ class OmniAnalyze_Base:
             filter_gpu_ids=workload.filter_gpu_ids,
             filter_dispatch_ids=workload.filter_dispatch_ids,
             time_unit=args.time_unit,
-            kernel_verbose=args.kernel_verbose,
         )
         workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
         workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
@@ -124,6 +121,11 @@ class OmniAnalyze_Base:
             workload, dir_path, args, pc_sampling_tool_data=tool_data
         )
         parser.nullify_unevaluated_metric_values(workload)
+
+    def membw_analysis_collected(self) -> bool:
+        """True when block 30 data was collected during profiling."""
+        config = getattr(self, "_profiling_config", {})
+        return config.get("membw_analysis", False)
 
     def set_soc(self, omni_socs: dict[str, OmniSoC_Base]) -> None:
         self.__socs = omni_socs
@@ -161,16 +163,6 @@ class OmniAnalyze_Base:
                 if single_panel_config
                 else str(Path(config_dir) / config_arch)
             ]
-            # Use restructured perf metrics in TUI analyze mode
-            if self.get_args().tui and arch in ["gfx942", "gfx950"]:
-                arch_panel_config.append(
-                    str(
-                        config.rocprof_compute_home
-                        / "rocprof_compute_tui"
-                        / "utils"
-                        / arch
-                    )
-                )
             ac.panel_configs = load_panel_configs(arch_panel_config)
 
         parser.build_dfs(
@@ -184,15 +176,14 @@ class OmniAnalyze_Base:
         return self._arch_configs
 
     @demarcate
-    def load_options(self, normalization_filter: Optional[str]) -> None:
+    def load_options(self) -> None:
         args = self.get_args()
-        target_filter = normalization_filter or args.normal_unit
 
         for arch_config in self._arch_configs.values():
             build_metric_value_string(
                 arch_config.dfs,
                 arch_config.dfs_type,
-                target_filter,
+                args.normal_unit,
             )
         # Error checking for multiple runs and multiple kernel filters
         if args.gpu_kernel and (len(args.path) != len(args.gpu_kernel)):
@@ -205,9 +196,7 @@ class OmniAnalyze_Base:
                 )
 
     @demarcate
-    def initalize_runs(
-        self, normalization_filter: Optional[str] = None
-    ) -> OrderedDict[str, schema.Workload]:
+    def initalize_runs(self) -> OrderedDict[str, schema.Workload]:
         args = self.get_args()
 
         # load required configs
@@ -225,7 +214,7 @@ class OmniAnalyze_Base:
                     getattr(self, "_profiling_config", {}),
                 )
 
-        self.load_options(normalization_filter)
+        self.load_options()
 
         for path_info in args.path:
             w = schema.Workload()
@@ -265,7 +254,6 @@ class OmniAnalyze_Base:
                         w.sys_info = parser.correct_sys_info(
                             mspec, args.specs_correction
                         )
-                w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
                 w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
                 w.dfs_type = self._arch_configs[arch].dfs_type
                 self._runs[path_info[0]] = w
@@ -276,9 +264,6 @@ class OmniAnalyze_Base:
     def sanitize(self) -> None:
         """Perform sanitization of inputs"""
         args = self.get_args()
-
-        if args.tui:
-            return
 
         if not args.path:
             console_error("The following arguments are required: -p/--path")
@@ -375,89 +360,6 @@ class OmniAnalyze_Base:
                 ),
             )
 
-    @demarcate
-    def concat_result_csvs(self, result_files: list[Path], output_file: Path) -> None:
-        """Vertically concatenate rocpd ``results_*.csv`` files into one CSV.
-
-        Every file shares the long-form header rocpd writes, so the header is
-        taken from the first non-empty file and the remaining rows are appended.
-
-        Args:
-            result_files: The results_*.csv files to concatenate
-            output_file: Destination CSV
-        """
-        console_warning(
-            "Reading intermediate results_*.csv files is deprecated and "
-            "will be removed in a future release."
-        )
-
-        rows_written = 0
-        with csv_compression.open_csv_write(output_file) as outfile:
-            writer = None
-            for file in result_files:
-                # Only the read can fail on compression; output_file is plain.
-                try:
-                    with csv_compression.open_csv_read(file) as infile:
-                        reader = csv.reader(infile)
-                        header = next(reader, None)
-                        if header is None:
-                            console_warning(f"Skipping empty {file}")
-                            continue
-                        if "Counter_Name" not in header:
-                            output_file.unlink(missing_ok=True)
-                            console_error(
-                                f"{file} is not in the supported rocpd format. "
-                                "Please re-profile this workload with a current "
-                                "release."
-                            )
-                        if writer is None:
-                            writer = csv.writer(outfile)
-                            writer.writerow(header)
-                        for row in reader:
-                            writer.writerow(row)
-                            rows_written += 1
-                except csv_compression.CORRUPT_CSV_ERRORS as e:
-                    # Drop the partial pmc_perf.csv built from earlier files.
-                    output_file.unlink(missing_ok=True)
-                    console_error(
-                        f"{file} is truncated or corrupt: {e}\n"
-                        "A profile run killed mid-write leaves this behind; "
-                        "re-run 'rocprof-compute profile' to regenerate the "
-                        "workload."
-                    )
-
-        # A header-only pmc_perf.csv would be reused by later analyze runs.
-        if rows_written == 0:
-            output_file.unlink(missing_ok=True)
-            console_error(
-                f"No counter data in results_*.csv under {output_file.parent}.\n"
-                f"Please re-run 'rocprof-compute profile'."
-            )
-
-        console_debug(f"Created file: {output_file} ({rows_written} counter rows)")
-
-    def join_workload_csvs(self, workload_dir: Path) -> None:
-        """Concatenate results_*.csv source files into pmc_perf.csv if needed.
-
-        Args:
-            workload_dir: Path to the workload directory
-        """
-        pmc_perf = workload_dir / "pmc_perf.csv"
-        result_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
-
-        if pmc_perf.exists() and pmc_perf.stat().st_size > 0:
-            console_debug(f"Using existing {pmc_perf}")
-        elif result_files:
-            console_log(f"Joining results_*.csv for {workload_dir}...")
-            self.concat_result_csvs(result_files, pmc_perf)
-            console_log(f"Created {pmc_perf}")
-        else:
-            console_error(
-                f"No profiling data found in {workload_dir}.\n"
-                f"Expected: pmc_perf.csv or results_*.csv\n"
-                f"Please run 'rocprof-compute profile' first."
-            )
-
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
     # ----------------------------------------------------
@@ -498,12 +400,6 @@ class OmniAnalyze_Base:
             # Apply filters to workloads
             for path_info, filter_value in zip(args.path, filter_list):
                 setattr(self._runs[path_info[0]], attr_name, filter_value)
-
-        if not self.pc_sampling_only():
-            # Join results_*.csv source files into pmc_perf.csv if needed
-            for path_info in args.path:
-                workload_dir = Path(path_info[0])
-                self.join_workload_csvs(workload_dir)
 
     @abstractmethod
     def run_analysis(self) -> None:

@@ -81,6 +81,8 @@ enum class AmdGpuMachineType : uint8
     Gfx1151 = 0x4A,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1151
     Gfx1152 = 0x55,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1152
     Gfx1153 = 0x58,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1153
+    Gfx1170    = 0x5D,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1170
+    Gfx1171 = 0x5E,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1171
     Gfx1200   = 0x48,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1200
     Gfx1201   = 0x4E,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1201
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 958
@@ -124,6 +126,9 @@ enum GfxIpStepping : uint16
     GfxIpSteppingStrixHalo     = 1,
     GfxIpSteppingKrackan1      = 2,
     GfxIpSteppingKrackan2      = 3,
+    // GFXIP 11.7.x steppings:
+    GfxIpSteppingGfx1170       = 0,
+    GfxIpSteppingGfx1171       = 1,
 
     // GFXIP 12.0.x steppings:
     GfxIpSteppingNavi44        = 0,
@@ -453,10 +458,12 @@ union ApiCompositeDataValue
         uint32 rasterStream       : 2; ///< Which vertex stream to rasterize.
 #endif
         uint32 patchControlPoints : 6; ///< Number of patch control points.
+        uint32 generatedPrimQuery : 1; ///< Whether primitive-generated query is active.
+        uint32 numPatchesPerGroup : 7; ///< Number of patches per thread group.
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 995
-        uint32 reserved           : 15;
+        uint32 reserved           : 7;
 #else
-        uint32 reserved           : 16;
+        uint32 reserved           : 8;
 #endif
     };
 
@@ -833,9 +840,8 @@ struct TessConfigCb
     /// [0]=Position, [1]=PointSize, [2]=ClipDistance, [3]=CullDistance, [4]=Layer, [5]=ViewportIndex,
     /// [6]=TessLevelOuter, [7]=TessLevelInner. Use InvalidValue if not present.
     uint32 hsOutputSemantic[MaxHsOutputSemantic];
-    uint32 patchControlPoints;        ///< Number of control points per patch.
 };
-static_assert(sizeof(TessConfigCb) == 64, "TessConfigCb size is different than expected!");
+static_assert(sizeof(TessConfigCb) == 60, "TessConfigCb size is different than expected!");
 
 /// Constant buffer used for dynamic states
 struct DynamicStateCb

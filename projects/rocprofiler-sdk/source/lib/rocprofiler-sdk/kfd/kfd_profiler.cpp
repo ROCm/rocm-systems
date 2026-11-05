@@ -24,11 +24,12 @@
 
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 
 // NOTE: this vendored header carries the *active* (profiler ABI v6, stream ABI
-// v3) dispatch-log UAPI: AMDKFD_IOC_PROFILER at 0x28 with the single OPEN_STREAM
+// v4) dispatch-log UAPI: AMDKFD_IOC_PROFILER at 0x28 with the single OPEN_STREAM
 // op. It deliberately conflicts with the older lib/rocprofiler-sdk/details/
 // kfd_ioctl.h (VERSION_NUM 1, ioctl 0x86, no dlog ops). The two must never be
 // included in the same translation unit. This file includes ONLY the dlog UAPI.
@@ -105,7 +106,7 @@ constexpr const char* kTopologyNodesPath = "/sys/class/kfd/kfd/topology/nodes";
 // Presence of dispatch_log_stream_format is the definitive per-GPU support check
 // for the stream reader (CPU nodes and unsupported GPU archs do not have it).
 // The legacy GFX9-only dispatch_log_format is deliberately NOT consulted: this
-// reader speaks stream ABI v3 and must test the stream-specific contract. gpu_id
+// reader speaks stream ABI v4 and must test the stream-specific contract. gpu_id
 // == 0 denotes a CPU-only node and is skipped.
 std::unordered_set<uint32_t>
 discover_stream_dispatch_log_gpus(const char* nodes_path)
@@ -147,6 +148,17 @@ discover_stream_dispatch_log_gpus(const char* nodes_path)
 
     closedir(dir);
     return gpu_ids;
+}
+
+// F15: is any registered context actually tracing kernel dispatch? Same predicate
+// as the interposition arm (buffer OR callback kernel-dispatch tracing).
+bool
+kernel_dispatch_context_registered()
+{
+    return !context::get_registered_contexts([](const context::context* ctx) {
+                return ctx->is_tracing_one_of(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                              ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH);
+            }).empty();
 }
 
 void
@@ -204,10 +216,12 @@ init_kfd_profiler()
     // a tool that starts its kernel-dispatch context in tool_init calls
     // start_context BEFORE HSA loads, so the arm there is a guaranteed no-op and
     // the ring is armed only lazily on the first dispatch -- losing the earliest
-    // ones. This runs at HSA-table install, gated by the feature and reached only
-    // because a kernel-dispatch context enabled interception, so arm now that
-    // probe_ok is set. Idempotent (establish_session early-outs).
-    if(signal_less_feature_enabled()) arm_dispatch_log_sessions();
+    // ones. This runs at HSA-table install, so arm eagerly ONLY when a
+    // kernel-dispatch context is actually registered (F15); the start_context arm
+    // and the lazy first-dispatch fallback still cover a context started later.
+    // Idempotent (establish_session early-outs).
+    if(signal_less_feature_enabled() && kernel_dispatch_context_registered())
+        arm_dispatch_log_sessions();
 
     // Neither the reader thread nor the ring is created here: installing the HSA
     // table says nothing about whether anyone wants kernel traces, and the SDK

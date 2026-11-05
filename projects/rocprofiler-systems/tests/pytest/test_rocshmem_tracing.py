@@ -9,7 +9,9 @@ and surfaces them as ``rocm_rocshmem_api`` spans in the Perfetto trace.
 """
 
 from __future__ import annotations
+
 from pathlib import Path
+
 import pytest
 from conftest import RocprofsysTest
 

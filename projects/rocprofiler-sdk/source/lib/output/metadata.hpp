@@ -49,6 +49,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -190,13 +191,14 @@ struct metadata
     // Loads only selected counters into metadata to reduce JSON size. Used by the 'rocprofv3' tool.
     void init(inprocess_with_counters&&);
 
-    const agent_info*                   get_agent(rocprofiler_agent_id_t _val) const;
-    const code_object_info*             get_code_object(uint64_t code_obj_id) const;
-    const kernel_symbol_info*           get_kernel_symbol(uint64_t kernel_id) const;
-    const host_function_info*           get_host_function(uint64_t host_function_id) const;
-    const tool_counter_info*            get_counter_info(uint64_t instance_id) const;
-    const tool_counter_info*            get_counter_info(rocprofiler_counter_id_t id) const;
-    const counter_dimension_info_vec_t* get_counter_dimension_info(uint64_t instance_id) const;
+    const agent_info*                     get_agent(rocprofiler_agent_id_t _val) const;
+    const code_object_info*               get_code_object(uint64_t code_obj_id) const;
+    std::optional<rocprofiler_agent_id_t> get_code_object_agent(uint64_t code_obj_id) const;
+    const kernel_symbol_info*             get_kernel_symbol(uint64_t kernel_id) const;
+    const host_function_info*             get_host_function(uint64_t host_function_id) const;
+    const tool_counter_info*              get_counter_info(uint64_t instance_id) const;
+    const tool_counter_info*              get_counter_info(rocprofiler_counter_id_t id) const;
+    const counter_dimension_info_vec_t*   get_counter_dimension_info(uint64_t instance_id) const;
 
     std::vector<std::string> get_att_filenames() const;
     code_object_data_vec_t   get_code_objects() const;

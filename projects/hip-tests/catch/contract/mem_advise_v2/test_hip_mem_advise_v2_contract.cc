@@ -131,8 +131,6 @@ HIP_TEST_CASE(Contract_MemAdviseV2_HipMemPrefetchAsyncV2_PrefetchAsync_IsAccepte
 
 // @asserts: hipMemAdvise_v2 - advising a null range does not silently succeed and returns a non-success status
 HIP_TEST_CASE(Contract_MemAdviseV2_HipMemAdviseV2_NullPointer_IsRejected) {
-  SkipIfManagedMemoryUnsupported();
-
   // Advising a null range must not silently succeed. The exact error code is
   // backend-specific, so only a non-success status is required.
   const hipMemLocation location = CurrentDeviceLocation();

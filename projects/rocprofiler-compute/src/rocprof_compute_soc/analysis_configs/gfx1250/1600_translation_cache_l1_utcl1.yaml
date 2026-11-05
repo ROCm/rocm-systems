@@ -31,7 +31,7 @@ Panel Config:
           avg: SUM(UTCL1_REQS_sum) / SUM($denom)
           min: MIN(UTCL1_REQS_sum / $denom)
           max: MAX(UTCL1_REQS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Returns to UTCL0:
           avg: SUM(UTCL1_RTNS_sum) / SUM($denom)
           min: MIN(UTCL1_RTNS_sum / $denom)
@@ -46,7 +46,7 @@ Panel Config:
           avg: SUM(UTCL1_UTCL2_REQS_sum) / SUM($denom)
           min: MIN(UTCL1_UTCL2_REQS_sum / $denom)
           max: MAX(UTCL1_UTCL2_REQS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         UTCL1-UTCL2 Returns:
           avg: SUM(UTCL1_UTCL2_RET_CNT_sum) / SUM($denom)
           min: MIN(UTCL1_UTCL2_RET_CNT_sum / $denom)

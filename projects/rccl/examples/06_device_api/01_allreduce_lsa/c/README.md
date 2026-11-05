@@ -16,7 +16,7 @@ The advanced examples can be built using either pthread or MPI for parallelizati
 From this directory:
 
 ```shell
-make [MPI=1] [MPI_HOME=<path-to-mpi>] [NCCL_HOME=<path-to-nccl>] [CUDA_HOME=<path-to-cuda>]
+make [MPI=1] [MPI_HOME=<path-to-mpi>] [RCCL_HOME=<path-to-rccl>] [ROCM_PATH=<path-to-rocm>] [GPU_TARGETS="<gfx-arch> ..."]
 ```
 ## Run
 
@@ -80,11 +80,11 @@ The NCCL Device API enables GPU kernels to perform inter-GPU communication direc
 
 ```c
 ncclDevComm devComm;
-ncclDevCommRequirements requirements = {0};
-requirements.lsaBarrierCount = numBlocks;  // One barrier per thread block
+ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+reqs.lsaBarrierCount = numBlocks;  // One barrier per thread block
 
 // Create device communicator
-ncclDevCommCreate(&devComm, comm, &requirements);
+ncclDevCommCreate(comm, &reqs, &devComm);
 ```
 
 ### Symmetric Memory Windows (Host-side)
@@ -114,7 +114,7 @@ GPUs.
 // synchronize independently with their counterparts on other GPUs.
 ncclLsaBarrierSession<ncclCoopCta> bar {
     ncclCoopCta(),           // Barrier scope: entire CTA (thread block)
-    devComm, ncclTeamLsa(devComm), devComm.lsaBarrier,
+    devComm, ncclTeamTagLsa(),
     blockIdx.x               // Barrier index: matches our CTA index (0 to lsaBarrierCount-1)
 };
 

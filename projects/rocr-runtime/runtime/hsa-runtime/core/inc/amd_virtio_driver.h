@@ -123,6 +123,10 @@ class KfdVirtioDriver final : public core::Driver {
   hsa_status_t IsModelEnabled(bool* enable) const override;
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
 
+  hsa_status_t SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) override {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
   hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
 };
 

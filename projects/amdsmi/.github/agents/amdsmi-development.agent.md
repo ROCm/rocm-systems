@@ -2,7 +2,7 @@
 name: AMD-SMI Development Agent
 description: Development agent for amd-smi. Coordinates a feature or defect end-to-end by dispatching one focused subagent per skill-phase (interrogate → plan → TDD → debug → verify → finish), running independent phases in parallel. Can be invoked directly by the user or dispatched as a subagent by the planning agent.
 tools: execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/createAndRunTask, execute/runTests, execute/testFailure, execute/runInTerminal, read/terminalSelection, read/terminalLastCommand, read/problems, read/readFile, agent, agent/runSubagent, edit/createDirectory, edit/createFile, edit/editFiles, edit/rename, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/textSearch, search/usages, todo, atlassian/*
-agents: [AMD-SMI Development Agent, Explore, amdsmi-review-tests, amdsmi-review-style, amdsmi-review-architecture, amdsmi-review-security, amdsmi-review-performance, amdsmi-review-build, amdsmi-review-docs, amdsmi-review-skeptic]
+agents: [AMD-SMI Development Agent, Explore, amdsmi-review-tests, amdsmi-review-style, amdsmi-review-architecture, amdsmi-review-security, amdsmi-review-performance, amdsmi-review-build, amdsmi-review-docs, amdsmi-review-skeptic, amdsmi-review-maintainer]
 ---
 
 # Development Agent — amd-smi
@@ -53,7 +53,7 @@ You are one of three orchestrators — there is **no router** above them:
 
 - **Planning agent** — lead and entry point; owns scope, dispatches you and the review agent, iterates until the goal is met
 - **Development agent (you)** — implements
-- **Review agent** — reviews (architecture, style, tests, build, security, perf, docs, skeptic, spec)
+- **Review agent** — reviews (architecture, style, tests, build, security, perf, docs, skeptic, spec, maintainer)
 
 When the planning agent dispatches you, read the handoff doc (see the `amdsmi-agent-handoff`
 skill) and return clean, structured output it can integrate. Do not invoke the
@@ -102,7 +102,7 @@ BATCH 3 — Implement (parallel across INDEPENDENT plan tasks):
 BATCH 4 — Verify (parallel):
    • subagent: amdsmi-test-runner   → full suite
    • review self-check subagents in parallel (tests, style, architecture,
-     security, build, docs, perf, skeptic — pick the relevant ones)
+     security, build, docs, perf, skeptic, maintainer — pick the relevant ones)
    • subagent(s): verification-before-completion on the touched areas
    └ integrate findings; loop back into BATCH 3 for any blocking fix
 

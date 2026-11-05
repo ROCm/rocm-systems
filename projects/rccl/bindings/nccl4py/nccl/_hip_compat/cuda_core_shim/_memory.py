@@ -26,7 +26,7 @@ import weakref
 from typing import Optional, Tuple
 
 from ._hip import check_hip, hip
-from .typing import DevicePointerT  # noqa: F401  (re-exported for fallback)
+from .typing import DevicePointerType  # noqa: F401  (re-exported for fallback)
 
 
 class Buffer:

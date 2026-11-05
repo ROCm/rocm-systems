@@ -26,6 +26,7 @@ from amdisa.sema_ast import (
     validate_types,
     validate_well_formed,
 )
+from amdisa.semantics import NO_OUTPUT_MODIFIER_INSTRUCTIONS
 
 _DS_ATOMIC_PREFIXES = (
     'DS_ADD_',
@@ -43,15 +44,6 @@ _DS_ATOMIC_PREFIXES = (
     'DS_PK_ADD_',
     'DS_COND_SUB_',
     'DS_SUB_CLAMP_',
-)
-
-_NO_DST_MODIFIER_INSTRUCTIONS = frozenset(
-    {
-        'V_CVT_F16_BF8',
-        'V_CVT_F16_FP8',
-        'V_CVT_NORM_I16_F16',
-        'V_CVT_NORM_U16_F16',
-    }
 )
 
 
@@ -92,7 +84,7 @@ def enrich_block(
     body = _fix_non_rtn_atomics(name, body)
 
     if enc_field_names:
-        if name in _NO_DST_MODIFIER_INSTRUCTIONS:
+        if name in NO_OUTPUT_MODIFIER_INSTRUCTIONS:
             enc_field_names = enc_field_names - frozenset({'clamp', 'omod'})
         body = _add_vop3_modifiers(body, enc_field_names, block.pragma)
 

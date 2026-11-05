@@ -19,10 +19,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: abi-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   major_abi_check:
     name: Major ABI Compliance Check
     runs-on: ubuntu-22.04
+    timeout-minutes: 20
     steps:
       - name: Setup Environment
         run: |
@@ -30,10 +35,14 @@ jobs:
           sudo rm -rf $GITHUB_WORKSPACE/.[!.]* || true
           sudo apt-get update -qq
           sudo apt-get install -y -qq perl build-essential git universal-ctags
-          git clone --branch 2.3 --depth 1 https://github.com/lvc/abi-compliance-checker.git
+          git init -q abi-compliance-checker
           cd abi-compliance-checker
+          git fetch -q --depth 1 https://github.com/lvc/abi-compliance-checker.git "$ACC_COMMIT"
+          git checkout -q FETCH_HEAD
           sudo make install
           abi-compliance-checker --version
+        env:
+          ACC_COMMIT: 8e819827e8d707c7addc4a08f5cf74045f2302bb  # tag 2.3
 
       - name: Checkout current code (new version)
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
@@ -41,9 +50,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-          sparse-checkout: |
-            projects/amdsmi/include/amd_smi/amdsmi.h
-            projects/amdsmi/tests/abi_check
+          sparse-checkout: projects/amdsmi/include/amd_smi
 
       # Vendor abi_check.py from the trusted base ref so the fork's copy is never executed.
       - name: Checkout base ref to vendor ABI check script
@@ -85,21 +92,30 @@ jobs:
           BASE_REF: ${{ steps.base_ref.outputs.ref }}
           HEAD_REF: ${{ github.head_ref || github.ref_name }}
         run: |
+          set +e
           python3 _base/projects/amdsmi/tests/abi_check/abi_check.py \
             --base-ref "$BASE_REF" \
             --head-ref "$HEAD_REF" \
             --project-path projects/amdsmi \
             --mode major
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
         continue-on-error: true
 
       - name: Save outcome for PR labeling
         if: always() && github.event_name == 'pull_request'
         env:
           RUN_MAJOR_OUTCOME: ${{ steps.run_major.outcome }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_MAJOR_RC: ${{ steps.run_major.outputs.rc }}
         run: |
-          echo "$RUN_MAJOR_OUTCOME" > outcome.txt
-          echo "$PR_NUMBER" > pr_number.txt
+          # abi_check.py exits 1 for a break and 2 when it could not compare; an error
+          # must not add or clear the label.
+          if [[ "$RUN_MAJOR_OUTCOME" == "failure" && "$RUN_MAJOR_RC" != "1" ]]; then
+            echo error > outcome.txt
+          else
+            echo "$RUN_MAJOR_OUTCOME" > outcome.txt
+          fi
 
       - name: Upload Major ABI Report
         if: always()
@@ -109,15 +125,17 @@ jobs:
           path: |
             abi_report.html
             outcome.txt
-            pr_number.txt
           if-no-files-found: warn
 
       - name: Report Major ABI Check Results
         if: always()
         env:
           RUN_MAJOR_OUTCOME: ${{ steps.run_major.outcome }}
+          RUN_MAJOR_RC: ${{ steps.run_major.outputs.rc }}
         run: |
-          if [[ "$RUN_MAJOR_OUTCOME" == "failure" ]]; then
+          if [[ "$RUN_MAJOR_OUTCOME" == "failure" && "$RUN_MAJOR_RC" != "1" ]]; then
+            echo "::error::Major ABI check could not compare the headers. See the Run Major ABI Compliance Check logs."
+          elif [[ "$RUN_MAJOR_OUTCOME" == "failure" ]]; then
             echo "::warning::MAJOR ABI BREAKAGE FOUND. Check Run Major ABI Compliance Check logs or the major-abi-report artifact."
           elif [[ "$RUN_MAJOR_OUTCOME" == "success" ]]; then
             echo "Major ABI check succeeded."
@@ -128,6 +146,7 @@ jobs:
   minor_abi_check:
     name: Minor ABI Compliance Check
     runs-on: ubuntu-22.04
+    timeout-minutes: 20
     steps:
       - name: Setup Environment
         run: |
@@ -135,10 +154,14 @@ jobs:
           sudo rm -rf $GITHUB_WORKSPACE/.[!.]* || true
           sudo apt-get update -qq
           sudo apt-get install -y -qq perl build-essential git universal-ctags
-          git clone --branch 2.3 --depth 1 https://github.com/lvc/abi-compliance-checker.git
+          git init -q abi-compliance-checker
           cd abi-compliance-checker
+          git fetch -q --depth 1 https://github.com/lvc/abi-compliance-checker.git "$ACC_COMMIT"
+          git checkout -q FETCH_HEAD
           sudo make install
           abi-compliance-checker --version
+        env:
+          ACC_COMMIT: 8e819827e8d707c7addc4a08f5cf74045f2302bb  # tag 2.3
 
       - name: Checkout current code (new version)
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
@@ -146,9 +169,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-          sparse-checkout: |
-            projects/amdsmi/include/amd_smi/amdsmi.h
-            projects/amdsmi/tests/abi_check
+          sparse-checkout: projects/amdsmi/include/amd_smi
 
       # Vendor abi_check.py from the trusted base ref so the fork's copy is never executed.
       - name: Checkout base ref to vendor ABI check script
@@ -190,19 +211,30 @@ jobs:
           BASE_REF: ${{ steps.base_ref_minor.outputs.ref }}
           HEAD_REF: ${{ github.head_ref || github.ref_name }}
         run: |
+          set +e
           python3 _base/projects/amdsmi/tests/abi_check/abi_check.py \
             --base-ref "$BASE_REF" \
             --head-ref "$HEAD_REF" \
             --project-path projects/amdsmi \
             --mode minor
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
         continue-on-error: true
 
       - name: Save outcome for PR labeling
         if: always() && github.event_name == 'pull_request'
         env:
           RUN_MINOR_OUTCOME: ${{ steps.run_minor.outcome }}
+          RUN_MINOR_RC: ${{ steps.run_minor.outputs.rc }}
         run: |
-          echo "$RUN_MINOR_OUTCOME" > outcome.txt
+          # abi_check.py exits 1 for a break and 2 when it could not compare; an error
+          # must not add or clear the label.
+          if [[ "$RUN_MINOR_OUTCOME" == "failure" && "$RUN_MINOR_RC" != "1" ]]; then
+            echo error > outcome.txt
+          else
+            echo "$RUN_MINOR_OUTCOME" > outcome.txt
+          fi
 
       - name: Upload Minor ABI Report
         if: always()
@@ -218,11 +250,14 @@ jobs:
         if: always()
         env:
           RUN_MINOR_OUTCOME: ${{ steps.run_minor.outcome }}
+          RUN_MINOR_RC: ${{ steps.run_minor.outputs.rc }}
         run: |
-          if [[ "$RUN_MINOR_OUTCOME" == "failure" ]]; then
-            echo "::warning::MINOR ABI CHANGES FOUND (STRICT CHECK). Check Run Minor ABI Compliance Check logs or the minor-abi-report artifact."
+          if [[ "$RUN_MINOR_OUTCOME" == "failure" && "$RUN_MINOR_RC" != "1" ]]; then
+            echo "::error::Minor ABI check could not compare the headers. See the Run Minor ABI Compliance Check logs."
+          elif [[ "$RUN_MINOR_OUTCOME" == "failure" ]]; then
+            echo "::warning::MINOR ABI CHANGES FOUND. Check Run Minor ABI Compliance Check logs or the minor-abi-report artifact."
           elif [[ "$RUN_MINOR_OUTCOME" == "success" ]]; then
-            echo "Minor ABI check (Strict) succeeded."
+            echo "Minor ABI check succeeded."
           else
             echo "Minor ABI check was skipped (no baseline ref available)."
           fi

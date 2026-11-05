@@ -28,9 +28,15 @@
 // whether a session belongs in the active poll set, and the consecutive
 // zero-copy backstop that turns a sticky-EPOLLIN spin into a timeout-only wait.
 //
-// Readiness is the kernel's level-triggered .poll predicate alone: a stream fd
-// stays readable while wptr != rptr, so poll() re-triggers on its own. The SDK
-// keeps no second readiness authority.
+// Readiness comes from the kernel's .poll wake plus a periodic timeout watchdog.
+// The kernel keeps a per-stream u64 notify_count (bumped by each firmware notify
+// IRQ and by queue-destroy nudges) and reports EPOLLIN, level-triggered, while
+// notify_count != 0; ->poll has no side effects. It is the read(fd,&u64,8) that
+// zeroes the count, so a consumer that wakes on EPOLLIN MUST read() it (else
+// poll() stays ready forever and the reader busy-spins). The SDK reads the count
+// on each EPOLLIN wake, then drains to the observed wptr on that wake AND on every
+// timeout, so a sub-interval tail (below one notify interval) is never stranded;
+// the read count itself is discarded -- wptr, not the count, is the drain target.
 
 #include <climits>
 #include <cstddef>
@@ -48,16 +54,17 @@ namespace kfd
 constexpr int kPollTimeoutMsDefault = 10;
 
 // Upper bound on drain passes per wake. Reaching it returns the reader to
-// poll(); the kernel's level trigger fires it again at once if wptr != rptr, so
-// a continuously advancing producer cannot livelock the reader in one wake.
+// poll(); the kernel's level trigger fires it again at once while notify_count is
+// nonzero, so a continuously advancing producer cannot livelock the reader in one
+// wake -- and the reader re-reads (clears) the count on that next wake.
 constexpr int kMaxDrainPassesPerWake = 8;
 
 // Consecutive wakes that reported readiness (poll returned before the timeout)
 // yet copied nothing, before the reader falls back to a timeout-only wait. This
-// is the spin backstop: if the kernel reports level EPOLLIN while the drain
-// copies nothing (an incoherent or reset-mismatched rptr the drain reconcile did
-// not resolve), the reader would otherwise free-run at 100% CPU. Past this count
-// it warns once and stops trusting the level trigger until a copy makes progress.
+// is the spin backstop: if the kernel reports EPOLLIN while the drain copies
+// nothing (e.g. the wake fired but no new records are visible yet), the reader
+// would otherwise free-run at 100% CPU. Past this count it warns once and stops
+// trusting the wake until a copy makes progress.
 constexpr int kMaxConsecutiveEmptyWakes = 64;
 
 // Parse the poll-timeout env value. Domain is [1, INT_MAX] ms; anything else
@@ -136,6 +143,19 @@ classify_terminal_revents(short revents)
     return terminal_action::none;
 }
 
+// Whether a stream wake must consume the kernel's notify count. The kernel reports
+// EPOLLIN level-triggered while its per-stream notify_count != 0 and only read()
+// clears it, so a POLLIN wake must be answered with a read(fd,&u64,8) or poll()
+// stays ready forever and the reader spins. A HUP/ERR-only wake (no POLLIN) carries
+// no count to drain and must NOT read -- read() would return EAGAIN and, on a torn
+// -down fd, only add noise. The read happens BEFORE the drain so a notify landing
+// mid-drain re-arms readiness and is not lost.
+inline bool
+stream_wake_wants_notify_read(short revents)
+{
+    return (revents & POLLIN) != 0;
+}
+
 // The control/wake eventfd occupies poll slot 0; the stream fds follow at 1..N.
 // build_pollfds() (the producer) and any_stream_pollin() / the terminal-revents
 // scan (the consumers) all depend on this layout, so the index lives here as the
@@ -168,15 +188,11 @@ any_stream_error(const pollfd* fds, size_t count)
     return false;
 }
 
-// Spin backstop for a sticky level trigger. `empty_wakes` is how many consecutive
+// Spin backstop for a sticky wake. `empty_wakes` is how many consecutive
 // pre-timeout wakes have copied nothing. Once it passes kMaxConsecutiveEmptyWakes
-// the reader must stop trusting the level trigger and wait on the timeout only,
-// so an incoherent rptr the drain reconcile could not resolve degrades to a
-// diagnosable warning rather than an un-killable 100% CPU hang.
-//
-// UNVALIDATED-pending-hardware: the drain reconcile (copy_pipes forcing rptr:=wptr
-// on a regression) should keep wptr and rptr coherent, but until that is validated
-// on hardware this backstop is what bounds a mismatch.
+// the reader must stop trusting the wake and wait on the timeout only, so a wake
+// storm that copies nothing degrades to a diagnosable warning rather than an
+// un-killable 100% CPU hang.
 inline bool
 empty_wake_backstop_tripped(int empty_wakes)
 {

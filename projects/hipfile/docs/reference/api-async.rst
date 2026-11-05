@@ -8,8 +8,7 @@ Asynchronous I/O API reference
 
 The hipFile asynchronous API lets you enqueue non-blocking reads and writes on
 HIP streams. Stream registration communicates hints about fixed offsets and
-alignment to the driver. On the AMD backend, asynchronous operations are
-serviced through the fallback path rather than the fastpath.
+alignment to the driver.
 
 For a step-by-step guide to using these functions, see
 :doc:`/tutorials/async-multistream-io`.

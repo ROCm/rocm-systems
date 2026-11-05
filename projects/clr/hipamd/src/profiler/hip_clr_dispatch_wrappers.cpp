@@ -183,7 +183,7 @@ static hipError_t hipBindTextureToMipmappedArrayLayer(const textureReference* te
 }
 
 // api_id = 11
-static hipError_t hipChooseDeviceLayer(int* device, const hipDeviceProp_t* prop) {
+static hipError_t hipChooseDeviceLayerR0600(int* device, const hipDeviceProp_tR0600* prop) {
   auto* _rec = HipGetActiveRecordExt(11u);
   auto _r = g_next.hipChooseDevice_fn(device, prop);
   _rec->end_ns = NowNs();
@@ -5057,6 +5057,20 @@ static hipError_t hipLibraryGetManagedLayer(void** dptr, size_t* bytes, hipLibra
   return _r;
 }
 
+// api_id = 514
+static hipError_t hipExtMemcpyBatchAsyncLayer(void** dsts, void** srcs, size_t* sizes,
+                                              size_t* sizesDst, hipExtMemcpyWait* waits,
+                                              hipExtMemcpySignal* signals, size_t count,
+                                              hipExtMemcpyAttributes* attrs, size_t* attrsIdxs,
+                                              size_t numAttrs, hipStream_t stream) {
+  auto* _rec = HipGetActiveRecordExt(514u);
+  _rec->stream = stream;
+  auto _r = g_next.hipExtMemcpyBatchAsync_fn(dsts, srcs, sizes, sizesDst, waits, signals, count,
+                                             attrs, attrsIdxs, numAttrs, stream);
+  _rec->end_ns = NowNs();
+  return _r;
+}
+
 // API name table — indexed by api_id (same order as UpdateDispatchTable).
 const char* const kHipApiNamesExt[] = {
   "hipApiName",
@@ -5573,8 +5587,9 @@ const char* const kHipApiNamesExt[] = {
   "hipKernelGetFunction",
   "hipLibraryGetGlobal",
   "hipLibraryGetManaged",
+  "hipExtMemcpyBatchAsync",
 };
-const size_t kHipApiNamesCountExt = 514;
+const size_t kHipApiNamesCountExt = 515;
 
 #include <cstring>
 
@@ -5592,7 +5607,7 @@ void HipProfilerBuildWrapperTableExt(HipDispatchTable* tbl) {
   g_wrapper_tbl.hipBindTexture2D_fn = hipBindTexture2DLayer;
   g_wrapper_tbl.hipBindTextureToArray_fn = hipBindTextureToArrayLayer;
   g_wrapper_tbl.hipBindTextureToMipmappedArray_fn = hipBindTextureToMipmappedArrayLayer;
-  g_wrapper_tbl.hipChooseDevice_fn = hipChooseDeviceLayer;
+  g_wrapper_tbl.hipChooseDevice_fn = hipChooseDeviceLayerR0600;
   g_wrapper_tbl.hipChooseDeviceR0000_fn = hipChooseDeviceR0000Layer;
   g_wrapper_tbl.hipConfigureCall_fn = hipConfigureCallLayer;
   g_wrapper_tbl.hipCreateSurfaceObject_fn = hipCreateSurfaceObjectLayer;
@@ -6095,6 +6110,7 @@ void HipProfilerBuildWrapperTableExt(HipDispatchTable* tbl) {
   g_wrapper_tbl.hipKernelGetFunction_fn = hipKernelGetFunctionLayer;
   g_wrapper_tbl.hipLibraryGetGlobal_fn = hipLibraryGetGlobalLayer;
   g_wrapper_tbl.hipLibraryGetManaged_fn = hipLibraryGetManagedLayer;
+  g_wrapper_tbl.hipExtMemcpyBatchAsync_fn = hipExtMemcpyBatchAsyncLayer;
   // g_wrapper_tbl is fully written before any Install call copies it in.
 }
 

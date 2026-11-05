@@ -1408,6 +1408,9 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<FlatAtomicFcmpswapX2Flat>,
     &execute_with_backend<FlatAtomicFminX2Flat>,
     &execute_with_backend<FlatAtomicFmaxX2Flat>,
+    &execute_with_backend<GlobalLoadDwordAddtidFlat>,
+    &execute_with_backend<GlobalStoreDwordAddtidFlat>,
+    &execute_with_backend<GlobalAtomicCsubFlat>,
 }};
 
 } // namespace

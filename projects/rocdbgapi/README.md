@@ -15,6 +15,22 @@ For more information about the AMD ROCm ecosystem, see:
 
 - https://rocm.docs.amd.com/
 
+Code Formatting
+---------------
+
+This project uses [clang-format](https://clang.llvm.org/docs/ClangFormat.html)
+to enforce consistent code style.  The style is based on the GNU style with
+minor adjustments documented in `.clang-format`.  Vendored headers under
+`src/hsa/`, `src/linux/`, `src/windows/`, and `third_party/` are excluded.
+
+Only modified lines are reformatted, using
+[clang-format-diff](https://clang.llvm.org/docs/ClangFormat.html#script-for-patch-reformatting).
+To reformat the changes in your working tree against the upstream branch:
+
+````shell
+git diff origin/develop | clang-format-diff -p1 -i
+````
+
 Build the AMD Debugger API Library
 ----------------------------------
 
@@ -31,29 +47,37 @@ Building the ROCdbgapi library has the following prerequisites:
 3. ROCm CMake modules, which can be installed using the ``rocm-cmake`` package
    available as part of the AMD ROCm release.
 
-4. For Ubuntu, the following adds the needed packages:
+4. GoogleTest and GMock, required to build the unit test suite. The suite is
+   disabled by default (``ENABLE_TESTS``); pass ``-DENABLE_TESTS=ON`` to build
+   it, either against a parent project that already provides the
+   ``GTest::*`` targets (e.g. the TheRock superbuild) or a system package
+   (included below for Ubuntu and RHEL). See ``test/README.md`` for details
+   on the test suite's build options.
+
+5. For Ubuntu, the following adds the needed packages:
 
    ````shell
-   apt install gcc g++ make cmake doxygen graphviz texlive-full
+   apt install gcc g++ make cmake doxygen graphviz texlive-full \
+     libgtest-dev libgmock-dev
    ````
 
    NOTE: The ``doxygen`` 1.8.13 that is installed by Ubuntu 18.04 has a bug
    that prevents the PDF from being created.  ``doxygen`` 1.8.11 can be built
    from source to avoid the issue.
 
-5. For RHEL, the following adds the needed packages:
+6. For RHEL, the following adds the needed packages:
 
    ````shell
    sudo dnf install -y gcc gcc-c++ make cmake doxygen graphviz texlive \
     texlive-xtab texlive-multirow texlive-sectsty texlive-tocloft \
-    texlive-tabu texlive-adjustbox
+    texlive-tabu texlive-adjustbox gtest-devel gmock-devel
    ````
 
    NOTE: The ``doxygen`` 1.8.14 that is installed by CentOS 8.1 and RHEL 8.1,
    has a bug that prevents the PDF from being created. ``doxygen`` 1.8.11 can be
    built from source to avoid the issue.
 
-6. For SLES, the following adds the needed packages:
+7. For SLES, the following adds the needed packages:
 
    ````shell
    sudo zypper in gcc gcc-c++ make cmake doxygen graphviz texlive-scheme-medium \
@@ -61,7 +85,11 @@ Building the ROCdbgapi library has the following prerequisites:
      texlive-tabu
    ````
 
-7. For Windows using MSYS2, the following adds the needed packages:
+   NOTE: This does not include GoogleTest/GMock packages. To build the test
+   suite (``-DENABLE_TESTS=ON``), also provide the ``GTest::*`` targets via a
+   parent project.
+
+8. For Windows using MSYS2, the following adds the needed packages:
 
    ````shell
    pacman -S make mingw-w64-ucrt-x86_64-gcc \
@@ -71,6 +99,10 @@ Building the ROCdbgapi library has the following prerequisites:
      mingw-w64-x86_64-texlive-latex-extra \
      doxygen mingw-w64-x86_64-graphviz
    ````
+
+   NOTE: This does not include GoogleTest/GMock packages. To build the test
+   suite (``-DENABLE_TESTS=ON``), also provide the ``GTest::*`` targets via a
+   parent project.
 
 Here is an example command line to build the ROCdbgapi library:
 
@@ -123,6 +155,11 @@ The installed ROCdbgapi library and documentation will be placed in:
 - ``../install/share/amd-dbgapi/README.md``
 - ``../install/share/html/amd-dbgapi/index.html``
 - ``../install/share/doc/amd-dbgapi/amd-dbgapi.pdf``
+
+Code Style
+----------
+
+CMake files are formatted with [gersemi](https://github.com/BlankSpruce/gersemi).
 
 Running the AMD Debugger API Library
 ------------------------------------

@@ -778,6 +778,98 @@ TEST(LoaderAPITest, LoadCodeObject_KernelNotFound) {
   EXPECT_EQ(code_object, nullptr);
 }
 
+// Regression test for ROCm/TheRock#7081: when a requested architecture's
+// kernels are split across multiple kpack archives (e.g. a more-specific
+// "gfx90a:xnack-" archive plus a less-specific "gfx90a" archive), a
+// kernel-not-found miss in the first matching archive must not abort the
+// search — the loader must fall through to the next compatible archive.
+//
+// test_fallthrough_xnack.kpack declares architecture "gfx90a:xnack-" and
+// contains only an unrelated kernel ("lib/libother.so#0").
+// test_fallthrough_generic.kpack declares architecture "gfx90a" and contains
+// the kernel under test ("lib/libtest.so#0").
+//
+// Both archives are listed as search paths. For agent ISA "gfx90a:xnack-",
+// for_each_compatible_target() yields "gfx90a:xnack-" before "gfx90a", so the
+// xnack archive is tried first and matches the architecture but not the
+// kernel. Before the fix, the loader returned KPACK_ERROR_KERNEL_NOT_FOUND
+// immediately at that point. With the fix, it falls through and finds the
+// kernel in the generic archive.
+TEST(LoaderAPITest, LoadCodeObject_FallsThroughToNextArchiveOnKernelNotFound) {
+  std::string assets_dir = get_test_assets_dir();
+  if (assets_dir.empty()) {
+    GTEST_SKIP() << "ROCM_KPACK_TEST_ASSETS_DIR not set";
+  }
+
+  CacheGuard cache;
+  ASSERT_EQ(kpack_cache_create(cache.ptr()), KPACK_SUCCESS);
+
+  // Search paths list the more-specific (xnack) archive first, matching the
+  // real torch device wheel layout where the xnack archive is also listed
+  // ahead of the bare-arch archive.
+  auto metadata = make_hipk_metadata(
+      "lib/libtest.so",
+      {"test_fallthrough_xnack.kpack", "test_fallthrough_generic.kpack"});
+  std::string binary_path = assets_dir + "/fake_binary.so";
+
+  const char* arch_list[] = {"gfx90a:xnack-"};
+  void* code_object = nullptr;
+  size_t size = 0;
+
+  kpack_error_t err =
+      kpack_load_code_object(cache.get(), metadata.data(), binary_path.c_str(),
+                             0, arch_list, 1, &code_object, &size);
+
+  ASSERT_EQ(err, KPACK_SUCCESS);
+  ASSERT_NE(code_object, nullptr);
+  EXPECT_EQ(std::memcmp(code_object, "GENERIC_GFX90A_KERNEL_DATA", 26), 0);
+
+  kpack_free_code_object(code_object);
+}
+
+// Regression test for ROCM-31644: a two-feature agent ISA
+// ("gfx950:sramecc+:xnack+") where no archive is tagged with "sramecc+" at
+// all — two of the four compatible-target candidates
+// ("gfx950:sramecc+:xnack+", "gfx950:sramecc+") have no archive whatsoever,
+// not merely a kernel-not-found miss. The loader must skip those cleanly,
+// miss the kernel in the "gfx950:xnack+" archive (holding an unrelated
+// binary's kernel), and fall through to the bare "gfx950" archive that
+// actually holds it. This is the exact shape rocFFT-test hits on gfx950
+// ASAN builds: rocFFT's own CMakeLists.txt strips all feature flags from
+// GPU_TARGETS before compiling ("rocFFT builds generic code for each
+// target"), so its kernels always land in the bare, untagged archive even
+// when a sibling binary in the same kpack group (e.g. hipFFT-test) is
+// correctly tagged "xnack+".
+TEST(LoaderAPITest,
+     LoadCodeObject_FallsThroughAcrossTwoFeatureCandidatesOnKernelNotFound) {
+  std::string assets_dir = get_test_assets_dir();
+  if (assets_dir.empty()) {
+    GTEST_SKIP() << "ROCM_KPACK_TEST_ASSETS_DIR not set";
+  }
+
+  CacheGuard cache;
+  ASSERT_EQ(kpack_cache_create(cache.ptr()), KPACK_SUCCESS);
+
+  auto metadata = make_hipk_metadata("lib/libtest.so",
+                                     {"test_fallthrough_2feat_xnack.kpack",
+                                      "test_fallthrough_2feat_generic.kpack"});
+  std::string binary_path = assets_dir + "/fake_binary.so";
+
+  const char* arch_list[] = {"gfx950:sramecc+:xnack+"};
+  void* code_object = nullptr;
+  size_t size = 0;
+
+  kpack_error_t err =
+      kpack_load_code_object(cache.get(), metadata.data(), binary_path.c_str(),
+                             0, arch_list, 1, &code_object, &size);
+
+  ASSERT_EQ(err, KPACK_SUCCESS);
+  ASSERT_NE(code_object, nullptr);
+  EXPECT_EQ(std::memcmp(code_object, "GENERIC_GFX950_ROCFFT_TEST", 26), 0);
+
+  kpack_free_code_object(code_object);
+}
+
 TEST(LoaderAPITest, LoadCodeObject_ArchiveFileNotFound) {
   std::string assets_dir = get_test_assets_dir();
   if (assets_dir.empty()) {

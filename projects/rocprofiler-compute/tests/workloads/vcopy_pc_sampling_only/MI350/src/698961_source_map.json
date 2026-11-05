@@ -1,0 +1,6 @@
+{
+  "source_paths": {
+    "/app/projects/rocprofiler-compute/sample/vcopy.cpp": "/app/projects/rocprofiler-compute/sample/vcopy.cpp",
+    "/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel/include/hip/amd_detail/amd_hip_runtime.h": "/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel/include/hip/amd_detail/amd_hip_runtime.h"
+  }
+}

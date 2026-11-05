@@ -197,6 +197,27 @@ def test_amdsmi_get_gpu_num_compute_units():
             assert cu_count == 0
 
 
+def test_amdsmi_get_gpu_perf_level():
+    from utils.amdsmi_interface import get_gpu_perf_level, import_amdsmi_module
+
+    _ = import_amdsmi_module()
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
+        device_handles_mock.return_value = [12345]
+        with mock.patch("amdsmi.amdsmi_get_gpu_perf_level") as perf_level_mock:
+            perf_level_mock.return_value = "AUTO"
+            perf_level = get_gpu_perf_level()
+            perf_level_mock.assert_called_once()
+            assert perf_level == "AUTO"
+
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_perf_level",
+            side_effect=Exception("Mock exception"),
+        ):
+            perf_level = get_gpu_perf_level()
+            assert perf_level is None
+
+
 def test_per_device_query_returns_default_and_logs_last_error_on_all_failure():
     """When every device raises, return the default and warn with the last error."""
 

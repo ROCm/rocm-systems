@@ -1,0 +1,105 @@
+name: "rocjitsu-website"
+
+on:
+  pull_request:
+    paths:
+      - "emulation/rocjitsu/website/dashboard/**"
+      - "emulation/rocjitsu/scripts/prepare-benchmarks.py"
+      - ".github/workflows/rocjitsu-website-test.yml"
+      - ".github/workflows/rocjitsu-publish-website.yml"
+      - ".github/workflows/rocjitsu-benchmarks.yml"
+  push:
+    branches:
+      - develop
+    paths:
+      - "emulation/rocjitsu/website/dashboard/**"
+      - "emulation/rocjitsu/scripts/prepare-benchmarks.py"
+      - ".github/workflows/rocjitsu-website-test.yml"
+      - ".github/workflows/rocjitsu-publish-website.yml"
+      - ".github/workflows/rocjitsu-benchmarks.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dashboard-data:
+    name: Verify benchmark preparation and publication
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: emulation/rocjitsu/website/dashboard
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: emulation/rocjitsu/website/dashboard/scripts/dashboard-data/requirements-test.txt
+
+      - name: Install test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bash git jq
+
+      - name: Install Python test dependencies
+        run: python -m pip install -r scripts/dashboard-data/requirements-test.txt
+
+      - name: Test benchmark preparation and publication
+        run: python -m pytest scripts/dashboard-data/tests
+
+  verify:
+    name: Verify website
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: emulation/rocjitsu/website/dashboard
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.0"
+          cache: npm
+          cache-dependency-path: emulation/rocjitsu/website/dashboard/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npm run test:e2e:install
+
+      - name: Verify website
+        run: npm run verify
+
+      - name: Smoke test published dashboard data
+        env:
+          PLAYWRIGHT_PUBLISHED_DATA: "1"
+        run: npm run test:e2e:production -- tests/production/published-data.e2e.js
+
+      - name: Upload Playwright diagnostics
+        if: ${{ !cancelled() && failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocjitsu-website-playwright-results
+          path: |
+            emulation/rocjitsu/website/dashboard/test-results
+            emulation/rocjitsu/website/dashboard/playwright-report
+          if-no-files-found: ignore
+          retention-days: 7

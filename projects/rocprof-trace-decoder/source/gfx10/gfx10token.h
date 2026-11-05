@@ -126,7 +126,12 @@ union header_type
         uint64_t UCF       : 1;
         uint64_t DPRate    : 4;
         uint64_t wv20      : 1;
-        uint64_t dp_derate : 3;
+        uint64_t dp_derate : 2;
+        uint64_t padding0  : 7;
+        uint64_t exec      : 1;
+        uint64_t dbl       : 1;
+        uint64_t padding1  : 15;
+        uint64_t exbarw    : 1;
     };
     uint64_t raw;
 
@@ -375,7 +380,7 @@ union reg_write_type
     std::stringstream print() const
     {
         std::stringstream ss;
-        ss << "pipe:" << pipe << std::hex << " addr:0x" << regaddr << " data:0x" << regdata << std::dec;
+        ss << "me:" << me << " pipe:" << pipe << std::hex << " addr:0x" << regaddr << " data:0x" << regdata << std::dec;
         return ss;
     }
     const char* typestr() const { return "REG_WRITE"; };
@@ -400,7 +405,7 @@ union reg_init_type
     std::stringstream print() const
     {
         std::stringstream ss;
-        ss << "pipe:" << pipe << " type:" << type << std::hex << " data:0x" << data << std::dec;
+        ss << "me:" << me << " pipe:" << pipe << " type:" << type << std::hex << " data:0x" << data << std::dec;
         return ss;
     }
     const char* typestr() const { return "REG_INIT"; };

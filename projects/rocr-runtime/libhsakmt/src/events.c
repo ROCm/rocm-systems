@@ -29,7 +29,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <sys/mman.h>
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include "fmm.h"
 #include "hsakmt/hsakmtmodel.h"
 #include <assert.h>

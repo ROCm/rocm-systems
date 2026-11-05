@@ -8,7 +8,14 @@
 #include <chrono>
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
+#ifdef _WIN32
+#include <thread>
+inline void usleep(unsigned int us) {
+  std::this_thread::sleep_for(std::chrono::microseconds(us));
+}
+#else
 #include <unistd.h>
+#endif
 #include <vector>
 #include "hipPerfCommon.hh"
 /**

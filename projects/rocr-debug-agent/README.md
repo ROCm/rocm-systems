@@ -269,6 +269,21 @@ supported:
 - `%g`: real group ID (GID) of the process
 - `%%`: the literal `%` character
 
+Code Formatting
+---------------
+
+This project uses [clang-format](https://clang.llvm.org/docs/ClangFormat.html)
+to enforce consistent code style.  The style is based on the GNU style with
+minor adjustments documented in `.clang-format`.
+
+Only modified lines are reformatted, using
+[clang-format-diff](https://clang.llvm.org/docs/ClangFormat.html#script-for-patch-reformatting).
+To reformat the changes in your working tree against the upstream branch:
+
+````shell
+git diff origin/develop | clang-format-diff -p1 -i
+````
+
 Build the ROCdebug-agent library
 ---------------------------------
 

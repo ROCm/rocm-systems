@@ -13,6 +13,7 @@
 #include "device/device.hpp"
 
 #include <atomic>
+#include <cmath>
 
 namespace amd {
 
@@ -255,7 +256,8 @@ bool Memory::allocHostMemory(void* initFrom, bool allocHostMem, bool forceCopy) 
 }
 
 // ================================================================================================
-bool Memory::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool forceAlloc) {
+bool Memory::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool forceAlloc,
+                    ErrorCode* errorCode) {
   static const bool forceAllocHostMem = false;
 
   // Sanity checks (can't defer and force allocations at the same time)
@@ -296,7 +298,7 @@ bool Memory::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool force
     deviceMemories_[i].value_ = NULL;
 
     if (forceAlloc || (!skipAlloc && ((devices.size() == 1) || DISABLE_DEFERRED_ALLOC))) {
-      device::Memory* mem = getDeviceMemory(*devices[i]);
+      device::Memory* mem = getDeviceMemory(*devices[i], true, errorCode);
       if (NULL == mem) {
         LogPrintfError("Can't allocate memory size - 0x%08X bytes!", getSize());
         return false;
@@ -310,7 +312,7 @@ bool Memory::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool force
 }
 
 // ================================================================================================
-bool Memory::addDeviceMemory(const Device* dev) {
+bool Memory::addDeviceMemory(const Device* dev, ErrorCode* errorCode) {
   bool result = false;
   AllocState create = AllocCreate;
   AllocState init = AllocInit;
@@ -323,7 +325,7 @@ bool Memory::addDeviceMemory(const Device* dev) {
       deviceAlloced_[dev].store(AllocInit, std::memory_order_release);
       return result;
     }
-    device::Memory* dm = dev->createMemory(*this);
+    device::Memory* dm = dev->createMemory(*this, errorCode);
 
     // Add the new memory allocation to the device map
     if (NULL != dm) {
@@ -376,7 +378,8 @@ void Memory::replaceDeviceMemory(const Device* dev, device::Memory* dm) {
   deviceAlloced_[dev].store(AllocRealloced, std::memory_order_release);
 }
 
-device::Memory* Memory::getDeviceMemory(const Device& dev, bool alloc) {
+device::Memory* Memory::getDeviceMemory(const Device& dev, bool alloc,
+                                        ErrorCode* errorCode) {
   device::Memory* dm = NULL;
   for (uint i = 0; i < numDevices_; ++i) {
     if (deviceMemories_[i].ref_ == &dev) {
@@ -386,7 +389,7 @@ device::Memory* Memory::getDeviceMemory(const Device& dev, bool alloc) {
   }
 
   if ((NULL == dm) && alloc) {
-    if (!addDeviceMemory(&dev)) {
+    if (!addDeviceMemory(&dev, errorCode)) {
       return NULL;
     }
     dm = deviceMemories_[numDevices() - 1].value_;
@@ -557,7 +560,9 @@ void Buffer::initDeviceMemory() {
   memset(deviceMemories_, 0, NumDevicesWithP2P() * sizeof(DeviceMemory));
 }
 
-bool Buffer::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool forceAlloc) {
+bool Buffer::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool forceAlloc,
+                    ErrorCode* errorCode) {
+  (void)errorCode;  // Currently not used but kept for signature parity
   if ((getMemFlags() & CL_MEM_EXTERNAL_PHYSICAL_AMD) && (initFrom != NULL)) {
     busAddress_ = *(reinterpret_cast<cl_bus_address_amd*>(initFrom));
     initFrom = NULL;
@@ -565,7 +570,7 @@ bool Buffer::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool force
     busAddress_.surface_bus_address = 0;
     busAddress_.marker_bus_address = 0;
   }
-  return Memory::create(initFrom, sysMemAlloc, skipAlloc, forceAlloc);
+  return Memory::create(initFrom, sysMemAlloc, skipAlloc, forceAlloc, nullptr);
 }
 
 bool Buffer::isEntirelyCovered(const Coord3D& origin, const Coord3D& region) const {
@@ -1509,9 +1514,20 @@ void SvmBuffer::Add(uintptr_t k, uintptr_t v) {
   Allocated_.insert(std::pair<uintptr_t, uintptr_t>(k, v));
 }
 
-void SvmBuffer::Remove(uintptr_t k) {
+bool SvmBuffer::Remove(uintptr_t ptr, uintptr_t* base) {
   std::scoped_lock lock(AllocatedLock_);
-  Allocated_.erase(k);
+  // ptr may not be base pointer, so look up the allocation that contains it.
+  auto it = Allocated_.upper_bound(ptr);
+  if (it == Allocated_.begin()) {
+    return false;
+  }
+  --it;
+  if (ptr < it->first || ptr >= it->second) {
+    return false;
+  }
+  *base = it->first;
+  Allocated_.erase(it);
+  return true;
 }
 
 bool SvmBuffer::Contains(uintptr_t ptr) {
@@ -1537,9 +1553,13 @@ void* SvmBuffer::malloc(Context& context, cl_svm_mem_flags flags, size_t size, s
   return ret;
 }
 
-void SvmBuffer::free(const Context& context, void* ptr) {
-  Remove(reinterpret_cast<uintptr_t>(ptr));
-  context.svmFree(ptr);
+bool SvmBuffer::free(const Context& context, void* ptr) {
+  uintptr_t base_ptr = 0;
+  if (!Remove(reinterpret_cast<uintptr_t>(ptr), &base_ptr)) {
+    return false;
+  }
+  context.svmFree(reinterpret_cast<void*>(base_ptr));
+  return true;
 }
 
 void SvmBuffer::memFill(void* dst, const void* src, size_t srcSize, size_t times) {

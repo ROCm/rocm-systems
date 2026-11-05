@@ -1,0 +1,162 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+// Fakes for the symbols defined by src/rccl_wrap.cc, shared by every host-only
+// microtest binary. Named after the PRODUCTION TU that owns these symbols, not
+// after whichever test target needed them first; see MICROTEST_README.md.
+
+#ifndef RCCL_TEST_HOST_RCCL_WRAP_FAKES_H_
+#define RCCL_TEST_HOST_RCCL_WRAP_FAKES_H_
+
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+
+#include "nccl.h"
+#include "nccl_common.h"
+
+struct ncclComm;
+struct ncclReg;
+struct ncclTaskColl;
+struct rcclCollDecision;
+
+// -------------------------------------------------------------------------
+// Tuning-override seams (rccl_wrap.cc:109-1751). All default to no-ops so a test
+// sees the *unmodified* selection, then overrides exactly one.
+// -------------------------------------------------------------------------
+extern std::function<void(struct ncclComm*, size_t const&, struct ncclTaskColl*)>
+    g_rcclUpdateCollectiveProtocol;
+extern std::function<void(struct ncclComm*, size_t const&, struct ncclTaskColl*)>
+    g_rcclSetPipelining;
+extern std::function<ncclResult_t(struct ncclComm*, ncclFunc_t, size_t, int&)>
+    g_rcclOverrideChannels;
+extern int g_rcclOverrideChannelsCalls;
+extern bool g_rcclIsArchSupportedForFunc;
+
+// RCCL_PARAM(DirectReduceScatterThreshold). Only referenced once a test hooks
+// ncclRegisterCollBuffers: the aborting stub makes the rest of the loop unreachable.
+extern int64_t g_rcclParamDirectReduceScatterThreshold;  // UNDRIVEN
+// Call counters for the no-op tuning hooks: a no-op that was never called and one
+// that was look identical without these, so a dropped call site would be silent.
+extern int g_rcclUpdateCollectiveProtocolCalls;
+extern int g_rcclUpdateCollectiveAlgorithmCalls;
+extern bool g_rcclUpdateCollectiveAlgorithmBeforeProtocol;
+extern int g_rcclUpdateRemoteFlushAlgoProtoCalls;
+extern bool g_rcclUpdateRemoteFlushAlgoProtoAfterProtocol;
+// Channel count the rcclUpdateRemoteFlushAlgoProto fake returns (0: keep RCCL's own).
+extern int g_rcclUpdateRemoteFlushAlgoProtoChannels;
+// rcclScaleCollLl128BuffSize fake: counts calls and multiplies buffSizes[NCCL_PROTO_LL128] by the factor.
+extern int g_rcclScaleCollLl128BuffSizeCalls;
+extern int g_rcclScaleCollLl128BuffSizeFactor;
+extern int g_rcclUpdateCollectiveChannelsCalls;
+extern int g_rcclSetPipeliningCalls;
+extern int g_rcclUpdateThreadThresholdCalls;
+extern int g_rcclOptThreadBlockSizeCalls;
+extern ncclResult_t g_rcclOverrideAlgorithmResult;
+extern ncclResult_t g_rcclOverrideProtocolResult;
+extern int g_rcclOverrideAlgorithmCalls;
+extern int g_rcclOverrideProtocolCalls;
+
+// CE (copy-engine) allreduce gates (rccl_wrap.cc:834-855).
+extern bool g_rcclCeArGraphSafe;  // UNDRIVEN
+extern int g_rcclCeAllReduceGraphLatchTickCalls;  // UNDRIVEN
+extern bool g_rcclCeAllReduceGraphLatchTickLastCapturing;  // UNDRIVEN
+
+// -------------------------------------------------------------------------
+// WARP_SPEED seams (rccl_wrap.cc:1448+). enqueue.cc calls these from five sites
+// inside `#ifdef ENABLE_WARP_SPEED` (:318, :2221, :2615, :2736, :2738), two of
+// which are in functions this suite covers (finishPlan and topoGetAlgoInfo).
+// init.cc's willEnableWarpSpeed (:1463, called unconditionally from
+// initTransportsRank at :1955 once ENABLE_WARP_SPEED is on) is a sixth site,
+// reached by every InitMicrotest that calls initTransportsRank -- not just one
+// named test, since the call isn't gated by anything the test controls.
+//
+// ENABLE_WARP_SPEED defaults OFF and is forced OFF unless GPU_TARGETS is gfx950
+// (CMakeLists.txt:671-680), so on most configurations those lines are
+// preprocessed away and these symbols are never referenced. A gfx950 build with
+// the option ON compiles them, and without these fakes the target fails to LINK.
+//
+// The defaults make an ENABLE_WARP_SPEED=ON build behave exactly like an OFF
+// one: report unsupported, return the channel count unchanged, succeed, no-op.
+// That keeps every test written against the OFF configuration honest on both.
+// -------------------------------------------------------------------------
+extern bool g_rcclWarpSpeedSupported;
+extern int g_rcclWarpSpeedSupportedCalls;
+extern ncclResult_t g_rcclSetWarpSpeedAutoResult;
+extern int g_rcclSetWarpSpeedAutoCalls;
+extern int g_rcclSetWarpSpeedCUsCalls;
+// Applied to the caller's nc by rcclWarpSpeedAdjustChannels. Identity by
+// default; production may shrink the count.
+extern std::function<int(struct ncclComm*, struct ncclTaskColl*, int)>
+    g_rcclWarpSpeedAdjustChannels;
+// RCCL_PARAM(WarpSpeedForceEnable, "WARP_SPEED_FORCE_ENABLE", 0) -- 0 matches
+// the env var unset, so willEnableWarpSpeed falls through to the auto check below.
+extern int64_t g_rcclParamWarpSpeedForceEnable;
+extern int g_rcclParamWarpSpeedForceEnableCalls;
+// false matches an ENABLE_WARP_SPEED=OFF build, where willEnableWarpSpeed's
+// auto-mode arm can never fire.
+extern bool g_rcclCanUseWarpSpeedAutoResult;
+extern int g_rcclCanUseWarpSpeedAutoCalls;
+
+// Hierarchical collectives (rcclEnsureHierarchicalComms). The temp-buffer size
+// is a hook so a test can check the arguments it was sized from, not only that
+// the returned size reached the allocator.
+extern std::function<size_t(int, bool, bool)> g_rcclHierarchicalTempBufferSize;
+extern int64_t g_rcclParamHierarchicalAllGather;
+extern int64_t g_rcclParamHierarchicalReduceScatter;
+
+// CE AllReduce / ReduceScatter staging (ncclCeEnsureAllReduceStaging, ncclCeInit in ce_coll.cc).
+extern int64_t g_rcclParamCeAllReduce;
+extern int64_t g_rcclParamCeReduceScatter;
+extern int64_t g_rcclParamCeArStagingBytes;
+
+// checkHsaEnvSetting's HSA_* scratch validation (rccl_wrap.cc). g_lastHsaScratchEnv records the
+// hsaScratchEnv argument, which is the only proof the check read the environment at all.
+extern bool g_validHsaScratch;
+extern const char* g_lastHsaScratchEnv;
+extern int g_firmwareVersion;
+
+// The backend selectors and DDA gates collectives.cc dispatches on. Fail loud until a test installs them.
+extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
+                                  hipStream_t, bool, bool, struct rcclCollDecision*)>
+    g_rcclSelectAllReduce;
+extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t, bool,
+                                  bool, struct rcclCollDecision*)>
+    g_rcclSelectAllGather;
+extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, bool,
+                                  struct rcclCollDecision*, bool)>
+    g_rcclSelectReduceScatter;
+extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t, bool,
+                                  bool, struct rcclCollDecision*)>
+    g_rcclSelectAlltoAll;
+extern std::function<bool(const struct ncclComm*, size_t, size_t, bool, const char*)> g_rcclDdaEnabled;
+extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaEntryThreshold;
+extern std::function<ncclResult_t(int, const char**)> g_rcclGetAlgoName;
+extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseAllGatherDirect;
+extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseReduceScatterDirect;
+// RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1).
+extern int64_t g_rcclParamDdaEnable;
+
+// NET user-buffer registration (net.cc's ncclNet{Local,Graph}RegisterBuffer). Both segment
+// counts default to keeping the caller's *numSegments; rcclNetRegCommit records its calls.
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclReg*, int*)> g_rcclNetRegSegmentCount;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclReg*, int*)> g_rcclNetGraphRegSegmentCount;
+extern int g_rcclNetRegCommitCalls;
+extern int g_rcclNetRegCommitLastSegments;
+
+// -------------------------------------------------------------------------
+// DDA params and thresholds. Defaults match rccl_wrap.cc with no arch table.
+// -------------------------------------------------------------------------
+extern int64_t g_rcclParamDdaLL;      // 1
+extern int64_t g_rcclParamDdaLL128;   // kDdaThresholdUnset
+extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLLThreshold;  // kDdaLLBaseDefault, UNDRIVEN
+extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold;  // 0
+extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaVmmThreshold;  // kDdaVmmBaseDefault, UNDRIVEN
+extern std::function<size_t(const struct ncclComm*)> g_rcclDdaScratchPayloadCap;
+
+void ResetRcclWrapFakes();
+
+#endif  // RCCL_TEST_HOST_RCCL_WRAP_FAKES_H_

@@ -23,9 +23,6 @@
 
 from __future__ import absolute_import
 
-import itertools
-import sys
-import pytest
 import numpy as np
 import pandas as pd
 

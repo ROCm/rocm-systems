@@ -142,6 +142,32 @@ rocprofiler_config_nolink_target(rocprofiler-sdk-hip-nolink hip::host)
 
 find_package(rocprof-trace-decoder 0.2.1 CONFIG)
 
+# The decoder is a runtime dlopen dependency and ships no version.h, so forward its SONAME
+# version from the CMake package to consumers that dlopen it (thread_trace/dl.cpp).
+if(rocprof-trace-decoder_FOUND AND DEFINED rocprof-trace-decoder_VERSION_MAJOR)
+    # Some packages publish only MAJOR.MINOR.
+    set(_rocprof_trace_decoder_patch 0)
+    if(DEFINED rocprof-trace-decoder_VERSION_PATCH)
+        set(_rocprof_trace_decoder_patch ${rocprof-trace-decoder_VERSION_PATCH})
+    endif()
+    target_compile_definitions(
+        rocprofiler-sdk-rocprof-trace-decoder
+        INTERFACE
+            ROCPROFILER_ATT_DECODER_SOVERSION_MAJOR=${rocprof-trace-decoder_VERSION_MAJOR}
+            ROCPROFILER_ATT_DECODER_SOVERSION_MINOR=${rocprof-trace-decoder_VERSION_MINOR}
+            ROCPROFILER_ATT_DECODER_SOVERSION_PATCH=${_rocprof_trace_decoder_patch})
+    unset(_rocprof_trace_decoder_patch)
+else()
+    message(
+        WARNING
+            "rocprof-trace-decoder package/version not found: "
+            "ROCPROFILER_ATT_DECODER_SOVERSION_MAJOR/MINOR/PATCH will not be defined. The "
+            "ATT decoder loader will only try the unversioned "
+            "'librocprof-trace-decoder.so' and will fail to "
+            "load the versioned decoder on runtime-only ROCm installs. Ensure the "
+            "rocprof-trace-decoder CMake config is on CMAKE_PREFIX_PATH.")
+endif()
+
 # ----------------------------------------------------------------------------------------#
 #
 # HSA runtime

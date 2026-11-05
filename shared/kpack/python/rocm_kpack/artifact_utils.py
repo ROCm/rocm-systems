@@ -101,6 +101,23 @@ def is_fat_binary(file_path: Path, toolchain: Toolchain) -> bool:
     For ELF binaries, checks for .hip_fatbin section.
     For PE/COFF binaries, checks for .hip_fat section.
 
+    ELF cases:
+    - Regular fat binary: ``.hip_fatbin`` is present, is not ``SHT_NOBITS``,
+      and ``sh_size > 0``. This is the only case that returns True.
+    - Debug artifact: ``.hip_fatbin`` is ``SHT_NOBITS``, from
+      ``objcopy --only-keep-debug`` (TheRock ``*_dbg`` artifacts). The header
+      survives but the contents are not in the file.
+    - Host-only binary: ``.hip_fatbin`` is ``SHT_PROGBITS`` with ``sh_size == 0``,
+      left by ``hipcc --offload-host-only``. Parsing that empty payload fails
+      with "Unrecognized fatbin format".
+    - Already-split binary: a ``.rocm_kpack_ref`` marker is present (COFF:
+      ``.kpackrf``). Device code has already been moved into a ``.kpack``
+      archive. The ``.hip_fatbin`` / ``.hip_fat`` header remains, so a name
+      check alone would send it back through the splitter and ``add_section()``
+      would fail with "Section '.rocm_kpack_ref' already exists".
+
+    The last three return False. A missing ``.hip_fatbin`` also returns False.
+
     Args:
         file_path: Path to the file to check
         toolchain: Toolchain instance with readelf path
@@ -128,9 +145,17 @@ def is_fat_binary(file_path: Path, toolchain: Toolchain) -> bool:
 
     if fmt == "elf":
         surgery = ElfSurgery.load(file_path)
-        return surgery.find_section(".hip_fatbin") is not None
+        if surgery.find_section(".rocm_kpack_ref") is not None:
+            return False
+        section = surgery.find_section(".hip_fatbin")
+        if section is None or section.header.is_nobits or section.header.sh_size == 0:
+            return False
+        return True
     else:
         surgery = CoffSurgery.load(file_path)
+        # .kpackrf is the 8-char PE spelling of .rocm_kpack_ref.
+        if surgery.find_section(".kpackrf") is not None:
+            return False
         return surgery.find_section(".hip_fat") is not None
 
 

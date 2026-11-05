@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/ldsdir.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -23,7 +24,7 @@ void LdsParamLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void LdsDirectLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_lds_direct_load_ldsdir(*this, wf);
+  amdgpu::execute_lds_direct_load(*this, wf, inst_.vdst);
 }
 
 } // namespace rdna3_5

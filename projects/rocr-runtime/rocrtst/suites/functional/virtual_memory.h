@@ -85,12 +85,22 @@ class VirtMemoryTestBasic : public TestBase {
 
   void TestFabricExportAcceleratorReadiness(void);
 
+  void TestImportedHandlePointerInfo(void);
+
+  void TestHostBackedAllocImportInfo(void);
+
   void TestGpuAccessToHostMemoryAllocation(void);
 
   void ImportedShareableHandleSetAccessAfterFdClose(void);
 
+  void ExportShareableHandlePcieMapping(void);
+
  private:
   void TestFabricExportAcceleratorReadiness(hsa_agent_t gpu_agent, hsa_amd_memory_pool_t pool);
+  void FabricImportedHandlePointerInfo(hsa_agent_t gpu_agent, hsa_amd_memory_pool_t pool);
+  void DmaBufImportedHandlePointerInfo(hsa_agent_t gpu_agent, hsa_amd_memory_pool_t pool);
+  void ImportedAllocInfoForPool(hsa_amd_memory_pool_t pool, hsa_device_type_t expected_owner,
+                                const char* label);
   void TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
   void TestRefCount(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
   void TestPartialMapping(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
@@ -108,6 +118,7 @@ class VirtMemoryTestBasic : public TestBase {
                                            hsa_amd_memory_pool_t cpu_pool);
   void ImportedShareableHandleSetAccessAfterFdClose(hsa_agent_t gpu_agent,
                                                     hsa_amd_memory_pool_t pool);
+  void ExportShareableHandlePcieMapping(hsa_agent_t gpu_agent, hsa_amd_memory_pool_t pool);
   void TestVirtAddressAlias(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
                             hsa_amd_memory_pool_t pool);
   void TestVirtAddressAlias(hsa_agent_t agent, hsa_amd_memory_pool_t pool);

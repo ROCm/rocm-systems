@@ -21,6 +21,30 @@ else()
     set(_FMT_REQUIRED)
 endif()
 
+# returns the major version number of black, or 0 if it cannot be determined
+function(_rocprofiler_get_black_major_version _OUT _EXE)
+    execute_process(
+        COMMAND ${_EXE} --version
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+        OUTPUT_VARIABLE _BLACK_VERSION_OUT
+        RESULT_VARIABLE _BLACK_VERSION_RET
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(_BLACK_VERSION_RET EQUAL 0)
+        string(REGEX MATCH "([0-9]+)\\." _BLACK_VERSION_MATCH "${_BLACK_VERSION_OUT}")
+        if(_BLACK_VERSION_MATCH)
+            string(REGEX REPLACE "([0-9]+)\\." "\\1" _BLACK_VERSION
+                                 "${_BLACK_VERSION_MATCH}")
+            set(${_OUT}
+                ${_BLACK_VERSION}
+                PARENT_SCOPE)
+            return()
+        endif()
+    endif()
+    set(${_OUT}
+        0
+        PARENT_SCOPE)
+endfunction()
+
 # checks that clang-format is version 11.x.x
 function(_rocprofiler_check_clang_format_version _OUT _EXE)
     execute_process(
@@ -88,7 +112,12 @@ find_program(
     PATHS ${_PYTHON_USER_BIN}
     HINTS ${_PYTHON_USER_BIN}
     PATH_SUFFIXES bin)
-
+# Version number is also enforced in .github/workflows/rocprofiler-sdk-formatting.yml
+set(_BLACK_REQUIRED_MAJOR_VERSION 26)
+if(ROCPROFILER_BLACK_FORMAT_EXE)
+    _rocprofiler_get_black_major_version(_BLACK_MAJOR_VERSION
+                                         "${ROCPROFILER_BLACK_FORMAT_EXE}")
+endif()
 _rocprofiler_check_clang_format_version(_IS_VALID_CLANG_FMT
                                         "${ROCPROFILER_CLANG_FORMAT_EXE}")
 if(NOT _IS_VALID_CLANG_FMT)
@@ -155,15 +184,33 @@ if(ROCPROFILER_CLANG_FORMAT_EXE
         NAMES xargs
         DOC "xargs executable for parallel formatter invocation")
 
+    # The files to format are passed to the formatters through file lists written into the
+    # build tree at configure time (when the globs above are evaluated) and fed to xargs.
+    # Passing them on the command line fails with long source paths: make runs each recipe
+    # line as a single argument to `sh -c`, and Linux limits a single argument to 128 KiB
+    # (MAX_ARG_STRLEN).
+    set(_FORMAT_FILE_LIST_DIR "${PROJECT_BINARY_DIR}/rocprofiler-format")
+    file(REMOVE_RECURSE "${_FORMAT_FILE_LIST_DIR}")
+
+    function(rocprofiler_format_file_list _var _name)
+        set(_file_list "${_FORMAT_FILE_LIST_DIR}/${_name}.txt")
+        list(JOIN ARGN "\n" _content)
+        file(WRITE "${_file_list}" "${_content}\n")
+        set(${_var}
+            "${_file_list}"
+            PARENT_SCOPE)
+    endfunction()
+
     # For formatters without built-in parallelization, use xargs -P
     function(rocprofiler_format_target _target _exe _comment)
         if(ROCPROFILER_SH_EXE AND ROCPROFILER_XARGS_EXE)
+            rocprofiler_format_file_list(_file_list ${_target} ${ARGN})
             add_custom_target(
                 ${_target}
                 COMMAND
                     ${ROCPROFILER_SH_EXE} -c
-                    "printf '%s\\n' \"$@\" | ${ROCPROFILER_XARGS_EXE} -P 0 -n 1 \"$0\" -i"
-                    ${_exe} ${ARGN}
+                    "${ROCPROFILER_XARGS_EXE} -P 0 -n 1 \"$@\" < \"$0\"" ${_file_list}
+                    ${_exe} -i
                 VERBATIM
                 COMMENT "${_comment}")
         else()
@@ -189,10 +236,37 @@ if(ROCPROFILER_CLANG_FORMAT_EXE
     endif()
 
     if(ROCPROFILER_BLACK_FORMAT_EXE AND rocp_python_files)
-        # black already uses parallelization internally, so no macro is needed
+        set(_black_warning)
+        set(_black_command ${ROCPROFILER_BLACK_FORMAT_EXE} -q)
+        if(_BLACK_MAJOR_VERSION LESS _BLACK_REQUIRED_MAJOR_VERSION)
+            set(_black_warning
+                COMMAND
+                ${CMAKE_COMMAND}
+                -E
+                echo
+                "WARNING: Your black version is ${_BLACK_MAJOR_VERSION} but the required version is ${_BLACK_REQUIRED_MAJOR_VERSION}. Formatted code might not pass pull request checks."
+                )
+        else()
+            list(APPEND _black_command --required-version
+                 ${_BLACK_REQUIRED_MAJOR_VERSION})
+        endif()
+
+        # black parallelizes internally, so xargs is only used to read the file list
+        if(ROCPROFILER_SH_EXE AND ROCPROFILER_XARGS_EXE)
+            rocprofiler_format_file_list(_file_list format-rocprofiler-python
+                                         ${rocp_python_files})
+            set(_black_command
+                ${ROCPROFILER_SH_EXE} -c "${ROCPROFILER_XARGS_EXE} \"$@\" < \"$0\""
+                ${_file_list} ${_black_command})
+        else()
+            list(APPEND _black_command ${rocp_python_files})
+        endif()
+
         add_custom_target(
             format-rocprofiler-python
-            ${ROCPROFILER_BLACK_FORMAT_EXE} -q ${rocp_python_files}
+            ${_black_warning}
+            COMMAND ${_black_command}
+            VERBATIM
             COMMENT
                 "[rocprofiler] Running python formatter ${ROCPROFILER_BLACK_FORMAT_EXE}..."
             )

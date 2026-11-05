@@ -26,7 +26,9 @@ from amdisa.fieldless_policy import (
     FieldlessCaps,
     FieldlessCategory,
     FieldlessDisplay,
+    FieldlessEffect,
     FieldlessPolicy,
+    SpecialRegClass,
     fieldless_policy,
     validate_fieldless_taxonomy,
 )
@@ -431,14 +433,26 @@ def test_fieldless_policy_table_is_golden():
     mp = FieldlessCategory.MEMORY_PSEUDO
     hidden = FieldlessDisplay.HIDDEN
     value = FieldlessCaps(reads_value=True, writable=False, is_vgpr=False)
+
+    def sreg(cls):
+        return FieldlessEffect(special_reg=cls)
+
     assert fieldless_policy_mod._FIELDLESS_POLICY == {
         'OPR_SIMM32': FieldlessPolicy(FieldlessCategory.LITERAL, value, hidden, None),
-        'OPR_VCC': FieldlessPolicy(sr, _INERT_CAPS, hidden, None),
-        'OPR_EXEC': FieldlessPolicy(sr, _INERT_CAPS, hidden, None),
-        'OPR_SDST_EXEC': FieldlessPolicy(sr, _INERT_CAPS, hidden, None),
-        'OPR_SSRC_SPECIAL_SCC': FieldlessPolicy(sr, _INERT_CAPS, hidden, None),
-        'OPR_PC': FieldlessPolicy(sr, _INERT_CAPS, hidden, None),
-        'OPR_SDST_M0': FieldlessPolicy(sr, _INERT_CAPS, hidden, None),
+        'OPR_VCC': FieldlessPolicy(sr, _INERT_CAPS, hidden, sreg(SpecialRegClass.VCC)),
+        'OPR_EXEC': FieldlessPolicy(
+            sr, _INERT_CAPS, hidden, sreg(SpecialRegClass.EXEC)
+        ),
+        'OPR_SDST_EXEC': FieldlessPolicy(
+            sr, _INERT_CAPS, hidden, sreg(SpecialRegClass.EXEC)
+        ),
+        'OPR_SSRC_SPECIAL_SCC': FieldlessPolicy(
+            sr, _INERT_CAPS, hidden, sreg(SpecialRegClass.SCC)
+        ),
+        'OPR_PC': FieldlessPolicy(sr, _INERT_CAPS, hidden, sreg(SpecialRegClass.PC)),
+        'OPR_SDST_M0': FieldlessPolicy(
+            sr, _INERT_CAPS, hidden, sreg(SpecialRegClass.M0)
+        ),
         'OPR_DSMEM': FieldlessPolicy(mp, _INERT_CAPS, hidden, None),
         'OPR_GPUMEM': FieldlessPolicy(mp, _INERT_CAPS, hidden, None),
         # FLAT_SCRATCH is the per-wave scratch-base register state (SGPR pair),
@@ -511,14 +525,70 @@ def test_validate_fieldless_taxonomy_is_fatal_on_unknown_type():
 
 
 def test_fieldless_policy_entry_carries_all_columns_on_one_object():
-    # Single-table design: capability, role, display, and (stubbed) effect are
-    # fields of one FieldlessPolicy object, so they cannot drift as independent
-    # type-keyed maps.
+    # Single-table design: capability, role, display, and effect are fields of
+    # one FieldlessPolicy object, so they cannot drift as independent type-keyed
+    # maps.
     policy = fieldless_policy('OPR_VCC')
     assert policy.role == FieldlessCategory.SPECIAL_REGISTER
     assert isinstance(policy.caps, FieldlessCaps)
     assert policy.display == FieldlessDisplay.HIDDEN
-    assert policy.effect is None  # stubbed until the special-effect slice
+    assert policy.effect == FieldlessEffect(special_reg=SpecialRegClass.VCC)
+
+
+# The special register each SPECIAL_REGISTER fieldless type denotes, consumed by
+# the generated to_special_reg_class() helper. SDST_EXEC is the SDST-namespace
+# alias for EXEC, so both map to EXEC.
+_EXPECTED_SPECIAL_REG = {
+    'OPR_VCC': SpecialRegClass.VCC,
+    'OPR_EXEC': SpecialRegClass.EXEC,
+    'OPR_SDST_EXEC': SpecialRegClass.EXEC,
+    'OPR_SSRC_SPECIAL_SCC': SpecialRegClass.SCC,
+    'OPR_PC': SpecialRegClass.PC,
+    'OPR_SDST_M0': SpecialRegClass.M0,
+}
+
+
+def test_special_register_types_carry_expected_effect():
+    # Every SPECIAL_REGISTER fieldless type maps to its architectural special
+    # register through the effect column; the mapping is the sole source the
+    # generator lowers into to_special_reg_class().
+    for opr_type, reg in _EXPECTED_SPECIAL_REG.items():
+        policy = fieldless_policy(opr_type)
+        assert policy.role == FieldlessCategory.SPECIAL_REGISTER, opr_type
+        assert policy.effect == FieldlessEffect(special_reg=reg), opr_type
+
+
+def test_special_register_role_and_effect_agree():
+    # Every type carrying a special-register effect is a SPECIAL_REGISTER, and
+    # the effect set is exactly the mapped types. FLAT_SCRATCH is the one
+    # SPECIAL_REGISTER whose architectural effect is intentionally deferred (no
+    # SpecialRegClass produced yet), so role and effect are not identical sets.
+    # Guards against a mapped special reg gaining/losing its effect, or a
+    # non-special type sprouting one, without a conscious edit.
+    with_effect = {
+        t
+        for t in _OBSERVED_FIELDLESS_TYPES
+        if fieldless_policy(t).effect is not None
+        and fieldless_policy(t).effect.special_reg is not None
+    }
+    is_special = {
+        t
+        for t in _OBSERVED_FIELDLESS_TYPES
+        if fieldless_policy(t).role == FieldlessCategory.SPECIAL_REGISTER
+    }
+    assert with_effect == set(_EXPECTED_SPECIAL_REG)
+    assert with_effect < is_special
+    assert is_special - with_effect == {'OPR_FLAT_SCRATCH'}
+
+
+def test_types_without_special_reg_mapping_have_no_effect():
+    # Everything outside the mapped special-register set models no architectural
+    # effect yet: literal, memory-pseudo, placeholder, and the deferred
+    # FLAT_SCRATCH special register.
+    for opr_type in _OBSERVED_FIELDLESS_TYPES:
+        if opr_type in _EXPECTED_SPECIAL_REG:
+            continue
+        assert fieldless_policy(opr_type).effect is None, opr_type
 
 
 def test_fieldless_caps_stmt_emits_policy_caps():

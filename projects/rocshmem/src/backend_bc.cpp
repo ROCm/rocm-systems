@@ -198,7 +198,7 @@ void Backend::dump_stats() {
     if (val) { append("  %-30s %llu\n", name, static_cast<unsigned long long>(val)); ++n_printed; }
   };
 
-  static_assert(NUM_STATS == 69,
+  static_assert(NUM_STATS == 70,
     "rocshmem_stats enum changed; update dump_stats device section");
   const auto& device_stats{globalStats};
   uint64_t device_total = 0;
@@ -237,6 +237,7 @@ void Backend::dump_stats() {
     pstat("WAVE_Sync",             device_stats.getStat(NUM_SYNC_WAVE));
     pstat("WG_Sync",               device_stats.getStat(NUM_SYNC_WG));
     pstat("Wait_Until",            device_stats.getStat(NUM_WAIT_UNTIL));
+    pstat("Signal_Wait_Until",     device_stats.getStat(NUM_SIGNAL_WAIT_UNTIL));
     pstat("Wait_Until_Any",        device_stats.getStat(NUM_WAIT_UNTIL_ANY));
     pstat("Wait_Until_All",        device_stats.getStat(NUM_WAIT_UNTIL_ALL));
     pstat("Wait_Until_Some",       device_stats.getStat(NUM_WAIT_UNTIL_SOME));

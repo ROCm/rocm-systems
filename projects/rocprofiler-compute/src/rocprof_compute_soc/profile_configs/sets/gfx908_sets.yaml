@@ -18,8 +18,8 @@ sets:
   set_option: mem_thruput
   description: Placeholder
   metric:
-  - 2.1.15: Theoretical LDS Bandwidth
-  - 2.1.16: LDS Bank Conflicts/Access
+  - 2.1.14: Theoretical LDS Bandwidth
+  - 2.1.15: LDS Bank Conflicts/Access
   - 16.1.2: Utilization
   - 17.1.0: Utilization
 - title: Launch Stats

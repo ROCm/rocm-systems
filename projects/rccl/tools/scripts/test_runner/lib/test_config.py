@@ -67,7 +67,7 @@ def expand_env_vars(value):
         var_name = match.group(1)
         default_value = match.group(2)
         result = os.environ.get(var_name)
-        if result is None:
+        if not result:
             result = expand_env_vars(default_value)
         return result
 

@@ -5,16 +5,21 @@
  ************************************************************************/
 
 // Suite G: GIN rocSHMEM-GDA device template coverage (Put/PutValue/Flush/
-// Signal/Counter + edge paths), the GDA analog of Suite H
+// FlushAsync/Wait/Signal/Counter, timeouts + edge paths), the GDA analog of Suite H
 // (GinAnvilSdmaTemplate_test.cpp). AllToAll drives these ncclGinApi_* template
 // specializations, so this suite unit-tests the GDA AllToAll device path
 // without a live network.
 //
-// The real rocshmem::QueuePair device methods (put_nbi/atomic_add/quiet) are
-// only declared in queue_pair_device.h (defined in rocSHMEM device bitcode).
-// This translation unit supplies inline stub definitions so the suite links
-// against no librocshmem device code, mirroring how Suite H shadows the SDMA
-// engine with test/device/sdma/anvil_device.hpp.
+// rocshmem::QueuePair is declared as a type alias for some QueuePair type by
+// the rocSHMEM-GDA header gda/queue_pair_provider.hpp. rocshmem::QueuePairMock
+// provides a mock QueuePair type that conforms to rocshmem::QueuePairInterface.
+// By defining GDA_QUEUEPAIR_MOCK prior to including queue_pair_provider.hpp,
+// rocshmem::QueuePair is aliased to rocshmem::QueuePairMock. The definition of
+// the rocshmem::QueuePairMock mock QueuePair object type mirrors how Suite H
+// shadows the SDMA engine with test/device/sdma/anvil_device.hpp.
+// projects/rccl/test/CMakeLists.txt defines GDA_QUEUEPAIR_MOCK for targets
+// rccl-UnitTestsFixtures, rccl-UnitTestsGinAnvilPlugin and
+// rccl-UnitTestsGinRocshmemGdaPlugin
 
 #include "DeviceTestBase.hpp"
 
@@ -22,13 +27,17 @@
 #include "nccl_device/gin/gin_device_host_common.h"
 #include "nccl_device/gin/gin_device_common.h"
 #include "nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h"
+#include "nccl_device/gin/rocshmem_gda/gda/queue_pair_provider.hpp"
 
 #if NCCL_GIN_ROCSHMEM_GDA_ENABLE
 // Count invocations of the Put/PutValue system-scope fence seam (gin_device_common.h).
 // Override must precede gin_rocshmem_gda.h so the templates expand our counter.
 __device__ unsigned long long g_gdaStubThreadfenceCount = 0;
+// Inline puts already posted when the last fence ran; nonzero means the fence came after the put.
+__device__ unsigned long long g_gdaInlinePutsAtFence = 0;
 #undef NCCL_GIN_THREADFENCE_SYSTEM
-#define NCCL_GIN_THREADFENCE_SYSTEM() atomicAdd(&g_gdaStubThreadfenceCount, 1ULL)
+#define NCCL_GIN_THREADFENCE_SYSTEM() \
+  (g_gdaInlinePutsAtFence = rocshmem::QueuePairMock::rma_inline_count, atomicAdd(&g_gdaStubThreadfenceCount, 1ULL))
 #include "nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h"
 #endif
 
@@ -37,43 +46,6 @@ __device__ unsigned long long g_gdaStubThreadfenceCount = 0;
 #include <vector>
 
 #if NCCL_GIN_ROCSHMEM_GDA_ENABLE
-
-// --------------------------------------------------------------------------
-// Stub definitions for rocshmem::QueuePair device methods.
-//   put_nbi       : byte-copy laddr -> raddr (observe data landing at remote VA)
-//   atomic_add   : atomic add into the remote signal word (observe signal deliver)
-//   quiet         : bump a device-global call counter (observe completion sync)
-// Non-RDC build: these must be defined in the same TU as the kernels that
-// (via the inlined template) call them.
-// --------------------------------------------------------------------------
-__device__ unsigned long long g_gdaStubQuietCount = 0;
-__device__ unsigned long long g_gdaStubPutNbiCount = 0;
-
-namespace rocshmem {
-
-__device__ void QueuePair::put_nbi(void* raddr, uint32_t /*rkey*/, const void* laddr, uint32_t /*lkey*/,
-                                   size_t length, ActiveWFInfo& /*wf_info*/, bool /*ring_db*/) {
-  if (raddr == nullptr || laddr == nullptr) return;
-  atomicAdd(&g_gdaStubPutNbiCount, 1ULL);
-  auto* d = static_cast<char*>(raddr);
-  const auto* s = static_cast<const char*>(laddr);
-  for (size_t i = 0; i < length; ++i) d[i] = s[i];
-}
-
-// Matches queue_pair_device.h: atomic_add(void* raddr, uint32_t rkey, int64_t
-// value, ActiveWFInfo&, bool fence). The template's signal path calls this
-// (gin_rocshmem_gda.h:54,101); rkey/fence are unused by the byte-accurate stub.
-__device__ void QueuePair::atomic_add(void* raddr, uint32_t /*rkey*/, int64_t value, ActiveWFInfo& /*wf_info*/,
-                                      bool /*fence*/) {
-  if (raddr == nullptr) return;
-  atomicAdd(reinterpret_cast<unsigned long long*>(raddr), static_cast<unsigned long long>(value));
-}
-
-__device__ void QueuePair::quiet(ActiveWFInfo& /*wf_info*/) {
-  atomicAdd(&g_gdaStubQuietCount, 1ULL);
-}
-
-}  // namespace rocshmem
 
 namespace RcclUnitTesting
 {
@@ -90,7 +62,12 @@ struct GdaHarness {
 // them into a single uploaded GdaHarness. Peer 1 is the (self-mapped) target:
 // its remote_vas entry points back at the local dst buffer and its signal
 // remote-address points back at the local signals array, so a self put/signal
-// is observable from the host.
+// is observable from the host. Each peer gets its own mock QP.
+//
+// nContexts > 1 mirrors createContext striping: one contiguous signals/counters
+// span, shared QPs, and per-context signal_raddrs slices offset by
+// contextId * kNSignals. dContexts holds the GPU-context array; host.ctx is
+// always contexts[0] so existing single-context kernels keep working.
 class GdaEnv {
 public:
   static constexpr int kNRanks = 2;
@@ -98,23 +75,41 @@ public:
   static constexpr uint32_t kNSignals = 4;
   static constexpr uint32_t kNCounters = 2;
 
-  DeviceBuffer<rocshmem::QueuePair> qp{1};
-  DeviceBuffer<rocshmem::QueuePair*> qps{kNRanks};
-  DeviceBuffer<uint64_t> signals{kNSignals};
-  DeviceBuffer<uint64_t> counters{kNCounters};
-  DeviceBuffer<uint32_t> signalRkeys{kNRanks};
-  DeviceBuffer<uintptr_t> signalRaddrs{kNRanks};
-  DeviceBuffer<uintptr_t> dstRemoteVas{kNRanks};
-  DeviceBuffer<uint32_t> dstRkeys{kNRanks};
+  int nContexts;
+  DeviceBuffer<rocshmem::QueuePair> qp;
+  DeviceBuffer<rocshmem::QueuePair*> qps;
+  DeviceBuffer<uint64_t> signals;
+  DeviceBuffer<uint64_t> counters;
+  DeviceBuffer<uint32_t> signalRkeys;
+  DeviceBuffer<uintptr_t> signalRaddrs;
+  DeviceBuffer<uintptr_t> dstRemoteVas;
+  DeviceBuffer<uint32_t> dstRkeys;
   DeviceBuffer<uint8_t> dst;
   DeviceBuffer<uint8_t> src;
-  DeviceBuffer<GdaHarness> dHarness{1};
+  DeviceBuffer<ncclGinRocshmemGdaGPUContext> dContexts;
+  DeviceBuffer<GdaHarness> dHarness;
   GdaHarness host{};
 
-  explicit GdaEnv(size_t bytes) : dst(bytes ? bytes : 1), src(bytes ? bytes : 1) {}
+  explicit GdaEnv(size_t bytes, int nContexts_ = 1)
+      : nContexts(nContexts_),
+        qp(kNRanks),
+        qps(kNRanks),
+        signals(static_cast<size_t>(kNSignals) * static_cast<size_t>(nContexts_)),
+        counters(static_cast<size_t>(kNCounters) * static_cast<size_t>(nContexts_)),
+        // One peer-rkey array for the whole signal MR (mirrors createContext).
+        signalRkeys(kNRanks),
+        signalRaddrs(static_cast<size_t>(kNRanks) * static_cast<size_t>(nContexts_)),
+        dstRemoteVas(kNRanks),
+        dstRkeys(kNRanks),
+        dst(bytes ? bytes : 1),
+        src(bytes ? bytes : 1),
+        dContexts(nContexts_),
+        dHarness(1) {}
 
   void build() {
-    std::vector<rocshmem::QueuePair*> qpRow(kNRanks, qp.ptr);
+    qp.zero();
+    std::vector<rocshmem::QueuePair*> qpRow(kNRanks);
+    for (int i = 0; i < kNRanks; ++i) qpRow[i] = qp.ptr + i;
     qps.copyFrom(qpRow.data(), kNRanks);
 
     signals.zero();
@@ -122,24 +117,34 @@ public:
     signalRkeys.zero();
     dstRkeys.zero();
 
-    std::vector<uintptr_t> sraddr(kNRanks, 0);
-    sraddr[kPeer] = reinterpret_cast<uintptr_t>(signals.ptr);  // signal lands in signals[]
-    signalRaddrs.copyFrom(sraddr.data(), kNRanks);
+    std::vector<uintptr_t> sraddr(static_cast<size_t>(kNRanks) * static_cast<size_t>(nContexts), 0);
+    for (int c = 0; c < nContexts; ++c) {
+      sraddr[static_cast<size_t>(c) * kNRanks + kPeer] =
+          reinterpret_cast<uintptr_t>(signals.ptr + static_cast<size_t>(c) * kNSignals);
+    }
+    signalRaddrs.copyFrom(sraddr);
 
     std::vector<uintptr_t> rvas(kNRanks, 0);
     rvas[kPeer] = reinterpret_cast<uintptr_t>(dst.ptr);  // "remote" dst maps to local dst
     dstRemoteVas.copyFrom(rvas.data(), kNRanks);
 
+    std::vector<ncclGinRocshmemGdaGPUContext> hostCtxs(static_cast<size_t>(nContexts));
+    for (int c = 0; c < nContexts; ++c) {
+      hostCtxs[static_cast<size_t>(c)] = {};
+      hostCtxs[static_cast<size_t>(c)].qps = qps.ptr;
+      hostCtxs[static_cast<size_t>(c)].signals = signals.ptr + static_cast<size_t>(c) * kNSignals;
+      hostCtxs[static_cast<size_t>(c)].counters = counters.ptr + static_cast<size_t>(c) * kNCounters;
+      hostCtxs[static_cast<size_t>(c)].signal_rkeys = signalRkeys.ptr;
+      hostCtxs[static_cast<size_t>(c)].signal_raddrs = signalRaddrs.ptr + static_cast<size_t>(c) * kNRanks;
+      hostCtxs[static_cast<size_t>(c)].nSignals = kNSignals;
+      hostCtxs[static_cast<size_t>(c)].nCounters = kNCounters;
+      hostCtxs[static_cast<size_t>(c)].nRanks = kNRanks;
+      hostCtxs[static_cast<size_t>(c)].rank = 0;
+    }
+    dContexts.copyFrom(hostCtxs.data(), static_cast<size_t>(nContexts));
+
     std::memset(&host, 0, sizeof(host));
-    host.ctx.qps = qps.ptr;
-    host.ctx.signals = signals.ptr;
-    host.ctx.counters = counters.ptr;
-    host.ctx.signal_rkeys = signalRkeys.ptr;
-    host.ctx.signal_raddrs = signalRaddrs.ptr;
-    host.ctx.nSignals = kNSignals;
-    host.ctx.nCounters = kNCounters;
-    host.ctx.nRanks = kNRanks;
-    host.ctx.rank = 0;
+    host.ctx = hostCtxs[0];
 
     host.dstMh.local_va = reinterpret_cast<uintptr_t>(dst.ptr);
     host.dstMh.remote_vas = dstRemoteVas.ptr;
@@ -156,36 +161,69 @@ public:
 };
 
 static void resetQuietCount() {
-  unsigned long long z = 0;
-  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_gdaStubQuietCount), &z, sizeof(z)));
+  size_t z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::quiet_count), &z, sizeof(z)));
 }
 
-static unsigned long long readQuietCount() {
-  unsigned long long q = 0;
-  HIP_EXPECT(hipMemcpyFromSymbol(&q, HIP_SYMBOL(g_gdaStubQuietCount), sizeof(q)));
+static size_t readQuietCount() {
+  size_t q = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&q, HIP_SYMBOL(rocshmem::QueuePairMock::quiet_count), sizeof(q)));
   return q;
 }
 
 static void resetPutNbiCount() {
-  unsigned long long z = 0;
-  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_gdaStubPutNbiCount), &z, sizeof(z)));
+  size_t z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::rma_count), &z, sizeof(z)));
 }
 
-static unsigned long long readPutNbiCount() {
-  unsigned long long n = 0;
-  HIP_EXPECT(hipMemcpyFromSymbol(&n, HIP_SYMBOL(g_gdaStubPutNbiCount), sizeof(n)));
+static size_t readPutNbiCount() {
+  size_t n = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&n, HIP_SYMBOL(rocshmem::QueuePairMock::rma_count), sizeof(n)));
   return n;
 }
 
+static void resetPutValCount() {
+  size_t z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::rma_inline_count), &z, sizeof(z)));
+}
+
+static size_t readPutValCount() {
+  size_t v = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&v, HIP_SYMBOL(rocshmem::QueuePairMock::rma_inline_count), sizeof(v)));
+  return v;
+}
+
+static void resetSignalCount() {
+  size_t z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::amo_count), &z, sizeof(z)));
+}
+
+static size_t readSignalCount() {
+  size_t s = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&s, HIP_SYMBOL(rocshmem::QueuePairMock::amo_count), sizeof(s)));
+  return s;
+}
+
 static void resetThreadfenceCount() {
-  unsigned long long z = 0;
+  size_t z = 0;
   HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_gdaStubThreadfenceCount), &z, sizeof(z)));
 }
 
-static unsigned long long readThreadfenceCount() {
-  unsigned long long c = 0;
+static size_t readThreadfenceCount() {
+  size_t c = 0;
   HIP_EXPECT(hipMemcpyFromSymbol(&c, HIP_SYMBOL(g_gdaStubThreadfenceCount), sizeof(c)));
   return c;
+}
+
+static void resetInlinePutsAtFence() {
+  unsigned long long z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_gdaInlinePutsAtFence), &z, sizeof(z)));
+}
+
+static unsigned long long readInlinePutsAtFence() {
+  unsigned long long n = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&n, HIP_SYMBOL(g_gdaInlinePutsAtFence), sizeof(n)));
+  return n;
 }
 
 // G1: Put with data (no signal) copies src -> peer's remote buffer.
@@ -237,9 +275,11 @@ TEST_F(GinRocshmemGdaTemplateTest, Put_ZeroByteSkipsDataStillSignals) {
   env.dst.zero();
   env.build();
   resetPutNbiCount();
+  resetSignalCount();
   kernelPutZeroBytes<<<1, 1>>>(env.dHarness.ptr);
   syncAndCheck();
   EXPECT_EQ(readPutNbiCount(), 0ULL);  // production skips put_nbi when bytes==0
+  EXPECT_EQ(readSignalCount(), 1ULL);  // signal still dispatched
   auto got = env.dst.copyTo();
   for (int i = 0; i < kN; ++i) EXPECT_EQ(got[static_cast<size_t>(i)], 0u);  // data write skipped
   auto sigs = env.signals.copyTo();
@@ -264,8 +304,10 @@ TEST_F(GinRocshmemGdaTemplateTest, Put_SignalAddDeliversArg) {
   GdaEnv env(32);
   env.src.zero();
   env.build();
+  resetSignalCount();
   kernelPutSignalAdd<<<1, 1>>>(env.dHarness.ptr);
   syncAndCheck();
+  EXPECT_EQ(readSignalCount(), 1ULL);  // signal dispatched
   auto sigs = env.signals.copyTo();
   EXPECT_EQ(sigs[1], 7ULL);
   EXPECT_EQ(sigs[0], 0ULL);
@@ -398,8 +440,9 @@ TEST_F(GinRocshmemGdaTemplateTest, Put_EqualScopeTakesNoFence) {
   for (int i = 0; i < kN; ++i) EXPECT_EQ(got[static_cast<size_t>(i)], pat[static_cast<size_t>(i)]);
 }
 
-// G8: PutValue writes an inline scalar to the peer buffer (lkey=0 inline WQE).
-__global__ void kernelPutValueScalar(GdaHarness* h, uint64_t val) {
+// G8: PutValue inlines the scalar (lkey=0 WQE) and fences first only when required=system and given < required.
+__global__ void kernelPutValueScoped(GdaHarness* h, uint64_t val, cuda::thread_scope required,
+                                     cuda::thread_scope given) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
   ginCtx.nRanks = 2;
@@ -407,20 +450,46 @@ __global__ void kernelPutValueScalar(GdaHarness* h, uint64_t val) {
   sig.type = NCCL_GIN_SIGNAL_TYPE_NONE;
   ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
       ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0, val, sig,
-      ncclGinSignalInc, 0, false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+      ncclGinSignalInc, 0, false, nullptr, required, given);
 }
 
-TEST_F(GinRocshmemGdaTemplateTest, PutValue_InlineScalar) {
-  GdaEnv env(sizeof(uint64_t));
-  env.dst.zero();
-  env.build();
-  const uint64_t kVal = 0xAABBCCDDEEFF0011ULL;
-  kernelPutValueScalar<<<1, 1>>>(env.dHarness.ptr, kVal);
-  syncAndCheck();
-  auto got = env.dst.copyTo();
-  uint64_t observed = 0;
-  std::memcpy(&observed, got.data(), sizeof(observed));
-  EXPECT_EQ(observed, kVal);
+TEST_F(GinRocshmemGdaTemplateTest, PutValue_FencesOnlyForWeakerGivenAtSystemScope) {
+  struct ScopeCase {
+    cuda::thread_scope required;
+    cuda::thread_scope given;
+    size_t fences;
+  };
+  const ScopeCase cases[] = {
+      {cuda::thread_scope_system, cuda::thread_scope_thread, 1},
+      {cuda::thread_scope_system, cuda::thread_scope_block, 1},
+      {cuda::thread_scope_system, cuda::thread_scope_device, 1},
+      {cuda::thread_scope_system, cuda::thread_scope_system, 0},
+      {cuda::thread_scope_device, cuda::thread_scope_block, 0},  // weaker given, but required is not system
+  };
+  uint64_t val = 0xC0FFEE0000000000ULL;
+  for (const ScopeCase& c : cases) {
+    SCOPED_TRACE(::testing::Message() << "required=" << c.required << " given=" << c.given);
+    ++val;
+    GdaEnv env(sizeof(uint64_t));
+    env.dst.zero();
+    env.build();
+    resetThreadfenceCount();
+    resetInlinePutsAtFence();
+    resetPutValCount();
+    resetSignalCount();
+    kernelPutValueScoped<<<1, 1>>>(env.dHarness.ptr, val, c.required, c.given);
+    syncAndCheck();
+    EXPECT_EQ(readThreadfenceCount(), c.fences);
+    if (c.fences != 0) {
+      EXPECT_EQ(readInlinePutsAtFence(), 0ULL) << "the fence must precede the inline put";
+    }
+    EXPECT_EQ(readPutValCount(), 1ULL);
+    EXPECT_EQ(readSignalCount(), 0ULL) << "no signal descriptor, so no AMO";
+    auto got = env.dst.copyTo();
+    uint64_t observed = 0;
+    std::memcpy(&observed, got.data(), sizeof(observed));
+    EXPECT_EQ(observed, val);
+  }
 }
 
 // G9: PutValue with signal delivers both the scalar and the signal.
@@ -440,9 +509,13 @@ TEST_F(GinRocshmemGdaTemplateTest, PutValue_WithSignal) {
   GdaEnv env(sizeof(uint32_t));
   env.dst.zero();
   env.build();
+  resetPutValCount();
+  resetSignalCount();
   const uint32_t kVal = 0x12345678u;
   kernelPutValueSignal<<<1, 1>>>(env.dHarness.ptr, kVal);
   syncAndCheck();
+  EXPECT_EQ(readPutValCount(), 1ULL);  // put inlined
+  EXPECT_EQ(readSignalCount(), 1ULL);  // signal dispatched
   auto got = env.dst.copyTo();
   uint32_t observed = 0;
   std::memcpy(&observed, got.data(), sizeof(observed));
@@ -466,7 +539,7 @@ TEST_F(GinRocshmemGdaTemplateTest, Flush_QuietsAllPeers) {
   resetQuietCount();
   kernelFlush<<<1, 1>>>(env.dHarness.ptr);
   syncAndCheck();
-  EXPECT_EQ(readQuietCount(), static_cast<unsigned long long>(GdaEnv::kNRanks));
+  EXPECT_EQ(readQuietCount(), static_cast<size_t>(GdaEnv::kNRanks));
 }
 
 // G11: GetSignalPtr/ResetSignal and GetCounterPtr/ResetCounter round-trip.
@@ -496,7 +569,7 @@ TEST_F(GinRocshmemGdaTemplateTest, GetReset_SignalAndCounter) {
   EXPECT_EQ(ctr[0], 0ULL);   // set to 77 then reset
 }
 
-// G12: ResetSignal with a non-indexed descriptor is a no-op.
+// G12: ResetSignal with a NONE descriptor is a no-op.
 __global__ void kernelResetSignalNone(GdaHarness* h) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
@@ -513,7 +586,431 @@ TEST_F(GinRocshmemGdaTemplateTest, ResetSignal_NoneIsNoOp) {
   kernelResetSignalNone<<<1, 1>>>(env.dHarness.ptr);
   syncAndCheck();
   auto sigs = env.signals.copyTo();
-  EXPECT_EQ(sigs[0], 42ULL);  // untouched by non-indexed reset
+  EXPECT_EQ(sigs[0], 42ULL);  // untouched by NONE reset
+}
+
+// G13: GDA device dispatch selects the GPU context indexed by ncclGinCtx::contextId
+// (AICOMRCCL-2339), instead of always using array element zero.
+__global__ void kernelGdaSignalContextSelection(ncclGinRocshmemGdaGPUContext* contexts) {
+  if (threadIdx.x != 0) return;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = contexts;
+
+  ginCtx.contextId = 0;
+  ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0).ptr[0] = 11;
+  ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0).ptr[0] = 101;
+
+  ginCtx.contextId = 1;
+  ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclGinSignalDescriptor{NCCL_GIN_SIGNAL_TYPE_INDEXED, {.indexedSignal = {.signalId = 0}}});
+  ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0);
+  // Write a sibling cell so ResetCounter's clear of index 0 stays observable.
+  ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 1).ptr[0] = 202;
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, SignalApis_SelectLogicalContext) {
+  GdaEnv env(/*bytes=*/1, /*nContexts=*/2);
+  env.build();
+
+  // Non-zero sentinels so a 0 after ResetSignal/ResetCounter only holds if the
+  // write actually reached the context-1 stripe (zero-initialized cells would
+  // pass both before and after the de-aliasing fix).
+  std::vector<uint64_t> sigInit(env.signals.count, 0);
+  sigInit[0] = 7ULL;
+  sigInit[GdaEnv::kNSignals] = 7ULL;
+  env.signals.copyFrom(sigInit);
+  std::vector<uint64_t> ctrInit(env.counters.count, 0);
+  ctrInit[0] = 7ULL;
+  ctrInit[GdaEnv::kNCounters] = 7ULL;
+  env.counters.copyFrom(ctrInit);
+
+  kernelGdaSignalContextSelection<<<1, 1>>>(env.dContexts.ptr);
+  syncAndCheck();
+  auto signals = env.signals.copyTo();
+  auto counters = env.counters.copyTo();
+  EXPECT_EQ(signals[0], 11ULL) << "ResetSignal must not clear context 0 when invoked on contextId=1";
+  EXPECT_EQ(signals[GdaEnv::kNSignals], 0ULL)
+      << "ResetSignal on contextId=1 must clear context 1 signal cell";
+  EXPECT_EQ(counters[0], 101ULL);
+  EXPECT_EQ(counters[GdaEnv::kNCounters], 0ULL)
+      << "ResetCounter on contextId=1 must clear context 1 counter index 0";
+  EXPECT_EQ(counters[GdaEnv::kNCounters + 1], 202ULL)
+      << "GetCounterPtr on contextId=1 must address the context-1 stripe";
+}
+
+// G14: Put with an indexed signal must resolve signal_raddrs from the GPU
+// context selected by contextId, so context 1's atomic lands in the second
+// stripe rather than aliasing context 0.
+__global__ void kernelPutSignalSelectContext(GdaHarness* h, ncclGinRocshmemGdaGPUContext* contexts,
+                                             int contextId) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = contexts;
+  ginCtx.contextId = contextId;
+  ginCtx.nRanks = 2;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
+  sig.indexedSignal.signalId = 0;
+  ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclCoopThread{}, 1, true, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
+      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, 0, sig, ncclGinSignalAdd, 5, false, 0, false,
+      nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, Put_SelectLogicalContextSignalStripe) {
+  GdaEnv env(/*bytes=*/1, /*nContexts=*/2);
+  env.build();
+  resetSignalCount();
+  kernelPutSignalSelectContext<<<1, 1>>>(env.dHarness.ptr, env.dContexts.ptr, /*contextId=*/1);
+  syncAndCheck();
+  EXPECT_EQ(readSignalCount(), 1ULL);
+  auto sigs = env.signals.copyTo();
+  EXPECT_EQ(sigs[0], 0ULL) << "contextId=1 Put must not write the context-0 signal stripe";
+  EXPECT_EQ(sigs[GdaEnv::kNSignals], 5ULL)
+      << "contextId=1 Put must deliver the signal into the context-1 stripe";
+}
+
+// G15: PutValue has its own signal_raddrs resolution path; cover contextId=1
+// the same way G14 covers Put.
+__global__ void kernelPutValueSignalSelectContext(GdaHarness* h, ncclGinRocshmemGdaGPUContext* contexts,
+                                                  int contextId, uint32_t val) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = contexts;
+  ginCtx.contextId = contextId;
+  ginCtx.nRanks = 2;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
+  sig.indexedSignal.signalId = 0;
+  ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0, val, sig, ncclGinSignalAdd, 5,
+      false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, PutValue_SelectLogicalContextSignalStripe) {
+  GdaEnv env(/*bytes=*/sizeof(uint32_t), /*nContexts=*/2);
+  env.dst.zero();
+  env.build();
+  resetPutValCount();
+  resetSignalCount();
+  const uint32_t kVal = 0xA5A5A5A5u;
+  kernelPutValueSignalSelectContext<<<1, 1>>>(env.dHarness.ptr, env.dContexts.ptr, /*contextId=*/1, kVal);
+  syncAndCheck();
+  EXPECT_EQ(readPutValCount(), 1ULL);
+  EXPECT_EQ(readSignalCount(), 1ULL);
+  auto got = env.dst.copyTo();
+  uint32_t observed = 0;
+  std::memcpy(&observed, got.data(), sizeof(observed));
+  EXPECT_EQ(observed, kVal);
+  auto sigs = env.signals.copyTo();
+  EXPECT_EQ(sigs[0], 0ULL) << "contextId=1 PutValue must not write the context-0 signal stripe";
+  EXPECT_EQ(sigs[GdaEnv::kNSignals], 5ULL)
+      << "contextId=1 PutValue must deliver the signal into the context-1 stripe";
+}
+
+// G16: VA signals (AICOMRCCL-3180) target a cell in the dst window, never the indexed signal buffer.
+constexpr size_t kVaSignalOff = 256;
+constexpr size_t kVaWindowBytes = kVaSignalOff + sizeof(uint64_t);
+
+__global__ void kernelPutVaSignal(GdaHarness* h, bool putValue, uint64_t val) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_VA;
+  sig.vaSignal.signalWindow = reinterpret_cast<ncclGinWindow_t>(&h->dstMh);
+  sig.vaSignal.signalOffset = kVaSignalOff;
+  if (putValue) {
+    ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+        ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0, val, sig, ncclGinSignalAdd, 9,
+        false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+  } else {
+    ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+        ginCtx, ncclCoopThread{}, 1, true, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
+        reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, sizeof(uint64_t), sig, ncclGinSignalAdd, 9, false, 0, false,
+        nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+  }
+}
+
+static uint64_t readU64At(const DeviceBuffer<uint8_t>& buf, size_t off) {
+  auto got = buf.copyTo();
+  uint64_t v = 0;
+  std::memcpy(&v, got.data() + off, sizeof(v));
+  return v;
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, VaSignal_PutSignalsWindowCell) {
+  const uint64_t kVal = 0x1122334455667788ULL;
+  for (const bool putValue : {false, true}) {
+    SCOPED_TRACE(::testing::Message() << "putValue=" << putValue);
+    GdaEnv env(kVaWindowBytes);
+    std::vector<uint8_t> src(kVaWindowBytes, 0);
+    std::memcpy(src.data(), &kVal, sizeof(kVal));
+    env.src.copyFrom(src);
+    env.dst.zero();
+    env.build();
+    resetSignalCount();
+    kernelPutVaSignal<<<1, 1>>>(env.dHarness.ptr, putValue, kVal);
+    syncAndCheck();
+    EXPECT_EQ(readSignalCount(), 1ULL);
+    EXPECT_EQ(readU64At(env.dst, 0), kVal) << "payload must still land at the destination offset";
+    EXPECT_EQ(readU64At(env.dst, kVaSignalOff), 9ULL) << "the VA cell must take the signal";
+    EXPECT_EQ(env.signals.copyTo(), std::vector<uint64_t>(GdaEnv::kNSignals, 0))
+        << "a VA signal must not touch the indexed signal buffer";
+  }
+}
+
+// G17: ResetSignal clears a VA signal's cell through the window's local VA.
+__global__ void kernelResetVaSignal(GdaHarness* h) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_VA;
+  sig.vaSignal.signalWindow = reinterpret_cast<ncclGinWindow_t>(&h->dstMh);
+  sig.vaSignal.signalOffset = kVaSignalOff;
+  ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, sig);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, ResetSignal_VaClearsWindowCell) {
+  GdaEnv env(kVaWindowBytes);
+  std::vector<uint8_t> dst(kVaWindowBytes, 0);
+  const uint64_t armed = 5;
+  std::memcpy(dst.data() + kVaSignalOff, &armed, sizeof(armed));
+  env.dst.copyFrom(dst);
+  env.build();
+  env.signals.copyFrom(std::vector<uint64_t>(GdaEnv::kNSignals, 7));
+  kernelResetVaSignal<<<1, 1>>>(env.dHarness.ptr);
+  syncAndCheck();
+  EXPECT_EQ(readU64At(env.dst, kVaSignalOff), 0ULL);
+  EXPECT_EQ(env.signals.copyTo(), std::vector<uint64_t>(GdaEnv::kNSignals, 7))
+      << "a VA reset must not clear indexed signals";
+}
+
+using nccl::gin::rocshmem_gda::ncclGinRocshmemGdaRequest;
+
+constexpr uint64_t kShortBudget = 1000;
+constexpr uint64_t kLongBudget = 1ULL << 34;
+constexpr size_t kNeverDrains = ~size_t{0};
+
+static void setQueue(GdaEnv& env, int peer, size_t busyPolls, size_t pendingWqes) {
+  rocshmem::QueuePair* qp = env.qp.ptr + peer;
+  HIP_CHECK(hipMemcpy(&qp->busy_polls, &busyPolls, sizeof(busyPolls), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(&qp->pending_wqes, &pendingWqes, sizeof(pendingWqes), hipMemcpyHostToDevice));
+}
+
+static size_t readPolls(const GdaEnv& env, int peer) {
+  size_t polls = 0;
+  HIP_EXPECT(hipMemcpy(&polls, &env.qp.ptr[peer].polls, sizeof(polls), hipMemcpyDeviceToHost));
+  return polls;
+}
+
+static ncclGinRequest_t makeRequest(int peer) {
+  ncclGinRocshmemGdaRequest req{/*target=*/0, peer};
+  ncclGinRequest_t raw{};
+  std::memcpy(&raw, &req, sizeof(req));
+  return raw;
+}
+
+static ncclGinRocshmemGdaRequest readRequest(DeviceBuffer<ncclGinRequest_t>& d_req) {
+  ncclGinRequest_t raw = d_req.download();
+  ncclGinRocshmemGdaRequest req;
+  std::memcpy(&req, &raw, sizeof(req));
+  return req;
+}
+
+// G18: FlushAsync records the peer and its queue target and posts no quiet.
+__global__ void kernelFlushAsync(GdaHarness* h, ncclGinRequest_t* req, int peer) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, peer, req, false, nullptr, 0);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, FlushAsync_RecordsQueueTargetWithoutQuiet) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.zero();
+  kernelPutData<<<1, 1>>>(env.dHarness.ptr, 1);
+  syncAndCheck();
+  resetQuietCount();
+  kernelFlushAsync<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, GdaEnv::kPeer);
+  syncAndCheck();
+  ncclGinRocshmemGdaRequest req = readRequest(d_req);
+  EXPECT_EQ(req.peer, GdaEnv::kPeer);
+  EXPECT_EQ(req.target, 1ULL);
+  EXPECT_EQ(readQuietCount(), 0ULL);
+}
+
+// G19: Wait polls only the QP of the recorded peer.
+__global__ void kernelWait(GdaHarness* h, ncclGinRequest_t* req) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, *req, false, nullptr, cuda::memory_order_acq_rel,
+                                                          nullptr);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, Wait_PollsRecordedPeer) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.upload(makeRequest(GdaEnv::kPeer));
+  kernelWait<<<1, 1>>>(env.dHarness.ptr, d_req.ptr);
+  syncAndCheck();
+  EXPECT_EQ(readPolls(env, GdaEnv::kPeer), 1u);
+  EXPECT_EQ(readPolls(env, 0), 0u);
+}
+
+// G20-G24: timed Flush and Wait poll the queue until it reaches the target, the budget runs out, or abort is set.
+__global__ void kernelFlushTimeout(GdaHarness* h, uint32_t* abortFlag, uint64_t timeoutCycles, ncclResult_t* result) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  *result = ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclCoopThread{}, false, nullptr, cuda::memory_order_seq_cst, abortFlag, timeoutCycles);
+}
+
+__global__ void kernelWaitTimeout(GdaHarness* h, ncclGinRequest_t* req, uint32_t* abortFlag, uint64_t timeoutCycles,
+                                  ncclResult_t* result) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  *result = ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, *req, false, nullptr, cuda::memory_order_acq_rel, abortFlag, timeoutCycles);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, FlushTimeout_DrainedQueueNeedsNoBudget) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  kernelFlushTimeout<<<1, 1>>>(env.dHarness.ptr, nullptr, /*timeoutCycles=*/0, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclSuccess);
+  EXPECT_EQ(readPolls(env, 0), 1u);
+  EXPECT_EQ(readPolls(env, GdaEnv::kPeer), 1u);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, FlushTimeout_BusyQueueTimesOut) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  setQueue(env, GdaEnv::kPeer, kNeverDrains, /*pendingWqes=*/0);
+  kernelFlushTimeout<<<1, 1>>>(env.dHarness.ptr, nullptr, kShortBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclTimeout);
+  EXPECT_EQ(readPolls(env, 0), 1u);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, WaitTimeout_PollsUntilDrained) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.upload(makeRequest(GdaEnv::kPeer));
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  setQueue(env, GdaEnv::kPeer, /*busyPolls=*/3, /*pendingWqes=*/0);
+  kernelWaitTimeout<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, nullptr, kLongBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclSuccess);
+  EXPECT_EQ(readPolls(env, GdaEnv::kPeer), 4u);
+  EXPECT_EQ(readPolls(env, 0), 0u);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, WaitTimeout_BusyQueueTimesOut) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.upload(makeRequest(GdaEnv::kPeer));
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  setQueue(env, GdaEnv::kPeer, kNeverDrains, /*pendingWqes=*/0);
+  kernelWaitTimeout<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, nullptr, kShortBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclTimeout);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, WaitTimeout_AbortReturnsSuccess) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.upload(makeRequest(GdaEnv::kPeer));
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  DeviceBuffer<uint32_t> d_abort(1);
+  uint32_t aborted = 1;
+  d_abort.copyFrom(&aborted, 1);
+  setQueue(env, GdaEnv::kPeer, kNeverDrains, /*pendingWqes=*/0);
+  kernelWaitTimeout<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, d_abort.ptr, kLongBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclSuccess);
+}
+
+// G25: Wait covers the WQEs posted before FlushAsync, not the ones posted after it.
+__device__ void putOneByte(ncclGinCtx ginCtx, GdaHarness* h) {
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_NONE;
+  ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclCoopThread{}, GdaEnv::kPeer, true, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
+      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, 1, sig, ncclGinSignalInc, 0, false, 0, false, nullptr,
+      cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+__global__ void kernelPutFlushAsyncPutWait(GdaHarness* h, uint64_t timeoutCycles, ncclResult_t* result) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinRequest_t req;
+  putOneByte(ginCtx, h);
+  ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, GdaEnv::kPeer, &req, false, nullptr, 0);
+  putOneByte(ginCtx, h);
+  *result = ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, req, false, nullptr, cuda::memory_order_acq_rel, nullptr, timeoutCycles);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, WaitTimeout_CoversOnlyWqesBeforeFlushAsync) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclResult_t> d_result(1);
+
+  d_result.upload(ncclInternalError);
+  setQueue(env, GdaEnv::kPeer, /*busyPolls=*/0, /*pendingWqes=*/1);
+  kernelPutFlushAsyncPutWait<<<1, 1>>>(env.dHarness.ptr, kShortBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclSuccess);
+
+  d_result.upload(ncclInternalError);
+  setQueue(env, GdaEnv::kPeer, /*busyPolls=*/0, /*pendingWqes=*/2);
+  kernelPutFlushAsyncPutWait<<<1, 1>>>(env.dHarness.ptr, kShortBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclTimeout);
+}
+
+// G26: blocking Flush and Wait return once abort is set, even if the queue never drains.
+__global__ void kernelBlockingFlushWait(GdaHarness* h, ncclGinRequest_t* req, uint32_t* abortFlag) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, ncclCoopThread{}, false, nullptr,
+                                                           cuda::memory_order_seq_cst, abortFlag);
+  ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, *req, false, nullptr, cuda::memory_order_acq_rel,
+                                                          abortFlag);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, Blocking_ReturnsOnAbort) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.upload(makeRequest(GdaEnv::kPeer));
+  DeviceBuffer<uint32_t> d_abort(1);
+  uint32_t aborted = 1;
+  d_abort.copyFrom(&aborted, 1);
+  setQueue(env, 0, kNeverDrains, /*pendingWqes=*/0);
+  setQueue(env, GdaEnv::kPeer, kNeverDrains, /*pendingWqes=*/0);
+  kernelBlockingFlushWait<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, d_abort.ptr);
+  syncAndCheck();
+  EXPECT_GT(readPolls(env, 0), 0u);
+  EXPECT_GT(readPolls(env, GdaEnv::kPeer), readPolls(env, 0));
 }
 
 }  // namespace RcclUnitTesting

@@ -44,36 +44,6 @@ if(UNIT_TESTS)
     add_subdirectory(unit)
 endif()
 
-if(BUILD_MARKERS)
-    if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR AND NOT TARGET SQTTInstrumentPass)
-        add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../markers ${CMAKE_CURRENT_BINARY_DIR}/markers)
-    endif()
-
-    find_program(
-        HIPCC_EXECUTABLE
-        NAMES hipcc
-        HINTS /opt/rocm/bin)
-    if(HIPCC_EXECUTABLE AND TARGET SQTTInstrumentPass)
-        add_test(NAME markers-python COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/markers/run_tests.py)
-        set_tests_properties(
-            markers-python
-            PROPERTIES
-                TIMEOUT
-                300
-                LABELS
-                "markers;integration-tests"
-                WORKING_DIRECTORY
-                ${TTD_PROJECT_SOURCE_DIR}
-                ENVIRONMENT
-                "HIPCC=${HIPCC_EXECUTABLE};SQTT_BUILD_DIR=${CMAKE_BINARY_DIR};SQTT_PASS_PLUGIN=$<TARGET_FILE:SQTTInstrumentPass>"
-        )
-    elseif(NOT TARGET SQTTInstrumentPass)
-        message(WARNING "SQTTInstrumentPass target not found; skipping SQTT marker Python tests")
-    else()
-        message(WARNING "hipcc not found; skipping SQTT marker Python tests")
-    endif()
-endif()
-
 if(BUILD_INTEGRATION_TESTS)
     set(Python3_FIND_UNVERSIONED_NAMES LAST)
     find_package(
@@ -111,11 +81,31 @@ if(BUILD_INTEGRATION_TESTS)
 
     set(DATA_DIR ${GFX10_DATA} ${GFX11_DATA} ${GFX12_DATA} ${MI300_DATA} ${MI350_DATA})
 
+    # One control per architecture: gfx942, gfx1030, gfx1101, gfx1150, gfx1200, gfx1201.
+    # mi300_template_attention and strix are the only traces whose results change when MATRIX
+    # classification is disabled; navi4_float is the only one with INST_OTHER_SIMD records.
+    set(HIDDEN_LATENCY_DATA
+        mi300_template_attention
+        mi300_pc2
+        navi2_fifo
+        navi3_float
+        strix
+        navi4_float
+        navi4_fifo)
+
+    # gfx950 hides no cycles on either trace, which would leave a header-only CSV.
+    set(HIDDEN_LATENCY_EMPTY_DATA mi350_histo0 mi350_scale)
+
+    # Negative control for the comparison itself, run on the cheapest trace.
+    set(HIDDEN_LATENCY_SELF_TEST_DATA navi4_fifo)
+
     set(CSV_PY ${CMAKE_CURRENT_SOURCE_DIR}/csv_test.py)
     set(ATT_TOOL_PY ${CMAKE_CURRENT_SOURCE_DIR}/../python/att_tool.py)
     set(PYTHON_API_PY ${CMAKE_CURRENT_SOURCE_DIR}/python_api_test.py)
     set(CODEGEN_TEST_PY ${CMAKE_CURRENT_SOURCE_DIR}/codegen_test.py)
     set(ATT_TOOL_TEST_PY ${CMAKE_CURRENT_SOURCE_DIR}/att_tool_test.py)
+    set(HIDDEN_LATENCY_TEST_PY ${CMAKE_CURRENT_SOURCE_DIR}/hidden_latency_test.py)
+    set(HIDDEN_LATENCY_CSV_PY ${CMAKE_CURRENT_SOURCE_DIR}/hidden_latency_csv_test.py)
 
     set(LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder${CMAKE_SHARED_LIBRARY_SUFFIX})
     set(SANITIZED_LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder-sanitized${CMAKE_SHARED_LIBRARY_SUFFIX})
@@ -155,6 +145,10 @@ if(BUILD_INTEGRATION_TESTS)
     add_test(NAME att-marker-clock-correction COMMAND ${Python3_EXECUTABLE} ${ATT_TOOL_TEST_PY})
     set_tests_properties(att-marker-clock-correction PROPERTIES TIMEOUT 30 LABELS "integration-tests" ENVIRONMENT
                                                                 "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+
+    add_test(NAME hidden-latency-unit COMMAND ${Python3_EXECUTABLE} ${HIDDEN_LATENCY_TEST_PY})
+    set_tests_properties(hidden-latency-unit PROPERTIES TIMEOUT 30 LABELS "integration-tests" ENVIRONMENT
+                                                        "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
 
     if(DEFINED ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR)
         configure_file(python_api_install_test.cmake.in python_api_install_test.cmake @ONLY)
@@ -214,6 +208,62 @@ if(BUILD_INTEGRATION_TESTS)
         add_test(NAME ${DATA}_csv COMMAND ${Python3_EXECUTABLE} ${CSV_PY} --lib ${LIB_PATH}
                                           "${TEST_BIN_DIR}/${DATA}/*.att" "${TEST_BIN_DIR}/control/${DATA}/*.csv")
         set_tests_properties(${DATA}_csv PROPERTIES WORKING_DIRECTORY ${TEST_BIN_DIR} FIXTURES_REQUIRED unpack_data)
+
+        if(${DATA} IN_LIST HIDDEN_LATENCY_DATA)
+            add_test(
+                NAME ${DATA}_hidden_latency
+                COMMAND
+                    ${Python3_EXECUTABLE} ${HIDDEN_LATENCY_CSV_PY} --lib ${LIB_PATH} --expected
+                    "${TEST_BIN_DIR}/control/${DATA}/hidden_latency/compare_hidden_latency.csv"
+                    "${TEST_BIN_DIR}/${DATA}/*.att" --stats "${TEST_BIN_DIR}/control/${DATA}/*.csv")
+            set_tests_properties(
+                ${DATA}_hidden_latency
+                PROPERTIES WORKING_DIRECTORY
+                           ${TEST_BIN_DIR}
+                           TIMEOUT
+                           300
+                           LABELS
+                           "integration-tests"
+                           FIXTURES_REQUIRED
+                           unpack_data)
+        endif()
+
+        if(${DATA} IN_LIST HIDDEN_LATENCY_EMPTY_DATA)
+            add_test(NAME ${DATA}_hidden_latency_empty
+                     COMMAND ${Python3_EXECUTABLE} ${HIDDEN_LATENCY_CSV_PY} --lib ${LIB_PATH} --expect-empty
+                             "${TEST_BIN_DIR}/${DATA}/*.att" --stats "${TEST_BIN_DIR}/control/${DATA}/*.csv")
+            set_tests_properties(
+                ${DATA}_hidden_latency_empty
+                PROPERTIES WORKING_DIRECTORY
+                           ${TEST_BIN_DIR}
+                           TIMEOUT
+                           300
+                           LABELS
+                           "integration-tests"
+                           FIXTURES_REQUIRED
+                           unpack_data)
+        endif()
+
+        if(${DATA} IN_LIST HIDDEN_LATENCY_SELF_TEST_DATA)
+            # The control tests prove the comparison accepts a correct file; this proves it
+            # rejects a corrupted one.
+            add_test(
+                NAME ${DATA}_hidden_latency_selftest
+                COMMAND
+                    ${Python3_EXECUTABLE} ${HIDDEN_LATENCY_CSV_PY} --lib ${LIB_PATH} --self-test --expected
+                    "${TEST_BIN_DIR}/control/${DATA}/hidden_latency/compare_hidden_latency.csv"
+                    "${TEST_BIN_DIR}/${DATA}/*.att" --stats "${TEST_BIN_DIR}/control/${DATA}/*.csv")
+            set_tests_properties(
+                ${DATA}_hidden_latency_selftest
+                PROPERTIES WORKING_DIRECTORY
+                           ${TEST_BIN_DIR}
+                           TIMEOUT
+                           300
+                           LABELS
+                           "integration-tests"
+                           FIXTURES_REQUIRED
+                           unpack_data)
+        endif()
 
         # Sanitized test: always use csv_test.py with the sanitized library
         add_test(NAME ${DATA}_sanitize COMMAND ${Python3_EXECUTABLE} ${CSV_PY} --lib ${SANITIZED_LIB_PATH}

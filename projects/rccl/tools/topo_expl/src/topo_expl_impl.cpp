@@ -28,9 +28,11 @@
 #include <cstdarg>
 #include "xml.h"
 #include "coll_net.h"
+#include <map>
+#include <string>
 #include "model.h"
 #include "topo_expl_impl.h"
-#include "rocm_smi/rocm_smi.h"
+#include "amdsmi_wrap.h"
 
 const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+4] = { "AllGather", "AllReduce", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda", "Broadcast", "Reduce", "ReduceScatter", "SendRecv" };
 const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS] = { "Tree", "Ring", "CollNetDirect", "CollNetChain", "NVLS", "NVLSTree", "PAT" };
@@ -46,6 +48,9 @@ NCCL_PARAM(GraphDumpFileRank, "GRAPH_DUMP_FILE_RANK", 0);
 NCCL_PARAM(CollNetNodeThreshold, "COLLNET_NODE_THRESHOLD", 2);
 NCCL_PARAM(NvbPreconnect, "NVB_PRECONNECT", 0);
 NCCL_PARAM(AllocP2pNetLLBuffers, "ALLOC_P2P_NET_LL_BUFFERS", 0);
+// Defined in enqueue.cc. topo_expl also compiles hipify_rccl/enqueue.cc, so a
+// second NCCL_PARAM here is a duplicate-symbol link error (extra gfx90a CI).
+extern int64_t ncclParamP2pLL128Enable();
 
 thread_local int ncclDebugNoWarn = 0;
 // Flag to suppress verbose rank/host output (used by test suite)
@@ -181,7 +186,7 @@ void ncclMemoryStackDestruct(struct ncclMemoryStack* me) {
   }
 }
 
-int ncclDebugLevel = -1;
+static int ncclDebugLevel = -1;
 
 void ncclDebugInit() {
   if (ncclDebugLevel != -1) return;
@@ -224,11 +229,60 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *file
 #endif
 }
 
+// Model XML never went through net plugin enumeration (ncclTopoProcessNet), so it lacks the
+// rail/plane attributes ncclTopoGetSystemFromXml() requires. Assign the same defaults: one rail per
+// distinct NIC on each host, in order of appearance, and the plane from the port.
+static ncclResult_t fillMissingRailPlane(struct ncclXml* xml) {
+  std::map<std::string, std::map<std::string, int>> railKeys;  // (tag, host) -> NIC ASIC -> rail index
+  for (int i = 0; i < xml->maxIndex; i++) {
+    struct ncclXmlNode* node = xml->nodes + i;
+    if (strcmp(node->name, "net") != 0 && strcmp(node->name, "gin") != 0 && strcmp(node->name, "rma") != 0) continue;
+    int rail, plane, port;
+    NCCLCHECK(xmlGetAttrIntDefault(node, "rail", &rail, NCCL_TOPO_UNDEF));
+    NCCLCHECK(xmlGetAttrIntDefault(node, "plane", &plane, NCCL_TOPO_UNDEF));
+    NCCLCHECK(xmlGetAttrIntDefault(node, "port", &port, 0));
+    if (rail == NCCL_TOPO_UNDEF) {
+      const char* hostHash = nullptr;
+      for (struct ncclXmlNode* p = node->parent; p != nullptr && hostHash == nullptr; p = p->parent) {
+        if (strcmp(p->name, "cpu") == 0) NCCLCHECK(xmlGetAttr(p, "host_hash", &hostHash));
+      }
+      // Without a GUID each net is its own ASIC, as ncclTopoAddNetAsic() assumes.
+      const char* guidStr;
+      NCCLCHECK(xmlGetAttr(node, "guid", &guidStr));
+      std::string asic;
+      if (guidStr) {
+        uint64_t guid;
+        NCCLCHECK(xmlGetAttrUint64Default(node, "guid", &guid, 0));
+        asic = "guid:" + std::to_string(guid);
+      } else {
+        int dev;
+        NCCLCHECK(xmlGetAttrIntDefault(node, "dev", &dev, i));
+        asic = "dev:" + std::to_string(dev);
+      }
+      auto& keys = railKeys[std::string(node->name) + "/" + (hostHash ? hostHash : "")];
+      int index = keys.emplace(asic, static_cast<int>(keys.size())).first->second;
+      NCCLCHECK(xmlSetAttrInt(node, "rail", NCCL_TOPO_UNDEF_BIT | index));
+    }
+    if (plane == NCCL_TOPO_UNDEF) NCCLCHECK(xmlSetAttrInt(node, "plane", NCCL_TOPO_UNDEF_BIT | port));
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclTopoGetSystem(const char* xmlTopoFile, struct ncclTopoSystem** system) {
   struct ncclXml* xml;
   NCCLCHECK(xmlAlloc(&xml, NCCL_GRAPH_XML_MAX_NODES));
   NCCLCHECK(ncclTopoGetXmlFromFile(xmlTopoFile, xml, 0));
-  NCCLCHECK(ncclTopoGetSystemFromXml(xml, system, 0));
+  NCCLCHECK(fillMissingRailPlane(xml));
+  // A model that records host hashes only loads as one of its own hosts.
+  uint64_t localHostHash = 0;
+  for (int i = 0; i < xml->maxIndex; i++) {
+    if (strcmp(xml->nodes[i].name, "cpu") != 0) continue;
+    const char* hostHashStr;
+    NCCLCHECK(xmlGetAttr(xml->nodes + i, "host_hash", &hostHashStr));
+    if (hostHashStr) localHostHash = strtoull(hostHashStr, NULL, 16);
+    break;
+  }
+  NCCLCHECK(ncclTopoGetSystemFromXml(xml, system, localHostHash));
   free(xml);
   return ncclSuccess;
 }
@@ -914,8 +968,17 @@ ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *a
       allXgmi &= isXGMI;
     }
   }
-  // Initialize num P2P LL buffers for this communicator
-  comm->allocP2pNetLLBuffers = ncclParamAllocP2pNetLLBuffers() == 1;
+  // Initialize num P2P LL buffers for this communicator. topo_expl never runs
+  // ncclCommInitRankFunc, so cudaArch is still 0 unless set from the XML GCN name.
+  if (comm->topo && comm->topo->nodes[GPU].count > 0) {
+    const char* gcn = comm->topo->nodes[GPU].nodes[0].gpu.gcn;
+    if (IsArchMatch(gcn, "gfx1250")) comm->cudaArch = 1250;
+    else if (IsArchMatch(gcn, "gfx950")) comm->cudaArch = 950;
+    else if (IsArchMatch(gcn, "gfx942")) comm->cudaArch = 942;
+  }
+  comm->allocP2pNetLLBuffers =
+    rcclAllocP2pNetLLBuffers(comm->cudaArch, /*nNodes=*/1, nranks, ncclParamP2pLL128Enable(),
+                             ncclParamAllocP2pNetLLBuffers());
 
   if (comm->rank == ncclParamGraphDumpFileRank()) {
     struct ncclTopoGraph* dumpGraphs[4] = { &ringGraph, &treeGraph, &collNetGraph, &nvlsGraph };
@@ -1327,23 +1390,34 @@ fail:
   goto exit;
 }
 
-ncclResult_t rocm_smi_init() {
+ncclResult_t amd_smi_init() {
   return ncclSuccess;
 }
 
-ncclResult_t rocm_smi_getNumDevice(uint32_t* num_devs) {
+ncclResult_t amd_smi_getNumDevice(uint32_t* num_devs) {
+  if (num_devs) *num_devs = 0;
   return ncclSuccess;
 }
 
-ncclResult_t rocm_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* busId, size_t len) {
+ncclResult_t amd_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* busId, size_t len) {
   return ncclSuccess;
 }
 
-ncclResult_t rocm_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* deviceIndex) {
+ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* deviceIndex) {
   return ncclSuccess;
 }
 
-ncclResult_t rocm_smi_getLinkInfo(int srcIndex, int dstIndex, RSMI_IO_LINK_TYPE* rsmi_type, int *hops, int *count) {
+ncclResult_t amd_smi_getLinkInfo(int srcDev, int dstDev, amdsmi_link_type_t* type, int* hops, int* count) {
+  return ncclSuccess;
+}
+
+ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t deviceIndex, struct amdsmiFabricDeviceInfo* info) {
+  if (info) *info = {};
+  return ncclSuccess;
+}
+
+ncclResult_t amd_smi_getFirmwareVersion(uint32_t deviceIndex, uint64_t* fwVersion) {
+  if (fwVersion) *fwVersion = 0;
   return ncclSuccess;
 }
 

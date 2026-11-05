@@ -179,8 +179,8 @@ void KFDExceptionTest::AddressFault(int gpuNode) {
         return;
     }
 
-    pid_t m_ChildPid = fork();
-    if (m_ChildPid == 0) {
+    pid_t childPid = fork();
+    if (childPid == 0) {
         TearDown();
         SetUp();
 
@@ -189,12 +189,12 @@ void KFDExceptionTest::AddressFault(int gpuNode) {
         srcBuffer.Fill(0xAA55AA55);
         TestMemoryException(gpuNode, srcBuffer.As<HSAuint64>(),
                                                0x12345678ULL);
-        exit(0);
+        ExitChild();
 
 	} else {
         int childStatus;
 
-        waitpid(m_ChildPid, &childStatus, 0);
+        waitpid(childPid, &childStatus, 0);
         if (hsakmt_is_dgpu()) {
             EXPECT_EQ_GPU(WIFEXITED(childStatus), true, gpuNode);
             EXPECT_EQ_GPU(WEXITSTATUS(childStatus), HSAKMT_STATUS_SUCCESS, gpuNode);
@@ -228,8 +228,8 @@ void KFDExceptionTest::PermissionFault(int gpuNode) {
         return;
     }
 
-    pid_t m_ChildPid = fork();
-    if (m_ChildPid == 0) {
+    pid_t childPid = fork();
+    if (childPid == 0) {
         TearDown();
         SetUp();
 
@@ -243,11 +243,11 @@ void KFDExceptionTest::PermissionFault(int gpuNode) {
         TestMemoryException(gpuNode, srcSysBuffer.As<HSAuint64>(),
                             readOnlyBuffer.As<HSAuint64>());
 
-        exit(0);
+        ExitChild();
     } else {
         int childStatus;
 
-        waitpid(m_ChildPid, &childStatus, 0);
+        waitpid(childPid, &childStatus, 0);
         if (hsakmt_is_dgpu()) {
             EXPECT_EQ(WIFEXITED(childStatus), true);
             EXPECT_EQ(WEXITSTATUS(childStatus), HSAKMT_STATUS_SUCCESS);
@@ -281,8 +281,8 @@ void KFDExceptionTest::PermissionFaultUserPointer(int gpuNode) {
         return;
     }
 
-    pid_t m_ChildPid = fork();
-    if (m_ChildPid == 0) {
+    pid_t childPid = fork();
+    if (childPid == 0) {
         TearDown();
         SetUp();
 
@@ -298,11 +298,11 @@ void KFDExceptionTest::PermissionFaultUserPointer(int gpuNode) {
          TestMemoryException(gpuNode, srcSysBuffer.As<HSAuint64>(),
                                                 (HSAuint64)pBuf);
 
-        exit(0);
+        ExitChild();
     } else {
         int childStatus;
 
-        waitpid(m_ChildPid, &childStatus, 0);
+        waitpid(childPid, &childStatus, 0);
         if (hsakmt_is_dgpu()) {
             EXPECT_EQ(WIFEXITED(childStatus), true);
             EXPECT_EQ(WEXITSTATUS(childStatus), HSAKMT_STATUS_SUCCESS);
@@ -338,18 +338,18 @@ void KFDExceptionTest::FaultStorm(int gpuNode) {
 
     HSAKMT_STATUS status;
 
-    pid_t m_ChildPid = fork();
-    if (m_ChildPid == 0) {
+    pid_t childPid = fork();
+    if (childPid == 0) {
         TearDown();
         SetUp();
 
         TestMemoryException(gpuNode, 0x12345678, 0x76543210, 1024, 1024, 1);
 
-        exit(0);
+        ExitChild();
     } else {
         int childStatus;
 
-        waitpid(m_ChildPid, &childStatus, 0);
+        waitpid(childPid, &childStatus, 0);
         if (hsakmt_is_dgpu()) {
             EXPECT_EQ_GPU(WIFEXITED(childStatus), true, gpuNode);
             EXPECT_EQ_GPU(WEXITSTATUS(childStatus), HSAKMT_STATUS_SUCCESS, gpuNode);
@@ -384,8 +384,8 @@ void KFDExceptionTest::SdmaQueueException(int gpuNode) {
 
     HSAKMT_STATUS status;
 
-    pid_t m_ChildPid = fork();
-    if (m_ChildPid == 0) {
+    pid_t childPid = fork();
+    if (childPid == 0) {
         unsigned int* pDb = NULL;
         unsigned int *nullPtr = NULL;
 
@@ -407,11 +407,11 @@ void KFDExceptionTest::SdmaQueueException(int gpuNode) {
         TestSdmaException(gpuNode, pDb);
         EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, pDb, PAGE_SIZE), gpuNode);
 
-        exit(0);
+        ExitChild();
     } else {
         int childStatus;
 
-        waitpid(m_ChildPid, &childStatus, 0);
+        waitpid(childPid, &childStatus, 0);
         if (hsakmt_is_dgpu()) {
             EXPECT_EQ_GPU(WIFEXITED(childStatus), true, gpuNode);
             EXPECT_EQ_GPU(WEXITSTATUS(childStatus), HSAKMT_STATUS_SUCCESS, gpuNode);

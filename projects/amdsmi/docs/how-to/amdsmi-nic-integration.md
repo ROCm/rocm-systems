@@ -278,7 +278,9 @@ Treat these sentinel values as "not reported" rather than as valid data. The
 overall API call still returns `AMDSMI_STATUS_SUCCESS` provided at least one
 field in the struct was populated; per-field availability is encoded via the
 sentinels above. If *no* field can be populated, the API returns
-`AMDSMI_STATUS_NOT_SUPPORTED`.
+`AMDSMI_STATUS_NOT_SUPPORTED`. Optional sub-structs are exempt from that last
+rule and report emptiness through a count instead; see
+[NIC RDMA device information](#nic-rdma-device-information).
 
 ---
 
@@ -455,6 +457,12 @@ typedef struct {
     amdsmi_nic_rdma_dev_info_t rdma_dev_info[AMDSMI_MAX_NIC_RDMA_DEV];
 } amdsmi_nic_rdma_devices_info_t;
 ```
+
+RDMA information is optional. A NIC whose RDMA driver is unavailable (for
+example, `ionic_rdma` blacklisted) is still enumerated, and
+`amdsmi_get_nic_rdma_dev_info()` returns `AMDSMI_STATUS_SUCCESS` with
+`num_rdma_dev` set to 0. Check `num_rdma_dev` rather than the return value to
+tell whether any RDMA device was reported.
 
 ### NIC statistics
 
@@ -1351,7 +1359,7 @@ library sources.
 
 External contributions described in this guide target the **bare-metal** AMD
 SMI library; see
-[CONTRIBUTING.md](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/CONTRIBUTING.md)
+[CONTRIBUTING.md](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/.github/CONTRIBUTING.md)
 for guidelines. The host AMD SMI library has its own contribution process,
 documented in its repository and user guide linked above.
 

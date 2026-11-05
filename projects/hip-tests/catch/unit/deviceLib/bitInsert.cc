@@ -100,12 +100,12 @@ HIP_TEST_CASE(Unit_bitInsert) {
     hostSrc032[i] = uint32_src01_dist(rd);
     hostSrc132[i] = uint32_src01_dist(rd);
     hostSrc232[i] = uint32_src23_dist(rd);
-    hostSrc232[i] = uint32_src23_dist(rd);
+    hostSrc332[i] = uint32_src23_dist(rd);
     hostOut64[i] = 0;
     hostSrc064[i] = uint64_src01_dist(rd);
     hostSrc164[i] = uint64_src01_dist(rd);
     hostSrc264[i] = uint64_src23_dist(rd);
-    hostSrc264[i] = uint64_src23_dist(rd);
+    hostSrc364[i] = uint64_src23_dist(rd);
   }
 
   HIP_CHECK(hipMalloc((void**)&deviceOut32, NUM * sizeof(unsigned int)));

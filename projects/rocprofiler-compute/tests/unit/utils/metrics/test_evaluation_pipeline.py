@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from utils.metrics.evaluation_pipeline import (
+    calc_builtin_vars,
     compute_pct_of_peak,
     create_sys_vars,
     eval_metric,
@@ -238,6 +239,54 @@ class TestEvaluationPipeline:
         assert len(variance_calls) == 1
         assert "Test Metric" in variance_calls[0].args[0]
         mock_print_summary.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "gui_active_counter",
+        ["GRBM_GUI_ACTIVE_sum", "GRBM_GUI_ACTIVE"],
+    )
+    def test_eval_metric_rejects_zero_gui_active_counter(self, gui_active_counter):
+        """The zero guard checks the available GUI-active counter by name."""
+        fixture = self._build_eval_metric_inputs()
+        _, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
+        raw_pmc_df[gui_active_counter] = 0
+
+        with patch(
+            "utils.metrics.evaluation_pipeline.console_warning"
+        ) as mock_warning, patch(
+            "utils.metrics.evaluation_pipeline.console_error",
+            side_effect=SystemExit,
+        ) as mock_error:
+            with pytest.raises(SystemExit):
+                eval_metric(
+                    dfs,
+                    dfs_type,
+                    dfs_expressions,
+                    sys_info,
+                    pd.DataFrame(),
+                    raw_pmc_df,
+                    debug=False,
+                )
+
+        mock_warning.assert_called_once_with(f"Detected {gui_active_counter} == 0")
+        mock_error.assert_called_once_with("Halting execution for warning above.")
+
+    def test_calc_builtin_vars_uses_gfx1250_gui_active_sum(self):
+        """gfx1250 computes per-dispatch GUI-active cycles from the XCD sum."""
+        raw_pmc_df = pd.DataFrame({"GRBM_GUI_ACTIVE_sum": [800, 1600]})
+        sys_vars = {"ammolite__num_xcd": 8}
+
+        builtin_vars = calc_builtin_vars(
+            raw_pmc_df,
+            sys_vars,
+            "gfx1250",
+            ["$GRBM_GUI_ACTIVE_PER_XCD"],
+        )
+
+        pd.testing.assert_series_equal(
+            builtin_vars["ammolite__GRBM_GUI_ACTIVE_PER_XCD"],
+            pd.Series([100.0, 200.0]),
+            check_names=False,
+        )
 
     def make_dual_issue_dfs(
         self, metric_name: str, value: float, peak: float, peak_col: str = "Peak"

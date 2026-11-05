@@ -41,6 +41,17 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Trap Handler V2 source
+
+// Trap-during-VOP3PX instruction fixup.  Off unless a build opts in with
+// -defsym,HAVE_VOP3PX_FIXUP=1, which only the gfx1250 revision 0 build does.
+// Defaulting to off means a target added without a matching ASM_DEFSYM entry
+// gets the unmodified handler rather than a rewind it must not perform.
+// The VGPR MSB fixup below is deliberately not scoped - it applies to
+// every revision.
+.ifndef HAVE_VOP3PX_FIXUP
+  .set HAVE_VOP3PX_FIXUP                           , 0
+.endif
+
 .set DOORBELL_ID_SIZE                              , 10
 .set DOORBELL_ID_MASK                              , ((1 << DOORBELL_ID_SIZE) - 1)
 .set EC_QUEUE_WAVE_ABORT_M0                        , (1 << (DOORBELL_ID_SIZE + 0))
@@ -133,13 +144,14 @@
 // Note: HW_ID1 bits [19:16] span SA_ID/SE_ID fields, NOT Virtual_XCC_ID - do not use HW_ID1 for XCC detection.
 
 .set TTMP8_DISPATCH_ID_MASK                        , 0X1FFFFFF
+.set TTMP8_GRID_YZ_VALID_SHIFT                     , 30           // TTMP8 bit 30: SPI sets this for 2D/3D dispatches when ttmp7 contains valid Y/Z
 // Per-sample data layout within the device buffer. Each sample is 64 bytes.
 // These are offsets from the start of a specific sample slot in the device buffer.
 
 .set SAMPLE_OFF_BYTES_PER_SAMPLE                   , 0x40         // 64 bytes per sample slot
 .set SAMPLE_OFF_PC_HOST                            , 0x00         // original PC (host trap only)
 .set SAMPLE_OFF_EXEC_LOHI                          , 0x08         // saved EXEC low/high
-.set SAMPLE_OFF_WGID_XY                            , 0x10         // WG id X / Y
+.set SAMPLE_OFF_WGID_X                             , 0x10         // WG id X (32-bit), stored with Y as an aligned 64-bit pair
 .set SAMPLE_OFF_WGID_Z                             , 0x18         // WG id Z (32-bit)
 .set SAMPLE_OFF_WAVE_IN_GROUP_CHIPLET              , 0x1C         // wave_in_wg[5:0] | reserved_wg[7:6] | chiplet[10:8] | reserved[31:11]
 .set SAMPLE_OFF_TIMESTAMP                          , 0x30         // 64 bit realtime counter
@@ -571,11 +583,9 @@
 
   v_mov_b32         v0, 1
   v_mov_b32         v1, 0
-.if .amdgcn.gfx_generation_minor >= 5
-  global_atomic_add_u64 v[0:1], v1, v[0:1], ttmp[14:15], scope:SCOPE_DEV th:TH_ATOMIC_RETURN
-.else
+
+  // Use SYSTEM scope to push through the GL2 cache.
   global_atomic_add_u64 v[0:1], v1, v[0:1], ttmp[14:15], scope:SCOPE_SYS th:TH_ATOMIC_RETURN
-.endif
   s_wait_loadcnt    0                                       // Wait for atomic operation to complete and return value
 
   // At this point, ttmp[4:5] is free. ttmp13 is free
@@ -743,19 +753,30 @@
 .endif
   global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_EXEC_LOHI, scope:SCOPE_SYS  // store out original EXEC
 
-  // Store Workgroup ID X and Y at offset SAMPLE_OFF_WGID_XY (0x10).
-  // ttmp9 = WGID_X (from first-level handler).
-  // ttmp7 contains WGID_Y in low 16 bits.
-  v_writelane_b32   v2, ttmp9, 0                             // wg_id_x
-  s_bfe_u32         ttmp13, ttmp7, (0 | 16<<16)              // extract bits tttmp7[15:0] representing wg_id_y
-  v_writelane_b32   v3, ttmp13, 0                            // wg_id_y
-  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_WGID_XY, scope:SCOPE_SYS  // store wg_id_x and wg_id_y
+  // Store Workgroup IDs. X is always valid; Y/Z are valid only when ttmp8 bit 30
+  // is set. Keep the X/Y pair as a naturally aligned 64-bit store at 0x10 and Z
+  // as a 32-bit store at 0x18 so neither access is misaligned.
+  // ttmp7 = {WGID_Z[15:0], WGID_Y[15:0]}.
+  v_writelane_b32   v2, ttmp9, 0                             // v2 = wg_id_x
+  s_bitcmp1_b32     ttmp8, TTMP8_GRID_YZ_VALID_SHIFT
+  s_cbranch_scc0    .wgid_yz_invalid
 
-  // Store Workgroup ID Z at offset 0x18 (32-bit).
-  // ttmp7 contains WGID_Z in high 16 bits [31:16].
-  s_bfe_u32         ttmp13, ttmp7, (16 | (16 << 16))         // Extract WGID_Z[15:0] from ttmp7[31:16]
-  v_writelane_b32   v2, ttmp13, 0                            // Store WGID_Z in v2
-  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_WGID_Z, scope:SCOPE_SYS  // store wg_id_z
+  // Valid (2D/3D dispatch): extract Y from ttmp7[15:0], Z from ttmp7[31:16]
+  s_and_b32         ttmp13, ttmp7, 0xffff                    // wg_id_y = ttmp7[15:0]
+  v_writelane_b32   v3, ttmp13, 0                            // v3 = wg_id_y
+  s_lshr_b32        ttmp13, ttmp7, 16                        // ttmp13 = wg_id_z = ttmp7[31:16]
+  s_branch          .store_wgid_yz
+
+.wgid_yz_invalid:
+  // Invalid (1D dispatch): Y and Z are 0
+  v_mov_b32         v3, 0                                    // v3 = wg_id_y = 0
+  s_mov_b32         ttmp13, 0                                // ttmp13 = wg_id_z = 0
+
+.store_wgid_yz:
+  // Aligned store: X (0x10) and Y (0x14) as a 64-bit pair, then Z (0x18)
+  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_WGID_X, scope:SCOPE_SYS  // wg_id_x, wg_id_y
+  v_writelane_b32   v2, ttmp13, 0                            // v2 = wg_id_z
+  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_WGID_Z, scope:SCOPE_SYS      // wg_id_z
 
   // v[0:1] = &buffer[local_entry]
   // v[2:3] = free
@@ -770,7 +791,7 @@
   // Current ROCr API determines single dword for HW_ID, while this information is scattered across:
   //    gfx12.0: two dword registers HW_ID1 and HW_ID2 on GFX10+ architectures.
   // >= gfx12.5: three registers HW_ID1, HW_ID2, and AID_ID
-  // Thus, we combine values from multiple registers listed abot into a single dword HW_ID with
+  // Thus, we combine values from multiple registers listed above into a single dword HW_ID with
   // the following layout:
   // WAVE_ID[4:0]
   // QUEUE_ID[8:5]
@@ -997,11 +1018,8 @@
   v_mov_b32         v1, 1                                   // buf_written_valX
  
   // Perform atomic add and return previous value
-.if .amdgcn.gfx_generation_minor >= 5
-  global_atomic_add_u32 v0, v0, v1, ttmp[14:15], offset:SAMPLE_OFF_BUF_WRITTEN_VAL, scope:SCOPE_DEV th:TH_ATOMIC_RETURN
-.else
+  // Use SYSTEM scope to push through the GL2 cache.
   global_atomic_add_u32 v0, v0, v1, ttmp[14:15], offset:SAMPLE_OFF_BUF_WRITTEN_VAL, scope:SCOPE_SYS th:TH_ATOMIC_RETURN
-.endif
   s_wait_loadcnt    0
 
   // Check Watermark and Signal Host
@@ -1031,7 +1049,7 @@
 
   s_cbranch_scc1    .restore_vector_before_exit_trap        // Skip signaling if below/above watermark (ttmp4 != ttmp5 succeeds)
 
-  // Host signalling part when whatermark is reached
+  // Host signalling part when watermark is reached
 .send_signal:
   // v[0:3] = free, ttmp[2:5] = backups of original v[0:3]
   // ttmp[10:11] holds original shaders data
@@ -1183,11 +1201,11 @@
   // Zero out trap_id[3:0] and scratch bits (if any) from ttmp1.
   // Two cases worth noting:
   // 1. perf_snapshot stochastic trap SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT_SHIFT
-  //    and `s_trap NON_ZERO_TRAP_ID` occured simultaneously.
+  //    and `s_trap NON_ZERO_TRAP_ID` occurred simultaneously.
   //    In that case, we'll process a stochastic trap, remove the TRAP_ID here,
   //    and execute s_rfe. As the PC inside ttmp[1:0] is not advanced, the `s_trap NON_ZERO_TRAP_ID`
   //    will be re-executed and properly processed in the trap handler reentry.
-  // 2. host-trap occured - trap_id is zero for host-trap, so the following would clean only scratch bits.
+  // 2. host-trap occurred - trap_id is zero for host-trap, so the following would clean only scratch bits.
   s_and_b32         ttmp1, ttmp1, SQ_WAVE_PC_HI_ADDRESS_MASK
   s_load_b64        ttmp[14:15], ttmp[0:1], 0, scope:SCOPE_CU // Load the 2 instruction DW we are returning to
   s_wait_kmcnt      0
@@ -1259,11 +1277,13 @@
   s_cbranch_scc1    .fixup_three_dword                      // If VOPD3, 3 DWORD inst
  // Not VOP1, VOP2, VOPC, VOP3, VOP3SD, VOPD, or VOPD3.
  // Check if we are in the middle of VOP3PX.
+.if HAVE_VOP3PX_FIXUP
   s_and_b32         ttmp13, ttmp14, 0xffff0000              // Bits 31:16
   s_cmp_eq_u32      ttmp13, 0xcc330000                      // If 31:16 = 0xcc33, this is 8 bytes past VOP3PX
   s_cbranch_scc1    .fixup_vop3px_middle
   s_cmp_eq_u32      ttmp13, 0xcc880000                      // If 31:16 = 0xcc88, this is 8 bytes past VOP3PX
   s_cbranch_scc1    .fixup_vop3px_middle
+.endif
  // Might be in VOP3P, but we must ensure we are not VOP3PX2
   s_and_b32         ttmp13, ttmp14, 0xffff0000              // Bits 31:16
   s_cmp_eq_u32      ttmp13, 0xcc350000                      // If 31:16 = 0xcc35, this is VOP3PX2
@@ -1324,10 +1344,12 @@
   s_wait_kmcnt      0                                       // Wait for PC+2 and PC+3 to arrive in ttmp2 and ttmp3
   s_mov_b32         ttmp15, ttmp3                           // Move possible S_SET_VGPR_MSB into ttmp15
   s_branch          .fixup_one_dword                        // Go to common logic that checks if it is S_SET_VGPR_MSB
+.if HAVE_VOP3PX_FIXUP
 .fixup_vop3px_middle:
   s_sub_co_u32      ttmp0, ttmp0, 8                         // Rewind PC 8 bytes to beginning of instruction
   s_sub_co_ci_u32   ttmp1, ttmp1, 0
   s_branch          .fixup_two_dword                        // 2 DWORD inst (2nd half of a 4 DWORD inst)
+.endif
 .fixup_done:
 
   s_wait_idle                                               // Required by SPG before reading/writing XNACK_STATE_PRIV

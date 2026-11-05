@@ -52,6 +52,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include "common/base_rocr.h"
@@ -351,21 +352,57 @@ std::string LocateKernelFile(std::string filename, hsa_agent_t agent) {
     return obj_file;
   }
 
-  // Try ./<agent_name>/<filename>
-  obj_file = "./" + std::string(agent_name) + "/" + filename;
-  file_handle = open(obj_file.c_str(), O_RDONLY);
-  if (file_handle >= 0) {
-    close(file_handle);
+  // The executable directory is only needed for the ../share/rocrtst fallback,
+  // and GetExecutableDir() calls realpath("/proc/self/exe"), so compute it
+  // lazily on first use and cache it across lookups.
+  std::string exe_dir;
+  bool exe_dir_valid = false;
+
+  // Look for the kernel under a directory named after the device. Returns the
+  // matching path, or an empty string if not found.
+  auto try_device_dir = [&](const std::string& dev_name) -> std::string {
+    // Try ./<dev_name>/<filename>
+    std::string path = "./" + dev_name + "/" + filename;
+    int fh = open(path.c_str(), O_RDONLY);
+    if (fh >= 0) {
+      close(fh);
+      return path;
+    }
+    // Try <exe_dir>/../share/rocrtst/<dev_name>/<filename>
+    if (!exe_dir_valid) {
+      exe_dir = GetExecutableDir();
+      exe_dir_valid = true;
+    }
+    path = exe_dir + "/../share/rocrtst/" + dev_name + "/" + filename;
+    fh = open(path.c_str(), O_RDONLY);
+    if (fh >= 0) {
+      close(fh);
+      return path;
+    }
+    return std::string();
+  };
+
+  // Try the ISA name the runtime reports for this agent.
+  obj_file = try_device_dir(agent_name);
+  if (!obj_file.empty()) {
     return obj_file;
   }
 
-  // Try <exe_dir>/../share/rocrtst/<agent_name>/<filename>
-  std::string exe_dir = GetExecutableDir();
-  obj_file = exe_dir + "/../share/rocrtst/" + std::string(agent_name) + "/" + filename;
-  file_handle = open(obj_file.c_str(), O_RDONLY);
-  if (file_handle >= 0) {
-    close(file_handle);
-    return obj_file;
+  // On A0 silicon the runtime reports the "-strict" ISA variant (e.g.
+  // gfx1250-strict), but kernels are compiled and installed under the base
+  // device name (gfx1250). Both are the same ISA version, so the base-named
+  // objects load and run. Fall back to the base name with "-strict" removed.
+  // This only affects "-strict" names; every other device name is unchanged.
+  std::string base_name = agent_name;
+  const std::string kStrictSuffix = "-strict";
+  if (base_name.size() > kStrictSuffix.size() &&
+      base_name.compare(base_name.size() - kStrictSuffix.size(), kStrictSuffix.size(),
+                        kStrictSuffix) == 0) {
+    base_name.erase(base_name.size() - kStrictSuffix.size());
+    obj_file = try_device_dir(base_name);
+    if (!obj_file.empty()) {
+      return obj_file;
+    }
   }
 
   throw std::runtime_error("Could not open kernel file: " + filename);
@@ -720,5 +757,46 @@ hsa_status_t AllocAndSetKernArgs(BaseRocR* test, void* args, size_t arg_size) {
 }
 
 #undef RET_IF_HSA_UTILS_ERR
+
+uint64_t WriteBarrierAndToQueue(hsa_queue_t* queue, hsa_signal_t dependency,
+                                hsa_signal_t completion_signal) {
+  hsa_barrier_and_packet_t barrier = {};
+  barrier.dep_signal[0] = dependency;
+  barrier.completion_signal = completion_signal;
+
+  const uint64_t index = hsa_queue_add_write_index_scacq_screl(queue, 1);
+  while (index - hsa_queue_load_read_index_scacquire(queue) >= queue->size) {
+  }
+  auto* slot = reinterpret_cast<hsa_barrier_and_packet_t*>(queue->base_address) +
+               (index & (queue->size - 1));
+  // The packet processor may read the slot as soon as the header is valid, so the header goes last
+  memcpy(reinterpret_cast<uint8_t*>(slot) + sizeof(uint32_t),
+         reinterpret_cast<const uint8_t*>(&barrier) + sizeof(uint32_t),
+         sizeof(barrier) - sizeof(uint32_t));
+  const uint16_t header = (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
+                          (1 << HSA_PACKET_HEADER_BARRIER);
+  AtomicSetPacketHeader(header, 0, reinterpret_cast<hsa_kernel_dispatch_packet_t*>(slot));
+  return index;
+}
+
+hsa_amd_memory_pool_t FindExtendedFineGrainedPool(hsa_agent_t agent) {
+  hsa_amd_memory_pool_t found_pool = {0};
+  hsa_amd_agent_iterate_memory_pools(
+      agent,
+      [](hsa_amd_memory_pool_t pool, void* data) {
+        hsa_amd_segment_t segment;
+        uint32_t global_flags = 0;
+        hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
+        if (segment != HSA_AMD_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;
+        hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &global_flags);
+        if (!(global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED)) {
+          return HSA_STATUS_SUCCESS;
+        }
+        *static_cast<hsa_amd_memory_pool_t*>(data) = pool;
+        return HSA_STATUS_INFO_BREAK;
+      },
+      &found_pool);
+  return found_pool;
+}
 
 }  // namespace rocrtst

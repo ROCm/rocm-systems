@@ -1445,6 +1445,9 @@ enum class InstructionExecutionId : size_t {
   FlatAtomicMinF32Flat,
   FlatAtomicMaxF32Flat,
   FlatAtomicAddF32Flat,
+  GlobalLoadAddtidB32Flat,
+  GlobalStoreAddtidB32Flat,
+  GlobalAtomicCsubU32Flat,
   Count,
 };
 

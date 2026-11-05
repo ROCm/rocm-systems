@@ -38,7 +38,7 @@ memory_error_t::memory_error_t (
   amd_dbgapi_status_t code, const address_space_t &address_space,
   amd_dbgapi_segment_address_t segment_address, std::string message)
   : api_error_t (code, message),
-    m_address (std::make_pair (std::cref (address_space), segment_address))
+    m_address (std::make_pair (&address_space, segment_address))
 {
 }
 

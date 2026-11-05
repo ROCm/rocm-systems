@@ -19,7 +19,7 @@ void RegisterSymbols::add(int bar, uint64_t byte_offset, std::string name) {
 }
 
 void RegisterSymbols::add_dword(int bar, uint64_t dword_index, std::string name) {
-  add(bar, dword_index * 4, std::move(name));
+  add(bar, byte_offset_of_dword(dword_index), std::move(name));
 }
 
 std::string_view RegisterSymbols::lookup(int bar, uint64_t byte_offset) const {

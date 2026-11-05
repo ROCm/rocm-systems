@@ -20,10 +20,12 @@ junits/
 /plugins/net/ib_sharp/build/
 /plugins/net/example/*.so
 /plugins/mixed/example/*.so
+/plugins/tuner/model_demo/*.so
 /plugins/net/mock/*.so
 tags
 *.swp
 .cache/
+*.log
 
 # Visual Studio Code
 .vscode
@@ -43,3 +45,4 @@ examples/**/rmsnorm_lsa
 examples/**/rmsnorm_multimem
 examples/**/rmsnorm_gin
 examples/**/rmsnorm_hybrid
+docs/examples/**/ring_exchange

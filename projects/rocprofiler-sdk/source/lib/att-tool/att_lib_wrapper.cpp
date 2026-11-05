@@ -127,7 +127,8 @@ get_shader_id(const std::string& name)
 ATTDecoder::ATTDecoder(const std::string& path)
 {
     auto status = rocprofiler_thread_trace_decoder_create(&decoder, path.c_str());
-    ROCP_FATAL_IF(status != ROCPROFILER_STATUS_SUCCESS) << "Error loading decoder: " << status;
+    ROCP_FATAL_IF(status != ROCPROFILER_STATUS_SUCCESS)
+        << "Error loading decoder (status " << status << ") from library path '" << path << "'";
 };
 
 ATTDecoder::~ATTDecoder() { rocprofiler_thread_trace_decoder_destroy(decoder); }

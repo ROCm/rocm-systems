@@ -109,7 +109,7 @@ struct Fixture {
     Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr) << "decode failed for " << expect_mnemonic;
     EXPECT_EQ(inst->mnemonic(), expect_mnemonic) << "decoded wrong op";
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     delete inst;
   }
 

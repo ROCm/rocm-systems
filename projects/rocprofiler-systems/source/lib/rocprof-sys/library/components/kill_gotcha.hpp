@@ -26,8 +26,8 @@ struct kill_gotcha : tim::component::base<kill_gotcha, void>
 
     static void configure();
 
-    static inline void start() {}
-    static inline void stop() {}
+    static void start() {}
+    static void stop() {}
 
     int operator()(const gotcha_data&, kill_func_t, pid_t, int) const;
 };

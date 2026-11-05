@@ -578,6 +578,10 @@ hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
     KernelCode& kernel = kernels_[kernel_name.first];
     gpuAgent->AssembleShader(kernel_name.second, AMD::GpuAgent::AssembleTarget::AQL, kernel.code_buf_,
                             kernel.code_buf_size_);
+    // Publish the code object the same way RegionMemory::Freeze() does.
+    gpuAgent->PcieWcFlush(kernel.code_buf_, kernel.code_buf_size_);
+    const_cast<AMD::GpuAgent*>(gpuAgent)->InvalidateCodeCaches(kernel.code_buf_,
+                                                               kernel.code_buf_size_);
   }
 
   if (agent_->profiling_enabled()) {
@@ -919,7 +923,7 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
   std::atomic_thread_fence(std::memory_order_release);
   if (queue_->IsDeviceMemRingBuf() && queue_->needsPcieOrdering()) {
     // Ensure the packet body is written as header may get reordered when writing over PCIE
-    _mm_sfence();
+    store_fence();
   }
 #if defined(__linux__)
   __atomic_store_n(&(queue_buffer[index & queue_bitmask_].full_header),

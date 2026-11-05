@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 """Unit tests for utils.parser.build_dfs, apply_filters, apply_kernel_filter,
-load_pc_sampling_data, utils_analysis filter resolution, and
+load_pc_sampling_data, correct_sys_info, utils_analysis filter resolution, and
 utils_common.expand_placeholder_ranges."""
 
 from collections import OrderedDict
@@ -19,8 +19,10 @@ from utils.parser import (
     apply_filters,
     apply_kernel_filter,
     build_dfs,
+    correct_sys_info,
     load_pc_sampling_data,
 )
+from utils.specs import MachineSpecsCDNA
 from utils.utils_common import (
     convert_filter_blocks_to_panel_ids,
     expand_placeholder_ranges,
@@ -70,6 +72,24 @@ def _make_arch_config(panels: list[tuple[int, dict[str, Any]]]) -> schema.ArchCo
 
 def _sys_info() -> dict[str, Any]:
     return {"total_l2_chan": 4}
+
+
+def make_mi350_machine_specs(monkeypatch: pytest.MonkeyPatch) -> MachineSpecsCDNA:
+    """MI350 (gfx950) specs, trimmed to the fields the correction tests assert.
+
+    get_class_members() warns once per spec left unset, so the warning is
+    silenced here instead of populating every field to keep the output quiet.
+    """
+    common.patch_console(monkeypatch, "utils.specs", "warning")
+    return MachineSpecsCDNA(
+        command="./tests/vcopy -n 1048576 -b 256 -i 3",
+        ip_blocks="SQ|LDS|SQC|TA|TD|TCP|TCC|SPI|CPC|CPF|roofline",
+        gpu_model="MI350",
+        gpu_arch="gfx950",
+        cu_per_gpu="256",
+        total_l2_chan="128",
+        num_xcd="8",
+    )
 
 
 # =============================================================================
@@ -271,7 +291,7 @@ class TestBuildDfs:
         assert list(ac.dfs[201]["Metric"]) == ["M1"]
         assert list(ac.dfs[1101]["Metric"]) == ["X1"]
 
-    def test_metric_counters_only_for_built_metrics(self):
+    def test_expressions_only_for_built_metrics(self):
         ac = _make_arch_config([
             (
                 200,
@@ -289,10 +309,84 @@ class TestBuildDfs:
             ac, filter_metrics=["2.1.0"], sys_info=_sys_info(), profiling_config={}
         )
 
-        assert "Kept" in ac.metric_counters
-        assert "Dropped" not in ac.metric_counters
-        assert ac.metric_counters["Kept"] == ["COUNTER_KEPT"]
         assert ac.dfs_expressions[201] == ["AVG(COUNTER_KEPT)"]
+
+    @pytest.mark.parametrize(
+        "profiling_config,expected_table_ids",
+        [
+            pytest.param({"membw_analysis": True}, {201, 3001}, id="collected"),
+            pytest.param({"membw_analysis": False}, {201}, id="not_collected"),
+            pytest.param({}, {201}, id="absent_from_config"),
+        ],
+    )
+    def test_block_30_built_only_when_membw_analysis_collected(
+        self, profiling_config, expected_table_ids
+    ):
+        ac = _make_arch_config([
+            (200, _metric_panel(200, 201, metrics={"M1": {"value": "AVG(COUNTER_A)"}})),
+            (
+                3000,
+                _metric_panel(3000, 3001, metrics={"BW": {"value": "AVG(TCC_HIT)"}}),
+            ),
+        ])
+        build_dfs(
+            ac,
+            filter_metrics=None,
+            sys_info=_sys_info(),
+            profiling_config=profiling_config,
+        )
+
+        assert set(ac.dfs.keys()) == expected_table_ids
+
+    def test_filter_block_3_does_not_auto_include_block_30(self):
+        ac = _make_arch_config([
+            (300, _metric_panel(300, 301, metrics={"MC": {"value": "AVG(MEM)"}})),
+            (3000, _metric_panel(3000, 3001, metrics={"BW": {"value": "AVG(TCC)"}})),
+        ])
+        build_dfs(
+            ac,
+            filter_metrics=["3"],
+            sys_info=_sys_info(),
+            profiling_config={"membw_analysis": True},
+        )
+
+        assert 301 in ac.dfs
+        assert 3001 not in ac.dfs
+
+    def test_no_auto_inject_when_filter_excludes_block_3(self):
+        ac = _make_arch_config([
+            (200, _metric_panel(200, 201, metrics={"M1": {"value": "AVG(COUNTER_A)"}})),
+            (3000, _metric_panel(3000, 3001, metrics={"BW": {"value": "AVG(TCC)"}})),
+        ])
+        build_dfs(
+            ac,
+            filter_metrics=["2"],
+            sys_info=_sys_info(),
+            profiling_config={"membw_analysis": True},
+        )
+
+        assert 201 in ac.dfs
+        assert 3001 not in ac.dfs
+
+    def test_alias_filter_does_not_auto_include_block_30(self, monkeypatch):
+        monkeypatch.setattr(
+            "utils.utils_common.get_arch_alias_to_panel_id",
+            lambda arch: {"memchart": "3"},
+        )
+        ac = _make_arch_config([
+            (300, _metric_panel(300, 301, metrics={"MC": {"value": "AVG(MEM)"}})),
+            (3000, _metric_panel(3000, 3001, metrics={"BW": {"value": "AVG(TCC)"}})),
+        ])
+        build_dfs(
+            ac,
+            filter_metrics=["memchart"],
+            sys_info=_sys_info(),
+            profiling_config={"membw_analysis": True},
+            arch="gfx950",
+        )
+
+        assert 301 in ac.dfs
+        assert 3001 not in ac.dfs
 
 
 # =============================================================================
@@ -333,6 +427,23 @@ class TestExpandPlaceholderRanges:
         with pytest.raises(SystemExit):
             expand_placeholder_ranges(configs, _sys_info())
 
+    def test_key_prefix_with_space_survives_expansion(self):
+        """
+        Panel 18 labels its rows "Channel 0", "Channel 1", ... by carrying
+        the literal prefix on the placeholder key. Only the placeholder token
+        is substituted; the space-bearing prefix must come through intact."""
+        metrics: dict[str, Any] = {
+            "Channel ::_1": {"expr": "AVG(TCC_HIT[::_1])"},
+            "placeholder_range": {"::_1": "$total_l2_chan"},
+        }
+        configs = OrderedDict([(1800, _metric_panel(1800, 1802, metrics=metrics))])
+
+        result = expand_placeholder_ranges(configs, {"total_l2_chan": 3})
+
+        expanded = result[1800]["data source"][0]["metric_table"]["metric"]
+        assert list(expanded) == ["Channel 0", "Channel 1", "Channel 2"]
+        assert expanded["Channel 2"] == {"expr": "AVG(TCC_HIT[2])"}
+
     def test_none_sys_info_clears_metric_dict(self):
         configs = _placeholder_panel(3)
         result = expand_placeholder_ranges(configs, None)
@@ -349,15 +460,32 @@ class TestExpandPlaceholderRanges:
 def _filter_workload() -> SimpleNamespace:
     """Workload stub exposing raw_pmc and filter attributes for apply_filters."""
     return SimpleNamespace(
+        dfs={
+            1: pd.DataFrame({
+                "Kernel_Name": ["vecCopy", "vecAdd", "vecMul"],
+                "Selected": ["", "", ""],
+            })
+        },
         raw_pmc=pd.DataFrame({
             "GPU_ID": [0, 0, 1, 1],
             "Kernel_Name": ["vecCopy", "vecAdd", "vecCopy", "vecMul"],
-            "Dispatch_ID": [0, 1, 2, 3],
+            "Dispatch_ID": [1, 2, 3, 4],
         }),
         filter_gpu_ids=None,
         filter_kernel_ids=None,
         filter_dispatch_ids=None,
     )
+
+
+def record_and_exit_stub():
+    """Return a calls list and a stub that records its args, then raises SystemExit."""
+    calls = []
+
+    def stub(*args, **_kwargs):
+        calls.append(args)
+        raise SystemExit(1)
+
+    return calls, stub
 
 
 def _kernel_filter_workload() -> SimpleNamespace:
@@ -397,25 +525,193 @@ class TestApplyFilters:
         """A string GPU filter keeps only matching rows."""
         workload = _filter_workload()
         workload.filter_gpu_ids = "0"
-        assert len(apply_filters(workload, "/tmp", False, False)) == 2
-
-    def test_kernel_name_filter(self) -> None:
-        """A kernel-name filter keeps only matching rows."""
-        workload = _filter_workload()
-        workload.filter_kernel_ids = ["vecCopy"]
-        assert len(apply_filters(workload, "/tmp", False, False)) == 2
+        assert len(apply_filters(workload, False)) == 2
 
     def test_dispatch_id_filter(self) -> None:
         """A dispatch-ID filter keeps only matching rows."""
         workload = _filter_workload()
-        workload.filter_dispatch_ids = ["0", "1"]
-        assert len(apply_filters(workload, "/tmp", False, False)) == 2
+        workload.filter_dispatch_ids = ["1", "2"]
+        filtered = apply_filters(workload, False)
+        assert list(filtered["Dispatch_ID"]) == [1, 2]
+        assert list(filtered["Kernel_Name"]) == ["vecCopy", "vecAdd"]
+
+    def test_dispatch_id_filter_matches_column_not_row_label(self) -> None:
+        """A dispatch-ID filter reads the column even when the index disagrees."""
+        workload = _filter_workload()
+        workload.raw_pmc.index = [30, 31, 32, 33]
+        workload.filter_dispatch_ids = ["2"]
+        filtered = apply_filters(workload, False)
+        assert list(filtered["Dispatch_ID"]) == [2]
+        assert list(filtered["Kernel_Name"]) == ["vecAdd"]
+
+    def test_unknown_dispatch_id_errors(self, monkeypatch) -> None:
+        """Dispatch 0 and other IDs absent from the column exit with a range hint."""
+        error_calls, record_and_exit = record_and_exit_stub()
+        common.patch_console(
+            monkeypatch, "utils.parser", "error", error=record_and_exit
+        )
+        workload = _filter_workload()
+        workload.filter_dispatch_ids = ["0"]
+        with pytest.raises(SystemExit):
+            apply_filters(workload, False)
+        assert "0 is an invalid dispatch id" in str(error_calls[0])
+        assert "from 1 to 4" in str(error_calls[0])
+
+    def test_dispatch_greater_than_zero_keeps_all(self) -> None:
+        """'> 0' skips nothing and keeps every dispatch."""
+        workload = _filter_workload()
+        workload.filter_dispatch_ids = [">0"]
+        filtered = apply_filters(workload, False)
+        assert list(filtered["Dispatch_ID"]) == [1, 2, 3, 4]
+
+    def test_dispatch_greater_than_dispatch_count_keeps_none(self) -> None:
+        """'> n' where n is the number of dispatches skips all of them."""
+        workload = _filter_workload()
+        workload.filter_dispatch_ids = [">4"]
+        assert apply_filters(workload, False).empty
+
+    def test_dispatch_greater_than_threshold_keeps_sparse_ids(self) -> None:
+        """'> n' compares against dispatch ids, not the dispatch count."""
+        workload = _filter_workload()
+        workload.raw_pmc = pd.DataFrame({
+            "GPU_ID": [0, 0],
+            "Kernel_Name": ["vecCopy", "vecAdd"],
+            "Dispatch_ID": [1, 6],
+        })
+        workload.filter_dispatch_ids = [">4"]
+        filtered = apply_filters(workload, False)
+        assert list(filtered["Dispatch_ID"]) == [6]
+
+    def test_dispatch_greater_than_highest_id_errors(self, monkeypatch) -> None:
+        """'> n' past the highest dispatch id exits with a range hint."""
+        error_calls, record_and_exit = record_and_exit_stub()
+        common.patch_console(
+            monkeypatch, "utils.parser", "error", error=record_and_exit
+        )
+        workload = _filter_workload()
+        workload.filter_dispatch_ids = [">5"]
+        with pytest.raises(SystemExit):
+            apply_filters(workload, False)
+        assert ">5 is an invalid dispatch id" in str(error_calls[0])
+        assert "from 1 to 4" in str(error_calls[0])
+
+    def test_dispatch_filter_without_dispatches_errors(self, monkeypatch) -> None:
+        """A dispatch filter on a workload with no dispatches exits."""
+        error_calls, record_and_exit = record_and_exit_stub()
+        common.patch_console(
+            monkeypatch, "utils.parser", "error", error=record_and_exit
+        )
+        workload = _filter_workload()
+        workload.raw_pmc = workload.raw_pmc.iloc[0:0]
+        workload.filter_dispatch_ids = [">0"]
+        with pytest.raises(SystemExit):
+            apply_filters(workload, False)
+        assert "This workload has no dispatches." in str(error_calls[0])
 
     def test_gpu_integer_list_filter(self) -> None:
         """A GPU filter given as a list of integers keeps all matching rows."""
         workload = _filter_workload()
         workload.filter_gpu_ids = [0, 1]
-        assert len(apply_filters(workload, "/tmp", False, False)) == 4
+        assert len(apply_filters(workload, False)) == 4
+
+    @pytest.mark.parametrize("dispatch_id", ["2", ">2"])
+    def test_combined_filters_keep_kernel_scoped_dispatch_error(
+        self, monkeypatch, dispatch_id
+    ) -> None:
+        error_calls, record_and_exit = record_and_exit_stub()
+        common.patch_console(
+            monkeypatch, "utils.parser", "error", error=record_and_exit
+        )
+        workload = _filter_workload()
+        workload.filter_gpu_ids = "0"
+        workload.filter_kernel_ids = [0]
+        workload.filter_dispatch_ids = [dispatch_id]
+
+        with pytest.raises(SystemExit):
+            apply_filters(workload, False)
+
+        assert error_calls == [
+            (
+                "analysis",
+                f"{dispatch_id} is an invalid dispatch id. "
+                "Dispatch ids run from 1 to 1.",
+            )
+        ]
+
+    @pytest.mark.parametrize(
+        "gpu_ids,dispatch_ids,kernel_ids,expected_rows,expected_index",
+        [
+            (
+                None,
+                None,
+                None,
+                [
+                    (0, "vecCopy", 1),
+                    (0, "vecAdd", 2),
+                    (1, "vecCopy", 3),
+                    (1, "vecMul", 4),
+                ],
+                [0, 1, 2, 3],
+            ),
+            (
+                "0",
+                None,
+                None,
+                [(0, "vecCopy", 1), (0, "vecAdd", 2)],
+                [0, 1],
+            ),
+            (
+                None,
+                ["1", "3"],
+                None,
+                [(0, "vecCopy", 1), (1, "vecCopy", 3)],
+                [0, 2],
+            ),
+            (
+                None,
+                None,
+                [0],
+                [(0, "vecCopy", 1), (1, "vecCopy", 3)],
+                [0, 2],
+            ),
+            (
+                "0",
+                ["1"],
+                [0],
+                [(0, "vecCopy", 1)],
+                [0],
+            ),
+            (
+                [0, 1],
+                ["1", "3"],
+                [0],
+                [(0, "vecCopy", 1), (1, "vecCopy", 3)],
+                [0, 2],
+            ),
+        ],
+    )
+    def test_apply_filters_matches_expected_rows(
+        self,
+        gpu_ids,
+        dispatch_ids,
+        kernel_ids,
+        expected_rows,
+        expected_index,
+    ) -> None:
+        workload = _filter_workload()
+        workload.filter_gpu_ids = gpu_ids
+        workload.filter_dispatch_ids = dispatch_ids
+        workload.filter_kernel_ids = kernel_ids
+
+        filtered = apply_filters(workload, False)
+        columns = ["GPU_ID", "Kernel_Name", "Dispatch_ID"]
+        expected = pd.DataFrame(
+            expected_rows,
+            columns=columns,
+            index=expected_index,
+        )
+
+        pd.testing.assert_frame_equal(filtered, expected)
 
 
 class TestApplyKernelFilter:
@@ -438,43 +734,13 @@ class TestApplyKernelFilter:
         result_df = apply_kernel_filter(_flat_raw_df(), workload)
         assert len(result_df) == 3
 
-    def test_invalid_id_errors(self, monkeypatch) -> None:
-        """An out-of-bounds kernel ID triggers console_error and exits."""
-        error_calls = []
-
-        def record_and_exit(*args, **_kwargs):
-            error_calls.append(args)
-            raise SystemExit(1)
-
-        common.patch_console(
-            monkeypatch, "utils.parser", "error", error=record_and_exit
-        )
+    @pytest.mark.parametrize("kernel_id", [99, -1])
+    def test_invalid_id_errors(self, kernel_id) -> None:
+        """An out-of-range kernel ID exits instead of indexing the top stats table."""
         workload = _kernel_filter_workload()
-        workload.filter_kernel_ids = [99]
+        workload.filter_kernel_ids = [kernel_id]
         with pytest.raises(SystemExit):
             apply_kernel_filter(_flat_raw_df(), workload)
-        assert error_calls
-        assert "99" in str(error_calls[0])
-
-    def test_exact_name_match(self) -> None:
-        """A string kernel name filters to the exact match."""
-        workload = _kernel_filter_workload()
-        workload.filter_kernel_ids = ["kernel_b"]
-        result_df = apply_kernel_filter(_flat_raw_df(), workload)
-        assert len(result_df) == 1
-        assert result_df["Kernel_Name"].iloc[0] == "kernel_b"
-
-    def test_name_match_strips_whitespace(self) -> None:
-        """Kernel names with surrounding whitespace are stripped before matching."""
-        raw_df_with_whitespace = pd.DataFrame({
-            "Kernel_Name": [" kernel_a ", "kernel_b", "kernel_a"],
-            "GPU_ID": [0, 0, 1],
-            "Dispatch_ID": [1, 2, 3],
-        })
-        workload = _kernel_filter_workload()
-        workload.filter_kernel_ids = ["kernel_a"]
-        result_df = apply_kernel_filter(raw_df_with_whitespace, workload)
-        assert len(result_df) == 2
 
 
 # =============================================================================
@@ -543,7 +809,6 @@ H2 = "nn.Module.Net.forward/torch.nn.functional.conv2d"
 H1 = "torch.relu"
 
 
-@pytest.mark.torch_ops
 def test_all_keyword():
     """'all' maps to '**' and matches every hierarchy."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -554,7 +819,6 @@ def test_all_keyword():
     assert not m("all", "")
 
 
-@pytest.mark.torch_ops
 def test_bare_pattern_requires_exact_match():
     """A pattern without wildcards matches only when equal to the full target."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -567,7 +831,6 @@ def test_bare_pattern_requires_exact_match():
     assert not m("sigmoid", H3)
 
 
-@pytest.mark.torch_ops
 def test_substring_wildcard_pattern():
     """``*`` matches any run of characters, including ``/``."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -581,7 +844,6 @@ def test_substring_wildcard_pattern():
     assert not m("sigm*", H3)
 
 
-@pytest.mark.torch_ops
 def test_hierarchy_glob():
     """Patterns with '/' match across multiple hierarchy components."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -591,7 +853,6 @@ def test_hierarchy_glob():
     assert not m("nn.Module.Net.forward/torch.relu", H3)
 
 
-@pytest.mark.torch_ops
 def test_leading_slash_is_cosmetic():
     """A leading ``/`` in the pattern is stripped before matching."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -600,7 +861,6 @@ def test_leading_slash_is_cosmetic():
     assert m("/torch.relu", H1)
 
 
-@pytest.mark.torch_ops
 def test_trailing_slash_is_cosmetic():
     """A trailing ``/`` in the pattern is stripped before matching."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -609,7 +869,6 @@ def test_trailing_slash_is_cosmetic():
     assert m("torch.relu/", H1)
 
 
-@pytest.mark.torch_ops
 def test_regex_not_supported():
     """Regex syntax has no special meaning; treated as literal glob text."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -620,7 +879,6 @@ def test_regex_not_supported():
     assert not m("2:functional", H3)
 
 
-@pytest.mark.torch_ops
 def test_empty_inputs():
     """Empty pattern or operator_name returns False."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -630,7 +888,6 @@ def test_empty_inputs():
     assert not m("", "")
 
 
-@pytest.mark.torch_ops
 def test_slash_only_markers():
     """Scope-marker-only tokens should not match any hierarchy."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -639,89 +896,9 @@ def test_slash_only_markers():
     assert not m("//", H3)
 
 
-# -- get_matched_torch_operators_for_display ---------------------------------
-
-
-def get_matched_torch_operators_for_display(
-    torch_operators: dict[str, pd.DataFrame],
-    pattern_list: list[str],
-) -> list[tuple[str, pd.DataFrame]]:
-    """Return (operator_name, filtered_df) for each operator matching any pattern.
-
-    Test-only helper: iterates every unique Operator_Name across all torch trace
-    DataFrames and checks each against the supplied glob patterns.
-    """
-    from utils.parser import torch_operator_pattern_matches
-
-    if not torch_operators or not pattern_list:
-        return []
-    result: list[tuple[str, pd.DataFrame]] = []
-    seen: set[str] = set()
-    for _, df in torch_operators.items():
-        if df is None or df.empty or "Operator_Name" not in df.columns:
-            continue
-        for op_name in df["Operator_Name"].dropna().unique():
-            op_str = str(op_name).strip()
-            if op_str in seen:
-                continue
-            for pattern in pattern_list:
-                if torch_operator_pattern_matches(pattern.strip(), op_str):
-                    seen.add(op_str)
-                    result.append((op_str, df.loc[df["Operator_Name"] == op_name]))
-                    break
-    return result
-
-
-@pytest.mark.torch_ops
-def test_display_match_hierarchy_glob():
-    """Full hierarchy globs are honored by display helper."""
-    df = pd.DataFrame({
-        "Operator_Name": [H3, H3, H2],
-        "Kernel_Name": ["k1", "k2", "k3"],
-    })
-    torch_operators = {"trace_0": df}
-
-    matched = get_matched_torch_operators_for_display(torch_operators, ["*/torch.relu"])
-    assert len(matched) == 1
-    assert matched[0][0] == H3
-
-
-@pytest.mark.torch_ops
-def test_display_match_multi_patterns():
-    """Multiple glob patterns match their respective operators."""
-    df = pd.DataFrame({
-        "Operator_Name": [H3, H2],
-        "Kernel_Name": ["k1", "k2"],
-    })
-    torch_operators = {"trace_0": df}
-
-    matched = get_matched_torch_operators_for_display(
-        torch_operators, ["*relu", "*conv*"]
-    )
-    assert len(matched) == 2
-
-
-@pytest.mark.torch_ops
-def test_display_no_match():
-    """No matches returns empty list."""
-    df = pd.DataFrame({
-        "Operator_Name": [H3],
-        "Kernel_Name": ["k1"],
-    })
-    assert get_matched_torch_operators_for_display({"t": df}, ["sigmoid"]) == []
-
-
-@pytest.mark.torch_ops
-def test_display_empty_inputs():
-    """Empty torch_operators or pattern_list returns []."""
-    assert get_matched_torch_operators_for_display({}, ["relu"]) == []
-    assert get_matched_torch_operators_for_display({"x": pd.DataFrame()}, []) == []
-
-
 # -- Additional coverage (xuchen #26) ----------------------------------------
 
 
-@pytest.mark.torch_ops
 def test_double_star_explicit():
     """'**' matches any hierarchy depth."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -733,7 +910,6 @@ def test_double_star_explicit():
     assert not m("**", "")
 
 
-@pytest.mark.torch_ops
 def test_single_char_wildcard():
     """``?`` matches exactly one character."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -745,7 +921,6 @@ def test_single_char_wildcard():
     assert m("*torch.nn.functional.conv?d", H2)
 
 
-@pytest.mark.torch_ops
 def test_long_hierarchy():
     """Patterns apply to deeply nested hierarchies."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -759,7 +934,6 @@ def test_long_hierarchy():
     assert m("*level0*", deep)
 
 
-@pytest.mark.torch_ops
 def test_long_component_names():
     """Patterns apply to components with long names."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -772,7 +946,6 @@ def test_long_component_names():
     assert not m("b*", hierarchy)
 
 
-@pytest.mark.torch_ops
 def test_special_characters_in_names():
     """Dots and underscores are treated literally."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -784,7 +957,6 @@ def test_special_characters_in_names():
     assert not m("nn_Module._internal/*", h)
 
 
-@pytest.mark.torch_ops
 def test_bracket_glob_pattern():
     """Character classes ``[abc]`` are supported."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -793,7 +965,6 @@ def test_bracket_glob_pattern():
     assert not m("*torch.rel[ab]", H3)
 
 
-@pytest.mark.torch_ops
 def test_single_component_hierarchy():
     """A single-component target matches an equal bare pattern."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -804,7 +975,6 @@ def test_single_component_hierarchy():
     assert not m("*/torch.relu", "torch.relu")
 
 
-@pytest.mark.torch_ops
 def test_whitespace_only_pattern():
     """Whitespace-only patterns normalize to empty and return False."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -813,7 +983,6 @@ def test_whitespace_only_pattern():
     assert not m("\t", H3)
 
 
-@pytest.mark.torch_ops
 def test_star_pattern_matches_all():
     """``*`` matches any non-empty target."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -825,7 +994,6 @@ def test_star_pattern_matches_all():
     assert not m("*", "")
 
 
-@pytest.mark.torch_ops
 def test_star_normalize_equivalence():
     """``"all"`` and ``"*"`` both match any non-empty target."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -834,7 +1002,6 @@ def test_star_normalize_equivalence():
     assert m("*", H3)
 
 
-@pytest.mark.torch_ops
 def test_case_sensitivity():
     """Pattern matching is case-sensitive."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -845,7 +1012,6 @@ def test_case_sensitivity():
     assert m("all", H3)
 
 
-@pytest.mark.torch_ops
 def test_all_keyword_case_sensitive():
     """The ``"all"`` alias is case-sensitive; other casings are literal."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -855,7 +1021,6 @@ def test_all_keyword_case_sensitive():
     assert not m("All", H3)
 
 
-@pytest.mark.torch_ops
 def test_consecutive_slashes_in_target():
     """Consecutive slashes in the target are treated literally."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -865,7 +1030,6 @@ def test_consecutive_slashes_in_target():
     assert m("*relu", h)
 
 
-@pytest.mark.torch_ops
 def test_dots_in_patterns():
     """Dots are treated literally, not as regex wildcards."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -877,7 +1041,6 @@ def test_dots_in_patterns():
     assert m("*torchXrelu", h)
 
 
-@pytest.mark.torch_ops
 def test_pattern_with_spaces():
     """Spaces are treated literally."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -888,7 +1051,6 @@ def test_pattern_with_spaces():
     assert m("* spaced op */*", h)
 
 
-@pytest.mark.torch_ops
 def test_colons_in_operator_names():
     """Colons are treated literally."""
     from utils.parser import torch_operator_pattern_matches as m
@@ -901,26 +1063,84 @@ def test_colons_in_operator_names():
     assert not m("*torch.relu", h)
 
 
-@pytest.mark.torch_ops
-def test_display_star_matches_all_operators():
-    """'*' pattern matches all operators in display helper."""
-    df = pd.DataFrame({
-        "Operator_Name": [H3, H2],
-        "Kernel_Name": ["k1", "k2"],
-    })
-    torch_operators = {"trace_0": df}
-
-    matched = get_matched_torch_operators_for_display(torch_operators, ["*"])
-    assert len(matched) == 2
+# =============================================================================
+# Tests for correct_sys_info (analyze --specs-correction)
+# =============================================================================
 
 
-@pytest.mark.torch_ops
-def test_display_dedup_across_dataframes():
-    """Same operator in multiple DataFrames is matched only once."""
-    df1 = pd.DataFrame({"Operator_Name": [H3], "Kernel_Name": ["k1"]})
-    df2 = pd.DataFrame({"Operator_Name": [H3], "Kernel_Name": ["k2"]})
-    torch_operators = {"trace_0": df1, "trace_1": df2}
+class TestCorrectSysInfo:
+    """--specs-correction parsing, spec overrides, and error handling."""
 
-    matched = get_matched_torch_operators_for_display(torch_operators, ["all"])
-    op_names = [name for name, _ in matched]
-    assert op_names.count(H3) == 1
+    def test_single_pair_overrides_spec(self, monkeypatch) -> None:
+        """One name:value pair updates the spec object and the returned frame."""
+        mspec = make_mi350_machine_specs(monkeypatch)
+        sys_info = correct_sys_info(mspec, "num_xcd:4")
+
+        assert mspec.num_xcd == "4"
+        assert len(sys_info) == 1
+        assert sys_info["num_xcd"].item() == "4"
+
+    def test_multiple_pairs_override_every_spec(self, monkeypatch) -> None:
+        """Comma-separated pairs are all applied."""
+        mspec = make_mi350_machine_specs(monkeypatch)
+        sys_info = correct_sys_info(mspec, "num_xcd:4,cu_per_gpu:64")
+
+        assert sys_info["num_xcd"].item() == "4"
+        assert sys_info["cu_per_gpu"].item() == "64"
+
+    def test_surrounding_whitespace_is_stripped(self, monkeypatch) -> None:
+        """Spaces around names and values do not break the override."""
+        sys_info = correct_sys_info(
+            make_mi350_machine_specs(monkeypatch), " num_xcd : 4 , cu_per_gpu:64 "
+        )
+
+        assert sys_info["num_xcd"].item() == "4"
+        assert sys_info["cu_per_gpu"].item() == "64"
+
+    def test_untouched_specs_are_preserved(self, monkeypatch) -> None:
+        """
+        Specs that were not corrected survive the rebuild of sys_info.
+
+        analysis_base.initalize_runs() reads sys_info["ip_blocks"] straight
+        after the correction, so dropping columns here would break analysis.
+        """
+        sys_info = correct_sys_info(make_mi350_machine_specs(monkeypatch), "num_xcd:4")
+
+        assert sys_info["ip_blocks"].item().startswith("SQ|LDS|")
+        assert sys_info["gpu_arch"].item() == "gfx950"
+        assert sys_info["gpu_model"].item() == "MI350"
+        assert sys_info["total_l2_chan"].item() == "128"
+
+    def test_fragment_without_separator_is_ignored(self, monkeypatch) -> None:
+        """A fragment with no ':' is skipped; valid pairs still apply."""
+        mspec = make_mi350_machine_specs(monkeypatch)
+        sys_info = correct_sys_info(mspec, "num_xcd:4,garbage")
+
+        assert sys_info["num_xcd"].item() == "4"
+        assert sys_info["cu_per_gpu"].item() == "256"
+
+    def test_value_keeps_everything_after_the_first_colon(self, monkeypatch) -> None:
+        """Only the first ':' separates name from value."""
+        sys_info = correct_sys_info(
+            make_mi350_machine_specs(monkeypatch), "command:./vcopy -n 1:2"
+        )
+
+        assert sys_info["command"].item() == "./vcopy -n 1:2"
+
+    def test_unknown_spec_name_errors_and_exits(self, monkeypatch) -> None:
+        """An unknown spec name reports the name and aborts."""
+        error_calls = []
+
+        def record_and_exit(*args, **_kwargs):
+            error_calls.append(args)
+            raise SystemExit(1)
+
+        common.patch_console(
+            monkeypatch, "utils.parser", "error", error=record_and_exit
+        )
+
+        with pytest.raises(SystemExit):
+            correct_sys_info(make_mi350_machine_specs(monkeypatch), "not_a_spec:1")
+
+        assert "not_a_spec" in str(error_calls[0])
+        assert "--specs" in str(error_calls[0])

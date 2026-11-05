@@ -11,6 +11,8 @@ changed lines of each affected file, then prints which files/lines were
 checked and which clang-tidy checks fired (with locations and messages).
 """
 
+from __future__ import annotations
+
 import argparse
 import concurrent.futures
 import os
@@ -368,6 +370,11 @@ def parse_args() -> argparse.Namespace:
             "staged/unstaged changes on top."
         ),
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print pre-existing issues outside the diff (default: suppress)",
+    )
     return parser.parse_args()
 
 
@@ -421,9 +428,10 @@ def main() -> int:
                     target.setdefault(check_name, []).append(diagnostic)
 
     print_rule_diagnostics("Detected clang-tidy rules (in this diff):", rule_diagnostics)
-    print_rule_diagnostics(
-        "Pre-existing issues (outside this diff):", preexisting_rule_diagnostics
-    )
+    if args.verbose:
+        print_rule_diagnostics(
+            "Pre-existing issues (outside this diff):", preexisting_rule_diagnostics
+        )
     print_timed_out_files(timed_out_files, args.timeout)
 
     return 1 if rule_diagnostics or timed_out_files else 0

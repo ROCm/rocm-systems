@@ -11,11 +11,17 @@ configuring the profiler for common workload scenarios. Instead of manually
 setting numerous environment variables, use a single ``--preset`` flag or
 combine domain flags for composable configuration.
 
+.. _using-preset-profiles-quick-start:
+
 Quick start
 ===========
 
-The following example runs are using the ``rocprof-sys-run`` tool.
-All of the examples should and will produce the same output when running with ``rocprof-sys-sample`` tool also.
+The following example runs use the ``rocprof-sys-run`` tool.
+``rocprof-sys-sample`` also accepts ``--preset``. Sampling mode enables
+call-stack sampling by default. A ``rocprof-sys-run`` launch enables sampling
+only when the preset or a sampling flag turns it on. The experimental
+``rocsys profile`` command accepts the same preset and domain flags. See
+:doc:`using-rocsys`.
 
 .. code-block:: shell
 
@@ -63,6 +69,8 @@ Available presets
 
 Use ``--list-presets`` to see all presets grouped by category, or
 ``--explain=<name>`` for detailed information about a specific preset.
+
+.. _using-preset-profiles-general:
 
 General purpose presets
 ------------------------
@@ -121,6 +129,8 @@ General purpose presets
 
    rocprof-sys-sample --preset=detailed -- ./complex_app
 
+.. _using-preset-profiles-gpu-workload:
+
 GPU and workload presets
 --------------------------
 
@@ -157,6 +167,8 @@ ROCm domains ON, GPU metrics ON, rocPD ON
 
    rocprof-sys-sample --preset=trace-hw-counters -- ./kernel_heavy_app
 
+.. _using-preset-profiles-hpc:
+
 HPC presets
 -----------
 
@@ -189,6 +201,8 @@ Kokkos ON, RCCL ON, PAPI events ON, ROCm domains ON, GPU metrics ON
 .. code-block:: shell
 
    mpirun -n 16 rocprof-sys-sample --preset=profile-mpi -- ./mpi_comm_app
+
+.. _using-preset-profiles-api-tracing:
 
 API tracing presets
 -------------------
@@ -379,7 +393,7 @@ fields with descriptions and types.
    * - Section
      - Description
    * - ``tracing``
-     - Perfetto trace output: ``enabled``, ``legacy``, ``buffer_size_kb``,
+     - Perfetto trace output: ``enabled``, ``buffer_size_kb``,
        ``fill_policy``
    * - ``profiling``
      - Call-stack profiling: ``enabled``, ``flat_profile``

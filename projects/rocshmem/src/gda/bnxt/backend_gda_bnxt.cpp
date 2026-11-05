@@ -22,10 +22,16 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "gda/backend_gda.hpp"
+#include <unistd.h> // getpagesize()
+#include <new>
+
+#include "bit.hpp"
 #include "log.hpp"
 #include "util.hpp"
-#include <unistd.h> // getpagesize()
+#include "gda/backend_gda.hpp"
+#include "gda/bnxt/provider_gda_bnxt.hpp"
+#include "gda/bnxt/queue_pair_bnxt.hpp"
+#include "gda/queue_pair_provider.hpp"
 
 namespace rocshmem {
 
@@ -33,14 +39,10 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   struct bnxt_re_dv_obj dv_obj;
   struct bnxt_re_dv_cq dv_cq;
   struct bnxt_re_dv_qp dv_qp;
-  struct ibv_qp *ib_qp;
   int err;
 
-  NicDevice &nic = nic_for_qp(conn_num);
-  int pe = conn_num % num_pes;
-  int nic_idx = nic_idx_for_qp(conn_num);
-
-  ib_qp = qps[conn_num];
+  struct ibv_qp *ib_qp = qps[conn_num];
+  const NicDevice& nic = nic_for_qp(conn_num);
 
   /* Export SCQ */
   memset(&dv_obj, 0, sizeof(struct bnxt_re_dv_obj));
@@ -50,11 +52,6 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   err = bnxt_re_dv.init_obj(&dv_obj, BNXT_RE_DV_OBJ_CQ);
   CHECK_ZERO(err, "bnxt_re_dv_init_obj(CQ)");
 
-  memset(&gpu_qp->bnxt_cq, 0, sizeof(bnxt_device_cq));
-  gpu_qp->bnxt_cq.buf   = bnxt_scqs[conn_num].buf;
-  gpu_qp->bnxt_cq.depth = bnxt_scqs[conn_num].depth;
-  gpu_qp->bnxt_cq.id    = dv_cq.cqn;
-
   /* Export QP */
   memset(&dv_obj, 0, sizeof(struct bnxt_re_dv_obj));
   dv_obj.qp.in  = ib_qp;
@@ -63,35 +60,35 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   err = bnxt_re_dv.init_obj(&dv_obj, BNXT_RE_DV_OBJ_QP);
   CHECK_ZERO(err, "bnxt_re_dv_init_obj(QP)");
 
-  memset(&gpu_qp->bnxt_sq, 0, sizeof(bnxt_device_sq));
-  gpu_qp->bnxt_sq.buf        = bnxt_qps[conn_num].sq_buf;
-  gpu_qp->bnxt_sq.depth      = bnxt_qps[conn_num].mem_info.sq_slots;
+  /* Export DB */
+  void* gpu_dbr_ptr = nullptr;
+  CHECK_HIP(hipHostRegister(bnxt_qps[conn_num].db_region_attr->dbr, getpagesize(), hipHostRegisterDefault));
+  CHECK_HIP(hipHostGetDevicePointer(&gpu_dbr_ptr, bnxt_qps[conn_num].db_region_attr->dbr, 0));
 
-  if ((gpu_qp->bnxt_sq.depth % BNXT_RE_STATIC_WQE_BB) != 0) {
+  uint64_t* dbr = reinterpret_cast<uint64_t*>(gpu_dbr_ptr);
+
+  void*    sq_buf      = bnxt_qps[conn_num].sq_buf;
+  uint32_t sq_depth    = bnxt_qps[conn_num].mem_info.sq_slots;
+  void*    msntbl      = bnxt_qps[conn_num].msntbl;
+  uint32_t msn_tbl_sz  = bnxt_qps[conn_num].msn_tbl_sz;
+  uint32_t psn_sz_log2 = bit_log2(bnxt_qps[conn_num].mem_info.sq_psn_sz);
+  uint32_t mtu         = ibv_mtu_to_int(nic.portinfo.active_mtu);
+
+  void*    cq_buf   = bnxt_scqs[conn_num].buf;
+  uint32_t cq_depth = bnxt_scqs[conn_num].depth;
+
+  if ((sq_depth % BNXT_RE_STATIC_WQE_BB) != 0) {
     LOG_WARN("SQ depth not divisible by BNXT_RE_STATIC_WQE_BB. "
              "There may be runtime errors.");
   }
 
-  gpu_qp->bnxt_sq.id          = ib_qp->qp_num;
-  gpu_qp->bnxt_sq.msntbl      = bnxt_qps[conn_num].msntbl;
-  gpu_qp->bnxt_sq.msn_tbl_sz  = bnxt_qps[conn_num].msn_tbl_sz;
-  gpu_qp->bnxt_sq.psn_sz_log2 = std::log2(bnxt_qps[conn_num].mem_info.sq_psn_sz);
-  gpu_qp->bnxt_sq.mtu         = ibv_mtu_to_int(nic.portinfo.active_mtu);
-
-  /* Export DB */
-  CHECK_HIP(hipHostRegister(bnxt_qps[conn_num].db_region_attr->dbr, getpagesize(), hipHostRegisterDefault));
-  CHECK_HIP(hipHostGetDevicePointer((void**) &gpu_qp->bnxt_dbr, bnxt_qps[conn_num].db_region_attr->dbr, 0));
-
-  /* Export Memory Keys */
-  gpu_qp->lkey = nic.heap_mr->lkey;
-  gpu_qp->rkey = heap_rkey[pe * num_nics_ + nic_idx];
-
-  /* Export Inline Threshold */
-  gpu_qp->inline_threshold = inline_threshold;
-
-  /* Base Heap information */
-  gpu_qp->base_heap = (uintptr_t) heap.get_local_heap_base();
-  gpu_qp->base_heap_size = heap.get_size();
+  /* QueuePair is either QueuePairBNXT or QueuePairMux
+   * both have a constructor that accepts rvalue reference QueuePairBNXT&&,
+   * so just use that instead of trying to figure out which one we're using */
+  new (gpu_qp) QueuePair{QueuePairBNXT{ib_qp->qp_num, gpu_qp_init_info(conn_num), dbr,
+                                       bnxt_device_sq{sq_buf, sq_depth, msntbl, msn_tbl_sz,
+                                                      psn_sz_log2, mtu},
+                                       bnxt_device_cq{cq_buf, cq_depth}}};
 }
 
 void GDABackend::bnxt_create_cqs(int cqe) {
@@ -200,7 +197,7 @@ void GDABackend::bnxt_create_qps(int sq_length) {
     ib_qp_attr.cap.max_recv_wr     = 0;
     ib_qp_attr.cap.max_send_sge    = 1;
     ib_qp_attr.cap.max_recv_sge    = 0;
-    ib_qp_attr.cap.max_inline_data = inline_threshold;
+    ib_qp_attr.cap.max_inline_data = QueuePairTraits<QueuePairBNXT>::InlineThreshold;
     ib_qp_attr.qp_type             = IBV_QPT_RC;
     ib_qp_attr.sq_sig_all          = 0;
 

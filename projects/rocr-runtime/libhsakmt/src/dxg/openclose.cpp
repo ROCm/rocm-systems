@@ -147,7 +147,7 @@ bool hsakmtRuntime::ReserveSvmSpace(uint64_t &base, uint64_t &size, uint64_t ali
             pr_err("fail to unmap right %lx with size %llx\n", (local_va + size), right_size);
 #endif
     } else {
-        pr_err("fail to reserve Local Heap Space!\n");
+        pr_err("fail to reserve Heap Space!\n");
         base = 0;
         size = 0;
     }
@@ -190,13 +190,19 @@ bool hsakmtRuntime::ReserveLocalHeapSpace() {
    * resource, so oversize the pool and shrink only if the range can't be reserved.
    */
   for (uint64_t scale : {8ull, 4ull, 2ull}) {
-    local_heap_space_start_ = 0;
     local_heap_space_size_ = total_local_size * scale;
-    if (ReserveSvmSpace(local_heap_space_start_, local_heap_space_size_, align))
-      return true;
 
-    pr_warn("fail to reserve %" PRIu64 "x VRAM (%" PRIu64 " MB) of local heap VA, retry smaller\n",
-            scale, (total_local_size * scale) >> 20);
+    pr_debug("try to reserve %" PRIu64 " MB (%" PRIu64 "x VRAM) of local heap VA\n",
+      (total_local_size * scale) >> 20, scale);
+
+    if (ReserveSvmSpace(local_heap_space_start_, local_heap_space_size_, align)) {
+      pr_debug("successfully reserved %" PRIu64 " MB of local heap VA at 0x%" PRIx64 "\n",
+        (total_local_size * scale) >> 20, local_heap_space_start_);
+      return true;
+    }
+
+    pr_warn("failed to reserve %" PRIu64 " MB of local heap VA\n",
+      (total_local_size * scale) >> 20);
   }
 
   return false;
@@ -240,8 +246,31 @@ bool hsakmtRuntime::ReserveSystemHeapSpace() {
   uint64_t total_ram = rocr::os::HostTotalPhysicalMemory();
   // minimum of reserve size is 8G, maximum of reserve size is 1T.
   total_ram = rocr::AlignUp(total_ram, static_cast<size_t>(alignment) * 2);
-  system_heap_space_size_ = (total_ram > max_ram) ? max_ram : total_ram;
-  return ReserveSvmSpace(system_heap_space_start_, system_heap_space_size_, alignment);
+  total_ram = (total_ram > max_ram) ? max_ram : total_ram;
+
+  for (uint64_t divisor : {1ull, 2ull, 4ull}) {
+    system_heap_space_size_ = total_ram / divisor;
+
+    pr_debug("try to reserve %" PRIu64 " MB (1/%" PRIu64 " RAM) of system heap VA\n",
+      (total_ram / divisor) >> 20, divisor);
+
+    if (divisor > 1 && system_heap_space_size_ < alignment * 2) {
+      pr_err("System heap reserve size would shrink below 8G minimum. "
+        "Not enough heap space to reserve.\n");
+      return false;
+    }
+
+    if (ReserveSvmSpace(system_heap_space_start_, system_heap_space_size_, alignment)) {
+      pr_debug("successfully reserved %" PRIu64 " MB of system heap VA at 0x%" PRIx64 "\n",
+        (total_ram / divisor) >> 20, system_heap_space_start_);
+      return true;
+    }
+
+    pr_warn("failed to reserve %" PRIu64 " MB of system heap VA\n",
+      (total_ram / divisor) >> 20);
+  }
+
+  return false;
 }
 
 bool hsakmtRuntime::FreeSystemHeapSpace(void) {
@@ -321,10 +350,22 @@ ErrorCode hsakmtRuntime::ReserveGpuVirtualAddress(const Wkmi::AllocDomain domain
             log_va_exhaustion("system", system_heap_mgr_.get(), system_heap_space_size_, size,
                               align, hit_base_addr);
             code = ErrorCode::OutOfMemory;
-        }
-        else if (!CommitSystemHeapSpace((void*)gpu_addr, size, lock)) {
+        } else if (!CommitSystemHeapSpace((void*)gpu_addr, size, lock)) {
             system_heap_mgr_->Free(gpu_addr);
             code = ErrorCode::SyscallFail;
+        }
+    } else if (domain == Wkmi::kUserMemory) {
+        // Userptr: system-heap GPU VA only. Do not Commit; pages are at user_ptr.
+        if (!system_heap_mgr_) {
+            *out_gpu_virt_addr = 0;
+            return ErrorCode::OutOfMemory;
+        }
+
+        gpu_addr = system_heap_mgr_->Alloc(size, align, hit_base_addr);
+        if (gpu_addr == 0) {
+            log_va_exhaustion("userptr", system_heap_mgr_.get(), system_heap_space_size_, size,
+                              align, hit_base_addr);
+            code = ErrorCode::OutOfMemory;
         }
     } else {
         if (!local_heap_mgr_) {
@@ -350,6 +391,10 @@ ErrorCode hsakmtRuntime::FreeGpuVirtualAddress(const Wkmi::AllocDomain domain,
 
     if (domain == Wkmi::kSystem) {
         DecommitSystemHeapSpace((void *)gpu_addr, size);
+        if (system_heap_mgr_) {
+            system_heap_mgr_->Free(gpu_addr);
+        }
+    } else if (domain == Wkmi::kUserMemory) {
         if (system_heap_mgr_) {
             system_heap_mgr_->Free(gpu_addr);
         }
@@ -420,6 +465,10 @@ ErrorCode hsakmtRuntime::ReserveIPCSysMem(gpusize size,
         int &memfd, bool lock) {
     gpusize gpu_addr = 0;
     ErrorCode code = ErrorCode::Success;
+    if (!system_heap_mgr_) {
+        *out_gpu_virt_addr = 0;
+        return ErrorCode::OutOfMemory;
+    }
     gpu_addr = system_heap_mgr_->Alloc(size, alignment, 0);
     if (gpu_addr == 0)
         return ErrorCode::OutOfMemory;
@@ -437,8 +486,9 @@ ErrorCode hsakmtRuntime::FreeIPCSysMem(gpusize gpu_addr, gpusize size, int &memf
     auto code = ErrorCode::Success;
 
     DecommitSystemHeapSpaceIPC((void *)gpu_addr, size, memfd);
-
-    system_heap_mgr_->Free(gpu_addr);
+    if (system_heap_mgr_) {
+        system_heap_mgr_->Free(gpu_addr);
+    }
     return code;
 }
 
@@ -496,6 +546,11 @@ ErrorCode hsakmtRuntime::HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt
     if (size >= GPU_HUGE_PAGE_SIZE)
         align = GPU_HUGE_PAGE_SIZE;
 
+    if (!handle_aperture_mgr_) {
+        *out_gpu_virt_addr = 0;
+        return ErrorCode::OutOfHandleApeMemory;
+    }
+
     *out_gpu_virt_addr = handle_aperture_mgr_->Alloc(size, align);
     if (*out_gpu_virt_addr == 0)
         return ErrorCode::OutOfHandleApeMemory;
@@ -504,7 +559,9 @@ ErrorCode hsakmtRuntime::HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt
 }
 
 void hsakmtRuntime::HandleApertureFree(gpusize gpu_addr) {
-    handle_aperture_mgr_->Free(gpu_addr);
+    if (handle_aperture_mgr_) {
+        handle_aperture_mgr_->Free(gpu_addr);
+    }
 }
 
 /* is_forked_child detects when the process has forked since the last
@@ -532,6 +589,17 @@ static void parent_fork_handler(void) { dxg_runtime->hsakmt_mutex.unlock(); }
 static void child_fork_handler(void) {
   dxg_runtime->is_forked = true;
 
+  /* Sever the references the child inherited but never took, before any public
+   * entry point can act on them. CHECK_DXG_OPEN() already rejects calls while
+   * is_forked is set, but zeroing the counts means that even a path that
+   * bypasses it cannot decrement the parent's bookkeeping. The inherited open
+   * count is cleared with a plain store and the snapshot count with a relaxed
+   * store on a lock-free atomic, so neither allocates nor takes a lock; heavier
+   * snapshot and object teardown waits for clear_after_fork().
+   */
+  dxg_runtime->dxg_open_count = 0;
+  topology_clear_snapshot_refs();
+
   /* prepare_fork_handler() locked hsakmt_mutex right before fork() so that
    * no other thread would be mid-operation during the fork snapshot. In the
    * child only this one thread survives, and its TID differs from whichever
@@ -555,6 +623,11 @@ static void child_fork_handler(void) {
 static void clear_after_fork(void) {
   reset_suballocator();
   clear_allocation_map();
+  /* The snapshot's WDDMDevices belong to the parent's DXCore session, which
+   * the runtime reset below discards. Let go of them rather than reusing or
+   * destroying them.
+   */
+  topology_abandon_after_fork();
 
   if (dxg_runtime->dxg_fd >= 0) {
 #if defined(__linux__)
@@ -626,8 +699,9 @@ static HSAKMT_STATUS init_vars_from_env(void) {
   if ((envvar = getenv("ROCR_USE_PM4")) != nullptr) {
     dxg_runtime->use_pm4_ = safe_env_to_int(envvar, 0);
   }
+
 #ifdef __linux__
-  dxg_runtime->use_pm4_ = 1;  // Force PM4 usage on Linux for now
+  dxg_runtime->use_pm4_ = safe_env_to_int(getenv("ROCR_USE_PM4"), 1);
 #endif
 
   // Disable wait timeout if ROCR_DISABLE_WAIT_TIMEOUT is set.
@@ -640,14 +714,11 @@ static HSAKMT_STATUS init_vars_from_env(void) {
     dxg_runtime->check_avail_sysram = (envvar[0] == '1' && envvar[1] == '\0');
   }
 
-  // Set default GPU node based on ROCR_VISIBLE_DEVICES. Extract the first numeric value
-  // from the environment variable and add 1 to convert to 1-indexed node ID.
-  if ((envvar = getenv("ROCR_VISIBLE_DEVICES")) != nullptr) {
-    std::string devices(envvar);
-    size_t first_num_pos = devices.find_first_of("0123456789");
-    if (first_num_pos != std::string::npos) {
-      dxg_runtime->default_node = std::stoi(devices.substr(first_num_pos));
-    }
+  // Leave the dependency POLL_REGMEM packets in the ring for the SDMA engine to execute if
+  // HSA_ENABLE_SDMA_GPU_POLL is "1", instead of waiting them out and stripping them on a host
+  // thread. Only meaningful on a native SDMA user queue. Defaults off: gpu poll is stuck in KMD.
+  if ((envvar = getenv("HSA_ENABLE_SDMA_GPU_POLL")) != nullptr) {
+    dxg_runtime->sdma_gpu_poll_ = (envvar[0] == '1' && envvar[1] == '\0');
   }
 
   // Determine SVM (Shared Virtual Memory) API support. Enabled by default unless
@@ -669,14 +740,21 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
   HsaSystemProperties sys_props;
   char *error;
 
-  std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
-
   /* If the process has forked, the child process must re-initialize
    * it's connection to DXG. Any references tracked by dxg_open_count
-   * belong to the parent
+   * belong to the parent.
+   *
+   * This runs before the lock is taken, and must: clear_after_fork() replaces
+   * *dxg_runtime, so a lock_guard constructed on the old object would unlock
+   * freed memory when it went out of scope. Only the forking thread survives
+   * into the child and child_fork_handler() has already reinitialized the
+   * mutex, so there is nothing here to exclude. is_forked is only ever written
+   * in a single-threaded child, so reading it unlocked races with nothing.
    */
   if (is_forked_child())
     clear_after_fork();
+
+  std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
 
   if (dxg_runtime->dxg_open_count == 0) {
     static bool atfork_installed = false;
@@ -711,7 +789,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
 
 
 
-    dxg_runtime->dxg_open_count = 1;
+    dxg_runtime->dxg_open_count++;
+
+    /* Only the 0->1 transition owns the suballocator. A later open comes from
+     * a second in-process consumer (on WSL, rocprofiler-sdk reading the KMT
+     * topology alongside the HSA runtime) and the first one's allocations are
+     * still live - resetting the fragment allocator here would throw away the
+     * bookkeeping that tracks them. clear_after_fork() above resets it on the
+     * one path where the inherited bookkeeping really is meaningless.
+     */
+    reset_suballocator();
 
     if (!atfork_installed) {
       /* Atfork handlers cannot be uninstalled and
@@ -730,7 +817,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
     result = HSAKMT_STATUS_KERNEL_ALREADY_OPENED;
   }
 
-  reset_suballocator();
   return result;
 dxcore_loader_failed:
 #if defined(__linux__)
@@ -747,6 +833,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void) {
 
   if (dxg_runtime->dxg_open_count > 0) {
     if (--dxg_runtime->dxg_open_count == 0) {
+      /* Before DXCore goes, and so before the WDDMDevice objects a snapshot
+       * names become pointers into a dead session.
+       */
+      topology_drop_snapshot_at_last_close();
+
       dxg_runtime->HeapFini();
 #if defined(__linux__)
       close(dxg_runtime->dxg_fd);

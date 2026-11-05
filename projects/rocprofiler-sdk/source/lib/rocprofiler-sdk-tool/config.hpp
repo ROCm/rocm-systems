@@ -31,6 +31,7 @@
 #include "lib/output/format_path.hpp"
 #include "lib/output/output_config.hpp"
 
+#include <rocprofiler-sdk/experimental/thread-trace/core.h>
 #include <rocprofiler-sdk/cxx/serialization.hpp>
 
 #include <fmt/format.h>
@@ -136,6 +137,7 @@ struct config : output_config
     bool   ompt_trace                    = get_env("ROCPROF_OMPT_TRACE", false);
     bool   rocshmem_api_trace            = get_env("ROCPROF_ROCSHMEM_API_TRACE", false);
     bool   hipfile_api_trace             = get_env("ROCPROF_HIPFILE_API_TRACE", false);
+    bool   hip_event_trace               = get_env("ROCPROF_HIP_EVENT_TRACE", false);
     bool   list_metrics                  = get_env("ROCPROF_LIST_METRICS", false);
     bool   list_metrics_output_file      = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool   advanced_thread_trace         = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
@@ -155,6 +157,11 @@ struct config : output_config
     rocprofiler_pc_sampling_method_t pc_sampling_method_value = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
     rocprofiler_pc_sampling_unit_t   pc_sampling_unit_value   = ROCPROFILER_PC_SAMPLING_UNIT_NONE;
 
+    // Route counter collection through in-process kernel replay: collect every --pmc counter group
+    // in a single application run by replaying each dispatch once per group (device-memory
+    // snapshot/restore between passes). The pass count is the number of counter groups.
+    bool kernel_replay = get_env("ROCPROF_KERNEL_REPLAY", false);
+
     int         mpi_size              = get_mpi_size();
     int         mpi_rank              = get_mpi_rank();
     std::string mpi_rank_env_variable = get_env(mpi_rank_env_var_name, "");
@@ -168,6 +175,9 @@ struct config : output_config
     uint64_t att_param_perf_ctrl   = get_env<uint64_t>("ROCPROF_ATT_PARAM_PERFCOUNTER_CTRL", 0);
     bool     att_param_target_only = get_env<int>("ROCPROF_ATT_PARAM_TARGET_ONLY", 0) != 0;
     uint64_t att_consecutive_kernels = get_env<uint64_t>("ROCPROF_ATT_CONSECUTIVE_KERNELS", 0);
+    std::string att_resource_mode    = get_env("ROCPROF_ATT_PARAM_RESOURCE_MODE", "code-object");
+    rocprofiler_thread_trace_resource_mode_t att_resource_mode_value =
+        ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT;
 
     size_t      spm_sample_interval      = get_env<uint64_t>("ROCPROF_SPM_SAMPLE_INTERVAL", 0);
     std::string spm_sample_interval_unit = get_env("ROCPROF_SPM_SAMPLE_INTERVAL_UNIT", "none");
@@ -218,6 +228,8 @@ config::get_attach_invariants() const
                            hsa_image_ext_api_trace,
                            hsa_finalizer_ext_api_trace,
                            marker_api_trace,
+                           selected_regions,
+                           selected_regions_ref_count,
                            memory_copy_trace,
                            memory_allocation_trace,
                            scratch_memory_trace,
@@ -232,6 +244,7 @@ config::get_attach_invariants() const
                            att_no_intercept,
                            att_serialize_all,
                            att_no_detail,
+                           att_resource_mode,
                            att_param_shader_engine_mask,
                            att_param_buffer_size,
                            att_param_simd_select,
@@ -250,7 +263,8 @@ config::get_attach_invariants() const
                            benchmark_mode,
                            spm_counter_collection,
                            rocshmem_api_trace,
-                           hipfile_api_trace);
+                           hipfile_api_trace,
+                           hip_event_trace);
 }
 
 inline bool
@@ -306,6 +320,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(ompt_trace_operations);
     CFG_SERIALIZE_MEMBER(rocshmem_api_trace);
     CFG_SERIALIZE_MEMBER(hipfile_api_trace);
+    CFG_SERIALIZE_MEMBER(hip_event_trace);
 
     CFG_SERIALIZE_MEMBER(mpi_rank);
     CFG_SERIALIZE_MEMBER(mpi_size);
@@ -341,10 +356,14 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(pc_sampling_method_value);
     CFG_SERIALIZE_MEMBER(pc_sampling_unit_value);
 
+    CFG_SERIALIZE_MEMBER(kernel_replay);
+
     CFG_SERIALIZE_MEMBER(advanced_thread_trace);
     CFG_SERIALIZE_MEMBER(att_no_intercept);
     CFG_SERIALIZE_MEMBER(att_serialize_all);
     CFG_SERIALIZE_MEMBER(att_no_detail);
+    CFG_SERIALIZE_MEMBER(att_resource_mode);
+    CFG_SERIALIZE_MEMBER(att_resource_mode_value);
     CFG_SERIALIZE_MEMBER(att_param_shader_engine_mask);
     CFG_SERIALIZE_MEMBER(att_param_buffer_size);
     CFG_SERIALIZE_MEMBER(att_param_simd_select);

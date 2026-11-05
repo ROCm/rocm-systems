@@ -37,15 +37,16 @@ namespace kfd
 // expose the stream-ABI dispatch-log contract (dispatch_log_stream_format).
 // Pure filesystem scan, parameterized on the root for testability. CPU-only
 // nodes (gpu_id == 0) and nodes exposing only the legacy GFX9 dispatch_log_format
-// are excluded -- the stream reader speaks stream ABI v3 and must not treat the
+// are excluded -- the stream reader speaks stream ABI v4 and must not treat the
 // retired per-record format selector as support.
 std::unordered_set<uint32_t>
 discover_stream_dispatch_log_gpus(const char* nodes_path);
 
 // Env opt-out, open /dev/kfd, profiler VERSION ioctl, ABI check, GPU discovery.
-// Idempotent, never throws. Probe only: it starts no thread and arms no ring, so
-// a process with no consumer of kernel-dispatch data gains no SDK-internal
-// thread. Outcome published via kfd_dispatch_log_supported().
+// Idempotent, never throws. Starts no reader thread; it arms the ring eagerly only
+// when a kernel-dispatch context is already registered (F15), otherwise a process
+// with no consumer of kernel-dispatch data gains no SDK-internal thread and the
+// ring is armed lazily on first dispatch. Outcome via kfd_dispatch_log_supported().
 void
 init_kfd_profiler();
 

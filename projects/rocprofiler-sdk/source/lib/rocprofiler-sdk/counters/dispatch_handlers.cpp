@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -73,10 +74,20 @@ queue_cb(const context::context*                                  ctx,
 
     if(!ctx || !ctx->dispatch_counter_collection) return {nullptr, false};
 
-    bool is_enabled = false;
-
-    ctx->dispatch_counter_collection->enabled.rlock(
-        [&](const auto& collect_ctx) { is_enabled = collect_ctx; });
+    // Effective collection state for this dispatch: the context's enabled flag, then the kernel-
+    // replay per-pass override (a replay pass may force this context on/off; no-op outside a replay
+    // loop). Computed as a single value so the override is part of "is_enabled" -- not a separable
+    // step that could drift below the check. See kernel_replay/local_context.hpp.
+    // Local start must only undo a prior local stop: it cannot promote a globally stopped context
+    // (its callback thread may already be gone). Local stop always wins. See Copilot #8622 and
+    // kernel_replay/local_context.hpp.
+    const bool is_enabled = [&] {
+        bool enabled = false;
+        ctx->dispatch_counter_collection->enabled.rlock([&](const auto& c) { enabled = c; });
+        if(auto ov = kernel_replay::local_context_override({.handle = ctx->context_idx}))
+            enabled = enabled && *ov;
+        return enabled;
+    }();
 
     if(!is_enabled || !info->user_cb) return {no_instrumentation(), true};
 

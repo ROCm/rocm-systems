@@ -28,8 +28,8 @@ struct fork_gotcha : comp::base<fork_gotcha, void>
     pid_t operator()(const gotcha_data_t&, pid_t (*)()) const;
 
     // silence SFINAE disabled for rocprofsys::fork_gotcha warnings
-    static inline void start() {}
-    static inline void stop() {}
+    static void start() {}
+    static void stop() {}
 };
 }  // namespace component
 

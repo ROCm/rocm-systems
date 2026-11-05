@@ -10,13 +10,14 @@
 /// AQL queue) and selects the oldest ready WG from the least recently used queue
 /// for dispatch. All wavefronts of a workgroup land on the same CU.
 
-#ifndef ROCJITSU_VM_AMDGPU_SPI_H_
-#define ROCJITSU_VM_AMDGPU_SPI_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
 #include "util/bit.h"
+#include "util/diagnostic.h"
+#include "util/result.h"
 
 #include <algorithm>
 #include <cassert>
@@ -27,7 +28,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
@@ -73,12 +73,16 @@ public:
   }
 
   /// @brief Enqueue a workgroup from an ACE pipe.
-  void enqueue_wg(uint32_t pipe_id, uint32_t global_wg_id, DispatchEntry *entry) {
+  /// @details WGP-mode requests fail without changing the pending queues.
+  /// @param emit_error Destination for failure diagnostics.
+  util::Result enqueue_wg(uint32_t pipe_id, uint32_t global_wg_id, DispatchEntry *entry,
+                          util::DiagnosticEmitter emit_error = {}) {
     if (entry->wgp_mode)
-      throw std::invalid_argument("legacy SPI queue path does not support WGP-mode workgroups");
+      return emit_error.emit() << "legacy SPI queue path does not support WGP-mode workgroups";
     if (pipe_id >= pipe_queues_.size())
       pipe_queues_.resize(pipe_id + 1);
     pipe_queues_[pipe_id].push_back({pipe_id, global_wg_id, entry});
+    return util::Result::success();
   }
 
   /// @brief Try to dispatch the next ready WG to a CU.
@@ -110,12 +114,14 @@ public:
       for (uint32_t w = 0; w < wg.entry->wfs_per_workgroup; ++w) {
         Wavefront *wf =
             cu->dispatch_wf(wg.global_wg_id, wg.entry->kernel_entry_pc, wg.entry->sgprs_per_wf,
-                            wg.entry->vgprs_per_wf, wg.entry->kernel_wave_size);
+                            wg.entry->vgprs_per_wf, wg.entry->kernel_wave_size,
+                            wg.entry->scratch_wave_limit_per_se);
         assert(wf && "dispatch_wf failed after select_cu returned a CU");
         wf->set_lds_base(lds_base);
         wf->set_lds_size(util::align_up(wg.entry->group_segment_fixed_size, 256u));
         wf->set_lds(placement->lds);
         wf->set_dispatch_id(wg.entry->dispatch_id);
+        wf->set_address_space(wg.entry->address_space);
         wf->set_process_id(wg.entry->process_id);
         wf->set_queue_id(wg.entry->queue_id);
         wf->set_exec(initial_exec_mask_for_wave(*wg.entry, wg.global_wg_id, w, wf->wf_size()));
@@ -142,6 +148,15 @@ public:
     }
     return any_runnable;
   }
+
+  /// @brief Check whether any CU in this SE has active wavefronts.
+  bool has_active_cus() const {
+    for (auto *cu : cus_)
+      if (cu->has_active_wfs())
+        return true;
+    return false;
+  }
+
   /// @brief Check if any WGs are queued or any CU is active.
   bool has_pending() const {
     for (auto &q : pipe_queues_)
@@ -176,11 +191,14 @@ public:
     for (size_t attempt = 0; attempt < cus_.size(); ++attempt) {
       size_t idx = (next_cu_ + attempt) % cus_.size();
       auto *cu = cus_[idx];
+      if (!entry.allows_cu(cu))
+        continue;
       const size_t wgp_index = cu_to_wgp_[idx];
       if (wgp_index != std::numeric_limits<size_t>::max() &&
           wgps_[wgp_index]->active_workgroups != 0)
         continue;
-      if (!cu->can_accept_workgroup(entry.wfs_per_workgroup, entry.group_segment_fixed_size))
+      if (!cu->can_accept_workgroup(entry.wfs_per_workgroup, entry.group_segment_fixed_size,
+                                    entry.scratch_wave_limit_per_se))
         continue;
       next_cu_ = (idx + 1) % cus_.size();
       return cu;
@@ -208,6 +226,9 @@ public:
       size_t wgp_index = (next_wgp_ + attempt) % wgps_.size();
       auto &wgp = *wgps_[wgp_index];
 
+      if (!entry.allows_cu(wgp.cu0) || !entry.allows_cu(wgp.cu1))
+        continue;
+
       // A WGP allocation cannot overlap CU-mode residents or cluster-pinned
       // CU-local LDS state. Existing WGP-mode workgroups may share the pool.
       if (wgp.active_workgroups == 0 &&
@@ -220,7 +241,8 @@ public:
       ComputeUnitCore *selected = nullptr;
       for (uint32_t half = 0; half < 2; ++half) {
         auto *candidate = ((next_wgp_half_ + half) & 1u) == 0 ? wgp.cu0 : wgp.cu1;
-        if (candidate->can_accept_workgroup(entry.wfs_per_workgroup, 0)) {
+        if (candidate->can_accept_workgroup(entry.wfs_per_workgroup, 0,
+                                            entry.scratch_wave_limit_per_se)) {
           selected = candidate;
           next_wgp_half_ = (next_wgp_half_ + half + 1) & 1u;
           break;
@@ -230,7 +252,8 @@ public:
         continue;
 
       const uint32_t lds_base = wgp.next_lds_alloc;
-      wgp.lds.zero_range(lds_base, aligned);
+      // Like CU-local LDS, paired-WGP LDS retains its physical contents on reuse.
+      wgp.lds.materialize_range(lds_base, aligned);
       wgp.next_lds_alloc += aligned;
       ++wgp.active_workgroups;
       resident_wgp_workgroups_[wg_key(entry.dispatch_id, global_wg_id)] = WgpReservation{wgp_index};
@@ -245,14 +268,21 @@ public:
     auto resident = resident_wgp_workgroups_.find(wg_key(dispatch_id, global_wg_id));
     if (resident == resident_wgp_workgroups_.end())
       return false;
-    const size_t wgp_index = resident->second.wgp_index;
+    release_wgp_reservation(resident->second.wgp_index);
     resident_wgp_workgroups_.erase(resident);
-    assert(wgp_index < wgps_.size());
-    auto &wgp = *wgps_[wgp_index];
-    assert(wgp.active_workgroups != 0);
-    if (--wgp.active_workgroups == 0)
-      wgp.next_lds_alloc = 0;
     return true;
+  }
+
+  /// @brief Release every paired-WGP reservation belonging to a cancelled dispatch.
+  /// @details The CP must stop its waves before reclaiming their shared LDS.
+  /// Includes reservations whose waves have not launched or were already aborted.
+  void release_wgp_dispatch(uint32_t dispatch_id) {
+    std::erase_if(resident_wgp_workgroups_, [&](const auto &resident) {
+      if (wg_key_dispatch_id(resident.first) != dispatch_id)
+        return false;
+      release_wgp_reservation(resident.second.wgp_index);
+      return true;
+    });
   }
 
   uint32_t max_wgp_lds_bytes() const {
@@ -282,6 +312,14 @@ private:
     size_t wgp_index = 0;
   };
 
+  void release_wgp_reservation(size_t wgp_index) {
+    assert(wgp_index < wgps_.size());
+    auto &wgp = *wgps_[wgp_index];
+    assert(wgp.active_workgroups != 0);
+    if (--wgp.active_workgroups == 0)
+      wgp.next_lds_alloc = 0;
+  }
+
   std::vector<ComputeUnitCore *> cus_;
   size_t next_cu_ = 0;
   std::vector<std::unique_ptr<WgpResource>> wgps_;
@@ -295,5 +333,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_SPI_H_

@@ -36,7 +36,7 @@ rocprof-sys-causal: `source/bin/rocprof-sys-causal <https://github.com/ROCm/rocm
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 When there is exactly one causal profiling configuration variant (which enables debugging),
-``rocprof-sys-casual`` has a nearly identical design to ``rocprof-sys-sample``
+``rocprof-sys-causal`` has a nearly identical design to ``rocprof-sys-sample``
 
 When the command-line options produce more than one causal profiling configuration variant,
 the following actions take place for each variant:
@@ -65,6 +65,23 @@ rocprof-sys-instrument: `source/bin/rocprof-sys-instrument <https://github.com/R
   * For a binary rewrite: it produces a new instrumented binary and exits
   * For runtime instrumentation: it instructs the application to resume and
     then waits for it to exit
+
+rocsys: `source/bin/rocsys-exe <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/bin/rocsys-exe>`_
+---------------------------------------------------------------------------------------------------------------------------------------
+
+``rocsys`` is an experimental command-line dispatcher introduced in this
+release. ``main`` is in the ``source/bin/rocsys-exe/rocsys.cpp``.
+``source/bin/common/cli_dispatcher.cpp`` classifies each invocation.
+
+* ``profile``, including the implicit default when the first argument is a flag
+  or ``--``, runs in-process through the same run-mode path as
+  ``rocprof-sys-run``.
+* The other verbs exec the matching ``rocprof-sys-*`` binary next to the real
+  ``rocsys`` executable. A symlink such as ``/usr/bin/rocsys`` still finds
+  those siblings. ``rewrite`` inserts ``-o`` so ``rocprof-sys-instrument``
+  performs a binary rewrite.
+* ``sample`` is not a verb. Call-stack sampling without instrumentation remains
+  ``rocprof-sys-sample``.
 
 Libraries
 ========================================
@@ -419,26 +436,45 @@ a new internal thread is created to handle the new samplers.
 Time-window constraint model
 ========================================
 
-With the recent introduction of tracing delay and duration, the
-`constraint namespace <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/source/lib/core/constraint.hpp>`_
-was introduced to improve the management of delays and duration limits for
-data collection. The ``spec`` class accepts a clock identifier, a delay value, a duration value, and an
-integer indicating how many times to repeat the delay and duration cycle. It is therefore
-possible to perform tasks such as periodically enabling tracing for brief periods
-of time in between long periods without data collection while the application runs. The
-syntax follows the format ``clock_identifier:delay:capture_duration:cycles``, so a value of
-``10:1:3`` for the last three parameters represents the following sequence of operations:
+The time-window constraint model manages delays and duration limits for data collection.
+Each window entry specifies a delay before collection begins, a duration for how long
+collection is active, and an optional repeat count. The syntax for ``ROCPROFSYS_TRACE_PERIODS``
+entries follows the format ``delay:duration`` or ``delay:duration:repeat``, so a value of
+``10:1:3`` represents the following sequence of operations:
 
 * Ten seconds where no data is collected, then one second where it is
 * Ten seconds where no data is collected, then one second where it is
 * Ten seconds where no data is collected, then one second where it is
 * Stop
 
-As another example, ``ROCPROFSYS_TRACE_PERIODS = realtime:10:1:5 process_cputime:10:2:20`` translates
-to this sequence:
+Clock selection
+---------------
 
-* Five cycles of: no data collection for ten seconds of real-time followed by one second of data collection
-* Twenty cycles of: no data collection for ten seconds of process CPU time followed by two CPU-time seconds of data collection
+``ROCPROFSYS_TRACE_PERIOD_CLOCK_ID`` controls what the delay and duration values mean.
+It accepts exactly two values:
+
+``realtime`` (default)
+    Delays and durations are measured in wall-clock time using a monotonic
+    steady clock. A ten-second delay waits for ten real seconds regardless of
+    how many CPU cores are active or how busy they are.
+
+``cputime``
+    Delays and durations are measured in process CPU time
+    (``CLOCK_PROCESS_CPUTIME_ID``). A ten-second delay waits until the process
+    has consumed ten CPU-seconds in total across all threads. This is useful
+    when you want to skip a fixed amount of computation rather than a fixed
+    elapsed time — for example, to profile only after a workload's warm-up
+    phase, measured in CPU work rather than calendar seconds.
+
+    Be aware that rocprof-sys instrumentation itself contributes to the
+    CPU-time counter, so the effective delay will be slightly shorter than the
+    configured value in heavily instrumented code.
+
+Example — profile only the steady-state CPU work, skipping the first ten
+CPU-seconds and capturing the next two, repeated twenty times::
+
+    ROCPROFSYS_TRACE_PERIOD_CLOCK_ID=cputime
+    ROCPROFSYS_TRACE_PERIODS=10:2:20
 
 Eventually, the goal is to migrate all subsets of data collection which currently support
 more rudimentary models of time window constraints, such as process sampling and causal profiling,

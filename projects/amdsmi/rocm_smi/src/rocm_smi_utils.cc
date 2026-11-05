@@ -69,7 +69,7 @@ bool FileExists(char const* filename) {
   return (stat(filename, &buf) == 0);
 }
 
-static inline void debugFilesDiscovered(std::vector<std::string> files) {
+[[maybe_unused]] static inline void debugFilesDiscovered(std::vector<std::string> files) {
   std::ostringstream ss;
   int numberOfFilesFound = static_cast<int>(files.size());
   ss << "fileName.size() = " << numberOfFilesFound << "; Files discovered = {";
@@ -405,48 +405,6 @@ int ParseGpuOdFanRange(const std::string& path, uint64_t* min_pwm, uint64_t* max
 
   if (min_pwm) *min_pwm = val1;
   if (max_pwm) *max_pwm = val2;
-  return 0;
-}
-
-int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm) {
-  // Read fan_minimum_pwm sysfs file and parse the current FAN_MINIMUM_PWM value.
-  // File format (multi-line):
-  //   FAN_MINIMUM_PWM:
-  //   <value>
-  //   OD_RANGE:
-  //   MINIMUM_PWM: <min> <max>
-  std::vector<std::string> lines;
-  int ret = ReadSysfsLines(path, &lines);
-  if (ret != 0) {
-    return ret;
-  }
-
-  if (lines.empty()) {
-    return EINVAL;
-  }
-
-  // Use TextFileTagContents_t for structured parsing
-  amd::smi::TextFileTagContents_t parser(lines);
-  parser.set_title_terminator(":", amd::smi::TagSplitterPositional_t::kLAST)
-      .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
-      .structure_content();
-
-  // Check if FAN_MINIMUM_PWM section exists
-  if (!parser.contains_title_key("FAN_MINIMUM_PWM:")) {
-    return EINVAL;
-  }
-
-  // Get the first value under FAN_MINIMUM_PWM section
-  auto current_str = parser.get_structured_data_subkey_first("FAN_MINIMUM_PWM:");
-
-  // Parse the value
-  uint64_t val;
-  std::istringstream iss(current_str);
-  if (!(iss >> val)) {
-    return EINVAL;
-  }
-
-  if (current_pwm) *current_pwm = val;
   return 0;
 }
 
@@ -924,9 +882,9 @@ void logHexDump(const char* desc, const void* addr, const size_t len, size_t byt
   std::ostringstream ss;
   // Silently ignore per-line values.
   if (bytesPerLine < 4 || bytesPerLine > 64) bytesPerLine = 16;
+  unsigned char buff[65];  // Using largest possible value as bounded by [4,64]
 
   size_t i;
-  unsigned char buff[bytesPerLine + 1];
   const unsigned char* pc  // ptr to data (char, 1 byte sized data)
       = (const unsigned char*)addr;
 
@@ -1350,7 +1308,7 @@ void system_wait(int milli_seconds) {
     LOG_DEBUG(ss);
   }
 
-  usleep(waitTime);
+  usleep(static_cast<unsigned int>(waitTime));
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   if (is_logger_enabled) {

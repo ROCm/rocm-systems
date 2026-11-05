@@ -3,7 +3,6 @@
 
 """Integration tests for roofline profiling and benchmark-only mode."""
 
-import inspect
 import os
 from pathlib import Path
 
@@ -17,9 +16,7 @@ from tests.integration.common import (
     num_devices,
     num_kernels,
     skip_unsupported_roofline_soc,
-    validate,
 )
-from utils import csv_compression
 
 
 @pytest.mark.roofline_validation
@@ -40,12 +37,6 @@ def test_roof_basic_validation(binary_handler_profile_rocprof_compute):
     file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
 
     assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -90,12 +81,9 @@ def test_roof_rocpd(
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
     assert (Path(workload_dir) / "roofline.csv").exists()
 
-    # Run analyze to create merged pmc_perf.csv
+    # A roof-only workload has no PMC result artifacts to read.
     code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
     assert code == 0
-
-    # Validate merged pmc_perf.csv content
-    assert common.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -115,9 +103,6 @@ def test_roofline_workload_dir_not_set_error():
         class MockArgs:
             def __init__(self):
                 self.roof_only = True
-                self.mem_level = "ALL"
-                self.sort = "ALL"
-                self.roofline_data_type = ["FP32"]
 
         args = MockArgs()
         mspec = generate_machine_specs(None, None)
@@ -125,9 +110,6 @@ def test_roofline_workload_dir_not_set_error():
         run_parameters = {
             "workload_dir": None,
             "device_id": 0,
-            "sort_type": "kernels",
-            "mem_level": "ALL",
-            "roofline_data_type": ["FP32"],
         }
 
         roofline_instance = Roofline(args, mspec, run_parameters)
@@ -245,30 +227,6 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.roofline_plot
-def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
-    skip_unsupported_roofline_soc()
-
-    try:
-        import plotext as plt  # noqa: F401
-
-        cli_available = True
-    except ImportError:
-        cli_available = False
-
-    if cli_available:
-        options = ["--device", "0", "--roof-only"]
-        workload_dir = common.get_output_dir()
-
-        returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
-            config, workload_dir, options, check_success=False, roof=True
-        )
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-    else:
-        pytest.skip("plotext not available for CLI testing")
-
-
-@pytest.mark.roofline_plot
 def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     skip_unsupported_roofline_soc()
 
@@ -305,7 +263,7 @@ def test_bench_only_basic(binary_handler_profile_rocprof_compute):
     assert not (workload_path / "perfmon").exists()
     assert not (workload_path / "sysinfo.csv").exists()
     assert not (workload_path / "profiling_config.yaml").exists()
-    assert not csv_compression.find_csvs(workload_path, "results_*.csv")
+    assert not sorted(workload_path.glob("results_*.csv.gz"))
     assert not list(workload_path.glob("pmc_perf_*.csv"))
 
 

@@ -1,6 +1,10 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+if(RJ_BUILD_CONSAN_RUNTIME)
+    add_subdirectory(consan)
+endif()
+
 # The hook sources are compiled once into an object library and linked into two
 # shared libraries: the production rocjitsu_hooks, which exports only the HSA
 # tool entry points, and the test-only rocjitsu_hooks_testing, which adds the
@@ -13,7 +17,10 @@
 set(RJ_HOOKS_LINK_LIBS
     rocjitsu_analysis
     rocjitsu_code
+    rocjitsu_code_object
+    rocjitsu_executable
     rocjitsu_dbt_config
+    rocjitsu_ip_discovery
     rocjitsu_isa
     rocjitsu_amdgpu_isa_registry
     rocjitsu_vm_amdgpu
@@ -22,6 +29,19 @@ set(RJ_HOOKS_LINK_LIBS
     simdojo
     Threads::Threads
     ${CMAKE_DL_LIBS}
+)
+
+# ROCR's hsa_api_trace.h selects flat extension-header includes only when
+# AMD_INTERNAL_BUILD is defined. The shared runtime header target supplies
+# that flat layout, so every HSA tools hook and its unit tests use this target.
+add_library(rocjitsu_hsa_tools_headers INTERFACE)
+target_link_libraries(
+    rocjitsu_hsa_tools_headers
+    INTERFACE rocm_runtime::runtime_headers
+)
+target_compile_definitions(
+    rocjitsu_hsa_tools_headers
+    INTERFACE AMD_INTERNAL_BUILD
 )
 
 add_library(
@@ -46,13 +66,10 @@ target_include_directories(
         ${RJ_VERSION_INCLUDE_DIR}
 )
 
-target_include_directories(
+target_link_libraries(
     rocjitsu_hooks_objects
-    SYSTEM
-    PRIVATE ${HSA_INCLUDE_DIR}
+    PRIVATE rocjitsu_hsa_tools_headers ${RJ_HOOKS_LINK_LIBS}
 )
-
-target_link_libraries(rocjitsu_hooks_objects PRIVATE ${RJ_HOOKS_LINK_LIBS})
 
 if(MSVC)
     target_compile_options(rocjitsu_hooks_objects PRIVATE /W4 /WX)
@@ -63,6 +80,17 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     )
 endif()
 
+# The hooks contain their own VM objects. Keep their C++ symbols, including
+# observer RTTI, local so they cannot collide with another core in the process.
+# Loadable observers obtain those exports from librocjitsu, not the HSA hooks.
+function(rj_set_hooks_exports target export_map)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(_map ${CMAKE_CURRENT_SOURCE_DIR}/${export_map})
+        set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS ${_map})
+        target_link_options(${target} PRIVATE "LINKER:--version-script=${_map}")
+    endif()
+endfunction()
+
 # Production hook: exports the HSA tool entry points only.
 add_library(rocjitsu_hooks SHARED)
 set_target_properties(rocjitsu_hooks PROPERTIES OUTPUT_NAME rocjitsu_hooks)
@@ -70,6 +98,7 @@ target_link_libraries(
     rocjitsu_hooks
     PRIVATE rocjitsu_hooks_objects ${RJ_HOOKS_LINK_LIBS}
 )
+rj_set_hooks_exports(rocjitsu_hooks rocjitsu_hooks.map)
 
 if(BUILD_TESTING)
     # Test-only hook: the same objects plus the exported test seams. Never
@@ -87,6 +116,7 @@ if(BUILD_TESTING)
         rocjitsu_hooks_testing
         PRIVATE rocjitsu_hooks_objects ${RJ_HOOKS_LINK_LIBS}
     )
+    rj_set_hooks_exports(rocjitsu_hooks_testing rocjitsu_hooks_testing.map)
 
     if(MSVC)
         target_compile_options(rocjitsu_hooks_testing PRIVATE /W4 /WX)
@@ -122,13 +152,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         set_target_properties(${_target} PROPERTIES OUTPUT_NAME ${_target})
         target_link_libraries(
             ${_target}
-            PRIVATE rocjitsu_gfx1250_b0_to_a0 Threads::Threads ${CMAKE_DL_LIBS}
+            PRIVATE
+                rocjitsu_gfx1250_b0_to_a0
+                util
+                Threads::Threads
+                ${CMAKE_DL_LIBS}
         )
         target_include_directories(
             ${_target}
             PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR}
         )
-        target_include_directories(${_target} SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
+        target_link_libraries(${_target} PRIVATE rocjitsu_hsa_tools_headers)
         rj_configure_target(${_target} WARNINGS HIDDEN)
         target_compile_options(
             ${_target}

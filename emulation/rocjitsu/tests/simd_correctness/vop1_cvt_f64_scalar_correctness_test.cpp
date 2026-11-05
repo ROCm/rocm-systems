@@ -84,7 +84,7 @@ struct Fixture {
     uint32_t words[4] = {enc, 0u, 0u, 0u};
     Instruction *inst = decode_valid(*decoder, words);
     EXPECT_NE(inst, nullptr);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     delete inst;
     return read64(vb + 2, 0);
   }

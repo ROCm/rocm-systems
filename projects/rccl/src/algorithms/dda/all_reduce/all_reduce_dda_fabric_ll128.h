@@ -37,7 +37,8 @@ namespace dda::common {
 // scratch at slot selfRank, as LL128 lines carrying the epoch flag (flag-last).
 // Phase 2 (reduce): rank selfRank polls its own scratch slot for each other
 // rank (waiting on word 15 == flag), and folds those words with its own
-// sendbuff into recvbuff. Flag polling provides the cross-rank ordering, so no
+// sendbuff into recvbuff in rank order 0..nRanks-1, so every rank rounds
+// identically. Flag polling provides the cross-rank ordering, so no
 // GPU barrier is used. Scratch is double-buffered: bank = flag & 1.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
@@ -50,7 +51,8 @@ __launch_bounds__(1024)
                                         int selfRank, int nRanksRt,
                                         uint32_t* __restrict__ epochDev, // per-block LL epoch cells (shared AG+AR)
                                         int epochLen, // number of cells in epochDev
-                                        size_t slotStrideLines) { // per-call lines/slot (from host)
+                                        size_t slotStrideLines, // per-call lines/slot (from host)
+                                        DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
@@ -61,8 +63,7 @@ __launch_bounds__(1024)
   // On-device, graph-safe flag/bank derivation (1D grid: flatBlockId=blockIdx.x).
   const int flatBlockId = blockIdx.x;
   const int total = gridDim.x;
-  __shared__ uint32_t s_flag;
-  const uint32_t flag = ddaLLEpochBegin(epochDev, flatBlockId, s_flag);
+  const uint32_t flag = ddaGetLLEpochInc(epochDev, flatBlockId, 1);
   const size_t bankOffsetLines = (size_t)(flag & 1u) * (size_t)nRanks * slot;
 
   // 16 lanes cooperate on one 128B line; grid-stride over line-groups.
@@ -104,24 +105,30 @@ __launch_bounds__(1024)
     const size_t base = ln * (size_t)kDdaLL128DataElems;
     const size_t e = base + (size_t)lane;
     const bool hasWord = (lane < kDdaLL128DataElems) && (e < nWords);
-    uint64_t acc = hasWord ? sw[e] : 0ull;
-    for (int r = 1; r < nRanks; ++r) {
-      const int peer = (selfRank + r) % nRanks;
-      LLLine128* src = myBase + (size_t)peer * slot;
-      // All 16 lanes poll the shared flag word (broadcast); unfenced.
-      while (ddaLL128LoadWord(&src[ln].w[kDdaLL128FlagElem]) != (uint64_t)flag) {
+    uint64_t acc = 0ull;
+    for (int peer = 0; peer < nRanks; ++peer) {
+      uint64_t d = 0ull;
+      if (peer == selfRank) {
+        d = hasWord ? sw[e] : 0ull;
+      } else {
+        LLLine128* src = myBase + (size_t)peer * slot;
+        // All 16 lanes poll the shared flag word (broadcast); unfenced.
+        if (!ddaLL128WaitFlag(&src[ln].w[kDdaLL128FlagElem], (uint64_t)flag, params)) {
+          ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag);
+          return;
+        }
+        if (hasWord) {
+          d = ddaLL128LoadWord(&src[ln].w[lane]);
+        }
       }
-      if (hasWord) {
-        const uint64_t d = ddaLL128LoadWord(&src[ln].w[lane]);
-        acc = ddaLL128AddWord<T>(acc, d);
-      }
+      acc = (peer == 0) ? d : ddaLL128AddWord<T>(acc, d);
     }
     if (hasWord) {
       out[e] = acc;
     }
   }
 
-  ddaLLEpochEnd(epochDev, flatBlockId, total, epochLen, flag);
+  ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag);
 }
 
 } // namespace dda::common

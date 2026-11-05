@@ -6,7 +6,9 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/sop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -137,8 +139,13 @@ void SBfeU64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfe_u6
 void SBfeI64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfe_i64_sop2(*this, wf); }
 
 void SCbranchGForkSop2::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  const uint64_t compare = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
+  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
+  const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64(ssrc1);
+  uint64_t target = encoded & kPcAddressMask;
+  if (encoded >> 32 == 0x1FFFFu && wf.code_load_bias() != 0)
+    target = wf.code_load_bias() + static_cast<int32_t>(encoded);
+  wf.pc = amdgpu::cbranch_fork(wf, compare, target, wf.pc + size_) - size_;
 }
 
 void SAbsdiffI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -146,8 +153,8 @@ void SAbsdiffI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SRfeRestoreB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void SMulHiU32Sop2::execute_impl(amdgpu::Wavefront &wf) {

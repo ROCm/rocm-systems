@@ -280,11 +280,15 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             size_t current_byte = 0;
             for(auto& end_byte : output_buffer.end_chunks)
             {
+                if(current_byte >= output_size) break;
+
                 uint32_t current_sdata = 0;
                 char*    ptr           = buffer.data() + current_byte;
                 size_t   cur_size      = std::min(end_byte, output_size) - current_byte;
 
-                rocprofiler_trace_decode(decoder, parse, ptr, cur_size, &current_sdata);
+                ROCPROFILER_CALL(
+                    rocprofiler_trace_decode(decoder, parse, ptr, cur_size, &current_sdata),
+                    "thread trace decode");
                 current_byte = end_byte;
             }
             total_size += output_size;
@@ -309,7 +313,10 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
 {
     agent_buffers = new std::vector<agent_output_buffer_t>{};
 
-    rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib");
+    auto status = rocprofiler_thread_trace_decoder_create(&decoder, "");
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+        status = rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib");
+    ROCPROFILER_CALL(status, "decoder create");
 
     ROCPROFILER_CALL(rocprofiler_create_context(&agent_ctx), "context creation");
     ROCPROFILER_CALL(rocprofiler_create_context(&tracing_ctx), "context creation");

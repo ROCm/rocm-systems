@@ -19,6 +19,8 @@ from all applicable levels (some may be empty/omitted).
 from dataclasses import dataclass
 from enum import Enum
 
+from .package_metadata import group_package_targets
+
 # ---------------------------------------------------------------------------
 # Public types
 # ---------------------------------------------------------------------------
@@ -170,6 +172,9 @@ GFX1201 = GfxTarget(name="gfx1201", major=12, minor=0, stepping=1, xnack=_U)
 
 # -- GFX12.5 --
 GFX1250 = GfxTarget(name="gfx1250", major=12, minor=5, stepping=0, xnack=_D)
+GFX1250_STRICT = GfxTarget(
+    name="gfx1250-strict", major=12, minor=5, stepping=0, xnack=_D
+)
 GFX1251 = GfxTarget(name="gfx1251", major=12, minor=5, stepping=1, xnack=_D)
 
 
@@ -401,7 +406,7 @@ BUNDLE_GFX1250 = TargetBundle(
     level=_TARGET,
     display_name="gfx1250",
     llvm_generic=None,
-    members=(GFX1250,),
+    members=(GFX1250, GFX1250_STRICT),
 )
 BUNDLE_GFX1251 = TargetBundle(
     key="gfx1251",
@@ -490,7 +495,7 @@ BUNDLE_GFX12_5 = TargetBundle(
     level=_SF,
     display_name="GFX12.5",
     llvm_generic=None,
-    members=(GFX1250, GFX1251),
+    members=(GFX1250, GFX1250_STRICT, GFX1251),
 )
 
 
@@ -553,7 +558,7 @@ BUNDLE_GFX12 = TargetBundle(
     level=_F,
     display_name="RDNA4",
     llvm_generic=None,
-    members=(GFX1200, GFX1201, GFX1250, GFX1251),
+    members=(GFX1200, GFX1201, GFX1250, GFX1250_STRICT, GFX1251),
 )
 
 
@@ -594,6 +599,7 @@ ALL_TARGETS: tuple[GfxTarget, ...] = (
     GFX1200,
     GFX1201,
     GFX1250,
+    GFX1250_STRICT,
     GFX1251,
 )
 
@@ -662,7 +668,17 @@ def _build_target_bundle_map() -> dict[str, TargetBundle]:
 _TARGET_BY_NAME: dict[str, GfxTarget] = {t.name: t for t in ALL_TARGETS}
 
 # Map: gfx_target_version int -> GfxTarget
-_TARGET_BY_GTV: dict[int, GfxTarget] = {t.gfx_target_version: t for t in ALL_TARGETS}
+# Preserve GFX1250 for numeric lookup while keeping gfx1250-strict available
+# through name lookup. Exclude GFX1250_STRICT from this map and reject any
+# remaining duplicate numeric versions.
+_TARGET_BY_GTV: dict[int, GfxTarget] = {}
+for _target in ALL_TARGETS:
+    if _target is GFX1250_STRICT:
+        continue
+    if _target.gfx_target_version in _TARGET_BY_GTV:
+        raise RuntimeError(f"Duplicate numeric ISA version: {_target.name}")
+    _TARGET_BY_GTV[_target.gfx_target_version] = _target
+_TARGET_BUNDLE_BY_TARGET: dict[str, TargetBundle] = {}
 
 # Map: bundle key -> TargetBundle (all levels)
 _BUNDLE_BY_KEY: dict[str, TargetBundle] = {}
@@ -691,16 +707,18 @@ def _build_lookups() -> None:
                 )
             _SUB_FAMILY_BY_TARGET[t.name] = sf
 
-    # Register target-level bundles
-    for t in ALL_TARGETS:
+    # Multiple targets can share a package owner.
+    for owner, names in group_package_targets(t.name for t in ALL_TARGETS).items():
         bundle = TargetBundle(
-            key=t.name,
+            key=owner,
             level=PackagingLevel.TARGET,
-            display_name=t.name,
+            display_name=owner,
             llvm_generic=None,
-            members=(t,),
+            members=tuple(_TARGET_BY_NAME[name] for name in names),
         )
-        _BUNDLE_BY_KEY[t.name] = bundle
+        _BUNDLE_BY_KEY[owner] = bundle
+        for name in names:
+            _TARGET_BUNDLE_BY_TARGET[name] = bundle
 
     # Build sub-family -> family mapping
     for fam_key, sfs in _FAMILY_TO_SUB_FAMILIES.items():
@@ -796,7 +814,7 @@ def packaging_chain(
         target = lookup_target(target)
     name = target.name
 
-    target_bundle = _BUNDLE_BY_KEY[name]
+    target_bundle = _TARGET_BUNDLE_BY_TARGET[name]
     sf_bundle = _SUB_FAMILY_BY_TARGET[name]
     fam_bundle = _FAMILY_BY_SUB_FAMILY[sf_bundle.key]
 
@@ -835,7 +853,9 @@ def all_bundles(level: PackagingLevel | None = None) -> tuple[TargetBundle, ...]
     Returns:
         Tuple of :class:`TargetBundle` instances.
     """
-    target_bundles = tuple(_BUNDLE_BY_KEY[t.name] for t in ALL_TARGETS)
+    target_bundles = tuple(
+        dict.fromkeys(_TARGET_BUNDLE_BY_TARGET[t.name] for t in ALL_TARGETS)
+    )
     if level is None:
         return ALL_FAMILIES + ALL_SUB_FAMILIES + target_bundles
     if level == PackagingLevel.FAMILY:

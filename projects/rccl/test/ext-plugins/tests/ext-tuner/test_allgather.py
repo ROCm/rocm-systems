@@ -8,6 +8,17 @@ import os
 import subprocess
 import pytest
 
+# RCCL only routes AllGather through the tuner when the rank count is not a
+# multiple of 8. rcclUseAllGatherDirect() gates Direct AllGather on
+# `comm->nRanks % 8`, so at 8 ranks on a single node RCCL picks a specialized
+# AllGather that never calls the plugin's pluginGetCollInfo(). Measured on
+# MI350X: 8 ranks yields zero tuner callbacks for any config, size range or
+# value of RCCL_DIRECT_ALLGATHER_DISABLE / _THRESHOLD, while 4 ranks exercises
+# the tuner normally. The AllGather tuner tests therefore run at 4 ranks -- at 8
+# they cannot observe the plugin at all, so "no config applied" would hold
+# vacuously rather than because the plugin decided so.
+ALLGATHER_TUNER_RANKS = "4"
+
 @pytest.mark.ext_tuner
 @pytest.mark.allgather
 def test_valid_config_with_wildcards(paths):
@@ -29,30 +40,16 @@ def test_valid_config_with_wildcards(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_gather_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     allgather_log_dir = os.path.join(paths.LOGDIR, "allgather_csv_plugin_test_logs")
     os.makedirs(allgather_log_dir, exist_ok=True)
 
     log_file = os.path.join(allgather_log_dir, "test_allgather_valid_config_with_wildcards.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"CSV Plugin allgather test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"CSV Plugin allgather test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -85,30 +82,16 @@ def test_valid_config_without_wildcards(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_gather_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     allgather_log_dir = os.path.join(paths.LOGDIR, "allgather_csv_plugin_test_logs")
     os.makedirs(allgather_log_dir, exist_ok=True)
 
     log_file = os.path.join(allgather_log_dir, "test_allgather_valid_config_without_wildcards.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"CSV Plugin allgather test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"CSV Plugin allgather test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -124,7 +107,10 @@ def test_valid_config_without_wildcards(paths):
 @pytest.mark.ext_tuner
 @pytest.mark.allgather
 def test_no_matching_config(paths):
-    """Test CSV plugin behavior with no matching configurations"""
+    """Test CSV plugin behavior with no matching configurations
+
+    Runs at 4 ranks: see ALLGATHER_TUNER_RANKS.
+    """
 
     env = os.environ.copy()
     env.update({
@@ -138,34 +124,20 @@ def test_no_matching_config(paths):
     })
 
     args = [
-        f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "8",
+        f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", ALLGATHER_TUNER_RANKS,
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_gather_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     allgather_log_dir = os.path.join(paths.LOGDIR, "allgather_csv_plugin_test_logs")
     os.makedirs(allgather_log_dir, exist_ok=True)
 
     log_file = os.path.join(allgather_log_dir, "test_allgather_no_matching_config.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"CSV Plugin allgather test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"CSV Plugin allgather test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -198,30 +170,16 @@ def test_incorrect_values_config(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_gather_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     allgather_log_dir = os.path.join(paths.LOGDIR, "allgather_csv_plugin_test_logs")
     os.makedirs(allgather_log_dir, exist_ok=True)
 
     log_file = os.path.join(allgather_log_dir, "test_allgather_incorrect_values_config.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"CSV Plugin allgather test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"CSV Plugin allgather test failed, see {log_file}"
     
     # Check that plugin loaded some configurations (plugin should handle invalid values gracefully)
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -255,30 +213,16 @@ def test_unsupported_algo_proto_config(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_gather_perf",
-        "-b", "64",
-        "-e", "1M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     allgather_log_dir = os.path.join(paths.LOGDIR, "allgather_csv_plugin_test_logs")
     os.makedirs(allgather_log_dir, exist_ok=True)
 
     log_file = os.path.join(allgather_log_dir, "test_allgather_unsupported_algo_proto.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"CSV Plugin allgather test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"CSV Plugin allgather test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -294,7 +238,11 @@ def test_unsupported_algo_proto_config(paths):
 @pytest.mark.ext_tuner
 @pytest.mark.allgather
 def test_singlenode_config(paths):
-    """Test CSV plugin with single-node configuration"""
+    """Test CSV plugin with single-node configuration
+
+    Runs at 4 ranks: see ALLGATHER_TUNER_RANKS. The allgather rows of
+    singlenode_config.conf are pinned to nodes=1,ranks=4 to match.
+    """
 
     env = os.environ.copy()
     env.update({
@@ -308,34 +256,20 @@ def test_singlenode_config(paths):
     })
 
     args = [
-        f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "8",
+        f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", ALLGATHER_TUNER_RANKS,
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_gather_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     allgather_log_dir = os.path.join(paths.LOGDIR, "allgather_csv_plugin_test_logs")
     os.makedirs(allgather_log_dir, exist_ok=True)
 
     log_file = os.path.join(allgather_log_dir, "test_allgather_singlenode.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"Single-node CSV Plugin allgather test failed, see {log_file}"
-
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"Single-node CSV Plugin allgather test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -403,10 +337,7 @@ def test_multinode_config(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_gather_perf",
-        "-b", "8",      
-        "-e", "128M",      
-        "-f", "2",       
-        "-g", "1",        
+        *paths.TUNER_PERF_ARGS,
     ]
 
     allgather_log_dir = os.path.join(paths.LOGDIR, "allgather_csv_plugin_test_logs")
@@ -414,20 +345,9 @@ def test_multinode_config(paths):
 
     log_file = os.path.join(allgather_log_dir, "test_allgather_multinode.log")
     
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"Multi-node CSV Plugin allgather test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"Multi-node CSV Plugin allgather test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \

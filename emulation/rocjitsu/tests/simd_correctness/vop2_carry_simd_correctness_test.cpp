@@ -118,7 +118,7 @@ struct Fixture {
 
   Result run(Instruction *inst, uint64_t seed, uint64_t exec, uint64_t vcc_in) {
     seed_inputs(seed, exec, vcc_in);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     Result res;
     uint32_t vbase = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)

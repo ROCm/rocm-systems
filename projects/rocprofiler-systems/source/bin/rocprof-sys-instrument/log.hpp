@@ -49,10 +49,10 @@ struct log_entry
     bool forced() const { return m_forced; }
 
 private:
-    bool                  m_forced    = false;  // if should always be displayed
-    source_location       m_location  = {};
-    std::string           m_message   = {};
-    tim::unwind::stack<4> m_backtrace = {};
+    bool                  m_forced   = false;  // if should always be displayed
+    source_location       m_location = {};
+    std::string           m_message;
+    tim::unwind::stack<4> m_backtrace;
 
     friend void print_log_entries(std::ostream&, std::int64_t,
                                   std::function<bool(const log_entry&)>, const char*,

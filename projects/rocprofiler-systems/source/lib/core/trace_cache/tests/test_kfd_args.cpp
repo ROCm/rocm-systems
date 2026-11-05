@@ -12,8 +12,8 @@ using namespace rocprofsys;
 
 TEST(kfd_args_test, page_fault_args_roundtrip)
 {
-    auto args_str = std::string("0;;std::uint64_t;;address;;0x7f4a00001000;;"
-                                "1;;string;;agent;;5;;");
+    auto const args_str = std::string("0;;std::uint64_t;;address;;0x7f4a00001000;;"
+                                      "1;;string;;agent;;5;;");
 
     auto args = process_arguments_string(args_str);
     ASSERT_EQ(args.size(), 2u);
@@ -28,8 +28,8 @@ TEST(kfd_args_test, page_fault_args_roundtrip)
     EXPECT_EQ(args[1].arg_name, "agent");
     EXPECT_EQ(args[1].arg_value, "5");
 
-    auto rebuilt  = get_args_string(args);
-    auto reparsed = process_arguments_string(rebuilt);
+    auto const rebuilt  = get_args_string(args);
+    auto       reparsed = process_arguments_string(rebuilt);
     ASSERT_EQ(reparsed.size(), 2u);
     EXPECT_EQ(reparsed[0].arg_name, "address");
     EXPECT_EQ(reparsed[1].arg_name, "agent");
@@ -37,13 +37,13 @@ TEST(kfd_args_test, page_fault_args_roundtrip)
 
 TEST(kfd_args_test, page_migrate_args_parse)
 {
-    auto args_str = std::string("0;;std::uint64_t;;start_address;;0x7fb100000000;;"
-                                "1;;std::uint64_t;;end_address;;0x7fb100200000;;"
-                                "2;;string;;src_agent;;1;;"
-                                "3;;string;;dst_agent;;2;;"
-                                "4;;string;;prefetch_agent;;null;;"
-                                "5;;string;;preferred_agent;;null;;"
-                                "6;;int;;error_code;;0;;");
+    auto const args_str = std::string("0;;std::uint64_t;;start_address;;0x7fb100000000;;"
+                                      "1;;std::uint64_t;;end_address;;0x7fb100200000;;"
+                                      "2;;string;;src_agent;;1;;"
+                                      "3;;string;;dst_agent;;2;;"
+                                      "4;;string;;prefetch_agent;;null;;"
+                                      "5;;string;;preferred_agent;;null;;"
+                                      "6;;int;;error_code;;0;;");
 
     auto args = process_arguments_string(args_str);
     ASSERT_EQ(args.size(), 7u);
@@ -73,7 +73,7 @@ TEST(kfd_args_test, page_migrate_args_parse)
 
 TEST(kfd_args_test, queue_args_parse)
 {
-    auto args_str = std::string("0;;string;;agent;;3;;");
+    auto const args_str = std::string("0;;string;;agent;;3;;");
 
     auto args = process_arguments_string(args_str);
     ASSERT_EQ(args.size(), 1u);
@@ -86,9 +86,9 @@ TEST(kfd_args_test, queue_args_parse)
 
 TEST(kfd_args_test, unmap_from_gpu_args_parse)
 {
-    auto args_str = std::string("0;;string;;agent;;5;;"
-                                "1;;std::uint64_t;;start_address;;0x7f0000000000;;"
-                                "2;;std::uint64_t;;end_address;;0x7f0000100000;;");
+    auto const args_str = std::string("0;;string;;agent;;5;;"
+                                      "1;;std::uint64_t;;start_address;;0x7f0000000000;;"
+                                      "2;;std::uint64_t;;end_address;;0x7f0000100000;;");
 
     auto args = process_arguments_string(args_str);
     ASSERT_EQ(args.size(), 3u);
@@ -100,7 +100,7 @@ TEST(kfd_args_test, unmap_from_gpu_args_parse)
 
 TEST(kfd_args_test, dropped_events_args_parse)
 {
-    auto args_str = std::string("0;;std::uint64_t;;count;;42;;");
+    auto const args_str = std::string("0;;std::uint64_t;;count;;42;;");
 
     auto args = process_arguments_string(args_str);
     ASSERT_EQ(args.size(), 1u);
@@ -113,7 +113,7 @@ TEST(kfd_args_test, dropped_events_args_parse)
 
 TEST(kfd_args_test, empty_args_string)
 {
-    auto args = process_arguments_string("");
+    auto const args = process_arguments_string("");
     EXPECT_EQ(args.size(), 0u);
 }
 
@@ -125,7 +125,7 @@ TEST(kfd_args_test, malformed_args_string_throws)
 
 TEST(kfd_args_test, null_agent_value_preserved)
 {
-    auto args_str = std::string("0;;string;;agent;;null;;");
+    auto const args_str = std::string("0;;string;;agent;;null;;");
 
     auto args = process_arguments_string(args_str);
     ASSERT_EQ(args.size(), 1u);

@@ -5,7 +5,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, TypeVar
 
 R = TypeVar("R")
 
@@ -48,7 +48,7 @@ def demarcate(function: Callable[..., R]) -> Callable[..., R]:
     return wrap_function
 
 
-def console_error(*argv: Any, exit: bool = True) -> None:
+def console_error(*argv: Any, exit: bool = True, exit_code: int = 1) -> None:
     if len(argv) > 1:
         logging.error(f"[{argv[0]}] {argv[1]}")
     elif len(argv) == 1:
@@ -56,7 +56,7 @@ def console_error(*argv: Any, exit: bool = True) -> None:
     else:
         logging.error("Empty error message")
     if exit:
-        sys.exit(1)
+        sys.exit(exit_code)
 
 
 def console_log(*argv: Any, indent_level: int = 0) -> None:
@@ -183,9 +183,7 @@ def setup_file_handler(loglevel: int, workload_dir: str) -> None:
 
 
 # Setup logger priority - called after argument parsing
-def setup_logging_priority(
-    verbosity: int, quietmode: bool, appmode: str, guimode: Optional[bool] = None
-) -> int:
+def setup_logging_priority(verbosity: int, quietmode: bool, appmode: str) -> int:
     # set loglevel based on selected verbosity and quietmode
     levels = [logging.INFO, logging.DEBUG, TRACE_LEVEL]
 
@@ -193,11 +191,6 @@ def setup_logging_priority(
         loglevel = logging.ERROR
     else:
         loglevel = levels[min(verbosity, len(levels) - 1)]  # cap to last level index
-
-    # optional: suppress Werkzeug's messages in analyze GUIs.
-    if quietmode and "analyze" in appmode and guimode:
-        werkzeug_logger = logging.getLogger("werkzeug")
-        werkzeug_logger.setLevel(logging.ERROR)
 
     # optional: override of default loglevel via env variable which takes precedence
     if "ROCPROFCOMPUTE_LOGLEVEL" in os.environ.keys():

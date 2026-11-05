@@ -25,7 +25,7 @@
 
 #include "libhsakmt.h"
 #include "fmm.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -116,7 +116,8 @@ static uint32_t get_hwreg_size_per_cu(const HsaNodeProperties *node, uint32_t gf
 		return 0x1000;
 	}
 
-	if (gfxv == GFX_VERSION_GFX1250) {
+	if (gfxv == GFX_VERSION_GFX1250 ||
+		gfxv == GFX_VERSION_GFX1251) {
 		bytes_per_wave = 512;  // per HW design; GFX_SHARED__HWREG_SPACE_USED
 	}
 
@@ -141,7 +142,7 @@ uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv)
 		vgpr_size = 0x40000;
 	else if (gfxv <= GFX_VERSION_GFX1201)
 		vgpr_size = 0x60000;
-	else if (gfxv <= GFX_VERSION_GFX1250)
+	else if (gfxv <= GFX_VERSION_GFX1251)
 		vgpr_size = 0x80000;
 
 	assert(vgpr_size);
@@ -155,7 +156,7 @@ uint32_t hsakmt_get_sgpr_size_per_cu(uint32_t gfxv)
 
 	if (gfxv < GFX_VERSION_GFX1250)
 		sgpr_size = 0x4000;
-	else if (gfxv == GFX_VERSION_GFX1250)
+	else if (gfxv <= GFX_VERSION_GFX1251)
 		sgpr_size = 0x8000;
 
 	assert(sgpr_size);
@@ -629,10 +630,16 @@ static int handle_concrete_asic(HsaKFDContext *ctx,
 		q->total_mem_alloc_size = (q->ctx_save_restore_size +
 					q->debug_memory_size) * node.NumXcc;
 
+		/* GPU_ALWAYS_MAPPED is rejected in recoverable-fault mode, and
+		 * without it an SVM save area cannot satisfy
+		 * kfd_queue_buffer_svm_get().
+		 */
+		bool svm_save_area = !node.Capability2.ui32.StallOnRetryFault;
+
 		/* Allocate unified memory for context save restore
 		 * area on dGPU.
 		 */
-		if (!q->use_ats && ctx->hsakmt_is_svm_api_supported) {
+		if (!q->use_ats && ctx->hsakmt_is_svm_api_supported && svm_save_area) {
 			uint32_t size = PAGE_ALIGN_UP(q->total_mem_alloc_size);
 
 			pr_info("Allocating GTT for CWSR\n");
@@ -669,7 +676,9 @@ static int handle_concrete_asic(HsaKFDContext *ctx,
 			q->ctx_save_restore = allocate_exec_aligned_memory(ctx,
 							q->total_mem_alloc_size,
 							q->use_ats, gpu_id, NodeId,
-							false, false, false);
+							/* nonPaged */ true,
+							/* DeviceLocal */ false,
+							/* Uncached */ false);
 
 			if (!q->ctx_save_restore)
 				return HSAKMT_STATUS_NO_MEMORY;

@@ -393,6 +393,11 @@ class Runtime {
                                      hsa_signal_value_t value, hsa_amd_signal_handler handler,
                                      void* arg);
 
+  /// @brief Asks the asynchronous event monitor to rescan its signals.
+  /// Uses the monitor's own wake signal, which nothing else waits on, so the
+  /// request cannot be consumed by another thread.
+  void WakeAsyncSignalMonitor();
+
   hsa_status_t InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
                           hsa_interop_map_flag_t flags, size_t size_hint, size_t* size, void** ptr,
                           size_t* metadata_size, const void** metadata);
@@ -429,6 +434,13 @@ class Runtime {
 
   hsa_status_t SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count, uint32_t num_dep_signals,
                                const hsa_signal_t* dep_signals, hsa_signal_t completion_signal);
+
+  hsa_status_t SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uint32_t count,
+                                          const hsa_agent_t* dst_agents,
+                                          uint32_t num_dst_agents,
+                                          uint32_t num_dep_signals,
+                                          const hsa_signal_t* dep_signals,
+                                          hsa_signal_t completion_signal);
 
   hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf, uint64_t* offset,
                             uint64_t flags);
@@ -467,6 +479,10 @@ class Runtime {
   hsa_status_t VMemoryGetAllocPropertiesFromHandle(const hsa_amd_vmem_alloc_handle_t memoryHandle,
                                                    const core::MemoryRegion** mem_region,
                                                    hsa_amd_memory_type_t* type);
+
+  hsa_status_t VMemoryGetHandleInfo(const hsa_amd_vmem_alloc_handle_t memoryHandle,
+                                    hsa_amd_vmem_handle_info_t* info);
+
   hsa_status_t VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_handle,
                                          hsa_amd_vmem_alloc_handle_t handle, uint64_t flags);
   hsa_status_t VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handle,
@@ -486,7 +502,14 @@ class Runtime {
 
   const std::vector<uint32_t>& gpu_ids() { return gpu_ids_; }
 
-  Agent* agent_by_gpuid(uint32_t gpuid) { return agents_by_gpuid_[gpuid]; }
+  // find() rather than operator[]: the latter inserts a null entry for an
+  // unknown gpuid, mutating a map that is otherwise only written during init
+  // and is guarded by no lock. Callers can pass driver-supplied ids that name
+  // a GPU outside this process's topology.
+  Agent* agent_by_gpuid(uint32_t gpuid) {
+    auto it = agents_by_gpuid_.find(gpuid);
+    return (it == agents_by_gpuid_.end()) ? nullptr : it->second;
+  }
 
   Agent* region_gpu() { return region_gpu_; }
 
@@ -603,6 +626,10 @@ class Runtime {
   static void AsyncIPCSockServerConnLoop(void*);
 
   struct AllocationRegion {
+    /* Value of thunk_node_id when thunk_bo carries no GPU mapping, as happens
+       for an IPC import whose exporting device backs no usable agent. */
+    static constexpr HSAuint32 kNodeUnmapped = HSAuint32(-1);
+
     AllocationRegion()
         : region(NULL),
           size(0),
@@ -610,7 +637,7 @@ class Runtime {
           alloc_flags(core::MemoryRegion::AllocateNoFlags),
           user_ptr(nullptr),
           thunk_bo(nullptr),
-          thunk_node_id(-1) {}
+          thunk_node_id(kNodeUnmapped) {}
 
     AllocationRegion(const MemoryRegion* region_arg, size_t size_arg, size_t size_requested,
                      MemoryRegion::AllocateFlags alloc_flags,
@@ -621,13 +648,19 @@ class Runtime {
           alloc_flags(alloc_flags),
           user_ptr(nullptr),
           thunk_bo(nullptr),
-          thunk_node_id(-1),
+          thunk_node_id(kNodeUnmapped),
           driver_handle(driver_handle_arg) {}
 
     struct notifier_t {
       void* ptr;
       AMD::callback_t<hsa_amd_deallocation_callback_t> callback;
       void* user_data;
+    };
+
+    /* An import of thunk_bo's dma-buf made on a device other than the one that exported it. */
+    struct PeerImport {
+      HSAuint32 node_id;
+      HsaMemoryObjectHandle thunk_bo;
     };
 
     const MemoryRegion* region;
@@ -638,6 +671,7 @@ class Runtime {
     std::unique_ptr<std::vector<notifier_t>> notifiers;
     HsaMemoryObjectHandle thunk_bo;
     HSAuint32 thunk_node_id;
+    std::vector<PeerImport> thunk_peer_imports;
     DriverMemoryHandle driver_handle;
   };
 
@@ -853,7 +887,7 @@ class Runtime {
   /// loaded library.
   void LoadTools();
 
-  /// @brief Load the rocjitsu hotswap hook as the first HSA tool.
+  /// @brief Load the rocjitsu hotswap hook as the first HSA tool when enabled.
   hsa_status_t LoadHotswapTool();
 
   /// @brief Call OnUnload method of each tool library.
@@ -881,9 +915,6 @@ class Runtime {
 
   /// @brief Get the highest used node id.
   uint32_t max_node_id() const { return agents_by_node_.rbegin()->first; }
-
-  // GPU matching libhsakmt first_gpu_mem (KFD GTT anchor for host memory).
-  Agent* KfdGttAnchorGpu();
 
   // Mutex object to protect multithreaded access to ::allocation_map_.
   // Also ensures atomicity of pointer info queries by interlocking
@@ -1057,15 +1088,17 @@ class Runtime {
   typedef void* ThunkHandle;
 
   struct AddressHandle {
-    AddressHandle() : os_addr(nullptr), size(0), use_count(0), registered(false) {}
+    AddressHandle() : os_addr(nullptr), size(0), use_count(0), registered(false), svm_attrib(false) {}
     AddressHandle(void* addr, size_t _size, bool _registered)
-        : os_addr(addr), size(_size), use_count(0), registered(_registered) {}
+        : os_addr(addr), size(_size), use_count(0), registered(_registered), svm_attrib(false) {}
 
     // Address returned by OS. May be different from user address when adjusted for alignment
     void* os_addr;
     size_t size;
     int use_count;
     bool registered;
+    // Set once hsa_amd_svm_attributes_set succeeds on any part of this reservation.
+    bool svm_attrib;
   };
   std::map<const void*, AddressHandle> reserved_address_map_;  // Indexed by VA
 
@@ -1103,6 +1136,11 @@ class Runtime {
     MemoryRegion::AllocateFlags alloc_flag;
     core::Agent* drm_owner;  // Gpu agent used for import of host memory, NULL for device
                              // memory/imported handles
+
+    /* An import's placement is recovered lazily, on the first query that needs
+     * it, and then cached in region/alloc_flag/driver_handle.size. Set once the
+     * driver has been asked, so a buffer it cannot describe is not re-queried. */
+    bool import_info_queried;
   };
   // hsa_amd_vmem_alloc_handle_t (MemoryHandle*) to MemoryHandle mapping. Owns MemoryHandle
   // lifetime. Uniqueness is guaranteed by the runtime, independent of any driver-supplied
@@ -1111,6 +1149,12 @@ class Runtime {
 
   MemoryHandle* FindMemoryHandle(MemoryHandle* handle);
   void ReleaseMemoryHandle(MemoryHandle* handle);
+
+  const MemoryRegion* ResolveImportedRegion(const core::DmaBufInfo& info);
+
+  /// @brief Recover an imported handle's placement and size on first use, caching
+  /// the result. No-op for locally created handles and for repeat calls.
+  void EnsureImportInfo(MemoryHandle* memoryHandle);
 
   struct MappedHandle;
   struct MappedHandleAllowedAgent {
@@ -1146,6 +1190,7 @@ class Runtime {
   std::map<const void*, MappedHandle> mapped_handle_map_;  // Indexed by VA
 
   AddressHandle* VMemoryFindReservedAddressHandle(const void* va);
+  void MarkReservedAddressSvm(const void* ptr, size_t size);
   hsa_status_t VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, void* (*alloc)(size_t),
                               uint32_t* num_agents_accessible, hsa_agent_t** accessible);
 
@@ -1160,6 +1205,11 @@ class Runtime {
   int IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, unsigned int numNodes,
                       HSAuint32* nodes, void** importAddress, HSAuint64* importSize,
                       bool isdmabufSysmem, uint32_t shared_handle);
+
+  /// @brief Release the buffer objects of an IPC import: the exporting device's handle and one
+  /// per peer device.
+  static void ReleaseImportHandles(HsaMemoryObjectHandle owner,
+                                   const std::vector<AllocationRegion::PeerImport>& peers);
 };
 
 }  // namespace core

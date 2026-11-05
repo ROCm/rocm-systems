@@ -5,7 +5,6 @@
 #  ************************************************************************
 
 import os
-import subprocess
 import pytest
 
 @pytest.mark.ext_tuner
@@ -29,30 +28,16 @@ def test_valid_config_with_wildcards(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/reduce_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     reduce_log_dir = os.path.join(paths.LOGDIR, "reduce_csv_plugin_test_logs")
     os.makedirs(reduce_log_dir, exist_ok=True)
 
     log_file = os.path.join(reduce_log_dir, "test_reduce_valid_config_with_wildcards.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"CSV Plugin reduce test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"CSV Plugin reduce test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -85,30 +70,16 @@ def test_valid_config_without_wildcards(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/reduce_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     reduce_log_dir = os.path.join(paths.LOGDIR, "reduce_csv_plugin_test_logs")
     os.makedirs(reduce_log_dir, exist_ok=True)
 
     log_file = os.path.join(reduce_log_dir, "test_reduce_valid_config_without_wildcards.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"CSV Plugin reduce test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"CSV Plugin reduce test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -142,30 +113,16 @@ def test_no_matching_config(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/reduce_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     reduce_log_dir = os.path.join(paths.LOGDIR, "reduce_csv_plugin_test_logs")
     os.makedirs(reduce_log_dir, exist_ok=True)
 
     log_file = os.path.join(reduce_log_dir, "test_reduce_no_matching_config.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"CSV Plugin reduce test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"CSV Plugin reduce test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -198,30 +155,16 @@ def test_incorrect_values_config(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/reduce_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     reduce_log_dir = os.path.join(paths.LOGDIR, "reduce_csv_plugin_test_logs")
     os.makedirs(reduce_log_dir, exist_ok=True)
 
     log_file = os.path.join(reduce_log_dir, "test_reduce_incorrect_values_config.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"CSV Plugin reduce test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"CSV Plugin reduce test failed, see {log_file}"
     
     # Check that plugin loaded some configurations (plugin should handle invalid values gracefully)
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -255,30 +198,16 @@ def test_unsupported_algo_proto_config(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/reduce_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     reduce_log_dir = os.path.join(paths.LOGDIR, "reduce_csv_plugin_test_logs")
     os.makedirs(reduce_log_dir, exist_ok=True)
 
     log_file = os.path.join(reduce_log_dir, "test_reduce_unsupported_algo_proto.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"CSV Plugin reduce test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"CSV Plugin reduce test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -312,30 +241,16 @@ def test_singlenode_config(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/reduce_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     reduce_log_dir = os.path.join(paths.LOGDIR, "reduce_csv_plugin_test_logs")
     os.makedirs(reduce_log_dir, exist_ok=True)
 
     log_file = os.path.join(reduce_log_dir, "test_reduce_singlenode.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"Single-node CSV Plugin reduce test failed, see {log_file}"
-
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"Single-node CSV Plugin reduce test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -392,30 +307,16 @@ def test_multinode_config(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/reduce_perf",
-        "-b", "8",       # 64 bytes start (faster than 1 byte)
-        "-e", "128M",      # 64MB end (much smaller than 16GB)
-        "-f", "2",        # factor 4 (fewer size steps)
-        "-g", "1",        # gap 1
+        *paths.TUNER_PERF_ARGS,
     ]
 
     reduce_log_dir = os.path.join(paths.LOGDIR, "reduce_csv_plugin_test_logs")
     os.makedirs(reduce_log_dir, exist_ok=True)
 
     log_file = os.path.join(reduce_log_dir, "test_reduce_multinode.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"Multi-node CSV Plugin reduce test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"Multi-node CSV Plugin reduce test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \

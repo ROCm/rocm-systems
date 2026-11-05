@@ -39,7 +39,7 @@ struct cpu_traits
     using device_t          = device<typename BackendProvider::backend_t>;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;
-    using backend_t         = typename BackendProvider::backend_t;
+    using backend_t         = BackendProvider::backend_t;
 
     static constexpr const char* device_name = "CPU";
 
@@ -71,31 +71,6 @@ struct cpu_traits
                                        is_first);
     }
 
-    template <typename Perfetto, typename DeviceVector>
-    static void init_perfetto_storage(const DeviceVector& /*device_entries*/)
-    {
-        Perfetto::init_storage();
-    }
-
-    template <typename Perfetto>
-    static void setup_counter_tracks(const device_ptr_t&      dev,
-                                     const enabled_metrics_t& enabled)
-    {
-        Perfetto::setup_counter_tracks(dev->get_index(), dev->get_monitored_cpus(),
-                                       enabled);
-    }
-
-    template <typename Perfetto, typename DeviceEntries>
-    static void post_process_perfetto(const DeviceEntries&     entries,
-                                      const enabled_metrics_t& enabled)
-    {
-        for(const auto& entry : entries)
-        {
-            Perfetto::post_process(entry.device->get_index(),
-                                   entry.device->get_monitored_cpus(), enabled);
-        }
-    }
-
     [[nodiscard]] static metrics_t get_metrics(const device_ptr_t&            dev,
                                                const enabled_metrics_t&       enabled,
                                                [[maybe_unused]] std::uint64_t timestamp)
@@ -117,7 +92,7 @@ struct cpu_traits
         std::vector<device_entry> entries;
         const auto                filter = get_device_filter<Settings>();
 
-        if(filter.mode == device_selection_mode::NONE)
+        if(filter.mode == device_selection_mode::none)
         {
             LOG_DEBUG("{} sampling disabled via configuration", device_name);
             return entries;
@@ -129,8 +104,8 @@ struct cpu_traits
         {
             const auto index = dev->get_index();
 
-            const bool should_include = (filter.mode == device_selection_mode::ALL) ||
-                                        (filter.mode == device_selection_mode::SPECIFIC &&
+            const bool should_include = (filter.mode == device_selection_mode::all) ||
+                                        (filter.mode == device_selection_mode::specific &&
                                          filter.indices.count(index) > 0);
 
             if(should_include)
@@ -152,7 +127,10 @@ struct cpu_traits
 private:
     static void warn_invalid_indices(const device_filter& filter, size_t max_index)
     {
-        if(filter.mode != device_selection_mode::SPECIFIC) return;
+        if(filter.mode != device_selection_mode::specific)
+        {
+            return;
+        }
         for(const auto idx : filter.indices)
         {
             if(idx >= max_index)

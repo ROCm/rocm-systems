@@ -1401,6 +1401,9 @@ enum class InstructionExecutionId : size_t {
   FlatAtomicFcmpswapX2Flat,
   FlatAtomicFminX2Flat,
   FlatAtomicFmaxX2Flat,
+  GlobalLoadDwordAddtidFlat,
+  GlobalStoreDwordAddtidFlat,
+  GlobalAtomicCsubFlat,
   Count,
 };
 

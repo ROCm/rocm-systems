@@ -6,9 +6,11 @@ General configuration file tests.
 """
 
 from __future__ import annotations
-import pytest
-from pathlib import Path
+
 import shutil
+from pathlib import Path
+
+import pytest
 from conftest import RocprofsysTest
 
 pytestmark = [pytest.mark.rocprof_config]
@@ -58,6 +60,11 @@ INVALID_TYPED_VALUE_CASES = [
         r"[Ii]nvalid value.*ROCPROFSYS_SAMPLING_FREQ",
         id="numeric-range",
     ),
+    pytest.param(
+        {"ROCPROFSYS_TRACE_PERIOD_CLOCK_ID": "boottime"},
+        r"[Ii]nvalid value.*ROCPROFSYS_TRACE_PERIOD_CLOCK_ID",
+        id="trace-period-clock-id",
+    ),
 ]
 
 VALID_BOOLEAN_VALUES = [
@@ -89,6 +96,11 @@ VALID_NON_BOOLEAN_TYPED_VALUE_CASES = [
         {"ROCPROFSYS_USE_SAMPLING": "ON", "ROCPROFSYS_SAMPLING_FREQ": "50"},
         r"[Ii]nvalid value.*ROCPROFSYS_SAMPLING_FREQ",
         id="numeric-range",
+    ),
+    pytest.param(
+        {"ROCPROFSYS_TRACE_PERIOD_CLOCK_ID": "cputime"},
+        r"[Ii]nvalid value.*ROCPROFSYS_TRACE_PERIOD_CLOCK_ID",
+        id="trace-period-clock-id",
     ),
 ]
 

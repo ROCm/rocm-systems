@@ -56,7 +56,8 @@ __launch_bounds__(512)
   __global__ void ddaAllReduceTreeFabric(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                          const T* __restrict__ sendbuff, int selfRank, int nRanks,
                                          FabricGpuBarrier barrier, const T* __restrict__ acc) {
-  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  // Release-acquire barrier ensures the stream-ordered scratch write is visible to peers.
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   // Use the compile-time rank count as the divisor when specialized.
   const int nRanksEff = (NRANKS_CT > 0) ? NRANKS_CT : nRanks;

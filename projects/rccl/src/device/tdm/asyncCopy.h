@@ -60,7 +60,7 @@ THE SOFTWARE.
 // multi-arch build (e.g. --amdgpu_targets gfx950 gfx1250) compiles this header
 // once per target, and naming a gfx1250-only builtin on any other device pass is
 // a hard error -- so every body that emits one has to be gated on these.
-#if defined(__gfx1250__) && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
                                   /* extend: || (defined(__gfxNNNN__) && ...) */
 #define ASYNC_COPY_SUPPORTED 1
 #else
@@ -70,7 +70,7 @@ THE SOFTWARE.
 // Same condition as tdmCopy.h's copy, kept #ifndef-guarded so the two headers can
 // be included together in either order.
 #ifndef TDM_SUPPORTED
-#if defined(__gfx1250__) && __has_builtin(__builtin_amdgcn_tensor_load_to_lds) && TDM_TOOLCHAIN_AVAILABLE
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __has_builtin(__builtin_amdgcn_tensor_load_to_lds) && TDM_TOOLCHAIN_AVAILABLE
                                   /* extend: || (defined(__gfxNNNN__) && ...) */
 #define TDM_SUPPORTED 1
 #else

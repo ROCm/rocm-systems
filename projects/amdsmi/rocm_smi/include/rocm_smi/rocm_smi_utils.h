@@ -64,7 +64,6 @@ rsmi_status_t GetDevBinaryBlob(amd::smi::DevInfoTypes type, uint32_t dv_ind, std
                                void* p_binary_data);
 rsmi_status_t ErrnoToRsmiStatus(int err);
 int ParseGpuOdFanRange(const std::string& path, uint64_t* min_pwm, uint64_t* max_pwm);
-int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm);
 rsmi_status_t WriteGpuOdFanPwm(const std::string& path, const std::string& value);
 [[nodiscard]] rsmi_status_t KFDIoctlErrnoToRsmiStatus(int err);
 std::string getRSMIStatusString(rsmi_status_t ret, bool fullStatus = true);
@@ -391,9 +390,11 @@ class TagTextContents_t {
   }
 
   decltype(auto) get_structured_data_subkey_last(const PrimaryKeyType& prim_key) {
+    auto size = get_structured_subkeys_size(prim_key);
+    // Avoid wrap-around on an empty subkey list.
+    uint32_t last_index = (size > 0) ? static_cast<uint32_t>(size - 1) : 0;
     return (get_structured_value_by_keys(
-        prim_key, get_structured_data_subkey_by_position(
-                      prim_key, static_cast<int>((get_structured_subkeys_size(prim_key) - 1)))));
+        prim_key, get_structured_data_subkey_by_position(prim_key, last_index)));
   }
 
   void reset() {

@@ -15,8 +15,9 @@ namespace rocjitsu {
 
 /// @brief Construct a decoder for @p Isa from a descriptor function pointer.
 template <typename Isa>
-std::unique_ptr<Decoder> make_isa_decoder(const IsaExecutionBackend *execution_backend = nullptr) {
-  return std::make_unique<IsaDecoder<Isa>>(execution_backend);
+std::unique_ptr<Decoder> make_isa_decoder(const IsaExecutionBackend *execution_backend = nullptr,
+                                          uint64_t isa_features = 0) {
+  return std::make_unique<IsaDecoder<Isa>>(execution_backend, isa_features);
 }
 
 } // namespace rocjitsu

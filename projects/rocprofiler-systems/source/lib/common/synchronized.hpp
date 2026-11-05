@@ -10,9 +10,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 /**
  * Sychronized is a wrapper that adds lock based write/read
@@ -74,7 +72,7 @@ public:
     // This overload to wlock allows a synchronized map whose keys map to synchronized
     // data to use a read lock on the key data and then a write lock on the mapped data.
     template <typename FuncT, typename... Args>
-        requires(IsMappedTypeV)
+        requires IsMappedTypeV
     decltype(auto) wlock(FuncT&& lambda, Args&&... args) const;
 
     // Upgradable lock. If read returns false, write will be called with a unique_lock.
@@ -100,8 +98,8 @@ decltype(auto)
 synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::rlock(FuncT&& lambda,
                                                                   Args&&... args) const
 {
-    auto guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
-    auto lock  = std::shared_lock{ m_mutex };
+    auto const guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
+    auto const lock  = std::shared_lock{ m_mutex };
     return std::forward<FuncT>(lambda)(m_data, std::forward<Args>(args)...);
 }
 
@@ -113,8 +111,8 @@ decltype(auto)
 synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::wlock(FuncT&& lambda,
                                                                   Args&&... args)
 {
-    auto guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
-    auto lock  = std::unique_lock{ m_mutex };
+    auto const guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
+    auto const lock  = std::unique_lock{ m_mutex };
     return std::forward<FuncT>(lambda)(m_data, std::forward<Args>(args)...);
 }
 
@@ -123,7 +121,7 @@ synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::wlock(FuncT&& lambda
 template <typename LockedType, policies::thread_state_policy ThreadStatePolicy,
           bool IsMappedTypeV>
 template <typename FuncT, typename... Args>
-    requires(IsMappedTypeV)
+    requires IsMappedTypeV
 decltype(auto)
 synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::wlock(FuncT&& lambda,
                                                                   Args&&... args) const
@@ -152,15 +150,17 @@ synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::ulock(ReadFuncT&&  r
     static_assert(std::is_same<read_return_type, bool>::value,
                   "read/write functions must return bool");
 
-    auto guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
+    auto const guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
 
     {
-        auto lock = std::shared_lock{ m_mutex };
-        if(read(m_data, std::forward<Args>(args)...)) return true;
+        auto const lock = std::shared_lock{ m_mutex };
+        if(read(m_data, std::forward<Args>(args)...))
+        {
+            return true;
+        }
     }
 
-    auto lock = std::unique_lock{ m_mutex };
+    auto const lock = std::unique_lock{ m_mutex };
     return write(m_data, std::forward<Args>(args)...);
 }
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common

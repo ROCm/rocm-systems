@@ -33,3 +33,9 @@ ncclResult_t ncclCommSetAsyncError(ncclComm_t comm, ncclResult_t nextState) {
     __atomic_store_n(&comm->asyncResult, nextState, __ATOMIC_RELEASE);
     return ncclSuccess;
 }
+
+struct ncclAsyncJob;
+ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*),
+                                 void (*)(void*), struct ncclComm*) {
+    return ncclSuccess;
+}

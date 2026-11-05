@@ -6,7 +6,9 @@
 
 ==================
 Using PC sampling
-==================
+*****************************
+Using PC sampling
+*****************************
 
 PC (Program Counter) sampling is a GPU profiling technique that periodically samples the program counter during GPU kernel execution. PC sampling helps in understanding code execution patterns and identifying hotspots.
 
@@ -18,6 +20,10 @@ Here are the benefits of using PC sampling:
 - Find heavily executed code paths
 
 To try out the PC sampling feature, you can use the ``rocprofv3`` command-line tool or the ROCprofiler-SDK library on ROCm 6.4 or later.
+
+For a comparison of the HOST_TRAP and STOCHASTIC sampling methods, see :ref:`Sampling methods <glance-pc-sampling-methods>` in the SDK overview.
+
+.. _pc-sampling-supported-gpus:
 
 Supported AMD Instinct GPUs
 ============================
@@ -38,6 +44,11 @@ The following table lists the AMD Instinct™ GPUs supporting PC sampling and sh
     - ✅
 
   * - MI350X
+    - CDNA4
+    - ✅
+    - ✅
+
+  * - MI350P
     - CDNA4
     - ✅
     - ✅
@@ -71,6 +82,10 @@ The following table lists the AMD Instinct™ GPUs supporting PC sampling and sh
     - CDNA2
     - ❌
     - ✅
+
+.. note::
+
+   AMD Instinct MI100 (CDNA1, gfx908) is not listed because it lacks the hardware support that PC sampling requires.
 
 PC sampling availability and configuration
 ===========================================

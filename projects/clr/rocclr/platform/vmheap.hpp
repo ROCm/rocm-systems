@@ -105,11 +105,11 @@ class VmHeap {
   //! Releases address range specified by the address
   bool ReleaseAddressRange(void* addr);
 
-  //! Commits actual physical memory on the specified address
-  bool CommitMemory(void* addr, size_t size);
+  //! Commits actual physical memory on the specified address and returns the physical memory
+  Memory* CommitMemory(void* addr, size_t size);
 
   //! Uncommits physical memory from the spcified address
-  bool UncommitMemory(void* addr, size_t size);
+  bool UncommitMemory(void* addr, size_t size, Memory* phys_mem_obj);
 
   HeapBlock* AllocBlock(size_t size  //! The allocation size
   );
@@ -157,7 +157,8 @@ class VmHeap {
   Device* device_;                      //!< Device that owns this heap
   GetQueueFunc get_vm_queue_;           //!< Queue for VM operations
 
-  std::vector<bool> mapped_mem_;  //!< A map of mapped memory, the size is total_size/chunk_size
+  //! Physical memory of the mapped chunks (nullptr if unmapped), the size is total_size/chunk_size
+  std::vector<Memory*> mapped_chunks_;
 };
 
 //! Implements an array of vm heaps of different sizes for more efficient management

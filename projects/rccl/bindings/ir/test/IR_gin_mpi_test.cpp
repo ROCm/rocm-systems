@@ -88,6 +88,9 @@ std::string cuMemReason() {
   const char* cumem = std::getenv("NCCL_CUMEM_ENABLE");
   if (!cumem || std::strcmp(cumem, "1") != 0)
     return "Symmetric memory required (NCCL_CUMEM_ENABLE=1)";
+  extern int ncclCuMemRuntimeSupported();
+  if (!ncclCuMemRuntimeSupported())
+    return "Symmetric memory not supported on this platform (cuMem requires kernel dma-buf/P2PDMA support)";
   return "";
 }
 
@@ -266,13 +269,13 @@ static constexpr int kIters = 16;
  * ==================================================================== */
 TEST_F(IRGinBarrierMPITest, C1_GinBarrierSession_TwoRanks) {
   /* ncclDevCommCreate needs symmetric-memory (cuMem/VMM) support, which the
-   * runtime disables on hosts with Linux kernel < 6.8 or a HIP version below
+   * runtime disables on hosts without working VMM / DMA-BUF export or a HIP version below
    * the cuMem threshold (ROCm 7.0.2.x backport / HIP >= 7.12). Skip (not fail)
    * when a GIN device comm cannot be created on this host. */
   if (ncclResult_t r = makeGinDevComm(); r != ncclSuccess)
     GTEST_SKIP() << "ncclDevCommCreate failed (" << ncclGetErrorString(r)
                  << "): GIN device comm requires symmetric-memory (cuMem) "
-                    "support — Linux kernel >= 6.8 and HIP >= 7.12 / ROCm "
+                    "support — working VMM and HIP >= 7.12 / ROCm "
                     "7.0.2.x. Not available on this host.";
 
   k_ir_gin_barrier<<<1, 32, 0, stream_>>>(kIters, devComm_);
@@ -291,7 +294,7 @@ TEST_F(IRGinBarrierMPITest, C2_CompositeBarrierSession_TwoRanks) {
   if (ncclResult_t r = makeGinDevComm(); r != ncclSuccess)
     GTEST_SKIP() << "ncclDevCommCreate failed (" << ncclGetErrorString(r)
                  << "): GIN device comm requires symmetric-memory (cuMem) "
-                    "support — Linux kernel >= 6.8 and HIP >= 7.12 / ROCm "
+                    "support — working VMM and HIP >= 7.12 / ROCm "
                     "7.0.2.x. Not available on this host.";
 
   k_ir_composite_barrier<<<1, 32, 0, stream_>>>(kIters, devComm_);

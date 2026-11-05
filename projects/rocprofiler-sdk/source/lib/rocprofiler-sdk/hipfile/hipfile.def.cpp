@@ -97,6 +97,12 @@ HIPFILE_API_INFO_DEFINITION_V(ROCPROFILER_HIPFILE_TABLE_ID_CORE, ROCPROFILER_HIP
 HIPFILE_API_INFO_DEFINITION_V(ROCPROFILER_HIPFILE_TABLE_ID_CORE, ROCPROFILER_HIPFILE_API_ID_hipFileSetParameterBool, hipFileSetParameterBool, pfn_hipfile_set_parameter_bool, param, value)
 HIPFILE_API_INFO_DEFINITION_V(ROCPROFILER_HIPFILE_TABLE_ID_CORE, ROCPROFILER_HIPFILE_API_ID_hipFileSetParameterString, hipFileSetParameterString, pfn_hipfile_set_parameter_string, param, desc_str)
 
+#if HIPFILE_RUNTIME_API_TABLE_STEP_VERSION >= 1
+HIPFILE_API_INFO_DEFINITION_V(ROCPROFILER_HIPFILE_TABLE_ID_CORE, ROCPROFILER_HIPFILE_API_ID_hipFileGetStatsL1, hipFileGetStatsL1, pfn_hipfile_get_stats_l1, stats)
+HIPFILE_API_INFO_DEFINITION_V(ROCPROFILER_HIPFILE_TABLE_ID_CORE, ROCPROFILER_HIPFILE_API_ID_hipFileGetStatsL2, hipFileGetStatsL2, pfn_hipfile_get_stats_l2, stats)
+HIPFILE_API_INFO_DEFINITION_V(ROCPROFILER_HIPFILE_TABLE_ID_CORE, ROCPROFILER_HIPFILE_API_ID_hipFileGetStatsL3, hipFileGetStatsL3, pfn_hipfile_get_stats_l3, stats)
+#endif
+
 #else
 #    error                                                                                         \
         "Do not compile this file directly. It is included by lib/rocprofiler-sdk/hipfile/hipfile.cpp"

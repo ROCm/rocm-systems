@@ -388,7 +388,7 @@ public:
     };
 
     // Build PMC enable PM4 commands - enable CP counting for a specific queue
-    void Enable(CmdBuffer* cmd_buffer)
+    void Enable(CmdBuffer* cmd_buffer) override
     {
         // Program Compute Perfcount Enable register to support perf counting
         builder.BuildWriteShRegPacket(cmd_buffer,
@@ -396,7 +396,7 @@ public:
                                       Primitives::cp_perfcount_enable_value());
     }
     // Build PMC disable PM4 commands - enable CP counting for a specific queue
-    void Disable(CmdBuffer* cmd_buffer)
+    void Disable(CmdBuffer* cmd_buffer) override
     {
         // Program Compute Perfcount Enable register to support perf counting
         builder.BuildWriteShRegPacket(cmd_buffer,
@@ -404,7 +404,7 @@ public:
                                       Primitives::cp_perfcount_disable_value());
     }
     // Build PMC waite-idle PM4 commands - enable CP counting for a specific queue
-    void WaitIdle(CmdBuffer* cmd_buffer)
+    void WaitIdle(CmdBuffer* cmd_buffer) override
     {
         // Program Compute Perfcount WaiteIdle register to support perf counting
         builder.BuildWriteWaitIdlePacket(cmd_buffer);
@@ -658,7 +658,7 @@ public:
             // Configure SQ block
             if(block_info->attr & CounterBlockSqAttr)
             {
-                if(Primitives::GFXIP_LEVEL == 9)
+                if(!(Primitives::SQ_PERFCOUNTER_MASK_ADDR == Register()))
                     builder.BuildWriteUConfigRegPacket(cmd_buffer,
                                                        Primitives::SQ_PERFCOUNTER_MASK_ADDR,
                                                        Primitives::sq_mask_value(counter_des));

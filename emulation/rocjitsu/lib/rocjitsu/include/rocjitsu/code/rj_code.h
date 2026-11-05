@@ -162,10 +162,12 @@ typedef enum rj_code_target_id_t {
   ROCJITSU_CODE_TARGET_GFX1201 = 4,
   /// @brief gfx1250 target ID.
   ROCJITSU_CODE_TARGET_GFX1250 = 5,
+  /// @brief gfx1251 target ID.
+  ROCJITSU_CODE_TARGET_GFX1251 = 6,
   // \NPI new GPU: add its public target identifier here and bind its
   // code-object name and ELF machine value in the corresponding ISA provider.
   /// @brief Number of named GPU targets and their exclusive upper bound.
-  ROCJITSU_CODE_TARGET_NUM_TARGETS = 6,
+  ROCJITSU_CODE_TARGET_NUM_TARGETS = 7,
   /// @brief Stable sentinel value representing an invalid target.
   ROCJITSU_CODE_TARGET_INVALID = INT32_MAX
 } rj_code_target_id_t;
@@ -194,8 +196,12 @@ typedef struct rj_code_executable_t rj_code_executable_t;
 /// @brief Load an executable from a file.
 /// @param[in] path Path to the executable file.
 /// @param[out] exec Handle to the newly created executable (refcount = 0; caller owns it).
+/// The value of @p *exec is unchanged on failure.
 /// @returns ROCJITSU_STATUS_SUCCESS on success.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT if @p path or @p exec is NULL.
+/// @retval ROCJITSU_STATUS_INVALID_CODE_OBJECT if loading or parsing the file fails.
+/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES if memory allocation fails.
+/// @retval ROCJITSU_STATUS_ERROR if another exception occurs while loading the executable.
 RJ_API_EXPORT rj_status_t rj_code_executable_create(const char *path, rj_code_executable_t **exec);
 
 /// @brief Increment the executable's reference count.
@@ -263,11 +269,14 @@ typedef struct rj_code_inst_list_t rj_code_inst_list_t;
 
 /// @brief Create an instruction list from a code object.
 /// @param[in] obj Code object to decode instructions from.
-/// @param[in] target_id Target architecture for decoding.
+/// @param[in] target_id Concrete GPU target to use for decoding, not only its architecture family.
+/// If the code object has recognizable concrete-target metadata, this value must match it. An
+/// explicit target remains the fallback for legacy or synthetic objects whose target metadata is
+/// not recognizable.
 /// @param[out] inst_list Handle to the newly created instruction list (refcount = 0).
 /// @retval ROCJITSU_STATUS_SUCCESS Instruction list was created successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL or the target is
-/// unsupported.
+/// unsupported, or target_id does not match recognizable code-object target metadata.
 /// @retval ROCJITSU_STATUS_ERROR An instruction could not be decoded.
 RJ_API_EXPORT rj_status_t rj_code_inst_list_create(rj_code_object_t *obj,
                                                    rj_code_target_id_t target_id,
@@ -299,11 +308,14 @@ typedef struct rj_code_basic_block_t rj_code_basic_block_t;
 
 /// @brief Create a list of basic blocks from a code object's .text sections.
 /// @param[in] obj Code object to analyze.
-/// @param[in] target_id Target architecture for decoding.
+/// @param[in] target_id Concrete GPU target to use for decoding, not only its architecture family.
+/// If the code object has recognizable concrete-target metadata, this value must match it. An
+/// explicit target remains the fallback for legacy or synthetic objects whose target metadata is
+/// not recognizable.
 /// @param[out] list Handle to the newly created basic block list (refcount = 0; caller owns it).
 /// @retval ROCJITSU_STATUS_SUCCESS Basic block list was created successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL or the target is
-/// unsupported.
+/// unsupported, or target_id does not match recognizable code-object target metadata.
 /// @retval ROCJITSU_STATUS_ERROR An instruction could not be decoded.
 RJ_API_EXPORT rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj,
                                                           rj_code_target_id_t target_id,

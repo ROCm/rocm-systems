@@ -183,9 +183,12 @@ typedef enum rocprofiler_callback_tracing_kind_t  // NOLINT(performance-enum-siz
     ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,  ///< @see ::rocprofiler_hip_stream_operation_t
     ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,  ///< @see
                                                          ///< ::rocprofiler_marker_core_range_api_id_t
-    ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,     ///< @see ::rocprofiler_hip_graph_operation_t
-    ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,  ///< rocSHMEM API tracing
-    ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,   ///< hipFILE API Tracing
+    ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,      ///< @see ::rocprofiler_hip_graph_operation_t
+    ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,   ///< rocSHMEM API tracing
+    ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,    ///< hipFILE API Tracing
+    ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,  ///< EXPERIMENTAL: @see
+                                                 ///< ::rocprofiler_kernel_replay_operation_t
+    ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,      ///< @see ::rocprofiler_hip_event_operation_t
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -242,6 +245,7 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT,
     ROCPROFILER_BUFFER_TRACING_HIPFILE_API,  ///< hipFILE tracing
     ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT,
+    ROCPROFILER_BUFFER_TRACING_HIP_EVENT,  ///< @see ::rocprofiler_hip_event_operation_t
     ROCPROFILER_BUFFER_TRACING_LAST,
 
     /// @var ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT
@@ -384,6 +388,23 @@ typedef enum rocprofiler_kernel_dispatch_operation_t  // NOLINT(performance-enum
 } rocprofiler_kernel_dispatch_operation_t;
 
 /**
+ * @brief ROCProfiler Kernel Replay Tracing Operation Types.
+ *
+ * CONFIG is delivered once per replayed dispatch (enter before replay begins,
+ * exit after all passes complete). PASS is delivered once per replay iteration
+ * (enter before kernel submission, exit after kernel completion).
+ */
+typedef enum rocprofiler_kernel_replay_operation_t  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_KERNEL_REPLAY_NONE   = 0,  ///< Unknown kernel replay operation
+    ROCPROFILER_KERNEL_REPLAY_CONFIG = 1,  ///< Replay configuration (pass count, loop control)
+    ROCPROFILER_KERNEL_REPLAY_PASS,        ///< Per-pass begin/end notification
+    // TODO: ROCPROFILER_KERNEL_REPLAY_SNAPSHOT  -- memory snapshot enter/exit
+    // TODO: ROCPROFILER_KERNEL_REPLAY_RESTORE   -- memory restore enter/exit
+    ROCPROFILER_KERNEL_REPLAY_LAST,
+} rocprofiler_kernel_replay_operation_t;
+
+/**
  * @brief PC Sampling Method.
  */
 typedef enum rocprofiler_pc_sampling_method_t  // NOLINT(performance-enum-size)
@@ -428,6 +449,32 @@ typedef enum rocprofiler_scratch_memory_operation_t
     ROCPROFILER_SCRATCH_MEMORY_ASYNC_RECLAIM,  ///< Scratch memory asynchronously reclaimed
     ROCPROFILER_SCRATCH_MEMORY_LAST,
 } rocprofiler_scratch_memory_operation_t;
+
+/**
+ * @brief ROCProfiler HIP Event Tracing Operation Types.
+ */
+typedef enum rocprofiler_hip_event_operation_t  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_HIP_EVENT_NONE   = 0,  ///< Unknown HIP event operation
+    ROCPROFILER_HIP_EVENT_RECORD = 1,  ///< hipEventRecord barrier
+    ROCPROFILER_HIP_EVENT_WAIT,        ///< hipStreamWaitEvent barrier
+    ROCPROFILER_HIP_EVENT_LAST,
+
+    /// @var ROCPROFILER_HIP_EVENT_RECORD
+    /// @brief Invoke callback when a HIP event record barrier is enqueued and when it completes.
+    /// When the phase is ::ROCPROFILER_CALLBACK_PHASE_ENTER, this is an opportunity to push an
+    /// external correlation id before the barrier is submitted. When the phase is
+    /// ::ROCPROFILER_CALLBACK_PHASE_EXIT, the barrier has been submitted and contexts have been
+    /// captured. The ::ROCPROFILER_CALLBACK_PHASE_NONE callback fires after the barrier completes
+    /// on the GPU. Buffer records are emitted after the barrier completes on the GPU; enqueue
+    /// is already captured by HIP API buffer tracing.
+    ///
+    /// @var ROCPROFILER_HIP_EVENT_WAIT
+    /// @brief Invoke callback when a HIP stream wait event barrier is enqueued and when it
+    /// completes. Follows the same phase semantics as RECORD. Not all hipStreamWaitEvent calls
+    /// produce a barrier (e.g. same-stream, already-complete, or never-recorded events); in those
+    /// cases no enqueue or complete callback is generated.
+} rocprofiler_hip_event_operation_t;
 
 /**
  * @brief Enumeration for specifying runtime libraries supported by rocprofiler. This enumeration is

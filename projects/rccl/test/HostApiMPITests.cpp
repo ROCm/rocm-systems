@@ -20,16 +20,25 @@
  *   E1  - PutSignalNullLocalbuff:  null localbuf → error (or skip)
  *   E2  - PutSignalNullWindow:     null peerWin  → error
  *   E3  - PutSignalOffsetOutOfBounds: offset past end → error (or skip)
- *   E4  - PutSignalInvalidSigIdx:  sigIdx=1      → error (or skip)
+ *   E4  - PutSignalInvalidSigIdx:  sigIdx=1 on default numRmaSig=1 → error
+ *   MS1 - PutSignalMultiSigIdx:    numRmaSig=2 unclamped, sigIdx=1 accepted
+ *   MC1 - PutSignalMultiCtx:       numRmaCtx=2, striped puts + waits
+ *   P7  - DenseAllToAllPutSignal: every rank puts to every peer in one group,
+ *                                 uniform and uneven sizes
  *   M1  - TwoCommunicatorsIndependentWindows: two comms, independent windows
  *   M2  - StressManySmallPuts:     100×64-byte PUTs, opCnt=100 wait
  *   P6  - PutToSelf:              PUT to own window (peer=self loopback)
  *   W3  - DoubleDeregister:       ncclCommWindowDeregister twice on same handle
  *   W4  - DestroyCommWithoutDeregister: window auto-freed during commFree
+ *   R1  - RmaDisableIntraNodePutUsesCe: NCCL_RMA_DISABLE=1 leaves LSA puts working
+ *   R2  - RmaDisableCrossNodePutFails:  NCCL_RMA_DISABLE=1 fails non-LSA put/wait,
+ *                                       without hanging or poisoning the comm
  *
- * Constraints (proxy GIN path, current API limits):
- *   sigIdx = 0, ctx = 0, flags = 0, winFlags = winMode()
+ * Constraints (proxy GIN path):
+ *   flags = 0, winFlags = winMode()
  *     (NCCL_WIN_COLL_SYMMETRIC when NCCL_CUMEM_ENABLE=1, else NCCL_WIN_DEFAULT)
+ *   Default communicators still use numRmaSig=1 / numRmaCtx=1, so E4/E5 reject
+ *   sigIdx=1 / ctx=1. Multi-signal/context happy paths use HostApiConfigTest.
  *
  * API signatures (from src/nccl.h.in):
  *   ncclResult_t ncclMemAlloc(void** ptr, size_t size);
@@ -56,6 +65,7 @@
 #include "MPITestBase.hpp"
 #include "MPIHelpers.hpp"
 #include "ResourceGuards.hpp"
+#include "SymmetricMemPrereq.hpp"
 #include "HostApiHelpers.hpp"
 #include "TestChecks.hpp"
 
@@ -65,6 +75,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <chrono>
+#include <iterator>
+#include <vector>
 
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
@@ -121,6 +133,35 @@ protected:
     }
 };
 
+// Communicator created with ncclCommInitRankConfig so tests can raise
+// numRmaSig / numRmaCtx above the default of 1.
+class HostApiConfigTest : public HostApiTest
+{
+protected:
+    int wantNumRmaSig_ = 1;
+    int wantNumRmaCtx_ = 1;
+    ncclConfig_t config_ = NCCL_CONFIG_INITIALIZER;
+
+    ncclConfig_t* communicatorConfig() override
+    {
+        config_.numRmaSig = wantNumRmaSig_;
+        config_.numRmaCtx = wantNumRmaCtx_;
+        return &config_;
+    }
+};
+
+class HostApiMultiSigTest : public HostApiConfigTest
+{
+protected:
+    HostApiMultiSigTest() { wantNumRmaSig_ = 2; }
+};
+
+class HostApiMultiCtxTest : public HostApiConfigTest
+{
+protected:
+    HostApiMultiCtxTest() { wantNumRmaCtx_ = 2; }
+};
+
 // ============================================================================
 // Constants shared across tests
 // ============================================================================
@@ -143,12 +184,22 @@ constexpr unsigned int kFlags  = 0;
 //   NCCL_CUMEM_ENABLE=0 -> NCCL_WIN_DEFAULT         (non-symmetric fallback)
 inline int winMode()
 {
-    static int cumem_ = -1;
-    if (cumem_ < 0) {
+    static int mode = -2;
+    if (mode == -2) {
         const char* e = getenv("NCCL_CUMEM_ENABLE");
-        cumem_ = e ? (atoi(e) != 0) : true; 
+        const bool wantSymmetric = e ? (atoi(e) != 0) : true;
+        mode = (wantSymmetric && ncclCuMemRuntimeSupported()) ? NCCL_WIN_COLL_SYMMETRIC
+                                                              : NCCL_WIN_DEFAULT;
     }
-    return cumem_ ? NCCL_WIN_COLL_SYMMETRIC : NCCL_WIN_DEFAULT;
+    return mode;
+}
+
+// NCCL_RMA_DISABLE is an NCCL_PARAM, cached for the process on first read, so a
+// test cannot set it itself; the runner config does, and R1/R2 skip without it.
+inline bool rmaDisableSet()
+{
+    const char* e = getenv("NCCL_RMA_DISABLE");
+    return e && atoi(e) != 0;
 }
 
 // Calibrate how many clock64() cycles approximate targetMs of GPU busy wait.
@@ -301,6 +352,9 @@ TEST_F(HostApiTest, GraphCaptureReplayPutWait)
     {
         GTEST_SKIP() << "Need exactly 2 MPI processes";
     }
+
+    if (auto reason = symmetricMemEnvAndRuntimeSkipReason(); !reason.empty())
+        GTEST_SKIP() << reason;
 
     const int   myRank = rank();
     ncclComm_t  comm   = getActiveCommunicator();
@@ -1001,9 +1055,11 @@ TEST_F(HostApiTest, PutSignalOffsetOutOfBounds)
 
 /**
  * @test HostApiTest.PutSignalInvalidSigIdx
- * @brief ncclPutSignal with sigIdx=1 (reserved, must be 0) should error.
+ * @brief ncclPutSignal with sigIdx=1 on the default communicator (numRmaSig=1)
+ *        should error. sigIdx is no longer hard-wired to 0; it must fall in
+ *        [0, numRmaSig).
  *
- * Non-collective: only rank 0 calls the API.  Skip if not validated.
+ * Non-collective: only rank 0 calls the API.
  */
 TEST_F(HostApiTest, PutSignalInvalidSigIdx)
 {
@@ -1036,6 +1092,89 @@ TEST_F(HostApiTest, PutSignalInvalidSigIdx)
     }
     ASSERT_MPI_NE(ncclSuccess, res);
     TEST_INFO("E4 rank %d: PutSignalInvalidSigIdx done.", myRank);
+}
+
+// ============================================================================
+// MS1 — PutSignalMultiSigIdx
+// ============================================================================
+
+/**
+ * @test HostApiMultiSigTest.PutSignalMultiSigIdx
+ * @brief numRmaSig=2 survives ncclCommInitRankConfig unclamped, and sigIdx=1 is accepted.
+ *
+ * Rank 0 issues two puts to distinct window offsets, one with sigIdx 0 and one
+ * with sigIdx 1. Rank 1 waits on each descriptor, then verifies both payloads.
+ * The proxy accumulates one host counter per signal slot, so a shared counter
+ * reaching 2 would also satisfy both opCnt=1 waits. This does not prove the
+ * two sigIdx values are independent streams.
+ */
+TEST_F(HostApiMultiSigTest, PutSignalMultiSigIdx)
+{
+    if(!validateTestPrerequisites(/*min=*/2, /*max=*/2))
+    {
+        GTEST_SKIP() << "Need exactly 2 MPI processes";
+    }
+
+    const int   myRank = rank();
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    constexpr size_t kWin = 4 * kTransferSize;
+    constexpr size_t kSend0 = 0;
+    constexpr size_t kSend1 = kTransferSize;
+    constexpr size_t kRecv0 = 2 * kTransferSize;
+    constexpr size_t kRecv1 = 3 * kTransferSize;
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, kWin));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t win = nullptr;
+    NcclWindowGuard wg(comm, winBuf, kWin, &win, winMode());
+    ASSERT_MPI_NE(win, nullptr);
+    ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
+
+    ncclResult_t putRes = ncclSuccess;
+    if(myRank == 0)
+    {
+        void* src0 = static_cast<uint8_t*>(winBuf) + kSend0;
+        void* src1 = static_cast<uint8_t*>(winBuf) + kSend1;
+        FillBuf(src0, kTransferSize, /*senderRank=*/0);
+        FillBuf(src1, kTransferSize, /*senderRank=*/1);
+        putRes = ncclPutSignal(src0, kTransferSize, ncclUint8,
+                               /*peer=*/1, win, /*peerWinOffset=*/kRecv0,
+                               /*sigIdx=*/0, kCtx, kFlags, comm, stream);
+        if(putRes == ncclSuccess)
+        {
+            putRes = ncclPutSignal(src1, kTransferSize, ncclUint8,
+                                   /*peer=*/1, win, /*peerWinOffset=*/kRecv1,
+                                   /*sigIdx=*/1, kCtx, kFlags, comm, stream);
+        }
+    }
+    ASSERT_MPI_EQ(ncclSuccess, putRes);
+
+    ncclResult_t waitRes = ncclSuccess;
+    if(myRank == 1)
+    {
+        ncclWaitSignalDesc_t d0{/*opCnt=*/1, /*peer=*/0, /*sigIdx=*/0, kCtx};
+        ncclWaitSignalDesc_t d1{/*opCnt=*/1, /*peer=*/0, /*sigIdx=*/1, kCtx};
+        waitRes = ncclWaitSignal(/*nDesc=*/1, &d0, comm, stream);
+        if(waitRes == ncclSuccess)
+            waitRes = ncclWaitSignal(/*nDesc=*/1, &d1, comm, stream);
+    }
+    ASSERT_MPI_EQ(ncclSuccess, waitRes);
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+    bool ok = true;
+    if(myRank == 1)
+    {
+        const uint8_t* base = static_cast<const uint8_t*>(winBuf);
+        ok = VerifyBuf(base + kRecv0, kTransferSize, /*seed=*/0) &&
+             VerifyBuf(base + kRecv1, kTransferSize, /*seed=*/1);
+    }
+    ASSERT_MPI_TRUE(ok);
+
+    TEST_INFO("MS1 rank %d: PutSignalMultiSigIdx passed.", myRank);
 }
 
 // ============================================================================
@@ -1413,6 +1552,188 @@ TEST_F(HostApiTest, AllToAllPut)
 }
 
 // ============================================================================
+// P7 — DenseAllToAllPutSignal
+// ============================================================================
+
+namespace
+{
+constexpr int     kA2aPutsPerPeer  = 2;
+constexpr size_t  kA2aGuard        = 4096;
+constexpr uint8_t kA2aSentinel     = 0xA5;
+constexpr size_t  kA2aUniformBytes = 4u << 20;
+// Around the default NCCL_CE_CHUNK_SIZE (8 MiB), none a multiple of it.
+constexpr size_t  kA2aUnevenBytes[] = {(3u << 20) + 4096, (9u << 20) + 12288, (12u << 20) + 262144};
+constexpr size_t  kA2aSlot          = 13u << 20;
+
+constexpr bool a2aPutFitsSlot(size_t bytes)
+{
+    return bytes % sizeof(uint64_t) == 0 && bytes + kA2aGuard <= kA2aSlot;
+}
+
+constexpr bool a2aAllPutsFitSlot()
+{
+    for(size_t bytes : kA2aUnevenBytes)
+        if(!a2aPutFitsSlot(bytes)) return false;
+    return a2aPutFitsSlot(kA2aUniformBytes);
+}
+static_assert(a2aAllPutsFitSlot(), "every put must be whole 64-bit words and fit its slot with the guard");
+
+size_t a2aPutBytes(bool uneven, int src, int dst, int k)
+{
+    return uneven ? kA2aUnevenBytes[(src + dst + k) % std::size(kA2aUnevenBytes)] : kA2aUniformBytes;
+}
+
+// The first nRanks * kA2aPutsPerPeer slots hold what this rank sends, the rest what it receives.
+size_t a2aSendOffset(int dst, int k)
+{
+    return kA2aSlot * (dst * kA2aPutsPerPeer + k);
+}
+
+size_t a2aRecvOffset(int nRanks, int src, int k)
+{
+    return kA2aSlot * ((nRanks + src) * kA2aPutsPerPeer + k);
+}
+
+// Word i of put k from src to dst; no two words of the test are equal, so a
+// chunk that lands at the wrong offset or at the wrong peer changes the data.
+uint64_t a2aWord(int nRanks, int src, int dst, int k, size_t i)
+{
+    const uint64_t op = (static_cast<uint64_t>(src) * nRanks + dst) * kA2aPutsPerPeer + k;
+    return op << 32 | i;
+}
+
+bool a2aFill(void* buf, size_t bytes, int nRanks, int src, int dst, int k)
+{
+    std::vector<uint64_t> words(bytes / sizeof(uint64_t));
+    for(size_t i = 0; i < words.size(); ++i)
+        words[i] = a2aWord(nRanks, src, dst, k, i);
+    return hipMemcpy(buf, words.data(), bytes, hipMemcpyHostToDevice) == hipSuccess;
+}
+
+bool a2aVerify(const void* buf, size_t bytes, int nRanks, int src, int dst, int k)
+{
+    std::vector<uint64_t> words(bytes / sizeof(uint64_t));
+    if(hipMemcpy(words.data(), buf, bytes, hipMemcpyDeviceToHost) != hipSuccess)
+        return false;
+    for(size_t i = 0; i < words.size(); ++i)
+    {
+        if(words[i] != a2aWord(nRanks, src, dst, k, i))
+        {
+            fprintf(stderr, "a2aVerify: put %d from rank %d to rank %d, word %zu: expected %#llx got %#llx\n",
+                    k, src, dst, i, static_cast<unsigned long long>(a2aWord(nRanks, src, dst, k, i)),
+                    static_cast<unsigned long long>(words[i]));
+            return false;
+        }
+    }
+    return true;
+}
+} // namespace
+
+/**
+ * @test HostApiTest.DenseAllToAllPutSignal
+ * @brief Every rank puts twice to every other rank in one group, then waits for
+ *        all of them (AICOMRCCL-1964). P5 covers the ring-neighbour case; this
+ *        is the dense N-to-N one.
+ *
+ * Runs once with uniform sizes and once with uneven sizes around the copy-engine
+ * chunk size; with 3+ ranks on one node the uneven profile is what makes the
+ * copy engine split its batches into chunks. Each put lands in its own slot with
+ * its own pattern, and the rest of the slot after it must stay untouched.
+ *
+ * A signal that overtook its data is caught only if the copy is still in flight
+ * when the receiver reads the slot back, so that ordering is checked
+ * probabilistically.
+ */
+TEST_F(HostApiTest, DenseAllToAllPutSignal)
+{
+    if(!validateTestPrerequisites(/*min=*/2, kNoProcessLimit, kNoPowerOfTwoRequired,
+                                  /*min_nodes=*/1, kRequireSingleNode))
+    {
+        GTEST_SKIP() << "Need at least 2 MPI processes on a single node";
+    }
+
+    const int    myRank  = rank();
+    const int    nRanks_ = nRanks();
+    ncclComm_t   comm    = getActiveCommunicator();
+    hipStream_t  stream  = getActiveStream();
+    const size_t winSize = kA2aSlot * 2 * nRanks_ * kA2aPutsPerPeer;
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, winSize));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t win = nullptr;
+    NcclWindowGuard wg(comm, winBuf, winSize, &win, winMode());
+    ASSERT_MPI_NE(win, nullptr);
+    ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
+
+    uint8_t* base = static_cast<uint8_t*>(winBuf);
+
+    std::vector<ncclWaitSignalDesc_t> descs;
+    for(int peer = 0; peer < nRanks_; ++peer)
+    {
+        if(peer != myRank)
+            descs.push_back({/*opCnt=*/kA2aPutsPerPeer, peer, kSigIdx, kCtx});
+    }
+
+    for(bool uneven : {false, true})
+    {
+        SCOPED_TRACE(uneven ? "uneven sizes" : "uniform sizes");
+        FillSentinel(base, winSize, kA2aSentinel);
+        bool filled = true;
+        for(int peer = 0; peer < nRanks_ && filled; ++peer)
+        {
+            if(peer == myRank) continue;
+            for(int k = 0; k < kA2aPutsPerPeer && filled; ++k)
+                filled = a2aFill(base + a2aSendOffset(peer, k), a2aPutBytes(uneven, myRank, peer, k), nRanks_, myRank, peer, k);
+        }
+        ASSERT_MPI_TRUE(filled);
+        ASSERT_MPI_EQ(hipSuccess, hipDeviceSynchronize());
+        ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
+
+        ncclResult_t putRes = ncclGroupStart();
+        for(int peer = 0; peer < nRanks_ && putRes == ncclSuccess; ++peer)
+        {
+            if(peer == myRank) continue;
+            for(int k = 0; k < kA2aPutsPerPeer && putRes == ncclSuccess; ++k)
+            {
+                putRes = ncclPutSignal(base + a2aSendOffset(peer, k), a2aPutBytes(uneven, myRank, peer, k), ncclUint8,
+                                       peer, win, a2aRecvOffset(nRanks_, myRank, k),
+                                       kSigIdx, kCtx, kFlags, comm, stream);
+            }
+        }
+        ncclResult_t endRes = ncclGroupEnd();
+        if(putRes == ncclSuccess) putRes = endRes;
+        ASSERT_MPI_EQ(ncclSuccess, putRes);
+
+        ncclResult_t waitRes = ncclWaitSignal(static_cast<int>(descs.size()), descs.data(), comm, stream);
+        ASSERT_MPI_EQ(ncclSuccess, waitRes);
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+        bool ok = true;
+        for(int src = 0; src < nRanks_ && ok; ++src)
+        {
+            for(int k = 0; k < kA2aPutsPerPeer && ok; ++k)
+            {
+                const uint8_t* slot = base + a2aRecvOffset(nRanks_, src, k);
+                if(src == myRank)
+                {
+                    // No put targets this rank's own receive slots.
+                    ok = AllSentinel(slot, kA2aSlot, kA2aSentinel);
+                    continue;
+                }
+                const size_t bytes = a2aPutBytes(uneven, src, myRank, k);
+                ok = a2aVerify(slot, bytes, nRanks_, src, myRank, k) &&
+                     AllSentinel(slot + bytes, kA2aSlot - bytes, kA2aSentinel);
+            }
+        }
+        ASSERT_MPI_TRUE(ok);
+
+        TEST_INFO("P7 rank %d: DenseAllToAllPutSignal passed (%s sizes).", myRank, uneven ? "uneven" : "uniform");
+    }
+}
+
+// ============================================================================
 // O2 — SignalImpliesPriorPutsDelivered
 // ============================================================================
 
@@ -1494,10 +1815,11 @@ TEST_F(HostApiTest, SignalImpliesPriorPutsDelivered)
 
 /**
  * @test HostApiTest.PutSignalInvalidCtx
- * @brief ncclPutSignal with ctx=1 (reserved, must be 0) should error.
+ * @brief ncclPutSignal with ctx=1 on the default communicator (numRmaCtx=1)
+ *        should error. ctx is no longer hard-wired to 0; it must fall in
+ *        [0, numRmaCtx).
  *
- * Non-collective: only rank 0 calls the API.  Skip if argcheck is not
- * implemented (i.e., the call returns ncclSuccess).
+ * Non-collective: only rank 0 calls the API.
  */
 TEST_F(HostApiTest, PutSignalInvalidCtx)
 {
@@ -1530,6 +1852,87 @@ TEST_F(HostApiTest, PutSignalInvalidCtx)
     }
     ASSERT_MPI_NE(ncclSuccess, res);
     TEST_INFO("E5 rank %d: PutSignalInvalidCtx done.", myRank);
+}
+
+// ============================================================================
+// MC1 — PutSignalMultiCtx
+// ============================================================================
+
+/**
+ * @test HostApiMultiCtxTest.PutSignalMultiCtx
+ * @brief Stripe two puts across ctx 0 and ctx 1 on numRmaCtx=2.
+ *
+ * Rank 0 issues one put per context to distinct window offsets. Rank 1 waits
+ * once with nDesc=2 (ctx 0 and ctx 1) so the enqueue grouping loop emits one
+ * task per distinct descriptor ctx, then verifies both payloads.
+ */
+TEST_F(HostApiMultiCtxTest, PutSignalMultiCtx)
+{
+    if(!validateTestPrerequisites(/*min=*/2, /*max=*/2))
+    {
+        GTEST_SKIP() << "Need exactly 2 MPI processes";
+    }
+
+    const int   myRank = rank();
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    constexpr size_t kWin = 4 * kTransferSize;
+    constexpr size_t kSend0 = 0;
+    constexpr size_t kSend1 = kTransferSize;
+    constexpr size_t kRecv0 = 2 * kTransferSize;
+    constexpr size_t kRecv1 = 3 * kTransferSize;
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, kWin));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t win = nullptr;
+    NcclWindowGuard wg(comm, winBuf, kWin, &win, winMode());
+    ASSERT_MPI_NE(win, nullptr);
+    ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
+
+    ncclResult_t putRes = ncclSuccess;
+    if(myRank == 0)
+    {
+        void* src0 = static_cast<uint8_t*>(winBuf) + kSend0;
+        void* src1 = static_cast<uint8_t*>(winBuf) + kSend1;
+        FillBuf(src0, kTransferSize, /*senderRank=*/0);
+        FillBuf(src1, kTransferSize, /*senderRank=*/2);
+        putRes = ncclPutSignal(src0, kTransferSize, ncclUint8,
+                               /*peer=*/1, win, /*peerWinOffset=*/kRecv0,
+                               kSigIdx, /*ctx=*/0, kFlags, comm, stream);
+        if(putRes == ncclSuccess)
+        {
+            putRes = ncclPutSignal(src1, kTransferSize, ncclUint8,
+                                   /*peer=*/1, win, /*peerWinOffset=*/kRecv1,
+                                   kSigIdx, /*ctx=*/1, kFlags, comm, stream);
+        }
+    }
+    ASSERT_MPI_EQ(ncclSuccess, putRes);
+
+    ncclResult_t waitRes = ncclSuccess;
+    if(myRank == 1)
+    {
+        ncclWaitSignalDesc_t descs[2] = {
+            {/*opCnt=*/1, /*peer=*/0, kSigIdx, /*ctx=*/0},
+            {/*opCnt=*/1, /*peer=*/0, kSigIdx, /*ctx=*/1},
+        };
+        waitRes = ncclWaitSignal(/*nDesc=*/2, descs, comm, stream);
+    }
+    ASSERT_MPI_EQ(ncclSuccess, waitRes);
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+    bool ok = true;
+    if(myRank == 1)
+    {
+        const uint8_t* base = static_cast<const uint8_t*>(winBuf);
+        ok = VerifyBuf(base + kRecv0, kTransferSize, /*seed=*/0) &&
+             VerifyBuf(base + kRecv1, kTransferSize, /*seed=*/2);
+    }
+    ASSERT_MPI_TRUE(ok);
+
+    TEST_INFO("MC1 rank %d: PutSignalMultiCtx passed.", myRank);
 }
 
 // ============================================================================
@@ -1993,6 +2396,143 @@ TEST_F(HostApiTest, WindowRegisterInvalidArgsNullWindow)
     }
 
     TEST_INFO("W5 rank %d: WindowRegisterInvalidArgsNullWindow passed.", myRank);
+}
+
+// ============================================================================
+// R1 — RmaDisableIntraNodePutUsesCe
+// ============================================================================
+
+/**
+ * @test HostApiTest.RmaDisableIntraNodePutUsesCe
+ * @brief NCCL_RMA_DISABLE only turns off the network (proxy) path. Peers in the
+ *        LSA team are served by the copy engine, so a single-node put/wait still
+ *        delivers the data.
+ */
+TEST_F(HostApiTest, RmaDisableIntraNodePutUsesCe)
+{
+    if(!rmaDisableSet())
+    {
+        GTEST_SKIP() << "Run with NCCL_RMA_DISABLE=1";
+    }
+    if(!validateTestPrerequisites(/*min=*/2, /*max=*/2, kNoPowerOfTwoRequired,
+                                  /*min_nodes=*/1, kRequireSingleNode))
+    {
+        GTEST_SKIP() << "Need exactly 2 MPI processes on a single node";
+    }
+
+    const int   myRank = rank();
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, kOneMB));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t win = nullptr;
+    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, winMode());
+
+    ASSERT_MPI_NE(win, nullptr);
+    ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
+
+    ncclResult_t putRes = ncclSuccess;
+    if(myRank == 0)
+    {
+        void* srcBuf = static_cast<uint8_t*>(winBuf) + kSendOffset;
+        FillBuf(srcBuf, kTransferSize, /*senderRank=*/0);
+        putRes = ncclPutSignal(
+            srcBuf, kTransferSize, ncclUint8,
+            /*peer=*/1, win, /*peerWinOffset=*/kRecvOffset,
+            kSigIdx, kCtx, kFlags, comm, stream);
+    }
+    ASSERT_MPI_EQ(ncclSuccess, putRes);
+
+    ncclResult_t waitRes = ncclSuccess;
+    if(myRank == 1)
+    {
+        ncclWaitSignalDesc_t desc{/*opCnt=*/1, /*peer=*/0, kSigIdx, kCtx};
+        waitRes = ncclWaitSignal(/*nDesc=*/1, &desc, comm, stream);
+    }
+    ASSERT_MPI_EQ(ncclSuccess, waitRes);
+
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+    bool ok = (myRank != 1) ||
+              VerifyBuf(static_cast<const uint8_t*>(winBuf) + kRecvOffset, kTransferSize, /*seed=*/0);
+    ASSERT_MPI_TRUE(ok);
+
+    TEST_INFO("R1 rank %d: RmaDisableIntraNodePutUsesCe passed.", myRank);
+}
+
+// ============================================================================
+// R2 — RmaDisableCrossNodePutFails
+// ============================================================================
+
+/**
+ * @test HostApiTest.RmaDisableCrossNodePutFails
+ * @brief With NCCL_RMA_DISABLE=1 a peer on another node has no path, so both
+ *        ends must fail with ncclInvalidUsage rather than hang or move data.
+ *
+ * Window registration must still succeed, on both the symmetric and the
+ * non-symmetric (NCCL_CUMEM_ENABLE=0) path, and must not bring the RMA proxy
+ * up. The put and the wait then fail locally: the launch used to connect the
+ * proxy lazily, and that connect is a comm-wide all-gather reached from one
+ * rank's put, so it deadlocked. A trailing allreduce shows the failure left
+ * the communicator usable.
+ */
+TEST_F(HostApiTest, RmaDisableCrossNodePutFails)
+{
+    if(!rmaDisableSet())
+    {
+        GTEST_SKIP() << "Run with NCCL_RMA_DISABLE=1";
+    }
+    if(!validateTestPrerequisites(/*min=*/2, /*max=*/2, kNoPowerOfTwoRequired,
+                                  /*min_nodes=*/2, /*max_nodes=*/2))
+    {
+        GTEST_SKIP() << "Need exactly 2 MPI processes on 2 nodes";
+    }
+
+    const int   myRank = rank();
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, kOneMB));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t win = nullptr;
+    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, winMode());
+
+    ASSERT_MPI_NE(win, nullptr);
+    ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
+
+    ncclResult_t res = ncclInvalidUsage;
+    if(myRank == 0)
+    {
+        res = ncclPutSignal(
+            static_cast<uint8_t*>(winBuf) + kSendOffset, kTransferSize, ncclUint8,
+            /*peer=*/1, win, /*peerWinOffset=*/kRecvOffset,
+            kSigIdx, kCtx, kFlags, comm, stream);
+    }
+    else if(myRank == 1)
+    {
+        ncclWaitSignalDesc_t desc{/*opCnt=*/1, /*peer=*/0, kSigIdx, kCtx};
+        res = ncclWaitSignal(/*nDesc=*/1, &desc, comm, stream);
+    }
+    ASSERT_MPI_EQ(ncclInvalidUsage, res);
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+    int* devVal = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&devVal, sizeof(int)));
+    auto devValGuard = makeScopeGuard([&]() { (void)hipFree(devVal); });
+    const int one = 1;
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(devVal, &one, sizeof(int), hipMemcpyHostToDevice));
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(devVal, devVal, 1, ncclInt32, ncclSum, comm, stream));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+    int sum = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&sum, devVal, sizeof(int), hipMemcpyDeviceToHost));
+    ASSERT_MPI_EQ(nRanks(), sum);
+
+    TEST_INFO("R2 rank %d: RmaDisableCrossNodePutFails passed.", myRank);
 }
 
 } // namespace RcclUnitTesting

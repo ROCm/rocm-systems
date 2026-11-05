@@ -4,8 +4,8 @@
 """Integration tests for PyTorch operator tracing during profiling."""
 
 import csv
-import os
 import re
+import sys
 import time
 from pathlib import Path
 
@@ -19,356 +19,255 @@ from tests.integration.common import (
     require_torch,
 )
 from utils import csv_compression
+from utils.utils_analysis import parse_marker_function
+
+MARKER_API_COLUMNS = {
+    "Domain",
+    "Function",
+    "Process_Id",
+    "Thread_Id",
+    "Correlation_Id",
+    "Start_Timestamp",
+    "End_Timestamp",
+}
+COUNTER_COLLECTION_COLUMNS = {
+    "Correlation_Id",
+    "Kernel_Name",
+    "Counter_Name",
+    "Counter_Value",
+    "Start_Timestamp",
+    "End_Timestamp",
+}
+# Caps for test_torch_trace_overhead. --torch-trace cost is host-side
+# RecordFunction/ROCTX. Wall-clock of the profile job is a wide sanity
+# check, not a measurement. GPU idle and kernel duration are not gated:
+# they read deprecated results_*.csv.gz. A real overhead number needs a
+# larger workload with repeats, not this sample.
+TORCH_TRACE_WALL_CLOCK_OVERHEAD_PCT = 50.0
 
 
-@pytest.mark.torch_trace
-def test_torch_trace_profile(
-    binary_handler_profile_rocprof_compute,
-    binary_handler_analyze_rocprof_compute,
-    capsys,
-):
-    """
-    Test profile and analyze flow for PyTorch torch-trace.
+ADDMM_MARKER = re.compile(r"aten::addmm(?![A-Za-z0-9_])")
 
-    Runs profiling with --torch-trace, verifies profile outputs (pmc_perf, marker
-    and counter CSVs), then runs analyze with --list-torch-operators and
-    --torch-operator (shell-style fnmatch glob patterns like *relu, all), and verifies
-    ml_api_trace directory, consolidated CSV contents (hierarchy, kernel, counters),
-    and CLI output format (call tree grouped by source location, aggregated stats,
-    kernel IDs, sort order).
-    Requires PyTorch and GPU; not included in default suite.
-    """
-    require_torch(gpu=True)
-    workload_dir = common.get_output_dir(param_id="torch_trace")
 
-    # --torch-trace needs --experimental for profiling
-    options = [
-        "--experimental",
-        "--torch-trace",
-        "--iteration-multiplexing",
+def check_torch_trace_markers(marker_rows):
+    """Check the native collector's argument, scope, and launcher metadata."""
+    backward_launchers = set()
+    torch_markers = []
+    for row in marker_rows:
+        marker = parse_marker_function(row["Function"])
+        if marker["Backend"] != "torch":
+            continue
+        if marker["Operator_Name"] == "torch.Tensor.backward":
+            backward_launchers.add((row["Process_Id"], int(row["Thread_Id"])))
+        torch_markers.append((row, marker))
+
+    assert backward_launchers, "Missing torch.Tensor.backward wrapper markers"
+    assert any(
+        marker["Operator_Name"].startswith("aten::") for _, marker in torch_markers
+    ), "No aten:: markers: the torch trace collector did not load"
+
+    relu_markers = [
+        (row, marker)
+        for row, marker in torch_markers
+        if marker["Operator_Name"] == "aten::relu"
     ]
+    assert relu_markers, "Missing native aten::relu markers"
+    for row, marker in relu_markers:
+        assert "|scope=FUNCTION|" in row["Function"], "Incorrect aten::relu scope"
+        assert marker["args"] == "(self=float32[5x20])", (
+            f"Incorrect aten::relu tensor metadata: {marker['args']}"
+        )
 
-    returncode = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options,
-        check_success=True,
-        app_name="torch_test_app",
+    backward_markers = [
+        (row, marker)
+        for row, marker in torch_markers
+        if "|scope=BACKWARD_FUNCTION|" in row["Function"]
+    ]
+    assert backward_markers, "Missing native BACKWARD_FUNCTION markers"
+    for row, marker in backward_markers:
+        launcher_tid = marker["launcher_thread_id"]
+        assert launcher_tid.isdecimal(), f"Invalid backward launcher ID: {launcher_tid}"
+        assert (row["Process_Id"], int(launcher_tid)) in backward_launchers, (
+            f"Backward launcher ID {launcher_tid} does not match a Python backward "
+            f"thread in process {row['Process_Id']}"
+        )
+
+
+def percent_overhead(with_flag, baseline, label):
+    """Return ``(with_flag - baseline) / baseline * 100``, or fail if baseline is 0."""
+    if baseline <= 0.0:
+        pytest.fail("baseline %s is %s; cannot compute overhead" % (label, baseline))
+    return ((with_flag - baseline) / baseline) * 100.0
+
+
+def format_duration(seconds):
+    """Format a duration in seconds for overhead-test logs (s / ms / us / ns)."""
+    ns = float(seconds) * 1e9
+    abs_ns = abs(ns)
+    if abs_ns >= 1e9:
+        return f"{ns / 1e9:.3f} s"
+    if abs_ns >= 1e6:
+        return f"{ns / 1e6:.3f} ms"
+    if abs_ns >= 1e3:
+        return f"{ns / 1e3:.3f} us"
+    return f"{ns:.0f} ns"
+
+
+def print_torch_trace_overhead_report(wall_clock):
+    """Print without/with/overhead for ``test_torch_trace_overhead``.
+
+    ``wall_clock`` is ``(without, with_flag, overhead_pct)`` in seconds.
+    """
+    without, with_flag, overhead_pct = wall_clock
+    print(f"\n{'=' * 72}")
+    print("--torch-trace overhead")
+    print(f"  {'metric':<22} {'without':>12}  {'with':>16}  {'overhead':>10}")
+    print(f"  {'-' * 22} {'-' * 12}  {'-' * 16}  {'-' * 10}")
+    print(
+        f"  {'wall-clock':<22} {format_duration(without):>12}  "
+        f"{format_duration(with_flag):>16}"
+        f"  {f'{overhead_pct:+.1f}%':>10}"
     )
+    print(f"{'=' * 72}\n")
 
-    # ---- Verify profiling output (checks 1–5) ----
 
-    # 1. Profiling completed successfully
-    assert returncode == 0, "Profiling the torch application failed"
+@pytest.fixture(scope="module")
+def torch_trace_workload_state():
+    """Clean the shared profiled workload directory at module teardown.
 
-    # 2. Validate profile outputs (PMC data validated by check_csv_files)
-    num_devices = config.get("num_devices", 1)
-    integration_common.check_csv_files(workload_dir, num_devices, 1)
+    ``dir`` is set as soon as the directory exists so teardown always cleans it.
+    ``profiled`` gates reuse, so a failed profile is not silently handed to the
+    tests that follow.
+    """
+    state = {"dir": None, "profiled": False}
+    yield state
+    if state["dir"] is not None:
+        common.clean_output_dir(config["cleanup"], state["dir"])
 
-    # 3. Marker/counter CSV pairs exist and counts match
-    marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
-    assert marker_api_trace_files, "No marker_api_trace.csv produced"
+
+@pytest.fixture
+def torch_trace_profiled_workload(
+    torch_trace_workload_state,
+    binary_handler_profile_rocprof_compute,
+):
+    """Profile simple_net with --torch-trace and return the workload directory."""
+    require_torch(gpu=True)
+    if not torch_trace_workload_state["profiled"]:
+        workload_dir = common.get_output_dir(param_id="torch_trace")
+        torch_trace_workload_state["dir"] = workload_dir
+        # Run the workload with the same interpreter as pytest.
+        profile_config = dict(config)
+        profile_config["torch_test_app"] = [
+            sys.executable,
+            *config["torch_test_app"][1:],
+        ]
+        returncode = binary_handler_profile_rocprof_compute(
+            profile_config,
+            workload_dir,
+            [
+                "--experimental",
+                "--torch-trace",
+                "--iteration-multiplexing",
+            ],
+            check_success=True,
+            app_name="torch_test_app",
+        )
+        assert returncode == 0, "Profiling the torch application failed"
+        torch_trace_workload_state["profiled"] = True
+    return torch_trace_workload_state["dir"]
+
+
+def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
+    """Check profile CSVs and Torch argument, scope, and launcher metadata."""
+    workload_dir = torch_trace_profiled_workload
+    integration_common.check_csv_files(workload_dir, config.get("num_devices", 1), 1)
+
+    marker_api_trace_files = list(
+        Path(workload_dir).glob("**/*marker_api_trace.csv.gz")
+    )
+    assert marker_api_trace_files, "No marker_api_trace.csv.gz produced"
     for marker_file in marker_api_trace_files:
-        corresponding_counter_file = csv_compression.resolve_csv(
-            marker_file.parent
-            / marker_file.name.replace("marker_api_trace", "counter_collection")
+        corresponding_counter_file = marker_file.parent / marker_file.name.replace(
+            "marker_api_trace", "counter_collection"
         )
         assert corresponding_counter_file.is_file(), (
             f"counter_collection CSV not found for {marker_file}"
         )
-        # 4. marker_api_trace CSVs: required columns and non-empty rows
-        expected_marker_columns = {
-            "Domain",
-            "Function",
-            "Process_Id",
-            "Thread_Id",
-            "Correlation_Id",
-            "Start_Timestamp",
-            "End_Timestamp",
-        }
-        with open(marker_file, newline="") as f:
+        with csv_compression.open_gzip_csv_read(marker_file) as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             assert fieldnames is not None, f"No columns in {marker_file}"
-            for column in expected_marker_columns:
+            for column in MARKER_API_COLUMNS:
                 assert column in fieldnames, (
                     f"Column '{column}' missing in {marker_file}"
                 )
-            found_row = False
-            for row in reader:
-                found_row = True
+            marker_rows = list(reader)
+            assert marker_rows, f"{marker_file} is empty"
+            functions = []
+            for row in marker_rows:
+                functions.append(row["Function"])
                 assert row["Function"], f"Empty Function in {marker_file}"
                 assert row["Correlation_Id"], f"Empty Correlation ID in {marker_file}"
                 assert row["Start_Timestamp"], f"Empty Start_Timestamp in {marker_file}"
                 assert row["End_Timestamp"], f"Empty End_Timestamp in {marker_file}"
-            assert found_row, f"{marker_file} is empty"
-        # 5. counter_collection CSVs: required columns and non-empty rows
-        expected_counter_columns = {
-            "Correlation_Id",
-            "Kernel_Name",
-            "Counter_Name",
-            "Counter_Value",
-            "Start_Timestamp",
-            "End_Timestamp",
-        }
-        with csv_compression.open_csv_read(corresponding_counter_file) as f:
+            assert any("nn.Module.Linear.forward" in fn for fn in functions)
+            assert any(ADDMM_MARKER.search(fn) for fn in functions)
+            assert any("scope=FUNCTION" in fn for fn in functions)
+            assert any("|seqNr=" in fn for fn in functions)
+            assert any("|tid=" in fn for fn in functions)
+            assert any("|ftid=" in fn for fn in functions)
+            assert any("|ltid=" in fn for fn in functions)
+            assert any("|scope=" in fn for fn in functions)
+            assert any("|args=" in fn for fn in functions)
+            assert any(fn.endswith("|torch") for fn in functions)
+        check_torch_trace_markers(marker_rows)
+        with csv_compression.open_gzip_csv_read(corresponding_counter_file) as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             assert fieldnames is not None, f"No columns in {corresponding_counter_file}"
-            for column in expected_counter_columns:
+            for column in COUNTER_COLLECTION_COLUMNS:
                 assert column in fieldnames, (
                     f"Column '{column}' missing in {corresponding_counter_file}"
                 )
             found_row = False
             for row in reader:
                 found_row = True
-
                 assert row["Correlation_Id"], (
                     f"Empty Correlation_Id in {corresponding_counter_file}"
                 )
-
                 assert row["Kernel_Name"], (
                     f"Empty Kernel_Name in {corresponding_counter_file}"
                 )
-
                 assert row["Counter_Name"], (
                     f"Empty Counter_Name in {corresponding_counter_file}"
                 )
-
                 assert row["Start_Timestamp"], (
                     f"Empty Start_Timestamp in {corresponding_counter_file}"
                 )
-
                 assert row["End_Timestamp"], (
                     f"Empty End_Timestamp in {corresponding_counter_file}"
                 )
-
             assert found_row, f"{corresponding_counter_file} is empty"
 
-    # Flush any profiling output so capsys captures only the analyze output
-    capsys.readouterr()
 
-    # ---- Verify analysis output from --list-torch-operators (checks 6–8) ----
-
-    # 6. Analyze with --list-torch-operators succeeds
-    returncode_analyze = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--path",
-        workload_dir,
-        "--list-torch-operators",
-    ])
-    assert returncode_analyze == 0, "Analyze with --list-torch-operators failed"
-
-    list_output = capsys.readouterr().out
-
-    # 7. ml_api_trace directory created with consolidated.csv
-    ml_api_trace_dir = Path(workload_dir) / "ml_api_trace"
-    assert ml_api_trace_dir.exists(), "ml_api_trace directory not created"
-
-    consolidated_csv = ml_api_trace_dir / "consolidated.csv"
-    assert consolidated_csv.exists(), "consolidated.csv not found in ml_api_trace"
-
-    # 8. Consolidated CSV contains hierarchy, kernel names, and counter values
-    df = pd.read_csv(consolidated_csv)
-    assert not df.empty, "consolidated.csv is empty"
-    assert "Operator_Name" in df.columns, "Operator_Name column missing"
-    hierarchy_present = (
-        df["Operator_Name"].apply(lambda x: "/" in str(x) or "::" in str(x)).any()
-    )
-    assert hierarchy_present, "No hierarchy information in consolidated.csv"
-    assert "Kernel_Name" in df.columns, "Kernel_Name missing"
-    assert df["Kernel_Name"].notnull().all() and (df["Kernel_Name"] != "").all(), (
-        "Empty Kernel_Name in consolidated.csv"
-    )
-    assert "Counter_Value" in df.columns, "Counter_Value column missing"
-    assert df["Counter_Value"].notnull().all()
-    assert (df["Counter_Value"] != "").all(), "Empty Counter_Value in consolidated.csv"
-
-    # ---- Verify --list-torch-operators CLI output format (checks 9–14) ----
-
-    # 9. Banner
-    assert "PyTorch Operator Call Tree:" in list_output, "Missing banner line"
-
-    # 10. Source-location grouping (file:line headers)
-    location_headers = re.findall(
-        r"^(\S+:\d+)\s+\(dispatches:", list_output, re.MULTILINE
-    )
-    assert location_headers, "No source-location headers found in output"
-
-    # 11. Aggregated stats on tree nodes
-    assert re.search(r"\(dispatches:\s+\d+,\s+total:", list_output), (
-        "No aggregated stats found in output"
-    )
-
-    # 12. Kernel IDs
-    kernel_ids = re.findall(r"\(id (\d+)\)", list_output)
-    assert kernel_ids, "No kernel IDs found in output"
-
-    # 13. Kernel launch durations
-    assert re.search(r"dispatches:\s+\d+,\s+total:", list_output), (
-        "No kernel duration info in output"
-    )
-
-    # 14. Source locations sorted by descending total duration
-    location_durations = re.findall(
-        r"^(\S+:\d+)\s+\(dispatches:\s+\d+,\s+total:\s+([\d.]+)\s+(ms|us)",
-        list_output,
-        re.MULTILINE,
-    )
-    assert location_durations, "No location durations found for sort-order check"
-    durations_ms = [
-        float(val) if unit == "ms" else float(val) / 1000.0
-        for _, val, unit in location_durations
-    ]
-    assert durations_ms == sorted(durations_ms, reverse=True), (
-        f"Source locations not sorted by descending duration: {location_durations}"
-    )
-
-    # 15. --list-torch-operators succeeds at every --kernel-verbose level 0-4
-    #     (level 5 is the baseline run above)
-    for verbose_level in range(5):
-        capsys.readouterr()
-        rc = binary_handler_analyze_rocprof_compute([
-            "--experimental",
-            "analyze",
-            "--path",
-            workload_dir,
-            "--list-torch-operators",
-            "--kernel-verbose",
-            str(verbose_level),
-        ])
-        assert rc == 0, (
-            f"--list-torch-operators failed with --kernel-verbose {verbose_level}"
-        )
-
-    # ---- Verify analysis output from --torch-operator (check 16) ----
-
-    # Analyze with --torch-operator needs --experimental flag
-    returncode_analyze_relu = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--path",
-        workload_dir,
-        "--torch-operator",
-        "*relu*",
-    ])
-    # 16. Analyze with --torch-operator *relu* succeeds and matches the relu subtree
-    assert returncode_analyze_relu == 0, "Analyze with --torch-operator *relu* failed"
-    out_relu = capsys.readouterr().out
-    assert "Matched PyTorch Operators" in out_relu, (
-        "Expected 'Matched PyTorch Operators' header from --torch-operator *relu*"
-    )
-
-    # --- Verify torch-operator cli output ---
-
-    # 17. Substring wildcard pattern matches torch.nn.functional.relu at any
-    #     position in the hierarchy.
-    capsys.readouterr()
-    rc_exact = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--path",
-        workload_dir,
-        "--torch-operator",
-        "*torch.nn.functional.relu*",
-    ])
-    assert rc_exact == 0, (
-        "Analyze with --torch-operator *torch.nn.functional.relu* failed"
-    )
-    out_exact = capsys.readouterr().out
-    assert "Matched PyTorch Operators" in out_exact, (
-        "Expected 'Matched PyTorch Operators' header in --torch-operator output"
-    )
-    assert "dispatches" in out_exact, (
-        "Expected call tree with dispatches stats in --torch-operator output"
-    )
-
-    # 18. Glob wildcard pattern (*relu*) matches the relu operator subtree
-    capsys.readouterr()
-    rc_glob = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--path",
-        workload_dir,
-        "--torch-operator",
-        "*relu*",
-    ])
-    assert rc_glob == 0, "Analyze with --torch-operator *relu* failed"
-    out_glob = capsys.readouterr().out
-    assert "dispatches" in out_glob, (
-        "Glob pattern *relu* should match relu operator and render call tree"
-    )
-
-    # 19. 'all' keyword matches every operator
-    capsys.readouterr()
-    rc_all = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--path",
-        workload_dir,
-        "--torch-operator",
-        "all",
-    ])
-    assert rc_all == 0, "Analyze with --torch-operator all failed"
-    out_all = capsys.readouterr().out
-    assert "dispatches" in out_all, "'all' keyword should match operators"
-
-    # 20. --torch-operator + -k intersection succeeds and renders call tree
-    capsys.readouterr()
-    rc_intersect = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--path",
-        workload_dir,
-        "--torch-operator",
-        "all",
-        "-k",
-        "0",
-    ])
-    assert rc_intersect == 0, "Analyze with --torch-operator all -k 0 failed"
-    out_intersect = capsys.readouterr().out
-    assert "Matched PyTorch Operators" in out_intersect, (
-        "Expected call tree output with --torch-operator all -k 0"
-    )
-    assert "Torch operator filter selected" in out_intersect, (
-        "Expected filter-selection log confirming -k intersection"
-    )
-
-    # 21. Non-matching pattern degrades gracefully with a warning
-    capsys.readouterr()
-    rc_nomatch = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--path",
-        workload_dir,
-        "--torch-operator",
-        "nonexistent_operator_xyz",
-    ])
-    assert rc_nomatch == 0, (
-        "Analyze with non-matching --torch-operator should not crash"
-    )
-    out_nomatch = capsys.readouterr().out
-    assert "No PyTorch operators matched" in out_nomatch, (
-        "Expected warning about no operators matched"
-    )
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.torch_trace
 def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
-    """
-    Measure overhead introduced by --torch-trace flag.
-    Compares execution time with and without the flag to ensure overhead is acceptable.
-    NOTE: Not included in the test suite since this requires PyTorch and GPU.
+    """Compare host wall-clock with and without --torch-trace.
+
+    Torch-trace adds host-side RecordFunction/ROCTX work. Asserts a wide
+    wall-clock sanity cap. GPU idle and kernel duration are not gated:
+    they depended on deprecated results_*.csv.gz.
     """
     require_torch(gpu=True)
+    profile_config = dict(config)
+    profile_config["torch_test_app"] = [
+        sys.executable,
+        *config["torch_test_app"][1:],
+    ]
     # Run WITHOUT --torch-trace (baseline)
     workload_dir_baseline = common.get_output_dir(param_id="torch_trace_baseline")
     start_baseline = time.time()
     returncode_baseline = binary_handler_profile_rocprof_compute(
-        config,
+        profile_config,
         workload_dir_baseline,
         ["--iteration-multiplexing"],  # Baseline without --torch-trace
         check_success=True,
@@ -377,23 +276,13 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     )
     baseline_time = time.time() - start_baseline
     assert returncode_baseline == 0, "Baseline profiling failed"
-
-    # Read baseline timestamps
-    baseline_results_files = csv_compression.find_csvs(
-        workload_dir_baseline, "results_*.csv"
-    )
-    baseline_df = pd.concat(
-        [pd.read_csv(f) for f in baseline_results_files], ignore_index=True
-    )
-    baseline_kernel_duration_total = (
-        baseline_df["End_Timestamp"].max() - baseline_df["Start_Timestamp"].min()
-    )
     common.clean_output_dir(config["cleanup"], workload_dir_baseline)
+
     # Run WITH --torch-trace (requires --experimental)
     workload_dir_with_flag = common.get_output_dir(param_id="torch_trace_with_flag")
     start_with_flag = time.time()
     returncode_with_flag = binary_handler_profile_rocprof_compute(
-        config,
+        profile_config,
         workload_dir_with_flag,
         ["--experimental", "--torch-trace", "--iteration-multiplexing"],
         check_success=True,
@@ -402,58 +291,19 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     )
     with_flag_time = time.time() - start_with_flag
     assert returncode_with_flag == 0, "Profiling with torch-trace failed"
-    # Read with-flag timestamps
-    with_flag_results_files = csv_compression.find_csvs(
-        workload_dir_with_flag, "results_*.csv"
-    )
-    with_flag_df = pd.concat(
-        [pd.read_csv(f) for f in with_flag_results_files], ignore_index=True
-    )
-    with_flag_kernel_duration_total = (
-        with_flag_df["End_Timestamp"].max() - with_flag_df["Start_Timestamp"].min()
-    )
-    longest_running_kernel_baseline = (
-        baseline_df["End_Timestamp"] - baseline_df["Start_Timestamp"]
-    ).max()
-    longest_running_kernel_with_flag = (
-        with_flag_df["End_Timestamp"] - with_flag_df["Start_Timestamp"]
-    ).max()
-    # Calculate overheads
-    longest_running_kernel_overhead = (
-        (longest_running_kernel_with_flag - longest_running_kernel_baseline)
-        / longest_running_kernel_baseline
-    ) * 100
-    wall_clock_overhead = ((with_flag_time - baseline_time) / baseline_time) * 100
-    kernel_overhead = (
-        (with_flag_kernel_duration_total - baseline_kernel_duration_total)
-        / baseline_kernel_duration_total
-    ) * 100
-    print(f"\n{'=' * 70}")
-    print("Performance Overhead Analysis:")
-    print(f"  Longest running kernel overhead: {longest_running_kernel_overhead:.1f}%")
-    print(f"  Baseline wall-clock time:     {baseline_time:.2f}s")
-    print(f"  With --torch-trace time:  {with_flag_time:.2f}s")
-    print(f"  Wall-clock overhead:          {wall_clock_overhead:.1f}%")
-    print(f"  Baseline kernel duration:     {baseline_kernel_duration_total:.0f} ns")
-    print(f"  With flag kernel duration:    {with_flag_kernel_duration_total:.0f} ns")
-    print(f"  Kernel execution overhead:    {kernel_overhead:.1f}%")
-    print(f"{'=' * 70}\n")
-
     common.clean_output_dir(config["cleanup"], workload_dir_with_flag)
-    # Assert overhead is reasonable (< 100% wall-clock, < 50% kernel)
-    assert wall_clock_overhead < 100, (
-        f"Wall-clock overhead too high: {wall_clock_overhead:.1f}%"
+
+    wall_clock_overhead = percent_overhead(with_flag_time, baseline_time, "wall-clock")
+    print_torch_trace_overhead_report(
+        wall_clock=(baseline_time, with_flag_time, wall_clock_overhead),
     )
-    assert kernel_overhead < 50, (
-        f"Kernel execution overhead too high: {kernel_overhead:.1f}%"
-    )
-    assert longest_running_kernel_overhead < 50, (
-        f"longest running kernel increase too high: "
-        f"{longest_running_kernel_overhead:.1f}%"
+
+    assert wall_clock_overhead < TORCH_TRACE_WALL_CLOCK_OVERHEAD_PCT, (
+        f"Wall-clock overhead too high: {wall_clock_overhead:.1f}% "
+        f"(limit {TORCH_TRACE_WALL_CLOCK_OVERHEAD_PCT}%)"
     )
 
 
-@pytest.mark.torch_trace
 @pytest.mark.parametrize(
     "workload_cmd, expected_exit",
     [
@@ -495,7 +345,7 @@ def test_profile_invalid_workloads_torch_trace(
     expected_exit,
     request,
 ):
-    """Integration test: workload validation exit codes with --torch-trace."""
+    """Assert profile exit codes for invalid workloads with --torch-trace."""
     require_torch(gpu=True)
     app_name = "test_invalid_workload"
     test_config = {**config, app_name: workload_cmd}
@@ -567,7 +417,7 @@ def test_profile_invalid_workloads_no_torch_trace(
     expected_exit,
     request,
 ):
-    """Integration test: workload validation exit codes without --torch-trace."""
+    """Assert profile exit codes for invalid workloads without --torch-trace."""
     app_name = "test_invalid_workload"
     test_config = {**config, app_name: workload_cmd}
 
@@ -592,80 +442,144 @@ def test_profile_invalid_workloads_no_torch_trace(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.torch_trace
-def test_torch_trace_deep_tensor_wraps_overhead(
+def test_list_torch_operators_prints_call_tree(
+    torch_trace_profiled_workload,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-torch-operators",
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "PyTorch Operator Call Tree:" in out
+    assert "nn.Module.Linear.forward" in out
+    assert ADDMM_MARKER.search(out)
+    assert "(id " in out
+    assert not (
+        Path(torch_trace_profiled_workload) / "ml_api_trace" / "consolidated.csv"
+    ).exists()
+
+
+def test_torch_operator_addmm_selects_kernels(
+    torch_trace_profiled_workload,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--torch-operator",
+        "*addmm*",
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "Matched PyTorch Operators:" in out
+    assert ADDMM_MARKER.search(out)
+    assert "nn.Module.Linear.forward" in out
+    assert "operator filter selected" in out
+
+
+def test_list_torch_operators_wins_over_filter(
+    torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-torch-operators",
+        "--torch-operator",
+        "*addmm*",
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "Operator filters are ignored" in out
+    assert "PyTorch Operator Call Tree:" in out
+    assert "Matched PyTorch Operators:" not in out
+
+
+def test_torch_operator_with_dispatch_filter(
+    torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    list_code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-torch-operators",
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert list_code == 0
+    capsys.readouterr()
+    dispatch_csv = Path(torch_trace_profiled_workload) / "pmc_dispatch_info.csv"
+    dispatch_df = pd.read_csv(dispatch_csv)
+    row_one = dispatch_df[dispatch_df["Dispatch_ID"].astype(int) == 1]
+    assert not row_one.empty
+    dispatch_one_kernel = str(row_one.iloc[0]["Kernel_Name"])
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--torch-operator",
+        "*",
+        "--dispatch",
+        "1",
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    kernel_top = pd.read_csv(Path(torch_trace_profiled_workload) / "pmc_kernel_top.csv")
+    assert set(kernel_top["Kernel_Name"].astype(str)) == {dispatch_one_kernel}
+    assert "operator filter selected" in out
+
+
+def test_torch_trace_user_range_and_backward_thread_in_marker_csv(
     binary_handler_profile_rocprof_compute,
 ):
-    """Manual benchmark for the deep tensor wrap overhead.
-
-    Skipped unless ``ROCPROFCOMPUTE_RUN_DEEP_TENSOR_WRAP_BENCH=1``.
-    """
     require_torch(gpu=True)
-
-    run_bench = os.environ.get("ROCPROFCOMPUTE_RUN_DEEP_TENSOR_WRAP_BENCH", "")
-    if run_bench.strip().lower() not in ("1", "true", "yes", "on"):
-        pytest.skip(
-            "set ROCPROFCOMPUTE_RUN_DEEP_TENSOR_WRAP_BENCH=1 to run this benchmark"
+    workload_dir = common.get_output_dir(param_id="torch_trace_user_range_backward")
+    profile_config = dict(config)
+    profile_config["simple_net_user_range_backward_thread"] = [
+        sys.executable,
+        *config["torch_test_app"][1:],
+        "--user-range",
+        "--backward-thread",
+    ]
+    try:
+        returncode = binary_handler_profile_rocprof_compute(
+            profile_config,
+            workload_dir,
+            [
+                "--experimental",
+                "--torch-trace",
+                "--iteration-multiplexing",
+            ],
+            check_success=True,
+            app_name="simple_net_user_range_backward_thread",
         )
-
-    def _run_once(*, deep_wraps: bool, param_id: str) -> tuple[float, float]:
-        workload_dir = common.get_output_dir(param_id=param_id)
-        prev = os.environ.get("ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS")
-        os.environ["ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS"] = (
-            "1" if deep_wraps else "0"
-        )
-        try:
-            start = time.time()
-            returncode = binary_handler_profile_rocprof_compute(
-                config,
-                workload_dir,
-                ["--experimental", "--torch-trace", "--iteration-multiplexing"],
-                check_success=True,
-                roof=False,
-                app_name="torch_test_app",
-            )
-            elapsed = time.time() - start
-            assert returncode == 0, "torch-trace profiling run failed"
-
-            results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
-            df = pd.concat([pd.read_csv(f) for f in results_files], ignore_index=True)
-            kernel_duration_total = (
-                df["End_Timestamp"].max() - df["Start_Timestamp"].min()
-            )
-            return elapsed, kernel_duration_total
-        finally:
-            common.clean_output_dir(config["cleanup"], workload_dir)
-            if prev is None:
-                os.environ.pop("ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS", None)
-            else:
-                os.environ["ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS"] = prev
-
-    baseline_wall, baseline_kernel = _run_once(
-        deep_wraps=False,
-        param_id="torch_trace_deep_wraps_off",
-    )
-    deep_wall, deep_kernel = _run_once(
-        deep_wraps=True,
-        param_id="torch_trace_deep_wraps_on",
-    )
-
-    wall_overhead = (
-        ((deep_wall - baseline_wall) / baseline_wall) * 100
-        if baseline_wall > 0
-        else 0.0
-    )
-    kernel_overhead = (
-        ((deep_kernel - baseline_kernel) / baseline_kernel) * 100
-        if baseline_kernel > 0
-        else 0.0
-    )
-
-    print("\n" + "=" * 70)
-    print("Deep Tensor Wrap Overhead Benchmark (--torch-trace):")
-    print(f"  Baseline wall-clock:         {baseline_wall:.2f}s")
-    print(f"  Deep-wraps wall-clock:       {deep_wall:.2f}s")
-    print(f"  Wall-clock overhead:         {wall_overhead:.1f}%")
-    print(f"  Baseline kernel duration:    {baseline_kernel:.0f} ns")
-    print(f"  Deep-wraps kernel duration:  {deep_kernel:.0f} ns")
-    print(f"  Kernel overhead:             {kernel_overhead:.1f}%")
-    print("=" * 70 + "\n")
+        assert returncode == 0
+        marker_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv.gz"))
+        assert marker_files
+        functions = []
+        thread_ids = set()
+        for marker_file in marker_files:
+            with csv_compression.open_gzip_csv_read(marker_file) as f:
+                for row in csv.DictReader(f):
+                    functions.append(row["Function"])
+                    thread_ids.add(row["Thread_Id"])
+        assert any(fn == "TrainingLoop_UserDefinedMarker" for fn in functions)
+        assert any("torch.Tensor.backward" in fn for fn in functions)
+        assert len(thread_ids) >= 2
+        assert any(re.search(r"\|ltid=\d+\|", fn) for fn in functions)
+    finally:
+        common.clean_output_dir(config["cleanup"], workload_dir)

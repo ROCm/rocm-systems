@@ -26,7 +26,7 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <hsakmt/linux/kfd_ioctl.h>
+#include "kfd_ioctl.h"
 #include <fcntl.h>
 #include "unistd.h"
 

@@ -24,14 +24,14 @@ _REGISTRY: dict[str, Backend] = {}
 
 
 def register(backend: Backend) -> None:
-    """Register backend under backend.name."""
+    """Register a backend."""
     _REGISTRY[backend.name] = backend
 
 
 def install_many(names: Iterable[str]) -> None:
-    """Install each backend in names.
+    """Install each named backend.
 
-    Unknown or failing entries are warned and skipped.
+    Unknown or failing backends are skipped after a warning.
     """
     from utils.logger import console_warning
 

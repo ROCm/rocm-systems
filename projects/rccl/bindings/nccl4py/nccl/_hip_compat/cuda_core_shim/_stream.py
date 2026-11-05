@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 from ._hip import check_hip, hip
-from .typing import IsStreamT
+from .typing import IsStreamType
 
 
 @dataclass
@@ -38,7 +38,7 @@ class StreamOptions:
     priority: Optional[int] = None
 
 
-def _try_to_get_stream_ptr(obj: IsStreamT) -> int:
+def _try_to_get_stream_ptr(obj: IsStreamType) -> int:
     """Extract the raw (cudaStream_t-equivalent) pointer from an object
     that implements the __cuda_stream__ protocol."""
     try:
@@ -91,7 +91,7 @@ class Stream:
     @classmethod
     def _init(
         cls,
-        obj: Optional[IsStreamT] = None,
+        obj: Optional[IsStreamType] = None,
         options: Optional[StreamOptions] = None,
         device_id: Optional[int] = None,
     ) -> "Stream":

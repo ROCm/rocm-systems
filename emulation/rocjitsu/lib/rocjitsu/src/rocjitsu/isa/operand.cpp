@@ -30,6 +30,8 @@ Result Operand::emit_encoding_error(const util::DiagnosticEmitter &emit_error) c
 
 std::optional<RegisterRef> Operand::to_register_ref() const { return std::nullopt; }
 
+std::optional<RegClass> Operand::to_special_reg_class() const { return std::nullopt; }
+
 uint32_t Operand::read_scalar(const amdgpu::Wavefront & /*wf*/) const {
   throw std::logic_error("read_scalar not implemented for this operand type");
 }

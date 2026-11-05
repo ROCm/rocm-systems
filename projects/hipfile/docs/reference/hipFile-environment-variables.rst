@@ -1,6 +1,6 @@
 .. meta::
    :description: hipFile environment variables
-   :keywords: hipFile, environment variables, HIPFILE_ALLOW_COMPAT_MODE, HIPFILE_FORCE_COMPAT_MODE, HIPFILE_STATS_LEVEL, HIPFILE_UNSUPPORTED_FILE_SYSTEMS, ROCm, AMD
+   :keywords: hipFile, environment variables, HIPFILE_ALLOW_COMPAT_MODE, HIPFILE_FORCE_COMPAT_MODE, HIPFILE_STATS_LEVEL, HIPFILE_UNSUPPORTED_FILE_SYSTEMS, ROCm, AMD, HIPFILE_HOST
 
 ******************************
 hipFile environment variables
@@ -33,3 +33,10 @@ The following environment variables affect the hipFile runtime.
        | ``true``: Fastpath is used with any file system without validation.
        | ``false``: Fastpath is only used with supported file systems. (default)
        | Must be set to ``true`` when using NFSoRDMA on Linux
+   * - ``HIPFILE_ASYNC_BUFFER_SIZE``
+     - | Controls the size of the host bounce buffer allocated for asynchronous fallback I/O.
+       | Default size is 16 MiB. Setting to 0 will use the default size.
+   * - ``HIPFILE_HOST``
+     - | Controls whether file I/O with registered host-memory buffers is enabled.
+       | Host memory regions must be registered prior to starting any transfers involving them.
+       | Default is ``true``. Setting to ``false`` disables this feature.

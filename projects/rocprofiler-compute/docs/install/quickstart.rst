@@ -73,23 +73,37 @@ Ensure ROCm is installed and follow the steps:
       :widths: 40 60
 
       * - Component
-        - Python requirement
+        - Supported Python versions
       * - Profile mode (standard library only)
-        - 3.8 or newer
-      * - Analyze mode (numpy, pandas, dash, textual)
-        - 3.9 or newer
+        - 3.8 through 3.14
+      * - Analyze mode (numpy, pandas, plotly, rich, etc.)
+        - 3.9 through 3.14
 
    Analyze mode aborts with a clear message if launched on Python older
    than 3.9.
 
-3. Check the installation dependencies. These are required for analyze mode
-   only; profile mode uses the standard library and needs no extra packages.
+3. Install the analyze mode dependencies. Profile mode uses the standard
+   library and needs no extra packages, so this step is only for analyze mode.
+
+   Install them into a virtual environment that is separate from the one your
+   profiled application uses. Analyze mode pins versions of packages such as
+   ``numpy`` and ``pandas``, and installing them alongside a workload that has
+   its own versions of ``torch``, ``numpy``, or similar packages can break
+   either side.
 
    .. code-block:: shell-session
 
-      pip install -r <ROCM_PATH>/libexec/rocprofiler-compute/requirements.txt
+      python3 -m venv ~/.venvs/rocprof-compute-analyze
+      source ~/.venvs/rocprof-compute-analyze/bin/activate
+      pip install --extra-index-url https://<stable/nightly>.repo.amd.com/rocm/whl-next/ "rocm-profiler[compute-analyze]"
 
-   **Note:** Replace ``<ROCM_PATH>`` with the ROCm installation path (e.g., ``/opt/rocm`` or ``/opt/rocm-7.3.0``).
+   To check that the environment has everything analyze mode needs, run
+   ``rocprof-compute analyze --verify-deps``.
+
+   Profile your application with its own Python environment, then activate this
+   environment to run analyze mode on the results. For the packaged ROCm
+   installation and other ways to install these dependencies, see
+   :ref:`analyze-deps`.
 
 For detailed installation instructions, refer to :doc:`/install/core-install`.
 
@@ -169,7 +183,7 @@ generate interactive HTML roofline charts, run analyze mode on the output:
 .. code-block:: shell-session
 
     $ rocprof-compute profile --name vcopy --roof-only -- ./vcopy -n 1048576 -b 256
-    $ rocprof-compute analyze -p workloads/vcopy/MI200/ --roofline-data-type FP32
+    $ rocprof-compute analyze -p workloads/vcopy/MI200/
 
 
 Collect the counters to compute the metric for compute throughput utilization, skipping roofline
@@ -229,10 +243,6 @@ analysis options are available to accommodate different workflows.
     - When to Use
   * - :doc:`CLI (Command Line Interface) </how-to/analyze/cli>`
     - Fast, scriptable insights; great for automation and quick checks.
-  * - :doc:`GUI (Standalone Graphical Interface) </how-to/analyze/standalone-gui>`
-    - Interactive exploration, visual drill-down, and detailed charts.
-  * - :doc:`TUI (Textual User Interface) </how-to/analyze/tui>`
-    - Lightweight, keyboard-driven experience for terminals.
   * - :doc:`ROCm Optiq </how-to/analyze/optiq>`
     - Interactive graphical exploration of generated ROCm Compute Profiler
       analysis databases.
@@ -285,7 +295,7 @@ Analyze dispatches 12 and 34 from mixbench workload with 3 decimal precision:
 
 .. code-block:: shell-session
 
-   rocprof-compute analyze -p workloads/mixbench/MI200/ --dispatch 12 34 --decimal 3
+   rocprof-compute analyze -p workloads/mixbench/MI200/ --dispatch 13 35 --decimal 3
 
 Compare two workloads to evaluate the impact of code optimizations
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++

@@ -78,12 +78,19 @@ class SvmMemoryTestBasic : public TestBase {
   void TestSVMBatchDiscard(void);
   void TestSVMDiscardNegative(void);
   void TestAccessedByAllDevices(void);
+  void TestSVMDiscardAndPrefetchBatch(void);
+  void TestSVMDiscardAndPrefetchBatchPerf(void);
 
  private:
   void TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
   void TestSVMPrefetch(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
   void TestSVMBatchDiscard(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
   void TestSVMDiscardNegative(hsa_agent_t agent);
+  void TestSVMDiscardAndPrefetchBatch(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
+
+  /* Comparison between the hsa_amd_svm_discard_and_prefetch_batch_async API and the
+  hsa_amd_svm_discard_batch_async + hsa_amd_svm_prefetch_async sequence */
+  void TestSVMDiscardAndPrefetchBatchPerf(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_SVM_MEMORY_H_

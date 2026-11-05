@@ -35,6 +35,20 @@
 #include <string>
 
 /**
+ * Skip a GTest MPI test when its process/node prerequisites are not met.
+ *
+ * This must be a macro rather than a helper function because GTEST_SKIP()
+ * returns from the current test body. MPITestCore::validateTestPrerequisites()
+ * remains a framework-agnostic bool API for standalone users.
+ */
+#define SKIP_UNLESS_MPI_PREREQS(...)                                                        \
+    do                                                                                      \
+    {                                                                                       \
+        if(!validateTestPrerequisites(__VA_ARGS__))                                         \
+            GTEST_SKIP() << "MPI process/node prerequisites not met; see rank-0 output";    \
+    } while(0)
+
+/**
  * @class MPITestBase
  * @brief Google Test adapter for MPI tests
  *

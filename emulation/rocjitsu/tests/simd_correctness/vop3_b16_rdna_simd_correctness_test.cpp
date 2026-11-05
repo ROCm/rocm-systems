@@ -2,22 +2,19 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_b16_rdna_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs scalar body) for five
+/// @brief Compare SIMD-enabled and forced-scalar execution for five
 /// 16-bit-lane VOP3 ops that are RDNA3+ only (no CDNA4 decode path). Each case
-/// runs TWICE in the same process -- once forcing the scalar body, once the SIMD
-/// fast path, with identical inputs/EXEC -- and the two result arrays are
-/// asserted equal with EXPECT_EQ (util::set_force_scalar_for_testing flips the
-/// gate in-process). In-process inactive lanes must keep the sentinel.
-///   - v_and_b16, v_or_b16, v_xor_b16: low-16 bitwise binary, routed
-///     through the int VOP3 binary glue with a `& 0xFFFFu` mask.
-///   - v_not_b16: low-16 bitwise unary, routed through the VOP1 unary glue
-///     with a `& 0xFFFFu` mask.
-///   - v_cndmask_b16: low-16 VCC/SGPR-pair select, routed through the new
-///     try_execute_cndmask_b16_vop3_simd glue.
+/// runs twice in the same process with identical inputs/EXEC and checks that
+/// inactive lanes keep the sentinel. These RDNA3 true16 VOP3 forms have no SIMD
+/// probe, so both runs execute the scalar body; the comparison guards any route
+/// added later.
+///   - v_and_b16, v_or_b16, v_xor_b16, v_not_b16: low-half bitwise operations.
+///   - v_cndmask_b16: low-half SGPR-pair select. The gfx1201 MODE test asserts
+///     the generated generic SIMD route.
 ///
-/// All five share the scalar-body pattern `uint32_t(uint16_t(... low16 ...))`
-/// — the high 16 bits of the destination VGPR are zeroed. The CU and decoder
-/// are built for RDNA3; encoding marker is 0x35<<26.
+/// The scalar bodies write through write_vop3_true16_dst, which preserves the
+/// destination's high half on RDNA. The CU and decoder are built for RDNA3;
+/// encoding marker is 0x35<<26.
 
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
@@ -137,7 +134,7 @@ struct Fixture {
 
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint32_t rot, uint64_t exec) {
     seed_vgprs(rot, exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -187,7 +184,7 @@ void check_binary(const BinCase &c, uint64_t exec) {
     const auto simd_out = run_mode(/*force_scalar=*/false, rot);
 
     EXPECT_EQ(scalar_out, simd_out)
-        << c.name << " rot=" << rot << ": SIMD path diverged from scalar body";
+        << c.name << " rot=" << rot << ": SIMD-enabled execution diverged from forced scalar";
 
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
@@ -221,7 +218,8 @@ void check_not_b16(uint64_t exec) {
   const auto scalar_out = run_mode(/*force_scalar=*/true);
   const auto simd_out = run_mode(/*force_scalar=*/false);
 
-  EXPECT_EQ(scalar_out, simd_out) << "v_not_b16_vop3: SIMD path diverged from scalar body";
+  EXPECT_EQ(scalar_out, simd_out)
+      << "v_not_b16_vop3: SIMD-enabled execution diverged from forced scalar";
 
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
@@ -260,7 +258,7 @@ void check_cndmask_b16(uint64_t exec, uint64_t sel) {
 
     EXPECT_EQ(scalar_out, simd_out)
         << "v_cndmask_b16_vop3 sel=0x" << std::hex << sel << " rot=" << std::dec << rot
-        << ": SIMD path diverged from scalar body";
+        << ": SIMD-enabled execution diverged from forced scalar";
 
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
@@ -347,7 +345,7 @@ void check_mov_b16(uint64_t exec, uint32_t omod, uint32_t clamp) {
   const auto simd_out = run_mode(/*force_scalar=*/false);
 
   EXPECT_EQ(scalar_out, simd_out) << "v_mov_b16 omod=" << omod << " clamp=" << clamp
-                                  << ": SIMD path diverged from scalar body";
+                                  << ": SIMD-enabled execution diverged from forced scalar";
 
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;

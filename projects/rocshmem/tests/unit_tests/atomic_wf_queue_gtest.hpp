@@ -62,19 +62,19 @@ class AtomicWFQueueTestFixture : public ::testing::Test {
     hipDeviceProp_t device_props;
     CHECK_HIP(hipGetDevice(&device_id));
     CHECK_HIP(hipGetDeviceProperties(&device_props, device_id));
-    
+
     wf_size = device_props.warpSize;
   }
 
   ~AtomicWFQueueTestFixture() {}
 
   void get_thread_lane_ids(unsigned int num_threads = 4) {
-    
+
     unsigned int *device_array {nullptr};
 
     hip_allocator_.allocate(reinterpret_cast<void**>(&device_array),
                             sizeof(unsigned int) * num_threads);
-  
+
 
     hipLaunchKernelGGL(wf_lane_ids, 1, num_threads, 0, nullptr,
                        awf_queue, device_array, wf_size);

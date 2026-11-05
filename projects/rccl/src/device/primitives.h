@@ -27,10 +27,10 @@
       if (wid == 0) { \
         (BARRIER_NEXT) += (NWORKERS) / WARP_SIZE; \
         __THREAD_FENCE; \
-        __hip_atomic_fetch_add((BARRIERS_PTR), 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP); \
+        __scoped_atomic_fetch_add((BARRIERS_PTR), 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_WRKGRP); \
         int spins = 0; \
         int rate_limit = 50; \
-        while (__hip_atomic_load((BARRIERS_PTR), __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) < (BARRIER_NEXT)) { \
+        while (__scoped_atomic_load_n((BARRIERS_PTR), __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) < (BARRIER_NEXT)) { \
           spins++; \
           if (spins == NCCL_SPINS_BEFORE_CHECK_ABORT) { \
             if (__atomic_load_n(ncclShmem.comm.abortFlag, __ATOMIC_SEQ_CST)) { \
@@ -42,7 +42,7 @@
           if (spins == 0 && rate_limit > 0) { \
             rate_limit--; \
             traceData(__LINE__, threadIdx.x, \
-                      __hip_atomic_load((BARRIERS_PTR), __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP), \
+                      __scoped_atomic_load_n((BARRIERS_PTR), __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP), \
                       (BARRIER_NEXT)); \
           } \
           __builtin_amdgcn_s_sleep(1); \

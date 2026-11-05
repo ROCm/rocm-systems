@@ -10,9 +10,7 @@
 #include <string>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace json_config
+namespace rocprofsys::json_config
 {
 
 [[nodiscard]] std::string
@@ -70,5 +68,4 @@ export_config_as_json(const std::map<std::string, std::string>& env_vars,
                       const std::string&                        preset_name = "",
                       std::string_view tool_name = "", int indent = 4);
 
-}  // namespace json_config
-}  // namespace rocprofsys
+}  // namespace rocprofsys::json_config

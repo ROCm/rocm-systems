@@ -19,7 +19,7 @@ static inline int rcclProtoGrainSize(int proto, ncclComm* comm) {
   case NCCL_PROTO_LL:
     return 16;
   case NCCL_PROTO_LL128:
-    return comm->WarpSize * NCCL_LL128_SHMEM_ELEMS_PER_THREAD * comm->ll128DataElems * sizeof(uint64_t) /
+    return comm->WarpSize * comm->ll128ShmemElemsPerThread * comm->ll128DataElems * sizeof(uint64_t) /
            comm->ll128LineElems;
   case NCCL_PROTO_SIMPLE:
     return 512;
@@ -31,6 +31,7 @@ static inline int rcclProtoGrainSize(int proto, ncclComm* comm) {
 ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskColl* task,
                                        struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next>* symTaskQueue,
                                        struct ncclTaskColl** remainTasksHead);
+void convertSymTaskDevOp(struct ncclComm* comm, struct ncclTaskColl* task);
 ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
                                         struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next>* symTaskQueue,
                                         struct ncclKernelPlan* plan);

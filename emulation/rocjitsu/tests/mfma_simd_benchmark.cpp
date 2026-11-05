@@ -530,7 +530,7 @@ TEST(MfmaSimdBenchmark, F32Scaled_16x16x128_fp8) {
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_mfma_scale_f32_16x16x128_f8f6f4");
 
-  auto run = [&] { fx.cu->execute_instruction(inst.get(), *fx.wf); };
+  auto run = [&] { (void)fx.cu->execute_instruction(inst.get(), *fx.wf); };
   bench("v_mfma_scale_f32_16x16x128_f8f6f4 [generated]", fx, run, double(M) * N * K * B,
         /*is_int=*/false);
 }

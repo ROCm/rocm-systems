@@ -183,6 +183,49 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters) 
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Verify that hipGraphExecUpdate propagates updated to-symbol parameters.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphExecMemcpyNodeSetParamsToSymbol.cc
+ */
+HIP_TEST_CASE(Unit_hipGraphExecUpdate_MemcpyNodeToSymbol) {
+  LinearAllocGuard<int> first_src(LinearAllocs::hipMalloc, sizeof(int));
+  LinearAllocGuard<int> second_src(LinearAllocs::hipMalloc, sizeof(int));
+  int first = 91;
+  int second = 92;
+  int zero = 0;
+  HIP_CHECK(hipMemcpy(first_src.ptr(), &first, sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(second_src.ptr(), &second, sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(int_device_var), &zero, sizeof(int)));
+
+  hipGraph_t graph = nullptr;
+  hipGraphNode_t node = nullptr;
+  hipGraphExec_t exec = nullptr;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphAddMemcpyNodeToSymbol(&node, graph, nullptr, 0, SYMBOL(int_device_var),
+                                          first_src.ptr(), sizeof(int), 0,
+                                          hipMemcpyDeviceToDevice));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphMemcpyNodeSetParamsToSymbol(node, SYMBOL(int_device_var), second_src.ptr(),
+                                                sizeof(int), 0, hipMemcpyDeviceToDevice));
+
+  hipGraphNode_t error_node = nullptr;
+  hipGraphExecUpdateResult result = hipGraphExecUpdateError;
+  HIP_CHECK(hipGraphExecUpdate(exec, graph, &error_node, &result));
+  REQUIRE(result == hipGraphExecUpdateSuccess);
+  HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+
+  int actual = 0;
+  HIP_CHECK(hipMemcpyFromSymbol(&actual, HIP_SYMBOL(int_device_var), sizeof(int)));
+  REQUIRE(actual == second);
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
  * End doxygen group GraphTest.
  * @}
  */

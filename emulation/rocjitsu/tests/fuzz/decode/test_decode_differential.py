@@ -28,6 +28,7 @@ class LlvmArgsTest(unittest.TestCase):
     def test_selects_requested_target(self):
         self.assertIn("--mcpu=gfx950", llvm_args("gfx950"))
         self.assertIn("--mcpu=gfx1201", llvm_args("gfx1201"))
+        self.assertIn("--mcpu=gfx1251", llvm_args("gfx1251"))
 
     def test_maps_architecture_to_representative_processor(self):
         self.assertIn("--mcpu=gfx908", llvm_args("cdna1"))

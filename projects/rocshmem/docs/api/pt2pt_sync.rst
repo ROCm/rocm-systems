@@ -86,11 +86,11 @@ ROCSHMEM_TEST
 -------------
 
 .. cpp:function:: __device__ int rocshmem_TYPENAME_test(TYPE *ivars, int cmp, TYPE val)
- 
+
   :param ivars: Pointer to memory on the symmetric heap to wait for.
   :param cmp:   Operation for the comparison.
   :param val:   Value to compare the memory at ``ivars`` to.
- 
+
   :returns:     ``1`` if the evaluation is true. ``0`` otherwise.
 
 **Description:**
@@ -108,9 +108,9 @@ ROCSHMEM_SIGNAL_WAIT_UNTIL_ON_STREAM
   :returns:          None.
 
 **Description:**
-This routine enqueues a wait operation on a HIP stream. The function blocks the calling thread
-until the signal variable at ``sig_addr`` satisfies the comparison condition ``(*sig_addr cmp cmp_value)``.
-The wait operation is executed asynchronously on the specified stream. The caller must synchronize
+This routine enqueues a wait operation on a HIP stream without blocking the calling thread. Work
+enqueued on ``stream`` after this call does not start until the signal variable at ``sig_addr``
+satisfies the comparison condition ``(*sig_addr cmp cmp_value)``. The caller must synchronize
 the stream (e.g., using ``hipStreamSynchronize``) to ensure the wait condition has been satisfied.
 
 Valid ``cmp`` values are listed in :ref:`CMP_VALUES`.

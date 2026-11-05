@@ -31,6 +31,42 @@ pub fn gpu_gfx_versions() -> Vec<u32> {
     detect_from(Path::new(KFD_NODES))
 }
 
+/// A GPU's gfx architecture, as KFD reports it.
+///
+/// A newtype over the packed `gfx_target_version` rather than the bare
+/// `u32` the wire formats use, because zero is not a target: KFD gives a
+/// CPU-only node `gfx_target_version 0`, and so does a device a document
+/// simply did not fill in. Holding a [`NonZeroU32`] makes "there is no
+/// GPU here" a thing a caller has to handle rather than a value it can
+/// forget to compare against, and makes the two cases indistinguishable
+/// on purpose — neither names a GPU.
+///
+/// [`Display`](std::fmt::Display) renders the conventional name, so the
+/// packed encoding never has to be spelled out at a call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GfxTarget(std::num::NonZeroU32);
+
+impl GfxTarget {
+    /// The target `version` names, or `None` when it names none.
+    #[must_use]
+    pub fn new(version: u32) -> Option<Self> {
+        std::num::NonZeroU32::new(version).map(Self)
+    }
+
+    /// The packed `gfx_target_version`, for the wire formats and the
+    /// per-target tables that are keyed on it.
+    #[must_use]
+    pub fn version(self) -> u32 {
+        self.0.get()
+    }
+}
+
+impl std::fmt::Display for GfxTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&gfx_name(self.0.get()))
+    }
+}
+
 /// Render a packed `gfx_target_version` as a conventional `gfxNNN`
 /// architecture string. The encoding is decimal `MMMmmpp` (major,
 /// minor, step), so `90402` → `gfx942` and `90500` → `gfx950`. Step
@@ -83,6 +119,22 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
+
+    /// Zero is not a target, and the two ways of arriving at it are the
+    /// same answer: a CPU-only KFD node and a device a document left
+    /// unfilled both name no GPU.
+    #[test]
+    fn a_zero_target_version_is_no_target() {
+        assert_eq!(GfxTarget::new(0), None);
+        assert_eq!(
+            GfxTarget::new(120500).map(|t| t.to_string()),
+            Some("gfx1250".to_string())
+        );
+        assert_eq!(GfxTarget::new(90402).unwrap().version(), 90402);
+        // The hex step the gfx convention uses, so the newtype's own
+        // rendering cannot drift from `gfx_name`.
+        assert_eq!(GfxTarget::new(90010).unwrap().to_string(), "gfx90a");
+    }
 
     #[test]
     fn parses_gfx_target_version_line() {

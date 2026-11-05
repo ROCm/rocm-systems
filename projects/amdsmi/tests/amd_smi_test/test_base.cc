@@ -12,7 +12,7 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
-static const int kOutputLineLength = 80;
+static const size_t kOutputLineLength = 80;
 static const char kLabelDelimiter[] = "####";
 static const char kDescriptionLabel[] = "TEST DESCRIPTION";
 static const char kTitleLabel[] = "TEST NAME";
@@ -28,6 +28,33 @@ static bool CheckModule(const std::string& fileName, const std::string& cond) {
   int rc = amd::smi::ReadSysfsStr(fileName, &state);
   if (!rc && !state.compare(cond)) return (true);
   return (false);
+}
+
+static std::string get_perf_level_string(amdsmi_dev_perf_level_t level) {
+  switch (level) {
+    case AMDSMI_DEV_PERF_LEVEL_AUTO:
+      return "AUTO";
+    case AMDSMI_DEV_PERF_LEVEL_LOW:
+      return "LOW";
+    case AMDSMI_DEV_PERF_LEVEL_HIGH:
+      return "HIGH";
+    case AMDSMI_DEV_PERF_LEVEL_MANUAL:
+      return "MANUAL";
+    case AMDSMI_DEV_PERF_LEVEL_STABLE_STD:
+      return "STABLE_STD";
+    case AMDSMI_DEV_PERF_LEVEL_STABLE_PEAK:
+      return "STABLE_PEAK";
+    case AMDSMI_DEV_PERF_LEVEL_STABLE_MIN_MCLK:
+      return "STABLE_MIN_MCLK";
+    case AMDSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK:
+      return "STABLE_MIN_SCLK";
+    case AMDSMI_DEV_PERF_LEVEL_DETERMINISM:
+      return "DETERMINISM";
+    case AMDSMI_DEV_PERF_LEVEL_UNKNOWN:
+      return "UNKNOWN";
+    default:
+      return "UNDEFINED_PERF_LEVEL";
+  }
 }
 
 TestBase::TestBase() : setup_failed_(false) {}
@@ -96,7 +123,7 @@ void TestBase::SetUp(uint64_t init_flags) {
 
     if (!found_amdgpu || !found_amd_hsmp) {
       ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
-      exit(err);
+      exit(static_cast<int>(err));
     }
   }
   ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
@@ -216,6 +243,18 @@ void TestBase::PrintDeviceHeader(amdsmi_processor_handle dv_ind) {
     }
     std::cout << "\t**Revision ID: 0x" << std::hex << std::setfill('0') << std::setw(2)
               << asic_info.rev_id << std::endl;
+    if (checkIfMaxValue(asic_info.chip_rev_id)) {
+      std::cout << "\t**Chip Revision ID: N/A" << std::endl;
+    } else {
+      std::cout << "\t**Chip Revision ID: 0x" << std::hex << std::setfill('0') << std::setw(2)
+                << asic_info.chip_rev_id << std::endl;
+    }
+    if (checkIfMaxValue(asic_info.external_rev_id)) {
+      std::cout << "\t**External Revision ID: N/A" << std::endl;
+    } else {
+      std::cout << "\t**External Revision ID: 0x" << std::hex << std::setfill('0') << std::setw(2)
+                << asic_info.external_rev_id << std::endl;
+    }
     if (checkIfMaxValue(asic_info.subvendor_id)) {
       std::cout << "\t**Subvendor ID: N/A" << std::endl;
     } else {
@@ -286,6 +325,45 @@ void TestBase::Close(void) {
   ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
 }
 
+void TestBase::SavePerfLevels(void) {
+  for (uint32_t i = 0; i < num_monitor_devs_; ++i) {
+    amdsmi_dev_perf_level_t lvl;
+    amdsmi_status_t err = amdsmi_get_gpu_perf_level(processor_handles_[i], &lvl);
+    if (err == AMDSMI_STATUS_SUCCESS) {
+      saved_perf_level_[i] = lvl;
+      saved_perf_level_valid_[i] = true;
+      IF_VERB(STANDARD) {
+        std::cout << "Saved original performance level for device " << i << ": "
+                  << get_perf_level_string(lvl) << std::endl;
+      }
+    } else {
+      // Device does not expose a settable performance level; skip it so a
+      // later restore does not attempt an unsupported write.
+      saved_perf_level_valid_[i] = false;
+    }
+  }
+}
+
+void TestBase::RestorePerfLevels(void) {
+  for (uint32_t i = 0; i < num_monitor_devs_; ++i) {
+    if (!saved_perf_level_valid_[i]) {
+      continue;  // Original level was never captured for this device.
+    }
+    // Best-effort: intentionally ignore the return so that a restore failure on
+    // one device neither aborts the test nor masks the actual test outcome.
+    amdsmi_status_t err = amdsmi_set_gpu_perf_level(processor_handles_[i], saved_perf_level_[i]);
+    IF_VERB(STANDARD) {
+      if (err == AMDSMI_STATUS_SUCCESS) {
+        std::cout << "Restored perf level dev[" << i
+                  << "]: " << get_perf_level_string(saved_perf_level_[i]) << std::endl;
+      } else {
+        std::cout << "Failed to restore perf level dev[" << i
+                  << "]: " << get_perf_level_string(saved_perf_level_[i]) << std::endl;
+      }
+    }
+  }
+}
+
 void TestBase::DisplayResults(void) const {
   std::string label;
   IF_VERB(STANDARD) {
@@ -312,7 +390,7 @@ void TestBase::DisplayTestInfo(void) {
 }
 
 void TestBase::set_description(std::string d) {
-  int le = kOutputLineLength - 4;
+  size_t le = kOutputLineLength - 4;
 
   description_ = d;
   size_t endlptr;
@@ -402,7 +480,7 @@ uint32_t TestBase::promptNumDevicesToTest(uint32_t current_num_devices) {
     }
   } while (true);
 
-  return_value = std::stoi(devices_to_test);
+  return_value = static_cast<uint32_t>(std::stoi(devices_to_test));
   if (return_value > current_num_devices) {
     std::cout << "Invalid input. Please enter a number between 0 and " << current_num_devices
               << std::endl;

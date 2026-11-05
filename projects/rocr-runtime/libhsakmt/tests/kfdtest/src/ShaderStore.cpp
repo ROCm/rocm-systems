@@ -1139,6 +1139,19 @@ const char *CheckCuMaskIsa =
         // Store HW_ID1 content
         .if (.amdgcn.gfx_generation_number >= 12)
             s_getreg_b32     s6, hwreg(HW_REG_HW_ID1)
+            .if (.amdgcn.gfx_generation_minor >= 5)
+                // gfx12.5+: SQ_WAVE_HW_ID1 no longer carries SE. Fetch the
+                // SE-within-XCC id from MSG_RTN_GET_SE_AID_ID[3:0] and inject it
+                // back into HW_ID1's SE field [20:18] so the out_data_t decode
+                // (shared with gfx12.0) keeps working. SA[16] and WGP[13:10]
+                // remain valid in HW_ID1.
+                s_sendmsg_rtn_b32 s7, sendmsg(MSG_RTN_GET_SE_AID_ID)
+                s_wait_kmcnt     0
+                s_and_b32        s7, s7, 0x3
+                s_lshl_b32       s7, s7, 18
+                s_and_b32        s6, s6, 0xFFE3FFFF
+                s_or_b32         s6, s6, s7
+            .endif
         .else
             s_getreg_b32     s6, hwreg(HW_REG_HW_ID)
         .endif

@@ -4,6 +4,8 @@ Instruction decoders, execution bodies, legalization tables, and encoding
 translators are generated from the
 [Machine-Readable ISA (MR ISA)](https://gpuopen.com/machine-readable-isa/)
 XML specification via the `amdisa` Python library in `lib/python/amdisa/`.
+DBT generation also emits the matrix lane-conversion catalog from Python
+layout formulas and a fixed inventory of source/target layout names.
 
 ## amdisa modules
 
@@ -18,6 +20,8 @@ XML specification via the `amdisa` Python library in `lib/python/amdisa/`.
 | `legalization.py` | Generate cross-ISA legalization tables (Action classification) |
 | `legalization_codegen.py` | Emit C++20 `InstructionLegalization[]` legalization table headers |
 | `encoding_translator_codegen.py` | Emit C++20 neutral field structs + decode/encode functions |
+| `layout_catalog.py` | Matrix lane-layout descriptors and XOR permutation formulas |
+| `codegen/dbt/rule_gen.py` | Derive and emit the matrix lane-conversion catalog |
 
 ## Installation
 
@@ -118,6 +122,83 @@ Provenance does not by itself define target availability: a separate variant
 model must also be able to restrict encoding forms already present in the base
 XML.
 
+Production additions must be independently auditable from public inputs. Keep a
+colocated provenance manifest or equivalent record that names a pinned public
+source revision, the exact definition and test-vector locations, the public
+base-XML template used for every field, and the derivation of each identifier.
+When a repository verifier accompanies the delta, the production generation
+script must run it before parsing the XML and fail closed if the delta contains
+unrecorded metadata or no longer reconstructs from those inputs. The CDNA5
+gfx1251 manifest and verifier next to its delta are the reference pattern.
+
+## Generated ISA variant features
+
+An optional JSON manifest assigns instruction-and-encoding legality bits to
+concrete targets within one generated ISA family. It is deliberately separate
+from additive XML deltas: the XML describes which instruction forms can be
+decoded, while the manifest describes which concrete targets may use them. For
+example:
+
+```json
+{
+  "schema_version": 1,
+  "features": ["example_instruction", "example_encoding_form"],
+  "variants": {
+    "gfx_base": [],
+    "gfx_plus": ["example_instruction", "example_encoding_form"]
+  },
+  "instructions": [
+    {"feature": "example_instruction", "names": ["V_EXAMPLE"]}
+  ],
+  "model_only_instructions": ["V_EXAMPLE"],
+  "encodings": [
+    {
+      "feature": "example_encoding_form",
+      "encoding": "VOP1_VOP_DPP16",
+      "instructions": ["V_OTHER"]
+    }
+  ]
+}
+```
+
+Feature names describe reusable ISA properties rather than GPU revisions. The
+array order assigns the generated feature bit positions; within one schema
+version, existing entries must not be reordered or removed. The
+loader validates the complete manifest before changing the parsed `IsaSpec`.
+Unknown features, instructions, or encodings; duplicate requirements; malformed
+names; more than 32 instruction features; and generated C++ name collisions
+fail closed. Instruction requirements
+apply to every form of a mnemonic. Encoding requirements apply only when that
+runtime encoding modifier is present, so an ordinary form can remain legal when
+its DPP16 form is target-specific. Schema version 1 deliberately accepts only
+DPP16 encoding requirements; other encoding kinds fail validation until their
+runtime construction paths implement the same fail-closed contract.
+
+The generator emits immutable feature masks in `isa_features.h`. A
+target-specific decoder compares the decoded instruction's combined
+instruction-plus-encoding requirement with its concrete target mask before
+returning it. Entries in `model_only_instructions` are emitted without execute
+declarations, definitions, execution IDs, or callbacks; they can be decoded and
+inspected but cannot accidentally acquire placeholder execution semantics.
+
+These generated feature masks do not describe runtime behavior differences
+between targets that share an instruction form. Model those differences as
+fail-closed, provider-authored fields in `IsaTargetCapabilities`, and have the
+execution or analysis consumer query the selected concrete binding. This keeps
+handwritten target semantics separate from the generated legality contract.
+
+Attach at most one manifest to each logical ISA name. It is applied after the
+base XML and all ISA additions are parsed, and before semantics derivation and
+code generation:
+
+```bash
+python -m amdisa cdna5:/path/to/amdgpu_isa_cdna5.xml \
+  --isa-additions cdna5:/path/to/cdna5-additions.xml \
+  --isa-variants cdna5:/path/to/cdna5-variants.json \
+  --isa-output /path/to/isa-output \
+  --dbt-output /path/to/dbt-output
+```
+
 ## Generated file locations
 
 | Generated files | Location | Generator |
@@ -127,13 +208,26 @@ XML.
 | ISA files generated at a custom path | A caller-selected tree such as `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/custom/generated/` | `codegen/` |
 | Cross-ISA legalization tables | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `legalization_codegen.py` |
 | Encoding decode/encode functions | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `encoding_translator_codegen.py` |
+| Matrix lane-conversion catalog (`matrix_conversions.h`) | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `codegen/dbt/rule_gen.py` |
+
+The matrix header is regenerated during DBT generation from the four preserved
+layout pairs in `_MATRIX_CONVERSION_PAIRS` in `codegen/dbt/rule_gen.py` and the
+lane-layout formulas in `layout_catalog.py`. The output helper creates the
+directory and runs `clang-format` when available. The inventory describes
+layout permutations; adding a row does not implement a translation or establish
+opcode availability. In particular, `V_WMMA_I32_16X16X32_I8` is a historical
+layout-only placeholder absent from the pinned RDNA4 XML, whose 8-bit integer
+WMMA instruction is `V_WMMA_I32_16X16X16_IU8`. The current consumer in
+`cdna4_to_rdna4.cpp` selects a row by source mnemonic and emits a fixed F16 WMMA
+instruction; it does not validate or select the catalog's destination names.
 
 GPUOpen's public CDNA5 MR ISA uses the architecture name `AMD CDNA 5` and the
 filename `amdgpu_isa_cdna5.xml`. rocjitsu's logical generator key and
-configuration architecture are `cdna5`. Its concrete GPU/runtime target, ELF
-identity, and public DBT target identity remain `gfx1250`. Its filesystem
-directories, generated and hand-written C++ namespace (`rocjitsu::cdna5`), and
-internal CMake provider targets also use `cdna5`.
+configuration architecture are `cdna5`. Concrete GPU/runtime, ELF, and public
+DBT identities remain `gfx1250` or `gfx1251`; an architecture-only lookup uses
+the provider's explicit `gfx1250` default. Filesystem directories, generated
+and hand-written C++ namespace (`rocjitsu::cdna5`), and CMake provider targets
+continue to use `cdna5`.
 
 Hand-written per-ISA files (`isa.h`, `mma_exec.h`, `addr_calc.h/.cpp`) remain
 under `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/<output-directory>/` and are
@@ -148,7 +242,8 @@ decode/encode functions and neutral field structs are auto-generated.
 ## CLI reference
 
 ```
-python -m amdisa [--isa-additions NAME:XML] [--gen-isas] [--gen-dbt]
+python -m amdisa [--isa-additions NAME:XML] [--isa-variants NAME:JSON]
+                 [--gen-isas] [--gen-dbt]
                  [--isa-output DIR] [--include-root DIR]
                  [--dbt-output DIR] [NAME:]XML ...
 ```
@@ -157,8 +252,9 @@ python -m amdisa [--isa-additions NAME:XML] [--gen-isas] [--gen-dbt]
 |---|---|
 | `[NAME:]XML ...` | One or more ISA XMLs. A recognized name selects its semantic profile. An unrecognized explicit name is treated as a custom generated identity, with its semantic profile detected from the XML |
 | `--isa-additions NAME:XML` | Apply a validated ISA additions file to the named ISA; may be repeated |
+| `--isa-variants NAME:JSON` | Attach one validated target-capability manifest to the named ISA |
 | `--gen-isas` | Generate ISA C++ files (decoders, encodings, execute bodies) |
-| `--gen-dbt` | Generate DBT legalization tables and encoding translators |
+| `--gen-dbt` | Generate DBT legalization tables, matrix layout conversions, and encoding translators |
 | `--isa-output DIR` | Output path for generated ISA C++ files |
 | `--include-root DIR` | Compiler include root used to spell relocatable generated includes |
 | `--dbt-output DIR` | Output directory for DBT tables (defaults to `--isa-output`) |
@@ -194,6 +290,15 @@ appropriate relative or absolute path. It discovers the active environment
 through `VIRTUAL_ENV` or the active Python interpreter, then formats changed
 generated files through the repository's pre-commit configuration.
 
+The CDNA1 through CDNA4 additions provide LLVM-supported legacy EXP/LOG encodings
+missing from the published base XML, while preserving those upstream inputs.
+The legacy EXP/LOG executors use the shared transcendental approximation and
+explicit flush/nearest output policy. The CDNA1/CDNA2 manuals specify base-2
+operations with unspecified legacy semantics. The CDNA3/CDNA4 manuals list the
+legacy names among transcendental operations but omit their opcode and operation
+definitions; their encodings come from LLVM. Bit-for-bit agreement for arbitrary
+inputs has not been qualified on CDNA hardware.
+
 The manual commands below are useful for focused generator development and are
 run from the rocjitsu project root. Set `MRISA` to the shared MR ISA directory:
 
@@ -211,6 +316,12 @@ python -m amdisa \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
+  --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_legacy_math.xml \
+  --isa-additions cdna2:$MRISA/amdgpu_isa_cdna2_legacy_math.xml \
+  --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
+  --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
+  --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
+  --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
   --include-root lib/rocjitsu/src \
   --dbt-output lib/rocjitsu/src/rocjitsu/code/dbt/generated
@@ -233,6 +344,12 @@ python -m amdisa \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
+  --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_legacy_math.xml \
+  --isa-additions cdna2:$MRISA/amdgpu_isa_cdna2_legacy_math.xml \
+  --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
+  --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
+  --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
+  --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
   --gen-isas \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
   --include-root lib/rocjitsu/src
@@ -255,6 +372,12 @@ python -m amdisa \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
+  --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_legacy_math.xml \
+  --isa-additions cdna2:$MRISA/amdgpu_isa_cdna2_legacy_math.xml \
+  --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
+  --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
+  --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
+  --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
   --gen-dbt \
   --dbt-output lib/rocjitsu/src/rocjitsu/code/dbt/generated
 

@@ -417,7 +417,7 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
       union {
         int i;
         T f;
-      } tmp;
+      } tmp = {};
 
       tmp.f = result;
       tmp.i = __hip_ds_bpermute(nextBit << 2, tmp.i);
@@ -466,7 +466,7 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
     union {
       int i;
       T f;
-    } tmp;
+    } tmp = {};
     tmp.f = result;
     tmp.i = __hip_ds_bpermute(firstLane << 2, tmp.i);
     return tmp.f;

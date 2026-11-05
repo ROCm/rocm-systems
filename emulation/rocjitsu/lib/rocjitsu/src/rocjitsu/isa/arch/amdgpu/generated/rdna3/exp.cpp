@@ -31,6 +31,7 @@ ExpExp::ExpExp(const MachineInst *inst)
   num_dst_ = 1;
   sdst_exec.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {

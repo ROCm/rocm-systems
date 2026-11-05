@@ -32,6 +32,8 @@
 //      RCCL_RMA_RELOAD_COUNTER_FILE (iputSignal also RCCL_RMA_SIGNAL_COUNTER_FILE)
 //      so RmaExternalPluginPutSignal.* can prove the host put/signal APIs reach
 //      the plugin primitives (a fire-and-forget check: no wait, no validation).
+//      GinPluginInitFail.* drives the same vtable with RCCL_GIN_TEST_PLUGIN_MODE
+//      to cover NCCL 2.30.7 / NVIDIA/nccl#2179 (finalize after devices() fails).
 //
 // Compiled as C++ (the RCCL project only enables CXX/HIP), so each plugin symbol
 // is exported with C linkage and default visibility for RCCL's dlsym() lookup.
@@ -46,6 +48,16 @@
 //                   companion case where finalize() must still run.
 // Both new modes record via RCCL_NET_TEST_{INIT,FINALIZE}_FILE.
 //
+// RCCL_GIN_TEST_PLUGIN_MODE selects a failure to inject on the GIN/RMA stub:
+//   init_fail     - init() reports an error (finalize must not run).
+//   devices_fail  - init() succeeds but devices() reports an error.
+//   devices_zero  - init() succeeds but devices() reports ndev = 0.
+// Both devices_* modes must still run finalize() (NVIDIA/nccl#2179).
+// Records via RCCL_GIN_TEST_{INIT,FINALIZE,PROPERTIES}_FILE. getProperties()
+// runs only after a successful devices() probe (the default assign path), so
+// GinPluginInitFail.* asserts that counter is 0 to distinguish those modes
+// from a mistyped RCCL_GIN_TEST_PLUGIN_MODE that falls through to default.
+//
 // Both plugins share the real RCCL plugin headers (nccl_net.h transitively
 // provides the v12 net ABI, net_device.h and the GIN proxy constants); this
 // keeps the two vtables in one consistent header world so they can live in a
@@ -53,9 +65,11 @@
 // net types that gin_v13.h also pulls in.
 
 #include <cstdint>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "nccl_net.h"     // ncclNet_v12_t + v12 net ABI, NCCL_NET_DEVICE_*
 #include "gin/gin_v13.h"  // ncclGin_v13_t, ncclGinConfig_v13_t
 
@@ -74,10 +88,17 @@ enum PluginTestMode {
 
 static void recordLine(const char* envVar) {
   const char* path = getenv(envVar);
-  if (path == nullptr) return;
+  if (path == nullptr || path[0] == '\0') return;
 
-  FILE* f = fopen(path, "a");
-  if (f == nullptr) return;
+  // O_NOFOLLOW: a pre-created symlink at a shared path must not redirect the
+  // counter into another file.
+  int fd = open(path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+  if (fd < 0) return;
+  FILE* f = fdopen(fd, "a");
+  if (f == nullptr) {
+    close(fd);
+    return;
+  }
 
   fputs("1\n", f);
   fclose(f);
@@ -211,18 +232,39 @@ struct RmaStubCtx {
 
 static int gRmaRequestSentinel = 0;
 
+enum GinPluginTestMode {
+  kGinModeDefault,
+  kGinModeInitFail,
+  kGinModeDevicesFail,
+  kGinModeDevicesZero,
+};
+
+static GinPluginTestMode ginTestMode() {
+  const char* mode = getenv("RCCL_GIN_TEST_PLUGIN_MODE");
+  if (mode == nullptr) return kGinModeDefault;
+  if (strcmp(mode, "init_fail") == 0) return kGinModeInitFail;
+  if (strcmp(mode, "devices_fail") == 0) return kGinModeDevicesFail;
+  if (strcmp(mode, "devices_zero") == 0) return kGinModeDevicesZero;
+  return kGinModeDefault;
+}
+
 __hidden ncclResult_t stubInit(void** ctx, uint64_t /*commId*/, ncclDebugLogger_t /*logFunction*/) {
   recordLine("RCCL_RMA_RELOAD_INIT_FILE");
+  recordLine("RCCL_GIN_TEST_INIT_FILE");
+  if (ginTestMode() == kGinModeInitFail) return ncclSystemError;
   if (ctx) *ctx = new RmaStubComm{0, 1};
   return ncclSuccess;
 }
 
 __hidden ncclResult_t stubDevices(int* ndev) {
-  if (ndev) *ndev = 1;
+  const GinPluginTestMode mode = ginTestMode();
+  if (mode == kGinModeDevicesFail) return ncclSystemError;
+  if (ndev) *ndev = (mode == kGinModeDevicesZero) ? 0 : 1;
   return ncclSuccess;
 }
 
 __hidden ncclResult_t stubGetProperties(int dev, ncclNetProperties_v12_t* props) {
+  recordLine("RCCL_GIN_TEST_PROPERTIES_FILE");
   memset(props, 0, sizeof(*props));
   props->name = kRmaPluginName;
   props->pciPath = nullptr;
@@ -347,6 +389,7 @@ __hidden ncclResult_t stubQueryLastError(void* /*ginCtx*/, bool* hasError) {
 }
 
 __hidden ncclResult_t stubFinalize(void* ctx) {
+  recordLine("RCCL_GIN_TEST_FINALIZE_FILE");
   delete static_cast<RmaStubComm*>(ctx);
   return ncclSuccess;
 }

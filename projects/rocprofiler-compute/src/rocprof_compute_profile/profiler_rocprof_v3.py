@@ -6,7 +6,7 @@ import shlex
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.logger import console_error, console_log, demarcate
+from utils.logger import console_log, demarcate
 from utils.utils_common import PROFILE_OUTPUT_FORMAT
 from utils.utils_profile import pc_sampling_unit
 
@@ -32,15 +32,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
 
     def get_profiler_options(self) -> list[str]:
         args = self.get_args()
-        if args.kokkos_trace:
-            trace_option = "--kokkos-trace"
-            # NOTE: --kokkos-trace feature is incomplete and is disabled for now.
-            console_error(
-                "The option '--kokkos-trace' is not supported in the current "
-                "version of rocprof-compute. This functionality is planned for a "
-                "future release. Please adjust your profiling options accordingly."
-            )
-        elif getattr(self, "_selected_frameworks", set()):
+        if getattr(self, "_selected_frameworks", set()):
             trace_option = "--marker-trace"
         else:
             trace_option = "--kernel-trace"
@@ -60,22 +52,22 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         if args.kernel:
             profiling_options.extend(["--kernel-include-regex", "|".join(args.kernel)])
 
-        # Dispatch filtering
-        dispatch = []
-        # rocprofv3 dispatch indexing is inclusive and starts from 1
-        if args.dispatch:
-            for dispatch_id in args.dispatch:
-                if ":" in dispatch_id:
+        # Kernel iteration filtering
+        iterations = []
+        # rocprofv3 iteration indexing is inclusive and starts from 1
+        if args.kernel_iteration_range:
+            for iteration in args.kernel_iteration_range:
+                if ":" in iteration:
                     # 4:7 -> 4-7
-                    start, end = dispatch_id.split(":")
-                    dispatch.append(f"{start}-{end}")
+                    start, end = iteration.split(":")
+                    iterations.append(f"{start}-{end}")
                 else:
                     # 4 -> 4
-                    dispatch.append(f"{dispatch_id}")
-        if dispatch:
+                    iterations.append(f"{iteration}")
+        if iterations:
             profiling_options.extend([
                 "--kernel-iteration-range",
-                f"[{','.join(dispatch)}]",
+                f"[{','.join(iterations)}]",
             ])
 
         if not args.attach_pid:

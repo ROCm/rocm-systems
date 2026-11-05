@@ -94,6 +94,35 @@ of reduction collectives. User-defined operators are created via
    * - ``nccl.core.AVG``
      - :py:attr:`NcclRedOp.AVG`
 
+Team
+====
+
+NCCLTeam
+--------
+.. autoclass:: NCCLTeam
+   :members:
+
+Type aliases
+============
+
+Aliases naming value types accepted by the public API. Each expands to a
+union of concrete types, so a value of any member type is accepted.
+
+.. autodata:: NcclBufferSpec
+   :annotation:
+
+.. autodata:: NcclScalarSpec
+   :annotation:
+
+.. autodata:: NcclDeviceSpec
+   :annotation:
+
+.. autodata:: NcclStreamSpec
+   :annotation:
+
+.. autodata:: NcclEventSpec
+   :annotation:
+
 Exceptions
 ==========
 

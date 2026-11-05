@@ -6,6 +6,7 @@
 #include "hipfile.h"
 #include "hipfile-test.h"
 #include "hipfile-warnings.h"
+#include "mconfiguration.h"
 #include "mhip.h"
 #include "msys.h"
 #include "stream.h"
@@ -35,15 +36,32 @@ hipFileFlagsPowerSet()
                               ::testing::Values(0, HIPFILE_STREAM_PAGE_ALIGNED_INPUTS));
 }
 
+static void
+expectStreamBuffer(StrictMock<MConfiguration> &mconfig, StrictMock<MHip> &mhip)
+{
+    EXPECT_CALL(mconfig, asyncBufferSize)
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Return(1 << 20));
+    EXPECT_CALL(mhip, hipHostMalloc)
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Return(reinterpret_cast<void *>(0x1234)));
+    EXPECT_CALL(mhip, hipHostGetDevicePointer)
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Return(reinterpret_cast<void *>(0x5678)));
+    EXPECT_CALL(mhip, hipHostFree).Times(::testing::AnyNumber());
+}
+
 struct HipFileStream : public ::testing::Test {
     HipFileStream()
     {
         nonnull_stream = reinterpret_cast<hipStream_t>(1);
+        expectStreamBuffer(mconfig, mhip);
     }
-    StrictMock<MHip> mhip;
-    StrictMock<MSys> msys;
-    hipStream_t      nonnull_stream;
-    StreamMap        stream_map;
+    StrictMock<MConfiguration> mconfig;
+    StrictMock<MHip>           mhip;
+    StrictMock<MSys>           msys;
+    hipStream_t                nonnull_stream;
+    StreamMap                  stream_map;
 };
 
 struct HipFileStreamValidParams
@@ -108,11 +126,46 @@ TEST_F(HipFileStream, deregister_with_unregistered_stream_throws)
     ASSERT_THROW(stream_map.deregisterStream(nonnull_stream), std::invalid_argument);
 }
 
+TEST_F(HipFileStream, register_buffer_alloc_fails_throws)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    EXPECT_CALL(mhip, hipHostMalloc).WillOnce(::testing::Return(nullptr));
+    ASSERT_THROW(stream_map.registerStream(nonnull_stream, 0), std::runtime_error);
+}
+
+TEST(HipFileStreamDestructor, buffer_free_failure_logs)
+{
+    StrictMock<MConfiguration> mconfig;
+    StrictMock<MHip>           mhip;
+    StrictMock<MSys>           msys;
+    EXPECT_CALL(mconfig, asyncBufferSize)
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Return(1 << 20));
+    EXPECT_CALL(mhip, hipHostMalloc)
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Return(reinterpret_cast<void *>(0x1234)));
+    EXPECT_CALL(mhip, hipHostGetDevicePointer)
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Return(reinterpret_cast<void *>(0x5678)));
+    EXPECT_CALL(mhip, hipHostFree)
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Throw(Hip::RuntimeError(hipErrorInvalidValue)));
+    EXPECT_CALL(msys, syslog);
+    {
+        StreamMap stream_map;
+        EXPECT_CALL(mhip, hipStreamGetDevice);
+        stream_map.registerStream(reinterpret_cast<hipStream_t>(1), 0);
+        stream_map.deregisterStream(reinterpret_cast<hipStream_t>(1));
+    }
+}
+
 TEST(HipFileStreamDestructor, destructor_with_streams_in_use_logs)
 {
-    StrictMock<MHip>         mhip;
-    StrictMock<MSys>         msys;
-    std::shared_ptr<IStream> stream;
+    StrictMock<MConfiguration> mconfig;
+    StrictMock<MHip>           mhip;
+    StrictMock<MSys>           msys;
+    std::shared_ptr<IStream>   stream;
+    expectStreamBuffer(mconfig, mhip);
     {
         StreamMap stream_map;
         EXPECT_CALL(mhip, hipStreamGetDevice);
@@ -126,10 +179,12 @@ struct HipFileStreamExternal : public HipFileOpened {
     HipFileStreamExternal()
     {
         nonnull_stream = reinterpret_cast<hipStream_t>(1);
+        expectStreamBuffer(mconfig, mhip);
     }
-    StrictMock<MHip> mhip;
-    StrictMock<MSys> msys;
-    hipStream_t      nonnull_stream;
+    StrictMock<MConfiguration> mconfig;
+    StrictMock<MHip>           mhip;
+    StrictMock<MSys>           msys;
+    hipStream_t                nonnull_stream;
 };
 
 TEST_F(HipFileStreamExternal, register_and_deregister_with_valid_stream_works)

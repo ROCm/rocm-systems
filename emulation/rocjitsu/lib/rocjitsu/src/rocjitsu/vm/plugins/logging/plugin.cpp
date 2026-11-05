@@ -27,7 +27,15 @@ void KernelLoggingPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchIn
 
 void KernelLoggingPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
                                                           Wavefront &wf) {
-  auto dispatch_id = wf.dispatch_id();
+  record_mma(inst, wf.dispatch_id());
+}
+
+void KernelLoggingPlugin::onAmdgpuAsyncInstructionIssued(uint64_t /*pc*/, const Instruction &inst,
+                                                         Wavefront &wf) {
+  record_mma(inst, wf.dispatch_id());
+}
+
+void KernelLoggingPlugin::record_mma(const Instruction &inst, uint32_t dispatch_id) {
   bool is_mfma = inst.is_mfma() || inst.mnemonic().starts_with("v_wmma_");
   if (is_mfma) {
     std::lock_guard<std::mutex> lock(mutex_);

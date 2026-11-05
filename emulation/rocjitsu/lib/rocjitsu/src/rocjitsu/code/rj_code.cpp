@@ -8,6 +8,7 @@
 
 #include <cstring>
 #include <new>
+#include <string>
 #include <unordered_map>
 
 using namespace rocjitsu;
@@ -20,11 +21,10 @@ Decoder *create_decoder_for_target(rj_code_target_id_t target) {
   if (descriptor == nullptr)
     return nullptr;
 
-  static thread_local std::unordered_map<const IsaTargetDescriptor *, std::unique_ptr<Decoder>>
-      decoders;
-  std::unique_ptr<Decoder> &decoder = decoders[descriptor];
+  static thread_local std::unordered_map<rj_code_target_id_t, std::unique_ptr<Decoder>> decoders;
+  std::unique_ptr<Decoder> &decoder = decoders[target];
   if (!decoder)
-    decoder = descriptor->decoder_factory();
+    decoder = Decoder::create(registry, target);
   return decoder.get();
 }
 
@@ -35,19 +35,30 @@ rj_code_arch_t arch_for_target(rj_code_target_id_t target) {
   return descriptor->architecture_id;
 }
 
+bool code_object_accepts_target(const AmdGpuCodeObject &object, rj_code_target_id_t target) {
+  const rj_code_target_id_t object_target = object.target_id();
+  return object_target == ROCJITSU_CODE_TARGET_INVALID || object_target == target;
+}
+
 } // namespace
 
 rj_status_t rj_code_executable_create(const char *path, rj_code_executable_t **exec) {
   if (!path || !exec)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto executable = std::make_unique<Executable>(path);
-  if (!executable->is_valid())
-    return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+  try {
+    auto handle = std::make_unique<rj_code_executable_t>();
+    handle->exec = std::make_unique<Executable>(path);
+    if (!handle->exec->is_valid())
+      return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
 
-  *exec = new rj_code_executable_t{};
-  (*exec)->exec = std::move(executable);
-  return ROCJITSU_STATUS_SUCCESS;
+    *exec = handle.release();
+    return ROCJITSU_STATUS_SUCCESS;
+  } catch (const std::bad_alloc &) {
+    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
+  } catch (...) {
+    return ROCJITSU_STATUS_ERROR;
+  }
 }
 
 void rj_code_executable_retain(rj_code_executable_t *exec) {
@@ -119,6 +130,9 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   *inst_list = nullptr;
 
+  if (!code_object_accepts_target(*obj->co, target_id))
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+
   auto *decoder = create_decoder_for_target(target_id);
   if (!decoder)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
@@ -184,6 +198,9 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   *list = nullptr;
 
+  if (!code_object_accepts_target(*obj->co, target_id))
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+
   auto *decoder = create_decoder_for_target(target_id);
   if (!decoder)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
@@ -195,7 +212,8 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
   try {
     Instruction::ScopedHeapAllocation heap_allocation;
     auto owned = std::make_unique<rj_code_basic_block_list_t>();
-    auto blocks = BasicBlock::build(*obj->co, *decoder, arch);
+    auto blocks = BasicBlock::build(*obj->co, *decoder, arch, {}, {},
+                                    ExternalEntryPolicy::InferPredecessorless, {}, target_id);
     if (blocks.failed())
       return ROCJITSU_STATUS_ERROR;
     owned->blocks = std::move(blocks).value();
@@ -321,7 +339,7 @@ rj_status_t rj_code_inst_disassemble(const rj_code_inst_t *inst, char *buf, uint
   if (!inst || !buf || buf_size == 0)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  const auto &dis = reinterpret_cast<const Instruction *>(inst)->disassemble();
+  const std::string dis = reinterpret_cast<const Instruction *>(inst)->disassemble();
   std::strncpy(buf, dis.c_str(), buf_size - 1);
   buf[buf_size - 1] = '\0';
   return ROCJITSU_STATUS_SUCCESS;

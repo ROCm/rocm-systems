@@ -8,6 +8,7 @@
 #include "os.h"
 
 #include "checks.h"
+#include "crypt.h"
 #include "utils.h"
 
 #include <cstdint>
@@ -52,7 +53,6 @@ ncclOsLibraryHandle ncclOsDlopen(const char* filename) {
   ncclOsLibraryHandle handle = dlopen(filename, RTLD_NOW | RTLD_LOCAL);
   if (handle == NULL) {
     saveDlError();
-    INFO(NCCL_INIT, "ncclOsDlopen(%s) failed: %s", filename, ncclDlErrorBuf);
   }
   return handle;
 }
@@ -61,7 +61,6 @@ void* ncclOsDlsym(ncclOsLibraryHandle handle, const char* symbol) {
   void* ptr = dlsym(handle, symbol);
   if (ptr == NULL) {
     saveDlError();
-    INFO(NCCL_INIT, "ncclOsDlsym(%s) failed: %s", symbol, ncclDlErrorBuf);
   }
   return ptr;
 }
@@ -71,7 +70,9 @@ const char* ncclOsDlerror() {
 }
 
 ncclOsLibraryHandle ncclOsDlopen(const char* path, int mode) {
-  return (ncclOsLibraryHandle)dlopen(path, (mode == NCCL_OS_DL_NOW) ? RTLD_NOW : RTLD_LAZY);
+  ncclOsLibraryHandle handle = dlopen(path, (mode == NCCL_OS_DL_NOW) ? RTLD_NOW : RTLD_LAZY);
+  if (handle == NULL) saveDlError();
+  return handle;
 }
 
 void ncclOsDlclose(ncclOsLibraryHandle handle) {
@@ -93,6 +94,10 @@ uint64_t ncclOsGetTid() {
 
 size_t ncclOsGetPageSize() {
   return (size_t)sysconf(_SC_PAGESIZE);
+}
+
+size_t ncclOsGetCommMempoolMaxSize() {
+  return 0;
 }
 
 void* ncclOsAlignedAlloc(size_t alignment, size_t size) {
@@ -284,20 +289,21 @@ static ncclResult_t socketConnectCheck(struct ncclSocket* sock, int errCode, con
       if (sock->errorRetries++ == ncclParamRetryCnt()) {
         sock->state = ncclSocketStateError;
         WARN("%s: connect to %s returned %s, exceeded error retry count after %d attempts", funcName,
-             ncclSocketToString(&sock->addr, line), strerror(errCode), sock->errorRetries);
+             ncclSocketToString(&sock->addr, line, sizeof(line)), strerror(errCode), sock->errorRetries);
         return ncclRemoteError;
       }
       unsigned int sleepTime = sock->errorRetries * ncclParamRetryTimeOut();
       INFO(NCCL_NET | NCCL_INIT, "%s: connect to %s returned %s, retrying (%d/%ld) after sleep for %u msec", funcName,
-           ncclSocketToString(&sock->addr, line), strerror(errCode), sock->errorRetries, ncclParamRetryCnt(),
-           sleepTime);
+           ncclSocketToString(&sock->addr, line, sizeof(line)), strerror(errCode), sock->errorRetries,
+           ncclParamRetryCnt(), sleepTime);
       std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));
     }
     NCCLCHECK(ncclOsSocketResetFd(sock)); /* in case of failure in connect, socket state is unspecified */
     sock->state = ncclSocketStateConnecting;
   } else {
     sock->state = ncclSocketStateError;
-    WARN("%s: connect to %s failed : %s", funcName, ncclSocketToString(&sock->addr, line), strerror(errCode));
+    WARN("%s: connect to %s failed : %s", funcName, ncclSocketToString(&sock->addr, line, sizeof(line)),
+         strerror(errCode));
     return ncclSystemError;
   }
   return ncclSuccess;
@@ -323,7 +329,8 @@ ncclResult_t ncclOsSocketPollConnect(struct ncclSocket* sock) {
   if (ret == 0 || (ret < 0 && errno == EINTR)) {
     return ncclSuccess;
   } else if (ret < 0) {
-    WARN("ncclOsSocketPollConnect to %s failed with error %s", ncclSocketToString(&sock->addr, line), strerror(errno));
+    WARN("ncclOsSocketPollConnect to %s failed with error %s", ncclSocketToString(&sock->addr, line, sizeof(line)),
+         strerror(errno));
     return ncclSystemError;
   }
 
@@ -356,7 +363,7 @@ ncclResult_t ncclOsSocketProgressOpt(int op, struct ncclSocket* sock, void* ptr,
       }
       if (errno != EINTR && errno != EWOULDBLOCK && errno != EAGAIN) {
         WARN("ncclOsSocketProgressOpt: Call to %s %s failed : %s", (op == NCCL_SOCKET_RECV ? "recv from" : "send to"),
-             ncclSocketToString(&sock->addr, line), strerror(errno));
+             ncclSocketToString(&sock->addr, line, sizeof(line)), strerror(errno));
         return ncclRemoteError;
       } else {
         bytes = 0;
@@ -398,7 +405,7 @@ ncclResult_t ncclOsFindInterfaces(const char* prefixList, char* names, union ncc
     if (!(interface->ifa_flags & IFF_RUNNING)) continue;
 
     TRACE(NCCL_INIT | NCCL_NET, "Found interface %s:%s", interface->ifa_name,
-          ncclSocketToString((union ncclSocketAddress*)interface->ifa_addr, line));
+          ncclSocketToString((union ncclSocketAddress*)interface->ifa_addr, line, sizeof(line)));
 
     /* Allow the caller to force the socket family type */
     if (sock_family != -1 && family != sock_family) continue;
@@ -508,7 +515,8 @@ ncclResult_t ncclFindInterfaceMatchSubnet(char* ifName, union ncclSocketAddress*
     strncpy(ifName, interface->ifa_name, ifNameMaxSize);
 
     TRACE(NCCL_INIT | NCCL_NET, "NET : Found interface %s:%s in the same subnet as remote address %s",
-          interface->ifa_name, ncclSocketToString(localAddr, line), ncclSocketToString(remoteAddr, line_a));
+          interface->ifa_name, ncclSocketToString(localAddr, line, sizeof(line)),
+          ncclSocketToString(remoteAddr, line_a, sizeof(line_a)));
     *found = 1;
   }
 
@@ -521,11 +529,11 @@ ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait) {
     if (sock->state > ncclSocketStateNone && sock->state < ncclSocketStateNum && ncclOsSocketIsValid(sock)) {
       if (wait) {
         char data;
-        int closed = 0;
+        bool closed = false;
         do {
           int offset = 0;
           if (ncclSocketProgress(NCCL_SOCKET_RECV, sock, &data, sizeof(char), &offset, &closed) != ncclSuccess) break;
-        } while (closed == 0);
+        } while (!closed);
       }
       /* shutdown() is needed to send FIN packet to proxy thread; shutdown() is not affected
        * by refcount of fd, but close() is. close() won't close a fd and send FIN packet if
@@ -534,13 +542,18 @@ ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait) {
       (void)shutdown(sock->socketDescriptor, SHUT_RDWR);
       (void)close(sock->socketDescriptor);
     }
+    if (sock->crypto) {
+      ncclCryptFree(sock->crypto);
+      sock->crypto = nullptr;
+    }
     sock->state = ncclSocketStateClosed;
     sock->socketDescriptor = NCCL_INVALID_SOCKET;
   }
   return ncclSuccess;
 }
 
-void ncclOsSetMutexCondShared(std::mutex& mutex, std::condition_variable& cond) {
+void ncclOsSetMutexCondShared(std::mutex& mutex, std::condition_variable& cond, int* initialized) {
+  if (initialized != NULL && *initialized) return;
   pthread_mutexattr_t mutexAttr;
   pthread_mutexattr_init(&mutexAttr);
   pthread_mutexattr_setpshared(&mutexAttr, PTHREAD_PROCESS_SHARED);
@@ -554,6 +567,14 @@ void ncclOsSetMutexCondShared(std::mutex& mutex, std::condition_variable& cond) 
   pthread_cond_t* condHandle = cond.native_handle();
   pthread_cond_init(condHandle, &condAttr);
   pthread_condattr_destroy(&condAttr);
+  if (initialized != NULL) *initialized = 1;
+}
+
+void ncclOsUnsetMutexCondShared(std::mutex& mutex, std::condition_variable& cond, int* initialized) {
+  if (initialized != NULL && *initialized == 0) return;
+  pthread_cond_destroy(cond.native_handle());
+  pthread_mutex_destroy(mutex.native_handle());
+  if (initialized != NULL) *initialized = 0;
 }
 
 void ncclOsCpuZero(ncclAffinity& affinity) {
@@ -666,13 +687,46 @@ ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* busId, char* deviceClass
   return ret;
 }
 
+ncclResult_t ncclOsGetPciDeviceComputePartitionByBusId(const char* busId, char* partition, size_t maxLen) {
+  if (partition == NULL || maxLen == 0) return ncclInvalidArgument;
+  char* path = NULL;
+  NOWARN(ncclOsGetPciPath(busId, &path), NCCL_GRAPH);
+  if (path == NULL) {
+    partition[0] = '\0';
+    return ncclSystemError;
+  }
+  // Absent on non-AMD devices and on kernels without the attribute; ncclOsTopoGetStrFromSys
+  // reports that as an empty string rather than an error.
+  ncclResult_t ret = ncclOsTopoGetStrFromSys(path, "current_compute_partition", partition, maxLen);
+  free(path);
+  return ret;
+}
+
 ncclResult_t ncclOsGetBcmLinks(const char* busId, int* nlinks, char** peers) {
   *nlinks = 0;
   *peers = NULL;
 
-  // Path to Broadcom switch virtual links in sysfs
-  char dirPath[] = "/sys/kernel/pci_switch_link/virtual_switch_links/0000:00:00.0";
-  memcpylower(dirPath + sizeof("/sys/kernel/pci_switch_link/virtual_switch_links/") - 1, busId, BUSID_SIZE - 1);
+  // Default sysfs path populated by switch_discovery kernel module.
+  // When this directory exists the kernel module is the authoritative
+  // source and RCCL_BCM_LINKS_PATH is intentionally not consulted —
+  // the kernel module has a complete, always-current view of the
+  // switch topology.  The env-var fallback is only for systems where
+  // the kernel module is not available and the userspace tool
+  // (rccl_bcm_isl_discover.sh) populates an equivalent directory.
+  static const char defaultBase[] = "/sys/kernel/pci_switch_link/virtual_switch_links";
+  const char* base = defaultBase;
+  struct stat st;
+  if (stat(defaultBase, &st) != 0 || !S_ISDIR(st.st_mode)) {
+    const char* envBase = ncclGetEnv("RCCL_BCM_LINKS_PATH");
+    if (envBase && stat(envBase, &st) == 0 && S_ISDIR(st.st_mode)) {
+      base = envBase;
+    }
+  }
+
+  char dirPath[PATH_MAX];
+  int n = snprintf(dirPath, sizeof(dirPath), "%s/%s", base, "0000:00:00.0");
+  if (n < 0 || n >= (int)sizeof(dirPath)) return ncclSuccess;  // path too long, no links
+  memcpylower(dirPath + strlen(base) + 1, busId, BUSID_SIZE - 1);
 
   DIR* dir = opendir(dirPath);
   if (dir) {
@@ -696,7 +750,8 @@ ncclResult_t ncclOsGetBcmLinks(const char* busId, int* nlinks, char** peers) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int numaId, char* affinityStr, size_t maxLen) {
+ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int numaId, char* affinityStr, size_t maxLen, int* cpuOffset) {
+  *cpuOffset = 0;
   char filePath[PATH_MAX];
   snprintf(filePath, sizeof(filePath), "/sys/devices/system/node/node%u/cpumap", numaId);
   int offset = 0;

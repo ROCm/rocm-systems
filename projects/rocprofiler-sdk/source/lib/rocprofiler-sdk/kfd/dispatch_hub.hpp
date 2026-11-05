@@ -24,8 +24,11 @@
 
 #include "lib/rocprofiler-sdk/kfd/correlation_types.hpp"
 #include "lib/rocprofiler-sdk/kfd/doorbell_map.hpp"
+#include "lib/rocprofiler-sdk/kfd/env_parse.hpp"
 
+#include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <mutex>
@@ -82,6 +85,52 @@ struct loss_stats
     uint64_t correlation_ids = 0;
 };
 
+// Sole bound on hub growth for entries whose window never closes (gc_closed_windows
+// only reaps closed windows; F3's start_max_age_ns ages pending_starts, not the hub
+// -- the two are unrelated). Env ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_PER_GPU,
+// default 2000000, accepted range [1, 4194304], read once (F3 pattern). Reject-and-
+// default via D8's parse contract; the upper limit keeps cap far below SIZE_MAX so
+// the register_batch comparisons cannot be defeated by an absurd value.
+//
+// Sizing (empirically validated, not the original ~100 B "few MB" estimate): a
+// graph-launch burst workload (hipGraphLaunch, e.g. 1024-node graph x 1000 iters)
+// legitimately keeps hundreds of thousands of dispatches in flight relative to the
+// reader/processor retirement rate -- an order of magnitude above the old 65536
+// default, which refused 16-41% of dispatches and forced the slower signal path,
+// erasing most of the signal-less speedup. At ~100 B/entry the 2M default costs
+// ~190-200 MB per GPU at worst. Why not a "medium" cap: collect_cap_victims_locked
+// is an O(live-entries-for-that-GPU) scan+sort under the single hub mutex, so a cap
+// a realistic workload still exceeds is WORSE than a small cap (cheap scans) or a
+// large one (scans essentially never fire) -- a mid cap that trips constantly cost
+// +408% in the benchmark. Residual (accepted, not re-engineered here): a workload
+// whose genuine peak concurrency exceeds 2M, or a real EOP-loss leak growing
+// unboundedly toward the cap, still pays that eviction-scan cost; a proper fix needs
+// a per-GPU secondary index for eligible-victim lookup, out of scope for this fix.
+inline size_t
+hub_max_pending_per_gpu()
+{
+    static const size_t _v = []() -> size_t {
+        constexpr long _dflt = 2'000'000;
+        auto           _parsed =
+            env_long_in_range("ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_PER_GPU", 1, 4'194'304);
+        return static_cast<size_t>(_parsed.value_or(_dflt));
+    }();
+    return _v;
+}
+
+// Exact per-GPU cap shortfall: how many entries must be evicted for `batch` new
+// entries to fit under `cap` given `live` already present, or 0 if none. All
+// three are size_t; the checked branches never form `live + batch` (overflows) or
+// subtract into a wrap on a healthy GPU (the underflow the review flagged). Pure
+// and header-exposed so the D9 arithmetic is a deterministic unit seam.
+inline size_t
+hub_cap_need(size_t live, size_t batch, size_t cap)
+{
+    if(live > cap) return (live - cap) + batch;          // live-cap guarded by live>cap
+    if(batch > cap - live) return batch - (cap - live);  // cap-live safe: live <= cap
+    return 0;                                            // fits: no shortfall
+}
+
 template <typename PayloadT>
 class DispatchHub
 {
@@ -131,7 +180,11 @@ public:
     // signal path on false. Not mode-gated: eligibility already committed this
     // batch, so refusing here would leave dispatches that skipped their signals
     // with nothing to complete them.
-    bool register_batch(std::vector<registration>&& batch)
+    //
+    // Cap-evicted payloads leave via evicted_out for the caller to release AFTER
+    // it drops m_mu (the hub's standing no-destroy-under-lock contract). On false
+    // the map is UNMUTATED across every GPU and evicted_out is empty.
+    bool register_batch(std::vector<registration>&& batch, std::vector<leaked>& evicted_out)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
 
@@ -150,13 +203,45 @@ public:
                 if(batch[j].key == batch[i].key) return false;
         }
 
+        // Per-GPU cap, evaluated for the WHOLE batch in this one critical section
+        // so two batches cannot each observe headroom only one has. Eligibility uses
+        // the same clock domain (steady_now_ns) as gc_deadline_ns / gc_closed_windows.
+        const size_t   cap          = hub_max_pending_per_gpu();
+        const uint64_t now_ns       = steady_now_ns();
+        auto           batch_by_gpu = std::unordered_map<uint32_t, size_t>{};
+        for(const auto& reg : batch)
+            ++batch_by_gpu[reg.key.gpu_id];
+
+        // Read-only victim selection across ALL GPUs first; evict only once every
+        // GPU's shortfall is satisfied, so a shortfall on a later GPU leaves the
+        // map unmutated. Checked comparisons only -- never live+batch-cap, which
+        // overflows the add and underflows a healthy GPU into a huge `need`.
+        auto victims = std::vector<typename pending_entry_map::iterator>{};
+        for(const auto& [gpu, bcount] : batch_by_gpu)
+        {
+            const size_t live = pending_count_for_gpu_locked(gpu);
+            const size_t need = hub_cap_need(live, bcount, cap);
+            if(need == 0) continue;  // fits: no shortfall for this GPU
+
+            if(!collect_cap_victims_locked(gpu, need, now_ns, victims))
+                return false;  // insufficient eligible victims -> refuse, map unmutated
+        }
+
+        for(auto it : victims)
+        {
+            evicted_out.emplace_back(leak_locked(it));
+            erase_entry_locked(it);
+        }
+
         for(auto& reg : batch)
         {
             auto e           = entry{};
             e.correlation_id = reg.correlation_id;
             e.window         = std::move(reg.window);
             e.payload        = std::move(reg.payload);
+            e.seq            = m_next_seq++;
             m_entries.emplace(reg.key, std::move(e));
+            ++m_pending_by_gpu[reg.key.gpu_id];
         }
         return true;
     }
@@ -187,7 +272,9 @@ public:
     // (containment applied even for a sole candidate -- a stale pending entry could
     // be the sole candidate while the record's true owner is an unregistered later
     // dispatch on a colliding low-32 id). With no START (shape ii), accept only a
-    // sole candidate on a first_owner, non-superseded window. Otherwise drop.
+    // sole candidate on a first_owner, non-superseded window whose t_open the EOP
+    // postdates. Otherwise drop. EVERY acceptance test runs before the entry is
+    // taken, so a rejected record never consumes or retires anything.
     //
     // NO session-mode gate: an EOP arriving during the teardown drain still proves
     // its kernel finished. A key with no live entry is REJECTED, never cached.
@@ -209,7 +296,7 @@ public:
             out.start_ticks    = start_ticks_opt;
             out.end_ticks      = end_ticks;
             out.payload        = std::move(it->second.payload);
-            m_entries.erase(it);
+            erase_entry_locked(it);
             return out;
         };
 
@@ -233,6 +320,20 @@ public:
         const auto& w = first->second.window;
         if(!w || !w->first_owner) return std::nullopt;
         if(w->superseded.load(std::memory_order_acquire)) return std::nullopt;
+        // Terminal-time sanity, applied BEFORE take(): a kernel registered in this
+        // window cannot have ended at or before the window opened, so such an EOP
+        // belongs to an earlier dispatch on this raw key whose START was lost.
+        // Taking it would consume and retire a NEWER dispatch's entry against a
+        // foreign record -- the finalizer's staleness bound runs too late to undo
+        // that. Rejected here the entry stays PENDING for its own EOP. Same clock
+        // domain as the containment test above: raw agent GPU ticks, so no
+        // conversion and no host clock is involved. There is deliberately no upper
+        // bound: t_close bounds STARTs, not ends -- a kernel legitimately outlives
+        // its window -- and the hub holds no tick-domain `now` to bound the future
+        // with, so an implausibly-future EOP is still taken here and rejected by
+        // the finalizer's kMaxFutureNs test (a no-timing record, not a misattributed
+        // one).
+        if(end_ticks <= w->t_open) return std::nullopt;
         return take(first);
     }
 
@@ -249,10 +350,10 @@ public:
         auto out = std::vector<leaked>{};
         for(auto it = m_entries.begin(); it != m_entries.end();)
         {
-            if(it->first.gpu_id == gpu_id && it->first.doorbell_off == doorbell_slot)
+            if(it->first.gpu_id == gpu_id && it->first.doorbell_slot == doorbell_slot)
             {
                 out.emplace_back(leak_locked(it));
-                it = m_entries.erase(it);
+                it = erase_entry_locked(it);
             }
             else
             {
@@ -281,7 +382,7 @@ public:
             {
                 ids.insert(it->second.correlation_id);
                 out.emplace_back(leak_locked(it));
-                it = m_entries.erase(it);
+                it = erase_entry_locked(it);
             }
             else
             {
@@ -340,6 +441,14 @@ public:
         return m_entries.size();
     }
 
+    // Next insertion seq to be assigned. D9 cap eviction orders victims by it. Under m_mu.
+    uint64_t current_seq() const
+    {
+        if(m_abandoned.load(std::memory_order_acquire)) return 0;
+        auto lk = std::lock_guard<std::mutex>{m_mu};
+        return m_next_seq;
+    }
+
     session_mode mode() const
     {
         if(m_abandoned.load(std::memory_order_acquire)) return session_mode::child_stale;
@@ -368,6 +477,9 @@ private:
         uint64_t   correlation_id = 0;
         window_ptr window         = {};
         PayloadT   payload        = {};
+        // Monotonic insertion order, assigned under m_mu. Ages the cap's eviction
+        // selection (oldest-first).
+        uint64_t seq = 0;
     };
 
     // A doorbell slot is only unique per GPU, so every slot-keyed container is
@@ -389,13 +501,49 @@ private:
     // admitted. Session mode gates eligibility, not registration.
     bool key_admissible_locked(const correlation_key& key) const
     {
-        if(m_quarantined.count({key.gpu_id, key.doorbell_off}) != 0) return false;
+        if(m_quarantined.count({key.gpu_id, key.doorbell_slot}) != 0) return false;
         auto [first, last] = m_entries.equal_range(key);
         for(auto it = first; it != last; ++it)
         {
             const auto& w = it->second.window;
             if(w && w->t_close.load(std::memory_order_acquire) == kWindowOpen) return false;
         }
+        return true;
+    }
+
+    // Caller holds m_mu. Live PENDING entries on one GPU (0 if none).
+    size_t pending_count_for_gpu_locked(uint32_t gpu_id) const
+    {
+        auto it = m_pending_by_gpu.find(gpu_id);
+        return it == m_pending_by_gpu.end() ? 0 : it->second;
+    }
+
+    // Caller holds m_mu. Collect up to `need` oldest-by-seq ELIGIBLE victims on one
+    // GPU into `out` (appended). Eligible == gc_closed_windows()'s own predicate:
+    // window closed AND now_ns >= gc_deadline_ns -- never open-window, never in-grace,
+    // so no admission guard is lost and no still-running kernel is ledgered. Returns
+    // false (collecting nothing usable for the caller to act on) if fewer than `need`
+    // eligible entries exist; the caller then refuses and leaves the map unmutated.
+    bool collect_cap_victims_locked(uint32_t                                           gpu_id,
+                                    size_t                                             need,
+                                    uint64_t                                           now_ns,
+                                    std::vector<typename pending_entry_map::iterator>& out)
+    {
+        auto eligible = std::vector<typename pending_entry_map::iterator>{};
+        for(auto it = m_entries.begin(); it != m_entries.end(); ++it)
+        {
+            if(it->first.gpu_id != gpu_id) continue;
+            const auto& w = it->second.window;
+            if(w && w->t_close.load(std::memory_order_acquire) != kWindowOpen &&
+               now_ns >= w->gc_deadline_ns)
+                eligible.push_back(it);
+        }
+        if(eligible.size() < need) return false;
+        std::sort(eligible.begin(), eligible.end(), [](const auto& a, const auto& b) {
+            return a->second.seq < b->second.seq;  // oldest first
+        });
+        out.insert(
+            out.end(), eligible.begin(), eligible.begin() + static_cast<std::ptrdiff_t>(need));
         return true;
     }
 
@@ -429,6 +577,7 @@ private:
             out.emplace_back(leak_locked(it));
         }
         m_entries.clear();
+        m_pending_by_gpu.clear();
         auto stats            = loss_stats{};
         stats.dispatches      = out.size();
         stats.correlation_ids = ids.size();
@@ -446,6 +595,23 @@ private:
     bool               m_ledger_saturated = false;
     // A single GPU's queue destroy must not quarantine another GPU's live slot.
     slot_set m_quarantined = {};
+    // Next insertion seq, and live PENDING count per gpu_id (the cap is per-GPU).
+    // Incremented at insert, decremented on every erase path via erase_entry_locked.
+    uint64_t                             m_next_seq       = 0;
+    std::unordered_map<uint32_t, size_t> m_pending_by_gpu = {};
+
+    // Caller holds m_mu. Erase an entry and keep m_pending_by_gpu in step; the
+    // single removal point every path funnels through so the per-GPU count cannot
+    // drift. Returns the iterator following the erased element.
+    typename pending_entry_map::iterator erase_entry_locked(typename pending_entry_map::iterator it)
+    {
+        auto _g = m_pending_by_gpu.find(it->first.gpu_id);
+        if(_g != m_pending_by_gpu.end() && _g->second > 0)
+        {
+            if(--_g->second == 0) m_pending_by_gpu.erase(_g);
+        }
+        return m_entries.erase(it);
+    }
 };
 }  // namespace kfd
 }  // namespace rocprofiler

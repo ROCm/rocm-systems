@@ -35,7 +35,14 @@ struct GpuDiscoveryTopology {
   /// management and exhausting the MMHUB invalidation-engine budget, none of
   /// which the device can answer yet. Raise this when the blocks that consume
   /// it are modelled, and not before.
-  uint8_t graphics_instances = 1;
+  uint8_t graphics_instances = 0;
+  uint32_t shader_engines = 0;
+  uint32_t shader_arrays_per_engine = 0;
+  uint32_t compute_units_per_shader_array = 0;
+  uint32_t wavefront_size = 0;
+  uint32_t max_waves_per_simd = 0;
+  uint32_t max_scratch_slots_per_cu = 0;
+  uint32_t lds_size_kb = 0;
 };
 
 /// @brief The blocks a simulated gfx1250 reports.
@@ -46,6 +53,6 @@ struct GpuDiscoveryTopology {
 ///
 /// @param[in] topology How much of the part to advertise.
 /// @returns The spec to serialize with @ref build_ip_discovery_table.
-[[nodiscard]] IpDiscoverySpec gfx1250_discovery_spec(const GpuDiscoveryTopology &topology = {});
+[[nodiscard]] IpDiscoverySpec gfx1250_discovery_spec(const GpuDiscoveryTopology &topology);
 
 } // namespace rocjitsu

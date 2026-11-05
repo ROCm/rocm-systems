@@ -12,9 +12,12 @@
  * NCCL must skip it and use the built-in GIN proxy over the RMA backend so host
  * one-sided operations (ncclPutSignal / ncclWaitSignal) keep working.
  *
- * Run (example):
+ * Run (example, single node — two ranks on one host):
  *   mpirun -np 2 ./rccl-UnitTestsMPI \
  *     --gtest_filter=HostApiCustomGinPluginTest.PutSignalWithExternalGinPlugin
+ *
+ * Multi-node (1 rank/node) is skipped: the inter-node RMA IB proxy path hangs
+ * (AICOMRCCL-2331).
  */
 
 #if defined(MPI_TESTS_ENABLED) && defined(RCCL_ENABLE_HOST_API_TESTS)
@@ -60,7 +63,7 @@ std::string ginExamplePluginPath()
 {
     if(!kGinExamplePluginDir || kGinExamplePluginDir[0] == '\0')
         return {};
-    return std::string(kGinExamplePluginDir) + "/libnccl-gin-example.so";
+    return std::string(kGinExamplePluginDir) + "/librccl-gin-example.so";
 }
 
 bool fileExists(const std::string& path)
@@ -107,12 +110,19 @@ protected:
         const std::string pluginPath = ginExamplePluginPath();
         if(pluginPath.empty() || !fileExists(pluginPath))
         {
-            GTEST_SKIP() << "libnccl-gin-example.so not built; rebuild tests with ENABLE_HOST_API_TESTS=ON";
+            GTEST_SKIP() << "librccl-gin-example.so not built; rebuild tests with ENABLE_HOST_API_TESTS=ON";
         }
 
         configureCustomGinPluginEnv();
 
         MPITestBase::SetUp();
+        if(!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2,
+                                      kNoPowerOfTwoRequired,
+                                      /*min_nodes=*/1, kRequireSingleNode))
+        {
+            GTEST_SKIP() << "Need exactly 2 MPI ranks on a single node "
+                            "(inter-node RMA IB proxy hangs; AICOMRCCL-2331)";
+        }
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
         if(!getActiveCommunicator()->hostRmaSupport)
         {
@@ -138,9 +148,12 @@ protected:
  */
 TEST_F(HostApiCustomGinPluginTest, PutSignalWithExternalGinPlugin)
 {
-    if(!validateTestPrerequisites(/*min=*/2, /*max=*/2))
+    if(!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2,
+                                  kNoPowerOfTwoRequired,
+                                  /*min_nodes=*/1, kRequireSingleNode))
     {
-        GTEST_SKIP() << "Need exactly 2 MPI processes";
+        GTEST_SKIP() << "Need exactly 2 MPI ranks on a single node "
+                        "(inter-node RMA IB proxy hangs; AICOMRCCL-2331)";
     }
 
     const int      myRank = rank();

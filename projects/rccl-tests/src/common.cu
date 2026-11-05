@@ -115,6 +115,12 @@ bool IsArchMatch(char const* arch, char const* target) {
 
 const char *test_memorytypes[nccl_NUM_MTYPES] = {"coarse", "fine", "host", "managed"};
 
+// AMD-only helper. Post-2.31 librccl exports the C++-mangled symbol; pre-sync
+// builds do not. Weak so latest tests still link against older RCCL.
+#if defined(__GNUC__)
+extern int ncclCuMemRuntimeSupported() __attribute__((weak));
+#endif
+
 // For libnccl's < 2.13
 #if defined(NCCL_OS_LINUX)
 extern "C" __attribute__((weak)) char const* ncclGetLastError(ncclComm_t comm) {
@@ -779,6 +785,77 @@ testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t*
   return testSuccess;
 }
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+static testResult_t deregisterTestWindows(
+    ncclComm_t* comms, void** sendRegHandles, void** recvRegHandles, void** biasRegHandles,
+    int count) {
+  for (int i = 0; i < count; i++) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+    // Symmetric windows are drained by ncclDevrFinalize during comm destroy;
+    // explicit deregister here can leave lsaFlatBase in a state where
+    // cuMemAddressFree double-frees during ncclCommDestroy (MI455 GIN path).
+    if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
+      continue;
+    }
+#endif
+    if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], sendRegHandles[i]));
+    if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], recvRegHandles[i]));
+    if (local_register && test_bias) NCCLCHECK(ncclCommDeregister(comms[i], biasRegHandles[i]));
+  }
+  return testSuccess;
+}
+#endif
+
+static testResult_t freeTestDeviceBuffers(
+    void** sendbuffs, void** recvbuffs, void** bias, void** expected, int count) {
+  for (int i = 0; i < count; i++) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && \
+    (HIP_VERSION >= 71260540 || (HIP_VERSION >= 70051831 && HIP_VERSION < 70060000))
+    if (sendbuffs[i]) {
+      NCCLCHECK(ncclMemFree(sendbuffs[i]));
+      sendbuffs[i] = nullptr;
+    }
+    if (recvbuffs[i]) {
+      NCCLCHECK(ncclMemFree(recvbuffs[i]));
+      recvbuffs[i] = nullptr;
+    }
+    if (test_bias && bias[i]) {
+      NCCLCHECK(ncclMemFree(bias[i]));
+      bias[i] = nullptr;
+    }
+    if (datacheck && expected[i]) {
+      NCCLCHECK(ncclMemFree(expected[i]));
+      expected[i] = nullptr;
+    }
+#else
+    if (sendbuffs[i]) {
+      CUDACHECK(cudaFree(sendbuffs[i]));
+      sendbuffs[i] = nullptr;
+    }
+    if (recvbuffs[i]) {
+      CUDACHECK(cudaFree(recvbuffs[i]));
+      recvbuffs[i] = nullptr;
+    }
+    if (test_bias && bias[i]) {
+      CUDACHECK(cudaFree(bias[i]));
+      bias[i] = nullptr;
+    }
+    if (datacheck && expected[i]) {
+      CUDACHECK(cudaFree(expected[i]));
+      expected[i] = nullptr;
+    }
+#endif
+  }
+  return testSuccess;
+}
+
+static testResult_t destroyTestComms(ncclComm_t* comms, int count) {
+  for (int i = 0; i < count; i++) {
+    NCCLCHECK(ncclCommDestroy(comms[i]));
+  }
+  return testSuccess;
+}
+
 testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t opIndex, int root, int in_place, int iter) {
   size_t count = args->nbytes / wordSize(type);
 
@@ -1258,8 +1335,12 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   double timeUsec = 0.0;
   if (!skipMetricRow) {
-    timeUsec = (report_cputime ? cputimeSec : deltaSec)*1.0E6;
-    writeBenchmarkLineBody(timeUsec, algBw, busBw, args->reportErrors, wrongElts, report_cputime, report_timestamps, in_place==0);
+    // Device-impl kernels (-D != 0, e.g. AllGather/AllToAll GIN-SDMA -D 3) report
+    // wall/kernel time in deltaSec; cputimeSec is host-side and misleading there.
+    // Suppress the cputime column label for every deviceImpl != 0 collective.
+    int useCputimeCol = report_cputime && (deviceImpl == 0);
+    timeUsec = (useCputimeCol ? cputimeSec : deltaSec)*1.0E6;
+    writeBenchmarkLineBody(timeUsec, algBw, busBw, args->reportErrors, wrongElts, useCputimeCol, report_timestamps, in_place==0);
 
     auto largestMessageSize = std::max(args->sendBytes, args->expectedBytes);
     if (args->reporter) {
@@ -1514,6 +1595,11 @@ static bool DiscoverRdmaNics(NetworkCounterContext& ctx) {
     }
     return true;
   }
+  const char* hca = getenv("NCCL_IB_HCA");
+  if (hca && hca[0] != '\0') {
+    fprintf(stderr, "# Warning: NCCL_IB_HCA=%s selects no IB device, disabling net counter collection\n", hca);
+    return false;
+  }
   std::vector<std::string> all_nics;
   NetCounterGetNetworkInterfaces(all_nics);
   for (const auto& nic : all_nics) {
@@ -1530,24 +1616,28 @@ static bool DiscoverRdmaNics(NetworkCounterContext& ctx) {
   return true;
 }
 
-static NicType DetectNicTypeFromIbDevices(const std::vector<std::string>& ib_names,
-                                          bool& mixed) {
-  NicType nic_type = NIC_UNKNOWN;
-  mixed = false;
-  for (size_t i = 0; i < ib_names.size(); i++) {
-    NicType t = NetCounterDetectNicType(ib_names[i]);
-    if (t == NIC_UNKNOWN) continue;
-    if (nic_type == NIC_UNKNOWN) {
-      nic_type = t;
-    } else if (t != nic_type) {
-      mixed = true;
-      break;
+// Use the most common NIC type's table (a tie goes to the first NCCL_IB_HCA
+// device). Discovered devices of another known type (e.g. a frontend NIC) are
+// skipped; an explicit NCCL_IB_HCA list is kept.
+static NicType SelectNicType(NetworkCounterContext& ctx, bool& mixed, std::vector<std::string>& skipped) {
+  std::vector<NicType> types;
+  for (const auto& ib : ctx.ib_names) { types.push_back(NetCounterDetectNicType(ib)); }
+  const char* hca = getenv("NCCL_IB_HCA");
+  bool explicit_list = hca && hca[0] != '\0';
+  NicType nic_type = NetCounterDominantNicType(types, mixed, explicit_list);
+  std::vector<bool> keep = NetCounterKeepDevices(types, nic_type, explicit_list);
+  std::vector<std::string> nics, ibs;
+  for (size_t i = 0; i < types.size(); i++) {
+    if (!keep[i]) {
+      skipped.push_back(ctx.ib_names[i] + "(" + NicTypeStr(types[i]) + ")");
+      continue;
     }
+    nics.push_back(ctx.nic_names[i]);
+    ibs.push_back(ctx.ib_names[i]);
   }
-  if (mixed) {
-    fprintf(stderr,
-            "# Warning: mixed NIC types detected during counter table selection\n");
-  }
+  if (!skipped.empty()) { mixed = false; }
+  ctx.nic_names = nics;
+  ctx.ib_names = ibs;
   return nic_type;
 }
 
@@ -1572,8 +1662,9 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
     return ctx;
   }
 
-  bool mixed_detect = false;
-  NicType nic_type = DetectNicTypeFromIbDevices(ctx.ib_names, mixed_detect);
+  bool mixed = false;
+  std::vector<std::string> skipped;
+  NicType nic_type = SelectNicType(ctx, mixed, skipped);
   ctx.selected_counters = NetCounterGetCounterList(nic_type);
 
   size_t ndevs = ctx.nic_names.size();
@@ -1601,7 +1692,12 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
     }
   }
   printf("\n");
-  printf("# NIC type: %s\n", mixed_detect ? "MIXED" : NicTypeStr(nic_type));
+  printf("# NIC type: %s\n", mixed ? "MIXED" : NicTypeStr(nic_type));
+  if (!skipped.empty()) {
+    printf("# Skipped (other NIC type):");
+    for (const auto& s : skipped) { printf(" %s", s.c_str()); }
+    printf("\n");
+  }
   printf("# Counters (%zu):", ctx.selected_counters.size());
   for (const auto& d : ctx.selected_counters) { printf(" %s", d.name.c_str()); }
   printf("\n");
@@ -1763,28 +1859,24 @@ testResult_t threadInit(struct threadArgs* args) {
 
   TESTCHECK(threadRunTests(args));
 
-  // Cleanup: deregister buffers and destroy communicators
-  for (int i=0; i<args->nGpus; i++) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
-    if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
-      NCCLCHECK(ncclCommWindowDeregister(args->comms[i], (ncclWindow_t)args->sendRegHandles[i]));
-      NCCLCHECK(ncclCommWindowDeregister(args->comms[i], (ncclWindow_t)args->recvRegHandles[i]));
-    } else
-#endif
-    {
-      if (local_register) NCCLCHECK(ncclCommDeregister(args->comms[i], args->sendRegHandles[i]));
-      if (local_register) NCCLCHECK(ncclCommDeregister(args->comms[i], args->recvRegHandles[i]));
-      if (local_register && test_bias) NCCLCHECK(ncclCommDeregister(args->comms[i], args->biasRegHandles[i]));
-    }
-#endif
+  // Symmetric GIN teardown: stream sync, devCommDestroy, then comm destroy
+  // (ncclDevrFinalize drains windows), then ncclMemFree. Skip explicit
+  // SYMMETRIC_REGISTER window deregister — it races cuMemAddressFree on MI455.
+  TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
-    if (deviceImpl) {
+  if (deviceImpl) {
+    for (int i = 0; i < args->nGpus; i++) {
       NCCLCHECK(ncclDevCommDestroy(args->comms[i], args->devComms+i));
     }
-#endif
-    NCCLCHECK(ncclCommDestroy(args->comms[i]));
   }
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+  TESTCHECK(deregisterTestWindows(args->comms, args->sendRegHandles, args->recvRegHandles,
+                                  args->biasRegHandles, args->nGpus));
+#endif
+  TESTCHECK(destroyTestComms(args->comms, args->nGpus));
+  TESTCHECK(freeTestDeviceBuffers(args->sendbuffs, args->recvbuffs, args->bias, args->expected,
+                                  args->nGpus));
 
   return testSuccess;
 }
@@ -1852,7 +1944,12 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
     if (datacheck) CUDACHECK(cudaMalloc(expected, recvBytes));
 #endif
   }
+  // Zero payloads run faster on some hardware, so no timed buffer may stay zero:
+  // recvbuff is the in-place source and initData fills only the first rotation slot.
+  // Zero data runs faster, so fill every rotation slot: recvbuff is the
+  // in-place source and initData fills only the first slot.
   CUDACHECK(hipMemset(*sendbuff, 1, nbytes));
+  CUDACHECK(hipMemset(*recvbuff, 2, nbytes));
   if (bias) CUDACHECK(hipMemset(*bias, 1, nbytes));
   if (datacheck) CUDACHECK(hipMemset(*expected, 1, recvBytes));
   return testSuccess;
@@ -2526,6 +2623,28 @@ testResult_t run() {
     //if parallel init is not selected, use main thread to initialize NCCL
     TESTCHECK(initComms(comms, nGpus*nThreads, ncclProc*nThreads*nGpus, ncclProcs*nThreads*nGpus, gpus.data(), ncclId));
 
+    {
+      // Missing symbol: pre-sync librccl; keep previous "just run" behavior.
+      const bool cuMemOk = !ncclCuMemRuntimeSupported || ncclCuMemRuntimeSupported();
+      if ((local_register == SYMMETRIC_REGISTER || deviceImpl > 0) && !cuMemOk) {
+        if (ncclProc == 0) {
+          printf("# SKIP: symmetric memory / device API not supported (cuMem runtime disabled)\n");
+        }
+        for (int i = 0; i < nGpus * nThreads; ++i) {
+          NCCLCHECK(ncclCommDestroy(comms[i]));
+        }
+        free(initFreeGpuMem);
+        free(comms);
+#ifdef MPI_SUPPORT
+        MPI_Barrier(mpi_comm);
+        MPI_Comm_free(&mpi_comm);
+        MPI_Finalize();
+#endif
+        cudaDeviceReset();
+        return testSuccess;
+      }
+    }
+
      // Capture the memory used by the GPUs after initializing the NCCL communicators
      for (int g = 0; g < nGpus; ++g) {
        CUDACHECK(cudaSetDevice(gpus[g]));
@@ -2712,44 +2831,26 @@ testResult_t run() {
 #endif
 
   if (!parallel_init) {
-    for(int i=0; i<nGpus*nThreads; ++i) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
-      if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
-        NCCLCHECK(ncclCommWindowDeregister(comms[i], (ncclWindow_t)sendRegHandles[i]));
-        NCCLCHECK(ncclCommWindowDeregister(comms[i], (ncclWindow_t)recvRegHandles[i]));
-      } else
-#endif
-      {
-        if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], sendRegHandles[i]));
-        if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], recvRegHandles[i]));
-        if (local_register && test_bias) NCCLCHECK(ncclCommDeregister(comms[i], biasRegHandles[i]));
-      }
-#endif
+    // Symmetric GIN teardown: stream sync, devCommDestroy, then comm destroy
+    // (ncclDevrFinalize drains windows), then ncclMemFree. Skip explicit
+    // SYMMETRIC_REGISTER window deregister — it races cuMemAddressFree on MI455.
+    TESTCHECK(testStreamSynchronize(nGpus*nThreads, streams.data(), comms));
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
-      if (deviceImpl) {
+    if (deviceImpl) {
+      for (int i = 0; i < nGpus*nThreads; i++) {
         NCCLCHECK(ncclDevCommDestroy(comms[i], devComms.data()+i));
       }
-#endif
-      NCCLCHECK(ncclCommDestroy(comms[i]));
     }
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+    TESTCHECK(deregisterTestWindows(comms, sendRegHandles.data(), recvRegHandles.data(),
+                                    biasRegHandles.data(), nGpus*nThreads));
+#endif
+    TESTCHECK(destroyTestComms(comms, nGpus*nThreads));
+    TESTCHECK(freeTestDeviceBuffers(sendbuffs.data(), recvbuffs.data(), bias.data(), expected.data(),
+                                    nGpus*nThreads));
   }
   free(comms);
-
-  // Free off CUDA allocated memory
-  for (int i=0; i<nGpus*nThreads; i++) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && HIP_VERSION >= 71260540
-    if (sendbuffs[i]) NCCLCHECK(ncclMemFree((char*)sendbuffs[i]));
-    if (recvbuffs[i]) NCCLCHECK(ncclMemFree((char*)recvbuffs[i]));
-    if (bias[i]) NCCLCHECK(ncclMemFree((char*)bias[i]));
-    if (datacheck) NCCLCHECK(ncclMemFree(expected[i]));
-#else
-    if (sendbuffs[i]) CUDACHECK(cudaFree((char*)sendbuffs[i]));
-    if (recvbuffs[i]) CUDACHECK(cudaFree((char*)recvbuffs[i]));
-    if (bias[i]) CUDACHECK(cudaFree((char*)bias[i]));
-    if (datacheck) CUDACHECK(cudaFree(expected[i]));
-#endif
-  }
   envstr = getenv("NCCL_TESTS_MIN_BW");
   const double check_avg_bw = envstr ? atof(envstr) : -1;
   if (bw_count[0] > 0) {
@@ -2775,8 +2876,14 @@ testResult_t run() {
   reporter.writeFile();
   writeErrors();
 
-  // 'cuda-memcheck --leak-check full' requires this
-  cudaDeviceReset();
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+  // cudaDeviceReset after symmetric VMM teardown can trip heap checks on MI455 GIN.
+  if (!(test_ncclVersion >= NCCL_VERSION(2,27,0) && local_register == SYMMETRIC_REGISTER))
+#endif
+  {
+    // 'cuda-memcheck --leak-check full' requires this
+    cudaDeviceReset();
+  }
 
   if (errors[0] || bw[0] < check_avg_bw*(0.9))
     return testNumResults;

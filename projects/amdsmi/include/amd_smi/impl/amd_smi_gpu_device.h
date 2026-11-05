@@ -142,6 +142,9 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   std::string bdf_to_string() const;  // -e feature
   std::vector<uint64_t> get_bitmask_from_numa_node(int32_t node_id, uint32_t size) const;
   std::vector<uint64_t> get_bitmask_from_local_cpulist(uint32_t drm_card, uint32_t size) const;
+  // Set the bit for every CPU named by a sysfs cpulist ("0-3,8") that the
+  // bitmask can hold. Malformed entries are skipped.
+  static void parse_cpulist(const std::string& cpulist, std::vector<uint64_t>& bitmask);
 
   // Get the UALoE handle, opening the IFoE/UALoE session on first use.
   // Deferred out of the constructor so amdsmi_init() and non-fabric queries

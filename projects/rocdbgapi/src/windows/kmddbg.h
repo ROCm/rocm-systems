@@ -4,7 +4,7 @@
  *
  *  Description    Escape function support for shader debugging.
  *
- *  Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  \****************************************************************************/
 
@@ -33,6 +33,11 @@ extern "C" {
 #define LHESCAPE_OK                                0x00000000
 #define LHESCAPE_ERROR                             0x00000001
 #define LHESCAPE_NOTSUPPORTED                      0x00000002
+#define LHESCAPE_RESOURCE_IN_USE                   0x0000000C
+#define LHESCAPE_INVALID_PARAMETER                 0x0000000D
+#define LHESCAPE_RETRY                             0x0000000E
+#define LHESCAPE_PROCESS_NOT_FOUND                 0x0000000F
+#define LHESCAPE_NO_MEMORY                         0x00000010
 
 typedef struct _ATI_LHESCAPE_HDR {
     ULONG   ulSize;         // size of the header
@@ -74,9 +79,18 @@ typedef enum _KMD_ESCAPE_SUBFUNCTION
 //
 // Debugger escape structure info
 //
+// Version History:
+// Version 1.0: Initial version
+// Version 1.1: Add sub vendor, sub device and revision IDs to device info. Add defines for capabilities and device properties. Use NTSTATUS to return errors to the debugger.
+// Version 1.2: Add UMD event handle in runtime info for UMD <-> KMD handshake.
+// Version 1.3: Add support for trap on wave start/end. Improved GPU memory read/write performance in KMD.
+// Version 1.4: Adjust gpuvmLimit to be the last valid address and enable traps for exceptions output to include previous and current trap support mask.
+// Version 2.0: Switch debugger error reporting from NTSTATUS to LHESCAPE return codes. Increment major version as changes cause ABI breakage.
+//
 
-#define KMD_DBGR_HEADER_MAJOR_VER                      0x0001
-#define KMD_DBGR_HEADER_MINOR_VER                      0x0001
+#define KMD_DBGR_HEADER_MAJOR_VER                      0x0002
+#define KMD_DBGR_HEADER_MINOR_VER                      0x0000
+#define KMD_DBGR_HEADER_VER ((KMD_DBGR_HEADER_MAJOR_VER << 16) | KMD_DBGR_HEADER_MINOR_VER)
 
 #define MAX_USER_QUEUES_VISIBLE_TO_DEBUGGER 32
 
@@ -130,20 +144,21 @@ enum KMD_DBGR_RUNTIME_STATE
 
 enum KMD_DBGR_TRAP_MASK 
 {
-    KMD_DBGR_TRAP_MASK_FP_INVALID = 1,
-    KMD_DBGR_TRAP_MASK_FP_INPUT_DENORMAL = 2,
-    KMD_DBGR_TRAP_MASK_FP_DIVIDE_BY_ZERO = 4,
-    KMD_DBGR_TRAP_MASK_FP_OVERFLOW = 8,
-    KMD_DBGR_TRAP_MASK_FP_UNDERFLOW = 16,
-    KMD_DBGR_TRAP_MASK_FP_INEXACT = 32,
-    KMD_DBGR_TRAP_MASK_INT_DIVIDE_BY_ZERO = 64,
-    KMD_DBGR_TRAP_MASK_DBG_ADDRESS_WATCH = 128,
-    KMD_DBGR_TRAP_MASK_DBG_MEMORY_VIOLATION = 256,
+    KMD_DBGR_TRAP_MASK_FP_INVALID = 1 << 0,
+    KMD_DBGR_TRAP_MASK_FP_INPUT_DENORMAL = 1 << 1,
+    KMD_DBGR_TRAP_MASK_FP_DIVIDE_BY_ZERO = 1 << 2,
+    KMD_DBGR_TRAP_MASK_FP_OVERFLOW = 1 << 3,
+    KMD_DBGR_TRAP_MASK_FP_UNDERFLOW = 1 << 4,
+    KMD_DBGR_TRAP_MASK_FP_INEXACT = 1 << 5,
+    KMD_DBGR_TRAP_MASK_INT_DIVIDE_BY_ZERO = 1 << 6,
+    KMD_DBGR_TRAP_MASK_DBG_ADDRESS_WATCH = 1 << 7,
+    KMD_DBGR_TRAP_MASK_DBG_MEMORY_VIOLATION = 1 << 8,
+    KMD_DBGR_TRAP_MASK_TRAP_ON_WAVE_START = 1 << 30,
+    KMD_DBGR_TRAP_MASK_TRAP_ON_WAVE_END = 1 << 31
 };
 
 enum KMD_DBGR_EXCEPTIONS
 {
-    KMD_DBGR_EXCP_QUEUE_WAVE_NONE = 0,
     KMD_DBGR_EXCP_QUEUE_WAVE_ABORT = 1,
     KMD_DBGR_EXCP_QUEUE_WAVE_TRAP = 2,
     KMD_DBGR_EXCP_QUEUE_WAVE_MATH_ERROR = 3,
@@ -168,7 +183,7 @@ enum KMD_DBGR_EXCEPTIONS
     KMD_DBGR_EXCP_DEVICE_NEW = 36,
     /* per process */
     KMD_DBGR_EXCP_PROCESS_RUNTIME = 48,
-    KMD_DBGR_EXCP_PROCESS_DEVICE_REMOVE = 49,
+    KMD_DBGR_EXCP_PROCESS_DEVICE_REMOVE = 49
 };
 
 enum KMD_DBGR_WAVE_LAUNCH_MODE
@@ -184,14 +199,14 @@ enum KMD_DBGR_WAVE_LAUNCH_MODE
 enum KMD_DBGR_ENABLE_TRAPS_FOR_EXCEPTIONS_MODE
 {
     KMD_DBGR_ENABLE_TRAPS_FOR_EXCEPTIONS_MODE_OR = 0,
-    KMD_DBGR_ENABLE_TRAPS_FOR_EXCEPTIONS_MODE_REPLACE = 1,
+    KMD_DBGR_ENABLE_TRAPS_FOR_EXCEPTIONS_MODE_REPLACE = 1
 };
 
 enum KMD_DBGR_USER_QUEUE_TYPE
 {
     KMD_DBGR_USER_QUEUE_TYPE_GFX = 0,
     KMD_DBGR_USER_QUEUE_TYPE_COMPUTE = 1,
-    KMD_DBGR_USER_QUEUE_TYPE_DMA = 2,
+    KMD_DBGR_USER_QUEUE_TYPE_DMA = 2
 };
 
 enum KMD_DBGR_USER_QUEUE_STATUS
@@ -210,6 +225,7 @@ typedef struct _KMDDBGRIF_SET_RUNTIME_INFO_INPUT
             D3DKMT_ALIGN64 ULONG64                     rDebug;
             ULONG                                      runtimeState;
             ULONG                                      ttmpSetup;
+            D3DKMT_ALIGN64 ULONG64                     umdEventHandle64;
         } rocRuntimeInfo;
 
         ULONG clientData[16];
@@ -276,7 +292,8 @@ typedef struct _KMDDBGRIF_ENABLE_TRAPS_FOR_EXCEPTIONS_INPUT
 typedef struct _KMDDBGRIF_ENABLE_TRAPS_FOR_EXCEPTIONS_OUTPUT
 {
     ULONG                                              trapSupportMask;
-    ULONG                                              Reserved[15];
+    ULONG                                              prevTrapEnabledMask;
+    ULONG                                              Reserved[14];
 } KMDDBGRIF_ENABLE_TRAPS_FOR_EXCEPTIONS_OUTPUT, * PKMDDBGRIF_ENABLE_TRAPS_FOR_EXCEPTIONS_OUTPUT;
 
 typedef struct _KMDDBGRIF_SET_WAVE_LAUNCH_MODE_INPUT
@@ -539,12 +556,12 @@ typedef struct _KMDDBGRIF_SET_USER_TRAP_INPUT
 {
     D3DKMT_ALIGN64 ULONG64                             userTrapHandlerVA; // GPU VA of the second level trap handler
     D3DKMT_ALIGN64 ULONG64                             userTrapMemoryVA; // GPU VA of the second level trap memory
-    unsigned int                                       Reserved[12];
+    ULONG                                              Reserved[12];
 } KMDDBGRIF_SET_USER_TRAP_INPUT, * PKMDDBGRIF_SET_USER_TRAP_INPUT;
 
 typedef struct _KMDDBGRIF_SET_USER_TRAP_OUTPUT
 {
-    unsigned int                                       Reserved[16];
+    ULONG                                              Reserved[16];
 } KMDDBGRIF_SET_USER_TRAP_OUTPUT, * PKMDDBGRIF_SET_USER_TRAP_OUTPUT;
 
 typedef struct _KMDDBGRIF_DBGR_CMDS_INPUT

@@ -162,19 +162,23 @@ mod tests {
 
     #[test]
     fn a_failed_write_names_the_document_and_not_the_scratch_file() {
-        // Saving a profile into a directory the user cannot write used to
-        // fail with `io error on /…/cdna4.tmp.4711` — a path that had
-        // never existed as far as they were concerned, does not exist by
-        // the time they look, and names neither the document they were
-        // saving nor anything they could fix.
-        use std::os::unix::fs::PermissionsExt;
-
+        // Saving a profile that cannot be written used to fail with `io
+        // error on /…/cdna4.tmp.4711` — a path that had never existed as
+        // far as the user was concerned, does not exist by the time they
+        // look, and names neither the document they were saving nor
+        // anything they could fix.
+        //
+        // The failure is forced by putting a non-empty *directory* where
+        // the document goes, so `rename` returns `EISDIR`. The obvious
+        // way to write this is a `chmod 500` parent, but that tests the
+        // kernel's permission check rather than mirage: root ignores the
+        // mode bits, the write succeeds, and the test fails on a machine
+        // where nothing is wrong. CI runs as root in a container.
         let dir = tempfile::tempdir().unwrap();
-        let readonly = dir.path().join("readonly");
-        fs::create_dir(&readonly).unwrap();
-        fs::set_permissions(&readonly, fs::Permissions::from_mode(0o500)).unwrap();
+        let dest = dir.path().join("cdna4.json");
+        fs::create_dir(&dest).unwrap();
+        fs::write(dest.join("occupied"), "x").unwrap();
 
-        let dest = readonly.join("cdna4.json");
         let err = write_json(
             &dest,
             &Sample {
@@ -186,14 +190,35 @@ mod tests {
         .full_message();
         assert!(err.contains("cdna4.json"), "{err}");
         assert!(!err.contains(".tmp."), "the scratch name is ours: {err}");
-        assert!(err.contains(&readonly.display().to_string()), "{err}");
+        assert!(err.contains(&dir.path().display().to_string()), "{err}");
         assert!(err.contains("writable"), "what to check: {err}");
-        assert!(err.contains("Permission denied"), "the reason: {err}");
 
         // And a write that did not land leaves nothing behind in a
         // directory the user reads and edits by hand.
-        assert_eq!(fs::read_dir(&readonly).unwrap().count(), 0);
+        let leftovers: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".tmp."))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "scratch files left behind: {leftovers:?}"
+        );
+    }
 
-        fs::set_permissions(&readonly, fs::Permissions::from_mode(0o700)).unwrap();
+    #[test]
+    fn an_unwritable_directory_is_reported_as_one() {
+        // The wording for the commonest cause, asserted against a
+        // synthesized `EACCES` rather than a real one: a test that has to
+        // make the kernel refuse a write cannot run as root, and this is
+        // the whole of what such a test would add over the one above.
+        let err = write_failed(
+            Path::new("/etc/mirage/cdna4.json"),
+            &std::io::Error::from_raw_os_error(13),
+        )
+        .full_message();
+        assert!(err.contains("Permission denied"), "the reason: {err}");
+        assert!(err.contains("/etc/mirage"), "the directory to check: {err}");
+        assert!(err.contains("writable"), "what to check: {err}");
     }
 }

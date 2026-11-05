@@ -139,6 +139,12 @@ class Operand:
         order: Order of the operand.
         data_format_name: ISA data format name from the XML operand signature.
         fieldless: True if the operand has no ``<FieldName>`` in the MR ISA.
+        wave_mask: True if the MR ISA data format is ``FMT_NUM_M64``, a lane
+            mask that is one SGPR in Wave32 and an SGPR pair in Wave64. Set on
+            every ISA, but the CDNA1-4 XMLs tag some lane masks
+            ``FMT_NUM_B64`` (the ``V_CMP*`` VOP3 destination), so a false flag
+            on CDNA does not rule out a lane mask. Codegen emits the C++ flag
+            only for Wave32-capable profiles.
     """
 
     name: str
@@ -151,6 +157,7 @@ class Operand:
     order: int
     data_format_name: str = ''
     fieldless: bool = False
+    wave_mask: bool = False
 
 
 @dataclass
@@ -313,8 +320,18 @@ class Instruction(InstBase):
         self.name = name
         self.opcode = opcode
         self.operands = operands
+        self.required_flat_segment: int | None = None
         self.available_encodings = available_encodings
         self.source_addition = source_addition
+        # Populated by an optional ISA-variant manifest after the base XML and
+        # additive deltas have been parsed.  The generator copies these masks
+        # into decoded instructions; the runtime decoder then fails closed when
+        # its concrete target lacks a required feature.
+        self.required_feature_mask = 0
+        self.encoding_feature_masks: dict[str, int] = {}
+        # A model-only instruction is decoded and represented, but deliberately
+        # omitted from generated execution callback tables.
+        self.model_only = False
 
     @cached_property
     def fmt_name(self) -> str:
@@ -448,6 +465,8 @@ class IsaSpec:
         )
         self.alt_encs_with_implied_literal: set[str] = set()
         self.applied_additions: tuple[IsaAdditionProvenance, ...] = ()
+        self.isa_features: tuple[str, ...] = ()
+        self.isa_variants: dict[str, int] = {}
         # Every fieldless operand type observed while parsing this spec.
         # Consumed by fieldless_policy.validate_fieldless_taxonomy.
         self.fieldless_operand_types: set[str] = set()

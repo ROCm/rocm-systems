@@ -6,26 +6,42 @@ import copy
 import math
 import shutil
 import textwrap
-from typing import Any, Optional, TextIO
+from io import StringIO
+from typing import Any, List, Optional, TextIO
 
 import pandas as pd
+from rich.console import Console as RichConsole
+from rich.panel import Panel as RichPanel
+from rich.table import Table as RichTable
+from rich.text import Text as RichText
 from tabulate import tabulate
 
 import config
-from utils import mem_chart_gfx9, mem_chart_gfx11, parser, schema
-from utils.kernel_name_shortener import (
-    kernel_name_shortener,
+from membw_analysis.models import MemBwAnalysisResult
+from membw_analysis.summary import (
+    ACTIVE_FALLBACK_TEXT,
+    has_active_nodes,
+    status_text,
 )
-from utils.logger import console_error, console_log, console_warning
+from memory_chart.loader import Layouts, is_memory_chart_panel
+from memory_chart.render import format_mem_chart_heading, plot_mem_chart
+from memory_chart.units import panel_units
+from utils import parser, schema
+from utils.logger import console_log, console_warning
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
+    ARGS_DISPLAY_MAX_VARIANTS,
     NS_TO_MS,
     CallTreeNode,
     build_operator_summary,
+    fold_identical_sibling_subtrees,
+    format_operator_args,
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
-from utils.utils_common import convert_filter_blocks_to_panel_ids, is_gfx9, is_gfx115x
+from utils.utils_common import convert_filter_blocks_to_panel_ids, strip_ansi
+
+_GUIDANCE_PANEL_MIN_WIDTH = 100
 
 
 def _tty_view_is_table(args: argparse.Namespace) -> bool:
@@ -34,6 +50,13 @@ def _tty_view_is_table(args: argparse.Namespace) -> bool:
 
 
 KERNEL_NAME_WRAP_WIDTH = 40
+
+PC_SAMPLING_TABLE_ID = "21.1"
+
+PC_SAMPLING_STALL_REASON_REFERENCE = (
+    "Stall reason definitions: https://rocm.docs.amd.com/projects/"
+    "rocprofiler-sdk/en/latest/how-to/cdna3-cdna4-pc-sampling.html#stall-reasons"
+)
 
 
 def wrap_kernel_name(name: str) -> str:
@@ -98,22 +121,6 @@ def scale_bw_columns(
         df_copy.loc[idx, "Unit"] = unit
 
     return df_copy
-
-
-def string_multiple_lines(source: str, width: int, max_rows: int) -> str:
-    """
-    Adjust string with multiple lines by inserting '\n'
-    """
-    lines: list[str] = []
-    for i in range(0, len(source), width):
-        if len(lines) >= max_rows:
-            break
-        lines.append(source[i : i + width])
-
-    if len(lines) == max_rows and len(source) > max_rows * width:
-        lines[-1] = lines[-1][:-3] + "..."
-
-    return "\n".join(lines)
 
 
 def get_table_string(
@@ -191,12 +198,19 @@ def has_time_data(df: pd.DataFrame) -> bool:
     )
 
 
+def _print_roofline_html_path(runs: dict[str, Any], output: Optional[TextIO]) -> None:
+    """Print where analyze saved the interactive roofline HTML, if it did."""
+    for workload in runs.values():
+        html_path = getattr(workload, "roofline_html_path", None)
+        if html_path:
+            print(f"\nInteractive roofline plot saved to {html_path}\n", file=output)
+
+
 def is_roofline_shown(
     args: argparse.Namespace,
     runs: dict[str, Any],
     output: Optional[TextIO],
     panel: dict[str, Any],
-    roof_plot: Optional[str],
     hidden_cols: list[str],
 ) -> bool:
     has_roofline_style = any(
@@ -224,18 +238,17 @@ def is_roofline_shown(
 
     print(f"\n{'-' * 80}", file=output)
     print("4. Roofline", file=output)
+    _print_roofline_html_path(runs, output)
 
     # Display roofline metrics for each run
     for run_path, workload in runs.items():
         if hasattr(workload, "roofline_metrics") and workload.roofline_metrics:
             print(
-                "\n(4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points",
+                "(4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points",
                 file=output,
             )
 
             kernel_top_df = workload.dfs.get(1, pd.DataFrame())
-            if not kernel_top_df.empty:
-                kernel_name_shortener(kernel_top_df, args.kernel_verbose)
 
             # Display roofline metrics
             for kernel_id, metrics in workload.roofline_metrics.items():
@@ -293,30 +306,26 @@ def is_roofline_shown(
         else:
             print("\nNo per-kernel metrics available", file=output)
 
-    # Show the roofline plot
-    if roof_plot:
-        show_roof_plot(roof_plot)
     return True
 
 
 def list_ml_operators(
     workload_path: str,
-    call_trees: dict[str, CallTreeNode],
-    framework_label: str = "PyTorch",
+    call_trees: dict[str, list[CallTreeNode]],
+    framework_labels: list[str],
 ) -> None:
-    """Display operators as a unified call tree grouped by source location.
+    """Display operators as a call tree sorted by GPU kernel duration.
 
-    ``framework_label`` sets the heading text (for example "PyTorch" or
-    "Triton").
+    framework_labels sets the heading text (for example PyTorch or Triton).
     """
     if not call_trees:
-        print(f"\n{framework_label} Operators in: {workload_path}")
+        print(f"\n{', '.join(framework_labels)} Operators in: {workload_path}")
         print("Total: 0 operators")
         return
 
     print(f"\n{'=' * 80}")
-    print(f"{framework_label} Operator Call Tree: {workload_path}")
-    print("Grouped by source location, sorted by total GPU kernel duration.")
+    print(f"{', '.join(framework_labels)} Operator Call Tree: {workload_path}")
+    print("Sorted by total GPU kernel duration.")
     print(f"{'=' * 80}")
     show_call_tree(call_trees)
     show_operator_summary(build_operator_summary(call_trees))
@@ -334,12 +343,19 @@ def format_duration(duration_ms: Optional[float]) -> str:
     return f"{duration_ms:.2f} ms"
 
 
+def _operator_display_name(node: CallTreeNode) -> str:
+    """Operator name with file:line when file_name is set."""
+    if not node.file_name:
+        return node.name
+    if node.line_number is None:
+        return f"{node.name} {node.file_name}"
+    return f"{node.name} {node.file_name}:{node.line_number}"
+
+
 def format_node_stats(node: CallTreeNode) -> str:
     """Format operator-node stats (calls, dispatches, total, dispatch_mean/min/max).
 
     dispatch_mean / dispatch_min / dispatch_max are per kernel dispatch.
-    The "calls:" segment is omitted when invocation_ids is empty (location
-    roots and frames recorded without Context_Id).
     """
     mean_ms = (
         node.mean_dispatch_ns * NS_TO_MS if node.mean_dispatch_ns is not None else None
@@ -361,6 +377,46 @@ def format_node_stats(node: CallTreeNode) -> str:
     )
 
 
+def format_node_args(node: CallTreeNode) -> str:
+    """Return the leading-space args=... segment for a single blob."""
+    variants = node.args_variants
+    if len(variants) != 1:
+        return ""
+    args_blob, _call_count = variants[0]
+    formatted_args = format_operator_args(args_blob)
+    return f" args={formatted_args}" if formatted_args else ""
+
+
+def format_args_variant_call_count(call_count: int) -> str:
+    """Return the call-count label for one args variant."""
+    if call_count <= 0:
+        return ""
+    return f"{call_count} call" if call_count == 1 else f"{call_count} calls"
+
+
+def format_args_variant_lines(node: CallTreeNode) -> list[str]:
+    """Return the args variants block, most frequent first."""
+    variants = node.args_variants
+    if len(variants) < 2:
+        return []
+
+    shown_variants = variants[:ARGS_DISPLAY_MAX_VARIANTS]
+    call_count_labels = [
+        format_args_variant_call_count(call_count) for _, call_count in shown_variants
+    ]
+    label_width = max(len(label) for label in call_count_labels)
+    lines = ["args variants:"]
+    lines.extend(
+        f"  {label:<{label_width}}  {format_operator_args(args_blob)}"
+        for label, (args_blob, _) in zip(call_count_labels, shown_variants)
+    )
+    hidden_variant_count = len(variants) - len(shown_variants)
+    if hidden_variant_count:
+        plural = "" if hidden_variant_count == 1 else "s"
+        lines.append(f"  ... {hidden_variant_count} more variant{plural}")
+    return lines
+
+
 def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
     """Pick wrap width based on terminal size to avoid terminal hard-wrap artifacts."""
     terminal_cols = shutil.get_terminal_size((max_width, 20)).columns
@@ -368,11 +424,20 @@ def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
     return min(safe_width, max_width)
 
 
+def build_continuation_indent(prefix: str, continuation_prefix: str) -> str:
+    """Return the wrapped-line indent under prefix."""
+    if not continuation_prefix:
+        return " " * len(prefix)
+    padding = max(len(prefix) - len(continuation_prefix), 0)
+    return continuation_prefix + " " * padding
+
+
 def print_wrapped_tree_line(
     prefix: str,
     body: str,
     width: Optional[int] = None,
     break_long_words: bool = False,
+    continuation_prefix: str = "",
 ) -> None:
     """Print a tree line and wrap continuation lines to preserve indentation."""
     effective_width = get_tree_wrap_width() if width is None else width
@@ -381,7 +446,7 @@ def print_wrapped_tree_line(
             body,
             width=effective_width,
             initial_indent=prefix,
-            subsequent_indent=" " * len(prefix),
+            subsequent_indent=build_continuation_indent(prefix, continuation_prefix),
             break_long_words=break_long_words,
             break_on_hyphens=False,
         )
@@ -392,12 +457,10 @@ def print_wrapped_kernel_line(
     prefix: str,
     kernel_name: str,
     suffix: str,
-    width: Optional[int] = None,
     continuation_prefix: str = "",
 ) -> None:
     """Wrap long kernel names while keeping suffix attached to final name chunk."""
-    effective_width = get_tree_wrap_width() if width is None else width
-    content_width = max(effective_width - len(prefix), 20)
+    content_width = max(get_tree_wrap_width() - len(prefix), 20)
 
     inline = f"{kernel_name} {suffix}"
     if len(inline) <= content_width:
@@ -416,15 +479,7 @@ def print_wrapped_kernel_line(
         print(f"{prefix}{suffix}")
         return
 
-    # Build continuation with vertical pipes from parent levels
-    # Preserve parent pipes but replace branch character with spaces
-    if len(continuation_prefix) > 0:
-        # continuation_prefix has pipes, add spaces for branch chars
-        spaces_needed = len(prefix) - len(continuation_prefix)
-        continuation = continuation_prefix + " " * spaces_needed
-    else:
-        # No parent pipes, just use spaces matching the prefix
-        continuation = " " * len(prefix)
+    continuation = build_continuation_indent(prefix, continuation_prefix)
 
     for i, chunk in enumerate(wrapped_name):
         if i == 0:
@@ -438,22 +493,31 @@ def print_wrapped_kernel_line(
             print(f"{continuation}{chunk}")
 
 
-def show_call_tree(call_trees: dict[str, CallTreeNode]) -> None:
-    """Print the unified call tree grouped by source location."""
-    sorted_locations = sorted(
-        call_trees.items(), key=lambda kv: kv[1].total_duration_ms, reverse=True
-    )
-    for i, (location, root) in enumerate(sorted_locations):
+def show_call_tree(call_trees: dict[str, list[CallTreeNode]]) -> None:
+    """Print top-level marker nodes sorted by total GPU duration.
+
+    Identical sibling subtrees are folded. The input forest is not mutated.
+    """
+    roots: list[CallTreeNode] = []
+    for thread_roots in call_trees.values():
+        roots.extend(fold_identical_sibling_subtrees(thread_roots))
+    roots.sort(key=lambda node: node.total_duration_ms, reverse=True)
+    for i, root in enumerate(roots):
         if i > 0:
             print(f"\n{'- ' * 40}")
-        stats = format_node_stats(root)
-        print(f"\n{location} {stats}")
-        for child in sorted(
-            root.children.values(),
-            key=lambda c: c.total_duration_ms,
-            reverse=True,
-        ):
-            print_operator_node(child)
+        heading = (
+            f"{_operator_display_name(root)}{format_node_args(root)} "
+            f"{format_node_stats(root)}"
+        )
+        print()
+        print_wrapped_tree_line("", heading)
+        for variant_line in format_args_variant_lines(root):
+            print_wrapped_tree_line("", variant_line)
+        children = fold_identical_sibling_subtrees(root.children)
+        for child_index, child in enumerate(children):
+            child_is_last = (child_index == len(children) - 1) and not root.kernels
+            print_operator_node(child, is_last=child_is_last)
+        _print_node_kernels(root, "")
 
 
 def show_operator_summary(summary_df: pd.DataFrame) -> None:
@@ -541,31 +605,46 @@ def print_operator_node(
     branch_char = "└─ " if is_last else "├─ "
     node_prefix = f"{indent}{branch_char}"
 
-    if is_branching:
-        print_wrapped_tree_line(node_prefix, f"{node.name} {format_node_stats(node)}")
-    else:
-        if len(node.invocation_ids) > 0:
-            suffix = f" (calls: {node.call_count})"
-        else:
-            suffix = ""
-        print_wrapped_tree_line(node_prefix, f"{node.name}{suffix}")
-
-    # Build new parent_pipes for children
     if is_last:
         new_parent_pipes = parent_pipes + "   "  # 3 spaces
     else:
         new_parent_pipes = parent_pipes + "|  "  # pipe + 2 spaces
 
+    args_segment = format_node_args(node)
+    if is_branching:
+        print_wrapped_tree_line(
+            node_prefix,
+            f"{_operator_display_name(node)}{args_segment} {format_node_stats(node)}",
+            continuation_prefix=new_parent_pipes,
+        )
+    else:
+        if len(node.invocation_ids) > 0:
+            suffix = f" (calls: {node.call_count})"
+        else:
+            suffix = ""
+        print_wrapped_tree_line(
+            node_prefix,
+            f"{_operator_display_name(node)}{args_segment}{suffix}",
+            continuation_prefix=new_parent_pipes,
+        )
+
+    for variant_line in format_args_variant_lines(node):
+        print_wrapped_tree_line(
+            new_parent_pipes, variant_line, continuation_prefix=new_parent_pipes
+        )
+
     # Process child nodes
-    children = sorted(
-        node.children.values(), key=lambda c: c.total_duration_ms, reverse=True
-    )
+    children = fold_identical_sibling_subtrees(node.children)
     for i, child in enumerate(children):
         # A child is last if it's the final child AND there are no kernels after it
         child_is_last = (i == len(children) - 1) and (len(node.kernels) == 0)
         print_operator_node(child, is_last=child_is_last, parent_pipes=new_parent_pipes)
 
-    # Process kernels
+    _print_node_kernels(node, new_parent_pipes)
+
+
+def _print_node_kernels(node: CallTreeNode, parent_pipes: str) -> None:
+    """Print this node's GPU dispatches, longest total duration first."""
     for i, (kernel_name, kernel_stats) in enumerate(
         sorted(
             node.kernels.items(),
@@ -581,16 +660,15 @@ def print_operator_node(
         total_ms = duration_ns * NS_TO_MS
         stats = f"(dispatches: {launches}, total: {format_duration(total_ms)})"
 
-        # Last kernel gets └─, others get ├─
         kernel_is_last = i == len(node.kernels) - 1
         kernel_branch_char = "└─ " if kernel_is_last else "├─ "
-        kernel_prefix = f"{new_parent_pipes}{kernel_branch_char}"
+        kernel_prefix = f"{parent_pipes}{kernel_branch_char}"
 
         print_wrapped_kernel_line(
             kernel_prefix,
             display_name,
             f"{id_suffix} {stats}".strip(),
-            continuation_prefix=new_parent_pipes,
+            continuation_prefix=parent_pipes,
         )
 
 
@@ -693,26 +771,6 @@ def process_table_data(
                         )
 
                         result_df = pd.concat([result_df, formatted_diff], axis=1)
-
-                        # DEBUG: When in a CI setting and flag is set,
-                        #       then verify metrics meet threshold
-                        #       requirement
-                        if (
-                            header in ["Value", "Count", "Avg"]
-                            and percent_diff.abs().gt(args.report_diff).any()
-                        ):
-                            result_df["Abs Diff"] = absolute_diff
-
-                            if args.report_diff:
-                                violation_idx = percent_diff.index[
-                                    percent_diff.abs() > args.report_diff
-                                ]
-                                console_warning(
-                                    f"Dataframe diff exceeds {args.report_diff}% "
-                                    "threshold requirement\n"
-                                    f"See metric {violation_idx.to_numpy()}"
-                                )
-                                console_warning(result_df)
                     else:
                         # Base run - just add the rounded values
                         cur_df_copy = copy.deepcopy(cur_df)
@@ -724,28 +782,12 @@ def process_table_data(
     return result_df
 
 
-def _mem_chart_heading(panel_id: int, normal_unit: str) -> str:
-    """Section number from ``panel id // 100`` (panel 300 → ``3. Memory Chart``)."""
-    section = max(0, int(panel_id)) // 100
-    return f"{section}. Memory Chart (Normalization: {normal_unit})"
-
-
-def _panel_is_mem_chart_only(panel: dict[str, Any]) -> bool:
-    """True when every table uses ``cli_style: mem_chart`` (one merged chart)."""
-    sources = panel.get("data source") or []
-    return bool(sources) and all(
-        tcfg.get("cli_style") == "mem_chart" for ds in sources for tcfg in ds.values()
-    )
-
-
 def format_table_output(
     args: argparse.Namespace,
     table_config: dict[str, Any],
     df: pd.DataFrame,
     table_type: str,
     runs: dict[str, Any],
-    gpu_arch: Optional[str] = None,
-    mem_data_override: Optional[dict[str, Any]] = None,
 ) -> str:
     """Format table for output, handling special cases and saving to files if needed."""
 
@@ -760,18 +802,16 @@ def format_table_output(
 
     # Do not print the table if any column is empty. PC sampling table 21.1 is
     # exempt: its source column is all N/A when the workload lacks debug info.
-    if is_empty_columns_exist and table_id_str != "21.1":
+    if is_empty_columns_exist and table_id_str != PC_SAMPLING_TABLE_ID:
         title = table_config.get("title", "")
         console_log(f"Not showing table with empty column(s): {table_id_str} {title}")
         return content
 
-    # mem_chart diagram mode: one merged chart, no per-table titles (3.1, 3.2, …).
-    # With --view table, keep titles so tabular output stays navigable.
-    skip_mem_chart_title = table_config.get(
-        "cli_style"
-    ) == "mem_chart" and not _tty_view_is_table(args)
-    if "title" in table_config and table_config["title"] and not skip_mem_chart_title:
+    if table_config.get("title"):
         content += f"{table_id_str} {table_config['title']}\n"
+
+    if table_id_str == PC_SAMPLING_TABLE_ID:
+        content += f"{PC_SAMPLING_STALL_REASON_REFERENCE}\n"
 
     # Only show top N kernels (as specified in --max-kernel-num)
     # in "Top Stats" section
@@ -789,68 +829,112 @@ def format_table_output(
     # fash for now.
     transpose = table_type != "raw_csv_table" and table_config.get("columnwise", False)
 
-    # For single run and gfx115x, format BW metrics (Bytes/s) to human-readable
+    # For a single run, format Bytes/s metrics with human-readable units.
     # For multiple runs (baseline comparison), keep Bytes for accurate comparison
     is_single_run = len(runs) == 1
 
-    if is_single_run and is_gfx115x(gpu_arch) and "Unit" in df.columns:
+    if is_single_run and "Unit" in df.columns:
         # Identify value columns to format
         value_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
         df = scale_bw_columns(df, value_cols, args.decimal)
 
-    # When --view table is set, force table output and ignore cli_style from config.
-    # Gate to architectures with a renderer so unsupported arches fall back to table.
-    use_mem_chart = (
-        not _tty_view_is_table(args)
-        and table_config.get("cli_style") == "mem_chart"
-        and len(runs) == 1
-        and "Metric" in df.columns
-        and "Value" in df.columns
-        and (is_gfx9(gpu_arch) or is_gfx115x(gpu_arch))
-    )
-
-    if use_mem_chart:
-        if mem_data_override is not None:
-            mem_data = mem_data_override
-        else:
-            mem_data = (
-                pd
-                .DataFrame([df["Metric"], df["Value"]])
-                .transpose()
-                .set_index("Metric")
-                .to_dict()["Value"]
-            )
-
-        if is_gfx9(gpu_arch):
-            content += (
-                mem_chart_gfx9.plot_mem_chart(
-                    mem_data,
-                    chart_title=_mem_chart_heading(
-                        int(table_config["id"]),
-                        args.normal_unit,
-                    ),
-                )
-                + "\n"
-            )
-        elif is_gfx115x(gpu_arch):
-            content += (
-                mem_chart_gfx11.plot_mem_chart(
-                    mem_data,
-                    chart_title=_mem_chart_heading(
-                        int(table_config["id"]),
-                        args.normal_unit,
-                    ),
-                )
-                + "\n"
-            )
-        else:
-            pass
-    else:
-        content += (
-            get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
-        )
+    content += get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
 
     return content
+
+
+def _max_line_width(rendered: str) -> int:
+    """Return the longest line width after stripping ANSI codes."""
+    stripped = strip_ansi(rendered)
+    if not stripped.strip():
+        return 0
+    return max(len(line) for line in stripped.splitlines())
+
+
+def _render_membw_guidance(
+    membw_result: MemBwAnalysisResult,
+    chart_width: int = 0,
+) -> str:
+    """Render membw guidance text to append below the memory chart."""
+    if not has_active_nodes(membw_result.nodes):
+        return _render_membw_status_line(membw_result)
+    panel_output = _render_membw_guidance_panel(
+        membw_result.guidance_blocks,
+        chart_width=chart_width,
+    )
+    if panel_output:
+        return panel_output
+    return f"{ACTIVE_FALLBACK_TEXT}\n"
+
+
+def _render_membw_status_line(
+    membw_result: MemBwAnalysisResult,
+) -> str:
+    """Render a single status line when no bottlenecks are active."""
+    return f"{status_text(membw_result)}\n"
+
+
+def _style_guidance_block(block: str) -> RichText:
+    """Apply Rich styling to a single guidance block."""
+    text = RichText(block.rstrip())
+    first_newline = block.find("\n")
+    if first_newline > 0:
+        text.stylize("bold indian_red", 0, first_newline)
+    text.highlight_regex(
+        r"  (Condition|Measured|Impact)\s*:",
+        style="dim",
+    )
+    return text
+
+
+def _render_membw_guidance_panel(
+    guidance_blocks: tuple[str, ...],
+    chart_width: int = 0,
+) -> str:
+    """Render active guidance blocks in a styled Rich panel."""
+    sections = [_style_guidance_block(block) for block in guidance_blocks if block]
+    if not sections:
+        return ""
+
+    panel_width = max(chart_width, _GUIDANCE_PANEL_MIN_WIDTH)
+    col_gap = 4
+    # 2 border + 2*2 padding = 6; minus column gap
+    col_width = (panel_width - 6 - col_gap) // 2
+
+    grid = RichTable.grid(padding=(1, col_gap))
+    grid.add_column(width=col_width)
+    grid.add_column(width=col_width)
+
+    for i in range(0, len(sections), 2):
+        left = sections[i]
+        right = sections[i + 1] if i + 1 < len(sections) else RichText()
+        grid.add_row(left, right)
+
+    panel = RichPanel(
+        grid,
+        title="[bold]Memory Bandwidth Guided Analysis[/bold]",
+        border_style="indian_red",
+        width=panel_width,
+        padding=(1, 2),
+    )
+
+    buf = StringIO()
+    console = RichConsole(
+        file=buf,
+        force_terminal=True,
+        width=panel_width,
+    )
+    console.print(panel)
+    return buf.getvalue()
+
+
+def resolve_hidden_columns(args: argparse.Namespace) -> List[str]:
+    """Resolve terminal columns hidden by default and user overrides."""
+    return [
+        column
+        for column in config.HIDDEN_COLUMNS_CLI
+        if column not in (args.include_cols or [])
+    ]
 
 
 def show_all(
@@ -859,7 +943,6 @@ def show_all(
     arch_configs: schema.ArchConfig,
     output: Optional[TextIO],
     profiling_config: dict[str, Any],
-    roof_plot: Optional[str] = None,
 ) -> None:
     """
     Show all panels with their data in plain text mode.
@@ -876,10 +959,7 @@ def show_all(
         profiling_config.get("filter_blocks", []), gpu_arch
     )
 
-    if args.include_cols:
-        hidden_cols = list(set(config.HIDDEN_COLUMNS_CLI) - set(args.include_cols))
-    else:
-        hidden_cols = config.HIDDEN_COLUMNS_CLI
+    hidden_cols = resolve_hidden_columns(args)
 
     # Check for valid roofline data once (used to skip roofline tables in the loop)
     has_valid_roofline = any(
@@ -897,22 +977,14 @@ def show_all(
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
-        # NOTE: Experimental Feature Toggle
-        # HARD GATE: Block 30 (panel 3000) requires membw_analysis flag
-        if panel_id == 3000 and not args.membw_analysis:
-            continue
-
-        # Skip panels that don't support baseline comparison
-        if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
-            continue
-
         # Handle roofline panel (400) with custom display logic
         # Skip if --view table is set; tables 401/402 will be rendered as normal tables
         if panel_id == 400 and not _tty_view_is_table(args):
-            _ = is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols)
+            _ = is_roofline_shown(args, runs, output, panel, hidden_cols)
 
         panel_content = ""  # store content of all data_source from one panel
-        mem_chart_data: dict[str, Any] = {}  # merged mem_chart metrics (gfx115x)
+        # Metric -> value from every table in this panel, drawn as one chart
+        mem_chart_data: dict[str, Any] = {}
 
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
@@ -997,12 +1069,12 @@ def show_all(
 
                 # For mem_chart panels, collect all tables and merge
                 # into a single chart; skip individual table output.
-                # Gate to architectures with a renderer; unsupported arches fall back to
+                # Gate to architectures with a chart layout; others fall back to
                 # normal table output.
                 is_mem_chart = (
                     table_config.get("cli_style") == "mem_chart"
                     and not _tty_view_is_table(args)
-                    and (is_gfx9(gpu_arch) or is_gfx115x(gpu_arch))
+                    and Layouts.for_arch(gpu_arch) is not None
                 )
 
                 if is_mem_chart and len(runs) == 1:
@@ -1024,56 +1096,42 @@ def show_all(
                     processed_df,
                     table_type,
                     runs,
-                    gpu_arch,
                 )
 
-        # Emit merged mem_chart for the panel (all architectures)
-        if mem_chart_data and not _tty_view_is_table(args):
-            heading = _mem_chart_heading(
-                int((panel or {}).get("id", 300)),
-                args.normal_unit,
+        # Emit the merged memory chart for the panel.
+        if mem_chart_data:
+            heading = format_mem_chart_heading(args.normal_unit, panel_id=panel_id)
+            membw_result = getattr(first_run, "membw_result", None)
+            chart_output = plot_mem_chart(
+                mem_chart_data,
+                chart_title=heading,
+                gpu_arch=gpu_arch,
+                units=panel_units(panel),
+                membw=membw_result,
             )
-            if is_gfx115x(gpu_arch):
-                panel_content += (
-                    mem_chart_gfx11.plot_mem_chart(
-                        mem_chart_data,
-                        chart_title=heading,
-                    )
-                    + "\n"
+            panel_content += chart_output + "\n"
+            if membw_result is not None:
+                panel_content += _render_membw_guidance(
+                    membw_result,
+                    chart_width=_max_line_width(chart_output),
                 )
-            elif is_gfx9(gpu_arch):
-                panel_content += (
-                    mem_chart_gfx9.plot_mem_chart(mem_chart_data, chart_title=heading)
-                    + "\n"
-                )
-            else:
-                pass
 
         # Roofline printing is handled separately above in is_roofline_shown.
         # With --view table, roofline tables (401/402) render as normal tables.
         if panel_content and (
             table_config["id"] not in [401, 402] or _tty_view_is_table(args)
         ):
-            if _panel_is_mem_chart_only(panel) and not _tty_view_is_table(args):
+            if not hasattr(output, "isatty") or not output.isatty():
+                panel_content = strip_ansi(panel_content)
+            # A panel drawn entirely as the memory chart carries its own heading
+            if mem_chart_data and is_memory_chart_panel(panel):
                 print(panel_content, file=output)
             else:
                 print(f"\n{'-' * 80}", file=output)
                 print(f"{panel_id // 100}. {panel['title']}", file=output)
+                if panel_id == 400:
+                    _print_roofline_html_path(runs, output)
                 print(panel_content, file=output)
-
-
-def show_roof_plot(roof_plot: str) -> None:
-    # TODO: short term solution to display roofline plot
-    print("4.3 Roofline Plot:")
-
-    if roof_plot:
-        print(roof_plot)
-    else:
-        console_error(
-            "Cannot create roofline plot for CLI with incomplete/missing "
-            "roofline profiling data.",
-            exit=False,
-        )
 
 
 def show_kernel_stats(

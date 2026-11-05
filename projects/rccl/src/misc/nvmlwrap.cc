@@ -9,7 +9,11 @@
 #include "checks.h"
 #include "debug.h"
 #include "os.h"
+#include "param.h"
 
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
 #include <initializer_list>
 #include <memory>
 #include <mutex>
@@ -33,11 +37,18 @@ NCCL_NVML_FN(nvmlDeviceGetCount_v2, nvmlReturn_t, (unsigned int*))
 NCCL_NVML_FN(nvmlDeviceGetHandleByPciBusId, nvmlReturn_t, (const char* pciBusId, nvmlDevice_t* device))
 NCCL_NVML_FN(nvmlDeviceGetHandleByIndex, nvmlReturn_t, (unsigned int index, nvmlDevice_t* device))
 NCCL_NVML_FN(nvmlDeviceGetIndex, nvmlReturn_t, (nvmlDevice_t device, unsigned* index))
+NCCL_NVML_FN(nvmlDeviceGetName, nvmlReturn_t, (nvmlDevice_t device, char* name, unsigned int length))
+NCCL_NVML_FN(nvmlSystemGetDriverVersion, nvmlReturn_t, (char* version, unsigned int length))
+NCCL_NVML_FN(nvmlDeviceGetMemoryErrorCounter, nvmlReturn_t,
+             (nvmlDevice_t device, nvmlMemoryErrorType_t errorType, nvmlEccCounterType_t counterType,
+              nvmlMemoryLocation_t locationType, unsigned long long* count))
 NCCL_NVML_FN(nvmlErrorString, char const*, (nvmlReturn_t r))
 NCCL_NVML_FN(nvmlDeviceGetNvLinkState, nvmlReturn_t,
              (nvmlDevice_t device, unsigned int link, nvmlEnableState_t* isActive))
 NCCL_NVML_FN(nvmlDeviceGetNvLinkRemotePciInfo, nvmlReturn_t,
              (nvmlDevice_t device, unsigned int link, nvmlPciInfo_t* pci))
+NCCL_NVML_FN(nvmlDeviceGetNvLinkRemoteDeviceType, nvmlReturn_t,
+             (nvmlDevice_t device, unsigned int link, nvmlIntNvLinkDeviceType_t* NvLinkDeviceType))
 NCCL_NVML_FN(nvmlDeviceGetNvLinkCapability, nvmlReturn_t,
              (nvmlDevice_t device, unsigned int link, nvmlNvLinkCapability_t capability, unsigned int* capResult))
 NCCL_NVML_FN(nvmlDeviceGetCudaComputeCapability, nvmlReturn_t, (nvmlDevice_t device, int* major, int* minor))
@@ -66,6 +77,45 @@ union nvmlCCInfoInternal {
   nvmlConfComputeSystemState_t settingV12020;
   nvmlSystemConfComputeSettings_t settingV12040;
 };
+
+void ncclNvmlParseCudaVisibleDevices(const char* env, int deviceCount, bool* visible) {
+  for (int a = 0; a < deviceCount; a++) visible[a] = (env == nullptr);
+  if (env == nullptr || env[0] == '\0') return;
+
+  const char* p = env;
+  while (*p != '\0') {
+    while (*p == ' ' || *p == '\t') p++;
+
+    char* end = nullptr;
+    errno = 0;
+    long value = strtol(p, &end, 10);
+    if (p == end) {
+      // CUDA accepts UUID and MIG identifiers, which cannot be mapped to NVML
+      // ordinals here. Avoid treating a potentially visible device as invisible.
+      for (int a = 0; a < deviceCount; a++) visible[a] = true;
+      return;
+    }
+    if (errno != 0 || value > INT_MAX) return;
+    if (value < 0) return;
+
+    while (*end == ' ' || *end == '\t') end++;
+    if (*end != '\0' && *end != ',') return;
+
+    // CUDA stops processing the sequence at the first invalid index.
+    if (value >= deviceCount) return;
+    visible[value] = true;
+    if (*end == '\0') break;
+    p = end + 1;
+  }
+}
+
+void ncclNvmlCacheCudaVisibleDevices() {
+  bool visible[ncclNvmlMaxDevices];
+  ncclNvmlParseCudaVisibleDevices(ncclGetEnv("CUDA_VISIBLE_DEVICES"), ncclNvmlDeviceCount, visible);
+  for (int a = 0; a < ncclNvmlDeviceCount; a++) {
+    ncclNvmlDevices[a].cudaVisible = visible[a];
+  }
+}
 } // namespace
 
 ncclResult_t ncclNvmlEnsureInitialized() {
@@ -101,9 +151,13 @@ ncclResult_t ncclNvmlEnsureInitialized() {
       {(void**)&pfn_nvmlDeviceGetHandleByPciBusId, "nvmlDeviceGetHandleByPciBusId"},
       {(void**)&pfn_nvmlDeviceGetHandleByIndex, "nvmlDeviceGetHandleByIndex"},
       {(void**)&pfn_nvmlDeviceGetIndex, "nvmlDeviceGetIndex"},
+      {(void**)&pfn_nvmlDeviceGetName, "nvmlDeviceGetName"},
+      {(void**)&pfn_nvmlSystemGetDriverVersion, "nvmlSystemGetDriverVersion"},
+      {(void**)&pfn_nvmlDeviceGetMemoryErrorCounter, "nvmlDeviceGetMemoryErrorCounter"},
       {(void**)&pfn_nvmlErrorString, "nvmlErrorString"},
       {(void**)&pfn_nvmlDeviceGetNvLinkState, "nvmlDeviceGetNvLinkState"},
       {(void**)&pfn_nvmlDeviceGetNvLinkRemotePciInfo, "nvmlDeviceGetNvLinkRemotePciInfo"},
+      {(void**)&pfn_nvmlDeviceGetNvLinkRemoteDeviceType, "nvmlDeviceGetNvLinkRemoteDeviceType"},
       {(void**)&pfn_nvmlDeviceGetNvLinkCapability, "nvmlDeviceGetNvLinkCapability"},
       {(void**)&pfn_nvmlDeviceGetCudaComputeCapability, "nvmlDeviceGetCudaComputeCapability"},
       {(void**)&pfn_nvmlDeviceGetP2PStatus, "nvmlDeviceGetP2PStatus"},
@@ -161,9 +215,15 @@ ncclResult_t ncclNvmlEnsureInitialized() {
     return initResult;
   }
 
+  ncclNvmlCacheCudaVisibleDevices();
+
   for (int a = 0; a < ncclNvmlDeviceCount; a++) {
     res1 = pfn_nvmlDeviceGetHandleByIndex(a, &ncclNvmlDevices[a].handle);
     if (res1 != NVML_SUCCESS) {
+      if (!ncclNvmlDevices[a].cudaVisible) {
+        ncclNvmlDevices[a].handle = nullptr;
+        continue;
+      }
       WARN("nvmlDeviceGetHandleByIndex(%d) failed: %s", int(a), pfn_nvmlErrorString(res1));
       initResult = ncclSystemError;
       return initResult;
@@ -172,6 +232,7 @@ ncclResult_t ncclNvmlEnsureInitialized() {
     res1 = pfn_nvmlDeviceGetCudaComputeCapability(ncclNvmlDevices[a].handle, &ncclNvmlDevices[a].computeCapabilityMajor,
                                                   &ncclNvmlDevices[a].computeCapabilityMinor);
     if (res1 != NVML_SUCCESS) {
+      if (!ncclNvmlDevices[a].cudaVisible) continue;
       WARN("nvmlDeviceGetCudaComputeCapability(%d) failed: %s", int(a), pfn_nvmlErrorString(res1));
       initResult = ncclSystemError;
       return initResult;
@@ -180,19 +241,32 @@ ncclResult_t ncclNvmlEnsureInitialized() {
 
   for (int a = 0; a < ncclNvmlDeviceCount; a++) {
     for (int b = 0; b < ncclNvmlDeviceCount; b++) {
+      if (ncclNvmlDevices[a].handle == nullptr || ncclNvmlDevices[b].handle == nullptr) {
+        ncclNvmlDevicePairs[a][b].p2pStatusRead = NVML_P2P_STATUS_UNKNOWN;
+        ncclNvmlDevicePairs[a][b].p2pStatusWrite = NVML_P2P_STATUS_UNKNOWN;
+        continue;
+      }
       nvmlDevice_t da = ncclNvmlDevices[a].handle;
       nvmlDevice_t db = ncclNvmlDevices[b].handle;
 
       res1 = pfn_nvmlDeviceGetP2PStatus(da, db, NVML_P2P_CAPS_INDEX_READ, &ncclNvmlDevicePairs[a][b].p2pStatusRead);
       if (res1 != NVML_SUCCESS) {
-        WARN("nvmlDeviceGetP2PStatus(%d,%d,NVML_P2P_CAPS_INDEX_READ) failed: %s", a, b, pfn_nvmlErrorString(res1));
-        initResult = ncclSystemError;
-        return initResult;
+        if (!ncclNvmlDevices[a].cudaVisible || !ncclNvmlDevices[b].cudaVisible) {
+          ncclNvmlDevicePairs[a][b].p2pStatusRead = NVML_P2P_STATUS_UNKNOWN;
+        } else {
+          WARN("nvmlDeviceGetP2PStatus(%d,%d,NVML_P2P_CAPS_INDEX_READ) failed: %s", a, b, pfn_nvmlErrorString(res1));
+          initResult = ncclSystemError;
+          return initResult;
+        }
       }
 
       res1 = pfn_nvmlDeviceGetP2PStatus(da, db, NVML_P2P_CAPS_INDEX_WRITE, &ncclNvmlDevicePairs[a][b].p2pStatusWrite);
       if (res1 != NVML_SUCCESS) {
-        WARN("nvmlDeviceGetP2PStatus(%d,%d,NVML_P2P_CAPS_INDEX_READ) failed: %s", a, b, pfn_nvmlErrorString(res1));
+        if (!ncclNvmlDevices[a].cudaVisible || !ncclNvmlDevices[b].cudaVisible) {
+          ncclNvmlDevicePairs[a][b].p2pStatusWrite = NVML_P2P_STATUS_UNKNOWN;
+          continue;
+        }
+        WARN("nvmlDeviceGetP2PStatus(%d,%d,NVML_P2P_CAPS_INDEX_WRITE) failed: %s", a, b, pfn_nvmlErrorString(res1));
         initResult = ncclSystemError;
         return initResult;
       }
@@ -237,6 +311,47 @@ ncclResult_t ncclNvmlDeviceGetHandleByIndex(unsigned int index, nvmlDevice_t* de
   return ncclSuccess;
 }
 
+ncclResult_t ncclNvmlDeviceGetName(nvmlDevice_t device, char* name, unsigned int length) {
+  NCCLCHECK(ncclNvmlEnsureInitialized());
+  std::lock_guard<std::mutex> locked(lock);
+  NVMLTRY(nvmlDeviceGetName, device, name, length);
+  return ncclSuccess;
+}
+
+ncclResult_t ncclNvmlSystemGetDriverVersion(char* version, unsigned int length) {
+  NCCLCHECK(ncclNvmlEnsureInitialized());
+  std::lock_guard<std::mutex> locked(lock);
+  NVMLTRY(nvmlSystemGetDriverVersion, version, length);
+  return ncclSuccess;
+}
+
+ncclResult_t ncclNvmlDeviceGetMemoryErrorCounter(nvmlDevice_t device, nvmlMemoryErrorType_t errorType,
+                                                 nvmlEccCounterType_t counterType, nvmlMemoryLocation_t locationType,
+                                                 unsigned long long* count) {
+  NCCLCHECK(ncclNvmlEnsureInitialized());
+  std::lock_guard<std::mutex> locked(lock);
+  NVMLTRY(nvmlDeviceGetMemoryErrorCounter, device, errorType, counterType, locationType, count);
+  return ncclSuccess;
+}
+
+// Re-queries NVML on each call, unlike the cached ncclNvmlDeviceCount global.
+ncclResult_t ncclNvmlDeviceGetCount(unsigned int* deviceCount) {
+  NCCLCHECK(ncclNvmlEnsureInitialized());
+  std::lock_guard<std::mutex> locked(lock);
+#if NCCL_NVML_DIRECT
+  bool have_v2 = true;
+#else
+  // if this compare is done in the NCCL_NVML_DIRECT=1 case then GCC warns about it never being null
+  bool have_v2 = pfn_nvmlInit_v2 != nullptr;
+#endif
+  if (have_v2) {
+    NVMLTRY(nvmlDeviceGetCount_v2, deviceCount);
+  } else {
+    NVMLTRY(nvmlDeviceGetCount, deviceCount);
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclNvmlDeviceGetIndex(nvmlDevice_t device, unsigned* index) {
   NCCLCHECK(ncclNvmlEnsureInitialized());
   for (int d = 0; d < ncclNvmlDeviceCount; d++) {
@@ -259,6 +374,14 @@ ncclResult_t ncclNvmlDeviceGetNvLinkRemotePciInfo(nvmlDevice_t device, unsigned 
   NCCLCHECK(ncclNvmlEnsureInitialized());
   std::lock_guard<std::mutex> locked(lock);
   NVMLTRY(nvmlDeviceGetNvLinkRemotePciInfo, device, link, pci);
+  return ncclSuccess;
+}
+
+ncclResult_t ncclNvmlDeviceGetNvLinkRemoteDeviceType(nvmlDevice_t device, unsigned int link,
+                                                     nvmlIntNvLinkDeviceType_t* NvLinkDeviceType) {
+  NCCLCHECK(ncclNvmlEnsureInitialized());
+  std::lock_guard<std::mutex> locked(lock);
+  NVMLTRY(nvmlDeviceGetNvLinkRemoteDeviceType, device, link, NvLinkDeviceType);
   return ncclSuccess;
 }
 

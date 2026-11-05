@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstddef>
 #include <cstdint>
 #include <sstream>
 #include <stdexcept>
@@ -32,10 +33,10 @@ inline constexpr std::size_t fields_per_record = 4;
  */
 struct argument_info
 {
-    std::uint32_t arg_number = 0;   ///< Argument position/index
-    std::string   arg_type   = {};  ///< Argument type (e.g., "int", "float*")
-    std::string   arg_name   = {};  ///< Argument name
-    std::string   arg_value  = {};  ///< Argument value as string
+    std::uint32_t arg_number = 0;  ///< Argument position/index
+    std::string   arg_type;        ///< Argument type (e.g., "int", "float*")
+    std::string   arg_name;        ///< Argument name
+    std::string   arg_value;       ///< Argument value as string
 };
 
 using function_args_t = std::vector<argument_info>;
@@ -109,7 +110,7 @@ inline std::string
 get_args_string(const function_args_t& args)
 {
     std::string args_str;
-    std::for_each(args.begin(), args.end(), [&args_str](const argument_info& arg) {
+    std::ranges::for_each(args, [&args_str](const argument_info& arg) {
         // arg_number is a uint32 and never contains an escapable character
         args_str.append(std::to_string(arg.arg_number)).append(ARG_DELIMITER);
         append_escaped_field(args_str, arg.arg_type);
@@ -123,27 +124,26 @@ get_args_string(const function_args_t& args)
 }
 
 inline function_args_t
-process_arguments_string(const std::string& arg_str)
+process_arguments_string(std::string_view arg_str)
 {
-    function_args_t   args;
-    const std::string delimiter{ ARG_DELIMITER };
+    function_args_t args;
 
-    auto split = [](const std::string& str, const std::string& _delimiter) {
-        std::vector<std::string> tokens;
-        size_t                   start = 0;
-        size_t                   end   = str.find(_delimiter);
+    auto const split = [](std::string_view str, std::string_view delimiter) {
+        std::vector<std::string_view> tokens;
+        size_t                        start = 0;
+        size_t                        end   = str.find(delimiter);
 
-        while(end != std::string::npos)
+        while(end != std::string_view::npos)
         {
             tokens.push_back(str.substr(start, end - start));
-            start = end + _delimiter.length();
-            end   = str.find(_delimiter, start);
+            start = end + delimiter.length();
+            end   = str.find(delimiter, start);
         }
 
         return tokens;
     };
 
-    auto tokens = split(arg_str, delimiter);
+    auto tokens = split(arg_str, ARG_DELIMITER);
 
     // Ensure the number of tokens is a whole number of records
     if(tokens.size() % fields_per_record != 0)
@@ -153,18 +153,19 @@ process_arguments_string(const std::string& arg_str)
 
     for(auto it = tokens.begin(); it != tokens.end(); it += fields_per_record)
     {
-        const std::string& number_token = *it;
-        std::uint32_t      arg_number   = 0;
-        auto [ptr, ec]                  = std::from_chars(
+        const auto    number_token = *it;
+        std::uint32_t arg_number   = 0;
+        auto [ptr, ec]             = std::from_chars(
             number_token.data(), number_token.data() + number_token.size(), arg_number);
         if(ec != std::errc{} || ptr != number_token.data() + number_token.size())
         {
             throw std::invalid_argument("Malformed argument string.");
         }
 
-        const argument_info arg = { arg_number, unescape_field(*(it + 1)),
-                                    unescape_field(*(it + 2)),
-                                    unescape_field(*(it + 3)) };
+        const argument_info arg = { .arg_number = arg_number,
+                                    .arg_type   = unescape_field(*(it + 1)),
+                                    .arg_name   = unescape_field(*(it + 2)),
+                                    .arg_value  = unescape_field(*(it + 3)) };
         args.push_back(arg);
     }
 

@@ -35,7 +35,8 @@ default, results are written to a subdirectory with your accelerator's name;
 for example, ``./workloads/vcopy_data/MI200/``, where name is configurable
 via the ``-n`` argument. When an MPI rank is detected, the default output
 directory appends the rank (``./workloads/vcopy_data/<rank>/``) instead of
-the gpu model. Use ``--output-directory`` to override the output location.
+the gpu model. Use ``-d``, ``--output-directory`` to override the output
+location.
 
 .. note::
 
@@ -57,8 +58,11 @@ Common filters to customize data collection include:
 ``-k``, ``--kernel``
    Enables filtering kernels by name.
 
+``--kernel-iteration-range``
+   In profile mode, selects which iterations of each kernel to profile.
+
 ``-d``, ``--dispatch``
-   Enables filtering based on dispatch iteration.
+   In analyze mode, selects which already-profiled dispatches to report on.
 
 ``-b``, ``--block``
    Enables collection metrics for only the specified analysis report blocks.
@@ -142,22 +146,11 @@ Analyze mode
    generated metrics. It generates metrics from the entirety of your profiled
    application or a subset identified through the ROCm Compute Profiler CLI analysis filters.
 
-   To generate a lightweight GUI interface, you can add the ``--experimental --gui`` flags to your
-   analysis command.
-
    .. code-block:: shell
 
       $ rocprof-compute analyze --help
 
-   Analyze mode now supports a lightweight Text-based User Interface (TUI) that
-   provides an interactive terminal experience for enhanced usability. To enable TUI mode,
-   use the ``--experimental --tui`` flags when running the analyze command:
-
-   .. code-block:: shell
-
-      $ rocprof-compute analyze --experimental --tui
-
-See :doc:`analyze/mode` to learn about these modes in depth and to get started
+See :doc:`analyze/mode` to learn about this mode in depth and to get started
 with analysis using ROCm Compute Profiler.
 
 .. _global-options:
@@ -208,11 +201,7 @@ The following table lists ROCm Compute Profiler's basic operations, their
 
    * - :ref:`Standalone roofline analysis <standalone-roofline>`
      - ``profile``
-     - ``--name`` or ``--output-directory``, ``--roof-only``, ``--roofline-data-type <data_type>``, ``-- <profile_cmd>``
-
-   * - :doc:`Launch standalone GUI from CLI </how-to/analyze/standalone-gui>`
-     - ``analyze``
-     - ``--path``, ``--experimental``, ``--gui``
+     - ``--name`` or ``--output-directory``, ``--roof-only``, ``-- <profile_cmd>``
 
    * - :doc:`Interact with profiling results from CLI </how-to/analyze/cli>`
      - ``analyze``

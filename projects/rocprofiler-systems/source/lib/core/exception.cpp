@@ -88,7 +88,7 @@ template <typename Tp>
 const char*
 exception<Tp>::what() const noexcept
 {
-    return (m_what) ? m_what : Tp::what();
+    return m_what ? m_what : Tp::what();
 }
 
 template class exception<std::runtime_error>;

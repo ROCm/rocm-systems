@@ -191,9 +191,10 @@ protected:
 
     /*! \brief Function to parse an OBU header
      * \param [in] p_stream Pointer to the bit stream
+     * \param [in] size_in_bytes Number of bytes available at p_stream
      * \return <tt>ParserResult</tt>
      */
-    ParserResult ParseObuHeader(const uint8_t *p_stream);
+    ParserResult ParseObuHeader(const uint8_t *p_stream, size_t size_in_bytes);
 
     /*! \brief Function to parse an OBU header and size
      * \return <tt>ParserResult</tt>
@@ -597,22 +598,32 @@ protected:
     /*! \brief Function to read unsigned integer represented by a variable number of little-endian bytes, which
      *         is less than or equal to (1 << 32) - 1. 4.10.5. leb128().
      * \param [in] p_stream Bit stream pointer
+     * \param [in] size_in_bytes Number of bytes available at p_stream
      * \param [out] p_num_bytes_read Number of bytes read
-     * \return The unsigned value
+     * \param [out] p_value The unsigned value
+     * \return <tt>ParserResult</tt>
      */
-    inline uint64_t ReadLeb128(const uint8_t *p_stream, uint32_t *p_num_bytes_read) {
-        uint32_t value = 0;
+    inline ParserResult ReadLeb128(const uint8_t *p_stream, size_t size_in_bytes, uint32_t *p_num_bytes_read, uint64_t *p_value) {
+        uint64_t value = 0;
         *p_num_bytes_read = 0;
-        uint32_t len;
-        for (len = 0; len < 8; ++len) {
-            value |= (p_stream[len] & 0x7F) << (len * 7);
+        *p_value = 0;
+        // leb128() reads at most 8 bytes, and must also stay inside what is left of the chunk.
+        // The encoding is 1 to 8 bytes, so a short tail is normal rather than an error here.
+        uint32_t max_len = size_in_bytes < 8 ? static_cast<uint32_t>(size_in_bytes) : 8;
+        for (uint32_t len = 0; len < max_len; ++len) {
+            // Accumulate in 64 bits: the last of the 8 bytes is shifted by 49.
+            value |= static_cast<uint64_t>(p_stream[len] & 0x7F) << (len * 7);
             if ((p_stream[len] & 0x80) == 0) {
-                ++len;
-                *p_num_bytes_read = len;
-                break;
+                if (value > 0xFFFFFFFFULL) {
+                    return PARSER_OUT_OF_RANGE;
+                }
+                *p_num_bytes_read = len + 1;
+                *p_value = value;
+                return PARSER_OK;
             }
         }
-        return value;
+        // Either the chunk ran out or there was no terminating byte within 8.
+        return PARSER_OUT_OF_RANGE;
     }
 
     /*! \brief Function to read signed integer converted from an n bits unsigned integer in the bitstream. 4.10.6. su(n).

@@ -30,7 +30,9 @@ struct ncclComm;
 #include "cudawrap.h"
 #endif
 
-#if ROCM_VERSION >= 71200
+// Every AMD build defines this, including host-only. rocmwrap.h then provides
+// NCCL_CUMEM_HOST_GATE for the host-alloc gate below.
+#if defined(__HIP_PLATFORM_AMD__)
 #include <hip/hip_runtime.h>
 #include "rocmwrap.h"
 #endif
@@ -54,6 +56,61 @@ inline void rcclShutdownHandler() {
 inline void rcclRegisterShutdownHandler() {
   static std::once_flag once;
   std::call_once(once, []() { atexit(rcclShutdownHandler); });
+}
+
+// RCCL workaround (gfx950 / gfx1250): hipMemUnmap on cuMem VMM *peer* allocations
+// can deadlock or double-free in the HSA busy-wait during ncclCommDestroy teardown.
+// To avoid that we skip ONLY the peer-aperture teardown in ncclCuMemFreeAddr (the
+// cuMemUnmap + cuMemAddressFree of the peer-mapped VA range), leaking just that
+// VA aperture (the OS reclaims it at process exit). The owner's physical handle
+// (ncclCuMemFree -> cuMemRelease) and ordinary buffers (ncclCudaFree -> cudaFree)
+// still free normally, so long-lived processes do not grow memory on every
+// ncclCommDestroy. Auto-enabled on gfx950 and gfx1250 (ROCM-30633); override with
+// NCCL_CUMEM_SKIP_FREE=0 (force off) or =1 (force on).
+//
+// Separate site: ncclDevrFinalize may skip owner-local cuMemAddressFree of the
+// LSA flat VA reservation (lsaFlatBase). Temporary gfx1250-only workaround
+// (ROCM-30633): leftover peer maps can hang or double-free AddressFree, and this
+// is the only reclaim site, so a process that creates/destroys device-API comms
+// in a loop will not recover that VA until exit. MI355 (gfx950) still
+// AddressFrees this reservation with skip-free auto-on. NCCL_CUMEM_SKIP_FREE
+// =0/1 still overrides both helpers below.
+inline bool rcclSkipCuMemFreeFromArch(const hipDeviceProp_t& prop) {
+  return strstr(prop.gcnArchName, "gfx950") != nullptr ||
+         strstr(prop.gcnArchName, "gfx1250") != nullptr;
+}
+
+inline bool rcclSkipLsaFlatAddressFreeFromArch(const hipDeviceProp_t& prop) {
+  return strstr(prop.gcnArchName, "gfx1250") != nullptr;
+}
+
+inline bool rcclQueryDeviceProp(hipDeviceProp_t* prop) {
+  *prop = hipDeviceProp_t{};
+  int dev = 0;
+  if (hipGetDevice(&dev) != hipSuccess) return false;
+  if (hipGetDeviceProperties(prop, dev) != hipSuccess) return false;
+  return true;
+}
+
+// Shared NCCL_CUMEM_SKIP_FREE parse + memoization; ArchPred is the only difference.
+template <bool (*ArchPred)(const hipDeviceProp_t&)>
+inline bool rcclSkipCuMemFreeIfArch() {
+  static const bool skip = []() {
+    const char* e = getenv("NCCL_CUMEM_SKIP_FREE");
+    if (e) return atoi(e) != 0;
+    hipDeviceProp_t prop;
+    if (!rcclQueryDeviceProp(&prop)) return false;
+    return ArchPred(prop);
+  }();
+  return skip;
+}
+
+inline bool rcclSkipCuMemFree() {
+  return rcclSkipCuMemFreeIfArch<rcclSkipCuMemFreeFromArch>();
+}
+
+inline bool rcclSkipLsaFlatAddressFree() {
+  return rcclSkipCuMemFreeIfArch<rcclSkipLsaFlatAddressFreeFromArch>();
 }
 uint64_t clockNano(); // from utils.h with which we have a circular dependency
 
@@ -108,6 +165,7 @@ struct ncclSideStream {
 
 inline std::unordered_map<ncclSideStreamKey, ncclSideStream, ncclSideStreamKeyHash> sideStream;
 inline pthread_mutex_t sideStreamLock = PTHREAD_MUTEX_INITIALIZER;
+
 extern ncclResult_t getBusId(int cudaDev, int64_t* busId);
 
 // Clamp a requested stream priority into the device-supported range.
@@ -231,29 +289,35 @@ struct ncclSideStreamScope {
   ncclSideStreamScope& operator=(const ncclSideStreamScope&) = delete;
 };
 
-#if CUDART_VERSION >= 12020 || ROCM_VERSION >= 71200
+#if CUDART_VERSION >= 12020 || NCCL_CUMEM_HOST_GATE
 
 static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocationHandle* handlep, size_t size) {
   ncclResult_t result = ncclSuccess;
   size_t granularity = 0;
-  CUdevice currentDev;
   CUmemAllocationProp prop = {};
   CUmemAccessDesc accessDesc = {};
   CUmemGenericAllocationHandle handle;
   int cudaDev;
+#if !defined(__HIP_PLATFORM_AMD__)
+  CUdevice currentDev;
   int cpuNumaNodeId = -1;
+#else
+  int cpuNumaNodeId = 0;
+#endif
   CUmemAllocationHandleType type = ncclCuMemHandleType;
   bool handleCreated = false;
   bool addressReserved = false;
   bool mapped = false;
 
   CUDACHECK(cudaGetDevice(&cudaDev));
+#if !defined(__HIP_PLATFORM_AMD__)
   CUCHECK(cuDeviceGet(&currentDev, cudaDev));
   CUCHECK(cuDeviceGetAttribute(&cpuNumaNodeId, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, currentDev));
   if (cpuNumaNodeId < 0) cpuNumaNodeId = 0;
+#endif
 #if defined(__HIP_PLATFORM_AMD__)
   // CLR rejects HostNuma; only Device or Host are accepted.
-  prop.location.type = CU_MEM_LOCATION_TYPE_HOST;
+  prop.location.type = hipMemLocationTypeHost;
   prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
   prop.requestedHandleTypes = type; // So it can be exported
   // HIP/CLR requires host id to be 0. cpuNumaNodeId can exceed GPU count and fail.
@@ -284,7 +348,7 @@ static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocation
   /* Now allow RW access to the newly mapped memory from the CPU */
 #if defined(__HIP_PLATFORM_AMD__)
   // CLR rejects HostNuma here too; mirror the Host fallback used at allocation.
-  accessDesc.location.type = CU_MEM_LOCATION_TYPE_HOST;
+  accessDesc.location.type = hipMemLocationTypeHost;
   accessDesc.location.id = 0;
 #else
   accessDesc.location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
@@ -326,7 +390,7 @@ static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
   return result;
 }
 
-#else /* CUDART_VERSION >= 12020 */
+#else /* CUDART_VERSION >= 12020 || NCCL_CUMEM_HOST_GATE */
 
 static inline ncclResult_t ncclCuMemHostAllocDebug(void** ptr, void* handlep, size_t size, const char* file, int line,
                                                    const char* callerFunc) {
@@ -347,7 +411,7 @@ static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
   return ncclInternalError;
 }
 
-#endif  /* CUDART_VERSION >= 12020 */
+#endif  /* CUDART_VERSION >= 12020 || NCCL_CUMEM_HOST_GATE */
 
 template <typename T>
 ncclResult_t ncclCudaHostCallocDebug(T** ptr, size_t nelem, const char* filefunc, int line) {
@@ -526,9 +590,14 @@ fail:
 
 static inline ncclResult_t ncclCuMemFreeAddr(void* ptr, struct ncclMemManager* manager, int numSegments = 1) {
   if (ptr == NULL) return ncclSuccess;
-  // Check if process is shutting down to avoid use-after-free in HIP runtime
-  if (rcclShutdownFlag().load(std::memory_order_acquire)) {
-    INFO(NCCL_ALLOC, "ncclCuMemFreeAddr: Skipping free (process shutdown) pointer %p", ptr);
+  // Check if process is shutting down to avoid use-after-free in HIP runtime.
+  // gfx950/gfx1250 (rcclSkipCuMemFree): hipMemUnmap on cuMem VMM *peer* apertures can
+  // deadlock in the HSA busy-wait during ncclCommDestroy. GIN-SDMA device tests
+  // allocate symmetric windows and hit this on teardown; skipping only the peer
+  // VA unmap here lets the run finish (OS reclaims at exit). Owner handle release
+  // (ncclCuMemFree) and ordinary buffers are unaffected — see rcclSkipCuMemFree().
+  if (rcclShutdownFlag().load(std::memory_order_acquire) || rcclSkipCuMemFree()) {
+    INFO(NCCL_ALLOC, "ncclCuMemFreeAddr: Skipping free (%s) pointer %p", rcclSkipCuMemFree() ? "NCCL_CUMEM_SKIP_FREE" : "process shutdown", ptr);
     return ncclSuccess;
   }
 
@@ -541,22 +610,36 @@ static inline ncclResult_t ncclCuMemFreeAddr(void* ptr, struct ncclMemManager* m
 
   ncclResult_t result = ncclSuccess;
   size_t totalSize = 0;
-  for (int segment = 0; segment < numSegments; segment++) {
-    size_t segmentSize = 0;
-    // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
-    // base is dereferenced in cuMemGetAddressRange without checking for nullptr
-    CUdeviceptr base = nullptr;
-    // RCCL: cast through char* before pointer arithmetic
-    CUCHECK(cuMemGetAddressRange(&base, &segmentSize, (CUdeviceptr)((char*)ptr + totalSize)));
-    CUCHECK(cuMemUnmap((CUdeviceptr)((char*)ptr + totalSize), segmentSize));
-    totalSize += segmentSize;
-  }
+  struct ncclMemUntrackInfo info = {};
 
-  // Untrack from memory manager
+  // Untrack the dynamic entry (if any) first, so we can tell whether the memory was already released
+  // by a suspend.  In that case the cuMem release functions below would fail, so we must skip them.
   if (manager != nullptr) {
-    NCCLCHECK(ncclMemUntrack(manager, ptr, totalSize));
+    NCCLCHECKGOTO(ncclMemUntrackDynamic(manager, ptr, &info), result, fail);
   }
 
+  if (info.memType != ncclMemPersist && info.dynMemState == ncclDynMemStateReleased) {
+    // Suspended dynamic memory: physical backing already released.
+    totalSize = info.dynMemSize;
+  } else {
+    // Unmap for each segment for active dynamic memory and persistent memory.
+    for (int segment = 0; segment < numSegments; segment++) {
+      size_t segmentSize = 0;
+      // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
+      // base is dereferenced in cuMemGetAddressRange without checking for nullptr
+      CUdeviceptr base = nullptr;
+      // RCCL: cast through char* before pointer arithmetic
+      CUCHECKGOTO(cuMemGetAddressRange(&base, &segmentSize, (CUdeviceptr)((char*)ptr + totalSize)), result, fail);
+      CUCHECKGOTO(cuMemUnmap((CUdeviceptr)((char*)ptr + totalSize), segmentSize), result, fail);
+      totalSize += segmentSize;
+    }
+    // Untrack persistent memory.
+    if (manager != nullptr && info.memType == ncclMemPersist) {
+      NCCLCHECKGOTO(ncclMemUntrackPersist(manager, ptr, totalSize), result, fail);
+    }
+  }
+
+fail:
   CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, totalSize));
 
   int dev;
@@ -634,12 +717,22 @@ static inline ncclResult_t ncclCuMemAlloc(void** ptr, CUmemGenericAllocationHand
   {
     cudaStreamCaptureMode capMode = cudaStreamCaptureModeRelaxed;
     CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&capMode), result, fail);
-    cudaStream_t zeroStream;
-    CUDACHECKGOTO(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), result, restoreCapMode);
+    // Reuse the pooled side stream when an allocation scope is active (comm
+    // init / P2P connect burst) so this per-allocation zeroing does not churn a
+    // scarce GPU hardware queue via create/destroy on every VMM allocation.
+    // Fall back to a private non-blocking stream when no scope is active.
+    cudaStream_t sidestream = nullptr, zeroStream = nullptr;
+    NCCLCHECKGOTO(getSideStream(&sidestream), result, restoreCapMode);
+    zeroStream = sidestream;
+    if (sidestream == nullptr) {
+      CUDACHECKGOTO(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), result, restoreCapMode);
+    }
     CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, size, zeroStream), result, destroyStream);
     CUDACHECKGOTO(cudaStreamSynchronize(zeroStream), result, destroyStream);
   destroyStream:
-    CUDACHECK(cudaStreamDestroy(zeroStream));
+    if (sidestream == nullptr) {
+      CUDACHECK(cudaStreamDestroy(zeroStream));
+    }
   restoreCapMode:
     CUDACHECK(cudaThreadExchangeStreamCaptureMode(&capMode));
     if (result != ncclSuccess) goto fail;
@@ -668,7 +761,11 @@ fail:
 
 static inline ncclResult_t ncclCuMemFree(void* ptr, struct ncclMemManager* manager, int numSegments = 1) {
   if (ptr == NULL) return ncclSuccess;
-  // Check if process is shutting down to avoid use-after-free in HIP runtime
+  // Check if process is shutting down to avoid use-after-free in HIP runtime.
+  // NOTE: the gfx950/gfx1250 rcclSkipCuMemFree() workaround is intentionally NOT
+  // applied here -- this releases the owner's physical handle (cuMemRelease), which
+  // does not hit the peer-unmap deadlock; skipping it would leak physical memory.
+  // The skip is confined to the peer aperture unmap in ncclCuMemFreeAddr.
   if (rcclShutdownFlag().load(std::memory_order_acquire)) {
     INFO(NCCL_ALLOC, "ncclCuMemFree: Skipping free (process shutdown) pointer %p", ptr);
     return ncclSuccess;
@@ -683,28 +780,42 @@ static inline ncclResult_t ncclCuMemFree(void* ptr, struct ncclMemManager* manag
 
   ncclResult_t result = ncclSuccess;
   size_t totalSize = 0;
-  for (int segment = 0; segment < numSegments; segment++) {
-    CUmemGenericAllocationHandle handle;
-    size_t segmentSize = 0;
-    CUCHECK(cuMemRetainAllocationHandle(&handle, (void*)((char*)ptr + totalSize)));
-    CUCHECK(cuMemRelease(handle));
-    // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
-    // base is dereferenced in cuMemGetAddressRange without checking for nullptr
-    CUdeviceptr base = nullptr;
-    // RCCL: cast through char* before pointer arithmetic
-    CUCHECK(cuMemGetAddressRange(&base, &segmentSize, (CUdeviceptr)((char*)ptr + totalSize)));
-    TRACE(NCCL_ALLOC, "CuMem Free Size %zu pointer %p handle %p segment %d numSegments %d", segmentSize, ptr,
-          (void*)(uintptr_t)handle, segment, numSegments);
-    CUCHECK(cuMemUnmap((CUdeviceptr)((char*)ptr + totalSize), segmentSize));
-    CUCHECK(cuMemRelease(handle));
-    totalSize += segmentSize;
-  }
+  struct ncclMemUntrackInfo info = {};
 
-  // Update tracking with total size after processing all segments
+  // Untrack the dynamic entry (if any) first, so we can tell whether the memory was already released
+  // by a suspend.  In that case the cuMem release functions below would fail, so we must skip them.
   if (manager != nullptr) {
-    NCCLCHECK(ncclMemUntrack(manager, ptr, totalSize));
+    NCCLCHECKGOTO(ncclMemUntrackDynamic(manager, ptr, &info), result, fail);
   }
 
+  if (info.memType != ncclMemPersist && info.dynMemState == ncclDynMemStateReleased) {
+    // Suspended dynamic memory: physical backing already released.
+    totalSize = info.dynMemSize;
+  } else {
+    // Unmap and release physical memory handles for each segment for active dynamic memory and persistent memory.
+    for (int segment = 0; segment < numSegments; segment++) {
+      CUmemGenericAllocationHandle handle;
+      size_t segmentSize = 0;
+      CUCHECKGOTO(cuMemRetainAllocationHandle(&handle, (void*)((char*)ptr + totalSize)), result, fail);
+      CUCHECKGOTO(cuMemRelease(handle), result, fail);
+      // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
+      // base is dereferenced in cuMemGetAddressRange without checking for nullptr
+      CUdeviceptr base = nullptr;
+      // RCCL: cast through char* before pointer arithmetic
+      CUCHECKGOTO(cuMemGetAddressRange(&base, &segmentSize, (CUdeviceptr)((char*)ptr + totalSize)), result, fail);
+      TRACE(NCCL_ALLOC, "CuMem Free Size %zu pointer %p handle %p segment %d numSegments %d", segmentSize, ptr,
+            (void*)(uintptr_t)handle, segment, numSegments);
+      CUCHECKGOTO(cuMemUnmap((CUdeviceptr)((char*)ptr + totalSize), segmentSize), result, fail);
+      CUCHECKGOTO(cuMemRelease(handle), result, fail);
+      totalSize += segmentSize;
+    }
+    // Untrack persistent memory.
+    if (manager != nullptr && info.memType == ncclMemPersist) {
+      NCCLCHECKGOTO(ncclMemUntrackPersist(manager, ptr, totalSize), result, fail);
+    }
+  }
+
+fail:
   CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, totalSize));
 
   int dev;
@@ -743,10 +854,10 @@ static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t
       CUCHECK(cuMemRetainAllocationHandle(&handle, (void*)mappedPtrEnd));
       CUCHECK(cuMemGetAllocationPropertiesFromHandle(&prop, handle));
 #if defined(__HIP_PLATFORM_AMD__)
-#if ROCM_VERSION >= 71200
-      // CLR rejects HostNuma; RCCL allocates host segments as CU_MEM_LOCATION_TYPE_HOST
-      // (host VMM alloc is only available on ROCm >= 7.12, matching ncclCuMemHostAlloc).
-      if (prop.location.type == CU_MEM_LOCATION_TYPE_HOST) {
+#if NCCL_CUMEM_HOST_GATE
+      // HIP rejects HostNuma. Host segments use hipMemLocationTypeHost on native
+      // ROCm 7.12 and the 7.0.2.x backport.
+      if (prop.location.type == hipMemLocationTypeHost) {
         *hasSysmemSegment = true;
       }
 #endif
@@ -860,20 +971,22 @@ ncclResult_t ncclCudaCallocDebug(T** ptr, size_t nelem, const char* filefunc, in
 
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (nelem > 0) {
-    // Need a side stream so as not to interfere with graph capture.
-    cudaStream_t stream, sidestream;
-    NCCLCHECK(getSideStream(&sidestream));
-    stream = sidestream;
-    if (sidestream == nullptr) CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
     if (ncclCuMemEnable()) {
+      // ncclCuMemAlloc already zeroes the buffer (ROCM-20370 residue scrub),
+      // reusing the pooled side stream, so no extra memset/stream is needed.
       NCCLCHECKGOTO(ncclCuMemAlloc((void**)ptr, NULL, ncclCuMemHandleType, nelem * ncclSizeOfT<T>(), manager, memType),
                     result, finish);
     } else {
+      // Need a side stream so as not to interfere with graph capture.
+      cudaStream_t stream, sidestream;
+      NCCLCHECK(getSideStream(&sidestream));
+      stream = sidestream;
+      if (sidestream == nullptr) CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
       CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem * ncclSizeOfT<T>(), flags), result, finish);
+      CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem * ncclSizeOfT<T>(), stream), result, finish);
+      CUDACHECKGOTO(cudaStreamSynchronize(stream), result, finish);
+      if (sidestream == nullptr) CUDACHECKGOTO(cudaStreamDestroy(stream), result, finish);
     }
-    CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem * ncclSizeOfT<T>(), stream), result, finish);
-    CUDACHECKGOTO(cudaStreamSynchronize(stream), result, finish);
-    if (sidestream == nullptr) CUDACHECKGOTO(cudaStreamDestroy(stream), result, finish);
   }
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
@@ -923,12 +1036,14 @@ ncclResult_t ncclCudaCallocAsyncDebug(T** ptr, size_t nelem, hipStream_t stream,
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (nelem > 0) {
     if (ncclCuMemEnable()) {
+      // ncclCuMemAlloc already zeroes the buffer (ROCM-20370 residue scrub),
+      // reusing the pooled side stream, so no extra memset is needed.
       NCCLCHECKGOTO(ncclCuMemAlloc((void**)ptr, NULL, ncclCuMemHandleType, nelem * ncclSizeOfT<T>(), manager, memType),
                     result, finish);
     } else {
       CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem * ncclSizeOfT<T>(), flags), result, finish);
+      CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem * ncclSizeOfT<T>(), stream), result, finish);
     }
-    CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem * ncclSizeOfT<T>(), stream), result, finish);
   }
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
@@ -992,6 +1107,10 @@ ncclResult_t ncclCudaFree(T* ptr, struct ncclMemManager* manager, int numSegment
   // Check if process is shutting down. The atexit handler sets this flag
   // BEFORE HIP runtime static destructors run, so we can safely skip the free.
   // The OS will reclaim all memory when the process exits anyway.
+  // NOTE: the gfx950/gfx1250 rcclSkipCuMemFree() workaround is intentionally NOT
+  // applied here -- ordinary buffers (cudaFree) and the VMM handle release
+  // (ncclCuMemFree) must free normally so long-lived processes do not leak on
+  // every ncclCommDestroy. The peer-unmap deadlock is dodged in ncclCuMemFreeAddr.
   if (rcclShutdownFlag().load(std::memory_order_acquire)) {
     INFO(NCCL_ALLOC, "ncclCudaFree: Skipping free (process shutdown) pointer %p", ptr);
     return ncclSuccess;
