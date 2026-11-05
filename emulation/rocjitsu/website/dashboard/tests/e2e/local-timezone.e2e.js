@@ -3,14 +3,10 @@ import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
 import { downloadSource, installPublication, openDashboard } from './helpers/dashboard.js';
 import { readChart } from './helpers/chart.js';
 
-for (const [timezoneId, expectedDay, expectedShortDay] of [
-  ['UTC', '2026-01-01', 'Jan 1'],
-  ['America/Los_Angeles', '2025-12-31', 'Dec 31'],
-  ['Pacific/Kiritimati', '2026-01-01', 'Jan 1'],
-]) {
+for (const timezoneId of ['UTC', 'America/Los_Angeles', 'Pacific/Kiritimati']) {
   test.describe(timezoneId, () => {
     test.use({ timezoneId });
-    test('local table, chart, tooltip and publication time preserve source timestamps', async ({ page }) => {
+    test('local timestamps preserve UTC chart days and source downloads', async ({ page }) => {
       const publication = createMaintainedPublication();
       publication.runs = publication.runs.slice(0, 1);
       const run = publication.runs[0];
@@ -41,10 +37,10 @@ for (const [timezoneId, expectedDay, expectedShortDay] of [
       const trend = page.getByTestId('performance-trend');
       const chart = trend.getByRole('img');
       const axisLabel = await readChart(chart, (instance) => instance.getOption().xAxis[0].axisLabel.formatter(0));
-      expect(axisLabel).toBe(expectedShortDay);
+      expect(axisLabel).toBe('Jan 1');
       await trend.getByRole('group', { name: 'Inspect performance trend', exact: true }).focus();
       await page.keyboard.press('End');
-      await expect(trend.getByTestId('trend-inspection-status')).toContainText(`${expectedDay} (local time)`);
+      await expect(trend.getByTestId('trend-inspection-status')).toContainText('2026-01-01 UTC');
       await expect(trend.getByTestId('trend-inspection-status')).toContainText(expected.full);
       expect(await downloadSource(page)).toEqual(publication);
     });

@@ -1,5 +1,3 @@
-import { localDay } from '../utils/calendar.js';
-import { formatShortDate } from '../utils/formatters.js';
 import { configurationKey, THREAD_POLICIES } from './runSchema.js';
 import { targetColor } from '../utils/chartColors.js';
 import { classifyDurationChange, DURATION_CHANGE_BAND_PERCENT } from '../utils/performance.js';
@@ -21,7 +19,7 @@ const pairsFor = (filters) => filters.targets.flatMap((target) => modesFor(filte
 
 export function periodKey(timestamp, period = 'weekly') {
   if (timestamp == null || !Number.isFinite(new Date(timestamp).getTime())) return null;
-  const date = new Date(`${localDay(timestamp)}T00:00:00Z`);
+  const date = new Date(timestamp);
   if (period === 'monthly') return date.toISOString().split('T')[0].slice(0, -3);
   if (period === 'daily') return date.toISOString().split('T')[0];
   const day = date.getUTCDay() || 7;
@@ -40,7 +38,7 @@ export function compareRuns(candidate, baseline, filters) {
   });
 }
 
-const dayLabel = formatShortDate;
+const dayLabel = (key) => new Date(`${key}T12:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
 const runLabel = (run, attempt = '') => `${dayLabel(periodKey(commitTimestampFor(run), 'daily'))}\n${commitShaFor(run).slice(0, 8)}${attempt ? ` · ${attempt}` : ''}`;
 
 function runSummary(run, filters) {

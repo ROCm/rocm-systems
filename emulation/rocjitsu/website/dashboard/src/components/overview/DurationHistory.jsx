@@ -121,7 +121,7 @@ export default function DurationHistory({ projection, catalogs, onRangeChange, o
           : Array.from({ length: Math.floor((lastX - firstX) / dateStep) + 1 }, (_, index) => firstX + index * dateStep),
         formatter: (x) => {
           const day = projection.dayKeys[weekly ? Math.floor(x) : Math.round(x)];
-          return day ? formatShortDate(day) : '';
+          return day ? formatShortDate(`${day}T12:00:00Z`) : '';
         } }, axisLine: { show: true, onZero: false, lineStyle: { type: 'solid', color: theme.palette.divider } } },
     yAxis: { type: 'value', name: 'Relative speedup (×)', scale: true, min: (extent) => extent.min < 1 ? extent.min - 0.01 : 1, max: (extent) => Math.max(1.01, extent.max + 0.01),
       nameTextStyle: { align: 'left', color: theme.palette.text.secondary }, axisLabel: { formatter: (v) => `${v.toFixed(2)}×`, color: theme.palette.text.secondary }, splitLine: { lineStyle: { color: theme.palette.divider } } },
@@ -149,9 +149,9 @@ export default function DurationHistory({ projection, catalogs, onRangeChange, o
   return <SectionCard data-testid="performance-trend" title="Performance Trend" subtitle="Relative speedup · higher is faster · develop only" sx={{ height: '100%', minWidth: 0 }} contentSx={{ p: 2 }} action={<Box sx={{ maxWidth: '100%', overflowX: 'auto' }}><ToggleButtonGroup exclusive size="small" value={projection.range} onChange={(_, next) => next && onRangeChange(next)} aria-label="History timeframe">{historyRanges.map(({ id, label }) => <ToggleButton key={id} value={id} aria-label={label} sx={{ px: 1, minHeight: { xs: 44, sm: 36 } }}>{id}</ToggleButton>)}</ToggleButtonGroup></Box>}>
     <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1, mb: 1 }}>
       <Typography id={catalogLabelId} variant="caption" color="text.secondary">Benchmark set</Typography>
-      <AnchoredSelect labelId={catalogLabelId} title="Latest published develop commit using this benchmark set (local time)" value={projection.catalogId ?? ''} onChange={(e) => { clear(); onCatalogChange(e.target.value || null); }} size="small" displayEmpty MenuProps={{ slotProps: { paper: { sx: { maxWidth: 'calc(100vw - 32px)' } } } }} sx={{ minWidth: 170, maxWidth: '100%', fontSize: 12, '& .MuiSelect-select': { whiteSpace: 'normal', overflowWrap: 'anywhere' } }}>
+      <AnchoredSelect labelId={catalogLabelId} title="Latest published develop commit using this benchmark set (UTC)" value={projection.catalogId ?? ''} onChange={(e) => { clear(); onCatalogChange(e.target.value || null); }} size="small" displayEmpty MenuProps={{ slotProps: { paper: { sx: { maxWidth: 'calc(100vw - 32px)' } } } }} sx={{ minWidth: 170, maxWidth: '100%', fontSize: 12, '& .MuiSelect-select': { whiteSpace: 'normal', overflowWrap: 'anywhere' } }}>
         <MenuItem value="" sx={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>Shared benchmarks</MenuItem>{projection.catalogId && !catalogs.some(({ catalog }) => catalog.id === projection.catalogId) && <MenuItem value={projection.catalogId} sx={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>Unavailable benchmark set: {projection.catalogId}</MenuItem>}
-        {catalogs.map(({ catalog, label }) => <MenuItem key={catalog.id} value={catalog.id} title="Latest published develop commit using this benchmark set (local time)" sx={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{label}</MenuItem>)}
+        {catalogs.map(({ catalog, label }) => <MenuItem key={catalog.id} value={catalog.id} title="Latest published develop commit using this benchmark set (UTC)" sx={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{label}</MenuItem>)}
       </AnchoredSelect>
       <Typography variant="caption" color="text.secondary">1.00× = each configuration’s first valid positive point in range.</Typography>
     </Stack>
@@ -175,7 +175,7 @@ export default function DurationHistory({ projection, catalogs, onRangeChange, o
       </>}
     </Box>
     <Typography ref={statusRef} data-testid="trend-inspection-status" aria-live="polite" aria-atomic="true" data-visible="false" variant="caption" sx={{ display: 'block', mt: 1, overflowWrap: 'anywhere', '&[data-visible="false"]': visuallyHiddenStyles }} />
-    <Typography id={helpId} variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>Arrow keys inspect dates and attempts · Home/End first/last · Escape clears · Date (local time)</Typography>
+    <Typography id={helpId} variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>Arrow keys inspect dates and attempts · Home/End first/last · Escape clears · Date (UTC)</Typography>
     <CatalogWorkloads catalogs={catalogs} projection={projection} />
     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>{projection.endpointLabel}{projection.weeklyEligibility ? ' · every required workload succeeds in every selected configuration' : ''}. General benchmark explorer (uses its own filters): <Link component="button" type="button" onClick={onOpenBenchmarks} sx={{ font: 'inherit' }}>Benchmarks</Link>.</Typography>
   </SectionCard>;

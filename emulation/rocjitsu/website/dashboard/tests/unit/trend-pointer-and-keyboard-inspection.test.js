@@ -6,7 +6,7 @@ const comparison = {
   attempts: [{ eligible: false }], rows: [{ target: 'gfx950', mode: 'single', cohortIds: ['a'], points: [{ reason: 'no-run', speedup: null }, { reason: 'timeout', speedup: null }] }],
 };
 test('keyboard gap status identifies the actual slot and reason without borrowing a measurement', () => {
-  expect(trendSlotStatus(comparison, 0)).toContain('2026-01-01 (local time)');
+  expect(trendSlotStatus(comparison, 0)).toContain('2026-01-01 UTC');
   expect(trendSlotStatus(comparison, 0)).toContain('No published run in this view');
   expect(trendSlotStatus(comparison, 1)).toContain('failed-attempt');
   expect(trendSlotStatus(comparison, 1)).toContain('Timed out');

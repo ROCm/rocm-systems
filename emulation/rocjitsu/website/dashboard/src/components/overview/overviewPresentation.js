@@ -20,7 +20,7 @@ export function trendSlotStatus(projection, index) {
   const slot = projection.slots[index];
   if (!slot) return '';
   const day = slot.dayKey ?? projection.dayKeys?.[Math.round(slot.x)];
-  const identity = [day ? `${day} (local time)` : 'Date unavailable'];
+  const identity = [day ? `${day} UTC` : 'Date unavailable'];
   const noRun = projection.range === '1W' ? 'No eligible plotted run' : 'No published run in this view';
   if (slot.run) {
     identity.push(`Attempt ${slot.run.runId}`);

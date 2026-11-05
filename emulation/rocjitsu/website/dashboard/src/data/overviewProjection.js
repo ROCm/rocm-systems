@@ -1,10 +1,10 @@
-import { localDay } from '../utils/calendar.js';
 import { resolveHistoryRange } from '../config/historyRanges.js';
 import { commitShaFor, commitTimestampFor, sortRunsByCommit } from './runOrdering.js';
 import { configurationKey, hasConfiguration, THREAD_POLICIES } from './runSchema.js';
 
+const utcDay = (timestamp) => typeof timestamp === 'string' && Number.isFinite(Date.parse(timestamp)) ? new Date(timestamp).toISOString().split('T')[0] : null;
 const dayTime = (day) => Date.parse(`${day}T00:00:00Z`);
-const dayFor = (run) => localDay(commitTimestampFor(run));
+const dayFor = (run) => utcDay(commitTimestampFor(run));
 const shiftDay = (day, offset) => {
   const date = new Date(`${day}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + offset);
@@ -12,7 +12,7 @@ const shiftDay = (day, offset) => {
 };
 
 function dateWindow(runs, generatedAt, range) {
-  const anchorDay = runs.length ? dayFor(runs.at(-1)) : localDay(generatedAt);
+  const anchorDay = runs.length ? dayFor(runs.at(-1)) : utcDay(generatedAt);
   if (!anchorDay) return { anchorDay: null, startDay: null, dayKeys: [] };
   const startDay = range.id === 'ALL' ? (runs.length ? dayFor(runs[0]) : anchorDay)
     : range.id === 'YTD' ? `${anchorDay.slice(0, -6)}-01-01` : shiftDay(anchorDay, -(range.days - 1));
@@ -96,9 +96,9 @@ function createSlots(dayKeys, runs, range) {
   });
 }
 
-// Shared Overview projection; catalog scoping preserves the local calendar window.
+// Shared Overview projection; catalog scoping preserves the UTC window.
 // catalogId=null selects Shared benchmarks; an explicit immutable catalog ID scopes
-// candidate runs without moving the local calendar window. Hover is intentionally not input.
+// candidate runs without moving the UTC window. Hover is intentionally not input.
 export function selectOverviewProjection(data, filters, { range = 'ALL', catalogId = null } = {}) {
   const resolved = resolveHistoryRange(range, { compatibility: true });
   const developRuns = sortRunsByCommit(data.runs.filter((run) => run.branch === (data.canonicalBranch ?? 'develop')));

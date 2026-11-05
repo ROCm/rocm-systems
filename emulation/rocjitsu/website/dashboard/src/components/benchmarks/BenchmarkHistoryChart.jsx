@@ -40,7 +40,7 @@ export default function BenchmarkHistoryChart({ data, filters, benchmark, range 
     grid: { left: 46, right: 14, top: 24, bottom: 45 },
     xAxis: {
       type: 'category', data: viewModel.labels,
-      axisLabel: { color: theme.palette.text.secondary, fontFamily: theme.typography.fontFamily, fontSize: 11, lineHeight: 15, hideOverlap: true },
+      axisLabel: { formatter: (label) => label.replace('\n', ' UTC\n'), color: theme.palette.text.secondary, fontFamily: theme.typography.fontFamily, fontSize: 11, lineHeight: 15, hideOverlap: true },
       axisTick: { show: false }, axisLine: { lineStyle: { color: theme.palette.divider } },
     },
     yAxis: {

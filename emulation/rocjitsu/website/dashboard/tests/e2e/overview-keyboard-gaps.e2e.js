@@ -63,7 +63,7 @@ for (const width of [1440, 390]) test(`keyboard slots expose truthful gaps and p
   await expect(status).toContainText('gfx1250 single: Unavailable — Timed out');
   await expect(status).toContainText('gfx950 single: 1.000×');
   await page.keyboard.press('ArrowLeft');
-  await expect(status).toContainText('2026-10-01 (local time)');
+  await expect(status).toContainText('2026-10-01 UTC');
   await expect(status).toContainText('qa-keyboard-1');
   await expect(trend.getByTestId('point-hover-guide')).not.toBeVisible();
   await expect(trend.getByTestId('hover-line-focus')).not.toBeVisible();
