@@ -36,8 +36,8 @@ application. With no other flags, that records a rocpd trace of the default
 ROCm domains and GPU telemetry.
 It does not rewrite the binary, and it does not enable call-stack sampling or
 an aggregated function profile. You can change the data that is collected by using
-``--preset`` or domain flags, as described in :doc:`using-preset-profiles`. Output paths follow
-``rocprof-sys-run``; see :doc:`understanding-rocprof-sys-output`.
+``--preset`` or domain flags, as described in :doc:`using-preset-profiles`. Output
+paths follow ``rocprof-sys-run``; see :doc:`understanding-rocprof-sys-output`.
 
 ``rocsys`` with no arguments prints the top-level help. ``rocsys --version``
 prints the version. Pass ``--help`` after ``profile`` to read the

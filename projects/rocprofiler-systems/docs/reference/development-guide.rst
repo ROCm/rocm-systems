@@ -69,13 +69,19 @@ rocprof-sys-instrument: `source/bin/rocprof-sys-instrument <https://github.com/R
 rocsys: `source/bin/rocsys-exe <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/bin/rocsys-exe>`_
 ---------------------------------------------------------------------------------------------------------------------------------------
 
-``rocsys`` is an experimental command-line dispatcher introduced in this release. ``main`` is in
-``source/bin/rocsys-exe/rocsys.cpp``. ``source/bin/common/cli_dispatcher.cpp``
-classifies each invocation.
+``rocsys`` is an experimental command-line dispatcher introduced in this
+release. ``main`` is in the ``source/bin/rocsys-exe/rocsys.cpp``.
+``source/bin/common/cli_dispatcher.cpp`` classifies each invocation.
 
-* ``profile``, including the implicit default when the first argument is a flag or ``--``, runs in-process through the same run-mode path as ``rocprof-sys-run``.
-* The other verbs exec the matching ``rocprof-sys-*`` binary next to the real ``rocsys`` executable. A symlink such as ``/usr/bin/rocsys`` still finds those siblings. ``rewrite`` inserts ``-o`` so ``rocprof-sys-instrument`` performs a binary rewrite.
-* ``sample`` is not a verb. Call-stack sampling without instrumentation remains ``rocprof-sys-sample``.
+* ``profile``, including the implicit default when the first argument is a flag
+  or ``--``, runs in-process through the same run-mode path as
+  ``rocprof-sys-run``.
+* The other verbs exec the matching ``rocprof-sys-*`` binary next to the real
+  ``rocsys`` executable. A symlink such as ``/usr/bin/rocsys`` still finds
+  those siblings. ``rewrite`` inserts ``-o`` so ``rocprof-sys-instrument``
+  performs a binary rewrite.
+* ``sample`` is not a verb. Call-stack sampling without instrumentation remains
+  ``rocprof-sys-sample``.
 
 Libraries
 ========================================

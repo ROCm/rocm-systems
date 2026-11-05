@@ -210,7 +210,8 @@ Causal profiling typically requires running the application several times in
 order to adequately sample all the code domains, experiment
 with speed-ups and other techniques, and resolve statistical fluctuations.
 The ``rocprof-sys-causal`` executable is designed to simplify this procedure.
-The experimental command ``rocsys causal`` forwards to this executable. See :doc:`using-rocsys`.
+The experimental command ``rocsys causal`` forwards to this executable.
+See :doc:`using-rocsys`.
 
 .. code-block:: shell
 
