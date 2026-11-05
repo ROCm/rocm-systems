@@ -103,15 +103,15 @@ configure=(
   -DROCJITSU="${launcher}"
   -DROCJITSU_CONFIG="${config}"
 )
-# Reuse rocjitsu's GoogleTest sources when they are the release the suite
-# requests, so the client does not fetch it again.
+# The suite tries an installed GoogleTest first. Supply matching sources for
+# its FetchContent fallback to avoid fetching them again.
 gtest_source="$(sed -n 's/^googletest-distribution_SOURCE_DIR:[^=]*=//p' "${cache}")"
 gtest_tag="$(sed -n 's/^[[:space:]]*GIT_TAG v\([0-9.]*\).*/\1/p' \
   "${file_limit_source_dir}/CMakeLists.txt" | head -n 1)"
 if [[ -n "${gtest_source}" && -n "${gtest_tag}" ]] &&
    grep -qxF "set(GOOGLETEST_VERSION ${gtest_tag})" \
      "${gtest_source}/CMakeLists.txt" 2>/dev/null; then
-  echo "Using rocjitsu's GoogleTest ${gtest_tag} sources: ${gtest_source}"
+  echo "Providing rocjitsu's GoogleTest ${gtest_tag} sources for the FetchContent fallback: ${gtest_source}"
   configure+=(-DFETCHCONTENT_SOURCE_DIR_GOOGLETEST="${gtest_source}")
 else
   configure+=(-UFETCHCONTENT_SOURCE_DIR_GOOGLETEST)
