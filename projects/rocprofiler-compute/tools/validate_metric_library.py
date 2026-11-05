@@ -69,6 +69,7 @@ from rocprof_compute_soc.soc_base import OmniSoC_Base, iter_analysis_config_metr
 from utils import metric_library
 from utils.equation_format import normalize_equation
 from utils.metric_library import (
+    METRIC_LIBRARY_ID_RE,
     SETS_FILENAME,
     VARIABLES_FILENAME,
     MetricLibrary,
@@ -121,9 +122,6 @@ UNIT_ALIASES = {
     "Waves": "Wavefronts",
 }
 
-# A metric id, "{category}.{subcategory}_{name}": lowercase words joined by
-# underscores. utils_common.METRIC_ID_RE matches the numeric panel ids instead.
-METRIC_LIBRARY_ID_RE = re.compile(r"^[a-z][a-z0-9]*\.[a-z0-9]+(_[a-z0-9]+)*$")
 METRIC_REQUIRED_FIELDS = ("name", "formula", "unit", "description")
 METRIC_OPTIONAL_FIELDS = ("peak", "peak_empirical")
 # A roofline benchmark ceiling, the measured peak in "peak_empirical".
