@@ -49,6 +49,11 @@ ncclResult_t ncclLaunchKernelAfter_NoCuda(struct ncclComm* comm, struct ncclKern
 ncclResult_t ncclLaunchFinish(struct ncclComm* comm);
 ncclResult_t ncclValidateCollConfigLaunchCompletionEvents(struct ncclComm* comm);
 
+// Threads per block of a collective kernel plan on HIP: `nWarps` warps of comm->WarpSize, at least three warps.
+static inline int rcclPlanThreadsPerBlock(const struct ncclComm* comm, int nWarps) {
+  return std::max(nWarps, 3) * comm->WarpSize;
+}
+
 // Addon backends launch onto the user's stream themselves instead of going through doLaunches, which is what
 // makes comm->cudaDev current and installs the cross-stream dependency. Bracket such a launch with these.
 //

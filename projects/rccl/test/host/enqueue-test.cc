@@ -886,6 +886,17 @@ ChunkResult RunChunking(ChunkComm& cc, ncclTaskColl& task, int nChannels, size_t
 }
 }  // namespace
 
+// Whole warps of the comm's wave size, at least three; rccl_wrap.cc caps a DDA re-route of Ring with the same value.
+TEST_F(EnqueueMicrotest, PlanThreadsPerBlock_IsAtLeastThreeWarpsOfTheWaveSize) {
+  ChunkComm cc;
+  EXPECT_EQ(96, rcclPlanThreadsPerBlock(cc.get(), 1));
+  EXPECT_EQ(96, rcclPlanThreadsPerBlock(cc.get(), 3));
+  EXPECT_EQ(256, rcclPlanThreadsPerBlock(cc.get(), 8));
+  cc.comm.WarpSize = 64;
+  EXPECT_EQ(192, rcclPlanThreadsPerBlock(cc.get(), 2));
+  EXPECT_EQ(1024, rcclPlanThreadsPerBlock(cc.get(), 16));
+}
+
 // ---------------------------------------------------------------------------
 // 1. Pattern selection. Each arm maps (func, algorithm) -> ncclPattern_t, and
 //    the pattern lands in proxyOp.pattern. Asserting the pattern (not the return

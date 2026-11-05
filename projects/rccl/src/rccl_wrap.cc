@@ -1794,8 +1794,7 @@ static ncclResult_t rcclRingFallback(struct ncclComm* comm, const void* sendbuff
     NCCLCHECK(getAlgoInfo(comm, &task, 0, 0, 1));
     decision->protocol = task.protocol;
     if (threadsPerBlock != nullptr) {
-      // The plan launches max(nWarps, 3) warps per block (enqueue.cc threadPerBlock).
-      *threadsPerBlock = (uint32_t)(std::max((int)task.nWarps, 3) * comm->WarpSize);
+      *threadsPerBlock = (uint32_t)rcclPlanThreadsPerBlock(comm, task.nWarps);
     }
     int packed = rcclKernelPackedChannels(comm, func, count, datatype,
                                          task.protocol, task.nMaxChannels);
