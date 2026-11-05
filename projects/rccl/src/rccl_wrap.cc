@@ -187,6 +187,8 @@ int32_t rcclGetProtoForGfx110x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
 
 namespace {
 inline const rcclArchThresholds* extAlgoArchTable(const ncclComm* comm);
+inline bool rcclSymTdmWindowContains(const rcclArchThresholds* table, ncclFunc_t func, size_t totalBytes,
+                                     bool spansTrays, bool graphMode);
 }
 
 // True when the user set `name` to a non-empty value.
@@ -925,7 +927,16 @@ ncclResult_t rcclSymKGetInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
                              ncclRedOp_t op, int* algo, int* protocol, int* maxChannels) {
   RCCL_STATIC_EXPOSE_CHECK();
   if (algo == nullptr || protocol == nullptr || maxChannels == nullptr) return ncclInvalidArgument;
-  if (rcclSymkQuery(comm, coll, count, dataType, op, algo, protocol, maxChannels)) return ncclSuccess;
+  if (rcclSymkQuery(comm, coll, count, dataType, op, algo, protocol, maxChannels)) {
+    // Across trays AllGather symk runs only as a TDM kernel in the TDM window. No graph flag here: use the eager one.
+    if (coll != ncclFuncAllGather || !comm->spansTrays) return ncclSuccess;
+    const size_t totalBytes = (size_t)comm->nRanks * count * ncclTypeSize(dataType);
+    if (*algo == (int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM &&
+        rcclSymTdmWindowContains(extAlgoArchTable(comm), ncclFuncAllGather, totalBytes, /*spansTrays=*/true,
+                                 /*graphMode=*/false)) {
+      return ncclSuccess;
+    }
+  }
   // Symmetric kernel does not apply here (e.g. cuMem disabled -> no symmetric
   // windows, so symk never runs). Report the backend that actually runs instead
   // of failing, so the caller labels its numbers with the real implementation.
@@ -1061,6 +1072,22 @@ inline size_t rcclSymMinR2CapTab(const rcclArchThresholds* table, ncclFunc_t fun
   if (param >= 0) return (size_t)param;
   if (table == nullptr) return 0;
   return funcThresholdFromTable(table->symMinR2, func);
+}
+
+// True when totalBytes is in the TDM window. RCCL_SYM_K_MIN_BYTES / RCCL_SYM_K_MAX_BYTES narrow it.
+inline bool rcclSymTdmWindowContains(const rcclArchThresholds* table, ncclFunc_t func, size_t totalBytes,
+                                     bool spansTrays, bool graphMode) {
+  if (table == nullptr) return false;
+  size_t windowMin = funcThresholdFromTable(table->symTdmMinR2, func);
+  size_t windowMax = funcThresholdFromTable(graphMode ? table->symTdmMaxR2Graph : table->symTdmMaxR2, func);
+  if (windowMin == 0 || windowMax == 0) return false;
+  const size_t crossTrayMax = funcThresholdFromTable(table->symTdmCrossTrayMaxR2, func);
+  if (spansTrays && crossTrayMax != 0) windowMax = std::min(windowMax, crossTrayMax);
+  const int64_t userMin = rcclParamSymKMinBytes();
+  const int64_t userMax = rcclParamSymKMaxBytes();
+  if (userMin >= 0) windowMin = std::max(windowMin, (size_t)userMin);
+  if (userMax >= 0) windowMax = std::min(windowMax, (size_t)userMax);
+  return totalBytes >= windowMin && totalBytes <= windowMax;
 }
 } // namespace
 
@@ -1302,6 +1329,26 @@ int rcclDdaFabricVmmBlocks(const ncclComm* comm) {
   const int want =
     std::min(table->ddaVmmMaxBlocks, std::max(table->ddaVmmMinBlocks, table->ddaVmmBlockBudget / comm->nRanks));
   return std::min(cap, want);
+}
+
+int rcclDdaFabricAgLL128Threads(const ncclComm* comm, size_t totalBytes) {
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  if (table == nullptr ||
+      !rcclWindowFits(totalBytes, table->ddaAgLL128ThreadsMinBytes, table->ddaAgLL128ThreadsMaxBytes)) {
+    return 0;
+  }
+  return table->ddaAgLL128Threads;
+}
+
+int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes) {
+  if (comm == nullptr) return 0;
+  const int cap = comm->ddaFabricMaxBlocks;
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  if (table == nullptr || table->ddaAgLL128MaxBlocks <= 0 ||
+      !rcclWindowFits(totalBytes, table->ddaAgLL128MaxBlocksMinBytes, table->ddaAgLL128MaxBlocksMaxBytes)) {
+    return cap;
+  }
+  return std::min(cap, table->ddaAgLL128MaxBlocks);
 }
 
 // Widest window any enabled DDA tier can serve for this collective. The entry
@@ -2125,13 +2172,36 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // to carry NCCL_WIN_COLL_SYMMETRIC, so agSymkRequested=true implies recv registered.
     const size_t agSymMaxR2  = rcclSymMaxR2CapTab(archTable, ncclFuncAllGather, ceCapturing);
     const size_t agSymMinR2  = rcclSymMinR2CapTab(archTable, ncclFuncAllGather);
-    const bool agSymSuppressedByMin  = agSymkRequested && agSymMinR2 > 0 && totalBytes < agSymMinR2;
-    const bool agSymSuppressedBySize = agSymkRequested && totalBytes > agSymMaxR2;
-    const bool symEligible = agSymkRequested && !agSymSuppressedByMin && !agSymSuppressedBySize;
-    if (!query && agSymkRequested && agSymSuppressedByMin)
+    // The TDM window admits symk when the model picks a TDM kernel. Across trays it is the only way in.
+    bool agTdmWindowAdmitsSymk = false;
+    if (agSymkRequested &&
+        rcclSymTdmWindowContains(archTable, ncclFuncAllGather, totalBytes, comm->spansTrays, ceCapturing)) {
+      int symkAlgo, symkProto, symkChannels;
+      agTdmWindowAdmitsSymk =
+        rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &symkAlgo, &symkProto, &symkChannels,
+                      ncclSymAligned16B(ncclFuncAllGather, comm->rank, sendbuff, recvbuff, sendWin, recvWin,
+                                        sendcount * typeSize)) &&
+        symkAlgo == (int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM;
+    }
+    decision->symkTdmOnly = agTdmWindowAdmitsSymk;
+    const bool agSymSuppressedByMin =
+      agSymkRequested && !agTdmWindowAdmitsSymk && agSymMinR2 > 0 && totalBytes < agSymMinR2;
+    const bool agSymSuppressedBySize = agSymkRequested && !agTdmWindowAdmitsSymk && totalBytes > agSymMaxR2;
+    const bool agSymSuppressedAcrossTrays = agSymkRequested && !agTdmWindowAdmitsSymk && comm->spansTrays;
+    const bool symEligible =
+      agSymkRequested && !agSymSuppressedByMin && !agSymSuppressedBySize && !agSymSuppressedAcrossTrays;
+    if (!query && agTdmWindowAdmitsSymk) {
+      INFO(NCCL_TUNING, "AG symk admitted by the TDM window: totalBytes=%zu", totalBytes);
+    }
+    if (!query && agSymSuppressedByMin) {
       INFO(NCCL_TUNING, "AG symk disqualified: totalBytes=%zu < agSymMinR2=%zu", totalBytes, agSymMinR2);
-    if (!query && agSymkRequested && agSymSuppressedBySize)
+    }
+    if (!query && agSymSuppressedBySize) {
       INFO(NCCL_TUNING, "AG symk disqualified: totalBytes=%zu > agSymMaxR2=%zu", totalBytes, agSymMaxR2);
+    }
+    if (!query && agSymSuppressedAcrossTrays && !agSymSuppressedByMin && !agSymSuppressedBySize) {
+      INFO(NCCL_TUNING, "AG symk disqualified: cross-tray comm outside the TDM window, totalBytes=%zu", totalBytes);
+    }
     // symEligible gates DDA below; the symk report itself is deferred until after
     // the CE-registered check so it loses to CE exactly as dispatch does
     // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so
