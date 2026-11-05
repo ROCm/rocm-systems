@@ -182,6 +182,25 @@ static void waitForPeerDevices(hip::Device* peerDevice, hip::Stream* copyStream)
   peerDevice->WaitActiveStreams(copyStream);
 }
 
+// KFD records peer access per direction, and with an identity IOMMU a peer BAR
+// above the source device's DMA mask is not addressable. hipMemcpyPeer* used to
+// skip the capability check and hand the copy to a path that either issued a
+// direct blit into the unaddressable BAR or dereferenced an unallocated staging
+// buffer; either way the process died with SIGSEGV. Reject the direction the
+// runtime cannot perform so callers get a catchable error and can fall back to
+// a staged copy.
+static hipError_t checkPeerCopyDirection(int srcDevice, int dstDevice) {
+  if (srcDevice == dstDevice) {
+    return hipSuccess;
+  }
+  int canAccess = 0;
+  hipError_t status = canAccessPeer(&canAccess, srcDevice, dstDevice);
+  if (status != hipSuccess) {
+    return status;
+  }
+  return (canAccess != 0) ? hipSuccess : hipErrorPeerAccessUnsupported;
+}
+
 hipError_t hipMemcpyPeer(void* dst, int dstDevice, const void* src, int srcDevice,
                          size_t sizeBytes) {
   HIP_INIT_API(hipMemcpyPeer, dst, dstDevice, src, srcDevice, sizeBytes);
@@ -189,6 +208,10 @@ hipError_t hipMemcpyPeer(void* dst, int dstDevice, const void* src, int srcDevic
   if (srcDevice >= static_cast<int>(g_devices.size()) ||
       dstDevice >= static_cast<int>(g_devices.size()) || srcDevice < 0 || dstDevice < 0) {
     HIP_RETURN(hipErrorInvalidDevice);
+  }
+  // A zero-byte copy is a no-op and does not need peer access.
+  if (sizeBytes != 0) {
+    HIP_RETURN_ONFAIL(checkPeerCopyDirection(srcDevice, dstDevice));
   }
 
   // Unlike hipMemcpyPeerAsync, hipMemcpyPeer is serialized with respect to all the pending
@@ -209,6 +232,10 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int src
       dstDevice >= static_cast<int>(g_devices.size()) || srcDevice < 0 || dstDevice < 0) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
+  // A zero-byte copy is a no-op and does not need peer access.
+  if (sizeBytes != 0) {
+    HIP_RETURN_ONFAIL(checkPeerCopyDirection(srcDevice, dstDevice));
+  }
   getStreamPerThread(stream);
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
@@ -226,6 +253,7 @@ hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p) {
       p->dstDevice >= static_cast<int>(g_devices.size()) || p->srcDevice < 0 || p->dstDevice < 0) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
+  HIP_RETURN_ONFAIL(checkPeerCopyDirection(p->srcDevice, p->dstDevice));
   hipMemcpy3DParms copyParms = getMemcpy3DParms(*p);
   HIP_RETURN(ihipMemcpy3D(&copyParms, nullptr));
 }
@@ -240,6 +268,7 @@ hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
 
+  HIP_RETURN_ONFAIL(checkPeerCopyDirection(p->srcDevice, p->dstDevice));
   getStreamPerThread(stream);
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {

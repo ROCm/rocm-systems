@@ -529,7 +529,6 @@ bool Device::init() {
   // Query active devices only
   devices = getDevices(CL_DEVICE_TYPE_GPU, kNoOfflineDevices);
   if (devices.size() > 0) {
-    bool p2p_available = false;
     // Loop through all available devices
     for (auto device1 : devices) {
       // Find all agents that can have access to the current device
@@ -540,7 +539,6 @@ bool Device::init() {
             // Device2 can have access to device1
             device2->p2pDevices_.push_back(as_cl(device1));
             device1->p2p_access_devices_.push_back(device2);
-            p2p_available = true;
           }
         }
       }
@@ -553,16 +551,22 @@ bool Device::init() {
       return false;
     }
 
-    // Allocate a staging buffer for P2P emulation path
-    if ((devices.size() >= 1) && !p2p_available) {
+    // Allocate the staging buffer for the P2P emulation path whenever more
+    // than one device is present. A topology can have at least one usable
+    // direction (the old p2p_available flag) while other directed pairs are
+    // still unaddressable, for example a peer BAR above the source's DMA mask
+    // with an identity IOMMU. Those pairs fall back to staging, so the buffer
+    // is required even when some direction works.
+    if (devices.size() > 1) {
       amd::Buffer* buf =
           new (*glb_ctx_) amd::Buffer(*glb_ctx_, CL_MEM_ALLOC_HOST_PTR, kP2PStagingSize);
       if ((buf != nullptr) && buf->create()) {
         p2p_stage_ = buf;
       } else {
         delete buf;
-        LogError("p2p stg buffer alloc failed");
-        return false;
+        // Staging is optional on a fully connected fabric. Keep the runtime
+        // usable and let the copy path report the failure if it needs staging.
+        LogError("p2p stg buffer alloc failed, peer staging disabled");
       }
     }
 

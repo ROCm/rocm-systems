@@ -4275,21 +4275,50 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
   Memory* dstDevMem = static_cast<roc::Memory*>(
       cmd.destination().getDeviceMemory(*cmd.destination().getContext().devices()[0]));
 
-  bool p2pAllowed = false;
-  // Loop through all available P2P devices for the destination buffer
-  for (auto agent : dstDevMem->dev().p2pAgents()) {
-    // Find the device, which is matching the current
-    if (agent.handle == dev().getBackendDevice().handle) {
-      p2pAllowed = true;
-      break;
-    }
-
-    for (auto agent : srcDevMem->dev().p2pAgents()) {
-      if (agent.handle == dev().getBackendDevice().handle) {
-        p2pAllowed = true;
-        break;
+  // Peer access is directed: KFD only records a direction when the peer BAR is
+  // addressable from the executing device. p2pAgents() lists the agents that
+  // can access a device's memory, so the executing device must appear in the
+  // list of the peer buffer it has to reach. The old code OR-ed the two lists,
+  // so a copy executed on a third device was allowed as long as it could reach
+  // either buffer; the blit then touched an unreachable BAR and killed the
+  // process with SIGSEGV. Require the executing device to reach every peer
+  // buffer it touches.
+  const hsa_agent_t copy_agent = dev().getBackendDevice();
+  auto canReach = [&copy_agent](const Device& target) {
+    for (const auto& agent : target.p2pAgents()) {
+      if (agent.handle == copy_agent.handle) {
+        return true;
       }
     }
+    return false;
+  };
+
+  const bool copy_on_src = (srcDevMem->dev().getBackendDevice().handle == copy_agent.handle);
+  const bool copy_on_dst = (dstDevMem->dev().getBackendDevice().handle == copy_agent.handle);
+
+  bool p2pAllowed;
+  if (copy_on_src && !copy_on_dst) {
+    // Local read, peer write: the executing device must reach the destination.
+    p2pAllowed = canReach(dstDevMem->dev());
+  } else if (copy_on_dst && !copy_on_src) {
+    // Peer read, local write: the executing device must reach the source.
+    p2pAllowed = canReach(srcDevMem->dev());
+  } else if (copy_on_src && copy_on_dst) {
+    p2pAllowed = true;
+  } else {
+    // Third device: it must reach both buffers to blit directly.
+    p2pAllowed = canReach(srcDevMem->dev()) && canReach(dstDevMem->dev());
+  }
+
+  // A topology with at least one usable direction does not require staging, so
+  // the buffer is optional. Do not dereference a null P2PStage() if it could
+  // not be allocated; fail the copy instead.
+  if (!p2pAllowed && (dev().P2PStage() == nullptr)) {
+    LogError("P2P staging buffer is not available");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+    cmd.destination().signalWrite(&dstDevMem->dev());
+    profilingEnd();
+    return;
   }
 
   // Synchronize source and destination memory
