@@ -6,7 +6,6 @@
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
-#include "rocjitsu/vm/plugins/race_detector/core/profiler_interface.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include <array>
 #include <cstdint>
@@ -225,8 +224,6 @@ public:
   RaceDetector *getDetector() { return detector; }
   const RaceDetector *getDetector() const { return detector; }
 
-  void setProfiler(ProfilerInterface &p) { profiler_ = &p; }
-
   WaveId getWaveId() const { return waveId; }
 
 private:
@@ -268,7 +265,6 @@ private:
 
   WaveId waveId;
   RaceDetector *detector;
-  ProfilerInterface *profiler_ = &NullProfiler::instance();
 };
 
 } // namespace rocjitsu::plugins::race_detector

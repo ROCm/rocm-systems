@@ -34,13 +34,6 @@ void appendLdsInterval(IntervalSet &intervals, uint32_t address, int bytes,
   const int start = static_cast<int>(address);
   intervals.append(start, start + bytes);
 }
-
-/// RAII guard for ProfilerInterface::beginScope/endScope.
-struct ProfileScope {
-  ProfilerInterface &p;
-  ProfileScope(ProfilerInterface &p, std::string_view key) : p(p) { p.beginScope(key); }
-  ~ProfileScope() { p.endScope(); }
-};
 } // namespace
 
 WaveRaceState::WaveRaceState(int vgprCount, int sgprCount, WaveId waveId, RaceDetector *detector,
@@ -137,7 +130,6 @@ void WaveRaceState::registerEventWithIntervals(
     uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
     MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask) {
-  ProfileScope ps(*profiler_, "registerEvent");
   bool toSgpr = isToSgpr(type);
   bool toTtmp = isToTtmp(type);
   const size_t register_limit = toSgpr   ? sgprMemoryEvents.size()
@@ -336,7 +328,6 @@ void WaveRaceState::registerDualOffsetLdsEvent(
 }
 
 void WaveRaceState::retireEventRegisters(EventId eventId) {
-  ProfileScope ps(*profiler_, "retireEventRegisters");
   auto eventType = detector->events().type(eventId);
   bool toSgpr = isToSgpr(eventType);
   bool toTtmp = isToTtmp(eventType);
@@ -458,7 +449,6 @@ void WaveRaceState::applyWaitCounter(amdgpu::WaitCounterType type, int threshold
 }
 
 void WaveRaceState::flushBarrierPendingEvents() {
-  ProfileScope ps(*profiler_, "removeEvents");
   for (EventId eventId : barrierPendingEvents) {
     detector->retireEvent(eventId);
   }
