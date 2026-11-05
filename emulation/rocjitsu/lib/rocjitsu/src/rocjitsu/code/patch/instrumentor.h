@@ -19,8 +19,10 @@
 ///         |  make_trampoline_plan() + TrampolineBuilder::build()
 ///         v
 ///   (preflight: per-site plan + built bytes, accumulated locally)
-///         |  splice anchors + append probe bodies, entry stub and trampolines
-///         |  into .text + redirect the entry to the stub + emit()
+///         |  KernelEntry callbacks: retarget only the entry-stub branch
+///         |  checked transaction into the private original-text buffer
+///         |  append probe bodies, entry stub and trampolines to .text
+///         |  replace_text() + finalize ELF/resource updates
 ///         v
 ///   InstrumentedCodeObject      -- patch(): patched ELF + diagnostics
 ///   InstrumentedCodeObjectDebug -- patch_with_debug_summaries(): same result
@@ -42,7 +44,9 @@
 
 #pragma once
 
+#include "rocjitsu/code/analysis/instruction_boundaries.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/patch/checked_text_edits.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/spill_manager.h"
@@ -63,6 +67,7 @@ namespace rocjitsu {
 
 class AmdGpuCodeObject;
 class BasicBlock;
+class CodeObjectPatcher;
 class Decoder;
 class Instruction;
 class LivenessAnalysis;
@@ -197,6 +202,8 @@ struct InstrumentationResources {
 struct InstrumentedCodeObject {
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;
+  /// Present for shared text-edit failures; errors retains the human-readable diagnostic.
+  std::optional<TextEditError> edit_error;
   std::vector<std::string> warnings;
   std::vector<InstrumentedSite> sites;
   InstrumentationResources resources;
@@ -445,7 +452,7 @@ make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arc
 class Instrumentor {
 public:
   /// @param obj  The code object to instrument. Borrowed; must outlive the
-  ///             Instrumentor.
+  ///             Instrumentor and must remain immutable and unmoved.
   /// @param arch The ISA used to decode @p obj. An arch that has no
   ///             registered Decoder (RV32I/RV64I/INVALID/etc.) surfaces as
   ///             a ValidationResult / InstrumentedCodeObject error at
@@ -527,16 +534,18 @@ private:
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).
   std::unordered_map<uint64_t, const Instruction *> offset_to_inst_;
-  // .text-relative byte offsets that cannot be trampoline anchors because they
-  // are among the following instructions covered by an s_clause. The s_clause
-  // instruction itself is rejected by is_relocatable_anchor().
-  std::unordered_set<uint64_t> clause_blocked_offsets_;
+  // Owned full-section index built with this source's decoder alongside blocks_.
+  // Shared structural facts copy it after coverage checks; they do not borrow it.
+  InstructionBoundaries instruction_boundaries_;
+  std::shared_ptr<const CheckedTextEdits> text_edits_;
   bool blocks_built_ = false;
 
   // Returns false if no decoder exists for arch_ (RV32I/RV64I/INVALID/etc.);
   // in that case *error_out is set and blocks_built_ stays false so the failure
   // is reported instead of crashing in BasicBlock::build.
   [[nodiscard]] bool ensure_blocks_built(std::string *error_out = nullptr);
+  [[nodiscard]] bool ensure_text_edits(TextEditError &error,
+                                       const CodeObjectPatcher *patcher = nullptr);
   [[nodiscard]] bool ensure_liveness_built(uint8_t wave_size,
                                            std::span<const KernelDescriptorInfo> kernels,
                                            std::string *error_out = nullptr);
