@@ -183,8 +183,10 @@ protected:
         return ncclSuccess;
     }
 
-    // One recv+flush. The host sentinel must come back, and the GPU scratchpad
-    // must hold it: a flush that posts only the read leaves the scratchpad zero.
+    // One recv+flush. The flush SGE is one byte, so the GPU scratchpad receives
+    // only the sentinel's low byte; a flush that posts only the read leaves that
+    // byte zero and copies the zero back over the host sentinel. Rank 0's checks
+    // stay non-fatal so a failure still reaches the barrier rank 1 waits on.
     void ExpectScratchpadSentinelRoundTrip() {
         const int rank = MPIEnvironment::world_rank;
 
@@ -192,7 +194,7 @@ protected:
 
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+        ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 
         int skip = 0;
         int* hostMem = nullptr;
@@ -212,7 +214,7 @@ protected:
         constexpr int kSentinel = 0x5a5a5a5a;
         if (rank == 0) {
             *hostMem = kSentinel;
-            ASSERT_EQ(hipMemset(gpuMem, 0, sizeof(*gpuMem)), hipSuccess);
+            EXPECT_EQ(hipMemset(gpuMem, 0, sizeof(*gpuMem)), hipSuccess);
         }
 
         const size_t bufferSize = kSmallBufferSize;
@@ -249,13 +251,17 @@ protected:
             int fs[1] = {static_cast<int>(bufferSize)};
             void* fh[1] = {mhandle};
             void* flushReq = nullptr;
-            ASSERT_EQ(FlushRecv(pair.recvComm, 1, fb, fs, fh, &flushReq), ncclSuccess);
-            ASSERT_NE(flushReq, nullptr);
-            ASSERT_EQ(WaitForCompletion(flushReq, nullptr), ncclSuccess);
-            EXPECT_EQ(*hostMem, kSentinel) << "scratchpad read did not return the sentinel";
-            int gpuVal = 0;
-            ASSERT_EQ(hipMemcpy(&gpuVal, gpuMem, sizeof(gpuVal), hipMemcpyDeviceToHost), hipSuccess);
-            EXPECT_EQ(gpuVal, kSentinel) << "scratchpad write did not land";
+            ncclResult_t r = FlushRecv(pair.recvComm, 1, fb, fs, fh, &flushReq);
+            EXPECT_EQ(r, ncclSuccess);
+            if (r == ncclSuccess) EXPECT_NE(flushReq, nullptr);
+            if (r == ncclSuccess && flushReq != nullptr) {
+                EXPECT_EQ(WaitForCompletion(flushReq, nullptr), ncclSuccess);
+                EXPECT_EQ(*hostMem, kSentinel) << "scratchpad read did not return the sentinel";
+                int gpuVal = 0;
+                EXPECT_EQ(hipMemcpy(&gpuVal, gpuMem, sizeof(gpuVal), hipMemcpyDeviceToHost), hipSuccess);
+                // sge.length is 1, so the write moves only the low byte.
+                EXPECT_EQ(gpuVal, kSentinel & 0xff) << "scratchpad write did not land";
+            }
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
@@ -319,8 +325,9 @@ TEST_F(GdrFlushTest, FeatureDisabled_FallbackReadRecvBuffer) {
 }
 
 // The chained flush posts an unsignaled scratchpad write and a signaled read.
-// Zero the scratchpad and put a sentinel in the host payload: the sentinel
-// comes back only if the write ran before the read.
+// Zero the scratchpad and put a sentinel in the host payload. The write moves
+// one byte, so the scratchpad's low byte is the sentinel, and the host value
+// stays intact only if that write ran before the read.
 TEST_F(GdrFlushTest, ScratchpadWrite_RoundTripsSentinel) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit);
