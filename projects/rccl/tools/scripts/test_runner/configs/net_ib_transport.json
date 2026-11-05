@@ -1128,7 +1128,8 @@
         { "name": "NetIB_GIN_PeerMem_AggregatedMixedBatchCompletesInPostingOrder_Ctx1_1MiB", "description": "GIN peermem: aggregated iget/iput/iput-signal batch completes in posting order (Ctx1, 1MiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx1_1MiB_RegMr" },
         { "name": "NetIB_GIN_PeerMem_AggregatedMixedBatchCompletesInPostingOrder_Ctx2_4KiB", "description": "GIN peermem: aggregated iget/iput/iput-signal batch completes in posting order (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx2_4KiB_RegMr" },
         { "name": "NetIB_GIN_PeerMem_AggregatedMixedBatchCompletesInPostingOrder_Ctx2_64KiB", "description": "GIN peermem: aggregated iget/iput/iput-signal batch completes in posting order (Ctx2, 64KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx2_64KiB_RegMr" },
-        { "name": "NetIB_GIN_PeerMem_AggregatedMixedBatchCompletesInPostingOrder_Ctx2_1MiB", "description": "GIN peermem: aggregated iget/iput/iput-signal batch completes in posting order (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx2_1MiB_RegMr" }
+        { "name": "NetIB_GIN_PeerMem_AggregatedMixedBatchCompletesInPostingOrder_Ctx2_1MiB", "description": "GIN peermem: aggregated iget/iput/iput-signal batch completes in posting order (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx2_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedIPutSignalStress", "description": "GIN peermem: 4096 aggregated iput-signals, one doorbell per 16-op window (RegMr)", "test_filter": "RmaMPIStressTest.AggregatedIPutSignalStress" }
       ]
     },
     "net_ib_gin_dmabuf": {

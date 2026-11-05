@@ -791,8 +791,8 @@ TEST_P(RmaMPIFixedSizeTest, IPutSignalInvalidSignalOp)
     Barrier();
 }
 
-// The host proxy closes a batch by posting the last op without the aggregate
-// flag. That op rings the doorbell for everything queued ahead of it.
+// Close each context's aggregated puts with one default-flag put, then check
+// the receiver's blocks. Doorbell coalescing is covered by net-ib-gin-batch-test.
 TEST_P(RmaMPITest, AggregatedPutsClosedByDefault)
 {
     if(!SetUpFixture(2, 2))
@@ -872,8 +872,8 @@ TEST_P(RmaMPITest, AggregatedPutsClosedByDefault)
     }
 }
 
-// A flush has to ring any deferred doorbell first. The puts are then visible
-// once both the flush and the put completions have been collected.
+// Flush after aggregated puts and collect the flush and the put completions.
+// The payload must match. Doorbell ordering is covered by net-ib-gin-batch-test.
 TEST_P(RmaMPITest, IFlushAfterAggregatedPuts)
 {
     if(!SetUpFixture(2, 2))
@@ -1052,16 +1052,18 @@ TEST_F(RmaMPIStressTest, IPutSignalStress10k)
     }
 }
 
-// Same sliding window as IPutSignalStress10k, but every post asks the proxy to
-// aggregate. One completion per batch has to retire the puts and the signal
-// counter still has to land on exactly one increment per operation.
+// One doorbell per window: 15 aggregated put-signals, then one default-flag
+// put-signal that rings the doorbell, then drain all 16. Polling inside the
+// window would call rma->test, and the net_ib proxy posts any held batch
+// first, so only the first window would stay aggregated.
 TEST_F(RmaMPIStressTest, AggregatedIPutSignalStress)
 {
     if(!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2)) return;
 
     constexpr int    kIterations = 4096;
-    constexpr int    kInflight   = 16;
+    constexpr int    kWindow     = 16;
     constexpr size_t kPayload    = 64;
+    static_assert(kIterations % kWindow == 0, "each window must close with a default-flag op");
 
     void* sendBuf = AllocBuf(kPayload);
     void* recvBuf = AllocBuf(kPayload);
@@ -1084,40 +1086,29 @@ TEST_F(RmaMPIStressTest, AggregatedIPutSignalStress)
 
     if(worldRank_ == 0)
     {
-        std::vector<void*> inflight(kInflight, nullptr);
-        int                next = 0;
-
-        for(int i = 0; i < kIterations; ++i)
+        for(int base = 0; base < kIterations; base += kWindow)
         {
-            if(inflight[next] != nullptr)
+            void* reqs[kWindow] = {};
+            for(int j = 0; j < kWindow; ++j)
             {
-                ASSERT_TRUE(PollUntilDone(inflight[next]))
-                    << "iteration " << i << " (slot " << next << ") drain failed";
-                inflight[next] = nullptr;
+                const bool     closing = j == kWindow - 1;
+                const uint32_t flags   = closing ? ncclRmaOptFlagsDefault
+                                                 : ncclRmaOptFlagsAggregateRequests;
+                ASSERT_EQ(ncclSuccess,
+                          IPutSignal( /*context=*/0,
+                                           /*srcOff=*/0, sendMh, kPayload,
+                                           /*dstOff=*/0, recvMh,
+                                           /*peerRank=*/1,
+                                           /*signalOff=*/0, sigMh,
+                                           /*signalValue=*/0,
+                                           NCCL_NET_SIGNAL_OP_INC,
+                                           &reqs[j], flags))
+                    << "iteration " << (base + j) << " post failed";
             }
-
-            const bool     closing = (i % kInflight) == kInflight - 1;
-            const uint32_t flags   = closing ? ncclRmaOptFlagsDefault
-                                             : ncclRmaOptFlagsAggregateRequests;
-            ASSERT_EQ(ncclSuccess,
-                      IPutSignal( /*context=*/0,
-                                       /*srcOff=*/0, sendMh, kPayload,
-                                       /*dstOff=*/0, recvMh,
-                                       /*peerRank=*/1,
-                                       /*signalOff=*/0, sigMh,
-                                       /*signalValue=*/0,
-                                       NCCL_NET_SIGNAL_OP_INC,
-                                       &inflight[next], flags))
-                << "iteration " << i << " post failed";
-            next = (next + 1) % kInflight;
-        }
-
-        for(int s = 0; s < kInflight; ++s)
-        {
-            if(inflight[s] != nullptr)
+            for(int j = 0; j < kWindow; ++j)
             {
-                EXPECT_TRUE(PollUntilDone(inflight[s]))
-                    << "final drain of slot " << s << " failed";
+                ASSERT_TRUE(PollUntilDone(reqs[j]))
+                    << "iteration " << (base + j) << " drain failed";
             }
         }
     }

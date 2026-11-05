@@ -1079,6 +1079,7 @@ function(rccl_define_micro_source_lists)
     net-ib-gin-batch-test.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
+    fakes/os_fakes.cc                    # ncclOsGetPageSize for ncclIbMalloc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 endfunction()
@@ -2447,10 +2448,15 @@ set(_MICRO_TRANSPORT_DEFS
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroNetIbGin -- doorbell batching in src/transport/net_ib/gin.cc
 # ---------------------------------------------------------------------------
+# net-ib-gin-batch-test.cc copies this table from p2p.cc. gin.cc indexes it with
+# req->type, so a new enumerator is an out-of-bounds read on the error path.
 # _rccl_src_root is unset once the checks above it have run.
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/../../src/transport/net_ib/gin.cc"
-  "batch->wrs[batch->nWrs - 1].send_flags |= IBV_SEND_SIGNALED;"
-  "net-ib-gin-batch-test.cc: only the batch tail is signaled")
+foreach(_req_type_cc "${CMAKE_CURRENT_LIST_DIR}/../../src/transport/net_ib/p2p.cc"
+                     "${CMAKE_CURRENT_LIST_DIR}/net-ib-gin-batch-test.cc")
+  rccl_assert_source_line("${_req_type_cc}"
+    "const char* ncclIbReqTypeStr[] = {\"Unused\", \"Send\", \"Recv\", \"Flush\", \"IPut\", \"IGet\", \"Failed\"};"
+    "net-ib-gin-batch-test.cc: ncclIbReqTypeStr")
+endforeach()
 rccl_add_micro_binary(rccl-UnitTestsMicroNetIbGin
   SOURCES ${TEST_MICRO_NET_IB_GIN_SOURCE_FILES}
   EXTRA_INCLUDES

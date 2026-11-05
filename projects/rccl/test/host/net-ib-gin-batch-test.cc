@@ -20,6 +20,17 @@
 
 #include NET_IB_GIN_CC_PATH
 
+// CreateContext's listen/connect/accept/regMr. Left failing unless a test enables
+// them, so an unexpected call still returns ncclInternalError.
+struct CreateContextHooks {
+  bool enabled = false;
+  int listenToken = 1;
+  int sendToken = 2;
+  int recvToken = 3;
+  int mrToken = 4;
+};
+CreateContextHooks g_createHooks;
+
 namespace {
 
 template <typename T>
@@ -155,7 +166,11 @@ class NetIbGinBatchMicrotest : public ::testing::Test {
     g_log = &log_;
   }
 
-  void TearDown() override { g_log = nullptr; }
+  void TearDown() override {
+    g_log = nullptr;
+    g_createHooks.enabled = false;
+    g_loadParam = [](const char*, int64_t deft) { return deft; };
+  }
 
   struct ncclRmaIbProxyMrHandle Handle(uintptr_t base, uint32_t lkey, uint32_t rkey0) {
     mrs_.emplace_back(new ibv_mr{});
@@ -375,10 +390,41 @@ TEST_F(NetIbGinBatchMicrotest, DestroyContext_PostsAHeldBatchBeforeReleasingTheC
 
 TEST_F(NetIbGinBatchMicrotest, UnsupportedSignalOp_PostsNothing) {
   void* request = nullptr;
+  // Default flags post immediately. Aggregate would hold a leaked work request in the
+  // batch, and log_.posts would stay empty even if validation ran after the commit.
   EXPECT_EQ(ncclRmaIbProxyIPutSignal(ctx_, 0, 0, &src_, 8, 0, &dst_, 1, 0, &sig_, 1, 0x7, false,
-                                     ncclRmaOptFlagsAggregateRequests, &request),
+                                     ncclRmaOptFlagsDefault, &request),
             ncclInvalidArgument);
   EXPECT_TRUE(log_.posts.empty());
+  EXPECT_EQ(ctx_[0].batch.nWrs, 0);
+}
+
+TEST_F(NetIbGinBatchMicrotest, CreateContext_ClampsWrBatchsize) {
+  struct Case {
+    int64_t requested;
+    int expected;
+  };
+  for (Case batch : {Case{1, NCCL_RMA_MAX_IB_WRS_PER_OP},
+                     Case{NCCL_RMA_IB_WR_BATCHSIZE + 1, NCCL_RMA_IB_WR_BATCHSIZE}}) {
+    SCOPED_TRACE(batch.requested);
+    g_loadParam = ParamOverride({{"RMA_IB_WR_BATCHSIZE", batch.requested}});
+    g_createHooks.enabled = true;
+
+    ncclGinIbCollComm coll{};
+    coll.rank = 0;
+    coll.nranks = 1;
+    coll.allGather = [](ncclGinIbCollComm*, void*, void*, size_t) { return ncclSuccess; };
+    ncclRmaConfig_t config{};
+    config.nContexts = 1;
+    config.rankStride = 1;
+    ncclRmaIbProxyCtx* contexts = nullptr;
+
+    ASSERT_EQ(ncclRmaIbProxyCreateContext(&coll, &config, reinterpret_cast<void**>(&contexts)), ncclSuccess);
+    ASSERT_NE(contexts, nullptr);
+    EXPECT_EQ(contexts[0].wrBatchsize, batch.expected);
+    ASSERT_EQ(ncclRmaIbProxyDestroyContext(contexts), ncclSuccess);
+    free(contexts);
+  }
 }
 
 }  // namespace
@@ -389,8 +435,22 @@ TEST_F(NetIbGinBatchMicrotest, UnsupportedSignalOp_PostsNothing) {
 static ncclResult_t OkClose(void*) { return ncclSuccess; }
 static ncclResult_t OkDereg(void*, void*) { return ncclSuccess; }
 
+static ncclResult_t HookListen(void*, int, void*, void** listenComm) {
+  if (!g_createHooks.enabled) return ncclInternalError;
+  *listenComm = &g_createHooks.listenToken;
+  return ncclSuccess;
+}
+
+static ncclResult_t HookRegMr(void*, void*, size_t, int, void** mhandle) {
+  if (!g_createHooks.enabled) return ncclInternalError;
+  *mhandle = &g_createHooks.mrToken;
+  return ncclSuccess;
+}
+
 ncclNet_t ncclNetIb = [] {
   ncclNet_t net{};
+  net.listen = HookListen;
+  net.regMr = HookRegMr;
   net.closeSend = OkClose;
   net.closeRecv = OkClose;
   net.closeListen = OkClose;
@@ -403,7 +463,6 @@ struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
 struct ncclIbMergedDev ncclIbMergedDevs[MAX_IB_VDEVS];
 
 int64_t ncclParamIbTc() { return -1; }
-size_t ncclOsGetPageSize() { return 4096; }
 
 const char* ncclIbReqTypeStr[] = {"Unused", "Send", "Recv", "Flush", "IPut", "IGet", "Failed"};
 
@@ -418,10 +477,16 @@ ncclResult_t ncclIbDevices(int* ndev) {
 }
 ncclResult_t ncclIbListen(void*, int, void*, void**) { return ncclInternalError; }
 ncclResult_t ncclIbCloseListen(void*) { return ncclSuccess; }
-ncclResult_t ncclIbConnectImpl(void*, int, void*, void**, ncclNetDeviceHandle_t**, int, int) {
-  return ncclInternalError;
+ncclResult_t ncclIbConnectImpl(void*, int, void*, void** sendComm, ncclNetDeviceHandle_t**, int, int) {
+  if (!g_createHooks.enabled) return ncclInternalError;
+  *sendComm = &g_createHooks.sendToken;
+  return ncclSuccess;
 }
-ncclResult_t ncclIbAcceptImpl(void*, void**, ncclNetDeviceHandle_t**, int) { return ncclInternalError; }
+ncclResult_t ncclIbAcceptImpl(void*, void** recvComm, ncclNetDeviceHandle_t**, int) {
+  if (!g_createHooks.enabled) return ncclInternalError;
+  *recvComm = &g_createHooks.recvToken;
+  return ncclSuccess;
+}
 ncclResult_t ncclIbGetProperties(int, ncclNetProperties_t*) { return ncclInternalError; }
 ncclResult_t ncclIbGetGidIndex(struct ibv_context*, uint8_t, struct ibv_port_attr*, int*) {
   return ncclInternalError;
