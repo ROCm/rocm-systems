@@ -235,7 +235,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaArVmmFirstMinRanks = 32,
   .ddaArVmmFirstMinBytes = 2ULL*1024*1024,
   .ddaArVmmFirstMaxPerRank = 512ULL*1024,
-  // Registered sum AllReduce past symMinR2: DDA beats Ring in capture and CE-registered eager at 4-16 ranks.
+  // Registered sum AllReduce past symMinR2: DDA beats Ring in capture to max(32M, n x 2M)
+  // and CE-registered eager on whole 512K-1M shards.
   .ddaArRegCaptureMinBytes = 32ULL*1024*1024,
   .ddaArRegCapturePerRankBytes = 2ULL*1024*1024,
   .ddaArRegEagerMinShardBytes = 512ULL*1024,
