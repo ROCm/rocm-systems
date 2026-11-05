@@ -11,6 +11,8 @@
 //  above should always be included first
 //
 #include "api.hpp"
+#include "backends/rocprofiler_sdk/backend.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/clocks.hpp"
 #include "common/defines.h"
 #include "common/delimit.hpp"
@@ -593,6 +595,8 @@ rocprofsys_init_library_hidden()
     }
 
     library_checker::check_profiler_hub_version_mismatch();
+    library_checker::check_rocprofiler_sdk_version_mismatch<
+        backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>>();
 
     if(_debug_init)
     {
