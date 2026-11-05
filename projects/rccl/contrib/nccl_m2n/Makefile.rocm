@@ -41,7 +41,7 @@
 # Optional environment variables:
 #   ROCM_PATH     - ROCm install (default: /opt/rocm)
 #   RCCL_LIBDIR   - Directory holding librccl.so (default: $(RCCL_HOME)/lib)
-#   OFFLOAD_ARCH  - GPU arch (default: gfx950)
+#   OFFLOAD_ARCH  - GPU arch(es), space- or ';'-separated (default: gfx950)
 #   ROCM_VERSION  - 10000*major+100*minor+patch (auto-detected from ROCM_PATH)
 #   GTEST_DIR     - googletest tree with include/ and src/ (for tests)
 #   MPI_HOME      - MPI install (benchmarks + MPI test); auto-detected via mpicc
@@ -60,6 +60,7 @@ HOSTCXX      := $(ROCM_PATH)/bin/amdclang++
 AR           ?= ar
 HIPIFY_FLAGS := -experimental -quiet-warnings
 OFFLOAD_ARCH ?= gfx950
+OFFLOAD_FLAGS := $(foreach a,$(subst ;, ,$(OFFLOAD_ARCH)),--offload-arch=$(a))
 
 # -- ROCm version ------------------------------------------------------------
 # RCCL's device headers gate behaviour on ROCM_VERSION, which hipcc does NOT
@@ -146,7 +147,7 @@ INCLUDES := -isystem $(RCCL_HOME)/include \
 # Every library/test TU is compiled as HIP (-x hip); the host-only .cc drivers
 # carry no device code so the device pass is a no-op for them.
 HIPFLAGS := $(CXXSTD) \
-            --offload-arch=$(OFFLOAD_ARCH) \
+            $(OFFLOAD_FLAGS) \
             -D__HIP_PLATFORM_AMD__ \
             -DNCCL_OS_LINUX \
             -DROCM_VERSION=$(ROCM_VERSION) \
@@ -215,9 +216,15 @@ MODEL_BENCH_SRCS := $(addprefix $(HBENCH)/,$(MODEL_BENCH_NAMES))
 # Sentinel that marks a completed hipify pass (all trees staged + converted).
 HIPIFY_STAMP := $(HIPIFY_DIR)/.hipify.stamp
 
+# Device code depends on OFFLOAD_ARCH, which make does not track: the stamp is checked on every run but
+# rewritten only when missing or when the arch list changes, so only a different list rebuilds device code.
+ARCH_STAMP := $(BUILDDIR)/.offload_arch
+# Base archs (gfx950:xnack- -> gfx950) for gpu_archs.txt, the manifest the nccl.m2n arch check reads.
+GPU_ARCH_LIST := $(sort $(foreach a,$(subst ;, ,$(OFFLOAD_ARCH)),$(firstword $(subst :, ,$(a)))))
+
 .PHONY: all lib tests bench basic_api_test_mpi basic_api_test_local \
         reshard reshard_batch_user_window reshard_model \
-        hipify gtest install clean help
+        hipify gtest install clean help FORCE
 
 all: lib
 
@@ -226,6 +233,12 @@ all: lib
 # and convert them there with hipify-perl. Upstream trees stay untouched.
 # ============================================================================
 hipify: $(HIPIFY_STAMP)
+
+$(ARCH_STAMP): FORCE
+	@mkdir -p $(@D)
+	@echo '$(OFFLOAD_ARCH)' | cmp -s - $@ || echo '$(OFFLOAD_ARCH)' > $@
+
+FORCE:
 
 $(HIPIFY_STAMP): $(wildcard $(SRCDIR)/* $(TESTSDIR)/* $(BENCHDIR)/*)
 	@printf ">>> Staging + hipifying sources into $(HIPIFY_DIR) ...\n"
@@ -250,10 +263,12 @@ $(HIPIFY_STAMP): $(wildcard $(SRCDIR)/* $(TESTSDIR)/* $(BENCHDIR)/*)
 # ============================================================================
 lib: $(M2N_LIBTARGET) $(M2N_HEADER_TARGET)
 
-$(M2N_LIBTARGET): $(HIPIFY_STAMP)
+$(M2N_LIBTARGET): $(HIPIFY_STAMP) $(ARCH_STAMP)
 	@printf "Building $(M2N_LIBNAME) (hipcc, arch=$(OFFLOAD_ARCH), ROCM_VERSION=$(ROCM_VERSION)) ...\n"
 	@mkdir -p $(LIBDIR)
+	@rm -f $(LIBDIR)/gpu_archs.txt
 	$(HIPCC) -shared -o $@ $(HIPFLAGS) $(LIB_SRCS) -x none $(M2N_LIB_LDFLAGS)
+	@echo '$(GPU_ARCH_LIST)' > $(LIBDIR)/gpu_archs.txt
 	@printf "Done! Library at: $@\n"
 
 $(M2N_HEADER_TARGET): $(HIPIFY_STAMP)
@@ -294,7 +309,7 @@ $(BINDIR)/basic_api_test_mpi: $(M2N_LIBTARGET) $(GTEST_A)
 	    $(TEST_MPI_SRCS) -x none $(GTEST_A) $(M2N_CLIENT_LDFLAGS) $(BENCH_LDFLAGS) -lpthread
 	@printf "Done! Test binary at: $@\n"
 
-$(BINDIR)/basic_api_test_local: $(HIPIFY_STAMP) $(GTEST_A)
+$(BINDIR)/basic_api_test_local: $(HIPIFY_STAMP) $(ARCH_STAMP) $(GTEST_A)
 	@printf "Building basic_api_test_local (hipcc, gtest, no MPI) ...\n"
 	@mkdir -p $(BINDIR)
 	$(HIPCC) -o $@ $(HIPFLAGS) -DNCCL_M2N_TESTING -DCUDART_CB= \
@@ -337,12 +352,12 @@ $(BINDIR)/reshard_model_bench: $(M2N_LIBTARGET)
 	@printf "Building reshard_model_bench ...\n"
 	@mkdir -p $(BINDIR) $(BUILDDIR)/obj
 	$(HIPCC) -x c++ $(CXXSTD) -D__HIP_PLATFORM_AMD__ -DNCCL_OS_LINUX \
-	    -DROCM_VERSION=$(ROCM_VERSION) -fPIC -O3 -isystem $(ROCM_PATH)/include \
-	    $(INCLUDES) $(MPI_CFLAGS) -I$(HBENCH) \
+	    -DROCM_VERSION=$(ROCM_VERSION) -fPIC -O3 \
+	    $(INCLUDES) -isystem $(ROCM_PATH)/include $(MPI_CFLAGS) -I$(HBENCH) \
 	    -c $(HBENCH)/reshard_model_bench.cu -o $(BUILDDIR)/obj/reshard_model_bench.o
 	$(HIPCC) $(HIPFLAGS) $(MPI_CFLAGS) -I$(HBENCH) \
 	    -c $(HBENCH)/$(BENCH_KERNELS_NAME) -o $(BUILDDIR)/obj/bench_common_kernels.model.o
-	$(HIPCC) -o $@ --offload-arch=$(OFFLOAD_ARCH) \
+	$(HIPCC) -o $@ $(OFFLOAD_FLAGS) \
 	    $(BUILDDIR)/obj/reshard_model_bench.o $(BUILDDIR)/obj/bench_common_kernels.model.o \
 	    $(M2N_CLIENT_LDFLAGS) $(BENCH_LDFLAGS)
 	@printf "Done! Benchmark binary at: $@\n"

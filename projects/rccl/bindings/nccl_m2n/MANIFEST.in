@@ -1,0 +1,13 @@
+include README.md
+include LICENSE.txt
+include nccl/m2n/README.md
+recursive-include nccl *.py *.pxd *.pyx
+
+# Source distributions contain only the portable sources needed to build a
+# wheel. Native libraries and installed headers are staged into wheels later.
+prune nccl/m2n/lib
+prune nccl/m2n/include
+global-exclude *.so *.cpp
+
+# Local build output and binding-generation tooling never belong in an sdist.
+prune build

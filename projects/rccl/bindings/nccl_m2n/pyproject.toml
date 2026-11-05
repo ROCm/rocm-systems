@@ -1,0 +1,97 @@
+[build-system]
+requires = [
+    "setuptools>=77.0.3",
+    "Cython>=3.1",
+    "nccl4py",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nccl-extensions"
+description = "Python bindings for nccl_m2n on ROCm (RCCL nccl4py port)"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE.txt"]
+authors = [
+    { name = "NVIDIA Corporation" },
+]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Cython",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+requires-python = ">=3.10"
+dynamic = ["version"]
+dependencies = [
+    "nccl4py",
+    "packaging",
+    "numpy",
+    'typing-extensions; python_version < "3.11"',
+]
+
+[project.optional-dependencies]
+# M2N's packaged Python benchmark uses mpi4py for multi-rank coordination.
+bench = ["mpi4py"]
+
+[project.urls]
+homepage = "https://github.com/NVIDIA/nccl-extensions"
+repository = "https://github.com/NVIDIA/nccl-extensions"
+issues = "https://github.com/NVIDIA/nccl-extensions/issues"
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.dynamic]
+version = { attr = "nccl._extensions._version.__version__" }
+
+[tool.setuptools.packages.find]
+# This distribution owns only nccl/_extensions/ and nccl/m2n/ inside the shared
+# `nccl` namespace; nccl4py owns nccl/__init__.py, nccl/_version.py, nccl/core/
+# and nccl/bindings/. Listing our subpackages explicitly (rather than "nccl*")
+# keeps a bare `nccl` package out of the wheel, so we never ship an __init__.py
+# that would collide with theirs.
+namespaces = true
+include = ["nccl._extensions*", "nccl.m2n*"]
+
+[tool.setuptools.package-data]
+"nccl._extensions.bindings" = ["cynccl_*.pxd", "nccl_*.pxd"]
+"nccl.m2n" = [
+    "lib/rocm/libnccl_m2n.so",
+    "lib/rocm/gpu_archs.txt",
+    "include/nccl_m2n.h",
+]
+
+# Run from the staged copy that contrib/nccl_m2n/scripts/build.sh py leaves in $WORK/py-build:
+#   cibuildwheel --platform linux nccl_m2n
+# The project directory (/project in the container) then also holds the RCCL nccl4py port,
+# which the build needs importable; pip's isolated build would fetch NVIDIA's nccl4py instead.
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+skip = "*-musllinux_*"
+build-frontend = { name = "pip", args = ["--no-build-isolation"] }
+before-build = [
+    "pip install 'setuptools>=77.0.3' 'setuptools-scm>=8' 'Cython>=3.1'",
+    "SETUPTOOLS_SCM_PRETEND_VERSION=0.2.0 pip install --no-build-isolation --no-deps {project}/nccl4py",
+]
+environment = { NCCL_EXTENSIONS_REQUIRE_NATIVE_LIBS = "1" }
+
+[tool.cibuildwheel.linux]
+archs = ["x86_64"]
+manylinux-x86_64-image = "manylinux_2_28"
+# The ROCm runtime comes from the user's ROCm / TheRock install, never from this wheel. The tag follows
+# the glibc of the staged libnccl_m2n.so (built in the Ubuntu 24.04 Primus image: GLIBC_2.38), not the
+# manylinux_2_28 image that builds the Cython extensions.
+repair-wheel-command = """auditwheel repair -w {dest_dir} {wheel} --plat manylinux_2_38_x86_64 \
+    --exclude librccl.so.1 --exclude libamdhip64.so.7 --exclude libhsa-runtime64.so.1 \
+    --exclude libamd_comgr.so.3 --exclude librocprofiler-register.so.0"""
