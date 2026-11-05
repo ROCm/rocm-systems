@@ -198,6 +198,32 @@ def test_matrix_kernel_sources_define_selected_symbol(gpu_arch):
         )
 
 
+def test_gfx1201_enabled_matrix_tests_have_operations_and_kernels():
+    """Every WMMA test gfx1201 runs has a FLOP count and a kernel name."""
+    bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
+    prefix = f"{bench.MATRIX_OPS_TYPE}-"
+    enabled = [
+        test_key[len(prefix) :]
+        for test_key in bench.tests
+        if test_key.startswith(prefix) and runs_benchmark(bench, test_key)
+    ]
+
+    assert sorted(enabled) == ["BF16", "F16", "F8"]
+    for matrix_type in enabled:
+        assert bench.matrix_ops[matrix_type] > 0
+        assert matrix_type in bench.matrix_kernel_selector
+
+
+def test_gfx1201_measures_infinity_cache_with_its_own_kernel():
+    """gfx1201 runs the MALL test through its grid-stride MALL_bw kernel."""
+    bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
+
+    assert runs_benchmark(bench, "MALL")
+    assert bench.tests["MALL"] == bench.mall_bw_bench
+    assert bench.csv_cols_map["MALL"] == "MALLBw"
+    assert_source_defines(bench.mall_bw_src, "MALL_bw", "gfx1201 MALL")
+
+
 # =============================================================================
 # GPU Benchmark Locking Tests
 # =============================================================================

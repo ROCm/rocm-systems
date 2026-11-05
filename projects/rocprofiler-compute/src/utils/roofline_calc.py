@@ -100,6 +100,7 @@ class GraphPoints:
     """Data structure for storing roofline graph ceiling points."""
 
     hbm: list[Union[list[float], float, None]]
+    mall: list[Union[list[float], float, None]]
     l2: list[Union[list[float], float, None]]
     l1: list[Union[list[float], float, None]]
     l0: list[Union[list[float], float, None]]
@@ -112,6 +113,7 @@ class GraphPoints:
         """Create empty graph points structure."""
         return cls(
             hbm=[None, None, None],
+            mall=[None, None, None],
             l2=[None, None, None],
             l1=[None, None, None],
             l0=[None, None, None],
@@ -148,12 +150,14 @@ def sanitize_ai_value(value: Union[SupportsFloat, str, None]) -> float:
 
 def roofline_mem_levels(gpu_arch: str, gpu_model: str) -> List[str]:
     """Memory levels the roofline plots, in the model's hierarchy order: those with a
-    measured bandwidth ceiling, except MALL, which is measured but not plotted."""
+    measured bandwidth ceiling. MALL is measured but not plotted unless the arch
+    sets plot_mall."""
     measured = mi_gpu_specs.get_roofline_bandwidth(gpu_arch)
+    plots_mall = mi_gpu_specs.get_roofline_plots_mall(gpu_arch)
     return [
         level
         for level in mi_gpu_specs.get_memory_levels(gpu_model)
-        if level in measured and level != "MALL"
+        if level in measured and (level != "MALL" or plots_mall)
     ]
 
 
@@ -172,6 +176,7 @@ def calc_ceilings(
 
     graph_points: dict[str, list[Union[list[float], float, None]]] = {
         "hbm": [],
+        "mall": [],
         "l2": [],
         "l1": [],
         "l0": [],

@@ -708,6 +708,36 @@ that contains both ``roofline.csv`` and application performance counters
    * gfx9 (CDNA1/2/3/4) supports Matrix Fused MultiplyAdd (MFMA).
    * gfx10+ (RDNA3+) supports Wave Matrix Multiply Accumulate (WMMA).
 
+   On gfx1201 (Navi 48, for example the Radeon RX 9070 XT), the roofline has
+   two device-memory roofs:
+
+   * ``HBM`` is the measured GDDR6 bandwidth. Navi 48 has no HBM; the column
+     keeps its historical name. The 256-bit, 20 Gbps GDDR6 interface peaks at
+     640 GB/s.
+   * ``MALL`` is the measured bandwidth of the 64 MB Infinity Cache. The
+     benchmark reads a buffer of half the Infinity Cache capacity repeatedly,
+     so the reads miss in the 8 MB L2 and hit in the Infinity Cache.
+
+   The ``AI HBM`` point counts GL2C/EA requests destined for DRAM
+   (``GL2C_EA_RDREQ_DRAM`` and ``GL2C_EA_WRREQ_DRAM``). The Infinity Cache
+   serves some of those requests, and no performance counter separates its hits
+   from GDDR6 traffic, so the point is read against both roofs. A kernel whose
+   working set fits in the Infinity Cache can sit above the ``HBM`` roof and
+   below the ``MALL`` roof. A kernel whose working set is larger sits near the
+   ``HBM`` roof.
+
+   A Navi 48 copy-kernel measurement reported about 2 TB/s of DRAM-destined
+   traffic for working sets up to 64 MiB and about 560 GB/s above that.
+   Compare the measured ``MALL`` and ``HBM`` roofs with those values on your
+   system.
+
+   The gfx1201 WMMA instruction counter requires a ROCprofiler-SDK and
+   aqlprofile installation that supports SQ event 233. Check profiling warnings
+   and counter output before relying on WMMA roofline points. One WMMA counter
+   covers FP16, BF16, and FP8, so the WMMA row is compared with the FP16 WMMA
+   peak. The aggregate VALU instruction counter is an estimate, not a
+   precision-specific FLOP count.
+
    CDNA4+ also supports Microscaling formats, which can be identified by the "MX" prefix in datatypes. More details and other resources about MX per CDNA architecture can be found at `AMD CDNA Architecture <https://www.amd.com/en/technologies/cdna.html>`_.
 
    The cache levels that are benchmarked are dependent on the memory hierarchy levels of the architecture. See the :ref:`CDNA Performance Model <cdna-performance-model>` or :ref:`RDNA Performance Model <rdna-performance-model>` pages to view more information about the hardware blocks and cache levels supported in each architecture.

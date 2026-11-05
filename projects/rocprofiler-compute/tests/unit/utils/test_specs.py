@@ -89,6 +89,60 @@ def test_set_cache_sizes_rdna_uses_l0_and_l1():
 
 
 @pytest.mark.misc
+def test_set_cache_sizes_rdna_split_shader_array_groups():
+    """AMD-SMI may split the GL1 instances into groups by the number of CUs
+    sharing each cache; the groups of one size add up to the shader-array count."""
+    cache_info = {
+        "cache": [
+            {
+                "cache_level": 1,
+                "cache_properties": ["DATA_CACHE"],
+                "cache_size": size,
+                "num_cache_instance": instances,
+            }
+            for size, instances in [(32, 56), (16, 28), (256, 4), (256, 4)]
+        ]
+    }
+    result = specs.set_cache_sizes(
+        "rdna4_navi48", 56, cache_info, num_dies=1, num_se=4, num_sa_se=2
+    )
+    assert result["L0"] == 32 * 1024
+    assert result["L1"] == 256 * 1024
+
+
+@pytest.mark.misc
+def test_set_cache_sizes_rx_9070_xt():
+    """The RX 9070 XT AMD-SMI cache list gives 32 KB GL0, 256 KB GL1, 8 MB L2,
+    and the 64 MB Infinity Cache as MALL."""
+    cache_info = {
+        "cache": [
+            {
+                "cache_level": level,
+                "cache_properties": ["DATA_CACHE", "SIMD_CACHE"],
+                "cache_size": size,
+                "num_cache_instance": instances,
+            }
+            for level, size, instances in [
+                (1, 32, 64),
+                (1, 16, 32),
+                (1, 256, 8),
+                (2, 8192, 1),
+                (3, 65536, 1),
+            ]
+        ]
+    }
+    result = specs.set_cache_sizes(
+        "rdna4_navi48", 64, cache_info, num_dies=1, num_se=4, num_sa_se=2
+    )
+    assert result == {
+        "L0": 32 * 1024,
+        "L1": 256 * 1024,
+        "L2": 8 * 1024 * 1024,
+        "MALL": 64 * 1024 * 1024,
+    }
+
+
+@pytest.mark.misc
 def test_set_cache_sizes_l2_and_mall():
     """L2 and MALL (L3) cache entries are correctly parsed and scaled by num_dies."""
     cache_info = {
