@@ -45,9 +45,6 @@
 
 namespace amd {
 
-//! True when Device::init kept ROCr and did not load PAL.
-bool useRocrBackend();
-
 //! True only when Device::init chose PAL. False before that choice.
 bool usePalBackend();
 

@@ -77,8 +77,6 @@ static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessReadWri
 
 namespace amd {
 
-bool useRocrBackend() { return g_backendChoice == BackendChoice::Rocr; }
-
 bool usePalBackend() { return g_backendChoice == BackendChoice::Pal; }
 
 std::recursive_mutex Device::lockP2P_;
