@@ -282,3 +282,43 @@ sdxi-cli elemwise add int4 2 src_packed.bin dst_packed.bin
 Scalar is a decimal integer or float for FP types, or a hex value (`0x...`)
 for raw bit-pattern overrides (useful for FP16/BF16/FP8 when you know the
 encoding).
+
+---
+
+## Performance counters
+
+Each context tracks 14 64-bit counters, indexed by `SDXI_CTR_STAT_*` selector.
+The `CTR_SELECT` register (BAR0 0x300) takes `cid | (stat_sel << 8)`; reading
+`CTR_VAL` (BAR0 0x308) returns the counter atomically.
+
+The `SDXI_IOC_STATS` ioctl (`_IOWR('X', 6, struct sdxi_ioc_stats)`) returns all
+14 counters for a given context in one call.
+
+| Selector | Constant | Description |
+|----------|----------|-------------|
+| `0x00` | `SDXI_CTR_STAT_BYTES_MOVED` | Total bytes DMA-copied |
+| `0x01` | `SDXI_CTR_STAT_NUM_COPY` | COPY descriptors completed |
+| `0x02` | `SDXI_CTR_STAT_NUM_ERRORS` | Descriptors completing with error |
+| `0x03` | `SDXI_CTR_STAT_NUM_INTR` | Interrupts delivered |
+| `0x04` | `SDXI_CTR_STAT_NUM_CXT_START` | CXT_START admin descriptors |
+| `0x05` | `SDXI_CTR_STAT_NUM_CXT_STOP` | CXT_STOP admin descriptors |
+| `0x06` | `SDXI_CTR_STAT_NUM_NOP` | NOP descriptors completed |
+| `0x07` | `SDXI_CTR_STAT_NUM_SYNC` | SYNC descriptors completed |
+| `0x08` | `SDXI_CTR_STAT_BYTES_COMPRESSED` | Input bytes to COMPRESS |
+| `0x09` | `SDXI_CTR_STAT_BYTES_DECOMPRESSED` | Input bytes to DECOMPRESS |
+| `0x0A` | `SDXI_CTR_STAT_NUM_COMPRESS` | COMPRESS descriptors completed |
+| `0x0B` | `SDXI_CTR_STAT_NUM_DECOMPRESS` | DECOMPRESS descriptors completed |
+| `0x0C` | `SDXI_CTR_STAT_NUM_ELEMWISE` | ELEMWISE descriptors completed |
+| `0x0D` | `SDXI_CTR_STAT_BYTES_ELEMWISE` | Source bytes processed by ELEMWISE |
+
+Constants are defined in `src/sdxi_regs.h`.  Python bindings
+(`CTR_NUM_ELEMWISE`, `CTR_BYTES_ELEMWISE`, etc.) are in
+`tests/py/sdxi/cxt_driver.py`.
+
+### CLI usage
+
+```sh
+sdxi-cli info              # print VERSION, PCI IDs, max contexts, CAP0/CAP1
+sdxi-cli stats             # print all 14 counters for context 0
+sdxi-cli stats 2           # print all 14 counters for context 2
+```

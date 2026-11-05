@@ -8,6 +8,8 @@
  *   roundtrip   <src>                         compress + decompress, verify
  *   bench       <copy|compress|decompress> <size_bytes> [iterations]
  *   stress      [iterations]                  compress/decompress across levels and patterns
+ *   info                                      print device version, PCI IDs, and capabilities
+ *   stats       [cid]                         print all 14 performance counters for context cid
  *
  * Usage: sdxi-cli [-d /dev/sdxi] [-v] <subcommand> [args...]
  */

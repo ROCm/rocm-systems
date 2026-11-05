@@ -68,6 +68,8 @@ CTR_BYTES_COMPRESSED   = 0x08
 CTR_BYTES_DECOMPRESSED = 0x09
 CTR_NUM_COMPRESS       = 0x0A
 CTR_NUM_DECOMPRESS     = 0x0B
+CTR_NUM_ELEMWISE       = 0x0C
+CTR_BYTES_ELEMWISE     = 0x0D
 
 # Context-table geometry — must match sdxi_engine.c / sdxi_regs.h exactly
 #

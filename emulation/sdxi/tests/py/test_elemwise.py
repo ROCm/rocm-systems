@@ -20,6 +20,8 @@ import struct
 
 from sdxi.check import Suite
 from sdxi.cxt_driver import (
+    CTR_BYTES_ELEMWISE,
+    CTR_NUM_ELEMWISE,
     DTYPE_BF16,
     DTYPE_FP16,
     DTYPE_FP32,
@@ -509,6 +511,38 @@ def test_elemwise_fp8_e5m2_reduce_max(suite, dev, mem):
     suite.check_eq(result, expected, f"FP8_E5M2 REDUCE_MAX: got {[hex(b) for b in result_raw]}")
 
 
+def test_elemwise_counters(suite, dev, mem):
+    """Verify NUM_ELEMWISE and BYTES_ELEMWISE counters increment correctly.
+
+    Runs two INT32 ADD operations on a 4-element (16-byte) buffer via context 2
+    and checks that:
+      - CTR_NUM_ELEMWISE   == 2  (one per operation)
+      - CTR_BYTES_ELEMWISE == 32 (src_len=16 bytes × 2 operations)
+    """
+    cxt = dev.cxt(2)
+    cid  = 2
+
+    src_data = struct.pack("<4i", 1, 2, 3, 4)   # 16 bytes
+    scalar   = 10
+    scalar_bits = scalar & 0xFFFFFFFFFFFFFFFF
+
+    n0 = dev.read_counter(cid, CTR_NUM_ELEMWISE)
+    b0 = dev.read_counter(cid, CTR_BYTES_ELEMWISE)
+
+    for _ in range(2):
+        src = mem.alloc(len(src_data))
+        dst = mem.alloc(len(src_data))
+        mem.write(src, src_data)
+        ok, _ = cxt.elemwise(dev.vfu, src, len(src_data), dst, DTYPE_INT32, ELEMOP_ADD, scalar_bits)
+        suite.check(ok, "counter test: ELEMWISE CSB reports success")
+
+    n1 = dev.read_counter(cid, CTR_NUM_ELEMWISE)
+    b1 = dev.read_counter(cid, CTR_BYTES_ELEMWISE)
+
+    suite.check_eq(n1 - n0, 2,  "CTR_NUM_ELEMWISE incremented by 2")
+    suite.check_eq(b1 - b0, 32, "CTR_BYTES_ELEMWISE incremented by 32 (2 × 16 bytes)")
+
+
 def main():
     binary = os.environ.get(
         "SDXI_SERVER_BIN",
@@ -539,6 +573,7 @@ def main():
                 suite.run("int4_reduce_max",     test_elemwise_int4_reduce_max,     dev, mem)
                 suite.run("fp8_e5m2_add",        test_elemwise_fp8_e5m2_add,        dev, mem)
                 suite.run("fp8_e5m2_reduce_max", test_elemwise_fp8_e5m2_reduce_max, dev, mem)
+                suite.run("counters",            test_elemwise_counters,            dev, mem)
     finally:
         stop_and_check(suite, server)
     suite.finish()
