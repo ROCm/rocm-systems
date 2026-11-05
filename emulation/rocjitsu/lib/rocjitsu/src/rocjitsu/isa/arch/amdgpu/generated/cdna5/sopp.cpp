@@ -77,6 +77,7 @@ SMonitorSleepSopp::SMonitorSleepSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= SUSPENDS_WAVE;
 }
 
 namespace detail {
@@ -196,7 +197,7 @@ STrapSopp::STrapSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= XCNT_DRAIN;
-  flags_ |= TRAP_CONTROL;
+  flags_ |= WRITES_PC;
 }
 
 namespace detail {

@@ -205,8 +205,9 @@ def _exec_mask_flag_stmts(sem) -> list[str]:
 
 
 # Execution-block flag (instruction.h) for each encoding with a generated
-# class. Exports issue to no block. Every such encoding must appear here, so a
-# new encoding fails generation until it is classified.
+# class, including the hand-templated VOPD dual-issue class (gen_vopd). Exports
+# issue to no block. Every such encoding must appear here, so a new encoding
+# fails generation until it is classified.
 _ENCODING_EXECUTION_BLOCKS: dict[str, str | None] = {
     'ENC_SOP1': 'SALU',
     'ENC_SOP2': 'SALU',
@@ -223,6 +224,8 @@ _ENCODING_EXECUTION_BLOCKS: dict[str, str | None] = {
     'VOP3P_MFMA': 'VALU',
     'ENC_VINTERP': 'VALU',
     'ENC_VINTRP': 'VALU',
+    'VOPDXY': 'VALU',
+    'VOPD3XY': 'VALU',
     'ENC_DS': 'LDS',
     'ENC_VDS': 'LDS',
     'ENC_LDSDIR': 'LDS',
@@ -254,26 +257,39 @@ def _execution_block_flag_stmt(enc_name: str) -> str:
 
 
 # Operations evaluated by the VALU transcendental unit, in both the vector and
-# the pseudo-scalar (V_S_*) forms.
+# the pseudo-scalar (V_S_*) forms, at every data width. This is the unit, not
+# the S_DELAY_ALU dependency class: see TRANSCENDENTAL in instruction.h.
 _TRANSCENDENTAL_CLASSES = frozenset({'vector_unary', 'pseudo_scalar_unary'})
 _TRANSCENDENTAL_OPERATIONS = frozenset(
-    {'rcp', 'rcp_iflag', 'rsq', 'sqrt', 'exp2', 'log2', 'sin', 'cos'}
+    {'rcp', 'rcp_iflag', 'rsq', 'sqrt', 'exp2', 'log2', 'sin', 'cos', 'tanh'}
 )
 
-# Instructions that sleep or halt their wave.
+# Instructions that may sleep or halt their wave, depending on their operands
+# and the wave's state.
 _SUSPENDS_WAVE_NAMES = frozenset(
-    {'S_SLEEP', 'S_SLEEP_VAR', 'S_SETHALT', 'S_SENDMSGHALT'}
+    {'S_SLEEP', 'S_SLEEP_VAR', 'S_MONITOR_SLEEP', 'S_SETHALT', 'S_SENDMSGHALT'}
 )
 
-# Trap entry and return. Their semantics carry no control-flow class (S_RFE
-# derives as a no-op), so they are named here.
-_TRAP_CONTROL_NAMES = frozenset(
-    {'S_TRAP', 'S_RFE_B64', 'S_RFE_I64', 'S_RFE_RESTORE_B64'}
+# PC writers whose semantics carry no control-flow class, so they are named
+# here: trap entry and return (S_RFE derives as a no-op), and the debug
+# conditional branches, which are modelled as never taken. They get WRITES_PC
+# rather than BRANCH/COND_BRANCH so CFG construction is unchanged.
+_WRITES_PC_NAMES = frozenset(
+    {
+        'S_TRAP',
+        'S_RFE_B64',
+        'S_RFE_I64',
+        'S_RFE_RESTORE_B64',
+        'S_CBRANCH_CDBGSYS',
+        'S_CBRANCH_CDBGUSER',
+        'S_CBRANCH_CDBGSYS_OR_USER',
+        'S_CBRANCH_CDBGSYS_AND_USER',
+    }
 )
 
 
 def _instruction_class_flag_stmts(name: str, sem) -> list[str]:
-    """Return ``flags_ |= ...;`` for TRANSCENDENTAL, SUSPENDS_WAVE and TRAP_CONTROL."""
+    """Return ``flags_ |= ...;`` for TRANSCENDENTAL, SUSPENDS_WAVE and WRITES_PC."""
     stmts = []
     if (
         sem is not None
@@ -283,8 +299,8 @@ def _instruction_class_flag_stmts(name: str, sem) -> list[str]:
         stmts.append('flags_ |= TRANSCENDENTAL;')
     if name in _SUSPENDS_WAVE_NAMES:
         stmts.append('flags_ |= SUSPENDS_WAVE;')
-    if name in _TRAP_CONTROL_NAMES:
-        stmts.append('flags_ |= TRAP_CONTROL;')
+    if name in _WRITES_PC_NAMES:
+        stmts.append('flags_ |= WRITES_PC;')
     return stmts
 
 
@@ -2723,7 +2739,7 @@ class CodeGenerator:
             )
             vopd3_constructor_branch = cpp_block('''
               if ((word0_ >> @VOPD3_PREFIX_SHIFT@) == @VOPD3_PREFIX@) {
-                format_ = Format::Vopd3;
+                format_ = Format::Vopd3;@VOPD3_EXECUTION_BLOCK@
                 size_ = 12;
                 encoding_id_ = @VOPD3_PREFIX@;
                 word2_ = words[2];
@@ -2758,9 +2774,15 @@ class CodeGenerator:
                   srcy2_.set_wave_mask();
               } else {
             ''')
-            vopd3_constructor_branch = vopd3_constructor_branch.replace(
-                '@VOPD3_PREFIX_SHIFT@', str(32 - vopd3_prefix.prefix_bits)
-            ).replace('@VOPD3_PREFIX@', f'0x{vopd3_prefix.prefix:X}')
+            vopd3_constructor_branch = (
+                vopd3_constructor_branch.replace(
+                    '@VOPD3_PREFIX_SHIFT@', str(32 - vopd3_prefix.prefix_bits)
+                )
+                .replace('@VOPD3_PREFIX@', f'0x{vopd3_prefix.prefix:X}')
+                .replace(
+                    '@VOPD3_EXECUTION_BLOCK@', _execution_block_flag_stmt('VOPD3XY')
+                )
+            )
             vopd3_validation_branch = cpp_block('''
               if ((word0 >> @VOPD3_PREFIX_SHIFT@) == @VOPD3_PREFIX@) {
                 const uint16_t opx = static_cast<uint16_t>((word0 >> 18) & 0x3F);
@@ -3216,10 +3238,9 @@ class CodeGenerator:
               raw_encoding_ = words;
               word0_ = words[0];
               word1_ = words[1];
-              flags_ |= VALU;
 
             @VOPD3_CONSTRUCTOR_BRANCH@
-                format_ = Format::VopdXy;
+                format_ = Format::VopdXy;@VOPD_EXECUTION_BLOCK@
                 encoding_id_ = @VOPD_PREFIX@;
                 opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
                 opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
@@ -3340,6 +3361,7 @@ class CodeGenerator:
             .replace('@VOPD_IMPL_INCLUDES@', vopd_impl_includes.rstrip())
             .replace('@VOPD_SRC0_TYPE_EXPR@', vopd_src0_type_expr)
             .replace('@VOPD_EXEC_FN@', vopd_exec_fn)
+            .replace('@VOPD_EXECUTION_BLOCK@', _execution_block_flag_stmt('VOPDXY'))
             .replace(
                 '@INLINE_EXECUTION_HELPERS@',
                 (

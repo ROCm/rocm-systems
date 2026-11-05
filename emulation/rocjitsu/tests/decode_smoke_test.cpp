@@ -338,7 +338,7 @@ TEST(DecoderSmokeTest, Gfx1201ClassifiesControlAndTranscendentalPredicates) {
       {0xBFA00001u, "s_branch", true, false, false, false},
       {0xBE804800u, "s_setpc_b64", true, false, false, false},
       {0xBFB00000u, "s_endpgm", true, true, false, false},
-      // Trap entry and return carry TRAP_CONTROL, not a control-flow flag.
+      // Trap entry and return carry WRITES_PC, not a control-flow flag.
       {0xBF900000u, "s_trap", true, false, false, false},
       {0xBE804A00u, "s_rfe_b64", true, false, false, false},
       {0xBF830001u, "s_sleep", false, false, false, true},
@@ -397,7 +397,37 @@ TEST(DecoderSmokeTest, Gfx1201ClassifiesExecutionBlocks) {
   }
 }
 
-TEST(DecoderSmokeTest, Gfx942ClassifiesTimestampAndTrapBlocks) {
+TEST(DecoderSmokeTest, Gfx1250ClassifiesTranscendentalAndSleepPredicates) {
+  struct TestCase {
+    uint32_t word;
+    const char *mnemonic;
+    bool transcendental;
+    bool suspends;
+  };
+  constexpr TestCase cases[] = {
+      {0x7E003D00u, "v_tanh_f32", true, false},
+      {0x7E006700u, "v_sqrt_f32", true, false},
+      // A unit classification, not the S_DELAY_ALU class, which tracks F64 as VALU.
+      {0x7E005F00u, "v_rcp_f64", true, false},
+      {0x7E000300u, "v_mov_b32", false, false},
+      {0xBF840001u, "s_monitor_sleep", false, true},
+      {0xBF830001u, "s_sleep", false, true},
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.mnemonic);
+    const uint32_t words[] = {test_case.word, 0, 0, 0};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(inst->mnemonic().starts_with(test_case.mnemonic));
+    EXPECT_EQ(inst->is_transcendental(), test_case.transcendental);
+    EXPECT_EQ(inst->suspends_wave(), test_case.suspends);
+  }
+}
+
+TEST(DecoderSmokeTest, Gfx942ClassifiesTimestampTrapAndDebugBranchBlocks) {
   using amdgpu::ExecutionBlock;
   struct TestCase {
     uint32_t word;
@@ -409,6 +439,8 @@ TEST(DecoderSmokeTest, Gfx942ClassifiesTimestampAndTrapBlocks) {
       {0xC0900000u, "s_memtime", ExecutionBlock::SMEM},
       {0xBF920000u, "s_trap", ExecutionBlock::BRANCH},
       {0xBE801F00u, "s_rfe_b64", ExecutionBlock::BRANCH},
+      // Modelled as never taken, but architecturally a conditional PC update.
+      {0xBF970001u, "s_cbranch_cdbgsys", ExecutionBlock::BRANCH},
   };
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
@@ -420,6 +452,7 @@ TEST(DecoderSmokeTest, Gfx942ClassifiesTimestampAndTrapBlocks) {
     ASSERT_NE(inst, nullptr);
     EXPECT_TRUE(inst->mnemonic().starts_with(test_case.mnemonic));
     EXPECT_EQ(inst->amdgpu_execution_block(), test_case.block);
+    EXPECT_EQ(inst->writes_pc(), test_case.block == ExecutionBlock::BRANCH);
   }
 }
 

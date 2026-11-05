@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_ISA_INSTRUCTION_H_
 #define ROCJITSU_ISA_INSTRUCTION_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/execution_block.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/isa/operand.h"
@@ -99,6 +100,9 @@ enum InstFlags : uint64_t {
   MISALIGNED_SCALAR_DATA = (1ULL << 29),
   /// @brief Encoded for the scalar ALU (SOP1, SOP2, SOPC, SOPK, SOPP), including
   /// waits, barriers, messages, no-ops and the PC writers.
+  /// @details SALU, VALU, SMEM, VMEM and LDS classify the encoding: the generator
+  /// sets at most one of them, from the encoding alone. amdgpu_execution_block()
+  /// applies policy on top of them; see amdgpu::ExecutionBlock.
   SALU = (1ULL << 30),
   /// @brief Encoded for the vector ALU (VOP*, VOPD, VINTERP), including matrix and
   /// transcendental operations.
@@ -112,32 +116,26 @@ enum InstFlags : uint64_t {
   /// @brief Encoded for LDS (DS, LDS-direct), including GWS and the DS no-op.
   LDS = (1ULL << 34),
   /// @brief Evaluated by the VALU transcendental unit: rcp, rsq, sqrt, exp, log,
-  /// sin and cos, including their pseudo-scalar forms.
+  /// sin, cos and tanh, including their pseudo-scalar forms.
+  /// @details An operation (unit) classification, not the S_DELAY_ALU TRANS
+  /// dependency class. It covers every data width, so F64 forms such as
+  /// v_rcp_f64 are included although the ISA tracks them as ordinary VALU for
+  /// delay purposes, and matrix operations are excluded although CDNA5 tracks
+  /// small-data WMMA as TRANS. A consumer that needs the delay class must apply
+  /// those target-specific rules itself.
   TRANSCENDENTAL = (1ULL << 35),
-  /// @brief Sleeps or halts its wave (s_sleep, s_sleep_var, s_sethalt, s_sendmsghalt).
+  /// @brief May sleep or halt its wave (s_sleep, s_sleep_var, s_monitor_sleep,
+  /// s_sethalt, s_sendmsghalt).
+  /// @details Whether it does depends on operands and execution state; for
+  /// example, s_sethalt 0 clears the halt bit.
   SUSPENDS_WAVE = (1ULL << 36),
-  /// @brief Enters or returns from the trap handler (s_trap, s_rfe*). Writes the PC
-  /// without any of the control-flow flags above.
-  TRAP_CONTROL = (1ULL << 37)
+  /// @brief May write the PC although it carries none of the control-flow flags
+  /// above: trap entry and return (s_trap, s_rfe*) and the debug conditional
+  /// branches (s_cbranch_cdbg*).
+  /// @details Kept separate from BRANCH and COND_BRANCH so CFG construction does
+  /// not change. Query through writes_pc(), which combines them.
+  WRITES_PC = (1ULL << 37)
 };
-
-namespace amdgpu {
-
-/// @brief The AMDGPU block an instruction issues to.
-/// @details A static classification of the decoded instruction's encoding: it
-/// does not see address routing, so generic FLAT is VMEM even when its address
-/// resolves to LDS.
-enum class ExecutionBlock : uint8_t {
-  UNKNOWN, ///< In no block below, e.g. exports and non-AMDGPU instructions.
-  SALU,    ///< Scalar ALU, including waits, barriers, messages and no-ops.
-  VALU,    ///< Vector ALU, including matrix and transcendental operations.
-  BRANCH,  ///< Instructions that may write the PC; see Instruction::writes_pc().
-  SMEM,    ///< Scalar memory and scalar cache maintenance.
-  VMEM,    ///< Vector memory: buffer, global, scratch, flat, image and tensor.
-  LDS,     ///< LDS, including LDS-direct, GWS and the ds_ no-op.
-};
-
-} // namespace amdgpu
 
 class BasicBlock;
 
@@ -397,24 +395,25 @@ public:
 
   /// @brief Whether this instruction may leave the PC somewhere other than the
   /// next instruction.
-  /// @details The control-flow flags plus TRAP_CONTROL. s_setpc, s_swappc and
+  /// @details The control-flow flags plus WRITES_PC. s_setpc, s_swappc and
   /// s_call carry INDIRECT_BRANCH or INDIRECT_CALL.
   bool writes_pc() const {
     constexpr uint64_t pc_flags =
-        BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR | TRAP_CONTROL;
+        BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR | WRITES_PC;
     return (flags_ & pc_flags) != 0;
   }
 
   /// @brief Whether this is an AMDGPU VALU transcendental. See TRANSCENDENTAL.
   bool is_transcendental() const { return flags_ & TRANSCENDENTAL; }
 
-  /// @brief Whether this instruction sleeps or halts its wave. See SUSPENDS_WAVE.
+  /// @brief Whether this instruction may sleep or halt its wave. See SUSPENDS_WAVE.
   bool suspends_wave() const { return flags_ & SUSPENDS_WAVE; }
 
   /// @brief The AMDGPU block this instruction issues to.
   /// @details The generated encoding sets exactly one of the block flags, or
-  /// none for exports. PC writers are encoded for the scalar ALU and report as
-  /// BRANCH.
+  /// none for exports. Every PC writer reports BRANCH, overriding its SALU
+  /// encoding; see amdgpu::ExecutionBlock for that contract and for when to use
+  /// plugins::classify_instruction() instead.
   [[nodiscard]] amdgpu::ExecutionBlock amdgpu_execution_block() const {
     using amdgpu::ExecutionBlock;
     if (flags_ & LDS)

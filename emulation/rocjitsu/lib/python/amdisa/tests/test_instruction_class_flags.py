@@ -14,7 +14,7 @@ from amdisa.codegen._generator import (
     _execution_block_flag_stmt,
     _instruction_class_flag_stmts,
 )
-from amdisa.semantics import InstructionSemantics
+from amdisa.semantics import InstructionSemantics, derive_semantics
 
 
 def _flags(name, sem):
@@ -31,6 +31,9 @@ def _flags(name, sem):
         ('ENC_SMEM', 'SMEM'),
         ('ENC_VOP3', 'VALU'),
         ('VOP3P_MFMA', 'VALU'),
+        # The hand-templated dual-issue class reads the table too.
+        ('VOPDXY', 'VALU'),
+        ('VOPD3XY', 'VALU'),
         ('ENC_VINTRP', 'VALU'),
         ('ENC_DS', 'LDS'),
         ('ENC_LDSDIR', 'LDS'),
@@ -68,12 +71,35 @@ def test_unclassified_encoding_fails_generation():
         InstructionSemantics('V_LOG_F16', 'vector_unary', operation='log2'),
         InstructionSemantics('V_SIN_F32', 'vector_unary', operation='sin'),
         InstructionSemantics('V_COS_F16', 'vector_unary', operation='cos'),
+        InstructionSemantics('V_TANH_F32', 'vector_unary', operation='tanh'),
+        InstructionSemantics('V_TANH_BF16', 'vector_unary', operation='tanh'),
         InstructionSemantics('V_S_EXP_F32', 'pseudo_scalar_unary', operation='exp2'),
     ],
     ids=lambda sem: sem.name,
 )
 def test_transcendentals_are_flagged(sem):
     assert _flags(sem.name, sem) == {'TRANSCENDENTAL'}
+
+
+# Derived rather than hand-built, so an operation the semantics layer names
+# but the transcendental set omits fails here.
+@pytest.mark.parametrize(
+    'name',
+    [
+        'V_RCP_F32',
+        'V_RCP_F64',
+        'V_SQRT_BF16',
+        'V_EXP_F16',
+        'V_TANH_F32',
+        'V_TANH_F16',
+        'V_TANH_BF16',
+    ],
+)
+@pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
+def test_derived_transcendentals_are_flagged(enc, name):
+    sem = derive_semantics(name, enc)
+    assert sem is not None
+    assert _flags(name, sem) == {'TRANSCENDENTAL'}
 
 
 @pytest.mark.parametrize(
@@ -90,17 +116,28 @@ def test_other_vector_ops_are_not_transcendental(sem):
 
 
 @pytest.mark.parametrize(
-    'name', ['S_SLEEP', 'S_SLEEP_VAR', 'S_SETHALT', 'S_SENDMSGHALT']
+    'name',
+    ['S_SLEEP', 'S_SLEEP_VAR', 'S_MONITOR_SLEEP', 'S_SETHALT', 'S_SENDMSGHALT'],
 )
 def test_wave_suspenders_are_flagged(name):
     assert _flags(name, InstructionSemantics(name, 'true_nop')) == {'SUSPENDS_WAVE'}
 
 
 @pytest.mark.parametrize(
-    'name', ['S_TRAP', 'S_RFE_B64', 'S_RFE_I64', 'S_RFE_RESTORE_B64']
+    'name',
+    [
+        'S_TRAP',
+        'S_RFE_B64',
+        'S_RFE_I64',
+        'S_RFE_RESTORE_B64',
+        'S_CBRANCH_CDBGSYS',
+        'S_CBRANCH_CDBGUSER',
+        'S_CBRANCH_CDBGSYS_OR_USER',
+        'S_CBRANCH_CDBGSYS_AND_USER',
+    ],
 )
-def test_trap_entry_and_return_are_flagged(name):
-    assert _flags(name, InstructionSemantics(name, 'true_nop')) == {'TRAP_CONTROL'}
+def test_pc_writers_without_control_flow_semantics_are_flagged(name):
+    assert _flags(name, InstructionSemantics(name, 'true_nop')) == {'WRITES_PC'}
 
 
 def test_flagless_instruction_without_semantics():

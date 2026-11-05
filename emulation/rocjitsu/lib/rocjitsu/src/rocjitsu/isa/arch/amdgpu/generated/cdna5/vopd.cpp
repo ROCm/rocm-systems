@@ -183,10 +183,10 @@ Vopd::Vopd(const MachineInst *inst)
   raw_encoding_ = words;
   word0_ = words[0];
   word1_ = words[1];
-  flags_ |= VALU;
 
   if ((word0_ >> 24) == 0xCF) {
     format_ = Format::Vopd3;
+    flags_ |= VALU;
     size_ = 12;
     encoding_id_ = 0xCF;
     word2_ = words[2];
@@ -221,6 +221,7 @@ Vopd::Vopd(const MachineInst *inst)
       srcy2_.set_wave_mask();
   } else {
     format_ = Format::VopdXy;
+    flags_ |= VALU;
     encoding_id_ = 0x32;
     opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
     opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);

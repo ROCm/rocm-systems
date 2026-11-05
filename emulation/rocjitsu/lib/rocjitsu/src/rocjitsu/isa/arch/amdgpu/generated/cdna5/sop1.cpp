@@ -2349,7 +2349,7 @@ SRfeI64Sop1::SRfeI64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   pc.apply_fieldless_caps(false, false, false);
-  flags_ |= TRAP_CONTROL;
+  flags_ |= WRITES_PC;
 }
 
 namespace detail {

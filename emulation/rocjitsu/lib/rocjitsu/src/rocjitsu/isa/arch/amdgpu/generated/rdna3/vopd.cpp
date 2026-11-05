@@ -123,9 +123,9 @@ Vopd::Vopd(const MachineInst *inst)
   raw_encoding_ = words;
   word0_ = words[0];
   word1_ = words[1];
-  flags_ |= VALU;
 
   format_ = Format::VopdXy;
+  flags_ |= VALU;
   encoding_id_ = 0x32;
   opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
   opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
