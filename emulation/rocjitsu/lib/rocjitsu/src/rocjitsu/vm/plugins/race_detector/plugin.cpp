@@ -275,6 +275,8 @@ std::string_view event_description(MemoryEventType type) {
     return "load from global memory into TTMPs";
   case SCALAR_TO_GLOBAL:
     return "store from scalar registers into global memory";
+  case LDS_TO_GLOBAL:
+    return "transfer from LDS into global memory";
   case N:
     break;
   }
@@ -293,8 +295,7 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
   const auto event = v.conflictingEvent;
   const int owner = events.waveId(event).value;
   const auto type = events.type(event);
-  const bool conflicting_read =
-      v.space == RaceViolation::Space::LDS && type == MemoryEventType::LDS_TO_VGPR;
+  const bool conflicting_read = v.space == RaceViolation::Space::LDS && isFromLds(type);
   const char *hazard = !v.isWrite         ? "read-after-write (RAW)"
                        : conflicting_read ? "write-after-read (WAR)"
                                           : "write-after-write (WAW)";

@@ -289,6 +289,8 @@ TEST(RaceReportDescriptionTest, DescribesRegisterAndLdsDirectionsAcrossCompletio
        "LDS into VGPRs"},
       {Space::LDS, MemoryEventType::LDS_TO_VGPR, true, 1, true, "LDS byte 2", "WAR",
        "LDS into VGPRs"},
+      {Space::LDS, MemoryEventType::LDS_TO_GLOBAL, true, 1, false, "LDS byte 2", "WAR",
+       "LDS into global memory"},
       {Space::LDS, MemoryEventType::GLOBAL_TO_LDS, false, 0, false, "LDS byte 2", "RAW",
        "global memory into LDS"},
       {Space::LDS, MemoryEventType::GLOBAL_TO_LDS, false, 1, true, "LDS byte 2", "RAW",
