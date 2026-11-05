@@ -86,9 +86,8 @@ class OmniAnalyze_Base:
         self, arch: str, sys_info: pd.Series, workload_dir: str
     ) -> Set[str]:
         """Return the ids of the blocks analyze shows for this workload."""
-        args = self.get_args()
         arch_configs = self.generate_configs(
-            arch, args.config_dir, False, None, sys_info, self.get_profiling_config()
+            arch, False, None, sys_info, self.get_profiling_config()
         )
         # Metric tables that define no metrics have empty frames even in blocks
         # the workload didn't profile, so only tables with rows count.
