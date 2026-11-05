@@ -4,11 +4,8 @@
  * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
-// Phase 2: Structured-data put via ipcCopy_wg / memcpy_wg_tdm.
-// Transfers arrays of TdmTestRecord (32 bytes each) and validates field-by-field.
-// The kernel registers its dynamic LDS buffer via rocshmem_set_tdm_lds(),
-// sized at launch via rocshmem_query_tdm_lds_bytes() -- the same public API
-// any user kernel would use to opt into the TDM fast path.
+// Phase 2: structured-data put via ipcCopy_wg / memcpy_wg_tdm.
+// Transfers TdmTestRecord arrays and validates field-by-field.
 
 #ifndef ROCSHMEM_TDM_STRUCT_PUT_GTEST_HPP
 #define ROCSHMEM_TDM_STRUCT_PUT_GTEST_HPP
@@ -113,11 +110,14 @@ class TdmStructPutFixture : public ::testing::TestWithParam<size_t> {
     assert(heap_mem_);
     mpi_ = new MPI_T(heap_mem_->get_ptr(), heap_mem_->get_size(), MPI_COMM_WORLD);
     ipc_impl_.ipcHostInit(mpi_->my_pe(), mpi_->get_heap_bases(), MPI_COMM_WORLD);
-    // Force a known tile size so the parameterized record counts below
-    // actually land on the tile boundaries their comments claim.
+    // Force a known tile size so the parameterized sizes land where intended.
     uint32_t tile_bytes = TEST_TDM_TILE_BYTES;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &tile_bytes, sizeof(tile_bytes),
                                 offsetof(constmem_t, tdm_tile_bytes)));
+    // Force SDMA off: this fixture never sets up an SDMA channel.
+    size_t sdma_threshold = SDMA_THRESHOLD_DISABLED;
+    CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &sdma_threshold, sizeof(sdma_threshold),
+                                offsetof(constmem_t, ipc_sdma_threshold)));
     hip_allocator_->allocate((void**)&ipc_impl_dptr_, sizeof(IpcImplT));
     CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT),
                         hipMemcpyHostToDevice));
@@ -166,7 +166,8 @@ class TdmStructPutFixture : public ::testing::TestWithParam<size_t> {
     mpi_->barrier();
 
     const dim3 block(WF_SIZE);
-    const size_t smem = rocshmem_query_tdm_lds_bytes();
+    // Backend-free: compute LDS size from the forced tile size directly.
+    const size_t smem = tdm::lds_bytes_for_tile(TEST_TDM_TILE_BYTES);
 
     if (my_pe == 0) {
       auto* src  = reinterpret_cast<const TdmTestRecord*>(ipc_impl_.ipc_bases[0]);
