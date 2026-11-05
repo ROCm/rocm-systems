@@ -2,11 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "library_checker.hpp"
-#include "common/defines.h"
 #include "common/version.hpp"
 #include "logger/debug.hpp"
-
-#include <profiler-hub/storage.hpp>
 
 #include <fmt/format.h>
 
@@ -43,20 +40,6 @@ check_version(std::string_view library_name, const version& built, const version
     LOG_CRITICAL("{}. Check LD_LIBRARY_PATH and the installed {}. Aborting.",
                  format_version_mismatch(library_name, built, loaded), library_name);
     std::exit(EXIT_FAILURE);
-}
-
-void
-check_profiler_hub_version_mismatch()
-{
-    // the storage is never opened here; its constructor only stores the arguments
-    const auto loaded = profiler_hub::storage_t{ "", "" }.get_storage_version();
-
-    check_version(
-        "profiler-hub",
-        version{ .major = ROCPROFSYS_PROFILER_HUB_VERSION_MAJOR,
-                 .minor = ROCPROFSYS_PROFILER_HUB_VERSION_MINOR,
-                 .patch = ROCPROFSYS_PROFILER_HUB_VERSION_PATCH },
-        version{ .major = loaded.major, .minor = loaded.minor, .patch = loaded.patch });
 }
 
 }  // namespace rocprofsys::library_checker
