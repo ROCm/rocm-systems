@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -158,6 +159,8 @@ public:
     MemoryWaitDiagnostics memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
     /// Opt in to gfx1250 replay-source overwrite diagnostics independently.
     MemoryWaitDiagnostics xcnt_diagnostics = MemoryWaitDiagnostics::Off;
+
+    ArithmeticPolicy arithmetic{};
 
     /// @brief Whether gfx1250 replay-source diagnostics are enabled.
     bool xcnt_checks_enabled() const {
@@ -331,6 +334,13 @@ public:
     assert(!has_active_wfs());
     config_.memory_wait_diagnostics = memory;
     config_.xcnt_diagnostics = xcnt;
+  }
+
+  /// @brief Restore arithmetic configuration before resuming checkpoint execution.
+  void restore_arithmetic_policy(ArithmeticPolicy policy) {
+    assert(!has_active_wfs());
+    config_.arithmetic = policy;
+    arithmetic_ = ArithmeticExecution(policy);
   }
 
   /// @brief Select whether the CP continuation event owns functional execution.
@@ -749,6 +759,8 @@ public:
   /// @brief Return the CU configuration.
   /// @returns Const reference to the CU configuration.
   const Config &config() const { return config_; }
+  uint64_t arithmetic_flags() const { return arithmetic_.flags(); }
+
   /// @brief Lazily acquire and cache the VM helper pool.
   matrix_coexecution::SharedPool &async_pool();
 
@@ -1331,8 +1343,9 @@ public:
   /// thread or from single-threaded test contexts only.
   /// @param inst The decoded instruction.
   /// @param wf The wavefront executing the instruction.
-  /// @param failure_detail Receives `UnimplementedInst::what()` when that legacy
-  /// exception is translated; otherwise the pointed-to string is unchanged.
+  /// @param failure_detail Receives the reported register-access diagnostic or
+  /// `UnimplementedInst::what()` when that legacy exception is translated.
+  /// Otherwise the pointed-to string is unchanged.
   /// @returns Failure for an unimplemented instruction stub or a reported operand
   /// failure. The wavefront retains the reason for caller-owned diagnostics.
   /// Each call clears the previous error; a failed call does not halt the wavefront.
@@ -1356,6 +1369,8 @@ public:
       if (failure_detail)
         *failure_detail = error.what();
     }
+    if (failure_detail && wf.instruction_execution_error_detail())
+      *failure_detail = wf.instruction_execution_error_detail();
     return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
   }
 
@@ -1484,6 +1499,7 @@ protected:
   virtual std::unique_ptr<Wavefront> create_wavefront(uint32_t wf_id) = 0;
 
   Config config_;
+  ArithmeticExecution arithmetic_;
   matrix_coexecution::SharedPool *async_pool_ = nullptr;
   GpuMemory *memory_;
   uint32_t wf_size_ = 0;
@@ -1833,6 +1849,9 @@ inline bool InstructionComputeUnitView::setreg_vgpr_msb_fixup() const {
   return raw_cu().setreg_vgpr_msb_fixup();
 }
 inline rj_code_arch_t InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
+inline uint64_t InstructionComputeUnitView::arithmetic_flags() const {
+  return raw_cu().arithmetic_flags();
+}
 inline bool InstructionComputeUnitView::observes_register_access() const {
   return raw_cu().observes_register_access();
 }

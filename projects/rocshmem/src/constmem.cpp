@@ -39,10 +39,11 @@ void init_constant_memory(void) {
                                  ? backend->ipcImpl.shm_size : 0;
 
 #if defined(USE_SDMA)
+  // Follow the node-local agreement rather than the environment: after an agreed fallback the env
+  // still enables SDMA but the queue handles are null, and every rank must pick the same alltoall.
+  const SdmaImpl &sdma = backend->ipcImpl.sdmaImpl_;
   constmem_values.ipc_sdma_threshold =
-      static_cast<bool>(envvar::sdma::enabled)
-          ? static_cast<size_t>(envvar::sdma::threshold)
-          : SDMA_THRESHOLD_DISABLED;
+      sdma.sdmaEnabled ? sdma.sdmaThreshold : SDMA_THRESHOLD_DISABLED;
 #else
   constmem_values.ipc_sdma_threshold = SDMA_THRESHOLD_DISABLED;
 #endif
@@ -52,7 +53,8 @@ void init_constant_memory(void) {
   constmem_values.heap_size = backend->heap.get_size();
 
   constmem_values.tdm_tile_bytes = envvar::tdm::tile_bytes;
-  constmem_values.tdm_threshold = envvar::tdm::threshold;
+  constmem_values.tdm_put_threshold = envvar::tdm::put_threshold;
+  constmem_values.tdm_get_threshold = envvar::tdm::get_threshold;
 
 #if defined(USE_TDM)
   {

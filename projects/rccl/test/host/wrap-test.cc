@@ -65,6 +65,7 @@
 // binary -- declaring a second copy here would be a duplicate-symbol error.
 #include "fakes/nccl_fakes.h"    // extern g_loadParam
 #include "fakes/param_redirect.h"  // NCCL_PARAM/RCCL_PARAM -> g_loadParam
+#include "fakes/rccl_arch_thresholds_fakes.h"  // g_archThresholdsTable (DPX vs SPX)
 
 // WRAP_CC_PATH is defined by test/host/CMakeLists.txt as the hipified copy of
 // src/rccl_wrap.cc, e.g. ${PROJECT_BINARY_DIR}/hipify/src/rccl_wrap.cc.
@@ -354,12 +355,9 @@ ncclTaskColl MakeTask(int protocol, bool hasAcc) {
 }
 }  // namespace
 
-// ENABLE_LL128's state depends on the build configuration; both arms are
-// written so whichever compiles in is exercised. The OCI cluster build has
-// ENABLE_LL128 defined, so *_LL128_AccGatesOutGfx90a and its siblings are the
-// ones that compile and run there; a local ROCm-7.0.0 build does not define
-// it, which is what compiles and runs *_LL128_DisabledAtCompileTime instead --
-// both arms are now verified, one per build.
+// rccl-UnitTestsMicro always compiles this file with ENABLE_LL128
+// (test/host/CMakeLists.txt), matching production librccl. The
+// *_LL128_DisabledAtCompileTime arms are not part of that binary.
 #if defined(ENABLE_LL128)
 TEST(WrapMicrotest, IsArchSupportedForFunc_LL128_AccGatesOutGfx90a) {
   // With acc set, gfx90a is EXCLUDED from the LL128+acc allow-list (only
@@ -1747,16 +1745,16 @@ rcclArchThresholds MakeRankScaledTable() {
   rcclArchThresholds t{};
   t.ddaLLMax[ncclFuncAllReduce] = 32 * kMiB;
   t.ddaLLMax[ncclFuncAllGather] = 128 * kKiB;
-  t.ddaLLMax[ncclFuncReduceScatter] = 1 * kMiB;
+  t.ddaLLMax[ncclFuncReduceScatter] = 4 * kMiB;
   t.ddaLL128Max[ncclFuncAllReduce] = 256 * kMiB;
   t.ddaLL128Max[ncclFuncAllGather] = 128 * kMiB;
-  t.ddaLL128Max[ncclFuncReduceScatter] = 64 * kMiB;
+  t.ddaLL128Max[ncclFuncReduceScatter] = 224 * kMiB;
   t.ddaVmmMax[ncclFuncAllReduce] = 16 * kMiB;
   t.ddaLLMaxPerRank[ncclFuncAllReduce] = 1 * kMiB;
   t.ddaLLMaxPerRank[ncclFuncAllGather] = 16 * kKiB;
-  t.ddaLLMaxPerRank[ncclFuncReduceScatter] = 256 * kKiB;
+  t.ddaLLMaxPerRank[ncclFuncReduceScatter] = 1 * kMiB;
   t.ddaLL128MaxPerRank[ncclFuncAllGather] = 16 * kMiB;
-  t.ddaLL128MaxPerRank[ncclFuncReduceScatter] = 2 * kMiB;
+  t.ddaLL128MaxPerRank[ncclFuncReduceScatter] = 15 * kMiB / 2;
   t.ddaVmmMaxPerRank[ncclFuncReduceScatter] = 2 * kMiB;
   t.rankScaledMinRanks = 8;
   t.rankScaledMaxBytes = 256 * kMiB;
@@ -1999,6 +1997,116 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250AllReduceLL128_Disab
       });
 }
 #endif  // ENABLE_LL128
+
+namespace {
+// DPX broadcast ceilings. Gfx1250Table() leaves both at 0, which is the SPX case.
+rcclArchThresholds MakeDpxBroadcastTable() {
+  rcclArchThresholds t{};
+  t.bcRingLLMaxBytes = 16 * kKiB;
+  t.bcRingLL128MaxBytes = 512 * kMiB;
+  return t;
+}
+
+// tuning_model_11 broadcast ranges. AllReduce / AllGather / ReduceScatter come
+// from MakeGfx1250ProtocolComm.
+void SetModelBroadcastRanges(ncclComm* comm) {
+  comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX] = 0;
+  comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MAX_IDX] = 2048;
+  comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MIN_IDX] = 2048;
+  comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = 16 * kMiB;
+}
+
+int ProtocolOf(ncclComm* comm, ncclFunc_t func, size_t nBytes) {
+  ncclTaskColl info{};
+  info.func = func;
+  info.algorithm = NCCL_ALGO_RING;
+  info.protocol = NCCL_PROTO_UNDEF;
+  rcclUpdateCollectiveProtocol(comm, nBytes, &info);
+  return info.protocol;
+}
+}  // namespace
+
+// gfx1250 DPX broadcast uses the arch table's total-byte ceilings at every node
+// count, including 12. SPX is Gfx1250Table(), whose ceilings are 0, so it keeps
+// tuning_model_11's per-rank ranges.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250DpxBroadcastUsesTotalBytes) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250DpxBroadcastUsesTotalBytes",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const rcclArchThresholds dpx = MakeDpxBroadcastTable();
+        const size_t llMax = 16 * kKiB;
+        const size_t ll128Max = 512 * kMiB;
+        const struct {
+          int nNodes;
+          int nRanks;
+        } scales[] = {{1, 8}, {2, 16}, {4, 32}, {8, 64}, {12, 96}};
+        for (const auto& scale : scales) {
+          ncclComm* comm = MakeGfx1250ProtocolComm(scale.nRanks);
+          comm->nNodes = scale.nNodes;
+          comm->archThresholds = &dpx;
+          SetModelBroadcastRanges(comm);
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 0)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, llMax)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, llMax + 1)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, ll128Max)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, ll128Max + 1)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, (size_t)16 << 30)) << scale.nNodes;
+          // The broadcast ceilings must not move AllReduce off its per-rank model.
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncAllReduce, 100 * kKiB)) << scale.nNodes;
+          DeleteCommWithArch(comm);
+        }
+
+        // SPX table is installed, with a zero LL128 ceiling, so the guard in
+        // rcclBroadcastTotalByteTable is what keeps the per-rank model. 16 KiB + 1
+        // on 8 ranks is still 2048 B/rank (LL). 256 MiB is 32 MiB/rank, past the
+        // model's 16 MiB LL128 ceiling (Simple).
+        ncclComm* spx = MakeGfx1250ProtocolComm(8);
+        SetModelBroadcastRanges(spx);
+        ASSERT_NE(spx->archThresholds, nullptr);
+        EXPECT_EQ((size_t)0, spx->archThresholds->bcRingLLMaxBytes);
+        EXPECT_EQ((size_t)0, spx->archThresholds->bcRingLL128MaxBytes);
+        EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(spx, ncclFuncBroadcast, llMax + 1));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(spx, ncclFuncBroadcast, 256 * kMiB));
+        DeleteCommWithArch(spx);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250DpxBroadcastHonorsUserProto) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250DpxBroadcastHonorsUserProto",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "LL128");
+        const rcclArchThresholds dpx = MakeDpxBroadcastTable();
+        ncclComm* comm = MakeGfx1250ProtocolComm(8);
+        comm->archThresholds = &dpx;
+        ncclTaskColl info{};
+        info.func = ncclFuncBroadcast;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        rcclUpdateCollectiveProtocol(comm, 1024, &info);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, info.protocol);
+        DeleteCommWithArch(comm);
+      });
+}
+
+#if defined(ENABLE_LL128)
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250DpxBroadcastWithoutLl128FallsToSimple) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250DpxBroadcastWithoutLl128FallsToSimple",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const rcclArchThresholds dpx = MakeDpxBroadcastTable();
+        ncclComm* comm = MakeGfx1250ProtocolComm(64);
+        comm->nNodes = 8;
+        comm->archThresholds = &dpx;
+        comm->topo->ll128Enabled = false;
+        EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 16 * kKiB));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 16 * kKiB + 1));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 512 * kMiB));
+        DeleteCommWithArch(comm);
+      });
+}
+#endif
 
 TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_UndefinedTuningWarnsOnceForSupportedArch) {
   RUN_ISOLATED_TEST(
@@ -3274,6 +3382,157 @@ TEST(WrapMicrotestIsolated, OptThreadBlockSize_SingleNodeUsesHalfThreads) {
         int nThreads = -1;
         rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
         EXPECT_EQ(RCCL_SINGLE_NODE_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx1250 DPX caps a 256-thread request at 192. Single-node would otherwise
+// force RCCL_SINGLE_NODE_MAX_NTHREADS, and multi-node LL would force
+// RCCL_LL_MAX_NTHREADS. nThreads is seeded with 256, the value the caller
+// passes from maxThreads when NCCL_NTHREADS is unset.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250DpxDefaultIs192) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250DpxDefaultIs192",
+      []() {
+        static rcclArchThresholds spx{};
+        static rcclArchThresholds dpx{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_SPX] = &spx;
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &dpx;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        comm->archThresholds = &dpx;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncBroadcast;
+        int nThreads = 256;
+        comm->nNodes = 1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(RCCL_GFX1250_DEFAULT_NTHREADS, nThreads);
+        comm->nNodes = 2;
+        info.protocol = NCCL_PROTO_LL;
+        nThreads = 256;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(RCCL_GFX1250_DEFAULT_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A lower NCCL_NTHREADS / NCCL_LL128_NTHREADS is already in nThreads. DPX must
+// not raise it to 192.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250DpxKeepsLowerNthreads) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250DpxKeepsLowerNthreads",
+      []() {
+        static rcclArchThresholds dpx{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &dpx;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        comm->nNodes = 2;
+        comm->archThresholds = &dpx;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncBroadcast;
+        int nThreads = 128;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(128, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// SPX is unmeasured, so gfx1250 SPX keeps the 256-thread single-node default.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250SpxStays256) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250SpxStays256",
+      []() {
+        static rcclArchThresholds spx{};
+        static rcclArchThresholds dpx{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_SPX] = &spx;
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &dpx;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        comm->nNodes = 1;
+        comm->archThresholds = &spx;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncBroadcast;
+        int nThreads = 256;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(RCCL_SINGLE_NODE_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// PAT's maxThreads slot is never filled on HIP, so the caller passes 0. The
+// DPX cap must not turn that into a short block: the PAT compute thread is
+// NCCL_MAX_NTHREADS-1. Multi-node so the single-node arm is not what sets it.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250DpxPatStaysFullBlock) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250DpxPatStaysFullBlock",
+      []() {
+        static rcclArchThresholds dpx{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &dpx;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        comm->nNodes = 2;
+        comm->archThresholds = &dpx;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_PAT;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncAllGather;
+        int nThreads = 0;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(RCCL_DEFAULT_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx950 and gfx942 return the same arch table for DPX and SPX. The gfx1250
+// arch check is what keeps that shared table from taking the 192 cap.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx950SharedTableStays256) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx950SharedTableStays256",
+      []() {
+        static rcclArchThresholds shared{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_SPX] = &shared;
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &shared;
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->WarpSize = 64;
+        comm->nNodes = 1;
+        comm->archThresholds = &shared;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncAllReduce;
+        int nThreads = 256;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(RCCL_SINGLE_NODE_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// RCCL_THREADS_PER_BLOCK wins over the DPX 192 cap. The comm is DPX so this
+// fails if the override is moved below that cap.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250UserOverrideKeeps256) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250UserOverrideKeeps256",
+      []() {
+        static rcclArchThresholds dpx{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &dpx;
+        g_loadParam = ForceParam("RCCL_THREADS_PER_BLOCK", int64_t(256));
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        comm->nNodes = 1;
+        comm->archThresholds = &dpx;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncBroadcast;
+        int nThreads = 192;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(256, nThreads);
         DeleteCommWithArch(comm);
       });
 }
@@ -6886,26 +7145,36 @@ TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
       []() {
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->archThresholds = Gfx1250Table();
+        comm->nRanks = 4;
+        EXPECT_EQ(4 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
         comm->nRanks = 7;
         EXPECT_EQ(32 * kMiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
         EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
-        EXPECT_EQ(1 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
-        EXPECT_EQ(64 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(4 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(224 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(0u, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         comm->nRanks = 8;
         EXPECT_EQ(8 * kMiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
         EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
-        EXPECT_EQ(2 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(8 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(128 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather));
-        EXPECT_EQ(16 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(60 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
         EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
+        comm->nRanks = 16;
+        EXPECT_EQ(16 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(120 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
         comm->nRanks = 32;
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather)) << "clipped";
         EXPECT_EQ(64 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         // The entry gate admits the widest tier, so it scales too.
-        EXPECT_EQ(64 * kMiB, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(240 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(240 * kMiB, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter));
+        comm->nRanks = 64;
+        EXPECT_EQ(64 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << "clipped";
+        EXPECT_EQ(128 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         DeleteCommWithArch(comm);
       });
 }
@@ -7792,6 +8061,49 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250NeverPicksSymmetric) {
             EXPECT_NE((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo) << totalBytes << " op " << op;
             EXPECT_EQ(NCCL_ALGO_RING, decision.algo) << totalBytes << " op " << op;
           }
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx1250 SPX ReduceScatter: DDA LL to its cap, LL128 to 224M below 8 ranks, nRanks x 7.5M to 256M, then Ring.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250SpxLL128Caps) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_Gfx1250SpxLL128Caps",
+      []() {
+        ScopedHook llEligible(g_reduceScatterDdaFabricLLEligible,
+                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                return true;
+                              });
+        ScopedHook ll128Eligible(g_reduceScatterDdaFabricLL128Eligible,
+                                 [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                   return true;
+                                 });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nNodes = 1;
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        auto algo = [&](size_t totalBytes) {
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr,
+                                                          totalBytes / sizeof(float) / (size_t)comm->nRanks,
+                                                          ncclFloat32, ncclSum, /*query=*/false, &decision));
+          return decision.algo;
+        };
+        const int ll = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL;
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const std::pair<int, size_t> llCases[] = {{4, 4 * kMiB}, {8, 8 * kMiB}, {16, 16 * kMiB}};
+        for (const auto& c : llCases) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(ll, algo(c.second)) << c.first;
+          EXPECT_EQ(ll128, algo(c.second + (size_t)c.first * sizeof(float))) << c.first;
+        }
+        const std::pair<int, size_t> cases[] = {
+            {4, 224 * kMiB}, {8, 60 * kMiB}, {16, 120 * kMiB}, {32, 240 * kMiB}, {64, 256 * kMiB}};
+        for (const auto& c : cases) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(ll128, algo(c.second)) << c.first;
+          EXPECT_EQ(NCCL_ALGO_RING, algo(c.second + (size_t)c.first * sizeof(float))) << c.first;
         }
         DeleteCommWithArch(comm);
       });
