@@ -1020,12 +1020,17 @@ queue_controller_adopt_existing_queue(const hsa_queue_t* queue)
 
     // Counter collection, SPM and thread trace need setup a queue adopted mid-life never
     // received. Adoption covers tracing only.
-    if(auto _blocking = describe_services_blocking_adoption(); !_blocking.empty())
+    if(!context::get_registered_contexts([](const context::context* ctx) {
+            return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
+                    ctx->dispatch_spm || ctx->device_spm || ctx->dispatch_thread_trace ||
+                    ctx->device_thread_trace);
+        }).empty())
     {
+        const auto blocking_services = describe_services_blocking_adoption();
         ROCP_WARNING << fmt::format(
             "[queue-intercept] not adopting pre-existing queue: queue setup for {} cannot be "
             "applied retroactively",
-            _blocking);
+            blocking_services);
         return false;
     }
 
@@ -1056,7 +1061,7 @@ queue_controller_adopt_existing_queue(const hsa_queue_t* queue)
             qc->get_ext_table(),
             _queue,
             [](write_interceptor_t, void*) {},
-            /*profiling_participant=*/false);
+            /*tracked_queue=*/false);
 
         // Not registered with the serializer, which keeps any async handler off its
         // ready_signal, and holds no owner-registry entry or doorbell window, so no
