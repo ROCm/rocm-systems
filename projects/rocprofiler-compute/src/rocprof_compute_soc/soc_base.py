@@ -15,13 +15,22 @@ from typing import Any, NamedTuple, Optional
 import config
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils import amdsmi_interface, rocprofv3_avail_interface
-from utils.analysis_views import get_arch_alias_to_panel_id
+from utils.analysis_views import (
+    get_arch_alias_to_panel_id,
+    metric_placements,
+    warn_numeric_metric_ids,
+)
 from utils.logger import (
     console_debug,
     console_error,
     console_log,
     console_warning,
     demarcate,
+)
+from utils.metric_library import (
+    METRIC_LIBRARY_ID_RE,
+    default_metric_library_dir,
+    load_metric_library,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs
@@ -460,6 +469,8 @@ class OmniSoC_Base:
         }
 
         filter_blocks = args.filter_blocks
+        if filter_blocks and self.__arch:
+            warn_numeric_metric_ids(filter_blocks, self.__arch)
         if args.set_selected and self.__arch:
             sets_info = parse_sets_yaml(self.__arch)
             if args.set_selected not in set(sets_info.keys()):
@@ -480,14 +491,25 @@ class OmniSoC_Base:
             for metric in self._iter_arch_analysis_yaml_metrics():
                 expressions.extend(metric.expressions)
 
+        # A metric library id names one metric; its counters come from the library.
+        library_ids = [b for b in filter_blocks if METRIC_LIBRARY_ID_RE.match(b)]
         for block_id in filter_blocks:
-            self._append_expressions_for_filter_token(
-                block_id, config_filename_dict, config_root_dir, expressions
-            )
+            if block_id not in library_ids:
+                self._append_expressions_for_filter_token(
+                    block_id, config_filename_dict, config_root_dir, expressions
+                )
 
         counters, _ = extract_counters_and_variables(
             "\n".join(expressions), self._mspec.gpu_series
         )
+        if library_ids:
+            # An id the arch's views don't show is an error, as in analyze.
+            for metric_id in library_ids:
+                metric_placements(metric_id, self.__arch)
+            library = load_metric_library(default_metric_library_dir(), self.__arch)
+            counters |= library.get_counters_for_metrics(
+                library_ids, self._mspec.gpu_series
+            )
         counters = self._expand_tcc_template_counters(counters)
 
         return counters, filter_blocks

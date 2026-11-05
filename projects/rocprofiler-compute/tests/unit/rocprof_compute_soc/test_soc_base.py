@@ -11,7 +11,7 @@ perfmon_coalesce. No GPU hardware required.
 from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock, patch
 
 import common
@@ -27,6 +27,13 @@ from rocprof_compute_soc.soc_base import (
     _rebuild_tcc_channel_file_map,
     _trial_counter_file_with_extra,
     flat_counters_in_perfmon_file,
+)
+from utils.analysis_views import (
+    has_views,
+    iter_view_rows,
+    legacy_position,
+    load_views,
+    row_metric_ids,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import (
@@ -869,6 +876,35 @@ def test_live_attach_set_fits_one_pass_on_each_architecture(gpu_arch: str) -> No
     assert len(counter_files) == 1, f"{gpu_arch}: live attachment needs one pass"
     assert set(flat_counters_in_perfmon_file(counter_files[0])) == requested_counters
     assert accumulator_count == 0, f"{gpu_arch}: live attachment set uses accumulators"
+
+
+def _metrics_to_select(gpu_arch: str) -> List[str]:
+    """The metric shown in the most rows of gpu_arch's views, and the first two
+    metrics shown in one row."""
+    rows_by_metric: Dict[str, int] = {}
+    for _, row in iter_view_rows(load_views(gpu_arch)):
+        for metric_id in row_metric_ids(row):
+            rows_by_metric[metric_id] = rows_by_metric.get(metric_id, 0) + 1
+    single = [metric for metric, count in rows_by_metric.items() if count == 1]
+    return [max(rows_by_metric, key=rows_by_metric.__getitem__), *single[:2]]
+
+
+@pytest.mark.parametrize("gpu_arch", [arch for arch in CONFIG_ARCHS if has_views(arch)])
+def test_metric_id_collects_the_counters_of_its_rows(gpu_arch: str) -> None:
+    """-b <metric id> takes its counters from the metric library; they are the
+    counters of the rows that show the metric, selected by numeric id."""
+    config_dir = config.analysis_configs_dir
+    for metric_id in _metrics_to_select(gpu_arch):
+        by_id, typed = offline_soc(
+            config_dir, gpu_arch, [metric_id], False
+        ).detect_counters()
+        rows = [
+            legacy_position(position, row)
+            for position, row in iter_view_rows(load_views(gpu_arch))
+            if metric_id in row_metric_ids(row)
+        ]
+        by_rows, _ = offline_soc(config_dir, gpu_arch, rows, False).detect_counters()
+        assert (by_id, typed) == (by_rows, [metric_id]), metric_id
 
 
 # =============================================================================

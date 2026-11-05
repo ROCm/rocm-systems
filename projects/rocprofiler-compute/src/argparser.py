@@ -166,7 +166,8 @@ def add_general_group(
             "Add block or metric [id]s or aliases to list their metrics with units\n"
             'and descriptions, or "all" to list every metric. Each id or alias adds\n'
             "to the list: --list-metrics sol 12.1 lists all of block 2 (sol) and\n"
-            "table 12.1.\n"
+            "table 12.1. A metric id such as compute.salu_util lists every row\n"
+            "that shows the metric.\n"
             "With analyze -p <workload>, list the workload's blocks and metrics."
         ),
     )
@@ -438,10 +439,11 @@ Examples:
         default=[],
         help=(
             "\t\t\tSpecify metric id(s) from --list-metrics for filtering "
-            "(e.g. 12, 12.1, 12.1.1).\n"
-            "\t\t\tAlternatively, specify block id(s) for filtering "
-            "(e.g. 12, 13, 14).\n"
+            "(e.g. compute.salu_util).\n"
+            "\t\t\tAlternatively, specify block or table id(s) for filtering "
+            "(e.g. 12, 12.1).\n"
             "\t\t\tAlternatively, specify block alias(es) for filtering.\n"
+            "\t\t\tNumeric metric ids (e.g. 12.1.1) are deprecated.\n"
             "\t\t\tAliases are arch-specific; run --list-metrics to see\n"
             "\t\t\tall valid block ids and aliases.\n"
             "\t\t\tCan provide multiple space separated arguments.\n"
@@ -839,7 +841,12 @@ Examples:
         metavar="",
         nargs="+",
         type=block_token_or_alias,
-        help="\t\tSpecify metric id(s) from --list-metrics for filtering.",
+        help=(
+            "\t\tSpecify metric id(s) (e.g. compute.salu_util), block or table\n"
+            "\t\tid(s) (e.g. 12, 12.1) or block alias(es) from --list-metrics for\n"
+            "\t\tfiltering.\n"
+            "\t\tNumeric metric ids (e.g. 12.1.1) are deprecated."
+        ),
     )
     analyze_group.add_argument(
         "--gpu-id",

@@ -5,21 +5,27 @@
 
 tools/validate_views.py checks that the shipped views keep the panels' structure; these
 tests cover what that check does not compare: the values a view row gives, the errors
-for broken views, and the profile mode imports.
+for broken views, the metric id resolver of -b and --list-metrics, and the profile mode
+imports.
 """
 
 import copy
 import importlib
 import sys
 
+import common
 from conftest import ProfileModeImportGuard
 
 from utils.analysis_views import (
+    convert_filter_blocks_to_panel_ids,
+    expand_metric_ids,
     iter_view_rows,
     load_views,
+    metric_placements,
     view_metric_errors,
     view_schema_errors,
     views_to_panel_configs,
+    warn_numeric_metric_ids,
 )
 from utils.metric_library import default_metric_library_dir, load_metric_library
 
@@ -139,6 +145,51 @@ def test_view_metric_errors():
         "panel 0 has more than one view",
         "2.1.11 compute.branch_util has no 'peak_empirical'",
         "11.2.0 compute.made_up: not a metric of the arch's library",
+    ]
+
+
+def test_metric_ids_select_every_row_that_shows_them():
+    """compute.salu_util is in Speed of Light and Compute Pipeline on gfx942; aliases
+    and numeric ids pass through."""
+    assert expand_metric_ids(["compute.salu_util", "lds", "11.2.3"], "gfx942") == [
+        "2.1.7",
+        "11.2.2",
+        "lds",
+        "11.2.3",
+    ]
+    assert convert_filter_blocks_to_panel_ids(["compute.salu_util"], "gfx942") == {
+        200,
+        1100,
+    }
+
+
+def test_saved_row_id_of_a_left_out_row_keeps_its_panel(monkeypatch):
+    """gfx908 Speed of Light 2.1.0 has no metric, so the views leave it out; a workload
+    saved with -b 2.1.0 still shows panel 2, without a warning."""
+    warning = common.patch_console(monkeypatch, "utils.analysis_views", "warning")
+    assert convert_filter_blocks_to_panel_ids(["2.1.0", "lds"], "gfx908") == {200, 1200}
+    warning["warning"].assert_not_called()
+
+
+def test_unknown_metric_id_names_the_id_and_arch(monkeypatch):
+    """gfx1151 (gfx115x views) has no SALU utilization metric."""
+    error = common.patch_console(monkeypatch, "utils.analysis_views", "error")["error"]
+    assert metric_placements("compute.salu_util", "gfx1151") == []
+    message = error.call_args.args[0]
+    assert "'compute.salu_util'" in message and "gfx115x" in message
+
+
+def test_numeric_row_ids_resolve_through_panel_positions(monkeypatch):
+    """gfx908's views leave out the Speed of Light rows without a metric, so panel
+    row 2.1.16 (vL1D hit rate) is view row 2.1.7, and panel row 2.1.0 selects nothing.
+    Block and table ids are not deprecated; a row id is, naming its metric id."""
+    warning = common.patch_console(monkeypatch, "utils.analysis_views", "warning")
+    tokens = ["11", "11.2", "2.1.16", "2.1.0", "lds"]
+    assert expand_metric_ids(tokens, "gfx908") == ["11", "11.2", "2.1.7", "lds"]
+    warning["warning"].reset_mock()
+    warn_numeric_metric_ids(tokens, "gfx908")
+    assert [call.args[0] for call in warning["warning"].call_args_list] == [
+        "Numeric metric id '2.1.16' is deprecated. Use 'vl1d.hit_rate' instead.",
     ]
 
 
