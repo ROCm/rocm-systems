@@ -288,6 +288,7 @@ private:
     return ss.str().substr(0, length);
   }
 
+#if !HT_WIN
   // @return the file descriptor of the newly created socket or -1 if there is a failure
   int createAbstractSocket()
   {
@@ -323,7 +324,8 @@ private:
 
     return code;
   }
-  
+#endif
+
   bool isServer_;
   int serverFd_;
   std::string prefix_;
