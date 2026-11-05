@@ -435,6 +435,33 @@ struct pending_completion
 
 using pending_completion_vector_t = std::vector<pending_completion>;
 
+// Set once the records of every batch the GPU completed before a flush are in their buffers.
+using flush_waiter_t = std::shared_ptr<std::atomic<bool>>;
+
+// Covers the batches handed to the record emitter since the last flush. Each emit task holds a
+// reference until its records are written and the monitor holds one until a flush closes the fence,
+// so the destructor runs once all of them are out. The emitter does not run tasks in the order they
+// were queued, so a fence also holds the next one: a later flush is never released ahead of an
+// earlier.
+struct flush_fence
+{
+    std::vector<flush_waiter_t>  waiters = {};
+    std::shared_ptr<flush_fence> next    = {};
+
+    ~flush_fence()
+    {
+        for(auto& waiter : waiters)
+            waiter->store(true, std::memory_order_release);
+    }
+};
+
+// What other threads hand the monitor.
+struct monitor_inbox
+{
+    pending_completion_vector_t completions = {};
+    std::vector<flush_waiter_t> flushes     = {};
+};
+
 inline void
 publish_submitted_packets(QueueState* state, uint64_t submit_pos)
 {
@@ -588,6 +615,7 @@ class completion_monitor
     // Single owner at any time: the monitor thread while it runs, then the finalizing thread once
     // stop_completion_monitor has joined it.
     std::vector<pending_completion> active = {};
+    std::shared_ptr<flush_fence>    fence  = std::make_shared<flush_fence>();
 
     friend void move_incoming_to_active(completion_monitor&);
     friend void retire_completed(completion_monitor&, pending_completion_vector_t&);
@@ -595,9 +623,9 @@ class completion_monitor
     friend void completion_monitor_loop(completion_monitor&);
 
 public:
-    common::Synchronized<std::vector<pending_completion>> incoming    = {};
-    hsa_signal_t                                          wake_signal = {};
-    std::atomic<monitor_state>                            state       = {monitor_state::stopped};
+    common::Synchronized<monitor_inbox> incoming    = {};
+    hsa_signal_t                        wake_signal = {};
+    std::atomic<monitor_state>          state       = {monitor_state::stopped};
 
     // Guards the thread handle so start and stop exclude each other: move-assigning onto a joinable
     // handle calls std::terminate. Both make their `state` transition under this lock, so the loser
@@ -619,6 +647,14 @@ get_completion_monitor()
 {
     static auto*& _v = common::static_object<completion_monitor>::construct();
     return *_v;
+}
+
+// True on the record-emitter thread, where a flush must not wait for the emitter.
+bool&
+on_record_emitter()
+{
+    static thread_local bool _v = false;
+    return _v;
 }
 
 // The single gate every wrapper consults: true means pass straight through to the next
@@ -664,7 +700,7 @@ register_pending_completion(pending_completion&& pending)
         }
 
         mon.inflight.fetch_add(1, std::memory_order_relaxed);
-        inbox.emplace_back(std::move(pending));
+        inbox.completions.emplace_back(std::move(pending));
         get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 1);
     });
 
@@ -848,6 +884,7 @@ submit_to_task_group(kfd::signal_less_hub_t::proven& proven)
     // work that is queued but not yet counted is work a drain reports as absent.
     mon.inflight.fetch_add(1, std::memory_order_relaxed);
     mon.record_emitter->async([&mon, _held]() {
+        on_record_emitter() = true;
         // Armed first: a throwing tool callback must not strand the counter every drain polls.
         auto _dtor = common::scope_destructor{
             [&mon]() { mon.inflight.fetch_sub(1, std::memory_order_release); }};
@@ -946,7 +983,8 @@ signal_less_batch_eligible(Queue*                                            que
 void
 retire_completion_async(completion_monitor&                          mon,
                         const std::shared_ptr<queue_info_session_t>& session,
-                        bool                                         completed)
+                        bool                                         completed,
+                        const std::shared_ptr<flush_fence>&          fence)
 {
     auto batch = release_completion_signals(session, completed);
 
@@ -956,22 +994,41 @@ retire_completion_async(completion_monitor&                          mon,
     // inflight drops after the records are delivered, not when the signals are released: a code
     // object may be unloaded the moment a drain returns, and records naming its kernels must
     // already be out. Only this path decrements.
-    mon.record_emitter->async([&mon, _batch = std::move(batch)]() mutable {
-        // Armed first: a throwing tool callback must not strand the counter every drain polls.
-        auto _dtor = common::scope_destructor{
-            [&mon]() { mon.inflight.fetch_sub(1, std::memory_order_release); }};
+    mon.record_emitter->async([&mon, _batch = std::move(batch), _fence = fence]() mutable {
+        on_record_emitter() = true;
+        // Armed first: a throwing tool callback must not strand the counter every drain polls,
+        // nor a flush waiting on the fence.
+        auto _dtor = common::scope_destructor{[&mon, &_fence]() {
+            mon.inflight.fetch_sub(1, std::memory_order_release);
+            _fence.reset();
+        }};
         emit_dispatch_records(std::move(_batch));
     });
 }
 
-// Move any newly-registered waits from the shared inbox into `active`.
+// Start the next fence if a flush waits on this one. The emit tasks holding it then release the
+// flush as the last of them finishes, or the reassignment does if none is left.
+void
+close_flush_fence(std::shared_ptr<flush_fence>& fence)
+{
+    if(fence->waiters.empty()) return;
+    fence->next = std::make_shared<flush_fence>();
+    fence       = fence->next;
+}
+
+// Move any newly-registered waits from the shared inbox into `active`, and waiting flushes onto the
+// current fence, which the next retirement pass closes.
 void
 move_incoming_to_active(completion_monitor& mon)
 {
     mon.incoming.wlock([&mon](auto& inbox) {
-        for(auto& pending : inbox)
+        for(auto& pending : inbox.completions)
             mon.active.emplace_back(std::move(pending));
-        inbox.clear();
+        inbox.completions.clear();
+
+        for(auto& waiter : inbox.flushes)
+            mon.fence->waiters.emplace_back(std::move(waiter));
+        inbox.flushes.clear();
     });
 }
 
@@ -988,7 +1045,7 @@ retire_completed(completion_monitor& mon, pending_completion_vector_t& scratch)
     {
         if(has_completed(pending))
         {
-            retire_completion_async(mon, pending.session, true);
+            retire_completion_async(mon, pending.session, true, mon.fence);
         }
         else
             scratch.emplace_back(std::move(pending));
@@ -999,6 +1056,8 @@ retire_completed(completion_monitor& mon, pending_completion_vector_t& scratch)
     // Release the swapped-out entries (moved-from sessions, plus any still-live
     // shared_ptrs from a prior pass) rather than holding them until the next swap.
     scratch.clear();
+
+    close_flush_fence(mon.fence);
 }
 
 // Retire every entry, whether or not its signal dropped, discarding the profiling data of the ones
@@ -1015,9 +1074,10 @@ force_retire_all(completion_monitor& mon)
         const auto completed = has_completed(pending);
         if(!completed) ++incomplete;
 
-        retire_completion_async(mon, pending.session, completed);
+        retire_completion_async(mon, pending.session, completed, mon.fence);
     }
     mon.active.clear();
+    close_flush_fence(mon.fence);
 
     ROCP_WARNING_IF(incomplete > 0) << fmt::format(
         "Completion monitor retired {} batch(es) still in flight at teardown; their dispatch "
@@ -1050,6 +1110,9 @@ completion_monitor_loop(completion_monitor& mon)
         // One more drain closes the window between the pre-wait drain and the reset.
         move_incoming_to_active(mon);
 
+        // Serve a waiting flush now: the wait below may not return until a running kernel ends.
+        if(!mon.fence->waiters.empty()) retire_completed(mon, scratch);
+
         // Break only when stop is requested. stop_completion_monitor moves the state to `stopped`
         // and bumps `wake_signal`, so the wait always returns even if no completion signal
         // transitions. get_fini_status() does not break: the monitor keeps retiring through
@@ -1058,8 +1121,8 @@ completion_monitor_loop(completion_monitor& mon)
 
         if(mon.active.empty())
         {
-            // Nothing to watch; block on the wake signal alone until a producer registers work or
-            // requests shutdown. Both bump that signal, so no timeout is needed to notice either.
+            // Nothing to watch; block on the wake signal alone until a producer registers work, a
+            // flush waits or shutdown is requested. Each bumps that signal, so no timeout is set.
             get_core_table()->hsa_signal_wait_relaxed_fn(mon.wake_signal,
                                                          HSA_SIGNAL_CONDITION_NE,
                                                          0,
@@ -1092,8 +1155,8 @@ completion_monitor_loop(completion_monitor& mon)
                                   mon.active.size());
 
         // Waits indefinitely on purpose. Every event that can change the answer already returns
-        // this call: a completion satisfies its own LT condition, and both
-        // register_pending_completion and stop_completion_monitor bump wake_signal. The satisfying
+        // this call: a completion satisfies its own LT condition, and register_pending_completion,
+        // flush_completed_dispatches and stop_completion_monitor bump wake_signal. The satisfying
         // index and value are discarded -- wait_any names at most one signal, and the active set is
         // rescanned below because several may have dropped at once.
         [[maybe_unused]] auto satisfying_value = hsa_signal_value_t{0};
@@ -2266,6 +2329,44 @@ void
 interposition_sync()
 {
     drain_completion_monitor();
+}
+
+void
+flush_completed_dispatches()
+{
+    // Past destroy_static_objects the monitor's static_object is null, so it must not be touched.
+    if(!s_intercept_installed.load(std::memory_order_acquire) ||
+       registration::get_fini_status() != 0 || internal_threading::fork_stale() ||
+       on_record_emitter())
+        return;
+
+    auto& mon = get_completion_monitor();
+    if(mon.inflight.load(std::memory_order_acquire) == 0) return;
+
+    // Queued like a completion wait, under the lock teardown's final drain takes, so the wake store
+    // cannot reach a destroyed signal and a monitor stopping after this still releases the waiter.
+    auto waiter = std::make_shared<std::atomic<bool>>(false);
+    auto queued = mon.incoming.wlock([&mon, &waiter](auto& inbox) {
+        if(mon.state.load(std::memory_order_relaxed) == monitor_state::stopped) return false;
+        inbox.flushes.emplace_back(waiter);
+        get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 1);
+        return true;
+    });
+
+    // Bounded, because the emitter can be blocked behind this thread, e.g. by a tool callback
+    // waiting on a lock the caller holds. Past the limit the flush behaves as if it had not waited.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
+    while(queued && !waiter->load(std::memory_order_acquire) &&
+          mon.inflight.load(std::memory_order_acquire) != 0)
+    {
+        if(std::chrono::steady_clock::now() > deadline)
+        {
+            ROCP_WARNING << "Flushing without the records of completed kernel dispatches: the "
+                            "record emitter has been blocked for 1 second";
+            return;
+        }
+        std::this_thread::yield();
+    }
 }
 
 // Create the wake signal and launch the monitor thread. A second call while it is already

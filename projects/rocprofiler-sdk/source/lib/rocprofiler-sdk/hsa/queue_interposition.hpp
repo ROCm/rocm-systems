@@ -319,6 +319,18 @@ void
 interposition_sync();
 
 /**
+ * @brief Deliver the records of every dispatch the GPU has already completed
+ *
+ * Called by rocprofiler_flush_buffer so a flush issued after the application has observed a
+ * dispatch's completion includes that dispatch's record. Waits only on dispatches that have
+ * completed, never on running ones, and returns immediately when nothing is in flight, when the
+ * monitor is stopped, or when called from the record emitter. Gives up after one second, with a
+ * warning, if the record emitter is blocked.
+ */
+void
+flush_completed_dispatches();
+
+/**
  * @brief Create the wake signal and launch the completion-monitor thread
  *
  * Does nothing if the monitor is already running, if interception was never installed, or once

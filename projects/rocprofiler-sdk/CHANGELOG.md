@@ -10,6 +10,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+- Fixed `rocprofiler_flush_buffer` missing the kernel dispatch records of kernels that had just completed, for example when it was called right after `hipDeviceSynchronize`. These records are written shortly after a kernel completes, and the flush now waits for them.
+
 ### Known issues
 
 ### Removed

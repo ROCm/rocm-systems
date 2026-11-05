@@ -109,6 +109,7 @@ add_subdirectory(code-object-multi-threaded)
 add_subdirectory(code-object-host-symbols)
 add_subdirectory(hip-fatbin-unload)
 add_subdirectory(spm)
+add_subdirectory(kernel-dispatch-flush-after-sync)
 
 # environment variable tests
 add_subdirectory(environment)
