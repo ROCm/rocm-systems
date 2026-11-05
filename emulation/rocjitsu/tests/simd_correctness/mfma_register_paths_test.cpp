@@ -8,6 +8,11 @@
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
 
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <format>
 #include <functional>
 #include <optional>

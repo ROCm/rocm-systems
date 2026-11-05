@@ -27,10 +27,17 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
+#include <span>
+#include <utility>
+#include <vector>
 
 namespace {
 

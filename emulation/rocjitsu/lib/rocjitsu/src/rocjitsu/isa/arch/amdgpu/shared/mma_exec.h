@@ -22,14 +22,17 @@
 ///   - Input A[row][k]: use input_loc(dim=M, K, B, i=row, k, b, bits).
 ///     Input B[col][k]: use input_loc(dim=N, K, B, i=col, k, b, bits).
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
+#include "rocjitsu/result.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/data_types.h"
 #include "util/host_target.h"
+#include "util/log.h"
 #include "util/meta_programming.h"
 #include "util/simd.h"
 
@@ -41,6 +44,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <format>
 #include <limits>
 #include <optional>
 #include <span>

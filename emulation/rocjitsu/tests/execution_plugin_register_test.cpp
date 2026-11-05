@@ -53,14 +53,21 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
 
+#include <gtest/gtest.h>
+
+#include <array>
 #include <bit>
 #include <cfenv>
+#include <cstdint>
 #include <format>
 #include <functional>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <tuple>
+#include <utility>
+#include <vector>
 
 namespace {
 
