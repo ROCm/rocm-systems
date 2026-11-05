@@ -354,7 +354,7 @@ TEST_F(c_api_async_ctx_test,
     in_progress = false;
 
     create(
-        [](ph_future_t, double) {
+        [](ph_future_t, double, ph_progress_description_t) {
             in_progress = true;
             while(!release)
             {
