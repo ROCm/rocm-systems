@@ -3573,6 +3573,29 @@ TEST(RaceDetectorPluginTest, GlobalWideLdsLoadsTrackPayloadAndSynchronization) {
         }
 }
 
+TEST(RaceDetectorPluginTest, GlobalWideLdsLoadsDetectPendingPeerReads) {
+  enum class PeerSync { None, LgkmcntZero, LgkmcntZeroBarrier };
+  using enum PeerSync;
+  for (unsigned count : {3u, 4u})
+    for (PeerSync sync : {None, LgkmcntZero, LgkmcntZeroBarrier})
+      // Byte 75 is in lane 0's payload for both widths; byte 80 is in inactive
+      // lane 1's slot.
+      for (unsigned address : {75u, 80u}) {
+        SCOPED_TRACE(testing::Message()
+                     << count << ',' << static_cast<int>(sync) << ',' << address);
+        GlobalWideLdsRaceHarness h;
+        ASSERT_NO_FATAL_FAILURE(h.initialize());
+        ASSERT_NO_FATAL_FAILURE(h.read_byte(h.peer(), address));
+        if (sync != None)
+          h.wait(h.peer(), 63, 0);
+        if (sync == LgkmcntZeroBarrier)
+          h.barrier();
+        EXPECT_FALSE(h.raced()) << h.report();
+        ASSERT_NO_FATAL_FAILURE(h.wide_load(count));
+        EXPECT_EQ(h.raced(), address == 75 && sync != LgkmcntZeroBarrier) << h.report();
+      }
+}
+
 TEST(RaceDetectorPluginTest, DecodedDirectLdsLoadsDetectConflictingWaveStores) {
   for (auto arch : {"rdna3", "rdna3_5", "rdna4"}) {
     for (uint32_t store_address : {16u, 20u}) {
