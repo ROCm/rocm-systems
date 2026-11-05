@@ -3581,6 +3581,11 @@ rsmi_status_t rsmi_status_string(rsmi_status_t status, const char** status_strin
           "RSMI_STATUS_FAIL_LOAD_SYMBOL: Failed to load the "
           "required symbol";
       break;
+    case RSMI_STATUS_DRIVER_NOT_LOADED:
+      *status_string =
+          "RSMI_STATUS_DRIVER_NOT_LOADED: The amdgpu driver is not "
+          "loaded";
+      break;
 
     default:
       *status_string = "RSMI_STATUS_UNKNOWN_ERROR: An unknown error occurred";

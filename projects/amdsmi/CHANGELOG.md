@@ -13,6 +13,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amd-smi` failures on non-x86 systems where the library is built without ESMI (EPYC CPU) support**.  
   - `amd-smi` no longer tries to initialize CPU monitoring on such builds, and the Python CPU APIs now raise `AmdSmiLibraryException` with `AMDSMI_STATUS_NOT_SUPPORTED` instead of `AttributeError`. CPU affinity is reported again instead of N/A, and the Go shim builds without ESMI.
+- **Fixed `amdsmi_init()` printing `Exception caught: rsmi_init.` on systems without ROCm**.
+  - On a system without KFD (`/sys/class/kfd` missing), `amdsmi_init()` with `AMDSMI_INIT_AMD_GPUS` now returns `AMDSMI_STATUS_DRIVER_NOT_LOADED` without printing, instead of `AMDSMI_STATUS_NOT_INIT`. Libraries that use AMD SMI as an optional dependency, such as hwloc, no longer print to stderr on machines without AMD GPUs.
+  - Other initialization error handling is unchanged.
 
 ## amd_smi_lib for ROCm 10.2.0
 
