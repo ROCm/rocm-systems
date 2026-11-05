@@ -8,6 +8,7 @@ RocJITsu checks for these explicitly undefined ISA conditions:
 | Negative scalar-buffer load immediate | RDNA4, CDNA5 | Nonnegative immediates, including loads beyond the buffer bounds that return zero |
 | MFMA broadcast group larger than the instruction's block count | CDNA3, CDNA4 | All supported integer/float broadcast sizes; F64 ignores CBSZ; F8/F6/F4 format selectors that reuse the CBSZ field |
 | Nonempty, partial EXEC on global transpose loads | RDNA4, CDNA5 | Full or empty effective EXEC, including wave32 with unused upper EXEC bits |
+| Nonempty, partial EXEC on LDS transpose loads; misaligned effective addresses on their B64 forms | CDNA4 | Full or empty EXEC; eight-byte-aligned combined addresses; ordinary DS operations; CDNA5 LDS transpose loads |
 | VOPD source-bank/scalar-input limits | RDNA3, RDNA3.5, RDNA4, CDNA5 | GFX12 same-register/same-width sharing and MOV/MOV routing; unused sources; unqualified cross-operation dependencies and older EXEC/SCC budgets |
 | `NEG[2]` or `NEG_HI` on IU DOT/WMMA | RDNA3, RDNA3.5, RDNA4, CDNA5 | `NEG[1:0]` signedness, floating-point modifiers, unqualified SWMMAC forms and CDNA5 DOT8 |
 | Misaligned normal SGPR data in `s_mov_b64` and scalar loads, or scalar-buffer descriptors | RDNA4, CDNA5 | Constants, special selectors, NULL destinations; other operand roles and ISA families |
@@ -44,6 +45,15 @@ Cross-operation VOPD dependencies remain unchecked. RDNA4's broad prohibition
 conflicts with LLVM's deliberate single-cycle pairing, while CDNA5's restriction
 depends on product-specific multi-cycle execution. Neither supports an
 unconditional warning with the available qualification.
+
+CDNA4 LDS transpose address checks include the immediate byte offset and report
+the first misaligned active lane once per instruction. Empty EXEC issues no
+address requests and stays silent, consistently with global transpose loads.
+The B96 packed-six-bit form shares the full-EXEC requirement, but its numerical
+address alignment remains unqualified: the manual says to align to the data
+size without explaining how that applies to a 96-bit payload. The checker does
+not infer a twelve- or sixteen-byte rule. CDNA5 LDS transpose instructions ignore
+EXEC and do not inherit the CDNA4 restrictions.
 
 This is a qualified set of checks, not a complete ISA validator. An access beyond
 an allocation is not sufficient evidence of undefined behavior: the manuals

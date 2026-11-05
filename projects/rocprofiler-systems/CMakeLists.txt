@@ -259,8 +259,10 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_DYNINST "Build dyninst from subm
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_ELFUTILS "Build elfutils from submodule"
     OFF
 )
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBIBERTY "Build libiberty from submodule"
-    OFF
+rocprofiler_systems_add_tristate_option(
+    ROCPROFSYS_BUILD_LIBIBERTY
+    "Build libiberty from binutils sources (ON: always, OFF: require system copy, AUTO: system copy, else build)"
+    "OFF"
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBUNWIND
     "Build libunwind from submodule" ON

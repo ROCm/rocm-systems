@@ -6,6 +6,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/register_set.h"
+#include "util/bit.h"
 
 #include <algorithm>
 #include <cstring>
@@ -21,13 +22,6 @@ namespace {
 using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 
 static_assert(sizeof(KD) == 64, "AMDHSA kernel descriptor size changed");
-
-// True if [offset, offset + length) fits within [0, size) without overflow (the
-// image is an arbitrary span, so offset + length may wrap). Use before forming any
-// pointer into the image.
-[[nodiscard]] bool range_in_bounds(uint64_t offset, uint64_t length, uint64_t size) {
-  return offset <= size && length <= size - offset;
-}
 
 [[nodiscard]] std::optional<std::string>
 kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t strtab_size) {
@@ -61,19 +55,20 @@ kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t s
 }
 
 [[nodiscard]] std::optional<uint64_t>
-text_vaddr_for_section(uint64_t text_offset, uint64_t text_size, const Elf64_Ehdr &ehdr,
-                       const Elf64_Shdr *shdr, std::optional<size_t> text_section_index) {
+text_vaddr_for_section(uint64_t text_offset, uint64_t text_size,
+                       std::span<const Elf64_Shdr> sections,
+                       std::optional<size_t> text_section_index) {
   if (text_section_index) {
-    if (*text_section_index >= ehdr.e_shnum)
+    if (*text_section_index >= sections.size())
       return std::nullopt;
-    const Elf64_Shdr &text = shdr[*text_section_index];
+    const Elf64_Shdr &text = sections[*text_section_index];
     if (text.sh_type == SHT_NOBITS || text.sh_offset != text_offset || text.sh_size != text_size)
       return std::nullopt;
     return text.sh_addr;
   }
-  for (int i = 0; i < ehdr.e_shnum; ++i) {
-    if (shdr[i].sh_offset == text_offset && shdr[i].sh_size == text_size)
-      return shdr[i].sh_addr;
+  for (const Elf64_Shdr &section : sections) {
+    if (section.sh_offset == text_offset && section.sh_size == text_size)
+      return section.sh_addr;
   }
   return std::nullopt;
 }
@@ -87,13 +82,15 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
   if (image.size() < sizeof(Elf64_Ehdr))
     return out;
 
-  const auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image.data());
-  if (!range_in_bounds(ehdr->e_shoff, static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr),
-                       image.size()))
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  std::optional<std::vector<Elf64_Shdr>> section_hdrs =
+      read_elf_table<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum, ehdr.e_shentsize);
+  if (!section_hdrs)
     return out;
 
-  const auto *shdr = reinterpret_cast<const Elf64_Shdr *>(image.data() + ehdr->e_shoff);
-  auto text_vaddr = text_vaddr_for_section(text_offset, text_size, *ehdr, shdr, text_section_index);
+  const std::optional<uint64_t> text_vaddr =
+      text_vaddr_for_section(text_offset, text_size, *section_hdrs, text_section_index);
   if (!text_vaddr)
     return out;
   constexpr uint64_t max_u64 = std::numeric_limits<uint64_t>::max();
@@ -104,29 +101,30 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
   // .symtab and .dynsym may both describe the same descriptor. Discovery is keyed
   // by descriptor bytes, so visit each file offset once.
   std::unordered_set<uint64_t> seen_descriptor_offsets;
-  for (int i = 0; i < ehdr->e_shnum; ++i) {
-    if (shdr[i].sh_type != SHT_SYMTAB && shdr[i].sh_type != SHT_DYNSYM)
+  for (const Elf64_Shdr &symbol_section : *section_hdrs) {
+    if (symbol_section.sh_type != SHT_SYMTAB && symbol_section.sh_type != SHT_DYNSYM)
       continue;
-    if (!range_in_bounds(shdr[i].sh_offset, shdr[i].sh_size, image.size()) ||
-        shdr[i].sh_entsize == 0)
+    if (symbol_section.sh_entsize == 0)
       continue;
-    if (shdr[i].sh_entsize != sizeof(Elf64_Sym))
+    const uint64_t num_symbols = symbol_section.sh_size / symbol_section.sh_entsize;
+    const std::optional<std::vector<Elf64_Sym>> symbols = read_elf_table<Elf64_Sym>(
+        image, symbol_section.sh_offset, num_symbols, symbol_section.sh_entsize);
+    if (!symbols)
       continue;
 
     const char *strtab = nullptr;
     size_t strtab_size = 0;
-    if (shdr[i].sh_link < ehdr->e_shnum) {
-      const auto &strtab_shdr = shdr[shdr[i].sh_link];
-      if (range_in_bounds(strtab_shdr.sh_offset, strtab_shdr.sh_size, image.size())) {
+    if (symbol_section.sh_link < section_hdrs->size()) {
+      const Elf64_Shdr &strtab_shdr = (*section_hdrs)[symbol_section.sh_link];
+      if (util::is_range_in_bounds(strtab_shdr.sh_offset, strtab_shdr.sh_size, image.size())) {
         strtab = reinterpret_cast<const char *>(image.data() + strtab_shdr.sh_offset);
         strtab_size = strtab_shdr.sh_size;
       }
     }
 
-    const auto *symtab = reinterpret_cast<const Elf64_Sym *>(image.data() + shdr[i].sh_offset);
-    const size_t nsyms = shdr[i].sh_size / shdr[i].sh_entsize;
-    for (size_t j = 0; j < nsyms; ++j) {
-      auto kernel_name = kernel_descriptor_symbol_name(symtab[j], strtab, strtab_size);
+    for (const Elf64_Sym &symbol : *symbols) {
+      std::optional<std::string> kernel_name =
+          kernel_descriptor_symbol_name(symbol, strtab, strtab_size);
       if (!kernel_name)
         continue;
 
@@ -138,34 +136,33 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
       // merely the image -- so a .kd near the section's end cannot extend past sh_size
       // into an adjacent section and later be mutated across the boundary. Any failure
       // skips this symbol rather than reading past the section.
-      const uint16_t sec_idx = symtab[j].st_shndx;
-      if (sec_idx >= ehdr->e_shnum || symtab[j].st_value < shdr[sec_idx].sh_addr)
+      const uint16_t owner_index = symbol.st_shndx;
+      if (owner_index >= section_hdrs->size() ||
+          symbol.st_value < (*section_hdrs)[owner_index].sh_addr)
         continue;
 
-      const Elf64_Shdr &owner = shdr[sec_idx];
-      const uint64_t delta = symtab[j].st_value - owner.sh_addr;
-      if (!range_in_bounds(owner.sh_offset, owner.sh_size, image.size()) ||
-          !range_in_bounds(delta, sizeof(KD), owner.sh_size))
+      const Elf64_Shdr &owner = (*section_hdrs)[owner_index];
+      const uint64_t delta = symbol.st_value - owner.sh_addr;
+      if (!util::is_range_in_bounds(owner.sh_offset, owner.sh_size, image.size()) ||
+          !util::is_range_in_bounds(delta, sizeof(KD), owner.sh_size))
         continue;
-      const uint64_t file_off = owner.sh_offset + delta;
-      if (!seen_descriptor_offsets.insert(file_off).second)
+      const uint64_t file_offset = owner.sh_offset + delta;
+      if (!seen_descriptor_offsets.insert(file_offset).second)
         continue;
 
       KD desc;
-      std::memcpy(&desc, image.data() + file_off, sizeof(desc));
-      const int64_t entry_vaddr_signed =
-          static_cast<int64_t>(symtab[j].st_value) + desc.kernel_code_entry_byte_offset;
-
-      if (entry_vaddr_signed < 0)
+      std::memcpy(&desc, image.data() + file_offset, sizeof(desc));
+      const std::optional<uint64_t> entry_vaddr =
+          add_signed_offset(symbol.st_value, desc.kernel_code_entry_byte_offset);
+      if (!entry_vaddr)
         continue;
-      const uint64_t entry_vaddr = static_cast<uint64_t>(entry_vaddr_signed);
-      if (entry_vaddr < *text_vaddr || entry_vaddr >= text_end)
+      if (*entry_vaddr < *text_vaddr || *entry_vaddr >= text_end)
         continue;
 
       out.push_back(KernelDescriptorInfo{
-          .descriptor_file_offset = file_off,
+          .descriptor_file_offset = file_offset,
           .kernel_name = std::move(*kernel_name),
-          .entry_text_offset = entry_vaddr - *text_vaddr,
+          .entry_text_offset = *entry_vaddr - *text_vaddr,
           .descriptor = desc,
       });
     }
