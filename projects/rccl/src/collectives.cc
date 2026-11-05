@@ -1164,8 +1164,10 @@ static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, voi
   }
 
   if (parentStop != nullptr) interComm->doneEvent = interDone;
-  // ncclInProgress is the non-blocking group's "launched" result, not a failure. NCCLCHECK used to
-  // return it straight through; treating it as an error here would skip the handoff below.
+  // ncclInProgress is the non-blocking group's "launched" result, not a failure. NCCLCHECK ignores
+  // it, and the AllGather path then returns success so the epilogue records the parent doneEvent.
+  // A non-blocking inter comm never takes that event, so returning ncclInProgress here would make
+  // the epilogue skip the record.
   if (interRes != ncclSuccess && interRes != ncclInProgress) {
     // The launch may already have published lastStreamTag. Leave a recorded
     // inter event behind so a later stream change does not wait on one that
@@ -1177,7 +1179,7 @@ static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, voi
   if (primeInterDone) CUDACHECK(hipEventRecord(interDone, stream));
   if (parentStop != nullptr) (void)rcclTakeAddonStopEvent(comm);
 
-  return interRes;
+  return ncclSuccess;
 }
 
 NCCL_API(ncclResult_t, ncclReduceScatter, const void* sendbuff, void* recvbuff, size_t recvcount,
