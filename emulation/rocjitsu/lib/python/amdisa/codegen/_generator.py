@@ -368,6 +368,7 @@ class CodeGenerator:
         'smem_atomic': 'scalar',
         'dcache_discard': 'scalar',
         'scratch_load_lds': 'vmem_load',
+        'global_load_lds': 'vmem_load',
         'flat_load': 'flat_load',
         'flat_store': 'flat_store',
         'flat_atomic': 'flat_atomic',
@@ -8050,7 +8051,7 @@ class CodeGenerator:
         if cls == 'smem_atomic':
             return self._gen_smem_atomic(sem)
 
-        if cls in ('flat_load', 'scratch_load_lds'):
+        if cls in ('flat_load', 'scratch_load_lds', 'global_load_lds'):
             return self._gen_flat_load(dst_ops, src_ops, sem)
 
         if cls == 'flat_store':
@@ -8915,7 +8916,9 @@ class CodeGenerator:
             )
         )
 
-    def _append_flat_lds_destination(self, lines: list[str], dedicated: bool) -> None:
+    def _append_flat_lds_destination(
+        self, lines: list[str], dedicated: bool, num_elems: int
+    ) -> None:
         indent = '  ' if dedicated else '    '
         if not dedicated:
             lines.append('  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {')
@@ -8934,7 +8937,8 @@ class CodeGenerator:
         )
         lines.append(
             f'{indent}amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),'
-            f' static_cast<int64_t>(wf.m0() & {mask}) + offset, 4, 4);'
+            f' static_cast<int64_t>(wf.m0() & {mask}) + offset,'
+            f' {num_elems * 4}, {16 if num_elems >= 3 else num_elems * 4});'
         )
         if not dedicated:
             lines.append('  }')
@@ -8945,14 +8949,17 @@ class CodeGenerator:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
         block = sem.name in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK')
-        dedicated_lds = sem.semantic_class == 'scratch_load_lds'
+        dedicated_flat_lds_load = sem.semantic_class in (
+            'scratch_load_lds',
+            'global_load_lds',
+        )
         legacy_lds = self._legacy_flat_lds_load(sem)
         sc0, sc1, nt = self._coherency_exprs()
         acc = self._acc_vgpr_expr
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
-        if not dedicated_lds:
+        if not dedicated_flat_lds_load:
             L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {esz};')
         L.append(
@@ -8987,8 +8994,8 @@ class CodeGenerator:
         if sem.name.startswith('CLUSTER_LOAD_'):
             L.append('  d->request_force_l1_bypass = true;')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
-        if dedicated_lds or legacy_lds:
-            self._append_flat_lds_destination(L, dedicated_lds)
+        if dedicated_flat_lds_load or legacy_lds:
+            self._append_flat_lds_destination(L, dedicated_flat_lds_load, ne)
         if block:
             L.append('  d->set_block_dword_mask(wf.m0());')
         L.append('  set_data(std::move(d));')
@@ -11094,8 +11101,10 @@ class CodeGenerator:
                     legacy_flat_lds_load = bool(
                         inst_sem and self._legacy_flat_lds_load(inst_sem)
                     )
-                    dedicated_scratch_lds_load = bool(
-                        inst_sem and inst_sem.semantic_class == 'scratch_load_lds'
+                    dedicated_flat_lds_load = bool(
+                        inst_sem
+                        and inst_sem.semantic_class
+                        in ('scratch_load_lds', 'global_load_lds')
                     )
                     readwrite_output_sources = []
                     vgpr_msb_role_body = []
@@ -11365,7 +11374,7 @@ class CodeGenerator:
                                 'if (!inst_.lds) dst_operands_[num_dst_++] = &vdst;'
                             )
                         elif opnd.is_output and not (
-                            dedicated_scratch_lds_load and opnd.name == 'vdst'
+                            dedicated_flat_lds_load and opnd.name == 'vdst'
                         ):
                             opnd_body.append(
                                 f'dst_operands_[{dst_idx}] = &{destination_operand};'
