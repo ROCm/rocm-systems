@@ -34,7 +34,7 @@ from utils.equation_format import (
     format_equation,
     parse_equation,
 )
-from utils.logger import console_error
+from utils.logger import console_error, console_warning
 from utils.utils_common import (
     INVALID_BLOCK_HINT,
     METRIC_ID_RE,
@@ -225,8 +225,20 @@ def convert_filter_blocks_to_panel_ids(
 ) -> Set[int]:
     """Return the panel ids (e.g. {200, 1100}) that -b tokens select.
 
-    Numeric ids ("2", "11.1") select their panel; other tokens are arch's panel aliases.
+    Numeric ids ("2", "11.1") select their panel, also when the views leave their row
+    out, so workloads saved by older versions keep their panels. Metric library ids
+    select the panels that show the metric; other tokens are arch's panel aliases.
     """
+    if arch:
+        filter_blocks = [
+            placement
+            for bid in map(str, filter_blocks)
+            for placement in (
+                metric_placements(bid, arch)
+                if loader.METRIC_LIBRARY_ID_RE.match(bid)
+                else [bid]
+            )
+        ]
     alias_map: Dict[str, str] = (
         get_arch_alias_to_panel_id(arch)
         if arch and any(not METRIC_ID_RE.match(str(bid)) for bid in filter_blocks)
@@ -251,6 +263,65 @@ def metric_tables_by_id(
         for source in panel_config["data source"]
         if METRIC_TABLE in source
     }
+
+
+def metric_placements(metric_id: str, arch: str) -> List[str]:
+    """Return the "block.table.row" ids of arch's rows that show metric_id, in view
+    order; exit with an error for an arch without views or an unknown metric_id."""
+    if not loader.has_metric_library(arch):
+        console_error(f"Metric ids such as {metric_id!r} are not supported on {arch}.")
+    placements = [
+        position
+        for position, row in iter_view_rows(load_views(arch))
+        if metric_id in row_metric_ids(row)
+    ]
+    if not placements:
+        console_error(
+            f"Unknown metric id {metric_id!r} for {canonical_config_arch(arch)}."
+            f"{INVALID_BLOCK_HINT}"
+        )
+    return placements
+
+
+def expand_metric_ids(tokens: List[str], arch: str) -> List[str]:
+    """Return -b tokens with each metric library id replaced by the numeric ids of
+    arch's rows that show it."""
+    expanded: List[str] = []
+    for token in tokens:
+        if loader.METRIC_LIBRARY_ID_RE.match(token):
+            expanded.extend(metric_placements(token, arch))
+        else:
+            expanded.append(token)
+    return expanded
+
+
+def row_ids_as_metric_ids(tokens: List[str], arch: str) -> List[str]:
+    """Return -b tokens, without duplicates, with each numeric row id replaced by its
+    row's metric ids, so a saved workload keeps its rows when later views renumber them.
+    """
+    rows = _rows_by_position(arch)
+    replaced: List[str] = []
+    for token in tokens:
+        for new in (
+            row_metric_ids(rows[token])
+            if _is_row_id(token) and token in rows
+            else [token]
+        ):
+            if new not in replaced:
+                replaced.append(new)
+    return replaced
+
+
+def warn_numeric_metric_ids(tokens: List[str], arch: str) -> None:
+    """Warn that each numeric row id in tokens is deprecated, naming its metric ids."""
+    rows = _rows_by_position(arch)
+    for token in tokens:
+        if not _is_row_id(token) or token not in rows:
+            continue
+        hint = " or ".join(repr(metric_id) for metric_id in row_metric_ids(rows[token]))
+        console_warning(
+            f"Numeric metric id {token!r} is deprecated. Use {hint} instead."
+        )
 
 
 def iter_view_rows(
@@ -305,6 +376,22 @@ def view_metric_errors(
             row_errors = _summed_collectable_errors(row, metrics, partners, simple_box)
         errors.extend(f"{position} {error}" for error in row_errors)
     return errors + _unshown_metric_errors(views, metrics)
+
+
+# ---------------------------------------------------------------------------
+# Metric ids
+# ---------------------------------------------------------------------------
+
+
+def _is_row_id(token: str) -> bool:
+    return bool(METRIC_ID_RE.match(token)) and token.count(".") == 2
+
+
+def _rows_by_position(arch: str) -> Dict[str, Dict[str, Any]]:
+    """Return numeric row id -> row of arch's views; {} for an arch without views."""
+    if not loader.has_metric_library(arch):
+        return {}
+    return dict(iter_view_rows(load_views(arch)))
 
 
 # ---------------------------------------------------------------------------

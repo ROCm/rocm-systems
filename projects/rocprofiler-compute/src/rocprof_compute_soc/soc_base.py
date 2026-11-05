@@ -20,13 +20,17 @@ from typing import (
 )
 
 import config
+from rocprof_compute_soc.metric_library import loader
 from rocprof_compute_soc.metric_library.loader import Collectables
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils import amdsmi_interface, rocprofv3_avail_interface
 from utils.analysis_views import (
     arch_panel_configs,
     get_arch_alias_to_panel_id,
+    metric_placements,
     metric_tables_by_id,
+    row_ids_as_metric_ids,
+    warn_numeric_metric_ids,
 )
 from utils.counters.allocator import (
     allocate_single_pass_metrics,
@@ -299,6 +303,9 @@ class OmniSoC_Base:
         panel_configs = self._profile_panel_configs()
 
         filter_blocks = args.filter_blocks
+        if filter_blocks and self.__arch:
+            warn_numeric_metric_ids(filter_blocks, self.__arch)
+            filter_blocks = row_ids_as_metric_ids(filter_blocks, self.__arch)
         if args.set_selected and self.__arch:
             sets_info = parse_sets_yaml(self.__arch)
             if args.set_selected not in sets_info:
@@ -317,7 +324,11 @@ class OmniSoC_Base:
             for metric in self._iter_profile_metrics():
                 expressions.extend(metric.expressions)
 
+        # A metric library id names one metric; its counters come from the library.
+        library_ids = [b for b in filter_blocks if loader.METRIC_LIBRARY_ID_RE.match(b)]
         for block_id in filter_blocks:
+            if block_id in library_ids:
+                continue
             self._append_expressions_for_filter_token(
                 block_id, panel_configs, expressions
             )
@@ -325,6 +336,14 @@ class OmniSoC_Base:
         counters, _ = extract_counters_and_variables(
             "\n".join(expressions), Collectables.of_arch(self._mspec.gpu_arch)
         )
+        if library_ids:
+            # An id the arch's views don't show is an error, as in analyze.
+            for metric_id in library_ids:
+                metric_placements(metric_id, self.__arch)
+            library = loader.MetricLibrary.load(
+                loader.default_metric_library_dir(), self.__arch
+            )
+            counters |= library.get_counters_for_metrics(library_ids)
         counters = self._expand_tcc_template_counters(counters)
 
         return counters, filter_blocks
