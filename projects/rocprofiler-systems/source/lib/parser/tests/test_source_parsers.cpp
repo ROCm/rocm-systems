@@ -9,12 +9,14 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <initializer_list>
 #include <map>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 using namespace rocprofsys::parser;
@@ -40,12 +42,23 @@ add_param(schema& value, schema_param param)
 }
 
 void
-expect_unset(const value_map_t& values, std::initializer_list<std::string_view> ids)
+expect_unset(const typed_values_t& values, std::initializer_list<std::string_view> ids)
 {
     for(const auto param_id : ids)
     {
-        EXPECT_EQ(values.find(std::string{ param_id }), values.end());
+        EXPECT_EQ(values.find(param_id), values.end());
     }
+}
+
+template <typename ValueT>
+void
+expect_stored(const typed_values_t& values, std::string_view id, const ValueT& expected)
+{
+    const auto found = values.find(id);
+    ASSERT_NE(found, values.end()) << id;
+    const auto* held = std::get_if<ValueT>(&found->second);
+    ASSERT_NE(held, nullptr) << id;
+    EXPECT_EQ(*held, expected);
 }
 
 [[nodiscard]] std::optional<std::string>
@@ -71,8 +84,9 @@ add_trace(schema& value)
 {
     auto param          = make_param("trace", param_type::boolean);
     param.default_value = "true";
-    param.env           = env_spec{ .name = "ROCPROFSYS_TRACE" };
-    param.arg           = arg_spec{ .name = "--trace", .form = arg_form::flag };
+    param.env           = "ROCPROFSYS_TRACE";
+    param.arg           = "--trace";
+    param.flag          = true;
     add_param(value, std::move(param));
 }
 
@@ -80,9 +94,11 @@ void
 add_short_flags(schema& value)
 {
     auto quiet   = make_param("quiet", param_type::boolean);
-    quiet.arg    = arg_spec{ .name = "-q", .form = arg_form::flag };
+    quiet.arg    = "-q";
+    quiet.flag   = true;
     auto verbose = make_param("verbose", param_type::boolean);
-    verbose.arg  = arg_spec{ .name = "-v", .form = arg_form::flag };
+    verbose.arg  = "-v";
+    verbose.flag = true;
     add_param(value, std::move(quiet));
     add_param(value, std::move(verbose));
 }
@@ -91,11 +107,11 @@ void
 add_values(schema& value)
 {
     auto output = make_param("output", param_type::path);
-    output.arg  = arg_spec{ .name = "--output", .style = assign_style::equals };
+    output.arg  = "--output";
     auto freq   = make_param("freq", param_type::integer);
     freq.max    = k_frequency_limit;
-    freq.env    = env_spec{ .name = "ROCPROFSYS_FREQ" };
-    freq.arg    = arg_spec{ .name = "--freq", .style = assign_style::separate };
+    freq.env    = "ROCPROFSYS_FREQ";
+    freq.arg    = "--freq";
     auto label  = make_param("label", param_type::string);
     add_param(value, std::move(output));
     add_param(value, std::move(freq));
@@ -124,7 +140,7 @@ TEST(parser_default, reads_only_parameters_with_defaults)
     const auto parsed = default_parser{}.parse(make_schema());
 
     EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values, (value_map_t{ { "trace", "true" } }));
+    EXPECT_EQ(parsed.values, (typed_values_t{ { "trace", true } }));
 }
 
 TEST(parser_default, rejects_a_default_the_catalog_refuses)
@@ -154,7 +170,22 @@ TEST(parser_env, reads_set_variables_and_skips_unset_ones)
 
     const auto parsed = env_parser{ lookup }.parse(make_schema());
     EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values, (value_map_t{ { "freq", "2" } }));
+    EXPECT_EQ(parsed.values, (typed_values_t{ { "freq", std::int64_t{ 2 } } }));
+}
+
+TEST(parser_env, stores_a_boolean_word_as_a_bool)
+{
+    const auto lookup = [](std::string_view name) -> std::optional<std::string> {
+        if(name == "ROCPROFSYS_TRACE")
+        {
+            return std::string{ "yes" };
+        }
+        return std::nullopt;
+    };
+
+    const auto parsed = env_parser{ lookup }.parse(make_schema());
+    EXPECT_TRUE(parsed.errors.empty());
+    expect_stored(parsed.values, "trace", true);
 }
 
 TEST(parser_env, reports_an_invalid_variable)
@@ -171,16 +202,16 @@ TEST(parser_env, trims_values_and_skips_an_empty_list)
 {
     schema value{};
     auto   freq    = make_param("freq", param_type::integer);
-    freq.env       = env_spec{ .name = "ROCPROFSYS_FREQ" };
+    freq.env       = "ROCPROFSYS_FREQ";
     auto events    = make_param("events", param_type::enumeration_list);
-    events.env     = env_spec{ .name = "ROCPROFSYS_EVENTS" };
+    events.env     = "ROCPROFSYS_EVENTS";
     events.choices = { choice{ .value = "ins" } };
     auto trace     = make_param("trace", param_type::boolean);
-    trace.env      = env_spec{ .name = "ROCPROFSYS_TRACE" };
+    trace.env      = "ROCPROFSYS_TRACE";
     auto label     = make_param("label", param_type::string);
-    label.env      = env_spec{ .name = "ROCPROFSYS_LABEL" };
+    label.env      = "ROCPROFSYS_LABEL";
     auto path      = make_param("output", param_type::path);
-    path.env       = env_spec{ .name = "ROCPROFSYS_OUTPUT" };
+    path.env       = "ROCPROFSYS_OUTPUT";
     add_param(value, std::move(freq));
     add_param(value, std::move(events));
     add_param(value, std::move(trace));
@@ -188,7 +219,7 @@ TEST(parser_env, trims_values_and_skips_an_empty_list)
     add_param(value, std::move(path));
 
     const auto parsed = env_parser{ blank_environment }.parse(value);
-    EXPECT_EQ(parsed.values.at("freq"), "2");
+    expect_stored(parsed.values, "freq", std::int64_t{ 2 });
     expect_unset(parsed.values, { "events", "trace", "label", "output" });
     EXPECT_TRUE(parsed.errors.empty());
 }
@@ -197,31 +228,31 @@ TEST(parser_cli, accepts_separate_and_equals_values)
 {
     const auto parsed = parse_cli({ "--output", "/tmp/out", "--freq=2" });
     EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values.at("output"), "/tmp/out");
-    EXPECT_EQ(parsed.values.at("freq"), "2");
+    expect_stored(parsed.values, "output", std::string{ "/tmp/out" });
+    expect_stored(parsed.values, "freq", std::int64_t{ 2 });
 }
 
 TEST(parser_cli, flag_defaults_to_true_and_accepts_an_explicit_value)
 {
     const auto enabled  = parse_cli({ "--trace" });
     const auto disabled = parse_cli({ "--trace=false" });
-    EXPECT_EQ(enabled.values.at("trace"), "true");
-    EXPECT_EQ(disabled.values.at("trace"), "false");
+    expect_stored(enabled.values, "trace", true);
+    expect_stored(disabled.values, "trace", false);
 }
 
 TEST(parser_cli, accepts_short_options_and_flag_bundles)
 {
     const auto parsed = parse_cli({ "-qv" });
     EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values.at("quiet"), "true");
-    EXPECT_EQ(parsed.values.at("verbose"), "true");
+    expect_stored(parsed.values, "quiet", true);
+    expect_stored(parsed.values, "verbose", true);
 }
 
 TEST(parser_cli, keeps_the_command_after_the_separator)
 {
     const auto parsed = parse_cli({ "--trace", "--", "./app", "--freq=9" });
     EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values.at("trace"), "true");
+    expect_stored(parsed.values, "trace", true);
     EXPECT_EQ(parsed.command, (std::vector<std::string>{ "./app", "--freq=9" }));
     EXPECT_EQ(parsed.values.find("freq"), parsed.values.end());
 }
@@ -231,7 +262,7 @@ TEST(parser_cli, stops_at_the_first_unknown_option)
     const auto parsed =
         parse_cli({ "--trace", "--sampling-freq", "100" }, unknown_option::stop);
     EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values.at("trace"), "true");
+    expect_stored(parsed.values, "trace", true);
     EXPECT_EQ(parsed.unparsed, (std::vector<std::string>{ "--sampling-freq", "100" }));
 }
 
@@ -240,7 +271,7 @@ TEST(parser_cli, reports_unknown_options_and_continues)
     const auto parsed = parse_cli({ "--bogus", "--freq", "2" });
     ASSERT_EQ(parsed.errors.size(), 1U);
     EXPECT_NE(parsed.errors.front().find("--bogus"), std::string::npos);
-    EXPECT_EQ(parsed.values.at("freq"), "2");
+    expect_stored(parsed.values, "freq", std::int64_t{ 2 });
 }
 
 TEST(parser_cli, reports_a_missing_or_invalid_value)
@@ -258,7 +289,7 @@ TEST(parser_cli, reports_a_missing_or_invalid_value)
 TEST(parser_cli, last_repeated_option_wins)
 {
     const auto parsed = parse_cli({ "--freq", "1", "--freq=2" });
-    EXPECT_EQ(parsed.values.at("freq"), "2");
+    expect_stored(parsed.values, "freq", std::int64_t{ 2 });
 }
 
 schema
@@ -266,25 +297,19 @@ make_event_schema()
 {
     schema value{};
     add_trace(value);
-    auto events    = make_param("events", param_type::enumeration_list);
-    events.env     = env_spec{ .name = "ROCPROFSYS_EVENTS" };
-    events.arg     = arg_spec{ .name = "--events", .min_count = 1, .max_count = 3 };
-    events.choices = { choice{ .value = "ins" },
-                       choice{ .value = "cyc", .aliases = { "cycles" } } };
-    auto format    = make_param("format", param_type::enumeration);
-    format.env     = env_spec{ .name = "ROCPROFSYS_FORMAT" };
-    format.arg     = arg_spec{ .name = "--format" };
-    format.choices = { choice{ .value = "pftrace", .aliases = { "proto" } } };
-    auto output    = make_param("output", param_type::path);
-    output.arg     = arg_spec{ .name      = "--output",
-                               .min_count = 1,
-                               .max_count = 2,
-                               .binds     = { "output", "prefix" } };
-    auto prefix    = make_param("prefix", param_type::string);
+    auto events          = make_param("events", param_type::enumeration_list);
+    events.env           = "ROCPROFSYS_EVENTS";
+    events.arg           = "--events";
+    events.arg_min_count = 1;
+    events.arg_max_count = 3;
+    events.choices       = { choice{ .value = "ins" },
+                             choice{ .value = "cyc", .aliases = { "cycles" } } };
+    auto format          = make_param("format", param_type::enumeration);
+    format.env           = "ROCPROFSYS_FORMAT";
+    format.arg           = "--format";
+    format.choices       = { choice{ .value = "pftrace", .aliases = { "proto" } } };
     add_param(value, std::move(events));
     add_param(value, std::move(format));
-    add_param(value, std::move(output));
-    add_param(value, std::move(prefix));
     return value;
 }
 
@@ -295,19 +320,8 @@ TEST(parser_cli, joins_tokens_until_the_next_option)
             .parse(make_event_schema());
 
     EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values.at("events"), "ins,cyc");
-    EXPECT_EQ(parsed.values.at("trace"), "true");
-}
-
-TEST(parser_cli, binds_each_token_to_its_parameter)
-{
-    const auto parsed =
-        cli_parser{ { "--output", "/tmp/out", "run1" }, unknown_option::report }.parse(
-            make_event_schema());
-
-    EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values.at("output"), "/tmp/out");
-    EXPECT_EQ(parsed.values.at("prefix"), "run1");
+    expect_stored(parsed.values, "events", std::vector<std::string>{ "ins", "cyc" });
+    expect_stored(parsed.values, "trace", true);
 }
 
 TEST(parser_cli, does_not_take_the_next_option_as_a_value)
@@ -317,7 +331,7 @@ TEST(parser_cli, does_not_take_the_next_option_as_a_value)
     ASSERT_EQ(parsed.errors.size(), 1U);
     EXPECT_NE(parsed.errors.front().find("requires a value"), std::string::npos);
     EXPECT_EQ(parsed.values.find("output"), parsed.values.end());
-    EXPECT_EQ(parsed.values.at("trace"), "true");
+    expect_stored(parsed.values, "trace", true);
 }
 
 TEST(parser_cli, stores_a_choice_alias_as_the_choice_value)
@@ -327,7 +341,7 @@ TEST(parser_cli, stores_a_choice_alias_as_the_choice_value)
             make_event_schema());
 
     EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values.at("format"), "pftrace");
+    expect_stored(parsed.values, "format", std::string{ "pftrace" });
 }
 
 TEST(parser_env, stores_a_choice_alias_as_the_choice_value)
@@ -346,21 +360,21 @@ TEST(parser_env, stores_a_choice_alias_as_the_choice_value)
 
     const auto parsed = env_parser{ lookup }.parse(make_event_schema());
     EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values.at("format"), "pftrace");
-    EXPECT_EQ(parsed.values.at("events"), "cyc,ins");
+    expect_stored(parsed.values, "format", std::string{ "pftrace" });
+    expect_stored(parsed.values, "events", std::vector<std::string>{ "cyc", "ins" });
 }
 
 TEST(parser_cli, accepts_a_negative_number_and_rejects_overflow)
 {
     schema value{};
     auto   param = make_param("num", param_type::integer);
-    param.arg    = arg_spec{ .name = "--num" };
+    param.arg    = "--num";
     add_param(value, std::move(param));
 
     const auto negative =
         cli_parser{ { "--num", "-5" }, unknown_option::report }.parse(value);
     EXPECT_TRUE(negative.errors.empty());
-    EXPECT_EQ(negative.values.at("num"), "-5");
+    expect_stored(negative.values, "num", std::int64_t{ -5 });
 
     const auto overflow =
         cli_parser{ { "--num", "9223372036854775808" }, unknown_option::report }.parse(
@@ -372,7 +386,7 @@ TEST(parser_cli, accepts_a_negative_number_and_rejects_overflow)
 TEST(parser_cli, flag_does_not_consume_the_next_token)
 {
     const auto with_word = parse_cli({ "--trace", "true" });
-    EXPECT_EQ(with_word.values.at("trace"), "true");
+    expect_stored(with_word.values, "trace", true);
     EXPECT_TRUE(with_word.command.empty());
     ASSERT_EQ(with_word.errors.size(), 1U);
     EXPECT_NE(with_word.errors.front().find("unexpected argument 'true'"),
@@ -380,7 +394,7 @@ TEST(parser_cli, flag_does_not_consume_the_next_token)
 
     const auto with_command = parse_cli({ "--trace", "--", "true" });
     EXPECT_TRUE(with_command.errors.empty());
-    EXPECT_EQ(with_command.values.at("trace"), "true");
+    expect_stored(with_command.values, "trace", true);
     EXPECT_EQ(with_command.command, (std::vector<std::string>{ "true" }));
 }
 
@@ -388,12 +402,12 @@ TEST(parser_cli, accepts_an_empty_equals_value)
 {
     schema value{};
     auto   param = make_param("name", param_type::string);
-    param.arg    = arg_spec{ .name = "--name" };
+    param.arg    = "--name";
     add_param(value, std::move(param));
 
     const auto parsed = cli_parser{ { "--name=" }, unknown_option::report }.parse(value);
     EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values.at("name"), "");
+    expect_stored(parsed.values, "name", std::string{});
 }
 
 TEST(parser_cli, accepts_a_short_flag_bundle)
@@ -401,13 +415,14 @@ TEST(parser_cli, accepts_a_short_flag_bundle)
     schema value{};
     add_short_flags(value);
     auto json = make_param("json", param_type::boolean);
-    json.arg  = arg_spec{ .name = "-j", .form = arg_form::flag };
+    json.arg  = "-j";
+    json.flag = true;
     add_param(value, std::move(json));
 
     const auto parsed = cli_parser{ { "-qj" }, unknown_option::report }.parse(value);
     EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values.at("quiet"), "true");
-    EXPECT_EQ(parsed.values.at("json"), "true");
+    expect_stored(parsed.values, "quiet", true);
+    expect_stored(parsed.values, "json", true);
 }
 
 TEST(parser_cli, plain_argument_is_unexpected)
@@ -425,13 +440,13 @@ TEST(parser_cli, list_stops_at_the_separator_and_rejects_a_bare_command)
                                        unknown_option::report }
                                .parse(make_event_schema());
     EXPECT_TRUE(separated.errors.empty());
-    EXPECT_EQ(separated.values.at("events"), "ins,cyc");
+    expect_stored(separated.values, "events", std::vector<std::string>{ "ins", "cyc" });
     EXPECT_EQ(separated.command, (std::vector<std::string>{ "./app" }));
 
     const auto bare =
         cli_parser{ { "--events", "ins", "cycles", "./app" }, unknown_option::report }
             .parse(make_event_schema());
-    EXPECT_EQ(bare.values.at("events"), "ins,cyc");
+    expect_stored(bare.values, "events", std::vector<std::string>{ "ins", "cyc" });
     EXPECT_TRUE(bare.command.empty());
     ASSERT_EQ(bare.errors.size(), 1U);
     EXPECT_NE(bare.errors.front().find("unexpected argument './app'"), std::string::npos);
@@ -442,7 +457,9 @@ TEST(parser_cli, optional_value_does_not_override_the_default)
     schema value{};
     auto   verbose        = make_param("verbose", param_type::integer);
     verbose.default_value = "0";
-    verbose.arg = arg_spec{ .name = "--verbose", .min_count = 0, .max_count = 1 };
+    verbose.arg           = "--verbose";
+    verbose.arg_min_count = 0;
+    verbose.arg_max_count = 1;
     add_param(value, std::move(verbose));
 
     const auto parsed =
@@ -452,7 +469,7 @@ TEST(parser_cli, optional_value_does_not_override_the_default)
     EXPECT_EQ(parsed.command, (std::vector<std::string>{ "./app" }));
 
     const auto defaults = default_parser{}.parse(value);
-    EXPECT_EQ(defaults.values.at("verbose"), "0");
+    expect_stored(defaults.values, "verbose", std::int64_t{ 0 });
 }
 
 TEST(parser_cli, required_value_stops_at_the_separator)
