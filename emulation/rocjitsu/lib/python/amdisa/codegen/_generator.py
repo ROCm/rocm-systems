@@ -8378,11 +8378,6 @@ class CodeGenerator:
         return '\n'.join(L)
 
     def _gen_smem_atomic(self, sem: InstructionSemantics) -> str:
-        # This emitter computes a global address; buffer forms need V# addressing.
-        if sem.name.upper().startswith('S_BUFFER_ATOMIC_'):
-            raise ValueError(
-                f'{sem.name}: smem_atomic supports only global S_ATOMIC_* addressing'
-            )
         # Semantics has no op-less smem_atomic fallback, so a missing op is a
         # derivation bug rather than an unimplemented variant.
         op_enum = self._ATOMIC_OP_ENUM.get(sem.operation)
@@ -8417,7 +8412,7 @@ class CodeGenerator:
         self._append_wait_counter_type(L, sem)
         L.extend(
             [
-                '  auto address = smem_calculate_address(inst_, wf);',
+                '  auto address = smem_calculate_address(inst_, wf, d.get());',
                 '  if (!address) return;',
                 '  d->addr = *address;',
                 '  set_data(std::move(d));',
@@ -11545,7 +11540,7 @@ class CodeGenerator:
                                 f'modifiers.block_data = &{self.isa_spec.profile.flat_store_src_field};'
                             )
                         if is_smem and inst.name.startswith(
-                            ('S_BUFFER_LOAD_', 'S_BUFFER_STORE_')
+                            ('S_BUFFER_LOAD_', 'S_BUFFER_STORE_', 'S_BUFFER_ATOMIC_')
                         ):
                             words = (
                                 2

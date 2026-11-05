@@ -2377,11 +2377,12 @@ _SCALAR_ATOMIC_OPS = (
 
 # Compare-swap carries its compare value after the source, doubling its data.
 _IMPLEMENTED_SCALAR_ATOMICS = {
-    f'S_ATOMIC_{op}{width}': (
+    f'{prefix}{op}{width}': (
         op.lower(),
         elem_size,
         2 * num_elems if op == 'CMPSWAP' else num_elems,
     )
+    for prefix in ('S_ATOMIC_', 'S_BUFFER_ATOMIC_')
     for op in _SCALAR_ATOMIC_OPS
     for width, elem_size, num_elems in (('', 4, 1), ('_X2', 8, 2))
 }
@@ -2398,23 +2399,9 @@ class TestDeriveSmemAtomic:
         assert sem.elem_size == elem_size
         assert sem.num_elems == num_elems
 
-    @pytest.mark.parametrize(
-        'name',
-        [
-            f'{prefix}{op}{width}'
-            for prefix in ('S_ATOMIC_', 'S_BUFFER_ATOMIC_')
-            for op in _SCALAR_ATOMIC_OPS
-            for width in ('', '_X2')
-            if f'{prefix}{op}{width}' not in _IMPLEMENTED_SCALAR_ATOMICS
-        ],
-    )
-    def test_unimplemented_scalar_atomics_stay_nop(self, name):
-        sem = derive_semantics(name, 'ENC_SMEM')
-        assert sem is not None
-        assert sem.semantic_class == 'nop'
-
-    # No CDNA ISA defines these. The flat atomic tables know their operations,
-    # so they pin that scalar support comes from the allowlist, not that table.
+    # No CDNA ISA defines these. They pin that scalar support comes from the
+    # allowlist: the flat atomic tables know most of these operations, SUB_F32
+    # strips to an allowlisted SUB, and ADD_U16 ends in a narrow load suffix.
     @pytest.mark.parametrize(
         'name',
         [
@@ -2423,6 +2410,10 @@ class TestDeriveSmemAtomic:
             'S_ATOMIC_PK_ADD_F16',
             'S_ATOMIC_CSUB',
             'S_ATOMIC_COND_SUB_U32',
+            'S_BUFFER_ATOMIC_ADD_F32',
+            'S_BUFFER_ATOMIC_FMIN',
+            'S_BUFFER_ATOMIC_SUB_F32',
+            'S_BUFFER_ATOMIC_ADD_U16',
         ],
     )
     def test_scalar_atomic_operations_outside_allowlist_stay_nop(self, name):
