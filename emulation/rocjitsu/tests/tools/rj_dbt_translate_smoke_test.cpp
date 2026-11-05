@@ -725,6 +725,35 @@ TEST(RjDbtTranslate, AppliesGfx1250RevisionContractToDefaultCdna5OutputMachine) 
   EXPECT_EQ(*error, "--output-revision is required when --output-target is gfx1250");
 }
 
+TEST(RjDecodeBenchmark, RejectsInputBeforeMeasurement) {
+  ASSERT_FALSE(g_decode_benchmark.empty());
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_decode_benchmark_rejection_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "input.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+  const std::string command = shell_quote(g_decode_benchmark.string()) + " " +
+                              shell_quote(input.string()) + " > " + shell_quote(output.string()) +
+                              " 2> " + shell_quote(error.string());
+
+  EXPECT_TRUE(command_exited_with(std::system(command.c_str()), 2));
+  EXPECT_TRUE(contains(read_text_file(error), "Failed to parse input code object"));
+  EXPECT_TRUE(read_text_file(output).empty());
+
+  const std::array<uint32_t, 1> truncated_instruction = {0xBE8000FFu};
+  const std::vector<uint8_t> image =
+      make_smoke_code_object(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1251, truncated_instruction);
+  {
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+  EXPECT_TRUE(command_exited_with(std::system(command.c_str()), 2));
+  EXPECT_TRUE(contains(read_text_file(error), "crosses a text-section boundary"))
+      << read_text_file(error);
+  EXPECT_TRUE(read_text_file(output).empty());
+}
+
 TEST(RjDecodeBenchmark, PreservesConcreteGfx1251Identity) {
   ASSERT_FALSE(g_decode_benchmark.empty());
   const rocjitsu::test::ScopedTempDirectory temp_dir("rj_decode_benchmark_gfx1251_");
