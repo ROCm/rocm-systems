@@ -2177,10 +2177,14 @@ class PollSentinel {
         if (!armed_) break;
         cv_.wait_for(lock, std::chrono::microseconds(nap_us),
                      [this, gen] { return exit_ || !armed_ || generation_ != gen; });
-        nap_us = NextPollNapUs(nap_us, kPollSentinelNapCeilingUs);
+        nap_us = NextPollNapUs(nap_us, kNapCeilingUs);
       }
     }
   }
+
+  // Ceiling (microseconds) for the nap between checks; the floor is
+  // kPollNapFloorUs.
+  static constexpr int kNapCeilingUs = 200;
 
   hsa_signal_t wake_;
   std::mutex mutex_;
@@ -2230,8 +2234,8 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   // Prepares a list of events for a wait inside KFD
   auto PrepareInterrupt = [&](size_t idx) {
     HsaEvent* hsa_event = hsa_signals[idx]->EopEvent();
-    // A signal without a KFD event stays out of the KFD wait list; the poll
-    // sentinel watches it instead of forcing the whole batch into polling.
+    // A signal without a KFD event stays out of the KFD wait list; the caller
+    // collects it in poll_only.
     if (hsa_event == nullptr) {
       return false;
     } else {
@@ -2355,8 +2359,8 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           }
         }
         // Wait in KFD on the interrupt-backed signals while the poll sentinel
-        // watches the others. If the sentinel thread could not be started, fall
-        // back to the existing polling behaviour below, unchanged.
+        // watches the others. If the sentinel thread could not be started, poll
+        // all of them instead.
         if (!finish && !polling) {
           if (unique_evts > 0 && (poll_only.empty() || sentinel.Usable())) {
             interrupt_wait = true;
@@ -2424,9 +2428,9 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             break;
           }
         } else if (polling && !finish && !g_use_interrupt_wait) {
-          // No interrupt-backed event is available for at least one pending
-          // signal (PrepareInterrupt forced polling) -- on the WSL/dxg thunk
-          // that is every signal, since it implements no KFD events at all.
+          // No interrupt-backed event is available for the pending signals --
+          // on the WSL/dxg thunk that is every signal, since it implements no
+          // KFD events at all.
           // Without a sleep this loop monopolizes a CPU core re-scanning the
           // signal values for the whole lifetime of the async-events thread,
           // idle or not; the two async-events threads cost ~2 cores in every
