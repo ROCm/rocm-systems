@@ -130,7 +130,7 @@ bool ncclAllToAllDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, vo
   if (perChunkBytes % 16 != 0) {
     return false;
   }
-  if (comm->ddaLLEpochDev == nullptr || comm->ddaLLEpochLen < comm->nRanks - 1) {
+  if (comm->ddaLLEpochDev == nullptr || comm->ddaLLEpochLen < 1) {
     return false;
   }
   // No pointer check: each rank passes its own buffers, so a rank-local refusal would leave its
