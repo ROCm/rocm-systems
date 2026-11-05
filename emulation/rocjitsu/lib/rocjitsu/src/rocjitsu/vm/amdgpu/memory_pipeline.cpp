@@ -607,11 +607,14 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
       ((d.elem_size != sizeof(uint32_t) && d.elem_size != sizeof(uint64_t)) ||
        d.num_dwords * sizeof(uint32_t) != d.elem_size))
     return VmAccessOutcome::Malformed;
-  // Masked loads still write the zero response, without taking a VM snapshot or
-  // touching backing memory, including byte and halfword requests.
-  // Fully masked stores likewise perform no VM or backing-memory access.
+  // Masked loads and returning atomics still write the zero response, without
+  // taking a VM snapshot or touching backing memory, including byte and halfword
+  // requests. Fully masked stores likewise perform no VM or backing-memory access.
   if (d.load_dword_mask == 0)
     return VmAccessOutcome::Complete;
+  assert(
+      (d.atomic_op == AtomicOp::NONE || (~d.load_dword_mask & ((1u << d.num_dwords) - 1)) == 0) &&
+      "a scalar atomic's mask covers its whole element or nothing");
   if (wf.address_space()) {
     const bool may_refresh_unready =
         d.translated.initialized && d.translated.access && !d.translated.access->info().ready &&
