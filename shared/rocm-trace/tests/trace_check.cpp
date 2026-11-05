@@ -22,3 +22,8 @@ bool rocm_trace_check_cpp_enabled() {
   return ROCM_TRACE_ENABLED(rocm_trace_check_cpp, "check",
                             ROCM_TRACE_LEVEL_VERBOSE, ROCM_TRACE_KW_DISPATCH);
 }
+
+/* TraceLoggingOpcode's values come from <winmeta.h> on Windows and from the
+ * LTTng flavour's own header on Linux; trace.h provides them on both. */
+static_assert(WINEVENT_OPCODE_START == 1 && WINEVENT_OPCODE_STOP == 2,
+              "opcodes");

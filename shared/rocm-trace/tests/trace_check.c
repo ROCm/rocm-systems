@@ -28,3 +28,8 @@ int rocm_trace_check_c_enabled(void) {
              ? 1
              : 0;
 }
+
+/* TraceLoggingOpcode's values come from <winmeta.h> on Windows and from the
+ * LTTng flavour's own header on Linux; trace.h provides them on both. */
+static_assert(WINEVENT_OPCODE_START == 1 && WINEVENT_OPCODE_STOP == 2,
+              "opcodes");
