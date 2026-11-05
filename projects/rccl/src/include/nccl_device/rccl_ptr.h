@@ -49,6 +49,14 @@ using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 0
 #endif
 
+// skip_fence for Simple post-send. Without the builtins, only an
+// unregistered collective (registeredOrP2p == false) may use the cheap fence.
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#define RCCL_USE_CHEAP_POST_SEND_FENCE(cheapOff, registeredOrP2p) (!(cheapOff))
+#else
+#define RCCL_USE_CHEAP_POST_SEND_FENCE(cheapOff, registeredOrP2p) (!(cheapOff) && !(registeredOrP2p))
+#endif
+
 #ifdef __HIP_DEVICE_COMPILE__
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && \
   __has_builtin(__builtin_amdgcn_cooperative_atomic_load_8x16B) && \

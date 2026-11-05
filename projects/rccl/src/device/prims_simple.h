@@ -889,13 +889,9 @@ public:
       patBarrier</*isHierarchical=*/false>();
     }
   }
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
-#else
   // No DWORDX4 builtins: only unregistered collectives (stores to the uncached FIFO) take the cheap fence.
-  skip_fence = !ncclShmem.comm.cheapPostSendFenceOff && collWork != nullptr && !collWork->regUsed &&
-               !collWork->netRegUsed;
-#endif
+  skip_fence = RCCL_USE_CHEAP_POST_SEND_FENCE(
+    ncclShmem.comm.cheapPostSendFenceOff, collWork == nullptr || collWork->regUsed || collWork->netRegUsed);
 }
 
 __forceinline__ __device__ ~Primitives() {

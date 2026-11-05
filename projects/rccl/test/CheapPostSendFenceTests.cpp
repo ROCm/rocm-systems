@@ -21,9 +21,15 @@
 
 #include "gtest/gtest.h"
 #include "rccl_common.h"
+#include "rccl_ptr.h"
 
 namespace RcclUnitTesting
 {
+
+// This TU is host code, so rccl_ptr.h takes the no-builtins arm. That is the
+// arm prims_simple.h compiles when DWORDX4_INTRINSICS is OFF.
+static_assert(RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS == 0,
+              "host test must compile the no-builtins post-send fence rule");
 
 // Numeric device archs (comm->cudaArch = 100*major + 10*minor).
 static constexpr int kGfx942 = 940;
@@ -88,6 +94,35 @@ TEST(CheapPostSendFenceTests, UnknownArchDefaultsOff)
     EXPECT_EQ(rcclComputeCheapPostSendFenceOff(/*cudaArch=*/0, kAuto, true), 1);
     EXPECT_EQ(rcclComputeCheapPostSendFenceOff(/*cudaArch=*/0, kForceOff, true), 1);
     EXPECT_EQ(rcclComputeCheapPostSendFenceOff(/*cudaArch=*/0, kForceOn, true), 0);
+}
+
+// RCCL_USE_CHEAP_POST_SEND_FENCE is the expression prims_simple.h assigns to
+// skip_fence. Host compilation takes the no-builtins arm (the macro is 0 outside
+// __HIP_DEVICE_COMPILE__), which is the arm this change adds. registeredOrP2p is
+// collWork == nullptr || regUsed || netRegUsed, so point-to-point and registered
+// buffers are the true case.
+TEST(CheapPostSendFenceTests, NoBuiltins_CheapFenceOn_UnregisteredCollectiveSkipsFullFence)
+{
+    const int off = rcclComputeCheapPostSendFenceOff(kGfx942, kAuto, true);
+    EXPECT_EQ(off, 0);
+    EXPECT_TRUE(RCCL_USE_CHEAP_POST_SEND_FENCE(off, /*registeredOrP2p=*/false));
+}
+
+TEST(CheapPostSendFenceTests, NoBuiltins_RegisteredOrP2pKeepsFullFence)
+{
+    const int off = rcclComputeCheapPostSendFenceOff(kGfx942, kAuto, true);
+    EXPECT_EQ(off, 0);
+    EXPECT_FALSE(RCCL_USE_CHEAP_POST_SEND_FENCE(off, /*registeredOrP2p=*/true));
+}
+
+TEST(CheapPostSendFenceTests, NoBuiltins_CheapFenceDisabled_KeepsFullFence)
+{
+    // gfx90a auto and an explicit force-off both leave the cheap fence disabled,
+    // so skip_fence stays false even for an unregistered collective.
+    const int gfx90a = rcclComputeCheapPostSendFenceOff(kGfx90a, kAuto, true);
+    EXPECT_EQ(gfx90a, 1);
+    EXPECT_FALSE(RCCL_USE_CHEAP_POST_SEND_FENCE(gfx90a, /*registeredOrP2p=*/false));
+    EXPECT_FALSE(RCCL_USE_CHEAP_POST_SEND_FENCE(kForceOff, /*registeredOrP2p=*/false));
 }
 
 } // namespace RcclUnitTesting
