@@ -911,6 +911,15 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
       copy_size_override = (supported_isas()[0]->GetMinorVersion() >= 4 ||
                             (supported_isas()[0]->GetMinorVersion() == 0 && supported_isas()[0]->GetStepping() == 10)) ?
                             copy_size_overrides[1] : copy_size_overrides[0];
+      // Temporary work-around until the issue is fixed in SDMA FW: on a compute
+      // partition that does not own every XCC, SDMA mishandles the larger
+      // single-copy limit, so fall back to the smaller one.  A full complement
+      // is 6 XCCs on the integrated part and 8 on the discrete ones.  Only the
+      // minor >= 4 parts are partitionable, and gfx90a reports one XCC without
+      // being partitioned, so it must keep the larger limit.
+      if (supported_isas()[0]->GetMinorVersion() >= 4 &&
+          properties_.NumXcc < (properties_.Integrated ? 6u : 8u))
+        copy_size_override = copy_size_overrides[0];
       break;
     case 10:
       sdma = (isDXG ? static_cast<BlitSdmaBase*>(new BlitSdmaV4()) : static_cast<BlitSdmaBase*>(new BlitSdmaV5()));
