@@ -402,7 +402,12 @@
         }
       ]
     },
-    "net_transport_eth_multinode": {
+    "net_ib_gdr_flush_cast": {
+      "extends": "net_ib_gdr_flush",
+      "env_variables": {
+        "NCCL_NET": "ib-cast"
+      }
+    },    "net_transport_eth_multinode": {
       "extends": "default",
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
@@ -5589,6 +5594,12 @@
       "name": "GDR Flush Flag - 4 QPs split (2-Node, 2-Rank)",
       "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1",
       "config": "net_ib_gdr_flush_flag_4qps_split",
+      "enabled": true
+    },
+    {
+      "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank) (IB-CAST)",
+      "description": "Whitebox coverage of the NET/IB GDR flush: dma-buf and peermem RO=0 scratchpad fence, feature-disabled fallback, and repeated-flush burst",
+      "config": "net_ib_gdr_flush_cast",
       "enabled": true
     },
     {

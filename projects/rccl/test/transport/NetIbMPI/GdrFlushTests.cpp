@@ -44,6 +44,14 @@ namespace {
 
 class GdrFlushTest : public NetIbMPITest {
 protected:
+    void SetUp() override {
+        NetIbMPITest::SetUp();
+        // GetPlugin() uses strcmp against the plugin name "IB-CAST", so
+        // NCCL_NET=ib-cast would otherwise keep running ncclNetIb.
+        const char* env = getenv("NCCL_NET");
+        if (env != nullptr && strcasecmp(env, netIbCast.name) == 0) net_ = &netIbCast;
+    }
+
     // NCCL_CUMEM_ENABLE=1 makes the flush scratchpad dma-buf-backed (the path
     // that used to fault). Absent/0 selects the legacy peermem reg_mr path.
     static bool cuMemEnabledEnv() {
