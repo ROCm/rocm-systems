@@ -1640,6 +1640,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     RCCL_GRAPH_GEN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rccl_graph_gen.cc"
     PARAM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/param/param_registry.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+# wrap-test.cc includes rccl_wrap.cc. Production librccl always compiles the LL128
+# arm; without this the broadcast protocol tests exercise the compiled-out fallback.
+set_source_files_properties(wrap-test.cc PROPERTIES COMPILE_DEFINITIONS ENABLE_LL128)
 
 # Fake ibverbs provider dv libraries for dv_symbols_test.cc; the SONAME is what the builders' dlopen matches.
 # The test finds them beside its own executable, in the build tree and in an install.

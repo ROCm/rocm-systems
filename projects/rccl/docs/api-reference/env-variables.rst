@@ -1252,6 +1252,16 @@ threshold table introduced for gfx1250.
         | ``N`` (bytes): Use ``N`` as the LL128 tier ceiling, overriding the table.
           Pre-table default: ``0`` (LL128 tier was off before the arch table).
 
+    * - | ``RCCL_DDA_LL128_AG_THREADS``
+        | Threads per block for the DDA LL128 ``ncclAllGather`` kernel. When ``0``
+          (default), resolved from ``ddaAgLL128Threads`` in the arch table: the
+          gfx1250 DPX table uses 256 threads for gathered sizes (``nRanks`` x
+          per-rank bytes) of 4 MiB to 32 MiB, and every other case uses 512.
+          Values that are not a multiple of 32 from 32 to 1024 are ignored.
+      - | ``0``: Resolved from the per-arch table at runtime (default).
+        | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
+          multiple of 32 from 32 to 1024. Pre-table default: ``512``.
+
     * - | ``RCCL_DDA_LL128_ASYNC_WIRE``
         | Opts in to the LDS-staged writer for the DDA LL128 two-shot ``ncclAllReduce``
           on gfx1250 communicators with one LL128 warp per wavefront (wave32). When
