@@ -16,6 +16,8 @@
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
 #include "util/bit.h"
+#include "util/diagnostic.h"
+#include "util/result.h"
 
 #include <algorithm>
 #include <cassert>
@@ -26,7 +28,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
@@ -72,12 +73,16 @@ public:
   }
 
   /// @brief Enqueue a workgroup from an ACE pipe.
-  void enqueue_wg(uint32_t pipe_id, uint32_t global_wg_id, DispatchEntry *entry) {
+  /// @details WGP-mode requests fail without changing the pending queues.
+  /// @param emit_error Destination for failure diagnostics.
+  util::Result enqueue_wg(uint32_t pipe_id, uint32_t global_wg_id, DispatchEntry *entry,
+                          util::DiagnosticEmitter emit_error = {}) {
     if (entry->wgp_mode)
-      throw std::invalid_argument("legacy SPI queue path does not support WGP-mode workgroups");
+      return emit_error.emit() << "legacy SPI queue path does not support WGP-mode workgroups";
     if (pipe_id >= pipe_queues_.size())
       pipe_queues_.resize(pipe_id + 1);
     pipe_queues_[pipe_id].push_back({pipe_id, global_wg_id, entry});
+    return util::Result::success();
   }
 
   /// @brief Try to dispatch the next ready WG to a CU.
