@@ -43,10 +43,10 @@ InstructionSnapshot capture_instruction(uint64_t pc, const Instruction &inst) {
       static_cast<size_t>(inst.size()) > InstructionSnapshot::kMaxWords * sizeof(uint32_t))
     throw std::logic_error(std::format(
         "race detector instruction at PC {:#x} has invalid encoding size {}", pc, inst.size()));
-  const bool keep_in_trace =
+  const bool sync_or_branch =
       inst.is_waitcnt() || inst.has_embedded_memory_wait() || inst.is_barrier() ||
       (inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL));
-  return {pc, std::span(inst.raw_encoding(), inst.size() / sizeof(uint32_t)), keep_in_trace};
+  return {pc, std::span(inst.raw_encoding(), inst.size() / sizeof(uint32_t)), sync_or_branch};
 }
 
 // onAmdgpuBeforeExecuteInstruction() records each instruction before it can
@@ -191,7 +191,7 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
   constexpr size_t tail = kTraceContextRows - head;
   for (size_t i = first; i < last; ++i) {
     shown[i] = span <= kTraceContextRows || i - first < head || last - i <= tail ||
-               trace[i].keep_in_trace();
+               trace[i].is_sync_or_branch();
     if (nonsequential(i))
       shown[i - 1] = shown[i] = true;
   }

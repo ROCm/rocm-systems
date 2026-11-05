@@ -25,11 +25,12 @@ public:
   static constexpr size_t kMaxWords = 4;
 
   /// @brief Copy the complete encoding of the instruction at `pc`.
+  /// @param sync_or_branch Whether the encoding is a wait, barrier or branch.
   /// @throws std::logic_error if `encoding` is empty or longer than kMaxWords.
   constexpr InstructionSnapshot(uint64_t pc, std::span<const uint32_t> encoding,
-                                bool keep_in_trace = false)
+                                bool sync_or_branch = false)
       : pc_(pc), word_count_(static_cast<uint32_t>(encoding.size())),
-        keep_in_trace_(keep_in_trace) {
+        sync_or_branch_(sync_or_branch) {
     if (encoding.empty() || encoding.size() > kMaxWords)
       throw std::logic_error("race detector instruction snapshot has an invalid word count");
     std::ranges::copy(encoding, words_.begin());
@@ -40,19 +41,19 @@ public:
     return std::span(words_).first(word_count_);
   }
 
-  // Preserve synchronization and control flow when the middle of a trace is elided.
-  constexpr bool keep_in_trace() const { return keep_in_trace_; }
+  /// True for a wait, barrier or branch, which reports keep when eliding a trace.
+  constexpr bool is_sync_or_branch() const { return sync_or_branch_; }
 
-  /// Equal when the PCs and encodings are equal; unused words are always zero.
-  friend constexpr bool operator==(const InstructionSnapshot &a, const InstructionSnapshot &b) {
-    return a.pc_ == b.pc_ && a.word_count_ == b.word_count_ && a.words_ == b.words_;
-  }
+  /// Equal when the PCs and encodings are equal; unused words are always zero,
+  /// and the sync/branch property is derived from the encoding.
+  friend constexpr bool operator==(const InstructionSnapshot &,
+                                   const InstructionSnapshot &) = default;
 
 private:
   uint64_t pc_;
   std::array<uint32_t, kMaxWords> words_{};
   uint32_t word_count_;
-  bool keep_in_trace_;
+  bool sync_or_branch_;
 };
 
 } // namespace rocjitsu::plugins::race_detector

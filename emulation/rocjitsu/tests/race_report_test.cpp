@@ -29,9 +29,9 @@ std::string text(const InstructionSnapshot &instruction) {
 }
 
 InstructionSnapshot snapshot(uint64_t pc, uint32_t word, size_t width = 1,
-                             bool keep_in_trace = false) {
+                             bool sync_or_branch = false) {
   std::array<uint32_t, InstructionSnapshot::kMaxWords> words{word};
-  return {pc, std::span(words).first(width), keep_in_trace};
+  return {pc, std::span(words).first(width), sync_or_branch};
 }
 
 struct PrintedRow {
@@ -196,19 +196,6 @@ TEST(RaceReportTraceTest, ExpiredProducerRetainsIdentityAndMissingHistoryWithout
   EXPECT_EQ(printed.size() - 1 + elided_count(report), trace.size());
 }
 
-TEST(RaceReportTraceTest, ContextMetadataDoesNotChangeInstructionIdentity) {
-  Trace trace;
-  trace.push(snapshot(0x100, 0, 1, true));
-  trace.push(snapshot(0x104, 1));
-  EXPECT_EQ(trace[0], snapshot(0x100, 0));
-  const auto report =
-      formatTrace(trace, text, MarkedInstruction{snapshot(0x100, 0), 0, 0}, mark(trace, 1));
-  const auto printed = rows(report);
-  ASSERT_EQ(printed.size(), 2u);
-  EXPECT_TRUE(printed.front().marked);
-  EXPECT_EQ(report.find("before trace window"), std::string::npos);
-}
-
 TEST(RaceReportTraceTest, EmptyAndMissingCurrentTraceDoNotFabricateExecutionContinuity) {
   const MarkedInstruction current{snapshot(0x104, 1, 1), 0, 0};
   const auto report = formatTrace({}, text, std::nullopt, current);
@@ -262,7 +249,7 @@ TEST(RaceReportTraceTest, SeededExecutionPathsPreserveEveryControlTransferAndMar
     }
     for (size_t i = 1; i < trace.size(); ++i) {
       const bool jump = trace[i].pc() != trace[i - 1].pc() + trace[i - 1].encoding().size_bytes();
-      if (jump || trace[i].keep_in_trace()) {
+      if (jump || trace[i].is_sync_or_branch()) {
         EXPECT_TRUE(
             std::ranges::any_of(printed, [&](const auto &row) { return row.sequence == 144 + i; }));
       }

@@ -3465,14 +3465,14 @@ TEST(RaceDetectorPluginOutputTest, CapturesSplitWaitBarrierAndBranchMetadataForE
     auto decoded = decoder->decode_window(words);
     ASSERT_TRUE(decoded.succeeded());
     f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *decoded.value(), *wave);
-    EXPECT_TRUE(state->trace[state->trace.size() - 1].keep_in_trace());
+    EXPECT_TRUE(state->trace[state->trace.size() - 1].is_sync_or_branch());
     wave->pc += 4;
   }
   const auto nop_words = cdna5::build_sopp(cdna5::kSNopSopp);
   auto nop = decoder->decode_window(nop_words);
   ASSERT_TRUE(nop.succeeded());
   f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *nop.value(), *wave);
-  EXPECT_FALSE(state->trace[state->trace.size() - 1].keep_in_trace());
+  EXPECT_FALSE(state->trace[state->trace.size() - 1].is_sync_or_branch());
 }
 
 TEST(RaceDetectorPluginOutputTest, ConcurrentReportsStayWholeAndSummaryCountsStayConsistent) {
