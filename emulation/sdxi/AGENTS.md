@@ -145,3 +145,48 @@ Two suites:
 
 The Python driver (`tests/py/sdxi/`) is modelled on rocm-ernic's
 `tests/py/ernic/` and uses only the standard library.
+
+---
+
+## Compression algorithms
+
+The emulator supports three lossless compression algorithms selectable
+per-operation.  Lossy algorithms are explicitly out of scope — SDXI is a
+data-movement/storage engine where data integrity is mandatory.
+
+| Constant (UAPI) | Value | Library | Notes |
+|-----------------|-------|---------|-------|
+| `SDXI_ALGO_ZLIB` | 0 | zlib (`-lz`) | Default; deflate stream |
+| `SDXI_ALGO_LZ4`  | 1 | liblz4 (`-llz4`) | Fast compression; level ignored (`LZ4_compress_default`) |
+| `SDXI_ALGO_ZSTD` | 2 | libzstd (`-lzstd`) | High ratio; level 0 = `ZSTD_CLEVEL_DEFAULT` |
+
+### Descriptor encoding
+
+The 32-bit flags field at descriptor offset 12 (`SDXI_COMP_FLAGS_OFF`) encodes:
+
+- bits[7:0] — compression level (0 = algorithm default, 1–9 = explicit)
+- bits[15:8] — algorithm (`SDXI_COMP_ALGO_*` from `src/sdxi_regs.h`)
+
+Zero in bits[15:8] selects ZLIB for backward compatibility.
+
+### CLI usage
+
+```sh
+sdxi-cli -a zlib  compress in.txt out.zlib
+sdxi-cli -a lz4   roundtrip in.txt
+sdxi-cli -a zstd  bench compress 1048576 100
+sdxi-cli          stress         # iterates all three algos internally
+```
+
+### Kernel crypto subsystem
+
+The SDXI kernel driver (`drivers/dma/sdxi/`) registers as a **dmaengine**
+provider, NOT a `crypto_engine` provider.  These are entirely separate
+kernel frameworks.
+
+Integrating with the kernel crypto subsystem (so user code can open
+`/dev/crypto` or use `AF_ALG` with an SDXI-backed compressor) requires a
+*separate* driver, e.g. `drivers/crypto/sdxi/sdxi_acomp.c`, that calls
+`crypto_register_acomp()` / `crypto_register_scomp()`.  This would be a
+distinct patch series from the dmaengine patches and cannot be part of
+`drivers/dma/sdxi/`.

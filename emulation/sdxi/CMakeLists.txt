@@ -44,6 +44,9 @@ include(SdxiVfioUser)
 # Dependencies
 # ---------------------------------------------------------------
 find_package(ZLIB REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LZ4   REQUIRED IMPORTED_TARGET liblz4)
+pkg_check_modules(ZSTD  REQUIRED IMPORTED_TARGET libzstd)
 
 # ---------------------------------------------------------------
 # Sources
@@ -71,6 +74,8 @@ target_compile_definitions(rocm-sdxi PRIVATE
 target_link_libraries(rocm-sdxi PRIVATE
     libvfio-user::libvfio-user
     ZLIB::ZLIB
+    PkgConfig::LZ4
+    PkgConfig::ZSTD
 )
 
 sdxi_set_compiler_flags(rocm-sdxi)

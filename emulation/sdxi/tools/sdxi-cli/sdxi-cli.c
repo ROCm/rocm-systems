@@ -24,9 +24,10 @@
 
 #include "sdxi_user.h"
 
-static int   g_fd      = -1;
-static int   g_verbose = 0;
-static const char *g_dev = "/dev/sdxi";
+static int        g_fd      = -1;
+static int        g_verbose = 0;
+static const char *g_dev    = "/dev/sdxi";
+static uint32_t   g_algo    = SDXI_ALGO_ZLIB;
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -164,6 +165,7 @@ static int cmd_compress(int argc, char **argv)
 		.dst     = (uint64_t)(uintptr_t)dst,
 		.dst_cap = dst_cap,
 		.level   = level,
+		.algo    = g_algo,
 	};
 
 	struct timespec t0, t1;
@@ -218,6 +220,7 @@ static int cmd_decompress(int argc, char **argv)
 		.src_len = src_len,
 		.dst     = (uint64_t)(uintptr_t)dst,
 		.dst_cap = dst_cap,
+		.algo    = g_algo,
 	};
 
 	struct timespec t0, t1;
@@ -273,6 +276,7 @@ static int cmd_roundtrip(int argc, char **argv)
 		.dst     = (uint64_t)(uintptr_t)cmp_buf,
 		.dst_cap = cmp_cap,
 		.level   = 0,
+		.algo    = g_algo,
 	};
 
 	if (ioctl(g_fd, SDXI_IOC_COMPRESS, &cioc) < 0)
@@ -287,6 +291,7 @@ static int cmd_roundtrip(int argc, char **argv)
 		.src_len = cioc.out_len,
 		.dst     = (uint64_t)(uintptr_t)dec_buf,
 		.dst_cap = src_len,
+		.algo    = g_algo,
 	};
 
 	if (ioctl(g_fd, SDXI_IOC_DECOMPRESS, &dioc) < 0)
@@ -361,6 +366,7 @@ static int cmd_bench(int argc, char **argv)
 			.dst     = (uint64_t)(uintptr_t)dst,
 			.dst_cap = size + size / 100 + 64,
 			.level   = 0,
+			.algo    = g_algo,
 		};
 		for (int i = 0; i < iters; i++) {
 			clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -383,6 +389,7 @@ static int cmd_bench(int argc, char **argv)
 			.dst     = (uint64_t)(uintptr_t)cmp_buf,
 			.dst_cap = cmp_cap,
 			.level   = 0,
+			.algo    = g_algo,
 		};
 		if (ioctl(g_fd, SDXI_IOC_COMPRESS, &cioc) < 0)
 			die("SDXI_IOC_COMPRESS (pre-compress for bench)");
@@ -392,6 +399,7 @@ static int cmd_bench(int argc, char **argv)
 			.src_len = cioc.out_len,
 			.dst     = (uint64_t)(uintptr_t)dst,
 			.dst_cap = size,
+			.algo    = g_algo,
 		};
 		for (int i = 0; i < iters; i++) {
 			clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -424,15 +432,17 @@ static int cmd_bench(int argc, char **argv)
 /* ------------------------------------------------------------------ */
 
 /*
- * Exercise compress+decompress roundtrip across all compression levels
- * (0,1,6,9) and two data patterns (compressible and pseudo-random) at
+ * Exercise compress+decompress roundtrip across all algorithms, compression
+ * levels (0,1,6,9) and two data patterns (compressible and pseudo-random) at
  * several buffer sizes.  Intended for in-VM validation of the full
  * compress/decompress path.
  */
 static int cmd_stress(int argc, char **argv)
 {
-	static const size_t   sizes[]  = {1, 64, 4096, 65536, 1 << 20};
-	static const uint32_t levels[] = {0, 1, 6, 9};
+	static const size_t    sizes[]      = {1, 64, 4096, 65536, 1 << 20};
+	static const uint32_t  levels[]     = {0, 1, 6, 9};
+	static const uint32_t  algos[]      = {SDXI_ALGO_ZLIB, SDXI_ALGO_LZ4, SDXI_ALGO_ZSTD};
+	static const char     *algo_names[] = {"zlib", "lz4", "zstd"};
 	int iters = (argc >= 1) ? atoi(argv[0]) : 1;
 	int pass = 0, fail = 0;
 
@@ -442,96 +452,103 @@ static int cmd_stress(int argc, char **argv)
 	}
 
 	for (int it = 0; it < iters; it++) {
-		for (int pat = 0; pat < 2; pat++) {
-			const char *pat_name = (pat == 0) ? "seq" : "rand";
+		for (size_t ai = 0; ai < sizeof(algos)/sizeof(algos[0]); ai++) {
+			uint32_t algo = algos[ai];
+			const char *algo_name = algo_names[ai];
 
-			for (size_t si = 0; si < sizeof(sizes)/sizeof(sizes[0]); si++) {
-				size_t sz = sizes[si];
+			for (int pat = 0; pat < 2; pat++) {
+				const char *pat_name = (pat == 0) ? "seq" : "rand";
 
-				uint8_t *orig = malloc(sz);
-				if (!orig)
-					die("malloc");
+				for (size_t si = 0; si < sizeof(sizes)/sizeof(sizes[0]); si++) {
+					size_t sz = sizes[si];
 
-				if (pat == 0) {
-					for (size_t i = 0; i < sz; i++)
-						orig[i] = (uint8_t)(i & 0x7f);
-				} else {
-					/* xorshift32 — reproducible pseudo-random */
-					uint32_t s = 0xDEADBEEF;
-					for (size_t i = 0; i < sz; i++) {
-						s ^= s << 13;
-						s ^= s >> 17;
-						s ^= s << 5;
-						orig[i] = (uint8_t)(s & 0xFF);
-					}
-				}
-
-				for (size_t li = 0; li < sizeof(levels)/sizeof(levels[0]); li++) {
-					uint32_t level = levels[li];
-
-					/* worst-case zlib bound: src + 0.1% + 12 bytes header */
-					size_t cmp_cap = sz + sz / 100 + 128;
-					uint8_t *cmp_buf = malloc(cmp_cap);
-					uint8_t *dec_buf = malloc(sz + 1);
-					if (!cmp_buf || !dec_buf)
+					uint8_t *orig = malloc(sz);
+					if (!orig)
 						die("malloc");
 
-					struct sdxi_ioc_compress cioc = {
-						.src     = (uint64_t)(uintptr_t)orig,
-						.src_len = sz,
-						.dst     = (uint64_t)(uintptr_t)cmp_buf,
-						.dst_cap = cmp_cap,
-						.level   = level,
-					};
-
-					int ok = 1;
-					if (ioctl(g_fd, SDXI_IOC_COMPRESS, &cioc) < 0) {
-						if (g_verbose)
-							fprintf(stderr,
-								"FAIL compress pat=%s sz=%zu level=%u: %s\n",
-								pat_name, sz, level, strerror(errno));
-						ok = 0;
+					if (pat == 0) {
+						for (size_t i = 0; i < sz; i++)
+							orig[i] = (uint8_t)(i & 0x7f);
 					} else {
-						struct sdxi_ioc_decompress dioc = {
-							.src     = (uint64_t)(uintptr_t)cmp_buf,
-							.src_len = cioc.out_len,
-							.dst     = (uint64_t)(uintptr_t)dec_buf,
-							.dst_cap = sz + 1,
-						};
-						if (ioctl(g_fd, SDXI_IOC_DECOMPRESS, &dioc) < 0) {
-							if (g_verbose)
-								fprintf(stderr,
-									"FAIL decompress pat=%s sz=%zu level=%u: %s\n",
-									pat_name, sz, level, strerror(errno));
-							ok = 0;
-						} else if (dioc.out_len != sz ||
-							   memcmp(orig, dec_buf, sz) != 0) {
-							if (g_verbose)
-								fprintf(stderr,
-									"FAIL data mismatch pat=%s sz=%zu level=%u "
-									"(out_len=%llu)\n",
-									pat_name, sz, level,
-									(unsigned long long)dioc.out_len);
-							ok = 0;
-						} else if (g_verbose) {
-							printf("PASS pat=%4s sz=%7zu level=%u: "
-							       "%zu -> %llu bytes (%.2fx)\n",
-							       pat_name, sz, level, sz,
-							       (unsigned long long)cioc.out_len,
-							       sz > 0 ? (double)sz / (double)cioc.out_len
-								     : 0.0);
+						/* xorshift32 — reproducible pseudo-random */
+						uint32_t s = 0xDEADBEEF;
+						for (size_t i = 0; i < sz; i++) {
+							s ^= s << 13;
+							s ^= s >> 17;
+							s ^= s << 5;
+							orig[i] = (uint8_t)(s & 0xFF);
 						}
 					}
 
-					if (ok)
-						pass++;
-					else
-						fail++;
+					for (size_t li = 0; li < sizeof(levels)/sizeof(levels[0]); li++) {
+						uint32_t level = levels[li];
 
-					free(cmp_buf);
-					free(dec_buf);
+						/* worst-case compressed bound */
+						size_t cmp_cap = sz + sz / 100 + 128;
+						uint8_t *cmp_buf = malloc(cmp_cap);
+						uint8_t *dec_buf = malloc(sz + 1);
+						if (!cmp_buf || !dec_buf)
+							die("malloc");
+
+						struct sdxi_ioc_compress cioc = {
+							.src     = (uint64_t)(uintptr_t)orig,
+							.src_len = sz,
+							.dst     = (uint64_t)(uintptr_t)cmp_buf,
+							.dst_cap = cmp_cap,
+							.level   = level,
+							.algo    = algo,
+						};
+
+						int ok = 1;
+						if (ioctl(g_fd, SDXI_IOC_COMPRESS, &cioc) < 0) {
+							if (g_verbose)
+								fprintf(stderr,
+									"FAIL compress algo=%s pat=%s sz=%zu level=%u: %s\n",
+									algo_name, pat_name, sz, level, strerror(errno));
+							ok = 0;
+						} else {
+							struct sdxi_ioc_decompress dioc = {
+								.src     = (uint64_t)(uintptr_t)cmp_buf,
+								.src_len = cioc.out_len,
+								.dst     = (uint64_t)(uintptr_t)dec_buf,
+								.dst_cap = sz + 1,
+								.algo    = algo,
+							};
+							if (ioctl(g_fd, SDXI_IOC_DECOMPRESS, &dioc) < 0) {
+								if (g_verbose)
+									fprintf(stderr,
+										"FAIL decompress algo=%s pat=%s sz=%zu level=%u: %s\n",
+										algo_name, pat_name, sz, level, strerror(errno));
+								ok = 0;
+							} else if (dioc.out_len != sz ||
+								   memcmp(orig, dec_buf, sz) != 0) {
+								if (g_verbose)
+									fprintf(stderr,
+										"FAIL data mismatch algo=%s pat=%s sz=%zu level=%u "
+										"(out_len=%llu)\n",
+										algo_name, pat_name, sz, level,
+										(unsigned long long)dioc.out_len);
+								ok = 0;
+							} else if (g_verbose) {
+								printf("PASS algo=%4s pat=%4s sz=%7zu level=%u: "
+								       "%zu -> %llu bytes (%.2fx)\n",
+								       algo_name, pat_name, sz, level, sz,
+								       (unsigned long long)cioc.out_len,
+								       sz > 0 ? (double)sz / (double)cioc.out_len
+									     : 0.0);
+							}
+						}
+
+						if (ok)
+							pass++;
+						else
+							fail++;
+
+						free(cmp_buf);
+						free(dec_buf);
+					}
+					free(orig);
 				}
-				free(orig);
 			}
 		}
 	}
@@ -551,7 +568,7 @@ static int cmd_stress(int argc, char **argv)
 static void usage(void)
 {
 	fprintf(stderr,
-		"usage: sdxi-cli [-d <device>] [-v] <subcommand> [args]\n"
+		"usage: sdxi-cli [-a <algo>] [-d <device>] [-v] <subcommand> [args]\n"
 		"\n"
 		"Subcommands:\n"
 		"  copy        <src> <dst>\n"
@@ -559,9 +576,10 @@ static void usage(void)
 		"  decompress  <src> <dst>\n"
 		"  roundtrip   <src>\n"
 		"  bench       <copy|compress|decompress> <size> [iters]\n"
-		"  stress      [iters]   compress/decompress roundtrip across levels and patterns\n"
+		"  stress      [iters]   compress/decompress roundtrip across all algos, levels and patterns\n"
 		"\n"
 		"Options:\n"
+		"  -a <algo>     compression algorithm: zlib (default), lz4, zstd\n"
 		"  -d <device>   SDXI device path (default: /dev/sdxi)\n"
 		"  -v            verbose output\n");
 }
@@ -569,8 +587,17 @@ static void usage(void)
 int main(int argc, char **argv)
 {
 	int opt;
-	while ((opt = getopt(argc, argv, "+d:vh")) != -1) {
+	while ((opt = getopt(argc, argv, "+a:d:vh")) != -1) {
 		switch (opt) {
+		case 'a':
+			if (strcmp(optarg, "zlib") == 0)       g_algo = SDXI_ALGO_ZLIB;
+			else if (strcmp(optarg, "lz4") == 0)   g_algo = SDXI_ALGO_LZ4;
+			else if (strcmp(optarg, "zstd") == 0)  g_algo = SDXI_ALGO_ZSTD;
+			else {
+				fprintf(stderr, "sdxi-cli: unknown algo '%s' (zlib|lz4|zstd)\n", optarg);
+				return 1;
+			}
+			break;
 		case 'd': g_dev     = optarg; break;
 		case 'v': g_verbose = 1;      break;
 		case 'h': usage(); return 0;

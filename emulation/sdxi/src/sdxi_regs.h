@@ -184,7 +184,12 @@
  * and dst_cap is the decompressed buffer capacity. */
 #define SDXI_COMP_SRC_LEN_OFF  4U    /* LE32: source byte count */
 #define SDXI_COMP_DST_CAP_OFF  8U    /* LE32: destination buffer capacity */
-#define SDXI_COMP_FLAGS_OFF    12U   /* LE32: compression level (1-9) or 0=default */
+#define SDXI_COMP_FLAGS_OFF    12U   /* LE32: flags[7:0]=level (0=default), flags[15:8]=algo */
+
+/* Compression algorithm identifiers stored in descriptor flags[15:8]. */
+#define SDXI_COMP_ALGO_ZLIB  0U   /* zlib/deflate (default) */
+#define SDXI_COMP_ALGO_LZ4   1U   /* LZ4 lossless */
+#define SDXI_COMP_ALGO_ZSTD  2U   /* Zstandard lossless */
 #define SDXI_COMP_SRC_ADDR_OFF 16U   /* LE64: source GPA */
 #define SDXI_COMP_DST_ADDR_OFF 24U   /* LE64: destination GPA */
 #define SDXI_COMP_CSBPTR_OFF   56U   /* LE64: NP | (csb_gpa >> 5) */

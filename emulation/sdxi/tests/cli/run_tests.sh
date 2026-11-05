@@ -263,11 +263,22 @@ test_decompress_truncated() {
 }
 
 # ---------------------------------------------------------------------------
-# test_stress: run sdxi-cli stress (all levels × patterns × sizes)
+# test_stress: run sdxi-cli stress (all algos × levels × patterns × sizes)
 # ---------------------------------------------------------------------------
 test_stress() {
     $SDXI_CLI $OPTS stress
     check "stress: all compress/decompress combinations pass" $?
+}
+
+# ---------------------------------------------------------------------------
+# test_roundtrip_algo ALGO: compress+decompress roundtrip for a specific algo
+# ---------------------------------------------------------------------------
+test_roundtrip_algo() {
+    local algo="$1"
+    local src="$TMPDIR_TEST/algo_${algo}.txt"
+    printf 'SDXI %s roundtrip test\n%.0s' "$algo" {1..200} > "$src"
+    $SDXI_CLI $OPTS -a "$algo" roundtrip "$src"
+    check "roundtrip $algo: data matches" $?
 }
 
 # ---------------------------------------------------------------------------
@@ -300,6 +311,13 @@ test_compress_tiny
 test_compress_already_compressed
 test_decompress_truncated
 test_stress
+
+echo ""
+echo "--- Per-algorithm roundtrip tests ---"
+
+test_roundtrip_algo zlib
+test_roundtrip_algo lz4
+test_roundtrip_algo zstd
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

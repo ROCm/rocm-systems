@@ -30,28 +30,35 @@ struct sdxi_ioc_memcpy {
 	__u64 len;    /* byte count */
 };
 
+/* Compression algorithm selector passed in ioc structs. */
+#define SDXI_ALGO_ZLIB  0U   /* zlib/deflate (default) */
+#define SDXI_ALGO_LZ4   1U   /* LZ4 lossless */
+#define SDXI_ALGO_ZSTD  2U   /* Zstandard lossless */
+
 /*
- * SDXI_IOC_COMPRESS — zlib-compress src_len bytes from src into dst.
+ * SDXI_IOC_COMPRESS — compress src_len bytes from src into dst.
  *
- * dst_cap must be large enough for the worst-case compressed output
- * (src_len + 12 + ceil(src_len/32768) * 5 + a few bytes for the header).
+ * dst_cap must be large enough for the worst-case compressed output;
+ * src_len + src_len/100 + 64 is sufficient for all supported algorithms.
  * On success out_len is filled with the actual compressed size.
- * level 0 = default, 1–9 = zlib compression level.
+ * level 0 = default, 1–9 = algorithm-specific level.
+ * algo: SDXI_ALGO_ZLIB / SDXI_ALGO_LZ4 / SDXI_ALGO_ZSTD.
  */
 struct sdxi_ioc_compress {
 	__u64 src;      /* source userspace virtual address */
 	__u64 src_len;  /* bytes to compress */
 	__u64 dst;      /* destination userspace virtual address */
 	__u64 dst_cap;  /* capacity of dst buffer */
-	__u32 level;    /* 0 = default; 1–9 = zlib level */
-	__u32 _pad;
+	__u32 level;    /* 0 = default; 1–9 = algo-specific level */
+	__u32 algo;     /* SDXI_ALGO_* */
 	__u64 out_len;  /* [out] actual compressed bytes */
 };
 
 /*
- * SDXI_IOC_DECOMPRESS — zlib-decompress src_len bytes from src into dst.
+ * SDXI_IOC_DECOMPRESS — decompress src_len bytes from src into dst.
  *
  * dst_cap must be >= the original uncompressed size.
+ * algo must match the value used to compress the data.
  * On success out_len is filled with the actual decompressed size.
  */
 struct sdxi_ioc_decompress {
@@ -59,6 +66,8 @@ struct sdxi_ioc_decompress {
 	__u64 src_len;  /* compressed byte count */
 	__u64 dst;      /* destination userspace virtual address */
 	__u64 dst_cap;  /* capacity of dst buffer */
+	__u32 algo;     /* SDXI_ALGO_* — must match compression algo */
+	__u32 _pad;
 	__u64 out_len;  /* [out] actual decompressed bytes */
 };
 

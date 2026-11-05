@@ -22,6 +22,8 @@
 #include <errno.h>
 #include <sys/mman.h>
 #include <zlib.h>
+#include <lz4.h>
+#include <zstd.h>
 
 #include <vfio-user/libvfio-user.h>
 
@@ -332,14 +334,15 @@ static int read_guest(vfu_ctx_t *vfu_ctx, uint64_t gpa, void *buf, size_t len);
 static int write_guest(vfu_ctx_t *vfu_ctx, uint64_t gpa, const void *buf, size_t len);
 
 /*
- * Compress src_len bytes from src_gpa into dst_gpa using deflate.
- * level 0 → Z_DEFAULT_COMPRESSION.
+ * Compress src_len bytes at src_gpa into dst_gpa.
+ * algo: SDXI_COMP_ALGO_ZLIB/LZ4/ZSTD  level: 0=default 1-9=algo-specific.
  * Returns actual compressed size on success, -1 on failure.
  * On success writes result_len into the CSB at csb_gpa (if non-zero).
  */
 static ssize_t exec_compress(vfu_ctx_t *vfu_ctx, uint64_t src_gpa,
                               uint32_t src_len, uint64_t dst_gpa,
-                              uint32_t dst_cap, int level, uint64_t csb_gpa)
+                              uint32_t dst_cap, int level, uint32_t algo,
+                              uint64_t csb_gpa)
 {
     if (src_len == 0)
         return 0;
@@ -365,28 +368,61 @@ static ssize_t exec_compress(vfu_ctx_t *vfu_ctx, uint64_t src_gpa,
         return -1;
     }
 
-    uLongf out_len = (uLongf)dst_cap;
-    int zrc = compress2(dst_buf, &out_len, src_buf, (uLong)src_len,
-                        level == 0 ? Z_DEFAULT_COMPRESSION : level);
-    free(src_buf);
-    if (zrc != Z_OK) {
-        sdxi_error("compress: zlib error %d (src=%u dst_cap=%u)", zrc, src_len, dst_cap);
-        free(dst_buf);
-        return -1;
+    size_t out_len;
+    switch (algo) {
+    case SDXI_COMP_ALGO_LZ4: {
+        int lrc = LZ4_compress_default((const char *)src_buf, (char *)dst_buf,
+                                       (int)src_len, (int)dst_cap);
+        free(src_buf);
+        if (lrc <= 0) {
+            sdxi_error("compress: LZ4 error (src=%u dst_cap=%u)", src_len, dst_cap);
+            free(dst_buf);
+            return -1;
+        }
+        out_len = (size_t)lrc;
+        break;
+    }
+    case SDXI_COMP_ALGO_ZSTD: {
+        int zstd_level = (level == 0) ? ZSTD_CLEVEL_DEFAULT : level;
+        size_t zrc = ZSTD_compress(dst_buf, (size_t)dst_cap, src_buf,
+                                   (size_t)src_len, zstd_level);
+        free(src_buf);
+        if (ZSTD_isError(zrc)) {
+            sdxi_error("compress: ZSTD error: %s (src=%u dst_cap=%u)",
+                       ZSTD_getErrorName(zrc), src_len, dst_cap);
+            free(dst_buf);
+            return -1;
+        }
+        out_len = zrc;
+        break;
+    }
+    default: { /* SDXI_COMP_ALGO_ZLIB */
+        uLongf zlib_out = (uLongf)dst_cap;
+        int zrc = compress2(dst_buf, &zlib_out, src_buf, (uLong)src_len,
+                            level == 0 ? Z_DEFAULT_COMPRESSION : level);
+        free(src_buf);
+        if (zrc != Z_OK) {
+            sdxi_error("compress: zlib error %d (src=%u dst_cap=%u)", zrc, src_len, dst_cap);
+            free(dst_buf);
+            return -1;
+        }
+        out_len = (size_t)zlib_out;
+        break;
+    }
     }
 
     nr = vfu_addr_to_sgl(vfu_ctx, (vfu_dma_addr_t)(uintptr_t)dst_gpa,
-                          (size_t)out_len, sg, 1, PROT_WRITE);
+                          out_len, sg, 1, PROT_WRITE);
     rc = (nr < 0) ? -1 : vfu_sgl_write(vfu_ctx, sg, (size_t)nr, dst_buf,
                                          VFU_SGL_DIRECT_ACCESS);
     free(dst_buf);
     if (rc != 0) {
-        sdxi_error("compress: failed to write dst (gpa=0x%llx len=%lu)",
-                   (unsigned long long)dst_gpa, (unsigned long)out_len);
+        sdxi_error("compress: failed to write dst (gpa=0x%llx len=%zu)",
+                   (unsigned long long)dst_gpa, out_len);
         return -1;
     }
 
-    sdxi_debug("compress: src=%u -> out=%lu bytes", src_len, (unsigned long)out_len);
+    sdxi_debug("compress: src=%u algo=%u -> out=%zu bytes", src_len, algo, out_len);
 
     if (csb_gpa != 0ULL) {
         struct sdxi_cst_blk csb;
@@ -400,13 +436,14 @@ static ssize_t exec_compress(vfu_ctx_t *vfu_ctx, uint64_t src_gpa,
 }
 
 /*
- * Decompress src_len bytes from src_gpa into dst_gpa using inflate.
- * dst_cap is the maximum output buffer size.
+ * Decompress src_len bytes at src_gpa into dst_gpa.
+ * algo must match the value used to compress (SDXI_COMP_ALGO_ZLIB/LZ4/ZSTD).
  * Returns actual decompressed size on success, -1 on failure.
  */
 static ssize_t exec_decompress(vfu_ctx_t *vfu_ctx, uint64_t src_gpa,
                                 uint32_t src_len, uint64_t dst_gpa,
-                                uint32_t dst_cap, uint64_t csb_gpa)
+                                uint32_t dst_cap, uint32_t algo,
+                                uint64_t csb_gpa)
 {
     if (src_len == 0)
         return 0;
@@ -432,27 +469,58 @@ static ssize_t exec_decompress(vfu_ctx_t *vfu_ctx, uint64_t src_gpa,
         return -1;
     }
 
-    uLongf out_len = (uLongf)dst_cap;
-    int zrc = uncompress(dst_buf, &out_len, src_buf, (uLong)src_len);
-    free(src_buf);
-    if (zrc != Z_OK) {
-        sdxi_error("decompress: zlib error %d (src=%u dst_cap=%u)", zrc, src_len, dst_cap);
-        free(dst_buf);
-        return -1;
+    size_t out_len;
+    switch (algo) {
+    case SDXI_COMP_ALGO_LZ4: {
+        int lrc = LZ4_decompress_safe((const char *)src_buf, (char *)dst_buf,
+                                      (int)src_len, (int)dst_cap);
+        free(src_buf);
+        if (lrc < 0) {
+            sdxi_error("decompress: LZ4 error %d (src=%u dst_cap=%u)", lrc, src_len, dst_cap);
+            free(dst_buf);
+            return -1;
+        }
+        out_len = (size_t)lrc;
+        break;
+    }
+    case SDXI_COMP_ALGO_ZSTD: {
+        size_t zrc = ZSTD_decompress(dst_buf, (size_t)dst_cap, src_buf, (size_t)src_len);
+        free(src_buf);
+        if (ZSTD_isError(zrc)) {
+            sdxi_error("decompress: ZSTD error: %s (src=%u dst_cap=%u)",
+                       ZSTD_getErrorName(zrc), src_len, dst_cap);
+            free(dst_buf);
+            return -1;
+        }
+        out_len = zrc;
+        break;
+    }
+    default: { /* SDXI_COMP_ALGO_ZLIB */
+        uLongf zlib_out = (uLongf)dst_cap;
+        int zrc = uncompress(dst_buf, &zlib_out, src_buf, (uLong)src_len);
+        free(src_buf);
+        if (zrc != Z_OK) {
+            sdxi_error("decompress: zlib error %d (src=%u dst_cap=%u)", zrc, src_len, dst_cap);
+            free(dst_buf);
+            return -1;
+        }
+        out_len = (size_t)zlib_out;
+        break;
+    }
     }
 
     nr = vfu_addr_to_sgl(vfu_ctx, (vfu_dma_addr_t)(uintptr_t)dst_gpa,
-                          (size_t)out_len, sg, 1, PROT_WRITE);
+                          out_len, sg, 1, PROT_WRITE);
     rc = (nr < 0) ? -1 : vfu_sgl_write(vfu_ctx, sg, (size_t)nr, dst_buf,
                                          VFU_SGL_DIRECT_ACCESS);
     free(dst_buf);
     if (rc != 0) {
-        sdxi_error("decompress: failed to write dst (gpa=0x%llx len=%lu)",
-                   (unsigned long long)dst_gpa, (unsigned long)out_len);
+        sdxi_error("decompress: failed to write dst (gpa=0x%llx len=%zu)",
+                   (unsigned long long)dst_gpa, out_len);
         return -1;
     }
 
-    sdxi_debug("decompress: src=%u -> out=%lu bytes", src_len, (unsigned long)out_len);
+    sdxi_debug("decompress: src=%u algo=%u -> out=%zu bytes", src_len, algo, out_len);
 
     if (csb_gpa != 0ULL) {
         struct sdxi_cst_blk csb;
@@ -728,12 +796,14 @@ void sdxi_engine_process_cxt(vfu_ctx_t *vfu_ctx, uint64_t l2_gpa,
                 memcpy(&flags,    dsc + SDXI_COMP_FLAGS_OFF,     4U);
                 memcpy(&src_addr, dsc + SDXI_COMP_SRC_ADDR_OFF, 8U);
                 memcpy(&dst_addr, dsc + SDXI_COMP_DST_ADDR_OFF, 8U);
-                sdxi_debug("cxt %u COMPRESS: 0x%llx len=%u -> 0x%llx cap=%u level=%u",
+                uint32_t level = flags & 0xFFU;
+                uint32_t algo  = (flags >> 8) & 0xFFU;
+                sdxi_debug("cxt %u COMPRESS: 0x%llx len=%u -> 0x%llx cap=%u level=%u algo=%u",
                            cid, (unsigned long long)src_addr, src_len,
-                           (unsigned long long)dst_addr, dst_cap, flags & 0xFU);
+                           (unsigned long long)dst_addr, dst_cap, level, algo);
                 ssize_t out = exec_compress(vfu_ctx, src_addr, src_len,
                                             dst_addr, dst_cap,
-                                            (int)(flags & 0xFU), csb_gpa);
+                                            (int)level, algo, csb_gpa);
                 if (out < 0) {
                     csb_ok = -1;
                 } else {
@@ -744,17 +814,19 @@ void sdxi_engine_process_cxt(vfu_ctx_t *vfu_ctx, uint64_t l2_gpa,
                 break;
             }
             case SDXI_DSC_OP_SUBTYPE_DECOMPRESS: {
-                uint32_t src_len, dst_cap;
+                uint32_t src_len, dst_cap, dflags;
                 uint64_t src_addr, dst_addr;
                 memcpy(&src_len,  dsc + SDXI_COMP_SRC_LEN_OFF,  4U);
                 memcpy(&dst_cap,  dsc + SDXI_COMP_DST_CAP_OFF,  4U);
+                memcpy(&dflags,   dsc + SDXI_COMP_FLAGS_OFF,     4U);
                 memcpy(&src_addr, dsc + SDXI_COMP_SRC_ADDR_OFF, 8U);
                 memcpy(&dst_addr, dsc + SDXI_COMP_DST_ADDR_OFF, 8U);
-                sdxi_debug("cxt %u DECOMPRESS: 0x%llx len=%u -> 0x%llx cap=%u",
+                uint32_t algo = (dflags >> 8) & 0xFFU;
+                sdxi_debug("cxt %u DECOMPRESS: 0x%llx len=%u -> 0x%llx cap=%u algo=%u",
                            cid, (unsigned long long)src_addr, src_len,
-                           (unsigned long long)dst_addr, dst_cap);
+                           (unsigned long long)dst_addr, dst_cap, algo);
                 ssize_t out = exec_decompress(vfu_ctx, src_addr, src_len,
-                                              dst_addr, dst_cap, csb_gpa);
+                                              dst_addr, dst_cap, algo, csb_gpa);
                 if (out < 0) {
                     csb_ok = -1;
                 } else {

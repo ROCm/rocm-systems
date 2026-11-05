@@ -270,7 +270,7 @@ static long handle_compress(struct sdxi_char_dev *sdev,
 	*(__le32 *)(slot + 0)  = cpu_to_le32(make_opcode(TYPE_DMAB, SUBTYPE_COMPRESS));
 	*(__le32 *)(slot + 4)  = cpu_to_le32((u32)ioc.src_len);
 	*(__le32 *)(slot + 8)  = cpu_to_le32((u32)ioc.dst_cap);
-	*(__le32 *)(slot + 12) = cpu_to_le32(ioc.level);
+	*(__le32 *)(slot + 12) = cpu_to_le32((ioc.level & 0xFFU) | ((ioc.algo & 0xFFU) << 8U));
 	*(__le64 *)(slot + 16) = cpu_to_le64(src.dma);
 	*(__le64 *)(slot + 24) = cpu_to_le64(dst.dma);
 	*(__le64 *)(slot + 56) = cpu_to_le64(sdev->client.csb_dma);
@@ -332,6 +332,7 @@ static long handle_decompress(struct sdxi_char_dev *sdev,
 	*(__le32 *)(slot + 0)  = cpu_to_le32(make_opcode(TYPE_DMAB, SUBTYPE_DECOMPRESS));
 	*(__le32 *)(slot + 4)  = cpu_to_le32((u32)ioc.src_len);
 	*(__le32 *)(slot + 8)  = cpu_to_le32((u32)ioc.dst_cap);
+	*(__le32 *)(slot + 12) = cpu_to_le32((ioc.algo & 0xFFU) << 8U);
 	*(__le64 *)(slot + 16) = cpu_to_le64(src.dma);
 	*(__le64 *)(slot + 24) = cpu_to_le64(dst.dma);
 	*(__le64 *)(slot + 56) = cpu_to_le64(sdev->client.csb_dma);
