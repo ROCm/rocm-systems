@@ -201,11 +201,9 @@ public:
   /// @param[out] dst Destination buffer.
   void vector_load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                    uint32_t num_elems, uint8_t *dst) {
+    // GWS instructions send a request with no data and no lanes, only to order
+    // the DS counter; its zero stride gives the run scan nothing to visit.
     const uint32_t stride = num_elems * elem_size;
-    // Only a request without element data has a zero stride; it reads nothing,
-    // and the run scan requires a nonzero stride.
-    if (stride == 0)
-      return;
     // A lane-ordered run is contiguous both in LDS and in the lane-major
     // buffer, so one copy moves it; a reordered run would need a gather.
     // Sorting permuted lanes costs more than the per-lane copies it would
@@ -227,10 +225,8 @@ public:
   /// supplies any byte that several lanes write.
   void vector_store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                     uint32_t num_elems, const uint8_t *src) {
+    // As in vector_load(), a zero-stride (GWS) request has no lanes.
     const uint32_t stride = num_elems * elem_size;
-    // As in vector_load(): nothing to write, and the run scan needs a stride.
-    if (stride == 0)
-      return;
     const auto store_run = [&](const CoalescedLaneRun &run) RJ_ALWAYS_INLINE {
       if (fits(run))
         write_backing(static_cast<size_t>(run.address), src + run.first_lane * stride, run.size);

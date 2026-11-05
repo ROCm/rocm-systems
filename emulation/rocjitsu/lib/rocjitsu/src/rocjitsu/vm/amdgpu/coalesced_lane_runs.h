@@ -257,7 +257,8 @@ RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lan
 template <typename F>
 bool for_each_lane_ordered_run(const uint64_t *addrs, uint64_t lane_mask, uint32_t wf_size,
                                uint32_t stride, F &&fn) {
-  assert(wf_size <= 64 && stride != 0);
+  // Only a request without lanes, such as GWS sends to LDS, may have no stride.
+  assert(wf_size <= 64 && (stride != 0 || lane_mask == 0));
   return detail::for_each_lane_ordered_run(addrs, lane_mask, wf_size, stride, fn);
 }
 
