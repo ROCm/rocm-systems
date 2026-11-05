@@ -41,6 +41,12 @@ using config_value_t =
 /// Parameter id to the value parsed for it.
 using typed_values_t = std::map<std::string, config_value_t, std::less<>>;
 
+/// True when @p value has the type of @p param and satisfies its rules: numbers are
+/// within min/max, an enumeration names a choice (or custom values are allowed), and
+/// a path is non-empty. The value is not parsed again.
+[[nodiscard]] bool
+accepts_value(const schema_param& param, const config_value_t& value);
+
 /// Parse @p text once as @p param. Returns nullopt when the text is not a value
 /// the parameter accepts.
 [[nodiscard]] std::optional<config_value_t>

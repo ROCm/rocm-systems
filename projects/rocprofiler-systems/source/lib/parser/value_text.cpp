@@ -231,73 +231,94 @@ format_list(const std::vector<std::string>& parts)
 }
 }  // namespace
 
-std::optional<config_value_t>
-parse_value(const schema_param& param, std::string_view text)
+bool
+accepts_value(const schema_param& param, const config_value_t& value)
 {
     switch(param.type)
     {
-        case param_type::boolean:
-        {
-            const auto parsed = parse_boolean(text);
-            if(!parsed)
-            {
-                return std::nullopt;
-            }
-            return config_value_t{ *parsed };
-        }
+        case param_type::boolean: return std::holds_alternative<bool>(value);
         case param_type::integer:
         {
-            const auto parsed = parse_integer(text);
-            if(!parsed || !integer_in_range(*parsed, param))
-            {
-                return std::nullopt;
-            }
-            return config_value_t{ *parsed };
+            const auto* integer = std::get_if<std::int64_t>(&value);
+            return integer != nullptr && integer_in_range(*integer, param);
         }
         case param_type::number:
         {
-            const auto parsed = parse_number(text);
-            if(!parsed || !number_in_range(*parsed, param))
-            {
-                return std::nullopt;
-            }
-            return config_value_t{ *parsed };
+            const auto* number = std::get_if<double>(&value);
+            return number != nullptr && number_in_range(*number, param);
         }
-        case param_type::string: return config_value_t{ std::string{ text } };
+        case param_type::string: return std::holds_alternative<std::string>(value);
         case param_type::path:
         {
-            if(text.empty())
-            {
-                return std::nullopt;
-            }
-            return config_value_t{ std::string{ text } };
+            const auto* text = std::get_if<std::string>(&value);
+            return text != nullptr && !text->empty();
         }
         case param_type::enumeration:
         {
-            if(!choice_accepted(param, text))
-            {
-                return std::nullopt;
-            }
-            return config_value_t{ std::string{ text } };
+            const auto* text = std::get_if<std::string>(&value);
+            return text != nullptr && choice_accepted(param, *text);
         }
         case param_type::enumeration_list:
         {
-            const auto parts = split_list(text, list_separator(param));
-            if(!parts)
+            const auto* parts = std::get_if<std::vector<std::string>>(&value);
+            if(parts == nullptr)
             {
-                return std::nullopt;
+                return false;
             }
             for(const auto& element : *parts)
             {
                 if(element.empty() || !choice_accepted(param, element))
                 {
-                    return std::nullopt;
+                    return false;
                 }
             }
-            return config_value_t{ *parts };
+            return true;
         }
     }
-    return std::nullopt;
+    return false;
+}
+
+std::optional<config_value_t>
+parse_value(const schema_param& param, std::string_view text)
+{
+    std::optional<config_value_t> candidate;
+    switch(param.type)
+    {
+        case param_type::boolean:
+            if(const auto parsed = parse_boolean(text))
+            {
+                candidate = config_value_t{ *parsed };
+            }
+            break;
+        case param_type::integer:
+            if(const auto parsed = parse_integer(text))
+            {
+                candidate = config_value_t{ *parsed };
+            }
+            break;
+        case param_type::number:
+            if(const auto parsed = parse_number(text))
+            {
+                candidate = config_value_t{ *parsed };
+            }
+            break;
+        case param_type::string:
+        case param_type::path:
+        case param_type::enumeration:
+            candidate = config_value_t{ std::string{ text } };
+            break;
+        case param_type::enumeration_list:
+            if(auto parts = split_list(text, list_separator(param)))
+            {
+                candidate = config_value_t{ std::move(*parts) };
+            }
+            break;
+    }
+    if(!candidate || !accepts_value(param, *candidate))
+    {
+        return std::nullopt;
+    }
+    return candidate;
 }
 
 std::string
