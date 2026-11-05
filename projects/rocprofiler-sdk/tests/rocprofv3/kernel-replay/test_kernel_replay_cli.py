@@ -365,6 +365,16 @@ def att_conflicts(**attrs):
     )
 
 
+def test_att_serialize_all_conflicts_with_kernel_replay():
+    # A disabled ATT context still returns bSerialize, so counter passes would stay serialized.
+    assert rocprofv3().kernel_replay_rejects_att_serialize_all(
+        rocprofv3().dotdict(att_serialize_all=True)
+    )
+    assert not rocprofv3().kernel_replay_rejects_att_serialize_all(
+        rocprofv3().dotdict(att_serialize_all=False)
+    )
+
+
 def test_dispatch_att_has_no_replay_option_conflict():
     # The plain dispatch thread trace is what replay knows how to give a pass of its own.
     assert att_conflicts(advanced_thread_trace=True, att_target_cu="1") == []

@@ -260,7 +260,7 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-att-first-iteration/out_results.json
         --passes 2 --expected-dispatch-count 4 --common-counters SQ_WAVES SQ_INSTS_VALU
         --thread-trace -k
-        "dispatch_id_constant_across_replay_passes or expected_logical_dispatch_count or each_pass_collects_distinct_batch or one_thread_trace_per_dispatch"
+        "dispatch_id_constant_across_replay_passes or expected_logical_dispatch_count or each_pass_collects_distinct_batch or one_thread_trace_per_dispatch or common_counters_constant_across_passes"
     )
 
 set_tests_properties(

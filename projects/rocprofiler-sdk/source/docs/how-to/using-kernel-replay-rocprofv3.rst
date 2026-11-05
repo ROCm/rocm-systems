@@ -101,7 +101,8 @@ Adding ``--att`` gives each profiled dispatch one more pass, ahead of its counte
 runs the dispatch thread trace with counter collection switched off. The counter groups then run
 on the following passes with the thread trace switched off. Each dispatch is traced once, and its
 counters are collected against the same restored inputs but without the trace's memory traffic
-and serialization perturbing them.
+and serialization perturbing them. ``--att-serialize-all`` is rejected with kernel replay,
+because a disabled thread-trace pass would still serialize the counter passes.
 
 .. code-block:: bash
 

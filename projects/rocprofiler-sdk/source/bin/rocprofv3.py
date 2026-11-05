@@ -1504,6 +1504,16 @@ def att_options_conflicting_with_kernel_replay(args):
     ]
 
 
+def kernel_replay_rejects_att_serialize_all(args):
+    """--att-serialize-all stays in force on a counter pass whose thread trace is off.
+
+    thread_trace/core.cpp still returns parameters.bSerialize for a disabled context, so every
+    counter pass of a replayed dispatch would be serialized. That is the perturbation the
+    counter passes exist to avoid.
+    """
+    return bool(getattr(args, "att_serialize_all", None))
+
+
 def patch_args(data):
     """Used to handle certain fields which might be specified as a string instead of an array or vice-versa"""
 
@@ -2294,6 +2304,12 @@ def run(app_args, args, **kwargs):
                 + ". Kernel replay gives each counter group, and the --att thread trace, a pass "
                 "of its own; every other service stays on for all of the passes and would "
                 "report each kernel once per pass. Collect them in a separate run."
+            )
+        if kernel_replay_rejects_att_serialize_all(args):
+            fatal_error(
+                "--replay-mode kernel cannot be combined with --att-serialize-all. "
+                "A disabled thread-trace pass still serializes every counter pass, which is "
+                "the perturbation kernel replay's counter passes are meant to avoid."
             )
         att_conflicts = att_options_conflicting_with_kernel_replay(args)
         if att_conflicts:
