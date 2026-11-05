@@ -6,11 +6,12 @@
 Sampling the call stack
 ****************************************************
 
-`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ can use call-stack sampling
-with ``rocprof-sys-instrument`` or with the ``rocprof-sys-sample`` executable.
-Sampling without instrumentation uses ``rocprof-sys-sample``, as shown below.
-The experimental ``rocsys`` command has no ``sample`` subcommand.
-See :doc:`using-rocsys`.
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_
+can use call-stack sampling with ``rocprof-sys-run`` or with the ``rocprof-sys-sample``
+executable. For sampling without instrumentation use ``rocprof-sys-sample``, as shown
+in the examples below. To enable sampling with the experimental ``rocsys``,
+see :doc:`using-rocsys`.
+
 For example, all of the following commands are effectively equivalent:
 
 * Binary rewrite with only the instrumentation necessary to start and stop sampling
