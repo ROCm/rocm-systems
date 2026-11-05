@@ -15,6 +15,7 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_wsl_device.h"
+#include "functional/wsl/wsl_fixture.h"
 
 namespace {
 
@@ -40,7 +41,7 @@ std::vector<amdsmi_processor_handle> GpuHandles() {
 
 }  // namespace
 
-TEST(WslFunctionalReadOnly, ClockInfoUnreportedFieldsAreNotAvailable) {
+TEST_F(WslFunctionalReadOnly, ClockInfoUnreportedFieldsAreNotAvailable) {
   if (amdsmi_init(AMDSMI_INIT_AMD_GPUS) != AMDSMI_STATUS_SUCCESS) {
     GTEST_SKIP() << "amdsmi_init failed";
   }
@@ -50,7 +51,7 @@ TEST(WslFunctionalReadOnly, ClockInfoUnreportedFieldsAreNotAvailable) {
   }
 
   auto handles = GpuHandles();
-  ASSERT_FALSE(handles.empty());
+  EXPECT_FALSE(handles.empty());
 
   for (auto handle : handles) {
     for (auto clk_type : {AMDSMI_CLK_TYPE_GFX, AMDSMI_CLK_TYPE_MEM}) {
