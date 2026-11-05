@@ -50,12 +50,12 @@ else()
     option(
         PROFILER_HUB_SQLITE3_FROM_GIT
         "Generate the SQLite3 amalgamation from the upstream git repo instead of downloading it. Needs git, make, and tclsh. Ignored on Windows."
-        OFF
+        ON
     )
 
-    # The default downloads the official amalgamation zip, which needs only
-    # CMake. Generating it from git runs upstream autotools, which needs git,
-    # make, and tclsh.
+    # Generating the amalgamation from git runs upstream autotools, which needs
+    # git, make, and tclsh. Turn this OFF to download the official amalgamation
+    # zip instead, which needs only CMake.
     if(PROFILER_HUB_SQLITE3_FROM_GIT AND NOT WIN32)
         find_package(Git REQUIRED)
         find_program(MAKE_COMMAND NAMES make gmake REQUIRED)
