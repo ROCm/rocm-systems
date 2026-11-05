@@ -47,6 +47,7 @@ target_link_libraries(
         util
         flatbuffers
         Threads::Threads
+        rocjitsu_cli
         rocjitsu_cli_launch_preload
         rocjitsu_version
 )
@@ -65,7 +66,31 @@ set_target_properties(rocjitsu_bin PROPERTIES OUTPUT_NAME rocjitsu)
 
 rj_configure_target(rocjitsu_bin TOOL)
 
-# Install the rocjitsu CLI so it is usable from a packaged dist (the default
-# entrypoint for driving emulation when mirage is not present).
+# Install the rocjitsu CLI so it is usable from a packaged dist as the default
+# entrypoint for driving emulation.
 include(GNUInstallDirs)
 install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+if(BUILD_TESTING)
+    add_executable(
+        rocjitsu_launch_flags_test
+        ../../tests/tools/launch_flags_test.cpp
+    )
+    target_include_directories(
+        rocjitsu_launch_flags_test
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(
+        rocjitsu_launch_flags_test
+        PRIVATE rocjitsu_cli flatbuffers GTest::gtest_main
+    )
+    rj_configure_target(rocjitsu_launch_flags_test TOOL)
+    include(GoogleTest)
+    rj_add_gtest_tests(rocjitsu_launch_flags_test TEST_PREFIX "cli.")
+    if(RJ_INSTALL_TESTS)
+        file(
+            APPEND "${RJ_INSTALL_CTEST_FILE}"
+            "include(\"rocjitsu_launch_flags_test.cmake\")\n"
+        )
+    endif()
+endif()
