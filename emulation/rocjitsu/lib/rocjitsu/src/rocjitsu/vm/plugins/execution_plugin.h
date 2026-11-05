@@ -225,9 +225,9 @@ public:
   /// later waits for memory, and also for an instruction that moves no data,
   /// such as a NULL descriptor, a NOP tile, a gather with no valid indices or a
   /// store wholly outside the tensor. A transfer deferred until its memory is
-  /// available is not reported again when it resumes. The observation's
-  /// element_size_bytes is meaningful only when its lds_ranges is nonempty; see
-  /// TensorDmaIssueObservation. Its LDS ranges are
+  /// available is not reported again when it resumes. The observation's LDS
+  /// ranges are byte ranges that can end mid-element; see
+  /// TensorDmaIssueObservation. They are
   /// borrowed and valid only during this callback.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
