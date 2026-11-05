@@ -1339,7 +1339,8 @@ public:
   /// `UnimplementedInst::what()` when that legacy exception is translated.
   /// Otherwise the pointed-to string is unchanged.
   /// @returns Failure for an unimplemented instruction stub or a reported operand
-  /// failure. The wavefront retains the reason for caller-owned diagnostics.
+  /// or register-access failure. The wavefront retains the reason for caller-owned
+  /// diagnostics.
   /// Each call clears the previous error; a failed call does not halt the wavefront.
   /// Other host failures inside implemented instructions still raise exceptions.
   util::Result execute_instruction(Instruction *inst, Wavefront &wf,
