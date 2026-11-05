@@ -182,9 +182,9 @@ void
 configure(shader_data_forwarder_t forwarder, std::unordered_set<size_t> filter_range)
 {
     ROCP_FATAL_IF(!backend_supported())
-        << "--att-no-intercept was requested, but this rocprofv3 build was configured with "
-           "ROCPROFILER_DISABLE_ATT_QUICK_SCAN=ON and does not include "
-           "rocprof-trace-decoder quick-scan support";
+        << "--att-no-intercept was requested, but ATT quick-scan is not supported on this "
+           "system. It needs a rocprofv3 build without ROCPROFILER_DISABLE_ATT_QUICK_SCAN=ON "
+           "(rocprof-trace-decoder quick-scan support) and a CPU with AVX-512";
 
     ROCP_FATAL_IF(forwarder == nullptr)
         << "ATT no-intercept setup requires a shader-data forwarding callback";
