@@ -114,7 +114,8 @@ the same name holds the pointer.
 | pointers, handles, function pointers, non-const `char*` inputs | `TraceLoggingPointer` |
 | `const char*` inputs, `char*` outputs and results listed in `strings` | `TraceLoggingCountedString`, at most `ROCM_TRACE_STRING_CAP` (256) bytes; `TraceLoggingString` if `uncapped`. A null pointer is recorded as "" |
 | structs passed by value (`dim3`, `hipExtent`, nested structs) | every component (RC-API-1), one field per member: `<name>_<member>`, `<name>_<member>_<member>` |
-| arrays of numbers or pointers | `TraceLogging<type>FixedArray` |
+| arrays of integers, enums, bools or pointers | `TraceLogging<type>FixedArray` |
+| arrays of `float` or `double` | one field per element, `<name>_<index>`: the LTTng flavour has no floating-point array fields |
 | arrays of structs | one set of fields per element: `<name>_<index>_<member>` |
 | unions | their bytes, `TraceLoggingUInt8FixedArray` (which member is active is unknown); an anonymous union member is `<name>_union` |
 | anything else (`long double`, incomplete types) | an error, until the parameter is listed in `omit` |
