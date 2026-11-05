@@ -47,6 +47,7 @@ typedef struct fakeLaunchConfig {
   fakeDim3 block;
   fakeDim3 extra[2];
   void *slots[2];
+  float weights[2];
   unsigned int flags;
 } fakeLaunchConfig;
 // A named union, and a struct with an anonymous one.

@@ -120,6 +120,8 @@ def test_aggregates_record_all_components(source):
     for name in ("config_grid_x", "config_extra_1_z", "config_flags"):
         assert f'"{name}"' in launch
     assert "TraceLoggingPointerFixedArray(" in launch
+    # Floating-point arrays are one field per element: LTTng has no float array fields.
+    assert '"config_weights_1"' in launch and "Float32FixedArray" not in source
     bits = _function(source, "probe_FakeTable_fakeBits")
     assert "TraceLoggingUInt8FixedArray(" in bits and '"value_union"' in bits
     assert "TraceLoggingInt8FixedArray(" in _function(

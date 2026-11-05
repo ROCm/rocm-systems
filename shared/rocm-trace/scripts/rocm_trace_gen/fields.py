@@ -96,7 +96,9 @@ def string(
 def _array(ctype: CType, expr: str, name: str, cond: Optional[str]) -> List[Field]:
     element = ctype.element
     assert element is not None
-    if element.kind in (Kind.RECORD, Kind.ARRAY):
+    # One set of fields per element for structs and nested arrays, and for floating point:
+    # the LTTng flavour of TraceLogging has no floating-point array fields.
+    if element.kind in (Kind.RECORD, Kind.ARRAY, Kind.FLOAT):
         fields: List[Field] = []
         for i in range(ctype.count):
             fields.extend(value(element, f"{expr}[{i}]", f"{name}_{i}", cond))

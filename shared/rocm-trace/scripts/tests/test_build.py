@@ -179,6 +179,7 @@ def test_session_records_enter_and_exit(driver, lttng_home, tmp_path):
     launch = event("fakeLaunchEx_enter")[0]
     assert "config_grid_x = 2" in launch and "config_extra_1_z = 9" in launch
     assert "config_slots = [ [0] = 0xABC" in launch and "config_flags = 3" in launch
+    assert "config_weights_0 = 0," in launch and "config_weights_1 = 0.5," in launch
     assert "handle_reserved = [ [0] = 104," in event("fakeOpen_enter")[0]
     bits = event("fakeBits_enter")[0]
     assert "bits = [ [0] = 4, [1] = 3, [2] = 2, [3] = 1 ]" in bits

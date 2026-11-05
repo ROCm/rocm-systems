@@ -279,6 +279,8 @@ fakeError_t probe_FakeTable_fakeLaunchEx(fakeLaunchConfig config) {
             TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(config.extra[1].y) : uint32_t{}), "config_extra_1_y"),
             TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(config.extra[1].z) : uint32_t{}), "config_extra_1_z"),
             TraceLoggingPointerFixedArray((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<void* const*>(config.slots) : zeros<void*, 2>()), 2, "config_slots"),
+            TraceLoggingFloat32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<float>(config.weights[0]) : float{}), "config_weights_0"),
+            TraceLoggingFloat32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<float>(config.weights[1]) : float{}), "config_weights_1"),
             TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(config.flags) : uint32_t{}), "config_flags"));
     fakeError_t rocm_trace_result{};
     try {
