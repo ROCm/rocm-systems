@@ -11,7 +11,9 @@ enrichments of the cache listing:
 * each entry carries a ``cache_acronym`` derived from ``cache_level`` plus the
   DATA/INST flags (L1D / L1I / L2 / L3, with an ``L<level>`` fallback), and
 * each entry carries a ``total_cache_size`` equal to the per-instance
-  ``cache_size`` times ``num_cache_instance``.
+  ``cache_size`` times ``num_cache_instance``, and
+* each entry carries a ``cache_name`` that tells apart the level-1 data caches
+  KFD reports with identical flags (vector L1, scalar L1, GL1).
 
 ``static.py`` is loaded through cli_search_order, so a plain checkout
 exercises the code under development; an explicit AMDSMI_PATH pins that install.
@@ -21,6 +23,7 @@ import argparse
 import copy
 import os
 import unittest
+from unittest import mock
 
 from common.common import (
     amdsmi_path,
@@ -88,6 +91,40 @@ _GFX950_CACHE = [
         "max_num_cu_shared": 256,
         "num_cache_instance": 1,
     },
+]
+
+
+def _cache_entry(props, size, level, cu_shared, instances):
+    return {
+        "cache_properties": [props, "SIMD_CACHE"],
+        "cache_size": size,
+        "cache_level": level,
+        "max_num_cu_shared": cu_shared,
+        "num_cache_instance": instances,
+    }
+
+
+# gfx1250 layout: seven level-1 entries, including three 256 KB GL1 groups.
+_GFX1250_CACHE = [
+    _cache_entry("DATA_CACHE", 32, 1, 1, 256),
+    _cache_entry("INST_CACHE", 64, 1, 2, 112),
+    _cache_entry("INST_CACHE", 64, 1, 1, 32),
+    _cache_entry("DATA_CACHE", 16, 1, 2, 112),
+    _cache_entry("DATA_CACHE", 16, 1, 1, 32),
+    _cache_entry("DATA_CACHE", 256, 1, 9, 14),
+    _cache_entry("DATA_CACHE", 256, 1, 7, 14),
+    _cache_entry("DATA_CACHE", 256, 1, 8, 4),
+    _cache_entry("DATA_CACHE", 4096, 2, 258, 1),
+]
+
+# gfx1100 (Navi31) layout captured live: one GL1 group plus L2 and L3.
+_GFX1100_CACHE = [
+    _cache_entry("DATA_CACHE", 32, 1, 1, 96),
+    _cache_entry("INST_CACHE", 32, 1, 2, 48),
+    _cache_entry("DATA_CACHE", 16, 1, 2, 48),
+    _cache_entry("DATA_CACHE", 256, 1, 8, 12),
+    _cache_entry("DATA_CACHE", 6144, 2, 96, 1),
+    _cache_entry("DATA_CACHE", 98304, 3, 96, 1),
 ]
 
 
@@ -218,7 +255,15 @@ class TestCliCacheLabels(unittest.TestCase):
         cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.static_module = _load_static_module()
 
-    def _run_cache(self, fmt):
+    def _run_cache(self, fmt, layout=None):
+        if layout is not None:
+            patcher = mock.patch.object(
+                self.interface,
+                "amdsmi_get_gpu_cache_info",
+                lambda _handle: {"cache": copy.deepcopy(layout)},
+            )
+            patcher.start()
+            self.addCleanup(patcher.stop)
         commands = object.__new__(self.static_module.StaticCommands)
         commands.logger = _FakeLogger(fmt)
         commands.helpers = _FakeHelpers()
@@ -273,3 +318,66 @@ class TestCliCacheLabels(unittest.TestCase):
 
         # Existing per-instance size wrapping is unchanged.
         self.assertEqual(cache_info[0]["cache_size"], {"value": 32, "unit": "KB"})
+
+    def test_gfx950_cache_names(self):
+        names = [entry.get("cache_name") for entry in self._run_cache("json")]
+        self.assertEqual(
+            names,
+            [
+                "L1 Vector Data",
+                "L1 Instruction",
+                "L1 Instruction",
+                "L1 Scalar Data",
+                "L1 Scalar Data",
+                "L2 Data",
+                "L3 Data",
+            ],
+            "vector and scalar L1 data caches must get distinct cache_name values",
+        )
+
+    def test_gfx1250_level1_caches_are_distinguishable(self):
+        cache_info = self._run_cache("human", _GFX1250_CACHE)
+        names = [cache_info[f"cache_{index}"].get("cache_name") for index in range(9)]
+        self.assertEqual(
+            names,
+            [
+                "L1 Vector Data",
+                "L1 Instruction",
+                "L1 Instruction",
+                "L1 Scalar Data",
+                "L1 Scalar Data",
+                "GL1 Data",
+                "GL1 Data",
+                "GL1 Data",
+                "L2 Data",
+            ],
+            "256 KB per-shader-array caches must be named GL1, not merged with scalar L1",
+        )
+        # cache_acronym is a released field; its values must not change.
+        acronyms = [cache_info[f"cache_{index}"]["cache_acronym"] for index in range(9)]
+        self.assertEqual(acronyms, ["L1D", "L1I", "L1I", "L1D", "L1D", "L1D", "L1D", "L1D", "L2"])
+
+    def test_gfx1100_cache_names_json(self):
+        names = [entry.get("cache_name") for entry in self._run_cache("json", _GFX1100_CACHE)]
+        self.assertEqual(
+            names,
+            [
+                "L1 Vector Data",
+                "L1 Instruction",
+                "L1 Scalar Data",
+                "GL1 Data",
+                "L2 Data",
+                "L3 Data",
+            ],
+        )
+
+    def test_level1_data_without_instruction_cache_stays_generic(self):
+        # Vector/scalar/GL1 are told apart by their position around the L1
+        # instruction cache; without one, do not guess.
+        layout = [
+            _cache_entry("DATA_CACHE", 16, 1, 1, 64),
+            _cache_entry("DATA_CACHE", 128, 1, 8, 4),
+            _cache_entry("DATA_CACHE", 4096, 2, 64, 1),
+        ]
+        names = [entry.get("cache_name") for entry in self._run_cache("json", layout)]
+        self.assertEqual(names, ["L1 Data", "L1 Data", "L2 Data"])
