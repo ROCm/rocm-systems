@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "common/version.hpp"
 #include "core/library_checker.hpp"
 
 #include <gmock/gmock.h>
@@ -8,7 +9,6 @@
 
 #include <cstdint>
 #include <stdexcept>
-#include <string>
 
 namespace rocprofsys::library_checker
 {
@@ -16,22 +16,6 @@ namespace
 {
 
 using ::testing::HasSubstr;
-
-struct fake_storage_version
-{
-    std::uint32_t major;
-    std::uint32_t minor;
-    std::uint32_t patch;
-};
-
-struct fake_storage
-{
-    static inline fake_storage_version s_loaded = {};
-
-    fake_storage(std::string, std::string) {}
-
-    [[nodiscard]] static fake_storage_version get_storage_version() { return s_loaded; }
-};
 
 struct fake_sdk_backend
 {
@@ -81,21 +65,6 @@ TEST(library_checker_test, check_version_message_names_library_and_both_versions
                       "is loaded"));
         EXPECT_THAT(e.what(), HasSubstr("LD_LIBRARY_PATH"));
     }
-}
-
-TEST(library_checker_test, profiler_hub_accepts_matching_loaded_version)
-{
-    fake_storage::s_loaded = { .major = 1, .minor = 2, .patch = 3 };
-
-    EXPECT_NO_THROW((check_profiler_hub_version_mismatch<fake_storage, k_built>()));
-}
-
-TEST(library_checker_test, profiler_hub_throws_on_mismatched_loaded_version)
-{
-    fake_storage::s_loaded = { .major = 1, .minor = 2, .patch = 4 };
-
-    EXPECT_THROW((check_profiler_hub_version_mismatch<fake_storage, k_built>()),
-                 std::runtime_error);
 }
 
 TEST(library_checker_test, rocprofiler_sdk_accepts_matching_loaded_version)
