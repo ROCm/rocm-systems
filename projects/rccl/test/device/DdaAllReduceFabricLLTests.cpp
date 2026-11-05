@@ -14,6 +14,7 @@
 #include <cstring>
 #include <random>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 #include "DdaLLHostPeers.hpp"
@@ -42,10 +43,11 @@ constexpr unsigned kEpochCells = 16;
 constexpr float kUntouched = -1.0f;
 constexpr auto kWatchdog = std::chrono::seconds(30);
 constexpr auto kSettle = std::chrono::milliseconds(20);  // lets every thread finish its first read of the late lines
-constexpr int kCopyArea = 0;  // spread areas: a peer's copy of the owner's shard, and a peer's reduced shard
-constexpr int kReducedArea = 1;
+constexpr int kCopyArea = 0;  // spread area holding a peer's copy of the owner's shard
+constexpr int kReducedArea = 1;  // spread area holding a peer's reduced shard
 constexpr int kHoldNothing = -1;
 constexpr bool kAbort = true;
+constexpr bool kNoAbort = false;
 
 // Rank order folds (-1e8 + 1e8) first, so every later rank's small value survives; any other order loses some of them.
 float rankValue(int rank) {
@@ -61,6 +63,17 @@ float rankValue(int rank) {
 // Exact rank-order sum: 0 + 1 + 2 + ... + (nRanks - 2) from the ranks past kSelf, each a distinct nonzero value.
 float rankOrderSum(int nRanks) {
   return (float)((nRanks - 2) * (nRanks - 1) / 2);
+}
+
+template <typename T>
+const char* typeName() {
+  if constexpr (std::is_same_v<T, float>) {
+    return "float";
+  } else if constexpr (std::is_same_v<T, bf16>) {
+    return "bf16";
+  } else {
+    return "half";
+  }
 }
 
 uint32_t bitsOf(float f) {
@@ -206,7 +219,7 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
   size_t twoShotSlot() const { return dda::common::ddaLLArTwoShotSlotPkts(kBankBytes, nRanks_); }
   int heldPeer() const { return self_ == 0 ? 1 : 0; }
 
-  // Line pk of sender's slot in owner's bank flag_ & 1: area 0 holds copies of owner's shard, area 1 reduced shards.
+  // Line pk of sender's slot in owner's bank flag_ & 1, in kCopyArea (copies of owner's shard) or kReducedArea.
   volatile uint32_t* spreadLine(int owner, int area, int sender, size_t pk) {
     const size_t bank = (size_t)(flag_ & 1u) * (kBankBytes / sizeof(LLPacket16));
     return line(owner, sender, bank + (size_t)area * nRanks_ * twoShotSlot() + pk, twoShotSlot());
@@ -235,7 +248,7 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
     return out;
   }
 
-  // Launches kernel, a one-shot or spread instance over T, as rank self_ on bytes_ of send: grid blocks of 512 threads.
+  // Launches kernel, a one-shot or spread instance over T, as rank self_ on bytes_ of send: grid x kOneShotThreads.
   template <typename T, typename Kernel>
   void launchLL(Kernel kernel, unsigned grid, const void* send) {
     kernel<<<dim3(grid), dim3(kOneShotThreads), 0, stream_>>>(
@@ -269,7 +282,7 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
     ref_ = recvWords();
   }
 
-  // Peer's lines in my scratch under flag_: its copy of my shard (area 0) or its reduced shard (area 1).
+  // Peer's lines in my scratch under flag_: its copy of my shard (kCopyArea) or its reduced shard (kReducedArea).
   void publishSpread(int peer, int area) {
     const int owner = area == kCopyArea ? self_ : peer;
     const std::vector<uint32_t>& words = area == kCopyArea ? in_[peer] : ref_;
@@ -346,16 +359,24 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
     }
   }
 
-  // One spread run over T on nRanks ranks as rank self from a fresh reset(), checked against the one-shot.
+  // spreadRun, then recvbuff, the published lines and the epoch cells at flag_.
   template <typename T, int N>
-  void spreadCase(int nRanks, int self, size_t bytes, unsigned grid, int heldArea = kHoldNothing, bool abort = false) {
-    SCOPED_TRACE(::testing::Message() << nRanks << " ranks, self " << self << ", " << bytes << " B, grid " << grid);
-    ASSERT_NO_FATAL_FAILURE((spreadReference<T, N>(nRanks, self, bytes, (uint32_t)(nRanks * 7919 + bytes))));
-    reset();
-    ASSERT_NO_FATAL_FAILURE((spreadRun<T, N>(grid, heldArea, abort, dSend_)));
+  void spreadRunAndCheck(unsigned grid, int heldArea, bool abort, const void* send) {
+    ASSERT_NO_FATAL_FAILURE((spreadRun<T, N>(grid, heldArea, abort, send)));
     ASSERT_NO_FATAL_FAILURE(expectSpreadRecv(heldArea, abort));
     ASSERT_NO_FATAL_FAILURE(expectSpreadPublished(!abort || heldArea != kCopyArea));
-    expectEpochAdvanced(grid);
+    expectEpochAdvanced(grid, flag_);
+  }
+
+  // One spread run over T on nRanks ranks as rank self from a fresh reset(), checked against the one-shot.
+  template <typename T, int N>
+  void spreadCase(int nRanks, int self, size_t bytes, unsigned grid, int heldArea = kHoldNothing,
+                  bool abort = kNoAbort) {
+    SCOPED_TRACE(::testing::Message() << typeName<T>() << ", " << nRanks << " ranks, self " << self << ", " << bytes
+                                      << " B, grid " << grid);
+    ASSERT_NO_FATAL_FAILURE((spreadReference<T, N>(nRanks, self, bytes, (uint32_t)(nRanks * 7919 + bytes))));
+    reset();
+    ASSERT_NO_FATAL_FAILURE((spreadRunAndCheck<T, N>(grid, heldArea, abort, dSend_)));
   }
 
   DdaLLHostPeers peers_;
@@ -460,9 +481,7 @@ TEST_F(DdaAllReduceFabricLL, SpreadInPlaceSendsBeforeOverwriting) {
   ASSERT_NO_FATAL_FAILURE((spreadReference<float, 0>(6, kSelf, kOneShotBytes, 1)));
   reset();
   HIP_CHECK(hipMemcpy(dRecv_, in_[self_].data(), kOneShotBytes, hipMemcpyHostToDevice));
-  ASSERT_NO_FATAL_FAILURE((spreadRun<float, 0>(3, kHoldNothing, false, dRecv_)));
-  ASSERT_NO_FATAL_FAILURE(expectSpreadRecv(kHoldNothing, false));
-  expectSpreadPublished(true);
+  ASSERT_NO_FATAL_FAILURE((spreadRunAndCheck<float, 0>(3, kHoldNothing, kNoAbort, dRecv_)));
 }
 
 // No reset after the one-shot: flag 3 runs on bank 1, then flag 4 on bank 0 over its flag-2 lines, one copy held late.
@@ -474,10 +493,7 @@ TEST_F(DdaAllReduceFabricLL, SpreadFollowsTheOneShotAndSkipsStaleLines) {
     flag_ = flag;
     clearRecv();
     const int held = flag == kFlag + 1 ? kHoldNothing : kCopyArea;
-    ASSERT_NO_FATAL_FAILURE((spreadRun<float, 0>(1, held, false, dSend_)));
-    ASSERT_NO_FATAL_FAILURE(expectSpreadRecv(held, false));
-    ASSERT_NO_FATAL_FAILURE(expectSpreadPublished(true));
-    expectEpochAdvanced(1, flag);
+    ASSERT_NO_FATAL_FAILURE((spreadRunAndCheck<float, 0>(1, held, kNoAbort, dSend_)));
   }
 }
 
