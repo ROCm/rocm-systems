@@ -255,6 +255,15 @@ std::string RaceDetectorPlugin::getSummary() const {
                                "========================================\n";
 }
 
+size_t RaceDetectorPlugin::retainedWorkgroupCount() const {
+  std::lock_guard<std::mutex> lock(dispatch_mutex_);
+  return detectors_.size();
+}
+
+bool RaceDetectorPlugin::observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const {
+  return wf != nullptr && wf->has_plugin_state(slot_index());
+}
+
 void RaceDetectorPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) {
   std::lock_guard<std::mutex> lock(report_mutex_);
   KernelNames kernel_names{info.kernelNameOrUnknown(), info.kernelSymbolOrUnknown()};
@@ -355,6 +364,18 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     state->race_state = &det.getWaveRaceState(static_cast<int>(w));
     wavefronts[w]->set_plugin_state(slot_index(), std::move(state));
   }
+}
+
+void RaceDetectorPlugin::onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {
+  // Each wave released its pointer into this detector when it halted.
+  std::lock_guard<std::mutex> lock(dispatch_mutex_);
+  detectors_.erase(WorkgroupKey{dispatch_id, wg_id});
+}
+
+void RaceDetectorPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) { release_wave_state(wf); }
+
+void RaceDetectorPlugin::onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) {
+  release_wave_state(wf);
 }
 
 void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
