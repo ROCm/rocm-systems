@@ -17,6 +17,14 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
+// Back-to-back batches enqueue many batches on one stream before a single synchronization, so
+// the stream's completion signals are reused several times over while earlier batches are still
+// queued. Copies of 2 MiB stay on SDMA under the default thresholds (peer copies move to SDMA above
+// 1 MiB), where one batch becomes several engine operations that all wait on the stream's prior
+// work.
+inline constexpr size_t kBackToBackCopySize = 2 * 1024 * 1024;
+inline constexpr size_t kBackToBackIterations = 400;
+
 // Copy `data` from the host into `buffer`, picking the copy kind from the buffer's allocation type
 // so device and host buffers can be filled through one call.
 inline void fillBuffer(void* buffer, const std::vector<unsigned char>& data,

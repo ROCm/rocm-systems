@@ -1502,6 +1502,96 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_MixedAttributes_DefaultSwapIndirect) {
 /**
  * Test Description
  * ------------------------
+ * - Verifies batches issued back to back on one stream with no synchronization in between, each
+ * mixing pinned host-to-device, device-to-pinned host and device-to-device copies. Two device
+ * sources each feed two destinations on the copy engines, so those copies alone become two
+ * operations, and one more device-to-device copy runs as a shader copy. Every operation of a batch
+ * waits on the stream's prior work while the stream's completion signals are reused many times
+ * over. The sources alternate between two patterns from batch to batch, so the final contents
+ * show that the last batch landed after all the others.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_MixedDirections_BackToBack) {
+  constexpr size_t kNumPatterns = 2;
+  const auto pattern = [](size_t source_idx, size_t pattern_idx) {
+    return std::vector<unsigned char>(
+        kBackToBackCopySize,
+        static_cast<unsigned char>(1 + source_idx * kNumPatterns + pattern_idx));
+  };
+
+  // Each source is copied to num_dsts destinations. The copies that prefer the copy engines
+  // follow the others, so a second attribute covers them.
+  struct SourceCopies {
+    LinearAllocs src_type;
+    LinearAllocs dst_type;
+    size_t num_dsts;
+    bool prefer_copy_engine;
+  };
+  const std::array<SourceCopies, 5> sources{
+      {{LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc, 1, false},
+       {LinearAllocs::hipMalloc, LinearAllocs::hipHostMalloc, 1, false},
+       {LinearAllocs::hipMalloc, LinearAllocs::hipMalloc, 1, false},
+       {LinearAllocs::hipMalloc, LinearAllocs::hipMalloc, 2, true},
+       {LinearAllocs::hipMalloc, LinearAllocs::hipMalloc, 2, true}}};
+
+  StreamGuard stream_guard(Streams::created);
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  const std::vector<unsigned char> zeros(kBackToBackCopySize, 0);
+  std::array<std::vector<void*>, kNumPatterns> batch_srcs;
+  std::vector<void*> dst_ptrs;
+  std::vector<size_t> dst_source_idxs;
+  size_t first_copy_engine_idx = 0;
+  for (size_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
+    const SourceCopies& source = sources[source_idx];
+    if (!source.prefer_copy_engine) {
+      first_copy_engine_idx += source.num_dsts;
+    }
+    std::array<void*, kNumPatterns> src_ptrs;
+    for (size_t pattern_idx = 0; pattern_idx < kNumPatterns; ++pattern_idx) {
+      src_ptrs[pattern_idx] =
+          addBuffer(allocations, pattern(source_idx, pattern_idx), source.src_type);
+    }
+    for (size_t i = 0; i < source.num_dsts; ++i) {
+      dst_ptrs.push_back(addBuffer(allocations, zeros, source.dst_type));
+      dst_source_idxs.push_back(source_idx);
+      for (size_t pattern_idx = 0; pattern_idx < kNumPatterns; ++pattern_idx) {
+        batch_srcs[pattern_idx].push_back(src_ptrs[pattern_idx]);
+      }
+    }
+  }
+
+  std::vector<size_t> sizes(dst_ptrs.size(), kBackToBackCopySize);
+  std::array<hipMemcpyAttributes, 2> attrs{
+      {{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault},
+       {hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtPreferCE}}};
+  std::array<size_t, 2> attrs_idxs{0, first_copy_engine_idx};
+  HIP_CHECK(hipDeviceSynchronize());
+
+  for (size_t iteration = 0; iteration < kBackToBackIterations; ++iteration) {
+    std::vector<void*>& iteration_srcs = batch_srcs[iteration % kNumPatterns];
+    HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), iteration_srcs.data(), sizes.data(),
+                                  sizes.size(), attrs.data(), attrs_idxs.data(), attrs.size(),
+                                  nullptr, stream_guard.stream()));
+  }
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  const size_t last_pattern_idx = (kBackToBackIterations - 1) % kNumPatterns;
+  for (size_t i = 0; i < dst_ptrs.size(); ++i) {
+    INFO("Destination " << i);
+    const size_t source_idx = dst_source_idxs[i];
+    requireBufferEquals(dst_ptrs[i], pattern(source_idx, last_pattern_idx),
+                        sources[source_idx].dst_type);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
  * - Verifies a large D2D batch through the shader and SDMA copy paths.
  * Test source
  * ------------------------
