@@ -491,6 +491,22 @@ inline TensorDmaLdsPadding tensor_dma_lds_padding(const TensorDmaDescriptor &des
           .amount_bytes = uint64_t{desc.pad_amount} * sizeof(uint32_t)};
 }
 
+/// @brief Byte offset, from the descriptor's LDS base, of one tile element.
+/// @details Each iterated tile starts lds_increment elements after the previous
+/// one, and padding restarts with each tile (CDNA5 ISA 10.11.2, 10.11.3.1), so
+/// padding applies to the element's offset within its tile only. Stores ignore
+/// padding. Address formation is proven safe by
+/// validate_materialization_address_ranges, so the arithmetic is unchecked.
+inline uint64_t tensor_dma_lds_byte(const TensorDmaDescriptor &desc, bool store_from_lds,
+                                    uint64_t iteration_lds_element, uint64_t tile_element) {
+  uint64_t tile_byte = tile_element * desc.elem_size;
+  if (desc.pad && !store_from_lds) {
+    const TensorDmaLdsPadding padding = tensor_dma_lds_padding(desc);
+    tile_byte += (tile_byte / padding.interval_bytes) * padding.amount_bytes;
+  }
+  return iteration_lds_element * desc.elem_size + tile_byte;
+}
+
 /// @brief Exclusive absolute CU byte address at which the wave's LDS
 /// allocation ends, clamped to the CU's LDS backing size. The allocation can
 /// end before the CU's LDS does; transfer bytes at or past it are dropped.
@@ -535,27 +551,31 @@ inline bool validate_materialization_address_ranges(const TensorDmaDescriptor &d
   if (!validate_global_address_range(desc, layout)) [[unlikely]]
     return false;
 
+  // Padding restarts with each iterated tile, so pad the last element's offset
+  // within a tile, then add the final iteration's start (see tensor_dma_lds_byte).
   const uint64_t elements_per_iteration = *total_elements / iterations;
-  const auto final_iteration_lds = util::checked_mul(iterations - 1, uint64_t{desc.lds_increment});
-  const auto max_lds_element =
-      final_iteration_lds ? util::checked_add(*final_iteration_lds, elements_per_iteration - 1)
-                          : std::nullopt;
-  auto max_lds_byte = max_lds_element
-                          ? util::checked_mul(*max_lds_element, uint64_t{desc.elem_size})
-                          : std::nullopt;
-  if (!max_lds_byte) [[unlikely]]
+  auto max_tile_byte = util::checked_mul(elements_per_iteration - 1, uint64_t{desc.elem_size});
+  if (!max_tile_byte) [[unlikely]]
     return false;
-
   if (desc.pad && !store_from_lds) {
     const TensorDmaLdsPadding padding = tensor_dma_lds_padding(desc);
     if (padding.interval_bytes == 0) [[unlikely]]
       return false;
     const auto extra =
-        util::checked_mul(*max_lds_byte / padding.interval_bytes, padding.amount_bytes);
-    max_lds_byte = extra ? util::checked_add(*max_lds_byte, *extra) : std::nullopt;
-    if (!max_lds_byte) [[unlikely]]
+        util::checked_mul(*max_tile_byte / padding.interval_bytes, padding.amount_bytes);
+    max_tile_byte = extra ? util::checked_add(*max_tile_byte, *extra) : std::nullopt;
+    if (!max_tile_byte) [[unlikely]]
       return false;
   }
+  const auto final_iteration_lds = util::checked_mul(iterations - 1, uint64_t{desc.lds_increment});
+  const auto final_iteration_byte =
+      final_iteration_lds ? util::checked_mul(*final_iteration_lds, uint64_t{desc.elem_size})
+                          : std::nullopt;
+  const auto max_lds_byte = final_iteration_byte
+                                ? util::checked_add(*final_iteration_byte, *max_tile_byte)
+                                : std::nullopt;
+  if (!max_lds_byte) [[unlikely]]
+    return false;
 
   const auto descriptor_base = util::checked_add(uint64_t{wf.lds_base()}, uint64_t{desc.lds_base});
   const auto last_address =
@@ -571,15 +591,13 @@ inline bool validate_materialization_address_ranges(const TensorDmaDescriptor &d
 /// @pre The descriptor and wave passed validate_supported_descriptor and
 /// validate_materialization_address_ranges.
 inline void append_copy(TensorDmaState &state, Wavefront &wf, uint64_t lds_allocation_end,
-                        uint64_t global_element, uint64_t lds_element, bool in_bounds) {
+                        uint64_t global_element, uint64_t iteration_lds_element,
+                        uint64_t tile_element, bool in_bounds) {
   const TensorDmaDescriptor &desc = state.desc;
   const uint64_t global_address =
       in_bounds ? desc.global_base + global_element * desc.elem_size : 0;
-  uint64_t lds_byte = lds_element * desc.elem_size;
-  if (desc.pad && !state.store_from_lds) {
-    const TensorDmaLdsPadding padding = tensor_dma_lds_padding(desc);
-    lds_byte += (lds_byte / padding.interval_bytes) * padding.amount_bytes;
-  }
+  const uint64_t lds_byte =
+      tensor_dma_lds_byte(desc, state.store_from_lds, iteration_lds_element, tile_element);
 
   // The tensor DMA section (CDNA5 ISA 10.11.6) specifies that processing of the descriptor
   // continues past an out-of-range LDS address. It does not establish the width of the LDS
@@ -622,8 +640,8 @@ inline void for_each_gather_tensor_element(const TensorDmaDescriptor &desc,
       if (in_bounds)
         global_element = coord0 + uint64_t{gather_index} * desc.global_strides[0];
 
-      const uint64_t lds_element = uint64_t{idx} * desc.tile_dims[0] + coord0;
-      visit(global_element, lds_element, in_bounds);
+      const uint64_t tile_element = uint64_t{idx} * desc.tile_dims[0] + coord0;
+      visit(global_element, /*iteration_lds_element=*/0, tile_element, in_bounds);
     }
   }
 }
@@ -678,7 +696,7 @@ inline void for_each_dense_tensor_element(const TensorDmaDescriptor &desc,
         }
       }
 
-      visit(in_bounds ? global_element : 0, iteration_lds + linear, in_bounds);
+      visit(in_bounds ? global_element : 0, iteration_lds, linear, in_bounds);
     }
   }
 }
@@ -721,8 +739,10 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
                                                lds_allocation_end)) [[unlikely]]
     return util::Result::failure();
   state.elements.reserve(static_cast<size_t>(*element_count));
-  auto append_element = [&](uint64_t global_element, uint64_t lds_element, bool in_bounds) {
-    append_copy(state, wf, lds_allocation_end, global_element, lds_element, in_bounds);
+  auto append_element = [&](uint64_t global_element, uint64_t iteration_lds_element,
+                            uint64_t tile_element, bool in_bounds) {
+    append_copy(state, wf, lds_allocation_end, global_element, iteration_lds_element, tile_element,
+                in_bounds);
   };
   for_each_tensor_element(desc, layout, append_element);
 
@@ -747,7 +767,7 @@ inline bool materialize_observed_addresses(const void *context, std::span<uint64
   const TensorDmaLayout layout(desc);
   size_t next_address = 0;
   bool fits = true;
-  auto collect_address = [&](uint64_t global_element, uint64_t, bool in_bounds) {
+  auto collect_address = [&](uint64_t global_element, uint64_t, uint64_t, bool in_bounds) {
     if (!in_bounds)
       return;
     if (next_address == addresses.size()) {

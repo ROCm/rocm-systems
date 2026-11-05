@@ -2237,6 +2237,86 @@ TEST(Gfx1250ExecutionTest, TensorDmaLoadAppliesLdsPadding) {
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 4 * 4), 0x33000003u);
 }
 
+// Padding restarts with each iterated tile, and the iteration's LDS increment
+// moves the tile's start (CDNA5 ISA 10.11.2, 10.11.3.1), so padding applies to
+// an element's offset within its tile, not its offset from the descriptor base.
+// Two i32s per iteration with one dword of padding per two, starting at 2024 of
+// a 2048-byte allocation with a 4-element increment, land at 2024, 2028, 2040
+// and 2044, exactly where two independent loads of each pair put them. Padding
+// the combined offset would put the second pair at 2048 and 2052 and clip it.
+TEST(Gfx1250ExecutionTest, TensorDmaIteratedPaddingRestartsWithEachTile) {
+  constexpr uint64_t kGlobal = 0x121000;
+  constexpr uint32_t kLdsBytes = 2048;
+  constexpr uint32_t kStart = 2024;
+  constexpr uint32_t kIncrementElements = 4;
+  constexpr uint32_t kSentinel = 0xCAFECAFEu;
+  constexpr std::array<uint32_t, 4> kValues = {0x11000000u, 0x22000000u, 0x33000000u, 0x44000000u};
+  struct Result {
+    std::vector<uint32_t> lds;
+    std::vector<amdgpu::TensorDmaLdsRange> ranges;
+  };
+  // Runs `loads` (LDS offset, global offset in elements, iterations) and returns
+  // the wave's last 32 LDS bytes, relative to its base, and the issued ranges.
+  auto run = [&](std::initializer_list<std::array<uint32_t, 3>> loads) {
+    Gfx1250Sim sim;
+    EXPECT_NO_FATAL_FAILURE(sim.initialize());
+    auto &observer = install_tensor_dma_issue_observer(sim);
+    auto *cu = sim.cu();
+    auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    EXPECT_NE(wf, nullptr);
+    wf->set_lds_base(cu->allocate_lds(kLdsBytes));
+    wf->set_lds_size(kLdsBytes);
+    for (uint32_t i = 0; i < kValues.size(); ++i)
+      write_global_u32(*sim.memory, kGlobal + i * 4, kValues[i]);
+    for (uint32_t byte = kLdsBytes - 32; byte < kLdsBytes; byte += 4)
+      cu->lds().write32(wf->lds_base() + byte, kSentinel);
+    for (const auto &[lds_offset, global_element, iterations] : loads) {
+      write_tensor_dma_d0(*cu, *wf, 0, kGlobal + global_element * 4, lds_offset);
+      const uint32_t iterate_bit = iterations > 1 ? 1u << 19 : 0;
+      write_wave_sgpr(*cu, *wf, 12, (2u << 16) | iterate_bit | (1u << 20)); // i32, pad.
+      write_wave_sgpr(*cu, *wf, 13, 2u << 16);                              // tensor dim0.
+      write_wave_sgpr(*cu, *wf, 14, 2u << 16);                              // tensor dim1.
+      write_wave_sgpr(*cu, *wf, 15, 2u << 16);                              // tile dim0.
+      write_wave_sgpr(*cu, *wf, 16, 1);                                     // tile dim1.
+      write_wave_sgpr(*cu, *wf, 17, 2);                                     // dim0 stride.
+      for (uint32_t reg = 18; reg < 24; ++reg)
+        write_wave_sgpr(*cu, *wf, reg, 0);
+      if (iterations > 1) {
+        write_wave_sgpr(*cu, *wf, 21, kIncrementElements);     // LDS increment.
+        write_wave_sgpr(*cu, *wf, 22, 2);                      // Global increment.
+        write_wave_sgpr(*cu, *wf, 23, (iterations - 1) << 16); // iteration_count - 1.
+      }
+      const std::array<uint32_t, 3> words = {0xd0710001u, 0x7c000000u,
+                                             iterations > 1 ? 0x7c140c00u : 0x7c7c0c00u};
+      auto load = decode_gfx1250(words, "tensor_load_to_lds");
+      EXPECT_NE(load, nullptr);
+      if (load) {
+        EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+      }
+    }
+    Result result;
+    for (uint32_t byte = kLdsBytes - 32; byte < kLdsBytes; byte += 4)
+      result.lds.push_back(cu->lds().read32(wf->lds_base() + byte));
+    for (const auto &issue : observer.issues)
+      for (const auto &range : issue.lds_ranges)
+        result.ranges.push_back({.address = range.address - wf->lds_base(), .bytes = range.bytes});
+    return result;
+  };
+
+  const Result iterated = run({{kStart, 0, 2}});
+  const Result independent = run({{kStart, 0, 1}, {kStart + 4 * kIncrementElements, 2, 1}});
+  const std::vector<amdgpu::TensorDmaLdsRange> expected_ranges = {
+      {.address = kStart, .bytes = 8}, {.address = kStart + 16, .bytes = 8}};
+  // Bytes 2016..2047: two untouched dwords, the first pair, two untouched
+  // dwords, then the second pair.
+  const std::vector<uint32_t> expected_lds = {kSentinel, kSentinel, kValues[0], kValues[1],
+                                              kSentinel, kSentinel, kValues[2], kValues[3]};
+  EXPECT_EQ(independent.lds, expected_lds);
+  EXPECT_EQ(independent.ranges, expected_ranges);
+  EXPECT_EQ(iterated.lds, independent.lds);
+  EXPECT_EQ(iterated.ranges, independent.ranges);
+}
+
 TEST(Gfx1250ExecutionTest, TensorDmaByteLoadUsesDwordPaddingUnits) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());

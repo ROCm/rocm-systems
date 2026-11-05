@@ -580,8 +580,12 @@ excluded. Bytes outside the wave's LDS allocation are not transferred and are
 omitted, so a range can end mid-element when an element straddles the end of
 the allocation; consumers must treat ranges as byte ranges, not as whole
 elements. A load covers every element of its tile, zero-filling those outside
-the tensor; a store covers only in-bounds elements. Consumers must opt in
-through `observes_tensor_dma_issue()`.
+the tensor; a store covers only in-bounds elements. Empty `lds_ranges` mean
+only that the transfer touches no LDS payload bytes, not that it makes no global
+accesses: for a tile wholly past the allocation, a load still reads its
+in-bounds tensor elements from global memory and can fault there, and a store
+still writes zeros to its global destination. Consumers must opt in through
+`observes_tensor_dma_issue()`.
 
 SGPR owner resolution is skipped when no contained plugin observes scalar
 register reads. Plugins that consume neither `onAmdgpuReadScalarRegister` nor
