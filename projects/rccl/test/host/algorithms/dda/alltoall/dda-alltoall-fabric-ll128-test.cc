@@ -158,7 +158,7 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_PerPeerBytesUpToTheSlotCapacity
   EXPECT_TRUE(Eligible((kSlices - 1) * kSliceFloats));
 }
 
-// The grid has nRanks - 1 columns and at least one block per column, each owning one epoch cell.
+// Eligibility asks for an epoch cell per peer (nRanks - 1).
 TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_NeedsAnEpochCellPerPeer) {
   comm().ddaLLEpochLen = 3;
   EXPECT_TRUE(Eligible(4));
@@ -223,7 +223,7 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_PassesBuffersSlicesBankAndAbortFl
   EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
 }
 
-// One warp per slice: blocks per peer = ceil(slices / 8), capped by the CU budget per peer.
+// One warp per slice: blocks per column = ceil(slices / 8), within the column's share of the CU budget.
 TEST_F(DdaAlltoallFabricLL128Microtest, Launch_BlocksPerPeerFollowSlicesPerWarp) {
   const size_t perBlock = kWarpsPerBlock * kSliceFloats;
   const unsigned cap = 256 / 3;
@@ -254,8 +254,7 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_GridStaysWithinTheEpochCellsAndCu
   EXPECT_EQ(ncclAllToAllDdaFabricLL128Blocks(mock_.get(), big, ncclFloat32), 2u);
 }
 
-// Columns never exceed the cap, so the grid stays within it at any peer count; each column gets the
-// blocks it wants within its share, and at least one.
+// The grid stays within the cap at any peer count, with at least one block per column.
 TEST(DdaPeerGrid, GridStaysWithinTheCap) {
   struct Case {
     int nPeers;

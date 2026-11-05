@@ -334,10 +334,9 @@ constexpr size_t ddaLLSlotPkts(size_t bankSize, size_t div, size_t align) {
   return (slotUnits / align) * align;
 }
 
-// Grid for kernels that give each peer a column of blocks. Columns are capped at
-// totalBlockCap, so with more peers than that each column serves several (see
-// DdaPeerColumns) and the grid stays within the cap. Blocks per column is
-// blocksWanted within the column's share of the cap, and at least one.
+// Grid of peer columns that stays within totalBlockCap: past the cap a column serves
+// several peers (DdaPeerColumns). Each column gets blocksWanted blocks, at most its
+// share of the cap and at least one.
 struct DdaPeerGrid {
   unsigned cols;
   unsigned blocksPerCol;
@@ -351,9 +350,8 @@ constexpr DdaPeerGrid ddaPeerGrid(int nPeers, size_t blocksWanted, size_t totalB
   return {(unsigned)cols, perCol < 1 ? 1u : (unsigned)perCol};
 }
 
-// Peer indices in [0, nPeers) that this block's column serves: blockIdx.x, blockIdx.x +
-// gridDim.x, ... A column serving several peers must issue all its sends before its first
-// poll; one that polls a peer before sending to the next can wait on a column waiting on it.
+// Peers this block's column serves: blockIdx.x, blockIdx.x + gridDim.x, ... below nPeers.
+// Issue every send before the first poll, or two columns can each wait on the other's send.
 struct DdaPeerColumns {
   struct Iter {
     int x;
