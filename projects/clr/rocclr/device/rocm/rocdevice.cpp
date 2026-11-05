@@ -1354,6 +1354,10 @@ bool Device::populateOCLDeviceConstants() {
   }
   assert(maxSdmaWriteMask_ > 0 && "No SDMA engines available for Write");
 
+  // Find SDMA D2D mask (same-device copies, e.g. imported VMM buffers)
+  // Non-fatal: falls back to maxSdmaWriteMask_ if unavailable.
+  Hsa::memory_copy_engine_status(getBackendDevice(), getBackendDevice(), &maxSdmaD2DMask_);
+
   info_.localMemSizePerCU_ = group_segment_size;
   info_.localMemSize_ = group_segment_size;
 
@@ -4582,10 +4586,8 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
                                                       hsa_agent_t peerAgent, hsa_agent_t copyAgent) {
   std::scoped_lock lock(lock_);
 
-  // Get valid engine mask based on operation type (read vs write)
-  uint32_t validEngineMask = (engine_type == HwQueueEngine::SdmaD2H)
-                              ? device_.maxSdmaReadMask_
-                              : device_.maxSdmaWriteMask_;
+  // Get valid engine mask based on operation type (read, write, or D2D)
+  uint32_t validEngineMask = device_.GetSdmaValidMask(engine_type);
 
   // Query HSA for engine status and preferences
   uint32_t freeEngineMask = 0;
