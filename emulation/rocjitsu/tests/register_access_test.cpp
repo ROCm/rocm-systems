@@ -353,6 +353,7 @@ TEST(RegisterAccessTest, ReadRegionCopiesDwordsToLaneMajorStorage) {
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Warray-bounds"
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
 #endif
 TEST(RegisterAccessTest, ReadRegionRejectsInvalidLaneMajorCopyBounds) {
   Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
@@ -1880,6 +1881,29 @@ TEST(RegisterAccessTest, PartialByteRawRegionOperationsRejectBeforeSideEffects) 
   EXPECT_FALSE(visited);
   expect_failure([&] { return region.copy_to(std::span(words).first(fx.wf->wf_size())); });
   expect_failure([&] { return region.copy_dwords_lane_major(bytes, 1); });
+}
+
+TEST(RegisterAccessTest, OversizedRawRegionCopyRejectsBeforeSideEffects) {
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
+             /*wave_size=*/64);
+  ASSERT_NE(fx.wf, nullptr);
+  ASSERT_EQ(fx.wf->wf_size(), 64u);
+  for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane)
+    fx.cu->write_vgpr(fx.vgpr_base(), lane, 0x12340000u + lane);
+  auto region = RegisterAccess(*fx.wf).read_vgpr_region(
+      fx.vgpr_base(), /*reg_count=*/1, /*lane_mask=*/~uint64_t{0}, ExecutionPlugin::kFullByteMask);
+  ASSERT_TRUE(region.valid());
+  std::array<uint32_t, 65> words;
+  words.fill(0xAABBCCDDu);
+  const auto original_words = words;
+
+  fx.wf->clear_instruction_execution_error();
+  ASSERT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::None);
+  ASSERT_EQ(fx.wf->instruction_execution_error_detail(), nullptr);
+  EXPECT_TRUE(region.copy_to(words).failed());
+  EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::InvalidRegisterAccess);
+  EXPECT_STREQ(fx.wf->instruction_execution_error_detail(), "destination exceeds read region");
+  EXPECT_EQ(words, original_words);
 }
 
 TEST(RegisterAccessTest, ScalarBackedPartialByteStoresRejectBeforeObservation) {
