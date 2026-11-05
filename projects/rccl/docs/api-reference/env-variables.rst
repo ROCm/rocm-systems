@@ -667,6 +667,24 @@ in the following table.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.
 
+    * - | ``RCCL_IB_UDMA_POLICY``
+        | Selects how queue pairs (QPs) are assigned to the two uDMA pipelines
+          of an AINIC. Applies only to AINIC with the ``IB-CAST`` transport.
+          With QP sharing enabled, the sharing groups choose the pipeline in
+          place of the per-channel assignment of ``0`` and ``1``.
+      - | ``0``: Pin each channel's send QPs, and separately its receive QPs,
+          to one pipeline per device, alternating pipelines as each is first
+          used (default).
+        | ``1``: Round-robin P2P QPs across the pipelines in creation order.
+          Collective QPs behave as with ``0``.
+        | ``2``: Leave the pipeline choice to the driver.
+        | ``3``: Split each connection across both pipelines. The default
+          ``NCCL_IB_QPS_PER_CONNECTION`` of 2 is enough. Splitting is lost with
+          ``NCCL_IB_QPS_PER_CONNECTION=1`` or ``RCCL_IB_QPS_PER_P2P=1``, and on
+          RMA comms, which use one QP; every QP of a channel then uses the same
+          pipeline.
+        | Other values log a warning and fall back to ``0``.
+
     * - | ``NCCL_NCHANNELS_PER_NET_PEER``
         | Sets the number of channels used per network (remote) peer.
         | This overrides the value of the ``nChannelsPerNetPeer`` field in
@@ -774,6 +792,19 @@ in the following table.
         | ``5``: EFA GDA
         | ``6``: rocSHMEM GDA (required for that backend to initialize)
         | ``7``: Anvil SDMA (also accepts unset)
+
+    * - | ``NCCL_GIN_ALLREDUCE_GFX1250_ENABLE``
+        | Opt in to GinScatter AllReduce on gfx1250.
+      - | ``0``: gfx1250 keeps the pre-existing AllReduce selectors (default)
+        | ``1``: symmetric ``ncclSum`` fp32/fp16/bf16 messages from 64 MiB
+          through 4 GiB use GinScatter when scratch can hold them
+        | Eligible sums below 64 MiB yield to DDA. Sums below 8 MiB already
+          used DDA. From 8 MiB to 64 MiB, DDA LL/LL128 can take those sums
+
+    * - | ``NCCL_GIN_ALLREDUCE_SCRATCH_BYTES``
+        | GinScatter incoming scratch size, in bytes.
+      - | ``536870912`` (512 MiB) by default, matching the CE AllReduce pool
+        | ``0``: do not allocate scratch, and do not select GinScatter
 
     * - | ``NCCL_RMA_PLUGIN``
         | Selects external one-sided RMA plugins, which are also the backend
@@ -1221,6 +1252,16 @@ threshold table introduced for gfx1250.
         | ``N`` (bytes): Use ``N`` as the LL128 tier ceiling, overriding the table.
           Pre-table default: ``0`` (LL128 tier was off before the arch table).
 
+    * - | ``RCCL_DDA_LL128_AG_THREADS``
+        | Threads per block for the DDA LL128 ``ncclAllGather`` kernel. When ``0``
+          (default), resolved from ``ddaAgLL128Threads`` in the arch table: the
+          gfx1250 DPX table uses 256 threads for gathered sizes (``nRanks`` x
+          per-rank bytes) of 4 MiB to 32 MiB, and every other case uses 512.
+          Values that are not a multiple of 32 from 32 to 1024 are ignored.
+      - | ``0``: Resolved from the per-arch table at runtime (default).
+        | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
+          multiple of 32 from 32 to 1024. Pre-table default: ``512``.
+
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),
           CE AllReduce is on by default for gfx1250 communicators that meet all
@@ -1378,4 +1419,3 @@ threshold table introduced for gfx1250.
         | ``2``: Forced. Wherever the collective has a TDM kernel, it is selected
           regardless of predicted time or message size. Intended for A/B
           measurement, not production.
-

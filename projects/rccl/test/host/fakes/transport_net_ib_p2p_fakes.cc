@@ -18,6 +18,9 @@ int64_t ncclIbArThreshold = 8192;
 int64_t ncclParamIbReceiverSideMatchingScheme() {
   return g_loadParam("IB_RECEIVER_SIDE_MATCHING_SCHEME", -2);
 }
+int64_t rcclParamIbGdrFlushGpuMemNoRelaxedOrdering() {
+  return g_loadParam("RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING", 1);
+}
 
 ncclResult_t ncclIbIsend(void*, void*, size_t, int, void*, void*, void**) {
   FailLoudUnfaked("transport_net_ib_p2p_fakes", "ncclIbIsend");
