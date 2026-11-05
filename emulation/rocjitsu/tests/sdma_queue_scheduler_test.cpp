@@ -1169,7 +1169,7 @@ TEST(SdmaQueueSchedulerCacheMaintenanceTest, FailedWritebackFaultsQueueBeforePac
   dirty_line.fill(0x5c);
   l2.writeback_line(kDirtyAddress, dirty_line.data(), Mtype::RW, kProcessId);
   l2.set_backing_memory(nullptr);
-  ASSERT_EQ(mprotect(mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ), 0);
+  legacy_process.unmap_pages(kDirtyAddress, GpuMemory::PAGE_SIZE);
 
   SdmaQueueScheduler scheduler(gpu_vm, coherence);
   SdmaPacketCallbacks callbacks;
@@ -1197,7 +1197,7 @@ TEST(SdmaQueueSchedulerCacheMaintenanceTest, FailedWritebackFaultsQueueBeforePac
 
   EXPECT_TRUE(scheduler.detach(queue));
   scheduler.shutdown();
-  ASSERT_EQ(mprotect(mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ | PROT_WRITE), 0);
+  legacy_process.map_pages(kDirtyAddress, mapping.data(), GpuMemory::PAGE_SIZE);
   {
     util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
         coherence->acquire_cache_maintenance(DeviceCacheOperation::WritebackInvalidate);
@@ -1208,7 +1208,10 @@ TEST(SdmaQueueSchedulerCacheMaintenanceTest, FailedWritebackFaultsQueueBeforePac
   EXPECT_TRUE(gpu_vm.unregister_address_space(queue_address_space));
 }
 
-TEST(SdmaQueueSchedulerCacheMaintenanceTest, InvalidateThenWritebackDiscardsFailedDirtyState) {
+class SdmaCacheInvalidateTest : public ::testing::TestWithParam<std::pair<bool, bool>> {};
+
+TEST_P(SdmaCacheInvalidateTest, DiscardsDirtyStateBeforeWritebackOrAtomic) {
+  const auto [fail_initial_writeback, finish_with_atomic] = GetParam();
   constexpr uint32_t kProcessId = 7;
   constexpr uint64_t kDirtyAddress = 0x160000;
   constexpr uint32_t kHostValue = 0x44444444;
@@ -1250,28 +1253,44 @@ TEST(SdmaQueueSchedulerCacheMaintenanceTest, InvalidateThenWritebackDiscardsFail
   SdmaPacketContinuation continuation;
   constexpr std::array<uint32_t, 6> kWriteback = {17, 0, 0, (1u << 14) | (1u << 15), 0, 0};
   constexpr std::array<uint32_t, 6> kInvalidate = {17, 0, 0, 1u << 14, 0, 0};
-  ASSERT_EQ(mprotect(mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ), 0);
-  const SdmaPacketProcessResult failed = first.process(
-      {.available_dwords = kWriteback, .access = *access, .continuation = continuation});
-  ASSERT_EQ(failed.packet.status, PacketProcessStatus::Faulted);
-  EXPECT_FALSE(continuation.pending());
-
-  ASSERT_EQ(mprotect(mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ | PROT_WRITE), 0);
+  if (fail_initial_writeback) {
+    legacy_process.unmap_pages(kDirtyAddress, GpuMemory::PAGE_SIZE);
+    const SdmaPacketProcessResult failed = first.process(
+        {.available_dwords = kWriteback, .access = *access, .continuation = continuation});
+    ASSERT_EQ(failed.packet.status, PacketProcessStatus::Faulted);
+    EXPECT_FALSE(continuation.pending());
+    legacy_process.map_pages(kDirtyAddress, mapping.data(), GpuMemory::PAGE_SIZE);
+  }
   std::memcpy(mapping.data(), &kHostValue, sizeof(kHostValue));
   const SdmaPacketProcessResult invalidated = second.process(
       {.available_dwords = kInvalidate, .access = *access, .continuation = continuation});
   ASSERT_EQ(invalidated.packet.status, PacketProcessStatus::Complete);
-  // No L2 access between the packets: maintenance must reconcile its own epoch.
-  const SdmaPacketProcessResult written = second.process(
-      {.available_dwords = kWriteback, .access = *access, .continuation = continuation});
-  ASSERT_EQ(written.packet.status, PacketProcessStatus::Complete);
+  // No ordinary L2 access before the next operation reconciles its own epoch.
+  if (finish_with_atomic) {
+    const auto increment = [](uint8_t *target, uint32_t) {
+      uint32_t value = 0;
+      std::memcpy(&value, target, sizeof(value));
+      ++value;
+      std::memcpy(target, &value, sizeof(value));
+    };
+    ASSERT_EQ(l2.atomic_rmw(kDirtyAddress, sizeof(uint32_t), increment, kProcessId),
+              VmAccessOutcome::Complete);
+  } else {
+    const SdmaPacketProcessResult written = second.process(
+        {.available_dwords = kWriteback, .access = *access, .continuation = continuation});
+    ASSERT_EQ(written.packet.status, PacketProcessStatus::Complete);
+  }
   uint32_t backing = 0;
   std::memcpy(&backing, mapping.data(), sizeof(backing));
-  EXPECT_EQ(backing, kHostValue);
+  EXPECT_EQ(backing, kHostValue + (finish_with_atomic ? 1u : 0u));
   EXPECT_FALSE(continuation.pending());
   EXPECT_TRUE(legacy_vm.unregister_vmid(kProcessId));
   EXPECT_TRUE(gpu_vm.unregister_address_space(queue_address_space));
 }
+
+INSTANTIATE_TEST_SUITE_P(WritebackAndAtomic, SdmaCacheInvalidateTest,
+                         ::testing::Values(std::pair{true, false}, std::pair{true, true},
+                                           std::pair{false, true}));
 
 } // namespace
 } // namespace rocjitsu::amdgpu

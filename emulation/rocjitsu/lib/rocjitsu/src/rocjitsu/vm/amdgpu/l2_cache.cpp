@@ -687,6 +687,10 @@ VmAccessOutcome L2Cache::flush_dirty_locked(std::optional<uint32_t> vmid) {
   if (!has_dirty_lines_.load(std::memory_order_relaxed))
     return VmAccessOutcome::Complete;
 
+  // Atomic boundaries can reach dirty state logically discarded by an earlier
+  // invalidate without an intervening ordinary access to reconcile the epoch.
+  synchronize_epoch_locked();
+
   uint32_t dirty_count = 0;
   uint64_t min_addr = std::numeric_limits<uint64_t>::max(), max_addr = 0;
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
