@@ -102,11 +102,14 @@ macro(HIP_ADD_LIBRARY hip_target)
         target_compile_options(${hip_target} PRIVATE ${_hip_cxx_opts})
     endif()
     if(hip_FOUND AND TARGET hip::device)
-        # PUBLIC so consumers of this library inherit hip::device usage
-        # requirements. Must use the keyword signature because callers (e.g.
-        # rocALUTION) add their own PRIVATE/PUBLIC links to the same target
-        # and CMake policy CMP0023 forbids mixing plain and keyword forms.
-        target_link_libraries(${hip_target} PUBLIC hip::device)
+        # PRIVATE hip::device: the library's own sources need -x hip and
+        # --offload-arch for device code compilation.
+        # PUBLIC hip::host: consumers get the HIP runtime (headers +
+        # libamdhip64) without inheriting -x hip, which would force their
+        # plain C++ sources to be compiled as HIP device code.
+        # Keyword signature required for CMP0023 compatibility (see e.g.
+        # rocALUTION, which mixes PRIVATE/PUBLIC links on the same target).
+        target_link_libraries(${hip_target} PRIVATE hip::device PUBLIC hip::host)
     endif()
     unset(_hip_src)
     unset(_hip_cmake_opts)
