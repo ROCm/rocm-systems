@@ -67,6 +67,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * On gfx1250 DPX, AllToAll takes DDA LL128 above 2 MiB up to 16 MiB total (LL128 was capped at 1 MiB, below the 2 MiB LL ceiling, so p2p took 2 to 16 MiB).
 * The gfx1250 AllToAll DDA fabric LL128 kernel caps its grid at the communicator's CU budget, so every block is co-resident.
 * gfx1250 AllToAll skips the DDA fabric paths under `NCCL_CHECK_MODE` or on a suspended or revoked communicator, and takes the next path.
+* `RCCL_DDA_LL128_A2A_THREADS` now defaults to `0`, which reads the arch table and keeps 256 threads where it sets none. It still overrides the table with a multiple of 32 up to 1024 (it took a multiple of 16 before). `RCCL_DDA_LL128_A2A_MAXBPP` (was default `64`) and `RCCL_DDA_LL128_A2A_LPB` (was default `4`) are now unset by default, so each warp moves one slice and the block budget alone caps the grid; when set, MAXBPP caps the blocks per peer column and LPB sizes them from 120-byte lines, both within the block budget.
 
 ### Removed
 
