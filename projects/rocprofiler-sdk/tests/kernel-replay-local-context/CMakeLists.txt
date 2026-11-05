@@ -116,8 +116,9 @@ add_kr_lc_test(test-kernel-replay-local-context-att-stop-after-0 ENVIRONMENT
 # SPM: same dispatch-scoped contract as counters. These two replay tests abort during KFD
 # acquisition on gfx120x CI runners. Tracking issue:
 # https://github.com/ROCm/rocm-systems/issues/13606
+# They are also disabled on gfx942.
 foreach(_gfx IN LISTS rocprofiler-sdk-tests-gfx-info)
-    if(_gfx MATCHES "^gfx120[0-9](-strict)?$")
+    if(_gfx MATCHES "^(gfx120[0-9]|gfx942)(-strict)?$")
         set(IS_SPM_DISABLED ON)
         break()
     endif()
