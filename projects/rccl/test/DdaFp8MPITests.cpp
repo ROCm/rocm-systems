@@ -117,6 +117,7 @@ protected:
     std::vector<std::unique_ptr<MPIHelpers::MpiEnvGuard>> envGuards_;
     int                                                    rank_{};
     int                                                    nRanks_{};
+    uint8_t a2aCallSalt_{}; // distinct for each of the test's first 256 AlltoAll calls
 
     // RCCL_DDA_* settings that leave this fixture's tier as the one claiming the
     // sizes its tests use. Every other kDdaKnobs entry must be unset.
@@ -324,27 +325,29 @@ protected:
 
         expectAlgo(ncclFuncAlltoAll, countPerPeer, datatype, sendBuf, recvBuf, expectedAlgo);
 
-        // Element i of the chunk rank s sends to rank d is copyPattern(s * nRanks + d, i) in the
-        // first call and its complement in the second, so every byte differs between the calls.
-        const int  nRanks    = nRanks_;
-        const auto chunkByte = [nRanks](int src, int dest, size_t i, bool second) {
-            const uint8_t v = copyPattern(src * nRanks + dest, i);
-            return second ? static_cast<uint8_t>(~v) : v;
+        // Element i of the chunk rank s sends to rank d is copyPattern(s * nRanks + d, i) XOR a salt
+        // that differs for every AlltoAll call in the test, so every byte differs from every
+        // earlier call's, whichever bank that call used.
+        const int     nRanks     = nRanks_;
+        const uint8_t firstSalt  = a2aCallSalt_++;
+        const uint8_t secondSalt = a2aCallSalt_++;
+        const auto    chunkByte  = [nRanks](int src, int dest, size_t i, uint8_t salt) {
+            return static_cast<uint8_t>(copyPattern(src * nRanks + dest, i) ^ salt);
         };
         for(void* buf : {sendBuf, sendBuf2})
         {
-            const bool second = buf == sendBuf2;
+            const uint8_t salt = buf == sendBuf ? firstSalt : secondSalt;
             ASSERT_MPI_EQ(hipSuccess,
                           initializeBufferWithPattern<uint8_t>(
-                              buf, totalCount, [this, countPerPeer, chunkByte, second](size_t i) {
+                              buf, totalCount, [this, countPerPeer, chunkByte, salt](size_t i) {
                                   return chunkByte(rank_, static_cast<int>(i / countPerPeer), i % countPerPeer,
-                                                   second);
+                                                   salt);
                               }));
         }
         ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, totalCount));
-        // Two back-to-back calls flip the scratch bank. The second sends different bytes, so a call
-        // that reads the previous call's bank fails the check; the memset between them, ordered on
-        // the stream, also catches a chunk the second call never stores.
+        // Two back-to-back calls flip the scratch bank, so the second reads the bank the call before
+        // last wrote. Distinct bytes per call make a stale read of either bank fail the check; the
+        // memset between them, ordered on the stream, also catches a chunk the second call never stores.
         ASSERT_MPI_EQ(ncclSuccess,
                       ncclAlltoAll(sendBuf, recvBuf, countPerPeer, datatype,
                                    getActiveCommunicator(), getActiveStream()));
@@ -355,8 +358,8 @@ protected:
         ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
         EXPECT_TRUE(verifyBufferData<uint8_t>(
-            recvBuf, totalCount, [this, countPerPeer, chunkByte](size_t i) {
-                return chunkByte(static_cast<int>(i / countPerPeer), rank_, i % countPerPeer, true);
+            recvBuf, totalCount, [this, countPerPeer, chunkByte, secondSalt](size_t i) {
+                return chunkByte(static_cast<int>(i / countPerPeer), rank_, i % countPerPeer, secondSalt);
             }))
             << "Rank " << rank_ << ": " << fp8Name(datatype) << " AlltoAll data mismatch";
     }
