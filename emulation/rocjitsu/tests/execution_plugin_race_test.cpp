@@ -824,6 +824,105 @@ TEST_F(TensorDmaRaceTest, TransferWithoutLdsBytesLeavesTheLoadPendingUntilTheWai
   EXPECT_TRUE(ds_read(0, 4));
 }
 
+/// Executes decoded tensor DMA instructions, so the emulator itself reports
+/// them to the race detector. Both waves share one 256-byte LDS allocation.
+class DecodedTensorDmaRaceTest : public TensorDmaRaceTest {
+protected:
+  static constexpr uint64_t kGlobal = 0x10000;
+  static constexpr uint32_t kTileOffset = 0;
+  static constexpr uint32_t kEmptyOffset = 64;
+
+  struct Descriptor {
+    uint32_t lds_offset = kTileOffset;
+    uint32_t tensor_dim0 = 4; ///< Zero places the whole tile outside the tensor.
+    uint32_t tile_dim0 = 4;   ///< Zero makes the tile a NOP.
+    uint32_t tile_dim1 = 0;
+    uint32_t count = 1; ///< Zero makes this a NULL tensor.
+  };
+
+  void SetUp() override {
+    TensorDmaRaceTest::SetUp();
+    const uint32_t lds_base = fixture.cu()->allocate_lds(256);
+    for (auto *wave : waves) {
+      wave->set_lds_base(lds_base);
+      wave->set_lds_size(256);
+    }
+  }
+
+  /// Decode and execute one tensor DMA instruction on `wave`: i32 elements, one
+  /// row. Unlike record_tensor_instruction(), this runs the instruction, so the
+  /// race detector hears of it through the issue hook as in a run.
+  void execute_decoded_tensor(int wave, bool is_load, const Descriptor &desc) {
+    waves[wave]->pc += 16;
+    const uint32_t sgprs = waves[wave]->sgpr_alloc().base;
+    const std::array<uint32_t, 4> group0{desc.count, desc.lds_offset,
+                                         static_cast<uint32_t>(kGlobal), 0x80000000u};
+    const std::array<uint32_t, 8> group1{
+        2u << 16, desc.tensor_dim0 << 16, 1u << 16, desc.tile_dim0 << 16, desc.tile_dim1, 4, 0, 0};
+    for (uint32_t reg = 0; reg < group0.size(); ++reg)
+      fixture.cu()->write_sgpr(sgprs + reg, group0[reg]);
+    for (uint32_t reg = 0; reg < group1.size(); ++reg)
+      fixture.cu()->write_sgpr(sgprs + 12 + reg, group1[reg]);
+    const std::array<uint32_t, 3> words{is_load ? 0xd0710001u : 0xd0714001u, 0x7c000000u,
+                                        0x7c7c0c00u};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->mnemonic(), is_load ? "tensor_load_to_lds" : "tensor_store_from_lds");
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, *inst, *waves[wave]);
+    EXPECT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[wave]).succeeded());
+  }
+
+  /// Load a tile, issue a transfer that moves no data, wait until at most
+  /// `remaining` transfers are outstanding, and read the loaded tile.
+  bool load_then_empty_then_read(uint16_t remaining, bool empty_is_load, const Descriptor &empty) {
+    execute_decoded_tensor(0, /*is_load=*/true, {});
+    execute_decoded_tensor(0, empty_is_load, empty);
+    wait_tensorcnt(0, remaining);
+    return ds_read(0, waves[0]->lds_base() + kTileOffset + 4);
+  }
+};
+
+// Each tensor instruction completes on TENSORcnt once, in issue order with the
+// others, including one that moves no data. Waiting for all but one therefore
+// completes the load issued before it.
+TEST_F(DecodedTensorDmaRaceTest, StoreOutsideTheTensorTakesATensorcntSlot) {
+  EXPECT_FALSE(load_then_empty_then_read(/*remaining=*/1, /*empty_is_load=*/false,
+                                         {.lds_offset = kEmptyOffset, .tensor_dim0 = 0}));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, NullTensorStoreTakesATensorcntSlot) {
+  EXPECT_FALSE(load_then_empty_then_read(/*remaining=*/1, /*empty_is_load=*/false,
+                                         {.lds_offset = kEmptyOffset, .count = 0}));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, NullTensorLoadTakesATensorcntSlot) {
+  EXPECT_FALSE(load_then_empty_then_read(/*remaining=*/1, /*empty_is_load=*/true,
+                                         {.lds_offset = kEmptyOffset, .count = 0}));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, NopTileLoadTakesATensorcntSlot) {
+  // With tile_dim1 = 0 the zero-width tile has rank zero, a shape accepted
+  // before NOP tiles were; tile_dim1 = 1 exercises the newly accepted {0,1}.
+  EXPECT_FALSE(load_then_empty_then_read(
+      /*remaining=*/1,
+      /*empty_is_load=*/true, {.lds_offset = kEmptyOffset, .tile_dim0 = 0, .tile_dim1 = 1}));
+}
+
+// With both transfers outstanding, the load is still pending, so the read races.
+// Had the NOP tile taken more than one slot, waiting for two would complete the
+// load.
+TEST_F(DecodedTensorDmaRaceTest, NopTileLoadStaysPendingUntilTheWaitCoversIt) {
+  EXPECT_TRUE(load_then_empty_then_read(
+      /*remaining=*/2, /*empty_is_load=*/true,
+      {.lds_offset = kEmptyOffset, .tile_dim0 = 0, .tile_dim1 = 1}));
+}
+
+// Likewise for a store outside the tensor.
+TEST_F(DecodedTensorDmaRaceTest, LoadStaysPendingUntilTheWaitCoversIt) {
+  EXPECT_TRUE(load_then_empty_then_read(/*remaining=*/2, /*empty_is_load=*/false,
+                                        {.lds_offset = kEmptyOffset, .tensor_dim0 = 0}));
+}
+
 TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
   auto opposite_half_read_reports_race = [](std::string_view arch, uint32_t wavefront_size,
                                             bool formatted) {
