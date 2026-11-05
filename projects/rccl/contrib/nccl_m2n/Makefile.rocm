@@ -337,8 +337,8 @@ $(BINDIR)/reshard_model_bench: $(M2N_LIBTARGET)
 	@printf "Building reshard_model_bench ...\n"
 	@mkdir -p $(BINDIR) $(BUILDDIR)/obj
 	$(HIPCC) -x c++ $(CXXSTD) -D__HIP_PLATFORM_AMD__ -DNCCL_OS_LINUX \
-	    -DROCM_VERSION=$(ROCM_VERSION) -fPIC -O3 -isystem $(ROCM_PATH)/include \
-	    $(INCLUDES) $(MPI_CFLAGS) -I$(HBENCH) \
+	    -DROCM_VERSION=$(ROCM_VERSION) -fPIC -O3 \
+	    $(INCLUDES) -isystem $(ROCM_PATH)/include $(MPI_CFLAGS) -I$(HBENCH) \
 	    -c $(HBENCH)/reshard_model_bench.cu -o $(BUILDDIR)/obj/reshard_model_bench.o
 	$(HIPCC) $(HIPFLAGS) $(MPI_CFLAGS) -I$(HBENCH) \
 	    -c $(HBENCH)/$(BENCH_KERNELS_NAME) -o $(BUILDDIR)/obj/bench_common_kernels.model.o

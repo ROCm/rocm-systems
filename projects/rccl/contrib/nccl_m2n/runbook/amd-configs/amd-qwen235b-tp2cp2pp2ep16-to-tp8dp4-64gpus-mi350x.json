@@ -1,0 +1,21 @@
+{
+    "_comment": "AMD 8 nodes: half of the shipped 128-GPU Qwen235B layout; generator TP8 = one node.",
+    "train": {
+        "num_gpus": 32,
+        "tp_size": 2,
+        "cp_size": 2,
+        "ep_size": 16,
+        "pp_size": 2,
+        "fsdp_size": 1,
+        "dp_size": 1
+    },
+    "generation": {
+        "num_gpus": 32,
+        "tp_size": 8,
+        "cp_size": 1,
+        "ep_size": 1,
+        "pp_size": 1,
+        "fsdp_size": 1,
+        "dp_size": 4
+    }
+}
