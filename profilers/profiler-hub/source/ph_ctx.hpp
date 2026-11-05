@@ -219,6 +219,7 @@ private:
     ph_schema_version_t              m_schema_version;
     profiler_hub::reader_types::trace_schema_t m_trace_schema{
         profiler_hub::reader_types::trace_schema_t::unknown };
+    std::uint32_t m_omit_track{};  // PROFILER_HUB_OMIT_TRACK; 0 = off
 
     std::vector<ph_track_t> m_c_tracks;
     std::unordered_map<uint32_t, placed_track_t> m_track_by_id;

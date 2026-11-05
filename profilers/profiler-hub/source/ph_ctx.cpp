@@ -10,7 +10,10 @@
 #include "reader_catalog.hpp"
 #include "track_read_options.hpp"
 
+#include <fmt/format.h>
+
 #include <algorithm>
+#include <cstdlib>
 #include <limits>
 #include <mutex>
 #include <numeric>
@@ -352,6 +355,18 @@ require_pool(const std::unique_ptr<profiler_hub::common::connection_pool>& pool)
     throw std::runtime_error{ message };
 }
 
+// Test hook: serves track PROFILER_HUB_OMIT_TRACK with no events, so a viewer can be
+// shown to display data from this context. Unset, 0 or not a number turns it off.
+std::uint32_t
+omit_track_from_env()
+{
+    const char* omit = std::getenv("PROFILER_HUB_OMIT_TRACK");
+    if(omit == nullptr) return 0;
+    char*      end   = nullptr;
+    const auto value = std::strtoul(omit, &end, 10);
+    return end != omit && *end == '\0' ? static_cast<std::uint32_t>(value) : 0;
+}
+
 }  // namespace
 
 size_t
@@ -511,6 +526,7 @@ ph_ctx::ph_ctx(std::vector<accepted_source_t> accepted)
 , m_trace_schema{ m_accepted.empty()
                       ? profiler_hub::reader_types::trace_schema_t::unknown
                       : m_accepted.front().schema }
+, m_omit_track{ omit_track_from_env() }
 {}
 
 ph_ctx::~ph_ctx()
@@ -697,6 +713,10 @@ ph_ctx::trim_trace(uint64_t    start_ts,
     if(output_path == nullptr || output_path[0] == '\0') return PH_RESULT_INVALID_ARGUMENT;
     if(const ph_result_t ready = wait_until_ready(); ready != PH_RESULT_SUCCESS) return ready;
     if(m_sources.empty()) return PH_RESULT_INVALID_FILE;
+    for(const std::unique_ptr<trace_source_t>& source : m_sources)
+    {
+        require_pool(source->pool);
+    }
 
     // SaveTrimmedData adds source 0's origin when that origin is greater than
     // zero. Subtract it back, then put the same displayed range on each source.
@@ -768,9 +788,23 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
               track_id,
               start_ts,
               end_ts);
+    const auto print = [&](uint32_t count) {
+        fmt::println(
+            "[Profiler-Hub] get_track_events track={} start={} end={} -> {} events",
+            track_id,
+            start_ts,
+            end_ts,
+            count);
+    };
     const placed_track_t* place = place_of(track_id);
     if(place == nullptr)
     {
+        print(0);
+        return ph_event_list_t{ .list_size = 0, .events = nullptr };
+    }
+    if(m_omit_track != 0 && track_id == m_omit_track)
+    {
+        print(0);
         return ph_event_list_t{ .list_size = 0, .events = nullptr };
     }
 
@@ -783,6 +817,7 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
             loaded.events[index].track_id = track_id;
         }
     }
+    print(loaded.list_size);
     return loaded;
 }
 
