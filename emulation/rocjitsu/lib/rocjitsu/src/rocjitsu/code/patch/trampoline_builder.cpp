@@ -324,7 +324,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
   const uint32_t original_offset = body.size() * sizeof(uint32_t);
   if (plan.emit_original)
     body.insert(body.end(), plan.original_words.begin(), plan.original_words.end());
-  const uint32_t after_offset = body.size() * sizeof(uint32_t);
+  const uint32_t after_items_byte_offset = body.size() * sizeof(uint32_t);
   for (const InlineAsmItem &item : plan.after_items)
     body.insert(body.end(), item.words.begin(), item.words.end());
 
@@ -354,9 +354,9 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
   out.original_byte_offset = original_offset;
   if (plan.is_probe_call) {
     const bool after_original = plan.probe_after_original && plan.emit_original;
-    out.call_envelope_byte_offset = after_original ? after_offset : 0;
+    out.call_envelope_byte_offset = after_original ? after_items_byte_offset : 0;
     out.call_envelope_byte_size =
-        after_original ? out.trampoline_words.size() * sizeof(uint32_t) - after_offset
+        after_original ? out.trampoline_words.size() * sizeof(uint32_t) - after_items_byte_offset
                        : original_offset;
   }
   if (plan.returns_to_kernel) {
@@ -601,10 +601,10 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // Word count is derived from the resource decisions, not a fixed envelope size.
   // Each add/addc uses the 32-bit literal form (instruction + literal word) so the
   // count is independent of the (layout-dependent) addend values.
-  uint32_t before_words = 0;
-  before_words += 1;     // s_getpc_b64
-  before_words += 2 + 2; // s_add_u32 + literal, s_addc_u32 + literal
-  before_words += 1;     // s_swappc_b64
+  uint32_t envelope_words = 0;
+  envelope_words += 1;     // s_getpc_b64
+  envelope_words += 2 + 2; // s_add_u32 + literal, s_addc_u32 + literal
+  envelope_words += 1;     // s_swappc_b64
   // Each argument is one v_mov_b32; an immediate adds the literal word its src0
   // field names, a register source does not.
   for (const ProbeArgValue &arg : plan.probe_args) {
@@ -612,42 +612,42 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     case ProbeArgSource::AnchorVgpr:
       break; // Parallel copies are counted together, including cycle breaks.
     case ProbeArgSource::Immediate:
-      before_words += 2;
+      envelope_words += 2;
       break;
     case ProbeArgSource::AnchorExecLo:
     case ProbeArgSource::AnchorExecHi:
     case ProbeArgSource::LogBufferPtrLo:
     case ProbeArgSource::LogBufferPtrHi:
     case ProbeArgSource::EntryVgprLane0:
-      before_words += 1;
+      envelope_words += 1;
       break;
     }
   }
-  before_words += argument_moves.size();
-  before_words += 2 * plan.register_saves.size();
+  envelope_words += argument_moves.size();
+  envelope_words += 2 * plan.register_saves.size();
   if (plan.preserve_scc)
-    before_words += 2; // s_cselect_b32 (save) + s_cmp_lg_u32 (restore)
+    envelope_words += 2; // s_cselect_b32 (save) + s_cmp_lg_u32 (restore)
   // Each special-state register adds one s_mov save + one s_mov restore.
-  before_words += static_cast<uint32_t>(special_saves.size()) * 2;
+  envelope_words += static_cast<uint32_t>(special_saves.size()) * 2;
   // The full-mask window's EXEC toggles, counted one per s_mov so this mirrors
   // emit_probe_call's three conditionals in the same order. A count that does not
   // match what the emitter produces trips the drift guard there.
   if (needs_full_mask) {
-    before_words += 1; // Widen ahead of the spill stores and the argument writes.
-    // Restore the anchor mask so the probe runs under it. A force_full_exec site
+    envelope_words += 1; // Widen ahead of the spill stores and the argument writes.
+    // Restore the guest mask observed at envelope entry. A force_full_exec site
     // skips this; leaving the window open across the call is the whole policy.
     if (!plan.force_full_exec)
-      before_words += 1;
+      envelope_words += 1;
     // Re-widen for the spill loads. Emitted even when the epilogue is empty (an
     // argument site that spills nothing), and on a force_full_exec site too,
     // since the probe may have narrowed EXEC while it ran.
-    before_words += 1;
+    envelope_words += 1;
   }
 
   if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4) {
-    before_words += 2; // getpc -> add, and add/addc -> swappc.
+    envelope_words += 2; // getpc -> add, and add/addc -> swappc.
     if (needs_rdna4_save_guard(plan.arch, special_saves, plan.register_saves))
-      before_words += 1;
+      envelope_words += 1;
   }
 
   plan.is_probe_call = true;
@@ -657,7 +657,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   if (scc_temp)
     plan.scc_temp = *scc_temp;
   plan.special_state_saves = std::move(special_saves);
-  plan.before_word_count = before_words;
+  plan.planned_envelope_word_count = envelope_words;
   plan.argument_moves = std::move(argument_moves);
   plan.argument_copy_temp = argument_copy_temp;
 
@@ -972,17 +972,15 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     }
   }
 
-  // Restore the anchor EXEC before the call so the probe runs under the anchor mask,
-  // not the full mask used to bracket the stores and argument writes. The loads are
-  // re-widened after. Skipped under force_full_exec, which is what leaves the probe
+  // Restore the guest EXEC observed at envelope entry before the call. The loads
+  // are re-widened after. Skipped under force_full_exec, which leaves the probe
   // running with every lane enabled.
   if (full_mask_exec && !plan.force_full_exec &&
       !append_scalar(build_s_mov_b64(exec_operand, exec_temp, plan.arch, &error)))
     return std::nullopt;
 
-  // Capture SCC at the selected observation point before the call-address adds
-  // overwrite it. With probe_after_original this includes the relocated anchor's
-  // effects; restore that same value after the callback.
+  // Capture the SCC observed at envelope entry before the call-address adds
+  // overwrite it; restore that same value after the callback.
   if (plan.preserve_scc &&
       !append_scalar(build_s_cselect_b32(plan.scc_temp, scalar_positive_inline_u32(1),
                                          scalar_positive_inline_u32(0), plan.arch, &error)))
@@ -994,7 +992,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // chain (s_add_u32 sets carry -> SCC, s_addc_u32 consumes it). Both sides are
   // .text-relative and share the load base, so the delta is a pure layout
   // distance. The adds always use the literal form so the word count is
-  // independent of the (layout-dependent) delta value (see before_word_count).
+  // independent of the layout-dependent delta (see planned_envelope_word_count).
   const size_t getpc_index = env.size();
   if (!append_scalar(build_s_getpc_b64(target_lo, plan.arch, &error)))
     return std::nullopt;
@@ -1028,8 +1026,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
 
   // Drain the probe's in-flight loads before restoration or resuming the guest:
   // a probe may return with an unwaited load targeting a register we restore or
-  // the guest reads next. With probe_after_original the anchor has already executed.
-  // Mirrors the boundary drain at the envelope top.
+  // the guest reads next. Mirrors the boundary drain at envelope entry.
   env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
 
   // Restore the observed SCC before resuming guest execution, whether the
@@ -1099,13 +1096,15 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
 
   // Plan/emit drift guard: the planner committed to this many envelope words and
   // the orchestrator sized the layout around it. A mismatch means the two
-  // disagree about the envelope shape. before_word_count includes internal
-  // RDNA4 guards; the spill bracket, the two boundary drains and the wait-state pad
-  // are accounted separately since their sizes are arch- and site-specific.
-  if (env.size() != plan.before_word_count + spill.prologue.size() + spill.epilogue.size() +
-                        2 * boundary_drain.size() + wait_state_pad_words + restore_drain_words) {
+  // disagree about the envelope shape. planned_envelope_word_count includes
+  // internal RDNA4 guards; the spill bracket, the two boundary drains and the
+  // wait-state pad are accounted separately since their sizes depend on the arch
+  // and site.
+  if (env.size() != plan.planned_envelope_word_count + spill.prologue.size() +
+                        spill.epilogue.size() + 2 * boundary_drain.size() + wait_state_pad_words +
+                        restore_drain_words) {
     report(error_out, "emit_probe_call: synthesized envelope word count does not match the planned "
-                      "before_word_count");
+                      "planned_envelope_word_count");
     return std::nullopt;
   }
 
