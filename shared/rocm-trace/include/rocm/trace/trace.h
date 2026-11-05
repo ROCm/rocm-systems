@@ -20,11 +20,12 @@
 
 #include <TraceLoggingProvider.h>
 #include <evntrace.h>
+#include <winmeta.h> /* WINEVENT_OPCODE_*, which TraceLoggingOpcode takes */
 #else
 #if !defined(__cplusplus)
 #include <assert.h> /* static_assert in C11 */
 #endif
-#include <tracelogging/TraceLoggingProvider.h>
+#include <tracelogging/TraceLoggingProvider.h> /* also WINEVENT_OPCODE_* */
 #endif
 
 /* Define a provider with its contract name and GUID, for example:
