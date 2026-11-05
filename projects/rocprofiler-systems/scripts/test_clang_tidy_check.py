@@ -269,6 +269,30 @@ def test_git_failure_surfaces_stderr(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# get_default_base
+# --------------------------------------------------------------------------- #
+def test_get_default_base_returns_merge_base_sha(monkeypatch):
+    calls = []
+
+    def fake_git(git_args, **_kwargs):
+        calls.append(git_args)
+        return "abc123\n"
+
+    monkeypatch.setattr(ctc, "_git", fake_git)
+    assert ctc.get_default_base() == "abc123"
+    assert calls == [["merge-base", "HEAD", ctc.DEFAULT_BASE]]
+
+
+def test_get_default_base_falls_back_to_head_with_warning(monkeypatch, capsys):
+    def boom(_git_args, **_kwargs):
+        sys.exit("error: unknown revision")
+
+    monkeypatch.setattr(ctc, "_git", boom)
+    assert ctc.get_default_base() == "HEAD"
+    assert "could not find merge-base" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
 # get_diff_changed_files
 # --------------------------------------------------------------------------- #
 _DIFF = """\
@@ -402,6 +426,17 @@ def test_main_gates_preexisting_diagnostics_on_verbose(monkeypatch, capsys, verb
     assert "check-a" in out
     assert ("Pre-existing issues (outside this diff):" in out) is verbose
     assert ("check-b" in out) is verbose
+
+
+def test_main_prints_base(monkeypatch, capsys):
+    changed_file = ctc.ChangedFile("src/foo.cpp", [(10, 20)])
+    monkeypatch.setattr(ctc, "get_repo_root", lambda: "/repo")
+    monkeypatch.setattr(ctc, "get_changed_files", lambda repo, base: [changed_file])
+    monkeypatch.setattr(ctc, "has_enabled_checks", lambda args: True)
+    monkeypatch.setattr(ctc, "run_clang_tidy", lambda a, f, t: ("", True))
+    monkeypatch.setattr(ctc, "parse_args", lambda: _args(base="abc123"))
+    assert ctc.main() == 0
+    assert "Checking changes since base commit: abc123" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("verbose", [False, True])
