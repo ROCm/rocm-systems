@@ -28,7 +28,7 @@ constexpr int kBudgetRounds = 3;
 // Capture is not capped; only replay is.
 void hrr_budget_replay(const char* direct_case, const char* dir, const char* cap_bytes,
                        const char* api) {
-  ScopedDir cap{fs::temp_directory_path() / dir};
+  ScopedDir cap{hrr_temp_dir(dir)};
   hrr_capture_direct(direct_case, cap.path, 5);
   for (const bool over : {false, true}) {
     const std::string cap_arg =
@@ -134,7 +134,7 @@ TEST_CASE("Unit_HRR_HostBudgetMemMapHold_Direct", "[.][hrr-direct]") {
 }
 
 HRR_TEST_CASE(Unit_HRR_HostBudgetMemMapHoldRoundtrip) {
-  ScopedDir cap{fs::temp_directory_path() / "hrr_budget_memmap_hold"};
+  ScopedDir cap{hrr_temp_dir("hrr_budget_memmap_hold")};
   hrr_capture_direct("Unit_HRR_HostBudgetMemMapHold_Direct", cap.path, 5);
   for (const bool refuse : {false, true}) {
     const std::string cap_arg =
