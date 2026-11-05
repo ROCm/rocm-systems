@@ -159,13 +159,11 @@ def set_cache_sizes(
                 "skipping GL1 cache size detection"
             )
         else:
-            sa_level_cache = [
-                c
-                for c in l1_data_caches
-                if c["num_cache_instance"] == int(num_se) * int(num_sa_se)
-            ]
-            if sa_level_cache:
-                cache_sizes["L1"] = int(sa_level_cache[0]["cache_size"]) * 1024
+            gl1_size = _shader_array_cache_size(
+                l1_data_caches, int(num_se) * int(num_sa_se)
+            )
+            if gl1_size is not None:
+                cache_sizes["L1"] = gl1_size * 1024
 
     for cache_values in cache_info["cache"]:
         if cache_values["cache_level"] == 2:
@@ -174,6 +172,35 @@ def set_cache_sizes(
             cache_sizes["MALL"] = int(cache_values["cache_size"]) * 1024 // num_dies
 
     return cache_sizes
+
+
+def _shader_array_cache_size(
+    l1_data_caches: list[dict[str, Any]], num_shader_arrays: int
+) -> Optional[int]:
+    """GL1 size in KB: the level-1 data cache with one instance per shader array.
+
+    AMD-SMI may split those instances into groups by the number of CUs sharing
+    each cache, so a size whose groups add up to the shader-array count also
+    matches.
+    """
+    for cache in l1_data_caches:
+        if int(cache["num_cache_instance"]) == num_shader_arrays:
+            return int(cache["cache_size"])
+
+    instances_by_size: dict[int, list[int]] = {}
+    for cache in l1_data_caches:
+        instances_by_size.setdefault(int(cache["cache_size"]), []).append(
+            int(cache["num_cache_instance"])
+        )
+    matches = [
+        size
+        for size, instances in instances_by_size.items()
+        if len(instances) > 1 and sum(instances) == num_shader_arrays
+    ]
+    if len(matches) > 1:
+        console_warning("Ambiguous GL1 cache size reported by AMD-SMI.")
+        return None
+    return matches[0] if matches else None
 
 
 def _kw_only(cls: T) -> T:

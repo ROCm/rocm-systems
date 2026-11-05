@@ -4,10 +4,11 @@
 # -----------------------------------------------------------------------------
 # benchmark_gfx1201.py
 #
-# Benchmarking class for gfx1201 products.
-# AMD Radeon AI PRO R9700 (Navi48 XTW) and similar RDNA4 dGPUs.
+# Benchmarking class for gfx1201 products: Navi 48 RDNA4 dGPUs such as the
+# AMD Radeon RX 9070 XT and Radeon AI PRO R9700.
 #
-# gfx1201 = Navi48 XTW (64 CUs, GDDR6 memory, 64 MB Infinity Cache)
+# Navi 48: 64 CUs, 8 MB L2, 64 MB Infinity Cache, 256-bit GDDR6 at 20 Gbps
+# (640 GB/s).
 #
 # The gfx12 base class targets gfx1250, whose WMMA builtins (16x16x32,
 # 16x16x64, 16x16x128) do not exist on RDNA4. This class therefore replaces the
@@ -15,8 +16,11 @@
 # supported precisions to what RDNA4 actually implements.
 # -----------------------------------------------------------------------------
 
+from ctypes import c_int64
+
 import utils.hip_interface as hip
 
+from .. import benchmark_base
 from . import benchmark_gfx12_base
 
 # One wmma.16x16x16 issues 16*16*16 = 4096 MACs = 8192 FLOPs (multiply + add).
@@ -25,8 +29,17 @@ from . import benchmark_gfx12_base
 WMMA_ACC = 8
 WMMA_FLOPS_PER_INSTRUCTION = 8192
 
-# Fallback GL0 working set when AMD-SMI does not expose a separate L0 entry.
-L0_BYTES_PER_CU = 32 * 1024
+# Navi 48 Infinity Cache capacity (public RDNA 4 docs), used when AMD-SMI reports
+# no level-3 cache.
+INFINITY_CACHE_BYTES = 64 * 1024 * 1024
+
+# The Infinity Cache benchmark streams half the Infinity Cache capacity: four times
+# the 8 MB L2, so repeated passes miss in L2 and hit in the Infinity Cache.
+MALL_WORKING_SET_DIVISOR = 2
+MALL_WORKGROUPS_PER_CU = 4
+MALL_UNROLL = 16
+MALL_ELEMENT_BYTES = 16  # sizeof(__uint128_t)
+MALL_TRAFFIC_BYTES = 32 * 1024 * 1024 * 1024
 
 
 # =============================================================================
@@ -36,10 +49,10 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
     def __init__(self, device_id: int, cache_sizes: dict, gpu_arch: str) -> None:
         super().__init__(device_id, cache_sizes)
 
-        # GDDR6 is measured through the HBM column. mi_gpu_spec.yaml lists no
-        # MALL bandwidth and no F4/F6/F32/F64/I8 matrix path, so those tests
-        # are marked unsupported by apply_roofline_spec.
-        self.tests["L0"] = self.l0_bw_bench
+        # GDDR6 is measured through the HBM column and the Infinity Cache through
+        # the MALL column. mi_gpu_spec.yaml lists no F4/F6/F32/F64/I8 matrix path,
+        # so those tests are marked unsupported by apply_roofline_spec.
+        self.tests["MALL"] = self.mall_bw_bench
         self.apply_roofline_spec(gpu_arch)
 
         self.matrix_kernel_selector = {
@@ -56,22 +69,66 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
         }
 
     # -----------------------------------------------------------------------------
-    # L0 (GL0/TCP per-CU) bandwidth benchmark
+    # Infinity Cache (MALL) bandwidth benchmark
     # -----------------------------------------------------------------------------
-    def l0_bw_bench(self, device: int) -> float:
-        """Measure GL0 bandwidth, synthesising a working set if AMD-SMI has none.
+    def mall_bw_bench(self, device: int) -> float:
+        """Measure Infinity Cache bandwidth over a working set it holds but L2 does
+        not."""
+        capacity = self.cache_sizes.get("MALL", INFINITY_CACHE_BYTES)
+        return self.resident_stream_bw_bench(
+            device, "MALL", capacity // MALL_WORKING_SET_DIVISOR
+        )
 
-        The base implementation assumes ``cache_sizes["L0"]`` was populated by
-        ``specs.set_cache_sizes``. On Navi48 that entry can be absent, which
-        would raise a KeyError out of ``cache_kernel_selector``.
+    def resident_stream_bw_bench(
+        self, device: int, label: str, working_set_bytes: int
+    ) -> float:
+        """Measure read bandwidth of repeated grid-stride passes over one buffer.
+
+        Every pass reads each 16-byte element once, so the bandwidth reflects the
+        cache level that holds the whole buffer.
         """
-        if "L0" not in self.cache_sizes:
-            num_cu = hip.hipGetDeviceProperties(device).multiProcessorCount
-            self.cache_sizes["L0"] = L0_BYTES_PER_CU * num_cu
-            self.cache_kernel_selector["L0"] = (
-                f"Cache_bw<float, {self.cache_sizes['L0']}, 256>"
-            )
-        return self.cache_bw_bench(device, "L0", 100)
+        hip.hipSetDevice(device)
+        num_experiments = benchmark_base.DEFAULT_NUM_EXPERIMENTS
+        workgroup_size = benchmark_base.DEFAULT_WORKGROUP_SIZE
+
+        cus = hip.hipGetDeviceProperties(device).multiProcessorCount
+        workgroups = MALL_WORKGROUPS_PER_CU * cus
+        step_bytes = workgroups * workgroup_size * MALL_UNROLL * MALL_ELEMENT_BYTES
+        num_steps = max(1, working_set_bytes // step_bytes)
+        buffer_bytes = num_steps * step_bytes
+        num_passes = max(1, MALL_TRAFFIC_BYTES // buffer_bytes)
+        total_bytes = num_passes * buffer_bytes
+
+        src = hip.hipMalloc(buffer_bytes)
+        dummy = hip.hipMalloc(MALL_ELEMENT_BYTES)
+        func = self.Program(self.mall_bw_src).get_kernel("MALL_bw")
+        args = [src, c_int64(num_steps), num_passes, dummy]
+
+        self.launch_kernel(
+            func, [workgroups, 1, 1], [workgroup_size, 1, 1], 0, None, args
+        )
+        hip.hipDeviceSynchronize()
+
+        samples = self.run_get_samples(
+            num_experiments,
+            total_bytes,
+            func,
+            [workgroups, 1, 1],
+            [workgroup_size, 1, 1],
+            0,
+            None,
+            args,
+        )
+        peak = max(samples)
+
+        print(
+            f"{label} BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
+            f"workgroups:{workgroups}, experiments:{num_experiments}, "
+            f"working set:{buffer_bytes} bytes, passes:{num_passes}, "
+            f"traffic:{total_bytes} bytes, duration:{total_bytes / peak / 1e6:.1f} ms, "
+            f"peak:{peak:.1f} GB/sec"
+        )
+        return peak
 
     # -----------------------------------------------------------------------------
     # Benchmarking kernel source
@@ -84,6 +141,38 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
         # Cache, so it measures sustained GDDR6 and is reported in the "HBM"
         # column. (Do not swap in a templated kernel here: the base looks the
         # entry point up by the unmangled name "HBM_bw".)
+
+        # Ordinary (temporal) loads, so the Infinity Cache keeps the buffer
+        # between passes.
+        self.mall_bw_src = """
+            extern "C" __global__ void MALL_bw(const __uint128_t *src,
+                                               long numSteps, int numPasses,
+                                               __uint128_t *dummy)
+            {
+                const unsigned long start =
+                    (unsigned long)blockIdx.x * blockDim.x + threadIdx.x;
+                const unsigned long stride =
+                    (unsigned long)gridDim.x * blockDim.x;
+                __uint128_t v = 0;
+
+                #pragma unroll 1
+                for (int pass = 0; pass < numPasses; pass++)
+                {
+                    unsigned long offset = start;
+                    #pragma unroll 1
+                    for (long step = 0; step < numSteps; step++)
+                    {
+                        #pragma unroll
+                        for (int i = 0; i < 16; i++)
+                        {
+                            v ^= src[offset];
+                            offset += stride;
+                        }
+                    }
+                }
+                if (v == 0) dummy[0] = v;
+            }
+            """
 
         # Matrix paths absent on RDNA4; blanked so a stray call fails loudly at
         # compile time rather than silently benchmarking a gfx1250 kernel.
