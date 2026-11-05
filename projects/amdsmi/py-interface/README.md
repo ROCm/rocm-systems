@@ -26,7 +26,7 @@ The following install modes expose the same `import amdsmi` entry point:
 | System package (`amd-smi-lib` rpm/deb) | The wrapper installed directly into the system Python's `site-packages` so plain `import amdsmi` works. The shared library lives at `/opt/rocm/lib/libamd_smi.so` and is registered with the dynamic linker via `ldconfig`. | `libamd_smi.so` resolved by the dynamic linker (SONAME). |
 | TheRock native package, tarball, or ROCm pip install | The wrapper under `<root>/share/amd_smi/amdsmi`; add `<root>/share/amd_smi` to `PYTHONPATH` for direct imports. | `<root>/lib/libamd_smi.so.<MAJOR>`, resolved relative to the wrapper. |
 | Community-built PyPI releases through 7.0.2 | Only the Python wrapper in `<site-packages>/amdsmi/`. Its version must match the ROCm release providing the library. | Matching ROCm `libamd_smi.so`; the legacy loader checks `ROCM_HOME` before `ROCM_PATH`. |
-| Bundled-library wheel (`BUILD_PYTHON_WHEEL=ON`) | The wrapper plus a SONAME-renamed `libamd_smi_python.so` directly inside `<site-packages>/amdsmi/`. | `libamd_smi_python.so` next to the wrapper. |
+| Bundled-library wheel (`BUILD_PYTHON_WHEEL=ON`) | The wrapper plus `libamd_smi_python.so` (SONAME `libamd_smi_python.so.27`) directly inside `<site-packages>/amdsmi/`. | `libamd_smi_python.so` next to the wrapper. |
 
 AMD SMI 27.x wheels built by the manylinux workflow include the native
 library and use the AMD SMI library version, not the ROCm release number.
@@ -47,8 +47,9 @@ For raw source-built wheel dependencies, see
 
 When a bundled-library wheel and system package coexist, Python's import
 path selects the wrapper. The wheel's wrapper loads its bundled
-`libamd_smi_python.so` and disables system fallback. The distinct SONAME
-and `-Bsymbolic-functions` isolate it from the system `libamd_smi.so`.
+`libamd_smi_python.so` and disables system fallback. Its distinct SONAME,
+`libamd_smi_python.so.27`, and `-Bsymbolic-functions` isolate it from the
+system `libamd_smi.so`.
 `PYTHONPATH` takes precedence over site-packages, so point it only at the
 wrapper you intend to use.
 

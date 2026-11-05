@@ -4,168 +4,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
-## amd_smi_lib for ROCm 10.2.0
+## amd_smi_lib for ROCm 10.3.0
 
 ### Added
 
-- **Added unified `amdsmi_get_link_topology()` API on baremetal**.  
-  - Returns link weight, status, type, hop count, and framebuffer-sharing data.
-  - Matches the existing host interface; includes Python and Rust bindings.
-  - Exports `AmdSmiLinkStatus` in Python and `AmdsmiLinkStatusT` in Rust for status interpretation.
-  - Self pair (same GPU): `INTERNAL`, `ENABLED`, zero hops and weight, `fb_sharing=1`.
-  - Migration from component APIs on baremetal:
-    - `amdsmi_topo_get_link_type(gpu, gpu)` reports PCIe and 2 hops instead.
-    - `amdsmi_topo_get_link_weight(gpu, gpu)` reports twice the NUMA node weight (typically 40).
-
-- **Added IFoE fabric RAS CPER API**.
-  - `amdsmi_get_fabric_cper_entries()` — retrieve IFoE RAS CPER records from UALoE library
-  - CLI: `amd-smi ras --cper` now reports fabric link events alongside GPU errors (fabric-linkdown, fabric-linkup, fabric-fatal)
-
-- **Added AMPP (amdsmi power profile) API and CLI support**.
-  - `amdsmi_get_ampp_profiles`, `amdsmi_get_ampp_fields`, `amdsmi_activate_ampp_profile`, and `amdsmi_configure_ampp_profile` expose the driver's `app_modes/` sysfs tree of predefined power/performance recipes. Profiles, fields, and units are all dynamically enumerated at runtime — nothing is hardcoded, since the driver does not guarantee a fixed field set, profile count, or naming across SoC generations.
-  - `amd-smi static --ampp` displays the tree-wide `app_modes/profile_abi` version plus per-profile active/writable/configured state and per-field name/unit/value/min/max.
-  - `amd-smi set --ampp-activate <profile_name>` activates a profile.
-  - `amd-smi set --ampp-configure <profile_name> KEY=VALUE...` stages one or more fields on a writable profile and commits them.
-  - `amd-smi set --ampp-configure @<path>` restores every writable profile with staged fields from an `amd-smi static --ampp --json`-shaped file in one call.
-  - This is unrelated to the legacy `amdsmi_*_gpu_power_profile*` preset-mask API, which is unchanged.
-
-- **Added `AMDSMI_VRAM_TYPE_HBM4` to `amdsmi_vram_type_t`**.  
-  - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.
-  - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
-
-- **Added NPM (Node Power Management) power limit setting**.  
-  - New `amd-smi set --node-power-limit`/`-n` to set the node-level power limit in watts (node-wide, not per-GPU).
-  - New API: `amdsmi_set_npm_limit()`.
-  - New `current_node_power` field in `amdsmi_npm_info_t` (returned by `amdsmi_get_npm_info()`), the current (instantaneous) node power in watts, queried once per node rather than once per GPU; `amd-smi node -p` now displays it when available.
-  - New `max_node_power_limit` field in `amdsmi_npm_info_t` (returned by `amdsmi_get_npm_info()`), the platform max bound for `amdsmi_set_npm_limit()` requests.
-  - `amdsmi_set_npm_limit()` rejects the request with `AMDSMI_STATUS_INVAL` when NPM is disabled on the node (`amdsmi_npm_info_t::status == AMDSMI_NPM_STATUS_DISABLED`), instead of writing a limit that would have no defined effect. `amd-smi set --node-power-limit` performs the same check up front to fail fast with a friendlier message.
-
-- **Added NPM (Node Power Management) balancing mode get/set**.  
-  - New `amdsmi_npm_balancing_mode_t` enum: `AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING` (PB, the default) or `AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING` (FB).
-  - New APIs: `amdsmi_get_npm_balancing_mode()` and `amdsmi_set_npm_balancing_mode()`. Getting always reflects the last-selected mode regardless of NPM enablement, returning `AMDSMI_STATUS_NOT_SUPPORTED` only when the underlying value is missing or unreadable.
-  - Setting is AMD-SMI-only (not exposed via BMC Redfish/APML) and requires elevated privileges; it returns `AMDSMI_STATUS_NOT_SUPPORTED` without touching sysfs when NPM is disabled on the node.
-  - CLI: `amd-smi node -p` now shows `BALANCING_MODE`; new `amd-smi set --node-balancing-mode {POWER_BALANCING,FREQUENCY_BALANCING}` (node-wide, not per-GPU, requires sudo).
-  - New `AMDSMI_NPM_BALANCING_MODE_MAX` enum value marks the end of the defined range, and new `amdsmi_get_npm_supported_balancing_modes()` reports the balancing modes supported by a node's platform/ASIC as a bitmask (bit N for enum value N), independent of NPM enablement. `amdsmi_set_npm_balancing_mode()` now returns `AMDSMI_STATUS_SETTING_UNAVAILABLE` when the requested mode is absent from this bitmask, distinct from the `AMDSMI_STATUS_NOT_SUPPORTED` NPM-disabled case. CLI: `amd-smi node -p` now also shows `SUPPORTED_BALANCING_MODES`, and `amd-smi set --node-balancing-mode` reports a distinct "not supported on this platform" message for a mode absent from the bitmask vs. the generic "NPM is disabled" message.
-
-- **Added a receipt timestamp to `amd-smi event` records**.
-  - `AmdSmiEventReader.read()` now attaches a `timestamp` (Unix epoch seconds) to every event record, and the `event` subcommand surfaces it as a `TIMESTAMP` field so events can be correlated across streams.
-  - Human-readable output renders one indented block per event (including `TIMESTAMP`); `--csv` writes the header once followed by a row per event, and `--json` emits newline-delimited JSON (one object per line).
-
-- **Added Component Unified ID (CUID) reporting APIs**.  
-  - `amdsmi_get_gpu_cuid_info()` returns a device's primary and derived CUIDs together with the Component Type, the lookup stage that answered, and whether the value is auxiliary (a temporary CUID), in the new `amdsmi_cuid_info_t`. The new `amdsmi_cuid_source_t` and `amdsmi_cuid_component_type_t` enums name the on-wire values.
-  - `amdsmi_get_gpu_device_cuid()` now returns the device's derived CUID.
-  - `amdsmi_get_cuid_components()` lists every component on the node that has a CUID (platform, CPU packages, GPUs and their compute partitions, NPUs, one entry per NIC function; a NIC's UnitID is its PCI function number) in the new `amdsmi_cuid_component_t`, with its BDF and sysfs path. It needs no processor handle.
-  - The entry points are exported whether or not the build links `libamdcuid`; without it they return `AMDSMI_STATUS_NOT_SUPPORTED`.
-  - Every CUID is a temporary CUID, built from the machine ID and world-readable device information, the same for every caller and on any kernel. A GPU handle in SPX reports the whole GPU's CUID; in DPX and above each handle reports its own partition's, with the partition's UnitID taken from amdgpu's `cuid_unit_id` or, on a kernel without it, from the KFD topology.
-  - CLI: `amd-smi static --cuid` reports the CUID block and `--cuid-primary` adds the serial-bearing primary CUID (requires elevation). `amd-smi node --cuid` (`--cuid-primary` for root) lists every component's CUID. `--cuid` is opt-in.
-  - `amd-smi list` adds `cuid`, `identifier_kind`, `source`, `auxiliary` and `cuid_metadata_status`. The existing `uuid`/`gpu_uuid` fields keep reporting the CUID when available and the legacy UUID otherwise.
-  - Build: `BUILD_CUID` takes `AUTO` (default), `ON` or `OFF`. Without an installed `libamdcuid` package, the in-tree `shared/cuid` sources are built and absorbed into `libamd_smi`.
-
-  ```shell
-  $ amd-smi static --cuid
-  GPU: 0
-      CUID:
-          DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
-          PRIMARY_CUID: N/A (not requested)
-          COMPONENT_TYPE: GPU
-          AUXILIARY: True
-          SOURCE: LIBRARY
-          IDENTIFIER_KIND: cuid
-          CUID_METADATA_STATUS: available
-  ```
-
 ### Changed
 
-- **Use fwupd daemon to read and write UMA carveout information**.  
-  - `amdsmi_get_gpu_uma_carveout_info()` / `amdsmi_set_gpu_uma_carveout()` (and therefore `amd-smi static/set --mem-carveout`) now read and write the carveout through the fwupd BIOS-settings interface on integrated GPUs and fallback to amdgpu `.../device/uma/carveout` sysfs node when the fwupd daemon is absent.
-  - Implemented in the AMD SMI library over the fwupd daemon's D-Bus BIOS-settings interface; the fwupd path is used only for the integrated (APU) GPU, and PolicyKit brokers authorization instead of requiring explicit root. Reading needs fwupd >= 1.8.4; writing needs fwupd >= 2.1.1 (Ubuntu 26.04+).
-
-- **Reworked `amd-smi` CLI process exit codes.**  
-  How exit codes are chosen:
-  - Library failures exit with the underlying `AMDSMI_STATUS_*` value (0-56).
-  - CLI-only errors use dedicated codes in the reserved 193-253 band.
-  - When more than one failure with different codes is recorded in a single run — across devices, or across sub-steps of one command (e.g. `reset --clocks`) — the process exits `204`.
-
-  Multi-device `set`/`reset` behavior:
-  - A per-device GPU failure is now recorded, and the command continues to the remaining devices.
-  - The exit code is decided once, after every device has been attempted. Previously a single device failure could abort the loop early.
-
-  Notable value changes (many cases previously aliased onto `1`/`2`; each now has a distinct code):
-
-  | Case | Was | Now |
-  | --- | --- | --- |
-  | Import failure | `1` | `193` |
-  | Invalid command | `1` | `194` |
-  | Invalid parameter | `2` | `195` |
-  | Device not found (bad device index, or no devices present) | `3` / `255` | `196` |
-  | Invalid file path | `4` | `197` |
-  | Invalid parameter value | `5` | `198` |
-  | Missing parameter value | `6` | `199` |
-  | Command not supported (CLI, parse-time) | `7` | `200` (distinct from library `NOT_SUPPORTED` = `2`) |
-  | Device interface unavailable (CLI, runtime) | — | `201` |
-  | Required target/argument missing | `9` | `202` |
-  | Invalid subcommand | `10` | `203` |
-  | Permission denied | `11` | `10` (real `AMDSMI_STATUS_NO_PERM`) |
-  | Mixed device/field failures (differing codes) | — | `204` |
-  | `amdsmi_init()` watchdog timeout | `2` | `205` |
-  | Drivers not loaded | `255` | `206` |
-  | Interactive confirmation declined (answering no, or closing stdin) | `1` | `207` |
-  | Library (device) failure | `(1000 + status)` wrapped to a byte | underlying `AMDSMI_STATUS_*` (`0`-`56`) |
-  | Unknown/unmapped library error | `231` | `255` (library `UNKNOWN_ERROR` reported as its low byte) |
-  | Library status too large to report as an exit code | — | `253` (not reachable with current library versions) |
-
-  The `Was`/`Now` values are process exit codes (`$?`). Previously the printed `code` field showed the *negative* of these (e.g. `-7`) while the process exited with the absolute value (`7`); the rework makes the printed `code` and `$?` agree (both `200`).
-
-- **`amd-smi set --power-cap` now applies per GPU instead of aborting on the first out-of-range device.**  
-  - Each GPU is validated against its own reported range.
-  - An out-of-range value on one GPU is reported for that GPU, while in-range GPUs still apply.
-  - The process exit code reflects the per-device failure.
-
-- **Clearer, more consistent `amd-smi` error messages.**  
-  - Errors now read `[AMDSMI_STATUS_<name>] <message>`, so the underlying status is obvious at a glance. The internal class name is no longer prepended, and `--json`/`--csv` errors are now valid JSON/CSV.
-    - Before: `amdsmi_cli_exceptions.AmdSmiLibraryErrorException: AMDSMI has returned error '-1002' - 'Command not supported' Error code: -1002`
-    - After (human): `[AMDSMI_STATUS_NOT_SUPPORTED] Command not supported Error code: 2 [AMDSMI_STATUS_NOT_SUPPORTED]`
-    - After (`--json`): `{"error": "[AMDSMI_STATUS_NOT_SUPPORTED] Command not supported", "code": 2, "error_type": "AMDSMI_STATUS_NOT_SUPPORTED"}`
-  - `--json` and `--csv` errors gain an `error_type` field (e.g. `INVALID_PARAMETER_VALUE` or an `AMDSMI_STATUS_*` name) alongside the numeric `code`. `--csv` gains a third column (`error,code,error_type`); a reader that unpacks exactly two fields per row will need updating.
-  - `amd-smi ras` reports a readable error when a CPER file can't be read or decoded, instead of printing a Python traceback.
-
-- **`amd-smi ras` now exits non-zero when a CPER file fails to decode.**  
-  - Affects `--afid --folder`, `--afid --cper-file`, and `--cper`, which previously exited `0`.
-  - The exit code is the underlying `AMDSMI_STATUS_*`, for example `43`. When files fail with different codes, the command exits `205`.
-  - The failing file shows `[AMDSMI_STATUS_<name>] <message>` in place of its AFIDs.
-  - A record that decodes successfully but carries no AFIDs (e.g. a corrected entry) shows `N/A` in place of its AFIDs.
-  - `--json` and `--csv` gain `status`, `message`, and `code` fields. Existing fields are unchanged.
-  - `--afid --csv` now emits CSV instead of the human-readable table.
-
-- **`amd-smi set --compute-partition` / `-C` now attempts each GPU individually.**  
-  - An unsupported GPU reports `NOT_SUPPORTED` on its own, instead of the whole command aborting up front.
-  - Input is validated against the static partition type names when profiles cannot be enumerated.
-  - A numeric profile INDEX (e.g. `-C 0`) is also accepted, matched against an estimated `SPX, DPX, TPX, QPX, CPX` ordering.
-  - The `-C` help now lists `SPX, DPX, TPX, QPX, CPX` and `0-4` instead of `N/A`.
-
-- **`amdsmi_get_npm_info()` and `amdsmi_set_npm_limit()` now reject `amdsmi_node_handle` values not vended by `amdsmi_get_node_handle()`**.  
-  - Previously any non-null handle was dereferenced directly; an unregistered/garbage handle now returns `AMDSMI_STATUS_INVAL` instead.
-
-- **NPM sysfs numeric reads (e.g. `cur_node_power_limit`, `max_node_power_limit`) now reject negative or malformed content**.  
-  - Previously a leading `-` (e.g. `"-1"`) parsed successfully as `UINT64_MAX`; such content now fails with `RSMI_STATUS_UNEXPECTED_DATA`.
-
-- **`amd-smi metric` no longer prints fields the GPU's `gpu_metrics` table version cannot carry** (human-readable output only).  
-  - These fields previously printed as `N/A` and are now omitted from human-readable output. On a metrics v1.3 GPU this removes 88 of the 110 `N/A` values in `amd-smi metric -g 0` (80%), taking the command from 140 lines to 95.
-  - **Fields that stop appearing on current accelerators.** On the metrics v1.6 and later tables, which cover MI300X, MI325X and MI355X, the `POWER` section loses `THROTTLE_STATUS` and the `USAGE` section loses `MM_ACTIVITY`, `VCN_ACTIVITY` and `JPEG_ACTIVITY`. Naming the section does not bring them back, so `amd-smi metric --power` no longer prints `THROTTLE_STATUS` and `amd-smi metric --usage` no longer prints the three activity rows. On a metrics v1.3 GPU plain `amd-smi metric` instead drops the whole `THROTTLE` section, and `THROTTLE_STATUS` is still printed. **`--show-unsupported` restores all of them**, and `--json` and `--csv` never stopped emitting them.
-  - **`--json` and `--csv` are unaffected and still emit every field, `N/A` ones included.** They are the machine-readable contract, so their key sets and column sets stay complete and stable: any key or column a script indexed before still resolves. Anything parsing the human-readable output does see fewer fields, and `--show-unsupported` gives it back the previous output.
-  - **Pass `--show-unsupported` to restore the full human-readable output.** The flag is accepted with `--json` and `--csv` and has no effect there, since those formats are never filtered.
-  - Scoped to the metrics table version, not to ASIC support: fields the CLI can also source from hwmon or sysfs are always printed, namely the `edge`, `hotspot` and `mem` temperature sensors, the fan section, the voltages, and the `gfx_N`, `vclk_N`, `dclk_N`, `mem_N` and `socclk_N` clock slots. Entries sourced only from the metrics blobs are eligible for omission: the `hbm_stacks`, `mid`, `aid` and `xcd` temperature arrays, and the `uclk_aid` and `socclks_mid` clock arrays.
-  - A section named on the command line is never emptied. Plain `amd-smi metric` drops a section the version can populate nothing of, which on a metrics v1.3 GPU removes the whole `throttle` section; `amd-smi metric --throttle` prints all 31 rows instead. A named section that is only partly suppressed is still filtered. `--partition` scopes the data rather than naming a section, so `amd-smi metric --partition` protects nothing and filters like plain `amd-smi metric`.
-  - A field the version does carry but the ASIC or driver leaves unpopulated still prints `N/A`, a field reporting a real value is never removed, and an unrecognized metrics version or an unreadable header suppresses nothing.
-
-- **`amd-smi static` shows NUMA information on Linux guests**.  
-  - `--numa` was previously limited to Linux baremetal and passthrough guests.
-  - Default `amd-smi static` output on guests now includes NUMA, in human-readable, JSON, and CSV output.
-
 ### Removed
-
-- **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
-  These were CLI-internal (not part of the public `amdsmi` Python library), their exit-code behavior is superseded by the reworked CLI process exit codes described above.
 
 ### Optimized
 
@@ -174,59 +19,184 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
   - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` failed on APUs such as gfx1103, leaving PLX temperature, GPU utilization and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.
 
+- **Fixed APU video engine (VCN) utilization reading 100 times too high**.  
+  - On APUs such as Ryzen AI Max (Strix Halo), `amdsmi_get_gpu_metrics_info()` returned `apu_metrics.average_vcn_activity` in hundredths of a percent (6067 for 61 %), so Python reported it as N/A and `amd-smi metric --usage` left it out. It is now whole percent.
+
+- **Fixed `amdsmi_get_gpu_total_ecc_count()` reporting `0` errors when the RAS state can't be read**.  
+  - It now returns `AMDSMI_STATUS_NOT_SUPPORTED` when `ras/features` can't be opened and `AMDSMI_STATUS_API_FAILED` when it can't be parsed, so the `amd-smi` `UEC` column, `amd-smi monitor --ecc` and `amd-smi metric --ecc` show `N/A`. A GPU with RAS disabled still reports `0`. `amdsmi_get_gpu_ras_block_features_enabled()` also returns `AMDSMI_STATUS_API_FAILED` for an unparsable `ras/features` instead of reporting every block as disabled.
+  - The RAS state is read once per call instead of once per RAS block, which avoids host-side RAS request throttling on SR-IOV guests.
+
+- **Fixed `amd-smi event` hanging when GPU event notifications can't start**.  
+  - The command now reports GPUs whose event notifications can't start and keeps listening on the others, or exits with the error when none can, for example on WSL or without access to `/dev/kfd`.
+
+- **Fixed `amd-smi event -g` listening on the wrong GPU**.  
+  - Events now come from the GPUs you select.
+
+- **Fixed `amd-smi metric --fan` reporting `0.0 %` on Navi3x/4x GPUs with OverDrive enabled**.  
+  - Fan speed and maximum fan speed are read from the live hwmon fan duty cycle again, and `amd-smi set --fan --help` shows the range the GPU accepts.
+
+- **Fixed several WSL backend metrics reporting a raw driver value or zero instead of `N/A`**.  
+  - When a WDDM sensor was unavailable, `amdsmi_get_clock_info()`, `amdsmi_get_gpu_busy_percent()`, `amdsmi_get_gpu_activity()`, `amdsmi_get_pcie_info()` and `amdsmi_get_power_cap_info()` returned a raw value or zero, or failed. Those fields now report `N/A`.
+  - `amdsmi_get_clk_freq()` and `amdsmi_get_gpu_fan_speed()` return `AMDSMI_STATUS_NOT_SUPPORTED` in that case.
+
+- **Fixed `amd-smi list` and `amd-smi static` showing a placeholder UUID instead of `N/A` on WSL APUs without an ASIC serial**.  
+  - Affects APUs such as Ryzen AI Max (Strix Halo) under WSL. `amdsmi_get_gpu_device_uuid()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` in that case.
+
+### Upcoming Changes
+
+- **CUIDs (Component Unified IDs) will replace UUIDs in an upcoming release**.  
+  - Preview support is available: new `amdsmi_get_gpu_cuid_info()` and `amdsmi_get_cuid_components()`, `amd-smi static --cuid` and `amd-smi node --cuid`, and `cuid` and `identifier_kind` in `amd-smi list`. `amdsmi_get_gpu_device_cuid()` now returns the derived CUID. All CUIDs are currently temporary IDs.
+  - In a future release, `uuid`/`gpu_uuid` in `amd-smi list` will report only the legacy UUID. Use `cuid` and `identifier_kind` instead. GPU selection accepts both identifiers, and the legacy UUID API is unchanged.
+
+## amd_smi_lib for ROCm 10.2.0
+
+### Added
+
+- **Added `amdsmi_get_link_topology()` on baremetal**.  
+  - Returns the link type, status, weight, hop count and framebuffer sharing between two GPUs, as on the host interface. Also available in the Python and Rust bindings, with `AmdSmiLinkStatus` and `AmdsmiLinkStatusT` for the status values.
+  - For the same GPU as source and destination it reports `INTERNAL`, `ENABLED`, zero hops and weight, and framebuffer sharing. For that pair `amdsmi_topo_get_link_type()` reports PCIe with 2 hops and `amdsmi_topo_get_link_weight()` reports twice the NUMA weight (typically 40).
+
+- **Added `amdsmi_get_fabric_cper_entries()` for IFoE fabric RAS events**.  
+  - Returns fabric link-down, link-up and fatal-error events as CPER records, paged with a cursor like `amdsmi_get_gpu_cper_entries()`. It returns `AMDSMI_STATUS_NOT_SUPPORTED` when UALoE is not available.
+  - `amd-smi ras --cper` now lists these events (`fabric-linkdown`, `fabric-linkup`, `fabric-fatal`) alongside GPU errors.
+
+- **Added AMPP (amdsmi power profile) API and CLI support**.  
+  - New `amdsmi_get_ampp_profiles()`, `amdsmi_get_ampp_fields()`, `amdsmi_activate_ampp_profile()` and `amdsmi_configure_ampp_profile()` list, activate and configure the driver's predefined power/performance profiles. Profiles and fields are read from the driver and can differ between GPU generations.
+  - `amd-smi static --ampp` shows each profile's state and fields. `amd-smi set --ampp-activate <profile>` activates a profile, and `amd-smi set --ampp-configure <profile> KEY=VALUE...` sets fields on a writable one. `--ampp-configure @<file>` restores fields from saved `amd-smi static --ampp --json` output.
+  - The existing `amdsmi_*_gpu_power_profile*` APIs are separate and unchanged.
+
+- **Added `AMDSMI_VRAM_TYPE_HBM4` to `amdsmi_vram_type_t`**.  
+  - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.
+  - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
+
+- **Added NPM (Node Power Management) node power limit setting and node power reading**.  
+  - New `amdsmi_set_npm_limit()` and `amd-smi set --node-power-limit`/`-n` set the node-wide power limit in watts.
+  - `amdsmi_npm_info_t` gains `current_node_power`, the current node power in watts shown by `amd-smi node -p`, and `max_node_power_limit`, the platform's maximum node power limit.
+  - Setting a limit while NPM is disabled on the node returns `AMDSMI_STATUS_INVAL`.
+
+- **Added NPM (Node Power Management) balancing mode get/set**.  
+  - New `amdsmi_get_npm_balancing_mode()` and `amdsmi_set_npm_balancing_mode()` with `amdsmi_npm_balancing_mode_t`: `AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING` (the default) or `AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING`.
+  - New `amdsmi_get_npm_supported_balancing_modes()` returns the modes the platform supports as a bitmask (bit N for enum value N).
+  - Setting requires elevated privileges. It returns `AMDSMI_STATUS_NOT_SUPPORTED` when NPM is disabled on the node, and `AMDSMI_STATUS_SETTING_UNAVAILABLE` for a mode the platform does not support.
+  - CLI: `amd-smi node -p` shows `BALANCING_MODE` and `SUPPORTED_BALANCING_MODES`, and the new `amd-smi set --node-balancing-mode {POWER_BALANCING,FREQUENCY_BALANCING}` sets the mode node-wide.
+
+- **Added a receipt timestamp to `amd-smi event` records**.  
+  - Each event now includes `TIMESTAMP` (Unix epoch seconds) so events can be correlated across streams. `AmdSmiEventReader.read()` returns it as `timestamp`.
+  - `--json` now prints one JSON object per line, and `--csv` prints the header once followed by one row per event.
+
+### Changed
+
+- **UMA carveout is now read and set through fwupd on integrated GPUs**.  
+  - `amdsmi_get_gpu_uma_carveout_info()`, `amdsmi_set_gpu_uma_carveout()` and `amd-smi static`/`set --mem-carveout` use the fwupd BIOS-settings interface on APUs, and fall back to the amdgpu `uma/carveout` sysfs node when fwupd is not running.
+  - Through fwupd, PolicyKit authorizes the change instead of requiring root. Reading needs fwupd 1.8.4 or later; setting needs fwupd 2.1.1 or later (Ubuntu 26.04+).
+
+- **Reworked `amd-smi` process exit codes.**  
+  - Library failures exit with the underlying `AMDSMI_STATUS_*` value (`0`-`56`). CLI errors use codes in the `193`-`253` range. A run with failures that have different codes exits `204`.
+  - The printed `code` field now matches the process exit code. It previously showed the negative value (for example `-7` for exit `7`).
+  - Multi-device `set`/`reset` now attempts every device before exiting, instead of stopping at the first failure.
+  - Scripts that check specific exit codes need updating:
+
+  | Case | Was | Now |
+  | --- | --- | --- |
+  | Import failure | `1` | `193` |
+  | Invalid command | `1` | `194` |
+  | Invalid parameter | `2` | `195` |
+  | Device not found, or no devices present | `3` / `255` | `196` |
+  | Invalid file path | `4` | `197` |
+  | Invalid parameter value | `5` | `198` |
+  | Missing parameter value | `6` | `199` |
+  | Command not supported by the CLI | `7` | `200` (library `NOT_SUPPORTED` is `2`) |
+  | Device interface unavailable | (new) | `201` |
+  | Required target or argument missing | `9` | `202` |
+  | Invalid subcommand | `10` | `203` |
+  | Permission denied | `11` | `10` (`AMDSMI_STATUS_NO_PERM`) |
+  | Failures with different codes | (new) | `204` |
+  | `amdsmi_init()` watchdog timeout | `2` | `205` |
+  | Drivers not loaded | `255` | `206` |
+  | Interactive confirmation declined | `1` | `207` |
+  | Library failure | `1000 + status`, wrapped to a byte | `AMDSMI_STATUS_*` value (`0`-`56`) |
+  | Unknown library error | `231` | `255` |
+
+- **`amd-smi set --power-cap` now applies per GPU instead of aborting on the first out-of-range device.**  
+  - Each GPU is validated against its own reported range.
+  - An out-of-range value on one GPU is reported for that GPU, while in-range GPUs still apply.
+  - The process exit code reflects the per-device failure.
+
+- **Clearer, more consistent `amd-smi` error messages.**  
+  - Errors now read `[AMDSMI_STATUS_<name>] <message>`, without the internal exception class name, and `--json`/`--csv` errors are now valid JSON/CSV.
+    - Before: `amdsmi_cli_exceptions.AmdSmiLibraryErrorException: AMDSMI has returned error '-1002' - 'Command not supported' Error code: -1002`
+    - After (human): `[AMDSMI_STATUS_NOT_SUPPORTED] Command not supported Error code: 2 [AMDSMI_STATUS_NOT_SUPPORTED]`
+    - After (`--json`): `{"error": "[AMDSMI_STATUS_NOT_SUPPORTED] Command not supported", "code": 2, "error_type": "AMDSMI_STATUS_NOT_SUPPORTED"}`
+  - `--json` and `--csv` errors gain an `error_type` field. `--csv` errors now have three columns (`error,code,error_type`), so a reader that expects two needs updating.
+
+- **`amd-smi ras` now exits non-zero when a CPER file fails to decode.**  
+  - Affects `--cper`, `--afid --cper-file` and `--afid --folder`, which previously exited `0` and could print a Python traceback.
+  - The exit code is the `AMDSMI_STATUS_*` value, for example `43`, or `204` when files fail with different codes.
+  - A failing file shows `[AMDSMI_STATUS_<name>] <message>` in place of its AFIDs. A record with no AFIDs, such as a corrected error, shows `N/A`.
+  - `--json` and `--csv` gain `status`, `message` and `code` fields, and `--afid --csv` now emits CSV instead of a table.
+
+- **`amd-smi set --compute-partition` / `-C` now attempts each GPU individually.**  
+  - A GPU that does not support the request reports `NOT_SUPPORTED` without stopping the others.
+  - `-C` also accepts a profile index `0`-`4`, mapped in `SPX, DPX, TPX, QPX, CPX` order, and the help lists both forms instead of `N/A`.
+
+- **`amdsmi_get_npm_info()` and `amdsmi_set_npm_limit()` now reject node handles not obtained from `amdsmi_get_node_handle()`**.  
+  - They return `AMDSMI_STATUS_INVAL` instead of using the handle.
+
+- **`amdsmi_get_npm_info()` now reports negative or malformed NPM sysfs values as unavailable**.  
+  - A negative value was previously read as a very large number.
+
+- **`amd-smi metric` no longer prints fields the GPU's `gpu_metrics` table version cannot report**.  
+  - These fields previously printed as `N/A`. A field the version supports still prints, even when its value is `N/A`.
+  - On MI300X, MI325X and MI355X, `THROTTLE_STATUS` and the `MM_ACTIVITY`, `VCN_ACTIVITY` and `JPEG_ACTIVITY` rows no longer appear.
+  - A section with no supported fields is dropped unless named on the command line, for example `--throttle`.
+  - Only human-readable output changes: `--json` and `--csv` still emit every field. Pass `--show-unsupported` to restore the previous output.
+
+- **`amd-smi static` shows NUMA information on Linux guests**.  
+  - `--numa` was previously limited to Linux baremetal and passthrough guests.
+  - Default `amd-smi static` output on guests now includes NUMA, in human-readable, JSON, and CSV output.
+
+- **Reworked the `amd-smi fabric` CLI flags** (breaking).  
+  - `--telemetry`/`-T` shows the fabric telemetry counters that `--topology` used to show.
+  - `--topology`/`-t` now shows the fabric configuration that `--info` used to show, under the same `fabric_info` key.
+  - `--info`/`-i` is removed. Passing `--topology` prints a warning to stderr about its new meaning; `--json` and `--csv` output stays parseable.
+
+### Removed
+
+- **Removed the `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
+  - They were internal to the CLI, not part of the `amdsmi` Python library, and are replaced by the reworked exit codes.
+
+### Resolved Issues
+
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
-  - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.
-  - Both now report `Can not find a device: NIC '999'` (or `SWITCH`) and exit `196`, matching `--gpu`, `--cpu`, and `--core`.
+  - `amd-smi static --nic 999` and `--switch 999` now report `Can not find a device` and exit `196`, like `--gpu`, instead of exiting `1` with a traceback and no parseable `--json`/`--csv` output.
 
 - **Fixed `amd-smi set`/`reset` on a GPU silently exiting `0` after a per-device failure.**  
   - A device error during GPU `set`/`reset` is now recorded, so the process exits with a non-zero code instead of reporting success.
   - Example: `set --memory-partition` on a GPU that does not support it.
 
-- **Fixed the topology APIs reporting uninitialized NUMA data when a GPU has no CPU `io_link`**.  
-  - The KFD node left its NUMA node number, weight and type uninitialized, so `amdsmi_topo_get_numa_node_number()`, `amdsmi_topo_get_link_weight()` and `amdsmi_topo_get_link_type()` could return an unrelated value alongside `AMDSMI_STATUS_SUCCESS`. They now return `AMDSMI_STATUS_NOT_SUPPORTED` for that case.
-  - A debug build previously aborted on an assertion in the same path instead of reporting a status.
+- **Fixed the topology APIs returning uninitialized NUMA data for a GPU with no CPU link**.  
+  - `amdsmi_topo_get_numa_node_number()`, `amdsmi_topo_get_link_weight()` and `amdsmi_topo_get_link_type()` could return an unrelated value with `AMDSMI_STATUS_SUCCESS`. They now return `AMDSMI_STATUS_NOT_SUPPORTED`.
 
-- **Fixed `amdsmi_get_gpu_fabric_info()` failing when only some UALink sysfs files carry data**.  
-  - The call required every file in scope to have usable content and otherwise returned `AMDSMI_STATUS_UNEXPECTED_DATA`, so a legitimately empty `vpod_active_accels` or `local_accels` suppressed the rest of the fabric data and left `amd-smi fabric` with nothing to print.
-  - It now returns `AMDSMI_STATUS_SUCCESS` when at least one file has usable content, and `AMDSMI_STATUS_NO_DATA` only when none do.
+- **Fixed `amdsmi_get_gpu_fabric_info()` failing when some UALink fabric values are empty**.  
+  - One empty sysfs file, such as `vpod_active_accels`, made the call return `AMDSMI_STATUS_UNEXPECTED_DATA`, so `amd-smi fabric` printed nothing. It now returns the available values, and `AMDSMI_STATUS_NO_DATA` only when none are available.
 
 - **Restored `amd-smi` bash autocompletion**.  
   - Pressing Tab completes `amd-smi` subcommands and their options again, whether completion is registered explicitly or through the global `argcomplete` hook.
 
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
-  - `amd-smi ras --cper` showed an empty `list afids` column for fatal records, `amd-smi ras --afid --cper-file` printed `-`, and `amdsmi_get_afids_from_cper()` returned no AFIDs. amdgpu writes fatal crashdump sections 32 bytes shorter than `sizeof(cper_sec_crashdump)`, and the section bounds check required the full struct, so every such section was skipped. The check now requires only the dump member the record type uses.
+  - `amd-smi ras --cper`, `amd-smi ras --afid --cper-file` and `amdsmi_get_afids_from_cper()` returned no AFIDs for fatal records, because the crashdump section amdgpu writes was rejected as too short.
 
 - **Fixed APU core and skin temperatures showing `0.0 °C` when the sensor is not measured**.  
   - On APUs such as Ryzen AI Max (Strix Halo), `amd-smi metric` and the library now report these readings as not available instead of a false 0 °C.
 
-- **Fixed APU video engine (VCN) utilization reading 100 times too high**.  
-  - On APUs such as Ryzen AI Max (Strix Halo), `amdsmi_get_gpu_metrics_info()` returned `apu_metrics.average_vcn_activity` in hundredths of a percent (6067 for 61 %), so Python reported it as N/A and `amd-smi metric --usage` left it out. It is now whole percent.
-
-- **Fixed `amd-smi list`/`amd-smi static` reporting a placeholder UUID instead of `N/A` on WSL APUs without an ASIC serial**.  
-  - On WSL2/DXG with APUs such as Ryzen AI Max (Strix Halo / gfx1151), HSA-KMT reports its "unavailable" sentinel for `UniqueID`, which was packed into a UUID-shaped string instead of surfacing `N/A`. `amdsmi_get_gpu_device_uuid()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` for that case.
-
 - **Fixed xGMI read and write data counters reading as unavailable on MI450**.  
-  - On MI450 the GPU connects to the CPU over xGMI, and the driver reports that link's traffic as a single counter. It was dropped instead of being stored as the first link, so `xgmi_read_data_acc` and `xgmi_write_data_acc` from `amdsmi_get_gpu_metrics_info()`, and the link `read`/`write` from `amdsmi_get_link_metrics()`, read `UINT64_MAX` (`N/A`).
+  - `xgmi_read_data_acc` and `xgmi_write_data_acc` from `amdsmi_get_gpu_metrics_info()`, and the link `read`/`write` from `amdsmi_get_link_metrics()`, read `UINT64_MAX` (`N/A`) instead of the GPU-to-CPU xGMI link traffic.
 
 - **Fixed `amdsmi_get_processor_count_from_handles()` crashing on NULL output pointers**.  
   - It wrote through a NULL `nr_cpusockets`, `nr_cpucores` or `nr_gpus` and crashed. It now returns `AMDSMI_STATUS_INVAL`.
 
 - **Fixed `amdsmi_get_gpu_cper_entries()` failing the page after a large CPER record**.  
-  - A record an earlier call had already returned still had to fit the caller's buffers on the next call, so that call failed with `AMDSMI_STATUS_OUT_OF_RESOURCES`. Records already returned are now skipped before the space check.
-
-- **Fixed `amdsmi_get_gpu_total_ecc_count()` reading RAS state up to 39 times per call, and reporting `0` instead of an error when that read failed**.  
-  - RAS state is now read once per call instead of once per block, avoiding the repeated `.../ras/features` reads that could trip host-side RAS request throttling on SR-IOV guests with RAS enabled.
-  - A failed RAS state read is now reported as an error (`N/A` in the CLI) instead of a misleading `0`. `amdsmi_get_gpu_total_ecc_count()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` when `ras/features` cannot be opened and `AMDSMI_STATUS_API_FAILED` when it cannot be parsed. It previously returned `AMDSMI_STATUS_SUCCESS` with a zero total in both cases.
-  - `amdsmi_get_gpu_ras_block_features_enabled()` shares that read, so an unparsable `ras/features` now returns `AMDSMI_STATUS_API_FAILED` instead of `AMDSMI_STATUS_SUCCESS` with every block reported as disabled.
-  - A GPU with RAS present but genuinely disabled (a cleanly-read, all-zero RAS state) still correctly reports `0`, not `N/A` -- only an actual read/parse failure reports `N/A`.
-  - Affects the default `amd-smi` output (`UEC` column), `amd-smi monitor --ecc`, and `amd-smi metric --ecc`.
-  - Example default output, one GPU where the read succeeds (`UEC: 0`) next to one where it fails (`UEC: N/A`), instead of both previously reading `0`:
-    ```
-    | 0000:0c:00.0            AMD Instinct MI...  | 12 %     45 °C   0       300/750 W    |
-    | 1     0       0       NA                    | 34 %     30 %    2048/196608 MB       |
-    | 0000:2f:00.0           AMD Radeon RX ...    | 8 %      41 °C   N/A     280/300 W    |
-    | 2     1       1       NA                    | 22 %     28 %    1024/32768 MB        |
-    ```
+  - The next call returned `AMDSMI_STATUS_OUT_OF_RESOURCES` when its buffers were too small for a record an earlier call had already returned.
 
 - **Fixed `amd-smi static --clock` printing a Python traceback for an unknown clock name**.  
   - It now reports the invalid parameter and exits `195` (`INVALID_PARAMETER`).
@@ -237,42 +207,42 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed crashes when several threads start or stop AMD SMI at the same time**.  
   - Programs that initialize and shut down the library from more than one thread could crash, find no GPUs, or leave the library initialized after every thread had shut it down.
 
-- **Fixed a one-byte overrun when reading the memory partition into a small buffer**.  
-  - A buffer too small for the partition name had the byte after its end overwritten. The name is now truncated inside the buffer, and the call still reports that the buffer is too small.
+- **Fixed `amdsmi_get_gpu_memory_partition()` writing one byte past a small buffer**.  
+  - The name is now truncated inside the buffer, and the call still reports the buffer as too small.
 
-- **`amd-smi set --memory-partition` no longer advises a driver reload when the partition is already current**.  
-  - Requesting the current partition does not cancel a different partition set earlier, so a reload would apply that one. amd-smi now reports that nothing changed and notes that an earlier request still applies at the next reload.
-
-- **Fixed `amd-smi event` hanging when GPU event notifications can't start**.  
-  - The command now reports GPUs whose event notifications can't start and keeps listening on the others, or exits with the error when none can, for example on WSL or without access to `/dev/kfd`.
-
-- **Fixed `amd-smi event -g` listening on the wrong GPU**.  
-  - Events now come from the GPUs you select.
+- **Fixed `amd-smi set --memory-partition` advising a driver reload when the partition is already current**.  
+  - It now reports that nothing changed, and notes when an earlier, different request still applies at the next reload.
 
 - **Fixed `amdsmi_get_gpu_driver_info()` reporting `0` as the driver date**.  
   - Kernels that no longer use the DRM driver date report it as `0`. `driver_date` is now empty in the C API and `N/A` in Python.
 
 - **Fixed `amd-smi node --tray` printing an empty section on hardware without UALoE**.  
-  - The tray output was guarded on the retrieved dictionary being non-empty, so the `N/A` defaults next to it could never be reached. `NODE:` was emitted with no body, and `--json` returned `[{"node": {}}]`. All three output formats now report `MAX_ACC_PER_TRAY` and `TRAY_TYPE` as `N/A`.
+  - It printed `NODE:` with nothing under it, and `--json` returned `[{"node": {}}]`. All output formats now show `MAX_ACC_PER_TRAY` and `TRAY_TYPE` as `N/A`.
 
-- **Fixed `amdsmi_get_afids_from_cper()` raising `TypeError` when passed a list of CPER records**.  
-  - The list branch called `isinstance()` with a subscripted generic, which Python rejects at runtime, so the documented list-of-dicts input always failed. `bytes` input was unaffected. Input that is neither `bytes` nor a list now raises `AmdSmiParameterException`.
+- **Fixed the Python `amdsmi_get_afids_from_cper()` raising `TypeError` for a list of CPER records**.  
+  - The documented list input always failed; `bytes` input was unaffected. Input of any other type now raises `AmdSmiParameterException`.
 
 - **Fixed a segmentation fault in the DRM example when run without root**.  
-  - `amdsmi_get_gpu_accelerator_partition_profile_config()` returns `AMDSMI_STATUS_NO_PERM` without filling its output, and the example read `num_profiles` from that uninitialized structure, so the profile loop ran past the end of the `profiles` array on every GPU. The loop now runs only when the query succeeds.
-
-- **Fixed `amd-smi metric --fan` reporting `0.0 %` on Navi3x/4x GPUs with OverDrive enabled**.  
-  - Fan speed and maximum fan speed are read from the live hwmon fan duty cycle again, and `amd-smi set --fan --help` shows the range the GPU accepts.
+  - When `amdsmi_get_gpu_accelerator_partition_profile_config()` returned `AMDSMI_STATUS_NO_PERM`, the example read an uninitialized profile count and ran past the profile array. It now skips the profile list when that call fails.
 
 - **Fixed `amd-smi` using the `amdsmi` Python library of another ROCm install**.  
   - When `ROCM_PATH` or `ROCM_HOME` named a different ROCm install, `amd-smi` loaded that install's library, so it either failed with an `AttributeError` or reported the other install's library and ROCm versions. `ROCM_PATH` and `ROCM_HOME` no longer redirect which `amdsmi` Python package `amd-smi` loads.
+
+- **Fixed `amdsmi_set_clk_freq()` falsely returning `AMDSMI_STATUS_INVAL` on Navi48 (gfx1201)**.  
+  - Requested levels outside the settable range are now skipped instead of failing the whole request. It returns `AMDSMI_STATUS_INVAL` only when no requested level can be set.
+
+- **Fixed `go get` failing for the amd-smi Go module**.  
+  - `go get github.com/ROCm/rocm-systems/projects/amdsmi` fetched the whole repository and failed with `module source tree too large`. `projects/amdsmi` now has its own `go.mod`, so only the amd-smi sources are fetched.
+
+- **Fixed LeakSanitizer reporting memory leaks in programs that use AMD SMI**.  
+  - Programs that read the GPU process list, or exit without calling `amdsmi_shut_down()`, no longer report leaked library objects at exit.
 
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added
 
-- **Exposed `BOOT_FIRMWARE` field in `amd-smi static --ifwi` output**.  
-  - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` now appears under the `IFWI` section alongside `NAME`, `BUILD_DATE`, `PART_NUMBER` and `VERSION` (`--vbios` remains available as a legacy alias).
+- **Added `BOOT_FIRMWARE` to `amd-smi static --ifwi` output**.  
+  - Shows the `boot_firmware` value from `amdsmi_get_gpu_vbios_info()` under `IFWI`. `--vbios` remains as an alias.
 
 - **Added an experimental, opt-in WSL (WDDM/dxg) GPU backend**.  
   - Built only with `-DENABLE_WSL_BACKEND=ON` (off by default); native builds and packages are unchanged.
@@ -288,109 +258,101 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Each `CACHE_<N>` entry now reports a short type label (`L1D`, `L1I`, `L2`, `L3`) and the total size across all instances at that level.
 
 - **Added `chip_rev_id` and `external_rev_id` to `amdsmi_get_gpu_asic_info()`**.  
-  - Reports the amdgpu `chip_rev` and `external_rev` values from the `AMDGPU_INFO_DEV_INFO` DRM query, both distinct from `rev_id`, which is the PCI config-space revision. `external_rev_id` is family-scoped, so interpret it alongside `device_id`.
-  - Exposed under the same names in the Python `amdsmi_get_gpu_asic_info()` dictionary and in `amd-smi static --asic`. The C fields report `0xFFFFFFFF` when unsupported; Python and the CLI render that as `N/A`.
-  - ABI-preserving: the fields take two `uint32_t` slots from `amdsmi_asic_info_t.reserved`, which shrinks from 17 to 15 entries. The structure size and all other field offsets are unchanged.
+  - They report the amdgpu `chip_rev` and `external_rev` values, which differ from `rev_id` (the PCI revision). `external_rev_id` is specific to a GPU family, so read it together with `device_id`.
+  - Also available in the Python dictionary and `amd-smi static --asic`. An unsupported value is `0xFFFFFFFF` in C and `N/A` in Python and the CLI.
+  - ABI-compatible: the fields use two of the `reserved` slots in `amdsmi_asic_info_t`.
 
 ### Changed
 
-- **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values that exceed `INT_MAX`**.  
-  - Such values were previously narrowed to a negative number and returned as data.
-  - The `UINT_MAX` "unavailable" sentinel is exempt: a domain with no minimum dpm level or no deep-sleep state keeps reporting the clock as unavailable instead of failing the call.
+- **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values above `INT_MAX`**.  
+  - Such values were previously returned as negative numbers.
+  - A clock reported as unavailable (`UINT_MAX`) still reads as unavailable instead of failing the call.
 
 - **Expanded `amdsmi_gpu_block_t` enum with 20 new RAS IP blocks**.  
   - Added blocks: from `AMDSMI_GPU_BLOCK_MMSCH` to `AMDSMI_GPU_BLOCK_UCIE_PCS` at bit positions 19-38.
   - Updated `AMDSMI_GPU_BLOCK_LAST` to `AMDSMI_GPU_BLOCK_UCIE_PCS`.
 
-- **A section with no entries now renders as `SECTION: N/A` in human-readable CLI output**.  
-  - It previously printed a bare `SECTION:` header with nothing beneath it, which read as truncated output. For `SWITCH_ERRORS` this also hid data: a block the driver reported as `N/A` became an empty header.
-  - Affects sections that list a variable number of entries: `PORTS` and `RDMA_DEVICES` for an AI-NIC, the per-block counters under `NIC_ERRORS` and `SWITCH_ERRORS`, and `FREQUENCY_LEVELS` in `amd-smi static --clock`. Sections with a fixed set of fields already print `N/A` per field and are unaffected.
-  - `--json`, `--csv`, and the table-based subcommands (`monitor`, `partition`, `topology`, `xgmi`, and the default no-argument output) are unchanged.
+- **Empty sections in human-readable CLI output now print `SECTION: N/A`**.  
+  - They previously printed a bare header that looked like truncated output. Under `SWITCH_ERRORS`, a block the driver reported as `N/A` showed as an empty header.
+  - Affects `PORTS` and `RDMA_DEVICES` for AI-NICs, the counters under `NIC_ERRORS` and `SWITCH_ERRORS`, and `FREQUENCY_LEVELS` in `amd-smi static --clock`. `--json`, `--csv` and table output are unchanged.
 
 - **`container_name` in process info now reports the full container ID**.  
-  - Previously only the first 16 characters were reported. The value is now the complete 64-character ID that `docker inspect`, `docker ps --no-trunc` and Kubernetes tooling use, so process output can be matched against them directly.
-  - Nested LXC containers now report the outer container name rather than `<parent>/<child>`.
+  - It previously reported only the first 16 characters. The full 64-character ID matches `docker inspect`, `docker ps --no-trunc` and Kubernetes tooling.
+  - Nested LXC containers now report the outer container name instead of `<parent>/<child>`.
 
 - **`amd_smi/impl/amd_smi_cper.h` and `example/amd_smi_cper.cc` are no longer installed in the dev package**.  
-  - Both functions the header declares are C++ symbols, which the version script's `amdsmi_*` export glob does not match, so including the header only ever led to a link error. It joins the `_test` and WSL impl headers that are already build-only.
-  - The example is the one shipped file that included that header, so it went with it rather than being left unbuildable against an install tree.
+  - The header's functions are not exported, so code that included it failed to link. The example needed that header.
 
-### Optimized
+- **Reworked the Python package install layout for system packages and pip wheels**.  
+  - `.deb` and `.rpm` packages now install the `amdsmi` Python package directly into the system Python's `site-packages` (or `dist-packages`) instead of running `pip install` during installation, so `pip list` no longer shows it.
+  - The new `-DBUILD_PYTHON_WHEEL=ON` CMake option builds a standalone pip wheel. It bundles its own `libamd_smi_python.so`, which can be loaded in the same process as the system `libamd_smi.so`.
+
+- **`amdsmi_enumeration_info_t` grew by 4 bytes** (breaking).  
+  - The new `physical_acc_id` field makes it 280 bytes instead of 276, and `amdsmi_get_gpu_enumeration_info()` always writes that field. Rebuild applications against the 10.1.0 headers: a binary built against an earlier header passes a buffer that is 4 bytes too small.
 
 ### Resolved Issues
 
-- **Fixed `rsmi_dev_reg_table_get()` failing on register-state images that contain no SMN entries**.  
-  - The loop-back test ran before the SMN and instance counters reached zero, so an image with no SMN entries re-entered the loop and read past the end of the image; the call then returned an error for a well-formed file.
+- **Fixed `amdsmi_get_gpu_reg_table_info()` failing on register-state images with no SMN entries**.  
+  - It read past the end of such an image and returned an error for a well-formed file.
 
-- **Fixed an out-of-bounds write when a GPU's NUMA or local CPU list names a CPU beyond the bitmask**.  
-  - `get_bitmask_from_numa_node()` and `get_bitmask_from_local_cpulist()` indexed the bitmask with the parsed CPU number without checking it against the allocated word count. Ranges are now clamped to the bitmask, and negative entries are skipped.
-
-- **Fixed `vram_bit_width` never being reported as `N/A`**.  
-  - The unavailable-value check compared a `uint32_t` field against `UINT64_MAX`, which can never match, so an unknown bit width was logged as `4294967295`.
+- **Fixed an out-of-bounds write in `amdsmi_get_cpu_affinity_with_scope()`**.  
+  - A GPU NUMA or local CPU list naming a CPU beyond the bitmask wrote past its end. Such ranges are now clamped to the bitmask, and negative entries are skipped.
 
 - **Fixed an out-of-bounds read in the DRM example's RAS block listing**.  
-  - `amd_smi_drm_example.cc` iterated every `amdsmi_gpu_block_t` value but indexed a 14-entry name array, so every block from `AMDSMI_GPU_BLOCK_MCA` onward read past the end of the array and printed a garbage label. The list now covers all 39 blocks and the lookup is bounds-checked.
+  - `amd_smi_drm_example.cc` printed garbage names for blocks from `AMDSMI_GPU_BLOCK_MCA` onward. It now lists all 39 blocks.
 
-- **Fixed `amd-smi ras --afid --folder --json` emitting nothing when no CPER files are readable**.  
-  - When every `.cper` file in the folder was skipped (e.g. rejected as a symlink), the JSON path printed empty output, so consumers feeding stdout to `json.loads` failed with `Expecting value: line 1 column 1 (char 0)`. It now emits `[]` for that case, matching the `--cper --json` contract.
+- **Fixed `amd-smi ras --afid --folder --json` printing nothing when no CPER file is readable**.  
+  - The empty output broke JSON parsers. It now prints `[]`, like `--cper --json`.
 
-- **Fixed an uninitialized processor index that let the CPU and Core APIs read an unrelated CPU socket**.  
-  - Passing a GPU, NIC, or switch handle to a CPU or Core API could return another socket's telemetry with `AMDSMI_STATUS_SUCCESS`. Such handles are now rejected. Calls that pass a CPU or Core handle are unaffected.
+- **Fixed CPU and Core APIs returning another socket's data for a GPU, NIC or switch handle**.  
+  - They could return an unrelated socket's telemetry with `AMDSMI_STATUS_SUCCESS`. Such handles are now rejected.
 
-- **Fixed `amd-smi metric` printing nothing for a section requested by name on APUs**.  
-  - APUs do not expose the discrete-GPU sensors, so those sections are dropped from the default dump. The same suppression applied to an explicitly named section, leaving `amd-smi metric --energy` printing only the GPU header and exiting 0, with no key at all in `--json` and `--csv` output.
-  - `--energy`, `--ecc-blocks`, `--overdrive`, `--xgmi-err`, `--pcie`, `--voltage-curve`, `--voltage` and `--fan` now report `N/A` when named explicitly. The default `amd-smi metric` dump is unchanged.
+- **Fixed `amd-smi metric` printing nothing for a section named on the command line on APUs**.  
+  - For example, `amd-smi metric --energy` printed only the GPU header and exited `0`, with no key in `--json` or `--csv`.
+  - `--energy`, `--ecc-blocks`, `--overdrive`, `--xgmi-err`, `--pcie`, `--voltage-curve`, `--voltage` and `--fan` now show `N/A` when named. The default `amd-smi metric` output is unchanged.
 
 - **Fixed `amdsmi_get_clock_info()` reporting an unavailable clock as `65535` instead of `N/A`**.  
-  - `amdsmi_clk_info_t.clk` is a `uint32_t`, but the GFX, MEM, SOC, VCLK and DCLK domains copied the raw `uint16_t` value straight from the GPU metrics table, so the 16-bit unavailable marker surfaced as the literal reading `65535` MHz. The `DF` domain already returned the 32-bit marker.
-  - All domains now report an unavailable clock as `UINT32_MAX`, which the Python interface maps to `N/A`. The field is documented accordingly.
+  - All clock domains now report an unavailable clock as `UINT32_MAX`, which Python and the CLI show as `N/A`.
 
-- **Fixed `amd-smi metric --usage` reporting APU IPU read/write bandwidth without a unit**.  
-  - `APU_AVERAGE_IPU_READS` and `APU_AVERAGE_IPU_WRITES` printed bare numbers while the adjacent DRAM counters carried `MB/s`. All four bandwidth counters now report `MB/s`, and the header documents the unit for each.
+- **Fixed `amd-smi metric --usage` showing APU IPU read/write bandwidth without a unit**.  
+  - `APU_AVERAGE_IPU_READS` and `APU_AVERAGE_IPU_WRITES` now show `MB/s`, like the DRAM bandwidth counters.
 
-- **Fixed `amd-smi static --vram` reporting `GDDR7` for LPDDR5 unified memory on APUs (e.g. gfx117x)**.  
-  - `AMDSMI_VRAM_TYPE__MAX` aliases the highest real memory type (`LPDDR5`), so a genuine LPDDR5 reading was matched by the `__MAX` special case and mislabeled `GDDR7`. It is now correctly reported as `LPDDR5`.
+- **Fixed `amd-smi static --vram` reporting `GDDR7` for LPDDR5 memory on APUs (for example gfx117x)**.  
+  - It now reports `LPDDR5`.
 
 - **Fixed `container_name` in process info being wrong, missing, or crashing `amd-smi`**.  
-  - `amd-smi process --sort-by-pid` could abort with `terminate called after throwing an instance of 'std::out_of_range'` when any GPU process ran in a cgroup whose path ended in `docker` or `lxc`.
-  - Processes in containerd, CRI-O and Podman containers reported no container at all, including Kubernetes pods. They are now identified under either cgroup driver.
-  - Processes that were not in a container could be reported as if they were, for example anything running under the Docker daemon's own `docker.service`.
-  - Containers managed by LXC 3 or later, or by LXD, under systemd are now identified.
-  - A process started from a path of 256 characters or more could report a corrupted process name.
+  - `amd-smi process --sort-by-pid` could abort with a `std::out_of_range` exception when a GPU process ran in a cgroup whose path ended in `docker` or `lxc`.
+  - Processes in containerd, CRI-O and Podman containers, including Kubernetes pods, are now identified.
+  - Processes outside a container, such as those under `docker.service`, are no longer reported as containerized.
+  - LXC 3+ and LXD containers under systemd are now identified.
+  - A process started from a path of 256 or more characters no longer reports a corrupted name.
 
 - **Fixed out-of-bounds reads and writes when parsing malformed CPER records**.  
-  - The ring reader now drops a record whose `record_length` is smaller than a CPER header; such a record was previously copied and then had a product serial number written past the end of the caller's buffer. `amdsmi_get_afids_from_cper` likewise returns `AMDSMI_STATUS_UNEXPECTED_SIZE` for an undersized `buf_size` instead of reading header fields the caller never supplied.
-  - A section descriptor's `fru_id` and `fru_text` are now logged only up to their declared width, and a crashdump section's registers are copied into an aligned buffer before decoding. Neither field carries a terminator, and the section can sit at an unaligned record-supplied offset.
-  - A non-standard error section whose `reg_arr_size` exceeds the fixed 128-byte register dump, and a record whose `error_severity` overflows the severity mask, are now rejected. Both previously read or matched outside the record; in boot context (`reg_ctx_type` 9) any AFID derived from the over-long register read is gone.
+  - Records shorter than a CPER header, with an oversized register dump, or with an out-of-range severity are now dropped or rejected instead of being read or written past their end. One such record previously wrote past the end of the buffer passed to `amdsmi_get_gpu_cper_entries()`.
+  - `amdsmi_get_afids_from_cper()` returns `AMDSMI_STATUS_UNEXPECTED_SIZE` when `buf_size` is smaller than a CPER header.
+  - AFIDs that came from reading past a boot-context register dump no longer appear.
 
 - **Fixed `amd-smi metric --clock` reporting FCLK `MAX_CLK` as 0 MHz**.  
-  - The FCLK range came from `pp_od_clk_voltage`, which on some GPUs (e.g. MI45x) has no FCLK section, leaving the parsed maximum at 0. It now falls back to `pp_dpm_fclk` (and likewise `pp_dpm_sclk`/`pp_dpm_mclk`) when the overdrive file omits a domain.
+  - On GPUs whose `pp_od_clk_voltage` has no FCLK section (for example MI45x), the range now comes from `pp_dpm_fclk`. SCLK and MCLK fall back the same way.
 
-- **Fixed `amd-smi set -L/--clk-limit <clk> max <value>` not enforcing caps that fall between clock levels**.  
-  - For `mclk` and `fclk` ONLY, which expose a discrete DPM table, the requested `max` is now rounded down to the nearest selectable clock level, so the enforced limit never exceeds the requested value.
-  - `sclk` supports a continuous frequency range, so its requested `max` is honored exactly (e.g. `600` enforces a limit of 600MHz) and is not snapped.
+- **Fixed `amd-smi set -L/--clk-limit <clk> max <value>` not enforcing caps between clock levels**.  
+  - For `mclk` and `fclk`, which have discrete levels, `max` is now rounded down to the nearest level, so the limit never exceeds the requested value.
+  - `sclk` has a continuous range, so its `max` is applied exactly. For example, `600` sets a 600 MHz limit.
 
 - **Fixed AI-NICs disappearing from `amd-smi` when the RDMA driver is unavailable**.  
-  - Discovery treated a missing RDMA device list as a fatal error for the whole NIC, so a host with `ionic_rdma` blacklisted (or otherwise not loaded) dropped the NIC entirely and reported no AI-NIC at all.
-  - The NIC is now enumerated with an empty `rdma_dev`.
-  - `amdsmi_get_nic_rdma_dev_info()` returns `AMDSMI_STATUS_SUCCESS` with `num_rdma_dev` set to 0.
-  - `amd-smi static` reports `RDMA_DEVICES: N/A` instead of omitting the device. All other NIC information is reported as usual.
+  - With `ionic_rdma` blacklisted or not loaded, the whole NIC was dropped. It is now listed with no RDMA devices.
+  - `amdsmi_get_nic_rdma_dev_info()` returns `AMDSMI_STATUS_SUCCESS` with `num_rdma_dev` set to `0`, and `amd-smi static` shows `RDMA_DEVICES: N/A`.
 
 - **Fixed `amdsmi_get_gpu_asic_info()` reporting `rev_id` as a real revision when it is not available**.  
-  - The WSL backend returned success with a zeroed structure, so `rev_id` read as `0x0`, and where it did report the not-supported value Python rendered it as the raw `0xffffffff`. Python and the CLI now render it as `N/A`.
-  - `amdsmi_asic_info_t` is now reset through one shared initializer used by every backend, so a field a backend cannot supply keeps its not-supported value rather than a plausible zero.
-
-- **Fixed `amdsmi_set_clk_freq()` falsely returning `AMDSMI_STATUS_INVAL` on Navi48 (gfx1201)**.  
-  - The deep-sleep bitmask validation added previously rejected the entire request when any requested bit fell outside a settable range computed from a prior read, so a supported clock set failed on gfx1201 even though the write is valid. The set is now lenient: out-of-range bits are dropped, and `AMDSMI_STATUS_INVAL` is only returned when no requested level is settable. The read-only check runs after the write, and `TestFrequenciesReadWrite` is re-enabled on Aldebaran (gfx90a / MI210).
-
-- **Fixed several WSL backend metrics reporting a raw driver sentinel or zero instead of `N/A`**.  
-  - `amdsmi_get_clock_info()`, `amdsmi_get_clk_freq()`, `amdsmi_get_gpu_busy_percent()`, `amdsmi_get_gpu_activity()`, `amdsmi_get_gpu_fan_speed()`, `amdsmi_get_pcie_info()` and `amdsmi_get_power_cap_info()` returned a raw PMLog sentinel, a zero-filled struct field, or (for `amdsmi_get_gpu_busy_percent()`) fell through to the bare-metal-only sysfs path and failed, when the underlying WDDM/dxg sensor was unavailable or rocdxg had no data source at all.
-  - Affected fields now report `N/A`; `amdsmi_get_clk_freq()` and `amdsmi_get_gpu_fan_speed()` return `AMDSMI_STATUS_NOT_SUPPORTED` instead, since they have no downstream `N/A` translation. `amdsmi_get_gpu_busy_percent()` is now routed through the WSL backend.
+  - On the WSL backend `rev_id` read as `0x0`, and elsewhere an unavailable `rev_id` showed as `0xffffffff` in Python. Python and the CLI now show `N/A`.
+  - Other fields a backend cannot supply now keep their not-supported value instead of reading as zero.
 
 ### Upcoming Changes
 
-- **`uuid`/`gpu_uuid` in `amd-smi list` will report only the legacy UUID**.  
-  - In a future release they will no longer report the CUID. Use `cuid` and `identifier_kind` instead. GPU selection accepts both identifiers, and the legacy UUID API is unchanged.
+- **UUIDs will be replaced by CUIDs (Component Unified IDs) in an upcoming release**.  
+  - CUIDs identify a device consistently across AMD tools.
+  - `amdsmi_get_gpu_device_cuid()` is available but stays disabled until the amdgpu driver supports it.
+  - `amd-smi list` and GPU selection already show the CUID instead of the UUID when one is available.
 
 ## amd_smi_lib for ROCm 10.0.0
 
@@ -411,12 +373,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Widened five `amdsmi_gpu_metrics_t` accumulator counters from 32-bit to 64-bit** (breaking).  
   - `gfx_activity_acc`, `mem_activity_acc`, `pcie_nak_sent_count_acc`, `pcie_nak_rcvd_count_acc`, and `pcie_lc_perf_other_end_recovery` are now `uint64_t` to match the amdgpu pmfw metrics header. Recompile callers that read these fields; the struct layout and field offsets have changed.
-
-- **Reworked the `amd-smi fabric` CLI flags** (breaking).  
-  - `--telemetry` (`-T`) now reports the per-category fabric telemetry counters. This data was previously shown by `--topology`.
-  - `--topology` (`-t`) now reports fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state). This data was previously shown by `--info`.
-  - `--info` (`-i`) has been removed. Use `--topology`, which reports the same data under the same `fabric_info` output key.
-  - `--topology` changed meaning rather than failing to parse, so a script written against the old flag would have silently read configuration where it expected counters. Passing it now prints a warning to stderr naming `--telemetry` as the new home of the counters; stdout is untouched, so `--json` and `--csv` stay parseable.
 
 - **Aligned the fabric telemetry and NIC firmware API surface with the unified ABI** (breaking).  
   - `amdsmi_fabric_telem_id_to_string()` now returns `amdsmi_status_t` and writes the name through a `const char**` out-parameter, instead of returning a `const char*` directly.
@@ -569,12 +525,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - New C and Python API `amdsmi_get_gpu_process_list_by_pid()`.
 
 ### Changed
-
-- **Reworked Python package install layout for system packages and pip wheels**.  
-  - System `.deb` / `.rpm` packages no longer run `pip install` during postinst; the `amdsmi` Python package is installed directly into the default system Python's `site-packages`/`dist-packages` (detected from the distro-default interpreter) as part of the package payload, so plain `import amdsmi` works after `apt install` / `dnf install`. Removing the package removes those files. `pip list` will no longer show `amdsmi` for the system package.
-  - The module is additionally staged under `share/amd_smi` (its historical location) for consumers that resolve it via `ROCM_PATH/share/amd_smi` rather than `site-packages` (e.g. rocprofiler-compute, omnistat) and for the TheRock artifact layout, whose manifest captures `share/amd_smi` but not the interpreter's `site-packages`. `site-packages` remains the primary importable location.
-  - Added new CMake option `-DBUILD_PYTHON_WHEEL=ON` (default `OFF`) which builds the standalone Python wheel and an isolated `libamd_smi_python.so` (distinct SONAME) bundled inside it, so the wheel-shipped library can coexist in-process with the system `libamd_smi.so` without symbol collisions. With `-DBUILD_PYTHON_WHEEL=OFF` (the default used by ROCm CI) only the system-package layout is built; no wheel artifact is produced.
-  - `py-interface/amdsmi_wrapper.py` now loads the shared library in this order: the `AMDSMI_LIB_OVERRIDE` env var (development / ABI-test escape hatch), a `libamd_smi_python.so` bundled next to the wrapper (pip wheel), then the system `libamd_smi.so` via the dynamic linker. A `_MissingLibrary` sentinel defers `OSError` to the first API call when no candidate is loadable, so import-time tooling (docs, lint) still works without a runtime library.
 
 - **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.  
   - The `uclk_aid`, `socclks_mid`, and temperature `xcd` keys are now lowercase (`aid_<N>`, `mid_<N>`, `xcp_<N>`) in JSON and CSV output, matching the existing `xcp_<N>` usage keys; they were previously uppercase (`AID_<N>`, `MID_<N>`, `XCP_<N>`).
