@@ -33,7 +33,7 @@ THE SOFTWARE.
 #if defined(__HIPCC__) || defined(__CUDACC__)
 // address_space is meaningful only for a device compile; a plain host C++
 // compiler warns that the attribute is ignored (and -Werror turns that into a
-// build failure for downstream consumers of the installed headers).
+// Host compilers ignore address_space and warn, which -Werror makes fatal.
 #define RCCL_GLOBAL_ADDRSPACE __attribute__((address_space(1)))
 #else
 #define RCCL_GLOBAL_ADDRSPACE
