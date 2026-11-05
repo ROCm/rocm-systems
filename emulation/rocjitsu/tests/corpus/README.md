@@ -80,11 +80,13 @@ ROCJITSU_CORPUS_DIR=/path/to/rocjitsu-test-corpus \
   bash tests/corpus/run-file-limit-tests.sh
 ```
 
-Use the corpus revision selected by the shared pin above. In CI, a manual
-`corpus_ref` without `corpus/runtime/file-limits` fails the file-limit step
-unless its resolved SHA is listed in `ROCJITSU_FILE_LIMIT_LEGACY_CORPUS_SHAS`,
-which names earlier pins that predate the matrix. For those pins the step logs
-a notice and runs no tests. The script reads
+Use the corpus revision selected by the shared pin above. CI requires
+`corpus/runtime/file-limits/CMakeLists.txt` at the shared pin, including after
+a pin rollback. A manual dispatch may compare against an earlier pin that
+predates the matrix: if its resolved SHA differs from the shared pin and is
+listed in `ROCJITSU_FILE_LIMIT_LEGACY_CORPUS_SHAS`, the step logs a notice with
+the SHA and missing path and runs no tests. All other missing-suite cases
+fail the file-limit step. The script reads
 `RJ_ENABLE_ASAN` and `RJ_ENABLE_TSAN` from the rocjitsu build's `CMakeCache.txt`
 to select `address,undefined` or `thread` instrumentation for the HIP client's
 host code. For ASan/TSan, it also uses the cached `CMAKE_CXX_COMPILER` as the
