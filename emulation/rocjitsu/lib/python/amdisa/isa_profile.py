@@ -428,6 +428,11 @@ class IsaProfile(ABC):
     """
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        """Opt into rj-arith matrix execution independently of operand layout."""
+        return False
+
+    @property
     @abstractmethod
     def supported_versions(self) -> list[str]:
         """Schema versions this profile supports."""
@@ -605,7 +610,11 @@ class IsaProfile(ABC):
 
     @property
     def has_gfx11_image_address_extension(self) -> bool:
-        """Whether MIMG NSA appends one DWORD of address-register selectors."""
+        """Whether MIMG uses the GFX11 image-address encoding contract.
+
+        This selects DIM-based VADDR sizing, x4 SRSRC/SSAMP tuple scaling, and
+        the optional NSA DWORD containing additional address-register selectors.
+        """
         return False
 
     @property
@@ -923,7 +932,11 @@ class IsaProfile(ABC):
         *,
         has_modifier_encoding: bool,
     ) -> bool:
-        """Qualify DPP16/DPP8 availability when the XML omits a valid form."""
+        """Qualify DPP16/DPP8 encoding availability.
+
+        has_modifier_encoding supplies the XML default. Profiles may override
+        it when the XML omits a valid form; dpp_opcode_rule defines ISA legality.
+        """
         del enc_name, inst_name
         return has_modifier_encoding
 
@@ -1637,11 +1650,6 @@ class _AmdgpuProfileBase(IsaProfile):
         return True
 
     @property
-    def vmem_writes_use_expcnt(self) -> bool:
-        """Whether vector-memory writes also contribute to EXPCNT."""
-        return False
-
-    @property
     def gds_uses_expcnt(self) -> bool:
         """Whether GDS operations also contribute to EXPCNT."""
         return False
@@ -1846,10 +1854,6 @@ class CdnaProfile(_AmdgpuProfileBase):
         return False
 
     @property
-    def vmem_writes_use_expcnt(self) -> bool:
-        return True
-
-    @property
     def gds_uses_expcnt(self) -> bool:
         return True
 
@@ -2006,6 +2010,11 @@ class CdnaProfile(_AmdgpuProfileBase):
 
 class Cdna4Profile(CdnaProfile):
     """ISA profile for CDNA4-only encoding capabilities."""
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
+        # CDNA4 ISA, sections 3.1 and 4.4: EXPCNT is unused.
+        return False
 
     @property
     def mfma_scale_vop3px2_specs(self) -> tuple[MfmaScaleVop3px2Spec, ...]:
@@ -2230,10 +2239,6 @@ class Rdna1Profile(_AmdgpuProfileBase):
     flat_saddr_null_aliases = ('127',)
 
     @property
-    def vmem_writes_use_expcnt(self) -> bool:
-        return True
-
-    @property
     def gds_uses_expcnt(self) -> bool:
         return True
 
@@ -2387,8 +2392,11 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
-    def vmem_writes_use_expcnt(self) -> bool:
-        return True
+    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': (11, 8),
+            'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
+        }
 
     @property
     def gds_uses_expcnt(self) -> bool:
@@ -2540,6 +2548,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return FloatDotAccumulation.GFX11
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        return True
+
+    @property
     def matrix_layout(self) -> MatrixLayout:
         return MatrixLayout.WMMA_REPLICATED_HALFWAVE
 
@@ -2616,6 +2628,11 @@ class Rdna3_5Profile(Rdna3Profile):
     """
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        # RDNA3.5 retains its legacy implementation despite sharing the RDNA3 layout.
+        return False
+
+    @property
     def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
         # Literal lane indices are only qualified on RDNA3 and RDNA4.
         return ((192, 192),)
@@ -2641,13 +2658,6 @@ class Rdna3_5Profile(Rdna3Profile):
         return {
             'IMAGE_BVH_INTERSECT_RAY': 4,
             'IMAGE_BVH64_INTERSECT_RAY': 4,
-        }
-
-    @property
-    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': (11, 8),
-            'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
         }
 
     @property
@@ -2887,6 +2897,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        return True
+
+    @property
     def matrix_layout(self) -> MatrixLayout:
         return MatrixLayout.WMMA_SPLIT_K
 
@@ -3013,6 +3027,11 @@ class Cdna5Profile(Rdna4Profile):
     """
 
     flat_saddr_null_aliases = ()
+
+    @property
+    def uses_rj_arith_matrix(self) -> bool:
+        # CDNA5 needs its own matrix bindings, including fixed-wave sparse forms.
+        return False
 
     @property
     def bf16_inline_uses_f32_carrier(self) -> bool:

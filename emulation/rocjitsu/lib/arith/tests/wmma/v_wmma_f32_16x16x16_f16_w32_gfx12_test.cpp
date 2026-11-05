@@ -26,10 +26,12 @@ using Registers = rocjitsu::arith::test::Registers<33, 32>;
 // Check matrix results, operand aliases, and instruction-flag contracts across supported CPUs
 // and semantics.
 TEST(WmmaF32F16W32Gfx12, Arithmetic) {
-  rocjitsu::arith::test::expect_wmma_exact_simd<false, 32, false>(
+  rocjitsu::arith::test::expect_wmma_exact_simd<false, 32, false, false>(
       rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12);
 
   rocjitsu::arith::test::expect_matrix_modifiers<false, 32, false>(
+      rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12);
+  rocjitsu::arith::test::expect_wmma_fixed_controls<false, 32, false, false>(
       rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12);
 
   Registers input;

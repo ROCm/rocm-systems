@@ -9,12 +9,34 @@ add_library(
     STATIC
     common/cpu.cpp
     common/cpu_decode.cpp
-    register/dpp.cpp
     fp/scalar_repair.cpp
     fp/fma.cpp
+    fp/binary.cpp
+    fp/div_fixup.cpp
+    fp/div_fmas.cpp
+    fp/div_scale.cpp
+    fp/fp64.cpp
+    fp/frexp_exp.cpp
+    fp/half_binary.cpp
+    fp/half_exponent.cpp
     fp/half_fma.cpp
+    fp/half_minmax.cpp
+    fp/ldexp.cpp
+    fp/minmax.cpp
+    fp/mixed_fma.cpp
+    fp/packed_fma.cpp
+    dot/dot.cpp
+    dot/fp8_dot.cpp
+    dot/half_dot.cpp
+    dot/integer_dot.cpp
     dot/scalar_repair.cpp
+    register/dpp.cpp
+    wmma/swmmac16.cpp
+    wmma/swmmac8.cpp
+    wmma/swmmac_float.cpp
+    wmma/swmmac_integer.cpp
     wmma/wmma.cpp
+    wmma/wmma_fp8_integer.cpp
     wmma/wmma_replicated.cpp
 )
 

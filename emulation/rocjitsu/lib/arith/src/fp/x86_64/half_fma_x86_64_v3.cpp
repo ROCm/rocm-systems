@@ -7,6 +7,7 @@
 #include "fp/x86_64/half_fma_x86_64_v3.h"
 #include "common/simd.h"
 #include "common/x86_64/half_x86_64_v3.h"
+#include "fp/fma.h"
 #include "rj_arith/rj_arith.h"
 
 #include <immintrin.h>
@@ -16,9 +17,12 @@ namespace rocjitsu::arith {
 
 // Evaluate FP16 fused multiply-add. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
+template <FmaOperands Operands>
 void half_fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d,
-                        const uint32_t *a, const uint32_t *b, const uint32_t *c) {
-
+                        const uint32_t *a, const uint32_t *b, const uint32_t *c, uint16_t literal) {
+  if constexpr (Operands != FmaOperands::Registers) {
+    instruction_flags &= RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D;
+  }
   int a_shift = instruction_flags & RJ_ARITH_ALU_HIGH_A ? 16 : 0;
   int b_shift = instruction_flags & RJ_ARITH_ALU_HIGH_B ? 16 : 0;
   int c_shift = instruction_flags & RJ_ARITH_ALU_HIGH_C ? 16 : 0;
@@ -29,9 +33,16 @@ void half_fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction
                         instruction_flags);
     auto y = half_input(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + lane)), b_shift,
                         instruction_flags >> 1);
-    auto z = half_input(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(c + lane)), c_shift,
-                        instruction_flags >> 2);
-
+    __m256 z;
+    if constexpr (Operands == FmaOperands::MultiplyLiteral) {
+      z = y;
+      y = half_input(_mm256_set1_epi32(literal), 0, 0);
+    } else if constexpr (Operands == FmaOperands::AddLiteral) {
+      z = half_input(_mm256_set1_epi32(literal), 0, 0);
+    } else {
+      z = half_input(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(c + lane)), c_shift,
+                     instruction_flags >> 2);
+    }
     if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
       x = flush_denorm_f16(x);
       y = flush_denorm_f16(y);
@@ -48,5 +59,18 @@ void half_fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction
     _mm256_maskstore_epi32(reinterpret_cast<int *>(d + lane), lane_exec_mask, result);
   }
 }
+
+template void half_fma_x86_64_v3<FmaOperands::Registers>(uint64_t, uint32_t, uint32_t, uint32_t *,
+                                                         const uint32_t *, const uint32_t *,
+                                                         const uint32_t *, uint16_t);
+
+template void half_fma_x86_64_v3<FmaOperands::MultiplyLiteral>(uint64_t, uint32_t, uint32_t,
+                                                               uint32_t *, const uint32_t *,
+                                                               const uint32_t *, const uint32_t *,
+                                                               uint16_t);
+
+template void half_fma_x86_64_v3<FmaOperands::AddLiteral>(uint64_t, uint32_t, uint32_t, uint32_t *,
+                                                          const uint32_t *, const uint32_t *,
+                                                          const uint32_t *, uint16_t);
 
 } // namespace rocjitsu::arith

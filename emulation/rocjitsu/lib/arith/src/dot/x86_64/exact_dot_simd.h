@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "common/bits.h"
+#include "common/isa.h"
 #include <immintrin.h>
 #include <stdint.h>
 
@@ -27,6 +27,13 @@ template <> inline __m256i load<__m256i>(const void *p) {
 // Write vector values to destination storage.
 inline void store(void *p, __m256i value) {
   _mm256_storeu_si256(reinterpret_cast<__m256i *>(p), value);
+}
+
+// Store selected vector lanes, leaving words outside exec_mask unchanged.
+inline void masked_store(uint32_t *p, uint32_t exec_mask, __m256i value) {
+  auto mask = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask)),
+                                _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
+  _mm256_maskstore_epi32(reinterpret_cast<int *>(p), mask, value);
 }
 
 // Add corresponding integer lanes with unsigned wraparound.
@@ -99,6 +106,13 @@ inline __m256i choose(__m256i mask, __m256i yes, __m256i no) {
   return _mm256_blendv_epi8(no, yes, mask);
 }
 
+// Widen finite low-halfword FP16 encodings to FP32 bits; NaN/Inf handling belongs to the
+// caller.
+inline __m256i widen_finite_half(__m256i value) {
+  auto words = _mm_packus_epi32(_mm256_castsi256_si128(value), _mm256_extracti128_si256(value, 1));
+  return _mm256_castps_si256(_mm256_cvtph_ps(words));
+}
+
 #if defined(__AVX512F__)
 template <> inline __m512i constant<__m512i>(int value) { return _mm512_set1_epi32(value); }
 
@@ -106,6 +120,11 @@ template <> inline __m512i load<__m512i>(const void *p) { return _mm512_loadu_si
 
 // Write vector values to destination storage.
 inline void store(void *p, __m512i value) { _mm512_storeu_si512(p, value); }
+
+// Store selected vector lanes, leaving words outside exec_mask unchanged.
+inline void masked_store(uint32_t *p, uint32_t exec_mask, __m512i value) {
+  _mm512_mask_storeu_epi32(p, __mmask16(exec_mask), value);
+}
 
 // Add corresponding integer lanes with unsigned wraparound.
 inline __m512i add(__m512i a, __m512i b) { return _mm512_add_epi32(a, b); }
@@ -177,6 +196,11 @@ inline __m512i choose(__m512i mask, __m512i yes, __m512i no) {
   return _mm512_mask_blend_epi32(_mm512_movepi32_mask(mask), no, yes);
 }
 
+// Widen finite low-halfword FP16 encodings to FP32 bits; NaN/Inf handling belongs to the
+// caller.
+inline __m512i widen_finite_half(__m512i value) {
+  return _mm512_castps_si512(_mm512_cvtph_ps(_mm512_cvtepi32_epi16(value)));
+}
 #endif
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::exact_dot

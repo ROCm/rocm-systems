@@ -184,6 +184,7 @@ declare -A TEST_NUMBERS=(
   ["signaladd"]="171"
   ["signalset"]="172"
   ["signalwaituntil"]="173"
+  ["signal_ops_on_stream"]="174"
   ["tile_put_rowmajor_start_coord"]="177"
   ["tile_get_rowmajor_start_coord"]="178"
   ["tile_put_wave_rowmajor_start_coord"]="179"
@@ -758,7 +759,6 @@ TestAMO() {
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
-  if [[ $TEST != ro* ]]; then #AIROCSHMEM-211
   ExecTest  "amo_add"          2       1            1
   ExecTest  "amo_add"          2       1            1024
   ExecTest  "amo_add"          2       8            1
@@ -778,7 +778,6 @@ TestAMO() {
   ExecTest  "amo_finc"         2       1            1024
   ExecTest  "amo_finc"         2       8            1
   ExecTest  "amo_finc"         2       32           128
-  else echo "Skip:   amo_add* (AIROCSHMEM-211: ro amo abort)"; fi
 
   ExecTest  "amo_set"          2       1            1
   ExecTest  "amo_set"          2       8            1
@@ -927,9 +926,8 @@ TestOnStream() {
   ExecTest  "getmem_on_stream" 2       1            1         1048576
 
   ExecTest  "signal_wait_until_on_stream" 2  1      1
-  if [[ $TEST != ro* ]]; then #AIROCSHMEM-217
+  ExecTest  "signal_ops_on_stream"   2  1           1
   ExecTest  "putmem_signal_on_stream" 2  1          1         1048576
-  else echo "Skip:   putmem_signal_on_stream (AIROCSHMEM-217: RO sometimes abort)"; fi
 
   ExecTest  "barrier_all_on_stream"  2  1           1
   ExecTest  "quiet_on_stream"        2  1           1

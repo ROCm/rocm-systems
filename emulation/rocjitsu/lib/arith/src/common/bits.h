@@ -31,4 +31,9 @@ template <typename T> constexpr int bit_width(T value) {
 // Return the larger value, retaining the first on ties.
 template <typename T> constexpr T maximum(T a, T b) { return a < b ? b : a; }
 
+// Constrain a value to the inclusive bounds; callers provide low <= high.
+template <typename T> constexpr T clamp(T value, T low, T high) {
+  return value < low ? low : high < value ? high : value;
+}
+
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

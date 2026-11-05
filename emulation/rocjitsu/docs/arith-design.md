@@ -74,6 +74,11 @@ The matrices are distributed across the wave, not replicated per lane.
 WMMA ignores EXEC, so the API has no execution-mask parameter.
 The [README example](../lib/arith/README.md#api-example) constructs these operands and decodes the result.
 
+Sparse SWMMAC instead reads the initial accumulator from `d`; its fourth pointer
+operand is `index`, not a separate `c`. See the
+[sparse instruction contracts](../lib/arith/include/rj_arith/detail/rj_arith_wmma.h)
+for operand layouts and metadata selectors.
+
 ### Operands and register storage
 
 Scalar inputs are values; scalar outputs are pointers. Vector operands are
@@ -140,9 +145,21 @@ loose arithmetic.
 ### Compatibility mode
 
 Mode 7 is a temporary, instruction-specific policy outside the ordered modes.
-Each entry point resolves it before validation or calling another entry point;
-the resolved mode determines both numerical behavior and FP status reporting.
-Rocjitsu's JSON policy setting is planned for the later integration step.
+Each entry point selects the arithmetic and FP status policy matching Rocjitsu's
+previous behavior. This can retain instruction-specific details beyond the
+other modes, such as rounding FP16 results before applying OMOD.
+FP32 MUL selects numeric-only exact semantics in every configuration. Its
+integration retains Rocjitsu's existing exception classifier for Compatibility;
+explicit mode 3 uses the library's qualified reporting domain instead.
+Compatibility may retain demonstrated hardware-fidelity improvements over the
+previous interpreter; instruction contracts document such exceptions.
+Rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
+setting maps directly to these modes and defaults to compatibility. Its string
+values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
+The migrated families are RDNA3/RDNA4 dense WMMA, RDNA4 sparse WMMA, and RDNA3/RDNA4 fused floating-point
+arithmetic, basic floating-point arithmetic and selection, division and dot products.
+VOPD remains unmigrated. RDNA3.5, CDNA, and other handlers retain their existing
+implementations.
 
 ### Guest FP controls
 
