@@ -1175,6 +1175,8 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_CloseFdBeforeMapAndBa
   int fd[2], fdSig[2];
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
+  std::string socketName =
+    ipcSocketCom::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
 
   auto pid = fork();
   REQUIRE(pid >= 0);
@@ -1200,9 +1202,10 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_CloseFdBeforeMapAndBa
         REQUIRE(close(fdSig[1]) == 0);
         exit(0);
       }
-      ipcSocketCom sockObj(false);
+      ipcSocketCom sockObj(false, socketName);
       hipShareableHdl shHandle;
       int sig = 0;
+      REQUIRE(sockObj.initialize());
       REQUIRE(write(fdSig[1], &sig, sizeof(int)) == static_cast<ssize_t>(sizeof(int)));
       checkSysCallErrors(sockObj.recvShareableHdl(&shHandle));
 
@@ -1353,7 +1356,8 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_CloseFdBeforeMapAndBa
     hipShareableHdl shareable_handle;
     HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, handle,
                                             hipMemHandleTypePosixFileDescriptor, 0));
-    ipcSocketCom sockObj(true);
+    ipcSocketCom sockObj(true, socketName);
+    REQUIRE(sockObj.initialize());
     REQUIRE(write(fd[1], &size_mem, sizeof(size_t)) == static_cast<ssize_t>(sizeof(size_t)));
     int sig = 0;
     // A child that failed before it signalled closes its end of the pipe: read() returns 0 then,
