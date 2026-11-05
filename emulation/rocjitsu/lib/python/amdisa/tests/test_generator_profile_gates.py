@@ -8252,6 +8252,41 @@ def test_gfx1250_vopd_uses_plain_src_when_simple_src_operand_is_absent(tmp_path)
     assert 'return Operand(bits, OperandType::OPR_SRC, encoded);' in cpp
 
 
+@pytest.mark.parametrize(
+    ('arch', 'profile', 'operand_type'),
+    [
+        ('cdna5', Cdna5Profile(), 'OPR_SRC_SIMPLE'),
+        ('rdna4', Rdna4Profile(), 'OPR_SRC'),
+    ],
+)
+def test_generated_vopd_owns_its_encoding_words(tmp_path, arch, profile, operand_type):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch,
+        generated_dir_name=arch,
+        cpp_namespace=arch,
+        profile=profile,
+        operand_types={operand_type},
+    )
+    codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
+
+    codegen.gen_vopd()
+    header = (tmp_path / arch / 'vopd.h').read_text()
+    cpp = (tmp_path / arch / 'vopd.cpp').read_text()
+
+    # Room for a literal, or for gfx1250 VOPD3's register word.
+    assert 'std::array<uint32_t, 3> raw_words_{};' in header
+    constructor = _generated_function_body(cpp, 'Vopd::Vopd(const MachineInst *inst)')
+    copy = 'std::memcpy(raw_words_.data(), words, size_);'
+    assert copy in constructor
+    # Every size_ assignment precedes the copy, so it covers VOPD3's third word too.
+    assert constructor.rfind('size_ = ') < constructor.index(copy)
+    assert (
+        'raw_encoding_ = raw_words_.data();' in constructor[constructor.index(copy) :]
+    )
+
+
 def test_bf16_mad_mix_half_updates_read_destination_operand():
     codegen = object.__new__(CodeGenerator)
     codegen.semantics = SimpleNamespace(
