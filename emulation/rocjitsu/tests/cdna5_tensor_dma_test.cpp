@@ -2237,26 +2237,31 @@ TEST(Gfx1250ExecutionTest, TensorDmaLoadAppliesLdsPadding) {
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 4 * 4), 0x33000003u);
 }
 
-// Padding restarts with each iterated tile, and the iteration's LDS increment
-// moves the tile's start (CDNA5 ISA 10.11.2, 10.11.3.1), so padding applies to
-// an element's offset within its tile, not its offset from the descriptor base.
-// Two i32s per iteration with one dword of padding per two, starting at 2024 of
-// a 2048-byte allocation with a 4-element increment, land at 2024, 2028, 2040
-// and 2044, exactly where two independent loads of each pair put them. Padding
-// the combined offset would put the second pair at 2048 and 2052 and clip it.
+// Each iterated tile starts lds_increment elements after the previous one
+// (CDNA5 ISA 10.11.3.1), and padding applies within a tile (10.11.2). The ISA
+// leaves the padding counter's state between tiles unspecified; rocjitsu
+// restarts it with each tile (issue #14661). Three i32s per tile with one dword
+// of padding per two, starting at 2012 of a 2048-byte allocation with a
+// 5-element increment, land at 2012, 2016 and 2024, then 2032, 2036 and 2044,
+// exactly where independent loads of each tile put them. The third word of each
+// tile follows a padding gap, so dropping padding would put it in the gap, and
+// carrying the counter into the second tile would move that tile's words too.
 TEST(Gfx1250ExecutionTest, TensorDmaIteratedPaddingRestartsWithEachTile) {
   constexpr uint64_t kGlobal = 0x121000;
   constexpr uint32_t kLdsBytes = 2048;
-  constexpr uint32_t kStart = 2024;
-  constexpr uint32_t kIncrementElements = 4;
+  constexpr uint32_t kStart = 2012;
+  constexpr uint32_t kTileElements = 3;
+  constexpr uint32_t kIncrementElements = 5;
   constexpr uint32_t kSentinel = 0xCAFECAFEu;
-  constexpr std::array<uint32_t, 4> kValues = {0x11000000u, 0x22000000u, 0x33000000u, 0x44000000u};
+  constexpr std::array<uint32_t, 2 * kTileElements> kValues = {
+      0x11000000u, 0x22000000u, 0x33000000u, 0x44000000u, 0x55000000u, 0x66000000u};
   struct Result {
     std::vector<uint32_t> lds;
     std::vector<amdgpu::TensorDmaLdsRange> ranges;
   };
   // Runs `loads` (LDS offset, global offset in elements, iterations) and returns
-  // the wave's last 32 LDS bytes, relative to its base, and the issued ranges.
+  // the wave's LDS from kStart to the end, relative to its base, and the issued
+  // ranges.
   auto run = [&](std::initializer_list<std::array<uint32_t, 3>> loads) {
     Gfx1250Sim sim;
     EXPECT_NO_FATAL_FAILURE(sim.initialize());
@@ -2268,22 +2273,22 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratedPaddingRestartsWithEachTile) {
     wf->set_lds_size(kLdsBytes);
     for (uint32_t i = 0; i < kValues.size(); ++i)
       write_global_u32(*sim.memory, kGlobal + i * 4, kValues[i]);
-    for (uint32_t byte = kLdsBytes - 32; byte < kLdsBytes; byte += 4)
+    for (uint32_t byte = kStart; byte < kLdsBytes; byte += 4)
       cu->lds().write32(wf->lds_base() + byte, kSentinel);
     for (const auto &[lds_offset, global_element, iterations] : loads) {
       write_tensor_dma_d0(*cu, *wf, 0, kGlobal + global_element * 4, lds_offset);
       const uint32_t iterate_bit = iterations > 1 ? 1u << 19 : 0;
       write_wave_sgpr(*cu, *wf, 12, (2u << 16) | iterate_bit | (1u << 20)); // i32, pad.
-      write_wave_sgpr(*cu, *wf, 13, 2u << 16);                              // tensor dim0.
+      write_wave_sgpr(*cu, *wf, 13, kTileElements << 16);                   // tensor dim0.
       write_wave_sgpr(*cu, *wf, 14, 2u << 16);                              // tensor dim1.
-      write_wave_sgpr(*cu, *wf, 15, 2u << 16);                              // tile dim0.
+      write_wave_sgpr(*cu, *wf, 15, kTileElements << 16);                   // tile dim0.
       write_wave_sgpr(*cu, *wf, 16, 1);                                     // tile dim1.
-      write_wave_sgpr(*cu, *wf, 17, 2);                                     // dim0 stride.
+      write_wave_sgpr(*cu, *wf, 17, kTileElements);                         // dim0 stride.
       for (uint32_t reg = 18; reg < 24; ++reg)
         write_wave_sgpr(*cu, *wf, reg, 0);
       if (iterations > 1) {
         write_wave_sgpr(*cu, *wf, 21, kIncrementElements);     // LDS increment.
-        write_wave_sgpr(*cu, *wf, 22, 2);                      // Global increment.
+        write_wave_sgpr(*cu, *wf, 22, kTileElements);          // Global increment.
         write_wave_sgpr(*cu, *wf, 23, (iterations - 1) << 16); // iteration_count - 1.
       }
       const std::array<uint32_t, 3> words = {0xd0710001u, 0x7c000000u,
@@ -2295,7 +2300,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratedPaddingRestartsWithEachTile) {
       }
     }
     Result result;
-    for (uint32_t byte = kLdsBytes - 32; byte < kLdsBytes; byte += 4)
+    for (uint32_t byte = kStart; byte < kLdsBytes; byte += 4)
       result.lds.push_back(cu->lds().read32(wf->lds_base() + byte));
     for (const auto &issue : observer.issues)
       for (const auto &range : issue.lds_ranges)
@@ -2304,13 +2309,16 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratedPaddingRestartsWithEachTile) {
   };
 
   const Result iterated = run({{kStart, 0, 2}});
-  const Result independent = run({{kStart, 0, 1}, {kStart + 4 * kIncrementElements, 2, 1}});
-  const std::vector<amdgpu::TensorDmaLdsRange> expected_ranges = {
-      {.address = kStart, .bytes = 8}, {.address = kStart + 16, .bytes = 8}};
-  // Bytes 2016..2047: two untouched dwords, the first pair, two untouched
-  // dwords, then the second pair.
-  const std::vector<uint32_t> expected_lds = {kSentinel, kSentinel, kValues[0], kValues[1],
-                                              kSentinel, kSentinel, kValues[2], kValues[3]};
+  const Result independent =
+      run({{kStart, 0, 1}, {kStart + 4 * kIncrementElements, kTileElements, 1}});
+  const std::vector<amdgpu::TensorDmaLdsRange> expected_ranges = {{.address = 2012, .bytes = 8},
+                                                                  {.address = 2024, .bytes = 4},
+                                                                  {.address = 2032, .bytes = 8},
+                                                                  {.address = 2044, .bytes = 4}};
+  // Bytes 2012..2047, one entry per dword; the padding gaps keep the sentinel.
+  const std::vector<uint32_t> expected_lds = {kValues[0], kValues[1], kSentinel,
+                                              kValues[2], kSentinel,  kValues[3],
+                                              kValues[4], kSentinel,  kValues[5]};
   EXPECT_EQ(independent.lds, expected_lds);
   EXPECT_EQ(independent.ranges, expected_ranges);
   EXPECT_EQ(iterated.lds, independent.lds);

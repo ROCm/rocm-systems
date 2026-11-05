@@ -493,9 +493,11 @@ inline TensorDmaLdsPadding tensor_dma_lds_padding(const TensorDmaDescriptor &des
 
 /// @brief Byte offset, from the descriptor's LDS base, of one tile element.
 /// @details Each iterated tile starts lds_increment elements after the previous
-/// one, and padding restarts with each tile (CDNA5 ISA 10.11.2, 10.11.3.1), so
-/// padding applies to the element's offset within its tile only. Stores ignore
-/// padding. Address formation is proven safe by
+/// one (CDNA5 ISA 10.11.3.1), and padding applies within a tile (10.11.2). The
+/// ISA leaves the padding counter's state between tiles unspecified; rocjitsu
+/// restarts it with each tile (issue #14661), so padding applies to the
+/// element's offset within its tile only. Stores ignore padding. Address
+/// formation is proven safe by
 /// validate_materialization_address_ranges, so the arithmetic is unchecked.
 inline uint64_t tensor_dma_lds_byte(const TensorDmaDescriptor &desc, bool store_from_lds,
                                     uint64_t iteration_lds_element, uint64_t tile_element) {
