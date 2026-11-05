@@ -132,6 +132,10 @@ HIP_TEST_CASE(Unit_hipMemcpyWithAttributesAsync_Negative_Parameters) {
   hipMemcpyAttributes bad = MakeAttr(static_cast<hipMemcpySrcAccessOrder>(0x7FFFFFFF));
   HIP_CHECK_ERROR(hipMemcpyWithAttributesAsync(dst, src, kCopySize, &bad, stream),
                   hipErrorInvalidValue);
+
+  // Intentional rejections leave a thread-global sticky error that would otherwise poison the
+  // next test's hipGetLastError check when the suite runs in order.
+  (void)hipGetLastError();
 }
 
 /**
@@ -212,6 +216,9 @@ HIP_TEST_CASE(Unit_hipMemcpy3DWithAttributesAsync_Negative_Parameters) {
 
   op.srcAccessOrder = static_cast<hipMemcpySrcAccessOrder>(0x7FFFFFFF);
   HIP_CHECK_ERROR(hipMemcpy3DWithAttributesAsync(&op, 0, stream), hipErrorInvalidValue);
+
+  // See the note in the 1D negative case: clear the sticky error before the next test runs.
+  (void)hipGetLastError();
 }
 
 /**
