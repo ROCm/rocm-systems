@@ -24,9 +24,8 @@
 
 namespace dda::common {
 
-// LL128 AllToAll: block column x sends to peers self+x+1, self+x+1+gridDim.x, ... (DdaPeerColumns),
-// one 2 KiB slice per warp; the self copy is spread over the whole grid, and per-peer slots are
-// carved from one scratch bank (ddaBankSize).
+// LL128 AllToAll: block column x serves peers self+x+1, self+x+1+gridDim.x, ..., one 2 KiB slice
+// per warp at a time. The self copy uses the whole grid; per-peer slots share one scratch bank.
 
 constexpr size_t ddaLL128A2ASlotWords(size_t bankSize, int nRanks) {
   return ddaLL128SlotWords(bankSize, nRanks, 1);
@@ -43,6 +42,7 @@ __launch_bounds__(1024)
                                          size_t slicesTotal, // slices per peer chunk
                                          size_t bankSize, DdaKernelParams params) {
   const DdaPeerColumns peerCols{nRanks - 1};
+  const auto peerOf = [=](int x) { return (selfRank + x + 1) % nRanks; };
   const int tid = threadIdx.x;
   const int nthreads = blockDim.x;
   const int lane = tid % kDdaLL128Warp;
@@ -61,7 +61,7 @@ __launch_bounds__(1024)
   const size_t wstride = (size_t)gridDim.y * (size_t)nwarps;
 
   for (const int x : peerCols) {
-    const int peer = (selfRank + x + 1) % nRanks;
+    const int peer = peerOf(x);
     const int8_t* srcBytes = reinterpret_cast<const int8_t*>(sendbuff) + (size_t)peer * perChunkBytes;
     uint64_t* scatterSlot =
       reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords + (uint64_t)selfRank * (uint64_t)slotWords;
@@ -81,7 +81,7 @@ __launch_bounds__(1024)
 
   bool aborted = false;
   for (const int x : peerCols) {
-    const int peer = (selfRank + x + 1) % nRanks;
+    const int peer = peerOf(x);
     const uint64_t* gatherSlot =
       reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) + bankWords + (uint64_t)peer * (uint64_t)slotWords;
     int8_t* dstBytes = reinterpret_cast<int8_t*>(recvbuff) + (size_t)peer * perChunkBytes;

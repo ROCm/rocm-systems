@@ -65,9 +65,8 @@ static inline size_t ddaLL128A2AMaxPerChunkBytes(ncclComm* comm) {
   return ddaLL128SlotPayloadBytes(ddaLL128A2ASlotWords(ddaBankSize(comm->ddaScratchBytes), comm->nRanks));
 }
 
-// Geometry: grid.x = peer columns, grid.y = a warp per slice; the whole grid stays within the comm
-// block budget (rcclDdaFabricA2aLL128Blocks) and the epoch array, with columns serving several
-// peers when there are more peers than that.
+// Geometry: grid.x = peer columns, grid.y = blocks of a warp per slice, all within the block
+// budget and the epoch array.
 static inline std::pair<dim3, dim3> ddaAllToAllFabricLL128Geom(ncclComm* comm, size_t perChunkBytes) {
   const size_t totalBytes = perChunkBytes * (size_t)comm->nRanks;
   const int tuned = rcclDdaFabricA2aLL128Threads(comm, totalBytes);
