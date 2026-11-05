@@ -1113,7 +1113,7 @@ TEST(CommandProcessorAqlTest, UnavailableKernelDescriptorReadRetriesBeforeAdmiss
   queue.fail_next_kernel_descriptor_read(amdgpu::VmAccessOutcome::Unavailable);
 
   queue.step();
-  EXPECT_EQ(queue.read_pointer(), 1u);
+  EXPECT_EQ(queue.read_pointer(), 0u) << "the admitted kernel has not executed yet";
   EXPECT_EQ(queue.accepted_entries(), 1u);
   EXPECT_EQ(queue.kernel_descriptor_read_attempts(), 2u);
   EXPECT_FALSE(queue.faulted());
@@ -1180,7 +1180,7 @@ TEST(CommandProcessorAqlTest, RingSnapshotPinsKernelDescriptorReads) {
   queue.step();
 
   EXPECT_EQ(queue.accepted_entries(), 1u);
-  EXPECT_EQ(queue.read_pointer(), 1u);
+  EXPECT_EQ(queue.read_pointer(), 0u) << "the admitted kernel has not executed yet";
   EXPECT_EQ(queue.read_pointer_on(replacement), 0u);
   EXPECT_FALSE(queue.faulted());
 }

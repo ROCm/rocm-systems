@@ -3287,51 +3287,8 @@ class TestExecutor:
         # counters live in the binary itself and must be listed as --object for
         # llvm-cov to attribute that coverage.
         host_test_dir = os.path.join(test_dir, "host")
-        for binary in ["rccl-UnitTestsMicro", "rccl-UnitTestsMicroInit",
-                       "rccl-UnitTestsMicroAlloc",
-                       "rccl-UnitTestsMicroAllocator",
-                       "rccl-UnitTestsMicroAmdsmiWrap",
-                       "rccl-UnitTestsMicroApiTrace",
-                       "rccl-UnitTestsMicroArgcheck",
-                       "rccl-UnitTestsMicroBootstrap",
-                       "rccl-UnitTestsMicroCftDevRuntime",
-                       "rccl-UnitTestsMicroCollTrace",
-                       "rccl-UnitTestsMicroCollectives",
-                       "rccl-UnitTestsMicroCore",
-                       "rccl-UnitTestsMicroCpuset",
-                       "rccl-UnitTestsMicroCrypt",
-                       "rccl-UnitTestsMicroDdaColl",
-                       "rccl-UnitTestsMicroDebug",
-                       "rccl-UnitTestsMicroGinHostProxy",
-                       "rccl-UnitTestsMicroLinux",
-                       "rccl-UnitTestsMicroMemManager",
-                       "rccl-UnitTestsMicroMgmtTaskEnq",
-                       "rccl-UnitTestsMicroMnnvl",
-                       "rccl-UnitTestsMicroNcclDevice",
-                       "rccl-UnitTestsMicroOnerank",
-                       "rccl-UnitTestsMicroParam",
-                       "rccl-UnitTestsMicroPlugin",
-                       "rccl-UnitTestsMicroProfiler",
-                       "rccl-UnitTestsMicroProxy",
-                       "rccl-UnitTestsMicroRecorder",
-                       "rccl-UnitTestsMicroRocmwrap",
-                       "rccl-UnitTestsMicroRoctxNvml",
-                       "rccl-UnitTestsMicroRomeModels",
-                       "rccl-UnitTestsMicroStrongstream",
-                       "rccl-UnitTestsMicroTopo",
-                       "rccl-UnitTestsMicroUtils",
-                       "rccl-UnitTestsMicroInit-uncached",
-                       "rccl-UnitTestsMicroInit-faultinj",
-                       "rccl-UnitTestsMicroEnqueue",
-                       "rccl-UnitTestsMicroSymKernels",
-                       "rccl-UnitTestsMicroGinHost",
-                       "rccl-UnitTestsMicroRomeModels",
-                       "rccl-UnitTestsMicroDda",
-                       "rccl-UnitTestsMicroTopo",
-                       "rccl-UnitTestsMicroNetIbCastInit",
-                       "rccl-UnitTestsMicroNetIbCastDataPath"]:
-            binary_path = os.path.join(host_test_dir, binary)
-            if os.path.isfile(binary_path):
+        for binary_path in sorted(glob.glob(os.path.join(host_test_dir, "rccl-UnitTestsMicro*"))):
+            if os.path.isfile(binary_path) and os.access(binary_path, os.X_OK):
                 object_files.extend(["--object", binary_path])
                 if self.args.verbose:
                     print(f"Found microtest binary: {binary_path}")
@@ -3372,7 +3329,7 @@ class TestExecutor:
         # Ignore patterns for non-relevant files
         ignore_regex = (
             ".*tuner_v.*|.*profiler_v.*|.*net_v.*|.*_deps.*|ext.*|"
-            ".*coll_net.*|.*nvls.*|.*nvml.*|.*nvtx.*|test/|.*gtest.*|"
+            ".*coll_net.*|.*tuning/nvls.*|.*nvml.*|.*nvtx.*|test/|.*gtest.*|"
             ".*gensrc.*|.*rccl-tests.*"
         )
 
