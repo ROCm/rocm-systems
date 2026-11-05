@@ -73,6 +73,10 @@ Panel Config:
           min: MIN(SQ_INSTS / SQ_BUSY_CU_CYCLES)
           max: MAX(SQ_INSTS / SQ_BUSY_CU_CYCLES)
           unit: Instructions per Cycle
+        # Sum of two ratios that share SQ_ACTIVE_INST_ANY. Each ratio comes from its
+        # own replay, so the sum equals the combined ratio only when both replays see
+        # the same total (or each replay scales numerator and denominator by the same
+        # factor). It does not when only the total varies.
         IPC (Issued):
           avg: COLLECT_SUM(_collect.ipc_issued_a, _collect.ipc_issued_b)
           min: MIN(_collect.ipc_issued_a + _collect.ipc_issued_b)  # min over dispatches of the summed pieces
