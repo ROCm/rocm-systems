@@ -234,10 +234,11 @@ protected:
   static constexpr uint64_t kRing = 0x100;
   static constexpr uint32_t kRingBytes = 64;
 
-  SdmaQueueSchedulerTest() : memory_(std::make_shared<EngineMemory>()), scheduler_(gpu_vm_) {
+  SdmaQueueSchedulerTest() : memory_(std::make_shared<EngineMemory>()), scheduler_(gpu_vm_) {}
+
+  void SetUp() override {
     address_space_ = gpu_vm_.register_translated(kProcessId, memory_, memory_);
-    if (!address_space_)
-      throw std::runtime_error("cannot register SDMA scheduler test address space");
+    ASSERT_TRUE(address_space_) << "cannot register SDMA scheduler test address space";
     memory_->store<uint64_t>(kReadPointer, 0);
     memory_->store<uint64_t>(kWritePointer, 0);
   }
