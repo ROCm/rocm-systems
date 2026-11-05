@@ -982,6 +982,33 @@ TEST(DecodedInstructionCacheTest, VopdOwnsItsEncodingAndIsReusedAcrossIssues) {
   }
 }
 
+// gfx1250 VOPD3 is 12 bytes without a literal: its third word holds register
+// fields, which consumers such as perfsim read back through raw_encoding().
+TEST(DecodedInstructionCacheTest, Gfx1250Vopd3KeepsItsThirdWordAcrossIssues) {
+  CountingDecoder decoder(ROCJITSU_CODE_ARCH_CDNA5);
+  amdgpu::DecodedInstructionCache cache;
+  // v_dual_lshlrev_b32 v1, 3, v0 :: v_dual_lshrrev_b32 v10, 6, v0
+  const std::array<uint32_t, amdgpu::DecodedInstructionCache::kNumWords> encoding{
+      0xCF455083u, 0x00000086u, 0x0A000001u};
+  auto words = encoding;
+  {
+    auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+    ASSERT_FALSE(decoded.failed());
+    ASSERT_EQ(std::string_view(decoded.value()->mnemonic()),
+              "v_dual_lshlrev_b32 :: v_dual_lshrrev_b32");
+    ASSERT_EQ(decoded.value()->size(), 12);
+    amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
+                                                           words);
+  }
+  auto next_words = words;
+  words.fill(0);
+  auto decoded = cache.decode(decoder, kCodeBase, 7, next_words, {});
+  ASSERT_FALSE(decoded.failed());
+  EXPECT_EQ(decoder.calls, 1u);
+  for (int word = 0; word < 3; ++word)
+    EXPECT_EQ(decoded.value()->raw_encoding()[word], encoding[word]) << word;
+}
+
 TEST(DecodedInstructionCacheTest, AddressSpacesAndClearCauseMisses) {
   CountingDecoder decoder;
   amdgpu::DecodedInstructionCache cache;
