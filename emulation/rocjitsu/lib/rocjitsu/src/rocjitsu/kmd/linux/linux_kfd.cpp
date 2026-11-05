@@ -11,7 +11,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "linux/uapi/kfd_ioctl.h"
+#include "uapi/linux/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
 #include <cerrno>
@@ -29,6 +29,9 @@ constexpr std::string_view kKfdTopologyAltPrefix = "/sys/class/kfd/kfd/topology"
 constexpr std::string_view kDrmSysfsPrefix = "/sys/class/drm";
 constexpr std::string_view kDrmRenderPrefix = "/sys/class/drm/renderD";
 constexpr std::string_view kSysDevCharPrefix = "/sys/dev/char/";
+// The shared UAPI describes 1.19, but the simulator does not implement
+// metadata-ring queue creation. Advertise the last supported minor version.
+constexpr uint32_t kImplementedKfdIoctlMinorVersion = 18;
 
 } // namespace
 
@@ -165,7 +168,7 @@ int LinuxKfd::fill_get_version_ioctl(void *arg) {
     return -1;
   }
   args->major_version = KFD_IOCTL_MAJOR_VERSION;
-  args->minor_version = KFD_IOCTL_MINOR_VERSION;
+  args->minor_version = kImplementedKfdIoctlMinorVersion;
   return 0;
 }
 

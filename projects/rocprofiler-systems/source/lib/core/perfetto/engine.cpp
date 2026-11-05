@@ -338,3 +338,5 @@ get_emitting_pid() noexcept
 template class basic_cached_perfetto_engine<perfetto_sdk_backend>;
 
 }  // namespace rocprofsys::core
+
+PERFETTO_TRACK_EVENT_STATIC_STORAGE();

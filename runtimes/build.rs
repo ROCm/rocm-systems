@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Link configuration for the shared AMDF and HSA Linux library.
@@ -9,7 +10,7 @@ fn main() {
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux") {
         return;
     }
-    let map = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("hsa/libhsa/src/exports_linux.map");
+    let map = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ddi/libhsa/src/exports_linux.map");
     println!("cargo:rerun-if-changed={}", map.display());
     println!("cargo:rustc-cdylib-link-arg=-fuse-ld=lld");
     println!(

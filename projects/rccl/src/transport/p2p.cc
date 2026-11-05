@@ -471,7 +471,7 @@ ncclResult_t p2pSendSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
 
   resources->next_hdp_reg = 0;
   bool isXGMI;
-  if (ncclTopoGetLinkType(comm->topo, myInfo->cudaDev, peerInfo->cudaDev, &isXGMI) != ncclSuccess) {
+  if (ncclTopoGetLinkType(comm->topo, myInfo->nvmlDev, peerInfo->nvmlDev, &isXGMI) != ncclSuccess) {
     INFO(NCCL_INIT | NCCL_P2P, "Ring %02d : %d -> %d failed to get link type and hop count", channelId, myInfo->rank,
          peerInfo->rank);
     return ncclInternalError;
@@ -528,6 +528,9 @@ ncclResult_t p2pSendSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
     INFO(NCCL_INIT | NCCL_P2P, "Channel %02d/%01d : %d[%lx] -> %d[%lx] via P2P/indirect/%d[%lx]%s comm %p nRanks %02d",
          channelId, connIndex, myInfo->rank, myInfo->busId, peerInfo->rank, peerInfo->busId, intermediateRank,
          comm->peerInfo[intermediateRank].busId, useReadStr, comm, comm->nRanks);
+  }
+  if (!useMemcpy) {
+    send->conn.flags |= NCCL_GPU_PRODUCER;
   }
 
   memset(&req, '\0', sizeof(req));
@@ -600,6 +603,9 @@ ncclResult_t p2pRecvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
   } else {
     resources->type = P2P_INTERMEDIATE;
     info->rank = intermediateRank;
+  }
+  if (!useMemcpy) {
+    recv->conn.flags |= NCCL_GPU_PRODUCER;
   }
 
   memset(&req, '\0', sizeof(req));

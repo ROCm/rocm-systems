@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! AMDF kernel queue ownership and validation over the neutral rocddi queue.
@@ -9,16 +10,25 @@ use crate::generated::amdf::*;
 use crate::instance::{self, Device};
 use crate::memory;
 use crate::support::*;
-use rocddi::gpu::queue::{KernelQueue as NativeQueue, KernelQueueFormat, KernelQueueWait};
-use rocddi::host_storage::Owned;
+use rocddi::device::gpu::queue::{
+    KernelQueue as NativeQueue, KernelQueueFormat, KernelQueueStatus as NativeStatus,
+    KernelQueueWait,
+};
+use rocddi::memory::storage::Owned;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
+/// Public kernel queue with its native submission and retirement state.
 struct KernelQueue {
+    /// Driver-mediated queue that owns accepted native submissions.
     native: NativeQueue,
+    /// Borrowed public device kept live by the queue registration count.
     device: *mut Device,
+    /// Immutable creation facts returned through the AMDF ABI.
     info: amdf_kernel_queue_info_t,
+    /// Highest submission ID published to callers.
     accepted: AtomicU64,
+    /// Prevents new work once public destruction begins.
     destroying: AtomicBool,
 }
 
@@ -38,6 +48,29 @@ impl KernelQueue {
         }
         native(error)
     }
+
+    fn public_status(&self, sample: NativeStatus) -> amdf_kernel_queue_status_t {
+        if sample.terminal == Some(rocddi::ErrorKind::DeviceLost) {
+            // SAFETY: A registered kernel queue borrows this live device.
+            unsafe { (*self.device).observe_loss(self.info.reset_epoch) };
+        }
+        let terminal_status = sample.terminal.map_or(0, |kind| {
+            native(&rocddi::Error::Operation {
+                kind,
+                detail: "kernel queue terminal failure",
+            })
+        });
+        amdf_kernel_queue_status_t {
+            retired_submission: sample.retired_submission,
+            state: match sample.terminal {
+                Some(rocddi::ErrorKind::DeviceLost) => AMDF_QUEUE_STATE_DEVICE_LOST,
+                Some(_) => AMDF_QUEUE_STATE_FAILED,
+                None => AMDF_QUEUE_STATE_ACTIVE,
+            },
+            terminal_status,
+            ..Default::default()
+        }
+    }
 }
 
 pub(crate) unsafe extern "C" fn create(
@@ -51,9 +84,6 @@ pub(crate) unsafe extern "C" fn create(
             create_info,
             AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO,
         )?;
-        if create_info.reserved != 0 {
-            return Err(INVALID);
-        }
         let device = object(pointer.cast::<Device>())?;
         let family = instance::family(device.native.endpoint(), create_info.queue_family_ordinal)?;
         if family.publication_modes & AMDF_QUEUE_PUBLICATION_MODE_KERNEL == 0 {
@@ -65,38 +95,34 @@ pub(crate) unsafe extern "C" fn create(
             _ => return Err(UNSUPPORTED),
         };
         let instance = instance::device_instance(device);
-        let slot =
-            Owned::<KernelQueue>::try_new_uninit(instance.allocator).map_err(|_| EXHAUSTED)?;
+        let slot = instance.owner_slot::<KernelQueue>()?;
         register(&device.queues)?;
         let gpu = match device.native.gpu() {
             Ok(gpu) => gpu,
             Err(error) => {
                 unregister(&device.queues);
-                return Err(native(&error));
+                return Err(device.native_error_status(&error));
             }
         };
-        let mut native_queue = match gpu.create_kernel_queue(format) {
+        let native_queue = match gpu.create_kernel_queue(format) {
             Ok(queue) => queue,
             Err(error) => {
                 unregister(&device.queues);
-                return Err(native(&error));
+                return Err(device.native_error_status(&error));
             }
         };
-        if device.native.has_observed_loss() {
-            let failure = native_queue
-                .destroy()
-                .err()
-                .map_or(LOST, |error| native(&error));
-            unregister(&device.queues);
-            return Err(failure);
-        }
         let info = amdf_kernel_queue_info_t {
             device_id: device.id,
             reset_epoch: device.current_reset_epoch(),
             queue_family_ordinal: create_info.queue_family_ordinal,
             command_type: family.command_type,
-            maximum_pending_submission_count: 1,
+            maximum_pending_submission_count: if create_info.maximum_pending_submission_count == 0 {
+                AMDF_GPU_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT
+            } else {
+                create_info.maximum_pending_submission_count
+            },
             maximum_command_count: 1,
+            notification_types: 0,
             ..Default::default()
         };
         let owner = slot.write(KernelQueue {
@@ -132,27 +158,63 @@ pub(crate) unsafe extern "C" fn status(
         let out = output(out, AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS)?;
         let queue = object(pointer.cast::<KernelQueue>())?;
         queue.require_usable()?;
-        let sample = queue.native.status();
-        if sample.terminal == Some(rocddi::ErrorKind::DeviceLost) {
-            (*queue.device).observe_loss(queue.info.reset_epoch);
-        }
-        let terminal_status = sample.terminal.map_or(0, |kind| {
-            native(&rocddi::Error::Operation {
-                kind,
-                detail: "kernel queue terminal failure",
-            })
-        });
-        out.publish(amdf_kernel_queue_status_t {
-            retired_submission: sample.retired_submission,
-            state: match sample.terminal {
-                Some(rocddi::ErrorKind::DeviceLost) => AMDF_QUEUE_STATE_DEVICE_LOST,
-                Some(_) => AMDF_QUEUE_STATE_FAILED,
-                None => AMDF_QUEUE_STATE_ACTIVE,
-            },
-            terminal_status,
-            ..Default::default()
-        });
+        out.publish(queue.public_status(queue.native.status()));
         Ok(())
+    })
+}
+
+pub(crate) unsafe extern "C" fn refresh_status(
+    pointer: *mut amdf_kernel_queue_t,
+    out: *mut amdf_kernel_queue_status_t,
+) -> u64 {
+    crate::support::boundary(|| unsafe {
+        let out = output(out, AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS)?;
+        let queue = object(pointer.cast::<KernelQueue>())?;
+        queue.require_usable()?;
+        let sample = queue
+            .native
+            .refresh_status()
+            .map_err(|error| queue.observe_error(&error))?;
+        out.publish(queue.public_status(sample));
+        Ok(())
+    })
+}
+
+pub(crate) unsafe extern "C" fn request_notification(
+    pointer: *mut amdf_kernel_queue_t,
+    submission: u64,
+    event: *const amdf_native_event_t,
+) -> u64 {
+    crate::support::boundary(|| unsafe {
+        if submission == 0 {
+            return Err(INVALID);
+        }
+        let event = object(event)?;
+        if event.reserved != 0 {
+            return Err(INVALID);
+        }
+        match event.r#type {
+            AMDF_NATIVE_EVENT_TYPE_EVENTFD => {
+                if event.payload.file_descriptor < 0
+                    || event.payload.file_descriptor > i64::from(i32::MAX)
+                {
+                    return Err(INVALID);
+                }
+            }
+            AMDF_NATIVE_EVENT_TYPE_WIN32_EVENT => {
+                let handle = event.payload.native_handle as usize;
+                if handle == 0 || handle == usize::MAX {
+                    return Err(INVALID);
+                }
+            }
+            _ => return Err(INVALID),
+        }
+        let queue = object(pointer.cast::<KernelQueue>())?;
+        queue.require_usable()?;
+        if submission > queue.accepted.load(Ordering::Acquire) {
+            return Err(RANGE);
+        }
+        Err(UNSUPPORTED)
     })
 }
 
@@ -216,6 +278,11 @@ pub(crate) unsafe extern "C" fn submit(
             descriptor.byte_offset,
             descriptor.byte_length,
         )?;
+        if queue.info.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
+            && command.device_address % 32 != 0
+        {
+            return Err(INVALID);
+        }
         // SAFETY: kernel_command validates current attachment and execute
         // permission. The AMDF submit contract requires the caller to keep
         // command storage and indirect dependencies live and unchanged until
@@ -224,7 +291,9 @@ pub(crate) unsafe extern "C" fn submit(
             .native
             .submit(command)
             .map_err(|error| queue.observe_error(&error))?;
-        queue.accepted.store(submission, Ordering::Release);
+        // Native submissions can complete their slot in a different order
+        // from the callers publishing their IDs here.
+        queue.accepted.fetch_max(submission, Ordering::AcqRel);
         out.write(submission);
         Ok(())
     })
@@ -243,12 +312,26 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_kernel_queue_t) -> u6
             }
             queue.destroying.store(true, Ordering::Release);
         }
-        queue
-            .native
-            .destroy()
-            .map_err(|error| queue.observe_error(&error))?;
+        let result = queue.native.destroy().map_err(|error| {
+            if error.kind() == rocddi::ErrorKind::Busy && error.native_error_code().is_none() {
+                // Native preflight rejected destruction before releasing the
+                // queue. BUSY promises that this public handle can be retried.
+                queue.destroying.store(false, Ordering::Release);
+            }
+            queue.observe_error(&error)
+        });
+        if result == Err(BUSY) && !queue.destroying.load(Ordering::Acquire) {
+            return result;
+        }
         unregister(&(*queue.device).queues);
-        drop(Owned::from_raw(pointer.cast::<KernelQueue>()));
-        Ok(())
+        let owner = Owned::from_raw(pointer.cast::<KernelQueue>());
+        if result.is_err() {
+            // A failed native cleanup consumes the public handle. Retain the
+            // native owner and its dependencies without a second release.
+            std::mem::forget(owner);
+        } else {
+            drop(owner);
+        }
+        result
     })
 }

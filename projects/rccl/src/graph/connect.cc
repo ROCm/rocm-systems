@@ -41,6 +41,9 @@ ncclResult_t ncclTopoReconcileGrowChannels(struct ncclComm* comm, int* value) {
 #endif
 }
 
+// Compact tree optimization for sorted domain ordering
+NCCL_PARAM(TreeCompact, "TREE_COMPACT", 0);
+
 /******************************************************************/
 /********************* Internode connection ***********************/
 /******************************************************************/
@@ -233,6 +236,9 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
     struct ncclChannel* channel1 = (nChannels > MAXCHANNELS / 2) ? 0 : channel0 + nChannels;
     if (channel1) memcpy(channel1, channel0, nChannels * sizeof(struct ncclChannel));
   }
+  // The channel count can change before ncclTopoPostset, which sets the final ring, tree and CollNet chain links on
+  // every channel from these nChannels preset channels.
+  topoRanks->nChannels = nChannels;
 
   // Get nvls heads and the number of heads. Duplicate head is not allowed.
   for (int c = 0; c < graphs[NCCL_ALGO_NVLS]->nChannels; ++c) {
@@ -542,7 +548,16 @@ static ncclResult_t connectTrees(struct ncclComm* comm, int* treeToParent, int* 
 
   int t0u, t0d0, t0d1, t0ChildType = 0, t1u, t1d0, t1d1, t1ChildType = 0;
   int *ttp, *ttc0, *ttc1;
-  NCCLCHECK(ncclGetDtree(nNodes, node, &t0u, &t0d0, &t0d1, &t0ChildType, &t1u, &t1d0, &t1d1, &t1ChildType));
+
+  // Use compact tree when enabled via NCCL_TREE_COMPACT=1
+  const bool useCompactTree = ncclParamTreeCompact();
+  if (useCompactTree) {
+    NCCLCHECK(ncclGetDtreeCompact(nNodes, node, &t0u, &t0d0, &t0d1, &t0ChildType,
+                                   &t1u, &t1d0, &t1d1, &t1ChildType));
+    INFO(NCCL_GRAPH, "Using compact tree: nNodes=%d, node=%d", nNodes, node);
+  } else {
+    NCCLCHECK(ncclGetDtree(nNodes, node, &t0u, &t0d0, &t0d1, &t0ChildType, &t1u, &t1d0, &t1d1, &t1ChildType));
+  }
   if (nChannels == comm->nChannels) {
     for (int c = 0; c < nChannels; c++) {
       struct ncclChannel* channel0 = comm->channels + c;
@@ -710,8 +725,18 @@ static ncclResult_t connectNvls(struct ncclComm* comm, int* nvlsHeads, int nHead
   // Connect Trees
   int tree0Parent, tree0Child0, tree0Child1, tree1Parent, tree1Child0, tree1Child1;
   int pc0, pc1; // ignored
-  NCCLCHECK(ncclGetDtree(comm->nNodes, comm->node, &tree0Parent, &tree0Child0, &tree0Child1, &pc0, &tree1Parent,
-                         &tree1Child0, &tree1Child1, &pc1));
+
+  // Use compact tree when enabled via NCCL_TREE_COMPACT=1
+  const bool useCompactTree = ncclParamTreeCompact();
+  if (useCompactTree) {
+    NCCLCHECK(ncclGetDtreeCompact(comm->nNodes, comm->node,
+          &tree0Parent, &tree0Child0, &tree0Child1, &pc0,
+          &tree1Parent, &tree1Child0, &tree1Child1, &pc1));
+  } else {
+    NCCLCHECK(ncclGetDtree(comm->nNodes, comm->node,
+          &tree0Parent, &tree0Child0, &tree0Child1, &pc0,
+          &tree1Parent, &tree1Child0, &tree1Child1, &pc1));
+  }
 
   int* heads = NULL;
   int treeUp[2] = {-1, -1};
@@ -813,18 +838,25 @@ void exchangeValues(int* v0, int* v1) {
   *v0 = tmp;
 }
 
-int getTreeNodeParity(int treeDir, int nNodes, int node) {
+int getTreeNodeParity(int treeDir, int nNodes, int node, bool useCompactTree) {
   if (node == -1) return -1;
 
   int parentNodes[2], child0Nodes[2], child1Nodes[2], childTypes[2];
-  ncclGetDtree(nNodes, node, &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0], &parentNodes[1],
-               &child0Nodes[1], &child1Nodes[1], &childTypes[1]);
+  if (useCompactTree) {
+    ncclGetDtreeCompact(nNodes, node,
+                 &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
+                 &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]);
+  } else {
+    ncclGetDtree(nNodes, node,
+                 &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
+                 &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]);
+  }
 
   // Uptree and downtree have different parity
   if (parentNodes[treeDir] == -1) return treeDir;
 
   // Recurse and swap parity if this is child that exits from 2nd intranode rank (childType == 0)
-  return ((childTypes[treeDir] + 1) + getTreeNodeParity(treeDir, nNodes, parentNodes[treeDir])) % 2;
+  return ((childTypes[treeDir] + 1) + getTreeNodeParity(treeDir, nNodes, parentNodes[treeDir], useCompactTree)) % 2;
 }
 
 // [RCCL] Build rail-optimized trees
@@ -868,8 +900,19 @@ ncclResult_t connectRailOptimizedTrees(struct ncclComm* comm, int* treeToParent,
 
   // Compute parent/child nodes for this current node, for uptree and downtree
   int parentNodes[2], child0Nodes[2], child1Nodes[2], childTypes[2];
-  NCCLCHECK(ncclGetDtree(nNodes, node, &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
-                         &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]));
+
+  // Use compact tree when enabled via NCCL_TREE_COMPACT=1
+  const bool useCompactTree = ncclParamTreeCompact();
+  if (useCompactTree) {
+    NCCLCHECK(ncclGetDtreeCompact(nNodes, node,
+                                   &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
+                                   &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]));
+    INFO(NCCL_GRAPH, "Using compact tree (rail-optimized): nNodes=%d, node=%d", nNodes, node);
+  } else {
+    NCCLCHECK(ncclGetDtree(nNodes, node,
+                           &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
+                           &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]));
+  }
 
   // Loop over up-tree / down-tree
   for (int treeDir = 0; treeDir < 2; treeDir++) {
@@ -881,10 +924,10 @@ ncclResult_t connectRailOptimizedTrees(struct ncclComm* comm, int* treeToParent,
     int* treeToChild = (childTypes[treeDir] == 0) ? treeToChild0 : treeToChild1;
 
     // Compute the parity for nodes for this tree direction
-    int nodeParity = getTreeNodeParity(treeDir, nNodes, node);
-    int parentParity = getTreeNodeParity(treeDir, nNodes, parentNode);
-    int child0Parity = getTreeNodeParity(treeDir, nNodes, child0Node);
-    int child1Parity = getTreeNodeParity(treeDir, nNodes, child1Node);
+    int nodeParity = getTreeNodeParity(treeDir, nNodes, node, useCompactTree);
+    int parentParity = getTreeNodeParity(treeDir, nNodes, parentNode, useCompactTree);
+    int child0Parity = getTreeNodeParity(treeDir, nNodes, child0Node, useCompactTree);
+    int child1Parity = getTreeNodeParity(treeDir, nNodes, child1Node, useCompactTree);
 
     // Loop over pairs of complimentary channels
     for (int ch = 0; ch < nChannels; ch += 2) {
@@ -943,6 +986,41 @@ ncclResult_t connectRailOptimizedTrees(struct ncclComm* comm, int* treeToParent,
   return ncclSuccess;
 }
 
+// Each rank's ncclTopoPreset fills topoRanks->nChannels channels, and the channel count can change before
+// ncclTopoPostset. Map every channel of the final count onto those, identically for rings and trees.
+static ncclResult_t expandTopoRanks(struct ncclTopoRanks** allTopoRanks, int nranks, int nChannels) {
+  for (int r = 0; r < nranks; r++) {
+    struct ncclTopoRanks* t = allTopoRanks[r];
+    if (t->nChannels <= 0 || t->nChannels > MAXCHANNELS) {
+      WARN("TopoPostset: rank %d reported %d preset channels, expected [1,%d]", r, t->nChannels, MAXCHANNELS);
+      return ncclInternalError;
+    }
+    for (int c = t->nChannels; c < nChannels; c++) {
+      const int src = c % t->nChannels;
+      t->ringRecv[c] = t->ringRecv[src];
+      t->ringSend[c] = t->ringSend[src];
+      t->ringPrev[c] = t->ringPrev[src];
+      t->ringNext[c] = t->ringNext[src];
+      t->treeToParent[c] = t->treeToParent[src];
+      t->treeToChild0[c] = t->treeToChild0[src];
+      t->treeToChild1[c] = t->treeToChild1[src];
+    }
+    t->nChannels = std::max(t->nChannels, nChannels);
+  }
+  return ncclSuccess;
+}
+
+// Neighbors of `rank` in one intra-node chain row, -1 where it has none. The head's up is `headUp`.
+static void intraChainLinks(const int* intra, int localRanks, int rank, int headUp, int* up, int* down) {
+  *up = *down = -1;
+  for (int i = 0; i < localRanks; i++) {
+    if (intra[i] != rank) continue;
+    *up = (i == 0) ? headUp : intra[i - 1];
+    *down = (i == localRanks - 1) ? -1 : intra[i + 1];
+    return;
+  }
+}
+
 /**
  * Check if search actually filled all requested channels
  * It is expected that these structures are filled by individual ranks followed by bootstrap allgather.
@@ -988,6 +1066,8 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   int nranks = comm->nRanks;
   int nNodes = comm->nNodes;
   int nChannels = comm->nChannels;
+  int presetChannels = 0;
+  const int localRanks = comm->topo->nodes[GPU].count;
   int minHeadNum = INT_MAX;
   int shared = parent && ncclNvlsTransportEnabled(parent) && parent->shareResources;
   int maxChannels;
@@ -1011,6 +1091,8 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   NCCLCHECKGOTO(ncclCalloc(&treeToChild1, nNodes * MAXCHANNELS), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&nvlsHeads, nNodes * MAXCHANNELS), ret, fail);
 
+  presetChannels = allTopoRanks[comm->rank]->nChannels;
+  NCCLCHECKGOTO(expandTopoRanks(allTopoRanks, nranks, nChannels), ret, fail);
   NCCLCHECK(repairMissingChannels(allTopoRanks, nranks, nChannels));
   // Alternate rings to avoid crossing rails.
   // CrossNic values could be not the same on all nodes as it depends on the number of net devs and the NVLink bandwidth.
@@ -1065,6 +1147,24 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   } else {
     // Connect rings and trees. This should also duplicate the channels.
     NCCLCHECK(connectRings(comm, ringRecv, ringSend, ringPrev, ringNext));
+  }
+
+  // Intra-node tree and CollNet chain links, for both halves like the rings below; inter-node links are added next.
+  // Only this rank reads them, so they come from the graph rows Preset used instead of the AllGather3 payload.
+  for (int c = 0; c < nChannels; c++) {
+    const int row = (c % presetChannels) * localRanks;
+    struct ncclChannel* channel0 = comm->channels + c;
+    intraChainLinks(graphs[NCCL_ALGO_TREE]->intra + row, localRanks, comm->rank, -1, &channel0->tree.up,
+                    &channel0->tree.down[0]);
+    intraChainLinks(graphs[NCCL_ALGO_COLLNET_CHAIN]->intra + row, localRanks, comm->rank, comm->nRanks,
+                    &channel0->collnetChain.up, &channel0->collnetChain.down[0]);
+    if (c + nChannels < MAXCHANNELS) {
+      struct ncclChannel* channel1 = channel0 + nChannels;
+      channel1->tree.up = channel0->tree.up;
+      channel1->tree.down[0] = channel0->tree.down[0];
+      channel1->collnetChain.up = channel0->collnetChain.up;
+      channel1->collnetChain.down[0] = channel0->collnetChain.down[0];
+    }
   }
 
   // [RCCL] Connect rail-optimized trees

@@ -18,7 +18,7 @@ rocJITsu requires:
 Optional prerequisites:
 
 -   **Python 3.10 or later** --- required for ISA code generation with the
-    `amdisa` pipeline and for the VFIO guest launcher. See
+    `amdisa` pipeline, the VFIO guest launcher, and the Python execution API. See
     [Regenerate ISA and DBT source files](../how-to/regenerate-isa-codegen.md)
     and [Run a VFIO guest with QEMU](../how-to/qemu-vfio.md) for details.
 -   **AMD ROCm toolchain** (`hipcc`, `libhsa-runtime64`) --- required
@@ -40,7 +40,8 @@ checkout to download only the rocJITsu project:
 git clone --filter=blob:none --sparse \
     https://github.com/ROCm/rocm-systems.git
 cd rocm-systems
-git sparse-checkout set projects/rocjitsu
+git sparse-checkout set emulation/rocjitsu runtimes/api-headers
+cd emulation/rocjitsu
 ```
 
 ### Build commands
@@ -60,20 +61,28 @@ ctest --test-dir build
 
 #### `ROCM_PATH` configuration
 
-CMake resolves the ROCm installation path in this order:
+When `BUILD_TESTING=ON`, CMake resolves the ROCm installation path for
+optional ROCm-dependent tests in this order:
 
 1.  The `ROCM_PATH` CMake variable, if set explicitly.
 2.  The `ROCM_PATH` environment variable, if set.
 3.  `/opt/rocm`, if the directory exists.
 
 When `ROCM_PATH` is set explicitly (by variable or environment) and the
-directory does not exist, the configure step fails with an error.
+nonempty directory path does not exist, the configure step fails with an
+error. An explicitly empty CMake value (`-DROCM_PATH=`) disables the
+environment and `/opt/rocm` fallbacks. Some test tools and libraries can
+still be found through normal system search paths.
+
+`ROCM_PATH` does not select the compiler used to build rocJITsu. Use
+`CMAKE_C_COMPILER` and `CMAKE_CXX_COMPILER`, or the `CC` and `CXX`
+environment variables, to select those compilers.
 
 #### Install prefix
 
-When `CMAKE_INSTALL_PREFIX` is not set by the user and `ROCM_PATH` is
-available, the install prefix defaults to the value of `ROCM_PATH`. This
-matches the convention used by other AMD ROCm projects.
+The install destination is controlled by `CMAKE_INSTALL_PREFIX`, using
+CMake's default when it is not set explicitly. It is independent of
+`ROCM_PATH`.
 
 #### Install targets
 
@@ -93,6 +102,23 @@ This installs:
     `<prefix>/share/rocjitsu/configs/`
 -   FlatBuffers schema files to `<prefix>/share/rocjitsu/schemas/`
 
+For a source build, install the Python package with `pip install ./python`
+from `emulation/rocjitsu/`;
+see the [Python execution API](../reference/python-api.md) for package setup.
+
+Bundled wheels containing the Python package and native runtime require
+follow-up TheRock packaging support. Wheel builders can explicitly install the
+Linux-only `rocjitsu-python` component to stage package sources under
+`<prefix>/<CMAKE_INSTALL_LIBDIR>/python3/site-packages/rocjitsu/` and packaging
+metadata under `<prefix>/<CMAKE_INSTALL_DATADIR>/rocjitsu/python/`:
+
+```shell
+cmake --install build --prefix /path/to/staging --component rocjitsu-python
+```
+
+The staged sources are not on Python's import path. This component is excluded
+from ordinary native installs and does not build or publish a wheel itself.
+
 #### Third-party dependencies
 
 Google Test and FlatBuffers are fetched into a `third_party/` directory
@@ -106,6 +132,7 @@ inside the source tree by default. To relocate the download directory
 |--------|---------|-------------|
 | `RJ_SANITIZER` | *(empty)* | Enable a sanitizer build. Accepted values: `asan`, `ubsan`, `tsan`, `msan`. |
 | `RJ_CLANG_TIDY` | `OFF` | Enable clang-tidy static analysis during the build. |
+| `RJ_RUNTIME_API_HEADERS_SOURCE_DIR` | `../../runtimes/api-headers` | Source directory of the shared runtime API headers. For detached rocJITsu checkouts, use a matching revision. |
 | `LTO` | `OFF` | Enable link-time optimization (IPO) for `Release` and `RelWithDebInfo` configurations. Incompatible with `RJ_SANITIZER`; setting both causes a fatal error. |
 | `ROCJITSU_ENABLE_VFIO` | `OFF` | Build Linux VFIO-user support. Requires CMake 3.28 or later and Linux 6.1 or later UAPI headers. |
 | `RJ_ENABLE_EXPENSIVE_CHECKS` | `OFF` | Enable expensive exhaustive test suites such as MFMA and WMMA SIMD bit-exactness checks. |
@@ -193,7 +220,7 @@ mode:
 cd /workspace
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- \
+rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json -- \
   python3 -c "import torch; print(torch.randn(4,4,device='cuda'))"
 ```
 

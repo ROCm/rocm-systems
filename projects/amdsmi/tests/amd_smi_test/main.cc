@@ -7,6 +7,7 @@
 #include <cstdlib>
 
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "functional/gpu/ampp/ampp_read_write.h"
 #include "functional/gpu/clock/clock_limit_read_write.h"
 #include "functional/gpu/clock/frequencies_read.h"
 #include "functional/gpu/clock/frequencies_read_write.h"
@@ -26,6 +27,7 @@
 #include "functional/gpu/metrics/process_list_read.h"
 #include "functional/gpu/partition/computepartition_memallocmode_read_write.h"
 #include "functional/gpu/partition/computepartition_read_write.h"
+#include "functional/gpu/partition/memorypartition_read.h"
 #include "functional/gpu/partition/memorypartition_read_write.h"
 #include "functional/gpu/pci/pci_read_write.h"
 #include "functional/gpu/perf/overdrive_read.h"
@@ -203,6 +205,13 @@ TEST(GpuFunctionalReadWrite, TestPowerCapReadWrite) {
   TestPowerCapReadWrite tst;
   RunGenericTest(&tst);
 }
+TEST(GpuFunctionalReadWrite, TestAmppReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestAmppReadWrite tst;
+  RunGenericTest(&tst);
+}
 TEST(GpuFunctionalReadOnly, TestErrCntRead) {
   TestErrCntRead tst;
   RunGenericTest(&tst);
@@ -246,6 +255,10 @@ TEST(GpuFunctionalReadOnly, TestGpuMetricsRead) {
 }
 TEST(GpuFunctionalReadOnly, TestGpuPartitionMetricsRead) {
   TestGpuPartitionMetricsRead tst;
+  RunGenericTest(&tst);
+}
+TEST(GpuFunctionalReadOnly, TestMemoryPartitionRead) {
+  TestMemoryPartitionRead tst;
   RunGenericTest(&tst);
 }
 TEST(GpuFunctionalReadOnly, TestMetricsCounterRead) {
@@ -357,7 +370,6 @@ TEST(SystemFunctionalReadOnly, TestCrossProcessSerialization) {
   tst.Run();
   RunCustomTestEpilog(&tst);
 }
-/*
 TEST(SystemFunctionalReadOnly, TestConcurrentInit) {
   TestConcurrentInit tst;
   SetFlags(&tst);
@@ -367,7 +379,6 @@ TEST(SystemFunctionalReadOnly, TestConcurrentInit) {
   // RunCustomTestEpilog(&tst);  // Avoid extra amdsmi_shut_down
   tst.DisplayResults();
 }
-*/
 
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);

@@ -68,10 +68,9 @@ rocprofiler-sdk-rocpd:
 # - Added hip_events data view
 
 # Version 3.0.5
-# - rocpd_kernel_dispatch: added replay_pass column (NULL outside kernel replay). Kernel replay
-#   re-executes one dispatch_id once per counter group, so dispatch_id no longer identifies a
-#   single execution; replay_pass completes the key.
-# - Modified counters_collection view to aggregate per event instead of per dispatch_id, so the
-#   passes of a replayed dispatch stay separate. Outside kernel replay there is exactly one event
-#   per dispatch_id, so this grouping is identical to the 3.0.4 grouping.
-# - counters_collection additionally exposes replay_pass.
+# - SPM counter location (xcc, shader_engine, shader_array, wgp, instance) moved
+#   from rocpd_pmc_event onto rocpd_info_pmc
+# - One rocpd_info_pmc row per agent and counter location. rocpd_pmc_event.pmc_id points at it
+# - SPM location dimensions not provided for a counter are stored as NULL.
+#   instance is always set on a location row
+# - spm_counters view reads those fields from rocpd_info_pmc

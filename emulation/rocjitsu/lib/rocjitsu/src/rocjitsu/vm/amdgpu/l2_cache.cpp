@@ -46,9 +46,17 @@ void L2Cache::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coheren
   coherence_->register_l2_cache(this);
 }
 
-std::shared_lock<util::DistributedSharedMutex> L2Cache::acquire_cache_access() {
+std::shared_lock<L2Cache::MaintenanceMutex> L2Cache::acquire_cache_access() {
+  std::shared_lock access_lock(maintenance_mutex_);
+  if (coherence_epoch_ == coherence_->current_epoch())
+    return access_lock;
+
+  access_lock.unlock();
+  // Only stale readers serialize here. Recheck under shared admission so peers
+  // reuse completed reconciliation instead of each closing the reader gate.
+  std::lock_guard reconcile_lock(epoch_reconcile_mutex_);
   for (;;) {
-    std::shared_lock access_lock(maintenance_mutex_);
+    access_lock.lock();
     if (coherence_epoch_ == coherence_->current_epoch())
       return access_lock;
 
@@ -58,7 +66,7 @@ std::shared_lock<util::DistributedSharedMutex> L2Cache::acquire_cache_access() {
   }
 }
 
-std::unique_lock<util::DistributedSharedMutex> L2Cache::acquire_cache_maintenance() {
+std::unique_lock<L2Cache::MaintenanceMutex> L2Cache::acquire_cache_maintenance() {
   std::unique_lock maintenance_lock(maintenance_mutex_);
   synchronize_epoch_locked();
   return maintenance_lock;
@@ -669,16 +677,24 @@ VmAccessOutcome L2Cache::flush_all(uint32_t vmid) {
   return VmAccessOutcome::Complete;
 }
 
-VmAccessOutcome L2Cache::flush_dirty_locked() {
+VmAccessOutcome L2Cache::flush_address_space(uint32_t vmid) {
+  auto maintenance_lock = acquire_cache_maintenance();
+  const VmAccessOutcome outcome = flush_dirty_locked(vmid);
+  if (outcome == VmAccessOutcome::Complete)
+    cache_.invalidate_all(vmid);
+  return outcome;
+}
+
+VmAccessOutcome L2Cache::flush_dirty_locked(std::optional<uint32_t> vmid) {
   if (!has_dirty_lines_.load(std::memory_order_relaxed))
     return VmAccessOutcome::Complete;
 
   uint32_t dirty_count = 0;
   uint64_t min_addr = std::numeric_limits<uint64_t>::max(), max_addr = 0;
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
-  cache_.for_each_dirty([this, &dirty_count, &min_addr, &max_addr,
+  cache_.for_each_dirty([this, &dirty_count, &min_addr, &max_addr, vmid,
                          &outcome](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
-    if (outcome != VmAccessOutcome::Complete)
+    if ((vmid && tag.vmid != *vmid) || outcome != VmAccessOutcome::Complete)
       return;
     // Each dirty line is written back under its own owning vmid.
     outcome = publish_dirty_bytes(line_addr, data, tag.vmid);

@@ -216,7 +216,15 @@ class TestCliSetNodePowerLimit(unittest.TestCase):
     def setUpClass(cls):
         if not SET_VALUE_PATH:
             raise unittest.SkipTest("amd-smi CLI set_value.py not found (source or installed)")
+        # set_value.py does `from amdsmi_helpers import AMDSMIHelpers`; stub that
+        # module directly so the real amdsmi_helpers -> amdsmi_init import chain
+        # (and its AmdSmiInitFlags/amdsmi_init C-library surface) never loads.
+        # This dispatch block only reaches AMDSMIHelpers via self.helpers (stubbed
+        # below by _StubHelpers), never the bare imported class.
         modules = _install_fake_amdsmi()
+        modules["amdsmi_helpers"] = fake_module(
+            "amdsmi_helpers", AMDSMIHelpers=type("AMDSMIHelpers", (), {})
+        )
         modules["amdsmi_cli_exceptions"] = None
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]

@@ -10,7 +10,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -122,31 +121,33 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdSubF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(
-        std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(),
-        wf.fp_denorm_mode_f32());
+    // The ISA defines VOPD by the VOP2 instructions (16.11): add the
+    // negated subtrahend, keeping the sources in operand order.
+    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
+        std::bit_cast<float>(src0), std::bit_cast<float>(src1 ^ 0x80000000u), 0.0f,
+        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdSubrevF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(
-        std::bit_cast<float>(src1), std::bit_cast<float>(src0), 0.0f, wf.fp_round_mode_f32(),
-        wf.fp_denorm_mode_f32());
+    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
+        std::bit_cast<float>(src0 ^ 0x80000000u), std::bit_cast<float>(src1), 0.0f,
+        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdMovB32:
     return src0;
   case kVopdCndmaskB32: {
-    uint64_t condition = slot.uses_vcc ? wf.vcc_mask(uint64_t{1} << lane)
-                                       : amdgpu::read_wave_mask_scalar(*slot.src2, wf);
+    uint64_t condition =
+        slot.uses_vcc ? wf.vcc_mask() : amdgpu::read_wave_mask_scalar(*slot.src2, wf);
     return ((condition >> lane) & 1u) ? src1 : src0;
   }
   case kVopdMaxNumF32: {
-    float result = std::fmax(std::bit_cast<float>(src0), std::bit_cast<float>(src1));
-    return std::bit_cast<uint32_t>(result);
+    return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MaxNum>(
+        amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
   }
   case kVopdMinNumF32: {
-    float result = std::fmin(std::bit_cast<float>(src0), std::bit_cast<float>(src1));
-    return std::bit_cast<uint32_t>(result);
+    return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MinNum>(
+        amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
   }
   case kVopdAddNcU32:
     return src0 + src1;
@@ -177,13 +178,18 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
     return amdgpu::gfx12_dot2_f32<true>(src0, src1, src0 >> 16, src1 >> 16, acc);
   }
   default:
-    throw util::UnimplementedInst(op_name(slot.op));
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return 0;
   }
 }
 
 void Vopd::execute_impl(amdgpu::Wavefront &wf) {
-  if (wf.wf_size() != 32)
-    throw util::UnimplementedInst("VOPD requires Wave32");
+  if (wf.wf_size() != 32) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
   if (amdgpu::try_execute_vopd_integer_pair_simd<kVopdMovB32, kVopdAddNcU32, kVopdLshlrevB32>(
           wf, x_, y_))
     return;
@@ -194,7 +200,11 @@ void Vopd::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t x_result = execute_slot(x_, wf, lane);
+    if (wf.instruction_execution_failed())
+      return;
     uint32_t y_result = execute_slot(y_, wf, lane);
+    if (wf.instruction_execution_failed())
+      return;
     amdgpu::RegisterAccess(wf).write_lane(*x_.dst, lane, x_result);
     amdgpu::RegisterAccess(wf).write_lane(*y_.dst, lane, y_result);
   }

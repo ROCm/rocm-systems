@@ -73,6 +73,16 @@ def _csv_columns(csv_path: Path) -> list:
         return [c.strip().lower() for c in next(csv_mod.reader(fh), [])]
 
 
+def _csv_column_values(csv_path: Path, column: str) -> list:
+    """Return values from one CSV column. ``column`` is matched case-insensitively."""
+    with open(csv_path, newline="") as fh:
+        rows = list(csv_mod.DictReader(fh))
+    if not rows:
+        return []
+    key = next(name for name in rows[0] if name.strip().lower() == column.lower())
+    return [row[key] for row in rows]
+
+
 def _otf2_location_names(otf2_path: Path) -> list:
     """Return all location names from an OTF2 trace archive."""
     from rocprofiler_sdk.pytest_utils.otf2_reader import OTF2Reader
@@ -254,47 +264,45 @@ def test_csv_for_schema_3_0_4_changes_present(output_root, latest_schema):
         ), f"Column '{expected}' missing from hip_event CSV for schema {latest_schema}"
 
 
-# ---------------------------------------------------------------------------
-# CSV tests — schema 3.0.5 (kernel replay pass identity)
-# ---------------------------------------------------------------------------
-
-
 def test_csv_for_schema_3_0_5_changes_absent(output_root, old_schema):
-    """Schema 3.0.5 additions must be absent for pre-3.0.5 schemas.
-
-    Pre-3.0.5 databases have no replay_pass column, so the counter CSV must not carry
-    the column and the export must still complete.
-    """
+    """Shader array and WGP stay out of the SPM counter name before 3.0.5."""
     if tuple(map(int, old_schema.split("."))) >= (3, 0, 5):
-        print(
-            f"Schema {old_schema} is newer than 3.0.5, calling test_csv_for_schema_3_0_5_changes_present instead"
-        )
         return test_csv_for_schema_3_0_5_changes_present(output_root, old_schema)
-
-    counters_csv = output_root / old_schema / "csv" / "out_counter_collection_trace.csv"
-    if not counters_csv.exists():
+    if tuple(map(int, old_schema.split("."))) < (3, 0, 3):
         return
 
-    assert "replay_pass" not in _csv_columns(
-        counters_csv
-    ), f"replay_pass column should not appear in the counter CSV for schema {old_schema}"
+    spm_counters_csv = (
+        output_root / old_schema / "csv" / "out_spm_counter_collection_trace.csv"
+    )
+    assert (
+        spm_counters_csv.exists()
+    ), f"out_spm_counter_collection_trace.csv not found for schema {old_schema}"
+    names = _csv_column_values(spm_counters_csv, "counter_name")
+    assert names, f"SPM counter CSV has no rows for schema {old_schema}"
+    for name in names:
+        assert (
+            "SA:" not in name and "WGP:" not in name
+        ), f"schema {old_schema} counter name includes shader array or WGP: {name}"
 
 
 def test_csv_for_schema_3_0_5_changes_present(output_root, latest_schema):
-    """Schema 3.0.5 additions must be present for the latest schema.
-
-    The database holds one dispatch replayed over two passes, so the counter CSV has to
-    name the pass that produced each row.
-    """
-    counters_csv = (
-        output_root / latest_schema / "csv" / "out_counter_collection_trace.csv"
+    """Shader array and WGP appear in the SPM counter name from schema 3.0.5."""
+    spm_counters_csv = (
+        output_root / latest_schema / "csv" / "out_spm_counter_collection_trace.csv"
     )
     assert (
-        counters_csv.exists()
-    ), f"out_counter_collection_trace.csv not found for schema {latest_schema}: {counters_csv}"
-    assert "replay_pass" in _csv_columns(
-        counters_csv
-    ), f"replay_pass column missing from the counter CSV for schema {latest_schema}"
+        spm_counters_csv.exists()
+    ), f"out_spm_counter_collection_trace.csv not found for schema {latest_schema}"
+    names = _csv_column_values(spm_counters_csv, "counter_name")
+    assert names, f"SPM counter CSV has no rows for schema {latest_schema}"
+    assert any(
+        "SA:" in name and "WGP:" in name for name in names
+    ), f"schema {latest_schema} counter names omit shader array or WGP: {names}"
+    assert all(
+        "XCC: ," in name for name in names
+    ), f"schema {latest_schema} counter names do not leave absent XCC blank: {names}"
+    assert any("SE: 0" in name and "SA: 1" in name and "WGP: 2" in name for name in names)
+    assert any("SE: 1" in name and "SA: 0" in name and "WGP: 3" in name for name in names)
 
 
 # ---------------------------------------------------------------------------

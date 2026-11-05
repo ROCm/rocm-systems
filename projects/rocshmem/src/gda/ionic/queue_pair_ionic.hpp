@@ -37,7 +37,11 @@ template <> struct QueuePairTraits<QueuePairIONIC> {
   static_assert(InlineMax == 32, "ionic can send up to 32 bytes inline in a WQE");
 
   /*
-   * @brief ionic preferred inlining threshold is the same as the maximum
+   * @brief ionic preferred inlining threshold matches the hardware maximum.
+   * Inlining up to InlineMax (32B) avoids a second NIC DMA for the payload.
+   * The earlier byte-by-byte inline copy made larger inlines costly; with the
+   * constant-width copy_inline_payload (one or two wide VMEM ops, no byte loop)
+   * latency is flat across 1..32B, so there is no reason to cap below InlineMax.
    */
   static constexpr size_t InlineThreshold = InlineMax;
 };
@@ -91,6 +95,10 @@ public:
                                        PostOpt<Options...> = {});
 
   __device__ __noinline__ void quiet_single();
+
+  __device__ __forceinline__ uint64_t cq_target();
+
+  __device__ __forceinline__ bool poll_cq_once(uint64_t target);
 
 private:
   /**
@@ -200,7 +208,7 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma(
         // TODO why is this needed?
         wqe->common.pld.data[0] = 1;
       } else {
-        memcpy(wqe->common.pld.data, reinterpret_cast<const void*>(laddr), size);
+        copy_inline_payload(wqe->common.pld.data, laddr, size);
       }
     } else {
       wqe->common.pld.sgl[0].va   = endian::to_be<uint64_t>(laddr);
@@ -258,7 +266,7 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma_single(
         // TODO why is this needed?
         wqe->common.pld.data[0] = 1;
       } else {
-        memcpy(wqe->common.pld.data, reinterpret_cast<const void*>(laddr), size);
+        copy_inline_payload(wqe->common.pld.data, laddr, size);
       }
     } else {
       wqe->common.pld.sgl[0].va   = endian::to_be<uint64_t>(laddr);
@@ -407,6 +415,35 @@ __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wq
 // precondition: called with all active lanes using different QPs
 __device__ inline __noinline__ void QueuePairIONIC::quiet_single() {
   quiet_internal_ccqe_single(sq.pos);
+}
+
+__device__ __forceinline__ uint64_t QueuePairIONIC::cq_target() {
+  return __scoped_atomic_load_n(&sq.pos, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+}
+
+// Only reads queue state, so lanes sharing a queue pair can call it.
+__device__ __forceinline__ bool QueuePairIONIC::poll_cq_once(uint64_t target) {
+  volatile struct ionic_v1_cqe *cqe = &cq.buf[0];
+  uint32_t qtf_be = cqe->qid_type_flags;
+  uint32_t msn = endian::from_be(cqe->send.msg_msn);
+
+  if (!!(qtf_be & IONIC_V1_CQE_ERROR_BE)) {
+#if defined(BUILD_DEBUG_DEVICE)
+    uint32_t qtf = endian::from_be(qtf_be);
+    uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
+    uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
+    uint32_t flag = qtf & 0xf;
+    uint32_t status = endian::from_be(cqe->status_length);
+    uint64_t npg = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
+
+    LOGD_ERROR("QUIET ERROR (CCQE): qid %u type %u flag %#x status %u msn %u npg %lu",
+               qid, type, flag, status, msn, npg);
+#endif
+    /* No other way to signal an error, so just crash. */
+    abort();
+  }
+
+  return !((msn - static_cast<uint32_t>(target)) & 0x800000);
 }
 
 __device__ __forceinline__ uint32_t QueuePairIONIC::reserve_sq(

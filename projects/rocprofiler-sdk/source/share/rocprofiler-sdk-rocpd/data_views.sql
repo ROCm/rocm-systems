@@ -396,7 +396,6 @@ SELECT
     K.nid,
     P.pid,
     K.dispatch_id,
-    K.replay_pass,
     K.start,
     K.end,
     (K.end - K.start) AS duration,
@@ -741,7 +740,6 @@ SELECT
     MIN(PMC_E.id) AS id,
     PMC_E.guid,
     K.dispatch_id,
-    K.replay_pass,
     K.kernel_id,
     E.id AS event_id,
     E.correlation_id,
@@ -786,7 +784,11 @@ SELECT
     PMC_I.expression,
     PMC_I.value_type,
     PMC_I.id AS counter_id,
-    SUM(PMC_E.value) AS value,
+    -- Kernel replay attaches every pass of a repeated counter to the first dispatch event.
+    -- Those readings are one measurement collected again, so the view reports their average
+    -- and stays one row per dispatch. The individual readings remain in rocpd_pmc_event.
+    -- A counter collected once is unchanged, because the average of one value is that value.
+    AVG(PMC_E.value) AS value,
     K.start,
     K.end,
     PMC_I.is_constant,
@@ -822,17 +824,9 @@ FROM
     AND T.guid = K.guid
 WHERE
     PMC_E.sample_id IS NULL
-    --
-    -- Aggregate per dispatch execution rather than per dispatch_id. Kernel replay executes one
-    -- dispatch once per counter group and all of the passes report the same dispatch_id, so
-    -- grouping on dispatch_id would sum a counter that appears in several groups across every
-    -- pass that collected it. Each execution owns one event, so grouping on the event keeps the
-    -- passes apart. Without kernel replay there is exactly one event per dispatch_id and this
-    -- grouping is equivalent to grouping on dispatch_id.
-    --
 GROUP BY
     PMC_E.guid,
-    E.id,
+    K.dispatch_id,
     PMC_I.name,
     K.agent_id;
 
@@ -889,9 +883,11 @@ SELECT
     PMC_I.expression,
     PMC_I.value_type,
     PMC_I.id AS counter_id,
-    PMC_E.xcc,
-    PMC_E.shader_engine,
-    PMC_E.instance,
+    PMC_I.xcc,
+    PMC_I.shader_engine,
+    PMC_I.shader_array,
+    PMC_I.wgp,
+    PMC_I.instance,
     PMC_E.value,
     S.timestamp,
     PMC_I.is_constant,

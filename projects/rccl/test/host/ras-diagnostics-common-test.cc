@@ -22,6 +22,7 @@
 #include "alloc.h"
 #include "checks.h"
 #include "comm.h"
+#include "fakes/ras_diagnostics_test_support.h"
 #include "compiler.h"
 #include "ras/diagnostics_checks_common.h"
 #include "ras/ras_internal.h"
@@ -58,26 +59,10 @@ struct TestPayload {
   uint32_t marker;
 };
 
-struct OwnedComm {
-  OwnedComm(uint64_t commHash, uint64_t hostHash, uint64_t pidHash, int rank, bool peerInfoValid = true)
-      : comm(std::make_unique<ncclComm>()), peers(std::make_unique<ncclPeerInfo[]>(1)) {
-    comm->commHash = commHash;
-    comm->peerInfo = peers.get();
-    comm->peerInfoValid = peerInfoValid;
-    comm->rank = rank;
-    comm->nRanks = 8;
-    comm->cudaDev = rank + 10;
-    comm->nvmlDev = rank + 20;
-    comm->busId = 0x1000 + rank;
-    comm->localRank = rank % 4;
-    comm->localRanks = 4;
-    peers[0].hostHash = hostHash;
-    peers[0].pidHash = pidHash;
-  }
-
-  std::unique_ptr<ncclComm> comm;
-  std::unique_ptr<ncclPeerInfo[]> peers;
-};
+using ras_test::OwnedComm;
+using ras_test::ReporterState;
+using ras_test::CaptureReport;
+using ras_test::InstallNcclComms;
 
 std::vector<rasDiagnosticsCommSnapshot> g_fillSnapshots;
 int g_fillCalls = 0;
@@ -102,23 +87,8 @@ ncclResult_t FillTestPayload(const rasDiagnosticsCommSnapshot* snapshot, void* c
   return ncclSuccess;
 }
 
-struct ReporterState {
-  std::vector<std::string> lines;
-  ncclResult_t emitResult = ncclSuccess;
-};
-
-ncclResult_t CaptureReport(void* target, const char* line) {
-  auto* state = static_cast<ReporterState*>(target);
-  state->lines.emplace_back(line);
-  return state->emitResult;
-}
-
 void ResetDiagnosticsCommonState() {
-  std::lock_guard<std::mutex> lock(ncclCommsMutex);
-  std::free(ncclComms);
-  ncclComms = nullptr;
-  nNcclComms = 0;
-  ncclCommsSorted = false;
+  ras_test::ResetNcclComms();
   g_allocationCalls = 0;
   g_failAllocationCall = 0;
   g_allocationCounts.clear();
@@ -126,16 +96,6 @@ void ResetDiagnosticsCommonState() {
   g_fillCalls = 0;
   g_failFillCall = 0;
   g_fillObservedUnlockedMutex = true;
-}
-
-void InstallComms(std::initializer_list<ncclComm*> comms) {
-  std::lock_guard<std::mutex> lock(ncclCommsMutex);
-  std::free(ncclComms);
-  ncclComms = static_cast<ncclComm**>(std::calloc(comms.size(), sizeof(*ncclComms)));
-  ASSERT_NE(nullptr, ncclComms);
-  nNcclComms = static_cast<int>(comms.size());
-  int index = 0;
-  for (ncclComm* comm : comms) ncclComms[index++] = comm;
 }
 
 rasDiagnosticsContext UnfilteredContext() {
@@ -307,7 +267,7 @@ TEST_F(RasDiagnosticsCommonMicrotest, CollectRejectsStrideRoundedPastIntMax) {
 TEST_F(RasDiagnosticsCommonMicrotest, CollectRejectsCombinedRecordBytesPastIntMax) {
   OwnedComm first(1, 2, 3, 0);
   OwnedComm second(4, 5, 6, 1);
-  InstallComms({first.comm.get(), second.comm.get()});
+  InstallNcclComms({first.comm.get(), second.comm.get()});
   const rasDiagnosticsContext ctx = UnfilteredContext();
   rasDiagnosticsLocalData data{};
   const size_t payloadSize = static_cast<size_t>(INT_MAX) / 2;
@@ -323,7 +283,7 @@ TEST_F(RasDiagnosticsCommonMicrotest, CollectRejectsCombinedRecordBytesPastIntMa
 TEST_F(RasDiagnosticsCommonMicrotest, CollectAcceptsRecordBytesExactlyAtIntMaxLimit) {
   OwnedComm first(1, 2, 3, 0);
   OwnedComm second(4, 5, 6, 1);
-  InstallComms({first.comm.get(), second.comm.get()});
+  InstallNcclComms({first.comm.get(), second.comm.get()});
   const rasDiagnosticsContext ctx = UnfilteredContext();
   rasDiagnosticsLocalData data{};
   const size_t payloadSize = 1000000000;
@@ -341,7 +301,7 @@ TEST_F(RasDiagnosticsCommonMicrotest, CollectAcceptsRecordBytesExactlyAtIntMaxLi
 TEST_F(RasDiagnosticsCommonMicrotest, CollectReturnsEmptyForNullInvalidAndFilteredComms) {
   OwnedComm invalid(10, 20, 30, 0, false);
   OwnedComm mismatch(11, 20, 30, 1);
-  InstallComms({nullptr, invalid.comm.get(), mismatch.comm.get()});
+  InstallNcclComms({nullptr, invalid.comm.get(), mismatch.comm.get()});
   const rasDiagnosticsContext ctx = FilteredContext(10, 20, 30);
   rasDiagnosticsLocalData data{reinterpret_cast<char*>(1), 2, 3, 4};
 
@@ -363,7 +323,7 @@ TEST_F(RasDiagnosticsCommonMicrotest, CollectFiltersCommsAndBuildsAlignedRecords
   first.comm->nRanks = 0x55667788;
   second.comm->rank = 0x22334455;
   second.comm->nRanks = 0x66778899;
-  InstallComms({first.comm.get(), nullptr, invalid.comm.get(), mismatch.comm.get(), second.comm.get(), nullptr});
+  InstallNcclComms({first.comm.get(), nullptr, invalid.comm.get(), mismatch.comm.get(), second.comm.get(), nullptr});
   const rasDiagnosticsContext ctx = FilteredContext(10, 20, 30);
   rasDiagnosticsLocalData data{};
 
@@ -407,7 +367,7 @@ TEST_F(RasDiagnosticsCommonMicrotest, CollectFiltersCommsAndBuildsAlignedRecords
 
 TEST_F(RasDiagnosticsCommonMicrotest, CollectPropagatesSnapshotAllocationFailure) {
   OwnedComm owned(1, 2, 3, 0);
-  InstallComms({owned.comm.get()});
+  InstallNcclComms({owned.comm.get()});
   const rasDiagnosticsContext ctx = UnfilteredContext();
   rasDiagnosticsLocalData data{};
   g_failAllocationCall = 1;
@@ -421,7 +381,7 @@ TEST_F(RasDiagnosticsCommonMicrotest, CollectPropagatesSnapshotAllocationFailure
 
 TEST_F(RasDiagnosticsCommonMicrotest, CollectPropagatesRecordAllocationFailure) {
   OwnedComm owned(1, 2, 3, 0);
-  InstallComms({owned.comm.get()});
+  InstallNcclComms({owned.comm.get()});
   const rasDiagnosticsContext ctx = UnfilteredContext();
   rasDiagnosticsLocalData data{};
   g_failAllocationCall = 2;
@@ -435,7 +395,7 @@ TEST_F(RasDiagnosticsCommonMicrotest, CollectPropagatesRecordAllocationFailure) 
 
 TEST_F(RasDiagnosticsCommonMicrotest, CollectPropagatesFillFailureWithoutPublishingPartialData) {
   OwnedComm owned(1, 2, 3, 0);
-  InstallComms({owned.comm.get()});
+  InstallNcclComms({owned.comm.get()});
   const rasDiagnosticsContext ctx = UnfilteredContext();
   rasDiagnosticsLocalData data{};
   g_failFillCall = 1;

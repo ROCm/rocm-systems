@@ -289,6 +289,25 @@ TEST(CompletionTrackerTest, RetryKeepsTheAddressSpaceSnapshotThatStartedPublicat
   EXPECT_EQ(replacement->successful_stores(CompletionFixture::kMailbox), 0u);
 }
 
+TEST(CompletionTrackerTest, RevokedPublicationSnapshotBecomesTerminal) {
+  CompletionFixture fixture;
+  fixture.memory->fail_next(CompletionRetryMemory::Operation::CompareExchange,
+                            CompletionFixture::kSignal + CompletionFixture::kValueOffset);
+
+  const CompletionDrainResult first = fixture.tracker.drain_completions(fixture.queues);
+  ASSERT_TRUE(first.retry_pending);
+  ASSERT_FALSE(first.terminal_fault);
+  ASSERT_TRUE(fixture.vm.invalidate(fixture.address_space));
+
+  const CompletionDrainResult second = fixture.tracker.drain_completions(fixture.queues);
+  EXPECT_FALSE(second.retry_pending);
+  ASSERT_TRUE(second.terminal_fault);
+  EXPECT_EQ(second.terminal_fault->outcome, VmAccessOutcome::Revoked);
+  ASSERT_EQ(fixture.queues.front().entries.size(), 1u);
+  EXPECT_TRUE(fixture.queues.front().entries.front().terminal_faulted);
+  EXPECT_EQ(fixture.retired, 0u);
+}
+
 TEST(CompletionTrackerTest, UnavailableQueueDoesNotStarveIndependentQueueRetirement) {
   constexpr uint64_t kSecondSignal = 0x400;
   constexpr uint64_t kSecondMailbox = 0x480;

@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 /* GFX1201 AMDF qualification for same-device GPU-produced SDMA and AQL queues.
@@ -41,7 +42,7 @@
 enum { BUFFER_BYTES = 65536, SLOT_WORDS = 32, ITERATIONS = 64 };
 static const uint64_t timeout_ns = UINT64_C(5000000000);
 static const amdf_queue_format_features_t required_format_features =
-    AMDF_GPU_SDMA_FORMAT_FEATURE_GCR |
+    AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR |
     AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM;
 
 struct buffer {
@@ -115,7 +116,7 @@ static int create_buffer(struct workload *w, struct buffer *b,
   create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
   create.access_count = 1;
   create.accesses = &access;
-  CALL(w->api->memory_create(w->scope, &create, &b->memory));
+  CALL(w->api->memory_create(w->scope, &create, &b->memory, NULL));
   amdf_memory_map_info_t map;
   INIT(map, AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO);
   map.byte_length = bytes;
@@ -135,7 +136,7 @@ static int check_pair(struct workload *w, struct buffer *b,
   INIT(host, AMDF_STRUCTURE_TYPE_MEMORY_SITE);
   INIT(device, AMDF_STRUCTURE_TYPE_MEMORY_SITE);
   host.kind = AMDF_MEMORY_SITE_KIND_HOST;
-  host.value.host_mapping = b->mapping;
+  host.value.host.mapping = b->mapping;
   device.kind = AMDF_MEMORY_SITE_KIND_DEVICE;
   device.value.device.memory = b->memory;
   device.value.device.queue_family_ordinal = w->family;
@@ -281,7 +282,7 @@ static int release_buffer(struct workload *w, struct buffer *b) {
     b->mapping = NULL;
   }
   if (b->memory) {
-    CALL(w->api->memory_destroy(b->memory));
+    CALL(w->api->memory_destroy(b->memory, NULL));
     b->memory = NULL;
   }
   return 0;

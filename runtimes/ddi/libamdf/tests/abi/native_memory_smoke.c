@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 /* CPU CREATE/REGISTER and explicit subrange mapping; optional GPU allocation.
@@ -90,7 +91,7 @@ static int check_pair_identity(const amdf_api_t *api,
    * the same address have no proven physical identity. The API distinguishes
    * those cases even though both reject a cross-resource cache-pair query. */
   amdf_memory_t *peer = NULL;
-  CHECK(api->memory_create(scope, create, &peer) == AMDF_STATUS_OK);
+  CHECK(api->memory_create(scope, create, &peer, NULL) == AMDF_STATUS_OK);
   amdf_memory_t *resources[2] = {memory, peer};
   amdf_host_mapping_t *mappings[2] = {NULL, NULL};
   amdf_memory_site_t sites[2];
@@ -102,7 +103,7 @@ static int check_pair_identity(const amdf_api_t *api,
     CHECK(api->memory_map(resources[i], &map, &mappings[i]) == AMDF_STATUS_OK);
     INIT(sites[i], AMDF_STRUCTURE_TYPE_MEMORY_SITE);
     sites[i].kind = AMDF_MEMORY_SITE_KIND_HOST;
-    sites[i].value.host_mapping = mappings[i];
+    sites[i].value.host.mapping = mappings[i];
   }
   amdf_memory_pair_info_t pair;
   INIT(pair, AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO);
@@ -118,7 +119,7 @@ static int check_pair_identity(const amdf_api_t *api,
   CHECK(memcmp(&saved, &pair, sizeof(pair)) == 0);
   for (unsigned i = 0; i < 2; ++i)
     CHECK(api->host_mapping_destroy(mappings[i]) == AMDF_STATUS_OK);
-  CHECK(api->memory_destroy(peer) == AMDF_STATUS_OK);
+  CHECK(api->memory_destroy(peer, NULL) == AMDF_STATUS_OK);
   return 0;
 }
 
@@ -151,7 +152,7 @@ static int check_cpu_profile(const amdf_api_t *api, amdf_memory_scope_t *scope,
       registered ? limits->registered_host_cacheability
                  : (amdf_host_cacheability_t)AMDF_HOST_CACHEABILITY_UNKNOWN;
   amdf_memory_t *memory = NULL;
-  CHECK(api->memory_create(scope, &create, &memory) == AMDF_STATUS_OK);
+  CHECK(api->memory_create(scope, &create, &memory, NULL) == AMDF_STATUS_OK);
   amdf_memory_info_t info;
   INIT(info, AMDF_STRUCTURE_TYPE_MEMORY_INFO);
   CHECK(api->memory_query_info(memory, &info) == AMDF_STATUS_OK);
@@ -177,7 +178,7 @@ static int check_cpu_profile(const amdf_api_t *api, amdf_memory_scope_t *scope,
   CHECK(api->memory_query_address(memory, 0, AMDF_MEMORY_ADDRESS_GPU,
                                   &address) == API_ERROR(OUT_OF_RANGE));
   CHECK(address == UINT64_C(0xfeedface));
-  CHECK(api->memory_destroy(memory) == AMDF_STATUS_OK);
+  CHECK(api->memory_destroy(memory, NULL) == AMDF_STATUS_OK);
   if (registered) {
     host[1] = 0x7a;
     CHECK(host[1] == 0x7a);
@@ -187,7 +188,7 @@ static int check_cpu_profile(const amdf_api_t *api, amdf_memory_scope_t *scope,
   create.byte_length = 0;
   amdf_memory_t *sentinel = (amdf_memory_t *)&create;
   memory = sentinel;
-  CHECK(api->memory_create(scope, &create, &memory) ==
+  CHECK(api->memory_create(scope, &create, &memory, NULL) ==
         API_ERROR(INVALID_ARGUMENT));
   CHECK(memory == sentinel);
   return 0;
@@ -226,7 +227,7 @@ check_gpu_registration(const amdf_api_t *api, amdf_memory_scope_t *scope,
       profile->registration.registered_host_cacheability;
   create.accesses = access;
   amdf_memory_t *memory = NULL;
-  CHECK(api->memory_create(scope, &create, &memory) == AMDF_STATUS_OK);
+  CHECK(api->memory_create(scope, &create, &memory, NULL) == AMDF_STATUS_OK);
 
   amdf_memory_info_t info;
   INIT(info, AMDF_STRUCTURE_TYPE_MEMORY_INFO);
@@ -277,16 +278,16 @@ check_gpu_registration(const amdf_api_t *api, amdf_memory_scope_t *scope,
   create.minimum_alignment = 64;
   amdf_memory_t *sentinel = (amdf_memory_t *)&create;
   amdf_memory_t *rejected = sentinel;
-  CHECK(api->memory_create(scope, &create, &rejected) ==
+  CHECK(api->memory_create(scope, &create, &rejected, NULL) ==
         API_ERROR(INVALID_ARGUMENT));
   CHECK(rejected == sentinel);
   create.minimum_alignment = 1;
   create.registered_host_pointer = (void *)(UINTPTR_MAX - 7);
-  CHECK(api->memory_create(scope, &create, &rejected) ==
+  CHECK(api->memory_create(scope, &create, &rejected, NULL) ==
         API_ERROR(INVALID_ARGUMENT));
   CHECK(rejected == sentinel);
 
-  CHECK(api->memory_destroy(memory) == AMDF_STATUS_OK);
+  CHECK(api->memory_destroy(memory, NULL) == AMDF_STATUS_OK);
   host[0] = 0xa5;
   CHECK(host[0] == 0xa5);
   free(allocation);
@@ -383,7 +384,7 @@ static int check_gpu_memory(const amdf_api_t *api, amdf_instance_t *instance,
       create.accesses = &access;
       create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
       amdf_memory_t *memory = NULL;
-      CHECK(api->memory_create(scope, &create, &memory) == AMDF_STATUS_OK);
+      CHECK(api->memory_create(scope, &create, &memory, NULL) == AMDF_STATUS_OK);
       amdf_memory_access_info_t actual;
       INIT(actual, AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO);
       CHECK(api->memory_query_access_info(memory, 0, &actual) ==
@@ -395,7 +396,7 @@ static int check_gpu_memory(const amdf_api_t *api, amdf_instance_t *instance,
       CHECK(address >= caps.device_address.minimum_address &&
             address <= caps.device_address.maximum_address);
       CHECK(check_mapping(api, memory, NULL) == 0);
-      CHECK(api->memory_destroy(memory) == AMDF_STATUS_OK);
+      CHECK(api->memory_destroy(memory, NULL) == AMDF_STATUS_OK);
       ++allocated;
     }
     CHECK(allocated != 0);

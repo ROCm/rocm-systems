@@ -20,6 +20,13 @@ downstream consumer of the library.
 
 ## [Unreleased]
 
+### Changed
+
+- CMake configure now prints the profiler-hub version and the RocPD schema version. The project version moved to a `VERSION` file.
+- The installed `profiler-hub-config.cmake` now only looks up `fmt` and `spdlog`
+  when the `static` component is requested, so shared-only consumers no longer get
+  `fmt::fmt` / `spdlog::spdlog` imported into their project.
+
 ## [0.2.0] - 2026-09-02
 
 ### Added

@@ -395,22 +395,10 @@ def write_counters_csv(importData, config) -> None:
 
     agent_id = build_agent_id_string(config.agent_index_value)
 
-    # Kernel replay executes a dispatch once per counter group, so a replayed run has several rows
-    # per dispatch_id and the pass index is the only thing separating them. Runs that did not
-    # replay leave the column NULL and keep their existing set of CSV columns, as do databases
-    # written before the column existed.
-    has_replay_passes = (
-        "replay_pass" in importData.supported_features
-        and importData.execute(
-            'SELECT EXISTS (SELECT 1 FROM "rocpd_kernel_dispatch" WHERE replay_pass IS NOT NULL)'
-        ).fetchone()[0]
-    )
-
     select_columns = [
         "guid",
         "stack_id AS Correlation_Id",
         "dispatch_id",
-        *(["replay_pass AS Replay_Pass"] if has_replay_passes else []),
         f"{agent_id} AS Agent_Id",
         "queue_id",
         "pid AS Process_Id",
@@ -467,7 +455,15 @@ def write_spm_counters_csv(importData, config) -> None:
         "vgpr_count",
         "accum_vgpr_count",
         "sgpr_count",
-        "counter_name || '[XCC: ' || xcc || ', SE: ' || shader_engine || ', Instance: ' || instance || ']' AS counter_name",
+        (
+            "counter_name || '[XCC: ' || COALESCE(xcc, '') || "
+            "', Instance: ' || COALESCE(instance, '') || "
+            "', SE: ' || COALESCE(shader_engine, '') || "
+            "', SA: ' || COALESCE(shader_array, '') || "
+            "', WGP: ' || COALESCE(wgp, '') || ']' AS counter_name"
+            if "spm_counter_location" in importData.supported_features
+            else "counter_name || '[XCC: ' || xcc || ', SE: ' || shader_engine || ', Instance: ' || instance || ']' AS counter_name"
+        ),
         "value AS Counter_Value",
         "timestamp AS Timestamp",
     ]
@@ -607,7 +603,7 @@ def main(argv=None):
     out_cfg_args = process_out_config_args(input, args)
     generic_out_cfg_args = process_generic_args(input, args)
     csv_args = process_csv_args(input, args)
-    process_time_window_args(input, args)
+    time_window.process_args_or_exit(process_time_window_args, input, args)
 
     all_args = {
         **out_cfg_args,

@@ -5,9 +5,9 @@
 # Batch examples for the hipFile C API. examples_common supplies shared file
 # and verification helpers and transitively links hipFile and HIP.
 
-include(AISAddExecutable)
+include(HipFileAddExecutable)
 
-ais_add_executable(
+hipfile_add_executable(
     NAME batch-roundtrip
     DEPS examples_common
     SRCS "batch-roundtrip.cpp"
@@ -21,7 +21,7 @@ if(BUILD_TESTING)
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     set(BATCH_TEST_DIR
-        "${AIS_CAPABLE_DIR}/hipfile_batch_tests_${_batch_scratch_token}"
+        "${HIPFILE_CAPABLE_DIR}/hipfile_batch_tests_${_batch_scratch_token}"
     )
     set(BATCH_INPUT "${BATCH_TEST_DIR}/input.bin")
     set(BATCH_OUTPUT "${BATCH_TEST_DIR}/output.bin")

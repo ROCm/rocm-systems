@@ -66,6 +66,7 @@
 #include <cctype>
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <initializer_list>
 #include <limits>
 #include <map>
@@ -144,65 +145,22 @@ struct rocpd_db
     rocpd_db(rocpd_db&&)                 = delete;
     rocpd_db& operator=(rocpd_db&&) = delete;
 
-    sqlite3*            conn                       = nullptr;
-    std::string         uuid                       = {};
-    std::string         guid                       = {};
-    schema_map_t        schemas                    = {};
-    track_map_t         tracks                     = {};
-    size_t              event_id_counter           = 0;
-    size_t              sample_id_counter          = 0;
-    size_t              kernel_dispatch_id_counter = 0;
-    statement_cache_t   statements                 = {};
-    pending_batch_map_t pending_batches            = {};
-    fk_parent_map_t     fk_parent_tables           = {};
-    flushing_set_t      flushing_tables            = {};
-    uint64_t            pending_touch_count        = 0;
-    batch_stats_map_t   batch_stats                = {};
+    sqlite3*            conn                = nullptr;
+    std::string         uuid                = {};
+    std::string         guid                = {};
+    schema_map_t        schemas             = {};
+    track_map_t         tracks              = {};
+    size_t              event_id_counter    = 0;
+    size_t              sample_id_counter   = 0;
+    statement_cache_t   statements          = {};
+    pending_batch_map_t pending_batches     = {};
+    fk_parent_map_t     fk_parent_tables    = {};
+    flushing_set_t      flushing_tables     = {};
+    uint64_t            pending_touch_count = 0;
+    batch_stats_map_t   batch_stats         = {};
 
     size_t get_event_id() { return ++event_id_counter; }
     size_t get_sample_id() { return ++sample_id_counter; }
-    size_t get_kernel_dispatch_id() { return ++kernel_dispatch_id_counter; }
-};
-
-// Maps one dispatch execution onto the rocpd event row that represents it.
-//
-// Outside kernel replay a dispatch_id names exactly one execution, so the flat vector below is
-// the whole map and lookups behave as they always have. Kernel replay re-executes a dispatch
-// once per counter group and every pass reports the same dispatch_id, so dispatch_id alone stops
-// identifying an execution and the pass index has to complete the key. Passes beyond the first
-// are rare enough to keep out of the vector.
-struct dispatch_event_map
-{
-    using key_type = std::pair<uint64_t, uint64_t>;
-
-    bool contains(uint64_t dispatch_id, uint64_t replay_pass) const
-    {
-        if(replay_pass == 0) return first_pass.size() > dispatch_id && first_pass[dispatch_id] != 0;
-        return later_passes.count(key_type{dispatch_id, replay_pass}) > 0;
-    }
-
-    uint64_t get(uint64_t dispatch_id, uint64_t replay_pass) const
-    {
-        if(replay_pass == 0) return first_pass.at(dispatch_id);
-        return later_passes.at(key_type{dispatch_id, replay_pass});
-    }
-
-    void set(uint64_t dispatch_id, uint64_t replay_pass, uint64_t event_id)
-    {
-        if(replay_pass == 0)
-        {
-            if(first_pass.size() < dispatch_id + 1)
-                common::container::resize(first_pass, dispatch_id + 1, 0UL);
-            first_pass.at(dispatch_id) = event_id;
-        }
-        else
-        {
-            later_passes.emplace(key_type{dispatch_id, replay_pass}, event_id);
-        }
-    }
-
-    common::container::stable_vector<uint64_t, 512> first_pass   = {};
-    std::map<key_type, uint64_t>                    later_passes = {};
 };
 
 void
@@ -305,7 +263,7 @@ read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options   = ROCPD_SQL_OPTIONS_NONE;
-    auto _version   = rocpd_version_triplet_t{3, 0, 4};  // default schema version
+    auto _version   = rocpd_version_triplet_t{3, 0, 5};  // default schema version
 
     _variables.uuid = db.uuid.c_str();
     _variables.guid = db.guid.c_str();
@@ -1520,17 +1478,6 @@ write_rocpd(
         }
     };
 
-    // Kernel replay is the only service that runs one dispatch_id more than once, and the pass
-    // index the counter records carry is the only place that is visible from here. When nothing
-    // reports a non-zero pass -- every run without replay, and a replay that resolved to a single
-    // counter group -- the export keeps its original one-row-per-dispatch_id shape untouched.
-    const bool kernel_replay_active = [&counter_collection_gen]() {
-        for(auto pctr : counter_collection_gen)
-            for(const auto& record : counter_collection_gen.get(pctr))
-                if(record.replay_pass > 0) return true;
-        return false;
-    }();
-
     auto insert_kernel_dispatch_data = [&, node_id, this_pid](auto& dispatch_evt_ids) {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_kernel_dispatch");
         auto _deferred         = sql::deferred_transaction{db.conn};
@@ -1549,32 +1496,13 @@ write_rocpd(
                                     const auto& workgroup,
                                     uint64_t    graph_exec_id,
                                     uint64_t    graph_node_id,
-                                    bool        enable_duplicate_check,
-                                    uint64_t    replay_pass) {
+                                    bool        enable_duplicate_check) {
+            // Skip if we've already processed this dispatch_id
+            if(dispatch_evt_ids.size() > dispatch_id && dispatch_evt_ids[dispatch_id] != 0) return;
+
             auto kern_name = (kernel_id > 0)
                                  ? tool_metadata.get_kernel_symbol(kernel_id)->formatted_kernel_name
                                  : "unknown_kernel";
-
-            // A dispatch execution is identified by its dispatch_id and, under kernel replay, the
-            // pass that produced it. Reaching the same execution twice is the duplicate the
-            // export has always dropped; reaching a later pass of a replayed dispatch is a
-            // distinct execution and gets its own row.
-            if(dispatch_evt_ids.contains(dispatch_id, replay_pass))
-            {
-                // Warn rather than ROCP_CI_LOG here: the previous form of this check sat after an
-                // unconditional early return and so could never fire. Restoring it as a CI-fatal
-                // check would turn a condition that has been silently tolerated into an abort.
-                ROCP_WARNING_IF(enable_duplicate_check) << fmt::format(
-                    "duplicate kernel dispatch id {} :: pass={}, event_id={}, kernel_id={}, "
-                    "corr_id={}, name='{}'",
-                    dispatch_id,
-                    replay_pass,
-                    dispatch_evt_ids.get(dispatch_id, replay_pass),
-                    kernel_id,
-                    corr_id.internal,
-                    kern_name);
-                return;
-            }
 
             auto evt_id = create_event(db,
                                        {
@@ -1584,7 +1512,24 @@ write_rocpd(
                                            insert_value("correlation_id", corr_id.external.value),
                                        });
 
-            dispatch_evt_ids.set(dispatch_id, replay_pass, evt_id);
+            // Ensure dispatch_evt_ids is large enough
+            if(dispatch_evt_ids.size() < dispatch_id + 1)
+                common::container::resize(dispatch_evt_ids, dispatch_id + 1, 0UL);
+
+            // Check for duplicates if requested
+            if(enable_duplicate_check && dispatch_evt_ids.at(dispatch_id) != 0)
+            {
+                ROCP_CI_LOG(WARNING)
+                    << fmt::format("duplicate kernel dispatch id {} :: event_id={}, kernel_id={}, "
+                                   "corr_id={}, name='{}'",
+                                   dispatch_id,
+                                   evt_id,
+                                   kernel_id,
+                                   corr_id.internal,
+                                   kern_name);
+            }
+
+            dispatch_evt_ids.at(dispatch_id) = evt_id;
             // Unconditionally collect kernel rename data if it is available. rocpd needs to be able
             // to use kernel rename option after data has already been collected, so the kernel
             // rename data needs to be stored in generated db.
@@ -1596,28 +1541,18 @@ write_rocpd(
 
             get_thread_id(thread_id);
 
-            // Outside kernel replay dispatch_id is unique across the run and stays the row id.
-            // Under replay several rows share a dispatch_id, so it cannot also serve as the
-            // primary key and the rows get a surrogate id instead.
-            auto row_id = kernel_replay_active ? db.get_kernel_dispatch_id() : dispatch_id;
-
             // Insert into kernel dispatch table
             get_insert_statement(
                 db,
                 "rocpd_kernel_dispatch{{uuid}}",
                 {
-                    insert_value("id", row_id),
+                    insert_value("id", dispatch_id),
                     insert_value("nid", node_id),
                     insert_value("pid", this_pid),
                     insert_value("tid", thread_id),
                     insert_value("agent_id", agent_node_id),
                     insert_value("kernel_id", kernel_id),
                     insert_value("dispatch_id", dispatch_id),
-                    // Left NULL outside kernel replay, where a dispatch executes once and the
-                    // column would carry no information.
-                    insert_value("replay_pass",
-                                 kernel_replay_active ? std::make_optional(replay_pass)
-                                                      : std::optional<uint64_t>{}),
                     insert_value("queue_id", queue_id),
                     insert_value("stream_id", stream_id),
                     insert_value("start", start_timestamp),
@@ -1668,8 +1603,7 @@ write_rocpd(
                                      info.workgroup_size,              // workgroup
                                      0,                                // graph_exec_id
                                      0,                                // graph_node_id
-                                     false,                            // enable_duplicate_check
-                                     record.replay_pass                // replay_pass
+                                     false                             // enable_duplicate_check
                     );
                 }
             }
@@ -1703,29 +1637,19 @@ write_rocpd(
                                      info.workgroup_size,  // workgroup
                                      0,                    // graph_exec_id
                                      0,                    // graph_node_id
-                                     false,                // enable_duplicate_check
-                                     0                     // replay_pass (SPM excludes replay)
+                                     false                 // enable_duplicate_check
                     );
                 }
             }
         }
         else
         {
-            // The kernel dispatch buffer records carry no pass index; the SDK reports the pass
-            // through the counter records instead. Replay executes the passes of a dispatch one
-            // after another and the buffer preserves completion order, so the n-th record seen
-            // for a dispatch_id is its n-th pass.
-            auto passes_seen = std::unordered_map<uint64_t, uint64_t>{};
-
             for(auto pitr : kernel_dispatch_gen)
             {
                 for(auto itr : kernel_dispatch_gen.get(pitr))
                 {
                     // Register thread ID
                     get_thread_id(itr.thread_id);
-
-                    auto replay_pass =
-                        kernel_replay_active ? passes_seen[itr.dispatch_info.dispatch_id]++ : 0;
 
                     // Process this dispatch
                     process_dispatch(itr.dispatch_info.dispatch_id,             // dispatch_id
@@ -1742,8 +1666,7 @@ write_rocpd(
                                      itr.dispatch_info.workgroup_size,          // workgroup
                                      itr.graph_exec_id.handle,                  // graph_exec_id
                                      itr.graph_node_id.handle,                  // graph_node_id
-                                     true,        // enable_duplicate_check
-                                     replay_pass  // replay_pass
+                                     true  // enable_duplicate_check
                     );
                 }
             }
@@ -1767,18 +1690,7 @@ write_rocpd(
                 const auto& info        = record.dispatch_data.dispatch_info;
                 auto        dispatch_id = info.dispatch_id;
 
-                // Every pass of a replayed dispatch reports the same dispatch_id, so the pass
-                // index is what routes these counters to the execution that produced them.
-                if(!dispatch_evt_ids.contains(dispatch_id, record.replay_pass))
-                {
-                    ROCP_WARNING_IF(true) << fmt::format(
-                        "missing kernel dispatch id {} :: pass={} for counter collection",
-                        dispatch_id,
-                        record.replay_pass);
-                    continue;
-                }
-
-                auto evt_id = dispatch_evt_ids.get(dispatch_id, record.replay_pass);
+                auto evt_id = dispatch_evt_ids.at(dispatch_id);
                 for(const auto& count : record.read())
                 {
                     get_insert_statement(db,
@@ -1795,13 +1707,198 @@ write_rocpd(
 
         auto spm_name_id = string_entries.at("SPM");
 
+        // One rocpd_info_pmc row per agent and counter location. The same
+        // counter and XCC/SE/SA/WGP/instance on two GPUs are different rows.
+        // Ids sit above the KFD pmc id range (0x7000000000000000) so they do
+        // not collide with counter ids or KFD rows. XCC, SE, SA, and WGP are
+        // NULL when the counter does not provide that dimension. Instance is
+        // always present.
+        struct spm_location_key
+        {
+            uint64_t               agent_id   = 0;
+            uint64_t               counter_id = 0;
+            std::optional<int64_t> xcc;
+            std::optional<int64_t> shader_engine;
+            std::optional<int64_t> shader_array;
+            std::optional<int64_t> wgp;
+            int64_t                instance = 0;
+
+            bool operator==(const spm_location_key& rhs) const
+            {
+                return agent_id == rhs.agent_id && counter_id == rhs.counter_id && xcc == rhs.xcc &&
+                       shader_engine == rhs.shader_engine && shader_array == rhs.shader_array &&
+                       wgp == rhs.wgp && instance == rhs.instance;
+            }
+        };
+        struct spm_location_key_hash
+        {
+            size_t operator()(const spm_location_key& key) const
+            {
+                auto mix = [](size_t seed, uint64_t value) {
+                    return seed ^ (std::hash<uint64_t>{}(value) + 0x9e3779b97f4a7c15ULL +
+                                   (seed << 6) + (seed >> 2));
+                };
+                auto mix_dimension = [&mix](size_t seed, const std::optional<int64_t>& value) {
+                    seed = mix(seed, value.has_value());
+                    return value ? mix(seed, static_cast<uint64_t>(*value)) : seed;
+                };
+                size_t seed = 0;
+                seed        = mix(seed, key.agent_id);
+                seed        = mix(seed, key.counter_id);
+                seed        = mix_dimension(seed, key.xcc);
+                seed        = mix_dimension(seed, key.shader_engine);
+                seed        = mix_dimension(seed, key.shader_array);
+                seed        = mix_dimension(seed, key.wgp);
+                seed        = mix(seed, static_cast<uint64_t>(key.instance));
+                return seed;
+            }
+        };
+        // Counter metadata is the same for every sample of an (agent, counter)
+        // pair. Cache it so later samples skip the counter scan and the
+        // dimension-id searches.
+        struct spm_counter_meta_key
+        {
+            uint64_t agent_id   = 0;
+            uint64_t counter_id = 0;
+
+            bool operator==(const spm_counter_meta_key& rhs) const
+            {
+                return agent_id == rhs.agent_id && counter_id == rhs.counter_id;
+            }
+        };
+        struct spm_counter_meta_key_hash
+        {
+            size_t operator()(const spm_counter_meta_key& key) const
+            {
+                auto mix = [](size_t seed, uint64_t value) {
+                    return seed ^ (std::hash<uint64_t>{}(value) + 0x9e3779b97f4a7c15ULL +
+                                   (seed << 6) + (seed >> 2));
+                };
+                return mix(mix(0, key.agent_id), key.counter_id);
+            }
+        };
+        struct spm_counter_meta
+        {
+            const tool_counter_info* base_info         = nullptr;
+            bool                     has_xcc           = false;
+            bool                     has_shader_engine = false;
+            bool                     has_shader_array  = false;
+            bool                     has_wgp           = false;
+        };
+        auto counter_meta_cache =
+            std::unordered_map<spm_counter_meta_key, spm_counter_meta, spm_counter_meta_key_hash>{};
+        auto location_ids = std::unordered_map<spm_location_key, uint64_t, spm_location_key_hash>{};
+        auto next_location_pmc_id = uint64_t{0x7100000000000000ULL};
+
+        auto cached_counter_meta = [&](rocprofiler_agent_id_t agent, uint64_t counter_id) {
+            auto cache_key = spm_counter_meta_key{agent.handle, counter_id};
+            if(auto found = counter_meta_cache.find(cache_key); found != counter_meta_cache.end())
+                return found->second;
+
+            auto meta = spm_counter_meta{};
+            if(auto agent_counters = tool_metadata.agent_counter_info.find(agent);
+               agent_counters != tool_metadata.agent_counter_info.end())
+            {
+                for(const auto& counter_info : agent_counters->second)
+                {
+                    if(counter_info.id.handle != counter_id) continue;
+                    meta.base_info = &counter_info;
+                    auto provides =
+                        [&](counters::rocprofiler_profile_counter_instance_types dimension) {
+                            auto dimension_id =
+                                static_cast<rocprofiler_counter_dimension_id_t>(dimension);
+                            return std::find(counter_info.dimension_ids.begin(),
+                                             counter_info.dimension_ids.end(),
+                                             dimension_id) != counter_info.dimension_ids.end();
+                        };
+                    meta.has_xcc = provides(counters::ROCPROFILER_DIMENSION_XCC);
+                    meta.has_shader_engine =
+                        provides(counters::ROCPROFILER_DIMENSION_SHADER_ENGINE);
+                    meta.has_shader_array = provides(counters::ROCPROFILER_DIMENSION_SHADER_ARRAY);
+                    meta.has_wgp          = provides(counters::ROCPROFILER_DIMENSION_WGP);
+                    break;
+                }
+            }
+            return counter_meta_cache.emplace(cache_key, meta).first->second;
+        };
+
+        auto spm_location_pmc_id = [&](const auto&            count,
+                                       rocprofiler_agent_id_t sample_agent) -> uint64_t {
+            auto meta = cached_counter_meta(sample_agent, count.id.handle);
+            auto dimension_value =
+                [&](bool present, counters::rocprofiler_profile_counter_instance_types dimension)
+                -> std::optional<int64_t> {
+                if(!present) return std::nullopt;
+                return static_cast<int64_t>(counters::rec_to_dim_pos(count.instance_id, dimension));
+            };
+            auto key = spm_location_key{
+                sample_agent.handle,
+                count.id.handle,
+                dimension_value(meta.has_xcc, counters::ROCPROFILER_DIMENSION_XCC),
+                dimension_value(meta.has_shader_engine,
+                                counters::ROCPROFILER_DIMENSION_SHADER_ENGINE),
+                dimension_value(meta.has_shader_array,
+                                counters::ROCPROFILER_DIMENSION_SHADER_ARRAY),
+                dimension_value(meta.has_wgp, counters::ROCPROFILER_DIMENSION_WGP),
+                static_cast<int64_t>(counters::rec_to_dim_pos(
+                    count.instance_id, counters::ROCPROFILER_DIMENSION_INSTANCE)),
+            };
+            if(auto found = location_ids.find(key); found != location_ids.end())
+                return found->second;
+
+            auto pmc_id = next_location_pmc_id++;
+            location_ids.emplace(key, pmc_id);
+
+            const auto* base_info          = meta.base_info;
+            const auto* agent              = tool_metadata.get_agent(sample_agent);
+            auto        json_data          = get_json_string([agent](auto& ar) {
+                if(agent) cereal::save(ar, *agent);
+            });
+            const auto* name               = base_info ? base_info->name : "";
+            const auto* description        = base_info ? base_info->description : "";
+            const auto* block              = base_info ? base_info->block : "";
+            const auto* expression         = base_info ? base_info->expression : "";
+            auto        nullable_dimension = [](std::string_view              column,
+                                         const std::optional<int64_t>& value) {
+                return value ? insert_value(column, *value) : sql_insert_value{column, nullptr};
+            };
+
+            get_insert_statement(
+                db,
+                "rocpd_info_pmc{{uuid}}",
+                {
+                    insert_value("id", pmc_id),
+                    insert_value("nid", node_id),
+                    insert_value("pid", this_pid),
+                    insert_value("target_arch", std::string_view{"GPU"}),
+                    insert_value("agent_id", agent ? agent->node_id : 0),
+                    insert_value("name", name, allow_empty_string{}),
+                    insert_value("symbol", name, allow_empty_string{}),
+                    insert_value("description", description, allow_empty_string{}),
+                    insert_value("component", std::string_view{"rocm"}),
+                    insert_value("value_type", std::string_view{"ABS"}),
+                    insert_value("block", block, allow_empty_string{}),
+                    insert_value("expression", expression, allow_empty_string{}),
+                    insert_value("is_constant", base_info ? base_info->is_constant : 0),
+                    insert_value("is_derived", base_info ? base_info->is_derived : 0),
+                    insert_value("spm_support", base_info ? base_info->spm_support : 1),
+                    nullable_dimension("xcc", key.xcc),
+                    nullable_dimension("shader_engine", key.shader_engine),
+                    nullable_dimension("shader_array", key.shader_array),
+                    nullable_dimension("wgp", key.wgp),
+                    insert_value("instance", key.instance),
+                    insert_value("extdata", json_data),
+                });
+            return pmc_id;
+        };
+
         for(auto ditr : spm_collection_gen)
         {
             for(const auto& record : spm_collection_gen.get(ditr))
             {
                 const auto& info        = record.dispatch_data.dispatch_info;
                 auto        dispatch_id = info.dispatch_id;
-                auto        evt_id      = dispatch_evt_ids.get(dispatch_id, 0);
+                auto        evt_id      = dispatch_evt_ids.at(dispatch_id);
 
                 auto track_id =
                     get_track_id(db, node_id, this_pid, record.thread_id, spm_name_id, "{}");
@@ -1834,20 +1931,8 @@ write_rocpd(
                                 insert_value("id", idx++),
                                 insert_value("event_id", evt_id),
                                 insert_value("sample_id", sample_id),
-                                insert_value("pmc_id", count.id.handle),
+                                insert_value("pmc_id", spm_location_pmc_id(count, info.agent_id)),
                                 insert_value("value", count.value),
-                                insert_value(
-                                    "xcc",
-                                    counters::rec_to_dim_pos(count.instance_id,
-                                                             counters::ROCPROFILER_DIMENSION_XCC)),
-                                insert_value("shader_engine",
-                                             counters::rec_to_dim_pos(
-                                                 count.instance_id,
-                                                 counters::ROCPROFILER_DIMENSION_SHADER_ENGINE)),
-                                insert_value("instance",
-                                             counters::rec_to_dim_pos(
-                                                 count.instance_id,
-                                                 counters::ROCPROFILER_DIMENSION_INSTANCE)),
                             });
                     }
                 }
@@ -2371,7 +2456,7 @@ write_rocpd(
             }
         };
 
-    auto dispatch_to_evt_id = dispatch_event_map{};
+    auto dispatch_to_evt_id = common::container::stable_vector<uint64_t, 512>{};
 
     insert_node_data();
     insert_process_data();

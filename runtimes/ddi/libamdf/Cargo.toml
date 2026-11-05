@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
 [package]
@@ -18,6 +19,9 @@ doctest = false
 
 [dependencies]
 rocddi.workspace = true
+
+[dev-dependencies]
+rocddi = { path = "../rocddi", features = ["allocator-test-hooks"] }
 
 [lints.rust]
 missing_docs = "deny"

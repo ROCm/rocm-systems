@@ -43,6 +43,10 @@
 extern ncclRma_t ncclRmaIbProxy;
 extern ncclRma_t IbCastRmaIbProxy;
 
+// The RMA proxy has no makeVDevice of its own and reads the table these populate.
+extern ncclNet_t ncclNetIb;
+extern ncclNet_t netIbCast;
+
 namespace RCCLRmaTests
 {
 
@@ -93,6 +97,16 @@ protected:
     virtual int  GetNumContexts() const { return 1; }
     virtual bool UseDmaBuf()     const { return false; }
 
+    // Device to connect over, or negative to skip with skipReason_. Runs after
+    // rma_->devices(), so an override may inspect nDevices_ and build vNICs.
+    virtual int SelectDevice() { return 0; }
+
+    std::string skipReason_;
+
+    // Bail out on every rank at once: a lone return strands the peers in the next
+    // barrier, replacing the real failure with a hang.
+    bool AnyRankFailed(bool localFailure) { return mpiAnyRank(localFailure); }
+
     void SetUp() override
     {
         MPITestBase::SetUp();
@@ -118,8 +132,97 @@ protected:
         }
     }
 
+    // main_mpi.cpp silences gtest output on non-zero ranks, so re-raise their failures
+    // on rank 0 at the file and line where they failed.
+    void ForwardPeerFailures()
+    {
+        constexpr int kTagCount = 9640;
+        constexpr int kTagLen   = 9641;
+        constexpr int kTagMsg   = 9642;
+
+        // Each failed part travels as three NUL-terminated fields: file, line, summary.
+        if(worldRank_ != 0)
+        {
+            int         nFailed = 0;
+            std::string msg;
+            const auto* r = ::testing::UnitTest::GetInstance()->current_test_info()->result();
+            for(int i = 0; i < r->total_part_count(); ++i)
+            {
+                const auto& p = r->GetTestPartResult(i);
+                if(!p.failed()) continue;
+                ++nFailed;
+                msg += p.file_name() ? p.file_name() : "unknown";
+                msg += '\0';
+                msg += std::to_string(p.line_number());
+                msg += '\0';
+                msg += p.summary() ? p.summary() : "";
+                msg += '\0';
+            }
+            int len = static_cast<int>(msg.size());
+            MPI_Send(&nFailed, 1, MPI_INT, 0, kTagCount, MPI_COMM_WORLD);
+            MPI_Send(&len, 1, MPI_INT, 0, kTagLen, MPI_COMM_WORLD);
+            if(len > 0) MPI_Send(msg.data(), len, MPI_CHAR, 0, kTagMsg, MPI_COMM_WORLD);
+            return;
+        }
+
+        // Same timeout as MPIEnvironment::TearDown, which a peer stuck in the test body
+        // would otherwise keep rank 0 from ever reaching.
+        int timeoutSec = 60;
+        if(const char* env = std::getenv("RCCL_TEST_TEARDOWN_TIMEOUT_SEC"))
+        {
+            int v = std::atoi(env);
+            if(v > 0) timeoutSec = v;
+        }
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeoutSec);
+
+        for(int peer = 1; peer < worldSize_; ++peer)
+        {
+            int arrived = 0;
+            MPI_Iprobe(peer, kTagCount, MPI_COMM_WORLD, &arrived, MPI_STATUS_IGNORE);
+            while(!arrived)
+            {
+                if(std::chrono::steady_clock::now() > deadline)
+                {
+                    ADD_FAILURE() << "rank " << peer << " did not reach TearDown within "
+                                  << timeoutSec << " s (ranks out of sync), forcing abort";
+                    MPI_Abort(MPI_COMM_WORLD, 1);
+                    return;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                MPI_Iprobe(peer, kTagCount, MPI_COMM_WORLD, &arrived, MPI_STATUS_IGNORE);
+            }
+
+            int nFailed = 0, len = 0;
+            MPI_Recv(&nFailed, 1, MPI_INT, peer, kTagCount, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(&len, 1, MPI_INT, peer, kTagLen, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            if(len <= 0) continue;
+
+            std::string msg(len, '\0');
+            MPI_Recv(msg.data(), len, MPI_CHAR, peer, kTagMsg, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            size_t pos = 0;
+            auto   nextField = [&msg, &pos]() {
+                const size_t end = msg.find('\0', pos);
+                std::string  field = msg.substr(pos, end - pos);
+                pos = (end == std::string::npos) ? msg.size() : end + 1;
+                return field;
+            };
+            for(int i = 0; i < nFailed && pos < msg.size(); ++i)
+            {
+                const std::string file    = nextField();
+                const int         line    = std::atoi(nextField().c_str());
+                const std::string summary = nextField();
+                ADD_FAILURE_AT(file.c_str(), line) << "[rank " << peer << "] " << summary;
+            }
+        }
+    }
+
     void TearDown() override
     {
+        // Every rank must reach TearDown for the same test; otherwise rank 0 aborts the job
+        // after RCCL_TEST_TEARDOWN_TIMEOUT_SEC. worldSize_ stays 0 until SetUpFixture
+        // passes its world-size checks.
+        if(worldSize_ > 1) ForwardPeerFailures();
+
         if(rma_ != nullptr)
         {
             if(collComm_ != nullptr && rma_->deregMrSym)
@@ -210,7 +313,21 @@ protected:
             return false;
         }
 
-        // 3. listen — produce this rank's listen handle
+        // 3. pick the device to connect over. Reduced so a host that cannot satisfy
+        // the request does not skip alone and strand its peers in the allgather.
+        int selected = SelectDevice();
+        if(AnyRankFailed(selected < 0))
+        {
+            // See comment above on the bool-vs-void GTEST_SKIP wrapping.
+            [&]() {
+                GTEST_SKIP() << (skipReason_.empty() ? "Requested RMA device unavailable on a peer"
+                                                     : skipReason_);
+            }();
+            return false;
+        }
+        defaultDevice_ = selected;
+
+        // 4. listen — produce this rank's listen handle
         std::vector<char> localHandle(NCCL_NET_HANDLE_MAXSIZE, 0);
         r = rma_->listen(pluginCtx_, defaultDevice_,
                          localHandle.data(), &listenComm_);
@@ -220,7 +337,7 @@ protected:
             return false;
         }
 
-        // 4. allgather all listen handles
+        // 5. allgather all listen handles
         std::vector<char> allHandles(NCCL_NET_HANDLE_MAXSIZE * worldSize_, 0);
         int mpiRet = MPI_Allgather(localHandle.data(), NCCL_NET_HANDLE_MAXSIZE, MPI_BYTE,
                                    allHandles.data(),  NCCL_NET_HANDLE_MAXSIZE, MPI_BYTE,
@@ -237,7 +354,7 @@ protected:
             handlePtrs[i] = allHandles.data() + i * NCCL_NET_HANDLE_MAXSIZE;
         }
 
-        // 5. connect (N-way collective)
+        // 6. connect (N-way collective)
         r = rma_->connect(pluginCtx_, handlePtrs.data(),
                           worldSize_, worldRank_,
                           listenComm_, &collComm_);
@@ -247,7 +364,7 @@ protected:
             return false;
         }
 
-        // 6. createContext — number of contexts driven by the parameter.
+        // 7. createContext — number of contexts driven by the parameter.
         // The RMA v14 config is host-only: no signal/counter pools or device
         // handle (those belong to the device-initiated GIN v14 surface).
         ncclRmaConfig_t cfg = {};
@@ -335,28 +452,50 @@ protected:
     // the request out-param; these functional tests always use the default
     // (non-strong) ordering semantics, so it is fixed to false here.
     ncclResult_t IPut(int context, uint64_t srcOff, void* srcMhandle, size_t size,
-                      uint64_t dstOff, void* dstMhandle, uint32_t rank, void** request)
+                      uint64_t dstOff, void* dstMhandle, uint32_t rank, void** request,
+                      uint32_t optFlags = ncclRmaOptFlagsDefault)
     {
         return rma_->iput(rmaCtx_, context, srcOff, srcMhandle, size, dstOff, dstMhandle,
-                          rank, ncclRmaOptFlagsDefault, request);
+                          rank, optFlags, request);
     }
 
     ncclResult_t IGet(int context, uint64_t remoteOff, void* remoteMhandle, size_t size,
-                      uint64_t localOff, void* localMhandle, uint32_t rank, void** request)
+                      uint64_t localOff, void* localMhandle, uint32_t rank, void** request,
+                      uint32_t optFlags = ncclRmaOptFlagsDefault)
     {
         return rma_->iget(rmaCtx_, context, remoteOff, remoteMhandle, size, localOff,
-                          localMhandle, rank, ncclRmaOptFlagsDefault, request);
+                          localMhandle, rank, optFlags, request);
     }
 
     ncclResult_t IPutSignal(int context, uint64_t srcOff, void* srcMhandle, size_t size,
                             uint64_t dstOff, void* dstMhandle, uint32_t rank,
                             uint64_t signalOff, void* signalMhandle, uint64_t signalValue,
-                            uint32_t signalOp, void** request)
+                            uint32_t signalOp, void** request,
+                            uint32_t optFlags = ncclRmaOptFlagsDefault)
     {
         return rma_->iputSignal(rmaCtx_, context, srcOff, srcMhandle, size, dstOff,
                                 dstMhandle, rank, signalOff, signalMhandle, signalValue,
-                                signalOp, /*isStrongSignal=*/false, ncclRmaOptFlagsDefault,
+                                signalOp, /*isStrongSignal=*/false, optFlags,
                                 request);
+    }
+
+    // A single rma->test() call: true iff the request was already complete.
+    bool TestOnce(void* request)
+    {
+        int          done = 0;
+        ncclResult_t r    = rma_->test(collComm_, request, &done);
+        if(r != ncclSuccess)
+        {
+            ADD_FAILURE() << "rma->test failed: " << r;
+            return false;
+        }
+        return done != 0;
+    }
+
+    // Only net_ib at the default batch size signals just a batch's tail, so one completion retires the whole batch.
+    bool RetiresBatchOnTailCompletion() const
+    {
+        return rma_ == &ncclRmaIbProxy && std::getenv("NCCL_RMA_IB_WR_BATCHSIZE") == nullptr;
     }
 
     bool PollUntilDone(void* request, int timeoutMs = kDefaultPollTimeoutMs)
@@ -431,18 +570,51 @@ protected:
         (void)hipDeviceSynchronize();
     }
 
-    /** Return true iff device `buf` matches (seed + i) % 256 for all i. */
-    bool VerifyBuf(const void* buf, size_t size, int seed)
+    /** Check device `buf` against (seed + i) % 256, reporting where a mismatch starts
+     *  and what was read, so a payload that never landed (zeros) stands out. */
+    ::testing::AssertionResult VerifyBuf(const void* buf, size_t size, int seed)
     {
+        constexpr size_t kHexWindow = 16;
+        auto expectedAt = [seed](size_t i) { return static_cast<uint8_t>((seed + i) % 256); };
+
         std::vector<uint8_t> staging(size);
-        if(hipMemcpy(staging.data(), buf, size, hipMemcpyDeviceToHost) != hipSuccess)
-            return false;
+        hipError_t err = hipMemcpy(staging.data(), buf, size, hipMemcpyDeviceToHost);
+        if(err != hipSuccess)
+        {
+            return ::testing::AssertionFailure() << "hipMemcpy D2H failed: " << hipGetErrorString(err);
+        }
         (void)hipDeviceSynchronize();
+
+        size_t nBad = 0, first = 0;
+        bool   allZero = true;
         for(size_t i = 0; i < size; ++i)
         {
-            if(staging[i] != static_cast<uint8_t>((seed + i) % 256)) return false;
+            if(staging[i] == expectedAt(i)) continue;
+            if(nBad++ == 0) first = i;
+            allZero = allZero && staging[i] == 0;
         }
-        return true;
+        if(nBad == 0) return ::testing::AssertionSuccess();
+
+        std::string expectedHex, actualHex;
+        char        hex[4];
+        char        seedHex[16];
+        std::snprintf(seedHex, sizeof(seedHex), "0x%02x", seed);
+        for(size_t i = first; i < size && i < first + kHexWindow; ++i)
+        {
+            std::snprintf(hex, sizeof(hex), " %02x", expectedAt(i));
+            expectedHex += hex;
+            std::snprintf(hex, sizeof(hex), " %02x", staging[i]);
+            actualHex += hex;
+        }
+
+        return ::testing::AssertionFailure()
+               << nBad << " of " << size << " bytes mismatched (seed " << seedHex
+               << "), first at offset " << first
+               << (allZero ? "; all mismatching bytes are 0x00" : "")
+               << "\n  expected @" << first << ":" << expectedHex
+               << "\n  actual   @" << first << ":" << actualHex
+               << "\n  rank " << worldRank_ << ", nContexts " << GetNumContexts() << ", "
+               << (UseDmaBuf() ? "DmaBuf" : "RegMr");
     }
 
     /** Fill device `buf` with a constant byte (sentinel). */
@@ -524,6 +696,75 @@ class RmaMPIStressTest : public RmaMPITestBase
 {
 protected:
     int GetNumContexts() const override { return 1; }
+};
+
+// ---------------------------------------------------------------------------
+// Connects over a fused vNIC. Fusion is topology-driven in production, which a
+// plugin-level fixture never reaches, so it builds the vNIC itself.
+// ---------------------------------------------------------------------------
+class RmaMPIFusedNicTest : public RmaMPITestBase
+{
+protected:
+    int GetNumContexts() const override { return 1; }
+
+    int SelectDevice() override
+    {
+        // makeVDevice appends to the shared table and there is no destroyVDevice, so
+        // build the vNIC once per process; one per test would accumulate duplicates.
+        static int cachedVdev = -1;
+        if(cachedVdev >= 0) return cachedVdev;
+
+        // Shares net_ib's device table, so the vNIC goes through the net plugin.
+        ncclNet_t* net = (rma_ == &IbCastRmaIbProxy) ? &netIbCast : &ncclNetIb;
+
+        if(nDevices_ < 2)
+        {
+            skipReason_ = "Fused vNIC needs at least 2 IB devices on this host";
+            return -1;
+        }
+
+        // Devices 0 and 1 are not a sensible pair everywhere; matching speed keeps a
+        // mismatched pair from being reported as a fusion failure.
+        ncclNetProperties_t dev0{}, dev1{};
+        if(rma_->getProperties(0, &dev0) != ncclSuccess || rma_->getProperties(1, &dev1) != ncclSuccess)
+        {
+            skipReason_ = "Could not read properties of IB devices 0 and 1";
+            return -1;
+        }
+        if(dev0.speed != dev1.speed)
+        {
+            skipReason_ = "IB devices 0 and 1 differ in speed (" + std::to_string(dev0.speed) + " vs " +
+                          std::to_string(dev1.speed) + "); not a mergeable pair on this host";
+            return -1;
+        }
+
+        ncclNetVDeviceProps_t vProps{};
+        vProps.ndevs   = 2;
+        vProps.devs[0] = 0;
+        vProps.devs[1] = 1;
+
+        int vdev = -1;
+        if(net->makeVDevice(&vdev, &vProps) != ncclSuccess || vdev < 0)
+        {
+            // Rejected with NCCL_IB_MERGE_NICS=0, or when the NICs are too far apart.
+            skipReason_ = "makeVDevice refused to fuse devices 0 and 1 "
+                          "(needs NCCL_IB_MERGE_NICS=1 and two mergeable NICs)";
+            return -1;
+        }
+
+        // A single-device vNIC would make the test silently vacuous.
+        ncclNetProperties_t props{};
+        if(rma_->getProperties(vdev, &props) != ncclSuccess || props.vProps.ndevs < 2)
+        {
+            skipReason_ = "vNIC came back with a single device; nothing was fused";
+            return -1;
+        }
+
+        TEST_INFO("RmaMPIFusedNicTest: using fused dev %d (%s, ndevs=%d)",
+                  vdev, props.name, props.vProps.ndevs);
+        cachedVdev = vdev;
+        return vdev;
+    }
 };
 
 } // namespace RCCLRmaTests

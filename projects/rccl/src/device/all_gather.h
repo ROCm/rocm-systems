@@ -100,7 +100,7 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
       tid - workNthreads, nthreads - workNthreads, work->redOpArg, false, 1, (void**)&inputBuf, 1, (void**)&outputBuf,
       partCount);
   }
-#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
+#if NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
     // we have to wait for all warps before we can proceed to the next work;
     // otherwise, we can have contention if next work will use the outputBuf
     // in this work. We use bar 14 to avoid conflicts with prims barrier and
@@ -110,7 +110,8 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
 }
 } // namespace
 
-#if defined(__gfx942__)  // Use a single slice per simple primitive for a single node on some GFX9 devices.
+// Use a single slice per simple primitive for a single node on gfx942 and gfx1250.
+#if defined(__gfx942__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
 #define rcclAllGatherRunRingSimpleProtoImpl(tid, nthreads, work) \
   if (work->rcclUseOneSlice) { \
     runRing<T, RedOp, \
@@ -137,10 +138,10 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
 template <typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    bool isNetOffload = false;
-#else
+#if NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
     bool isNetOffload = work->isOneRPN && work->netRegUsed;
+#else
+    bool isNetOffload = false;
 #endif
     if (isNetOffload) runRing<T, RedOp, ProtoSimple<1, 1>, true>(tid, nthreads, work);
     else {
@@ -203,7 +204,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
         while (1) {
           struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
           int* poll = &ps->flags;
-          while (__hip_atomic_load(poll, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != 0) {
+          while (__scoped_atomic_load_n(poll, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) != 0) {
             pollCount++; // Wait for workers to be done with step 'step-NCCL_SHMEM_PAT_STEPS'
           }
           patAlgo.getNextOp(ps);
@@ -218,7 +219,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
         volatile int* pfPtr = &shmem->parallelFactor;
         while (parallelFactor == 0) parallelFactor = *pfPtr;
 
-        int groupSize = nworkers / (WARP_SIZE * parallelFactor) * WARP_SIZE;
+        int groupSize = patWorkerGroupSize(nworkers, WARP_SIZE, parallelFactor);
         int group = tid / groupSize;
         int nGroups = nworkers / groupSize;
         int tidInGroup = tid - group * groupSize;
@@ -231,14 +232,14 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
         while (1) {
           struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
           int* poll = &ps->flags;
-          while (__hip_atomic_load(poll, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) == 0) {
+          while (__scoped_atomic_load_n(poll, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) == 0) {
             pollCount++; // Wait for compute thread
           }
           int last = ps->last;
           prims.patCopy(ps, shmem);
           if (tidInGroup == 0)
-            __hip_atomic_store(poll, 0, __ATOMIC_RELEASE,
-                               __HIP_MEMORY_SCOPE_WORKGROUP); // Return element to compute thread
+            __scoped_atomic_store_n(poll, 0, __ATOMIC_RELEASE,
+                               __MEMORY_SCOPE_WRKGRP); // Return element to compute thread
           if (last) break;
           step += nGroups;
         }
@@ -257,9 +258,9 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
         while (1) {
           struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
           int* schedulerStep = &ps->step;
-          while (__hip_atomic_load(schedulerStep, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != -1) pollCount++;
+          while (__scoped_atomic_load_n(schedulerStep, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) != -1) pollCount++;
           patAlgo.getNextOp(ps);
-          __hip_atomic_store(schedulerStep, step, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP);
+          __scoped_atomic_store_n(schedulerStep, step, __ATOMIC_RELEASE, __MEMORY_SCOPE_WRKGRP);
           int last = ps->last;
           step++;
           if (last == 2) break;
@@ -272,7 +273,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
         volatile int* pfPtr = &shmem->parallelFactor;
         while (parallelFactor == 0) parallelFactor = *pfPtr;
 
-        int groupSize = nworkers / (WARP_SIZE * parallelFactor) * WARP_SIZE;
+        int groupSize = patWorkerGroupSize(nworkers, WARP_SIZE, parallelFactor);
         int group = tid / groupSize;
         int nGroups = nworkers / groupSize;
         int tidInGroup = tid - group * groupSize;
@@ -285,7 +286,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
         while (1) {
           struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
           int* schedulerStep = &ps->step;
-          while (__hip_atomic_load(schedulerStep, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != step) pollCount++;
+          while (__scoped_atomic_load_n(schedulerStep, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) != step) pollCount++;
           int last = ps->last;
           prims.template patCopy<true>(ps, shmem);
           if (last) break;
@@ -307,7 +308,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
         while (1) {
           struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
           int* schedulerStep = &ps->step;
-          while (__hip_atomic_load(schedulerStep, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != step) pollCount++;
+          while (__scoped_atomic_load_n(schedulerStep, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) != step) pollCount++;
           int last = ps->last;
           prims.patGather(ps, shmem, step, parallelFactor, count);
           int localIdx = step % parallelFactor;
@@ -317,7 +318,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
             int waveStart = step - localIdx;
             for (int i = 0; i < parallelFactor; i++) {
               struct ncclPatStep* donePs = shmem->patSteps + ((waveStart + i) % NCCL_SHMEM_PAT_STEPS);
-              __hip_atomic_store(&donePs->step, -1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP);
+              __scoped_atomic_store_n(&donePs->step, -1, __ATOMIC_RELEASE, __MEMORY_SCOPE_WRKGRP);
             }
           }
           if (last == 2) break;

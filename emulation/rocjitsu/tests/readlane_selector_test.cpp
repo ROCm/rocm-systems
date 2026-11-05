@@ -180,4 +180,41 @@ TEST_P(ReadlaneSelectorTest, LaneReadsRejectUnqualifiedScalarDestinations) {
   }
 }
 
+TEST(CdnaReadlaneTest, RestoresBothVccHalvesFromInactiveSpillLanes) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    amdgpu::GpuMemory mem("readlane_mem");
+    amdgpu::L2Cache l2("readlane_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 102;
+    cfg.vgprs_per_wf = 128;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("readlane", cfg, &mem, &l2);
+    auto decoder = Decoder::create(arch);
+    auto *wf = cu->dispatch_wf(0, 0, 102, 128);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(0);
+    wf->set_vcc(0xaabbccdd11223344ull);
+    cu->write_vgpr(wf->vgpr_alloc().base + 126, 33, 0x76543210u);
+    cu->write_vgpr(wf->vgpr_alloc().base + 126, 34, 0xfedcba98u);
+    // LLVM's tinygrad cumprod gradient restores VCC from VGPR spill lanes.
+    const std::array<std::array<uint32_t, 2>, 2> words{{
+        {0xd289006au, 0x0001437eu}, // v_readlane_b32 vcc_lo, v126, 33
+        {0xd289006bu, 0x0001457eu}, // v_readlane_b32 vcc_hi, v126, 34
+    }};
+    for (unsigned i = 0; i < words.size(); ++i) {
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words[i].data()));
+      ASSERT_NE(inst, nullptr);
+      EXPECT_EQ(inst->disassemble(),
+                i == 0 ? "v_readlane_b32 vcc_lo, v126, 33" : "v_readlane_b32 vcc_hi, v126, 34");
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      EXPECT_EQ(wf->vcc(), i == 0 ? 0xaabbccdd76543210ull : 0xfedcba9876543210ull);
+      EXPECT_EQ(wf->exec(), 0u);
+    }
+    wf->halt();
+  }
+}
+
 } // namespace

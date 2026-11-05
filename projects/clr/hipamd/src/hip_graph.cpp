@@ -124,6 +124,8 @@ hipError_t ihipGraphAddKernelNode(
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
+  const bool clusterDimsSpecified =
+      clusterDim.x != 0 || clusterDim.y != 0 || clusterDim.z != 0;
   if (hipError_t status =
           ihipResolveGraphClusterDimensions(func, deviceId, pNodeParams->gridDim, &clusterDim);
       status != hipSuccess) {
@@ -159,7 +161,7 @@ hipError_t ihipGraphAddKernelNode(
   auto* kernelNode =
       new hip::GraphKernelNode(pNodeParams, pNodeEvents, coopKernel, globalWorkSizeX_remainder,
                                globalWorkSizeY_remainder, globalWorkSizeZ_remainder, clusterDim,
-                               launchFlags);
+                               clusterDimsSpecified, launchFlags);
   status = kernelNode->GetParamCopyStatus();
   if (status != hipSuccess) {
     delete kernelNode;
@@ -180,6 +182,11 @@ hipError_t ihipGraphAddMemcpyNode(hip::GraphNode** pGraphNode, hip::Graph* graph
     return hipErrorInvalidValue;
   }
   hipError_t status = ihipMemcpy3D_validate(pCopyParams);
+  if (status != hipSuccess) {
+    return status;
+  }
+  const HIP_MEMCPY3D desc = hip::getDrvMemcpy3DDesc(*pCopyParams);
+  status = ihipDrvMemcpy3D_validate(&desc);
   if (status != hipSuccess) {
     return status;
   }
@@ -278,14 +285,21 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
   return status;
 }
 
-hipError_t capturehipLaunchKernel(hipStream_t& stream, const void*& hostFunction, dim3& gridDim,
-                                  dim3& blockDim, void**& args, size_t& sharedMemBytes) {
+hipError_t capturehipLaunchKernelCommon(hipStream_t& stream, const void*& hostFunction,
+                                        dim3& gridDim, dim3& blockDim, void**& args,
+                                        size_t& sharedMemBytes, dim3& clusterDim,
+                                        bool& clusterDimsSpecified) {
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
-          "[hipGraph] Current capture node LaunchKernel on stream : %p", stream);
+          "[hipGraph] Current capture node LaunchKernel on stream : %p (cluster %u,%u,%u%s)",
+          stream, clusterDim.x, clusterDim.y, clusterDim.z,
+          clusterDimsSpecified ? "" : ", not specified");
 
   if (!hip::isValid(stream)) {
     return hipErrorContextIsDestroyed;
   }
+  // {0,0,0} tells the kernel node that no cluster dimensions were given, so it resolves the
+  // kernel's own requirement (__cluster_dims__ or a runtime cluster attribute) instead.
+  const dim3 nodeClusterDim = clusterDimsSpecified ? clusterDim : dim3(0, 0, 0);
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   hipKernelNodeParams nodeParams;
   nodeParams.func = const_cast<void*>(hostFunction);
@@ -296,9 +310,10 @@ hipError_t capturehipLaunchKernel(hipStream_t& stream, const void*& hostFunction
   nodeParams.sharedMemBytes = sharedMemBytes;
 
   hip::GraphNode* pGraphNode;
-  hipError_t status = ihipGraphAddKernelNode(
-      &pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
-      s->GetLastCapturedNodes().size(), &nodeParams, nullptr, true, 0, s->DeviceId());
+  hipError_t status =
+      ihipGraphAddKernelNode(&pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
+                             s->GetLastCapturedNodes().size(), &nodeParams, nullptr, true, 0,
+                             s->DeviceId(), 0, 0, 0, nodeClusterDim);
   if (status != hipSuccess) {
     return status;
   }

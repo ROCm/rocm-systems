@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Linux descriptor and memory interop for the AMDF frontend.
@@ -7,20 +8,23 @@ use crate::generated::amdf::{
     amdf_endpoint_native_identity_t__value, amdf_endpoint_native_identity_t__value__linux_device,
 };
 use rocddi::topology::Endpoint;
+use rocddi::topology::platform::linux::{host_numa_node as native_host_numa_node, kfd_drm_info};
 
 pub(crate) use rocddi::memory::interop::linux as memory;
 pub(crate) use std::os::fd::IntoRawFd;
 
 pub(crate) fn render_supported(endpoint: &Endpoint) -> bool {
-    endpoint
-        .linux_kfd_drm_info()
+    kfd_drm_info(endpoint)
         .and_then(|info| info.render_minor)
         .is_some()
 }
 
+pub(crate) fn host_numa_node(endpoint: &Endpoint) -> u32 {
+    native_host_numa_node(endpoint).unwrap_or(u32::MAX)
+}
+
 pub(crate) fn native_identity(endpoint: &Endpoint) -> amdf_endpoint_native_identity_t {
-    endpoint
-        .linux_kfd_drm_info()
+    kfd_drm_info(endpoint)
         .and_then(|info| info.render_minor)
         .map_or_else(amdf_endpoint_native_identity_t::default, |minor| {
             amdf_endpoint_native_identity_t {

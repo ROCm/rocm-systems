@@ -80,22 +80,23 @@ static ncclResult_t ncclAllToAllDdaFabricLLTyped(
   INFO(NCCL_COLL, "DDA fabric AllToAll LL: nRanks=%d perChunkBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
        nRanks, perChunkBytes, grid.x, grid.y, block.x, blocksPerPeer);
 
+  const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   switch (nRanks) {
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen);
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, params);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen);
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, params);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen);
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, params);
     break;
   }
 
@@ -122,7 +123,7 @@ bool ncclAllToAllDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void*
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 
@@ -149,7 +150,7 @@ uint32_t ncclAllToAllDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataTyp
 
 ncclResult_t ncclAllToAllDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                      ncclComm* comm, cudaStream_t stream) {
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return ncclInvalidArgument;
   }
   // All-to-all moves raw bytes, so instantiate once for int8_t and scale the
