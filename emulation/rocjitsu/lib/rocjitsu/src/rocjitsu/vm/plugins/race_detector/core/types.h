@@ -75,7 +75,7 @@ struct RaceViolation {
   Space space;
   int index;    ///< Register index (VGPR/SGPR) or byte address (LDS).
   int wave;     ///< Wave that triggered the violation.
-  int lane;     ///< Lane within the wave, or -1 for scalar.
+  int lane;     ///< Lane within the wave, or -1 for no lane (scalar or tensor DMA).
   bool isWrite; ///< True if the violating access was a write.
   Dim3d workgroupId;
   EventId conflictingEvent; ///< Exact pending memory event that caused the violation.

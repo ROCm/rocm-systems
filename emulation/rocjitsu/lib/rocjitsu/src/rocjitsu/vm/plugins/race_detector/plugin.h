@@ -25,7 +25,7 @@ namespace rocjitsu::plugins::race_detector {
 struct MarkedInstruction {
   InstructionSnapshot instruction;
   int wave;
-  int lane; // -1 for scalar
+  int lane; // -1 for no lane: a scalar access or a tensor DMA transfer.
 };
 
 /// Retains the last N pushed values. Elements are never default-constructed.
