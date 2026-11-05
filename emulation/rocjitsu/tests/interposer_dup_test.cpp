@@ -2768,8 +2768,9 @@ protected:
     ASSERT_EQ(close(drm_), 0);
     drm_ = -1;
     bo_ = 0;
-    if (!race_completion)
+    if (!race_completion) {
       EXPECT_EQ(memory_[1537], 0u);
+    }
     // Completion releases the last submission owner on the engine thread. Final
     // file cleanup must be deferred rather than destroying the backend there.
     if (!race_completion)
@@ -6345,11 +6346,13 @@ protected:
   void TearDown() override {
     // Close DRM files before the KFD descriptor, including on an ASSERT failure.
     for (auto *vm : {&first_, &second_}) {
-      if (vm->drm >= 0)
+      if (vm->drm >= 0) {
         EXPECT_EQ(close(std::exchange(vm->drm, -1)), 0);
+      }
     }
-    if (kfd_ >= 0)
+    if (kfd_ >= 0) {
       EXPECT_EQ(close(kfd_), 0);
+    }
   }
 
   void open_vm(Vm &vm, int minor) {
@@ -6436,8 +6439,9 @@ protected:
     // existing direct KFD queue tests; the destination is explicitly DRM-mapped.
     kfd_ioctl_create_event_args event{};
     event.event_type = KFD_IOC_EVENT_MEMORY;
-    if (expect_fault)
+    if (expect_fault) {
       ASSERT_EQ(ioctl(kfd_, AMDKFD_IOC_CREATE_EVENT, &event), 0);
+    }
     class EventCleanup {
     public:
       int kfd;
