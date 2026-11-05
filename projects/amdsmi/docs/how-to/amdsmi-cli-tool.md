@@ -1516,6 +1516,7 @@ GPU: 0
     CACHE_INFO:
         CACHE_0:
             CACHE_ACRONYM: L1D
+            CACHE_NAME: L1 Vector Data
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
             CACHE_SIZE: 32 KB
             CACHE_LEVEL: 1
@@ -1524,6 +1525,7 @@ GPU: 0
             TOTAL_CACHE_SIZE: 7296 KB
         CACHE_1:
             CACHE_ACRONYM: L1I
+            CACHE_NAME: L1 Instruction
             CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
             CACHE_SIZE: 64 KB
             CACHE_LEVEL: 1
@@ -1532,6 +1534,7 @@ GPU: 0
             TOTAL_CACHE_SIZE: 6912 KB
         CACHE_2:
             CACHE_ACRONYM: L1I
+            CACHE_NAME: L1 Instruction
             CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
             CACHE_SIZE: 64 KB
             CACHE_LEVEL: 1
@@ -1540,6 +1543,7 @@ GPU: 0
             TOTAL_CACHE_SIZE: 768 KB
         CACHE_3:
             CACHE_ACRONYM: L1D
+            CACHE_NAME: L1 Scalar Data
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
             CACHE_SIZE: 16 KB
             CACHE_LEVEL: 1
@@ -1548,6 +1552,7 @@ GPU: 0
             TOTAL_CACHE_SIZE: 1728 KB
         CACHE_4:
             CACHE_ACRONYM: L1D
+            CACHE_NAME: L1 Scalar Data
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
             CACHE_SIZE: 16 KB
             CACHE_LEVEL: 1
@@ -1556,6 +1561,7 @@ GPU: 0
             TOTAL_CACHE_SIZE: 192 KB
         CACHE_5:
             CACHE_ACRONYM: L2
+            CACHE_NAME: L2 Data
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
             CACHE_SIZE: 4096 KB
             CACHE_LEVEL: 2
@@ -1564,6 +1570,7 @@ GPU: 0
             TOTAL_CACHE_SIZE: 4096 KB
         CACHE_6:
             CACHE_ACRONYM: L3
+            CACHE_NAME: L3 Data
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
             CACHE_SIZE: 262144 KB
             CACHE_LEVEL: 3
