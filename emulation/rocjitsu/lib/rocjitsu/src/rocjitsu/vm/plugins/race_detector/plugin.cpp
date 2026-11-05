@@ -25,7 +25,6 @@
 #include <format>
 #include <mutex>
 #include <optional>
-#include <set>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -262,33 +261,6 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
 
 namespace {
 
-std::string_view counter_name(amdgpu::WaitCounterType type) {
-  using enum amdgpu::WaitCounterType;
-  switch (type) {
-  case VMCNT:
-    return "vmcnt";
-  case LGKMCNT:
-    return "lgkmcnt";
-  case EXPCNT:
-    return "expcnt";
-  case VSCNT:
-    return "vscnt";
-  case LOADCNT:
-    return "loadcnt";
-  case STORECNT:
-    return "storecnt";
-  case DSCNT:
-    return "dscnt";
-  case KMCNT:
-    return "kmcnt";
-  case TENSORCNT:
-    return "tensorcnt";
-  case ASYNCCNT:
-    return "asynccnt";
-  }
-  throw std::logic_error("race event has an unknown completion counter");
-}
-
 std::string_view event_description(MemoryEventType type) {
   using enum MemoryEventType;
   switch (type) {
@@ -380,21 +352,18 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
       << std::dec << ", wave " << owner << ".\n";
   if (events.status(event) == EventStatus::ACTIVE) {
     oss << "  Completion for wave " << owner << " is not guaranteed; pending counters: ";
-    std::set<amdgpu::WaitCounterType> displayed;
+    std::vector<amdgpu::WaitCounterKind> displayed;
     for (const auto obligation : events.counterObligations(event)) {
-      const auto counter = obligation.wait_counter_type();
+      const amdgpu::WaitCounterType counter = obligation.wait_counter_type();
       if (!events.hasPendingWaitCounter(event, counter))
         continue;
-      const auto architectural_counter =
-          amdgpu::memory_wait_counter_type(amdgpu::canonical_wait_counter(counter, model.value()),
-                                           model.value())
-              .value_or(counter);
-      if (displayed.contains(architectural_counter))
+      const amdgpu::WaitCounterKind kind = amdgpu::canonical_wait_counter(counter, model.value());
+      if (std::ranges::find(displayed, kind) != displayed.end())
         continue;
       if (!displayed.empty())
         oss << ", ";
-      oss << counter_name(architectural_counter);
-      displayed.insert(architectural_counter);
+      oss << amdgpu::wait_counter_name(kind, model.value());
+      displayed.push_back(kind);
     }
     oss << ".\n";
   } else if (events.status(event) == EventStatus::WAVE_COMPLETE) {
