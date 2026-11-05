@@ -84,6 +84,7 @@
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
+#include <profiler-hub/storage.hpp>
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/registration.h>
 
@@ -594,7 +595,11 @@ rocprofsys_init_library_hidden()
         std::exit(EXIT_FAILURE);
     }
 
-    library_checker::check_profiler_hub_version_mismatch();
+    library_checker::check_profiler_hub_version_mismatch<
+        profiler_hub::storage_t,
+        version{ .major = ROCPROFSYS_PROFILER_HUB_VERSION_MAJOR,
+                 .minor = ROCPROFSYS_PROFILER_HUB_VERSION_MINOR,
+                 .patch = ROCPROFSYS_PROFILER_HUB_VERSION_PATCH }>();
     library_checker::check_rocprofiler_sdk_version_mismatch<
         backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>>();
 
