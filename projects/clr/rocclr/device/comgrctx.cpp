@@ -90,9 +90,7 @@ bool Comgr::LoadLib() {
   constexpr size_t kRequiredMajor = 3;
   constexpr size_t kRequiredMinor = 2;
   if (major != kRequiredMajor || minor < kRequiredMinor) {
-    // Log unconditionally: a mismatched Comgr (typically one from another ROCm installation
-    // found first on the library search path) leaves no usable devices, and the resulting
-    // hipErrorNoDevice is otherwise indistinguishable from having no GPU at all.
+    // Always log: otherwise the only symptom is hipErrorNoDevice.
     ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
             "COMGR library version %zu.%zu is incompatible; "
             "require %zu.%zu or newer (same major). Ensure the Comgr library from the same "
