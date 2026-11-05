@@ -114,7 +114,7 @@ hsa_signal_t
 plain_signal(hsa_signal_t signal)
 {
 #if defined(AMD_SIGNAL_HINT_MASK)
-    signal.handle &= ~static_cast<uint64_t>(AMD_SIGNAL_HINT_MASK);
+    signal.handle &= ~AMD_SIGNAL_HINT_MASK;
 #endif
     return signal;
 }
