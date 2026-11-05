@@ -622,12 +622,8 @@ public:
 #if TDM_LL128_ON
     tdmEnable = ncclShmem.comm.tdmLl128Enable;
 #endif
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-    skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
-#else
     // No DWORDX4 builtins: registered user-buffer stores are cacheable; the FIFO is uncached when the cheap fence is on.
-    skip_fence = !ncclShmem.comm.cheapPostSendFenceOff && !userRegUsed;
-#endif
+    skip_fence = RCCL_USE_CHEAP_POST_SEND_FENCE(ncclShmem.comm.cheapPostSendFenceOff, userRegUsed);
   }
 
   // stepSize_ is the Simple-protocol chunk the send/recv kernel passes for every protocol; LL128 send/recv uses its
