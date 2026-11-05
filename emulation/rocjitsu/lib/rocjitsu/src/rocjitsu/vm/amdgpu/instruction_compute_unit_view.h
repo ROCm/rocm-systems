@@ -30,6 +30,7 @@ class L2Cache;
 class Lds;
 class OperandExecutionAccess;
 class RegisterAccess;
+struct TensorDmaIssueObservation;
 struct TensorDmaMemoryAccessObservation;
 class Wavefront;
 
@@ -92,6 +93,8 @@ public:
                               bool retain_wave = true);
   bool observes_tensor_dma_memory_access() const;
   void report_tensor_dma_memory_access(const TensorDmaMemoryAccessObservation &access);
+  bool observes_tensor_dma_issue() const;
+  void report_tensor_dma_issue(const TensorDmaIssueObservation &issue);
 
 private:
   ComputeUnitCore &raw_cu() { return *cu_; }
