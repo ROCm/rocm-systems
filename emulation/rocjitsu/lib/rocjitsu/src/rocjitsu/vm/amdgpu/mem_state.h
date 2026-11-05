@@ -95,6 +95,9 @@ public:
   AtomicOp atomic_op = AtomicOp::NONE;
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::LGKMCNT;
+  /// One bit per DWORD of a buffer access. A set bit selects the DWORD for
+  /// access; a clear bit makes a load return zero for it or skips it for a
+  /// store. An atomic's mask is all set or all clear.
   uint16_t load_dword_mask = 0xffff;
   uint32_t response_data[16] = {};
   uint32_t store_data[16] = {};
