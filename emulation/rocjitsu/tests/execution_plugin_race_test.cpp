@@ -455,6 +455,375 @@ INSTANTIATE_TEST_SUITE_P(BlockLoads, BlockLoadRaceTest,
                                            BlockLoadCase{"rdna4", false},
                                            BlockLoadCase{"rdna4", true}));
 
+/// Drives the race detector's tensor DMA hook for two gfx1250 waves of one
+/// workgroup, probing LDS with ordinary DS accesses. The Dtl tests also drive
+/// the routed-memory hook with direct-to-LDS writes, checked against a pending
+/// tensor store or, without any tensor instruction, a pending DS read. Race
+/// semantics are covered in race_detector_tests.cpp; these tests cover the
+/// hooks' translation.
+class TensorDmaRaceTest : public ::testing::Test {
+protected:
+  static constexpr uint64_t kTensorPc = 0x2010;
+
+  PluginFixture fixture;
+  StringSink *sink = nullptr;
+  std::array<Wavefront *, 2> waves{};
+  std::unique_ptr<Decoder> decoder;
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/2, "cdna5",
+                                               /*wavefront_size=*/32, /*sgprs_per_wf=*/128));
+    PluginSinkConfig sink_config;
+    sink = &sink_config.emplace<StringSink>();
+    fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    fixture.soc->set_plugin_group(fixture.plugin_group_);
+    fixture.plugin_group_->onInit();
+    for (auto &wave : waves) {
+      wave = fixture.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0x100, /*sgprs=*/128, /*vgprs=*/256,
+                                       /*wf_size=*/32);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1);
+    }
+    fixture.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0, 256, 128,
+                                                       waves);
+    decoder = Decoder::create(fixture.cu()->arch());
+    ASSERT_NE(decoder, nullptr);
+  }
+
+  /// Record a decoded tensor DMA instruction in the wave's trace, as execution
+  /// does before running it. It does not execute the instruction; transfer()
+  /// delivers the issue observation separately.
+  void record_tensor_instruction(int wave, bool is_load) {
+    const std::array<uint32_t, 3> words{is_load ? 0xd0710001u : 0xd0714001u, 0x7c000000u,
+                                        0x7c7c0c00u};
+    util::StringDiagnostic error;
+    auto inst = decoder->decode_window(words, waves[wave]->pc, error.emitter());
+    ASSERT_TRUE(inst.succeeded()) << error.message();
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, *inst.value(),
+                                                            *waves[wave]);
+  }
+
+  /// Issue one tensor DMA instruction, as execution does, and return whether it
+  /// produced a race.
+  bool transfer(int wave, bool is_load, std::span<const TensorDmaLdsRange> ranges) {
+    // Each access gets a distinct PC so reports are not deduplicated.
+    waves[wave]->pc += 16;
+    record_tensor_instruction(wave, is_load);
+    const size_t previous = sink->str().size();
+    fixture.plugin_group_->onAmdgpuTensorDmaIssued(
+        {.is_load = is_load, .element_size_bytes = sizeof(uint32_t), .lds_ranges = ranges},
+        *waves[wave]);
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+
+  bool tensor_load(int wave, std::initializer_list<TensorDmaLdsRange> ranges) {
+    return transfer(wave, true, std::span(ranges.begin(), ranges.size()));
+  }
+
+  bool tensor_store(int wave, std::initializer_list<TensorDmaLdsRange> ranges) {
+    return transfer(wave, false, std::span(ranges.begin(), ranges.size()));
+  }
+
+  /// Issue a one-lane DS access and report whether it produced a race.
+  bool ds_access(int wave, uint32_t address, bool is_load) {
+    waves[wave]->pc += 16;
+    const size_t previous = sink->str().size();
+    auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = is_load;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = 1;
+    state->lane_mask = 1;
+    state->dst_reg_base = waves[wave]->vgpr_alloc().base;
+    state->per_lane_addr[0] = address;
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::DSCNT, MemoryCompletionClass::LDS}});
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave]);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *waves[wave]);
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+
+  bool ds_read(int wave, uint32_t address) { return ds_access(wave, address, true); }
+  bool ds_write(int wave, uint32_t address) { return ds_access(wave, address, false); }
+
+  /// Issue a one-lane Direct-to-LDS write of one dword, as an async load to LDS
+  /// does, and report whether it produced a race. A nonzero `cluster_mcast_mask`
+  /// makes it a cluster load with that M0 multicast mask.
+  bool dtl_write(int wave, uint32_t address, uint32_t cluster_mcast_mask = 0) {
+    waves[wave]->pc += 16;
+    const size_t previous = sink->str().size();
+    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = true;
+    state->lds_dst = true;
+    state->lds_per_lane_addr = true;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = 1;
+    state->lane_mask = 1;
+    state->per_lane_lds_addr[0] = address;
+    state->cluster_multicast = cluster_mcast_mask != 0;
+    state->cluster_mcast_mask = cluster_mcast_mask;
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}});
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave]);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *waves[wave]);
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+
+  void wait_tensorcnt(int wave, uint16_t count) {
+    execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfcb0000u | count);
+  }
+
+  void wait_asynccnt(int wave, uint16_t count) {
+    execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfca0000u | count);
+  }
+
+  void wait_dscnt(int wave) {
+    execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfc60000u); // s_wait_dscnt 0.
+  }
+
+  void barrier() { fixture.plugin_group_->onAmdgpuBarrierResolved(waves); }
+
+  /// Wave 0 issues a tensor load at 0x2010 that overwrites bytes wave 1 is
+  /// still reading. Returns the race report.
+  std::string tensor_load_racing_an_older_read() {
+    EXPECT_FALSE(ds_read(1, 4));
+    waves[0]->pc = kTensorPc - 16; // transfer() advances the PC by 16.
+    const size_t previous = sink->str().size();
+    EXPECT_TRUE(tensor_load(0, {{.address = 0, .bytes = 16}}));
+    return sink->str().substr(previous);
+  }
+};
+
+// A reported race suppresses later reports involving either instruction, so
+// each retirement check uses a transfer that has not raced yet; the unwaited
+// case is its own test.
+TEST_F(TensorDmaRaceTest, LoadIsAnLdsWriteUntilRetired) {
+  tensor_load(0, {{.address = 0, .bytes = 16}});
+  EXPECT_TRUE(ds_read(1, 4));
+}
+
+TEST_F(TensorDmaRaceTest, LoadIsRetiredByTensorcntAndBarrier) {
+  tensor_load(0, {{.address = 0, .bytes = 16}});
+  wait_tensorcnt(0, 0);
+  barrier();
+  EXPECT_FALSE(ds_read(1, 4));
+}
+
+TEST_F(TensorDmaRaceTest, StoreIsAnLdsReadUntilRetired) {
+  tensor_store(0, {{.address = 32, .bytes = 16}});
+  EXPECT_TRUE(ds_write(1, 40));
+}
+
+TEST_F(TensorDmaRaceTest, StoreIsRetiredByTensorcntAndBarrier) {
+  tensor_store(0, {{.address = 32, .bytes = 16}});
+  wait_tensorcnt(0, 0);
+  barrier();
+  EXPECT_FALSE(ds_write(1, 40));
+}
+
+TEST_F(TensorDmaRaceTest, EveryRangeOfATransferIsTracked) {
+  // Probe the gap and the second range; a race is reported once per producer.
+  tensor_load(0, {{.address = 0, .bytes = 8}, {.address = 12, .bytes = 8}});
+  EXPECT_FALSE(ds_read(1, 8));
+  EXPECT_TRUE(ds_read(1, 16));
+}
+
+TEST_F(TensorDmaRaceTest, SameWaveLoadOverwritingAPendingStoreSourceRaces) {
+  // Transfers from one wave complete in order; the detector conservatively
+  // treats their LDS accesses as unordered.
+  tensor_store(0, {{.address = 0, .bytes = 16}});
+  EXPECT_TRUE(tensor_load(0, {{.address = 4, .bytes = 8}}));
+}
+
+TEST_F(TensorDmaRaceTest, SameWaveLoadAfterTensorcntIsSafe) {
+  tensor_store(0, {{.address = 0, .bytes = 16}});
+  wait_tensorcnt(0, 0);
+  EXPECT_FALSE(tensor_load(0, {{.address = 0, .bytes = 16}}));
+}
+
+TEST_F(TensorDmaRaceTest, TransferIsCheckedAgainstPendingLdsAccesses) {
+  EXPECT_FALSE(ds_read(1, 4));
+  const size_t previous = sink->str().size();
+  EXPECT_TRUE(tensor_load(0, {{.address = 0, .bytes = 16}}));
+  // A transfer has no lanes.
+  const std::string report = sink->str().substr(previous);
+  EXPECT_NE(report.find("type=LDS access=write"), std::string::npos) << report;
+  EXPECT_NE(report.find("wave=0 lane=-1"), std::string::npos) << report;
+}
+
+TEST_F(TensorDmaRaceTest, StoreIsCheckedAgainstAPendingDsWrite) {
+  // DS writes and tensor transfers complete independently, so the store may
+  // read the bytes before the earlier write lands.
+  EXPECT_FALSE(ds_write(0, 4));
+  waves[0]->pc = kTensorPc - 16; // transfer() advances the PC by 16.
+  const size_t previous = sink->str().size();
+  EXPECT_TRUE(tensor_store(0, {{.address = 0, .bytes = 16}}));
+  const std::string report = sink->str().substr(previous);
+  EXPECT_NE(report.find("type=LDS access=read"), std::string::npos) << report;
+  EXPECT_NE(report.find("wave=0 lane=-1"), std::string::npos) << report;
+  EXPECT_NE(report.find(std::format("==>  0x{:x}  tensor_store_from_lds", kTensorPc)),
+            std::string::npos)
+      << report;
+}
+
+TEST_F(TensorDmaRaceTest, RaceIsReportedAtAByteBothAccessesTouch) {
+  // The store reads bytes 0-127 but shares only bytes 120-123 with the DS write.
+  EXPECT_FALSE(ds_write(0, 120));
+  const size_t previous = sink->str().size();
+  EXPECT_TRUE(tensor_store(0, {{.address = 0, .bytes = 128}}));
+  const std::string report = sink->str().substr(previous);
+  EXPECT_NE(report.find("Race on LDS byte 120 ["), std::string::npos) << report;
+  EXPECT_NE(report.find(" reg=120 "), std::string::npos) << report;
+}
+
+// A Direct-to-LDS write is checked against pending LDS reads when it issues.
+TEST_F(TensorDmaRaceTest, DtlOverwritingAPendingStoreSourceRaces) {
+  tensor_store(0, {{.address = 0, .bytes = 16}});
+  EXPECT_TRUE(dtl_write(0, 4));
+}
+
+// A cluster load issued outside a cluster is an ordinary global load (CDNA5 ISA
+// 10.7), so it writes the wave's own LDS whatever its M0 mask says.
+TEST_F(TensorDmaRaceTest, ClusterLoadOutsideAClusterOverwritingAPendingStoreSourceRaces) {
+  ASSERT_EQ(waves[0]->cluster_size(), 1u);
+  ASSERT_EQ(waves[0]->cluster_rank(), 0u);
+  tensor_store(0, {{.address = 0, .bytes = 16}});
+  EXPECT_TRUE(dtl_write(0, 4, /*cluster_mcast_mask=*/2));
+}
+
+TEST_F(TensorDmaRaceTest, ClusterLoadToItsOwnRankOverwritingAPendingStoreSourceRaces) {
+  // Inside a cluster, so the mask applies and M0 = 1 selects the wave's rank.
+  waves[0]->set_cluster_info(/*rank=*/0, /*size=*/2);
+  tensor_store(0, {{.address = 0, .bytes = 16}});
+  EXPECT_TRUE(dtl_write(0, 4, /*cluster_mcast_mask=*/1));
+}
+
+// Inside a cluster, a multicast that excludes the wave's rank does not write
+// its LDS.
+TEST_F(TensorDmaRaceTest, ClusterLoadToOnlyAPeerLeavesTheLocalStoreSourceAlone) {
+  waves[0]->set_cluster_info(/*rank=*/0, /*size=*/2);
+  tensor_store(0, {{.address = 0, .bytes = 16}});
+  EXPECT_FALSE(dtl_write(0, 4, /*cluster_mcast_mask=*/2));
+}
+
+// A peer-only cluster load writes no local LDS but still takes the issuing
+// wave's next ASYNCcnt slot. After an ordinary async load to byte 0 and a
+// cluster load to rank 0 only, waiting for all but one completes the first load,
+// so a tensor store reading byte 0 is safe; waiting for all but two is not.
+TEST_F(TensorDmaRaceTest, PeerOnlyClusterLoadKeepsItsAsynccntSlot) {
+  waves[0]->set_cluster_info(/*rank=*/1, /*size=*/2);
+  EXPECT_FALSE(dtl_write(0, 0));
+  EXPECT_FALSE(dtl_write(0, 64, /*cluster_mcast_mask=*/1));
+  wait_asynccnt(0, 1);
+  EXPECT_FALSE(tensor_store(0, {{.address = 0, .bytes = 16}}));
+}
+
+TEST_F(TensorDmaRaceTest, PeerOnlyClusterLoadLeavesTheEarlierLoadPendingUntilTheWaitCoversIt) {
+  waves[0]->set_cluster_info(/*rank=*/1, /*size=*/2);
+  EXPECT_FALSE(dtl_write(0, 0));
+  EXPECT_FALSE(dtl_write(0, 64, /*cluster_mcast_mask=*/1));
+  wait_asynccnt(0, 2);
+  EXPECT_TRUE(tensor_store(0, {{.address = 0, .bytes = 16}}));
+}
+
+TEST_F(TensorDmaRaceTest, DtlAfterTensorcntIsSafe) {
+  tensor_store(0, {{.address = 0, .bytes = 16}});
+  wait_tensorcnt(0, 0);
+  EXPECT_FALSE(dtl_write(0, 4));
+}
+
+// A direct-to-LDS write over the same wave's pending DS read is reported as a
+// conservative rule: the ISA does not establish that the write waits for the
+// read.
+TEST_F(TensorDmaRaceTest, DtlOverwritingAPendingDsReadRaces) {
+  EXPECT_FALSE(ds_read(0, 4));
+  EXPECT_TRUE(dtl_write(0, 4));
+}
+
+TEST_F(TensorDmaRaceTest, DtlAfterDscntIsSafe) {
+  EXPECT_FALSE(ds_read(0, 4));
+  wait_dscnt(0);
+  EXPECT_FALSE(dtl_write(0, 4));
+}
+
+TEST_F(TensorDmaRaceTest, StoreAfterDscntIsSafe) {
+  EXPECT_FALSE(ds_write(0, 4));
+  wait_dscnt(0);
+  EXPECT_FALSE(tensor_store(0, {{.address = 0, .bytes = 16}}));
+}
+
+TEST_F(TensorDmaRaceTest, RaceFoundByTheTransferIsReportedAtItsInstruction) {
+  const std::string report = tensor_load_racing_an_older_read();
+  EXPECT_NE(report.find(std::format("==>  0x{:x}  tensor_load_to_lds", kTensorPc)),
+            std::string::npos)
+      << report;
+  EXPECT_NE(report.find("; <-- wave 0"), std::string::npos) << report;
+}
+
+TEST_F(TensorDmaRaceTest, RaceFoundLaterIsReportedAtTheTensorInstruction) {
+  // The event is registered at issue, at the tensor instruction. Keep wave 0's
+  // PCs distinct from wave 1's so the report identifies the event.
+  waves[0]->pc = 0x2000;
+  const uint64_t instruction_pc = waves[0]->pc + 16;
+  tensor_load(0, {{.address = 0, .bytes = 16}});
+  const size_t previous = sink->str().size();
+  EXPECT_TRUE(ds_read(1, 4));
+  const std::string report = sink->str().substr(previous);
+  EXPECT_NE(report.find(std::format("==>  0x{:x}  tensor_load_to_lds", instruction_pc)),
+            std::string::npos)
+      << report;
+}
+
+TEST_F(TensorDmaRaceTest, ExecutedTensorLoadIsRegisteredWhenItIssues) {
+  // Execute a decoded load of one i32 element into LDS offset 0, so the race
+  // detector hears of it through the execution plugin group, as in a run.
+  const uint32_t lds_base = fixture.cu()->allocate_lds(256);
+  for (auto *wave : waves) {
+    wave->set_lds_base(lds_base);
+    wave->set_lds_size(256);
+  }
+  const uint32_t sgprs = waves[0]->sgpr_alloc().base;
+  const std::array<uint32_t, 4> group0{1, 0, 0x10000u, 0x80000000u};
+  const std::array<uint32_t, 8> group1{2u << 16, 1u << 16, 0, 1u << 16, 0, 0, 0, 0};
+  for (uint32_t reg = 0; reg < group0.size(); ++reg)
+    fixture.cu()->write_sgpr(sgprs + reg, group0[reg]);
+  for (uint32_t reg = 0; reg < group1.size(); ++reg)
+    fixture.cu()->write_sgpr(sgprs + 12 + reg, group1[reg]);
+  const std::array<uint32_t, 3> words{0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  // Tensor instructions ignore EXEC (CDNA5 ISA 10.11.1), so the load is still
+  // registered with every lane of the issuing wave disabled. Wave 1 keeps lane
+  // 0 enabled for its DS reads.
+  waves[0]->set_exec(0);
+  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0]);
+  ASSERT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[0]).succeeded());
+
+  EXPECT_FALSE(ds_read(1, lds_base + 4));
+  EXPECT_TRUE(ds_read(1, lds_base));
+}
+
+TEST_F(TensorDmaRaceTest, TransferWithoutLdsBytesStillTakesATensorcntSlot) {
+  // A NULL descriptor or a store wholly outside the tensor moves no data but
+  // occupies a TENSORcnt slot, so waiting for all but one transfer completes
+  // the load issued before it.
+  tensor_load(0, {{.address = 0, .bytes = 16}});
+  tensor_store(0, {});
+  wait_tensorcnt(0, 1);
+  EXPECT_FALSE(ds_read(0, 4));
+}
+
+TEST_F(TensorDmaRaceTest, TransferWithoutLdsBytesLeavesTheLoadPendingUntilTheWaitCoversIt) {
+  tensor_load(0, {{.address = 0, .bytes = 16}});
+  tensor_store(0, {});
+  wait_tensorcnt(0, 2);
+  EXPECT_TRUE(ds_read(0, 4));
+}
+
 TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
   auto opposite_half_read_reports_race = [](std::string_view arch, uint32_t wavefront_size,
                                             bool formatted) {
