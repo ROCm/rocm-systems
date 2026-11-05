@@ -46,6 +46,20 @@ template <typename T, int N>
 const void* LLSpread() {
   return KernelPtr(&dda::common::ddaAllReduceSpreadTwoShotLL<T, N>);
 }
+// The float LL one-shot or spread instance the launcher picks for nRanks.
+const void* LLFloatTier(bool spread, int nRanks) {
+  if (nRanks == 4) {
+    return spread ? LLSpread<float, 4>() : LLOneShot<float, 4>();
+  }
+  if (nRanks == 8) {
+    return spread ? LLSpread<float, 8>() : LLOneShot<float, 8>();
+  }
+  return spread ? LLSpread<float, 0>() : LLOneShot<float, 0>();
+}
+// Floats in a message of `bytes`.
+constexpr size_t Floats(size_t bytes) {
+  return bytes / sizeof(float);
+}
 template <typename T, int N>
 const void* LL128OneShot() {
   return KernelPtr(&dda::common::ddaAllReduceFlatLL128<T, N>);
@@ -522,13 +536,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Run_LaunchErrorIsReportedFromEveryTier) {
   EXPECT_EQ(g_ddaLaunches.size(), 4u);
 }
 
-// Floats in a message of `bytes`.
-constexpr size_t Floats(size_t bytes) {
-  return bytes / sizeof(float);
-}
-
-// The spread two-shot takes a message once the one-shot's wire per block reaches 96 KiB (16 B x 512 packets x
-// (n - 1)) or its wire beyond the two-shot's, 2 (n - 1)(n - 2) / n x bytes, reaches 4 MiB; else the one-shot runs.
+// Spread once the one-shot's block wire, 16 B x min(packets, 512) x (n - 1), reaches 96 KiB or its saved wire 4 MiB.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadWhereOneShotBlockWireOrSavedWireIsLarge) {
   comm().ddaScratchBytes = 1u << 30;
   struct Case {
@@ -550,14 +558,20 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadWhereOneShotBlockWireOrSavedWi
   };
   for (const Case& c : cases) {
     comm().nRanks = c.nRanks;
-    const DdaLaunch& launch = RunOneLL(Floats(c.bytes));
-    const void* want = c.spread ? LLSpread<float, 0>() : LLOneShot<float, 0>();
-    if (c.nRanks == 4 || c.nRanks == 8) {
-      want = c.spread ? (c.nRanks == 4 ? LLSpread<float, 4>() : LLSpread<float, 8>())
-                      : (c.nRanks == 4 ? LLOneShot<float, 4>() : LLOneShot<float, 8>());
-    }
-    EXPECT_EQ(launch.kernel, want) << c.nRanks << " ranks, " << c.bytes << " bytes";
+    EXPECT_EQ(RunOneLL(Floats(c.bytes)).kernel, LLFloatTier(c.spread, c.nRanks)) << c.nRanks << " ranks, " << c.bytes;
   }
+}
+
+// Both rules at their exact edges and just below: 96 KiB of block wire at 13 ranks, 4 MiB of saved wire.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadRuleEdges) {
+  EXPECT_TRUE(ddaLLArSpreadWins(4096, 13));       // 512 packets x 16 B x 12 = 96 KiB
+  EXPECT_FALSE(ddaLLArSpreadWins(4080, 13));      // 510 packets: 95.625 KiB
+  EXPECT_TRUE(ddaLLArSpreadWins(3 << 20, 3));     // 2 x 2 x 1 / 3 x 3 MiB = 4 MiB
+  EXPECT_FALSE(ddaLLArSpreadWins(1398101, 4));    // 2 x 3 x 2 / 4 x bytes = 4 MiB - 1
+  comm().nRanks = 13;
+  comm().ddaScratchBytes = 1u << 30;
+  EXPECT_EQ(RunOneLL(Floats(4096)).kernel, (LLSpread<float, 0>()));
+  EXPECT_EQ(RunOneLL(Floats(4080)).kernel, (LLOneShot<float, 0>()));
 }
 
 // The spread runs on exactly the one-shot's grid, which the reporter also returns.
@@ -594,9 +608,9 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadTakesUnevenShards) {
   comm().nRanks = 24;
   comm().ddaScratchBytes = 1u << 30;
   EXPECT_EQ(RunOneLL(Floats(8192)).kernel, (LLSpread<float, 0>()));   // 1024 packets: 23 shards of 43, one of 35
-  EXPECT_EQ(RunOneLL(Floats(9216)).kernel, (LLSpread<float, 0>()));   // 1152 packets, 48 a rank
+  comm().nRanks = 64;
+  EXPECT_EQ(RunOneLL(Floats(784)).kernel, (LLSpread<float, 0>()));    // 98 packets: 49 shards of 2, 15 empty
   comm().nRanks = 12;
-  EXPECT_EQ(RunOneLL(Floats(4096)).kernel, (LLOneShot<float, 0>()));  // 88 KiB of one-shot wire a block: below the rule
   EXPECT_EQ(RunOneLL(Floats(512 << 10)).kernel, (LLSpread<float, 0>()));
 }
 
@@ -606,7 +620,8 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadNeedsTheShardInTheTwoShotSlot)
   comm().ddaScratchBytes = 2 * 32 * 16 * 2 * 16;  // bank 16 KiB: one-shot slot 32 packets, two-shot slot 16
   ASSERT_EQ(dda::common::ddaLLArSlotPkts(dda::common::ddaBankSize(comm().ddaScratchBytes), 32), 32u);
   ASSERT_EQ(dda::common::ddaLLArTwoShotSlotPkts(dda::common::ddaBankSize(comm().ddaScratchBytes), 32), 16u);
-  EXPECT_FALSE(ddaLLArSpreadSelected(mock_.get(), 32 * 32 * 8 + 8)) << "33-packet shards past the 16-packet slot";
+  EXPECT_TRUE(ddaLLArSpreadSelected(mock_.get(), 32 * 16 * 8)) << "16-packet shards fill the 16-packet slot";
+  EXPECT_FALSE(ddaLLArSpreadSelected(mock_.get(), 32 * 16 * 8 + 16)) << "17-packet shards, rounded up";
   EXPECT_FALSE(ddaLLArSpreadSelected(mock_.get(), 1u << 20));
   comm().ddaScratchBytes = 1u << 30;
   EXPECT_TRUE(ddaLLArSpreadSelected(mock_.get(), 1u << 20));
