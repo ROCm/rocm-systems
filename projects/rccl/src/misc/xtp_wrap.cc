@@ -3,6 +3,7 @@
 #include "xtp_wrap.h"
 
 #include <dlfcn.h>
+#include <climits>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -173,6 +174,30 @@ void loadOnce() {
   });
 }
 
+// Snapshot whatever topology the comm currently knows. PXN runs before
+// nNodes/localRanks/NVL domains exist, so those fields stay 0 on the first
+// bind; rcclXtpRefreshComm copies them once initNvlDomainInfo has run.
+// nic_type and hash have no stable RCCL mapping into the XTP vocabulary yet
+// (cx7/thor2, coverage hash), so they stay NULL / unknown.
+xtp_descriptor fillDescriptor(struct ncclComm* comm) {
+  xtp_descriptor desc = {};
+  desc.arch = comm->topo->nodes[GPU].nodes[0].gpu.gcn;
+  desc.n_nodes = comm->nNodes;
+  desc.ranks_per_node = comm->localRanks;
+  // Always valid, unlike n_nodes / ranks_per_node: nRanks is an argument to
+  // ncclCommInitRank, so it is set before any knob is read.
+  desc.n_ranks = comm->nRanks;
+  if (comm->nvlDomainInfo.nNvlDomains > 0) {
+    desc.n_domains = comm->nvlDomainInfo.nNvlDomains;
+    desc.ranks_per_domain = comm->nvlDomainInfo.maxRanksPerNvlDomain;
+  }
+  // Per-rank trimmed NET.count can differ across nodes (trim drops a slower
+  // port on a shared asic). Class A matching on nic_count would then bind
+  // ranks to different profiles. minNetCount is already reduced across ranks.
+  if (comm->nNodes > 0 && comm->minNetCount != INT_MAX) desc.nic_count = comm->minNetCount;
+  return desc;
+}
+
 // Bind on first use, and re-bind whenever the descriptor changes, because the
 // topology facts do not all arrive at once. PXN is consulted from
 // ncclTopoComputePaths -- before nNodes and localRanks are derived from the
@@ -183,13 +208,7 @@ xtp_comm* commHandle(struct ncclComm* comm) {
   loadOnce();
   if (xtpCtx == nullptr || comm == nullptr || comm->topo == nullptr) return nullptr;
 
-  xtp_descriptor desc = {};
-  desc.arch = comm->topo->nodes[GPU].nodes[0].gpu.gcn;
-  desc.n_nodes = comm->nNodes;
-  desc.ranks_per_node = comm->localRanks;
-  // Always valid, unlike the two above: nRanks is an argument to
-  // ncclCommInitRank, so it is set before any knob is read.
-  desc.n_ranks = comm->nRanks;
+  xtp_descriptor desc = fillDescriptor(comm);
 
   std::lock_guard<std::mutex> guard(xtpLock);
   auto found = xtpComms.find(comm);
@@ -205,10 +224,10 @@ xtp_comm* commHandle(struct ncclComm* comm) {
   // Class B rules start carrying constraints.
   xtp_comm* bound = api.bindComm(xtpCtx, &desc, nullptr, comm);
   xtpComms[comm] = Binding{desc, bound};
-  if (bound == nullptr) {
-    INFO(NCCL_INIT, "XTP: no profile matches arch=%s nodes=%d ranks_per_node=%d nranks=%d; using built-in tuning",
-         desc.arch, desc.n_nodes, desc.ranks_per_node, desc.n_ranks);
-  }
+  INFO(NCCL_INIT,
+       "XTP: bind arch=%s n_nodes=%d ranks_per_node=%d n_ranks=%d n_domains=%d ranks_per_domain=%d nic_count=%d%s",
+       desc.arch ? desc.arch : "(null)", desc.n_nodes, desc.ranks_per_node, desc.n_ranks, desc.n_domains,
+       desc.ranks_per_domain, desc.nic_count, bound ? "" : "; no matching profile, using built-in tuning");
   return bound;
 }
 
@@ -236,6 +255,10 @@ bool rcclXtpClassAInt(struct ncclComm* comm, const char* key, int64_t* out) {
   }
   *out = value->i;
   return true;
+}
+
+void rcclXtpRefreshComm(struct ncclComm* comm) {
+  (void)commHandle(comm);
 }
 
 void rcclXtpCommFree(struct ncclComm* comm) {

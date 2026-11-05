@@ -9640,6 +9640,22 @@ TEST_F(InitMicrotest, InitTransportsRank_UnevenNodes_RecordsBothTheMinAndMaxLoca
   EXPECT_EQ(2, c.get()->nvlDomainInfo.nNvlDomains);
 }
 
+TEST_F(InitMicrotest, InitTransportsRank_RefreshesXtpAfterNvlDomainInfo) {
+  const int kNRanks = 8;
+  TransportsRankComm c(kNRanks, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx950");
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_rcclXtpRefreshCommCalls);
+  EXPECT_EQ(c.get(), g_rcclXtpRefreshLastComm);
+  EXPECT_EQ(1, g_rcclXtpRefreshLastNNodes);
+  EXPECT_EQ(kNRanks, g_rcclXtpRefreshLastLocalRanks);
+  EXPECT_EQ(1, g_rcclXtpRefreshLastNvlDomains);
+  EXPECT_EQ(kNRanks, g_rcclXtpRefreshLastMaxRanksPerNvlDomain);
+  EXPECT_EQ(g_rcclXtpRefreshLastNvlDomains, c.get()->nvlDomainInfo.nNvlDomains);
+  EXPECT_EQ(g_rcclXtpRefreshLastMaxRanksPerNvlDomain, c.get()->nvlDomainInfo.maxRanksPerNvlDomain);
+}
+
 TEST_F(InitMicrotest, InitTransportsRank_OneRankPerNode_SetsIsOneRpn) {
   const int kNRanks = 3;
   TransportsRankComm c(kNRanks, /*rank=*/0);

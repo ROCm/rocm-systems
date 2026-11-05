@@ -2279,6 +2279,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->localRanks = comm->nodeRanks[comm->node].localRanks;
 
   NCCLCHECKGOTO(initNvlDomainInfo(comm), ret, fail);
+  rcclXtpRefreshComm(comm);
 
   TRACE(NCCL_INIT, "hostHash[%d] %lx localRank %d localRanks %d localRank0 %d", rank, comm->peerInfo[rank].hostHash,
         comm->localRank, comm->localRanks, comm->localRankToRank[0]);

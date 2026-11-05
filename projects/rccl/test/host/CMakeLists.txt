@@ -79,6 +79,7 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/transport_stubs.cc             # transport/PXN/AINIC seams
   fakes/tuning_fakes.cc                # graph tuning/channel params
   fakes/wrap_fakes.cc                  # remaining uncategorized dependency seams
+  fakes/xtp_wrap_fakes.cc              # src/misc/xtp_wrap.cc
   ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
   ../common/ProcessIsolatedTestRunner.cpp
 )
@@ -375,6 +376,7 @@ if(BUILD_TESTS)
     fakes/mem_manager_fakes.cc           # src/mem_manager.cc
     fakes/os_fakes.cc                    # src/os/linux.cc
     fakes/rccl_wrap_fakes.cc             # src/rccl_wrap.cc
+    fakes/xtp_wrap_fakes.cc              # src/misc/xtp_wrap.cc
     fakes/recorder_fakes.cc              # src/recorder.cc
     fakes/rocmwrap_fakes.cc              # src/misc/rocmwrap.cc
     fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
@@ -1202,6 +1204,7 @@ set(TEST_MICRO_INIT_SOURCE_FILES
   fakes/mem_manager_fakes.cc
   fakes/os_fakes.cc
   fakes/rccl_wrap_fakes.cc
+  fakes/xtp_wrap_fakes.cc
   fakes/recorder_fakes.cc
   fakes/rocmwrap_fakes.cc
   fakes/strongstream_stubs.cc
