@@ -80,53 +80,25 @@ changes them.
 
 ---
 
-## Emulator vs. kernel driver alignment (reviewed 2026-11-03, v3 patches)
+## Emulator vs. kernel driver alignment (updated 2026-11-05, v3 patches)
 
-The emulator **cannot be driven by the v3 kernel driver** in its current
-form.  Gaps span every layer:
+The emulator is now aligned with the v3 kernel driver register map and
+architecture.  All areas that were previously mismatched have been
+implemented:
 
-| Area | Emulator | Kernel driver v3 |
-|------|----------|------------------|
-| PCI class | `0x08/0x80/0x00` (Base peripheral) | `0x120100` (Processing Accelerator / SDXI) — driver won't claim device |
-| `VERSION` reg | offset 0x004 | `SDXI_MMIO_VERSION` at 0x210 |
-| `CAP` reg | offset 0x008 | `SDXI_MMIO_CAP0/1` at 0x200/0x208 |
-| `CTRL` reg | offset 0x014 | `SDXI_MMIO_CTL0` at 0x000 |
-| `STATUS` reg | offset 0x010 | `SDXI_MMIO_STS0` at 0x100 |
-| Queue access | Indirect via Q_SELECT (0x020–0x054) | Context table in guest memory at 0x10000 |
-| Descriptor | 64 bytes; opcode MEMCPY=1/MEMSET=2/FENCE=3 | 64 bytes; type+subtype (DMAB/ADMIN; COPY/NOP/SYNC) — incompatible encoding |
-| Completion | `struct sdxi_cqe` — 16 bytes | `struct sdxi_cst_blk` — 32 bytes, different layout |
-| Architecture | Flat register-visible queue model | Two-level context table (L1: 128 ctx, L2: 512 entries each) |
-| Context lifecycle | Queue enable via Q_CTRL register write | CXT_START / CXT_STOP admin descriptors; admin context required first |
-| Access keys | None | Per-context `struct sdxi_akey_ent` (16 bytes) |
+| Area | Status | Notes |
+| ---- | ------ | ----- |
+| PCI class | aligned | `0x120100` (Processing Accelerator / SDXI) in `src/rocm_sdxi_server.c` |
+| Register map | aligned | CTL0=0x000, CTL2=0x010, STS0=0x100, CAP0=0x200, CAP1=0x208, VERSION=0x210 |
+| Context table | aligned | CXT_L2 pointer at 0x10000; L1 capped at 128 contexts (`SDXI_MAX_CXT`) |
+| Descriptor | aligned | 64-byte `sdxi_dsc`; DMAB/ADMIN type+subtype encoding |
+| Completion | aligned | 32-byte `sdxi_cst_blk` (`SDXI_CST_BLK_SIZE`) |
+| Context lifecycle | aligned | CXT_START / CXT_STOP admin descriptors; context 0 is the admin context |
+| CTL0 FN_GSR | aligned | FN_GSR bits[1:0] mirrored into STS0 FN_GSV bits[2:0] at probe time |
 
-To achieve kernel driver interop the emulator needs: new PCI class code,
-new register map, 32-byte CSBs, L1/L2 context table support, and an
-admin context boot sequence.  This is effectively a rewrite of
-`src/sdxi_regs.h`, `src/rocm_sdxi_server.c`, and `src/sdxi_engine.c`.
-
-### In-VM probe experiment (2026-11-03)
-
-A minimal out-of-tree probe module (`sdxi_probe.ko`) was built against the
-Ubuntu 24.04 6.8 kernel and loaded into a QEMU VM running the emulator.
-After updating the emulator PCI class from `0x088000` to `0x120100`
-(`SDXI_PCI_CLASS_BASE=0x12`, `SDXI_PCI_CLASS_SUB=0x01`), the kernel
-correctly claimed the device (confirmed via lspci: "SNIA Smart Data
-Accelerator Interface (SDXI) controller").
-
-The probe module read the five registers the v3 driver interrogates at
-probe time.  All returned `0xffffffffffffffff` — the vfio-user default
-for unmapped BAR offsets — confirming the register-map gap:
-
-| Register | Expected offset | Emulator response |
-|----------|-----------------|-------------------|
-| CTL0     | 0x000           | 0xffffffffffffffff |
-| STS0     | 0x100           | 0xffffffffffffffff |
-| CAP0     | 0x200           | 0xffffffffffffffff |
-| CAP1     | 0x208           | 0xffffffffffffffff |
-| VERSION  | 0x210           | 0xffffffffffffffff |
-
-Implementing those five offsets (and the context-table plumbing they gate)
-is the first concrete step toward driver interop.
+The emulator does not implement per-context access keys (`sdxi_akey_ent`);
+the kernel driver does not enforce them in the current v3 patches so this
+is not a blocker for driver interop.
 
 ---
 
