@@ -54,9 +54,10 @@ Every skill directory holds:
 ├── SKILL.md            # frontmatter (name, description) plus the instructions
 ├── skill-card.md       # human-facing card: description, owner, license
 └── evals/
-    ├── evals.json      # prompts that must and must not route to this skill
-    ├── machine.yml     # hardware the behavioral cases need
-    └── samples/        # copies of the samples the cases use
+    ├── evals.json            # minimum set the AMD skills catalog grades
+    ├── extended_evals.json   # longer profile cases, run here with --extended
+    ├── machine.yml           # hardware the behavioral cases need
+    └── samples/              # copies of the samples the cases use
 ```
 
 `SKILL.md` states the decision: which command to run, when, and where the
@@ -77,9 +78,22 @@ routing needs a model API key, and behavior needs a supported GPU.
 ```bash
 ./skills/run_evals.py --list                         # validate the datasets
 ./skills/run_evals.py                                # does the right skill load?
-./skills/run_evals.py --mode behavioral              # also grade the agent
+./skills/run_evals.py --mode behavioral              # grade the minimum set
+./skills/run_evals.py --extended --mode behavioral   # also grade the long profiles
 ./skills/run_evals.py --skill rocprof-compute-memory  # one skill
 ```
+
+`evals/evals.json` is the minimum set. The AMD skills catalog grades that file
+and no other. It keeps at least three prompts that should trigger the skill,
+two that should not, and one triggering case with judged behavior. Negative
+cases carry only an id, a prompt, and an optional note. The judged cases stay
+short: they check that the right workflow is chosen, and they do not profile
+a sample.
+
+Cases that build a sample, profile it, and read the report live in
+`evals/extended_evals.json`, beside the minimum file and in the same format.
+Add `--extended` to run them. The catalog workflow sets `extended: false`, so
+moving a case into that file takes it out of the catalog run.
 
 Routing mode denies the agent its tools and only checks which skill it chose,
 so it is quick and needs no GPU. Behavioral mode lets the agent work and grades
@@ -93,12 +107,8 @@ install script and its docs links. Both drive the `claude` CLI. The script
 exits 77 when that CLI is absent, so a caller can treat it as skipped rather
 than failed.
 
-Each dataset needs at least three cases that should trigger the skill, two that
-should not, and one triggering case with judged behavior. Negative cases carry
-only an id, a prompt, and an optional note.
-
-A triggering case that needs an application sets `workspace` to
-`evals/samples`, and its prompt names the application. The contents of the
+A case that profiles an application lives in `extended_evals.json`. It sets
+`workspace` to `evals/samples`, and its prompt names the application. The contents of the
 workspace directory are copied to the workspace root when the case runs, as
 skillscope does. The AMD skills repo copies only the skill directory, so
 `evals/samples/` holds copies of the samples from `sample/`. Each copy and its

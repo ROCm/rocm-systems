@@ -12,6 +12,7 @@ it should not.
 Usage:
     ./skills/run_evals.py                      # routing only, no tools
     ./skills/run_evals.py --mode behavioral    # also grade what the agent did
+    ./skills/run_evals.py --extended --mode behavioral  # include the long profile cases
     ./skills/run_evals.py --skill rocprof-compute-memory  # one skill
     ./skills/run_evals.py --only kb-kernel-name-filter    # one case
     ./skills/run_evals.py --list               # validate datasets, run nothing
@@ -77,16 +78,39 @@ def discover_skills(only: Optional[str]) -> list[Path]:
     return found
 
 
-def load_cases(skill: Path) -> list[dict[str, Any]]:
-    """Parse and validate one dataset, erroring on anything malformed."""
-    dataset = json.loads((skill / "evals" / "evals.json").read_text())
-    cases = dataset["evaluations"]
+def load_cases(skill: Path, *, extended: bool) -> tuple[list[dict[str, Any]], int]:
+    """Parse and validate one skill's datasets.
 
-    positive = 0
-    negative = 0
-    judged = 0
+    ``evals/evals.json`` is the catalog minimum and always runs. The optional
+    ``evals/extended_evals.json`` is validated whenever it exists and is run
+    only when `extended` is set. Returns the cases to run and how many of
+    them came from the extended file.
+    """
+    required = _read_cases(skill, "evals.json")
+    _require_minimum(skill, required)
+    extra_path = skill / "evals" / "extended_evals.json"
+    extra = _read_cases(skill, "extended_evals.json") if extra_path.is_file() else []
+    seen = {case["id"] for case in required}
+    for case in extra:
+        if case["id"] in seen:
+            sys.exit(f"{skill.name}: duplicate case id {case['id']!r}")
+        seen.add(case["id"])
+    if extended:
+        return required + extra, len(extra)
+    return required, len(extra)
+
+
+def _read_cases(skill: Path, filename: str) -> list[dict[str, Any]]:
+    """Parse one dataset file, erroring on anything malformed."""
+    dataset = json.loads((skill / "evals" / filename).read_text())
+    unknown_top = set(dataset) - {"evaluations", "comment"}
+    if unknown_top:
+        sys.exit(f"{skill.name}: unknown key(s) {sorted(unknown_top)} in {filename}")
+    cases = dataset.get("evaluations")
+    if not isinstance(cases, list):
+        sys.exit(f"{skill.name}: {filename} needs an evaluations array")
+
     seen: set[str] = set()
-
     for case in cases:
         unknown = set(case) - KNOWN_KEYS
         if unknown:
@@ -102,24 +126,27 @@ def load_cases(skill: Path) -> list[dict[str, Any]]:
         seen.add(case["id"])
         if "workspace" in case and not workspace_dir(skill, case["workspace"]).is_dir():
             sys.exit(f"{skill.name}: {case['id']} names a missing workspace")
-
-        if case["skill_should_trigger"]:
-            positive += 1
-            judged += any(case.get(key) for key in JUDGED_KEYS)
-        else:
-            negative += 1
+        if not case["skill_should_trigger"]:
             extra = set(case) - {"id", "prompt", "skill_should_trigger", "note"}
             if extra:
                 sys.exit(
                     f"{skill.name}: {case['id']} is negative but sets {sorted(extra)}"
                 )
+    return cases
 
+
+def _require_minimum(skill: Path, cases: list[dict[str, Any]]) -> None:
+    """The catalog bar applies to evals.json only, not the extended file."""
+    positive = sum(case["skill_should_trigger"] for case in cases)
+    negative = len(cases) - positive
+    judged = sum(
+        case["skill_should_trigger"] and any(case.get(key) for key in JUDGED_KEYS)
+        for case in cases
+    )
     if positive < 3 or negative < 2:
         sys.exit(f"{skill.name}: needs at least 3 positive and 2 negative cases")
     if not judged:
         sys.exit(f"{skill.name}: needs at least one positive case with judged behavior")
-
-    return cases
 
 
 def workspace_dir(skill: Path, workspace: str) -> Path:
@@ -342,6 +369,14 @@ def main() -> int:
     parser.add_argument("--only", help="Comma-separated case ids to run.")
     parser.add_argument("--list", action="store_true", help="Validate datasets only.")
     parser.add_argument(
+        "--extended",
+        action="store_true",
+        help=(
+            "Also run evals/extended_evals.json. Those cases profile a sample "
+            "and are not graded by the AMD skills catalog."
+        ),
+    )
+    parser.add_argument(
         "--jobs",
         type=int,
         default=8,
@@ -350,12 +385,24 @@ def main() -> int:
     args = parser.parse_args()
 
     skills = discover_skills(args.skill)
-    datasets = {skill.name: load_cases(skill) for skill in skills}
+    datasets = {}
+    extended_counts = {}
+    for skill in skills:
+        cases, extended_count = load_cases(skill, extended=args.extended)
+        datasets[skill.name] = cases
+        extended_counts[skill.name] = extended_count
 
     if args.list:
         for name, cases in datasets.items():
             positive = sum(case["skill_should_trigger"] for case in cases)
-            print(f"{name}: {len(cases)} cases ({positive} positive)")
+            extra = extended_counts[name]
+            if args.extended and extra:
+                detail = f"{positive} positive, including {extra} extended"
+            elif extra:
+                detail = f"{positive} positive; {extra} extended not selected"
+            else:
+                detail = f"{positive} positive"
+            print(f"{name}: {len(cases)} cases ({detail})")
         return 0
 
     if not shutil.which("claude"):
