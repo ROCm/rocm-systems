@@ -74,6 +74,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #if defined(__x86_64__) || defined(__i386__)
@@ -599,6 +600,8 @@ constexpr auto poll_interval = std::chrono::milliseconds{1};
 class completion_monitor;
 
 void
+close_flush_fence(completion_monitor&);
+void
 move_incoming_to_active(completion_monitor&);
 void
 retire_completed(completion_monitor&, pending_completion_vector_t&);
@@ -615,8 +618,11 @@ class completion_monitor
     // Single owner at any time: the monitor thread while it runs, then the finalizing thread once
     // stop_completion_monitor has joined it.
     std::vector<pending_completion> active = {};
-    std::shared_ptr<flush_fence>    fence  = std::make_shared<flush_fence>();
+    // Same owner, but replaced only under the `incoming` lock so current_fence() can read it from
+    // any thread.
+    std::shared_ptr<flush_fence> fence = std::make_shared<flush_fence>();
 
+    friend void close_flush_fence(completion_monitor&);
     friend void move_incoming_to_active(completion_monitor&);
     friend void retire_completed(completion_monitor&, pending_completion_vector_t&);
     friend void force_retire_all(completion_monitor&);
@@ -626,6 +632,13 @@ public:
     common::Synchronized<monitor_inbox> incoming    = {};
     hsa_signal_t                        wake_signal = {};
     std::atomic<monitor_state>          state       = {monitor_state::stopped};
+
+    // For emit tasks queued off the monitor thread, which must hold the fence a later flush waits
+    // on.
+    std::shared_ptr<flush_fence> current_fence() const
+    {
+        return incoming.rlock([this](const auto&) { return fence; });
+    }
 
     // Guards the thread handle so start and stop exclude each other: move-assigning onto a joinable
     // handle calls std::terminate. Both make their `state` transition under this lock, so the loser
@@ -883,11 +896,14 @@ submit_to_task_group(kfd::signal_less_hub_t::proven& proven)
     // Counted before the submit, not inside the task: `inflight` is what every drain polls, so
     // work that is queued but not yet counted is work a drain reports as absent.
     mon.inflight.fetch_add(1, std::memory_order_relaxed);
-    mon.record_emitter->async([&mon, _held]() {
+    mon.record_emitter->async([&mon, _held, _fence = mon.current_fence()]() mutable {
         on_record_emitter() = true;
-        // Armed first: a throwing tool callback must not strand the counter every drain polls.
-        auto _dtor = common::scope_destructor{
-            [&mon]() { mon.inflight.fetch_sub(1, std::memory_order_release); }};
+        // Armed first: a throwing tool callback must not strand the counter every drain polls,
+        // nor a flush waiting on the fence.
+        auto _dtor = common::scope_destructor{[&mon, &_fence]() {
+            mon.inflight.fetch_sub(1, std::memory_order_release);
+            _fence.reset();
+        }};
         complete_signal_less_dispatch(std::move(*_held));
     });
     return true;
@@ -1007,13 +1023,15 @@ retire_completion_async(completion_monitor&                          mon,
 }
 
 // Start the next fence if a flush waits on this one. The emit tasks holding it then release the
-// flush as the last of them finishes, or the reassignment does if none is left.
+// flush as the last of them finishes, or dropping `closed` does if none is left.
 void
-close_flush_fence(std::shared_ptr<flush_fence>& fence)
+close_flush_fence(completion_monitor& mon)
 {
-    if(fence->waiters.empty()) return;
-    fence->next = std::make_shared<flush_fence>();
-    fence       = fence->next;
+    if(mon.fence->waiters.empty()) return;
+    auto next = std::make_shared<flush_fence>();
+    auto closed =
+        mon.incoming.wlock([&mon, &next](auto&) { return std::exchange(mon.fence, next); });
+    closed->next = std::move(next);
 }
 
 // Move any newly-registered waits from the shared inbox into `active`, and waiting flushes onto the
@@ -1057,7 +1075,7 @@ retire_completed(completion_monitor& mon, pending_completion_vector_t& scratch)
     // shared_ptrs from a prior pass) rather than holding them until the next swap.
     scratch.clear();
 
-    close_flush_fence(mon.fence);
+    close_flush_fence(mon);
 }
 
 // Retire every entry, whether or not its signal dropped, discarding the profiling data of the ones
@@ -1077,7 +1095,7 @@ force_retire_all(completion_monitor& mon)
         retire_completion_async(mon, pending.session, completed, mon.fence);
     }
     mon.active.clear();
-    close_flush_fence(mon.fence);
+    close_flush_fence(mon);
 
     ROCP_WARNING_IF(incomplete > 0) << fmt::format(
         "Completion monitor retired {} batch(es) still in flight at teardown; their dispatch "

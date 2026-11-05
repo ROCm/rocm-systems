@@ -22,9 +22,8 @@
 
 #
 # Regression test for ROCm/rocm-systems#14378: a rocprofiler_flush_buffer() issued right
-# after hipDeviceSynchronize() must include the kernel-dispatch record of the kernel that
-# just completed. The app is its own tool and exits non-zero if any flush lacks the
-# record.
+# after a synchronize must include the kernel-dispatch record of the kernel that just
+# completed. The app is its own tool and exits non-zero if any flush lacks the record.
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
@@ -74,4 +73,14 @@ rocprofiler_add_integration_execute_test(
     # The record reaches the flush through the inline queue-interposition path. Pin it on
     # so a change to its default cannot silently move the test onto the legacy path, which
     # has its own older version of this race.
+    ENVIRONMENT "ROCPROFILER_QUEUE_INTERPOSITION=1")
+
+# Streams on one GPU, each flushing from its own thread: the flushes overlap, so a later
+# one must not return before the records an earlier one waits for.
+rocprofiler_add_integration_execute_test(
+    kernel-dispatch-flush-after-sync-multi-stream
+    TARGET kernel-dispatch-flush-after-sync
+    ARGS 8
+    TIMEOUT 60
+    LABELS "integration-tests"
     ENVIRONMENT "ROCPROFILER_QUEUE_INTERPOSITION=1")
