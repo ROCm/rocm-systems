@@ -2379,7 +2379,7 @@ void GpuAgent::GetAqlInfoProperties(uint8_t value[8]) const {
   };
 
   // Fill the HSA_AMD_AQL_PROPERTY_EXT_DISPATCH
-  if (extended_aql_dispatch_supported_)
+  if (ExtendedAqlDispatchSupported())
       setFlag(HSA_AMD_AQL_PROPERTY_EXT_DISPATCH);
 }
 
@@ -2829,9 +2829,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 }
 
 // CP FW writes amd_queue_t::caps only once it has processed a packet on the queue, so the first
-// query runs an empty barrier-AND on the utility queue and reads the bit there.
-bool GpuAgent::SignalHintsSupported() const {
-  std::call_once(signal_hints_once_, [this]() {
+// query runs an empty barrier-AND on the utility queue and reads the bits there.
+uint32_t GpuAgent::CpFirmwareCaps() const {
+  std::call_once(cp_caps_once_, [this]() {
     core::unique_signal_ptr completion(new core::DefaultSignal(1));
     if (!completion->IsValid()) return;
     core::Queue* queue = (*queues_[QueueUtility]).get();
@@ -2850,9 +2850,20 @@ bool GpuAgent::SignalHintsSupported() const {
                   std::memory_order_release);
     core::Signal::Convert(hsa_queue.doorbell_signal)->StoreRelease(index);
     completion->WaitAcquire(HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
-    signal_hints_supported_ = (queue->amd_queue_.caps & AMD_QUEUE_CAPS_CP_SIGNAL_HINTS) != 0;
+    cp_caps_ = queue->amd_queue_.caps;
   });
-  return signal_hints_supported_;
+  return cp_caps_;
+}
+
+bool GpuAgent::SignalHintsSupported() const {
+  return (CpFirmwareCaps() & AMD_QUEUE_CAPS_CP_SIGNAL_HINTS) != 0;
+}
+
+// gfx12.5 supports the packet natively, without asking the firmware. The firmware's packet has
+// clusters of 1: cluster_max_dim_ stays {1, 1, 1}.
+bool GpuAgent::ExtendedAqlDispatchSupported() const {
+  return extended_aql_dispatch_supported_ ||
+         ((CpFirmwareCaps() & AMD_QUEUE_CAPS_CP_EXT_KERNEL_DISPATCH) != 0);
 }
 
 hsa_status_t GpuAgent::SetAgentAttribute(hsa_agent_info_t attribute, void* value) {
