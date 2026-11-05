@@ -193,6 +193,32 @@ TEST(RaceReportTraceTest, OtherWaveConflictIsSeparateEvenWhenPcsAndEncodingsMatc
   EXPECT_NE(report.find("Execution trace below is for wave 0."), std::string::npos);
 }
 
+TEST(RaceReportTraceTest, OtherWaveConflictStartsAtThisWavesLatestRunOfThatInstruction) {
+  Trace trace;
+  for (uint32_t i = 0; i < 40; ++i)
+    trace.push(snapshot(0x100 + (i % 20) * 4, i % 20, 1));
+  const MarkedInstruction producer{snapshot(0x104, 1, 1), 1, 0};
+  const auto printed = rows(formatTrace(trace, text, producer, mark(trace, 39)));
+  ASSERT_EQ(printed.size(), 20u);
+  EXPECT_TRUE(printed[0].marked);
+  EXPECT_EQ(printed[1].pc, 0x104u);
+  EXPECT_FALSE(printed[1].marked);
+  EXPECT_EQ(printed.back().pc, 0x14cu);
+}
+
+TEST(RaceReportTraceTest, OtherWaveConflictNeverRunHereShowsOnlyRecentRows) {
+  Trace trace;
+  for (uint32_t i = 0; i < 40; ++i)
+    trace.push(snapshot(0x100 + i * 4, i, 1));
+  const MarkedInstruction producer{snapshot(0x2000, 99, 1), 1, 0};
+  const auto report = formatTrace(trace, text, producer, mark(trace, 39));
+  const auto printed = rows(report);
+  ASSERT_EQ(printed.size(), 1 + kOtherWaveContextRows);
+  EXPECT_EQ(printed[1].sequence, 40 - kOtherWaveContextRows);
+  EXPECT_EQ(printed.back().sequence, 39u);
+  EXPECT_EQ(report.find("elided"), std::string::npos);
+}
+
 TEST(RaceReportTraceTest, ExpiredProducerRetainsIdentityAndMissingHistoryWithoutInventingAJump) {
   Trace trace;
   const InstructionSnapshot producer = snapshot(0x100, 0, 1);

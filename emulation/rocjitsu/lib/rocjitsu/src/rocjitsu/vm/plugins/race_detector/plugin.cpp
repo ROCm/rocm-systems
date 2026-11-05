@@ -177,8 +177,18 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
       }
   if (conflict_index && read_index && *conflict_index > *read_index)
     throw std::invalid_argument("race conflict follows the current access in the wave trace");
-  const size_t first = conflict ? conflict_index.value_or(0) : read_index.value_or(n);
   const size_t last = read_index ? *read_index + 1 : n;
+  size_t first = read_index.value_or(n);
+  if (conflict && conflict->wave == read.wave) {
+    first = conflict_index.value_or(0);
+  } else if (conflict) {
+    // Waves usually run the same code, so start where this wave last ran the
+    // conflicting instruction; that shows its own path to the access.
+    first = last - std::min(last, kOtherWaveContextRows);
+    for (size_t i = 0; i < last; ++i)
+      if (trace[i] == conflict->instruction)
+        first = i;
+  }
   const size_t span = last > first ? last - first : 0;
   auto nonsequential = [&](size_t i) {
     if (i <= first || i >= last)

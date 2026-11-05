@@ -57,12 +57,19 @@ MarkedInstruction findConflict(const RaceViolation &, RaceDetector &);
 /// Maximum trace rows printed before formatTrace elides the middle of a report.
 inline constexpr size_t kTraceContextRows = 128;
 
+/// Trace rows printed for another wave's conflict when the reporting wave never
+/// ran the conflicting instruction.
+inline constexpr size_t kOtherWaveContextRows = 16;
+
 /// Format the reporting wave's trace, marking the first matching same-wave
 /// conflict and the last matching current access by PC and encoding. Identical
 /// producer executions are not distinguished. A conflict from another wave, or
-/// one no longer retained, is printed separately before the trace. A span longer
-/// than kTraceContextRows keeps its first and last rows, synchronization and
-/// control-flow rows, and both sides of each jump. Disassemble only printed rows.
+/// one no longer retained, is printed separately before the trace. For another
+/// wave's conflict, the trace starts at the reporting wave's latest execution of
+/// the same instruction, or shows the last kOtherWaveContextRows rows when it has
+/// none. A span longer than kTraceContextRows keeps its first and last rows,
+/// synchronization and control-flow rows, and both sides of each jump.
+/// Disassemble only printed rows.
 std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
                         const std::function<std::string(const InstructionSnapshot &)> &disassemble,
                         std::optional<MarkedInstruction> conflict, MarkedInstruction read);

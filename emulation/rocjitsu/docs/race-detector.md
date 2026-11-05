@@ -164,6 +164,12 @@ the displayed span starts at the first matching producer PC and encoding and
 ends at the last matching current access. Repeated producer executions with
 identical PCs and encodings are not distinguished.
 
+When the conflict belongs to another wave, the reporting wave's trace starts at
+its own latest execution of the same instruction. Waves usually run the same
+code, so this shows the path from that instruction to the racing access, where
+synchronization is missing. If the reporting wave never ran that instruction,
+the report shows its last 16 instructions.
+
 The instruction table follows the reporting wave's execution order. A separate
 `--- jump forward ---` or `--- jump backward ---` line highlights a
 nonsequential transition immediately before its destination. A transition back
