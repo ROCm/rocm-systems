@@ -549,8 +549,9 @@ protected:
   bool ds_write(int wave, uint32_t address) { return ds_access(wave, address, false); }
 
   /// Issue a one-lane Direct-to-LDS write of one dword, as an async load to LDS
-  /// does, and report whether it produced a race.
-  bool dtl_write(int wave, uint32_t address) {
+  /// does, and report whether it produced a race. A nonzero `cluster_mcast_mask`
+  /// makes it a cluster load with that M0 multicast mask.
+  bool dtl_write(int wave, uint32_t address, uint32_t cluster_mcast_mask = 0) {
     waves[wave]->pc += 16;
     const size_t previous = sink->str().size();
     auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
@@ -563,6 +564,8 @@ protected:
     state->exec_mask = 1;
     state->lane_mask = 1;
     state->per_lane_lds_addr[0] = address;
+    state->cluster_multicast = cluster_mcast_mask != 0;
+    state->cluster_mcast_mask = cluster_mcast_mask;
     TestMemoryInstruction inst(std::move(state),
                                {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}});
     fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave]);
@@ -677,6 +680,28 @@ TEST_F(TensorDmaRaceTest, RaceIsReportedAtAByteBothAccessesTouch) {
 TEST_F(TensorDmaRaceTest, DtlOverwritingAPendingStoreSourceRaces) {
   tensor_store(0, {{.address = 0, .bytes = 16}});
   EXPECT_TRUE(dtl_write(0, 4));
+}
+
+// A cluster load issued outside a cluster is an ordinary global load (CDNA5 ISA
+// 10.7), so it writes the wave's own LDS whatever its M0 mask says.
+TEST_F(TensorDmaRaceTest, ClusterLoadOutsideAClusterOverwritingAPendingStoreSourceRaces) {
+  ASSERT_EQ(waves[0]->cluster_size(), 1u);
+  ASSERT_EQ(waves[0]->cluster_rank(), 0u);
+  tensor_store(0, {{.address = 0, .bytes = 16}});
+  EXPECT_TRUE(dtl_write(0, 4, /*cluster_mcast_mask=*/2));
+}
+
+TEST_F(TensorDmaRaceTest, ClusterLoadToItsOwnRankOverwritingAPendingStoreSourceRaces) {
+  tensor_store(0, {{.address = 0, .bytes = 16}});
+  EXPECT_TRUE(dtl_write(0, 4, /*cluster_mcast_mask=*/1));
+}
+
+// Inside a cluster, a multicast that excludes the wave's rank does not write
+// its LDS.
+TEST_F(TensorDmaRaceTest, ClusterLoadToOnlyAPeerLeavesTheLocalStoreSourceAlone) {
+  waves[0]->set_cluster_info(/*rank=*/0, /*size=*/2);
+  tensor_store(0, {{.address = 0, .bytes = 16}});
+  EXPECT_FALSE(dtl_write(0, 4, /*cluster_mcast_mask=*/2));
 }
 
 TEST_F(TensorDmaRaceTest, DtlAfterTensorcntIsSafe) {

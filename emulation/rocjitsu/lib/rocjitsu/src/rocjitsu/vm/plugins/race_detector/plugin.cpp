@@ -455,7 +455,10 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       uint32_t perLaneBytes = d.buffer_components
                                   ? 4u * d.destination_vgpr_count()
                                   : d.num_elems * (d.lds_dword_extend ? 4u : d.elem_size);
-      if (d.cluster_multicast && d.cluster_mcast_mask != 0) {
+      // A cluster load outside a cluster is an ordinary global load (CDNA5 ISA
+      // 10.7), so the mask selects targets only when the wave is in a cluster,
+      // as in the memory pipeline.
+      if (d.cluster_multicast && d.cluster_mcast_mask != 0 && wf.cluster_size() > 1) {
         uint32_t selfMask = amdgpu::cluster_multicast_rank_mask(wf.cluster_rank());
         uint32_t peerMask = d.cluster_mcast_mask & ~selfMask;
         if (peerMask != 0)
