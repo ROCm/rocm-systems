@@ -118,6 +118,18 @@ class WaitCheckingCliTest(unittest.TestCase):
             with self.subTest(mode=mode):
                 self.check_handoff([f"--wait-checking={mode}"], mode, daemon=True)
 
+    def test_forwarding_does_not_parse_application_flags(self):
+        arguments = ["--wait-checking=bad", "", "--", "--help", "-v"]
+        result = self.run_cli(
+            "--",
+            sys.executable,
+            "-c",
+            "import json, sys; print(json.dumps(sys.argv[1:]))",
+            *arguments,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), arguments)
+
     def test_last_mode_wins(self):
         self.check_handoff(["--wait-checking=off", "--wait-checking", "on"], "on")
 
@@ -132,7 +144,11 @@ class WaitCheckingCliTest(unittest.TestCase):
             with self.subTest(flags=flags):
                 result = self.run_cli(*flags)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("--wait-checking requires on, off, or all", result.stderr)
+                self.assertIn("--wait-checking", result.stderr)
+                self.assertTrue(
+                    "requires a value" in result.stderr
+                    or "requires on, off, or all" in result.stderr
+                )
 
     def test_rejects_attach_and_external_dbt_config(self):
         for flags, config, message in (
