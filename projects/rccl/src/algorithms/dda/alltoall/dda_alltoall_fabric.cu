@@ -152,20 +152,23 @@ static bool ddaAllToAllFabricTdmEligible(ncclComm* comm, const void* sendbuff, c
   return true;
 }
 
-// Opt this instantiation into the full dynamic LDS once; each launch then asks for only what it needs.
+// Opt this instantiation into the full dynamic LDS once per device; each launch then asks for only what it needs.
 // The static is per template instantiation, so each tile shape is set up independently.
+// TODO: move this to ncclDdaFabricCommInit (like ncclInitKernelsForDevice) so it fails at init, not at launch.
 template <auto Kernel>
 static ncclResult_t ddaAllToAllFabricTdmPrepare() {
-  static std::atomic<bool> done{false};
-  if (done.load(std::memory_order_acquire)) return ncclSuccess;
+  static std::atomic<uint64_t> doneDevs{0};
   int dev = 0;
-  int maxSmem = 0;
   CUDACHECK(cudaGetDevice(&dev));
+  // Devices past 64 are not cached and set the attribute on every call.
+  const uint64_t devBit = dev < 64 ? uint64_t{1} << dev : 0;
+  if (doneDevs.load(std::memory_order_acquire) & devBit) return ncclSuccess;
+  int maxSmem = 0;
   CUDACHECK(cudaDeviceGetAttribute(&maxSmem, cudaDevAttrMaxSharedMemoryPerBlockOptin, dev));
   if (dda::common::kDdaA2ATdmMaxSmemBytes > maxSmem) return ncclInvalidUsage;
   CUDACHECK(cudaFuncSetAttribute(Kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
                                  dda::common::kDdaA2ATdmMaxSmemBytes));
-  done.store(true, std::memory_order_release);
+  doneDevs.fetch_or(devBit, std::memory_order_release);
   return ncclSuccess;
 }
 
