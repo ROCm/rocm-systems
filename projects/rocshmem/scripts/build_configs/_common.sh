@@ -30,7 +30,7 @@ if [[ "${ASAN}" == true ]]; then
 fi
 
 generator_args=()
-if command -v ninja >/dev/null 2>&1; then
+if [[ ! -f CMakeCache.txt ]] && command -v ninja >/dev/null 2>&1; then
     generator_args=(-G Ninja)
 fi
 
