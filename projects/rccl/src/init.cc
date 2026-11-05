@@ -1726,6 +1726,14 @@ static ncclResult_t initNvlDomainInfo(struct ncclComm* comm) {
   return ncclSuccess;
 }
 
+// [RCCL] True when one UALink LSA team holds every rank on more than one host (tray) and the arch table has an
+// AllGather TDM window. Across trays AllGather symk then runs only through that window.
+static bool commSpansTrays(const struct ncclComm* comm, bool isOneLsaTeam) {
+  const rcclArchThresholds* table = comm->archThresholds;
+  return comm->MNNVL && isOneLsaTeam && comm->topo->nHosts > 1 && table != nullptr &&
+         table->symTdmMinR2[ncclFuncAllGather] != 0;
+}
+
 // True when every host has the same number of ranks and those partitions sum to nranks.
 static bool uniformRanksPerHost(const struct ncclComm* comm, int nranks) {
   int ranksPerHost = -1;
@@ -2952,6 +2960,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   }
   comm->globalRmaProxySupport = globalRmaPluginSupport && globalCrossNicSupport && comm->cuMemGdrSupport;
   isOneLsaTeams = ncclDevrIsOneLsaTeam(comm);
+  comm->spansTrays = commSpansTrays(comm, isOneLsaTeams); // [RCCL]
   comm->symmetricSupport = comm->isAllCudaP2p && ncclParamWinEnable() && ncclCuMemEnable() &&
                            (comm->globalGinSupport != NCCL_GIN_CONNECTION_NONE || isOneLsaTeams);
   // hostRmaSupport must not require symmetricSupport: multi-node GIN proxy RMA
@@ -4439,6 +4448,12 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
              comm->commHash, comm->rank);
       }
     }
+    // Close imported DDA IPC mappings while commDestroySync is still running
+    // concurrently for every local rank. The existing intranode barrier below
+    // then guarantees all mappings are closed before serial commFree releases
+    // any rank's exported allocations. Revoked comms close in commReclaim.
+    ncclResult_t ddaCloseRet = ncclSuccess;
+    NCCLCHECKIGNORE(ncclDdaIpcCommClosePeerMappings(comm), ddaCloseRet);
     if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) == 0) {
       int* hostRanks;
       int hostRank = 0;
@@ -4635,6 +4650,11 @@ static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
                    cb);
             }
           }
+          // Revoke skips commDestroySync, so close this rank's DDA IPC imports
+          // here, before the serial commCleanup loop below frees any local rank's
+          // exported allocations.
+          ncclResult_t ddaCloseRet = ncclSuccess;
+          NCCLCHECKIGNORE(ncclDdaIpcCommClosePeerMappings(curIntraComm), ddaCloseRet);
         }
       }
       for (int i = 0; i < nIntraThreads; i++) {
