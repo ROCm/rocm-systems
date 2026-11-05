@@ -242,8 +242,22 @@ bool MemoryPipeline::cancel_wait_check_issue(const PipelineEntry &entry) {
           xevent != events.value().end() &&
           (xevent->kind == waitcheck_detail::WaitEventKind::Smem || (wf.mode_raw() & (1u << 25)));
     }
-    if (!scoreboard->cancel_last_issue(entry.issue_pc,
-                                       std::span(entry.counters.types).first(entry.counters.size),
+    WaitCounterTokens issued = entry.counters;
+    const auto *state = entry.inst->data();
+    if ((state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
+        !entry.inst->data_as<VectorMemState>()->exec_mask) {
+      const util::FailureOr<WaitcntModel> model = waitcnt_model(wf.cu().arch());
+      if (model.failed())
+        return false;
+      issued.size = 0;
+      for (const auto counter : std::span(entry.counters.types).first(entry.counters.size)) {
+        // track_memory_wait omits empty-EXEC positions only when no older
+        // request occupies this counter. Pipeline counters are still acquired.
+        if (scoreboard->outstanding(canonical_wait_counter(counter, model.value())))
+          issued.types[issued.size++] = counter;
+      }
+    }
+    if (!scoreboard->cancel_last_issue(entry.issue_pc, std::span(issued.types).first(issued.size),
                                        wf.cu().arch(), xcnt))
       return false;
   }
