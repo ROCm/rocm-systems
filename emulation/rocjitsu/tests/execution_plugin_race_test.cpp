@@ -3693,6 +3693,154 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeLoadcntOrderingSlot) {
 INSTANTIATE_TEST_SUITE_P(LoadAndReturningAtomic, IgnoredGlobalMemoryRaceTest,
                          ::testing::Values(AtomicOp::NONE, AtomicOp::SWAP));
 
+// Two CDNA4 waves share a 108-byte LDS allocation. The producer's M0 selects
+// allocation byte 64, and its active lanes 0, 2 and 5 write 16-byte lane slots
+// at bytes 64, 96 and 144. X3 writes the first 12 bytes of each slot and X4
+// writes all 16. Lane 5's slot is outside the allocation, so it writes nothing.
+class GlobalWideLdsRaceHarness {
+public:
+  void initialize() {
+    ASSERT_NO_FATAL_FAILURE(f_.initialize(2));
+    PluginSinkConfig config;
+    sink_ = &config.emplace<StringSink>();
+    f_.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+    ASSERT_TRUE(f_.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    f_.soc->set_plugin_group(f_.plugin_group_);
+    f_.plugin_group_->onInit();
+    producer_ = f_.cu()->dispatch_wf(0, 0x1000, 104, 256);
+    peer_ = f_.cu()->dispatch_wf(0, 0x2000, 104, 256);
+    ASSERT_NE(producer_, nullptr);
+    ASSERT_NE(peer_, nullptr);
+    waves_ = {producer_, peer_};
+    for (auto *wave : waves_) {
+      wave->set_exec(1);
+      wave->set_lds_base(128);
+      wave->set_lds_size(108);
+    }
+    producer_->set_m0(0xfffc0043);
+    for (unsigned lane : {0u, 2u, 5u}) {
+      f_.cu()->write_vgpr(producer_->vgpr_alloc().base + 2, lane, 0x20000 + lane * 32);
+      f_.cu()->write_vgpr(producer_->vgpr_alloc().base + 3, lane, 0);
+    }
+    f_.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 208, waves_);
+  }
+
+  Wavefront &producer() { return *producer_; }
+  Wavefront &peer() { return *peer_; }
+  bool raced() const { return sink_->str().find("RACE ") != std::string::npos; }
+  const std::string &report() const { return sink_->str(); }
+
+  void wide_load(unsigned count) {
+    producer_->set_exec(0x25);
+    execute(*producer_, cdna4::build_flat(count == 3 ? cdna4::kGlobalLoadLdsDwordx3Flat
+                                                     : cdna4::kGlobalLoadLdsDwordx4Flat,
+                                          {.seg = 2, .addr = 2, .saddr = 0x7f, .vdst = 0xff}));
+  }
+
+  void read_byte(Wavefront &wave, unsigned address) {
+    wave.set_exec(1);
+    wave.pc = 0x3000;
+    f_.cu()->write_vgpr(wave.vgpr_alloc().base, 0, address);
+    execute(wave, cdna4::build_ds(cdna4::kDsReadU8Ds, {.addr = 0, .vdst = 8}));
+  }
+
+  void wait(Wavefront &wave, uint8_t vmcnt, uint8_t lgkmcnt) {
+    execute_wait(*f_.plugin_group_, wave,
+                 legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, vmcnt, lgkmcnt));
+  }
+
+  void barrier() { f_.plugin_group_->onAmdgpuBarrierResolved(waves_); }
+
+private:
+  void execute(Wavefront &wave, std::array<uint32_t, 2> words) {
+    auto decoded = decoder_->decode_window(words);
+    ASSERT_TRUE(decoded.succeeded());
+    auto &inst = *instructions_.emplace_back(std::move(decoded.value()));
+    f_.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave.pc, inst, wave);
+    ASSERT_TRUE(f_.cu()->execute_instruction(&inst, wave).succeeded());
+    f_.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, wave);
+  }
+
+  PluginFixture f_;
+  StringSink *sink_ = nullptr;
+  Wavefront *producer_ = nullptr;
+  Wavefront *peer_ = nullptr;
+  std::array<Wavefront *, 2> waves_{};
+  std::unique_ptr<Decoder> decoder_ = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  std::vector<std::unique_ptr<Instruction>> instructions_;
+};
+
+enum class WideLdsWait {
+  None,
+  VmcntOne,         // Leaves the single outstanding load pending.
+  LgkmcntZero,      // Waits on the wrong counter.
+  VmcntZero,        // Completes the load for the producer only.
+  VmcntZeroBarrier, // Completes the load and orders it for the peer.
+};
+
+TEST(RaceDetectorPluginTest, GlobalWideLdsLoadsTrackPayloadAndSynchronization) {
+  using enum WideLdsWait;
+  for (unsigned count : {3u, 4u})
+    for (bool other_wave : {false, true})
+      for (WideLdsWait wait : {None, VmcntOne, LgkmcntZero, VmcntZero, VmcntZeroBarrier})
+        // Byte 75 is in lane 0's payload for both widths. Byte 79 is lane 0's
+        // fourth DWORD, written only by X4. Byte 80 starts inactive lane 1's
+        // slot. Lane 2's 96..107 payload fits only for X3, because X4 would
+        // cross the 108-byte allocation, so byte 107 is written only by X3.
+        // Bytes 108 and 144 are outside the allocation.
+        for (unsigned address : {75u, 79u, 80u, 107u, 108u, 144u}) {
+          SCOPED_TRACE(testing::Message() << count << ',' << other_wave << ','
+                                          << static_cast<int>(wait) << ',' << address);
+          GlobalWideLdsRaceHarness h;
+          ASSERT_NO_FATAL_FAILURE(h.initialize());
+          ASSERT_NO_FATAL_FAILURE(h.wide_load(count));
+          EXPECT_FALSE(h.raced()) << h.report();
+          if (wait == VmcntOne)
+            h.wait(h.producer(), 1, 15);
+          else if (wait == LgkmcntZero)
+            h.wait(h.producer(), 63, 0);
+          else if (wait == VmcntZero || wait == VmcntZeroBarrier)
+            h.wait(h.producer(), 0, 15);
+          if (wait == VmcntZeroBarrier)
+            h.barrier();
+
+          ASSERT_NO_FATAL_FAILURE(h.read_byte(other_wave ? h.peer() : h.producer(), address));
+          const bool overlaps =
+              address == 75 || (address == 79 && count == 4) || (address == 107 && count == 3);
+          const bool synchronized = wait == VmcntZeroBarrier || (!other_wave && wait == VmcntZero);
+          EXPECT_EQ(h.raced(), overlaps && !synchronized) << h.report();
+        }
+}
+
+TEST(RaceDetectorPluginTest, GlobalWideLdsLoadsDetectPendingLdsReads) {
+  enum class ReadSync { None, LgkmcntZero, LgkmcntZeroBarrier };
+  using enum ReadSync;
+  for (unsigned count : {3u, 4u})
+    for (bool other_wave : {false, true})
+      for (ReadSync sync : {None, LgkmcntZero, LgkmcntZeroBarrier})
+        // Byte 75 is in lane 0's payload for both widths; byte 80 is in
+        // inactive lane 1's slot.
+        for (unsigned address : {75u, 80u}) {
+          SCOPED_TRACE(testing::Message() << count << ',' << other_wave << ','
+                                          << static_cast<int>(sync) << ',' << address);
+          GlobalWideLdsRaceHarness h;
+          ASSERT_NO_FATAL_FAILURE(h.initialize());
+          Wavefront &reader = other_wave ? h.peer() : h.producer();
+          ASSERT_NO_FATAL_FAILURE(h.read_byte(reader, address));
+          if (sync != None)
+            h.wait(reader, 63, 0);
+          if (sync == LgkmcntZeroBarrier)
+            h.barrier();
+          EXPECT_FALSE(h.raced()) << h.report();
+          ASSERT_NO_FATAL_FAILURE(h.wide_load(count));
+          // The load's LDS write is not ordered after the producer's own DS
+          // read, so that read also needs an lgkmcnt wait.
+          const bool synchronized =
+              sync == LgkmcntZeroBarrier || (!other_wave && sync == LgkmcntZero);
+          EXPECT_EQ(h.raced(), address == 75 && !synchronized) << h.report();
+        }
+}
+
 TEST(RaceDetectorPluginTest, DecodedDirectLdsLoadsDetectConflictingWaveStores) {
   for (auto arch : {"rdna3", "rdna3_5", "rdna4"}) {
     for (uint32_t store_address : {16u, 20u}) {
