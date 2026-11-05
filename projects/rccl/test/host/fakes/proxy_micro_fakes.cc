@@ -211,6 +211,7 @@ ncclResult_t ncclShmOpen(char* shmPath, size_t shmPathSize, size_t shmSize, void
                          ncclShmHandle_t* handle) {
   g_shm.opens++;
   g_shm.lastRefcount = refcount;
+  g_shm.lastSize = shmSize;
   if (g_shm.openResult != ncclSuccess) return g_shm.openResult;
   if (shmPath[0] == '\0') std::snprintf(shmPath, shmPathSize, "/dev/shm/nccl-AbC123");
   g_shm.lastPath = shmPath;
