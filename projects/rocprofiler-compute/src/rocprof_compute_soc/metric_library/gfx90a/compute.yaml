@@ -221,13 +221,41 @@ compute.iops_per_norm:
     The total number of integer operations executed on either the VALU or MFMA units,
     per normalization unit.
 compute.mfma_flops_bf16:
+  name: MFMA FLOPs (BF16)
+  formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_BF16) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    The total number of 16-bit brain floating point MFMA operations executed per second.
+    Note: this does not include any 16-bit brain floating point operations from VALU
+    instructions.
   peak: $max_sclk * $cu_per_gpu * 1024 / 1000
   peak_empirical: $MFMABF16Flops_empirical_peak
 compute.mfma_flops_f16:
+  name: MFMA FLOPs (F16)
+  formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F16) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    The total number of 16-bit floating point MFMA operations executed per second.
+    Note: this does not include any 16-bit floating point operations from VALU instructions.
+  peak: $max_sclk * $cu_per_gpu * 1024 / 1000
   peak_empirical: $MFMAF16Flops_empirical_peak
 compute.mfma_flops_f32:
+  name: MFMA FLOPs (F32)
+  formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F32) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    The total number of 32-bit floating point MFMA operations executed per second.
+    Note: this does not include any 32-bit floating point operations from VALU instructions.
+  peak: $max_sclk * $cu_per_gpu * 256 / 1000
   peak_empirical: $MFMAF32Flops_empirical_peak
 compute.mfma_flops_f64:
+  name: MFMA FLOPs (F64)
+  formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F64) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    The total number of 64-bit floating point MFMA operations executed per second.
+    Note: this does not include any 64-bit floating point operations from VALU instructions.
+  peak: $max_sclk * $cu_per_gpu * 256 / 1000
   peak_empirical: $MFMAF64Flops_empirical_peak
 compute.mfma_inst_cycles:
   name: MFMA Instruction Cycles
@@ -238,6 +266,13 @@ compute.mfma_inst_cycles:
     the ratio of the total number of cycles the MFMA unit was busy over the total
     number of MFMA instructions.
 compute.mfma_iops_int8:
+  name: MFMA IOPs (INT8)
+  formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_I8) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GIOP/s
+  description: >-
+    The total number of 8-bit integer MFMA operations executed per second. Note: this
+    does not include any 8-bit integer operations from VALU instructions.
+  peak: $max_sclk * $cu_per_gpu * 1024 / 1000
   peak_empirical: $MFMAI8Ops_empirical_peak
 compute.mfma_util:
   name: MFMA Utilization
@@ -255,6 +290,15 @@ compute.smem_lat:
   description: >-
     The average number of round-trip cycles (that is, from issue to data return /
     acknowledgment) required for a SMEM instruction to complete.
+compute.total_flops:
+  name: Performance (GFLOPs)
+  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) / 1e9
+  unit: GFLOP/s
+  description: >-
+    The overall achieved performance, measured in GigaFLOPs per second (GFLOP/s).
+    This is calculated as the sum of all VALU and MFMA floating-point operations divided
+    by the total execution time. This value is used as the y-coordinate for the kernel's
+    point on the Roofline plot.
 compute.valu_active_threads:
   peak: 64
 compute.valu_flops:
@@ -266,10 +310,28 @@ compute.valu_flops:
     does not include any floating-point operations from MFMA instructions.
   peak: $max_sclk * $cu_per_gpu * 64 * 2 / 1000
 compute.valu_flops_f16:
+  name: VALU FLOPs (F16)
+  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16)) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    The total 16-bit floating-point operations executed per second on the VALU. Note:
+    this does not include any F16 operations from MFMA instructions.
   peak_empirical: $FP16Flops_empirical_peak
 compute.valu_flops_f32:
+  name: VALU FLOPs (F32)
+  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32)) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    The total 32-bit floating-point operations executed per second on the VALU. Note:
+    this does not include any F32 operations from MFMA instructions.
   peak_empirical: $FP32Flops_empirical_peak
 compute.valu_flops_f64:
+  name: VALU FLOPs (F64)
+  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64)) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    The total 64-bit floating-point operations executed per second on the VALU. Note:
+    this does not include any F64 operations from MFMA instructions.
   peak_empirical: $FP64Flops_empirical_peak
 compute.vmem_lat:
   name: VMEM Latency

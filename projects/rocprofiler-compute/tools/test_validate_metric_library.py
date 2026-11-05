@@ -532,14 +532,6 @@ def test_changed_row_peak(shipped_copy):
     assert any("is neither the 'peak' nor the 'peak_empirical'" in e for e in errors)
 
 
-def test_changed_hidden_row_peak(shipped_copy):
-    library, configs = shipped_copy("gfx908")
-    path = configs / "gfx908" / "0200_system_speed_of_light.yaml"
-    replace_in(path, "$cu_per_gpu * 512 / 1000", "$cu_per_gpu * 999 / 1000")
-    errors = validate(library, configs)
-    assert any("2.1.1 MFMA FLOPs (BF16): peak" in error for error in errors)
-
-
 def test_library_peak_must_be_shown(shipped_copy):
     library, configs = shipped_copy("gfx908")
     replace_in(
@@ -590,9 +582,9 @@ def test_shared_formula_rows_show_the_id_their_label_names(
 
 def test_display_variant_row_is_checked_for_its_unit(shipped_copy):
     """4.1.11 shows lds.theoretical_bw in another form; its unit is still checked."""
-    library, configs = shipped_copy("gfx908")
+    library, configs = shipped_copy("gfx90a")
     replace_in(
-        configs / "gfx908" / "0400_roofline.yaml",
+        configs / "gfx90a" / "0400_roofline.yaml",
         "* 4 * $lds_banks_per_cu) / SUM(End_Timestamp - Start_Timestamp)\n"
         "          unit: GB/s",
         "* 4 * $lds_banks_per_cu) / SUM(End_Timestamp - Start_Timestamp)\n"
@@ -613,11 +605,11 @@ def test_variant_position_must_exist(shipped_copy, monkeypatch):
 
 
 def test_unknown_measured_peak_is_an_error(shipped_copy):
-    """gfx908 has no roofline benchmark, so its row peaks are not checked; a typo
-    still is."""
-    library, configs = shipped_copy("gfx908")
+    """A ceiling the benchmark does not measure on the arch is not checked; a typo
+    is."""
+    library, configs = shipped_copy("gfx90a")
     replace_in(
-        configs / "gfx908" / "0400_roofline.yaml",
+        configs / "gfx90a" / "0400_roofline.yaml",
         "$LDSBw_empirical_peak",
         "$LDSBz_empirical_peak",
     )
@@ -640,9 +632,9 @@ def test_bytes_per_second_row_shows_its_peak_scaled(peak, shown):
 
 
 def test_changed_rewritten_display_variant(shipped_copy):
-    library, configs = shipped_copy("gfx908")
+    library, configs = shipped_copy("gfx90a")
     replace_in(
-        configs / "gfx908" / "0400_roofline.yaml",
+        configs / "gfx90a" / "0400_roofline.yaml",
         "* 4 * $lds_banks_per_cu) / SUM(End",
         "* 8 * $lds_banks_per_cu) / SUM(End",
     )
@@ -678,7 +670,7 @@ def test_scaled_display_variant_unit(shipped_copy):
 
 
 def test_renamed_display_variant(shipped_copy):
-    library, configs = shipped_copy("gfx908")
-    path = configs / "gfx908" / "0400_roofline.yaml"
+    library, configs = shipped_copy("gfx90a")
+    path = configs / "gfx90a" / "0400_roofline.yaml"
     replace_in(path, "LDS Bandwidth:", "LDS BW:")
     assert any("4.1.11 is now" in error for error in validate(library, configs))

@@ -5,14 +5,6 @@ vl1d.access_lat:
   description: >-
     Calculated as the average number of cycles that a vL1D cache line request spent
     in the vL1D cache pipeline.
-vl1d.ai:
-  name: vL1D Arithmetic Intensity
-  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (64 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum))
-  unit: FLOPs/Byte
-  description: >-
-    The Arithmetic Intensity (AI) relative to the L1 Cache. It is the ratio of total
-    floating-point operations (FLOPs) to total bytes transferred between the L1 cache
-    and the processing units.
 vl1d.atomic_req:
   name: vL1D Atomic Requests
   formula: SUM(TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum) / SUM($denom)

@@ -22,11 +22,12 @@ For every arch in src/rocprof_compute_soc/metric_library/, check that:
      one id on every arch (except SPLIT_FORMULA_IDS);
   7. units use one spelling, and each metric id has one name and one unit on every
      arch;
-  8. the library matches analysis_configs: every equation a row shows is a library
-     formula (DISPLAY_VARIANTS list the rows that show one in another form), every
-     formula is shown, every row's unit is its metric's unit (except UNIT_VARIANTS),
-     each row's peak is its metric's "peak" or "peak_empirical" and each library peak
-     is shown by a row, the no-filter counters equal detect_counters(), and the
+  8. the library matches analysis_configs, except the roofline panel on an arch without
+     a roofline benchmark: every equation a row shows is a library formula
+     (DISPLAY_VARIANTS list the rows that show one in another form), every formula is
+     shown, every row's unit is its metric's unit (except UNIT_VARIANTS), each row's
+     peak is its metric's "peak" or "peak_empirical" and each library peak is shown by
+     a row, the library's counters equal detect_counters() for those panels, and the
      variables equal get_build_in_vars(). Check 8 is temporary; see "Equivalence with
      analysis_configs" below.
 """
@@ -86,7 +87,11 @@ from utils.metrics.metric_evaluator import MetricEvaluator
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import total_sqc
 from utils.utils_analysis import add_unit_counter
-from utils.utils_common import MEMBW_ANALYSIS_PANEL_ID, canonical_config_arch
+from utils.utils_common import (
+    MEMBW_ANALYSIS_PANEL_ID,
+    ROOFLINE_PANEL_ID,
+    canonical_config_arch,
+)
 from utils.utils_counter_defs import (
     SUPPORTED_DENOM,
     get_build_in_vars,
@@ -189,10 +194,6 @@ _PIPELINE_MFMA_UTIL = (
     "/ (4 * SUM($cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))",
 )
 DISPLAY_VARIANTS = {
-    "gfx908": {
-        "4.1.9": _ROOFLINE_L2_BW,
-        "4.1.11": _ROOFLINE_LDS_BW,
-    },
     "gfx90a": {
         "4.1.9": _ROOFLINE_L2_BW,
         "4.1.11": _ROOFLINE_LDS_BW,
@@ -293,7 +294,7 @@ def same_value_errors(arch: str, library: MetricLibrary) -> List[str]:
 def equivalence_errors(metric_dir: Path, analysis_dir: Path, arch: str) -> List[str]:
     """Check one arch's library against its analysis configs. Temporary; see below."""
     library = load_metric_library(metric_dir, arch)
-    rows = list(_row_equations(analysis_dir / arch))
+    rows = list(_row_equations(analysis_dir / arch, _unshown_file_ids(arch)))
     variants = DISPLAY_VARIANTS.get(arch, {})
     formulas = {
         _canonical(metric["formula"]): metric_id
@@ -764,15 +765,13 @@ def _row_metric_id(
 ) -> Optional[str]:
     """Return the id of the metric a row shows, or None if it shows none.
 
-    A row without an equation (value: None) is hidden; its label names the metric. A
-    row whose label names an id of SHARED_FORMULA_IDS shows that id.
+    A row without an equation (value: None) shows none. A row whose label names an id
+    of SHARED_FORMULA_IDS shows that id.
     """
     if row.legacy_id in variants:
         metric_id = variants[row.legacy_id][1]
         return metric_id if metric_id in library_ids else None
     named_id = names.get(row.label.casefold())
-    if row.equation is None:
-        return named_id
     metric_id = formulas.get(_gb_per_second(row))
     if metric_id is not None and SHARED_FORMULA_IDS.get(named_id) == metric_id:
         return named_id
@@ -886,8 +885,7 @@ def _peak_errors(
     Each row's peak is its metric's "peak" or "peak_empirical", and each library peak
     is the peak of a row that shows the metric. A Bytes/s row shows its peak in Bytes/s.
     A row's measured peak is skipped where the roofline benchmark does not measure that
-    ceiling on the arch (always, on an arch without a benchmark); a ceiling that is no
-    roofline.csv column is still an error.
+    ceiling on the arch; a ceiling that is no roofline.csv column is still an error.
     """
     unmeasured = mi_gpu_specs.get_all_roofline_columns() - _arch_ceilings(arch)
     errors = []
@@ -919,11 +917,16 @@ def _peak_errors(
     return errors
 
 
-def _make_soc(analysis_dir: Path, arch: str, membw_analysis: bool) -> OmniSoC_Base:
+def _make_soc(
+    analysis_dir: Path,
+    arch: str,
+    membw_analysis: bool,
+    filter_blocks: Sequence[str] = (),
+) -> OmniSoC_Base:
     """Return an OmniSoC_Base that reads analysis_dir without a GPU (16 L2 channels)."""
     args = SimpleNamespace(
         config_dir=analysis_dir,
-        filter_blocks=[],
+        filter_blocks=list(filter_blocks),
         membw_analysis=membw_analysis,
         roof_only=False,
         set_selected=None,
@@ -970,7 +973,15 @@ def _counter_errors(arch: str, library: MetricLibrary, analysis_dir: Path) -> Li
         (analysis_dir / arch).glob(f"{MEMBW_ANALYSIS_PANEL_ID}_*.yaml")
     )
     gpu_series = _gpu_series(arch)
-    soc = _make_soc(analysis_dir, _member_arch(arch), has_membw_panel)
+    unshown = _unshown_file_ids(arch)
+    blocks = []
+    if unshown:
+        # Select the shown files as --block does; no blocks select every file.
+        file_ids = {
+            path.name.split("_")[0] for path in (analysis_dir / arch).glob("*.yaml")
+        }
+        blocks = [str(int(file_id) // 100) for file_id in sorted(file_ids - unshown)]
+    soc = _make_soc(analysis_dir, _member_arch(arch), has_membw_panel, blocks)
     expected, _ = soc.detect_counters()
     actual = soc._expand_tcc_template_counters(
         library.get_counters_for_metrics(list(library.metrics), gpu_series)
@@ -998,12 +1009,23 @@ def _builtin_var_errors(arch: str, library: MetricLibrary) -> List[str]:
     return [f"[{arch}] variables differ from get_build_in_vars()"]
 
 
-def _row_equations(arch_dir: Path) -> Iterator["_Row"]:
-    """Yield each equation a row of arch_dir shows.
+def _unshown_file_ids(arch: str) -> Set[str]:
+    """Return the ids of the analysis config files an arch never shows.
+
+    An arch without a roofline benchmark (gfx908) shows no roofline panel, so its
+    library leaves out the metrics only that panel lists.
+    """
+    if _member_arch(arch) in mi_gpu_specs.get_roofline_archs():
+        return set()
+    return {f"{ROOFLINE_PANEL_ID:04d}"}
+
+
+def _row_equations(arch_dir: Path, unshown_file_ids: Set[str]) -> Iterator["_Row"]:
+    """Yield each equation a row of arch_dir shows, except in unshown_file_ids.
 
     A per-channel table's last key, placeholder_range, shows no column and adds no row.
     """
-    for item in iter_analysis_config_metrics(arch_dir, set()):
+    for item in iter_analysis_config_metrics(arch_dir, unshown_file_ids):
         legacy_id = f"{item.table_id // 100}.{item.table_id % 100}.{item.metric_idx}"
         for form in _row_forms(item.table, item.metric):
             yield _Row(

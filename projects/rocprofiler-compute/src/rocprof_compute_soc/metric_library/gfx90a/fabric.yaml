@@ -1,6 +1,12 @@
 inherit: ../gfx908/fabric.yaml
 fabric.ai_hbm:
+  name: HBM Arithmetic Intensity
   formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / SUM(TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64 + TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32)
+  unit: FLOPs/Byte
+  description: >-
+    The Arithmetic Intensity (AI) relative to High-Bandwidth Memory (HBM). It is the
+    ratio of total floating-point operations (FLOPs) to total bytes transferred between
+    HBM and the L2 cache.
 fabric.atomic:
   formula: SUM(TCC_EA_ATOMIC_sum) / SUM($denom)
 fabric.atomic_lat:
@@ -8,7 +14,13 @@ fabric.atomic_lat:
 fabric.atomic_traffic:
   formula: 100 * SUM(TCC_EA_ATOMIC_sum) / SUM(TCC_EA_WRREQ_sum)
 fabric.hbm_bw:
+  name: HBM Bandwidth
   formula: SUM(TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64 + TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    The total number of bytes read from and written to High-Bandwidth Memory (HBM)
+    per second. It reflects peak single-direction (read-only) bandwidth, so write-heavy
+    or mixed kernels fall below it.
   peak_empirical: $HBMBw_empirical_peak
 fabric.hbm_rd:
   formula: SUM(TCC_EA_RDREQ_DRAM_sum) / SUM($denom)
