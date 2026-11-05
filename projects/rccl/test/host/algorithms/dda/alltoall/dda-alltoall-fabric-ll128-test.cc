@@ -248,7 +248,30 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_GridStaysWithinTheEpochCellsAndCu
   comm().ddaFabricMaxBlocks = 30;
   EXPECT_EQ(RunOne(big).grid.y, 10u);
   comm().ddaFabricMaxBlocks = 2;
-  EXPECT_EQ(RunOne(big).grid.y, 1u) << "one block per peer is the floor, even above the budget";
+  const DdaLaunch& narrow = RunOne(big);
+  EXPECT_EQ(narrow.grid.x, 2u) << "below the peer count, columns serve several peers";
+  EXPECT_EQ(narrow.grid.y, 1u);
+  EXPECT_EQ(ncclAllToAllDdaFabricLL128Blocks(mock_.get(), big, ncclFloat32), 2u);
+}
+
+// Columns never exceed the cap, so the grid stays within it at any peer count; each column gets the
+// blocks it wants within its share, and at least one.
+TEST(DdaPeerGrid, GridStaysWithinTheCap) {
+  struct Case {
+    int nPeers;
+    size_t wanted;
+    size_t cap;
+    unsigned cols;
+    unsigned perCol;
+  };
+  const Case cases[] = {{7, 4, 64, 7, 4},   {7, 100, 64, 7, 9}, {143, 8, 64, 64, 1},
+                        {143, 1, 256, 143, 1}, {3, 0, 2, 2, 1},   {3, 5, 0, 1, 1}};
+  for (const Case& c : cases) {
+    const auto grid = dda::common::ddaPeerGrid(c.nPeers, c.wanted, c.cap);
+    EXPECT_EQ(grid.cols, c.cols) << c.nPeers << " peers, cap " << c.cap;
+    EXPECT_EQ(grid.blocksPerCol, c.perCol) << c.nPeers << " peers, cap " << c.cap;
+    EXPECT_LE((size_t)grid.cols * grid.blocksPerCol, c.cap < 1 ? 1 : c.cap);
+  }
 }
 
 // RCCL_DDA_LL128_A2A_LPB counts 120-byte lines per block: one 480-float slice is 16 lines.
@@ -294,7 +317,9 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_BlockBudgetFromTheArchTable) {
   EXPECT_EQ(RunOne(big).grid.y, 10u);
   EXPECT_EQ(seenTotal, 4 * big * sizeof(float));
   g_rcclDdaFabricA2aLL128Blocks = [](const ncclComm*, size_t) { return 1; };
-  EXPECT_EQ(RunOne(big).grid.y, 1u) << "at least one block per peer";
+  const DdaLaunch& one = RunOne(big);
+  EXPECT_EQ(one.grid.x, 1u) << "one column serves every peer";
+  EXPECT_EQ(one.grid.y, 1u);
 }
 
 // The arch table's block size applies unless RCCL_DDA_LL128_A2A_THREADS gives a valid one.

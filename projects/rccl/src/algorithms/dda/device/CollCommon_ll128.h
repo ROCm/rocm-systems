@@ -316,13 +316,4 @@ constexpr bool ddaLL128ValidThreads(int64_t threads) {
   return threads >= kDdaLL128Warp && threads <= 1024 && threads % kDdaLL128Warp == 0;
 }
 
-// Blocks in one peer column: a warp per slice, capped by the column's share of
-// totalBlockCap, and at least one.
-constexpr unsigned ddaLL128BlocksPerPeer(size_t slices, size_t warps, int nPeers, size_t totalBlockCap) {
-  const size_t cap = totalBlockCap / (size_t)nPeers;
-  const size_t want = (slices + warps - 1) / warps;
-  const size_t bpp = want < cap ? want : cap;
-  return bpp < 1 ? 1u : (unsigned)bpp;
-}
-
 } // namespace dda::common

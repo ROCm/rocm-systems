@@ -34,7 +34,6 @@ namespace {
 using dda::common::kDdaLL128Warp;
 using dda::common::ddaBankSize;
 using dda::common::ddaLL128A2ASlotWords;
-using dda::common::ddaLL128BlocksPerPeer;
 using dda::common::ddaLL128Slices;
 using dda::common::ddaLL128SlotPayloadBytes;
 using dda::common::ddaLL128ValidThreads;
@@ -66,29 +65,28 @@ static inline size_t ddaLL128A2AMaxPerChunkBytes(ncclComm* comm) {
   return ddaLL128SlotPayloadBytes(ddaLL128A2ASlotWords(ddaBankSize(comm->ddaScratchBytes), comm->nRanks));
 }
 
-// Geometry: grid.x = remote peers, grid.y = warp-per-slice split capped by the comm block budget
-// (rcclDdaFabricA2aLL128Blocks) and the epoch array, with at least one block per peer.
+// Geometry: grid.x = peer columns, grid.y = a warp per slice; the whole grid stays within the comm
+// block budget (rcclDdaFabricA2aLL128Blocks) and the epoch array, with columns serving several
+// peers when there are more peers than that.
 static inline std::pair<dim3, dim3> ddaAllToAllFabricLL128Geom(ncclComm* comm, size_t perChunkBytes) {
   const size_t totalBytes = perChunkBytes * (size_t)comm->nRanks;
   const int tuned = rcclDdaFabricA2aLL128Threads(comm, totalBytes);
   const unsigned threads = ddaLL128A2AThreads(tuned > 0 ? (unsigned)tuned : kDdaLL128A2ADefaultThreads);
   const size_t warps = threads / (unsigned)kDdaLL128Warp;
   const int nPeers = comm->nRanks - 1;
-  int cap = std::min(rcclDdaFabricA2aLL128Blocks(comm, totalBytes), comm->ddaLLEpochLen);
-  const int maxBpp = ddaLL128A2AMaxBppEnv(0);
-  if (maxBpp > 0 && (int64_t)maxBpp * nPeers < cap) cap = maxBpp * nPeers;
-  const size_t totalCap = cap < 0 ? 0 : (size_t)cap;
+  const int cap = std::min(rcclDdaFabricA2aLL128Blocks(comm, totalBytes), comm->ddaLLEpochLen);
+  size_t blocksWanted = (ddaLL128Slices(perChunkBytes) + warps - 1) / warps;
   // A warp moves a whole 16-line slice, so fewer than 16 lines per warp only adds idle blocks.
   const size_t linesPerBlock = ddaLL128A2ALinesPerBlockEnv(0);
-  unsigned bpp;
   if (linesPerBlock > 0) {
     const size_t nWords = perChunkBytes >> 3;
     const size_t numLines = (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
-    bpp = ddaLL128BlocksPerPeer(numLines, linesPerBlock, nPeers, totalCap);
-  } else {
-    bpp = ddaLL128BlocksPerPeer(ddaLL128Slices(perChunkBytes), warps, nPeers, totalCap);
+    blocksWanted = (numLines + linesPerBlock - 1) / linesPerBlock;
   }
-  return std::make_pair(dim3((unsigned)nPeers, bpp), dim3(threads));
+  const int maxBpp = ddaLL128A2AMaxBppEnv(0);
+  if (maxBpp > 0) blocksWanted = std::min(blocksWanted, (size_t)maxBpp);
+  const auto grid = dda::common::ddaPeerGrid(nPeers, blocksWanted, cap < 0 ? 0 : (size_t)cap);
+  return std::make_pair(dim3(grid.cols, grid.blocksPerCol), dim3(threads));
 }
 
 static ncclResult_t ddaAllToAllFabricLL128Launch(const void* sendbuff, void* recvbuff, size_t perChunkBytes,
