@@ -37,11 +37,12 @@
 
 /// @brief Force a small helper to inline into its performance-sensitive caller.
 /// @details The GNU attribute form also applies to lambdas, where it follows the
-/// parameter list: `[&](int lane) RJ_ALWAYS_INLINE { ... }`.
-#if defined(_MSC_VER)
-#define RJ_ALWAYS_INLINE __forceinline
-#elif defined(__GNUC__) || defined(__clang__)
+/// parameter list: `[&](int lane) RJ_ALWAYS_INLINE { ... }`. Clang is tested
+/// first because clang-cl also defines _MSC_VER but rejects __forceinline there.
+#if defined(__GNUC__) || defined(__clang__)
 #define RJ_ALWAYS_INLINE __attribute__((always_inline))
+#elif defined(_MSC_VER)
+#define RJ_ALWAYS_INLINE __forceinline
 #else
 #define RJ_ALWAYS_INLINE
 #endif
