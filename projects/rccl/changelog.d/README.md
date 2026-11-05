@@ -30,9 +30,17 @@ A bullet can span more than one line. Name every environment variable that the p
 request adds, removes or changes. The `RCCL env-var changelog` check reads this
 directory, and it accepts a fragment instead of a `CHANGELOG.md` edit.
 
-## Release
+## Nightly update
 
-At release time, run `python3 .github/scripts/rccl_assemble_changelog.py` from the
-repository root. The script appends each fragment to the newest release section of
-`CHANGELOG.md` and deletes the fragment files. It applies fragments in merge order, so
-run it in a clone with full history.
+Each night, the `RCCL changelog fragments` workflow runs
+`.github/scripts/rccl_assemble_changelog.py` on `develop`. The script appends each
+fragment to the newest release section of `CHANGELOG.md`, in merge order, and deletes
+the fragment files. The workflow puts the result on one rolling pull request from the
+`bot/rccl-changelog-fragments` branch. Until that pull request merges, the fragments
+stay in this directory.
+
+Before a release branch is cut from `develop`, merge the open bot pull request, or run
+the workflow by hand and merge its pull request. If you do not, the release does not
+list the entries that are still in this directory.
+
+To run the script by hand, run it from the repository root, in a clone with full history.
