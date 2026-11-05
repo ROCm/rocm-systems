@@ -151,6 +151,26 @@ HRR_TEST_CASE(Unit_HRR_HostBudgetMemMapHoldRoundtrip) {
   }
 }
 
+// A managed buffer the workload never frees stays live through the --kernel-filter
+// warm-up pass. The timed pass replays the same allocation and replaces it, which
+// must return the old charge: the cap holds one buffer (3 MiB), so a charge that
+// is kept makes the second pass refuse.
+TEST_CASE("Unit_HRR_HostBudgetManagedLeak_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  void* p = nullptr;
+  HRR_HIP_CHECK(hipMallocManaged(&p, kBudgetBuf));  // deliberately never freed
+}
+
+HRR_TEST_CASE(Unit_HRR_HostBudgetManagedLeakRoundtrip) {
+  ScopedDir cap{hrr_temp_dir("hrr_budget_managed_leak")};
+  hrr_capture_direct("Unit_HRR_HostBudgetManagedLeak_Direct", cap.path, 5);
+  auto [ret, out] = hrr_playback_merged(
+      cap.path, "--kernel-filter hrr_no_such_kernel --max-host-bytes 3145728");
+  INFO("playback exit " << ret << ", output:\n" << out);
+  CHECK(ret == 0);
+  CHECK(out.find("[HRR] Fatal") == std::string::npos);
+}
+
 /**
  * @}
  */
