@@ -59,8 +59,8 @@ different sockets, or a GPU reaching a NIC on the other socket. The topology
 log shows the link itself (``SYS[16.0]``, ``SYS[24.0]``, or ``SYS[32.0]``).
 Search then picks the largest entry in its speed table that does not exceed
 the slowest hop, so a 32 GB/s Turin link can still produce a 24 GB/s graph
-speed. GPUs connected by xGMI do not send GPU-to-GPU traffic across that
-link, so their collective bandwidth is unchanged. ``NCCL_GRAPH_FILE``
+speed. Intra-node GPU-to-GPU traffic that stays on xGMI does not cross
+that link, so its bandwidth is unchanged. ``NCCL_GRAPH_FILE``
 overrides the computed graph.
 
 Symmetric memory and ``NCCL_P2P_LEVEL``

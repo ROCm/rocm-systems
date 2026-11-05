@@ -594,6 +594,7 @@ struct AmdHost {
   std::string ids;
   int zen;
   bool rome;
+  float bw;
 };
 
 void ExpectAmdHost(const AmdHost& h) {
@@ -605,34 +606,31 @@ void ExpectAmdHost(const AmdHost& h) {
   EXPECT_EQ(h.zen, cpu->cpu.model) << h.name;
   EXPECT_EQ(h.rome, rcclTopoCpuIsRome(system.get())) << h.name;
   ASSERT_EQ(1, cpu->nlinks) << h.name;
-  const float bw = h.zen == NCCL_TOPO_CPU_MODEL_AMD_ZEN5    ? AMD_ZEN5_BW :
-                   h.zen == NCCL_TOPO_CPU_MODEL_AMD_ZEN34   ? AMD_ZEN34_BW :
-                                                             AMD_ZEN12_BW;
-  EXPECT_FLOAT_EQ(bw, cpu->links[0].bw) << h.name;
+  EXPECT_FLOAT_EQ(h.bw, cpu->links[0].bw) << h.name;
 }
 
 // Regression: classify from the familyid detection writes today (0x17/0x19/0x1A), not only the old file encoding.
 TEST_F(TopoMicrotest, AddCpu_AmdHostsFromLiveCpuidKeepZenGenerationAndRomeClass) {
   const AmdHost hosts[] = {
-    {"Naples", AmdCpuFromCpuid(0x00800F12), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, false},
-    {"Rome", AmdCpuFromCpuid(0x00830F10), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, true},
-    {"Milan", AmdCpuFromCpuid(0x00A00F11), NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true},
-    {"Genoa", AmdCpuFromCpuid(0x00A10F11), NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true},
-    {"Bergamo", AmdCpuFromCpuid(0x00AA0F02), NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true},
-    {"Turin", AmdCpuFromCpuid(0x00B00F21), NCCL_TOPO_CPU_MODEL_AMD_ZEN5, false},
-    {"Turin dense", AmdCpuFromCpuid(0x00B10F10), NCCL_TOPO_CPU_MODEL_AMD_ZEN5, false},
+    {"Naples", AmdCpuFromCpuid(0x00800F12), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, false, AMD_ZEN12_BW},
+    {"Rome", AmdCpuFromCpuid(0x00830F10), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, true, AMD_ZEN12_BW},
+    {"Milan", AmdCpuFromCpuid(0x00A00F11), NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true, AMD_ZEN34_BW},
+    {"Genoa", AmdCpuFromCpuid(0x00A10F11), NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true, AMD_ZEN34_BW},
+    {"Bergamo", AmdCpuFromCpuid(0x00AA0F02), NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true, AMD_ZEN34_BW},
+    {"Turin", AmdCpuFromCpuid(0x00B00F21), NCCL_TOPO_CPU_MODEL_AMD_ZEN5, false, AMD_ZEN5_BW},
+    {"Turin dense", AmdCpuFromCpuid(0x00B10F10), NCCL_TOPO_CPU_MODEL_AMD_ZEN5, false, AMD_ZEN5_BW},
   };
   for (const AmdHost& h : hosts) ExpectAmdHost(h);
 }
 
 TEST_F(TopoMicrotest, AddCpu_AmdHostsFromOldTopologyFileEncodingKeepTheirRomeClass) {
   const AmdHost hosts[] = {
-    {"Naples (143/1)", AmdCpu(143, 1), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, false},
-    {"Zen 2 below Rome (143/48)", AmdCpu(143, 48), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, false},
-    {"Rome (143/49)", AmdCpu(143, 49), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, true},
-    {"Milan (175/1)", AmdCpu(175, 1), NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true},
-    {"Genoa (175/17)", AmdCpu(175, 17), NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true},
-    {"Turin (191/2)", AmdCpu(191, 2), NCCL_TOPO_CPU_MODEL_AMD_ZEN5, false},
+    {"Naples (143/1)", AmdCpu(143, 1), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, false, AMD_ZEN12_BW},
+    {"Zen 2 below Rome (143/48)", AmdCpu(143, 48), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, false, AMD_ZEN12_BW},
+    {"Rome (143/49)", AmdCpu(143, 49), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, true, AMD_ZEN12_BW},
+    {"Milan (175/1)", AmdCpu(175, 1), NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true, AMD_ZEN34_BW},
+    {"Genoa (175/17)", AmdCpu(175, 17), NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true, AMD_ZEN34_BW},
+    {"Turin (191/2)", AmdCpu(191, 2), NCCL_TOPO_CPU_MODEL_AMD_ZEN5, false, AMD_ZEN5_BW},
   };
   for (const AmdHost& h : hosts) ExpectAmdHost(h);
 }
