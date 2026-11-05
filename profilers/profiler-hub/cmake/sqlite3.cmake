@@ -45,12 +45,18 @@ else()
     set(SQLITE3_AMALGAMATION_YEAR
         "2024"
         CACHE STRING
-        "Release year folder on sqlite.org for the amalgamation download (Windows)"
+        "Release year folder on sqlite.org for the amalgamation download"
+    )
+    option(
+        PROFILER_HUB_SQLITE3_FROM_GIT
+        "Generate the SQLite3 amalgamation from the upstream git repo instead of downloading it. Needs git, make, and tclsh. Ignored on Windows."
+        OFF
     )
 
-    # Windows downloads the official amalgamation zip. Linux clones and runs
-    # upstream autotools, which needs git and make.
-    if(NOT WIN32)
+    # The default downloads the official amalgamation zip, which needs only
+    # CMake. Generating it from git runs upstream autotools, which needs git,
+    # make, and tclsh.
+    if(PROFILER_HUB_SQLITE3_FROM_GIT AND NOT WIN32)
         find_package(Git REQUIRED)
         find_program(MAKE_COMMAND NAMES make gmake REQUIRED)
     endif()
@@ -69,6 +75,7 @@ else()
             -DMAKE_COMMAND=${MAKE_COMMAND} -DSQLITE3_GIT_URL=${SQLITE3_GIT_URL}
             -DSQLITE3_GIT_TAG=${SQLITE3_GIT_TAG}
             -DSQLITE3_AMALGAMATION_YEAR=${SQLITE3_AMALGAMATION_YEAR}
+            -DSQLITE3_FROM_GIT=${PROFILER_HUB_SQLITE3_FROM_GIT}
             -DSQLITE3_SOURCE_DIR=${SQLITE3_SOURCE_DIR} -P
             ${CMAKE_CURRENT_LIST_DIR}/fetch_sqlite3.cmake
         DEPENDS ${CMAKE_CURRENT_LIST_DIR}/fetch_sqlite3.cmake
