@@ -50,3 +50,7 @@ ENV LC_ALL C.UTF-8
 SHELL [ "/bin/bash", "--login", "-c" ]
 COPY ./entrypoint-rhel.sh /docker-entrypoint.sh
 ENTRYPOINT [ "/docker-entrypoint.sh" ]
+
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root
