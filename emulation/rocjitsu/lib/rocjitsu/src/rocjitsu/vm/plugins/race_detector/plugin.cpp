@@ -11,6 +11,7 @@
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/log.h"
+#include "util/result.h"
 
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
@@ -287,12 +288,12 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
                                   uint64_t access_pc, rj_code_arch_t arch) {
   if (!events.contains(v.conflictingEvent))
     throw std::out_of_range("race violation references an unavailable conflicting event");
-  const auto model = amdgpu::waitcnt_model(arch);
+  const util::FailureOr<amdgpu::WaitcntModel> model = amdgpu::waitcnt_model(arch);
   if (model.failed())
     throw std::invalid_argument("race report has an unsupported architecture");
-  const auto event = v.conflictingEvent;
+  const EventId event = v.conflictingEvent;
   const int owner = events.waveId(event).value;
-  const auto type = events.type(event);
+  const MemoryEventType type = events.type(event);
   const bool conflicting_read = v.space == RaceViolation::Space::LDS && isFromLds(type);
   const char *hazard = !v.isWrite         ? "read-after-write (RAW)"
                        : conflicting_read ? "write-after-read (WAR)"

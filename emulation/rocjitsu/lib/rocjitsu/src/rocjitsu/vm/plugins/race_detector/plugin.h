@@ -8,6 +8,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -66,7 +67,12 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
                         const std::function<std::string(const InstructionSnapshot &)> &disassemble,
                         std::optional<MarkedInstruction> conflict, MarkedInstruction read);
 
-/// Explain the exact conflicting event and its synchronization state.
+/// Describe a violation: the hazard direction, the current access at
+/// `access_pc`, the conflicting event, and that event's completion and
+/// synchronization state, with counter names for `arch`.
+/// Throws std::out_of_range if `events` no longer holds the conflicting event,
+/// std::invalid_argument for an architecture without a wait-counter model, and
+/// std::logic_error if the event is already retired.
 std::string formatRaceDescription(const RaceViolation &violation, const EventRegistry &events,
                                   uint64_t access_pc, rj_code_arch_t arch);
 
