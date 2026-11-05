@@ -48,32 +48,6 @@ prints the version. Pass ``--help`` after ``profile`` to read the
    rocsys profile --help
    rocsys profile --preset=balanced -- ./app
 
-How arguments are parsed
-========================
-
-* The subcommand, when you pass one, is the first argument.
-  ``rocsys profile --preset=balanced -- ./app`` and
-  ``rocsys --preset=balanced -- ./app`` are profile runs.
-  A flag placed before the subcommand does not select that subcommand.
-* A first token that does not start with ``-`` must be a known verb.
-  ``rocsys ./app`` exits with ``unknown subcommand './app'``.
-  Use ``rocsys -- ./app`` or ``rocsys profile -- ./app``.
-* Tool options go before ``--``. Tokens after ``--`` belong to the application.
-  ``rocsys profile -- ./app --preset=balanced`` does not apply the preset.
-* Every verb except ``avail`` requires another argument after the verb.
-  ``rocsys profile``, ``rocsys instrument``, ``rocsys rewrite``,
-  ``rocsys causal``, ``rocsys python``, and ``rocsys attach`` with no further
-  arguments exit with ``missing application argument``.
-  ``rocsys avail`` is valid on its own.
-* No arguments, or ``-h``, ``-?``, or ``--help`` as the first token, prints
-  ``rocsys`` help and does not forward it. ``rocsys --help=sampling`` is
-  top-level help. Topic help for a profile run is
-  ``rocsys profile --help=sampling``.
-* ``rocsys <subcommand> --help`` forwards to that tool.
-  ``rewrite`` inserts ``-o`` before the forwarded arguments, so
-  ``rocsys rewrite --help`` is run as ``rocprof-sys-instrument -o --help``.
-  Read the instrumenter options with ``rocsys instrument --help``.
-
 Subcommands
 ===========
 
