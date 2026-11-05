@@ -27,6 +27,9 @@ downstream consumer of the library.
   returns `PH_RESULT_CANCELLED` instead of waiting for that statement to
   finish. A future that was not attached can still be reused for the next
   page.
+- Cancelling `ph_get_track_events` stops an on-disk track-cache read between
+  checkpoints. The future ends `PH_FUTURE_CANCELLED` and the event list stays
+  empty.
 
 ### Added
 

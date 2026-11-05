@@ -10,8 +10,18 @@ struct ph_future;
 namespace profiler_hub
 {
 
+/** Thrown when the current operation's future has been cancelled. */
+class operation_cancelled : public std::exception
+{
+public:
+    [[nodiscard]] const char* what() const noexcept override
+    {
+        return "operation cancelled";
+    }
+};
+
 /** Thrown when sqlite3_interrupt aborts the statement a call is running. */
-class sql_interrupted : public std::exception
+class sql_interrupted : public operation_cancelled
 {
 public:
     [[nodiscard]] const char* what() const noexcept override
@@ -19,6 +29,9 @@ public:
         return "SQLite query interrupted";
     }
 };
+
+/** Throws operation_cancelled when the future on this thread has been stopped. */
+void throw_if_cancelled();
 
 /**
  * Makes SQL started on this thread interruptible by @p future.

@@ -5,6 +5,7 @@
 
 #include "cache_directory.hpp"
 #include "debug.hpp"
+#include "sql_cancel.hpp"
 #include "track_window.hpp"
 
 #include <algorithm>
@@ -1063,11 +1064,24 @@ track_file_store::read_events(uint32_t global_id, uint64_t start_ts, uint64_t en
     const file_header_t header = read_file_header(in, k_event_magic, k_event_record_bytes);
     if(header.record_count == 0) return {};
 
+    const uint64_t stride = m_checkpoint_interval == 0
+                                ? uint64_t{ 1 }
+                                : static_cast<uint64_t>(m_checkpoint_interval);
+    uint64_t       seen   = 0;
+    const auto     note_record = [&] {
+        if(seen % stride == 0)
+        {
+            throw_if_cancelled();
+        }
+        ++seen;
+    };
+
     const auto take = [&](uint64_t count) {
         std::vector<ph_event_t> loaded;
         loaded.reserve(static_cast<size_t>(count));
         for(uint64_t index = 0; index < count; ++index)
         {
+            note_record();
             loaded.push_back(to_event(in.record<event_record_t>()));
         }
         return loaded;
@@ -1133,6 +1147,7 @@ track_file_store::read_events(uint32_t global_id, uint64_t start_ts, uint64_t en
         for(const uint64_t open_index : checkpoints[chosen].open_indices)
         {
             if(open_index >= header.record_count) continue;
+            note_record();
             in.seek(k_file_header_bytes + open_index * sizeof(event_record_t));
             const event_record_t record = in.record<event_record_t>();
             if(overlaps_window(record.start, record.end, window_start, window_end))
@@ -1146,6 +1161,7 @@ track_file_store::read_events(uint32_t global_id, uint64_t start_ts, uint64_t en
         in.seek(k_file_header_bytes + scan_begin * sizeof(event_record_t));
         for(uint64_t index = scan_begin; index < scan_end; ++index)
         {
+            note_record();
             const event_record_t record = in.record<event_record_t>();
             if(overlaps_window(record.start, record.end, window_start, window_end))
             {

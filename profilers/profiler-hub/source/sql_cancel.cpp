@@ -57,4 +57,14 @@ current_sql_future() noexcept
     return g_current_sql_future;
 }
 
+void
+throw_if_cancelled()
+{
+    if(g_current_sql_future != nullptr &&
+       g_current_sql_future->stop_token().stop_requested())
+    {
+        throw operation_cancelled{};
+    }
+}
+
 }  // namespace profiler_hub

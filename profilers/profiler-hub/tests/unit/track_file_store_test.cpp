@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "depth_tracker.hpp"
+#include "ph_future.hpp"
+#include "sql_cancel.hpp"
 #include "track_file_store.hpp"
 
 #include <gtest/gtest.h>
@@ -122,6 +124,12 @@ TEST(track_file_store_test, a_window_keeps_a_long_event_from_an_earlier_checkpoi
     loaded.release_events(slice.events);
     loaded.release_events(overlap.events);
     loaded.release_samples(tail.samples);
+
+    auto future = ph_future::create(nullptr, nullptr);
+    ASSERT_EQ(future->cancel(), PH_RESULT_SUCCESS);
+    const profiler_hub::sql_cancel_scope scope{ future.get() };
+    EXPECT_THROW(loaded.events(7, 0, 0), profiler_hub::operation_cancelled);
+    EXPECT_THROW(loaded.events(7, 15, 16), profiler_hub::operation_cancelled);
 
     std::ofstream{ fixture.trace, std::ios::app } << "x";
     track_file_store stale;

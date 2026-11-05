@@ -27,7 +27,7 @@ guard_call(Fn&& fn)
     try
     {
         return std::forward<Fn>(fn)();
-    } catch(const profiler_hub::sql_interrupted&)
+    } catch(const profiler_hub::operation_cancelled&)
     {
         return PH_RESULT_CANCELLED;
     } catch(...)

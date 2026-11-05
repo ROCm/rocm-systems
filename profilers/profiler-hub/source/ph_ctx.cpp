@@ -583,7 +583,7 @@ ph_ctx::load_async(std::shared_ptr<ph_future> future)
                 set_load_state(load_state_t::cancelled);
                 future->finish(PH_FUTURE_CANCELLED, PH_RESULT_CANCELLED);
             }
-        } catch(const profiler_hub::sql_interrupted&)
+        } catch(const profiler_hub::operation_cancelled&)
         {
             set_load_state(load_state_t::cancelled);
             future->finish(PH_FUTURE_CANCELLED, PH_RESULT_CANCELLED);
@@ -629,7 +629,7 @@ ph_ctx::run_async(std::shared_ptr<ph_future>   future,
                             }
                             future->finish(status, result);
                         }
-                    } catch(const profiler_hub::sql_interrupted&)
+                    } catch(const profiler_hub::operation_cancelled&)
                     {
                         future->finish(PH_FUTURE_CANCELLED, PH_RESULT_CANCELLED);
                     } catch(...)

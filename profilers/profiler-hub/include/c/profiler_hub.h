@@ -284,6 +284,9 @@ extern "C"
      *       request with a time window gets its own private storage; its
      *       events are the overlapping ones of the whole track, in the same
      *       order, with the same ph_event_t::nesting_depth.
+     * @note An on-disk cache read checks @p future between checkpoints. A
+     *       cancel during that read ends the future with PH_FUTURE_CANCELLED
+     *       and leaves @p events empty.
      */
     ph_result_t ph_get_track_events(ph_ctx_t         ctx,
                                     uint32_t         track_id,
