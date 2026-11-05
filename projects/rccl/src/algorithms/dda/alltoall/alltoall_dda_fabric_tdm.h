@@ -35,6 +35,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
                           FabricGpuBarrier barrier) {
   static_assert(TileBytes * UnrollPeers == kDdaA2ATdmWindowBytes, "tiles must fill one wave window");
   static_assert(TileBytes % kDdaA2ATdmAlign == 0, "tiles must be whole 256 B rows");
+  static_assert(UnrollPeers < 10, "tdm unroll must be less than 10");
 #if TDM_SUPPORTED
   extern __shared__ __attribute__((aligned(128))) uint8_t ddaA2ATdmSmem[];
   // TDM descriptors live in SGPRs, so the wave id that selects the LDS window must be wave-uniform.
@@ -170,6 +171,7 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
                               int blocksPerPeer, unsigned pieces, unsigned drain, FabricGpuBarrier barrier) {
   static_assert(TileBytes * UnrollPeers == kDdaA2ATdmWindowBytes, "tiles must fill one wave window");
   static_assert(TileBytes % kDdaA2ATdmAlign == 0, "tiles must be whole 256 B rows");
+  static_assert(UnrollPeers < 10, "tdm unroll must be less than 10");
 #if TDM_SUPPORTED
   extern __shared__ __attribute__((aligned(128))) uint8_t ddaA2ATdmSmem[];
   // TDM descriptors live in SGPRs, so the wave id that selects the LDS window must be wave-uniform.
