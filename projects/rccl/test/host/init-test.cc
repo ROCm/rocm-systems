@@ -338,6 +338,31 @@ TEST(ScopedHookMicrotest, CallsCounterIsExactUnderConcurrentInvocation) {
   EXPECT_EQ(hook.calls, kThreads * kPerThread);
 }
 
+// Cross-tray AllGather rules need UALink, one LSA team over 2+ hosts, and an AllGather TDM window. One clique
+// per tray (NCCL_MNNVL_CROSS_CLIQUE=0) gives one LSA team per tray; gfx1250 DPX has no window.
+TEST_F(InitMicrotest, CommSpansTrays_NeedsUalinkOneLsaTeamTwoHostsAndATdmWindow) {
+  auto topo = std::make_unique<ncclTopoSystem>();
+  auto comm = std::make_unique<ncclComm>();
+  rcclArchThresholds table{};
+  table.symTdmMinR2[ncclFuncAllGather] = 64 * 1024 * 1024;
+  comm->archThresholds = &table;
+  comm->topo = topo.get();
+  comm->MNNVL = 1;
+  topo->nHosts = 2;
+  EXPECT_TRUE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true));
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/false)) << "one LSA team per tray";
+  topo->nHosts = 1;
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true)) << "one host";
+  topo->nHosts = 2;
+  comm->MNNVL = 0;
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true)) << "no UALink";
+  comm->MNNVL = 1;
+  table.symTdmMinR2[ncclFuncAllGather] = 0;
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true)) << "no AllGather TDM window";
+  comm->archThresholds = nullptr;
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true)) << "no arch table";
+}
+
 TEST_F(InitMicrotest, UniformRanksPerHost_TwoHostsTwoRanksEach_ReturnsTrue) {
   HostPattern p{1, 1, 2, 2};
   EXPECT_TRUE(uniformRanksPerHost(p.comm(), p.nranks()));

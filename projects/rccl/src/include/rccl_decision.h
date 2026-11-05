@@ -44,6 +44,7 @@ struct rcclCollDecision {
   // taskAppend() so it never recomputes graph-capture state.
   bool ceCapturing;
   bool ceArGraphAllowed;
+  bool symkTdmOnly;  // symk admitted only through the TDM window, so only a TDM kernel may run
 };
 
 
