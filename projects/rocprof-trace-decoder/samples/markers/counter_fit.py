@@ -82,12 +82,14 @@ from collections import defaultdict
 # Reuse the existing marker samples: the shared loader and the address-trace
 # block decoder (header + EXEC mask + one payload word per lane).
 from address_trace import BUFFER_KINDS, MEMORY_KINDS, decode_address_traces
-from marker_common import add_marker_args, load_marker_traces
+from marker_common import add_marker_args, load_marker_traces, marker_selected, marker_time
 from rocprof_trace_decoder import RecordType
 
 # LDS data accesses. ds_permute and ds_bpermute go through the LDS crossbar but
 # their payload is a lane index, not an LDS address, so they are left out.
 LDS_KINDS = {"lds_load", "lds_store", "lds_atomic"}
+# Name prefix of the payload-free markers emitted by SQTT_TRACE_SITES.
+SITE_PREFIX = "site_"
 # Global memory accesses (flat/global and buffer instructions).
 GLOBAL_KINDS = MEMORY_KINDS | BUFFER_KINDS
 # --sites choices -> which address-trace kinds become columns of A.
@@ -294,11 +296,25 @@ def main() -> int:
             )
             realtime = clock[0] * trace.time + clock[1] if clock else None
             executions.append((trace.time, realtime, site, model))
+        # Light site markers (SQTT_TRACE_SITES=lds|memory): one header per executed
+        # instruction, named site_<kind>, with no addresses. They are enough for A;
+        # only the bank-model column needs addresses.
+        for marker in decoded.records.markers:
+            name = marker.name or ""
+            if not name.startswith(SITE_PREFIX) or not marker_selected(marker, args):
+                continue
+            kind = name[len(SITE_PREFIX) :]
+            if kind not in kinds or (args.loads_only and "store" in kind):
+                continue
+            site = f"{kind}@{marker.source_location or f'marker#{marker.marker_id}'}"
+            time = marker_time(marker)
+            realtime = clock[0] * time + clock[1] if clock else None
+            executions.append((time, realtime, site, None))
 
     if not executions:
         raise SystemExit(
-            "No address markers found for the selected sites. Build the kernel with the "
-            "sqtt-marker pass and SQTT_TRACE_ADDRESSES=lds (or memory)."
+            "No markers found for the selected sites. Build the kernel with the "
+            "sqtt-marker pass and SQTT_TRACE_SITES=lds (cheap) or SQTT_TRACE_ADDRESSES=lds."
         )
 
     # Give every distinct site a column in A, and keep per-site totals.
