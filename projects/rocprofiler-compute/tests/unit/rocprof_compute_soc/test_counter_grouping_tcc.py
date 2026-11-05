@@ -412,11 +412,11 @@ def test_gfx950_channels_follow_its_reported_die_count():
     assert counters_fit_one_bucket(request_row, config)
 
 
-def test_gfx942_offline_layout_stays_fourteen_buckets():
+def test_gfx942_offline_layout_stays_sixteen_buckets():
     config = gfx942_perfmon_config()
     with tempfile.TemporaryDirectory() as tmp:
         counters, files, soc = detect_and_coalesce("gfx942", config, Path(tmp))
-    assert len(files) == 14
+    assert len(files) == 16
     assert (
         count_single_pass_metrics_split_across_buckets(files, soc, counters, config)
         == 0
