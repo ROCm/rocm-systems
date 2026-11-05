@@ -90,6 +90,11 @@ std::vector<std::vector<uint8_t>> seed_corpus() {
   execution_seed.insert(execution_seed.begin(), static_cast<uint8_t>(FuzzTarget::Execution));
   seeds.push_back(std::move(execution_seed));
 
+  std::vector<uint8_t> kernel_seed = execution_fuzz::generated_kernel_input(
+      0, execution_fuzz::kGeneratedKernelSeedSize, execution_fuzz::FuzzTarget::Gfx1250);
+  kernel_seed.insert(kernel_seed.begin(), static_cast<uint8_t>(FuzzTarget::Execution));
+  seeds.push_back(std::move(kernel_seed));
+
   for (std::vector<uint8_t> code_object_seed : code_object_fuzz::seed_corpus()) {
     code_object_seed.insert(code_object_seed.begin(), static_cast<uint8_t>(FuzzTarget::CodeObject));
     seeds.push_back(std::move(code_object_seed));
