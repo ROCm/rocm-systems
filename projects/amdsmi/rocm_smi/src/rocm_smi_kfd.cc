@@ -38,7 +38,13 @@
 namespace amd::smi {
 
 static bool is_number(const std::string& s);
-static const char* kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
+static const char kDefaultKFDProcPathRoot[] = "/sys/class/kfd/kfd/proc";
+// Set only by SetKFDProcPathRootForTesting(); production never writes it.
+static const char* g_kfd_proc_path_root_override = nullptr;
+
+const char* KFDProcPathRoot() {
+  return g_kfd_proc_path_root_override ? g_kfd_proc_path_root_override : kDefaultKFDProcPathRoot;
+}
 static const char* kKFDVramPrefix = "vram_";
 
 // Tri-state result of inspecting a PID's open file descriptors for /dev/kfd.
@@ -79,9 +85,11 @@ static bool PidHasKfdOpen(const std::string& pid_str) {
 }
 
 // Detect whether KFD sysfs PIDs are in a different PID namespace from ours.
-// When running inside a container with PID namespace isolation, KFD sysfs
-// reports host PIDs that are not visible in the container's /proc. We detect
-// this by checking numeric entries under kKFDProcPathRoot against /proc.
+// KFD names its process directories by PID in the initial PID namespace, so
+// in that namespace they are our PIDs. Elsewhere, e.g. in a container with its
+// own PID namespace, KFD sysfs reports host PIDs that are not visible in the
+// container's /proc. We detect this by checking numeric entries under
+// KFDProcPathRoot() against /proc.
 // For each numeric KFD PID: if it exists in /proc and has /dev/kfd open we
 // share its namespace; if it exists but lacks /dev/kfd, a container-local PID
 // reused the number (namespaced). A PID that is gone (exited) or whose fd dir
@@ -91,11 +99,22 @@ static bool PidHasKfdOpen(const std::string& pid_str) {
 // namespaced (the KFD entries will be cleaned up shortly anyway).
 // Result is cached for the lifetime of the process; PID namespace is assumed stable.
 static bool IsKfdPidNamespaced() {
+  // A mock tree (SetKFDProcPathRootForTesting()) is named by this process's PIDs.
+  if (g_kfd_proc_path_root_override != nullptr) return false;
   static std::atomic<int> cached{-1};
   int val = cached.load(std::memory_order_acquire);
   if (val >= 0) return val;
 
-  DIR* kfd_dir = opendir(kKFDProcPathRoot);
+  // The initial PID namespace has a fixed inode number (PROC_PID_INIT_INO).
+  constexpr char kInitPidNamespace[] = "pid:[4026531836]";
+  char pid_ns[32] = {};
+  if (readlink("/proc/self/ns/pid", pid_ns, sizeof(pid_ns) - 1) > 0 &&
+      strcmp(pid_ns, kInitPidNamespace) == 0) {
+    cached.store(0, std::memory_order_release);
+    return false;
+  }
+
+  DIR* kfd_dir = opendir(KFDProcPathRoot());
   if (!kfd_dir) {
     cached.store(0, std::memory_order_release);
     return false;
@@ -111,8 +130,8 @@ static bool IsKfdPidNamespaced() {
     std::string proc_path = "/proc/" + name;
     struct stat st;
     if (stat(proc_path.c_str(), &st) != 0) {
-      // PID not in /proc — could be a short-lived process that already exited.
-      // Skip to the next KFD entry to avoid a false positive race condition.
+      // PID not in /proc: it exited, or it is a host PID that a container's
+      // /proc does not show. Either way this entry proves nothing.
       continue;
     }
     // PID exists in /proc; check whether the same process has /dev/kfd open.
@@ -133,8 +152,9 @@ static bool IsKfdPidNamespaced() {
   }
   closedir(kfd_dir);
 
-  // If every KFD entry was inconclusive (exited or unreadable), conservatively
-  // assume we are not namespaced — the stale KFD entries will be reaped soon.
+  // If no KFD entry was conclusive (none in /proc, or none readable), assume we
+  // are not namespaced. That is also the outcome in a container whose /proc
+  // shows none of KFD's host PIDs.
   if (!determined) {
     namespaced = false;
   }
@@ -180,7 +200,7 @@ static int ScanProcForKfdPids(rsmi_process_info_t* procs, uint32_t num_allocated
 // NOTE: Uses the first host-PID entry found; assumes all container processes
 // share the same GPU set (valid for typical single-container deployments).
 static void CollectGpuIdsFromKfdVram(std::unordered_set<uint64_t>* gpu_set) {
-  DIR* kfd_proc_dir = opendir(kKFDProcPathRoot);
+  DIR* kfd_proc_dir = opendir(KFDProcPathRoot());
   if (!kfd_proc_dir) return;
 
   struct dirent* de;
@@ -188,7 +208,7 @@ static void CollectGpuIdsFromKfdVram(std::unordered_set<uint64_t>* gpu_set) {
     std::string entry(de->d_name);
     if (!is_number(entry)) continue;
 
-    std::string host_proc = std::string(kKFDProcPathRoot) + "/" + entry;
+    std::string host_proc = std::string(KFDProcPathRoot()) + "/" + entry;
     DIR* pd = opendir(host_proc.c_str());
     if (!pd) continue;
 
@@ -261,6 +281,67 @@ static const char* kKFDSdmaPrefix = "sdma_";
 
 static bool is_number(const std::string& s) {
   return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
+}
+
+// Parses a sysfs value that is_number() accepts. Returns false for anything
+// else, including a value too large for 64 bits.
+static bool ParseU64(const std::string& s, uint64_t* val) {
+  if (!is_number(s)) return false;
+  errno = 0;
+  const uint64_t parsed = strtoull(s.c_str(), nullptr, 10);
+  if (errno == ERANGE) return false;
+  *val = parsed;
+  return true;
+}
+
+// a + b, capped one below UINT64_MAX, which callers read as "unknown".
+static uint64_t AddCapped(uint64_t a, uint64_t b) {
+  constexpr uint64_t kMaxKnown = std::numeric_limits<uint64_t>::max() - 1;
+  return (b > kMaxKnown || a > kMaxKnown - b) ? kMaxKnown : a + b;
+}
+
+// Whether a sysfs error means the entry went away with its exiting process:
+// it is missing, or was removed after the lookup (ENODEV from open or read).
+static bool SysfsEntryGone(int err) { return err == ENOENT || err == ENODEV; }
+
+// Reads a KFD process file, which holds one number. Unlike ReadSysfsStr(), it
+// returns the errno of a failed open() or read(), so a file removed with its
+// exiting process (ENOENT, ENODEV) can be told from a running process's read
+// error. An empty value, or one too long for any number, is ENXIO.
+static int ReadKfdProcessFile(const std::string& path, std::string* value) {
+  value->clear();
+  int fd = -1;
+  do {
+    fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+  } while (fd < 0 && errno == EINTR);
+  int err = fd < 0 ? errno : 0;
+  const char* cause = nullptr;
+  if (fd >= 0) {
+    // sysfs returns the whole value in the first read; a 64-bit number and its
+    // newline take 21 bytes.
+    char buf[64];
+    ssize_t n = 0;
+    do {
+      n = read(fd, buf, sizeof(buf));
+    } while (n < 0 && errno == EINTR);
+    if (n < 0) {
+      err = errno;
+    } else if (n == 0 || static_cast<size_t>(n) == sizeof(buf)) {
+      err = ENXIO;
+      cause = n == 0 ? "empty value" : "value too long";
+    } else {
+      value->assign(buf, static_cast<size_t>(n));
+      if (value->back() == '\n') value->pop_back();
+    }
+    close(fd);
+  }
+  if (err != 0 && !SysfsEntryGone(err)) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | Fail | " << path << " | "
+       << (cause != nullptr ? cause : std::strerror(err));
+    LOG_ERROR(ss);
+  }
+  return err;
 }
 
 // Helper function to get secondary context directories under a KFD process
@@ -464,6 +545,85 @@ static int ReadKFDGpuName(uint32_t kfd_node_id, std::string* gpu_name) {
   return 0;
 }
 
+// readdir() of a sysfs directory can skip an entry that exists the whole time
+// when another entry is removed during the scan. A process is missed only if
+// every one of these scans of the KFD process root skips it.
+constexpr int kKfdProcRootScans = 2;
+
+// The names in the KFD process root that any of kKfdProcRootScans scans saw, in
+// the order first seen. Returns 0, or errno when the first scan cannot open the
+// root; a later scan that cannot open it keeps the names already seen.
+static int ListKfdProcRoot(std::vector<std::string>* names) {
+  names->clear();
+  std::unordered_set<std::string> seen;
+  for (int scan = 0; scan < kKfdProcRootScans; ++scan) {
+    DIR* proc_dir = opendir(KFDProcPathRoot());
+    if (proc_dir == nullptr) {
+      return scan == 0 ? errno : 0;
+    }
+    while (const dirent* dentry = readdir(proc_dir)) {
+      if (dentry->d_name[0] != '.' && seen.insert(dentry->d_name).second) {
+        names->emplace_back(dentry->d_name);
+      }
+    }
+    closedir(proc_dir);
+  }
+  return 0;
+}
+
+// The alternate-context dirs ("pid:<owner>-id:<n>", a rarely-used layout for
+// multi-context processes) in one listing of the KFD process root, as full
+// paths by owner PID.
+struct KfdAltContextIndex {
+  std::mutex mtx;  // Guards the rest. No other lock is taken while it is held.
+  std::unordered_map<long, std::vector<std::string>> dirs;
+  std::chrono::steady_clock::time_point listed_at{};
+  bool valid = false;
+};
+
+// Never destroyed: a thread can still be reading processes while static
+// destructors run at exit.
+static KfdAltContextIndex& AltContextIndex() {
+  static auto& index = *new KfdAltContextIndex();
+  return index;
+}
+
+void SetKFDProcPathRootForTesting(const char* path) {
+  KfdAltContextIndex& index = AltContextIndex();
+  std::lock_guard<std::mutex> lock(index.mtx);
+  g_kfd_proc_path_root_override = path;
+  // The index lists the previous root's directories.
+  index.dirs.clear();
+  index.valid = false;
+}
+
+// Rebuilds the index from the root `names` listed at `listed_at`, unless it
+// already holds a later listing. The caller holds index->mtx.
+static void UpdateAltContextIndexLocked(const std::vector<std::string>& names,
+                                        std::chrono::steady_clock::time_point listed_at,
+                                        KfdAltContextIndex* index) {
+  if (index->valid && listed_at <= index->listed_at) return;
+  index->dirs.clear();
+  for (const std::string& name : names) {
+    // Match exactly "pid:<owner>-id:<n>" and bucket the full path by <owner>.
+    if (strncmp(name.c_str(), "pid:", 4) != 0) continue;
+    char* end = nullptr;
+    long owner = strtol(name.c_str() + 4, &end, 10);
+    if (end == name.c_str() + 4) continue;       // no digits after "pid:"
+    if (strncmp(end, "-id:", 4) != 0) continue;  // require "pid:<owner>-id:"
+    index->dirs[owner].push_back(std::string(KFDProcPathRoot()) + "/" + name);
+  }
+  index->listed_at = listed_at;
+  index->valid = true;
+}
+
+static void UpdateAltContextIndex(const std::vector<std::string>& names,
+                                  std::chrono::steady_clock::time_point listed_at) {
+  KfdAltContextIndex& index = AltContextIndex();
+  std::lock_guard<std::mutex> lock(index.mtx);
+  UpdateAltContextIndexLocked(names, listed_at, &index);
+}
+
 int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t* num_procs_found) {
   assert(num_procs_found != nullptr);
 
@@ -474,29 +634,21 @@ int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t*
     return ScanProcForKfdPids(procs, num_allocated, num_procs_found);
   }
 
-  errno = 0;
-  auto proc_dir = opendir(kKFDProcPathRoot);
-
-  if (proc_dir == nullptr) {
-    perror("Unable to open process directory");
-    return errno;
+  const auto listed_at = std::chrono::steady_clock::now();
+  std::vector<std::string> names;
+  const int err = ListKfdProcRoot(&names);
+  if (err != 0) {
+    return err;
   }
-  auto dentry = readdir(proc_dir);
+  // The per-process reads that follow this listing see the alternate contexts
+  // it found, not an older listing's.
+  UpdateAltContextIndex(names, listed_at);
 
-  std::string proc_id_str;
-  std::string tmp;
   // Keep track of PIDs we've already seen to avoid duplicates
   // (e.g., if both "1234" and "pid:1234-id:1" exist)
   std::unordered_set<uint32_t> seen_pids;
 
-  while (dentry != nullptr) {
-    if (dentry->d_name[0] == '.') {
-      dentry = readdir(proc_dir);
-      continue;
-    }
-
-    proc_id_str = dentry->d_name;
-
+  for (const std::string& proc_id_str : names) {
     // Check if the entry is a plain number (traditional format)
     if (is_number(proc_id_str)) {
       uint32_t pid = static_cast<uint32_t>(std::stoul(proc_id_str));
@@ -526,19 +678,9 @@ int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t*
           }
         }
       }
-    } else {
-      // Skip unexpected entries that don't match known formats
-      // (e.g., non-numeric, non-pid: format files/directories)
-      dentry = readdir(proc_dir);
-      continue;
     }
-
-    dentry = readdir(proc_dir);
-  }
-
-  errno = 0;
-  if (closedir(proc_dir)) {
-    return errno;
+    // Skip unexpected entries that don't match known formats
+    // (e.g., non-numeric, non-pid: format files/directories)
   }
   return 0;
 }
@@ -547,41 +689,27 @@ int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t*
 // (a rarely-used layout for multi-context processes), as full paths.
 //
 // Scanning the proc root per PID makes a sweep over P processes O(P^2), so the
-// scan is cached process-wide and rebuilt when older than kTtl; a lookup can
-// therefore lag a just-created context by up to kTtl, which is fine for a
-// monitoring read. kTtl is a fixed internal constant on purpose: raising it
-// hides running processes for longer, lowering it restores the O(P^2) scan.
+// index is shared: GetProcessInfo() rebuilds it from each listing, and a lookup
+// rebuilds it when it is older than kTtl. A caller that reads a PID without
+// listing processes first can therefore miss a context created up to kTtl ago,
+// which is fine for a monitoring read. kTtl is a fixed internal constant on
+// purpose: raising it hides contexts for longer, lowering it restores the
+// O(P^2) scan for those callers.
 static std::vector<std::string> KfdAltContextRootDirsForPid(long pid) {
-  static std::mutex mtx;
-  static std::unordered_map<long, std::vector<std::string>> index;
-  static std::chrono::steady_clock::time_point built{};
-  static bool valid = false;
   constexpr std::chrono::milliseconds kTtl{500};
-
-  std::lock_guard<std::mutex> lock(mtx);
-  auto now = std::chrono::steady_clock::now();
-  if (!valid || (now - built) > kTtl) {
-    index.clear();
-    DIR* proc_root = opendir(kKFDProcPathRoot);
-    if (proc_root) {
-      struct dirent* entry;
-      while ((entry = readdir(proc_root)) != nullptr) {
-        if (entry->d_name[0] == '.') continue;
-        // Match exactly "pid:<owner>-id:<n>" and bucket the full path by <owner>.
-        if (strncmp(entry->d_name, "pid:", 4) != 0) continue;
-        char* end = nullptr;
-        long owner = strtol(entry->d_name + 4, &end, 10);
-        if (end == entry->d_name + 4) continue;      // no digits after "pid:"
-        if (strncmp(end, "-id:", 4) != 0) continue;  // require "pid:<owner>-id:"
-        index[owner].push_back(std::string(kKFDProcPathRoot) + "/" + entry->d_name);
-      }
-      closedir(proc_root);
-    }
-    built = now;
-    valid = true;
+  KfdAltContextIndex& index = AltContextIndex();
+  std::lock_guard<std::mutex> lock(index.mtx);
+  const auto now = std::chrono::steady_clock::now();
+  if (!index.valid || (now - index.listed_at) > kTtl) {
+    // A root that cannot be listed has no alternate-context dirs to report.
+    // The failed listing is not stored, where it would turn away a successful
+    // one that started earlier.
+    std::vector<std::string> names;
+    if (ListKfdProcRoot(&names) != 0) return {};
+    UpdateAltContextIndexLocked(names, now, &index);
   }
-  auto it = index.find(pid);
-  if (it == index.end()) return {};
+  auto it = index.dirs.find(pid);
+  if (it == index.dirs.end()) return {};
   return it->second;
 }
 
@@ -589,7 +717,13 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out) {
   if (!out) return EINVAL;
   out->clear();
 
-  std::string pdir = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
+  // In a PID namespace, pid does not name KFD's directories (see
+  // GetProcessInfoForPID()). An empty set lets callers use other sources.
+  if (IsKfdPidNamespaced()) {
+    return 0;
+  }
+
+  std::string pdir = std::string(KFDProcPathRoot()) + "/" + std::to_string(pid);
 
   // Helper lambda to extract GPU IDs from files in a directory
   auto extract_gpu_ids_from_dir = [&out](const std::string& dir_path) {
@@ -617,10 +751,6 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out) {
   DIR* d = opendir(pdir.c_str());
 
   if (!d) {
-    // Return success with empty set so 'GetProcessGPUs()' can use 'vram_*' fallback.
-    if (IsKfdPidNamespaced()) {
-      return 0;
-    }
     perror(("Unable to open KFD process directory for process " + std::to_string(pid)).c_str());
     return errno ? errno : ESRCH;
   }
@@ -667,7 +797,19 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  std::string proc_path = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
+  // In a PID namespace, pid does not name KFD's directories (see
+  // GetProcessInfoForPID()): report the GPUs of the first KFD process found,
+  // as before (see CollectGpuIdsFromKfdVram()).
+  if (IsKfdPidNamespaced()) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | PID namespace detected, falling back to "
+       << "KFD vram_* files for GPU discovery (pid=" << pid << ")";
+    LOG_DEBUG(ss);
+    CollectGpuIdsFromKfdVram(gpu_set);
+    return 0;
+  }
+
+  std::string proc_path = std::string(KFDProcPathRoot()) + "/" + std::to_string(pid);
 
   // Helper lambda to read GPU IDs from queues in a given base path
   auto read_gpus_from_queues = [&](const std::string& base_path) -> int {
@@ -675,8 +817,10 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
     auto queues_dir_hd = opendir(queues_dir.c_str());
 
     if (queues_dir_hd == nullptr) {
-      // Directory doesn't exist, which is okay for secondary contexts
-      return 0;
+      // A context without queues has no queues directory, nor has a process
+      // that exited.
+      const int open_err = errno;
+      return SysfsEntryGone(open_err) ? 0 : open_err;
     }
 
     auto q_dentry = readdir(queues_dir_hd);
@@ -695,16 +839,19 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
 
       std::string q_gpu_id_str = queues_dir + '/' + q_dentry->d_name + "/gpuid";
 
-      int read_err = ReadSysfsStr(q_gpu_id_str, &tmp);
-      if (read_err) {
+      // A queue destroyed during the scan is missing, or fails with ENODEV.
+      int read_err = ReadKfdProcessFile(q_gpu_id_str, &tmp);
+      if (SysfsEntryGone(read_err)) {
         q_dentry = readdir(queues_dir_hd);
         continue;
       }
+      if (read_err != 0) {
+        closedir(queues_dir_hd);
+        return read_err;
+      }
 
-      uint64_t val;
-      try {
-        val = std::stoull(tmp);
-      } catch (...) {
+      uint64_t val = 0;
+      if (!ParseU64(tmp, &val)) {
         std::cerr << "Error; read invalid data: " << tmp << " from " << q_gpu_id_str << std::endl;
         closedir(queues_dir_hd);
         return ENXIO;  // Return "no such device" if we read an invalid gpu id
@@ -762,6 +909,9 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
   // every GPU and would attribute an idle process to all of them.
   {
     DIR* pd = opendir(proc_path.c_str());
+    if (pd == nullptr && !SysfsEntryGone(errno)) {
+      return errno;
+    }
     if (pd) {
       struct dirent* de;
       while ((de = readdir(pd))) {
@@ -770,48 +920,53 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
         if (gpu_id_str.empty() || !is_number(gpu_id_str)) continue;
 
         std::string vram_bytes;
-        if (ReadSysfsStr(std::string(proc_path) + "/" + de->d_name, &vram_bytes) != 0) continue;
-        try {
-          if (std::stoull(vram_bytes) > 0) {
-            gpu_set->insert(strtoull(gpu_id_str.c_str(), nullptr, 10));
-          }
-        } catch (...) {
-          // Unreadable/garbage size: skip, treat as no allocation.
+        const int read_err =
+            ReadKfdProcessFile(std::string(proc_path) + "/" + de->d_name, &vram_bytes);
+        if (SysfsEntryGone(read_err)) continue;
+        if (read_err != 0) {
+          closedir(pd);
+          return read_err;
+        }
+        uint64_t bytes = 0;
+        if (!ParseU64(vram_bytes, &bytes)) {
+          closedir(pd);
+          return ENXIO;
+        }
+        if (bytes > 0) {
+          gpu_set->insert(strtoull(gpu_id_str.c_str(), nullptr, 10));
         }
       }
       closedir(pd);
     }
   }
 
-  // PID namespace: fall back to discovering GPU IDs from KFD vram_* files.
-  if (gpu_set->empty() && IsKfdPidNamespaced()) {
-    std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__ << " | PID namespace detected, falling back to "
-       << "KFD vram_* files for GPU discovery (pid=" << pid << ")";
-    LOG_DEBUG(ss);
-    CollectGpuIdsFromKfdVram(gpu_set);
-  }
-
   return 0;
 }
 
 static int CheckValidProcessInfoData(const std::string& s, int sysfs_ret) {
+  // A KFD process file always holds a number.
   if (sysfs_ret == 0 && !is_number(s)) {
-    return EINVAL;
+    return ENXIO;
   }
   return sysfs_ret;
 }
 
 static int GetProcessKFDStats(std::string path, uint32_t& val) {
   std::string tmp;
-  int err = ReadSysfsStr(path, &tmp);
+  int err = ReadKfdProcessFile(path, &tmp);
   auto sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
 
   if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)) {
     return sysfs_data_errcode;
   } else if (sysfs_data_errcode == 0) {
     // Update KFD stat by the process
-    val = static_cast<uint32_t>(std::stoul(tmp));
+    uint64_t stat = 0;
+    if (!ParseU64(tmp, &stat)) {
+      return ENXIO;
+    }
+    // evicted_ms is 64-bit. KFD_STATS_INVALID means "not available", so a
+    // larger value saturates one below it.
+    val = static_cast<uint32_t>(std::min<uint64_t>(stat, KFD_STATS_INVALID - 1));
   } else {
     // Some GFX revisions do not provide KFD stats debugfs method
     // which may cause ENOENT
@@ -819,6 +974,21 @@ static int GetProcessKFDStats(std::string path, uint32_t& val) {
   }
 
   return 0;
+}
+
+bool KfdProcessExists(uint32_t pid) {
+  const std::string path = std::string(KFDProcPathRoot()) + "/" + std::to_string(pid);
+  return FileExists(path.c_str());
+}
+
+bool KfdProcessExitedDuringRead(uint32_t pid, int err) {
+  return err == ESRCH || err == ENODEV || (err != 0 && !KfdProcessExists(pid));
+}
+
+rsmi_process_info_t MakeUnavailableProcessInfo(uint32_t pid) {
+  return rsmi_process_info_t{pid, std::numeric_limits<uint64_t>::max(),
+                             std::numeric_limits<uint64_t>::max(), KFD_STATS_INVALID,
+                             KFD_STATS_INVALID};
 }
 
 int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
@@ -830,19 +1000,17 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
   std::unordered_set<uint64_t>::iterator itr;
   uint32_t kfd_stat;
 
-  std::string proc_str_path = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
+  std::string proc_str_path = std::string(KFDProcPathRoot()) + "/" + std::to_string(pid);
 
+  // In a PID namespace, pid is this namespace's PID while KFD names its
+  // directories by host PID, so a directory named pid can be another
+  // process's. Return sentinel values so callers can distinguish "unavailable"
+  // from "zero usage".
+  if (IsKfdPidNamespaced()) {
+    *proc = MakeUnavailableProcessInfo(pid);
+    return 0;
+  }
   if (!FileExists(proc_str_path.c_str())) {
-    // PID namespace: no KFD sysfs entry for this PID; return sentinel
-    // values so callers can distinguish "unavailable" from "zero usage".
-    if (IsKfdPidNamespaced()) {
-      proc->process_id = pid;
-      proc->vram_usage = std::numeric_limits<uint64_t>::max();
-      proc->sdma_usage = std::numeric_limits<uint64_t>::max();
-      proc->cu_occupancy = std::numeric_limits<uint32_t>::max();
-      proc->evicted_time = std::numeric_limits<uint32_t>::max();
-      return 0;
-    }
     return ESRCH;
   }
   proc->process_id = pid;
@@ -881,10 +1049,14 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
   for (const auto& gpu_id : *gpu_set) {
     // Aggregate metrics from primary process and all secondary contexts
     for (const auto& metric_base_path : metric_paths) {
+      // A secondary context can be destroyed while its process keeps running:
+      // its files then fail with ENODEV. Skip it.
+      const bool is_primary = (metric_base_path == proc_str_path);
       std::string vram_str_path = metric_base_path + "/vram_" + std::to_string(gpu_id);
 
-      err = ReadSysfsStr(vram_str_path, &tmp);
+      err = ReadKfdProcessFile(vram_str_path, &tmp);
       auto sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
+      if (!is_primary && sysfs_data_errcode == ENODEV) continue;
 
       // Report all errors, except ENOENT (2), which should be ignored
       // and the proc->vram_usage should be unmodified
@@ -893,18 +1065,27 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
       }
       // Do not store any invalid values
       else if (sysfs_data_errcode == 0) {
-        proc->vram_usage += std::stoull(tmp);
+        uint64_t bytes = 0;
+        if (!ParseU64(tmp, &bytes)) {
+          return ENXIO;
+        }
+        proc->vram_usage = AddCapped(proc->vram_usage, bytes);
       }
 
       std::string sdma_str_path = metric_base_path + "/sdma_" + std::to_string(gpu_id);
 
-      err = ReadSysfsStr(sdma_str_path, &tmp);
+      err = ReadKfdProcessFile(sdma_str_path, &tmp);
       sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
+      if (!is_primary && sysfs_data_errcode == ENODEV) continue;
 
       if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)) {
         return sysfs_data_errcode;
       } else if (sysfs_data_errcode == 0) {
-        proc->sdma_usage += std::stoull(tmp);
+        uint64_t usage = 0;
+        if (!ParseU64(tmp, &usage)) {
+          return ENXIO;
+        }
+        proc->sdma_usage = AddCapped(proc->sdma_usage, usage);
       }
 
       // Build the path and read from Sysfs file, info that
@@ -914,13 +1095,8 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
 
       err = GetProcessKFDStats(cu_occupancy_path, kfd_stat);
       if (err != 0) {
-        // ENOENT is acceptable for secondary contexts where stats may not exist
-        // Only return error for: non-ENOENT errors, OR primary process with existing file
-        bool is_primary = (metric_base_path == proc_str_path);
-        bool file_exists = FileExists(cu_occupancy_path.c_str());
-        if (err != ENOENT || (is_primary && file_exists)) {
-          return err;
-        }
+        if (!is_primary && err == ENODEV) continue;
+        return err;
       } else {
         // Aggregate cu_occupancy (use max value as it represents peak usage)
         if (kfd_stat != KFD_STATS_INVALID &&
@@ -934,22 +1110,16 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
 
       err = GetProcessKFDStats(evicted_time_path, kfd_stat);
       if (err != 0) {
-        // ENOENT is acceptable for secondary contexts where stats may not exist
-        // Only return error for: non-ENOENT errors, OR primary process with existing file
-        bool is_primary_ctx = (metric_base_path == proc_str_path);
-        bool file_found = FileExists(evicted_time_path.c_str());
-        if (err != ENOENT || (is_primary_ctx && file_found)) {
-          return err;
-        }
+        if (!is_primary && err == ENODEV) continue;
+        return err;
       } else {
         // Aggregate evicted_time (sum all evicted times)
         if (kfd_stat != KFD_STATS_INVALID) {
-          // Handle potential overflow by checking before addition
-          if (proc->evicted_time <= UINT32_MAX - kfd_stat) {
-            proc->evicted_time += kfd_stat;
-          } else {
-            proc->evicted_time = UINT32_MAX;  // Cap at max value
-          }
+          // Saturate one below KFD_STATS_INVALID, which means "not available".
+          constexpr uint32_t kMaxEvicted = KFD_STATS_INVALID - 1;
+          proc->evicted_time = (proc->evicted_time > kMaxEvicted - kfd_stat)
+                                   ? kMaxEvicted
+                                   : proc->evicted_time + kfd_stat;
         }
       }
     }  // End of metric_paths loop

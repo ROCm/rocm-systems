@@ -21,3 +21,8 @@
 // if some global/static object's own constructor called it during static init.
 const std::string& smi_amdgpu_sysfs_drm_root();
 void smi_amdgpu_set_sysfs_drm_root_for_testing(const std::string& root);
+
+// The same kind of seam for the /proc root that fdinfo.cc reads a process's
+// fdinfo, exe link and cgroup under: "/proc/" by default.
+const std::string& smi_amdgpu_proc_root();
+void smi_amdgpu_set_proc_root_for_testing(const std::string& root);
