@@ -9,7 +9,9 @@ The child is deep-merged onto the parent:
 - scalars and lists replace the parent's value;
 - "key: !remove" deletes the key.
 
-Duplicate keys and removing a missing key are errors. Uses the vendored PyYAML, so it
+Duplicate keys, removing a missing key, and replacing a mapping or a list with a value
+of another kind are errors. A scalar may replace a scalar of another type, and a null
+value on either side may be replaced. Uses the vendored PyYAML, so it
 is safe in profile mode.
 """
 
@@ -98,11 +100,21 @@ def _remove_key(mapping: Dict[str, Any], key: str, source: str) -> None:
 
 
 def _merge_value(base: object, override: object, key: str, source: str) -> object:
+    if None not in (base, override) and _kind(base) != _kind(override):
+        raise InheritanceError(
+            f"{source}: '{key}' replaces a {_kind(base)} with a {_kind(override)}"
+        )
     if isinstance(override, dict):
         return _merge_mappings(base if isinstance(base, dict) else {}, override, source)
     if isinstance(override, list) and _contains_remove(override):
         raise InheritanceError(f"{source}: '{REMOVE_TAG}' is not allowed in '{key}'")
     return copy.deepcopy(override)
+
+
+def _kind(value: object) -> str:
+    if isinstance(value, dict):
+        return "mapping"
+    return "list" if isinstance(value, list) else "scalar"
 
 
 def _contains_remove(value: object) -> bool:

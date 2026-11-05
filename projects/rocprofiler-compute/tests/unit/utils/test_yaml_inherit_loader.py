@@ -133,9 +133,34 @@ def test_duplicate_key_fails(tmp_path, text, key):
 
 
 def test_lists_and_scalars_are_replaced(tmp_path):
-    write_text_file(tmp_path / "base/x.yaml", "tags: [a, b]\ntitle: Old\n")
-    child = write_child(tmp_path, "tags: [c]\ntitle: New\n")
-    assert load_inherited_yaml(child) == {"tags": ["c"], "title": "New"}
+    """A scalar may change type (gfx90a overrides a peak string with a number), and a
+    null value may be replaced by any kind."""
+    write_text_file(
+        tmp_path / "base/x.yaml", "tags: [a, b]\ntitle: Old\npeak: '100'\nnote:\n"
+    )
+    child = write_child(tmp_path, "tags: [c]\ntitle: New\npeak: 100\nnote: {a: 1}\n")
+    assert load_inherited_yaml(child) == {
+        "tags": ["c"],
+        "title": "New",
+        "peak": 100,
+        "note": {"a": 1},
+    }
+
+
+@pytest.mark.parametrize(
+    "base, child, kinds",
+    [
+        ("a.one:\n  unit: X\n", "a.one: X\n", "a mapping with a scalar"),
+        ("a.one: X\n", "a.one:\n  unit: X\n", "a scalar with a mapping"),
+        ("a.one: [X]\n", "a.one: X\n", "a list with a scalar"),
+        ("a.one: [X]\n", "a.one:\n  unit: X\n", "a list with a mapping"),
+    ],
+)
+def test_mapping_or_list_replaced_by_another_kind_fails(tmp_path, base, child, kinds):
+    write_text_file(tmp_path / "base/x.yaml", base)
+    path = write_child(tmp_path, child)
+    with pytest.raises(InheritanceError, match=f"{path}: 'a.one' replaces {kinds}"):
+        load_inherited_yaml(path)
 
 
 def test_merge_does_not_change_yaml_aliases(tmp_path):
