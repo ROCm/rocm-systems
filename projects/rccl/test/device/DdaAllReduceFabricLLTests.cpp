@@ -32,7 +32,8 @@ using dda::common::LLPacket16;
 constexpr int kMaxRanks = 12;  // past 8 ranks the spread folds its LDS rows in two batches
 constexpr int kSelf = 1;
 constexpr size_t kCount = 3072;  // floats: 1536 packets, 3 blocks of 512
-constexpr size_t kBufBytes = 2 * kCount * sizeof(float);  // a spread shard of more than one LDS pass on one block
+constexpr size_t kOneShotBytes = kCount * sizeof(float);
+constexpr size_t kBufBytes = 2 * kOneShotBytes;  // a spread shard of more than one LDS pass on one block
 constexpr unsigned kOneShotThreads = 512;
 static_assert(dda::common::kDdaLLSpreadThreads == kOneShotThreads, "the spread runs on the one-shot's blocks");
 constexpr size_t kBankBytes = (size_t)kMaxRanks * 64 * 1024;
@@ -41,6 +42,10 @@ constexpr unsigned kEpochCells = 16;
 constexpr float kUntouched = -1.0f;
 constexpr auto kWatchdog = std::chrono::seconds(30);
 constexpr auto kSettle = std::chrono::milliseconds(20);  // lets every thread finish its first read of the late lines
+constexpr int kCopyArea = 0;  // spread areas: a peer's copy of the owner's shard, and a peer's reduced shard
+constexpr int kReducedArea = 1;
+constexpr int kHoldNothing = -1;
+constexpr bool kAbort = true;
 
 // Rank order folds (-1e8 + 1e8) first, so every later rank's small value survives; any other order loses some of them.
 float rankValue(int rank) {
@@ -86,6 +91,10 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
     *peers_.AbortFlag() = 0;
     const std::vector<uint32_t> epoch(kEpochCells, kFlag - 1);
     HIP_CHECK(hipMemcpy(dEpoch_, epoch.data(), kEpochCells * sizeof(uint32_t), hipMemcpyHostToDevice));
+    clearRecv();
+  }
+
+  void clearRecv() {
     const std::vector<float> recv(kBufBytes / sizeof(float), kUntouched);
     HIP_CHECK(hipMemcpy(dRecv_, recv.data(), kBufBytes, hipMemcpyHostToDevice));
   }
@@ -105,7 +114,8 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
   }
 
   size_t oneShotSlot() const { return dda::common::ddaLLArSlotPkts(kBankBytes, nRanks_); }
-  size_t packets() const { return kCount * sizeof(float) / 8; }
+  size_t packets() const { return bytes_ / 8; }
+  unsigned oneShotGrid() const { return (unsigned)((packets() + kOneShotThreads - 1) / kOneShotThreads); }
 
   void publishPeer(int peer) {
     for (size_t pk = 0; pk < packets(); ++pk) {
@@ -128,20 +138,11 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
     }
   }
 
-  template <int N>
-  void launchOneShot() {
-    const unsigned blocks = (packets() + kOneShotThreads - 1) / kOneShotThreads;
-    hipLaunchKernelGGL((dda::common::ddaAllReduceFlatLL<float, N>), dim3(blocks), dim3(kOneShotThreads), 0, stream_,
-                       peers_.DevPeers<float>(), dRecv_, dSend_, kCount, kSelf, nRanks_, dEpoch_, (int)kEpochCells,
-                       kBankBytes, DdaKernelParams{peers_.AbortFlag()});
-    ASSERT_EQ(hipGetLastError(), hipSuccess);
-  }
-
   // True once every thread has stored its phase-1 line to the next peer, so nearly all of them are already polling.
   bool phase1Done() {
     const int peer = (self_ + 1) % nRanks_;
     for (size_t pk = 0; pk < (spread_ ? shardLen(peer) : packets()); ++pk) {
-      volatile uint32_t* w = spread_ ? spreadLine(peer, 0, self_, pk) : line(peer, kSelf, pk, oneShotSlot());
+      volatile uint32_t* w = spread_ ? spreadLine(peer, kCopyArea, self_, pk) : line(peer, self_, pk, oneShotSlot());
       if (w[1] != flag_ || w[3] != flag_) {
         return false;
       }
@@ -191,18 +192,17 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
     for (int peer = 2; peer < nRanks_; ++peer) {
       publishPeer(peer);
     }
-    launchOneShot<N>();
+    ASSERT_NO_FATAL_FAILURE(launchLL<float>(&dda::common::ddaAllReduceFlatLL<float, N>, oneShotGrid(), dSend_));
     expectStillPolling("finished before rank 0 published");
     publishPeer(0);
     ASSERT_TRUE(finishes()) << "kernel never saw the late peer";
     expectRankOrderSum();
-    expectEpochAdvanced((packets() + kOneShotThreads - 1) / kOneShotThreads);
+    expectEpochAdvanced(oneShotGrid());
   }
 
   // Spread two-shot: rank self_ reduces bytes_ of per-rank words in_ (two a packet); ref_ is the one-shot's result.
-  size_t spreadPkts() const { return bytes_ / 8; }
-  size_t shardPkts() const { return dda::common::ddaLLSpreadShardPkts(spreadPkts(), nRanks_); }
-  size_t shardLen(int rank) const { return dda::common::ddaLLSpreadShardLen(spreadPkts(), shardPkts(), rank); }
+  size_t shardPkts() const { return dda::common::ddaLLSpreadShardPkts(packets(), nRanks_); }
+  size_t shardLen(int rank) const { return dda::common::ddaLLSpreadShardLen(packets(), shardPkts(), rank); }
   size_t twoShotSlot() const { return dda::common::ddaLLArTwoShotSlotPkts(kBankBytes, nRanks_); }
   int heldPeer() const { return self_ == 0 ? 1 : 0; }
 
@@ -238,21 +238,15 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
   // Launches kernel, a one-shot or spread instance over T, as rank self_ on bytes_ of send: grid blocks of 512 threads.
   template <typename T, typename Kernel>
   void launchLL(Kernel kernel, unsigned grid, const void* send) {
-    T* const* scratch = peers_.DevPeers<T>();
-    T* out = reinterpret_cast<T*>(dRecv_);
-    const T* in = static_cast<const T*>(send);
-    size_t count = bytes_ / sizeof(T);
-    int cells = (int)kEpochCells;
-    size_t bankBytes = kBankBytes;
-    DdaKernelParams params{peers_.AbortFlag()};
-    void* args[] = {&scratch, &out, &in, &count, &self_, &nRanks_, &dEpoch_, &cells, &bankBytes, &params};
-    const void* fn = reinterpret_cast<const void*>(kernel);
-    ASSERT_EQ(hipLaunchKernel(fn, dim3(grid), dim3(kOneShotThreads), args, 0, stream_), hipSuccess);
+    kernel<<<dim3(grid), dim3(kOneShotThreads), 0, stream_>>>(
+        peers_.DevPeers<T>(), reinterpret_cast<T*>(dRecv_), static_cast<const T*>(send), bytes_ / sizeof(T), self_,
+        nRanks_, dEpoch_, (int)kEpochCells, kBankBytes, DdaKernelParams{peers_.AbortFlag()});
+    ASSERT_EQ(hipGetLastError(), hipSuccess);
   }
 
-  // Random inputs for nRanks ranks as rank self, then ref_ from the one-shot on its own grid, then a fresh reset().
+  // From reset(): random inputs for nRanks ranks as rank self, then ref_ from the one-shot on its own grid at kFlag.
   template <typename T, int N>
-  void spreadPrepare(int nRanks, int self, size_t bytes, uint32_t seed) {
+  void spreadReference(int nRanks, int self, size_t bytes, uint32_t seed) {
     nRanks_ = nRanks;
     self_ = self;
     bytes_ = bytes;
@@ -262,50 +256,47 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
     randomInputs(sizeof(T) == 2, seed);
     HIP_CHECK(hipMemcpy(dSend_, in_[self_].data(), bytes_, hipMemcpyHostToDevice));
     for (int peer = 0; peer < nRanks_; ++peer) {
-      for (size_t pk = 0; peer != self_ && pk < spreadPkts(); ++pk) {
+      if (peer == self_) {
+        continue;
+      }
+      for (size_t pk = 0; pk < packets(); ++pk) {
         const uint32_t* w = &in_[peer][2 * pk];
         DdaLLHostPeers::PublishLine(line(self_, peer, pk, oneShotSlot()), w[0], w[1], kFlag);
       }
     }
-    const unsigned grid = (unsigned)((spreadPkts() + kOneShotThreads - 1) / kOneShotThreads);
-    launchLL<T>(&dda::common::ddaAllReduceFlatLL<T, N>, grid, dSend_);
+    ASSERT_NO_FATAL_FAILURE(launchLL<T>(&dda::common::ddaAllReduceFlatLL<T, N>, oneShotGrid(), dSend_));
     ASSERT_TRUE(peers_.Finishes(stream_, [] {}, kWatchdog)) << "one-shot reference did not finish";
     ref_ = recvWords();
-    reset();
   }
 
   // Peer's lines in my scratch under flag_: its copy of my shard (area 0) or its reduced shard (area 1).
   void publishSpread(int peer, int area) {
-    const int owner = area == 0 ? self_ : peer;
-    const std::vector<uint32_t>& words = area == 0 ? in_[peer] : ref_;
+    const int owner = area == kCopyArea ? self_ : peer;
+    const std::vector<uint32_t>& words = area == kCopyArea ? in_[peer] : ref_;
     for (size_t pk = 0; pk < shardLen(owner); ++pk) {
       const size_t w = 2 * (owner * shardPkts() + pk);
       DdaLLHostPeers::PublishLine(spreadLine(self_, area, peer, pk), words[w], words[w + 1], flag_);
     }
   }
 
-  void publishSpreadAll() {
+  // Publishes every peer's lines but heldPeer()'s heldArea.
+  void publishSpreadAll(int heldArea = kHoldNothing) {
     for (int peer = 0; peer < nRanks_; ++peer) {
-      if (peer != self_) {
-        publishSpread(peer, 0);
-        publishSpread(peer, 1);
+      for (int area : {kCopyArea, kReducedArea}) {
+        if (peer != self_ && (peer != heldPeer() || area != heldArea)) {
+          publishSpread(peer, area);
+        }
       }
     }
   }
 
   // Publishes every line but heldPeer()'s held area; once the kernel waits for it, publishes it or raises abort.
   template <typename T, int N>
-  bool spreadRun(unsigned grid, int heldArea, bool abort, const void* send) {
+  void spreadRun(unsigned grid, int heldArea, bool abort, const void* send) {
     spread_ = true;
-    for (int peer = 0; peer < nRanks_; ++peer) {
-      for (int area = 0; peer != self_ && area < 2; ++area) {
-        if (peer != heldPeer() || area != heldArea) {
-          publishSpread(peer, area);
-        }
-      }
-    }
-    launchLL<T>(&dda::common::ddaAllReduceSpreadTwoShotLL<T, N>, grid, send);
-    if (heldArea >= 0) {
+    publishSpreadAll(heldArea);
+    ASSERT_NO_FATAL_FAILURE(launchLL<T>(&dda::common::ddaAllReduceSpreadTwoShotLL<T, N>, grid, send));
+    if (heldArea != kHoldNothing) {
       expectStillPolling("finished before the held lines were published");
       if (abort) {
         *peers_.AbortFlag() = 1;
@@ -313,7 +304,7 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
         publishSpread(heldPeer(), heldArea);
       }
     }
-    return peers_.Finishes(stream_, [this] { publishSpreadAll(); }, kWatchdog);
+    ASSERT_TRUE(peers_.Finishes(stream_, [this] { publishSpreadAll(); }, kWatchdog)) << "spread kernel did not finish";
   }
 
   // recvbuff is the one-shot's bit for bit; an abort leaves the held shard untouched (every peer shard for a copy).
@@ -321,9 +312,9 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
     const std::vector<uint32_t> out = recvWords();
     for (size_t i = 0; i < out.size(); ++i) {
       const int owner = (int)(i / 2 / shardPkts());
-      if (!abort || (heldArea == 1 && owner == self_)) {
+      if (!abort || (heldArea == kReducedArea && owner == self_)) {
         ASSERT_EQ(out[i], ref_[i]) << "word " << i << " of shard " << owner;
-      } else if (owner == heldPeer() || (heldArea == 0 && owner != self_)) {
+      } else if (owner == heldPeer() || (heldArea == kCopyArea && owner != self_)) {
         ASSERT_EQ(out[i], bitsOf(kUntouched)) << "an aborted thread wrote word " << i << " of shard " << owner;
       }
     }
@@ -332,9 +323,12 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
   // Every peer holds my copy of its shard, nothing past its shard's end, and my reduced shard (none if not reduced).
   void expectSpreadPublished(bool reduced) {
     for (int peer = 0; peer < nRanks_; ++peer) {
-      for (size_t pk = 0; peer != self_ && pk < shardPkts(); ++pk) {
+      if (peer == self_) {
+        continue;
+      }
+      for (size_t pk = 0; pk < shardPkts(); ++pk) {
         const size_t w = 2 * (peer * shardPkts() + pk);
-        volatile uint32_t* c = spreadLine(peer, 0, self_, pk);
+        volatile uint32_t* c = spreadLine(peer, kCopyArea, self_, pk);
         if (pk < shardLen(peer)) {
           ASSERT_TRUE(c[0] == in_[self_][w] && c[1] == flag_ && c[2] == in_[self_][w + 1] && c[3] == flag_)
               << "copy to " << peer << " pk " << pk;
@@ -343,7 +337,7 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
         }
         if (pk < shardLen(self_)) {
           const size_t m = 2 * (self_ * shardPkts() + pk);
-          volatile uint32_t* r = spreadLine(peer, 1, self_, pk);
+          volatile uint32_t* r = spreadLine(peer, kReducedArea, self_, pk);
           ASSERT_TRUE(reduced ? r[0] == ref_[m] && r[1] == flag_ && r[2] == ref_[m + 1] && r[3] == flag_
                               : r[1] != flag_ && r[3] != flag_)
               << "reduced shard to " << peer << " pk " << pk;
@@ -352,14 +346,15 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
     }
   }
 
-  // One spread run over T on nRanks ranks as rank self, checked against the one-shot; heldArea -1 holds nothing back.
+  // One spread run over T on nRanks ranks as rank self from a fresh reset(), checked against the one-shot.
   template <typename T, int N>
-  void spreadCase(int nRanks, int self, size_t bytes, unsigned grid, int heldArea = -1, bool abort = false) {
+  void spreadCase(int nRanks, int self, size_t bytes, unsigned grid, int heldArea = kHoldNothing, bool abort = false) {
     SCOPED_TRACE(::testing::Message() << nRanks << " ranks, self " << self << ", " << bytes << " B, grid " << grid);
-    spreadPrepare<T, N>(nRanks, self, bytes, (uint32_t)(nRanks * 7919 + bytes));
-    ASSERT_TRUE((spreadRun<T, N>(grid, heldArea, abort, dSend_))) << "spread kernel did not finish";
-    expectSpreadRecv(heldArea, abort);
-    expectSpreadPublished(!abort || heldArea != 0);
+    ASSERT_NO_FATAL_FAILURE((spreadReference<T, N>(nRanks, self, bytes, (uint32_t)(nRanks * 7919 + bytes))));
+    reset();
+    ASSERT_NO_FATAL_FAILURE((spreadRun<T, N>(grid, heldArea, abort, dSend_)));
+    ASSERT_NO_FATAL_FAILURE(expectSpreadRecv(heldArea, abort));
+    ASSERT_NO_FATAL_FAILURE(expectSpreadPublished(!abort || heldArea != kCopyArea));
     expectEpochAdvanced(grid);
   }
 
@@ -368,7 +363,7 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
   int self_ = kSelf;
   uint32_t flag_ = kFlag;
   bool spread_ = false;
-  size_t bytes_ = kCount * sizeof(float);
+  size_t bytes_ = kOneShotBytes;
   std::vector<std::vector<uint32_t>> in_;
   std::vector<uint32_t> ref_;
   float* dSend_ = nullptr;
@@ -406,7 +401,7 @@ TEST_F(DdaAllReduceFabricLL, OneShotTornLineWaitsForBothHalves) {
     }
   }
   publishHalf(torn, 1);
-  launchOneShot<0>();
+  ASSERT_NO_FATAL_FAILURE(launchLL<float>(&dda::common::ddaAllReduceFlatLL<float, 0>, oneShotGrid(), dSend_));
   expectStillPolling("finished with one half of a line stale");
   publishHalf(torn, 0);
   ASSERT_TRUE(finishes()) << "kernel never saw the second half land";
@@ -418,19 +413,17 @@ TEST_F(DdaAllReduceFabricLL, OneShotAbortDuringStaleBatchLeavesRecvbuffAndAdvanc
   nRanks_ = 6;
   publishPeer(0);
   publishPeer(2);
-  launchOneShot<0>();
+  ASSERT_NO_FATAL_FAILURE(launchLL<float>(&dda::common::ddaAllReduceFlatLL<float, 0>, oneShotGrid(), dSend_));
   expectStillPolling("finished with three peers stale");
   *peers_.AbortFlag() = 1;
   ASSERT_TRUE(finishes()) << "kernel ignored the abort flag";
   for (float v : recv()) {
     ASSERT_EQ(v, kUntouched) << "an aborted thread wrote recvbuff";
   }
-  expectEpochAdvanced((packets() + kOneShotThreads - 1) / kOneShotThreads);
+  expectEpochAdvanced(oneShotGrid());
 }
 
-constexpr size_t kOneShotBytes = kCount * sizeof(float);
-
-// Float and bf16, compile-time and runtime ranks, even (6) and uneven (5) shards: bit for bit the one-shot's result.
+// Float, bf16 and half, compile-time and runtime ranks, even (6) and uneven (5) shards: the one-shot's result bits.
 TEST_F(DdaAllReduceFabricLL, SpreadMatchesOneShotBitwise) {
   spreadCase<float, 4>(4, kSelf, kOneShotBytes, 3);
   spreadCase<float, 8>(8, kSelf, kOneShotBytes, 3);
@@ -438,6 +431,7 @@ TEST_F(DdaAllReduceFabricLL, SpreadMatchesOneShotBitwise) {
   spreadCase<float, 0>(5, kSelf, kOneShotBytes, 3);
   spreadCase<bf16, 0>(6, kSelf, kOneShotBytes, 3);
   spreadCase<bf16, 0>(5, kSelf, kOneShotBytes, 3);
+  spreadCase<half, 0>(5, kSelf, kOneShotBytes, 3);
 }
 
 // Two LDS passes on one block (12 ranks also fold two batches), idle blocks, and an empty or a one-packet self shard.
@@ -450,44 +444,39 @@ TEST_F(DdaAllReduceFabricLL, SpreadPassesIdleBlocksAndShortShards) {
 
 // Rank 0's copy of my shard lands only once the kernel is polling (phase 2), then a peer's reduced shard (phase 3).
 TEST_F(DdaAllReduceFabricLL, SpreadWaitsForLateCopiesAndLateReducedShards) {
-  spreadCase<float, 0>(6, kSelf, kOneShotBytes, 3, 0);
-  spreadCase<float, 0>(5, kSelf, kOneShotBytes, 3, 1);
+  spreadCase<float, 0>(6, kSelf, kOneShotBytes, 3, kCopyArea);
+  spreadCase<float, 0>(5, kSelf, kOneShotBytes, 3, kReducedArea);
 }
 
 // An abort in the phase-2 wait publishes no partial sum; one in the phase-3 wait leaves the missing shard untouched.
 TEST_F(DdaAllReduceFabricLL, SpreadAbortPublishesNoPartialSumAndLeavesMissingShards) {
-  spreadCase<float, 0>(6, kSelf, kOneShotBytes, 3, 0, true);
-  spreadCase<float, 0>(6, kSelf, kOneShotBytes, 3, 1, true);
+  spreadCase<float, 0>(6, kSelf, kOneShotBytes, 3, kCopyArea, kAbort);
+  spreadCase<float, 0>(6, kSelf, kOneShotBytes, 3, kReducedArea, kAbort);
 }
 
 // In place: the copies of the peers' shards leave before their reduced shards overwrite the same recvbuff range.
 TEST_F(DdaAllReduceFabricLL, SpreadInPlaceSendsBeforeOverwriting) {
-  spreadPrepare<float, 0>(6, kSelf, kOneShotBytes, 1);
-  HIP_CHECK(hipMemcpy(dRecv_, in_[kSelf].data(), kOneShotBytes, hipMemcpyHostToDevice));
-  ASSERT_TRUE((spreadRun<float, 0>(3, -1, false, dRecv_))) << "in-place kernel did not finish";
-  expectSpreadRecv(-1, false);
+  ASSERT_NO_FATAL_FAILURE((spreadReference<float, 0>(6, kSelf, kOneShotBytes, 1)));
+  reset();
+  HIP_CHECK(hipMemcpy(dRecv_, in_[self_].data(), kOneShotBytes, hipMemcpyHostToDevice));
+  ASSERT_NO_FATAL_FAILURE((spreadRun<float, 0>(3, kHoldNothing, false, dRecv_)));
+  ASSERT_NO_FATAL_FAILURE(expectSpreadRecv(kHoldNothing, false));
   expectSpreadPublished(true);
 }
 
-// Two launches in a row with new inputs: the second takes the next epoch flag and the other scratch bank.
-TEST_F(DdaAllReduceFabricLL, SpreadSecondLaunchFlipsTheBank) {
-  spreadPrepare<float, 0>(5, kSelf, kOneShotBytes, 1);
-  std::vector<std::vector<uint32_t>> in = in_;
-  std::vector<uint32_t> ref = ref_;
-  spreadPrepare<float, 0>(5, kSelf, kOneShotBytes, 2);
-  std::swap(in_, in);
-  std::swap(ref_, ref);
-  HIP_CHECK(hipMemcpy(dSend_, in_[kSelf].data(), kOneShotBytes, hipMemcpyHostToDevice));
-  ASSERT_TRUE((spreadRun<float, 0>(3, -1, false, dSend_))) << "first launch did not finish";
-  expectSpreadRecv(-1, false);
-  std::swap(in_, in);
-  std::swap(ref_, ref);
-  flag_ = kFlag + 1;
-  HIP_CHECK(hipMemcpy(dSend_, in_[kSelf].data(), kOneShotBytes, hipMemcpyHostToDevice));
-  ASSERT_TRUE((spreadRun<float, 0>(3, -1, false, dSend_))) << "second launch did not finish";
-  expectSpreadRecv(-1, false);
-  expectSpreadPublished(true);
-  expectEpochAdvanced(3, kFlag + 1);
+// No reset after the one-shot: flag 3 runs on bank 1, then flag 4 on bank 0 over its flag-2 lines, one copy held late.
+TEST_F(DdaAllReduceFabricLL, SpreadFollowsTheOneShotAndSkipsStaleLines) {
+  ASSERT_NO_FATAL_FAILURE((spreadReference<float, 0>(5, kSelf, kOneShotBytes, 1)));
+  for (const uint32_t flag : {kFlag + 1, kFlag + 2}) {
+    SCOPED_TRACE(::testing::Message() << "flag " << flag);
+    flag_ = flag;
+    clearRecv();
+    const int held = flag == kFlag + 1 ? kHoldNothing : kCopyArea;
+    ASSERT_NO_FATAL_FAILURE((spreadRun<float, 0>(oneShotGrid(), held, false, dSend_)));
+    ASSERT_NO_FATAL_FAILURE(expectSpreadRecv(held, false));
+    ASSERT_NO_FATAL_FAILURE(expectSpreadPublished(true));
+    expectEpochAdvanced(oneShotGrid(), flag);
+  }
 }
 
 }  // namespace RcclUnitTesting
