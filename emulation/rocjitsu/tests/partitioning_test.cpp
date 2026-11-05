@@ -81,16 +81,6 @@ config_json_with_num_threads(std::string &json, const std::string &path, uint32_
   return testing::AssertionSuccess();
 }
 
-TEST(PartitioningConfigTest, ReportsDirectoryReadFailure) {
-  test::ScopedTempDirectory directory;
-  ASSERT_TRUE(directory.initialize("rocjitsu-partitioning-config-"));
-  std::string json;
-  const testing::AssertionResult result = config_json_with_num_threads(json, directory.path(), 1);
-  ASSERT_FALSE(result);
-  EXPECT_NE(std::string(result.message()).find("Failed to read config: " + directory.path()),
-            std::string::npos);
-}
-
 struct PartitionedTopology {
   config::LoadedConfig loaded;
   SoC *soc = nullptr;
@@ -130,6 +120,16 @@ void expect_subtree_partition(simdojo::Component *component, simdojo::PartitionI
 
   for (const auto &child : composite->children())
     expect_subtree_partition(child.get(), expected);
+}
+
+TEST(PartitioningConfigTest, ReportsDirectoryReadFailure) {
+  test::ScopedTempDirectory directory;
+  ASSERT_TRUE(directory.initialize("rocjitsu-partitioning-config-"));
+  std::string json;
+  const testing::AssertionResult result = config_json_with_num_threads(json, directory.path(), 1);
+  ASSERT_FALSE(result);
+  EXPECT_NE(std::string(result.message()).find("Failed to read config: " + directory.path()),
+            std::string::npos);
 }
 
 TEST(CpuDispatchBudgetTest, AutoUsesDetectedHostWidthBelowCap) {

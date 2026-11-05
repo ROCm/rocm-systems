@@ -3344,16 +3344,16 @@ TEST(HsaHooksUnitDeathTest, InterceptGuestUnregisteredOversizedDispatchAborts) {
   // metadata and whose group segment exceeds the host LDS limit has no sidecar to
   // fall back to, so it must fail closed rather than submit a host-faulting launch.
   GTEST_FLAG_SET(death_test_style, "threadsafe");
+  reset_pool_blocker(false);
+  reset_queue_fakes();
+  FakeApiTable api;
+  api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
+  api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
+
   EXPECT_DEATH(
       {
-        reset_pool_blocker(false);
-        reset_queue_fakes();
-        FakeApiTable api;
-        api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
-        api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
-        InstalledHook hook;
-        ASSERT_TRUE(hook.initialize(api));
-
         hsa_queue_t *queue = nullptr;
         api.core.hsa_queue_create_fn(kGuestAgent, 4, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0, 0,
                                      &queue);

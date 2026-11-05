@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -23,10 +24,9 @@ class PluginLoaderTest : public ::testing::Test {
 protected:
   void SetUp() override {
     ASSERT_TRUE(trace_.initialize("rocjitsu-plugin-loader-"));
-    ASSERT_EQ(setenv("ROCJITSU_PLUGIN_TEST_TRACE", trace_.path().c_str(), 1), 0);
+    trace_environment_.emplace("ROCJITSU_PLUGIN_TEST_TRACE", trace_.path());
+    ASSERT_STREQ(std::getenv("ROCJITSU_PLUGIN_TEST_TRACE"), trace_.path().c_str());
   }
-
-  void TearDown() override { unsetenv("ROCJITSU_PLUGIN_TEST_TRACE"); }
 
   std::string trace() const {
     std::ifstream input(trace_.path());
@@ -39,6 +39,7 @@ protected:
   }
 
   rocjitsu::test::ScopedTempFile trace_;
+  std::optional<rocjitsu::test::ScopedEnvironmentVariable> trace_environment_;
 };
 
 TEST_F(PluginLoaderTest, LoadsPluginAndDispatchesLifecycle) {
