@@ -556,7 +556,11 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   // against a pending load's destination.
   constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
   constexpr MemoryOrderClass ldsAccessOrder = MemoryOrderClass::UNORDERED;
-  const int elementBytes = static_cast<int>(issue.element_size_bytes);
+  // An observed range can end mid-element: an element that straddles the end
+  // of the wave's LDS allocation transfers only its leading bytes. Validate the
+  // ranges at byte granularity, as registerLdsRangeEvent registers them;
+  // rounding them to whole elements would drop those bytes.
+  constexpr int kByteGranularity = 1;
 
   // A transfer has no lanes; its violations report lane -1. The core takes
   // its own range type, independent of the observation protocol.
@@ -564,7 +568,7 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   ranges.reserve(issue.lds_ranges.size());
   for (const auto &range : issue.lds_ranges) {
     ranges.push_back({.address = range.address, .bytes = range.bytes});
-    const auto bytes = detector->ldsBytesInRange(range.address, range.bytes, elementBytes);
+    const auto bytes = detector->ldsBytesInRange(range.address, range.bytes, kByteGranularity);
     if (bytes == 0)
       continue;
     const int addr = static_cast<int>(range.address);
@@ -583,7 +587,7 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
   rs->registerLdsRangeEvent(
       instruction, issue.is_load ? MemoryEventType::GLOBAL_TO_LDS : MemoryEventType::LDS_TO_GLOBAL,
-      ranges, elementBytes, obligations, memoryOrder);
+      ranges, obligations, memoryOrder);
 }
 
 void RaceDetectorPlugin::onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
