@@ -15,6 +15,10 @@
 #   pre-commit run --config projects/rccl/.pre-commit-config.yaml \
 #     --files $(git diff --name-only origin/develop...HEAD)
 #
+#   # clang-tidy, which is too slow for a commit hook and so is manual-stage
+#   pre-commit run --config projects/rccl/.pre-commit-config.yaml \
+#     --hook-stage manual clang-tidy
+#
 # pre-commit itself: `pip install pre-commit` (or `uv tool install pre-commit`).
 
 # Only ever look at files under projects/rccl, whatever file list pre-commit is
@@ -30,6 +34,23 @@ repos:
         name: clang-format (C/C++)
         entry: clang-format -i -style=file
         files: ^projects/rccl/src/.*\.(c|cc|cpp|cu|cuh|h|hpp)$
+
+  # C/C++ static analysis, advisory only. Manual stage: unlike clang-format,
+  # clang-tidy needs a parsed translation unit, so it configures a build and
+  # runs hipify first. That is minutes, not seconds, and it ignores the
+  # changed-file list, so it has no business running on `git commit`. CI
+  # invokes it explicitly with --hook-stage manual.
+  - repo: local
+    hooks:
+      - id: clang-tidy
+        name: clang-tidy (advisory, configures a build)
+        language: script
+        entry: projects/rccl/maint/run-clang-tidy.sh
+        # The script picks its own files from the compile database.
+        pass_filenames: false
+        always_run: true
+        stages: [manual]
+        verbose: true
 
   # Python linting, advisory only.
   - repo: local
