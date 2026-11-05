@@ -1255,13 +1255,24 @@ typedef std::unordered_map<int, bool> requestedDevices_t;
 static void parseRequestedDeviceList(const char* requestedDeviceList,
                                      requestedDevices_t& requestedDevices, uint32_t numDevices,
                                      Pal::IDevice* deviceList[Pal::MaxDevices]) {
-  char* pch = strtok(const_cast<char*>(requestedDeviceList), ",");
-  while (pch != nullptr) {
+  const char* cursor = requestedDeviceList;
+  while (*cursor != '\0') {
+    while (*cursor == ',') {
+      ++cursor;
+    }
+    if (*cursor == '\0') {
+      break;
+    }
+    const char* token_end = cursor;
+    while (*token_end != '\0' && *token_end != ',') {
+      ++token_end;
+    }
+    std::string token(cursor, token_end);
+    cursor = token_end;
+
     bool deviceIdValid = true;
-    // UUID needs to be specified in the format GPU-<body>, <body> encodes UUID as a 16 chars
-    char* deviceUuid = strstr(pch, "GPU-");
-    // If Uuid is specified, then convert it to index
-    if (deviceUuid != nullptr) {
+    // UUID form is GPU-<body>, <body> is 16 chars. Match the body at byte 4.
+    if (token.find("GPU-") != std::string::npos) {
       for (uint32_t i = 0; i < numDevices; i++) {
         Pal::DeviceProperties properties;
         // Retrieve device properties
@@ -1274,18 +1285,17 @@ static void parseRequestedDeviceList(const char* requestedDeviceList,
         char uuid[17] = {0};
         setUUID(&properties, &uuid[0]);
 
-        // Convert it to index
-        if (strcmp(pch + 4, uuid) == 0) {
-          snprintf(pch, strlen(pch), "%d", i);
+        if (strcmp(token.c_str() + 4, uuid) == 0) {
+          token = std::to_string(i);
           break;
         }
       }
     }
 
-    int currentDeviceIndex = atoi(pch);
+    int currentDeviceIndex = atoi(token.c_str());
     // Validate device index.
-    for (size_t i = 0; i < strlen(pch); i++) {
-      if (!isdigit(reinterpret_cast<unsigned char*>(pch)[i])) {
+    for (size_t i = 0; i < token.size(); i++) {
+      if (!isdigit(static_cast<unsigned char>(token[i]))) {
         deviceIdValid = false;
         break;
       }
@@ -1293,8 +1303,6 @@ static void parseRequestedDeviceList(const char* requestedDeviceList,
     if (currentDeviceIndex < 0 || static_cast<uint32_t>(currentDeviceIndex) >= numDevices) {
       deviceIdValid = false;
     }
-    // Get next token.
-    pch = strtok(nullptr, ",");
 
     if (!deviceIdValid) {
       // Exit the loop as anything to the right of invalid deviceId
@@ -1462,6 +1470,21 @@ Memory* Device::getGpuMemory(amd::Memory* mem) const {
 }
 
 const device::BlitManager& Device::xferMgr() const { return xferQueue_->blitMgr(); }
+
+// ================================================================================================
+[[nodiscard]] bool Device::writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                             const void* src) const {
+  if (src == nullptr) {
+    return false;
+  }
+  pal::Memory* devMem = getGpuMemory(&dst);
+  if (devMem == nullptr) {
+    return false;
+  }
+  // PAL runs this as a CP packet on its own transfer queue and blocks until it completes.
+  static_cast<const KernelBlitManager&>(xferMgr()).writeRawData(*devMem, offset, size, src);
+  return true;
+}
 
 Pal::ChNumFormat Device::getPalFormat(const amd::Image::Format& format,
                                       Pal::ChannelMapping* channel) const {
@@ -1665,8 +1688,8 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
         // Pipe initialize in order read_idx, write_idx, end_idx. Refer clk_pipe_t structure.
         // Init with 3 DWORDS for 32bit addressing and 6 DWORDS for 64bit
         size_t pipeInit[3] = {0, 0, owner.asPipe()->getMaxNumPackets()};
-        static_cast<const KernelBlitManager&>(xferMgr()).writeRawData(*gpuMemory, sizeof(pipeInit),
-                                                                      pipeInit);
+        static_cast<const KernelBlitManager&>(xferMgr()).writeRawData(*gpuMemory, 0,
+                                                                      sizeof(pipeInit), pipeInit);
       }
       // If memory has direct access from host, then get CPU address
       if (gpuMemory->isHostMemDirectAccess() && (type != Resource::ExternalPhysical) &&
