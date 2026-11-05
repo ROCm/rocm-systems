@@ -207,6 +207,10 @@ public:
   void set_scratch_xcc_layout_for_test(uint32_t xcc_id, uint32_t xcc_count);
 
   /// @brief Register a queue and return its CP-local lifetime identity.
+  /// @details Invalid layout and VM capability publication failures return zero.
+  /// Exceptions from VM capability access propagate before queue publication.
+  /// Standard-library failures during internal publication and monitor startup
+  /// are fatal. Replica queues do not repeat capability publication.
   uint64_t register_queue(ComputeQueueConfig queue);
 
   /// @brief Remove only the queue incarnation identified by @p registration_id.

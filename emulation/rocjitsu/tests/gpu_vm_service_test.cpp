@@ -2673,17 +2673,26 @@ TEST(GpuVmService, CloseAllPublishesItsEpochAfterBlockedRegistrationRollsBack) {
       std::make_shared<RecordingQueueBindingFactory>(BlockedQueueOperation::CreateBinding);
   AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   const uint64_t old_epoch = queues.lifecycle_epoch();
+  std::promise<void> destruction_started;
+  std::promise<void> allow_destruction;
+  std::shared_future<void> destruction_release = allow_destruction.get_future().share();
+  binding_factory->set_destruction_observer([&]() {
+    destruction_started.set_value();
+    destruction_release.wait();
+  });
 
   std::future<QueueHandle> registration = std::async(std::launch::async, [&]() {
     return queues.register_queue(queue_request(address_space, binding_factory, 1));
   });
   if (!binding_factory->wait_until_callback_is_blocked()) {
+    allow_destruction.set_value();
     binding_factory->release_callback();
     (void)registration.get();
     FAIL() << "the binding factory callback did not block";
   }
   std::future<void> close_all = std::async(std::launch::async, [&]() { queues.close_all(); });
   if (!wait_until_registration_admission_closes(queues)) {
+    allow_destruction.set_value();
     binding_factory->release_callback();
     (void)registration.get();
     close_all.get();
@@ -2695,6 +2704,18 @@ TEST(GpuVmService, CloseAllPublishesItsEpochAfterBlockedRegistrationRollsBack) {
   EXPECT_EQ(close_all.wait_for(std::chrono::milliseconds(50)), std::future_status::timeout);
 
   binding_factory->release_callback();
+  const std::future_status destruction_status =
+      destruction_started.get_future().wait_for(std::chrono::seconds(5));
+  EXPECT_EQ(destruction_status, std::future_status::ready);
+  if (destruction_status == std::future_status::ready) {
+    EXPECT_EQ(close_all.wait_for(std::chrono::milliseconds(50)), std::future_status::timeout);
+    EXPECT_EQ(queues.lifecycle_epoch(), old_epoch);
+    const auto retained = gpu_vm.lookup(address_space);
+    EXPECT_TRUE(retained);
+    if (retained)
+      EXPECT_EQ(retained->queue_references, 1u);
+  }
+  allow_destruction.set_value();
   EXPECT_FALSE(registration.get());
   close_all.get();
   EXPECT_EQ(binding_factory->create_binding_calls(), 1u);

@@ -238,7 +238,6 @@ TEST_F(GpuQueueRegistryTest, RegistrationFailuresRollBackAddressSpaceRetention) 
       registry_.register_queue(request(std::make_shared<TestQueueFactory>(factory_control())));
   ASSERT_TRUE(replacement);
   EXPECT_TRUE(registry_.unregister_queue(replacement, QueueCloseMode::ForceCancel));
-  registry_.close_all();
 }
 
 TEST_F(GpuQueueRegistryTest, DuplicateIdentityIsRejectedBeforeCreatingAnotherBinding) {

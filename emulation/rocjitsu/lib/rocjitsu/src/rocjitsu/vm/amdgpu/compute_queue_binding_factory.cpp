@@ -102,10 +102,14 @@ public:
     });
     if (registration_id == 0)
       return {};
-    return {.status = QueueBindingCreateStatus::Bound,
-            .binding = std::make_unique<ComputeQueueBinding>(
-                command_processor_, registration_id, request.packet_format,
-                request.ring.base_address, request.ring.size_bytes)};
+    // The processor attachment is live. A failed ownership allocation must not
+    // reach a recovering frontend without a binding that owns that attachment.
+    return [&]() noexcept -> QueueBindingCreateResult {
+      return {.status = QueueBindingCreateStatus::Bound,
+              .binding = std::make_unique<ComputeQueueBinding>(
+                  command_processor_, registration_id, request.packet_format,
+                  request.ring.base_address, request.ring.size_bytes)};
+    }();
   }
 
 private:

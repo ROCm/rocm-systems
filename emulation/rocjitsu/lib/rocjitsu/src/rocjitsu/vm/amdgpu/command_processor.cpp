@@ -1190,135 +1190,140 @@ uint64_t CommandProcessor::register_queue(ComputeQueueConfig config, bool fanout
       publish_async_scratch_capability(queue) != VmAccessOutcome::Complete) {
     return 0;
   }
-  class PeerRegistrationRollback {
-  public:
-    PeerRegistrationRollback(const std::vector<CommandProcessor *> &peers,
-                             const std::vector<uint32_t> &registered_ranks, uint32_t queue_id,
-                             uint32_t process_id)
-        : peers_(peers), registered_ranks_(registered_ranks), queue_id_(queue_id),
-          process_id_(process_id) {}
-    PeerRegistrationRollback(const PeerRegistrationRollback &) = delete;
-    PeerRegistrationRollback &operator=(const PeerRegistrationRollback &) = delete;
-    ~PeerRegistrationRollback() {
-      if (committed_)
-        return;
-      for (const uint32_t rank : registered_ranks_)
-        peers_[rank]->unregister_queue(queue_id_, process_id_);
-    }
+  // Publish only through internal storage, peer registration and thread startup.
+  // Foreign VM access above can still fail through its own boundary contract;
+  // standard-library failures after publication starts must be fatal.
+  return [&]() noexcept -> uint64_t {
+    class PeerRegistrationRollback {
+    public:
+      PeerRegistrationRollback(const std::vector<CommandProcessor *> &peers,
+                               const std::vector<uint32_t> &registered_ranks, uint32_t queue_id,
+                               uint32_t process_id)
+          : peers_(peers), registered_ranks_(registered_ranks), queue_id_(queue_id),
+            process_id_(process_id) {}
+      PeerRegistrationRollback(const PeerRegistrationRollback &) = delete;
+      PeerRegistrationRollback &operator=(const PeerRegistrationRollback &) = delete;
+      ~PeerRegistrationRollback() {
+        if (committed_)
+          return;
+        for (const uint32_t rank : registered_ranks_)
+          peers_[rank]->unregister_queue(queue_id_, process_id_);
+      }
 
-    void commit() { committed_ = true; }
+      void commit() { committed_ = true; }
 
-  private:
-    const std::vector<CommandProcessor *> &peers_;
-    const std::vector<uint32_t> &registered_ranks_;
-    uint32_t queue_id_ = 0;
-    uint32_t process_id_ = 0;
-    bool committed_ = false;
-  };
+    private:
+      const std::vector<CommandProcessor *> &peers_;
+      const std::vector<uint32_t> &registered_ranks_;
+      uint32_t queue_id_ = 0;
+      uint32_t process_id_ = 0;
+      bool committed_ = false;
+    };
 
-  class OwnerRegistrationRollback {
-  public:
-    explicit OwnerRegistrationRollback(std::vector<ComputeQueueRecord> &queues)
-        : queues_(queues), initial_queue_count_(queues.size()) {}
-    OwnerRegistrationRollback(const OwnerRegistrationRollback &) = delete;
-    OwnerRegistrationRollback &operator=(const OwnerRegistrationRollback &) = delete;
-    ~OwnerRegistrationRollback() {
-      if (committed_)
-        return;
-      while (queues_.size() > initial_queue_count_)
-        queues_.pop_back();
-    }
+    class OwnerRegistrationRollback {
+    public:
+      explicit OwnerRegistrationRollback(std::vector<ComputeQueueRecord> &queues)
+          : queues_(queues), initial_queue_count_(queues.size()) {}
+      OwnerRegistrationRollback(const OwnerRegistrationRollback &) = delete;
+      OwnerRegistrationRollback &operator=(const OwnerRegistrationRollback &) = delete;
+      ~OwnerRegistrationRollback() {
+        if (committed_)
+          return;
+        while (queues_.size() > initial_queue_count_)
+          queues_.pop_back();
+      }
 
-    void commit() { committed_ = true; }
+      void commit() { committed_ = true; }
 
-  private:
-    std::vector<ComputeQueueRecord> &queues_;
-    std::size_t initial_queue_count_ = 0;
-    bool committed_ = false;
-  };
+    private:
+      std::vector<ComputeQueueRecord> &queues_;
+      std::size_t initial_queue_count_ = 0;
+      bool committed_ = false;
+    };
 
-  util::Logger::cp([&](auto &os) {
-    os << std::format("{}: REGISTER_QUEUE id={} pid={} ring={:#x} size={} rptr={:#x} wptr={:#x} "
-                      "doorbell_off={} db_base={}",
-                      name(), queue.queue_id, queue.process_id, queue.ring_base_va, queue.ring_size,
-                      queue.read_ptr_va, queue.write_ptr_va, queue.doorbell_offset,
-                      reinterpret_cast<uintptr_t>(queue.doorbell_base));
-  });
-  // A replica exists only to receive dispatch shards from the XCD that owns the
-  // queue. It must never read the ring or poll the doorbell, or the same packets
-  // would be dispatched once per XCD.
-  const bool start_poll =
-      queue.doorbell_mode == QueueDoorbellMode::HostPolled && !queue.fanout_replica;
-  // Replicate onto the peer XCDs without holding this CP's lock:
-  // accept_fanout_shard() and the peers' register_queue() take their own locks.
-  // A shard can arrive only after this function returns, so the owner may be
-  // committed last without exposing an incomplete topology.
-  {
-    // Checked before replicating, so a rejection cannot leave replicas behind on
-    // the peers. Shard routing keys on (queue_id, process_id), so a duplicate would
-    // silently deliver every shard to whichever slot matched first -- a wrong-answer
-    // bug rather than a crash, which is precisely what an assert compiled out of a
-    // release build would let through. Enforced in every build for that reason.
-    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    if (find_compute_queue(queue.queue_id, queue.process_id) != nullptr)
-      return 0;
-    queue.registration_id = next_queue_registration_id_++;
-    if (next_queue_registration_id_ == 0)
-      next_queue_registration_id_ = 1;
-  }
-  const uint64_t registration_id = queue.registration_id;
-  const auto num_xcds = static_cast<uint32_t>(xcd_peers_.size());
-  bool replicate = queue.xcd_fanout && num_xcds > 1;
-  std::vector<uint32_t> registered_peer_ranks;
-  PeerRegistrationRollback peer_rollback(xcd_peers_, registered_peer_ranks, queue.queue_id,
-                                         queue.process_id);
-  if (replicate) {
-    registered_peer_ranks.reserve(num_xcds - 1);
-    for (uint32_t rank = 0; rank < num_xcds; ++rank) {
-      if (rank == xcd_rank_)
-        continue;
-      ComputeQueueConfig replica = queue;
-      replica.xcd_fanout = false;
-      if (xcd_peers_[rank]->register_queue(std::move(replica), true) == 0)
+    util::Logger::cp([&](auto &os) {
+      os << std::format("{}: REGISTER_QUEUE id={} pid={} ring={:#x} size={} rptr={:#x} wptr={:#x} "
+                        "doorbell_off={} db_base={}",
+                        name(), queue.queue_id, queue.process_id, queue.ring_base_va,
+                        queue.ring_size, queue.read_ptr_va, queue.write_ptr_va,
+                        queue.doorbell_offset, reinterpret_cast<uintptr_t>(queue.doorbell_base));
+    });
+    // A replica exists only to receive dispatch shards from the XCD that owns the
+    // queue. It must never read the ring or poll the doorbell, or the same packets
+    // would be dispatched once per XCD.
+    const bool start_poll =
+        queue.doorbell_mode == QueueDoorbellMode::HostPolled && !queue.fanout_replica;
+    // Replicate onto the peer XCDs without holding this CP's lock:
+    // accept_fanout_shard() and the peers' register_queue() take their own locks.
+    // A shard can arrive only after this function returns, so the owner may be
+    // committed last without exposing an incomplete topology.
+    {
+      // Checked before replicating, so a rejection cannot leave replicas behind on
+      // the peers. Shard routing keys on (queue_id, process_id), so a duplicate would
+      // silently deliver every shard to whichever slot matched first -- a wrong-answer
+      // bug rather than a crash, which is precisely what an assert compiled out of a
+      // release build would let through. Enforced in every build for that reason.
+      std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+      if (find_compute_queue(queue.queue_id, queue.process_id) != nullptr)
         return 0;
-      registered_peer_ranks.push_back(rank);
+      queue.registration_id = next_queue_registration_id_++;
+      if (next_queue_registration_id_ == 0)
+        next_queue_registration_id_ = 1;
     }
-  }
-  {
-    std::unique_lock<std::shared_mutex> structure_lock(queue_structure_mutex_);
-    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    if (find_compute_queue(queue.queue_id, queue.process_id) != nullptr)
-      return 0;
-    OwnerRegistrationRollback owner_rollback(compute_queues_);
-    compute_queues_.push_back(std::move(queue));
-    // KFD queues rely on the VM-level primary (rj_vm.cpp); only internal test
-    // queues (no host-accessible queue anywhere on this CP) need the CP to own the
-    // primary lifecycle. Gate on the same aggregate predicate as the teardown
-    // release (!has_kfd_queues()) — checked AFTER the push_back so it reflects the
-    // new queue — so a CP can never register a primary it will never release.
-    if (!is_primary_ && engine() && !has_kfd_queues()) {
-      engine()->register_as_primary();
-      is_primary_ = true;
-    } else if (is_primary_ && engine() && has_kfd_queues()) {
-      // A KFD queue joined a CP that had registered a test-owned primary; the
-      // VM-level primary now anchors this CP's lifecycle, so drop the CP-owned
-      // primary to keep register/release symmetric (the teardown path only
-      // releases when !has_kfd_queues()).
-      engine()->primary_release();
-      is_primary_ = false;
+    const uint64_t registration_id = queue.registration_id;
+    const auto num_xcds = static_cast<uint32_t>(xcd_peers_.size());
+    bool replicate = queue.xcd_fanout && num_xcds > 1;
+    std::vector<uint32_t> registered_peer_ranks;
+    PeerRegistrationRollback peer_rollback(xcd_peers_, registered_peer_ranks, queue.queue_id,
+                                           queue.process_id);
+    if (replicate) {
+      registered_peer_ranks.reserve(num_xcds - 1);
+      for (uint32_t rank = 0; rank < num_xcds; ++rank) {
+        if (rank == xcd_rank_)
+          continue;
+        ComputeQueueConfig replica = queue;
+        replica.xcd_fanout = false;
+        if (xcd_peers_[rank]->register_queue(std::move(replica), true) == 0)
+          return 0;
+        registered_peer_ranks.push_back(rank);
+      }
     }
-    owner_rollback.commit();
-  }
-  peer_rollback.commit();
-  // Start (or restart) the doorbell poll thread for KFD (host-accessible) queues
-  // AFTER releasing hw_queue_mutex_. ensure_doorbell_monitor() serializes on its
-  // own doorbell_thread_mutex_. Keeping that lock order consistent with the stop
-  // path avoids joining a monitor while holding the queue mutex it needs to finish
-  // a scan. Internal test queues inject doorbell events directly via
-  // schedule_event_now() and need no monitor.
-  if (start_poll)
-    ensure_doorbell_monitor();
-  return registration_id;
+    {
+      std::unique_lock<std::shared_mutex> structure_lock(queue_structure_mutex_);
+      std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+      if (find_compute_queue(queue.queue_id, queue.process_id) != nullptr)
+        return 0;
+      OwnerRegistrationRollback owner_rollback(compute_queues_);
+      compute_queues_.push_back(std::move(queue));
+      // KFD queues rely on the VM-level primary (rj_vm.cpp); only internal test
+      // queues (no host-accessible queue anywhere on this CP) need the CP to own the
+      // primary lifecycle. Gate on the same aggregate predicate as the teardown
+      // release (!has_kfd_queues()) — checked AFTER the push_back so it reflects the
+      // new queue — so a CP can never register a primary it will never release.
+      if (!is_primary_ && engine() && !has_kfd_queues()) {
+        engine()->register_as_primary();
+        is_primary_ = true;
+      } else if (is_primary_ && engine() && has_kfd_queues()) {
+        // A KFD queue joined a CP that had registered a test-owned primary; the
+        // VM-level primary now anchors this CP's lifecycle, so drop the CP-owned
+        // primary to keep register/release symmetric (the teardown path only
+        // releases when !has_kfd_queues()).
+        engine()->primary_release();
+        is_primary_ = false;
+      }
+      owner_rollback.commit();
+    }
+    peer_rollback.commit();
+    // Start (or restart) the doorbell poll thread for KFD (host-accessible) queues
+    // AFTER releasing hw_queue_mutex_. ensure_doorbell_monitor() serializes on its
+    // own doorbell_thread_mutex_. Keeping that lock order consistent with the stop
+    // path avoids joining a monitor while holding the queue mutex it needs to finish
+    // a scan. Internal test queues inject doorbell events directly via
+    // schedule_event_now() and need no monitor.
+    if (start_poll)
+      ensure_doorbell_monitor();
+    return registration_id;
+  }();
 }
 
 void CommandProcessor::notify_queue_doorbell(uint64_t registration_id, uint64_t value) {

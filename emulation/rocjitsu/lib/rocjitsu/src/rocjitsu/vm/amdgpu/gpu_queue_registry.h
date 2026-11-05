@@ -188,6 +188,9 @@ public:
   virtual ~QueueBindingFactory() = default;
 
   /// @brief Create a fully attached binding or reject without leaving processor state.
+  /// @details A factory that propagates an exception must undo its own attachment:
+  /// the registry cannot destroy a binding it has not received. Internal factories
+  /// make standard-library failures during attachment publication fatal.
   [[nodiscard]] virtual QueueBindingCreateResult
   create_binding(const QueueRegistrationRequest &request) = 0;
 };
@@ -221,8 +224,8 @@ public:
   ~GpuQueueRegistry();
 
   /// @brief Register a queue or return an empty handle on rejection.
-  /// @details On rejection, destroy any returned binding before releasing its VM
-  /// retention so binding cleanup can still access the VM.
+  /// @details If admission closes after a factory returns a bound queue, destroy
+  /// that binding before releasing its VM retention so cleanup can access the VM.
   [[nodiscard]] QueueHandle register_queue(const QueueRegistrationRequest &request);
   [[nodiscard]] QueueReconfigureResult reconfigure_queue(QueueHandle handle,
                                                          QueueReconfigureRequest request);

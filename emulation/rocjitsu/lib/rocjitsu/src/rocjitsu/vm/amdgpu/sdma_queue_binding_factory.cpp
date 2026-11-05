@@ -97,21 +97,25 @@ SdmaQueueBindingFactory::create_binding(const QueueRegistrationRequest &request)
           std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
     };
   }
-  const SdmaQueueScheduler::Handle handle = scheduler_->attach(
-      {.ring = std::move(ring),
-       .context = context,
-       .producer_pointer_address = request.ring.producer_pointer_address,
-       .doorbell_offset = request.doorbell.offset,
-       .doorbell_base = request.doorbell.host_base,
-       .last_doorbell = request.doorbell.last_value,
-       .host_accessible = request.doorbell.mode == QueueDoorbellMode::HostPolled},
-      std::move(callbacks),
-      progress_observer_factory_ ? progress_observer_factory_(context)
-                                 : SdmaQueueProgressObserver{});
-  if (!handle)
-    return {};
-  return {.status = QueueBindingCreateStatus::Bound,
-          .binding = std::make_unique<SdmaQueueBinding>(*scheduler_, handle)};
+  SdmaQueueProgressObserver progress_observer = progress_observer_factory_
+                                                    ? progress_observer_factory_(context)
+                                                    : SdmaQueueProgressObserver{};
+  // Resolve foreign callbacks above the fatal internal attachment boundary.
+  return [&]() noexcept -> QueueBindingCreateResult {
+    const SdmaQueueScheduler::Handle handle = scheduler_->attach(
+        {.ring = std::move(ring),
+         .context = context,
+         .producer_pointer_address = request.ring.producer_pointer_address,
+         .doorbell_offset = request.doorbell.offset,
+         .doorbell_base = request.doorbell.host_base,
+         .last_doorbell = request.doorbell.last_value,
+         .host_accessible = request.doorbell.mode == QueueDoorbellMode::HostPolled},
+        std::move(callbacks), std::move(progress_observer));
+    if (!handle)
+      return {};
+    return {.status = QueueBindingCreateStatus::Bound,
+            .binding = std::make_unique<SdmaQueueBinding>(*scheduler_, handle)};
+  }();
 }
 
 std::shared_ptr<SdmaQueueBindingFactory>
