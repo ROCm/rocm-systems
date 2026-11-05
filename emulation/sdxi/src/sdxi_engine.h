@@ -37,6 +37,8 @@ typedef struct {
     uint64_t         num_sync;          /* SYNC/fence descriptors processed */
     uint64_t         num_compress;      /* COMPRESS descriptors processed */
     uint64_t         num_decompress;    /* DECOMPRESS descriptors processed */
+    uint64_t         num_elemwise;      /* ELEMWISE descriptors processed */
+    uint64_t         bytes_elemwise;    /* cumulative ELEMWISE source bytes */
     uint64_t         num_intr;          /* INTR descriptors processed */
     uint64_t         num_cxt_start;     /* CXT_START admin descriptors issued */
     uint64_t         num_cxt_stop;      /* CXT_STOP admin descriptors issued */

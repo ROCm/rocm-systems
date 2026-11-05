@@ -660,10 +660,7 @@ static int cmd_elemwise(int argc, char **argv)
 			op_str, dtype_str, src_len,
 			(unsigned long long)ioc.out_len);
 
-	if (write_file(dst_path, dst_buf, (size_t)ioc.out_len) != 0) {
-		free(src_buf); free(dst_buf);
-		return 1;
-	}
+	write_file(dst_path, dst_buf, (size_t)ioc.out_len);
 
 	if (is_reduce)
 		printf("reduce result written to %s (%llu bytes)\n",
@@ -671,6 +668,68 @@ static int cmd_elemwise(int argc, char **argv)
 
 	free(src_buf);
 	free(dst_buf);
+	return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* info                                                                */
+/* ------------------------------------------------------------------ */
+
+static int cmd_info(int argc, char **argv)
+{
+	(void)argc; (void)argv;
+	struct sdxi_ioc_info inf = {0};
+	if (ioctl(g_fd, SDXI_IOC_INFO, &inf) < 0) {
+		perror("SDXI_IOC_INFO");
+		return 1;
+	}
+	printf("SDXI Device Information\n");
+	printf("  Version     : %u.%u\n",
+	       (inf.version >> 8) & 0xffU, inf.version & 0xffU);
+	printf("  Vendor ID   : 0x%04x\n", inf.vendor_id);
+	printf("  Device ID   : 0x%04x\n", inf.device_id);
+	printf("  Max contexts: %u\n", inf.max_cxt);
+	printf("  CAP0        : 0x%016llx\n", (unsigned long long)inf.cap0);
+	printf("  CAP1        : 0x%016llx\n", (unsigned long long)inf.cap1);
+	return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* stats                                                               */
+/* ------------------------------------------------------------------ */
+
+static const char *stat_names[SDXI_NUM_STATS] = {
+	"bytes_moved",
+	"num_copy",
+	"num_errors",
+	"num_intr",
+	"num_cxt_start",
+	"num_cxt_stop",
+	"num_nop",
+	"num_sync",
+	"bytes_compressed",
+	"bytes_decompressed",
+	"num_compress",
+	"num_decompress",
+	"num_elemwise",
+	"bytes_elemwise",
+};
+
+static int cmd_stats(int argc, char **argv)
+{
+	uint32_t cid = 0;
+	if (argc >= 1)
+		cid = (uint32_t)strtoul(argv[0], NULL, 0);
+
+	struct sdxi_ioc_stats st = { .cid = cid };
+	if (ioctl(g_fd, SDXI_IOC_STATS, &st) < 0) {
+		perror("SDXI_IOC_STATS");
+		return 1;
+	}
+	printf("SDXI Statistics (context %u)\n", cid);
+	for (int i = 0; i < SDXI_NUM_STATS; i++)
+		printf("  %-24s: %llu\n",
+		       stat_names[i], (unsigned long long)st.val[i]);
 	return 0;
 }
 
@@ -691,6 +750,8 @@ static void usage(void)
 		"  bench       <copy|compress|decompress> <size> [iters]\n"
 		"  stress      [iters]   compress/decompress roundtrip across all algos, levels and patterns\n"
 		"  elemwise    <op> <dtype> <scalar> <src-file> <dst-file>\n"
+		"  info                  print device version, PCI IDs, and capabilities\n"
+		"  stats       [cid]     print per-context performance counters (default cid=0)\n"
 		"\n"
 		"Options:\n"
 		"  -a <algo>     compression algorithm: zlib (default), lz4, zstd\n"
@@ -738,6 +799,8 @@ int main(int argc, char **argv)
 	else if (strcmp(cmd, "bench")      == 0) rc = cmd_bench(rem, rest);
 	else if (strcmp(cmd, "stress")     == 0) rc = cmd_stress(rem, rest);
 	else if (strcmp(cmd, "elemwise")   == 0) rc = cmd_elemwise(rem, rest);
+	else if (strcmp(cmd, "info")       == 0) rc = cmd_info(rem, rest);
+	else if (strcmp(cmd, "stats")      == 0) rc = cmd_stats(rem, rest);
 	else {
 		fprintf(stderr, "sdxi-cli: unknown subcommand '%s'\n", cmd);
 		usage();

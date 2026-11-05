@@ -118,6 +118,8 @@
 #define SDXI_CTR_STAT_BYTES_DECOMPRESSED 0x09U  /* cumulative DECOMPRESS output bytes */
 #define SDXI_CTR_STAT_NUM_COMPRESS       0x0AU
 #define SDXI_CTR_STAT_NUM_DECOMPRESS     0x0BU
+#define SDXI_CTR_STAT_NUM_ELEMWISE       0x0CU
+#define SDXI_CTR_STAT_BYTES_ELEMWISE     0x0DU
 
 /* Context-table L2 pointer register at BAR0 offset 0x10000.
  * Driver writes FIELD_PREP(GENMASK_ULL(63,12), l2_dma >> 12); emulator recovers

@@ -255,6 +255,8 @@ static ssize_t bar0_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
                 case SDXI_CTR_STAT_BYTES_DECOMPRESSED: val = c->bytes_decompressed; break;
                 case SDXI_CTR_STAT_NUM_COMPRESS:       val = c->num_compress;       break;
                 case SDXI_CTR_STAT_NUM_DECOMPRESS:     val = c->num_decompress;     break;
+                case SDXI_CTR_STAT_NUM_ELEMWISE:       val = c->num_elemwise;       break;
+                case SDXI_CTR_STAT_BYTES_ELEMWISE:     val = c->bytes_elemwise;     break;
                 default: break;
                 }
                 break;

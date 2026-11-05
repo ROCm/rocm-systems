@@ -1185,7 +1185,8 @@ void sdxi_engine_process_cxt(vfu_ctx_t *vfu_ctx, uint64_t l2_gpa,
                 int er = exec_elemwise(vfu_ctx, src_addr, src_len, dst_addr,
                                        dtype, op, scalar, csb_gpa);
                 write_csb = false;
-                if (er < 0) csb_ok = -1;
+                if (er < 0) { csb_ok = -1; }
+                else { cxt->num_elemwise++; cxt->bytes_elemwise += src_len; }
                 break;
             }
             default:
