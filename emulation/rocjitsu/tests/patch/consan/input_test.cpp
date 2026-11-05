@@ -38,6 +38,7 @@ TEST(ConSanInput, Gfx1100UsesConcreteModelOnlyDecoder) {
   ASSERT_NE(binding, nullptr);
   EXPECT_EQ(binding, registry.find_gpu_target_by_code_object_id("gfx1100"));
   EXPECT_EQ(binding, registry.find_gpu_target_by_elf_machine(EF_AMDGPU_MACH_AMDGCN_GFX1100));
+  EXPECT_EQ(binding->gfx_target_version, 110000u);
   EXPECT_FALSE(binding->capabilities.execution_implemented);
 
   std::unique_ptr<Decoder> decoder = Decoder::create(registry, ROCJITSU_CODE_TARGET_GFX1100);
@@ -52,14 +53,14 @@ TEST(ConSanInput, Gfx1100UsesConcreteModelOnlyDecoder) {
 TEST(ConSanInput, Gfx1100RequiresConcreteIdentityBeforeImageValidation) {
   const TargetProfile *profile = target_profile("gfx1100");
   ASSERT_NE(profile, nullptr);
-  TargetProfile selected = *profile;
-  selected.public_id = ROCJITSU_CODE_TARGET_GFX1100;
+  EXPECT_EQ(profile->public_id, ROCJITSU_CODE_TARGET_GFX1100);
 
   // An empty image distinguishes target admission from later ELF validation.
   InputError error;
-  EXPECT_TRUE(build_input_program({}, selected, "kernel", error).failed());
+  EXPECT_TRUE(build_input_program({}, *profile, "kernel", error).failed());
   EXPECT_EQ(error.code, InputErrorCode::InvalidImage);
 
+  TargetProfile selected = *profile;
   selected.public_id = ROCJITSU_CODE_TARGET_INVALID;
   EXPECT_TRUE(build_input_program({}, selected, "kernel", error).failed());
   EXPECT_EQ(error.code, InputErrorCode::UnsupportedTarget);

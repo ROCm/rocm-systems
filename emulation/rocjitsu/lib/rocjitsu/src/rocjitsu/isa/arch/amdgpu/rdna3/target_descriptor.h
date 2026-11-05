@@ -14,12 +14,14 @@ inline constexpr std::array<std::string_view, 1> kTargetAliases = {"gfx1100"};
 inline constexpr std::array<IsaGpuTargetDescription, 1> kModelGpuTargets = {{
     {.public_id = ROCJITSU_CODE_TARGET_GFX1100,
      .code_object_id = "gfx1100",
-     .elf_machine = EF_AMDGPU_MACH_AMDGCN_GFX1100},
+     .elf_machine = EF_AMDGPU_MACH_AMDGCN_GFX1100,
+     .gfx_target_version = 110000},
 }};
 inline constexpr std::array<IsaGpuTargetDescription, 1> kExecutionGpuTargets = {{
     {.public_id = ROCJITSU_CODE_TARGET_GFX1100,
      .code_object_id = "gfx1100",
      .elf_machine = EF_AMDGPU_MACH_AMDGCN_GFX1100,
+     .gfx_target_version = 110000,
      .capabilities = {.execution_implemented = true}},
 }};
 

@@ -6,6 +6,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 
+#include <algorithm>
 #include <array>
 #include <string_view>
 
@@ -64,6 +65,10 @@ inline constexpr std::array kNativeLdsTargets = {
                   .default_wave_size = 32,
                   .wave64 = false},
 };
+
+static_assert(std::ranges::none_of(kNativeLdsTargets, [](const TargetProfile &target) {
+  return target.public_id == ROCJITSU_CODE_TARGET_INVALID;
+}));
 
 inline constexpr const TargetProfile *target_profile(uint32_t id) {
   for (const TargetProfile &target : kNativeLdsTargets)
