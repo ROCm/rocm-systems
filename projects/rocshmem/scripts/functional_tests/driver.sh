@@ -846,8 +846,8 @@ TestColl() {
 
   ExecTest  "teamwavesync"     2       1            1
   ExecTest  "teamwavesync"     2       16           $WAVE_SIZE
-  ExecTest  "teamwavesync"     2       32           $((WAVE_SIZE * 4))
-  ExecTest  "teamwavesync"     2       39           $((WAVE_SIZE * 16))
+  ExecTest  "teamwavesync"     2       32           256
+  ExecTest  "teamwavesync"     2       39           1024
 
   ExecTest  "teamwgsync"       2       1            1
   ExecTest  "teamwgsync"       2       16           64
@@ -871,8 +871,8 @@ TestColl() {
 
   ExecTest  "teamwavebarrier"  2       1            1
   ExecTest  "teamwavebarrier"  2       16           $WAVE_SIZE
-  ExecTest  "teamwavebarrier"  2       32           $((WAVE_SIZE * 4))
-  ExecTest  "teamwavebarrier"  2       39           $((WAVE_SIZE * 16))
+  ExecTest  "teamwavebarrier"  2       32           256
+  ExecTest  "teamwavebarrier"  2       39           1024
 
   ExecTest  "teamwgbarrier"    2       1            1
   ExecTest  "teamwgbarrier"    2       16           64
@@ -1058,16 +1058,16 @@ TestOther() {
 
   ########################### Fence ordering tests #############################
   if [[ $TEST != ro* ]]; then #AIROCSHMEM-418: fence tests not supported on RO
-  ExecTest  "fence_putwavesignal"    2       1     $WAVE_SIZE           1048576
-  ExecTest  "fence_putwavesignal"    2       8     $((WAVE_SIZE * 4))   1048576
-  ExecTest  "fence_putwavesignal"    2       32    $((WAVE_SIZE * 16))  65536
-  ExecTest  "fence_putlargesmall"    2       1     64        4096
-  ExecTest  "fence_putlargesmall"    2       8     256       65536
-  ExecTest  "fence_fanout"           2       1     64        1048576
-  ExecTest  "fence_fanout"           4       4     256       65536
-  ExecTest  "fence_fanout"           8       8     256       65536
-  ExecTest  "fence_putwavenbichunks" 2       1     $WAVE_SIZE           1048576
-  ExecTest  "fence_putwavenbichunks" 2       8     $((WAVE_SIZE * 4))   65536
+  ExecTest  "fence_putwavesignal"    2       1     $WAVE_SIZE 1048576
+  ExecTest  "fence_putwavesignal"    2       8     256        1048576
+  ExecTest  "fence_putwavesignal"    2       32    1024       65536
+  ExecTest  "fence_putlargesmall"    2       1     64         4096
+  ExecTest  "fence_putlargesmall"    2       8     256        65536
+  ExecTest  "fence_fanout"           2       1     64         1048576
+  ExecTest  "fence_fanout"           4       4     256        65536
+  ExecTest  "fence_fanout"           8       8     256        65536
+  ExecTest  "fence_putwavenbichunks" 2       1     $WAVE_SIZE 1048576
+  ExecTest  "fence_putwavenbichunks" 2       8     256        65536
   else echo "Skip:   fence_* (AIROCSHMEM-418: fence tests not supported on RO)"; fi
 }
 
@@ -1083,18 +1083,18 @@ TestTiles() {
   ExecTest  "tile_put_wave_contiguous"  2       1            $WAVE_SIZE   1048576
   ExecTest  "tile_put_wave_rowmajor"    2       1            $WAVE_SIZE   1048576
   ExecTest  "tile_put_wave_colmajor"    2       1            $WAVE_SIZE   1048576
-  ExecTest  "tile_put_wg_contiguous"    2       1            $((WAVE_SIZE * 16)) 1048576
-  ExecTest  "tile_put_wg_rowmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
-  ExecTest  "tile_put_wg_colmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
-  ExecTest  "tile_put_wg_contiguous"    2       4            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_put_wg_contiguous"    2       1            1024         1048576
+  ExecTest  "tile_put_wg_rowmajor"      2       1            1024         1048576
+  ExecTest  "tile_put_wg_colmajor"      2       1            1024         1048576
+  ExecTest  "tile_put_wg_contiguous"    2       4            1024         1048576
   ExecTest  "tile_get_contiguous"       2       1            1            1048576
   ExecTest  "tile_get_rowmajor"         2       1            1            1048576
   ExecTest  "tile_get_colmajor"         2       1            1            1048576
   ExecTest  "tile_get_arbitrary"        2       1            1            16384
-  ExecTest  "tile_get_wg_contiguous"    2       1            $((WAVE_SIZE * 16)) 1048576
-  ExecTest  "tile_get_wg_rowmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
-  ExecTest  "tile_get_wg_colmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
-  ExecTest  "tile_get_wg_contiguous"    2       4            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_get_wg_contiguous"    2       1            1024         1048576
+  ExecTest  "tile_get_wg_rowmajor"      2       1            1024         1048576
+  ExecTest  "tile_get_wg_colmajor"      2       1            1024         1048576
+  ExecTest  "tile_get_wg_contiguous"    2       4            1024         1048576
   ExecTest  "tile_put_1d"               2       1            1            1048576
   ExecTest  "tile_get_1d"               2       1            1            1048576
   ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE   1048576
@@ -1104,22 +1104,22 @@ TestTiles() {
   ExecTest  "tile_get_rowmajor_start_coord"       2       1            1
   ExecTest  "tile_put_wave_rowmajor_start_coord"  2       1            $WAVE_SIZE
   ExecTest  "tile_get_wave_rowmajor_start_coord"  2       1            $WAVE_SIZE
-  ExecTest  "tile_put_wg_rowmajor_start_coord"    2       1            $((WAVE_SIZE * 16))
-  ExecTest  "tile_get_wg_rowmajor_start_coord"    2       1            $((WAVE_SIZE * 16))
+  ExecTest  "tile_put_wg_rowmajor_start_coord"    2       1            1024
+  ExecTest  "tile_get_wg_rowmajor_start_coord"    2       1            1024
   # 3D/4D N-dimensional tile tests (thread, wave, and workgroup scopes)
   ExecTest  "tile_put_3d"                         2       1            1
   ExecTest  "tile_get_3d"                         2       1            1
-  ExecTest  "tile_put_wg_3d"                      2       4            $((WAVE_SIZE * 16))
-  ExecTest  "tile_get_wg_3d"                      2       4            $((WAVE_SIZE * 16))
+  ExecTest  "tile_put_wg_3d"                      2       4            1024
+  ExecTest  "tile_get_wg_3d"                      2       4            1024
   ExecTest  "tile_put_4d"                         2       1            1
   ExecTest  "tile_get_4d"                         2       1            1
-  ExecTest  "tile_put_wg_4d"                      2       4            $((WAVE_SIZE * 16))
-  ExecTest  "tile_get_wg_4d"                      2       4            $((WAVE_SIZE * 16))
+  ExecTest  "tile_put_wg_4d"                      2       4            1024
+  ExecTest  "tile_get_wg_4d"                      2       4            1024
   export ROCSHMEM_MAX_NUM_CONTEXTS=$((1 * 4))
-  ExecTest  "tile_put_wave_3d"                    2       1            $WAVE_SIZE
-  ExecTest  "tile_get_wave_3d"                    2       1            $WAVE_SIZE
-  ExecTest  "tile_put_wave_4d"                    2       1            $WAVE_SIZE
-  ExecTest  "tile_get_wave_4d"                    2       1            $WAVE_SIZE
+  ExecTest  "tile_put_wave_3d"                    2       1            $((WAVE_SIZE * 4))
+  ExecTest  "tile_get_wave_3d"                    2       1            $((WAVE_SIZE * 4))
+  ExecTest  "tile_put_wave_4d"                    2       1            $((WAVE_SIZE * 4))
+  ExecTest  "tile_get_wave_4d"                    2       1            $((WAVE_SIZE * 4))
   unset ROCSHMEM_MAX_NUM_CONTEXTS
   ExecTest  "tile_broadcast"            2       1            1            1048576
   ExecTest  "tile_broadcast"            4       1            1            1048576
@@ -1161,23 +1161,23 @@ TestHeatMapRMA() {
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
-  ExecTest  "get"              2       1            1         v1048576
-  ExecTest  "get"              2       32           1024      v1073741824
-  ExecTest  "waveget"          2       1            $WAVE_SIZE           v1073741824
-  ExecTest  "waveget"          2       2            $WAVE_SIZE           v1073741824
-  ExecTest  "waveget"          2       16           $((WAVE_SIZE * 16))  v1073741824
-  ExecTest  "wgget"            2       1            1024      v1073741824
-  ExecTest  "wgget"            2       16           1024      v1073741824
+  ExecTest  "get"              2       1            1          v1048576
+  ExecTest  "get"              2       32           1024       v1073741824
+  ExecTest  "waveget"          2       1            $WAVE_SIZE v1073741824
+  ExecTest  "waveget"          2       2            $WAVE_SIZE v1073741824
+  ExecTest  "waveget"          2       16           1024       v1073741824
+  ExecTest  "wgget"            2       1            1024       v1073741824
+  ExecTest  "wgget"            2       16           1024       v1073741824
   #ExecTest  "wgget"            2       32           1024      v1073741824
 
-  ExecTest  "put"              2       1            1         v1048576
-  ExecTest  "put"              2       32           1024      v1073741824
-  ExecTest  "waveput"          2       1            $WAVE_SIZE           v1073741824
-  ExecTest  "waveput"          2       2            $WAVE_SIZE           v1073741824
-  ExecTest  "waveput"          2       16           $((WAVE_SIZE * 16))  v1073741824
-  ExecTest  "wgput"            2       1            1024      v1073741824
-  ExecTest  "wgput"            2       16           1024      v1073741824
-  #ExecTest  "wgput"            2       32           1024      v1073741824
+  ExecTest  "put"              2       1            1          v1048576
+  ExecTest  "put"              2       32           1024       v1073741824
+  ExecTest  "waveput"          2       1            $WAVE_SIZE v1073741824
+  ExecTest  "waveput"          2       2            $WAVE_SIZE v1073741824
+  ExecTest  "waveput"          2       16           1024       v1073741824
+  ExecTest  "wgput"            2       1            1024       v1073741824
+  ExecTest  "wgput"            2       16           1024       v1073741824
+  #ExecTest  "wgput"            2       32           1024       v1073741824
 }
 
 TestHeatMapColl() {
