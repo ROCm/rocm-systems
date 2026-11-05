@@ -5,7 +5,6 @@
 
 #include "common/version.hpp"
 
-#include <cstdint>
 #include <string_view>
 
 namespace rocprofsys::library_checker
@@ -29,21 +28,9 @@ check_version(std::string_view library_name, const version& built, const version
  * version of the profiler-hub library loaded at runtime.
  *
  * @throws std::runtime_error on a mismatch.
- *
- * @tparam Storage profiler-hub storage type constructible from two strings and exposing
- * `get_storage_version()`. It is never opened; its constructor only stores the arguments.
- * @tparam CompileVersion Version of profiler-hub the headers were configured against.
  */
-template <typename Storage, version CompileVersion>
 void
-check_profiler_hub_version_mismatch()
-{
-    const auto loaded = Storage{ "", "" }.get_storage_version();
-
-    check_version(
-        "profiler-hub", CompileVersion,
-        version{ .major = loaded.major, .minor = loaded.minor, .patch = loaded.patch });
-}
+check_profiler_hub_version_mismatch();
 
 /**
  * @brief Compare the rocprofiler-sdk version this build was configured against with the
