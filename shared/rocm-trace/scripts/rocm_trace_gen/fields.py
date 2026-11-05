@@ -103,8 +103,10 @@ def _array(ctype: CType, expr: str, name: str, cond: Optional[str]) -> List[Fiel
         return fields
     c_type, tl_type = _scalar_type(element)
     if element.kind == Kind.POINTER:
-        c_type = "const void*"
-        pointer = f"reinterpret_cast<const void* const*>({expr})"
+        # The Windows SDK's TraceLoggingPointerFixedArray takes void* const*; the
+        # LTTng flavour's takes void const* const*, to which this converts.
+        c_type = "void*"
+        pointer = f"reinterpret_cast<void* const*>({expr})"
     else:
         pointer = f"reinterpret_cast<const {c_type}*>({expr})"
     zero = f"zeros<{c_type}, {ctype.count}>()"

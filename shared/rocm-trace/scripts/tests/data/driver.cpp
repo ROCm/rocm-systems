@@ -45,7 +45,7 @@ fakeError_t stub_alloc(void **ptr, size_t size) {
 fakeError_t stub_name(char *out, int len) {
   if (len < 5)
     return fakeErrorInvalidValue;
-  std::strcpy(out, "fake");
+  std::memcpy(out, "fake", 5);
   return fakeSuccess;
 }
 fakeError_t stub_load(const char *, fakeStream_t) { return fakeSuccess; }
@@ -246,11 +246,12 @@ int main() {
 
   // A table from an older runtime: only the entries within its size are
   // wrapped.
-  FakeTable small = stub_table();
-  small.size = offsetof(FakeTable, fakeLoad_fn);
-  rocm_trace_install_FakeTable(&small);
-  check(small.fakeName_fn != stub_name, "entry within size wrapped");
-  check(small.fakeLoad_fn == stub_load, "entry beyond size untouched");
+  // (Not named "small": windows.h defines that as a macro.)
+  FakeTable older = stub_table();
+  older.size = offsetof(FakeTable, fakeLoad_fn);
+  rocm_trace_install_FakeTable(&older);
+  check(older.fakeName_fn != stub_name, "entry within size wrapped");
+  check(older.fakeLoad_fn == stub_load, "entry beyond size untouched");
 
   TraceLoggingUnregister(fake_provider);
   if (failures == 0)
