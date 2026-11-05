@@ -159,9 +159,11 @@ def test_metric_must_be_a_mapping(tree):
 
 
 def test_id_category_must_be_the_file_name(tree):
-    write_text_file(tree / "gfx_base" / "wave.yaml", BASE_METRIC)
+    write_text_file(
+        tree / "gfx_base" / "wave.yaml", BASE_METRIC.replace("valu_util", "waves")
+    )
     assert (
-        "[gfx_base/wave.yaml] compute.valu_util: the id must have the file's category "
+        "[gfx_base/wave.yaml] compute.waves: the id must have the file's category "
         "'wave'" in validate(tree)
     )
 

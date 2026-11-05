@@ -18,8 +18,10 @@ from utils import metric_library
 from utils.metric_library import (
     arch_chain,
     arch_files,
+    iter_library_documents,
     load_metric_library,
 )
+from utils.yaml_inherit_loader import InheritanceError
 
 GPU_SERIES = "MI300"
 
@@ -93,12 +95,19 @@ def test_load_metric_library_reads_variables(tree):
 
 
 def test_duplicate_id_across_files_fails(tree):
-    write_text_file(
+    """The error raises on load and is recorded with load_errors, like a file that does
+    not load."""
+    wave = write_text_file(
         tree / "gfx_c4" / "wave.yaml",
         "compute.valu_util:\n  name: Again\n",
     )
-    with pytest.raises(ValueError, match=r"\['compute.valu_util'\] are defined twice"):
+    message = r"\['compute.valu_util'\] are defined twice"
+    with pytest.raises(InheritanceError, match=message):
         load_metric_library(tree, "gfx_c4")
+    load_errors = {}
+    documents = dict(iter_library_documents(tree, "gfx_c4", load_errors))
+    assert list(documents) == [tree / "gfx_c4" / "compute.yaml"]
+    assert list(load_errors) == [wave]
 
 
 # =============================================================================
@@ -124,6 +133,12 @@ def test_counters_come_from_formula_peak_and_builtin_variables(tree):
         "SQ_BUSY_CYCLES",
     } <= selected
     assert "TCC_HIT_sum" not in selected
+
+
+def test_counters_of_unknown_metric_ids_fail(tree):
+    library = load_metric_library(tree, "gfx_c4")
+    with pytest.raises(ValueError, match=r"for gfx_c4: \['l2.foo'\]"):
+        library.get_counters_for_metrics(["compute.valu_util", "l2.foo"], GPU_SERIES)
 
 
 # =============================================================================

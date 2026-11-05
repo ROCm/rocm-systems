@@ -11,7 +11,7 @@ an "inherit" key. variables.yaml holds the built-in variables.
 Only tests and tools use this module so far. At the cutover it becomes the source of
 metrics for analyze and profile, so its scope grows past loading. The file contents are
 checked by tools/validate_metric_library.py; loading only rejects an id that two files
-define.
+define. Every load failure raises InheritanceError.
 """
 
 from pathlib import Path
@@ -94,7 +94,8 @@ def load_metric_library(metric_dir: Path, arch: str) -> "MetricLibrary":
         arch: A GPU arch.
 
     Returns:
-        The arch's metrics and built-in variables.
+        The arch's metrics and built-in variables. Every caller shares the cached
+        library, so callers must not change it; read-only views come with the cutover.
     """
     key = (str(Path(metric_dir).resolve()), canonical_config_arch(arch))
     if key not in MetricLibrary._cache:
@@ -109,11 +110,20 @@ def iter_library_documents(
 ) -> Iterator[Tuple[Path, Dict[str, Any]]]:
     """Yield each library file of arch with its document, merged through its chain.
 
-    A file that does not load raises, or with load_errors is recorded there and skipped.
+    A file that does not load, or that defines a metric id an earlier file defines,
+    raises, or with load_errors is recorded there and skipped.
     """
+    metric_ids: Set[str] = set()
     for path in arch_files(metric_dir, arch).values():
         try:
             document = load_inherited_yaml(path)
+            if path.name != VARIABLES_FILENAME:
+                duplicates = sorted(set(document) & metric_ids)
+                if duplicates:
+                    raise InheritanceError(
+                        f"{path}: metric ids {duplicates} are defined twice"
+                    )
+                metric_ids.update(document)
         except (InheritanceError, yaml.YAMLError) as error:
             if load_errors is None:
                 raise
@@ -129,11 +139,8 @@ def _read_metric_library(metric_dir: Path, arch: str) -> "MetricLibrary":
         if path.name == VARIABLES_FILENAME:
             variables = document
             continue
-        duplicates = sorted(set(document) & set(metrics))
-        if duplicates:
-            raise ValueError(f"{path}: metric ids {duplicates} are defined twice")
         metrics.update(document)
-    return MetricLibrary(metrics, variables)
+    return MetricLibrary(canonical_config_arch(arch), metrics, variables)
 
 
 class MetricLibrary:
@@ -142,15 +149,28 @@ class MetricLibrary:
     _cache: Dict[Tuple[str, str], "MetricLibrary"] = {}
 
     def __init__(
-        self, metrics: Dict[str, Dict[str, Any]], variables: Dict[str, Dict[str, Any]]
+        self,
+        arch: str,
+        metrics: Dict[str, Dict[str, Any]],
+        variables: Dict[str, Dict[str, Any]],
     ) -> None:
+        self.arch = arch
         self.metrics = metrics
         self.variables = variables
 
     def get_counters_for_metrics(
         self, metric_ids: List[str], gpu_series: str
     ) -> Set[str]:
-        """Return the counters the metrics need, from formula and peak."""
+        """Return the counters the metrics need, from formula and peak.
+
+        Raises ValueError, naming the ids and the arch, if an id is not a metric of the
+        arch.
+        """
+        unknown = [
+            metric_id for metric_id in metric_ids if metric_id not in self.metrics
+        ]
+        if unknown:
+            raise ValueError(f"Unknown metric ids for {self.arch}: {unknown}")
         texts = [
             str(self.metrics[metric_id][field])
             for metric_id in metric_ids
