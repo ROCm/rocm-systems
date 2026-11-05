@@ -62,7 +62,7 @@ RaceDetector::allocateEventId(WaveId waveId, InstructionSnapshot instruction, Me
     if (isToLds(type)) {
       ldsWriteEvents.push_back(eid);
       adjustByteCounts(ivs, byteWriteCounts, +1, orderedWave);
-    } else if (type == MemoryEventType::LDS_TO_VGPR) {
+    } else if (isFromLds(type)) {
       ldsReadEvents.push_back(eid);
       adjustByteCounts(ivs, byteReadCounts, +1, orderedWave);
     }
@@ -81,7 +81,7 @@ void RaceDetector::retireEvent(EventId eventId) {
   if (isToLds(type)) {
     removeFromUnorderedList(ldsWriteEvents, eventId);
     adjustByteCounts(events_.ldsIntervals(eventId), byteWriteCounts, -1);
-  } else if (type == MemoryEventType::LDS_TO_VGPR) {
+  } else if (isFromLds(type)) {
     removeFromUnorderedList(ldsReadEvents, eventId);
     adjustByteCounts(events_.ldsIntervals(eventId), byteReadCounts, -1);
   }
@@ -108,8 +108,10 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
         continue;
       }
     }
-    if (events_.ldsIntervals(eventId).overlapsRange(addr, addr + nBytes)) {
-      raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, false, workgroupId, eventId});
+    // Report a byte both accesses touch, not the start of this access.
+    if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes)) {
+      raceHandler(
+          {RaceViolation::Space::LDS, *byte, wave.value, lane, false, workgroupId, eventId});
     }
   }
 }
@@ -135,8 +137,9 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
       if (orderedWithCurrent || events_.status(eventId) == EventStatus::WAVE_COMPLETE)
         continue;
     }
-    if (events_.ldsIntervals(eventId).overlapsRange(addr, addr + nBytes)) {
-      raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, true, workgroupId, eventId});
+    // Report a byte both accesses touch, not the start of this access.
+    if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes)) {
+      raceHandler({RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, eventId});
     }
   }
 }
