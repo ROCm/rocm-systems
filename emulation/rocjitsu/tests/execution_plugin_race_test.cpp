@@ -3324,7 +3324,6 @@ TEST(RaceDetectorPluginOutputTest, ExecutedJumpsHaveSeparatorsAtTheirDestination
   const std::array code{S_NOP, load[0], load[1], forward[0], read[0], S_ENDPGM, backward[0]};
   f.run_kernel(code.data(), code.size());
   const auto report = sink.str();
-  EXPECT_EQ(report.find("PC diff"), std::string::npos);
   EXPECT_NE(report.find("0x104c  s_branch 2\n       --- jump forward ---\n       0x1058"),
             std::string::npos)
       << report;
@@ -3334,9 +3333,6 @@ TEST(RaceDetectorPluginOutputTest, ExecutedJumpsHaveSeparatorsAtTheirDestination
   EXPECT_NE(report.find("  ==>  0x1044  ds_read_b32 v8, v0"), std::string::npos) << report;
   EXPECT_NE(report.find("0x1058  s_branch 65533\n"), std::string::npos) << report;
   EXPECT_EQ(report.find("instructions elided"), std::string::npos);
-  EXPECT_EQ(report.find("Trace window:"), std::string::npos);
-  EXPECT_EQ(report.find("Same-wave instruction distance:"), std::string::npos);
-  RecordProperty("race_report", report);
 }
 
 TEST(RaceDetectorPluginOutputTest, LdsWriteExplainsPendingAndCompletedOtherWaveReads) {

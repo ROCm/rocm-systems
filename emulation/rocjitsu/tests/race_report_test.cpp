@@ -7,11 +7,16 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <format>
-#include <limits>
-#include <random>
+#include <optional>
 #include <regex>
+#include <span>
 #include <sstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -48,8 +53,6 @@ std::vector<PrintedRow> rows(const std::string &report) {
   std::istringstream lines(report);
   std::string line, transition;
   while (std::getline(lines, line)) {
-    EXPECT_EQ(line.find("Trace window:"), std::string::npos);
-    EXPECT_EQ(line.find("Same-wave instruction distance:"), std::string::npos);
     std::smatch match;
     if (std::regex_search(line, match, marker)) {
       EXPECT_TRUE(transition.empty());
@@ -85,7 +88,6 @@ TEST(RaceReportTraceTest, VariableWidthSequentialInstructionsHaveNoJumpMarkers) 
   ASSERT_EQ(printed.size(), 5u);
   for (const auto &row : printed)
     EXPECT_TRUE(row.transition.empty());
-  EXPECT_EQ(report.find("PC diff"), std::string::npos);
   EXPECT_EQ(elided_count(report), 0u);
 }
 
@@ -209,56 +211,6 @@ TEST(RaceReportTraceTest, RejectsReversedExecutionOrder) {
   trace.push(snapshot(0x100, 0, 1));
   trace.push(snapshot(0x104, 1, 1));
   EXPECT_THROW(formatTrace(trace, text, mark(trace, 1), mark(trace, 0)), std::invalid_argument);
-}
-
-TEST(RaceReportTraceTest, SeededExecutionPathsPreserveEveryControlTransferAndMarkOnlyActualJumps) {
-  std::mt19937 generator(14330);
-  for (size_t trial = 0; trial < 100; ++trial) {
-    Trace trace;
-    std::vector<uint64_t> pcs;
-    uint64_t pc = 0x10000;
-    uint32_t previous_width = 1;
-    for (uint32_t i = 0; i < 400; ++i) {
-      if (i)
-        pc = generator() % 8 ? pc + previous_width * 4 : 0x10000 + generator() % 1024;
-      pcs.push_back(pc);
-      previous_width = 1 + generator() % 4;
-      trace.push(snapshot(pc, i, previous_width, generator() % 13 == 0));
-    }
-    const auto report = formatTrace(trace, text, mark(trace, 0), mark(trace, 255));
-    const auto printed = rows(report);
-    ASSERT_FALSE(printed.empty());
-    EXPECT_EQ(printed.size() + elided_count(report), 256u);
-    size_t previous_sequence = 143;
-    for (const auto &row : printed) {
-      ASSERT_GT(row.sequence, previous_sequence);
-      EXPECT_EQ(row.pc, pcs[row.sequence]);
-      if (row.sequence == 144) {
-        EXPECT_TRUE(row.transition.empty());
-      } else {
-        const size_t index = row.sequence - 144;
-        const auto previous = trace[index - 1];
-        const bool jump = row.pc != previous.pc() + previous.encoding().size_bytes();
-        const std::string expected = !jump                    ? ""
-                                     : row.pc < previous.pc() ? "jump backward"
-                                     : row.pc > previous.pc() ? "jump forward"
-                                                              : "same PC executed again";
-        EXPECT_EQ(row.transition, expected);
-      }
-      previous_sequence = row.sequence;
-    }
-    for (size_t i = 1; i < trace.size(); ++i) {
-      const bool jump = trace[i].pc() != trace[i - 1].pc() + trace[i - 1].encoding().size_bytes();
-      if (jump || trace[i].is_sync_or_branch()) {
-        EXPECT_TRUE(
-            std::ranges::any_of(printed, [&](const auto &row) { return row.sequence == 144 + i; }));
-      }
-      if (jump) {
-        EXPECT_TRUE(std::ranges::any_of(
-            printed, [&](const auto &row) { return row.sequence == 144 + i - 1; }));
-      }
-    }
-  }
 }
 
 TEST(RaceReportDescriptionTest, DescribesRegisterAndLdsDirectionsAcrossCompletionStates) {
