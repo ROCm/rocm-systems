@@ -44,6 +44,8 @@
 #include <cassert>
 #include <chrono>
 #include <thread>
+#include <condition_variable>
+#include <mutex>
 #include <cstring>
 #include <optional>
 #include <regex>
@@ -2093,6 +2095,105 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
   return HSA_STATUS_SUCCESS;
 }
 
+namespace {
+// Watches async signals that have no KFD event (IPC signals, DefaultSignals,
+// or interrupt signals created after the KFD events ran out) while the
+// async-events thread sleeps in the KFD wait on the interrupt-backed signals.
+// When one of them meets its condition it notifies the wake signal, the same
+// way SetAsyncSignalHandler() does, and the async-events thread then rescans
+// and runs the handler as usual. The entries are only read while armed; the
+// async-events thread disarms under the lock before it touches the list again.
+class PollSentinel {
+ public:
+  struct Entry {
+    hsa_signal_t signal;
+    hsa_signal_condition_t cond;
+    hsa_signal_value_t value;
+  };
+
+  explicit PollSentinel(hsa_signal_t wake) : wake_(wake) {}
+
+  ~PollSentinel() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      exit_ = true;
+    }
+    cv_.notify_one();
+    if (thread_.joinable()) thread_.join();
+  }
+
+  // False if the sentinel thread could not be started; the caller then polls.
+  bool Usable() const { return !failed_; }
+
+  bool Arm(std::vector<Entry>& entries) {
+    if (entries.empty()) return true;
+    if (!thread_.joinable()) {
+      try {
+        thread_ = std::thread([this] { Loop(); });
+      } catch (...) {
+        failed_ = true;
+        return false;
+      }
+    }
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      entries_.swap(entries);
+      armed_ = true;
+      ++generation_;
+    }
+    cv_.notify_one();
+    return true;
+  }
+
+  void Disarm() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      armed_ = false;
+    }
+    cv_.notify_one();
+  }
+
+ private:
+  void Loop() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    while (!exit_) {
+      cv_.wait(lock, [this] { return exit_ || armed_; });
+      // Each arming starts the nap at the floor again; the nap waits on the
+      // condition variable so Arm/Disarm cut it short.
+      uint64_t gen = generation_;
+      int nap_us = kPollNapFloorUs;
+      while (armed_ && !exit_) {
+        if (generation_ != gen) {
+          gen = generation_;
+          nap_us = kPollNapFloorUs;
+        }
+        for (const auto& e : entries_) {
+          if (CheckSignalCondition(hsa_signal_handle(e.signal)->LoadRelaxed(), e.cond, e.value)) {
+            armed_ = false;
+            hsa_signal_handle(wake_)->StoreReleaseAndNotify(1);
+            break;
+          }
+        }
+        if (!armed_) break;
+        cv_.wait_for(lock, std::chrono::microseconds(nap_us),
+                     [this, gen] { return exit_ || !armed_ || generation_ != gen; });
+        nap_us = NextPollNapUs(nap_us, kPollSentinelNapCeilingUs);
+      }
+    }
+  }
+
+  hsa_signal_t wake_;
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  std::vector<Entry> entries_;
+  uint64_t generation_ = 0;
+  bool armed_ = false;
+  bool exit_ = false;
+  bool failed_ = false;
+  std::thread thread_;
+};
+}  // namespace
+
 void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   AsyncEventsInfo* eventsInfo = reinterpret_cast<AsyncEventsInfo*>(_eventsInfo);
 
@@ -2104,6 +2205,10 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   auto& event_age_map = eventsInfo->events.age_by_event_;
   uint32_t unique_evts = 0;
   auto hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
+  // Signals of the current batch that have no KFD event.
+  std::vector<size_t> poll_only;
+  std::vector<PollSentinel::Entry> sentinel_entries;
+  PollSentinel sentinel(async_events_control_.wake);
 
   auto processEvent = [&](size_t index, hsa_signal_value_t value, bool wait_any) {
     // No error or timeout occured, process the handlers
@@ -2125,9 +2230,9 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   // Prepares a list of events for a wait inside KFD
   auto PrepareInterrupt = [&](size_t idx) {
     HsaEvent* hsa_event = hsa_signals[idx]->EopEvent();
-    // If any signal doesn't have an interrupt, then switch to polling
+    // A signal without a KFD event stays out of the KFD wait list; the poll
+    // sentinel watches it instead of forcing the whole batch into polling.
     if (hsa_event == nullptr) {
-      unique_evts = 0;
       return false;
     } else {
       if (hsa_events.size() <= unique_evts) {
@@ -2222,6 +2327,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
         }
         bool interrupt_wait = false;
         unique_evts = 0;
+        poll_only.clear();
 
         // Check remaining signals before sleeping.
         for (size_t i = index; i < async_events_.Size(); i++) {
@@ -2243,15 +2349,20 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           // If the current signal isn't complete and polling is disabled, then prepare KFD wait for
           // an interrupt
           if (!finish && !polling) {
-            interrupt_wait = PrepareInterrupt(i);
-            // If the interrupt was disabled, then force polling
-            if (!interrupt_wait) {
-              polling = true;
-              finish = false;
-            }
+            if (!PrepareInterrupt(i)) poll_only.push_back(i);
           } else if (unique_evts > 0) {
             unique_evts = 0;
-            interrupt_wait = false;
+          }
+        }
+        // Wait in KFD on the interrupt-backed signals while the poll sentinel
+        // watches the others. If the sentinel thread could not be started, fall
+        // back to the existing polling behaviour below, unchanged.
+        if (!finish && !polling) {
+          if (unique_evts > 0 && (poll_only.empty() || sentinel.Usable())) {
+            interrupt_wait = true;
+          } else if (unique_evts > 0 || !poll_only.empty()) {
+            polling = true;
+            unique_evts = 0;
           }
         }
         // If nothing was complete and an interrupt wait was requested, then call KFD
@@ -2294,7 +2405,16 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
 
             if (!finish) {
-              WaitForInterrupt();
+              sentinel_entries.clear();
+              for (size_t p : poll_only)
+                sentinel_entries.push_back(
+                    {async_events_.signal_[p], async_events_.cond_[p], async_events_.value_[p]});
+              // If the sentinel cannot start, skip the KFD wait; the next pass
+              // sees Usable() == false and polls.
+              if (sentinel.Arm(sentinel_entries)) {
+                WaitForInterrupt();
+                sentinel.Disarm();
+              }
             }
 
             for (size_t e = 0; e < async_events_.Size(); e++) {

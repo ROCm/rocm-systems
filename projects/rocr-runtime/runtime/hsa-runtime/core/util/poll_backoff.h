@@ -35,6 +35,11 @@ inline constexpr int kPollNapFloorUs = 20;
 // interrupt-backed handlers batched onto that same thread.
 inline constexpr int kPollNapCeilingUs = 2000;
 
+// Ceiling (microseconds) for the poll sentinel in AsyncEventsLoop, which
+// watches only the signals that have no KFD event while the async-events
+// thread sleeps in the KFD wait on the interrupt-backed ones.
+inline constexpr int kPollSentinelNapCeilingUs = 200;
+
 // Given the current nap duration, return the next one: double it, capped at
 // ceiling_us. Saturating at the ceiling is a fixed point, so repeated calls
 // converge to and stay at ceiling_us. The multiply is only evaluated when
