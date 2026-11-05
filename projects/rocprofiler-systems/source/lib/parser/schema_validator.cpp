@@ -251,6 +251,12 @@ is_valid_value(const schema_param& param, std::string_view value)
     return accepts_text(param, value);
 }
 
+std::string
+invalid_value_message(std::string_view value, std::string_view param_id)
+{
+    return fmt::format("invalid value '{}' for parameter '{}'", value, param_id);
+}
+
 std::vector<violation>
 validate_values(const schema& config_schema, const value_map_t& values)
 {

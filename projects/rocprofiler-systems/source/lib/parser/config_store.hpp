@@ -4,6 +4,7 @@
 #pragma once
 
 #include "parser/schema.hpp"
+#include "parser/value_text.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -44,16 +45,18 @@ enum class config_source : std::uint8_t
  * Values for the parameters of one schema.
  *
  * Construct a store with its schema. set() accepts only parameter ids and textual
- * values the schema allows, and records which source supplied the value.
- * get_as<T>() converts a stored value when T is that parameter's type: bool,
- * int64_t, double, string, or vector<string> for an enumeration_list. An integer
- * value is not returned as a double.
+ * values the schema allows, parses each value once, and records which source
+ * supplied it. get() returns canonical text. get_as<T>() returns the stored value
+ * when T is that parameter's type: bool, int64_t, double, string, or
+ * vector<string> for an enumeration_list. An integer value is not returned as a
+ * double.
  *
- * set() checks the value, then locks to store it. Do not call reset() at the same
+ * set() parses the value, then locks to store it. Do not call reset() at the same
  * time as set(), get(), or on_change(). Callbacks run in registration order after
- * the value is stored and the lock is released. A callback may call set(). A
- * callback that throws leaves the new value stored and skips later callbacks for
- * that change. clear() drops stored values and does not run callbacks.
+ * the value is stored and the lock is released. A callback receives the canonical
+ * text and may call set(). A callback that throws leaves the new value stored and
+ * skips later callbacks for that change. clear() drops stored values and does not
+ * run callbacks.
  */
 class config_store
 {
@@ -68,8 +71,8 @@ public:
     /**
      * Store a textual value for a known parameter.
      * @throws std::runtime_error if the id is unknown or the value is not valid.
-     * Change callbacks run after the value is stored, and only when the text changes.
-     * A callback may read the store.
+     * Change callbacks run after the value is stored, and only when the parsed
+     * value changes. A callback may read the store.
      */
     void set(std::string_view param_id, std::string_view value, config_source source);
 
@@ -100,19 +103,12 @@ private:
 
     struct stored_value
     {
-        std::string   value;
-        config_source source = config_source::default_value;
-    };
-
-    struct stored_text
-    {
-        param_type  type = param_type::string;
-        std::string text;
-        std::string separator;
+        config_value_t value;
+        config_source  source = config_source::default_value;
     };
 
     [[nodiscard]] std::shared_ptr<const schema> locked_schema() const;
-    [[nodiscard]] std::optional<stored_text>    lookup(std::string_view param_id) const;
+    [[nodiscard]] std::optional<stored_value>   lookup(std::string_view param_id) const;
 
     std::shared_ptr<const schema>                                      m_schema;
     mutable std::shared_mutex                                          m_mutex;

@@ -26,6 +26,10 @@ namespace rocprofsys::parser
 [[nodiscard]] bool
 is_valid_value(const schema_param& param, std::string_view value);
 
+/// Shared wording for a value the catalog refuses.
+[[nodiscard]] std::string
+invalid_value_message(std::string_view value, std::string_view param_id);
+
 struct violation
 {
     std::string              message;
