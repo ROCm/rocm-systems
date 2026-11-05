@@ -105,13 +105,14 @@ protected:
     processor_.set_gpu_vm(&gpu_vm_);
     factory_ = GetParam() == QueueType::Compute ? make_compute_queue_binding_factory(processor_)
                                                 : make_sdma_queue_binding_factory(scheduler_);
-    request_ = {.identity = {.address_space = address_space_, .process_id = 7, .queue_id = 11},
-                .ring = {.base_address = 0x100, .size_bytes = 64, .consumer_pointer_address = 0x80},
-                .doorbell = {},
-                .binding_factory = factory_,
-                .type = GetParam(),
-                .packet_format = GetParam() == QueueType::Compute ? QueuePacketFormat::Pm4
-                                                                  : QueuePacketFormat::Sdma};
+    request_.identity.address_space = address_space_;
+    request_.identity.process_id = 7;
+    request_.identity.queue_id = 11;
+    request_.ring = {.base_address = 0x100, .size_bytes = 64, .consumer_pointer_address = 0x80};
+    request_.binding_factory = factory_;
+    request_.type = GetParam();
+    request_.packet_format =
+        GetParam() == QueueType::Compute ? QueuePacketFormat::Pm4 : QueuePacketFormat::Sdma;
   }
 
   GpuVm gpu_vm_;
