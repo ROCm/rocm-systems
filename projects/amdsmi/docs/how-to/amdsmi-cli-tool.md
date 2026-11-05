@@ -1515,7 +1515,7 @@ GPU: 0
         MAX_BANDWIDTH: 5325 GB/s
     CACHE_INFO:
         CACHE_0:
-            CACHE_ACRONYM: L1D
+            CACHE_ACRONYM: vL1D
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
             CACHE_SIZE: 32 KB
             CACHE_LEVEL: 1
@@ -1539,7 +1539,7 @@ GPU: 0
             NUM_CACHE_INSTANCE: 12
             TOTAL_CACHE_SIZE: 768 KB
         CACHE_3:
-            CACHE_ACRONYM: L1D
+            CACHE_ACRONYM: sL1D
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
             CACHE_SIZE: 16 KB
             CACHE_LEVEL: 1
@@ -1547,7 +1547,7 @@ GPU: 0
             NUM_CACHE_INSTANCE: 108
             TOTAL_CACHE_SIZE: 1728 KB
         CACHE_4:
-            CACHE_ACRONYM: L1D
+            CACHE_ACRONYM: sL1D
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
             CACHE_SIZE: 16 KB
             CACHE_LEVEL: 1
