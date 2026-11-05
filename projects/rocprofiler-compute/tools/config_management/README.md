@@ -23,8 +23,6 @@ rocprofiler-compute/
 │       ├── gfx908/
 │       │   └── 0000_top_stats.yaml
 │       ├── gfx90a/
-│       ├── gfx940/
-│       ├── gfx941/
 │       ├── gfx942/
 │       ├── gfx950/
 │       ├── gfx115x/                     # RDNA 3.5 shared analysis configs
