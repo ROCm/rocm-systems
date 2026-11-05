@@ -6,6 +6,40 @@
 use super::*;
 use crate::api::signal::asynchronous::*;
 
+#[test]
+fn satisfied_single_wait_does_not_take_lifecycle_mutex() {
+    let slot = Arc::new(AmdSignal::user(7));
+    let handle = HsaSignal {
+        handle: Arc::as_ptr(&slot) as u64,
+    };
+    reserve_wait_signal_slots(1).unwrap();
+    publish_wait_signal(handle.handle as usize);
+    let lifecycle = lock().unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        // SAFETY: The registry and Arc keep the slot mapped for this load.
+        let value = unsafe {
+            signal_wait(
+                handle,
+                SIGNAL_CONDITION_EQ,
+                7,
+                0,
+                WAIT_STATE_ACTIVE,
+                Ordering::Acquire,
+            )
+        };
+        sender.send(value).unwrap();
+    });
+    let result = receiver.recv_timeout(Duration::from_secs(1));
+    drop(lifecycle);
+    worker.join().unwrap();
+    WAIT_SIGNAL_HANDLES
+        .write()
+        .unwrap()
+        .remove(&(handle.handle as usize));
+    assert_eq!(result.unwrap(), 7);
+}
+
 /// Creates a signal batch and returns its live members.
 fn batch_fixture(count: usize) -> (SignalState, HsaAmdSignalBatch, Vec<HsaSignal>) {
     let slots: Box<[AmdSignal]> = (0..count)
@@ -713,6 +747,93 @@ fn shutdown_cancels_unbounded_multi_signal_waits() {
             u32::MAX
         );
     }
+}
+
+#[test]
+fn closing_admission_releases_unbounded_waits() {
+    let gate = Arc::new(crate::runtime::InFlightTracker::new());
+    let stop = Arc::new(AtomicBool::new(false));
+    let signal = Arc::new(AmdSignal::user(3));
+    let (ready_send, ready_recv) = std::sync::mpsc::channel();
+    let (done_send, done_recv) = std::sync::mpsc::channel();
+    let mut workers = Vec::new();
+    for mode in 0..3 {
+        let gate = gate.clone();
+        let stop = stop.clone();
+        let signal = signal.clone();
+        let ready_send = ready_send.clone();
+        let done_send = done_send.clone();
+        workers.push(std::thread::spawn(move || {
+            let _lease = gate.enter().unwrap();
+            let handle = HsaSignal {
+                handle: Arc::as_ptr(&signal) as u64,
+            };
+            let conditions = [SIGNAL_CONDITION_EQ];
+            let values = [4];
+            notify_first_unsatisfied_poll(ready_send);
+            let result = if mode == 0 {
+                signal_wait_open(
+                    signal.as_ref(),
+                    None,
+                    &stop,
+                    SignalWaitConfig {
+                        condition: conditions[0],
+                        compare_value: values[0],
+                        timeout_hint: u64::MAX,
+                        wait_state_hint: WAIT_STATE_BLOCKED,
+                        order: Ordering::Acquire,
+                    },
+                ) as u32
+            } else {
+                // SAFETY: The Arc retains the signal through this wait.
+                let mut entries = unsafe { collect_wait_signals(&[handle], |_| true) };
+                if mode == 1 {
+                    // SAFETY: Slices and signal storage remain live.
+                    unsafe {
+                        signal_wait_any_open(
+                            &entries,
+                            &conditions,
+                            &values,
+                            u64::MAX,
+                            WAIT_STATE_BLOCKED,
+                            std::ptr::null_mut(),
+                            &stop,
+                        )
+                    }
+                } else {
+                    // SAFETY: Slices and signal storage remain live.
+                    unsafe {
+                        signal_wait_all_open(
+                            &mut entries,
+                            &conditions,
+                            &values,
+                            u64::MAX,
+                            WAIT_STATE_BLOCKED,
+                            std::ptr::null_mut(),
+                            &stop,
+                        )
+                    }
+                }
+            };
+            done_send.send((mode, result)).unwrap();
+        }));
+    }
+    for _ in 0..3 {
+        ready_recv.recv_timeout(Duration::from_secs(1)).unwrap();
+    }
+    assert!(done_recv.try_recv().is_err());
+    gate.close();
+    stop.store(true, Ordering::Release);
+    gate.wait_idle();
+    let mut results = [u32::MAX; 3];
+    for _ in 0..3 {
+        let (mode, result) = done_recv.recv_timeout(Duration::from_secs(1)).unwrap();
+        results[mode] = result;
+    }
+    for worker in workers {
+        worker.join().unwrap();
+    }
+    assert_eq!(results, [3, u32::MAX, u32::MAX]);
 }
 
 #[test]

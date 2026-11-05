@@ -63,6 +63,7 @@ set(SRC_FILES
   device/hierarchical_shuffle.h
   device/network/unpack/unpack.h
   device/network/unpack/unpack_defs.h
+  device/ll128Layout.h
   device/onerank.cu
   device/op128.h
   device/primitives.h
@@ -87,8 +88,11 @@ set(SRC_FILES
   device/symmetric/reduce_scatter_gin.cuh
   device/tdm/asyncCopy.h
   device/tdm/cachePolicy.h
+  device/tdm/ll128Tdm.h
   device/tdm/syncPolicy.h
   device/tdm/tdmCopy.h
+  device/tdm/tdmReduce.h
+  device/uniform.h
   algorithms/dda/device/device_buffer.cc
   diagnostics.cc
   diagnostics.h
@@ -165,6 +169,7 @@ set(SRC_FILES
   algorithms/gin/gin_all_reduce.h
   algorithms/gin/gin_all_reduce_policy.h
   algorithms/gin/sdma/all_reduce_gin_sdma.h
+  algorithms/gin/sdma/gin_scatter_reduce.h
   include/alloc.h
   include/allocator.h
   include/alltoallv_meta.h
@@ -228,6 +233,7 @@ set(SRC_FILES
   include/graph.h
   include/group.h
   include/hip_rocm_version_info.h
+  include/ib_gid_utils.h
   include/ibvcore.h
   include/ibvsymbols.h
   include/ibvwrap.h
@@ -587,6 +593,7 @@ set(SRC_FILES
   transport/net_ib/wqe_lat_mon.cc
   transport/net_ib/wqe_lat_mon.h
   transport/net_ib_cast/net_ib_cast_inspect.h
+  transport/net_ib_cast/net_ib_qp_sharing_inspect.h
   transport/net_ib_cast/net_ib_fault_inject.h
   transport/net_ib_gid_inspect.h
   transport/net_ib_limits.h
@@ -632,6 +639,7 @@ if(ENABLE_ROCSHMEM_GIN)
   list(APPEND SRC_FILES
     src/gin/gin_plugin_rocshmem_gda.cc
     src/gin/gin_rocshmem_gda_factory.cc
+    src/gin/gin_rocshmem_gda_inspect.h
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_sdma_factory.cc
     src/gin/gin_anvil_ipc_table_host.cc
@@ -880,10 +888,6 @@ add_dependencies(copy_nccl_device_headers nccl_device_header_symlinks)
 
 # Generate device/host tables and all the collective functions that are going to be in librccl.so
 #==================================================================================================
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
-if (NOT Python3_FOUND)
-  message(FATAL_ERROR "RCCL requires Python3 for generating host/device tables")
-endif()
 
 set(GEN_DIR "${HIPIFY_DIR}/gensrc")
 set(GEN_SYM_DIR "${GEN_DIR}/symmetric")
@@ -1229,6 +1233,9 @@ if (ENABLE_ROCSHMEM_GIN)
     add_custom_target(copy_rocshmem_sdma_sources DEPENDS ${_GIN_SDMA_OUTPUTS})
     add_dependencies(copy_rocshmem_headers copy_rocshmem_sdma_sources)
     target_sources(rccl PRIVATE "${_GIN_SDMA_DIR}/anvil.cpp")
+    # Apps that link librocshmem.a carry their own anvil.cpp. Keep this copy private even when
+    # librccl exports its symbols, or both copies destroy the same globals at exit.
+    set_source_files_properties("${_GIN_SDMA_DIR}/anvil.cpp" PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
     # src/gin/ so host log.hpp wins over the device shim for anvil.cpp.
     target_include_directories(rccl BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/gin")
 
@@ -1661,10 +1668,10 @@ if(ENABLE_ROCSHMEM)
   # of the final librccl.so link.
   target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
+  # Full target IDs, not bare names
   set(_rocshmem_offload_arch_flags "")
   foreach(_gpu_raw ${GPU_TARGETS})
-    string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
-    list(APPEND _rocshmem_offload_arch_flags "--offload-arch=${_gpu}")
+    list(APPEND _rocshmem_offload_arch_flags "--offload-arch=${_gpu_raw}")
   endforeach()
   list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
   target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
