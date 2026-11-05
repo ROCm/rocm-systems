@@ -1586,7 +1586,7 @@ TEST_F(RasClientSupportMicrotest, RunComms_JsonFormat_EarlyExit_SkipsTextLogic) 
   struct rasClient* client = MakeClient();
   client->outputFormat = RAS_OUTPUT_JSON;
   client->status = RAS_CLIENT_COMMS;
-  struct rasCollective* coll = MakeCollective(OneEmptyComm(), {MakeAddr(4000)});
+  struct rasCollective* coll = MakeCollective(BuildRasCollComms({MakeCommSpec(1, {RankSpec{0, 0}})}), {MakeAddr(4000)});
   client->coll = coll;
 
   rasClientRun(client, nullptr);
@@ -1626,40 +1626,45 @@ TEST_F(RasClientSupportMicrotest, RunComms_MismatchedFwdCounts_ReturnsInternalEr
 
 namespace {
 
-// Malformed RAS_COLL_COMMS records are rejected before rasClientRunComms sizes or indexes anything with
-// them. Like the arm above, it returns with client->coll still set, so rasClientRun frees both.
+// Rejection must happen while client->coll is still set, so rasClientRun frees the collective exactly once.
 void ExpectRunCommsRejects(std::vector<char> data, int nPeers = 1) {
   std::vector<union ncclSocketAddress> peers;
   for (int i = 0; i < nPeers; i++) peers.push_back(MakeAddr(static_cast<uint16_t>(4000 + i)));
   struct rasClient* client = MakeClient();
   client->status = RAS_CLIENT_COMMS;
   client->coll = MakeCollective(std::move(data), peers);
+  const int collFreeCalls = g_collFreeCalls;
   bool closed = false;
   EXPECT_EQ(rasClientRun(client, &closed), ncclInternalError);
   EXPECT_TRUE(closed);
-}
-
-RankSpec MakeRankSpec(int commRank, int peerIdx) {
-  RankSpec r;
-  r.commRank = commRank;
-  r.peerIdx = peerIdx;
-  return r;
+  EXPECT_EQ(g_collFreeCalls, collFreeCalls + 1);
 }
 
 }  // namespace
 
 TEST_F(RasClientSupportMicrotest, RunComms_MoreRanksThanCommNRanks_ReturnsInternalError) {
-  ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1, {MakeRankSpec(0, 0), MakeRankSpec(1, 0)})}));
+  ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1, {RankSpec{0, 0}, RankSpec{1, 0}})}));
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_NoRanks_ReturnsInternalError) {
+  ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1)}));
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_NegativeCounts_ReturnsInternalError) {
   for (int field = 0; field < 3; field++) {
-    std::vector<char> data = BuildRasCollComms({MakeCommSpec(1, {MakeRankSpec(0, 0)})});
+    std::vector<char> data = BuildRasCollComms({MakeCommSpec(1, {RankSpec{0, 0}})});
     struct rasCollComms::comm* comm = FirstComm(data);
     (field == 0 ? comm->commNRanks : field == 1 ? comm->nRanks : comm->nMissingRanks) = -1;
     ExpectRunCommsRejects(std::move(data));
   }
-  std::vector<char> data = BuildRasCollComms({});
+  // With a missing rank, the record size computed from nRanks = -1 still fits the data.
+  CommSpec c = MakeCommSpec(2, {RankSpec{0, 0}});
+  c.missing = {MissingSpec{1, MakeAddr(4000)}};
+  std::vector<char> data = BuildRasCollComms({c});
+  FirstComm(data)->nRanks = -1;
+  ExpectRunCommsRejects(std::move(data));
+
+  data = BuildRasCollComms({});
   reinterpret_cast<struct rasCollComms*>(data.data())->nComms = -1;
   ExpectRunCommsRejects(std::move(data));
 }
@@ -1669,29 +1674,39 @@ TEST_F(RasClientSupportMicrotest, RunComms_ReportShorterThanHeader_ReturnsIntern
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_TruncatedRecord_ReturnsInternalError) {
-  std::vector<char> data = BuildRasCollComms({MakeCommSpec(2, {MakeRankSpec(0, 0), MakeRankSpec(1, 0)})});
+  std::vector<char> data = BuildRasCollComms({MakeCommSpec(2, {RankSpec{0, 0}, RankSpec{1, 0}})});
   data.resize(data.size() - sizeof(struct rasCollComms::comm::rank));
+  ExpectRunCommsRejects(std::move(data));
+
+  CommSpec c = MakeCommSpec(2, {RankSpec{0, 0}});
+  c.missing = {MissingSpec{1, MakeAddr(4000)}};
+  data = BuildRasCollComms({c});
+  data.resize(data.size() - 1);
+  ExpectRunCommsRejects(std::move(data));
+
+  // Less than one record header follows the report header.
+  data = BuildRasCollComms({MakeCommSpec(1, {RankSpec{0, 0}})});
+  data.resize(offsetof(struct rasCollComms, comms) + sizeof(struct rasCollComms::comm) - 1);
   ExpectRunCommsRejects(std::move(data));
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_PeerIdxOutOfRange_ReturnsInternalError) {
   for (int peerIdx : {-1, 1}) {
-    ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1, {MakeRankSpec(0, peerIdx)})}), /*nPeers*/ 1);
+    ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1, {RankSpec{0, peerIdx}})}), /*nPeers*/ 1);
   }
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_NvmlDevOutOfRange_ReturnsInternalError) {
   for (int nvmlDev : {-1, 64}) {
-    RankSpec r = MakeRankSpec(0, 0);
+    RankSpec r{0, 0};
     r.nvmlDev = static_cast<char>(nvmlDev);
     ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1, {r})}));
   }
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_StatusCodeOutOfRange_ReturnsInternalError) {
-  // initState/asyncError are 4-bit fields, so a peer can send up to 15, past ncclErrors[ncclNumResults].
   for (bool async : {false, true}) {
-    RankSpec r = MakeRankSpec(0, 0);
+    RankSpec r{0, 0};
     (async ? r.asyncError : r.initState) = static_cast<ncclResult_t>(ncclNumResults);
     ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1, {r})}));
   }
