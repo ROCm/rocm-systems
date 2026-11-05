@@ -102,6 +102,11 @@
 - JAX dispatch is asynchronous: the callable returns before the GPU finishes.
   - The range encloses the host-side launch enqueue, not GPU completion.
   - Those enqueues inherit the marker's correlation id.
+  - `GUID` is the rocprofiler-sdk database/import identifier
+    ([rocpd schema](https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/lib/python/rocpd/README.md)).
+    All marker and kernel rows from that instance share it.
+  - The join is `Correlation_ID` + `GUID` so a colliding `Correlation_ID`
+    from another instance does not match.
 
 ```
 time →
