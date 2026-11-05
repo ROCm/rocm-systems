@@ -98,6 +98,10 @@ Panel Config:
           unit: Conflicts per Access
           peak: 32
           pct_of_peak: true
+        # Sum of two ratios that share TCP_TOTAL_CACHE_ACCESSES_sum. Each ratio comes
+        # from its own replay, so the sum equals the combined ratio only when both
+        # replays see the same total (or each replay scales numerator and denominator
+        # by the same factor). It does not when only the total varies.
         vL1D Cache Hit Rate:
           value: COLLECT_SUM(_collect.vl1d_hit_non_rw, _collect.vl1d_hit_atom)
           unit: Percent
