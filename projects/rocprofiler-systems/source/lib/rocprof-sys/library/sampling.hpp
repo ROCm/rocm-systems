@@ -47,8 +47,13 @@ void unblock_signals(std::set<int> = {});
 void
 post_process();
 
+/// Wait for the running polls of the process sampler before a fork, and let it go on
+/// after it.
 void
-postfork_parent_reinit();
+block_process_sampler();
+
+void
+unblock_process_sampler();
 
 void
 postfork_child_cleanup();
@@ -61,15 +66,6 @@ postfork_child_cleanup();
 /// terminate.
 void
 postfork_child_release_samplers() noexcept;
-
-void
-prefork_lock_pmc_sampler();
-
-void
-postfork_parent_unlock_pmc_sampler();
-
-void
-postfork_child_reset_pmc_sampler_lock();
 
 void
 pause();
