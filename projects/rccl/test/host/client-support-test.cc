@@ -1624,6 +1624,75 @@ TEST_F(RasClientSupportMicrotest, RunComms_MismatchedFwdCounts_ReturnsInternalEr
   EXPECT_TRUE(closed);
 }
 
+namespace {
+
+// Malformed RAS_COLL_COMMS records are rejected before rasClientRunComms sizes or indexes anything with
+// them. Like the arm above, it returns with client->coll still set, so rasClientRun frees both.
+void ExpectRunCommsRejects(std::vector<char> data, int nPeers = 1) {
+  std::vector<union ncclSocketAddress> peers;
+  for (int i = 0; i < nPeers; i++) peers.push_back(MakeAddr(static_cast<uint16_t>(4000 + i)));
+  struct rasClient* client = MakeClient();
+  client->status = RAS_CLIENT_COMMS;
+  client->coll = MakeCollective(std::move(data), peers);
+  bool closed = false;
+  EXPECT_EQ(rasClientRun(client, &closed), ncclInternalError);
+  EXPECT_TRUE(closed);
+}
+
+RankSpec MakeRankSpec(int commRank, int peerIdx) {
+  RankSpec r;
+  r.commRank = commRank;
+  r.peerIdx = peerIdx;
+  return r;
+}
+
+}  // namespace
+
+TEST_F(RasClientSupportMicrotest, RunComms_MoreRanksThanCommNRanks_ReturnsInternalError) {
+  ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1, {MakeRankSpec(0, 0), MakeRankSpec(1, 0)})}));
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_NegativeCounts_ReturnsInternalError) {
+  for (int field = 0; field < 3; field++) {
+    std::vector<char> data = BuildRasCollComms({MakeCommSpec(1, {MakeRankSpec(0, 0)})});
+    struct rasCollComms::comm* comm = FirstComm(data);
+    (field == 0 ? comm->commNRanks : field == 1 ? comm->nRanks : comm->nMissingRanks) = -1;
+    ExpectRunCommsRejects(std::move(data));
+  }
+  std::vector<char> data = BuildRasCollComms({});
+  reinterpret_cast<struct rasCollComms*>(data.data())->nComms = -1;
+  ExpectRunCommsRejects(std::move(data));
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_TruncatedRecord_ReturnsInternalError) {
+  std::vector<char> data = BuildRasCollComms({MakeCommSpec(2, {MakeRankSpec(0, 0), MakeRankSpec(1, 0)})});
+  data.resize(data.size() - sizeof(struct rasCollComms::comm::rank));
+  ExpectRunCommsRejects(std::move(data));
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_PeerIdxOutOfRange_ReturnsInternalError) {
+  for (int peerIdx : {-1, 1}) {
+    ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1, {MakeRankSpec(0, peerIdx)})}), /*nPeers*/ 1);
+  }
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_NvmlDevOutOfRange_ReturnsInternalError) {
+  for (int nvmlDev : {-1, 64}) {
+    RankSpec r = MakeRankSpec(0, 0);
+    r.nvmlDev = static_cast<char>(nvmlDev);
+    ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1, {r})}));
+  }
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_StatusCodeOutOfRange_ReturnsInternalError) {
+  // initState/asyncError are 4-bit fields, so a peer can send up to 15, past ncclErrors[ncclNumResults].
+  for (bool async : {false, true}) {
+    RankSpec r = MakeRankSpec(0, 0);
+    (async ? r.asyncError : r.initState) = static_cast<ncclResult_t>(ncclNumResults);
+    ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1, {r})}));
+  }
+}
+
 // =============================================================================================
 // rasClientEventLoop -- socket protocol parsing (POLLIN: recv + command dispatch; POLLOUT: send).
 // =============================================================================================
