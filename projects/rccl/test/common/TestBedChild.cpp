@@ -126,7 +126,7 @@ namespace RcclUnitTesting
     }
   }
 
-  void TestBedChild::StartExecutionLoop()
+  int TestBedChild::StartExecutionLoop()
   {
 
     // Wait for commands from parent process
@@ -135,7 +135,7 @@ namespace RcclUnitTesting
     if (useRankThreading)
     {
       TEST_ERROR("UT_MULTITHREAD=1 requires a unit-test build with OPENMP_TESTS_ENABLED=ON");
-      exit(1);
+      return 1;
     }
     #endif
     int command;
@@ -222,11 +222,10 @@ namespace RcclUnitTesting
     // Coverage profiles must be written before HIP/HSA teardown, so this path
     // flushes and _exit()s instead of unwinding through main.
     ProcessIsolatedTestRunner::exitChild(0);
-#else
+#endif
     // Return through main so this stack object's vectors release their host
     // allocations. exit() bypasses automatic object destruction.
-    return;
-#endif
+    return 0;
   }
 
   ErrCode TestBedChild::GetUniqueId(std::vector<char>& retValBuf)

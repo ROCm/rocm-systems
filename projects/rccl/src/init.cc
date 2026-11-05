@@ -5109,7 +5109,9 @@ ncclResult_t ncclCommGrow_impl(ncclComm_t comm, int nRanks, const ncclUniqueId* 
         res = ncclInvalidArgument;
         goto exit;
       }
-      memset(&recvId, 0, sizeof(recvId));
+      // The handle is smaller than the id (static_assert in bootstrap.h), and the job copies
+      // a whole id, so copy the handle into a zeroed id rather than casting its address.
+      recvId = ncclUniqueId{};
       memcpy(&recvId, &recvHandle, sizeof(recvHandle));
       uniqueId = &recvId;
     }

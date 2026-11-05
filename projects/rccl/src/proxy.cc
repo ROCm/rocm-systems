@@ -77,10 +77,7 @@ static ncclResult_t expectedProxyResponseStore(struct ncclProxyState* state, voi
         return ncclInternalError;
       }
 
-      if (respSize > 0) {
-        memcpy(elem->respBuff, respBuff, respSize);
-        free(respBuff);
-      }
+      if (respSize > 0) memcpy(elem->respBuff, respBuff, respSize);
       elem->done = true;
       elem->res = res;
       return ncclSuccess;
@@ -1462,6 +1459,7 @@ error:
 ncclResult_t ncclPollProxyResponse(struct ncclComm* comm, struct ncclProxyConnector* proxyConn, void* respBuff,
                                    void* opId) {
   struct ncclProxyState* sharedProxyState = comm->proxyState;
+  void* otherRespBuff = NULL; // Holds another op's response; always freed at exit.
   // Receive the connection pointer from the Proxy
   if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire)) {
     WARN("Comm %p is in abort state", comm);
@@ -1495,44 +1493,40 @@ ncclResult_t ncclPollProxyResponse(struct ncclComm* comm, struct ncclProxyConnec
     if (resp.respSize > 0) {
       if (resp.opId != opId) {
         // Unexpected response, need to buffer the socket data
-        respBuff = malloc(resp.respSize);
+        respBuff = otherRespBuff = malloc(resp.respSize);
         if (respBuff == NULL) {
           WARN("Could not allocate proxy response buffer for response opId=%p expected opId=%p response size %d",
                resp.opId, opId, resp.respSize);
-          return ncclSystemError;
+          res = ncclSystemError;
+          goto exit;
         }
       }
       if (respBuff == NULL) {
         WARN("Proxy response buffer is NULL for response opId=%p expected opId=%p response size %d", resp.opId, opId,
              resp.respSize);
-        return ncclInternalError;
+        res = ncclInternalError;
+        goto exit;
       }
-      ncclResult_t recvRes = ncclSocketRecv(sock, respBuff, resp.respSize);
-      if (recvRes != ncclSuccess) {
-        if (resp.opId != opId) free(respBuff);
-        return recvRes;
-      }
+      NCCLCHECKGOTO(ncclSocketRecv(sock, respBuff, resp.respSize), res, exit);
     }
 
     if (resp.opId == opId) {
       INFO(NCCL_PROXY, "resp.opId=%p matches expected opId=%p", resp.opId, opId);
-      NCCLCHECK(expectedProxyResponseRemove(sharedProxyState, resp.opId));
-      return resp.res;
+      NCCLCHECKGOTO(expectedProxyResponseRemove(sharedProxyState, resp.opId), res, exit);
+      res = resp.res;
     } else {
       INFO(NCCL_PROXY, "Queuing opId=%p respBuff=%p respSize=%d", resp.opId, respBuff, resp.respSize);
-      // Store the result and mark response as completed. Store frees the buffer only on success.
-      ncclResult_t storeRes =
-        expectedProxyResponseStore(sharedProxyState, resp.opId, respBuff, resp.respSize, resp.res);
-      if (storeRes != ncclSuccess) {
-        if (resp.respSize > 0) free(respBuff);
-        return storeRes;
-      }
-      return ncclInProgress;
+      // Store the result and mark response as completed. Store copies the payload.
+      NCCLCHECKGOTO(expectedProxyResponseStore(sharedProxyState, resp.opId, respBuff, resp.respSize, resp.res), res,
+                    exit);
+      res = ncclInProgress;
     }
   } else {
     INFO(NCCL_PROXY, "ncclPollProxyResponse Dequeued cached opId=%p", opId);
   }
 
+exit:
+  free(otherRespBuff);
   return res;
 }
 
