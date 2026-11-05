@@ -261,7 +261,8 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
           return false;
     return true;
   };
-  if (!covers_tree(covers_tree, soc) || !serialized_cus.empty())
+  // VM construction may have moved these components out of the SoC itself.
+  if (!covers_tree(covers_tree, soc.component_root()) || !serialized_cus.empty())
     return emit_error.emit() << "Cannot checkpoint topology: serialization does not cover every CU";
 
   flatbuffers::FlatBufferBuilder builder(1024 * 1024);
