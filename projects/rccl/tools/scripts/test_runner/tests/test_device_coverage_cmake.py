@@ -176,6 +176,38 @@ class DeviceCoverageCMakeTest(unittest.TestCase):
         self.assertIn("rejected device coverage flags", result)
         self.assertIn("-fcoverage-mapping", argv)
 
+    def _run_rdc_host_coverage_probe(self, compiler_body):
+        probe_call = (
+            "rccl_compiler_supports_rdc_host_coverage("
+            '"${COMPILER}" "${CMAKE_CURRENT_LIST_DIR}/rdc-probe" ok reason)\n'
+            'file(WRITE "${RESULT_FILE}" "${ok}\\n${reason}")\n'
+        )
+        return self._run_cmake_probe(
+            'printf "%s\\n" "$@" >> "${ARGV_FILE:-/dev/null}"\n' + compiler_body,
+            probe_call,
+        )
+
+    def test_rdc_host_coverage_probe_accepts_fixed_compiler(self):
+        cat_source = (
+            'for a in "$@"; do case "$a" in *.hip) '
+            'cat "$a" >> "${ARGV_FILE:-/dev/null}";; esac; done\n'
+        )
+        _root, result, argv, _ = self._run_rdc_host_coverage_probe(cat_source)
+
+        self.assertEqual(result, "TRUE\n")
+        flat_argv = argv.replace("\n", " ")
+        for flag in ("-fgpu-rdc", "--offload-host-only", "-fprofile-instr-generate"):
+            self.assertIn(flag, flat_argv)
+        self.assertIn("= rccl_probe_init();", argv)
+
+    def test_rdc_host_coverage_probe_reports_compiler_error(self):
+        error = "error: unknown special variable with appending linkage: llvm.global_ctors.1"
+        _root, result, _argv, _ = self._run_rdc_host_coverage_probe(
+            f"echo '{error}' >&2; exit 1\n"
+        )
+
+        self.assertEqual(result, f"FALSE\n{error}")
+
     def test_host_probe_finds_companion_rocm_profile_runtime(self):
         runtime, result, argv = self.run_host_probe(create_runtime=True)
 
