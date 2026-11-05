@@ -56,7 +56,7 @@ add_sampling_params(schema& value)
     auto components = make_param("components", param_type::enumeration_list, "sampling");
     components.choices = { choice{ .value = "wall_clock" },
                            choice{ .value = "cpu_clock" } };
-    components.env     = env_spec{ .name = "ROCPROFSYS_COMPONENTS", .separator = ";" };
+    components.env     = "ROCPROFSYS_COMPONENTS";
     add_param(value, std::move(frequency));
     add_param(value, make_param("scale", param_type::number, "sampling"));
     add_param(value, std::move(components));
@@ -94,7 +94,7 @@ TEST(parser_config_store, stores_and_reads_values)
     store.set("trace", "yes", config_source::command_line);
     store.set("output", "/tmp/out", config_source::file);
 
-    EXPECT_EQ(store.get("trace"), "yes");
+    EXPECT_EQ(store.get("trace"), "true");
     EXPECT_TRUE(store.contains("trace"));
     EXPECT_EQ(store.source_of("trace"), config_source::command_line);
     EXPECT_EQ(store.get_as<bool>("trace"), true);
@@ -108,7 +108,7 @@ TEST(parser_config_store, converts_numeric_and_list_values)
     auto store = make_store();
     store.set("sampling_freq", "2", config_source::environment);
     store.set("scale", "2", config_source::environment);
-    store.set("components", "wall_clock; cpu_clock", config_source::file);
+    store.set("components", "wall_clock, cpu_clock", config_source::file);
     store.set("mode", "fast", config_source::preset);
 
     EXPECT_EQ(store.get_as<std::int64_t>("sampling_freq"), 2);
@@ -137,16 +137,17 @@ TEST(parser_config_store, rejects_unknown_and_invalid_values)
     EXPECT_EQ(store.source_of("sampling_freq"), config_source::default_value);
 }
 
-TEST(parser_config_store, source_changes_without_notifying_when_text_is_unchanged)
+TEST(parser_config_store, source_changes_without_notifying_when_the_value_is_unchanged)
 {
     auto store = make_store();
     int  calls = 0;
     store.on_change("trace", [&calls](std::string_view, std::string_view) { ++calls; });
 
-    store.set("trace", "true", config_source::file);
-    store.set("trace", "true", config_source::command_line);
+    store.set("trace", "yes", config_source::file);
+    store.set("trace", "TRUE", config_source::command_line);
 
     EXPECT_EQ(calls, 1);
+    EXPECT_EQ(store.get("trace"), "true");
     EXPECT_EQ(store.source_of("trace"), config_source::command_line);
 }
 
@@ -204,7 +205,7 @@ TEST(parser_config_store, values_map_contains_stored_entries)
     store.set("mode", "slow", config_source::file);
 
     const auto stored = store.values();
-    EXPECT_EQ(stored.at("trace"), "1");
+    EXPECT_EQ(stored.at("trace"), "true");
     EXPECT_EQ(stored.at("mode"), "slow");
     EXPECT_EQ(stored.size(), 2U);
 }
