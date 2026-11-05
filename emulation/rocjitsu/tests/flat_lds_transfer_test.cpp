@@ -3,6 +3,7 @@
 
 #include "decode_test_util.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -57,10 +58,21 @@ protected:
   std::array<uint32_t, 2> encoding(unsigned kind, unsigned segment, bool vaddr, unsigned saddr,
                                    int offset = 0, bool lds = true) {
     const unsigned op = (modern() && lds ? 38 : rdna() ? 8 : 16) + kind;
+    return encoding_for_opcode(op, segment, vaddr, saddr, offset, lds);
+  }
+  std::array<uint32_t, 2> encoding_for_opcode(unsigned op, unsigned segment, bool vaddr,
+                                              unsigned saddr, int offset = 0, bool lds = true,
+                                              unsigned vdst = 8) {
     const unsigned bit13 = modern() ? vaddr : lds;
     return {0xdc000000u | (op << 18) | (segment << 14) | (bit13 << 13) |
                 (static_cast<unsigned>(offset) & (rdna() ? 0xfff : 0x1fff)),
-            2u | (saddr << 16) | (8u << 24)};
+            2u | (saddr << 16) | (vdst << 24)};
+  }
+  std::array<uint32_t, 2> global_wide_lds_encoding(unsigned count, unsigned saddr, int offset,
+                                                   unsigned vdst = 8) {
+    return encoding_for_opcode(count == 3 ? cdna4::kGlobalLoadLdsDwordx3Flat
+                                          : cdna4::kGlobalLoadLdsDwordx4Flat,
+                               2, false, saddr, offset, true, vdst);
   }
   void clear() {
     for (unsigned a = 0; a < 1408; a += 4)
@@ -326,6 +338,109 @@ TEST_P(FlatLdsTransfer, RdnaScratchScalarOffsetIsUnsigned) {
   const auto *state = inst->data_as<amdgpu::VectorMemState>();
   ASSERT_NE(state, nullptr);
   EXPECT_EQ(state->per_lane_addr[0], 0x10000 + uint64_t{0x80000000} * wave->wf_size());
+}
+
+TEST_P(FlatLdsTransfer, GlobalWideLoadsPreservePaddingInactiveLanesAndVgprs) {
+  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA4)
+    GTEST_SKIP() << "Wide GLOBAL LDS loads require CDNA4.";
+  constexpr uint64_t base = 0x123400020000;
+  for (unsigned count : {3u, 4u})
+    for (bool scalar_base : {false, true})
+      for (int offset : {-16, 16})
+        for (uint64_t exec : {uint64_t{0}, uint64_t{0x8000000000000025}}) {
+          SCOPED_TRACE(testing::Message()
+                       << count << ',' << scalar_base << ',' << offset << ',' << exec);
+          clear();
+          cu->flush_all();
+          wave->set_lds_size(2048);
+          wave->set_exec(exec);
+          wave->set_m0(0xfffc0043);
+          scalar(4, static_cast<uint32_t>(base));
+          scalar(5, base >> 32);
+          for (unsigned lane = 0; lane < wave->wf_size(); ++lane) {
+            const uint64_t address = base + 0x80000000u + lane * 32;
+            vector(2, lane, scalar_base ? 0x80000000u + lane * 32 : address);
+            vector(3, lane, address >> 32);
+            for (unsigned word = 0; word < count; ++word)
+              memory.write32(address + offset + word * 4, 0x12340000 + lane * 16 + word);
+          }
+          ASSERT_NO_FATAL_FAILURE(
+              issue(global_wide_lds_encoding(count, scalar_base ? 4 : 127, offset, 255)));
+          for (unsigned address = 0; address < 1408; address += 4) {
+            const int relative = static_cast<int>(address) - (128 + 64 + offset);
+            const unsigned lane = relative / 16;
+            const unsigned word = (relative % 16) / 4;
+            const bool written =
+                relative >= 0 && lane < 64 && word < count && (exec & (uint64_t{1} << lane));
+            EXPECT_EQ(wave->lds().read32(address),
+                      written ? 0x12340000 + lane * 16 + word : 0xcccccccc)
+                << address;
+          }
+          for (unsigned lane = 0; lane < wave->wf_size(); ++lane)
+            EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8, lane), 0xdeadbeef);
+        }
+}
+
+TEST_P(FlatLdsTransfer, GlobalWideLoadsRespectM0WidthAndWholePayloadBounds) {
+  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA4)
+    GTEST_SKIP() << "Wide GLOBAL LDS loads require CDNA4.";
+  for (unsigned count : {3u, 4u})
+    for (uint32_t m0 : {3u, 0x10003u, 0xfffc0003u})
+      for (int offset : {-16, 0, 16}) {
+        SCOPED_TRACE(testing::Message() << count << ',' << m0 << ',' << offset);
+        clear();
+        cu->flush_all();
+        wave->set_lds_size(44);
+        wave->set_exec(7);
+        wave->set_m0(m0);
+        for (unsigned lane = 0; lane < 3; ++lane) {
+          vector(2, lane, 0x20000 + lane * 32);
+          vector(3, lane, 0);
+          for (unsigned word = 0; word < count; ++word)
+            memory.write32(0x20000 + lane * 32 + offset + word * 4, 0xabc000 + lane * 16 + word);
+        }
+        ASSERT_NO_FATAL_FAILURE(issue(global_wide_lds_encoding(count, 127, offset)));
+        for (unsigned address = 0; address < 256; address += 4) {
+          uint32_t expected = 0xcccccccc;
+          for (unsigned lane = 0; lane < 3; ++lane) {
+            const int relative =
+                static_cast<int>(m0 & 0x3fffcu) + offset + static_cast<int>(lane) * 16;
+            if (relative < 0 || relative + count * 4 > 44)
+              continue;
+            for (unsigned word = 0; word < count; ++word)
+              if (address == 128 + relative + word * 4)
+                expected = 0xabc000 + lane * 16 + word;
+          }
+          EXPECT_EQ(wave->lds().read32(address), expected) << address;
+        }
+      }
+}
+
+TEST_P(FlatLdsTransfer, GlobalWideLoadsApplyThirteenBitOffsetToLds) {
+  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA4)
+    GTEST_SKIP() << "Wide GLOBAL LDS loads require CDNA4.";
+  // Offset 2048 sets bit 11, so it becomes -2048 if only 12 bits are sign-extended.
+  constexpr int offset = 2048;
+  constexpr unsigned destination = 128 + offset;
+  for (unsigned count : {3u, 4u}) {
+    SCOPED_TRACE(count);
+    clear();
+    for (unsigned word = 0; word < 4; ++word)
+      wave->lds().write32(destination + word * 4, 0xcccccccc);
+    cu->flush_all();
+    wave->set_lds_size(4096);
+    wave->set_exec(1);
+    wave->set_m0(0);
+    vector(2, 0, 0x20000);
+    vector(3, 0, 0);
+    for (unsigned word = 0; word < count; ++word)
+      memory.write32(0x20000 + offset + word * 4, 0xabc000 + word);
+    ASSERT_NO_FATAL_FAILURE(issue(global_wide_lds_encoding(count, 127, offset)));
+    for (unsigned word = 0; word < 4; ++word)
+      EXPECT_EQ(wave->lds().read32(destination + word * 4),
+                word < count ? 0xabc000 + word : 0xcccccccc)
+          << word;
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(Architectures, FlatLdsTransfer,
