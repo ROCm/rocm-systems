@@ -8,10 +8,29 @@
 
 #include <profiler-hub/storage.hpp>
 
+#include <fmt/format.h>
+
 #include <cstdlib>
+#include <string>
+#include <string_view>
 
 namespace rocprofsys::library_checker
 {
+
+namespace
+{
+
+std::string
+format_version_mismatch(std::string_view library_name, const version& built,
+                        const version& loaded)
+{
+    return fmt::format("{} version mismatch: built against v{}.{}.{} but v{}.{}.{} is "
+                       "loaded",
+                       library_name, built.major, built.minor, built.patch, loaded.major,
+                       loaded.minor, loaded.patch);
+}
+
+}  // namespace
 
 void
 check_profiler_hub_version_mismatch()
@@ -19,18 +38,18 @@ check_profiler_hub_version_mismatch()
     // the storage is never opened here; its constructor only stores the arguments
     const auto loaded = profiler_hub::storage_t{ "", "" }.get_storage_version();
 
-    const auto mismatch = describe_version_mismatch(
-        "profiler-hub",
-        version{ .major = ROCPROFSYS_PROFILER_HUB_VERSION_MAJOR,
-                 .minor = ROCPROFSYS_PROFILER_HUB_VERSION_MINOR,
-                 .patch = ROCPROFSYS_PROFILER_HUB_VERSION_PATCH },
-        version{ .major = loaded.major, .minor = loaded.minor, .patch = loaded.patch });
+    const version built{ .major = ROCPROFSYS_PROFILER_HUB_VERSION_MAJOR,
+                         .minor = ROCPROFSYS_PROFILER_HUB_VERSION_MINOR,
+                         .patch = ROCPROFSYS_PROFILER_HUB_VERSION_PATCH };
+    const version loaded_version{ .major = loaded.major,
+                                  .minor = loaded.minor,
+                                  .patch = loaded.patch };
 
-    if(mismatch)
+    if(built != loaded_version)
     {
         LOG_CRITICAL("{}. Check LD_LIBRARY_PATH and the installed profiler-hub. "
                      "Aborting.",
-                     *mismatch);
+                     format_version_mismatch("profiler-hub", built, loaded_version));
         std::exit(EXIT_FAILURE);
     }
 }
