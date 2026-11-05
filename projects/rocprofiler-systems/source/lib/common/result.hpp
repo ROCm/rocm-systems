@@ -25,25 +25,7 @@ failure(E) -> failure<E>;
 /**
  * @brief Holds either a success value `T` or an error `E`, never both.
  *
- * Use it for operations that can fail with a reason the caller may need. Use
- * `std::optional` when "no value" is a valid answer and not a failure.
- *
- * @code
- * using parse_result = result<int, parse_error>;
- *
- * parse_result parse(std::string_view text)
- * {
- *     if(text.empty())
- *         return parse_result{ failure{ parse_error::empty } };
- *     return parse_result{ 42 };
- * }
- *
- * auto parsed = parse(text);
- * if(parsed.is_error())
- *     report(parsed.error());
- * else
- *     use(parsed.value());
- * @endcode
+ * Use it for operations that can fail with a reason the caller may need.
  */
 template <typename T, typename E>
 class [[nodiscard]] result
