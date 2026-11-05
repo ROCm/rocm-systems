@@ -30,7 +30,7 @@ repos:
       - id: clang-format
         name: clang-format (C/C++)
         entry: clang-format -i -style=file
-        files: ^projects/rccl/src/.*\.(c|cc|cpp|h|hpp)$
+        files: ^projects/rccl/src/.*\.(c|cc|cpp|cu|cuh|h|hpp)$
 
   # Python linting, advisory only.
   - repo: local
