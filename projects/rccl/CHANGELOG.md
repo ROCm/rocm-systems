@@ -194,6 +194,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed multi-receive `irecv` failing with a fatal network error in the `IB` transport when `NCCL_IB_USE_INLINE=1`.
 * Fixed Anvil SDMA (`NCCL_GIN_TYPE=7`) GIN contexts sharing signal cells across logical contexts on a connection, which let a consecutive `ncclGinAllContexts` barrier return early on a stale count. Each logical context now has its own signals.
 * Fixed GIN signal shadows being sized for the requested context count instead of the rounded-up `ginContextCount`, which let the last contexts write past the shadow region when the GIN connection count does not divide the requested context count.
+* Scoped the unset `RCCL_P2P_BATCH_THRESHOLD` to gfx950 at 16 or more nodes. The NCCL 2.31.2 sync applied the 64 KiB per-peer cutoff on every architecture, so with `RCCL_P2P_BATCH_ENABLE=1` several AllToAll peer rounds shared one channel and ran one after another above 64 KiB per peer. On MI300X (gfx942), 4 nodes and 32 ranks, in-place AllToAll from 4 MiB to 16 MiB was about 6–16% slower. The parameter now defaults to `-1`. A negative value, including an explicit `-1`, selects that architecture default: 64 KiB on gfx950 with 16 or more nodes, and no size cutoff elsewhere. A non-negative value is the cutoff on every architecture. The variable does not itself turn batching on.
 
 ### Known issues
 * The FP8 ReduceSum and ReduceCopy device APIs are not exported in the LLVM bitcode library.
