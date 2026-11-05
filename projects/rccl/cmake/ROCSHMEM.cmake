@@ -235,6 +235,9 @@ function(copy_files FILE_LIST_VAR SRC_DIR DST_DIR OUTPUT_LIST_VAR)
         -e "s|#include \"constants\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/constants.hpp\"|g"
         -e "s|#include \"gda_enums\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/gda/gda_enums.hpp\"|g"
         -e "s|#include \"util\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/util.hpp\"|g"
+        # Keep QueuePairMux::provider out of librccl's exported symbols so an app's
+        # own rocSHMEM cannot interpose it.
+        -e "s|static inline GDAProvider provider{|static inline __attribute__((visibility(\"hidden\"))) GDAProvider provider{|g"
         "${dst_file}"
       DEPENDS "${src_file}"
       COMMENT "Copying ${src_file} -> ${dst_file}"
