@@ -389,12 +389,12 @@ if(ROCJITSU_ENABLE_VFIO)
     include(rj_libvfio_user)
 endif()
 
-# Configure arithmetic before applying the parent host CPU flags.
 if(BUILD_TESTING)
     include(rj_test_registration)
 endif()
 
-# Keep library and tests ahead of rj_host_cpu to avoid inheriting its -march policy.
+# rj-arith selects its own baseline and runtime-dispatched SIMD implementations.
+# Configure it before rj_host_cpu so neither library nor tests inherit its -march policy.
 add_subdirectory(lib/arith)
 
 # Apply the host CPU policy to rocjitsu targets, after configuring dependencies.
@@ -402,6 +402,7 @@ include(rj_host_cpu)
 
 # Libraries
 add_subdirectory(lib/util)
+add_subdirectory(lib/cli)
 add_subdirectory(lib/simdojo)
 add_subdirectory(lib/rocjitsu)
 add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
@@ -517,6 +518,25 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     install(
         PROGRAMS scripts/rocjitsu-pretranslate.py
         DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+
+    # Wheel builders explicitly install this staging component. Ordinary native
+    # installs do not create an unimportable second copy of the Python package.
+    install(
+        DIRECTORY python/rocjitsu
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/python3/site-packages
+        COMPONENT rocjitsu-python
+        EXCLUDE_FROM_ALL
+        FILES_MATCHING
+        PATTERN "*.py"
+        PATTERN "__pycache__" EXCLUDE
+    )
+    # Wheel builders consume the same metadata as the standalone Python package.
+    install(
+        FILES python/pyproject.toml python/README.md
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/python
+        COMPONENT rocjitsu-python
+        EXCLUDE_FROM_ALL
     )
 endif()
 

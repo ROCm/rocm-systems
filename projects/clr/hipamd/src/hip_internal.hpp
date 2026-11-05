@@ -270,34 +270,54 @@ HIP_PUBLIC_API void __hipOnError(const void *err_info);
     HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                  \
   }
 
-// Device sync is not supported during any active capture — invalidate unconditionally.
-#define CHECK_SUPPORTED_DURING_CAPTURE()                                                           \
-  if (!g_allCapturingStreams.empty()) {                                                            \
-    for (auto stream : g_allCapturingStreams) {                                                    \
-      stream->InvalidateCapture();                                                                 \
+// Helper: invalidate all capturing streams on the current device and return an error.
+// Invalidation is device-scoped, not thread-scoped or mode-scoped. A sync API invalidates
+// all captures on the same device, regardless of which thread they belong to or what
+// capture mode they use.
+#define INVALIDATE_DEVICE_CAPTURING_AND_RETURN(err)                                                \
+  {                                                                                                \
+    int _devId = hip::ihipGetDevice();                                                             \
+    bool _found = false;                                                                           \
+    {                                                                                              \
+      amd::ScopedLock lock(g_streamSetLock);                                                      \
+      for (auto* _s : g_allCapturingStreams) {                                                    \
+        if (_s->DeviceId() == _devId) {                                                           \
+          _s->InvalidateCapture();                                                                 \
+          _found = true;                                                                           \
+        }                                                                                          \
+      }                                                                                            \
     }                                                                                              \
-    return hipErrorStreamCaptureUnsupported;                                                       \
+    if (_found) return err;                                                                        \
   }
+
+// Device sync is not supported during capture.
+#define CHECK_SUPPORTED_DURING_CAPTURE()                                                           \
+  INVALIDATE_DEVICE_CAPTURING_AND_RETURN(hipErrorStreamCaptureUnsupported)
 
 // Legacy-stream sync APIs (hipMemset, hipMemcpy, etc.) invalidate captures on
 // blocking streams or Global-mode captures. NonBlocking origins with ThreadLocal
 // or Relaxed capture are exempt only if none of their participants are blocking,
 // since a blocking participant retains its implicit legacy-stream dependency.
 #define CHECK_STREAM_CAPTURING()                                                                   \
-  if (!g_allCapturingStreams.empty()) {                                                            \
-    bool anyInvalidated = false;                                                                   \
-    for (auto stream : g_allCapturingStreams) {                                                    \
-      if ((stream->Flags() & hipStreamNonBlocking) &&                                              \
-          stream->GetCaptureMode() != hipStreamCaptureModeGlobal &&                                \
-          !stream->HasBlockingParticipant()) {                                                     \
-        continue;                                                                                  \
+  {                                                                                                \
+    int _devId = hip::ihipGetDevice();                                                             \
+    bool _invalidated = false;                                                                     \
+    {                                                                                              \
+      amd::ScopedLock lock(g_streamSetLock);                                                       \
+      for (auto* _s : g_allCapturingStreams) {                                                    \
+        if (_s->DeviceId() != _devId) {                                                           \
+          continue;                                                                                \
+        }                                                                                          \
+        if ((_s->Flags() & hipStreamNonBlocking) &&                                                \
+            _s->GetCaptureMode() != hipStreamCaptureModeGlobal &&                                 \
+            !_s->HasBlockingParticipant()) {                                                      \
+          continue;                                                                                \
+        }                                                                                          \
+        _s->InvalidateCapture();                                                                   \
+        _invalidated = true;                                                                       \
       }                                                                                            \
-      stream->InvalidateCapture();                                                                 \
-      anyInvalidated = true;                                                                       \
     }                                                                                              \
-    if (anyInvalidated) {                                                                          \
-      return hipErrorStreamCaptureImplicit;                                                        \
-    }                                                                                              \
+    if (_invalidated) return hipErrorStreamCaptureImplicit;                                        \
   }
 
 #define STREAM_CAPTURE(name, stream, ...)                                                          \

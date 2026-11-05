@@ -338,6 +338,31 @@ TEST(ScopedHookMicrotest, CallsCounterIsExactUnderConcurrentInvocation) {
   EXPECT_EQ(hook.calls, kThreads * kPerThread);
 }
 
+// Cross-tray AllGather rules need UALink, one LSA team over 2+ hosts, and an AllGather TDM window. One clique
+// per tray (NCCL_MNNVL_CROSS_CLIQUE=0) gives one LSA team per tray; gfx1250 DPX has no window.
+TEST_F(InitMicrotest, CommSpansTrays_NeedsUalinkOneLsaTeamTwoHostsAndATdmWindow) {
+  auto topo = std::make_unique<ncclTopoSystem>();
+  auto comm = std::make_unique<ncclComm>();
+  rcclArchThresholds table{};
+  table.symTdmMinR2[ncclFuncAllGather] = 64 * 1024 * 1024;
+  comm->archThresholds = &table;
+  comm->topo = topo.get();
+  comm->MNNVL = 1;
+  topo->nHosts = 2;
+  EXPECT_TRUE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true));
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/false)) << "one LSA team per tray";
+  topo->nHosts = 1;
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true)) << "one host";
+  topo->nHosts = 2;
+  comm->MNNVL = 0;
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true)) << "no UALink";
+  comm->MNNVL = 1;
+  table.symTdmMinR2[ncclFuncAllGather] = 0;
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true)) << "no AllGather TDM window";
+  comm->archThresholds = nullptr;
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true)) << "no arch table";
+}
+
 TEST_F(InitMicrotest, UniformRanksPerHost_TwoHostsTwoRanksEach_ReturnsTrue) {
   HostPattern p{1, 1, 2, 2};
   EXPECT_TRUE(uniformRanksPerHost(p.comm(), p.nranks()));
@@ -3224,6 +3249,30 @@ TEST_F(InitMicrotest, GinGate_NoSupportedGinTypeOrNoCuMemGdr_RefusesGin) {
   auto noGdr = GinGateComm(/*cuMemGdrSupport=*/false, /*hasMloPart=*/false);
   EXPECT_FALSE(ginGateAllows(/*ginTypeBitMask=*/0, noType.get()));
   EXPECT_FALSE(ginGateAllows(UINT64_MAX, noGdr.get()));
+}
+
+// The connection type chosen after ncclGinSetDefaultBackend. AICOMRCCL-3417: dropping Anvil SDMA on
+// a multi-host communicator can leave no backend, and that communicator must stay NONE.
+TEST_F(InitMicrotest, GinConnectionType_NoBackendLeft_StaysNone) {
+  auto comm = std::make_unique<ncclComm>();
+  auto sr = std::make_unique<ncclSharedResources>();
+  comm->sharedRes = sr.get();
+  comm->contiguousRanksPerHost = 8;
+  sr->ginState.supported = false;
+  EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/true), NCCL_GIN_CONNECTION_NONE);
+  EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/false), NCCL_GIN_CONNECTION_NONE);
+}
+
+TEST_F(InitMicrotest, GinConnectionType_BackendLeft_FullOrRail) {
+  auto comm = std::make_unique<ncclComm>();
+  auto sr = std::make_unique<ncclSharedResources>();
+  comm->sharedRes = sr.get();
+  sr->ginState.supported = true;
+  comm->contiguousRanksPerHost = 8;
+  EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/true), NCCL_GIN_CONNECTION_FULL);
+  EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/false), NCCL_GIN_CONNECTION_RAIL);
+  comm->contiguousRanksPerHost = INT_MAX;
+  EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/false), NCCL_GIN_CONNECTION_NONE);
 }
 
 // NOT ASSERTABLE FROM THIS RUNG, deliberately: the four `global*Support` accumulators at :1491-1494 are

@@ -187,6 +187,8 @@ int32_t rcclGetProtoForGfx110x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
 
 namespace {
 inline const rcclArchThresholds* extAlgoArchTable(const ncclComm* comm);
+inline bool rcclSymTdmWindowContains(const rcclArchThresholds* table, ncclFunc_t func, size_t totalBytes,
+                                     bool spansTrays, bool graphMode);
 }
 
 // True when the user set `name` to a non-empty value.
@@ -210,6 +212,14 @@ static const rcclArchThresholds* rcclRingTreeTable(const struct ncclComm* comm, 
   const rcclArchThresholds* t = extAlgoArchTable(comm);
   if (t == nullptr) return nullptr;
   if (rankScaled && (t->rankScaledMinRanks <= 0 || comm->nRanks < t->rankScaledMinRanks)) return nullptr;
+  return t;
+}
+
+// Null when this comm keeps the tuning model's per-rank broadcast ranges.
+// Semantics of the ceilings live on rcclArchThresholds.
+static const rcclArchThresholds* rcclBroadcastTotalByteTable(const struct ncclComm* comm) {
+  const rcclArchThresholds* t = extAlgoArchTable(comm);
+  if (t == nullptr || t->bcRingLL128MaxBytes == 0) return nullptr;
   return t;
 }
 
@@ -258,6 +268,22 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
   // Honor user input for protocol choice
   const bool userProtocolInput = rcclNcclProtoEnvIsSet();
   size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
+
+  // Broadcast on a table with total-byte ceilings (gfx1250 DPX). NCCL_PROTO still wins.
+  if (!userProtocolInput && info->func == ncclFuncBroadcast) {
+    if (const rcclArchThresholds* t = rcclBroadcastTotalByteTable(comm)) {
+      info->protocol = NCCL_PROTO_SIMPLE;
+      if (nBytes > 0 && nBytes <= t->bcRingLLMaxBytes) {
+        info->protocol = NCCL_PROTO_LL;
+      }
+#if defined(ENABLE_LL128)
+      if (comm->topo->ll128Enabled && nBytes > t->bcRingLLMaxBytes && nBytes <= t->bcRingLL128MaxBytes) {
+        info->protocol = NCCL_PROTO_LL128;
+      }
+#endif
+      return;
+    }
+  }
 
   if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 &&
       (info->func == ncclFuncAllGather) && sizePerRank <= 88448) {
@@ -901,7 +927,16 @@ ncclResult_t rcclSymKGetInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
                              ncclRedOp_t op, int* algo, int* protocol, int* maxChannels) {
   RCCL_STATIC_EXPOSE_CHECK();
   if (algo == nullptr || protocol == nullptr || maxChannels == nullptr) return ncclInvalidArgument;
-  if (rcclSymkQuery(comm, coll, count, dataType, op, algo, protocol, maxChannels)) return ncclSuccess;
+  if (rcclSymkQuery(comm, coll, count, dataType, op, algo, protocol, maxChannels)) {
+    // Across trays AllGather symk runs only as a TDM kernel in the TDM window. No graph flag here: use the eager one.
+    if (coll != ncclFuncAllGather || !comm->spansTrays) return ncclSuccess;
+    const size_t totalBytes = (size_t)comm->nRanks * count * ncclTypeSize(dataType);
+    if (*algo == (int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM &&
+        rcclSymTdmWindowContains(extAlgoArchTable(comm), ncclFuncAllGather, totalBytes, /*spansTrays=*/true,
+                                 /*graphMode=*/false)) {
+      return ncclSuccess;
+    }
+  }
   // Symmetric kernel does not apply here (e.g. cuMem disabled -> no symmetric
   // windows, so symk never runs). Report the backend that actually runs instead
   // of failing, so the caller labels its numbers with the real implementation.
@@ -1037,6 +1072,22 @@ inline size_t rcclSymMinR2CapTab(const rcclArchThresholds* table, ncclFunc_t fun
   if (param >= 0) return (size_t)param;
   if (table == nullptr) return 0;
   return funcThresholdFromTable(table->symMinR2, func);
+}
+
+// True when totalBytes is in the TDM window. RCCL_SYM_K_MIN_BYTES / RCCL_SYM_K_MAX_BYTES narrow it.
+inline bool rcclSymTdmWindowContains(const rcclArchThresholds* table, ncclFunc_t func, size_t totalBytes,
+                                     bool spansTrays, bool graphMode) {
+  if (table == nullptr) return false;
+  size_t windowMin = funcThresholdFromTable(table->symTdmMinR2, func);
+  size_t windowMax = funcThresholdFromTable(graphMode ? table->symTdmMaxR2Graph : table->symTdmMaxR2, func);
+  if (windowMin == 0 || windowMax == 0) return false;
+  const size_t crossTrayMax = funcThresholdFromTable(table->symTdmCrossTrayMaxR2, func);
+  if (spansTrays && crossTrayMax != 0) windowMax = std::min(windowMax, crossTrayMax);
+  const int64_t userMin = rcclParamSymKMinBytes();
+  const int64_t userMax = rcclParamSymKMaxBytes();
+  if (userMin >= 0) windowMin = std::max(windowMin, (size_t)userMin);
+  if (userMax >= 0) windowMax = std::min(windowMax, (size_t)userMax);
+  return totalBytes >= windowMin && totalBytes <= windowMax;
 }
 } // namespace
 
@@ -1278,6 +1329,26 @@ int rcclDdaFabricVmmBlocks(const ncclComm* comm) {
   const int want =
     std::min(table->ddaVmmMaxBlocks, std::max(table->ddaVmmMinBlocks, table->ddaVmmBlockBudget / comm->nRanks));
   return std::min(cap, want);
+}
+
+int rcclDdaFabricAgLL128Threads(const ncclComm* comm, size_t totalBytes) {
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  if (table == nullptr ||
+      !rcclWindowFits(totalBytes, table->ddaAgLL128ThreadsMinBytes, table->ddaAgLL128ThreadsMaxBytes)) {
+    return 0;
+  }
+  return table->ddaAgLL128Threads;
+}
+
+int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes) {
+  if (comm == nullptr) return 0;
+  const int cap = comm->ddaFabricMaxBlocks;
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  if (table == nullptr || table->ddaAgLL128MaxBlocks <= 0 ||
+      !rcclWindowFits(totalBytes, table->ddaAgLL128MaxBlocksMinBytes, table->ddaAgLL128MaxBlocksMaxBytes)) {
+    return cap;
+  }
+  return std::min(cap, table->ddaAgLL128MaxBlocks);
 }
 
 // Widest window any enabled DDA tier can serve for this collective. The entry
@@ -1883,10 +1954,13 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // it does not hand registered operands to DDA.
     //
     // GIN AllReduce is selected first in this function and requires symmetric
-    // windows. By default it only claims messages >= 256 MiB, so DDA must still be
-    // allowed for smaller symmetric AllReduces (otherwise they would hit the
-    // symmetric kernel instead of DDA). FORCE_ENABLE=1 keeps the original
-    // !symEligible gate because GIN already returned above for those sizes.
+    // windows. By default gfx950 claims messages >= 256 MiB. gfx1250 claims
+    // [64 MiB, 4 GiB] only when NCCL_GIN_ALLREDUCE_GFX1250_ENABLE=1, so DDA must
+    // still be allowed for smaller symmetric AllReduces (otherwise they would
+    // hit the symmetric kernel instead of DDA). The yield has no lower bound.
+    // Below symMinR2 (8 MiB) DDA already won. From there up to 64 MiB, clearing
+    // ddaSymEligible lets DDA LL/LL128 claim the sum. FORCE_ENABLE=1 keeps the
+    // original gate because GIN already returned above for those sizes.
     // symSuppressedByMin: DDA wins below symMinR2[AR]; do not block it with symkRequested.
     bool ddaSymEligible = symkRequested && !symSuppressedByMin;
   #if defined(ENABLE_ROCSHMEM_GIN)
@@ -2098,13 +2172,36 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // to carry NCCL_WIN_COLL_SYMMETRIC, so agSymkRequested=true implies recv registered.
     const size_t agSymMaxR2  = rcclSymMaxR2CapTab(archTable, ncclFuncAllGather, ceCapturing);
     const size_t agSymMinR2  = rcclSymMinR2CapTab(archTable, ncclFuncAllGather);
-    const bool agSymSuppressedByMin  = agSymkRequested && agSymMinR2 > 0 && totalBytes < agSymMinR2;
-    const bool agSymSuppressedBySize = agSymkRequested && totalBytes > agSymMaxR2;
-    const bool symEligible = agSymkRequested && !agSymSuppressedByMin && !agSymSuppressedBySize;
-    if (!query && agSymkRequested && agSymSuppressedByMin)
+    // The TDM window admits symk when the model picks a TDM kernel. Across trays it is the only way in.
+    bool agTdmWindowAdmitsSymk = false;
+    if (agSymkRequested &&
+        rcclSymTdmWindowContains(archTable, ncclFuncAllGather, totalBytes, comm->spansTrays, ceCapturing)) {
+      int symkAlgo, symkProto, symkChannels;
+      agTdmWindowAdmitsSymk =
+        rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &symkAlgo, &symkProto, &symkChannels,
+                      ncclSymAligned16B(ncclFuncAllGather, comm->rank, sendbuff, recvbuff, sendWin, recvWin,
+                                        sendcount * typeSize)) &&
+        symkAlgo == (int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM;
+    }
+    decision->symkTdmOnly = agTdmWindowAdmitsSymk;
+    const bool agSymSuppressedByMin =
+      agSymkRequested && !agTdmWindowAdmitsSymk && agSymMinR2 > 0 && totalBytes < agSymMinR2;
+    const bool agSymSuppressedBySize = agSymkRequested && !agTdmWindowAdmitsSymk && totalBytes > agSymMaxR2;
+    const bool agSymSuppressedAcrossTrays = agSymkRequested && !agTdmWindowAdmitsSymk && comm->spansTrays;
+    const bool symEligible =
+      agSymkRequested && !agSymSuppressedByMin && !agSymSuppressedBySize && !agSymSuppressedAcrossTrays;
+    if (!query && agTdmWindowAdmitsSymk) {
+      INFO(NCCL_TUNING, "AG symk admitted by the TDM window: totalBytes=%zu", totalBytes);
+    }
+    if (!query && agSymSuppressedByMin) {
       INFO(NCCL_TUNING, "AG symk disqualified: totalBytes=%zu < agSymMinR2=%zu", totalBytes, agSymMinR2);
-    if (!query && agSymkRequested && agSymSuppressedBySize)
+    }
+    if (!query && agSymSuppressedBySize) {
       INFO(NCCL_TUNING, "AG symk disqualified: totalBytes=%zu > agSymMaxR2=%zu", totalBytes, agSymMaxR2);
+    }
+    if (!query && agSymSuppressedAcrossTrays && !agSymSuppressedByMin && !agSymSuppressedBySize) {
+      INFO(NCCL_TUNING, "AG symk disqualified: cross-tray comm outside the TDM window, totalBytes=%zu", totalBytes);
+    }
     // symEligible gates DDA below; the symk report itself is deferred until after
     // the CE-registered check so it loses to CE exactly as dispatch does
     // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so
@@ -3032,6 +3129,17 @@ void rcclOptThreadBlockSize(struct ncclComm* comm, struct ncclTaskColl* info, si
       nThreads = 3 * comm->WarpSize; // min requirement for tree
       INFO(NCCL_INIT, "RCCL Threads per block increased to %d to be at least one warp", nThreads);
     }
+    return;
+  }
+  // gfx1250 DPX: cap the block at 192. A lower NCCL_NTHREADS / NCCL_LL128_NTHREADS,
+  // already in nThreads, still wins. PAT is excluded: its maxThreads entry is
+  // unset on HIP, and the kernel's compute thread is NCCL_MAX_NTHREADS-1, so a
+  // short block leaves the workers spinning. SPX stays on the 256 path below.
+  // RCCL_THREADS_PER_BLOCK is handled above. Channel selection still uses maxThreads.
+  if (info->algorithm != NCCL_ALGO_PAT && comm->archName && IsArchMatch(comm->archName, "gfx1250") &&
+      comm->archThresholds != nullptr &&
+      comm->archThresholds == rcclGetArchThresholds(comm->archName, RCCL_TUNING_PARTITION_DPX)) {
+    nThreads = std::min(nThreads, RCCL_GFX1250_DEFAULT_NTHREADS);
     return;
   }
   if (info->algorithm == NCCL_ALGO_TREE) nThreads = maxNthreads[NCCL_PROTO_SIMPLE]; // Tree now uses all threads always.
