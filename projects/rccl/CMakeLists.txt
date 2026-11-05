@@ -416,6 +416,21 @@ if(NOT _enable_full_coverage_request STREQUAL "OFF")
     "${_device_coverage_capability_error}"
     _full_coverage_resolved
     _full_coverage_blocker)
+  if(_full_coverage_resolved)
+    rccl_compiler_supports_rdc_host_coverage(
+      "${CMAKE_CXX_COMPILER}"
+      "${CMAKE_BINARY_DIR}/CMakeFiles/rccl-rdc-coverage-probe"
+      _rdc_host_coverage_ok
+      _rdc_host_coverage_error)
+    if(NOT _rdc_host_coverage_ok)
+      message(FATAL_ERROR
+        "ENABLE_FULL_COVERAGE cannot be used with '${CMAKE_CXX_COMPILER}': it fails "
+        "to compile -fgpu-rdc host code with -fprofile-instr-generate when the file "
+        "has a dynamic initializer (llvm/llvm-project#233655, fixed in ROCm 10.3). "
+        "Use a newer compiler, or configure with -DENABLE_FULL_COVERAGE=OFF.\n"
+        "Compiler output:\n${_rdc_host_coverage_error}")
+    endif()
+  endif()
 endif()
 
 if(ENABLE_FULL_COVERAGE STREQUAL "AUTO")
