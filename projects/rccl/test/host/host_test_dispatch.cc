@@ -1464,8 +1464,19 @@ void writeMergedCoverage(const std::string &directory, const std::vector<std::st
     const std::string profdataTool = llvmTool("llvm-profdata");
     const std::string covTool = llvmTool("llvm-cov");
 
+    // Each binary costs an llvm-profdata merge and an llvm-cov export over the whole hipified
+    // tree, so this phase runs for a while after the last test has printed its result. It says
+    // what it is doing, and how far through it is, rather than leave the run looking hung.
+    fmt::print("----- coverage: exporting {} binaries into {} -----\n", binaries.size(),
+               (fs::path(directory) / kCoverageTracefile).string());
+    std::fflush(stdout);
+
     std::vector<std::string> tracefiles;
+    size_t exported = 0;
     for (const std::string &binary : binaries) {
+        fmt::print("[{}/{}] {}\n", ++exported, binaries.size(),
+                   fs::path(binary).filename().string());
+        std::fflush(stdout);
         const fs::path binaryDir = fs::path(directory) / fs::path(binary).filename();
         const std::vector<std::string> profiles = profilesIn(binaryDir.string());
         if (profiles.empty()) {
@@ -1499,6 +1510,9 @@ void writeMergedCoverage(const std::string &directory, const std::vector<std::st
         return;
     }
     out << mergeLcovTracefiles(tracefiles);
+    out.close();
+    fmt::print("----- coverage: merged {} tracefiles into {} -----\n", tracefiles.size(), path);
+    std::fflush(stdout);
 }
 
 }  // namespace rccl_host_dispatch
@@ -1797,6 +1811,11 @@ int main(int argc, char **argv)
     writeMergedCoverage(coverageDirectory(), ran, runShell);
 
     if (!options.outputPath.empty()) {
+        // Merging the children's reports walks every case in the tree, which is tens of
+        // thousands of them, so this too is a pause the caller would otherwise see unexplained.
+        fmt::print("----- report: merging {} suites into {} -----\n", fragments.size(),
+                   options.outputPath);
+        std::fflush(stdout);
         std::ofstream report(options.outputPath, std::ios::binary | std::ios::trunc);
         if (!report) {
             fmt::print(stderr, "host-test-dispatch: cannot write {}: {}\n", options.outputPath,
@@ -1804,6 +1823,9 @@ int main(int argc, char **argv)
             return 1;
         }
         report << mergeReports(fragments, options.outputFormat);
+        report.close();
+        fmt::print("----- report: wrote {} -----\n", options.outputPath);
+        std::fflush(stdout);
     }
 
     return failures == 0 ? 0 : 1;
