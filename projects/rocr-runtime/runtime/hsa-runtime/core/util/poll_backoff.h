@@ -29,10 +29,10 @@ inline constexpr int kPollNapFloorUs = 20;
 // runtime has no interrupt-backed signal events at all
 // (g_use_interrupt_wait == false, e.g. the WSL/dxg thunk). Every signal is
 // polling-only there, so the only cost of a long nap is observation latency of
-// the napping wait itself. Where interrupts are available, callers must not
-// back off at all: a single EopEvent-less signal can force the shared
-// async-events thread into polling, and napping would delay the unrelated
-// interrupt-backed handlers batched onto that same thread.
+// the napping wait itself. Where interrupts are available this ceiling must not
+// be used: an EopEvent-less signal can force the shared async-events thread into
+// polling, and a long nap would delay the unrelated interrupt-backed handlers
+// batched onto that same thread (AsyncEventsLoop caps that case at 200us).
 inline constexpr int kPollNapCeilingUs = 2000;
 
 // Given the current nap duration, return the next one: double it, capped at

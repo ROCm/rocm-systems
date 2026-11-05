@@ -2096,6 +2096,10 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
 }
 
 namespace {
+// Nap ceiling (microseconds) for polling while interrupts are available: used by
+// the poll sentinel, and by AsyncEventsLoop when the sentinel thread cannot start.
+constexpr int kInterruptPollNapCeilingUs = 200;
+
 // Watches async signals that have no KFD event (IPC signals, DefaultSignals,
 // or interrupt signals created after the KFD events ran out) while the
 // async-events thread sleeps in the KFD wait on the interrupt-backed signals.
@@ -2179,14 +2183,10 @@ class PollSentinel {
         if (!armed_) break;
         cv_.wait_for(lock, std::chrono::microseconds(nap_us),
                      [this, gen] { return exit_ || !armed_ || generation_ != gen; });
-        nap_us = NextPollNapUs(nap_us, kNapCeilingUs);
+        nap_us = NextPollNapUs(nap_us, kInterruptPollNapCeilingUs);
       }
     }
   }
-
-  // Ceiling (microseconds) for the nap between checks; the floor is
-  // kPollNapFloorUs.
-  static constexpr int kNapCeilingUs = 200;
 
   hsa_signal_t wake_;
   std::mutex mutex_;
@@ -2429,7 +2429,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
             break;
           }
-        } else if (polling && !finish && !g_use_interrupt_wait) {
+        } else if (polling && !finish) {
           // No interrupt-backed event is available for the pending signals --
           // on the WSL/dxg thunk that is every signal, since it implements no
           // KFD events at all.
@@ -2443,9 +2443,12 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           // observation latency while a long-lived idle wait costs almost no
           // CPU. The nap is re-initialized at the outer-loop boundary (see
           // poll_nap_us above), so the escalation only compounds within a
-          // single idle wait batch.
+          // single idle wait batch. With interrupts available this branch is only
+          // reached when the poll sentinel thread could not be started, and the
+          // nap is capped at kInterruptPollNapCeilingUs instead of spinning.
           os::uSleep(poll_nap_us);
-          poll_nap_us = NextPollNapUs(poll_nap_us, kPollNapCeilingUs);
+          poll_nap_us = NextPollNapUs(
+              poll_nap_us, g_use_interrupt_wait ? kInterruptPollNapCeilingUs : kPollNapCeilingUs);
         }
       }
     }
