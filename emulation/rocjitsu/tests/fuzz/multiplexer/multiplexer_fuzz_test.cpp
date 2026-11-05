@@ -77,7 +77,7 @@ TEST(MultiplexerFuzzTest, SelectorIdsRemainStableAsTargetsAreAdded) {
 
 TEST(MultiplexerFuzzTest, StructuredSeedsReachEveryHarness) {
   const std::vector<std::vector<uint8_t>> seeds = seed_corpus();
-  ASSERT_EQ(seeds.size(), 6u);
+  ASSERT_EQ(seeds.size(), 7u);
   std::array<uint64_t, 3> seeds_per_target{};
   std::array<bool, 3> target_did_work{};
   for (std::size_t index = 0; index < seeds.size(); ++index) {
@@ -90,7 +90,7 @@ TEST(MultiplexerFuzzTest, StructuredSeedsReachEveryHarness) {
     ++seeds_per_target[target_index];
     target_did_work[target_index] |= result->work_units != 0;
   }
-  EXPECT_EQ(seeds_per_target, (std::array<uint64_t, 3>{1, 1, 4}));
+  EXPECT_EQ(seeds_per_target, (std::array<uint64_t, 3>{1, 2, 4}));
   EXPECT_EQ(target_did_work, (std::array<bool, 3>{true, true, true}));
 }
 
