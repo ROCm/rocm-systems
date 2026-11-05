@@ -620,29 +620,20 @@ ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, s
   return ncclInternalError;
 }
 
+// Reports the grid of the tier ncclAllReduceDdaFabricLL launches: one-shot when eligible, else two-shot.
 uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype, rcclDdaLaunchCap cap) {
   const size_t bytes = count * ncclTypeSize(datatype);
-  // Uncapped reports the one-shot grid, a bound on the two-shot's; a capped call reports the tier that launches.
-  if ((cap.blocks > 0 || cap.threads > 0) &&
-      !ddaLLArOneShotEligible(comm, nullptr, nullptr, count, datatype, ncclSum)) {
-    const dim3 grid = ddaArLLTwoShotGeom(comm, bytes, cap).first;
-    return grid.x * grid.y;
-  }
-  const dim3 grid = ddaArLLOneShotGeom(comm, bytes, cap).first;
+  const bool oneShot = ddaLLArOneShotEligible(comm, nullptr, nullptr, count, datatype, ncclSum);
+  const dim3 grid = (oneShot ? ddaArLLOneShotGeom(comm, bytes, cap) : ddaArLLTwoShotGeom(comm, bytes, cap)).first;
   return grid.x * grid.y;
 }
 
-// Reports the one-shot tier's grid, as the LL counterpart above reports the LL
-// one-shot's: the two-shot tier sizes its grid on a shard rather than the whole
-// message, so it runs on no more blocks than this. A capped call reports the tier that launches.
+// Reports the grid of the tier ncclAllReduceDdaFabricLL128 launches: one-shot when eligible, else two-shot.
 uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype,
                                            rcclDdaLaunchCap cap) {
   const size_t bytes = count * ncclTypeSize(datatype);
-  if ((cap.blocks > 0 || cap.threads > 0) &&
-      !ddaLL128ArOneShotEligible(comm, nullptr, nullptr, count, datatype, ncclSum)) {
-    const dim3 grid = ddaArLL128TwoShotGeom(comm, bytes, cap).first;
-    return grid.x * grid.y;
-  }
-  const dim3 grid = ddaArLL128OneShotGeom(comm, bytes, cap).first;
+  const bool oneShot = ddaLL128ArOneShotEligible(comm, nullptr, nullptr, count, datatype, ncclSum);
+  const dim3 grid =
+      (oneShot ? ddaArLL128OneShotGeom(comm, bytes, cap) : ddaArLL128TwoShotGeom(comm, bytes, cap)).first;
   return grid.x * grid.y;
 }

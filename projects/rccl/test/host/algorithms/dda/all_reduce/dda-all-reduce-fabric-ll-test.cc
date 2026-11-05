@@ -590,7 +590,7 @@ void DdaAllReduceFabricLLMicrotest::ForEachTierCase(Fn fn) {
   }
 }
 
-// Without a cap every tier launches its fixed shape, and each reporter reports its one-shot tier's fixed grid.
+// Without a cap every tier launches its fixed shape, and its reporter reports the grid it launches.
 TEST_F(DdaAllReduceFabricLLMicrotest, Run_NoCapKeepsTheFixedShapeInEveryTier) {
   ForEachTierCase([&](int maxBlocks, const FixedTier& tier, int nRanks, ncclDataType_t type, size_t bytes,
                       size_t count) {
@@ -600,9 +600,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Run_NoCapKeepsTheFixedShapeInEveryTier) {
     const DdaLaunch zero = RunTier(tier, count, type, {0, 0});
     EXPECT_EQ(zero.grid.x, launch.grid.x);
     EXPECT_EQ(zero.block.x, launch.block.x);
-    const FixedTier oneShot = {tier.ll128, false, 512, tier.unitThreads};
-    const unsigned reported = FixedBlocks(TierUnits(oneShot, bytes, nRanks), 512, tier.unitThreads, maxBlocks);
-    EXPECT_EQ(ReportTier(tier, count, type, {0, 0}), reported);
+    EXPECT_EQ(ReportTier(tier, count, type, {0, 0}), launch.grid.x * launch.grid.y);
   });
 }
 
