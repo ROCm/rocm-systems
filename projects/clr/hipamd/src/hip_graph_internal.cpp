@@ -2182,8 +2182,8 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
   }
 
   // Re-point flat_packet pointers in patch_list into filteredFlatPacketData.
-  for (size_t patchIdx : ownedPatches) {
-    auto& patch = patch_list[patchIdx];
+  for (auto& owned : ownedPatches) {
+    auto& patch = patch_list[owned.patch];
     // The reserved dependency barrier sits at filtered slot 0 when spliced in. Otherwise patch
     // its standalone copy, which is never dispatched, rather than a stale slot of an earlier
     // filtered buffer.
@@ -2192,11 +2192,10 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
       continue;
     }
 
-    auto slot = std::find(dispatchPackets.begin(), dispatchPackets.end(), patch.packet);
-    if (slot == dispatchPackets.end()) {
+    const size_t idx = ownedPatchSlot(owned, patch.packet);
+    if (idx == kNoSlot) {
       continue;
     }
-    const size_t idx = slot - dispatchPackets.begin();
     if (filteredIndex[idx] != kNotFiltered) {
       patch.flat_packet = filteredFlatPacketData.data() + filteredIndex[idx] * kAqlPktSize;
       continue;
@@ -2240,20 +2239,30 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
 // ================================================================================================
 void GraphExecSegmented::PacketBatch::restorePatchListPointers(
     std::vector<amd::Device::HwEventPatch>& patch_list) {
-  for (size_t patchIdx : ownedPatches) {
-    auto& patch = patch_list[patchIdx];
+  for (auto& owned : ownedPatches) {
+    auto& patch = patch_list[owned.patch];
     // The reserved dependency barrier is not in flatPacketData; its filtered slot is stale.
     if (patch.packet == fallbackDepBarrier) {
       patch.flat_packet = nullptr;
       continue;
     }
-    for (size_t i = 0; i < dispatchPackets.size(); ++i) {
-      if (patch.packet == dispatchPackets[i]) {
-        patch.flat_packet = flatPacketData.data() + i * kAqlPktSize;
-        break;
-      }
+    const size_t idx = ownedPatchSlot(owned, patch.packet);
+    if (idx != kNoSlot) {
+      patch.flat_packet = flatPacketData.data() + idx * kAqlPktSize;
     }
   }
+}
+
+// ================================================================================================
+size_t GraphExecSegmented::PacketBatch::ownedPatchSlot(OwnedPatch& owned, const uint8_t* packet) {
+  if (owned.slot < dispatchPackets.size() && dispatchPackets[owned.slot] == packet) {
+    return owned.slot;
+  }
+  auto it = std::find(dispatchPackets.begin(), dispatchPackets.end(), packet);
+  owned.slot = (it == dispatchPackets.end())
+                   ? kNoSlot
+                   : static_cast<size_t>(it - dispatchPackets.begin());
+  return owned.slot;
 }
 
 // ================================================================================================
@@ -2453,7 +2462,12 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph(bool reuseKernargSl
     auto it = pktToFlat.find(patch.packet);
     if (it != pktToFlat.end()) {
       patch.flat_packet = it->second.first;
-      it->second.second->ownedPatches.push_back(i);
+      PacketBatch* batch = it->second.second;
+      const size_t slot =
+          (patch.flat_packet == nullptr)
+              ? PacketBatch::kNoSlot
+              : (patch.flat_packet - batch->flatPacketData.data()) / PacketBatch::kAqlPktSize;
+      batch->ownedPatches.push_back({i, slot});
     }
   }
 
@@ -2649,8 +2663,8 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
     // Update SyncPlan patch list to point to the new packet
     // ApplyHwEventPatches patches the correct packet at launch time.
     if (oldPkt != newPkt) {
-      for (size_t patchIdx : packetBatch.ownedPatches) {
-        auto& patch = sync_plan_.patch_list[patchIdx];
+      for (const auto& owned : packetBatch.ownedPatches) {
+        auto& patch = sync_plan_.patch_list[owned.patch];
         if (patch.packet == oldPkt) {
           patch.packet = newPkt;
         }
