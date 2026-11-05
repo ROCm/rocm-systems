@@ -337,6 +337,7 @@ SSethaltSopp::SSethaltSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= SUSPENDS_WAVE;
 }
 
 namespace detail {
@@ -356,6 +357,7 @@ SSleepSopp::SSleepSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= SUSPENDS_WAVE;
 }
 
 namespace detail {
@@ -421,6 +423,7 @@ SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= SUSPENDS_WAVE;
 }
 
 namespace detail {
@@ -441,6 +444,7 @@ STrapSopp::STrapSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= WRITES_PC;
 }
 
 namespace detail {
@@ -538,6 +542,7 @@ SCbranchCdbgsysSopp::SCbranchCdbgsysSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= WRITES_PC;
 }
 
 namespace detail {
@@ -558,6 +563,7 @@ SCbranchCdbguserSopp::SCbranchCdbguserSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= WRITES_PC;
 }
 
 namespace detail {
@@ -578,6 +584,7 @@ SCbranchCdbgsysOrUserSopp::SCbranchCdbgsysOrUserSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= WRITES_PC;
 }
 
 namespace detail {
@@ -598,6 +605,7 @@ SCbranchCdbgsysAndUserSopp::SCbranchCdbgsysAndUserSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= WRITES_PC;
 }
 
 namespace detail {
