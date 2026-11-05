@@ -1292,7 +1292,8 @@ TEST_F(NetIbCastP2pIflushMicrotest, Iflush_ReadsTheLastNonEmptyBufferOnEveryDevi
   }
 }
 
-// With a GPU scratchpad registered, each device first writes it (no completion) and then reads it back.
+// With a GPU scratchpad registered, each device posts the unsignaled write and
+// the signaled read as one chain. PostSend records one send per ibv_post_send.
 TEST_F(NetIbCastP2pIflushMicrotest, Iflush_GpuScratchpad_WritesThenReadsIt) {
   for (int d = 0; d < 2; d++) {
     recv_->devs[d].gpuFlush.gpuFlushGpuMem = &gpuMem_;
@@ -1302,9 +1303,10 @@ TEST_F(NetIbCastP2pIflushMicrotest, Iflush_GpuScratchpad_WritesThenReadsIt) {
   void* req = nullptr;
   ASSERT_EQ(Flush(&req), ncclSuccess);
   for (int d = 0; d < 2; d++) {
-    ASSERT_EQ(verbs_[d].sends.size(), 2u) << d;
+    ASSERT_EQ(verbs_[d].sends.size(), 1u) << d;
+    ASSERT_EQ(Chain(d, 0).size(), 2u) << d;
     const auto& write = Chain(d, 0)[0];
-    const auto& read = Chain(d, 1)[0];
+    const auto& read = Chain(d, 0)[1];
     EXPECT_EQ(write.wr.opcode, IBV_WR_RDMA_WRITE);
     EXPECT_EQ(write.wr.send_flags, 0);
     EXPECT_EQ(write.wr.wr.rdma.remote_addr, (uint64_t)&gpuMem_);
@@ -1320,8 +1322,8 @@ TEST_F(NetIbCastP2pIflushMicrotest, Iflush_GpuScratchpad_WritesThenReadsIt) {
     return std::string(env) == "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING" ? 0 : d;
   });
   ASSERT_EQ(Flush(&req), ncclSuccess);
-  EXPECT_EQ(verbs_[0].sends.size(), 3u);
-  EXPECT_EQ(Chain(0, 2)[0].wr.wr.rdma.remote_addr, (uint64_t)data_[0]);
+  EXPECT_EQ(verbs_[0].sends.size(), 2u);
+  EXPECT_EQ(Chain(0, 1)[0].wr.wr.rdma.remote_addr, (uint64_t)data_[0]);
 }
 
 TEST_F(NetIbCastP2pIflushMicrotest, Iflush_SharingAndFailures) {
