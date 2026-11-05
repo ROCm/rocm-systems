@@ -143,6 +143,9 @@ DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation,
     for (L2Cache *cache : l2_caches_) {
       cache->maintenance_mutex_.lock();
       ++locked_l2_count;
+      // Earlier invalidate-only maintenance may have logically discarded dirty
+      // bytes without an intervening cache access to reconcile the epoch.
+      cache->synchronize_epoch_locked();
     }
 
     for (MemorySideCache *cache : memory_side_caches_) {
