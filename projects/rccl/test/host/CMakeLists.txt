@@ -1072,16 +1072,6 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroNetIbGin -- src/transport/net_ib/gin.cc. Own binary: it defines ncclRmaIbProxy,
-  # which the cast gin suite does not, and it fakes the rest of net_ib rather than compiling it.
-  set(TEST_MICRO_NET_IB_GIN_SOURCE_FILES
-    net-ib-gin-batch-test.cc
-    fakes/hip_fakes.cc
-    fakes/nccl_fakes.cc
-    fakes/os_fakes.cc                    # ncclOsGetPageSize for ncclIbMalloc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -2444,30 +2434,6 @@ set(_MICRO_TRANSPORT_DEFS
   RMA_SOCKET_MEM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_mem.cc"
   RMA_SOCKET_PROGRESS_RECVER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_progress_recver.cc"
   RMA_SOCKET_SETUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_setup.cc")
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroNetIbGin -- doorbell batching in src/transport/net_ib/gin.cc
-# ---------------------------------------------------------------------------
-# net-ib-gin-batch-test.cc copies this table from p2p.cc. gin.cc indexes it with
-# req->type, so a new enumerator is an out-of-bounds read on the error path.
-# _rccl_src_root is unset once the checks above it have run.
-foreach(_req_type_cc "${CMAKE_CURRENT_LIST_DIR}/../../src/transport/net_ib/p2p.cc"
-                     "${CMAKE_CURRENT_LIST_DIR}/net-ib-gin-batch-test.cc")
-  rccl_assert_source_line("${_req_type_cc}"
-    "const char* ncclIbReqTypeStr[] = {\"Unused\", \"Send\", \"Recv\", \"Flush\", \"IPut\", \"IGet\", \"Failed\"};"
-    "net-ib-gin-batch-test.cc: ncclIbReqTypeStr")
-endforeach()
-rccl_add_micro_binary(rccl-UnitTestsMicroNetIbGin
-  SOURCES ${TEST_MICRO_NET_IB_GIN_SOURCE_FILES}
-  EXTRA_INCLUDES
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    # plugin/gin.cc keeps the basename gin.cc, so add_file_unique() renames this copy.
-    # Re-check after any source-list reorder.
-    NET_IB_GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/gin_tmp.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_gin.yaml")
 
 # One src/transport/ test file per binary. SOURCES lists the fakes and the real sibling units the test file
 # reaches; a sibling unit is compiled real or faked, never both. PROCESS_ISOLATED links the forking runner.

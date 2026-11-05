@@ -792,7 +792,7 @@ TEST_P(RmaMPIFixedSizeTest, IPutSignalInvalidSignalOp)
 }
 
 // Close each context's aggregated puts with one default-flag put, then check
-// the receiver's blocks. Doorbell coalescing is covered by net-ib-gin-batch-test.
+// the receiver's blocks. Doorbell coalescing is covered by NetIbGinMicrotest (transport/net_ib/gin-test.cc).
 TEST_P(RmaMPITest, AggregatedPutsClosedByDefault)
 {
     if(!SetUpFixture(2, 2))
@@ -873,7 +873,7 @@ TEST_P(RmaMPITest, AggregatedPutsClosedByDefault)
 }
 
 // Flush after aggregated puts and collect the flush and the put completions.
-// The payload must match. Doorbell ordering is covered by net-ib-gin-batch-test.
+// The payload must match. Doorbell ordering is covered by NetIbGinMicrotest (transport/net_ib/gin-test.cc).
 TEST_P(RmaMPITest, IFlushAfterAggregatedPuts)
 {
     if(!SetUpFixture(2, 2))
