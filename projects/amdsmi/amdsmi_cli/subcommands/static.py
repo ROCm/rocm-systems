@@ -19,6 +19,45 @@ from amdsmi import amdsmi_exception, amdsmi_interface
 AMD_VENDOR_DISPLAY_NAME = "Advanced Micro Devices, Inc. [AMD/ATI]"
 
 
+def _cache_names(cache_info_list):
+    """Return a descriptive name for each entry of amdsmi_get_gpu_cache_info().
+
+    KFD flags vector L1, scalar L1 and GL1 identically (level 1, DATA|SIMD) but
+    enumerates them in a fixed order: vector L1, L1 instruction, scalar L1, GL1.
+    """
+    has_l1_inst = any(
+        cache.get("cache_level") == 1 and "INST_CACHE" in cache.get("cache_properties", [])
+        for cache in cache_info_list
+    )
+    names = []
+    seen_l1_inst = False
+    scalar_size = None
+    for cache in cache_info_list:
+        level = cache.get("cache_level")
+        properties = cache.get("cache_properties", [])
+        if level == 1 and "INST_CACHE" in properties:
+            seen_l1_inst = True
+            name = "L1 Instruction"
+        elif level == 1 and "DATA_CACHE" in properties:
+            if not has_l1_inst:
+                name = "L1 Data"
+            elif not seen_l1_inst:
+                name = "L1 Vector Data"
+            elif scalar_size in (None, cache.get("cache_size")):
+                scalar_size = cache.get("cache_size")
+                name = "L1 Scalar Data"
+            else:
+                name = "GL1 Data"
+        elif "INST_CACHE" in properties:
+            name = f"L{level} Instruction"
+        elif "DATA_CACHE" in properties:
+            name = f"L{level} Data"
+        else:
+            name = f"L{level}"
+        names.append(name)
+    return names
+
+
 class StaticCommands:
     def static_cpu(self, args, multiple_devices=False, cpu=None, interface_ver=None):
         """Get Static information for target cpu
@@ -1112,6 +1151,7 @@ class StaticCommands:
                 cache_info_list = amdsmi_interface.amdsmi_get_gpu_cache_info(args.gpu)["cache"]
                 logging.debug(f"cache_info dictionary = {cache_info_list}")
 
+                cache_names = _cache_names(cache_info_list)
                 for index, cache_info in enumerate(cache_info_list):
                     # Label each entry with a cache-type acronym from level +
                     # DATA/INST flags (L1D/L1I/L2/L3, else L<level>).
@@ -1124,7 +1164,11 @@ class StaticCommands:
                     else:
                         cache_acronym = f"L{cache_level}"
 
-                    new_cache_info = {"cache": index, "cache_acronym": cache_acronym}
+                    new_cache_info = {
+                        "cache": index,
+                        "cache_acronym": cache_acronym,
+                        "cache_name": cache_names[index],
+                    }
                     new_cache_info.update(cache_info)
                     # Aggregate size across all instances (per-instance size x count).
                     new_cache_info["total_cache_size"] = (
