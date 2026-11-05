@@ -5,10 +5,10 @@
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_binding_factory.h"
+#include "util/result.h"
 
 #include <sys/mman.h>
 
-#include "util/result.h"
 #include <algorithm>
 #include <chrono>
 #include <functional>
@@ -384,6 +384,10 @@ public:
   }
   bool faulted() const { return sim_.cp()->queue_faulted_for_test(kQueueId, kProcessId); }
 
+  std::optional<amdgpu::GpuVmAccess> snapshot() const {
+    return sim_.soc->gpu_vm().snapshot(address_space_);
+  }
+
   void step() {
     sim_.engine->schedule_event_now(sim_.cp()->doorbell_event());
     ASSERT_TRUE(sim_.engine->step()) << "transient AQL test did not execute a doorbell event";
@@ -605,20 +609,19 @@ public:
   template <typename T> void store(uint64_t address, const T &value) {
     static_assert(std::is_trivially_copyable_v<T>);
     auto access = sim_.soc->gpu_vm().snapshot(address_space_);
-    ASSERT_TRUE(access);
+    ASSERT_TRUE(access) << "cannot snapshot for store at " << address;
     ASSERT_EQ(access->write(address, std::as_bytes(std::span(&value, 1))),
-              amdgpu::VmAccessOutcome::Complete);
+              amdgpu::VmAccessOutcome::Complete)
+        << "store at " << address;
   }
 
-  template <typename T> util::FailureOr<T> load(uint64_t address) const {
+  template <typename T> void load(uint64_t address, T &value) const {
     static_assert(std::is_trivially_copyable_v<T>);
-    T value{};
     auto access = sim_.soc->gpu_vm().snapshot(address_space_);
-    if (!access || access->read(address, std::as_writable_bytes(std::span(&value, 1))) !=
-                       amdgpu::VmAccessOutcome::Complete) {
-      return util::Result::failure();
-    }
-    return value;
+    ASSERT_TRUE(access) << "cannot snapshot for load at " << address;
+    ASSERT_EQ(access->read(address, std::as_writable_bytes(std::span(&value, 1))),
+              amdgpu::VmAccessOutcome::Complete)
+        << "load at " << address;
   }
 
   /// @brief Leave the signal value mapped but drop the metadata behind it.
@@ -1152,7 +1155,10 @@ TEST(CommandProcessorAqlTest, QueuePointerSnapshotPinsRingFetchAndCursorPublicat
   const auto replacement = queue.make_invalid_replacement();
   queue.replace_after_next_write_pointer_load(replacement);
 
+  const auto original = queue.snapshot();
+  ASSERT_TRUE(original);
   ASSERT_NO_FATAL_FAILURE(queue.step());
+  EXPECT_FALSE(original->is_current());
 
   EXPECT_EQ(queue.accepted_entries(), 1u);
   EXPECT_EQ(queue.read_pointer(), 1u);
@@ -1170,7 +1176,10 @@ TEST(CommandProcessorAqlTest, RingSnapshotPinsDependencyReads) {
   queue.set_replacement_dependency(replacement, 1);
   queue.replace_after_next_packet_read(replacement);
 
+  const auto original = queue.snapshot();
+  ASSERT_TRUE(original);
   ASSERT_NO_FATAL_FAILURE(queue.step());
+  EXPECT_FALSE(original->is_current());
 
   EXPECT_EQ(queue.accepted_entries(), 1u);
   EXPECT_EQ(queue.read_pointer(), 1u);
@@ -1188,7 +1197,10 @@ TEST(CommandProcessorAqlTest, RingSnapshotPinsKernelDescriptorReads) {
   queue.fail_replacement_kernel_descriptor_read(replacement, amdgpu::VmAccessOutcome::Faulted);
   queue.replace_after_next_packet_read(replacement);
 
+  const auto original = queue.snapshot();
+  ASSERT_TRUE(original);
   ASSERT_NO_FATAL_FAILURE(queue.step());
+  EXPECT_FALSE(original->is_current());
 
   EXPECT_EQ(queue.accepted_entries(), 1u);
   EXPECT_EQ(queue.read_pointer(), 0u) << "the admitted kernel has not executed yet";
@@ -1206,7 +1218,10 @@ TEST(CommandProcessorAqlTest, CursorRetryKeepsSnapshotThatReadTheDependency) {
   const auto replacement = queue.make_invalid_replacement();
   queue.replace_after_next_dependency_load(replacement);
 
+  const auto original = queue.snapshot();
+  ASSERT_TRUE(original);
   ASSERT_NO_FATAL_FAILURE(queue.step());
+  EXPECT_FALSE(original->is_current());
 
   EXPECT_EQ(queue.accepted_entries(), 1u);
   EXPECT_EQ(queue.read_pointer(), 1u);
@@ -1384,12 +1399,10 @@ TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyL2Line) {
   EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Accepted);
 
   // Backing must reflect the SDMA fill, not the stale cached line.
-  util::FailureOr<uint32_t> loaded_7 = queue.load<uint32_t>(queue.dst_va());
-  ASSERT_TRUE(loaded_7.succeeded());
-  EXPECT_EQ(loaded_7.value(), kFillWord);
-  util::FailureOr<uint32_t> loaded_6 = queue.load<uint32_t>(queue.dst_va());
-  ASSERT_TRUE(loaded_6.succeeded());
-  EXPECT_NE(loaded_6.value(), kStaleWord);
+  uint32_t filled_word{};
+  ASSERT_NO_FATAL_FAILURE(queue.load(queue.dst_va(), filled_word));
+  EXPECT_EQ(filled_word, kFillWord);
+  EXPECT_NE(filled_word, kStaleWord);
 }
 
 TEST(Gfx1250SdmaTest, ConstFillClippedDestinationRejectsWithoutPartialTransfer) {
@@ -1578,9 +1591,9 @@ TEST(Gfx1250SdmaTest, WrappingWriteHaltsInsteadOfLandingInLowMemory) {
 
   queue.submit(8 + kDwords);
   EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Faulted);
-  util::FailureOr<uint32_t> loaded_5 = queue.load<uint32_t>(kWrapTarget);
-  ASSERT_TRUE(loaded_5.succeeded());
-  EXPECT_EQ(loaded_5.value(), kSentinel) << "a wrapping write reached low memory";
+  uint32_t wrapped_word{};
+  ASSERT_NO_FATAL_FAILURE(queue.load(kWrapTarget, wrapped_word));
+  EXPECT_EQ(wrapped_word, kSentinel) << "a wrapping write reached low memory";
   EXPECT_EQ(queue.signal_value(), 5) << "a fence behind a wrapping write ran";
 }
 
@@ -1645,12 +1658,10 @@ TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingScalarL1Line) {
     l2->flush_all();
 
   // Backing must reflect the SDMA fill, not the stale scalar line.
-  util::FailureOr<uint32_t> loaded_4 = queue.load<uint32_t>(queue.dst_va());
-  ASSERT_TRUE(loaded_4.succeeded());
-  EXPECT_EQ(loaded_4.value(), kFillWord);
-  util::FailureOr<uint32_t> loaded_3 = queue.load<uint32_t>(queue.dst_va());
-  ASSERT_TRUE(loaded_3.succeeded());
-  EXPECT_NE(loaded_3.value(), kStaleWord);
+  uint32_t filled_word{};
+  ASSERT_NO_FATAL_FAILURE(queue.load(queue.dst_va(), filled_word));
+  EXPECT_EQ(filled_word, kFillWord);
+  EXPECT_NE(filled_word, kStaleWord);
 }
 
 // OP_TIMESTAMP is a direct backing-store write like COPY/FENCE/CONST_FILL, so it
@@ -1688,9 +1699,8 @@ TEST(Gfx1250SdmaTest, TimestampSupersedesOverlappingDirtyL2Line) {
 
   // The timestamp value is nondeterministic, but it must not be the stale word
   // and must be a plausible nonzero nanosecond count.
-  util::FailureOr<uint64_t> loaded_2 = queue.load<uint64_t>(queue.dst_va());
-  ASSERT_TRUE(loaded_2.succeeded());
-  const uint64_t stored = loaded_2.value();
+  uint64_t stored{};
+  ASSERT_NO_FATAL_FAILURE(queue.load(queue.dst_va(), stored));
   EXPECT_NE(stored, kStaleQword);
   EXPECT_NE(stored, 0u);
 }
@@ -1744,9 +1754,7 @@ TEST(Gfx1250SdmaTest, GcrWritebackPublishesInvalidateDropsNoopKeeps) {
     queue.submit(6); // gfx1250 GCR is 6 dwords.
     EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Accepted);
 
-    util::FailureOr<uint32_t> loaded_1 = queue.load<uint32_t>(queue.dst_va());
-    ASSERT_TRUE(loaded_1.succeeded());
-    out.backing = loaded_1.value();
+    ASSERT_NO_FATAL_FAILURE(queue.load(queue.dst_va(), out.backing));
     // Read back through L2: a still-resident dirty line returns kDirtyWord; a
     // dropped line re-fetches from backing on the miss.
     uint32_t l2_word = 0;
