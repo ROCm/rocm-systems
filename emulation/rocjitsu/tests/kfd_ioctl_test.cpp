@@ -1600,26 +1600,35 @@ TEST_P(KfdNativePm4Test, NativePm4PauseResumeRejectsInvalidRingAndTerminalFault)
   update.ring_size = 3;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), -EINVAL);
   update.ring_size = queue.ring_size;
-  const auto queue_handle = process->queue_doorbell_map_.at(queue.queue_id).queue_handle;
   // Invalid updates must leave the old ring live at its previous cursor.
   std::copy(packet.begin(), packet.end(), ring.begin() + 10);
   ring[14] = 0xabcdef01;
   std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell))
       .store(15, std::memory_order_release);
-  // Publish through the same binding so update rejection does not depend on
-  // when the host doorbell monitor next runs.
-  ASSERT_EQ(soc_->queue_registry().submit_producer(queue_handle, 15).status,
-            rocjitsu::amdgpu::QueueSubmissionStatus::Accepted);
-  pump();
+  const auto pump_until = [&](const auto &ready) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!ready() && std::chrono::steady_clock::now() < deadline) {
+      (void)engine_->step();
+      std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
+    return ready();
+  };
+  ASSERT_TRUE(pump_until([&] {
+    return std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire) == 15;
+  }));
   EXPECT_EQ(std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire), 15u);
   EXPECT_EQ(pointers[2], 0xabcdef01u);
 
   ring[15] = 0; // Invalid type: the queue enters terminal failure.
   std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell))
       .store(16, std::memory_order_release);
-  ASSERT_EQ(soc_->queue_registry().submit_producer(queue_handle, 16).status,
-            rocjitsu::amdgpu::QueueSubmissionStatus::Accepted);
-  pump();
+  ASSERT_TRUE(pump_until([&] {
+    bool faulted = false;
+    soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+      faulted |= cp->queue_faulted_for_test(queue.queue_id, driver_->local_process_id());
+    });
+    return faulted;
+  }));
   EXPECT_EQ(std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire), 15u);
   update.queue_percentage = 0;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), -EINVAL);

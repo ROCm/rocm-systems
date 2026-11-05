@@ -100,19 +100,21 @@ SdmaQueueBindingFactory::create_binding(const QueueRegistrationRequest &request)
   SdmaQueueProgressObserver progress_observer = progress_observer_factory_
                                                     ? progress_observer_factory_(context)
                                                     : SdmaQueueProgressObserver{};
-  // Resolve foreign callbacks above the fatal internal attachment boundary.
+  // Worker startup can fail before attach publishes the queue. Let the KFD
+  // boundary translate that error after the local queue state unwinds.
+  const SdmaQueueScheduler::Handle handle = scheduler_->attach(
+      {.ring = std::move(ring),
+       .context = context,
+       .producer_pointer_address = request.ring.producer_pointer_address,
+       .doorbell_offset = request.doorbell.offset,
+       .doorbell_base = request.doorbell.host_base,
+       .last_doorbell = request.doorbell.last_value,
+       .host_accessible = request.doorbell.mode == QueueDoorbellMode::HostPolled},
+      std::move(callbacks), std::move(progress_observer));
+  if (!handle)
+    return {};
+  // Once attached, allocation failure must not strand an unpublished binding.
   return [&]() noexcept -> QueueBindingCreateResult {
-    const SdmaQueueScheduler::Handle handle = scheduler_->attach(
-        {.ring = std::move(ring),
-         .context = context,
-         .producer_pointer_address = request.ring.producer_pointer_address,
-         .doorbell_offset = request.doorbell.offset,
-         .doorbell_base = request.doorbell.host_base,
-         .last_doorbell = request.doorbell.last_value,
-         .host_accessible = request.doorbell.mode == QueueDoorbellMode::HostPolled},
-        std::move(callbacks), std::move(progress_observer));
-    if (!handle)
-      return {};
     return {.status = QueueBindingCreateStatus::Bound,
             .binding = std::make_unique<SdmaQueueBinding>(*scheduler_, handle)};
   }();

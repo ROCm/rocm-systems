@@ -190,7 +190,8 @@ public:
   /// @brief Create a fully attached binding or reject without leaving processor state.
   /// @details A factory that propagates an exception must undo its own attachment:
   /// the registry cannot destroy a binding it has not received. Internal factories
-  /// make standard-library failures during attachment publication fatal.
+  /// make allocation failures after attachment publication fatal. SDMA worker
+  /// startup failures before publication can propagate to the frontend boundary.
   [[nodiscard]] virtual QueueBindingCreateResult
   create_binding(const QueueRegistrationRequest &request) = 0;
 };
