@@ -13,11 +13,13 @@ set -euo pipefail
 PATCHES_DIR="$(dirname "$0")/../patches/kernel"
 
 # Mailing list thread roots (message-id index pages on ratatoskr.run)
+# v4 URL is not yet known; fill it in when the series is posted.
 declare -A THREAD_URLS=(
     [rfc]="https://www.spinics.net/lists/kernel/msg5839841.html"
     [v1]="https://ratatoskr.run/lkml/2026/04/3508169/t"
     [v2]="https://ratatoskr.run/linux-pci/2026/05/8996752/t"
     [v3]="https://ratatoskr.run/linux-pci/2026/06/17096410/t"
+    [v4]=""   # TODO: fill in when v4 is posted to linux-pci
 )
 
 # lore.kernel.org query URLs — the canonical source for downloadable mboxes
@@ -27,26 +29,32 @@ declare -A LORE_URLS=(
     [v1]="https://lore.kernel.org/linux-pci/?q=dmaengine+SDXI+v1"
     [v2]="https://lore.kernel.org/linux-pci/?q=dmaengine+SDXI+v2"
     [v3]="https://lore.kernel.org/linux-pci/?q=dmaengine+SDXI+v3"
+    [v4]=""   # TODO: fill in when v4 is posted
 )
 
 usage() {
-    echo "Usage: $0 [--version <rfc|v1|v2|v3>] [--all]"
+    echo "Usage: $0 [--version <rfc|v1|v2|v3|v4>] [--all]"
     echo "       $0 --list   # print known thread URLs"
     exit 1
 }
 
 list_urls() {
     echo "Known SDXI patch series:"
-    for ver in rfc v1 v2 v3; do
-        echo "  $ver: ${THREAD_URLS[$ver]}"
+    for ver in rfc v1 v2 v3 v4; do
+        url="${THREAD_URLS[$ver]}"
+        echo "  $ver: ${url:-<not yet posted>}"
     done
 }
 
 fetch_version() {
     local ver="$1"
-    local url="${THREAD_URLS[$ver]:-}"
+    local url="${THREAD_URLS[$ver]:-__missing__}"
+    if [[ "$url" == "__missing__" ]]; then
+        echo "Unknown version: $ver (not in THREAD_URLS)" >&2
+        exit 1
+    fi
     if [[ -z "$url" ]]; then
-        echo "Unknown version: $ver" >&2
+        echo "Version $ver is not yet posted; update THREAD_URLS[$ver] when the series appears." >&2
         exit 1
     fi
 
@@ -108,7 +116,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if $fetch_all; then
-    versions=(rfc v1 v2 v3)
+    versions=(rfc v1 v2 v3)   # v4 excluded until URL is known
 fi
 
 if [[ ${#versions[@]} -eq 0 ]]; then

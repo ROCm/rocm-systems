@@ -26,6 +26,7 @@ Lynch** and **Wei Huang** (AMD).
 | v1 (Apr 2026) | lkml | https://ratatoskr.run/lkml/2026/04/3508169/t |
 | v2 (May 2026) | linux-pci | https://ratatoskr.run/linux-pci/2026/05/8996752/t |
 | v3 (Jun 2026) | linux-pci | https://ratatoskr.run/linux-pci/2026/06/17096410/t |
+| v4 | linux-pci | **not yet posted** — URL unknown as of 2026-11-04; update `scripts/fetch-kernel-patches.sh` and this table when it appears |
 
 LWN coverage: https://lwn.net/Articles/1036975/
 Phoronix: https://www.phoronix.com/news/Initial-Linux-SDXI-Driver

@@ -151,6 +151,126 @@ test_bench_decompress() {
 }
 
 # ---------------------------------------------------------------------------
+# test_compress_level N: compress + roundtrip at a specific level
+# ---------------------------------------------------------------------------
+test_compress_level() {
+    local level="$1"
+    local src="$TMPDIR_TEST/level${level}_src.txt"
+    local cmp="$TMPDIR_TEST/level${level}.zlib"
+    local dec="$TMPDIR_TEST/level${level}_dec.txt"
+    printf 'SDXI level %d test pattern\n%.0s' "$level" {1..400} > "$src"
+    $SDXI_CLI $OPTS compress "$src" "$cmp" "$level"
+    $SDXI_CLI $OPTS decompress "$cmp" "$dec"
+    cmp -s "$src" "$dec"
+    check "compress/decompress roundtrip at level $level: data matches" $?
+}
+
+# ---------------------------------------------------------------------------
+# test_compress_level_ordering: level 9 output <= level 1 on compressible data
+# ---------------------------------------------------------------------------
+test_compress_level_ordering() {
+    local src="$TMPDIR_TEST/ord_src.txt"
+    local cmp1="$TMPDIR_TEST/ord_l1.zlib"
+    local cmp9="$TMPDIR_TEST/ord_l9.zlib"
+    printf 'compressible SDXI ordering test pattern\n%.0s' {1..600} > "$src"
+    $SDXI_CLI $OPTS compress "$src" "$cmp1" 1
+    $SDXI_CLI $OPTS compress "$src" "$cmp9" 9
+    local sz1 sz9
+    sz1=$(wc -c < "$cmp1")
+    sz9=$(wc -c < "$cmp9")
+    [[ $sz9 -le $sz1 ]]
+    check "compress level 9 output <= level 1 ($sz9 <= $sz1)" $?
+}
+
+# ---------------------------------------------------------------------------
+# test_compress_incompressible: random data must roundtrip even if it expands
+# ---------------------------------------------------------------------------
+test_compress_incompressible() {
+    local src="$TMPDIR_TEST/incompat_src.bin"
+    local cmp="$TMPDIR_TEST/incompat.zlib"
+    local dec="$TMPDIR_TEST/incompat_dec.bin"
+    dd if=/dev/urandom bs=65536 count=1 of="$src" 2>/dev/null
+    $SDXI_CLI $OPTS compress "$src" "$cmp"
+    $SDXI_CLI $OPTS decompress "$cmp" "$dec"
+    cmp -s "$src" "$dec"
+    check "compress/decompress incompressible 64 KiB: data matches" $?
+}
+
+# ---------------------------------------------------------------------------
+# test_compress_large: 4 MiB roundtrip
+# ---------------------------------------------------------------------------
+test_compress_large() {
+    local src="$TMPDIR_TEST/large_src.txt"
+    local cmp="$TMPDIR_TEST/large.zlib"
+    local dec="$TMPDIR_TEST/large_dec.txt"
+    python3 -c "print('SDXI large compress test\n' * 50000)" > "$src"
+    $SDXI_CLI $OPTS compress "$src" "$cmp"
+    $SDXI_CLI $OPTS decompress "$cmp" "$dec"
+    cmp -s "$src" "$dec"
+    check "compress/decompress large (~4 MiB): data matches" $?
+}
+
+# ---------------------------------------------------------------------------
+# test_compress_tiny: very small input (< 64 bytes)
+# ---------------------------------------------------------------------------
+test_compress_tiny() {
+    local src="$TMPDIR_TEST/tiny_src.txt"
+    local cmp="$TMPDIR_TEST/tiny.zlib"
+    local dec="$TMPDIR_TEST/tiny_dec.txt"
+    printf 'hi' > "$src"
+    $SDXI_CLI $OPTS compress "$src" "$cmp"
+    $SDXI_CLI $OPTS decompress "$cmp" "$dec"
+    cmp -s "$src" "$dec"
+    check "compress/decompress tiny (2 bytes): data matches" $?
+}
+
+# ---------------------------------------------------------------------------
+# test_compress_already_compressed: re-compressing zlib output must roundtrip
+# ---------------------------------------------------------------------------
+test_compress_already_compressed() {
+    local src="$TMPDIR_TEST/already_src.txt"
+    local cmp1="$TMPDIR_TEST/already_l1.zlib"
+    local cmp2="$TMPDIR_TEST/already_l2.zlib"
+    local dec="$TMPDIR_TEST/already_dec.txt"
+    printf 'SDXI already-compressed test\n%.0s' {1..200} > "$src"
+    $SDXI_CLI $OPTS compress "$src"  "$cmp1"
+    $SDXI_CLI $OPTS compress "$cmp1" "$cmp2"
+    $SDXI_CLI $OPTS decompress "$cmp2" "$cmp1"   # peel one layer
+    $SDXI_CLI $OPTS decompress "$cmp1" "$dec"    # peel second
+    cmp -s "$src" "$dec"
+    check "compress/decompress double-wrapped: data matches" $?
+}
+
+# ---------------------------------------------------------------------------
+# test_decompress_truncated: truncated stream must return error
+# ---------------------------------------------------------------------------
+test_decompress_truncated() {
+    local src="$TMPDIR_TEST/trunc_src.txt"
+    local cmp="$TMPDIR_TEST/trunc.zlib"
+    local cmp_half="$TMPDIR_TEST/trunc_half.zlib"
+    local dec="$TMPDIR_TEST/trunc_dec.txt"
+    printf 'SDXI truncated stream test\n%.0s' {1..200} > "$src"
+    $SDXI_CLI $OPTS compress "$src" "$cmp"
+    local full_sz
+    full_sz=$(wc -c < "$cmp")
+    # Keep only the first half — guaranteed to be incomplete
+    dd if="$cmp" bs=1 count=$((full_sz / 2)) of="$cmp_half" 2>/dev/null
+    if $SDXI_CLI $OPTS decompress "$cmp_half" "$dec" 2>/dev/null; then
+        check "decompress truncated stream: returns error" 1
+    else
+        check "decompress truncated stream: returns error" 0
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# test_stress: run sdxi-cli stress (all levels × patterns × sizes)
+# ---------------------------------------------------------------------------
+test_stress() {
+    $SDXI_CLI $OPTS stress
+    check "stress: all compress/decompress combinations pass" $?
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 require_device
@@ -166,6 +286,20 @@ test_decompress_bad
 test_bench_copy
 test_bench_compress
 test_bench_decompress
+
+echo ""
+echo "--- Compression / decompression extended tests ---"
+
+test_compress_level 1
+test_compress_level 5
+test_compress_level 9
+test_compress_level_ordering
+test_compress_incompressible
+test_compress_large
+test_compress_tiny
+test_compress_already_compressed
+test_decompress_truncated
+test_stress
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

@@ -7,6 +7,7 @@
  *   decompress  <src> <dst>                   zlib-decompress via SDXI
  *   roundtrip   <src>                         compress + decompress, verify
  *   bench       <copy|compress|decompress> <size_bytes> [iterations]
+ *   stress      [iterations]                  compress/decompress across levels and patterns
  *
  * Usage: sdxi-cli [-d /dev/sdxi] [-v] <subcommand> [args...]
  */
@@ -419,6 +420,131 @@ static int cmd_bench(int argc, char **argv)
 }
 
 /* ------------------------------------------------------------------ */
+/* stress                                                              */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Exercise compress+decompress roundtrip across all compression levels
+ * (0,1,6,9) and two data patterns (compressible and pseudo-random) at
+ * several buffer sizes.  Intended for in-VM validation of the full
+ * compress/decompress path.
+ */
+static int cmd_stress(int argc, char **argv)
+{
+	static const size_t   sizes[]  = {1, 64, 4096, 65536, 1 << 20};
+	static const uint32_t levels[] = {0, 1, 6, 9};
+	int iters = (argc >= 1) ? atoi(argv[0]) : 1;
+	int pass = 0, fail = 0;
+
+	if (iters <= 0) {
+		fprintf(stderr, "stress: iterations must be > 0\n");
+		return 1;
+	}
+
+	for (int it = 0; it < iters; it++) {
+		for (int pat = 0; pat < 2; pat++) {
+			const char *pat_name = (pat == 0) ? "seq" : "rand";
+
+			for (size_t si = 0; si < sizeof(sizes)/sizeof(sizes[0]); si++) {
+				size_t sz = sizes[si];
+
+				uint8_t *orig = malloc(sz);
+				if (!orig)
+					die("malloc");
+
+				if (pat == 0) {
+					for (size_t i = 0; i < sz; i++)
+						orig[i] = (uint8_t)(i & 0x7f);
+				} else {
+					/* xorshift32 — reproducible pseudo-random */
+					uint32_t s = 0xDEADBEEF;
+					for (size_t i = 0; i < sz; i++) {
+						s ^= s << 13;
+						s ^= s >> 17;
+						s ^= s << 5;
+						orig[i] = (uint8_t)(s & 0xFF);
+					}
+				}
+
+				for (size_t li = 0; li < sizeof(levels)/sizeof(levels[0]); li++) {
+					uint32_t level = levels[li];
+
+					/* worst-case zlib bound: src + 0.1% + 12 bytes header */
+					size_t cmp_cap = sz + sz / 100 + 128;
+					uint8_t *cmp_buf = malloc(cmp_cap);
+					uint8_t *dec_buf = malloc(sz + 1);
+					if (!cmp_buf || !dec_buf)
+						die("malloc");
+
+					struct sdxi_ioc_compress cioc = {
+						.src     = (uint64_t)(uintptr_t)orig,
+						.src_len = sz,
+						.dst     = (uint64_t)(uintptr_t)cmp_buf,
+						.dst_cap = cmp_cap,
+						.level   = level,
+					};
+
+					int ok = 1;
+					if (ioctl(g_fd, SDXI_IOC_COMPRESS, &cioc) < 0) {
+						if (g_verbose)
+							fprintf(stderr,
+								"FAIL compress pat=%s sz=%zu level=%u: %s\n",
+								pat_name, sz, level, strerror(errno));
+						ok = 0;
+					} else {
+						struct sdxi_ioc_decompress dioc = {
+							.src     = (uint64_t)(uintptr_t)cmp_buf,
+							.src_len = cioc.out_len,
+							.dst     = (uint64_t)(uintptr_t)dec_buf,
+							.dst_cap = sz + 1,
+						};
+						if (ioctl(g_fd, SDXI_IOC_DECOMPRESS, &dioc) < 0) {
+							if (g_verbose)
+								fprintf(stderr,
+									"FAIL decompress pat=%s sz=%zu level=%u: %s\n",
+									pat_name, sz, level, strerror(errno));
+							ok = 0;
+						} else if (dioc.out_len != sz ||
+							   memcmp(orig, dec_buf, sz) != 0) {
+							if (g_verbose)
+								fprintf(stderr,
+									"FAIL data mismatch pat=%s sz=%zu level=%u "
+									"(out_len=%llu)\n",
+									pat_name, sz, level,
+									(unsigned long long)dioc.out_len);
+							ok = 0;
+						} else if (g_verbose) {
+							printf("PASS pat=%4s sz=%7zu level=%u: "
+							       "%zu -> %llu bytes (%.2fx)\n",
+							       pat_name, sz, level, sz,
+							       (unsigned long long)cioc.out_len,
+							       sz > 0 ? (double)sz / (double)cioc.out_len
+								     : 0.0);
+						}
+					}
+
+					if (ok)
+						pass++;
+					else
+						fail++;
+
+					free(cmp_buf);
+					free(dec_buf);
+				}
+				free(orig);
+			}
+		}
+	}
+
+	int total = pass + fail;
+	printf("stress: %d/%d passed", pass, total);
+	if (iters > 1)
+		printf(" (%d iteration%s)", iters, iters == 1 ? "" : "s");
+	printf("\n");
+	return (fail == 0) ? 0 : 1;
+}
+
+/* ------------------------------------------------------------------ */
 /* main                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -433,6 +559,7 @@ static void usage(void)
 		"  decompress  <src> <dst>\n"
 		"  roundtrip   <src>\n"
 		"  bench       <copy|compress|decompress> <size> [iters]\n"
+		"  stress      [iters]   compress/decompress roundtrip across levels and patterns\n"
 		"\n"
 		"Options:\n"
 		"  -d <device>   SDXI device path (default: /dev/sdxi)\n"
@@ -468,6 +595,7 @@ int main(int argc, char **argv)
 	else if (strcmp(cmd, "decompress") == 0) rc = cmd_decompress(rem, rest);
 	else if (strcmp(cmd, "roundtrip")  == 0) rc = cmd_roundtrip(rem, rest);
 	else if (strcmp(cmd, "bench")      == 0) rc = cmd_bench(rem, rest);
+	else if (strcmp(cmd, "stress")     == 0) rc = cmd_stress(rem, rest);
 	else {
 		fprintf(stderr, "sdxi-cli: unknown subcommand '%s'\n", cmd);
 		usage();
