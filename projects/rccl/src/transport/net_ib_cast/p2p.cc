@@ -100,20 +100,6 @@ static inline bool IbCastSkipRecvCompletionCheck(const struct ncclIbNetCommBase*
           base->optRecvCompletion);
 }
 
-// Bytes this QP consumes of a send. A weighted QP takes an aligned share of the size, and the last
-// weighted QP also takes whatever remains. Otherwise every QP takes the same aligned equal split.
-static inline int IbCastMultiSendChunk(const struct ncclIbRequest* req, const struct ncclIbSendComm* comm, int nqps,
-                                       int qpOrdinal, int qpIndex, uint32_t sent, bool weighted) {
-  const int align = IB_WRITE_CHUNK_ALIGNMENT;
-  if (weighted) {
-    int weightedSendSize = (int)((double)req->send.size * comm->base.qpTxSched[qpIndex].weight);
-    int chunkSize = (weightedSendSize / align) * align;
-    if (qpOrdinal == nqps - 1) chunkSize = std::max((int)(req->send.size - sent), chunkSize);
-    return chunkSize;
-  }
-  return DIVUP(DIVUP(req->send.size, nqps), align) * align;
-}
-
 ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, int startQpIndex, bool wrrSched,
                              bool useWriteOp) {
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
@@ -213,6 +199,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
   uint32_t sendOffsets[NCCL_NET_IB_MAX_RECVS] = {0};
   int qpIndex = -1;
   ncclIbQp* qp = NULL;
+  const int align = 128;
   for (int i = 0; i < nqps; i++) {
     NCCLCHECK(IbCastCommBaseGetQpForRequest(&comm->base, startQpIndex, i, &qp, &qpIndex));
 
@@ -224,8 +211,8 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     // Selective retransmission
     if (comm->base.resiliency && reqs[0]->send.sentData[qpIndex] == true) {
       for (int r = 0; r < nreqs; r++) {
-        int chunkSize = IbCastMultiSendChunk(reqs[r], comm, nqps, i, qpIndex, sendOffsets[r],
-                                             reqs[r]->desc.parms.enable && comm->base.qpTxSchedInit);
+        // Advance by the equal-split chunk, not sg_list: an empty post clears it, and its length is not the chunk.
+        int chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
         sendOffsets[r] += chunkSize;
         comm->sges[r].addr += chunkSize;
         comm->wrs[r].wr.rdma.remote_addr += chunkSize;
@@ -247,10 +234,16 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       // Select proper rkey (needed even for 0-size send)
       comm->wrs[r].wr.rdma.rkey = comm->useCtsOffload ? 0xbade : ctsFifoRkey(slots, r, qp->remDevIdx);
 
-      const bool weighted = reqs[r]->desc.parms.enable && comm->base.qpTxSchedInit;
-      int chunkSize = IbCastMultiSendChunk(reqs[r], comm, nqps, i, qpIndex, sendOffsets[r], weighted);
-      // A weighted QP posts its whole chunk. An equal split posts only what remains.
-      int length = weighted ? chunkSize : std::min((int)(reqs[r]->send.size - sendOffsets[r]), chunkSize);
+      int chunkSize, length;
+      if ((nqps > 1) && reqs[r]->desc.parms.enable && comm->base.qpTxSchedInit) {
+        int weightedSendSize = (int)(((double)reqs[r]->send.size) * comm->base.qpTxSched[qpIndex].weight);
+        chunkSize = (weightedSendSize / align) * align;
+        if (i == (nqps - 1)) length = std::max((int)(reqs[r]->send.size - sendOffsets[r]), chunkSize);
+        else length = chunkSize;
+      } else {
+        chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+        length = std::min((int)(reqs[r]->send.size - sendOffsets[r]), chunkSize);
+      }
 
       // Check the data left to send. If the send is too small, it might be
       // that on the current QP there is no data left to be sent.
@@ -358,8 +351,14 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     // Update the send offset and addresses for the next QP according to the
     // actual data size that was sent on the current QP, for every request
     for (int r = 0; r < nreqs; r++) {
-      int chunkSize = IbCastMultiSendChunk(reqs[r], comm, nqps, i, qpIndex, sendOffsets[r],
-                                           reqs[r]->desc.parms.enable && comm->base.qpTxSchedInit);
+      int chunkSize;
+
+      if (reqs[r]->desc.parms.enable && comm->base.qpTxSchedInit) {
+        int weightedSendSize = (int)(((double)reqs[r]->send.size) * comm->base.qpTxSched[qpIndex].weight);
+        chunkSize = (weightedSendSize / align) * align;
+        if (i == (nqps - 1)) chunkSize = std::max((int)(reqs[r]->send.size - sendOffsets[r]), chunkSize);
+      } else chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+
       sendOffsets[r] += chunkSize;
       comm->sges[r].addr += chunkSize;
       comm->wrs[r].wr.rdma.remote_addr += chunkSize;

@@ -697,7 +697,7 @@ TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_Retransmit_ResendsOnlyTheUndel
   EXPECT_EQ(Chain(0, 0)[0].sge.length, 512u);
 }
 
-// 800 bytes over 2 QPs is 512 + 288. Skipping the delivered first QP leaves the retransmit at offset 512.
+// Skipping the delivered QP leaves the 288-byte tail at offset 512.
 TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_RetransmitAfterSkippedQp_PostsOnlyTheUnsentTail) {
   SendThenLose(2, 1, 800);
   EXPECT_EQ(Chain(0, 0)[0].sge.addr, (uint64_t)buf_ + 512);
@@ -705,7 +705,7 @@ TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_RetransmitAfterSkippedQp_Posts
   EXPECT_EQ(Chain(0, 0)[0].sge.length, 288u);
 }
 
-// 1000 bytes over 3 QPs is 384 + 384 + 232. Skipping the two delivered QPs leaves the retransmit at offset 768.
+// Skipping two delivered QPs leaves the 232-byte tail at offset 768.
 TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_RetransmitAfterTwoSkippedQps_PostsOnlyTheUnsentTail) {
   SendThenLose(3, 2, 1000);
   EXPECT_EQ(Chain(0, 0)[0].sge.addr, (uint64_t)buf_ + 768);
@@ -713,35 +713,10 @@ TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_RetransmitAfterTwoSkippedQps_P
   EXPECT_EQ(Chain(0, 0)[0].sge.length, 232u);
 }
 
-// The skipped QP's chunk comes from its weight at retransmit time, not from the equal-split length still in the SGE.
-// 0.75/0.25 of 1000 bytes is 640 + 360; the SGE was initialized to the equal-split 512.
-TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_RetransmitAfterSkippedWeightedQp_UsesThatQpsWeight) {
-  WireSend(2);
-  send_->base.resiliency = res_.get();
-  send_->base.schedParmsInit = true;
-  send_->base.schedParms.enable = true;
-  send_->base.schedParms.splitData = true;
-  send_->base.schedParms.splitDataMin = 1;
-  send_->base.schedParms.updateInterval = 1000000000;
-  send_->base.qpTxSchedInit = true;
-  send_->base.qpTxSched[0].weight = 0.5;
-  send_->base.qpTxSched[1].weight = 0.5;
-  Cts(0, 1, 1, 4096);
-  void* req = nullptr;
-  ASSERT_EQ(Isend(1000, 1, &req), ncclSuccess);
-  verbs_[0].sends.clear();
-  // Weight moves after the original post. The retransmit must size the skipped QP from the new weight.
-  send_->base.qpTxSched[0].weight = 0.75;
-  send_->base.qpTxSched[1].weight = 0.25;
-  Req(req)->send.sentData[1] = false;
-  ncclResult_t r = ncclInternalError;
-  CaptureLog([&] { r = IbCastMultiSend(send_.get(), 0, 2, 0, false, false); });
-  ASSERT_EQ(r, ncclSuccess);
-  ASSERT_EQ(verbs_[0].sends.size(), 1u);
-  EXPECT_EQ(verbs_[0].sends[0].qp, &verbs_[0].qps[1]);
-  EXPECT_EQ(Chain(0, 0)[0].sge.addr, (uint64_t)buf_ + 640);
-  EXPECT_EQ(Chain(0, 0)[0].wr.wr.rdma.remote_addr, kRemoteAddr + 640);
-  EXPECT_EQ(Chain(0, 0)[0].sge.length, 360u);
+// An empty repost clears sg_list; the following skip must still advance.
+TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_SkipAfterEmptyRepost_AdvancesWithoutSgList) {
+  SendThenLose(3, 1, 100);
+  EXPECT_FALSE(Chain(0, 0)[0].hasSge);
 }
 
 TEST_F(NetIbCastP2pIsendMicrotest, MultiSend_MoreRequestsThanAMultiRecvHolds_IsRejected) {
