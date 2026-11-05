@@ -334,6 +334,42 @@ constexpr size_t ddaLLSlotPkts(size_t bankSize, size_t div, size_t align) {
   return (slotUnits / align) * align;
 }
 
+// Grid for kernels that give each peer a column of blocks. Columns are capped at
+// totalBlockCap, so with more peers than that each column serves several (see
+// DdaPeerColumns) and the grid stays within the cap. Blocks per column is
+// blocksWanted within the column's share of the cap, and at least one.
+struct DdaPeerGrid {
+  unsigned cols;
+  unsigned blocksPerCol;
+};
+constexpr DdaPeerGrid ddaPeerGrid(int nPeers, size_t blocksWanted, size_t totalBlockCap) {
+  const size_t cap = totalBlockCap < 1 ? 1 : totalBlockCap;
+  const size_t peers = nPeers < 1 ? 1 : (size_t)nPeers;
+  const size_t cols = peers < cap ? peers : cap;
+  const size_t share = cap / cols;
+  const size_t perCol = blocksWanted < share ? blocksWanted : share;
+  return {(unsigned)cols, perCol < 1 ? 1u : (unsigned)perCol};
+}
+
+// Peer indices in [0, nPeers) that this block's column serves: blockIdx.x, blockIdx.x +
+// gridDim.x, ... A column serving several peers must issue all its sends before its first
+// poll; one that polls a peer before sending to the next can wait on a column waiting on it.
+struct DdaPeerColumns {
+  struct Iter {
+    int x;
+    int step;
+    __device__ int operator*() const { return x; }
+    __device__ Iter& operator++() {
+      x += step;
+      return *this;
+    }
+    __device__ bool operator!=(const Iter& end) const { return x < end.x; }
+  };
+  int nPeers;
+  __device__ Iter begin() const { return {(int)blockIdx.x, (int)gridDim.x}; }
+  __device__ Iter end() const { return {nPeers, 0}; }
+};
+
 // Peers staged in one pass. A runtime-sized array, or a runtime index into
 // one, is placed in scratch. 8 covers rank counts 4 and 8 in a single pass.
 constexpr int kDdaLLPeerBatch = 8;
