@@ -194,13 +194,16 @@ and a null value on either side may be replaced.
 Example, from the gfx90a files:
 
 ```yaml
+# gfx90a/l2.yaml
+inherit: ../gfx908/l2.yaml
+
+# Modify: a gfx90a L2 request moves 128 bytes instead of 64
+l2.bw:
+  formula: 128 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+```
+```yaml
 # gfx90a/compute.yaml
 inherit: ../gfx908/compute.yaml
-
-# Modify: gfx90a doubles the BF16 MFMA rate and adds the measured peak
-compute.mfma_flops_bf16:
-  peak: $max_sclk * $cu_per_gpu * 1024 / 1000
-  peak_empirical: $MFMABF16Flops_empirical_peak
 
 # Add: a metric gfx908 cannot compute
 compute.valu_flops:
@@ -392,7 +395,9 @@ At the cutover, counters come from the metrics that the selected views place
 ### Validation
 
 `tools/validate_metric_library.py`, for every arch that has a metric library tree, also
-compares the library with today's analysis configs:
+compares the library with today's analysis configs. An arch without a roofline benchmark
+(gfx908) never shows its roofline panel, so the check leaves that panel out and the
+arch's library holds none of the metrics only that panel lists:
 
 - **Formulas:** every equation a row shows (its `avg`, `value` or `expr` form; for a row
   with none of these, each of its table's value columns; without display-only `ROUND()`)
@@ -403,14 +408,13 @@ compares the library with today's analysis configs:
 - **Units:** every row's unit is its metric's unit, after unit aliases, except the rows
   listed as unit variants. A row that shows a GB/s metric in seconds says Bytes/s.
 - **Counters:** the counters the whole library selects equal the counters
-  `detect_counters()` selects with no filter (with `--membw-analysis` where the arch has
-  panel 3000).
+  `detect_counters()` selects for every panel checked (with `--membw-analysis` where the
+  arch has panel 3000).
 - **Built-in variables:** the library variables equal `get_build_in_vars()`.
 - **Peaks:** every row's `peak` is its metric's `peak` or `peak_empirical`, and every
   library peak is the peak of some row that shows the metric (a measured peak whose
-  ceiling the benchmark does not measure on the arch is skipped, as on gfx908, which has
-  no benchmark). A display variant names its metric id for
-  this check, and a hidden row (`value: None`) names it by its label.
+  ceiling the benchmark does not measure on the arch is skipped). A display variant
+  names its metric id for this check.
 
 The reference side is today's tree, read through the production loaders in the same
 run, so there are no snapshot files. Both trees are source data that cannot change after
