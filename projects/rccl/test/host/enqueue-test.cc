@@ -5449,6 +5449,7 @@ struct Gfx94P2pLlOpts {
   int nNodes = 1;
   int isAllNvlink = 1;
   bool ll128OptIn = false;
+  int p2pChunkSize = 1 << 19;
 };
 
 struct Gfx94P2pLlScene {
@@ -5477,7 +5478,7 @@ struct Gfx94P2pLlScene {
     c->p2pnChannels = 1;
     c->p2pnChannelsPerPeer = 1;
     c->p2pChannelShiftSize = 0;
-    c->p2pChunkSize = 1 << 19;
+    c->p2pChunkSize = opts.p2pChunkSize;
     c->buffSizes[NCCL_PROTO_LL] = 1 << 20;
     c->buffSizes[NCCL_PROTO_LL128] = 1 << 20;
     c->buffSizes[NCCL_PROTO_SIMPLE] = 1 << 20;
@@ -5899,6 +5900,22 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94WidenGates_StaySimple) {
   Gfx94P2pLlOpts ll128;
   ll128.ll128OptIn = true;
   ExpectGfx94RecvProtoLL(ll128, 32 << 10, 0);
+}
+
+// The default 512 KiB chunk makes p2pChunkSize/8 equal the 64 KiB cap, so either
+// operand of the min would pass. A smaller chunk stops at chunk/8. A larger one
+// stays at the cap.
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94ChunkSize_BoundsTheWiden) {
+  PinP2pLlThreshold(/*userSet=*/false);
+  Gfx94P2pLlOpts small;
+  small.p2pChunkSize = 256 << 10;
+  ExpectGfx94RecvProtoLL(small, 32 << 10, 1);
+  ExpectGfx94RecvProtoLL(small, (32 << 10) + 1, 0);
+  Gfx94P2pLlOpts large;
+  large.p2pChunkSize = 1 << 20;
+  ExpectGfx94RecvProtoLL(large, 64 << 10, 1);
+  ExpectGfx94RecvProtoLL(large, (64 << 10) + 1, 0);
+  ExpectGfx94RecvProtoLL(large, 128 << 10, 0);
 }
 
 // ===========================================================================
