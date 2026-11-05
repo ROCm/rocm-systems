@@ -286,6 +286,11 @@
           "name": "GdrFlush_RepeatedFlushBurst",
           "description": "50-iteration GPU recv+flush burst over the dma-buf scratchpad; an intermittent QP async-fatal would surface as a non-success flush. The whole burst must stay clean.",
           "test_filter": "GdrFlushTest.RepeatedFlush_NoFaultBurst"
+        },
+        {
+          "name": "GdrFlush_ScratchpadWriteRoundTrip",
+          "description": "The chained flush must write the host sentinel into the RO=0 scratchpad and read it back. Dropping the write leaves the scratchpad zero.",
+          "test_filter": "GdrFlushTest.ScratchpadWrite_RoundTripsSentinel"
         }
       ]
     },
