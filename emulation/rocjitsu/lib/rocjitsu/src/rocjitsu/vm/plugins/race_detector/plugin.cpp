@@ -182,7 +182,7 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
   auto nonsequential = [&](size_t i) {
     if (i <= first || i >= last)
       return false;
-    const auto previous = trace[i - 1];
+    const InstructionSnapshot &previous = trace[i - 1];
     return (trace[i].pc() < previous.pc() ||
             trace[i].pc() - previous.pc() != previous.encoding().size_bytes());
   };
@@ -220,9 +220,7 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
   auto emit = [&](size_t i) {
     const bool is_conflict = conflict_index && i == *conflict_index;
     const bool is_read = read_index && i == *read_index;
-    const auto instruction = is_conflict ? conflict->instruction
-                             : is_read   ? read.instruction
-                                         : trace[i];
+    const InstructionSnapshot &instruction = trace[i];
     if (nonsequential(i)) {
       const auto previous_pc = trace[i - 1].pc();
       oss << "       --- "
