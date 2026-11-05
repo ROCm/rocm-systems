@@ -40,10 +40,7 @@ function(transpose_build_target _NAME _COMPILE_DEFS _LINK_TARGETS)
     add_executable(${_NAME})
     target_sources(${_NAME} PRIVATE transpose.cpp)
     target_compile_definitions(${_NAME} PRIVATE ${_COMPILE_DEFS})
-    # PC sampling validation decodes sampled instructions and maps them to
-    # source lines via the code object's line table. Line tables must be
-    # emitted even in build types that do not include debug info.
-    target_compile_options(${_NAME} PRIVATE -Wpedantic -gline-tables-only)
+    target_compile_options(${_NAME} PRIVATE -Wpedantic)
     target_link_libraries(
         ${_NAME} PRIVATE Threads::Threads rocprofiler-sdk::tests-build-flags
                          ${_LINK_TARGETS})
@@ -60,6 +57,13 @@ find_package(Threads REQUIRED)
 find_package(rocprofiler-sdk-roctx REQUIRED)
 
 transpose_build_target(transpose "" rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+
+# Variant used by the PC sampling integration tests. PC sampling validation decodes
+# sampled instructions and maps them to source lines via the code object's line table, so
+# line tables must be emitted even in build types that do not include debug info.
+transpose_build_target(transpose-pc-sampling ""
+                       rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+target_compile_options(transpose-pc-sampling PRIVATE -gline-tables-only)
 
 #
 # using old roctracer roctx
