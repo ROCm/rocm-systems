@@ -41,12 +41,7 @@ WaveRaceState::WaveRaceState(int vgprCount, int sgprCount, WaveId waveId, RaceDe
     : counterCapacities(counterCapacities), waveId(waveId), detector(detector) {
   vgprMemoryEvents.resize(vgprCount);
   sgprMemoryEvents.resize(sgprCount);
-  sgprEventCount.resize(sgprCount, 0);
   ttmpMemoryEvents.resize(REGISTER_SET_MAX_TTMPS);
-  ttmpEventCount.resize(REGISTER_SET_MAX_TTMPS, 0);
-  for (auto &counts : regEventCount) {
-    counts.resize(vgprCount, 0);
-  }
 }
 
 void WaveRaceState::dispatch(const PendingWaitCount &wait_count) {
@@ -137,22 +132,14 @@ void WaveRaceState::registerEventWithIntervals(
                                          : vgprMemoryEvents.size();
   if (std::ranges::any_of(regIds, [register_limit](uint32_t reg) { return reg >= register_limit; }))
     return;
-  if (!toSgpr && !toTtmp) {
-    for (auto reg : regIds) {
-      regEventCountInc(type, reg);
-    }
-  }
-
   auto eventId = detector->allocateEventId(waveId, instruction, type, std::move(regIds), execMask,
                                            byteMask, std::move(ldsIntervals), counterObligations,
                                            memoryOrder, lastRegisterByteMask);
   for (uint32_t reg : detector->events().registers(eventId)) {
     if (toSgpr) {
       sgprMemoryEvents[reg].push_back(eventId);
-      sgprEventCount[reg]++;
     } else if (toTtmp) {
       ttmpMemoryEvents[reg].push_back(eventId);
-      ttmpEventCount[reg]++;
     } else {
       vgprMemoryEvents[reg].push_back(eventId);
     }
@@ -333,13 +320,10 @@ void WaveRaceState::retireEventRegisters(EventId eventId) {
   for (uint32_t regId : detector->events().registers(eventId)) {
     if (toSgpr) {
       removeFromUnorderedList(sgprMemoryEvents[regId], eventId);
-      sgprEventCount[regId]--;
     } else if (toTtmp) {
       removeFromUnorderedList(ttmpMemoryEvents[regId], eventId);
-      ttmpEventCount[regId]--;
     } else {
       removeFromUnorderedList(getVgprMemoryEvents(regId), eventId);
-      regEventCountDec(eventType, regId);
     }
   }
 }
@@ -510,45 +494,16 @@ void WaveRaceState::checkVgprWrite(int reg, uint64_t execMask, uint8_t byteMask,
   }
 }
 
-// Like checkVgprRead but for instructions that read all lanes (e.g. cross-lane ops).
-// countr_zero picks the first active lane from the event's exec mask as the
-// representative lane for the violation report.
-void WaveRaceState::checkVgprReadAllLanes(int reg) const {
-  if (getRegEventCount(MemoryEventType::GLOBAL_TO_VGPR, reg) != 0 ||
-      getRegEventCount(MemoryEventType::LDS_TO_VGPR, reg) != 0) {
-    for (EventId eid : vgprMemoryEvents[reg]) {
-      if (isToVgpr(detector->events().type(eid)) &&
-          (detector->events().registerByteMask(eid, reg) & 0xF) != 0) {
-        int lane = std::countr_zero(detector->events().execMask(eid));
-        detector->getRaceHandler()({RaceViolation::Space::VGPR, reg, waveId.value, lane, false,
-                                    detector->getWorkgroupId(), eid});
-      }
-    }
-  }
-}
-
-bool WaveRaceState::isOutstandingFromVgpr(int lane, int reg) const {
-  for (EventId eid : vgprMemoryEvents[reg]) {
-    if (isFromVgpr(detector->events().type(eid)) && detector->events().isActiveForLane(eid, lane)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 void WaveRaceState::checkScalarAccess(RegisterRef ref, bool isWrite) const {
   const std::vector<std::vector<EventId>> *events = nullptr;
-  const std::vector<int> *counts = nullptr;
   RaceViolation::Space space;
   MemoryEventType type;
   if (ref.cls == RegClass::SGPR) {
     events = &sgprMemoryEvents;
-    counts = &sgprEventCount;
     space = RaceViolation::Space::SGPR;
     type = MemoryEventType::GLOBAL_TO_SGPR;
   } else if (ref.cls == RegClass::TTMP) {
     events = &ttmpMemoryEvents;
-    counts = &ttmpEventCount;
     space = RaceViolation::Space::TTMP;
     type = MemoryEventType::GLOBAL_TO_TTMP;
   } else {
@@ -560,8 +515,6 @@ void WaveRaceState::checkScalarAccess(RegisterRef ref, bool isWrite) const {
   std::vector<EventId> reportedEvents;
   for (uint32_t offset = 0; offset < ref.width; ++offset) {
     const uint32_t index = ref.index + offset;
-    if ((*counts)[index] == 0)
-      continue;
     for (EventId eid : (*events)[index]) {
       if (detector->events().type(eid) != type ||
           std::ranges::find(reportedEvents, eid) != reportedEvents.end())
