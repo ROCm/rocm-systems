@@ -1338,6 +1338,7 @@ class CollectivesHierarchicalMicrotest : public CollectivesMicrotest {
     comm_->hierarchicalTempBuffer = temp_.data();
     comm_->addonStopEvent = stopEvent_;
     inter_->doneEvent = interDone_;
+    inter_->config.blocking = 1;  // production default; 0 keeps the inter done event (see below)
     send_.assign(kCount * kLocal * kNodes, 1.0f);
     recv_.assign(kCount * kLocal * kNodes, 0.0f);
     fake.useAgDirect = [this](ncclComm* comm, size_t msgSize) {
@@ -1595,6 +1596,26 @@ TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_NoParentStopEventKeepsThe
   EXPECT_EQ(interDone_, fake.enqueued[1].doneEvent);
   EXPECT_EQ(interDone_, inter_->doneEvent);
   EXPECT_TRUE(eventRecords_.empty());
+}
+
+TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_NonBlockingInterCommIsNotRedirected) {
+  Decide(RCCL_HIERARCHICAL_REDUCESCATTER);
+  inter_->config.blocking = 0;
+  EXPECT_EQ(ncclSuccess, ReduceScatter());
+  EXPECT_EQ(interDone_, fake.enqueued[1].doneEvent);
+  EXPECT_EQ(interDone_, inter_->doneEvent);
+  EXPECT_EQ(stopEvent_, comm_->addonStopEvent);
+  EXPECT_TRUE(eventRecords_.empty());
+}
+
+TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_InProgressStillHandsOffTheStopEvent) {
+  Decide(RCCL_HIERARCHICAL_REDUCESCATTER);
+  fake.enqueueResults = {ncclSuccess, ncclInProgress};
+  EXPECT_EQ(ncclInProgress, ReduceScatter());
+  EXPECT_EQ(stopEvent_, fake.enqueued[1].doneEvent);
+  EXPECT_EQ(interDone_, inter_->doneEvent);
+  EXPECT_EQ(nullptr, comm_->addonStopEvent);
+  EXPECT_EQ((std::vector<EventRecord>{{interDone_, stream_}}), eventRecords_);
 }
 
 TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_InterFailureRestoresTheInterEventAndKeepsTheStopEvent) {

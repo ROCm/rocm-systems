@@ -1132,23 +1132,13 @@ static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, voi
                                  nullptr};
   NCCLCHECK(ncclEnqueueCheck(&infoIntraRS));
 
-  // Step 3: Inter-node ReduceScatter intraOut -> recvbuff. This is the last GPU work.
-  // The pre-shuffle cannot carry the parent's stop event: the intra and inter
-  // collectives are still queued after it, and a triple-chevron launch cannot
-  // take one anyway. ncclLaunchKernel fuses interComm->doneEvent into that last
-  // kernel. Point the slot at the parent's doneEvent for this launch so the
-  // addon epilogue does not append hipEventRecord (a fixed several-microsecond
-  // packet on the user stream after every hierarchical ReduceScatter).
-  //
-  // The inter comm is only launched from hierarchical AllGather/ReduceScatter,
-  // on this same user stream, and only after rcclAddonLaunchBegin has already
-  // queued the parent doneEvent wait when the stream changed. A later inter
-  // wait on interComm->doneEvent is therefore redundant with that parent wait.
-  // The redirected launch does not record interComm->doneEvent, so the first
-  // time that event is still unrecorded, record it once here. After that the
-  // parent event is the fence, and it is fused into the last kernel.
+  // Step 3: Inter-node ReduceScatter intraOut -> recvbuff, the last GPU work. Its kernel carries the parent's
+  // doneEvent as stop event. The parent's stream-change wait covers interComm, which only runs inside hierarchical
+  // collectives, so interComm->doneEvent is recorded once, on first use, not per call. A non-blocking inter comm
+  // keeps its own doneEvent: NCCL_COMM_BLOCKING=0 is reapplied to the split child, so its first launch can run on
+  // the group thread and race a swap, and that launch can return ncclInProgress.
   size_t interMsgSize = recvcount * typeSize * (size_t)nNodes;
-  const hipEvent_t parentStop = comm->addonStopEvent;
+  const hipEvent_t parentStop = interComm->config.blocking ? comm->addonStopEvent : nullptr;
   const hipEvent_t interDone = interComm->doneEvent;
   const bool primeInterDone = parentStop != nullptr && interComm->lastStreamTag == 0;
   if (parentStop != nullptr) interComm->doneEvent = parentStop;
@@ -1175,17 +1165,20 @@ static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, voi
   }
 
   if (parentStop != nullptr) interComm->doneEvent = interDone;
-  if (interRes != ncclSuccess) {
+  // ncclInProgress is the non-blocking group's "launched" result, not a failure. NCCLCHECK used to
+  // return it straight through; treating it as an error here would skip the handoff below.
+  if (interRes != ncclSuccess && interRes != ncclInProgress) {
     // The launch may already have published lastStreamTag. Leave a recorded
     // inter event behind so a later stream change does not wait on one that
-    // was never recorded. The addon epilogue still records the parent event.
+    // was never recorded. The parent stop event stays offered; the epilogue
+    // records it only when this call returns success.
     if (primeInterDone) (void)hipEventRecord(interDone, stream);
     return interRes;
   }
   if (primeInterDone) CUDACHECK(hipEventRecord(interDone, stream));
   if (parentStop != nullptr) (void)rcclTakeAddonStopEvent(comm);
 
-  return ncclSuccess;
+  return interRes;
 }
 
 NCCL_API(ncclResult_t, ncclReduceScatter, const void* sendbuff, void* recvbuff, size_t recvcount,
