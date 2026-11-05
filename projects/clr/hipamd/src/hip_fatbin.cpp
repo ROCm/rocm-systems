@@ -409,6 +409,36 @@ static bool UncompressAndPopulateCodeObject(
   return passed;
 }
 
+enum class CopyComgrDataStatus { kFailure, kEmpty, kSuccess };
+
+// Copy a comgr data item's bytes into a new caller-owned buffer. Returns kSuccess (with
+// item_data/item_size set; the caller owns item_data via delete[]), kEmpty for a zero-size item
+// (not a comgr failure - just nothing to copy), or kFailure on a real comgr error.
+static CopyComgrDataStatus CopyOutComgrDataItem(amd_comgr_data_t item, char*& item_data,
+                                                size_t& item_size) {
+  item_size = 0;
+  if (auto comgr_status = amd::Comgr::get_data(item, &item_size, nullptr);
+      comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to get data size");
+    return CopyComgrDataStatus::kFailure;
+  }
+
+  if (item_size == 0) {
+    return CopyComgrDataStatus::kEmpty;
+  }
+
+  char* data = new char[item_size];
+  if (auto comgr_status = amd::Comgr::get_data(item, &item_size, data);
+      comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to get data");
+    delete[] data;
+    return CopyComgrDataStatus::kFailure;
+  }
+
+  item_data = data;
+  return CopyComgrDataStatus::kSuccess;
+}
+
 // Copy out the code object comgr produced for one requested target, if it produced one at all.
 //
 // comgr can return more than one entry for a single request, so this takes the first, the way
@@ -438,23 +468,15 @@ static bool TakeUnpackagedCodeObject(
     }
     comgr_helper::ComgrDataUniqueHandle item_handle(item);
 
+    char* item_data = nullptr;
     size_t item_size = 0;
-    if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, nullptr);
-        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogError("Failed to get data size");
-      return false;
-    }
-
-    if (item_size == 0) {
-      continue;
-    }
-
-    char* item_data = new char[item_size];
-    if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, item_data);
-        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogError("Failed to get data");
-      delete[] item_data;
-      return false;
+    switch (CopyOutComgrDataItem(item_handle.get(), item_data, item_size)) {
+      case CopyComgrDataStatus::kFailure:
+        return false;
+      case CopyComgrDataStatus::kEmpty:
+        continue;
+      case CopyComgrDataStatus::kSuccess:
+        break;
     }
 
     code_obj_map[isa_name] = std::make_pair(item_data, item_size);
@@ -487,6 +509,76 @@ static bool TakeUnpackagedCodeObject(
   }
 
   return true;
+}
+
+// Try to resolve one requested (isa_name, triple, arch) entry directly out of a package already
+// unpackaged against a *batch* of entries, without needing to know which of the batch's many
+// requested entries produced which output item.
+static bool TryExactUnpackagedMatch(
+    amd_comgr_data_set_t unpackaged_co, const std::string& isa_name, const std::string& triple,
+    const std::string& arch, std::map<std::string, std::pair<const void*, size_t>>& code_obj_map) {
+  // Only the two kinds TakeUnpackagedCodeObject treats as directly loadable are worth matching
+  // here; a bc/fatbin-only entry falls back to the single-entry path so its existing "not
+  // loadable by hipModuleLoad" diagnostic (see TakeUnpackagedCodeObject) is preserved verbatim.
+  struct Candidate {
+    amd_comgr_data_kind_t kind;
+    const char* extension;
+  };
+  constexpr Candidate kCandidates[] = {
+      {AMD_COMGR_DATA_KIND_EXECUTABLE, "o"},
+      {AMD_COMGR_DATA_KIND_SPIRV, "spv"},
+  };
+
+  const std::string prefix = std::string(symbols::kHipFatBinName) + "-" + triple + "-" + arch + ".";
+
+  for (const auto& candidate : kCandidates) {
+    const std::string expected_name = prefix + candidate.extension;
+
+    size_t count = 0;
+    if (amd::Comgr::action_data_count(unpackaged_co, candidate.kind, &count) !=
+            AMD_COMGR_STATUS_SUCCESS ||
+        count == 0) {
+      continue;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+      amd_comgr_data_t item;
+      if (amd::Comgr::action_data_get_data(unpackaged_co, candidate.kind, i, &item) !=
+          AMD_COMGR_STATUS_SUCCESS) {
+        continue;
+      }
+      comgr_helper::ComgrDataUniqueHandle item_handle(item);
+
+      size_t name_size = 0;
+      if (amd::Comgr::get_data_name(item_handle.get(), &name_size, nullptr) !=
+              AMD_COMGR_STATUS_SUCCESS ||
+          name_size == 0) {
+        continue;
+      }
+      std::string item_name(name_size, '\0');
+      if (amd::Comgr::get_data_name(item_handle.get(), &name_size, item_name.data()) !=
+          AMD_COMGR_STATUS_SUCCESS) {
+        continue;
+      }
+      // get_data_name's size includes the null terminator (same convention already relied on in
+      // UncompressAndPopulateCodeObject above); c_str() gives the clean, comparable string.
+      if (std::string(item_name.c_str()) != expected_name) {
+        continue;
+      }
+
+      char* item_data = nullptr;
+      size_t item_size = 0;
+      if (CopyOutComgrDataItem(item_handle.get(), item_data, item_size) !=
+          CopyComgrDataStatus::kSuccess) {
+        continue;
+      }
+
+      code_obj_map[isa_name] = std::make_pair(item_data, item_size);
+      return true;
+    }
+  }
+
+  return false;
 }
 
 // Extract the code objects matching unique_isa_names from an llvm-offload-binary package.
@@ -551,16 +643,64 @@ static bool PopulateCodeObjectMapFromPackage(
       break;
     }
 
-    // Targets are offered to comgr one at a time. The extra actions only re-read the
-    // package header, which is cheap beside the copy every matched entry already costs.
-    bool failed = false;
+    // Split every requested ISA name up front so they can be offered to comgr together below,
+    // instead of one comgr call (and one re-parse of the whole package) per name.
+    struct Entry {
+      std::string isa_name;
+      std::string triple;
+      std::string arch;
+    };
+    std::vector<Entry> entries;
+    entries.reserve(unique_isa_names.size());
     for (const auto& isa_name : unique_isa_names) {
       std::string triple, arch;
       if (!helpers::SplitIsaName(isa_name, triple, arch)) {
         LogPrintfError("Cannot split ISA name into a (triple, arch) pair: %s", isa_name.c_str());
         continue;
       }
-      const amd_comgr_target_id_t target_id{triple.c_str(), arch.c_str()};
+      entries.push_back({isa_name, std::move(triple), std::move(arch)});
+    }
+
+    // First, try resolving every entry out of a single batched comgr call: comgr parses the
+    // package exactly once regardless of how many entries are requested (see
+    // TryExactUnpackagedMatch for why only exact-name matches are claimed here). Anything left
+    // unresolved - and everything, if the batched call itself could not be made - falls back to
+    // the single-entry call below, identical to the code this replaces.
+    std::vector<bool> resolved(entries.size(), false);
+    if (!entries.empty()) {
+      std::vector<amd_comgr_target_id_t> all_target_ids;
+      all_target_ids.reserve(entries.size());
+      for (const auto& entry : entries) {
+        all_target_ids.push_back({entry.triple.c_str(), entry.arch.c_str()});
+      }
+
+      comgr_helper::ComgrActionInfoUniqueHandle batch_action;
+      comgr_helper::ComgrDataSetUniqueHandle batch_unpackaged_co;
+      if (batch_action.Create() == AMD_COMGR_STATUS_SUCCESS &&
+          batch_unpackaged_co.Create() == AMD_COMGR_STATUS_SUCCESS &&
+          amd::Comgr::action_info_set_package_entry_ids(
+              batch_action.get(), all_target_ids.data(), all_target_ids.size()) ==
+              AMD_COMGR_STATUS_SUCCESS &&
+          amd::Comgr::do_action(AMD_COMGR_ACTION_UNPACKAGE, batch_action.get(), packaged_co.get(),
+                                batch_unpackaged_co.get()) == AMD_COMGR_STATUS_SUCCESS) {
+        for (size_t i = 0; i < entries.size(); i++) {
+          resolved[i] = TryExactUnpackagedMatch(batch_unpackaged_co.get(), entries[i].isa_name,
+                                                entries[i].triple, entries[i].arch, code_obj_map);
+        }
+      }
+    }
+
+    // Targets left unresolved by the batch above (including all of them, if the batch could not
+    // be made at all) are offered to comgr one at a time, exactly as before this function learned
+    // to batch. The extra actions only re-read the package header, which is cheap beside the copy
+    // every matched entry already costs.
+    bool failed = false;
+    for (size_t i = 0; i < entries.size(); i++) {
+      if (resolved[i]) {
+        continue;
+      }
+      const Entry& entry = entries[i];
+      const amd_comgr_target_id_t target_id{entry.triple.c_str(), entry.arch.c_str()};
 
       comgr_helper::ComgrActionInfoUniqueHandle unpackage_action;
       comgr_helper::ComgrDataSetUniqueHandle unpackaged_co;
@@ -588,12 +728,12 @@ static bool PopulateCodeObjectMapFromPackage(
               amd::Comgr::do_action(AMD_COMGR_ACTION_UNPACKAGE, unpackage_action.get(),
                                     packaged_co.get(), unpackaged_co.get());
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-        LogPrintfError("Failed to unpackage code object for %s", isa_name.c_str());
+        LogPrintfError("Failed to unpackage code object for %s", entry.isa_name.c_str());
         failed = true;
         break;
       }
 
-      if (!TakeUnpackagedCodeObject(unpackaged_co.get(), isa_name, code_obj_map)) {
+      if (!TakeUnpackagedCodeObject(unpackaged_co.get(), entry.isa_name, code_obj_map)) {
         failed = true;
         break;
       }
