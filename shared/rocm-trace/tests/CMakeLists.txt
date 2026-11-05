@@ -76,3 +76,39 @@ else()
         "rocm-trace: no TraceLogging header (ROCM_TRACE_TRACELOGGING_INCLUDE_DIR), skipping the trace.h check"
     )
 endif()
+
+# The probe generator in scripts/: its pytest suite, when Python has the generator's
+# requirements (scripts/requirements.txt).
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_FOUND)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import clang.cindex, yaml, pytest"
+        RESULT_VARIABLE ROCM_TRACE_GEN_DEPS
+        OUTPUT_QUIET
+        ERROR_QUIET
+    )
+endif()
+if(Python3_FOUND AND ROCM_TRACE_GEN_DEPS EQUAL 0)
+    add_test(
+        NAME rocm-trace-gen
+        COMMAND
+            ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+            ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/tests
+    )
+    set(ROCM_TRACE_GEN_TEST_ENV PYTHONDONTWRITEBYTECODE=1)
+    if(ROCM_TRACE_TRACELOGGING_INCLUDE_DIR)
+        list(
+            APPEND ROCM_TRACE_GEN_TEST_ENV
+            ROCM_TRACE_GEN_TRACELOGGING_INCLUDE=${ROCM_TRACE_TRACELOGGING_INCLUDE_DIR}
+        )
+    endif()
+    set_tests_properties(
+        rocm-trace-gen
+        PROPERTIES ENVIRONMENT "${ROCM_TRACE_GEN_TEST_ENV}"
+    )
+else()
+    message(
+        STATUS
+        "rocm-trace: Python with libclang, PyYAML and pytest not found, skipping the generator tests"
+    )
+endif()
