@@ -142,13 +142,18 @@ rccl_readelf() {
     readelf "$@"
   fi
 }
+# Arg is an install prefix (lib under <prefix>/lib) or a build-tree dir (lib
+# directly in it); try both layouts.
 resolve_librccl_elf() {
   local prefix="$1"
   local cand
   for cand in \
       "${prefix}/lib/librccl.so.1.0" \
       "${prefix}/lib/librccl.so.1" \
-      "${prefix}/lib/librccl.so"; do
+      "${prefix}/lib/librccl.so" \
+      "${prefix}/librccl.so.1.0" \
+      "${prefix}/librccl.so.1" \
+      "${prefix}/librccl.so"; do
     if [[ -e "${cand}" ]] && rccl_readelf -h "${cand}" >/dev/null 2>&1; then
       printf '%s\n' "${cand}"
       return 0
@@ -306,16 +311,33 @@ if nm -DuC "${librccl}" | grep -iE "rocshmem|envvar|IBVWrapper"; then
 fi
 echo "  OK: librccl.so leaves no rocshmem host symbol unresolved"
 
-# Also fail if librccl.so EXPORTS any rocSHMEM C++ symbol. The copied leaves
-# (anvil.cpp, provider_gda_mlx5.cpp) are compiled -fvisibility=hidden so none of
-# rocshmem::* reaches .dynsym; if that regresses, an app's own rocSHMEM loaded in
-# the same process could interpose these calls. The 'rocshmem::' namespace form is
-# matched on purpose: the intended extern "C" rocshmem_gin_* API has no '::'.
-if nm -DC --defined-only "${librccl}" | grep -E "rocshmem::"; then
-  echo "  ERROR: librccl.so exports rocSHMEM C++ symbols (expected hidden)" >&2
+# Also fail if librccl.so EXPORTS a rocSHMEM C++ function. This must run against
+# the build-tree library (ENABLE_MPI_TESTS=ON => -fvisibility=default), NOT the
+# installed one: the install is built with BUILD_TESTS off, so librccl is already
+# hidden target-wide and would pass even if the per-file -fvisibility=hidden on
+# the copied leaves (anvil.cpp, provider_gda_mlx5.cpp) regressed. Under default
+# visibility those leaves are the only thing keeping rocSHMEM's own functions out
+# of .dynsym; a leak would let an app's own rocSHMEM interpose these calls.
+#
+# Match only symbols whose DEFINING name is in the rocshmem:: namespace (demangled
+# name begins with 'rocshmem::'), i.e. 'nm' column 3 starts with it. Excluded:
+#   - our exported rocshmem_gin_* API (begins rocshmem_gin, no '::') and its
+#     rocshmem_gin_qp_set:: methods, which legitimately take rocshmem:: params;
+#   - std:: template instantiations over rocshmem:: types (std::vector<rocshmem::..>)
+#     -- these mention rocshmem:: mid-name but are STL-owned weak symbols.
+librccl_build="$(resolve_librccl_elf "${rccl_build}")" || {
+  echo "  ERROR: no build-tree librccl.so ELF under ${rccl_build}" >&2
+  exit 1
+}
+rocshmem_exports() {
+  nm -DC --defined-only "${librccl_build}" | awk '$3 ~ /^rocshmem::/ {print}'
+}
+if rocshmem_exports | grep -q .; then
+  echo "  ERROR: ${librccl_build} exports rocSHMEM C++ symbols (expected hidden):" >&2
+  rocshmem_exports | sed 's/^/    /' >&2
   exit 1
 fi
-echo "  OK: librccl.so exports no rocSHMEM C++ symbol"
+echo "  OK: build-tree librccl.so exports no rocSHMEM C++ symbol"
 
 # Hand the install/build locations to the run stage.
 {
