@@ -470,8 +470,8 @@ TEST_F(DdaAlltoallFabricPushMicrotest, PeerMajor_DrainAutoAndForced) {
       {1, -1, 256, 16, 1, 1},             // automatic 18, limited to blocksPerPeer
       {1, 100, 1024, 64 * kMiB, 64, 64},  // capped at 64
   };
-  for (const Case& c : cases) {
-    if (c.tdm && !TDM_TOOLCHAIN_AVAILABLE) continue;
+  auto check = [&](const Case& c) {
+    if (c.tdm && !TDM_TOOLCHAIN_AVAILABLE) return;
     SetParams({{"RCCL_DDA_A2A_TDM", c.tdm}, {"RCCL_DDA_A2A_PUSH_PEER_DRAIN", c.drainParam}});
     comm().ddaFabricMaxBlocks = c.maxBlocks;
     const DdaLaunch* launch = RunBytes(c.bytes);
@@ -481,7 +481,13 @@ TEST_F(DdaAlltoallFabricPushMicrotest, PeerMajor_DrainAutoAndForced) {
     EXPECT_EQ(launch->Arg<unsigned>(8), c.drain) << "tdm " << c.tdm << " drain " << c.drainParam;
     EXPECT_EQ(launch->grid.x, static_cast<unsigned>(c.blocksPerPeer * 8) + c.drain * 7)
         << "tdm " << c.tdm << " drain " << c.drainParam;
-  }
+  };
+  for (const Case& c : cases) check(c);
+
+  // RCCL_DDA_A2A_PUSH_PEER_EPOCH=0 (CAS flags) forces the drain to 0: drain blocks would take the handshake tokens.
+  barrier_->barrierHost.setEpochFlags(false);
+  check({0, 3, 256, kMiB, 32, 0});
+  check({1, 3, 256, 8 * kMiB, 32, 0});
 }
 
 // All-peer TDM: one wave per two tiles over all peers, at most 16 waves per block and ddaFabricMaxBlocks blocks;
