@@ -392,6 +392,11 @@ TEST_CASE("Unit_HRR_HostBudget_HostMemCreateRefusedOverBudget", "[hrr]") {
  *     charged, whatever the HIP call returns.
  */
 TEST_CASE("Unit_HRR_HostBudget_DeviceMemCreateNotCharged", "[hrr]") {
+  // Without a device hipMemCreate fails at the ordinal check, before the
+  // charge decision, so the case would pass even if device memory were charged.
+  int ndev = 0;
+  if (hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+    SKIP("needs a GPU: without one the call fails before the charge decision");
   PlaybackContext ctx;
   ctx.host_budget.set_cap(100);
   hrr_test::ExactRecord<hrr_args_hipMemCreate> rec;
