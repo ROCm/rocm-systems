@@ -6158,9 +6158,9 @@ class RegisteredAr {
   }
 
   // Expects the choice the re-route leaves alone: `algo` with no grid cap.
-  void ExpectUnchanged(size_t bytes, bool capturing, int algo, const char* why = "") {
-    SCOPED_TRACE(testing::Message() << why << " bytes=" << bytes << " capturing=" << capturing);
-    const rcclCollDecision d = Select(bytes, capturing);
+  void ExpectUnchanged(size_t bytes, bool capturing, int algo, const char* why = "", bool query = true) {
+    SCOPED_TRACE(testing::Message() << why << " bytes=" << bytes << " capturing=" << capturing << " query=" << query);
+    const rcclCollDecision d = Select(bytes, capturing, query);
     EXPECT_EQ(algo, d.algo);
     EXPECT_EQ(0u, d.ddaCap.blocks);
     EXPECT_EQ(0u, d.ddaCap.threads);
@@ -6471,6 +6471,40 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureCapFollowsThePlanne
         d = ar.Select(16 * kMiB, true);
         EXPECT_EQ(24u, d.ddaCap.blocks) << "the channels the packed plan launches";
         EXPECT_EQ(24u, d.nMaxChannels);
+      });
+}
+
+// CTA_POLICY_ZERO prefers CE: eager keeps CE-registered; capture falls back, with the warning, to DDA in Ring's grid.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteUnderZeroPolicy) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredRerouteUnderZeroPolicy",
+      []() {
+        RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        RegisteredAr ar(8);
+        ar.comm_->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        std::string log = RcclUnitTesting::CaptureLog([&]() {
+          for (bool query : {true, false}) {
+            ar.SetRanks(8);
+            ar.ExpectUnchanged(8 * kMiB, /*capturing=*/false, ceReg, "1M shards", query);
+            ar.SetRanks(16);
+            ar.ExpectUnchanged(16 * kMiB, false, ceReg, "1M shards", query);
+          }
+        });
+        EXPECT_FALSE(RcclUnitTesting::LogHas(log, "preferred backend")) << "CE-registered is the preferred backend";
+        ar.SetRanks(8);
+        for (bool query : {true, false}) {
+          SCOPED_TRACE(query ? "query" : "live: stream probe");
+          rcclCollDecision d{};
+          log = RcclUnitTesting::CaptureLog([&]() { d = ar.Select(16 * kMiB, /*capturing=*/true, query); });
+          EXPECT_EQ(ll128, d.algo) << "CE cannot run in capture, so the first in-window candidate runs";
+          EXPECT_EQ(NCCL_PROTO_LL128, d.protocol);
+          EXPECT_EQ(96u, d.nMaxChannels) << "the reporter sizes Ring's grid";
+          EXPECT_EQ(96u, d.ddaCap.blocks) << "Ring's channels";
+          EXPECT_EQ(256u, d.ddaCap.threads) << "Ring's block width";
+          EXPECT_TRUE(RcclUnitTesting::LogHas(log, "preferred backend")) << "the fallback warning fires";
+        }
       });
 }
 
