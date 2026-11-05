@@ -179,6 +179,12 @@ public:
   /// Retire non-trimmable events whose owning wave completed them before a workgroup barrier.
   void flushBarrierPendingEvents();
 
+  /// Record that this wave has ended. An ended wave no longer arrives at
+  /// barriers, but a workgroup barrier among the remaining waves resolves only
+  /// after it ended, so that barrier also orders the events it had completed.
+  void markExited() { exited_ = true; }
+  bool hasExited() const { return exited_; }
+
   /// Check a full VGPR read for races. Calls the RaceHandler on violation.
   void checkVgprRead(int reg, int lane, uint8_t byteMask) const;
 
@@ -268,6 +274,7 @@ private:
 
   WaveId waveId;
   RaceDetector *detector;
+  bool exited_ = false;
   ProfilerInterface *profiler_ = &NullProfiler::instance();
 };
 

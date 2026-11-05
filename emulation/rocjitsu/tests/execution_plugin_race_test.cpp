@@ -611,7 +611,7 @@ protected:
     execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfc60000u); // s_wait_dscnt 0.
   }
 
-  void barrier() { fixture.plugin_group_->onAmdgpuBarrierResolved(waves); }
+  void barrier() { fixture.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup); }
 
   /// Wave 0 issues a tensor load at 0x2010 that overwrites bytes wave 1 is
   /// still reading. Returns the race report.
@@ -848,6 +848,113 @@ TEST_F(TensorDmaRaceTest, TransferWithoutLdsBytesLeavesTheLoadPendingUntilTheWai
   tensor_store(0, {});
   wait_tensorcnt(0, 2);
   EXPECT_TRUE(ds_read(0, 4));
+}
+
+// Wave 1 writes LDS and ends; wave 0 then passes a barrier and reads the
+// bytes. The fixture's DS helpers are not specific to tensor DMA.
+class ExitedWaveRaceTest : public TensorDmaRaceTest {
+protected:
+  void write_and_exit(bool wait) {
+    EXPECT_FALSE(ds_write(1, 64));
+    if (wait)
+      wait_dscnt(1);
+    fixture.plugin_group_->onAmdgpuWavefrontHalted(*waves[1]);
+  }
+
+  void barrier_without_wave_1(BarrierKind kind) {
+    std::array<Wavefront *, 1> remaining{waves[0]};
+    fixture.plugin_group_->onAmdgpuBarrierResolved(remaining, kind);
+  }
+};
+
+// A workgroup barrier among the remaining waves cannot resolve until wave 1
+// has ended, so it orders the write wave 1 waited for.
+TEST_F(ExitedWaveRaceTest, WorkgroupBarrierRetiresCompletedWrite) {
+  write_and_exit(/*wait=*/true);
+  barrier_without_wave_1(BarrierKind::Workgroup);
+  EXPECT_FALSE(ds_read(0, 64));
+}
+
+TEST_F(ExitedWaveRaceTest, UnwaitedWriteStillRacesAfterWorkgroupBarrier) {
+  write_and_exit(/*wait=*/false);
+  barrier_without_wave_1(BarrierKind::Workgroup);
+  EXPECT_TRUE(ds_read(0, 64));
+}
+
+TEST_F(ExitedWaveRaceTest, BarrierBeforeExitDoesNotRetireLaterWrite) {
+  EXPECT_FALSE(ds_write(1, 64));
+  wait_dscnt(1);
+  barrier_without_wave_1(BarrierKind::Workgroup);
+  fixture.plugin_group_->onAmdgpuWavefrontHalted(*waves[1]);
+  EXPECT_TRUE(ds_read(0, 64));
+}
+
+// Named and cluster barriers do not wait for every wave of the workgroup, so
+// they could have resolved before wave 1 ended.
+TEST_F(ExitedWaveRaceTest, NamedAndClusterBarriersDoNotRetireCompletedWrite) {
+  write_and_exit(/*wait=*/true);
+  barrier_without_wave_1(BarrierKind::Named);
+  barrier_without_wave_1(BarrierKind::Cluster);
+  EXPECT_TRUE(ds_read(0, 64));
+}
+
+// Run a two-wave CDNA4 kernel: wave 1 writes LDS, optionally waits for the
+// write, and ends; wave 0 passes s_barrier and reads the same bytes. Returns
+// the race report.
+std::string run_exited_writer_kernel(bool wait) {
+  PluginFixture f;
+  EXPECT_NO_FATAL_FAILURE(f.initialize());
+  PluginSinkConfig config;
+  auto &sink = config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+  EXPECT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  constexpr uint16_t kVgprBase = 256;
+  constexpr uint16_t kInline2 = 130;
+  constexpr uint8_t kInline64 = 192;
+  const auto first_id =
+      cdna4::build_vop1(cdna4::kVReadfirstlaneB32Vop1, {.src0 = kVgprBase + 0, .vdst = 4});
+  const auto address =
+      cdna4::build_vop2(cdna4::kVLshlrevB32Vop2, {.src0 = kInline2, .vsrc1 = 0, .vdst = 1});
+  const auto is_wave_0 = cdna4::build_sopc(cdna4::kSCmpLtU32Sopc, {.ssrc0 = 4, .ssrc1 = kInline64});
+  const auto to_reader = cdna4::build_sopp(cdna4::kSCbranchScc1Sopp, {.simm16 = 4});
+  const auto write = cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 1, .data0 = 0});
+  // offset1 is the high byte of the 16-bit offset, so the read is at v1 + 256.
+  const auto read = cdna4::build_ds(cdna4::kDsReadB32Ds, {.offset1 = 1, .addr = 1, .vdst = 2});
+  const uint32_t lgkm_wait = legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, 63, 0);
+  const uint32_t code[] = {
+      first_id[0],
+      address[0],
+      is_wave_0[0],
+      to_reader[0], // Waves with work-item IDs below 64 read.
+      write[0],
+      write[1], // Wave 1 writes bytes [256, 512).
+      wait ? lgkm_wait : S_NOP,
+      S_ENDPGM,
+      S_BARRIER,
+      read[0],
+      read[1], // Wave 0 reads bytes [256, 512).
+      lgkm_wait,
+      S_ENDPGM,
+  };
+  const uint64_t kernel = f.write_kernel(0x1000, code, std::size(code), /*sgprs=*/12,
+                                         /*group_segment_fixed_size=*/512);
+  test::AqlQueue queue(f.mem, f.cp());
+  queue.dispatch(kernel, /*grid=*/128, /*workgroup=*/128);
+  f.run_until_idle();
+  return sink.str();
+}
+
+TEST(RaceDetectorPluginTest, BarrierAfterWriterEndsOrdersItsWaitedLdsWrite) {
+  const std::string report = run_exited_writer_kernel(/*wait=*/true);
+  EXPECT_EQ(report.find("RACE "), std::string::npos) << report;
+}
+
+TEST(RaceDetectorPluginTest, BarrierAfterWriterEndsDoesNotOrderItsUnwaitedLdsWrite) {
+  const std::string report = run_exited_writer_kernel(/*wait=*/false);
+  EXPECT_NE(report.find("RACE "), std::string::npos) << report;
 }
 
 /// Executes decoded tensor DMA instructions, so the emulator itself reports
@@ -3876,7 +3983,7 @@ public:
                  legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, vmcnt, lgkmcnt));
   }
 
-  void barrier() { f_.plugin_group_->onAmdgpuBarrierResolved(waves_); }
+  void barrier() { f_.plugin_group_->onAmdgpuBarrierResolved(waves_, BarrierKind::Workgroup); }
 
 private:
   void execute(Wavefront &wave, std::array<uint32_t, 2> words) {

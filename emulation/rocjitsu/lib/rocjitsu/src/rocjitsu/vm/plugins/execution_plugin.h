@@ -28,6 +28,18 @@
 
 namespace rocjitsu {
 
+/// The kind of barrier passed to ExecutionPlugin::onAmdgpuBarrierResolved.
+enum class BarrierKind : uint8_t {
+  /// A workgroup barrier or workgroup trap barrier. It resolves only after
+  /// every wave of the workgroup has arrived or ended.
+  Workgroup,
+  /// A named barrier. It counts only the waves that joined it.
+  Named,
+  /// A cluster barrier or cluster trap barrier. One signal from any wave of
+  /// a workgroup counts for the whole workgroup.
+  Cluster,
+};
+
 /// @brief Abstract plugin interface for execution hooks.
 ///
 /// Plugins receive callbacks at key points during simulation execution.
@@ -342,8 +354,10 @@ public:
   virtual void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront * /*wf*/, RegisterRef /*reg*/) {}
 
   /// Called with the waves synchronized by a completed barrier domain.
+  /// Waves that ended before the barrier resolved are not members.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
-  virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
+  virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/,
+                                       BarrierKind /*kind*/) {}
 
   /// Whether this plugin consumes onAmdgpuMemoryAccessRouted(). Building the
   /// observation is real work on the per-instruction path, so a plugin that
