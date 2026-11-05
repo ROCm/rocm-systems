@@ -215,8 +215,8 @@ amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t* handles, uint32_t* count)
  *         AMDCUID_STATUS_INVALID_ARGUMENT if the provided arguments are
  * invalid, AMDCUID_STATUS_DEVICE_NOT_FOUND if the device could not be found at
  * the specified path AMDCUID_STATUS_UNSUPPORTED if the device type is not
- * supported or the device is a GPU on WSL, AMDCUID_STATUS_INVALID_FORMAT if another component has the same
- * derived CUID
+ * supported or the device is a GPU on WSL, AMDCUID_STATUS_INVALID_FORMAT if another component has
+ * the same derived CUID
  */
 amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
                                                 amdcuid_device_type_t device_type,
