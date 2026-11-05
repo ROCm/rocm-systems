@@ -326,7 +326,32 @@ record_code_object_symbols(agent_state_t& state,
 bool
 backend_supported()
 {
-    return true;
+    // The decoder's quick-scan is SIMD-only and reports NOT_IMPLEMENTED on hosts whose CPU
+    // lacks AVX-512 (vbmi, bw and f). Probe it once here, so that callers can fall back to
+    // regular ATT instead of aborting later in backend_create().
+    static const bool ret = []() {
+        auto supported = false;
+        auto decoder   = rocprof_trace_decoder_handle_t{};
+        auto status    = rocprof_trace_decoder_create_handle(&decoder);
+
+        if(status == ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
+        {
+            status = rocprof_trace_decoder_quick_scan(decoder, 0, nullptr, 0, nullptr, nullptr);
+            (void) rocprof_trace_decoder_destroy_handle(decoder);
+            supported = (status == ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
+        }
+
+        if(!supported)
+        {
+            ROCP_INFO << fmt::format("ATT no-intercept quick-scan is not supported on this "
+                                     "system: {}",
+                                     rocprof_trace_decoder_get_status_string(status));
+        }
+
+        return supported;
+    }();
+
+    return ret;
 }
 
 void

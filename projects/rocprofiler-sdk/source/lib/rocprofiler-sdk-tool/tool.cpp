@@ -3093,8 +3093,9 @@ apply_core_capability_gates(tool::config& cfg)
     {
         if(!att_no_intercept_reported.test_and_set())
         {
-            ROCP_WARNING << "--att-no-intercept is unavailable: this rocprofv3 build does not "
-                            "include ATT quick-scan support. Falling back to --att.";
+            ROCP_WARNING << "--att-no-intercept is unavailable: ATT quick-scan is not supported "
+                            "on this system. It needs a rocprofv3 build that includes "
+                            "quick-scan support and a CPU with AVX-512. Falling back to --att.";
         }
         cfg.att_no_intercept = false;
     }
