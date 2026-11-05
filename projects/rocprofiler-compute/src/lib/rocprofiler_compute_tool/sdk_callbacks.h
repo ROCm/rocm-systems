@@ -18,14 +18,6 @@
 
 namespace rocprofiler_compute_tool
 {
-enum class iteration_multiplexing_mode_t
-{
-    DISABLED,
-    SIMPLE,
-    KERNEL,
-    LAUNCH
-};
-
 struct kernel_dispatch_info_t
 {
     uint64_t           kernel_id;
@@ -54,13 +46,6 @@ struct kernel_dispatch_info_t
                                                     other.grid_size.z,
                                                     other.LDS_memory_size);
     }
-};
-
-struct iteration_multiplexing_dispatch_record_t
-{
-    std::size_t                                   config;
-    std::map<uint64_t, std::size_t>               kernel_id_to_profile_index;
-    std::map<kernel_dispatch_info_t, std::size_t> kernel_params_to_profile_index;
 };
 
 /// One completed kernel dispatch. Grid and workgroup sizes are the products of
@@ -131,7 +116,7 @@ struct tool_data_t
     std::unordered_map<uint64_t, kernel_symbol_record_t> kernel_symbols{};
     std::unordered_map<uint64_t, agent_record_t>         agents{};
     std::set<uint64_t>                                   target_kernel_ids{};
-    iteration_multiplexing_mode_t iteration_multiplexing_mode{iteration_multiplexing_mode_t::DISABLED};
+    bool                                                 iteration_multiplexing{false};
     pc_sampling_feature_t::ptr pc_sampling{std::make_shared<pc_sampling_feature_t>()};
 };
 
@@ -188,7 +173,8 @@ private:
     std::shared_mutex                      m_kernel_id_iteration_mutex;
     std::shared_mutex                      m_mutex = {};
     std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>> m_profile_cache_per_agent = {};
-    std::unordered_map<uint64_t, iteration_multiplexing_dispatch_record_t> m_iteration_multiplexing_per_agent = {};
+    std::unordered_map<uint64_t, std::map<kernel_dispatch_info_t, std::size_t>>
+        m_iteration_multiplexing_per_agent = {};
 
     static std::vector<std::string> split_by_regex(const std::string& s, const std::string& regex_pattern);
 };

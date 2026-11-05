@@ -398,23 +398,14 @@ Examples:
     )
     profile_group.add_argument(
         "--iteration-multiplexing",
-        type=str,
         dest="iteration_multiplexing",
-        metavar="",
         required=False,
-        nargs="?",
-        choices=[
-            "kernel",
-            "kernel_launch_params",
-        ],
-        const="kernel_launch_params",
+        default=False,
+        action="store_true",
         help=(
-            "\t\t\tChoose the iteration multiplexing policy: "
-            "(DEFAULT: kernel_launch_params).\n"
-            "\t\t\t   kernel (i.e. Round robin counters over kernel calls with "
-            "unique kernel names.)\n"
-            "\t\t\t   kernel_launch_params (i.e. Round robin counters over "
-            "kernel calls with unique kernel and launch parameters)"
+            "\t\t\tCollect all counters in one application run by spreading them "
+            "over repeated\n"
+            "\t\t\tdispatches of each kernel with the same launch parameters."
         ),
     )
 

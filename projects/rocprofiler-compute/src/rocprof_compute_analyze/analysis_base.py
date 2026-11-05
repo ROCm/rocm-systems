@@ -157,9 +157,9 @@ class OmniAnalyze_Base:
 
     @demarcate
     def iteration_multiplex_impute_counters(
-        self, df: pd.DataFrame, policy: str, workload_dir: Path
+        self, df: pd.DataFrame, workload_dir: Path
     ) -> pd.DataFrame:
-        return impute_counters_iteration_multiplex(df, policy, workload_dir)
+        return impute_counters_iteration_multiplex(df, workload_dir)
 
     @demarcate
     def generate_configs(
@@ -328,6 +328,13 @@ class OmniAnalyze_Base:
             args.path[0][0]
         )
         profiling_config = self.get_profiling_config()
+        if profiling_config.get("iteration_multiplexing") == "kernel":
+            console_error(
+                "analysis",
+                'This workload was profiled with "--iteration-multiplexing kernel", '
+                "which is no longer supported. Profile it again with "
+                '"--iteration-multiplexing".',
+            )
 
         # --ml-api-trace enables every backend.
         ml_api_trace = profiling_config.get("ml_api_trace", False)
@@ -373,7 +380,7 @@ class OmniAnalyze_Base:
                     "Please choose a different name."
                 )
 
-        if profiling_config.get("iteration_multiplexing") is not None:
+        if profiling_config.get("iteration_multiplexing"):
             console_log(
                 "analysis",
                 (
