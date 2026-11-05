@@ -15,7 +15,7 @@ namespace rocprofsys::library_checker
  * @brief Compare the version a library was built against with the version loaded at
  * runtime.
  *
- * Logs a critical message and exits the process with `EXIT_FAILURE` on a mismatch.
+ * @throws std::runtime_error on a mismatch.
  *
  * @param library_name Name used in the message.
  * @param built Version the headers were configured against.
@@ -28,7 +28,7 @@ check_version(std::string_view library_name, const version& built, const version
  * @brief Compare the profiler-hub version this build was configured against with the
  * version of the profiler-hub library loaded at runtime.
  *
- * Logs a critical message and exits the process with `EXIT_FAILURE` on a mismatch.
+ * @throws std::runtime_error on a mismatch.
  *
  * @tparam Storage profiler-hub storage type constructible from two strings and exposing
  * `get_storage_version()`. It is never opened; its constructor only stores the arguments.
@@ -49,7 +49,7 @@ check_profiler_hub_version_mismatch()
  * @brief Compare the rocprofiler-sdk version this build was configured against with the
  * version of the rocprofiler-sdk library loaded at runtime.
  *
- * Logs a critical message and exits the process with `EXIT_FAILURE` on a mismatch.
+ * @throws std::runtime_error on a mismatch.
  *
  * @tparam Backend rocprofiler-sdk backend exposing `compile_time_version` and
  * `get_version(major*, minor*, patch*)`.
