@@ -37,8 +37,6 @@ namespace rocjitsu::plugins::race_detector {
 ///   - Slow path: when a chunk may contain a conflict, scans live event intervals
 ///     with binary search (IntervalSet::overlapsRange).
 class RaceDetector {
-  friend class Workgroup;
-
 public:
   /// ldsSizeBytes is the CU backing capacity, independent of workgroup
   /// allocation metadata and the lazily materialized byte count.
@@ -121,8 +119,6 @@ public:
   WaveRaceState &getWaveRaceState(int waveIndex);
 
 private:
-  void setProfiler(ProfilerInterface &);
-
   struct LdsChunkCounts {
     int bytes = 0;
     /// When bytes > 0, a nonnegative owner proves that every counted event

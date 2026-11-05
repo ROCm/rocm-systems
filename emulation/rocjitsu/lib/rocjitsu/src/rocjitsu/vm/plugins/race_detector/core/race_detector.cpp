@@ -24,12 +24,6 @@ WaveRaceState &RaceDetector::getWaveRaceState(int waveIndex) {
   return waveRaceStates[waveIndex];
 }
 
-void RaceDetector::setProfiler(ProfilerInterface &p) {
-  for (auto &wrs : waveRaceStates) {
-    wrs.setProfiler(p);
-  }
-}
-
 EventId
 RaceDetector::allocateEventId(WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
                               std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
