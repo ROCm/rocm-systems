@@ -310,11 +310,19 @@ private:
 
 /// @brief Count the elements materialized by a tensor DMA instruction.
 /// @details Gather mode uses valid_indices * tile_dims[0]. Dense mode includes
-/// every iteration. Arithmetic overflow and empty dense tile dimensions return
-/// std::nullopt.
+/// every iteration. A zero tile_dims[0] makes the instruction a NOP whatever the
+/// higher tile dimensions (CDNA5 ISA 10.11.4, D# field tile_dim0). Arithmetic
+/// overflow and a zero higher dimension below the rank return std::nullopt.
+///
+/// A NOP tile and a gather with no valid indices are still active descriptors:
+/// with atomic_barrier set, they validate the barrier address and send exactly
+/// one barrier arrival. Only a NULL tensor skips both, as the ISA specifies
+/// (CDNA5 ISA 10.11.4, D# field count). The published ISA does not state the
+/// barrier behavior of a NOP tile; this is the emulator's chosen semantics, not
+/// established hardware behavior.
 inline std::optional<uint64_t> tensor_element_count(const TensorDmaDescriptor &desc,
                                                     const TensorDmaLayout &layout) {
-  if (layout.rank() == 0)
+  if (layout.rank() == 0 || desc.tile_dims[0] == 0)
     return uint64_t{0};
   if (desc.gather)
     return util::checked_mul(uint64_t{desc.valid_indices}, uint64_t{desc.tile_dims[0]});
@@ -345,15 +353,17 @@ inline util::Result validate_supported_descriptor(const TensorDmaDescriptor &des
   if (desc.gather) {
     if (rank != 2) [[unlikely]]
       return util::Result::failure();
-    if (desc.tile_dims[0] == 0) [[unlikely]]
-      return util::Result::failure();
-    if (desc.valid_indices == 0) [[unlikely]]
-      return util::Result::failure();
+    // Zero valid indices or a zero tile_dims[0] is a NOP; see tensor_element_count.
     const uint32_t max_indices = desc.gather_indices_32bit ? 8 : 16;
     if (desc.valid_indices > max_indices) [[unlikely]]
       return util::Result::failure();
     return tensor_element_count(desc, layout) ? util::Result::success() : util::Result::failure();
   }
+  // A dense tile with no elements is a NOP (see tensor_element_count). It
+  // visits no iteration origins, so its iteration fields need not describe a
+  // valid walk; pipelines drain an iterating prefetch this way.
+  if (rank == 0 || desc.tile_dims[0] == 0)
+    return util::Result::success();
   if (desc.iterate && (rank < 2 || rank > 3)) [[unlikely]]
     return util::Result::failure();
   if (desc.iterate && desc.iteration_count > 1 && desc.global_increment != 0) {
@@ -591,6 +601,12 @@ inline void for_each_dense_tensor_element(const TensorDmaDescriptor &desc,
   uint64_t element_count = 1;
   for (uint32_t dim = 0; dim < rank; ++dim)
     element_count *= desc.tile_dims[dim];
+  // Without elements there is nothing to visit, so reconstruct no origins.
+  // validate_supported_descriptor accepts an empty tile without validating its
+  // iteration inverse, so its layout may hold a zero stride, which
+  // origin_from_linear_offset would divide by.
+  if (element_count == 0)
+    return;
 
   const uint32_t iteration_count = desc.iterate ? desc.iteration_count : 1;
   for (uint32_t iter = 0; iter < iteration_count; ++iter) {
@@ -647,10 +663,11 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   const TensorDmaLayout layout(desc);
   if (validate_supported_descriptor(desc, layout).failed()) [[unlikely]]
     return util::Result::failure();
-  if (layout.rank() != 0 && !wf.has_gpu_memory()) [[unlikely]]
-    return util::Result::failure();
   const auto element_count = tensor_element_count(desc, layout);
   if (!element_count) [[unlikely]]
+    return util::Result::failure();
+  // A transfer with zero elements needs no GPU memory.
+  if (*element_count != 0 && !wf.has_gpu_memory()) [[unlikely]]
     return util::Result::failure();
   // Iterations may legally reuse LDS through a zero or overlapping increment.
   // This separate simulator limit bounds the eager host representation.
@@ -668,7 +685,9 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   };
   for_each_tensor_element(desc, layout, append_element);
 
-  if (wf.address_space()) {
+  // A transfer with zero elements makes no global request, so it needs no VM
+  // binding either.
+  if (*element_count != 0 && wf.address_space()) {
     state.access = wf.snapshot_vm_access();
     if (!state.access)
       state.outcome = VmAccessOutcome::Faulted;
