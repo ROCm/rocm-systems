@@ -203,7 +203,7 @@
       ROCm/rocm-systems
       <ul class="md-source__facts">
         <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 550 · build snapshot" aria-label="Stars: 550">550</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 488 · build snapshot" aria-label="Forks: 488">488</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 489 · build snapshot" aria-label="Forks: 489">489</li>
       </ul>
     </div>
   </a>
@@ -256,7 +256,7 @@
       ROCm/rocm-systems
       <ul class="md-source__facts">
         <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 550 · build snapshot" aria-label="Stars: 550">550</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 488 · build snapshot" aria-label="Forks: 488">488</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 489 · build snapshot" aria-label="Forks: 489">489</li>
       </ul>
     </div>
   </a>
@@ -2842,13 +2842,21 @@ read-modify-write at L2. The old value is returned to vdst when
 SC0/GLC is set. The L1 line is invalidated after the atomic to prevent
 stale reads. Supported integer atomics: swap, cmpswap, add, sub,
 smin/umin, smax/umax, and, or, xor, inc, dec.</p>
-<p><strong>Scalar atomics</strong> (<code>s_atomic_*</code> and <code>s_atomic_*_x2</code>, CDNA1–4) bypass the
-L1 scalar cache and perform read-modify-write at L2; the atomic boundary's
-coherence epoch makes stale K$ lines refetch. The old value is returned to
-SDATA when GLC is set. Supported: swap, cmpswap, add, sub, smin/umin,
-smax/umax, and, or, xor, inc, dec. Compare-swap reads the source and then
-the compare value from SDATA and returns only the old value, to the low half.
-<code>s_buffer_atomic_*</code> are not yet implemented.</p>
+<p><strong>Scalar atomics</strong> (<code>s_atomic_*</code>, <code>s_buffer_atomic_*</code> and their <code>_x2</code> forms,
+CDNA1–4) bypass the L1 scalar cache and perform read-modify-write at L2; the
+atomic boundary's coherence epoch makes stale K$ lines refetch. The old value
+is returned to SDATA when GLC is set. Supported: swap, cmpswap, add, sub,
+smin/umin, smax/umax, and, or, xor, inc, dec. Compare-swap reads the source
+and then the compare value from SDATA and returns only the old value, to the
+low half. A buffer atomic's address is the V# base plus the offset; stride
+only scales the bound. A buffer atomic whose element is not wholly in range
+performs no access and returns zero when GLC is set. A misaligned <code>_x2</code> buffer
+atomic faults even when out of range. The CDNA ISA manuals do not describe
+these bounds and fault-order rules. They are observed on gfx90a with
+<code>s_buffer_atomic_inc[_x2]</code>, and the fault order also with
+<code>s_buffer_atomic_dec_x2</code>. The other operations and CDNA targets are modeled
+the same way by extrapolation, including <code>s_buffer_atomic_cmpswap_x2</code>, whose
+bound covers its 8-byte memory element although SDATA holds 16 bytes.</p>
 <p><strong>Cache management instructions:</strong></p>
 <ul>
 <li><code>s_dcache_inv</code> / <code>s_dcache_inv_vol</code> — invalidate the L1 scalar cache</li>
