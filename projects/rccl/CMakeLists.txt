@@ -703,7 +703,7 @@ elseif (HAVE_KERNARG_PRELOAD AND DISABLE_KERNARG_PRELOAD)
   message(STATUS "Kernarg preloading to SGPR disabled by DISABLE_KERNARG_PRELOAD=ON")
 endif()
 
-check_cxx_compiler_flag("-parallel-jobs=12" HAVE_PARALLEL_JOBS)
+check_cxx_compiler_flag("--offload-jobs=12" HAVE_PARALLEL_JOBS)
 if (HAVE_PARALLEL_JOBS)
   message(STATUS "Parallel jobs enabled")
 endif()
