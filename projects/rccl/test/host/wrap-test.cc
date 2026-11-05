@@ -6101,7 +6101,7 @@ ncclComm* MakeArDdaComm(int nRanks) {
 }
 
 // Registered AllReduce (gfx1250 unless `arch` says otherwise) with symk withdrawn by symMaxR2: CE-registered runs
-// eager, Ring in capture.
+// eager, Ring in capture. DDA tiers take sums only, as in production.
 class RegisteredAr {
  public:
   explicit RegisteredAr(int nRanks, const char* arch = "gfx1250") {
@@ -6137,10 +6137,10 @@ class RegisteredAr {
     comm_->rankToNode = rankToNode_.data();
   }
 
-  rcclCollDecision Select(size_t bytes, bool capturing, bool query = true) {
+  rcclCollDecision Select(size_t bytes, bool capturing, bool query = true, ncclRedOp_t op = ncclSum) {
     capturing_ = capturing;
     rcclCollDecision decision{};
-    EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm_, nullptr, nullptr, bytes / sizeof(float), ncclFloat32, ncclSum,
+    EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm_, nullptr, nullptr, bytes / sizeof(float), ncclFloat32, op,
                                                 /*stream=*/nullptr, query, /*graphCapturingHint=*/capturing,
                                                 &decision));
     return decision;
@@ -6204,13 +6204,19 @@ class RegisteredAr {
       [](const struct ncclComm*, size_t, ncclDataType_t, bool symEligible, bool) { return !symEligible; }};
   HookFor<decltype(g_allReduceDdaFabricLL128Eligible)> ll128EligibleHook_{
       g_allReduceDdaFabricLL128Eligible,
-      [this](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return ll128Eligible_; }};
+      [this](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t op) {
+        return ll128Eligible_ && op == ncclSum;
+      }};
   HookFor<decltype(g_allReduceDdaFabricLLEligible)> llEligibleHook_{
       g_allReduceDdaFabricLLEligible,
-      [this](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return llEligible_; }};
+      [this](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t op) {
+        return llEligible_ && op == ncclSum;
+      }};
   HookFor<decltype(g_allReduceDdaFabricEligible)> vmmEligibleHook_{
       g_allReduceDdaFabricEligible,
-      [this](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return vmmEligible_; }};
+      [this](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t op) {
+        return vmmEligible_ && op == ncclSum;
+      }};
   HookFor<decltype(g_allReduceDdaFabricLL128Blocks)> ll128Blocks_{g_allReduceDdaFabricLL128Blocks, CappedReport(114u)};
   HookFor<decltype(g_allReduceDdaFabricLLBlocks)> llBlocks_{g_allReduceDdaFabricLLBlocks, CappedReport(113u)};
   HookFor<decltype(g_allReduceDdaFabricBlocks)> vmmBlocks_{g_allReduceDdaFabricBlocks, CappedReport(112u)};
@@ -6527,6 +6533,112 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteUnderZeroPolicy) {
           EXPECT_EQ(96u, d.ddaCap.blocks) << "Ring's channels";
           EXPECT_EQ(256u, d.ddaCap.threads) << "Ring's block width";
           EXPECT_TRUE(RcclUnitTesting::LogHas(log, "preferred backend")) << "the fallback warning fires";
+        }
+      });
+}
+
+// Below symMinR2 symk is not withdrawn, so a captured registered sum already runs on DDA, with no Ring cap.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureBelowSymMinKeepsUncappedDda) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredCaptureBelowSymMinKeepsUncappedDda",
+      []() {
+        RegisteredAr ar(8);
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        for (bool query : {true, false}) {
+          SCOPED_TRACE(query ? "query" : "live: stream probe");
+          for (size_t bytes : {4 * kMiB, 8 * kMiB - sizeof(float)}) {
+            SCOPED_TRACE(testing::Message() << "bytes=" << bytes);
+            ar.ringInfo_.calls = 0;
+            ar.reportedCap_ = {};
+            const rcclCollDecision d = ar.Select(bytes, /*capturing=*/true, query);
+            EXPECT_TRUE(d.ceCapturing);
+            EXPECT_EQ(ll128, d.algo);
+            EXPECT_EQ(0u, d.ddaCap.blocks);
+            EXPECT_EQ(0u, d.ddaCap.threads);
+            EXPECT_EQ(114u, d.nMaxChannels) << "the LL128 reporter's own grid";
+            EXPECT_EQ(0u, ar.reportedCap_.blocks);
+            EXPECT_EQ(0, ar.ringInfo_.calls.load()) << "Ring is not planned for a cap";
+          }
+          const rcclCollDecision atMin = ar.Select(8 * kMiB, true, query);
+          EXPECT_EQ(ll128, atMin.algo);
+          EXPECT_EQ(96u, atMin.ddaCap.blocks) << "from symMinR2 up the re-route caps at Ring's grid";
+        }
+      });
+}
+
+// In capture DDA LL takes registered sums up to its cap (32M here), LL128 just past it; both within Ring's grid.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureTierFollowsTheLLCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredCaptureTierFollowsTheLLCap",
+      []() {
+        RegisteredAr ar(32);  // The capture bound max(32M, 32 x 2M) = 64M lies past the 32M LL cap.
+        ar.llEligible_ = true;
+        const int ll = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL;
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        for (bool query : {true, false}) {
+          SCOPED_TRACE(query ? "query" : "live: stream probe");
+          for (size_t bytes : {32 * kMiB, 32 * kMiB + sizeof(float)}) {
+            SCOPED_TRACE(testing::Message() << "bytes=" << bytes);
+            ar.reportedCap_ = {};
+            const rcclCollDecision d = ar.Select(bytes, /*capturing=*/true, query);
+            EXPECT_EQ(bytes <= 32 * kMiB ? ll : ll128, d.algo);
+            EXPECT_EQ(96u, d.ddaCap.blocks) << "Ring's channels";
+            EXPECT_EQ(256u, d.ddaCap.threads) << "Ring's single-node block";
+            EXPECT_EQ(96u, ar.reportedCap_.blocks) << "the chosen tier's reporter sizes the capped grid";
+            EXPECT_EQ(96u, d.nMaxChannels);
+          }
+        }
+      });
+}
+
+// A user-set NCCL_ALGO skips every RCCL backend, so registered sums reach the planner with no re-route and no cap.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredNcclAlgoEnvKeepsThePlannersChoice) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredNcclAlgoEnvKeepsThePlannersChoice",
+      []() {
+        SetMicroEnv("NCCL_ALGO", "Ring");
+        RegisteredAr ar(8);
+        for (bool query : {true, false}) {
+          for (bool capturing : {false, true}) {
+            SCOPED_TRACE(testing::Message() << "query=" << query << " capturing=" << capturing);
+            ar.ceChunkElems_.clear();
+            const rcclCollDecision d = ar.Select(capturing ? 16 * kMiB : 8 * kMiB, capturing, query);
+            EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+            EXPECT_EQ(query ? NCCL_PROTO_LL128 : NCCL_PROTO_SIMPLE, d.protocol) << "live: enqueue plans it";
+            EXPECT_EQ(query ? 96u : 0u, d.nMaxChannels);
+            EXPECT_EQ(0u, d.ddaCap.blocks);
+            EXPECT_EQ(0u, d.ddaCap.threads);
+            EXPECT_TRUE(ar.ceChunkElems_.empty()) << "no CE cap is sized";
+          }
+        }
+      });
+}
+
+// Only a sum requests symk, so another op is never re-routed: eager keeps CE-registered, capture keeps Ring.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredNonSumKeepsCeAndRing) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredNonSumKeepsCeAndRing",
+      []() {
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        for (ncclRedOp_t op : {ncclProd, ncclMax}) {
+          RegisteredAr ar(8);  // Fresh per op: a live capture latches CE off for later eager calls.
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, ar.Select(8 * kMiB, false).algo) << "a sum re-routes";
+          for (bool query : {true, false}) {
+            SCOPED_TRACE(testing::Message() << "op=" << (int)op << " query=" << query);
+            ar.ceChunkElems_.clear();
+            rcclCollDecision d = ar.Select(8 * kMiB, /*capturing=*/false, query, op);
+            EXPECT_EQ(ceReg, d.algo);
+            EXPECT_EQ(46u, d.nMaxChannels) << "CE's reduce blocks";
+            EXPECT_EQ(0u, d.ddaCap.blocks);
+            EXPECT_EQ(0u, d.ddaCap.threads);
+            EXPECT_EQ(std::vector<size_t>{kMiB / sizeof(float)}, ar.ceChunkElems_) << "only CE's own launch is sized";
+            ar.ringInfo_.calls = 0;
+            d = ar.Select(16 * kMiB, /*capturing=*/true, query, op);
+            EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+            EXPECT_EQ(0u, d.ddaCap.blocks);
+            EXPECT_EQ(0u, d.ddaCap.threads);
+            EXPECT_EQ(query ? 1 : 0, ar.ringInfo_.calls.load()) << "Ring is planned only for the report, not for a cap";
+          }
         }
       });
 }
