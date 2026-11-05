@@ -196,9 +196,6 @@ public:
   void checkVgprWrite(int reg, uint64_t execMask, uint8_t byteMask,
                       MemoryOrderClass currentMemoryOrder) const;
 
-  /// Check all lanes of a VGPR for races (used by bulk register reads).
-  void checkVgprReadAllLanes(int reg) const;
-
   /// Check a scalar register read for races. Calls the RaceHandler on
   /// violation (outstanding scalar load targeting the same register).
   void checkScalarRead(RegisterRef reg) const;
@@ -206,14 +203,6 @@ public:
   /// Check a scalar instruction write for conflicts with pending scalar loads.
   /// A wide write reports each conflicting memory event at most once.
   void checkScalarWrite(RegisterRef reg) const;
-
-  /// True if any outstanding global/LDS store reads from the given VGPR lane.
-  bool isOutstandingFromVgpr(int lane, int reg) const;
-
-  /// Number of outstanding events of a given type on a register.
-  int getRegEventCount(MemoryEventType type, int reg) const {
-    return regEventCount[static_cast<int>(type)][reg];
-  }
 
   std::vector<EventId> &getVgprMemoryEvents(int reg) { return vgprMemoryEvents[reg]; }
 
@@ -242,21 +231,9 @@ private:
   void applyWaitCounter(amdgpu::WaitCounterType type, int threshold);
   int doNotWaitValue(amdgpu::WaitCounterType type) const;
 
-  void regEventCountInc(MemoryEventType type, int reg) {
-    regEventCount[static_cast<int>(type)][reg]++;
-  }
-  void regEventCountDec(MemoryEventType type, int reg) {
-    regEventCount[static_cast<int>(type)][reg]--;
-  }
-
   std::vector<std::vector<EventId>> vgprMemoryEvents;
   std::vector<std::vector<EventId>> sgprMemoryEvents;
-  std::vector<int> sgprEventCount;
   std::vector<std::vector<EventId>> ttmpMemoryEvents;
-  std::vector<int> ttmpEventCount;
-
-  static constexpr int kNumEventTypes = static_cast<int>(MemoryEventType::N);
-  std::array<std::vector<int>, kNumEventTypes> regEventCount;
 
   std::vector<EventId> waveMemoryEvents;
   std::vector<EventId> barrierPendingEvents;

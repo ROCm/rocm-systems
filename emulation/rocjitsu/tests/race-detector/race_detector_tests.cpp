@@ -2182,28 +2182,16 @@ TEST(RaceDetector, DualOffset_CrossWaveRace) {
 
 // ---- Exec mask and lane-level checks ----
 
-TEST(RaceDetector, CheckVgprReadAllLanes) {
-  // checkVgprReadAllLanes checks all 64 lanes for races on a register.
-  // A global load with partial exec (lane 5 only) should race when
-  // checkVgprReadAllLanes is called (it checks lane 5 among others).
-  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
-  b.globalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1, /*exec=*/1ULL << 5);
-  // Use the WaveRaceState directly for checkVgprReadAllLanes.
-  b.violations(); // ensure handler is set up
-  // checkVgprReadAllLanes iterates all lanes, should hit lane 5.
-  // Access it through the detector:
-  RaceTestBuilder b2(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
-  b2.globalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1, /*exec=*/1ULL << 5);
-  // Check individual lane 5 → race
-  b2.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/5);
-  EXPECT_TRUE(b2.hasVgprRace(1));
-  // Check lane 0 (not in exec mask) → should still race because the event
-  // is active and checkVgprRead checks if ANY pending load overlaps.
-  RaceTestBuilder b3(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
-  b3.globalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1, /*exec=*/1ULL << 5);
-  b3.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
-  // Lane 0 was not in the exec mask of the load, so it should NOT race.
-  EXPECT_FALSE(b3.hasRace());
+TEST(RaceDetector, CheckVgprReadOnlyReportsLanesInLoadExecMask) {
+  RaceTestBuilder active(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  active.globalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1, /*exec=*/1ULL << 5);
+  active.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/5);
+  EXPECT_TRUE(active.hasVgprRace(1));
+
+  RaceTestBuilder inactive(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  inactive.globalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1, /*exec=*/1ULL << 5);
+  inactive.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
+  EXPECT_FALSE(inactive.hasRace());
 }
 
 TEST(RaceDetector, CheckVgprReadLanesReportsMaskedLane) {

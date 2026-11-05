@@ -167,10 +167,6 @@ public:
 
   const IntervalSet &ldsIntervals(EventId id) const { return entries_[index(id)].ldsIntervals; }
 
-  bool isActiveForLane(EventId id, int lane) const {
-    return (entries_[index(id)].execMask >> lane) & 1;
-  }
-
   // -- Test helpers --
 
   /// Number of events currently stored (live + not-yet-trimmed dead).
