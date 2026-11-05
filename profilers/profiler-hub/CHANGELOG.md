@@ -195,6 +195,12 @@ downstream consumer of the library.
 
 ### Fixed
 
+- An asynchronous call that throws now finishes its future with
+  `PH_FUTURE_ERROR` and `PH_RESULT_INTERNAL_ERROR`, so `ph_future_wait`
+  does not stay blocked. A call that returns `PH_RESULT_CANCELLED` finishes
+  its future as `PH_FUTURE_CANCELLED`. `ph_future_cancel` requests a stop
+  even when the future is not attached, so a synchronous table read can
+  observe it and the same future can be reused.
 - `ph_ctx::initialize_track_list()` no longer crashes on tracks with no
   associated process (e.g. the new per-agent+queue category tracks, which
   have no `pid`) — `node_info`/`process_info` are now null-checked the same

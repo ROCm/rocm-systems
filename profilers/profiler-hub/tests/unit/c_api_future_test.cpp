@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "ph_ctx.hpp"
 #include "ph_future.hpp"
 #include "profiler-hub/c/profiler_hub.h"
 #include "trace_fixtures.hpp"
@@ -10,7 +11,9 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -113,12 +116,13 @@ TEST_F(c_api_future_test, a_future_serves_only_one_operation)
     EXPECT_FALSE(m_future->try_attach());
 }
 
-TEST_F(c_api_future_test, wait_and_cancel_need_an_operation)
+TEST_F(c_api_future_test, wait_needs_an_operation_and_cancel_does_not)
 {
     create();
 
     EXPECT_EQ(ph_future_wait(m_future), PH_RESULT_INVALID_ARGUMENT);
-    EXPECT_EQ(ph_future_cancel(m_future), PH_RESULT_INVALID_ARGUMENT);
+    EXPECT_EQ(ph_future_cancel(m_future), PH_RESULT_SUCCESS);
+    EXPECT_TRUE(m_future->stop_token().stop_requested());
 }
 
 TEST_F(c_api_future_test, the_functions_reject_a_null_future)
@@ -354,7 +358,7 @@ TEST_F(c_api_async_ctx_test,
     in_progress = false;
 
     create(
-        [](ph_future_t, double) {
+        [](ph_future_t, double, ph_progress_description_t) {
             in_progress = true;
             while(!release)
             {
@@ -376,6 +380,14 @@ TEST_F(c_api_async_ctx_test,
     EXPECT_EQ(g_log.result, PH_RESULT_CANCELLED);
     ph_track_list_t tracks{};
     EXPECT_EQ(ph_get_track_list(m_ctx, &tracks, nullptr), PH_RESULT_CANCELLED);
+
+    ph_future_t data_future = nullptr;
+    ASSERT_EQ(ph_future_create(nullptr, on_finished, &data_future), PH_RESULT_SUCCESS);
+    EXPECT_EQ(ph_get_track_list(m_ctx, &tracks, data_future), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_future_wait(data_future), PH_RESULT_SUCCESS);
+    EXPECT_EQ(g_log.status, PH_FUTURE_CANCELLED);
+    EXPECT_EQ(g_log.result, PH_RESULT_CANCELLED);
+    EXPECT_EQ(ph_future_free(data_future), PH_RESULT_SUCCESS);
 }
 
 TEST_F(c_api_async_ctx_test, freeing_the_context_ends_the_future_exactly_once)
@@ -566,6 +578,62 @@ TEST_F(c_api_async_call_test, a_call_that_has_not_started_is_skipped_when_cancel
     EXPECT_EQ(g_log.status, PH_FUTURE_CANCELLED);
     EXPECT_EQ(g_log.result, PH_RESULT_CANCELLED);
     EXPECT_EQ(tracks.list_size, 0U);
+}
+
+TEST_F(c_api_async_call_test, a_throwing_operation_finishes_the_future)
+{
+    create();
+    ASSERT_TRUE(m_future->try_attach());
+
+    m_ctx->run_async(m_future->shared_from_this(), []() -> ph_result_t {
+        throw std::runtime_error("async operation failed");
+    });
+
+    ASSERT_EQ(ph_future_wait(m_future), PH_RESULT_SUCCESS);
+    EXPECT_EQ(g_log.finished_calls, 1);
+    EXPECT_EQ(g_log.status, PH_FUTURE_ERROR);
+    EXPECT_EQ(g_log.result, PH_RESULT_INTERNAL_ERROR);
+}
+
+TEST_F(c_api_async_call_test, an_unattached_future_cancels_a_synchronous_table_read)
+{
+    create();
+    EXPECT_EQ(ph_future_cancel(m_future), PH_RESULT_SUCCESS);
+    EXPECT_TRUE(m_future->stop_token().stop_requested());
+
+    uint32_t          event_type = PH_EVENT_TYPE_REGION;
+    ph_event_filter_t filter{};
+    filter.size             = sizeof(filter);
+    filter.event_types      = &event_type;
+    filter.event_type_count = 1;
+    ph_event_query_t query  = nullptr;
+    ASSERT_EQ(ph_event_query_create(m_ctx, &filter, &query), PH_RESULT_SUCCESS);
+
+    ph_table_event_t row{};
+    uint32_t         count = 99;
+    EXPECT_EQ(ph_event_query_read(query,
+                                  PH_EVENT_TYPE_REGION,
+                                  0,
+                                  UINT64_MAX,
+                                  &row,
+                                  1,
+                                  &count,
+                                  m_future),
+              PH_RESULT_CANCELLED);
+    EXPECT_EQ(ph_future_wait(m_future), PH_RESULT_INVALID_ARGUMENT);
+
+    count = 99;
+    EXPECT_EQ(ph_event_query_read(query,
+                                  PH_EVENT_TYPE_REGION,
+                                  0,
+                                  UINT64_MAX,
+                                  &row,
+                                  1,
+                                  &count,
+                                  m_future),
+              PH_RESULT_CANCELLED);
+    EXPECT_EQ(ph_future_wait(m_future), PH_RESULT_INVALID_ARGUMENT);
+    EXPECT_EQ(ph_event_query_free(query), PH_RESULT_SUCCESS);
 }
 
 TEST_F(c_api_async_call_test, freeing_the_context_cancels_the_calls_still_waiting)

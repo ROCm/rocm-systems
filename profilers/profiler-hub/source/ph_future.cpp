@@ -75,10 +75,6 @@ ph_future::wait()
 ph_result_t
 ph_future::cancel()
 {
-    {
-        const std::scoped_lock lock{ m_mutex };
-        if(!m_attached) return PH_RESULT_INVALID_ARGUMENT;
-    }
     m_stop.request_stop();
     return PH_RESULT_SUCCESS;
 }

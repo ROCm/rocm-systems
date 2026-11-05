@@ -552,14 +552,17 @@ extern "C"
     ph_result_t ph_future_wait(ph_future_t future);
 
     /**
-     * @brief Requests cancellation of the operation of @p future.
+     * @brief Requests cancellation of @p future.
      * @param future Future to cancel.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if
-     *         @p future is null or was not passed to an operation yet.
-     * @note Cancellation is cooperative: an operation that has not started is
-     *       skipped, a running one stops at its next check. The operation ends
-     *       with PH_FUTURE_CANCELLED. Cancelling an operation that already
-     *       ended has no effect.
+     *         @p future is null.
+     * @note Cancellation is cooperative and does not require the future to be
+     *       attached. A synchronous call such as ph_event_query_read observes
+     *       the stop without attaching the future, so the same future can be
+     *       reused. An asynchronous operation that has not started is skipped.
+     *       A running one stops at its next check and ends with
+     *       PH_FUTURE_CANCELLED. Cancelling an operation that already ended
+     *       does not change its result.
      */
     ph_result_t ph_future_cancel(ph_future_t future);
 
@@ -626,7 +629,8 @@ extern "C"
      * @param count Out parameter. Set to the number of rows written. A count
      *        smaller than @p capacity means there are no further rows.
      * @param future Optional cancellation source. This synchronous call does
-     *        not attach or complete it; it only observes cancellation while
+     *        not attach or complete it, so the same future can be reused.
+     *        ph_future_cancel requests the stop this call observes while
      *        reading the page.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if a
      *         pointer is null, @p capacity is 0, or @p event_type is unknown,
@@ -647,7 +651,9 @@ extern "C"
      *        @p event_type, ignoring the query filter.
      * @param first_id Out parameter. Set to 0 if the table is empty.
      * @param last_id Out parameter. Set to 0 if the table is empty.
-     * @param future Optional cancellation source, observed only.
+     * @param future Optional cancellation source. This synchronous call does
+     *        not attach or complete it. ph_future_cancel requests the stop
+     *        this call observes.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if a
      *         pointer is null or @p event_type is unknown,
      *         PH_RESULT_INVALID_CONTEXT if the query has no trace,
@@ -677,6 +683,9 @@ extern "C"
     /**
      * @brief Aggregates matching events by display name inside SQLite.
      *        Durations are end minus start, in trace ticks.
+     * @param future Optional cancellation source. This synchronous call does
+     *        not attach or complete it. ph_future_cancel requests the stop
+     *        this call observes.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if a
      *         pointer is null or @p event_type is unknown,
      *         PH_RESULT_INVALID_CONTEXT if the query has no trace,

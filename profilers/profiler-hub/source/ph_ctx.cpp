@@ -599,16 +599,37 @@ ph_ctx::run_async(std::shared_ptr<ph_future>   future,
         std::ignore =
             m_thread_pool.submit([this, future, operation = std::move(operation)](
                                      const std::stop_token& token) {
-                if(token.stop_requested() || future->stop_token().stop_requested())
+                try
                 {
-                    future->finish(PH_FUTURE_CANCELLED, PH_RESULT_CANCELLED);
-                }
-                else
+                    try
+                    {
+                        if(token.stop_requested() ||
+                           future->stop_token().stop_requested())
+                        {
+                            future->finish(PH_FUTURE_CANCELLED, PH_RESULT_CANCELLED);
+                        }
+                        else
+                        {
+                            const auto         result = operation();
+                            ph_future_status_t status = PH_FUTURE_ERROR;
+                            if(result == PH_RESULT_SUCCESS)
+                            {
+                                status = PH_FUTURE_FINISHED;
+                            }
+                            else if(result == PH_RESULT_CANCELLED)
+                            {
+                                status = PH_FUTURE_CANCELLED;
+                            }
+                            future->finish(status, result);
+                        }
+                    } catch(...)
+                    {
+                        future->finish(PH_FUTURE_ERROR, PH_RESULT_INTERNAL_ERROR);
+                    }
+                } catch(...)
                 {
-                    const auto result = operation();
-                    future->finish(result == PH_RESULT_SUCCESS ? PH_FUTURE_FINISHED
-                                                               : PH_FUTURE_ERROR,
-                                   result);
+                    // The caller's on_finished callback may throw. The future is
+                    // still removed from the pending set below.
                 }
                 m_operations.remove(future);
             });

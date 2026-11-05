@@ -405,13 +405,6 @@ is the only caller in this integration.
 These were found by reading the code. None of them has been fixed or confirmed
 with a test.
 
-- **Futures**
-  - An asynchronous call that throws never finishes its future, so
-    `ph_future_wait` can block until `ph_ctx_free`.
-  - The event-query functions never attach their future, so
-    `ph_future_cancel` on it returns `PH_RESULT_INVALID_ARGUMENT`.
-  - A call that returns `PH_RESULT_CANCELLED` finishes its future as
-    `PH_FUTURE_ERROR`.
 - **Several sources**
   - Without a cache folder, each source builds its own histogram grid, but the
     result reports source 0's origin and bucket size.

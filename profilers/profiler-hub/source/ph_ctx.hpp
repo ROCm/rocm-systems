@@ -56,9 +56,12 @@ struct ph_ctx
 
     /**
      * Runs @p operation on a worker of the ctx pool and ends @p future with its
-     * ph_result_t. @p future must have been attached by the caller. It ends with
-     * PH_FUTURE_CANCELLED if it is cancelled before the operation starts or the ctx is
-     * destroyed first.
+     * ph_result_t. @p future must have been attached by the caller.
+     * PH_RESULT_SUCCESS ends it as PH_FUTURE_FINISHED. PH_RESULT_CANCELLED ends
+     * it as PH_FUTURE_CANCELLED, as does cancellation before the operation
+     * starts or destruction of the ctx. Any other result ends it as
+     * PH_FUTURE_ERROR. An exception ends it as PH_FUTURE_ERROR with
+     * PH_RESULT_INTERNAL_ERROR, so the future does not stay unfinished.
      */
     void run_async(std::shared_ptr<ph_future>   future,
                    std::function<ph_result_t()> operation);
