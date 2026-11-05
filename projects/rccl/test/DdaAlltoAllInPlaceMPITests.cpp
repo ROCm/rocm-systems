@@ -69,6 +69,8 @@ class DdaAlltoAllInPlaceMPI : public DdaFabricMPITest
 protected:
     int rank_{};
     int nRanks_{};
+    int ddaCases_{};   // cases whose aligned call took a DDA tier
+    int ll128Cases_{}; // of those, on LL128
 
     void SetUp() override
     {
@@ -101,6 +103,8 @@ protected:
         const int alignedAlgo = selectedAlgo(sendBase, c.inPlace ? sendBase : recvBase, count, c.datatype);
         if(!isDdaFabric(alignedAlgo))
             return;
+        ++ddaCases_;
+        ll128Cases_ += alignedAlgo == RCCL_DDA_FABRIC_LL128;
         EXPECT_EQ(selectedAlgo(send, recv, count, c.datatype), alignedAlgo) << "Rank " << rank_;
 
         const int nRanks = nRanks_;
@@ -141,6 +145,12 @@ TEST_F(DdaAlltoAllInPlaceMPI, OffsetsStayOnDda)
                 return;
         }
     }
+    // Cases off DDA return before any check, so a selection change that sent them all to p2p
+    // would pass with nothing tested. From 8 ranks the 64 KiB or 512 KiB per-peer total sits in
+    // the LL128 band of the gfx1250 tables, so LL128 has to be among them.
+    EXPECT_GT(ddaCases_, 0) << "Rank " << rank_ << ": no case took a DDA tier";
+    if(nRanks_ >= 8)
+        EXPECT_GT(ll128Cases_, 0) << "Rank " << rank_ << " of " << nRanks_ << ": no case took DDA LL128";
 }
 
 #endif // MPI_TESTS_ENABLED
