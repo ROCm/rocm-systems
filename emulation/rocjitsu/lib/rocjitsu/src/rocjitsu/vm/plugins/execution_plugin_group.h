@@ -11,8 +11,10 @@
 /// sink, so construction order and lifetime are explicit in the type.
 ///
 /// When a plugin is added via add(), the group constructs an internal fanout sink
-/// combining all configured sinks + an optional per-plugin FileSink, and
-/// assigns it to the plugin. Every fanout in one group shares a sink mutex so
+/// combining configured sinks + an optional per-plugin FileSink, and
+/// assigns it to the plugin. Loader-created groups defer file opening until
+/// onInit(), after the outgoing group has shut down and been destroyed.
+/// Every fanout in one group shares a sink mutex so
 /// asynchronous plugin writers cannot concurrently enter a configured sink.
 
 #pragma once
@@ -97,7 +99,7 @@ public:
   /// Defer file creation until plugin admission is complete. Call before add().
   void defer_file_sinks() { file_sinks_deferred_ = !sink_dir_.empty(); }
 
-  /// Open the deferred files only after the candidate group has been admitted.
+  /// Open deferred files after outgoing group destruction, before initialization.
   void activate_file_sinks() {
     if (!file_sinks_deferred_)
       return;
@@ -189,6 +191,7 @@ public:
   // completes before callbacks start, and onShutdown() starts after they stop.
   // callback_mutex_ orders simulation callbacks, not lifecycle teardown.
   void onInit() {
+    activate_file_sinks();
     dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onInit();
@@ -652,7 +655,7 @@ private:
   /// Returns an empty bundle if no sinks are configured.
   [[nodiscard]] SinkBundle build_sink_bundle(const std::string &file_name) {
     bool has_file = !file_sinks_deferred_ && !sink_dir_.empty() && !file_name.empty();
-    if (configured_sinks_.empty() && !has_file)
+    if (configured_sinks_.empty() && !has_file && !file_sinks_deferred_)
       return {};
 
     SinkBundle result;

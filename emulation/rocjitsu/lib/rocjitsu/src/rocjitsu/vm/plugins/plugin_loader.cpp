@@ -313,7 +313,6 @@ PluginLoader::configure_plugin_group(const std::string &config_json, const std::
     return emit_error.emit() << "required plugin loading failed: loaded " << loaded_plugins
                              << " of " << requested_plugins << " configured plugins";
   }
-  group->activate_file_sinks();
   return group;
 }
 

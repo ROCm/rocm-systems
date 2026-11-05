@@ -198,7 +198,10 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_string_for_node(const char *json, co
 /// ordering keeps plugin initialization and replacement outside the
 /// simulation-callback interval. Admission failures preserve the installed group
 /// and its active state. Exceptions during shutdown, replacement, or initialization
-/// are translated to errors without a state-preservation guarantee.
+/// are translated to errors without a state-preservation guarantee. To reconfigure
+/// a single-instance plugin such as Perfsim, first pass an empty string to remove
+/// the installed group, then load the new config. This removes the old group
+/// before the replacement is validated; a rejected replacement leaves no plugins.
 /// @param[in] vm VM handle from rj_vm_create / rj_vm_create_from_string.
 /// @param[in] config_json The full config-file JSON containing the plugin
 ///            configuration; it may differ from the text used to create the VM.

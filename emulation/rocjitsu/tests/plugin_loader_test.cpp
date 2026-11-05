@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <memory>
@@ -268,8 +269,11 @@ TEST_F(PluginLoaderTest, AdmissionRejectionPreservesActiveFileSink) {
   vm->soc = &soc;
   const std::string sinks = R"(,"sinks":{"types":["file"],"dir":")" + output.path() + R"("}})";
   const std::string valid = R"({"require_all_plugins":true,"plugins":{"good":{}})" + sinks;
-  ASSERT_EQ(rj_vm_load_plugins(vm.get(), valid.c_str(), PLUGIN_LOADER_FIXTURE_DIR),
-            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_EQ(setenv("ROCJITSU_PLUGIN_TEST_LONG_SHUTDOWN", "1", 1), 0);
+  const rj_status_t initial_status =
+      rj_vm_load_plugins(vm.get(), valid.c_str(), PLUGIN_LOADER_FIXTURE_DIR);
+  unsetenv("ROCJITSU_PLUGIN_TEST_LONG_SHUTDOWN");
+  ASSERT_EQ(initial_status, ROCJITSU_STATUS_SUCCESS);
   const auto contents = [&] {
     std::ifstream input(output.path() + "/boundary.log");
     return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
@@ -282,6 +286,29 @@ TEST_F(PluginLoaderTest, AdmissionRejectionPreservesActiveFileSink) {
             ROCJITSU_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(contents(), before);
   EXPECT_TRUE(vm->plugin_group_active.load());
+  ASSERT_EQ(rj_vm_load_plugins(vm.get(), valid.c_str(), PLUGIN_LOADER_FIXTURE_DIR),
+            ROCJITSU_STATUS_SUCCESS);
+  vm.reset();
+  soc.set_plugin_group(nullptr);
+  EXPECT_EQ(contents(), "boundary:init\nboundary:shutdown\nboundary:destroy\n");
+}
+
+TEST_F(PluginLoaderTest, RejectedFileOnlyCandidateDiscardsSimulationSummary) {
+  rocjitsu::test::ScopedTempDirectory output("rocjitsu-plugin-sinks-");
+  const std::string plugin_dir =
+      std::filesystem::path(PLUGIN_LOADER_FIXTURE_DIR).parent_path().parent_path().string();
+  rocjitsu::ExecutionPluginGroup probe(rocjitsu::PluginSinkConfig{});
+  ASSERT_EQ(
+      rocjitsu::PluginLoader::load_from_config(R"({"plugins":{"race":{}}})", probe, plugin_dir), 1);
+  const std::string config = R"({"require_all_plugins":true,"plugins":{"race":{},"missing":{}},)"
+                             R"("sinks":{"types":["file"],"dir":")" +
+                             output.path() + R"("}})";
+  testing::internal::CaptureStderr();
+  const bool rejected = rocjitsu::PluginLoader::configure_plugin_group(config, plugin_dir).failed();
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_TRUE(rejected);
+  EXPECT_NE(diagnostic.find("missing"), std::string::npos);
+  EXPECT_EQ(diagnostic.find("No races detected."), std::string::npos);
 }
 
 TEST_F(PluginLoaderTest, CApiTranslatesForeignInitializationExceptions) {
