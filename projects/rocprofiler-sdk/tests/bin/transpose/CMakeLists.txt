@@ -57,13 +57,7 @@ find_package(Threads REQUIRED)
 find_package(rocprofiler-sdk-roctx REQUIRED)
 
 transpose_build_target(transpose "" rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
-
-# Variant used by the PC sampling integration tests. PC sampling validation decodes
-# sampled instructions and maps them to source lines via the code object's line table, so
-# line tables must be emitted even in build types that do not include debug info.
-transpose_build_target(transpose-pc-sampling ""
-                       rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
-target_compile_options(transpose-pc-sampling PRIVATE -gline-tables-only)
+target_compile_options(transpose PRIVATE -gline-tables-only)
 
 #
 # using old roctracer roctx

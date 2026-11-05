@@ -50,9 +50,8 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kernel-trace --pc-sampling-unit cycles
         --pc-sampling-method stochastic --pc-sampling-interval 1048576 -d
         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input -o out --output-format csv json
-        -- $<TARGET_FILE:transpose-pc-sampling> ${TRANSPOSE_NUM_THREADS}
-        ${TRANSPOSE_NUM_ITERATIONS}
-    DEPENDS transpose-pc-sampling
+        -- $<TARGET_FILE:transpose> ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS}
+    DEPENDS transpose
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling;stochastic"
     ENVIRONMENT "${PRELOAD_ENV}" "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on"
@@ -88,10 +87,9 @@ rocprofiler_add_integration_execute_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input.json -d
-        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input --
-        $<TARGET_FILE:transpose-pc-sampling> ${TRANSPOSE_NUM_THREADS}
-        ${TRANSPOSE_NUM_ITERATIONS}
-    DEPENDS transpose-pc-sampling
+        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input -- $<TARGET_FILE:transpose>
+        ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS}
+    DEPENDS transpose
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling;stochastic"
     ENVIRONMENT "${PRELOAD_ENV}"
@@ -126,10 +124,9 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-yaml
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i ${CMAKE_CURRENT_BINARY_DIR}/input.yml
-        -d ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input --
-        $<TARGET_FILE:transpose-pc-sampling> ${TRANSPOSE_NUM_THREADS}
-        ${TRANSPOSE_NUM_ITERATIONS}
-    DEPENDS transpose-pc-sampling
+        -d ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input -- $<TARGET_FILE:transpose>
+        ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS}
+    DEPENDS transpose
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling;stochastic"
     ENVIRONMENT "${PRELOAD_ENV}"

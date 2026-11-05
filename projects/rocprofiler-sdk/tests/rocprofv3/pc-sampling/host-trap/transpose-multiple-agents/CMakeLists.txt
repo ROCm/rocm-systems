@@ -28,9 +28,8 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kernel-trace --pc-sampling-unit time
         --pc-sampling-method host_trap --pc-sampling-interval 1 -d
         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input -o out --output-format csv --
-        $<TARGET_FILE:transpose-pc-sampling> ${TRANSPOSE_NUM_THREADS}
-        ${TRANSPOSE_NUM_ITERATIONS}
-    DEPENDS transpose-pc-sampling
+        $<TARGET_FILE:transpose> ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS}
+    DEPENDS transpose
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
@@ -65,10 +64,9 @@ rocprofiler_add_integration_execute_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input.json -d
-        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input --
-        $<TARGET_FILE:transpose-pc-sampling> ${TRANSPOSE_NUM_THREADS}
-        ${TRANSPOSE_NUM_ITERATIONS}
-    DEPENDS transpose-pc-sampling
+        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input -- $<TARGET_FILE:transpose>
+        ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS}
+    DEPENDS transpose
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
@@ -102,9 +100,8 @@ rocprofiler_add_integration_execute_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i ${CMAKE_CURRENT_BINARY_DIR}/input.yml
         -d ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input -o out --output-format csv
-        -- $<TARGET_FILE:transpose-pc-sampling> ${TRANSPOSE_NUM_THREADS}
-        ${TRANSPOSE_NUM_ITERATIONS}
-    DEPENDS transpose-pc-sampling
+        -- $<TARGET_FILE:transpose> ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS}
+    DEPENDS transpose
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
