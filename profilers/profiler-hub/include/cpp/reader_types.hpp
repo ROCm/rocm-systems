@@ -626,6 +626,7 @@ enum class trace_schema_t
 {
     unknown,
     rocpd,
+    pytorch_kineto,
 };
 
 /** @brief What a path contains, and whether a reader can open it. */

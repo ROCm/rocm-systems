@@ -57,6 +57,8 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/pytorch/kineto_loader.hpp
     ${CMAKE_CURRENT_LIST_DIR}/pytorch/host_tree.cpp
     ${CMAKE_CURRENT_LIST_DIR}/pytorch/host_tree.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/kineto_probe.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/kineto_probe.hpp
 )
 target_sources(profiler-hub-objects PRIVATE ${profiler-hub_sources})
 
