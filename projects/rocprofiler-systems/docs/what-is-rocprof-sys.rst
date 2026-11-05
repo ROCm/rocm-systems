@@ -160,9 +160,15 @@ To use ROCm Systems Profiler for instrumentation, follow these two configuration
 Command-line tools
 ====================
 
-ROCm Systems Profiler ships as a set of standalone executables, each oriented toward a different profiling workflow. These ``rocprof-sys-*`` commands are the original tools. Examples on this page and on the workflow pages use them.
+ROCm Systems Profiler ships as a set of standalone executables, each oriented
+toward a different profiling workflow. These ``rocprof-sys-*`` commands are the
+original tools. Examples on this page and on the workflow pages use them.
 
-The ``rocsys`` command is a new unified command-line entry point for profiling. Running ``rocsys -- ./app`` or ``rocsys profile -- ./app`` produces a full trace profile, and ``rocsys rewrite`` runs ``rocprof-sys-instrument`` in binary-rewrite mode (``-o``). ``rocsys --help`` reports that the command is experimental and that commands and workflows are subject to change. See :doc:`how-to/using-rocsys`.
+The ``rocsys`` command is a new unified command-line entry point for profiling. Running
+``rocsys -- ./app`` or ``rocsys profile -- ./app`` produces a full trace profile, and
+``rocsys rewrite`` runs ``rocprof-sys-instrument`` in binary-rewrite mode (``-o``).
+``rocsys --help`` reports that the command is experimental and that commands and
+workflows are subject to change. See :doc:`how-to/using-rocsys`.
 
 .. list-table::
    :header-rows: 1
@@ -210,7 +216,11 @@ The ``rocsys`` command is a new unified command-line entry point for profiling. 
 Preset profiles
 =================
 
-Presets replace manually setting numerous environment variables with a single ``--preset`` flag available on ``rocprof-sys-run`` and ``rocprof-sys-sample``. Presets were introduced in ROCm 7.12 and expanded into an extensible JSON-based system in ROCm 7.13. The experimental ``rocsys profile`` command accepts the same flag. See :doc:`how-to/using-rocsys`.
+Presets replace manually setting numerous environment variables with a single
+``--preset`` flag available on ``rocprof-sys-run`` and ``rocprof-sys-sample``.
+Presets were introduced in ROCm 7.12 and expanded into an extensible JSON-based system
+in ROCm 7.13. The experimental ``rocsys profile`` command accepts the same flag.
+See :doc:`how-to/using-rocsys`.
 
 Discover, inspect, and apply a preset as follows:
 

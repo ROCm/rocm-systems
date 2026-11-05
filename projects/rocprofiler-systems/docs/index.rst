@@ -10,7 +10,8 @@ ROCm Systems Profiler is designed for the high-level profiling and comprehensive
 of applications running on the CPU or the CPU and GPU. It supports dynamic binary
 instrumentation, call-stack sampling, and various other features for determining
 which function and line number are currently executing. The original
-``rocprof-sys-*`` tools provide these capabilities. To learn more, see :doc:`What is ROCm Systems Profiler? <what-is-rocprof-sys>`
+``rocprof-sys-*`` tools provide these capabilities. To learn more,
+see :doc:`What is ROCm Systems Profiler? <what-is-rocprof-sys>`
 
 The ``rocsys`` command is a new unified command-line entry point for profiling. Running
 ``rocsys -- ./app`` or ``rocsys profile -- ./app`` produces a full trace profile,
