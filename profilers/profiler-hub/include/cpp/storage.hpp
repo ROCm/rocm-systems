@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <profiler-hub/version.hpp>
+#include <profiler-hub/cpp/version.hpp>
 
 #include <memory>
 #include <string>

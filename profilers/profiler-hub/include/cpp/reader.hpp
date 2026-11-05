@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <profiler-hub/reader_types.hpp>
-#include <profiler-hub/storage.hpp>
+#include <profiler-hub/cpp/reader_types.hpp>
+#include <profiler-hub/cpp/storage.hpp>
 
 #include <memory>
 #include <optional>
