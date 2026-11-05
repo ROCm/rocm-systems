@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -161,6 +163,10 @@ struct Event {
 // Full loaded archive
 // ---------------------------------------------------------------------------
 
+// The files an archive check vouched for: path below the archive directory
+// ('/'-separated) -> SHA-256 as 64 lowercase hex digits.
+using VerifiedFiles = std::map<std::string, std::string>;
+
 struct Archive {
   std::string path;
   uint16_t    version = 0;        // format version from hrr_file_header
@@ -185,6 +191,14 @@ struct Archive {
   // trailer's event count must match the records before it for complete=true.
   size_t skipped_after_trailer = 0;
 
+  // Set when an ArchiveCheck passed. `verified` is then the digest of every file
+  // as the check saw it. The check ran once, but the files are opened again
+  // later (code objects at each module's first launch, blobs at each use), so
+  // each reader compares what it reads to this: a file replaced after the check,
+  // or one the check did not list, is refused where it is read.
+  bool          checked = false;
+  VerifiedFiles verified;
+
   // Content-addressed blobs: hash_hex -> file path
   std::unordered_map<std::string, std::string> blobs;
   // Code objects: hash_hex -> file path
@@ -203,6 +217,16 @@ struct Archive {
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
+
+// Installed once by a caller that must not read an archive it has not checked
+// (hrr-playback with --trusted-key). load_archive() calls it with the resolved
+// pid-<pid>/ directory before it opens any file in it, and refuses the archive,
+// printing `*err`, when it returns false. On success the check fills `*files`
+// with the digest of each file it checked, which load_archive keeps in
+// Archive::verified. Not installed: no check.
+using ArchiveCheck = bool (*)(const std::string& archive_dir, VerifiedFiles* files,
+                              std::string* err);
+void set_archive_check(ArchiveCheck check);
 
 // Load an archive from disk. Returns false on error, including a load that
 // would take `bytes` past its cap; the diagnostic names --max-host-bytes.
@@ -223,6 +247,11 @@ bool load_archive(const std::string& path, Archive& archive,
 // or 0 for any other name. An archive moved aside to pid-<pid>.prev-<n>, when a
 // later process with the same pid starts capturing, is not one of them.
 uint64_t pid_from_archive_dir_name(const std::string& name);
+
+// The directory load_archive reads for `input`: the directory itself when it holds
+// events.bin, else the one pid-<pid>/ it holds. Prints why and returns false for
+// anything else (no archive, or several process captures).
+bool resolve_archive_path(const std::string& input, std::string& resolved);
 
 // Whether load_archive would find the archive in `archive_dir` complete: a
 // trailer whose total_events counts the records before it. Walks the record
@@ -251,24 +280,43 @@ enum class RecordStatus {
   OverBudget    // the record would not fit the budget; nothing was allocated
 };
 
+// SHA-256 of the bytes a stream reader consumed, for comparing a file to a
+// verified digest while it is parsed rather than before: hashing a file first and
+// reading it again would leave a gap for it to be swapped in. Without archive
+// signing support it hashes nothing and hex() is empty.
+class StreamHash {
+ public:
+  StreamHash();
+  ~StreamHash();
+  void update(const void* data, size_t n);
+  // Reads the rest of `f` into the hash and returns the digest (hex) of the whole stream.
+  std::string finish(FILE* f);
+  // The digest (hex) of everything given so far.
+  std::string hex();
+
+ private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
+
 // Read one framed record into `out` (resized to the record's full length,
 // header included). Only the final record of a stream can ever be Torn, because
 // the writer appends whole records. With `budget`, the record's length is
 // charged before `out` grows to it: a record that does not fit returns
 // OverBudget without allocating it, and one that is read keeps its charge
-// (a torn one gives it back).
+// (a torn one gives it back). `hash`, when given, is fed the bytes read.
 RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out,
-                             ByteBudget* budget = nullptr);
+                             ByteBudget* budget = nullptr, StreamHash* hash = nullptr);
 
 // Open a record stream and validate its 8-byte header. `expected_magic` selects
 // the stream kind (HRR_MAGIC for events.bin, HRR_REGION_MAGIC for a region
 // sidecar). On success returns the open FILE* positioned at the first record
 // and stores the file's format version in *version and its header flags in
 // *flags (either may be null); returns nullptr and logs on a missing file, bad
-// magic, or version mismatch.
+// magic, or version mismatch. `hash`, when given, is fed the header bytes read.
 FILE* open_record_stream(const std::string& file_path, uint32_t expected_magic,
                          uint16_t expected_version, uint16_t* version,
-                         uint16_t* flags = nullptr);
+                         uint16_t* flags = nullptr, StreamHash* hash = nullptr);
 
 // Sidecar region streams for a resolved archive directory: every
 // <archive_dir>/regions/*.hrrr, sorted by name for a deterministic merge order.
@@ -299,6 +347,29 @@ void set_max_events(uint64_t events);
 // or an allocation failure, as opposed to being missing or unreadable.
 bool read_file_capped(const std::string& path, std::vector<uint8_t>& data,
                       std::string* error = nullptr, bool* refused = nullptr);
+
+// Read the archive file `rel` (a path below `dir`) whole, as read_file_capped
+// does. With `verified` the file must be listed in it and its bytes must hash to
+// the listed digest, else the read is refused: false is returned, *refused is
+// set and *error says which. A listed file that is gone or unreadable is refused
+// too. Null `verified`: no check.
+bool read_archive_file(const std::string& dir, const std::string& rel,
+                       const VerifiedFiles* verified, std::vector<uint8_t>& data,
+                       std::string* error = nullptr, bool* refused = nullptr);
+
+// The pid and parent_pid recorded in an archive's manifest.json.
+struct ManifestIds {
+  uint64_t pid = 0;
+  uint64_t parent_pid = 0;
+};
+
+// Read the ids from `dir`/manifest.json as read_archive_file reads it, so with
+// `verified` they come from bytes that hash to the verified digest. False when
+// there is no usable pid: the file is absent, has none, or (with `verified`) is not
+// listed in it, which is not read at all. *refused is set, with *error, when the
+// file is listed but was changed or removed since the check.
+bool read_manifest_ids(const std::string& dir, const VerifiedFiles* verified, ManifestIds& out,
+                       std::string* error = nullptr, bool* refused = nullptr);
 
 // Read a blob's bytes given its hash. Returns false if not found.
 bool read_blob(const Archive& archive, uint64_t hash_lo, uint64_t hash_hi,
