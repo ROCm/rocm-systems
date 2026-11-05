@@ -21,8 +21,7 @@ class CommandProcessor;
 /// are copied into each CP-owned PM4 queue and must obey their own captured
 /// lifetime contracts. The factory is a lifetime/notification adapter; CP owns
 /// ring, packet, retry, and cursor-publication state so semantics do not migrate
-/// into MES or a PCI/VFIO transport adapter. Binding allocation after processor
-/// attachment is fatal rather than recoverable by frontend adapters.
+/// into MES or a PCI/VFIO transport adapter.
 [[nodiscard]] std::shared_ptr<QueueBindingFactory>
 make_compute_queue_binding_factory(CommandProcessor &command_processor,
                                    Pm4PacketCallbacks callbacks = {});

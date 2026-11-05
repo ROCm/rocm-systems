@@ -31,8 +31,7 @@ public:
                           SdmaProgressObserverFactory progress_observer_factory = {});
 
   /// @brief Resolve callback factories, then attach and create the owning binding.
-  /// @details Callback factory exceptions propagate before attachment. Internal
-  /// attachment and binding allocation failures are fatal.
+  /// @details Callback factory exceptions propagate before attachment.
   [[nodiscard]] QueueBindingCreateResult
   create_binding(const QueueRegistrationRequest &request) override;
 
