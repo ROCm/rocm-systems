@@ -487,7 +487,7 @@ BUNDLE_GFX110X = TargetBundle(
     key="gfx110x",
     level=_SF,
     display_name="RDNA3",
-    llvm_generic=None,
+    llvm_generic="gfx11-generic",
     members=(GFX1100, GFX1101, GFX1102, GFX1103),
 )
 
@@ -495,7 +495,7 @@ BUNDLE_GFX115X = TargetBundle(
     key="gfx115x",
     level=_SF,
     display_name="RDNA3.5",
-    llvm_generic=None,
+    llvm_generic="gfx11-generic",
     members=(GFX1150, GFX1151, GFX1152, GFX1153),
 )
 
@@ -570,13 +570,12 @@ BUNDLE_GFX10 = TargetBundle(
     ),
 )
 
-# gfx11-generic covers GFX11.0 and GFX11.5 only; GFX11.7 carries its own
-# gfx11-7-generic, so the family generic does not span every member.
+# GFX11 sub-families have different LLVM generics, so no family generic is safe.
 BUNDLE_GFX11 = TargetBundle(
     key="gfx11",
     level=_F,
     display_name="RDNA3",
-    llvm_generic="gfx11-generic",
+    llvm_generic=None,
     members=(
         GFX1100,
         GFX1101,

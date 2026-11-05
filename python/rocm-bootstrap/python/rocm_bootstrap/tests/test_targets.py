@@ -398,15 +398,14 @@ class TestLLVMGenericAssignments:
     def test_gfx10_3_has_gfx10_3_generic(self):
         assert lookup_bundle("gfx10_3").llvm_generic == "gfx10-3-generic"
 
-    def test_gfx11_family_has_gfx11_generic(self):
-        assert lookup_bundle("gfx11").llvm_generic == "gfx11-generic"
+    def test_gfx11_family_no_generic(self):
+        assert lookup_bundle("gfx11").llvm_generic is None
 
-    def test_gfx110x_no_generic(self):
-        """gfx11-generic is at family level, not sub-family."""
-        assert lookup_bundle("gfx110x").llvm_generic is None
+    def test_gfx110x_has_gfx11_generic(self):
+        assert lookup_bundle("gfx110x").llvm_generic == "gfx11-generic"
 
-    def test_gfx115x_no_generic(self):
-        assert lookup_bundle("gfx115x").llvm_generic is None
+    def test_gfx115x_has_gfx11_generic(self):
+        assert lookup_bundle("gfx115x").llvm_generic == "gfx11-generic"
 
     def test_gfx117x_has_gfx11_7_generic(self):
         """GFX11.7 is not covered by gfx11-generic; it has its own."""
@@ -425,3 +424,10 @@ class TestLLVMGenericAssignments:
     def test_gfx12_family_no_generic(self):
         """No gfx12-generic at family (it's at sub-family gfx12_0)."""
         assert lookup_bundle("gfx12").llvm_generic is None
+
+    def test_family_generic_covers_every_sub_family(self):
+        for family_key, sub_families in _FAMILY_TO_SUB_FAMILIES.items():
+            family = lookup_bundle(family_key)
+            sub_family_generics = {sf.llvm_generic for sf in sub_families}
+            if family.llvm_generic is not None:
+                assert sub_family_generics == {family.llvm_generic}
