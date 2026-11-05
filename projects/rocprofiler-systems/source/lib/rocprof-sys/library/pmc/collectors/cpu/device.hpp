@@ -278,9 +278,7 @@ private:
 
     /**
      * @brief Create a metrics struct pre-populated with zero entries for each
-     * monitored CPU. This ensures that even a default/pause sample serializes
-     * per-CPU entries, so Perfetto tracks drop to zero instead of retaining
-     * their last value.
+     * monitored CPU, so every reading carries an entry for each core.
      */
     metrics make_empty_metrics() const
     {

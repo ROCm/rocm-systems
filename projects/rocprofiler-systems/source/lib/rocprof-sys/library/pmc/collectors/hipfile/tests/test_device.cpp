@@ -367,9 +367,8 @@ TEST_F(HipFileDeviceTest, available_backend_does_not_mark_query_failed)
 
 TEST_F(HipFileDeviceTest, default_constructed_metrics_are_not_a_failed_query)
 {
-    // The paused collector emits a value-initialized metrics to drop tracks to zero.
-    // If that looked like a failed query it would be suppressed and the tracks would
-    // flatline at their last value instead.
+    // A value-initialized metrics must not look like a failed query, or the source
+    // would suppress it.
     const metrics paused{};
 
     EXPECT_FALSE(paused.query_failed);

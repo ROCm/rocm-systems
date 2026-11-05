@@ -188,21 +188,6 @@ TEST_F(HipFileTraitsTest, enabled_metrics_come_from_settings)
     EXPECT_EQ(enabled.value & k_write_bytes, 0U);
 }
 
-TEST_F(HipFileTraitsTest, get_metrics_delegates_to_device)
-{
-    stub_settings::set_visible_identity(1);
-    m_provider->backend->gpu(0).read_bytes = test_values::k_read_bytes_single;
-
-    const auto entries = enumerate();
-    ASSERT_EQ(entries.size(), 1U);
-
-    enabled_metrics enabled;
-    enabled.value = ALL_HIPFILE_METRICS;
-
-    EXPECT_EQ(traits_t::get_metrics(entries[0].device, enabled, 1'000'000'000).read_bytes,
-              test_values::k_read_bytes_single);
-}
-
 TEST_F(HipFileTraitsTest, identity_mapping_is_unchanged_without_a_visibility_mask)
 {
     stub_settings::set_visible_identity(2);

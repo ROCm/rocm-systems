@@ -5,7 +5,6 @@
 
 #include "core/config.hpp"
 #include "library/pmc/collectors/cpu/device.hpp"
-#include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
@@ -34,11 +33,9 @@ using ::rocprofsys::pmc::device_selection_mode;
 template <typename BackendProvider>
 struct cpu_traits
 {
-    using metrics_t         = cpu::metrics;
     using enabled_metrics_t = cpu::enabled_metrics;
     using device_t          = device<typename BackendProvider::backend_t>;
     using device_ptr_t      = std::shared_ptr<device_t>;
-    using container_t       = std::vector<device_ptr_t>;
     using backend_t         = BackendProvider::backend_t;
 
     static constexpr const char* device_name = "CPU";
@@ -53,29 +50,6 @@ struct cpu_traits
     [[nodiscard]] static device_filter get_device_filter()
     {
         return Settings::get_device_filter(rocprofsys::get_sampling_cpus());
-    }
-
-    template <typename Settings>
-    [[nodiscard]] static enabled_metrics_t get_enabled_metrics()
-    {
-        return Settings::get_cpu_enabled_metrics();
-    }
-
-    template <typename Cache>
-    static void init_pmc_metadata(const device_ptr_t& dev)
-    {
-        static bool first_socket_registered = false;
-        const bool  is_first                = !first_socket_registered;
-        first_socket_registered             = true;
-        Cache::initialize_pmc_metadata(dev->get_index(), dev->get_monitored_cpus(),
-                                       is_first);
-    }
-
-    [[nodiscard]] static metrics_t get_metrics(const device_ptr_t&            dev,
-                                               const enabled_metrics_t&       enabled,
-                                               [[maybe_unused]] std::uint64_t timestamp)
-    {
-        return dev->get_cpu_metrics(enabled);
     }
 
     /**
