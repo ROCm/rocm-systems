@@ -2816,7 +2816,15 @@ void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable) {
   const char* inputStr = getenv("NCCL_PXN_DISABLE");
   const bool archGfx942 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
   const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+  const bool archGfx1250 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
   comm->enableCustColl = (archGfx942 || archGfx950) && (inputStr && !atoi(inputStr));
+
+  // gfx1250: keep PXN off unless NCCL_PXN_DISABLE explicitly asks for it.
+  if (archGfx1250 && !inputStr) {
+    INFO(NCCL_INIT, "RCCL PXN disabled by default on gfx1250");
+    rcclPxnDisable = comm->pxnDisable = 1;
+    return;
+  }
 
   if ((!archGfx942 && !archGfx950) || inputStr) {
     rcclPxnDisable = comm->pxnDisable = RCCL_VALUE_INVALID;
