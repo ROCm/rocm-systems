@@ -24,6 +24,7 @@ from sdxi.cxt_driver import (
     DTYPE_FP16,
     DTYPE_FP32,
     DTYPE_FP8_E4M3,
+    DTYPE_FP8_E5M2,
     DTYPE_INT4,
     DTYPE_INT8,
     DTYPE_INT32,
@@ -124,6 +125,15 @@ def _pack_fp8_e4m3(raw_bytes):
 
 
 def _unpack_fp8_e4m3(data):
+    return list(data)
+
+
+def _pack_fp8_e5m2(raw_bytes):
+    """raw_bytes is a list of uint8 OCP E5M2 bit patterns."""
+    return bytes(raw_bytes)
+
+
+def _unpack_fp8_e5m2(data):
     return list(data)
 
 
@@ -404,6 +414,101 @@ def test_elemwise_int4_add(suite, dev, mem):
     suite.check_eq(result_vals, expected_values, f"INT4 ADD result: {result_vals}")
 
 
+def test_elemwise_int4_reduce_min(suite, dev, mem):
+    """INT4 reduce_min across nibble-packed elements.
+
+    4 elements [1, 2, 3, -1]; min = -1.
+    Result is 1 byte with the minimum in the low nibble: 0x0F.
+    """
+    cxt = dev.cxt(1)
+    values = [1, 2, 3, -1]
+    src_data = _pack_int4(values)
+    expected = _pack_int4([-1])  # 0x0F
+
+    src = mem.alloc(len(src_data))
+    dst = mem.alloc(ELEM_SIZE[DTYPE_INT4])
+    mem.write(src, src_data)
+
+    ok, _ = cxt.elemwise(dev.vfu, src, len(src_data), dst, DTYPE_INT4, ELEMOP_REDUCE_MIN)
+    suite.check(ok, "INT4 REDUCE_MIN CSB reports success")
+    result = mem.read(dst, ELEM_SIZE[DTYPE_INT4])
+    result_vals = _unpack_int4(result, 1)
+    suite.check_eq(result_vals, [-1], f"INT4 REDUCE_MIN result: {result_vals}")
+
+
+def test_elemwise_int4_reduce_max(suite, dev, mem):
+    """INT4 reduce_max across nibble-packed elements.
+
+    4 elements [1, 2, 3, -1]; max = 3.
+    Result is 1 byte with the maximum in the low nibble: 0x03.
+    """
+    cxt = dev.cxt(1)
+    values = [1, 2, 3, -1]
+    src_data = _pack_int4(values)
+    expected = _pack_int4([3])  # 0x03
+
+    src = mem.alloc(len(src_data))
+    dst = mem.alloc(ELEM_SIZE[DTYPE_INT4])
+    mem.write(src, src_data)
+
+    ok, _ = cxt.elemwise(dev.vfu, src, len(src_data), dst, DTYPE_INT4, ELEMOP_REDUCE_MAX)
+    suite.check(ok, "INT4 REDUCE_MAX CSB reports success")
+    result = mem.read(dst, ELEM_SIZE[DTYPE_INT4])
+    result_vals = _unpack_int4(result, 1)
+    suite.check_eq(result_vals, [3], f"INT4 REDUCE_MAX result: {result_vals}")
+
+
+def test_elemwise_fp8_e5m2_add(suite, dev, mem):
+    """FP8 E5M2 elementwise add with known bit patterns.
+
+    OCP E5M2: bias=15, 5-bit exponent, 2-bit mantissa.
+    0x3C = 0 01111 00 = 2^(15-15) * 1.0 = 1.0
+    0x40 = 0 10000 00 = 2^(16-15) * 1.0 = 2.0
+    0x42 = 0 10000 10 = 2^(16-15) * 1.5 = 3.0
+    Adding 1.0 (0x3C): [1.0, 2.0] → [2.0, 3.0] → [0x40, 0x42].
+    """
+    cxt = dev.cxt(1)
+    src_raw = [0x3C, 0x40]   # [1.0, 2.0]
+    scalar = 0x3C             # 1.0 in E5M2
+    expected_raw = [0x40, 0x42]  # [2.0, 3.0]
+
+    src_data = _pack_fp8_e5m2(src_raw)
+    expected = _pack_fp8_e5m2(expected_raw)
+
+    src = mem.alloc(len(src_data))
+    dst = mem.alloc(len(src_data))
+    mem.write(src, src_data)
+
+    ok, _ = cxt.elemwise(dev.vfu, src, len(src_data), dst, DTYPE_FP8_E5M2, ELEMOP_ADD, scalar)
+    suite.check(ok, "FP8_E5M2 ADD CSB reports success")
+    result = mem.read(dst, len(expected))
+    result_raw = _unpack_fp8_e5m2(result)
+    suite.check_eq(result, expected, f"FP8_E5M2 ADD: got {[hex(b) for b in result_raw]}")
+
+
+def test_elemwise_fp8_e5m2_reduce_max(suite, dev, mem):
+    """FP8 E5M2 reduce_max.
+
+    Input: [1.0, 2.0, 3.0] = [0x3C, 0x40, 0x42]; expected max = 3.0 = 0x42.
+    """
+    cxt = dev.cxt(1)
+    src_raw = [0x3C, 0x40, 0x42]   # [1.0, 2.0, 3.0]
+    expected_raw = [0x42]           # 3.0
+
+    src_data = _pack_fp8_e5m2(src_raw)
+    expected = _pack_fp8_e5m2(expected_raw)
+
+    src = mem.alloc(len(src_data))
+    dst = mem.alloc(ELEM_SIZE[DTYPE_FP8_E5M2])
+    mem.write(src, src_data)
+
+    ok, _ = cxt.elemwise(dev.vfu, src, len(src_data), dst, DTYPE_FP8_E5M2, ELEMOP_REDUCE_MAX)
+    suite.check(ok, "FP8_E5M2 REDUCE_MAX CSB reports success")
+    result = mem.read(dst, ELEM_SIZE[DTYPE_FP8_E5M2])
+    result_raw = _unpack_fp8_e5m2(result)
+    suite.check_eq(result, expected, f"FP8_E5M2 REDUCE_MAX: got {[hex(b) for b in result_raw]}")
+
+
 def main():
     binary = os.environ.get(
         "SDXI_SERVER_BIN",
@@ -428,8 +533,12 @@ def main():
                 suite.run("fp32_reduce_max", test_elemwise_fp32_reduce_max, dev, mem)
                 suite.run("fp16_add",        test_elemwise_fp16_add,        dev, mem)
                 suite.run("bf16_add",        test_elemwise_bf16_add,        dev, mem)
-                suite.run("fp8_e4m3_add",    test_elemwise_fp8_e4m3_add,   dev, mem)
-                suite.run("int4_add",        test_elemwise_int4_add,        dev, mem)
+                suite.run("fp8_e4m3_add",        test_elemwise_fp8_e4m3_add,       dev, mem)
+                suite.run("int4_add",            test_elemwise_int4_add,            dev, mem)
+                suite.run("int4_reduce_min",     test_elemwise_int4_reduce_min,     dev, mem)
+                suite.run("int4_reduce_max",     test_elemwise_int4_reduce_max,     dev, mem)
+                suite.run("fp8_e5m2_add",        test_elemwise_fp8_e5m2_add,        dev, mem)
+                suite.run("fp8_e5m2_reduce_max", test_elemwise_fp8_e5m2_reduce_max, dev, mem)
     finally:
         stop_and_check(suite, server)
     suite.finish()
