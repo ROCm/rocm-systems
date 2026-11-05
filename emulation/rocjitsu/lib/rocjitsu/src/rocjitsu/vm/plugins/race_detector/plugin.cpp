@@ -408,7 +408,14 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
                              ~(access.flat_dds_lane_mask | access.flat_local_oob_lane_mask);
     if (execMask == 0)
       return;
-    auto type = d.is_load ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::VGPR_TO_LDS;
+    // is_load says only whether the instruction writes VGPRs. An atomic reads
+    // and writes its LDS bytes either way.
+    const bool atomic = d.atomic_op != amdgpu::AtomicOp::NONE;
+    MemoryEventType type;
+    if (atomic)
+      type = d.is_load ? MemoryEventType::LDS_ATOMIC_TO_VGPR : MemoryEventType::LDS_ATOMIC;
+    else
+      type = d.is_load ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::VGPR_TO_LDS;
     const uint32_t perLaneBytes = d.num_elems * d.elem_size;
 
     std::vector<uint32_t> registers;
@@ -432,7 +439,10 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
         if (bytes == 0)
           return amdgpu::kInvalidLdsAddress;
         const auto addr = static_cast<uint32_t>(address);
-        if (d.is_load)
+        if (atomic)
+          detector->validateAtomic(static_cast<int>(addr), waveId, static_cast<int>(lane), bytes,
+                                   memoryOrder);
+        else if (d.is_load)
           detector->validateRead(static_cast<int>(addr), waveId, static_cast<int>(lane), bytes,
                                  memoryOrder);
         else

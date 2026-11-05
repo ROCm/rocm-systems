@@ -3841,6 +3841,97 @@ TEST(RaceDetectorPluginTest, GlobalWideLdsLoadsDetectPendingLdsReads) {
         }
 }
 
+// One LDS access by each of two waves to the same dword, with no barrier.
+// Atomics read and write their bytes whether or not they return a value, and
+// do not race with each other.
+enum class LdsAccess { Read, Write, Atomic, ReturningAtomic };
+
+struct LdsAccessPair {
+  LdsAccess first;
+  LdsAccess second;
+  bool races;
+};
+
+std::string ldsAccessPairName(const ::testing::TestParamInfo<LdsAccessPair> &info) {
+  auto name = [](LdsAccess access) {
+    switch (access) {
+    case LdsAccess::Read:
+      return "Read";
+    case LdsAccess::Write:
+      return "Write";
+    case LdsAccess::Atomic:
+      return "Atomic";
+    case LdsAccess::ReturningAtomic:
+      return "ReturningAtomic";
+    }
+    return "Unknown";
+  };
+  return std::string(name(info.param.first)) + "_vs_" + name(info.param.second);
+}
+
+class LdsAtomicRaceTest : public ::testing::TestWithParam<LdsAccessPair> {};
+
+TEST_P(LdsAtomicRaceTest, ReportsOnlyNonAtomicPairs) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(
+      f.initialize(/*num_wf_slots=*/2, /*arch=*/"cdna4", /*wavefront_size=*/64));
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *cu = f.cu();
+  std::array<amdgpu::Wavefront *, 2> waves{
+      cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256),
+      cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256)};
+  for (auto *wf : waves) {
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(0x1u);
+  }
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0,
+                                               /*physical_vgpr_count=*/512, /*sgpr_count=*/208,
+                                               waves);
+
+  auto issue = [&](amdgpu::Wavefront &wf, LdsAccess access) {
+    auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    state->elem_size = 4;
+    state->num_elems = 1;
+    state->is_load = access == LdsAccess::Read || access == LdsAccess::ReturningAtomic;
+    if (access == LdsAccess::Atomic || access == LdsAccess::ReturningAtomic)
+      state->atomic_op = AtomicOp::ADD;
+    state->wf_size = wf.wf_size();
+    state->exec_mask = 0x1u;
+    state->lane_mask = 0x1u;
+    state->per_lane_addr[0] = 64;
+    state->dst_reg_base = wf.vgpr_alloc().base;
+    TestMemoryInstruction inst(std::move(state));
+    f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wf.pc, inst, wf);
+    f.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, wf);
+  };
+  issue(*waves[0], GetParam().first);
+  issue(*waves[1], GetParam().second);
+
+  EXPECT_EQ(sink.str().find("RACE ") != std::string::npos, GetParam().races) << sink.str();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AccessPairs, LdsAtomicRaceTest,
+    ::testing::Values(LdsAccessPair{LdsAccess::Atomic, LdsAccess::ReturningAtomic, false},
+                      LdsAccessPair{LdsAccess::ReturningAtomic, LdsAccess::Atomic, false},
+                      LdsAccessPair{LdsAccess::Atomic, LdsAccess::Atomic, false},
+                      LdsAccessPair{LdsAccess::ReturningAtomic, LdsAccess::ReturningAtomic, false},
+                      LdsAccessPair{LdsAccess::ReturningAtomic, LdsAccess::Read, true},
+                      LdsAccessPair{LdsAccess::Read, LdsAccess::ReturningAtomic, true},
+                      LdsAccessPair{LdsAccess::Atomic, LdsAccess::Read, true},
+                      LdsAccessPair{LdsAccess::Read, LdsAccess::Atomic, true},
+                      LdsAccessPair{LdsAccess::ReturningAtomic, LdsAccess::Write, true},
+                      LdsAccessPair{LdsAccess::Write, LdsAccess::ReturningAtomic, true},
+                      LdsAccessPair{LdsAccess::Atomic, LdsAccess::Write, true},
+                      LdsAccessPair{LdsAccess::Write, LdsAccess::Atomic, true}),
+    ldsAccessPairName);
+
 TEST(RaceDetectorPluginTest, DecodedDirectLdsLoadsDetectConflictingWaveStores) {
   for (auto arch : {"rdna3", "rdna3_5", "rdna4"}) {
     for (uint32_t store_address : {16u, 20u}) {
