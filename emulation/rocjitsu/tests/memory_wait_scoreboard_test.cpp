@@ -2418,7 +2418,7 @@ TEST(MemoryWaitExecutionTest, BarrierObserversPreservePendingResults) {
   class BarrierSnapshot final : public ExecutionPlugin {
   public:
     BarrierSnapshot() : ExecutionPlugin("barrier_snapshot") {}
-    void onAmdgpuBarrierResolved(std::span<Wavefront *> members) override {
+    void onAmdgpuBarrierResolved(std::span<Wavefront *> members, BarrierKind) override {
       for (auto *wf : members) {
         EXPECT_EQ(RegisterAccess(*wf).read_sgpr(wf->sgpr_alloc().base + 4), 0x12345678u);
         ++snapshots;

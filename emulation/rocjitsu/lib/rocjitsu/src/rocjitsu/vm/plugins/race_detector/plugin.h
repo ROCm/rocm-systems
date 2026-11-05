@@ -99,6 +99,8 @@ public:
   /// Release the workgroup's detector. Reported races are still counted.
   void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) override;
 
+  /// Mark the wave's race state as ended, so later workgroup barriers retire
+  /// the events it completed, then release the wave's pointer to it.
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override;
 
   void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override;
@@ -127,7 +129,8 @@ public:
   void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
                                        amdgpu::Wavefront &wf) override;
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) override;
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
+                               BarrierKind kind) override;
 
   std::string getSummary() const;
 

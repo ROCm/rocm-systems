@@ -371,7 +371,13 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32
   detectors_.erase(WorkgroupKey{dispatch_id, wg_id});
 }
 
-void RaceDetectorPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) { release_wave_state(wf); }
+void RaceDetectorPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
+  // The wave's race state lives in the workgroup's detector and outlives this
+  // pointer, so later barriers can still retire the wave's completed events.
+  if (auto *s = get_state(wf); s && s->race_state)
+    s->race_state->markExited();
+  release_wave_state(wf);
+}
 
 void RaceDetectorPlugin::onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) {
   release_wave_state(wf);
@@ -688,12 +694,18 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
     s->race_state->dispatch(wait);
 }
 
-void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) {
+void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
+                                                 BarrierKind kind) {
   for (auto *wf : wavefronts) {
     auto *s = get_state(wf);
     assert(s && s->race_state);
     s->race_state->flushBarrierPendingEvents();
   }
+  // A workgroup barrier waits for every wave of the workgroup to arrive or
+  // end, so it also orders the events that already-ended waves completed.
+  // Named and cluster barriers can resolve without waiting for those waves.
+  if (kind == BarrierKind::Workgroup && !wavefronts.empty())
+    get_state(wavefronts.front())->race_state->getDetector()->flushExitedWaves();
 }
 
 } // namespace rocjitsu::plugins::race_detector

@@ -120,6 +120,14 @@ public:
 
   WaveRaceState &getWaveRaceState(int waveIndex);
 
+  /// Retire events that ended waves completed before they ended. Call when a
+  /// workgroup barrier among the remaining waves resolves.
+  void flushExitedWaves() {
+    for (auto &wave : waveRaceStates)
+      if (wave.hasExited())
+        wave.flushBarrierPendingEvents();
+  }
+
 private:
   void setProfiler(ProfilerInterface &);
 

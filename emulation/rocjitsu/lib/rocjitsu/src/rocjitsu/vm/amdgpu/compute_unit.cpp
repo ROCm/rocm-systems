@@ -696,7 +696,7 @@ bool ComputeUnitCore::barrier_signal(Wavefront &wf, int32_t barrier_id, uint32_t
 
   barrier->signal_count = 0;
   auto members = complete_barrier(wf.dispatch_id(), wf.wg_id(), completion_bit, named_id);
-  notify_barrier_complete(members);
+  notify_barrier_complete(members, completion_bit);
   return is_first;
 }
 
@@ -724,10 +724,16 @@ std::vector<Wavefront *> ComputeUnitCore::complete_barrier(uint32_t dispatch_id,
   return members;
 }
 
-void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members) {
-  if (!members.empty()) {
-    plugin_group_->onAmdgpuBarrierResolved(members);
-  }
+void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members,
+                                              uint8_t completion_bit) {
+  if (members.empty())
+    return;
+  BarrierKind kind = BarrierKind::Workgroup;
+  if (completion_bit == kNamedBarrierBit)
+    kind = BarrierKind::Named;
+  else if (completion_bit == kClusterBarrierBit || completion_bit == kClusterTrapBarrierBit)
+    kind = BarrierKind::Cluster;
+  plugin_group_->onAmdgpuBarrierResolved(members, kind);
 }
 
 uint32_t ComputeUnitCore::barrier_state(const Wavefront &wf, int32_t barrier_id) const {
@@ -807,7 +813,7 @@ bool ComputeUnitCore::named_barrier_leave(Wavefront &wf) {
   if (barrier.signal_count >= barrier.member_count) {
     barrier.signal_count = 0;
     auto members = complete_barrier(wf.dispatch_id(), wf.wg_id(), kNamedBarrierBit, id);
-    notify_barrier_complete(members);
+    notify_barrier_complete(members, kNamedBarrierBit);
   }
   return barrier.member_count == 0;
 }
@@ -859,7 +865,7 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
         return;
       barrier.signal_count = 0;
       auto members = complete_barrier(dispatch_id, wg_id, completion_bit, joined_id);
-      notify_barrier_complete(members);
+      notify_barrier_complete(members, completion_bit);
     };
 
     retire_member(group->second.workgroup[0], kWorkgroupBarrierBit);
@@ -1748,7 +1754,7 @@ void ComputeUnitCore::update_wf_states() {
             other_wf->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
           barrier_wfs.push_back(other_wf.get());
       }
-      notify_barrier_complete(barrier_wfs);
+      notify_barrier_complete(barrier_wfs, kWorkgroupBarrierBit);
       for (auto *bwf : barrier_wfs) {
         bwf->set_state(WfState::RUNNING);
         bwf->set_ready_cycle(cycle_counter_);
