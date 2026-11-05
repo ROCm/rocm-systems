@@ -55,7 +55,7 @@ jobs:
       # step, and that pulls in boto3/botocore/s3transfer. Nothing is installed
       # here -- that venv is built by uv and has no pip in it, so `python -m pip`
       # fails outright. If boto3 ever stops arriving that way the sweep does not
-      # quietly skip: run_rocdecode_conformance.py treats a missing SDK under
+      # quietly skip: run_conformance_sweep.py treats a missing SDK under
       # GITHUB_ACTIONS as a hard error.
       component: >-
         {

@@ -510,6 +510,18 @@ def fetch_corpus(
     if cached == want and found:
         logging.info(f"++ Corpus already up to date at {dest}")
         return found
+    # A corpus with no marker was put there by someone else -- test/README.md
+    # tells developers to point ROCDECODE_CONFORMANCE_DIR at their own stream
+    # collection. Use it as it is. Downloading over it would destroy it, and
+    # refusing outright would fail a run that has everything it needs.
+    # ROCDECODE_CONFORMANCE_DIR therefore means one of two things, decided by the
+    # marker: a cache this script owns and refreshes, or a collection it only reads.
+    if cached is None and found:
+        logging.info(
+            f"++ Using the corpus already at {dest} "
+            f"(no {ETAG_MARKER}, so it is not managed by this script and is left alone)"
+        )
+        return found
     if cached and cached != want:
         logging.info("++ Cached corpus is stale; fetching again")
 

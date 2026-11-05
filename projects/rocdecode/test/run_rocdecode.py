@@ -145,7 +145,7 @@ def execute_conformance(env: Dict[str, str], script_dir: Path, build_dir: Path) 
     failure -- the sweep reports that itself and exits 0. A real conformance
     failure raises, the same way a CTest failure does in execute_tests.
     """
-    runner = script_dir / "run_rocdecode_conformance.py"
+    runner = script_dir / "run_conformance_sweep.py"
     if not runner.is_file():
         logging.info(f"++ conformance runner not found at {runner}, skipping")
         return

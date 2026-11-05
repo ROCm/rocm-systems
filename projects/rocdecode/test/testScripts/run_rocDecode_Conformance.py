@@ -281,6 +281,19 @@ print(COUNTS_PREFIX
       + " unfinished=" + str(unfinishedNum)
       + " skipped=" + str(skipNum))
 
+# Name every failing stream on stdout, not just in rocDecode_conformance.log.
+# That file is written beside the results and CI keeps no artifact of it, so on a
+# red run it dies with the runner -- leaving the counts above as the only record
+# and a triager to read back through a few hundred interleaved streams. All three
+# loops are empty on a clean run, so this is silent unless something failed.
+for streamName, returnCode in digestFailures:
+    print("\nFAILED: " + streamName + " digest did not match its reference (exited "
+          + str(returnCode) + ")")
+
+for streamName, returnCode in unfinished:
+    print("\nFAILED: " + streamName + " did not finish decoding (exited "
+          + str(returnCode) + ")")
+
 for streamName, returnCode in teardownFailures:
     print("\nWARNING: " + streamName + " matched its reference digest but the decoder "
           "exited " + str(returnCode) + " (failure during teardown)")
