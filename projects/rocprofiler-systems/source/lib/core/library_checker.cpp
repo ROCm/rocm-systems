@@ -33,25 +33,30 @@ format_version_mismatch(std::string_view library_name, const version& built,
 }  // namespace
 
 void
+check_version(std::string_view library_name, const version& built, const version& loaded)
+{
+    if(built == loaded)
+    {
+        return;
+    }
+
+    LOG_CRITICAL("{}. Check LD_LIBRARY_PATH and the installed {}. Aborting.",
+                 format_version_mismatch(library_name, built, loaded), library_name);
+    std::exit(EXIT_FAILURE);
+}
+
+void
 check_profiler_hub_version_mismatch()
 {
     // the storage is never opened here; its constructor only stores the arguments
     const auto loaded = profiler_hub::storage_t{ "", "" }.get_storage_version();
 
-    const version built{ .major = ROCPROFSYS_PROFILER_HUB_VERSION_MAJOR,
-                         .minor = ROCPROFSYS_PROFILER_HUB_VERSION_MINOR,
-                         .patch = ROCPROFSYS_PROFILER_HUB_VERSION_PATCH };
-    const version loaded_version{ .major = loaded.major,
-                                  .minor = loaded.minor,
-                                  .patch = loaded.patch };
-
-    if(built != loaded_version)
-    {
-        LOG_CRITICAL("{}. Check LD_LIBRARY_PATH and the installed profiler-hub. "
-                     "Aborting.",
-                     format_version_mismatch("profiler-hub", built, loaded_version));
-        std::exit(EXIT_FAILURE);
-    }
+    check_version(
+        "profiler-hub",
+        version{ .major = ROCPROFSYS_PROFILER_HUB_VERSION_MAJOR,
+                 .minor = ROCPROFSYS_PROFILER_HUB_VERSION_MINOR,
+                 .patch = ROCPROFSYS_PROFILER_HUB_VERSION_PATCH },
+        version{ .major = loaded.major, .minor = loaded.minor, .patch = loaded.patch });
 }
 
 }  // namespace rocprofsys::library_checker

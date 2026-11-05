@@ -4,13 +4,11 @@
 #pragma once
 
 #include "backends/rocprofiler_sdk/types.hpp"
-#include "common/version.hpp"
 
 #include <rocprofiler-sdk/version.h>
 
 #include <cstddef>
 #include <cstdint>
-#include <fmt/format.h>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -658,29 +656,6 @@ public:
         return status;
     }
 
-    /// Verifies that the rocprofiler-sdk library loaded at runtime is the same
-    /// version this code was compiled against.
-    /// @throws std::runtime_error if the runtime and compile-time versions differ.
-    static void check_version_compatibility()
-    {
-        static constexpr auto compile_time_ver =
-            common::version::from_formatted(compile_time_version);
-
-        auto runtime_ver = common::version{};
-        get_version(&runtime_ver.major, &runtime_ver.minor, &runtime_ver.patch);
-
-        if(runtime_ver == compile_time_ver)
-        {
-            return;
-        }
-
-        throw std::runtime_error{ fmt::format(
-            "rocprofiler-sdk version mismatch: compiled against {}.{}.{}, but runtime "
-            "library reports {}.{}.{}",
-            compile_time_ver.major, compile_time_ver.minor, compile_time_ver.patch,
-            runtime_ver.major, runtime_ver.minor, runtime_ver.patch) };
-    }
-
     [[nodiscard]] static const callback_name_info_t& get_callback_tracing_names()
     {
         static const auto cached_names = Wrapper::get_callback_tracing_names();
@@ -812,7 +787,6 @@ struct backend_factory
 
     static std::shared_ptr<backend_t> create_backend()
     {
-        backend_t::check_version_compatibility();
         return std::make_shared<backend_t>();
     }
 };
