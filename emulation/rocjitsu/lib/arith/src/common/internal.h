@@ -55,8 +55,8 @@ inline double as_double(uint64_t bits) { return rocjitsu::arith::bit_cast<double
 // Return the FP64 representation without numeric conversion.
 inline uint64_t double_bits(double value) { return rocjitsu::arith::bit_cast<uint64_t>(value); }
 
-// Resolve the legacy rocjitsu policy selected by this entry point's wrapper.
-// Explicit semantics are never reinterpreted.
+// Resolve only the semantics field for validation; explicit modes are unchanged.
+// Callers preserve any additional Compatibility policy before calling this helper.
 inline uint64_t resolve_compatibility(uint64_t flags, uint64_t semantics) {
   return (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY
              ? (flags & ~RJ_ARITH_SEMANTICS_MASK) | semantics
@@ -78,6 +78,13 @@ inline bool is_exact(uint64_t flags) {
 // Return whether resolved semantics require guest FP status reporting.
 inline bool reports_fp_status(uint64_t flags) {
   return (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
+}
+
+// A composed instruction may calculate its own status around a numeric sub-operation.
+inline uint64_t without_fp_status(uint64_t flags) {
+  return reports_fp_status(flags) ? (flags & ~RJ_ARITH_SEMANTICS_MASK) |
+                                        RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                                  : flags;
 }
 
 // Accept ordinary semantics modes 0..3; reject reserved or unresolved compatibility modes.
