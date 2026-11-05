@@ -6,6 +6,7 @@
 #include "parser/schema.hpp"
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -36,6 +37,9 @@ accepts_text(const schema_param& param, std::string_view value);
 /// Parsed configuration value. Lists are already split.
 using config_value_t =
     std::variant<bool, std::int64_t, double, std::string, std::vector<std::string>>;
+
+/// Parameter id to the value parsed for it.
+using typed_values_t = std::map<std::string, config_value_t, std::less<>>;
 
 /// Parse @p text once as @p param. Returns nullopt when the text is not a value
 /// the parameter accepts.
