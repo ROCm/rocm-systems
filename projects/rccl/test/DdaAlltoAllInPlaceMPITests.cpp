@@ -177,7 +177,7 @@ protected:
                              + " sendOffset=" + std::to_string(c.sendOffset)
                              + " recvOffset=" + std::to_string(c.recvOffset));
                 runCase(static_cast<uint8_t*>(base), static_cast<uint8_t*>(recvBase), perPeer, c);
-                if(HasFatalFailure())
+                if(HasFatalFailure() || IsSkipped())
                     return;
             }
         }
@@ -210,8 +210,10 @@ protected:
 // polls any, and a column that polled first would wait on a peer whose sender has not run.
 TEST_F(DdaAlltoAllPeerColumnsMPI, ColumnsServeSeveralPeers)
 {
-    if(nRanks_ < 8 || !ll128On_)
-        GTEST_SKIP() << "Needs 8 or more ranks with DDA AlltoAll LL128 on";
+    const std::string skip
+        = mpiCoordinatedSkipReason(nRanks_ < 8 || !ll128On_, "Needs 8 or more ranks with DDA AlltoAll LL128 on");
+    if(!skip.empty())
+        GTEST_SKIP() << skip;
     ASSERT_MPI_EQ(std::atoi(kMaxBlocks), getActiveCommunicator()->ddaFabricMaxBlocks);
     runAllCases();
 }

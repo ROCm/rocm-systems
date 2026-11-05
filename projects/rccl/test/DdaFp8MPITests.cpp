@@ -316,12 +316,15 @@ protected:
         void*        sendBuf    = nullptr;
         void*        recvBuf    = nullptr;
         void*        sendBuf2   = nullptr;
+        void*        recvBuf2   = nullptr;
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, totalCount));
         DeviceBufferAutoGuard sendGuard(sendBuf);
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf2, totalCount));
         DeviceBufferAutoGuard sendGuard2(sendBuf2);
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, totalCount));
         DeviceBufferAutoGuard recvGuard(recvBuf);
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf2, totalCount));
+        DeviceBufferAutoGuard recvGuard2(recvBuf2);
 
         expectAlgo(ncclFuncAlltoAll, countPerPeer, datatype, sendBuf, recvBuf, expectedAlgo);
 
@@ -344,24 +347,28 @@ protected:
                                                    salt);
                               }));
         }
-        ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, totalCount));
-        // Two back-to-back calls flip the scratch bank, so the second reads the bank the call before
-        // last wrote. Distinct bytes per call make a stale read of either bank fail the check; the
-        // memset between them, ordered on the stream, also catches a chunk the second call never stores.
+        for(void* buf : {recvBuf, recvBuf2})
+            ASSERT_MPI_EQ(hipSuccess, hipMemset(buf, 0, totalCount));
+        // Back-to-back calls flip the scratch bank and both are checked, so a stale read of either
+        // bank fails, and the zeroed receive buffers catch a chunk a call never stores.
         ASSERT_MPI_EQ(ncclSuccess,
                       ncclAlltoAll(sendBuf, recvBuf, countPerPeer, datatype,
                                    getActiveCommunicator(), getActiveStream()));
-        ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(recvBuf, 0, totalCount, getActiveStream()));
         ASSERT_MPI_EQ(ncclSuccess,
-                      ncclAlltoAll(sendBuf2, recvBuf, countPerPeer, datatype,
+                      ncclAlltoAll(sendBuf2, recvBuf2, countPerPeer, datatype,
                                    getActiveCommunicator(), getActiveStream()));
         ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
-        EXPECT_TRUE(verifyBufferData<uint8_t>(
-            recvBuf, totalCount, [this, countPerPeer, chunkByte, secondSalt](size_t i) {
-                return chunkByte(static_cast<int>(i / countPerPeer), rank_, i % countPerPeer, secondSalt);
-            }))
-            << "Rank " << rank_ << ": " << fp8Name(datatype) << " AlltoAll data mismatch";
+        for(void* buf : {recvBuf, recvBuf2})
+        {
+            const uint8_t salt = buf == recvBuf ? firstSalt : secondSalt;
+            EXPECT_TRUE(verifyBufferData<uint8_t>(
+                buf, totalCount, [this, countPerPeer, chunkByte, salt](size_t i) {
+                    return chunkByte(static_cast<int>(i / countPerPeer), rank_, i % countPerPeer, salt);
+                }))
+                << "Rank " << rank_ << ": " << fp8Name(datatype) << " AlltoAll call " << (buf == recvBuf ? 1 : 2)
+                << " data mismatch";
+        }
     }
 
     // Runs `body` for each fp8 format at each count. The ASSERT_MPI_* checks fail
