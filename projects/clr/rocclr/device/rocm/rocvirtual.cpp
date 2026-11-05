@@ -8,6 +8,7 @@
 #include "device/rocm/rocdevice.hpp"
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rockernel.hpp"
+#include "device/rocm/rocp2p_direction.hpp"
 #include "utils/nontemporal.hpp"
 #include "device/rocm/rocmemory.hpp"
 #include "device/rocm/rocblit.hpp"
@@ -4296,19 +4297,9 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
   const bool copy_on_src = (srcDevMem->dev().getBackendDevice().handle == copy_agent.handle);
   const bool copy_on_dst = (dstDevMem->dev().getBackendDevice().handle == copy_agent.handle);
 
-  bool p2pAllowed;
-  if (copy_on_src && !copy_on_dst) {
-    // Local read, peer write: the executing device must reach the destination.
-    p2pAllowed = canReach(dstDevMem->dev());
-  } else if (copy_on_dst && !copy_on_src) {
-    // Peer read, local write: the executing device must reach the source.
-    p2pAllowed = canReach(srcDevMem->dev());
-  } else if (copy_on_src && copy_on_dst) {
-    p2pAllowed = true;
-  } else {
-    // Third device: it must reach both buffers to blit directly.
-    p2pAllowed = canReach(srcDevMem->dev()) && canReach(dstDevMem->dev());
-  }
+  const auto role = ::roc::p2p::SelectRole(copy_on_src, copy_on_dst);
+  const bool p2pAllowed =
+      ::roc::p2p::CanBlit(role, canReach(srcDevMem->dev()), canReach(dstDevMem->dev()));
 
   // A topology with at least one usable direction does not require staging, so
   // the buffer is optional. Do not dereference a null P2PStage() if it could
