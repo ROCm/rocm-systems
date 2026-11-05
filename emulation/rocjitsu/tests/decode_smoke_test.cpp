@@ -453,6 +453,9 @@ TEST(DecoderSmokeTest, Gfx942ClassifiesTimestampTrapAndDebugBranchBlocks) {
     EXPECT_TRUE(inst->mnemonic().starts_with(test_case.mnemonic));
     EXPECT_EQ(inst->amdgpu_execution_block(), test_case.block);
     EXPECT_EQ(inst->writes_pc(), test_case.block == ExecutionBlock::BRANCH);
+    // None of these carries a CFG branch flag: s_cbranch_cdbgsys is modelled as
+    // falling through and has no decoded branch offset.
+    EXPECT_FALSE(inst->is_branch());
   }
 }
 
