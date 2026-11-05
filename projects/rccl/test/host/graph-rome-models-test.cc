@@ -509,6 +509,7 @@ TEST_F(GraphRomeModelsMicrotest, P4H4P_MatchesFourHivesWithANicPerGpu) {
 
   EXPECT_GT(ring->nChannels, 0);
   EXPECT_EQ(RCCL_ROME_TOPO_PRESET_MODEL_IDX_4H4P, system_->romeTopoModelIdx);
+  EXPECT_TRUE(system_->type & RCCL_TOPO_4P2H_ROME);
   EXPECT_TRUE(Logged("Found matching Rome model 4P4H"));
 }
 

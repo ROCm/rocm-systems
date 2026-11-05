@@ -51,6 +51,7 @@ test_categories:
 
 # Unit tests
       - "unit_tests_n4"
+      - "tdm_tests_n2"
 
     labels:
       - "smoke"
