@@ -59,6 +59,14 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/pytorch/host_tree.hpp
     ${CMAKE_CURRENT_LIST_DIR}/pytorch/kineto_probe.cpp
     ${CMAKE_CURRENT_LIST_DIR}/pytorch/kineto_probe.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/pytorch_store.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/pytorch_store.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/pytorch_catalog.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/pytorch_catalog.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/memory_source.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/memory_source.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/memory_histogram.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/memory_histogram.hpp
 )
 target_sources(profiler-hub-objects PRIVATE ${profiler-hub_sources})
 

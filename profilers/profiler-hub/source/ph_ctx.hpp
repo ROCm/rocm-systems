@@ -7,6 +7,7 @@
 #include "pooled_connection_source.hpp"
 #include "profiler-hub/c/profiler_hub_types.h"
 #include "profiler-hub/cpp/reader.hpp"
+#include "pytorch/memory_source.hpp"
 #include "track_read_options.hpp"
 #include <condition_variable>
 #include <cstdint>
@@ -174,6 +175,7 @@ private:
         std::shared_ptr<profiler_hub::reader_catalog_t>     catalog;
         std::unique_ptr<profiler_hub::common::connection_pool> pool;
         std::unique_ptr<profiler_hub::pooled_connection_source> connections;
+        std::unique_ptr<profiler_hub::pytorch::memory_source>   memory;
         std::unique_ptr<profiler_hub::cached_track_reader>  reader;
         uint32_t                                            track_offset{};
         uint32_t                                            track_count{};
