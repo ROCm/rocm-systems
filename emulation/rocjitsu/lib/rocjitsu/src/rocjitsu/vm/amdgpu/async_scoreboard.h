@@ -171,6 +171,13 @@ public:
       ++async_execution::stats.inline_overlap;
   }
 
+  // Admission requires production decoding to have rejected every operand or
+  // format that can reach report_instruction_execution_error() in a candidate.
+  // Helpers transport exceptions only: reporting through the shared Wavefront
+  // error field would race the issuer clearing it for subsequent instructions.
+  // Keep new candidates synchronous unless their decode checks establish this
+  // invariant (including any execution-state checks), and cover those checks.
+  // Test/custom callbacks submitted here must obey the same restriction.
   bool submit_mma(std::unique_ptr<Instruction> &inst) {
     if (stopped_ || !matrix_coexecution::async_candidate(inst->mnemonic()))
       return false;
@@ -185,7 +192,7 @@ public:
         continue;
       // Inline accumulator/scale constants are immutable. SGPRs and special
       // registers are not covered by the vector-register scoreboard.
-      if (i == sources || !operand->const_value())
+      if (i < 2 || i == sources || !operand->const_value())
         return false;
     }
     if (!pool_.available()) {

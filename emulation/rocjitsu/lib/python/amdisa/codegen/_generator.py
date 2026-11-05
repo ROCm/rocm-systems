@@ -25,6 +25,7 @@ import cgen
 
 from amdisa.codegen.execute import input_policy
 from amdisa.codegen.execute.conversion import share_stages
+from amdisa.codegen.execute.required_vgpr import append_required_vgpr_offset
 from amdisa.codegen.execute.floating_policy import (
     F16_TRANSCENDENTAL_OPS,
     FLUSH_NEAREST_F32_OPS,
@@ -5583,8 +5584,11 @@ class CodeGenerator:
                                 s1b, s2, ea, eb, const_acc, vb, scale_a, scale_b, scale_a_byte,
                                 scale_b_byte, c_modifier);
                           }});
-                      if (!dispatched)
-                        throw util::UnimplementedInst(mnemonic());
+                      if (!dispatched) {{
+                        wf.report_instruction_execution_error(
+                            amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+                        return;
+                      }}
                     }}
                     '''))
         return outputs
@@ -6205,16 +6209,40 @@ class CodeGenerator:
             .replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
         )
 
-        execution = textwrap.dedent('''\
+        required_vgpr_guards: list[str] = []
+        for name, operand in (
+            ('dst_off', 'vdst'),
+            ('src0_off', 'src0'),
+            ('src1_off', 'src1'),
+        ):
+            append_required_vgpr_offset(
+                required_vgpr_guards, name, operand, uses_vgpr_msb_indexing=True
+            )
+
+        matrix_a_fmt, matrix_b_fmt = self._cdna5_wmma_scale_formats('inst_.')
+        execution = (
+            (
+                'namespace {\n'
+                + self._emit_cdna5_wmma_scale_format_pair_legal()
+                + '} // namespace\n'
+            )
+            + textwrap.dedent('''\
             void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
               auto &cu = wf.cu();
+              const uint32_t matrix_a_fmt = @MATRIX_A_FMT@;
+              const uint32_t matrix_b_fmt = @MATRIX_B_FMT@;
+              if (!isGfx1250WmmaScaleFormatPairLegal(
+                      matrix_a_fmt, matrix_b_fmt, scale_inst_.neg & 0x3u,
+                      scale_inst_.neg_hi & 0x3u)) {
+                wf.report_instruction_execution_error(
+                    amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+                return;
+              }
               uint32_t vb = wf.vgpr_alloc().base;
-              uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                             vdst.vgpr_msb_role());
-              uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                                   src0.vgpr_msb_role());
-              uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                                   src1.vgpr_msb_role());
+            @REQUIRED_VGPR_GUARDS@
+              uint32_t dst = vb + *dst_off;
+              uint32_t src0_base = vb + *src0_off;
+              uint32_t src1_base = vb + *src1_off;
               uint32_t const_acc;
               auto src2_off =
                   Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -6226,8 +6254,6 @@ class CodeGenerator:
                 const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);
               }
 
-              const uint32_t matrix_a_fmt = inst_.opsel;
-              const uint32_t matrix_b_fmt = (inst_.@OPSEL_HI_2@ << 2) | inst_.opsel_hi;
               const uint32_t matrix_a_scale =
                   (scale_inst_.opsel & 0x1u) | (((scale_inst_.opsel >> 2u) & 0x1u) << 1u);
               const uint32_t matrix_b_scale =
@@ -6282,14 +6308,49 @@ class CodeGenerator:
                           amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
                     });
               }
-              if (!dispatched)
-                throw util::UnimplementedInst(mnemonic());
+              if (!dispatched) {
+                wf.report_instruction_execution_error(
+                    amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+                return;
+              }
             }
-            ''').replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
+            ''')
+            .replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
+            .replace('@REQUIRED_VGPR_GUARDS@', '\n'.join(required_vgpr_guards))
+            .replace('@MATRIX_A_FMT@', matrix_a_fmt)
+            .replace('@MATRIX_B_FMT@', matrix_b_fmt)
+        )
         return _ImplOutputs(model=[model], execution=[execution])
 
-    def _emit_cdna5_scaled_wmma_vop3px2_decoder_helpers(self) -> str:
+    def _cdna5_wmma_scale_formats(self, matrix: str) -> tuple[str, str]:
+        """Derive the matrix formats shared by scaled-WMMA decode and execution."""
+        opsel_hi_2 = self._op_sel_hi_2_field('ENC_VOP3P')
+        return (
+            f'{matrix}op == 0x88u ? 4u : {matrix}opsel',
+            f'{matrix}op == 0x88u ? 4u : '
+            f'({matrix}{opsel_hi_2} << 2u) | {matrix}opsel_hi',
+        )
+
+    @staticmethod
+    def _emit_cdna5_wmma_scale_format_pair_legal() -> str:
         return textwrap.dedent('''\
+            bool isGfx1250WmmaScaleFormatPairLegal(uint32_t matrix_a_fmt, uint32_t matrix_b_fmt,
+                                                   uint32_t scale_a_fmt, uint32_t scale_b_fmt) {
+              if (matrix_a_fmt > 4u || matrix_b_fmt > 4u || scale_a_fmt > 2u || scale_b_fmt > 2u)
+                return false;
+              if (scale_a_fmt == 0u && scale_b_fmt == 0u)
+                return true;
+              if ((scale_a_fmt != 0u && matrix_a_fmt != 4u) ||
+                  (scale_b_fmt != 0u && matrix_b_fmt != 4u))
+                return false;
+              return matrix_a_fmt != 4u || matrix_b_fmt != 4u || scale_a_fmt == scale_b_fmt;
+            }
+            ''')
+
+    def _emit_cdna5_scaled_wmma_vop3px2_decoder_helpers(self) -> str:
+        matrix_a_fmt, matrix_b_fmt = self._cdna5_wmma_scale_formats('matrix->')
+        return (
+            textwrap.dedent('''\
             namespace {
 
             bool isVop3pOp(const MachineInst opcode, uint32_t op) {
@@ -6304,17 +6365,7 @@ class CodeGenerator:
               return !scale16 || ((selector - 256u) % 2u == 0u && selector < 511u);
             }
 
-            bool isGfx1250WmmaScaleFormatPairLegal(uint32_t matrix_a_fmt, uint32_t matrix_b_fmt,
-                                                   uint32_t scale_a_fmt, uint32_t scale_b_fmt) {
-              if (matrix_a_fmt > 4u || matrix_b_fmt > 4u || scale_a_fmt > 2u || scale_b_fmt > 2u)
-                return false;
-              if (scale_a_fmt == 0u && scale_b_fmt == 0u)
-                return true;
-              if ((scale_a_fmt != 0u && matrix_a_fmt != 4u) ||
-                  (scale_b_fmt != 0u && matrix_b_fmt != 4u))
-                return false;
-              return matrix_a_fmt != 4u || matrix_b_fmt != 4u || scale_a_fmt == scale_b_fmt;
-            }
+            @SCALE_FORMAT_PAIR_LEGAL@
 
             bool isGfx1250WmmaScalePairValid(const MachineInst *opcode) {
               const auto *scale = reinterpret_cast<const Vop3pMachineInst *>(opcode);
@@ -6334,16 +6385,21 @@ class CodeGenerator:
 
               const uint32_t scale_a_fmt = scale->neg & 0x3u;
               const uint32_t scale_b_fmt = scale->neg_hi & 0x3u;
-              if (matrix->op == 0x88u)
-                return isGfx1250WmmaScaleFormatPairLegal(4u, 4u, scale_a_fmt, scale_b_fmt);
-              const uint32_t matrix_a_fmt = matrix->opsel;
-              const uint32_t matrix_b_fmt = (matrix->@OPSEL_HI_2@ << 2u) | matrix->opsel_hi;
+              const uint32_t matrix_a_fmt = @MATRIX_A_FMT@;
+              const uint32_t matrix_b_fmt = @MATRIX_B_FMT@;
               return isGfx1250WmmaScaleFormatPairLegal(matrix_a_fmt, matrix_b_fmt, scale_a_fmt,
                                                        scale_b_fmt);
             }
 
             } // namespace
-            ''').replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
+            ''')
+            .replace(
+                '@SCALE_FORMAT_PAIR_LEGAL@',
+                self._emit_cdna5_wmma_scale_format_pair_legal(),
+            )
+            .replace('@MATRIX_A_FMT@', matrix_a_fmt)
+            .replace('@MATRIX_B_FMT@', matrix_b_fmt)
+        )
 
     def _execute_operand_roles(
         self, inst: Instruction, sem: InstructionSemantics
