@@ -15,13 +15,13 @@
 #include <gtest/gtest.h>
 
 #include "../common/ProcessIsolatedTestRunner.hpp"
-#include "../common/ScopedEnv.hpp"
+#include "../common/ScopedEnvVar.hpp"
 
 namespace {
 
 constexpr const char* kMarkerEnvVar = "RCCL_PIT_TEST_MARKER";
 
-using RcclUnitTesting::ScopedEnv;
+using RcclUnitTesting::ScopedEnvVar;
 
 }  // namespace
 
@@ -36,10 +36,10 @@ TEST(ProcessIsolatedRunnerMicrotest, NonZeroShard_ChildStillRunsBody) {
   const std::string marker = dir + "/marker";
   const std::string statusFile = dir + "/shard_status";
   {
-    ScopedEnv totalShards("GTEST_TOTAL_SHARDS", "2");
-    ScopedEnv shardIndex("GTEST_SHARD_INDEX", "1");
+    ScopedEnvVar totalShards("GTEST_TOTAL_SHARDS", "2");
+    ScopedEnvVar shardIndex("GTEST_SHARD_INDEX", "1");
     // Set after this process's gtest started, so only a child that inherits it would create the file.
-    ScopedEnv shardStatusFile("GTEST_SHARD_STATUS_FILE", statusFile.c_str());
+    ScopedEnvVar shardStatusFile("GTEST_SHARD_STATUS_FILE", statusFile.c_str());
     RUN_ISOLATED_TEST_WITH_ENV(
       "Pit_NonZeroShard_ChildStillRunsBody",
       []() {

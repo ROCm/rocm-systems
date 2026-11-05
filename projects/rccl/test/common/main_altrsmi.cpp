@@ -5,9 +5,11 @@
  ************************************************************************/
 
 #include <gtest/gtest.h>
+#include "EnvIsolationListener.hpp"
 
 int main(int argc, char **argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
+    RcclUnitTesting::EnvIsolationListener::Install();
     return RUN_ALL_TESTS();
 }

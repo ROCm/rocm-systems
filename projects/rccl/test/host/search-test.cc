@@ -16,7 +16,7 @@
 #include <vector>
 
 #include "ScopedHook.h"
-#include "../common/ScopedEnv.hpp"
+#include "../common/ScopedEnvVar.hpp"
 #include "fakes/graph_fakes.h"
 #include "fakes/param_redirect.h"
 
@@ -801,7 +801,7 @@ TEST_F(SearchMicrotest, Compute_GraphFileReplacesTheSearch) {
                 "<gpu dev=\"0\" rank=\"0\"/></channel></graph>"
                 "<graph id=\"1\" pattern=\"1\" crossnic=\"0\" nchannels=\"1\" speedintra=\"1\" speedinter=\"1\" "
                 "typeintra=\"SYS\" typeinter=\"SYS\" samechannels=\"0\"/></graphs>");
-  RcclUnitTesting::ScopedEnv graphFile("NCCL_GRAPH_FILE", file.path());
+  RcclUnitTesting::ScopedEnvVar graphFile("NCCL_GRAPH_FILE", file.path());
 
   GraphPtr ring = Compute(0, NCCL_TOPO_PATTERN_RING);
 
@@ -818,7 +818,7 @@ TEST_F(SearchMicrotest, Compute_GraphFileReplacesTheSearch) {
 TEST_F(SearchMicrotest, Compute_EmptyGraphFileFallsThroughToTheSearch) {
   Use(XgmiSystem(2));
   TempFile file("<graphs version=\"1\"/>");
-  RcclUnitTesting::ScopedEnv graphFile("NCCL_GRAPH_FILE", file.path());
+  RcclUnitTesting::ScopedEnvVar graphFile("NCCL_GRAPH_FILE", file.path());
 
   GraphPtr ring = Compute(0, NCCL_TOPO_PATTERN_RING);
 
@@ -829,13 +829,13 @@ TEST_F(SearchMicrotest, Compute_UserRingsAndTreesSkipTheSearch) {
   Use(
     System(Cpu(0, GpuPci(GpuBus(0), 0, 0, Xgmi(GpuBus(1))) + GpuPci(GpuBus(1), 1, 1, Xgmi(GpuBus(0))), "", kRomeCpu)));
   {
-    RcclUnitTesting::ScopedEnv rings("NCCL_RINGS", "0 1|1 0");
+    RcclUnitTesting::ScopedEnvVar rings("NCCL_RINGS", "0 1|1 0");
     GraphPtr ring = Compute(0, NCCL_TOPO_PATTERN_RING);
     EXPECT_EQ(2, ring->nChannels);
     EXPECT_TRUE(system_->type & RCCL_TOPO_4P2H_ROME);
   }
 
-  RcclUnitTesting::ScopedEnv trees("RCCL_TREES", "(0(1))");
+  RcclUnitTesting::ScopedEnvVar trees("RCCL_TREES", "(0(1))");
   GraphPtr tree = Compute(1, NCCL_TOPO_PATTERN_BALANCED_TREE);
   EXPECT_TRUE(system_->treeDefined);
   EXPECT_STREQ("(0(1))", tree->treeBase[0]);
@@ -843,7 +843,7 @@ TEST_F(SearchMicrotest, Compute_UserRingsAndTreesSkipTheSearch) {
 
 TEST_F(SearchMicrotest, Compute_UserRingsOnAZenHostDoNotMarkRome) {
   Use(XgmiSystem(2));
-  RcclUnitTesting::ScopedEnv rings("NCCL_RINGS", "0 1");
+  RcclUnitTesting::ScopedEnvVar rings("NCCL_RINGS", "0 1");
 
   GraphPtr ring = Compute(0, NCCL_TOPO_PATTERN_RING);
 
@@ -1030,7 +1030,7 @@ TEST_F(SearchMicrotest, DumpGraphs_WritesTheGraphFileWhenAsked) {
   ASSERT_EQ(ncclSuccess, ncclTopoDumpGraphs(system_.get(), 1, graphs));
 
   TempFile file;
-  RcclUnitTesting::ScopedEnv dumpFile("NCCL_GRAPH_DUMP_FILE", file.path());
+  RcclUnitTesting::ScopedEnvVar dumpFile("NCCL_GRAPH_DUMP_FILE", file.path());
   ASSERT_EQ(ncclSuccess, ncclTopoDumpGraphs(system_.get(), 1, graphs));
 
   std::string text = file.Read();

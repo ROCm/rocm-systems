@@ -19,7 +19,7 @@
 #include <string>
 #include <vector>
 
-#include "../common/ScopedEnv.hpp"
+#include "../common/ScopedEnvVar.hpp"
 #include "fakes/graph_fakes.h"
 #include "fakes/param_redirect.h"
 
@@ -656,7 +656,7 @@ TEST_F(GraphRomeModelsMicrotest, ChordalRing_SkipsOtherShapes) {
 TEST_F(GraphRomeModelsMicrotest, ParseRomeSystem_DumpsTheModelWhenAsked) {
   UseModel(romeTopoModels[43]);
   TempFile file;
-  RcclUnitTesting::ScopedEnv dumpFile("RCCL_DUMP_ROME_MODEL_FILE", file.path());
+  RcclUnitTesting::ScopedEnvVar dumpFile("RCCL_DUMP_ROME_MODEL_FILE", file.path());
   rcclRomeModel topo;
   char pattern[256];
 
@@ -666,7 +666,7 @@ TEST_F(GraphRomeModelsMicrotest, ParseRomeSystem_DumpsTheModelWhenAsked) {
   EXPECT_NE(std::string::npos, text.find(".nGpus = 8, .nCpus = 2, .nNics = 4, .nLinks = 7"));
   EXPECT_NE(std::string::npos, text.find(".pattern = \"4242\""));
   EXPECT_NE(std::string::npos, text.find("PATH_PXB"));
-  RcclUnitTesting::ScopedEnv badDumpFile("RCCL_DUMP_ROME_MODEL_FILE", "/nonexistent/model.txt");
+  RcclUnitTesting::ScopedEnvVar badDumpFile("RCCL_DUMP_ROME_MODEL_FILE", "/nonexistent/model.txt");
   ASSERT_EQ(ncclSuccess, parseRomeSystem(system_.get(), &topo, pattern, nullptr));
   EXPECT_TRUE(Logged("Unable to open /nonexistent/model.txt, not dumping Rome model"));
 }

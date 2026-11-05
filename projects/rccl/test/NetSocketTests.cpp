@@ -8,7 +8,7 @@
 #include "os.h"
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
-#include "common/ScopedEnv.hpp"
+#include "common/ScopedEnvVar.hpp"
 #include "gtest/gtest.h"
 #include <atomic>
 #include <cctype>
@@ -1627,9 +1627,9 @@ TEST(NetBootstrapInterfaceTest, VirbrConsideredLast) {
   // Save/restore the process-global env this test touches so we neither pin the
   // auto-selection path to a user-forced interface/family nor leak state into
   // other tests in the same binary.
-  ScopedEnv guardIfname("NCCL_SOCKET_IFNAME", nullptr);
-  ScopedEnv guardCommId("NCCL_COMM_ID", nullptr);
-  ScopedEnv guardFamily("NCCL_SOCKET_FAMILY", nullptr);
+  ScopedEnvVar guardIfname("NCCL_SOCKET_IFNAME", nullptr);
+  ScopedEnvVar guardCommId("NCCL_COMM_ID", nullptr);
+  ScopedEnvVar guardFamily("NCCL_SOCKET_FAMILY", nullptr);
 
   // Resolve the socket family only after NCCL_SOCKET_FAMILY has been cleared, so
   // the probes are not forced to IPv6 -- which can legitimately return zero
@@ -1765,7 +1765,7 @@ TEST(BcmLinksTest, EnvFallback) {
     fclose(f); }
 
   // Redirect the fallback path to our tmpdir.
-  ScopedEnv guard("RCCL_BCM_LINKS_PATH", tmpdir.str().c_str());
+  ScopedEnvVar guard("RCCL_BCM_LINKS_PATH", tmpdir.str().c_str());
 
   // Query bdfA — should discover bdfB as its sole peer.
   int   nlinks = -1;

@@ -46,7 +46,7 @@
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
-#include "ScopedEnv.hpp"
+#include "ScopedEnvVar.hpp"
 #include "TestChecks.hpp"
 
 #include <atomic>
@@ -62,7 +62,7 @@ using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
 // NCCL_CHECK_MODE and NCCL_SYM_KERNEL are read in ncclCommInitRank, so tests set them before creating the communicator.
-using RcclUnitTesting::ScopedEnv;
+using RcclUnitTesting::ScopedEnvVar;
 
 namespace {
 
@@ -259,7 +259,7 @@ protected:
 
 TEST_F(SymCheckMode_Registration, DebugGlobal_MatchingRegistration_Succeeds)
 {
-    ScopedEnv checkMode("NCCL_CHECK_MODE", "DEBUG_GLOBAL");
+    ScopedEnvVar checkMode("NCCL_CHECK_MODE", "DEBUG_GLOBAL");
     if (!symmetricPrerequisitesMet()) {
         GTEST_SKIP() << "Requires symmetric support (NCCL_CUMEM_ENABLE=1, kernel >= 6.8) with 2+ ranks";
     }
@@ -271,7 +271,7 @@ TEST_F(SymCheckMode_Registration, DebugGlobal_MatchingRegistration_Succeeds)
 
 TEST_F(SymCheckMode_Registration, DebugGlobal_RegistrationMismatch_Rejected)
 {
-    ScopedEnv checkMode("NCCL_CHECK_MODE", "DEBUG_GLOBAL");
+    ScopedEnvVar checkMode("NCCL_CHECK_MODE", "DEBUG_GLOBAL");
     if (!symmetricPrerequisitesMet()) {
         GTEST_SKIP() << "Requires symmetric support (NCCL_CUMEM_ENABLE=1, kernel >= 6.8) with 2+ ranks";
     }
@@ -284,7 +284,7 @@ TEST_F(SymCheckMode_Registration, DebugGlobal_RegistrationMismatch_Rejected)
 
 TEST_F(SymCheckMode_Registration, DebugGlobal_UserOffsetMismatch_Rejected)
 {
-    ScopedEnv checkMode("NCCL_CHECK_MODE", "DEBUG_GLOBAL");
+    ScopedEnvVar checkMode("NCCL_CHECK_MODE", "DEBUG_GLOBAL");
     if (!symmetricPrerequisitesMet()) {
         GTEST_SKIP() << "Requires symmetric support (NCCL_CUMEM_ENABLE=1, kernel >= 6.8) with 2+ ranks";
     }
@@ -299,7 +299,7 @@ TEST_F(SymCheckMode_Registration, DebugGlobal_UserOffsetMismatch_Rejected)
 // registered path must still run and reduce correctly, which runAllReduce checks element by element.
 TEST_F(SymCheckMode_Registration, Default_MatchingRegistration_Succeeds)
 {
-    ScopedEnv checkMode("NCCL_CHECK_MODE", nullptr);
+    ScopedEnvVar checkMode("NCCL_CHECK_MODE", nullptr);
     if (!symmetricPrerequisitesMet()) {
         GTEST_SKIP() << "Requires symmetric support (NCCL_CUMEM_ENABLE=1, kernel >= 6.8) with 2+ ranks";
     }
@@ -341,7 +341,7 @@ protected:
 
 TEST_F(SymCheckMode_Local, DebugLocal_HostPointer_Rejected)
 {
-    ScopedEnv checkMode("NCCL_CHECK_MODE", "DEBUG_LOCAL");
+    ScopedEnvVar checkMode("NCCL_CHECK_MODE", "DEBUG_LOCAL");
     if (!validateTestPrerequisites(1)) {
         GTEST_SKIP() << "Needs at least 1 process";
     }
@@ -352,7 +352,7 @@ TEST_F(SymCheckMode_Local, DebugLocal_HostPointer_Rejected)
 
 TEST_F(SymCheckMode_Local, DebugGlobal_HostPointer_Rejected)
 {
-    ScopedEnv checkMode("NCCL_CHECK_MODE", "DEBUG_GLOBAL");
+    ScopedEnvVar checkMode("NCCL_CHECK_MODE", "DEBUG_GLOBAL");
     if (!validateTestPrerequisites(1)) {
         GTEST_SKIP() << "Needs at least 1 process";
     }
@@ -397,7 +397,7 @@ protected:
     // the fixture's window/allocation teardown.
     void runAbortScenario(const char* symKernel)
     {
-        ScopedEnv kernelEnv("NCCL_SYM_KERNEL", symKernel);
+        ScopedEnvVar kernelEnv("NCCL_SYM_KERNEL", symKernel);
         if (!symmetricPrerequisitesMet()) {
             GTEST_SKIP() << "Requires symmetric support (NCCL_CUMEM_ENABLE=1, kernel >= 6.8) with 2+ ranks";
         }

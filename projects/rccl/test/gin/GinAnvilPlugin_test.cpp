@@ -10,7 +10,7 @@
 
 #include "gin_anvil_plugin_test_stubs.h"
 
-#include "../common/ScopedEnv.hpp"
+#include "../common/ScopedEnvVar.hpp"
 
 #include "gin/gin_host_anvil_sdma.h"
 #include "comm.h"
@@ -129,7 +129,7 @@ class GinAnvilPluginTest : public ::testing::Test {
 
 // G1: wrong NCCL_GIN_TYPE.
 TEST_F(GinAnvilPluginTest, Init_WrongGinType) {
-  ScopedEnv ty("NCCL_GIN_TYPE", "4");
+  ScopedEnvVar ty("NCCL_GIN_TYPE", "4");
   void* ictx = nullptr;
   EXPECT_EQ(plugin_.init(&ictx, 0, nullptr), ncclInternalError);
   EXPECT_EQ(ictx, nullptr);
@@ -267,8 +267,8 @@ TEST_F(GinAnvilPluginTest, CreateContext_MissingInfra) {
 
 // G11: createContext success + env-driven fields.
 TEST_F(GinAnvilPluginTest, CreateContext_EnvAndCounters) {
-  ScopedEnv th("NCCL_GIN_ANVIL_SDMA_THRESHOLD", "256");
-  ScopedEnv fs("NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL", "1");
+  ScopedEnvVar th("NCCL_GIN_ANVIL_SDMA_THRESHOLD", "256");
+  ScopedEnvVar fs("NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL", "1");
   void* ictx = nullptr;
   initCtx(&ictx);
   void* coll = nullptr;
@@ -628,7 +628,7 @@ TEST_F(GinAnvilPluginTest, Misc_NoOpPaths) {
 // no longer honored. Even with the (now-ignored) env set to a former multi-channel
 // value, connect + createContext must bring the context up with numChannels == 1.
 TEST_F(GinAnvilPluginTest, Connect_NumChannelsForcedSingle) {
-  ScopedEnv ch("NCCL_GIN_ANVIL_SDMA_NUM_CHANNELS", "4");
+  ScopedEnvVar ch("NCCL_GIN_ANVIL_SDMA_NUM_CHANNELS", "4");
   void* ictx = nullptr;
   initCtx(&ictx);
   void* coll = nullptr;
@@ -839,7 +839,7 @@ TEST_F(GinAnvilPluginTest, ConnCheck_InjectFailRankAbortsBind) {
   GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
   GinAnvilPluginStubs::SetConnCheckMissingCalls(-1);
 
-  ScopedEnv inj("NCCL_GIN_ANVIL_SDMA_CONN_INJECT_FAIL_RANK", "0");
+  ScopedEnvVar inj("NCCL_GIN_ANVIL_SDMA_CONN_INJECT_FAIL_RANK", "0");
   GinAnvilPluginStubs::SetBootstrapNranks(2);
   mockComm_.get()->devrState.lsaSize = 2;
   void* ictx = nullptr;
@@ -864,7 +864,7 @@ TEST_F(GinAnvilPluginTest, ConnCheck_InjectFailRankAbortsBind) {
 
 // G22: conn-check bypassed when NCCL_GIN_ANVIL_SDMA_CONN_CHECK=0.
 TEST_F(GinAnvilPluginTest, ConnCheck_EnvBypassSkipsGate) {
-  ScopedEnv bypass("NCCL_GIN_ANVIL_SDMA_CONN_CHECK", "0");
+  ScopedEnvVar bypass("NCCL_GIN_ANVIL_SDMA_CONN_CHECK", "0");
   GinAnvilPluginStubs::SetBootstrapNranks(2);
   GinAnvilPluginStubs::SetConnCheckMissingCalls(-1);
   mockComm_.get()->devrState.lsaSize = 2;
@@ -889,7 +889,7 @@ TEST_F(GinAnvilPluginTest, ConnCheck_EnvBypassSkipsGate) {
 }
 
 TEST_F(GinAnvilPluginTest, ConnCheck_InconsistentEnvBypassFailsCollectively) {
-  ScopedEnv bypass("NCCL_GIN_ANVIL_SDMA_CONN_CHECK", "0");
+  ScopedEnvVar bypass("NCCL_GIN_ANVIL_SDMA_CONN_CHECK", "0");
   GinAnvilPluginStubs::SetBootstrapNranks(2);
   mockComm_.get()->devrState.lsaSize = 2;
   void* ictx = nullptr;
@@ -1024,7 +1024,7 @@ TEST_F(GinAnvilPluginTest, BindSignals_SkippedConnCheckStillRunsOncePerSpan) {
 }
 
 TEST_F(GinAnvilPluginTest, ConnCheck_NonNumericEnvValueKeepsGateEnabled) {
-  ScopedEnv enabled("NCCL_GIN_ANVIL_SDMA_CONN_CHECK", "true");
+  ScopedEnvVar enabled("NCCL_GIN_ANVIL_SDMA_CONN_CHECK", "true");
   void* rawDevLsa = nullptr;
   ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
   HipAllocation devLsa(rawDevLsa);
@@ -1376,7 +1376,7 @@ TEST_F(GinAnvilPluginTest, LiveInitCtx_FailedInitAndNullFinalizeLeaveCountUnchan
 
   void* ictx = nullptr;
   {
-    ScopedEnv ty("NCCL_GIN_TYPE", "4");
+    ScopedEnvVar ty("NCCL_GIN_TYPE", "4");
     EXPECT_EQ(plugin_.init(&ictx, 0, nullptr), ncclInternalError);
   }
   GinAnvilPluginStubs::SetProbeResult(0);

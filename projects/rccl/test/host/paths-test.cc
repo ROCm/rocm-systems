@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "ScopedHook.h"
-#include "../common/ScopedEnv.hpp"
+#include "../common/ScopedEnvVar.hpp"
 #include "fakes/graph_fakes.h"
 #include "fakes/param_redirect.h"
 
@@ -154,7 +154,7 @@ TEST_F(PathsMicrotest, ComputePaths_NoGdrNicTrafficGoesThroughTheCpu) {
 }
 
 TEST_F(PathsMicrotest, ComputePaths_UserP2pLevelDivertsGpuPairsThroughTheCpu) {
-  RcclUnitTesting::ScopedEnv p2pLevel("NCCL_P2P_LEVEL", "LOC");
+  RcclUnitTesting::ScopedEnvVar p2pLevel("NCCL_P2P_LEVEL", "LOC");
 
   SystemPtr system = BuildWithPaths(XgmiSystem(2));
 
@@ -360,8 +360,8 @@ TEST_F(PathsMicrotest, GetLevel_ParsesNamesOldNumbersAndTheDisableVariable) {
                         {nullptr, "2", PATH_PXB}, {nullptr, "9", PATH_SYS}, {nullptr, "bogus", -2},
                         {nullptr, nullptr, -2}};
   for (const Case& c : cases) {
-    RcclUnitTesting::ScopedEnv disable("NCCL_X_DISABLE", c.disable);
-    RcclUnitTesting::ScopedEnv levelEnv("NCCL_X_LEVEL", c.level);
+    RcclUnitTesting::ScopedEnvVar disable("NCCL_X_DISABLE", c.disable);
+    RcclUnitTesting::ScopedEnvVar levelEnv("NCCL_X_LEVEL", c.level);
     int level = -1;
 
     ASSERT_EQ(ncclSuccess, ncclGetLevel(&level, "NCCL_X_DISABLE", "NCCL_X_LEVEL"));
@@ -370,7 +370,7 @@ TEST_F(PathsMicrotest, GetLevel_ParsesNamesOldNumbersAndTheDisableVariable) {
   }
   int level = PATH_NVL;
   {
-    RcclUnitTesting::ScopedEnv sys("NCCL_X_LEVEL", "SYS");
+    RcclUnitTesting::ScopedEnvVar sys("NCCL_X_LEVEL", "SYS");
     ASSERT_EQ(ncclSuccess, ncclGetLevel(&level, nullptr, "NCCL_X_LEVEL"));
   }
   EXPECT_EQ(PATH_NVL, level);  // already resolved
@@ -381,7 +381,7 @@ TEST_F(PathsMicrotest, GetUserP2pLevel_ReadsTheEnvironmentOnce) {
   ASSERT_EQ(ncclSuccess, ncclGetUserP2pLevel(&level));
   EXPECT_EQ(PATH_SYS, level);  // unset leaves it alone
 
-  RcclUnitTesting::ScopedEnv p2pDisable("NCCL_P2P_DISABLE", "1");
+  RcclUnitTesting::ScopedEnvVar p2pDisable("NCCL_P2P_DISABLE", "1");
   ASSERT_EQ(ncclSuccess, ncclGetUserP2pLevel(&level));
   EXPECT_EQ(PATH_SYS, level);
 
@@ -451,7 +451,7 @@ TEST_F(PathsCommMicrotest, CheckP2p_AnyPathOnAnAmdHostAndPxbOnOthers) {
 }
 
 TEST_F(PathsCommMicrotest, CheckP2p_UserLevelOverridesTheCpuDefault) {
-  RcclUnitTesting::ScopedEnv p2pLevel("NCCL_P2P_LEVEL", "PIX");
+  RcclUnitTesting::ScopedEnvVar p2pLevel("NCCL_P2P_LEVEL", "PIX");
   Use(BuildWithPaths(PcieSystem()));
 
   EXPECT_EQ(1, P2p(0, 1));
@@ -549,7 +549,7 @@ TEST_F(PathsMnnvlMicrotest, CheckP2p_CliquePeerOnAnotherHostIsP2p) {
 }
 
 TEST_F(PathsMnnvlMicrotest, CheckP2p_CliquePeerBypassesTheUserDisable) {
-  RcclUnitTesting::ScopedEnv p2pDisable("NCCL_P2P_DISABLE", "1");
+  RcclUnitTesting::ScopedEnvVar p2pDisable("NCCL_P2P_DISABLE", "1");
   ncclTopoUserP2pLevel = -1;
 
   EXPECT_EQ(1, P2p(0, 1, nullptr, nullptr, nullptr, comm_.get()));
@@ -566,7 +566,7 @@ TEST_F(PathsMnnvlMicrotest, CheckP2p_CrossCliqueUsesTheFabricUnlessTheUserLevelI
   EXPECT_EQ(1, cudaP2p);
   EXPECT_EQ(1, cross);
 
-  RcclUnitTesting::ScopedEnv p2pLevel("NCCL_P2P_LEVEL", "LOC");
+  RcclUnitTesting::ScopedEnvVar p2pLevel("NCCL_P2P_LEVEL", "LOC");
   ncclTopoUserP2pLevel = -1;
   EXPECT_EQ(0, P2p(0, 1, nullptr, nullptr, nullptr, comm_.get()));
 }
@@ -617,7 +617,7 @@ TEST_F(PathsGdrMicrotest, CheckGdr_LevelFromC2cParamSystemAndUser) {
 
   system_->netGdrLevel = -2;
   {
-    RcclUnitTesting::ScopedEnv gdrLevel("NCCL_NET_GDR_LEVEL", "SYS");
+    RcclUnitTesting::ScopedEnvVar gdrLevel("NCCL_NET_GDR_LEVEL", "SYS");
     ncclTopoUserGdrLevel = -1;
     EXPECT_EQ(ncclTopoGdrModeDefault, Gdr(0, 0));
   }

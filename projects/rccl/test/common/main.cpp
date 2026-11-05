@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 #include <fcntl.h>
+#include "EnvIsolationListener.hpp"
 #include "EnvVars.hpp"
 #include "TestBed.hpp"
 int main(int argc, char **argv)
@@ -45,6 +46,7 @@ int main(int argc, char **argv)
     }
 
   ::testing::InitGoogleTest(&argc, argv);
+  RcclUnitTesting::EnvIsolationListener::Install();
   RcclUnitTesting::EnvVars ev;
   ev.ShowConfig();
   int retCode = RUN_ALL_TESTS();

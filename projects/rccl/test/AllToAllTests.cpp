@@ -7,6 +7,7 @@
  // Note: InPlace is not supported for All-To-All
 
 #include "TestBed.hpp"
+#include "ScopedEnvVar.hpp"
 #include "SingleProcMemRegTestUtils.hpp"
 #include "StandaloneUtils.hpp"
 
@@ -105,11 +106,10 @@ namespace RcclUnitTesting
         std::vector<const char *>   const channelList     = {"112"};
         bool                        const enableSweep     = false;
         for (auto channel : channelList) {
-          setenv("NCCL_MIN_NCHANNELS", channel, 1);
+          ScopedEnvVar minChannels("NCCL_MIN_NCHANNELS", channel);
           testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
                                 inPlaceList, managedMemList, useHipGraphList, enableSweep);
           testBed.Finalize();
-          unsetenv("NCCL_MIN_NCHANNELS");
         }
       }
     }

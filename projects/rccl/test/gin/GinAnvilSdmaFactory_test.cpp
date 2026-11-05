@@ -14,7 +14,7 @@
 #include "gin/gin_anvil_sdma_factory.h"
 #include "sdma/anvil.hpp"
 
-#include "../common/ScopedEnv.hpp"
+#include "../common/ScopedEnvVar.hpp"
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -36,7 +36,7 @@ void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int, const char
 // GPU probe. This binary never needs cuMem, so report it unsupported.
 int ncclCuMemRuntimeSupported() { return 0; }
 
-using RcclUnitTesting::ScopedEnv;
+using RcclUnitTesting::ScopedEnvVar;
 
 namespace {
 
@@ -191,7 +191,7 @@ TEST_F(GinAnvilSdmaFactoryTest, SpreadChannels_Env) {
   }
 
   {
-    ScopedEnv spread("NCCL_GIN_ANVIL_SDMA_SPREAD_CHANNELS", "0");
+    ScopedEnvVar spread("NCCL_GIN_ANVIL_SDMA_SPREAD_CHANNELS", "0");
     CreateOut out{};
     ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, 1, &out), 0);
     EXPECT_EQ(gin_anvil_sdma_get_channel_stride(out.handle), 0);
@@ -199,7 +199,7 @@ TEST_F(GinAnvilSdmaFactoryTest, SpreadChannels_Env) {
   }
 
   {
-    ScopedEnv spread("NCCL_GIN_ANVIL_SDMA_SPREAD_CHANNELS", "1");
+    ScopedEnvVar spread("NCCL_GIN_ANVIL_SDMA_SPREAD_CHANNELS", "1");
     CreateOut out{};
     ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, 1, &out), 0);
     EXPECT_EQ(gin_anvil_sdma_get_channel_stride(out.handle), 1);
@@ -366,7 +366,7 @@ TEST_F(GinAnvilSdmaFactoryTest, SpreadChannels_EnvAtoi) {
   }
 
   {
-    ScopedEnv spread("NCCL_GIN_ANVIL_SDMA_SPREAD_CHANNELS", "2");
+    ScopedEnvVar spread("NCCL_GIN_ANVIL_SDMA_SPREAD_CHANNELS", "2");
     CreateOut out{};
     ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, 1, &out), 0);
     EXPECT_EQ(gin_anvil_sdma_get_channel_stride(out.handle), 1);
@@ -374,7 +374,7 @@ TEST_F(GinAnvilSdmaFactoryTest, SpreadChannels_EnvAtoi) {
   }
 
   {
-    ScopedEnv spread("NCCL_GIN_ANVIL_SDMA_SPREAD_CHANNELS", "x");
+    ScopedEnvVar spread("NCCL_GIN_ANVIL_SDMA_SPREAD_CHANNELS", "x");
     CreateOut out{};
     ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, 1, &out), 0);
     EXPECT_EQ(gin_anvil_sdma_get_channel_stride(out.handle), 0);
