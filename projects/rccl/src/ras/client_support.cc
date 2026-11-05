@@ -1158,10 +1158,8 @@ fail:
 }
 #endif
 
-// Checks the RAS_COLL_COMMS records before rasClientRunComms uses them. They carry peer-supplied values that size
-// and index its scratch arrays: auxCommRanks is sized by commNRanks but filled with nRanks entries, peerIdx indexes
-// peerIdxConv/peerNvmlDevs (nPeers entries), nvmlDev is a shift count into a 64-bit mask, and initState/asyncError
-// (4-bit fields) index ncclErrors[ncclNumResults].
+// Rejects peer-supplied RAS_COLL_COMMS records whose counts or indices would overrun rasClientRunComms' arrays.
+// Every record has at least one rank (rasCollCommsInit); with none, the comm status stays 0 and reaches CLZ(0).
 static ncclResult_t rasClientValidateComms(const struct rasCollective* coll) {
   const char* const end = coll->data + coll->nData;
   const struct rasCollComms* commsData = (const struct rasCollComms*)coll->data;
@@ -1171,7 +1169,7 @@ static ncclResult_t rasClientValidateComms(const struct rasCollective* coll) {
   }
   const struct rasCollComms::comm* comm = commsData->comms;
   for (int commIdx = 0; commIdx < commsData->nComms; commIdx++) {
-    if (end - (const char*)comm < (ptrdiff_t)sizeof(*comm) || comm->commNRanks < 0 || comm->nRanks < 0 ||
+    if (end - (const char*)comm < (ptrdiff_t)sizeof(*comm) || comm->commNRanks < 0 || comm->nRanks < 1 ||
         comm->nMissingRanks < 0 || (int64_t)comm->nRanks + comm->nMissingRanks > comm->commNRanks) {
       INFO(NCCL_RAS, "RAS rejecting malformed communicator record %d", commIdx);
       return ncclInternalError;
@@ -1208,7 +1206,6 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
   char* msg = nullptr;
   int msgLen;
   struct rasCollective* coll = client->coll;
-  // Validate the collective before dereferencing it or its data below (TRACE, commsData, etc.).
   if (coll == nullptr || coll->data == nullptr) {
     INFO(NCCL_RAS, "RAS invalid collective operation status; client status %d -- internal error?", client->status);
     return ncclInternalError;
@@ -1244,8 +1241,7 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
     INFO(NCCL_RAS, "RAS invalid collective operation status; client status %d -- internal error?", client->status);
     return ncclInternalError;
   }
-  // Like the check above, return while client->coll is still set, so that rasClientRun frees it. This must
-  // precede any read of commsData, including the TRACE below.
+  // Before any read of commsData, and while client->coll is still set so that rasClientRun frees it.
   NCCLCHECK(rasClientValidateComms(coll));
   TRACE(NCCL_RAS, "RAS: coll nLegTimeouts %d, nPeers %d, nData %d; commsData nComms %d", coll->nLegTimeouts,
         coll->nPeers, coll->nData, commsData->nComms);
@@ -1373,7 +1369,9 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
         // rankIdx > 0
         if (auxRank->value != auxRank[-1].value) {
           auxComm->nPeers++;
-          if (!ncclSocketsSameNode(&rasPeers[auxRank->value].addr, &rasPeers[auxRank[-1].value].addr)) {
+          // -1: a peer this process does not know (rasPeerFind miss); count it as a separate node.
+          if (auxRank->value == -1 || auxRank[-1].value == -1 ||
+              !ncclSocketsSameNode(&rasPeers[auxRank->value].addr, &rasPeers[auxRank[-1].value].addr)) {
             auxComm->nNodes++;
             if (auxComm->ranksPerNodeMin > nRanks) auxComm->ranksPerNodeMin = nRanks;
             if (auxComm->ranksPerNodeMax < nRanks) auxComm->ranksPerNodeMax = nRanks;
