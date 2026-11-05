@@ -14,9 +14,9 @@
 
 namespace amd::smi::test_hooks {
 
-// Root of the DRM sysfs tree smi_amdgpu_get_enabled_blocks() reads. Defaults to "/sys/class/drm/",
-// so production reads "/sys/class/drm/card0/device/ras/features". A test sets it to a FakeSysfsTree
-// root such as "/tmp/amdsmi_fake_sysfs_XXXXXX/" to read
+// Root of the DRM sysfs tree smi_amdgpu_get_enabled_blocks() reads, with no trailing "/". Defaults
+// to "/sys/class/drm", so production reads "/sys/class/drm/card0/device/ras/features". A test sets
+// it to a FakeSysfsTree root such as "/tmp/amdsmi_fake_sysfs_XXXXXX" to read
 // "/tmp/amdsmi_fake_sysfs_XXXXXX/card0/device/ras/features" instead.
 AMDSMI_TEST_HOOK const std::string& SysfsDrmRoot();
 

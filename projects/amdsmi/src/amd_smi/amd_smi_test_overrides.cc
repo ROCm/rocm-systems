@@ -9,7 +9,7 @@ namespace {
 // Not thread-safe for tests: only single-threaded tests mutate these (via
 // amd::smi::testing::ScopedOverride), never while another thread may be using the library.
 // Production only reads them, possibly from several threads.
-std::string g_sysfs_drm_root = "/sys/class/drm/";
+std::string g_sysfs_drm_root = "/sys/class/drm";
 std::string g_kfd_device_path = "/dev/kfd";
 }  // namespace
 

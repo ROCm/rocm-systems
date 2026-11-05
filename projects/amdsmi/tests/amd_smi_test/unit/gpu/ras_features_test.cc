@@ -98,7 +98,7 @@ TEST(GpuUnit, RAS_FEATURES__ValidMaskSucceeds) {
   FakeSysfsTree tree;
   tree.WriteFile("card0/device/ras/features", kValidFeatureMaskLine);
   ScopedOverride<std::string> root_guard(test_hooks::SysfsDrmRoot, test_hooks::SetSysfsDrmRoot,
-                                         tree.root() + "/");
+                                         tree.root());
 
   amdsmi_error_count_t ec = {};
   EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_SUCCESS), AMDSMI_STATUS_SUCCESS);
@@ -124,7 +124,7 @@ TEST(GpuUnit, RAS_FEATURES__ValidMaskOverwritesStaleOutput) {
                                                        "\nce: " + std::to_string(kUmcCorrectable) +
                                                        "\n");
   ScopedOverride<std::string> root_guard(test_hooks::SysfsDrmRoot, test_hooks::SetSysfsDrmRoot,
-                                         tree.root() + "/");
+                                         tree.root());
 
   amdsmi_error_count_t ec = {};
   ec.correctable_count = ec.uncorrectable_count = ec.deferred_count = kSentinelEccCount;
@@ -160,7 +160,7 @@ TEST(GpuUnit, RAS_FEATURES__MultipleBlocksSumCorrectlyIgnoringUnreadableBlock) {
                  "ue: " + std::to_string(kSdmaUncorrectable) +
                      "\nce: " + std::to_string(kSdmaCorrectable) + "\n");
   ScopedOverride<std::string> root_guard(test_hooks::SysfsDrmRoot, test_hooks::SetSysfsDrmRoot,
-                                         tree.root() + "/");
+                                         tree.root());
 
   amdsmi_error_count_t ec = {};
   EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_SUCCESS), AMDSMI_STATUS_SUCCESS);
@@ -181,7 +181,7 @@ TEST(GpuUnit, RAS_FEATURES__ReadsMaskExactlyOncePerCall) {
   FakeSysfsTree tree;
   tree.WriteFile("card0/device/ras/features", kValidFeatureMaskLine);
   ScopedOverride<std::string> root_guard(test_hooks::SysfsDrmRoot, test_hooks::SetSysfsDrmRoot,
-                                         tree.root() + "/");
+                                         tree.root());
 
   // IN_ACCESS is also watched so back-to-back IN_OPEN events can't coalesce
   // in the inotify queue -- see faking-external-interfaces.md's "Limitation:
@@ -204,7 +204,7 @@ TEST(GpuUnit, RAS_FEATURES__ZeroMaskSucceedsWithZeroedOutput) {
   FakeSysfsTree tree;
   tree.WriteFile("card0/device/ras/features", kZeroFeatureMaskLine);
   ScopedOverride<std::string> root_guard(test_hooks::SysfsDrmRoot, test_hooks::SetSysfsDrmRoot,
-                                         tree.root() + "/");
+                                         tree.root());
 
   amdsmi_error_count_t ec = {};
   EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_SUCCESS), AMDSMI_STATUS_SUCCESS);
@@ -219,7 +219,7 @@ TEST(GpuUnit, RAS_FEATURES__BlockFeaturesZeroMaskReportsDisabled) {
   FakeSysfsTree tree;
   tree.WriteFile("card0/device/ras/features", kZeroFeatureMaskLine);
   ScopedOverride<std::string> root_guard(test_hooks::SysfsDrmRoot, test_hooks::SetSysfsDrmRoot,
-                                         tree.root() + "/");
+                                         tree.root());
 
   amdsmi_ras_err_state_t state = AMDSMI_RAS_ERR_STATE_INVALID;
   EXPECT_EQ(CallFeaturesEnabled(tree, "card0", AMDSMI_GPU_BLOCK_UMC, &state, AMDSMI_STATUS_SUCCESS),
@@ -233,7 +233,7 @@ TEST(GpuUnit, RAS_FEATURES__BlockFeaturesValidMaskReportsPerBlockState) {
   FakeSysfsTree tree;
   tree.WriteFile("card0/device/ras/features", kValidFeatureMaskLine);
   ScopedOverride<std::string> root_guard(test_hooks::SysfsDrmRoot, test_hooks::SetSysfsDrmRoot,
-                                         tree.root() + "/");
+                                         tree.root());
 
   amdsmi_ras_err_state_t state = AMDSMI_RAS_ERR_STATE_INVALID;
   EXPECT_EQ(CallFeaturesEnabled(tree, "card0", AMDSMI_GPU_BLOCK_UMC, &state, AMDSMI_STATUS_SUCCESS),
@@ -251,7 +251,7 @@ TEST(GpuUnit, RAS_FEATURES__BlockFeaturesNonHexTokenFails) {
   FakeSysfsTree tree;
   tree.WriteFile("card0/device/ras/features", "feature mask: garbage\n");
   ScopedOverride<std::string> root_guard(test_hooks::SysfsDrmRoot, test_hooks::SetSysfsDrmRoot,
-                                         tree.root() + "/");
+                                         tree.root());
 
   amdsmi_ras_err_state_t state = AMDSMI_RAS_ERR_STATE_INVALID;
   EXPECT_EQ(
@@ -264,7 +264,7 @@ TEST(GpuUnit, RAS_FEATURES__UlongMaxMaskFails) {
   FakeSysfsTree tree;
   tree.WriteFile("card0/device/ras/features", kAllOnesFeatureMaskLine);
   ScopedOverride<std::string> root_guard(test_hooks::SysfsDrmRoot, test_hooks::SetSysfsDrmRoot,
-                                         tree.root() + "/");
+                                         tree.root());
 
   amdsmi_error_count_t ec = {};
   EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_API_FAILED),
@@ -276,7 +276,7 @@ TEST(GpuUnit, RAS_FEATURES__EmptyFileFails) {
   FakeSysfsTree tree;
   tree.WriteFile("card0/device/ras/features", "");
   ScopedOverride<std::string> root_guard(test_hooks::SysfsDrmRoot, test_hooks::SetSysfsDrmRoot,
-                                         tree.root() + "/");
+                                         tree.root());
 
   amdsmi_error_count_t ec = {};
   EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_API_FAILED),
@@ -288,7 +288,7 @@ TEST(GpuUnit, RAS_FEATURES__MissingValueTokenFails) {
   FakeSysfsTree tree;
   tree.WriteFile("card0/device/ras/features", "feature mask:\n");
   ScopedOverride<std::string> root_guard(test_hooks::SysfsDrmRoot, test_hooks::SetSysfsDrmRoot,
-                                         tree.root() + "/");
+                                         tree.root());
 
   amdsmi_error_count_t ec = {};
   EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_API_FAILED),
@@ -300,7 +300,7 @@ TEST(GpuUnit, RAS_FEATURES__NonHexTokenFails) {
   FakeSysfsTree tree;
   tree.WriteFile("card0/device/ras/features", "feature mask: garbage\n");
   ScopedOverride<std::string> root_guard(test_hooks::SysfsDrmRoot, test_hooks::SetSysfsDrmRoot,
-                                         tree.root() + "/");
+                                         tree.root());
 
   amdsmi_error_count_t ec = {};
   EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_API_FAILED),
@@ -313,7 +313,7 @@ TEST(GpuUnit, RAS_FEATURES__MissingFileNeverWrittenIsNotSupported) {
   ScopedAmdsmiInit smi_init;
   FakeSysfsTree tree;  // card0/device/ras/features intentionally never written
   ScopedOverride<std::string> root_guard(test_hooks::SysfsDrmRoot, test_hooks::SetSysfsDrmRoot,
-                                         tree.root() + "/");
+                                         tree.root());
 
   amdsmi_error_count_t ec = {};
   EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_NOT_SUPPORTED),
@@ -328,7 +328,7 @@ TEST(GpuUnit, RAS_FEATURES__FileRemovedAfterCreationIsNotSupported) {
   tree.WriteFile("card0/device/ras/features", kValidFeatureMaskLine);
   tree.RemoveFile("card0/device/ras/features");
   ScopedOverride<std::string> root_guard(test_hooks::SysfsDrmRoot, test_hooks::SetSysfsDrmRoot,
-                                         tree.root() + "/");
+                                         tree.root());
 
   amdsmi_error_count_t ec = {};
   EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_NOT_SUPPORTED),
@@ -367,7 +367,7 @@ TEST(GpuUnit, RAS_FEATURES__PermissionDeniedIsNotSupported) {
   tree.SetPermissions("card0/device/ras/features", kNoPermissions);
 
   ScopedOverride<std::string> root_guard(test_hooks::SysfsDrmRoot, test_hooks::SetSysfsDrmRoot,
-                                         tree.root() + "/");
+                                         tree.root());
 
   if (geteuid() != 0) {
     // Non-root: the 0000 mode above already forces a real EACCES, no fork needed.
