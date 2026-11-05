@@ -394,6 +394,7 @@ if(BUILD_TESTS)
     # build root, not just from tests/unit.
     enable_testing()
     add_subdirectory("tests/unit")
+    add_subdirectory("tests/fake_amdsmi")
 endif()
 
 if(BUILD_EXAMPLES)
