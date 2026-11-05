@@ -23,7 +23,10 @@ from utils.utils_common import (
     METRIC_ID_RE,
     convert_metric_id_to_panel_info,
 )
-from utils.utils_counter_defs import extract_counters_and_variables
+from utils.utils_counter_defs import (
+    denom_colocated_counters,
+    extract_counters_and_variables,
+)
 from vendored import yaml
 
 from .counter_file import CounterFile, flat_counters_in_perfmon_file
@@ -138,6 +141,7 @@ def iter_metric_groups(
             gpu_series,
             include_supported_denom=False,
         )
+        formula_hw.update(denom_colocated_counters(metric_text))
         panel_key = str(panel_id) if panel_id is not None else ""
         counters = _profiled_counters(set(formula_hw), profile_counters)
         if not counters:
