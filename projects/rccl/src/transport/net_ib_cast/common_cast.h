@@ -261,6 +261,10 @@ int64_t ncclParamIbCastOooRq();
 #define NCCL_IB_LLSTR(ll) \
   (((ll) == IBV_LINK_LAYER_INFINIBAND) ? "IB" : (((ll) == IBV_LINK_LAYER_ETHERNET) ? "RoCE" : "UNSPECIFIED"))
 
+// The alignment for IB writes that is required to make LL and LL128 protocols work
+#define IB_WRITE_CHUNK_ALIGNMENT 128
+#define IB_CAST_MAX_STACK_WRS 16
+
 // Per-Dev connection metadata
 struct ncclIbDevInfo {
   uint32_t lid;
@@ -896,6 +900,8 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
 ncclResult_t IbCastDevices(int* ndev);
 ncclResult_t IbCastGetProperties(int dev, ncclNetProperties_t* props);
 ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props);
+
+extern uint32_t IbCastMaxPostSendBytes;
 ncclResult_t IbCastListen(void* ctx, int dev, void* opaqueHandle, void** listenComm);
 ncclResult_t IbCastConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
                            ncclNetDeviceHandle_t** /*sendDevComm*/);

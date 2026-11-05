@@ -11,6 +11,9 @@
 #include "net_telemetry.h"
 #include "qp_sharing.h"
 #include "net_ib_cast_inspect.h"
+#include "archinfo.h"
+
+#include <hip/hip_runtime.h>
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
@@ -18,6 +21,7 @@ extern int64_t ncclParamIbCastGdrFlushDisable();
 // AMD AINIC
 RCCL_PARAM(IbCastCtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
 RCCL_PARAM(IbCastP2pDisableCts, "IB_P2P_DISABLE_CTS", 1);
+RCCL_PARAM(IbCastMaxMsgSize, "IB_MAX_MSG_SIZE", -1);
 
 bool IbCastAinicRoce = 0;
 bool IbCastMultiplaneEnable = false;
@@ -382,6 +386,45 @@ ncclResult_t IbCastFinalizeDevices(void) {
 }
 
 extern int64_t IbCastArThreshold;
+
+static bool IbCastGpuIsGfx1250() {
+  int dev = 0;
+  hipDeviceProp_t prop{};
+  if (hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&prop, dev) != hipSuccess) {
+    (void)hipGetLastError();
+    return false;
+  }
+  return IsArchMatch(prop.gcnArchName, "gfx1250");
+}
+
+// Resolves RCCL_IB_MAX_MSG_SIZE, else 256 MiB on gfx1250, else the ports' max_msg_sz.
+// One value for every device: the smallest reported port limit wins. A port reporting
+// 0 has no limit and does not pull the cap down.
+static void IbCastInitMaxPostSendBytes() {
+  constexpr uint32_t kGfx1250Cap = 256u * 1024u * 1024u;
+  constexpr uint32_t minCap = 1024u * 1024u;
+  const int64_t requested = rcclParamIbCastMaxMsgSize();
+  IbCastMaxPostSendBytes = UINT32_MAX;
+
+  if (requested > 0) {
+    INFO(NCCL_ENV, "NET/IB: RCCL_IB_MAX_MSG_SIZE set by environment to %lld", (long long)requested);
+    IbCastMaxPostSendBytes = (uint32_t)std::min(requested, (int64_t)UINT32_MAX);
+  }
+  if (IbCastGpuIsGfx1250()) {
+    IbCastMaxPostSendBytes = std::min(IbCastMaxPostSendBytes, kGfx1250Cap);
+  }
+  for (int i = 0; i < IbCastNDevs; i++) {
+      uint32_t portMax = IbCastDevs[i].portAttr.max_msg_sz;
+      if (portMax != 0 && portMax < IbCastMaxPostSendBytes) IbCastMaxPostSendBytes = portMax;
+  }
+  // The floor covers every source, so no data post splits below 1 MiB.
+  IbCastMaxPostSendBytes = std::max(IbCastMaxPostSendBytes, minCap);
+  // Round down to the IB_WRITE_CHUNK_ALIGNMENT
+  IbCastMaxPostSendBytes -= IbCastMaxPostSendBytes % IB_WRITE_CHUNK_ALIGNMENT;
+  INFO(NCCL_ENV, "NET/IB: IB-CAST data posts default to %u bytes",
+    IbCastMaxPostSendBytes);
+}
+
 ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
   // Never NCCLCHECKed; telemetry reports its own failures. See net_telemetry.h.
   if (rcclTelemetryInit() != 0) {
@@ -735,6 +778,7 @@ exit:
     }
     IbCastReportMatchingScheme();
   }
+  if (ret == ncclSuccess) IbCastInitMaxPostSendBytes();
   return ret;
 fail:
   if (devices && (ncclSuccess != wrap_ibv_free_device_list(devices))) {

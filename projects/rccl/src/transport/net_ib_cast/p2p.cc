@@ -90,14 +90,97 @@ static ncclResult_t IbCastPrintWr(struct ibv_send_wr* wr, char* wrStr) {
 }
 #endif // ENABLE_TRACE
 
-// The alignment for IB writes that is required to make LL and LL128 protocols work
-#define IB_WRITE_CHUNK_ALIGNMENT 128
+
 
 static inline bool IbCastSkipRecvCompletionCheck(const struct ncclIbNetCommBase* base, void* const* req,
                                                  const int nreqs) {
   return ((nreqs == 1) && \
           (*req == (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION) &&\
           base->optRecvCompletion);
+}
+
+static inline int IbCastGetNumWqeSplits(const struct ncclIbSendComm* comm, int nreqs) {
+  int nSplit = 0;
+  for (int r = 0; r < nreqs; r++) {
+    if (comm->wrs[r].num_sge > 0 && comm->sges[r].length > IbCastMaxPostSendBytes) {
+      const uint32_t len = comm->sges[r].length;
+      nSplit += (size_t)(len / IbCastMaxPostSendBytes) + (len % IbCastMaxPostSendBytes != 0);
+    }
+  }
+  return nSplit;
+}
+
+
+static inline ncclResult_t IbCastPostDataWithinCap(struct ncclIbSendComm* comm, struct ibv_qp* qp, int nreqs,
+                                            struct ibv_send_wr** badWr) {
+  const size_t nSplit = IbCastGetNumWqeSplits(comm, nreqs);
+  if (nSplit == 0) return wrap_ibv_post_send(qp, comm->wrs, badWr);
+
+  struct ibv_send_wr stackWrs[IB_CAST_MAX_STACK_WRS];
+  struct ibv_sge stackSges[IB_CAST_MAX_STACK_WRS];
+  struct ibv_send_wr* extraWrs = nullptr;
+  struct ibv_sge* extraSges = nullptr;
+  ncclResult_t ret = ncclSuccess;
+
+  struct ibv_send_wr* prev = nullptr;
+  struct ibv_send_wr* sendHead = nullptr;
+  size_t used = 0;
+  if (nSplit > IB_CAST_MAX_STACK_WRS) {
+    NCCLCHECKGOTO(ncclCalloc(&extraWrs, nSplit), ret, out);
+    NCCLCHECKGOTO(ncclCalloc(&extraSges, nSplit), ret, out);
+  } else {
+    extraWrs = stackWrs;
+    extraSges = stackSges;
+  }
+
+
+  for (int r = 0; r < nreqs; r++) {
+    if (!(comm->wrs[r].num_sge > 0 && comm->sges[r].length > IbCastMaxPostSendBytes)) {
+      if (prev) prev->next = &comm->wrs[r];
+      else sendHead = &comm->wrs[r];
+      prev = &comm->wrs[r];
+      continue;
+    }
+
+    uint32_t len = comm->sges[r].length;
+    uintptr_t local = comm->sges[r].addr;
+    uint64_t remote = comm->wrs[r].wr.rdma.remote_addr;
+    int lkey = comm->sges[r].lkey;
+    while (len > 0) {
+      const uint32_t chunk = std::min(IbCastMaxPostSendBytes, len);
+
+      extraWrs[used] = comm->wrs[r];
+      extraSges[used].addr = local;
+      extraSges[used].length = chunk;
+      extraSges[used].lkey = lkey;
+      extraWrs[used].sg_list = &extraSges[used];
+
+      extraWrs[used].wr.rdma.remote_addr = remote;
+      extraWrs[used].next = nullptr;
+
+      if (prev) prev->next = &extraWrs[used];
+      else sendHead = &extraWrs[used];
+
+      prev = &extraWrs[used];
+      local += chunk;
+      remote += chunk;
+      used++;
+
+      len -= chunk;
+      // reset flags for non-last chunk
+      if (len != 0) extraWrs[used].send_flags = 0;
+    }
+  }
+
+  ret = wrap_ibv_post_send(qp, sendHead, badWr);
+
+  //Restore original WRs list.
+  for (int r = 1; r < nreqs; r++) comm->wrs[r-1].next = &comm->wrs[r];
+  comm->wrs[nreqs-1].next = NULL;
+out:
+  free(extraWrs);
+  free(extraSges);
+  return ret;
 }
 
 ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, int startQpIndex, bool wrrSched,
@@ -341,7 +424,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       for (int r=0; r<nreqs; r++) reqs[r]->tel_post_ts = _tel_ns;
     }
 
-    NCCLCHECK(wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr));
+    NCCLCHECK(IbCastPostDataWithinCap(comm, qp->qp, nreqs, &bad_wr));
 
     rcclTelemetryQpSendPosted(qp->telQpStats, useWriteOp ? 0 : 1);
 

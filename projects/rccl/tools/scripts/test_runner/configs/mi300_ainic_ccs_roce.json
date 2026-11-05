@@ -852,6 +852,22 @@
         { "name": "C1_alltoall_counters_ROCMIB", "binary": "alltoall_perf", "command_args": "-b 1M -e 128M -f 2 -g 1", "env_variables": { "NCCL_NET": "ROCM-IB" }, "description": "IONIC counters (tx_rdma_ucast_bytes) non-zero and BW > 10 GB/s on the ROCM-IB backend. Capped at 128M to keep the counter run fast; large-size coverage lives in alltoall_fullrange_guard." },
         { "name": "C1_allreduce_counters_ROCMIB", "binary": "all_reduce_perf", "command_args": "-b 1G -e 8G -f 2 -g 1", "env_variables": { "NCCL_NET": "ROCM-IB" }, "description": "IONIC counter validation on allreduce over the ROCM-IB backend." }
       ]
+    },
+
+    "gin_proxy_max_msg": {
+      "extends": "gin_proxy",
+      "description": "Same GIN proxy tests with RCCL_IB_MAX_MSG_SIZE at 256 MiB.",
+      "env_variables": {
+        "RCCL_IB_MAX_MSG_SIZE": "268435456"
+      }
+    },
+
+    "cast_alltoall_full_max_msg": {
+      "extends": "cast_alltoall_full",
+      "description": "Same full-range CAST alltoall with RCCL_IB_MAX_MSG_SIZE at 256 MiB, so messages above the cap are posted as several work requests.",
+      "env_variables": {
+        "RCCL_IB_MAX_MSG_SIZE": "268435456"
+      }
     }
   },
 
@@ -892,6 +908,9 @@
 
     { "config": "ionic_counters",        "enabled": true },
 
-    { "config": "cast_multiplane_perf",  "enabled": true }
+    { "config": "cast_multiplane_perf",  "enabled": true },
+
+    { "config": "gin_proxy_max_msg",          "enabled": true },
+    { "config": "cast_alltoall_full_max_msg", "enabled": true }
   ]
 }
