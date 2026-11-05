@@ -35,6 +35,7 @@ RJ_DIAGNOSTIC_POP
 #include <optional>
 #include <string>
 #include <sys/mman.h>
+#include <system_error>
 #include <thread>
 
 namespace rocjitsu {
@@ -1190,10 +1191,13 @@ uint64_t CommandProcessor::register_queue(ComputeQueueConfig config, bool fanout
       publish_async_scratch_capability(queue) != VmAccessOutcome::Complete) {
     return 0;
   }
-  // Publish only through internal storage, peer registration and thread startup.
+  // Replicas receive dispatch shards but must never read the ring or poll it.
+  const bool start_poll =
+      queue.doorbell_mode == QueueDoorbellMode::HostPolled && !queue.fanout_replica;
+  // Publish only through internal storage and peer registration.
   // Foreign VM access above can still fail through its own boundary contract;
   // standard-library failures after publication starts must be fatal.
-  return [&]() noexcept -> uint64_t {
+  const uint64_t registration_id = [&]() noexcept -> uint64_t {
     class PeerRegistrationRollback {
     public:
       PeerRegistrationRollback(const std::vector<CommandProcessor *> &peers,
@@ -1248,11 +1252,6 @@ uint64_t CommandProcessor::register_queue(ComputeQueueConfig config, bool fanout
                         queue.ring_size, queue.read_ptr_va, queue.write_ptr_va,
                         queue.doorbell_offset, reinterpret_cast<uintptr_t>(queue.doorbell_base));
     });
-    // A replica exists only to receive dispatch shards from the XCD that owns the
-    // queue. It must never read the ring or poll the doorbell, or the same packets
-    // would be dispatched once per XCD.
-    const bool start_poll =
-        queue.doorbell_mode == QueueDoorbellMode::HostPolled && !queue.fanout_replica;
     // Replicate onto the peer XCDs without holding this CP's lock:
     // accept_fanout_shard() and the peers' register_queue() take their own locks.
     // A shard can arrive only after this function returns, so the owner may be
@@ -1314,6 +1313,11 @@ uint64_t CommandProcessor::register_queue(ComputeQueueConfig config, bool fanout
       owner_rollback.commit();
     }
     peer_rollback.commit();
+    return registration_id;
+  }();
+  if (registration_id == 0)
+    return 0;
+  try {
     // Start (or restart) the doorbell poll thread for KFD (host-accessible) queues
     // AFTER releasing hw_queue_mutex_. ensure_doorbell_monitor() serializes on its
     // own doorbell_thread_mutex_. Keeping that lock order consistent with the stop
@@ -1322,8 +1326,15 @@ uint64_t CommandProcessor::register_queue(ComputeQueueConfig config, bool fanout
     // schedule_event_now() and need no monitor.
     if (start_poll)
       ensure_doorbell_monitor();
-    return registration_id;
-  }();
+  } catch (const std::system_error &) {
+    // The owner cascades teardown to its replicas before releasing its VM lease.
+    (void)unregister_queue_registration(registration_id);
+    throw;
+  } catch (...) {
+    // Allocation failures remain fatal even though thread-creation errors recover.
+    std::terminate();
+  }
+  return registration_id;
 }
 
 void CommandProcessor::notify_queue_doorbell(uint64_t registration_id, uint64_t value) {
@@ -1743,6 +1754,8 @@ void CommandProcessor::ensure_doorbell_monitor() {
   // no-oping forever. We still hold doorbell_thread_mutex_, so teardown cannot
   // observe the new handle until both it and the running flag are published.
   assert(!doorbell_thread_.joinable());
+  if (std::exchange(fail_next_doorbell_monitor_start_for_testing_, false))
+    throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));
   doorbell_thread_ = std::jthread([this](std::stop_token stop) { doorbell_poll_loop(stop); });
   doorbell_running_ = true;
 }

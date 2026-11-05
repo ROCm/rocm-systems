@@ -113,7 +113,7 @@ SdmaQueueBindingFactory::create_binding(const QueueRegistrationRequest &request)
       std::move(callbacks), std::move(progress_observer));
   if (!handle)
     return {};
-  // Once attached, allocation failure must not strand an unpublished binding.
+  // Once attached, allocation failure must not strand a live scheduler slot.
   return [&]() noexcept -> QueueBindingCreateResult {
     return {.status = QueueBindingCreateStatus::Bound,
             .binding = std::make_unique<SdmaQueueBinding>(*scheduler_, handle)};
