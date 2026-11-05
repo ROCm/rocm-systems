@@ -66,7 +66,6 @@ from format_yaml import normalize_equation
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base, iter_analysis_config_metrics
-from roofline.run_benchmark import bench_class
 from utils import metric_library
 from utils.metric_library import (
     VARIABLES_FILENAME,
@@ -144,8 +143,8 @@ SAME_VALUE_IDS = {}
 # The same-value check evaluates each formula on one dispatch per normalization
 # ($denom), with counters drawn from this seed. Machine values with no static source are
 # drawn too: the ones each device reports (CU, SE and SIMD counts, waves per CU, clocks,
-# memory channels, GL1 caches), the XCD count of an arch whose devices differ in it, and
-# gfx908's wave size (it has no roofline benchmark).
+# memory channels, wave size, GL1 caches) and the XCD count of an arch whose devices
+# differ in it.
 # Counters within one decade keep built-in variables such as $numActiveCUs positive.
 SAME_VALUE_SEED = 0
 COUNTER_VALUE_RANGE = (1e5, 1e6)
@@ -686,9 +685,9 @@ def _machine_values(
 def _static_machine_specs(gpu_arch: str) -> Dict[str, Any]:
     """Return the machine values every device of gpu_arch shares.
 
-    The SoC class sets the LDS banks, pipes and L2 banks per XCD; the roofline benchmark
-    sets the wave size. The XCD count is that of the SPX partition where every device
-    has the same one; where devices differ, it is drawn.
+    The SoC class sets the LDS banks, pipes and L2 banks per XCD. The XCD count is that
+    of the SPX partition where every device has the same one; where devices differ, it
+    is drawn.
     """
     machine_specs = SimpleNamespace(rocminfo_lines=None)
     soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{gpu_arch}")
@@ -696,9 +695,6 @@ def _static_machine_specs(gpu_arch: str) -> Dict[str, Any]:
     xcd_counts = _spx_xcd_counts(gpu_arch)
     if len(xcd_counts) == 1:
         (machine_specs.num_xcd,) = xcd_counts
-    if gpu_arch in mi_gpu_specs.get_roofline_archs():
-        benchmark = bench_class(gpu_arch)(0, {}, gpu_arch)
-        machine_specs.wave_size = benchmark.WAVEFRONT_SIZE
     return vars(machine_specs)
 
 
