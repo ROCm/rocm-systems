@@ -104,18 +104,19 @@ fi
 
 # Attachment with ATT enabled.
 # Trace the first three simple_kernel launches on target CU/WGP 0 across every
-# shader engine. Leave GPU selection unrestricted so ROCr device visibility
-# cannot select a different physical GPU for the application and profiler.
+# shader engine. Allow enough time for slow initialization or CI contention;
+# the iteration range still limits ATT output to three dispatches.
 # Small buffer (16MB) to keep the test fast.
 # --attach-sync-output ensures ATT output is fully written before rocprofv3 exits.
 # Note: ATT mode does not produce standard kernel_dispatch/memory_copy/hsa_api
 # buffer records; it produces raw instruction trace data (*.att files) decoded
 # into ui_output_agent_* directories.
-echo "Attaching profiler with ATT to PID $APP_PID for 500 milliseconds..."
+ATTACH_DURATION_MSEC=2000
+echo "Attaching profiler with ATT to PID $APP_PID for ${ATTACH_DURATION_MSEC} milliseconds..."
 
 LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} \
     --attach $APP_PID \
-    --attach-duration-msec 500 \
+    --attach-duration-msec ${ATTACH_DURATION_MSEC} \
     --att \
     ${ATT_LIB_ARG} \
     --kernel-include-regex simple_kernel \

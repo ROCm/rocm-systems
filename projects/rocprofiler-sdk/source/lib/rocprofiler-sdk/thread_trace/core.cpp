@@ -184,9 +184,9 @@ ThreadTracerAgent::initialize_resources()
         {
             static auto once = std::once_flag{};
             std::call_once(once, []() {
-                // This is a supported backend choice, so it must remain non-fatal in CI.
-                ROCP_WARNING << "Direct KFD thread trace is unavailable or unsupported for this "
-                                "GPU; using the ROCr/HSA thread-trace backend";
+                ROCP_CI_LOG(WARNING)
+                    << "Direct KFD thread trace is unavailable or unsupported for this "
+                       "GPU; using the ROCr/HSA thread-trace backend";
             });
         }
     }
