@@ -1522,7 +1522,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaEmptyInstructionsNeedNoGpuMemory) {
                                                c.gather ? 0x18140c00u : 0x7c7c0c00u};
         auto inst = decode_gfx1250(words, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
         ASSERT_NE(inst, nullptr);
-        EXPECT_EQ(cu->execute_instruction(inst.get(), *wf).succeeded(), c.succeeds);
+        // Fatal: a failed instruction attaches no state for tensor_dma_outcome().
+        ASSERT_EQ(cu->execute_instruction(inst.get(), *wf).succeeded(), c.succeeds);
         if (c.succeeds) {
           EXPECT_EQ(observer.issues.size(), 1u);
           if (observer.issues.size() == 1) {
