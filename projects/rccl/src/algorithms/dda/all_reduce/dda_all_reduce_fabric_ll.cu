@@ -18,8 +18,8 @@
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 
 #include "algorithms/dda/all_reduce/all_reduce_dda_ll.h"
-#include "algorithms/dda/all_reduce/all_reduce_dda_ll_twoshot.h"
 #include "algorithms/dda/all_reduce/all_reduce_dda_ll_spread.h"
+#include "algorithms/dda/all_reduce/all_reduce_dda_ll_twoshot.h"
 #include "algorithms/dda/all_reduce/all_reduce_dda_ll128.h"
 #include "algorithms/dda/all_reduce/all_reduce_dda_ll128_twoshot.h"
 #include "checks.h"
@@ -81,22 +81,23 @@ constexpr size_t kDdaLLSpreadMinSavedWireBytes = 4 * 1024 * 1024;
 static bool ddaLLArSpreadWins(size_t bytes, int nRanks) {
   const size_t n = (size_t)nRanks;
   const size_t nPk = bytes >> 3;
-  const size_t blockWire = std::min<size_t>(nPk, 512) * sizeof(dda::common::LLPacket16) * (n - 1);
+  const size_t blockPkts = std::min<size_t>(nPk, dda::common::kDdaLLSpreadThreads);
+  const size_t blockWire = blockPkts * sizeof(dda::common::LLPacket16) * (n - 1);
   const size_t savedWire = 2 * (n - 1) * (n - 2) * bytes / n;
   return blockWire >= kDdaLLSpreadMinBlockWireBytes || savedWire >= kDdaLLSpreadMinSavedWireBytes;
 }
 
-// LL one-shot messages that run as the spread two-shot on its grid: the two-shot slot holds a shard, and the spread wins.
+// LL one-shot messages that run as the spread two-shot on its grid: a shard fits the two-shot slot and the spread wins.
 static bool ddaLLArSpreadSelected(ncclComm* comm, size_t bytes) {
-  const size_t nRanks = (size_t)comm->nRanks;
+  const int nRanks = comm->nRanks;
   if (nRanks < 2) {
     return false;
   }
-  const size_t shardPkts = ((bytes >> 3) + nRanks - 1) / nRanks;
-  if (shardPkts > ddaLLArTwoShotSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
+  if (dda::common::ddaLLSpreadShardPkts(bytes >> 3, nRanks) >
+      ddaLLArTwoShotSlotPkts(ddaBankSize(comm->ddaScratchBytes), nRanks)) {
     return false;
   }
-  return ddaLLArSpreadWins(bytes, comm->nRanks);
+  return ddaLLArSpreadWins(bytes, nRanks);
 }
 
 template <typename T>
@@ -106,7 +107,8 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   const size_t bytes = count * sizeof(T);
   const size_t nPk = bytes >> 3; // 8 payload bytes per packet (for logging)
 
-  const unsigned threads = 512;
+  constexpr unsigned threads = 512;
+  static_assert(dda::common::kDdaLLSpreadThreads == threads, "the spread two-shot runs on the one-shot's grid");
   int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
@@ -575,6 +577,7 @@ bool ddaLL128ArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
 // Tested cheapest-first, so a message that qualifies for several takes the
 // earliest; a run hands sizes over to a later tier by lowering the earlier
 // tier's threshold and raising the later one's.
+// Inside the LL one-shot tier, ddaLLArSpreadSelected moves large-wire messages to the spread two-shot on the same grid.
 bool ncclAllReduceDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                       ncclDataType_t datatype, ncclRedOp_t op) {
   return ddaLLArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op) ||

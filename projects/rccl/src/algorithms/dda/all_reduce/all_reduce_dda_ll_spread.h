@@ -48,9 +48,6 @@ constexpr int kDdaLLSpreadMaxPassPkts = kDdaLLSpreadLdsPkts / 2;
 // Ranks the LDS peer table holds; the launcher asserts it covers every comm the fabric path admits.
 constexpr int kDdaLLSpreadMaxRanks = 144;
 
-// Ranks whose LDS copies one fold step reads before adding them.
-constexpr int kDdaLLSpreadFoldBatch = 8;
-
 // Units (one LL line each) a thread keeps in flight per sweep.
 constexpr int kDdaLLSpreadBatch = 4;
 
@@ -59,15 +56,22 @@ __host__ __device__ constexpr size_t ddaLLSpreadPassPkts(int nRanks) {
   return (size_t)kDdaLLSpreadLdsPkts / (size_t)nRanks;
 }
 
-// Workgroup barrier for LDS only; __syncthreads() would also wait for every remote store to be acknowledged.
+// Packets of each rank's shard of nPk packets; kernel, selection rule and tests all size the shards with this.
+__host__ __device__ constexpr size_t ddaLLSpreadShardPkts(size_t nPk, int nRanks) {
+  return (nPk + (size_t)nRanks - 1) / (size_t)nRanks;
+}
+
+// Packets rank owns in shards of shardPkts: the last shards are shorter, or empty, when nRanks does not divide nPk.
+__host__ __device__ constexpr size_t ddaLLSpreadShardLen(size_t nPk, size_t shardPkts, int rank) {
+  const size_t first = (size_t)rank * shardPkts;
+  return first < nPk ? (nPk - first < shardPkts ? nPk - first : shardPkts) : (size_t)0;
+}
+
+// Workgroup barrier for LDS only: on gfx1250 __syncthreads() would also wait for every remote store in flight.
 __device__ __forceinline__ void ddaLLSpreadLdsBarrier() {
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
-  asm volatile("s_wait_dscnt 0x0" ::: "memory");
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
   __builtin_amdgcn_s_barrier();
-  asm volatile("" ::: "memory");
-#else
-  __syncthreads();
-#endif
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
 }
 
 // Polls the lines of up to kDdaLLSpreadBatch units this thread owns (mask bit i = unit i valid); false if aborted.
@@ -80,7 +84,7 @@ __device__ __forceinline__ bool ddaLLSpreadPoll(const uint32_t* const (&line)[kD
 // LL spread two-shot all-reduce kernel; launched on the one-shot tier's grid (kDdaLLSpreadThreads per block).
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
-__launch_bounds__(512)
+__launch_bounds__(kDdaLLSpreadThreads)
 #endif
   __global__ void ddaAllReduceSpreadTwoShotLL(T* const* __restrict__ peerScratch,    // ddaPeerPtrsDev: scratch bases
                                               T* __restrict__ recvbuff,           // local user output
@@ -99,12 +103,8 @@ __launch_bounds__(512)
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t nPk = (count * sizeof(T)) >> 3;
-  // Shards of nPkRank packets, the last ones shorter (or empty) when nRanks does not divide the message.
-  const size_t nPkRank = (nPk + (size_t)nRanks - 1) / (size_t)nRanks;
-  auto shardLen = [&](int rank) {
-    const size_t first = (size_t)rank * nPkRank;
-    return first < nPk ? (nPk - first < nPkRank ? nPk - first : nPkRank) : (size_t)0;
-  };
+  const size_t nPkRank = ddaLLSpreadShardPkts(nPk, nRanks);
+  auto shardLen = [&](int rank) { return ddaLLSpreadShardLen(nPk, nPkRank, rank); };
   const size_t slot = ddaLLArTwoShotSlotPkts(bankSize, nRanks);
 
   // This block's slice of every shard: the same packet range on every rank, so its LL epoch stays in lockstep.
@@ -122,11 +122,14 @@ __launch_bounds__(512)
   const size_t tid = threadIdx.x;
   const size_t nthr = blockDim.x;
 
+  // Peer of unit u in runs of run32 packets per peer, counted from selfRank + 1.
+  auto unitPeer = [&](size_t u, uint32_t run32) { return (selfRank + 1 + (int)((uint32_t)u / run32)) % nRanks; };
+
   // Unit u of phase 1 (peer offset r, packet k): peer and packet, and its payload loaded from sendbuff.
   auto sendUnit = [&](size_t u, int& peer, size_t& pk, uint32_t& d0, uint32_t& d1) {
     peer = -1;
     if (u < peerUnits) {
-      peer = (selfRank + 1 + (int)((uint32_t)u / len32)) % nRanks;
+      peer = unitPeer(u, len32);
       pk = p0 + (uint32_t)u % len32;
       if (pk >= shardLen(peer)) {
         peer = -1;
@@ -145,12 +148,12 @@ __launch_bounds__(512)
   if (tid == 0) {
     ldsAborted = 0;
   }
-  uint32_t d0[kDdaLLSpreadBatch], d1[kDdaLLSpreadBatch];
-  int peer[kDdaLLSpreadBatch];
-  size_t pk[kDdaLLSpreadBatch];
+  uint32_t sendD0[kDdaLLSpreadBatch], sendD1[kDdaLLSpreadBatch];
+  int sendPeer[kDdaLLSpreadBatch];
+  size_t sendPk[kDdaLLSpreadBatch];
 #pragma unroll
   for (int i = 0; i < kDdaLLSpreadBatch; ++i) {
-    sendUnit(tid + (size_t)i * nthr, peer[i], pk[i], d0[i], d1[i]);
+    sendUnit(tid + (size_t)i * nthr, sendPeer[i], sendPk[i], sendD0[i], sendD1[i]);
   }
   // My shard's part of this block's range: the reduce covers only packets every rank sends.
   const size_t mine = shardLen(selfRank);
@@ -172,14 +175,14 @@ __launch_bounds__(512)
     if (base != tid) {
 #pragma unroll
       for (int i = 0; i < kDdaLLSpreadBatch; ++i) {
-        sendUnit(base + (size_t)i * nthr, peer[i], pk[i], d0[i], d1[i]);
+        sendUnit(base + (size_t)i * nthr, sendPeer[i], sendPk[i], sendD0[i], sendD1[i]);
       }
     }
 #pragma unroll
     for (int i = 0; i < kDdaLLSpreadBatch; ++i) {
-      if (peer[i] >= 0) {
-        LLPacket16* dst = ldsPeer[peer[i]] + bankOffsetPkts + (size_t)selfRank * slot + pk[i];
-        ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(dst), d0[i], flag, d1[i], flag);
+      if (sendPeer[i] >= 0) {
+        LLPacket16* dst = ldsPeer[sendPeer[i]] + bankOffsetPkts + (size_t)selfRank * slot + sendPk[i];
+        ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(dst), sendD0[i], flag, sendD1[i], flag);
       }
     }
   }
@@ -192,19 +195,19 @@ __launch_bounds__(512)
     const uint32_t plen32 = (uint32_t)plen;
     for (size_t base = tid; base < pollUnits; base += nthr * kDdaLLSpreadBatch) {
       const uint32_t* line[kDdaLLSpreadBatch];
-      int src[kDdaLLSpreadBatch];
+      int peer[kDdaLLSpreadBatch];
       size_t k[kDdaLLSpreadBatch];
       uint32_t mask = 0;
 #pragma unroll
       for (int i = 0; i < kDdaLLSpreadBatch; ++i) {
         const size_t u = base + (size_t)i * nthr;
-        src[i] = 0;
+        peer[i] = 0;
         k[i] = 0;
         line[i] = nullptr;
         if (u < pollUnits) {
-          src[i] = (selfRank + 1 + (int)((uint32_t)u / plen32)) % nRanks;
+          peer[i] = unitPeer(u, plen32);
           k[i] = (uint32_t)u % plen32;
-          line[i] = reinterpret_cast<const uint32_t*>(myBase + bankOffsetPkts + (size_t)src[i] * slot + q0 + k[i]);
+          line[i] = reinterpret_cast<const uint32_t*>(myBase + bankOffsetPkts + (size_t)peer[i] * slot + q0 + k[i]);
           mask |= 1u << i;
         }
       }
@@ -215,7 +218,7 @@ __launch_bounds__(512)
 #pragma unroll
       for (int i = 0; i < kDdaLLSpreadBatch; ++i) {
         if (((mask >> i) & 1u) != 0) {
-          ldsIn[(size_t)src[i] * plen + k[i]] = make_uint2(d0[i], d1[i]);
+          ldsIn[(size_t)peer[i] * plen + k[i]] = make_uint2(d0[i], d1[i]);
         }
       }
     }
@@ -237,14 +240,14 @@ __launch_bounds__(512)
       uint32_t acc0 = ldsIn[k].x;
       uint32_t acc1 = ldsIn[k].y;
       // A batch of LDS reads is issued before its adds, which still run in rank order.
-      for (int r0 = 1; r0 < nRanks; r0 += kDdaLLSpreadFoldBatch) {
-        uint2 e[kDdaLLSpreadFoldBatch];
+      for (int r0 = 1; r0 < nRanks; r0 += kDdaLLPeerBatch) {
+        uint2 e[kDdaLLPeerBatch];
 #pragma unroll
-        for (int i = 0; i < kDdaLLSpreadFoldBatch; ++i) {
+        for (int i = 0; i < kDdaLLPeerBatch; ++i) {
           e[i] = r0 + i < nRanks ? ldsIn[(size_t)(r0 + i) * plen + k] : make_uint2(0, 0);
         }
 #pragma unroll
-        for (int i = 0; i < kDdaLLSpreadFoldBatch; ++i) {
+        for (int i = 0; i < kDdaLLPeerBatch; ++i) {
           if (r0 + i < nRanks) {
             ddaLLAddPayload<T>(acc0, acc1, e[i].x, e[i].y);
           }
@@ -260,7 +263,7 @@ __launch_bounds__(512)
     // After an abort the sums are partial; publishing them under this epoch's flag would let a peer accept them.
     if (!aborted) {
       for (size_t u = tid; u < pollUnits; u += nthr) {
-        const int peer = (selfRank + 1 + (int)((uint32_t)u / plen32)) % nRanks;
+        const int peer = unitPeer(u, plen32);
         const size_t k = (uint32_t)u % plen32;
         const uint2 acc = ldsAcc[k];
         LLPacket16* dst = ldsPeer[peer] + bankOffsetPktsNext + (size_t)selfRank * slot + q0 + k;
@@ -280,7 +283,7 @@ __launch_bounds__(512)
       line[i] = nullptr;
       w[i] = 0;
       if (u < peerUnits) {
-        const int peer = (selfRank + 1 + (int)((uint32_t)u / len32)) % nRanks;
+        const int peer = unitPeer(u, len32);
         const size_t pk = p0 + (uint32_t)u % len32;
         if (pk < shardLen(peer)) {
           line[i] = reinterpret_cast<const uint32_t*>(myBase + bankOffsetPktsNext + (size_t)peer * slot + pk);
