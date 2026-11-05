@@ -534,6 +534,282 @@ static ssize_t exec_decompress(vfu_ctx_t *vfu_ctx, uint64_t src_gpa,
 }
 
 /* ------------------------------------------------------------------ */
+/* Elementwise arithmetic helpers — rocm-ernic p4_fp8.c pattern:      */
+/* memcpy for type punning, float as the intermediate arithmetic type. */
+/* ------------------------------------------------------------------ */
+
+static float bf16_to_float(uint16_t v) {
+    uint32_t f32 = (uint32_t)v << 16;
+    float r; memcpy(&r, &f32, 4); return r;
+}
+static uint16_t bf16_from_float(float v) {
+    uint32_t b; memcpy(&b, &v, 4); return (uint16_t)(b >> 16);
+}
+
+static float fp16_to_float(uint16_t v) {
+    uint32_t s = (v >> 15) & 1U, e = (v >> 10) & 0x1FU, m = v & 0x3FFU;
+    uint32_t f32;
+    if (e == 0x1FU) {
+        f32 = (s << 31) | 0x7F800000U | (m << 13);
+    } else if (e == 0 && m == 0) {
+        f32 = s << 31;
+    } else if (e == 0) {
+        float fv = (float)m * 5.9604644775390625e-8f;
+        return s ? -fv : fv;
+    } else {
+        uint32_t fe = e - 15 + 127;
+        f32 = (s << 31) | (fe << 23) | (m << 13);
+    }
+    float r; memcpy(&r, &f32, 4); return r;
+}
+static uint16_t fp16_from_float(float v) {
+    uint32_t b; memcpy(&b, &v, 4);
+    uint32_t s = (b >> 31) & 1U, abs_b = b & 0x7FFFFFFFU;
+    uint32_t fe = (abs_b >> 23) & 0xFFU;
+    if (fe == 0xFFU)
+        return (uint16_t)((s << 15) | 0x7C00U | ((abs_b & 0x7FFFFFU) ? 0x200U : 0U));
+    if (abs_b > 0x477FE000U) return (uint16_t)((s << 15) | 0x7C00U);
+    if (abs_b == 0) return (uint16_t)(s << 15);
+    int exp32 = (int)fe - 127, exp16 = exp32 + 15;
+    uint32_t man32 = abs_b & 0x7FFFFFU;
+    if (exp16 <= 0) {
+        uint32_t shift = (uint32_t)(1 - exp16) + 13;
+        if (shift > 23) return (uint16_t)(s << 15);
+        uint32_t m = (0x800000U | man32) >> shift;
+        return (uint16_t)((s << 15) | (m & 0x3FFU));
+    }
+    return (uint16_t)((s << 15) | ((uint32_t)exp16 << 10) | (man32 >> 13));
+}
+
+/* FP8 E4M3: OCP convention — bias=7, max=448, NaN=0x7F/0xFF, no infinities. */
+static float e4m3_to_float(uint8_t v) {
+    uint8_t s = v >> 7, e = (v >> 3) & 0xFU, m = v & 0x7U;
+    if (e == 0xFU && m == 0x7U) {
+        uint32_t nb = ((uint32_t)s << 31) | 0x7FC00000U;
+        float r; memcpy(&r, &nb, 4); return r;
+    }
+    if (e == 0 && m == 0) return s ? -0.0f : 0.0f;
+    if (e == 0) {
+        float fv = (float)m * 0.001953125f; /* m × 2^(-9) */
+        return s ? -fv : fv;
+    }
+    uint32_t fe = (uint32_t)e - 7 + 127;
+    uint32_t f32 = ((uint32_t)s << 31) | (fe << 23) | ((uint32_t)m << 20);
+    float r; memcpy(&r, &f32, 4); return r;
+}
+static uint8_t e4m3_from_float(float v) {
+    uint32_t b; memcpy(&b, &v, 4);
+    uint8_t sign = (b >> 31) & 1U;
+    uint32_t abs_b = b & 0x7FFFFFFFU;
+    if ((abs_b >> 23) == 0xFFU) return sign ? 0xFFU : 0x7FU; /* NaN/Inf → NaN */
+    if (abs_b > 0x43E00000U) return sign ? (uint8_t)(0x80U | 0x7EU) : 0x7EU; /* >448 → sat */
+    if (abs_b == 0) return sign ? 0x80U : 0x00U;
+    int exp32 = (int)((abs_b >> 23) & 0xFFU) - 127, exp8 = exp32 + 7;
+    uint32_t man32 = abs_b & 0x7FFFFFU;
+    if (exp8 <= 0) {
+        uint32_t shift = (uint32_t)(1 - exp8) + 20;
+        if (shift > 23) return sign ? 0x80U : 0x00U;
+        uint32_t m = (0x800000U | man32) >> shift;
+        if (!m) return sign ? 0x80U : 0x00U;
+        return (uint8_t)((sign << 7) | (m & 0x7U));
+    }
+    uint8_t e8 = (uint8_t)exp8, m8 = (uint8_t)(man32 >> 20);
+    return (uint8_t)((sign << 7) | (e8 << 3) | (m8 & 0x7U));
+}
+
+/* FP8 E5M2: OCP convention — bias=15, has infinities, NaN when e=11111 m!=0. */
+static float e5m2_to_float(uint8_t v) {
+    uint8_t s = v >> 7, e = (v >> 2) & 0x1FU, m = v & 0x3U;
+    uint32_t f32;
+    if (e == 0x1FU) {
+        f32 = m ? (((uint32_t)s << 31) | 0x7FC00000U)
+                : (((uint32_t)s << 31) | 0x7F800000U);
+    } else if (e == 0 && m == 0) {
+        f32 = (uint32_t)s << 31;
+    } else if (e == 0) {
+        float fv = (float)m * (1.0f / 65536.0f); /* m × 2^(-16) */
+        return s ? -fv : fv;
+    } else {
+        uint32_t fe = (uint32_t)e - 15 + 127;
+        f32 = ((uint32_t)s << 31) | (fe << 23) | ((uint32_t)m << 21);
+    }
+    float r; memcpy(&r, &f32, 4); return r;
+}
+static uint8_t e5m2_from_float(float v) {
+    uint32_t b; memcpy(&b, &v, 4);
+    uint8_t sign = (b >> 31) & 1U;
+    uint32_t abs_b = b & 0x7FFFFFFFU;
+    if ((abs_b >> 23) == 0xFFU) {
+        if (!(abs_b & 0x7FFFFFU)) return sign ? 0xFCU : 0x7CU; /* Inf */
+        return sign ? 0xFFU : 0x7FU; /* NaN */
+    }
+    if (abs_b > 0x47600000U) return sign ? 0xFCU : 0x7CU; /* overflow → Inf */
+    if (abs_b == 0) return sign ? 0x80U : 0x00U;
+    int exp32 = (int)((abs_b >> 23) & 0xFFU) - 127, exp5 = exp32 + 15;
+    uint32_t man32 = abs_b & 0x7FFFFFU;
+    if (exp5 <= 0) {
+        uint32_t shift = (uint32_t)(1 - exp5) + 21;
+        if (shift > 23) return sign ? 0x80U : 0x00U;
+        uint32_t m = (0x800000U | man32) >> shift;
+        return (uint8_t)((sign << 7) | (m & 0x3U));
+    }
+    uint8_t e5 = (uint8_t)exp5, m5 = (uint8_t)(man32 >> 21);
+    return (uint8_t)((sign << 7) | (e5 << 2) | (m5 & 0x3U));
+}
+
+/* INT4: nibble-packed, low nibble first, signed two's complement -8..7. */
+static int int4_from_nibble(uint8_t n) {
+    n &= 0xFU; return (n >= 8) ? (int)n - 16 : (int)n;
+}
+static uint8_t int4_to_nibble(int v) {
+    if (v < -8) v = -8; if (v > 7) v = 7;
+    return (uint8_t)(v & 0xFU);
+}
+
+static int exec_elemwise(vfu_ctx_t *vfu_ctx,
+                         uint64_t src_gpa, uint32_t src_len,
+                         uint64_t dst_gpa,
+                         uint32_t dtype, uint32_t op,
+                         uint64_t scalar_bits,
+                         uint64_t csb_gpa)
+{
+    if (src_len == 0)
+        return -1;
+
+    /* Determine element size; INT4 packs 2 elements per byte. */
+    size_t elem_sz;
+    size_t n_elems;
+    switch (dtype) {
+    case SDXI_DTYPE_FP32:  case SDXI_DTYPE_INT32:  elem_sz = 4; n_elems = src_len / 4; break;
+    case SDXI_DTYPE_FP16:  case SDXI_DTYPE_BF16:   elem_sz = 2; n_elems = src_len / 2; break;
+    case SDXI_DTYPE_INT8:  case SDXI_DTYPE_FP8_E4M3:
+    case SDXI_DTYPE_FP8_E5M2:                       elem_sz = 1; n_elems = src_len;     break;
+    case SDXI_DTYPE_INT4:                            elem_sz = 1; n_elems = src_len * 2; break;
+    default: return -1;
+    }
+
+    bool is_reduce = (op == SDXI_ELEMOP_REDUCE_MIN || op == SDXI_ELEMOP_REDUCE_MAX);
+    size_t dst_len = is_reduce ? elem_sz : (size_t)src_len;
+
+    uint8_t *src_buf = malloc(src_len);
+    uint8_t *dst_buf = calloc(1, dst_len);
+    if (!src_buf || !dst_buf) { free(src_buf); free(dst_buf); return -1; }
+
+    uint8_t sg_buf[dma_sg_size()];
+    dma_sg_t *sg = (dma_sg_t *)(void *)sg_buf;
+
+    int nr = vfu_addr_to_sgl(vfu_ctx, (vfu_dma_addr_t)(uintptr_t)src_gpa,
+                              src_len, sg, 1, PROT_READ);
+    int rc = (nr < 0) ? -1 : vfu_sgl_read(vfu_ctx, sg, (size_t)nr, src_buf,
+                                            VFU_SGL_DIRECT_ACCESS);
+    if (rc != 0) {
+        sdxi_error("elemwise: failed to read src (gpa=0x%llx len=%u)",
+                   (unsigned long long)src_gpa, src_len);
+        free(src_buf); free(dst_buf); return -1;
+    }
+
+    /* Decode scalar to float for arithmetic; scalar_bits is dtype-native. */
+    float scalar_f = 0.0f;
+    switch (dtype) {
+    case SDXI_DTYPE_FP32: { float f; memcpy(&f, &scalar_bits, 4); scalar_f = f; break; }
+    case SDXI_DTYPE_FP16: scalar_f = fp16_to_float((uint16_t)scalar_bits); break;
+    case SDXI_DTYPE_BF16: scalar_f = bf16_to_float((uint16_t)scalar_bits); break;
+    case SDXI_DTYPE_INT8: scalar_f = (float)(int8_t)(scalar_bits & 0xFFU); break;
+    case SDXI_DTYPE_INT32: { int32_t i; memcpy(&i, &scalar_bits, 4); scalar_f = (float)i; break; }
+    case SDXI_DTYPE_FP8_E4M3: scalar_f = e4m3_to_float((uint8_t)scalar_bits); break;
+    case SDXI_DTYPE_FP8_E5M2: scalar_f = e5m2_to_float((uint8_t)scalar_bits); break;
+    case SDXI_DTYPE_INT4: scalar_f = (float)int4_from_nibble((uint8_t)scalar_bits); break;
+    }
+
+    float accum = (op == SDXI_ELEMOP_REDUCE_MIN) ? 1e38f : -1e38f;
+
+    for (size_t i = 0; i < n_elems; i++) {
+        /* Decode element i to float. */
+        float elem = 0.0f;
+        switch (dtype) {
+        case SDXI_DTYPE_FP32: { float f; memcpy(&f, src_buf + i * 4, 4); elem = f; break; }
+        case SDXI_DTYPE_FP16: { uint16_t h; memcpy(&h, src_buf + i * 2, 2); elem = fp16_to_float(h); break; }
+        case SDXI_DTYPE_BF16: { uint16_t b; memcpy(&b, src_buf + i * 2, 2); elem = bf16_to_float(b); break; }
+        case SDXI_DTYPE_INT8:  elem = (float)(int8_t)src_buf[i]; break;
+        case SDXI_DTYPE_INT32: { int32_t v; memcpy(&v, src_buf + i * 4, 4); elem = (float)v; break; }
+        case SDXI_DTYPE_FP8_E4M3: elem = e4m3_to_float(src_buf[i]); break;
+        case SDXI_DTYPE_FP8_E5M2: elem = e5m2_to_float(src_buf[i]); break;
+        case SDXI_DTYPE_INT4: {
+            uint8_t byte = src_buf[i / 2];
+            elem = (float)int4_from_nibble((i & 1) ? (byte >> 4) : (byte & 0xFU));
+            break;
+        }
+        }
+
+        /* Apply operation. */
+        float result = elem;
+        switch (op) {
+        case SDXI_ELEMOP_ADD: result = elem + scalar_f; break;
+        case SDXI_ELEMOP_MIN: result = elem < scalar_f ? elem : scalar_f; break;
+        case SDXI_ELEMOP_MAX: result = elem > scalar_f ? elem : scalar_f; break;
+        case SDXI_ELEMOP_REDUCE_MIN: accum = elem < accum ? elem : accum; continue;
+        case SDXI_ELEMOP_REDUCE_MAX: accum = elem > accum ? elem : accum; continue;
+        }
+
+        /* Encode result back to dtype and store. */
+        switch (dtype) {
+        case SDXI_DTYPE_FP32: { memcpy(dst_buf + i * 4, &result, 4); break; }
+        case SDXI_DTYPE_FP16: { uint16_t h = fp16_from_float(result); memcpy(dst_buf + i * 2, &h, 2); break; }
+        case SDXI_DTYPE_BF16: { uint16_t b = bf16_from_float(result); memcpy(dst_buf + i * 2, &b, 2); break; }
+        case SDXI_DTYPE_INT8: dst_buf[i] = (uint8_t)(int8_t)(int)result; break;
+        case SDXI_DTYPE_INT32: { int32_t v = (int32_t)result; memcpy(dst_buf + i * 4, &v, 4); break; }
+        case SDXI_DTYPE_FP8_E4M3: dst_buf[i] = e4m3_from_float(result); break;
+        case SDXI_DTYPE_FP8_E5M2: dst_buf[i] = e5m2_from_float(result); break;
+        case SDXI_DTYPE_INT4: {
+            uint8_t nib = int4_to_nibble((int)result);
+            if (i & 1) dst_buf[i / 2] = (uint8_t)((dst_buf[i / 2] & 0x0FU) | (nib << 4));
+            else        dst_buf[i / 2] = (uint8_t)((dst_buf[i / 2] & 0xF0U) | (nib & 0x0FU));
+            break;
+        }
+        }
+    }
+
+    /* For reduce ops, store the accumulated result as a single element. */
+    if (is_reduce) {
+        switch (dtype) {
+        case SDXI_DTYPE_FP32: { memcpy(dst_buf, &accum, 4); break; }
+        case SDXI_DTYPE_FP16: { uint16_t h = fp16_from_float(accum); memcpy(dst_buf, &h, 2); break; }
+        case SDXI_DTYPE_BF16: { uint16_t b = bf16_from_float(accum); memcpy(dst_buf, &b, 2); break; }
+        case SDXI_DTYPE_INT8: dst_buf[0] = (uint8_t)(int8_t)(int)accum; break;
+        case SDXI_DTYPE_INT32: { int32_t v = (int32_t)accum; memcpy(dst_buf, &v, 4); break; }
+        case SDXI_DTYPE_FP8_E4M3: dst_buf[0] = e4m3_from_float(accum); break;
+        case SDXI_DTYPE_FP8_E5M2: dst_buf[0] = e5m2_from_float(accum); break;
+        case SDXI_DTYPE_INT4: dst_buf[0] = int4_to_nibble((int)accum); break;
+        }
+    }
+
+    free(src_buf);
+
+    nr = vfu_addr_to_sgl(vfu_ctx, (vfu_dma_addr_t)(uintptr_t)dst_gpa,
+                          dst_len, sg, 1, PROT_WRITE);
+    rc = (nr < 0) ? -1 : vfu_sgl_write(vfu_ctx, sg, (size_t)nr, dst_buf,
+                                         VFU_SGL_DIRECT_ACCESS);
+    free(dst_buf);
+    if (rc != 0) {
+        sdxi_error("elemwise: failed to write dst (gpa=0x%llx len=%zu)",
+                   (unsigned long long)dst_gpa, dst_len);
+        return -1;
+    }
+
+    sdxi_debug("elemwise: dtype=%u op=%u src_len=%u -> dst_len=%zu", dtype, op, src_len, dst_len);
+
+    if (csb_gpa != 0ULL) {
+        struct sdxi_cst_blk csb;
+        memset(&csb, 0, sizeof(csb));
+        uint64_t result = (uint64_t)dst_len;
+        memcpy((uint8_t *)&csb + SDXI_CSB_RESULT_LEN_OFF, &result, sizeof(result));
+        write_guest(vfu_ctx, csb_gpa, &csb, sizeof(csb));
+    }
+
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
 /* Poll                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -894,6 +1170,30 @@ void sdxi_engine_process_cxt(vfu_ctx_t *vfu_ctx, uint64_t l2_gpa,
             write_csb = false;   /* INTR descriptors carry no CSB pointer */
             break;
         }
+
+        case SDXI_DSC_OP_TYPE_COMPUTE:
+            switch (subtype) {
+            case SDXI_DSC_OP_SUBTYPE_ELEMWISE: {
+                uint32_t src_len, dtype, op;
+                uint64_t src_addr, dst_addr, scalar;
+                memcpy(&src_len,  dsc + SDXI_ELEM_SRC_LEN_OFF,  4U);
+                memcpy(&dtype,    dsc + SDXI_ELEM_DTYPE_OFF,     4U);
+                memcpy(&op,       dsc + SDXI_ELEM_OP_OFF,        4U);
+                memcpy(&src_addr, dsc + SDXI_ELEM_SRC_ADDR_OFF,  8U);
+                memcpy(&dst_addr, dsc + SDXI_ELEM_DST_ADDR_OFF,  8U);
+                memcpy(&scalar,   dsc + SDXI_ELEM_SCALAR_OFF,    8U);
+                int er = exec_elemwise(vfu_ctx, src_addr, src_len, dst_addr,
+                                       dtype, op, scalar, csb_gpa);
+                write_csb = false;
+                if (er < 0) csb_ok = -1;
+                break;
+            }
+            default:
+                sdxi_warn("cxt %u: unknown COMPUTE subtype 0x%x", cid, subtype);
+                csb_ok = -1;
+                break;
+            }
+            break;
 
         default:
             sdxi_warn("cxt %u: unknown descriptor type 0x%x subtype 0x%x",

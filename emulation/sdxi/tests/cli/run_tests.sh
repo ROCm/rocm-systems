@@ -320,5 +320,81 @@ test_roundtrip_algo lz4
 test_roundtrip_algo zstd
 
 echo ""
+echo "--- Elementwise arithmetic tests ---"
+
+# test_elemwise_op OP DTYPE SCALAR SRC_HEX EXPECTED_HEX
+# SCALAR: passed verbatim to CLI (decimal int or float string)
+# SRC_HEX / EXPECTED_HEX: paired hex nibbles of raw binary data
+test_elemwise_op() {
+    local op=$1 dtype=$2 scalar=$3 src_hex=$4 expected_hex=$5
+    local src_file dst_file got_hex pass=1
+    src_file=$(mktemp); dst_file=$(mktemp)
+    printf '%b' "$(echo "$src_hex" | sed 's/../\\x&/g')" > "$src_file"
+    if ! $CLI elemwise "$op" "$dtype" "$scalar" "$src_file" "$dst_file" 2>/dev/null; then
+        pass=0
+    else
+        got_hex=$(xxd -p -c 256 "$dst_file" | tr -d '\n')
+        [[ "$got_hex" == "$expected_hex" ]] || pass=0
+    fi
+    rm -f "$src_file" "$dst_file"
+    if [[ $pass -eq 1 ]]; then
+        ok "elemwise ${op} ${dtype} scalar=${scalar}"
+    else
+        fail "elemwise ${op} ${dtype} scalar=${scalar}: expected ${expected_hex}, got ${got_hex:-<ioctl failed>}"
+    fi
+}
+
+# test_elemwise_reduce OP DTYPE SRC_HEX EXPECTED_HEX
+test_elemwise_reduce() {
+    local op=$1 dtype=$2 src_hex=$3 expected_hex=$4
+    local src_file dst_file got_hex pass=1
+    src_file=$(mktemp); dst_file=$(mktemp)
+    printf '%b' "$(echo "$src_hex" | sed 's/../\\x&/g')" > "$src_file"
+    if ! $CLI elemwise "$op" "$dtype" "0" "$src_file" "$dst_file" 2>/dev/null; then
+        pass=0
+    else
+        got_hex=$(xxd -p -c 256 "$dst_file" | tr -d '\n')
+        [[ "$got_hex" == "$expected_hex" ]] || pass=0
+    fi
+    rm -f "$src_file" "$dst_file"
+    if [[ $pass -eq 1 ]]; then
+        ok "elemwise ${op} ${dtype}"
+    else
+        fail "elemwise ${op} ${dtype}: expected ${expected_hex}, got ${got_hex:-<ioctl failed>}"
+    fi
+}
+
+# INT8 add: bytes [10, 20, 30] + 5 = [15, 25, 35] = 0f 19 23
+test_elemwise_op add int8 5 "0a141e" "0f1923"
+
+# INT8 min: [5, 2, 8] min 4 = [4, 2, 4]
+test_elemwise_op min int8 4 "050208" "040204"
+
+# INT8 max: [1, 7, 3] max 4 = [4, 7, 4]
+test_elemwise_op max int8 4 "010703" "040704"
+
+# INT8 reduce_min: [3, 1, 4] -> min = 1
+test_elemwise_reduce reduce_min int8 "030104" "01"
+
+# INT8 reduce_max: [3, 1, 4] -> max = 4
+test_elemwise_reduce reduce_max int8 "030104" "04"
+
+# INT32 add: LE [1,2,3] + 10 = [11,12,13]
+# 1=01000000 2=02000000 3=03000000; 11=0b000000 12=0c000000 13=0d000000
+test_elemwise_op add int32 10 "010000000200000003000000" "0b0000000c0000000d000000"
+
+# INT32 reduce_min: LE [100,50,200] -> 50
+# 100=64000000 50=32000000 200=c8000000
+test_elemwise_reduce reduce_min int32 "6400000032000000c8000000" "32000000"
+
+# FP32 add: [1.0f] + 1.0f = [2.0f]
+# 1.0f LE bytes = 0000803f; 2.0f LE = 00000040
+test_elemwise_op add fp32 1.0 "0000803f" "00000040"
+
+# FP32 reduce_max: [1.0, 3.0, 2.0] -> max = 3.0
+# 1.0f=0000803f 3.0f=00004040 2.0f=00000040
+test_elemwise_reduce reduce_max fp32 "0000803f0000404000000040" "00004040"
+
+echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

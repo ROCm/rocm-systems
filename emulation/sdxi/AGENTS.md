@@ -190,3 +190,95 @@ Integrating with the kernel crypto subsystem (so user code can open
 `crypto_register_acomp()` / `crypto_register_scomp()`.  This would be a
 distinct patch series from the dmaengine patches and cannot be part of
 `drivers/dma/sdxi/`.
+
+---
+
+## Compute / elementwise arithmetic
+
+The emulator supports a **COMPUTE descriptor type** (0x008) with one subtype:
+**ELEMWISE** (0x01).  This performs element-wise or reductive arithmetic on a
+guest buffer without moving data through any host-side copy engine.
+
+### Descriptor layout (64 bytes)
+
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| 0 | 4 | opcode | `VL(0) \| (SUBTYPE_ELEMWISE << 8) \| (TYPE_COMPUTE << 16)` |
+| 4 | 4 | src_len | Source byte count (LE32) |
+| 8 | 4 | dtype | `SDXI_DTYPE_*` (LE32) |
+| 12 | 4 | op | `SDXI_ELEMOP_*` (LE32) |
+| 16 | 8 | src_addr | Source GPA (LE64) |
+| 24 | 8 | dst_addr | Destination GPA (LE64) |
+| 32 | 8 | scalar | Scalar as dtype-native bits (LE64) |
+| 56 | 8 | csb_ptr | NP \| (csb_gpa >> 5) (LE64) |
+
+### Element data types (`SDXI_DTYPE_*`)
+
+| Constant | Value | Elem size | Notes |
+|----------|-------|-----------|-------|
+| `SDXI_DTYPE_FP32` | 0 | 4 bytes | IEEE 754 single |
+| `SDXI_DTYPE_FP16` | 1 | 2 bytes | IEEE 754 half; bias=15 |
+| `SDXI_DTYPE_BF16` | 2 | 2 bytes | Top 16 bits of FP32 |
+| `SDXI_DTYPE_INT8` | 3 | 1 byte | Signed two's complement |
+| `SDXI_DTYPE_INT32` | 4 | 4 bytes | Signed two's complement |
+| `SDXI_DTYPE_FP8_E4M3` | 5 | 1 byte | OCP E4M3: bias=7, max=448, NaN=0x7F/0xFF, no Inf |
+| `SDXI_DTYPE_FP8_E5M2` | 6 | 1 byte | OCP E5M2: bias=15, has Inf, NaN when e=11111 m≠0 |
+| `SDXI_DTYPE_INT4` | 7 | ½ byte | Nibble-packed, low nibble first; n_elems = src_len × 2 |
+
+### Element operations (`SDXI_ELEMOP_*`)
+
+| Constant | Value | Semantics |
+|----------|-------|-----------|
+| `SDXI_ELEMOP_ADD` | 0 | `dst[i] = src[i] + scalar` |
+| `SDXI_ELEMOP_MIN` | 1 | `dst[i] = min(src[i], scalar)` |
+| `SDXI_ELEMOP_MAX` | 2 | `dst[i] = max(src[i], scalar)` |
+| `SDXI_ELEMOP_REDUCE_MIN` | 3 | `dst[0] = min over all src elements` |
+| `SDXI_ELEMOP_REDUCE_MAX` | 4 | `dst[0] = max over all src elements` |
+
+For reduce ops dst is one element (elem_sz bytes); for elementwise ops dst is
+src_len bytes (or src_len/2 for INT4 since they pack 2 per byte).
+
+### FP8 OCP conventions
+
+Both E4M3 and E5M2 follow the OCP MX specification:
+
+- **E4M3**: bias=7, max representable=448.  `0x7F` and `0xFF` are NaN.
+  No infinities; overflow saturates to max normal (0x7E / 0xFE).
+- **E5M2**: bias=15, has ±Inf (`0x7C`/`0xFC`).  NaN when exponent=11111 and
+  mantissa≠0.  Overflow to ±Inf.
+
+### INT4 packing
+
+Two signed nibbles per byte, low nibble first.  Range −8..7 (two's complement
+in 4 bits).  Element index `i` lives in byte `i/2`; low nibble when i is even,
+high nibble when i is odd.
+
+### Design principle (rocm-ernic P4 engine)
+
+All type conversions use `memcpy` for type-punning (never pointer casts to avoid
+UB).  Float is the universal intermediate arithmetic type — decode to float, add/
+min/max in float, re-encode.  This matches the pattern in
+`rocm-ernic/src/p4_fp8.c`.
+
+### CLI usage
+
+```sh
+# elementwise: add scalar 5 to each int8 element
+sdxi-cli elemwise add int8 5 src.bin dst.bin
+
+# elementwise: clamp fp32 values to max 1.0
+sdxi-cli elemwise min fp32 1.0 src.bin dst.bin
+
+# reduce: find minimum fp16 value across the buffer
+sdxi-cli elemwise reduce_min fp16 0 src.bin result.bin
+
+# reduce: find maximum fp8 (E4M3) value
+sdxi-cli elemwise reduce_max fp8e4m3 0 src.bin result.bin
+
+# INT4 add nibble-packed buffer
+sdxi-cli elemwise add int4 2 src_packed.bin dst_packed.bin
+```
+
+Scalar is a decimal integer or float for FP types, or a hex value (`0x...`)
+for raw bit-pattern overrides (useful for FP16/BF16/FP8 when you know the
+encoding).

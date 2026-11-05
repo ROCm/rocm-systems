@@ -71,9 +71,37 @@ struct sdxi_ioc_decompress {
 	__u64 out_len;  /* [out] actual decompressed bytes */
 };
 
+/* Element data type selector. */
+#define SDXI_DTYPE_FP32      0U
+#define SDXI_DTYPE_FP16      1U
+#define SDXI_DTYPE_BF16      2U
+#define SDXI_DTYPE_INT8      3U
+#define SDXI_DTYPE_INT32     4U
+#define SDXI_DTYPE_FP8_E4M3  5U
+#define SDXI_DTYPE_FP8_E5M2  6U
+#define SDXI_DTYPE_INT4      7U
+
+/* Element operation selector. */
+#define SDXI_ELEMOP_ADD         0U
+#define SDXI_ELEMOP_MIN         1U
+#define SDXI_ELEMOP_MAX         2U
+#define SDXI_ELEMOP_REDUCE_MIN  3U
+#define SDXI_ELEMOP_REDUCE_MAX  4U
+
+struct sdxi_ioc_elemwise {
+	__u64 src;        /* source userspace virtual address */
+	__u64 src_len;    /* source byte count */
+	__u64 dst;        /* destination userspace virtual address */
+	__u32 dtype;      /* SDXI_DTYPE_* */
+	__u32 op;         /* SDXI_ELEMOP_* */
+	__u64 scalar;     /* scalar as dtype-native bits (ignored for reduce ops) */
+	__u64 out_len;    /* [out] dst byte count written */
+};
+
 #define SDXI_IOC_MAGIC       'X'
 #define SDXI_IOC_MEMCPY      _IOW (SDXI_IOC_MAGIC, 1, struct sdxi_ioc_memcpy)
 #define SDXI_IOC_COMPRESS    _IOWR(SDXI_IOC_MAGIC, 2, struct sdxi_ioc_compress)
 #define SDXI_IOC_DECOMPRESS  _IOWR(SDXI_IOC_MAGIC, 3, struct sdxi_ioc_decompress)
+#define SDXI_IOC_ELEMWISE    _IOWR(SDXI_IOC_MAGIC, 4, struct sdxi_ioc_elemwise)
 
 #endif /* _UAPI_LINUX_SDXI_USER_H */

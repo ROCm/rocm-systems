@@ -191,6 +191,36 @@
 #define SDXI_COMP_ALGO_LZ4   1U   /* LZ4 lossless */
 #define SDXI_COMP_ALGO_ZSTD  2U   /* Zstandard lossless */
 #define SDXI_COMP_SRC_ADDR_OFF 16U   /* LE64: source GPA */
+
+/* COMPUTE descriptor type and subtypes. */
+#define SDXI_DSC_OP_TYPE_COMPUTE       0x008U
+#define SDXI_DSC_OP_SUBTYPE_ELEMWISE   0x01U
+
+/* Element data type identifiers (SDXI_DTYPE_*). */
+#define SDXI_DTYPE_FP32      0U
+#define SDXI_DTYPE_FP16      1U
+#define SDXI_DTYPE_BF16      2U
+#define SDXI_DTYPE_INT8      3U
+#define SDXI_DTYPE_INT32     4U
+#define SDXI_DTYPE_FP8_E4M3  5U
+#define SDXI_DTYPE_FP8_E5M2  6U
+#define SDXI_DTYPE_INT4      7U
+
+/* Element operation identifiers (SDXI_ELEMOP_*). */
+#define SDXI_ELEMOP_ADD         0U   /* dst[i] = src[i] + scalar */
+#define SDXI_ELEMOP_MIN         1U   /* dst[i] = min(src[i], scalar) */
+#define SDXI_ELEMOP_MAX         2U   /* dst[i] = max(src[i], scalar) */
+#define SDXI_ELEMOP_REDUCE_MIN  3U   /* dst[0] = min over all src elements */
+#define SDXI_ELEMOP_REDUCE_MAX  4U   /* dst[0] = max over all src elements */
+
+/* ELEMWISE descriptor field offsets (64-byte descriptor). */
+#define SDXI_ELEM_SRC_LEN_OFF   4U   /* LE32: source byte count */
+#define SDXI_ELEM_DTYPE_OFF     8U   /* LE32: SDXI_DTYPE_* */
+#define SDXI_ELEM_OP_OFF        12U  /* LE32: SDXI_ELEMOP_* */
+#define SDXI_ELEM_SRC_ADDR_OFF  16U  /* LE64: source GPA */
+#define SDXI_ELEM_DST_ADDR_OFF  24U  /* LE64: destination GPA */
+#define SDXI_ELEM_SCALAR_OFF    32U  /* LE64: scalar as dtype-native bits */
+#define SDXI_ELEM_CSBPTR_OFF    56U  /* LE64: NP | (csb_gpa >> 5) */
 #define SDXI_COMP_DST_ADDR_OFF 24U   /* LE64: destination GPA */
 #define SDXI_COMP_CSBPTR_OFF   56U   /* LE64: NP | (csb_gpa >> 5) */
 

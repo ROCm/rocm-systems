@@ -562,6 +562,119 @@ static int cmd_stress(int argc, char **argv)
 }
 
 /* ------------------------------------------------------------------ */
+/* elemwise                                                            */
+/* ------------------------------------------------------------------ */
+
+static uint32_t parse_dtype(const char *s)
+{
+	if (strcmp(s, "fp32")    == 0) return SDXI_DTYPE_FP32;
+	if (strcmp(s, "fp16")    == 0) return SDXI_DTYPE_FP16;
+	if (strcmp(s, "bf16")    == 0) return SDXI_DTYPE_BF16;
+	if (strcmp(s, "int8")    == 0) return SDXI_DTYPE_INT8;
+	if (strcmp(s, "int32")   == 0) return SDXI_DTYPE_INT32;
+	if (strcmp(s, "fp8e4m3") == 0) return SDXI_DTYPE_FP8_E4M3;
+	if (strcmp(s, "fp8e5m2") == 0) return SDXI_DTYPE_FP8_E5M2;
+	if (strcmp(s, "int4")    == 0) return SDXI_DTYPE_INT4;
+	fprintf(stderr, "sdxi-cli: unknown dtype '%s'\n", s);
+	exit(1);
+}
+
+static uint64_t scalar_to_bits(const char *s, uint32_t dtype)
+{
+	switch (dtype) {
+	case SDXI_DTYPE_FP32: {
+		float f = strtof(s, NULL);
+		uint32_t b; memcpy(&b, &f, 4); return b;
+	}
+	case SDXI_DTYPE_FP16: case SDXI_DTYPE_BF16:
+		/* Accept as float, store raw bits from strtoul so user can pass hex. */
+		return (uint64_t)strtoul(s, NULL, 0);
+	case SDXI_DTYPE_INT8:  return (uint64_t)(int64_t)(int8_t)strtol(s, NULL, 0);
+	case SDXI_DTYPE_INT32: return (uint64_t)(int64_t)(int32_t)strtol(s, NULL, 0);
+	case SDXI_DTYPE_FP8_E4M3: case SDXI_DTYPE_FP8_E5M2:
+		return (uint64_t)strtoul(s, NULL, 0);
+	case SDXI_DTYPE_INT4:  return (uint64_t)(int64_t)strtol(s, NULL, 0);
+	}
+	return 0;
+}
+
+static int cmd_elemwise(int argc, char **argv)
+{
+	/* elemwise <op> <dtype> <scalar> <src-file> <dst-file> */
+	if (argc < 5) {
+		fprintf(stderr,
+			"usage: elemwise <op> <dtype> <scalar> <src-file> <dst-file>\n"
+			"  op:    add | min | max | reduce_min | reduce_max\n"
+			"  dtype: fp32 | fp16 | bf16 | int8 | int32 | fp8e4m3 | fp8e5m2 | int4\n");
+		return 1;
+	}
+
+	const char *op_str    = argv[0];
+	const char *dtype_str = argv[1];
+	const char *scalar_s  = argv[2];
+	const char *src_path  = argv[3];
+	const char *dst_path  = argv[4];
+
+	uint32_t op;
+	if      (strcmp(op_str, "add")        == 0) op = SDXI_ELEMOP_ADD;
+	else if (strcmp(op_str, "min")        == 0) op = SDXI_ELEMOP_MIN;
+	else if (strcmp(op_str, "max")        == 0) op = SDXI_ELEMOP_MAX;
+	else if (strcmp(op_str, "reduce_min") == 0) op = SDXI_ELEMOP_REDUCE_MIN;
+	else if (strcmp(op_str, "reduce_max") == 0) op = SDXI_ELEMOP_REDUCE_MAX;
+	else {
+		fprintf(stderr, "sdxi-cli: unknown op '%s'\n", op_str);
+		return 1;
+	}
+
+	uint32_t dtype    = parse_dtype(dtype_str);
+	uint64_t scalar   = scalar_to_bits(scalar_s, dtype);
+
+	size_t src_len;
+	uint8_t *src_buf = read_file(src_path, &src_len);
+	if (!src_buf) return 1;
+
+	/* dst buffer: for reduce ops one element (at most 4 bytes), else src_len. */
+	bool is_reduce = (op == SDXI_ELEMOP_REDUCE_MIN || op == SDXI_ELEMOP_REDUCE_MAX);
+	size_t dst_cap = is_reduce ? 8 : src_len;
+	uint8_t *dst_buf = calloc(1, dst_cap);
+	if (!dst_buf) { free(src_buf); perror("calloc"); return 1; }
+
+	struct sdxi_ioc_elemwise ioc = {
+		.src     = (uint64_t)(uintptr_t)src_buf,
+		.src_len = src_len,
+		.dst     = (uint64_t)(uintptr_t)dst_buf,
+		.dtype   = dtype,
+		.op      = op,
+		.scalar  = scalar,
+		.out_len = 0,
+	};
+
+	if (ioctl(g_fd, SDXI_IOC_ELEMWISE, &ioc) < 0) {
+		perror("SDXI_IOC_ELEMWISE");
+		free(src_buf); free(dst_buf);
+		return 1;
+	}
+
+	if (g_verbose)
+		fprintf(stderr, "elemwise: op=%s dtype=%s src=%zu dst=%llu bytes\n",
+			op_str, dtype_str, src_len,
+			(unsigned long long)ioc.out_len);
+
+	if (write_file(dst_path, dst_buf, (size_t)ioc.out_len) != 0) {
+		free(src_buf); free(dst_buf);
+		return 1;
+	}
+
+	if (is_reduce)
+		printf("reduce result written to %s (%llu bytes)\n",
+		       dst_path, (unsigned long long)ioc.out_len);
+
+	free(src_buf);
+	free(dst_buf);
+	return 0;
+}
+
+/* ------------------------------------------------------------------ */
 /* main                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -577,6 +690,7 @@ static void usage(void)
 		"  roundtrip   <src>\n"
 		"  bench       <copy|compress|decompress> <size> [iters]\n"
 		"  stress      [iters]   compress/decompress roundtrip across all algos, levels and patterns\n"
+		"  elemwise    <op> <dtype> <scalar> <src-file> <dst-file>\n"
 		"\n"
 		"Options:\n"
 		"  -a <algo>     compression algorithm: zlib (default), lz4, zstd\n"
@@ -623,6 +737,7 @@ int main(int argc, char **argv)
 	else if (strcmp(cmd, "roundtrip")  == 0) rc = cmd_roundtrip(rem, rest);
 	else if (strcmp(cmd, "bench")      == 0) rc = cmd_bench(rem, rest);
 	else if (strcmp(cmd, "stress")     == 0) rc = cmd_stress(rem, rest);
+	else if (strcmp(cmd, "elemwise")   == 0) rc = cmd_elemwise(rem, rest);
 	else {
 		fprintf(stderr, "sdxi-cli: unknown subcommand '%s'\n", cmd);
 		usage();

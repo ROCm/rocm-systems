@@ -76,6 +76,8 @@ MODULE_VERSION("1.0");
 #define SUBTYPE_CXT_START  0x03U   /* same value, disambiguated by TYPE */
 #define SUBTYPE_COMPRESS   0x04U
 #define SUBTYPE_DECOMPRESS 0x05U
+#define TYPE_COMPUTE       0x008U
+#define SUBTYPE_ELEMWISE   0x01U
 
 /* Per-operation bounce buffer limit */
 #define MAX_OP_SIZE      (16UL << 20)   /* 16 MiB */
@@ -360,6 +362,87 @@ out:
 	return ret;
 }
 
+static long handle_elemwise(struct sdxi_char_dev *sdev,
+			     struct sdxi_ioc_elemwise __user *uioc)
+{
+	struct sdxi_ioc_elemwise ioc;
+	struct bounce src = {}, dst = {};
+	u64 out_len = 0;
+	u8 *slot;
+	long ret;
+	size_t elem_sz, dst_len;
+	bool is_reduce;
+
+	if (copy_from_user(&ioc, uioc, sizeof(ioc)))
+		return -EFAULT;
+	if (ioc.src_len == 0)
+		return -EINVAL;
+	if (ioc.src_len > MAX_OP_SIZE)
+		return -E2BIG;
+
+	switch (ioc.dtype) {
+	case SDXI_DTYPE_FP32:
+	case SDXI_DTYPE_INT32:  elem_sz = 4; break;
+	case SDXI_DTYPE_FP16:
+	case SDXI_DTYPE_BF16:   elem_sz = 2; break;
+	case SDXI_DTYPE_INT8:
+	case SDXI_DTYPE_FP8_E4M3:
+	case SDXI_DTYPE_FP8_E5M2:
+	case SDXI_DTYPE_INT4:   elem_sz = 1; break;
+	default: return -EINVAL;
+	}
+
+	is_reduce = (ioc.op == SDXI_ELEMOP_REDUCE_MIN ||
+		     ioc.op == SDXI_ELEMOP_REDUCE_MAX);
+	dst_len = is_reduce ? elem_sz : (size_t)ioc.src_len;
+
+	ret = bounce_alloc(sdev, ioc.src_len, &src);
+	if (ret)
+		goto out;
+	ret = bounce_alloc(sdev, dst_len, &dst);
+	if (ret)
+		goto out;
+
+	if (copy_from_user(src.cpu, (void __user *)ioc.src, ioc.src_len)) {
+		ret = -EFAULT;
+		goto out;
+	}
+
+	clear_csb(&sdev->client);
+	slot = ring_slot(&sdev->client);
+	memset(slot, 0, DSC_SIZE);
+	*(__le32 *)(slot + 0)  = cpu_to_le32(make_opcode(TYPE_COMPUTE, SUBTYPE_ELEMWISE));
+	*(__le32 *)(slot + 4)  = cpu_to_le32((u32)ioc.src_len);
+	*(__le32 *)(slot + 8)  = cpu_to_le32(ioc.dtype);
+	*(__le32 *)(slot + 12) = cpu_to_le32(ioc.op);
+	*(__le64 *)(slot + 16) = cpu_to_le64(src.dma);
+	*(__le64 *)(slot + 24) = cpu_to_le64(dst.dma);
+	*(__le64 *)(slot + 32) = cpu_to_le64(ioc.scalar);
+	*(__le64 *)(slot + 56) = cpu_to_le64(sdev->client.csb_dma);
+	sdev->client.wi++;
+	ring_doorbell(sdev, CLIENT_CID, sdev->client.wi);
+
+	ret = poll_csb(&sdev->client, &out_len);
+	if (ret)
+		goto out;
+
+	if (out_len > dst_len) {
+		ret = -EIO;
+		goto out;
+	}
+	if (copy_to_user((void __user *)ioc.dst, dst.cpu, (size_t)out_len)) {
+		ret = -EFAULT;
+		goto out;
+	}
+	ioc.out_len = out_len;
+	if (copy_to_user(uioc, &ioc, sizeof(ioc)))
+		ret = -EFAULT;
+out:
+	bounce_free(sdev, &src);
+	bounce_free(sdev, &dst);
+	return ret;
+}
+
 static long sdxi_char_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
 	struct sdxi_char_dev *sdev = g_sdev;
@@ -378,6 +461,9 @@ static long sdxi_char_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		break;
 	case SDXI_IOC_DECOMPRESS:
 		ret = handle_decompress(sdev, (struct sdxi_ioc_decompress __user *)arg);
+		break;
+	case SDXI_IOC_ELEMWISE:
+		ret = handle_elemwise(sdev, (struct sdxi_ioc_elemwise __user *)arg);
 		break;
 	default:
 		ret = -ENOTTY;
