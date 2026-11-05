@@ -173,7 +173,9 @@ ncclResult_t ncclRasCommFini(const struct ncclComm* comm) {
 }
 
 // Global destructor.  Notifies the RAS thread to release all the resources
-// and terminate.  Waits for the thread to terminate.
+// and terminate.  Waits for the thread unless the notification cannot be
+// delivered, in which case the thread is detached (joining would block the
+// exit forever).
 static void rasTerminate() {
   struct rasNotification msg;
   if (!rasThread.joinable()) return;
@@ -181,10 +183,7 @@ static void rasTerminate() {
     memset(&msg, '\0', sizeof(msg));
     msg.type = RAS_TERMINATE;
     if (rasLocalNotify(&msg) != ncclSuccess) {
-      // The thread never saw the request, so joining it would block the exit
-      // forever. It is still joinable, though, and ~std::thread() on a
-      // joinable thread calls std::terminate. Detach it instead; the process
-      // is exiting and the OS will reclaim the thread.
+      // The thread never got the request: join() would hang, and a joinable ~std::thread() calls std::terminate.
       rasThread.detach();
       return;
     }
