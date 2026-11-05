@@ -737,7 +737,8 @@ VirtualGPU::HwQueueTracker::~HwQueueTracker() {
   for (auto& signal : signal_list_) {
     CpuWaitForSignal(signal);
   }
-  // Every consumer of a pinned wait owns a use, or precedes one, on this queue
+  // Every consumer of a pinned wait owns a use, or precedes one, on this queue. ~VirtualGPU
+  // drained the queue first, so that also holds for AQL waiters no fence use followed.
   ReleaseAllPins();
   for (auto& signal : signal_list_) {
     signal->release();
@@ -1379,9 +1380,10 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
         // Wait on CPU for completion if requested
         CpuWaitForSignal(external_signals_[i]);
       } else {
-        // Add HSA signal for tracking on GPU
+        // Add HSA signal for tracking on GPU. Compute callers wait in AQL packets, the others
+        // hand the waits to ROCr operations that each complete a use of this tracker.
         waiting_signals_.push_back(external_signals_[i]->signal_);
-        NoteGpuWait(external_signals_[i]);
+        NoteGpuWait(external_signals_[i], engine == HwQueueEngine::Compute);
       }
     }
   }
@@ -1398,10 +1400,12 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
 }
 
 // ================================================================================================
-void VirtualGPU::HwQueueTracker::NoteGpuWait(ProfilingSignal* signal) {
+void VirtualGPU::HwQueueTracker::NoteGpuWait(ProfilingSignal* signal, bool aql_waiter) {
   // Keep the owner from rearming the signal before the GPU waiter reads it
   signal->retain();
-  pins_.push_back(PinnedWait{signal});
+  PinnedWait pin{signal};
+  pin.aql_waiter = aql_waiter;
+  pins_.push_back(pin);
   ++num_open_pins_;
 }
 
@@ -1422,6 +1426,10 @@ void VirtualGPU::HwQueueTracker::ReleaseAllPins() {
   }
   pins_.clear();
   num_open_pins_ = 0;
+  for (ProfilingSignal* signal : unfenced_pins_) {
+    signal->release();
+  }
+  unfenced_pins_.clear();
 }
 
 // ================================================================================================
@@ -1530,11 +1538,61 @@ void VirtualGPU::HwQueueTracker::BeginUse(ProfilingSignal* signal, hsa_signal_va
 
 // ================================================================================================
 void VirtualGPU::LegacySignalTracker::ArmForUse(ProfilingSignal* signal,
-                                                hsa_signal_value_t init_val, uint64_t /*aql_slot*/,
-                                                bool /*barrier_bit*/, bool /*blocking_callback*/) {
+                                                hsa_signal_value_t init_val, uint64_t aql_slot,
+                                                bool barrier_bit, bool /*blocking_callback*/) {
   // Reset the signal and return
   Hsa::signal_silent_store_relaxed(signal->signal_, init_val);
   signal->use_seq_ = next_use_seq_++;
+  signal->use_fence_ = barrier_bit && aql_slot != kInvalidAqlSlot;
+  if (signal->use_fence_) {
+    NoteFence(signal->use_seq_);
+  }
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::NoteWaitsSubmitted() {
+  if (num_open_pins_ == 0) {
+    return;
+  }
+  // Compacts the open pins that stay in pins_ toward the front of the open range
+  const auto open_begin = pins_.end() - num_open_pins_;
+  auto kept = open_begin;
+  for (auto pin = open_begin; pin != pins_.end(); ++pin) {
+    if (!pin->aql_waiter) {
+      // Each consumer owns a use issued since the WaitingSignal call
+      pin->close_seq = next_use_seq_;
+    } else if (pin->close_seq == 0) {
+      // A consumer may be an AQL packet without a signal, such as the barrier ahead of a kernel,
+      // so only a later fence use proves that it passed the wait
+      unfenced_pins_.push_back(pin->signal);
+      continue;
+    }
+    *kept++ = *pin;
+  }
+  pins_.erase(kept, pins_.end());
+  num_open_pins_ = 0;
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::NoteFence(uint64_t fence_seq) {
+  // The callers publish the AQL packets consuming a WaitingSignal result before the next use's
+  // packet, so the fence follows them on the queue even while their pins are open. A HW queue is
+  // released only once idle, so a fence on a later HW queue still follows them.
+  for (auto pin = pins_.end() - num_open_pins_; pin != pins_.end(); ++pin) {
+    if (pin->aql_waiter && pin->close_seq == 0) {
+      pin->close_seq = fence_seq + 1;
+    }
+  }
+  // The closed pins in pins_ closed at most at fence_seq, before this use was issued, so the
+  // fenced pins go after them, ahead of the open ones, and keep close_seq non-decreasing. Only the
+  // first fence after a WaitingSignal call finds unfenced pins, so the open ones close at
+  // fence_seq + 1 or later.
+  for (ProfilingSignal* signal : unfenced_pins_) {
+    PinnedWait pin{signal, fence_seq + 1};
+    pin.aql_waiter = true;
+    pins_.insert(pins_.end() - num_open_pins_, pin);
+  }
+  unfenced_pins_.clear();
 }
 
 // ================================================================================================
@@ -1588,8 +1646,8 @@ void VirtualGPU::LegacySignalTracker::ProbeCompleted() {
 
 // ================================================================================================
 void VirtualGPU::LegacySignalTracker::ReleasePins() {
-  // The consumers of a pin own a use below its close_seq. A consumer without one, such as an
-  // AQL barrier, is covered by the wait on the next slot, as before pinning.
+  // The consumers of a pin own a use below its close_seq, or precede the fence use below it on
+  // the AQL queue. A pin still awaiting its fence is not in pins_ and blocks nothing.
   while (pins_.size() > num_open_pins_ && pins_.front().close_seq <= completed_below_seq_) {
     pins_.front().signal->release();
     pins_.pop_front();
@@ -1598,6 +1656,8 @@ void VirtualGPU::LegacySignalTracker::ReleasePins() {
 
 // ================================================================================================
 void VirtualGPU::LegacySignalTracker::ResetCurrentSignal() {
+  // Only ROCr operations fail after taking their use, and those are never fences that closed pins
+  assert(!signal_list_[current_id_]->use_fence_ && "Rolled back a fence use!");
   // Reset the signal and return
   Hsa::signal_silent_store_relaxed(signal_list_[current_id_]->signal_, 0);
   // The use never ran. Its slot is reused next, out of use order, so its wait proves nothing.
