@@ -9,6 +9,7 @@
 
 #include <cerrno>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -54,7 +55,14 @@ float ncclParamRasTimeoutFactor(void) {
 }
 
 int64_t rasTimeoutFactorNs(int64_t baseSeconds) {
-  return (int64_t)((double)baseSeconds * 1000000000.0 * ncclParamRasTimeoutFactor());
+  const double scaled = (double)baseSeconds * 1000000000.0 * ncclParamRasTimeoutFactor();
+  // Saturate before the double->int64 conversion (out of range is undefined behavior), and well below
+  // INT64_MAX: callers add the result to clockNano() and to other timeouts (e.g. startTime + timeout +
+  // RAS_COLLECTIVE_EXTRA_TIMEOUT), and those sums must not overflow. INT64_MAX/4 ns is ~73 years.
+  constexpr int64_t kMaxTimeoutNs = INT64_MAX / 4;
+  if (std::isnan(scaled) || scaled >= (double)kMaxTimeoutNs) return kMaxTimeoutNs;
+  if (scaled <= -(double)kMaxTimeoutNs) return -kMaxTimeoutNs;
+  return (int64_t)scaled;
 }
 
 double rasTimeoutFactorSec(int baseSeconds) {
