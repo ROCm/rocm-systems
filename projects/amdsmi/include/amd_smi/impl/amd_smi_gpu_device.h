@@ -41,7 +41,6 @@ namespace amd::smi {
  */
 
 constexpr auto kIFOE_DRIVER_BASE_PATH = std::string_view("/sys/bus/pci/drivers/ifoe/");
-constexpr auto kUALOE_BASE_PATH = std::string_view("/sys/class/drm/");
 constexpr auto kUALOE_UALINK_DIRECTORY = std::string_view("/device/ualink");
 constexpr auto kUALOE_LINK_TYPE = std::string_view("link_type");
 constexpr auto kUALOE_ACCEL_ID = std::string_view("accel_id");
