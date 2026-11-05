@@ -13,10 +13,14 @@
 #include <hip/hip_runtime.h>
 #include <hsa/hsa_ext_amd.h>
 #include <rccl/rccl.h>
+#include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <iterator>
@@ -175,7 +179,8 @@ static bool xgmiFullMesh(const std::vector<int>& devices)
 // Checks the p2p summary lines of a report covering one communicator per device group (groups of equal size).
 // On a full XGMI mesh each communicator verifies all of its N * (N - 1) directed pairs. Elsewhere only the tested
 // edges are known: each summary must still be [OK] and bounded by the pair count, and a communicator without
-// eligible pairs prints no summary. A report with no summary at all tested nothing, so the case is skipped.
+// eligible pairs prints no summary. A report with no summary at all tested nothing, so the case is skipped and
+// runDiagCases() reports the skip on the parent test.
 static void expectEdgeSummaries(const DiagReport& report, const std::vector<std::vector<int>>& groups)
 {
     const int nRanks  = static_cast<int>(groups.front().size());
@@ -292,10 +297,24 @@ struct DiagCase
     std::function<void()> body;
 };
 
+// Path of the file in which isolated cases record that they skipped, set by the parent for its children. The
+// runner reports a skipped case to the parent like a passed one, and executeAllTests() discards the results.
+static const char* const kDiagSkipFileEnvVar = "RCCL_DIAG_TEST_SKIP_FILE";
+
+// Body of an isolated case: appends the case name to the skip file when the case skipped. A case that also
+// failed a check is not skipped for gtest, and the runner reports it as failed.
+static void runCaseRecordingSkip(const std::string& name, const std::function<void()>& body)
+{
+    body();
+    const char* path = std::getenv(kDiagSkipFileEnvVar);
+    if(testing::Test::IsSkipped() && path != nullptr)
+        std::ofstream(path, std::ios::app) << name << "\n";
+}
+
 // Runs, each in its own process, the cases that fit the visible GPU count. The GPU count is checked here in the
-// parent: RUN_ISOLATED_TESTS-style runs end in EXPECT_TRUE(), so a GTEST_SKIP() inside an isolated case is reported
-// as a pass. When no case fits, gtest reports a real skip. The re-exec'd child registers every case, so the runner
-// finds the one it was started for.
+// parent, so that when no case fits gtest reports a real skip. A case that skips in its process is reported as a
+// skip of the parent test. The re-exec'd child registers every case, so the runner finds the one it was started
+// for.
 static void runDiagCases(const std::vector<DiagCase>& cases)
 {
     const bool child = isIsolatedChild();
@@ -309,16 +328,43 @@ static void runDiagCases(const std::vector<DiagCase>& cases)
             notRun += std::string(" ") + c.name + " (>= " + std::to_string(c.minGpus) + " GPUs)";
             continue;
         }
-        ProcessIsolatedTestRunner::registerTest(ProcessIsolatedTestRunner::TestConfig(c.name, c.body)
-                                                    .withNumGpus(kMaxGpus)
-                                                    .withTimeout(std::chrono::seconds(kDiagTimeoutSeconds)));
+        const std::string name = c.name;
+        ProcessIsolatedTestRunner::registerTest(
+            ProcessIsolatedTestRunner::TestConfig(name, [name, body = c.body]() { runCaseRecordingSkip(name, body); })
+                .withNumGpus(kMaxGpus)
+                .withTimeout(std::chrono::seconds(kDiagTimeoutSeconds)));
         ++registered;
     }
     if(registered == 0)
         GTEST_SKIP() << nGpus << " usable GPUs, not run:" << notRun;
     if(!notRun.empty())
         std::cout << "[ INFO     ] " << nGpus << " usable GPUs, not run:" << notRun << std::endl;
+
+    // In a child, executeAllTests() runs the case it was started for and exits.
+    std::string skipFile;
+    if(!child)
+    {
+        skipFile = testing::TempDir() + "rccl-diag-skips-XXXXXX";
+        const int fd = mkstemp(skipFile.data());
+        if(fd == -1)
+        {
+            ProcessIsolatedTestRunner::clear();
+            FAIL() << "mkstemp(" << skipFile << "): " << std::strerror(errno);
+        }
+        close(fd);
+        setenv(kDiagSkipFileEnvVar, skipFile.c_str(), 1);
+    }
     EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests()) << "One or more isolated tests failed";
+    unsetenv(kDiagSkipFileEnvVar);
+
+    std::ifstream in(skipFile);
+    std::string skipped;
+    for(std::string name; in >> name;)
+        skipped += " " + name;
+    in.close();
+    unlink(skipFile.c_str());
+    if(!skipped.empty())
+        GTEST_SKIP() << "isolated cases skipped, see their output above:" << skipped;
 }
 
 class Diagnostics : public ::testing::Test
