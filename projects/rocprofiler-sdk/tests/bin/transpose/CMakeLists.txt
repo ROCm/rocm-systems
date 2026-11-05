@@ -40,7 +40,10 @@ function(transpose_build_target _NAME _COMPILE_DEFS _LINK_TARGETS)
     add_executable(${_NAME})
     target_sources(${_NAME} PRIVATE transpose.cpp)
     target_compile_definitions(${_NAME} PRIVATE ${_COMPILE_DEFS})
-    target_compile_options(${_NAME} PRIVATE -Wpedantic)
+    # PC sampling validation decodes sampled instructions and maps them to
+    # source lines via the code object's line table. Line tables must be
+    # emitted even in build types that do not include debug info.
+    target_compile_options(${_NAME} PRIVATE -Wpedantic -gline-tables-only)
     target_link_libraries(
         ${_NAME} PRIVATE Threads::Threads rocprofiler-sdk::tests-build-flags
                          ${_LINK_TARGETS})
