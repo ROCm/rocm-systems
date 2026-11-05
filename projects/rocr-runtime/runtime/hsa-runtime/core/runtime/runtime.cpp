@@ -2167,6 +2167,8 @@ class PollSentinel {
           gen = generation_;
           nap_us = kPollNapFloorUs;
         }
+        // Held across the scan on purpose: after Disarm() returns, AsyncEventsLoop may
+        // Release() these signals, and Arm() swaps entries_ under the same lock.
         for (const auto& e : entries_) {
           if (CheckSignalCondition(hsa_signal_handle(e.signal)->LoadRelaxed(), e.cond, e.value)) {
             armed_ = false;
