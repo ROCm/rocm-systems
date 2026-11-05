@@ -852,6 +852,13 @@ track_file_store::has_events(uint32_t global_id) const
 }
 
 bool
+track_file_store::has_local_events(uint32_t source_index, uint32_t local_id) const
+{
+    const track_entry_t* entry = find_local(source_index, local_id);
+    return entry != nullptr && entry->kind == payload_t::events;
+}
+
+bool
 track_file_store::has_samples(uint32_t global_id) const
 {
     const track_entry_t* entry = find_global(global_id);

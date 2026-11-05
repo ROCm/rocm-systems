@@ -444,6 +444,28 @@ ph_ctx::place_of(uint32_t track_id) const
     return &found->second;
 }
 
+ph_ctx::trace_source_t*
+ph_ctx::source_for_event(uint64_t event_id, ph_event_type_t event_type)
+{
+    const auto type = to_reader_event_type(event_type);
+    if(!type.has_value() || m_sources.empty()) return nullptr;
+    if(m_sources.size() == 1) return &source_at(0);
+
+    profiler_hub::reader_types::timeline_event_t query;
+    query.unique_identifier = { .id   = static_cast<size_t>(event_id),
+                                .type = type.value() };
+    for(uint32_t index = 0; index < m_sources.size(); ++index)
+    {
+        trace_source_t& held  = source_at(index);
+        const auto      track = held.pool->with_connection(
+            [&query](profiler_hub::common::connection& connection) {
+                return connection.reader().track_of(query);
+            });
+        if(track) return &held;
+    }
+    return nullptr;
+}
+
 ph_optional_uint64_t
 ph_ctx::global_track_id(const trace_source_t& source,
                         const profiler_hub::reader_types::track_info_ptr_t& track) const
@@ -840,18 +862,22 @@ ph_ctx::get_correlated_events(uint32_t        track_id,
                               uint64_t        event_id,
                               ph_event_type_t event_type)
 {
+    (void) track_id;
     LOG_DEBUG("[Profiler-Hub] Get correlated events. Event id {}, type {}",
               event_id,
               static_cast<int>(event_type));
 
-    const placed_track_t* place = place_of(track_id);
-    if(place == nullptr) return std::nullopt;
-    trace_source_t& held = source_at(place->source_index);
+    trace_source_t* held_ptr = source_for_event(event_id, event_type);
+    if(held_ptr == nullptr)
+    {
+        return ph_event_list_t{ .list_size = 0, .events = nullptr };
+    }
+    trace_source_t& held = *held_ptr;
 
     const auto type = to_reader_event_type(event_type);
     if(!type.has_value())
     {
-        return std::nullopt;
+        return ph_event_list_t{ .list_size = 0, .events = nullptr };
     }
 
     profiler_hub::reader_types::timeline_event_t source;
@@ -896,10 +922,7 @@ ph_ctx::get_correlated_events(uint32_t        track_id,
                 }
             }
         }
-        if(!depth.has_value() || !placed_track)
-        {
-            return std::nullopt;
-        }
+        if(!depth.has_value() || !placed_track) continue;
 
         const ph_optional_uint64_t global = global_track_id(held, placed_track);
         converted.push_back(ph_event_t{
@@ -929,16 +952,17 @@ ph_ctx::get_correlated_events(uint32_t        track_id,
 ph_call_stack_t
 ph_ctx::get_call_stack(uint32_t track_id, uint64_t event_id, ph_event_type_t event_type)
 {
+    (void) track_id;
     LOG_DEBUG("[Profiler-Hub] Get call stack. Event id {}, type {}",
               event_id,
               static_cast<int>(event_type));
 
-    const placed_track_t* place = place_of(track_id);
-    if(place == nullptr)
+    trace_source_t* origin_ptr = source_for_event(event_id, event_type);
+    if(origin_ptr == nullptr)
     {
         return ph_call_stack_t{ .list_size = 0, .frames = nullptr };
     }
-    trace_source_t& origin = source_at(place->source_index);
+    trace_source_t& origin = *origin_ptr;
 
     const auto type = to_reader_event_type(event_type);
     if(!type.has_value())

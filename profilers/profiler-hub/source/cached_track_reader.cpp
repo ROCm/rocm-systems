@@ -349,10 +349,17 @@ cached_track_reader::nesting_depth_of(const reader_types::track_info_ptr_t& trac
         return std::nullopt;
     }
 
-    if(m_store != nullptr && m_store->ready())
+    if(m_store != nullptr && m_store->ready() &&
+       m_store->has_local_events(m_store_source, static_cast<uint32_t>(track->id)))
     {
-        return m_store->nesting_depth_of(
-            m_store_source, static_cast<uint32_t>(track->id), id, type);
+        try
+        {
+            return m_store->nesting_depth_of(
+                m_store_source, static_cast<uint32_t>(track->id), id, type);
+        }
+        catch(const std::exception&)
+        {
+        }
     }
 
     const auto             whole = events(track, 0, 0);

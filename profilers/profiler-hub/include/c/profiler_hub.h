@@ -336,8 +336,8 @@ extern "C"
      * @note ph_event_t::nesting_depth is the depth of that event on its own
      *       track, the same value ph_get_track_events() reports.
      *       ph_event_t::track_id is ph_track_t::id of that track. The track is
-     *       loaded if it was not loaded already. A result is not returned when
-     *       an event cannot be placed on a track.
+     *       loaded if it was not loaded already. An event that cannot be
+     *       placed on a track is left out of the list.
      */
     ph_result_t ph_get_correlated_events(ph_ctx_t          ctx,
                                          const ph_event_t* event,

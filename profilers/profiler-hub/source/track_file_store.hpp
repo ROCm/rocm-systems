@@ -98,6 +98,7 @@ public:
     [[nodiscard]] bool finish_write();
 
     [[nodiscard]] bool     has_events(uint32_t global_id) const;
+    [[nodiscard]] bool     has_local_events(uint32_t source_index, uint32_t local_id) const;
     [[nodiscard]] bool     has_samples(uint32_t global_id) const;
     [[nodiscard]] uint32_t nesting_depth(uint32_t global_id) const;
     [[nodiscard]] uint64_t record_count(uint32_t global_id) const;
