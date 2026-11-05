@@ -73,6 +73,8 @@ def _ctype(t: cindex.Type, follow_pointer: bool = True, depth: int = 0) -> CType
         return CType(spelling, Kind.ENUM, size, enum_signed=underlying in _SIGNED)
     if kind == TK.POINTER:
         target = t.get_pointee()
+        if target.kind == TK.INVALID:  # a typedef of a pointer, such as hipStream_t
+            target = c.get_pointee()
         target_kind = target.get_canonical().kind
         pointee = _ctype(target, False, depth + 1) if follow_pointer else None
         return CType(

@@ -71,6 +71,11 @@ GENERATE_ERRORS = [
         "uncapped names 'size', which is not a string field",
     ),
     (
+        _with_api("fakeLoad", {"out": ["stream"]}),
+        "out parameter 'stream' points to a type with no field mapping: "
+        "struct 'fakeStream' (incomplete",
+    ),
+    (
         _with_api("fakeWide", {"out": ["props"]}),
         "out parameter 'props' points to a type with no field mapping",
     ),
