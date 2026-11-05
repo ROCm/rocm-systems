@@ -447,6 +447,10 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'waitcnt')
     if name == 'S_SET_VGPR_MSB':
         return InstructionSemantics(name, 'set_vgpr_msb')
+    if name == 'S_ROUND_MODE':
+        return InstructionSemantics(name, 'round_mode')
+    if name == 'S_DENORM_MODE':
+        return InstructionSemantics(name, 'denorm_mode')
     # RDNA4 split-wait instructions (GFX12 — no S_WAITCNT; each waits on a
     # single counter whose threshold is the immediate operand directly).
     _SPLIT_WAIT = {
@@ -1873,23 +1877,24 @@ _SMEM_NARROW_LOAD_MAP = {
     'U16': (2, False),
 }
 
-# S_ATOMIC_* operations the CDNA ISAs define and the scalar pipeline supports.
-# Other flat atomic operations stay 'nop' even when the flat tables know them.
+# S_ATOMIC_* and S_BUFFER_ATOMIC_* operations the CDNA ISAs define and the
+# scalar pipeline supports, spelled as in the mnemonic without _X2. Any other
+# scalar atomic derives nop, even when the flat tables know its operation.
 _SMEM_ATOMIC_OPS = frozenset(
     {
-        'swap',
-        'cmpswap',
-        'add',
-        'sub',
-        'smin',
-        'umin',
-        'smax',
-        'umax',
-        'and',
-        'or',
-        'xor',
-        'inc',
-        'dec',
+        'SWAP',
+        'CMPSWAP',
+        'ADD',
+        'SUB',
+        'SMIN',
+        'UMIN',
+        'SMAX',
+        'UMAX',
+        'AND',
+        'OR',
+        'XOR',
+        'INC',
+        'DEC',
     }
 )
 
@@ -1924,23 +1929,20 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
     if 'DCACHE' in upper or upper in ('S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'nop')
 
-    if '_ATOMIC_' in upper:
-        if upper.startswith('S_ATOMIC_'):
-            suffix = upper[len('S_ATOMIC_') :]
-            is_x2 = suffix.endswith('_X2')
-            if is_x2:
-                suffix = suffix[:-3]
-            info = _derive_flat_atomic_info(suffix, is_x2)
-            if info and info[0] in _SMEM_ATOMIC_OPS:
-                op, elem_size, data_dw_actual = info
-                return InstructionSemantics(
-                    name,
-                    'smem_atomic',
-                    operation=op,
-                    elem_size=elem_size,
-                    num_elems=data_dw_actual,
-                )
-        # Scalar buffer atomics are not currently simulated.
+    if upper.startswith(('S_ATOMIC_', 'S_BUFFER_ATOMIC_')):
+        suffix = upper.partition('_ATOMIC_')[2]
+        is_x2 = suffix.endswith('_X2')
+        if is_x2:
+            suffix = suffix[:-3]
+        if suffix in _SMEM_ATOMIC_OPS:
+            op, elem_size, data_dw_actual = _derive_flat_atomic_info(suffix, is_x2)
+            return InstructionSemantics(
+                name,
+                'smem_atomic',
+                operation=op,
+                elem_size=elem_size,
+                num_elems=data_dw_actual,
+            )
         return InstructionSemantics(name, 'nop')
 
     is_store = '_STORE_' in upper or '_SCRATCH_STORE_' in upper

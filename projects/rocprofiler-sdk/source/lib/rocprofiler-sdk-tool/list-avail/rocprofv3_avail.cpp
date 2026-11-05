@@ -32,6 +32,8 @@
 #include "lib/output/agent_info.hpp"
 #include "lib/output/counter_info.hpp"
 #include "lib/output/metadata.hpp"
+#include "lib/output/output_config.hpp"
+#include "lib/output/output_stream.hpp"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -112,7 +114,8 @@ get_counter_info(rocprofiler_counter_id_t counter_id)
     return counter_info;
 }
 
-auto agent_json = std::map<rocprofiler_agent_id_t, std::string>{};
+auto agent_json          = std::map<rocprofiler_agent_id_t, std::string>{};
+auto list_avail_filename = std::string{};
 
 ROCPROFILER_EXTERN_C_INIT
 
@@ -321,6 +324,44 @@ agent_info(uint64_t agent_handle, const char** agent_info_str)
         }
     }
     *agent_info_str = agent_json.at(rocprofiler_agent_id_t{agent_handle}).c_str();
+}
+
+rocprofiler_status_t
+list_avail_output_filename(const char*  output_path,
+                           const char*  output_file,
+                           const char** filename) noexcept
+{
+    if(filename == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    try
+    {
+        initialize_logging();
+
+        auto cfg = tool::output_config{};
+        if(output_path != nullptr && *output_path != '\0') cfg.output_path = output_path;
+        if(output_file != nullptr && *output_file != '\0') cfg.output_file = output_file;
+
+        // resolving aborts on a path that is not a directory, which a listing
+        // asked for from the command line should report and return instead
+        if(auto invalid = tool::check_output_path(cfg, "list_avail", "txt"))
+        {
+            ROCP_ERROR << fmt::format("output path ({}) already exists and is not a directory",
+                                      *invalid);
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+
+        list_avail_filename = tool::get_output_filename(cfg, "list_avail", "txt");
+        *filename           = list_avail_filename.c_str();
+
+        return ROCPROFILER_STATUS_SUCCESS;
+    } catch(const std::exception& e)
+    {
+        ROCP_ERROR << "[rocprofiler] " << __FUNCTION__ << " threw an exception :: " << e.what();
+        return ROCPROFILER_STATUS_ERROR;
+    } catch(...)
+    {
+        return ROCPROFILER_STATUS_ERROR;
+    }
 }
 
 ROCPROFILER_EXTERN_C_FINI

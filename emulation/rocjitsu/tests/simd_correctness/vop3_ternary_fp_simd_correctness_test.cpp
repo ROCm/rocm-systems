@@ -531,12 +531,14 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
         fx.wf->set_mode_raw(test.mode);
         amdgpu::ScopedSimdFastPathTracker tracker;
         ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
-        if (force_scalar)
+        if (force_scalar) {
           EXPECT_TRUE(tracker.no_tracked_path_executed())
               << test.name << ": forced-scalar execution used SIMD";
-        else
+        } else if (test.arch != ROCJITSU_CODE_ARCH_RDNA3) {
+          // RDNA3 uses rj-arith, whose SIMD paths do not use the legacy tracker.
           EXPECT_TRUE(tracker.only_tracked_path_executed(test.expected_simd_path))
               << test.name << ": eligible execution did not use the ternary F16 SIMD path";
+        }
         for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
           const uint32_t actual = fx.cu->read_vgpr(vb + kDstVgpr32, lane);
           if (!(exec & (1ULL << lane))) {

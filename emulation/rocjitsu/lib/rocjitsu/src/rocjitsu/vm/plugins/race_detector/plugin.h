@@ -25,7 +25,7 @@ namespace rocjitsu::plugins::race_detector {
 struct MarkedInstruction {
   InstructionSnapshot instruction;
   int wave;
-  int lane; // -1 for scalar
+  int lane; // -1 for no lane: a scalar access or a tensor DMA transfer.
 };
 
 /// Retains the last N pushed values. Elements are never default-constructed.
@@ -83,6 +83,7 @@ public:
 
   bool observes_sgpr_reads() const override { return true; }
   bool observes_memory_routing() const override { return true; }
+  bool observes_tensor_dma_issue() const override { return true; }
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
 
@@ -92,6 +93,10 @@ public:
 
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
                                   const Instruction &inst, amdgpu::Wavefront &wf) override;
+
+  /// Register an issued tensor DMA instruction's LDS side as an event on TENSORCNT.
+  void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &issue,
+                               const amdgpu::Wavefront &wf) override;
 
   void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override;

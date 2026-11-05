@@ -49,6 +49,10 @@ ncclResult_t ncclLaunchKernelAfter_NoCuda(struct ncclComm* comm, struct ncclKern
 ncclResult_t ncclLaunchFinish(struct ncclComm* comm);
 ncclResult_t ncclValidateCollConfigLaunchCompletionEvents(struct ncclComm* comm);
 
+// Biased so the default stream (nullptr) tags as 1, leaving 0 free as the "no launch yet"
+// sentinel. See ncclComm::lastStreamTag.
+static inline uintptr_t ncclStreamTag(cudaStream_t s) { return (uintptr_t)s + 1; }
+
 // Addon backends launch onto the user's stream themselves instead of going through doLaunches, which is what
 // makes comm->cudaDev current and installs the cross-stream dependency. Bracket such a launch with these.
 //
