@@ -5444,25 +5444,36 @@ struct ScopedP2pCeEnv {
 // p2pChunkSize is the single-node default (512 KiB), so the SIMPLE estimate is 1
 // channel at or below 64 KiB/peer. nChannelsMax is 1 on purpose: the bug is the
 // protocol choice, not how many channels the LL recompute would then stripe.
+struct Gfx94P2pLlOpts {
+  int cudaArch = 940;
+  int nNodes = 1;
+  int isAllNvlink = 1;
+  bool ll128OptIn = false;
+};
+
 struct Gfx94P2pLlScene {
   BatchPlanComm bp;
   std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
   std::vector<ncclChannelPeer> peers;
   std::vector<ncclChannelPeer*> peerSlots;
   char llBuf[8]{};
+  char ll128Buf[8]{};
   char sendMem[8]{};
   char recvMem[8]{};
   int planTotalTasks[2]{1, 1};
 
-  explicit Gfx94P2pLlScene(int cudaArch) : bp(/*nNodes=*/1, cudaArch) {
+  explicit Gfx94P2pLlScene(Gfx94P2pLlOpts opts) : bp(opts.nNodes, opts.cudaArch) {
     InstallSendRecvDevFuncIds();
     ncclComm* c = bp.c();
     c->rank = 0;
     c->nRanks = 2;
-    c->nNodes = 1;
-    c->cudaArch = cudaArch;
-    c->isAllNvlink = 1;
-    c->allocP2pNetLLBuffers = 0;
+    c->nNodes = opts.nNodes;
+    c->maxLocalRanks = 2;  // nNodes > 1 divides the P2P channel base by this
+    c->cudaArch = opts.cudaArch;
+    c->isAllNvlink = opts.isAllNvlink;
+    c->allocP2pNetLLBuffers = opts.ll128OptIn;
+    c->ll128LineElems = 8;
+    c->ll128DataElems = 7;
     c->p2pnChannels = 1;
     c->p2pnChannelsPerPeer = 1;
     c->p2pChannelShiftSize = 0;
@@ -5470,16 +5481,18 @@ struct Gfx94P2pLlScene {
     c->buffSizes[NCCL_PROTO_LL] = 1 << 20;
     c->buffSizes[NCCL_PROTO_LL128] = 1 << 20;
     c->buffSizes[NCCL_PROTO_SIMPLE] = 1 << 20;
-    SetSingleGpuArch(topo.get(), cudaArch == 950 ? "gfx950" : "gfx942");
-    topo->ll128Enabled = false;
+    SetSingleGpuArch(topo.get(), opts.cudaArch == 950 ? "gfx950" : "gfx942");
+    topo->ll128Enabled = opts.ll128OptIn;
     c->topo = topo.get();
 
     peers.resize(2);
     peerSlots.resize(2);
     for (int i = 0; i < 2; ++i) {
       peerSlots[i] = &peers[i];
-      for (int ci = 0; ci < NCCL_MAX_CONNS; ++ci)
+      for (int ci = 0; ci < NCCL_MAX_CONNS; ++ci) {
         peers[i].send[ci].conn.buffs[NCCL_PROTO_LL] = peers[i].recv[ci].conn.buffs[NCCL_PROTO_LL] = llBuf;
+        peers[i].send[ci].conn.buffs[NCCL_PROTO_LL128] = peers[i].recv[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
+      }
     }
     c->channels[0].peers = peerSlots.data();
   }
@@ -5836,13 +5849,19 @@ void PinP2pLlThreshold(bool userSet) {
   SetParam("P2P_LL_THRESHOLD", 4096);
 }
 
-void ExpectGfx94RecvProtoLL(int cudaArch, ssize_t bytes, int protoLL) {
-  Gfx94P2pLlScene sc(cudaArch);
-  ASSERT_EQ(ncclSuccess, sc.add(bytes)) << "arch=" << cudaArch << " bytes=" << bytes;
+void ExpectGfx94RecvProtoLL(Gfx94P2pLlOpts opts, ssize_t bytes, int protoLL) {
+  Gfx94P2pLlScene sc(opts);
+  ASSERT_EQ(ncclSuccess, sc.add(bytes)) << "arch=" << opts.cudaArch << " bytes=" << bytes;
   auto* work = sc.p2pWork();
-  ASSERT_NE(nullptr, work) << "arch=" << cudaArch << " bytes=" << bytes;
-  EXPECT_EQ(protoLL, int(work->recvProtoLL)) << "arch=" << cudaArch << " bytes=" << bytes;
-  EXPECT_EQ(protoLL, int(work->sendProtoLL)) << "arch=" << cudaArch << " bytes=" << bytes;
+  ASSERT_NE(nullptr, work) << "arch=" << opts.cudaArch << " bytes=" << bytes;
+  EXPECT_EQ(protoLL, int(work->recvProtoLL)) << "arch=" << opts.cudaArch << " bytes=" << bytes;
+  EXPECT_EQ(protoLL, int(work->sendProtoLL)) << "arch=" << opts.cudaArch << " bytes=" << bytes;
+}
+
+void ExpectGfx94RecvProtoLL(int cudaArch, ssize_t bytes, int protoLL) {
+  Gfx94P2pLlOpts opts;
+  opts.cudaArch = cudaArch;
+  ExpectGfx94RecvProtoLL(opts, bytes, protoLL);
 }
 
 TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94UnsetLlThreshold_WidensLlThrough64KiB) {
@@ -5865,6 +5884,21 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94UserLlThreshold_KeepsPerChannelRule) 
   PinP2pLlThreshold(/*userSet=*/true);
   ExpectGfx94RecvProtoLL(940, 16 << 10, 0);
   ExpectGfx94RecvProtoLL(950, 16 << 10, 0);
+}
+
+// 32 KiB is inside the widen (stock cutoff is 4 KiB). Each gate that is off must
+// stay SIMPLE; dropping nNodes, isAllNvlink, or !useLL128OptIn would pick LL.
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94WidenGates_StaySimple) {
+  PinP2pLlThreshold(/*userSet=*/false);
+  Gfx94P2pLlOpts multiNode;
+  multiNode.nNodes = 2;
+  ExpectGfx94RecvProtoLL(multiNode, 32 << 10, 0);
+  Gfx94P2pLlOpts pcie;
+  pcie.isAllNvlink = 0;
+  ExpectGfx94RecvProtoLL(pcie, 32 << 10, 0);
+  Gfx94P2pLlOpts ll128;
+  ll128.ll128OptIn = true;
+  ExpectGfx94RecvProtoLL(ll128, 32 << 10, 0);
 }
 
 // ===========================================================================
