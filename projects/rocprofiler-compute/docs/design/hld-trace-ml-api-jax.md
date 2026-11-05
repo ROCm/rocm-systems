@@ -78,21 +78,18 @@ marker and the kernels launched inside its range share one correlation id;
 
 ### Where the range is marked
 
-The launcher replaces `jax.jit` / `jax.pmap` at install. Compilation is left
-untouched; the wrapper sits on the compiled callable. Each call opens a ROCTX
-range named `jax.jit.<fn>` or `jax.pmap.<fn>` on that thread, runs the
-executable, and closes the range when the callable returns.
+Wrap `jax.jit`, `jax.pmap`, and eager dispatch. A nested or inner call does
+not open a second range; its kernels stay under the outer marker. We do not
+wrap `jnp.*`.
 
-A nested `jit` is inlined into the outer module, so it is not a second
-`Execute`. The inner wrapper does not open a range; those kernels stay under
-the outer `jax.jit.<fn>`. A direct call to the inner function is its own
-range.
+`jax.jit` / `jax.pmap` wrap the compiled callable. Compilation is unmarked.
+Each outer call opens `jax.jit.<fn>` or `jax.pmap.<fn>`, runs the executable,
+and closes the range when the callable returns. A direct call to an inner
+jitted function is its own outer call, so it gets its own range.
 
-Eager ops do not go through those callables. `jnp`, `x @ x`, and `jax.lax`
-meet at one eager dispatch. The launcher wraps that hook once. If a JAX range
-is already open, or JAX is tracing a `jit`, the hook is unchanged. Otherwise
-it opens `jax.{primitive}` around the dispatch, which compiles a one-op
-module and runs `Execute`. We do not wrap `jnp.*`.
+Eager ops (`x @ x`, `jnp.sum`, `jax.lax`) go through the eager dispatch hook.
+If no JAX range is open, that hook opens `jax.{primitive}` around the
+one-op `Execute`.
 
 JAX dispatch is asynchronous: the callable returns before the GPU finishes.
 The range encloses the host-side launch enqueue, not GPU completion. Those
@@ -171,9 +168,9 @@ nodes in the same form.
 
 ## Validation, security and debuggability
 
-- **Marker wrapper.** A call to a `jax.jit` / `jax.pmap` function emits one
-  range named `jax.jit.<fn>` or `jax.pmap.<fn>`. An eager op emits
-  `jax.{primitive}`; the eager hook during `jit` tracing does not.
+- **Marker wrapper.** An outer `jax.jit` / `jax.pmap` call emits one range
+  named `jax.jit.<fn>` or `jax.pmap.<fn>`. An outer eager op emits
+  `jax.{primitive}`. Nested or inner calls do not emit a second range.
 - **Call tree.** On a profiled workload, the kernels launched by a call appear
   under that marker, with the caller `file:line` and the call's dispatch
   count and GPU time.
