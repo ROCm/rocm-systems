@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/kfd_address_space.h"
 #include "rocjitsu/vm/amdgpu/legacy_address_space.h"
 #include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 
@@ -47,7 +47,7 @@ TEST(LegacyPageTableCacheStateTest, NoOpMutationRestoresLockFreeHits) {
         alarm(10);
         GpuMemory memory("page_cache_noop");
         LegacyAddressSpace space(memory);
-        KfdProcess process(7);
+        KfdAddressSpace process;
         constexpr uint64_t kAddress = 0x40000000;
         std::array<uint8_t, kLegacyPageSize> page{};
         page[0] = 0x37;

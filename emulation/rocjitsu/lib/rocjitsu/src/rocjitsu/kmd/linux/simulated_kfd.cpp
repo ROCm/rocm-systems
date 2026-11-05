@@ -75,6 +75,15 @@ namespace rocjitsu {
 
 namespace {
 
+// Read one element at a time so an untrusted count cannot force an unbounded
+// allocation. n_success is the ABI retry cursor and advances only on success.
+int read_device_id(uint64_t array, uint32_t index, uint32_t &gpu_id) {
+  const uint64_t offset = uint64_t{index} * sizeof(gpu_id);
+  if (array > UINT64_MAX - offset)
+    return -EFAULT;
+  return copy_ioctl_user_buffer(&gpu_id, array + offset, sizeof(gpu_id));
+}
+
 #ifndef CLONE_ARGS_SIZE_VER0
 // Older build headers may lack clone_args even when the host supports clone3.
 // The original 64-byte ABI is sufficient for the flags and pidfd used below.
@@ -154,28 +163,126 @@ amdgpu::Mtype SimulatedKfd::pte_mtype_for_flags(uint32_t flags, bool shared) {
   return amdgpu::Mtype::RW;
 }
 
-bool SimulatedKfd::gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags,
-                              bool sealed_ram) {
-  auto proc = find_process(local_process_id_);
+std::shared_ptr<DrmVm> SimulatedKfd::create_drm_vm(uint32_t render_minor) {
+  if (!handles_drm_render_minor(render_minor))
+    return {};
+  const auto ordinal = gpu_ordinal_for_render_minor(render_minor);
+  if (!ordinal)
+    return {};
+  auto &gpu = gpus_[*ordinal];
+  if (!gpu.soc || !gpu.soc->memory())
+    return {};
+  const uint64_t vmid = next_drm_vmid_.fetch_add(1, std::memory_order_relaxed);
+  if (vmid > UINT32_MAX)
+    return {};
+  auto reporter = std::make_shared<GpuFaultReporter>(this, gpu.gpu_id, find_local_process(),
+                                                     static_cast<uint32_t>(vmid));
+  auto vm =
+      std::make_shared<DrmVm>(gpu.soc->gpu_vm(), gpu.soc->memory(), *ordinal,
+                              static_cast<uint32_t>(vmid), !daemon_mode_, std::move(reporter));
+  return vm->address_space() ? vm : nullptr;
+}
+
+int SimulatedKfd::acquire_vm(uint32_t gpu_id, const std::shared_ptr<DrmFileState> &file) {
+  // A client descriptor is resolved by the interposer, never by the daemon's fd table.
+  if (daemon_mode_)
+    return -EOPNOTSUPP;
+  auto proc = find_local_process();
   if (!proc)
+    return -ESRCH;
+  if (!find_gpu(gpu_id))
+    return -EINVAL;
+  const uint32_t ordinal = gpu_ordinal(gpu_id);
+  if (!file || !file->id || file->backend_lease.local().get() != this)
+    return -EINVAL;
+  const auto &vm = file->vm;
+  if (!vm || vm->gpu_ordinal != ordinal || !vm->belongs_to(gpus_[ordinal].soc->gpu_vm()))
+    return -EINVAL;
+  std::lock_guard op_lock(proc->op_mutex_);
+  if (proc->event_state_.is_closing())
+    return -ESRCH;
+  auto &state = proc->gpu(ordinal);
+  if (state.acquired_drm_file)
+    return state.acquired_drm_file == file ? 0 : -EBUSY;
+  // Legacy direct-driver queues have already captured their fallback VM. Do not
+  // silently change their translation context after they have been created.
+  {
+    std::lock_guard alloc_lock(proc->alloc_mutex_);
+    for (const auto &[_, queue] : proc->queue_doorbell_map_)
+      if (queue.gpu_ordinal == ordinal)
+        return -EBUSY;
+    // Publish dirty fallback writes while their VMID still resolves. An error
+    // leaves the old binding in place so acquisition can be retried.
+    for (amdgpu::Xcd *xcd : gpus_[ordinal].soc->xcds())
+      if (xcd->l2_cache()->flush_address_space(proc->process_id()) !=
+          amdgpu::VmAccessOutcome::Complete)
+        return -EIO;
+    try {
+      std::vector<KfdAddressSpace::MappingRange> ranges;
+      for (const auto &[_, alloc] : proc->allocations_) {
+        if (!alloc.mapped_gpu_ordinals.contains(ordinal))
+          continue;
+        if (alloc.host_ptr)
+          ranges.push_back({alloc.gpu_va, std::min<uint64_t>(alloc.size, alloc.host_mapping_size)});
+        for (const auto &view : alloc.client_views) {
+          if (!view.backing_gpu_va)
+            continue;
+          const uint64_t offset = *view.backing_gpu_va - alloc.gpu_va;
+          if (offset < alloc.size)
+            ranges.push_back(
+                {*view.backing_gpu_va, std::min<uint64_t>(view.size, alloc.size - offset)});
+        }
+      }
+      for (const auto &view : state.doorbell_views)
+        ranges.push_back({view.gpu_va, state.doorbell_page_size});
+      // The old PTEs describe actual extents, backing ownership and cache policy.
+      // Rebuilding from allocation sizes would expand a partial mmap. Import
+      // transactionally before publishing the binding, preserving it on failure.
+      if (!vm->memory->import_mappings(proc->legacy_address_space_, ranges))
+        return -EBUSY;
+    } catch (const std::bad_alloc &) {
+      return -ENOMEM;
+    }
+    if (state.legacy_address_space)
+      (void)gpus_[ordinal].legacy_vm->unregister_address_space(state.legacy_address_space);
+    state.legacy_address_space = {};
+    state.acquired_drm_file = file;
+    if (auto *reporter = dynamic_cast<GpuFaultReporter *>(vm->fault_reporter()))
+      reporter->bind_process(proc);
+    // The remaining fallback GPUs share one table. Retain only mappings that
+    // still belong to one of them; future FREE/UNMAP follows the new binding.
+    for (const auto &[_, alloc] : proc->allocations_) {
+      if (!alloc.mapped_gpu_ordinals.contains(ordinal))
+        continue;
+      const bool legacy_user = std::ranges::any_of(
+          alloc.mapped_gpu_ordinals, [&](uint32_t mapped) { return !proc->gpu(mapped).drm_vm(); });
+      if (!legacy_user)
+        proc->legacy_address_space_.unmap_pages(alloc.gpu_va, alloc.size);
+    }
+    for (const auto &view : state.doorbell_views)
+      proc->legacy_address_space_.unmap_pages(view.gpu_va, state.doorbell_page_size);
+  }
+  return 0;
+}
+
+bool SimulatedKfd::gem_va_map(const std::shared_ptr<DrmVm> &vm, uint64_t gpu_va, void *host_ptr,
+                              size_t size, uint32_t alloc_flags, bool sealed_ram) {
+  if (!vm)
     return false;
-  // GEM_VA uses the interposer's private read-write dmabuf mapping, whose
-  // lifetime is tied to the GEM entry. It is not the application's CPU alias.
-  map_to_gpu(*proc, gpu_va, host_ptr, size, pte_mtype_for_flags(alloc_flags),
-             sealed_ram ? KfdProcess::HostExtentOwner::DriverSealedRam
-                        : KfdProcess::HostExtentOwner::Driver);
+  vm->memory->map_pages(gpu_va, host_ptr, size, pte_mtype_for_flags(alloc_flags),
+                        sealed_ram ? KfdAddressSpace::HostExtentOwner::DriverSealedRam
+                                   : KfdAddressSpace::HostExtentOwner::Driver);
   return true;
 }
 
-bool SimulatedKfd::gem_va_unmap(uint64_t gpu_va, size_t size) {
-  auto proc = find_process(local_process_id_);
-  if (!proc)
+bool SimulatedKfd::gem_va_unmap(const std::shared_ptr<DrmVm> &vm, uint64_t gpu_va, size_t size) {
+  if (!vm)
     return false;
-  unmap_from_gpu(*proc, gpu_va, size);
+  vm->memory->unmap_pages(gpu_va, size);
   return true;
 }
 
-int SimulatedKfd::submit_pm4(uint32_t render_minor, uint64_t queue_key,
+int SimulatedKfd::submit_pm4(const std::shared_ptr<DrmVm> &vm, uint64_t queue_key,
                              amdgpu::Pm4Submission submission) {
   const auto process = find_process(local_process_id_);
   if (!process)
@@ -183,17 +290,21 @@ int SimulatedKfd::submit_pm4(uint32_t render_minor, uint64_t queue_key,
   std::lock_guard op_lock(process->op_mutex_);
   if (process->event_state_.is_closing())
     return -ENODEV;
-  const auto ordinal = gpu_ordinal_for_render_minor(render_minor);
-  if (!ordinal)
+  if (!vm)
+    return -EINVAL;
+  const uint32_t ordinal = vm->gpu_ordinal;
+  if (ordinal >= gpus_.size())
     return -ENODEV;
+  if (!vm->belongs_to(gpus_[ordinal].soc->gpu_vm()))
+    return -EINVAL;
   std::lock_guard lock(pm4_mutex_);
   auto it = pm4_queues_.find(queue_key);
   if (it == pm4_queues_.end()) {
-    auto *cp = gpus_[*ordinal].soc->assign_queue_owner_cp(0);
+    auto *cp = gpus_[ordinal].soc->assign_queue_owner_cp(0);
     if (!cp)
       return -ENODEV;
     amdgpu::ComputeQueueConfig queue;
-    queue.address_space = process->gpu(*ordinal).address_space;
+    queue.address_space = vm->address_space();
     queue.process_id = local_process_id_;
     queue.queue_id = next_pm4_queue_id_++;
     const uint32_t queue_id = queue.queue_id;
@@ -308,7 +419,8 @@ struct MappedGpuTranslation {
   void *host_ptr;
   size_t size;
   amdgpu::Mtype mtype;
-  KfdProcess::HostExtentOwner owner;
+  KfdAddressSpace::HostExtentOwner owner;
+  uint32_t gpu_ordinal;
 };
 
 void collect_gpu_backing_overlap(std::vector<GpuBackingOverlap> &overlaps,
@@ -356,45 +468,54 @@ std::vector<MappedGpuTranslation> mapped_gpu_backing_overlaps(const KfdProcess &
                                                               uintptr_t start, uintptr_t end) {
   const auto candidates = gpu_backing_overlaps(proc.allocations_, start, end);
   std::vector<MappedGpuTranslation> mapped;
-  std::shared_lock page_lock(proc.page_table_mutex_);
-  for (const auto &candidate : candidates) {
-    size_t offset = 0;
-    while (offset < candidate.size) {
-      const uint64_t gpu_va = candidate.gpu_va + offset;
-      const uint64_t page_base = gpu_va & ~(KfdProcess::kPageSize - 1);
-      const size_t chunk =
-          std::min<size_t>(KfdProcess::kPageSize - (gpu_va - page_base), candidate.size - offset);
-      const auto page = proc.page_table_.find(gpu_va >> KfdProcess::kPageShift);
-      if (page != proc.page_table_.end()) {
-        for (const auto &extent : page->second.host_extents) {
-          const uint64_t extent_start = page_base + extent.gpu_page_offset;
-          const uint64_t overlap_start = std::max(gpu_va, extent_start);
-          const uint64_t overlap_end =
-              std::min(gpu_va + chunk, extent_start + extent.host_backed_bytes);
-          if (overlap_start >= overlap_end)
-            continue;
-          auto *host_ptr = extent.host_ptr + (overlap_start - extent_start);
-          auto *expected_ptr =
-              static_cast<uint8_t *>(candidate.host_ptr) + (overlap_start - candidate.gpu_va);
-          if (host_ptr != expected_ptr)
-            continue;
-          if (!mapped.empty()) {
-            auto &last = mapped.back();
-            if (last.gpu_va + last.size == overlap_start &&
-                static_cast<uint8_t *>(last.host_ptr) + last.size == host_ptr &&
-                last.mtype == page->second.mtype && last.owner == extent.owner) {
-              last.size += overlap_end - overlap_start;
+  bool inspected_legacy = false;
+  for (uint32_t ordinal = 0; ordinal < proc.gpu_state_.size(); ++ordinal) {
+    const auto *vm = proc.gpu(ordinal).drm_vm();
+    if (!vm && std::exchange(inspected_legacy, true))
+      continue;
+    const KfdAddressSpace &space = vm ? *vm->memory : proc.legacy_address_space_;
+    std::shared_lock page_lock(space.page_table_mutex_);
+    for (const auto &candidate : candidates) {
+      size_t offset = 0;
+      while (offset < candidate.size) {
+        const uint64_t gpu_va = candidate.gpu_va + offset;
+        const uint64_t page_base = gpu_va & ~(KfdAddressSpace::kPageSize - 1);
+        const size_t chunk = std::min<size_t>(KfdAddressSpace::kPageSize - (gpu_va - page_base),
+                                              candidate.size - offset);
+        const auto page = space.page_table_.find(gpu_va >> KfdAddressSpace::kPageShift);
+        if (page != space.page_table_.end()) {
+          for (const auto &extent : page->second.host_extents) {
+            const uint64_t extent_start = page_base + extent.gpu_page_offset;
+            const uint64_t overlap_start = std::max(gpu_va, extent_start);
+            const uint64_t overlap_end =
+                std::min(gpu_va + chunk, extent_start + extent.host_backed_bytes);
+            if (overlap_start >= overlap_end)
               continue;
+            auto *host_ptr = extent.host_ptr + (overlap_start - extent_start);
+            auto *expected_ptr =
+                static_cast<uint8_t *>(candidate.host_ptr) + (overlap_start - candidate.gpu_va);
+            if (host_ptr != expected_ptr)
+              continue;
+            if (!mapped.empty()) {
+              auto &last = mapped.back();
+              if (last.gpu_va + last.size == overlap_start &&
+                  static_cast<uint8_t *>(last.host_ptr) + last.size == host_ptr &&
+                  last.mtype == page->second.mtype && last.owner == extent.owner &&
+                  last.gpu_ordinal == ordinal) {
+                last.size += overlap_end - overlap_start;
+                continue;
+              }
             }
+            mapped.push_back({.gpu_va = overlap_start,
+                              .host_ptr = host_ptr,
+                              .size = overlap_end - overlap_start,
+                              .mtype = page->second.mtype,
+                              .owner = extent.owner,
+                              .gpu_ordinal = ordinal});
           }
-          mapped.push_back({.gpu_va = overlap_start,
-                            .host_ptr = host_ptr,
-                            .size = overlap_end - overlap_start,
-                            .mtype = page->second.mtype,
-                            .owner = extent.owner});
         }
+        offset += chunk;
       }
-      offset += chunk;
     }
   }
   return mapped;
@@ -1006,17 +1127,48 @@ uint32_t SimulatedKfd::mapping_flags_for_handle(uint64_t handle) const {
              : 0;
 }
 
-void SimulatedKfd::map_to_gpu(KfdProcess &proc, uint64_t gpu_va, void *host_ptr, size_t size,
-                              amdgpu::Mtype mtype, KfdProcess::HostExtentOwner owner) {
-  util::Logger::cp("MAP pid=", proc.process_id(), " va=0x", std::hex, gpu_va, " size=0x", size,
-                   std::dec, " mtype=", static_cast<int>(mtype));
-  proc.map_pages(gpu_va, host_ptr, size, mtype, owner);
+amdgpu::LegacyGpuVmAdapter &SimulatedKfd::address_space_adapter(KfdProcess &proc,
+                                                                uint32_t ordinal) {
+  if (auto *vm = proc.gpu(ordinal).drm_vm())
+    return vm->adapter();
+  return *gpus_[ordinal].legacy_vm;
 }
 
-void SimulatedKfd::unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size) {
+void SimulatedKfd::map_to_gpu(KfdProcess &proc, uint64_t gpu_va, void *host_ptr, size_t size,
+                              amdgpu::Mtype mtype, KfdAddressSpace::HostExtentOwner owner,
+                              uint32_t ordinal) {
+  util::Logger::cp("MAP pid=", proc.process_id(), " va=0x", std::hex, gpu_va, " size=0x", size,
+                   std::dec, " mtype=", static_cast<int>(mtype));
+  proc.translation_state(ordinal).map_pages(gpu_va, host_ptr, size, mtype, owner);
+}
+
+void SimulatedKfd::unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size,
+                                  uint32_t ordinal) {
   util::Logger::cp("UNMAP pid=", proc.process_id(), " va=0x", std::hex, gpu_va, " size=0x", size,
                    std::dec);
-  proc.unmap_pages(gpu_va, size);
+  proc.translation_state(ordinal).unmap_pages(gpu_va, size);
+}
+
+void SimulatedKfd::map_allocation_pages(KfdProcess &proc, const KfdProcess::GpuAllocation &alloc,
+                                        void *host_ptr, size_t size,
+                                        KfdAddressSpace::HostExtentOwner owner) {
+  bool mapped_legacy = false;
+  for (uint32_t ordinal : alloc.mapped_gpu_ordinals) {
+    if (!proc.gpu(ordinal).drm_vm() && std::exchange(mapped_legacy, true))
+      continue;
+    map_to_gpu(proc, alloc.gpu_va, host_ptr, size, pte_mtype_for_flags(alloc.flags, alloc.shared),
+               owner, ordinal);
+  }
+}
+
+void SimulatedKfd::unmap_allocation_pages(KfdProcess &proc,
+                                          const KfdProcess::GpuAllocation &alloc) {
+  bool unmapped_legacy = false;
+  for (uint32_t ordinal : alloc.mapped_gpu_ordinals) {
+    if (!proc.gpu(ordinal).drm_vm() && std::exchange(unmapped_legacy, true))
+      continue;
+    unmap_from_gpu(proc, alloc.gpu_va, alloc.size, ordinal);
+  }
 }
 
 void SimulatedKfd::release_allocation_mappings(KfdProcess &proc, KfdProcess::GpuAllocation &alloc) {
@@ -1024,7 +1176,7 @@ void SimulatedKfd::release_allocation_mappings(KfdProcess &proc, KfdProcess::Gpu
   if (alloc.host_ptr || std::ranges::any_of(alloc.client_views, [](const auto &view) {
         return view.backing_gpu_va.has_value();
       }))
-    unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+    unmap_allocation_pages(proc, alloc);
   if (alloc.host_ptr && (alloc.host_mapping_kind == MappingKind::DriverView ||
                          alloc.host_mapping_kind == MappingKind::InternalBacking))
     safe_munmap(alloc.host_ptr, alloc.host_mapping_size);
@@ -1368,9 +1520,9 @@ void *SimulatedKfd::mmap_replacing_client_doorbell_views(void *addr, size_t leng
   }
 
   for (const auto &entry : retired)
-    unmap_from_gpu(*proc, entry.view.gpu_va, entry.page_size);
+    unmap_from_gpu(*proc, entry.view.gpu_va, entry.page_size, entry.gpu_ordinal);
   for (const auto &entry : retired_gpu)
-    unmap_from_gpu(*proc, entry.gpu_va, entry.size);
+    unmap_from_gpu(*proc, entry.gpu_va, entry.size, entry.gpu_ordinal);
 
   void *mapped = safe_mmap(addr, length, prot, flags, fd, offset);
   if (mapped != MAP_FAILED) {
@@ -1380,9 +1532,11 @@ void *SimulatedKfd::mmap_replacing_client_doorbell_views(void *addr, size_t leng
 
   int mmap_errno = errno;
   for (const auto &entry : retired_gpu)
-    map_to_gpu(*proc, entry.gpu_va, entry.host_ptr, entry.size, entry.mtype, entry.owner);
+    map_to_gpu(*proc, entry.gpu_va, entry.host_ptr, entry.size, entry.mtype, entry.owner,
+               entry.gpu_ordinal);
   for (const auto &entry : retired) {
-    map_to_gpu(*proc, entry.view.gpu_va, entry.view.page, entry.page_size, amdgpu::Mtype::UC);
+    map_to_gpu(*proc, entry.view.gpu_va, entry.view.page, entry.page_size, amdgpu::Mtype::UC,
+               KfdAddressSpace::HostExtentOwner::Application, entry.gpu_ordinal);
     proc->gpu_state_[entry.gpu_ordinal].doorbell_views.push_back(entry.view);
   }
   errno = mmap_errno;
@@ -1457,21 +1611,18 @@ void SimulatedKfd::init_command_processors_locked() {
       // Tests register synthetic queues directly with these CPs without the
       // KFD queue ABI. Only those queues use these backing hooks;
       // runtime-created queues obtain their allocation from ROCr's amd_queue_t.
-      cp->set_scratch_backing_resolver([this](uint32_t process_id) -> uint64_t {
+      cp->set_scratch_backing_resolver([this, i](uint32_t process_id) -> uint64_t {
         std::lock_guard<std::mutex> plk(process_mutex_);
         for (auto &[fd, proc] : processes_) {
           if (proc->process_id() == process_id) {
-            for (auto &gs : proc->gpu_state_) {
-              if (gs.scratch_backing_va != 0)
-                return gs.scratch_backing_va << 16;
-            }
+            return proc->gpu(static_cast<uint32_t>(i)).scratch_backing_va << 16;
           }
         }
         return 0;
       });
       cp->set_scratch_backing_allocator(
-          [this](uint32_t process_id, uint64_t gpu_va, size_t size) -> bool {
-            return allocate_scratch_backing(process_id, gpu_va, size);
+          [this, i](uint32_t process_id, uint64_t gpu_va, size_t size) -> bool {
+            return allocate_scratch_backing(process_id, gpu_va, size, static_cast<uint32_t>(i));
           });
       for (auto *cu : cp->compute_units()) {
         const uint32_t gpu_ordinal = static_cast<uint32_t>(i);
@@ -1530,28 +1681,29 @@ bool SimulatedKfd::register_process_address_spaces(const std::shared_ptr<KfdProc
     KfdProcess::PerGpuState &gpu_state = proc->gpu(ordinal);
     auto fault_reporter = std::make_shared<GpuFaultReporter>(this, gpu.gpu_id, proc);
     auto *const fault_reporter_ptr = fault_reporter.get();
-    gpu_state.address_space = gpu.legacy_vm->register_address_space(
+    gpu_state.legacy_address_space = gpu.legacy_vm->register_address_space(
         proc->process_id(),
-        {.page_table = &proc->page_table_,
-         .page_table_mutex = &proc->page_table_mutex_,
-         .page_table_generation = proc->page_table_generation(),
-         .request_mutex = proc->page_table_request_mutex(),
-         .mutation_epoch = proc->page_table_mutation_epoch(),
-         .page_table_cache_state = proc->page_table_cache_state(),
+        {.page_table = &proc->legacy_address_space_.page_table_,
+         .page_table_mutex = &proc->legacy_address_space_.page_table_mutex_,
+         .page_table_generation = proc->legacy_address_space_.page_table_generation(),
+         .request_mutex = proc->legacy_address_space_.page_table_request_mutex(),
+         .mutation_epoch = proc->legacy_address_space_.page_table_mutation_epoch(),
+         .page_table_cache_state = proc->legacy_address_space_.page_table_cache_state(),
          .client_pid = client_pid,
          .client_mem_fd = -1,
          .passthrough = passthrough,
          .fault_reporter = fault_reporter_ptr},
         std::move(fault_reporter));
-    if (!gpu_state.address_space) {
+    if (!gpu_state.address_space()) {
       for (uint32_t registered = 0; registered <= ordinal; ++registered) {
         GpuDevice &registered_gpu = gpus_[registered];
         if (registered_gpu.soc == nullptr)
           continue;
         KfdProcess::PerGpuState &registered_state = proc->gpu(registered);
-        if (registered_state.address_space) {
-          (void)registered_gpu.legacy_vm->unregister_address_space(registered_state.address_space);
-          registered_state.address_space = {};
+        if (registered_state.address_space()) {
+          (void)registered_gpu.legacy_vm->unregister_address_space(
+              registered_state.address_space());
+          registered_state.legacy_address_space = {};
         }
       }
       return false;
@@ -1641,9 +1793,9 @@ void SimulatedKfd::set_process_client_pid(uint32_t process_id, pid_t client_pid)
       if (g.soc == nullptr)
         continue;
       const auto ordinal = static_cast<uint32_t>(&g - gpus_.data());
-      const amdgpu::AddressSpaceHandle address_space = it->second->gpu(ordinal).address_space;
+      const amdgpu::AddressSpaceHandle address_space = it->second->gpu(ordinal).address_space();
       if (address_space)
-        (void)g.legacy_vm->set_client_pid(address_space, client_pid);
+        (void)address_space_adapter(*it->second, ordinal).set_client_pid(address_space, client_pid);
     }
   }
 }
@@ -1698,10 +1850,10 @@ uint32_t SimulatedKfd::open_process(pid_t client_pid) {
         GpuDevice &gpu = gpus_[ordinal];
         if (gpu.soc == nullptr)
           continue;
-        const amdgpu::AddressSpaceHandle address_space = process->gpu(ordinal).address_space;
+        const amdgpu::AddressSpaceHandle address_space = process->gpu(ordinal).address_space();
         if (address_space)
-          (void)gpu.legacy_vm->set_client_mem_fd(address_space,
-                                                 session->second.target_mem_fd.get());
+          (void)address_space_adapter(*process, ordinal)
+              .set_client_mem_fd(address_space, session->second.target_mem_fd.get());
       }
     }
   }
@@ -1841,7 +1993,7 @@ int SimulatedKfd::close(uint32_t process_id) {
   // op_mutex_ — it synchronizes on alloc_mutex_. So the allocation and doorbell
   // teardown below additionally takes alloc_mutex_ to serialize against those
   // paths; op_mutex_ alone does not cover them.
-  std::lock_guard<std::mutex> op_lock(proc.op_mutex_);
+  std::unique_lock<std::mutex> op_lock(proc.op_mutex_);
 
   // Linux kfd_release() only drops the file's kfd_process reference;
   // kfd_process_notifier_release_internal() disables debug when the process mm
@@ -1920,7 +2072,16 @@ int SimulatedKfd::close(uint32_t process_id) {
       queues.push_back(queue_entry.second);
     }
     proc.queue_doorbell_map_.clear();
+  }
 
+  for (const KfdProcess::QueueDoorbellInfo &queue : queues) {
+    if (queue.gpu_ordinal < gpus_.size() && gpus_[queue.gpu_ordinal].soc)
+      (void)gpus_[queue.gpu_ordinal].soc->queue_registry().unregister_queue(
+          queue.queue_handle, amdgpu::QueueCloseMode::ForceCancel);
+  }
+
+  {
+    std::lock_guard<std::mutex> alk(proc.alloc_mutex_);
     if (trace_enabled)
       leaked_handles.reserve(proc.allocations_.size());
     for (auto &[handle, alloc] : proc.allocations_) {
@@ -1933,20 +2094,14 @@ int SimulatedKfd::close(uint32_t process_id) {
     proc.allocations_.clear();
   }
 
-  for (const KfdProcess::QueueDoorbellInfo &queue : queues) {
-    if (queue.gpu_ordinal < gpus_.size() && gpus_[queue.gpu_ordinal].soc)
-      (void)gpus_[queue.gpu_ordinal].soc->queue_registry().unregister_queue(
-          queue.queue_handle, amdgpu::QueueCloseMode::ForceCancel);
-  }
-
   for (uint32_t ordinal = 0; ordinal < gpus_.size(); ++ordinal) {
     GpuDevice &gpu = gpus_[ordinal];
     if (gpu.soc == nullptr)
       continue;
     KfdProcess::PerGpuState &gpu_state = proc.gpu(ordinal);
-    if (gpu_state.address_space) {
-      (void)gpu.legacy_vm->unregister_address_space(gpu_state.address_space);
-      gpu_state.address_space = {};
+    if (gpu_state.address_space() && !gpu_state.drm_vm()) {
+      (void)gpu.legacy_vm->unregister_address_space(gpu_state.address_space());
+      gpu_state.legacy_address_space = {};
     }
     // The process's queues were force-cancelled above, so its waves are drained;
     // drop its device-global GWS table so a later process reusing this rid starts
@@ -1977,7 +2132,7 @@ int SimulatedKfd::close(uint32_t process_id) {
     update_cp_doorbell_base(static_cast<uint32_t>(ord), process_id, nullptr);
     for (const auto &view : doorbell_views) {
       if (view.gpu_va && doorbell_page_size)
-        unmap_from_gpu(proc, view.gpu_va, doorbell_page_size);
+        unmap_from_gpu(proc, view.gpu_va, doorbell_page_size, ord);
       if (view.page != MAP_FAILED && doorbell_page_size)
         safe_munmap(view.page, doorbell_page_size);
     }
@@ -2031,6 +2186,18 @@ int SimulatedKfd::close(uint32_t process_id) {
     // import_dmabuf_ioctl/free_memory_ioctl); its fds were just closed above.
     proc.fd_to_import_handle_.clear();
   }
+
+  // The file owns GEM backing and may initiate final resource cleanup. Keep it
+  // through allocation/doorbell teardown, then release it outside process locks.
+  std::vector<std::shared_ptr<DrmFileState>> retained_files;
+  {
+    std::lock_guard alloc_lock(proc.alloc_mutex_);
+    for (auto &state : proc.gpu_state_)
+      if (state.acquired_drm_file)
+        retained_files.push_back(std::move(state.acquired_drm_file));
+  }
+  op_lock.unlock();
+  retained_files.clear();
 
   return 0;
 }
@@ -2405,7 +2572,8 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
 
     static_cast<void>(new_monitor_mapping.release());
     static_cast<void>(client_mapping.release());
-    map_to_gpu(proc, reinterpret_cast<uint64_t>(ptr), ptr, length, amdgpu::Mtype::UC);
+    map_to_gpu(proc, reinterpret_cast<uint64_t>(ptr), ptr, length, amdgpu::Mtype::UC,
+               KfdAddressSpace::HostExtentOwner::Application, ord);
     update_cp_doorbell_base(ord, proc.process_id(), monitor_ptr);
     return ptr;
   }
@@ -2545,11 +2713,12 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
   // A fixed mapping can replace a surviving tail whose GPU VA lies beyond
   // the new BO prefix. Withdraw that translation before changing host pages.
   for (const auto &entry : retired_gpu)
-    unmap_from_gpu(proc, entry.gpu_va, entry.size);
+    unmap_from_gpu(proc, entry.gpu_va, entry.size, entry.gpu_ordinal);
   auto restore_replaced_backing = [&]() -> void * {
     const int mmap_errno = errno;
     for (const auto &entry : retired_gpu)
-      map_to_gpu(proc, entry.gpu_va, entry.host_ptr, entry.size, entry.mtype, entry.owner);
+      map_to_gpu(proc, entry.gpu_va, entry.host_ptr, entry.size, entry.mtype, entry.owner,
+                 entry.gpu_ordinal);
     errno = mmap_errno;
     return MAP_FAILED;
   };
@@ -2664,8 +2833,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
                       bool(flags & MAP_FIXED), alloc.user_va, alloc.backing_fd);
   });
   // mmap and KFD BOs cover whole pages, including the last partial page.
-  map_to_gpu(proc, alloc.gpu_va, host_ptr, mapped_bytes,
-             pte_mtype_for_flags(alloc.flags, alloc.shared));
+  map_allocation_pages(proc, alloc, host_ptr, mapped_bytes);
 
   return host_ptr;
 }
@@ -2739,16 +2907,21 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
           }
         }
       }
-      for (const auto &gs : proc.gpu_state_)
+      for (uint32_t ordinal = 0; ordinal < proc.gpu_state_.size(); ++ordinal) {
+        const auto &gs = proc.gpu(ordinal);
         for (const auto &view : gs.doorbell_views)
           if (range_contains(addr, *unmapped_span, view.page, gs.doorbell_page_size))
-            unmap_from_gpu(proc, view.gpu_va, gs.doorbell_page_size);
+            unmap_from_gpu(proc, view.gpu_va, gs.doorbell_page_size, ordinal);
+      }
       if (safe_munmap(addr, length) != 0) {
         const int saved_errno = errno;
-        for (const auto &gs : proc.gpu_state_)
+        for (uint32_t ordinal = 0; ordinal < proc.gpu_state_.size(); ++ordinal) {
+          const auto &gs = proc.gpu(ordinal);
           for (const auto &view : gs.doorbell_views)
             if (range_contains(addr, *unmapped_span, view.page, gs.doorbell_page_size))
-              map_to_gpu(proc, view.gpu_va, view.page, gs.doorbell_page_size, amdgpu::Mtype::UC);
+              map_to_gpu(proc, view.gpu_va, view.page, gs.doorbell_page_size, amdgpu::Mtype::UC,
+                         KfdAddressSpace::HostExtentOwner::Application, ordinal);
+        }
         errno = saved_errno;
         return -1;
       }
@@ -2796,11 +2969,12 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
     // Withdraw direct translations before releasing caller-owned pages. A
     // failed libc unmap leaves the old mappings intact and restores them.
     for (const auto &entry : retired_gpu)
-      unmap_from_gpu(proc, entry.gpu_va, entry.size);
+      unmap_from_gpu(proc, entry.gpu_va, entry.size, entry.gpu_ordinal);
     if (safe_munmap(addr, length) != 0) {
       const int saved_errno = errno;
       for (const auto &entry : retired_gpu)
-        map_to_gpu(proc, entry.gpu_va, entry.host_ptr, entry.size, entry.mtype, entry.owner);
+        map_to_gpu(proc, entry.gpu_va, entry.host_ptr, entry.size, entry.mtype, entry.owner,
+                   entry.gpu_ordinal);
       errno = saved_errno;
       return -1;
     }
@@ -2905,8 +3079,9 @@ int SimulatedKfd::get_tile_config_ioctl(void *arg) {
 }
 
 int SimulatedKfd::acquire_vm_ioctl([[maybe_unused]] void *arg) {
-  (void)arg;
-  return 0;
+  // Daemon clients keep the legacy VM; native remote DRM GEM/CS is unsupported.
+  // Local DRM descriptors are resolved and bound by the interposer instead.
+  return daemon_mode_ ? 0 : -EINVAL;
 }
 
 int SimulatedKfd::set_memory_policy_ioctl(void *arg) {
@@ -2971,9 +3146,9 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   alloc.handle = proc.next_handle_++;
   alloc.host_ptr = nullptr;
   alloc.gpu_id = args->gpu_id;
+  alloc.mapped_gpu_ordinals.insert(gpu_ordinal(args->gpu_id));
   alloc.user_va = user_provided_va;
 
-  auto alloc_mtype = pte_mtype_for_flags(args->flags);
   bool is_userptr = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) != 0;
   bool is_doorbell = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) != 0;
   if (is_userptr && !daemon_mode_) {
@@ -2982,7 +3157,7 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
     alloc.host_ptr = reinterpret_cast<void *>(args->mmap_offset);
     alloc.host_mapping_kind = KfdProcess::GpuAllocation::HostMappingKind::Caller;
     alloc.host_mapping_size = alloc.size;
-    map_to_gpu(proc, va, alloc.host_ptr, alloc.size, alloc_mtype);
+    map_allocation_pages(proc, alloc, alloc.host_ptr, alloc.size);
   } else if (!is_doorbell) {
     // Every allocation on this path retains one backing descriptor, even if
     // it is never exported. Fail allocation if that backing cannot be created
@@ -3020,8 +3195,8 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
       alloc.host_mapping_kind = KfdProcess::GpuAllocation::HostMappingKind::InternalBacking;
       alloc.host_mapping_size = alloc.size;
       // Driver-owned: no application alias can change this mapping's protection.
-      map_to_gpu(proc, va, alloc.host_ptr, alloc.size, alloc_mtype,
-                 KfdProcess::HostExtentOwner::Driver);
+      map_allocation_pages(proc, alloc, alloc.host_ptr, alloc.size,
+                           KfdAddressSpace::HostExtentOwner::Driver);
     }
   }
 
@@ -3048,7 +3223,8 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   return 0;
 }
 
-bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size) {
+bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size,
+                                            uint32_t ordinal) {
   if (size == 0 || size > std::numeric_limits<size_t>::max() - 0xFFF)
     return false;
 
@@ -3079,7 +3255,7 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
   {
     std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
     for (const auto &[handle, alloc] : proc->allocations_) {
-      if (!alloc.host_ptr || alloc.gpu_va >= end)
+      if (!alloc.host_ptr || alloc.gpu_va >= end || !alloc.mapped_gpu_ordinals.contains(ordinal))
         continue;
       const uint64_t begin = std::max(gpu_va, alloc.gpu_va);
       const uint64_t offset = begin - alloc.gpu_va;
@@ -3106,8 +3282,8 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
     std::memset(host_ptr, 0, range_size);
     // Driver-owned for the same reason as the allocation path: the backing is a
     // private region this function created and mapped read-write.
-    proc->map_pages(range_va, host_ptr, range_size, amdgpu::Mtype::RW,
-                    KfdProcess::HostExtentOwner::Driver);
+    map_to_gpu(*proc, range_va, host_ptr, range_size, amdgpu::Mtype::RW,
+               KfdAddressSpace::HostExtentOwner::Driver, ordinal);
 
     {
       std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
@@ -3117,6 +3293,15 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
       alloc.host_ptr = host_ptr;
       alloc.host_mapping_kind = KfdProcess::GpuAllocation::HostMappingKind::InternalBacking;
       alloc.host_mapping_size = range_size;
+      alloc.gpu_id = gpus_[ordinal].gpu_id;
+      if (proc->gpu(ordinal).drm_vm()) {
+        alloc.mapped_gpu_ordinals.insert(ordinal);
+      } else {
+        // Legacy registrations share one process table and scratch backing.
+        for (uint32_t i = 0; i < gpus_.size(); ++i)
+          if (!proc->gpu(i).drm_vm())
+            alloc.mapped_gpu_ordinals.insert(i);
+      }
       alloc.handle = proc->next_handle_++;
       alloc.backing_fd = -1;
       proc->allocations_[alloc.handle] = alloc;
@@ -3184,25 +3369,44 @@ int SimulatedKfd::map_memory_ioctl(KfdProcess &proc, void *arg) {
                       alloc.handle, alloc.gpu_va, alloc.size, args->n_devices,
                       alloc.host_ptr != nullptr);
   });
-  if (alloc.host_ptr) {
-    const auto owner =
-        alloc.host_mapping_kind == KfdProcess::GpuAllocation::HostMappingKind::InternalBacking
-            ? KfdProcess::HostExtentOwner::Driver
-            : KfdProcess::HostExtentOwner::Application;
-    map_to_gpu(proc, alloc.gpu_va, alloc.host_ptr,
-               std::min<uint64_t>(alloc.size, alloc.host_mapping_size),
-               pte_mtype_for_flags(alloc.flags, alloc.shared), owner);
-  }
-  for (const auto &view : alloc.client_views) {
-    if (!view.backing_gpu_va)
+  if (args->n_success > args->n_devices)
+    return -EINVAL;
+  if (args->n_devices && !args->device_ids_array_ptr)
+    return -EFAULT;
+  for (; args->n_success < args->n_devices; ++args->n_success) {
+    uint32_t gpu_id;
+    if (read_device_id(args->device_ids_array_ptr, args->n_success, gpu_id) != 0)
+      return -EFAULT;
+    if (!find_gpu(gpu_id))
+      return -EINVAL;
+    const uint32_t ordinal = gpu_ordinal(gpu_id);
+    const bool already_mapped =
+        alloc.mapped_gpu_ordinals.contains(ordinal) ||
+        (!proc.gpu(ordinal).drm_vm() &&
+         std::ranges::any_of(alloc.mapped_gpu_ordinals,
+                             [&](uint32_t mapped) { return !proc.gpu(mapped).drm_vm(); }));
+    alloc.mapped_gpu_ordinals.insert(ordinal);
+    if (already_mapped)
       continue;
-    const uint64_t offset = *view.backing_gpu_va - alloc.gpu_va;
-    if (offset < alloc.size)
-      map_to_gpu(proc, *view.backing_gpu_va, view.ptr,
-                 std::min<uint64_t>(view.size, alloc.size - offset),
-                 pte_mtype_for_flags(alloc.flags, alloc.shared));
+    if (alloc.host_ptr) {
+      const auto owner = alloc.host_mapping_kind == HostMappingKind::InternalBacking
+                             ? KfdAddressSpace::HostExtentOwner::Driver
+                             : KfdAddressSpace::HostExtentOwner::Application;
+      map_to_gpu(proc, alloc.gpu_va, alloc.host_ptr,
+                 std::min<uint64_t>(alloc.size, alloc.host_mapping_size),
+                 pte_mtype_for_flags(alloc.flags, alloc.shared), owner, ordinal);
+    }
+    for (const auto &view : alloc.client_views) {
+      if (!view.backing_gpu_va)
+        continue;
+      const uint64_t offset = *view.backing_gpu_va - alloc.gpu_va;
+      if (offset < alloc.size)
+        map_to_gpu(proc, *view.backing_gpu_va, view.ptr,
+                   std::min<uint64_t>(view.size, alloc.size - offset),
+                   pte_mtype_for_flags(alloc.flags, alloc.shared),
+                   KfdAddressSpace::HostExtentOwner::Application, ordinal);
+    }
   }
-  args->n_success = args->n_devices;
   return 0;
 }
 
@@ -3210,15 +3414,30 @@ int SimulatedKfd::unmap_memory_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_unmap_memory_from_gpu_args *>(arg);
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
   auto it = proc.allocations_.find(args->handle);
-  if (it != proc.allocations_.end()) {
-    // UNMAP only tears down GPU page-table mappings; the allocation record
-    // (and its backing descriptor) stays tracked until FREE_MEMORY_OF_GPU
-    // releases it. Erasing here would leak those fds and make a later FREE a
-    // no-op for this handle.
-    auto &alloc = it->second;
-    unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+  if (it == proc.allocations_.end() || args->n_success > args->n_devices)
+    return -EINVAL;
+  if (args->n_devices && !args->device_ids_array_ptr)
+    return -EFAULT;
+  auto &alloc = it->second;
+  for (; args->n_success < args->n_devices; ++args->n_success) {
+    uint32_t gpu_id;
+    if (read_device_id(args->device_ids_array_ptr, args->n_success, gpu_id) != 0)
+      return -EFAULT;
+    if (!find_gpu(gpu_id))
+      return -EINVAL;
+    const uint32_t ordinal = gpu_ordinal(gpu_id);
+    // An absent mapping belongs to no part of this allocation. In particular,
+    // another BO may occupy the same address in this GPU's independent DRM VM.
+    if (!alloc.mapped_gpu_ordinals.contains(ordinal))
+      return -EINVAL;
+    alloc.mapped_gpu_ordinals.erase(ordinal);
+    const bool legacy_user = !proc.gpu(ordinal).drm_vm() &&
+                             std::ranges::any_of(alloc.mapped_gpu_ordinals, [&](uint32_t mapped) {
+                               return !proc.gpu(mapped).drm_vm();
+                             });
+    if (!legacy_user)
+      unmap_from_gpu(proc, alloc.gpu_va, alloc.size, ordinal);
   }
-  args->n_success = args->n_devices;
   return 0;
 }
 
@@ -3280,14 +3499,17 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
 
     if (!daemon_mode_) {
       map_to_gpu(proc, args->ring_base_address, reinterpret_cast<void *>(args->ring_base_address),
-                 args->ring_size, amdgpu::Mtype::UC);
+                 args->ring_size, amdgpu::Mtype::UC, KfdAddressSpace::HostExtentOwner::Application,
+                 gpu_ordinal(args->gpu_id));
       map_to_gpu(proc, args->read_pointer_address,
                  reinterpret_cast<void *>(args->read_pointer_address), sizeof(uint64_t),
-                 amdgpu::Mtype::UC);
+                 amdgpu::Mtype::UC, KfdAddressSpace::HostExtentOwner::Application,
+                 gpu_ordinal(args->gpu_id));
       if (args->write_pointer_address != args->read_pointer_address)
         map_to_gpu(proc, args->write_pointer_address,
                    reinterpret_cast<void *>(args->write_pointer_address), sizeof(uint64_t),
-                   amdgpu::Mtype::UC);
+                   amdgpu::Mtype::UC, KfdAddressSpace::HostExtentOwner::Application,
+                   gpu_ordinal(args->gpu_id));
     }
 
     queue_id = proc.next_queue_id_++;
@@ -3326,7 +3548,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
           .store(~uint64_t(0), std::memory_order_release);
     }
 
-    queue_request.identity = {.address_space = gs.address_space,
+    queue_request.identity = {.address_space = gs.address_space(),
                               .interrupt_sink = gpu->interrupt_subscription.sink(),
                               .process_id = proc.process_id(),
                               .queue_id = queue_id};
@@ -3375,7 +3597,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     if (is_aql_compute && args->ctx_save_restore_address != 0) {
       constexpr uint32_t kErrorReasonOffset = 6 * sizeof(uint32_t);
       const std::optional<amdgpu::GpuVmAccess> access =
-          gpu->soc->gpu_vm().snapshot(gs.address_space);
+          gpu->soc->gpu_vm().snapshot(gs.address_space());
       if (!access)
         return -EFAULT;
       std::array<std::byte, 2 * sizeof(uint64_t)> exception_fields{};
@@ -3399,12 +3621,12 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
       *wptr = 0;
       *rptr = 0;
     } else if (is_sdma && daemon_mode_) {
-      if (gpu->soc && gs.address_space) {
+      if (gpu->soc && gs.address_space()) {
         const uint64_t zero = 0;
         const auto bytes = std::as_bytes(std::span<const uint64_t>(&zero, 1));
-        if (gpu->soc->gpu_vm().write(gs.address_space, args->write_pointer_address, bytes) !=
+        if (gpu->soc->gpu_vm().write(gs.address_space(), args->write_pointer_address, bytes) !=
                 amdgpu::VmAccessOutcome::Complete ||
-            gpu->soc->gpu_vm().write(gs.address_space, args->read_pointer_address, bytes) !=
+            gpu->soc->gpu_vm().write(gs.address_space(), args->read_pointer_address, bytes) !=
                 amdgpu::VmAccessOutcome::Complete) {
           return -EFAULT;
         }
@@ -3694,7 +3916,8 @@ int SimulatedKfd::get_queue_wave_state_ioctl(KfdProcess &proc, void *arg) {
                                      true))
       return -EIO;
   }
-  const auto access = gpu->soc->gpu_vm().snapshot_vmid(proc.process_id());
+  const auto access =
+      gpu->soc->gpu_vm().snapshot(proc.gpu(gpu_ordinal(info.gpu_id)).address_space());
   if (!access)
     return -EFAULT;
   const uint64_t total_bytes = uint64_t{info.ctx_save_restore_area_size} * gpu->soc->num_xcds();
@@ -3805,6 +4028,7 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
     alloc.gpu_va = args->va_addr;
     alloc.size = size;
     alloc.gpu_id = args->gpu_id;
+    alloc.mapped_gpu_ordinals.insert(gpu_ordinal(args->gpu_id));
     // Import currently models unknown backing as GTT. IPC re-export preserves
     // these placeholder flags; PRIME retains an existing BO's authoritative
     // flags when it recognizes the same backing.
@@ -3833,7 +4057,8 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
 
   if (args->va_addr)
     map_to_gpu(proc, args->va_addr, reinterpret_cast<void *>(args->va_addr), size,
-               amdgpu::Mtype::UC);
+               amdgpu::Mtype::UC, KfdAddressSpace::HostExtentOwner::Application,
+               gpu_ordinal(args->gpu_id));
 
   args->handle = handle;
   return 0;
@@ -3858,7 +4083,13 @@ int SimulatedKfd::share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAlloc
   // Publish the KFD sharing policy only after retaining the export succeeds.
   // Keep it separate from requested flags returned by IPC_IMPORT_HANDLE.
   alloc.shared = true;
-  proc.set_page_mtype(alloc.gpu_va, alloc.size, pte_mtype_for_flags(alloc.flags, alloc.shared));
+  bool updated_legacy = false;
+  for (uint32_t ordinal : alloc.mapped_gpu_ordinals) {
+    if (!proc.gpu(ordinal).drm_vm() && std::exchange(updated_legacy, true))
+      continue;
+    proc.translation_state(ordinal).set_page_mtype(alloc.gpu_va, alloc.size,
+                                                   pte_mtype_for_flags(alloc.flags, alloc.shared));
+  }
   return exported;
 }
 
@@ -3993,6 +4224,7 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
     alloc.bo_state = std::move(bo_state);
     alloc.export_access_mode = public_mode;
     alloc.gpu_id = source_gpu_id;
+    alloc.mapped_gpu_ordinals.insert(gpu_ordinal(source_gpu_id));
     alloc.imported = true;
     alloc.shared = true;
     proc.allocations_[handle] = alloc;
@@ -4005,7 +4237,7 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
   // Without this, the importing GPU's L2 cache serves stale data when
   // the exporting GPU writes to the shared buffer.
   map_to_gpu(proc, gpu_va, host_ptr, alloc_size, amdgpu::Mtype::CC,
-             KfdProcess::HostExtentOwner::Driver);
+             KfdAddressSpace::HostExtentOwner::Driver, gpu_ordinal(source_gpu_id));
 
   args->handle = handle;
   args->mmap_offset = handle << 12;
@@ -4395,7 +4627,8 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
       return false;
     control_stack_capacity = queue->second.control_stack_capacity;
   }
-  const std::optional<amdgpu::GpuVmAccess> vm_access = gpu->soc->gpu_vm().snapshot_vmid(process_id);
+  const std::optional<amdgpu::GpuVmAccess> vm_access =
+      gpu->soc->gpu_vm().snapshot(proc->gpu(gpu_ordinal(gpu_id)).address_space());
   if (!vm_access)
     return false;
   UniqueDriverFd target_mem = duplicate_debug_target_mem(proc->client_pid());
@@ -4988,10 +5221,17 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
     // concurrent trap can legitimately rewrite those registers before the
     // second interrupt.
     if (wave.pc >= 2 * sizeof(uint32_t)) {
-      const uint32_t payload_move =
-          wave.cu().fetch_instruction_word(wave.pc - 2 * sizeof(uint32_t), wave.process_id());
-      const uint32_t delay =
-          wave.cu().fetch_instruction_word(wave.pc - sizeof(uint32_t), wave.process_id());
+      const auto access = wave.snapshot_vm_access();
+      auto fetch_word = [&](uint64_t address) {
+        uint32_t word = 0;
+        auto bytes = std::span<std::byte>(reinterpret_cast<std::byte *>(&word), sizeof(word));
+        return access && access->read(address, bytes, amdgpu::VmAccessKind::Execute) ==
+                             amdgpu::VmAccessOutcome::Complete
+                   ? word
+                   : 0;
+      };
+      const uint32_t payload_move = fetch_word(wave.pc - 2 * sizeof(uint32_t));
+      const uint32_t delay = fetch_word(wave.pc - sizeof(uint32_t));
       const auto site =
           kmd::detail::classify_pre_gfx12_trap_interrupt_site(arch, payload_move, delay);
       if (site == kmd::detail::TrapInterruptSite::Profiling)
@@ -5655,9 +5895,9 @@ void SimulatedKfd::revoke_target_mem_routing(uint32_t process_id) {
     GpuDevice &gpu = gpus_[ordinal];
     if (gpu.soc == nullptr)
       continue;
-    const amdgpu::AddressSpaceHandle address_space = process->gpu(ordinal).address_space;
+    const amdgpu::AddressSpaceHandle address_space = process->gpu(ordinal).address_space();
     if (address_space)
-      (void)gpu.legacy_vm->set_client_mem_fd(address_space, -1);
+      (void)address_space_adapter(*process, ordinal).set_client_mem_fd(address_space, -1);
   }
 }
 
@@ -5858,7 +6098,7 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
     bool restored = stopped.empty();
     if (!stopped.empty() && context.base != 0) {
       const std::optional<amdgpu::GpuVmAccess> vm_access =
-          gpu->soc->gpu_vm().snapshot_vmid(proc->process_id());
+          gpu->soc->gpu_vm().snapshot(proc->gpu(gpu_ordinal(context.gpu_id)).address_space());
       if (!vm_access) {
         queue_ids[context.request_index] |= kQueueError;
         continue;
@@ -6191,7 +6431,7 @@ void SimulatedKfd::clear_completed_debug_queues(KfdProcess *proc, const uint32_t
     });
     if (!has_stopped_wave) {
       const std::optional<amdgpu::GpuVmAccess> vm_access =
-          gpu->soc->gpu_vm().snapshot_vmid(process_id);
+          gpu->soc->gpu_vm().snapshot(proc->gpu(gpu_ordinal(queue.gpu_id)).address_space());
       if (!vm_access)
         continue;
       const uint32_t area_count = kmd::cwsr_area_count(gpu->soc->arch(), gpu->soc->num_xcds());
@@ -6796,10 +7036,10 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
         GpuDevice &gpu = gpus_[ordinal];
         if (gpu.soc == nullptr)
           continue;
-        const amdgpu::AddressSpaceHandle address_space = target_proc->gpu(ordinal).address_space;
+        const amdgpu::AddressSpaceHandle address_space = target_proc->gpu(ordinal).address_space();
         if (address_space)
-          (void)gpu.legacy_vm->set_client_mem_fd(address_space,
-                                                 inserted->second.target_mem_fd.get());
+          (void)address_space_adapter(*target_proc, ordinal)
+              .set_client_mem_fd(address_space, inserted->second.target_mem_fd.get());
       }
     }
     set_debug_active_on_all_cus(true);

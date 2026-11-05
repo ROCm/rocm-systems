@@ -161,7 +161,7 @@ struct IdentityHostPage {
   uint8_t *data = nullptr;
 
   IdentityHostPage() {
-    void *raw = mmap(nullptr, rocjitsu::KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+    void *raw = mmap(nullptr, rocjitsu::KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     data = raw == MAP_FAILED ? nullptr : static_cast<uint8_t *>(raw);
   }
@@ -174,7 +174,7 @@ struct IdentityHostPage {
   /// @brief Unmap the page, turning its address into a hole that outlives it.
   void release() {
     if (data)
-      munmap(data, rocjitsu::KfdProcess::kPageSize);
+      munmap(data, rocjitsu::KfdAddressSpace::kPageSize);
     data = nullptr;
   }
 };
@@ -383,7 +383,7 @@ private:
 TEST(CommandProcessorTest, ScratchExhaustionReturnsFailureAndReclaimsPartialWaveSetup) {
   VmFixture fixture;
   ASSERT_NO_FATAL_FAILURE(fixture.initialize("rdna3", 1, 4));
-  KfdProcess process(7);
+  KfdAddressSpace process;
   std::array<uint8_t, 4096> scratch_backing{};
   process.map_pages(0x10000, scratch_backing.data(), scratch_backing.size());
   amdgpu::LegacyGpuVmAdapter adapter(fixture.soc_ptr->gpu_vm(), fixture.mem());
@@ -926,18 +926,21 @@ TEST(GpuMemoryTest, SparsePages) {
 TEST(GpuMemoryTest, AtomicsValidateApplicationPagesAndTrustDriverPages) {
   rocjitsu::test::LegacyGpuMemoryFixture mem("owner_mem");
   KfdProcess process(/*process_id=*/321);
-  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
+  mem.register_process(process.process_id(), &process.legacy_address_space_.page_table_,
+                       &process.legacy_address_space_.page_table_mutex_);
 
   auto *pages =
-      static_cast<uint8_t *>(mmap(nullptr, 2 * KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+      static_cast<uint8_t *>(mmap(nullptr, 2 * KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE,
                                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
   ASSERT_NE(pages, MAP_FAILED);
   constexpr uint64_t kAppVa = 0x200000;
   constexpr uint64_t kDriverVa = 0x300000;
-  process.map_pages(kAppVa, pages, KfdProcess::kPageSize, amdgpu::Mtype::RW,
-                    KfdProcess::HostExtentOwner::Application);
-  process.map_pages(kDriverVa, pages + KfdProcess::kPageSize, KfdProcess::kPageSize,
-                    amdgpu::Mtype::RW, KfdProcess::HostExtentOwner::Driver);
+  process.legacy_address_space_.map_pages(kAppVa, pages, KfdAddressSpace::kPageSize,
+                                          amdgpu::Mtype::RW,
+                                          KfdAddressSpace::HostExtentOwner::Application);
+  process.legacy_address_space_.map_pages(kDriverVa, pages + KfdAddressSpace::kPageSize,
+                                          KfdAddressSpace::kPageSize, amdgpu::Mtype::RW,
+                                          KfdAddressSpace::HostExtentOwner::Driver);
 
   EXPECT_EQ(mem.atomic_store(kAppVa, sizeof(uint32_t), 7, process.process_id()),
             amdgpu::AccessOutcome::Complete);
@@ -946,7 +949,7 @@ TEST(GpuMemoryTest, AtomicsValidateApplicationPagesAndTrustDriverPages) {
 
   // The application revokes write permission on its own page. The atomic must
   // report a fault rather than store through it and take down the simulator.
-  ASSERT_EQ(mprotect(pages, KfdProcess::kPageSize, PROT_READ), 0);
+  ASSERT_EQ(mprotect(pages, KfdAddressSpace::kPageSize, PROT_READ), 0);
   EXPECT_EQ(mem.atomic_store(kAppVa, sizeof(uint32_t), 11, process.process_id()),
             amdgpu::AccessOutcome::Faulted);
 
@@ -954,8 +957,8 @@ TEST(GpuMemoryTest, AtomicsValidateApplicationPagesAndTrustDriverPages) {
   EXPECT_EQ(mem.atomic_store(kDriverVa, sizeof(uint32_t), 13, process.process_id()),
             amdgpu::AccessOutcome::Complete);
 
-  ASSERT_EQ(mprotect(pages, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
-  munmap(pages, 2 * KfdProcess::kPageSize);
+  ASSERT_EQ(mprotect(pages, KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE), 0);
+  munmap(pages, 2 * KfdAddressSpace::kPageSize);
   mem.unregister_process(process.process_id());
 }
 
@@ -968,15 +971,17 @@ TEST(GpuMemoryTest, AtomicsValidateApplicationPagesAndTrustDriverPages) {
 TEST(GpuMemoryTest, SinglePageApplicationStoresDoNotDependOnProcMaps) {
   rocjitsu::test::LegacyGpuMemoryFixture mem("proc_independent_mem");
   KfdProcess process(/*process_id=*/323);
-  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
+  mem.register_process(process.process_id(), &process.legacy_address_space_.page_table_,
+                       &process.legacy_address_space_.page_table_mutex_);
 
   IdentityHostPage page;
   ASSERT_NE(page.data, nullptr);
   constexpr uint64_t kVa = 0x500000;
   constexpr size_t kWriteOffset = 32;
   constexpr size_t kAtomicOffset = 64;
-  process.map_pages(kVa, page.data, KfdProcess::kPageSize, amdgpu::Mtype::RW,
-                    KfdProcess::HostExtentOwner::Application);
+  process.legacy_address_space_.map_pages(kVa, page.data, KfdAddressSpace::kPageSize,
+                                          amdgpu::Mtype::RW,
+                                          KfdAddressSpace::HostExtentOwner::Application);
 
   amdgpu::GpuMemoryTestAccess::set_proc_maps_open_failure(true);
   const std::array<uint8_t, 4> payload{1, 2, 3, 4};
@@ -1005,24 +1010,28 @@ TEST(GpuMemoryTest, SinglePageApplicationStoresDoNotDependOnProcMaps) {
 TEST(GpuMemoryTest, RevokedApplicationPagesFaultInsteadOfKillingTheProcess) {
   rocjitsu::test::LegacyGpuMemoryFixture mem("guarded_mem");
   KfdProcess process(/*process_id=*/322);
-  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_,
-                       process.page_table_generation(), process.page_table_request_mutex(),
-                       process.page_table_mutation_epoch(), process.page_table_cache_state());
+  mem.register_process(process.process_id(), &process.legacy_address_space_.page_table_,
+                       &process.legacy_address_space_.page_table_mutex_,
+                       process.legacy_address_space_.page_table_generation(),
+                       process.legacy_address_space_.page_table_request_mutex(),
+                       process.legacy_address_space_.page_table_mutation_epoch(),
+                       process.legacy_address_space_.page_table_cache_state());
   const amdgpu::GpuVmAccessBatchGuard batch;
 
-  auto *page = static_cast<uint8_t *>(mmap(nullptr, KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
-                                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  auto *page =
+      static_cast<uint8_t *>(mmap(nullptr, KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE,
+                                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
   ASSERT_NE(page, MAP_FAILED);
   constexpr uint64_t kVa = 0x400000;
-  process.map_pages(kVa, page, KfdProcess::kPageSize, amdgpu::Mtype::RW,
-                    KfdProcess::HostExtentOwner::Application);
+  process.legacy_address_space_.map_pages(kVa, page, KfdAddressSpace::kPageSize, amdgpu::Mtype::RW,
+                                          KfdAddressSpace::HostExtentOwner::Application);
 
   const std::array<uint8_t, 4> payload{1, 2, 3, 4};
   ASSERT_EQ(mem.write_block(kVa, std::span<const uint8_t>(payload), process.process_id()),
             amdgpu::AccessOutcome::Complete);
 
   // Write permission withdrawn: the store faults, and the fault is reported.
-  ASSERT_EQ(mprotect(page, KfdProcess::kPageSize, PROT_READ), 0);
+  ASSERT_EQ(mprotect(page, KfdAddressSpace::kPageSize, PROT_READ), 0);
   EXPECT_EQ(mem.write_block(kVa, std::span<const uint8_t>(payload), process.process_id()),
             amdgpu::AccessOutcome::Faulted);
   // Reading it is still legitimate, so it must still work.
@@ -1032,18 +1041,18 @@ TEST(GpuMemoryTest, RevokedApplicationPagesFaultInsteadOfKillingTheProcess) {
   EXPECT_EQ(readback, payload);
 
   // Withdrawn entirely: the read faults too, and hands back nothing.
-  ASSERT_EQ(mprotect(page, KfdProcess::kPageSize, PROT_NONE), 0);
+  ASSERT_EQ(mprotect(page, KfdAddressSpace::kPageSize, PROT_NONE), 0);
   EXPECT_EQ(mem.read_block(kVa, std::span<uint8_t>(readback), process.process_id()),
             amdgpu::AccessOutcome::Faulted);
   EXPECT_EQ(readback, (std::array<uint8_t, 4>{0, 0, 0, 0}))
       << "a refused read must not hand back bytes it could not fetch";
 
   // The guard is not a one-shot: the thread keeps working afterwards.
-  ASSERT_EQ(mprotect(page, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  ASSERT_EQ(mprotect(page, KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE), 0);
   EXPECT_EQ(mem.write_block(kVa, std::span<const uint8_t>(payload), process.process_id()),
             amdgpu::AccessOutcome::Complete);
 
-  munmap(page, KfdProcess::kPageSize);
+  munmap(page, KfdAddressSpace::kPageSize);
   mem.unregister_process(process.process_id());
 }
 
@@ -1053,8 +1062,9 @@ TEST(GpuMemoryTest, FindHostRangeUsesVmidPageTable) {
   alignas(4096) std::array<uint8_t, 3 * amdgpu::GpuMemory::PAGE_SIZE> backing{};
   constexpr uint64_t kGpuVa = 0x100000;
 
-  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
-  process.map_pages(kGpuVa, backing.data(), backing.size());
+  mem.register_process(process.process_id(), &process.legacy_address_space_.page_table_,
+                       &process.legacy_address_space_.page_table_mutex_);
+  process.legacy_address_space_.map_pages(kGpuVa, backing.data(), backing.size());
 
   auto [host_base, size] =
       mem.find_host_range(kGpuVa + amdgpu::GpuMemory::PAGE_SIZE + 0x123, process.process_id());
@@ -1070,11 +1080,12 @@ TEST(GpuMemoryTest, FindHostRangeStopsAtNonContiguousVmidHostPages) {
   alignas(4096) std::array<uint8_t, 3 * amdgpu::GpuMemory::PAGE_SIZE> backing{};
   constexpr uint64_t kGpuVa = 0x200000;
 
-  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
-  process.map_pages(kGpuVa, backing.data(), amdgpu::GpuMemory::PAGE_SIZE);
-  process.map_pages(kGpuVa + amdgpu::GpuMemory::PAGE_SIZE,
-                    backing.data() + 2 * amdgpu::GpuMemory::PAGE_SIZE,
-                    amdgpu::GpuMemory::PAGE_SIZE);
+  mem.register_process(process.process_id(), &process.legacy_address_space_.page_table_,
+                       &process.legacy_address_space_.page_table_mutex_);
+  process.legacy_address_space_.map_pages(kGpuVa, backing.data(), amdgpu::GpuMemory::PAGE_SIZE);
+  process.legacy_address_space_.map_pages(kGpuVa + amdgpu::GpuMemory::PAGE_SIZE,
+                                          backing.data() + 2 * amdgpu::GpuMemory::PAGE_SIZE,
+                                          amdgpu::GpuMemory::PAGE_SIZE);
 
   auto [first_host_base, first_size] = mem.find_host_range(kGpuVa, process.process_id());
   EXPECT_EQ(first_host_base, reinterpret_cast<uint64_t>(backing.data()));
@@ -1902,8 +1913,9 @@ TEST(GpuMemoryTest, VmidMappedKernelSymbolUsesTranslatedHostPointer) {
   constexpr uint64_t kernel_descriptor_offset = 0x800;
   auto image = make_loaded_kernel_symbol_elf(kernel_descriptor_offset, "vmid_kernel.kd");
 
-  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
-  process.map_pages(gpu_va, image.data(), image.size());
+  mem.register_process(process.process_id(), &process.legacy_address_space_.page_table_,
+                       &process.legacy_address_space_.page_table_mutex_);
+  process.legacy_address_space_.map_pages(gpu_va, image.data(), image.size());
 
   uint64_t kernel_object = gpu_va + kernel_descriptor_offset;
   auto [host_base, host_size] = mem.find_host_range(kernel_object, process.process_id());
@@ -1930,16 +1942,17 @@ TEST(GpuMemoryTest, HostBackingProbeDoesNotFaultBeforeAllocation) {
   IdentityHostPage page;
   ASSERT_NE(page.data, nullptr);
   const uint64_t va = reinterpret_cast<uint64_t>(page.data);
-  ASSERT_EQ(mprotect(page.data, KfdProcess::kPageSize, PROT_NONE), 0);
+  ASSERT_EQ(mprotect(page.data, KfdAddressSpace::kPageSize, PROT_NONE), 0);
   memory.set_passthrough(true);
-  memory.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_,
-                          process.page_table_generation());
+  memory.register_process(process.process_id(), &process.legacy_address_space_.page_table_,
+                          &process.legacy_address_space_.page_table_mutex_,
+                          process.legacy_address_space_.page_table_generation());
   RecordingFaultReporter reporter;
   memory.set_memory_fault_reporter(&reporter);
 
   {
     amdgpu::LegacyAddressSpace::FaultScope faults;
-    EXPECT_FALSE(memory.has_host_backing(va, process.process_id(), KfdProcess::kPageSize));
+    EXPECT_FALSE(memory.has_host_backing(va, process.process_id(), KfdAddressSpace::kPageSize));
     EXPECT_FALSE(faults.observed());
     EXPECT_TRUE(reporter.addresses.empty());
   }
@@ -1948,8 +1961,8 @@ TEST(GpuMemoryTest, HostBackingProbeDoesNotFaultBeforeAllocation) {
   EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{va}));
   reporter.addresses.clear();
 
-  std::array<uint8_t, KfdProcess::kPageSize> backing{};
-  process.map_pages(va, backing.data(), backing.size());
+  std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
+  process.legacy_address_space_.map_pages(va, backing.data(), backing.size());
   EXPECT_TRUE(memory.has_host_backing(va, process.process_id(), backing.size()));
   EXPECT_TRUE(reporter.addresses.empty());
   memory.set_memory_fault_reporter(nullptr);
@@ -1963,39 +1976,43 @@ TEST(GpuMemoryTest, HostBackingProbeChecksWholeRangeAndAcceptsIdentityPages) {
   ASSERT_NE(page.data, nullptr);
   memory.set_passthrough(true);
   const uint64_t identity_va = reinterpret_cast<uint64_t>(page.data);
-  EXPECT_TRUE(memory.has_host_backing(identity_va, 0, KfdProcess::kPageSize));
+  EXPECT_TRUE(memory.has_host_backing(identity_va, 0, KfdAddressSpace::kPageSize));
   EXPECT_FALSE(memory.has_host_backing(identity_va, 0, 0));
   EXPECT_FALSE(memory.has_host_backing(UINT64_MAX, 0, 2));
 
-  memory.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_,
-                          process.page_table_generation());
-  EXPECT_TRUE(memory.has_host_backing(identity_va, process.process_id(), KfdProcess::kPageSize));
+  memory.register_process(process.process_id(), &process.legacy_address_space_.page_table_,
+                          &process.legacy_address_space_.page_table_mutex_,
+                          process.legacy_address_space_.page_table_generation());
+  EXPECT_TRUE(
+      memory.has_host_backing(identity_va, process.process_id(), KfdAddressSpace::kPageSize));
   EXPECT_FALSE(memory.is_mapped(identity_va, process.process_id()));
 
   constexpr uint64_t kVa = 0x40000000;
   memory.set_passthrough(false);
-  process.map_pages(kVa, page.data, KfdProcess::kPageSize);
-  EXPECT_TRUE(memory.has_host_backing(kVa, process.process_id(), KfdProcess::kPageSize));
-  EXPECT_FALSE(memory.has_host_backing(kVa, process.process_id(), KfdProcess::kPageSize + 1));
+  process.legacy_address_space_.map_pages(kVa, page.data, KfdAddressSpace::kPageSize);
+  EXPECT_TRUE(memory.has_host_backing(kVa, process.process_id(), KfdAddressSpace::kPageSize));
+  EXPECT_FALSE(memory.has_host_backing(kVa, process.process_id(), KfdAddressSpace::kPageSize + 1));
   std::array<uint8_t, 16> tail{};
-  process.map_pages(kVa + KfdProcess::kPageSize, tail.data(), tail.size());
+  process.legacy_address_space_.map_pages(kVa + KfdAddressSpace::kPageSize, tail.data(),
+                                          tail.size());
   EXPECT_TRUE(
-      memory.has_host_backing(kVa, process.process_id(), KfdProcess::kPageSize + tail.size()));
-  EXPECT_FALSE(
-      memory.has_host_backing(kVa, process.process_id(), KfdProcess::kPageSize + tail.size() + 1));
+      memory.has_host_backing(kVa, process.process_id(), KfdAddressSpace::kPageSize + tail.size()));
+  EXPECT_FALSE(memory.has_host_backing(kVa, process.process_id(),
+                                       KfdAddressSpace::kPageSize + tail.size() + 1));
   memory.unregister_process(process.process_id());
 }
 
 TEST(GpuMemoryTest, HostBackingProbeAcceptsAdjacentSubpageExtents) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("scratch_probe_extents");
   KfdProcess process(7);
-  memory.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_,
-                          process.page_table_generation());
+  memory.register_process(process.process_id(), &process.legacy_address_space_.page_table_,
+                          &process.legacy_address_space_.page_table_mutex_,
+                          process.legacy_address_space_.page_table_generation());
   constexpr uint64_t kVa = 0x40000100;
   std::array<uint8_t, 4> first{};
   std::array<uint8_t, 4> second{};
-  process.map_pages(kVa, first.data(), first.size());
-  process.map_pages(kVa + first.size(), second.data(), second.size());
+  process.legacy_address_space_.map_pages(kVa, first.data(), first.size());
+  process.legacy_address_space_.map_pages(kVa + first.size(), second.data(), second.size());
   EXPECT_TRUE(memory.has_host_backing(kVa, process.process_id(), first.size() + second.size()));
   EXPECT_FALSE(
       memory.has_host_backing(kVa, process.process_id(), first.size() + second.size() + 1));
@@ -2012,8 +2029,8 @@ TEST(GpuMemoryTest, UnregisterInvalidatesThreadLocalTranslationCaches) {
   constexpr uint64_t kOffset = 0x123;
   constexpr uint64_t kAddr = kBaseVa + kOffset;
 
-  KfdProcess process(kPid);
-  std::array<uint8_t, KfdProcess::kPageSize> page{};
+  KfdAddressSpace process;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> page{};
   page[kOffset] = 0x5a;
   process.map_pages(kBaseVa, page.data(), page.size(), amdgpu::Mtype::UC);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
@@ -2038,10 +2055,10 @@ TEST(GpuMemoryTest, ReregisterProcessInvalidatesThreadLocalTranslationCaches) {
   constexpr uint64_t kOffset = 0x123;
   constexpr uint64_t kAddr = kBaseVa + kOffset;
 
-  KfdProcess first_process(kPid);
-  KfdProcess second_process(kPid);
-  std::array<uint8_t, KfdProcess::kPageSize> first_page{};
-  std::array<uint8_t, KfdProcess::kPageSize> second_page{};
+  KfdAddressSpace first_process;
+  KfdAddressSpace second_process;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> first_page{};
+  std::array<uint8_t, KfdAddressSpace::kPageSize> second_page{};
   first_page[kOffset] = 0x11;
   second_page[kOffset] = 0x22;
   first_process.map_pages(kBaseVa, first_page.data(), first_page.size(), amdgpu::Mtype::UC);
@@ -2072,9 +2089,9 @@ TEST(GpuMemoryTest, PageTableEntryMutationsInvalidateCachedPtes) {
   constexpr uint64_t kOffset = 0x123;
   constexpr uint64_t kAddr = kBaseVa + kOffset;
 
-  KfdProcess process(kPid);
-  std::array<uint8_t, KfdProcess::kPageSize> old_page{};
-  std::array<uint8_t, KfdProcess::kPageSize> new_page{};
+  KfdAddressSpace process;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> old_page{};
+  std::array<uint8_t, KfdAddressSpace::kPageSize> new_page{};
   old_page[kOffset] = 0x11;
   new_page[kOffset] = 0x22;
   process.map_pages(kBaseVa, old_page.data(), old_page.size(), amdgpu::Mtype::UC);
@@ -2096,7 +2113,7 @@ TEST(GpuMemoryTest, TranslationPolicyCombinesLiveExtentAndPageMtype) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kAddress = 0x40000040;
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   std::array<uint8_t, 128> allocation{};
   process.map_pages(kAddress, allocation.data(), allocation.size(), amdgpu::Mtype::UC);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
@@ -2130,13 +2147,13 @@ TEST(GpuMemoryTest, AccessBatchObservesRemappedPteBeforeQuantumExit) {
     constexpr size_t kOffset = 0x123;
     constexpr uint64_t kAddr = kBaseVa + kOffset;
 
-    KfdProcess process(kPid);
-    alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> old_page{};
-    alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> new_page{};
+    KfdAddressSpace process;
+    alignas(KfdAddressSpace::kPageSize) std::array<uint8_t, KfdAddressSpace::kPageSize> old_page{};
+    alignas(KfdAddressSpace::kPageSize) std::array<uint8_t, KfdAddressSpace::kPageSize> new_page{};
     old_page[kOffset] = 0x11;
     new_page[kOffset] = 0x22;
     process.map_pages(kBaseVa, old_page.data(), old_page.size(), amdgpu::Mtype::RW,
-                      KfdProcess::HostExtentOwner::Driver);
+                      KfdAddressSpace::HostExtentOwner::Driver);
     memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                             process.page_table_generation(), process.page_table_request_mutex(),
                             process.page_table_mutation_epoch(), process.page_table_cache_state());
@@ -2199,11 +2216,11 @@ TEST(GpuMemoryTest, AccessBatchDropsAdmissionsBeforeMtypeLookup) {
       rocjitsu::test::LegacyGpuMemoryFixture memory("batched_policy_memory");
       constexpr uint32_t kPid = 19;
       constexpr uint64_t kAddress = 0x43000000;
-      KfdProcess process(kPid);
-      alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> page{};
+      KfdAddressSpace process;
+      alignas(KfdAddressSpace::kPageSize) std::array<uint8_t, KfdAddressSpace::kPageSize> page{};
       page[0] = 0x37;
       process.map_pages(kAddress, page.data(), page.size(), amdgpu::Mtype::RW,
-                        KfdProcess::HostExtentOwner::Driver);
+                        KfdAddressSpace::HostExtentOwner::Driver);
       memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                               process.page_table_generation(), process.page_table_request_mutex(),
                               process.page_table_mutation_epoch(),
@@ -2259,11 +2276,11 @@ TEST(GpuMemoryTest, AccessBatchAllowsMutatingCallbacks) {
       rocjitsu::test::LegacyGpuMemoryFixture memory("reentrant_batch_memory");
       constexpr uint32_t kPid = 20;
       constexpr uint64_t kAddress = 0x44000000;
-      KfdProcess process(kPid);
-      alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> page{};
+      KfdAddressSpace process;
+      alignas(KfdAddressSpace::kPageSize) std::array<uint8_t, KfdAddressSpace::kPageSize> page{};
       page[0] = 0x49;
       process.map_pages(kAddress, page.data(), page.size(), amdgpu::Mtype::RW,
-                        KfdProcess::HostExtentOwner::Driver);
+                        KfdAddressSpace::HostExtentOwner::Driver);
       memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                               process.page_table_generation(), process.page_table_request_mutex(),
                               process.page_table_mutation_epoch(),
@@ -2312,20 +2329,21 @@ TEST(GpuMemoryTest, AccessBatchDropsAdmissionsBeforeLockedPteRefill) {
     rocjitsu::test::LegacyGpuMemoryFixture memory("batched_pte_refill_memory");
     constexpr uint32_t kPid = 18;
     constexpr uint64_t kFirstVa = 0x42000000;
-    constexpr uint64_t kSecondVa = kFirstVa + KfdProcess::kPageSize;
+    constexpr uint64_t kSecondVa = kFirstVa + KfdAddressSpace::kPageSize;
     constexpr size_t kOffset = 0x45;
 
-    KfdProcess process(kPid);
-    alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> old_page{};
-    alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> new_page{};
-    alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> second_page{};
+    KfdAddressSpace process;
+    alignas(KfdAddressSpace::kPageSize) std::array<uint8_t, KfdAddressSpace::kPageSize> old_page{};
+    alignas(KfdAddressSpace::kPageSize) std::array<uint8_t, KfdAddressSpace::kPageSize> new_page{};
+    alignas(KfdAddressSpace::kPageSize) std::array<uint8_t, KfdAddressSpace::kPageSize>
+        second_page{};
     old_page[kOffset] = 0x31;
     new_page[kOffset] = 0x32;
     second_page[kOffset] = 0x41;
     process.map_pages(kFirstVa, old_page.data(), old_page.size(), amdgpu::Mtype::RW,
-                      KfdProcess::HostExtentOwner::Driver);
+                      KfdAddressSpace::HostExtentOwner::Driver);
     process.map_pages(kSecondVa, second_page.data(), second_page.size(), amdgpu::Mtype::RW,
-                      KfdProcess::HostExtentOwner::Driver);
+                      KfdAddressSpace::HostExtentOwner::Driver);
     memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                             process.page_table_generation(), process.page_table_request_mutex(),
                             process.page_table_mutation_epoch(), process.page_table_cache_state());
@@ -2375,9 +2393,9 @@ TEST(GpuMemoryTest, UnalignedMappingUsesGpuPageOffsetForHostTranslation) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kBaseVa = 0x40000800;
-  constexpr size_t kMappingSize = KfdProcess::kPageSize;
+  constexpr size_t kMappingSize = KfdAddressSpace::kPageSize;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   std::array<uint8_t, kMappingSize> allocation{};
   allocation.front() = 0x11;
   allocation.back() = 0x22;
@@ -2411,7 +2429,7 @@ TEST(GpuMemoryTest, PartialMappedPageReadsZeroFillAndWritesClipToAllocation) {
   constexpr size_t kAllocationSize = 24;
   constexpr size_t kCacheLineSize = 64;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   std::array<uint8_t, kAllocationSize> allocation{};
   for (size_t i = 0; i < allocation.size(); ++i)
     allocation[i] = static_cast<uint8_t>(i + 1);
@@ -2498,7 +2516,7 @@ TEST(GpuMemoryTest, PageTableNormalizationMergesOnlyEqualOwners) {
         SCOPED_TRACE(static_cast<int>(first));
         SCOPED_TRACE(static_cast<int>(second));
         SCOPED_TRACE(reverse);
-        KfdProcess process(7);
+        KfdAddressSpace process;
         const auto map_first = [&] {
           process.map_pages(base, backing.data(), 16, amdgpu::Mtype::UC, first);
         };
@@ -2512,7 +2530,8 @@ TEST(GpuMemoryTest, PageTableNormalizationMergesOnlyEqualOwners) {
           map_first();
           map_second();
         }
-        const auto &extents = process.page_table_.at(base >> KfdProcess::kPageShift).host_extents;
+        const auto &extents =
+            process.page_table_.at(base >> KfdAddressSpace::kPageShift).host_extents;
         if (first == second) {
           EXPECT_EQ(extents,
                     (std::vector<amdgpu::LegacyHostExtent>{{backing.data(), 32, 0, first}}));
@@ -2536,11 +2555,12 @@ TEST(GpuMemoryTest, PageTableReplacementPreservesSurvivingOwners) {
     for (const auto inserted : owners) {
       SCOPED_TRACE(static_cast<int>(original));
       SCOPED_TRACE(static_cast<int>(inserted));
-      KfdProcess process(7);
+      KfdAddressSpace process;
       process.map_pages(base, backing.data(), backing.size(), amdgpu::Mtype::UC, original);
       process.map_pages(base + 16, replacement.data(), replacement.size(), amdgpu::Mtype::UC,
                         inserted);
-      const auto &extents = process.page_table_.at(base >> KfdProcess::kPageShift).host_extents;
+      const auto &extents =
+          process.page_table_.at(base >> KfdAddressSpace::kPageShift).host_extents;
       EXPECT_EQ(extents,
                 (std::vector<amdgpu::LegacyHostExtent>{{backing.data(), 16, 0, original},
                                                        {replacement.data(), 16, 16, inserted},
@@ -2555,10 +2575,10 @@ TEST(GpuMemoryTest, PageTableUnmapPreservesSurvivingOwners) {
   std::array<uint8_t, 64> backing{};
   for (const auto owner : {Owner::Application, Owner::Driver, Owner::DriverSealedRam}) {
     SCOPED_TRACE(static_cast<int>(owner));
-    KfdProcess process(7);
+    KfdAddressSpace process;
     process.map_pages(base, backing.data(), backing.size(), amdgpu::Mtype::UC, owner);
     process.unmap_pages(base + 16, 16);
-    const auto &extents = process.page_table_.at(base >> KfdProcess::kPageShift).host_extents;
+    const auto &extents = process.page_table_.at(base >> KfdAddressSpace::kPageShift).host_extents;
     EXPECT_EQ(extents, (std::vector<amdgpu::LegacyHostExtent>{
                            {backing.data(), 16, 0, owner}, {backing.data() + 32, 32, 32, owner}}));
     process.map_pages(base + 16, backing.data() + 16, 16, amdgpu::Mtype::UC, owner);
@@ -2573,7 +2593,7 @@ TEST(GpuMemoryTest, SamePageMappingsRemainIndependent) {
   constexpr uint64_t kFirstVa = kPageVa + 0x100;
   constexpr uint64_t kSecondVa = kPageVa + 0x300;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   std::array<uint8_t, 32> first{};
   std::array<uint8_t, 32> second{};
   first.fill(0x11);
@@ -2599,12 +2619,12 @@ TEST(GpuMemoryTest, UnmapRangePreservesPartialBoundaryPages) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kBaseVa = 0x40000000;
-  constexpr size_t kPageSize = KfdProcess::kPageSize;
+  constexpr size_t kPageSize = KfdAddressSpace::kPageSize;
   constexpr uint64_t kFirstMiddleVa = kBaseVa + kPageSize + 128;
   constexpr uint64_t kSecondMiddleVa = kBaseVa + kPageSize + 1024;
   constexpr size_t kExtentSize = 64;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   std::array<uint8_t, kPageSize> first{};
   std::array<uint8_t, kPageSize> last{};
   std::array<uint8_t, kExtentSize> middle_first{};
@@ -2643,11 +2663,11 @@ TEST(GpuMemoryTest, FullPageUnmapAndRemapRefreshesCachedBacking) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kBaseVa = 0x40000000;
-  constexpr size_t kPageSize = KfdProcess::kPageSize;
+  constexpr size_t kPageSize = KfdAddressSpace::kPageSize;
   constexpr uint64_t kRemapVa = kBaseVa + 128;
   constexpr size_t kRemapBytes = 64;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   std::array<uint8_t, kPageSize> old_backing{};
   std::array<uint8_t, kPageSize> new_backing{};
   old_backing.fill(0x11);
@@ -2679,9 +2699,9 @@ TEST(GpuMemoryThreadingTest, SplitMappedAtomicLocksEveryBackingStripe) {
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kAtomicVa = 0x40000100;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   alignas(8) std::array<uint8_t, sizeof(uint64_t)> first_backing = {1, 2, 3, 4, 5, 6, 7, 8};
-  alignas(8) std::array<uint8_t, KfdProcess::kPageSize> second_pool{};
+  alignas(8) std::array<uint8_t, KfdAddressSpace::kPageSize> second_pool{};
   auto *first_mutex = amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(first_backing.data());
   uint8_t *second_backing = nullptr;
   for (size_t offset = 0; offset + sizeof(uint32_t) <= second_pool.size(); offset += 8) {
@@ -2732,11 +2752,11 @@ TEST(GpuMemoryTest, SealedSmallCopyRejectsNullBackingWithoutChangingReadDestinat
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kAddress = 0x40000000;
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   process.page_table_.emplace(
-      kAddress >> KfdProcess::kPageShift,
+      kAddress >> KfdAddressSpace::kPageShift,
       amdgpu::LegacyPageTableEntry(nullptr, amdgpu::Mtype::RW, amdgpu::kMaxMemoryTransactionBytes,
-                                   0, KfdProcess::HostExtentOwner::DriverSealedRam));
+                                   0, KfdAddressSpace::HostExtentOwner::DriverSealedRam));
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
   std::array<uint32_t, 4> bytes{1, 2, 3, 4};
@@ -2751,14 +2771,14 @@ TEST(GpuMemoryThreadingTest, OrdinaryLineTransfersShareAtomicExclusionAcrossMapp
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kAddress = 0x40000000;
   constexpr uint64_t kAlias = 0x50000000;
-  for (auto owner :
-       {KfdProcess::HostExtentOwner::Application, KfdProcess::HostExtentOwner::DriverSealedRam}) {
+  for (auto owner : {KfdAddressSpace::HostExtentOwner::Application,
+                     KfdAddressSpace::HostExtentOwner::DriverSealedRam}) {
     for (size_t host_offset : {0u, 4u, 64u}) {
       rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
-      KfdProcess process(kPid);
+      KfdAddressSpace process;
       // Keep the contiguous-copy paths within one host page at every host offset.
-      alignas(KfdProcess::kPageSize)
-          std::array<uint8_t, KfdProcess::kPageSize + amdgpu::kMaxMemoryTransactionBytes>
+      alignas(KfdAddressSpace::kPageSize)
+          std::array<uint8_t, KfdAddressSpace::kPageSize + amdgpu::kMaxMemoryTransactionBytes>
               backing{};
       auto *host = backing.data() + host_offset;
       process.map_pages(kAddress, host, amdgpu::kMaxMemoryTransactionBytes, amdgpu::Mtype::RW,
@@ -2815,19 +2835,19 @@ TEST(GpuMemoryThreadingTest, NarrowTransactionPolicyPublishesSeparateHalvesOfOne
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kAddress = 0x40000000;
   for (auto policy : {Policy{}, Policy::unqualified_64()}) {
-    for (auto owner :
-         {KfdProcess::HostExtentOwner::Application, KfdProcess::HostExtentOwner::DriverSealedRam}) {
+    for (auto owner : {KfdAddressSpace::HostExtentOwner::Application,
+                       KfdAddressSpace::HostExtentOwner::DriverSealedRam}) {
       SCOPED_TRACE(policy.bytes());
       rocjitsu::test::LegacyGpuMemoryFixture memory("memory", policy);
-      KfdProcess process(kPid);
+      KfdAddressSpace process;
       // The GPU-aligned 128-byte record starts 64 bytes into a host page,
       // crossing two lock stripes while fitting try_copy_contiguous's
       // single-page limit. Holding the second stripe exposes whether the
       // first 64 bytes publish alone.
-      alignas(KfdProcess::kPageSize) std::array<uint8_t, 256> backing{};
+      alignas(KfdAddressSpace::kPageSize) std::array<uint8_t, 256> backing{};
       auto *host = backing.data() + 64;
-      ASSERT_LE(reinterpret_cast<uintptr_t>(host) % KfdProcess::kPageSize + 128,
-                KfdProcess::kPageSize);
+      ASSERT_LE(reinterpret_cast<uintptr_t>(host) % KfdAddressSpace::kPageSize + 128,
+                KfdAddressSpace::kPageSize);
       auto *first_mutex = amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(host);
       auto *second_mutex = amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(host + 64);
       ASSERT_NE(first_mutex, second_mutex);
@@ -2874,16 +2894,16 @@ TEST(GpuMemoryThreadingTest, IndependentL2sReadWholeMappedLinePublications) {
   constexpr uint64_t kWriteAddress = 0x40000000;
   constexpr uint64_t kReadAddress = 0x50000000;
   constexpr uint32_t kRounds = 20000;
-  for (auto owner :
-       {KfdProcess::HostExtentOwner::Application, KfdProcess::HostExtentOwner::DriverSealedRam}) {
+  for (auto owner : {KfdAddressSpace::HostExtentOwner::Application,
+                     KfdAddressSpace::HostExtentOwner::DriverSealedRam}) {
     for (size_t host_offset : {0u, 4u}) {
       alignas(amdgpu::kMaxMemoryTransactionBytes)
-          std::array<uint8_t, KfdProcess::kPageSize + amdgpu::kMaxMemoryTransactionBytes>
+          std::array<uint8_t, KfdAddressSpace::kPageSize + amdgpu::kMaxMemoryTransactionBytes>
               backing{};
       rocjitsu::test::LegacyGpuMemoryFixture writer_memory("writer");
       rocjitsu::test::LegacyGpuMemoryFixture reader_memory("reader");
-      KfdProcess writer_process(kPid);
-      KfdProcess reader_process(kPid);
+      KfdAddressSpace writer_process;
+      KfdAddressSpace reader_process;
       writer_process.map_pages(kWriteAddress, backing.data() + host_offset,
                                amdgpu::kMaxMemoryTransactionBytes, amdgpu::Mtype::UC, owner);
       reader_process.map_pages(kReadAddress, backing.data() + host_offset,
@@ -2932,12 +2952,12 @@ TEST(GpuMemoryThreadingTest, IndependentL2sReadWholeMappedLinePublications) {
 TEST(GpuMemoryThreadingTest, GuardedLineCopyReleasesStripesAfterHostFault) {
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kAddress = 0x40000000;
-  const size_t page_size = KfdProcess::kPageSize;
+  const size_t page_size = KfdAddressSpace::kPageSize;
   auto *page = static_cast<uint8_t *>(
       mmap(nullptr, page_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
   ASSERT_NE(page, MAP_FAILED);
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   process.map_pages(kAddress, page, page_size);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
@@ -2965,12 +2985,12 @@ TEST(GpuMemoryThreadingTest, GuardedLineCopyReleasesStripesAfterHostFault) {
 TEST(GpuMemoryThreadingTest, BulkCopyReleasesCurrentStripeAfterLaterPageFault) {
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kAddress = 0x40000000;
-  constexpr size_t kPageSize = KfdProcess::kPageSize;
+  constexpr size_t kPageSize = KfdAddressSpace::kPageSize;
   auto *pages = static_cast<uint8_t *>(
       mmap(nullptr, 2 * kPageSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
   ASSERT_NE(pages, MAP_FAILED);
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   process.map_pages(kAddress, pages, 2 * kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
@@ -3001,8 +3021,8 @@ TEST(GpuMemoryTest, IdentityMappedEntryStillEnforcesItsExtent) {
   constexpr uint32_t kPid = 7;
   constexpr size_t kAllocationSize = 32;
 
-  KfdProcess process(kPid);
-  alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> backing{};
+  KfdAddressSpace process;
+  alignas(KfdAddressSpace::kPageSize) std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
   const uint64_t gpu_va = reinterpret_cast<uint64_t>(backing.data());
   process.map_pages(gpu_va, backing.data(), kAllocationSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
@@ -3021,10 +3041,10 @@ TEST(GpuMemoryTest, SanitizedCacheLineAccessClipsRoundedMapping) {
   constexpr size_t kAllocationSize = 24;
   constexpr size_t kCacheLineSize = 64;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   auto allocation = std::make_unique<uint8_t[]>(kAllocationSize);
   std::ranges::fill_n(allocation.get(), kAllocationSize, 0x5a);
-  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  process.map_pages(kBaseVa, allocation.get(), KfdAddressSpace::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -3103,7 +3123,7 @@ TEST(GpuMemoryTest, SanitizedCacheLineAccessClipsRoundedMapping) {
   auto remapped_allocation = std::make_unique<uint8_t[]>(kRemappedAllocationSize);
   std::ranges::fill_n(remapped_allocation.get(), kRemappedAllocationSize, 0x3c);
   process.remap_page_host_ptrs(kBaseVa, allocation.get(), remapped_allocation.get(),
-                               KfdProcess::kPageSize);
+                               KfdAddressSpace::kPageSize);
 
   cache_line.fill(0xff);
   memory.read_block(kBaseVa, std::span<uint8_t>(cache_line), kPid);
@@ -3117,10 +3137,10 @@ TEST(GpuMemoryTest, SanitizedHeapBoundsAreRevalidatedWithoutPteMutation) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kBaseVa = 0x40000000;
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   auto allocation = std::make_unique<uint8_t[]>(24);
   allocation[0] = 0x5a;
-  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  process.map_pages(kBaseVa, allocation.get(), KfdAddressSpace::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation(), process.page_table_request_mutex(),
                           process.page_table_mutation_epoch(), process.page_table_cache_state());
@@ -3146,7 +3166,7 @@ TEST(GpuMemoryTest, SanitizedMappedExtentTracksCurrentShadowState) {
   constexpr uint64_t kBaseVa = 0x40000000;
   constexpr size_t kInitialExtentBytes = 256;
   constexpr size_t kReducedExtentBytes = 1024;
-  constexpr size_t kAllocationSize = KfdProcess::kPageSize;
+  constexpr size_t kAllocationSize = KfdAddressSpace::kPageSize;
   constexpr size_t kInitialInsideOffset = kInitialExtentBytes / 2;
   constexpr size_t kGrowthProbeOffset = kInitialExtentBytes * 2;
   constexpr size_t kReducedInsideOffset = kReducedExtentBytes - sizeof(uint32_t);
@@ -3155,7 +3175,7 @@ TEST(GpuMemoryTest, SanitizedMappedExtentTracksCurrentShadowState) {
   constexpr size_t kInteriorPoisonBytes = 256;
   constexpr size_t kLaterLiveOffset = kInteriorPoisonOffset + kInteriorPoisonBytes + 256;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   auto allocation = std::make_unique<uint8_t[]>(kAllocationSize);
   std::ranges::fill_n(allocation.get(), kAllocationSize, 0);
   process.map_pages(kBaseVa, allocation.get(), kAllocationSize);
@@ -3202,10 +3222,10 @@ TEST(GpuMemoryTest, SanitizedMtypeLookupAvoidsAllocatorMetadataReentry) {
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kBaseVa = 0x40000000;
 
-  KfdProcess process(kPid);
-  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  KfdAddressSpace process;
+  auto allocation = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
   allocation[0] = 0x5a;
-  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize, amdgpu::Mtype::UC);
+  process.map_pages(kBaseVa, allocation.get(), KfdAddressSpace::kPageSize, amdgpu::Mtype::UC);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation(), process.page_table_request_mutex());
 
@@ -3213,7 +3233,7 @@ TEST(GpuMemoryTest, SanitizedMtypeLookupAvoidsAllocatorMetadataReentry) {
   std::function<void()> query_hook = [&] {
     memory.set_page_table_unlocked_hook(nullptr);
     ++hook_calls;
-    process.set_page_mtype(kBaseVa, KfdProcess::kPageSize, amdgpu::Mtype::RW);
+    process.set_page_mtype(kBaseVa, KfdAddressSpace::kPageSize, amdgpu::Mtype::RW);
   };
   memory.set_page_table_unlocked_hook(&query_hook);
   {
@@ -3238,10 +3258,10 @@ TEST(GpuMemoryTest, SanitizedL1BackingLookupAllowsAllocatorMetadataReentry) {
   constexpr uint32_t kReplacement = 0x33334444;
   constexpr uint32_t kLatest = 0x55556666;
 
-  KfdProcess process(kPid);
-  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  KfdAddressSpace process;
+  auto allocation = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
   std::memcpy(allocation.get(), &kInitial, sizeof(kInitial));
-  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize, amdgpu::Mtype::RW);
+  process.map_pages(kBaseVa, allocation.get(), KfdAddressSpace::kPageSize, amdgpu::Mtype::RW);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation(), process.page_table_request_mutex());
   l2.set_backing_memory(&memory);
@@ -3252,7 +3272,7 @@ TEST(GpuMemoryTest, SanitizedL1BackingLookupAllowsAllocatorMetadataReentry) {
   std::function<void()> query_hook = [&] {
     memory.set_page_table_unlocked_hook(nullptr);
     ++hook_calls;
-    process.set_page_mtype(kBaseVa, KfdProcess::kPageSize, amdgpu::Mtype::UC);
+    process.set_page_mtype(kBaseVa, KfdAddressSpace::kPageSize, amdgpu::Mtype::UC);
     std::memcpy(allocation.get(), &kReplacement, sizeof(kReplacement));
   };
   memory.set_page_table_unlocked_hook(&query_hook);
@@ -3274,13 +3294,13 @@ TEST(GpuMemoryTest, SanitizedUnlockedQueryPreservesOuterWalkAcrossReentry) {
   constexpr uint64_t kOuterVa = 0x40000000;
   constexpr uint64_t kNestedVa = 0x50000000;
 
-  KfdProcess process(kPid);
-  auto outer_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  auto nested_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  KfdAddressSpace process;
+  auto outer_page = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
+  auto nested_page = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
   outer_page[0] = 0x11;
   nested_page[0] = 0x22;
-  process.map_pages(kOuterVa, outer_page.get(), KfdProcess::kPageSize);
-  process.map_pages(kNestedVa, nested_page.get(), KfdProcess::kPageSize);
+  process.map_pages(kOuterVa, outer_page.get(), KfdAddressSpace::kPageSize);
+  process.map_pages(kNestedVa, nested_page.get(), KfdAddressSpace::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation(), process.page_table_request_mutex());
 
@@ -3302,12 +3322,12 @@ TEST(GpuMemoryTest, SanitizedUnlockedQueryRetriesAfterRemap) {
     constexpr uint32_t kPid = 7;
     constexpr uint64_t kBaseVa = 0x40000000;
 
-    KfdProcess process(kPid);
-    auto old_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-    auto new_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+    KfdAddressSpace process;
+    auto old_page = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
+    auto new_page = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
     old_page[0] = 0x11;
     new_page[0] = 0x22;
-    process.map_pages(kBaseVa, old_page.get(), KfdProcess::kPageSize);
+    process.map_pages(kBaseVa, old_page.get(), KfdAddressSpace::kPageSize);
     memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                             use_generation ? process.page_table_generation() : nullptr,
                             process.page_table_request_mutex());
@@ -3321,7 +3341,7 @@ TEST(GpuMemoryTest, SanitizedUnlockedQueryRetriesAfterRemap) {
         return;
       }
       auto *next_page = current_page == old_page.get() ? new_page.get() : old_page.get();
-      process.remap_page_host_ptrs(kBaseVa, current_page, next_page, KfdProcess::kPageSize);
+      process.remap_page_host_ptrs(kBaseVa, current_page, next_page, KfdAddressSpace::kPageSize);
       current_page = next_page;
     };
     memory.set_page_table_unlocked_hook(&query_hook);
@@ -3336,12 +3356,12 @@ TEST(GpuMemoryTest, SanitizedRetryLimitKeepsMappedAccessOutOfFallback) {
   constexpr uint64_t kBaseVa = 0x40000000;
   constexpr size_t kLiveOffset = 128;
 
-  KfdProcess process(kPid);
-  auto first_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  auto second_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  std::ranges::fill_n(first_page.get(), KfdProcess::kPageSize, 0x5a);
-  std::ranges::fill_n(second_page.get(), KfdProcess::kPageSize, 0x5a);
-  process.map_pages(kBaseVa, first_page.get(), KfdProcess::kPageSize);
+  KfdAddressSpace process;
+  auto first_page = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
+  auto second_page = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
+  std::ranges::fill_n(first_page.get(), KfdAddressSpace::kPageSize, 0x5a);
+  std::ranges::fill_n(second_page.get(), KfdAddressSpace::kPageSize, 0x5a);
+  process.map_pages(kBaseVa, first_page.get(), KfdAddressSpace::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -3350,7 +3370,7 @@ TEST(GpuMemoryTest, SanitizedRetryLimitKeepsMappedAccessOutOfFallback) {
   std::function<void()> query_hook = [&] {
     ++hook_calls;
     auto *next_page = current_page == first_page.get() ? second_page.get() : first_page.get();
-    process.remap_page_host_ptrs(kBaseVa, current_page, next_page, KfdProcess::kPageSize);
+    process.remap_page_host_ptrs(kBaseVa, current_page, next_page, KfdAddressSpace::kPageSize);
     current_page = next_page;
   };
   memory.set_page_table_unlocked_hook(&query_hook);
@@ -3366,7 +3386,7 @@ TEST(GpuMemoryTest, SanitizedRetryLimitKeepsMappedAccessOutOfFallback) {
   EXPECT_EQ(current_page[kLiveOffset], 0x3c);
   EXPECT_EQ(memory.read8(kBaseVa + kLiveOffset, kPid), 0x3c);
   EXPECT_EQ(memory.read8(kBaseVa + kLiveOffset, kPid), 0x3c);
-  process.unmap_pages(kBaseVa, KfdProcess::kPageSize);
+  process.unmap_pages(kBaseVa, KfdAddressSpace::kPageSize);
   EXPECT_EQ(memory.read8(kBaseVa + kLiveOffset, kPid), 0u);
 }
 
@@ -3377,11 +3397,11 @@ TEST(GpuMemoryTest, SanitizedUnrelatedVmidReplacementDoesNotRetryMappedAccess) {
   constexpr uint64_t kBaseVa = 0x40000000;
   constexpr size_t kLiveOffset = 128;
 
-  KfdProcess process(kPid);
-  KfdProcess churn_process(kChurnPid);
-  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  std::ranges::fill_n(allocation.get(), KfdProcess::kPageSize, 0x5a);
-  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  KfdAddressSpace process;
+  KfdAddressSpace churn_process;
+  auto allocation = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
+  std::ranges::fill_n(allocation.get(), KfdAddressSpace::kPageSize, 0x5a);
+  process.map_pages(kBaseVa, allocation.get(), KfdAddressSpace::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -3417,24 +3437,24 @@ TEST(GpuMemoryTest, SanitizedFindHostRangeQueriesWithoutPageTableLocks) {
   constexpr uint64_t kOtherVa = 0x50000000;
   constexpr size_t kOffset = 128;
 
-  KfdProcess process(kPid);
-  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  auto other_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  KfdAddressSpace process;
+  auto allocation = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
+  auto other_page = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
+  process.map_pages(kBaseVa, allocation.get(), KfdAddressSpace::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
   size_t hook_calls = 0;
   std::function<void()> query_hook = [&] {
     ++hook_calls;
-    process.map_pages(kOtherVa, other_page.get(), KfdProcess::kPageSize);
+    process.map_pages(kOtherVa, other_page.get(), KfdAddressSpace::kPageSize);
   };
   memory.set_page_table_unlocked_hook(&query_hook);
   const auto [range, size] = memory.find_host_range(kBaseVa + kOffset, kPid);
   memory.set_page_table_unlocked_hook(nullptr);
   EXPECT_EQ(hook_calls, 1u);
   EXPECT_EQ(range, reinterpret_cast<uint64_t>(allocation.get()));
-  EXPECT_EQ(size, KfdProcess::kPageSize);
+  EXPECT_EQ(size, KfdAddressSpace::kPageSize);
 }
 
 TEST(GpuMemoryTest, SanitizedFindHostRangeRetriesTargetRemap) {
@@ -3443,10 +3463,10 @@ TEST(GpuMemoryTest, SanitizedFindHostRangeRetriesTargetRemap) {
   constexpr uint64_t kBaseVa = 0x40000000;
   constexpr size_t kOffset = 128;
 
-  KfdProcess process(kPid);
-  auto old_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  auto new_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  process.map_pages(kBaseVa, old_page.get(), KfdProcess::kPageSize);
+  KfdAddressSpace process;
+  auto old_page = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
+  auto new_page = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
+  process.map_pages(kBaseVa, old_page.get(), KfdAddressSpace::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -3454,13 +3474,14 @@ TEST(GpuMemoryTest, SanitizedFindHostRangeRetriesTargetRemap) {
   std::function<void()> query_hook = [&] {
     ++hook_calls;
     memory.set_page_table_unlocked_hook(nullptr);
-    process.remap_page_host_ptrs(kBaseVa, old_page.get(), new_page.get(), KfdProcess::kPageSize);
+    process.remap_page_host_ptrs(kBaseVa, old_page.get(), new_page.get(),
+                                 KfdAddressSpace::kPageSize);
   };
   memory.set_page_table_unlocked_hook(&query_hook);
   const auto [range, size] = memory.find_host_range(kBaseVa + kOffset, kPid);
   EXPECT_EQ(hook_calls, 1u);
   EXPECT_EQ(range, reinterpret_cast<uint64_t>(new_page.get()));
-  EXPECT_EQ(size, KfdProcess::kPageSize);
+  EXPECT_EQ(size, KfdAddressSpace::kPageSize);
 }
 
 TEST(GpuMemoryTest, SanitizedFindHostRangeRejectsTargetUnmap) {
@@ -3469,9 +3490,9 @@ TEST(GpuMemoryTest, SanitizedFindHostRangeRejectsTargetUnmap) {
   constexpr uint64_t kBaseVa = 0x40000000;
   constexpr size_t kOffset = 128;
 
-  KfdProcess process(kPid);
-  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  KfdAddressSpace process;
+  auto allocation = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
+  process.map_pages(kBaseVa, allocation.get(), KfdAddressSpace::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -3479,7 +3500,7 @@ TEST(GpuMemoryTest, SanitizedFindHostRangeRejectsTargetUnmap) {
   std::function<void()> query_hook = [&] {
     ++hook_calls;
     memory.set_page_table_unlocked_hook(nullptr);
-    process.unmap_pages(kBaseVa, KfdProcess::kPageSize);
+    process.unmap_pages(kBaseVa, KfdAddressSpace::kPageSize);
   };
   memory.set_page_table_unlocked_hook(&query_hook);
   const auto [range, size] = memory.find_host_range(kBaseVa + kOffset, kPid);
@@ -3494,12 +3515,12 @@ TEST(GpuMemoryTest, SanitizedFindHostRangePreservesOuterVmidBinding) {
   constexpr uint64_t kBaseVa = 0x40000000;
   constexpr size_t kOffset = 128;
 
-  KfdProcess old_process(kPid);
-  KfdProcess new_process(kPid);
-  auto old_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  auto new_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  old_process.map_pages(kBaseVa, old_page.get(), KfdProcess::kPageSize);
-  new_process.map_pages(kBaseVa, new_page.get(), KfdProcess::kPageSize);
+  KfdAddressSpace old_process;
+  KfdAddressSpace new_process;
+  auto old_page = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
+  auto new_page = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
+  old_process.map_pages(kBaseVa, old_page.get(), KfdAddressSpace::kPageSize);
+  new_process.map_pages(kBaseVa, new_page.get(), KfdAddressSpace::kPageSize);
   memory.register_process(kPid, &old_process.page_table_, &old_process.page_table_mutex_,
                           old_process.page_table_generation());
 
@@ -3515,7 +3536,7 @@ TEST(GpuMemoryTest, SanitizedFindHostRangePreservesOuterVmidBinding) {
   const auto [range, size] = memory.find_host_range(kBaseVa + kOffset, kPid);
   EXPECT_EQ(hook_calls, 1u);
   EXPECT_EQ(range, reinterpret_cast<uint64_t>(old_page.get()));
-  EXPECT_EQ(size, KfdProcess::kPageSize);
+  EXPECT_EQ(size, KfdAddressSpace::kPageSize);
   EXPECT_EQ(memory.find_host_range(kBaseVa + kOffset, kPid).first,
             reinterpret_cast<uint64_t>(new_page.get()));
 }
@@ -3528,10 +3549,10 @@ TEST(GpuMemoryTest, SanitizedUnrelatedMappingChurnDoesNotLoseStableWrites) {
   constexpr size_t kOffset = 128;
   constexpr size_t kIterations = 64;
 
-  KfdProcess process(kPid);
-  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  auto churn_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  KfdAddressSpace process;
+  auto allocation = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
+  auto churn_page = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
+  process.map_pages(kBaseVa, allocation.get(), KfdAddressSpace::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -3548,9 +3569,9 @@ TEST(GpuMemoryTest, SanitizedUnrelatedMappingChurnDoesNotLoseStableWrites) {
       const size_t target = requested.load(std::memory_order_acquire);
       while (handled < target) {
         if (mapped)
-          process.unmap_pages(kChurnVa, KfdProcess::kPageSize);
+          process.unmap_pages(kChurnVa, KfdAddressSpace::kPageSize);
         else
-          process.map_pages(kChurnVa, churn_page.get(), KfdProcess::kPageSize);
+          process.map_pages(kChurnVa, churn_page.get(), KfdAddressSpace::kPageSize);
         mapped = !mapped;
         completed.store(++handled, std::memory_order_release);
         completed.notify_all();
@@ -3591,10 +3612,10 @@ TEST(GpuMemoryTest, SanitizedCacheLinePreservesLiveBytesAfterInteriorGap) {
   constexpr size_t kGapOffset = 16;
   constexpr size_t kGapSize = 16;
 
-  KfdProcess process(kPid);
-  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  std::ranges::fill_n(allocation.get(), KfdProcess::kPageSize, 0x5a);
-  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  KfdAddressSpace process;
+  auto allocation = std::make_unique<uint8_t[]>(KfdAddressSpace::kPageSize);
+  std::ranges::fill_n(allocation.get(), KfdAddressSpace::kPageSize, 0x5a);
+  process.map_pages(kBaseVa, allocation.get(), KfdAddressSpace::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -3623,16 +3644,16 @@ TEST(GpuMemoryTest, SanitizedCrossPageResolveIgnoresEarlierGap) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kBaseVa = 0x40000000;
-  constexpr size_t kMappingSize = 2 * KfdProcess::kPageSize;
+  constexpr size_t kMappingSize = 2 * KfdAddressSpace::kPageSize;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   auto allocation = std::make_unique<uint8_t[]>(kMappingSize);
   process.map_pages(kBaseVa, allocation.get(), kMappingSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
   __asan_poison_memory_region(allocation.get() + 256, 64);
-  constexpr size_t kResolveOffset = KfdProcess::kPageSize - 8;
+  constexpr size_t kResolveOffset = KfdAddressSpace::kPageSize - 8;
   EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kResolveOffset, kPid, 16),
             allocation.get() + kResolveOffset);
   __asan_unpoison_memory_region(allocation.get() + 256, 64);
@@ -3641,16 +3662,16 @@ TEST(GpuMemoryTest, SanitizedCrossPageResolveIgnoresEarlierGap) {
 TEST(GpuMemoryTest, SanitizedPassthroughCrossPageResolveChecksEveryPage) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   memory.set_passthrough(true);
-  constexpr size_t kMappingSize = 2 * KfdProcess::kPageSize;
+  constexpr size_t kMappingSize = 2 * KfdAddressSpace::kPageSize;
 
   void *raw_mapping =
       mmap(nullptr, kMappingSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   ASSERT_NE(raw_mapping, MAP_FAILED);
   auto *mapping = static_cast<uint8_t *>(raw_mapping);
-  __asan_poison_memory_region(mapping + KfdProcess::kPageSize, 8);
-  const uint64_t gpu_va = reinterpret_cast<uint64_t>(mapping + KfdProcess::kPageSize - 8);
+  __asan_poison_memory_region(mapping + KfdAddressSpace::kPageSize, 8);
+  const uint64_t gpu_va = reinterpret_cast<uint64_t>(mapping + KfdAddressSpace::kPageSize - 8);
   EXPECT_EQ(memory.resolve_host_ptr(gpu_va, 0, 16), nullptr);
-  __asan_unpoison_memory_region(mapping + KfdProcess::kPageSize, 8);
+  __asan_unpoison_memory_region(mapping + KfdAddressSpace::kPageSize, 8);
   EXPECT_EQ(munmap(mapping, kMappingSize), 0);
 }
 
@@ -3658,7 +3679,7 @@ TEST(GpuMemoryTest, SanitizedPassthroughAtomicLoadIgnoresPoisonedPagePrefix) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   memory.set_passthrough(true);
 
-  void *raw_mapping = mmap(nullptr, KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+  void *raw_mapping = mmap(nullptr, KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE,
                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   ASSERT_NE(raw_mapping, MAP_FAILED);
   auto *mapping = static_cast<uint8_t *>(raw_mapping);
@@ -3675,7 +3696,7 @@ TEST(GpuMemoryTest, SanitizedPassthroughAtomicLoadIgnoresPoisonedPagePrefix) {
             amdgpu::CopyOutcome::Complete);
   EXPECT_EQ(value, kExpected);
   __asan_unpoison_memory_region(mapping, kPoisonSize);
-  EXPECT_EQ(munmap(mapping, KfdProcess::kPageSize), 0);
+  EXPECT_EQ(munmap(mapping, KfdAddressSpace::kPageSize), 0);
 }
 #endif
 
@@ -3687,8 +3708,8 @@ TEST(GpuMemoryTest, ReusedMemoryInstanceInvalidatesThreadLocalTranslationCaches)
   alignas(rocjitsu::test::LegacyGpuMemoryFixture) unsigned char
       storage[sizeof(rocjitsu::test::LegacyGpuMemoryFixture)];
 
-  KfdProcess first_process(kPid);
-  std::array<uint8_t, KfdProcess::kPageSize> first_page{};
+  KfdAddressSpace first_process;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> first_page{};
   first_page[kOffset] = 0x11;
   first_process.map_pages(kBaseVa, first_page.data(), first_page.size(), amdgpu::Mtype::UC);
 
@@ -3699,8 +3720,8 @@ TEST(GpuMemoryTest, ReusedMemoryInstanceInvalidatesThreadLocalTranslationCaches)
   EXPECT_EQ(first_memory->pte_mtype(kAddr, kPid), amdgpu::Mtype::UC);
   first_memory->~LegacyGpuMemoryFixture();
 
-  KfdProcess second_process(kPid);
-  std::array<uint8_t, KfdProcess::kPageSize> second_page{};
+  KfdAddressSpace second_process;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> second_page{};
   second_page[kOffset] = 0x22;
   second_process.map_pages(kBaseVa, second_page.data(), second_page.size(), amdgpu::Mtype::CC);
 
@@ -3717,15 +3738,15 @@ TEST(GpuMemoryThreadingTest, AtomicRmwKeepsStorageIdentityAcrossConcurrentMap) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   constexpr uint32_t kVmid = 17;
 
-  void *raw_mapping = mmap(nullptr, KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+  void *raw_mapping = mmap(nullptr, KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE,
                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   ASSERT_NE(raw_mapping, MAP_FAILED);
   struct Mapping {
     uint8_t *data;
-    ~Mapping() { munmap(data, KfdProcess::kPageSize); }
+    ~Mapping() { munmap(data, KfdAddressSpace::kPageSize); }
   } mapping{static_cast<uint8_t *>(raw_mapping)};
 
-  KfdProcess process(kVmid);
+  KfdAddressSpace process;
   memory.register_process(kVmid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
   memory.set_process_client_pid(kVmid, getpid());
@@ -3767,7 +3788,8 @@ TEST(GpuMemoryThreadingTest, AtomicRmwKeepsStorageIdentityAcrossConcurrentMap) {
   // replaced.
   EXPECT_EQ(*target, 0u) << "a refused client atomic still wrote";
 
-  process.map_pages(reinterpret_cast<uint64_t>(mapping.data), mapping.data, KfdProcess::kPageSize);
+  process.map_pages(reinterpret_cast<uint64_t>(mapping.data), mapping.data,
+                    KfdAddressSpace::kPageSize);
   memory.atomic_rmw(
       reinterpret_cast<uint64_t>(target), sizeof(*target),
       [](uint8_t *storage) {
@@ -3790,7 +3812,7 @@ TEST(GpuMemoryThreadingTest, ReadersRemainSafeWhilePagesAreRemapped) {
   constexpr uint32_t kReaders = 4;
   constexpr uint32_t kRemaps = 2000;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation(), process.page_table_request_mutex(),
                           process.page_table_mutation_epoch(), process.page_table_cache_state());
@@ -3852,12 +3874,12 @@ TEST(GpuMemoryTest, RegisteredVmidPassthroughMissRespectsUserSpaceLimit) {
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
   EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + 0x123, kPid), nullptr);
-  EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + KfdProcess::kPageSize + 0x123, kPid),
+  EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + KfdAddressSpace::kPageSize + 0x123, kPid),
             nullptr);
   // Below the limit still resolves by identity, but only where a host page
   // really exists -- so this also shows the rejections above are the limit
@@ -3890,7 +3912,7 @@ TEST(GpuMemoryTest, PassthroughRejectsUninhabitedIdentityAddresses) {
   memory.set_passthrough(true);
   constexpr uint32_t kPid = 7;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -3899,7 +3921,7 @@ TEST(GpuMemoryTest, PassthroughRejectsUninhabitedIdentityAddresses) {
   // under a sanitizer that happens readily enough to flip this test mid-run.
   // PROT_NONE is stable, and is what a reserved runtime VA aperture looks like.
   IdentityHostPage reserved;
-  ASSERT_EQ(mprotect(reserved.data, KfdProcess::kPageSize, PROT_NONE), 0);
+  ASSERT_EQ(mprotect(reserved.data, KfdAddressSpace::kPageSize, PROT_NONE), 0);
   const uint64_t reserved_addr = reserved.addr();
 
   EXPECT_EQ(memory.resolve_host_ptr(reserved_addr, kPid), nullptr);
@@ -3923,13 +3945,13 @@ TEST(GpuMemoryTest, PassthroughRejectedAccessFaultsAndLeavesHostMemoryUntouched)
   constexpr uint32_t kSentinel = 0xA5A5A5A5u;
   constexpr uint32_t kWritten = 0x5A5A5A5Au;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
   IdentityHostPage page;
   std::memcpy(page.data, &kSentinel, sizeof(kSentinel));
-  ASSERT_EQ(mprotect(page.data, KfdProcess::kPageSize, PROT_NONE), 0);
+  ASSERT_EQ(mprotect(page.data, KfdAddressSpace::kPageSize, PROT_NONE), 0);
 
   EXPECT_EQ(memory.write_block(page.addr(),
                                std::span<const uint8_t>(
@@ -3944,7 +3966,7 @@ TEST(GpuMemoryTest, PassthroughRejectedAccessFaultsAndLeavesHostMemoryUntouched)
             amdgpu::AccessOutcome::Faulted);
   EXPECT_EQ(rejected_read, 0u);
 
-  ASSERT_EQ(mprotect(page.data, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  ASSERT_EQ(mprotect(page.data, KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE), 0);
   uint32_t observed = 0;
   std::memcpy(&observed, page.data, sizeof(observed));
   EXPECT_EQ(observed, kSentinel);
@@ -3966,19 +3988,19 @@ TEST(GpuMemoryTest, ClientCopyFailureFaultsInsteadOfStayingRetryable) {
   // mmap, and the test would then be reading a live page.
   IdentityHostPage refused;
   ASSERT_NE(refused.data, nullptr);
-  ASSERT_EQ(mprotect(refused.data, KfdProcess::kPageSize, PROT_NONE), 0);
+  ASSERT_EQ(mprotect(refused.data, KfdAddressSpace::kPageSize, PROT_NONE), 0);
   const uint64_t refused_va = refused.addr();
 
   {
     rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
-    KfdProcess process(kPid);
+    KfdAddressSpace process;
     memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                             process.page_table_generation());
     memory.set_process_client_pid(kPid, getpid());
 
     IdentityHostPage destination;
     ASSERT_NE(destination.data, nullptr);
-    process.map_pages(0x400000, destination.data, KfdProcess::kPageSize);
+    process.map_pages(0x400000, destination.data, KfdAddressSpace::kPageSize);
 
     EXPECT_EQ(memory.copy_block(0x400000, refused_va, kBytes, kPid), amdgpu::CopyOutcome::Faulted)
         << "a refused client source stayed retryable";
@@ -3987,14 +4009,14 @@ TEST(GpuMemoryTest, ClientCopyFailureFaultsInsteadOfStayingRetryable) {
 
   {
     rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
-    KfdProcess process(kPid);
+    KfdAddressSpace process;
     memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                             process.page_table_generation());
     memory.set_process_client_pid(kPid, getpid());
 
     IdentityHostPage source;
     ASSERT_NE(source.data, nullptr);
-    process.map_pages(0x400000, source.data, KfdProcess::kPageSize);
+    process.map_pages(0x400000, source.data, KfdAddressSpace::kPageSize);
 
     EXPECT_EQ(memory.copy_block(refused_va, 0x400000, kBytes, kPid), amdgpu::CopyOutcome::Faulted)
         << "a refused client destination stayed retryable";
@@ -4024,10 +4046,10 @@ TEST(GpuMemoryTest, RefusedClientCopyDeliversItsFaultBeforeReturning) {
 
   IdentityHostPage refused;
   ASSERT_NE(refused.data, nullptr);
-  ASSERT_EQ(mprotect(refused.data, KfdProcess::kPageSize, PROT_NONE), 0);
+  ASSERT_EQ(mprotect(refused.data, KfdAddressSpace::kPageSize, PROT_NONE), 0);
 
   RecordingReporter reporter;
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
   memory.set_process_client_pid(kPid, getpid());
@@ -4035,7 +4057,7 @@ TEST(GpuMemoryTest, RefusedClientCopyDeliversItsFaultBeforeReturning) {
 
   IdentityHostPage destination;
   ASSERT_NE(destination.data, nullptr);
-  process.map_pages(0x400000, destination.data, KfdProcess::kPageSize);
+  process.map_pages(0x400000, destination.data, KfdAddressSpace::kPageSize);
 
   EXPECT_EQ(memory.copy_block(0x400000, refused.addr(), kBytes, kPid),
             amdgpu::CopyOutcome::Faulted);
@@ -4046,7 +4068,7 @@ TEST(GpuMemoryTest, RefusedClientCopyDeliversItsFaultBeforeReturning) {
   const size_t delivered = reporter.addresses.size();
   IdentityHostPage healthy;
   ASSERT_NE(healthy.data, nullptr);
-  process.map_pages(0x500000, healthy.data, KfdProcess::kPageSize);
+  process.map_pages(0x500000, healthy.data, KfdAddressSpace::kPageSize);
   EXPECT_EQ(memory.copy_block(0x500000, 0x400000, kBytes, kPid), amdgpu::CopyOutcome::Complete);
   EXPECT_EQ(reporter.addresses.size(), delivered) << "a stale fault was delivered later";
 
@@ -4066,7 +4088,7 @@ TEST(GpuMemoryTest, RangesThatWrapTheAddressSpaceAreRefused) {
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kNearTop = std::numeric_limits<uint64_t>::max() - 15;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -4138,7 +4160,7 @@ TEST(GpuMemoryTest, PartiallyBackedAtomicIsRefusedRatherThanTorn) {
   std::memcpy(page.data, &kSeed, sizeof(kSeed));
 
   // Back only the first four bytes of the eight the atomic will touch.
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   process.map_pages(kGpuVa, page.data, sizeof(uint32_t));
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
@@ -4163,11 +4185,11 @@ TEST(GpuMemoryTest, FaultedBlockWriteStopsInsteadOfSkippingThePage) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   memory.set_passthrough(true);
   constexpr uint32_t kPid = 7;
-  constexpr size_t kPageSize = KfdProcess::kPageSize;
+  constexpr size_t kPageSize = KfdAddressSpace::kPageSize;
   constexpr uint8_t kSentinel = 0xA5;
   constexpr uint8_t kPayload = 0x5A;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -4205,7 +4227,7 @@ TEST(GpuMemoryTest, IdentityAtomicFailsClosedOnUnwritablePages) {
   memory.set_passthrough(true);
   constexpr uint32_t kPid = 7;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -4217,18 +4239,18 @@ TEST(GpuMemoryTest, IdentityAtomicFailsClosedOnUnwritablePages) {
   };
 
   IdentityHostPage reserved;
-  ASSERT_EQ(mprotect(reserved.data, KfdProcess::kPageSize, PROT_NONE), 0);
+  ASSERT_EQ(mprotect(reserved.data, KfdAddressSpace::kPageSize, PROT_NONE), 0);
   memory.atomic_rmw(reserved.addr(), sizeof(uint32_t), bump, kPid);
 
   IdentityHostPage read_only;
   constexpr uint32_t kSeed = 0x0BADF00Du;
   std::memcpy(read_only.data, &kSeed, sizeof(kSeed));
-  ASSERT_EQ(mprotect(read_only.data, KfdProcess::kPageSize, PROT_READ), 0);
+  ASSERT_EQ(mprotect(read_only.data, KfdAddressSpace::kPageSize, PROT_READ), 0);
   memory.atomic_rmw(read_only.addr(), sizeof(uint32_t), bump, kPid);
 
   EXPECT_GE(amdgpu::GpuMemoryTestAccess::rejected_identity_accesses(memory), 2u);
 
-  ASSERT_EQ(mprotect(read_only.data, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  ASSERT_EQ(mprotect(read_only.data, KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE), 0);
   uint32_t observed = 0;
   std::memcpy(&observed, read_only.data, sizeof(observed));
   EXPECT_EQ(observed, kSeed) << "the refused store must not have reached the page";
@@ -4247,7 +4269,7 @@ TEST(GpuMemoryTest, IdentityAtomicIsAtomicAgainstConcurrentHostUpdates) {
   constexpr uint32_t kPid = 7;
   constexpr uint32_t kIterations = 20000;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -4286,12 +4308,12 @@ TEST(GpuMemoryTest, FaultedAccessIsDistinguishedFromSparseBacking) {
   memory.set_passthrough(true);
   constexpr uint32_t kPid = 7;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
   IdentityHostPage reserved;
-  ASSERT_EQ(mprotect(reserved.data, KfdProcess::kPageSize, PROT_NONE), 0);
+  ASSERT_EQ(mprotect(reserved.data, KfdAddressSpace::kPageSize, PROT_NONE), 0);
 
   std::vector<uint8_t> bytes(64, 0xff);
   EXPECT_EQ(memory.read_block(reserved.addr(), std::span<uint8_t>(bytes), kPid),
@@ -4306,7 +4328,7 @@ TEST(GpuMemoryTest, FaultedAccessIsDistinguishedFromSparseBacking) {
   // An address with no page table entry and no passthrough page is unwritten GPU
   // memory, not a violation: it must still read as zero and report completion.
   rocjitsu::test::LegacyGpuMemoryFixture sparse_only("sparse");
-  KfdProcess sparse_process(kPid);
+  KfdAddressSpace sparse_process;
   sparse_only.register_process(kPid, &sparse_process.page_table_, &sparse_process.page_table_mutex_,
                                sparse_process.page_table_generation());
   EXPECT_EQ(sparse_only.read_block(0x800000000000ULL + 0x1000, std::span<uint8_t>(bytes), kPid),
@@ -4326,8 +4348,8 @@ TEST(GpuMemoryTest, AtomicLanesPreserveMappedAliasesAndInactiveLanes) {
     rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
     constexpr uint32_t kPid = 7;
     constexpr uint64_t kFirstVa = 0x40000000, kAliasVa = 0x50000000;
-    KfdProcess process(kPid);
-    alignas(uint64_t) std::array<uint8_t, KfdProcess::kPageSize> page{};
+    KfdAddressSpace process;
+    alignas(uint64_t) std::array<uint8_t, KfdAddressSpace::kPageSize> page{};
     process.map_pages(kFirstVa, page.data(), page.size());
     process.map_pages(kAliasVa, page.data(), page.size());
     memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
@@ -4366,8 +4388,8 @@ TEST(GpuMemoryTest, AtomicLanesResumeAfterMissingMappingWithoutReplayingPrefix) 
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kFirstVa = 0x40000000, kSecondVa = 0x50000000;
-  KfdProcess process(kPid);
-  alignas(uint64_t) std::array<uint8_t, KfdProcess::kPageSize> first{}, second{};
+  KfdAddressSpace process;
+  alignas(uint64_t) std::array<uint8_t, KfdAddressSpace::kPageSize> first{}, second{};
   process.map_pages(kFirstVa, first.data(), first.size());
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
@@ -4400,8 +4422,8 @@ TEST(GpuMemoryTest, AtomicLanesStopAtClippedMappedOperand) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kFirstVa = 0x40000000, kClippedVa = 0x50000000;
-  KfdProcess process(kPid);
-  alignas(uint64_t) std::array<uint8_t, KfdProcess::kPageSize> first{};
+  KfdAddressSpace process;
+  alignas(uint64_t) std::array<uint8_t, KfdAddressSpace::kPageSize> first{};
   std::array<uint8_t, 2> clipped = {0x12, 0x34};
   process.map_pages(kFirstVa, first.data(), first.size());
   process.map_pages(kClippedVa, clipped.data(), clipped.size());
@@ -4440,7 +4462,7 @@ TEST(GpuMemoryTest, AtomicLanesStopAtClippedMappedOperand) {
 TEST(GpuMemoryTest, FaultsAreReportedOutsideTranslationLocks) {
   class ReenteringReporter : public amdgpu::MemoryFaultReporter {
   public:
-    ReenteringReporter(rocjitsu::test::LegacyGpuMemoryFixture &memory, KfdProcess &process)
+    ReenteringReporter(rocjitsu::test::LegacyGpuMemoryFixture &memory, KfdAddressSpace &process)
         : memory_(memory), process_(process) {}
 
     void report_memory_fault(uint32_t vmid, uint64_t, amdgpu::MemoryFaultCause) override {
@@ -4455,21 +4477,21 @@ TEST(GpuMemoryTest, FaultsAreReportedOutsideTranslationLocks) {
 
   private:
     rocjitsu::test::LegacyGpuMemoryFixture &memory_;
-    KfdProcess &process_;
+    KfdAddressSpace &process_;
   };
 
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   memory.set_passthrough(true);
   constexpr uint32_t kPid = 7;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
   ReenteringReporter reporter(memory, process);
   memory.set_memory_fault_reporter(&reporter);
 
   IdentityHostPage reserved;
-  ASSERT_EQ(mprotect(reserved.data, KfdProcess::kPageSize, PROT_NONE), 0);
+  ASSERT_EQ(mprotect(reserved.data, KfdAddressSpace::kPageSize, PROT_NONE), 0);
 
   const amdgpu::GpuVmAccessBatchGuard batch;
   // Each of these discovers the miss under the VMID lock. The enclosing
@@ -4496,7 +4518,7 @@ TEST(GpuMemoryTest, IdentityAtomicHoldsTheMappingStillWhileItRuns) {
   memory.set_passthrough(true);
   constexpr uint32_t kPid = 7;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -4569,7 +4591,7 @@ TEST(GpuMemoryTest, ClientAtomicFailureDoesNotFallBackToSparseStorage) {
   // so neither endpoint can service it.
   constexpr uint64_t kAddr = 0x4000;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
   memory.set_process_client_pid(kPid, std::numeric_limits<pid_t>::max());
@@ -4615,18 +4637,18 @@ TEST(GpuMemoryTest, WritabilityDistinguishesProtectedFromAbsentMemory) {
 
   IdentityHostPage read_only;
   ASSERT_NE(read_only.data, nullptr);
-  ASSERT_EQ(mprotect(read_only.data, KfdProcess::kPageSize, PROT_READ), 0);
+  ASSERT_EQ(mprotect(read_only.data, KfdAddressSpace::kPageSize, PROT_READ), 0);
   EXPECT_EQ(amdgpu::GpuMemoryTestAccess::page_writability(read_only.data),
             amdgpu::PageWritability::ReadOnly);
-  ASSERT_EQ(mprotect(read_only.data, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  ASSERT_EQ(mprotect(read_only.data, KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE), 0);
 
   IdentityHostPage reserved;
   ASSERT_NE(reserved.data, nullptr);
-  ASSERT_EQ(mprotect(reserved.data, KfdProcess::kPageSize, PROT_NONE), 0);
+  ASSERT_EQ(mprotect(reserved.data, KfdAddressSpace::kPageSize, PROT_NONE), 0);
   EXPECT_EQ(amdgpu::GpuMemoryTestAccess::page_writability(reserved.data),
             amdgpu::PageWritability::Inaccessible)
       << "a PROT_NONE reservation is absent to the GPU, not merely protected";
-  ASSERT_EQ(mprotect(reserved.data, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  ASSERT_EQ(mprotect(reserved.data, KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE), 0);
 
   IdentityHostPage released;
   ASSERT_NE(released.data, nullptr);
@@ -4655,7 +4677,7 @@ TEST(GpuMemoryTest, ClientOwnedAtomicsAreRefusedRatherThanApproximated) {
   std::memcpy(page.data, &kSeed, sizeof(kSeed));
 
   RecordingFaultReporter reporter;
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
   memory.set_process_client_pid(kPid, getpid());
@@ -4705,10 +4727,10 @@ TEST(GpuMemoryTest, RefusedClientWriteReportsAnUndeterminedCause) {
   IdentityHostPage page;
   ASSERT_NE(page.data, nullptr);
   std::memcpy(page.data, &kSeed, sizeof(kSeed));
-  ASSERT_EQ(mprotect(page.data, KfdProcess::kPageSize, PROT_READ), 0);
+  ASSERT_EQ(mprotect(page.data, KfdAddressSpace::kPageSize, PROT_READ), 0);
 
   RecordingReporter reporter;
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
   memory.set_process_client_pid(kPid, getpid());
@@ -4728,7 +4750,7 @@ TEST(GpuMemoryTest, RefusedClientWriteReportsAnUndeterminedCause) {
   ASSERT_EQ(reporter.causes.size(), 1u);
   EXPECT_EQ(reporter.causes.front(), amdgpu::MemoryFaultCause::Indeterminate);
 
-  ASSERT_EQ(mprotect(page.data, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  ASSERT_EQ(mprotect(page.data, KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE), 0);
   uint64_t observed = 0;
   std::memcpy(&observed, page.data, sizeof(observed));
   EXPECT_EQ(observed, kSeed) << "the refused write still reached the page";
@@ -4758,8 +4780,8 @@ TEST(GpuMemoryTest, MappedAtomicMakesProgressAgainstPageTableMutation) {
   IdentityHostPage spare;
   ASSERT_NE(spare.data, nullptr);
 
-  KfdProcess process(kPid);
-  process.map_pages(kGpuVa, page.data, KfdProcess::kPageSize);
+  KfdAddressSpace process;
+  process.map_pages(kGpuVa, page.data, KfdAddressSpace::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation(), process.page_table_request_mutex(),
                           process.page_table_mutation_epoch(), process.page_table_cache_state());
@@ -4768,8 +4790,8 @@ TEST(GpuMemoryTest, MappedAtomicMakesProgressAgainstPageTableMutation) {
   std::atomic<int> completed{0};
   std::thread mutator([&] {
     while (!stop.load(std::memory_order_acquire)) {
-      process.map_pages(kSpareVa, spare.data, KfdProcess::kPageSize);
-      process.unmap_pages(kSpareVa, KfdProcess::kPageSize);
+      process.map_pages(kSpareVa, spare.data, KfdAddressSpace::kPageSize);
+      process.unmap_pages(kSpareVa, KfdAddressSpace::kPageSize);
     }
   });
 
@@ -4809,10 +4831,10 @@ TEST(GpuMemoryTest, MappedAtomicFailsClosedOnUnwritableHostPages) {
   IdentityHostPage page;
   ASSERT_NE(page.data, nullptr);
   std::memcpy(page.data, &kSeed, sizeof(kSeed));
-  ASSERT_EQ(mprotect(page.data, KfdProcess::kPageSize, PROT_READ), 0);
+  ASSERT_EQ(mprotect(page.data, KfdAddressSpace::kPageSize, PROT_READ), 0);
 
-  KfdProcess process(kPid);
-  process.map_pages(kGpuVa, page.data, KfdProcess::kPageSize);
+  KfdAddressSpace process;
+  process.map_pages(kGpuVa, page.data, KfdAddressSpace::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -4835,7 +4857,7 @@ TEST(GpuMemoryTest, Atomic64AddAcceptsExtremeOperands) {
   memory.set_passthrough(true);
   constexpr uint32_t kPid = 7;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -4864,7 +4886,7 @@ TEST(GpuMemoryTest, PassthroughStillResolvesLiveHostMemory) {
   constexpr uint32_t kPid = 7;
   constexpr uint32_t kValue = 0xdecafbadu;
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -4897,8 +4919,8 @@ TEST(GpuMemoryTest, NullBackedPteDoesNotInvokeMappedCallback) {
   constexpr uint64_t kAddr = 0x4000;
   constexpr uint32_t kValue = 0x12345678;
 
-  KfdProcess process(kPid);
-  process.page_table_[kAddr >> KfdProcess::kPageShift] = {};
+  KfdAddressSpace process;
+  process.page_table_[kAddr >> KfdAddressSpace::kPageShift] = {};
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
@@ -4910,7 +4932,7 @@ TEST(GpuMemoryTest, NullBackedPteDoesNotInvokeMappedCallback) {
 TEST(GpuMemoryTest, RegisteredVmidBlockMissUsesClientMemory) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   constexpr uint32_t kPid = 7;
-  constexpr size_t kMappingSize = KfdProcess::kPageSize * 2;
+  constexpr size_t kMappingSize = KfdAddressSpace::kPageSize * 2;
 
   void *raw_mapping =
       mmap(nullptr, kMappingSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -4927,12 +4949,12 @@ TEST(GpuMemoryTest, RegisteredVmidBlockMissUsesClientMemory) {
   for (size_t i = 0; i < kMappingSize; ++i)
     mapping.data[i] = static_cast<uint8_t>((i * 17 + 3) & 0xff);
 
-  KfdProcess process(kPid);
+  KfdAddressSpace process;
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
   memory.set_process_client_pid(kPid, getpid());
 
-  constexpr size_t kAccessOffset = KfdProcess::kPageSize - 8;
+  constexpr size_t kAccessOffset = KfdAddressSpace::kPageSize - 8;
   constexpr size_t kAccessSize = 32;
   const uint64_t addr = reinterpret_cast<uint64_t>(mapping.data + kAccessOffset);
 
@@ -9471,8 +9493,8 @@ TEST(L1ScalarCacheVmidTest, WriteThroughStoreUsesStoreVmid) {
   rocjitsu::test::LegacyGpuMemoryFixture mem("test.vram");
 
   // Two processes whose page tables map the same VA to different host buffers.
-  KfdProcess proc_a(kVmidA);
-  KfdProcess proc_b(kVmidB);
+  KfdAddressSpace proc_a;
+  KfdAddressSpace proc_b;
   alignas(4096) std::array<uint8_t, 4096> backing_a{};
   alignas(4096) std::array<uint8_t, 4096> backing_b{};
   proc_a.map_pages(kSharedVa, backing_a.data(), backing_a.size());
@@ -11169,7 +11191,7 @@ TEST(ClusterDispatchTest, LaterPeerSetupRollbackCancelsOnlyThatWaveIncarnation) 
 }
 
 TEST(Pm4DispatchTest, CancellationFailsPendingSubmissionAndReleasesVmBinding) {
-  KfdProcess process(7);
+  KfdAddressSpace process;
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("rdna3"));
   amdgpu::LegacyGpuVmAdapter adapter(f.soc_ptr->gpu_vm(), f.mem());
@@ -11201,7 +11223,7 @@ TEST(Pm4DispatchTest, CancellationFailsPendingSubmissionAndReleasesVmBinding) {
 }
 
 TEST(Pm4DispatchTest, ExactQueueRetirementPreservesOtherQueuesAndReleasesBindings) {
-  KfdProcess process(7);
+  KfdAddressSpace process;
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("rdna3"));
   amdgpu::LegacyGpuVmAdapter adapter(f.soc_ptr->gpu_vm(), f.mem());
@@ -11325,7 +11347,7 @@ TEST(Pm4DispatchTest, OverlappingScratchQueuesSerializeAndPreserveContents) {
     SCOPED_TRACE(overlap);
     constexpr uint32_t pid = 7;
     constexpr uint64_t code = 0x8000, ib = 0x4000, scratch = 0x10000;
-    KfdProcess process(pid);
+    KfdAddressSpace process;
     std::array<uint8_t, 4096> code_backing{}, ib_backing{}, scratch_backing{};
     process.map_pages(code, code_backing.data(), code_backing.size());
     process.map_pages(ib, ib_backing.data(), ib_backing.size());
@@ -11401,7 +11423,7 @@ TEST(Pm4DispatchTest, ScratchUsesTargetRegisterLayout) {
         constexpr uint64_t code = 0x8000, ib = 0x4000, scratch = 0x10000;
         constexpr uint32_t pid = 7;
         const uint32_t wave_bytes = units * (legacy ? 1024 : 256);
-        KfdProcess process(pid);
+        KfdAddressSpace process;
         std::array<uint8_t, 4096> code_backing{}, ib_backing{};
         std::vector<uint8_t> scratch_backing(3 * wave_bytes);
         process.map_pages(code, code_backing.data(), code_backing.size());

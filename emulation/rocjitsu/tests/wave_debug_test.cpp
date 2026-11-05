@@ -334,7 +334,7 @@ TEST(WaveDebugTest, UnmappedInstructionFetchReportsMemoryViolationAtBranchTarget
   constexpr uint32_t kProcessId = 7;
   constexpr uint64_t kBranchTarget = 0x100;
   std::vector<uint8_t> kernel_page(amdgpu::GpuMemory::PAGE_SIZE);
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
                                                               amdgpu::Mtype::RW};
@@ -373,7 +373,7 @@ TEST(WaveDebugTest, UnmappedScalarLoadReportsMemoryViolationAfterInstruction) {
   WaveDebugFixture fx;
   constexpr uint32_t kProcessId = 7;
   std::vector<uint8_t> kernel_page(amdgpu::GpuMemory::PAGE_SIZE);
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
                                                               amdgpu::Mtype::RW};
@@ -812,7 +812,7 @@ TEST(WaveDebugTest, DeclinedMemoryViolationStillIssuesTheAccess) {
 
   std::vector<uint8_t> kernel_page(kPageSize);
   std::vector<uint8_t> data_page(kPageSize);
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
                                                               amdgpu::Mtype::RW};
@@ -879,7 +879,7 @@ TEST(WaveDebugTest, ScalarLoadStraddlingIntoUnmappedPageReportsMemoryViolation) 
 
   std::vector<uint8_t> kernel_page(kPageSize);
   std::vector<uint8_t> data_page(kPageSize);
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
                                                               amdgpu::Mtype::RW};
@@ -934,7 +934,7 @@ TEST(WaveDebugTest, ScalarAtomicX2AtPageEndChecksOnlyItsAccessWidth) {
 
   std::vector<uint8_t> kernel_page(kPageSize);
   std::vector<uint8_t> data_page(kPageSize);
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
                                                               amdgpu::Mtype::RW};

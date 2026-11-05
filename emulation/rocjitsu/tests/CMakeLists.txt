@@ -1109,6 +1109,24 @@ endif()
 
 # Linux-only tests for allocator interception and model ISA contracts.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Keep allocation-failure injection separate from the simulator test executable.
+    add_executable(
+        drm_retirement_owner_test
+        drm_retirement_owner_test.cpp
+        ../lib/rocjitsu/src/rocjitsu/kmd/linux/drm_retirement_owner.cpp
+        ../lib/rocjitsu/src/rocjitsu/kmd/linux/linux_kfd.cpp
+    )
+    target_link_libraries(
+        drm_retirement_owner_test
+        PRIVATE simdojo_headers GTest::gtest_main
+    )
+    rj_configure_target(drm_retirement_owner_test PRIVATE_INCLUDES WARNINGS)
+    target_link_options(
+        drm_retirement_owner_test
+        PRIVATE "LINKER:--wrap=_Znwm" "LINKER:--wrap=_Znam"
+    )
+    rj_add_gtest_tests(drm_retirement_owner_test)
+
     # Isolate allocator fault injection from the simulator test executable.
     add_executable(
         cache_allocation_failure_test
@@ -2260,7 +2278,6 @@ set(_rj_interposer_gem_tests
     LowAddressMappingHonorsMap32Bit
     SparseReservationsPreserveRangesAndFileOwnership
     GemNamespaceIsPrivateButSharedByDuplicates
-    IndependentDrmFilesRejectOverlappingMappings
     UnmapWithWrongHandleFails
     ReplaceEvictsOverlappingDifferentSizeRange
     ReplaceTransfersOwnershipAcrossOldOwnerClose
@@ -2391,7 +2408,8 @@ set(_rj_interposer_pm4_tests
     CyclicChainedIndirectBufferFailsFence
     ExcessiveIndirectNestingFailsFence
     FreeContextCancelsPendingWorkAndRejectsFurtherSubmissions
-    FinalRenderCloseCancelsPendingWorkWhileKfdRemainsOpen
+    FinalRenderClosePreservesAcceptedWorkWhileKfdRemainsOpen
+    FinalRenderCloseRacesAcceptedWorkCompletion
     PrivateDescriptorsSurviveDup2Replacement
     PrivateDescriptorsSurviveDup3Replacement
 )
@@ -2431,6 +2449,11 @@ foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700)
         CONFIG "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
         SUFFIX ".fallback" PREFIX prlimit --fsize=4096:4096
     )
+    set_tests_properties(
+        "InterposerPm4Test.FinalRenderClosePreservesAcceptedWorkWhileKfdRemainsOpen.${_config}"
+        "InterposerPm4Test.FinalRenderCloseRacesAcceptedWorkCompletion.${_config}"
+        PROPERTIES TIMEOUT 30
+    )
 endforeach()
 
 rj_add_interposer_test_suite(
@@ -2468,6 +2491,54 @@ rj_add_interposer_test_suite(
 )
 
 rj_add_interposer_test_suite(InterposerGemTest ${_rj_interposer_gem_tests})
+
+# Both same-device opens and peer-device opens need independent GPUVMs. Run
+# every case under the two-GPU config so a topology error cannot silently skip it.
+rj_add_interposer_test_suite(
+    DrmFiles/InterposerGpuVmTest
+    CONFIG "${RJ_CDNA4_KMD_2GPU_CONFIG}"
+    SingleMappingRoutesDrmAndKfdWrites/SameGpu
+    SingleMappingRoutesDrmAndKfdWrites/DifferentGpus
+    AcquisitionPreservesExistingKfdMappings/SameGpu
+    AcquisitionPreservesExistingKfdMappings/DifferentGpus
+    DuplicateSharesMappingsAndKeepsTheVmAlive/SameGpu
+    DuplicateSharesMappingsAndKeepsTheVmAlive/DifferentGpus
+    IndependentMappingsExecuteInTheirOwnVm/SameGpu
+    IndependentMappingsExecuteInTheirOwnVm/DifferentGpus
+    PeerUpdatesPreserveTheAcquiredVm/SameGpu
+    PeerUpdatesPreserveTheAcquiredVm/DifferentGpus
+    SharedBackingSurvivesPeerUnmapAndClose/SameGpu
+    SharedBackingSurvivesPeerUnmapAndClose/DifferentGpus
+    AcquireUsesFileIdentityAndBindsEachGpuIndependently/SameGpu
+    AcquireUsesFileIdentityAndBindsEachGpuIndependently/DifferentGpus
+    AcquireRejectsInvalidArgumentsWithoutClaimingTheGpu/SameGpu
+    AcquireRejectsInvalidArgumentsWithoutClaimingTheGpu/DifferentGpus
+    DrmAndAcquiredBindingSurviveAllApplicationKfdCloses/SameGpu
+    DrmAndAcquiredBindingSurviveAllApplicationKfdCloses/DifferentGpus
+    AcquiredVmSurvivesTheLastUserspaceDrmClose/SameGpu
+    AcquiredVmSurvivesTheLastUserspaceDrmClose/DifferentGpus
+)
+get_filename_component(
+    _rj_gpu_vm_config_suffix
+    "${RJ_CDNA4_KMD_2GPU_CONFIG}"
+    NAME_WE
+)
+set_tests_properties(
+    "DrmFiles/InterposerGpuVmTest.DrmAndAcquiredBindingSurviveAllApplicationKfdCloses/SameGpu.${_rj_gpu_vm_config_suffix}"
+    "DrmFiles/InterposerGpuVmTest.DrmAndAcquiredBindingSurviveAllApplicationKfdCloses/DifferentGpus.${_rj_gpu_vm_config_suffix}"
+    PROPERTIES TIMEOUT 30
+)
+
+rj_add_interposer_test_suite(
+    Peers/InterposerPeerGpuVmTest
+    CONFIG "${RJ_CDNA4_KMD_2GPU_CONFIG}"
+    KfdUnmapPreservesTheOtherGpuMapping/DifferentGpus
+)
+rj_add_interposer_test_suite(
+    InterposerGpuVmAcquireTest
+    CONFIG "${RJ_CDNA4_KMD_2GPU_CONFIG}"
+    AcquiresBothGpuVms
+)
 
 set(_rj_interposer_syncobj_tests
     VmTimelineWaitObservesSynchronousMapAndUnmap
@@ -4179,6 +4250,7 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.InterposerDupKeepsRoutingAfterPrimaryCloseRemote
             DaemonTest.InterposerDup2OverPrimaryInvalidatesRemote
             DaemonTest.InterposerProcMapsNamesRemoteKfdMarker
+            DaemonTest.AcquireVmRemainsCompatibilityNoOp
         )
         # ROCr leaks also affect masked LDS reuse in daemon mode. Its TSan
         # case passes, so keep that coverage as well as regular builds.

@@ -596,32 +596,37 @@ TEST_F(Pm4DispatchFlushTest, RetirementPublishesDirtyLineUnderWaveProcessId) {
   EXPECT_EQ(memory->load<uint32_t>(kDirtyLine), 0xababababu);
 }
 
-TEST_F(Pm4DispatchFlushTest, MismatchedProcessIdFaultsBeforeDispatch) {
-  ASSERT_NO_FATAL_FAILURE(submit_dispatch(true, 0));
-  testing::internal::CaptureStderr();
-  expect_cancelled();
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
-  EXPECT_NE(diagnostic.find("PM4 dispatch process ID does not match address-space VMID"),
-            std::string::npos)
-      << diagnostic;
-  EXPECT_EQ(plugin->processed, 0u);
-  EXPECT_TRUE(plugin->wave_process_ids.empty());
+TEST_F(Pm4DispatchFlushTest, DistinctProcessIdPublishesWritesUnderAddressSpaceVmid) {
+  constexpr uint32_t kOwner = 7;
+  expected_success = true;
+  plugin->on_completed = [&] {
+    std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+    dirty.fill(0xab);
+    ASSERT_EQ(l2->writeback_line(kDirtyLine, dirty.data(), Mtype::RW, kProcessId),
+              VmAccessOutcome::Complete);
+    EXPECT_EQ(memory->load<uint32_t>(kDirtyLine), 0u);
+  };
+  ASSERT_NO_FATAL_FAILURE(submit_dispatch(true, kOwner));
+  for (uint32_t step = 0; step < 100 && !completions; ++step)
+    service();
+  EXPECT_EQ(completions, 1u);
+  EXPECT_EQ(successors, 1u);
+  EXPECT_EQ(plugin->processed, 1u);
+  EXPECT_EQ(plugin->wave_process_ids, std::vector<uint32_t>{kOwner});
+  EXPECT_EQ(memory->load<uint32_t>(kDirtyLine), 0xababababu);
 }
 
-TEST_F(Pm4DispatchFlushTest, NativeMismatchedProcessIdFaultsBeforeDispatch) {
-  ASSERT_NO_FATAL_FAILURE(submit_dispatch(true, 0, true));
-  testing::internal::CaptureStderr();
-  for (uint32_t i = 0; i < 100 && !cp->queue_faulted_for_test(1, 0); ++i)
+TEST_F(Pm4DispatchFlushTest, NativeDispatchPreservesDistinctProcessIdentity) {
+  constexpr uint32_t kOwner = 7;
+  ASSERT_NO_FATAL_FAILURE(submit_dispatch(true, kOwner, true));
+  for (uint32_t step = 0; step < 100 && !successors; ++step)
     service();
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
-  EXPECT_NE(diagnostic.find("PM4 dispatch process ID does not match address-space VMID"),
-            std::string::npos)
-      << diagnostic;
-  EXPECT_TRUE(cp->queue_faulted_for_test(1, 0));
-  EXPECT_EQ(plugin->processed, 0u);
-  EXPECT_TRUE(plugin->wave_process_ids.empty());
-  EXPECT_EQ(successors, 0u);
-  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 8u);
+  EXPECT_FALSE(cp->queue_faulted_for_test(1, kOwner));
+  EXPECT_EQ(plugin->processed, 1u);
+  EXPECT_EQ(plugin->wave_process_ids, std::vector<uint32_t>{kOwner});
+  EXPECT_EQ(successors, 1u);
+  // Native PM4 publishes the cursor modulo the ring capacity.
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
 }
 
 TEST_F(Pm4ComputeQueueTest, ForeignFlushFailureDoesNotBlockFreshQueues) {

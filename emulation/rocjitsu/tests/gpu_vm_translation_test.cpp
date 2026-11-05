@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "legacy_gpu_memory_fixture.h"
-#include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/drm_vm.h"
+#include "rocjitsu/kmd/linux/kfd_address_space.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
@@ -44,6 +45,59 @@ constexpr bool kSanitizedVmMetadata = true;
 #else
 constexpr bool kSanitizedVmMetadata = false;
 #endif
+
+TEST(KfdAddressSpaceImportTest, CopiesOnlySelectedExtentsAndPreservesBackingPolicy) {
+  KfdAddressSpace source, target;
+  std::array<uint8_t, 256> source_bytes{}, target_bytes{};
+  source.map_pages(0x1080, source_bytes.data(), 256, Mtype::NT,
+                   KfdAddressSpace::HostExtentOwner::Driver);
+  source.map_pages(0x2000, source_bytes.data(), 256);
+  target.map_pages(0x1000, target_bytes.data(), 32, Mtype::NT);
+  // Overlapping selection ranges must not duplicate or widen imported extents.
+  const std::array<KfdAddressSpace::MappingRange, 3> ranges{
+      {{0x10a0, 64}, {0x10c0, 64}, {0x1200, 64}}};
+  const auto generation = *target.page_table_generation();
+  ASSERT_TRUE(target.import_mappings(source, ranges));
+  EXPECT_EQ(*target.page_table_generation(), generation + 1);
+  ASSERT_EQ(target.page_table_.size(), 1u);
+  const auto &page = target.page_table_.at(1);
+  EXPECT_EQ(page.mtype, Mtype::NT);
+  ASSERT_EQ(page.host_extents.size(), 2u);
+  EXPECT_EQ(page.host_extents[0].host_ptr, target_bytes.data());
+  EXPECT_EQ(page.host_extents[0].host_backed_bytes, 32u);
+  const auto &imported = page.host_extents[1];
+  EXPECT_EQ(imported.host_ptr, source_bytes.data() + 32);
+  EXPECT_EQ(imported.gpu_page_offset, 0xa0u);
+  EXPECT_EQ(imported.host_backed_bytes, 96u);
+  EXPECT_EQ(imported.owner, KfdAddressSpace::HostExtentOwner::Driver);
+  EXPECT_EQ(source.page_table_.at(1).host_extents[0].host_backed_bytes, 256u);
+}
+
+TEST(KfdAddressSpaceImportTest, PolicyConflictAndInvalidRangeLeaveTargetUnchanged) {
+  KfdAddressSpace source, target;
+  std::array<uint8_t, 256> source_bytes{}, target_bytes{};
+  source.map_pages(0x1080, source_bytes.data(), 256, Mtype::NT);
+  source.map_pages(0x2000, source_bytes.data(), 256, Mtype::NT);
+  target.map_pages(0x1000, target_bytes.data(), 32, Mtype::RW);
+  const auto generation = *target.page_table_generation();
+  const util::IntrusiveSharedPtr<const VmMutationEpoch> mutation_epoch =
+      target.page_table_mutation_epoch();
+  ASSERT_NE(mutation_epoch.get(), nullptr);
+  const auto epoch = mutation_epoch->value.load();
+  const std::array<KfdAddressSpace::MappingRange, 1> ranges{{{0x1000, 8192}}};
+  EXPECT_FALSE(target.import_mappings(source, ranges));
+  EXPECT_EQ(*target.page_table_generation(), generation);
+  EXPECT_EQ(mutation_epoch->value.load(), epoch);
+  ASSERT_EQ(target.page_table_.size(), 1u);
+  const auto &page = target.page_table_.at(1);
+  EXPECT_EQ(page.mtype, Mtype::RW);
+  ASSERT_EQ(page.host_extents.size(), 1u);
+  EXPECT_EQ(page.host_extents[0].host_ptr, target_bytes.data());
+  EXPECT_EQ(page.host_extents[0].host_backed_bytes, 32u);
+  const std::array<KfdAddressSpace::MappingRange, 1> wrapping{{{UINT64_MAX - 1, 4}}};
+  EXPECT_FALSE(target.import_mappings(source, wrapping));
+  EXPECT_EQ(*target.page_table_generation(), generation);
+}
 
 class TestPhysicalMemory final : public PhysicalMemoryAccess {
 public:
@@ -147,7 +201,7 @@ public:
 
 class HostPage {
 public:
-  explicit HostPage(size_t size = KfdProcess::kPageSize) : size_(size) {
+  explicit HostPage(size_t size = KfdAddressSpace::kPageSize) : size_(size) {
     void *mapping =
         mmap(nullptr, size_, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     data_ = mapping == MAP_FAILED ? nullptr : static_cast<uint8_t *>(mapping);
@@ -166,7 +220,7 @@ private:
   uint8_t *data_ = nullptr;
 };
 
-AddressSpaceHandle register_step_process(LegacyGpuVmAdapter &adapter, KfdProcess &process,
+AddressSpaceHandle register_step_process(LegacyGpuVmAdapter &adapter, KfdAddressSpace &process,
                                          MemoryFaultReporter *reporter = nullptr) {
   return adapter.register_address_space(7,
                                         {.page_table = &process.page_table_,
@@ -184,15 +238,15 @@ TEST(GpuVmTranslation, MutationSnapshotRetainsEpochAfterProcessDestruction) {
   VmMtypeSnapshot snapshot;
   uint64_t updated_epoch = 0;
   {
-    KfdProcess process(7);
+    KfdAddressSpace process;
     auto epoch = process.page_table_mutation_epoch();
     snapshot = {.mtype = Mtype::RW,
                 .begin = 0x4000,
-                .size = KfdProcess::kPageSize,
+                .size = KfdAddressSpace::kPageSize,
                 .mutation_epoch = epoch,
                 .captured_epoch = epoch->value.load(std::memory_order_acquire)};
     EXPECT_TRUE(snapshot.unchanged(0x4000));
-    process.map_pages(0x4000, backing.data(), KfdProcess::kPageSize, Mtype::RW);
+    process.map_pages(0x4000, backing.data(), KfdAddressSpace::kPageSize, Mtype::RW);
     EXPECT_FALSE(snapshot.unchanged(0x4000));
     updated_epoch = epoch->value.load(std::memory_order_acquire);
     EXPECT_GT(updated_epoch, snapshot.captured_epoch);
@@ -275,7 +329,7 @@ TEST(GpuVmTranslation, LegacyStepsKeepExtentBoundariesAndRejectOverlappingCovera
         SCOPED_TRACE(second_offset);
         SCOPED_TRACE(first_size);
         GpuMemory memory("memory");
-        KfdProcess process(7);
+        KfdAddressSpace process;
         HostPage backing;
         ASSERT_NE(backing.data(), nullptr);
         std::memset(backing.data(), 0x55, 32);
@@ -309,13 +363,13 @@ TEST(GpuVmTranslation, LegacyStepsKeepExtentBoundariesAndRejectOverlappingCovera
 TEST(GpuVmTranslation, LegacyStepsKeepPageProgressAndResumeWithoutReplayingPrefix) {
   for (const auto owner : {LegacyHostExtentOwner::Driver, LegacyHostExtentOwner::Application}) {
     GpuMemory memory("memory");
-    KfdProcess process(7);
+    KfdAddressSpace process;
     HostPage first, second;
     ASSERT_NE(first.data(), nullptr);
     ASSERT_NE(second.data(), nullptr);
-    std::memset(first.data(), 0x55, KfdProcess::kPageSize);
-    std::memset(second.data(), 0x66, KfdProcess::kPageSize);
-    process.map_pages(0x4000, first.data(), KfdProcess::kPageSize, Mtype::RW, owner);
+    std::memset(first.data(), 0x55, KfdAddressSpace::kPageSize);
+    std::memset(second.data(), 0x66, KfdAddressSpace::kPageSize);
+    process.map_pages(0x4000, first.data(), KfdAddressSpace::kPageSize, Mtype::RW, owner);
     GpuVm vm;
     LegacyGpuVmAdapter adapter(vm, &memory);
     const auto handle = register_step_process(adapter, process);
@@ -329,31 +383,31 @@ TEST(GpuVmTranslation, LegacyStepsKeepPageProgressAndResumeWithoutReplayingPrefi
     EXPECT_EQ(completed, 16u);
     for (size_t i = 0; i < bytes.size(); ++i)
       EXPECT_EQ(bytes[i], i < 16 ? std::byte{0x55} : std::byte{0xaa});
-    std::memset(first.data() + KfdProcess::kPageSize - 16, 0x77, 16);
-    process.map_pages(0x5000, second.data(), KfdProcess::kPageSize, Mtype::CC, owner);
+    std::memset(first.data() + KfdAddressSpace::kPageSize - 16, 0x77, 16);
+    process.map_pages(0x5000, second.data(), KfdAddressSpace::kPageSize, Mtype::CC, owner);
     EXPECT_EQ(access->read(0x4ff0, bytes, completed), VmAccessOutcome::Complete);
     EXPECT_EQ(completed, bytes.size());
     EXPECT_EQ(bytes[0], std::byte{0x55});
     EXPECT_EQ(bytes[16], std::byte{0x66});
-    process.unmap_pages(0x5000, KfdProcess::kPageSize);
+    process.unmap_pages(0x5000, KfdAddressSpace::kPageSize);
     bytes.fill(std::byte{0x88});
     completed = 0;
     EXPECT_EQ(access->write(0x4ff0, bytes, completed), VmAccessOutcome::Unavailable);
     EXPECT_EQ(completed, 16u);
-    std::memset(first.data() + KfdProcess::kPageSize - 16, 0x99, 16);
-    process.map_pages(0x5000, second.data(), KfdProcess::kPageSize, Mtype::CC, owner);
+    std::memset(first.data() + KfdAddressSpace::kPageSize - 16, 0x99, 16);
+    process.map_pages(0x5000, second.data(), KfdAddressSpace::kPageSize, Mtype::CC, owner);
     EXPECT_EQ(access->write(0x4ff0, bytes, completed), VmAccessOutcome::Complete);
-    EXPECT_EQ(first.data()[KfdProcess::kPageSize - 1], 0x99);
+    EXPECT_EQ(first.data()[KfdAddressSpace::kPageSize - 1], 0x99);
     EXPECT_EQ(second.data()[0], 0x88);
   }
 }
 
 TEST(GpuVmTranslation, LegacyApplicationStepPrevalidatesCrossHostPageWrites) {
   GpuMemory memory("memory");
-  KfdProcess process(7);
-  HostPage backing(2 * KfdProcess::kPageSize);
+  KfdAddressSpace process;
+  HostPage backing(2 * KfdAddressSpace::kPageSize);
   ASSERT_NE(backing.data(), nullptr);
-  auto *first = backing.data() + KfdProcess::kPageSize - 16;
+  auto *first = backing.data() + KfdAddressSpace::kPageSize - 16;
   std::memset(first, 0x55, 32);
   process.map_pages(0x4000, first, 32, Mtype::RW, LegacyHostExtentOwner::Application);
   RecordingFaultReporter reporter;
@@ -363,7 +417,9 @@ TEST(GpuVmTranslation, LegacyApplicationStepPrevalidatesCrossHostPageWrites) {
   ASSERT_TRUE(handle);
   const auto access = vm.snapshot(handle);
   ASSERT_TRUE(access);
-  ASSERT_EQ(mprotect(backing.data() + KfdProcess::kPageSize, KfdProcess::kPageSize, PROT_READ), 0);
+  ASSERT_EQ(
+      mprotect(backing.data() + KfdAddressSpace::kPageSize, KfdAddressSpace::kPageSize, PROT_READ),
+      0);
   std::array<std::byte, 32> bytes;
   bytes.fill(std::byte{0xaa});
   size_t completed = 0;
@@ -371,19 +427,21 @@ TEST(GpuVmTranslation, LegacyApplicationStepPrevalidatesCrossHostPageWrites) {
   EXPECT_EQ(completed, 0u);
   EXPECT_TRUE(std::ranges::all_of(std::span(first, 32), [](auto byte) { return byte == 0x55; }));
   EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{0x4000}));
-  ASSERT_EQ(mprotect(backing.data() + KfdProcess::kPageSize, KfdProcess::kPageSize, PROT_NONE), 0);
+  ASSERT_EQ(
+      mprotect(backing.data() + KfdAddressSpace::kPageSize, KfdAddressSpace::kPageSize, PROT_NONE),
+      0);
   EXPECT_EQ(access->read(0x4000, bytes, completed), VmAccessOutcome::Faulted);
   EXPECT_EQ(completed, 0u);
   EXPECT_TRUE(std::ranges::all_of(bytes, [](auto byte) { return byte == std::byte{0xaa}; }));
   EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{0x4000, 0x4000}));
-  ASSERT_EQ(mprotect(backing.data() + KfdProcess::kPageSize, KfdProcess::kPageSize,
+  ASSERT_EQ(mprotect(backing.data() + KfdAddressSpace::kPageSize, KfdAddressSpace::kPageSize,
                      PROT_READ | PROT_WRITE),
             0);
 }
 
 TEST(GpuVmTranslation, LegacyStepsPreserveClientBackingAndTerminalFaults) {
   GpuMemory memory("memory");
-  KfdProcess process(7);
+  KfdAddressSpace process;
   HostPage backing;
   ASSERT_NE(backing.data(), nullptr);
   backing.data()[0] = 0x55;
@@ -403,13 +461,13 @@ TEST(GpuVmTranslation, LegacyStepsPreserveClientBackingAndTerminalFaults) {
   EXPECT_EQ(access->write(address, bytes), VmAccessOutcome::Complete);
   EXPECT_EQ(backing.data()[0], 0x66);
   EXPECT_TRUE(reporter.addresses.empty());
-  ASSERT_EQ(mprotect(backing.data(), KfdProcess::kPageSize, PROT_NONE), 0);
+  ASSERT_EQ(mprotect(backing.data(), KfdAddressSpace::kPageSize, PROT_NONE), 0);
   bytes[0] = std::byte{0xaa};
   EXPECT_EQ(access->read(address, bytes), VmAccessOutcome::Faulted);
   EXPECT_EQ(bytes[0], std::byte{0xaa});
   EXPECT_EQ(access->write(address, bytes), VmAccessOutcome::Faulted);
   EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{address, address}));
-  ASSERT_EQ(mprotect(backing.data(), KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  ASSERT_EQ(mprotect(backing.data(), KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE), 0);
   EXPECT_EQ(backing.data()[0], 0x66);
 }
 
@@ -420,23 +478,23 @@ TEST(GpuVmTranslation, LegacyStepFaultCallbacksCanMutatePolicyAndHostMappings) {
         for (const auto owner :
              {LegacyHostExtentOwner::Driver, LegacyHostExtentOwner::Application}) {
           GpuMemory memory("memory");
-          KfdProcess process(7);
+          KfdAddressSpace process;
           HostPage backing;
           if (!backing.data())
             _exit(1);
           backing.data()[0] = 0x55;
-          process.map_pages(0x4000, backing.data(), KfdProcess::kPageSize, Mtype::RW, owner);
+          process.map_pages(0x4000, backing.data(), KfdAddressSpace::kPageSize, Mtype::RW, owner);
           class Reporter final : public MemoryFaultReporter {
           public:
-            explicit Reporter(KfdProcess &process) : process(process) {}
+            explicit Reporter(KfdAddressSpace &process) : process(process) {}
             void report_memory_fault(uint32_t, uint64_t address, MemoryFaultCause) override {
               if (address != 0x4000)
                 _exit(2);
               ++calls;
-              process.set_page_mtype(0x4000, KfdProcess::kPageSize, Mtype::CC);
+              process.set_page_mtype(0x4000, KfdAddressSpace::kPageSize, Mtype::CC);
               const auto mapping = rocjitsu::host_mapping_lock().lock_exclusive();
             }
-            KfdProcess &process;
+            KfdAddressSpace &process;
             unsigned calls = 0;
           } reporter(process);
           GpuVm vm;
@@ -446,7 +504,7 @@ TEST(GpuVmTranslation, LegacyStepFaultCallbacksCanMutatePolicyAndHostMappings) {
           std::array<std::byte, 1> bytes{std::byte{0xaa}};
           if (!access || access->read(0x4000, bytes) != VmAccessOutcome::Complete)
             _exit(3);
-          if (mprotect(backing.data(), KfdProcess::kPageSize, PROT_NONE) != 0)
+          if (mprotect(backing.data(), KfdAddressSpace::kPageSize, PROT_NONE) != 0)
             _exit(4);
           bytes[0] = std::byte{0xaa};
           if (access->read(0x4000, bytes) != VmAccessOutcome::Faulted || reporter.calls != 1 ||
@@ -454,7 +512,7 @@ TEST(GpuVmTranslation, LegacyStepFaultCallbacksCanMutatePolicyAndHostMappings) {
             _exit(5);
           if (access->write(0x4000, bytes) != VmAccessOutcome::Faulted || reporter.calls != 2)
             _exit(6);
-          if (mprotect(backing.data(), KfdProcess::kPageSize, PROT_READ | PROT_WRITE) != 0 ||
+          if (mprotect(backing.data(), KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE) != 0 ||
               backing.data()[0] != 0x55)
             _exit(7);
         }
@@ -470,13 +528,13 @@ TEST(GpuVmTranslation, LegacyStepKeepsOneMappedSpanStableDuringConcurrentRemap) 
         for (const auto owner :
              {LegacyHostExtentOwner::Driver, LegacyHostExtentOwner::Application}) {
           GpuMemory memory("memory");
-          KfdProcess process(7);
+          KfdAddressSpace process;
           HostPage first, second;
           if (!first.data() || !second.data())
             _exit(1);
-          std::memset(first.data(), 0x55, KfdProcess::kPageSize);
-          std::memset(second.data(), 0xaa, KfdProcess::kPageSize);
-          process.map_pages(0x4000, first.data(), KfdProcess::kPageSize, Mtype::RW, owner);
+          std::memset(first.data(), 0x55, KfdAddressSpace::kPageSize);
+          std::memset(second.data(), 0xaa, KfdAddressSpace::kPageSize);
+          process.map_pages(0x4000, first.data(), KfdAddressSpace::kPageSize, Mtype::RW, owner);
           GpuVm vm;
           LegacyGpuVmAdapter adapter(vm, &memory);
           const auto handle = register_step_process(adapter, process);
@@ -488,8 +546,8 @@ TEST(GpuVmTranslation, LegacyStepKeepsOneMappedSpanStableDuringConcurrentRemap) 
             while (!started.load(std::memory_order_acquire))
               std::this_thread::yield();
             for (unsigned i = 0; i < 2000; ++i)
-              process.map_pages(0x4000, i % 2 ? first.data() : second.data(), KfdProcess::kPageSize,
-                                i % 2 ? Mtype::RW : Mtype::CC, owner);
+              process.map_pages(0x4000, i % 2 ? first.data() : second.data(),
+                                KfdAddressSpace::kPageSize, i % 2 ? Mtype::RW : Mtype::CC, owner);
           });
           started.store(true, std::memory_order_release);
           for (unsigned i = 0; i < 2000; ++i) {
@@ -508,7 +566,7 @@ TEST(GpuVmTranslation, LegacyStepKeepsOneMappedSpanStableDuringConcurrentRemap) 
               _exit(3);
           }
           writer.join();
-          process.unmap_pages(0x4000, KfdProcess::kPageSize);
+          process.unmap_pages(0x4000, KfdAddressSpace::kPageSize);
           std::array<std::byte, 1> bytes{std::byte{0xcc}};
           if (access->read(0x4000, bytes) != VmAccessOutcome::Unavailable ||
               bytes[0] != std::byte{0xcc})
@@ -522,13 +580,13 @@ TEST(GpuVmTranslation, LegacyStepKeepsOneMappedSpanStableDuringConcurrentRemap) 
 #if defined(RJ_GPU_VM_TRANSLATION_TEST_WITH_ASAN)
 TEST(GpuVmTranslation, LegacyStepRevalidatesAfterUnlockedAllocatorMetadataQuery) {
   GpuMemory memory("memory");
-  KfdProcess process(7);
+  KfdAddressSpace process;
   HostPage first, second;
   ASSERT_NE(first.data(), nullptr);
   ASSERT_NE(second.data(), nullptr);
   first.data()[0] = 0x55;
   second.data()[0] = 0xaa;
-  process.map_pages(0x4000, first.data(), KfdProcess::kPageSize);
+  process.map_pages(0x4000, first.data(), KfdAddressSpace::kPageSize);
   GpuVm vm;
   LegacyGpuVmAdapter adapter(vm, &memory);
   const auto handle = register_step_process(adapter, process);
@@ -538,7 +596,7 @@ TEST(GpuVmTranslation, LegacyStepRevalidatesAfterUnlockedAllocatorMetadataQuery)
   unsigned calls = 0;
   std::function<void()> remap = [&] {
     if (++calls == 1)
-      process.map_pages(0x4000, second.data(), KfdProcess::kPageSize);
+      process.map_pages(0x4000, second.data(), KfdAddressSpace::kPageSize);
   };
   auto *address_space = adapter.address_space(7);
   ASSERT_NE(address_space, nullptr);
@@ -1431,13 +1489,13 @@ TEST(GpuVmTranslation, TranslatedBindingDoesNotDependOnLegacyMemoryOrNonzeroMeta
 
 TEST(GpuVmTranslation, LegacyBindingUsesTheSharedVmInterfaceWithoutClaimingPhysicalIdentity) {
   GpuMemory memory("memory");
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4123;
-  std::array<uint8_t, KfdProcess::kPageSize> backing{};
+  std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
   backing[0x123] = 0x5a;
-  page_table[virtual_address >> KfdProcess::kPageShift] = {backing.data(), Mtype::CC};
+  page_table[virtual_address >> KfdAddressSpace::kPageShift] = {backing.data(), Mtype::CC};
   GpuVm gpu_vm;
   LegacyGpuVmAdapter legacy_vm(gpu_vm, &memory);
 
@@ -1453,7 +1511,7 @@ TEST(GpuVmTranslation, LegacyBindingUsesTheSharedVmInterfaceWithoutClaimingPhysi
   EXPECT_EQ(translated.translation.domain, VmMemoryDomain::Compatibility);
   EXPECT_EQ(translated.translation.address, virtual_address);
   EXPECT_EQ(translated.translation.mtype, Mtype::CC);
-  EXPECT_EQ(translated.translation.contiguous_bytes, KfdProcess::kPageSize - 0x123);
+  EXPECT_EQ(translated.translation.contiguous_bytes, KfdAddressSpace::kPageSize - 0x123);
 
   std::array<std::byte, 1> value{};
   EXPECT_EQ(gpu_vm.read(handle, virtual_address, value), VmAccessOutcome::Complete);
@@ -1467,14 +1525,14 @@ TEST(GpuVmTranslation, LegacyBindingUsesTheSharedVmInterfaceWithoutClaimingPhysi
 
 TEST(GpuVmTranslation, LegacyProbeRequiresEveryPageToHaveAGpuMapping) {
   GpuMemory memory("memory");
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t mapped_address = 0x4000;
   constexpr uint64_t unmapped_address = 0;
-  constexpr uint64_t mapped_page_end = mapped_address + KfdProcess::kPageSize;
-  std::array<uint8_t, KfdProcess::kPageSize> backing{};
-  page_table[mapped_address >> KfdProcess::kPageShift] = {backing.data(), Mtype::CC};
+  constexpr uint64_t mapped_page_end = mapped_address + KfdAddressSpace::kPageSize;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
+  page_table[mapped_address >> KfdAddressSpace::kPageShift] = {backing.data(), Mtype::CC};
   GpuVm gpu_vm;
   LegacyGpuVmAdapter legacy_vm(gpu_vm, &memory);
 
@@ -1496,13 +1554,13 @@ TEST(GpuVmTranslation, LegacyProbeRequiresEveryPageToHaveAGpuMapping) {
 
 TEST(GpuVmTranslation, LegacyProbeRejectsWritesAndAtomicsToReadOnlyBacking) {
   GpuMemory memory("memory");
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4000;
   HostPage backing;
   ASSERT_NE(backing.data(), nullptr);
-  page_table[virtual_address >> KfdProcess::kPageShift] = {backing.data(), Mtype::CC};
+  page_table[virtual_address >> KfdAddressSpace::kPageShift] = {backing.data(), Mtype::CC};
   RecordingFaultReporter reporter;
   GpuVm gpu_vm;
   LegacyGpuVmAdapter legacy_vm(gpu_vm, &memory);
@@ -1518,30 +1576,30 @@ TEST(GpuVmTranslation, LegacyProbeRejectsWritesAndAtomicsToReadOnlyBacking) {
   ASSERT_TRUE(handle);
   const std::optional<GpuVmAccess> access = gpu_vm.snapshot(handle);
   ASSERT_TRUE(access);
-  ASSERT_EQ(mprotect(backing.data(), KfdProcess::kPageSize, PROT_READ), 0);
+  ASSERT_EQ(mprotect(backing.data(), KfdAddressSpace::kPageSize, PROT_READ), 0);
 
-  EXPECT_EQ(access->query_access(virtual_address, KfdProcess::kPageSize, VmAccessKind::Read),
+  EXPECT_EQ(access->query_access(virtual_address, KfdAddressSpace::kPageSize, VmAccessKind::Read),
             VmAccessOutcome::Complete);
-  EXPECT_EQ(access->query_access(virtual_address, KfdProcess::kPageSize, VmAccessKind::Write),
+  EXPECT_EQ(access->query_access(virtual_address, KfdAddressSpace::kPageSize, VmAccessKind::Write),
             VmAccessOutcome::Faulted);
-  EXPECT_EQ(access->query_access(virtual_address, KfdProcess::kPageSize, VmAccessKind::Atomic),
+  EXPECT_EQ(access->query_access(virtual_address, KfdAddressSpace::kPageSize, VmAccessKind::Atomic),
             VmAccessOutcome::Faulted);
   EXPECT_TRUE(reporter.addresses.empty());
 
-  EXPECT_EQ(access->probe(virtual_address, KfdProcess::kPageSize, VmAccessKind::Write),
+  EXPECT_EQ(access->probe(virtual_address, KfdAddressSpace::kPageSize, VmAccessKind::Write),
             VmAccessOutcome::Faulted);
-  EXPECT_EQ(access->probe(virtual_address, KfdProcess::kPageSize, VmAccessKind::Atomic),
+  EXPECT_EQ(access->probe(virtual_address, KfdAddressSpace::kPageSize, VmAccessKind::Atomic),
             VmAccessOutcome::Faulted);
   EXPECT_EQ(reporter.vmids, (std::vector<uint32_t>{vmid, vmid}));
   EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{virtual_address, virtual_address}));
 
-  ASSERT_EQ(mprotect(backing.data(), KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  ASSERT_EQ(mprotect(backing.data(), KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE), 0);
   EXPECT_TRUE(gpu_vm.unregister_address_space(handle));
 }
 
 TEST(GpuVmTranslation, QueryAccessDoesNotReportAnExpectedProvisioningMiss) {
   GpuMemory memory("memory");
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t unmapped_address = 0x4000;
@@ -1561,11 +1619,12 @@ TEST(GpuVmTranslation, QueryAccessDoesNotReportAnExpectedProvisioningMiss) {
   const std::optional<GpuVmAccess> access = gpu_vm.snapshot(handle);
   ASSERT_TRUE(access);
 
-  EXPECT_EQ(access->query_access(unmapped_address, KfdProcess::kPageSize, VmAccessKind::Atomic),
-            VmAccessOutcome::Faulted);
+  EXPECT_EQ(
+      access->query_access(unmapped_address, KfdAddressSpace::kPageSize, VmAccessKind::Atomic),
+      VmAccessOutcome::Faulted);
   EXPECT_TRUE(reporter.addresses.empty());
 
-  EXPECT_EQ(access->probe(unmapped_address, KfdProcess::kPageSize, VmAccessKind::Atomic),
+  EXPECT_EQ(access->probe(unmapped_address, KfdAddressSpace::kPageSize, VmAccessKind::Atomic),
             VmAccessOutcome::Faulted);
   EXPECT_EQ(reporter.vmids, (std::vector<uint32_t>{vmid}));
   EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{unmapped_address}));
@@ -1573,7 +1632,7 @@ TEST(GpuVmTranslation, QueryAccessDoesNotReportAnExpectedProvisioningMiss) {
 
 TEST(GpuVmTranslation, LegacyExecuteUsesFetchableCompatibilityBacking) {
   GpuMemory memory("memory");
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t executable_address = 0x9000;
@@ -1603,20 +1662,20 @@ TEST(GpuVmTranslation, LegacyExecuteUsesFetchableCompatibilityBacking) {
 TEST(GpuVmTranslation, LegacySnapshotRetainsStorageButIsRevokedAcrossUnregister) {
   auto original_memory = std::make_shared<GpuMemory>("original-memory");
   auto replacement_memory = std::make_shared<GpuMemory>("replacement-memory");
-  KfdProcess::PageTable original_page_table;
-  KfdProcess::PageTable replacement_page_table;
+  KfdAddressSpace::PageTable original_page_table;
+  KfdAddressSpace::PageTable replacement_page_table;
   util::DistributedSharedMutex original_page_table_mutex;
   util::DistributedSharedMutex replacement_page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4000;
-  std::array<uint8_t, KfdProcess::kPageSize> original_backing{};
-  std::array<uint8_t, KfdProcess::kPageSize> replacement_backing{};
+  std::array<uint8_t, KfdAddressSpace::kPageSize> original_backing{};
+  std::array<uint8_t, KfdAddressSpace::kPageSize> replacement_backing{};
   original_backing[0] = 0x3c;
   replacement_backing[0] = 0xa5;
-  original_page_table[virtual_address >> KfdProcess::kPageShift] = {original_backing.data(),
-                                                                    Mtype::CC};
-  replacement_page_table[virtual_address >> KfdProcess::kPageShift] = {replacement_backing.data(),
-                                                                       Mtype::CC};
+  original_page_table[virtual_address >> KfdAddressSpace::kPageShift] = {original_backing.data(),
+                                                                         Mtype::CC};
+  replacement_page_table[virtual_address >> KfdAddressSpace::kPageShift] = {
+      replacement_backing.data(), Mtype::CC};
   GpuVm gpu_vm;
   LegacyGpuVmAdapter legacy_vm(gpu_vm, original_memory);
 
@@ -1658,7 +1717,7 @@ TEST(GpuVmTranslation, LegacySnapshotRetainsStorageButIsRevokedAcrossUnregister)
 
 TEST(GpuVmTranslation, LegacyUnregisterRevokesFaultDeliveryFromRetainedSnapshot) {
   GpuMemory memory("memory");
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   RecordingFaultReporter reporter;
   GpuVm gpu_vm;
@@ -1681,9 +1740,121 @@ TEST(GpuVmTranslation, LegacyUnregisterRevokesFaultDeliveryFromRetainedSnapshot)
   EXPECT_TRUE(reporter.addresses.empty());
 }
 
+TEST(GpuVmTranslation, DrmVmDestructionPreservesIndependentMappingAtTheSameVa) {
+  GpuMemory memory("memory");
+  GpuVm gpu_vm;
+  constexpr uint64_t address = 0x4000;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> first_backing{}, second_backing{};
+  first_backing[0] = 0x3c;
+  second_backing[0] = 0xa5;
+  auto first = std::make_unique<DrmVm>(gpu_vm, &memory, 0, 7, false);
+  DrmVm second(gpu_vm, &memory, 0, 8, false);
+  first->memory->map_pages(address, first_backing.data(), first_backing.size());
+  second.memory->map_pages(address, second_backing.data(), second_backing.size());
+  const auto first_handle = first->address_space();
+  ASSERT_TRUE(first_handle);
+  ASSERT_TRUE(second.address_space());
+  EXPECT_NE(first_handle, second.address_space());
+
+  std::array<std::byte, 1> value{};
+  ASSERT_EQ(gpu_vm.read(first_handle, address, value), VmAccessOutcome::Complete);
+  EXPECT_EQ(value[0], std::byte{0x3c});
+  ASSERT_EQ(gpu_vm.read(second.address_space(), address, value), VmAccessOutcome::Complete);
+  EXPECT_EQ(value[0], std::byte{0xa5});
+
+  first.reset();
+  EXPECT_FALSE(gpu_vm.lookup(first_handle));
+  ASSERT_TRUE(gpu_vm.lookup(second.address_space()));
+  ASSERT_EQ(gpu_vm.read(second.address_space(), address, value), VmAccessOutcome::Complete);
+  EXPECT_EQ(value[0], std::byte{0xa5});
+}
+
+TEST(GpuVmTranslation, DrmVmSnapshotRetainsBackingUntilItsRelease) {
+  GpuMemory memory("memory");
+  GpuVm gpu_vm;
+  constexpr uint64_t address = 0x4000;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
+  backing[0] = 0x3c;
+  std::weak_ptr<KfdAddressSpace> retained_memory;
+  std::weak_ptr<MemoryFaultReporter> retained_reporter;
+  std::optional<GpuVmAccess> access;
+  AddressSpaceHandle handle;
+  {
+    auto reporter = std::make_shared<RecordingFaultReporter>();
+    retained_reporter = reporter;
+    DrmVm vm(gpu_vm, &memory, 0, 7, false, std::move(reporter));
+    vm.memory->map_pages(address, backing.data(), backing.size());
+    retained_memory = vm.memory;
+    handle = vm.address_space();
+    access = gpu_vm.snapshot(handle);
+    ASSERT_TRUE(access);
+    std::array<std::byte, 1> value{};
+    ASSERT_EQ(access->read(address, value), VmAccessOutcome::Complete);
+    EXPECT_EQ(value[0], std::byte{0x3c});
+  }
+
+  EXPECT_FALSE(gpu_vm.lookup(handle));
+  EXPECT_FALSE(retained_memory.expired());
+  EXPECT_FALSE(retained_reporter.expired());
+  EXPECT_EQ(access->probe(address, 1, VmAccessKind::Read), VmAccessOutcome::Revoked);
+  access.reset();
+  EXPECT_TRUE(retained_memory.expired());
+  EXPECT_TRUE(retained_reporter.expired());
+}
+
+TEST(GpuVmTranslation, DrmVmChecksGpuIdentityEvenWhenHandlesCollide) {
+  GpuMemory first_memory("first-memory"), second_memory("second-memory");
+  GpuVm first_gpu, second_gpu;
+  auto first = std::make_unique<DrmVm>(first_gpu, &first_memory, 0, 7, false);
+  DrmVm second(second_gpu, &second_memory, 0, 7, false);
+  ASSERT_TRUE(first->address_space());
+  ASSERT_TRUE(second.address_space());
+  ASSERT_EQ(first->address_space(), second.address_space());
+  EXPECT_TRUE(first->belongs_to(first_gpu));
+  EXPECT_FALSE(first->belongs_to(second_gpu));
+  EXPECT_TRUE(second.belongs_to(second_gpu));
+  EXPECT_FALSE(second.belongs_to(first_gpu));
+  {
+    DrmVm duplicate(first_gpu, &first_memory, 0, 7, false);
+    EXPECT_FALSE(duplicate.address_space());
+    EXPECT_FALSE(duplicate.belongs_to(first_gpu));
+  }
+  EXPECT_TRUE(first_gpu.lookup(first->address_space()));
+
+  first.reset();
+  EXPECT_FALSE(first_gpu.lookup(second.address_space()));
+  EXPECT_TRUE(second_gpu.lookup(second.address_space()));
+}
+
+TEST(GpuVmTranslation, DrmVmDestructionAllowsReusingTheSameVmid) {
+  GpuMemory memory("memory");
+  GpuVm gpu_vm;
+  constexpr uint64_t address = 0x4000;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
+  backing[0] = 0xa5;
+  AddressSpaceHandle original;
+  std::optional<GpuVmAccess> old_access;
+  {
+    DrmVm vm(gpu_vm, &memory, 0, 7, false);
+    original = vm.address_space();
+    old_access = gpu_vm.snapshot(original);
+    ASSERT_TRUE(old_access);
+  }
+  DrmVm replacement(gpu_vm, &memory, 0, 7, false);
+  ASSERT_TRUE(replacement.address_space());
+  EXPECT_EQ(replacement.address_space().slot, original.slot);
+  EXPECT_NE(replacement.address_space().generation, original.generation);
+  replacement.memory->map_pages(address, backing.data(), backing.size());
+  std::array<std::byte, 1> value{std::byte{0x5a}};
+  EXPECT_EQ(old_access->read(address, value), VmAccessOutcome::Revoked);
+  EXPECT_EQ(value[0], std::byte{0x5a});
+  ASSERT_EQ(gpu_vm.read(replacement.address_space(), address, value), VmAccessOutcome::Complete);
+  EXPECT_EQ(value[0], std::byte{0xa5});
+}
+
 TEST(GpuVmTranslation, LegacyAdapterTeardownRevokesFaultDeliveryFromRetainedSnapshot) {
   GpuMemory memory("memory");
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   RecordingFaultReporter reporter;
   GpuVm gpu_vm;
@@ -1711,7 +1882,7 @@ TEST(GpuVmTranslation, LegacyAdapterTeardownRevokesFaultDeliveryFromRetainedSnap
 
 TEST(GpuVmTranslation, LegacyAdapterTeardownPreservesQueueRetainedBindingWithoutFaultSink) {
   GpuMemory memory("memory");
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   RecordingFaultReporter reporter;
   GpuVm gpu_vm;
@@ -1743,7 +1914,7 @@ TEST(GpuVmTranslation, LegacyAdapterTeardownPreservesQueueRetainedBindingWithout
 
 TEST(GpuVmTranslation, LegacyMutationPrunesBindingRevokedByGenericVmReset) {
   GpuMemory memory("memory");
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   RecordingFaultReporter reporter;
   GpuVm gpu_vm;
@@ -1772,7 +1943,7 @@ TEST(GpuVmTranslation, LegacyMutationPrunesBindingRevokedByGenericVmReset) {
 
 TEST(GpuVmTranslation, LegacyBackingRetriesUntilPageTableMappingIsPublished) {
   GpuMemory memory("memory");
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4000;
@@ -1786,11 +1957,11 @@ TEST(GpuVmTranslation, LegacyBackingRetriesUntilPageTableMappingIsPublished) {
   EXPECT_EQ(gpu_vm.read(handle, virtual_address, value), VmAccessOutcome::Unavailable);
   EXPECT_EQ(gpu_vm.write(handle, virtual_address, value), VmAccessOutcome::Unavailable);
 
-  std::array<uint8_t, KfdProcess::kPageSize> backing{};
+  std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
   backing[0] = 0x5a;
   {
     std::unique_lock lock(page_table_mutex);
-    page_table[virtual_address >> KfdProcess::kPageShift] = {backing.data(), Mtype::CC};
+    page_table[virtual_address >> KfdAddressSpace::kPageShift] = {backing.data(), Mtype::CC};
   }
 
   EXPECT_EQ(gpu_vm.read(handle, virtual_address, value), VmAccessOutcome::Complete);
@@ -1804,7 +1975,7 @@ TEST(GpuVmTranslation, LegacyBackingRetriesUntilPageTableMappingIsPublished) {
 
 TEST(GpuVmTranslation, LegacyAtomicsDoNotFallBackToSparseStorage) {
   GpuMemory memory("memory");
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4000;
@@ -1832,15 +2003,15 @@ TEST(GpuVmTranslation, LegacyAtomicsDoNotFallBackToSparseStorage) {
 
 TEST(GpuVmTranslation, LegacyBackingRejectsMappedPageClippingWithoutPartialTransfer) {
   GpuMemory memory("memory");
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4000;
   constexpr size_t mapped_bytes = 64;
   std::array<uint8_t, mapped_bytes> backing{};
   std::ranges::fill(backing, uint8_t{0x5a});
-  page_table[virtual_address >> KfdProcess::kPageShift] = {backing.data(), Mtype::CC,
-                                                           backing.size(), 0};
+  page_table[virtual_address >> KfdAddressSpace::kPageShift] = {backing.data(), Mtype::CC,
+                                                                backing.size(), 0};
   GpuVm gpu_vm;
   LegacyGpuVmAdapter legacy_vm(gpu_vm, &memory);
   const AddressSpaceHandle handle =
@@ -1863,13 +2034,13 @@ TEST(GpuVmTranslation, LegacyBackingRejectsMappedPageClippingWithoutPartialTrans
 
 TEST(GpuVmTranslation, LegacyAtomicTranslationFaultsReportExactlyOncePerOperation) {
   GpuMemory memory("memory");
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4000;
   std::array<uint8_t, sizeof(uint32_t)> backing{};
-  page_table[virtual_address >> KfdProcess::kPageShift] = {backing.data(), Mtype::CC,
-                                                           backing.size(), 0};
+  page_table[virtual_address >> KfdAddressSpace::kPageShift] = {backing.data(), Mtype::CC,
+                                                                backing.size(), 0};
   RecordingFaultReporter reporter;
   GpuVm gpu_vm;
   LegacyGpuVmAdapter legacy_vm(gpu_vm, &memory);
@@ -1905,13 +2076,13 @@ TEST(GpuVmTranslation, LegacyAtomicTranslationFaultsReportExactlyOncePerOperatio
 
 TEST(GpuVmTranslation, LegacyBackingFaultsForInaccessibleMappedPage) {
   GpuMemory memory("memory");
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4000;
   HostPage backing;
   ASSERT_NE(backing.data(), nullptr);
-  page_table[virtual_address >> KfdProcess::kPageShift] = {backing.data(), Mtype::CC};
+  page_table[virtual_address >> KfdAddressSpace::kPageShift] = {backing.data(), Mtype::CC};
   RecordingFaultReporter reporter;
   GpuVm gpu_vm;
   LegacyGpuVmAdapter legacy_vm(gpu_vm, &memory);
@@ -1925,7 +2096,7 @@ TEST(GpuVmTranslation, LegacyBackingFaultsForInaccessibleMappedPage) {
                                               .passthrough = false,
                                               .fault_reporter = &reporter});
   ASSERT_TRUE(handle);
-  ASSERT_EQ(mprotect(backing.data(), KfdProcess::kPageSize, PROT_NONE), 0);
+  ASSERT_EQ(mprotect(backing.data(), KfdAddressSpace::kPageSize, PROT_NONE), 0);
 
   std::array<std::byte, 4> value{};
   EXPECT_EQ(gpu_vm.read(handle, virtual_address, value), VmAccessOutcome::Faulted);
@@ -1933,13 +2104,13 @@ TEST(GpuVmTranslation, LegacyBackingFaultsForInaccessibleMappedPage) {
   EXPECT_EQ(reporter.vmids, (std::vector<uint32_t>{vmid, vmid}));
   EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{virtual_address, virtual_address}));
 
-  ASSERT_EQ(mprotect(backing.data(), KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  ASSERT_EQ(mprotect(backing.data(), KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE), 0);
   EXPECT_TRUE(gpu_vm.unregister_address_space(handle));
 }
 
 TEST(GpuVmTranslation, FaultedLegacyAtomicModifyDoesNotInvokeMutation) {
   GpuMemory memory("memory");
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4000;
@@ -1947,7 +2118,7 @@ TEST(GpuVmTranslation, FaultedLegacyAtomicModifyDoesNotInvokeMutation) {
   HostPage backing;
   ASSERT_NE(backing.data(), nullptr);
   std::memcpy(backing.data(), &initial_value, sizeof(initial_value));
-  page_table[virtual_address >> KfdProcess::kPageShift] = {backing.data(), Mtype::CC};
+  page_table[virtual_address >> KfdAddressSpace::kPageShift] = {backing.data(), Mtype::CC};
   RecordingFaultReporter reporter;
   GpuVm gpu_vm;
   LegacyGpuVmAdapter legacy_vm(gpu_vm, &memory);
@@ -1963,7 +2134,7 @@ TEST(GpuVmTranslation, FaultedLegacyAtomicModifyDoesNotInvokeMutation) {
   ASSERT_TRUE(handle);
   std::optional<GpuVmAccess> access = gpu_vm.snapshot(handle);
   ASSERT_TRUE(access);
-  ASSERT_EQ(mprotect(backing.data(), KfdProcess::kPageSize, PROT_READ), 0);
+  ASSERT_EQ(mprotect(backing.data(), KfdAddressSpace::kPageSize, PROT_READ), 0);
 
   uint32_t mutation_calls = 0;
   EXPECT_EQ(access->atomic_modify(virtual_address, sizeof(uint32_t),
@@ -1976,7 +2147,7 @@ TEST(GpuVmTranslation, FaultedLegacyAtomicModifyDoesNotInvokeMutation) {
   EXPECT_EQ(reporter.vmids, (std::vector<uint32_t>{vmid}));
   EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{virtual_address}));
 
-  ASSERT_EQ(mprotect(backing.data(), KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  ASSERT_EQ(mprotect(backing.data(), KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE), 0);
   uint32_t observed = 0;
   std::memcpy(&observed, backing.data(), sizeof(observed));
   EXPECT_EQ(observed, initial_value);

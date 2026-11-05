@@ -7,7 +7,7 @@
 #include "execution_plugin_test_util.h"
 #include "halt_snapshot_plugin.h"
 #include "instruction_failure_test_util.h"
-#include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/kfd_address_space.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
@@ -2319,7 +2319,7 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
       ~static_cast<uintptr_t>(amdgpu::GpuMemory::PAGE_MASK));
   std::memcpy(image_host, image.data(), image.size());
 
-  KfdProcess process(process_id);
+  KfdAddressSpace process;
   amdgpu::LegacyGpuVmAdapter legacy_vm(f.soc->gpu_vm(), f.soc->memory());
   const amdgpu::AddressSpaceHandle address_space =
       legacy_vm.register_address_space(process_id, &process.page_table_, &process.page_table_mutex_,

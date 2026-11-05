@@ -4,6 +4,7 @@
 #include "cdna5_sim_test_common.h"
 
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
+#include "rocjitsu/kmd/linux/drm_vm.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -41,6 +42,207 @@ public:
     set_data(std::move(state));
   }
 };
+
+// Use the compatibility registration used by DRM files, rather than the
+// translated test backend below: these requests must go through L1/L2 routing.
+class DrmVmPipelineTest : public ::testing::TestWithParam<const char *> {
+protected:
+  static constexpr uint64_t kAddress = 0x4000;
+  static constexpr uint32_t kProcessId = 77;
+  static constexpr uint32_t kDestination = 8;
+
+  void SetUp() override {
+    util::StringDiagnostic diagnostic;
+    auto result = config::load_config(std::string(CONFIG_DIR) + "/" + GetParam(), kEmbeddedSchema,
+                                      diagnostic.emitter());
+    ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+    loaded_ = std::move(result).value();
+    soc_ = loaded_.soc();
+    memory_ = loaded_.memory();
+    loaded_.engine_config.num_threads = 1;
+    engine_ = std::make_unique<simdojo::SimulationEngine>(loaded_.engine_config);
+    engine_->topology().set_root(loaded_.take_root());
+    ASSERT_TRUE(loaded_.wire_links(engine_->topology(), diagnostic.emitter()).succeeded())
+        << diagnostic.message();
+    ASSERT_TRUE(engine_->create(diagnostic.emitter()).succeeded()) << diagnostic.message();
+    cu_ = soc_->xcd(0)->shader_engine(0)->compute_unit(0);
+    cu_->set_gpu_vm(&soc_->gpu_vm());
+    for (uint32_t index = 0; index < 2; ++index) {
+      vms_[index] = std::make_unique<DrmVm>(soc_->gpu_vm(), memory_, 0, 100 + index, false);
+      ASSERT_TRUE(vms_[index]->address_space());
+      const auto access = soc_->gpu_vm().snapshot(vms_[index]->address_space());
+      ASSERT_TRUE(access);
+      ASSERT_TRUE(access->info().legacy_cache_compatible);
+      ASSERT_NE(access->info().vmid, kProcessId);
+      vms_[index]->memory->map_pages(kAddress, backing_[index].data(), backing_[index].size(),
+                                     amdgpu::Mtype::RW, KfdAddressSpace::HostExtentOwner::Driver);
+      waves_[index] = cu_->dispatch_wf(index, 0, 32, 32);
+      ASSERT_NE(waves_[index], nullptr);
+      waves_[index]->set_process_id(kProcessId);
+      waves_[index]->set_address_space(vms_[index]->address_space());
+      waves_[index]->set_exec(1);
+    }
+    ASSERT_FALSE(soc_->gpu_vm().snapshot_vmid(kProcessId));
+  }
+
+  void seed(uint32_t index, uint64_t offset, uint32_t width, uint64_t value) {
+    std::memcpy(backing_[index].data() + offset, &value, width);
+  }
+
+  uint64_t backing_value(uint32_t index, uint64_t offset, uint32_t width) const {
+    uint64_t value = 0;
+    std::memcpy(&value, backing_[index].data() + offset, width);
+    return value;
+  }
+
+  amdgpu::VmAccessOutcome access(uint32_t index, bool scalar, uint64_t offset, uint32_t width,
+                                 bool load, uint64_t value = 0, bool atomic = false) {
+    auto &wave = *waves_[index];
+    if (scalar) {
+      auto state = std::make_unique<amdgpu::ScalarMemState>();
+      state->addr = kAddress + offset;
+      state->num_dwords = width / sizeof(uint32_t);
+      state->is_load = load;
+      state->dst_register = {amdgpu::ScalarRegisterStorage::SGPR, kDestination,
+                             static_cast<uint8_t>(state->num_dwords)};
+      state->atomic_op = atomic ? amdgpu::AtomicOp::ADD : amdgpu::AtomicOp::NONE;
+      std::memcpy(state->store_data, &value, width);
+      amdgpu::ScalarMemPipeline pipeline(&cu_->l1_scalar());
+      return pipeline.issue(new TestMemoryInstruction(std::move(state)), wave);
+    }
+    auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    state->elem_size = width;
+    state->num_elems = 1;
+    state->is_load = load;
+    state->wf_size = wave.wf_size();
+    state->exec_mask = 1;
+    state->lane_mask = 1;
+    state->dst_reg_base = wave.vgpr_alloc().base + kDestination;
+    state->per_lane_addr[0] = kAddress + offset;
+    state->atomic_op = atomic ? amdgpu::AtomicOp::ADD : amdgpu::AtomicOp::NONE;
+    state->store_data.resize(wave.wf_size() * width);
+    std::memcpy(state->store_data.data(), &value, width);
+    amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), cu_->l2());
+    return pipeline.issue(new TestMemoryInstruction(std::move(state)), wave);
+  }
+
+  uint64_t result(uint32_t index, bool scalar, uint32_t width) const {
+    const auto &wave = *waves_[index];
+    const auto word = [&](uint32_t offset) {
+      return scalar ? cu_->read_sgpr_storage(wave.sgpr_alloc().base + kDestination + offset)
+                    : cu_->read_vgpr(wave.vgpr_alloc().base + kDestination + offset, 0);
+    };
+    return word(0) | (width == 8 ? uint64_t{word(1)} << 32 : 0);
+  }
+
+  config::LoadedConfig loaded_;
+  SoC *soc_ = nullptr;
+  amdgpu::GpuMemory *memory_ = nullptr;
+  std::unique_ptr<simdojo::SimulationEngine> engine_;
+  amdgpu::ComputeUnitCore *cu_ = nullptr;
+  std::array<amdgpu::Wavefront *, 2> waves_{};
+  alignas(4096) std::array<std::array<uint8_t, KfdAddressSpace::kPageSize>, 2> backing_{};
+  std::array<std::unique_ptr<DrmVm>, 2> vms_;
+};
+
+TEST_P(DrmVmPipelineTest, ScalarAndVectorLoadsAndStoresUseTheBoundVm) {
+  for (bool scalar : {true, false}) {
+    for (uint32_t width : {4u, 8u}) {
+      SCOPED_TRACE(scalar);
+      SCOPED_TRACE(width);
+      const uint64_t offset = (scalar ? 0 : 0x200) + width * 16;
+      const uint64_t high = width == 8 ? 0x1234567800000000ull : 0;
+      std::array<uint64_t, 2> expected{high | 0x11223344, high | 0xaabbccdd};
+      for (uint32_t index = 0; index < 2; ++index)
+        seed(index, offset, width, expected[index]);
+      // Keep both registrations and waves live, and return to A with warm
+      // caches after accessing the same virtual address through B.
+      for (uint32_t index : {0u, 1u, 0u}) {
+        ASSERT_EQ(access(index, scalar, offset, width, true), amdgpu::VmAccessOutcome::Complete);
+        EXPECT_EQ(result(index, scalar, width), expected[index]);
+      }
+      for (uint32_t index : {0u, 1u, 0u}) {
+        expected[index] += 7;
+        ASSERT_EQ(access(index, scalar, offset, width, false, expected[index]),
+                  amdgpu::VmAccessOutcome::Complete);
+        for (uint32_t peer : {index, 1 - index}) {
+          ASSERT_EQ(access(peer, scalar, offset, width, true), amdgpu::VmAccessOutcome::Complete);
+          EXPECT_EQ(result(peer, scalar, width), expected[peer]);
+        }
+      }
+      ASSERT_EQ(cu_->l2()->flush_all(), amdgpu::VmAccessOutcome::Complete);
+      for (uint32_t index = 0; index < 2; ++index)
+        EXPECT_EQ(backing_value(index, offset, width), expected[index]);
+    }
+  }
+}
+
+TEST_P(DrmVmPipelineTest, ReturningAtomicsUseTheBoundVm) {
+  // ScalarMemPipeline implements DWORD atomics; vector atomics support both widths.
+  for (bool scalar : {true, false}) {
+    for (uint32_t width : {4u, 8u}) {
+      if (scalar && width == 8)
+        continue;
+      SCOPED_TRACE(scalar);
+      SCOPED_TRACE(width);
+      const uint64_t offset = (scalar ? 0 : 0x200) + width * 16;
+      const uint64_t high = width == 8 ? 0x1234567800000000ull : 0;
+      std::array<uint64_t, 2> expected{high | 0x11223344, high | 0xaabbccdd};
+      for (uint32_t index = 0; index < 2; ++index)
+        seed(index, offset, width, expected[index]);
+      for (uint32_t index : {0u, 1u, 0u}) {
+        ASSERT_EQ(access(index, scalar, offset, width, true, 9, true),
+                  amdgpu::VmAccessOutcome::Complete);
+        EXPECT_EQ(result(index, scalar, width), expected[index]);
+        expected[index] += 9;
+        ASSERT_EQ(cu_->l2()->flush_all(), amdgpu::VmAccessOutcome::Complete);
+        for (uint32_t peer = 0; peer < 2; ++peer)
+          EXPECT_EQ(backing_value(peer, offset, width), expected[peer]);
+      }
+    }
+  }
+}
+
+TEST_P(DrmVmPipelineTest, UnmappingAndRevokingOneVmPreservesItsPeer) {
+  for (uint32_t index = 0; index < 2; ++index)
+    seed(index, 0, 4, 0x11223344 + index);
+  for (uint32_t index : {0u, 1u, 0u})
+    for (bool scalar : {true, false}) {
+      ASSERT_EQ(access(index, scalar, 0, 4, true), amdgpu::VmAccessOutcome::Complete);
+      EXPECT_EQ(result(index, scalar, 4), 0x11223344u + index);
+    }
+
+  vms_[0]->memory->unmap_pages(kAddress, KfdAddressSpace::kPageSize);
+  // Check the page-table mutation directly. Raw map/unmap does not perform
+  // shader data-cache maintenance, so cached bytes are not an unmap oracle.
+  const auto unmapped = soc_->gpu_vm().snapshot(vms_[0]->address_space());
+  ASSERT_TRUE(unmapped);
+  EXPECT_EQ(unmapped->query_access(kAddress, 4, amdgpu::VmAccessKind::Read),
+            amdgpu::VmAccessOutcome::Faulted);
+  for (bool scalar : {true, false}) {
+    ASSERT_EQ(access(1, scalar, 0, 4, true), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(result(1, scalar, 4), 0x11223345u);
+  }
+  vms_[0].reset();
+  for (bool scalar : {true, false}) {
+    EXPECT_NE(access(0, scalar, 0, 4, true), amdgpu::VmAccessOutcome::Complete);
+    ASSERT_EQ(access(1, scalar, 0, 4, true), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(result(1, scalar, 4), 0x11223345u);
+    ASSERT_EQ(access(1, scalar, scalar ? 0x100 : 0x200, 4, false, 0xaabbccdd),
+              amdgpu::VmAccessOutcome::Complete);
+  }
+  ASSERT_EQ(cu_->l2()->flush_all(), amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(backing_value(0, 0, 4), 0x11223344u);
+  EXPECT_EQ(backing_value(1, 0, 4), 0x11223345u);
+  for (uint64_t offset : {0x100u, 0x200u}) {
+    EXPECT_EQ(backing_value(0, offset, 4), 0u);
+    EXPECT_EQ(backing_value(1, offset, 4), 0xaabbccddu);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Compatibility, DrmVmPipelineTest,
+                         ::testing::Values("gfx950_mi355x.json", "gfx1250_mi455x.json"),
+                         [](const auto &info) { return info.index == 0 ? "Cdna4" : "Cdna5"; });
 
 class MemoryLifecyclePlugin final : public ExecutionPlugin {
 public:

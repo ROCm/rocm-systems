@@ -4,7 +4,7 @@
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
-#include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/kfd_address_space.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
@@ -589,7 +589,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationReportsCompletedDenseLoadAndStore
   constexpr uint32_t kGlobalPlaneStride = 7;
   constexpr uint32_t kBarrierLdsAddr = 128;
 
-  KfdProcess process(kProcessId);
+  KfdAddressSpace process;
   std::array<uint32_t, kGlobalRowStride * kTensorRows> load_storage{};
   std::array<uint32_t, kGlobalRowStride * kTensorRows> store_storage{};
   process.map_pages(kLoadGlobal, load_storage.data(), sizeof(load_storage));
@@ -825,7 +825,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaUsesWaveProcessPageTable) {
   constexpr uint32_t kProcessId = 1250;
   constexpr uint32_t kElements = 4;
   constexpr uint64_t kLoadGlobal = 0x20000000;
-  constexpr uint64_t kStoreGlobal = kLoadGlobal + KfdProcess::kPageSize;
+  constexpr uint64_t kStoreGlobal = kLoadGlobal + KfdAddressSpace::kPageSize;
   constexpr std::array<uint32_t, kElements> kLoadValues = {
       0x11000000u,
       0x22000000u,
@@ -839,7 +839,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaUsesWaveProcessPageTable) {
       0x88000000u,
   };
 
-  KfdProcess process(kProcessId);
+  KfdAddressSpace process;
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -2770,7 +2770,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaCoalescingMatchesElementCopiesAtBoundaries) 
   constexpr uint32_t kProcessId = 81250;
   constexpr uint64_t kGlobal = 0x350000;
   constexpr uint32_t kLdsBytes = 16384;
-  KfdProcess process(kProcessId);
+  KfdAddressSpace process;
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -2855,7 +2855,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaCoalescingCopiesAFullBatch) {
   constexpr uint64_t kGlobal = 0x370000;
   constexpr uint32_t kBytes = 256;
   alignas(4096) std::array<uint8_t, kBytes> backing;
-  KfdProcess process(kProcessId);
+  KfdAddressSpace process;
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -2911,14 +2911,14 @@ TEST(Gfx1250ExecutionTest, TensorDmaCoalescingPreservesClippedAndRefusedExtents)
   constexpr uint64_t kGlobal = 0x360000;
   constexpr uint32_t kSpan = 64;
   constexpr uint32_t kBytes = 3 * kSpan;
-  constexpr size_t kPage = KfdProcess::kPageSize;
+  constexpr size_t kPage = KfdAddressSpace::kPageSize;
   auto *pages = static_cast<uint8_t *>(
       mmap(nullptr, 3 * kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
   ASSERT_NE(pages, MAP_FAILED);
   auto unmap = [](uint8_t *ptr) { munmap(ptr, 3 * kPage); };
   const std::unique_ptr<uint8_t, decltype(unmap)> mapping(pages, unmap);
   ASSERT_EQ(mprotect(pages + kPage, kPage, PROT_NONE), 0);
-  KfdProcess process(kProcessId);
+  KfdAddressSpace process;
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
