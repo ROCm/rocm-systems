@@ -22,7 +22,11 @@ include(GNUInstallDirs)
 
 # Prefixed, so a parent project's own BUILD_TESTS or install policy is not adopted.
 option(ROCM_TRACE_BUILD_TESTS "Build the rocm-trace tests" OFF)
-option(ROCM_TRACE_INSTALL "Install the headers and the CMake package" ${ROCM_TRACE_TOP_LEVEL})
+option(
+    ROCM_TRACE_INSTALL
+    "Install the headers and the CMake package"
+    ${ROCM_TRACE_TOP_LEVEL}
+)
 
 # Names, GUIDs, keywords and levels: no dependencies, for runtimes and tools.
 add_library(rocm-trace-values INTERFACE)
@@ -30,7 +34,9 @@ add_library(rocm::trace_values ALIAS rocm-trace-values)
 set_target_properties(rocm-trace-values PROPERTIES EXPORT_NAME trace_values)
 target_include_directories(
     rocm-trace-values
-    INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 # Adds the enable check for runtimes. It needs a TraceLogging implementation (the
@@ -46,8 +52,17 @@ if(ROCM_TRACE_INSTALL)
     set(ROCM_TRACE_CMAKE_DIR ${CMAKE_INSTALL_LIBDIR}/cmake/rocm-trace)
 
     install(TARGETS rocm-trace-values rocm-trace EXPORT rocm-trace-targets)
-    install(DIRECTORY include/rocm DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT devel)
-    install(EXPORT rocm-trace-targets NAMESPACE rocm:: DESTINATION ${ROCM_TRACE_CMAKE_DIR} COMPONENT devel)
+    install(
+        DIRECTORY include/rocm
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        COMPONENT devel
+    )
+    install(
+        EXPORT rocm-trace-targets
+        NAMESPACE rocm::
+        DESTINATION ${ROCM_TRACE_CMAKE_DIR}
+        COMPONENT devel
+    )
 
     configure_package_config_file(
         cmake/rocm-trace-config.cmake.in
@@ -61,13 +76,18 @@ if(ROCM_TRACE_INSTALL)
         ARCH_INDEPENDENT
     )
     install(
-        FILES ${CMAKE_CURRENT_BINARY_DIR}/rocm-trace-config.cmake
-              ${CMAKE_CURRENT_BINARY_DIR}/rocm-trace-config-version.cmake
+        FILES
+            ${CMAKE_CURRENT_BINARY_DIR}/rocm-trace-config.cmake
+            ${CMAKE_CURRENT_BINARY_DIR}/rocm-trace-config-version.cmake
         DESTINATION ${ROCM_TRACE_CMAKE_DIR}
         COMPONENT devel
     )
     # The same targets from the build tree, for a superbuild that has not installed yet.
-    export(EXPORT rocm-trace-targets NAMESPACE rocm:: FILE ${CMAKE_CURRENT_BINARY_DIR}/rocm-trace-targets.cmake)
+    export(
+        EXPORT rocm-trace-targets
+        NAMESPACE rocm::
+        FILE ${CMAKE_CURRENT_BINARY_DIR}/rocm-trace-targets.cmake
+    )
 endif()
 
 if(ROCM_TRACE_BUILD_TESTS)
