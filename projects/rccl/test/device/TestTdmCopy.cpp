@@ -249,14 +249,16 @@ protected:
 TEST_P(TdmBlockCopyTest, Blocking)  { run<false>(GetParam()); }
 TEST_P(TdmBlockCopyTest, Async)     { run<true>(GetParam());  }
 
-// A broad gamut hitting: pure aligned bulk; head plus chunks; copies under 256B;
+// A broad gamut hitting: pure aligned bulk (doff 128 puts the destination on a
+// 256B boundary, so head 0 and delta 0); head plus chunks; copies under 256B;
 // head-only (head clamped by n); tiny LDS (< MIN_SLOT, vector fallback); LDS that
-// only feeds a subset of warps; single-warp blocks; and awkward remainders.
+// only feeds a subset of warps; fewer 256B units than warps; single-warp blocks;
+// and awkward remainders.
 INSTANTIATE_TEST_SUITE_P(
   Gamut, TdmBlockCopyTest,
   ::testing::Values(
-    BlockCase{4096,        4096, 0,   0,   64,  "aligned_bulk_2warp"},
-    BlockCase{8192,        8192, 0,   0,   256, "aligned_bulk_8warp"},
+    BlockCase{4096,        4096, 0,   128, 64,  "aligned_bulk_2warp"},
+    BlockCase{8192,        8192, 0,   128, 256, "aligned_bulk_8warp"},
     BlockCase{256,         1024, 0,   0,   32,  "exactly_one_row"},
     BlockCase{255,         1024, 0,   0,   32,  "tail_only_255"},
     BlockCase{257,         1024, 0,   0,   32,  "one_row_plus_tail"},
@@ -266,12 +268,18 @@ INSTANTIATE_TEST_SUITE_P(
     BlockCase{50,          1024, 100, 100, 32,  "head_only_clamped"},
     BlockCase{4096,        128,  0,   0,   64,  "tiny_lds_vector_fallback"},
     BlockCase{16384,       2176, 0,   0,   256, "lds_limits_issuers"},
+    // delta 129 pushes the head to 384B, leaving 3 units for 8 warps.
+    BlockCase{1000,        65536, 1,  0,   256, "units_limit_issuers"},
     BlockCase{4096,        1024, 0,   0,   32,  "single_warp_block"},
     BlockCase{65536 + 37,  8192, 0,   0,   256, "large_odd_remainder"},
     BlockCase{1,           1024, 3,   3,   32,  "one_byte_head"},
     // Two slots: shifting (delta 129) on a 4KB window, and not shifting on a window wide enough for two anyway.
     BlockCase{65536 + 37,  4096,  5, 4, 32,  "two_slot_shift"},
     BlockCase{(1 << 18) + 5, 32768, 0, 0, 32, "two_slot_wide"},
+    // Two slots with each warp's run a whole number of chunks, so the last store is a full chunk: the tryTdmCopy
+    // shape (16KB windows, 8KB chunks, head 0, delta 0), and shifting by delta 1 (head 256B, 7936B chunks).
+    BlockCase{65536,       32768, 0, 128, 64, "two_slot_whole_chunks"},
+    BlockCase{256 + 2 * 7936, 16384, 1, 128, 32, "two_slot_shift_whole_chunks"},
     // Every delta % 4 across a whole block.
     BlockCase{(1 << 20) + 13, 65536, 0, 0, 256, "team_delta128"},
     BlockCase{(1 << 20) + 13, 65536, 1, 0, 256, "team_delta129"},
