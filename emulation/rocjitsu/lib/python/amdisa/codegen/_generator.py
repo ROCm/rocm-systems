@@ -205,6 +205,106 @@ def _exec_mask_flag_stmts(sem) -> list[str]:
     ]
 
 
+# Execution-block flag (instruction.h) for each encoding with a generated
+# class, including the hand-templated VOPD dual-issue class (gen_vopd). Exports
+# issue to no block. Every such encoding must appear here, so a new encoding
+# fails generation until it is classified.
+_ENCODING_EXECUTION_BLOCKS: dict[str, str | None] = {
+    'ENC_SOP1': 'SALU',
+    'ENC_SOP2': 'SALU',
+    'ENC_SOPC': 'SALU',
+    'ENC_SOPK': 'SALU',
+    'ENC_SOPP': 'SALU',
+    'ENC_SMEM': 'SMEM',
+    'ENC_VOP1': 'VALU',
+    'ENC_VOP2': 'VALU',
+    'ENC_VOP3': 'VALU',
+    'ENC_VOP3P': 'VALU',
+    'ENC_VOPC': 'VALU',
+    'VOP3_SDST_ENC': 'VALU',
+    'VOP3P_MFMA': 'VALU',
+    'ENC_VINTERP': 'VALU',
+    'ENC_VINTRP': 'VALU',
+    'VOPDXY': 'VALU',
+    'VOPD3XY': 'VALU',
+    'ENC_DS': 'LDS',
+    'ENC_VDS': 'LDS',
+    'ENC_LDSDIR': 'LDS',
+    'ENC_VDSDIR': 'LDS',
+    'ENC_MUBUF': 'VMEM',
+    'ENC_MTBUF': 'VMEM',
+    'ENC_MIMG': 'VMEM',
+    'ENC_FLAT': 'VMEM',
+    'ENC_VBUFFER': 'VMEM',
+    'ENC_VFLAT': 'VMEM',
+    'ENC_VGLOBAL': 'VMEM',
+    'ENC_VSCRATCH': 'VMEM',
+    'ENC_VIMAGE': 'VMEM',
+    'ENC_VSAMPLE': 'VMEM',
+    'ENC_EXP': None,
+    'ENC_VEXPORT': None,
+}
+
+
+def _execution_block_flag_stmt(enc_name: str) -> str:
+    """Return the ``flags_ |= ...;`` statement naming the block ``enc_name`` issues to."""
+    try:
+        block = _ENCODING_EXECUTION_BLOCKS[enc_name.upper()]
+    except KeyError:
+        raise ValueError(
+            f'{enc_name}: no execution block; add it to _ENCODING_EXECUTION_BLOCKS'
+        ) from None
+    return f' flags_ |= {block};' if block else ''
+
+
+# Operations evaluated by the VALU transcendental unit, in both the vector and
+# the pseudo-scalar (V_S_*) forms, at every data width. This is the unit, not
+# the S_DELAY_ALU dependency class: see TRANSCENDENTAL in instruction.h.
+_TRANSCENDENTAL_CLASSES = frozenset({'vector_unary', 'pseudo_scalar_unary'})
+_TRANSCENDENTAL_OPERATIONS = frozenset(
+    {'rcp', 'rcp_iflag', 'rsq', 'sqrt', 'exp2', 'log2', 'sin', 'cos', 'tanh'}
+)
+
+# Instructions that may sleep or halt their wave, depending on their operands
+# and the wave's state.
+_SUSPENDS_WAVE_NAMES = frozenset(
+    {'S_SLEEP', 'S_SLEEP_VAR', 'S_MONITOR_SLEEP', 'S_SETHALT', 'S_SENDMSGHALT'}
+)
+
+# PC writers whose semantics carry no control-flow class, so they are named
+# here: trap entry and return (S_RFE derives as a no-op), and the debug
+# conditional branches, which are modelled as never taken. They get WRITES_PC
+# rather than BRANCH/COND_BRANCH so CFG construction is unchanged.
+_WRITES_PC_NAMES = frozenset(
+    {
+        'S_TRAP',
+        'S_RFE_B64',
+        'S_RFE_I64',
+        'S_RFE_RESTORE_B64',
+        'S_CBRANCH_CDBGSYS',
+        'S_CBRANCH_CDBGUSER',
+        'S_CBRANCH_CDBGSYS_OR_USER',
+        'S_CBRANCH_CDBGSYS_AND_USER',
+    }
+)
+
+
+def _instruction_class_flag_stmts(name: str, sem) -> list[str]:
+    """Return ``flags_ |= ...;`` for TRANSCENDENTAL, SUSPENDS_WAVE and WRITES_PC."""
+    stmts = []
+    if (
+        sem is not None
+        and sem.semantic_class in _TRANSCENDENTAL_CLASSES
+        and sem.operation in _TRANSCENDENTAL_OPERATIONS
+    ):
+        stmts.append('flags_ |= TRANSCENDENTAL;')
+    if name in _SUSPENDS_WAVE_NAMES:
+        stmts.append('flags_ |= SUSPENDS_WAVE;')
+    if name in _WRITES_PC_NAMES:
+        stmts.append('flags_ |= WRITES_PC;')
+    return stmts
+
+
 def _memory_wait_producer(name: str) -> bool:
     """Conservative decode-time filter for completion-counter producers.
 
@@ -2639,7 +2739,7 @@ class CodeGenerator:
             ''')
             vopd3_constructor_branch = cpp_block('''
               if ((word0_ >> @VOPD3_PREFIX_SHIFT@) == @VOPD3_PREFIX@) {
-                format_ = Format::Vopd3;
+                format_ = Format::Vopd3;@VOPD3_EXECUTION_BLOCK@
                 size_ = 12;
                 encoding_id_ = @VOPD3_PREFIX@;
                 word2_ = words[2];
@@ -2674,9 +2774,15 @@ class CodeGenerator:
                   srcy2_.set_wave_mask();
               } else {
             ''')
-            vopd3_constructor_branch = vopd3_constructor_branch.replace(
-                '@VOPD3_PREFIX_SHIFT@', str(32 - vopd3_prefix.prefix_bits)
-            ).replace('@VOPD3_PREFIX@', f'0x{vopd3_prefix.prefix:X}')
+            vopd3_constructor_branch = (
+                vopd3_constructor_branch.replace(
+                    '@VOPD3_PREFIX_SHIFT@', str(32 - vopd3_prefix.prefix_bits)
+                )
+                .replace('@VOPD3_PREFIX@', f'0x{vopd3_prefix.prefix:X}')
+                .replace(
+                    '@VOPD3_EXECUTION_BLOCK@', _execution_block_flag_stmt('VOPD3XY')
+                )
+            )
             vopd3_validation_branch = cpp_block('''
               if ((word0 >> @VOPD3_PREFIX_SHIFT@) == @VOPD3_PREFIX@) {
                 const uint16_t opx = static_cast<uint16_t>((word0 >> 18) & 0x3F);
@@ -3137,7 +3243,7 @@ class CodeGenerator:
               word1_ = words[1];
 
             @VOPD3_CONSTRUCTOR_BRANCH@
-                format_ = Format::VopdXy;
+                format_ = Format::VopdXy;@VOPD_EXECUTION_BLOCK@
                 encoding_id_ = @VOPD_PREFIX@;
                 opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
                 opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
@@ -3261,6 +3367,7 @@ class CodeGenerator:
             .replace('@VOPD_IMPL_INCLUDES@', vopd_impl_includes.rstrip())
             .replace('@VOPD_SRC0_TYPE_EXPR@', vopd_src0_type_expr)
             .replace('@VOPD_EXEC_FN@', vopd_exec_fn)
+            .replace('@VOPD_EXECUTION_BLOCK@', _execution_block_flag_stmt('VOPDXY'))
             .replace(
                 '@INLINE_EXECUTION_HELPERS@',
                 (
@@ -4349,6 +4456,8 @@ class CodeGenerator:
                 validation_body += ' }'
             if profile.vskip_affected_encoding(enc_upper):
                 size_line += ' flags_ |= VSKIP_AFFECTED;'
+            # First, so it stays outside the extension-decode guard.
+            size_line = _execution_block_flag_stmt(enc_upper) + size_line
             validation_body += ' return Result::success();'
             if has_encoding_validation:
                 public_members.append(
@@ -13522,6 +13631,9 @@ class CodeGenerator:
                     # Result-combinator metadata (RESULT_COPY / RESULT_OR) for
                     # EXEC-state all-ones reasoning.
                     ctor_body_parts.extend(_result_combinator_flag_stmts(_mem_sem))
+                    ctor_body_parts.extend(
+                        _instruction_class_flag_stmts(inst.name, _mem_sem)
+                    )
 
                     ctor_body = ''.join(ctor_body_parts)
                     class_ctor_impl_str = (

@@ -1631,6 +1631,8 @@ TEST(Gfx1250DecodeTest, Vopd3ConsumesThreeDwords) {
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_dual_lshlrev_b32 :: v_dual_lshrrev_b32");
   EXPECT_EQ(inst->size(), sizeof(words));
+  // The VOPD3 constructor path sets its block separately from two-dword VOPD.
+  EXPECT_EQ(inst->amdgpu_execution_block(), amdgpu::ExecutionBlock::VALU);
   EXPECT_NE(inst->disassemble().find("v_dual_lshlrev_b32"), std::string::npos);
   EXPECT_NE(inst->disassemble().find("v_dual_lshrrev_b32"), std::string::npos);
 }
