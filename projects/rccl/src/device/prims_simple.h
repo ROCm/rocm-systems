@@ -892,9 +892,7 @@ public:
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
 #else
-  // Without global DWORDX4 builtins, registered (direct) user-buffer stores are
-  // cacheable and need the full fence; unregistered collectives only store to the
-  // uncached comm FIFO, where the cheap fence suffices. P2P keeps the full fence.
+  // No DWORDX4 builtins: only unregistered collectives (stores to the uncached FIFO) take the cheap fence.
   skip_fence = !ncclShmem.comm.cheapPostSendFenceOff && collWork != nullptr && !collWork->regUsed &&
                !collWork->netRegUsed;
 #endif
