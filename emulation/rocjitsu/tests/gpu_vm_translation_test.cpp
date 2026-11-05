@@ -80,11 +80,14 @@ TEST(KfdAddressSpaceImportTest, PolicyConflictAndInvalidRangeLeaveTargetUnchange
   source.map_pages(0x2000, source_bytes.data(), 256, Mtype::NT);
   target.map_pages(0x1000, target_bytes.data(), 32, Mtype::RW);
   const auto generation = *target.page_table_generation();
-  const auto epoch = target.page_table_mutation_epoch()->value.load();
+  const util::IntrusiveSharedPtr<const VmMutationEpoch> mutation_epoch =
+      target.page_table_mutation_epoch();
+  ASSERT_NE(mutation_epoch.get(), nullptr);
+  const auto epoch = mutation_epoch->value.load();
   const std::array<KfdAddressSpace::MappingRange, 1> ranges{{{0x1000, 8192}}};
   EXPECT_FALSE(target.import_mappings(source, ranges));
   EXPECT_EQ(*target.page_table_generation(), generation);
-  EXPECT_EQ(target.page_table_mutation_epoch()->value.load(), epoch);
+  EXPECT_EQ(mutation_epoch->value.load(), epoch);
   ASSERT_EQ(target.page_table_.size(), 1u);
   const auto &page = target.page_table_.at(1);
   EXPECT_EQ(page.mtype, Mtype::RW);
