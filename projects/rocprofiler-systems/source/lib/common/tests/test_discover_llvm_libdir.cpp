@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "common/defines.h"
 #include "common/environment.hpp"
 
 #include <filesystem>
