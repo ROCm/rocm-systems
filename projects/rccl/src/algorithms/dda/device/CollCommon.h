@@ -265,7 +265,7 @@ constexpr uint32_t calcBlockCount(size_t numThreads, size_t threadsPerBlock, siz
   return y;
 }
 
-// Every capped DDA block width is a whole number of these threads.
+// DDA block widths come in 64-thread units: one wave64 or two wave32 waves, so no block ends in a partial wave.
 constexpr uint32_t kDdaThreadGranule = 64;
 
 // Blocks under a grid cap: `capBlocks` when set and lower, else `blocks`.
@@ -282,23 +282,22 @@ inline uint32_t ddaCapThreads(uint32_t threads, uint32_t capThreads) {
 }
 
 inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, size_t maxBlocks) {
-  constexpr uint32_t kThreadsPerWarp = 64;
   constexpr uint32_t kThreadsPerBlock = 512;
 
   const uint32_t elementsPerThread = 16 / typeSize; // we do 16 Byte load in kernel
 
-  const uint32_t elementsPerWarp = elementsPerThread * kThreadsPerWarp;
+  const uint32_t elementsPerWarp = elementsPerThread * kDdaThreadGranule;
 
   dim3 threads(0, 1, 1);
   dim3 blocks(0, 1, 1);
   if (ddaAlltoAllSingleBlockGrid(count, typeSize)) {
-    threads.x = divRoundUp(count, elementsPerWarp) * kThreadsPerWarp;
+    threads.x = divRoundUp(count, elementsPerWarp) * kDdaThreadGranule;
     blocks.x = 1;
   } else {
     auto warpsRequired = divRoundUp(count, elementsPerWarp);
     blocks.x = calcBlockCount(divRoundUp(count, elementsPerThread), kThreadsPerBlock, maxBlocks);
     auto warpsPerBlock = divRoundUp(warpsRequired, blocks.x);
-    auto threadsPerBlock = std::min<uint32_t>(kThreadsPerBlock, warpsPerBlock * kThreadsPerWarp);
+    auto threadsPerBlock = std::min<uint32_t>(kThreadsPerBlock, warpsPerBlock * kDdaThreadGranule);
     threads.x = threadsPerBlock;
   }
 
