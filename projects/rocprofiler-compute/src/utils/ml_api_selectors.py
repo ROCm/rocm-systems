@@ -3,7 +3,7 @@
 
 """Parse --trace-ml-api, --list-operators, and --operator."""
 
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 
@@ -66,6 +66,12 @@ def resolve_operator_patterns(
     if not tokens:
         return {UNSCOPED_OPERATOR_KEY: ["**"]}
     return _patterns_by_backend(tokens)
+
+
+def traced_frameworks_from_config(profiling_config: Dict[str, Any]) -> List[str]:
+    """Return ML API backends recorded in profiling yaml."""
+    trace_ml_api = profiling_config.get("trace_ml_api")
+    return [str(name) for name in trace_ml_api] if trace_ml_api else []
 
 
 def check_list_operators_against_traced_frameworks(

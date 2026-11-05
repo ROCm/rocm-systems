@@ -13,6 +13,7 @@ from utils.ml_api_selectors import (
     resolve_list_selectors,
     resolve_operator_patterns,
     resolve_profile_selection,
+    traced_frameworks_from_config,
 )
 
 
@@ -103,6 +104,15 @@ def test_comma_joined_ml_api_token_hints_spaces(resolver, token):
     with pytest.raises(ValueError, match="torch,triton") as excinfo:
         resolver([token])
     assert_comma_name_hints_spaces(excinfo)
+
+
+def test_traced_frameworks_from_config_reads_trace_ml_api():
+    assert traced_frameworks_from_config({}) == []
+    assert traced_frameworks_from_config({"trace_ml_api": None}) == []
+    assert traced_frameworks_from_config({"trace_ml_api": ["torch", "triton"]}) == [
+        "torch",
+        "triton",
+    ]
 
 
 def test_list_operators_rejects_backend_missing_from_workload():

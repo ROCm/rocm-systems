@@ -269,8 +269,19 @@ def test_sanitize_mixed_paths_bare_operator_accepts_either_order(
             operator_patterns=resolve_operator_patterns([]),
             output_name=None,
         )
-        OmniAnalyze_Base(args, {}).sanitize()
+        analyzer = OmniAnalyze_Base(args, {})
+        analyzer.sanitize()
         assert args.operator_patterns == {UNSCOPED_OPERATOR_KEY: ["**"]}
+        torch_path = str(torch_workload.resolve())
+        triton_path = str(triton_workload.resolve())
+        assert analyzer._operator_patterns_by_path[torch_path] == {
+            "torch": ["**"],
+            "user": ["**"],
+        }
+        assert analyzer._operator_patterns_by_path[triton_path] == {
+            "triton": ["**"],
+            "user": ["**"],
+        }
 
 
 def test_sanitize_mixed_paths_list_torch_rejects_either_order(

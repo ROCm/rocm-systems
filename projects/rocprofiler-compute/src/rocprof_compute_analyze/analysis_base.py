@@ -25,6 +25,7 @@ from utils.metrics.expression import build_metric_value_string
 from utils.ml_api_selectors import (
     check_list_operators_against_traced_frameworks,
     operator_patterns_for_traced_frameworks,
+    traced_frameworks_from_config,
 )
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
@@ -70,25 +71,27 @@ def _check_ml_api_selectors_for_workload(
     list_operators: Optional[List[str]],
     operator_patterns: Optional[Dict[str, List[str]]],
     profiling_config: Optional[Dict[str, Any]] = None,
-) -> None:
+) -> Optional[Dict[str, List[str]]]:
     """Reject --list-operators / --operator this workload did not collect."""
     if list_operators is None and operator_patterns is None:
-        return
+        return None
     if profiling_config is None:
         profiling_config = file_io.load_profiling_config(workload_path)
-    trace_ml_api = profiling_config.get("trace_ml_api")
-    traced_frameworks = [str(name) for name in trace_ml_api] if trace_ml_api else []
+    traced_frameworks = traced_frameworks_from_config(profiling_config)
     try:
         if list_operators is not None:
             check_list_operators_against_traced_frameworks(
                 list_operators, traced_frameworks
             )
-        elif operator_patterns is not None:
-            operator_patterns_for_traced_frameworks(
-                operator_patterns, traced_frameworks
-            )
+            return None
+        if operator_patterns is None:
+            return None
+        return operator_patterns_for_traced_frameworks(
+            operator_patterns, traced_frameworks
+        )
     except ValueError as error:
         console_error("ml api trace", f"{workload_path}: {error}")
+    return None
 
 
 class OmniAnalyze_Base:
@@ -101,6 +104,7 @@ class OmniAnalyze_Base:
         self.__supported_archs = supported_archs
         self._output: Optional[TextIO] = None
         self.__socs: Optional[dict[str, OmniSoC_Base]] = None
+        self._operator_patterns_by_path: Dict[str, Dict[str, List[str]]] = {}
 
     def get_args(self) -> argparse.Namespace:
         return self.__args
@@ -360,13 +364,16 @@ class OmniAnalyze_Base:
         list_operators = getattr(args, "list_operators", None)
         operator_patterns = getattr(args, "operator_patterns", None)
 
+        self._operator_patterns_by_path = {}
         for index, dir_info in enumerate(args.path):
-            _check_ml_api_selectors_for_workload(
+            bound_patterns = _check_ml_api_selectors_for_workload(
                 dir_info[0],
                 list_operators,
                 operator_patterns,
                 profiling_config if index == 0 else None,
             )
+            if bound_patterns is not None:
+                self._operator_patterns_by_path[dir_info[0]] = bound_patterns
             if not any([
                 profiling_config.get("iteration_multiplexing"),
                 self.pc_sampling_only(),

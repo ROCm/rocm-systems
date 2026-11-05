@@ -15,7 +15,10 @@ from rocprof_compute_analyze.analysis_cli import (
     cli_analysis,
 )
 from utils import schema
-from utils.ml_api_selectors import resolve_operator_patterns
+from utils.ml_api_selectors import (
+    operator_patterns_for_traced_frameworks,
+    resolve_operator_patterns,
+)
 from utils.utils_analysis import CallTreeNode, KernelStats, iter_call_tree_paths
 
 ADDMM_PMC_GROUP_KEY = (1, "addmm_kernel", 0, 0, 0)
@@ -75,25 +78,23 @@ def workload_with_operator_forest():
     return workload
 
 
-def stub_trace_ml_api(monkeypatch, traced_by_path=None):
-    """Make load_profiling_config return trace_ml_api for each workload path."""
-    configs = traced_by_path or {}
-
-    def load_profiling_config(workload_path):
-        return {"trace_ml_api": list(configs.get(workload_path, ["torch"]))}
-
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_cli.file_io.load_profiling_config",
-        load_profiling_config,
+def bind_operator_patterns_for_path(cli, workload_path, traced_frameworks=None):
+    """Store the per-path bind sanitize would have written."""
+    if traced_frameworks is None:
+        traced_frameworks = ["torch"]
+    cli._operator_patterns_by_path[workload_path] = (
+        operator_patterns_for_traced_frameworks(
+            cli.get_args().operator_patterns, traced_frameworks
+        )
     )
 
 
-def apply_torch_operator_glob(pattern, monkeypatch):
-    stub_trace_ml_api(monkeypatch)
+def apply_torch_operator_glob(pattern):
     args = argparse.Namespace(
         operator_patterns=resolve_operator_patterns([f"torch:{pattern}"])
     )
     cli = cli_analysis(args, {})
+    bind_operator_patterns_for_path(cli, "/workload")
     workload = workload_with_operator_forest()
     pmc_group_keys, _ = cli.apply_operator_filter(args, workload, "/workload")
     return pmc_group_keys, workload
@@ -192,8 +193,8 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
     assert len(membw_calls) == (1 if expect_called else 0)
 
 
-def test_operator_glob_relu_returns_relu_keys(monkeypatch):
-    pmc_group_keys, workload = apply_torch_operator_glob("*relu*", monkeypatch)
+def test_operator_glob_relu_returns_relu_keys():
+    pmc_group_keys, workload = apply_torch_operator_glob("*relu*")
     assert pmc_group_keys == [RELU_PMC_GROUP_KEY]
     assert forest_node_names(workload.ml_api_call_trees) == [
         "nn.Module.SimpleModel.forward",
@@ -201,8 +202,8 @@ def test_operator_glob_relu_returns_relu_keys(monkeypatch):
     ]
 
 
-def test_operator_glob_addmm_path_returns_addmm_keys(monkeypatch):
-    pmc_group_keys, workload = apply_torch_operator_glob("*/aten::addmm", monkeypatch)
+def test_operator_glob_addmm_path_returns_addmm_keys():
+    pmc_group_keys, workload = apply_torch_operator_glob("*/aten::addmm")
     assert pmc_group_keys == [ADDMM_PMC_GROUP_KEY]
     assert forest_node_names(workload.ml_api_call_trees) == [
         "nn.Module.SimpleModel.forward",
@@ -211,8 +212,8 @@ def test_operator_glob_addmm_path_returns_addmm_keys(monkeypatch):
     ]
 
 
-def test_operator_glob_linear_includes_descendant_addmm_keys(monkeypatch):
-    pmc_group_keys, workload = apply_torch_operator_glob("*Linear.forward", monkeypatch)
+def test_operator_glob_linear_includes_descendant_addmm_keys():
+    pmc_group_keys, workload = apply_torch_operator_glob("*Linear.forward")
     assert pmc_group_keys == [ADDMM_PMC_GROUP_KEY]
     assert forest_node_names(workload.ml_api_call_trees) == [
         "nn.Module.SimpleModel.forward",
@@ -234,12 +235,12 @@ def test_list_operators_joint_backend_heading(capsys):
     assert "PyTorch, Triton Operator Call Tree" in captured.out
 
 
-def test_handle_operator_prints_matched_subtree(capsys, monkeypatch):
-    stub_trace_ml_api(monkeypatch)
+def test_handle_operator_prints_matched_subtree(capsys):
     args = argparse.Namespace(
         operator_patterns=resolve_operator_patterns(["torch:*addmm*"])
     )
     cli = cli_analysis(args, {})
+    bind_operator_patterns_for_path(cli, "/workload")
     workload = workload_with_operator_forest()
     cli.apply_operator_filter(args, workload, "/workload")
     cli.handle_operator(args, workload, "/workload")
@@ -254,11 +255,11 @@ def test_apply_operator_filter_missed_glob_errors(monkeypatch):
         "rocprof_compute_analyze.analysis_cli.console_error",
         functools.partial(append_args_and_exit, errors),
     )
-    stub_trace_ml_api(monkeypatch)
     args = argparse.Namespace(
         operator_patterns=resolve_operator_patterns(["torch:nomatch"])
     )
     cli = cli_analysis(args, {})
+    bind_operator_patterns_for_path(cli, "/workload")
     workload = workload_with_operator_forest()
     with pytest.raises(SystemExit) as excinfo:
         cli.apply_operator_filter(args, workload, "/workload")
@@ -285,10 +286,10 @@ def test_dispatch_filter_outside_operator_dispatches_errors(monkeypatch):
     assert "No PyTorch dispatches matched the -d filter" in str(errors[-1])
 
 
-def test_apply_operator_filter_keeps_nodes_from_requested_backend(monkeypatch):
-    stub_trace_ml_api(monkeypatch)
+def test_apply_operator_filter_keeps_nodes_from_requested_backend():
     args = argparse.Namespace(operator_patterns=resolve_operator_patterns(["torch:*"]))
     cli = cli_analysis(args, {})
+    bind_operator_patterns_for_path(cli, "/workload")
     workload = schema.Workload()
     workload.ml_api_call_trees = torch_parent_triton_child_forest()
     cli.apply_operator_filter(args, workload, "/workload")
@@ -299,17 +300,15 @@ def test_apply_operator_filter_keeps_nodes_from_requested_backend(monkeypatch):
 
 def test_apply_operator_filter_user_region_keeps_nested_work_and_unions_relu(
     user_region_with_nested_addmm_and_outside_relu,
-    monkeypatch,
 ):
-    stub_trace_ml_api(monkeypatch)
     workload = schema.Workload()
     workload.ml_api_call_trees = user_region_with_nested_addmm_and_outside_relu
     args = argparse.Namespace(
         operator_patterns=resolve_operator_patterns(["user:region1"])
     )
-    region_keys, _ = cli_analysis(args, {}).apply_operator_filter(
-        args, workload, "/workload"
-    )
+    region_cli = cli_analysis(args, {})
+    bind_operator_patterns_for_path(region_cli, "/workload")
+    region_keys, _ = region_cli.apply_operator_filter(args, workload, "/workload")
     assert region_keys == [ADDMM_PMC_GROUP_KEY]
     region_names = forest_node_names(workload.ml_api_call_trees)
     assert region_names == ["region1", "aten::addmm"]
@@ -319,7 +318,9 @@ def test_apply_operator_filter_user_region_keeps_nested_work_and_unions_relu(
     union_args = argparse.Namespace(
         operator_patterns=resolve_operator_patterns(["user:region1", "torch:*relu*"])
     )
-    union_keys, _ = cli_analysis(union_args, {}).apply_operator_filter(
+    union_cli = cli_analysis(union_args, {})
+    bind_operator_patterns_for_path(union_cli, "/workload")
+    union_keys, _ = union_cli.apply_operator_filter(
         union_args, union_workload, "/workload"
     )
     assert union_keys == [ADDMM_PMC_GROUP_KEY, RELU_PMC_GROUP_KEY]
@@ -330,14 +331,12 @@ def test_apply_operator_filter_user_region_keeps_nested_work_and_unions_relu(
     ]
 
 
-def test_apply_operator_filter_unscoped_mixed_paths(monkeypatch):
+def test_apply_operator_filter_unscoped_mixed_paths():
     """Bare --operator on sn_torch then tf_triton binds each path's yaml."""
-    stub_trace_ml_api(
-        monkeypatch,
-        {"/sn_torch": ["torch"], "/tf_triton": ["triton"]},
-    )
     args = argparse.Namespace(operator_patterns=resolve_operator_patterns([]))
     cli = cli_analysis(args, {})
+    bind_operator_patterns_for_path(cli, "/sn_torch", ["torch"])
+    bind_operator_patterns_for_path(cli, "/tf_triton", ["triton"])
     torch_workload = workload_with_operator_forest()
     triton_workload = schema.Workload()
     triton_workload.ml_api_call_trees = triton_rmsnorm_forest()

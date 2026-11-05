@@ -14,11 +14,7 @@ from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.ml_api_selectors import (
-    OPERATOR_LABELS,
-    OPERATOR_SELECTORS,
-    operator_patterns_for_traced_frameworks,
-)
+from utils.ml_api_selectors import OPERATOR_LABELS
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
     CallTreeNode,
@@ -36,30 +32,6 @@ def _labels_for_backends(backends: List[str]) -> str:
     if not backends:
         return "ML API"
     return ", ".join(OPERATOR_LABELS.get(backend, backend) for backend in backends)
-
-
-def _restrict_patterns_to_operator_backends(
-    selections: Dict[str, List[str]],
-) -> Dict[str, List[str]]:
-    """Restrict pattern lists to keys in OPERATOR_SELECTORS."""
-    return {
-        backend: list(patterns)
-        for backend, patterns in selections.items()
-        if backend in OPERATOR_SELECTORS
-    }
-
-
-def _bind_operator_patterns_for_workload(
-    operator_patterns: Dict[str, List[str]],
-    workload_path: str,
-) -> Dict[str, List[str]]:
-    """Bind unscoped --operator patterns using this workload's yaml."""
-    profiling_config = file_io.load_profiling_config(workload_path)
-    trace_ml_api = profiling_config.get("trace_ml_api")
-    traced_frameworks = [str(name) for name in trace_ml_api] if trace_ml_api else []
-    return _restrict_patterns_to_operator_backends(
-        operator_patterns_for_traced_frameworks(operator_patterns, traced_frameworks)
-    )
 
 
 def _collect_nodes_matching_operator_patterns(
@@ -448,12 +420,7 @@ class cli_analysis(OmniAnalyze_Base):
         operator_patterns = getattr(args, "operator_patterns", None)
         if operator_patterns is None:
             return [], {}
-        try:
-            operator_patterns_by_backend = _bind_operator_patterns_for_workload(
-                operator_patterns, workload_path
-            )
-        except ValueError as error:
-            console_error("ml api trace", f"{workload_path}: {error}")
+        operator_patterns_by_backend = self._operator_patterns_by_path[workload_path]
         labels = _labels_for_backends(list(operator_patterns_by_backend))
         nodes_matching_operator_patterns = _collect_nodes_matching_operator_patterns(
             workload.ml_api_call_trees, operator_patterns_by_backend
@@ -503,12 +470,7 @@ class cli_analysis(OmniAnalyze_Base):
         operator_patterns = getattr(args, "operator_patterns", None)
         if operator_patterns is None:
             return
-        try:
-            operator_patterns_by_backend = _bind_operator_patterns_for_workload(
-                operator_patterns, workload_path
-            )
-        except ValueError as error:
-            console_error("ml api trace", f"{workload_path}: {error}")
+        operator_patterns_by_backend = self._operator_patterns_by_path[workload_path]
         operator_pattern_text = ", ".join(
             dict.fromkeys(
                 pattern
