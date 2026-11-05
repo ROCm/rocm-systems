@@ -288,6 +288,28 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_LinesPerBlockAndMaxBlocksPerPeerF
   }
 }
 
+// The arch table's block budget is split across the peer columns; it sees the total, nRanks x the chunk.
+TEST_F(DdaAlltoallFabricLL128Microtest, Launch_BlockBudgetFromTheArchTable) {
+  const size_t big = 64 * kWarpsPerBlock * kSliceFloats;
+  size_t seenTotal = 0;
+  g_rcclDdaFabricA2aLL128Blocks = [&seenTotal](const ncclComm*, size_t totalBytes) {
+    seenTotal = totalBytes;
+    return 30;
+  };
+  EXPECT_EQ(RunOne(big).grid.y, 10u);
+  EXPECT_EQ(seenTotal, 4 * big * sizeof(float));
+  g_rcclDdaFabricA2aLL128Blocks = [](const ncclComm*, size_t) { return 1; };
+  EXPECT_EQ(RunOne(big).grid.y, 1u) << "at least one block per peer";
+}
+
+// The arch table's block size applies unless RCCL_DDA_LL128_A2A_THREADS gives a valid one.
+TEST_F(DdaAlltoallFabricLL128Microtest, Launch_ThreadsFromTheArchTable) {
+  g_rcclDdaFabricA2aLL128Threads = [](const ncclComm*, size_t) { return 512; };
+  EXPECT_EQ(RunOne(4).block.x, 512u);
+  params_["RCCL_DDA_LL128_A2A_THREADS"] = 128;
+  EXPECT_EQ(RunOne(4).block.x, 128u);
+}
+
 TEST_F(DdaAlltoallFabricLL128Microtest, Launch_ThreadsOverrideMustBeAWarpMultipleUpTo1024) {
   const std::pair<int64_t, unsigned> cases[] = {{256, 256}, {32, 32},  {1024, 1024}, {16, 256},
                                                 {48, 256},  {1056, 256}, {0, 256}};

@@ -8921,6 +8921,47 @@ TEST(WrapMicrotestIsolated, DdaFabricAgLL128Shape_FromDpxTable) {
       });
 }
 
+// DDA LL128 AlltoAll reads its own ddaA2aLL128* window, inclusive at both ends; no shipped table sets
+// it, so a synthetic table pins the accessors. The real tables and no table keep 0 threads and the init cap.
+TEST(WrapMicrotestIsolated, DdaFabricA2aLL128Shape_FromTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaFabricA2aLL128Shape_FromTable",
+      []() {
+        rcclArchThresholds tbl = *real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        tbl.ddaA2aLL128Threads = 512;
+        tbl.ddaA2aLL128ThreadsMinBytes = 4 * kMiB;
+        tbl.ddaA2aLL128ThreadsMaxBytes = 16 * kMiB;
+        tbl.ddaA2aLL128MaxBlocks = 64;
+        tbl.ddaA2aLL128MaxBlocksMinBytes = 2 * kMiB;
+        tbl.ddaA2aLL128MaxBlocksMaxBytes = 8 * kMiB;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->ddaFabricMaxBlocks = 96;
+        comm->archThresholds = &tbl;
+        const std::pair<size_t, int> threads[] = {
+            {4 * kMiB - 1, 0}, {4 * kMiB, 512}, {16 * kMiB, 512}, {16 * kMiB + 1, 0}};
+        for (const auto& c : threads) {
+          EXPECT_EQ(c.second, rcclDdaFabricA2aLL128Threads(comm, c.first)) << c.first;
+        }
+        const std::pair<size_t, int> blocks[] = {
+            {2 * kMiB - 1, 96}, {2 * kMiB, 64}, {8 * kMiB, 64}, {8 * kMiB + 1, 96}};
+        for (const auto& c : blocks) {
+          EXPECT_EQ(c.second, rcclDdaFabricA2aLL128Blocks(comm, c.first)) << c.first;
+        }
+        comm->ddaFabricMaxBlocks = 48;
+        EXPECT_EQ(48, rcclDdaFabricA2aLL128Blocks(comm, 4 * kMiB)) << "init cap still bounds it";
+        comm->ddaFabricMaxBlocks = 96;
+        for (const rcclArchThresholds* table :
+             {real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX),
+              real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX),
+              static_cast<const rcclArchThresholds*>(nullptr)}) {
+          comm->archThresholds = table;
+          EXPECT_EQ(0, rcclDdaFabricA2aLL128Threads(comm, 8 * kMiB));
+          EXPECT_EQ(96, rcclDdaFabricA2aLL128Blocks(comm, 8 * kMiB));
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
 // gfx1250 SPX symMaxR2[ReduceScatter] is 0: at and above symMinR2 (2 MiB) symk stays withdrawn even when requested.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250NeverPicksSymmetric) {
   RUN_ISOLATED_TEST(
