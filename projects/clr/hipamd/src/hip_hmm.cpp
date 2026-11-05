@@ -7,7 +7,6 @@
 #include <hip/hip_runtime.h>
 #include "hip_internal.hpp"
 #include "hip_conversions.hpp"
-#include "hip_platform.hpp"
 #include "platform/context.hpp"
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
@@ -487,8 +486,11 @@ hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align, bool use_hos
   if (memObj == nullptr) {
     return hipErrorMemoryAllocation;
   }
-  // saves the current device id so that it can be accessed later
-  memObj->getUserData().deviceId = hipDev->deviceId();
+
+  // Mapping a __managed__ variable's storage reaches here before any HIP API has
+  // established a current device. Device 0 is fine in that case since managed memory is
+  // reachable from every device.
+  memObj->getUserData().deviceId = (hipDev != nullptr) ? hipDev->deviceId() : 0;
 
   ClPrint(amd::LOG_INFO, amd::LOG_API, "ihipMallocManaged ptr=0x%zx", *ptr);
   return hipSuccess;
@@ -630,17 +632,6 @@ hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t coun
       size_t size = sizes[op_idx];
       amd::Memory* mem_obj = mem_objs[op_idx];
       size_t offset = offsets[op_idx];
-
-      if (mem_obj == nullptr) {
-        hip::Var* deferred_var = PlatformState::Instance().StatCO().FindDeferredManagedVar(dev_ptr);
-        if (deferred_var != nullptr) {
-          hipError_t status = deferred_var->AllocateManagedVarPtr();
-          if (status != hipSuccess) {
-            return status;
-          }
-          mem_obj = getMemoryObject(hip::getCurrentDevice(), dev_ptr, offset);
-        }
-      }
 
       if (mem_obj != nullptr) {
         if (size > (mem_obj->getSize() - offset)) {

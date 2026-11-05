@@ -1720,6 +1720,14 @@ static ncclResult_t initNvlDomainInfo(struct ncclComm* comm) {
   return ncclSuccess;
 }
 
+// [RCCL] True when one UALink LSA team holds every rank on more than one host (tray) and the arch table has an
+// AllGather TDM window. Across trays AllGather symk then runs only through that window.
+static bool commSpansTrays(const struct ncclComm* comm, bool isOneLsaTeam) {
+  const rcclArchThresholds* table = comm->archThresholds;
+  return comm->MNNVL && isOneLsaTeam && comm->topo->nHosts > 1 && table != nullptr &&
+         table->symTdmMinR2[ncclFuncAllGather] != 0;
+}
+
 // True when every host has the same number of ranks and those partitions sum to nranks.
 static bool uniformRanksPerHost(const struct ncclComm* comm, int nranks) {
   int ranksPerHost = -1;
@@ -2769,7 +2777,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclCalloc(&comm->gproxyConn, comm->nRanks), ret, fail);
 
   if (ncclParamRasDiagnostics() && comm->rank == 0) ncclRunRasDiagnostics(comm);
-  if (ncclParamDiagnostics()) ncclRunDiagnostics(comm);
+  if (ncclParamDiagnostics()) NCCLCHECKGOTO(ncclRunDiagnostics(comm), ret, fail);
 
   timers[TIMER_INIT_CONNECT] = clockNano();
   // Build p2p schedule
@@ -2946,6 +2954,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   }
   comm->globalRmaProxySupport = globalRmaPluginSupport && globalCrossNicSupport && comm->cuMemGdrSupport;
   isOneLsaTeams = ncclDevrIsOneLsaTeam(comm);
+  comm->spansTrays = commSpansTrays(comm, isOneLsaTeams); // [RCCL]
   comm->symmetricSupport = comm->isAllCudaP2p && ncclParamWinEnable() && ncclCuMemEnable() &&
                            (comm->globalGinSupport != NCCL_GIN_CONNECTION_NONE || isOneLsaTeams);
   // hostRmaSupport must not require symmetricSupport: multi-node GIN proxy RMA

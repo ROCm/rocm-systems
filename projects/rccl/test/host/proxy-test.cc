@@ -1576,6 +1576,8 @@ TEST_F(ProxyShmPoolMicrotest, ProgressInit_MapsThePoolOnceThreadsFreeListsAndSta
   ASSERT_NE(pool, nullptr);
   EXPECT_EQ(g_shm.opens, 1);
   EXPECT_EQ(g_shm.lastRefcount, 3);
+  // Sized for the 3 local ranks, not NCCL_MAX_LOCAL_RANKS: /dev/shm is charged for every byte.
+  EXPECT_EQ(g_shm.lastSize, offsetof(ncclProxyOpsPool, ops) + 3 * MAX_OPS_PER_PEER * sizeof(ncclProxyOp));
   EXPECT_STREQ(st().opsPoolShmSuffix, "AbC123");
   EXPECT_EQ(pool->nextOps, -1);
   for (int r = 0; r < 3; r++) {
@@ -1971,6 +1973,7 @@ TEST_F(ProxyConnectMicrotest, Connect_RejectsRanksOutsideTheCommAndTheTopParent)
 
 TEST_F(ProxyConnectMicrotest, Connect_ConnectsInitsAndMapsThePeerOpsPoolOnce) {
   ServeInit(&remote_, 9);
+  ps_.tpLocalnRanks = kRanks;
   ncclProxyConnector pc = {};
   ASSERT_EQ(ncclProxyConnect(comm_.get(), /*transport*/ 0, /*send*/ 1, /*proxyRank*/ 2, &pc), ncclSuccess);
   EXPECT_TRUE(pc.initialized);
@@ -1996,6 +1999,8 @@ TEST_F(ProxyConnectMicrotest, Connect_ConnectsInitsAndMapsThePeerOpsPoolOnce) {
   EXPECT_EQ(req.tpRank, 0);
   EXPECT_EQ(req.sameProcess, 0);
   EXPECT_EQ(g_shm.lastPath, "/dev/shm/nccl-QwErTy");
+  // Must match the creator's size in proxyProgressInit: the shm refcount sits right after the pool.
+  EXPECT_EQ(g_shm.lastSize, offsetof(ncclProxyOpsPool, ops) + kRanks * MAX_OPS_PER_PEER * sizeof(ncclProxyOp));
   ncclProxyOps& ops = ps_.proxyOps[2];
   ASSERT_NE(ops.pool, nullptr);
   EXPECT_EQ(ops.nextOps, -1);

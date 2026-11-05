@@ -289,3 +289,44 @@ install(
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT}
 )
+
+# rdc_rocr_lifetime_tests: the ROCr diagnostic module (librdc_rocr.so) keeps ROCr
+# loaded from its first check until it is destroyed, and its checks release what
+# they create. Compiles the module's sources into the test, which defines the HSA
+# calls they make, so it links no ROCr and runs on GPU-less CI; librdc_bootstrap
+# provides the logger. It needs the HSA headers, so it is built with the module.
+if(BUILD_RUNTIME)
+    find_package(hsa-runtime64 NAMES hsa-runtime64 HINTS ${ROCM_DIR}/lib/cmake CONFIG REQUIRED)
+    set(RDC_ROCR_SRC_DIR ${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/rdc_rocr)
+    add_executable(
+        rdc_rocr_lifetime_tests
+        ${SRC_DIR}/test_rocr_lifetime.cc
+        ${RDC_ROCR_SRC_DIR}/ComputeQueueTest.cc
+        ${RDC_ROCR_SRC_DIR}/MemoryAccess.cc
+        ${RDC_ROCR_SRC_DIR}/MemoryTest.cc
+        ${RDC_ROCR_SRC_DIR}/RdcDiagnosticLib.cc
+        ${RDC_ROCR_SRC_DIR}/RdcRocrBase.cc
+        ${RDC_ROCR_SRC_DIR}/TestBase.cc
+        ${RDC_ROCR_SRC_DIR}/base_rocr_utils.cc
+        ${RDC_ROCR_SRC_DIR}/common.cc
+        ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcPerfTimer.cc
+    )
+    target_include_directories(
+        rdc_rocr_lifetime_tests
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}
+            ${PROJECT_SOURCE_DIR}/include
+            $<TARGET_PROPERTY:hsa-runtime64::hsa-runtime64,INTERFACE_INCLUDE_DIRECTORIES>
+    )
+    target_link_libraries(rdc_rocr_lifetime_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+    set_target_properties(
+        rdc_rocr_lifetime_tests
+        PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib"
+    )
+    add_test(NAME rdc_rocr_lifetime_tests COMMAND rdc_rocr_lifetime_tests)
+    install(
+        TARGETS rdc_rocr_lifetime_tests
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+        COMPONENT ${TESTS_COMPONENT}
+    )
+endif()
