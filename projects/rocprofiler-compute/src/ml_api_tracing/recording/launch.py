@@ -4,8 +4,8 @@
 """Internal entry point used by rocprof-compute to launch a workload under
 ROCTX injection.
 
-Invoked by absolute path as ``python <path>/launch.py --frameworks <name>
-[<name> ...] -- <target.py> [args...]``.
+Invoked by absolute path as python <path>/launch.py --frameworks <name>
+[<name> ...] -- <target.py> [args...].
 """
 
 import runpy
@@ -13,12 +13,12 @@ import sys
 from pathlib import Path
 from typing import List
 
-# Make the inject_roctx package importable when run by absolute path.
+# Make ML API tracing importable when run by absolute path.
 _PACKAGE_PARENT = str(Path(__file__).resolve().parents[2])
 if _PACKAGE_PARENT not in sys.path:
     sys.path.insert(0, _PACKAGE_PARENT)
 
-from utils.inject_roctx.core import install_global_wraps  # noqa: E402
+from ml_api_tracing.recording.installer import install_global_wraps  # noqa: E402
 
 # Consume a leading "--frameworks <name> [<name> ...]" option and an optional
 # "--" separator. Framework names are all tokens until "--".

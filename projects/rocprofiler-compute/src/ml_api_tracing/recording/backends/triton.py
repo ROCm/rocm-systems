@@ -14,13 +14,13 @@ from functools import partial, partialmethod
 from pathlib import Path
 from typing import Any, Callable
 
-from utils.inject_roctx import core
-from utils.inject_roctx.core import (
+from ml_api_tracing.recording import core
+from ml_api_tracing.recording.backend_contract import register
+from ml_api_tracing.recording.core import (
     _pop_scope,
     _push_scope,
     resolve_user_caller_location,
 )
-from utils.inject_roctx.registry import register
 from utils.logger import console_log, console_warning
 
 _BACKEND_NAME = "triton"
@@ -77,8 +77,8 @@ def _register_framework_root() -> None:
 
 
 def _extract_kernel_name(obj: object, default: str = "<triton_kernel>") -> str:
-    """Resolve the kernel name from ``name``, ``metadata``, or ``fn``,
-    returning ``default`` when none is available."""
+    """Resolve the kernel name from name, metadata, or fn,
+    returning default when none is available."""
     name = getattr(obj, "name", None)
     if isinstance(name, str) and name:
         return name
@@ -124,7 +124,7 @@ def _roctx_method_call(
     *args: Any,
     **kwargs: Any,
 ) -> object:
-    """Run a wrapped method ``original`` inside a ROCTX range."""
+    """Run a wrapped method original inside a ROCTX range."""
     return _run_with_marker(
         instance, marker_prefix, partial(original, instance, *args, **kwargs)
     )
@@ -146,7 +146,7 @@ def _roctx_launch(
     *args: Any,
     **kwargs: Any,
 ) -> object:
-    """Run a property-returned ``launcher`` inside a ROCTX range."""
+    """Run a property-returned launcher inside a ROCTX range."""
     return _run_with_marker(instance, marker_prefix, partial(launcher, *args, **kwargs))
 
 
@@ -183,7 +183,7 @@ def _wrap_launch(
     method_name: str,
     marker_prefix: str,
 ) -> bool:
-    """Wrap ``owner.method_name`` (a method or property) with a ROCTX range.
+    """Wrap owner.method_name (a method or property) with a ROCTX range.
 
     Idempotent. Returns True when the wrapper is installed or already present.
     """

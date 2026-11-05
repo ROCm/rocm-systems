@@ -1,17 +1,16 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""ROCTX range push and pop for inject_roctx backends."""
+"""ROCTX range push and pop for ML API tracing backends."""
 
 import importlib.util
 import inspect
 import os
 import sys
 import threading
-from collections.abc import Iterable
 from importlib.machinery import PathFinder
 from pathlib import Path
-from typing import Callable
+from typing import Callable, List, Tuple
 
 from ml_api_tracing.marker_format import compose_marker
 
@@ -37,8 +36,8 @@ class _CoreState:
     def __init__(self) -> None:
         self.range_push: Callable[[str], None] = _missing_range_push
         self.range_pop: Callable[[], None] = _missing_range_pop
-        self.framework_roots: list[str] = []
-        self.roctx_candidate_paths: list[str] = []
+        self.framework_roots: List[str] = []
+        self.roctx_candidate_paths: List[str] = []
 
 
 _STATE = _CoreState()
@@ -61,12 +60,12 @@ def python_tier_configured() -> bool:
     return _STATE.range_push is not _missing_range_push
 
 
-def get_python_tier_io() -> tuple[Callable[[str], None], Callable[[], None]]:
+def get_python_tier_io() -> Tuple[Callable[[str], None], Callable[[], None]]:
     """Return the currently wired (rangePush, rangePop) callbacks."""
     return _STATE.range_push, _STATE.range_pop
 
 
-def roctx_candidate_paths() -> list[str]:
+def roctx_candidate_paths() -> List[str]:
     """Return the directories probed for the roctx module."""
     return list(_STATE.roctx_candidate_paths)
 
@@ -141,17 +140,3 @@ def _pop_scope() -> None:
         _STATE.range_pop()
     finally:
         _thread_local.depth = depth - 1
-
-
-def install_global_wraps(backends: Iterable[str] = ()) -> None:
-    """Install ROCTX instrumentation for each named backend.
-
-    ``backends`` is an iterable of framework names (e.g. ``["torch"]``).
-    Empty input is a no-op.
-    """
-    from .registry import install_many
-
-    names = [str(n).strip() for n in backends if str(n).strip()]
-    if not names:
-        return
-    install_many(names)

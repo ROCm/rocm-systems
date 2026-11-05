@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -12,11 +13,11 @@ import common
 import pytest
 import yaml
 
+from ml_api_tracing import profile as ml_api_profile
 from pc_sampling.pc_sampling_profile import PCSamplingLimits
 from rocprof_compute_base import RocProfCompute
 from rocprof_compute_profile.profiler_base import (
     RocProfCompute_Base,
-    _compute_selected_frameworks,
     _partition_warning_messages,
 )
 from rocprof_compute_profile.profiler_rocprof_v3 import rocprof_v3_profiler
@@ -187,6 +188,8 @@ def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
     if expected_exception:
         with pytest.raises(expected_exception):
             profiler.sanitize()
+        assert profiler._selected_frameworks == {"torch"}
+        assert args.remaining == remaining
     else:
         profiler.sanitize()
 
@@ -199,21 +202,21 @@ def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
     [
         pytest.param(
             ["21"],
-            {"torch_trace": True},
+            {"torch_trace": True, "pc_sampling": True, "experimental": True},
             True,
             None,
             id="pc_only_torch_trace_errors",
         ),
         pytest.param(
             ["pc_sampling"],
-            {"ml_api_trace": True},
+            {"ml_api_trace": True, "pc_sampling": True, "experimental": True},
             True,
             None,
             id="pc_only_ml_api_trace_errors",
         ),
         pytest.param(
             ["21"],
-            {"triton_trace": True},
+            {"triton_trace": True, "pc_sampling": True, "experimental": True},
             True,
             None,
             id="pc_only_triton_trace_errors",
@@ -235,7 +238,7 @@ def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
     ],
 )
 def test_sanitize_pc_sampling_only_rejects_ml_api_tracing_flags(
-    tmp_path, filter_blocks, trace_flags, expect_error, expected_frameworks
+    tmp_path, caplog, filter_blocks, trace_flags, expect_error, expected_frameworks
 ):
     """ML API tracing flags are rejected for PC-sampling-only runs and retained when a
     counter block is also requested."""
@@ -245,6 +248,9 @@ def test_sanitize_pc_sampling_only_rejects_ml_api_tracing_flags(
     if expect_error:
         with pytest.raises(SystemExit):
             profiler.sanitize()
+        assert "cannot be used with PC-sampling-only profiling" in caplog.messages[-1]
+        assert not hasattr(profiler, "_selected_frameworks")
+        assert args.remaining == ["--", *remaining]
     else:
         profiler.sanitize()
         assert profiler._selected_frameworks == expected_frameworks
@@ -1245,17 +1251,6 @@ def test_run_profiling_native_tool_path(
         assert mocks.console_error.called is expect_error
 
 
-def test_compute_selected_frameworks_unions_torch_and_triton_flags():
-    both_flags = _compute_selected_frameworks(
-        argparse.Namespace(torch_trace=True, triton_trace=True, ml_api_trace=False)
-    )
-    ml_api = _compute_selected_frameworks(
-        argparse.Namespace(torch_trace=False, triton_trace=False, ml_api_trace=True)
-    )
-    assert both_flags == {"torch", "triton"}
-    assert ml_api == both_flags
-
-
 @pytest.mark.parametrize(
     "trace_flag",
     [
@@ -1270,3 +1265,86 @@ def test_sanitize_rejects_ml_api_trace_with_attach_pid(tmp_path, trace_flag):
     profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
     with pytest.raises(SystemExit):
         profiler.sanitize()
+
+
+@pytest.mark.parametrize(
+    "overrides, message, assigned, blocks",
+    [
+        ({"filter_blocks": ["21"]}, "Block 21 (PC Sampling)", False, ["21"]),
+        (
+            {"pc_sampling": True, "experimental": True, "set_selected": "set"},
+            "ML API tracing options",
+            False,
+            ["21"],
+        ),
+        (
+            {"filter_blocks": ["2"], "set_selected": "set", "attach_pid": 1},
+            "--block, --set, and --roof-only",
+            True,
+            ["2"],
+        ),
+        (
+            {"no_native_tool": True, "iteration_multiplexing": 1, "attach_pid": 1},
+            "--no-native-tool cannot be used",
+            True,
+            [],
+        ),
+        (
+            {"iteration_multiplexing": 1, "attach_pid": 1},
+            "--attach-pid cannot be used",
+            True,
+            [],
+        ),
+        (
+            {"attach_pid": 1, "attach_duration_msec": 100},
+            "ML API tracing cannot be used with --attach-pid.",
+            True,
+            [],
+        ),
+        (
+            {"attach_duration_msec": 100, "kernel_iteration_range": ["invalid"]},
+            "ML API tracing cannot be used with --attach-duration-msec.",
+            True,
+            [],
+        ),
+    ],
+)
+def test_sanitize_preserves_competing_error_precedence_and_staged_state(
+    caplog, overrides, message, assigned, blocks
+):
+    command = ["--", "missing-application"]
+    args = _make_sanitize_args(command[1:], torch_trace=True, **overrides)
+    profiler = RocProfCompute_Base(args, "rocprofiler-sdk", None)
+
+    with pytest.raises(SystemExit) as error:
+        profiler.sanitize()
+
+    assert error.value.code == 1
+    assert caplog.messages[-1].startswith(message)
+    assert hasattr(profiler, "_selected_frameworks") is assigned
+    if assigned:
+        assert profiler._selected_frameworks == {"torch"}
+    assert args.filter_blocks == blocks
+    assert args.remaining == command
+
+
+def test_sanitize_joins_injected_command_without_losing_arguments(tmp_path):
+    script = tmp_path / "workload with spaces.py"
+    script.write_text("pass\n", encoding="utf-8")
+    interpreter = [sys.executable, "-u", "-W", "ignore", "-X", "dev"]
+    command = [*interpreter, str(script), "two words", "--"]
+    args = _make_sanitize_args(command, ml_api_trace=True)
+    profiler = RocProfCompute_Base(args, "rocprofiler-sdk", None)
+
+    profiler.sanitize()
+
+    launcher = Path(ml_api_profile.__file__).parent / "recording" / "launch.py"
+    assert shlex.split(args.remaining) == [
+        *interpreter,
+        str(launcher),
+        "--frameworks",
+        "torch",
+        "triton",
+        "--",
+        *command[len(interpreter) :],
+    ]

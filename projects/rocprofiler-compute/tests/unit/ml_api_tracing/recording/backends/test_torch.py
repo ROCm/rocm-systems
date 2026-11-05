@@ -3,17 +3,19 @@
 
 """Unit tests for Torch backend wrappers, metadata, and lazy tensors."""
 
+from functools import partial
 from types import SimpleNamespace
 
 import pytest
 
-from tests.integration.common import require_torch
-from utils.inject_roctx import core
-from utils.inject_roctx._backends import torch as torch_backend
-from utils.inject_roctx._backends.torch import (
+from ml_api_tracing.marker_format import compose_marker
+from ml_api_tracing.recording import core
+from ml_api_tracing.recording.backends import torch as torch_backend
+from ml_api_tracing.recording.backends.torch import (
     DEEP_TENSOR_METHOD_WRAPS,
     TENSOR_METHOD_WRAPS,
 )
+from tests.integration.common import require_torch
 
 
 class FakeDType:
@@ -26,6 +28,19 @@ class FakeDType:
 
 def fake_tensor(shape=(2, 4), dtype_name="torch.float32"):
     return SimpleNamespace(shape=shape, dtype=FakeDType(dtype_name))
+
+
+def run_nn_module_entry(self, *args, **kwargs):
+    self.entry_state.events.append(("invoke", self, args, kwargs))
+    if self.entry_state.outcome == "workload-fails":
+        raise ValueError("module workload failed")
+    return self.entry_state.return_value
+
+
+def record_nn_module_push(entry_state, marker):
+    entry_state.events.append(("push", marker))
+    if entry_state.outcome == "push-fails":
+        raise RuntimeError("module scope push failed")
 
 
 def noop_torch_structural_wraps(monkeypatch, torch_backend):
@@ -117,7 +132,7 @@ def test_format_wrap_args_caps_raw_text_before_encoding(delimiter, encoded):
 
 
 def test_dispatcher_marker_name_for_aten_packet():
-    from utils.inject_roctx._backends.torch import dispatcher_marker_name_for
+    from ml_api_tracing.recording.backends.torch import dispatcher_marker_name_for
 
     packet = SimpleNamespace(_qualified_op_name="aten::addmm")
     func = SimpleNamespace(overloadpacket=packet)
@@ -125,7 +140,7 @@ def test_dispatcher_marker_name_for_aten_packet():
 
 
 def test_roctx_wrapper_idempotent_and_push_pop(monkeypatch):
-    from utils.inject_roctx._backends import torch as torch_backend
+    from ml_api_tracing.recording.backends import torch as torch_backend
 
     pushes = []
     pops = []
@@ -143,8 +158,8 @@ def test_roctx_wrapper_idempotent_and_push_pop(monkeypatch):
 
 
 def test_inject_roctx_into_model_pushes_class_forward(monkeypatch):
+    from ml_api_tracing.recording.backends import torch as torch_backend
     from tests.integration.common import require_torch
-    from utils.inject_roctx._backends import torch as torch_backend
 
     require_torch()
     import torch
@@ -166,8 +181,87 @@ def test_inject_roctx_into_model_pushes_class_forward(monkeypatch):
         torch.nn.Module.__call__ = original_call
 
 
+@pytest.mark.parametrize(
+    ("entry_method_name", "marker_method_name"),
+    [("to", "to"), ("__call__", "forward")],
+)
+@pytest.mark.parametrize("outcome", ["returns", "workload-fails", "push-fails"])
+def test_nn_module_entry_preserves_marker_and_scope_lifecycle(
+    monkeypatch, entry_method_name, marker_method_name, outcome
+):
+    entry_state = SimpleNamespace(events=[], outcome=outcome, return_value=object())
+    module_class = type(
+        "FakeModule", (), {"to": run_nn_module_entry, "__call__": run_nn_module_entry}
+    )
+    receivers = [
+        type("FirstModule", (module_class,), {})(),
+        type("SecondModule", (module_class,), {})(),
+    ]
+    for receiver in receivers:
+        receiver.entry_state = entry_state
+    monkeypatch.setattr(
+        torch_backend._STATE, "nn", SimpleNamespace(Module=module_class)
+    )
+
+    if entry_method_name == "__call__":
+        install = torch_backend.inject_roctx_into_model
+    else:
+        install = torch_backend.inject_roctx_into_module_methods
+    install()
+    wrapped_once = getattr(module_class, entry_method_name)
+    assert wrapped_once._roctx_wrapped is True
+    install()
+    assert getattr(module_class, entry_method_name) is wrapped_once
+
+    monkeypatch.setattr(
+        core._STATE, "range_push", partial(record_nn_module_push, entry_state)
+    )
+    monkeypatch.setattr(
+        core._STATE, "range_pop", lambda: entry_state.events.append(("pop",))
+    )
+    monkeypatch.setattr(core._thread_local, "depth", 0, raising=False)
+    monkeypatch.setattr(
+        core, "resolve_user_caller_location", lambda: "module_entry.py:42"
+    )
+    positional_tensor = fake_tensor()
+    keyword_tensor = fake_tensor(shape=(1,), dtype_name="torch.float64")
+    for receiver in receivers:
+        entry_state.events.clear()
+        entry = getattr(receiver, entry_method_name)
+        if outcome == "push-fails":
+            with pytest.raises(RuntimeError, match="module scope push failed"):
+                entry(positional_tensor, bias=keyword_tensor)
+        elif outcome == "workload-fails":
+            with pytest.raises(ValueError, match="module workload failed"):
+                entry(positional_tensor, bias=keyword_tensor)
+        else:
+            assert (
+                entry(positional_tensor, bias=keyword_tensor)
+                is entry_state.return_value
+            )
+
+        expected_events = [
+            (
+                "push",
+                compose_marker(
+                    f"nn.Module.{receiver.__class__.__name__}.{marker_method_name}",
+                    "module_entry.py:42",
+                    backend="torch",
+                    args="(float32[2x4], bias=float64[1])",
+                ),
+            )
+        ]
+        if outcome != "push-fails":
+            expected_events.extend([
+                ("invoke", receiver, (positional_tensor,), {"bias": keyword_tensor}),
+                ("pop",),
+            ])
+        assert entry_state.events == expected_events
+        assert core._thread_local.depth == 0
+
+
 def test_torch_backend_install_skips_dispatcher_when_collector_loads(monkeypatch):
-    from utils.inject_roctx._backends import torch as torch_backend
+    from ml_api_tracing.recording.backends import torch as torch_backend
 
     noop_torch_structural_wraps(monkeypatch, torch_backend)
     monkeypatch.setattr(torch_backend.torch_trace_collector, "install", lambda: True)
@@ -184,7 +278,7 @@ def test_torch_backend_install_skips_dispatcher_when_collector_loads(monkeypatch
 
 
 def test_torch_backend_install_falls_back_to_dispatch_mode(monkeypatch):
-    from utils.inject_roctx._backends import torch as torch_backend
+    from ml_api_tracing.recording.backends import torch as torch_backend
 
     noop_torch_structural_wraps(monkeypatch, torch_backend)
     monkeypatch.setattr(torch_backend.torch_trace_collector, "install", lambda: False)
@@ -201,7 +295,7 @@ def test_torch_backend_install_falls_back_to_dispatch_mode(monkeypatch):
 
 
 def test_deep_tensor_method_wraps_disabled_by_env(monkeypatch):
-    from utils.inject_roctx._backends.torch import (
+    from ml_api_tracing.recording.backends.torch import (
         TENSOR_METHOD_WRAPS,
         _selected_tensor_method_wraps,
     )
@@ -216,7 +310,7 @@ def test_lazy_linear_to_under_tensor_wraps(monkeypatch):
     from torch.nn.parameter import UninitializedParameter
 
     if not torch_backend._resolve_torch():
-        pytest.skip("torch could not be resolved for inject_roctx backend")
+        pytest.skip("torch could not be resolved for ML API tracing backend")
 
     pushes = []
     monkeypatch.setattr(
@@ -240,7 +334,7 @@ def test_uninitialized_tensor_item_still_raises(monkeypatch):
     from torch.nn.parameter import UninitializedParameter
 
     if not torch_backend._resolve_torch():
-        pytest.skip("torch could not be resolved for inject_roctx backend")
+        pytest.skip("torch could not be resolved for ML API tracing backend")
 
     param = UninitializedParameter()
     with pytest.raises(ValueError, match="uninitialized"):
@@ -265,7 +359,7 @@ def test_lazy_batch_norm_to_dtype_keeps_uninitialized_buffer(monkeypatch):
     from torch.nn.parameter import UninitializedBuffer
 
     if not torch_backend._resolve_torch():
-        pytest.skip("torch could not be resolved for inject_roctx backend")
+        pytest.skip("torch could not be resolved for ML API tracing backend")
 
     monkeypatch.setattr(torch_backend, "_push_scope", lambda *args, **kwargs: None)
     monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
@@ -284,7 +378,7 @@ def test_uninitialized_buffer_keeps_persistent_on_to(monkeypatch):
     from torch.nn.parameter import UninitializedBuffer
 
     if not torch_backend._resolve_torch():
-        pytest.skip("torch could not be resolved for inject_roctx backend")
+        pytest.skip("torch could not be resolved for ML API tracing backend")
 
     monkeypatch.setattr(torch_backend, "_push_scope", lambda *args, **kwargs: None)
     monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)

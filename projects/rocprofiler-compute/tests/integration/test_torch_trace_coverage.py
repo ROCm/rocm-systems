@@ -47,6 +47,7 @@ def torch_trace_coverage_sampling(request):
     return seed, n
 
 
+@pytest.mark.torch_trace_coverage
 def test_random_operator_kernel_coverage(
     request,
     tmp_path,

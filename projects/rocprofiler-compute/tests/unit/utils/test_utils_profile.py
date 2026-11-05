@@ -5,6 +5,12 @@
 
 import gzip
 import os
+import stat
+import sys
+from contextlib import nullcontext
+from pathlib import Path
+from types import SimpleNamespace
+from typing import List
 from unittest import mock
 
 import pandas as pd
@@ -39,6 +45,98 @@ OUTDATED_FIRMWARE_TAIL = [
         utils_profile.EXIT_CODE_OUTDATED_GPU_FIRMWARE,
     ),
 ]
+
+
+SUBMODULE_DISCOVERY_PACKAGE = SimpleNamespace(__path__=["/fake/path"])
+mock_submodules = [
+    (None, "module_parse", False),
+    (None, "module_request", False),
+    (None, "module_error", False),
+]
+
+mock_submodules_single = [
+    (None, "module_parser", False),
+    (None, "module_request", False),
+    (None, "module_error", False),
+]
+
+mock_submodules_multiple = [
+    (None, "module_some_complex_name", False),
+    (None, "module_another_test_case", False),
+    (None, "module_simple", False),
+]
+
+mock_submodules_base = [
+    (None, "module_base", False),
+    (None, "module_parser", False),
+    (None, "module_handler", False),
+]
+
+mock_submodules_no_underscore = [
+    (None, "simplemodule", False),
+    (None, "anothermodule", False),
+]
+
+mock_submodules_empty_parts = [
+    (None, "module_", False),  # ends with underscore
+    (None, "_module", False),  # leading underscore leaves "module"
+    (None, "module__double", False),  # double underscore
+]
+
+mock_submodules_mixed = [
+    (None, "module_base", False),  # Should be filtered out
+    (None, "module_parser", False),  # Normal case
+    (None, "module_test_case", False),  # Multiple underscores
+    (None, "module_simple", False),  # Simple case
+    (None, "module_another_base", False),  # Contains 'base' but not exactly 'base'
+]
+
+mock_submodules_large = [(None, f"module_test{i}", False) for i in range(100)]
+expected_results_large = [f"test{i}" for i in range(100)]
+
+mock_submodules_special = [
+    (None, "module_test-case", False),
+    (None, "module_test.case", False),
+    (None, "module_test123", False),
+]
+
+mock_submodules_isolation = [(None, "module_test", False)]
+
+mock_submodules_unicode = [
+    (None, "module_tëst", False),
+    (None, "module_测试", False),
+    (None, "module_тест", False),
+]
+
+mock_submodules_processed_names = [
+    (None, "module_submodule1", False),
+    (None, "module_submodule2", False),
+]
+
+
+def stub_run_prof_deps(monkeypatch, counter_csv_body, warnings):
+    """Run run_prof against a canned counter CSV instead of a real profiler."""
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
+    monkeypatch.setattr(
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (True, "success"),
+    )
+    monkeypatch.setattr("utils.utils_profile.parse_pmc_perf", lambda f: ["SQ_WAVES"])
+
+    def fake_convert(db_paths, counter_csv, marker_csv, kernel_symbols_csv):
+        assert counter_csv.endswith(".csv.gz"), counter_csv
+        if counter_csv_body is not None:
+            with gzip.open(counter_csv, "wt", encoding="utf-8") as f:
+                f.write(counter_csv_body)
+
+    monkeypatch.setattr(
+        "utils.utils_profile.rocpd_data.convert_dbs_to_csv", fake_convert
+    )
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "utils.utils_profile.console_warning",
+        lambda msg, *a, **k: warnings.append(str(msg)),
+    )
 
 
 # =============================================================================
@@ -76,7 +174,6 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
         "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None
     )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
     utils_profile.run_prof(str(fname), profiler_options, workload_dir)
@@ -103,11 +200,10 @@ def test_rocprofiler_sdk_env_log_excludes_user_env(tmp_path, monkeypatch):
         "utils.utils_profile.capture_subprocess_output",
         lambda *a, **k: (True, "success"),
     )
-    monkeypatch.setattr("utils.utils_common.parse_pmc_perf", lambda f: ["SQ_WAVES"])
+    monkeypatch.setattr("utils.utils_profile.parse_pmc_perf", lambda f: ["SQ_WAVES"])
     monkeypatch.setattr(
         "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None
     )
-    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
     fname = tmp_path / "pmc_perf_test.yaml"
@@ -149,7 +245,7 @@ def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
     }
 
     update_calls: list = []
-    debug_msgs: list[str] = []
+    debug_msgs: List[str] = []
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
     monkeypatch.setattr(
@@ -168,39 +264,12 @@ def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
         "utils.utils_profile.console_debug",
         lambda msg, *a, **k: debug_msgs.append(msg),
     )
-    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
     utils_profile.run_prof(str(fname), options, str(workload_dir))
 
     assert update_calls == []
     assert any("No native counter CSV for pid 12345" in m for m in debug_msgs)
-
-
-def stub_run_prof_deps(monkeypatch, counter_csv_body, warnings):
-    """Run run_prof against a canned counter CSV instead of a real profiler."""
-    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
-    monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output",
-        lambda *a, **k: (True, "success"),
-    )
-    monkeypatch.setattr("utils.utils_profile.parse_pmc_perf", lambda f: ["SQ_WAVES"])
-
-    def fake_convert(db_paths, counter_csv, marker_csv, kernel_symbols_csv):
-        assert counter_csv.endswith(".csv.gz"), counter_csv
-        if counter_csv_body is not None:
-            with gzip.open(counter_csv, "wt", encoding="utf-8") as f:
-                f.write(counter_csv_body)
-
-    monkeypatch.setattr(
-        "utils.utils_profile.rocpd_data.convert_dbs_to_csv", fake_convert
-    )
-    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
-    monkeypatch.setattr(
-        "utils.utils_profile.console_warning",
-        lambda msg, *a, **k: warnings.append(str(msg)),
-    )
 
 
 @pytest.mark.parametrize(
@@ -210,8 +279,9 @@ def stub_run_prof_deps(monkeypatch, counter_csv_body, warnings):
         pytest.param(COUNTER_CSV_HEADER, id="header_only"),
     ],
 )
+@pytest.mark.parametrize("ml_api_trace_enabled", [False, True])
 def test_run_prof_zero_kernels_writes_no_results_csv(
-    tmp_path, monkeypatch, counter_csv_body
+    tmp_path, monkeypatch, counter_csv_body, ml_api_trace_enabled
 ):
     """A workload that dispatches no GPU kernels must warn and leave no
     results_*.csv behind: a header-only file would look like real profiling data
@@ -221,18 +291,77 @@ def test_run_prof_zero_kernels_writes_no_results_csv(
     workload_dir = tmp_path / "workload"
     (workload_dir / "out" / "pmc_1").mkdir(parents=True)
 
-    warnings: list[str] = []
+    warnings: List[str] = []
     stub_run_prof_deps(monkeypatch, counter_csv_body, warnings)
 
     utils_profile.run_prof(
         str(fname),
         {"APP_CMD": ["./test_app"], "ROCPROF_COUNTER_COLLECTION": "1"},
         str(workload_dir),
+        ml_api_trace_enabled=ml_api_trace_enabled,
     )
 
     assert any("No GPU kernel data collected" in m for m in warnings)
     assert sorted(workload_dir.glob("results_*.csv.gz")) == []
+    assert sorted(workload_dir.glob("ml_api_trace_*.csv.gz")) == []
     assert not (workload_dir / "out").exists()
+
+
+@pytest.mark.parametrize("marker_available", [True, False])
+def test_run_prof_ml_api_trace_retention_precedes_database_copy_and_cleanup(
+    tmp_path, monkeypatch, marker_available
+):
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n", encoding="utf-8")
+    workload_dir = tmp_path / "workload"
+    database = workload_dir / "out" / "pmc_1" / "100" / "100.db"
+    database.parent.mkdir(parents=True)
+    database.write_bytes(b"raw-rocpd-database")
+    counter_body = COUNTER_CSV_HEADER + (
+        "100,77,kernel_a,256,64,0,10,20,9,SQ_WAVES,7\n"
+    )
+    marker_bytes = gzip.compress(
+        b"Function,Thread_Id\nnn.Module.Linear.forward:train.py:19|torch,4\n",
+        mtime=0,
+    )
+    stub_run_prof_deps(monkeypatch, counter_body, [])
+
+    def write_converted_inputs(db_paths, counter_csv, marker_csv, kernel_symbols_csv):
+        Path(counter_csv).write_bytes(gzip.compress(counter_body.encode(), mtime=0))
+        if marker_available:
+            Path(marker_csv).write_bytes(marker_bytes)
+
+    monkeypatch.setattr(
+        utils_profile.rocpd_data, "convert_dbs_to_csv", write_converted_inputs
+    )
+
+    outcome = nullcontext() if marker_available else pytest.raises(FileNotFoundError)
+    with outcome:
+        utils_profile.run_prof(
+            str(fname),
+            {"APP_CMD": ["./test_app"], "ROCPROF_COUNTER_COLLECTION": "1"},
+            str(workload_dir),
+            ml_api_trace_enabled=True,
+            retain_rocpd_output=True,
+        )
+
+    results = workload_dir / "results_pmc_perf_test.csv.gz"
+    retained_counter = (
+        workload_dir / "ml_api_trace_pmc_perf_test_counter_collection.csv.gz"
+    )
+    retained_marker = (
+        workload_dir / "ml_api_trace_pmc_perf_test_marker_api_trace.csv.gz"
+    )
+    assert retained_counter.read_bytes() == results.read_bytes()
+    retained_database = workload_dir / "pmc_perf_test_100.db"
+    if marker_available:
+        assert retained_marker.read_bytes() == marker_bytes
+        assert retained_database.read_bytes() == b"raw-rocpd-database"
+        assert not (workload_dir / "out").exists()
+    else:
+        assert not retained_marker.exists()
+        assert not retained_database.exists()
+        assert database.read_bytes() == b"raw-rocpd-database"
 
 
 def test_run_prof_relabels_dispatch_and_kernel_ids(tmp_path, monkeypatch):
@@ -250,7 +379,7 @@ def test_run_prof_relabels_dispatch_and_kernel_ids(tmp_path, monkeypatch):
         "100,88,kernel_a,256,64,0,30,40,9,SQ_WAVES,3\n"
         "100,99,kernel_b,512,64,0,50,60,5,SQ_WAVES,4\n"
     )
-    warnings: list[str] = []
+    warnings: List[str] = []
     stub_run_prof_deps(monkeypatch, body, warnings)
 
     utils_profile.run_prof(
@@ -297,7 +426,6 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
         "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None
     )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir)
@@ -337,7 +465,6 @@ def test_run_prof_failure_subprocess(
         lambda *a, **k: (False, "error output"),
     )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
     errors = []
 
@@ -399,7 +526,6 @@ def test_run_prof_failure_prints_diagnostic_message(
         lambda *a, **k: (False, captured_output),
     )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
     errors = []
 
@@ -434,7 +560,6 @@ def test_run_prof_success_ignores_outdated_firmware_warning(tmp_path, monkeypatc
         "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None
     )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
     errors = []
@@ -481,7 +606,6 @@ def test_run_prof_rocprofv3_builds_command_and_env(tmp_path, monkeypatch):
         "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None
     )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir)
@@ -497,58 +621,14 @@ def test_run_prof_rocprofv3_builds_command_and_env(tmp_path, monkeypatch):
     assert "ROCPROFILER_METRICS_PATH" in captured["env"]
 
 
-# =============================================================================
-# Normal Functionality:
-#
-# Basic submodule listing with real packages
-# Correct name processing with underscores
-# Multiple underscore handling
-# Base module filtering
-# Edge Cases:
-#
-# Empty packages (no submodules)
-# Non-existent packages
-# Names without underscores (IndexError case)
-# Empty name parts
-# Packages without __path__ attribute
-# Error Conditions:
-#
-# ModuleNotFoundError for invalid packages
-# AttributeError for packages without __path__
-# TypeError for invalid input types
-# ImportError from pkgutil.walk_packages
-# Special Scenarios:
-#
-# Large numbers of submodules
-# Special characters in names
-# Unicode character handling
-# Import isolation testing
-# Mixed module types
-# Data Integrity:
-#
-# Return type consistency
-# Docstring verification
-# Behavior validation
-# =============================================================================
-
-
-mock_package = mock.MagicMock()
-mock_package.__path__ = ["/fake/path"]
-mock_submodules = [
-    (None, "module_parse", False),
-    (None, "module_request", False),
-    (None, "module_error", False),
-]
-
-
-@mock.patch("importlib.import_module", return_value=mock_package)
+@mock.patch("importlib.import_module", return_value=SUBMODULE_DISCOVERY_PACKAGE)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules)
 def test_get_submodules_basic_functionality(mock_walk, mock_import):
     """
-    Test basic functionality with a real package that has submodules.
+    Test submodule listing with package discovery returning supplied names.
 
     Returns:
-        None: Asserts function correctly lists submodules from a real package.
+        None: Asserts function correctly processes the supplied submodule names.
     """
 
     result = utils_profile.get_submodules("test_package")
@@ -566,13 +646,10 @@ def test_get_submodules_empty_package():
     Returns:
         None: Asserts function returns empty list for packages without submodules.
     """
-    from unittest.mock import MagicMock, patch
+    mock_package = SimpleNamespace(__path__=["/fake/path"])
 
-    mock_package = MagicMock()
-    mock_package.__path__ = ["/fake/path"]
-
-    with patch("importlib.import_module", return_value=mock_package):
-        with patch("pkgutil.walk_packages", return_value=[]):
+    with mock.patch("importlib.import_module", return_value=mock_package):
+        with mock.patch.object(utils_profile.pkgutil, "walk_packages", return_value=[]):
             result = utils_profile.get_submodules("empty_package")
 
             assert isinstance(result, list)
@@ -591,16 +668,7 @@ def test_get_submodules_package_not_found():
         utils_profile.get_submodules("nonexistent_package_12345")
 
 
-mock_package_single = mock.MagicMock()
-mock_package_single.__path__ = ["/fake/path"]
-mock_submodules_single = [
-    (None, "module_parser", False),
-    (None, "module_request", False),
-    (None, "module_error", False),
-]
-
-
-@mock.patch("importlib.import_module", return_value=mock_package_single)
+@mock.patch("importlib.import_module", return_value=SUBMODULE_DISCOVERY_PACKAGE)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_single)
 def test_get_submodules_name_processing_single_underscore(mock_walk, mock_import):
     """
@@ -615,16 +683,7 @@ def test_get_submodules_name_processing_single_underscore(mock_walk, mock_import
     assert result == expected
 
 
-mock_package_multiple = mock.MagicMock()
-mock_package_multiple.__path__ = ["/fake/path"]
-mock_submodules_multiple = [
-    (None, "module_some_complex_name", False),
-    (None, "module_another_test_case", False),
-    (None, "module_simple", False),
-]
-
-
-@mock.patch("importlib.import_module", return_value=mock_package_multiple)
+@mock.patch("importlib.import_module", return_value=SUBMODULE_DISCOVERY_PACKAGE)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_multiple)
 def test_get_submodules_name_processing_multiple_underscores(mock_walk, mock_import):
     """
@@ -639,16 +698,7 @@ def test_get_submodules_name_processing_multiple_underscores(mock_walk, mock_imp
     assert result == expected
 
 
-mock_package_base = mock.MagicMock()
-mock_package_base.__path__ = ["/fake/path"]
-mock_submodules_base = [
-    (None, "module_base", False),
-    (None, "module_parser", False),
-    (None, "module_handler", False),
-]
-
-
-@mock.patch("importlib.import_module", return_value=mock_package_base)
+@mock.patch("importlib.import_module", return_value=SUBMODULE_DISCOVERY_PACKAGE)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_base)
 def test_get_submodules_base_module_filtered(mock_walk, mock_import):
     """
@@ -664,15 +714,7 @@ def test_get_submodules_base_module_filtered(mock_walk, mock_import):
     assert "base" not in result
 
 
-mock_package_no_underscore = mock.MagicMock()
-mock_package_no_underscore.__path__ = ["/fake/path"]
-mock_submodules_no_underscore = [
-    (None, "simplemodule", False),
-    (None, "anothermodule", False),
-]
-
-
-@mock.patch("importlib.import_module", return_value=mock_package_no_underscore)
+@mock.patch("importlib.import_module", return_value=SUBMODULE_DISCOVERY_PACKAGE)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_no_underscore)
 def test_get_submodules_no_underscore_in_name(mock_walk, mock_import):
     """
@@ -686,16 +728,7 @@ def test_get_submodules_no_underscore_in_name(mock_walk, mock_import):
         utils_profile.get_submodules("test_package")
 
 
-mock_package_empty_parts = mock.MagicMock()
-mock_package_empty_parts.__path__ = ["/fake/path"]
-mock_submodules_empty_parts = [
-    (None, "module_", False),  # ends with underscore
-    (None, "_module", False),  # starts with underscore - this will cause IndexError
-    (None, "module__double", False),  # double underscore
-]
-
-
-@mock.patch("importlib.import_module", return_value=mock_package_empty_parts)
+@mock.patch("importlib.import_module", return_value=SUBMODULE_DISCOVERY_PACKAGE)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_empty_parts)
 def test_get_submodules_empty_name_parts(mock_walk, mock_import):
     """
@@ -705,12 +738,9 @@ def test_get_submodules_empty_name_parts(mock_walk, mock_import):
         None: Asserts function handles edge cases in name processing.
     """
 
-    try:
-        result = utils_profile.get_submodules("test_package")
-        expected = ["", "", "double"]  # noqa - Empty strings for edge cases
-        assert len(result) == 3
-    except IndexError:
-        pytest.skip("Function doesn't handle edge case module names gracefully")
+    result = utils_profile.get_submodules("test_package")
+
+    assert result == ["", "module", "double"]
 
 
 def test_get_submodules_package_without_path_attribute():
@@ -720,21 +750,14 @@ def test_get_submodules_package_without_path_attribute():
     Returns:
         None: Asserts AttributeError is raised for packages without __path__.
     """
-    from unittest.mock import MagicMock, patch
+    mock_package = SimpleNamespace()
 
-    mock_package = MagicMock()
-    del mock_package.__path__
-
-    with patch("importlib.import_module", return_value=mock_package):
+    with mock.patch("importlib.import_module", return_value=mock_package):
         with pytest.raises(AttributeError):
             utils_profile.get_submodules("test_package")
 
 
-mock_package_exception = mock.MagicMock()
-mock_package_exception.__path__ = ["/fake/path"]
-
-
-@mock.patch("importlib.import_module", return_value=mock_package_exception)
+@mock.patch("importlib.import_module", return_value=SUBMODULE_DISCOVERY_PACKAGE)
 @mock.patch("pkgutil.walk_packages", side_effect=ImportError("Mock error"))
 def test_get_submodules_pkgutil_walk_packages_exception(mock_walk, mock_import):
     """
@@ -748,18 +771,7 @@ def test_get_submodules_pkgutil_walk_packages_exception(mock_walk, mock_import):
         utils_profile.get_submodules("test_package")
 
 
-mock_package_mixed = mock.MagicMock()
-mock_package_mixed.__path__ = ["/fake/path"]
-mock_submodules_mixed = [
-    (None, "module_base", False),  # Should be filtered out
-    (None, "module_parser", False),  # Normal case
-    (None, "module_test_case", False),  # Multiple underscores
-    (None, "module_simple", False),  # Simple case
-    (None, "module_another_base", False),  # Contains 'base' but not exactly 'base'
-]
-
-
-@mock.patch("importlib.import_module", return_value=mock_package_mixed)
+@mock.patch("importlib.import_module", return_value=SUBMODULE_DISCOVERY_PACKAGE)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_mixed)
 def test_get_submodules_mixed_module_types(mock_walk, mock_import):
     """
@@ -775,21 +787,11 @@ def test_get_submodules_mixed_module_types(mock_walk, mock_import):
     assert "base" not in result
 
 
-mock_package_large = mock.MagicMock()
-mock_package_large.__path__ = ["/fake/path"]
-mock_submodules_large = []
-expected_results_large = []
-for i in range(100):
-    module_name = f"module_test{i}"
-    mock_submodules_large.append((None, module_name, False))
-    expected_results_large.append(f"test{i}")
-
-
-@mock.patch("importlib.import_module", return_value=mock_package_large)
+@mock.patch("importlib.import_module", return_value=SUBMODULE_DISCOVERY_PACKAGE)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_large)
 def test_get_submodules_large_number_of_submodules(mock_walk, mock_import):
     """
-    Test performance and correctness with a large number of submodules.
+    Test correctness with a large number of supplied submodule names.
 
     Returns:
         None: Asserts function handles large numbers of submodules correctly.
@@ -826,35 +828,25 @@ def test_get_submodules_return_type_consistency():
     Returns:
         None: Asserts return type is always a list.
     """
-    from unittest.mock import MagicMock, patch
+    mock_package = SimpleNamespace(__path__=["/fake/path"])
 
-    mock_package = MagicMock()
-    mock_package.__path__ = ["/fake/path"]
-
-    with patch("importlib.import_module", return_value=mock_package):
-        with patch("pkgutil.walk_packages", return_value=[]):
+    with mock.patch("importlib.import_module", return_value=mock_package):
+        with mock.patch.object(utils_profile.pkgutil, "walk_packages", return_value=[]):
             result = utils_profile.get_submodules("test_package")
             assert isinstance(result, list)
             assert len(result) == 0
 
     mock_submodules = [(None, "module_base", False)]
-    with patch("importlib.import_module", return_value=mock_package):
-        with patch("pkgutil.walk_packages", return_value=mock_submodules):
+    with mock.patch("importlib.import_module", return_value=mock_package):
+        with mock.patch.object(
+            utils_profile.pkgutil, "walk_packages", return_value=mock_submodules
+        ):
             result = utils_profile.get_submodules("test_package")
             assert isinstance(result, list)
             assert len(result) == 0
 
 
-mock_package_special = mock.MagicMock()
-mock_package_special.__path__ = ["/fake/path"]
-mock_submodules_special = [
-    (None, "module_test-case", False),
-    (None, "module_test.case", False),
-    (None, "module_test123", False),
-]
-
-
-@mock.patch("importlib.import_module", return_value=mock_package_special)
+@mock.patch("importlib.import_module", return_value=SUBMODULE_DISCOVERY_PACKAGE)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_special)
 def test_get_submodules_special_characters_in_names(mock_walk, mock_import):
     """
@@ -869,22 +861,15 @@ def test_get_submodules_special_characters_in_names(mock_walk, mock_import):
     assert result == expected
 
 
-mock_package_isolation = mock.MagicMock()
-mock_package_isolation.__path__ = ["/fake/path"]
-mock_submodules_isolation = [(None, "module_test", False)]
-
-
-@mock.patch("importlib.import_module", return_value=mock_package_isolation)
+@mock.patch("importlib.import_module", return_value=SUBMODULE_DISCOVERY_PACKAGE)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_isolation)
 def test_get_submodules_imports_isolation(mock_walk, mock_import):
     """
-    Test that imports are properly isolated and don't affect global state.
+    Test that existing importlib and pkgutil module entries remain unchanged.
 
     Returns:
-        None: Asserts function imports don't pollute global namespace.
+        None: Asserts both existing sys.modules entries remain unchanged.
     """
-    import sys
-
     original_importlib = sys.modules.get("importlib")
     original_pkgutil = sys.modules.get("pkgutil")
 
@@ -896,16 +881,7 @@ def test_get_submodules_imports_isolation(mock_walk, mock_import):
     assert result == ["test"]
 
 
-mock_package_unicode = mock.MagicMock()
-mock_package_unicode.__path__ = ["/fake/path"]
-mock_submodules_unicode = [
-    (None, "module_tëst", False),
-    (None, "module_测试", False),
-    (None, "module_тест", False),
-]
-
-
-@mock.patch("importlib.import_module", return_value=mock_package_unicode)
+@mock.patch("importlib.import_module", return_value=SUBMODULE_DISCOVERY_PACKAGE)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_unicode)
 def test_get_submodules_unicode_names(mock_walk, mock_import):
     """
@@ -920,44 +896,18 @@ def test_get_submodules_unicode_names(mock_walk, mock_import):
     assert result == expected
 
 
-mock_package_docstring = mock.MagicMock()
-mock_package_docstring.__path__ = ["/fake/path"]
-mock_submodules_docstring = [
-    (None, "module_submodule1", False),
-    (None, "module_submodule2", False),
-]
-
-
-@mock.patch("importlib.import_module", return_value=mock_package_docstring)
-@mock.patch("pkgutil.walk_packages", return_value=mock_submodules_docstring)
-def test_get_submodules_docstring_verification(mock_walk, mock_import):
-    """
-    Test that function behavior matches its docstring description.
-
-    Returns:
-        None: Asserts function behavior aligns with documented purpose.
-    """
-
-    assert utils_profile.get_submodules.__doc__ is not None
-    assert (
-        "List all submodules for a target package"
-        in utils_profile.get_submodules.__doc__
-    )  # noqa
-
+@mock.patch("importlib.import_module", return_value=SUBMODULE_DISCOVERY_PACKAGE)
+@mock.patch("pkgutil.walk_packages", return_value=mock_submodules_processed_names)
+def test_get_submodules_returns_processed_submodule_names(mock_walk, mock_import):
+    """Return the processed names of every discovered submodule."""
     result = utils_profile.get_submodules("test_package")
 
-    assert isinstance(result, list)
-    assert "submodule1" in result
-    assert "submodule2" in result
+    assert result == ["submodule1", "submodule2"]
 
 
 @pytest.mark.misc
 def test_file_lock_creates_world_rw_file(tmp_path):
     """A freshly created lock file must be world-rw (0o666) regardless of umask."""
-    import stat
-
-    from utils import utils_profile
-
     lock_file = tmp_path / "shared.lock"
 
     # Force a strict umask that would otherwise leave the file owner-only.
@@ -992,8 +942,6 @@ def test_file_lock_does_not_change_process_umask(tmp_path, monkeypatch):
 def test_file_lock_existing_file_owned_by_other_user(tmp_path, monkeypatch):
     """A lock file owned by another user (no write access) is still lockable."""
 
-    from utils import utils_profile
-
     lock_file = tmp_path / "shared.lock"
     # Pre-create the lock file (as if another user created it first).
     lock_file.touch()
@@ -1026,8 +974,6 @@ def test_file_lock_existing_file_owned_by_other_user(tmp_path, monkeypatch):
 @pytest.mark.misc
 def test_file_lock_unopenable_file_raises(tmp_path, monkeypatch):
     """If the lock file cannot be opened at all, raise an actionable error."""
-
-    from utils import utils_profile
 
     lock_file = tmp_path / "shared.lock"
     lock_file.touch()

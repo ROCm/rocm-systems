@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Load the generic collector through its revision-2 plain-C interface.
+"""Load the generic Torch collector through its revision-2 plain-C interface.
 
 The collector has no PyTorch link dependency. Its symbols are supplied by
 the workload's real libtorch_cpu.so after checking the supported minor version.

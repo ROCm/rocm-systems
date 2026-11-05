@@ -34,12 +34,6 @@ string(
     "${FULL_VERSION_STRING}"
 )
 
-# string(REGEX REPLACE "(${ROCPROFCOMPUTE_VERSION})(.*)" "\\2"
-# ROCPROFCOMPUTE_VERSION_TWEAK
-# "${FULL_VERSION_STRING}")
-# string(REGEX REPLACE "^\\." "" ROCPROFCOMPUTE_VERSION_TWEAK
-# "${ROCPROFCOMPUTE_VERSION_TWEAK}")
-
 project(
     rocprofiler-compute
     VERSION ${ROCPROFCOMPUTE_VERSION}
@@ -1005,27 +999,61 @@ add_test(
 )
 
 add_test(
-    NAME test_inject_roctx_package
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_package.xml
-        ${COV_OPTION} tests/unit/utils/inject_roctx/test_inject_roctx_package.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_inject_roctx_torch_trace_collector
+    NAME test_ml_api_tracing_recording_backend_contract
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest
-        --junitxml=tests/test_inject_roctx_torch_trace_collector.xml ${COV_OPTION}
-        tests/unit/utils/inject_roctx/_backends/test_torch_trace_collector.py
-        ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_ml_api_tracing_recording_backend_contract.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/recording/test_backend_contract.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
-    NAME test_inject_roctx_torch
+    NAME test_ml_api_tracing_recording_installer
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_torch.xml
-        ${COV_OPTION} tests/unit/utils/inject_roctx/test_torch.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_recording_installer.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/recording/test_installer.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_recording_core
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_recording_core.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/recording/test_core.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_recording_launch
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_recording_launch.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/recording/test_launch.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_recording_triton
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_recording_triton.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/recording/backends/test_triton.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_recording_torch
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_recording_torch.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/recording/backends/test_torch.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_recording_torch_trace_collector
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_recording_torch_trace_collector.xml
+        ${COV_OPTION}
+        tests/unit/ml_api_tracing/recording/backends/test_torch_trace_collector.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1075,6 +1103,37 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profiler_base.xml
         ${COV_OPTION} tests/unit/rocprof_compute_profile/test_profiler_base.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_profile
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_ml_api_tracing_profile.xml
+        ${COV_OPTION} tests/unit/ml_api_tracing/test_profile.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_storage
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_ml_api_tracing_storage.xml
+        ${COV_OPTION} tests/unit/ml_api_tracing/test_storage.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_profiler_rocprofiler_sdk
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_profiler_rocprofiler_sdk.xml ${COV_OPTION}
+        tests/unit/rocprof_compute_profile/test_profiler_rocprofiler_sdk.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_profiler_rocprof_v3
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profiler_rocprof_v3.xml
+        ${COV_OPTION} tests/unit/rocprof_compute_profile/test_profiler_rocprof_v3.py
         ${WORKING_DIR_OPTION}
 )
 
@@ -1252,9 +1311,17 @@ if(${ENABLE_COVERAGE})
         test_profile_triton_trace
         test_profile_ml_api_trace
         test_torch_trace_coverage
-        test_inject_roctx_package
-        test_inject_roctx_torch
-        test_inject_roctx_torch_trace_collector
+        test_ml_api_tracing_recording_backend_contract
+        test_ml_api_tracing_recording_installer
+        test_ml_api_tracing_recording_core
+        test_ml_api_tracing_recording_launch
+        test_ml_api_tracing_recording_triton
+        test_ml_api_tracing_recording_torch
+        test_ml_api_tracing_recording_torch_trace_collector
+        test_ml_api_tracing_profile
+        test_ml_api_tracing_storage
+        test_profiler_rocprofiler_sdk
+        test_profiler_rocprof_v3
         test_inject_roctx_torch_gpu
         test_analysis_db
         test_analysis_base

@@ -8,15 +8,15 @@ and leaves call-tree construction to analysis.
 
 | Source | Responsibility |
 | --- | --- |
-| [torch.py](../../src/utils/inject_roctx/_backends/torch.py) | Structural Python wrappers and TorchDispatchMode fallback |
-| [torch_trace_collector.py](../../src/utils/inject_roctx/_backends/torch_trace_collector.py) | Generic-artifact discovery, runtime loading, C-interface binding, and launcher publication |
-| [core.py](../../src/utils/inject_roctx/core.py) | Python ROCTX runtime emission and source-location resolution |
+| [torch.py](../../src/ml_api_tracing/recording/backends/torch.py) | Structural Python wrappers and TorchDispatchMode fallback |
+| [torch_trace_collector.py](../../src/ml_api_tracing/recording/backends/torch_trace_collector.py) | Generic-artifact discovery, runtime loading, C-interface binding, and launcher publication |
+| [core.py](../../src/ml_api_tracing/recording/core.py) | Python ROCTX runtime emission and source-location resolution |
 | [marker_format.py](../../src/ml_api_tracing/marker_format.py) | Shared Python marker encoding, composition, parsing, and legacy stacked-wire detection |
 | [torch_trace_collector.cpp](../../src/lib/torch_trace_collector/torch_trace_collector.cpp) | Process-wide callback installation, range lifetime, and launcher debug info |
 | [argument_capture.cpp](../../src/lib/torch_trace_collector/argument_capture.cpp) | Bounded input rendering and schema-name lookup |
 | [wire_format.h](../../src/lib/torch_trace_collector/wire_format.h) | Native marker serialization |
 | [torch_abi.h](../../src/lib/torch_trace_collector/torch_abi/torch_abi.h) | Measured private PyTorch layouts used by the local declarations |
-| [utils_profile.py](../../src/utils/utils_profile.py) | Copy marker and counter CSVs into the workload directory |
+| [storage.py](../../src/ml_api_tracing/storage.py) | Copy marker and counter CSVs into the workload directory |
 
 ## Installation and callback lifetime
 
@@ -212,7 +212,7 @@ validation. No exact wheel identity or paired ELF build-ID gate is used.
 ## Tests
 
 Live profile covers torch, triton, and combined ML API traces, plus operator
-coverage against the native collector. Unit tests cover inject_roctx wraps,
+coverage against the native collector. Unit tests cover recording wrappers,
 Function parse, join, nest, and operator list/filter.
 
 `ROCPROFCOMPUTE_TORCH_ROOT` selects real headers and libraries for optional

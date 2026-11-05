@@ -101,4 +101,5 @@ markers = [
     "iteration_multiplexing_2",
     "iteration_multiplexing_stochastic",
     "experimental_feature",
+    "torch_trace_coverage: sampled Torch operator kernel attribution coverage",
 ]

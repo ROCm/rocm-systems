@@ -10,18 +10,17 @@ import re
 import shlex
 import shutil
 import time
-from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Optional, Union, cast
+from typing import Any, Dict, Generator, List, Optional, Tuple, Union, cast
 
 import config
 import utils.utils_profile_csv as csv_ops
+from ml_api_tracing.storage import save_ml_api_trace_inputs
 from utils import csv_compression, rocpd_data
 from utils.logger import (
     console_debug,
     console_error,
-    console_log,
     console_warning,
     demarcate,
 )
@@ -62,7 +61,7 @@ _OUTDATED_FIRMWARE_MESSAGE = (
     "GPU firmware on this machine is below the minimum rocprofiler-sdk requires."
 )
 
-ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
+ProfilerOptions = Union[List[str], Dict[str, Union[str, List[str]]]]
 
 
 def is_live_attach(
@@ -100,7 +99,7 @@ def file_lock(
         yield
 
 
-def _open_shared_lock_fd(lock_path: Path) -> tuple[int, str]:
+def _open_shared_lock_fd(lock_path: Path) -> Tuple[int, str]:
     """Open a shared world-rw lock file, creating it if needed.
 
     flock advisory locks do not require write access, so a read-only fd is
@@ -174,7 +173,7 @@ def keep_native_artifacts(source_dir: Path, workload_dir: Path, fbase: str) -> N
 
 
 def run_prof(
-    fnames: Union[list[str], str],
+    fnames: Union[List[str], str],
     profiler_options: ProfilerOptions,
     workload_dir: str,
     ml_api_trace_enabled: bool = False,
@@ -205,7 +204,7 @@ def run_prof(
 
     # standard rocprof options
     if get_rocprof_cmd() == "rocprofiler-sdk":
-        options = cast(dict[str, Union[str, list[str]]], profiler_options).copy()
+        options = cast(Dict[str, Union[str, List[str]]], profiler_options).copy()
         if multiple_files:
             options["ROCPROF_COUNTERS"] = ", ".join([
                 f"pmc: {' '.join(parse_pmc_perf(fname))}" for fname in fnames
@@ -221,7 +220,7 @@ def run_prof(
             )
             return
         default_options = ["-i", fnames]
-        options = default_options + cast(list[str], profiler_options)
+        options = default_options + cast(List[str], profiler_options)
         options = ["-A", "absolute"] + options
 
     new_env = os.environ.copy()
@@ -419,7 +418,9 @@ def run_prof(
     if ml_api_trace_enabled:
         # results_*.csv already holds the relabeled counters the ML API trace
         # path needs; copy it and the marker trace to the workload dir.
-        save_ml_api_trace_inputs(workload_dir, fbase, results_csv)
+        save_ml_api_trace_inputs(
+            workload_dir, fbase, results_csv, src_marker=marker_csv
+        )
     if retain_rocpd_output:
         console_warning(
             "--retain-rocpd-output is deprecated and will be removed in "
@@ -460,10 +461,10 @@ def gen_sysinfo(
         writer.writerow(data)
 
 
-def get_submodules(package_name: str) -> list[str]:
+def get_submodules(package_name: str) -> List[str]:
     """List all submodules for a target package"""
 
-    submodules: list[str] = []
+    submodules: List[str] = []
 
     # walk all submodules in target package
     package = importlib.import_module(package_name)
@@ -474,32 +475,3 @@ def get_submodules(package_name: str) -> list[str]:
             submodules.append(pretty_name)
 
     return submodules
-
-
-@demarcate
-def save_ml_api_trace_inputs(
-    workload_dir: str,
-    fbase: str,
-    src_counter: Path,
-) -> None:
-    """Copy the counter and marker CSVs into the workload directory for analyze."""
-    src_dir = Path(workload_dir) / "out" / "pmc_1"
-    # Only one pair expected
-    src_marker = csv_compression.compressed_name(
-        src_dir / f"{fbase}_marker_api_trace.csv"
-    )
-    dst_counter = csv_compression.compressed_name(
-        Path(workload_dir) / f"ml_api_trace_{fbase}_counter_collection.csv"
-    )
-    dst_marker = csv_compression.compressed_name(
-        Path(workload_dir) / f"ml_api_trace_{fbase}_marker_api_trace.csv"
-    )
-    # These files are expected to exist.
-    shutil.copyfile(src_counter, dst_counter)
-    shutil.copyfile(src_marker, dst_marker)
-    console_log(
-        "ml api trace",
-        "Copied counter collection and marker trace files to the workload directory.",
-    )
-    console_log("Counter Collection: ", str(dst_counter))
-    console_log("Marker API Trace: ", str(dst_marker))

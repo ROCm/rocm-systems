@@ -23,6 +23,13 @@ import pytest
 import torch
 from common import normalize_kernel_names
 
+_GROUND_TRUTH_TIMEOUT_SECONDS = 120
+_MAX_FAILURE_REASON_CHARS = 500
+_MAX_KERNEL_PREVIEW_ITEMS = 6
+_MAX_SKIP_REASON_CHARS = 4000
+_MAX_STDERR_HEAD_LINES = 10
+_MAX_VERBOSE_MATCH_ITEMS = 8
+
 # dense unary-float name list
 # fmt: off
 _UNARY_FLOAT_ELEMENTWISE_NAMES = (
@@ -627,10 +634,6 @@ def bool_mask(device: str, shape: Tuple[int, ...] = (4, 4)) -> torch.Tensor:
     return torch.ones(shape, device=device, dtype=torch.bool)
 
 
-def unit_interval_tensor(device: str, *shape: int) -> torch.Tensor:
-    return torch.rand(shape, device=device)
-
-
 # Symmetric positive-definite, for Cholesky-family ops.
 def spd_matrix(device: str, size: int = 4) -> torch.Tensor:
     factor = torch.randn(size, size, device=device)
@@ -678,11 +681,6 @@ def lu_solve_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
         CoverageTensorArg(shape=(4,), emit="pivots_1based"),
         torch.randn(4, 2, device=device),
     ], {}
-
-
-def ldl_solve_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
-    ld, pivots, _ = torch.linalg.ldl_factor_ex(spd_matrix(device))
-    return [ld, pivots.to(dtype=torch.int64), torch.randn(4, 2, device=device)], {}
 
 
 def solve_triangular_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
@@ -3419,7 +3417,7 @@ def _nn_module_method_builder(method_name: str) -> StructuralBuilder:
 
 
 def _register_wrap_constant_builders() -> None:
-    from utils.inject_roctx._backends.torch import (
+    from ml_api_tracing.recording.backends.torch import (
         DEEP_TENSOR_METHOD_WRAPS,
         EXTRA_STRUCTURAL_WRAPS,
         TENSOR_METHOD_WRAPS,
@@ -3920,7 +3918,7 @@ def multiline_coverage_failure_warning(
     ]
     shown = failure_detail[:max_ops]
     for name, reason in shown:
-        r = reason.replace("\n", " ")[:500]
+        r = reason.replace("\n", " ")[:_MAX_FAILURE_REASON_CHARS]
         lines.append(f"FAIL  {name}")
         lines.append(f"    {r}")
         lines.append("")
@@ -3992,8 +3990,8 @@ def inclusive_gpu_ns(node: Any) -> float:
 
 def _trunc(label: str, items) -> str:
     items_sorted = sorted(items)
-    head = items_sorted[:8]
-    ellipsis = "…" if len(items_sorted) > 8 else ""
+    head = items_sorted[:_MAX_VERBOSE_MATCH_ITEMS]
+    ellipsis = "…" if len(items_sorted) > _MAX_VERBOSE_MATCH_ITEMS else ""
     return f"    [match] {label}: {head}{ellipsis}"
 
 
@@ -4036,7 +4034,11 @@ def compare_single_op(
 
     if ground_truth_entry is None or "error" in ground_truth_entry:
         err_msg = describe_missing_or_errored_op(op, ground_truth_entry)
-        reason = err_msg if len(err_msg) <= 4000 else f"{err_msg[:4000]}…"
+        reason = (
+            err_msg
+            if len(err_msg) <= _MAX_SKIP_REASON_CHARS
+            else f"{err_msg[:_MAX_SKIP_REASON_CHARS]}…"
+        )
         log_lines = coverage_log_skip(op.name, reason)
         if match_verbose:
             log_lines = log_lines + (
@@ -4068,7 +4070,7 @@ def compare_single_op(
 
     if not matched_nodes:
         if op.category == "structural":
-            skip_msg = "no matching analyze node - inject_roctx instrumentation gap"
+            skip_msg = "no matching analyze node - ML API tracing instrumentation gap"
             return OpCompareOutcome(
                 "skip",
                 skip_msg,
@@ -4112,10 +4114,11 @@ def compare_single_op(
                 )
             reason = (
                 "no inclusive kernel overlap with torch.profiler cuda_kernels "
-                f"(profiler={sorted(profiler_kernel_set)[:6]}"
-                f"{'…' if len(profiler_kernel_set) > 6 else ''}, "
-                f"tree={sorted(tree_kernels)[:6]}"
-                f"{'…' if len(tree_kernels) > 6 else ''})"
+                f"(profiler={sorted(profiler_kernel_set)[:_MAX_KERNEL_PREVIEW_ITEMS]}"
+                f"{'…' if len(profiler_kernel_set) > _MAX_KERNEL_PREVIEW_ITEMS else ''}"
+                ", "
+                f"tree={sorted(tree_kernels)[:_MAX_KERNEL_PREVIEW_ITEMS]}"
+                f"{'…' if len(tree_kernels) > _MAX_KERNEL_PREVIEW_ITEMS else ''})"
             )
             mismatch_lines = (
                 f"    profiler cuda_kernels ({len(profiler_kernel_set)}):",
@@ -4198,7 +4201,9 @@ def op_workload_failure_due_to(
 ) -> str:
     """Short phrase for pytest.fail lead-in."""
     if timed_out:
-        return "ground-truth subprocess exceeded 120s timeout"
+        return (
+            f"ground-truth subprocess exceeded {_GROUND_TRUTH_TIMEOUT_SECONDS}s timeout"
+        )
     assert returncode is not None
     if returncode < 0:
         name = signal_name(returncode)
@@ -4238,7 +4243,7 @@ def stderr_tail_collapsed(
     if len(collapsed) <= max_lines:
         body_lines = collapsed
     else:
-        head_n = min(10, max_lines // 3)
+        head_n = min(_MAX_STDERR_HEAD_LINES, max_lines // 3)
         tail_n = max_lines - head_n - 1
         head = collapsed[:head_n]
         tail = collapsed[-tail_n:]
@@ -4324,7 +4329,7 @@ def run_ground_truth_torch_profiler_subprocess(
             argv,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=_GROUND_TRUTH_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired as exc:
         copy_note = copy_failed_coverage_artifacts_to_cwd(

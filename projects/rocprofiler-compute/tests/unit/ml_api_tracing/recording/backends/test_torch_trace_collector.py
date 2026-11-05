@@ -5,14 +5,18 @@
 
 import builtins
 import ctypes
+import json
 import os
+import shutil
+import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from packaging.version import Version
 
-from utils.inject_roctx._backends import torch_trace_collector as loader
+from ml_api_tracing.recording.backends import torch_trace_collector as loader
 
 
 class FakeNativeFunction:
@@ -84,6 +88,32 @@ def native_environment(monkeypatch, tmp_path):
     )
 
 
+@pytest.fixture
+def relocated_runtime(tmp_path):
+    source_root = Path(loader.__file__).resolve().parents[3]
+    runtime_root = tmp_path / "share" / "rocprofiler-compute"
+    for relative_path in (
+        "config.py",
+        "utils/__init__.py",
+        "utils/logger.py",
+        "utils/utils_common.py",
+        "utils/native_tool_finder.py",
+        "ml_api_tracing/__init__.py",
+        "ml_api_tracing/recording/__init__.py",
+        "ml_api_tracing/recording/backends/__init__.py",
+        "ml_api_tracing/recording/backends/torch_trace_collector.py",
+    ):
+        destination = runtime_root / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_root / relative_path, destination)
+    shutil.copytree(
+        source_root / "vendored",
+        runtime_root / "vendored",
+        ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc"),
+    )
+    return runtime_root
+
+
 @pytest.mark.parametrize(
     ("version", "expected"),
     [
@@ -139,6 +169,39 @@ def test_find_collector_uses_source_build_artifact(monkeypatch, tmp_path):
     monkeypatch.setattr(loader, "_PACKAGE_ROOT", package_root)
 
     assert loader._find_collector() == artifact.resolve()
+
+
+@pytest.mark.parametrize("libdir", ["lib", "lib64"])
+def test_find_collector_infers_actual_relocated_root(
+    relocated_runtime, tmp_path, libdir
+):
+    artifact = tmp_path / libdir / "rocprofiler-compute" / "torch_trace_collector.so"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"artifact lookup only")
+    probe = (
+        "import json, sys\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "from ml_api_tracing.recording.backends import "
+        "torch_trace_collector as loader\n"
+        "print(json.dumps([str(loader._PACKAGE_ROOT), loader.__file__, "
+        "loader.find_prebuilt_artifacts.__module__, str(loader._find_collector())]))\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-B", "-I", "-S", "-c", probe, str(relocated_runtime)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert json.loads(completed.stdout) == [
+        str(relocated_runtime),
+        str(
+            relocated_runtime
+            / "ml_api_tracing/recording/backends/torch_trace_collector.py"
+        ),
+        "utils.native_tool_finder",
+        str(artifact),
+    ]
 
 
 @pytest.mark.parametrize("version", ["2.12.1", "2.15.0", "3.13.0"])

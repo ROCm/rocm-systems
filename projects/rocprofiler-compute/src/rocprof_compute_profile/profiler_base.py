@@ -5,13 +5,17 @@ import argparse
 import re
 import shlex
 import shutil
-import sys
 import time
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-from ml_api_tracing.constants import KNOWN_ML_API_BACKENDS
+from ml_api_tracing.profile import (
+    compute_selected_frameworks,
+    prepare_ml_api_trace_injection,
+    validate_ml_api_trace_attach,
+    validate_ml_api_trace_pc_sampling,
+)
 from pc_sampling.pc_sampling_profile import PCSamplingProfile
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import (
@@ -34,17 +38,9 @@ from utils.utils_common import (
 from utils.utils_exceptions import (
     ExecutableNotFoundError,
     NoScriptInCommandError,
-    PythonScriptNotFoundError,
 )
 from utils.utils_profile import gen_sysinfo, run_prof
 from vendored import yaml
-
-# Maps each CLI flag to the backends it enables.
-_FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
-    "torch_trace": ("torch",),
-    "triton_trace": ("triton",),
-    "ml_api_trace": KNOWN_ML_API_BACKENDS,
-}
 
 # Only the specs classes that can be power-gated carry a perf_level, so seeing
 # AUTO here is enough to warn.
@@ -56,7 +52,7 @@ _PMC_POWER_GATING_WARNING = (
 )
 
 
-def _partition_warning_messages(mspec: MachineSpecs) -> list[str]:
+def _partition_warning_messages(mspec: MachineSpecs) -> List[str]:
     """Return notices on how active partition modes shape analysis metrics."""
     if not MIGPUSpecs.is_partition_supported(
         getattr(mspec, "gpu_arch", None), getattr(mspec, "gpu_model", None)
@@ -78,16 +74,7 @@ def _partition_warning_messages(mspec: MachineSpecs) -> list[str]:
     return messages
 
 
-def _compute_selected_frameworks(args: argparse.Namespace) -> set[str]:
-    """Return the set of frameworks requested via CLI flags."""
-    selected: set[str] = set()
-    for flag, frameworks in _FLAG_TO_FRAMEWORKS.items():
-        if getattr(args, flag, False):
-            selected.update(frameworks)
-    return selected
-
-
-def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[str]]:
+def _find_python_script_index(argv: List[str]) -> Tuple[Optional[int], Optional[str]]:
     """Locate the script argument in a Python command, skipping interpreter flags.
 
     Returns (script_index, skip_flag).  skip_flag is the flag string ("-c"/"-m")
@@ -110,71 +97,6 @@ def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[
     return None, None
 
 
-def _prepare_ml_api_trace_injection(
-    remaining: list[str],
-    resolved_exec_path: Path,
-    is_python: bool,
-    script_index: Optional[int],
-    skip_flag: Optional[str],
-    frameworks: set[str],
-) -> None:
-    """Insert the inject_roctx launcher into the workload command.
-
-    Modifies the ``remaining`` command list in place. The launcher is run by
-    absolute path, with the selected frameworks passed as ``--frameworks``
-    followed by each framework name, then ``--`` and the workload command. The
-    rewrite depends on the workload type:
-      1. Python interpreter — insert the launcher before the script.
-      2. Direct .py script  — prepend ``sys.executable`` and the launcher.
-      3. Other executables  — leave the command unchanged and emit a warning.
-    """
-    launch_script = (
-        Path(__file__).parent.parent / "utils" / "inject_roctx" / "launch.py"
-    )
-    if not launch_script.is_file():
-        console_error(
-            f"Cannot find inject_roctx launcher at {launch_script}. "
-            "Please verify your installation."
-        )
-
-    launcher = [
-        str(launch_script),
-        "--frameworks",
-        *sorted(frameworks),
-        "--",
-    ]
-
-    if is_python:
-        if skip_flag:
-            console_warning(
-                f"Cannot inject ROCTX markers into 'python {skip_flag}' "
-                "invocations. Launching workload as-is; "
-                "ML API tracing may have no effect."
-            )
-        elif not Path(remaining[script_index]).is_file():
-            raise PythonScriptNotFoundError(remaining[script_index])
-        else:
-            remaining[script_index:script_index] = launcher
-    elif resolved_exec_path.suffix in (".py", ".pyw", ".pyc", ".pyo"):
-        remaining[0:0] = [sys.executable, *launcher]
-    else:
-        console_warning(
-            "Command does not look like a Python entry point, "
-            "skipping ROCTX auto-injection and launching workload as-is. "
-            "Ensure the binary already initializes ROCTX markers, "
-            "otherwise ML API tracing will have no effect."
-        )
-
-    if (resolved_exec_path.parent / "_internal").is_dir():
-        console_warning(
-            "Workload appears to be a self-contained binary. "
-            "Such bundles typically ship private ROCm/HSA libraries, which "
-            "prevents ML API tracing from collecting data. "
-            "Rebuild without packaging libhsa/libhip or "
-            "adjust LD_LIBRARY_PATH to /opt/rocm before profiling."
-        )
-
-
 class RocProfCompute_Base:
     def __init__(
         self,
@@ -189,7 +111,7 @@ class RocProfCompute_Base:
     def get_args(self) -> argparse.Namespace:
         return self.__args
 
-    def get_profiler_options(self) -> Union[list[str], dict[str, Any]]:
+    def get_profiler_options(self) -> Union[List[str], Dict[str, Any]]:
         """Fetch any version specific arguments required by profiler"""
         # assume no SoC specific options and return empty list by default
         return []
@@ -241,14 +163,12 @@ class RocProfCompute_Base:
                 current.append("30")
                 args.filter_blocks = current
 
-        selected_frameworks = _compute_selected_frameworks(args)
-        if selected_frameworks and is_only_pc_sampling(args.filter_blocks):
-            console_error(
-                "ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) "
-                "cannot be used with PC-sampling-only profiling, which does not "
-                "collect counters. Remove the tracing option(s) or add a counter block."
-            )
-        self._selected_frameworks: set[str] = selected_frameworks
+        selected_frameworks = compute_selected_frameworks(args)
+        validate_ml_api_trace_pc_sampling(
+            selected_frameworks,
+            bool(selected_frameworks) and is_only_pc_sampling(args.filter_blocks),
+        )
+        self._selected_frameworks: Set[str] = selected_frameworks
 
         if (
             sum((
@@ -276,21 +196,7 @@ class RocProfCompute_Base:
             )
 
         if selected_frameworks:
-            if args.attach_pid:
-                console_error(
-                    "ML API tracing cannot be used with --attach-pid. "
-                    "ROCTX injection requires launching the workload; "
-                    "already-running processes cannot be instrumented. "
-                    "Please remove one of these options."
-                )
-
-            if args.attach_duration_msec:
-                console_error(
-                    "ML API tracing cannot be used with --attach-duration-msec. "
-                    "--attach-duration-msec only applies to --attach-pid, which "
-                    "is incompatible with ML API tracing. Please remove one of "
-                    "these options."
-                )
+            validate_ml_api_trace_attach(selected_frameworks, args)
 
         # Each --kernel-iteration-range token must be a positive integer or a
         # range ('start:end' or 'start-end') with start <= end (1-based).
@@ -337,7 +243,7 @@ class RocProfCompute_Base:
                     raise NoScriptInCommandError(args.remaining)
 
             if selected_frameworks:
-                _prepare_ml_api_trace_injection(
+                prepare_ml_api_trace_injection(
                     args.remaining,
                     resolved_exec_path,
                     bool(is_python),
@@ -398,8 +304,8 @@ class RocProfCompute_Base:
 
     def profile(
         self,
-        fnames: Union[list[Path], Path],
-        options: Union[list[str], dict[str, Any]],
+        fnames: Union[List[Path], Path],
+        options: Union[List[str], Dict[str, Any]],
         total_runs: int = 1,
     ) -> float:
         args = self.get_args()
