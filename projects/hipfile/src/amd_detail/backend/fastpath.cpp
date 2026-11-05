@@ -33,7 +33,8 @@ using namespace std;
 static bool
 fastpathFallbackEligibleErrno(int err)
 {
-    return err == ENODEV || err == EREMOTEIO;
+    // ENOTTY: the KFD does not implement the AIS ioctl.
+    return err == ENODEV || err == EREMOTEIO || err == ENOTTY;
 }
 
 /* The fastpath backend is used when:
@@ -217,6 +218,17 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
             default:
                 throw std::runtime_error("Invalid IoType");
         }
+    }
+    catch (const std::system_error &) {
+        Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size, buffer->getGpuId());
+        // A failed AIS call records hipErrorUnknown as this thread's last HIP
+        // error. Don't leave it behind if the I/O will be retried on the
+        // fallback. Async I/O runs on a HIP callback thread, so its last error
+        // never reaches the caller.
+        if (is_fallback_eligible(std::current_exception(), 0)) {
+            (void)Context<Hip>::get()->hipGetLastError();
+        }
+        throw;
     }
     catch (...) {
         Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size, buffer->getGpuId());
