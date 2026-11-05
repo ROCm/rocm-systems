@@ -76,14 +76,14 @@ Panel Config:
             max: MAX(CPC_TCIU_WRITE_REQUEST_SENT_sum / $denom)
             unit: (Count + $normUnit)
           GUS Read Requests:
-            avg: SUM(CPC_GUS_READ_REQUEST_SENT_sum) / SUM($denom)
-            min: MIN(CPC_GUS_READ_REQUEST_SENT_sum / $denom)
-            max: MAX(CPC_GUS_READ_REQUEST_SENT_sum / $denom)
+            avg: None
+            min: None
+            max: None
             unit: (Count + $normUnit)
           GUS Write Requests:
-            avg: SUM(CPC_GUS_WRITE_REQUEST_SENT_sum) / SUM($denom)
-            min: MIN(CPC_GUS_WRITE_REQUEST_SENT_sum / $denom)
-            max: MAX(CPC_GUS_WRITE_REQUEST_SENT_sum / $denom)
+            avg: None
+            min: None
+            max: None
             unit: (Count + $normUnit)
           Instruction Cache Hits:
             avg: SUM(CPC_MEC_INSTR_CACHE_HIT_sum) / SUM($denom)

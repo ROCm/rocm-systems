@@ -1,68 +1,76 @@
 {
   "archs": ["gfx1201"],
-  "description": "RDNA 4 Navi 48. Metrics carried into the GL2 table until the chart is split across L0, L1, L2, Infinity Cache, and GDDR6.",
+  "description": "RDNA 4 Navi 48: WGPs, LDS/L0 and the read-only L1 caches, GL1, 8 MB L2, 64 MB Infinity Cache, GDDR6.",
   "scope": {"labels": ["GPU", "GDDR6"], "split": "gddr6"},
   "blocks": [
-    {"id": "gl2", "title": "GL2 Cache", "column": 0, "order": 0, "position": "grid", "style": "panel", "content": [
-      {"metric": "Wavefront Occupancy", "title": "Wavefront Occupancy", "category": "neutral", "bar": false},
-      {"metric": "Wave Life", "title": "Wave Life", "category": "neutral", "bar": false},
-      {"metric": "Wavefronts", "title": "Wavefronts", "category": "neutral", "bar": false},
-      {"metric": "Workgroups", "title": "Workgroups", "category": "neutral", "bar": false},
-      {"metric": "Active CUs", "title": "Active CUs", "category": "neutral", "bar": false},
-      {"metric": "Num CUs", "title": "Num CUs", "category": "neutral", "bar": false},
-      {"metric": "VGPR", "title": "VGPR", "category": "neutral", "bar": false},
-      {"metric": "SGPR", "title": "SGPR", "category": "neutral", "bar": false},
-      {"metric": "LDS Allocation", "title": "LDS Allocation", "category": "neutral", "bar": false},
-      {"metric": "Scratch Allocation", "title": "Scratch Allocation", "category": "neutral", "bar": false},
-      {"metric": "SALU", "title": "SALU", "category": "neutral", "bar": false},
-      {"metric": "SMEM", "title": "SMEM", "category": "neutral", "bar": false},
-      {"metric": "VALU", "title": "VALU", "category": "neutral", "bar": false},
-      {"metric": "Matrix Ops", "title": "Matrix Ops", "category": "neutral", "bar": false},
-      {"metric": "VMEM", "title": "VMEM", "category": "neutral", "bar": false},
-      {"metric": "LDS", "title": "LDS", "category": "neutral", "bar": false},
-      {"metric": "GWS", "title": "GWS", "category": "neutral", "bar": false},
-      {"metric": "BR", "title": "BR", "category": "neutral", "bar": false},
-      {"metric": "LDS Req", "title": "LDS Req", "category": "neutral", "bar": false},
-      {"metric": "LDS Util", "title": "LDS Util", "category": "neutral", "bar": false},
-      {"metric": "LDS Latency", "title": "LDS Latency", "category": "neutral", "bar": false},
-      {"metric": "IL1 Fetch", "title": "IL1 Fetch", "category": "neutral", "bar": false},
-      {"metric": "IL1 Hit", "title": "IL1 Hit", "category": "neutral", "bar": false},
-      {"metric": "IL1 Lat", "title": "IL1 Lat", "category": "neutral", "bar": false},
-      {"metric": "IL1_L2 Rd", "title": "IL1_L2 Rd", "category": "neutral", "bar": false},
-      {"metric": "sL1D Hit", "title": "sL1D Hit", "category": "neutral", "bar": false},
-      {"metric": "sL1D Rd", "title": "sL1D Rd", "category": "neutral", "bar": false},
-      {"metric": "sL1D Lat", "title": "sL1D Lat", "category": "neutral", "bar": false},
-      {"metric": "sL1D_L2 Rd", "title": "sL1D_L2 Rd", "category": "neutral", "bar": false},
-      {"metric": "sL1D_L2 Wr", "title": "sL1D_L2 Wr", "category": "neutral", "bar": false},
-      {"metric": "sL1D_L2 Atomic", "title": "sL1D_L2 Atomic", "category": "neutral", "bar": false},
-      {"metric": "VL1 Rd", "title": "VL1 Rd", "category": "neutral", "bar": false},
-      {"metric": "VL1 Wr", "title": "VL1 Wr", "category": "neutral", "bar": false},
-      {"metric": "VL1 Atomic", "title": "VL1 Atomic", "category": "neutral", "bar": false},
-      {"metric": "VL1 Hit", "title": "VL1 Hit", "category": "neutral", "bar": false},
-      {"metric": "VL1 Lat", "title": "VL1 Lat", "category": "neutral", "bar": false},
-      {"metric": "VL1 Stall", "title": "VL1 Stall", "category": "neutral", "bar": false},
-      {"metric": "VL1 Coalesce", "title": "VL1 Coalesce", "category": "neutral", "bar": false},
-      {"metric": "VL1_L2 Rd", "title": "VL1_L2 Rd", "category": "neutral", "bar": false},
-      {"metric": "VL1_L2 Wr", "title": "VL1_L2 Wr", "category": "neutral", "bar": false},
-      {"metric": "VL1_L2 Atomic", "title": "VL1_L2 Atomic", "category": "neutral", "bar": false},
-      {"metric": "L2 Rd", "title": "L2 Rd", "category": "neutral", "bar": false},
-      {"metric": "L2 Wr", "title": "L2 Wr", "category": "neutral", "bar": false},
-      {"metric": "L2 Atomic", "title": "L2 Atomic", "category": "neutral", "bar": false},
-      {"metric": "L2 Hit", "title": "L2 Hit", "category": "neutral", "bar": false},
-      {"metric": "L2 Rd Lat", "title": "L2 Rd Lat", "category": "neutral", "bar": false},
-      {"metric": "L2 Wr Lat", "title": "L2 Wr Lat", "category": "neutral", "bar": false},
-      {"metric": "Fabric_L2 Rd", "title": "Fabric_L2 Rd", "category": "neutral", "bar": false},
-      {"metric": "Fabric_L2 Wr", "title": "Fabric_L2 Wr", "category": "neutral", "bar": false},
-      {"metric": "Fabric_L2 Atomic", "title": "Fabric_L2 Atomic", "category": "neutral", "bar": false},
-      {"metric": "Fabric Rd Lat", "title": "Fabric Rd Lat", "category": "neutral", "bar": false},
-      {"metric": "Fabric Wr Lat", "title": "Fabric Wr Lat", "category": "neutral", "bar": false},
-      {"metric": "Fabric Atomic Lat", "title": "Fabric Atomic Lat", "category": "neutral", "bar": false},
-      {"metric": "HBM Rd", "title": "HBM Rd", "category": "neutral", "bar": false},
-      {"metric": "HBM Wr", "title": "HBM Wr", "category": "neutral", "bar": false}
+    {"id": "cu", "title": "WGPs", "column": 0, "order": 0, "position": "grid", "style": "list", "content": [
+      {"metric": "Wavefront Occupancy", "title": "Wave Occ", "category": "util", "bar": false},
+      {"metric": "VGPR", "title": "vGPRs", "category": "util", "bar": false},
+      {"metric": "SGPR", "title": "sGPRs", "category": "util", "bar": false},
+      {"metric": "Scratch Allocation", "title": "Scratch/Wave", "category": "util", "bar": false},
+      {"metric": "LDS Allocation", "title": "LDS Alloc", "category": "util", "bar": false},
+      {"metric": "Workgroups", "title": "Workgroups/WGP", "category": "util", "bar": false}
     ]},
 
-    {"id": "gddr6", "title": "GDDR6", "column": 1, "order": 0, "position": "grid", "style": "panel"}
+    {"id": "lds", "title": "LDS", "column": 1, "order": 0, "position": "grid", "style": "panel", "content": [
+      {"metric": "LDS Utilization", "title": "Util", "category": "util", "bar": true},
+      {"metric": "LDS Bandwidth", "title": "BW", "category": "bw", "bar": false},
+      {"metric": "LDS Bank Conflict Rate", "title": "Bank Conflict", "category": "stall", "bar": true}
+    ]},
+    {"id": "l0", "title": "L0 (Vector)", "column": 1, "order": 1, "position": "grid", "style": "panel", "content": [
+      {"metric": "GL0 Hit Rate", "title": "Hit Rate", "category": "hit", "bar": true}
+    ]},
+    {"id": "l1", "title": "L1 (Read-Only)", "column": 1, "order": 2, "position": "grid", "style": "panel"},
+    {"id": "icache", "title": "Instruction Cache", "column": 1, "order": 0, "position": "grid", "style": "panel", "parent": "l1", "content": [
+      {"metric": "ICache Hit Rate", "title": "Hit Rate", "category": "hit", "bar": true}
+    ]},
+    {"id": "dcache", "title": "Scalar Data Cache", "column": 1, "order": 1, "position": "grid", "style": "panel", "parent": "l1", "content": [
+      {"metric": "DCache Hit Rate", "title": "Hit Rate", "category": "hit", "bar": true},
+      {"metric": "DCache Load Bandwidth", "title": "Load BW", "category": "read", "bar": false}
+    ]},
+
+    {"id": "gl1", "title": "GL1 (Write-Combining)", "column": 2, "order": 0, "position": "grid", "style": "panel", "content": [
+      {"metric": "GL1 Utilization", "title": "Util", "category": "util", "bar": true},
+      {"metric": "GL1 Request Credit Stall Rate", "title": "Req Credit Stall", "category": "stall", "bar": true},
+      {"metric": "GL1 Data Credit Stall Rate", "title": "Data Credit Stall", "category": "stall", "bar": true},
+      {"metric": "GL1 Buffer Full Stall Rate", "title": "Buffer Full", "category": "stall", "bar": true}
+    ]},
+
+    {"id": "l2", "title": "L2 (8 MB)", "column": 3, "order": 0, "position": "grid", "style": "panel", "content": [
+      {"metric": "GL2 Utilization", "title": "Util", "category": "util", "bar": true},
+      {"metric": "GL2 Hit Rate", "title": "Hit Rate", "category": "hit", "bar": true}
+    ]},
+
+    {"id": "infinity_cache", "title": "Infinity Cache (64 MB)", "column": 4, "order": 0, "position": "grid", "style": "panel"},
+
+    {"id": "gddr6", "title": "GDDR6", "column": 5, "order": 0, "position": "grid", "style": "panel", "content": [
+      {"metric": "DRAM Read Requests", "title": "Read Req", "category": "read", "bar": false},
+      {"metric": "DRAM Write Requests", "title": "Write Req", "category": "write", "bar": false},
+      {"metric": "DRAM Read Bandwidth", "title": "Read BW", "category": "read", "bar": false},
+      {"metric": "DRAM Write Bandwidth", "title": "Write BW", "category": "write", "bar": false}
+    ]}
   ],
   "arrows": [
+    {"from": "cu", "to": "lds", "direction": "both", "metric": "LDS Req", "title": "LDS", "category": "neutral", "style": "inline", "group": "Request"},
+
+    {"from": "cu", "to": "l0", "direction": "backward", "metric": "GL0 Read Requests", "title": "Read", "category": "read", "style": "inline"},
+    {"from": "cu", "to": "l0", "direction": "forward", "metric": "GL0 Write Requests", "title": "Write", "category": "write", "style": "inline"},
+
+    {"from": "cu", "to": "icache", "direction": "backward", "metric": "ICache Requests", "title": "ICACHE", "category": "read", "style": "inline"},
+
+    {"from": "cu", "to": "dcache", "direction": "backward", "metric": "DCache Requests", "title": "SMEM", "category": "read", "style": "inline"},
+
+    {"from": "l0", "to": "gl1", "direction": "backward", "metric": "GL0-GL1 Read Bandwidth", "title": "Read BW", "category": "read", "style": "stacked"},
+    {"from": "l0", "to": "gl1", "direction": "forward", "metric": "GL0-GL1 Write Requests", "title": "Write Req", "category": "write", "style": "inline"},
+
+    {"from": "icache", "to": "gl1", "direction": "backward", "metric": "ICache-GL1 Read Requests", "title": "Read Req", "category": "read", "style": "inline"},
+
+    {"from": "dcache", "to": "gl1", "direction": "backward", "metric": "DCache-GL1 Read Requests", "title": "Read Req", "category": "read", "style": "inline"},
+
+    {"from": "gl1", "to": "l2", "direction": "backward", "metric": "GL1-GL2 Read Bandwidth", "title": "Read BW", "category": "read", "style": "stacked"},
+    {"from": "gl1", "to": "l2", "direction": "forward", "metric": "GL1-GL2 Write Bandwidth", "title": "Write BW", "category": "write", "style": "stacked"},
+
+    {"from": "l2", "to": "infinity_cache", "direction": "backward", "metric": "GL2-Fabric Read BW", "title": "Read BW", "category": "read", "style": "stacked"},
+    {"from": "l2", "to": "infinity_cache", "direction": "forward", "metric": "GL2-Fabric Write BW", "title": "Write BW", "category": "write", "style": "stacked"}
   ]
 }

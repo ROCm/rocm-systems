@@ -16,9 +16,9 @@ Panel Config:
           unit: Unit
         metric:
           Hit Rate:
-            avg: 100 * SUM(GL1C_REQ_sum - GL1C_REQ_MISS_sum) / SUM(GL1C_REQ_sum)
-            min: MIN(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum)
-            max: MAX(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum)
+            avg: None
+            min: None
+            max: None
             unit: Percent
     - metric_table:
         id: 1102
@@ -35,15 +35,15 @@ Panel Config:
             min: MIN(100 * GL1C_STARVE / GL1C_CYCLE)
             max: MAX(100 * GL1C_STARVE / GL1C_CYCLE)
             unit: Percent
-          GL2 Stall:
-            avg: SUM(GL1C_STALL_GL2_GL1_sum) / SUM($denom)
-            min: MIN(GL1C_STALL_GL2_GL1_sum / $denom)
-            max: MAX(GL1C_STALL_GL2_GL1_sum / $denom)
+          GL2 Request Credit Stall:
+            avg: SUM(GL1C_STALL_GL1_GL2_REQ_CREDITS_sum) / SUM($denom)
+            min: MIN(GL1C_STALL_GL1_GL2_REQ_CREDITS_sum / $denom)
+            max: MAX(GL1C_STALL_GL1_GL2_REQ_CREDITS_sum / $denom)
             unit: (Cycles + $normUnit)
-          LFIFO Full Stall:
-            avg: SUM(GL1C_STALL_LFIFO_FULL_sum) / SUM($denom)
-            min: MIN(GL1C_STALL_LFIFO_FULL_sum / $denom)
-            max: MAX(GL1C_STALL_LFIFO_FULL_sum / $denom)
+          GL2 Data Credit Stall:
+            avg: SUM(GL1C_STALL_GL1_GL2_DATA_CREDITS_sum) / SUM($denom)
+            min: MIN(GL1C_STALL_GL1_GL2_DATA_CREDITS_sum / $denom)
+            max: MAX(GL1C_STALL_GL1_GL2_DATA_CREDITS_sum / $denom)
             unit: (Cycles + $normUnit)
     - metric_table:
         id: 1103
@@ -66,9 +66,9 @@ Panel Config:
             max: MAX(GL1C_REQ_WRITE_sum / $denom)
             unit: (Count + $normUnit)
           Miss Requests:
-            avg: SUM(GL1C_REQ_MISS_sum) / SUM($denom)
-            min: MIN(GL1C_REQ_MISS_sum / $denom)
-            max: MAX(GL1C_REQ_MISS_sum / $denom)
+            avg: None
+            min: None
+            max: None
             unit: (Count + $normUnit)
     - metric_table:
         id: 1104

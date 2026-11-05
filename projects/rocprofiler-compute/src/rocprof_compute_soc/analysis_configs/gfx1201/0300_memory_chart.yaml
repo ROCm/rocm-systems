@@ -1,6 +1,11 @@
 # gfx1201 (RDNA 4, Navi 48) -- Memory Chart
-# Metric bodies are carried from the gfx1201 metrics port and placed in the
-# gfx12 panel template. Tables with no carried metric are empty.
+#
+# Levels follow the RDNA 4 ISA (section 1.2.3) and the Navi 48 Hot Chips 2025
+# disclosure: L0 per WGP, the read-only instruction and scalar caches, the GL1
+# write-combining cache, an 8 MB L2, a 64 MB Infinity Cache, then GDDR6.
+# The Infinity Cache has no counter. Requests the L2 sends toward DRAM can
+# still be served by the Infinity Cache, so the GDDR6 metrics count traffic
+# destined for DRAM, not traffic that reached it.
 Panel Config:
   id: 300
   title: Memory Chart
@@ -10,228 +15,266 @@ Panel Config:
       title: Instruction Cache
       header: &id001
         metric: Metric
-        avg: Avg
-        min: Min
-        max: Max
+        value: Value
         unit: Unit
-      metric: {}
+      metric:
+        ICache Requests:
+          value: SUM(SQC_ICACHE_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        ICache Hit Rate:
+          value: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)
+          unit: Percent
+        ICache-GL1 Read Requests:
+          value: SUM(SQC_TC_INST_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
       cli_style: mem_chart
   - metric_table:
       id: 302
       title: Scalar Data Cache
       header: *id001
-      metric: {}
+      metric:
+        DCache Requests:
+          value: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        DCache Hit Rate:
+          value: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum)
+          unit: Percent
+        DCache Load Bandwidth:
+          value: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        DCache-GL1 Read Requests:
+          value: SUM(SQC_TC_DATA_READ_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
       cli_style: mem_chart
   - metric_table:
       id: 303
       title: GL0 Cache (Vector L0)
       header: *id001
-      metric: {}
+      metric:
+        GL0 Read Requests:
+          value: SUM(TCP_REQ_READ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        GL0 Write Requests:
+          value: SUM(TCP_REQ_WRITE_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        GL0 Hit Rate:
+          value: 100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum)
+          unit: Percent
       cli_style: mem_chart
   - metric_table:
       id: 304
       title: LDS (Local Data Share)
       header: *id001
-      metric: {}
+      metric:
+        LDS Req:
+          value: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        LDS Utilization:
+          value: 100 * SUM(SQC_LDS_IDX_ACTIVE_sum) / (SUM(GRBM_GUI_ACTIVE) * $cu_per_gpu)
+          unit: Percent
+        LDS Bank Conflict Rate:
+          value: 100 * SUM(SQC_LDS_BANK_CONFLICT_sum) / SUM(SQC_LDS_IDX_ACTIVE_sum)
+          unit: Percent
+        LDS Bandwidth:
+          value: 4 * SUM(SQC_LDS_LOAD_DWORDS_sum + SQC_LDS_STORE_DWORDS_sum + SQC_LDS_ATOMIC_DWORDS_sum)
+            / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
       cli_style: mem_chart
   - metric_table:
       id: 305
       title: GL0-GL1 Interface
       header: *id001
-      metric: {}
+      metric:
+        GL0-GL1 Read Bandwidth:
+          value: SUM(TCP_GL1_REQ_READ_128B_sum * 128 + TCP_GL1_REQ_READ_64B_sum * 64) / (SUM(End_Timestamp
+            - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        GL0-GL1 Write Requests:
+          value: SUM(TCP_GL1_REQ_WRITE_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
       cli_style: mem_chart
   - metric_table:
       id: 306
       title: GLARB (GL1-GL2 Arbiter)
       header: *id001
-      metric: {}
+      metric:
+        GL1 Utilization:
+          value: 100 * SUM(GL1C_BUSY_sum) / SUM(GL1C_CYCLE_sum)
+          unit: Percent
+        GL1 Request Credit Stall Rate:
+          value: 100 * SUM(GL1C_STALL_GL1_GL2_REQ_CREDITS_sum) / SUM(GL1C_CYCLE_sum)
+          unit: Percent
+        GL1 Data Credit Stall Rate:
+          value: 100 * SUM(GL1C_STALL_GL1_GL2_DATA_CREDITS_sum) / SUM(GL1C_CYCLE_sum)
+          unit: Percent
+        GL1 Buffer Full Stall Rate:
+          value: 100 * SUM(GL1C_STALL_BUFFER_FULL_sum) / SUM(GL1C_CYCLE_sum)
+          unit: Percent
+        GL1-GL2 Read Bandwidth:
+          value: 32 * SUM(GL1C_GL2_RET_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        GL1-GL2 Write Bandwidth:
+          value: 32 * SUM(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum) / (SUM(End_Timestamp - Start_Timestamp)
+            / 1e9)
+          unit: Bytes/s
       cli_style: mem_chart
   - metric_table:
       id: 307
       title: GL2 Cache (L2)
-      header:
-        metric: Metric
-        value: Avg
-        unit: Unit
-        peak: Peak
-        pct_of_peak: Percent of Peak
+      header: *id001
       metric:
-        Wavefront Occupancy:
-          value: ROUND(AVG(GRBM_GUI_ACTIVE), 0)
-          unit: Cycles
-        Wave Life:
-          value: ROUND(SUM(SQ_WAVE_CYCLES) / SUM(SQ_WAVES), 0)
-          unit: Cycles
-        Wavefronts:
-          value: ROUND(SUM(SQ_WAVES), 0)
-          unit: Cycles
-        Workgroups:
-          value: 0
-          unit: Cycles
-        Active CUs:
-          value: $cu_per_gpu
-          unit: Cycles
-        Num CUs:
-          value: $cu_per_gpu
-          unit: Cycles
-        VGPR:
-          value: ROUND(AVG(Arch_VGPR), 0)
-          unit: Cycles
-        SGPR:
-          value: ROUND(AVG(SGPR), 0)
-          unit: Cycles
-        LDS Allocation:
-          value: ROUND(AVG(LDS_Per_Workgroup), 0)
-          unit: Cycles
-        Scratch Allocation:
-          value: ROUND(AVG(Scratch_Per_Workitem), 0)
-          unit: Cycles
-        SALU:
-          value: ROUND(SUM(SQ_INSTS_SALU_sum), 0)
-          unit: Cycles
-        SMEM:
-          value: ROUND(SUM(SQ_INSTS_SMEM_sum), 0)
-          unit: Cycles
-        VALU:
-          value: ROUND(SUM(SQ_INSTS_VALU), 0)
-          unit: Cycles
-        Matrix Ops:
-          value: ROUND(SUM(SQ_WMMA_VALU_INSTS), 0)
-          unit: Cycles
-        VMEM:
-          value: ROUND(SUM(SQ_INSTS_TEX_LOAD_sum + SQ_INSTS_TEX_STORE_sum), 0)
-          unit: Cycles
-        LDS:
-          value: ROUND(SUM(SQ_INSTS_LDS_sum), 0)
-          unit: Cycles
-        GWS:
-          value: 0
-          unit: Cycles
-        BR:
-          value: 0
-          unit: Cycles
-        LDS Req:
-          value: ROUND(SUM(SQ_INSTS_LDS_sum), 0)
-          unit: Cycles
-        LDS Util:
-          value: 0
-          unit: Cycles
-        LDS Latency:
-          value: 0
-          unit: Cycles
-        IL1 Fetch:
-          value: ROUND(SUM(SQC_ICACHE_REQ_sum), 0)
-          unit: Cycles
-        IL1 Hit:
-          value: ROUND(100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum), 1)
-          unit: Cycles
-        IL1 Lat:
-          value: 0
-          unit: Cycles
-        IL1_L2 Rd:
-          value: ROUND(SUM(SQC_ICACHE_MISSES_sum), 0)
-          unit: Cycles
-        sL1D Hit:
-          value: 0
-          unit: Cycles
-        sL1D Rd:
-          value: 0
-          unit: Cycles
-        sL1D Lat:
-          value: 0
-          unit: Cycles
-        sL1D_L2 Rd:
-          value: 0
-          unit: Cycles
-        sL1D_L2 Wr:
-          value: 0
-          unit: Cycles
-        sL1D_L2 Atomic:
-          value: 0
-          unit: Cycles
-        VL1 Rd:
-          value: ROUND(SUM(TCP_REQ_READ_sum), 0)
-          unit: Cycles
-        VL1 Wr:
-          value: ROUND(SUM(TCP_REQ_WRITE_sum), 0)
-          unit: Cycles
-        VL1 Atomic:
-          value: 0
-          unit: Cycles
-        VL1 Hit:
-          value: ROUND(100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum), 1)
-          unit: Cycles
-        VL1 Lat:
-          value: 0
-          unit: Cycles
-        VL1 Stall:
-          value: ROUND(SUM(TCP_DATA_FIFO_STALL_sum), 0)
-          unit: Cycles
-        VL1 Coalesce:
-          value: 0
-          unit: Cycles
-        VL1_L2 Rd:
-          value: ROUND(SUM(TCP_REQ_MISS_sum), 0)
-          unit: Cycles
-        VL1_L2 Wr:
-          value: ROUND(SUM(TCP_REQ_WRITE_sum), 0)
-          unit: Cycles
-        VL1_L2 Atomic:
-          value: 0
-          unit: Cycles
-        L2 Rd:
-          value: ROUND(SUM(GL2C_HIT_sum + GL2C_MISS_sum), 0)
-          unit: Cycles
-        L2 Wr:
-          value: 0
-          unit: Cycles
-        L2 Atomic:
-          value: 0
-          unit: Cycles
-        L2 Hit:
-          value: ROUND(100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum), 1)
-          unit: Cycles
-        L2 Rd Lat:
-          value: 0
-          unit: Cycles
-        L2 Wr Lat:
-          value: 0
-          unit: Cycles
-        Fabric_L2 Rd:
-          value: ROUND(SUM(GL2C_EA_RDREQ_DRAM_sum), 0)
-          unit: Cycles
-        Fabric_L2 Wr:
-          value: ROUND(SUM(GL2C_EA_WRREQ_DRAM_sum), 0)
-          unit: Cycles
-        Fabric_L2 Atomic:
-          value: 0
-          unit: Cycles
-        Fabric Rd Lat:
-          value: 0
-          unit: Cycles
-        Fabric Wr Lat:
-          value: 0
-          unit: Cycles
-        Fabric Atomic Lat:
-          value: 0
-          unit: Cycles
-        HBM Rd:
-          value: ROUND(256 * SUM(GL2C_EA_RDREQ_DRAM_sum), 0)
-          unit: Cycles
-        HBM Wr:
-          value: ROUND(256 * SUM(GL2C_EA_WRREQ_DRAM_sum), 0)
-          unit: Cycles
+        GL2 Utilization:
+          value: 100 * SUM(GL2C_BUSY_sum) / SUM(GL2C_CYCLE_sum)
+          unit: Percent
+        GL2 Hit Rate:
+          value: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
+          unit: Percent
+        GL2-Fabric Read BW:
+          value: SUM(GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_RDREQ_128B_sum
+            * 128 + GL2C_EA_RDREQ_256B_sum * 256) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        GL2-Fabric Write BW:
+          value: SUM(GL2C_EA_WRREQ_32B_sum * 32 + GL2C_EA_WRREQ_64B_sum * 64 + GL2C_EA_WRREQ_128B_sum
+            * 128 + GL2C_EA_WRREQ_256B_sum * 256) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
       cli_style: mem_chart
   - metric_table:
       id: 308
       title: EA to HBM
       header: *id001
-      metric: {}
+      metric:
+        DRAM Read Requests:
+          value: SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        DRAM Write Requests:
+          value: SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        DRAM Read Bandwidth:
+          value: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        DRAM Write Bandwidth:
+          value: 32 * SUM(GL2C_EA_WRREQ_DRAM_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
       cli_style: mem_chart
   - metric_table:
       id: 309
       title: Workgroup Processors (WGPs)
       header: *id001
-      metric: {}
+      metric:
+        Wavefront Occupancy:
+          value: ROUND(100 * SUM(SQG_WAVE_CYCLES_sum) / SUM(GRBM_GUI_ACTIVE * $cu_per_gpu * $max_waves_per_cu),
+            1)
+          unit: Percent
+        VGPR:
+          value: ROUND(AVG(Arch_VGPR), 0)
+          unit: Registers
+        SGPR:
+          value: ROUND(AVG(SGPR), 0)
+          unit: Registers
+        LDS Allocation:
+          value: ROUND(AVG(LDS_Per_Workgroup), 0)
+          unit: Bytes per Workgroup
+        Scratch Allocation:
+          value: ROUND(AVG(Scratch_Per_Workitem) * $wave_size / 1024, 3)
+          unit: KB per Wave
+        Workgroups:
+          value: ROUND(AVG(Grid_Size / Workgroup_Size) / ($cu_per_gpu / 2), 1)
+          unit: Workgroups per WGP
       cli_style: mem_chart
-  metrics_description: {}
+  metrics_description:
+    ICache Requests: >-
+      Instruction cache requests from the SQ, normalized by the chosen unit.
+    ICache Hit Rate: >-
+      Percentage of instruction cache requests that hit. The instruction cache is
+      read-only and shared by the WGPs it serves.
+    ICache-GL1 Read Requests: >-
+      Instruction requests the instruction cache sent to GL1 after a miss.
+    DCache Requests: >-
+      Scalar data cache requests after bank serialization, normalized by the chosen unit.
+    DCache Hit Rate: >-
+      Percentage of scalar data cache requests that hit. The scalar data cache is read-only.
+    DCache Load Bandwidth: >-
+      Bytes loaded by scalar memory instructions, from the dwords each instruction loads.
+      Bounds-check reductions are ignored.
+    DCache-GL1 Read Requests: >-
+      Data read requests the scalar data cache sent to GL1 after a miss.
+    GL0 Read Requests: >-
+      Read requests to the vector L0 cache (TCP), counted per cache line accessed.
+    GL0 Write Requests: >-
+      Write requests to the vector L0 cache (TCP), counted per cache line accessed.
+    GL0 Hit Rate: >-
+      Percentage of vector L0 cache line accesses that hit.
+    LDS Req: >-
+      LDS instructions issued, including FLAT instructions that resolve to LDS. This
+      counts instructions, not data, so it does not separate reads from writes.
+    LDS Utilization: >-
+      Percentage of the LDS cycle budget across all CUs spent on indexed (non-direct,
+      non-interpolation) accesses, over GPU-active cycles. Two CUs share a WGP's LDS,
+      so a saturated LDS reads well below 100%.
+    LDS Bank Conflict Rate: >-
+      LDS cycles stalled by bank conflicts, as a percentage of cycles LDS spent on
+      indexed accesses.
+    LDS Bandwidth: >-
+      Bytes LDS accessed for load, store, and atomic instructions, from the dwords
+      counted per instruction type.
+    GL0-GL1 Read Bandwidth: >-
+      Bytes the vector L0 cache requested from GL1, from the 64-byte and 128-byte read
+      request counts.
+    GL0-GL1 Write Requests: >-
+      Write requests the vector L0 cache sent to GL1. The counters give no write size.
+    GL1 Utilization: >-
+      Percentage of GL1 cycles with a request pending. GL1 is a write-combining cache
+      between the WGPs and L2.
+    GL1 Request Credit Stall Rate: >-
+      Percentage of GL1 cycles stalled because GL1 had no L2 request credits.
+    GL1 Data Credit Stall Rate: >-
+      Percentage of GL1 cycles stalled because GL1 had no L2 data credits.
+    GL1 Buffer Full Stall Rate: >-
+      Percentage of GL1 cycles stalled because no buffer entry was free.
+    GL1-GL2 Read Bandwidth: >-
+      Bytes L2 returned to GL1, from the physical 32-byte beats returned.
+    GL1-GL2 Write Bandwidth: >-
+      Bytes GL1 wrote to L2, from the physical 32-byte data beats sent.
+    GL2 Utilization: >-
+      Percentage of L2 cycles with a request pending.
+    GL2 Hit Rate: >-
+      Percentage of L2 lookups that hit. Navi 48 has an 8 MB L2.
+    GL2-Fabric Read BW: >-
+      Bytes L2 read over its EA interface, from the 32, 64, 128, and 256-byte read
+      request counts. This includes traffic the Infinity Cache serves.
+    GL2-Fabric Write BW: >-
+      Bytes L2 wrote over its EA interface, from the 32, 64, 128, and 256-byte write
+      request counts. 64-byte requests include atomics.
+    DRAM Read Requests: >-
+      L2 read requests over EA destined for DRAM. The 64 MB Infinity Cache can serve
+      them before they reach GDDR6.
+    DRAM Write Requests: >-
+      L2 write requests over EA destined for DRAM. The 64 MB Infinity Cache can absorb
+      them before they reach GDDR6.
+    DRAM Read Bandwidth: >-
+      Bytes L2 read over EA for requests destined for DRAM, in 32-byte units. Infinity
+      Cache hits are included, so this can exceed the 640 GB/s GDDR6 peak.
+    DRAM Write Bandwidth: >-
+      Bytes L2 wrote over EA for requests destined for DRAM, in 32-byte units. Infinity
+      Cache hits are included.
+    Wavefront Occupancy: >-
+      Resident wavefronts per CU, averaged over GPU-active cycles, as a percent of the
+      maximum wavefronts per CU.
+    VGPR: >-
+      The number of architected vector general-purpose registers allocated
+      for the kernel. Note: this may not exactly match the number of VGPRs
+      requested by the compiler due to allocation granularity.
+    SGPR: >-
+      The number of scalar general-purpose registers allocated for the kernel.
+      Note: this may not exactly match the number of SGPRs requested by
+      the compiler due to allocation granularity.
+    LDS Allocation: >-
+      The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note:
+      This may also be larger than what was requested at compile time due to both allocation
+      granularity and dynamic per-dispatch LDS allocations.
+    Scratch Allocation: >-
+      The amount of scratch memory requested per wavefront, in KB: the scratch bytes
+      requested per work-item multiplied by the wavefront size. Scratch memory is used for
+      stack memory on the accelerator, as well as for register spills and restores.
+    Workgroups: >-
+      The number of workgroups in the launch divided by the number of WGPs.

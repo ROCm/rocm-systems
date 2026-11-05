@@ -26,14 +26,14 @@ Panel Config:
         header: *id001
         metric:
           Compute Wave Dispatches:
-            avg: SUM(SPI_CSN_WAVE) / SUM($denom)
-            min: MIN(SPI_CSN_WAVE / $denom)
-            max: MAX(SPI_CSN_WAVE / $denom)
+            avg: SUM(SQ_WAVES_sum) / SUM($denom)
+            min: MIN(SQ_WAVES_sum / $denom)
+            max: MAX(SQ_WAVES_sum / $denom)
             unit: (Count + $normUnit)
           Wave Dispatch Rate:
-            avg: SUM(SPI_CSN_WAVE) / SUM(GRBM_GUI_ACTIVE)
-            min: MIN(SPI_CSN_WAVE / GRBM_GUI_ACTIVE)
-            max: MAX(SPI_CSN_WAVE / GRBM_GUI_ACTIVE)
+            avg: SUM(SQ_WAVES_sum) / SUM(GRBM_GUI_ACTIVE)
+            min: MIN(SQ_WAVES_sum / GRBM_GUI_ACTIVE)
+            max: MAX(SQ_WAVES_sum / GRBM_GUI_ACTIVE)
             unit: Waves/cycle
     - metric_table:
         id: 603

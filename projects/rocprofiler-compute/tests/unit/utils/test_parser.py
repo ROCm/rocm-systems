@@ -13,6 +13,7 @@ import common
 import pandas as pd
 import pytest
 
+import config
 from pc_sampling.pc_sampling_analysis import load_pc_sample_records
 from utils import schema
 from utils.parser import (
@@ -26,6 +27,7 @@ from utils.specs import MachineSpecsCDNA
 from utils.utils_common import (
     convert_filter_blocks_to_panel_ids,
     expand_placeholder_ranges,
+    load_panel_configs,
 )
 
 # =============================================================================
@@ -1144,3 +1146,21 @@ class TestCorrectSysInfo:
 
         assert "not_a_spec" in str(error_calls[0])
         assert "--specs" in str(error_calls[0])
+
+
+GFX1201_WGP_TABLES = [
+    table
+    for source in load_panel_configs([str(config.analysis_configs_dir / "gfx1201")])[
+        700
+    ]["data source"]
+    for table in source.values()
+]
+
+
+@pytest.mark.parametrize(
+    "table", GFX1201_WGP_TABLES, ids=[table["id"] for table in GFX1201_WGP_TABLES]
+)
+def test_gfx1201_wgp_metrics_fill_every_header_column_in_order(table):
+    columns = [key for key in table["header"] if key != "metric"]
+    for name, metric in table["metric"].items():
+        assert list(metric) == columns, name

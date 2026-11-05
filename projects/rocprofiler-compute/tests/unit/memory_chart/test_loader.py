@@ -120,6 +120,38 @@ def test_layout_shows_every_panel_metric_and_no_other(path, arch):
     assert not panel - shown, f"missing from {path.name}: {sorted(panel - shown)}"
 
 
+def test_gfx1201_columns_follow_the_rdna4_hierarchy():
+    columns = [
+        [block.id for block in column] for column in Layouts.for_arch("gfx1201").columns
+    ]
+    assert columns == [
+        ["cu"],
+        ["lds", "l0", "l1"],
+        ["gl1"],
+        ["l2"],
+        ["infinity_cache"],
+        ["gddr6"],
+    ]
+
+
+def test_gfx1201_infinity_cache_shows_no_metrics():
+    layout = Layouts.for_arch("gfx1201")
+    infinity_cache = next(b for b in layout.blocks() if b.id == "infinity_cache")
+    assert not infinity_cache.items
+    assert all(arrow.source != "infinity_cache" for arrow in layout.arrows)
+
+
+def test_gfx1201_gddr6_counts_dram_destined_gl2_requests():
+    metrics = {
+        name: metric
+        for source in PanelConfigs.for_arch("gfx1201")["data source"]
+        for table in source.values()
+        for name, metric in table["metric"].items()
+    }
+    assert "GL2C_EA_RDREQ_DRAM_sum" in metrics["DRAM Read Requests"]["value"]
+    assert "GL2C_EA_WRREQ_DRAM_sum" in metrics["DRAM Write Requests"]["value"]
+
+
 @pytest.mark.parametrize("arch", MEMORY_CHART_ARCHS)
 def test_panel_metric_names_are_unique(arch):
     # Charts and the analysis database find metrics by name

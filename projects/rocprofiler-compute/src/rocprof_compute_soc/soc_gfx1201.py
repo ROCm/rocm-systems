@@ -19,13 +19,13 @@ class gfx1201_soc(OmniSoC_Base):
 
     Public RDNA 4 docs: monolithic die, 64 CUs, 8 MB L2, 64 MB Infinity Cache,
     GDDR6. The register spec has no Infinity Cache performance counter.
-    WMMA event IDs carried from the metrics port: 233, with 256 emulated.
+    SQ event 233 counts WMMA instructions per vec32, so a wave64 WMMA counts
+    twice. Event 256 counts the cycles of WMMA work.
     """
 
     def __init__(self, args: argparse.Namespace, mspec: MachineSpecs) -> None:
         super().__init__(args, mspec)
         self.set_arch("gfx1201")
-        self.set_compatible_profilers(["rocprofv3", "rocprofiler-sdk"])
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx1201"))
 
         # GL2C instance count carried from the metrics port. Public docs give

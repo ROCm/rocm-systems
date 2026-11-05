@@ -564,12 +564,13 @@ mi_gpu_spec:
         perfmon_config:
           SQ: 8
           SQC: 4
+          SQG: 8
           TA: 2
           TCP: 4
           GRBM: 2
           CPC: 2
           CPF: 2
-          GCEA: 2
+          GC_EA_SE: 2
           SPI: 6
           GL1A: 4
           GL1C: 4
