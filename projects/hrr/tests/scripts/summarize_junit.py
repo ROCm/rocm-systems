@@ -19,19 +19,10 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-# Display order matches .github/workflows/hrr-ci.yml.
-COLUMNS = (
+# The unit job's matrix in .github/workflows/hrr-ci.yml.
+UNIT_COLUMNS = (
     ("unit-ubuntu-24.04.xml", "Unit", "Linux"),
     ("unit-windows-2022.xml", "Unit", "Windows"),
-    ("integration-gfx90a.xml", "Integration", "gfx90a"),
-    ("integration-gfx94x.xml", "Integration", "gfx94x"),
-    ("integration-gfx950.xml", "Integration", "gfx950"),
-    ("integration-gfx103x.xml", "Integration", "gfx103x"),
-    ("integration-gfx110x.xml", "Integration", "gfx110x"),
-    ("integration-gfx120x.xml", "Integration", "gfx120x"),
-    ("integration-gfx1151.xml", "Integration", "gfx1151"),
-    ("integration-gfx1150.xml", "Integration", "gfx1150"),
-    ("integration-gfx1153.xml", "Integration", "gfx1153"),
 )
 
 MAX_FAILED_NAMES = 8
@@ -114,19 +105,41 @@ def failed_cell(names: list[str]) -> str:
     return text
 
 
-def render(directory: Path, errors: list[str]) -> str:
+def render(
+    directory: Path,
+    errors: list[str],
+    families: list[tuple[str, str]] | None = None,
+    *,
+    failures: list[str] | None = None,
+) -> str:
+    """families: (family, why it did not run, or "") per integration row. By
+    default, one row per integration-<family>.xml present. Suites with failed
+    cases are appended to failures as "suite platform"."""
+    if families is None:
+        families = [
+            (path.stem[len("integration-"):], "")
+            for path in sorted(directory.glob("integration-*.xml"))
+        ]
+    columns = [*UNIT_COLUMNS]
+    not_run = {}
+    for family, why in families:
+        columns.append((f"integration-{family}.xml", "Integration", family))
+        not_run[family] = why
+
     rows: list[tuple[str, str, dict[str, object] | None]] = []
-    for filename, suite, platform in COLUMNS:
+    for filename, suite, platform in columns:
         path = directory / filename
         if path.is_file():
             rows.append((suite, platform, try_summarize(path, errors)))
+        elif not_run.get(platform):
+            rows.append((suite, platform, {"not_run": not_run[platform]}))
         else:
             rows.append((suite, platform, None))
 
     extra = sorted(
         path.name
         for path in directory.glob("*.xml")
-        if path.name not in {filename for filename, _, _ in COLUMNS}
+        if path.name not in {filename for filename, _, _ in columns}
     )
     for filename in extra:
         rows.append(("Other", filename, try_summarize(directory / filename, errors)))
@@ -141,12 +154,17 @@ def render(directory: Path, errors: list[str]) -> str:
         if data is None:
             lines.append(f"| {suite} | {platform} | — | — | — | — | _no results_ |")
             continue
+        if "not_run" in data:
+            lines.append(f"| {suite} | {platform} | — | — | — | — | _not run: {data['not_run']}_ |")
+            continue
         if "error" in data:
             lines.append(
                 f"| {suite} | {platform} | — | — | — | — | _unreadable XML: {data['error']}_ |"
             )
             continue
         counts = data["counts"]
+        if failures is not None and counts["FAIL"]:
+            failures.append(f"{suite} {platform}")
         lines.append(
             "| {suite} | {platform} | {passed} | {failed} | {skipped} | {config} | {names} |".format(
                 suite=suite,
@@ -162,7 +180,7 @@ def render(directory: Path, errors: list[str]) -> str:
     lines.extend(
         [
             "",
-            "Counts are top-level Catch2 cases. Missing XML means that job did not upload results (cancelled or not started). Unreadable XML is usually a job killed mid-run; its results are incomplete.",
+            "Counts are top-level Catch2 cases. Skip is a case that skipped itself, such as the cases that need two GPUs on a single-GPU runner; Config skip is a case a rule in the suite config skipped. No results means that job did not upload results (cancelled or not started). Unreadable XML is usually a job killed mid-run; its results are incomplete.",
             "",
             "### Counts grid",
             "",
@@ -176,9 +194,7 @@ def render(directory: Path, errors: list[str]) -> str:
                         ("Config skip", "CONFIG")):
         values = []
         for _, _, data in rows:
-            values.append(
-                cell(None if data is None or "error" in data else data["counts"][key])
-            )
+            values.append(cell(data["counts"][key] if data and "counts" in data else None))
         lines.append("| " + " | ".join([label, *values]) + " |")
 
     return "\n".join(lines) + "\n"
@@ -197,14 +213,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"not a directory: {args.dir}", file=sys.stderr)
         return 1
     errors: list[str] = []
-    markdown = render(args.dir, errors)
+    failures: list[str] = []
+    markdown = render(args.dir, errors, failures=failures)
     sys.stdout.write(markdown)
     if args.summary is not None:
         with args.summary.open("a", encoding="utf-8") as out:
             out.write(markdown)
     for error in errors:
         print(f"::error::unreadable JUnit XML {error}")
-    return 1 if errors else 0
+    for suite in failures:
+        print(f"::error::failed cases in {suite}")
+    return 1 if errors or failures else 0
 
 
 if __name__ == "__main__":

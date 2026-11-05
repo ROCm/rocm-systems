@@ -68,10 +68,20 @@ class ParseArgsTest(unittest.TestCase):
 
     def test_launcher_stays_off_the_catch2_binary(self):
         args = run_catch2.parse_args(
-            ["--xml", "r.xml", "--launcher", "rocjitsu --daemon --config c.json --", "--", "./bin"]
+            [
+                "--xml",
+                "r.xml",
+                "--launcher",
+                "rocjitsu --daemon --config c.json --",
+                "--",
+                "./bin",
+            ]
         )
         self.assertEqual(args.command, ["./bin"])
-        self.assertEqual(args.launcher, "rocjitsu --daemon --config c.json --")
+        self.assertEqual(
+            run_catch2.launch_command(args.launcher, args.command),
+            ["rocjitsu", "--daemon", "--config", "c.json", "--", "./bin"],
+        )
 
     def test_requires_a_command(self):
         with contextlib.redirect_stderr(io.StringIO()):
@@ -90,13 +100,25 @@ class ResultTest(unittest.TestCase):
 
     def test_test_result(self):
         self.assertEqual(run_catch2.test_result(self.parse(record("a"))), "PASS")
-        self.assertEqual(run_catch2.test_result(self.parse(record("a", "skipped"))), "SKIP")
-        self.assertEqual(run_catch2.test_result(self.parse(record("a", "failure"))), "FAIL")
-        self.assertEqual(run_catch2.test_result(self.parse(record("a", "error"))), "FAIL")
+        self.assertEqual(
+            run_catch2.test_result(self.parse(record("a", "skipped"))), "SKIP"
+        )
+        self.assertEqual(
+            run_catch2.test_result(self.parse(record("a", "failure"))), "FAIL"
+        )
+        self.assertEqual(
+            run_catch2.test_result(self.parse(record("a", "error"))), "FAIL"
+        )
 
     def test_group_cases_folds_sections_into_their_case(self):
         root = self.parse(
-            junit(record("A"), record("B/x"), record("B/y"), record("C/s/t"), '<testcase/>')
+            junit(
+                record("A"),
+                record("B/x"),
+                record("B/y"),
+                record("C/s/t"),
+                "<testcase/>",
+            )
         )
         groups = run_catch2.group_cases(root)
         self.assertEqual(list(groups), ["A", "B", "C"])
@@ -104,7 +126,9 @@ class ResultTest(unittest.TestCase):
 
     def test_group_result_precedence(self):
         def result(*kinds):
-            root = self.parse(junit(*(record("A/" + str(i), k) for i, k in enumerate(kinds))))
+            root = self.parse(
+                junit(*(record("A/" + str(i), k) for i, k in enumerate(kinds)))
+            )
             return run_catch2.group_result(run_catch2.group_cases(root)["A"])
 
         self.assertEqual(result(None, None), "PASS")
@@ -125,7 +149,15 @@ class MainTest(unittest.TestCase):
     def run_main(self, spec: dict, *extra: str):
         spec_path = self.dir / "spec.json"
         spec_path.write_text(json.dumps(spec))
-        argv = ["--xml", str(self.xml), *extra, "--", sys.executable, str(self.fake), str(spec_path)]
+        argv = [
+            "--xml",
+            str(self.xml),
+            *extra,
+            "--",
+            sys.executable,
+            str(self.fake),
+            str(spec_path),
+        ]
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             rc = run_catch2.main(argv)
@@ -182,7 +214,9 @@ class MainTest(unittest.TestCase):
         self.assertIn("1 failed", out)
 
     def test_crash_after_skips_keeps_the_transcript(self):
-        rc, out, _ = self.run_main({"xml": junit(record("A", "skipped"), record("B")), "rc": 139})
+        rc, out, _ = self.run_main(
+            {"xml": junit(record("A", "skipped"), record("B")), "rc": 139}
+        )
         self.assertEqual(rc, 139)
         self.assertIn("Catch2 terminated without a JUnit failure", out)
         self.assertIn("BANNER", out)
@@ -205,53 +239,128 @@ class MainTest(unittest.TestCase):
 
     def _config(self, cases):
         path = self.dir / "suite.yaml"
-        path.write_text(hrr_test_config.render({
-            "version": 1,
-            "suite": "integration",
-            "binary": "hrr-integration-tests",
-            "select": "[hrr]~[direct]",
-            "targets": {"os": ["linux", "windows"],
-                        "arch": ["gfx90a", "gfx1151"]},
-            "cases": cases,
-        }))
+        path.write_text(
+            hrr_test_config.render(
+                {
+                    "version": 1,
+                    "suite": "integration",
+                    "binary": "hrr-integration-tests",
+                    "select": "[hrr]~[direct]",
+                    "targets": {
+                        "os": ["linux", "windows"],
+                        "arch": ["gfx90a", "gfx1151"],
+                    },
+                    "cases": cases,
+                }
+            )
+        )
         return path
 
     def test_config_skips_a_case_and_records_why(self):
-        path = self._config({
-            "Keep": {},
-            "Drop": {"skip": [{
-                "when": {"os": "linux", "arch": "gfx1151"},
-                "kind": "disabled",
-                "reason": "npu",
-                "issue": "https://github.com/ROCm/rocm-systems/issues/1",
-            }]},
-        })
-        listed = [{"name": "Keep", "tags": ["[hrr]"]}, {"name": "Drop", "tags": ["[hrr]"]}]
+        path = self._config(
+            {
+                "Keep": {},
+                "Drop": {
+                    "skip": [
+                        {
+                            "when": {"os": "linux", "arch": "gfx1151"},
+                            "kind": "disabled",
+                            "reason": "npu",
+                            "issue": "https://github.com/ROCm/rocm-systems/issues/1",
+                        }
+                    ]
+                },
+            }
+        )
+        listed = [
+            {"name": "Keep", "tags": ["[hrr]"]},
+            {"name": "Drop", "tags": ["[hrr]"]},
+        ]
         with mock.patch("hrr_test_config.list_cases", return_value=listed):
             rc, out, _ = self.run_main(
                 {"xml": junit(record("Keep"))},
-                "--config", str(path), "--os", "linux", "--arch", "gfx1151",
+                "--config",
+                str(path),
+                "--os",
+                "linux",
+                "--arch",
+                "gfx1151",
             )
         self.assertEqual(rc, 0)
         self.assertIn("PASS: Keep", out)
         self.assertIn("SKIP (config): Drop", out)
-        self.assertIn("hrr-config: linux/gfx1151: npu "
-                      "(https://github.com/ROCm/rocm-systems/issues/1)", out)
+        self.assertIn(
+            "hrr-config: linux/gfx1151: npu "
+            "(https://github.com/ROCm/rocm-systems/issues/1)",
+            out,
+        )
         self.assertIn("1 config-skipped", out)
         root = ET.parse(self.xml).getroot()
         skipped = root.find(".//testcase[@name='Drop']/skipped")
         self.assertIsNotNone(skipped)
         self.assertTrue(skipped.attrib["message"].startswith("hrr-config:"))
 
+    def test_emulator_rule_applies_only_with_a_launcher(self):
+        path = self._config(
+            {
+                "Keep": {},
+                "Drop": {
+                    "skip": [
+                        {
+                            "when": {"emulator": True},
+                            "kind": "unsupported",
+                            "reason": "emulator only",
+                        }
+                    ]
+                },
+            }
+        )
+        listed = [
+            {"name": "Keep", "tags": ["[hrr]"]},
+            {"name": "Drop", "tags": ["[hrr]"]},
+        ]
+        with mock.patch("hrr_test_config.list_cases", return_value=listed):
+            rc, out, _ = self.run_main(
+                {"xml": junit(record("Keep"))},
+                "--config", str(path), "--os", "linux", "--arch", "gfx1151",
+                "--launcher", "env",
+            )
+        self.assertEqual(rc, 0)
+        self.assertIn("SKIP (config): Drop", out)
+        with mock.patch("hrr_test_config.list_cases", return_value=listed):
+            rc, out, _ = self.run_main(
+                {"xml": junit(record("Keep"), record("Drop"))},
+                "--config", str(path), "--os", "linux", "--arch", "gfx1151",
+            )
+        self.assertEqual(rc, 0)
+        self.assertNotIn("SKIP (config)", out)
+
     def test_config_runs_nothing_when_every_case_is_skipped(self):
-        path = self._config({"Drop": {"skip": [{
-            "when": {"os": "linux"}, "kind": "unsupported", "reason": "all",
-        }]}})
-        with mock.patch("hrr_test_config.list_cases",
-                        return_value=[{"name": "Drop", "tags": ["[hrr]"]}]) as listed:
+        path = self._config(
+            {
+                "Drop": {
+                    "skip": [
+                        {
+                            "when": {"os": "linux"},
+                            "kind": "unsupported",
+                            "reason": "all",
+                        }
+                    ]
+                }
+            }
+        )
+        with mock.patch(
+            "hrr_test_config.list_cases",
+            return_value=[{"name": "Drop", "tags": ["[hrr]"]}],
+        ) as listed:
             rc, out, _ = self.run_main(
                 {"xml": junit(record("Drop")), "banner": "SHOULD NOT RUN"},
-                "--config", str(path), "--os", "linux", "--arch", "none",
+                "--config",
+                str(path),
+                "--os",
+                "linux",
+                "--arch",
+                "none",
             )
         self.assertEqual(rc, 0)
         self.assertIn("SKIP (config): Drop", out)
@@ -260,14 +369,31 @@ class MainTest(unittest.TestCase):
         self.assertEqual(listed.call_args.args[1], "[hrr]~[direct]")
 
     def test_ignore_config_runs_the_skipped_case(self):
-        path = self._config({"Drop": {"skip": [{
-            "when": {"os": "linux"}, "kind": "unsupported", "reason": "all",
-        }]}})
-        with mock.patch("hrr_test_config.list_cases",
-                        return_value=[{"name": "Drop", "tags": ["[hrr]"]}]) :
+        path = self._config(
+            {
+                "Drop": {
+                    "skip": [
+                        {
+                            "when": {"os": "linux"},
+                            "kind": "unsupported",
+                            "reason": "all",
+                        }
+                    ]
+                }
+            }
+        )
+        with mock.patch(
+            "hrr_test_config.list_cases",
+            return_value=[{"name": "Drop", "tags": ["[hrr]"]}],
+        ):
             rc, out, _ = self.run_main(
                 {"xml": junit(record("Drop")), "rc": 0},
-                "--config", str(path), "--os", "linux", "--arch", "gfx1151",
+                "--config",
+                str(path),
+                "--os",
+                "linux",
+                "--arch",
+                "gfx1151",
                 "--ignore-config",
             )
         self.assertEqual(rc, 0)
@@ -280,16 +406,36 @@ class MainTest(unittest.TestCase):
         spec_path = self.dir / "spec.json"
         # A non-zero status with no JUnit failure dumps the transcript, which is
         # the only place the wrapper's argv (and the case file) are visible.
-        spec_path.write_text(json.dumps({
-            "xml": junit(record("Keep")), "echo_args": True, "rc": 139,
-        }))
+        spec_path.write_text(
+            json.dumps(
+                {
+                    "xml": junit(record("Keep")),
+                    "echo_args": True,
+                    "rc": 139,
+                }
+            )
+        )
         argv = [
-            "--xml", str(self.xml), "--config", str(path), "--os", "linux",
-            "--arch", "none", "--select", "[cpu]",
-            "--", sys.executable, str(self.fake), str(spec_path), "[hrr]~[direct]",
+            "--xml",
+            str(self.xml),
+            "--config",
+            str(path),
+            "--os",
+            "linux",
+            "--arch",
+            "none",
+            "--select",
+            "[cpu]",
+            "--",
+            sys.executable,
+            str(self.fake),
+            str(spec_path),
+            "[hrr]~[direct]",
         ]
-        with mock.patch("hrr_test_config.list_cases",
-                        return_value=[{"name": "Keep", "tags": ["[cpu]"]}]) as listed:
+        with mock.patch(
+            "hrr_test_config.list_cases",
+            return_value=[{"name": "Keep", "tags": ["[cpu]"]}],
+        ) as listed:
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 rc = run_catch2.main(argv)
@@ -305,7 +451,12 @@ class MainTest(unittest.TestCase):
         with mock.patch("hrr_test_config.detect_archs", return_value=[]):
             rc, _, err = self.run_main(
                 {"xml": junit(record("Keep"))},
-                "--config", str(path), "--os", "linux", "--arch", "auto",
+                "--config",
+                str(path),
+                "--os",
+                "linux",
+                "--arch",
+                "auto",
             )
         self.assertEqual(rc, 1)
         self.assertIn("could not detect a GPU architecture", err)
@@ -313,11 +464,15 @@ class MainTest(unittest.TestCase):
     def test_config_flags_without_a_config_are_rejected(self):
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
-                run_catch2.parse_args(["--xml", "r.xml", "--arch", "none", "--", "./bin"])
+                run_catch2.parse_args(
+                    ["--xml", "r.xml", "--arch", "none", "--", "./bin"]
+                )
 
     @unittest.skipUnless(os.name == "posix", "process groups are POSIX only")
     def test_timeout_kills_the_suite_and_reports(self):
-        rc, out, _ = self.run_main({"sleep": 60, "banner": "LAST CASE"}, "--timeout", "1")
+        rc, out, _ = self.run_main(
+            {"sleep": 60, "banner": "LAST CASE"}, "--timeout", "1"
+        )
         self.assertEqual(rc, 1)
         self.assertIn("timed out after 1 s", out)
 
