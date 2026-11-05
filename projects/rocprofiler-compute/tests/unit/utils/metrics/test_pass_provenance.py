@@ -477,8 +477,9 @@ def test_per_cycle_metric_is_unset_when_gui_active_sum_is_on_another_pass() -> N
 def test_denom_choice_uses_only_the_counter_on_the_selected_pass(caplog) -> None:
     """$denom is expanded before the pass is chosen.
 
-    Packing does not add SQ_WAVES or GRBM_GUI_ACTIVE for $denom. per_kernel
-    and per_second still use the pass that holds the metric counter. per_wave
+    extract_counters_and_variables does not add SQ_WAVES or GRBM_GUI_ACTIVE.
+    Packing adds those through DENOM_COLOCATED_COUNTERS. per_kernel and
+    per_second still use the pass that holds the metric counter. per_wave
     and per_cycle choose no pass when that counter is only on another pass.
     This profile copied nothing, so those expressions stay.
     """

@@ -99,11 +99,12 @@ def main() -> int:
         print(f"  {key}: {val}")
     print()
     if args.arch == "gfx942":
-        # Phase 1: 14 passes and every single-pass metric set stays together.
+        # Phase 1: 16 passes and every single-pass metric set stays together.
+        # Two of those passes co-locate SQ_WAVES and GRBM with $denom sets.
         # Phase 2: multi-pass metrics are analyze composites with no parent PMCs.
         ok = (
             single_pass_metrics["single_pass_metric_sets_without_pass"] == 0
-            and single_pass_metrics["passes"] == 14
+            and single_pass_metrics["passes"] == 16
             and single_pass_metrics["multi_pass_additional_passes"] == 0
             and single_pass_metrics["multi_pass_metric_count"] == 0
         )

@@ -15,6 +15,13 @@ from rocprof_compute_soc.soc_base import flat_counters_in_perfmon_file
 from tests.unit.rocprof_compute_soc.test_soc_base import PERFMON_CONFIG
 
 
+def _groups_by_label(rows, profile, gpu_series):
+    return {
+        label: counters
+        for _key, counters, label in iter_metric_groups((), rows, gpu_series, profile)
+    }
+
+
 @pytest.mark.misc
 def test_counters_fit_one_bucket_respects_slot_limit():
     small = frozenset({"GRBM_GUI_ACTIVE", "GRBM_SPI_BUSY"})
@@ -138,3 +145,49 @@ def test_iter_metric_groups_reads_only_the_given_inputs():
         (frozenset({"SQ_WAVES", "GRBM_GUI_ACTIVE"}), "1700.1701.1 (waves)"),
         (frozenset({"SQ_WAVES", "TCC_HIT[0]", "TCC_HIT[1]"}), "2.2.1 (tcc hits)"),
     ]
+
+
+@pytest.mark.misc
+def test_denom_formula_gains_colocated_counters_present_in_the_profile():
+    """A $denom formula picks up listed counters this profile collects."""
+    rows = [
+        ("1", 1, 0, "with denom", ["TA_BUSY / $denom"]),
+        ("1", 1, 1, "without denom", ["TA_BUSY"]),
+        ("1", 1, 2, "already named", ["TA_BUSY / $denom + SQ_WAVES"]),
+        ("1", 1, 3, "other variable", ["TA_BUSY / $denominator"]),
+    ]
+    profile = {"TA_BUSY", "SQ_WAVES", "GRBM_GUI_ACTIVE"}
+    groups = _groups_by_label(rows, profile, "MI300")
+    assert groups["1.1.0 (with denom)"] == frozenset({
+        "TA_BUSY",
+        "SQ_WAVES",
+        "GRBM_GUI_ACTIVE",
+    })
+    assert groups["1.1.1 (without denom)"] == frozenset({"TA_BUSY"})
+    assert groups["1.1.2 (already named)"] == frozenset({
+        "TA_BUSY",
+        "SQ_WAVES",
+        "GRBM_GUI_ACTIVE",
+    })
+    assert groups["1.1.3 (other variable)"] == frozenset({"TA_BUSY"})
+
+    gfx1250 = {"TA_BUSY", "SQ_WAVES", "GRBM_GUI_ACTIVE_sum"}
+    groups = _groups_by_label(rows, gfx1250, "GFX1250_SERIES")
+    assert groups["1.1.0 (with denom)"] == frozenset({
+        "TA_BUSY",
+        "SQ_WAVES",
+        "GRBM_GUI_ACTIVE_sum",
+    })
+
+
+@pytest.mark.misc
+def test_empty_denom_list_adds_nothing(monkeypatch):
+    """Clearing DENOM_COLOCATED_COUNTERS leaves a $denom formula unchanged."""
+    monkeypatch.setattr(
+        "utils.utils_counter_defs.DENOM_COLOCATED_COUNTERS",
+        (),
+    )
+    rows = [("1", 1, 0, "with denom", ["TA_BUSY / $denom"])]
+    profile = {"TA_BUSY", "SQ_WAVES", "GRBM_GUI_ACTIVE", "GRBM_GUI_ACTIVE_sum"}
+    groups = _groups_by_label(rows, profile, "MI300")
+    assert groups["1.1.0 (with denom)"] == frozenset({"TA_BUSY"})
