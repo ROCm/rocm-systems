@@ -122,6 +122,8 @@ def test_aggregates_record_all_components(source):
     assert "TraceLoggingPointerFixedArray(" in launch
     # Floating-point arrays are one field per element: LTTng has no float array fields.
     assert '"config_weights_1"' in launch and "Float32FixedArray" not in source
+    # A named member of an unnamed struct type keeps its name.
+    assert "config.named.b" in launch and '"config_named_b"' in launch
     bits = _function(source, "probe_FakeTable_fakeBits")
     assert "TraceLoggingUInt8FixedArray(" in bits and '"value_union"' in bits
     assert "TraceLoggingInt8FixedArray(" in _function(

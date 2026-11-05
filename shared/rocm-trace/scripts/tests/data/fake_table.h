@@ -49,6 +49,10 @@ typedef struct fakeLaunchConfig {
   void *slots[2];
   float weights[2];
   unsigned int flags;
+  struct {
+    unsigned char a;
+    unsigned short b;
+  } named; // a named member of an unnamed struct type
 } fakeLaunchConfig;
 // A named union, and a struct with an anonymous one.
 typedef union fakeBits {

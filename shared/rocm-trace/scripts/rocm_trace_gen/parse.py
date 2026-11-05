@@ -37,16 +37,16 @@ class ParseError(Exception):
 
 
 def _member_name(f: cindex.Cursor) -> str:
-    """A member's name, or "" for an anonymous struct or union member (which
-    libclang spells as "(anonymous union at ...)")."""
-    decl = f.type.get_canonical().get_declaration()
-    if (
-        decl is not None
-        and decl.kind in (CK.STRUCT_DECL, CK.UNION_DECL)
-        and decl.is_anonymous()
-    ):
+    """A member's name, or "" for an anonymous struct or union member.
+
+    libclang spells an anonymous member "S::(anonymous union at ...)". A named
+    member whose type is an unnamed struct (``struct { ... } flags;``) keeps
+    its name: is_anonymous() is true for both, so the spelling decides.
+    """
+    spelling = f.spelling
+    if not spelling or "(anonymous" in spelling or "(unnamed" in spelling:
         return ""
-    return f.spelling
+    return spelling
 
 
 def _ctype(t: cindex.Type, follow_pointer: bool = True, depth: int = 0) -> CType:

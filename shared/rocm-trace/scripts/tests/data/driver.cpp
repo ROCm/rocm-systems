@@ -155,6 +155,7 @@ void call_all(const FakeTable &t, const FakeDeclTable &d,
   config.extra[1] = fakeDim3{9, 9, 9};
   config.slots[0] = reinterpret_cast<void *>(0xabc);
   config.weights[1] = 0.5f;
+  config.named.b = 12;
   config.flags = 3;
   check(t.fakeLaunchEx_fn(config) == fakeSuccess, "nested struct");
   fakeHandle handle{};
