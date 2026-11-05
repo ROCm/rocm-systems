@@ -71,7 +71,6 @@ typedef struct rj_code_inst_t rj_code_inst_t;
 typedef struct rj_code_decoder_t rj_code_decoder_t;
 
 /// @brief Create a decoder for the architecture specified by @p arch.
-/// @note Memory allocation failures are fatal.
 /// @param[in] arch Architecture to create a decoder for.
 /// @param[out] decoder Newly created decoder handle (refcount = 0). Set to NULL
 /// on any failure when @p decoder itself is non-NULL.
@@ -81,7 +80,6 @@ typedef struct rj_code_decoder_t rj_code_decoder_t;
 RJ_API_EXPORT rj_status_t rj_code_decoder_create(rj_code_arch_t arch, rj_code_decoder_t **decoder);
 
 /// @brief Create a decoder by canonical target ID or alias.
-/// @note Memory allocation failures are fatal.
 /// @param[in] target_id Null-terminated target identity selected in this
 /// component's statically composed registry.
 /// @param[out] decoder Newly created decoder handle (refcount = 0). Set to NULL
@@ -115,7 +113,6 @@ RJ_API_EXPORT void rj_code_decoder_destroy(rj_code_decoder_t *decoder);
 /// @details On success, @p inst receives an independent caller-owned
 /// instruction that remains valid after @p decoder is destroyed. Release it
 /// with rj_code_inst_destroy. On any failure, @p inst is set to NULL.
-/// @note Memory allocation failures are fatal.
 /// @param[in] decoder The decoder object to use for decoding.
 /// @param[in] binary_inst Pointer to raw instruction bits in the instruction stream.
 /// @param[out] inst Pointer to the newly decoded instruction object.
