@@ -1117,6 +1117,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         PRIVATE simdojo_headers GTest::gtest_main
     )
     rj_configure_target(drm_retirement_owner_test PRIVATE_INCLUDES WARNINGS)
+    target_link_options(
+        drm_retirement_owner_test
+        PRIVATE "LINKER:--wrap=_Znwm" "LINKER:--wrap=_Znam"
+    )
     rj_add_gtest_tests(drm_retirement_owner_test)
 
     # Isolate allocator fault injection from the simulator test executable.

@@ -11,7 +11,6 @@
 #include <atomic>
 #include <barrier>
 #include <cerrno>
-#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -24,7 +23,7 @@
 
 #include <sys/mman.h>
 
-// This source belongs to a dedicated executable: its allocation override must
+// This source belongs to a dedicated executable: its allocation wrappers must
 // not affect unrelated simulator tests. Only the current thread rejects new,
 // and assertions run after restoring allocation so GoogleTest can report errors.
 namespace {
@@ -39,18 +38,20 @@ public:
 };
 } // namespace
 
-void *operator new(std::size_t size) {
+// Keep successful allocations and deallocations paired by the runtime, including ASan.
+extern "C" void *__real__Znwm(std::size_t size);
+extern "C" void *__real__Znam(std::size_t size);
+
+extern "C" void *__wrap__Znwm(std::size_t size) {
   if (reject_allocations)
     throw std::bad_alloc();
-  if (void *memory = std::malloc(size ? size : 1))
-    return memory;
-  throw std::bad_alloc();
+  return __real__Znwm(size);
 }
-void *operator new[](std::size_t size) { return ::operator new(size); }
-void operator delete(void *memory) noexcept { std::free(memory); }
-void operator delete[](void *memory) noexcept { std::free(memory); }
-void operator delete(void *memory, std::size_t) noexcept { std::free(memory); }
-void operator delete[](void *memory, std::size_t) noexcept { std::free(memory); }
+extern "C" void *__wrap__Znam(std::size_t size) {
+  if (reject_allocations)
+    throw std::bad_alloc();
+  return __real__Znam(size);
+}
 
 namespace rocjitsu {
 namespace {
