@@ -566,22 +566,23 @@ observation-only overload.
 `onAmdgpuMemoryAccessRouted`. It fires once for every tensor DMA instruction, in
 the issuing wavefront's instruction step, after the descriptor is read and,
 unless it is NULL, validated. That includes an instruction that moves no data:
-a store whose tile lies wholly outside the tensor still completes on TENSORcnt,
-and the emulator also counts a NULL descriptor (`count = 0`) on TENSORcnt, an
-assumption since hardware behavior for that encoding is not established. A
-transfer that waits for memory is reported when it issues and not again when it
-resumes. When the hook fires, a store has already sampled its LDS source bytes,
-so changing LDS in the callback does not change what the store writes to global
-memory; no global request has been made and a load has written no LDS. Its
-`lds_ranges` member is a callback-lifetime span of the LDS byte runs the
-transfer will write (loads) or read (stores), with adjacent elements merged and
-padding bytes excluded. A load covers every element of its tile, zero-filling
-those outside the tensor; a store covers only in-bounds elements. The
-observation's `element_size_bytes` describes the transfer only when
-`lds_ranges` is nonempty; when it is empty, consumers must not rely on it,
-since the instruction may be a NULL descriptor, which is not validated, and the
-observation carries no field that distinguishes one. Consumers must opt in
-through `observes_tensor_dma_issue()`.
+a NOP tile (`tile_dim0 = 0`), a gather with no valid indices or a store whose
+tile lies wholly outside the tensor still completes on TENSORcnt, and the
+emulator also counts a NULL descriptor (`count = 0`) on TENSORcnt, an assumption
+since hardware behavior for that encoding is not established. A transfer that
+waits for memory is reported when it issues and not again when it resumes. When
+the hook fires, a store has already sampled its LDS source bytes, so changing
+LDS in the callback does not change what the store writes to global memory; no
+global request has been made and a load has written no LDS. Its `lds_ranges`
+member is a callback-lifetime span of the LDS byte runs the transfer will write
+(loads) or read (stores), with adjacent elements merged and padding bytes
+excluded. A load covers every element of its tile, zero-filling those outside
+the tensor; a store covers only in-bounds elements. The observation's
+`element_size_bytes` describes the transfer only when `lds_ranges` is nonempty;
+when it is empty, consumers must not rely on it, since the instruction may be a
+NULL descriptor, which is not validated, and the observation carries no field
+that distinguishes one. Consumers must opt in through
+`observes_tensor_dma_issue()`.
 
 SGPR owner resolution is skipped when no contained plugin observes scalar
 register reads. Plugins that consume neither `onAmdgpuReadScalarRegister` nor
