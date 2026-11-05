@@ -1,10 +1,10 @@
-name: RCCL formatting
+name: RCCL format and lint
 
 on:
   pull_request:
     paths:
       - "projects/rccl/**"
-      - ".github/workflows/rccl-formatting.yml"
+      - ".github/workflows/rccl-format-and-lint.yml"
 
 permissions:
   contents: read
