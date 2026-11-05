@@ -4,9 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// ROCM-33800: a grouped send+recv to self on a 1-rank comm must return from ncclGroupEnd and
-// copy the data with 256 P2P channels per peer. Single-node gfx1250 picks that by default when it
-// has at least 256 CUs; the env of the second case forces it on other archs such as gfx950.
+// ROCM-33800: 1-rank grouped send/recv to self at 256 P2P channels per peer must complete.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>

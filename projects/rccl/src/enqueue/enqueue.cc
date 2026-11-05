@@ -1873,7 +1873,7 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
             WARN("P2P round with %d channels per peer does not fit an empty kernel plan (%zd bytes of kernel args); "
                  "lower NCCL_MAX_P2P_NCHANNELS",
                  nChannelsMax, budget->inArgsBytes);
-            return ncclInternalError;
+            return ncclInvalidUsage;
           }
           return ncclSuccess;
         }

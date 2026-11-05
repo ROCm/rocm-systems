@@ -145,6 +145,7 @@ bool rcclWarpSpeedSupported(struct ncclComm*, struct ncclKernelPlan*) {
   return g_rcclWarpSpeedSupported;
 }
 bool rcclWarpSpeedSupported(struct ncclComm*, struct ncclKernelPlan*, struct ncclTaskColl*, int) {
+  ++g_rcclWarpSpeedSupportedCalls;
   return g_rcclWarpSpeedSupported;
 }
 

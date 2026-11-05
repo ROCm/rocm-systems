@@ -5083,11 +5083,11 @@ TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_SelfPair256ChannelsDefaultArgs_S
   EXPECT_LE(sc.bp.p()->nWorkBatches, 256) << "at most one batch per channel part";
 }
 
-TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_RoundDoesNotFitEmptyPlan_IsInternalError) {
+TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_RoundDoesNotFitEmptyPlan_IsInvalidUsage) {
   SelfPairBudgetScene sc(/*channelsPerPeer=*/256);
   sc.budget.inArgsBytes = 255 * kBatch;  // one batch short of a full round
   std::string log;
-  EXPECT_EQ(ncclInternalError, sc.Schedule(&log));
+  EXPECT_EQ(ncclInvalidUsage, sc.Schedule(&log));
   EXPECT_TRUE(RcclUnitTesting::LogHas(log, "does not fit an empty kernel plan")) << log;
   EXPECT_EQ(2, sc.bp.c()->planner.nTasksP2p);
 }
@@ -5114,7 +5114,7 @@ TEST_F(EnqueueMicrotest, LaunchPrepare_P2pRoundNeverFits_ReturnsErrorInsteadOfSp
   sc.bp.c()->workArgsBytes = sizeof(struct ncclDevKernelArgs) + 255 * kBatch;
   ncclResult_t rc = ncclSuccess;
   const std::string log = RcclUnitTesting::CaptureLog([&] { rc = ncclLaunchPrepare(sc.bp.c()); });
-  EXPECT_EQ(ncclInternalError, rc);
+  EXPECT_EQ(ncclInvalidUsage, rc);
   EXPECT_TRUE(RcclUnitTesting::LogHas(log, "does not fit an empty kernel plan")) << log;
 }
 
