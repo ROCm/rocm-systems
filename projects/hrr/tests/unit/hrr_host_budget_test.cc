@@ -263,9 +263,10 @@ TEST_CASE("Unit_HRR_HostBudget_DispatchTableUsesTheChargingHandlers", "[hrr]") {
  *   - The old charge goes back only if the runtime let go of the buffer. A
  *     hipHostMalloc entry's buffer is freed (a null live pointer frees
  *     cleanly where a runtime is up, and fails without one, which the charge
- *     must then follow); a failing hipHostFree keeps the charge, as a failing
- *     hipHostUnregister does for a hipHostRegister entry, and the buffer is
- *     left alone. The seeds are not pinned, so the failures need no GPU.
+ *     must then follow); a failing hipHostFree keeps the charge, and the
+ *     buffer is left alone. A hipHostRegister entry's charge stays either way,
+ *     and a failing hipHostUnregister leaves its buffer alone too. The seeds
+ *     are not pinned, so the failures need no GPU.
  */
 TEST_CASE("Unit_HRR_HostBudget_DispatchFreesReplacedHostAllocation", "[hrr]") {
   auto run = [](uint32_t api, auto& rec, AllocKind kind, void* live, size_t expect_used) {
