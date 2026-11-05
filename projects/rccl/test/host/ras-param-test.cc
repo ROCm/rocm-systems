@@ -42,7 +42,7 @@ TEST_F(RasParamMicrotest, LoadTimeoutFactorAcceptsPositiveFiniteValues) {
     const char* value;
     float expected;
   } cases[] = {{"0.25", 0.25f}, {"3", 3.0f}, {"2.5", 2.5f}, {"1e3", 1000.0f},
-               {" 2.5", 2.5f}, {"+2.5", 2.5f}};
+               {" 2.5", 2.5f}, {"+2.5", 2.5f}, {"1e-3", 1e-3f}, {"1e6", 1e6f}};
   for (const auto& testCase : cases) {
     SetMicroEnv("NCCL_RAS_TIMEOUT_FACTOR", testCase.value);
     EXPECT_FLOAT_EQ(testCase.expected, rasLoadTimeoutFactor()) << testCase.value;
@@ -50,7 +50,10 @@ TEST_F(RasParamMicrotest, LoadTimeoutFactorAcceptsPositiveFiniteValues) {
 }
 
 TEST_F(RasParamMicrotest, LoadTimeoutFactorRejectsInvalidValues) {
-  for (const char* value : {"abc", "1x", "0", "-1", "nan", "inf", "1e9999", "1e-9999", "1e-310"}) {
+  // Positive finite values outside [1e-3, 1e6] are rejected too, including ones that would narrow to
+  // 0.0f/+inf as float (1e-46, 1e39) or overflow the scaled int64 timeouts (1.5e8).
+  for (const char* value : {"abc", "1x", "0", "-1", "nan", "inf", "1e9999", "1e-9999", "1e-310", "1e-46", "1e39",
+                            "1e-12", "9.99e-4", "1000001", "1.5e8"}) {
     SetMicroEnv("NCCL_RAS_TIMEOUT_FACTOR", value);
     EXPECT_FLOAT_EQ(1.0f, rasLoadTimeoutFactor()) << value;
   }
