@@ -5,6 +5,7 @@
 #include "debug.hpp"
 #include "file_probe_failure.hpp"
 #include "ph_future.hpp"
+#include "sql_cancel.hpp"
 #include "catalog_aggregate_store.hpp"
 #include "populate_reader_catalog.hpp"
 #include "profiler-hub/cpp/reader.hpp"
@@ -571,6 +572,7 @@ ph_ctx::load_async(std::shared_ptr<ph_future> future)
 
         try
         {
+            const profiler_hub::sql_cancel_scope cancel{ future.get() };
             if(read_trace(stop_requested, progress))
             {
                 set_load_state(load_state_t::ready);
@@ -581,6 +583,10 @@ ph_ctx::load_async(std::shared_ptr<ph_future> future)
                 set_load_state(load_state_t::cancelled);
                 future->finish(PH_FUTURE_CANCELLED, PH_RESULT_CANCELLED);
             }
+        } catch(const profiler_hub::sql_interrupted&)
+        {
+            set_load_state(load_state_t::cancelled);
+            future->finish(PH_FUTURE_CANCELLED, PH_RESULT_CANCELLED);
         } catch(...)
         {
             set_load_state(load_state_t::failed);
@@ -610,6 +616,7 @@ ph_ctx::run_async(std::shared_ptr<ph_future>   future,
                         }
                         else
                         {
+                            const profiler_hub::sql_cancel_scope cancel{ future.get() };
                             const auto         result = operation();
                             ph_future_status_t status = PH_FUTURE_ERROR;
                             if(result == PH_RESULT_SUCCESS)
@@ -622,6 +629,9 @@ ph_ctx::run_async(std::shared_ptr<ph_future>   future,
                             }
                             future->finish(status, result);
                         }
+                    } catch(const profiler_hub::sql_interrupted&)
+                    {
+                        future->finish(PH_FUTURE_CANCELLED, PH_RESULT_CANCELLED);
                     } catch(...)
                     {
                         future->finish(PH_FUTURE_ERROR, PH_RESULT_INTERNAL_ERROR);

@@ -20,6 +20,14 @@ downstream consumer of the library.
 
 ## [Unreleased]
 
+### Fixed
+
+- `ph_future_cancel` interrupts the SQLite statement a call is running, the
+  same way a cancelled Optiq query calls `sqlite3_interrupt`. The call
+  returns `PH_RESULT_CANCELLED` instead of waiting for that statement to
+  finish. A future that was not attached can still be reused for the next
+  page.
+
 ### Added
 
 - `ph_pmc_info_t.id` is `rocpd_info_pmc.id`, not the index of the counter in

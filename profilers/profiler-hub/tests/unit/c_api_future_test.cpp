@@ -4,6 +4,7 @@
 #include "ph_ctx.hpp"
 #include "ph_future.hpp"
 #include "profiler-hub/c/profiler_hub.h"
+#include "sql_cancel.hpp"
 #include "trace_fixtures.hpp"
 
 #include <gtest/gtest.h>
@@ -200,6 +201,40 @@ TEST_F(c_api_future_test, wait_returns_after_the_finished_callback_has_returned)
     EXPECT_EQ(ph_future_wait(m_future), PH_RESULT_SUCCESS);
     EXPECT_EQ(g_log.finished_calls, 1);
     worker.join();
+}
+
+TEST_F(c_api_future_test, cancel_interrupts_the_sql_connection_the_call_is_running)
+{
+    create();
+    std::atomic<int> hits{ 0 };
+    const profiler_hub::sql_cancel_scope scope{ m_future };
+    const profiler_hub::running_sql      sql{
+        [](void* arg) noexcept {
+            static_cast<std::atomic<int>*>(arg)->fetch_add(1, std::memory_order_relaxed);
+        },
+        &hits,
+    };
+
+    EXPECT_EQ(ph_future_cancel(m_future), PH_RESULT_SUCCESS);
+
+    EXPECT_EQ(hits.load(), 1);
+}
+
+TEST_F(c_api_future_test, sql_that_starts_after_cancel_is_interrupted_immediately)
+{
+    create();
+    ASSERT_EQ(ph_future_cancel(m_future), PH_RESULT_SUCCESS);
+    std::atomic<int> hits{ 0 };
+    const profiler_hub::sql_cancel_scope scope{ m_future };
+
+    const profiler_hub::running_sql sql{
+        [](void* arg) noexcept {
+            static_cast<std::atomic<int>*>(arg)->fetch_add(1, std::memory_order_relaxed);
+        },
+        &hits,
+    };
+
+    EXPECT_EQ(hits.load(), 1);
 }
 
 TEST_F(c_api_future_test, cancel_requests_a_stop_the_operation_can_observe)

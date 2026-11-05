@@ -4,6 +4,7 @@
 #pragma once
 
 #include "thread_pool.hpp"
+#include "../sql_cancel.hpp"
 
 #include <tuple>
 #include <vector>
@@ -40,7 +41,12 @@ public:
 
     void add(thread_pool::task_fn helper)
     {
-        m_handles.push_back(m_workers.submit(std::move(helper)));
+        ph_future* future = profiler_hub::current_sql_future();
+        m_handles.push_back(m_workers.submit(
+            [helper = std::move(helper), future](const std::stop_token& token) {
+                const profiler_hub::sql_cancel_scope cancel{ future };
+                helper(token);
+            }));
     }
 
 private:

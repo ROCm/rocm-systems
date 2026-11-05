@@ -324,7 +324,9 @@ source for that id. `event->track_id` is not used.
 ### 4.7 Table queries
 
 The table API serves Optiq's event tables. It always reads SQLite and never
-uses the timeline cache.
+uses the timeline cache. `ph_future_cancel` calls `sqlite3_interrupt` on the
+connection reading the page or the summary, so the statement stops instead of
+running to the end. The call then returns `PH_RESULT_CANCELLED`.
 
 1. `ph_event_query_create` copies and checks the filter (time window, node,
    agent, process, thread, source, tracks, event types, search strings).

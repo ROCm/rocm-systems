@@ -4,6 +4,7 @@
 #include "ph_future.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <utility>
 
 ph_future::ph_future(ph_progress_fn on_progress, ph_finished_fn on_finished) noexcept
@@ -75,8 +76,49 @@ ph_future::wait()
 ph_result_t
 ph_future::cancel()
 {
-    m_stop.request_stop();
+    std::vector<std::pair<void (*)(void*) noexcept, void*>> running;
+    {
+        const std::scoped_lock lock{ m_mutex };
+        m_stop.request_stop();
+        running = m_sql;
+    }
+    for(const auto& [interrupt, arg] : running)
+    {
+        if(interrupt != nullptr)
+        {
+            interrupt(arg);
+        }
+    }
     return PH_RESULT_SUCCESS;
+}
+
+void
+ph_future::bind_sql(void (*interrupt)(void*) noexcept, void* arg)
+{
+    bool already_stopped = false;
+    {
+        const std::scoped_lock lock{ m_mutex };
+        m_sql.emplace_back(interrupt, arg);
+        already_stopped = m_stop.stop_requested();
+    }
+    if(already_stopped && interrupt != nullptr)
+    {
+        interrupt(arg);
+    }
+}
+
+void
+ph_future::unbind_sql(void* arg)
+{
+    const std::scoped_lock lock{ m_mutex };
+    for(auto it = m_sql.rbegin(); it != m_sql.rend(); ++it)
+    {
+        if(it->second == arg)
+        {
+            m_sql.erase(std::next(it).base());
+            return;
+        }
+    }
 }
 
 ph_result_t

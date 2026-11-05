@@ -3,6 +3,7 @@
 #include "file_probe_failure.hpp"
 #include "ph_ctx.hpp"
 #include "ph_future.hpp"
+#include "sql_cancel.hpp"
 #include "profiler-hub/c/profiler_hub.h"
 #include "profiler-hub/c/profiler_hub_trim.h"
 #include "profiler-hub/cpp/reader.hpp"
@@ -26,6 +27,9 @@ guard_call(Fn&& fn)
     try
     {
         return std::forward<Fn>(fn)();
+    } catch(const profiler_hub::sql_interrupted&)
+    {
+        return PH_RESULT_CANCELLED;
     } catch(...)
     {
         return PH_RESULT_INTERNAL_ERROR;
@@ -963,6 +967,7 @@ ph_event_query_read(ph_event_query_t  query,
             {
                 return PH_RESULT_CANCELLED;
             }
+            const profiler_hub::sql_cancel_scope cancel{ future };
             *count = query->ctx->read_table_events(
                 query->query, event_type, after_id, last_id, rows, capacity);
             if(future != nullptr && future->stop_token().stop_requested())
@@ -996,6 +1001,7 @@ ph_event_query_id_span(ph_event_query_t query,
         {
             return PH_RESULT_CANCELLED;
         }
+        const profiler_hub::sql_cancel_scope cancel{ future };
         uint64_t first = 0;
         uint64_t last  = 0;
         if(query->ctx->table_event_id_span(query->query, event_type, first, last))
@@ -1028,6 +1034,7 @@ ph_event_query_summarize_durations(ph_event_query_t                    query,
         {
             return PH_RESULT_CANCELLED;
         }
+        const profiler_hub::sql_cancel_scope cancel{ future };
         std::vector<profiler_hub::name_duration_summary_t> rows;
         if(!query->ctx->summarize_name_durations(query->query, event_type, rows))
         {
