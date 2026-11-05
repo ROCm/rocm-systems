@@ -3,6 +3,7 @@
 
 """Unit tests for utils/specs.py."""
 
+import sys
 from subprocess import CompletedProcess
 from unittest.mock import patch
 
@@ -270,13 +271,13 @@ def test_reconstruct_specs_from_sysinfo_missing_version_raises():
 
 
 @pytest.mark.misc
-def test_reconstruct_specs_from_sysinfo_unsupported_arch_exits(caplog):
+def test_reconstruct_specs_from_sysinfo_unsupported_arch_exits(monkeypatch):
     """A workload from an arch without a spec entry stops with an error naming
     the arch, not a traceback."""
-    with patch.object(specs, "get_version", return_value={"version": "3.0.0"}):
-        with pytest.raises(SystemExit):
-            generate_machine_specs(None, {"version": "3", "gpu_arch": "gfx1030"})
-    assert "profiled on gfx1030, which is not supported" in caplog.text
+    monkeypatch.setattr(specs, "console_error", sys.exit)
+    monkeypatch.setattr(specs, "get_version", lambda _home: {"version": "3.0.0"})
+    with pytest.raises(SystemExit, match="profiled on gfx1030, which is not supported"):
+        generate_machine_specs(None, {"version": "3", "gpu_arch": "gfx1030"})
 
 
 @pytest.mark.misc
