@@ -2712,8 +2712,9 @@ TEST(GpuVmService, CloseAllPublishesItsEpochAfterBlockedRegistrationRollsBack) {
     EXPECT_EQ(queues.lifecycle_epoch(), old_epoch);
     const auto retained = gpu_vm.lookup(address_space);
     EXPECT_TRUE(retained);
-    if (retained)
+    if (retained) {
       EXPECT_EQ(retained->queue_references, 1u);
+    }
   }
   allow_destruction.set_value();
   EXPECT_FALSE(registration.get());
