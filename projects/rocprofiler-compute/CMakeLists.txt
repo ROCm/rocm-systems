@@ -994,8 +994,7 @@ add_test(
     NAME test_rocprof_compute_base
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_rocprof_compute_base.xml
-        ${COV_OPTION} tests/unit/test_rocprof_compute_base.py
-        ${WORKING_DIR_OPTION}
+        ${COV_OPTION} tests/unit/test_rocprof_compute_base.py ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
