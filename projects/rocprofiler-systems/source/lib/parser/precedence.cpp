@@ -5,6 +5,7 @@
 #include "parser/config_store.hpp"
 #include "parser/schema.hpp"
 #include "parser/schema_validator.hpp"
+#include "parser/value_text.hpp"
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -26,6 +27,7 @@ source_rank(config_source source) noexcept
     return static_cast<std::uint8_t>(source);
 }
 
+/// Values are already typed by their parser, so only ids and types are checked here.
 std::vector<std::string>
 rejection_messages(const schema& config_schema, const resolved_config& resolved)
 {
@@ -38,10 +40,10 @@ rejection_messages(const schema& config_schema, const resolved_config& resolved)
             errors.push_back(fmt::format("unknown parameter '{}'", param_id));
             continue;
         }
-        if(!is_valid_value(*param, item.value))
+        if(!accepts_value(*param, item.value))
         {
             errors.push_back(fmt::format("invalid value '{}' for parameter '{}'",
-                                         item.value, param_id));
+                                         format_value(item.value), param_id));
         }
     }
     return errors;
@@ -85,7 +87,7 @@ apply_resolved(config_store& store, const resolved_config& resolved)
     }
     for(const auto& [param_id, item] : resolved)
     {
-        store.set(param_id, item.value, item.source);
+        store.set_value(param_id, item.value, item.source);
     }
 }
 

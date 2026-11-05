@@ -13,9 +13,11 @@
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -28,9 +30,7 @@ namespace rocprofsys::parser
 {
 namespace
 {
-constexpr std::int64_t k_unused_integer = 0;
-constexpr double       k_unused_number  = 0.0;
-
+/// Text for a JSON scalar that is checked as text. A number keeps its JSON spelling.
 std::optional<std::string>
 scalar_text(const nlohmann::json& value)
 {
@@ -38,18 +38,46 @@ scalar_text(const nlohmann::json& value)
     {
         return value.get<std::string>();
     }
-    if(value.is_boolean() || value.is_number())
+    if(value.is_boolean())
+    {
+        return std::string{ value.get<bool>() ? "true" : "false" };
+    }
+    if(value.is_number())
     {
         return value.dump();
     }
     return std::nullopt;
 }
 
-struct decoded_value
+/// A JSON scalar that already has the parameter's type. Anything else, including an
+/// integer that does not fit int64, falls back to text and is rejected there.
+std::optional<config_value_t>
+typed_scalar(const schema_param& param, const nlohmann::json& value)
 {
-    bool                       array_rejected = false;
-    std::optional<std::string> text;
-};
+    if(param.type == param_type::boolean && value.is_boolean())
+    {
+        return config_value_t{ value.get<bool>() };
+    }
+    if(param.type == param_type::integer && value.is_number_unsigned())
+    {
+        const auto unsigned_value = value.get<std::uint64_t>();
+        if(unsigned_value >
+           static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+        {
+            return std::nullopt;
+        }
+        return config_value_t{ static_cast<std::int64_t>(unsigned_value) };
+    }
+    if(param.type == param_type::integer && value.is_number_integer())
+    {
+        return config_value_t{ value.get<std::int64_t>() };
+    }
+    if(param.type == param_type::number && value.is_number())
+    {
+        return config_value_t{ value.get<double>() };
+    }
+    return std::nullopt;
+}
 
 std::optional<std::string>
 joined_array(const nlohmann::json& value, std::string_view separator)
@@ -63,23 +91,34 @@ joined_array(const nlohmann::json& value, std::string_view separator)
         {
             return std::nullopt;
         }
-        items.push_back(text.value_or(std::string{}));
+        items.push_back(*text);
     }
     return fmt::format("{}", fmt::join(items, separator));
 }
 
+struct decoded_value
+{
+    std::optional<config_value_t> typed;
+    std::optional<std::string>    text;
+    bool                          array_rejected = false;
+};
+
 decoded_value
 decode_value(const schema_param& param, const nlohmann::json& value)
 {
-    if(!value.is_array())
+    if(value.is_array())
     {
-        return { .text = scalar_text(value) };
+        if(param.type != param_type::enumeration_list)
+        {
+            return { .array_rejected = true };
+        }
+        return { .text = joined_array(value, list_separator(param)) };
     }
-    if(param.type != param_type::enumeration_list)
+    if(auto typed = typed_scalar(param, value))
     {
-        return { .array_rejected = true };
+        return { .typed = std::move(typed) };
     }
-    return { .text = joined_array(value, list_separator(param)) };
+    return { .text = scalar_text(value) };
 }
 
 [[nodiscard]] bool
@@ -88,32 +127,28 @@ ignored_entry(std::string_view key, const nlohmann::json& value)
     return (!key.empty() && key.front() == '_') || value.is_null();
 }
 
+/// The JSON form of a stored value. A list becomes a JSON array. Parentheses are
+/// used because nlohmann::json{x} with one element would build a one-element array.
 [[nodiscard]] nlohmann::json
-json_leaf(const schema_param& param, std::string_view text)
+json_value(const config_value_t& value)
 {
-    if(param.type == param_type::boolean)
+    if(const auto* flag = std::get_if<bool>(&value))
     {
-        return parse_boolean(text).value_or(false);
+        return nlohmann::json(*flag);
     }
-    if(param.type == param_type::integer)
+    if(const auto* integer = std::get_if<std::int64_t>(&value))
     {
-        return parse_integer(text).value_or(k_unused_integer);
+        return nlohmann::json(*integer);
     }
-    if(param.type == param_type::number)
+    if(const auto* number = std::get_if<double>(&value))
     {
-        return parse_number(text).value_or(k_unused_number);
+        return nlohmann::json(*number);
     }
-    if(param.type == param_type::enumeration_list)
+    if(const auto* text = std::get_if<std::string>(&value))
     {
-        auto       items = nlohmann::json::array();
-        const auto parts = split_list(text, list_separator(param));
-        for(const auto& part : parts.value_or(std::vector<std::string>{}))
-        {
-            items.push_back(part);
-        }
-        return items;
+        return nlohmann::json(*text);
     }
-    return std::string{ text };
+    return nlohmann::json(std::get<std::vector<std::string>>(value));
 }
 
 void
@@ -125,21 +160,44 @@ append_parameter(nlohmann::json& object, const schema_param& param,
     {
         return;
     }
-    object[param.id] = json_leaf(param, found->second.value);
+    object[param.id] = json_value(found->second.value);
+}
+
+/// Categories in the order each word first appears on a parameter row.
+std::vector<std::string>
+category_order(const schema& config_schema)
+{
+    std::vector<std::string> order;
+    for(const auto& param : config_schema.params())
+    {
+        if(!param.category.empty() &&
+           std::find(order.begin(), order.end(), param.category) == order.end())
+        {
+            order.push_back(param.category);
+        }
+    }
+    return order;
+}
+
+/// A category is known when at least one parameter row uses it.
+[[nodiscard]] bool
+known_category(const schema& config_schema, std::string_view category_id)
+{
+    return !category_id.empty() && !config_schema.params_in_category(category_id).empty();
 }
 
 void
 append_category(nlohmann::json& document, const schema& config_schema,
-                const category& group, const resolved_config& resolved)
+                const std::string& category_id, const resolved_config& resolved)
 {
     auto object = nlohmann::json::object();
-    for(const auto* param : config_schema.params_in_category(group.id))
+    for(const auto* param : config_schema.params_in_category(category_id))
     {
         append_parameter(object, *param, resolved);
     }
     if(!object.empty())
     {
-        document[group.id] = std::move(object);
+        document[category_id] = std::move(object);
     }
 }
 
@@ -166,7 +224,7 @@ public:
 private:
     void read_category(const std::string& category_id, const nlohmann::json& value)
     {
-        if(m_schema.find_category(category_id) == nullptr)
+        if(!known_category(m_schema, category_id))
         {
             m_result.errors.push_back(fmt::format("unknown category '{}'", category_id));
             return;
@@ -214,13 +272,18 @@ private:
                 fmt::format("parameter '{}' does not accept an array", param.id));
             return;
         }
+        if(decoded.typed)
+        {
+            m_result.store_typed(param, *decoded.typed);
+            return;
+        }
         if(!decoded.text)
         {
             m_result.errors.push_back(
                 fmt::format("unsupported value for parameter '{}'", param.id));
             return;
         }
-        m_result.store_if_valid(param, decoded.text.value_or(std::string{}));
+        m_result.store_if_valid(param, *decoded.text);
     }
 
     const schema& m_schema;
@@ -232,9 +295,9 @@ nlohmann::json
 catalog_document(const schema& config_schema, const resolved_config& resolved)
 {
     auto document = nlohmann::json::object();
-    for(const auto& group : config_schema.categories())
+    for(const auto& category_id : category_order(config_schema))
     {
-        append_category(document, config_schema, group, resolved);
+        append_category(document, config_schema, category_id, resolved);
     }
     return document;
 }
