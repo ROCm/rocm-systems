@@ -106,6 +106,7 @@ enum rcclSymkExtract : int8_t {
   RCCL_SYMK_EXTRACT_DENY  = -1,  // selector chose non-symk backend; do not extract
   RCCL_SYMK_EXTRACT_NONE  =  0,  // no opinion; extractor uses windows + ncclSymkAvailable
   RCCL_SYMK_EXTRACT_ALLOW =  1,  // rcclSelect* chose RCCL_SYMMETRIC; may extract
+  RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY = 2,  // admitted by the AllGather TDM window; offer only TDM kernels
 };
 
 #ifdef RCCL_EXPOSE_STATIC

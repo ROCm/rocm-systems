@@ -4134,6 +4134,30 @@ TEST_F(EnqueueMicrotest, CollTaskAppend_SymmetricDecision_WritesAllow) {
   EXPECT_EQ(RCCL_SYMK_EXTRACT_ALLOW, t->symkExtract);
 }
 
+TEST_F(EnqueueMicrotest, CollTaskAppend_TdmWindowDecision_WritesAllowTdmOnly) {
+  // A symmetric decision the AllGather TDM window admitted extracts only with a TDM kernel.
+  CollTaskComm cc;
+  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, RCCL_SYMMETRIC);
+  info.decision.symkTdmOnly = true;
+  ncclDevRedOpFull opDev{};
+  ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
+  const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
+  ASSERT_NE(nullptr, t);
+  EXPECT_EQ(RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY, t->symkExtract);
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_NonSymmetricDecisionWithTdmOnly_WritesDeny) {
+  // symkTdmOnly means nothing once another path won the decision.
+  CollTaskComm cc;
+  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, NCCL_ALGO_RING);
+  info.decision.symkTdmOnly = true;
+  ncclDevRedOpFull opDev{};
+  ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
+  const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
+  ASSERT_NE(nullptr, t);
+  EXPECT_EQ(RCCL_SYMK_EXTRACT_DENY, t->symkExtract);
+}
+
 TEST_F(EnqueueMicrotest, CollTaskAppend_NoDecision_WritesNone) {
   // decisionValid=false → symkExtract must stay NONE so the extractor uses
   // window inspection rather than a stale/absent selector result.
