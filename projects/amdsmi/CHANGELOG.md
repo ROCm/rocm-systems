@@ -62,6 +62,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **`amd-smi static --cache` now tells the level-1 data caches apart**.  
+  - `CACHE_ACRONYM` reports `vL1D` (vector), `sL1D` (scalar) and `GL1` (per shader array) instead of `L1D` for every level-1 data cache; `L1I`, `L2` and `L3` are unchanged.
+
 - **The `amdsmi` Python module no longer loads an AMD SMI library newer than itself**.  
   - A newer library's structures can be larger than the module allocates, so it is now skipped, and an older library loads with a warning. To load a specific library anyway, set `AMDSMI_LIB_OVERRIDE` to its absolute path.
 

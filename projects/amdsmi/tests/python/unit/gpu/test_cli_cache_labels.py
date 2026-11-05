@@ -8,8 +8,9 @@ These tests drive ``StaticCommands.static_gpu`` with the C library, logger, and
 helpers fully stubbed, so they run without GPU hardware. They lock in two
 enrichments of the cache listing:
 
-* each entry carries a ``cache_acronym`` derived from ``cache_level`` plus the
-  DATA/INST flags (L1D / L1I / L2 / L3, with an ``L<level>`` fallback), and
+* each entry carries a ``cache_acronym`` derived from ``cache_level``, the
+  DATA/INST flags and CU sharing (vL1D / sL1D / GL1 / L1I, else
+  ``L<level>``), and
 * each entry carries a ``total_cache_size`` equal to the per-instance
   ``cache_size`` times ``num_cache_instance``.
 
@@ -90,6 +91,26 @@ _GFX950_CACHE = [
     },
 ]
 
+# gfx1250 (MI455X) layout from a live report: GL1 per shader array is also a
+# level-1 data cache, harvested to 9, 7 and 8 CUs.
+_GFX1250_CACHE = (
+    copy.deepcopy(_GFX950_CACHE[:5])
+    + [
+        {
+            "cache_properties": ["DATA_CACHE", "SIMD_CACHE"],
+            "cache_size": 256,
+            "cache_level": 1,
+            "max_num_cu_shared": cu_shared,
+            "num_cache_instance": instances,
+        }
+        for cu_shared, instances in ((9, 14), (7, 14), (8, 4))
+    ]
+    + [copy.deepcopy(_GFX950_CACHE[5])]
+)
+
+# Layout returned by the stub interface; tests may swap it.
+_CACHE_FIXTURE = {"cache": _GFX950_CACHE}
+
 
 class _FakeLibraryException(Exception):
     def get_error_info(self):
@@ -103,7 +124,7 @@ def _build_fake_modules():
     """
 
     def _get_cache_info(_handle):
-        return {"cache": copy.deepcopy(_GFX950_CACHE)}
+        return {"cache": copy.deepcopy(_CACHE_FIXTURE["cache"])}
 
     interface = fake_module("amdsmi.amdsmi_interface", amdsmi_get_gpu_cache_info=_get_cache_info)
     exception = fake_module("amdsmi.amdsmi_exception", AmdSmiLibraryException=_FakeLibraryException)
@@ -218,6 +239,11 @@ class TestCliCacheLabels(unittest.TestCase):
         cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.static_module = _load_static_module()
 
+    def _use_fixture(self, cache):
+        previous = _CACHE_FIXTURE["cache"]
+        _CACHE_FIXTURE["cache"] = cache
+        self.addCleanup(_CACHE_FIXTURE.__setitem__, "cache", previous)
+
     def _run_cache(self, fmt):
         commands = object.__new__(self.static_module.StaticCommands)
         commands.logger = _FakeLogger(fmt)
@@ -239,7 +265,7 @@ class TestCliCacheLabels(unittest.TestCase):
         cache_info = self._run_cache("human")
 
         # Acronyms derived from level + DATA/INST flags, one assertion per fixture entry.
-        expected_acronyms = ["L1D", "L1I", "L1I", "L1D", "L1D", "L2", "L3"]
+        expected_acronyms = ["vL1D", "L1I", "L1I", "sL1D", "sL1D", "L2", "L3"]
         for index, acronym in enumerate(expected_acronyms):
             self.assertEqual(cache_info[f"cache_{index}"].get("cache_acronym"), acronym)
 
@@ -263,7 +289,7 @@ class TestCliCacheLabels(unittest.TestCase):
         cache_info = self._run_cache("json")
 
         acronyms = [entry.get("cache_acronym") for entry in cache_info]
-        self.assertEqual(acronyms, ["L1D", "L1I", "L1I", "L1D", "L1D", "L2", "L3"])
+        self.assertEqual(acronyms, ["vL1D", "L1I", "L1I", "sL1D", "sL1D", "L2", "L3"])
 
         expected_totals = [8192, 7168, 2048, 1792, 512, 4096, 229376]
         for index, value in enumerate(expected_totals):
@@ -273,3 +299,14 @@ class TestCliCacheLabels(unittest.TestCase):
 
         # Existing per-instance size wrapping is unchanged.
         self.assertEqual(cache_info[0]["cache_size"], {"value": 32, "unit": "KB"})
+
+    def test_gfx1250_level1_data_caches_are_distinguishable(self):
+        self._use_fixture(_GFX1250_CACHE)
+        cache_info = self._run_cache("json")
+
+        acronyms = [entry.get("cache_acronym") for entry in cache_info]
+        self.assertEqual(
+            acronyms, ["vL1D", "L1I", "L1I", "sL1D", "sL1D", "GL1", "GL1", "GL1", "L2"]
+        )
+        # Raw fields stay as reported by the library.
+        self.assertEqual([entry["cache_level"] for entry in cache_info], [1] * 8 + [2])
