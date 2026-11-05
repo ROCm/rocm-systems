@@ -196,6 +196,43 @@ struct WaveFixture {
   }
 };
 
+/// @brief Release GoogleTest's global stderr capture even when fixture setup fails.
+class ScopedStderrCapture {
+public:
+  ScopedStderrCapture() { testing::internal::CaptureStderr(); }
+  ScopedStderrCapture(const ScopedStderrCapture &) = delete;
+  ScopedStderrCapture &operator=(const ScopedStderrCapture &) = delete;
+  ~ScopedStderrCapture() {
+    if (active_)
+      testing::internal::GetCapturedStderr();
+  }
+
+  std::string take() {
+    active_ = false;
+    return testing::internal::GetCapturedStderr();
+  }
+
+private:
+  bool active_ = true;
+};
+
+TEST(PerfsimPluginCaptureTest, ReleasesStderrWhenWaveSetupThrows) {
+  WaveFixture fixture(0);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  EXPECT_THROW(
+      {
+        ScopedStderrCapture capture;
+        fixture.wave(1, 0, {0, 0, 0}, 0);
+      },
+      std::runtime_error);
+  {
+    ScopedStderrCapture capture;
+    EXPECT_TRUE(capture.take().empty());
+  }
+  ScopedStderrCapture capture;
+  EXPECT_TRUE(capture.take().empty());
+}
+
 KernelDispatchInfo dispatch_info(uint32_t id) {
   KernelDispatchInfo info;
   info.dispatch_id = id;
@@ -1639,7 +1676,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
   for (const auto &test : cases) {
     WaveFixture fixture;
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    testing::internal::CaptureStderr();
+    ScopedStderrCapture capture;
     const std::string config = plugin_config();
     PerfsimPlugin plugin(config.c_str());
     plugin.onInit();
@@ -1689,7 +1726,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
     plugin.onAmdgpuWavefrontHalted(wave);
     plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
     plugin.onShutdown();
-    diagnostic += testing::internal::GetCapturedStderr();
+    diagnostic += capture.take();
   }
   EXPECT_EQ(std::ranges::count(diagnostic, '\n'), cases.size());
   EXPECT_NE(diagnostic.find("FLAT DDS store or atomic"), std::string::npos);

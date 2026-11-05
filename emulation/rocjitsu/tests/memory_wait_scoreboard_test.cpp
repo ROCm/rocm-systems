@@ -1872,7 +1872,7 @@ TEST_F(MemoryWaitOrderingTest, NativeLdsOverwritesOnlyOrderedFlatLdsLanes) {
       for (bool wait : {false, true}) {
         SCOPED_TRACE(std::format("arch={} shared={} wait={}", static_cast<unsigned>(arch),
                                  shared_lanes, wait));
-        setup(arch);
+        ASSERT_NO_FATAL_FAILURE(setup(arch));
         set_test_flat_domains(*cu, *wf, shared_lanes);
         constexpr uint8_t dst = 2;
         flat_load(dst);
@@ -1909,7 +1909,7 @@ TEST_F(MemoryWaitOrderingTest, PartialWaitRetiresFlatResultFromGfx10) {
                     ROCJITSU_CODE_ARCH_RDNA4})
     for (bool lds_route : {false, true}) {
       SCOPED_TRACE(std::format("arch={} lds_route={}", static_cast<unsigned>(arch), lds_route));
-      setup(arch);
+      ASSERT_NO_FATAL_FAILURE(setup(arch));
       set_test_flat_domains(*cu, *wf, lds_route ? 0b1111 : 0);
       constexpr uint8_t flat_dst = 2;
       constexpr uint8_t younger_dst = 3;
@@ -2317,7 +2317,9 @@ TEST(MemoryWaitExecutionTest, LdsLoadsOverwriteInIssueOrder) {
         config.sgprs_per_wf = 128;
         config.vgprs_per_wf = 32;
         config.lds_size_kb = 64;
-        auto cu = ComputeUnitCore::create("lds_overwrite_cu", config, &memory, &l2);
+        std::unique_ptr<ComputeUnitCore> cu;
+        ASSERT_NO_FATAL_FAILURE(
+            rocjitsu::test::initialize_compute_unit(cu, "lds_overwrite_cu", config, &memory, &l2));
         auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
         ASSERT_NE(wf, nullptr);
         wf->set_exec(1);

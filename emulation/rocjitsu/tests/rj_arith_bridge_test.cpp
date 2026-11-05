@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "fixtures/float_dot/gfx1100_cases.h"
 #include "fixtures/float_dot/gfx1201_cases.h"
 #include "rj_arith/rj_arith.h"
@@ -83,7 +84,9 @@ public:
     config.sgprs_per_wf = 104;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    cu = ComputeUnitCore::create("rj_arith_bridge", config, &memory, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "rj_arith_bridge", config, &memory, &l2);
+    if (!cu)
+      return;
     auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto observer = std::make_unique<WriteRecorder>();
     recorder = observer.get();
@@ -108,6 +111,7 @@ public:
 TEST(ArithBridgeTest, NumericWideConstantDoesNotReplicateItsLowWord) {
   for (uint32_t lanes : {32u, 64u}) {
     BridgeFixture fixture(false, lanes);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     RegisterAccess registers(*fixture.wave);
     rdna4::Operand one(64, rdna4::OperandType::OPR_SRC, 129);
     arith::VectorInput64 input(registers, *fixture.wave, one, ~0ULL);
@@ -125,6 +129,7 @@ TEST(ArithBridgeTest, Fma64DirectedGuestRounding) {
     for (unsigned lanes : {32u, 64u}) {
       for (unsigned rounding = 1; rounding < 4; ++rounding) {
         BridgeFixture fixture(rdna3, lanes);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
         fixture.wave->set_mode_raw((rounding << 2) | (3u << 6));
         fixture.wave->set_exec(uint64_t{1} << (lanes - 1));
         const double inputs[] = {rounding == 2 ? -1.0 : 1.0, 0x1p-53, rounding == 2 ? -1.0 : 1.0};
@@ -157,6 +162,7 @@ TEST(ArithBridgeTest, Fma64WidensSccWithoutReplicatingHighWord) {
   for (bool rdna3 : {false, true}) {
     for (uint32_t lanes : {32U, 64U}) {
       BridgeFixture fixture(rdna3, lanes);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       fixture.wave->set_exec(1ULL << (lanes - 1));
       fixture.wave->write_scc(true);
       fixture.wave->set_mode_raw(0xf0); // Preserve the subnormal numeric value of SCC=1.
@@ -197,6 +203,7 @@ TEST(ArithBridgeTest, DoubleBinaryGuestRounding) {
     for (unsigned lanes : {32u, 64u}) {
       for (const auto &sample : samples) {
         BridgeFixture fixture(rdna3, lanes);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
         // Round up, flush output denormals; OMOD is enabled on both architectures.
         fixture.wave->set_mode_raw((1u << 2) | (1u << 6));
         fixture.wave->set_exec(1);
@@ -227,6 +234,7 @@ TEST(ArithBridgeTest, Binary32Dx10Clamp) {
   for (uint16_t op : {rdna3::kVAddF32Vop3, rdna3::kVMulF32Vop3}) {
     for (bool dx10 : {false, true}) {
       BridgeFixture fixture(true);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       fixture.wave->set_mode_raw(0xf0u | (dx10 ? Wavefront::DX10_CLAMP_BIT : 0));
       fixture.wave->set_exec(1);
       fixture.cu->write_vgpr(fixture.base(), 0, 0x7fc12345u);
@@ -251,6 +259,7 @@ TEST(ArithBridgeTest, FloatBinaryPreservesAliasedInputsModifiersAndMasks) {
       for (bool observed : {false, true}) {
         for (uint64_t cpu : {RJ_ARITH_CPU_BASELINE, rj_arith_init_cpu_flags()}) {
           BridgeFixture fixture(rdna3, lanes);
+          ASSERT_FALSE(::testing::Test::HasFatalFailure());
           if (!observed) {
             fixture.cu->set_plugin_group(nullptr);
             fixture.recorder = nullptr;
@@ -302,6 +311,7 @@ TEST(ArithBridgeTest, DecodedFmaFormsPreserveAccumulatorLiteralOrderAndMasks) {
           if (dx9)
             policy.semantics = ArithmeticSemantics::BitExactEmpirical;
           BridgeFixture fixture(rdna3, lanes, policy);
+          ASSERT_FALSE(::testing::Test::HasFatalFailure());
           if (!observed) {
             fixture.cu->set_plugin_group(nullptr);
             fixture.recorder = nullptr;
@@ -366,6 +376,7 @@ TEST(ArithBridgeTest, DecodedFmaRequiredReportingRejectsWithoutPartialCommit) {
       ArithmeticPolicy policy{};
       policy.semantics = ArithmeticSemantics::BitExactEmpirical;
       BridgeFixture fixture(rdna3, lanes, policy);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       fixture.wave->set_exec(1);
       fixture.wave->set_trapsts(0x10);
       fixture.recorder->writes.clear();
@@ -388,6 +399,7 @@ TEST(ArithBridgeTest, DecodedFmaRequiredReportingRejectsWithoutPartialCommit) {
 TEST(ArithBridgeTest, PendingRegisterErrorPreventsVectorEvaluationAndWrites) {
   for (bool observed : {false, true}) {
     BridgeFixture fixture(false);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     if (!observed)
       fixture.cu->set_plugin_group(nullptr);
     RegisterAccess registers(*fixture.wave);
@@ -417,6 +429,7 @@ TEST(ArithBridgeTest, DppFloatReadsExecButWritesOnlyEnabledRows) {
         SCOPED_TRACE(::testing::Message()
                      << "rdna3=" << rdna3 << " kind=" << kind << " exec=" << exec_mask);
         BridgeFixture fixture(rdna3);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
         fixture.wave->set_exec(exec_mask);
         std::array<uint32_t, 3> words{};
         if (kind < 2) {
@@ -453,6 +466,7 @@ TEST(ArithBridgeTest, DppFloatReadsExecButWritesOnlyEnabledRows) {
 TEST(ArithBridgeTest, ExactMulStatusRespectsDppRows) {
   for (bool enabled : {false, true}) {
     BridgeFixture fixture(false, 32, parse_arithmetic_policy("bit_exact_empirical"));
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_exec(1);
     fixture.wave->set_mode_raw(0x1f0);
     fixture.cu->write_vgpr(fixture.base(), 0, 0x7f7fffff);
@@ -468,6 +482,7 @@ TEST(ArithBridgeTest, ExactMulStatusRespectsDppRows) {
 
 TEST(ArithBridgeTest, FloatFrexpExponentIgnoresGuestRounding) {
   BridgeFixture fixture(false);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fixture.wave->set_exec(1);
   fixture.wave->set_mode_raw(0x1f3); // Directed guest rounding, denormals preserved.
   fixture.cu->write_vgpr(fixture.base(), 0, 0x3fc00000); // 1.5 = 0.75 * 2^1.
@@ -484,6 +499,7 @@ TEST(ArithBridgeTest, CompatibilityMulDppStatusIncludesWriteSuppressedLanes) {
   // v_mul_f32 v2, v0, v1 with DPP row_mask:2. Lane 0 overflows but cannot write.
   for (uint64_t exec_mask : {0x10001ULL, 1ULL}) {
     BridgeFixture fixture(false);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_exec(exec_mask);
     fixture.wave->set_trapsts(0x80000000);
     for (unsigned lane = 0; lane < 32; ++lane) {
@@ -515,6 +531,7 @@ TEST(ArithBridgeTest, CompatibilityMulRetainsLegacyStatus) {
   for (bool rdna3 : {false, true}) {
     for (uint32_t lanes : {32u, 64u}) {
       BridgeFixture fixture(rdna3, lanes);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       rdna3::Operand d3(32, rdna3::OperandType::OPR_VGPR, 0);
       rdna4::Operand d4(32, rdna4::OperandType::OPR_VGPR, 0);
       rdna3::Operand a3(32, rdna3::OperandType::OPR_SRC_VGPR, 256);
@@ -553,6 +570,7 @@ TEST(ArithBridgeTest, CompatibilityMulRetainsLegacyStatus) {
 
 TEST(ArithBridgeTest, BulkWritesRequireUnobservedOwnedWholeRegisters) {
   BridgeFixture fixture(false);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   RegisterAccess registers(*fixture.wave);
   rdna4::Operand d(32, rdna4::OperandType::OPR_VGPR, 0);
   unsigned calls = 0;
@@ -598,6 +616,7 @@ TEST(ArithBridgeTest, HalfBinarySelectorsModifiersAliasesAndObservations) {
   for (bool is_rdna3 : {false, true})
     for (uint32_t lanes : {32u, 64u}) {
       BridgeFixture fixture(is_rdna3, lanes);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       const uint64_t exec_mask = lanes == 32 ? 0x80000005ULL : 0x8000000180000005ULL;
       fixture.wave->set_exec(exec_mask);
       fixture.wave->set_mode_raw(0x3c0); // Preserve FP16 denormals; IEEE and DX10_CLAMP enabled.
@@ -683,6 +702,7 @@ TEST(ArithBridgeTest, HalfBinaryVop2InlineGuestRoundingAndRejection) {
           policy.semantics = ArithmeticSemantics::BitExactEmpirical;
         }
         BridgeFixture fixture(is_rdna3, lanes, policy);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
         fixture.wave->set_exec(1);
         fixture.wave->set_mode_raw(0x3c0 | (1u << 2)); // Guest toward +infinity.
         fixture.wave->set_trapsts(0x10);
@@ -731,6 +751,7 @@ TEST(ArithBridgeTest, HalfSelectionNanZeroDenormModesAndPartialWrites) {
   for (const auto &op : operations)
     for (uint32_t lanes : {32u, 64u}) {
       BridgeFixture fixture(op.rdna3, lanes);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       const auto words =
           op.rdna3
               ? rdna3::build_vop3(op.opcode, {.vdst = 0, .op_sel = 11, .src0 = 256, .src1 = 257})
@@ -837,6 +858,7 @@ TEST(ArithBridgeTest, TernarySelectionWidthsModifiersAndState) {
               if (policy.semantics != ArithmeticSemantics::Loose)
                 policy.semantics = ArithmeticSemantics::BitExactEmpirical;
             BridgeFixture fixture(c.rdna3, lanes, policy);
+            ASSERT_FALSE(::testing::Test::HasFatalFailure());
             const bool nan = settings == 2 || settings == 3;
             const bool negate = settings == 1;
             fixture.wave->set_mode_raw((negate ? 0u : 0x2f0u) | 0xfu |
@@ -945,6 +967,7 @@ TEST(ArithBridgeTest, HalfLdexpGuestRoundingSelectorsAndIntegerExponent) {
                   if (policy.semantics != ArithmeticSemantics::Loose)
                     policy.semantics = ArithmeticSemantics::BitExactEmpirical;
                 BridgeFixture fixture(rdna3, lanes, policy);
+                ASSERT_FALSE(::testing::Test::HasFatalFailure());
                 // Output flush with IEEE=0 enables RDNA3 OMOD; otherwise
                 // preserve denormals to observe directed halfway rounding.
                 fixture.wave->set_mode_raw((c.omod ? 0u : 0xc0u) | (rounding << 2));
@@ -1030,6 +1053,7 @@ TEST(ArithBridgeTest, DoubleFrexpExponentWritesOneIntegerWord) {
               if (policy.semantics != ArithmeticSemantics::Loose)
                 policy.semantics = ArithmeticSemantics::BitExactEmpirical;
             BridgeFixture fixture(rdna3, lanes, policy);
+            ASSERT_FALSE(::testing::Test::HasFatalFailure());
             // Input flushing makes subnormal exponents zero.
             fixture.wave->set_mode_raw(3u << 2);
             fixture.wave->set_trapsts(0x10);
@@ -1118,6 +1142,7 @@ TEST(ArithBridgeTest, DoubleUnaryEncodingsPairAliasesAndState) {
                 if (policy.semantics != ArithmeticSemantics::Loose)
                   policy.semantics = ArithmeticSemantics::BitExactEmpirical;
               BridgeFixture fixture(rdna3, lanes, policy);
+              ASSERT_FALSE(::testing::Test::HasFatalFailure());
               // Integral rounding is named; FRACT subtraction and OMOD use guest rounding.
               // Alternate denormal preservation to exercise RDNA3 OMOD gating.
               fixture.wave->set_mode_raw((guest << 2) | ((guest & 1) ? 3u << 6 : 0));
@@ -1186,6 +1211,7 @@ TEST(ArithBridgeTest, DoubleLdexpGuestRoundingIntegerExponentAndState) {
               if (policy.semantics != ArithmeticSemantics::Loose)
                 policy.semantics = ArithmeticSemantics::BitExactEmpirical;
             BridgeFixture fixture(rdna3, lanes, policy);
+            ASSERT_FALSE(::testing::Test::HasFatalFailure());
             fixture.wave->set_mode_raw((3u << 6) | (rounding << 2));
             fixture.wave->set_trapsts(0x10);
             const uint64_t exec_mask = empty         ? 0
@@ -1255,6 +1281,7 @@ TEST(ArithBridgeTest, FloatLdexpGuestRoundingIntegerExponentAndState) {
               if (policy.semantics != ArithmeticSemantics::Loose)
                 policy.semantics = ArithmeticSemantics::BitExactEmpirical;
             BridgeFixture fixture(rdna3, lanes, policy);
+            ASSERT_FALSE(::testing::Test::HasFatalFailure());
             fixture.wave->set_mode_raw((3u << 4) | rounding);
             fixture.wave->set_trapsts(0x10);
             const uint64_t exec_mask = empty         ? 0
@@ -1313,6 +1340,7 @@ TEST(ArithBridgeTest, HalfFrexpExponentIntegerOutputAndState) {
                 if (policy.semantics != ArithmeticSemantics::Loose)
                   policy.semantics = ArithmeticSemantics::BitExactEmpirical;
               BridgeFixture fixture(rdna3, lanes, policy);
+              ASSERT_FALSE(::testing::Test::HasFatalFailure());
               // Input flushing makes subnormal exponents zero. Other FP controls
               // do not modify the integer result.
               fixture.wave->set_mode_raw(3u << 2);
@@ -1395,6 +1423,7 @@ TEST(ArithBridgeTest, HalfFmaFormsRoundingPartialAccumulatorsAndState) {
               else if (policy_index == 2)
                 policy.semantics = ArithmeticSemantics::BitExactEmpirical;
               BridgeFixture fixture(rdna3, lanes, policy);
+              ASSERT_FALSE(::testing::Test::HasFatalFailure());
               fixture.wave->set_mode_raw(0x3c0 | (rounding << 2));
               fixture.wave->set_trapsts(0x10);
               const uint64_t exec_mask = lanes == 32 ? 0x80000001ULL : 0x8000000180000001ULL;
@@ -1491,6 +1520,7 @@ TEST(ArithBridgeTest, HalfDotModifiersSelectorsAliasesAndByteObservations) {
         ArithmeticPolicy policy{};
         policy.semantics = ArithmeticSemantics::Loose;
         BridgeFixture fixture(is_rdna3, lanes, policy);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
         const uint64_t exec_mask = lanes == 32 ? 0x80000005ULL : 0x8000000180000005ULL;
         fixture.wave->set_exec(exec_mask);
         for (unsigned controls = 0; controls < 64; ++controls) {
@@ -1572,6 +1602,7 @@ TEST(ArithBridgeTest, HalfDotInlineReplicationAndRejectedPartialWrites) {
             policy.semantics = ArithmeticSemantics::BitExactEmpirical;
           }
           BridgeFixture fixture(is_rdna3, lanes, policy);
+          ASSERT_FALSE(::testing::Test::HasFatalFailure());
           fixture.wave->set_exec(lanes == 32 ? 0x80000001ULL : 0x8000000000000001ULL);
           fixture.wave->set_trapsts(0x10);
           for (uint32_t lane = 0; lane < lanes; ++lane) {
@@ -1629,6 +1660,7 @@ TEST(ArithBridgeTest, Dot2HardwareBitsWaveWidthsAliasesAndStatePolicy) {
             if (policy.semantics != ArithmeticSemantics::Loose)
               policy.semantics = ArithmeticSemantics::BitExactEmpirical;
           BridgeFixture fixture(is_rdna3, lanes, policy);
+          ASSERT_FALSE(::testing::Test::HasFatalFailure());
           if (!observed) {
             fixture.cu->set_plugin_group(nullptr);
             fixture.recorder = nullptr;
@@ -1682,6 +1714,7 @@ TEST(ArithBridgeTest, Dot2HardwareBitsWaveWidthsAliasesAndStatePolicy) {
 TEST(ArithBridgeTest, Dot2DppLooseRoutingAndWriteFilter) {
   for (uint32_t lanes : {32u, 64u}) {
     BridgeFixture fixture(true, lanes, {ArithmeticSemantics::Loose});
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_exec(UINT64_MAX);
     for (uint32_t lane = 0; lane < lanes; ++lane) {
       fixture.cu->write_vgpr(fixture.base(), lane, uint32_t(util::f32_to_f16(float(lane + 1))));
@@ -1715,6 +1748,7 @@ TEST(ArithBridgeTest, Dot2DppLooseRoutingAndWriteFilter) {
 TEST(ArithBridgeTest, Dot4DppObservesOnlyWritableLanes) {
   for (uint32_t lanes : {32u, 64u}) {
     BridgeFixture fixture(false, lanes, {ArithmeticSemantics::Loose});
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_exec(UINT64_MAX);
     for (uint32_t lane = 0; lane < lanes; ++lane) {
       fixture.cu->write_vgpr(fixture.base(), lane, 0x38383838u);
@@ -1765,6 +1799,7 @@ TEST(ArithBridgeTest, Dot4FormatsAccumulatorModifiersAndExactPolicy) {
             policy.semantics = ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
           }
           BridgeFixture fixture(false, lanes, policy);
+          ASSERT_FALSE(::testing::Test::HasFatalFailure());
           fixture.wave->set_exec(lanes == 32 ? 0x80000001ULL : 0x8000000000000001ULL);
           fixture.wave->set_trapsts(0x10);
           for (uint32_t lane = 0; lane < lanes; ++lane) {
@@ -1810,6 +1845,7 @@ TEST(ArithBridgeTest, DecodedPackedSelectionGuestModesAndAliases) {
   for (bool is_rdna3 : {false, true}) {
     for (uint32_t lanes : {32u, 64u}) {
       BridgeFixture fixture(is_rdna3, lanes);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       fixture.wave->set_trapsts(0x10);
       const uint64_t exec_mask = lanes == 32 ? 0x80000005ULL : 0x8000000180000005ULL;
       fixture.wave->set_exec(exec_mask);
@@ -1896,6 +1932,7 @@ TEST(ArithBridgeTest, PackedSelectionRdna3NanClampPolicy) {
       for (bool ieee : {false, true}) {
         for (bool dx10 : {false, true}) {
           BridgeFixture fixture(true, lanes);
+          ASSERT_FALSE(::testing::Test::HasFatalFailure());
           fixture.wave->set_mode_raw(0xc0 | (ieee ? 0x200 : 0) | (dx10 ? 0x100 : 0));
           fixture.wave->set_exec(1);
           fixture.cu->write_vgpr(fixture.base(), 0, 0x7d017d01u);
@@ -1925,6 +1962,7 @@ TEST(ArithBridgeTest, DecodedPackedBinarySelectorsSignsClampAndAliases) {
       for (bool multiply : {false, true}) {
         for (bool observed : {false, true}) {
           BridgeFixture fixture(is_rdna3, lanes);
+          ASSERT_FALSE(::testing::Test::HasFatalFailure());
           if (!observed) {
             fixture.cu->set_plugin_group(nullptr);
             fixture.recorder = nullptr;
@@ -2013,6 +2051,7 @@ TEST(ArithBridgeTest, PackedBinaryInlineRoundingAndStrictPolicy) {
             policy.semantics = ArithmeticSemantics::Loose;
           }
           BridgeFixture fixture(is_rdna3, lanes, policy);
+          ASSERT_FALSE(::testing::Test::HasFatalFailure());
           fixture.wave->set_mode_raw(0x3c0 | (rounding << 2));
           fixture.wave->set_exec(lanes == 32 ? 0x80000001ULL : 0x8000000000000001ULL);
           fixture.wave->set_trapsts(0x10);
@@ -2053,6 +2092,7 @@ TEST(ArithBridgeTest, DecodedPackedFmaSelectorsSignsClampAndAliases) {
                               {semantics == ArithmeticSemantics::Loose
                                    ? semantics
                                    : ArithmeticSemantics::BitExactEmpiricalNoFpStatus});
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
         fixture.wave->set_mode_raw(0x3c0);
         for (unsigned selectors = 0; selectors < 64; ++selectors) {
           for (unsigned signs : {0u, 0x15u, 0x2au, 0x3fu}) {
@@ -2124,6 +2164,7 @@ TEST(ArithBridgeTest, PackedFmaInlineConstantsRoundingAndFmacReplication) {
       for (unsigned rounding = 0; rounding < 4; ++rounding) {
         for (bool observed : {false, true}) {
           BridgeFixture fixture(is_rdna3, lanes);
+          ASSERT_FALSE(::testing::Test::HasFatalFailure());
           if (!observed) {
             fixture.cu->set_plugin_group(nullptr);
             fixture.recorder = nullptr;
@@ -2178,6 +2219,7 @@ TEST(ArithBridgeTest, PackedFmaRequiredStateAndRejectedCommit) {
           ArithmeticPolicy policy{};
           policy.semantics = ArithmeticSemantics::BitExactEmpirical;
           BridgeFixture fixture(is_rdna3, lanes, policy);
+          ASSERT_FALSE(::testing::Test::HasFatalFailure());
           fixture.wave->set_mode_raw(0x3c0 | (unsupported_rounding ? 4u : 0u));
           fixture.wave->set_exec(1);
           fixture.wave->set_trapsts(0x10);
@@ -2229,6 +2271,7 @@ TEST(ArithBridgeTest, DecodedIntegerDotSignednessSaturationAndAliases) {
             for (bool observed : {false, true}) {
               for (bool empty : {false, true}) {
                 BridgeFixture fixture(is_rdna3, lanes);
+                ASSERT_FALSE(::testing::Test::HasFatalFailure());
                 if (!observed) {
                   fixture.cu->set_plugin_group(nullptr);
                   fixture.recorder = nullptr;
@@ -2314,6 +2357,7 @@ TEST(ArithBridgeTest, UnobservedMatrixWritesPreserveAliasesAndRejectedOutputs) {
   for (bool sparse : {false, true}) {
     for (bool partial : {false, true}) {
       BridgeFixture fixture(false);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       fixture.cu->set_plugin_group(nullptr);
       fixture.recorder = nullptr;
       fixture.wave->set_exec(0); // Matrix execution is independent of EXEC.
@@ -2360,6 +2404,7 @@ const uint64_t kExactEmpiricalNoFpStatus = RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICA
 
 TEST(ArithBridgeTest, MatrixIgnoresExecAndPreservesAliasedInputsUntilCommit) {
   BridgeFixture fixture(false);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fixture.wave->set_exec(0);
   arith::exec_wmma(*fixture.wave, rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12,
                    kExactEmpiricalNoFpStatus, 0, fixture.base(), fixture.base(), fixture.base() + 8,
@@ -2377,6 +2422,7 @@ TEST(ArithBridgeTest, MatrixIgnoresExecAndPreservesAliasedInputsUntilCommit) {
 
 TEST(ArithBridgeTest, CuOnlyAccessorDeclinesBulkMatrixWrites) {
   BridgeFixture fixture(false);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fixture.cu->set_plugin_group(nullptr);
   RegisterAccess registers(*fixture.cu);
   bool invoked = false;
@@ -2395,6 +2441,7 @@ TEST(ArithBridgeTest, OutOfRangeMatrixSourceTupleReadsV0) {
     for (uint32_t vgprs : {32U, 256U}) {
       for (uint32_t a : {0U, vgprs - 2}) {
         BridgeFixture fixture(rdna3, 32, {}, vgprs);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
         const uint32_t words[] = {0xcc404018U, 0x04421100U | a, 0, 0};
         auto decoded = fixture.decoder->decode(words);
         ASSERT_TRUE(decoded.succeeded());
@@ -2418,6 +2465,7 @@ TEST(ArithBridgeTest, OutOfRangeMatrixDestinationSuppressesReadsAndWrites) {
   for (bool sparse : {false, true}) {
     for (uint32_t vgprs : {32U, 256U}) {
       BridgeFixture fixture(false, 32, {}, vgprs);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       const uint32_t destination = vgprs - 4;
       for (uint32_t reg = 0; reg < 4; ++reg)
         fixture.cu->write_vgpr(fixture.base() + destination + reg, 0, 0xdeadbeef);
@@ -2438,6 +2486,7 @@ TEST(ArithBridgeTest, OutOfRangeMatrixDestinationSuppressesReadsAndWrites) {
 
 TEST(ArithBridgeTest, FailedRegisterReadPreventsMatrixCommit) {
   BridgeFixture fixture(false);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   RegisterAccess registers(*fixture.wave);
   auto source = registers.read_vgpr_region(fixture.base(), 1, ~0ULL, 0x3);
   const uint32_t *data[1];
@@ -2455,6 +2504,7 @@ TEST(ArithBridgeTest, FailedRegisterReadPreventsMatrixCommit) {
 
 TEST(ArithBridgeTest, FailedInvocationDoesNotReportOrCommitWrites) {
   BridgeFixture fixture(false);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   arith::exec_wmma(*fixture.wave, rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12,
                    kExactEmpiricalNoFpStatus | (1ULL << 63), 0, fixture.base(), fixture.base(),
                    fixture.base() + 8, fixture.base() + 16, 4, 8, std::nullopt);
@@ -2468,6 +2518,7 @@ TEST(ArithBridgeTest, FailedInvocationDoesNotReportOrCommitWrites) {
 TEST(ArithBridgeTest, DecodedIu4UsesOnlyConsumedFactorLanes) {
   for (uint32_t lanes : {32u, 64u}) {
     BridgeFixture fixture(false, lanes);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_exec(0); // Matrix instructions ignore EXEC.
     for (uint32_t lane = 0; lane < lanes; ++lane) {
       const uint32_t factor = lane < 32 ? 0x11111111u : 0xffffffffu;
@@ -2493,6 +2544,7 @@ TEST(ArithBridgeTest, DecodedIu4UsesOnlyConsumedFactorLanes) {
 
 TEST(ArithBridgeTest, PackedResultPreservesUnselectedHalfAndObservesOnlyWrittenBytes) {
   BridgeFixture fixture(true);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   arith::exec_wmma(*fixture.wave, rj_arith_v_wmma_f16_16x16x16_f16_w32, kExactEmpiricalNoFpStatus,
                    RJ_ARITH_WMMA_HIGH_C_D, fixture.base(), fixture.base(), fixture.base() + 8,
                    fixture.base() + 16, 8, 8, std::nullopt, 0xc);
@@ -2507,6 +2559,7 @@ TEST(ArithBridgeTest, PackedResultPreservesUnselectedHalfAndObservesOnlyWrittenB
 
 TEST(ArithBridgeTest, SparseMatrixReadsItsTiedAccumulatorAndIgnoresExec) {
   BridgeFixture fixture(false);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fixture.wave->set_exec(0);
   for (uint32_t lane = 0; lane < 32; ++lane) {
     fixture.cu->write_vgpr(fixture.base() + 12, lane, 0x44444444u);
@@ -2528,6 +2581,7 @@ TEST(ArithBridgeTest, DecodedSparseIu4NormalizesSelectorAndObservesConsumedLanes
   for (uint32_t sample = 0; sample < 4; ++sample) {
     const uint32_t selector = sample == 2 ? 3 : sample == 3 ? 1 : sample;
     BridgeFixture fixture(false, 64);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint32_t lane = 0; lane < 64; ++lane) {
       fixture.cu->write_vgpr(fixture.base(), lane,
                              lane < 32     ? 0x11111111u
@@ -2564,6 +2618,7 @@ TEST(ArithBridgeTest, DecodedMatrixUsesConfiguredSemantics) {
          {ArithmeticSemantics::Loose, ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
       const bool sparse = kind == 2;
       BridgeFixture fixture(kind == 0, 32, {semantics});
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       for (uint32_t lane = 0; lane < 32; ++lane) {
         for (uint32_t reg = 16; reg < 24; ++reg)
           fixture.cu->write_vgpr(fixture.base() + reg, lane, 0x4b800000u);
@@ -2596,6 +2651,7 @@ TEST(ArithBridgeTest, DecodedMatrixUsesConfiguredSemantics) {
 
 TEST(ArithBridgeTest, FailedSparseInvocationPreservesItsTiedAccumulator) {
   BridgeFixture fixture(false);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   arith::exec_swmmac(*fixture.wave, rj_arith_v_swmmac_f32_16x16x32_f16_w32,
                      kExactEmpiricalNoFpStatus | (1ULL << 63), 0, fixture.base(), fixture.base(),
                      fixture.base() + 4, fixture.base() + 12, 4, 8, 8, 32);
@@ -2619,6 +2675,7 @@ TEST(ArithBridgeTest, DoubleBinaryPairAliasesAndPolicies) {
               if (required)
                 policy.semantics = ArithmeticSemantics::BitExactEmpirical;
               BridgeFixture fixture(rdna3, lanes, policy);
+              ASSERT_FALSE(::testing::Test::HasFatalFailure());
               fixture.wave->set_mode_raw(preserve_denorm ? 3u << 6 : 0);
               const uint64_t exec_mask = lanes == 32 ? 0x80000003ULL : 0x8000000380000003ULL;
               fixture.wave->set_exec(exec_mask);
@@ -2690,6 +2747,7 @@ TEST(ArithBridgeTest, DoubleFmaPairAliasesModifiersAndPolicies) {
               if (policy_kind == 3)
                 policy.semantics = ArithmeticSemantics::BitExactEmpirical;
               BridgeFixture fixture(rdna3, lanes, policy);
+              ASSERT_FALSE(::testing::Test::HasFatalFailure());
               const bool preserve_denorm = mode & 1;
               const bool ieee = mode & 2;
               fixture.wave->set_mode_raw((preserve_denorm ? 3u << 6 : 0) | (ieee ? 0x200 : 0));
@@ -2815,6 +2873,7 @@ TEST(ArithBridgeTest, MixedFmaFormatsInlineConstantsAndPartialAliases) {
                   if (policy_kind == 3)
                     policy.semantics = ArithmeticSemantics::BitExactEmpirical;
                   BridgeFixture fixture(rdna3, lanes, policy);
+                  ASSERT_FALSE(::testing::Test::HasFatalFailure());
                   fixture.wave->set_mode_raw(0x1f0);
                   const uint64_t exec_mask = lanes == 32 ? 0x8000000fULL : 0x8000000f8000000fULL;
                   fixture.wave->set_exec(exec_mask);
@@ -2906,6 +2965,7 @@ TEST(ArithBridgeTest, MixedFmaFormatsInlineConstantsAndPartialAliases) {
 
 TEST(ArithBridgeTest, MixedFmaDppPreservesSuppressedDestinations) {
   BridgeFixture fixture(false);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fixture.wave->set_exec(0x38003);
   for (unsigned lane = 0; lane < 32; ++lane) {
     fixture.cu->write_vgpr(fixture.base() + 1, lane, std::bit_cast<uint32_t>(float(lane + 1)));
@@ -2934,6 +2994,7 @@ TEST(ArithBridgeTest, FmaGuestControlsChangeResults) {
     for (int kind = 0; kind < 3; ++kind) {
       for (uint32_t mode : {0xf1u, 0xf4u}) {
         BridgeFixture fixture(rdna3);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
         fixture.wave->set_mode_raw(mode);
         fixture.wave->set_exec(1);
         fixture.cu->write_vgpr(fixture.base(), 0, 0x3f800000u);
@@ -2972,6 +3033,7 @@ TEST(ArithBridgeTest, FmaGuestControlsChangeResults) {
   }
   // Distinguish FP32 input/output denormal fields and RDNA3 DX10 clamp.
   BridgeFixture fixture(true);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fixture.wave->set_exec(1);
   struct Case {
     uint32_t mode, a, b, expected;
@@ -3019,6 +3081,7 @@ TEST(ArithBridgeTest, MixedFmaGuestControlsAndReportingPolicy) {
         if (policy_kind == 4)
           policy.semantics = ArithmeticSemantics::BitExactEmpirical;
         BridgeFixture fixture(rdna3, 32, policy);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
         // Directed rounding; mixed-format input denorm settings; DX10_CLAMP-off.
         const uint32_t modes[] = {0x1f1, 0x1b0, 0xf0};
         fixture.wave->set_mode_raw(modes[control]);
@@ -3066,6 +3129,7 @@ TEST(ArithBridgeTest, MulReportingPolicyPreservesDirectedNumericalExecution) {
             if (policy_kind == 3)
               policy.semantics = ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
             BridgeFixture fixture(rdna3, lanes, policy);
+            ASSERT_FALSE(::testing::Test::HasFatalFailure());
             const unsigned last = lanes - 1;
             const uint64_t exec_mask = 1ULL << last;
             fixture.wave->set_exec(exec_mask);
@@ -3112,6 +3176,7 @@ TEST(ArithBridgeTest, DivisionScaleWritesExplicitHighConditionBit) {
     for (uint32_t lanes : {32U, 64U}) {
       for (bool wide : {false, true}) {
         BridgeFixture fixture(rdna3, lanes);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
         fixture.wave->set_exec(1ULL | (1ULL << (lanes - 1)));
         fixture.wave->set_mode_raw(0x1f0);
         fixture.wave->set_vcc(0x55);
@@ -3155,6 +3220,7 @@ TEST(ArithBridgeTest, DivisionMasksConditionAndDirectedRounding) {
           for (unsigned rounding = 0; rounding < 4; ++rounding)
             for (bool empty : {false, true}) {
               BridgeFixture fixture(rdna3, lanes);
+              ASSERT_FALSE(::testing::Test::HasFatalFailure());
               const unsigned last = lanes - 1;
               const uint64_t exec_mask = empty ? 0 : 1ULL << last;
               const uint64_t old_condition = lanes == 32 ? UINT32_MAX : UINT64_MAX;
@@ -3221,6 +3287,7 @@ TEST(ArithBridgeTest, DivisionDx10ClampAndFixupStatus) {
           if (divide_by_zero && operation != 2)
             continue;
           BridgeFixture fixture(true);
+          ASSERT_FALSE(::testing::Test::HasFatalFailure());
           fixture.wave->set_mode_raw(0xf0u | (dx10 ? Wavefront::DX10_CLAMP_BIT : 0));
           fixture.wave->set_exec(1);
           fixture.wave->set_trapsts(0x20);
@@ -3271,6 +3338,7 @@ TEST(ArithBridgeTest, EmptyScaleValidatesBeforeCommittingCondition) {
   for (uint32_t lanes : {32u, 64u}) {
     for (bool unsupported : {false, true}) {
       BridgeFixture fixture(true, lanes, {ArithmeticSemantics::BitExactEmpiricalNoFpStatus});
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       fixture.wave->set_mode_raw(0xd0); // OMOD active: FP32 output flushing, IEEE clear.
       fixture.wave->set_exec(0);
       uint64_t condition = 0x1234;
@@ -3295,6 +3363,7 @@ TEST(ArithBridgeTest, HalfFixupGuestRoundingNanClampAndPartialWrites) {
             for (bool nan : {false, true})
               for (bool ieee : {false, true}) {
                 BridgeFixture fixture(rdna3, lanes);
+                ASSERT_FALSE(::testing::Test::HasFatalFailure());
                 const unsigned last = lanes - 1;
                 fixture.wave->set_exec(1ULL << last);
                 fixture.wave->set_mode_raw(0xf0 | (rounding << 2) | (dx10 ? 0x100 : 0) |

@@ -88,7 +88,6 @@ protected:
     config.functional_quantum = 1;
     ASSERT_NO_FATAL_FAILURE(
         rocjitsu::test::initialize_compute_unit(cu, "cbranch_fork_join_cu", config, &memory, &l2));
-    ASSERT_NE(cu, nullptr);
     wf = cu->dispatch_wf(0, kCodeBase, 104, 256);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(~uint64_t{0});
