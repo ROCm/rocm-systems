@@ -7,10 +7,12 @@
 # (counters every pass, ATT once).
 #
 # Combinations that are not exercised here, by design:
-#   - counters + PC sampling: Constraint5, they cannot be configured together
 #   - counters + SPM: both use SQ hardware on the same dispatch
 #   - ATT + SPM: both inject AQL packets around the dispatch
 #   - 3-/4-way mixes inherit those conflicts
+#
+# counters + PC sampling can share a replay when they use separate contexts and
+# separate passes. Same-context configure remains forbidden (Constraint5).
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
@@ -137,10 +139,44 @@ add_kr_lc_test(
     DISABLED
     ${IS_SPM_DISABLED})
 
-# PC sampling is agent-wide; the replay loop applies the local stop to the agent session.
+# PC sampling is agent-wide; the replay loop applies the local stop/start to the agent
+# session before each pass. These cases mirror the dispatch-counter matrix and assert
+# sample presence/absence rather than only the toggle API.
+add_kr_lc_test(
+    test-kernel-replay-local-context-pc-sampling-all-passes ENVIRONMENT
+    "KR_LC_SERVICES=pc-sampling;KR_LC_PASSES=4;KR_LC_STOP_PASS=-1" DISABLED
+    ${IS_PC_SAMPLING_DISABLED})
+
+add_kr_lc_test(
+    test-kernel-replay-local-context-pc-sampling-stop-from-start ENVIRONMENT
+    "KR_LC_SERVICES=pc-sampling;KR_LC_PASSES=4;KR_LC_STOP_PASS=0" DISABLED
+    ${IS_PC_SAMPLING_DISABLED})
+
 add_kr_lc_test(
     test-kernel-replay-local-context-pc-sampling-stop-after-0 ENVIRONMENT
     "KR_LC_SERVICES=pc-sampling;KR_LC_PASSES=4;KR_LC_STOP_PASS=1" DISABLED
+    ${IS_PC_SAMPLING_DISABLED})
+
+add_kr_lc_test(
+    test-kernel-replay-local-context-pc-sampling-stop-then-restart ENVIRONMENT
+    "KR_LC_SERVICES=pc-sampling;KR_LC_PASSES=4;KR_LC_STOP_PASS=1;KR_LC_START_PASS=2"
+    DISABLED ${IS_PC_SAMPLING_DISABLED})
+
+# Separate contexts: counters every pass, PC sampling only on pass 0. Validates the
+# pass-boundary stop/flush before later counter-only passes.
+add_kr_lc_test(
+    test-kernel-replay-local-context-counters-pc-sampling-pass-0
+    ENVIRONMENT
+    "KR_LC_SERVICES=counters,pc-sampling;KR_LC_KEEP=counters;KR_LC_PASSES=4;KR_LC_STOP_PASS=1"
+    DISABLED
+    ${IS_PC_SAMPLING_DISABLED})
+
+# Separate contexts: counters every pass, PC sampling locally stopped before pass 0.
+add_kr_lc_test(
+    test-kernel-replay-local-context-counters-pc-sampling-stopped
+    ENVIRONMENT
+    "KR_LC_SERVICES=counters,pc-sampling;KR_LC_KEEP=counters;KR_LC_PASSES=4;KR_LC_STOP_PASS=0"
+    DISABLED
     ${IS_PC_SAMPLING_DISABLED})
 
 # Design example: counters every pass, ATT pass 0 only.

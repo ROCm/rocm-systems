@@ -579,14 +579,18 @@ tool_fini(void*)
 
     if(wants("pc-sampling"))
     {
+        const bool keep          = kept("pc-sampling");
+        const int  expect_passes = keep ? static_cast<int>(g_passes) : expected_dispatch_records();
+        const int  got           = g_pcs_samples.load();
         fprintf(stderr,
-                "[lc] pc-sampling samples=%d local_starts=%d local_stops=%d "
-                "(agent-wide service; local start/stop is a no-op for collection)\n",
-                g_pcs_samples.load(),
+                "[lc] pc-sampling samples=%d expect_collecting_passes=%d "
+                "local_starts=%d local_stops=%d\n",
+                got,
+                expect_passes,
                 g_local_starts.load(),
                 g_local_stops.load());
-        const bool should_stop  = g_stop_pass >= 0 && !kept("pc-sampling");
-        const bool should_start = g_start_pass >= 0 && !kept("pc-sampling");
+        const bool should_stop  = g_stop_pass >= 0 && !keep;
+        const bool should_start = g_start_pass >= 0 && !keep;
         if(should_stop && g_local_stops.load() < 1)
         {
             fprintf(stderr, "[lc] FAIL: pc-sampling local_stop was not invoked successfully\n");
@@ -595,6 +599,20 @@ tool_fini(void*)
         if(should_start && g_local_starts.load() < 1)
         {
             fprintf(stderr, "[lc] FAIL: pc-sampling local_start was not invoked successfully\n");
+            ok = false;
+        }
+        // The busy bump kernel is long enough for host-trap sampling. Zero samples with at least
+        // one enabled pass means the agent session never collected; non-zero samples with every
+        // pass locally stopped means the pass-boundary stop failed.
+        if(expect_passes > 0 && got == 0)
+        {
+            fprintf(stderr, "[lc] FAIL: pc-sampling produced no samples on enabled passes\n");
+            ok = false;
+        }
+        if(expect_passes == 0 && got != 0)
+        {
+            fprintf(stderr,
+                    "[lc] FAIL: pc-sampling collected while locally stopped for every pass\n");
             ok = false;
         }
     }

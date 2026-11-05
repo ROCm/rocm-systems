@@ -10,7 +10,8 @@ set(ROCPROFILER_LIB_PC_SAMPLING_TEST_SOURCES
     query_configuration.cpp
     multiple_contexts_one_per_agent.cpp
     queue_hooks_test.cpp
-    local_context.cpp)
+    local_context.cpp
+    replay_session_sync.cpp)
 set(ROCPROFILER_LIB_PC_SAMPLING_TEST_HEADERS pc_sampling_internals.hpp)
 
 add_executable(pcs-test)
