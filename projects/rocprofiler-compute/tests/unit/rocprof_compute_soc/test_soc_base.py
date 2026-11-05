@@ -635,7 +635,7 @@ def test_same_bucket_priority_resolves_gfx115x_policy(gpu_arch):
     assert "17.1.0" in ids
 
 
-@pytest.mark.parametrize("gpu_arch", ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942"])
+@pytest.mark.parametrize("gpu_arch", ["gfx908", "gfx90a", "gfx942"])
 def test_same_bucket_priority_hbm_traffic_ids_match_yaml(gpu_arch):
     """Policy metric IDs must resolve to 'HBM Read Traffic' and
     'HBM Write and Atomic Traffic' in the analysis YAMLs.  Guards against

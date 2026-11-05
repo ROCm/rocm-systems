@@ -301,7 +301,7 @@ To load a file:
 
 1. Resolve the `inherit` path relative to the current file's directory.
 2. Load the base file recursively (supporting chains:
-   `gfx950 -> gfx942 -> gfx940 -> gfx90a -> gfx908`).
+   `gfx950 -> gfx942 -> gfx90a -> gfx908`).
 3. Deep-merge the current file's content on top of the base.
 4. After merge, scan for any `!remove` markers and delete those keys.
 
@@ -363,7 +363,7 @@ cutover; it would only add a second path to maintain. The risk is covered instea
 - Collectable schema: valid collectable definitions pass validation, missing `id` or
   `formula` raises errors, counter list is inferred from formula when not explicit.
 - Inheritance loader: single-level inheritance, multi-level chain (4+ deep, matching
-  the real `gfx908 -> gfx90a -> gfx940 -> gfx942` chain), cycle detection error.
+  the real `gfx908 -> gfx90a -> gfx942 -> gfx950` chain), cycle detection error.
 - Merge operations: key modification (override), key addition (new metric in child),
   key removal (`!remove` deletes from merged result), deep-merge of maps,
   `data source` list matched by `metric_table.id`, new list entry appended.
@@ -392,9 +392,7 @@ New module `src/utils/layer2_parser.py`.
    ARCH_INHERITANCE = {
        "gfx908": None,         # CDNA base -- no parent
        "gfx90a": "gfx908",
-       "gfx940": "gfx90a",     # each arch inherits from its immediate predecessor
-       "gfx941": "gfx940",
-       "gfx942": "gfx940",
+       "gfx942": "gfx90a",     # each arch inherits from its immediate predecessor
        "gfx950": "gfx942",
        "gfx115x": None,        # RDNA base -- no parent
        "gfx1250": None,        # own base -- shares no file with gfx115x
@@ -451,7 +449,7 @@ class MetricLibrary:
 
 ### Tests
 
-- Integration test: load a synthetic family chain (`gfx908/` -> `gfx940/` ->
+- Integration test: load a synthetic family chain (`gfx908/` -> `gfx90a/` ->
   `gfx942/`) from test fixtures. Verify: correct number of metrics, inheritance
   overrides applied, variable definitions present, duplicate id raises error.
 - Counter extraction equivalence: `get_counters_for_metrics()` returns the same
@@ -634,9 +632,7 @@ metric_library/          # sibling of analysis_configs/ (see Stage 3)
     1800_l2_cache_per_channel.yaml
     2100_pc_sampling.yaml
   gfx90a/                # inherits gfx908, overrides only what differs
-  gfx940/                # inherits gfx90a
-  gfx941/                # inherits gfx940 (2 files differ)
-  gfx942/                # inherits gfx940
+  gfx942/                # inherits gfx90a
   gfx950/                # inherits gfx942, adds 3000_mem_bw.yaml
   gfx115x/               # RDNA base -- complete standalone definitions
     variables.yaml
@@ -661,14 +657,11 @@ express only what changed. This chain-based pattern applies to future families
    format with string IDs, single formulas, and descriptions. This is the largest
    single-arch conversion but produces the foundation for the inheritance chain.
 2. **gfx90a** -- inherits gfx908. Override files for metrics added or modified in MI200.
-3. **gfx940** -- inherits gfx90a. MI300 generation -- adds MFMA FLOPs variants,
+3. **gfx942** -- inherits gfx90a. MI300 generation -- adds MFMA FLOPs variants,
    modifies formulas for new counter names.
-4. **gfx941** -- inherits gfx940. Differs in 2 files (one unit override and three
-   roofline formulas). The smallest override, ideal for validating the inheritance
-   mechanism.
-5. **gfx942, gfx950** -- inherits gfx940/gfx942 respectively.
-6. **gfx115x** -- RDNA base. Separate standalone definitions, no inheritance from CDNA.
-7. **gfx1250** -- own base. Separate standalone definitions.
+4. **gfx950** -- inherits gfx942.
+5. **gfx115x** -- RDNA base. Separate standalone definitions, no inheritance from CDNA.
+6. **gfx1250** -- own base. Separate standalone definitions.
 
 Each step is validated: run the golden-file comparison (old path vs new path) for the
 migrated architecture before proceeding to the next.
@@ -782,8 +775,8 @@ sets:
 - **References only.** A set entry references a metric id and carries no metric fields,
   so a metric is still defined exactly once per architecture. Every referenced id must
   exist on that architecture.
-- **Inheritance.** `sets.yaml` follows the same `inherit` chain as the metric files; for
-  example, gfx941 and gfx942 use gfx940's sets unchanged.
+- **Inheritance.** `sets.yaml` follows the same `inherit` chain as the metric files, so
+  a child arch uses its parent's sets unless it overrides them.
 - **Single-pass check.** Validation uses `get_counters_for_metrics()` to confirm that each
   set's counters fit in one pass.
 - **Transition.** Production `--set` and `--list-sets` keep reading

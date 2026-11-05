@@ -193,7 +193,7 @@ tables:
     metrics:
       - id: compute.valu_flops
       - id: compute.mfma_flops_f8
-        archs: [gfx940, gfx941, gfx942, gfx950]
+        archs: [gfx942, gfx950]
       - id: compute.mfma_flops_bf16
       - id: compute.mfma_flops_f16
       - id: compute.mfma_flops_f32

@@ -38,7 +38,7 @@ The analysis configs use a 2-level grouping structure:
 
 Within each analysis config, metrics are further grouped into sub-categories.
 
-Currently, rocprof-compute supports 8 architecture configurations (gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950, gfx115x and gfx1250) across a total of 141 analysis config YAML files (37 distinct file names).
+When this design was written, rocprof-compute supported 8 architecture configurations (gfx908, gfx90a, two pre-production MI300 variants, gfx942, gfx950, gfx115x and gfx1250) across a total of 141 analysis config YAML files (37 distinct file names).
 
 ```mermaid
 flowchart LR
@@ -125,20 +125,20 @@ This problem is specific to tool developers — see [Design note: developer-focu
 - PR review burden scales linearly with the number of architectures.
 - Platform enabling for a new arch requires duplicating 18+ files and manually patching differences.
 
-As an example, the most recent architecture addition (gfx950) required adding 19 new YAML files. A single metric formula fix that applies across CDNA3 variants (gfx940, gfx941, gfx942) requires 3 identical edits and 3 review cycles.
+As an example, the most recent architecture addition (gfx950) required adding 19 new YAML files. A single metric formula fix that applies across CDNA archs (gfx908, gfx90a, gfx942, gfx950) requires 4 identical edits and 4 review cycles.
 
 Because analysis configs are organized per architecture, every metric that applies to multiple architectures is fully copied. Static analysis across all files shows:
 
 - **69.1% of metric definitions are duplicates** (1,862 / 2,693)
 - **46.4% of descriptions are duplicates** (1,135 / 2,448)
 
-There is no inheritance or override mechanism. Fixing a formula in gfx940 does not fix it in gfx941, gfx942, or gfx950.
+There is no inheritance or override mechanism. Fixing a formula in gfx90a does not fix it in gfx942 or gfx950.
 
 ```
   "VALU Utilization" defined 7 times (3 shown):
 
   gfx908/  ──►  VALU Utilization { formula, unit, description, peak }
-  gfx941/  ──►  VALU Utilization { ... unit="GFLOPs" }  (unit drifted)
+  gfx9xx/  ──►  VALU Utilization { ... unit="GFLOPs" }  (unit drifted)
   gfx115x/ ──►  VALU Utilization { ... }  (different formula — different arch family)
 ```
 
@@ -151,14 +151,14 @@ All four types of information listed in System Context (metric specification, me
 - A change to how a metric is displayed requires opening the same file as a change to how it is calculated.
 - A change to any single concern carries risk of unintended impact on other concerns in the same location.
 
-For example, the current `MFMA FLOPs (F8)` unit string in the System Speed-of-Light panel has drifted between gfx940 (`"GFLOP/s"`) and gfx941 (`"GFLOPs"`) — the same metric with the same formula reports different units. This drift was not caught because the change was bundled with unrelated modifications in the same file.
+For example, the current `MFMA FLOPs (F8)` unit string in the System Speed-of-Light panel had drifted between two MI300 configs (`"GFLOP/s"` and `"GFLOPs"`) — the same metric with the same formula reports different units. This drift was not caught because the change was bundled with unrelated modifications in the same file.
 
 ```yaml
-# gfx940
+# one MI300 config
 MFMA FLOPs (F8):
   unit: "GFLOP/s"
 
-# gfx941
+# another MI300 config
 MFMA FLOPs (F8):
   unit: "GFLOPs"    # same metric, same formula, different unit string
 ```
@@ -261,7 +261,7 @@ flowchart LR
 |---|---|---|---|---|---|
 | **Layer 1** Counter Registry | Raw PMC counter definitions per architecture (`sdk_config.yaml`) | Nothing (ground truth) | Already exists as the SDK config. No structural change needed. | — | — |
 | **Layer 1.5** Collectables | Sub-expressions of metrics whose counters fit in a single hardware pass | Layer 1 counter names | - Each collectable is a formula fragment that produces a correct result within one hardware pass<br>- Metrics whose full formula exceeds the pass limit are composed of collectables<br>- ⚠️ Target: integrate into `sdk_config.yaml` as part of the SDK counter definitions. Requires collaboration with the SDK team. Until then, defined separately by rocprof-compute. | — | — |
-| **Layer 2** Metric Library | Metric specification, documentation, profiling sets | Layer 1 counter names, Layer 1.5 collectables | - One file per hardware concept (e.g., SQ, TCP, TCC), multiple metrics per file<br>- Profiling sets are a hardware concept within Layer 2: one file per set, referencing metrics by id, constrained by hardware pass limits. Both developers and users may author sets.<br>- Per-architecture files are preserved, organized as family base + arch overrides using YAML inheritance (`inherit` key) — see [YAML inheritance](#yaml-inheritance)<br>- The first architecture in each family serves as the base (gfx908 for CDNA, gfx115x for RDNA); inheritance chains mirror hardware lineage (e.g., `gfx908 -> gfx90a -> gfx940 -> gfx942 -> gfx950`)<br>- Each metric has a canonical `name` — the stable, unambiguous display name for the metric concept<br>- Built-in sets may optionally have a matching Layer 3 view for structured display; user-defined sets get default flat rendering<br>- ⚠️ Default display behavior is unresolved — see [OQ2](#oq2--default-display-for-set-based-profiling) | One file for all metrics, similar to SDK counter yaml. | [[FR2]](#fr2) requires a metric is defined exactly once. Single-place definition eliminates the per-architecture duplication identified in [[PS2]](#ps2-per-architecture-duplication-makes-metric-maintenance-costly-and-error-prone), satisfying FR2.2. |
+| **Layer 2** Metric Library | Metric specification, documentation, profiling sets | Layer 1 counter names, Layer 1.5 collectables | - One file per hardware concept (e.g., SQ, TCP, TCC), multiple metrics per file<br>- Profiling sets are a hardware concept within Layer 2: one file per set, referencing metrics by id, constrained by hardware pass limits. Both developers and users may author sets.<br>- Per-architecture files are preserved, organized as family base + arch overrides using YAML inheritance (`inherit` key) — see [YAML inheritance](#yaml-inheritance)<br>- The first architecture in each family serves as the base (gfx908 for CDNA, gfx115x for RDNA); inheritance chains mirror hardware lineage (e.g., `gfx908 -> gfx90a -> gfx942 -> gfx950`)<br>- Each metric has a canonical `name` — the stable, unambiguous display name for the metric concept<br>- Built-in sets may optionally have a matching Layer 3 view for structured display; user-defined sets get default flat rendering<br>- ⚠️ Default display behavior is unresolved — see [OQ2](#oq2--default-display-for-set-based-profiling) | One file for all metrics, similar to SDK counter yaml. | [[FR2]](#fr2) requires a metric is defined exactly once. Single-place definition eliminates the per-architecture duplication identified in [[PS2]](#ps2-per-architecture-duplication-makes-metric-maintenance-costly-and-error-prone), satisfying FR2.2. |
 | **Layer 3** Display / View | Metric grouping, display configuration | Layer 2 metric ids | - One file per view (what the user sees as a panel or block)<br>- Each view references metrics by id and declares which to show, in what order, and how to render<br>- A view may declare an optional `label` override for a metric — the same metric concept intentionally appears under different names in different panel contexts (e.g., `"L2 Cache Hit Rate"` in a speed-of-light panel vs. `"Hit Rate"` in a memory chart). Static analysis found 234 such cases within a single architecture. If no `label` is declared, the canonical `name` from Layer 2 is used.<br>- **View-level `archs:`** — entire view is arch-conditional<br>- **Metric-level `archs:`** — individual entries skipped for unsupported archs<br>- ⚠️ What views exist and what they contain requires customer input — see [OQ1](#oq1--layer-3-view-definition-requires-customer-input)<br>- ⚠️ Default display for set-based analysis is unresolved — see [OQ2](#oq2--default-display-for-set-based-profiling) | Drive grouping and display directly in code — no view YAML layer. | [[FR1]](#fr1) (FR1.1) requires grouping to be explicitly declared, not inferred. Hardcoding panel structure in code makes grouping implicit and non-auditable by non-developers, and every display change requires a code change and a release. |
 
 ### YAML inheritance
@@ -289,20 +289,18 @@ flowchart LR
     gfx1250["gfx1250 (own base)"]
 
     gfx908 --> gfx90a
-    gfx90a --> gfx940
-    gfx940 --> gfx941
-    gfx940 --> gfx942
+    gfx90a --> gfx942
     gfx942 --> gfx950
 ```
 
-The first architecture in each family serves as the base -- its files are the complete, standalone definitions. There is no abstract `_base/` directory. CDNA and RDNA share no content. gfx1250 is a third standalone base: it shares no identical file with gfx115x. Each arch inherits from its immediate predecessor in the hardware lineage, not from the family root. This minimizes the diff at each step: gfx90a overrides only what changed from gfx908, gfx940 overrides only what changed from gfx90a, etc. The same chain-based pattern applies to future families (gfx12xx).
+The first architecture in each family serves as the base -- its files are the complete, standalone definitions. There is no abstract `_base/` directory. CDNA and RDNA share no content. gfx1250 is a third standalone base: it shares no identical file with gfx115x. Each arch inherits from its immediate predecessor in the hardware lineage, not from the family root. This minimizes the diff at each step: gfx90a overrides only what changed from gfx908, gfx942 overrides only what changed from gfx90a, etc. The same chain-based pattern applies to future families (gfx12xx).
 
 Files identical to the parent arch do not exist in the child directory; they are inherited implicitly. Files that exist contain only the `inherit` key plus additions, modifications, or removals.
 
-**Example:** gfx941 differs from gfx940 in two files. With inheritance, the first of them becomes:
+**Example:** a child arch whose System Speed-of-Light panel differs from its parent's only in one unit string. With inheritance, that file becomes:
 
 ```yaml
-inherit: ../gfx940/0200_system_speed_of_light.yaml
+inherit: ../gfx942/0200_system_speed_of_light.yaml
 
 Panel Config:
   data source:
@@ -313,7 +311,7 @@ Panel Config:
           unit: GFLOPs
 ```
 
-This 7-line file replaces a 300+ line duplicate. The deep merge replaces only the `unit` field within `MFMA FLOPs (F8)`, preserving all other content from gfx940.
+This 7-line file replaces a 300+ line duplicate. The deep merge replaces only the `unit` field within `MFMA FLOPs (F8)`, preserving all other content from gfx942.
 
 ### How the layers connect
 
@@ -440,7 +438,7 @@ render: roofline_chart
 metrics:
   - mem.hbm_bandwidth                        # available on all archs in scope
   - mem.l2_cache_bandwidth
-  - compute.mfma_flops_f8    archs: [gfx940, gfx941, gfx942, gfx950]  # metric-level: not on gfx908/gfx90a
+  - compute.mfma_flops_f8    archs: [gfx942, gfx950]                  # metric-level: not on gfx908/gfx90a
   - compute.mfma_flops_f6f4  archs: [gfx950]                           # metric-level: gfx950 only
   - ...
 
