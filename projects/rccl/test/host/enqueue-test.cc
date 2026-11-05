@@ -2316,6 +2316,17 @@ TEST_F(EnqueueMicrotest, P2pBatchEligible_Gfx942FourNode_ThresholdDefaultVersusS
   EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
 }
 
+TEST_F(EnqueueMicrotest, P2pBatchEligible_Gfx950_UnsetThresholdFollowsNodeCount) {
+  // 128 KiB is above the 64 KiB arch default. Multi-node gfx950 turns batching
+  // on with the threshold left unset. BatchComm leaves nRanks at 0, so passing
+  // that instead of nNodes would fuse the 16-node case.
+  constexpr ssize_t perPeer = 128 * 1024;
+  BatchComm at16(/*nNodes=*/16, "gfx950");
+  EXPECT_FALSE(rcclP2pBatchEligible(at16.get(), perPeer, perPeer));
+  BatchComm at15(/*nNodes=*/15, "gfx950");
+  EXPECT_TRUE(rcclP2pBatchEligible(at15.get(), perPeer, perPeer));
+}
+
 // ===========================================================================
 // rcclAddonLaunchBegin (enqueue.cc:2092) / rcclAddonLaunchEnd (:2125) -- the
 // bracket an addon collective wraps its own launch in.
