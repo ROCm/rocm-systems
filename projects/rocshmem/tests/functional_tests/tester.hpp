@@ -204,6 +204,8 @@
   X(QpPutNbi,                  159)  \
   X(SdmaPingPong,              160)  \
   X(SdmaPutNbi,                161)  \
+  X(SdmaAbcePingPong,          196)  \
+  X(SdmaAbcePutNbi,            197)  \
   X(BufferRegisterSymmetric,   162)  \
   X(TilePutWaveRowMajor,       163)  \
   X(TilePutWaveColumnMajor,    164)  \

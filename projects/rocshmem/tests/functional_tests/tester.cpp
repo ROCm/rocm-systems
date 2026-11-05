@@ -96,6 +96,10 @@
 #include "sdma_ping_pong_tester.hpp"
 #include "sdma_put_nbi_tester.hpp"
 #endif
+#if defined(USE_ABCE_SDMA)
+#include "sdma_abce_ping_pong_tester.hpp"
+#include "sdma_abce_put_nbi_tester.hpp"
+#endif
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -1194,6 +1198,17 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case SdmaPutNbiPollTestType:
       test_name = "SDMA-Direct Put NBI Poll";
       testers.push_back(new SdmaPutNbiTester(args));
+      break;
+#endif
+#if defined(USE_ABCE_SDMA)
+    case SdmaAbcePingPongTestType:
+      test_name = (args.num_wgs > 1) ? "SDMA-ABCE PingPong (W>1: bidir BW)"
+                                     : "SDMA-ABCE PingPong";
+      testers.push_back(new SdmaAbcePingPongTester(args));
+      break;
+    case SdmaAbcePutNbiTestType:
+      test_name = "SDMA-ABCE Put NBI";
+      testers.push_back(new SdmaAbcePutNbiTester(args));
       break;
 #endif
     default:

@@ -36,6 +36,13 @@ option(ASAN "Enable AddressSanitizer" ${ASAN})
 ###############################################################################
 # SOURCES
 ###############################################################################
+# ABCE copy-engine testers: opt-in (needs the from-source HIP that ships
+# hip/hip_ext_copy_engine.h). Enable with -DUSE_ABCE_SDMA=ON and a HIP whose
+# include tree has the ABCE copy-engine headers (e.g. CMAKE_PREFIX_PATH or
+# -I pointing at the from-source HIP prefix). Declared before target_sources so
+# the generator expression below sees it.
+option(USE_ABCE_SDMA "Build the ABCE copy-engine ping-pong / put-nbi testers" OFF)
+
 add_executable(${PROJECT_NAME} "")
 
 target_include_directories(
@@ -84,7 +91,21 @@ target_sources(
     $<$<BOOL:${USE_GDA}>:qp_put_nbi_tester.cpp>
     $<$<BOOL:${USE_SDMA}>:sdma_ping_pong_tester.cpp>
     $<$<BOOL:${USE_SDMA}>:sdma_put_nbi_tester.cpp>
+    $<$<BOOL:${USE_ABCE_SDMA}>:sdma_abce_ping_pong_tester.cpp>
+    $<$<BOOL:${USE_ABCE_SDMA}>:sdma_abce_put_nbi_tester.cpp>
 )
+
+if(USE_ABCE_SDMA)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE USE_ABCE_SDMA)
+  # hipExtCopyEngineGetDeviceHandles lives only in the from-source HIP (the
+  # nightly /opt/rocm libamdhip64 does not export it), and the --hip-link driver
+  # otherwise links the nightly libamdhip64 by absolute path. PROTOTYPE: hardcode
+  # the from-source lib as an explicit full-path link input so the symbol
+  # resolves there, and rpath it. (Image path; this build only runs in-image.)
+  target_link_options(${PROJECT_NAME} PRIVATE
+                      "/opt/hip-abce/lib/libamdhip64.so"
+                      "-Wl,-rpath,/opt/hip-abce/lib")
+endif()
 
 ###############################################################################
 # ROCSHMEM
