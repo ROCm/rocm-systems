@@ -892,7 +892,7 @@ function(rccl_define_micro_source_lists)
     fakes/utils_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
-    
+
   # rccl-UnitTestsMicroDdaIpc -- src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu. Own binary:
   # rccl-UnitTestsMicro links fakes/dda_fakes.cc, which defines the same ncclAllReduceDdaIpc* symbols.
   set(TEST_MICRO_DDA_IPC_SOURCE_FILES
@@ -1106,7 +1106,7 @@ function(rccl_add_micro_binary _name)
       endif()
     endif()
   else()
-    # Mirror add_test_executable(): record for the HOST_TEST_COVERAGE loop.
+    # Mirror add_test_executable(): record for the standalone coverage loop.
     if(_ramb_OBJECT)
       list(APPEND HOST_TEST_OBJECT_LIBS ${_name})
       set(HOST_TEST_OBJECT_LIBS "${HOST_TEST_OBJECT_LIBS}" PARENT_SCOPE)
@@ -1448,8 +1448,8 @@ endfunction()
 # Standalone Coverage
 # =====================================================================
 function(rccl_standalone_coverage)
-  option(HOST_TEST_COVERAGE "Build the host-only test binaries with llvm source-based coverage" ON)
-  if(HOST_TEST_COVERAGE)
+  option(ENABLE_CODE_COVERAGE "Enable code coverage" OFF)
+  if(ENABLE_CODE_COVERAGE)
     # HOST_TEST_BINARIES is populated by add_test_executable() and by
     # rccl_add_micro_binary(), so new test binaries are instrumented automatically.
     foreach(_cov_tgt ${HOST_TEST_BINARIES})
@@ -1638,6 +1638,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     RCCL_GRAPH_GEN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rccl_graph_gen.cc"
     PARAM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/param/param_registry.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+# wrap-test.cc includes rccl_wrap.cc. Production librccl always compiles the LL128
+# arm; without this the broadcast protocol tests exercise the compiled-out fallback.
+set_source_files_properties(wrap-test.cc PROPERTIES COMPILE_DEFINITIONS ENABLE_LL128)
 
 # Fake ibverbs provider dv libraries for dv_symbols_test.cc; the SONAME is what the builders' dlopen matches.
 # The test finds them beside its own executable, in the build tree and in an install.
@@ -2266,6 +2269,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTopo
     CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/connect.cc"
     RINGS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rings.cc"
     TREES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/trees.cc"
+    TOPO_EXPL_MODELS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tools/topo_expl/models"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_topo.yaml")
 
 # ---------------------------------------------------------------------------
