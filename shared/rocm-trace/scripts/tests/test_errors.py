@@ -9,12 +9,12 @@ import yaml
 
 from conftest import DATA, ROCM_TRACE_INCLUDE, generate_files, run_cli
 from rocm_trace_gen.config import EXTRA_KEYWORDS, ConfigError
-from rocm_trace_gen.emit import GenerateError
+from rocm_trace_gen.emit import MAX_FIELDS, GenerateError
 from rocm_trace_gen.parse import ParseError
 
 
-def _write(tmp_path, data):
-    path = tmp_path / "config.yaml"
+def _write(tmp_path, data, name="config.yaml"):
+    path = tmp_path / name
     path.write_text(yaml.safe_dump(data, sort_keys=False))
     return path
 
@@ -29,6 +29,21 @@ def _with_api(name, entry):
     return data
 
 
+def _one_table(tmp_path, header, apis=None):
+    """A configuration for a one-table header written to tmp_path."""
+    (tmp_path / "one_table.h").write_text(header)
+    config = {
+        "version": 1,
+        "provider": "one_provider",
+        "output_name": "one_probes",
+        "includes": ["one_table.h"],
+        "tables": [{"name": "OneTable", "size_member": "size"}],
+    }
+    if apis:
+        config["apis"] = apis
+    return _write(tmp_path, config)
+
+
 GENERATE_ERRORS = [
     (
         _with_api("fakeNotAnEntry", {"level": "verbose"}),
@@ -38,14 +53,22 @@ GENERATE_ERRORS = [
         _with_api("fakeAlloc", {"out": ["pointer"]}),
         "out names 'pointer', which is not a parameter",
     ),
+    (
+        _with_api("fakeReserved", {"out": ["exception"]}),
+        "which is not a parameter; RC-API-1 names this parameter arg_exception",
+    ),
     (_with_api("fakeName", {"out": ["len"]}), "out parameter 'len' is not a pointer"),
     (
-        _with_api("fakeAlloc", {"strings": ["size"]}),
-        "strings names 'size', which is not a char pointer",
+        _with_api("fakeAlloc", {"out": ["ptr"], "strings": ["size"]}),
+        "strings names 'size', which is not a char-pointer output",
     ),
     (
-        _with_api("fakeOpen", {}),
-        "parameter 'handle' has no field mapping: struct 'fakeHandle'",
+        _with_api("fakeLoad", {"strings": ["path"]}),
+        "const char* inputs are recorded as strings already",
+    ),
+    (
+        _with_api("fakeAlloc", {"uncapped": ["size"]}),
+        "uncapped names 'size', which is not a string field",
     ),
     (
         _with_api("fakeWide", {"out": ["props"]}),
@@ -67,11 +90,57 @@ def test_generate_errors(tmp_path, data, message):
 
 def test_all_errors_are_reported_together(tmp_path):
     data = _base()
-    data["apis"]["fakeOpen"] = {}
+    data["apis"]["fakeLoad"] = {"strings": ["path"]}
     data["apis"]["fakeNotAnEntry"] = {"level": "verbose"}
     with pytest.raises(GenerateError) as err:
         generate_files(_write(tmp_path, data))
     assert len(err.value.errors) == 2
+
+
+def test_unmappable_parameter_needs_omit(tmp_path):
+    header = (
+        "typedef int (*t_oneCall)(long double value, int count);\n"
+        "struct OneTable { unsigned long size; t_oneCall oneCall_fn; };\n"
+    )
+    with pytest.raises(GenerateError) as err:
+        generate_files(_one_table(tmp_path, header), [f"-I{tmp_path}"])
+    assert any("parameter 'value' has no field mapping" in e for e in err.value.errors)
+
+    files = generate_files(
+        _one_table(tmp_path, header, {"oneCall": {"omit": ["value"]}}),
+        [f"-I{tmp_path}"],
+    )
+    assert '"value"' not in files["one_probes.cpp"]
+    assert '"count"' in files["one_probes.cpp"]
+
+
+def test_duplicate_field_names_are_rejected(tmp_path):
+    header = (
+        "typedef struct oneDim3 { unsigned x, y, z; } oneDim3;\n"
+        "typedef int (*t_oneLaunch)(oneDim3 grid, int grid_x);\n"
+        "struct OneTable { unsigned long size; t_oneLaunch oneLaunch_fn; };\n"
+    )
+    with pytest.raises(GenerateError) as err:
+        generate_files(_one_table(tmp_path, header), [f"-I{tmp_path}"])
+    assert any("two fields named 'grid_x'" in e for e in err.value.errors)
+
+    path = _one_table(tmp_path, header, {"oneLaunch": {"omit": ["grid_x"]}})
+    assert '"grid_x"' in generate_files(path, [f"-I{tmp_path}"])["one_probes.cpp"]
+
+
+def test_too_many_fields_are_rejected(tmp_path):
+    members = " ".join(f"int m{i};" for i in range(MAX_FIELDS + 1))
+    header = (
+        f"typedef struct oneBig {{ {members} }} oneBig;\n"
+        "typedef int (*t_oneBig)(oneBig big);\n"
+        "struct OneTable { unsigned long size; t_oneBig oneBig_fn; };\n"
+    )
+    with pytest.raises(GenerateError) as err:
+        generate_files(_one_table(tmp_path, header), [f"-I{tmp_path}"])
+    assert any(
+        f"would have {MAX_FIELDS + 1} fields; TraceLogging allows {MAX_FIELDS}" in e
+        for e in err.value.errors
+    )
 
 
 CONFIG_ERRORS = [
@@ -87,7 +156,7 @@ CONFIG_ERRORS = [
         _with_api("fakeAlloc", {"level": "debug"}),
         "level must be one of information, verbose",
     ),
-    (_with_api("fakeAlloc", {"out": ["result"]}), "the result is always recorded"),
+    (_with_api("fakeAlloc", {"out": ["result"]}), "result is the return value"),
     (
         _with_api("fakeAlloc", {"out": ["ptr"], "omit": ["ptr"]}),
         "ptr both omitted and recorded",
@@ -95,6 +164,7 @@ CONFIG_ERRORS = [
     (_with_api("fakeAlloc", {"outs": ["ptr"]}), "unknown key(s) outs"),
     ({**_base(), "version": 2}, "only version 1 is supported"),
     ({**_base(), "extra": 1}, "unknown key(s) extra"),
+    ({**_base(), "capture_level": "not an identifier"}, "expected an identifier"),
     ({k: v for k, v in _base().items() if k != "provider"}, "missing provider"),
     ({**_base(), "includes": ["fake table.h"]}, "not a header path"),
     (
@@ -143,13 +213,11 @@ def test_header_errors_fail_the_parse(tmp_path):
 
 
 def test_cli_reports_errors_and_fails(tmp_path, capsys):
-    path = _write(tmp_path, _with_api("fakeOpen", {}))
-    assert (
-        run_cli("--config", str(path), "--output-dir", str(tmp_path), "-I", str(DATA))
-        == 1
-    )
+    path = _write(tmp_path, _with_api("fakeLoad", {"strings": ["path"]}))
+    args = ["--config", str(path), "--output-dir", str(tmp_path), "-I", str(DATA)]
+    assert run_cli(*args) == 1
     err = capsys.readouterr().err
-    assert "parameter 'handle' has no field mapping" in err and "1 error(s)" in err
+    assert "inputs are recorded as strings already" in err and "1 error(s)" in err
     assert not (tmp_path / "fake_probes.cpp").exists()
 
 
@@ -159,24 +227,11 @@ def test_keywords_match_values_header():
     assert sorted(names) == sorted(("API",) + EXTRA_KEYWORDS)
 
 
-def test_duplicate_field_names_are_rejected(tmp_path):
-    (tmp_path / "dup_table.h").write_text(
-        "typedef struct dupDim3 { unsigned x, y, z; } dupDim3;\n"
-        "typedef int (*t_dupLaunch)(dupDim3 grid, int grid_x);\n"
-        "struct DupTable { unsigned long size; t_dupLaunch dupLaunch_fn; };\n"
-    )
-    config = {
-        "version": 1,
-        "provider": "dup_provider",
-        "output_name": "dup_probes",
-        "includes": ["dup_table.h"],
-        "tables": [{"name": "DupTable", "size_member": "size"}],
-    }
-    path = _write(tmp_path, config)
-    with pytest.raises(GenerateError) as err:
-        generate_files(path, [f"-I{tmp_path}"])
-    assert any("two fields named 'grid_x'" in e for e in err.value.errors)
-
-    config["apis"] = {"dupLaunch": {"omit": ["grid_x"]}}
-    files = generate_files(_write(tmp_path, config), [f"-I{tmp_path}"])
-    assert '"grid_x"' in files["dup_probes.cpp"]
+def test_capture_and_cap_names_match_values_header():
+    text = (ROCM_TRACE_INCLUDE / "rocm" / "trace" / "values.h").read_text()
+    for name in (
+        "ROCM_TRACE_CAPTURE_SCALARS",
+        "ROCM_TRACE_CAPTURE_FULL",
+        "ROCM_TRACE_STRING_CAP",
+    ):
+        assert f"#define {name} " in text

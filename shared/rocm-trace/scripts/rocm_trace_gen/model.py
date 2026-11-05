@@ -20,33 +20,50 @@ class Kind(Enum):
     ENUM = "enum"
     POINTER = "pointer"
     RECORD = "record"
+    ARRAY = "array"
     UNSUPPORTED = "unsupported"
 
 
 @dataclass(frozen=True)
 class CType:
-    """A parameter or result type.
+    """A parameter, result, member, or array element type.
 
     ``spelling`` is the type as written in the header (``hipStream_t``,
     ``size_t``); the generated code uses it for declarations. ``size`` is in
-    bytes. ``pointee`` is set for pointers whose target is a complete type,
-    ``members`` for records, as ``(name, type)`` pairs; a member that is an
-    array or other unsupported type has kind ``UNSUPPORTED``.
+    bytes.
+
+    - Enums: ``enum_signed`` is the signedness of the underlying type.
+    - Pointers: ``pointee`` is set for a parameter or result that points to a
+      complete type (outputs are read through it); ``is_const_char_pointer``
+      marks a ``const char*``, which RC-API-2 records as a string.
+    - Records: ``members`` lists ``(name, type)`` pairs, nested records and
+      arrays included; an anonymous member has the name "". ``is_union`` marks
+      a union, whose members overlap.
+    - Arrays: ``element`` and ``count``.
     """
 
     spelling: str
     kind: Kind
     size: int = 0
+    enum_signed: bool = True
     pointee: Optional["CType"] = None
     is_char_pointer: bool = False
+    is_const_char_pointer: bool = False
     is_function_pointer: bool = False
     members: Tuple[Tuple[str, "CType"], ...] = ()
+    is_union: bool = False
+    element: Optional["CType"] = None
+    count: int = 0
 
 
 @dataclass(frozen=True)
 class Param:
+    """A parameter. ``declared`` is false for one named ``arg_<N>`` because
+    its declaration has no name (RC-API-1)."""
+
     name: str
     ctype: CType
+    declared: bool = True
 
 
 @dataclass(frozen=True)

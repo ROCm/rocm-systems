@@ -8,12 +8,27 @@
 
 #include <fake_table.h>
 
-// Replace each non-null entry of *table with its probe. Not thread-safe:
-// call before the table is published. Calling it again is harmless.
+// What the probes record: ROCM_TRACE_CAPTURE_NONE, _SCALARS or _FULL
+// (rocm/trace/values.h). Defined by the runtime and set from the
+// ROCM_TRACE_CAPTURE environment variable before the tables are installed.
+extern int fake_capture_level;
+
+// Replace each non-null entry of *table, within its size, with its probe.
+// Not thread-safe: call before the table is published. Calling it again
+// is harmless. The original entries are kept in one copy per table type,
+// so install one instance of each table.
 void rocm_trace_install_FakeTable(FakeTable* table);
 
-// Replace each non-null entry of *table with its probe. Not thread-safe:
-// call before the table is published. Calling it again is harmless.
+// Replace each non-null entry of *table, within its size, with its probe.
+// Not thread-safe: call before the table is published. Calling it again
+// is harmless. The original entries are kept in one copy per table type,
+// so install one instance of each table.
 void rocm_trace_install_FakeDeclTable(FakeDeclTable* table);
+
+// Replace each non-null entry of *table, within its size, with its probe.
+// Not thread-safe: call before the table is published. Calling it again
+// is harmless. The original entries are kept in one copy per table type,
+// so install one instance of each table.
+void rocm_trace_install_FakeRenamedTable(FakeRenamedTable* table);
 
 // clang-format on

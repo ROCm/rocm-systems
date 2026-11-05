@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string.h>
 
 TRACELOGGING_DECLARE_PROVIDER(fake_provider);
 
@@ -17,8 +18,26 @@ static_assert(sizeof(FakeTable) == offsetof(FakeTable, fakeSkipped_fn) + sizeof(
               "FakeTable changed after the trace probes were generated; regenerate them");
 static_assert(sizeof(FakeDeclTable) == offsetof(FakeDeclTable, fakeCount_fn) + sizeof(FakeDeclTable::fakeCount_fn),
               "FakeDeclTable changed after the trace probes were generated; regenerate them");
+static_assert(sizeof(FakeRenamedTable) == offsetof(FakeRenamedTable, fakeRenamed_fn) + sizeof(FakeRenamedTable::fakeRenamed_fn),
+              "FakeRenamedTable changed after the trace probes were generated; regenerate them");
 
 namespace {
+
+// A string pointer that is never null, and its length within cap.
+inline const char* text(const char* s) {
+    return s != nullptr ? s : "";
+}
+
+inline uint16_t text_size(const char* s, size_t cap) {
+    return s != nullptr ? static_cast<uint16_t>(strnlen(s, cap)) : 0;
+}
+
+// N zero values, for array fields that are not captured.
+template <typename T, size_t N>
+const T* zeros() {
+    static const T values[N] = {};
+    return values;
+}
 
 constexpr bool has_slot(size_t limit, size_t offset) {
     return offset + sizeof(void*) <= limit;
@@ -26,30 +45,51 @@ constexpr bool has_slot(size_t limit, size_t offset) {
 
 FakeTable saved_FakeTable{};
 
+void exit_FakeTable_fakeScalars(bool rocm_trace_exception, fakeError_t rocm_trace_result) {
+    TraceLoggingWrite(fake_provider, "fakeScalars_exit",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
+}
+
 fakeError_t probe_FakeTable_fakeScalars(int8_t a, int16_t b, int32_t c, int64_t d, uint8_t e, uint16_t f, uint32_t g, uint64_t h, size_t i, bool j, float k, double l) {
     TraceLoggingWrite(fake_provider, "fakeScalars_enter",
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_START),
-            TraceLoggingInt8(static_cast<int8_t>(a), "a"),
-            TraceLoggingInt16(static_cast<int16_t>(b), "b"),
-            TraceLoggingInt32(static_cast<int32_t>(c), "c"),
-            TraceLoggingInt64(static_cast<int64_t>(d), "d"),
-            TraceLoggingUInt8(static_cast<uint8_t>(e), "e"),
-            TraceLoggingUInt16(static_cast<uint16_t>(f), "f"),
-            TraceLoggingUInt32(static_cast<uint32_t>(g), "g"),
-            TraceLoggingUInt64(static_cast<uint64_t>(h), "h"),
-            TraceLoggingUInt64(static_cast<uint64_t>(i), "i"),
-            TraceLoggingBoolean(static_cast<uint8_t>(j), "j"),
-            TraceLoggingFloat32(static_cast<float>(k), "k"),
-            TraceLoggingFloat64(static_cast<double>(l), "l"));
-    auto const rocm_trace_result = saved_FakeTable.fakeScalars_fn(a, b, c, d, e, f, g, h, i, j, k, l);
-    TraceLoggingWrite(fake_provider, "fakeScalars_exit",
-            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
-            TraceLoggingKeyword(ROCM_TRACE_KW_API),
-            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
-            TraceLoggingInt32(static_cast<int32_t>(rocm_trace_result), "result"));
+            TraceLoggingInt8((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<int8_t>(a) : int8_t{}), "a"),
+            TraceLoggingInt16((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<int16_t>(b) : int16_t{}), "b"),
+            TraceLoggingInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<int32_t>(c) : int32_t{}), "c"),
+            TraceLoggingInt64((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<int64_t>(d) : int64_t{}), "d"),
+            TraceLoggingUInt8((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint8_t>(e) : uint8_t{}), "e"),
+            TraceLoggingUInt16((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint16_t>(f) : uint16_t{}), "f"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(g) : uint32_t{}), "g"),
+            TraceLoggingUInt64((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint64_t>(h) : uint64_t{}), "h"),
+            TraceLoggingUInt64((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint64_t>(i) : uint64_t{}), "i"),
+            TraceLoggingBoolean((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint8_t>(j) : uint8_t{}), "j"),
+            TraceLoggingFloat32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<float>(k) : float{}), "k"),
+            TraceLoggingFloat64((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<double>(l) : double{}), "l"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeScalars_fn(a, b, c, d, e, f, g, h, i, j, k, l);
+    } catch (...) {
+        exit_FakeTable_fakeScalars(true, rocm_trace_result);
+        throw;
+    }
+    exit_FakeTable_fakeScalars(false, rocm_trace_result);
     return rocm_trace_result;
+}
+
+void exit_FakeTable_fakeAlloc(bool rocm_trace_exception, fakeError_t rocm_trace_result, void ** ptr) {
+    TraceLoggingWrite(fake_provider, "fakeAlloc_exit",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API | ROCM_TRACE_KW_ALLOC),
+            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL && !rocm_trace_exception && rocm_trace_result == fakeSuccess && ptr != nullptr ? reinterpret_cast<const void*>((*ptr)) : static_cast<const void*>(nullptr)), "ptr"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
 }
 
 fakeError_t probe_FakeTable_fakeAlloc(void ** ptr, size_t size) {
@@ -57,16 +97,27 @@ fakeError_t probe_FakeTable_fakeAlloc(void ** ptr, size_t size) {
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API | ROCM_TRACE_KW_ALLOC),
             TraceLoggingOpcode(WINEVENT_OPCODE_START),
-            TraceLoggingPointer(reinterpret_cast<const void*>(ptr), "ptr"),
-            TraceLoggingUInt64(static_cast<uint64_t>(size), "size"));
-    auto const rocm_trace_result = saved_FakeTable.fakeAlloc_fn(ptr, size);
-    TraceLoggingWrite(fake_provider, "fakeAlloc_exit",
-            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
-            TraceLoggingKeyword(ROCM_TRACE_KW_API | ROCM_TRACE_KW_ALLOC),
-            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
-            TraceLoggingInt32(static_cast<int32_t>(rocm_trace_result), "result"),
-            TraceLoggingPointer((rocm_trace_result == fakeSuccess && ptr != nullptr ? reinterpret_cast<const void*>((*ptr)) : static_cast<const void*>(nullptr)), "ptr_out"));
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(ptr) : static_cast<const void*>(nullptr)), "ptr"),
+            TraceLoggingUInt64((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint64_t>(size) : uint64_t{}), "size"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeAlloc_fn(ptr, size);
+    } catch (...) {
+        exit_FakeTable_fakeAlloc(true, rocm_trace_result, ptr);
+        throw;
+    }
+    exit_FakeTable_fakeAlloc(false, rocm_trace_result, ptr);
     return rocm_trace_result;
+}
+
+void exit_FakeTable_fakeName(bool rocm_trace_exception, fakeError_t rocm_trace_result, char * name) {
+    TraceLoggingWrite(fake_provider, "fakeName_exit",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingCountedString(text((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL && !rocm_trace_exception && rocm_trace_result == fakeSuccess && name != nullptr ? name : static_cast<const char*>(nullptr))), text_size((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL && !rocm_trace_exception && rocm_trace_result == fakeSuccess && name != nullptr ? name : static_cast<const char*>(nullptr)), ROCM_TRACE_STRING_CAP), "name"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
 }
 
 fakeError_t probe_FakeTable_fakeName(char * name, int len) {
@@ -74,16 +125,26 @@ fakeError_t probe_FakeTable_fakeName(char * name, int len) {
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_START),
-            TraceLoggingPointer(reinterpret_cast<const void*>(name), "name"),
-            TraceLoggingInt32(static_cast<int32_t>(len), "len"));
-    auto const rocm_trace_result = saved_FakeTable.fakeName_fn(name, len);
-    TraceLoggingWrite(fake_provider, "fakeName_exit",
-            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(name) : static_cast<const void*>(nullptr)), "name"),
+            TraceLoggingInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<int32_t>(len) : int32_t{}), "len"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeName_fn(name, len);
+    } catch (...) {
+        exit_FakeTable_fakeName(true, rocm_trace_result, name);
+        throw;
+    }
+    exit_FakeTable_fakeName(false, rocm_trace_result, name);
+    return rocm_trace_result;
+}
+
+void exit_FakeTable_fakeLoad(bool rocm_trace_exception, fakeError_t rocm_trace_result) {
+    TraceLoggingWrite(fake_provider, "fakeLoad_exit",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_VERBOSE),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
-            TraceLoggingInt32(static_cast<int32_t>(rocm_trace_result), "result"),
-            TraceLoggingString((rocm_trace_result == fakeSuccess && name != nullptr ? name : static_cast<const char*>(nullptr)), "name_out"));
-    return rocm_trace_result;
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
 }
 
 fakeError_t probe_FakeTable_fakeLoad(const char * path, fakeStream_t stream) {
@@ -91,15 +152,81 @@ fakeError_t probe_FakeTable_fakeLoad(const char * path, fakeStream_t stream) {
             TraceLoggingLevel(ROCM_TRACE_LEVEL_VERBOSE),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_START),
-            TraceLoggingString(path, "path"),
-            TraceLoggingPointer(reinterpret_cast<const void*>(stream), "stream"));
-    auto const rocm_trace_result = saved_FakeTable.fakeLoad_fn(path, stream);
-    TraceLoggingWrite(fake_provider, "fakeLoad_exit",
-            TraceLoggingLevel(ROCM_TRACE_LEVEL_VERBOSE),
+            TraceLoggingCountedString(text((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL ? path : static_cast<const char*>(nullptr))), text_size((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL ? path : static_cast<const char*>(nullptr)), ROCM_TRACE_STRING_CAP), "path"),
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(stream) : static_cast<const void*>(nullptr)), "stream"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeLoad_fn(path, stream);
+    } catch (...) {
+        exit_FakeTable_fakeLoad(true, rocm_trace_result);
+        throw;
+    }
+    exit_FakeTable_fakeLoad(false, rocm_trace_result);
+    return rocm_trace_result;
+}
+
+void exit_FakeTable_fakeGetFunction(bool rocm_trace_exception, fakeError_t rocm_trace_result, fakeFunction_t * function) {
+    TraceLoggingWrite(fake_provider, "fakeGetFunction_exit",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
-            TraceLoggingInt32(static_cast<int32_t>(rocm_trace_result), "result"));
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL && !rocm_trace_exception && rocm_trace_result == fakeSuccess && function != nullptr ? reinterpret_cast<const void*>((*function)) : static_cast<const void*>(nullptr)), "function"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
+}
+
+fakeError_t probe_FakeTable_fakeGetFunction(fakeFunction_t * function, const char * kname) {
+    TraceLoggingWrite(fake_provider, "fakeGetFunction_enter",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_START),
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(function) : static_cast<const void*>(nullptr)), "function"),
+            TraceLoggingString((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL ? kname : static_cast<const char*>(nullptr)), "kname"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeGetFunction_fn(function, kname);
+    } catch (...) {
+        exit_FakeTable_fakeGetFunction(true, rocm_trace_result, function);
+        throw;
+    }
+    exit_FakeTable_fakeGetFunction(false, rocm_trace_result, function);
     return rocm_trace_result;
+}
+
+void exit_FakeTable_fakeScratch(bool rocm_trace_exception, fakeError_t rocm_trace_result) {
+    TraceLoggingWrite(fake_provider, "fakeScratch_exit",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
+}
+
+fakeError_t probe_FakeTable_fakeScratch(char * buffer, size_t size) {
+    TraceLoggingWrite(fake_provider, "fakeScratch_enter",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_START),
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(buffer) : static_cast<const void*>(nullptr)), "buffer"),
+            TraceLoggingUInt64((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint64_t>(size) : uint64_t{}), "size"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeScratch_fn(buffer, size);
+    } catch (...) {
+        exit_FakeTable_fakeScratch(true, rocm_trace_result);
+        throw;
+    }
+    exit_FakeTable_fakeScratch(false, rocm_trace_result);
+    return rocm_trace_result;
+}
+
+void exit_FakeTable_fakeLaunch(bool rocm_trace_exception, fakeError_t rocm_trace_result) {
+    TraceLoggingWrite(fake_provider, "fakeLaunch_exit",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
 }
 
 fakeError_t probe_FakeTable_fakeLaunch(fakeDim3 grid, fakeDim3 block, fakeStream_t stream) {
@@ -107,20 +234,71 @@ fakeError_t probe_FakeTable_fakeLaunch(fakeDim3 grid, fakeDim3 block, fakeStream
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_START),
-            TraceLoggingUInt32(static_cast<uint32_t>(grid.x), "grid_x"),
-            TraceLoggingUInt32(static_cast<uint32_t>(grid.y), "grid_y"),
-            TraceLoggingUInt32(static_cast<uint32_t>(grid.z), "grid_z"),
-            TraceLoggingUInt32(static_cast<uint32_t>(block.x), "block_x"),
-            TraceLoggingUInt32(static_cast<uint32_t>(block.y), "block_y"),
-            TraceLoggingUInt32(static_cast<uint32_t>(block.z), "block_z"),
-            TraceLoggingPointer(reinterpret_cast<const void*>(stream), "stream"));
-    auto const rocm_trace_result = saved_FakeTable.fakeLaunch_fn(grid, block, stream);
-    TraceLoggingWrite(fake_provider, "fakeLaunch_exit",
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(grid.x) : uint32_t{}), "grid_x"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(grid.y) : uint32_t{}), "grid_y"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(grid.z) : uint32_t{}), "grid_z"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(block.x) : uint32_t{}), "block_x"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(block.y) : uint32_t{}), "block_y"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(block.z) : uint32_t{}), "block_z"),
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(stream) : static_cast<const void*>(nullptr)), "stream"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeLaunch_fn(grid, block, stream);
+    } catch (...) {
+        exit_FakeTable_fakeLaunch(true, rocm_trace_result);
+        throw;
+    }
+    exit_FakeTable_fakeLaunch(false, rocm_trace_result);
+    return rocm_trace_result;
+}
+
+void exit_FakeTable_fakeLaunchEx(bool rocm_trace_exception, fakeError_t rocm_trace_result) {
+    TraceLoggingWrite(fake_provider, "fakeLaunchEx_exit",
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
-            TraceLoggingInt32(static_cast<int32_t>(rocm_trace_result), "result"));
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
+}
+
+fakeError_t probe_FakeTable_fakeLaunchEx(fakeLaunchConfig config) {
+    TraceLoggingWrite(fake_provider, "fakeLaunchEx_enter",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_START),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(config.grid.x) : uint32_t{}), "config_grid_x"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(config.grid.y) : uint32_t{}), "config_grid_y"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(config.grid.z) : uint32_t{}), "config_grid_z"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(config.block.x) : uint32_t{}), "config_block_x"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(config.block.y) : uint32_t{}), "config_block_y"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(config.block.z) : uint32_t{}), "config_block_z"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(config.extra[0].x) : uint32_t{}), "config_extra_0_x"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(config.extra[0].y) : uint32_t{}), "config_extra_0_y"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(config.extra[0].z) : uint32_t{}), "config_extra_0_z"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(config.extra[1].x) : uint32_t{}), "config_extra_1_x"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(config.extra[1].y) : uint32_t{}), "config_extra_1_y"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(config.extra[1].z) : uint32_t{}), "config_extra_1_z"),
+            TraceLoggingPointerFixedArray((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void* const*>(config.slots) : zeros<const void*, 2>()), 2, "config_slots"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(config.flags) : uint32_t{}), "config_flags"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeLaunchEx_fn(config);
+    } catch (...) {
+        exit_FakeTable_fakeLaunchEx(true, rocm_trace_result);
+        throw;
+    }
+    exit_FakeTable_fakeLaunchEx(false, rocm_trace_result);
     return rocm_trace_result;
+}
+
+void exit_FakeTable_fakeOpen(bool rocm_trace_exception, fakeError_t rocm_trace_result, void ** ptr) {
+    TraceLoggingWrite(fake_provider, "fakeOpen_exit",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL && !rocm_trace_exception && rocm_trace_result == fakeSuccess && ptr != nullptr ? reinterpret_cast<const void*>((*ptr)) : static_cast<const void*>(nullptr)), "ptr"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
 }
 
 fakeError_t probe_FakeTable_fakeOpen(fakeHandle handle, void ** ptr) {
@@ -128,15 +306,54 @@ fakeError_t probe_FakeTable_fakeOpen(fakeHandle handle, void ** ptr) {
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_START),
-            TraceLoggingPointer(reinterpret_cast<const void*>(ptr), "ptr"));
-    auto const rocm_trace_result = saved_FakeTable.fakeOpen_fn(handle, ptr);
-    TraceLoggingWrite(fake_provider, "fakeOpen_exit",
+            TraceLoggingInt8FixedArray((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const int8_t*>(handle.reserved) : zeros<int8_t, 16>()), 16, "handle_reserved"),
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(ptr) : static_cast<const void*>(nullptr)), "ptr"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeOpen_fn(handle, ptr);
+    } catch (...) {
+        exit_FakeTable_fakeOpen(true, rocm_trace_result, ptr);
+        throw;
+    }
+    exit_FakeTable_fakeOpen(false, rocm_trace_result, ptr);
+    return rocm_trace_result;
+}
+
+void exit_FakeTable_fakeBits(bool rocm_trace_exception, fakeError_t rocm_trace_result) {
+    TraceLoggingWrite(fake_provider, "fakeBits_exit",
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
-            TraceLoggingInt32(static_cast<int32_t>(rocm_trace_result), "result"),
-            TraceLoggingPointer((rocm_trace_result == fakeSuccess && ptr != nullptr ? reinterpret_cast<const void*>((*ptr)) : static_cast<const void*>(nullptr)), "ptr_out"));
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
+}
+
+fakeError_t probe_FakeTable_fakeBits(fakeBits bits, fakeValue value) {
+    TraceLoggingWrite(fake_provider, "fakeBits_enter",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_START),
+            TraceLoggingUInt8FixedArray((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const uint8_t*>(&(bits)) : zeros<uint8_t, 4>()), 4, "bits"),
+            TraceLoggingInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<int32_t>(value.kind) : int32_t{}), "value_kind"),
+            TraceLoggingUInt8FixedArray((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const uint8_t*>(&(value.i)) : zeros<uint8_t, 8>()), 8, "value_union"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeBits_fn(bits, value);
+    } catch (...) {
+        exit_FakeTable_fakeBits(true, rocm_trace_result);
+        throw;
+    }
+    exit_FakeTable_fakeBits(false, rocm_trace_result);
     return rocm_trace_result;
+}
+
+void exit_FakeTable_fakeCallback(bool rocm_trace_exception, fakeError_t rocm_trace_result) {
+    TraceLoggingWrite(fake_provider, "fakeCallback_exit",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
 }
 
 fakeError_t probe_FakeTable_fakeCallback(fakeStream_t stream, fakeCallback_t cb, void * user) {
@@ -144,33 +361,54 @@ fakeError_t probe_FakeTable_fakeCallback(fakeStream_t stream, fakeCallback_t cb,
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_START),
-            TraceLoggingPointer(reinterpret_cast<const void*>(stream), "stream"),
-            TraceLoggingPointer(reinterpret_cast<const void*>(cb), "cb"),
-            TraceLoggingPointer(reinterpret_cast<const void*>(user), "user"));
-    auto const rocm_trace_result = saved_FakeTable.fakeCallback_fn(stream, cb, user);
-    TraceLoggingWrite(fake_provider, "fakeCallback_exit",
-            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
-            TraceLoggingKeyword(ROCM_TRACE_KW_API),
-            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
-            TraceLoggingInt32(static_cast<int32_t>(rocm_trace_result), "result"));
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(stream) : static_cast<const void*>(nullptr)), "stream"),
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(cb) : static_cast<const void*>(nullptr)), "cb"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeCallback_fn(stream, cb, user);
+    } catch (...) {
+        exit_FakeTable_fakeCallback(true, rocm_trace_result);
+        throw;
+    }
+    exit_FakeTable_fakeCallback(false, rocm_trace_result);
     return rocm_trace_result;
 }
 
 using FakeTable_fakeRawFn_fn_t = void (*)(void *);
+void exit_FakeTable_fakeRawFn(bool rocm_trace_exception, fakeError_t rocm_trace_result) {
+    TraceLoggingWrite(fake_provider, "fakeRawFn_exit",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
+}
+
 fakeError_t probe_FakeTable_fakeRawFn(FakeTable_fakeRawFn_fn_t fn, void * arg) {
     TraceLoggingWrite(fake_provider, "fakeRawFn_enter",
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_START),
-            TraceLoggingPointer(reinterpret_cast<const void*>(fn), "fn"),
-            TraceLoggingPointer(reinterpret_cast<const void*>(arg), "arg"));
-    auto const rocm_trace_result = saved_FakeTable.fakeRawFn_fn(fn, arg);
-    TraceLoggingWrite(fake_provider, "fakeRawFn_exit",
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(fn) : static_cast<const void*>(nullptr)), "fn"),
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(arg) : static_cast<const void*>(nullptr)), "arg"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeRawFn_fn(fn, arg);
+    } catch (...) {
+        exit_FakeTable_fakeRawFn(true, rocm_trace_result);
+        throw;
+    }
+    exit_FakeTable_fakeRawFn(false, rocm_trace_result);
+    return rocm_trace_result;
+}
+
+void exit_FakeTable_fakeErrorString(bool rocm_trace_exception, const char * rocm_trace_result) {
+    TraceLoggingWrite(fake_provider, "fakeErrorString_exit",
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
-            TraceLoggingInt32(static_cast<int32_t>(rocm_trace_result), "result"));
-    return rocm_trace_result;
+            TraceLoggingCountedString(text((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL ? rocm_trace_result : static_cast<const char*>(nullptr))), text_size((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL ? rocm_trace_result : static_cast<const char*>(nullptr)), ROCM_TRACE_STRING_CAP), "result"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
 }
 
 const char * probe_FakeTable_fakeErrorString(fakeError_t error) {
@@ -178,14 +416,24 @@ const char * probe_FakeTable_fakeErrorString(fakeError_t error) {
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_START),
-            TraceLoggingInt32(static_cast<int32_t>(error), "error"));
-    auto const rocm_trace_result = saved_FakeTable.fakeErrorString_fn(error);
-    TraceLoggingWrite(fake_provider, "fakeErrorString_exit",
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(error) : uint32_t{}), "error"));
+    const char * rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeErrorString_fn(error);
+    } catch (...) {
+        exit_FakeTable_fakeErrorString(true, rocm_trace_result);
+        throw;
+    }
+    exit_FakeTable_fakeErrorString(false, rocm_trace_result);
+    return rocm_trace_result;
+}
+
+void exit_FakeTable_fakeNoResult(bool rocm_trace_exception) {
+    TraceLoggingWrite(fake_provider, "fakeNoResult_exit",
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
-            TraceLoggingString(rocm_trace_result, "result"));
-    return rocm_trace_result;
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
 }
 
 void probe_FakeTable_fakeNoResult(int x) {
@@ -193,12 +441,25 @@ void probe_FakeTable_fakeNoResult(int x) {
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_START),
-            TraceLoggingInt32(static_cast<int32_t>(x), "x"));
-    saved_FakeTable.fakeNoResult_fn(x);
-    TraceLoggingWrite(fake_provider, "fakeNoResult_exit",
+            TraceLoggingInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<int32_t>(x) : int32_t{}), "x"));
+    try {
+        saved_FakeTable.fakeNoResult_fn(x);
+    } catch (...) {
+        exit_FakeTable_fakeNoResult(true);
+        throw;
+    }
+    exit_FakeTable_fakeNoResult(false);
+}
+
+void exit_FakeTable_fakeMakeDim(bool rocm_trace_exception, fakeDim3 rocm_trace_result) {
+    TraceLoggingWrite(fake_provider, "fakeMakeDim_exit",
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
-            TraceLoggingOpcode(WINEVENT_OPCODE_STOP));
+            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result.x), "result_x"),
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result.y), "result_y"),
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result.z), "result_z"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
 }
 
 fakeDim3 probe_FakeTable_fakeMakeDim(uint32_t x) {
@@ -206,16 +467,28 @@ fakeDim3 probe_FakeTable_fakeMakeDim(uint32_t x) {
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_START),
-            TraceLoggingUInt32(static_cast<uint32_t>(x), "x"));
-    auto const rocm_trace_result = saved_FakeTable.fakeMakeDim_fn(x);
-    TraceLoggingWrite(fake_provider, "fakeMakeDim_exit",
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(x) : uint32_t{}), "x"));
+    fakeDim3 rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeMakeDim_fn(x);
+    } catch (...) {
+        exit_FakeTable_fakeMakeDim(true, rocm_trace_result);
+        throw;
+    }
+    exit_FakeTable_fakeMakeDim(false, rocm_trace_result);
+    return rocm_trace_result;
+}
+
+void exit_FakeTable_fakeGetDim(bool rocm_trace_exception, fakeError_t rocm_trace_result, fakeDim3 * dim) {
+    TraceLoggingWrite(fake_provider, "fakeGetDim_exit",
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
-            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result.x), "result_x"),
-            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result.y), "result_y"),
-            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result.z), "result_z"));
-    return rocm_trace_result;
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL && !rocm_trace_exception && rocm_trace_result == fakeSuccess && dim != nullptr ? static_cast<uint32_t>((*dim).x) : uint32_t{}), "dim_x"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL && !rocm_trace_exception && rocm_trace_result == fakeSuccess && dim != nullptr ? static_cast<uint32_t>((*dim).y) : uint32_t{}), "dim_y"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL && !rocm_trace_exception && rocm_trace_result == fakeSuccess && dim != nullptr ? static_cast<uint32_t>((*dim).z) : uint32_t{}), "dim_z"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
 }
 
 fakeError_t probe_FakeTable_fakeGetDim(fakeDim3 * dim) {
@@ -223,47 +496,160 @@ fakeError_t probe_FakeTable_fakeGetDim(fakeDim3 * dim) {
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_START),
-            TraceLoggingPointer(reinterpret_cast<const void*>(dim), "dim"));
-    auto const rocm_trace_result = saved_FakeTable.fakeGetDim_fn(dim);
-    TraceLoggingWrite(fake_provider, "fakeGetDim_exit",
-            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
-            TraceLoggingKeyword(ROCM_TRACE_KW_API),
-            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
-            TraceLoggingInt32(static_cast<int32_t>(rocm_trace_result), "result"),
-            TraceLoggingUInt32((rocm_trace_result == fakeSuccess && dim != nullptr ? static_cast<uint32_t>((*dim).x) : uint32_t{0}), "dim_out_x"),
-            TraceLoggingUInt32((rocm_trace_result == fakeSuccess && dim != nullptr ? static_cast<uint32_t>((*dim).y) : uint32_t{0}), "dim_out_y"),
-            TraceLoggingUInt32((rocm_trace_result == fakeSuccess && dim != nullptr ? static_cast<uint32_t>((*dim).z) : uint32_t{0}), "dim_out_z"));
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(dim) : static_cast<const void*>(nullptr)), "dim"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeGetDim_fn(dim);
+    } catch (...) {
+        exit_FakeTable_fakeGetDim(true, rocm_trace_result, dim);
+        throw;
+    }
+    exit_FakeTable_fakeGetDim(false, rocm_trace_result, dim);
     return rocm_trace_result;
 }
 
-fakeError_t probe_FakeTable_fakeWide(fakeWide value, fakeProps * props) {
-    TraceLoggingWrite(fake_provider, "fakeWide_enter",
-            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
-            TraceLoggingKeyword(ROCM_TRACE_KW_API),
-            TraceLoggingOpcode(WINEVENT_OPCODE_START),
-            TraceLoggingInt64(static_cast<int64_t>(value), "value"),
-            TraceLoggingPointer(reinterpret_cast<const void*>(props), "props"));
-    auto const rocm_trace_result = saved_FakeTable.fakeWide_fn(value, props);
+void exit_FakeTable_fakeWide(bool rocm_trace_exception, fakeError_t rocm_trace_result) {
     TraceLoggingWrite(fake_provider, "fakeWide_exit",
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
-            TraceLoggingInt32(static_cast<int32_t>(rocm_trace_result), "result"));
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
+}
+
+fakeError_t probe_FakeTable_fakeWide(fakeWide value, fakeFlags flags, fakeProps * props) {
+    TraceLoggingWrite(fake_provider, "fakeWide_enter",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_START),
+            TraceLoggingUInt64((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint64_t>(value) : uint64_t{}), "value"),
+            TraceLoggingUInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(flags) : uint32_t{}), "flags"),
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(props) : static_cast<const void*>(nullptr)), "props"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeWide_fn(value, flags, props);
+    } catch (...) {
+        exit_FakeTable_fakeWide(true, rocm_trace_result);
+        throw;
+    }
+    exit_FakeTable_fakeWide(false, rocm_trace_result);
+    return rocm_trace_result;
+}
+
+void exit_FakeTable_fakeUnnamed(bool rocm_trace_exception, fakeError_t rocm_trace_result) {
+    TraceLoggingWrite(fake_provider, "fakeUnnamed_exit",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
+}
+
+fakeError_t probe_FakeTable_fakeUnnamed(int arg_1, const char * arg_2) {
+    TraceLoggingWrite(fake_provider, "fakeUnnamed_enter",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_START),
+            TraceLoggingInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<int32_t>(arg_1) : int32_t{}), "arg_1"),
+            TraceLoggingCountedString(text((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL ? arg_2 : static_cast<const char*>(nullptr))), text_size((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL ? arg_2 : static_cast<const char*>(nullptr)), ROCM_TRACE_STRING_CAP), "arg_2"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeUnnamed_fn(arg_1, arg_2);
+    } catch (...) {
+        exit_FakeTable_fakeUnnamed(true, rocm_trace_result);
+        throw;
+    }
+    exit_FakeTable_fakeUnnamed(false, rocm_trace_result);
+    return rocm_trace_result;
+}
+
+void exit_FakeTable_fakeReserved(bool rocm_trace_exception, fakeError_t rocm_trace_result, int * exception) {
+    TraceLoggingWrite(fake_provider, "fakeReserved_exit",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL && !rocm_trace_exception && rocm_trace_result == fakeSuccess && exception != nullptr ? static_cast<int32_t>((*exception)) : int32_t{}), "arg_exception"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
+}
+
+fakeError_t probe_FakeTable_fakeReserved(int result, uint64_t timestamp, int * exception) {
+    TraceLoggingWrite(fake_provider, "fakeReserved_enter",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_START),
+            TraceLoggingInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<int32_t>(result) : int32_t{}), "arg_result"),
+            TraceLoggingUInt64((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint64_t>(timestamp) : uint64_t{}), "arg_timestamp"),
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(exception) : static_cast<const void*>(nullptr)), "arg_exception"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeReserved_fn(result, timestamp, exception);
+    } catch (...) {
+        exit_FakeTable_fakeReserved(true, rocm_trace_result, exception);
+        throw;
+    }
+    exit_FakeTable_fakeReserved(false, rocm_trace_result, exception);
+    return rocm_trace_result;
+}
+
+void exit_FakeTable_fakeThrow(bool rocm_trace_exception, fakeError_t rocm_trace_result) {
+    TraceLoggingWrite(fake_provider, "fakeThrow_exit",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
+}
+
+fakeError_t probe_FakeTable_fakeThrow(int x) {
+    TraceLoggingWrite(fake_provider, "fakeThrow_enter",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_START),
+            TraceLoggingInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<int32_t>(x) : int32_t{}), "x"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeTable.fakeThrow_fn(x);
+    } catch (...) {
+        exit_FakeTable_fakeThrow(true, rocm_trace_result);
+        throw;
+    }
+    exit_FakeTable_fakeThrow(false, rocm_trace_result);
     return rocm_trace_result;
 }
 
 FakeDeclTable saved_FakeDeclTable{};
+
+void exit_FakeDeclTable_fakeInit(bool rocm_trace_exception) {
+    TraceLoggingWrite(fake_provider, "fakeInit_exit",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
+}
 
 void probe_FakeDeclTable_fakeInit() {
     TraceLoggingWrite(fake_provider, "fakeInit_enter",
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_START));
-    saved_FakeDeclTable.fakeInit_fn();
-    TraceLoggingWrite(fake_provider, "fakeInit_exit",
+    try {
+        saved_FakeDeclTable.fakeInit_fn();
+    } catch (...) {
+        exit_FakeDeclTable_fakeInit(true);
+        throw;
+    }
+    exit_FakeDeclTable_fakeInit(false);
+}
+
+void exit_FakeDeclTable_fakeCount(bool rocm_trace_exception, fakeError_t rocm_trace_result, size_t * count) {
+    TraceLoggingWrite(fake_provider, "fakeCount_exit",
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
-            TraceLoggingOpcode(WINEVENT_OPCODE_STOP));
+            TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingUInt64((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL && !rocm_trace_exception && rocm_trace_result == fakeSuccess && count != nullptr ? static_cast<uint64_t>((*count)) : uint64_t{}), "count"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
 }
 
 fakeError_t probe_FakeDeclTable_fakeCount(int device, size_t * count) {
@@ -271,15 +657,44 @@ fakeError_t probe_FakeDeclTable_fakeCount(int device, size_t * count) {
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_START),
-            TraceLoggingInt32(static_cast<int32_t>(device), "device"),
-            TraceLoggingPointer(reinterpret_cast<const void*>(count), "count"));
-    auto const rocm_trace_result = saved_FakeDeclTable.fakeCount_fn(device, count);
-    TraceLoggingWrite(fake_provider, "fakeCount_exit",
+            TraceLoggingInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<int32_t>(device) : int32_t{}), "device"),
+            TraceLoggingPointer((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(count) : static_cast<const void*>(nullptr)), "count"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeDeclTable.fakeCount_fn(device, count);
+    } catch (...) {
+        exit_FakeDeclTable_fakeCount(true, rocm_trace_result, count);
+        throw;
+    }
+    exit_FakeDeclTable_fakeCount(false, rocm_trace_result, count);
+    return rocm_trace_result;
+}
+
+FakeRenamedTable saved_FakeRenamedTable{};
+
+void exit_FakeRenamedTable_fakeRenamed(bool rocm_trace_exception, fakeError_t rocm_trace_result) {
+    TraceLoggingWrite(fake_provider, "fakeRenamed_exit",
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_STOP),
-            TraceLoggingInt32(static_cast<int32_t>(rocm_trace_result), "result"),
-            TraceLoggingUInt64((rocm_trace_result == fakeSuccess && count != nullptr ? static_cast<uint64_t>((*count)) : uint64_t{0}), "count_out"));
+            TraceLoggingUInt32(static_cast<uint32_t>(rocm_trace_result), "result"),
+            TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
+}
+
+fakeError_t probe_FakeRenamedTable_fakeRenamed(int public_name) {
+    TraceLoggingWrite(fake_provider, "fakeRenamed_enter",
+            TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
+            TraceLoggingKeyword(ROCM_TRACE_KW_API),
+            TraceLoggingOpcode(WINEVENT_OPCODE_START),
+            TraceLoggingInt32((fake_capture_level >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<int32_t>(public_name) : int32_t{}), "public_name"));
+    fakeError_t rocm_trace_result{};
+    try {
+        rocm_trace_result = saved_FakeRenamedTable.fakeRenamed_fn(public_name);
+    } catch (...) {
+        exit_FakeRenamedTable_fakeRenamed(true, rocm_trace_result);
+        throw;
+    }
+    exit_FakeRenamedTable_fakeRenamed(false, rocm_trace_result);
     return rocm_trace_result;
 }
 
@@ -308,15 +723,35 @@ void rocm_trace_install_FakeTable(FakeTable* table) {
         saved_FakeTable.fakeLoad_fn = table->fakeLoad_fn;
         table->fakeLoad_fn = probe_FakeTable_fakeLoad;
     }
+    if (has_slot(limit, offsetof(FakeTable, fakeGetFunction_fn)) && table->fakeGetFunction_fn != nullptr &&
+        table->fakeGetFunction_fn != probe_FakeTable_fakeGetFunction) {
+        saved_FakeTable.fakeGetFunction_fn = table->fakeGetFunction_fn;
+        table->fakeGetFunction_fn = probe_FakeTable_fakeGetFunction;
+    }
+    if (has_slot(limit, offsetof(FakeTable, fakeScratch_fn)) && table->fakeScratch_fn != nullptr &&
+        table->fakeScratch_fn != probe_FakeTable_fakeScratch) {
+        saved_FakeTable.fakeScratch_fn = table->fakeScratch_fn;
+        table->fakeScratch_fn = probe_FakeTable_fakeScratch;
+    }
     if (has_slot(limit, offsetof(FakeTable, fakeLaunch_fn)) && table->fakeLaunch_fn != nullptr &&
         table->fakeLaunch_fn != probe_FakeTable_fakeLaunch) {
         saved_FakeTable.fakeLaunch_fn = table->fakeLaunch_fn;
         table->fakeLaunch_fn = probe_FakeTable_fakeLaunch;
     }
+    if (has_slot(limit, offsetof(FakeTable, fakeLaunchEx_fn)) && table->fakeLaunchEx_fn != nullptr &&
+        table->fakeLaunchEx_fn != probe_FakeTable_fakeLaunchEx) {
+        saved_FakeTable.fakeLaunchEx_fn = table->fakeLaunchEx_fn;
+        table->fakeLaunchEx_fn = probe_FakeTable_fakeLaunchEx;
+    }
     if (has_slot(limit, offsetof(FakeTable, fakeOpen_fn)) && table->fakeOpen_fn != nullptr &&
         table->fakeOpen_fn != probe_FakeTable_fakeOpen) {
         saved_FakeTable.fakeOpen_fn = table->fakeOpen_fn;
         table->fakeOpen_fn = probe_FakeTable_fakeOpen;
+    }
+    if (has_slot(limit, offsetof(FakeTable, fakeBits_fn)) && table->fakeBits_fn != nullptr &&
+        table->fakeBits_fn != probe_FakeTable_fakeBits) {
+        saved_FakeTable.fakeBits_fn = table->fakeBits_fn;
+        table->fakeBits_fn = probe_FakeTable_fakeBits;
     }
     if (has_slot(limit, offsetof(FakeTable, fakeCallback_fn)) && table->fakeCallback_fn != nullptr &&
         table->fakeCallback_fn != probe_FakeTable_fakeCallback) {
@@ -353,6 +788,21 @@ void rocm_trace_install_FakeTable(FakeTable* table) {
         saved_FakeTable.fakeWide_fn = table->fakeWide_fn;
         table->fakeWide_fn = probe_FakeTable_fakeWide;
     }
+    if (has_slot(limit, offsetof(FakeTable, fakeUnnamed_fn)) && table->fakeUnnamed_fn != nullptr &&
+        table->fakeUnnamed_fn != probe_FakeTable_fakeUnnamed) {
+        saved_FakeTable.fakeUnnamed_fn = table->fakeUnnamed_fn;
+        table->fakeUnnamed_fn = probe_FakeTable_fakeUnnamed;
+    }
+    if (has_slot(limit, offsetof(FakeTable, fakeReserved_fn)) && table->fakeReserved_fn != nullptr &&
+        table->fakeReserved_fn != probe_FakeTable_fakeReserved) {
+        saved_FakeTable.fakeReserved_fn = table->fakeReserved_fn;
+        table->fakeReserved_fn = probe_FakeTable_fakeReserved;
+    }
+    if (has_slot(limit, offsetof(FakeTable, fakeThrow_fn)) && table->fakeThrow_fn != nullptr &&
+        table->fakeThrow_fn != probe_FakeTable_fakeThrow) {
+        saved_FakeTable.fakeThrow_fn = table->fakeThrow_fn;
+        table->fakeThrow_fn = probe_FakeTable_fakeThrow;
+    }
     // fakeSkipped_fn: not traced (the test of a skipped entry)
 }
 
@@ -368,6 +818,16 @@ void rocm_trace_install_FakeDeclTable(FakeDeclTable* table) {
         table->fakeCount_fn != probe_FakeDeclTable_fakeCount) {
         saved_FakeDeclTable.fakeCount_fn = table->fakeCount_fn;
         table->fakeCount_fn = probe_FakeDeclTable_fakeCount;
+    }
+}
+
+void rocm_trace_install_FakeRenamedTable(FakeRenamedTable* table) {
+    if (table == nullptr) return;
+    auto const limit = static_cast<size_t>(table->size);
+    if (has_slot(limit, offsetof(FakeRenamedTable, fakeRenamed_fn)) && table->fakeRenamed_fn != nullptr &&
+        table->fakeRenamed_fn != probe_FakeRenamedTable_fakeRenamed) {
+        saved_FakeRenamedTable.fakeRenamed_fn = table->fakeRenamed_fn;
+        table->fakeRenamed_fn = probe_FakeRenamedTable_fakeRenamed;
     }
 }
 

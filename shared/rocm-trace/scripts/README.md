@@ -1,16 +1,24 @@
 # rocm_trace_gen: dispatch-table probe generator
 
 Generates a TraceLogging probe for every entry of a runtime's dispatch tables, and the
-function that installs them. Each probe writes two events per call:
+function that installs them, as the runtime contract's RC-API-1 and RC-API-2 require.
+Each probe writes two events per call:
 
 - `<api>_enter` (opcode start): the arguments;
-- `<api>_exit` (opcode stop): the result, and the outputs the call wrote, recorded only
-  when the call succeeded.
+- `<api>_exit` (opcode stop): `result`, the outputs the call wrote (recorded only when
+  it succeeded), and `exception`, true when the call threw. A probe that sees an
+  exception writes the exit event and rethrows, so every enter has its exit.
 
 The transport timestamps each event and records the thread; a consumer pairs enter
 and exit per thread, in order. With no session listening, an event costs one load and
 a branch: TraceLoggingWrite evaluates its field expressions only when the event is
-enabled.
+enabled, so the probes need no `ROCM_TRACE_ENABLED` check (that is for work done
+before an event, which these probes do not do).
+
+Each event name is written from exactly one place, so it always has one set of fields:
+LTTng corrupts a trace in which one event name has two layouts. What a probe does not
+record (an output after a failure, or anything the capture level excludes) is written
+as 0 or "".
 
 The runtimes check the generated files in. Their builds do not run the generator, so
 they need neither Python nor libclang.
@@ -52,17 +60,22 @@ success:                            # result type -> value meaning success; outp
   hipError_t: hipSuccess            # are recorded on exit only after it
 defaults:
   level: information                # information | verbose
+capture_level: rocm_hip_capture     # optional: the runtime's int holding the
+                                    # ROCM_TRACE_CAPTURE level (see below)
 apis:
   hipMalloc:
     out: [ptr]                      # pointers the call writes through; on exit,
-                                    # the value written is recorded as ptr_out
+                                    # the value written is recorded as ptr
     keywords: [ALLOC]               # added to API, which every event has
   hipDeviceGetName:
     out: [name]
-    strings: [name]                 # char pointers recorded as strings, not
-                                    # addresses; may name result
-  hipIpcOpenMemHandle:
-    omit: [handle]                  # not recorded; may name result
+    strings: [name]                 # a char-pointer output recorded as a string;
+                                    # may also name result
+  hipModuleGetFunction:
+    uncapped: [kname]               # a string recorded whole: kernel names and
+                                    # URIs only (RC-GEN-8)
+  hipStreamAddCallback:
+    omit: [userData]                # not recorded; may name result
   hsa_signal_load_relaxed:
     level: verbose
   hipApiName:
@@ -70,23 +83,53 @@ apis:
     reason: "called by tracing tools"
 ```
 
+Names in `out`, `strings`, `uncapped` and `omit` are field names (below); `result` is
+the return value. `const char*` inputs are recorded as strings without being listed
+(RC-API-2).
+
 The generator stops with every problem it finds: an API or argument that does not
 exist, `out` on something that is not a pointer, `strings` on something that is not a
-`char` pointer, `skip` without a reason, unknown keys or keywords, and any parameter
-whose type has no field mapping.
+`char`-pointer output or result, `uncapped` on something that is not a string, `skip`
+without a reason, unknown keys or keywords, a parameter whose type has no field
+mapping, two fields with one name, and an event with more fields than TraceLogging
+allows (96).
+
+## Field names
+
+Field names are the parameter names of the public declaration (RC-API-1): the
+function's own declaration when the parsed headers have one with the same parameter
+types, else the table's. A parameter with no name is `arg_<N>`, `<N>` its 1-based
+position. A parameter named `result`, `tid`, `timestamp`, `exception` or `arg_*` gets
+the prefix `arg_`. An output is recorded on exit under its parameter's name; on enter,
+the same name holds the pointer.
 
 ## Field mapping
 
 | C type | Field |
 |---|---|
 | integers of 1, 2, 4 or 8 bytes | `TraceLogging[U]Int8/16/32/64` |
-| enums | `TraceLoggingInt32` (`Int64` for 8-byte enums) |
+| enums | the integer field of the enum's underlying type |
 | `bool` | `TraceLoggingBoolean` |
 | `float`, `double` | `TraceLoggingFloat32`, `TraceLoggingFloat64` |
-| pointers, handles, function pointers | `TraceLoggingPointer` |
-| `char` pointers listed in `strings` | `TraceLoggingString` (a null pointer is recorded as "") |
-| structs passed by value with at most 8 number, enum or pointer members (`dim3`, `hipExtent`) | one field per member, `<name>_<member>` |
-| anything else (arrays, larger or nested structs) | an error, until the parameter is listed in `omit` |
+| pointers, handles, function pointers, non-const `char*` inputs | `TraceLoggingPointer` |
+| `const char*` inputs, `char*` outputs and results listed in `strings` | `TraceLoggingCountedString`, at most `ROCM_TRACE_STRING_CAP` (256) bytes; `TraceLoggingString` if `uncapped`. A null pointer is recorded as "" |
+| structs passed by value (`dim3`, `hipExtent`, nested structs) | every component (RC-API-1), one field per member: `<name>_<member>`, `<name>_<member>_<member>` |
+| arrays of numbers or pointers | `TraceLogging<type>FixedArray` |
+| arrays of structs | one set of fields per element: `<name>_<index>_<member>` |
+| unions | their bytes, `TraceLoggingUInt8FixedArray` (which member is active is unknown); an anonymous union member is `<name>_union` |
+| anything else (`long double`, incomplete types) | an error, until the parameter is listed in `omit` |
+
+## Capture levels
+
+With `capture_level` set, the probes read that `int` (defined by the runtime, set from
+the `ROCM_TRACE_CAPTURE` environment variable before the tables are installed) and
+record, by `ROCM_TRACE_CAPTURE_*` level (`rocm/trace/values.h`):
+
+| Level | Records |
+|---|---|
+| `FULL` (default) | everything |
+| `SCALARS` | no strings and no output values: those fields are "" and 0 |
+| `NONE` | only `result` and `exception`: every argument field is 0 or "" |
 
 ## Generated code
 
@@ -99,7 +142,15 @@ whose type has no field mapping.
 It touches only entries inside the table's size, so a table from an older runtime is
 safe; null, skipped, and retired (`void*`) entries are left as they are. Calling it
 again on the same table is harmless. It is not thread-safe: call it before the table
-is published. There is one saved copy per table type.
+is published. There is one saved copy per table type, so install one instance of each.
+
+The runtime calls it where it finishes filling the table and before it hands the table
+to tools (for HIP, at the end of the table-filling step in `GetDispatchTableImpl`,
+before `ToolsInit`), so the probe is the entry nearest the implementation and tools
+that wrap the table see it as the implementation (API-HLD-16).
+
+The generated code uses only public headers, so it can be built into the runtime or
+into a separate library the runtime loads.
 
 The generated files are wrapped in `// clang-format off` so that formatting tools
 leave them byte-identical to the generator's output.

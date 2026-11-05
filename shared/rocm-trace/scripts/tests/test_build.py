@@ -160,19 +160,60 @@ def test_session_records_enter_and_exit(driver, lttng_home, tmp_path):
         )
         return lines
 
-    alloc_enter = event("fakeAlloc_enter")[0]
-    assert "size = 16" in alloc_enter and ";k0;k6;" in alloc_enter
+    alloc_enter = event("fakeAlloc_enter")
+    assert "size = 16" in alloc_enter[0] and ";k0;k6;" in alloc_enter[0]
     alloc_exit = event("fakeAlloc_exit")
-    assert "result = 0" in alloc_exit[0] and "ptr_out = 0x1234" in alloc_exit[0]
-    assert "result = 1" in alloc_exit[1] and "ptr_out = 0x0" in alloc_exit[1]
-    assert 'name_out = "fake"' in event("fakeName_exit")[0]
-    assert 'path = "/tmp/kernel.co"' in event("fakeLoad_enter")[0]
-    launch = event("fakeLaunch_enter")[0]
-    assert "grid_x = 4" in launch and "block_x = 64" in launch
-    assert "dim_out_x = 7" in event("fakeGetDim_exit")[0]
+    # Outputs under their own names, only after success (RC-API-1, RC-API-2).
+    assert "result = 0" in alloc_exit[0] and "ptr = 0x1234" in alloc_exit[0]
+    assert "result = 1" in alloc_exit[1] and "ptr = 0x0" in alloc_exit[1]
+    assert all('exception = ( "false"' in line for line in alloc_exit)
+    assert 'name = "fake"' in event("fakeName_exit")[0]
+
+    # const char* inputs: capped at 256 bytes, except the kernel name.
+    load = event("fakeLoad_enter")[0]
+    assert "_path_length = 256" in load and 'path = "/' + "p" * 255 + '"' in load
+    assert 'kname = "' + "k" * 300 + '"' in event("fakeGetFunction_enter")[0]
+    assert "function = 0x77" in event("fakeGetFunction_exit")[0]
+
+    # Every component of an aggregate; unions as bytes.
+    launch = event("fakeLaunchEx_enter")[0]
+    assert "config_grid_x = 2" in launch and "config_extra_1_z = 9" in launch
+    assert "config_slots = [ [0] = 0xABC" in launch and "config_flags = 3" in launch
+    assert "handle_reserved = [ [0] = 104," in event("fakeOpen_enter")[0]
+    bits = event("fakeBits_enter")[0]
+    assert "bits = [ [0] = 4, [1] = 3, [2] = 2, [3] = 1 ]" in bits
+    assert "value_kind = 1" in bits and "value_union = [ [0] = 7," in bits
+
+    # Contract names.
+    assert "arg_1 = 1" in event("fakeUnnamed_enter")[0]
+    assert 'arg_2 = "unnamed"' in event("fakeUnnamed_enter")[0]
+    reserved = event("fakeReserved_enter")[0]
+    assert "arg_result = 1" in reserved and "arg_timestamp = 2" in reserved
+    assert "arg_exception = 5" in event("fakeReserved_exit")[0]
+    assert "public_name = 1" in event("fakeRenamed_enter")[0]
+
+    # Enums keep their signedness.
+    wide = event("fakeWide_enter")[0]
+    assert "value = 1099511627776" in wide and "flags = 2147483648" in wide
+
+    # An exception: exit written, marked, result zero.
+    thrown = event("fakeThrow_exit")[0]
+    assert 'exception = ( "true"' in thrown and "result = 0" in thrown
+
+    assert "dim_x = 7" in event("fakeGetDim_exit")[0]
+    assert "result_x = 1" in event("fakeMakeDim_exit")[0]
     assert 'result = "invalid value"' in event("fakeErrorString_exit")[0]
-    assert "count_out = 42" in event("fakeCount_exit")[0]
+    assert "count = 42" in event("fakeCount_exit")[0]
     assert not re.search(r"fake_provider:fakeSkipped", text)
+
+    # Capture levels: scalars drops strings and outputs, none keeps only results.
+    load_events = event("fakeLoad_enter")
+    assert 'path = ""' in load_events[1] and "stream = 0x20" in load_events[1]
+    assert "size = 32" in alloc_enter[2] and "ptr = 0x0" in alloc_exit[2]
+    assert "result = 0" in alloc_exit[2]
+    assert "size = 0" in alloc_enter[3] and "ptr = 0x0," in alloc_enter[3]
+    assert "result = 0" in alloc_exit[3]
+    assert len(load_events) == 2
 
     enters = len(re.findall(r"fake_provider:\w+_enter", text))
     exits = len(re.findall(r"fake_provider:\w+_exit", text))

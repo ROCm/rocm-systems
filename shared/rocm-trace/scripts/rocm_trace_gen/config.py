@@ -35,8 +35,14 @@ class TableConfig:
 
 @dataclass(frozen=True)
 class ApiConfig:
+    """Overrides for one API. Names are field names: a parameter's name, or
+    ``arg_<name>`` for one RC-API-1 prefixes (``result``, ``tid``,
+    ``timestamp``, ``exception``, ``arg_*``), or ``arg_<N>`` for an unnamed
+    one; ``result`` is the return value."""
+
     out: Tuple[str, ...] = ()
     strings: Tuple[str, ...] = ()
+    uncapped: Tuple[str, ...] = ()
     omit: Tuple[str, ...] = ()
     level: str = ""
     keywords: Tuple[str, ...] = ()
@@ -53,6 +59,7 @@ class Config:
     tables: Tuple[TableConfig, ...]
     success: Mapping[str, str]
     level: str
+    capture_level: str = ""
     apis: Mapping[str, ApiConfig] = field(default_factory=dict)
 
 
@@ -122,7 +129,7 @@ def _api(name: str, data: Any) -> ApiConfig:
         where,
         data,
         (),
-        ("out", "strings", "omit", "level", "keywords", "skip", "reason"),
+        ("out", "strings", "uncapped", "omit", "level", "keywords", "skip", "reason"),
     )
 
     if data.get("skip", False):
@@ -140,11 +147,15 @@ def _api(name: str, data: Any) -> ApiConfig:
 
     out = _names(f"{where}.out", data.get("out", []))
     strings = _names(f"{where}.strings", data.get("strings", []))
+    uncapped = _names(f"{where}.uncapped", data.get("uncapped", []))
     omit = _names(f"{where}.omit", data.get("omit", []))
     keywords = _names(f"{where}.keywords", data.get("keywords", []))
     if RESULT in out:
-        raise ConfigError(f"{where}.out: the result is always recorded")
-    both = sorted(set(omit) & (set(out) | set(strings)))
+        raise ConfigError(
+            f"{where}.out: result is the return value, always recorded; "
+            "a parameter named result is arg_result"
+        )
+    both = sorted(set(omit) & (set(out) | set(strings) | set(uncapped)))
     if both:
         raise ConfigError(f"{where}: {', '.join(both)} both omitted and recorded")
     unknown = sorted(set(keywords) - set(EXTRA_KEYWORDS))
@@ -154,7 +165,7 @@ def _api(name: str, data: Any) -> ApiConfig:
             f"choose from {', '.join(EXTRA_KEYWORDS)}"
         )
     level = _level(f"{where}.level", data["level"]) if "level" in data else ""
-    return ApiConfig(out, strings, omit, level, keywords)
+    return ApiConfig(out, strings, uncapped, omit, level, keywords)
 
 
 def load(path: Path) -> Config:
@@ -178,7 +189,7 @@ def _config(path: Path, data: Dict[str, Any]) -> Config:
         "top level",
         data,
         ("version", "provider", "output_name", "includes", "tables"),
-        ("success", "defaults", "apis"),
+        ("success", "defaults", "capture_level", "apis"),
     )
     if data["version"] != 1:
         raise ConfigError("version: only version 1 is supported")
@@ -232,5 +243,10 @@ def _config(path: Path, data: Dict[str, Any]) -> Config:
         tables=tuple(tables),
         success=dict(success),
         level=level,
+        capture_level=(
+            _identifier("capture_level", data["capture_level"])
+            if "capture_level" in data
+            else ""
+        ),
         apis=apis,
     )

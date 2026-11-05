@@ -1,8 +1,8 @@
 # Copyright Advanced Micro Devices, Inc. SPDX-License-Identifier: MIT
 
-# The smallest configuration the in-tree HIP tables generate with: only the
-# entries whose types have no field mapping. The runtime's real configuration
-# lives with CLR.
+# The smallest configuration the in-tree HIP tables generate with: none of
+# their parameters needs an annotation. The runtime's real configuration lives
+# with CLR.
 
 version: 1
 provider: rocm_hip
@@ -19,8 +19,3 @@ tables:
     size_member: size
 success:
   hipError_t: hipSuccess
-apis:
-  hipIpcOpenEventHandle:
-    omit: [handle]
-  hipIpcOpenMemHandle:
-    omit: [handle]

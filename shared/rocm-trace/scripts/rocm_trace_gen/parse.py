@@ -25,18 +25,34 @@ _UNSIGNED = {
     TK.CHAR32,
 }
 _CHAR = {TK.CHAR_S, TK.CHAR_U, TK.SCHAR, TK.UCHAR}
+_PLAIN_CHAR = {TK.CHAR_S, TK.CHAR_U}
 _FUNCTION = {TK.FUNCTIONPROTO, TK.FUNCTIONNOPROTO}
 
-# How deep pointer targets and record members are described. Depth 0 is the
-# parameter itself; its pointee or members are depth 1, and so on.
-_MAX_DEPTH = 2
+# Records nest at most this deep; deeper members are unsupported.
+_MAX_NESTING = 8
 
 
 class ParseError(Exception):
     """The headers did not parse, or a configured table is missing."""
 
 
-def _ctype(t: cindex.Type, depth: int = 0) -> CType:
+def _member_name(f: cindex.Cursor) -> str:
+    """A member's name, or "" for an anonymous struct or union member (which
+    libclang spells as "(anonymous union at ...)")."""
+    decl = f.type.get_canonical().get_declaration()
+    if (
+        decl is not None
+        and decl.kind in (CK.STRUCT_DECL, CK.UNION_DECL)
+        and decl.is_anonymous()
+    ):
+        return ""
+    return f.spelling
+
+
+def _ctype(t: cindex.Type, follow_pointer: bool = True, depth: int = 0) -> CType:
+    """Describe ``t``. ``follow_pointer`` describes a pointer's target, which
+    is wanted for parameters and results (outputs are read through them) but
+    not inside records or arrays (whose pointers are recorded as addresses)."""
     spelling = t.spelling
     c = t.get_canonical()
     size = max(c.get_size(), 0)
@@ -53,64 +69,118 @@ def _ctype(t: cindex.Type, depth: int = 0) -> CType:
     if kind in (TK.FLOAT, TK.DOUBLE):
         return CType(spelling, Kind.FLOAT, size)
     if kind == TK.ENUM:
-        return CType(spelling, Kind.ENUM, size)
+        underlying = c.get_declaration().enum_type.get_canonical().kind
+        return CType(spelling, Kind.ENUM, size, enum_signed=underlying in _SIGNED)
     if kind == TK.POINTER:
         target = t.get_pointee()
         target_kind = target.get_canonical().kind
-        pointee = _ctype(target, depth + 1) if depth < _MAX_DEPTH else None
+        pointee = _ctype(target, False, depth + 1) if follow_pointer else None
         return CType(
             spelling,
             Kind.POINTER,
             size,
             pointee=pointee,
             is_char_pointer=target_kind in _CHAR,
+            is_const_char_pointer=target_kind in _PLAIN_CHAR
+            and target.is_const_qualified(),
             is_function_pointer=target_kind in _FUNCTION,
         )
     if kind == TK.RECORD:
         members: Tuple[Tuple[str, CType], ...] = ()
-        if depth < _MAX_DEPTH and size > 0:
+        if size > 0 and depth < _MAX_NESTING:
             members = tuple(
-                (f.spelling, _ctype(f.type, depth + 1)) for f in c.get_fields()
+                (_member_name(f), _ctype(f.type, False, depth + 1))
+                for f in c.get_fields()
             )
-        return CType(spelling, Kind.RECORD, size, members=members)
+        is_union = c.get_declaration().kind == CK.UNION_DECL
+        return CType(spelling, Kind.RECORD, size, members=members, is_union=is_union)
+    if kind == TK.CONSTANTARRAY and depth < _MAX_NESTING:
+        element = _ctype(c.element_type, False, depth + 1)
+        return CType(spelling, Kind.ARRAY, size, element=element, count=c.element_count)
     return CType(spelling, Kind.UNSUPPORTED, size)
 
 
-def _parameters(
-    field: cindex.Cursor, proto: cindex.Type
-) -> List[Tuple[str, cindex.Type]]:
-    """Parameter names and declared types of a table member.
-
-    HIP members are ``t_<api> <api>_fn``: the names come from the typedef. HSA
-    members are ``decltype(<api>)* <api>_fn``: the names come from the function
-    declaration. A parameter without a name is called ``arg<N>``.
-    """
+def _declaration(
+    field: cindex.Cursor, arity: int
+) -> Optional[List[Tuple[str, cindex.Type]]]:
+    """Parameter names and spelled types from the declaration a table member is
+    typed by: HIP's ``t_<api> <api>_fn`` typedef, or the function in HSA's
+    ``decltype(<api>)* <api>_fn``. Spelled types keep typedefs such as
+    ``size_t``, which the prototype has lost."""
     decl: Optional[cindex.Cursor] = None
     for child in field.get_children():
-        if child.kind == CK.TYPE_REF and child.referenced is not None:
-            decl = child.referenced
-            break
-        if child.kind == CK.DECL_REF_EXPR and child.referenced is not None:
-            decl = child.referenced
-            break
         for sub in child.walk_preorder():
-            if sub.kind == CK.DECL_REF_EXPR and sub.referenced is not None:
+            if (
+                sub.kind in (CK.TYPE_REF, CK.DECL_REF_EXPR)
+                and sub.referenced is not None
+            ):
                 decl = sub.referenced
                 break
         if decl is not None:
             break
+    if decl is None:
+        return None
+    if decl.kind == CK.FUNCTION_DECL:
+        params = list(decl.get_arguments())
+    else:
+        params = [c for c in decl.get_children() if c.kind == CK.PARM_DECL]
+    if len(params) != arity:
+        return None
+    return [(p.spelling, p.type) for p in params]
 
-    named: List[cindex.Cursor] = []
-    if decl is not None:
-        if decl.kind == CK.FUNCTION_DECL:
-            named = list(decl.get_arguments())
-        else:
-            named = [c for c in decl.get_children() if c.kind == CK.PARM_DECL]
 
-    types = list(proto.argument_types())
-    if len(named) == len(types):
-        return [(p.spelling or f"arg{i}", p.type) for i, p in enumerate(named)]
-    return [(f"arg{i}", t) for i, t in enumerate(types)]
+_Signature = List[Tuple[str, str]]  # (parameter name, canonical type)
+
+
+def _public_functions(tu: cindex.TranslationUnit) -> Dict[str, List[_Signature]]:
+    """Parameter names and canonical types of every function with external
+    linkage declared at namespace scope (including inside ``extern "C"``), by
+    function name."""
+    found: Dict[str, List[_Signature]] = {}
+    parents = (CK.TRANSLATION_UNIT, CK.LINKAGE_SPEC)
+    for c in tu.cursor.walk_preorder():
+        if (
+            c.kind == CK.FUNCTION_DECL
+            and c.semantic_parent is not None
+            and c.semantic_parent.kind in parents
+            and c.linkage == cindex.LinkageKind.EXTERNAL
+            and c.type.kind == TK.FUNCTIONPROTO
+        ):
+            found.setdefault(c.spelling, []).append(
+                [
+                    (a.spelling, a.type.get_canonical().spelling)
+                    for a in c.get_arguments()
+                ]
+            )
+    return found
+
+
+def _parameters(
+    api: str,
+    field: cindex.Cursor,
+    proto: cindex.Type,
+    public: Dict[str, List[_Signature]],
+) -> Tuple[Param, ...]:
+    """The entry's parameters, named as RC-API-1 requires: by the public
+    function's declaration when the headers have one with the same parameter
+    types, else by the table's own declaration; a parameter with no name is
+    ``arg_<N>``, 1-based."""
+    declaration = _declaration(field, len(list(proto.argument_types())))
+    if declaration is not None:
+        types = [t for _, t in declaration]
+        names = [n for n, _ in declaration]
+    else:
+        types = list(proto.argument_types())
+        names = [""] * len(types)
+    canonical = [t.get_canonical().spelling for t in types]
+    for candidate in public.get(api, []):
+        if [t for _, t in candidate] == canonical:
+            names = [n for n, _ in candidate]
+            break
+    return tuple(
+        Param(n, _ctype(t)) if n else Param(f"arg_{i + 1}", _ctype(t), declared=False)
+        for i, (n, t) in enumerate(zip(names, types))
+    )
 
 
 def _structs(
@@ -129,12 +199,16 @@ def _structs(
     return found
 
 
-def _table(struct: cindex.Cursor, name: str, size_member: str) -> Table:
+def _table(
+    struct: cindex.Cursor,
+    name: str,
+    size_member: str,
+    public: Dict[str, List[_Signature]],
+) -> Table:
     fields = [c for c in struct.get_children() if c.kind == CK.FIELD_DECL]
     if not fields:
         raise ParseError(f"{name} has no members")
-    member_names = {f.spelling for f in fields}
-    if size_member.split(".")[0] not in member_names:
+    if size_member.split(".")[0] not in {f.spelling for f in fields}:
         raise ParseError(f"{name} has no size member '{size_member}'")
 
     slots: List[Slot] = []
@@ -150,7 +224,7 @@ def _table(struct: cindex.Cursor, name: str, size_member: str) -> Table:
             continue
         member = field.spelling
         api = member[:-3] if member.endswith("_fn") else member
-        params = tuple(Param(n, _ctype(t)) for n, t in _parameters(field, proto))
+        params = _parameters(api, field, proto, public)
         slots.append(Slot(name, member, api, _ctype(proto.get_result()), params))
 
     if not slots:
@@ -192,4 +266,5 @@ def parse_tables(
     missing = [name for name, _ in tables if name not in structs]
     if missing:
         raise ParseError("tables not found in the headers: " + ", ".join(missing))
-    return [_table(structs[name], name, size) for name, size in tables]
+    public = _public_functions(tu)
+    return [_table(structs[name], name, size, public) for name, size in tables]

@@ -1,17 +1,21 @@
 # Copyright Advanced Micro Devices, Inc. SPDX-License-Identifier: MIT
 
-"""Map C types to TraceLogging field macros."""
+"""Map C types to TraceLogging field macros.
+
+Every builder takes an optional ``cond``: a C++ condition under which the
+value is recorded. When it is false the field records zero (or an empty
+string), so an event has the same fields whatever is captured; one event name
+must keep one layout, or LTTng corrupts the trace.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional, Tuple
 
 from .model import CType, Kind
 
-# A by-value struct is recorded as one field per member when it has at most
-# this many members, each a number, enum, or pointer (dim3, hipExtent, ...).
-MAX_RECORD_MEMBERS = 8
+STRING_CAP = "ROCM_TRACE_STRING_CAP"
 
 
 class Unmappable(Exception):
@@ -20,92 +24,142 @@ class Unmappable(Exception):
 
 @dataclass(frozen=True)
 class Field:
-    """One event field: ``macro(expr, "name")``.
-
-    ``zero`` is the value of the field's type that ``expr`` is replaced with
-    when the field is conditional (an output the call did not write).
-    """
+    """One event field: ``macro(args..., "name")``."""
 
     macro: str
-    expr: str
+    args: Tuple[str, ...]
     name: str
-    zero: str
 
     def render(self) -> str:
-        return f'{self.macro}({self.expr}, "{self.name}")'
-
-    def guarded(self, condition: str) -> "Field":
-        return Field(
-            self.macro,
-            f"({condition} ? {self.expr} : {self.zero})",
-            self.name,
-            self.zero,
-        )
+        return f'{self.macro}({", ".join(self.args)}, "{self.name}")'
 
 
-def _integer(signed: bool, size: int, expr: str, name: str) -> Field:
+def _guard(cond: Optional[str], expr: str, zero: str) -> str:
+    return expr if cond is None else f"({cond} ? {expr} : {zero})"
+
+
+def _integer_type(signed: bool, size: int) -> Tuple[str, str]:
+    """(C type, TraceLogging type name) of an integer of ``size`` bytes."""
     bits = {1: 8, 2: 16, 4: 32, 8: 64}.get(size)
     if bits is None:
         raise Unmappable(f"{size}-byte integer")
-    ctype = f"{'' if signed else 'u'}int{bits}_t"
-    macro = f"TraceLogging{'Int' if signed else 'UInt'}{bits}"
-    return Field(macro, f"static_cast<{ctype}>({expr})", name, f"{ctype}{{0}}")
+    return f"{'' if signed else 'u'}int{bits}_t", f"{'Int' if signed else 'UInt'}{bits}"
 
 
-def scalar(ctype: CType, expr: str, name: str) -> Field:
-    """The field for a value that is not a record."""
+def _scalar_type(ctype: CType) -> Tuple[str, str]:
+    """(C type the value is cast to, TraceLogging type name) for a scalar."""
     kind = ctype.kind
-    if kind == Kind.SIGNED:
-        return _integer(True, ctype.size, expr, name)
-    if kind == Kind.UNSIGNED:
-        return _integer(False, ctype.size, expr, name)
+    if kind in (Kind.SIGNED, Kind.UNSIGNED):
+        return _integer_type(kind == Kind.SIGNED, ctype.size)
     if kind == Kind.ENUM:
-        return _integer(True, ctype.size if ctype.size == 8 else 4, expr, name)
+        return _integer_type(ctype.enum_signed, ctype.size)
     if kind == Kind.BOOL:
-        return Field(
-            "TraceLoggingBoolean", f"static_cast<uint8_t>({expr})", name, "uint8_t{0}"
-        )
+        return "uint8_t", "Boolean"
     if kind == Kind.FLOAT:
         if ctype.size == 4:
-            return Field(
-                "TraceLoggingFloat32", f"static_cast<float>({expr})", name, "0.0f"
-            )
+            return "float", "Float32"
         if ctype.size == 8:
-            return Field(
-                "TraceLoggingFloat64", f"static_cast<double>({expr})", name, "0.0"
-            )
+            return "double", "Float64"
         raise Unmappable(f"{ctype.size}-byte floating point")
     if kind == Kind.POINTER:
-        return Field(
-            "TraceLoggingPointer",
-            f"reinterpret_cast<const void*>({expr})",
-            name,
-            "static_cast<const void*>(nullptr)",
-        )
+        return "const void*", "Pointer"
     raise Unmappable(f"'{ctype.spelling}'")
 
 
-def string(expr: str, name: str) -> Field:
-    """A NUL-terminated string. TraceLogging records a null pointer as ""."""
-    return Field("TraceLoggingString", expr, name, "static_cast<const char*>(nullptr)")
+def scalar(ctype: CType, expr: str, name: str, cond: Optional[str] = None) -> Field:
+    """The field for a number, enum, bool, or pointer."""
+    c_type, tl_type = _scalar_type(ctype)
+    if ctype.kind == Kind.POINTER:
+        value = f"reinterpret_cast<const void*>({expr})"
+        zero = "static_cast<const void*>(nullptr)"
+    else:
+        value = f"static_cast<{c_type}>({expr})"
+        zero = f"{c_type}{{}}"
+    return Field(f"TraceLogging{tl_type}", (_guard(cond, value, zero),), name)
 
 
-def value(ctype: CType, expr: str, name: str) -> List[Field]:
-    """The fields for a value: one, or one per member of a small struct."""
-    if ctype.kind != Kind.RECORD:
-        return [scalar(ctype, expr, name)]
-    if not ctype.members:
-        raise Unmappable(f"struct '{ctype.spelling}' (incomplete or too deep)")
-    if len(ctype.members) > MAX_RECORD_MEMBERS:
-        raise Unmappable(
-            f"struct '{ctype.spelling}' ({len(ctype.members)} members; at most "
-            f"{MAX_RECORD_MEMBERS} are recorded one per field)"
+def string(
+    expr: str, name: str, capped: bool = True, cond: Optional[str] = None
+) -> Field:
+    """A NUL-terminated string; a null pointer records "". Capped strings
+    record at most ROCM_TRACE_STRING_CAP bytes (RC-GEN-8)."""
+    pointer = _guard(cond, expr, "static_cast<const char*>(nullptr)")
+    if not capped:
+        return Field("TraceLoggingString", (pointer,), name)
+    return Field(
+        "TraceLoggingCountedString",
+        (f"text({pointer})", f"text_size({pointer}, {STRING_CAP})"),
+        name,
+    )
+
+
+def _array(ctype: CType, expr: str, name: str, cond: Optional[str]) -> List[Field]:
+    element = ctype.element
+    assert element is not None
+    if element.kind in (Kind.RECORD, Kind.ARRAY):
+        fields: List[Field] = []
+        for i in range(ctype.count):
+            fields.extend(value(element, f"{expr}[{i}]", f"{name}_{i}", cond))
+        return fields
+    c_type, tl_type = _scalar_type(element)
+    if element.kind == Kind.POINTER:
+        c_type = "const void*"
+        pointer = f"reinterpret_cast<const void* const*>({expr})"
+    else:
+        pointer = f"reinterpret_cast<const {c_type}*>({expr})"
+    zero = f"zeros<{c_type}, {ctype.count}>()"
+    return [
+        Field(
+            f"TraceLogging{tl_type}FixedArray",
+            (_guard(cond, pointer, zero), str(ctype.count)),
+            name,
         )
+    ]
+
+
+def value(
+    ctype: CType, expr: str, name: str, cond: Optional[str] = None
+) -> List[Field]:
+    """The fields for a value: one for a scalar, one per component for a
+    struct or array (RC-API-1: all components of an aggregate)."""
+    if ctype.kind == Kind.ARRAY:
+        return _array(ctype, expr, name, cond)
+    if ctype.kind != Kind.RECORD:
+        return [scalar(ctype, expr, name, cond)]
+    if not ctype.members:
+        raise Unmappable(
+            f"struct '{ctype.spelling}' (incomplete, or nested too deeply)"
+        )
+    if ctype.is_union:
+        return [_union_bytes(ctype, f"&({expr})", name, cond)]
     fields: List[Field] = []
     for member, mtype in ctype.members:
-        if mtype.kind in (Kind.RECORD, Kind.UNSUPPORTED, Kind.VOID):
+        if mtype.kind in (Kind.UNSUPPORTED, Kind.VOID):
             raise Unmappable(
                 f"struct '{ctype.spelling}' (member '{member}' is '{mtype.spelling}')"
             )
-        fields.append(scalar(mtype, f"{expr}.{member}", f"{name}_{member}"))
+        if member:
+            fields.extend(value(mtype, f"{expr}.{member}", f"{name}_{member}", cond))
+        elif mtype.is_union:
+            # An anonymous union starts where its first member does.
+            first = mtype.members[0][0] if mtype.members else ""
+            if not first:
+                raise Unmappable(f"struct '{ctype.spelling}' (an unnamed nested union)")
+            fields.append(
+                _union_bytes(mtype, f"&({expr}.{first})", f"{name}_union", cond)
+            )
+        else:
+            # An anonymous struct: its members belong to the enclosing one.
+            fields.extend(value(mtype, expr, name, cond))
     return fields
+
+
+def _union_bytes(ctype: CType, address: str, name: str, cond: Optional[str]) -> Field:
+    """A union's bytes: which member is active is unknown."""
+    pointer = f"reinterpret_cast<const uint8_t*>({address})"
+    zero = f"zeros<uint8_t, {ctype.size}>()"
+    return Field(
+        "TraceLoggingUInt8FixedArray",
+        (_guard(cond, pointer, zero), str(ctype.size)),
+        name,
+    )

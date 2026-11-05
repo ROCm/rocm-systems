@@ -10,11 +10,19 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from . import __version__
 from .config import RESULT, ApiConfig, Config
 from .fields import Field, Unmappable, string, value
-from .model import Kind, Slot, Table
+from .model import Kind, Param, Slot, Table
 
 _RESULT_VAR = "rocm_trace_result"
+_EXCEPTION_VAR = "rocm_trace_exception"
 _COPYRIGHT = "// Copyright Advanced Micro Devices, Inc. SPDX-License-Identifier: MIT\n"
 _INDENT = "    "
+
+# Field names a parameter cannot take: RC-API-1 prefixes these with arg_
+# (exception is added here, for the exit event's own field).
+RESERVED = ("result", "tid", "timestamp", "exception")
+
+# TraceLoggingWrite takes at most 99 arguments; level, keyword and opcode use 3.
+MAX_FIELDS = 96
 
 
 class GenerateError(Exception):
@@ -25,16 +33,16 @@ class GenerateError(Exception):
         self.errors = list(errors)
 
 
-@dataclass(frozen=True)
-class _Probe:
-    slot: Slot
-    function: str
-    aliases: Tuple[Tuple[str, str], ...]
-    params: Tuple[Tuple[str, str], ...]  # (declared type, name)
-    level: str
-    keywords: Tuple[str, ...]
-    enter: Tuple[Field, ...]
-    exit: Tuple[Field, ...]
+def field_name(p: Param) -> str:
+    """The event field name of a parameter (RC-API-1)."""
+    if p.declared and (p.name in RESERVED or p.name.startswith("arg_")):
+        return f"arg_{p.name}"
+    return p.name
+
+
+def _all(*conditions: Optional[str]) -> Optional[str]:
+    parts = [c for c in conditions if c]
+    return " && ".join(parts) if parts else None
 
 
 def _declarable(spelling: str) -> bool:
@@ -42,67 +50,120 @@ def _declarable(spelling: str) -> bool:
     return "(" not in spelling and "[" not in spelling
 
 
-def _plan(
-    slot: Slot, api: ApiConfig, config: Config
-) -> Tuple[Optional[_Probe], List[str]]:
-    errors: List[str] = []
+@dataclass(frozen=True)
+class _Probe:
+    slot: Slot
+    function: str
+    exit_function: str
+    aliases: Tuple[Tuple[str, str], ...]
+    params: Tuple[Tuple[str, str], ...]  # (declared type, name)
+    result_type: str
+    exit_params: Tuple[Tuple[str, str], ...]  # after the exception flag
+    level: str
+    keywords: Tuple[str, ...]
+    enter: Tuple[Field, ...]
+    exit: Tuple[Field, ...]
+
+
+def _check_names(slot: Slot, api: ApiConfig, by_field: Dict[str, Param]) -> List[str]:
     where = f"{slot.table}.{slot.member} ({slot.api})"
-    names = [p.name for p in slot.params]
-    known = set(names) | {RESULT}
-
-    for key in ("out", "strings", "omit"):
+    errors: List[str] = []
+    known = set(by_field) | {RESULT}
+    for key in ("out", "strings", "uncapped", "omit"):
         for name in getattr(api, key):
-            if name not in known or (key == "out" and name == RESULT):
+            if name not in known:
+                hint = ""
+                if f"arg_{name}" in by_field:
+                    hint = f"; RC-API-1 names this parameter arg_{name}"
                 errors.append(
-                    f"{where}: {key} names '{name}', which is not a parameter"
+                    f"{where}: {key} names '{name}', which is not a parameter{hint}"
                 )
+    if errors:
+        return errors
 
-    params = {p.name: p.ctype for p in slot.params}
     for name in api.out:
-        ctype = params.get(name)
-        if ctype is not None and (ctype.kind != Kind.POINTER or ctype.pointee is None):
+        ctype = by_field[name].ctype
+        if (
+            ctype.kind != Kind.POINTER
+            or ctype.pointee is None
+            or ctype.pointee.kind == Kind.VOID
+        ):
             errors.append(
                 f"{where}: out parameter '{name}' is not a pointer to a complete type"
             )
     for name in api.strings:
-        ctype = slot.result if name == RESULT else params.get(name)
-        if ctype is not None and not ctype.is_char_pointer:
+        if name == RESULT:
+            if not slot.result.is_char_pointer:
+                errors.append(
+                    f"{where}: strings names 'result', which is not a char pointer"
+                )
+        elif name not in api.out or not by_field[name].ctype.is_char_pointer:
             errors.append(
-                f"{where}: strings names '{name}', which is not a char pointer"
+                f"{where}: strings names '{name}', which is not a char-pointer output; "
+                "const char* inputs are recorded as strings already"
             )
+    for name in api.uncapped:
+        is_input_string = (
+            name in by_field and by_field[name].ctype.is_const_char_pointer
+        )
+        if name not in api.strings and not (is_input_string and name not in api.out):
+            errors.append(
+                f"{where}: uncapped names '{name}', which is not a string field"
+            )
+    return errors
+
+
+def _plan(
+    slot: Slot, api: ApiConfig, config: Config
+) -> Tuple[Optional[_Probe], List[str]]:
+    where = f"{slot.table}.{slot.member} ({slot.api})"
+    by_field = {field_name(p): p for p in slot.params}
+    errors = _check_names(slot, api, by_field)
     if errors:
         return None, errors
 
+    cap = config.capture_level
+    scalars = f"{cap} >= ROCM_TRACE_CAPTURE_SCALARS" if cap else None
+    full = f"{cap} >= ROCM_TRACE_CAPTURE_FULL" if cap else None
+
     aliases: List[Tuple[str, str]] = []
-    declared: List[Tuple[str, str]] = []
-    for p in slot.params:
-        spelling = p.ctype.spelling
-        if not _declarable(spelling):
-            alias = f"{slot.table}_{slot.api}_{p.name}_t"
-            aliases.append((alias, spelling))
-            spelling = alias
-        declared.append((spelling, p.name))
+
+    def declared_type(spelling: str, alias: str) -> str:
+        if _declarable(spelling):
+            return spelling
+        aliases.append((alias, spelling))
+        return alias
+
+    prefix = f"{slot.table}_{slot.api}"
+    declared = [
+        (declared_type(p.ctype.spelling, f"{prefix}_{p.name}_t"), p.name)
+        for p in slot.params
+    ]
+    result_type = declared_type(slot.result.spelling, f"{prefix}_result_t")
 
     enter: List[Field] = []
     for p in slot.params:
-        if p.name in api.omit:
+        name = field_name(p)
+        if name in api.omit:
             continue
         try:
-            if p.name in api.strings and p.name not in api.out:
-                enter.append(string(p.name, p.name))
+            if p.ctype.is_const_char_pointer and name not in api.out:
+                enter.append(string(p.name, name, name not in api.uncapped, full))
             else:
-                enter.extend(value(p.ctype, p.name, p.name))
+                enter.extend(value(p.ctype, p.name, name, scalars))
         except Unmappable as err:
             errors.append(
-                f"{where}: parameter '{p.name}' has no field mapping: {err}; "
-                "add it to omit"
+                f"{where}: parameter '{name}' has no field mapping: {err}; add it to omit"
             )
 
+    has_result = slot.result.kind != Kind.VOID and RESULT not in api.omit
     exit_fields: List[Field] = []
-    if slot.result.kind != Kind.VOID and RESULT not in api.omit:
+    if has_result:
         try:
             if RESULT in api.strings:
-                exit_fields.append(string(_RESULT_VAR, RESULT))
+                exit_fields.append(
+                    string(_RESULT_VAR, RESULT, RESULT not in api.uncapped, full)
+                )
             else:
                 exit_fields.extend(value(slot.result, _RESULT_VAR, RESULT))
         except Unmappable as err:
@@ -111,27 +172,42 @@ def _plan(
             )
 
     success = config.success.get(slot.result.spelling)
-    for name in api.out:
-        ctype = params[name]
-        condition = f"{name} != nullptr"
-        if success is not None:
-            condition = f"{_RESULT_VAR} == {success} && {condition}"
+    success_cond = f"{_RESULT_VAR} == {success}" if success and has_result else None
+    exit_params: List[Tuple[str, str]] = []
+    if has_result:
+        exit_params.append((result_type, _RESULT_VAR))
+    for p, decl in zip(slot.params, declared):
+        name = field_name(p)
+        if name not in api.out:
+            continue
+        exit_params.append(decl)
+        cond = _all(full, f"!{_EXCEPTION_VAR}", success_cond, f"{p.name} != nullptr")
         try:
             if name in api.strings:
-                exit_fields.append(string(name, f"{name}_out").guarded(condition))
+                exit_fields.append(string(p.name, name, name not in api.uncapped, cond))
             else:
-                exit_fields.extend(
-                    f.guarded(condition)
-                    for f in value(ctype.pointee, f"(*{name})", f"{name}_out")
-                )
+                exit_fields.extend(value(p.ctype.pointee, f"(*{p.name})", name, cond))
         except Unmappable as err:
             errors.append(
-                f"{where}: out parameter '{name}' points to a type with no field mapping: {err}"
+                f"{where}: out parameter '{name}' points to a type with no field "
+                f"mapping: {err}"
             )
+    exit_fields.append(
+        Field(
+            "TraceLoggingBoolean",
+            (f"static_cast<uint8_t>({_EXCEPTION_VAR})",),
+            "exception",
+        )
+    )
 
-    for event, event_fields in (("enter", enter), ("exit", exit_fields)):
+    for event, fields in (("enter", enter), ("exit", exit_fields)):
+        if len(fields) > MAX_FIELDS:
+            errors.append(
+                f"{where}: the {event} event would have {len(fields)} fields; "
+                f"TraceLogging allows {MAX_FIELDS}"
+            )
         seen = set()
-        for f in event_fields:
+        for f in fields:
             if f.name in seen:
                 errors.append(
                     f"{where}: the {event} event would have two fields named "
@@ -144,9 +220,12 @@ def _plan(
     return (
         _Probe(
             slot=slot,
-            function=f"probe_{slot.table}_{slot.api}",
+            function=f"probe_{prefix}",
+            exit_function=f"exit_{prefix}",
             aliases=tuple(aliases),
             params=tuple(declared),
+            result_type=result_type,
+            exit_params=tuple(exit_params),
             level=api.level or config.level,
             keywords=("API", *api.keywords),
             enter=tuple(enter),
@@ -156,7 +235,7 @@ def _plan(
     )
 
 
-def _event(
+def _write(
     provider: str, name: str, probe: _Probe, opcode: str, fields: Sequence[Field]
 ) -> List[str]:
     keywords = " | ".join(f"ROCM_TRACE_KW_{k}" for k in probe.keywords)
@@ -174,21 +253,39 @@ def _event(
 
 def _probe_source(probe: _Probe, provider: str, saved: str) -> List[str]:
     slot = probe.slot
+    void = slot.result.kind == Kind.VOID
     lines = [f"using {alias} = {spelling};" for alias, spelling in probe.aliases]
-    params = ", ".join(f"{t} {n}" for t, n in probe.params)
-    lines.append(f"{slot.result.spelling} {probe.function}({params}) {{")
-    lines += _event(
-        provider, f"{slot.api}_enter", probe, "WINEVENT_OPCODE_START", probe.enter
+
+    # The one place the exit event is written, so both paths share one layout.
+    exit_params = ", ".join(
+        [f"bool {_EXCEPTION_VAR}"] + [f"{t} {n}" for t, n in probe.exit_params]
     )
-    call = f"{saved}.{slot.member}({', '.join(n for _, n in probe.params)})"
-    if slot.result.kind == Kind.VOID:
-        lines.append(f"{_INDENT}{call};")
-    else:
-        lines.append(f"{_INDENT}auto const {_RESULT_VAR} = {call};")
-    lines += _event(
+    lines.append(f"void {probe.exit_function}({exit_params}) {{")
+    lines += _write(
         provider, f"{slot.api}_exit", probe, "WINEVENT_OPCODE_STOP", probe.exit
     )
-    if slot.result.kind != Kind.VOID:
+    lines += ["}", ""]
+
+    params = ", ".join(f"{t} {n}" for t, n in probe.params)
+    call = f"{saved}.{slot.member}({', '.join(n for _, n in probe.params)})"
+    exit_args = ", ".join(n for _, n in probe.exit_params)
+    exit_args = f", {exit_args}" if exit_args else ""
+    lines.append(f"{probe.result_type} {probe.function}({params}) {{")
+    lines += _write(
+        provider, f"{slot.api}_enter", probe, "WINEVENT_OPCODE_START", probe.enter
+    )
+    if not void:
+        lines.append(f"{_INDENT}{probe.result_type} {_RESULT_VAR}{{}};")
+    lines.append(f"{_INDENT}try {{")
+    lines.append(
+        f"{_INDENT * 2}{call};" if void else f"{_INDENT * 2}{_RESULT_VAR} = {call};"
+    )
+    lines.append(f"{_INDENT}}} catch (...) {{")
+    lines.append(f"{_INDENT * 2}{probe.exit_function}(true{exit_args});")
+    lines.append(f"{_INDENT * 2}throw;")
+    lines.append(f"{_INDENT}}}")
+    lines.append(f"{_INDENT}{probe.exit_function}(false{exit_args});")
+    if not void:
         lines.append(f"{_INDENT}return {_RESULT_VAR};")
     lines.append("}")
     return lines
@@ -207,17 +304,49 @@ def _header(config: Config, tables: Sequence[Table]) -> str:
     lines = [_banner(config), "#pragma once", ""]
     lines += [f"#include <{inc}>" for inc in config.includes]
     lines.append("")
+    if config.capture_level:
+        lines += [
+            "// What the probes record: ROCM_TRACE_CAPTURE_NONE, _SCALARS or _FULL",
+            "// (rocm/trace/values.h). Defined by the runtime and set from the",
+            "// ROCM_TRACE_CAPTURE environment variable before the tables are installed.",
+            f"extern int {config.capture_level};",
+            "",
+        ]
     for t in tables:
-        lines.append(
-            "// Replace each non-null entry of *table with its probe. Not thread-safe:"
-        )
-        lines.append(
-            "// call before the table is published. Calling it again is harmless."
-        )
-        lines.append(f"void rocm_trace_install_{t.name}({t.name}* table);")
-        lines.append("")
+        lines += [
+            "// Replace each non-null entry of *table, within its size, with its probe.",
+            "// Not thread-safe: call before the table is published. Calling it again",
+            "// is harmless. The original entries are kept in one copy per table type,",
+            "// so install one instance of each table.",
+            f"void rocm_trace_install_{t.name}({t.name}* table);",
+            "",
+        ]
     lines.append("// clang-format on")
     return "\n".join(lines) + "\n"
+
+
+_HELPERS = [
+    "// A string pointer that is never null, and its length within cap.",
+    "inline const char* text(const char* s) {",
+    f'{_INDENT}return s != nullptr ? s : "";',
+    "}",
+    "",
+    "inline uint16_t text_size(const char* s, size_t cap) {",
+    f"{_INDENT}return s != nullptr ? static_cast<uint16_t>(strnlen(s, cap)) : 0;",
+    "}",
+    "",
+    "// N zero values, for array fields that are not captured.",
+    "template <typename T, size_t N>",
+    "const T* zeros() {",
+    f"{_INDENT}static const T values[N] = {{}};",
+    f"{_INDENT}return values;",
+    "}",
+    "",
+    "constexpr bool has_slot(size_t limit, size_t offset) {",
+    f"{_INDENT}return offset + sizeof(void*) <= limit;",
+    "}",
+    "",
+]
 
 
 def _source(
@@ -235,6 +364,7 @@ def _source(
         "",
         "#include <cstddef>",
         "#include <cstdint>",
+        "#include <string.h>",
         "",
         f"TRACELOGGING_DECLARE_PROVIDER({provider});",
         "",
@@ -248,19 +378,10 @@ def _source(
             f'              "{t.name} changed after the trace probes were generated; '
             f'regenerate them");'
         )
-    lines += [
-        "",
-        "namespace {",
-        "",
-        "constexpr bool has_slot(size_t limit, size_t offset) {",
-        f"{_INDENT}return offset + sizeof(void*) <= limit;",
-        "}",
-        "",
-    ]
+    lines += ["", "namespace {", ""] + _HELPERS
     for t in tables:
         saved = f"saved_{t.name}"
-        lines.append(f"{t.name} {saved}{{}};")
-        lines.append("")
+        lines += [f"{t.name} {saved}{{}};", ""]
         for probe in probes[t.name]:
             lines += _probe_source(probe, provider, saved)
             lines.append("")
@@ -296,12 +417,8 @@ def generate(config: Config, tables: Sequence[Table]) -> Dict[str, str]:
     Raises GenerateError listing every problem found.
     """
     errors: List[str] = []
-    slots_by_api: Dict[str, List[Slot]] = {}
-    for t in tables:
-        for s in t.slots:
-            slots_by_api.setdefault(s.api, []).append(s)
-
-    for name in sorted(set(config.apis) - set(slots_by_api)):
+    apis_in_tables = {s.api for t in tables for s in t.slots}
+    for name in sorted(set(config.apis) - apis_in_tables):
         errors.append(f"apis.{name}: no table has this entry")
 
     probes: Dict[str, List[_Probe]] = {t.name: [] for t in tables}
