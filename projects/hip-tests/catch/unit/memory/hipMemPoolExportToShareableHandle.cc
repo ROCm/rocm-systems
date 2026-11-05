@@ -137,35 +137,42 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldUseHdl) {
   REQUIRE(pid >= 0);
 
   if (pid == 0) {  // child
-    REQUIRE(close(fd[1]) == 0);
-    REQUIRE(close(fdSig[0]) == 0);
-    // Wait for parent process to create the socket.
-    hipMemPoolPtrExportData ptrExp;
-    REQUIRE(read(fd[0], &ptrExp, sizeof(hipMemPoolPtrExportData)) >= 0);
-    // Open Socket as client
-    ipcSocketCom<hipShareableHdl> sockObj(false, socketName);
-    REQUIRE(sockObj.initialize());
-    // Signal Parent process that Child is ready to receive msg
-    int sig = 0;
-    REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
-    hipShareableHdl shdl;
-    // receive message from parent provess
-    checkSysCallErrors(sockObj.recvShareableHdl(&shdl));
-    // Import mempool
-    hipMemPool_t mempoolImp;
-    HIP_CHECK(hipMemPoolImportFromShareableHandle(&mempoolImp, (void*)shdl,
-                                                  hipMemHandleTypePosixFileDescriptor, 0));
-    // Import and use pointer
-    void* ptrImp;
-    HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp));
-    square_kernel<<<dim3(DATA_SIZE() / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
-        (int*)ptrImp);
-    HIP_CHECK(hipStreamSynchronize(0));
-    // Import and use pointer
-    REQUIRE(close(fd[0]) == 0);
-    REQUIRE(close(fdSig[1]) == 0);
-    checkSysCallErrors(sockObj.closeThisSock());
-    exit(0);
+    // A failing assertion throws a Catch exception, in that case we want to exit immediately and
+    // let the parent clean up instead of us, so we use _exit()
+    try {
+      REQUIRE(close(fd[1]) == 0);
+      REQUIRE(close(fdSig[0]) == 0);
+      // Wait for parent process to create the socket.
+      hipMemPoolPtrExportData ptrExp;
+      REQUIRE(read(fd[0], &ptrExp, sizeof(hipMemPoolPtrExportData)) >= 0);
+      // Open Socket as client
+      ipcSocketCom<hipShareableHdl> sockObj(false, socketName);
+      REQUIRE(sockObj.initialize());
+      // Signal Parent process that Child is ready to receive msg
+      int sig = 0;
+      REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
+      hipShareableHdl shdl;
+      // receive message from parent provess
+      checkSysCallErrors(sockObj.recvShareableHdl(&shdl));
+      // Import mempool
+      hipMemPool_t mempoolImp;
+      HIP_CHECK(hipMemPoolImportFromShareableHandle(&mempoolImp, (void*)shdl,
+                                                    hipMemHandleTypePosixFileDescriptor, 0));
+      // Import and use pointer
+      void* ptrImp;
+      HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp));
+      square_kernel<<<dim3(DATA_SIZE() / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
+          (int*)ptrImp);
+      HIP_CHECK(hipStreamSynchronize(0));
+      // Import and use pointer
+      REQUIRE(close(fd[0]) == 0);
+      REQUIRE(close(fdSig[1]) == 0);
+      checkSysCallErrors(sockObj.closeThisSock());
+      exit(0);
+    } catch (...) {
+      std::fprintf(stderr, "child: an assertion or HIP call failed, see the output above\n");
+      _exit(1);
+    }
   } else {  // parent
     REQUIRE(close(fd[0]) == 0);
     REQUIRE(close(fdSig[1]) == 0);
@@ -246,39 +253,46 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess) {
   REQUIRE(pid >= 0);
 
   if (pid == 0) {  // child
-    REQUIRE(close(fd[1]) == 0);
-    REQUIRE(close(fdSig[0]) == 0);
-    // Wait for parent process to create the socket.
-    int sig = 0;
-    REQUIRE(read(fd[0], &sig, sizeof(int)) >= 0);
-    // Open Socket as client
-    ipcSocketCom<hipShareableHdl> sockObj(false, socketName);
-    REQUIRE(sockObj.initialize());
-    // Signal Parent process that Child is ready to receive msg
-    REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
-    hipShareableHdl shdl;
-    // receive message from parent provess
-    checkSysCallErrors(sockObj.recvShareableHdl(&shdl));
-    // Import mempool
-    hipMemPool_t mempoolImp;
-    HIP_CHECK(hipMemPoolImportFromShareableHandle(&mempoolImp, (void*)shdl,
-                                                  hipMemHandleTypePosixFileDescriptor, 0));
-    // Get and validate access for all devices
-    int numDevices = 0;
-    HIP_CHECK(hipGetDeviceCount(&numDevices));
-    for (int dev = 0; dev < numDevices; dev++) {
-      hipMemAccessFlags flags;
-      hipMemLocation location;
-      location.type = hipMemLocationTypeDevice;
-      location.id = dev;
-      HIP_CHECK(hipMemPoolGetAccess(&flags, mempoolImp, &location));
-      REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+    // A failing assertion throws a Catch exception, in that case we want to exit immediately and
+    // let the parent clean up instead of us, so we use _exit()
+    try {
+      REQUIRE(close(fd[1]) == 0);
+      REQUIRE(close(fdSig[0]) == 0);
+      // Wait for parent process to create the socket.
+      int sig = 0;
+      REQUIRE(read(fd[0], &sig, sizeof(int)) >= 0);
+      // Open Socket as client
+      ipcSocketCom<hipShareableHdl> sockObj(false, socketName);
+      REQUIRE(sockObj.initialize());
+      // Signal Parent process that Child is ready to receive msg
+      REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
+      hipShareableHdl shdl;
+      // receive message from parent provess
+      checkSysCallErrors(sockObj.recvShareableHdl(&shdl));
+      // Import mempool
+      hipMemPool_t mempoolImp;
+      HIP_CHECK(hipMemPoolImportFromShareableHandle(&mempoolImp, (void*)shdl,
+                                                    hipMemHandleTypePosixFileDescriptor, 0));
+      // Get and validate access for all devices
+      int numDevices = 0;
+      HIP_CHECK(hipGetDeviceCount(&numDevices));
+      for (int dev = 0; dev < numDevices; dev++) {
+        hipMemAccessFlags flags;
+        hipMemLocation location;
+        location.type = hipMemLocationTypeDevice;
+        location.id = dev;
+        HIP_CHECK(hipMemPoolGetAccess(&flags, mempoolImp, &location));
+        REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+      }
+      // Import and use pointer
+      REQUIRE(close(fd[0]) == 0);
+      REQUIRE(close(fdSig[1]) == 0);
+      checkSysCallErrors(sockObj.closeThisSock());
+      exit(0);
+    } catch (...) {
+      std::fprintf(stderr, "child: an assertion or HIP call failed, see the output above\n");
+      _exit(1);
     }
-    // Import and use pointer
-    REQUIRE(close(fd[0]) == 0);
-    REQUIRE(close(fdSig[1]) == 0);
-    checkSysCallErrors(sockObj.closeThisSock());
-    exit(0);
   } else {  // parent
     REQUIRE(close(fd[0]) == 0);
     REQUIRE(close(fdSig[1]) == 0);
@@ -355,44 +369,51 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl) {
   REQUIRE(pid >= 0);
 
   if (pid == 0) {  // child
-    auto pid2 = fork();
-    if (pid2 == 0) {  // grandchild
-      REQUIRE(close(fd[1]) == 0);
-      REQUIRE(close(fdSig[0]) == 0);
-      // Wait for parent process to create the socket.
-      hipMemPoolPtrExportData ptrExp;
-      REQUIRE(read(fd[0], &ptrExp, sizeof(hipMemPoolPtrExportData)) >= 0);
-      // Open Socket as client
-      ipcSocketCom<hipShareableHdl> sockObj(false, socketName);
-      REQUIRE(sockObj.initialize());
-      hipShareableHdl shdl;
-      // Signal Parent process that Child is ready to receive msg
-      int sig = 0;
-      REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
-      // receive message from parent provess
-      checkSysCallErrors(sockObj.recvShareableHdl(&shdl));
-      // Import mempool
-      hipMemPool_t mempoolImp;
-      HIP_CHECK(hipMemPoolImportFromShareableHandle(&mempoolImp, (void*)shdl,
-                                                    hipMemHandleTypePosixFileDescriptor, 0));
-      // Import and use pointer
-      void* ptrImp;
-      HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp));
-      square_kernel<<<dim3(DATA_SIZE() / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
-          (int*)ptrImp);
-      HIP_CHECK(hipStreamSynchronize(0));
-      REQUIRE(close(fd[0]) == 0);
-      REQUIRE(close(fdSig[1]) == 0);
-      checkSysCallErrors(sockObj.closeThisSock());
-      exit(0);
-    } else {
-      int status;
-      REQUIRE(close(fdpid[0]) == 0);
-      REQUIRE(write(fdpid[1], &pid2, sizeof(pid2)) >= 0);
-      REQUIRE(wait(&status) >= 0);
-      REQUIRE(status == 0);
-      REQUIRE(close(fdpid[1]) == 0);
-      exit(0);
+    // A failing assertion throws a Catch exception, which would otherwise make the forked child
+    // go on running the remaining test cases. Report it and leave with a failure status instead.
+    try {
+      auto pid2 = fork();
+      if (pid2 == 0) {  // grandchild
+        REQUIRE(close(fd[1]) == 0);
+        REQUIRE(close(fdSig[0]) == 0);
+        // Wait for parent process to create the socket.
+        hipMemPoolPtrExportData ptrExp;
+        REQUIRE(read(fd[0], &ptrExp, sizeof(hipMemPoolPtrExportData)) >= 0);
+        // Open Socket as client
+        ipcSocketCom<hipShareableHdl> sockObj(false, socketName);
+        REQUIRE(sockObj.initialize());
+        hipShareableHdl shdl;
+        // Signal Parent process that Child is ready to receive msg
+        int sig = 0;
+        REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
+        // receive message from parent provess
+        checkSysCallErrors(sockObj.recvShareableHdl(&shdl));
+        // Import mempool
+        hipMemPool_t mempoolImp;
+        HIP_CHECK(hipMemPoolImportFromShareableHandle(&mempoolImp, (void*)shdl,
+                                                      hipMemHandleTypePosixFileDescriptor, 0));
+        // Import and use pointer
+        void* ptrImp;
+        HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp));
+        square_kernel<<<dim3(DATA_SIZE() / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
+            (int*)ptrImp);
+        HIP_CHECK(hipStreamSynchronize(0));
+        REQUIRE(close(fd[0]) == 0);
+        REQUIRE(close(fdSig[1]) == 0);
+        checkSysCallErrors(sockObj.closeThisSock());
+        exit(0);
+      } else {
+        int status;
+        REQUIRE(close(fdpid[0]) == 0);
+        REQUIRE(write(fdpid[1], &pid2, sizeof(pid2)) >= 0);
+        REQUIRE(wait(&status) >= 0);
+        REQUIRE(status == 0);
+        REQUIRE(close(fdpid[1]) == 0);
+        exit(0);
+      }
+    } catch (...) {
+      std::fprintf(stderr, "child: an assertion or HIP call failed, see the output above\n");
+      _exit(1);
     }
   } else {  // parent
     REQUIRE(close(fd[0]) == 0);
