@@ -259,6 +259,10 @@ constexpr size_t ddaLL128StageBytes(unsigned threads) {
   return (size_t)(threads / kDdaLL128Warp) * kDdaLL128StageWindows * kDdaLL128WireBytesPerSlice;
 }
 constexpr CachePolicy kDdaLL128StagePolicy = createCachePolicy(TemporalHint::RT, MemScope::SYS);
+#if ASYNC_COPY_SUPPORTED
+// Async stores a lane issues per push of one slice; lastOps and the wait ladder count in these.
+constexpr int kDdaLL128StagePushOps = asyncAlignedCopyOps<kDdaLL128WireBytesPerSlice, kDdaLL128Warp>();
+#endif
 
 template <int WIRE>
 constexpr bool ddaLL128Staged() {
@@ -338,7 +342,7 @@ __device__ __forceinline__ void ddaLL128StagePush(DdaLL128Stage& st, uint64_t* w
   asyncStoreFromLDS<SyncPolicy::Async, kDdaLL128StagePolicy, true>(
     st.lds + (size_t)st.win * kDdaLL128WireBytesPerSlice, reinterpret_cast<uint8_t*>(wireSlice),
     kDdaLL128WireBytesPerSlice);
-  st.lastOps += kDdaLL128Pairs;
+  st.lastOps += kDdaLL128StagePushOps;
 #endif
 }
 

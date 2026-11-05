@@ -331,6 +331,13 @@ __device__ inline void asyncWait() {
   __builtin_amdgcn_s_wait_asynccnt(WAIT_CNT);
 }
 
+// Async ops each lane issues in an Aligned copy of SIZE bytes on LANES lanes: one b128 per warp-wide row, no tail.
+template <size_t SIZE, size_t LANES>
+constexpr int asyncAlignedCopyOps() {
+  static_assert(SIZE % (LANES * async_detail::BYTES_PER_LANE_B128) == 0, "a tail would issue more ops per lane");
+  return (int)(SIZE / (LANES * async_detail::BYTES_PER_LANE_B128));
+}
+
 template <SyncPolicy sp, CachePolicy cp, bool Aligned>
 __device__ inline void asyncLoadToLDS(const uint8_t* globalSrc, uint8_t* ldsDst, size_t sizeInBytes) {
   async_detail::warpAsyncCopy<async_detail::AsyncDir::Load, cp, Aligned>(globalSrc, ldsDst, sizeInBytes);
