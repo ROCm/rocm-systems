@@ -932,6 +932,9 @@ memory:
   Unit_hipMemcpyBatchAsync_MixedDirections_BackToBack:
     <<: *level_default
     tags: [transfer, stream]
+  Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack:
+    <<: *level_default
+    tags: [transfer, stream]
   Unit_hipMemcpyBatchAsync_Stream:
     <<: *level_default
     tags: [transfer, stream]

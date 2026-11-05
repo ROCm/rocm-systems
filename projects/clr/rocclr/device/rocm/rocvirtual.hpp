@@ -378,8 +378,9 @@ class VirtualGPU : public device::VirtualDevice {
 
     //! A GPU waiter will read the busy signal. Every operation submitted until the next
     //! WaitingSignal call may poll it, not just the one owning the following slot, so the signal
-    //! is pinned with a reference until the tracker proves those consumers passed it.
-    void NoteGpuWait(ProfilingSignal* signal);
+    //! is pinned with a reference until the tracker proves those consumers passed it. aql_waiter
+    //! means the consumers are packets on this VirtualGPU's AQL queue, which may own no use.
+    void NoteGpuWait(ProfilingSignal* signal, bool aql_waiter);
 
     //! A GPU wait captured by one WaitingSignal call. Holding a reference keeps the owner from
     //! rearming the signal while a waiter may still read the old use.
@@ -389,12 +390,14 @@ class VirtualGPU : public device::VirtualDevice {
       uint64_t close_aql = 0;         //!< AQL packets below this slot consume the wait
       uint64_t queue_gen = 0;         //!< HW queue generation of those packets
       bool consumers_passed = false;  //!< The queue drained, so every AQL consumer launched
+      bool aql_waiter = false;        //!< The consumers are AQL packets on this queue
     };
 
     //! Closes the pins captured by the last WaitingSignal call at the next use sequence
     void CloseOpenPins(uint64_t close_aql = 0, uint64_t queue_gen = 0);
 
-    //! Drops every pin, open or closed. The consumers must be complete or abandoned.
+    //! Drops every pin, open, closed or awaiting a fence. The consumers must be complete or
+    //! abandoned.
     void ReleaseAllPins();
 
     HwQueueEngine engine_ = HwQueueEngine::Unknown;  //!< Engine used in the current operations
@@ -408,9 +411,13 @@ class VirtualGPU : public device::VirtualDevice {
     std::vector<hsa_signal_t> waiting_signals_;       //!< Current waiting signals in this queue
     uint64_t next_use_seq_ = 1;                       //!< Sequence number of the next use
     //! Pinned GPU waits, oldest first. Closed pins precede the num_open_pins_ open ones, and
-    //! their close_seq never decreases along the deque.
+    //! their close_seq never decreases along the deque. An open pin of AQL waiters may already
+    //! hold the close_seq of a fence use that followed it.
     std::deque<PinnedWait> pins_;
     size_t num_open_pins_ = 0;                        //!< Pins from the last WaitingSignal call
+    //! Closed pins of AQL waiters that no fence use followed yet, for LegacySignalTracker. The
+    //! next fence use moves them into pins_, after the closed pins and ahead of the open ones.
+    std::vector<ProfilingSignal*> unfenced_pins_;
   };
 
   //! Reads and resets each signal when it is handed out
@@ -427,6 +434,14 @@ class VirtualGPU : public device::VirtualDevice {
     hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
                                  hsa_signal_value_t init_value) override;
     bool IsBusy(const ProfilingSignal* signal) const override;
+    //! Closes the open pins. A pin of AQL waiters closes at the first fence use after it, since
+    //! its consumers may own no use; until then it waits in unfenced_pins_.
+    void NoteWaitsSubmitted() override;
+
+    //! A fence use, whose packet was published on the AQL queue with the barrier bit, starts at
+    //! fence_seq. Its completion proves that every earlier packet on the queue completed, so it
+    //! closes the pins of AQL waiters that no fence followed yet at fence_seq + 1.
+    void NoteFence(uint64_t fence_seq);
 
     //! Wait for the next active signal
     void WaitNext();
