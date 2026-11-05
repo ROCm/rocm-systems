@@ -1608,14 +1608,17 @@ TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_NonBlockingInterCommIsNot
   EXPECT_TRUE(eventRecords_.empty());
 }
 
-TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_InProgressStillHandsOffTheStopEvent) {
+TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_InProgressReturnsSuccessWithoutRedirect) {
   Decide(RCCL_HIERARCHICAL_REDUCESCATTER);
+  // ncclInProgress only comes from a non-blocking inter comm, which is not redirected. The call
+  // still returns success, as NCCLCHECK does, so the epilogue records the parent stop event.
+  inter_->config.blocking = 0;
   fake.enqueueResults = {ncclSuccess, ncclInProgress};
-  EXPECT_EQ(ncclInProgress, ReduceScatter());
-  EXPECT_EQ(stopEvent_, fake.enqueued[1].doneEvent);
+  EXPECT_EQ(ncclSuccess, ReduceScatter());
+  EXPECT_EQ(interDone_, fake.enqueued[1].doneEvent);
   EXPECT_EQ(interDone_, inter_->doneEvent);
-  EXPECT_EQ(nullptr, comm_->addonStopEvent);
-  EXPECT_EQ((std::vector<EventRecord>{{interDone_, stream_}}), eventRecords_);
+  EXPECT_EQ(stopEvent_, comm_->addonStopEvent);
+  EXPECT_TRUE(eventRecords_.empty());
 }
 
 TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_InterFailureRestoresTheInterEventAndKeepsTheStopEvent) {
