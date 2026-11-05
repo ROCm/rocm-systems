@@ -5602,3 +5602,4 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_Nvls_UsesNvlsChannelsCappedByCommOnlyFo
     EXPECT_EQ(c.algo, task.algorithm);
     EXPECT_EQ(c.nMaxChannels, task.nMaxChannels) << c.algo << " nNodes=" << c.nNodes;
   }
+}
