@@ -77,6 +77,24 @@ get_handle_from_code_object(
 #endif
 }
 
+// CPU and GPU pmc_info is keyed by type index; NIC pmc_info is keyed by device id.
+const agent&
+get_pmc_agent(const agent_manager& agents, const info::pmc& pmc_info)
+{
+    switch(pmc_info.type)
+    {
+        case agent_type::cpu:
+        case agent_type::gpu:
+            return agents.get_agent_by_type_index(pmc_info.agent_type_index,
+                                                  pmc_info.type);
+        case agent_type::nic:
+            return agents.get_agent_by_id(pmc_info.agent_type_index, pmc_info.type);
+        default:
+            throw std::logic_error(fmt::format("agent_type {} not handled",
+                                               static_cast<int>(pmc_info.type)));
+    }
+}
+
 std::string
 generate_db_output_path(int pid)
 {
@@ -1211,19 +1229,7 @@ rocpd_processor_t::post_process_metadata()
     auto const pmc_info_list = m_metadata->get_pmc_info_list();
     for(const auto& pmc_info : pmc_info_list)
     {
-        const agent* pmc_agent_ptr = nullptr;
-        try
-        {
-            pmc_agent_ptr = &m_agent_manager->get_agent_by_type_index(
-                pmc_info.agent_type_index, pmc_info.type);
-        } catch(const std::out_of_range&)
-        {
-            // NIC pmc_info is keyed by device id, not type index.
-            pmc_agent_ptr = &m_agent_manager->get_agent_by_id(pmc_info.agent_type_index,
-                                                              pmc_info.type);
-        }
-
-        const auto& pmc_agent     = *pmc_agent_ptr;
+        const auto& pmc_agent     = get_pmc_agent(*m_agent_manager, pmc_info);
         auto        pmc_agent_uid = make_agent_uid(pmc_agent);
 
         LOG_TRACE("Inserting PMC description: agent_uid: {}, pmc_info: {}",
