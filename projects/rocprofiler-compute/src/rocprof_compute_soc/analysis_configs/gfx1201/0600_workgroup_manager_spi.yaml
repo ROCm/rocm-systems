@@ -1,0 +1,48 @@
+# gfx1201 (RDNA 4, Navi 48) -- Workgroup Manager (SPI)
+# Metric bodies are carried from the gfx1201 metrics port and placed in the
+# gfx12 panel template. Tables with no carried metric are empty.
+Panel Config:
+  id: 600
+  title: Workgroup Manager (SPI)
+  data source:
+    - metric_table:
+        id: 601
+        title: Utilization
+        header: &id001
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
+        metric:
+          SPI Busy:
+            avg: 100 * SUM(GRBM_SPI_BUSY) / SUM(GRBM_GUI_ACTIVE)
+            min: MIN(100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE)
+            max: MAX(100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE)
+            unit: Percent
+    - metric_table:
+        id: 602
+        title: Wavefront Dispatch
+        header: *id001
+        metric:
+          Compute Wave Dispatches:
+            avg: SUM(SPI_CSN_WAVE) / SUM($denom)
+            min: MIN(SPI_CSN_WAVE / $denom)
+            max: MAX(SPI_CSN_WAVE / $denom)
+            unit: (Count + $normUnit)
+          Wave Dispatch Rate:
+            avg: SUM(SPI_CSN_WAVE) / SUM(GRBM_GUI_ACTIVE)
+            min: MIN(SPI_CSN_WAVE / GRBM_GUI_ACTIVE)
+            max: MAX(SPI_CSN_WAVE / GRBM_GUI_ACTIVE)
+            unit: Waves/cycle
+    - metric_table:
+        id: 603
+        title: Resource Allocation
+        header: *id001
+        metric: {}
+    - metric_table:
+        id: 604
+        title: CPC-SPI Interface
+        header: *id001
+        metric: {}
+  metrics_description: {}

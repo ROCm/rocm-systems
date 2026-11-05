@@ -1,0 +1,237 @@
+# gfx1201 (RDNA 4, Navi 48) -- Memory Chart
+# Metric bodies are carried from the gfx1201 metrics port and placed in the
+# gfx12 panel template. Tables with no carried metric are empty.
+Panel Config:
+  id: 300
+  title: Memory Chart
+  data source:
+  - metric_table:
+      id: 301
+      title: Instruction Cache
+      header: &id001
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric: {}
+      cli_style: mem_chart
+  - metric_table:
+      id: 302
+      title: Scalar Data Cache
+      header: *id001
+      metric: {}
+      cli_style: mem_chart
+  - metric_table:
+      id: 303
+      title: GL0 Cache (Vector L0)
+      header: *id001
+      metric: {}
+      cli_style: mem_chart
+  - metric_table:
+      id: 304
+      title: LDS (Local Data Share)
+      header: *id001
+      metric: {}
+      cli_style: mem_chart
+  - metric_table:
+      id: 305
+      title: GL0-GL1 Interface
+      header: *id001
+      metric: {}
+      cli_style: mem_chart
+  - metric_table:
+      id: 306
+      title: GLARB (GL1-GL2 Arbiter)
+      header: *id001
+      metric: {}
+      cli_style: mem_chart
+  - metric_table:
+      id: 307
+      title: GL2 Cache (L2)
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+        peak: Peak
+        pct_of_peak: Percent of Peak
+      metric:
+        Wavefront Occupancy:
+          value: ROUND(AVG(GRBM_GUI_ACTIVE), 0)
+          unit: Cycles
+        Wave Life:
+          value: ROUND(SUM(SQ_WAVE_CYCLES) / SUM(SQ_WAVES), 0)
+          unit: Cycles
+        Wavefronts:
+          value: ROUND(SUM(SQ_WAVES), 0)
+          unit: Cycles
+        Workgroups:
+          value: 0
+          unit: Cycles
+        Active CUs:
+          value: $cu_per_gpu
+          unit: Cycles
+        Num CUs:
+          value: $cu_per_gpu
+          unit: Cycles
+        VGPR:
+          value: ROUND(AVG(Arch_VGPR), 0)
+          unit: Cycles
+        SGPR:
+          value: ROUND(AVG(SGPR), 0)
+          unit: Cycles
+        LDS Allocation:
+          value: ROUND(AVG(LDS_Per_Workgroup), 0)
+          unit: Cycles
+        Scratch Allocation:
+          value: ROUND(AVG(Scratch_Per_Workitem), 0)
+          unit: Cycles
+        SALU:
+          value: ROUND(SUM(SQ_INSTS_SALU_sum), 0)
+          unit: Cycles
+        SMEM:
+          value: ROUND(SUM(SQ_INSTS_SMEM_sum), 0)
+          unit: Cycles
+        VALU:
+          value: ROUND(SUM(SQ_INSTS_VALU), 0)
+          unit: Cycles
+        Matrix Ops:
+          value: ROUND(SUM(SQ_WMMA_VALU_INSTS), 0)
+          unit: Cycles
+        VMEM:
+          value: ROUND(SUM(SQ_INSTS_TEX_LOAD_sum + SQ_INSTS_TEX_STORE_sum), 0)
+          unit: Cycles
+        LDS:
+          value: ROUND(SUM(SQ_INSTS_LDS_sum), 0)
+          unit: Cycles
+        GWS:
+          value: 0
+          unit: Cycles
+        BR:
+          value: 0
+          unit: Cycles
+        LDS Req:
+          value: ROUND(SUM(SQ_INSTS_LDS_sum), 0)
+          unit: Cycles
+        LDS Util:
+          value: 0
+          unit: Cycles
+        LDS Latency:
+          value: 0
+          unit: Cycles
+        IL1 Fetch:
+          value: ROUND(SUM(SQC_ICACHE_REQ_sum), 0)
+          unit: Cycles
+        IL1 Hit:
+          value: ROUND(100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum), 1)
+          unit: Cycles
+        IL1 Lat:
+          value: 0
+          unit: Cycles
+        IL1_L2 Rd:
+          value: ROUND(SUM(SQC_ICACHE_MISSES_sum), 0)
+          unit: Cycles
+        sL1D Hit:
+          value: 0
+          unit: Cycles
+        sL1D Rd:
+          value: 0
+          unit: Cycles
+        sL1D Lat:
+          value: 0
+          unit: Cycles
+        sL1D_L2 Rd:
+          value: 0
+          unit: Cycles
+        sL1D_L2 Wr:
+          value: 0
+          unit: Cycles
+        sL1D_L2 Atomic:
+          value: 0
+          unit: Cycles
+        VL1 Rd:
+          value: ROUND(SUM(TCP_REQ_READ_sum), 0)
+          unit: Cycles
+        VL1 Wr:
+          value: ROUND(SUM(TCP_REQ_WRITE_sum), 0)
+          unit: Cycles
+        VL1 Atomic:
+          value: 0
+          unit: Cycles
+        VL1 Hit:
+          value: ROUND(100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum), 1)
+          unit: Cycles
+        VL1 Lat:
+          value: 0
+          unit: Cycles
+        VL1 Stall:
+          value: ROUND(SUM(TCP_DATA_FIFO_STALL_sum), 0)
+          unit: Cycles
+        VL1 Coalesce:
+          value: 0
+          unit: Cycles
+        VL1_L2 Rd:
+          value: ROUND(SUM(TCP_REQ_MISS_sum), 0)
+          unit: Cycles
+        VL1_L2 Wr:
+          value: ROUND(SUM(TCP_REQ_WRITE_sum), 0)
+          unit: Cycles
+        VL1_L2 Atomic:
+          value: 0
+          unit: Cycles
+        L2 Rd:
+          value: ROUND(SUM(GL2C_HIT_sum + GL2C_MISS_sum), 0)
+          unit: Cycles
+        L2 Wr:
+          value: 0
+          unit: Cycles
+        L2 Atomic:
+          value: 0
+          unit: Cycles
+        L2 Hit:
+          value: ROUND(100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum), 1)
+          unit: Cycles
+        L2 Rd Lat:
+          value: 0
+          unit: Cycles
+        L2 Wr Lat:
+          value: 0
+          unit: Cycles
+        Fabric_L2 Rd:
+          value: ROUND(SUM(GL2C_EA_RDREQ_DRAM_sum), 0)
+          unit: Cycles
+        Fabric_L2 Wr:
+          value: ROUND(SUM(GL2C_EA_WRREQ_DRAM_sum), 0)
+          unit: Cycles
+        Fabric_L2 Atomic:
+          value: 0
+          unit: Cycles
+        Fabric Rd Lat:
+          value: 0
+          unit: Cycles
+        Fabric Wr Lat:
+          value: 0
+          unit: Cycles
+        Fabric Atomic Lat:
+          value: 0
+          unit: Cycles
+        HBM Rd:
+          value: ROUND(256 * SUM(GL2C_EA_RDREQ_DRAM_sum), 0)
+          unit: Cycles
+        HBM Wr:
+          value: ROUND(256 * SUM(GL2C_EA_WRREQ_DRAM_sum), 0)
+          unit: Cycles
+      cli_style: mem_chart
+  - metric_table:
+      id: 308
+      title: EA to HBM
+      header: *id001
+      metric: {}
+      cli_style: mem_chart
+  - metric_table:
+      id: 309
+      title: Workgroup Processors (WGPs)
+      header: *id001
+      metric: {}
+      cli_style: mem_chart
+  metrics_description: {}

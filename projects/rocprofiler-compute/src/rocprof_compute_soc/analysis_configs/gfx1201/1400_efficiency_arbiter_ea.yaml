@@ -1,0 +1,113 @@
+# gfx1201 (RDNA 4, Navi 48) -- Efficiency Arbiter (EA)
+# Metric bodies are carried from the gfx1201 metrics port and placed in the
+# gfx12 panel template. Tables with no carried metric are empty.
+Panel Config:
+  id: 1400
+  title: Efficiency Arbiter (EA)
+  data source:
+    - metric_table:
+        id: 1401
+        title: EA Utilization
+        header: &id001
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
+        metric:
+          SARB Busy:
+            avg: 100 * SUM(GCEA_SARB_BUSY) / SUM(GCEA_ALWAYS_COUNT)
+            min: MIN(100 * GCEA_SARB_BUSY / GCEA_ALWAYS_COUNT)
+            max: MAX(100 * GCEA_SARB_BUSY / GCEA_ALWAYS_COUNT)
+            unit: Percent
+          SARB Stalled:
+            avg: 100 * SUM(GCEA_SARB_STALLED) / SUM(GCEA_ALWAYS_COUNT)
+            min: MIN(100 * GCEA_SARB_STALLED / GCEA_ALWAYS_COUNT)
+            max: MAX(100 * GCEA_SARB_STALLED / GCEA_ALWAYS_COUNT)
+            unit: Percent
+          SARB Starving:
+            avg: 100 * SUM(GCEA_SARB_STARVING) / SUM(GCEA_ALWAYS_COUNT)
+            min: MIN(100 * GCEA_SARB_STARVING / GCEA_ALWAYS_COUNT)
+            max: MAX(100 * GCEA_SARB_STARVING / GCEA_ALWAYS_COUNT)
+            unit: Percent
+          SARB Total Requests:
+            avg: SUM(GCEA_SARB_REQ_PER_VC_sum) / SUM($denom)
+            min: MIN(GCEA_SARB_REQ_PER_VC_sum / $denom)
+            max: MAX(GCEA_SARB_REQ_PER_VC_sum / $denom)
+            unit: (Count + $normUnit)
+          SARB DRAM Requests:
+            avg: SUM(GCEA_SARB_DRAM_REQ_PER_VC_sum) / SUM($denom)
+            min: MIN(GCEA_SARB_DRAM_REQ_PER_VC_sum / $denom)
+            max: MAX(GCEA_SARB_DRAM_REQ_PER_VC_sum / $denom)
+            unit: (Count + $normUnit)
+    - metric_table:
+        id: 1402
+        title: EA Traffic Bandwidth
+        header: *id001
+        metric:
+          DRAM Read Requests:
+            avg: SUM(GCEA_RDRAM_REQ_PER_CLIGRP_sum) / SUM($denom)
+            min: MIN(GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom)
+            max: MAX(GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom)
+            unit: (Count + $normUnit)
+          DRAM Read Chained Requests:
+            avg: SUM(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum) / SUM($denom)
+            min: MIN(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
+            max: MAX(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
+            unit: (Count + $normUnit)
+          DRAM Read Banks Active:
+            avg: SUM(GCEA_RDRAM_NUM_BANKS_VLD_sum) / SUM($denom)
+            min: MIN(GCEA_RDRAM_NUM_BANKS_VLD_sum / $denom)
+            max: MAX(GCEA_RDRAM_NUM_BANKS_VLD_sum / $denom)
+            unit: (Count + $normUnit)
+          DRAM Read Size (32B increments):
+            avg: SUM(GCEA_RDRAM_SIZE_REQ_sum) / SUM($denom)
+            min: MIN(GCEA_RDRAM_SIZE_REQ_sum / $denom)
+            max: MAX(GCEA_RDRAM_SIZE_REQ_sum / $denom)
+            unit: (Count + $normUnit)
+          DRAM Write Requests:
+            avg: SUM(GCEA_WDRAM_REQ_PER_CLIGRP_sum) / SUM($denom)
+            min: MIN(GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom)
+            max: MAX(GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom)
+            unit: (Count + $normUnit)
+          DRAM Write Chained Requests:
+            avg: SUM(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum) / SUM($denom)
+            min: MIN(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
+            max: MAX(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
+            unit: (Count + $normUnit)
+          DRAM Write Banks Active:
+            avg: SUM(GCEA_WDRAM_NUM_BANKS_VLD_sum) / SUM($denom)
+            min: MIN(GCEA_WDRAM_NUM_BANKS_VLD_sum / $denom)
+            max: MAX(GCEA_WDRAM_NUM_BANKS_VLD_sum / $denom)
+            unit: (Count + $normUnit)
+          DRAM Write Size (32B increments):
+            avg: SUM(GCEA_WDRAM_SIZE_REQ_sum) / SUM($denom)
+            min: MIN(GCEA_WDRAM_SIZE_REQ_sum / $denom)
+            max: MAX(GCEA_WDRAM_SIZE_REQ_sum / $denom)
+            unit: (Count + $normUnit)
+    - metric_table:
+        id: 1403
+        title: EA-SDP Interface - Outstanding Requests
+        header: *id001
+        metric:
+          Read Returns:
+            avg: SUM(GCEA_RRET_VLD_sum) / SUM($denom)
+            min: MIN(GCEA_RRET_VLD_sum / $denom)
+            max: MAX(GCEA_RRET_VLD_sum / $denom)
+            unit: (Count + $normUnit)
+          Write Returns:
+            avg: SUM(GCEA_WRET_VLD_sum) / SUM($denom)
+            min: MIN(GCEA_WRET_VLD_sum / $denom)
+            max: MAX(GCEA_WRET_VLD_sum / $denom)
+            unit: (Count + $normUnit)
+          Probe Requests:
+            avg: SUM(GCEA_PRB_REQ_sum) / SUM($denom)
+            min: MIN(GCEA_PRB_REQ_sum / $denom)
+            max: MAX(GCEA_PRB_REQ_sum / $denom)
+            unit: (Count + $normUnit)
+    - metric_table:
+        id: 1404
+        title: EA-SDP Interface - Stalls
+        header: *id001
+        metric: {}
+  metrics_description: {}

@@ -1,0 +1,12 @@
+# gfx1201 (RDNA 4, Navi 48) -- PC Sampling
+# Metric bodies are carried from the gfx1201 metrics port and placed in the
+# gfx12 panel template. Tables with no carried metric are empty.
+Panel Config:
+  id: 2100
+  title: PC Sampling
+  data source:
+    - pc_sampling_table:
+        id: 2101
+        title: PC Sampling
+        source: ps_file
+  metrics_description: {}

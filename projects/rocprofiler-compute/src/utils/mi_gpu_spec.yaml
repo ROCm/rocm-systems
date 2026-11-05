@@ -557,6 +557,38 @@ mi_gpu_spec:
               physical: 6402
 
   #########################################################
+  # RDNA 4 (gfx120x). Navi 48 is monolithic: 8 MB L2, 64 MB Infinity Cache, GDDR6.
+  - gpu_series: rdna4
+    gpu_archs:
+      - gpu_arch: gfx1201
+        perfmon_config:
+          SQ: 8
+          SQC: 4
+          TA: 2
+          TCP: 4
+          GRBM: 2
+          CPC: 2
+          CPF: 2
+          GCEA: 2
+          SPI: 6
+          GL1A: 4
+          GL1C: 4
+          GL2A: 4
+          GL2C: 4
+        # GDDR6 is measured in the HBM column. The benchmark has no separate
+        # Infinity Cache path yet.
+        roofline:
+          bandwidth: [HBM, L2, L1, L0, LDS]
+          valu: [FP16, FP32, FP64, I8, I32, I64]
+          wmma: [FP8, FP16, BF16]
+        models:
+          - gpu_model: rdna4_navi48
+            design:
+              memory_levels: ["LDS", "L0", "L1", "L2", "HBM"]
+            chip_ids:
+              physical: 30032  # 0x7550, Radeon RX 9070 XT
+
+  #########################################################
   # gfx1250 family
   - gpu_series: gfx1250_series
     gpu_archs:
