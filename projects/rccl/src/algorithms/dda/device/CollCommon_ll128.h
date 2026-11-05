@@ -307,13 +307,9 @@ __device__ __forceinline__ void ddaLL128StageFill(DdaLL128Stage& st, const uint6
   st.lastOps = 0;
   uint8_t* slice = st.lds + (size_t)st.win * kDdaLL128WireBytesPerSlice + (size_t)lane * 16;
   ddaLL128ForEachWirePair(regs, flag, flagLane, [slice](int word, uint64_t lo, uint64_t hi) {
-    union {
-      v4i v;
-      uint64_t w[2];
-    } u;
-    u.w[0] = lo;
-    u.w[1] = hi;
-    *reinterpret_cast<v4i*>(slice + (size_t)word * sizeof(uint64_t)) = u.v;
+    uint64_t* pair = reinterpret_cast<uint64_t*>(slice) + word;
+    pair[0] = lo;
+    pair[1] = hi;
   });
 #if ASYNC_COPY_SUPPORTED
   // The mover reads LDS by address, outside this lane's program order.
