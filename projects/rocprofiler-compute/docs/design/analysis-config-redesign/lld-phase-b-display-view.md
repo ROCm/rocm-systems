@@ -246,7 +246,7 @@ Every production reader of the old analysis config tree moves to the new path:
 | Reader | Where | New source |
 |---|---|---|
 | Analyze panel configs | `generate_configs()`, `rocprof_compute_analyze/analysis_base.py` | `views_to_panel_configs()` |
-| `--list-metrics`, `--list-blocks` | `_build_arch_metric_list()`, `rocprof_compute_base.py` | `views_to_panel_configs()` |
+| `--list-metrics` | `_build_arch_metric_details()`, `rocprof_compute_base.py` | `views_to_panel_configs()` |
 | Memory chart | `PanelConfigs.for_arch()`, `memory_chart/loader.py` | `views_to_panel_configs()` |
 | Profile counters (no filter, `-b`, `--set`, `--roof-only`) | `detect_counters()` and `_append_analysis_yaml_for_filter_token()`, `rocprof_compute_soc/soc_base.py` | `MetricLibrary.get_counters_for_metrics()` |
 | Metric-aware counter grouping | `_iter_arch_analysis_yaml_metrics()` and `profiling_counter_grouping_policy.yaml`, `soc_base.py` | Not designed yet: needs metric ids instead of positional ids |
