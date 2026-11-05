@@ -15,6 +15,34 @@ import zlib
 
 from sdxi.vfu import VFU_PCI_DEV_BAR0_REGION_IDX, VFU_PCI_DEV_BAR2_REGION_IDX
 
+# COMPUTE descriptor type and ELEMWISE subtype
+TYPE_COMPUTE       = 0x008
+SUBTYPE_ELEMWISE   = 0x01
+
+# Element data type constants (SDXI_DTYPE_*)
+DTYPE_FP32      = 0
+DTYPE_FP16      = 1
+DTYPE_BF16      = 2
+DTYPE_INT8      = 3
+DTYPE_INT32     = 4
+DTYPE_FP8_E4M3  = 5
+DTYPE_FP8_E5M2  = 6
+DTYPE_INT4      = 7
+
+# Element operation constants (SDXI_ELEMOP_*)
+ELEMOP_ADD         = 0
+ELEMOP_MIN         = 1
+ELEMOP_MAX         = 2
+ELEMOP_REDUCE_MIN  = 3
+ELEMOP_REDUCE_MAX  = 4
+
+ELEM_SIZE = {
+    DTYPE_FP32: 4, DTYPE_INT32: 4,
+    DTYPE_FP16: 2, DTYPE_BF16:  2,
+    DTYPE_INT8: 1, DTYPE_FP8_E4M3: 1, DTYPE_FP8_E5M2: 1,
+    DTYPE_INT4: 1,  # 2 elements per byte; dst_elem_sz used for reduce
+}
+
 # BAR0 v3 register offsets (64-bit readq/writeq)
 MMIO_CTL0    = 0x000
 MMIO_STS0    = 0x100
@@ -132,6 +160,21 @@ def _pack_decompress_dsc(src_gpa, src_len, dst_gpa, dst_cap, csb_gpa):
     return bytes(dsc)
 
 
+def _pack_elemwise_dsc(src_gpa, src_len, dst_gpa, dtype, op, scalar_bits, csb_gpa):
+    """64-byte COMPUTE ELEMWISE descriptor."""
+    opcode = _make_opcode(TYPE_COMPUTE, SUBTYPE_ELEMWISE)
+    dsc = bytearray(DSC_SIZE)
+    struct.pack_into("<I", dsc,  0, opcode)
+    struct.pack_into("<I", dsc,  4, src_len)
+    struct.pack_into("<I", dsc,  8, dtype)
+    struct.pack_into("<I", dsc, 12, op)
+    struct.pack_into("<Q", dsc, 16, src_gpa)
+    struct.pack_into("<Q", dsc, 24, dst_gpa)
+    struct.pack_into("<Q", dsc, 32, scalar_bits & 0xFFFFFFFFFFFFFFFF)
+    struct.pack_into("<Q", dsc, 56, csb_gpa)
+    return bytes(dsc)
+
+
 def _pack_cxt_start_dsc(target_cid):
     """64-byte ADMIN CXT_START descriptor."""
     opcode = _make_opcode(TYPE_ADMIN, SUBTYPE_CXT_START)
@@ -190,6 +233,24 @@ class CxtContext:
         self._clear_csb()
         new_wi = self._write_dsc(
             _pack_compress_dsc(src_gpa, src_len, dst_gpa, dst_cap, level, self.csb_gpa)
+        )
+        db = self.cid * DB_STRIDE
+        vfu.write_bar64(VFU_PCI_DEV_BAR2_REGION_IDX, db, new_wi)
+        flags, result_len = self._poll_csb()
+        ok = (flags & CSB_ER_BIT) == 0
+        return ok, result_len
+
+    def elemwise(self, vfu, src_gpa, src_len, dst_gpa, dtype, op, scalar_bits=0):
+        """Submit a COMPUTE ELEMWISE descriptor and return (ok, out_len).
+
+        scalar_bits is the dtype-native bit pattern as an integer (ignored for
+        reduce operations but must still be supplied).  dst_gpa must be large
+        enough: src_len bytes for elementwise ops, one elem for reduce ops.
+        """
+        self._clear_csb()
+        new_wi = self._write_dsc(
+            _pack_elemwise_dsc(src_gpa, src_len, dst_gpa, dtype, op, scalar_bits,
+                               self.csb_gpa)
         )
         db = self.cid * DB_STRIDE
         vfu.write_bar64(VFU_PCI_DEV_BAR2_REGION_IDX, db, new_wi)

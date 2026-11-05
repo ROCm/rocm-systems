@@ -44,3 +44,13 @@ set_tests_properties(sdxi-cxt PROPERTIES
     RUN_SERIAL TRUE
     ENVIRONMENT "PYTHONPATH=${SDXI_PY_DIR};SDXI_SERVER_BIN=${SDXI_SERVER_BIN}"
 )
+
+add_test(
+    NAME sdxi-elemwise
+    COMMAND ${Python3_EXECUTABLE} ${SDXI_PY_DIR}/test_elemwise.py
+)
+set_tests_properties(sdxi-elemwise PROPERTIES
+    TIMEOUT 120
+    RUN_SERIAL TRUE
+    ENVIRONMENT "PYTHONPATH=${SDXI_PY_DIR};SDXI_SERVER_BIN=${SDXI_SERVER_BIN}"
+)
