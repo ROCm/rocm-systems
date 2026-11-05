@@ -49,104 +49,57 @@ add_profiler_params(schema& value)
 {
     add_checked(value, schema_param{
                            .id          = "output",
-                           .name        = "Output",
                            .description = "Output path",
                            .type        = param_type::path,
-                           .required    = true,
                        });
     add_checked(value, schema_param{
-                           .id                      = "trace",
-                           .name                    = "Trace",
-                           .description             = "Tracing",
-                           .type                    = param_type::boolean,
-                           .default_value           = "true",
-                           .mutually_exclusive_with = { "flat_profile" },
+                           .id            = "trace",
+                           .description   = "Tracing",
+                           .type          = param_type::boolean,
+                           .default_value = "true",
+                           .conflicts     = { "flat_profile" },
                        });
     add_checked(value, schema_param{
                            .id            = "profile",
-                           .name          = "Profile",
                            .description   = "Profiling",
                            .type          = param_type::boolean,
                            .default_value = "false",
                        });
     add_checked(value, schema_param{
                            .id            = "flat_profile",
-                           .name          = "Flat",
                            .description   = "Flat profile",
                            .type          = param_type::boolean,
                            .default_value = "false",
-                           .prerequisites = { "profile" },
+                           .required      = { "profile" },
+                       });
+    add_checked(value, schema_param{
+                           .id          = "sampling_freq",
+                           .description = "Hz",
+                           .type        = param_type::number,
+                           .min         = k_frequency_minimum,
+                           .max         = k_frequency_maximum,
                        });
     add_checked(value,
                 schema_param{
-                    .id          = "sampling_freq",
-                    .name        = "Frequency",
-                    .description = "Hz",
-                    .type        = param_type::number,
-                    .min         = k_frequency_minimum,
-                    .max         = k_frequency_maximum,
-                    .depends_on  = param_condition{ .param = "trace", .equals = "true" },
+                    .id          = "mode",
+                    .description = "Mode",
+                    .type        = param_type::enumeration,
+                    .choices = { choice{ .value = "fast" }, choice{ .value = "slow" } },
                 });
     add_checked(value, schema_param{
-                           .id          = "mode",
-                           .name        = "Mode",
-                           .description = "Mode",
-                           .type        = param_type::enumeration,
-                           .choices     = { choice{ .value = "fast", .name = "Fast" },
-                                            choice{ .value = "slow", .name = "Slow" } },
-                       });
-    add_checked(value, schema_param{
                            .id          = "label",
-                           .name        = "Label",
                            .description = "Label",
                            .type        = param_type::string,
                        });
 }
 
-void
-add_profiler_constraints(schema& value)
-{
-    value.add_constraint(constraint{
-        .kind   = constraint_kind::mutually_exclusive,
-        .params = { "label", "mode" },
-    });
-    value.add_constraint(constraint{
-        .kind    = constraint_kind::warn,
-        .level   = severity::warning,
-        .message = "nothing collected",
-        .when =
-            condition{
-                .mode  = condition_mode::all,
-                .terms = { param_condition{ .param = "trace", .equals = "false" },
-                           param_condition{ .param = "profile", .equals = "false" } } },
-    });
-    value.add_constraint(constraint{
-        .kind    = constraint_kind::warn,
-        .level   = severity::info,
-        .message = "slow or labeled",
-        .when =
-            condition{
-                .mode  = condition_mode::any,
-                .terms = { param_condition{ .param = "mode", .equals = "slow" },
-                           param_condition{ .param = "label", .equals = "debug" } } },
-    });
-    value.add_constraint(constraint{
-        .kind          = constraint_kind::forces,
-        .message       = "flat profiles need profiling",
-        .when          = condition{ .terms = { param_condition{ .param  = "flat_profile",
-                                                                .equals = "true" } } },
-        .forced_values = { { "profile", "true" } },
-    });
-}
-
-/// Parameters and constraints shared by the validate_values() tests.
+/// Parameters shared by the validate_values() tests.
 schema
 make_profiler_schema()
 {
     schema value{};
     value.set_version("1.0");
     add_profiler_params(value);
-    add_profiler_constraints(value);
     return value;
 }
 
@@ -160,11 +113,10 @@ validate(const value_map_t& values)
 }
 
 bool
-has_violation(const std::vector<violation>& violations, severity level,
-              const std::string& fragment)
+has_violation(const std::vector<violation>& violations, const std::string& fragment)
 {
     return std::ranges::any_of(violations, [&](const violation& item) {
-        return item.level == level && item.message.find(fragment) != std::string::npos;
+        return item.message.find(fragment) != std::string::npos;
     });
 }
 }  // namespace
@@ -172,12 +124,12 @@ has_violation(const std::vector<violation>& violations, severity level,
 TEST(parser_schema_validator, boolean_values)
 {
     const auto param = make_param(param_type::boolean);
-    for(const auto* value :
-        { "true", "FALSE", "Yes", "no", "on", "OFF", "y", "N", "1", "0", "2", "" })
+    for(const auto* value : { "true", "FALSE", "Yes", "no", "on", "OFF", "y", "N", "t",
+                              "F", "1", "0", "2", "+2" })
     {
         EXPECT_TRUE(is_valid_value(param, value)) << value;
     }
-    for(const auto* value : { "truthy", " true" })
+    for(const auto* value : { "", "truthy", " true", "+" })
     {
         EXPECT_FALSE(is_valid_value(param, value)) << value;
     }
@@ -232,26 +184,13 @@ TEST(parser_schema_validator, number_bounds)
 
 TEST(parser_schema_validator, string_and_path_values)
 {
-    auto text = make_param(param_type::string);
+    const auto text = make_param(param_type::string);
     EXPECT_TRUE(is_valid_value(text, ""));
     EXPECT_TRUE(is_valid_value(text, "anything"));
 
-    text.pattern = "^[a-z]+$";
-    EXPECT_TRUE(is_valid_value(text, "lower"));
-    EXPECT_FALSE(is_valid_value(text, "Upper"));
-    EXPECT_FALSE(is_valid_value(text, "lower1"));
-
-    auto path = make_param(param_type::path);
+    const auto path = make_param(param_type::path);
     EXPECT_TRUE(is_valid_value(path, "/tmp/output"));
     EXPECT_FALSE(is_valid_value(path, ""));
-}
-
-TEST(parser_schema_validator, regex_matches_whole_value)
-{
-    auto param    = make_param(param_type::string);
-    param.pattern = "[0-9]+";
-    EXPECT_TRUE(is_valid_value(param, "123"));
-    EXPECT_FALSE(is_valid_value(param, "a123b"));
 }
 
 TEST(parser_schema_validator, enumeration_values)
@@ -278,12 +217,11 @@ TEST(parser_schema_validator, enumeration_list_values)
     EXPECT_FALSE(is_valid_value(param, "alpha,,beta"));
     EXPECT_FALSE(is_valid_value(param, "alpha,"));
 
-    param.env = env_spec{ .name = "ROCPROFSYS_LIST", .separator = ";" };
-    EXPECT_TRUE(is_valid_value(param, "alpha;beta"));
-    EXPECT_FALSE(is_valid_value(param, "alpha,beta"));
+    param.env = "ROCPROFSYS_LIST";
+    EXPECT_TRUE(is_valid_value(param, "alpha,beta"));
 
     param.allow_custom = true;
-    EXPECT_TRUE(is_valid_value(param, "alpha;custom"));
+    EXPECT_TRUE(is_valid_value(param, "alpha,custom"));
 }
 
 TEST(parser_schema_validator, accepts_defaults_and_valid_values)
@@ -298,16 +236,9 @@ TEST(parser_schema_validator, reports_unknown_and_invalid_values)
         validate({ { "bogus", "1" }, { "sampling_freq", "nan" }, { "mode", "medium" } });
 
     EXPECT_EQ(violations.size(), 3U);
-    EXPECT_TRUE(has_violation(violations, severity::error, "unknown parameter 'bogus'"));
-    EXPECT_TRUE(has_violation(violations, severity::error, "'nan'"));
-    EXPECT_TRUE(has_violation(violations, severity::error, "'medium'"));
-}
-
-TEST(parser_schema_validator, reports_missing_required_value)
-{
-    const auto violations = validate_values(make_profiler_schema(), {});
-    ASSERT_EQ(violations.size(), 1U);
-    EXPECT_EQ(violations.front().params, std::vector<std::string>{ "output" });
+    EXPECT_TRUE(has_violation(violations, "unknown parameter 'bogus'"));
+    EXPECT_TRUE(has_violation(violations, "'nan'"));
+    EXPECT_TRUE(has_violation(violations, "'medium'"));
 }
 
 TEST(parser_schema_validator, reports_mutually_exclusive_params_once)
@@ -319,7 +250,7 @@ TEST(parser_schema_validator, reports_mutually_exclusive_params_once)
         return item.message.find("mutually exclusive") != std::string::npos;
     });
     EXPECT_EQ(count, 1);
-    EXPECT_TRUE(has_violation(violations, severity::error, "'trace' and 'flat_profile'"));
+    EXPECT_TRUE(has_violation(violations, "'trace' and 'flat_profile'"));
 }
 
 TEST(parser_schema_validator, exclusion_uses_boolean_value)
@@ -329,89 +260,34 @@ TEST(parser_schema_validator, exclusion_uses_boolean_value)
             .empty());
 }
 
-TEST(parser_schema_validator, reports_missing_prerequisite)
+TEST(parser_schema_validator, reports_missing_requirement)
 {
     const auto violations =
         validate({ { "trace", "false" }, { "flat_profile", "true" } });
-    EXPECT_TRUE(
-        has_violation(violations, severity::error, "'flat_profile' requires 'profile'"));
-}
-
-TEST(parser_schema_validator, warns_about_unmet_dependency)
-{
-    const auto violations = validate(
-        { { "trace", "false" }, { "profile", "true" }, { "sampling_freq", "100" } });
-    ASSERT_EQ(violations.size(), 1U);
-    EXPECT_EQ(violations.front().level, severity::warning);
-    EXPECT_EQ(violations.front().params,
-              (std::vector<std::string>{ "sampling_freq", "trace" }));
-}
-
-TEST(parser_schema_validator, schema_mutually_exclusive_constraint)
-{
-    const auto violations = validate({ { "label", "debug-run" }, { "mode", "fast" } });
-    ASSERT_EQ(violations.size(), 1U);
-    EXPECT_EQ(violations.front().message,
-              "parameters label, mode are mutually exclusive");
-    EXPECT_EQ(violations.front().params, (std::vector<std::string>{ "label", "mode" }));
-}
-
-TEST(parser_schema_validator, warn_constraint_with_all_terms)
-{
-    EXPECT_TRUE(has_violation(validate({ { "trace", "false" } }), severity::warning,
-                              "nothing collected"));
-    EXPECT_FALSE(has_violation(validate({ { "trace", "false" }, { "profile", "true" } }),
-                               severity::warning, "nothing collected"));
-}
-
-TEST(parser_schema_validator, warn_constraint_with_any_terms)
-{
-    EXPECT_TRUE(has_violation(validate({ { "mode", "slow" } }), severity::info,
-                              "slow or labeled"));
-    EXPECT_TRUE(has_violation(validate({ { "label", "debug" } }), severity::info,
-                              "slow or labeled"));
-    EXPECT_FALSE(has_violation(validate({ { "mode", "fast" } }), severity::info,
-                               "slow or labeled"));
-}
-
-TEST(parser_schema_validator, forces_constraint_reports_its_message)
-{
-    const auto violations =
-        validate({ { "trace", "false" }, { "flat_profile", "true" } });
-    EXPECT_TRUE(
-        has_violation(violations, severity::error, "flat profiles need profiling"));
-}
-
-TEST(parser_schema_validator, forces_constraint_is_quiet_when_satisfied)
-{
-    const auto violations = validate(
-        { { "trace", "false" }, { "flat_profile", "true" }, { "profile", "true" } });
-    EXPECT_TRUE(violations.empty());
+    EXPECT_TRUE(has_violation(violations, "'flat_profile' requires 'profile'"));
 }
 
 TEST(parser_schema_validator, a_default_does_not_enable_mutual_exclusion)
 {
     const auto violations =
         validate({ { "flat_profile", "true" }, { "profile", "true" } });
-    EXPECT_FALSE(has_violation(violations, severity::error, "mutually exclusive"));
+    EXPECT_FALSE(has_violation(violations, "mutually exclusive"));
 }
 
 TEST(parser_schema_validator, reports_a_two_sided_exclusion_once)
 {
     schema value{};
     add_checked(value, schema_param{
-                           .id                      = "left",
-                           .name                    = "Left",
-                           .description             = "Left",
-                           .type                    = param_type::boolean,
-                           .mutually_exclusive_with = { "right" },
+                           .id          = "left",
+                           .description = "Left",
+                           .type        = param_type::boolean,
+                           .conflicts   = { "right" },
                        });
     add_checked(value, schema_param{
-                           .id                      = "right",
-                           .name                    = "Right",
-                           .description             = "Right",
-                           .type                    = param_type::boolean,
-                           .mutually_exclusive_with = { "left" },
+                           .id          = "right",
+                           .description = "Right",
+                           .type        = param_type::boolean,
+                           .conflicts   = { "left" },
                        });
 
     const auto violations =
@@ -431,30 +307,6 @@ TEST(parser_schema_validator, integer_above_two_to_the_53_respects_its_maximum)
     EXPECT_FALSE(is_valid_value(param, "9007199254740993"));
 }
 
-TEST(parser_schema_validator, large_integers_do_not_compare_as_doubles)
-{
-    schema value{};
-    add_checked(value, schema_param{
-                           .id          = "wide",
-                           .name        = "Wide",
-                           .description = "Wide",
-                           .type        = param_type::integer,
-                           .depends_on  = param_condition{ .param  = "wide",
-                                                           .equals = "9007199254740992" },
-                       });
-
-    const auto violations = validate_values(value, { { "wide", "9007199254740993" } });
-    EXPECT_TRUE(has_violation(violations, severity::warning, "has no effect"));
-}
-
-TEST(parser_schema_validator, rejects_an_oversized_pattern_subject)
-{
-    constexpr std::size_t k_oversized_subject = 4097;
-    auto                  param               = make_param(param_type::string);
-    param.pattern                             = "a+";
-    EXPECT_FALSE(is_valid_value(param, std::string(k_oversized_subject, 'a')));
-}
-
 TEST(parser_schema_validator, catalog_check_accepts_the_profiler_fixture)
 {
     EXPECT_TRUE(validate_schema(make_profiler_schema()).empty());
@@ -465,24 +317,20 @@ TEST(parser_schema_validator, catalog_check_reports_structural_errors)
     schema value{};
     add_checked(value, schema_param{
                            .id            = "count",
-                           .name          = "Count",
                            .description   = "Count",
                            .category      = "missing",
                            .type          = param_type::integer,
                            .default_value = "maybe",
                            .min           = 2.5,
                            .max           = 1.5,
-                           .pattern       = "[",
-                           .env = env_spec{ .name = "ROCPROFSYS_COUNT", .separator = "" },
-                           .copy_to = { "absent" },
+                           .env           = "ROCPROFSYS_COUNT",
+                           .conflicts     = { "absent" },
                        });
 
     const auto errors = validate_schema(value);
-    EXPECT_TRUE(has_violation(errors, severity::error, "unknown category"));
-    EXPECT_TRUE(has_violation(errors, severity::error, "invalid default"));
-    EXPECT_TRUE(has_violation(errors, severity::error, "minimum greater"));
-    EXPECT_TRUE(has_violation(errors, severity::error, "non-integer minimum"));
-    EXPECT_TRUE(has_violation(errors, severity::error, "invalid pattern"));
-    EXPECT_TRUE(has_violation(errors, severity::error, "empty list separator"));
-    EXPECT_TRUE(has_violation(errors, severity::error, "unknown parameter 'absent'"));
+    EXPECT_TRUE(has_violation(errors, "invalid default"));
+    EXPECT_TRUE(has_violation(errors, "minimum greater"));
+    EXPECT_TRUE(has_violation(errors, "non-integer minimum"));
+    EXPECT_TRUE(has_violation(errors, "unknown parameter 'absent'"));
+    EXPECT_FALSE(has_violation(errors, "unknown category"));
 }
