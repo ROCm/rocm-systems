@@ -1075,6 +1075,10 @@ typedef enum hsa_amd_agent_memory_properties_s {
  * @brief Agent AQL info properties attributes
  */
 typedef enum hsa_amd_agent_aql_properties_s {
+  /**
+   * The agent executes ::hsa_amd_ext_kernel_dispatch_packet_t: natively, or
+   * with CP firmware that reports AMD_QUEUE_CAPS_CP_EXT_KERNEL_DISPATCH.
+   */
   HSA_AMD_AQL_PROPERTY_EXT_DISPATCH = (1 << 0),
 } hsa_amd_agent_aql_properties_t;
 
