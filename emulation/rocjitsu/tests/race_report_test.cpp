@@ -113,7 +113,7 @@ TEST(RaceReportTraceTest, PadsPcsSoInstructionsShareAColumn) {
   EXPECT_EQ(
       formatTrace(trace, text, MarkedInstruction{snapshot(0x2000, 9, 1), 1, 0}, mark(trace, 1)),
       "       PC      Instruction\n"
-      "  ==>  0x2000  instruction 9  (outside this wave's trace)  ; <-- wave 1 lane 0\n"
+      "  ==>  0x2000  instruction 9  ; <-- wave 1 lane 0\n"
       "       Execution trace below is for wave 0.\n"
       "       0xfc    instruction 0\n"
       "  ==>  0x100   instruction 1  ; <-- wave 0 lane 0\n");
@@ -190,7 +190,7 @@ TEST(RaceReportTraceTest, OtherWaveConflictIsSeparateEvenWhenPcsAndEncodingsMatc
   ASSERT_EQ(printed.size(), 3u);
   for (const auto &row : printed)
     EXPECT_TRUE(row.transition.empty());
-  EXPECT_NE(report.find("outside this wave's trace"), std::string::npos);
+  EXPECT_NE(report.find("Execution trace below is for wave 0."), std::string::npos);
 }
 
 TEST(RaceReportTraceTest, ExpiredProducerRetainsIdentityAndMissingHistoryWithoutInventingAJump) {
@@ -281,14 +281,15 @@ TEST(RaceReportDescriptionTest, DescribesRegisterAndLdsDirectionsAcrossCompletio
         formatRaceDescription(violation, detector.events(), 0x200, ROCJITSU_CODE_ARCH_CDNA4);
     EXPECT_NE(report.find(test.resource), std::string::npos);
     EXPECT_NE(report.find(std::string("(") + test.hazard + ")"), std::string::npos);
-    EXPECT_NE(report.find(test.operation), std::string::npos);
+    EXPECT_NE(
+        report.find(std::string("Conflict: transfer from ") + test.operation + " at PC 0x100"),
+        std::string::npos);
     EXPECT_NE(report.find("Current access: " + std::string(test.write ? "write" : "read") +
                           " at PC 0x200"),
               std::string::npos);
     EXPECT_NE(report.find("workgroup (1, 2, 3)"), std::string::npos);
     if (test.complete) {
-      EXPECT_NE(report.find("Completed for wave 1, but not synchronized with wave 0"),
-                std::string::npos);
+      EXPECT_NE(report.find("Completed for wave 1.\n"), std::string::npos);
       EXPECT_EQ(report.find("pending counters"), std::string::npos);
     } else {
       EXPECT_NE(
@@ -296,6 +297,9 @@ TEST(RaceReportDescriptionTest, DescribesRegisterAndLdsDirectionsAcrossCompletio
           std::string::npos);
       EXPECT_NE(report.find("pending counters"), std::string::npos);
     }
+    EXPECT_EQ(report.find("Waves 1 and 0 have not synchronized this access.\n") !=
+                  std::string::npos,
+              test.owner == 1);
     EXPECT_EQ(report.find("lane -1"), std::string::npos);
   }
 }
@@ -348,7 +352,7 @@ TEST(RaceReportDescriptionTest, ArchitecturalCounterNamesPreservePendingSubsetCh
     const std::string prefix =
         "Race on VGPR v2 [workgroup (0, 0, 0), wave 0, lane 0]: read-after-write (RAW).\n"
         "  Current access: read at PC 0x200.\n"
-        "  Conflict: load from global memory into VGPRs at PC 0x100, wave 0.\n"
+        "  Conflict: transfer from global memory into VGPRs at PC 0x100, wave 0.\n"
         "  Completion for wave 0 is not guaranteed; pending counters: ";
     EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, test.arch),
               prefix + test.both + ".\n");
@@ -370,8 +374,9 @@ TEST(RaceReportDescriptionTest, ExactCrossWaveCompletedReadConflict) {
   EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, ROCJITSU_CODE_ARCH_RDNA3),
             "Race on LDS byte 16 [workgroup (1, 2, 3), wave 0, lane 3]: write-after-read (WAR).\n"
             "  Current access: write at PC 0x200.\n"
-            "  Conflict: load from LDS into VGPRs at PC 0x100, wave 1.\n"
-            "  Completed for wave 1, but not synchronized with wave 0.\n");
+            "  Conflict: transfer from LDS into VGPRs at PC 0x100, wave 1.\n"
+            "  Completed for wave 1.\n"
+            "  Waves 1 and 0 have not synchronized this access.\n");
 }
 
 TEST(RaceReportDescriptionTest, RejectsUnavailableAndRetiredConflicts) {

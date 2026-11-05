@@ -100,10 +100,11 @@ compiled kernel:
 RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]: read-after-write (RAW).
   Current access: read at PC 0x1018.
-  Conflict: store from VGPRs into LDS at PC 0x1010, wave 1.
-  Completed for wave 1, but not synchronized with wave 0.
+  Conflict: transfer from VGPRs into LDS at PC 0x1010, wave 1.
+  Completed for wave 1.
+  Waves 1 and 0 have not synchronized this access.
        PC      Instruction
-  ==>  0x1010  ds_write_b32 v0, v1  (outside this wave's trace)  ; <-- wave 1
+  ==>  0x1010  ds_write_b32 v0, v1  ; <-- wave 1
        Execution trace below is for wave 0.
        0x1014  v_sub_u32_e32 v1, 0, v0
   ==>  0x1018  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
@@ -147,14 +148,15 @@ $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 
 The human-readable heading names the affected register or LDS byte and identifies
 read-after-write (RAW), write-after-read (WAR), or write-after-write (WAW). The
-next lines identify the current access and the exact conflicting memory event.
-For a pending event, the report lists the completion counters that remain
-unsatisfied, using the architectural wait names for the target. Internal GFX11
-subsets are displayed as their covering `vmcnt`, `vscnt`, or `lgkmcnt` domains.
-For an event completed by its owning wave, the report identifies
-the other wave with which it has not been synchronized. Completion and
-inter-wave synchronization are separate conditions; one wait instruction is not
-a universal fix for every reported hazard.
+next lines identify the current access and the conflicting memory event by
+where its data moves, such as from global memory into VGPRs. For a pending
+event, the report lists the completion counters that remain unsatisfied, using
+the architectural wait names for the target. Internal GFX11 subsets are
+displayed as their covering `vmcnt`, `vscnt`, or `lgkmcnt` domains. When the
+event belongs to another wave, the report also states that the two waves have
+not synchronized the access. Completion and inter-wave synchronization are
+separate conditions; one wait instruction is not a universal fix for every
+reported hazard.
 
 Each trace row is disassembled from its own captured bytes, so code rewrites or
 unmapping do not change the reported instructions. Within the reporting wave,

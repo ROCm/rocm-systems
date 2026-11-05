@@ -223,8 +223,7 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
     oss << '\n';
   };
   if (conflict && !conflict_index) {
-    external(*conflict, conflict->wave == read.wave ? "  (before trace window)"
-                                                    : "  (outside this wave's trace)");
+    external(*conflict, conflict->wave == read.wave ? "  (before trace window)" : "");
     if (conflict->wave == read.wave) {
       oss << "       ... earlier instructions not recorded ...\n";
     } else
@@ -267,27 +266,34 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
 
 namespace {
 
-std::string_view event_description(MemoryEventType type) {
+struct Transfer {
+  std::string_view source;
+  std::string_view destination;
+};
+
+// Name only where the data moves; one event type covers several operations,
+// such as loads and returning atomics.
+Transfer event_transfer(MemoryEventType type) {
   using enum MemoryEventType;
   switch (type) {
   case GLOBAL_TO_VGPR:
-    return "load from global memory into VGPRs";
+    return {"global memory", "VGPRs"};
   case VGPR_TO_GLOBAL:
-    return "store from VGPRs into global memory";
+    return {"VGPRs", "global memory"};
   case LDS_TO_VGPR:
-    return "load from LDS into VGPRs";
+    return {"LDS", "VGPRs"};
   case VGPR_TO_LDS:
-    return "store from VGPRs into LDS";
+    return {"VGPRs", "LDS"};
   case GLOBAL_TO_LDS:
-    return "transfer from global memory into LDS";
+    return {"global memory", "LDS"};
   case GLOBAL_TO_SGPR:
-    return "load from global memory into SGPRs";
+    return {"global memory", "SGPRs"};
   case GLOBAL_TO_TTMP:
-    return "load from global memory into TTMPs";
+    return {"global memory", "TTMPs"};
   case SCALAR_TO_GLOBAL:
-    return "store from scalar registers into global memory";
+    return {"scalar registers", "global memory"};
   case LDS_TO_GLOBAL:
-    return "transfer from LDS into global memory";
+    return {"LDS", "global memory"};
   case N:
     break;
   }
@@ -333,8 +339,9 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
   oss << "]: " << hazard << ".\n";
   oss << "  Current access: " << (v.isWrite ? "write" : "read") << " at PC 0x" << std::hex
       << access_pc << std::dec << ".\n";
-  oss << "  Conflict: " << event_description(type) << " at PC 0x" << std::hex << events.pc(event)
-      << std::dec << ", wave " << owner << ".\n";
+  const Transfer transfer = event_transfer(type);
+  oss << "  Conflict: transfer from " << transfer.source << " into " << transfer.destination
+      << " at PC 0x" << std::hex << events.pc(event) << std::dec << ", wave " << owner << ".\n";
   if (events.status(event) == EventStatus::ACTIVE) {
     oss << "  Completion for wave " << owner << " is not guaranteed; pending counters: ";
     std::vector<amdgpu::WaitCounterKind> displayed;
@@ -352,12 +359,11 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
     }
     oss << ".\n";
   } else if (events.status(event) == EventStatus::WAVE_COMPLETE) {
-    oss << "  Completed for wave " << owner << ", but not synchronized with wave " << v.wave
-        << ".\n";
+    oss << "  Completed for wave " << owner << ".\n";
   } else {
     throw std::logic_error("race violation references a retired memory event");
   }
-  if (owner != v.wave && events.status(event) == EventStatus::ACTIVE)
+  if (owner != v.wave)
     oss << "  Waves " << owner << " and " << v.wave << " have not synchronized this access.\n";
   return oss.str();
 }

@@ -2952,8 +2952,8 @@ TEST(RaceDetectorPluginOutputTest, KeepsProducerBytesAfterWaitAndTraceOverwrite)
   EXPECT_NE(sink.str().find("0x3000  ds_read_b32 v8, v0"), std::string::npos) << sink.str();
   EXPECT_NE(sink.str().find("; <-- wave 0"), std::string::npos);
   EXPECT_NE(sink.str().find("; <-- wave 1 lane 0"), std::string::npos);
-  EXPECT_NE(sink.str().find("(outside this wave's trace)  ; <-- wave 0\n"
-                            "       Execution trace below is for wave 1.\n"),
+  EXPECT_NE(sink.str().find(expected_store + "  ; <-- wave 0\n"
+                                             "       Execution trace below is for wave 1.\n"),
             std::string::npos);
   state->race_state->flushBarrierPendingEvents();
   EXPECT_TRUE(state->race_state->getDetector()->events().isTrimmable(event));
@@ -3047,14 +3047,13 @@ TEST(FormatTraceTest, WaveLaneAnnotations) {
       conflict, read);
   EXPECT_NE(result.find("; <-- wave 3"), std::string::npos);
   EXPECT_NE(result.find("; <-- wave 0 lane 5"), std::string::npos);
-  EXPECT_EQ(result,
-            "       PC     Instruction\n"
-            "  ==>  0x100  ds_write_b32 v9, v12  (outside this wave's trace)  ; <-- wave 3\n"
-            "       Execution trace below is for wave 0.\n"
-            "       0x100  ds_write_b32 v9, v12\n"
-            "       --- jump forward ---\n"
-            "       0x108  s_nop 0\n"
-            "  ==>  0x10c  ds_read_b32 v8, v9  ; <-- wave 0 lane 5\n");
+  EXPECT_EQ(result, "       PC     Instruction\n"
+                    "  ==>  0x100  ds_write_b32 v9, v12  ; <-- wave 3\n"
+                    "       Execution trace below is for wave 0.\n"
+                    "       0x100  ds_write_b32 v9, v12\n"
+                    "       --- jump forward ---\n"
+                    "       0x108  s_nop 0\n"
+                    "  ==>  0x10c  ds_read_b32 v8, v9  ; <-- wave 0 lane 5\n");
   EXPECT_NE(result.find("0x108  s_nop 0"), std::string::npos);
 }
 
@@ -3186,7 +3185,7 @@ TEST(FormatTraceTest, DifferentEncodingAtConflictPcIsNotTheProducer) {
                   },
                   MarkedInstruction{producer, 1, -1}, {trace[1], 0, 0});
   EXPECT_EQ(report, "       PC     Instruction\n"
-                    "  ==>  0x100  s_nop 7  (outside this wave's trace)  ; <-- wave 1\n"
+                    "  ==>  0x100  s_nop 7  ; <-- wave 1\n"
                     "       Execution trace below is for wave 0.\n"
                     "       0x100  s_nop 0\n"
                     "  ==>  0x104  s_nop 0  ; <-- wave 0 lane 0\n");
@@ -3375,16 +3374,16 @@ TEST(RaceDetectorPluginOutputTest, LdsWriteExplainsPendingAndCompletedOtherWaveR
     EXPECT_NE(report.find("type=LDS access=write reg=0 wave=1 lane=0"), std::string::npos)
         << report;
     EXPECT_NE(report.find("write-after-read (WAR)"), std::string::npos) << report;
-    EXPECT_NE(report.find("Conflict: load from LDS into VGPRs at PC 0x1000, wave 0."),
+    EXPECT_NE(report.find("Conflict: transfer from LDS into VGPRs at PC 0x1000, wave 0."),
               std::string::npos)
         << report;
-    EXPECT_NE(report.find("  ==>  0x1000  ds_read_b32 v8, v0  (outside this wave's trace)"),
-              std::string::npos)
+    EXPECT_NE(report.find("  ==>  0x1000  ds_read_b32 v8, v0  ; <-- wave 0"), std::string::npos)
         << report;
     EXPECT_NE(report.find("  ==>  0x1000  ds_write_b32 v0, v1"), std::string::npos) << report;
     if (complete) {
-      EXPECT_NE(report.find("Completed for wave 0, but not synchronized with wave 1."),
-                std::string::npos)
+      EXPECT_NE(
+          report.find("Completed for wave 0.\n  Waves 0 and 1 have not synchronized this access."),
+          std::string::npos)
           << report;
       EXPECT_EQ(report.find("pending counters"), std::string::npos);
     } else {
