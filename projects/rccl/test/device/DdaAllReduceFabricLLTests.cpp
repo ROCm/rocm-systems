@@ -71,8 +71,10 @@ const char* typeName() {
     return "float";
   } else if constexpr (std::is_same_v<T, bf16>) {
     return "bf16";
-  } else {
+  } else if constexpr (std::is_same_v<T, half>) {
     return "half";
+  } else {
+    static_assert(!std::is_same_v<T, T>, "add a name for this type");
   }
 }
 
@@ -183,11 +185,12 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
     return out;
   }
 
-  void expectEpochAdvanced(unsigned blocks, uint32_t flag = kFlag) {
+  // Every block, idle or aborted, bumps the cells it owns (e % grid), so all kEpochCells cells end at flag.
+  void expectEpochAdvanced(uint32_t flag = kFlag) {
     std::vector<uint32_t> epoch(kEpochCells);
     ASSERT_EQ(hipMemcpy(epoch.data(), dEpoch_, kEpochCells * sizeof(uint32_t), hipMemcpyDeviceToHost), hipSuccess);
-    for (unsigned b = 0; b < blocks; ++b) {
-      EXPECT_EQ(epoch[b], flag) << "block " << b;
+    for (unsigned e = 0; e < kEpochCells; ++e) {
+      EXPECT_EQ(epoch[e], flag) << "epoch cell " << e;
     }
   }
 
@@ -210,7 +213,7 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
     publishPeer(0);
     ASSERT_TRUE(finishes()) << "kernel never saw the late peer";
     expectRankOrderSum();
-    expectEpochAdvanced(oneShotGrid());
+    expectEpochAdvanced();
   }
 
   // Spread two-shot: rank self_ reduces bytes_ of per-rank words in_ (two a packet); ref_ is the one-shot's result.
@@ -365,7 +368,7 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
     ASSERT_NO_FATAL_FAILURE((spreadRun<T, N>(grid, heldArea, abort, send)));
     ASSERT_NO_FATAL_FAILURE(expectSpreadRecv(heldArea, abort));
     ASSERT_NO_FATAL_FAILURE(expectSpreadPublished(!abort || heldArea != kCopyArea));
-    expectEpochAdvanced(grid, flag_);
+    expectEpochAdvanced(flag_);
   }
 
   // One spread run over T on nRanks ranks as rank self from a fresh reset(), checked against the one-shot.
@@ -441,7 +444,7 @@ TEST_F(DdaAllReduceFabricLL, OneShotAbortDuringStaleBatchLeavesRecvbuffAndAdvanc
   for (float v : recv()) {
     ASSERT_EQ(v, kUntouched) << "an aborted thread wrote recvbuff";
   }
-  expectEpochAdvanced(oneShotGrid());
+  expectEpochAdvanced();
 }
 
 // Float, bf16 and half, compile-time and runtime ranks, even (6) and uneven (5) shards: the one-shot's result bits.
@@ -464,7 +467,7 @@ TEST_F(DdaAllReduceFabricLL, SpreadPassesIdleBlocksAndShortShards) {
 }
 
 // Rank 0's copy of my shard lands only once the kernel is polling (phase 2), then a peer's reduced shard (phase 3).
-// On one block the phase-3 poll masks carry 2 or 3 lines, so the late reduced shard waits in the batched sweep.
+// On one block the held lines sit in 2- or 3-line masks, so the late reduced shard waits in the batched sweep.
 TEST_F(DdaAllReduceFabricLL, SpreadWaitsForLateCopiesAndLateReducedShards) {
   spreadCase<float, 0>(6, kSelf, kOneShotBytes, 3, kCopyArea);
   spreadCase<float, 0>(5, kSelf, kOneShotBytes, 1, kReducedArea);
@@ -484,16 +487,17 @@ TEST_F(DdaAllReduceFabricLL, SpreadInPlaceSendsBeforeOverwriting) {
   ASSERT_NO_FATAL_FAILURE((spreadRunAndCheck<float, 0>(3, kHoldNothing, kNoAbort, dRecv_)));
 }
 
-// No reset after the one-shot: flag 3 runs on bank 1, then flag 4 on bank 0 over its flag-2 lines, one copy held late.
-// One block, so every poll mask carries 2 or 3 lines and the stale lines meet the batched sweep's exact flag test.
+// No reset after the one-shot: flag 3 on bank 1 at the one-shot's grid, then flag 4 on bank 0 over its flag-2 lines.
+// Flag 4 holds a copy late on one block: the held lines sit in 2- or 3-line masks and meet the sweep's exact flag test.
 TEST_F(DdaAllReduceFabricLL, SpreadFollowsTheOneShotAndSkipsStaleLines) {
   ASSERT_NO_FATAL_FAILURE((spreadReference<float, 0>(5, kSelf, kOneShotBytes, 1)));
   for (const uint32_t flag : {kFlag + 1, kFlag + 2}) {
-    SCOPED_TRACE(::testing::Message() << "flag " << flag);
+    const unsigned grid = flag == kFlag + 1 ? oneShotGrid() : 1;
+    SCOPED_TRACE(::testing::Message() << "flag " << flag << ", grid " << grid);
     flag_ = flag;
     clearRecv();
     const int held = flag == kFlag + 1 ? kHoldNothing : kCopyArea;
-    ASSERT_NO_FATAL_FAILURE((spreadRunAndCheck<float, 0>(1, held, kNoAbort, dSend_)));
+    ASSERT_NO_FATAL_FAILURE((spreadRunAndCheck<float, 0>(grid, held, kNoAbort, dSend_)));
   }
 }
 
