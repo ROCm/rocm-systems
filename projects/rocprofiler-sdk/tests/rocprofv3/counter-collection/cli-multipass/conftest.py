@@ -40,6 +40,16 @@ def pytest_addoption(parser):
         "The number of passes is derived from the length of this list.",
     )
     parser.addoption(
+        "--cli-output-dir",
+        action="store",
+        help="Path to the output directory for combined-mode CLI passes.",
+    )
+    parser.addoption(
+        "--input-output-dir",
+        action="store",
+        help="Path to the output directory for combined-mode input-file passes.",
+    )
+    parser.addoption(
         "--binary-dir",
         action="store",
         help="Path to the directory holding the per-test output directories.",
@@ -70,6 +80,16 @@ def output_dir(request):
 @pytest.fixture
 def expected_counters(request):
     return request.config.getoption("--expected-counters")
+
+
+@pytest.fixture
+def cli_output_dir(request):
+    return request.config.getoption("--cli-output-dir")
+
+
+@pytest.fixture
+def input_output_dir(request):
+    return request.config.getoption("--input-output-dir")
 
 
 @pytest.fixture

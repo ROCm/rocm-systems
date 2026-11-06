@@ -32,10 +32,20 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
+set(_combined_shared_output ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc-combined)
+set(_combined_cli_output
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc-combined-independent-cli)
+set(_combined_input_output
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc-combined-independent-input)
+
+configure_file(input-combined.json ${CMAKE_CURRENT_BINARY_DIR}/input-combined.json @ONLY)
+configure_file(input-combined-independent.json
+               ${CMAKE_CURRENT_BINARY_DIR}/input-combined-independent.json @ONLY)
+
 rocprofiler_configure_pytest_files(
     CONFIG pytest.ini
-    COPY validate.py validate_no_output.py conftest.py input.json input.yml
-         input-combined.json input-pmc-groups.json input-pid.json)
+    COPY validate.py validate_independent_output.py validate_no_output.py conftest.py
+         input.json input.yml input-pmc-groups.json input-pid.json)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
@@ -110,8 +120,7 @@ rocprofiler_add_integration_execute_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input-combined.json --pmc SQ_WAVES --pmc GRBM_COUNT -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc-combined -o out -f csv --
-        $<TARGET_FILE:simple-transpose>
+        ${_combined_shared_output} -o out -f csv -- $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
     PRELOAD "${PRELOAD_ENV}"
@@ -121,10 +130,31 @@ rocprofiler_add_integration_validate_test(
     rocprofv3-test-counter-collection-cli-multipass-combined
     TEST_PATHS validate.py
     CONFIG pytest.ini
-    ARGS --output-dir ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc-combined
-         --expected-counters SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE
+    ARGS --output-dir ${_combined_shared_output} --expected-counters SQ_WAVES GRBM_COUNT
+         GRBM_GUI_ACTIVE
     TIMEOUT 45
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-cli-multipass-combined)
+
+# combined multi-pass with independent output settings for the CLI and input-file passes
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-counter-collection-cli-multipass-independent-output
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
+        ${CMAKE_CURRENT_BINARY_DIR}/input-combined-independent.json --pmc GRBM_COUNT -d
+        ${_combined_cli_output} -o cli -f csv -- $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 45
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-counter-collection-cli-multipass-independent-output)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-counter-collection-cli-multipass-independent-output
+    TEST_PATHS validate_independent_output.py
+    CONFIG pytest.ini
+    ARGS --cli-output-dir ${_combined_cli_output} --input-output-dir
+         ${_combined_input_output}
+    TIMEOUT 45
+    FIXTURES_REQUIRED rocprofv3-test-counter-collection-cli-multipass-independent-output)
 
 # Negative tests: illegal combinations must fail before launch. PASS_REGULAR_EXPRESSION
 # strictly asserts the message (WILL_FAIL would accept any non-zero exit).
