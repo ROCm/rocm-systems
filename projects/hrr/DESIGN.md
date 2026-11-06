@@ -660,12 +660,13 @@ or direct GPU access via the mapped flag. At capture time:
 
 At playback:
 
-- `playback_hipHostRegister` allocates a fresh 64-byte-aligned host buffer (`_aligned_malloc`
-  on Windows, `posix_memalign` on Linux), restores the blob snapshot into it, calls
-  `hipHostRegister` on the new buffer, and records `(recorded_ptr → live_ptr)` in `alloc_map`
+- `playback_hipHostRegister` takes the recorded address's block in `host_reg_blocks` (the
+  same block again when it is large enough), restores the blob snapshot into it, calls
+  `hipHostRegister` on it, and records `(recorded_ptr → live_ptr)` in `alloc_map`
   (for kernel-arg pointer translation) and `host_reg_bufs` (for cleanup at Unregister).
-- `playback_hipHostUnregister` translates the pointer, calls `hipHostUnregister`, frees the
-  backing buffer, and removes both map entries.
+- `playback_hipHostUnregister` translates the pointer, calls `hipHostUnregister`, and removes
+  both map entries. The block stays, charged to the host budget, until the context is
+  destroyed, since a graph node may still point into it.
 
 ### Pinned Host Snapshots
 

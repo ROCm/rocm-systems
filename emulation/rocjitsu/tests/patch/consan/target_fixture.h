@@ -50,9 +50,7 @@ inline std::vector<uint8_t> read_fixture(const std::filesystem::path &path) {
 inline std::optional<DbiEntryProloguePlan> bootstrap_plan(const InputProgram &input) {
   AmdGpuCodeObject object(input.image.data(), input.image.size());
   std::unique_ptr<Decoder> decoder =
-      input.target->public_id == ROCJITSU_CODE_TARGET_INVALID
-          ? Decoder::create(input.target->arch)
-          : Decoder::create(default_isa_target_registry(), input.target->public_id);
+      Decoder::create(default_isa_target_registry(), input.target->public_id);
   if (!decoder)
     return std::nullopt;
   const std::array entries{input.kernel.entry_text_offset};
