@@ -4206,6 +4206,10 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 			if (!IS_CANONICAL_ADDR(process_apertures[i].gpuvm_limit))
 				continue;
 
+			/* Skip GPUs with no VM; kernel rejects their policy */
+			if (gpu_mem_find_by_gpu_id(fmm_ctx, process_apertures[i].gpu_id) < 0)
+				continue;
+
 			/* Set memory policy to match the SVM apertures */
 			alt_base = (uintptr_t)fmm_ctx->svm.dgpu_alt_aperture->base;
 			alt_size = VOID_PTRS_SUB(fmm_ctx->svm.dgpu_alt_aperture->limit,
