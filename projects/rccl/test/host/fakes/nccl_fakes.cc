@@ -309,7 +309,7 @@ static ncclResult_t DefaultTopoCheckP2p(int /*rank1*/, int /*rank2*/, int* p2p,
 std::function<ncclResult_t(int, int, int*, int*, int*, int*, int*)>
     g_ncclTopoCheckP2p = DefaultTopoCheckP2p;
 
-// rccl-UnitTestsMicroGraph links the real src/graph/paths.cc and search.cc, which define these.
+// rccl-UnitTestsMicroGraphDev links the real src/graph/paths.cc and search.cc, which define these.
 #ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
 ncclResult_t ncclTopoCheckP2p(struct ncclComm*       /*comm*/,
                               struct ncclTopoSystem* /*system*/,

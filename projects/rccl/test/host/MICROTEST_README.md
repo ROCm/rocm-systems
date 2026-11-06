@@ -874,9 +874,9 @@ slightly weaker than the others, which is what `rccl::Recorder` and `ncclGetEnv`
 had become before this map existed.
 
 `src/graph/search.cc` has two rows for the same reason as `src/rccl_wrap.cc` below:
-the targets that compile it (`rccl-UnitTestsMicroSearch`, which tests it, and
-`rccl-UnitTestsMicroTopo` / `rccl-UnitTestsMicroGraph`, which only need it to collaborate
-with `paths.cc`) take its dependencies from `topo_stubs.cc` or `graph_fakes.cc`, while
+the targets that compile it (`rccl-UnitTestsMicroGraphSearch`, which tests it, and the
+other `src/graph/` binaries that link it, which only need it to collaborate with
+`paths.cc`) take its dependencies from `topo_stubs.cc` or `graph_fakes.cc`, while
 every other target fakes its own entry points (`search_fakes.cc`). The two never define
 the same symbol, so no target needs an `RCCL_STUBS_OMIT_` macro for them.
 
@@ -902,7 +902,7 @@ symbol.
 | externals the devcomm compat shims reach | `fakes/devcomm_fakes.cc` |
 | `src/diagnostics/device/p2p.cu` (`ncclDiagP2p*` kernel launchers) | `fakes/diagnostics_p2p_device_fakes.cc` |
 | `src/graph/*.cc` (topo, paths, connect, rome consensus) and `search.cc`'s *dependencies* | `fakes/topo_stubs.cc` |
-| `src/graph/search.cc`'s own entry points (targets that don't compile the real file, i.e. all but `rccl-UnitTestsMicroSearch`, `rccl-UnitTestsMicroTopo` and `rccl-UnitTestsMicroGraph`) | `fakes/search_fakes.cc` |
+| `src/graph/search.cc`'s own entry points (targets that don't compile the real file, i.e. all but the `src/graph/` binaries that link it) | `fakes/search_fakes.cc` |
 | `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
 | everything `src/graph/*.cc` calls outside `src/graph` (the `graph/` binaries except `rccl-UnitTestsMicroGraph{Dev,RcclGraphGen,Trees}`) | `fakes/graph_fakes.cc` |
 | `src/group.cc` | `fakes/group_fakes.cc` |
