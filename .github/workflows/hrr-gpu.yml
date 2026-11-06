@@ -126,7 +126,7 @@ jobs:
           set -euo pipefail
           sudo -n apt-get update
           sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            build-essential ca-certificates clang libdrm-dev ninja-build
+            build-essential ca-certificates ccache clang libdrm-dev ninja-build
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -140,12 +140,47 @@ jobs:
           "${RUNNER_TEMP}/hrr-venv/bin/python" -m pip install --no-cache-dir 'cmake==3.31.10'
           echo "${RUNNER_TEMP}/hrr-venv/bin" >> "${GITHUB_PATH}"
 
+      # ccache holds only the rocJitsu compile objects, in its own directory
+      # under RUNNER_TEMP. It never covers the ROCm install in the build job,
+      # which stays uncached (see the note above that job's Build step).
+      # ccache keys each object on the preprocessed source and the compiler,
+      # so a stale hit is not possible; the key below only decides when a new
+      # cache is saved. Pull requests restore the cache that develop pushes and
+      # the schedule saved, and save their own, which only that PR reads.
+      - name: Configure ccache
+        id: ccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "CCACHE_DIR=${RUNNER_TEMP}/ccache-rocjitsu"
+            echo "CCACHE_BASEDIR=${GITHUB_WORKSPACE}"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_MAXSIZE=500M"
+          } >> "${GITHUB_ENV}"
+          echo "compiler=$( (c++ --version | head -n1; cc --version | head -n1) | sha256sum | cut -c1-12)" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore ccache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/ccache-rocjitsu
+          key: ccache-rocjitsu-${{ runner.os }}-${{ runner.arch }}-${{ steps.ccache.outputs.compiler }}-${{ hashFiles('emulation/rocjitsu/**', 'runtimes/api-headers/**', 'shared/machine-readable-isa/**') }}
+          restore-keys: |
+            ccache-rocjitsu-${{ runner.os }}-${{ runner.arch }}-${{ steps.ccache.outputs.compiler }}-
+
       - name: Build rocJitsu
         shell: bash
         run: |
           set -euo pipefail
-          cmake -S emulation/rocjitsu -B build/rocjitsu -G Ninja -DCMAKE_BUILD_TYPE=Release
+          ccache --zero-stats
+          cmake -S emulation/rocjitsu -B build/rocjitsu -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build/rocjitsu --target rocjitsu_bin rocjitsu_shared rocjitsu_memory -j
+
+      - name: ccache stats
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: ccache --show-stats --verbose || true
 
       - name: Package rocJitsu
         shell: bash
