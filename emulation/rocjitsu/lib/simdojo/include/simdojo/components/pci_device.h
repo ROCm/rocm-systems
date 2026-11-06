@@ -32,6 +32,7 @@
 #pragma once
 
 #include "simdojo/sim/component.h"
+#include "util/diagnostic.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -614,6 +615,7 @@ public:
                                            bool write) = 0;
 
   /// @brief Register a guest memory window as reachable by the device.
+  /// @details Transport callbacks must not throw.
   /// @param[in] region The window the guest mapped.
   virtual void dma_map(const DmaRegion &region) = 0;
 
@@ -625,7 +627,11 @@ public:
 
   /// @brief Return the device to its power-on state.
   /// @param[in] kind Why the reset was requested.
-  virtual void reset(ResetKind /*kind*/) {}
+  /// @returns Failure if reset could not complete; partial effects remain applied.
+  /// Hooks invoked by the transport must not throw.
+  virtual util::Result reset(ResetKind /*kind*/, util::DiagnosticEmitter /*diag*/ = {}) {
+    return util::Result::success();
+  }
 
 protected:
   /// @brief Revoke and drain the current peer generation without releasing the
