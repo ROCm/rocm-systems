@@ -508,9 +508,10 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
-// The enqueue-rearch job path: collective_stubs.cc pins
-// ncclParamEnqueueRearchEnable to 0, so every call site takes the in-group task
-// branch instead and nothing here enqueues a job.
+// The enqueue-rearch job path: collective_stubs.cc defaults
+// ncclParamEnqueueRearchEnable to 0, so call sites take the in-group task
+// branch. DevCommCreateFailureTest turns it on only for requests rejected
+// before this enqueue, so nothing here ever owns a job.
 ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),
                                  ncclComm_t) {
   return ncclSuccess;
