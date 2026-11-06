@@ -76,6 +76,7 @@ constexpr size_t DEFAULT_NUM_THREADS   = 2;
     do                                                                                   \
     {                                                                                    \
         name<<<GRID_SIZE, BLOCK_SIZE>>>(data, KERNEL_ELEMENTS);                          \
+        HIP_CHECK(hipGetLastError());                                                    \
         HIP_CHECK(hipDeviceSynchronize());                                               \
     } while(0)
 
@@ -85,6 +86,7 @@ constexpr size_t DEFAULT_NUM_THREADS   = 2;
         for(int _rep = 0; _rep < KERNEL_LAUNCH_REPEATS; ++_rep)                          \
         {                                                                                \
             name<<<GRID_SIZE, BLOCK_SIZE, 0, stream>>>(data, KERNEL_ELEMENTS);           \
+            HIP_CHECK(hipGetLastError());                                                \
             HIP_CHECK(hipStreamSynchronize(stream));                                     \
         }                                                                                \
     } while(0)
