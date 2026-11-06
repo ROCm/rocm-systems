@@ -79,6 +79,28 @@ class WorkflowTests(unittest.TestCase):
             self.assertNotIn("continue-on-error", step)
         self.assertEqual(steps[-1]["run"], "${{ matrix.run }}")
 
+    def test_integration_source_contains_every_formatter_scope(self) -> None:
+        formatting = yaml.load(
+            (
+                ACTION_DIRECTORY.parents[1] / "workflows/scoped-formatting.yml"
+            ).read_text(),
+            Loader=yaml.BaseLoader,
+        )
+        integration = next(
+            scope for scope in self.scopes if scope["suite"] == "formatting-integration"
+        )
+        inputs = integration["sparse-checkout"].splitlines()
+        for scope in formatting["jobs"]["pre-commit"]["strategy"]["matrix"]["include"]:
+            for path in scope["sparse-checkout"].splitlines():
+                with self.subTest(scope=scope["scope"], path=path):
+                    self.assertTrue(
+                        any(
+                            path == source or path.startswith(source + "/")
+                            for source in inputs
+                        ),
+                        f"Integration source does not materialize {path}",
+                    )
+
     def test_selector_compares_pinned_event_commits(self) -> None:
         action = yaml.load(
             (ACTION_DIRECTORY / "action.yml").read_text(), Loader=yaml.BaseLoader

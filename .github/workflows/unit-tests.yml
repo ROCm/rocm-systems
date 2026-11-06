@@ -54,8 +54,7 @@ jobs:
           - suite: formatting-integration
             include: '^(\.github/(actions/changed-files/|workflows/)|\.(pre-commit-config\.yaml|clang-format)\Z|shared/cuid/\.(pre-commit-config\.yaml|clang-format|codespellrc|gersemirc)\Z|projects/rocprofiler-compute/(tools/|\.(pre-commit-config\.yaml|clang-format)\Z))'
             sparse-checkout: |
-              .github/actions/changed-files
-              .github/workflows
+              .github
               runtimes
               emulation/mirage
               emulation/rocjitsu
@@ -84,6 +83,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Shared integration fixtures require a non-shallow source checkout.
+          fetch-depth: 0
           sparse-checkout: ${{ matrix.sparse-checkout }}
 
       - name: Set up Python
