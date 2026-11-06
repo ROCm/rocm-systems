@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cstring>
 
@@ -833,9 +834,13 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
   return true;
 }
 
+// Set in Device::tearDown so removeVACache does not lock a device already destroyed.
+static std::atomic<bool> deviceTearDown{false};
+
 // ================================================================================================
 bool Device::init() {
   assert(!Runtime::initialized() && "initialize only once");
+  deviceTearDown.store(false, std::memory_order_release);
   bool ret = false;
   devices_ = nullptr;
   appProfile_.init();
@@ -909,6 +914,7 @@ bool Device::init() {
 
 // ================================================================================================
 void Device::tearDown() {
+  deviceTearDown.store(true, std::memory_order_release);
 #if DEVICE_ADDRESS_SANITIZER
   // Scan for device-side leaks before ~Device frees the heap slabs.
   reportAllDeviceMemoryLeaks();
@@ -1062,6 +1068,9 @@ void Device::addVACache(device::Memory* memory) const {
 }
 
 void Device::removeVACache(const device::Memory* memory) const {
+  if (deviceTearDown.load(std::memory_order_acquire)) {
+    return;
+  }
   // Make sure system memory has direct access
   if (memory->isHostMemDirectAccess() && memory->owner()) {
     // VA cache access must be serialised
