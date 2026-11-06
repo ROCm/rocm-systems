@@ -2699,6 +2699,31 @@ def test_matrix_acc_cd_destination_uses_encoding_field_presence(mnemonic):
     [
         ('(void)wf; throw util::UnimplementedInst(mnemonic());', True),
         (
+            'wf.report_instruction_execution_error('
+            'amdgpu::InstructionExecutionError::UnimplementedInstruction); return;',
+            True,
+        ),
+        (
+            '/* failure only */ (void)wf; wf.report_instruction_execution_error(\n'
+            'amdgpu::InstructionExecutionError::UnimplementedInstruction); // reason\n',
+            True,
+        ),
+        (
+            'if (unsupported) { wf.report_instruction_execution_error('
+            'amdgpu::InstructionExecutionError::UnimplementedInstruction); return; }',
+            False,
+        ),
+        (
+            'wf.halt(); wf.report_instruction_execution_error('
+            'amdgpu::InstructionExecutionError::UnimplementedInstruction); return;',
+            False,
+        ),
+        (
+            'wf.report_instruction_execution_error('
+            'amdgpu::InstructionExecutionError::UnimplementedInstruction); return; wf.halt();',
+            False,
+        ),
+        (
             '// Unimplemented sparse matrix operation.\n'
             '(void)wf;\nthrow util::UnimplementedInst(mnemonic()); // detail',
             True,
@@ -2718,6 +2743,115 @@ def test_matrix_acc_cd_destination_uses_encoding_field_presence(mnemonic):
 )
 def test_unimplemented_execute_stub_requires_unconditional_failure(body, expected):
     assert CodeGenerator._is_unimplemented_execute_stub(body) is expected
+
+
+@pytest.mark.parametrize(
+    ('semantic_class', 'name'),
+    [
+        ('nop', 'S_UNSUPPORTED'),
+        ('buffer_load_format_d16', 'BUFFER_LOAD_FORMAT_D16_X'),
+        ('buffer_store_format_d16', 'BUFFER_STORE_FORMAT_D16_X'),
+        ('future_semantics', 'UNSUPPORTED'),
+        ('flat_atomic', 'FLAT_ATOMIC_UNSUPPORTED'),
+        ('buffer_atomic', 'BUFFER_ATOMIC_UNSUPPORTED'),
+        ('ds_atomic', 'DS_ATOMIC_UNSUPPORTED'),
+        ('ds_append_consume', 'DS_APPEND_UNSUPPORTED'),
+    ],
+)
+def test_latent_execute_fallbacks_report_failure_without_preparing_execution(
+    semantic_class, name
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='cdna5', profile=Cdna5Profile(), encoding_map={}, inst_encodings=[]
+    )
+    inst = Instruction(name, 'ENC_SOPP', 0, [])
+    sem = InstructionSemantics(name, semantic_class)
+    body = codegen._gen_execute_body(inst, sem, inst.enc_name)
+    assert 'throw ' not in body
+    assert 'InstructionExecutionError::UnimplementedInstruction' in body
+    assert 'return;' in body
+    assert 'set_data(' not in body
+    assert 'RegisterAccess' not in body
+    assert 'wf.cu()' not in body
+    assert CodeGenerator._is_unimplemented_execute_stub(body)
+
+
+@pytest.mark.parametrize(
+    ('operation', 'direct_operands'),
+    [
+        ('sr_pk_fp4_f32', ['data_src']),
+        ('pk32_fp6_f32', ['vdst', 'src0']),
+        ('2xpk16_fp6_f32', ['vdst', 'src0', 'src1']),
+        ('pk32_f32_fp6', ['vdst', 'src0']),
+        ('sr_pk32_fp6_f32', ['vdst', 'src0']),
+    ],
+)
+def test_latent_scalef32_checks_every_direct_operand_before_execution(
+    operation, direct_operands
+):
+    body = gen_cvt_scalef32(
+        SimpleNamespace(
+            op=operation,
+            dst_ops=['vdst'],
+            src_ops=['src0', 'src1', 'src2'],
+            arch_name='cdna4',
+        )
+    )
+    assert 'throw ' not in body
+    lane_loop = body.index('for (uint32_t lane')
+    for operand in direct_operands:
+        guard = re.search(rf'if\s*\(!{operand}_off\)\s*{{([^}}]*)}}', body)
+        assert guard is not None
+        rejection = guard.group(1)
+        assert 'InstructionExecutionError::UnsupportedOperandValue' in rejection
+        assert 'return;' in rejection
+        assert guard.end() < lane_loop
+
+
+@pytest.mark.parametrize('conditional', [False, True])
+def test_failure_stub_recognition_keeps_conditional_modifier_restoration(
+    tmp_path, monkeypatch, conditional
+):
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna2.xml'), Rdna2Profile()).parse()
+    codegen = CodeGenerator(spec, str(tmp_path), derive_all_semantics(spec))
+    original = codegen._gen_execute_body
+    failure = (
+        '  wf.report_instruction_execution_error(\n'
+        '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+        '  return;\n'
+    )
+
+    def emit(inst, sem, enc_name='', result_writer=None):
+        body = original(inst, sem, enc_name, result_writer)
+        if inst.name == 'V_MOV_B32' and enc_name == 'ENC_VOP1':
+            return (
+                ('  if (wf.exec() == 0) {\n' + failure + '  }\n' + body)
+                if conditional
+                else failure
+            )
+        return body
+
+    monkeypatch.setattr(codegen, '_gen_execute_body', emit)
+    codegen.gen_all()
+    source = (tmp_path / 'rdna2' / 'vop1_exec.cpp').read_text()
+    signature = 'void VMovB32Vop1::execute_modifier_impl'
+    if conditional:
+        modifier = _generated_function_body(source, signature)
+        assert 'ScopedOperandDelegate' in modifier
+        assert 'ScopedVgprWriteMask' in modifier
+        assert 'sdwa::stage_source' in modifier
+        assert '.restore();' in modifier
+        assert 'execute_v_mov_b32_vop1' in modifier
+        shared_body = codegen._shared_execute_bodies[('v_mov_b32', 'ENC_VOP1')][2]
+        assert 'InstructionExecutionError::UnimplementedInstruction' in shared_body
+        assert 'return;' in shared_body
+    else:
+        assert signature not in source
+        body = _generated_function_body(source, 'void VMovB32Vop1::execute_impl')
+        assert 'InstructionExecutionError::UnimplementedInstruction' in body
+        assert 'apply_dpp' not in body
+        assert 'stage_source' not in body
 
 
 @pytest.mark.parametrize(
