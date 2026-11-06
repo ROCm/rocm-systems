@@ -10051,7 +10051,7 @@ class CodeGenerator:
         L.append('    d->per_lane_lds_addr[lane] = source.address;')
         L.append('    d->per_lane_lds_src_bytes[lane] = source.bytes;')
         L.append(
-            '    // Out-of-range LDS DWORDs read zero; the global store still issues.'
+            '    // LDS bytes past the allocation read zero; the global store still issues.'
         )
         L.append(
             f'    lds.read(source.address, &d->store_data[lane * {stride}], source.bytes);'

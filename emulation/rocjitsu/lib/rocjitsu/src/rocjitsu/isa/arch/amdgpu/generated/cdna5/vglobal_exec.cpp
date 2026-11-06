@@ -1861,7 +1861,7 @@ void GlobalStoreAsyncFromLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     const auto source = async_lds_lane_source(inst_, wf, lane_lds_addr, 1);
     d->per_lane_lds_addr[lane] = source.address;
     d->per_lane_lds_src_bytes[lane] = source.bytes;
-    // Out-of-range LDS DWORDs read zero; the global store still issues.
+    // LDS bytes past the allocation read zero; the global store still issues.
     lds.read(source.address, &d->store_data[lane * 1], source.bytes);
   }
   set_data(std::move(d));
@@ -1895,7 +1895,7 @@ void GlobalStoreAsyncFromLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     const auto source = async_lds_lane_source(inst_, wf, lane_lds_addr, 4);
     d->per_lane_lds_addr[lane] = source.address;
     d->per_lane_lds_src_bytes[lane] = source.bytes;
-    // Out-of-range LDS DWORDs read zero; the global store still issues.
+    // LDS bytes past the allocation read zero; the global store still issues.
     lds.read(source.address, &d->store_data[lane * 4], source.bytes);
   }
   set_data(std::move(d));
@@ -1929,7 +1929,7 @@ void GlobalStoreAsyncFromLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     const auto source = async_lds_lane_source(inst_, wf, lane_lds_addr, 8);
     d->per_lane_lds_addr[lane] = source.address;
     d->per_lane_lds_src_bytes[lane] = source.bytes;
-    // Out-of-range LDS DWORDs read zero; the global store still issues.
+    // LDS bytes past the allocation read zero; the global store still issues.
     lds.read(source.address, &d->store_data[lane * 8], source.bytes);
   }
   set_data(std::move(d));
@@ -1963,7 +1963,7 @@ void GlobalStoreAsyncFromLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     const auto source = async_lds_lane_source(inst_, wf, lane_lds_addr, 16);
     d->per_lane_lds_addr[lane] = source.address;
     d->per_lane_lds_src_bytes[lane] = source.bytes;
-    // Out-of-range LDS DWORDs read zero; the global store still issues.
+    // LDS bytes past the allocation read zero; the global store still issues.
     lds.read(source.address, &d->store_data[lane * 16], source.bytes);
   }
   set_data(std::move(d));

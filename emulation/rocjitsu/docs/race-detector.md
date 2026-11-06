@@ -234,9 +234,10 @@ races. Some examples:
   loads and stores complete out of order with each other, so a partial
   `s_wait_asynccnt` retires the oldest of each kind only when the count
   guarantees it: after a load and then a store, `s_wait_asynccnt 1` retires
-  neither. A store lane reads, and is tracked for, only the whole DWORDs of its
-  source inside the wave's LDS allocation (its byte, for B8): an LDS DWORD with
-  any byte out of range reads zero (CDNA5 ISA 3.3.4.1). A copy with no active
+  neither. A store lane reads, and is tracked for, the bytes of its source
+  inside the wave's LDS allocation; bytes past it read zero. The ISA specifies
+  out-of-range LDS behavior for async loads only (CDNA5 ISA 3.3.3), so this is
+  a modeling choice that tracks every byte a store may read. A copy with no active
   lanes touches no LDS but still issues while other async copies are pending
   (3.2.2.1). Either way, the instruction occupies its `asynccnt` slot.
 

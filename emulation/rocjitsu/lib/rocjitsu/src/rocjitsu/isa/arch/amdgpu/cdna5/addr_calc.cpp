@@ -259,12 +259,12 @@ AsyncLdsSource async_lds_lane_source(const VglobalMachineInst &inst, const amdgp
   const uint64_t lds_size = wf.lds_size();
   if (relative_addr >= lds_size || access_size_bytes == 0)
     return {};
-  // An LDS DWORD with any byte out of range reads zero (CDNA5 ISA 3.3.4.1), so
-  // keep the whole DWORDs of the access, or its one byte for B8, that fit.
-  const uint32_t granule = std::min<uint32_t>(access_size_bytes, sizeof(uint32_t));
-  const uint64_t available = lds_size - relative_addr;
+  // The ISA specifies out-of-range LDS behavior for async loads only (CDNA5 ISA
+  // 3.3.3). As a modeling choice, an async store reads every byte of its source
+  // inside the allocation, and zeros past it, so a race detector tracks every
+  // byte the store may read.
   const auto bytes =
-      static_cast<uint32_t>(std::min<uint64_t>(access_size_bytes, available / granule * granule));
+      static_cast<uint32_t>(std::min<uint64_t>(access_size_bytes, lds_size - relative_addr));
   const uint64_t absolute_addr = static_cast<uint64_t>(wf.lds_base()) + relative_addr;
   if (bytes == 0 || absolute_addr + bytes > UINT32_MAX)
     return {};

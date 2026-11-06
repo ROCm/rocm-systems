@@ -1062,9 +1062,9 @@ TEST_F(TensorDmaRaceTest, AsyncStoreB128CoversTheLanesLastDword) {
   EXPECT_TRUE(ds_write(1, 12));
 }
 
-// A lane straddling the end of the allocation reads only its in-range DWORDs,
+// A lane straddling the end of the allocation reads only its in-range bytes,
 // so only those bytes are its source.
-TEST_F(TensorDmaRaceTest, AsyncStoreLaneStraddlingTheAllocationTracksItsInRangeDwords) {
+TEST_F(TensorDmaRaceTest, AsyncStoreLaneStraddlingTheAllocationTracksItsInRangeBytes) {
   async_store(0, 240, /*bytes=*/16, /*in_range_bytes=*/8);
   EXPECT_FALSE(ds_write(1, 248));
   EXPECT_TRUE(ds_write(1, 244));
@@ -1243,7 +1243,7 @@ TEST_F(TensorDmaRaceTest, ExecutedAsyncStoreOutsideTheAllocationRegistersNoLdsBy
   fixture.cu()->write_sgpr(sgprs + 1, 0);
   const uint32_t vgprs = waves[0]->vgpr_alloc().base;
   fixture.cu()->write_vgpr(vgprs, 0, 0);
-  fixture.cu()->write_vgpr(vgprs + 1, 0, 254); // Straddles the end of the allocation.
+  fixture.cu()->write_vgpr(vgprs + 1, 0, 256); // Just past the end of the allocation.
   const auto words = cdna5::build_vglobal(cdna5::kGlobalStoreAsyncFromLdsB32Vglobal,
                                           {.saddr = 0, .vsrc = 1, .vaddr = 0});
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
@@ -1253,12 +1253,14 @@ TEST_F(TensorDmaRaceTest, ExecutedAsyncStoreOutsideTheAllocationRegistersNoLdsBy
   test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), inst.release(), *waves[0]);
 
   EXPECT_FALSE(ds_write(1, lds_base + 252));
+  EXPECT_FALSE(ds_write(1, lds_base + 256));
   EXPECT_FALSE(ds_write(1, lds_base));
 }
 
-// A decoded B128 store straddling the end of the allocation reads its in-range
-// DWORDs, so a write to one of them races with it.
-TEST_F(TensorDmaRaceTest, ExecutedAsyncStoreStraddlingTheAllocationTracksItsInRangeDwords) {
+// A decoded B128 store at offset 250 of a 256-byte allocation reads bytes
+// 250-255, so a write to its last two bytes races with it, and a write ending
+// before byte 250 does not.
+TEST_F(TensorDmaRaceTest, ExecutedAsyncStoreStraddlingTheAllocationTracksItsInRangeBytes) {
   const uint32_t lds_base = fixture.cu()->allocate_lds(256);
   for (auto *wave : waves) {
     wave->set_lds_base(lds_base);
@@ -1269,7 +1271,7 @@ TEST_F(TensorDmaRaceTest, ExecutedAsyncStoreStraddlingTheAllocationTracksItsInRa
   fixture.cu()->write_sgpr(sgprs + 1, 0);
   const uint32_t vgprs = waves[0]->vgpr_alloc().base;
   fixture.cu()->write_vgpr(vgprs, 0, 0);
-  fixture.cu()->write_vgpr(vgprs + 1, 0, 248);
+  fixture.cu()->write_vgpr(vgprs + 1, 0, 250);
   const auto words = cdna5::build_vglobal(cdna5::kGlobalStoreAsyncFromLdsB128Vglobal,
                                           {.saddr = 0, .vsrc = 1, .vaddr = 0});
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
@@ -1278,7 +1280,8 @@ TEST_F(TensorDmaRaceTest, ExecutedAsyncStoreStraddlingTheAllocationTracksItsInRa
   ASSERT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[0]).succeeded());
   test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), inst.release(), *waves[0]);
 
-  EXPECT_TRUE(ds_write(1, lds_base + 252));
+  EXPECT_FALSE(ds_write(1, lds_base + 246));
+  EXPECT_TRUE(ds_write(1, lds_base + 254));
 }
 
 // A decoded async store with EXEC zero still takes an ASYNCcnt slot, so waiting

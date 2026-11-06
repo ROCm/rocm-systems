@@ -64,10 +64,10 @@ struct AsyncLdsSource {
 
 /// @brief Compute the LDS source of one async store lane.
 ///
-/// @returns the absolute address and the leading bytes of the access that lie
-/// in whole DWORDs (whole bytes for B8) inside the wave's allocation. An LDS
-/// DWORD with any byte out of range reads zero. A lane that reads no bytes
-/// returns amdgpu::kInvalidLdsAddress.
+/// @returns the absolute address and the leading bytes of the access inside
+/// the wave's allocation; bytes past it read zero. That out-of-range behavior
+/// is a modeling choice: the ISA specifies it for async loads only. A lane that
+/// reads no bytes returns amdgpu::kInvalidLdsAddress.
 AsyncLdsSource async_lds_lane_source(const VglobalMachineInst &inst, const amdgpu::Wavefront &wf,
                                      uint32_t lds_operand, uint32_t access_size_bytes);
 

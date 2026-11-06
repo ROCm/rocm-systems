@@ -383,10 +383,9 @@ TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsRecordsLdsSourceAddresses) {
   EXPECT_EQ(state->per_lane_lds_src_bytes[2], 4u);
 }
 
-// An out-of-range LDS DWORD reads zero, even when only part of it is out of
-// range, so a B32 lane straddling the end of the allocation reads no LDS bytes
-// and records the invalid address. The global store still issues for it.
-TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromOutOfRangeLdsSourceRecordsInvalidAddress) {
+// A B32 lane straddling the end of the allocation reads its in-range bytes and
+// zeros for the rest. The global store still issues for it.
+TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsStraddlingTheEndReadsItsInRangeBytes) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -400,6 +399,7 @@ TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromOutOfRangeLdsSourceRecordsInvalid
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
   cu->write_vgpr(vgpr_base, 0, 252); // Last dword of the allocation.
   cu->write_vgpr(vgpr_base, 1, 254); // Straddles the end of the allocation.
+  cu->lds().write32(wf->lds_base() + 252, 0x44332211u);
 
   auto inst =
       decode_gfx1250({0xEE190000u, 0x00000000u, 0x00000000u}, "global_store_async_from_lds_b32");
@@ -409,14 +409,18 @@ TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromOutOfRangeLdsSourceRecordsInvalid
   ASSERT_NE(state, nullptr);
   EXPECT_EQ(state->lane_mask, 0x3u);
   EXPECT_EQ(state->per_lane_lds_addr[0], wf->lds_base() + 252);
-  EXPECT_EQ(state->per_lane_lds_addr[1], amdgpu::kInvalidLdsAddress);
+  EXPECT_EQ(state->per_lane_lds_addr[1], wf->lds_base() + 254);
   EXPECT_EQ(state->per_lane_lds_src_bytes[0], 4u);
-  EXPECT_EQ(state->per_lane_lds_src_bytes[1], 0u);
+  EXPECT_EQ(state->per_lane_lds_src_bytes[1], 2u);
+  ASSERT_GE(state->store_data.size(), 8u);
+  uint32_t lane1 = UINT32_MAX;
+  std::memcpy(&lane1, &state->store_data[4], sizeof(lane1));
+  EXPECT_EQ(lane1, 0x4433u);
 }
 
-// A B128 lane straddling the end of the allocation reads its in-range DWORDs
-// and zeros for the rest: at offset 248 of 256 bytes, it reads two DWORDs.
-TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsB128StraddlingTheEndReadsItsInRangeDwords) {
+// A B128 lane straddling the end of the allocation reads its in-range bytes
+// and zeros for the rest: at offset 248 of 256 bytes, it reads eight bytes.
+TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsB128StraddlingTheEndReadsItsInRangeBytes) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -510,9 +514,9 @@ TEST(Gfx1250ExecutionTest, AsyncLdsAddressRejectsAccessOutsideAllocation) {
   EXPECT_EQ(cdna5::async_lds_lane_address(inst, *wf, UINT32_MAX - 63, 4), wf->lds_base());
 }
 
-// An async store's LDS source keeps the whole DWORDs inside the allocation; a
-// DWORD with any byte outside it reads zero. B8 reads its one byte.
-TEST(Gfx1250ExecutionTest, AsyncLdsLaneSourceKeepsInRangeDwords) {
+// An async store's LDS source is every byte of the access inside the
+// allocation; bytes past it read zero.
+TEST(Gfx1250ExecutionTest, AsyncLdsLaneSourceKeepsInRangeBytes) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -536,9 +540,9 @@ TEST(Gfx1250ExecutionTest, AsyncLdsLaneSourceKeepsInRangeDwords) {
   expect_source(240, 16, base + 240, 16);
   expect_source(248, 16, base + 248, 8);
   expect_source(252, 16, base + 252, 4);
-  expect_source(250, 16, base + 250, 4); // Unaligned: bytes 250-253 fit, 254-257 do not.
+  expect_source(250, 16, base + 250, 6);
   expect_source(252, 8, base + 252, 4);
-  expect_source(254, 4, amdgpu::kInvalidLdsAddress, 0);
+  expect_source(254, 4, base + 254, 2);
   expect_source(255, 1, base + 255, 1);
   expect_source(256, 1, amdgpu::kInvalidLdsAddress, 0);
   expect_source(UINT32_MAX, 4, amdgpu::kInvalidLdsAddress, 0);

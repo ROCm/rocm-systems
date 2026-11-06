@@ -333,8 +333,8 @@ public:
   bool lds_per_lane_addr = false;
   std::array<uint32_t, 64> per_lane_lds_addr = {};
   /// For lds_src, the leading LDS bytes each lane reads from per_lane_lds_addr:
-  /// the whole DWORDs of its source inside the allocation (one byte for B8).
-  /// Bytes past them read zero. Zero for lanes that read no LDS.
+  /// the bytes of its source inside the allocation. Bytes past them read zero.
+  /// Zero for lanes that read no LDS.
   std::array<uint8_t, 64> per_lane_lds_src_bytes = {};
   bool cluster_multicast = false;  ///< Cluster async-to-LDS load: multicast LDS writes by M0 mask.
   uint32_t cluster_mcast_mask = 0; ///< Cluster workgroup destination mask captured at issue time.
