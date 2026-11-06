@@ -50,6 +50,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -4128,6 +4129,8 @@ TEST_CASE("Unit_HRR_CaptureCrashDuringFork_Direct", "[.][hrr-direct]") {
   // The crashes are the point; core files are not.
   struct rlimit no_core{0, 0};
   (void)setrlimit(RLIMIT_CORE, &no_core);
+  // Non-dumpable too: the parent's core dump outlasts the CI watchdog (#15217).
+  (void)prctl(PR_SET_DUMPABLE, 0);
 
   HRR_HIP_CHECK(hipSetDevice(0));
   int* d = nullptr;
