@@ -397,9 +397,10 @@ static bool IbCastGpuIsGfx1250() {
   return IsArchMatch(prop.gcnArchName, "gfx1250");
 }
 
-// An explicit RCCL_IB_MAX_MSG_SIZE wins. Otherwise gfx1250 uses 256 MiB, and every
-// other arch uses the ports' max_msg_sz. The smallest non-zero port limit wins;
-// a port reporting 0 has no limit and does not pull the cap down.
+// The cap is the smallest of a positive RCCL_IB_MAX_MSG_SIZE, the gfx1250 limit
+// of 256 MiB, and the smallest non-zero port max_msg_sz. An unset value, or 0,
+// does not take part. The result is raised to at least 1 MiB and rounded down
+// to IB_WRITE_CHUNK_ALIGNMENT. The environment value can only lower the cap.
 static void IbCastInitMaxPostSendBytes() {
   constexpr uint32_t kGfx1250Cap = 256u * 1024u * 1024u;
   constexpr uint32_t kMinCap = 1024u * 1024u;
@@ -414,8 +415,8 @@ static void IbCastInitMaxPostSendBytes() {
     IbCastMaxPostSendBytes = std::min(IbCastMaxPostSendBytes, kGfx1250Cap);
   }
   for (int i = 0; i < IbCastNDevs; i++) {
-      uint32_t portMax = IbCastDevs[i].portAttr.max_msg_sz;
-      if (portMax != 0 && portMax < IbCastMaxPostSendBytes) IbCastMaxPostSendBytes = portMax;
+    uint32_t portMax = IbCastDevs[i].portAttr.max_msg_sz;
+    if (portMax != 0 && portMax < IbCastMaxPostSendBytes) IbCastMaxPostSendBytes = portMax;
   }
   // The floor covers every source, so no data post splits below 1 MiB.
   IbCastMaxPostSendBytes = std::max(IbCastMaxPostSendBytes, kMinCap);

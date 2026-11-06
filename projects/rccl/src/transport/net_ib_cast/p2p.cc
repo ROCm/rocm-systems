@@ -110,7 +110,6 @@ static inline int IbCastGetNumWqeSplits(const struct ncclIbSendComm* comm, int n
   return nSplit;
 }
 
-
 static inline ncclResult_t IbCastPostDataWithinCap(struct ncclIbSendComm* comm, struct ibv_qp* qp, int nreqs,
                                             struct ibv_send_wr** badWr) {
   const size_t nSplit = IbCastGetNumWqeSplits(comm, nreqs);
