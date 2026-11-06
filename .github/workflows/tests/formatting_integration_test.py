@@ -28,22 +28,27 @@ class FormattingIntegrationTests(unittest.TestCase):
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": os.devnull,
         }
-        # Temporary clones share immutable objects; neither fixtures nor hook
-        # fixes can modify the source checkout.
+        # The shared source object store can be partial. Retain promisor metadata
+        # so sparse commits accept objects outside the materialized inputs.
+        # Fixtures and hook fixes are confined to the temporary checkout.
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory) / "repository"
 
             def git(*arguments: str, input: str | None = None) -> str:
-                return subprocess.check_output(
+                result = subprocess.run(
                     ["git", *arguments],
                     cwd=repository if repository.exists() else REPOSITORY,
                     input=input,
                     text=True,
                     env=environment,
-                    stderr=subprocess.PIPE,
-                ).strip()
+                    capture_output=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                return result.stdout.strip()
 
             git("clone", "--shared", "--no-checkout", str(REPOSITORY), str(repository))
+            git("config", "remote.origin.promisor", "true")
+            git("config", "remote.origin.partialclonefilter", "blob:none")
             git("config", "user.name", "Formatting Test")
             git("config", "user.email", "formatting@example.com")
             git("sparse-checkout", "init", "--cone")
