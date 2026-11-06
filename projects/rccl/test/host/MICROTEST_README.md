@@ -364,9 +364,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroGinHostProxy`** — `gin/gin_host_proxy.cc` and the three
   `gin/proxy_gpucontext/` writers (`GIN_HOST_PROXY_CC_PATH`, `GPUCONTEXT{,_V1,_V2}_CC_PATH`,
   from `gin/gin-host-proxy-test.cc`); suites `GinHostProxy*`, against the scripted RMA plugin in
-  `fakes/rma_vtable_fake.h`. Its own binary:
-  `gin-plugin-init-test.cc` in `rccl-UnitTestsMicro` defines `ncclGinProxy` and
-  `ncclGinProxyVersion`. See `test_categories_micro_gin.yaml`.
+  `fakes/rma_vtable_fake.h`. See `test_categories_micro_gin.yaml`.
 - **`rccl-UnitTestsMicroWarpSpeed`** — `allgatherv_sched.cc` +
   `symmetric_sched.cc` (via `ALLGATHERV_SCHED_CC_PATH`/`SYMMETRIC_SCHED_CC_PATH`,
   both from `scheduler-test.cc`); suite `SchedulerMicrotest.*`. Its own binary,
@@ -465,9 +463,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   tables, stride validation, failure cleanup) and free, finalize, window
   registration, and last-error queries, plus the proxy-thread CPU affinity pin.
   A scripted `ncclGin_t` in the test file stands in for the plugin, so every
-  failure arm is reachable by failing a chosen call. Its own binary, not
-  sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
-  `ncclParamGinEnable` there. See `test_categories_micro_gin.yaml`.
+  failure arm is reachable by failing a chosen call. See
+  `test_categories_micro_gin.yaml`.
   Every line and every function in `gin_host.cc` is covered (100% of both);
   branch coverage is 74%. The residue is in three groups, none of them a
   source-level decision the tests skip:
@@ -969,7 +966,7 @@ symbol.
 | rocSHMEM host API | `fakes/rocshmem_fakes.cc` |
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroTransportNet`) | `fakes/transport_p2p_fakes.cc` |
 | `src/transport/p2p.cc` registration entry points, macro-renamed in one unit via `fakes/transport_p2p_reg_seam.h` (`rccl-UnitTestsMicro`, which compiles the real file) | `fakes/transport_p2p_reg_fakes.cc` |
-| `src/plugin/plugin_open.cc` library path table and `src/plugin/net/net_v*.cc` getters (targets that do not compile the real files) | `fakes/plugin_stubs.cc` |
+| `src/plugin/plugin_open.cc` library registry and `src/plugin/net/net_v*.cc` getters (targets that do not compile the real files) | `fakes/plugin_stubs.cc` |
 | selected entry points from `src/{transport,proxy}.cc`, `src/transport/{generic,coll_net,net,nvls}.cc`, `src/{graph/paths,tuning/tuning,plugin/net}.cc` (targets that do not compile the real files) | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
 | libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`; files, `ioctl`, `atexit`, clock, aligned allocation, thread start and sleep for `transport/net_telemetry.cc`; `opendir` for `misc/gdr_peermem.cc`; `open`/`read`/`close` for `transport/net_socket.cc`; `clock_gettime` for `transport/net_ib/wqe_lat_mon.cc` and `transport/net_ib_cast/scheduler.cc`; the OS surface of `os/linux*.cc` and `misc/{socket,signals}.cc`) | `fakes/libc_fakes.cc` |

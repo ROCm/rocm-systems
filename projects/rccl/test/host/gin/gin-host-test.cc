@@ -10,11 +10,8 @@
 // suites are not listed here, so there is one place to keep current rather than
 // a copy of the file's own table of contents.
 //
-// Own binary (rccl-UnitTestsMicroGinHost): gin-plugin-init-test.cc already defines
-// ncclParamGinEnable in rccl-UnitTestsMicro, and gin_fakes.cc supplies
-// ncclGinQueryLastError to rccl-UnitTestsMicroInit. This TU #includes the hipified
-// gin_host.cc (GIN_HOST_CC_PATH) so file-scope helpers and ncclGinProgress are
-// reachable. No GPU, no librccl.so, no network.
+// This TU #includes the hipified gin_host.cc (GIN_HOST_CC_PATH) so file-scope
+// helpers and ncclGinProgress are reachable. No GPU, no librccl.so, no network.
 
 #include <gtest/gtest.h>
 #include <gtest/gtest-spi.h>

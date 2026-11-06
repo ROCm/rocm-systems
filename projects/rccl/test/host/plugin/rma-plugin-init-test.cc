@@ -15,7 +15,7 @@
 // GIN plugin path covered by gin-plugin-init-test.cc.
 //
 // ncclRmaPluginInit is file-static, so this TU #includes the hipified plugin
-// rma.cc (RMA_PLUGIN_CC_PATH), the standard rccl-UnitTestsMicro pattern. A
+// rma.cc (RMA_PLUGIN_CC_PATH), the standard micro-test pattern. A
 // scriptable ncclRma_t vtable stands in for the plugin; no GPU, no librccl.so,
 // no network.
 
@@ -37,8 +37,7 @@
 // ncclRmaPluginInit directly and never exercise these, but ncclRmaInit (compiled
 // into this TU) references them through initPluginLibsOnceFunc / ncclRmaPluginLoad,
 // so they must resolve at link time. ncclPluginLibPaths, ncclClosePluginLib,
-// ncclGetNetPluginLib and ncclGetPluginLibName are owned by gin-plugin-init-test.cc
-// in the same binary, so they are deliberately not redefined here.
+// ncclGetNetPluginLib and ncclGetPluginLibName come from fakes/plugin_stubs.cc.
 ncclRma_t* getNcclRma_v16(void*) { return nullptr; }
 ncclRma_t* getNcclRma_v15(void*) { return nullptr; }
 ncclRma_t* getNcclRma_v14(void*) { return nullptr; }

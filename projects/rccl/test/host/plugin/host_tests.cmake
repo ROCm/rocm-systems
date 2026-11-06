@@ -47,6 +47,7 @@ endmacro()
 
 rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginGinPluginInit gin-plugin-init-test.cc
   SOURCES
+    fakes/env_fakes.cc
     fakes/nccl_fakes.cc)
 
 rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginNet plugin-net-test.cc
@@ -72,7 +73,9 @@ rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginProfiler profiler-test.cc
 
 rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginRmaPluginInit rma-plugin-init-test.cc
   SOURCES
-    fakes/nccl_fakes.cc)
+    fakes/env_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/plugin_stubs.cc)
 
 rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginNetV6 net/net-v6-test.cc
   SOURCES
