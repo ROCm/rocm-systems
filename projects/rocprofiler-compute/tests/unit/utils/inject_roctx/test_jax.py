@@ -75,6 +75,30 @@ def reset_jax_backend_state():
     jax_backend._jax_thread_local.depth = 0
 
 
+def install_jax_backend(
+    monkeypatch, python_tier=True, jax_file="/tmp/fake_jax/__init__.py"
+):
+    reset_jax_backend_state()
+    jax_mod, compiled_type, primitive_type = install_fake_jax(
+        monkeypatch, jax_file=jax_file
+    )
+    monkeypatch.setattr(core, "ensure_python_tier", lambda: python_tier)
+    monkeypatch.setattr(core, "add_framework_root", lambda path: None)
+    jax_backend.JaxBackend().install()
+    return jax_mod, compiled_type, primitive_type
+
+
+def record_scopes(monkeypatch):
+    pushes = []
+
+    def push(marker, location, backend="", args="n/a"):
+        pushes.append({"marker": marker, "backend": backend, "location": location})
+
+    monkeypatch.setattr(core, "_push_scope", push)
+    monkeypatch.setattr(core, "_pop_scope", lambda: None)
+    return pushes
+
+
 def test_jax_backend_skips_when_jax_missing(monkeypatch):
     warnings = []
 
@@ -110,3 +134,17 @@ def test_jax_backend_skips_when_python_tier_unavailable(monkeypatch):
     assert warnings
     assert warnings[0][0] == "ml api trace"
     assert "ROCTX bindings not found" in warnings[0][1]
+
+
+def test_jax_jit_call_emits_jit_marker(monkeypatch):
+    jax_mod, compiled_type, _primitive_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+
+    def train_step(value):
+        return value
+
+    compiled = jax_mod.jit(train_step)
+    assert isinstance(compiled, compiled_type)
+    assert compiled(1) == 1
+    assert [item["marker"] for item in pushes] == ["jax.jit.train_step"]
+    assert pushes[0]["backend"] == "jax"
