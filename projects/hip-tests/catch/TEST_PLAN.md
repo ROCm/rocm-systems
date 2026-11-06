@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 636 | 636 | 0 |
-| **total** | **636** | **636** | **0** |
+| `contract` | 638 | 638 | 0 |
+| **total** | **638** | **638** | **0** |
 
 ## Tier: `contract`
 
@@ -789,10 +789,12 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemAdviseV2_HipMemAdviseV2_SetReadMostly_IsAcceptedOrUnsupported` | hipMemAdvise_v2 | the location-based set-read-mostly hint on managed memory is accepted or reported unsupported |
 | `Contract_MemAdviseV2_HipMemPrefetchAsyncV2_PrefetchAsync_IsAcceptedOrUnsupported` | hipMemPrefetchAsync_v2 | a location-based prefetch either completes after stream sync or is reported unsupported |
 
-### `mem_batch_copy` (4 cases)
+### `mem_batch_copy` (6 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_MemBatchCopy_HipExtMemcpyBatchAsync_MalformedWaitSignal_ReturnsInvalidValue` | hipExtMemcpyBatchAsync | a malformed wait or signal entry (NULL or misaligned address, unknown op, nonzero reserved field, nonzero fields with op None) returns hipErrorInvalidValue on any device |
+| `Contract_MemBatchCopy_HipExtMemcpyBatchAsync_NoneWaitSignal_RoundTripBytes` | hipExtMemcpyBatchAsync | zero-initialized wait and signal entries (op None) behave like null arrays: the copy runs and delivers the source bytes (or reports unsupported) |
 | `Contract_MemBatchCopy_HipExtMemcpyBatchAsync_TwoOps_RoundTripBytes` | hipExtMemcpyBatchAsync | a two-op batch with all extended parameters null (no asymmetric swap or wait/signal) and default attributes delivers each source to its destination after synchronize (or reports unsupported) |
 | `Contract_MemBatchCopy_HipMemcpyBatchAsync_NullDestination_IsRejected` | hipMemcpyBatchAsync | a batch with a null destination never returns hipSuccess (or reports unsupported) |
 | `Contract_MemBatchCopy_HipMemcpyBatchAsync_TwoOps_RoundTripBytes` | hipMemcpyBatchAsync | a two-op batch delivers each source to its matching destination after synchronize (or reports unsupported) |

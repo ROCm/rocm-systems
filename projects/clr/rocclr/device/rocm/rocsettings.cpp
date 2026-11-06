@@ -168,6 +168,8 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
       (gfxipMajor == 12 && gfxipMinor >= 5)) {
     sdma_swap_supported_ = true;
     sdma_swap_alignment_ = (gfxipMajor == 12) ? 32 : 64;
+    // Batch waits/signals are enabled on the same ASICs as swap.
+    sdma_wait_signal_supported_ = true;
   }
 
   setKernelArgImpl(isa, pcieStoresNeedFlush);
@@ -216,6 +218,9 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     sdma_indirect_supported_ = true;
     sdma_indirect_max_size_ = 0x3fffffff;  // ROCr MaxSingleLinearCopySize
   }
+
+  // Older SDMA polls compare one dword.
+  sdma_poll64_supported_ = (gfxipMajor == 12 && gfxipMinor >= 5);
 
   sdma_asymmetric_swap_supported_ = false;
 

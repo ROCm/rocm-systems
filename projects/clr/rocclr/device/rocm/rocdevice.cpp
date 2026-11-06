@@ -224,10 +224,12 @@ void Device::setupCpuAgent() {
 void Device::checkAtomicSupport() {
   std::vector<amd::Device::LinkAttrType> link_attrs;
   link_attrs.push_back(std::make_pair(LinkAttribute::kLinkAtomicSupport, 0));
+  link_attrs.push_back(std::make_pair(LinkAttribute::kLinkAtomic64Support, 0));
   if (findLinkInfo(cpu_agent_info_->fine_grain_pool, &link_attrs)) {
     if (link_attrs[0].second == 1) {
       info_.pcie_atomics_ = true;
     }
+    info_.pcie_atomics64_ = link_attrs[1].second == 1;
   }
 }
 
@@ -4069,7 +4071,8 @@ bool Device::findLinkInfo(const hsa_amd_memory_pool_t& pool,
           link_attr.second = 0;
           break;
         }
-        case kLinkAtomicSupport: {
+        case kLinkAtomicSupport:
+        case kLinkAtomic64Support: {
           // atomic support if its on the same agent
           link_attr.second = 1;
           break;
@@ -4125,6 +4128,10 @@ bool Device::findLinkInfo(const hsa_amd_memory_pool_t& pool,
         // if either of the atomic is supported
         link_attr.second = static_cast<int32_t>(link_info[0].atomic_support_64bit ||
                                                 link_info[0].atomic_support_32bit);
+        break;
+      }
+      case kLinkAtomic64Support: {
+        link_attr.second = static_cast<int32_t>(link_info[0].atomic_support_64bit);
         break;
       }
       default: {

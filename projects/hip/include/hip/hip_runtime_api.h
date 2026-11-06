@@ -6473,8 +6473,10 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
  * @param [in] sizesDst    - Swap entries: bytes copied from dsts[i] to srcs[i],
  *                            0 < sizesDst[i] <= sizes[i]. Must be 0 for non-swap entries.
  *                            NULL = symmetric.
- * @param [in] waits       - Reserved for future use. Must be NULL.
- * @param [in] signals     - Reserved for future use. Must be NULL.
+ * @param [in] waits       - Optional array of count waits; copy i starts once waits[i] is
+ *                            satisfied. NULL = no waits.
+ * @param [in] signals     - Optional array of count signals; signals[i] is applied after
+ *                            copy i completes. NULL = no signals.
  * @param [in] count       - Number of copy operations.
  * @param [in] attrs       - Array of hipExtMemcpyAttributes.
  * @param [in] attrsIdxs   - Array mapping attributes to copy index ranges.
@@ -6483,6 +6485,18 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported,
  *          #hipErrorInvalidResourceHandle, #hipErrorStreamCaptureUnsupported
+ *
+ * A wait or signal entry returns #hipErrorInvalidValue if it is malformed (unknown op,
+ * nonzero reserved field, NULL or misaligned address, address outside a HIP allocation).
+ * It returns #hipErrorNotSupported if the device has no copy-engine waits/signals, for a
+ * signal without 64-bit PCIe atomics, for a masked compare spanning both 32-bit halves
+ * (including mask 0) without 64-bit polls, for copies that don't run on a copy engine
+ * (host-to-host, hipMemcpyFlagExtPreferComputeEngine), and for asymmetric swaps the device
+ * splits into two copies.
+ *
+ * @note A wait may only depend on work enqueued before it, including lower-index entries
+ *       of the same batch. Waiting on later work can deadlock, because streams and batch
+ *       entries share copy-engine queues.
  *
  * @warning This API is marked as Beta. While this feature is complete, it can
  *          change and might have outstanding issues.

@@ -43,6 +43,7 @@
 #include "core/inc/amd_gpu_agent.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cinttypes>
 #include <climits>
@@ -1173,6 +1174,8 @@ void GpuAgent::ReleaseResources() {
         assert(destroy_st == HSA_STATUS_SUCCESS);
       }
     }
+    // SDMA queues are gone; free wait/signal chains while the signal pool is alive.
+    RetireWaitSignalChains(true);
 
     for (int i = 0; i < QueueCount; i++)
       queues_[i].reset();
@@ -1407,25 +1410,14 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
-                               const void* src, core::Agent& src_agent,
-                               size_t size,
-                               std::vector<core::Signal*>& dep_signals,
-                               core::Signal& out_signal,
-                               int engine_offset,
-                               bool force_copy_on_sdma) {
-  // At this point it is guaranteed that one of
-  // the two devices is a GPU, potentially both
-  assert(((src_agent.device_type() == core::Agent::kAmdGpuDevice) ||
-          (dst_agent.device_type() == core::Agent::kAmdGpuDevice)) &&
-         ("Both devices are CPU agents which is not expected"));
-
+hsa_status_t GpuAgent::ResolveDmaEngine(core::Agent& dst_agent, core::Agent& src_agent,
+                                        bool force_copy_on_sdma, int* engine_offset) {
   // engine_offset is an index into blits_, not an SDMA engine count. blits_ is
   // always sized DefaultBlitCount + num_p2p_engines_, so BlitHostToDev(1) and
   // BlitDevToHost(2) are valid everywhere, regardless of how many SDMA engines
   // it has. Bounding by the engine count instead rejected BlitDevToHost
   // whenever NumSdmaEngines == 1 (e.g. gfx1151).
-  if (engine_offset < 0 || engine_offset >= static_cast<int>(blits_.size())) {
+  if (*engine_offset < 0 || *engine_offset >= static_cast<int>(blits_.size())) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -1443,7 +1435,7 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
     // we still want to handle force Blit Kernels in this function in case other libraries
     // decide to use DmaCopyOnEngine for P2P copies
 
-    engine_offset = BlitDevToDev;
+    *engine_offset = BlitDevToDev;
   } else {
     bool use_p2p_engines = is_p2p && dst_agent.HiveId() && src_agent.HiveId() == dst_agent.HiveId() &&
                          num_p2p_engines_;
@@ -1462,14 +1454,30 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
     bool limit_h2d_blit = supported_isas()[0]->GetVersion() == core::Isa::Version(9, 0, 10);
 
     // Ensure engine selection is within proper range based on transfer type
-    if ((p2p_engine_is_mandatory && !rec_sdma_eng_override_ && engine_offset <= num_h2d_d2h_engines_) ||
-          (!is_h2d_blit && !is_same_gpu && limit_h2d_blit &&
-            engine_offset == BlitHostToDev)) {
+    if ((p2p_engine_is_mandatory && !rec_sdma_eng_override_ &&
+         *engine_offset <= num_h2d_d2h_engines_) ||
+        (!is_h2d_blit && !is_same_gpu && limit_h2d_blit && *engine_offset == BlitHostToDev)) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
-    engine_offset = is_same_gpu && !force_copy_on_sdma ? BlitDevToDev : engine_offset;
+    *engine_offset = is_same_gpu && !force_copy_on_sdma ? BlitDevToDev : *engine_offset;
   }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent, const void* src,
+                                       core::Agent& src_agent, size_t size,
+                                       std::vector<core::Signal*>& dep_signals,
+                                       core::Signal& out_signal, int engine_offset,
+                                       bool force_copy_on_sdma) {
+  // At this point it is guaranteed that one of
+  // the two devices is a GPU, potentially both
+  assert(((src_agent.device_type() == core::Agent::kAmdGpuDevice) ||
+          (dst_agent.device_type() == core::Agent::kAmdGpuDevice)) &&
+         ("Both devices are CPU agents which is not expected"));
+
+  hsa_status_t status = ResolveDmaEngine(dst_agent, src_agent, force_copy_on_sdma, &engine_offset);
+  if (status != HSA_STATUS_SUCCESS) return status;
 
   SetCopyRequestRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
@@ -2208,6 +2216,24 @@ hsa_status_t GpuAgent::DmaCopyBatchFallback(
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 }
 
+void GpuAgent::RetireWaitSignalChains(bool all) {
+  std::lock_guard<std::mutex> lock(ws_retire_lock_);
+  // op_done may still carry a fan-out cleanup handler after chain_done completes.
+  auto done = [](const std::array<core::Signal*, 3>& c) {
+    return c[2]->LoadRelaxed() == 0 && !c[1]->IsRetained();
+  };
+  // A pending user wait must not hold back chains that completed after it.
+  for (auto it = ws_retire_.begin(); it != ws_retire_.end();) {
+    if (!all && !done(*it)) {
+      ++it;
+      continue;
+    }
+    for (core::Signal* s : *it)
+      if (s) s->DestroySignal();
+    it = ws_retire_.erase(it);
+  }
+}
+
 hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
                                     uint32_t num_ops,
                                     std::vector<core::Signal*>& dep_signals) {
@@ -2215,10 +2241,10 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
     return HSA_STATUS_SUCCESS;
   }
 
+  bool retired = false;
   for (uint32_t i = 0; i < num_ops; ++i) {
-    const auto& op = ops[i];
-    core::Signal* out_signal_obj = core::Signal::Convert(op.completion_signal);
-    core::Signal& out_signal = *out_signal_obj;
+    const bool has_wait = ops[i].wait.function != HSA_AMD_MEMORY_COPY_WAIT_ALWAYS;
+    const bool has_signal = ops[i].signal.operation != HSA_AMD_MEMORY_COPY_SIGNAL_NONE;
 
     hsa_status_t status;
 
@@ -2237,15 +2263,91 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
     // that finds none would get a shader blit and have every RECT op rejected, though the op
     // would not use that queue. DmaCopyRect checks the engine it does use.
     const bool sdma_off =
-        (op.type == HSA_AMD_MEMORY_COPY_OP_RECT)
+        (ops[i].type == HSA_AMD_MEMORY_COPY_OP_RECT)
             ? core::Runtime::runtime_singleton_->flag().enable_sdma() == Flag::SDMA_DISABLE
             : !GetBlitObject(BlitHostToDev)->isSDMA();
     if (sdma_off) {
-      status = DmaCopyBatchFallback(op, dep_signals);
+      // Shader blits cannot poll or signal user memory.
+      if (has_wait || has_signal) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      status = DmaCopyBatchFallback(ops[i], dep_signals);
       if (status != HSA_STATUS_SUCCESS)
         return status;
       continue;
     }
+
+    hsa_amd_memory_copy_op_t op = ops[i];
+    std::vector<core::Signal*> wait_deps, signal_deps;
+    std::vector<core::Signal*>* op_deps = &dep_signals;
+    std::array<core::Signal*, 3> chain{};  // wait_done, op_done, chain_done
+    // Plain ops: the copy helpers hold the refcount themselves.
+    const bool has_ws = has_wait || has_signal;
+    if (has_ws) SetCopyRequestRefCount(true);
+    MAKE_SCOPE_GUARD([&]() {
+      if (has_ws) SetCopyRequestRefCount(false);
+    });
+    // Wait/signal commands go on the H2D engine; only probe it when needed (see RECT above).
+    BlitSdmaBase* ws_blit = nullptr;
+    if (has_ws) {
+      if (!retired) {
+        RetireWaitSignalChains(false);
+        retired = true;
+      }
+      lazy_ptr<core::Blit>& h2d = GetBlitObject(BlitHostToDev);
+      if (!h2d->isSDMA()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      ws_blit = static_cast<BlitSdmaBase*>((*h2d).get());
+      if (!ws_blit->MemoryWaitSignalSupported(has_signal)) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    // Single linear copy: wait, copy and signal go in one submission on the copy's engine.
+    if (has_ws && op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR && op.num_entries == 0) {
+      core::Agent* dst_agent = core::Agent::Convert(op.dst_agent);
+      core::Agent* src_agent = core::Agent::Convert(op.src_agent);
+      uint32_t rec_mask = 0;
+      DmaPreferredEngine(*dst_agent, *src_agent, &rec_mask);
+      int engine_offset = NthSdmaEngine(rec_mask, 0);
+      if (!engine_offset) {
+        bool is_h2d = (src_agent->device_type() == core::Agent::kAmdCpuDevice &&
+                       dst_agent->device_type() == core::Agent::kAmdGpuDevice);
+        engine_offset = is_h2d ? BlitHostToDev : BlitDevToHost;
+      }
+      status = ResolveDmaEngine(*dst_agent, *src_agent, true, &engine_offset);
+      if (status != HSA_STATUS_SUCCESS) return status;
+      lazy_ptr<core::Blit>& blit = GetBlitObject(engine_offset);
+      if (!blit->isSDMA()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      core::Signal& out_signal = *core::Signal::Convert(op.completion_signal);
+      if (profiling_enabled())
+        out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
+      status = static_cast<BlitSdmaBase*>((*blit).get())
+                   ->SubmitLinearCopyWaitSignal(op.dst, op.src, op.size, op.wait.addr,
+                                                op.wait.function, op.wait.value, op.wait.mask,
+                                                op.signal.addr, op.signal.operation, op.signal.data,
+                                                dep_signals, out_signal);
+      if (status != HSA_STATUS_SUCCESS) return status;
+      continue;
+    }
+
+    // Other ops: user wait/signal are standalone SDMA commands chained by internal
+    // signals: deps -> wait -> op -> signal -> completion_signal -> chain_done.
+    if (has_ws) {
+      core::unique_signal_ptr wait_done(has_wait ? new core::DefaultSignal(1) : nullptr);
+      core::unique_signal_ptr op_done(new core::DefaultSignal(1));
+      core::unique_signal_ptr chain_done(new core::DefaultSignal(1));
+      if ((wait_done && !wait_done->IsValid()) || !op_done->IsValid() || !chain_done->IsValid())
+        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      wait_deps.reserve(1);
+      signal_deps.reserve(1);
+      // Submitted commands may still touch the chain; from here it is leaked on any failure.
+      chain = {wait_done.release(), op_done.release(), chain_done.release()};
+      op.completion_signal = core::Signal::Convert(chain[1]);
+    }
+    if (has_wait) {
+      status = ws_blit->SubmitMemoryWait(op.wait.addr, op.wait.function, op.wait.value,
+                                         op.wait.mask, dep_signals, *chain[0]);
+      if (status != HSA_STATUS_SUCCESS) return status;
+      wait_deps.push_back(chain[0]);
+      op_deps = &wait_deps;
+    }
+    core::Signal& out_signal = *core::Signal::Convert(op.completion_signal);
 
     switch (op.type) {
     case HSA_AMD_MEMORY_COPY_OP_LINEAR: {
@@ -2265,15 +2367,12 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
           }
         }
         if (all_b2b) {
-          status = DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR, out_signal,
-                                   dep_signals, op.num_entries,
-                                   const_cast<const void* const*>(op.src_list),
-                                   op.dst_list, nullptr, op.size_list,
-                                   BlitHostToDev, 1);
+          status = DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR, out_signal, *op_deps,
+                                   op.num_entries, const_cast<const void* const*>(op.src_list),
+                                   op.dst_list, nullptr, op.size_list, BlitHostToDev, 1);
         } else {
-          status = DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR, out_signal,
-                                   dep_signals, op.num_entries,
-                                   const_cast<const void* const*>(op.src_list),
+          status = DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR, out_signal, *op_deps,
+                                   op.num_entries, const_cast<const void* const*>(op.src_list),
                                    op.dst_list, op.dst_agent_list, op.size_list);
         }
       } else {
@@ -2287,21 +2386,21 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
                          dst_agent->device_type() == core::Agent::kAmdGpuDevice);
           engine_offset = is_h2d ? BlitHostToDev : BlitDevToHost;
         }
-        status = DmaCopyOnEngine(op.dst, *dst_agent, op.src, *src_agent, op.size,
-                                 dep_signals, out_signal, engine_offset, true);
+        status = DmaCopyOnEngine(op.dst, *dst_agent, op.src, *src_agent, op.size, *op_deps,
+                                 out_signal, engine_offset, true);
       }
       break;
     }
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
-      status = DmaCopyBroadcast(op, dep_signals);
+      status = DmaCopyBroadcast(op, *op_deps);
       break;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
-      status = DmaCopySwap(op, dep_signals);
+      status = DmaCopySwap(op, *op_deps);
       break;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
-      status = DmaCopyIndirect(op, dep_signals);
+      status = DmaCopyIndirect(op, *op_deps);
       break;
     case HSA_AMD_MEMORY_COPY_OP_RECT: {
       const bool from_host =
@@ -2319,16 +2418,34 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
         }
       }
       status = DmaCopyRect(op.rect_src, op.rect_dst, op.range_list, op.num_entries,
-                           from_host ? hsaHostToDevice : hsaDeviceToDevice, dep_signals,
+                           from_host ? hsaHostToDevice : hsaDeviceToDevice, *op_deps,
                            out_signal, peer);
       break;
     }
     default:
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      status = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      break;
     }
 
-    if (status != HSA_STATUS_SUCCESS)
-      return status;
+    // Fan-out ops may have partially submitted; the chain is leaked.
+    if (status != HSA_STATUS_SUCCESS) return status;
+    if (!has_ws) continue;
+
+    signal_deps.push_back(chain[1]);
+    core::Signal& user_signal = *core::Signal::Convert(ops[i].completion_signal);
+    if (profiling_enabled())
+      user_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
+    status = ws_blit->SubmitMemorySignal(op.signal.addr, op.signal.operation, op.signal.data,
+                                         signal_deps, user_signal, chain[1]);
+    if (status != HSA_STATUS_SUCCESS) return status;
+
+    // completion_signal may be recycled by the caller, so retire the chain on a
+    // fence we own, ordered after the signal command on the same queue.
+    std::vector<core::Signal*> no_deps, gang_signals;
+    status = ws_blit->SubmitCommand(nullptr, 0, 0, no_deps, *chain[2], gang_signals);
+    if (status != HSA_STATUS_SUCCESS) return status;
+    std::lock_guard<std::mutex> lock(ws_retire_lock_);
+    ws_retire_.push_back(chain);
   }
 
   return HSA_STATUS_SUCCESS;
