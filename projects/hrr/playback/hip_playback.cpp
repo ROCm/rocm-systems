@@ -3342,12 +3342,12 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 // An archive can record a host allocation again at an address that still holds
 // one: a second pass replays the same events, and a crafted archive can repeat
 // the address without a free. The entry being replaced keeps a live pinned
-// buffer, so free it, and give its charge back, before the new one is charged.
-// Otherwise the old buffer would stay allocated with no charge against it.
+// buffer, so release it before the new one is charged: a hipHostMalloc buffer
+// is freed and its charge given back; a hipHostRegister block is unregistered
+// and kept in host_reg_blocks for the next registration at this address.
 // A buffer the runtime refuses to release (hipHostFree or hipHostUnregister
-// fails, as it does under a capture on another thread) is left alone, buffer
-// and charge both: the charge goes back only once the runtime has let go.
-// Freeing a registration would leave it aimed at freed heap.
+// fails, as it does under a capture on another thread) is left alone and
+// keeps its charge: the charge goes back only once the runtime has let go.
 static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
     std::unique_lock host_free(ctx.host_free_mu);
     void* host_ptr = nullptr;
@@ -3374,13 +3374,11 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
         return;
     }
     void* buf = reg_buf ? reg_buf : host_ptr;
-    if (hipHostUnregister(buf) != hipSuccess) return;
-    ctx.host_budget.release(size);
-#ifdef _WIN32
-    _aligned_free(buf);
-#else
-    free(buf);
-#endif
+    if (hipHostUnregister(buf) == hipSuccess) return;
+    // Still registered: the next registration here gets a new block.
+    std::unique_lock lk(ctx.map_mutex);
+    auto& block = ctx.host_reg_blocks[rec];
+    if (block.cur.get() == buf) block.retired.push_back(std::move(block.cur));
 }
 
 hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
@@ -3450,11 +3448,12 @@ hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl) {
 // Manual playback: hipHostRegister / hipHostUnregister
 // ---------------------------------------------------------------------------
 // hipHostRegister recorded a snapshot of the host memory as a blob.
-// At replay we allocate a fresh host buffer (malloc), restore the blob
-// into it, call hipHostRegister on it, and track the (recorded -> live)
+// At replay we take the recorded address's block in host_reg_blocks, restore
+// the blob into it, call hipHostRegister on it, and track the (recorded -> live)
 // mapping so kernel-arg pointer translations work. A registration recorded
 // without its blob is refused.
-// hipHostUnregister unregisters, frees the backing buffer, and removes the entry.
+// hipHostUnregister unregisters and removes the entry. The block stays until
+// the context is destroyed, since a graph node may still point into it.
 
 hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostRegister*>(pl);
@@ -3463,20 +3462,9 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
     free_replaced_host_alloc(ctx, a->hostPtr);
     if (host_contents_left_out("hipHostRegister", sz, a->blob_hash_lo, a->blob_hash_hi))
         return hipErrorNotFound;
-    if (!ctx.charge_host(sz, "hipHostRegister backing buffer"))
-        return hipErrorMemoryAllocation;
-
-    // Allocate backing host buffer aligned to 64 bytes (page-register friendly).
-    void* buf = nullptr;
-#ifdef _WIN32
-    buf = _aligned_malloc(sz, 64);
-#else
-    if (posix_memalign(&buf, 64, sz) != 0) buf = nullptr;
-#endif
-    if (!buf) {
-        ctx.host_budget.release(sz);
-        return hipErrorMemoryAllocation;
-    }
+    void* buf = ctx.host_block(ctx.host_reg_blocks, a->hostPtr, sz,
+                               "hipHostRegister backing buffer");
+    if (!buf) return hipErrorMemoryAllocation;
 
     // Restore snapshot into the buffer.
     size_t blob_sz = 0;
@@ -3488,11 +3476,6 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
     if (!blob && ctx.fatal_error.load(std::memory_order_acquire)) {
         // The blob was refused (cap or allocation), not merely absent:
         // do not register zeros in its place.
-#ifdef _WIN32
-        _aligned_free(buf);
-#else
-        free(buf);
-#endif
         return hipErrorUnknown;
     }
 
@@ -3501,13 +3484,6 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
         ctx.record_alloc(a->hostPtr, buf, sz, AllocKind::HostRegister);
         std::unique_lock lk(ctx.map_mutex);
         ctx.host_reg_bufs[a->hostPtr] = buf;
-    } else {
-        ctx.host_budget.release(sz);
-#ifdef _WIN32
-        _aligned_free(buf);
-#else
-        free(buf);
-#endif
     }
     return r;
 }
@@ -3516,9 +3492,8 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
     std::unique_lock host_free(ctx.host_free_mu);
     const auto* a = reinterpret_cast<const hrr_args_hipHostUnregister*>(pl);
 
-    // Leave the maps and the backing buffer alone until the runtime call
-    // succeeds. A failed unregister did not release the registration, so
-    // freeing the buffer would leave alloc_map aimed at freed heap.
+    // Leave the maps alone until the runtime call succeeds: a failed
+    // unregister did not release the registration.
     void* buf = nullptr;
     {
         std::shared_lock lk(ctx.map_mutex);
@@ -3537,13 +3512,6 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
         ctx.host_reg_bufs.erase(a->hostPtr);
     }
     ctx.remove_alloc(a->hostPtr);
-    if (buf) {
-#ifdef _WIN32
-        _aligned_free(buf);
-#else
-        free(buf);
-#endif
-    }
     return r;
 }
 
