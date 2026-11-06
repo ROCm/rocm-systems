@@ -905,6 +905,9 @@ memory:
   Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack:
     <<: *level_default
     tags: [transfer, multigpu, stream]
+  Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack_AllDevices:
+    <<: *level_3
+    tags: [transfer, multigpu, stream]
   Unit_hipMemcpyBatchAsync_Negative:
     <<: *level_default
     tags: [transfer]

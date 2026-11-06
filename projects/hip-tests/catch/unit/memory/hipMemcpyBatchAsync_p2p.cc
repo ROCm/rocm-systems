@@ -5,6 +5,7 @@
  */
 
 #include <array>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -277,25 +278,26 @@ static std::vector<int> GetMutuallyPeeredDevices() {
   return devices;
 }
 
-/**
- * Allgather-style batches issued back to back on one stream with no synchronization in between:
- * every GPU's buffer is copied to two destinations on every other GPU, so each source feeds
- * several destinations and one batch becomes several SDMA operations that all wait on the stream's
- * prior work. Optionally each batch also carries an intra-device copy, which runs as a shader copy
- * waiting on the same prior work. The sources alternate between two patterns from batch to batch,
- * so the final contents show that the last batch landed after all the others.
- */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack) {
+// Allgather-style batches issued back to back on one stream with no synchronization in between,
+// over the first `max_devices` mutually peered GPUs: every GPU's buffer is copied to two
+// destinations on every other GPU, so each source feeds several destinations and one batch becomes
+// several SDMA operations that all wait on the stream's prior work. With `with_intra_device_copy`
+// each batch also carries an intra-device copy, which runs as a shader copy waiting on the same
+// prior work. The sources alternate between two patterns from batch to batch, so the final
+// contents show that the last batch landed after all the others. The data moved grows with the
+// square of the number of GPUs.
+static void RunAllgatherBackToBack(size_t max_devices, bool with_intra_device_copy) {
   if (HipTest::getDeviceCount() < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
-  const std::vector<int> devices = GetMutuallyPeeredDevices();
+  std::vector<int> devices = GetMutuallyPeeredDevices();
   if (devices.size() < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
-
-  const bool with_intra_device_copy = GENERATE(false, true);
+  if (devices.size() > max_devices) {
+    devices.resize(max_devices);
+  }
   CAPTURE(devices.size(), with_intra_device_copy);
 
   constexpr size_t kNumPatterns = 2;
@@ -389,5 +391,21 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack) {
 
   DisablePeerAccess(peer_pairs);
   HIP_CHECK(hipSetDevice(stream_device));
+}
+
+/**
+ * Allgather-style batches issued back to back on one stream between two peered GPUs, optionally
+ * with an intra-device shader copy in each batch.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack) {
+  RunAllgatherBackToBack(2, GENERATE(false, true));
+}
+
+/**
+ * Allgather-style batches issued back to back on one stream across every mutually peered GPU,
+ * optionally with an intra-device shader copy in each batch.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack_AllDevices) {
+  RunAllgatherBackToBack(std::numeric_limits<size_t>::max(), GENERATE(false, true));
 }
 #endif
