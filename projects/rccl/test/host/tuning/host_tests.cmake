@@ -76,6 +76,7 @@ if(_MICRO_BUILD_SYM_KERNELS)
       fakes/nccl_fakes.cc
       fakes/env_fakes.cc
       fakes/devcomm_fakes.cc
+      fakes/gin_fakes.cc                   # ncclGetRailedGinType, read by sym_kernels.cc
       fakes/nccl_device_core_fakes.cc      # ncclTeamRail, read by the GIN cost model
       ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     EXTRA_DEFS

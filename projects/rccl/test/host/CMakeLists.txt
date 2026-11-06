@@ -661,6 +661,7 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
     fakes/devcomm_fakes.cc
+    fakes/gin_fakes.cc                   # ncclGetRailedGinType, read by sym_kernels.cc
     fakes/nccl_device_core_fakes.cc      # ncclTeamRail, read by sym_kernels.cc
     fakes/mgmt_task_enq_fakes.cc
     fakes/os_fakes.cc
