@@ -15,7 +15,7 @@ import pytest
 
 from pc_sampling.pc_sampling_analysis import load_pc_sample_records
 from utils import schema
-from utils.analysis_views import convert_filter_blocks_to_panel_ids
+from utils.analysis_views import arch_panel_configs, convert_filter_blocks_to_panel_ids
 from utils.parser import (
     apply_filters,
     apply_kernel_filter,
@@ -233,6 +233,30 @@ class TestBuildDfs:
         assert list(df.columns) == ["Metric", "Avg"]
         # Only the matching metric remains
         assert list(df["Metric"]) == ["M1"]
+
+    def test_metric_id_filter_keeps_every_row_that_shows_it(self, monkeypatch):
+        """On the shipped gfx942 views, -b compute.salu_util keeps its Speed of Light
+        and Compute Pipeline rows, as -b 2.1.7 11.2.2 does, without the warning."""
+        warning = common.patch_console(monkeypatch, "utils.analysis_views", "warning")
+        by_id, by_rows = schema.ArchConfig(), schema.ArchConfig()
+        for ac, tokens in (
+            (by_id, ["compute.salu_util"]),
+            (by_rows, ["2.1.7", "11.2.2"]),
+        ):
+            ac.panel_configs = arch_panel_configs("gfx942")
+            build_dfs(
+                ac,
+                filter_metrics=tokens,
+                sys_info=_sys_info(),
+                profiling_config={},
+                arch="gfx942",
+            )
+        assert {201, 1102} <= set(by_id.dfs)
+        assert [len(by_id.dfs[table]) for table in (201, 1102)] == [1, 1]
+        assert {table: df.to_dict() for table, df in by_id.dfs.items()} == {
+            table: df.to_dict() for table, df in by_rows.dfs.items()
+        }
+        assert warning["warning"].call_count == 2
 
     def test_whole_block_filter_keeps_every_metric_in_block(self):
         ac = _two_block_config()

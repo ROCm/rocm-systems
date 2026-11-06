@@ -15,6 +15,7 @@ tools/validate_metric_library.py; loading only rejects an id that two files defi
 Every load failure raises InheritanceError.
 """
 
+import re
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Set, Tuple
@@ -34,6 +35,9 @@ METRIC_LIBRARY_PARENT_ARCH: Dict[str, Optional[str]] = {
     "gfx115x": None,
     "gfx1250": None,
 }
+# A metric id, "{category}.{subcategory}_{name}": lowercase words joined by
+# underscores. utils_common.METRIC_ID_RE matches the numeric panel ids instead.
+METRIC_LIBRARY_ID_RE = re.compile(r"^[a-z][a-z0-9]*\.[a-z0-9]+(_[a-z0-9]+)*$")
 VARIABLES_FILENAME = "variables.yaml"
 SETS_FILENAME = "sets.yaml"
 
