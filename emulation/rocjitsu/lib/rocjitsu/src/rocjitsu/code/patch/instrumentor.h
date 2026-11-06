@@ -172,6 +172,9 @@ struct InstrumentationPatch {
 /// @brief Production attribution from an original anchor to its emitted bytes.
 /// @details Offsets are relative to .text. KernelEntry has no relocated guest
 /// instruction, so guest_size is zero and guest_offset names its return branch.
+/// For callable sites, instrumentation_offset and instrumentation_size cover
+/// the call envelope and exclude the relocated guest instruction and resume
+/// branch.
 struct InstrumentedSite {
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
   uint64_t original_offset = 0;
