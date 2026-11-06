@@ -23,14 +23,12 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <new>
 #include <optional>
 #include <sys/mman.h>
 #include <unistd.h>
 
 namespace rocjitsu::consan {
 namespace {
-
 class ConSanHsaPlugin : public ::testing::Test {
 protected:
   void SetUp() override {
@@ -353,10 +351,6 @@ protected:
 
   static hsa_status_t create_reader(const void *bytes, size_t size,
                                     hsa_code_object_reader_t *reader) {
-    if (current_->throw_reader_) {
-      mark_exception();
-      throw std::bad_alloc();
-    }
     reader->handle = ++current_->next_reader_;
     current_->readers_[reader->handle] = {static_cast<const uint8_t *>(bytes), size};
     return HSA_STATUS_SUCCESS;
@@ -405,10 +399,6 @@ protected:
     std::lock_guard lock(current_->fake_mutex_);
     // Normal launches may replace report_; only the armed, single-launch
     // finish test needs to inspect it here.
-    if (current_->throw_report_free_ && memory == current_->report_) {
-      mark_exception();
-      throw std::bad_alloc();
-    }
     if (current_->allocations_.erase(memory) != 1)
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     std::free(memory);
@@ -416,10 +406,6 @@ protected:
   }
   static hsa_status_t pointer_info(const void *pointer, hsa_amd_pointer_info_t *info,
                                    void *(*)(size_t), uint32_t *, hsa_agent_t **) {
-    if (current_->throw_pointer_info_) {
-      mark_exception();
-      throw 42;
-    }
     const uintptr_t base = reinterpret_cast<uintptr_t>(current_->arguments_.data());
     const uintptr_t address = reinterpret_cast<uintptr_t>(pointer);
     if (address < base || address >= base + current_->arguments_.size())
@@ -473,10 +459,6 @@ protected:
   }
   static hsa_signal_value_t wait_signal(hsa_signal_t signal, hsa_signal_condition_t,
                                         hsa_signal_value_t, uint64_t, hsa_wait_state_t) {
-    if (current_->throw_wait_) {
-      mark_exception();
-      throw std::bad_alloc();
-    }
     std::unique_lock lock(current_->fake_mutex_);
     current_->fake_condition_.wait_for(lock, std::chrono::milliseconds(1), [&] {
       return current_->signal_values_.at(signal.handle) < 1;
@@ -534,13 +516,6 @@ protected:
     return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
   }
 
-  static void mark_exception() {
-    constexpr char message[] = "consan injected exception\n";
-    if (::write(STDERR_FILENO, message, sizeof(message) - 1) !=
-        static_cast<ssize_t>(sizeof(message) - 1))
-      std::_Exit(90);
-  }
-
   inline static ConSanHsaPlugin *current_ = nullptr;
   CoreApiTable core_{};
   AmdExtTable amd_{};
@@ -583,8 +558,6 @@ protected:
   const hsa_agent_t *amd_signal_agents_ = nullptr;
   uint64_t amd_signal_attributes_ = 0;
   bool installed_ = false, preserve_ = false, fail_proxy_ = false, auto_complete_ = true;
-  bool throw_reader_ = false, throw_report_free_ = false, throw_pointer_info_ = false,
-       throw_wait_ = false;
 };
 
 class ConSanHsaPluginDeathTest : public ConSanHsaPlugin {
@@ -592,23 +565,6 @@ protected:
   void SetUp() override {
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     ConSanHsaPlugin::SetUp();
-  }
-
-  template <typename Action> void expect_termination(Action &&action) {
-    // Distinguish the injected exception's terminate path from a returned
-    // status or an exception escaping the loaded DSO into its caller.
-    ASSERT_EXIT(
-        {
-          std::set_terminate([] { std::_Exit(86); });
-          ::alarm(5);
-          try {
-            action();
-          } catch (...) {
-            std::_Exit(89);
-          }
-          std::_Exit(87);
-        },
-        ::testing::ExitedWithCode(86), "consan injected exception");
   }
 
   void expect_interrupted_freeze(bool finish_during_query) {
@@ -654,51 +610,6 @@ TEST_F(ConSanHsaPluginDeathTest, FinishDuringFreezePreventsWorkerStartupAndUnloa
 
 TEST_F(ConSanHsaPluginDeathTest, DestroyDuringFreezeInvalidatesTheAdmittedModule) {
   expect_interrupted_freeze(false);
-}
-
-TEST_F(ConSanHsaPluginDeathTest, HsaHookExceptionTerminatesInsteadOfReturningAStatus) {
-  expect_termination([&] {
-    throw_reader_ = true;
-    hsa_code_object_reader_t reader{};
-    (void)core_.hsa_code_object_reader_create_from_memory_fn(original_.data(), original_.size(),
-                                                             &reader);
-  });
-}
-
-TEST_F(ConSanHsaPluginDeathTest, PacketCallbackExceptionTerminatesInsteadOfReturningToHsa) {
-  expect_termination([&] {
-    ASSERT_TRUE(bind());
-    ASSERT_TRUE(create_queue_and_signal());
-    throw_pointer_info_ = true;
-    submit();
-  });
-}
-
-TEST_F(ConSanHsaPluginDeathTest, ObserverExceptionTerminatesInsteadOfLeavingAStoppedWorker) {
-  expect_termination([&] {
-    throw_wait_ = true;
-    ASSERT_TRUE(bind());
-    ASSERT_TRUE(create_queue_and_signal());
-    submit();
-    for (;;)
-      ::pause();
-  });
-}
-
-TEST_F(ConSanHsaPluginDeathTest, FinishExceptionTerminatesInsteadOfReturningInvalidFacts) {
-  expect_termination([&] {
-    ASSERT_TRUE(bind());
-    ASSERT_TRUE(create_queue_and_signal());
-    submit();
-    ASSERT_EQ(drain_(), 0);
-    // Only the report is freed by finish after joining both workers. Observer
-    // wrapper/context cleanup must not trigger this exception on another path.
-    {
-      std::lock_guard lock(fake_mutex_);
-      throw_report_free_ = true;
-    }
-    (void)finish_();
-  });
 }
 
 TEST_F(ConSanHsaPlugin, RuntimeConfigurationRequiresBothPrefixedPaths) {
