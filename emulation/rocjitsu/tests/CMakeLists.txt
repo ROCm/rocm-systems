@@ -485,6 +485,7 @@ add_executable(
     output_modifier_test.cpp
     source_modifier_test.cpp
     amdgpu_elf_test_support.cpp
+    amdgpu_elf_test_support_test.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
     patch/log_buffer_test.cpp
