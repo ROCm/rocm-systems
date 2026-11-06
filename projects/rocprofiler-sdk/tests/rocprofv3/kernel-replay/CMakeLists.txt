@@ -113,7 +113,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT
         --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --replay-mode kernel
         --kernel-replay-beta-enabled --kernel-include-regex saxpy --kernel-iteration-range
-        "2-3" --output-format json -d
+        "2-3" --kernel-trace --output-format json -d
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-iteration-range -o out --
         $<TARGET_FILE:kernel-replay> 65536 4
     DEPENDS kernel-replay
@@ -138,7 +138,7 @@ rocprofiler_add_integration_validate_test(
          SQ_WAVES
          SQ_INSTS_VALU
          -k
-         "dispatch_id_constant_across_replay_passes or expected_logical_dispatch_count or each_pass_collects_distinct_batch"
+         "dispatch_id_constant_across_replay_passes or expected_logical_dispatch_count or each_pass_collects_distinct_batch or unselected_dispatches_run_once"
     TIMEOUT 120
     LABELS "kernel-replay"
     PYTHON_PATH
