@@ -83,6 +83,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **`amd-smi static --cache` now tells the level-1 data caches apart**.  
+  - `CACHE_ACRONYM` reports `vL1D` (vector), `sL1D` (scalar) and `GL1` (per shader array) instead of `L1D` for every level-1 data cache; `L1I`, `L2` and `L3` are unchanged.
+
 - **Use fwupd daemon to read and write UMA carveout information**.  
   - `amdsmi_get_gpu_uma_carveout_info()` / `amdsmi_set_gpu_uma_carveout()` (and therefore `amd-smi static/set --mem-carveout`) now read and write the carveout through the fwupd BIOS-settings interface on integrated GPUs and fallback to amdgpu `.../device/uma/carveout` sysfs node when the fwupd daemon is absent.
   - Implemented in the AMD SMI library over the fwupd daemon's D-Bus BIOS-settings interface; the fwupd path is used only for the integrated (APU) GPU, and PolicyKit brokers authorization instead of requiring explicit root. Reading needs fwupd >= 1.8.4; writing needs fwupd >= 2.1.1 (Ubuntu 26.04+).

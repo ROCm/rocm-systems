@@ -1112,15 +1112,30 @@ class StaticCommands:
                 cache_info_list = amdsmi_interface.amdsmi_get_gpu_cache_info(args.gpu)["cache"]
                 logging.debug(f"cache_info dictionary = {cache_info_list}")
 
+                # KFD flags vector, scalar and GL1 data caches alike; the scalar one
+                # shares its SQC's CU grouping with the instruction cache.
+                sqc_groups = {
+                    (cache["max_num_cu_shared"], cache["num_cache_instance"])
+                    for cache in cache_info_list
+                    if cache.get("cache_level") == 1
+                    and "INST_CACHE" in cache.get("cache_properties", [])
+                }
                 for index, cache_info in enumerate(cache_info_list):
-                    # Label each entry with a cache-type acronym from level +
-                    # DATA/INST flags (L1D/L1I/L2/L3, else L<level>).
                     cache_level = cache_info.get("cache_level")
                     cache_properties = cache_info.get("cache_properties", [])
                     if cache_level == 1 and "INST_CACHE" in cache_properties:
                         cache_acronym = "L1I"
                     elif cache_level == 1 and "DATA_CACHE" in cache_properties:
-                        cache_acronym = "L1D"
+                        cu_group = (
+                            cache_info["max_num_cu_shared"],
+                            cache_info["num_cache_instance"],
+                        )
+                        if cu_group in sqc_groups:
+                            cache_acronym = "sL1D"
+                        elif cache_info["max_num_cu_shared"] > 1:
+                            cache_acronym = "GL1"
+                        else:
+                            cache_acronym = "vL1D"
                     else:
                         cache_acronym = f"L{cache_level}"
 
