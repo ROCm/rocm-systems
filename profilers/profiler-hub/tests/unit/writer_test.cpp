@@ -7,8 +7,6 @@
 #include "profiler-hub/writer.hpp"
 #include "profiler-hub/writer_types.hpp"
 
-#include "backends/sqlite_backend.hpp"
-
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -40,12 +38,6 @@ protected:
     {
         return std::make_unique<writer_t>(
             std::make_unique<storage_t>(m_db_path, m_uuid, schema_version));
-    }
-
-    [[nodiscard]] std::shared_ptr<data_storage::sqlite_backend> make_backend() const
-    {
-        return data_storage::sqlite_backend::create(
-            m_db_path, m_uuid, data_storage::sqlite_backend::storage_mode_t::in_memory);
     }
 
     // Registers a minimal node + process pair that most register_*/insert_* calls
@@ -91,34 +83,28 @@ TEST_F(writer_test, get_storage_version_returns_explicitly_passed_version)
 
 TEST_F(writer_test, initialize_schema_default_version_succeeds)
 {
-    auto backend = make_backend();
-    EXPECT_NO_THROW(backend->initialize_schema(version_t{ 3, 0, 1 }));
+    // writer_t initializes the schema for the storage version.
+    EXPECT_NO_THROW({ auto writer = make_writer(); });
 }
 
 TEST_F(writer_test, initialize_schema_latest_sentinel_version_succeeds)
 {
-    auto backend = make_backend();
-
-    // version_t{} (all-zero) is the latest version
-    EXPECT_NO_THROW(backend->initialize_schema(version_t{}));
+    // version_t{} (all-zero) is the latest version.
+    EXPECT_NO_THROW({ auto writer = make_writer(version_t{}); });
 }
 
 TEST_F(writer_test, initialize_schema_called_twice_is_a_no_op)
 {
-    auto backend = make_backend();
-
-    backend->initialize_schema(version_t{ 3, 0, 0 });
-
-    // Second call logs a warning and returns early instead of throwing or re-executing
-    // the schema SQL against an already-initialized database.
-    EXPECT_NO_THROW(backend->initialize_schema(version_t{ 3, 0, 0 }));
+    EXPECT_NO_THROW({
+        auto first  = make_writer(version_t{ 3, 0, 0 });
+        auto second = make_writer(version_t{ 3, 0, 0 });
+    });
 }
 
 TEST_F(writer_test, initialize_schema_unsupported_version_throws_runtime_error)
 {
-    auto backend = make_backend();
-
-    EXPECT_THROW(backend->initialize_schema(version_t{ 99, 0, 0 }), std::runtime_error);
+    EXPECT_THROW(
+        { auto writer = make_writer(version_t{ 99, 0, 0 }); }, std::runtime_error);
 }
 
 TEST_F(writer_test, construct_with_null_storage_throws_invalid_argument)

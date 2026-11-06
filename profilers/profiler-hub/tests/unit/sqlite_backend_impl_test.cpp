@@ -23,8 +23,12 @@
 #    ifndef NOMINMAX
 #        define NOMINMAX
 #    endif
-#    include <tlhelp32.h>
+// windows.h defines HANDLE, BOOL, and WINAPI. tlhelp32.h uses them, so it
+// stays in its own include block: clang-format sorts one block alphabetically
+// and would put tlhelp32.h first.
 #    include <windows.h>
+
+#    include <tlhelp32.h>
 #endif
 
 namespace
