@@ -219,14 +219,15 @@ __device__ __forceinline__ T uncached_load([[maybe_unused]] T* src) {
           : "memory");
 #endif
 #if defined(__GFX11__)
-      int32_t val32;
+      uint32_t val32;
       asm volatile(
           "global_load_ushort %0 %1 off glc slc \n"
           "s_waitcnt vmcnt(0)"
           : "=&v"(val32)
           : "v"(src)
           : "memory");
-      ret = static_cast<T>(val32);
+      uint16_t bits = static_cast<uint16_t>(val32);
+      __builtin_memcpy(&ret, &bits, sizeof(ret));
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
       asm volatile(
@@ -237,14 +238,15 @@ __device__ __forceinline__ T uncached_load([[maybe_unused]] T* src) {
           : "memory");
 #endif
 #if defined(__GFX12__)
-      int32_t val32;
+      uint32_t val32;
       asm volatile(
           "global_load_u16 %0 %1 off scope:SCOPE_SYS \n"
           "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
           : "=&v"(val32)
           : "v"(src)
           : "memory");
-      ret = static_cast<T>(val32);
+      uint16_t bits = static_cast<uint16_t>(val32);
+      __builtin_memcpy(&ret, &bits, sizeof(ret));
 #endif
       break;
     }
