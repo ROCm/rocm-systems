@@ -131,10 +131,10 @@ class ParseCompilerFlagsTest(unittest.TestCase):
 
 class BuildLinkCmdTest(unittest.TestCase):
     def test_without_profile_rt_omits_mcpu(self):
-        cmd = driver.build_link_cmd("ld.lld", "device.elf", "objs.rsp",
+        cmd = driver.build_link_cmd("ld.lld", "device.o", "objs.rsp",
                                     "gfx942", None)
 
-        self.assertEqual(cmd, ["ld.lld", "-shared", "-o", "device.elf",
+        self.assertEqual(cmd, ["ld.lld", "-r", "-o", "device.o",
                                "@objs.rsp"])
 
     def test_with_profile_rt_appends_mcpu_and_archive(self):
@@ -142,7 +142,7 @@ class BuildLinkCmdTest(unittest.TestCase):
             archive = Path(temp_dir) / "libclang_rt.profile.a"
             archive.touch()
 
-            cmd = driver.build_link_cmd("ld.lld", "device.elf", "objs.rsp",
+            cmd = driver.build_link_cmd("ld.lld", "device.o", "objs.rsp",
                                         "gfx942", str(archive))
 
         self.assertEqual(cmd[-2:], ["--plugin-opt=mcpu=gfx942", str(archive)])
@@ -152,7 +152,7 @@ class BuildLinkCmdTest(unittest.TestCase):
 
     def test_missing_profile_rt_raises(self):
         with self.assertRaises(SystemExit):
-            driver.build_link_cmd("ld.lld", "device.elf", "objs.rsp",
+            driver.build_link_cmd("ld.lld", "device.o", "objs.rsp",
                                   "gfx942", "/nonexistent/lib.a")
 
 
@@ -220,7 +220,7 @@ class TargetIdTest(unittest.TestCase):
                              "-o", "out.o", "in.cpp"])
 
     def test_link_hands_the_target_id_to_every_codegen_step(self):
-        """Pins do_link to reaching all three codegen builders with
+        """Pins do_link to reaching both codegen builders with
         --target-id, while ld.lld still gets the bare name. Runs the whole of do_link
         with only run() stubbed, so each command is the genuine one."""
         calls = []
@@ -235,8 +235,6 @@ class TargetIdTest(unittest.TestCase):
             obj.touch()
             (Path(temp_dir) / "kernel.resources.json").write_text(
                 '{"vgpr_count": 8, "agpr_count": 0, "sgpr_count": 16}')
-            bitcode = Path(temp_dir) / "librocshmem_device_gfx942.bc"
-            bitcode.touch()
             # build_link_cmd only emits --plugin-opt=mcpu when it is given an
             # archive, so without one the link step carries no arch at all and
             # there is nothing here to pin.
@@ -245,9 +243,9 @@ class TargetIdTest(unittest.TestCase):
 
             args = argparse.Namespace(
                 clang="clang", arch="gfx942", target_id="gfx942:xnack+",
-                objects=[str(obj)], output=str(Path(temp_dir) / "device.elf"),
+                objects=[str(obj)], output=str(Path(temp_dir) / "device.o"),
                 dispatcher="common.cu.cpp", keep_temps=False,
-                rocshmem_bitcode=str(bitcode), profile_rt=str(profile_rt))
+                profile_rt=str(profile_rt))
 
             saved = (driver.discover_tools, driver.run)
             driver.discover_tools = lambda _: ("clang", "ld.lld")
@@ -257,10 +255,9 @@ class TargetIdTest(unittest.TestCase):
             finally:
                 driver.discover_tools, driver.run = saved
 
-        disp_compile, disp_assemble, rocshmem_compile, link = calls
+        disp_compile, disp_assemble, link = calls
         self.assertIn("--offload-arch=gfx942:xnack+", disp_compile)
         self.assertIn("-mcpu=gfx942:xnack+", disp_assemble)
-        self.assertIn("-mcpu=gfx942:xnack+", rocshmem_compile)
         # lld's LTO plugin does not parse target IDs, so this one site takes
         # the bare processor name.
         self.assertIn("--plugin-opt=mcpu=gfx942", link)
@@ -303,7 +300,7 @@ class TargetIdTest(unittest.TestCase):
         of which misread it silently."""
         args = self._main_with(["--link", "--arch=gfx942:xnack+",
                                 "--dispatcher=common.cu.cpp",
-                                "-o", "device.elf", "kernel.o"],
+                                "-o", "device.o", "kernel.o"],
                                mode="link")
 
         self.assertEqual(args.arch, "gfx942")
