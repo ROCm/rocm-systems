@@ -1454,17 +1454,6 @@ protected:
   template <bool EnableAsync>
   IssueOutcome issue_instruction_impl(Wavefront *wf, MaybeAsyncWindow<EnableAsync> window = {},
                                       MaybeAsyncWindowStorage<EnableAsync> storage = {});
-  /// @brief The part of issue_instruction_impl() after a successful decode.
-  /// @details Split out so the caller can discard the cache return when an
-  /// exception escapes, without a per-instruction std::uncaught_exceptions().
-  /// @returns Whether the instruction issued, as for issue_instruction_impl().
-  template <bool EnableAsync>
-  IssueOutcome issue_decoded_instruction(
-      Wavefront *wf, MaybeAsyncWindow<EnableAsync> window,
-      MaybeAsyncWindowStorage<EnableAsync> storage, const GpuVmAccess *vm_access, uint32_t vmid,
-      const std::array<rj_code_binary_inst_t, DecodedInstructionCache::kNumWords> &words,
-      DecodeResult &decoded, bool debugger_active,
-      DecodedInstructionCache::ScopedReturn &return_decoded);
   /// @brief Advance CU scheduling with compile-time selection of the issue adapter.
   /// @param selected_slots Slots whose running wave may issue; every slot by default.
   /// @param issued If set, receives the selected slots that issued an instruction.
