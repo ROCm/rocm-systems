@@ -90,14 +90,14 @@ enum kernel_index : size_t
 };
 
 constexpr auto kernel_names = std::array<const char*, kernel_count>{
-    "kernel_replay_count_tiles",
-    "kernel_replay_scan_tiles",
-    "kernel_replay_expand_tiles",
-    "kernel_replay_copy_tiles",
-    "kernel_replay_capture_tiles",
-    "kernel_replay_restore_changed_tiles",
-    "kernel_replay_restore_listed_tiles",
-    "kernel_replay_check_tiles",
+    "__kernel_replay_count_tiles",
+    "__kernel_replay_scan_tiles",
+    "__kernel_replay_expand_tiles",
+    "__kernel_replay_copy_tiles",
+    "__kernel_replay_capture_tiles",
+    "__kernel_replay_restore_changed_tiles",
+    "__kernel_replay_restore_listed_tiles",
+    "__kernel_replay_check_tiles",
 };
 
 constexpr auto kernel_arg_sizes = std::array<size_t, kernel_count>{
