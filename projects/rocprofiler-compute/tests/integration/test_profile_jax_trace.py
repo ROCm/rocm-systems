@@ -14,6 +14,21 @@ from tests.integration.common import config, require_jax
 from utils import csv_compression
 
 
+def captured_analyze_output(capsys):
+    captured = capsys.readouterr()
+    return captured.out + captured.err
+
+
+def root_operator_line(out, name):
+    for line in out.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith(("├─", "└─", "|")):
+            continue
+        if name in stripped:
+            return line
+    raise AssertionError(f"root operator {name!r} not found")
+
+
 @pytest.fixture(scope="module")
 def jax_trace_workload_state():
     state = {"dir": None, "profiled": False}
@@ -93,3 +108,35 @@ def test_list_jax_operators_prints_call_tree(
     out = captured.out + captured.err
     assert "JAX Operator Call Tree:" in out
     assert "Operator summary" in out
+
+
+def test_list_jax_operators_train_step_stats(
+    jax_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-operators",
+        "jax",
+        "--path",
+        jax_trace_profiled_workload,
+    ])
+    assert code == 0
+    out = captured_analyze_output(capsys)
+    heading = root_operator_line(out, "jax.jit.train_step")
+    assert "jax_workload.py:" in heading
+    assert "dispatches:" in heading
+    assert "total:" in heading
+    lines = out.splitlines()
+    heading_index = lines.index(heading)
+    kernel_children = []
+    for line in lines[heading_index + 1 :]:
+        stripped = line.lstrip()
+        if stripped.startswith("- "):
+            break
+        if stripped.startswith(("├─", "└─")):
+            kernel_children.append(stripped)
+            continue
+        if stripped and not stripped.startswith("|"):
+            break
+    assert kernel_children
