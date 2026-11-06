@@ -1,3 +1,9 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# The early-access runtimes/ tree is outside the repository's default build.
+# Cover its standalone CMake/Cargo build, host ABI tests and Rust quality here
+# without requiring a GPU.
 name: runtimes CI
 
 on:
@@ -17,6 +23,10 @@ on:
 
 permissions:
   contents: read
+
+env:
+  # Prepare dependencies once; all checks and CMake builds use this same home.
+  CARGO_HOME: ${{ github.workspace }}/.runtimes-cargo-home
 
 concurrency:
   # PR revisions supersede each other; distinct postsubmit commits do not.
@@ -51,6 +61,10 @@ jobs:
           sudo apt-get install -y lld
           rustup toolchain install "$RUST_VERSION" \
             --profile minimal --component clippy --component rustfmt
+
+      - name: Fetch locked dependencies
+        working-directory: runtimes
+        run: cargo +"$RUST_VERSION" fetch --locked
 
       - name: Check Rust formatting
         working-directory: runtimes
@@ -112,6 +126,10 @@ jobs:
           rustup toolchain install "$RUST_VERSION" \
             --profile minimal --component clippy --component rustfmt
 
+      - name: Fetch locked dependencies
+        working-directory: runtimes
+        run: cargo +"$RUST_VERSION" fetch --locked
+
       - name: Configure
         env:
           CC: ${{ matrix.cc }}
@@ -131,6 +149,7 @@ jobs:
             -DROCM_RUNTIMES_CARGO="$cargo" \
             -DROCM_RUNTIMES_RUSTC="$rustc" \
             -DROCM_RUNTIMES_LLD="$lld" \
+            -DROCM_RUNTIMES_CARGO_HOME="$CARGO_HOME" \
             -DROCM_RUNTIMES_CARGO_JOBS="$(nproc)"
 
       - name: Build
