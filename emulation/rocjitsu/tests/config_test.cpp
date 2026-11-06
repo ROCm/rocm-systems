@@ -3909,7 +3909,8 @@ TEST(ConfigLoaderTest, RejectsInvalidCuAfterConstructingSibling) {
     EXPECT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &output),
               ROCJITSU_STATUS_INVALID_ARGUMENT);
     EXPECT_EQ(output, &sentinel);
-    const auto file = write_temp_config(json);
+    test::ScopedTempFile file;
+    ASSERT_TRUE(write_temp_config(file, json));
     EXPECT_EQ(rj_vm_create(file.path().c_str(), RJ_VM_MODE_DEFAULT, &output),
               ROCJITSU_STATUS_INVALID_FILE);
     EXPECT_EQ(output, &sentinel);

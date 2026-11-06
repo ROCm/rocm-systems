@@ -680,7 +680,8 @@ TEST(RjDbtTranslate, RequiresRevisionsOnlyForGfx1250) {
 TEST(RjPretranslate, SharedParserWritesReusesAndForcesTranslationStore) {
   const auto &tool = g_pretranslate_tool;
   ASSERT_TRUE(std::filesystem::exists(tool));
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_pretranslate_cli_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_pretranslate_cli_"));
   const std::filesystem::path temp_path = std::filesystem::canonical(temp_dir.path());
   const auto input = temp_path / "gfx1250.co";
   const auto output = temp_path / "stdout.txt";
@@ -791,7 +792,8 @@ TEST(RjDbtTranslate, AppliesGfx1250RevisionContractToDefaultCdna5OutputMachine) 
 
 TEST(RjDecodeBenchmark, RejectsInputBeforeMeasurement) {
   ASSERT_FALSE(g_decode_benchmark.empty());
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_decode_benchmark_rejection_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_decode_benchmark_rejection_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const std::filesystem::path input = temp_path / "input.co";
   const std::filesystem::path output = temp_path / "stdout.txt";
