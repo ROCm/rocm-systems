@@ -3,6 +3,7 @@
 
 #include "core/thread_list/internal_thread_list.hpp"
 
+#include "common/static_object.hpp"
 #include "core/state.hpp"
 
 #include <algorithm>
@@ -117,6 +118,14 @@ internal_thread_list::reset_after_fork() noexcept
     std::construct_at(&m_gate);
     std::construct_at(&m_mutex);
     m_tids.clear();
+}
+
+internal_thread_list&
+get_internal_thread_list()
+{
+    static auto*& list =
+        common::static_object<internal_thread_list>::construct(common::do_not_destroy{});
+    return *list;
 }
 
 scoped_internal_thread::scoped_internal_thread(internal_thread_list& list)

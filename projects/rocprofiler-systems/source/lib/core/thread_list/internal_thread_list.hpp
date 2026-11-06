@@ -61,6 +61,12 @@ private:
     std::unordered_set<pid_t> m_tids;
 };
 
+/// Process-wide list. Heap-backed and never destroyed, so it stays valid during static
+/// destruction and for detached threads. Needed because the pthread_create gotcha has
+/// no way to receive an injected reference.
+[[nodiscard("the list is the whole point")]] internal_thread_list&
+get_internal_thread_list();
+
 /// Registers the calling thread in a list for its lifetime. Normal exit removes the
 /// entry; every other exit path is covered by internal_thread_list::prune_exited().
 class scoped_internal_thread

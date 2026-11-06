@@ -3,6 +3,7 @@
 
 #include "buffer_storage.hpp"
 
+#include "core/thread_list/internal_thread_list.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "logger/debug.hpp"
 
@@ -54,6 +55,9 @@ flush_worker_t::start(const pid_t& current_pid)
     m_worker_synchronization->exit_finished = false;
 
     m_flushing_thread = std::jthread{ [this](std::stop_token stoken) {
+        const thread_list::scoped_internal_thread internal_thread{
+            thread_list::get_internal_thread_list()
+        };
         LOG_TRACE("Flush worker thread started for pid={}",
                   m_worker_synchronization->origin_pid);
 
