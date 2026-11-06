@@ -47,7 +47,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS roctx-pause-resume
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling;pause-resume;selected-regions"
-    ENVIRONMENT "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}" "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-selected-regions-host-trap
     DISABLED "${IS_PC_SAMPLING_DISABLED}")
@@ -78,7 +78,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS roctx-pause-resume
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling;pause-resume;selected-regions"
-    ENVIRONMENT "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}" "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-selected-regions-ref-count-host-trap
     DISABLED "${IS_PC_SAMPLING_DISABLED}")
