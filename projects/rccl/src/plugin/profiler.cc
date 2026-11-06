@@ -1406,9 +1406,10 @@ static void profilerPostPlanWorkSym(struct ncclComm* comm, struct ncclKernelPlan
 // exactly (`ncclShmem.channel.workCounter += ncclShmem.nWorks` in
 // src/device/common.h::profiler). Per-task mapping:
 //   * Coll: one bump per channel in [channelLo, channelHi].
-//   * P2p:  one bump per channel in channelMask per addP2pToPlan() pair;
+//   * P2p:  one bump per channel in channelMask per P2P work (p2pPairId);
 //           sibling tasks of a pair must not double-post. Multiple pairs
-//           that overlap a channel each contribute one bump.
+//           that overlap a channel each contribute one bump, in the order
+//           their works were emitted.
 //   * Sym-coll: one bump per channel in [0, countOneBits(channelMask)), with
 //     the counter mirrored into the kernel args buffer (see below).
 //   * Bcast/RMA/CE: piggyback or no KernelCh.
@@ -1433,12 +1434,12 @@ ncclResult_t ncclProfilerPostPlanWork(struct ncclComm* comm, struct ncclKernelPl
     ct = ct->next;
   }
 
-  // Both halves of a send/recv pair carry KernelCh over their own channels, as
-  // before the thread decouple. The device counts the fused p2p work once per
-  // channel, so the pair shares a single workCounter bump per channel and both
-  // halves' ops read the same device slot. Siblings are enqueued back-to-back
-  // (see scheduleP2pTasksToPlan) and share p2pPairId; PID 0 is the unassigned
-  // sentinel, treated as a single-task pair.
+  // Advance the host counter for every emitted work and its full channel mask,
+  // even when that task did not request KernelCh. The device advances the same
+  // sequence unconditionally. A fused send/recv pair shares one bump per
+  // channel, while event enqueueing remains activation-gated. Siblings are
+  // back-to-back (see scheduleP2pTasksToPlan) and share p2pPairId; PID 0 is the
+  // unassigned sentinel, treated as a single-task pair.
   struct ncclProfilerThread* thr = comm->profiler.profilerThread;
   struct ncclTaskP2p* p2pt = ncclIntruQueueHead(&plan->p2pTaskQueue);
   uint16_t lastPid = 0;
@@ -1449,14 +1450,19 @@ ncclResult_t ncclProfilerPostPlanWork(struct ncclComm* comm, struct ncclKernelPl
     if (isFirstOfPair) {
       struct ncclTaskP2p* t0 = p2pt;
       struct ncclTaskP2p* t1 = (pid != 0 && p2pt->next && p2pt->next->p2pPairId == pid) ? p2pt->next : nullptr;
-      uint64_t m0 = (t0->eActivationMask & ncclProfileKernelCh) ? t0->channelMask : 0;
-      uint64_t m1 = (t1 && (t1->eActivationMask & ncclProfileKernelCh)) ? t1->channelMask : 0;
+      struct channelMasks m0 = t0->channelMask;
+      struct channelMasks m1 = t1 ? t1->channelMask : channelMasks{};
+      bool profile0 = t0->eActivationMask & ncclProfileKernelCh;
+      bool profile1 = t1 && (t1->eActivationMask & ncclProfileKernelCh);
       for (int c = 0; c < MAXCHANNELS; c++) {
-        uint64_t bit = 1ull << c;
-        if (!((m0 | m1) & bit)) continue;
+        bool in0 = (m0.masks[c / 64] >> (c % 64)) & 1;
+        bool in1 = (m1.masks[c / 64] >> (c % 64)) & 1;
+        if (!in0 && !in1) continue;
         uint64_t wc = ++comm->profiler.workCounter[c];
-        if (m0 & bit) profilerEnqueueOp(thr, comm, c, wc, t0->eActivationMask, t0->eventHandle, /*sym=*/false);
-        if (m1 & bit) profilerEnqueueOp(thr, comm, c, wc, t1->eActivationMask, t1->eventHandle, /*sym=*/false);
+        if (in0 && profile0)
+          profilerEnqueueOp(thr, comm, c, wc, t0->eActivationMask, t0->eventHandle, /*sym=*/false);
+        if (in1 && profile1)
+          profilerEnqueueOp(thr, comm, c, wc, t1->eActivationMask, t1->eventHandle, /*sym=*/false);
       }
     }
     p2pt = p2pt->next;

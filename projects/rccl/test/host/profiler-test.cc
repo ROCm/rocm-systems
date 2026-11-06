@@ -1877,10 +1877,33 @@ TEST_F(ProfilerThreadMicrotest, PostPlanWork_P2pOutsideAPair_BumpsPerTask) {
   ncclTaskP2p* partner = AddP2p(ncclProfileP2p);
   partner->p2pPairId = 5;
   partner->channelMask = 0x1;
-  AddP2p(ncclProfileP2p)->channelMask = 0x1;  // no KernelCh at all
+  AddP2p(ncclProfileP2p)->channelMask = 0x1;  // no event, but the device still advances this work
   ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(comm_.get(), plan_.get()));
-  EXPECT_EQ(comm_->profiler.workCounter[0], 5u);
+  EXPECT_EQ(comm_->profiler.workCounter[0], 6u);
   EXPECT_EQ(OpsOn(comm_.get(), 0), 5u);
+}
+
+TEST_F(ProfilerThreadMicrotest, PostPlanWork_MixedActivationSplitWorksKeepTheDeviceCounterAligned) {
+  Load(ncclProfileKernelCh);
+  CreateThread(comm_.get());
+  Stamp(started_, 0, 2, 10);
+  Stamp(completed_, 0, 2, 20);
+
+  ncclTaskP2p* unprofiled = AddP2p(ncclProfileP2p);
+  unprofiled->p2pPairId = 1;
+  unprofiled->channelMask = 0x1;
+  ncclTaskP2p* profiled = AddP2p(ncclProfileKernelCh);
+  profiled->p2pPairId = 2;
+  profiled->channelMask = 0x1;
+  profiled->eventHandle = H(0x63);
+
+  ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(comm_.get(), plan_.get()));
+  EXPECT_EQ(comm_->profiler.workCounter[0], 2u);
+  ASSERT_TRUE(waitUntil([this] { return fake_.NumStops() == 1; }));
+  auto starts = fake_.StartsOf(ncclProfileKernelCh);
+  ASSERT_EQ(starts.size(), 1u);
+  EXPECT_EQ(starts[0].d.parentObj, H(0x63));
+  EXPECT_EQ(starts[0].d.kernelCh.pTimer, 10u);
 }
 
 // Only channels below 64 are asserted: the post loop runs to MAXCHANNELS but shifts a 64-bit mask, which is

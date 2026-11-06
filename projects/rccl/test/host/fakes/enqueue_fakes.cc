@@ -85,6 +85,15 @@ std::function<int(struct ncclComm*)> g_rcclEffectiveP2pBatchEnable = DefaultEffe
 static int DefaultP2pTaskParts(struct ncclComm* comm, ncclFunc_t) { return comm->p2pnChannelsPerPeer; }
 std::function<int(struct ncclComm*, ncclFunc_t)> g_rcclP2pTaskParts = DefaultP2pTaskParts;
 
+// Direct-P2P channel widening is opt-in. The task-prep micro tests include
+// task_posttuning.cc without the production enqueue/transport objects, so keep
+// the default-off policy here.
+int64_t rcclParamP2pDirectMaxChannels() { return 0; }
+bool ncclP2pUsesMemcpy() { return false; }
+int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t, int, int, bool) {
+  return comm->p2pnChannelsPerPeer;
+}
+
 // enqueue.cc:437-441 splits the default on ROCm version; mirrored rather than pinned to one arm.
 #if ROCM_VERSION >= 71200
 int64_t ncclParamGraphRegister() { return g_loadParam("GRAPH_REGISTER", 1); }
