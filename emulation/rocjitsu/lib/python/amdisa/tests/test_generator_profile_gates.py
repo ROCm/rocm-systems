@@ -8250,6 +8250,28 @@ def test_gfx1250_vopd_uses_plain_src_when_simple_src_operand_is_absent(tmp_path)
     assert 'return Operand(bits, OperandType::OPR_SRC, encoded);' in cpp
 
 
+def test_gfx1250_vopd3_cndmask_selector_uses_wave32_mask_size(tmp_path):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='cdna5',
+        generated_dir_name='cdna5',
+        cpp_namespace='cdna5',
+        profile=Cdna5Profile(),
+        operand_types={'OPR_SRC_SIMPLE'},
+    )
+    codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
+
+    codegen.gen_vopd()
+    cpp = (tmp_path / 'cdna5' / 'vopd.cpp').read_text()
+
+    assert 'Operand(32, OperandType::OPR_SREG, vsrcx2)' in cpp
+    assert 'Operand(32, OperandType::OPR_SREG, vsrcy2)' in cpp
+    assert 'Operand(64, OperandType::OPR_SREG' not in cpp
+    assert 'srcx2_.set_wave_mask();' in cpp
+    assert 'srcy2_.set_wave_mask();' in cpp
+
+
 def test_bf16_mad_mix_half_updates_read_destination_operand():
     codegen = object.__new__(CodeGenerator)
     codegen.semantics = SimpleNamespace(
