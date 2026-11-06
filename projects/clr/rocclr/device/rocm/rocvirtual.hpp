@@ -374,10 +374,31 @@ class VirtualGPU : public device::VirtualDevice {
     virtual bool IsBusy(const ProfilingSignal* signal) const = 0;
 
     //! The operations consuming the waits of the previous WaitingSignal call have been submitted
-    virtual void NoteWaitsSubmitted() {}
+    virtual void NoteWaitsSubmitted() { CloseOpenPins(); }
 
-    //! A GPU waiter will read the busy signal
-    virtual void NoteGpuWait(ProfilingSignal* /*signal*/) {}
+    //! A GPU waiter will read the busy signal. Every operation submitted until the next
+    //! WaitingSignal call may poll it, not just the one owning the following slot, so the signal
+    //! is pinned with a reference until the tracker proves those consumers passed it. aql_waiter
+    //! means the consumers are packets on this VirtualGPU's AQL queue, which may own no use.
+    void NoteGpuWait(ProfilingSignal* signal, bool aql_waiter);
+
+    //! A GPU wait captured by one WaitingSignal call. Holding a reference keeps the owner from
+    //! rearming the signal while a waiter may still read the old use.
+    struct PinnedWait {
+      ProfilingSignal* signal;
+      uint64_t close_seq = 0;         //!< Uses below this sequence consume the wait, 0 while open
+      uint64_t close_aql = 0;         //!< AQL packets below this slot consume the wait
+      uint64_t queue_gen = 0;         //!< HW queue generation of those packets
+      bool consumers_passed = false;  //!< The queue drained, so every AQL consumer launched
+      bool aql_waiter = false;        //!< The consumers are AQL packets on this queue
+    };
+
+    //! Closes the pins captured by the last WaitingSignal call at the next use sequence
+    void CloseOpenPins(uint64_t close_aql = 0, uint64_t queue_gen = 0);
+
+    //! Drops every pin, open, closed or awaiting a fence. The consumers must be complete or
+    //! abandoned.
+    void ReleaseAllPins();
 
     HwQueueEngine engine_ = HwQueueEngine::Unknown;  //!< Engine used in the current operations
     std::stack<ProfilingSignal*> signal_pool_irq_;   //!< The pool of free signals with interrupts
@@ -388,6 +409,15 @@ class VirtualGPU : public device::VirtualDevice {
     std::vector<ProfilingSignal*> external_signals_;  //!< External signals for a wait in this queue
     std::vector<hsa_signal_t> dynamic_queue_waits_;   //!< Extra raw signals for a wait in this queue
     std::vector<hsa_signal_t> waiting_signals_;       //!< Current waiting signals in this queue
+    uint64_t next_use_seq_ = 1;                       //!< Sequence number of the next use
+    //! Pinned GPU waits, oldest first. Closed pins precede the num_open_pins_ open ones, and
+    //! their close_seq never decreases along the deque. An open pin of AQL waiters may already
+    //! hold the close_seq of a fence use that followed it.
+    std::deque<PinnedWait> pins_;
+    size_t num_open_pins_ = 0;                        //!< Pins from the last WaitingSignal call
+    //! Closed pins of AQL waiters that no fence use followed yet, for LegacySignalTracker. The
+    //! next fence use moves them into pins_, after the closed pins and ahead of the open ones.
+    std::vector<ProfilingSignal*> unfenced_pins_;
   };
 
   //! Reads and resets each signal when it is handed out
@@ -404,9 +434,30 @@ class VirtualGPU : public device::VirtualDevice {
     hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
                                  hsa_signal_value_t init_value) override;
     bool IsBusy(const ProfilingSignal* signal) const override;
+    //! Closes the open pins. A pin of AQL waiters closes at the first fence use after it, since
+    //! its consumers may own no use; until then it waits in unfenced_pins_.
+    void NoteWaitsSubmitted() override;
+
+    //! A fence use, whose packet was published on the AQL queue with the barrier bit, starts at
+    //! fence_seq. Its completion proves that every earlier packet on the queue completed, so it
+    //! closes the pins of AQL waiters that no fence followed yet at fence_seq + 1.
+    void NoteFence(uint64_t fence_seq);
 
     //! Wait for the next active signal
     void WaitNext();
+
+    //! Records that the use of a slot signal completed. AcquireSlot reuses the slots in use
+    //! order and waits each use before its reuse, so every earlier use completed too.
+    void NoteCompleted(const ProfilingSignal* signal);
+
+    //! Reads, without waiting, the uses following the next slot until one is busy or every
+    //! closed pin's consumers are proven complete
+    void ProbeCompleted();
+
+    //! Drops the closed pins whose consumers all completed
+    void ReleasePins();
+
+    uint64_t completed_below_seq_ = 1;  //!< Every use below this sequence completed
   };
 
   //! Proves reuse from host memory instead of reading every signal, and rearms signals ahead of
@@ -437,17 +488,6 @@ class VirtualGPU : public device::VirtualDevice {
                                  hsa_signal_value_t init_value) override;
     bool IsBusy(const ProfilingSignal* signal) const override;
     void NoteWaitsSubmitted() override;
-    void NoteGpuWait(ProfilingSignal* signal) override;
-
-    //! Signals a set of GPU waits captured in one WaitingSignal call. Holding a reference keeps
-    //! the owner from rearming them while a waiter may still read the old use.
-    struct PinnedWaits {
-      std::vector<ProfilingSignal*> signals;
-      uint64_t close_seq = 0;   //!< Uses below this sequence consume the waits
-      uint64_t close_aql = 0;   //!< AQL packets below this slot consume the waits
-      uint64_t queue_gen = 0;   //!< HW queue generation of those packets
-      bool consumers_passed = false;  //!< The queue drained, so every AQL consumer launched
-    };
 
     //! True if the last use of the signal is known to be complete without reading its value
     bool IsRetired(const ProfilingSignal* signal) const;
@@ -520,7 +560,6 @@ class VirtualGPU : public device::VirtualDevice {
     static constexpr uint32_t kSpareBatch = 64;   //!< Signals per spare pool allocation
     static constexpr size_t kMaxFences = 256;     //!< Fence uses tracked per queue
 
-    uint64_t next_use_seq_ = 1;       //!< Sequence number of the next use
     uint64_t oldest_unretired_seq_ = 1;  //!< Every use below this sequence completed
     uint64_t queue_gen_ = 1;          //!< Generation of the current HW queue
     uint64_t retired_below_ = 0;      //!< Every packet below this slot on queue_gen_ completed
@@ -533,8 +572,6 @@ class VirtualGPU : public device::VirtualDevice {
     //! Retired signals swapped out while shared, oldest first. Reusing them avoids destroying and
     //! recreating device-memory signals.
     std::deque<ProfilingSignal*> parked_signals_;
-    PinnedWaits open_pins_;                        //!< Pins from the last WaitingSignal call
-    std::deque<PinnedWaits> closed_pins_;          //!< Pins waiting for their consumers
     ProfilingSignal* unflushed_store_ = nullptr;  //!< Last direct store not yet flushed
     hsa_signal_value_t unflushed_value_ = 0;      //!< Value of unflushed_store_
   };
