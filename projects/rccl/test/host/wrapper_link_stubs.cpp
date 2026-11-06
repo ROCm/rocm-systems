@@ -101,6 +101,7 @@ int ncclParamWorkArgsBytes() { return 0; }
 // --- HIP runtime stubs (return hipSuccess = 0) ---
 extern "C" {
 int hipHostFree(void*) { return 0; }
+int hipGetDeviceCount(int* count) { if (count) *count = 0; return 0; }
 const char* hipGetErrorString(int) { return "stub"; }
 int hipGetLastError() { return 0; }
 int hipMemAddressFree(void*, size_t) { return 0; }

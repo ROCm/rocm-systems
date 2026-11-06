@@ -788,7 +788,9 @@ def _parse_cdna_specs(*names: str):
     return specs
 
 
-def test_parser_separates_logical_arch_directory_and_cpp_namespace():
+def test_decoder_tables_follow_cpp_namespace_independently_of_output_directory(
+    tmp_path: Path,
+):
     class IdentityOverrideRdna4Profile(Rdna4Profile):
         @property
         def generated_dir_name(self) -> str:
@@ -799,11 +801,23 @@ def test_parser_separates_logical_arch_directory_and_cpp_namespace():
             return 'test_rdna4_namespace'
 
     isa_xml = _mrisa_dir() / 'amdgpu_isa_rdna4.xml'
-    spec = Parser(str(isa_xml), IdentityOverrideRdna4Profile()).isa_spec
+    spec = Parser(str(isa_xml), IdentityOverrideRdna4Profile()).parse()
 
     assert spec.arch_name == 'rdna4'
     assert spec.generated_dir_name == 'test_generated_rdna4'
     assert spec.cpp_namespace == 'test_rdna4_namespace'
+
+    semantics = derive_all_semantics(spec)
+    for namespace in ('test_rdna4_namespace', 'other_rdna4_namespace'):
+        spec.cpp_namespace = namespace
+        CodeGenerator(spec, str(tmp_path), semantics).gen_decoder()
+        root = tmp_path / spec.generated_dir_name
+        decoder = (root / 'decoder.cpp').read_text()
+        assembly = (root / 'decode_tables.S').read_text()
+        assert f'namespace {namespace} {{' in decoder
+        symbol = f'rj_{namespace}_table_primary_decode_table'
+        assert f'RJ_DECODE_SYMBOL({symbol})' in decoder
+        assert f'rj_table_begin {symbol}' in assembly
 
 
 @pytest.mark.parametrize(
@@ -1208,20 +1222,79 @@ def test_rdna4_parser_injects_s_waitcnt_compat():
     assert dte.sub_decode_funcs[9] == 'decodeSWaitcntSopp'
 
 
+def _decode_targets(arch_root: Path, table: str) -> list[str]:
+    tables_inc = (arch_root / 'decode_tables.inc').read_text()
+    macro = f'RJ_{table.upper()}_ROWS'
+    definitions = dict(
+        re.findall(
+            rf'^#define ({macro}(?:_\d+)?)\s+(.+)$',
+            tables_inc.replace('\\\n', ''),
+            re.MULTILINE,
+        )
+    )
+    rows = definitions[macro].strip()
+    if len(definitions) > 1:
+        chunks = rows.split()
+        assert [*chunks, macro] == list(definitions)
+        rows = ' '.join(definitions[chunk] for chunk in chunks)
+    cases, scope, name, gaps = re.split(r'RJ_DECODE_DEFAULT\((\w+),\s*(\w+)\)', rows)
+    default = f'{scope}::{name}'
+    assert 'RJ_DECODE_GAP(' not in cases
+    assert not re.search(r'RJ_DECODE_(?:CASE|ALIAS)\(', gaps)
+    targets = {}
+    alias = None
+    for kind, first, count, scope, name in re.findall(
+        r'RJ_DECODE_(CASE|ALIAS|GAP)\((\d+),\s*(?:(\d+),\s*)?(\w+),\s*(\w+)\)', rows
+    ):
+        target = f'{scope}::{name}'
+        assert bool(count) == (kind == 'GAP')
+        if kind == 'GAP':
+            assert target == default
+        # A portable alias falls through to the next returning case.
+        assert alias is None or alias == target
+        alias = target if kind == 'ALIAS' else None
+        first_slot = int(first)
+        slot_count = int(count) if count else 1
+        for slot in range(first_slot, first_slot + slot_count):
+            assert slot not in targets
+            targets[slot] = '&' + target
+    assert alias is None
+    return [targets[i] for i in range(len(targets))]
+
+
+def test_decode_rows_cover_each_declared_table(amdgpu_generated_root: Path):
+    for source in sorted(amdgpu_generated_root.glob('*/decoder.cpp')):
+        decoder = source.read_text()
+        assembly = source.with_name('decode_tables.S').read_text()
+        tables = re.findall(
+            r'DecodeTable<DecodeFactory \*, (\d+)>\s+(\w+)\s+RJ_DECODE_SYMBOL\((\w+)\)',
+            decoder,
+        )
+        assert tables, source
+        for size, table, symbol in tables:
+            macro = f'RJ_{table.upper()}_ROWS'
+            switch = decoder.split(f'return {table}[', 1)[1].split('#endif', 1)[0]
+            assert re.search(rf'\b{macro}\b', switch)
+            assert (
+                f'rj_table_begin {symbol}\n{macro}\nrj_table_end {symbol}, {size}'
+                in assembly
+            )
+            assert len(_decode_targets(source.parent, table)) == int(size), (
+                source,
+                table,
+            )
+
+
 def test_gfx1250_generated_inventory_omits_legacy_s_waitcnt(
     gfx1250_generated_root: Path,
 ):
     opcodes = (gfx1250_generated_root / 'opcodes.h').read_text()
-    decoder = (gfx1250_generated_root / 'decoder.cpp').read_text()
 
     assert 'kSWaitcntSopp' not in opcodes
-    table_start = decoder.index('DecoderImpl::sub_decode_sopp = {')
-    table_end = decoder.index('\n};', table_start)
-    decode_targets = re.findall(
-        r'&(detail|DecoderImpl)::([A-Za-z0-9_]+)',
-        decoder[table_start:table_end],
+    assert (
+        _decode_targets(gfx1250_generated_root, 'sub_decode_sopp')[9]
+        == '&DecoderImpl::decodeInvalid'
     )
-    assert decode_targets[9] == ('DecoderImpl', 'decodeInvalid')
 
 
 def _fake_sopp_parser(arch_name: str, *, sub_decode_funcs: list[str | None] | None):
@@ -2699,6 +2772,31 @@ def test_matrix_acc_cd_destination_uses_encoding_field_presence(mnemonic):
     [
         ('(void)wf; throw util::UnimplementedInst(mnemonic());', True),
         (
+            'wf.report_instruction_execution_error('
+            'amdgpu::InstructionExecutionError::UnimplementedInstruction); return;',
+            True,
+        ),
+        (
+            '/* failure only */ (void)wf; wf.report_instruction_execution_error(\n'
+            'amdgpu::InstructionExecutionError::UnimplementedInstruction); // reason\n',
+            True,
+        ),
+        (
+            'if (unsupported) { wf.report_instruction_execution_error('
+            'amdgpu::InstructionExecutionError::UnimplementedInstruction); return; }',
+            False,
+        ),
+        (
+            'wf.halt(); wf.report_instruction_execution_error('
+            'amdgpu::InstructionExecutionError::UnimplementedInstruction); return;',
+            False,
+        ),
+        (
+            'wf.report_instruction_execution_error('
+            'amdgpu::InstructionExecutionError::UnimplementedInstruction); return; wf.halt();',
+            False,
+        ),
+        (
             '// Unimplemented sparse matrix operation.\n'
             '(void)wf;\nthrow util::UnimplementedInst(mnemonic()); // detail',
             True,
@@ -2718,6 +2816,115 @@ def test_matrix_acc_cd_destination_uses_encoding_field_presence(mnemonic):
 )
 def test_unimplemented_execute_stub_requires_unconditional_failure(body, expected):
     assert CodeGenerator._is_unimplemented_execute_stub(body) is expected
+
+
+@pytest.mark.parametrize(
+    ('semantic_class', 'name'),
+    [
+        ('nop', 'S_UNSUPPORTED'),
+        ('buffer_load_format_d16', 'BUFFER_LOAD_FORMAT_D16_X'),
+        ('buffer_store_format_d16', 'BUFFER_STORE_FORMAT_D16_X'),
+        ('future_semantics', 'UNSUPPORTED'),
+        ('flat_atomic', 'FLAT_ATOMIC_UNSUPPORTED'),
+        ('buffer_atomic', 'BUFFER_ATOMIC_UNSUPPORTED'),
+        ('ds_atomic', 'DS_ATOMIC_UNSUPPORTED'),
+        ('ds_append_consume', 'DS_APPEND_UNSUPPORTED'),
+    ],
+)
+def test_latent_execute_fallbacks_report_failure_without_preparing_execution(
+    semantic_class, name
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='cdna5', profile=Cdna5Profile(), encoding_map={}, inst_encodings=[]
+    )
+    inst = Instruction(name, 'ENC_SOPP', 0, [])
+    sem = InstructionSemantics(name, semantic_class)
+    body = codegen._gen_execute_body(inst, sem, inst.enc_name)
+    assert 'throw ' not in body
+    assert 'InstructionExecutionError::UnimplementedInstruction' in body
+    assert 'return;' in body
+    assert 'set_data(' not in body
+    assert 'RegisterAccess' not in body
+    assert 'wf.cu()' not in body
+    assert CodeGenerator._is_unimplemented_execute_stub(body)
+
+
+@pytest.mark.parametrize(
+    ('operation', 'direct_operands'),
+    [
+        ('sr_pk_fp4_f32', ['data_src']),
+        ('pk32_fp6_f32', ['vdst', 'src0']),
+        ('2xpk16_fp6_f32', ['vdst', 'src0', 'src1']),
+        ('pk32_f32_fp6', ['vdst', 'src0']),
+        ('sr_pk32_fp6_f32', ['vdst', 'src0']),
+    ],
+)
+def test_latent_scalef32_checks_every_direct_operand_before_execution(
+    operation, direct_operands
+):
+    body = gen_cvt_scalef32(
+        SimpleNamespace(
+            op=operation,
+            dst_ops=['vdst'],
+            src_ops=['src0', 'src1', 'src2'],
+            arch_name='cdna4',
+        )
+    )
+    assert 'throw ' not in body
+    lane_loop = body.index('for (uint32_t lane')
+    for operand in direct_operands:
+        guard = re.search(rf'if\s*\(!{operand}_off\)\s*{{([^}}]*)}}', body)
+        assert guard is not None
+        rejection = guard.group(1)
+        assert 'InstructionExecutionError::UnsupportedOperandValue' in rejection
+        assert 'return;' in rejection
+        assert guard.end() < lane_loop
+
+
+@pytest.mark.parametrize('conditional', [False, True])
+def test_failure_stub_recognition_keeps_conditional_modifier_restoration(
+    tmp_path, monkeypatch, conditional
+):
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna2.xml'), Rdna2Profile()).parse()
+    codegen = CodeGenerator(spec, str(tmp_path), derive_all_semantics(spec))
+    original = codegen._gen_execute_body
+    failure = (
+        '  wf.report_instruction_execution_error(\n'
+        '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+        '  return;\n'
+    )
+
+    def emit(inst, sem, enc_name='', result_writer=None):
+        body = original(inst, sem, enc_name, result_writer)
+        if inst.name == 'V_MOV_B32' and enc_name == 'ENC_VOP1':
+            return (
+                ('  if (wf.exec() == 0) {\n' + failure + '  }\n' + body)
+                if conditional
+                else failure
+            )
+        return body
+
+    monkeypatch.setattr(codegen, '_gen_execute_body', emit)
+    codegen.gen_all()
+    source = (tmp_path / 'rdna2' / 'vop1_exec.cpp').read_text()
+    signature = 'void VMovB32Vop1::execute_modifier_impl'
+    if conditional:
+        modifier = _generated_function_body(source, signature)
+        assert 'ScopedOperandDelegate' in modifier
+        assert 'ScopedVgprWriteMask' in modifier
+        assert 'sdwa::stage_source' in modifier
+        assert '.restore();' in modifier
+        assert 'execute_v_mov_b32_vop1' in modifier
+        shared_body = codegen._shared_execute_bodies[('v_mov_b32', 'ENC_VOP1')][2]
+        assert 'InstructionExecutionError::UnimplementedInstruction' in shared_body
+        assert 'return;' in shared_body
+    else:
+        assert signature not in source
+        body = _generated_function_body(source, 'void VMovB32Vop1::execute_impl')
+        assert 'InstructionExecutionError::UnimplementedInstruction' in body
+        assert 'apply_dpp' not in body
+        assert 'stage_source' not in body
 
 
 @pytest.mark.parametrize(
@@ -5192,7 +5399,7 @@ def test_gfx11_graphics_sources_use_vgpr_selectors():
         assert (
             profile.normalize_operand_type('ENC_DS', 'data0', 'OPR_VGPR') == 'OPR_VGPR'
         )
-        assert profile.has_gfx11_image_address_extension
+        assert profile.mimg_nsa_dword_count_expr == '1u'
 
 
 def test_rdna3_5_disassembly_overrides_do_not_change_rdna3():
@@ -7457,7 +7664,12 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
         maxsplit=1,
     )[1].split('DecodeResult DecoderImpl::decodeInvalid', 1)[0]
     assert 'isWmmaScaleF32Vop3px2' not in decode_body
-    assert decoder.count('&DecoderImpl::decodeVWmmaScaleF32Vop3px2,') == 2
+    assert (
+        _decode_targets(gfx1250_generated_root, 'sub_decode_vop3p').count(
+            '&DecoderImpl::decodeVWmmaScaleF32Vop3px2'
+        )
+        == 2
+    )
     assert 'if (!isVop3pOp(opcode[2], 0x33)' in decoder
     assert 'if (!isGfx1250WmmaScalePairValid(opcode))' in decoder
 
@@ -7471,8 +7683,8 @@ def test_generated_decoders_publish_instruction_lookahead_bounds(
         'cdna3': 2,
         'cdna4': 4,
         'cdna5': 4,
-        'rdna1': 3,
-        'rdna2': 3,
+        'rdna1': 5,
+        'rdna2': 5,
         'rdna3': 3,
         'rdna3_5': 3,
         'rdna4': 3,
@@ -7494,8 +7706,8 @@ def test_generated_decoders_publish_instruction_lookahead_bounds(
         ('cdna3', CdnaProfile, 2),
         ('cdna4', Cdna4Profile, 4),
         ('cdna5', Cdna5Profile, 4),
-        ('rdna1', Rdna1Profile, 3),
-        ('rdna2', Rdna2Profile, 3),
+        ('rdna1', Rdna1Profile, 5),
+        ('rdna2', Rdna2Profile, 5),
         ('rdna3', Rdna3Profile, 3),
         ('rdna3_5', Rdna3_5Profile, 3),
         ('rdna4', Rdna4Profile, 3),
@@ -7614,12 +7826,7 @@ def test_vopd_dispatch_uses_primary_decode_table(
     )[1].split('DecodeResult DecoderImpl::decodeInvalid', 1)[0]
 
     assert 'Vopd::is_vopd' not in decode_body
-    primary_table = decoder.split('DecoderImpl::primary_decode_table = {', 1)[1].split(
-        '\n};', 1
-    )[0]
-    primary_entries = re.findall(
-        r'&(?:DecoderImpl|detail)::[A-Za-z0-9_]+', primary_table
-    )
+    primary_entries = _decode_targets(arch_root, 'primary_decode_table')
     assert len(primary_entries) == 512
     actual_vopd_indices = {
         index
@@ -7654,7 +7861,7 @@ def test_decoder_header_keeps_dispatch_details_private(
     ):
         arch_root = amdgpu_generated_root / _generated_dir_name(arch_name)
         decoder_header = (arch_root / 'decoder.h').read_text()
-        assert 'DecodeFunc' not in decoder_header
+        assert 'DecodeFactory' not in decoder_header
         assert 'decodeInvalid' not in decoder_header
         assert 'primary_decode_table' not in decoder_header
         assert decoder_header.count('static DecodeResult decode(') == 1

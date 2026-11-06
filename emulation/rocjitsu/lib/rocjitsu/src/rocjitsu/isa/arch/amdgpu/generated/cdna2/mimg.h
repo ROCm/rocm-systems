@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 
 namespace rocjitsu {
 namespace cdna2 {
@@ -18,6 +19,14 @@ class ImageLoadMimg : public Mimg {
 public:
   ImageLoadMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::contiguous_image_address_registers(inst_.vaddr);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = 3;
+  }
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -72,6 +81,14 @@ class ImageStoreMimg : public Mimg {
 public:
   ImageStoreMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::contiguous_image_address_registers(inst_.vaddr);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = 3;
+  }
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
