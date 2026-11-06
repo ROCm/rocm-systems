@@ -65,13 +65,14 @@ ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitValue64,          hipStreamWaitValue64);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemcpyBatchAsync,           hipMemcpyBatchAsync);
 #endif
 ASSERT_HOOK_MATCHES_PROD(g_hipMemset,                     hipMemset);
-ASSERT_HOOK_MATCHES_PROD(g_hipHostRegister,               hipHostRegister);
-ASSERT_HOOK_MATCHES_PROD(g_hipHostGetDevicePointer,       hipHostGetDevicePointer);
-ASSERT_HOOK_MATCHES_PROD(g_hipHostUnregister,             hipHostUnregister);
 ASSERT_HOOK_MATCHES_PROD(g_hipFuncSetAttribute,           hipFuncSetAttribute);
 #define RCCL_ASSERT_INTERCEPTOR_HOOK(name, params) ASSERT_HOOK_MATCHES_PROD(g_##name, name);
 RCCL_HIP_PROFILE_INTERCEPTORS_HOOKED(RCCL_ASSERT_INTERCEPTOR_HOOK)
 #undef RCCL_ASSERT_INTERCEPTOR_HOOK
+
+ASSERT_HOOK_MATCHES_PROD(g_hipHostRegister,               hipHostRegister);
+ASSERT_HOOK_MATCHES_PROD(g_hipHostGetDevicePointer,       hipHostGetDevicePointer);
+ASSERT_HOOK_MATCHES_PROD(g_hipHostUnregister,             hipHostUnregister);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 

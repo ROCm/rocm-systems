@@ -294,6 +294,14 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `argcheck-test.cc`); suite `Argcheck*`. Its own binary because the test seams HIP,
   `ncclDevrFindWindow` and `bootstrapAllGather` around a unit other binaries link whole.
   See `test_categories_micro_argcheck.yaml`.
+- **`rccl-UnitTestsMicroLinux`**: `os/linux.cc` (`LINUX_CC_PATH`, from `linux-test.cc`),
+  plus `os/linux_ipcsocket.cc`, `os/linux_socket_pair.cc`, `misc/socket.cc`,
+  `misc/shmutils.cc` and `misc/signals.cc`, one test TU each; suites `Linux*`,
+  `Socket*`, `Shmutils*`, `Signals*`. Its own binary: `fakes/os_fakes.cc`, which most
+  targets link, defines `ncclOsInitialize`, `ncclOsTopoGetStrFromSys` and other `ncclOs*`
+  symbols `os/linux.cc` defines. The units run on real sockets and files through
+  `fakes/libc_seam.h` with `UseRealLibc()`. See `test_categories_micro_linux.yaml`.
+
 - **`rccl-UnitTestsMicroCpuset`** — header-only `include/cpuset.h` (from `cpuset-test.cc`);
   suite `Cpuset*`. Its own binary because the test defines `os/linux.cc`'s
   `ncclOsCpuZero` / `ncclOsCpuSet` / `ncclOsCpuIsSet` one-liners, which would
@@ -364,14 +372,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   so a fake tests this binary's own error-propagation logic just as well
   without pulling in that file's dependency floor. See
   `test_categories_micro_scheduler.yaml`.
-
-- **`rccl-UnitTestsMicroLinux`**: `os/linux.cc` (`LINUX_CC_PATH`, from `linux-test.cc`),
-  plus `os/linux_ipcsocket.cc`, `os/linux_socket_pair.cc`, `misc/socket.cc`,
-  `misc/shmutils.cc` and `misc/signals.cc`, one test TU each; suites `Linux*`,
-  `Socket*`, `Shmutils*`, `Signals*`. Its own binary: `fakes/os_fakes.cc`, which most
-  targets link, defines `ncclOsInitialize`, `ncclOsTopoGetStrFromSys` and other `ncclOs*`
-  symbols `os/linux.cc` defines. The units run on real sockets and files through
-  `fakes/libc_seam.h` with `UseRealLibc()`. See `test_categories_micro_linux.yaml`.
 
 - **`rccl-UnitTestsMicroTaskPrep`** — `src/enqueue/task_prep/task_prep.cc` (via
   `TASK_PREP_CC_PATH`, suite `TaskPrepMicrotest.*`),
