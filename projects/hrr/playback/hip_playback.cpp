@@ -4362,6 +4362,15 @@ hipError_t playback_hipGraphInstantiateWithFlags(PlaybackContext& ctx,
     return r;
 }
 
+// hipStreamPerThread is a token rather than a stream capture saw created, so
+// translate_stream would send it, and the null stream of an _spt call, to the
+// legacy null stream. Both mean this thread's default stream.
+static hipStream_t spt_aware_stream(PlaybackContext& ctx, uint64_t rec, bool spt) {
+    if (rec == reinterpret_cast<uint64_t>(hipStreamPerThread) || (spt && rec == 0))
+        return hipStreamPerThread;
+    return ctx.translate_stream(rec);
+}
+
 // ---------------------------------------------------------------------------
 // Manual playback: hipGraphLaunch
 // ---------------------------------------------------------------------------
@@ -4403,7 +4412,7 @@ static hipError_t playback_graph_launch(PlaybackContext& ctx, const uint8_t* pay
         }
     }
 
-    hipStream_t stream = ctx.translate_stream(a->stream);
+    hipStream_t stream = spt_aware_stream(ctx, a->stream, spt);
     if (n) {
         if (hipError_t sr = restore_host_snapshots(ctx, rec, n, stream, api); sr != hipSuccess)
             return sr;
@@ -4950,15 +4959,6 @@ hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
     return replay_memcpy3d(ctx, pl, /*spt=*/false);
 }
 
-// hipStreamPerThread is a token rather than a stream capture saw created, so
-// translate_stream would send it, and the null stream of an _spt call, to the
-// legacy null stream. Both mean this thread's default stream.
-static hipStream_t memcpy3d_async_stream(PlaybackContext& ctx, uint64_t rec, bool spt) {
-    if (rec == reinterpret_cast<uint64_t>(hipStreamPerThread) || (spt && rec == 0))
-        return hipStreamPerThread;
-    return ctx.translate_stream(rec);
-}
-
 static hipError_t replay_memcpy3d_async(PlaybackContext& ctx, const uint8_t* pl, bool spt) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpy3DAsync*>(pl);
     hipMemcpy3DParms parms{};
@@ -4969,7 +4969,7 @@ static hipError_t replay_memcpy3d_async(PlaybackContext& ctx, const uint8_t* pl,
     if (memcpy3d_is_host_array(parms))
         return refuse_host_array_copy(ctx, spt ? "hipMemcpy3DAsync_spt" : "hipMemcpy3DAsync",
                                       parms, a->d2h_hash_lo, a->d2h_hash_hi);
-    hipStream_t stream = memcpy3d_async_stream(ctx, a->stream, spt);
+    hipStream_t stream = spt_aware_stream(ctx, a->stream, spt);
 
     if (parms.kind == hipMemcpyHostToDevice) {
         hipError_t r = memcpy3d_h2d_src(ctx, "hipMemcpy3DAsync", a->blob_hash_lo,
