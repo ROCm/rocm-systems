@@ -113,7 +113,7 @@ __CG_STATIC_QUALIFIER__ unsigned long long adjust_mask(unsigned long long base_m
  * @brief Drain the asynchronous global<->LDS copies issued by this wave.
  *
  * The copies behind `cooperative_groups::memcpy_async` complete out of band and are tracked by
- * ASYNCcnt, which is per-wave and is not drained by a barrier. Each wave therefore has to drain
+ * ASYNCcnt or TENSORcnt, which are per-wave and are not drained by a barrier. Each wave must drain
  * its own counter, and it has to do so before the group barrier, so that the barrier is what
  * publishes the data to the rest of the group.
  */
@@ -121,6 +121,10 @@ __CG_STATIC_QUALIFIER__ void wait_async_copies() {
 #if __has_builtin(__builtin_amdgcn_s_wait_asynccnt)
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_wait_asynccnt))
     __builtin_amdgcn_s_wait_asynccnt(0);
+#endif
+#if __has_builtin(__builtin_amdgcn_s_wait_tensorcnt)
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_wait_tensorcnt))
+    __builtin_amdgcn_s_wait_tensorcnt(0);
 #endif
 }
 
@@ -425,7 +429,7 @@ __CG_STATIC_QUALIFIER__ unsigned int num_threads() {
 
 __CG_STATIC_QUALIFIER__ unsigned int thread_rank() {
   return block_rank() * (blockDim.x * blockDim.y * blockDim.z) +
-      ((threadIdx.z * blockDim.y * blockDim.x) + (threadIdx.y * blockDim.x) + threadIdx.x);
+         ((threadIdx.z * blockDim.y * blockDim.x) + (threadIdx.y * blockDim.x) + threadIdx.x);
 }
 
 template <typename T> __CG_STATIC_QUALIFIER__ T* map_shared_rank(T* in, int rank) {
@@ -441,7 +445,8 @@ template <typename T> __CG_STATIC_QUALIFIER__ T* map_shared_rank(T* in, int rank
 __CG_STATIC_QUALIFIER__ unsigned int query_shared_rank(const void* in) {
 #if __has_builtin(__builtin_amdgcn_query_shared_rank)
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_query_shared_rank)) {
-    return static_cast<unsigned int>(__builtin_amdgcn_query_shared_rank((__attribute__((address_space(11))) const void*)in));
+    return static_cast<unsigned int>(
+        __builtin_amdgcn_query_shared_rank((__attribute__((address_space(11))) const void*)in));
   } else {
     __builtin_trap();
     return 0;
