@@ -369,6 +369,21 @@ collected in the following table.
       - | Protocol name string
         | Used to override automatic protocol selection
 
+    * - | ``RCCL_P2P_BATCH_THRESHOLD``
+        | Per-peer byte size above which point-to-point sends and receives are
+        | not fused into one batch. Send and receive sizes must be equal to
+        | fuse. This does not turn batching on; that is
+        | ``RCCL_P2P_BATCH_ENABLE``.
+        | A negative value selects the architecture default: 64 KiB on gfx950
+        | (MI350) with 16 or more nodes, and no size limit elsewhere. An
+        | explicit ``-1`` is the same as leaving the variable unset. A
+        | non-negative value, including ``65536``, is the cutoff on every
+        | architecture. ``0`` fuses no positive-size message.
+      - | Integer byte count.
+        | Default: ``-1`` (architecture default).
+        | Negative: architecture default.
+        | ``0`` or greater: cutoff on every architecture.
+
     * - | ``RCCL_DIRECT_ALLGATHER_DISABLE``
         | Controls the direct AllGather algorithm. Because the algorithm builds a full
           point-to-point mesh, its queue-pair footprint grows with the square
