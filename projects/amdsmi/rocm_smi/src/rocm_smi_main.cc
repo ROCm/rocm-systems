@@ -1283,8 +1283,17 @@ uint32_t RocmSMI::DiscoverBRCMswitchDevices(void) {
   switch_devices_.clear();
   switch_monitors_.clear();
 
+  errno = 0;
   auto scsi_host_dir = opendir(kPathSwitchRoot);
   if (scsi_host_dir == nullptr) {
+    // A kernel built without SCSI support (CONFIG_SCSI=n) has no scsi_host
+    // class, so there is no switch to discover. That is not an error.
+    if (errno == ENOENT) {
+      ss << __PRETTY_FUNCTION__ << " | " << kPathSwitchRoot
+         << " does not exist; no switch devices to discover.";
+      LOG_DEBUG(ss);
+      return 0;
+    }
     err_msg =
         "Failed to open scsi_host root directory, while DiscoverBRCMswitchDevices and graceful "
         "exit.";
