@@ -529,7 +529,6 @@ bool Device::init() {
   // Query active devices only
   devices = getDevices(CL_DEVICE_TYPE_GPU, kNoOfflineDevices);
   if (devices.size() > 0) {
-    bool p2p_available = false;
     // Loop through all available devices
     for (auto device1 : devices) {
       // Find all agents that can have access to the current device
@@ -540,9 +539,20 @@ bool Device::init() {
             // Device2 can have access to device1
             device2->p2pDevices_.push_back(as_cl(device1));
             device1->p2p_access_devices_.push_back(device2);
-            p2p_available = true;
           }
         }
+      }
+    }
+
+    // Staging is needed whenever at least one directed pair cannot be reached
+    // directly. A fully connected topology never falls back to staging.
+    bool staging_required = false;
+    for (auto device : devices) {
+      // p2pDevices_ lists the devices that can access this device, excluding
+      // itself. A fully connected fabric has devices.size() - 1 entries.
+      if (device->p2pDevices_.size() + 1 < devices.size()) {
+        staging_required = true;
+        break;
       }
     }
 
@@ -553,8 +563,13 @@ bool Device::init() {
       return false;
     }
 
-    // Allocate a staging buffer for P2P emulation path
-    if ((devices.size() >= 1) && !p2p_available) {
+    // Allocate the staging buffer for the P2P emulation path whenever more
+    // than one device is present. A topology can have at least one usable
+    // direction (the old p2p_available flag) while other directed pairs are
+    // still unaddressable, for example a peer BAR above the source's DMA mask
+    // with an identity IOMMU. Those pairs fall back to staging, so the buffer
+    // is required even when some direction works.
+    if (devices.size() > 1) {
       amd::Buffer* buf =
           new (*glb_ctx_) amd::Buffer(*glb_ctx_, CL_MEM_ALLOC_HOST_PTR, kP2PStagingSize);
       if ((buf != nullptr) && buf->create()) {
@@ -562,7 +577,13 @@ bool Device::init() {
       } else {
         delete buf;
         LogError("p2p stg buffer alloc failed");
-        return false;
+        // A topology that needs staging cannot complete those copies without
+        // the buffer. Fail init instead of silently turning every such copy
+        // into a no-op. On a fully connected fabric the buffer is unused, so
+        // the runtime stays usable.
+        if (staging_required) {
+          return false;
+        }
       }
     }
 
