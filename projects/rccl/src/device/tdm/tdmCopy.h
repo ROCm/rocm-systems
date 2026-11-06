@@ -648,14 +648,16 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
 
   const uint32_t window = (ldsUsable / issuers) & ~15u;
   const uint32_t nSlots = window >= 2 * MIN_SLOT && (r || window >= TWO_SLOT_WINDOW) ? 2 : 1;
-  const uint32_t slotBytes = (window / nSlots) & ~15u;
+  const uint32_t slotBytes = (nSlots == 2 ? window >> 1 : window) & ~15u;
   // slot + o + chunkBytes (plus the shift's slack) fits; MIN_SLOT keeps chunkBytes >= ALIGN
   uint32_t chunkBytes = (slotBytes - o - (r ? SHIFT_SLACK : 0)) & ~(ALIGN - 1);
   if (chunkBytes > MAX_CHUNK) chunkBytes = MAX_CHUNK;
 
-  // distribute the ALIGN-byte units across issuers by team rank (contiguous)
-  const size_t base = units / issuers;
-  const size_t extra = units % issuers;
+  // distribute the ALIGN-byte units across issuers by team rank (contiguous). units fits
+  // 32 bits for any copy under 1 TiB, so the division skips the 64-bit expansion.
+  const uint32_t units32 = static_cast<uint32_t>(units);
+  const size_t base = units32 / issuers;
+  const size_t extra = units32 % issuers;
   const size_t myStart = rank * base + (rank < extra ? rank : extra);
   const size_t myUnits = base + (rank < extra ? 1u : 0u);
   const size_t begin = head + myStart * ALIGN;
@@ -689,6 +691,7 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
 
   // Two slots, ping-ponged; see HARDWARE MODEL above for why the wait drains to zero.
   uint32_t slot = 0;
+  size_t lastOff = 0;
   for (size_t off = 0; off < len; off += chunkBytes) {
     const uint32_t n = len - off < chunkBytes ? static_cast<uint32_t>(len - off) : chunkBytes;
     if (off) waitTensor0();
@@ -696,9 +699,9 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
     if (off == 0 && vecHead) warpVecCopy(s, d, head, warpThread, warpThreads);
     if (off) storeChunk(win + (slot ^ slotBytes), dB + off - chunkBytes, chunkBytes);
     slot ^= slotBytes;
+    lastOff = off;
   }
   waitTensor0();
-  const size_t lastOff = (len - 1) / chunkBytes * chunkBytes;
   storeChunk(win + (slot ^ slotBytes), dB + lastOff, static_cast<uint32_t>(len - lastOff));
 }
 
