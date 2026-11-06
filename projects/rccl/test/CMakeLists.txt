@@ -303,6 +303,7 @@ if(BUILD_TESTS)
     PipeUtilsTests.cpp
     VersionGateTests.cpp
     SendRecvTests.cpp
+    SendRecvSingleRankTests.cpp
     StandaloneTests.cpp
     SymmetricInPlaceSliceTests.cpp
     DdaIpcTests.cpp
