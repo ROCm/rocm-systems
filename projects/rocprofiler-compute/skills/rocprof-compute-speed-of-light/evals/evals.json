@@ -56,7 +56,6 @@
     {
       "id": "sol-instruction-level",
       "skill_should_trigger": false,
-      "note": "Peak comparison is not the question; this is per-instruction work.",
       "prompt": "which individual instruction in this kernel stalls the most?"
     },
     {
@@ -67,7 +66,6 @@
     {
       "id": "sol-hardware-spec-lookup",
       "skill_should_trigger": false,
-      "note": "Asks for a datasheet number, not a reading from a profile.",
       "prompt": "what is the theoretical peak FP64 throughput of an MI300X?"
     }
   ]
