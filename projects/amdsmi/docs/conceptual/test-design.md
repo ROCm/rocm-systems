@@ -235,6 +235,35 @@ replaying committed byte blobs instead of faking the interface that produced the
 Fixtures should be static, sanitized blobs so the tests stay deterministic and **run on any
 machine regardless of GPU** (see `mock_cper/README.md` for provenance).
 
+**To unit-test a functional test's own logic**, such as which values it writes, give its fixture a
+`protected` struct of `std::function` members for the APIs and host calls it makes (sysfs and
+`/proc` reads, processes it starts), and subclass the fixture in the unit test to replace them.
+Keep any library re-initialization in a `virtual` method the subclass can override, since
+`amdsmi_init` cannot be faked through a seam. `unit/gpu/memorypartition_read_write_test.cc`
+does this for `TestMemoryPartitionReadWrite`, so the real reload checks run against a fake host.
+
+#### Tests that reload amdgpu
+
+`TestMemoryPartitionReadWrite` and `test_memory_partition_cycle.py` both apply NPS modes by
+reloading amdgpu, behind `AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1`. With current library and amdgpu
+releases a staged mode cannot be cancelled, only applied by the next reload, so both follow
+the same rules:
+
+- Check every reload requirement before staging anything: `modprobe` at a fixed path, the
+  process holding CAP_SYS_MODULE, amdgpu loaded as a module, and no other user of amdgpu
+  after the test closes its own library session. Fail if one is missing.
+- Run `modprobe` from `/usr/sbin` or `/sbin` with a fixed environment and no shell.
+- Bound every wait: 120 s per `modprobe`, 10 s to reap one that ignores SIGKILL (then report
+  that the node needs a reboot and stop), and 60 s for the devices to come back.
+- Never leave amdgpu unloaded: retry a failed load once, but not a stuck one.
+- Treat a mode as applied only when every GPU reports it, and restore unless the readback
+  shows every GPU already on the starting mode.
+- Restore the accelerator profiles only after the memory partition is restored, retrying
+  BUSY and reading the profile back.
+- Name the staged mode in every failure that leaves one pending.
+Assert outcomes (what was requested, what failed), not call counts or order, so that a harmless
+extra read does not break the tests.
+
 ### CMake integration
 
 `tests/amd_smi_test/CMakeLists.txt` uses `file(GLOB_RECURSE ... CONFIGURE_DEPENDS)` to collect all

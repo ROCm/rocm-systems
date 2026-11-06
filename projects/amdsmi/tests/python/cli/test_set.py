@@ -79,7 +79,7 @@ class TestSet(TestCliBase):
                 )
 
             # set --memory-partition defaults
-            # Safe to write back: the mode only takes effect after a driver reload.
+            # The active mode only; it cannot cancel a mode already staged.
             memory_partition = self.partition_data["current_partition"][index]["memory"]
             if memory_partition != "N/A":
                 cmds.append(
