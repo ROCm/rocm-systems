@@ -61,6 +61,12 @@ jobs:
             profilers/profiler-hub
             .github/workflows
 
+      - name: Install integration test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip
+          python3 -m pip install -r profilers/profiler-hub/tests/integration/requirements.txt
+
       - name: Cache ccache
         uses: actions/cache@v6
         with:
