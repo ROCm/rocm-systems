@@ -856,10 +856,17 @@
 
     "gin_proxy_max_msg": {
       "extends": "gin_proxy",
-      "description": "Same GIN proxy tests with RCCL_IB_MAX_MSG_SIZE at 256 MiB.",
+      "description": "Same GIN proxy tests with RCCL_IB_MAX_MSG_SIZE at 256 MiB. Filters name RmaMPITest; the parent suite's GinMPITest filters match nothing.",
       "env_variables": {
         "RCCL_IB_MAX_MSG_SIZE": "268435456"
-      }
+      },
+      "tests": [
+        { "name": "A9_Gin_IPutBasic", "test_filter": "*RmaMPITest.IPutBasic*" },
+        { "name": "A10_Gin_IGetBasic", "test_filter": "*RmaMPITest.IGetBasic*" },
+        { "name": "A11_Gin_IPutSignal", "test_filter": "*RmaMPITest.IPutSignalInc*:*RmaMPITest.IPutSignalAdd*" },
+        { "name": "A12_Gin_MultipleInflight", "test_filter": "*RmaMPITest.MultipleInflightIPuts*:*RmaMPITest.MultipleInflightIGets*" },
+        { "name": "A13_Gin_IPutSignalStress10k", "test_filter": "*RmaMPIStressTest.IPutSignalStress10k*" }
+      ]
     },
 
     "cast_alltoall_full_max_msg": {

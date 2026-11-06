@@ -809,6 +809,61 @@ TEST_F(NetIbCastP2pIsendMicrotest, MultiSend_ChunkWithinTheCap_PostsOnce) {
   }
 }
 
+// The sizes immediate is not one of the data WRs. Splitting the first request must still post it,
+// signaled, after the data chunks.
+TEST_F(NetIbCastP2pIsendMicrotest, MultiSend_SplitRequest_KeepsTheSizesImmediate) {
+  constexpr uint32_t kCap = 1024u * 1024u;
+  IbCastMaxPostSendBytes = kCap;
+  WireSend();
+  send_->base.fifoHead = 5;
+  Cts(0, 2, 0x10, 2u * kCap, 3);
+  Cts(1, 2, 0x11, 64, 3);
+  void* first = nullptr;
+  void* second = nullptr;
+  ASSERT_EQ(Isend(2u * kCap, 0x10, &first), ncclSuccess);
+  ASSERT_EQ(Isend(64, 0x11, &second, buf_ + 0x800), ncclSuccess);
+
+  const auto& chain = Chain(0, 0);
+  ASSERT_EQ(chain.size(), 4u);
+  EXPECT_EQ(chain[0].wr.opcode, IBV_WR_RDMA_WRITE);
+  EXPECT_EQ(chain[0].wr.send_flags, 0);
+  EXPECT_EQ(chain[0].sge.length, kCap);
+  EXPECT_EQ(chain[1].wr.opcode, IBV_WR_RDMA_WRITE);
+  EXPECT_EQ(chain[1].wr.send_flags, 0);
+  EXPECT_EQ(chain[1].sge.length, kCap);
+  EXPECT_EQ(chain[1].sge.addr, (uint64_t)buf_ + kCap);
+  EXPECT_EQ(chain[2].wr.opcode, IBV_WR_RDMA_WRITE);
+  EXPECT_EQ(chain[2].sge.length, 64u);
+  EXPECT_EQ(chain[2].sge.addr, (uint64_t)(buf_ + 0x800));
+  EXPECT_EQ(chain[3].wr.opcode, IBV_WR_RDMA_WRITE_WITH_IMM);
+  EXPECT_EQ(chain[3].wr.send_flags, IBV_SEND_SIGNALED);
+  EXPECT_EQ(chain[3].wr.wr.rdma.remote_addr, kCmplsAddr + 5 * sizeof(ncclIbRequestCompletionRecord));
+  EXPECT_EQ(chain[3].sge.length, 2 * sizeof(int));
+}
+
+// Seventeen chunks do not fit in the stack work requests, so the post allocates them.
+TEST_F(NetIbCastP2pIsendMicrotest, MultiSend_MoreChunksThanTheStackHolds_PostsThemFromTheHeap) {
+  constexpr uint32_t kCap = 1024u * 1024u;
+  constexpr int kChunks = IB_CAST_MAX_STACK_WRS + 1;
+  constexpr size_t kSize = (size_t)kCap * (kChunks - 1) + 64;
+  IbCastMaxPostSendBytes = kCap;
+  WireSend();
+  Cts(0, 1, 1, kSize);
+  void* req = nullptr;
+  ASSERT_EQ(Isend(kSize, 1, &req), ncclSuccess);
+
+  const auto& posted = verbs_[0].posted;
+  ASSERT_EQ(posted.size(), (size_t)kChunks);
+  EXPECT_EQ(posted[0].opcode, IBV_WR_RDMA_WRITE);
+  EXPECT_EQ(posted[0].sendFlags, 0);
+  EXPECT_EQ(posted[0].sge.length, kCap);
+  EXPECT_EQ(posted[0].sge.addr, (uint64_t)buf_);
+  EXPECT_EQ(posted.back().opcode, IBV_WR_RDMA_WRITE_WITH_IMM);
+  EXPECT_EQ(posted.back().sendFlags, IBV_SEND_SIGNALED);
+  EXPECT_EQ(posted.back().sge.length, 64u);
+  EXPECT_EQ(posted.back().sge.addr, (uint64_t)buf_ + (size_t)kCap * (kChunks - 1));
+}
+
 TEST_F(NetIbCastP2pIsendMicrotest, Isend_RemapPoolExhausted_Fails) {
   WireSend();
   for (auto& r : send_->base.remapWrId) r.state = NCCL_NET_IB_REMAP_USED;

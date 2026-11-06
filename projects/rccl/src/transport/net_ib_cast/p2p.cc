@@ -120,11 +120,14 @@ static inline ncclResult_t IbCastPostDataWithinCap(struct ncclIbSendComm* comm, 
   struct ibv_sge stackSges[IB_CAST_MAX_STACK_WRS];
   struct ibv_send_wr* extraWrs = nullptr;
   struct ibv_sge* extraSges = nullptr;
-  ncclResult_t ret = ncclSuccess;
-
   struct ibv_send_wr* prev = nullptr;
   struct ibv_send_wr* sendHead = nullptr;
+  ncclResult_t ret = ncclSuccess;
   size_t used = 0;
+  // wrs[r].next is wrs[r + 1]. The last data WR points at the sizes write or the
+  // adaptive-routing immediate, and the QP loop leaves that chain in place.
+  struct ibv_send_wr* tail = comm->wrs[nreqs - 1].next;
+
   if (nSplit > IB_CAST_MAX_STACK_WRS) {
     NCCLCHECKGOTO(ncclCalloc(&extraWrs, nSplit), ret, out);
     NCCLCHECKGOTO(ncclCalloc(&extraSges, nSplit), ret, out);
@@ -132,7 +135,6 @@ static inline ncclResult_t IbCastPostDataWithinCap(struct ncclIbSendComm* comm, 
     extraWrs = stackWrs;
     extraSges = stackSges;
   }
-
 
   for (int r = 0; r < nreqs; r++) {
     if (!(comm->wrs[r].num_sge > 0 && comm->sges[r].length > IbCastMaxPostSendBytes)) {
@@ -148,38 +150,37 @@ static inline ncclResult_t IbCastPostDataWithinCap(struct ncclIbSendComm* comm, 
     int lkey = comm->sges[r].lkey;
     while (len > 0) {
       const uint32_t chunk = std::min(IbCastMaxPostSendBytes, len);
-
       extraWrs[used] = comm->wrs[r];
       extraSges[used].addr = local;
       extraSges[used].length = chunk;
       extraSges[used].lkey = lkey;
       extraWrs[used].sg_list = &extraSges[used];
-
       extraWrs[used].wr.rdma.remote_addr = remote;
       extraWrs[used].next = nullptr;
-
+      len -= chunk;
+      // Only the last chunk of this request keeps its opcode, immediate, and signal.
+      if (len != 0) {
+        extraWrs[used].opcode = IBV_WR_RDMA_WRITE;
+        extraWrs[used].imm_data = 0;
+        extraWrs[used].send_flags = 0;
+      }
       if (prev) prev->next = &extraWrs[used];
       else sendHead = &extraWrs[used];
-
       prev = &extraWrs[used];
       local += chunk;
       remote += chunk;
       used++;
-
-      len -= chunk;
-      // reset flags for non-last chunk
-      if (len != 0) extraWrs[used].send_flags = 0;
     }
   }
+  // A split last request was copied out of comm->wrs, so put the tail back on the chain.
+  if (prev != nullptr && prev != &comm->wrs[nreqs - 1]) prev->next = tail;
 
   ret = wrap_ibv_post_send(qp, sendHead, badWr);
-
-  //Restore original WRs list.
-  for (int r = 1; r < nreqs; r++) comm->wrs[r-1].next = &comm->wrs[r];
-  comm->wrs[nreqs-1].next = NULL;
 out:
-  free(extraWrs);
-  free(extraSges);
+  for (int r = 0; r < nreqs - 1; r++) comm->wrs[r].next = &comm->wrs[r + 1];
+  comm->wrs[nreqs - 1].next = tail;
+  if (extraWrs != nullptr && extraWrs != stackWrs) free(extraWrs);
+  if (extraSges != nullptr && extraSges != stackSges) free(extraSges);
   return ret;
 }
 

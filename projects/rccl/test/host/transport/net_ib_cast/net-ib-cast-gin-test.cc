@@ -1120,6 +1120,43 @@ TEST_F(NetIbCastGinDataMicrotest, IPut_PortMaxBelowOneMiB_PostsOneMiBChunks) {
                    IBV_SEND_SIGNALED);
 }
 
+TEST_F(NetIbCastGinDataMicrotest, IPut_UnalignedPortMax_RoundsTheCapDown) {
+  ApplyMaxMsgSize(-1, kMiB + 64);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kMiB);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_TwoPorts_UsesTheSmallerLimit) {
+  constexpr uint32_t kSmaller = 2u * kMiB;
+  IbCastNDevs = 2;
+  IbCastDevs[0].portAttr.max_msg_sz = 4u * kMiB;
+  IbCastDevs[1].portAttr.max_msg_sz = kSmaller;
+  IbCastInitMaxPostSendBytes();
+  EXPECT_EQ(IbCastMaxPostSendBytes, kSmaller);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_RequestedCap_OverridesGfx1250AndThePort) {
+  constexpr uint32_t kRequested = 512u * kMiB;
+  ScopedHook props(g_hipGetDeviceProperties, [](hipDeviceProp_t* prop, int) {
+    *prop = hipDeviceProp_t{};
+    std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "gfx1250:sramecc+:xnack-");
+    return hipSuccess;
+  });
+  ApplyMaxMsgSize(kRequested, 2u * kMiB);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kRequested);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_MoreChunksThanTheStackHolds_PostsThemFromTheHeap) {
+  constexpr int kChunks = IB_CAST_MAX_STACK_WRS + 1;
+  constexpr size_t kSize = (size_t)kMiB * (kChunks - 1) + 64;
+  ApplyMaxMsgSize(kMiB, 0);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kMiB);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, kSize, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), (size_t)kChunks);
+  ExpectDataChunks(kChunks, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, kMiB, kSize,
+                   IBV_SEND_SIGNALED);
+}
+
 TEST_F(NetIbCastGinDataMicrotest, IPutSignal_SizeZeroOrNoDestination_PostsOnlyTheSignal) {
   void* request = nullptr;
   ASSERT_EQ(IbCastRmaIbProxyIPutSignal(proxyCtx_, 0, 0, &src_, 0, 0, &dst_, 1, 0, &sig_, 5, NCCL_NET_SIGNAL_OP_INC, false,

@@ -3894,16 +3894,16 @@
     },
     "net_ib_transfer_max_msg": {
       "extends": "net_ib_transfer",
-      "description": "Same InfiniBand transfer tests with RCCL_IB_MAX_MSG_SIZE at 256 MiB, so a chunk above the cap is posted as several work requests.",
+      "description": "Same InfiniBand transfer tests with RCCL_IB_MAX_MSG_SIZE at 1 MiB, so the 16 MiB transfer is posted as several work requests.",
       "env_variables": {
-        "RCCL_IB_MAX_MSG_SIZE": "268435456"
+        "RCCL_IB_MAX_MSG_SIZE": "1048576"
       }
     },
     "gin_device_get_flush_max_msg": {
       "extends": "gin_device_get_flush",
-      "description": "Same GIN get/flush tests with RCCL_IB_MAX_MSG_SIZE at 256 MiB.",
+      "description": "Same GIN get/flush tests with RCCL_IB_MAX_MSG_SIZE at 1 MiB, below the 4 MiB get.",
       "env_variables": {
-        "RCCL_IB_MAX_MSG_SIZE": "268435456"
+        "RCCL_IB_MAX_MSG_SIZE": "1048576"
       }
     }
   },
@@ -4539,14 +4539,14 @@
       "enabled": true
     },
     {
-      "name": "NET IB - Data Transfer (256 MiB post cap)",
-      "description": "InfiniBand transfer tests with RCCL_IB_MAX_MSG_SIZE=256 MiB",
+      "name": "NET IB - Data Transfer (1 MiB post cap)",
+      "description": "InfiniBand transfer tests with RCCL_IB_MAX_MSG_SIZE=1 MiB",
       "config": "net_ib_transfer_max_msg",
       "enabled": true
     },
     {
-      "name": "GIN Device MPI - Get/Flush Visibility (256 MiB post cap)",
-      "description": "GIN get/flush tests with RCCL_IB_MAX_MSG_SIZE=256 MiB",
+      "name": "GIN Device MPI - Get/Flush Visibility (1 MiB post cap)",
+      "description": "GIN get/flush tests with RCCL_IB_MAX_MSG_SIZE=1 MiB",
       "config": "gin_device_get_flush_max_msg",
       "enabled": true
     }

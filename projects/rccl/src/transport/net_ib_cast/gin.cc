@@ -725,8 +725,7 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
   struct ibv_sge signalSge;
   memset(&signalSge, 0, sizeof(signalSge));
 
-  // Size 0 posts only the signal. A size with no destination leaves wr[0] empty and posts that
-  // instead of the signal, as before.
+  // Size 0 posts only the signal. A size with no destination posts the empty wr[0] instead.
   void* srcPtr = NULL;
   void* dstPtr = NULL;
   uint32_t lkey = 0;
