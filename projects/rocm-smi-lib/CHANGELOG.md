@@ -4,6 +4,18 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ***All information listed below is for reference and subject to change.***
 
+## rocm_smi_lib for ROCm 10.3.0
+
+### Added
+
+- **Added `RSMI_STATUS_DRIVER_NOT_LOADED` to `rsmi_status_t`**.
+  - Appended after `RSMI_STATUS_FAIL_LOAD_SYMBOL` as `0x17`; existing values are unchanged.
+
+### Changed
+
+- **`rsmi_init()` returns `RSMI_STATUS_DRIVER_NOT_LOADED` when KFD is missing**.
+  - On a system without KFD (`/sys/class/kfd` missing), `rsmi_init()` now returns `RSMI_STATUS_DRIVER_NOT_LOADED` instead of `RSMI_STATUS_INIT_ERROR` and no longer prints `Exception caught: rsmi_init.`. Other initialization failures still return `RSMI_STATUS_INIT_ERROR`.
+
 ## rocm_smi_lib for ROCm 10.2.0
 
 ### Added
