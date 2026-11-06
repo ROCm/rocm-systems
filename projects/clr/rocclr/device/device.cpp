@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cstring>
 
@@ -342,6 +343,7 @@ std::recursive_mutex Device::p2p_stage_ops_;
 Memory* Device::p2p_stage_ = nullptr;
 
 std::atomic<cl_int> Device::gpu_error_{CL_SUCCESS};
+std::atomic<bool> Device::deviceTearDown_{false};
 
 std::shared_mutex MemObjMap::AllocatedLock_ ROCCLR_INIT_PRIORITY(101);
 std::map<uintptr_t, amd::Memory*> MemObjMap::MemObjMap_ ROCCLR_INIT_PRIORITY(101);
@@ -836,6 +838,7 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
 // ================================================================================================
 bool Device::init() {
   assert(!Runtime::initialized() && "initialize only once");
+  deviceTearDown_.store(false, std::memory_order_release);
   bool ret = false;
   devices_ = nullptr;
   appProfile_.init();
@@ -909,6 +912,7 @@ bool Device::init() {
 
 // ================================================================================================
 void Device::tearDown() {
+  deviceTearDown_.store(true, std::memory_order_release);
 #if DEVICE_ADDRESS_SANITIZER
   // Scan for device-side leaks before ~Device frees the heap slabs.
   reportAllDeviceMemoryLeaks();
@@ -1062,6 +1066,9 @@ void Device::addVACache(device::Memory* memory) const {
 }
 
 void Device::removeVACache(const device::Memory* memory) const {
+  if (deviceTearDown_.load(std::memory_order_acquire)) {
+    return;
+  }
   // Make sure system memory has direct access
   if (memory->isHostMemDirectAccess() && memory->owner()) {
     // VA cache access must be serialised
