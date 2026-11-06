@@ -2542,15 +2542,19 @@ testResult_t run() {
   const char* tlsPsk = getenv(NCCL_TESTS_TLS_PSK_ENV);
   if (tlsPsk) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,32,0)
+    typedef ncclResult_t (*ncclSetEncryption_t)(const ncclEncryptionConfig_t*);
+#ifdef RCCL_TESTS_STATIC_RCCL
+    ncclSetEncryption_t setEncryption = ncclSetEncryption;
+#else
     // Looked up at run time: a direct reference would keep the binary from loading against
     // an older librccl when it is linked with -z now or run with LD_BIND_NOW.
-    typedef ncclResult_t (*ncclSetEncryption_t)(const ncclEncryptionConfig_t*);
     ncclSetEncryption_t setEncryption = (ncclSetEncryption_t) dlsym(RTLD_DEFAULT, "ncclSetEncryption");
     if (setEncryption == NULL) {
       fprintf(stderr, NCCL_TESTS_TLS_PSK_ENV " is set, but the RCCL library (%d) has no ncclSetEncryption; 2.32 or newer is required.\n",
         test_ncclVersion);
       return testInvalidUsage;
     }
+#endif
     ncclEncryptionConfig_t encryption = NCCL_ENCRYPTION_CONFIG_INITIALIZER;
     encryption.mode = NCCL_ENCRYPTION_MODE_PSK;
     encryption.psk = tlsPsk;
