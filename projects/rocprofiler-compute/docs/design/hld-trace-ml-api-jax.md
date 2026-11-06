@@ -19,7 +19,7 @@
     - The only identity available at the call, which is where a marker can be
       placed, is the compiled function.
   - Without an outer `jit`, each op is compiled and executed on its own when
-    Python reaches it (`x @ x`, `jnp.sum`, …). That is eager dispatch.
+    Python reaches it (`x @ x`, `jax.numpy.sum`, …). That is eager dispatch.
 - Assumptions:
   - The HLD was planned by considering JAX 0.11.0, where `jax.jit` can be
     wrapped by intercepting `jaxlib._jax.PjitFunction`.
@@ -96,7 +96,7 @@
 
 - The known JAX compute pathways this implementation plans to cover are
   compiled calls (`jit`, `pmap`, `shard_map`) and Primitive dispatch.
-  `jnp.*` is not a launch path of its own.
+  `jax.numpy` is not a launch path of its own.
 - `jax.jit` wraps how the compiled function is called, not `jax.jit` itself:
   - `jax.jit(fn)` returns a callable. It does not run `fn`.
   - On JAX 0.11.0 every such callable has the same type,
@@ -115,13 +115,14 @@
   - `pmap` maps `fn` over devices. `shard_map` runs `fn` on a mesh.
   - Each outer call opens `jax.pmap.<fn>` or `jax.shard_map.<fn>`, runs the
     executable, and closes the range when the callable returns.
-- Primitive wrap: `inject_roctx` wraps `jax.extend.core.Primitive`, not `jnp.*`.
+- Primitive wrap: `inject_roctx` wraps `jax.extend.core.Primitive`, not
+  `jax.numpy`.
   - If a JAX range is already open, do not open another; run the original
     dispatch.
   - Otherwise read the primitive's name from that call, push `jax.{name}` with
     the caller `file:line`, run the original dispatch (the one-op `Execute`),
-    then pop. `x @ x` therefore marks `jax.dot_general`; `jnp.sum` marks
-    `jax.reduce_sum`.
+    then pop. `x @ x` therefore marks `jax.dot_general`; `jax.numpy.sum`
+    marks `jax.reduce_sum`.
 - JAX dispatch is asynchronous: the callable returns before the GPU finishes
   ([Asynchronous dispatch](https://docs.jax.dev/en/latest/async_dispatch.html)).
   - The range encloses the host-side launch enqueue, not GPU completion.
@@ -169,6 +170,8 @@ rocprofv3 kernel trace :  gemm_fusion_dot_general_0   Correlation_Id = C
 
 ```python
 # jax_workload.py
+import jax.numpy as jnp
+
 @jax.jit
 def matmul_relu(a, b):
     return jnp.maximum(a @ b, 0.0)
