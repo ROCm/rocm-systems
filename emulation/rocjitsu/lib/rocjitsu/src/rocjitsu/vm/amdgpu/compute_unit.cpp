@@ -29,6 +29,7 @@
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "util/log.h"
 

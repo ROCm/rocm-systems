@@ -33,6 +33,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
 #include "gfx11_mimg_test_common.h"

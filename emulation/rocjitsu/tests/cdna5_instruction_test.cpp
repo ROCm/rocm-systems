@@ -4,10 +4,14 @@
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopd.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace {
 

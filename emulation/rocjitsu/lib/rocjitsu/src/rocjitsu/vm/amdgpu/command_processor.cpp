@@ -16,6 +16,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/amd_hsa_queue.h"
 RJ_DIAGNOSTIC_POP
 
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "simdojo/sim/message.h"
 #include "simdojo/sim/simulation.h"
 #include "util/bit.h"

@@ -11,6 +11,7 @@
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/instruction_mix/plugin.h"
 #include "rocjitsu/vm/plugins/logging/plugin.h"
 #include "rocjitsu/vm/plugins/plugin_config_resolver.h"
