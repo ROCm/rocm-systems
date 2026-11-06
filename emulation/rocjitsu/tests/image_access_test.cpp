@@ -1,5 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
+#include "compute_unit_test_util.h"
 #include "gfx11_mimg_test_common.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
@@ -137,7 +139,8 @@ protected:
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 32;
     cfg.lds_size_kb = 64;
-    cu_ = amdgpu::ComputeUnitCore::create("image_cu", cfg, &memory_, &l2_);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu_, "image_cu", cfg, &memory_, &l2_));
     wf_ = cu_->dispatch_wf(0, 0, 106, 32);
     ASSERT_NE(wf_, nullptr);
     sb_ = wf_->sgpr_alloc().base;
@@ -713,7 +716,8 @@ protected:
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 32;
     cfg.vgprs_per_wf = 32;
-    cu_ = amdgpu::ComputeUnitCore::create("rdna_image_cu", cfg, &memory_, &l2_);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu_, "rdna_image_cu", cfg, &memory_, &l2_));
     wf_ = cu_->dispatch_wf(0, 0, 32, 32);
     ASSERT_NE(wf_, nullptr);
     wf_->set_exec(5); // Lane 1 must not store or receive a load result.
@@ -1376,7 +1380,9 @@ TEST(ImageAccessTest, UnsupportedArchitectureIsRejected) {
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 32;
   cfg.vgprs_per_wf = 32;
-  auto cu = amdgpu::ComputeUnitCore::create("unsupported_image_cu", cfg, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "unsupported_image_cu", cfg, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0, 32, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1);

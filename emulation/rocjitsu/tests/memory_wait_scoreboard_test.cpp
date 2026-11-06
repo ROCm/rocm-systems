@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "cdna5_sim_test_common.h"
+#include "compute_unit_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
@@ -682,7 +683,9 @@ TEST(MemoryWaitExecutionTest, NsaImageChecksOnlyItsDecodedCoordinateRegisters) {
     config.sgprs_per_wf = 128;
     config.vgprs_per_wf = 32;
     config.lds_size_kb = 64;
-    auto cu = ComputeUnitCore::create("nsa_image_wait_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "nsa_image_wait_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(1);
@@ -743,7 +746,9 @@ TEST(MemoryWaitExecutionTest, D16ImageWaitsTrackPartialResultsAndRealImplicitRea
     config.sgprs_per_wf = 128;
     config.vgprs_per_wf = 32;
     config.lds_size_kb = 64;
-    auto cu = ComputeUnitCore::create("d16_image_wait_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "d16_image_wait_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(1);
@@ -868,8 +873,9 @@ TEST(MemoryWaitExecutionTest, WaitIdleAndRdna4CompatibilityWaitDrainEveryFunctio
       config.sgprs_per_wf = 128;
       config.vgprs_per_wf = 32;
       config.lds_size_kb = 64;
-      auto cu = ComputeUnitCore::create("wait_cu", config, &memory, &l2);
-      ASSERT_NE(cu, nullptr);
+      std::unique_ptr<ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "wait_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
       ASSERT_NE(wf, nullptr);
       const auto counters = {WaitCounterType::LOADCNT, WaitCounterType::STORECNT,
@@ -949,7 +955,9 @@ TEST(MemoryWaitExecutionTest, FormattedLoadsTrackRegisterLayoutInsteadOfMemoryFo
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 128;
   config.vgprs_per_wf = 32;
-  auto cu = ComputeUnitCore::create("format_wait_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "format_wait_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1);
@@ -1053,7 +1061,9 @@ TEST(MemoryWaitExecutionTest, LdsStackTracksOnePointerWordAlongsideTwoPoppedNode
   config.sgprs_per_wf = 128;
   config.vgprs_per_wf = 32;
   config.lds_size_kb = 64;
-  auto cu = ComputeUnitCore::create("stack_wait_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "stack_wait_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1);
@@ -1095,7 +1105,9 @@ TEST(MemoryWaitExecutionTest, ZeroExecTransposeResultsRequireDsWait) {
   config.sgprs_per_wf = 128;
   config.vgprs_per_wf = 32;
   config.lds_size_kb = 64;
-  auto cu = ComputeUnitCore::create("transpose_wait_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "transpose_wait_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(0);
@@ -1312,7 +1324,9 @@ TEST(MemoryWaitExecutionTest, ReusedInstructionResolvesCurrentSourceAndDestinati
   config.sgprs_per_wf = 128;
   config.vgprs_per_wf = 1024;
   config.lds_size_kb = 64;
-  auto cu = ComputeUnitCore::create("bank_wait_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "bank_wait_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 128, 1024, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1);
@@ -1445,8 +1459,9 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndCounterPartici
         config.sgprs_per_wf = 128;
         config.vgprs_per_wf = 32;
         config.lds_size_kb = 64;
-        auto cu = ComputeUnitCore::create("flat_cu", config, &memory, &l2);
-        ASSERT_NE(cu, nullptr);
+        std::unique_ptr<ComputeUnitCore> cu;
+        ASSERT_NO_FATAL_FAILURE(
+            rocjitsu::test::initialize_compute_unit(cu, "flat_cu", config, &memory, &l2));
         auto *wf = cu->dispatch_wf(0, 0x100, config.sgprs_per_wf, config.vgprs_per_wf);
         ASSERT_NE(wf, nullptr);
         wf->set_exec(0b1111);
@@ -1508,7 +1523,9 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
     config.sgprs_per_wf = 32;
     config.vgprs_per_wf = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 1024 : 256;
     config.lds_size_kb = 64;
-    auto cu = ComputeUnitCore::create("flat_plan_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "flat_plan_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 32, config.vgprs_per_wf, 32);
     ASSERT_NE(wf, nullptr);
     cu->set_apertures(shared, shared + UINT32_MAX, private_base, private_base + UINT32_MAX);
@@ -1654,7 +1671,8 @@ struct MemoryWaitOrderingTest : ::testing::Test {
     config.sgprs_per_wf = 128;
     config.vgprs_per_wf = 32;
     config.lds_size_kb = 64;
-    cu = ComputeUnitCore::create("memory_wait_ordering_cu", config, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(cu, "memory_wait_ordering_cu",
+                                                                    config, &memory, &l2));
     wf = cu->dispatch_wf(0, 0x100, 128, 32);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(0b1111);
@@ -1810,7 +1828,7 @@ TEST_F(MemoryWaitOrderingTest, IncomingLdsRoutedFlatPreservesLdsWriteOrder) {
       for (bool wait : {false, true}) {
         SCOPED_TRACE(std::format("arch={} shared={} wait={}", static_cast<unsigned>(arch),
                                  shared_lanes, wait));
-        setup(arch);
+        ASSERT_NO_FATAL_FAILURE(setup(arch));
         set_test_flat_domains(*cu, *wf, shared_lanes);
         lds_load();
         if (wait)
@@ -1826,7 +1844,7 @@ TEST_F(MemoryWaitOrderingTest, SuccessiveFlatLdsResultsPreserveWriteOrder) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
                     ROCJITSU_CODE_ARCH_CDNA5}) {
     SCOPED_TRACE(static_cast<unsigned>(arch));
-    setup(arch);
+    ASSERT_NO_FATAL_FAILURE(setup(arch));
     set_test_flat_domains(*cu, *wf, 0b1111);
     flat_load();
     flat_load();
@@ -1839,7 +1857,7 @@ TEST_F(MemoryWaitOrderingTest, NativeLdsDoesNotExemptUnqualifiedFlatWriteback) {
   // in order with them.
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
     SCOPED_TRACE(static_cast<unsigned>(arch));
-    setup(arch);
+    ASSERT_NO_FATAL_FAILURE(setup(arch));
     set_test_flat_domains(*cu, *wf, 0b1111);
     flat_load();
     lds_load();
@@ -1856,7 +1874,7 @@ TEST_F(MemoryWaitOrderingTest, NativeLdsOverwritesOnlyOrderedFlatLdsLanes) {
       for (bool wait : {false, true}) {
         SCOPED_TRACE(std::format("arch={} shared={} wait={}", static_cast<unsigned>(arch),
                                  shared_lanes, wait));
-        setup(arch);
+        ASSERT_NO_FATAL_FAILURE(setup(arch));
         set_test_flat_domains(*cu, *wf, shared_lanes);
         constexpr uint8_t dst = 2;
         flat_load(dst);
@@ -1893,7 +1911,7 @@ TEST_F(MemoryWaitOrderingTest, PartialWaitRetiresFlatResultFromGfx10) {
                     ROCJITSU_CODE_ARCH_RDNA4})
     for (bool lds_route : {false, true}) {
       SCOPED_TRACE(std::format("arch={} lds_route={}", static_cast<unsigned>(arch), lds_route));
-      setup(arch);
+      ASSERT_NO_FATAL_FAILURE(setup(arch));
       set_test_flat_domains(*cu, *wf, lds_route ? 0b1111 : 0);
       constexpr uint8_t flat_dst = 2;
       constexpr uint8_t younger_dst = 3;
@@ -1926,7 +1944,7 @@ TEST_F(MemoryWaitOrderingTest, LdsDirectAndParameterResultsUseQualifiedWriteback
         for (bool wait : {false, true}) {
           SCOPED_TRACE(std::format("arch={} params={},{} wait={}", static_cast<unsigned>(arch),
                                    first_parameter, second_parameter, wait));
-          setup(arch);
+          ASSERT_NO_FATAL_FAILURE(setup(arch));
           direct_load(first_parameter);
           if (wait)
             wf->memory_wait_scoreboard()->wait(WaitCounterKind::Exp, 0);
@@ -1942,7 +1960,7 @@ TEST_F(MemoryWaitOrderingTest, OrderedLdsOverwriteStillChecksAliasedAddressAndAt
       for (bool wait : {false, true}) {
         SCOPED_TRACE(
             std::format("arch={} atomic={} wait={}", static_cast<unsigned>(arch), atomic, wait));
-        setup(arch);
+        ASSERT_NO_FATAL_FAILURE(setup(arch));
         lds_load();
         if (wait)
           wf->memory_wait_scoreboard()->wait(WaitCounterKind::Ds, 0);
@@ -1961,7 +1979,7 @@ TEST_F(MemoryWaitOrderingTest, PartialOverwriteRetainsUncoveredLanesAndBytes) {
       for (bool read_high : {false, true}) {
         SCOPED_TRACE(std::format("arch={} disjoint={} high={}", static_cast<unsigned>(arch),
                                  disjoint_lanes, read_high));
-        setup(arch);
+        ASSERT_NO_FATAL_FAILURE(setup(arch));
         set_test_flat_domains(*cu, *wf, 0b1111);
         wf->set_exec(0b0011);
         lds_load();
@@ -1984,7 +2002,7 @@ TEST_F(MemoryWaitOrderingTest, SameLanePartialOverwritePreservesLowBytesBeforeWa
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
                     ROCJITSU_CODE_ARCH_CDNA5}) {
     SCOPED_TRACE(static_cast<unsigned>(arch));
-    setup(arch);
+    ASSERT_NO_FATAL_FAILURE(setup(arch));
     set_test_flat_domains(*cu, *wf, 0b1111);
     wf->set_exec(0b0001);
     lds_load();
@@ -2002,7 +2020,7 @@ TEST_F(MemoryWaitOrderingTest, GdsResultDoesNotShareFlatLdsWriteOrder) {
     for (bool wait : {false, true}) {
       SCOPED_TRACE(static_cast<unsigned>(arch));
       SCOPED_TRACE(wait);
-      setup(arch);
+      ASSERT_NO_FATAL_FAILURE(setup(arch));
       if (arch == ROCJITSU_CODE_ARCH_RDNA3)
         track(rdna3::build_ds(rdna3::kDsLoadB32Ds, {.gds = 1, .addr = 0, .vdst = 2}));
       else
@@ -2020,7 +2038,7 @@ TEST_F(MemoryWaitOrderingTest, InterleavedExportsDoNotBreakDirectLdsWriteOrder) 
   for (auto arch :
        {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
     SCOPED_TRACE(static_cast<unsigned>(arch));
-    setup(arch);
+    ASSERT_NO_FATAL_FAILURE(setup(arch));
     direct_load(/*parameter=*/false);
     auto &state = *wf->memory_wait_scoreboard();
     state.issue(ClassifiedEvent{WaitCounterKind::Exp, WaitEventKind::Export}, cu->arch());
@@ -2038,7 +2056,7 @@ TEST_F(MemoryWaitOrderingTest, FlatAndGlobalStoresShareCompletionOrderForReplay)
       for (unsigned threshold : {0u, 1u, 2u}) {
         SCOPED_TRACE(std::format("flat_first={} shared={} threshold={}", flat_first, shared_lanes,
                                  threshold));
-        setup(ROCJITSU_CODE_ARCH_CDNA5, /*replay=*/true);
+        ASSERT_NO_FATAL_FAILURE(setup(ROCJITSU_CODE_ARCH_CDNA5, /*replay=*/true));
         wf->set_mode_raw(wf->mode_raw() | (1u << 25));
         set_test_flat_domains(*cu, *wf, flat_first ? shared_lanes : 0);
         for (unsigned lane = 0; lane < wf->wf_size(); ++lane) {
@@ -2073,7 +2091,7 @@ TEST_F(MemoryWaitOrderingTest, DirectAndIndexedLdsKeepIndependentWritebackOrder)
     for (bool direct_first : {false, true}) {
       SCOPED_TRACE(static_cast<unsigned>(arch));
       SCOPED_TRACE(direct_first);
-      setup(arch);
+      ASSERT_NO_FATAL_FAILURE(setup(arch));
       for (unsigned i = 0; i < 2; ++i) {
         if (direct_first != static_cast<bool>(i))
           direct_load(/*parameter=*/false);
@@ -2100,7 +2118,9 @@ TEST(MemoryWaitExecutionTest, IncomingFlatOverwriteUsesItsOwnOrderingAndRoutedLa
         config.sgprs_per_wf = 128;
         config.vgprs_per_wf = 32;
         config.lds_size_kb = 64;
-        auto cu = ComputeUnitCore::create("flat_overwrite_cu", config, &memory, &l2);
+        std::unique_ptr<ComputeUnitCore> cu;
+        ASSERT_NO_FATAL_FAILURE(
+            rocjitsu::test::initialize_compute_unit(cu, "flat_overwrite_cu", config, &memory, &l2));
         auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
         ASSERT_NE(wf, nullptr);
         wf->set_exec(0b1111);
@@ -2134,7 +2154,9 @@ TEST(MemoryWaitExecutionTest, Gfx12LoadDestinationsUseTheirActualWidth) {
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 128;
       config.vgprs_per_wf = 32;
-      auto cu = ComputeUnitCore::create("load_width_cu", config, &memory, &l2);
+      std::unique_ptr<ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "load_width_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
       ASSERT_NE(wf, nullptr);
       wf->set_exec(1);
@@ -2205,7 +2227,9 @@ TEST(MemoryWaitExecutionTest, LegacyImageOverwritesCheckTheIncomingCompletionCla
         config.sgprs_per_wf = 128;
         config.vgprs_per_wf = 32;
         config.lds_size_kb = 64;
-        auto cu = ComputeUnitCore::create("image_overwrite_cu", config, &memory, &l2);
+        std::unique_ptr<ComputeUnitCore> cu;
+        ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(cu, "image_overwrite_cu",
+                                                                        config, &memory, &l2));
         auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
         ASSERT_NE(wf, nullptr);
         wf->set_exec(1);
@@ -2298,7 +2322,9 @@ TEST(MemoryWaitExecutionTest, LdsLoadsOverwriteInIssueOrder) {
         config.sgprs_per_wf = 128;
         config.vgprs_per_wf = 32;
         config.lds_size_kb = 64;
-        auto cu = ComputeUnitCore::create("lds_overwrite_cu", config, &memory, &l2);
+        std::unique_ptr<ComputeUnitCore> cu;
+        ASSERT_NO_FATAL_FAILURE(
+            rocjitsu::test::initialize_compute_unit(cu, "lds_overwrite_cu", config, &memory, &l2));
         auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
         ASSERT_NE(wf, nullptr);
         wf->set_exec(1);
@@ -2436,7 +2462,9 @@ TEST(MemoryWaitExecutionTest, SccHwregWritesCheckOnlyPermittedOverlappingFields)
           config.sgprs_per_wf = 128;
           config.vgprs_per_wf = 32;
           config.lds_size_kb = 64;
-          auto cu = ComputeUnitCore::create("hwreg_wait_cu", config, &memory, &l2);
+          std::unique_ptr<ComputeUnitCore> cu;
+          ASSERT_NO_FATAL_FAILURE(
+              rocjitsu::test::initialize_compute_unit(cu, "hwreg_wait_cu", config, &memory, &l2));
           auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
           ASSERT_NE(wf, nullptr);
           wf->write_scc(true);
@@ -2497,7 +2525,9 @@ TEST(MemoryWaitExecutionTest, Wave64MaskReadChecksPendingVccHighWord) {
     config.sgprs_per_wf = 128;
     config.vgprs_per_wf = 32;
     config.lds_size_kb = 64;
-    auto cu = ComputeUnitCore::create("vcc_high_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "vcc_high_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
     ASSERT_NE(wf, nullptr);
     ASSERT_EQ(wf->wf_size(), 64u);
@@ -2583,7 +2613,9 @@ TEST(MemoryWaitExecutionTest, SdwaExplicitCompareDoesNotOverwriteItsTemporaryVcc
       config.sgprs_per_wf = 128;
       config.vgprs_per_wf = 32;
       config.lds_size_kb = 64;
-      auto cu = ComputeUnitCore::create("sdwa_wait_cu", config, &memory, &l2);
+      std::unique_ptr<ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "sdwa_wait_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
       ASSERT_NE(wf, nullptr);
       wf->set_exec(1);
@@ -2648,7 +2680,9 @@ TEST(MemoryWaitExecutionTest, ScratchAddressChecksDoNotObserveGlobalOrInactiveLa
         config.sgprs_per_wf = 128;
         config.vgprs_per_wf = 32;
         config.lds_size_kb = 64;
-        auto cu = ComputeUnitCore::create("scratch_cu", config, &memory, &l2);
+        std::unique_ptr<ComputeUnitCore> cu;
+        ASSERT_NO_FATAL_FAILURE(
+            rocjitsu::test::initialize_compute_unit(cu, "scratch_cu", config, &memory, &l2));
         auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
         ASSERT_NE(wf, nullptr);
         wf->set_exec(active ? 1 : 0);
@@ -2718,7 +2752,9 @@ TEST(MemoryWaitExecutionTest, VopdMoveChecksOnlyItsConsumedSources) {
       config.sgprs_per_wf = 128;
       config.vgprs_per_wf = 32;
       config.lds_size_kb = 64;
-      auto cu = ComputeUnitCore::create("vopd_cu", config, &memory, &l2);
+      std::unique_ptr<ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "vopd_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, 0x200, 128, 32, 32);
       ASSERT_NE(wf, nullptr);
       wf->set_exec(1);
@@ -2768,7 +2804,9 @@ TEST(MemoryWaitExecutionTest, VopdCndmaskChecksPendingVccOnlyForActiveLanes) {
         config.sgprs_per_wf = 128;
         config.vgprs_per_wf = 32;
         config.lds_size_kb = 64;
-        auto cu = ComputeUnitCore::create("vopd_vcc_cu", config, &memory, &l2);
+        std::unique_ptr<ComputeUnitCore> cu;
+        ASSERT_NO_FATAL_FAILURE(
+            rocjitsu::test::initialize_compute_unit(cu, "vopd_vcc_cu", config, &memory, &l2));
         auto *wf = cu->dispatch_wf(0, 0x200, 128, 32, 32);
         ASSERT_NE(wf, nullptr);
         wf->set_exec(active ? 1 : 0);
@@ -2822,7 +2860,9 @@ TEST(MemoryWaitExecutionTest, NarrowStoresCheckOnlyConsumedBytes) {
       config.sgprs_per_wf = 128;
       config.vgprs_per_wf = 32;
       config.lds_size_kb = 64;
-      auto cu = ComputeUnitCore::create("store_cu", config, &memory, &l2);
+      std::unique_ptr<ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "store_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, 0x200, 128, 32, 32);
       ASSERT_NE(wf, nullptr);
       wf->set_exec(1);
@@ -3239,7 +3279,9 @@ TEST(MemoryWaitExecutionTest, BlockDependenciesUseCapturedDwordMask) {
             config.sgprs_per_wf = 128;
             config.vgprs_per_wf = 256;
             config.lds_size_kb = 64;
-            auto cu = ComputeUnitCore::create("block_wait_cu", config, &memory, &l2);
+            std::unique_ptr<ComputeUnitCore> cu;
+            ASSERT_NO_FATAL_FAILURE(
+                rocjitsu::test::initialize_compute_unit(cu, "block_wait_cu", config, &memory, &l2));
             auto *wf = cu->dispatch_wf(0, 0x100, 128, 256, 32);
             ASSERT_NE(wf, nullptr);
             wf->set_exec(1);
@@ -3337,7 +3379,9 @@ TEST(MemoryWaitExecutionTest, BlockPrechecksRespectMaskAndPerDwordOwnership) {
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 128;
     config.vgprs_per_wf = 256;
-    auto cu = ComputeUnitCore::create("block_precheck_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "block_precheck_cu", config, &memory, &l2));
     auto *wave = cu->dispatch_wf(0, 0x100, 128, 256, 32);
     ASSERT_NE(wave, nullptr);
     wave->set_exec(1);
@@ -3431,7 +3475,9 @@ TEST(XcntExecutionTest, BlockStoreProtectsOwnedWordsAndVgpr0Fallback) {
         config.num_wf_slots = 2;
         config.sgprs_per_wf = 128;
         config.vgprs_per_wf = 256;
-        auto cu = ComputeUnitCore::create("block_source_cu", config, &memory, &l2);
+        std::unique_ptr<ComputeUnitCore> cu;
+        ASSERT_NO_FATAL_FAILURE(
+            rocjitsu::test::initialize_compute_unit(cu, "block_source_cu", config, &memory, &l2));
         ASSERT_NE(cu->dispatch_wf(0, 0x100, 128, 256, 32), nullptr);
         auto *wave = cu->dispatch_wf(1, 0x100, 128, 256, 32);
         ASSERT_NE(wave, nullptr);
@@ -3492,7 +3538,9 @@ TEST(XcntExecutionTest, BlockStoreMaskedDataStillProtectsOverlappingAddress) {
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 128;
     config.vgprs_per_wf = 128;
-    auto cu = ComputeUnitCore::create("block_address_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "block_address_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 128, 128, 32);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(1);
@@ -3676,7 +3724,9 @@ TEST(XcntExecutionTest, ReplayAddressFootprintsHonorScratchAndBufferEnableBits) 
   config.sgprs_per_wf = 128;
   config.vgprs_per_wf = 32;
   config.lds_size_kb = 64;
-  auto cu = ComputeUnitCore::create("replay_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "replay_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
   ASSERT_NE(wf, nullptr);
   const RegisterAccess regs(*wf);
@@ -3719,8 +3769,9 @@ TEST(XcntExecutionTest, FlatReplayCompletionFollowsTheWholeRequestRoute) {
   config.sgprs_per_wf = 128;
   config.vgprs_per_wf = 32;
   config.lds_size_kb = 64;
-  auto cu = ComputeUnitCore::create("flat_replay_cu", config, &memory, &l2);
-  ASSERT_NE(cu, nullptr);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "flat_replay_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(3);
@@ -3849,7 +3900,9 @@ void check_vector_footprints(rj_code_arch_t arch, unsigned wave_size, unsigned n
   config.sgprs_per_wf = 128;
   config.vgprs_per_wf = num_vgprs;
   config.lds_size_kb = 64;
-  auto cu = ComputeUnitCore::create("footprint_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "footprint_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 104, num_vgprs, wave_size);
   ASSERT_NE(wf, nullptr);
   wf->set_m0(m0);
@@ -4023,7 +4076,9 @@ TEST(MemoryWaitFootprintTest, ValuPermutationsCheckConsumedLanesBeforeExecution)
     config.sgprs_per_wf = 128;
     config.vgprs_per_wf = 32;
     config.lds_size_kb = 64;
-    auto cu = ComputeUnitCore::create("permlane_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "permlane_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 104, 32, test.arch == ROCJITSU_CODE_ARCH_RDNA3 ? 64 : 32);
     ASSERT_NE(wf, nullptr);
     ASSERT_TRUE(RegisterAccess(*wf).write_sgpr(wf->sgpr_alloc().base + 4, 0x55555555).succeeded());
@@ -4271,7 +4326,9 @@ TEST(MemoryWaitFootprintTest, WaveMaskDestinationUsesWaveWidth) {
     config.sgprs_per_wf = 128;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    auto cu = ComputeUnitCore::create("mask_wait_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "mask_wait_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 104, 256, wave_size);
     ASSERT_NE(wf, nullptr);
     const auto words =
@@ -4314,7 +4371,9 @@ TEST(MemoryWaitExecutionTest, ExplicitVccMaskDestinationUsesWaveWidth) {
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 106;
       config.vgprs_per_wf = 32;
-      auto cu = ComputeUnitCore::create("vcc_mask_wait_cu", config, &memory, &l2);
+      std::unique_ptr<ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "vcc_mask_wait_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, wave_size);
       ASSERT_NE(wf, nullptr);
       wf->set_exec(~uint64_t{0});
@@ -4369,7 +4428,9 @@ TEST(MemoryWaitExecutionTest, Wave32MaskDestinationsAtScalarRegisterBoundaries) 
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 106;
       config.vgprs_per_wf = 32;
-      auto cu = ComputeUnitCore::create("mask_boundary_cu", config, &memory, &l2);
+      std::unique_ptr<ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "mask_boundary_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, 32);
       ASSERT_NE(wf, nullptr);
       auto decoder = Decoder::create(arch);
@@ -4429,7 +4490,9 @@ TEST(MemoryWaitExecutionTest, ExplicitConditionAndCarryMasksUseWaveWidth) {
           config.num_wf_slots = 1;
           config.sgprs_per_wf = 106;
           config.vgprs_per_wf = 32;
-          auto cu = ComputeUnitCore::create("mask_source_cu", config, &memory, &l2);
+          std::unique_ptr<ComputeUnitCore> cu;
+          ASSERT_NO_FATAL_FAILURE(
+              rocjitsu::test::initialize_compute_unit(cu, "mask_source_cu", config, &memory, &l2));
           auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, wave_size);
           ASSERT_NE(wf, nullptr);
           wf->set_exec(1);
@@ -4500,7 +4563,9 @@ TEST(MemoryWaitFootprintTest, WaitImmediateIsNotAScalarRegister) {
   config.sgprs_per_wf = 128;
   config.vgprs_per_wf = 256;
   config.lds_size_kb = 64;
-  auto cu = ComputeUnitCore::create("immediate_wait_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "immediate_wait_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 104, 256, 32);
   ASSERT_NE(wf, nullptr);
   auto decoder = Decoder::create(config.arch);
@@ -4763,7 +4828,9 @@ TEST(MemoryWaitExecutionTest, TransposePrecheckUsesExpandedExecutionLanes) {
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 32;
   config.lds_size_kb = 64;
-  auto cu = ComputeUnitCore::create("transpose_precheck_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "transpose_precheck_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 106, 32);
   ASSERT_NE(wf, nullptr);
   auto decoder = Decoder::create(config.arch);
@@ -4809,7 +4876,9 @@ TEST(MemoryWaitExecutionTest, BufferTypeSuppressesResultsButKeepsEncodedSourceDe
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 32;
   config.lds_size_kb = 64;
-  auto cu = ComputeUnitCore::create("buffer_type_precheck_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "buffer_type_precheck_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 106, 32);
   ASSERT_NE(wf, nullptr);
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -4879,7 +4948,9 @@ TEST(MemoryWaitExecutionTest, DelayImmediatesDoNotAliasPendingRegisters) {
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 106;
       config.vgprs_per_wf = 256;
-      auto cu = ComputeUnitCore::create("immediate_wait_cu", config, &memory, &l2);
+      std::unique_ptr<ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "immediate_wait_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, 0x100, 106, 256, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
       ASSERT_NE(wf, nullptr);
       wf->set_mode_raw(wf->mode_raw() | (1u << 25));
@@ -4975,7 +5046,9 @@ TEST(MemoryWaitExecutionTest, DecodedScalarIssueUsesArchitecturalWaitDomain) {
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 32;
     config.lds_size_kb = 64;
-    auto cu = ComputeUnitCore::create("scalar_issue_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "scalar_issue_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 106, 32);
     ASSERT_NE(wf, nullptr);
     const auto words = arch == ROCJITSU_CODE_ARCH_CDNA5 ? make_s_load_b32_scaled_imm(4, 0, 0)
@@ -5027,7 +5100,9 @@ TEST(MemoryWaitFootprintTest, ScalarRelativeAccessesMatchExecution) {
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 32;
     config.lds_size_kb = 64;
-    auto cu = ComputeUnitCore::create("scalar_relative_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "scalar_relative_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64);
     ASSERT_NE(wf, nullptr);
     auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -5132,7 +5207,9 @@ TEST(MemoryWaitExecutionTest, ScalarStoresReadTheirDataAndHaveNoRegisterResult) 
   config.sgprs_per_wf = 128;
   config.vgprs_per_wf = 32;
   config.lds_size_kb = 64;
-  auto cu = ComputeUnitCore::create("scalar_store_plan_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "scalar_store_plan_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
   ASSERT_NE(wf, nullptr);
   auto decoder = Decoder::create(config.arch);
@@ -5180,7 +5257,9 @@ TEST(MemoryWaitExecutionTest, ScalarMemoryRegisterOffsetIsCheckedBeforeAddressCa
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 128;
     config.vgprs_per_wf = 32;
-    auto cu = ComputeUnitCore::create("smem_offset_wait_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "smem_offset_wait_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
     ASSERT_NE(wf, nullptr);
     auto decoder = Decoder::create(arch);
@@ -5263,7 +5342,9 @@ TEST(MemoryWaitExecutionTest, ScalarBufferDescriptorChecksItsConsumedVccWords) {
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 128;
     config.vgprs_per_wf = 32;
-    auto cu = ComputeUnitCore::create("smem_buffer_wait_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "smem_buffer_wait_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, 32);
     ASSERT_NE(wf, nullptr);
     auto decoder = Decoder::create(arch);
@@ -5327,7 +5408,9 @@ TEST(MemoryWaitExecutionTest, ScalarBufferStoreChecksItsConsumedBaseWords) {
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 32;
-  auto cu = ComputeUnitCore::create("smem_store_wait_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "smem_store_wait_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, 64);
   ASSERT_NE(wf, nullptr);
   auto decoder = Decoder::create(config.arch);
@@ -5376,7 +5459,9 @@ TEST(MemoryWaitExecutionTest, ScalarBufferAtomicChecksItsConsumedDescriptorWords
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 32;
-  auto cu = ComputeUnitCore::create("smem_atomic_wait_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "smem_atomic_wait_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, 64);
   ASSERT_NE(wf, nullptr);
   auto decoder = Decoder::create(config.arch);
@@ -5424,7 +5509,9 @@ TEST(MemoryWaitFootprintTest, ScalarBufferDescriptorsRetainOnlyBackedAndConsumed
       config.num_wf_slots = 1;
       config.sgprs_per_wf = sgprs;
       config.vgprs_per_wf = 32;
-      auto cu = ComputeUnitCore::create("smem_prefix_cu", config, &memory, &l2);
+      std::unique_ptr<ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "smem_prefix_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, 0x100, sgprs, 32, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
       ASSERT_NE(wf, nullptr);
       const auto words = arch == ROCJITSU_CODE_ARCH_CDNA5
@@ -5479,7 +5566,9 @@ TEST(MemoryWaitExecutionTest, DirectLdsResultsUseWholeQuadsAndValidateM0BeforeEx
   config.sgprs_per_wf = 32;
   config.vgprs_per_wf = 32;
   config.lds_size_kb = 64;
-  auto cu = ComputeUnitCore::create("lds_direct_plan_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "lds_direct_plan_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 32, 32, 32);
   ASSERT_NE(wf, nullptr);
   auto decoder = Decoder::create(config.arch);
@@ -5585,7 +5674,9 @@ TEST(MemoryWaitExecutionTest, DecodedProducerResultsMatchResolvedPipelineDestina
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 32;
     config.lds_size_kb = 64;
-    auto cu = ComputeUnitCore::create("producer_shape_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "producer_shape_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
     ASSERT_NE(wf, nullptr);
     auto decoder = Decoder::create(arch);
@@ -5671,7 +5762,9 @@ TEST(MemoryWaitExecutionTest, DualDsStoresSnapshotActiveLanesAndAliasedSources) 
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 32;
-    auto cu = ComputeUnitCore::create("dual_store_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "dual_store_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
     ASSERT_NE(wf, nullptr);
     const auto value = [](unsigned reg, unsigned lane) { return reg * 0x10000u + lane * 32u; };
@@ -5748,7 +5841,9 @@ TEST(MemoryWaitExecutionTest, DualDsExchangeExecutesBothDecodedResultsAcrossArch
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 32;
     config.lds_size_kb = 64;
-    auto cu = ComputeUnitCore::create("dual_ds_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "dual_ds_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(1);
@@ -5825,7 +5920,9 @@ TEST(MemoryWaitExecutionTest,
       config.sgprs_per_wf = sgprs;
       config.vgprs_per_wf = 32;
       config.lds_size_kb = 64;
-      auto cu = ComputeUnitCore::create("buffer_alias_cu", config, &memory, &l2);
+      std::unique_ptr<ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "buffer_alias_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, 0x100, sgprs, 32);
       ASSERT_NE(wf, nullptr);
       auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -5889,7 +5986,9 @@ TEST(XcntExecutionTest, BufferResourceCrossingVccProtectsBothAliasWords) {
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 32;
   config.lds_size_kb = 64;
-  auto cu = ComputeUnitCore::create("xcnt_resource_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "xcnt_resource_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 106, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1);
@@ -5997,7 +6096,9 @@ TEST(MemoryWaitFootprintTest, RestrictedScalarSelectorsAndZeroAliasesKeepDepende
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 128;
     config.vgprs_per_wf = 32;
-    auto cu = ComputeUnitCore::create("selector_wait_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "selector_wait_cu", config, &memory, &l2));
     const unsigned wave_size = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32;
     auto *wf = cu->dispatch_wf(0, 0x100, 104, 32, wave_size);
     ASSERT_NE(wf, nullptr);
@@ -6076,7 +6177,9 @@ TEST(MemoryWaitFootprintTest, BarrierIdSelectorsReadPendingMessageResultsInM0) {
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 104;
     config.vgprs_per_wf = 32;
-    auto cu = ComputeUnitCore::create("barrier_selector_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "barrier_selector_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 104, 32, 32);
     ASSERT_NE(wf, nullptr);
     auto decoder = Decoder::create(arch);
@@ -6149,7 +6252,9 @@ TEST(MemoryWaitFootprintTest, PermutationControlsShareExecutionSelectorValues) {
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 128;
   config.vgprs_per_wf = 32;
-  auto cu = ComputeUnitCore::create("lane_control_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "lane_control_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 104, 32, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec_raw(1ull << 32);
@@ -6199,7 +6304,9 @@ TEST(MemoryWaitFootprintTest, WordwiseMemorySourcesKeepTheBackedPrefix) {
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 128;
     config.vgprs_per_wf = 32;
-    auto cu = ComputeUnitCore::create("wordwise_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "wordwise_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 104, 32, 32);
     ASSERT_NE(wf, nullptr);
     ASSERT_EQ(cu->vgpr_allocation_block_size(), 32u);
@@ -6258,7 +6365,9 @@ TEST(MemoryWaitFootprintTest, SparseWmmaChecksAllLanesIncludingZeroExec) {
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 128;
   config.vgprs_per_wf = 40;
-  auto cu = ComputeUnitCore::create("swmma_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "swmma_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 104, 40, 32);
   ASSERT_NE(wf, nullptr);
   auto decoder = Decoder::create(config.arch);
@@ -6299,7 +6408,9 @@ TEST(MemoryWaitFootprintTest, ScaledMfmaChecksAllSourcesAndLanesRegardlessOfExec
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 104;
   config.vgprs_per_wf = 104;
-  auto cu = ComputeUnitCore::create("scaled_mfma_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "scaled_mfma_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 104, 104, 64);
   ASSERT_NE(wf, nullptr);
   auto decoder = Decoder::create(config.arch);
@@ -6352,7 +6463,9 @@ TEST(MemoryWaitExecutionTest, DiagnosticBudgetsAndCountersAreIndependentAcrossCU
   config.sgprs_per_wf = 128;
   config.vgprs_per_wf = 32;
   for (unsigned i = 0; i < 3; ++i) {
-    auto cu = ComputeUnitCore::create(std::format("budget_cu{}", i), config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+        cu, std::format("budget_cu{}", i), config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, 0x100, 104, 32, 32);
     ASSERT_NE(wf, nullptr);
     MemoryWaitScoreboard::Hazard hazard{
@@ -6407,7 +6520,9 @@ TEST(MemoryWaitFootprintTest, RestrictedPackedAndScalarBranchSourcesKeepVccWords
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 128;
   config.vgprs_per_wf = 32;
-  auto cu = ComputeUnitCore::create("restricted_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "restricted_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 104, 32, 64);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1);
@@ -6450,7 +6565,9 @@ TEST(MemoryWaitFootprintTest, DirectLdsChecksItsExecDependency) {
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 32;
   config.vgprs_per_wf = 32;
-  auto cu = ComputeUnitCore::create("lds_exec_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "lds_exec_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 32, 32, 32);
   ASSERT_NE(wf, nullptr);
   auto decoder = Decoder::create(config.arch);
@@ -6488,7 +6605,9 @@ TEST(XcntExecutionTest, WordwiseBufferDataRetainsItsBackedReplaySource) {
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 128;
   config.vgprs_per_wf = 32;
-  auto cu = ComputeUnitCore::create("buffer_prefix_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "buffer_prefix_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 104, 32, 32);
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(cu->vgpr_allocation_block_size(), 32u);

@@ -4,6 +4,7 @@
 /// @file pseudo_scalar_exec_test.cpp
 /// @brief Cross-architecture pseudo-scalar transcendental execution tests.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
@@ -676,8 +677,10 @@ public:
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    compute_unit =
-        amdgpu::ComputeUnitCore::create(std::string(profile.name), config, &gpu_memory, &l2);
+    rocjitsu::test::initialize_compute_unit(compute_unit, std::string(profile.name), config,
+                                            &gpu_memory, &l2);
+    if (!compute_unit)
+      return;
     decoder = Decoder::create(profile.arch);
     if (compute_unit)
       wavefront = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
