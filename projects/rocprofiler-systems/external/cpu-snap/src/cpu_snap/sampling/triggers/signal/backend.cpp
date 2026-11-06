@@ -9,14 +9,14 @@
 // signal_handler() and everything it calls must use ONLY async-signal-safe
 // operations. The audited handler does exactly:
 //   * clock_gettime(<configured clock>)       -- AS-safe (vDSO/syscall)
-//   * syscall(SYS_gettid) (cached in TLS)    -- AS-safe
+//   * syscall(SYS_gettid), once per delivery -- AS-safe
 //   * atomic loads on the published ring table + relaxed/acquire/release
 //     atomics on the per-thread ring                                  -- AS-safe
 //   * reads of ucontext_t gregs              -- plain memory reads
 //   * process_vm_readv() of the user stack into a PREALLOCATED ring slot
 //     (syscall, AS-safe; short-reads on EFAULT instead of faulting)   -- AS-safe
 //   * mmap() + sigaltstack() on the first delivery to a thread without an
-//     alternate stack (TLS-guarded)                                    -- AS-safe
+//     alternate stack (buffer recorded in the thread's ring)          -- AS-safe
 //   * write()/eventfd write of a u64 (once per ring fill-up) -- AS-safe
 //   * errno is saved on entry and restored on every exit path
 // It performs NO malloc/new, NO locks, NO std::vector growth, NO std::function,
@@ -25,9 +25,8 @@
 //
 // Per-thread slot lookup from the handler: a fixed-size, lock-free, open-
 // addressed table (tid -> ring*) is published by the worker (attach/detach,
-// off-handler) with atomic stores; the handler reads it with atomic loads and
-// caches the result in a thread_local pointer, so steady-state lookup is one
-// TLS read.
+// off-handler) with atomic stores; the handler reads it with atomic loads on
+// every delivery (hash + ~1 probe).
 //
 // sigaltstack: we use option (b) -- the handler installs its own per-thread
 // alternate stack on the FIRST delivery to a thread that has none, so all
@@ -94,30 +93,20 @@ std::atomic<std::uint32_t> g_stack_bytes{ 0 };
 // guard, read lock-free (and async-signal-safely) in the handler.
 std::atomic<clockid_t>     g_sample_clock{ CLOCK_MONOTONIC };
 static_assert(std::atomic<clockid_t>::is_always_lock_free);
+// The handler reads the ring's alternate-stack pointer.
+static_assert(std::atomic<void*>::is_always_lock_free);
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
-// Per-thread cached tid + the mmap'd alternate signal stack for this thread.
-//
-// ASYNC-SIGNAL-SAFETY: both are declared initial-exec (tls_model). Under the
-// default general-dynamic TLS model the FIRST access to a thread_local from a
-// dlopened DSO routes through __tls_get_addr, which lazily malloc()s the
-// module's TLS block -- and malloc is NOT async-signal-safe, so a signal that
-// interrupts the host mid-malloc would self-deadlock. initial-exec resolves the
-// slot via a fixed thread-pointer offset with no allocation and no lazy-init
-// guard (these objects are trivially constructible), so the handler's first
-// touch is AS-safe. The altstack buffer is mmap()'d (an AS-safe syscall), never
-// malloc()'d. A pointer + a pid_t fit the static-TLS surplus trivially, so
-// initial-exec does not jeopardize dlopen of the autoload .so.
-//
-// NOTE: the ring pointer is deliberately NOT cached in TLS. A given thread can
-// be sampled by one backend, see that backend destroyed, then be sampled again
-// by a later backend; a cached ring* would dangle across that boundary. The
-// global ring table is the single source of truth and is retired on detach, so
-// the handler looks the ring up there every time (hash + ~1 probe).
-// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
-__attribute__((tls_model("initial-exec"))) thread_local pid_t         t_cached_tid = 0;
-__attribute__((tls_model("initial-exec"))) thread_local std::uint8_t* t_altstack   = nullptr;
-// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
+// NO THREAD_LOCALS ON THE SIGNAL PATH. This code is linked statically into
+// libraries that are dlopen()ed (librocprof-sys.so). There a general-dynamic
+// thread_local read goes through __tls_get_addr, which can malloc (first touch,
+// DTV growth after a later dlopen) and self-deadlock if the signal interrupted
+// malloc. An initial-exec one marks the whole host library STATIC_TLS, and
+// dlopen fails once the host's TLS block exceeds glibc's static-TLS spare.
+// Per-thread state is reached through g_ring_table instead: the tid comes from
+// gettid() and the alternate stack is stored in the thread's ring. The ring
+// itself is looked up on every delivery, never cached: a thread can outlive the
+// backend that sampled it, and a cached ring* would dangle.
 
 // glibc greg indices in the PERF_REG_X86_* output-slot order every
 // regs_and_stack unwinder (dwarf_unwinder, fp_copy_unwinder) consumes
@@ -151,28 +140,28 @@ constexpr std::size_t k_altstack_bytes = std::size_t{ 64 } * 1024;
 // the signal frame, so the new stack must be written back into the frame's
 // uc_stack or the kernel undoes the sigaltstack() call when the handler
 // returns. A thread that already has one (the host's, or ours from an earlier
-// delivery) is left alone. The buffer is mmap()'d (AS-safe) once per thread and
-// reused if the thread's stack is ever disabled; the worker reclaims it after
-// the thread has exited (see adopt_altstack / reap_altstacks).
+// delivery) is left alone. The buffer is mmap()'d (AS-safe) once per ring, i.e.
+// per attach, and reused if the thread's stack is ever disabled; the worker
+// reclaims it after the thread has exited (see adopt_altstack / reap_altstacks).
 void install_altstack_if_missing(ucontext_t* uc, snapshot_ring& ring) noexcept
 {
     if((uc->uc_stack.ss_flags & SS_DISABLE) == 0)
     {
         return;
     }
-    if(t_altstack == nullptr)
+    void* altstack = ring.altstack();
+    if(altstack == nullptr)
     {
-        void* buf = ::mmap(nullptr, k_altstack_bytes, PROT_READ | PROT_WRITE,
-                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if(buf == MAP_FAILED)
+        altstack = ::mmap(nullptr, k_altstack_bytes, PROT_READ | PROT_WRITE,
+                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if(altstack == MAP_FAILED)
         {
             return;  // run on the interrupted stack; retried on the next delivery
         }
-        t_altstack = static_cast<std::uint8_t*>(buf);
-        ring.set_altstack(buf);
+        ring.set_altstack(altstack);
     }
     stack_t ss{};
-    ss.ss_sp    = t_altstack;
+    ss.ss_sp    = altstack;
     ss.ss_size  = k_altstack_bytes;
     ss.ss_flags = 0;
     if(::sigaltstack(&ss, nullptr) == 0)
@@ -268,14 +257,7 @@ void capture_sample(snapshot_ring* ring, pid_t tid, void* ucontext) noexcept
 void signal_handler(int /*signo*/, siginfo_t* /*info*/, void* ucontext) noexcept
 {
     const errno_guard preserve_errno;
-
-    // Resolve our tid once per thread, then cache in TLS.
-    pid_t tid = t_cached_tid;
-    if(tid == 0)
-    {
-        tid          = static_cast<pid_t>(::syscall(SYS_gettid));
-        t_cached_tid = tid;
-    }
+    const auto        tid = static_cast<pid_t>(::syscall(SYS_gettid));
 
     // Not (yet) attached, or detached: nothing to publish into, drop. While the
     // slot is entered the worker will not free the ring or close the wake fd.
@@ -447,12 +429,10 @@ std::atomic<unsigned> g_fork_epoch{ 0 };
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<bool> g_backend_active{ false };
 
-// Runs in the single-threaded forked child. POSIX timers are not inherited, no
-// handler can be in flight, and the thread id cached by the forking thread
-// belongs to the parent, so the child starts again from an empty registry.
+// Runs in the single-threaded forked child. POSIX timers are not inherited and
+// no handler can be in flight, so the child starts again from an empty registry.
 void reset_after_fork() noexcept
 {
-    t_cached_tid = 0;
     g_ring_table.clear();
     g_wake_fd.store(-1, std::memory_order_relaxed);
     g_sample_clock.store(CLOCK_MONOTONIC, std::memory_order_relaxed);

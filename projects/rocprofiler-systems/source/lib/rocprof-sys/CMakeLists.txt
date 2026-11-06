@@ -66,6 +66,7 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-interface-library
         rocprofiler-systems::rocprofiler-systems-core
         rocprofiler-systems::rocprofiler-systems-binary
+        rocprofiler-systems::rocprofiler-systems-cpu-snap
 )
 
 # The PMC objects are consumed via $<TARGET_OBJECTS>, so the backend target has to be
@@ -116,6 +117,7 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-interface-library
         rocprofiler-systems::rocprofiler-systems-core
         rocprofiler-systems::rocprofiler-systems-binary
+        rocprofiler-systems::rocprofiler-systems-cpu-snap
 )
 
 if(ROCPROFSYS_HIPFILE_SUPPORT)
