@@ -67,6 +67,7 @@ HIP_TEST_CASE(Unit_HRR_CaptureSmoke) {
 
   hip::SpawnProc proc(HRR_TEST_EXE);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+  proc.setEnv("HIP_HRR_CAPTURE_CONSENT", "yes");
   set_proc_search_path(proc);
   int ret = proc.run("\"Unit_HRR_CaptureSmoke_Direct\"");
   INFO("Capture subprocess exit code: " << ret);

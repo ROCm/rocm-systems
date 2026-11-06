@@ -129,6 +129,8 @@ def test_archive_with_no_process_directories_is_empty(tmp_path):
     rendered = inspect_archive.render(report)
     assert "Verdict: nothing captured" in rendered
     assert "preflight" in rendered
+    # Without consent the runtime writes nothing while preflight passes.
+    assert "capture needs your consent" in rendered
 
 
 def test_process_directory_without_events_is_not_recorded(tmp_path):
@@ -537,6 +539,7 @@ def test_missing_archive_says_capture_never_started(tmp_path, capsys):
     assert "Verdict: no archive" in out
     assert "capture never started" in out
     assert "preflight" in out
+    assert "capture needs your consent" in out
 
 
 def test_exit_code_is_one_when_nothing_was_captured(tmp_path, capsys):
