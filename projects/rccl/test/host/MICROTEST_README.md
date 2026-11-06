@@ -48,8 +48,9 @@ exactly one pattern (`GinHost*`) and a new suite in the same TU is picked up
 without editing it — gtest's `*` does not cross the `.`, so a per-suite list
 silently drops any suite someone forgets to add.
 
-A new binary is named once, in its `rccl_add_micro_binary()` (or
-`rccl_add_transport_micro_binary()`) call in `test/host/CMakeLists.txt`. The
+A new binary is named once, in its `rccl_add_micro_binary()` call in
+`test/host/CMakeLists.txt`, or its directory wrapper's call in
+`<dir>/host_tests.cmake` (e.g. `rccl_add_transport_micro_binary()`). The
 standalone configure writes every binary to `host_test_binaries.txt` in the build
 directory, which `run_host_tests.sh` runs, and `lib/test_executor.py` passes every
 `rccl-UnitTestsMicro*` binary to llvm-cov as `--object`.
@@ -809,7 +810,7 @@ test:
 
 1. **Pick the unit.** If it lives in a `.cc` that is already `#include`d (see
    [Units under test](#units-under-test)), skip to step 3. Otherwise add a new path
-   macro in `CMakeLists.txt` (mirror `P2P_CC_PATH`/`INIT_CC_PATH`) pointing at the
+   macro beside its binary (mirror `P2P_CC_PATH`/`INIT_CC_PATH`) pointing at the
    hipified copy, and `#include` it from the test TU *after* the fakes/macro shims
    are in scope. A new unit generally warrants its own binary (see
    [Units under test](#units-under-test)) so its file-scope state stays isolated.
