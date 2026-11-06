@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/soc.h"
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
@@ -1495,6 +1496,43 @@ TEST(GpuVmService, ReplacingABindingPreservesIdentityAndAdvancesItsEpoch) {
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
 }
 
+TEST(GpuVmService, SharedPinnedSnapshotRetainsBackingAndPreservesValueCopies) {
+  GpuVm gpu_vm;
+  auto backing = std::make_shared<ByteAddressSpace>(0x11);
+  std::weak_ptr<ByteAddressSpace> backing_lifetime = backing;
+  const auto address_space = gpu_vm.register_translated(7, backing, backing);
+  ASSERT_TRUE(address_space);
+  auto access = gpu_vm.snapshot_pinned(address_space);
+  ASSERT_TRUE(access);
+  const auto original_namespace = access->cache_namespace();
+  auto owner = util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(*access);
+  util::IntrusiveSharedPtr<const GpuVmAccessSnapshot> shared = owner;
+  EXPECT_EQ(owner.get(), shared.get());
+  access.reset();
+  owner.reset();
+  backing.reset();
+
+  auto replacement = std::make_shared<ByteAddressSpace>(0x22);
+  ASSERT_TRUE(gpu_vm.replace_translated(address_space, replacement, replacement));
+  EXPECT_FALSE(backing_lifetime.expired());
+  std::array<std::byte, 1> value{};
+  EXPECT_EQ(shared->value.read(0, value), VmAccessOutcome::Complete);
+  EXPECT_EQ(value[0], std::byte{0x11});
+  EXPECT_EQ(shared->value.cache_namespace(), original_namespace);
+
+  // A value copy retains the access state independently of the shared storage.
+  std::optional<GpuVmAccess> copied = shared->value;
+  shared.reset();
+  EXPECT_FALSE(backing_lifetime.expired());
+  EXPECT_EQ(copied->read(0, value), VmAccessOutcome::Complete);
+  EXPECT_EQ(value[0], std::byte{0x11});
+  ASSERT_TRUE(gpu_vm.unregister_address_space(address_space));
+  EXPECT_TRUE(copied->revoked());
+  EXPECT_EQ(copied->read(0, value), VmAccessOutcome::Revoked);
+  copied.reset();
+  EXPECT_TRUE(backing_lifetime.expired());
+}
+
 TEST(GpuVmService, AccessSnapshotIsRevokedAndNamespacesItsTranslationEpoch) {
   GpuMemory memory("memory");
   GpuVm gpu_vm;
@@ -1582,10 +1620,11 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
               .begin = address & ~uint64_t{4095},
               .size = 4096,
               .mutation_epoch = epoch,
-              .captured_epoch = epoch->load()};
+              .captured_epoch = epoch->value.load()};
     }
 
-    std::shared_ptr<std::atomic<uint64_t>> epoch = std::make_shared<std::atomic<uint64_t>>(0);
+    util::IntrusiveSharedPtr<VmMutationEpoch> epoch =
+        util::IntrusiveSharedPtr<VmMutationEpoch>::make(0);
     Mtype mtype = Mtype::RW;
     mutable uint32_t queries = 0;
   };
@@ -1621,7 +1660,7 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
     EXPECT_EQ(policy->queries, 9u);
   }
 
-  policy->epoch->fetch_add(1);
+  policy->epoch->value.fetch_add(1);
   policy->mtype = Mtype::UC;
   for (uint64_t page = 0; page < 8; ++page)
     EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::UC);
@@ -1631,7 +1670,7 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
   // queries even when the binding and mutation epoch themselves do not change.
   cache.clear();
   cache.clear(); // Clearing an already-empty table is idempotent.
-  EXPECT_EQ(policy->epoch.use_count(), 1);
+  EXPECT_EQ(policy->epoch->ref_count(), 1);
   policy->mtype = Mtype::CC;
   for (uint64_t page = 0; page < 8; ++page)
     EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::CC);
@@ -1655,7 +1694,7 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
   access.reset();
   new_access.reset();
   cache.clear();
-  EXPECT_EQ(policy->epoch.use_count(), 2);
+  EXPECT_EQ(policy->epoch->ref_count(), 2);
 }
 
 TEST(GpuVmService, PolicyCacheReusesStridedPagesAndRevalidatesPrivateHints) {
@@ -1666,7 +1705,7 @@ TEST(GpuVmService, PolicyCacheReusesStridedPagesAndRevalidatesPrivateHints) {
 
     VmMtypeSnapshot snapshot_mtype(uint64_t address) const override {
       ++queries;
-      const uint64_t captured_epoch = epoch->load();
+      const uint64_t captured_epoch = epoch->value.load();
       const bool private_uc = (address / kRowStride + captured_epoch) % 2 == 0;
       return {.mtype = private_uc ? Mtype::UC : Mtype::RW,
               .may_batch_private_uc = private_uc,
@@ -1677,7 +1716,8 @@ TEST(GpuVmService, PolicyCacheReusesStridedPagesAndRevalidatesPrivateHints) {
               .captured_epoch = captured_epoch};
     }
 
-    std::shared_ptr<std::atomic<uint64_t>> epoch = std::make_shared<std::atomic<uint64_t>>(0);
+    util::IntrusiveSharedPtr<VmMutationEpoch> epoch =
+        util::IntrusiveSharedPtr<VmMutationEpoch>::make(0);
     mutable uint32_t queries = 0;
   };
 
@@ -1704,7 +1744,7 @@ TEST(GpuVmService, PolicyCacheReusesStridedPagesAndRevalidatesPrivateHints) {
   EXPECT_EQ(policy->queries, 8u);
 
   // Cached hints must reject stale policy before a fresh lookup replaces it.
-  policy->epoch->fetch_add(1);
+  policy->epoch->value.fetch_add(1);
   for (uint64_t row = 0; row < 8; ++row) {
     const uint64_t address = 0x100000000 + row * kRowStride;
     EXPECT_FALSE(access->cached_private_uc_hint(address, cache));
@@ -1729,10 +1769,11 @@ TEST(GpuVmService, PolicyCacheReusesContiguousAndTiledPages) {
               .begin = address & ~uint64_t{4095},
               .size = 4096,
               .mutation_epoch = epoch,
-              .captured_epoch = epoch->load()};
+              .captured_epoch = epoch->value.load()};
     }
 
-    std::shared_ptr<std::atomic<uint64_t>> epoch = std::make_shared<std::atomic<uint64_t>>(0);
+    util::IntrusiveSharedPtr<VmMutationEpoch> epoch =
+        util::IntrusiveSharedPtr<VmMutationEpoch>::make(0);
     mutable uint32_t queries = 0;
   };
 
@@ -2401,6 +2442,59 @@ TEST(CommandProcessorQueueRegistration, RequiresAnAddressSpaceAndUsesTheConfigur
   EXPECT_TRUE(gpu_vm.unregister_address_space(internal));
 }
 
+TEST(SoCAssembly, RejectsNullXcdWithoutRecordingIt) {
+  GpuMemory memory("memory");
+  rocjitsu::SoC soc("soc", &memory);
+  util::StringDiagnostic diagnostic;
+
+  EXPECT_TRUE(soc.add_xcd(nullptr, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "cannot add a null XCD");
+  EXPECT_EQ(soc.num_xcds(), 0u);
+}
+
+TEST(SoCAssembly, RejectsNullIodWithoutRecordingIt) {
+  GpuMemory memory("memory");
+  rocjitsu::SoC soc("soc", &memory);
+  util::StringDiagnostic diagnostic;
+
+  EXPECT_TRUE(soc.add_iod(nullptr, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "cannot add a null IOD");
+  EXPECT_EQ(soc.num_iods(), 0u);
+}
+
+TEST(SoCAssembly, RejectsArchitectureReplacementWhileCopyQueueIsActive) {
+  GpuMemory memory("memory");
+  rocjitsu::SoC soc("soc", &memory, ROCJITSU_CODE_ARCH_CDNA4);
+  const AddressSpaceHandle internal = soc.internal_address_space();
+  const SdmaQueueScheduler::Handle queue =
+      soc.sdma_queue_scheduler().attach({.ring = {.address_space = internal,
+                                                  .ring_base = 0x100,
+                                                  .ring_bytes = 256,
+                                                  .read_pointer_address = 0x80,
+                                                  .initial_cursor = 0},
+                                         .context = {}},
+                                        {});
+  ASSERT_TRUE(queue);
+  util::StringDiagnostic diagnostic;
+
+  EXPECT_TRUE(soc.set_arch(ROCJITSU_CODE_ARCH_RDNA4, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "SoC architecture cannot change while copy queues are active");
+  EXPECT_EQ(soc.arch(), ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_EQ(soc.sdma_queue_scheduler().packet_dialect(), SdmaPacketDialect::LegacyExtendedCount);
+  EXPECT_TRUE(soc.sdma_queue_scheduler().contains(queue));
+  EXPECT_EQ(soc.internal_address_space(), internal);
+  EXPECT_TRUE(soc.gpu_vm().lookup(internal));
+  EXPECT_FALSE(soc.gpu_vm().unregister_address_space(internal));
+
+  ASSERT_TRUE(soc.sdma_queue_scheduler().detach(queue));
+  util::StringDiagnostic retry_diagnostic;
+  EXPECT_TRUE(soc.set_arch(ROCJITSU_CODE_ARCH_RDNA4, retry_diagnostic.emitter()).succeeded());
+  EXPECT_TRUE(retry_diagnostic.message().empty());
+  EXPECT_EQ(soc.arch(), ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ(soc.sdma_queue_scheduler().packet_dialect(), SdmaPacketDialect::Rdna4);
+  EXPECT_EQ(soc.internal_address_space(), internal);
+}
+
 TEST(SoCInternalAddressSpace, RefusesBackingReplacementWhileAnotherAddressSpaceExists) {
   GpuMemory original_memory("original");
   GpuMemory replacement_memory("replacement");
@@ -2432,7 +2526,7 @@ TEST(SoCInternalAddressSpace, RefusesBackingReplacementWhileAnInternalAqlQueueEx
   Xcd xcd("xcd");
   xcd.set_command_processor(&command_processor);
   rocjitsu::SoC soc("soc", &original_memory);
-  soc.add_xcd(&xcd);
+  ASSERT_TRUE(soc.add_xcd(&xcd).succeeded());
 
   const AddressSpaceHandle original_internal = soc.internal_address_space();
   ASSERT_TRUE(original_internal);
@@ -2467,7 +2561,7 @@ TEST(SoCInternalAddressSpace, ReinstallsTheSameBackingAfterAnExplicitVmReset) {
   Xcd xcd("xcd");
   xcd.set_command_processor(&command_processor);
   rocjitsu::SoC soc("soc", &memory);
-  soc.add_xcd(&xcd);
+  ASSERT_TRUE(soc.add_xcd(&xcd).succeeded());
 
   const AddressSpaceHandle original_internal = soc.internal_address_space();
   ASSERT_TRUE(original_internal);

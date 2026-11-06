@@ -88,7 +88,7 @@ extern char **environ;
 
 namespace {
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi350x.json";
 constexpr uint32_t kGpuId = 38144;
 const std::string CDNA2_CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx90a_mi210_kmd.json";
 constexpr uint32_t kCdna2GpuId = 50149;
@@ -1189,7 +1189,9 @@ TEST_P(KfdCuMaskPlacementTest, CuMaskSelectsOnlyTheRequestedPhysicalUnits) {
   RJ_AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, rdna);
   RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, rdna);
   std::memcpy(code.data(), &kd, sizeof(kd));
-  const uint32_t endpgm = rocjitsu::build_s_endpgm(soc_->arch());
+  util::FailureOr<uint32_t> maybe_s_endpgm = rocjitsu::build_s_endpgm(soc_->arch());
+  ASSERT_TRUE(maybe_s_endpgm.succeeded());
+  const uint32_t endpgm = maybe_s_endpgm.value();
   std::memcpy(code.data() + sizeof(kd), &endpgm, sizeof(endpgm));
   auto *process = driver_->find_process(driver_->local_process_id()).get();
   ASSERT_NE(process, nullptr);
@@ -1288,9 +1290,9 @@ TEST_P(KfdCuMaskPlacementTest, CuMaskSelectsOnlyTheRequestedPhysicalUnits) {
 }
 
 INSTANTIATE_TEST_SUITE_P(KfdMasks, KfdCuMaskPlacementTest,
-                         ::testing::Values(CuMaskPlacementCase{"gfx950_mi355x.json", 0, 0, 0, 0},
-                                           CuMaskPlacementCase{"gfx950_mi355x.json", 1, 1, 0, 0},
-                                           CuMaskPlacementCase{"gfx950_mi355x.json", -1, 0, 0, 0},
+                         ::testing::Values(CuMaskPlacementCase{"gfx950_mi350x.json", 0, 0, 0, 0},
+                                           CuMaskPlacementCase{"gfx950_mi350x.json", 1, 1, 0, 0},
+                                           CuMaskPlacementCase{"gfx950_mi350x.json", -1, 0, 0, 0},
                                            CuMaskPlacementCase{"gfx1201_r9700.json", 8, 0, 0, 8},
                                            CuMaskPlacementCase{"gfx1201_r9700.json", 18, 0, 1, 2}));
 
@@ -1358,7 +1360,7 @@ protected:
 INSTANTIATE_TEST_SUITE_P(
     KfdTargets, KfdAqlPm4Test,
     ::testing::Values(KfdNativePm4Target{"gfx942", "gfx942_cdna3_kmd.json", 50148},
-                      KfdNativePm4Target{"gfx950", "gfx950_mi355x_kmd.json", kGpuId}),
+                      KfdNativePm4Target{"gfx950", "gfx950_mi350x_kmd.json", kGpuId}),
     [](const ::testing::TestParamInfo<KfdNativePm4Target> &info) { return info.param.name; });
 
 TEST_P(KfdAqlPm4Test, ExecutesEveryXcdAndRetainsBlockedIndirectBuffer) {
@@ -2184,7 +2186,9 @@ TEST_F(KfdIoctlCdna5Test, ZeroRingSizeNormalizesAndNullBaseSuspendsAql) {
   kernel_descriptor_t descriptor{};
   descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
   std::memcpy(code.data(), &descriptor, sizeof(descriptor));
-  const uint32_t endpgm = rocjitsu::build_s_endpgm(soc_->arch());
+  util::FailureOr<uint32_t> maybe_s_endpgm_2 = rocjitsu::build_s_endpgm(soc_->arch());
+  ASSERT_TRUE(maybe_s_endpgm_2.succeeded());
+  const uint32_t endpgm = maybe_s_endpgm_2.value();
   std::memcpy(code.data() + sizeof(descriptor), &endpgm, sizeof(endpgm));
   auto process = driver_->find_process(driver_->local_process_id());
   ASSERT_NE(process, nullptr);
@@ -9537,7 +9541,9 @@ TEST_F(KfdIoctlCdna5Test, ScratchGrowthPreservesSpillsFromOverlappingDispatches)
     kd.kernel_code_entry_byte_offset = sizeof(kd);
     kd.private_segment_fixed_size = 32u << i;
     std::memcpy(code.data() + i * 4096, &kd, sizeof(kd));
-    const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+    util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
+    const uint32_t endpgm = maybe_s_endpgm_3.value();
     std::memcpy(code.data() + i * 4096 + sizeof(kd), &endpgm, sizeof(endpgm));
   }
   process->map_pages(kCodeAddress, code.data(), code.size());

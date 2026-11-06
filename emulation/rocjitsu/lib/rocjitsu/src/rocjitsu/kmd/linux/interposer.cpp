@@ -544,9 +544,7 @@ public:
     // Keep generated topology and proc snapshots independent of limits lowered
     // by application code before its first GPU call. Inherited hard limits on
     // GPU backing are handled by the keeper's shared-RAM fallback.
-    const int warmup = rocjitsu::create_memory_backing(1);
-    if (warmup >= 0)
-      real().close(warmup);
+    rocjitsu::prepare_memory_keeper();
   }
 
   /// @brief Conservatively detect real GPU descriptors inherited outside this backend.
@@ -2804,13 +2802,14 @@ public:
         queue.fences.emplace(sequence, finished);
         pending_queue = key;
       }
-      submission.ready = [this, dependencies = std::move(dependencies)]() mutable {
+      submission.ready = [this, dependencies = std::move(dependencies)](
+                             util::DiagnosticEmitter emit_error) mutable -> util::FailureOr<bool> {
         std::lock_guard lock(fd_mutex_);
         for (auto &dependency : dependencies) {
           if (!dependency.fence)
             dependency.fence = syncobj_fence_locked(*dependency.entry, dependency.point);
           if (dependency.fence && dependency.fence->is_failed())
-            throw std::runtime_error("PM4 submission dependency failed");
+            return emit_error.emit() << "PM4 submission dependency failed";
           if (!dependency.fence || !dependency.fence->is_signaled())
             return false;
         }
@@ -5013,9 +5012,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
         if (info->read_mmr_reg.dword_offset == 0x263e && info->read_mmr_reg.count == 1 &&
             info->return_size >= sizeof(uint32_t)) {
           *static_cast<uint32_t *>(out) =
-              major == 11
-                  ? rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3)
-                  : rocjitsu::kmd::gb_addr_config_for_gfx_target_version(gpu->gfx_target_version);
+              rocjitsu::kmd::gb_addr_config_for_gfx_target_version(gpu->gfx_target_version);
         }
         return 0;
       }

@@ -118,6 +118,8 @@ std::string_view instruction_execution_error_name(InstructionExecutionError erro
     return "invalid instruction encoding";
   case InstructionExecutionError::UnsupportedOperandValue:
     return "unsupported operand value";
+  case InstructionExecutionError::InvalidRegisterAccess:
+    return "invalid register access";
   case InstructionExecutionError::UnimplementedInstruction:
     return "unimplemented instruction";
   case InstructionExecutionError::DecodeFailure:
@@ -174,8 +176,8 @@ std::string ComputeUnitCore::disassemble_instruction(std::span<const uint32_t> e
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size, uint32_t vgpr_storage_lane_count,
                                  uint32_t vgpr_allocation_block_size)
-    : simdojo::CompositeComponent(std::move(name)), config_(config), memory_(memory),
-      wf_size_(wf_size), vgpr_storage_lane_count_(vgpr_storage_lane_count),
+    : simdojo::CompositeComponent(std::move(name)), config_(config), arithmetic_(config.arithmetic),
+      memory_(memory), wf_size_(wf_size), vgpr_storage_lane_count_(vgpr_storage_lane_count),
       vgpr_allocation_block_size_(vgpr_allocation_block_size),
       scratch_slots_per_cu_(config.num_wf_slots),
       setreg_vgpr_msb_fixup_(has_setreg_vgpr_msb_fixup(config)), decoder_(create_decoder(config)),
@@ -1298,7 +1300,6 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   if (WaitcheckTarget::classify_events_into(inst, config_.arch, classified).failed() ||
       classified.empty())
     return;
-  const bool legacy = uses_legacy_waitcnt(model.value());
   auto &scoreboard = wf.ensure_memory_wait_scoreboard();
   scoreboard.bind(wf.pc, &wf, &ComputeUnitCore::report_memory_wait);
   const auto xevent =
@@ -1421,10 +1422,11 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   // Check all writes before adding any new dependencies. FLAT has the same
   // destination on two counters; those entries are not writes racing each other.
   const bool flat_result = defs != classified.end() && defs->kind == WaitEventKind::FlatLoad;
-  const auto vmem_write_order =
-      legacy && defs != classified.end() && defs->counter == WaitCounterKind::Load
-          ? scoreboard.ordered_write_order(*defs, config_.arch)
-          : MemoryWaitScoreboard::kUnordered;
+  const auto vmem_write_order = has_ordered_vmem_writeback(config_.arch) &&
+                                        defs != classified.end() &&
+                                        defs->counter == WaitCounterKind::Load
+                                    ? scoreboard.ordered_write_order(*defs, config_.arch)
+                                    : MemoryWaitScoreboard::kUnordered;
   if (flat) {
     const auto ds_event =
         std::ranges::find(classified, WaitCounterKind::Ds, &ClassifiedEvent::counter);
@@ -1531,7 +1533,13 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
         uint64_t lanes = d.lanes;
         if (event.kind == WaitEventKind::FlatLoad)
           lanes &= counter == WaitCounterKind::Ds ? flat_shared_lanes : ~flat_shared_lanes;
-        scoreboard.add({sequence, wf.pc, lanes, d.reg, counter, d.bytes});
+        MemoryWaitScoreboard::Event result{sequence, wf.pc, lanes, d.reg, counter, d.bytes};
+        // FLAT's LDS-serviced lanes share native LDS's order class, so partial
+        // waits retire them together. Only qualified targets also write them
+        // to registers in order with native LDS results.
+        if (event.kind == WaitEventKind::FlatLoad && counter == WaitCounterKind::Ds)
+          result.ordered_overwrite = has_ordered_flat_lds_writeback(config_.arch);
+        scoreboard.add(result);
       }
   }
 }
@@ -1613,8 +1621,11 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
     access.wavefront_size = 1;
     access.active_lane_mask = 1;
     access.architectural_exec_lane_mask = 1;
-    access.valid_lane_mask = 1;
-    access.request_lane_mask = 1;
+    // The pipeline skips a buffer access whose bounds mask clears every DWORD.
+    // Like an out-of-range vector lane, its lane is active but not valid.
+    const bool accessed = state.load_dword_mask != 0;
+    access.valid_lane_mask = accessed;
+    access.request_lane_mask = accessed;
     access.addresses = std::span<const uint64_t>(&state.addr, 1);
     break;
   }
@@ -1930,31 +1941,37 @@ template <bool EnableAsync>
   }
   const bool vm_address_space = vm_access != nullptr;
 
-  rj_code_binary_inst_t words[4];
-  static_assert(sizeof(words) == InstructionCache::kFetchBytes,
-                "the I$ fetch width must match the issue window");
-  VmAccessOutcome fetch_outcome = VmAccessOutcome::Complete;
-  if (vm_address_space) {
-    if (debug_active()) {
-      fetch_outcome = vm_access->read(
-          active->pc, std::span<std::byte>(reinterpret_cast<std::byte *>(words), sizeof(words)),
-          VmAccessKind::Execute);
-    } else {
-      sync_inst_cache_debug_epoch();
-      fetch_outcome = inst_cache_.fetch(*vm_access, active->pc, reinterpret_cast<uint8_t *>(words));
-    }
-  } else if (debug_active()) {
-    // A debugger writes breakpoints straight into code memory with none of the
-    // maintenance that invalidates the I$, so bypass it while one is attached.
-    for (int i = 0; i < 4; ++i)
-      words[i] = memory_->fetch32(active->pc + i * 4);
-  } else {
-    // A session that has come and gone may have written over lines cached
-    // before it attached, whether or not this wave issued while it was
-    // running. Take the invalidation set_debug_active() published.
+  std::array<rj_code_binary_inst_t, DecodedInstructionCache::kNumWords> words{};
+  constexpr uint32_t kFirstFetchBytes = InstructionCache::kFetchBytes;
+  constexpr uint32_t kFirstFetchWords = kFirstFetchBytes / sizeof(words[0]);
+  static_assert(kFirstFetchWords + 1 == words.size());
+  const bool debugger_active = debug_active();
+  if (!debugger_active)
     sync_inst_cache_debug_epoch();
-    inst_cache_.fetch(*memory_, active->pc, reinterpret_cast<uint8_t *>(words));
-  }
+  const auto fetch = [&](uint64_t pc, uint32_t *dst, uint32_t byte_count) {
+    if (vm_address_space) {
+      if (debugger_active)
+        return vm_access->read(pc, {reinterpret_cast<std::byte *>(dst), byte_count},
+                               VmAccessKind::Execute);
+      return inst_cache_.fetch(*vm_access, pc, reinterpret_cast<uint8_t *>(dst), byte_count);
+    }
+    if (debugger_active) {
+      for (uint32_t word = 0; word < byte_count / sizeof(*dst); ++word)
+        dst[word] = memory_->fetch32(pc + word * sizeof(*dst));
+    } else {
+      inst_cache_.fetch(*memory_, pc, reinterpret_cast<uint8_t *>(dst), byte_count);
+    }
+    return VmAccessOutcome::Complete;
+  };
+  VmAccessOutcome fetch_outcome = fetch(active->pc, words.data(), kFirstFetchBytes);
+  // GFX10 MIMG has a two-bit NSA count at bits 2:1. Only NSA=3 needs
+  // a fifth word; shorter instructions must not fetch beyond the normal window.
+  constexpr uint32_t kMimgEncodingAndNsaMask = 0xfc000006u;
+  constexpr uint32_t kMimgWithThreeNsaWords = 0xf0000006u;
+  if (fetch_outcome == VmAccessOutcome::Complete &&
+      (arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2) &&
+      (words[0] & kMimgEncodingAndNsaMask) == kMimgWithThreeNsaWords)
+    fetch_outcome = fetch(active->pc + kFirstFetchBytes, &words.back(), sizeof(words.back()));
 
   if (fetch_outcome != VmAccessOutcome::Complete) {
     drain_async_window();
@@ -1985,7 +2002,6 @@ template <bool EnableAsync>
   active->trace_inst_count_++;
 
   util::StringDiagnostic decode_error;
-  const bool debugger_active = debug_active();
   const bool reuse_decoded = !debugger_active;
   DecodeResult decoded = decoded_inst_cache_.decode(*decoder_, active->pc, vmid, words,
                                                     decode_error.emitter(), reuse_decoded);
@@ -2060,7 +2076,7 @@ template <bool EnableAsync>
       may_submit = false;
       if (async_pool().available()) {
         MmaAdmissionCache::Words first;
-        std::ranges::copy_n(words, first.size(), first.begin());
+        std::ranges::copy_n(words.begin(), first.size(), first.begin());
         issuer = admission->inspect(*decoder_, inst_cache_, *memory_, vm_access, active->pc, vmid,
                                     active->num_vgprs(), storage->has_accvgprs, first);
         may_submit = issuer.has_value();
@@ -2134,8 +2150,9 @@ template <bool EnableAsync>
   }
 
   if (observes_before_execute_instruction_)
-    plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active,
-                                                    std::span<const uint32_t>(words, 4));
+    plugin_group_->onAmdgpuBeforeExecuteInstruction(
+        active->pc, *inst, *active,
+        std::span(words).first(std::max<size_t>(kFirstFetchWords, inst_size / 4)));
 
   // s_trap enters the per-process handler configured by SET_TRAP_HANDLER. The
   // hardware saves the interrupted PC/status in TTMPs and begins fetching at

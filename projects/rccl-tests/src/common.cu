@@ -45,6 +45,17 @@ extern char **environ;
 #define DIVUP(x, y) \
     (((x)+(y)-1)/(y))
 
+// ROCM-2696: ncclMemAlloc relies on hipMemRetainAllocationHandle, which had a bug
+// in older HIP versions that could cause use-after-free or segfaults due to premature allocation release.
+// The ROCm 7.0.2.x backport (HIP_VERSION in [70051831, 70060000)) carries the same hipMemRetainAllocationHandle
+// fix, so the guard covers that range as well.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && \
+    (HIP_VERSION >= 71260540 || (HIP_VERSION >= 70051831 && HIP_VERSION < 70060000))
+#define USE_NCCL_MEM_ALLOC 1
+#else
+#define USE_NCCL_MEM_ALLOC 0
+#endif
+
 int test_ncclVersion = 0; // init'd with ncclGetVersion()
 int32_t gpu_block3;
 size_t cache_bytes = 192 * 1024 * 1024; // Use 192MB
@@ -806,45 +817,31 @@ static testResult_t deregisterTestWindows(
 }
 #endif
 
+// Must mirror the memorytype branches in AllocateBuffs.
+static testResult_t freeTestBuffer(void** buff) {
+  if (*buff == nullptr) return testSuccess;
+  if (memorytype == ncclHost) {
+    CUDACHECK(hipHostFree(*buff));
+  } else if (memorytype == ncclFine || memorytype == ncclManaged) {
+    CUDACHECK(cudaFree(*buff));
+  } else {
+#if USE_NCCL_MEM_ALLOC
+    NCCLCHECK(ncclMemFree(*buff));
+#else
+    CUDACHECK(cudaFree(*buff));
+#endif
+  }
+  *buff = nullptr;
+  return testSuccess;
+}
+
 static testResult_t freeTestDeviceBuffers(
     void** sendbuffs, void** recvbuffs, void** bias, void** expected, int count) {
   for (int i = 0; i < count; i++) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && \
-    (HIP_VERSION >= 71260540 || (HIP_VERSION >= 70051831 && HIP_VERSION < 70060000))
-    if (sendbuffs[i]) {
-      NCCLCHECK(ncclMemFree(sendbuffs[i]));
-      sendbuffs[i] = nullptr;
-    }
-    if (recvbuffs[i]) {
-      NCCLCHECK(ncclMemFree(recvbuffs[i]));
-      recvbuffs[i] = nullptr;
-    }
-    if (test_bias && bias[i]) {
-      NCCLCHECK(ncclMemFree(bias[i]));
-      bias[i] = nullptr;
-    }
-    if (datacheck && expected[i]) {
-      NCCLCHECK(ncclMemFree(expected[i]));
-      expected[i] = nullptr;
-    }
-#else
-    if (sendbuffs[i]) {
-      CUDACHECK(cudaFree(sendbuffs[i]));
-      sendbuffs[i] = nullptr;
-    }
-    if (recvbuffs[i]) {
-      CUDACHECK(cudaFree(recvbuffs[i]));
-      recvbuffs[i] = nullptr;
-    }
-    if (test_bias && bias[i]) {
-      CUDACHECK(cudaFree(bias[i]));
-      bias[i] = nullptr;
-    }
-    if (datacheck && expected[i]) {
-      CUDACHECK(cudaFree(expected[i]));
-      expected[i] = nullptr;
-    }
-#endif
+    TESTCHECK(freeTestBuffer(&sendbuffs[i]));
+    TESTCHECK(freeTestBuffer(&recvbuffs[i]));
+    if (test_bias) TESTCHECK(freeTestBuffer(&bias[i]));
+    if (datacheck) TESTCHECK(freeTestBuffer(&expected[i]));
   }
   return testSuccess;
 }
@@ -1927,12 +1924,7 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
 #endif
   }
   else {
-    // ROCM-2696:HIP_VERSION check added because ncclMemAlloc relies on hipMemRetainAllocationHandle, which had a bug
-    // in older HIP versions that could cause use-after-free or segfaults due to premature allocation release.
-    // The ROCm 7.0.2.x backport (HIP_VERSION in [70051831, 70060000)) carries the same hipMemRetainAllocationHandle
-    // fix, so extend the guard to cover that range as well.
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && \
-    (HIP_VERSION >= 71260540 || (HIP_VERSION >= 70051831 && HIP_VERSION < 70060000))
+#if USE_NCCL_MEM_ALLOC
     NCCLCHECK(ncclMemAlloc(sendbuff, nbytes));
     NCCLCHECK(ncclMemAlloc(recvbuff, nbytes));
     if (bias) NCCLCHECK(ncclMemAlloc(bias, nbytes));
@@ -1944,7 +1936,12 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
     if (datacheck) CUDACHECK(cudaMalloc(expected, recvBytes));
 #endif
   }
+  // Zero payloads run faster on some hardware, so no timed buffer may stay zero:
+  // recvbuff is the in-place source and initData fills only the first rotation slot.
+  // Zero data runs faster, so fill every rotation slot: recvbuff is the
+  // in-place source and initData fills only the first slot.
   CUDACHECK(hipMemset(*sendbuff, 1, nbytes));
+  CUDACHECK(hipMemset(*recvbuff, 2, nbytes));
   if (bias) CUDACHECK(hipMemset(*bias, 1, nbytes));
   if (datacheck) CUDACHECK(hipMemset(*expected, 1, recvBytes));
   return testSuccess;
