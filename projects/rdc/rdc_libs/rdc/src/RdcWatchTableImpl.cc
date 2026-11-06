@@ -298,7 +298,9 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
         fields.push_back({fields_to_watch_iter->first.first, fields_to_watch_iter->first.second});
       }
     }
-    rdc_telemetry->rdc_telemetry_fields_watch(&fields[0], fields.size());
+    if (!fields.empty()) {
+      rdc_telemetry->rdc_telemetry_fields_watch(fields.data(), fields.size());
+    }
   }
 
   return RDC_ST_OK;
@@ -369,8 +371,8 @@ rdc_status_t RdcWatchTableImpl::update_field_in_table_when_unwatch(const RdcFiel
 
   // Notify the telemetry_module to unwatch those fields
   auto rdc_telemetry = rdc_module_mgr_->get_telemetry_module();
-  if (rdc_telemetry) {
-    rdc_telemetry->rdc_telemetry_fields_unwatch(&unwatch_fields[0], unwatch_fields.size());
+  if (rdc_telemetry && !unwatch_fields.empty()) {
+    rdc_telemetry->rdc_telemetry_fields_unwatch(unwatch_fields.data(), unwatch_fields.size());
   }
 
   return RDC_ST_OK;

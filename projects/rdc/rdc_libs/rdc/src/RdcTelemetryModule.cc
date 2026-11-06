@@ -145,7 +145,9 @@ rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_value_get(rdc_gpu_field_t*
   }
 
   // Notify the caller unsupported fields
-  callback(&unsupport_fields[0], unsupport_fields.size(), user_data);
+  if (!unsupport_fields.empty()) {
+    callback(unsupport_fields.data(), unsupport_fields.size(), user_data);
+  }
 
   return RDC_ST_OK;
 }

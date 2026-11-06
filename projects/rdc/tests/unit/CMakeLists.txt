@@ -290,6 +290,33 @@ install(
     COMPONENT ${TESTS_COMPONENT}
 )
 
+# rdc_telemetry_module_tests: how RdcTelemetryModule reports the fields no module
+# supports. Compiles RdcTelemetryModule.cc into the test with a fake telemetry
+# module, so it needs no GPU, and with libstdc++ assertions on, so an access past
+# the end of a vector aborts the test on every toolchain; librdc_bootstrap
+# provides the logger.
+add_executable(
+    rdc_telemetry_module_tests
+    ${SRC_DIR}/test_telemetry_module.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcTelemetryModule.cc
+)
+target_include_directories(
+    rdc_telemetry_module_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_compile_definitions(rdc_telemetry_module_tests PRIVATE _GLIBCXX_ASSERTIONS)
+target_link_libraries(rdc_telemetry_module_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+set_target_properties(
+    rdc_telemetry_module_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib"
+)
+add_test(NAME rdc_telemetry_module_tests COMMAND rdc_telemetry_module_tests)
+install(
+    TARGETS rdc_telemetry_module_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
+
 # rdc_rocr_lifetime_tests: the ROCr diagnostic module (librdc_rocr.so) keeps ROCr
 # loaded from its first check until it is destroyed, and its checks release what
 # they create. Compiles the module's sources into the test, which defines the HSA
