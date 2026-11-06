@@ -46,10 +46,10 @@
 
 #include "rocjitsu/code/analysis/instruction_boundaries.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
-#include "rocjitsu/code/patch/checked_text_edits.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/spill_manager.h"
+#include "rocjitsu/code/patch/text_edit_error.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/register_set.h"
@@ -67,7 +67,6 @@ namespace rocjitsu {
 
 class AmdGpuCodeObject;
 class BasicBlock;
-class CodeObjectPatcher;
 class Decoder;
 class Instruction;
 class LivenessAnalysis;
@@ -205,7 +204,7 @@ struct InstrumentationResources {
 struct InstrumentedCodeObject {
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;
-  /// Present for shared text-edit failures; errors retains the human-readable diagnostic.
+  /// Present for anchor-batch failures; errors retains the human-readable diagnostic.
   std::optional<TextEditError> edit_error;
   std::vector<std::string> warnings;
   std::vector<InstrumentedSite> sites;
@@ -487,6 +486,8 @@ public:
   /// Currently all-or-nothing: on any failure, `sites` is empty and `errors`
   /// lists every fatal diagnostic encountered. On success, `sites` contains
   /// one record per queued point in insertion order and `errors` is empty.
+  /// Success establishes per-site eligibility, not that the final patch will succeed.
+  /// Complete encoded-batch reference checks and final layout checks run in patch().
   [[nodiscard]] ValidationResult validate_points();
 
   /// @brief Validate, plan, build, and apply the queued points; emit a
@@ -538,17 +539,14 @@ private:
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).
   std::unordered_map<uint64_t, const Instruction *> offset_to_inst_;
   // Owned full-section index built with this source's decoder alongside blocks_.
-  // Shared structural facts copy it after coverage checks; they do not borrow it.
+  // The local anchor transaction borrows it during patching.
   InstructionBoundaries instruction_boundaries_;
-  std::shared_ptr<const CheckedTextEdits> text_edits_;
   bool blocks_built_ = false;
 
   // Returns false if no decoder exists for arch_ (RV32I/RV64I/INVALID/etc.);
   // in that case *error_out is set and blocks_built_ stays false so the failure
   // is reported instead of crashing in BasicBlock::build.
   [[nodiscard]] bool ensure_blocks_built(std::string *error_out = nullptr);
-  [[nodiscard]] bool ensure_text_edits(TextEditError &error,
-                                       const CodeObjectPatcher *patcher = nullptr);
   [[nodiscard]] bool ensure_liveness_built(uint8_t wave_size,
                                            std::span<const KernelDescriptorInfo> kernels,
                                            std::string *error_out = nullptr);

@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -154,6 +155,74 @@ std::vector<uint8_t> with_absolute64_text_reference(int64_t addend, bool nonallo
   return image;
 }
 
+// Replace the descriptor symbol with a text label. These probe-free edits do not
+// need a descriptor; keeping its old name would make this label look like one.
+std::vector<uint8_t> with_text_symbol(uint64_t start, uint64_t size, bool relocatable) {
+  std::vector<uint8_t> image = make_mixed_width_kernel_elf();
+  const AmdGpuCodeObject original(image.data(), image.size());
+  const Section &text = *original.text_sections().front();
+  std::vector<Elf64_Shdr> sections = CodeObjectPatcher(original).section_headers();
+  const std::vector<Elf64_Shdr>::iterator symbols =
+      std::ranges::find(sections, SHT_SYMTAB, &Elf64_Shdr::sh_type);
+  EXPECT_NE(symbols, sections.end());
+  if (symbols == sections.end())
+    return {};
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  if (relocatable) {
+    header.e_type = ET_REL;
+    header.e_phoff = 0;
+    header.e_phnum = 0;
+    // A nonzero section address makes erroneous subtraction observable: the
+    // interior label at section offset 12 must not be normalized to offset 4.
+    sections[*text.sectionHeaderIndex()].sh_addr = 8;
+  }
+  const Elf64_Sym symbol = {.st_name = 0,
+                            .st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeNone),
+                            .st_other = 0,
+                            .st_shndx = static_cast<uint16_t>(*text.sectionHeaderIndex()),
+                            .st_value = relocatable ? start : text.vaddr() + start,
+                            .st_size = size};
+  std::memcpy(image.data() + symbols->sh_offset + sizeof(Elf64_Sym), &symbol, sizeof(symbol));
+  std::memcpy(image.data(), &header, sizeof(header));
+  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  return image;
+}
+
+// Exercise the public observation path, including the distinction between
+// per-site eligibility and the reference checks performed on the final batch.
+void expect_reference_result(const std::vector<uint8_t> &image, uint64_t anchor,
+                             std::optional<uint64_t> rejected_reference,
+                             rj_code_arch_t arch = kArch) {
+  const std::vector<uint8_t> original_image = image;
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  Instrumentor instrumentor(object, arch);
+  instrumentor.add_point_by_offset(anchor);
+  const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+  ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+  ASSERT_EQ(validated.sites.size(), 1u);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  if (rejected_reference) {
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.sites.empty());
+    ASSERT_FALSE(result.errors.empty());
+    ASSERT_TRUE(result.edit_error);
+    EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+    EXPECT_EQ(result.edit_error->offset, *rejected_reference);
+  } else {
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    EXPECT_FALSE(result.edit_error);
+    ASSERT_FALSE(result.elf_bytes.empty());
+    ASSERT_EQ(result.sites.size(), 1u);
+    EXPECT_EQ(result.sites.front().original_offset, anchor);
+    const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    EXPECT_TRUE(patched.is_valid());
+  }
+  EXPECT_EQ(image, original_image);
+  EXPECT_EQ(std::memcmp(object.image_data(), original_image.data(), original_image.size()), 0);
+}
+
 TEST(CheckedTextEdits, RejectsSymbolReferenceBeforePartialRelocationTail) {
   for (const bool trailing_partial_record : {false, true}) {
     SCOPED_TRACE(trailing_partial_record);
@@ -199,11 +268,201 @@ TEST(CheckedTextEdits, InstrumentorRejectsRelativeReferenceInsideAnchor) {
   const std::vector<uint8_t> original_image = image;
   const InstrumentedCodeObject result = instrumentor.patch();
   EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.sites.empty());
   ASSERT_FALSE(result.errors.empty());
+  ASSERT_TRUE(result.edit_error);
+  EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+  EXPECT_EQ(result.edit_error->offset, 12u);
   EXPECT_NE(result.errors.front().find("anchor edit transaction:"), std::string::npos);
   EXPECT_NE(result.errors.front().find("relocation"), std::string::npos);
   EXPECT_EQ(image, original_image);
   EXPECT_EQ(std::memcmp(object.image_data(), original_image.data(), original_image.size()), 0);
+}
+
+TEST(CheckedTextEdits, InstrumentorChecksDirectReferencesIncludingUnreachableBranches) {
+  for (const bool unreachable : {false, true}) {
+    SCOPED_TRACE(unreachable);
+    for (const uint64_t destination : {8u, 12u, 16u}) {
+      SCOPED_TRACE(destination);
+      std::vector<uint8_t> image = make_mixed_width_kernel_elf();
+      const AmdGpuCodeObject object(image.data(), image.size());
+      const uint64_t text_file_offset = object.text_sections().front()->sectionOffset();
+      const uint64_t branch_offset = unreachable ? 4 : 0;
+      if (unreachable) {
+        // Jump over the second branch. The complete text scan must retain that
+        // unreachable branch's reference, not just references in entry's CFG.
+        const util::FailureOr<uint32_t> maybe_skip = build_s_branch(1, kArch);
+        ASSERT_TRUE(maybe_skip.succeeded());
+        const uint32_t skip = maybe_skip.value();
+        std::memcpy(image.data() + text_file_offset, &skip, sizeof(skip));
+      }
+      const int16_t displacement = static_cast<int16_t>((destination - branch_offset - 4) / 4);
+      const util::FailureOr<uint32_t> maybe_branch = build_s_branch(displacement, kArch);
+      ASSERT_TRUE(maybe_branch.succeeded());
+      const uint32_t branch = maybe_branch.value();
+      std::memcpy(image.data() + text_file_offset + branch_offset, &branch, sizeof(branch));
+      expect_reference_result(image, 8,
+                              destination == 12 ? std::optional<uint64_t>(12) : std::nullopt);
+    }
+  }
+}
+
+TEST(CheckedTextEdits, InstrumentorRejectsWholeBatchOnLaterInteriorReference) {
+  for (const uint64_t reference : {12u, 16u}) {
+    SCOPED_TRACE(reference);
+    const std::vector<uint8_t> image =
+        with_relative64_reference(make_mixed_width_kernel_elf(), reference);
+    const std::vector<uint8_t> original_image = image;
+    const AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    Instrumentor instrumentor(object, kArch);
+    instrumentor.add_point_by_offset(0);
+    instrumentor.add_point_by_offset(8);
+    const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+    ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+    ASSERT_EQ(validated.sites.size(), 2u);
+    const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+    if (reference == 12) {
+      // The first anchor is valid, but the reference enters the second anchor's
+      // literal. A failed transaction must not publish either applied site.
+      ASSERT_FALSE(result.errors.empty());
+      ASSERT_TRUE(result.edit_error);
+      EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+      EXPECT_EQ(result.edit_error->offset, reference);
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+      EXPECT_TRUE(result.patches.empty());
+    } else {
+      // A reference at the second anchor's end permits both edits.
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      EXPECT_FALSE(result.edit_error);
+      ASSERT_FALSE(result.elf_bytes.empty());
+      ASSERT_EQ(result.sites.size(), 2u);
+      EXPECT_EQ(result.patches.size(), 2u);
+      const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+      EXPECT_TRUE(patched.is_valid());
+    }
+    EXPECT_EQ(image, original_image);
+    EXPECT_EQ(std::memcmp(object.image_data(), original_image.data(), original_image.size()), 0);
+  }
+}
+
+TEST(CheckedTextEdits, InstrumentorChecksSymbolStartAndEndReferences) {
+  for (const bool end_reference : {false, true}) {
+    SCOPED_TRACE(end_reference);
+    for (const uint64_t endpoint : {8u, 12u, 16u}) {
+      SCOPED_TRACE(endpoint);
+      const std::vector<uint8_t> image =
+          with_text_symbol(end_reference ? 0 : endpoint, end_reference ? endpoint : 0, false);
+      expect_reference_result(image, 8,
+                              endpoint == 12 ? std::optional<uint64_t>(12) : std::nullopt);
+    }
+  }
+}
+
+TEST(CheckedTextEdits, RelocatableSymbolsKeepSectionOffsetsWithNonzeroSectionAddress) {
+  for (const bool end_reference : {false, true}) {
+    SCOPED_TRACE(end_reference);
+    for (const uint64_t endpoint : {8u, 12u, 16u}) {
+      SCOPED_TRACE(endpoint);
+      const std::vector<uint8_t> image =
+          with_text_symbol(end_reference ? 0 : endpoint, end_reference ? endpoint : 0, true);
+      expect_reference_result(image, 8,
+                              endpoint == 12 ? std::optional<uint64_t>(12) : std::nullopt);
+    }
+  }
+}
+
+TEST(CheckedTextEdits, InstrumentorChecksDescriptorEntryInsideAnchor) {
+  constexpr uint64_t kEntry = 256;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  ASSERT_TRUE(nop.succeeded());
+  const util::FailureOr<uint32_t> endpgm = build_s_endpgm(kArch);
+  ASSERT_TRUE(endpgm.succeeded());
+  for (const uint64_t anchor : {248u, 252u, 256u}) {
+    SCOPED_TRACE(anchor);
+    std::vector<uint32_t> words(67, nop.value());
+    words[anchor / sizeof(uint32_t)] = 0xbe8000ffu;
+    words[anchor / sizeof(uint32_t) + 1] = 0x12345678u;
+    words.back() = endpgm.value();
+    const std::vector<uint8_t> image =
+        test::make_amdgpu_kernel_elf(words, 0, 3, EF_AMDGPU_MACH_AMDGCN_GFX1200, 0, 0, false, false,
+                                     false, false, false, false, 0, kEntry);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    const Section &text = *object.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(image, text.sectionOffset(), text.size());
+    ASSERT_EQ(kernels.size(), 1u);
+    ASSERT_EQ(kernels.front().entry_text_offset, kEntry);
+    expect_reference_result(image, anchor,
+                            anchor == 252 ? std::optional<uint64_t>(kEntry) : std::nullopt);
+  }
+}
+
+TEST(CheckedTextEdits, UnknownMachineUsesTheSameCallerArchitectureForValidationAndPatching) {
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  ASSERT_TRUE(nop.succeeded());
+  const util::FailureOr<uint32_t> endpgm = build_s_endpgm(kArch);
+  ASSERT_TRUE(endpgm.succeeded());
+  const std::vector<uint8_t> image =
+      test::make_amdgpu_kernel_elf({nop.value(), endpgm.value()}, 0, 3, 0);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  ASSERT_EQ(object.target_id(), ROCJITSU_CODE_TARGET_INVALID);
+  expect_reference_result(image, 0, std::nullopt);
+}
+
+TEST(CheckedTextEdits, ConcreteVariantDecoderIsUsedForSourceAndFinalAnchor) {
+  constexpr rj_code_arch_t kCdna5 = ROCJITSU_CODE_ARCH_CDNA5;
+  const util::FailureOr<uint32_t> endpgm = build_s_endpgm(kCdna5);
+  ASSERT_TRUE(endpgm.succeeded());
+  // Same public LLVM gfx1251 encoding as the probe mismatch regression:
+  // v_pk_add_nc_u64 v[4:7], v[8:11], v[12:15]. It is unavailable on gfx1250.
+  const std::vector<uint32_t> words = {0xcc4c4004u, 0x1a021908u, endpgm.value()};
+  for (const uint32_t machine : {EF_AMDGPU_MACH_AMDGCN_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX1251}) {
+    SCOPED_TRACE(machine);
+    const std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(words, 0, 3, machine);
+    if (machine == EF_AMDGPU_MACH_AMDGCN_GFX1251) {
+      expect_reference_result(image, 0, std::nullopt, kCdna5);
+    } else {
+      const std::vector<uint8_t> original_image = image;
+      const AmdGpuCodeObject object(image.data(), image.size());
+      ASSERT_TRUE(object.is_valid());
+      Instrumentor instrumentor(object, kCdna5);
+      instrumentor.add_point_by_offset(0);
+      const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+      EXPECT_TRUE(validated.sites.empty());
+      EXPECT_FALSE(validated.errors.empty());
+      const InstrumentedCodeObject result = instrumentor.patch();
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+      EXPECT_FALSE(result.errors.empty());
+      EXPECT_EQ(image, original_image);
+      EXPECT_EQ(std::memcmp(object.image_data(), original_image.data(), original_image.size()), 0);
+    }
+  }
+}
+
+TEST(CheckedTextEdits, RejectsDebugBranchesWhoseDestinationsAreUnavailable) {
+  constexpr rj_code_arch_t kCdna3 = ROCJITSU_CODE_ARCH_CDNA3;
+  const util::FailureOr<uint32_t> endpgm = build_s_endpgm(kCdna3);
+  ASSERT_TRUE(endpgm.succeeded());
+  // Gfx942 SOPP encodings for the four conditional-debug branch forms. Their
+  // displacement is one dword, targeting the literal at offset 8 of [4,12).
+  constexpr std::array<uint32_t, 4> kDebugBranches = {0xbf970001u, 0xbf980001u, 0xbf990001u,
+                                                      0xbf9a0001u};
+  for (const uint32_t branch : kDebugBranches) {
+    SCOPED_TRACE(branch);
+    const std::vector<uint8_t> image =
+        test::make_gfx942_kernel_elf({branch, 0xbe8000ffu, 0x12345678u, endpgm.value()}, 0);
+    expect_reference_result(image, 4, 0, kCdna3);
+  }
+  // A normal branch to the anchor's boundary remains supported.
+  const util::FailureOr<uint32_t> branch = build_s_branch(0, kCdna3);
+  ASSERT_TRUE(branch.succeeded());
+  const std::vector<uint8_t> control =
+      test::make_gfx942_kernel_elf({branch.value(), 0xbe8000ffu, 0x12345678u, endpgm.value()}, 0);
+  expect_reference_result(control, 4, std::nullopt, kCdna3);
 }
 
 } // namespace

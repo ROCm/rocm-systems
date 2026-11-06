@@ -13,6 +13,7 @@
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/patch/checked_text_edits.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
 #include "rocjitsu/code/patch/error_report.h"
@@ -884,32 +885,6 @@ void Instrumentor::add_point_by_offset(uint64_t anchor_offset, InstrumentationKi
   pt.anchor_offset = anchor_offset;
   pt.kind = kind;
   points_.push_back(std::move(pt));
-}
-
-bool Instrumentor::ensure_text_edits(TextEditError &error, const CodeObjectPatcher *patcher) {
-  error = {};
-  if (text_edits_)
-    return true;
-  if (!obj_.is_valid() || obj_.text_sections().size() != 1) {
-    error = {.code = TextEditErrorCode::InvalidImage,
-             .offset = 0,
-             .message = "expected one allocated executable .text section"};
-    return false;
-  }
-  // Reuse the private full-section index after coverage is checked.
-  // The existing anchor path already owns a private writer. Reuse its shared
-  // ELF queries before text/layout changes rather than copying another ELF.
-  std::optional<CodeObjectPatcher> source_patcher;
-  if (!patcher) {
-    source_patcher.emplace(obj_);
-    patcher = &*source_patcher;
-  }
-  FailureOr<std::shared_ptr<const CheckedTextEdits>> facts = CheckedTextEdits::create(
-      obj_, arch_, blocks_built_ ? &instruction_boundaries_ : nullptr, *patcher, error);
-  if (facts.failed())
-    return false;
-  text_edits_ = std::move(facts).value();
-  return true;
 }
 
 bool Instrumentor::ensure_blocks_built(std::string *error_out) {
@@ -1840,9 +1815,30 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   const std::span<const uint8_t> original_text = patcher.text_bytes();
   std::vector<uint8_t> new_text(original_text.begin(), original_text.end());
   if (!anchor_edits.empty()) {
+    // The conditional-debug forms do not yet expose branch metadata. Do not
+    // mistake their missing displacement for proof that an anchor has no
+    // incoming reference. Keep this admission guard out of generic analysis.
+    for (const std::unique_ptr<BasicBlock> &block : blocks_) {
+      for (const Instruction &instruction : block->instructions()) {
+        if (instruction.mnemonic().starts_with("s_cbranch_cdbg") &&
+            !instruction.branch_offset_bytes()) {
+          result.edit_error = TextEditError{
+              .code = TextEditErrorCode::UnsupportedReferences,
+              .offset = instruction.src_loc(),
+              .message = "conditional-debug branch destination metadata is unavailable"};
+          result.errors.push_back("anchor edit transaction: " + result.edit_error->message);
+          return result;
+        }
+      }
+    }
+    std::vector<uint64_t> kernel_entries;
+    kernel_entries.reserve(kernels.size());
+    for (const KernelDescriptorInfo &kernel : kernels)
+      kernel_entries.push_back(kernel.entry_text_offset);
+    const CheckedTextEdits transaction(obj_, arch_, *decoder_, instruction_boundaries_, patcher,
+                                       kernel_entries);
     TextEditError edit_error;
-    if (!ensure_text_edits(edit_error, &patcher) ||
-        text_edits_->apply(anchor_edits, new_text, edit_error).failed()) {
+    if (transaction.apply(anchor_edits, new_text, edit_error).failed()) {
       result.errors.emplace_back("anchor edit transaction: " + edit_error.message);
       result.edit_error = std::move(edit_error);
       return result;

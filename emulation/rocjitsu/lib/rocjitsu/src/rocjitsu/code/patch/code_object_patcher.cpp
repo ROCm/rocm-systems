@@ -556,7 +556,6 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
   std::unordered_map<size_t, std::unordered_set<uint32_t>> referenced_by_symtab;
   for (const Elf64_Shdr &relocs : shdrs) {
     if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
-        relocs.sh_size % sizeof(Elf64_Rela) != 0 ||
         !image_contains_range(image.size(), relocs.sh_offset, relocs.sh_size)) {
       continue;
     }
@@ -571,6 +570,8 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
         !image_contains_range(image.size(), symtab.sh_offset, symtab.sh_size)) {
       continue;
     }
+    // Admission processes complete records before a partial tail. Their symbol
+    // references still require mappings when the text is rewritten.
     const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
     for (size_t i = 0; i < count; ++i) {
       Elf64_Rela rela{};
