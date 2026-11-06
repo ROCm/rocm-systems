@@ -80,6 +80,7 @@ public:
   //         not be created)
   [[nodiscard]] bool initialize()
   {
+#if !HT_WIN
     // maximum name size without the PID (which is added at bind() time)
     int maxNameSize = kSocketUserPrefixMaxSize + kNonceDigitsSize + 2;
     if (prefix_.size() > maxNameSize) {
@@ -89,6 +90,7 @@ public:
                     maxNameSize);
       return false;
     }
+#endif
 
     handle.reset(new ipcHdl());
 
