@@ -4,10 +4,11 @@
 """ROCTX instrumentation backend for JAX.
 
 Resolves jax.jit, jax.pmap, and jax.extend.core.Primitive handles.
-Wraps jax.jit compiled __call__ with a jax.jit.<fn> ROCTX range.
+Wraps jax.jit compiled __call__ and the jax.pmap factory with ROCTX ranges.
 """
 
 import importlib.util
+from functools import partial
 from typing import Any
 
 from utils.inject_roctx import core
@@ -23,6 +24,7 @@ class _JaxState:
     def __init__(self) -> None:
         self.jit: Any = None
         self.pmap: Any = None
+        self.pmap_factory: Any = None
         self.primitive: Any = None
         self.compiled_call: Any = None
 
@@ -31,30 +33,9 @@ _STATE = _JaxState()
 
 
 def patch_jax_entry_points() -> None:
-    """Wrap jax.jit compiled __call__ with a jax.jit.<fn> ROCTX range."""
-    jit = _STATE.jit
-    if jit is None:
-        console_warning(
-            "ml api trace",
-            "jax.jit is not available; skipping jit instrumentation.",
-        )
-        return
-    try:
-        compiled_type = type(jit(_identity))
-        if getattr(compiled_type.__call__, "_roctx_wrapped", False):
-            return
-        _STATE.compiled_call = compiled_type.__call__
-        compiled_type.__call__ = _roctx_compiled_call
-    except Exception as exc:
-        console_warning(
-            "ml api trace",
-            f"Could not patch jax.jit compiled __call__: {exc}",
-        )
-        return
-    console_log(
-        "ml api trace",
-        "Wrapped jax.jit compiled calls with ROCTX markers",
-    )
+    """Wrap JAX compiled-call entry points."""
+    _wrap_jit_compiled_call()
+    _wrap_pmap_factory()
 
 
 def _resolve_jax() -> bool:
@@ -83,7 +64,7 @@ def _identity(value: object) -> object:
 
 
 def _compiled_function_name(compiled: object) -> str:
-    """Name for jax.jit.<fn> from the compiled object or its wrapped function."""
+    """Name for a jax.jit or jax.pmap marker from the compiled callable."""
     name = getattr(compiled, "__name__", None)
     if isinstance(name, str) and name:
         return name
@@ -108,11 +89,90 @@ def _roctx_compiled_call(compiled: object, *args: Any, **kwargs: Any) -> object:
 _roctx_compiled_call._roctx_wrapped = True
 
 
+def _roctx_pmap_call(compiled: object, *args: Any, **kwargs: Any) -> object:
+    """Push jax.pmap.<fn>, run the original pmap result, then pop."""
+    marker = f"jax.pmap.{_compiled_function_name(compiled)}"
+    location = core.resolve_user_caller_location()
+    core._push_scope(marker, location, backend=_BACKEND_NAME)
+    try:
+        return compiled(*args, **kwargs)
+    finally:
+        core._pop_scope()
+
+
+def _roctx_pmap_factory(fun: object, *args: Any, **kwargs: Any) -> object:
+    """Call original jax.pmap and return a marked callable."""
+    compiled = _STATE.pmap_factory(fun, *args, **kwargs)
+    if getattr(compiled, "_roctx_wrapped", False):
+        return compiled
+    wrapped = partial(_roctx_pmap_call, compiled)
+    wrapped._roctx_wrapped = True
+    return wrapped
+
+
+_roctx_pmap_factory._roctx_wrapped = True
+
+
+def _wrap_jit_compiled_call() -> None:
+    """Replace PjitFunction.__call__ with _roctx_compiled_call."""
+    jit = _STATE.jit
+    if jit is None:
+        console_warning(
+            "ml api trace",
+            "jax.jit is not available; skipping jit instrumentation.",
+        )
+        return
+    try:
+        compiled_type = type(jit(_identity))
+        if getattr(compiled_type.__call__, "_roctx_wrapped", False):
+            return
+        _STATE.compiled_call = compiled_type.__call__
+        compiled_type.__call__ = _roctx_compiled_call
+    except Exception as exc:
+        console_warning(
+            "ml api trace",
+            f"Could not patch jax.jit compiled __call__: {exc}",
+        )
+        return
+    console_log(
+        "ml api trace",
+        "Wrapped jax.jit compiled calls with ROCTX markers",
+    )
+
+
+def _wrap_pmap_factory() -> None:
+    """Replace jax.pmap with _roctx_pmap_factory."""
+    pmap = _STATE.pmap
+    if pmap is None:
+        console_warning(
+            "ml api trace",
+            "jax.pmap is not available; skipping pmap instrumentation.",
+        )
+        return
+    if getattr(pmap, "_roctx_wrapped", False):
+        return
+    try:
+        import jax
+
+        _STATE.pmap_factory = pmap
+        jax.pmap = _roctx_pmap_factory
+    except Exception as exc:
+        console_warning(
+            "ml api trace",
+            f"Could not patch jax.pmap: {exc}",
+        )
+        return
+    console_log(
+        "ml api trace",
+        "Wrapped jax.pmap compiled calls with ROCTX markers",
+    )
+
+
 class JaxBackend:
     name = "jax"
 
     def install(self) -> None:
-        """Resolve jax and ROCTX, then wrap jax.jit compiled calls."""
+        """Resolve jax and ROCTX, then wrap compiled-call entry points."""
         if not _resolve_jax():
             console_warning(
                 "ml api trace",
