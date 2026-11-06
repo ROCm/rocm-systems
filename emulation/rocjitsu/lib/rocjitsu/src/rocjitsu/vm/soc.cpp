@@ -12,7 +12,6 @@
 #include <algorithm>
 #include <cassert>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -329,9 +328,9 @@ void SoC::flush_all() {
     i->msc()->flush_all();
 }
 
-void SoC::initialize() {
+util::Result SoC::initialize(util::DiagnosticEmitter emit_error) {
   if (!cache_coherence_->has_legacy_maintenance_backing())
-    throw std::logic_error("SoC cache hierarchy lacks legacy maintenance backing");
+    return emit_error.emit() << "SoC cache hierarchy lacks legacy maintenance backing";
 
   // Let every XCD's command processor see its siblings, so a queue marked for
   // fan-out can split its dispatches across the whole device. Each CP's rank is
@@ -370,7 +369,7 @@ void SoC::initialize() {
         }
       }
     }
-    return;
+    return util::Result::success();
   }
 
   auto &topo = engine()->topology();
@@ -405,6 +404,7 @@ void SoC::initialize() {
       link_ba->set_exec_mode(exec_mode_);
     }
   }
+  return util::Result::success();
 }
 
 const std::vector<amdgpu::ComputeUnitCore *> &SoC::all_cus() {

@@ -122,7 +122,7 @@ util::Result Xcd::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coh
   return util::Result::success();
 }
 
-void Xcd::initialize() {
+util::Result Xcd::initialize(util::DiagnosticEmitter) {
   auto &topo = engine()->topology();
 
   // Wire CP req ports → CU cpl ports.
@@ -179,6 +179,7 @@ void Xcd::initialize() {
 
   // L2→HBM/fabric port wiring is done by SoC::initialize() since the
   // destination depends on the IOD topology.
+  return util::Result::success();
 }
 
 } // namespace amdgpu

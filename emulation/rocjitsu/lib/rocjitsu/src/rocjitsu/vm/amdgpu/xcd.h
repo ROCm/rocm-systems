@@ -104,7 +104,7 @@ public:
   ///
   /// @details L2→HBM/fabric wiring is done by SoC::initialize() since the
   /// destination depends on the IOD topology.
-  void initialize() override;
+  util::Result initialize(util::DiagnosticEmitter emit_error = {}) override;
 
   /// @brief Return the command processor.
   /// @returns Pointer to the command processor.

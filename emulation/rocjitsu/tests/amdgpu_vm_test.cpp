@@ -345,6 +345,26 @@ public:
   void onAmdgpuDispatchExecutionEnd(uint32_t) override { ++completed_dispatches; }
 };
 
+TEST(SoCLifecycleTest, MissingMaintenanceBackingRejectsEngineCreation) {
+  util::StringDiagnostic diagnostic;
+  simdojo::SimulationEngine engine({.num_threads = 1});
+  auto soc = std::make_unique<SoC>("soc", nullptr);
+  auto xcd = std::make_unique<amdgpu::Xcd>("xcd");
+  auto l2 = std::make_unique<amdgpu::L2Cache>("l2");
+  xcd->set_l2_cache(l2.get());
+  xcd->add_child(std::move(l2));
+  ASSERT_TRUE(soc->add_xcd(xcd.get(), diagnostic.emitter()).succeeded());
+  soc->add_child(std::move(xcd));
+  engine.topology().set_root(std::move(soc));
+
+  EXPECT_TRUE(engine.create(diagnostic.emitter()).failed());
+  EXPECT_NE(diagnostic.message().find("lacks legacy maintenance backing"), std::string::npos);
+  EXPECT_FALSE(engine.is_created());
+  EXPECT_FALSE(engine.wait_until_started());
+  EXPECT_EQ(engine.last_exit().code, 1);
+  engine.shutdown();
+}
+
 TEST(VmFixtureSetupTest, ReportsMalformedConfigAndLeavesFixtureEmpty) {
   EXPECT_FATAL_FAILURE(
       {

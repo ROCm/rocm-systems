@@ -119,7 +119,8 @@ public:
   simdojo::ExecMode exec_mode() const { return exec_mode_; }
 
   /// @brief Wire topology links between XCDs, IODs, and memory.
-  void initialize() override;
+  /// @returns Failure with a diagnostic if cache maintenance has no backing memory.
+  util::Result initialize(util::DiagnosticEmitter emit_error = {}) override;
 
   /// @brief Return the number of XCDs.
   /// @returns Number of Accelerator Complex Dies.
