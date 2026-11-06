@@ -38,6 +38,8 @@ downstream consumer of the library.
   at `start_ts`. A row or sample that begins at `end_ts` is still left out.
   The per-node table suffix is parsed without the schema-3 trim source, so a
   build with schema 3 disabled still links.
+- Schema-3 region details include the `rocpd_arg` rows for that region's
+  event. Optiq shows them in the Arguments panel.
 
 ### Added
 

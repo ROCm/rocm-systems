@@ -783,6 +783,19 @@ rocpd_v3_reader::get_region_details(const reader_types::timeline_event_t& event)
         {
             data.event = build_event_data(event_meta.value());
         }
+
+        // rocpd_arg rows hang off the region's rocpd_event id, the same join
+        // the legacy reader uses (rocpd_region -> rocpd_event -> rocpd_arg).
+        const auto arg_rows = m_read_statements->arg_detail()(r.event_id.value()).to_vector();
+        data.args.reserve(arg_rows.size());
+        for(const auto& arg : arg_rows)
+        {
+            data.args.push_back(reader_types::arg_data_t{ .position = arg.position,
+                                                          .type     = arg.type,
+                                                          .name     = arg.name,
+                                                          .value    = arg.value,
+                                                          .extdata  = arg.extdata });
+        }
     }
 
     return data;

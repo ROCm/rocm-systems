@@ -411,7 +411,6 @@ These were found by reading the code and have not been confirmed with a test.
     The first open can change the file's modification time.
   - Trimmed copies also carry these indexes.
 - **Missing data**
-  - Schema-3 region details do not include arguments.
   - Schema 2 has no memory allocation details and no HIP events.
 - **Naming differs by path.** Examples:
   - A schema-3 memory copy is named by `region_name_id` on the timeline and by
