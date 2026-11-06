@@ -30,7 +30,6 @@ This testcase works only on gfx90a, gfx942, gfx950.
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
-#include <hip_test_features.hh>
 #include <type_traits>
 
 #define INC_VAL 10
@@ -174,9 +173,11 @@ TEST_CASE(Unit_unsafeAtomicAdd_Coherent) {
   HIP_CHECK(hipGetDeviceProperties(&prop, device));
   std::string gfxName(prop.gcnArchName);
 
-  if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
+  int fineGrainSupport = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&fineGrainSupport, hipDeviceAttributeFineGrainSupport, device));
+  if (fineGrainSupport) {
     if (prop.canMapHostMemory != 1) {
-      SUCCEED("Does not support HostPinned Memory");
+      HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       SECTION("with -mno-unsafe-fp-atomics flag") {
         SECTION("float") { runUnsafeAtomicAddCoherentNoUnsafeFlagTest<float>(gfxName); }
@@ -194,9 +195,6 @@ TEST_CASE(Unit_unsafeAtomicAdd_Coherent) {
       }
     }
   } else {
-    SUCCEED(
-        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
-        "Hence skipping the testcase for this GPU "
-        << device);
+    HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
 }
