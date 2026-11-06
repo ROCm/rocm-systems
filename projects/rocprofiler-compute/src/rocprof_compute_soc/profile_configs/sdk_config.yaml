@@ -2406,6 +2406,10 @@ rocprofiler-sdk:
       - gfx1250
       block: SQ
       event: 34
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 26
   - name: SQ_WAIT_INST_LDS
     description: Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)
     properties: []
@@ -23138,6 +23142,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx1250
+      - gfx1201
       expression: reduce(SQ_WAIT_INST_ANY,sum)
   - name: SQ_INSTS_CBRANCH_NOT_TAKEN_sum
     description: sum of SQ INSTS CBRANCH NOT TAKEN.
