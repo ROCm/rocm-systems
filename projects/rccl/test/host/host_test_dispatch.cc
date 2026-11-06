@@ -34,6 +34,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <tuple>
 #include <unordered_set>
 #include <vector>
@@ -1494,6 +1495,10 @@ void writeMergedCoverage(const std::string &directory, const std::vector<std::st
             fmt::print(stderr, "host-test-dispatch: llvm-cov export failed for {} -- its coverage"
                                " is missing from {}\n",
                        binary, kCoverageTracefile);
+            // The redirect created the tracefile before llvm-cov ran; leaving the empty file
+            // behind would make run_host_tests.sh treat the export as done and skip its fallback.
+            std::error_code ec;
+            fs::remove(tracefile, ec);
             continue;
         }
         tracefiles.push_back(readFile(tracefile));
