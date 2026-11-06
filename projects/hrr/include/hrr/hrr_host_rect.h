@@ -5,30 +5,6 @@
  */
 #pragma once
 
-/*
- * hrr_host_rect.h - The host footprint of a pitched copy.
- *
- * Capture snapshots the host side of a pitched copy (hipMemcpy2D, hipMemcpy3D,
- * the hipDrvMemcpy* family) and replay sizes and reads that snapshot back. A
- * capture round-trips only while both measure the host buffer the same way, so
- * the arithmetic lives here, once, and both sides include it.
- *
- * The runtime addresses the host side as a pitched rect, as
- * amd::BufferRect::create() does:
- *   row   = pitch ? pitch : width
- *   slice = pitch*pitch_height ? pitch*pitch_height : row*height
- *   first = z*slice + y*row + x
- * The copy touches `height` rows of `width` bytes in each of `depth` slices and
- * nothing in between. The span from the host base pointer through the last
- * copied byte is
- *   extent = first + (depth-1)*slice + (height-1)*row + width
- * For a copy the runtime accepted, extent >= width*height*depth.
- *
- * Every step is checked. The geometry comes from the application at capture and
- * from the archive at replay, and a wrapped extent would place rows outside the
- * buffer the copy was given, or size a buffer below what the runtime then
- * writes into it.
- */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -86,8 +62,6 @@ static inline size_t hrr_host_rect_extent(size_t pitch, size_t pitch_height,
     return r.ok ? r.extent : SIZE_MAX;
 }
 
-/* True when the copied bytes of an ok rect are one contiguous run from `first`.
- * Neither product wraps: both are at most the extent. */
 static inline bool hrr_host_rect_dense(const HrrHostRect* rect) {
     return (rect->height == 1 || rect->row == rect->width) &&
            (rect->depth == 1 || rect->slice == rect->width * rect->height);
