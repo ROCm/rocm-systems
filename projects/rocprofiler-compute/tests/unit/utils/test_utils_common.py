@@ -14,6 +14,7 @@ from unittest import mock
 
 import pytest
 
+import config
 import utils.utils_common as utils_common
 from utils.utils_common import canonical_config_arch
 
@@ -1301,3 +1302,36 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
     assert not utils_common.is_gfx1250("gfx12500")
     assert not utils_common.is_gfx1250("gfx1251")
     assert not utils_common.is_gfx1250(None)
+
+
+@pytest.mark.misc
+def test_gfx120_and_gfx125_match_separate_config_templates():
+    """RDNA4 and CDNA5 keep their own templates even if a shared gfx12 file remains."""
+    names = [
+        "gfx9_config_template.yaml",
+        "gfx11_config_template.yaml",
+        "gfx12_config_template.yaml",
+        "gfx120x_config_template.yaml",
+        "gfx125x_config_template.yaml",
+    ]
+    match = utils_common.matching_config_template_name
+    assert match("gfx1201", names) == "gfx120x_config_template.yaml"
+    assert match("gfx1250", names) == "gfx125x_config_template.yaml"
+    assert match("gfx1151", names) == "gfx11_config_template.yaml"
+    assert match("gfx942", names) == "gfx9_config_template.yaml"
+    without_shared = [name for name in names if name != "gfx12_config_template.yaml"]
+    assert match("gfx1210", without_shared) is None
+    assert match("gfx1260", without_shared) is None
+
+
+@pytest.mark.misc
+def test_installed_templates_split_gfx1201_from_gfx1250():
+    """On-disk templates resolve gfx1201 and gfx1250 to different files."""
+    names = [
+        path.name for path in config.analysis_configs_dir.glob("*_config_template.yaml")
+    ]
+    assert "gfx12_config_template.yaml" not in names
+    match = utils_common.matching_config_template_name
+    assert match("gfx1201", names) == "gfx120x_config_template.yaml"
+    assert match("gfx1250", names) == "gfx125x_config_template.yaml"
+    assert match("gfx1210", names) is None
