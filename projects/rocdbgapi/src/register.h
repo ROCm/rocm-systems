@@ -84,7 +84,7 @@ enum class amdgpu_regnum_t : uint32_t
 
   /* Hardware registers (hwregs).  */
 
-  last_hwreg = first_hwreg + 15,
+  last_hwreg = first_hwreg + 127,
   first_ttmp = last_hwreg + 1,
 
   /* Trap temporary registers (ttmps).  */
