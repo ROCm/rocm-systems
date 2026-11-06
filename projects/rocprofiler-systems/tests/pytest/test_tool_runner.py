@@ -1036,7 +1036,7 @@ class TestBackendFlagsGpuArtifacts(RocprofsysTest):
             subtest_name="RocPD validation",
             rules_files=[
                 *transpose_baseline_rules,
-                validation_rules_dir / "transpose" / "amd-smi-rules.json",
+                validation_rules_dir / "domain-flags" / "gpu-default-metrics-rules.json",
             ],
         )
 

@@ -55,9 +55,7 @@ TEST_P(ConSanTargetStatic, CallableArtifactsPreserveStaticSitesAndPrivateFrameAd
     std::vector<uint32_t> words(text->size() / sizeof(uint32_t));
     std::memcpy(words.data(), text->data(), text->size());
     std::unique_ptr<Decoder> decoder =
-        target.public_id == ROCJITSU_CODE_TARGET_INVALID
-            ? Decoder::create(target.arch)
-            : Decoder::create(default_isa_target_registry(), target.public_id);
+        Decoder::create(default_isa_target_registry(), target.public_id);
     ASSERT_TRUE(decoder);
     size_t calls = 0;
     for (size_t cursor = 0; cursor < words.size();) {
