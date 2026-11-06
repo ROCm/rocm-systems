@@ -3975,6 +3975,22 @@
       ]
     },
 
+    "bootstrap_tls_mpi_2rank": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "BootstrapTls_2Rank",
+          "description": "Communicator lifecycle with a socket encryption key set, 2 ranks and default bootstrap settings. With 2 ranks every bootstrap ring AllGather step is one-way, so the write-only clients exposed the TLS session-ticket reset. Without -DTLS_BACKEND=OPENSSL3 only the no-TLS-support check runs",
+          "test_filter": "BootstrapTlsMPITest.*"
+        }
+      ]
+    },
     "bootstrap_tls_mpi_bidir": {
       "extends": "default",
       "is_gtest": true,
@@ -6033,6 +6049,12 @@
       "name": "Grow MPI Tests - Net Bidir Regression (4-rank, single-node)",
       "description": "AICOMRCCL-3004: ncclCommGrow over the network bootstrap with NCCL_BOOTSTRAP_BIDIR_NET=1 at 4 ranks on one node, guarding against the bidirectional-net reverse-ring hang during grow (Grow_SendRecv, DoubleGrow_AllReduce, Grow_RankPreservation, Grow_CoordinatorOnlyUniqueId).",
       "config": "grow_mpi_tests_netbidir",
+      "enabled": true
+    },
+    {
+      "name": "Bootstrap TLS - Default Settings (2-rank, single-node)",
+      "description": "BootstrapTlsMPITest.* on 2 ranks with default bootstrap settings, where the ring AllGather is one-way",
+      "config": "bootstrap_tls_mpi_2rank",
       "enabled": true
     },
     {
