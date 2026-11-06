@@ -58,7 +58,7 @@
 
 
 // devcomm compat tables (defined in devcomm/devcomm_v*.cc in the real build).
-// devcomm-test.cc supplies v22902, v22907 and v23204 by compiling their sources; the
+// rccl-UnitTestsMicro compiles the v22902, v22907 and v23204 sources for real; the
 // rest only need to exist for getNcclVersionCompat's table to link.
 struct ncclDevCommCompat ncclDevCommCompat_v23000 = {};
 struct ncclDevCommCompat ncclDevCommCompat_v23100 = {};

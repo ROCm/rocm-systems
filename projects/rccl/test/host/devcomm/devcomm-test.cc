@@ -19,7 +19,7 @@
 #include <type_traits>
 #include <vector>
 
-#include "../common/LogCapture.hpp"
+#include "../../common/LogCapture.hpp"
 #include "DevcommTest.h"
 #include "ScopedHook.h"
 #include "fakes/devcomm_fakes.h"
@@ -42,6 +42,18 @@
 #include DEVCOMM_V22907_CC_PATH
 // v23204 (NCCL 2.32.6) has no file-static callbacks; it is compiled here so the compat table is the real one.
 #include DEVCOMM_V23204_CC_PATH
+
+// Real definitions live in dev_runtime.cc, not linked into this binary; the compat tables reference them by address.
+ncclResult_t ncclDevCommGinSignalsPerBarrier_v22902(ncclComm_t, struct ncclGinBackendState const*, int nRanks,
+                                                    int* outSlots) {
+  *outSlots = nRanks;
+  return ncclSuccess;
+}
+ncclResult_t ncclDevCommGinSignalsPerBarrier_v23204(ncclComm_t, struct ncclGinBackendState const*, int nRanks,
+                                                    int* outSlots) {
+  *outSlots = nRanks;
+  return ncclSuccess;
+}
 
 namespace {
 
