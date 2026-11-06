@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
-# Locate hrr-playback; optionally build the standalone projects/hrr playback tool (--build).
-# Prints the absolute path to stdout on success.
-#
-# Discovery order (no build): explicit HRR_PLAYBACK, installed <ROCM_PATH>/bin, then PATH.
-# --build: configure and build hrr-playback from projects/hrr into a dedicated HRR build
-#          dir (never a CLR build dir), against a capture-enabled ROCm/HIP prefix.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-# scripts -> decode-and-triage -> skills -> hrr (the standalone HRR project root)
 HRR_PROJECT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 DO_BUILD=0
@@ -29,7 +22,6 @@ done
 
 [[ "${HRR_ENSURE_BUILD:-0}" == 1 ]] && DO_BUILD=1
 
-# Discovery: explicit HRR_PLAYBACK, then installed <ROCM_PATH>/bin, then PATH.
 find_existing_playback() {
   local p candidates=()
   [[ -n "${HRR_PLAYBACK:-}" && -x "${HRR_PLAYBACK}" ]] && candidates+=("$HRR_PLAYBACK")
@@ -74,8 +66,6 @@ export_playback_env() {
   export HRR_PLAYBACK="$play"
   # An in-tree ROCR lib dir, when the caller points at one, must precede the
   # packaged runtime. check_replay_compat.py, replay_docker.sh and
-  # triage_archive.sh read the same variable; resolving it from a CLR build
-  # tree is gone with the standalone layout, so it is taken from the caller.
   [[ -n "${ROCR_LIB:-}" && -d "${ROCR_LIB}" ]] && ld_parts+=("$ROCR_LIB")
   [[ -d "$ROCM_PATH/lib" ]] && ld_parts+=("$ROCM_PATH/lib")
   if [[ ${#ld_parts[@]} -gt 0 ]]; then

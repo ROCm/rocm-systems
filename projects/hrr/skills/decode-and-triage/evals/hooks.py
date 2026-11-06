@@ -35,7 +35,6 @@ SKILL = "decode-and-triage"
 FIXTURES = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
 
 # fixtures/replay_memory_fault.log with the archive listing in info_crash.txt:
-# a memory access fault on the archive's only kernel.
 FAULT_ADDRESS = "0x7f91da000000"
 FAULT_KERNEL = "crash_oob"
 
@@ -86,7 +85,6 @@ def _check_clean_pass(run) -> None:
     assert "PASS" in run.result_text, "the reply does not report the clean pass"
 
 
-# Case id -> (fixtures staged as {workspace name: fixture}, reply check).
 CASES = {
     "triage-recorded-memory-fault": (
         {"replay.log": "replay_memory_fault.log", "info.txt": "info_crash.txt"},

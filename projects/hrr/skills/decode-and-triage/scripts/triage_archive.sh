@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# HRR triage: optional GPU replay + structured finding. Sole agent entry point.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,10 +9,6 @@ REPLAY_DOCKER="$SCRIPT_DIR/replay_docker.sh"
 COMPAT="$SCRIPT_DIR/check_replay_compat.py"
 SANITIZER="$SCRIPT_DIR/archive_text.py"
 
-# Archive-derived text printed here (the archive's own path, and a finding name
-# built from it) goes through the same sanitizer as the Python scripts: a
-# directory name can carry a newline and a heading, and this script's output is
-# read by an agent. The replay's own output is filtered the same way below.
 safe() { python3 "$SANITIZER" --text "$1"; }
 
 ARCHIVE=""
@@ -73,15 +68,9 @@ ARCHIVE="$(readlink -f "$ARCHIVE" 2>/dev/null || realpath "$ARCHIVE" 2>/dev/null
 [[ -d "$ARCHIVE" ]] || { echo "error: archive not found: $(safe "$ARCHIVE")" >&2; exit 1; }
 
 name="$(basename "$ARCHIVE")"
-# The pid keeps two runs in the same second from sharing a log and a finding.
 ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 # Never the current directory by default: run from inside a customer's archive
 # and the finding and the replay log land in it, against this skill's own rule
-# that the archive is not to be written to. Per user, because a shared /tmp
-# directory belongs to whoever ran first and the next user cannot write in it.
-# The archive here is the pid directory and, for a pid-<n> one, the capture
-# directory holding it. Paths are resolved before anything is created, so
-# TMPDIR=. from inside the archive is caught before it writes there.
 ARCHIVE_ROOT="$ARCHIVE"
 [[ "$name" == pid-* ]] && ARCHIVE_ROOT="$(dirname "$ARCHIVE")"
 in_archive() {
@@ -97,7 +86,6 @@ if [[ -n "${HRR_TRIAGE_WORKDIR:-}" ]]; then
   fi
   # Created private when we are the one creating it. An existing directory is
   # the caller's business, but the finding inside it is not: see the chmod
-  # where it is written.
   mkdir -p -m 700 "$WORKDIR"
 else
   tmp_base="${TMPDIR:-/tmp}"
@@ -107,10 +95,6 @@ else
     exit 1
   fi
   WORKDIR="$tmp_base/hrr-triage-$(id -u)"
-  # 0700 and ours, or somewhere else entirely. The name is predictable, so on a
-  # shared host another user can get there first, and a finding names a
-  # customer's kernels and addresses. The capture itself can carry that name
-  # too, and then it is ours and writable and still the archive.
   mkdir -p -m 700 "$WORKDIR" 2>/dev/null || true
   if [[ -L "$WORKDIR" || ! -d "$WORKDIR" || ! -O "$WORKDIR" || ! -w "$WORKDIR" ]] ||
      in_archive "$WORKDIR"; then
@@ -139,16 +123,11 @@ pick_replay_mode() {
 setup_library_path() {
   local play="$1" bin_dir lib_dirs=() p seen="" repo built=""
   bin_dir="$(cd "$(dirname "$play")" && pwd)"
-  # Installed/standalone layout: hrr-playback in <prefix>/bin -> matching libs in <prefix>/lib.
   if [[ "$bin_dir" == */bin ]]; then
     lib_dirs+=("$(cd "$bin_dir/../lib" 2>/dev/null && pwd || true)")
   fi
   # A packaged playback ships as bin/, lib/ and runtime-lib/ siblings rather
   # than inside a build tree. Without these its libamdhip64 and libhsa are
-  # never on the path, so the binary loads the system ones and dies on the
-  # symbols it was built against. runtime-lib was missing here while the
-  # sibling skill's inspector had it, so `verify` could launch a reader that
-  # `triage` could not.
   for p in lib runtime-lib; do
     [[ -d "$bin_dir/../$p" ]] && lib_dirs+=("$(cd "$bin_dir/../$p" && pwd)")
   done
@@ -163,16 +142,6 @@ setup_library_path() {
     seen="${seen:+$seen:}$p"
     built="${built:+$built:}$p"
   done
-  # The caller's own value next, and $ROCM_PATH/lib last. Putting the ROCm
-  # install ahead of an explicitly set LD_LIBRARY_PATH bound libhsa from the
-  # system release in front of the reader's own, and a newer libamdhip64 then
-  # fails on a symbol that release does not have.
-  # Assembled a component at a time. An empty component, which is what
-  # "${built}:..." leaves when nothing was found, means the current directory
-  # to the loader, and this script is run from inside customer archives: a
-  # shared object sitting in one would be loaded ahead of ROCm. The caller's
-  # value can hold empty components of its own (/mine: or a::b), so it is
-  # split too.
   local joined="" part parts=()
   for p in "$built" "${LD_LIBRARY_PATH:-}" "${ROCM_PATH:+$ROCM_PATH/lib}"; do
     IFS=: read -r -a parts <<< "$p"
@@ -198,10 +167,6 @@ pick_gpu() {
     done < <(rocm-smi --showmeminfo vram 2>/dev/null | awk '
       # The used line reads "VRAM Total Used Memory", so it also contains the
       # word Total and must be tested first. Total and used arrive on separate
-      # lines whose order is not guaranteed, so collect both per device and
-      # subtract at END rather than on whichever line happens to land last.
-      # printf, because mawk, the Ubuntu default, prints a difference that size
-      # as 2.73804e+11, which the bash arithmetic above cannot read.
       /GPU\[/ {
         id = $1; gsub(/[^0-9]/, "", id)
         if ($0 ~ /Total Used Memory/) used[id] = $NF
@@ -219,21 +184,12 @@ pick_gpu() {
 replay_sync_args() {
   # Default replay serializes the GPU once at the end, so a fault is reported
   # but not attributed to a launch: the finding then has no failing event and
-  # no kernel. Synchronizing after every launch is what makes the last launch
-  # line before the fault the culprit. Opt out with --no-sync when throughput
-  # matters more than attribution, for instance a long soak.
   [[ "$NO_SYNC" == "1" ]] && return 0
   echo "--sync-after-launch"
 }
 
 # A stop the replay does not explain itself has to be recorded here, because
 # the log just ends where the process died. The analyzer would read that
-# truncation as insufficient signal and then go looking for a kernel to blame
-# for it, which is how a crash of the replay process ends up reported as a
-# workload fault. 124 is what `timeout` reports; above 128 the shell is
-# reporting death by signal 128+N. A signal is not on its own a verdict: a GPU
-# memory fault also aborts, and there the log's own fault line is the better
-# answer, so the classifier ranks these markers last.
 record_replay_stop() {
   local rc="$1" log="$2"
   [[ -n "$log" ]] || return 0
@@ -252,28 +208,17 @@ run_native_replay() {
   read -r -a sync_args <<< "$(replay_sync_args)"
   # A hung workload replays as a hang, and without a bound the replay never
   # returns, so the analyzer never runs and the archive yields no finding at
-  # all. The bound belongs here, around the playback process: wrapping the
-  # container instead leaves the replay running inside it. Set
-  # HRR_REPLAY_TIMEOUT=0 to disable. hrr-playback has a wall-clock limit of its
-  # own (--max-wall-seconds, default 3600), so the same value goes to it:
-  # otherwise 0 or anything above 3600 would still end the replay at one hour.
   local timeout_s="${HRR_REPLAY_TIMEOUT:-1800}" runner=()
   if [[ "$timeout_s" != "0" ]] && command -v timeout >/dev/null 2>&1; then
     runner=(timeout "$timeout_s")
   fi
   echo "[triage] native replay playback=$play GPU=$gpu ${sync_args[*]}" >&2
   set +e
-  # hrr-playback is a HIP program, so HIP_VISIBLE_DEVICES is the mask that
-  # applies to it. Setting ROCR_VISIBLE_DEVICES re-indexes devices underneath a
-  # HIP mask, which can land the replay on a device other than the one picked.
   HIP_VISIBLE_DEVICES="$gpu" HIP_HRR_REPLAY_PROGRESS_SECONDS="${HIP_HRR_REPLAY_PROGRESS_SECONDS:-30}" \
     ${runner[@]+"${runner[@]}"} "$play" "$ARCHIVE" --max-wall-seconds "$timeout_s" ${sync_args[@]+"${sync_args[@]}"} 2>&1 | tee "$log" | python3 "$SANITIZER"
   local rc=${PIPESTATUS[0]}
   # Deliberately not re-enabling `set -e` here. The caller wraps this call in
   # `set +e` precisely so a failing replay is survivable, and restores `set -e`
-  # afterwards. Re-arming it inside the function made the non-zero return fatal,
-  # so a replay that faulted killed the script before the finding was written:
-  # the skill produced nothing in exactly the case it exists for.
   echo "[triage] native replay exit=$rc" >&2
   return "$rc"
 }
@@ -331,9 +276,6 @@ if [[ "$mode" != "skip" && "$mode" == "native" && -x "$ENSURE" ]]; then
 elif [[ "$mode" == "skip" && -x "$ENSURE" ]]; then
   # Metadata-only still wants `hrr-playback --info`, which needs no GPU. Locate
   # without --build so this never tries to compile; if there is no binary the
-  # analyzer simply reports the archive path, as before.
-  # Not a trailing `&&`: as the last statement of this branch it would become
-  # the `if` statement's exit status and, under `set -e`, end the script.
   HRR_PLAYBACK="$("$ENSURE" 2>/dev/null || true)"
   if [[ -n "$HRR_PLAYBACK" ]]; then
     export HRR_PLAYBACK
@@ -351,7 +293,6 @@ fi
 
 # The replay log and the finding name a customer's kernels and addresses, so
 # they are private from the moment they exist, not only after the chmod at the
-# end. Set here rather than at the top, so a playback built above is untouched.
 umask 077
 
 REPLAY_GPU=""

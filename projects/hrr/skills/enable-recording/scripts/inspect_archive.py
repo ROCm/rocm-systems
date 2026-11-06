@@ -41,29 +41,13 @@ EXIT_EMPTY = 1
 EXIT_USAGE = 2
 # A cross-check the caller asked for and that did not happen. Distinct from a
 # bad archive: the archive may be perfect and the reader unable to start. It
-# gets its own code because exiting 0 here lets a pre-send gate pass on a check
-# that never ran.
 EXIT_NO_CROSS_CHECK = 3
 
-# Emitted by hrr_reader.cpp when the archive format and the reader disagree.
 VERSION_MISMATCH = "Version mismatch"
 
-# `events.bin` is hrr_file_header(8) + events + optional hrr_eof_record(44).
-# The header is `{ uint32 magic, uint16 version, uint16 reserved }`, little
-# endian, and its version is the number the reader compares against its own
-# when it says `Version mismatch in <path>: file=N reader=M`. The root
-# manifest's `version` is a different quantity and comparing that one raises a
-# false alarm on a perfectly matched reader.
-# See projects/hrr/include/hrr/hrr_api_args.h and projects/hrr/DESIGN.md.
 HEADER_BYTES = 8
 HEADER_MAGIC = 0x52524845  # "HRRE"
-# `hrr_event_header.event_type` sentinel for the clean-shutdown trailer. A file
-# whose very first record is the trailer recorded nothing, however many bytes
-# it holds: header plus trailer is 52 bytes of no events at all.
 EOF_MARKER = 0xFFFF
-# `hrr_eof_record`: the event header, uint64 total_events, uint32 eof_magic.
-# The sentinel alone is not the trailer: the reader takes 0xFFFF with any other
-# length or magic as an unknown event and keeps it.
 EOF_RECORD_BYTES = 44
 EOF_MAGIC = 0x464F4548  # "HEOF"
 EOF_MAGIC_OFFSET = 40
@@ -76,26 +60,13 @@ MAX_RECORD_BYTES = 64 * 1024 * 1024
 
 # Capture zeroes these ELF sections in every code object it stores, since they
 # hold the compiler build, source file names and build paths; and it writes the
-# manifest's hardware identifiers blank. `verify` reports what is left of both.
-# See projects/clr/hipamd/src/hrr/hip_capture_scrub.h.
 BUNDLE_MAGIC = b"__CLANG_OFFLOAD_BUNDLE__"
 COMPRESSED_BUNDLE_MAGIC = b"CCOB"
-# `blobs/` holds buffer contents as well as fat binaries, so the fat binaries
-# are the blobs a `__hipRegisterFatBinary` record names: its hrr_api_id_t, and
-# where the record keeps the hash after the event header and `uint64 ret`.
-# The id is per archive format version (hrr_api_args.h): v8 put two runtime
-# APIs ahead of it, v9 one more, v10 left it where it was, v11 and v12 one more
-# each. A v7 archive may hold either numbering, so that and any other version
-# leaves the fat binaries unscanned. tools/tests/test_skill_api_ids.py fails
-# when HRR_VERSION moves past this table.
 REGISTER_FAT_BINARY = {8: 549, 9: 550, 10: 550, 11: 551, 12: 552}
 FAT_BINARY_HASH_OFFSET = EVENT_HEADER_BYTES + 8
 HARDWARE_ID_FIELDS = ("pci", "uuid", "luid")
 # Capture cannot zero what the GPU loads, so `verify` looks there for strings
 # such as "/home/dev/src/model.hip" or "C:\src\model.hip": a NUL-terminated
-# string that starts with "/" or a drive letter and has at least two components,
-# in a loaded, non-executable section. A component is any bytes from 0x20 up,
-# so spaces and UTF-8 names count.
 SHT_PROGBITS, SHF_ALLOC, SHF_EXECINSTR = 1, 0x2, 0x4
 ABSOLUTE_PATH = re.compile(
     rb"(?<=\0)(?:/[\x20-\xff]+/|[A-Za-z]:[\\/][\x20-\xff]+[\\/])[\x20-\xff]+(?=\0)"
@@ -122,13 +93,10 @@ class ProcessArchive:
     holds_an_event: bool = False
     # Manifest fields that name the individual GPU and are not blank.
     hardware_ids: list[str] = field(default_factory=list)
-    # Code objects and fat binaries still holding a .comment or .debug* section.
     debug_info_files: int = 0
-    # Code objects and fat binaries whose loaded data holds an absolute path.
     path_files: int = 0
     # Compressed fat binaries, which cannot be checked without decompressing.
     unchecked_fat_binaries: int = 0
-    # False when events.bin is in a format version whose fat binary id is unknown.
     fat_binaries_scanned: bool = True
 
     @property
@@ -179,7 +147,6 @@ class ArchiveReport:
     capture_runtime: str | None = None
     # True only when a reader actually decoded the archive. A reader that
     # refused it explained itself, which is useful, but the archive still went
-    # unread and a pre-send gate should not pass on that.
     cross_check_ran: bool = False
     warnings: list[str] = field(default_factory=list)
 
@@ -406,10 +373,6 @@ def _load_process(pid_dir: Path) -> ProcessArchive:
     if manifest is not None:
         # A damaged manifest is reported, not raised on: any field can be any
         # JSON value, and `"event_count": "100"` crashed the first comparison.
-        # bool is an int to Python, so it is excluded from the counts. The
-        # writer never writes null, so an explicit null is damage as well. Every
-        # integer it writes is a count or a pid, so a negative one is damage too:
-        # `"event_count": -1` read as zero would call a recorded stream empty.
         def typed(source: dict, key: str, kind: type):
             if key not in source:
                 return None
@@ -459,7 +422,6 @@ def _resolve(archive: Path) -> tuple[Path, list[Path]]:
     """
     # A pid-* directory with no events.bin is a leftover the reader skips
     # (playback/hrr_playback.cpp), not a process that recorded nothing, and so is
-    # pid-<pid>.prev-<n>, an earlier process's archive moved aside by the writer.
     pid_dirs = sorted(
         d
         for d in archive.glob("pid-*")
@@ -602,8 +564,6 @@ def _run_playback_info(playback: str, target: Path, timeout: int) -> tuple[str |
     if completed.returncode != 0:
         # A reader that refused the archive explains itself, and that explanation
         # is worth keeping. A reader that never started prints a loader error,
-        # and printing that under an `--info` heading passes a crash off as
-        # archive information: it is a failed cross-check and has to read as one.
         if VERSION_MISMATCH in output:
             return output, None
         detail = output.splitlines()[0] if output else "no output"
@@ -624,14 +584,12 @@ def inspect(
     root, pid_dirs = _resolve(archive)
     report = ArchiveReport(root=root)
 
-    # In a single pid dir, manifest.json is the process's own, read below.
     manifest, error = None, None
     if pid_dirs != [root]:
         manifest, error = _read_manifest(root / "manifest.json")
     report.root_manifest = manifest
     report.root_manifest_error = error
     if error:
-        # A warning, so --json carries it as the text report does.
         report.warnings.append(
             f"root manifest.json is unreadable ({error}); each process's own manifest "
             "is what this reports"
@@ -639,7 +597,6 @@ def inspect(
 
     for pid_dir in pid_dirs:
         report.processes.append(_load_process(pid_dir))
-    # What is sent is the root whole, its own manifest included.
     _, report.total_bytes = _dir_stats(root)
 
     if manifest and isinstance(manifest.get("processes"), list):
@@ -652,7 +609,6 @@ def inspect(
                 )
                 continue
             pid = entry.get("pid")
-            # A list or an object here is unhashable, and the lookup raised.
             proc = by_pid.get(pid) if isinstance(pid, int) else None
             if proc is None:
                 report.warnings.append(
@@ -704,7 +660,6 @@ def inspect(
             report.playback_version, report.playback_format_version = _playback_version(binary)
             # The substantive process, not the alphabetically first one: pid-406
             # sorts before pid-45, and in a server capture the small process is
-            # usually the one that only registered fat binaries.
             target = max(
                 report.recorded_processes,
                 key=lambda p: (p.event_count or 0, p.events_bytes),
@@ -785,8 +740,6 @@ def _cross_check(report: ArchiveReport, target: Path) -> None:
     elif report.playback_format_version is None:
         # Keyed on the format version rather than on the identity string: a
         # reader whose `--version` succeeds without printing that field still
-        # establishes nothing, and testing the identity instead let it pass as
-        # though it had.
         report.warnings.append(
             "this hrr-playback does not report the archive format it reads, so the pairing "
             "with the runtime that captured is unverified. A reader from a different build "
@@ -842,7 +795,6 @@ def render(report: ArchiveReport) -> str:
         events = "unknown" if proc.event_count is None else f"{proc.event_count:,}"
         # Files on disk rather than the manifest total, which counts code
         # objects among its blobs and so disagrees with both `blobs/` and
-        # `hrr-playback --info` for the same archive.
         blobs = f"{proc.blob_files:,}"
         if proc.manifest_error:
             state = "unknown (manifest unreadable)"
@@ -996,9 +948,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-playback", action="store_true", help="skip the hrr-playback cross-check"
     )
-    # --info walks the whole event stream, so a multi-million-event archive on a
-    # slow filesystem takes tens of seconds. Two minutes is generous for that and
-    # still bounds a reader that has wedged.
     parser.add_argument("--timeout", type=int, default=120, help="seconds for hrr-playback --info")
     parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
     args = parser.parse_args(argv)
@@ -1007,7 +956,6 @@ def main(argv: list[str] | None = None) -> int:
 
     # A reader the caller named and that cannot run is a mistake to report, not
     # one to fall back from: a silently skipped cross-check exiting 0 passes a
-    # scripted gate that was written to depend on it.
     if args.playback and not (Path(args.playback).is_file() and os.access(args.playback, os.X_OK)):
         message = f"--playback is not an executable file: {args.playback}"
         if args.json:
@@ -1036,8 +984,6 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_EMPTY
     # A reader that was found and then failed is a check that did not happen,
     # whoever asked for it. No reader on the machine at all is the documented
-    # manifests-only path and not a failure, or every host without one would
-    # report red.
     if not report.cross_check_ran and (args.playback or report.playback_binary):
         return EXIT_NO_CROSS_CHECK
     return EXIT_OK

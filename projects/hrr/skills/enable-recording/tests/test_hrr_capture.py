@@ -37,9 +37,6 @@ sys.path.insert(0, str(SKILL / "scripts"))
 
 import inspect_archive  # noqa: E402
 
-# The script requires GNU find, stat and readlink, and reads /proc. The
-# argument and output-path cases below run anywhere; the ones that let it
-# search for runtimes are Linux only, which is what CI runs.
 linux_only = pytest.mark.skipif(
     sys.platform != "linux", reason="the script's runtime search needs GNU tools and /proc"
 )
@@ -167,7 +164,6 @@ def listing(stderr: str) -> list[tuple[str, str, str]]:
     return [m.groups() for m in map(LISTING.match, stderr.splitlines()) if m]
 
 
-# --- arguments --------------------------------------------------------------
 
 
 def test_no_verb_is_a_usage_error_and_help_is_not(world):
@@ -226,7 +222,6 @@ def test_run_and_verify_need_their_required_arguments(world):
     assert "--output is required" in verify.stderr
 
 
-# --- which runtime binds ----------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -546,7 +541,6 @@ def test_preflight_says_whether_a_reader_is_here(world, where):
         assert "hrr-playback is available" in result.stderr
 
 
-# --- the output path --------------------------------------------------------
 
 
 def _check_output(
@@ -604,7 +598,6 @@ def test_a_relative_output_path_is_warned_about(tmp_path):
 @pytest.mark.parametrize(
     "path, expected",
     [
-        # `-v /host/captures:/data/captures` under an overlay root.
         ("/data/captures", "ext4"),
         ("/data/captures/run.hrr", "ext4"),
         ("/data", "overlay"),
@@ -630,7 +623,6 @@ def test_the_filesystem_is_the_innermost_mount_holding_the_path(tmp_path, path, 
     assert result.stdout.strip() == expected
 
 
-# --- run and verify ---------------------------------------------------------
 
 
 def _capturing_workload(world: World, *, exit_status: int = 0, record: bool = True) -> Path:
@@ -756,7 +748,6 @@ def test_run_waits_for_what_the_workload_left_running(world):
 
 # Runs a command as a child subreaper that waits for that command only: a
 # process orphaned below it is reparented here and never reaped, as under a
-# container whose PID 1 is `sleep infinity` or a Python entry point.
 NON_REAPING_PARENT = (
     "import ctypes, subprocess, sys\n"
     "PR_SET_CHILD_SUBREAPER = 36\n"

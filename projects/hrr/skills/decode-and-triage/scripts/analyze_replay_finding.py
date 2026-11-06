@@ -14,7 +14,6 @@ from typing import Any
 
 from archive_text import sanitize
 
-# --- regex library (diverse workloads) ---
 
 RE_PROGRESS = re.compile(
     r"\[HRR progress\].*seq=(\d+).*kernels=(\d+).*d2h_pass=(\d+).*"
@@ -33,23 +32,14 @@ RE_MAF = re.compile(
 )
 # CLR prints "Memory Fault Error" and this bracket with separate log calls, and
 # the first only at AMD_LOG_LEVEL>=1, so the bracket is matched on its own. Its
-# leading fields vary (`host:` is omitted without a hostname), so anchor on the
-# two fields actually consumed.
 RE_MEM_FAULT_ERR = re.compile(
     r"\[[^\]\n]*?faulting addr: (0x[0-9a-fA-F]+), kernel: ([^\]]+)\]"
 )
 RE_HSA_STATUS = re.compile(r"HSA_STATUS_ERROR_(MEMORY_FAULT|ABORTED|EXCEPTION)")
-# The runner bounds the replay and records the fact when it had to stop it.
-# This is the only signal a hang leaves: it makes no progress and prints
-# nothing, so without the marker the archive yields no finding at all.
 RE_REPLAY_TIMEOUT = re.compile(r"replay timed out after (\d+)s")
-# The replay process dying on a signal leaves the log truncated and nothing
-# else, so the runner records it the same way. Read on its own it says the run
-# failed, not that the workload did: no kernel was established as at fault.
 RE_REPLAY_SIGNAL = re.compile(r"replay killed by signal (\d+)")
 # A queue abort carries its own bracket, with the kernel but no faulting
 # address, so the memory-fault regex above cannot see it. Observed on an
-# out-of-bounds ATen gather, where this was the only line naming the culprit.
 RE_QUEUE_ABORT_KERNEL = re.compile(
     r"aborting with error[^\[\n]*\[[^\]]*?kernel: ([^\]]+)\]"
 )
@@ -58,9 +48,6 @@ RE_FAIL = re.compile(r"\[HRR\] FAIL\b")
 RE_ARCHIVE_RECOVERED = re.compile(
     r"recovered (\d+) events|Archive : (\d+) events, (\d+) kernels, (\d+) blobs, (\d+) code objects"
 )
-# `--info` prints `Complete:     yes (clean shutdown)` or `Complete:     NO (no
-# shutdown trailer; capture likely crashed)`, so the verdict is case-mixed and
-# always carries a trailing explanation.
 RE_ARCHIVE_COMPLETE = re.compile(r"Complete:\s+(yes|no)\b", re.IGNORECASE)
 # `--info` reports the archive as labelled fields, one per line, while a replay
 # run reports the same totals on a single `[HRR] Archive :` line.
@@ -69,33 +56,20 @@ RE_INFO_KERNELS = re.compile(r"^Kernels:\s+(\d+)\s*$", re.MULTILINE)
 RE_INFO_RECOVERED = re.compile(r"^Recovered:\s+(\d+)\s+events\s*$", re.MULTILINE)
 # Short archives print no `Kernels:` total and report launches only in the API
 # call-count block. Without this the total stays unknown and the single-kernel
-# inference in finalize() can never fire.
 RE_INFO_LAUNCH_COUNT = re.compile(r"\bhip\w*LaunchKernel\s+(\d+)\b")
 # Rows of the `--info` kernel summary table: name, grid, block, with an optional
 # leading id, since some builds omit the id column. A memory fault can kill the
-# replay before any per-launch attribution reaches the log, and then this table
-# is the only record of what the archive ran. The name must start with a letter
-# or underscore, which is what keeps a bare id from being read as a symbol now
-# that the id is optional.
 RE_INFO_KERNEL_ROW = re.compile(
     r"^[ \t]*(?:\d+[ \t]+)?([A-Za-z_][^\s\[]*)[ \t]+\[[\d,\s]+\][ \t]+\[[\d,\s]+\]",
     re.MULTILINE,
 )
 # `--verbose` prints one line per replayed event. A GPU fault tears the process
 # down before HRR writes its own Fatal line, so when a run was made verbose the
-# last of these is the only record of the failing dispatch. The sync flags do
-# not emit these lines: `hrr_playback.cpp` gates them on `ctx.verbose` alone.
 RE_EVENT_PROGRESS = re.compile(
     r"^[ \t]*(?:\[HRR\][ \t]*)?Event (\d+):[ \t]*(\w+)"
     r"(?:[^\n]*?->[ \t]*Kernel '([^']+)')?",
     re.MULTILINE,
 )
-# PyTorch/ATen kernels reach the GPU through `<<<>>>` (hipLaunchByPtr) and pass
-# device pointers inside by-value structs. Capture records those and replay
-# translates them, so these kernels do replay faithfully on a current build. The
-# detector is still a value-based heuristic, and an archive recorded before it
-# landed carries no such offsets at all, so a fault on one of these symbols
-# earns a caveat in the finding, not a different verdict.
 RE_ATEN_CHEVRON = re.compile(r"_ZN2at6native|at::native::")
 RE_CAPTURE_MAF = RE_MAF
 RE_D2H_SUMMARY = re.compile(r"D2H checks\s+: (\d+) pass.*?, (\d+) fail, (\d+) skipped")
@@ -155,9 +129,6 @@ class Finding:
 def _classify(text: str, finding: Finding) -> str:
     if RE_VERSION_MISMATCH.search(text):
         return "version_mismatch"
-    # A replay the runner had to stop made no progress against the clock, which
-    # is what a hang is. This outranks the rest: whatever partial output the
-    # replay printed before stalling does not describe why it stalled.
     if RE_REPLAY_TIMEOUT.search(text):
         return "hang"
     if RE_PASS.search(text):
@@ -167,10 +138,6 @@ def _classify(text: str, finding: Finding) -> str:
     if "out of memory" in text.lower() or "hipErrorOutOfMemory" in text:
         return "replay_oom"
     # A GPU memory fault has to be classified before the generic abort branch.
-    # Surfacing a fault through --sync-after-event makes the runtime print the
-    # memory-fault line and hrr-playback print "Fatal: GPU error after ..." for
-    # the same fault, so testing the abort first would report every fault as a
-    # plain API error, and that is exactly the mode used to localize a fault.
     if RE_MAF.search(text) or RE_MEM_FAULT_ERR.search(text):
         reason = (finding.fault_reason or "").lower()
         if "read-only" in reason:
@@ -186,10 +153,6 @@ def _classify(text: str, finding: Finding) -> str:
         return "replay_fatal_api"
     # An HSA queue abort is not a hang. MEMORY_FAULT says so in as many words,
     # and EXCEPTION is a hardware exception, which an out-of-bounds access
-    # raises. Reporting either as a hang sends the reader after stalled work
-    # that never existed and drops the kernel the abort just named. A real hang
-    # shows up as no progress against the clock, which is what the replay
-    # timeout above reports.
     hsa = RE_HSA_STATUS.search(text)
     if hsa and not RE_PASS.search(text):
         return (
@@ -203,8 +166,6 @@ def _classify(text: str, finding: Finding) -> str:
         return "replay_aborted"
     # Last, so that a log which explains its own stop is believed first: a
     # memory fault also dies on a signal, and there the fault line is the
-    # answer. On its own the signal says the replay process died without
-    # reaching a verdict, which is a failure of the run and not of the workload.
     if RE_REPLAY_SIGNAL.search(text):
         return "replay_crashed"
     return "unknown"
@@ -222,9 +183,6 @@ def _kernel_family(name: str | None) -> str | None:
         if sk:
             parts.append("streamk" if "SK3" in sk else "streamk_variant")
         return "/".join(parts)
-    # Mangled and demangled forms of the same ATen symbols both occur: the
-    # memory-fault line prints the mangled name, the queue-abort line prints
-    # the demangled signature.
     if name.startswith("_ZN") or "at::native::" in name:
         return "pytorch_kernel"
     return "other"
@@ -297,7 +255,6 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         last_prog = m.group(6)
     # Only when this input had progress lines. Assigning unconditionally let the
     # archive `--info` pass, which has none, wipe the kernel the replay log had
-    # already recorded, and the default pipeline always parses both.
     if last_prog is not None:
         finding.last_progress_kernel = last_prog
 
@@ -357,8 +314,6 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
 
     # The replay summary carries the end-of-run totals, so it wins over the
     # last progress line, which is printed at the first kernel and then only
-    # periodically. It gives skipped rather than attempted, and skipped is
-    # attempted less pass and fail.
     m = RE_D2H_SUMMARY.search(text)
     if m:
         finding.d2h_pass = int(m.group(1))
@@ -411,11 +366,6 @@ def finalize(finding: Finding) -> Finding:
     `--info` dump each hold half of the evidence, and which half arrives first
     depends on how the caller was invoked.
     """
-    # A clean replay implicates no kernel. The archive still lists the kernels
-    # it ran, and a GEMM matched out of that listing would sit in the report
-    # next to a pass as though it were a culprit. The same holds for the event
-    # and kernel a progress line named on the way, and the JSON report prints
-    # every field, so they are cleared rather than left for markdown to hide.
     if finding.fault_class == "replay_pass":
         finding.kernel_name = None
         finding.kernel_family = None
@@ -429,7 +379,6 @@ def finalize(finding: Finding) -> Finding:
 
     # The replay process died without reaching a verdict, so nothing here is a
     # statement about the workload. Inferring a kernel from the archive would
-    # hand over a culprit for a crash of the replay itself.
     if finding.fault_class == "replay_crashed":
         finding.kernel_name = None
         finding.kernel_family = None
@@ -455,8 +404,6 @@ def finalize(finding: Finding) -> Finding:
 
     # A memory fault can tear the process down before the failing dispatch is
     # attributed, leaving a log with no kernel at all. When the archive holds
-    # exactly one kernel, that kernel is the one that faulted. More than one
-    # stays unknown: picking among several would be a guess.
     if (
         not finding.kernel_name
         and finding.archive_kernels == 1
@@ -470,12 +417,6 @@ def finalize(finding: Finding) -> Finding:
             f"confirm the faulting dispatch directly."
         )
 
-    # A `<<<>>>`-launched ATen kernel passes device pointers inside by-value
-    # structs. Current capture records those offsets and replay translates them,
-    # so this is not automatically a recording artefact, but the detector is a
-    # heuristic and an archive taken before it landed carries no offsets at all.
-    # Both failure modes look exactly like a workload fault, so flag the
-    # ambiguity rather than resolving it either way.
     if finding.fault_class in (
         "illegal_memory_access",
         "read_only_page_fault",
@@ -515,12 +456,10 @@ def run_archive_info(archive: Path, hrr_playback: str | None) -> str:
 def render_markdown(f: Finding) -> str:
     # Every value below came from the archive or from a log its replay wrote, so
     # each goes through the one sanitizer before it is printed: a value is a line
-    # of the report, never a way to start another.
     d2h = (
         f"- **D2H**: pass={f.d2h_pass or 0} fail={f.d2h_fail or 0} "
         f"attempted={f.d2h_attempted or 0}"
     )
-    # A replay can launch no kernels at all, and that zero is still a count.
     kernels = "n/a" if f.kernels_launched is None else f.kernels_launched
     lines = [
         "# HRR replay finding",
@@ -532,11 +471,6 @@ def render_markdown(f: Finding) -> str:
         f"- **Kernel family**: `{sanitize(f.kernel_family or 'unknown')}`",
         "",
     ]
-    # A clean replay has no fault details and no fault to be at, and printing
-    # a progress counter under "at fault" read as one: a PASS came back naming
-    # a failing event and a kernel taken from a progress line. Keyed on the
-    # class, as finalize() is, so a PASS line with D2H failures, which is a
-    # divergence, keeps its fault details.
     if f.fault_class == "replay_pass":
         lines += [
             "## Replay result",

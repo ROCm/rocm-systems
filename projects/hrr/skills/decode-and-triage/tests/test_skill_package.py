@@ -24,10 +24,8 @@ EVALS_DIR = SKILL_DIR / "evals"
 DATASET = EVALS_DIR / "evals.json"
 HOOKS = EVALS_DIR / "hooks.py"
 
-# The frontmatter fields the catalogue's runtimes read.
 KNOWN_FIELDS = {"name", "description", "allowed-tools", "license", "compatibility", "metadata"}
 
-# skillscope/schema/evals.schema.json: the keys each kind of evaluation may carry.
 EXPECTATIONS = {"expected_behavior", "unexpected_behavior", "logs_contain", "files_exist"}
 NON_TRIGGERING_KEYS = {"id", "prompt", "skill_should_trigger", "note"}
 TRIGGERING_KEYS = NON_TRIGGERING_KEYS | EXPECTATIONS | {"workspace"}
@@ -207,7 +205,6 @@ class EvalHooksTests(unittest.TestCase):
         staged = {f for files, _ in self.hooks.CASES.values() for f in files.values()}
         for fixture in ("replay_memory_fault.log", "version_mismatch.log", "replay_pass.log"):
             self.assertIn(fixture, staged)
-        # False activation: graded by `skillscope routing` on the run log's tool calls.
         self.assertGreaterEqual(sum(1 for c in self.cases.values() if not c["skill_should_trigger"]), 2)
 
     def test_setup_stages_the_fixtures_under_the_prompted_names(self):

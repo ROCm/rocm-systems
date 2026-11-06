@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Replay an HRR archive inside a Docker image (when capture used that image's ROCm stack).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -109,7 +108,6 @@ PLAY_INSIDE=""
 LD_INSIDE=""
 
 if [[ "$MOUNT_CLR" == "1" ]]; then
-  # Host hrr-playback: explicit HRR_PLAYBACK, else installed <ROCM_PATH>/bin, else PATH.
   PLAY="${HRR_PLAYBACK:-}"
   if [[ -z "$PLAY" ]]; then
     if [[ -x "${ROCM_PATH:-/opt/rocm}/bin/hrr-playback" ]]; then
@@ -122,7 +120,6 @@ if [[ "$MOUNT_CLR" == "1" ]]; then
     echo "error: HRR_DOCKER_MOUNT_CLR=1 requires host hrr-playback (set HRR_PLAYBACK or install under ROCM_PATH/bin)" >&2
     exit 1
   }
-  # Matching capture-enabled libamdhip64: explicit CLR_LIB, else a host CLR build's hipamd/lib.
   CLR_LIB="${CLR_LIB:-}"
   if [[ -z "$CLR_LIB" && -n "${CLR_BUILD:-}" ]]; then
     CLR_LIB="${CLR_BUILD}/hipamd/lib"

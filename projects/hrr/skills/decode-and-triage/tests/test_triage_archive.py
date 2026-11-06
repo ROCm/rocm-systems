@@ -375,8 +375,6 @@ class LibraryPathSafetyTests(unittest.TestCase):
         body = _shell_function("setup_library_path")
         # The playback has to exist: from a path that does not resolve, the
         # sibling probe reads /../lib, which is /lib on any Linux host.
-        # ROCR_LIB is read too, so a developer's own must not leak in.
-        # `set -u` as in the script, where an unbound name aborts the run.
         with tempfile.TemporaryDirectory() as tmp:
             play = Path(tmp) / parent / "hrr-playback"
             play.parent.mkdir()

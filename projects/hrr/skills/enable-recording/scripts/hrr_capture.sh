@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-#
-# Turn HRR capture on for a workload, then say whether it actually recorded
-# anything. Sole agent entry point for this skill.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,9 +11,6 @@ TRIAGE="$SCRIPT_DIR/../../decode-and-triage/scripts/triage_archive.sh"
 ENSURE_PLAYBACK="$SCRIPT_DIR/../../decode-and-triage/scripts/ensure_playback.sh"
 ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 
-# The environment variable libamdhip64 reads to enable capture. Its presence as
-# a literal in a shared object distinguishes a capture-capable runtime from one
-# built without HRR.
 CAPTURE_VAR="HIP_HRR_CAPTURE_OUTPUT"
 
 # Set by check_runtime when it could not establish which runtime will bind, so
@@ -61,27 +55,19 @@ EOF
 log()  { printf '[capture] %s\n' "$*" >&2; }
 fail() { printf '[capture] error: %s\n' "$*" >&2; exit 1; }
 
-# --- runtime discovery ------------------------------------------------------
 
-# Does this shared object carry HRR capture?
 lib_has_capture() {
   grep -a -q -- "$CAPTURE_VAR" "$1" 2>/dev/null
 }
 
 # Only the names a linked binary can ask for. A build or backup left beside the
 # real thing, `libamdhip64.so.hrr-orig` and the like, is not a runtime anything
-# loads, and treating it as one has already produced a wrong verdict.
 is_runtime_name() {
   # Anchored: `libamdhip64.so.7.hrr-orig` and `libamdhip64.so.7.bak` match a
   # `.so.[0-9]*` glob and are not runtimes anything loads.
   [[ "${1##*/}" =~ ^libamdhip64\.so(\.[0-9]+)*$ ]]
 }
 
-# Runtimes in one directory, soname first. `libamdhip64.so` is a development
-# alias: nothing links it, everything links the soname `libamdhip64.so.N`, so
-# the alias must never be the one a verdict is pronounced on. They are normally
-# hardlinks to one file, and the order only matters when something has broken
-# that, which is exactly when the verdict was wrong before.
 emit_libs() {
   local src="$1" dir="$2" entry
   for entry in "$dir"/libamdhip64.so.[0-9]*; do
@@ -91,11 +77,6 @@ emit_libs() {
   return 0
 }
 
-# The interpreter whose packages matter. Named directly for `python train.py`,
-# but the workloads this skill is aimed at are console scripts: `vllm`,
-# `torchrun`, `accelerate`, `pytest`. Those are text files whose shebang names
-# the interpreter of their own virtual environment, and asking the PATH's
-# python3 instead reports the wrong site-packages, or none at all.
 workload_interpreter() {
   local bin="${WORKLOAD_BIN:-}" shebang
   case "${bin##*/}" in
@@ -108,7 +89,6 @@ workload_interpreter() {
         set -- $shebang
         # `#!/usr/bin/env python3` names the interpreter in the second word,
         # and `#!/usr/bin/env -S python3 -u` in the third, possibly after
-        # assignments. Any other option is not an interpreter.
         if [[ "${1##*/}" == "env" ]]; then
           shift
           case "${1:-}" in
@@ -127,17 +107,12 @@ workload_interpreter() {
 
 # Launchers that wrap the real workload. The binary that matters is the one
 # after them, otherwise preflight resolves `srun` or `env` and learns nothing.
-# Prints the VAR=value assignments `env` takes, one a line, then the workload
-# last: `env LD_LIBRARY_PATH=/capture/lib app` runs app with that path, so
-# preflight has to resolve its runtime with it too.
 strip_launchers() {
   while (( $# )); do
     case "${1##*/}" in
       env)
         # Its options change the environment in ways the assignments below
         # cannot carry: -i empties it, -u removes a name, -C moves the working
-        # directory. Stop at env when one is given rather than resolve the
-        # workload in an environment it will not have.
         [[ "${2:-}" == -* && "$2" != -- ]] && { printf '%s\n' "$1"; return 0; }
         shift
         [[ "${1:-}" == -- ]] && shift
@@ -194,8 +169,6 @@ strip_launchers() {
 
 # Directories on the binary's own DT_RPATH or DT_RUNPATH, with $ORIGIN expanded,
 # for whichever of the two tags is asked for. The order matters and the two are
-# not interchangeable: DT_RPATH is searched before LD_LIBRARY_PATH, DT_RUNPATH
-# after it, and nothing else listed here can see either.
 binary_rpath_dirs() {
   local bin="$1" tag="${2:-RPATH|RUNPATH}" origin list dir
   [[ -n "$bin" && -f "$bin" ]] || return 0
@@ -213,20 +186,12 @@ binary_rpath_dirs() {
 
 # The runtime the loader will actually bind for this binary. This is the only
 # answer that accounts for DT_RPATH, and it is why the list below is a listing
-# rather than a verdict. Empty when the binary links no HIP runtime of its own,
-# which is the normal case for an interpreter: Python loads the runtime later,
-# out of whatever package asks for it, where no static inspection can see it.
 resolved_runtime() {
   local bin="$1" path
   [[ -n "$bin" && -f "$bin" ]] || return 1
   command -v ldd >/dev/null 2>&1 || return 1
   # Only the mapping lines: `soname => /path`, or `/path` alone for a runtime
   # preloaded by absolute path, which also satisfies the binary's own entry so
-  # no `=>` line follows it. A binary built against a newer ROCm than the
-  # host's makes ldd print symbol-version errors first, and those lines also
-  # mention libamdhip64: taking the third field off one of them yielded the
-  # literal word "version", resolution then failed silently, and preflight
-  # blamed an interpreter for a compiled binary.
   path="$(ldd "$bin" 2>/dev/null |
             awk '$2 == "=>" && $1 ~ /libamdhip64\.so/ { print $3; exit }
                  $1 ~ /^\/.*libamdhip64\.so[^\/]*$/ && $2 ~ /^\(0x/ { print $1; exit }')"
@@ -234,14 +199,6 @@ resolved_runtime() {
   readlink -f "$path"
 }
 
-# Candidate libamdhip64 paths, most-likely-to-win first.
-#
-# Precedence follows the dynamic loader: LD_PRELOAD beats everything, then the
-# binary's own DT_RPATH, then LD_LIBRARY_PATH, then its DT_RUNPATH, then a
-# runtime bundled with the application itself, then the ldconfig cache, then
-# the ROCm install. Bundled
-# copies are worth listing because an application that ships its own runtime
-# uses that one, whatever is installed on the system.
 candidate_libs() {
   local entry dir pkg_dir interpreter
   local IFS_SAVE="$IFS"
@@ -272,14 +229,12 @@ candidate_libs() {
 
   # After LD_LIBRARY_PATH, which is where the loader looks for it. DT_RUNPATH
   # is the modern linker's default, so listing it as if it were DT_RPATH put
-  # the wrong candidate first.
   while read -r dir; do
     [[ -d "$dir" ]] && emit_libs "workload RUNPATH" "$dir"
   done < <(binary_rpath_dirs "${WORKLOAD_BIN:-}" RUNPATH)
 
   # Runtimes bundled inside installed packages. Listed generically rather than
   # by package name: any package may ship one, and the site directories are
-  # asked of the interpreter rather than guessed.
   while read -r pkg_dir; do
     [[ -n "$pkg_dir" && -d "$pkg_dir" ]] || continue
     while read -r dir; do
@@ -287,7 +242,6 @@ candidate_libs() {
     done < <(find "$pkg_dir" -maxdepth 3 -name 'libamdhip64.so*' -type f -printf '%h\n' 2>/dev/null | sort -u)
     # The interpreter that will run the workload, not the one on PATH. A job
     # launched as /opt/venv/bin/python has different site directories from the
-    # shell's python3, and asking the wrong one hides the wheel that matters.
   done < <("$interpreter" - <<'PY' 2>/dev/null || true
 import site
 seen = []
@@ -309,13 +263,10 @@ PY
 
 # Identity of a file for dedup purposes. Device and inode rather than the
 # resolved path, because the same library is routinely installed as several
-# hardlinked names (libamdhip64.so, .so.7, .so.7.x.y) that readlink cannot
-# collapse: a hardlink has no target to follow.
 file_identity() {
   stat -c '%d:%i' "$1" 2>/dev/null || readlink -f "$1" 2>/dev/null || echo "$1"
 }
 
-# Print the candidate table; return 0 when the runtime that will win has capture.
 check_runtime() {
   local found_any=0 resolved_ok=0 effective="" effective_src="" seen="" src path resolved status ident bound
   local no_capture_seen=""
@@ -368,14 +319,10 @@ check_runtime() {
       log "the runtime that will load is $effective (via $effective_src) and it has capture"
       return 0
     fi
-    # Unresolved and the best guess looks fine. Saying "you are ready" here is
-    # how a Python workload gets a clean preflight and an empty capture: the
-    # wheel's own runtime is bound later and is not this one.
     RUNTIME_UNRESOLVED=1
     if [[ -n "$no_capture_seen" ]]; then
       # The PyTorch case exactly: binding cannot be established, and a runtime
       # that cannot capture is sitting in the load path. Passing here is how a
-      # clean preflight turns into an empty archive an hour later.
       log "UNRESOLVED, and refusing: nothing here was resolved, and $no_capture_seen has no"
       log "capture. If the workload binds that one, which a wheel or a plugin commonly does,"
       log "nothing will be recorded. Install a capture-capable runtime where the workload"
@@ -394,7 +341,6 @@ check_runtime() {
   log "and no archive is created at all: verify then reports 'no archive'."
   # Collected rather than piped into `grep -q`: under `pipefail` an early-closing
   # reader makes the whole pipeline fail, and the advice below would then flip to
-  # the wrong branch precisely when a usable runtime does exist.
   local alternatives
   alternatives="$(candidate_libs | while IFS='|' read -r _ path; do
                     lib_has_capture "$path" && echo yes
@@ -411,11 +357,9 @@ check_runtime() {
   return 1
 }
 
-# --- output path ------------------------------------------------------------
 
 # Filesystem type of the mount a path sits on, from /proc/self/mountinfo, which
 # knows about bind mounts where `stat -f` on a parent directory does not. Falls
-# back to stat where mountinfo is unavailable.
 path_fstype() {
   local target="$1" resolved
   resolved="$(readlink -f "$target" 2>/dev/null || echo "$target")"
@@ -444,7 +388,6 @@ check_output_path() {
 
   # Capture writes into the output directory, so when it already exists, most
   # often because it is the bind mount itself, that directory is the one to
-  # check. Otherwise capture creates it inside its parent.
   if [[ -d "$out" ]]; then
     probe="$out"
   elif [[ -e "$out" || -L "$out" ]]; then
@@ -455,13 +398,10 @@ check_output_path() {
     mkdir -p "$parent" 2>/dev/null || fail "cannot create $parent"
     probe="$parent"
   fi
-  # Creating entries in a directory takes search permission as well as write.
   [[ -w "$probe" && -x "$probe" ]] || fail "not writable (needs write and search permission): $probe"
 
   # The filesystem of the output path itself, resolved through its own mount
   # rather than its parent's. With `-v /host/captures:/data/captures` the
-  # parent `/data` is on the container's overlay while the archive's directory
-  # is the bind mount, and keying on the parent refused a perfectly good path.
   fstype="$(path_fstype "$probe")"
   avail_kb="$(df -Pk "$probe" 2>/dev/null | awk 'NR==2 {print $4}')"
   avail_gb=$(( ${avail_kb:-0} / 1024 / 1024 ))
@@ -488,12 +428,7 @@ check_output_path() {
   return 0
 }
 
-# --- the workload's process group -------------------------------------------
 
-# Whether anything in process group $1 is still running. `kill -0` is true of a
-# zombie, and a child that outlives the workload is reparented to PID 1: where
-# PID 1 reaps nothing, a container whose entry point is `sleep infinity` or a
-# Python process, that zombie stays forever and waiting on it never ended.
 group_running() {
   local pgid="$1" stat line fields
   if [[ ! -r /proc/self/stat ]]; then
@@ -512,7 +447,6 @@ group_running() {
   return 1
 }
 
-# --- verbs ------------------------------------------------------------------
 
 VERB="${1:-}"
 [[ -n "$VERB" ]] || { usage; exit 1; }
@@ -554,7 +488,6 @@ done
 # The executable the command will run, when there is one. Preflight answers a
 # different and much weaker question without it.
 WORKLOAD_BIN=""
-# The PATH the workload is started with. Empty means this script's own.
 WORKLOAD_PATH=""
 LAUNCHER_ENV=()
 if [[ ${#CMD[@]} -gt 0 ]]; then
@@ -563,7 +496,6 @@ if [[ ${#CMD[@]} -gt 0 ]]; then
     [[ -n "$WORKLOAD_NAME" ]] && LAUNCHER_ENV+=("$WORKLOAD_NAME")
     WORKLOAD_NAME="$line"
   done < <(strip_launchers "${CMD[@]}")
-  # A command that is nothing but assignments has no workload in it.
   [[ "$WORKLOAD_NAME" == *=* ]] && { LAUNCHER_ENV+=("$WORKLOAD_NAME"); WORKLOAD_NAME=""; }
   # Looked up on the PATH the workload is started with: `env PATH=/x app` runs
   # /x/app, and the last assignment wins as it does for env.
@@ -575,14 +507,9 @@ fi
 
 # check_runtime in the environment the workload will have. `local -x` exports
 # each assignment for the length of this call only, so the reader run after the
-# capture keeps this script's own loader path.
 check_runtime_as_launched() {
   local assignment
   for assignment in ${LAUNCHER_ENV[@]+"${LAUNCHER_ENV[@]}"}; do
-    # Except PATH, which is the workload's and has been used to find it and its
-    # interpreter. This script's own tools come from the caller's: exported,
-    # `env PATH=/opt/app/bin app` left grep, ldd and readlink unfound, and a
-    # runtime that can capture read as one that cannot.
     [[ "$assignment" == PATH=* ]] && continue
     [[ "${assignment%%=*}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && local -x "$assignment"
   done
@@ -597,7 +524,6 @@ case "$VERB" in
       check_output_path "$OUTPUT" "$MIN_FREE_GB" || rc=1
     fi
     if [[ -n "$PLAYBACK" ]]; then
-      # A regular file, as verify requires: -x alone passes a directory.
       if [[ -f "$PLAYBACK" && -x "$PLAYBACK" ]]; then
         log "hrr-playback given: $PLAYBACK"
       else
@@ -628,11 +554,6 @@ case "$VERB" in
       fi
     fi
 
-    # Capture adds this run's pid-* directories next to the ones already there,
-    # so a second run against the same --output silently merges two attempts
-    # into what reads afterwards as one multi-process capture. A process of this
-    # run that reuses an earlier pid moves that pid-<pid> to pid-<pid>.prev-<n>
-    # instead, and readers of the archive root leave it out.
     if compgen -G "$OUTPUT/pid-*" >/dev/null 2>&1; then
       if (( FORCE )); then
         log "$OUTPUT already holds a capture and --force was given: this run will be added"
@@ -644,10 +565,6 @@ case "$VERB" in
       fi
     fi
 
-    # The archive holds blobs, prompts and weights in clear, and a writer that
-    # creates its files 0644 leaves them to every user on a shared host under
-    # the usual umask. A directory created 0700 here closes that without
-    # changing the umask the workload's own files are written with.
     if [[ ! -e "$OUTPUT" ]]; then
       mkdir -p -- "$(dirname -- "$OUTPUT")" && ( umask 077 && mkdir -- "$OUTPUT" ) ||
         fail "cannot create $OUTPUT"
@@ -664,11 +581,6 @@ case "$VERB" in
     log "running: ${CMD[*]}"
     # Backgrounded and waited on, with the signals forwarded, so that a stop
     # aimed at this script reaches the workload. Left in the foreground, a
-    # SIGTERM from timeout, systemd, a pod stop or a cancelled CI job killed
-    # the wrapper only: the workload carried on capturing and nothing verified
-    # the archive. The workload gets a process group of its own and the signal
-    # goes to the whole group: a launcher that exits on it would otherwise
-    # leave its GPU workers capturing behind it.
     workload_pid=0
     forward_signal() {
       local sig="$1"
@@ -681,12 +593,6 @@ case "$VERB" in
     set +e
     # Job control on for the launch only, which is what gives the job its own
     # group. It also stops stdin defaulting to /dev/null for a background job,
-    # so a workload fed from a pipe or a file still reads it. Only a terminal
-    # is replaced: a workload reading it from outside the foreground group
-    # would be stopped, and the wait below with it.
-    # A background job starts with SIGINT and SIGQUIT ignored, and the workload
-    # would inherit that, so neither a Ctrl-C nor the INT forwarded above would
-    # ever reach it. Put them back to what this script was started with.
     set -m
     (
       trap - INT QUIT
@@ -703,7 +609,6 @@ case "$VERB" in
     done
     wait "$workload_pid"
     workload_rc=$?
-    # Then the rest of its group, which is still writing the archive.
     if group_running "$workload_pid"; then
       log "the workload has exited and processes it started are still running; waiting"
       log "for them, so the archive is checked once it is complete"
@@ -720,10 +625,6 @@ case "$VERB" in
     python3 "$INSPECT" --archive "$OUTPUT" ${PLAYBACK:+--playback "$PLAYBACK"} \
       "${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"}" || inspect_rc=$?
 
-    # Offer the replay here, while the machine that captured is still the
-    # machine in front of you. Its runtime is by definition the one the reader
-    # has to match, so the pairing problem that dogs every later attempt does
-    # not exist at this moment.
     if (( inspect_rc == 0 )); then
       log "the archive holds events. To find out what went wrong, replay it here and now:"
       log "  $TRIAGE --archive $OUTPUT/pid-<pid>"

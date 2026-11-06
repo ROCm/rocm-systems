@@ -216,7 +216,6 @@ def test_multi_process_archive_says_to_keep_it_together(tmp_path):
     assert len(report.recorded_processes) == 2
     rendered = inspect_archive.render(report)
     assert "whole archive directory" in rendered
-    # hrr-playback refuses a root holding several processes, and triage takes one.
     assert "one at a time" in rendered
 
 
@@ -1065,11 +1064,9 @@ def test_a_torn_first_event_header_is_not_a_recording(tmp_path):
     (pid_dir / "events.bin").write_bytes(header + b"\x01\x00" + b"\0" * 10)
     assert inspect_archive.inspect(tmp_path, use_playback=False).recorded_processes == []
 
-    # A whole header claiming a record longer than the file holds.
     (pid_dir / "events.bin").write_bytes(header + struct.pack("<HQQQI2x", 1, 1, 0, 0, 1 << 20))
     assert inspect_archive.inspect(tmp_path, use_playback=False).recorded_processes == []
 
-    # One longer than the reader takes, in a file that does hold it.
     too_long = inspect_archive.MAX_RECORD_BYTES + 1
     with (pid_dir / "events.bin").open("wb") as handle:
         handle.write(header + struct.pack("<HQQQI2x", 1, 1, 0, 0, too_long))
@@ -1279,10 +1276,6 @@ if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
 
 
-# --- the wrapper script's launcher handling ---------------------------------
-#
-# Not the inspector, but it belongs with the suite the CI runs: preflight
-# resolving the wrong executable is how a capture comes back empty.
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "hrr_capture.sh"
 
@@ -1305,10 +1298,8 @@ def _strip_launchers(command: str) -> str:
     "command, expected",
     [
         ("python train.py", "python"),
-        # env's assignments come first, one a line, so preflight can apply them.
         ("env FOO=1 python train.py", "FOO=1\npython"),
         ("env A=1 nice -n 5 env B=2 app", "A=1\nB=2\napp"),
-        # Operands (duration, niceness) are skipped along with the dashed options.
         ("timeout 60s python train.py", "python"),
         ("timeout -s KILL 30 python train.py", "python"),
         ("nice -n 10 vllm serve", "vllm"),
@@ -1350,7 +1341,6 @@ def test_the_interpreter_is_read_off_the_shebang(tmp_path, shebang, expected):
     assert function, "workload_interpreter is gone from the script"
     script = tmp_path / "console-script"
     script.write_text(f"{shebang}\nimport sys\n")
-    # The PATH's python3 is what the fallback answers, so make it recognisable.
     bindir = tmp_path / "bin"
     bindir.mkdir()
     fallback = bindir / "python3"

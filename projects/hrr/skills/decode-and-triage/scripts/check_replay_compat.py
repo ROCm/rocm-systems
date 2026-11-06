@@ -22,9 +22,6 @@ from archive_text import sanitize
 
 _IS_WIN = sys.platform == "win32"
 
-# ---------------------------------------------------------------------------
-# Data classes
-# ---------------------------------------------------------------------------
 
 @dataclass
 class CaptureMetadata:
@@ -57,9 +54,6 @@ class CompatReport:
     replay: ReplayEnvironment | None = None
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _nested_get(obj: dict[str, Any], *keys: str) -> Any:
     cur: Any = obj
@@ -97,9 +91,6 @@ def _run(cmd: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
     )
 
 
-# ---------------------------------------------------------------------------
-# Manifest loader (cross-platform)
-# ---------------------------------------------------------------------------
 
 def load_capture_metadata(archive: Path) -> CaptureMetadata | None:
     manifest = archive / "manifest.json"
@@ -149,9 +140,6 @@ def capture_device_arch_names(capture: CaptureMetadata) -> list[str]:
     return names
 
 
-# ---------------------------------------------------------------------------
-# HIP version parsing
-# ---------------------------------------------------------------------------
 
 def _parse_hip_version(text: str) -> str | None:
     for line in text.splitlines():
@@ -172,7 +160,6 @@ def _find_hip_exe(name: str) -> str | None:
     if hip_root:
         for sub in (("bin", "hip\\bin", "tools\\bin") if _IS_WIN else ("bin",)):
             dirs.append(os.path.join(hip_root, sub))
-    # PATH
     for p in os.environ.get("PATH", "").split(os.pathsep):
         dirs.append(p)
     for d in dirs:
@@ -183,11 +170,7 @@ def _find_hip_exe(name: str) -> str | None:
     return shutil.which(name + (".exe" if _IS_WIN else "")) or shutil.which(name)
 
 
-# ---------------------------------------------------------------------------
-# comgr version probe (cross-platform)
-# ---------------------------------------------------------------------------
 
-# On Linux we dlopen libamd_comgr.so; on Windows we LoadLibrary amd_comgr.dll.
 _PROBE_COMGR_PY_LINUX = r"""
 import ctypes, glob, os, sys
 
@@ -254,9 +237,6 @@ def probe_comgr_version() -> str | None:
     return lines[-1].strip() if lines else None
 
 
-# ---------------------------------------------------------------------------
-# Linux: rocm-smi based GPU enumeration
-# ---------------------------------------------------------------------------
 
 def _parse_rocm_smi(text: str) -> tuple[int, list[str], list[str]]:
     gpu_ids = sorted({int(m.group(1)) for m in re.finditer(r"GPU\[(\d+)\]", text)})
@@ -285,9 +265,6 @@ def _parse_amd_smi_static(text: str) -> tuple[int, list[str], list[str]]:
     return count, archs, names
 
 
-# ---------------------------------------------------------------------------
-# Windows: amd-smi / hipDeviceGetProperties based GPU enumeration
-# ---------------------------------------------------------------------------
 
 _PROBE_GPU_WIN_PY = r"""
 import ctypes, os, sys
@@ -397,9 +374,6 @@ def _parse_win_gpu_probe(text: str) -> tuple[int, list[str], list[str]]:
     return count, archs, names
 
 
-# ---------------------------------------------------------------------------
-# Host environment probe — Linux
-# ---------------------------------------------------------------------------
 
 def probe_host_replay_env_linux() -> ReplayEnvironment:
     env = ReplayEnvironment(source="host:linux")
@@ -423,15 +397,11 @@ def probe_host_replay_env_linux() -> ReplayEnvironment:
     return env
 
 
-# ---------------------------------------------------------------------------
-# Host environment probe — Windows
-# ---------------------------------------------------------------------------
 
 def probe_host_replay_env_windows() -> ReplayEnvironment:
     env = ReplayEnvironment(source="host:windows")
     py = shutil.which("python") or shutil.which("python3") or "python"
 
-    # GPU count + arch via HIP runtime DLL
     proc = _run([py, "-c", _PROBE_GPU_WIN_PY], timeout=30)
     if proc.returncode == 0:
         count, archs, names = _parse_win_gpu_probe(proc.stdout)
@@ -439,7 +409,6 @@ def probe_host_replay_env_windows() -> ReplayEnvironment:
         env.gpu_archs = archs
         env.gpu_names = names
 
-    # HIP version via amd-smi > .info/version > amdhip64.dll
     amd_smi = _find_hip_exe("amd-smi")
     if amd_smi:
         proc2 = _run([amd_smi, "--version"], timeout=15)
@@ -474,7 +443,6 @@ def probe_host_replay_env() -> ReplayEnvironment:
 
 # ---------------------------------------------------------------------------
 # Docker environment probe — Linux only
-# ---------------------------------------------------------------------------
 
 def _docker_cmd(*args: str) -> list[str]:
     if _IS_WIN:
@@ -515,7 +483,6 @@ def resolve_clr_lib_dir(
     if hrr_playback:
         play = Path(hrr_playback)
         if play.is_file():
-            # Installed layout: <prefix>/bin/hrr-playback -> <prefix>/lib
             path = (play.parent / ".." / "lib").resolve()
             if path.is_dir() and any(path.glob("libamdhip64.so*")):
                 return path
@@ -666,7 +633,6 @@ def probe_docker_replay_env(
         env.hip_runtime_version = hip_version_from_clr_lib(clr_lib)
     if env.hip_runtime_version is None:
         env.hip_runtime_version = _parse_hip_version(out)
-    # comgr inside container
     comgr_args = _docker_cmd("run", "--rm")
     if clr_lib is not None:
         comgr_args.extend(["-v", f"{clr_lib}:/opt/hrr/lib:ro"])
@@ -679,9 +645,6 @@ def probe_docker_replay_env(
     return env
 
 
-# ---------------------------------------------------------------------------
-# Compatibility evaluation
-# ---------------------------------------------------------------------------
 
 def evaluate_compat(
     capture: CaptureMetadata,
@@ -745,14 +708,8 @@ def evaluate_compat(
     return report
 
 
-# ---------------------------------------------------------------------------
-# Renderer
-# ---------------------------------------------------------------------------
 
 def render_report(report: CompatReport) -> str:
-    # The capture side is whatever the archive's author wrote, so every value
-    # printed passes the one sanitizer; the replay side is probed from the host
-    # or an image and gets the same treatment rather than a judgement call.
     lines = ["# HRR replay compatibility"]
     if report.capture:
         c = report.capture
@@ -801,9 +758,6 @@ def render_report(report: CompatReport) -> str:
     return "\n".join(lines) + "\n"
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)

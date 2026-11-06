@@ -203,7 +203,6 @@ class AnalyzerTests(unittest.TestCase):
         )
 
     def test_kernel_names_from_a_replay_log_do_not_forge_markdown(self) -> None:
-        # The fault bracket's kernel field runs to the next `]`, newlines included.
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             log = tmp_path / "replay.log"
@@ -289,7 +288,6 @@ class ReplayOutputTests(unittest.TestCase):
             archive = make_archive(tmp_path)
             bin_dir = tmp_path / "bin"
             bin_dir.mkdir()
-            # sudo declines, so the script's `docker` is this stand-in.
             (bin_dir / "sudo").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
             (bin_dir / "docker").write_text(
                 "#!/bin/sh\n"
@@ -315,7 +313,6 @@ class ReplayOutputTests(unittest.TestCase):
         for line in proc.stdout.splitlines():
             self.assertTrue(line.startswith(archive_text.STREAM_PREFIX), line)
         self.assertIn("INERT_MARKER_SECTION", proc.stdout)
-        # The log the analyzer reads stays the replay's own bytes.
         self.assertEqual(len(forged(log)), 3)
 
     def test_native_replay_output_is_marked_as_data(self) -> None:
@@ -357,7 +354,6 @@ class ReplayOutputTests(unittest.TestCase):
         self.assertIn("INERT_MARKER_SECTION", proc.stdout)
         for line in proc.stdout.splitlines():
             self.assertTrue(line.startswith(archive_text.STREAM_PREFIX), line)
-        # The log the analyzer reads stays the replay's own bytes.
         self.assertEqual(len(forged(raw)), 3)
 
 

@@ -1,30 +1,7 @@
 #!/usr/bin/env pwsh
-# HRR triage: optional GPU replay + structured finding.  Windows port of triage_archive.sh.
-# Requires: PowerShell 5.1+, Python 3.x, hrr-playback.exe (HIP SDK for Windows or local build).
-#
-# Usage:
-#   .\triage_archive.ps1 --archive <pid-dir> [--replay [native|auto]] [--no-replay]
-#                        [-o <path>] [--format markdown|json] [-h]
-#
-# Environment knobs (mirror the Linux version):
-#   HRR_TRIAGE_WORKDIR   Output dir for findings + logs (default: a temp dir,
-#                        never the archive: triage must not write into it)
-#   HRR_PLAYBACK         Explicit path to hrr-playback.exe
-#   HIP_PATH / ROCM_PATH HIP SDK root (default: C:\Program Files\AMD\ROCm\6.2)
-#   GPU                  Replay GPU ordinal (default: 0)
-#   HRR_CONTINUE=1       Proceed after preflight HIP/comgr version mismatch
-#   HRR_SKIP_COMPAT=1    Skip manifest preflight entirely
-#   HRR_STRICT_VERSION=1 Turn version mismatch into a hard block
-#   HRR_STRICT_ARCH=1    Turn arch mismatch into a hard block
-#
-# NOTE: Docker GPU replay is NOT supported by this script on Windows.
-#       --replay docker prints guidance and exits 1.
-#       For Docker replay on Windows, use WSL2 + replay_docker.sh from WSL2.
-# ---------------------------------------------------------------------------
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# Declare variables — no param() block so $args is always the raw token list
 $Archive   = ""
 $Replay    = ""
 $NoReplay  = $false
@@ -38,18 +15,10 @@ $EnsurePs1  = Join-Path $ScriptDir "ensure_playback.ps1"
 $Compat     = Join-Path $ScriptDir "check_replay_compat.py"
 $Sanitizer  = Join-Path $ScriptDir "archive_text.py"
 
-# Resolve HIP/ROCm root: HIP_PATH > ROCM_PATH > default install
 $HipRoot = if ($env:HIP_PATH)   { $env:HIP_PATH }
            elseif ($env:ROCM_PATH) { $env:ROCM_PATH }
            else { "C:\Program Files\AMD\ROCm\6.2" }
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-# Archive-derived text (the archive's own path, and names built from it) goes
-# through the skill's one sanitizer, archive_text.py, before it is printed: a
-# directory name can carry a newline and a heading, and this script's output is
-# read by an agent. The replay's own output is filtered through it below.
 function Get-SafeText([string]$Text) {
     $safe = & python $Sanitizer --text $Text
     if ($LASTEXITCODE -ne 0) { return "<unprintable>" }
@@ -83,7 +52,6 @@ Environment:
 "@ | Write-Host -ForegroundColor Cyan
 }
 
-# Parse --long-style flags directly from $args (no param() block — avoids PS binder interference)
 $i = 0
 while ($i -lt $args.Count) {
     $tok = $args[$i]
@@ -107,12 +75,9 @@ while ($i -lt $args.Count) {
 
 if ($Help) { Show-Usage; exit 0 }
 
-# Handle --no-replay flag
 if ($NoReplay) { $Replay = "skip" }
-# Default replay mode
 if (-not $Replay) { $Replay = "auto" }
 
-# Validate archive
 if (-not $Archive) {
     Write-Host "error: --archive required" -ForegroundColor Red
     Show-Usage
@@ -131,8 +96,6 @@ if (-not (Test-Path $Archive -PathType Container)) {
 
 # GetFullPath is lexical only, so a symbolic link or a junction anywhere in a
 # path is followed here, as realpath does for triage_archive.sh. Components that
-# do not exist yet are kept as they are. $null when the links go round in a
-# loop.
 function Resolve-LinkedPath([string]$Path) {
     $full = [IO.Path]::GetFullPath($Path)
     $hops = 0
@@ -148,7 +111,6 @@ function Resolve-LinkedPath([string]$Path) {
             if (-not $target) { $cur = $next; continue }
             if (++$hops -gt 40) { return $null }
             if (-not [IO.Path]::IsPathRooted($target)) { $target = Join-Path $cur $target }
-            # The target can hold links of its own, so the walk starts again on it.
             foreach ($p in ($parts | Select-Object -Skip ($i + 1))) { $target = Join-Path $target $p }
             $full = [IO.Path]::GetFullPath($target)
             $relinked = $true
@@ -160,7 +122,6 @@ function Resolve-LinkedPath([string]$Path) {
 
 # The archive's own links are followed before anything is derived from its name,
 # as readlink -f does in triage_archive.sh: a link to a pid-<n> directory has to
-# protect the capture directory holding the target, not the one holding the link.
 $ArchiveTarget = Resolve-LinkedPath $Archive
 if (-not $ArchiveTarget) {
     Write-Host "error: a symbolic link loop in the archive path: $(Get-SafeText $Archive)" -ForegroundColor Red
@@ -168,13 +129,10 @@ if (-not $ArchiveTarget) {
 }
 $Archive = $ArchiveTarget
 $Name    = Split-Path $Archive -Leaf
-# The pid keeps two runs in the same second from sharing a log and a finding.
 $Ts      = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'") + "-$PID"
 $Workdir = if ($env:HRR_TRIAGE_WORKDIR) { $env:HRR_TRIAGE_WORKDIR } else { Join-Path ([IO.Path]::GetTempPath()) 'hrr-triage' }
 # The archive is not to be written to, as in triage_archive.sh: the archive here
 # is the pid directory and, for a pid-<n> one, the capture directory holding it.
-# Both paths are resolved, links included, before anything is created: a work
-# directory or a parent of it that is a link into the capture is inside it.
 $ArchiveRoot = if ($Name -like 'pid-*') { Split-Path $Archive -Parent } else { $Archive }
 $ArchiveRoot = Resolve-LinkedPath $ArchiveRoot
 function Test-InArchive([string]$Path) {
@@ -203,9 +161,6 @@ $Ext     = if ($Format -eq "json") { ".finding.json" } else { ".finding.md" }
 $Finding = if ($Output) { $Output } else { Join-Path $Workdir "${Name}-${Ts}${Ext}" }
 $Log     = ""
 
-# ---------------------------------------------------------------------------
-# GPU tool discovery
-# ---------------------------------------------------------------------------
 function Find-RocmExe([string]$BaseName) {
     foreach ($dir in @(
         (Join-Path $HipRoot "bin"),
@@ -225,16 +180,13 @@ function Find-RocmExe([string]$BaseName) {
 }
 
 function Get-BestGpu {
-    # Honour explicit override
     if ($env:GPU) { return $env:GPU }
 
-    # Try amd-smi (newer HIP SDK), then rocm-smi
     $smi = Find-RocmExe "amd-smi"
     if (-not $smi) { $smi = Find-RocmExe "rocm-smi" }
 
     if ($smi) {
         try {
-            # amd-smi list --format csv gives GPU indices
             $out = & $smi list 2>&1 | Out-String
             $gpus = [regex]::Matches($out, 'GPU\s*(\d+)') | ForEach-Object { [int]$_.Groups[1].Value }
             if ($gpus.Count -gt 0) {
@@ -249,9 +201,6 @@ function Get-BestGpu {
     return "0"
 }
 
-# ---------------------------------------------------------------------------
-# Replay mode resolution
-# ---------------------------------------------------------------------------
 function Resolve-ReplayMode {
     if ($Replay -ne "auto") { return $Replay }
     if ($env:HRR_DOCKER_IMAGE) {
@@ -261,9 +210,6 @@ function Resolve-ReplayMode {
     return "native"
 }
 
-# ---------------------------------------------------------------------------
-# Manifest preflight (check_replay_compat.py)
-# ---------------------------------------------------------------------------
 function Invoke-ReplayPreflight([string]$Mode, [string]$Gpu) {
     if (-not (Test-Path $Compat)) { return }
     if ($env:HRR_SKIP_COMPAT -eq "1") {
@@ -300,9 +246,6 @@ function Invoke-ReplayPreflight([string]$Mode, [string]$Gpu) {
     if ($rc -ne 0) { exit $rc }
 }
 
-# ---------------------------------------------------------------------------
-# Native replay
-# ---------------------------------------------------------------------------
 function Invoke-NativeReplay([string]$PlaybackExe, [string]$LogPath, [string]$Gpu) {
     Write-Triage "native replay  playback=$PlaybackExe  GPU=$Gpu"
 
@@ -312,13 +255,6 @@ function Invoke-NativeReplay([string]$PlaybackExe, [string]$LogPath, [string]$Gp
                                            } else { "30" }
 
     # WHY Start-Process instead of "& exe 2>&1 | Tee-Object":
-    #   PowerShell's 2>&1 converts native-process stderr into ErrorRecord objects.
-    #   Tee-Object writes them with an "hrr-playback.exe : " prefix and may split
-    #   long lines — breaking every regex in analyze_replay_finding.py.
-    #   cmd /c avoids that but has its own quoting/exit-code quirks with PowerShell.
-    #   Start-Process with file-level redirection bypasses PowerShell's pipeline
-    #   entirely: stdout and stderr arrive as plain UTF-8 text, no wrapping, no
-    #   prefix, no splitting.
     $tmpOut = [System.IO.Path]::GetTempFileName()
     $tmpErr = [System.IO.Path]::GetTempFileName()
     $rc = -1
@@ -339,7 +275,6 @@ function Invoke-NativeReplay([string]$PlaybackExe, [string]$LogPath, [string]$Gp
         $rc = $proc.ExitCode
 
         # stderr has [HRR progress] lines; stdout has [HRR] PASS / archive stats.
-        # Merge both into the log (stderr first = chronological order).
         $errText = [System.IO.File]::ReadAllText($tmpErr)
         $outText = [System.IO.File]::ReadAllText($tmpOut)
         $combined = $errText + $outText
@@ -360,18 +295,10 @@ function Invoke-NativeReplay([string]$PlaybackExe, [string]$LogPath, [string]$Gp
     return $rc
 }
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 $Mode = Resolve-ReplayMode
 Write-Triage "archive=$Archive  replay=$Mode"
 
-# Docker replay via WSL2.
-# Docker Desktop on Windows cannot pass --device=/dev/kfd to a container directly.
-# Instead we invoke replay_docker.sh inside the WSL2 Linux kernel where /dev/kfd
-# is accessible, translating the Windows archive path to its /mnt/ WSL2 equivalent.
 if ($Mode -eq "docker") {
-    # Require WSL2
     if (-not (Get-Command wsl -ErrorAction SilentlyContinue)) {
         Write-Host @"
 [triage] Docker replay requires WSL2, which is not installed.
@@ -384,13 +311,11 @@ Then re-run with --replay docker (or set HRR_DOCKER_IMAGE and use --replay auto)
         exit 1
     }
 
-    # Require HRR_DOCKER_IMAGE
     if (-not $env:HRR_DOCKER_IMAGE) {
         Write-Host "error: set HRR_DOCKER_IMAGE to the capture container image before using --replay docker" -ForegroundColor Red
         exit 1
     }
 
-    # Convert Windows path (C:\foo\bar) -> WSL2 /mnt/c/foo/bar
     function ConvertTo-WslPath([string]$WinPath) {
         $p = $WinPath.TrimEnd('\').Replace('\', '/')
         if ($p -match '^([A-Za-z]):(.*)') {
@@ -411,8 +336,6 @@ Then re-run with --replay docker (or set HRR_DOCKER_IMAGE and use --replay auto)
 
     # Pass every value as its own argument. The archive path is the capture
     # author's to name, so it must never be spliced into a command string that
-    # bash parses: a folder called  x';touch PWNED;'  would run. `env` sets the
-    # variables, and --exec starts it without a shell on the WSL side.
     $wslEnv = @("HRR_DOCKER_IMAGE=$($env:HRR_DOCKER_IMAGE)")
     if ($env:HRR_DOCKER_MOUNT_CLR -eq "1") { $wslEnv += "HRR_DOCKER_MOUNT_CLR=1" }
     $wslArgs = @($wslEnv) + @("bash", $wslScript, "--archive", $wslArchive, "--log", $wslLog)
@@ -428,10 +351,8 @@ Then re-run with --replay docker (or set HRR_DOCKER_IMAGE and use --replay auto)
         Write-Host "  - hrr-playback not in image: set HRR_DOCKER_MOUNT_CLR=1 with CLR_BUILD pointing at a Linux build" -ForegroundColor Yellow
         Write-Host "  - Image not pulled: docker pull `$HRR_DOCKER_IMAGE" -ForegroundColor Yellow
     }
-    # Fall through to analyzer so we still parse whatever log was written
 }
 
-# Locate or build hrr-playback.exe
 $HrrPlayback = $env:HRR_PLAYBACK
 
 if ($Mode -ne "skip") {
@@ -447,7 +368,6 @@ if ($Mode -ne "skip") {
         }
     }
 
-    # Fallback: search HIP SDK bin
     if (-not $HrrPlayback) {
         $HrrPlayback = Find-RocmExe "hrr-playback"
     }
@@ -466,19 +386,16 @@ Options:
     }
 }
 
-# GPU selection + preflight
 $ReplayGpu = Get-BestGpu
 if ($Mode -ne "skip") {
     Invoke-ReplayPreflight -Mode $Mode -Gpu $ReplayGpu
 }
 
-# GPU replay
 if ($Mode -eq "native") {
     $Log = Join-Path $Workdir "hrr-replay-${Name}-${Ts}.log"
     Invoke-NativeReplay -PlaybackExe $HrrPlayback -LogPath $Log -Gpu $ReplayGpu | Out-Null
 }
 
-# Python analyzer
 $AnalyzerArgs = @($Analyzer, "--format", $Format, "--archive", $Archive, "-o", $Finding)
 if ($HrrPlayback)                        { $AnalyzerArgs += @("--hrr-playback", $HrrPlayback) }
 if ($Log) {
