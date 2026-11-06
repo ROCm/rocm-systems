@@ -588,13 +588,10 @@ __device__ inline void warpLdsCopy(uint64_t global, uint32_t lds, size_t sizeInB
 template <CachePolicy cp>
 __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void* ldsBuffer, size_t ldsBufferBytes,
                              uint32_t startWarpId, uint32_t stopWarpId) {
-  const uint8_t* s = uniform(reinterpret_cast<const uint8_t*>(src));
-  uint8_t* d = uniform(reinterpret_cast<uint8_t*>(dst));
-  const uint32_t ldsBase = uniform(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ldsBuffer)));
-  const uint32_t ldsBytes = uniform(static_cast<uint32_t>(ldsBufferBytes)); // LDS is small
-  sizeBytes = uniform(static_cast<uint64_t>(sizeBytes));
-  startWarpId = uniform(startWarpId);
-  stopWarpId = uniform(stopWarpId);
+  const uint8_t* s = reinterpret_cast<const uint8_t*>(src);
+  uint8_t* d = reinterpret_cast<uint8_t*>(dst);
+  const uint32_t ldsBase = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ldsBuffer));
+  const uint32_t ldsBytes = static_cast<uint32_t>(ldsBufferBytes); // LDS is small
 
   const uint32_t W = warpSize;
   const uint32_t nThreads = blockDim.x * blockDim.y * blockDim.z;
