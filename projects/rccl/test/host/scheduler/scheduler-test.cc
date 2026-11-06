@@ -29,7 +29,8 @@
 #include "fakes/tuning_fakes.h"
 #include "warp_speed_plan.h"
 
-// ENABLE_WARP_SPEED is this binary's own compile definition (CMakeLists.txt), not shared with any other TU.
+// ENABLE_WARP_SPEED is this binary's own compile definition (scheduler/host_tests.cmake), not shared with any
+// other TU.
 
 // The only src/config/algorithm_registry.cc symbol symmetric_sched.cc calls, and only inside an INFO() log-guard.
 const char* ncclAlgNameForSymk(int) { return "sym-kernel"; }
@@ -2568,8 +2569,8 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_KernelDynSmem_FalseWhenBitNotS
 // ---- Tma kernels: launch geometry and the tile-staging LDS bound ----
 //
 // These read ncclSymkWarpsPerBlock rather than restating 16, but they do not prove the tuner picks
-// it: nWarps arrives already decided and no test target compiles sym_model.cc. They cover what is
-// downstream of that choice. That the width fits the budget is a static_assert in sym_kernels.h.
+// it: nWarps arrives already decided and the scheduler binary doesn't compile sym_model.cc. They cover what
+// is downstream of that choice. That the width fits the budget is a static_assert in sym_kernels.h.
 constexpr int kSymTmaWaveSize = 32;
 constexpr ncclSymkKernelId kSymTmaKernelId = ncclSymkKernelId_AllGather_TmaST;
 // Fixture value: ncclSymkTileSmemBudget is gfx1250-device-pass only and this is a host binary.

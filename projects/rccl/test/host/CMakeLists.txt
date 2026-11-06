@@ -64,11 +64,11 @@ rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "NCCL_PARAM(GraphRegister, \"GRAPH_REGISTER\", 0)"
   "fakes/enqueue_fakes.cc: ncclParamGraphRegister()")
-# cost-model-test.cc defines ncclFuncStr itself and parseList() indexes it as its prefix table,
+# tuning/cost-model-test.cc defines ncclFuncStr itself and parseList() indexes it as its prefix table,
 # so a rename in production must not leave the test parsing NCCL_ALGO against stale names.
 rccl_assert_source_line("${_rccl_src_root}/init.cc"
   "const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {\"Broadcast\", \"Reduce\", \"AllGather\", \"ReduceScatter\", \"AllReduce\","
-  "cost-model-test.cc: ncclFuncStr")
+  "tuning/cost-model-test.cc: ncclFuncStr")
 # Real NCCL_PARAM lives in enqueue.cc; init.cc only has the extern. MicroInit
 # does not compile enqueue.cc, so init_fakes.cc supplies the body.
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
@@ -377,9 +377,6 @@ function(rccl_define_micro_source_lists)
     rma-proxy-progress-test.cc
     rma-test.cc
     rma-ce-test.cc
-    tuning-test.cc                       # src/tuning/tuning.cc
-    tuning-general-test.cc
-    cost-model-test.cc                   # src/tuning/cost_model.cc modelMap + dispatch
     param-utils-test.cc                  # src/include/param/utils.h, src/include/param/parser_common.h
     param-parsers-test.cc                # src/include/param/parser_{default,enum,bitset,list}.h
     param-registry-test.cc               # src/param/param_registry.cc
@@ -456,42 +453,6 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     fakes/os_fakes.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroWarpSpeed -- scheduler UUTs under ENABLE_WARP_SPEED.
-  set(TEST_MICRO_SCHEDULER_SOURCE_FILES
-    scheduler-test.cc
-    fakes/enqueue_fakes.cc
-    fakes/bootstrap_stubs.cc
-    fakes/topo_stubs.cc
-    fakes/search_fakes.cc
-    fakes/transport_stubs.cc
-    fakes/nccl_stubs.cc
-    fakes/channel_fakes.cc
-    fakes/nccl_fakes.cc
-    fakes/hip_fakes.cc
-    # Shared per-production-TU fakes
-    fakes/ce_fakes.cc
-    fakes/collectives_fakes.cc
-    fakes/comm_fakes.cc
-    fakes/dev_runtime_fakes.cc
-    fakes/env_fakes.cc
-    fakes/mgmt_task_enq_fakes.cc
-    fakes/os_fakes.cc
-    fakes/proxy_fakes.cc
-    fakes/profiler_fakes.cc
-    fakes/rccl_wrap_fakes.cc
-    fakes/recorder_fakes.cc
-    fakes/register_stubs.cc
-    fakes/roctx_fakes.cc
-    fakes/strongstream_stubs.cc
-    fakes/sym_kernels_fakes.cc
-    fakes/sym_kernels_index_fakes.cc
-    fakes/tuning_fakes.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -687,11 +648,9 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroSymKernels -- REAL src/sym_kernels.cc + generated host TU,
-  # plus the REAL symmetric cost model (src/tuning/sym_model.cc, src/tuning/sym_model/*.cc).
+  # rccl-UnitTestsMicroSymKernels -- REAL src/sym_kernels.cc + generated host TU.
   set(TEST_MICRO_SYM_KERNELS_SOURCE_FILES
     sym-kernels-test.cc
-    sym-model-test.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/search_fakes.cc
@@ -702,7 +661,7 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
     fakes/devcomm_fakes.cc
-    fakes/nccl_device_core_fakes.cc      # ncclTeamRail, read by the GIN cost model
+    fakes/nccl_device_core_fakes.cc      # ncclTeamRail, read by sym_kernels.cc
     fakes/mgmt_task_enq_fakes.cc
     fakes/os_fakes.cc
     fakes/profiler_fakes.cc
@@ -1469,12 +1428,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     COMM_DUMP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/commDump.cc"
-    # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
-    TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
-    TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
-    COST_MODEL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/cost_model.cc"
-    ALGORITHM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc"
-    RING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/ring.cc"
     RMA_PROXY_LAUNCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_launch.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
     # rma_tmp.cc, not rma.cc: src/CMakeLists.txt lists plugin/rma.cc first, so
@@ -1558,20 +1511,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDebug
     DEBUG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/debug.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_debug.yaml")
 
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroWarpSpeed -- tests for ENABLE_WARP_SPEED
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroWarpSpeed
-  SOURCES ${TEST_MICRO_SCHEDULER_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    ENABLE_WARP_SPEED
-    # Not inherited via RCCL_COMMON_COMPILE_DEFS (unlike ENABLE_FAULT_INJECTION); the default-ON, shipping config.
-    GENERATE_SYM_KERNELS
-    # Hipify renames this to *_tmp.cc: src/enqueue/task_sched/allgatherv_sched.cc keeps the basename instead.
-    ALLGATHERV_SCHED_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/scheduler/allgatherv_sched_tmp.cc"
-    SYMMETRIC_SCHED_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/scheduler/symmetric_sched.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_scheduler.yaml")
+include("${CMAKE_CURRENT_LIST_DIR}/scheduler/host_tests.cmake")
 
 # In-build, RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED arrives with rccl's own compile definitions; standalone
 # repeats the top-level probe, so rocmwrap.h's NCCL_CUMEM_DMABUF_EXPORT_GATE matches what rccl compiles.
@@ -1738,14 +1678,10 @@ if(_MICRO_BUILD_SYM_KERNELS)
       GENERATE_SYM_KERNELS
       SYM_KERNELS_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc"
       SYM_KERNELS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/sym_kernels.cc"
-      SYM_MODEL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model.cc"
-      # gin_tmp.cc, not gin.cc: src/CMakeLists.txt lists plugin/gin.cc first, so hipify renames this one.
-      SYM_MODEL_GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/gin_tmp.cc"
-      SYM_MODEL_LSA_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/lsa.cc"
-      SYM_MODEL_LSA_BASE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/lsa_base.cc"
-      SYM_MODEL_LSA_A2A_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/lsa_a2a.cc"
     CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/tuning/host_tests.cmake")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroProxy
