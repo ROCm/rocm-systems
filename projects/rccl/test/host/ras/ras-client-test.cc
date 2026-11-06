@@ -35,7 +35,7 @@
 #include <string>
 #include <vector>
 
-#include "../common/LogCapture.hpp"
+#include "../../common/LogCapture.hpp"
 #include "ScopedHook.h"
 #include "fakes/libc_fakes.h"
 
