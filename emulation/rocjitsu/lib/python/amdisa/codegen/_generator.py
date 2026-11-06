@@ -2131,6 +2131,7 @@ class CodeGenerator:
             #include "{generated_arch}/execution_backend.h"
             #include "{generated_arch}/insts.h"
             #include "{generated_arch}/operand.h"
+            #include "rocjitsu/vm/amdgpu/wavefront.h"
 
             #include <array>
 
@@ -2140,12 +2141,31 @@ class CodeGenerator:
 
             template <typename Derived>
             void execute_with_backend(Instruction &instruction, void *context) {{
+              auto &wf = *static_cast<Isa::Context *>(context);
+              // Decode captures immutable operands and this callback under the
+              // same backend scope. Only scoped delegates installed on this
+              // execution thread can introduce a different operand backend.
+              if (ScopedOperandDelegate::active()) {{
+                for (int i = 0; i < instruction.num_src_operands(); ++i) {{
+                  if (!instruction.src_operand(i)->execution_backend_available()) {{
+                    wf.report_instruction_execution_error(
+                        amdgpu::InstructionExecutionError::MissingExecutionBackend);
+                    return;
+                  }}
+                }}
+                for (int i = 0; i < instruction.num_dst_operands(); ++i) {{
+                  if (!instruction.dst_operand(i)->execution_backend_available()) {{
+                    wf.report_instruction_execution_error(
+                        amdgpu::InstructionExecutionError::MissingExecutionBackend);
+                    return;
+                  }}
+                }}
+              }}
               // execute_impl may construct temporary operands (for example,
               // indexed SOP1/VOP1 sources). Re-enter the ISA scope so those
               // operands capture the same backend as decode-time operands.
               ScopedIsaExecutionBackend scope(&execution_backend());
-              static_cast<Derived &>(instruction).execute_impl(
-                  *static_cast<Isa::Context *>(context));
+              static_cast<Derived &>(instruction).execute_impl(wf);
             }}
 
             constexpr size_t kInstructionCallbackCount =
@@ -6810,15 +6830,18 @@ class CodeGenerator:
 
     @staticmethod
     def _is_unimplemented_execute_stub(body: str) -> bool:
-        # Comments may precede the stub or follow its throw. Require the whole
-        # body to match so conditional failures and side effects stay intact.
+        # Require the entire body to be a failure, so conditional rejection and
+        # side effects still receive modifier setup and restoration.
         statements = re.sub(r'//[^\n]*|/\*.*?\*/', '', body, flags=re.DOTALL)
-        return (
-            re.fullmatch(
+        return any(
+            re.fullmatch(pattern, statements) is not None
+            for pattern in (
+                # Matrix generation still has legacy stubs until its migration lands.
                 r'\s*\(void\)wf;\s*throw\s+util::UnimplementedInst\(mnemonic\(\)\);\s*',
-                statements,
+                r'\s*(?:\(void\)wf;\s*)?wf\.report_instruction_execution_error\(\s*'
+                r'amdgpu::InstructionExecutionError::UnimplementedInstruction\s*\);'
+                r'\s*(?:return;\s*)?',
             )
-            is not None
         )
 
     def _pc_address_format(self) -> tuple[int, str, str]:
@@ -7498,7 +7521,11 @@ class CodeGenerator:
             return '  wf.set_fp_denorm_mode(static_cast<uint32_t>(simm16.encoding_value_));'
 
         if cls == 'nop':
-            return '  (void)wf;\n throw util::UnimplementedInst(mnemonic());'
+            return (
+                '  wf.report_instruction_execution_error(\n'
+                '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                '  return;'
+            )
 
         if cls == 'setkill':
             # A killed wave still drains outstanding memory operations.
@@ -8231,8 +8258,9 @@ class CodeGenerator:
             # A profile without formatted memory instructions must not acquire
             # executable format operations from metadata alone.
             return (
-                '  (void)wf;\n'
-                '  throw util::UnimplementedInst(mnemonic()); '
+                '  wf.report_instruction_execution_error(\n'
+                '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                '  return; '
                 '// packed D16 FORMAT execution intentionally unimplemented'
             )
 
@@ -8487,7 +8515,11 @@ class CodeGenerator:
             )
             return '\n'.join(L)
 
-        return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: {cls}'
+        return (
+            '  wf.report_instruction_execution_error(\n'
+            '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+            f'  return; // unhandled semantic class: {cls}'
+        )
 
     def _gen_smem_load(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
@@ -9422,7 +9454,11 @@ class CodeGenerator:
         explicit unimplemented-instruction error.
         """
         if sem.operation is None or sem.operation not in self._ATOMIC_OP_ENUM:
-            return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // TODO: unhandled flat_atomic variant ({sem.name})'
+            return (
+                '  wf.report_instruction_execution_error(\n'
+                '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                f'  return; // TODO: unhandled flat_atomic variant ({sem.name})'
+            )
 
         op_enum = self._ATOMIC_OP_ENUM[sem.operation]
         esz = sem.elem_size or 4
@@ -9470,7 +9506,11 @@ class CodeGenerator:
     ) -> str:
         """Generate buffer_atomic execute() body (MUBUF encoding)."""
         if sem.operation is None or sem.operation not in self._ATOMIC_OP_ENUM:
-            return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // TODO: unhandled buffer_atomic variant ({sem.name})'
+            return (
+                '  wf.report_instruction_execution_error(\n'
+                '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                f'  return; // TODO: unhandled buffer_atomic variant ({sem.name})'
+            )
 
         op_enum = self._ATOMIC_OP_ENUM[sem.operation]
         esz = sem.elem_size or 4
@@ -9536,7 +9576,11 @@ class CodeGenerator:
     ) -> str:
         """Generate ds_atomic execute() body (DS encoding)."""
         if sem.operation is None or sem.operation not in self._ATOMIC_OP_ENUM:
-            return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // TODO: unhandled ds_atomic variant ({sem.name})'
+            return (
+                '  wf.report_instruction_execution_error(\n'
+                '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                f'  return; // TODO: unhandled ds_atomic variant ({sem.name})'
+            )
 
         op_enum = self._ATOMIC_OP_ENUM[sem.operation]
         esz = sem.elem_size or 4
@@ -9729,7 +9773,11 @@ class CodeGenerator:
     ) -> str:
         """Generate ds_append/ds_consume execute() body (DS encoding)."""
         if sem.operation not in ('append', 'consume'):
-            return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // TODO: unhandled ds_append_consume variant ({sem.name})'
+            return (
+                '  wf.report_instruction_execution_error(\n'
+                '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                f'  return; // TODO: unhandled ds_append_consume variant ({sem.name})'
+            )
         op_enum = self._ATOMIC_OP_ENUM[sem.operation]
         L = []
         L.append(
@@ -14280,11 +14328,9 @@ class CodeGenerator:
                             r'(*this, wf, \1, lane, ',
                             _local_body,
                         )
-                        # Skip DPP/SDWA preamble and cleanup for unimplemented
-                        # instructions whose body is ONLY a throw — the cleanup
-                        # code after the throw would be unreachable. Only match
-                        # pure-throw bodies, not bodies with conditional throws.
-                        body_throws = self._is_unimplemented_execute_stub(body)
+                        # Failure-only stubs need no DPP/SDWA setup or cleanup.
+                        # Conditional rejection retains the modifier wrapper.
+                        body_unimplemented = self._is_unimplemented_execute_stub(body)
                         can_share = self._can_share_execute(
                             inst.mnemonic, inst, enc.enc_name
                         )
@@ -14311,7 +14357,7 @@ class CodeGenerator:
                         if _rj_arith_arithmetic:
                             can_share = False
                             _portable_probe = False
-                        if not body_throws and (can_share or _portable_probe):
+                        if not body_unimplemented and (can_share or _portable_probe):
                             self._shared_execute_candidates[
                                 (inst.mnemonic, enc.enc_name)
                             ] = (inst, sem, body, enc.enc_name, body_true16_vop3)
@@ -14398,7 +14444,7 @@ class CodeGenerator:
                             _ordinary_local_execute_body = (
                                 _local_simd_body + _local_scalar_body
                             )
-                        if _has_dpp_encoding and not body_throws:
+                        if _has_dpp_encoding and not body_unimplemented:
                             class_members.extend(
                                 [
                                     cgen.Line('private:'),
@@ -14407,7 +14453,7 @@ class CodeGenerator:
                                     ),
                                 ]
                             )
-                        if body_throws:
+                        if body_unimplemented:
                             exec_impl = cgen.Line(
                                 f'void {inst.fmt_name}::execute_impl'
                                 f'(amdgpu::Wavefront &wf) {{\n'
@@ -16952,7 +16998,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         )
         simd_public_decl = ''
         simd_private_decl = ''
-        execution_backend_public_decl = ''
+        execution_backend_public_decl = (
+            '  bool execution_backend_available() const override;\n'
+        )
         packed_16bit_field = ''
         if uses_packed_16bit_sources or self.isa_spec.profile.split_execution_sources:
             simd_public_decl = '  bool simd_capable() const override;\n'
@@ -17001,7 +17049,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  static const void *full_execution_backend();\n'
                 '  /// @brief Validate that every full-simulator operand callback is present.\n'
                 '  static bool full_execution_backend_complete();\n'
-            )
+            ) + execution_backend_public_decl
             execution_backend_ctor_init = (
                 ',\n'
                 '      execution_backend_(static_cast<const ExecutionBackend *>(\n'
@@ -17295,6 +17343,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
         if self.isa_spec.profile.split_execution_sources:
             class_impl.model.append(cgen.Line(textwrap.dedent('''\
+                    bool Operand::execution_backend_available() const {
+                      // Captured tables are the immutable full table or null; no
+                      // independently populated/partial tables are supported.
+                      return execution_backend_ != nullptr &&
+                             (!delegate() || delegate()->execution_backend_available());
+                    }
+
                     bool Operand::simd_capable() const {
                       decltype(ExecutionBackend::simd_capable) callback =
                           execution_backend_ ? execution_backend_->simd_capable : nullptr;
@@ -17305,8 +17360,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                                   uint32_t count, uint32_t *out) const {
                       decltype(ExecutionBackend::read_lane_chunk) callback =
                           execution_backend_ ? execution_backend_->read_lane_chunk : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return;
+                      }
                       (this->*callback)(wf, lane_base, count, out);
                     }
 
@@ -17315,32 +17372,40 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                                    uint64_t mask) const {
                       decltype(ExecutionBackend::write_lane_chunk) callback =
                           execution_backend_ ? execution_backend_->write_lane_chunk : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return;
+                      }
                       (this->*callback)(wf, lane_base, count, vals, mask);
                     }
 
                     uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
                       decltype(ExecutionBackend::read_scalar) callback =
                           execution_backend_ ? execution_backend_->read_scalar : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return 0;
+                      }
                       return (this->*callback)(wf);
                     }
 
                     uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
                       decltype(ExecutionBackend::read_lane) callback =
                           execution_backend_ ? execution_backend_->read_lane : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return 0;
+                      }
                       return (this->*callback)(wf, lane);
                     }
 
                     void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {
                       decltype(ExecutionBackend::write_scalar) callback =
                           execution_backend_ ? execution_backend_->write_scalar : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return;
+                      }
                       (this->*callback)(wf, val);
                     }
 
@@ -17348,8 +17413,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                              uint32_t val) const {
                       decltype(ExecutionBackend::write_lane) callback =
                           execution_backend_ ? execution_backend_->write_lane : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return;
+                      }
                       (this->*callback)(wf, lane, val);
                     }
 
@@ -17357,8 +17424,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                                   uint32_t lane) const {
                       decltype(ExecutionBackend::read_lane64) callback =
                           execution_backend_ ? execution_backend_->read_lane64 : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return 0;
+                      }
                       return (this->*callback)(wf, lane);
                     }
 
@@ -17366,24 +17435,30 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                                uint64_t val) const {
                       decltype(ExecutionBackend::write_lane64) callback =
                           execution_backend_ ? execution_backend_->write_lane64 : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return;
+                      }
                       (this->*callback)(wf, lane, val);
                     }
 
                     uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
                       decltype(ExecutionBackend::read_scalar64) callback =
                           execution_backend_ ? execution_backend_->read_scalar64 : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return 0;
+                      }
                       return (this->*callback)(wf);
                     }
 
                     void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {
                       decltype(ExecutionBackend::write_scalar64) callback =
                           execution_backend_ ? execution_backend_->write_scalar64 : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return;
+                      }
                       (this->*callback)(wf, val);
                     }
 
@@ -17480,6 +17555,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                               execution_backend_ ? execution_backend_->simd_notify_write64_mut
                                                  : nullptr)
                         (this->*callback)(wf, lane_mask, byte_mask);
+                    }
+                    ''')))
+        else:
+            class_impl.model.append(cgen.Line(textwrap.dedent('''\
+                    bool Operand::execution_backend_available() const {
+                      return !delegate() || delegate()->execution_backend_available();
                     }
                     ''')))
 
@@ -18020,7 +18101,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    amdgpu::RegisterAccess(wf).write_vgpr(wf.vgpr_alloc().base + voff, lane, val);\n'
             '    return;\n'
             '  }\n'
-            '  throw std::logic_error("write_lane called on non-VGPR operand type");\n'
+            '  wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
             '}\n'
             '\n' + _read_lane64_body + '\n\n'
             'void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {\n'
@@ -18034,7 +18115,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    amdgpu::RegisterAccess(wf).write_vgpr64(idx, lane, val);\n'
             '    return;\n'
             '  }\n'
-            '  throw std::logic_error("write_lane64 called on non-VGPR operand type");\n'
+            '  wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
             '}\n'
             '\n'
             'uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {\n'
@@ -18360,7 +18441,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     ('rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h', False),
                     ('format', True),
                     ('optional', True),
-                    ('stdexcept', True),
                     ('string', True),
                 ],
                 [],
@@ -18387,7 +18467,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     ('rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h', False),
                     ('format', True),
                     ('optional', True),
-                    ('stdexcept', True),
                     ('string', True),
                 ],
                 [],
@@ -18412,10 +18491,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     ('rocjitsu/vm/amdgpu/register_access.h', False),
                     ('rocjitsu/vm/amdgpu/wavefront.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h', False),
-                    ('util/except.h', False),
                     ('format', True),
                     ('optional', True),
-                    ('stdexcept', True),
                     ('string', True),
                 ],
                 [],
