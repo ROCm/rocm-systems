@@ -502,6 +502,40 @@ TEST_F(SearchMicrotest, CompareGraphs_OddCountTiesGoToTheEvenReference) {
   EXPECT_EQ(0, copy);  // same aggregate bandwidth, so fewer hops do not matter
 }
 
+TEST_F(SearchMicrotest, CompareGraphs_WithoutNicsOddCountTiesGoToFewerHops) {
+  Use(XgmiSystem(2));
+  GraphPtr graph = NewGraph(0, NCCL_TOPO_PATTERN_RING);
+  GraphPtr ref = NewGraph(0, NCCL_TOPO_PATTERN_RING);
+  graph->nChannels = 1;
+  graph->bwIntra = 40;
+  graph->nHops = 1;
+  ref->nChannels = 2;
+  ref->bwIntra = 20;
+  ref->nHops = 5;
+  int copy = 0;
+
+  ASSERT_EQ(ncclSuccess, ncclTopoCompareGraphs(system_.get(), graph.get(), ref.get(), &copy));
+
+  EXPECT_EQ(1, copy);  // the even preference needs more NICs than channels; with none, fewer hops win the tie
+}
+
+TEST_F(SearchMicrotest, CompareGraphs_OddCountAtTheNicCountTiesGoToFewerHops) {
+  Use(XgmiSystem(3, 1, true), 6);
+  GraphPtr graph = NewGraph(0, NCCL_TOPO_PATTERN_RING);
+  GraphPtr ref = NewGraph(0, NCCL_TOPO_PATTERN_RING);
+  graph->nChannels = 3;
+  graph->bwIntra = 40;
+  graph->nHops = 1;
+  ref->nChannels = 4;
+  ref->bwIntra = 30;
+  ref->nHops = 5;
+  int copy = 0;
+
+  ASSERT_EQ(ncclSuccess, ncclTopoCompareGraphs(system_.get(), graph.get(), ref.get(), &copy));
+
+  EXPECT_EQ(1, copy);  // 3 channels on 3 NICs: no even preference, so fewer hops win the tie
+}
+
 TEST_F(SearchMicrotest, CompareGraphs_ChannelsThenBandwidthThenHopsThenXgmi) {
   Use(XgmiSystem(2, 1, true), 4);
   GraphPtr graph = NewGraph(0, NCCL_TOPO_PATTERN_RING);
