@@ -27,6 +27,18 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Profiling now places all counters of a metric in one pass where they fit, so the metric reads them from the same application replay. Some counters are collected in more than one pass, which adds replays. Pass counts with the shipped configs, before and after this change:
+  * gfx908: 12 to 13.
+  * gfx90a: 12 to 13.
+  * gfx942: 12 to 14.
+  * gfx950: 20 to 22.
+  * gfx1250: 16 to 24.
+  * gfx1150, gfx1151, gfx1152, and gfx1153: 10 to 12.
+
+* Perfmon input and result files are numbered `pmc_perf_N` (for example `pmc_perf_0.yaml` and `results_pmc_perf_0.csv.gz`). The per-counter `pmc_perf_SQ_*` and `pmc_perf_SQC_*` files for accumulate counters are no longer written.
+
+* `rocprof-compute analyze` reads each metric from one pass that holds all of its counters. A metric whose counters are spread across passes is left unset and shows `N/A`.
+
 * Improved the standalone roofline HTML kernel hover tooltip: it now shows the limiting roof, percent of roofline, achieved and peak bandwidth per memory level, dispatch count and share of total application dispatches, and kernel duration and share of total application time. Kernel names longer than 200 characters are truncated in the sidebar, with the full name shown on hover.
 
 * The roofline benchmark now reports the peak measured sample across runs instead of the mean.
