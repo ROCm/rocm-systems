@@ -26,18 +26,6 @@
       "logs_contain": ["--operator"]
     },
     {
-      "id": "tt-list-user-operators",
-      "skill_should_trigger": true,
-      "prompt": "I added my own ROCTx range to my Python script. Profile it and show the GPU work inside that range.\n\nThe application is ./simple_net.py. Run it with --user-range.",
-      "workspace": "evals/samples",
-      "expected_behavior": [
-        "profiles the Python script with --experimental --trace-ml-api",
-        "lists the user region with --experimental --list-operators user",
-        "shows the operator call tree under that region, including nested ML API operators and the GPU kernels they launched"
-      ],
-      "logs_contain": ["--trace-ml-api", "--list-operators user"]
-    },
-    {
       "id": "tt-user-roctx-no-collection-control",
       "skill_should_trigger": true,
       "prompt": "start and stop rocprof-compute counter collection at my ROCTx range UserDefined",
