@@ -9,10 +9,12 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * `hipDrvLaunchKernelEx` now validates cluster dimensions before dispatch. Previously, an oversized or overflowing cluster size (e.g. exceeding the device maximum, or a product that overflows `uint32_t`) reached the hardware and caused an `HSA_STATUS_ERROR_INVALID_ARGUMENT` queue abort. Both `hipDrvLaunchKernelEx` and `hipLaunchKernelExC` now return `hipErrorInvalidClusterSize` at the API boundary for invalid cluster dimensions, matching CUDA's `cudaErrorInvalidClusterSize` / `CUDA_ERROR_INVALID_CLUSTER_SIZE` behavior. A cluster size greater than 1 on a device that does not support clusters (`clusterMaxSize == 0`) is also rejected.
 * Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
 * `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
+* `HIP_SKIP_ABORT_ON_GPU_ERROR` now correctly suppresses process termination for device-side assertions (`HSA_STATUS_ERROR_EXCEPTION`), consistent with existing behavior for out-of-memory and invalid-dispatch errors. Previously, when core dumps were enabled (`RLIMIT_CORE` nonzero), a device-side assertion could still invoke `abort()` even when skip-abort mode was enabled. The HIP runtime now returns `hipErrorLaunchFailure` instead of aborting the process.
 
 ### Changed
 
 * After `hipFuncSetCacheConfig`, `preferredShmemCarveout` reads back `-1` for `hipFuncCachePreferNone` (was `0`) and `0` for `hipFuncCachePreferL1` (was `1`).
+* Device-side assertions could ignore `HIP_SKIP_ABORT_ON_GPU_ERROR` when core dumps were enabled. `HSA_STATUS_ERROR_EXCEPTION` now follows the same skip-abort path as out-of-memory and invalid-dispatch errors. As a result, the HIP runtime now returns `hipErrorLaunchFailure` instead of calling `abort()`.
 
 ## HIP 7.17.0 for ROCm 10.2.0
 
