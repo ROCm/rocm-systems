@@ -628,6 +628,9 @@ namespace hip {
     int deviceId() const { return deviceId_; }
     void retain() const { context_->retain(); }
     void release() const { context_->release(); }
+
+    std::atomic<uint32_t> explicitCtxCount_{0};
+    std::atomic<uint32_t> primaryCtxCount_{0};
     const std::vector<amd::Device*>& devices() const { return context_->devices(); }
     unsigned int getFlags() const { return flags_; }
     void setFlags(unsigned int flags) { flags_ = flags; }
