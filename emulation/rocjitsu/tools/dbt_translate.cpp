@@ -14,7 +14,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <exception>
 #include <format>
 #include <iomanip>
 #include <memory>
@@ -109,43 +108,33 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
         ++pc;
         continue;
       }
-      try {
-        util::StringDiagnostic decode_error;
-        DecodeResult decoded = decoder->decode(&words[pc], decode_error.emitter());
-        if (decoded.failed()) {
-          record_decode_failure(section_report, pc * sizeof(uint32_t), decode_error.message());
-          if (include_disassembly) {
-            os << "  0x" << std::hex << std::setw(4) << std::setfill('0') << pc * 4
-               << ": <decode error: " << decode_error.message() << ">\n"
-               << std::dec << std::setfill(' ');
-          }
-          ++pc;
-          continue;
-        }
-        std::unique_ptr<Instruction> inst = std::move(decoded).value();
-
-        const uint32_t inst_words = inst->size() / sizeof(uint32_t);
-        ++section_report.instruction_count;
-        if (include_disassembly) {
-          os << "  0x" << std::hex << std::setw(4) << std::setfill('0') << pc * 4 << ": "
-             << std::dec << std::setfill(' ') << inst->disassemble() << " [";
-          for (uint32_t i = 0; i < inst_words && pc + i < word_count; ++i) {
-            if (i != 0)
-              os << ' ';
-            os << std::hex << std::setw(8) << std::setfill('0') << words[pc + i];
-          }
-          os << std::dec << std::setfill(' ') << "]\n";
-        }
-        pc += inst_words == 0 ? 1 : inst_words;
-      } catch (const std::exception &e) {
-        record_decode_failure(section_report, pc * sizeof(uint32_t), e.what());
+      util::StringDiagnostic decode_error;
+      DecodeResult decoded = decoder->decode(&words[pc], decode_error.emitter());
+      if (decoded.failed()) {
+        record_decode_failure(section_report, pc * sizeof(uint32_t), decode_error.message());
         if (include_disassembly) {
           os << "  0x" << std::hex << std::setw(4) << std::setfill('0') << pc * 4
-             << ": <decode error: " << e.what() << ">\n"
+             << ": <decode error: " << decode_error.message() << ">\n"
              << std::dec << std::setfill(' ');
         }
         ++pc;
+        continue;
       }
+      std::unique_ptr<Instruction> inst = std::move(decoded).value();
+
+      const uint32_t inst_words = inst->size() / sizeof(uint32_t);
+      ++section_report.instruction_count;
+      if (include_disassembly) {
+        os << "  0x" << std::hex << std::setw(4) << std::setfill('0') << pc * 4 << ": " << std::dec
+           << std::setfill(' ') << inst->disassemble() << " [";
+        for (uint32_t i = 0; i < inst_words && pc + i < word_count; ++i) {
+          if (i != 0)
+            os << ' ';
+          os << std::hex << std::setw(8) << std::setfill('0') << words[pc + i];
+        }
+        os << std::dec << std::setfill(' ') << "]\n";
+      }
+      pc += inst_words == 0 ? 1 : inst_words;
     }
 
     inspection.report.sections.push_back(std::move(section_report));
@@ -542,29 +531,24 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
     output.value.disassembly += source_inspection.disassembly;
   }
 
-  try {
-    BinaryTranslator translator(options.guest_arch, options.host_arch, options.target_mach,
-                                make_binary_translator_options(options));
-    if (need_report) {
-      output.value.instruction_translations.clear();
-      translator.set_trace_callback([&](const TranslationTraceEvent &trace) {
-        output.value.instruction_translations.push_back(
-            build_instruction_report(trace, *input.code_object, options.input_target,
-                                     options.guest_arch, output_target, options.host_arch));
-      });
-    }
-    auto translated = translator.translate(*input.code_object);
-    output.value.elf_bytes = std::move(translated.elf_bytes);
-    output.value.host_arch = translated.host_arch;
-    output.value.target_mach =
-        options.target_mach ? options.target_mach : elf_mach_for_arch(output.value.host_arch);
-    output.value.diagnostics = std::move(translated.diagnostics);
-    output.value.rewrite_discharge_checked = translated.rewrite_discharge_checked;
-    output.value.rewrite_discharge_verified = translated.rewrite_discharge_verified;
-  } catch (const std::exception &e) {
-    add_error(output, kTranslationError, std::string("translation threw exception: ") + e.what());
-    return output;
+  BinaryTranslator translator(options.guest_arch, options.host_arch, options.target_mach,
+                              make_binary_translator_options(options));
+  if (need_report) {
+    output.value.instruction_translations.clear();
+    translator.set_trace_callback([&](const TranslationTraceEvent &trace) {
+      output.value.instruction_translations.push_back(
+          build_instruction_report(trace, *input.code_object, options.input_target,
+                                   options.guest_arch, output_target, options.host_arch));
+    });
   }
+  auto translated = translator.translate(*input.code_object);
+  output.value.elf_bytes = std::move(translated.elf_bytes);
+  output.value.host_arch = translated.host_arch;
+  output.value.target_mach =
+      options.target_mach ? options.target_mach : elf_mach_for_arch(output.value.host_arch);
+  output.value.diagnostics = std::move(translated.diagnostics);
+  output.value.rewrite_discharge_checked = translated.rewrite_discharge_checked;
+  output.value.rewrite_discharge_verified = translated.rewrite_discharge_verified;
 
   if (has_error_diagnostic(output.value.diagnostics)) {
     add_error(output, kTranslationError, "translation failed");
@@ -598,42 +582,35 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
 
   if (options.verify_idempotence) {
     output.value.idempotence_checked = true;
-    try {
-      auto verifier_options = make_binary_translator_options(options);
-      // The first translation already audited the authoritative output. The
-      // idempotence pass only needs to prove that translating those bytes again
-      // does not change them; auditing its temporary output would duplicate the
-      // final-stream scan and raise peak memory on large code objects.
-      verifier_options.verify_rewrite_discharge = false;
-      BinaryTranslator verifier(options.guest_arch, options.host_arch, options.target_mach,
-                                verifier_options);
-      TranslatedCodeObject second = verifier.translate(translated_obj);
-      const bool second_ok = second.ok();
-      output.value.idempotence_diagnostics = std::move(second.diagnostics);
-      if (!second_ok) {
-        add_error(output, kValidationError, "idempotence verification second translation failed");
-        return output;
-      }
-      if (second.elf_bytes != output.value.elf_bytes) {
-        AmdGpuCodeObject second_obj(second.elf_bytes.data(), second.elf_bytes.size());
-        if (!second_obj.is_valid()) {
-          add_error(output, kValidationError,
-                    "idempotence verification produced an invalid AMDGPU code object");
-          return output;
-        }
-        add_error(output, kValidationError,
-                  "translation output is not byte-idempotent: " +
-                      find_idempotence_difference(translated_obj, second_obj,
-                                                  output.value.elf_bytes, second.elf_bytes));
-        return output;
-      }
-      output.value.idempotence_verified = true;
-    } catch (const std::exception &e) {
-      add_error(output, kTranslationError,
-                std::string("idempotence verification second translation threw exception: ") +
-                    e.what());
+    auto verifier_options = make_binary_translator_options(options);
+    // The first translation already audited the authoritative output. The
+    // idempotence pass only needs to prove that translating those bytes again
+    // does not change them; auditing its temporary output would duplicate the
+    // final-stream scan and raise peak memory on large code objects.
+    verifier_options.verify_rewrite_discharge = false;
+    BinaryTranslator verifier(options.guest_arch, options.host_arch, options.target_mach,
+                              verifier_options);
+    TranslatedCodeObject second = verifier.translate(translated_obj);
+    const bool second_ok = second.ok();
+    output.value.idempotence_diagnostics = std::move(second.diagnostics);
+    if (!second_ok) {
+      add_error(output, kValidationError, "idempotence verification second translation failed");
       return output;
     }
+    if (second.elf_bytes != output.value.elf_bytes) {
+      AmdGpuCodeObject second_obj(second.elf_bytes.data(), second.elf_bytes.size());
+      if (!second_obj.is_valid()) {
+        add_error(output, kValidationError,
+                  "idempotence verification produced an invalid AMDGPU code object");
+        return output;
+      }
+      add_error(output, kValidationError,
+                "translation output is not byte-idempotent: " +
+                    find_idempotence_difference(translated_obj, second_obj, output.value.elf_bytes,
+                                                second.elf_bytes));
+      return output;
+    }
+    output.value.idempotence_verified = true;
   }
 
   return output;
