@@ -1153,6 +1153,23 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_configure_target(file_loading_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
     rj_add_gtest_tests(file_loading_allocation_failure_test)
 
+    # Keep allocation injection isolated from the main test executable.
+    add_executable(
+        queue_registration_allocation_failure_test
+        queue_registration_allocation_failure_test.cpp
+    )
+    target_link_libraries(
+        queue_registration_allocation_failure_test
+        PRIVATE
+            ${RJ_OBJECT_LIBS}
+            util
+            flatbuffers
+            Threads::Threads
+            GTest::gtest_main
+    )
+    rj_configure_target(queue_registration_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
+    rj_add_gtest_tests(queue_registration_allocation_failure_test)
+
     # Native dispatch must extract both the relative tables and their factories
     # from a static archive, including when the C++ objects use LTO.
     add_library(rocjitsu_cdna5_test_archive STATIC)
