@@ -163,7 +163,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(
         rocjitsu_memory
         rocjitsu_memory.cpp
-        ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/memory_backing.cpp
+        ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/memory_keeper.cpp
+        ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/memory_keeper_protocol.cpp
         ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/libc_passthrough.cpp
     )
     target_link_libraries(
