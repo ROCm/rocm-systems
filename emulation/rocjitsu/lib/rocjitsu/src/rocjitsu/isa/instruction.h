@@ -267,7 +267,10 @@ public:
   /// and must not be called. No virtual dispatch.
   /// This is a low-level backend callback. AMDGPU callers should use the CU's
   /// execute_instruction() API to reset and check simulator execution failures.
-  /// @details Decoded non-memory instructions without DynamicInstState may be
+  /// @details Decoded operands are immutable after construction, except for
+  /// temporary read delegation through ScopedOperandDelegate on the execution
+  /// thread. The decoded instruction must not execute concurrently while bound.
+  /// Decoded non-memory instructions without DynamicInstState may be
   /// reused across waves without a reset. Executors must read register values,
   /// EXEC and other execution state from the current context, and restore any
   /// temporary operand delegates before returning. Put persistent per-issue

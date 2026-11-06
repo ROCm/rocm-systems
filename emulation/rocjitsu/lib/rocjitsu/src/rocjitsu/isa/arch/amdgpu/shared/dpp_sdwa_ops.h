@@ -59,6 +59,9 @@ public:
 
   std::string name() const override { return "staged_src"; }
   bool simd_capable() const override { return true; }
+  bool execution_backend_available() const override {
+    return !delegate() || delegate()->execution_backend_available();
+  }
 
   void set_lane(uint32_t lane, uint32_t value) { lo_[lane] = value; }
   void set_lane64(uint32_t lane, uint64_t value) {
