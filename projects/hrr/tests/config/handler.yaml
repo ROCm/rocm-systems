@@ -36,13 +36,19 @@ cases:
   Unit_HRR_HostBudget_BlobCacheRefusesOverBudgetAndMissing: {}
   Unit_HRR_HostBudget_CodeObjectCacheIsChargedSeparately: {}
   Unit_HRR_HostBudget_ConcurrentLoadsOfOneBlobChargeOnce: {}
+  Unit_HRR_HostBudget_DeviceMemCreateNotCharged: {}
   Unit_HRR_HostBudget_DispatchFreesReplacedHostAllocation: {}
   Unit_HRR_HostBudget_DispatchTableUsesTheChargingHandlers: {}
-  Unit_HRR_HostBudget_HostBlocksStartOnCacheLine: {}
   Unit_HRR_HostBudget_HostAllocationHandlersRefuseOverBudget: {}
+  Unit_HRR_HostBudget_HostBlocksStartOnCacheLine: {}
+  Unit_HRR_HostBudget_HostMemCreateRefusedOverBudget: {}
   Unit_HRR_HostBudget_HostRegisterAllocationFailureRefuses: {}
   Unit_HRR_HostBudget_LandingBufferChargesWholeBlock: {}
   Unit_HRR_HostBudget_LandingBufferPointerSurvivesGrowth: {}
+  Unit_HRR_HostBudget_ManagedAllocationRefusedOverBudget: {}
+  Unit_HRR_HostBudget_ManagedAllocationReturnsChargeOnFree: {}
+  Unit_HRR_HostBudget_MemCreateChargeHeldWhileMapped: {}
+  Unit_HRR_HostBudget_RegionReleaseKeepsReplacingAllocation: {}
   Unit_HRR_HostUnregister_FailedCallKeepsBuffer: {}
   Unit_HRR_HostUnregister_FailedReplaceTakesNewBlock: {}
   Unit_HRR_HostUnregister_GraphNodeKeepsBuffer: {}
