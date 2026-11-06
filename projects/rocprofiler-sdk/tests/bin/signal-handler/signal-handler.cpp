@@ -117,6 +117,33 @@ sigint_handler(int)
     g_shutdown.store(true, std::memory_order_relaxed);
 }
 
+// Querying or replacing a disposition must return the app's own, never the profiler's: CPython
+// only installs its KeyboardInterrupt handler if it finds SIGINT at SIG_DFL, and uvicorn reinstalls
+// the handlers it replaced when it shuts down.
+bool
+dispositions_are_the_apps()
+{
+    for(int signo : {SIGINT, SIGTERM})
+    {
+        struct sigaction initial = {};
+        sigaction(signo, nullptr, &initial);
+        if((initial.sa_flags & SA_SIGINFO) != 0 ||
+           (initial.sa_handler != SIG_DFL && initial.sa_handler != SIG_IGN))
+            return false;
+
+        struct sigaction sa = {};
+        sa.sa_handler       = sigint_handler;
+        sigemptyset(&sa.sa_mask);
+        struct sigaction prev = {};
+        sigaction(signo, &sa, &prev);
+        if(prev.sa_handler != initial.sa_handler) return false;
+
+        if(signal(signo, initial.sa_handler) != sigint_handler) return false;
+        if(signal(signo, sigint_handler) != initial.sa_handler) return false;
+    }
+    return true;
+}
+
 // Runs HIP kernels in a loop until g_shutdown is set.
 void
 run_kernels(const char* label)
@@ -190,10 +217,35 @@ mode_good_single_process()
 {
     fprintf(stderr, "Mode: good/single-process, PID=%d\n", getpid());
 
+    if(!dispositions_are_the_apps())
+    {
+        fprintf(
+            stderr, "Parent PID=%d: signal()/sigaction() returned a profiler handler\n", getpid());
+        return 1;
+    }
+
     struct sigaction sa = {};
     sa.sa_handler       = sigint_handler;
     sigemptyset(&sa.sa_mask);
     sigaction(SIGINT, &sa, nullptr);
+    // SIGTERM means the same orderly shutdown here, as it does for servers.
+    sigaction(SIGTERM, &sa, nullptr);
+
+    // Like CPython's subprocess: reset a vfork() child's handlers before it execs. The child shares
+    // this process's memory, and must not change which handler gets the profiler's signals here.
+    if(pid_t child = vfork(); child == 0)
+    {
+        struct sigaction dfl = {};
+        dfl.sa_handler       = SIG_DFL;
+        sigemptyset(&dfl.sa_mask);
+        sigaction(SIGINT, &dfl, nullptr);
+        sigaction(SIGTERM, &dfl, nullptr);
+        _exit(0);
+    }
+    else if(child > 0)
+    {
+        waitpid(child, nullptr, 0);
+    }
 
     run_kernels("parent");
 
@@ -249,8 +301,21 @@ mode_good_fork()
         write(pipes[i][1], "q", 1);
         close(pipes[i][1]);
     }
+    // Let the profiler's finalization worker, which polls the children every 100 ms, see them exit
+    // first: the children are still this process's to reap.
+    usleep(500000);
     for(int i = 0; i < NUM_CHILDREN; i++)
-        waitpid(children[i], nullptr, 0);
+    {
+        if(waitpid(children[i], nullptr, 0) != children[i])
+        {
+            fprintf(stderr,
+                    "Parent PID=%d: child %d was already reaped: %s\n",
+                    getpid(),
+                    static_cast<int>(children[i]),
+                    strerror(errno));
+            return 1;
+        }
+    }
 
     emit_roctx_marker("exit_marker parent fork ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());

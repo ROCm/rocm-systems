@@ -39,6 +39,7 @@ set(BASE_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 #                                       (e.g. --app-signal-handler / --no-app-signal-handler)
 #   ROCPROFV3_EXTRA_FLAGS <flags...>  : inserted into the rocprofv3 command
 #                                       (e.g. --disable-signal-handlers)
+#   SIGNAL <name>                     : signal timeout sends (default INT)
 #
 # Registers the {cleanup, execute, validate} triad for one scenario:
 #   cleanup wipes the output dir (FIXTURES_SETUP <name>-clean)
@@ -47,7 +48,7 @@ set(BASE_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 # cmake-format: on
 function(add_signal_handler_test NAME)
     cmake_parse_arguments(
-        arg "NO_TIMEOUT_SIGNAL" "PROCESS_TYPE;VALIDATE_EXPECT;PASS_REGEX"
+        arg "NO_TIMEOUT_SIGNAL" "PROCESS_TYPE;VALIDATE_EXPECT;PASS_REGEX;SIGNAL"
         "APP_EXTRA_FLAGS;ROCPROFV3_EXTRA_FLAGS" ${ARGN})
 
     set(_name "app-${NAME}-${arg_PROCESS_TYPE}")
@@ -58,6 +59,10 @@ function(add_signal_handler_test NAME)
     # NO_TIMEOUT_SIGNAL the app is run directly and must self-terminate (normal-exit
     # scenarios). A finalize hang is caught by the ctest's TIMEOUT.
     set(_signal_wrapper ${TIMEOUT_CMD})
+    if(arg_SIGNAL)
+        set(_signal_wrapper timeout --preserve-status --signal=${arg_SIGNAL}
+                            ${SIGNAL_DELAY})
+    endif()
     if(arg_NO_TIMEOUT_SIGNAL)
         set(_signal_wrapper "")
     endif()
@@ -189,3 +194,15 @@ add_signal_handler_test(
     VALIDATE_EXPECT clean-exit
     PASS_REGEX "clean exit"
     NO_TIMEOUT_SIGNAL)
+
+# SIGTERM case: the app's own SIGTERM handler must run once the profiler has flushed, not
+# the crash handler rocprofv3's logging library installs before main (which kills the
+# process with a backtrace, so "clean exit" is never printed). The app also checks that
+# signal() and sigaction() report its own dispositions rather than the profiler's. Markers
+# after the signal are not collected, so only the flushed ones are checked.
+add_signal_handler_test(
+    sigterm-signal-handling
+    PROCESS_TYPE single-process
+    VALIDATE_EXPECT flushed-markers
+    PASS_REGEX "clean exit"
+    APP_EXTRA_FLAGS --app-signal-handler SIGNAL TERM)
