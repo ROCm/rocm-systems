@@ -4,10 +4,14 @@
 """Unit tests for rocprof_compute_base.py."""
 
 import argparse
+from unittest.mock import Mock
 
+import common
 import pytest
 
 from rocprof_compute_base import RocProfCompute
+
+MODULE = "rocprof_compute_base"
 
 
 def build_args(
@@ -51,46 +55,34 @@ def test_handle_analyze_args_list_stats_output_format(output_format, expect_erro
         instance.handle_analyze_args()
 
 
-def test_handle_analyze_args_listing_skips_operator_parse(monkeypatch):
-    """--list-operators ignores --operator, including an unknown prefix."""
-    args = build_args(list_operators=["torch"], operator=["unknown:*"])
-    warnings = []
-    monkeypatch.setattr(
-        "rocprof_compute_base.console_warning",
-        lambda *argv: warnings.append(argv),
-    )
-    instance = rocprof_compute_with_args(args)
-    instance.handle_analyze_args()
-    assert args.list_operators == ["torch"]
-    assert args.operator_patterns is None
-    assert "ignored" in warnings[-1][1]
+def test_handle_analyze_args_listing_ignores_operator_filter(monkeypatch):
+    """--list-operators wins, and a warning says --operator is ignored."""
+    warning = common.patch_console(monkeypatch, MODULE, "warning")["warning"]
+    args = build_args(list_operators=["torch"], operator=["torch:*relu*"])
+    rocprof_compute_with_args(args).handle_analyze_args()
+    assert "--operator is ignored" in warning.call_args.args[1]
 
 
-@pytest.mark.parametrize("flag", ["list_operators", "operator"])
+@pytest.mark.parametrize(
+    "operator_flags",
+    [{"list_operators": ["torch"]}, {"operator": ["torch:*relu*"]}],
+)
 @pytest.mark.parametrize(
     "output_format, expect_error",
     [("stdout", False), ("txt", True), ("csv", True), ("db", True)],
 )
 def test_handle_analyze_args_operator_flags_require_stdout(
-    flag, output_format, expect_error, monkeypatch
+    operator_flags, output_format, expect_error, monkeypatch
 ):
     """--list-operators and --operator are rejected unless output is stdout."""
-    if flag == "list_operators":
-        args = build_args(output_format=output_format, list_operators=["torch"])
-    else:
-        args = build_args(output_format=output_format, operator=["torch:*relu*"])
+    error = common.patch_console(
+        monkeypatch, MODULE, "error", error=Mock(side_effect=SystemExit(1))
+    )["error"]
+    args = build_args(output_format=output_format, **operator_flags)
     instance = rocprof_compute_with_args(args)
     if expect_error:
-        error_text = None
-
-        def record_error(*argv, **_kwargs):
-            nonlocal error_text
-            error_text = argv[1]
-            raise SystemExit(1)
-
-        monkeypatch.setattr("rocprof_compute_base.console_error", record_error)
         with pytest.raises(SystemExit):
             instance.handle_analyze_args()
-        assert "only supported with --output-format stdout" in error_text
+        assert "only supported with --output-format stdout" in error.call_args.args[1]
     else:
         instance.handle_analyze_args()

@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from pc_sampling.pc_sampling_profile import PCSamplingProfile
 from rocprof_compute_soc.soc_base import OmniSoC_Base
+from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -21,7 +22,6 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import MIGPUSpecs
-from utils.ml_api_selectors import resolve_profile_selection
 from utils.native_tool_finder import NativeToolFinder
 from utils.specs import MachineSpecs
 from utils.utils_common import (
@@ -92,6 +92,13 @@ def _find_python_script_index(argv: List[str]) -> Tuple[Optional[int], Optional[
             continue
         return i, None
     return None, None
+
+
+def _frameworks_to_trace(trace_ml_api: Optional[List[str]]) -> Optional[List[str]]:
+    """Return the --trace-ml-api frameworks. With no values, it traces all of them."""
+    if trace_ml_api == []:
+        return list(KNOWN_ML_API_BACKENDS)
+    return trace_ml_api
 
 
 def _prepare_ml_api_trace_injection(
@@ -169,7 +176,6 @@ class RocProfCompute_Base:
         self.__args = args
         self.__profiler = profiler_mode
         self._soc = soc  # OmniSoC obj
-        self._ml_api_trace_enabled = False
 
     def get_args(self) -> argparse.Namespace:
         return self.__args
@@ -226,13 +232,7 @@ class RocProfCompute_Base:
                 current.append("30")
                 args.filter_blocks = current
 
-        try:
-            frameworks = resolve_profile_selection(getattr(args, "trace_ml_api", None))
-        except ValueError as error:
-            console_error("ml api trace", str(error))
-        if getattr(args, "trace_ml_api", None) is not None:
-            args.trace_ml_api = list(frameworks)
-        self._ml_api_trace_enabled: bool = bool(frameworks)
+        frameworks = _frameworks_to_trace(args.trace_ml_api)
         if frameworks and is_only_pc_sampling(args.filter_blocks):
             console_error(
                 "--trace-ml-api cannot be used with PC-sampling-only profiling, "
@@ -370,6 +370,7 @@ class RocProfCompute_Base:
             args_dict = dict(vars(self.__args))
             args_dict["config_dir"] = str(args_dict["config_dir"])
             args_dict["format_rocprof_output"] = PROFILE_OUTPUT_FORMAT
+            args_dict["trace_ml_api"] = _frameworks_to_trace(args_dict["trace_ml_api"])
             yaml.dump(args_dict, f)
 
         gen_sysinfo(
@@ -425,7 +426,7 @@ class RocProfCompute_Base:
             fnames=str_fnames,
             profiler_options=options,
             workload_dir=args.output_directory,
-            ml_api_trace_enabled=self._ml_api_trace_enabled,
+            ml_api_trace_enabled=args.trace_ml_api is not None,
             retain_rocpd_output=args.retain_rocpd_output,
         )
 

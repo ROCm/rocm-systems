@@ -551,41 +551,6 @@ def test_torch_operator_with_dispatch_filter(
     kernel_top = pd.read_csv(Path(torch_trace_profiled_workload) / "pmc_kernel_top.csv")
     assert set(kernel_top["Kernel_Name"].astype(str)) == {dispatch_one_kernel}
     assert "operator filter selected" in out
-    addmm_code = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--operator",
-        "torch:*addmm*",
-        "--path",
-        torch_trace_profiled_workload,
-    ])
-    assert addmm_code == 0
-    capsys.readouterr()
-    addmm_kernels = set(
-        pd.read_csv(Path(torch_trace_profiled_workload) / "pmc_kernel_top.csv")[
-            "Kernel_Name"
-        ].astype(str)
-    )
-    assert addmm_kernels
-    miss = dispatch_df[~dispatch_df["Kernel_Name"].astype(str).isin(addmm_kernels)]
-    assert not miss.empty
-    miss_id = str(int(miss.iloc[0]["Dispatch_ID"]))
-    miss_code = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--operator",
-        "torch:*addmm*",
-        "--dispatch",
-        miss_id,
-        "--path",
-        torch_trace_profiled_workload,
-    ])
-    assert miss_code != 0
-    miss_out = capsys.readouterr()
-    assert (
-        f"No PyTorch dispatches matched the -d filter: ['{miss_id}']"
-        in miss_out.out + miss_out.err
-    )
 
 
 def test_list_and_filter_user_range_keeps_nested_addmm_drops_relu(

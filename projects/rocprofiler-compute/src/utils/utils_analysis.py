@@ -11,7 +11,11 @@ import numpy as np
 import pandas as pd
 
 from utils import csv_compression, schema
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
+from utils.inject_roctx.constants import (
+    KNOWN_ML_API_BACKENDS,
+    OPERATOR_BACKENDS,
+    USER_REGION_BACKEND,
+)
 from utils.logger import (
     console_debug,
     console_error,
@@ -19,7 +23,6 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.ml_api_selectors import USER_REGION_BACKEND
 from utils.ml_api_trace_errors import (
     KernelSequenceLengthMismatchError,
     LauncherThreadNotFoundError,
@@ -1018,13 +1021,10 @@ def fold_identical_sibling_subtrees(
     return folded
 
 
-def _copy_full_operator_subtree(node: CallTreeNode) -> CallTreeNode:
+def _clone_operator_subtree(node: CallTreeNode) -> CallTreeNode:
     """Copy a node and every descendant, keeping kernels on each."""
     copied_node = clone_call_tree_node(node)
-    copied_node.children = [
-        _copy_full_operator_subtree(child) for child in node.children
-    ]
-    rollup_node_stats(copied_node)
+    copied_node.children = [_clone_operator_subtree(child) for child in node.children]
     return copied_node
 
 
@@ -1035,8 +1035,11 @@ def _copy_scoped_operator_node(
 ) -> Optional[CallTreeNode]:
     """Copy one node, keeping match kernels and in-scope descendant kernels."""
     node_is_match = id(node) in matched_node_ids
+    # A matched user region keeps everything inside it.
     if node_is_match and node.backend == USER_REGION_BACKEND:
-        return _copy_full_operator_subtree(node)
+        copied_region = _clone_operator_subtree(node)
+        rollup_node_stats(copied_region)
+        return copied_region
     descendant_backends = inherited_backends
     if node_is_match and node.backend is not None:
         descendant_backends = set(inherited_backends)
@@ -1078,6 +1081,86 @@ def copy_matched_operator_subtree(
         if kept_roots:
             subtree[thread_id] = kept_roots
     return subtree
+
+
+def filter_forest_by_backends(
+    forest: dict[str, list[CallTreeNode]],
+    backends: list[str],
+) -> dict[str, list[CallTreeNode]]:
+    """Copy the call trees, keeping the nodes of the given backends.
+
+    No backends keeps every node. Other nodes stay only as parents on the way
+    to a kept node, without kernels of their own.
+    """
+    if not backends:
+        return forest
+    backend_nodes = [
+        node
+        for roots in forest.values()
+        for node, _path in iter_call_tree_paths(roots)
+        if node.backend in backends
+    ]
+    return copy_matched_operator_subtree(forest, backend_nodes)
+
+
+def traced_frameworks_from_config(profiling_config: dict[str, Any]) -> list[str]:
+    """Return the frameworks that --trace-ml-api traced, from profiling_config.yaml."""
+    return list(profiling_config.get("trace_ml_api") or [])
+
+
+def check_backends_traced(backends: list[str], traced_frameworks: list[str]) -> None:
+    """Raise ValueError unless the workload traced every given backend.
+
+    User regions are recorded by every --trace-ml-api run.
+    """
+    if not traced_frameworks:
+        raise ValueError(
+            "Workload was not profiled with --trace-ml-api. Profile again with "
+            "--trace-ml-api to use --list-operators or --operator."
+        )
+    for backend in backends:
+        if backend in KNOWN_ML_API_BACKENDS and backend not in traced_frameworks:
+            raise ValueError(
+                f"Workload was not profiled with --trace-ml-api {backend}."
+            )
+
+
+def split_backend_prefix(pattern: str) -> tuple[Optional[str], str]:
+    """Split 'torch:*conv*' into ('torch', '*conv*').
+
+    A pattern without a prefix returns (None, pattern). The '::' in names such
+    as aten::addmm is not a prefix.
+    """
+    prefix, separator, rest = pattern.partition(":")
+    if not separator or rest.startswith(":"):
+        return None, pattern
+    return prefix, rest or "**"
+
+
+def bind_operator_patterns(
+    patterns: list[str], traced_frameworks: list[str]
+) -> dict[str, list[str]]:
+    """Group --operator patterns by the backend they match in one workload.
+
+    A pattern without a prefix uses the prefix before it. Before any prefix, it
+    matches every traced framework and user regions. No patterns match every
+    operator. Raises ValueError for an unknown prefix or an untraced framework.
+    """
+    patterns_by_backend: dict[str, list[str]] = {}
+    backends = [*traced_frameworks, USER_REGION_BACKEND]
+    for token in patterns or ["**"]:
+        prefix, pattern = split_backend_prefix(token)
+        if prefix is not None:
+            if prefix not in OPERATOR_BACKENDS:
+                raise ValueError(
+                    f"Unknown --operator prefix {prefix!r}. "
+                    f"Prefixes: {', '.join(OPERATOR_BACKENDS)}"
+                )
+            backends = [prefix]
+        for backend in backends:
+            patterns_by_backend.setdefault(backend, []).append(pattern)
+    check_backends_traced(list(patterns_by_backend), traced_frameworks)
+    return patterns_by_backend
 
 
 def _node_source_location(node: CallTreeNode) -> str:

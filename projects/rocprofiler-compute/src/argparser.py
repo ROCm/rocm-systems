@@ -6,9 +6,8 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
+from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS, OPERATOR_BACKENDS
 from utils.logger import console_warning
-from utils.ml_api_selectors import OPERATOR_SELECTORS
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 
 # Deprecated options by argparse dest: the option and what to use instead
@@ -548,13 +547,14 @@ Examples:
         required=False,
         default=None,
         nargs="*",
-        metavar="arg",
+        choices=KNOWN_ML_API_BACKENDS,
+        metavar="framework",
         base_action="store",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
         feature_label="ML API trace",
         help=(
-            "\t\t\tTrace ML APIs. User-defined ROCTx regions are included.\n"
+            "\t\t\tTrace ML APIs. User ROCTx regions are always included.\n"
             f"\t\t\tWith no arguments, traces {' and '.join(KNOWN_ML_API_BACKENDS)}.\n"
             f"\t\t\tValues: {', '.join(KNOWN_ML_API_BACKENDS)}"
         ),
@@ -678,8 +678,8 @@ Examples:
         help=(
             "\t\tList all detected kernels and kernel dispatches.\n"
             "\t\tCannot be used with --output-format csv or db.\n"
-            "\t\tWith --operator, lists only the\n"
-            "\t\tkernels and dispatches of the matching operators."
+            "\t\tWith --operator, lists only the kernels and dispatches\n"
+            "\t\tof the matching operators."
         ),
     )
     analyze_group.add_argument(
@@ -696,21 +696,22 @@ Examples:
         dest="list_operators",
         default=None,
         nargs="*",
-        metavar="arg",
+        choices=OPERATOR_BACKENDS,
+        metavar="framework",
         base_action="store",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
         feature_label="List operators",
         help=(
-            "\t\tList collected operators as a unified call tree.\n"
+            "\t\tList collected operators as a call tree.\n"
             "\t\tWith no arguments, lists every collected operator.\n"
-            "\t\tRequires --output-format stdout. Ignores --operator.\n"
-            f"\t\tValues: {', '.join(OPERATOR_SELECTORS)}"
+            "\t\tIgnores --operator.\n"
+            f"\t\tValues: {', '.join(OPERATOR_BACKENDS)}"
         ),
     )
     analyze_group.add_argument(
         "--operator",
-        metavar="arg",
+        metavar="pattern",
         type=str,
         dest="operator",
         nargs="*",
@@ -721,16 +722,13 @@ Examples:
         feature_label="Operator filter",
         help=(
             "\t\tFilter operators with glob patterns.\n"
-            "\t\tA pattern with no prefix uses the preceding prefix.\n"
-            "\t\tIf there is no preceding prefix, it matches every "
-            "traced framework and user regions.\n"
+            "\t\tA pattern without a prefix uses the prefix before it.\n"
+            "\t\tBefore any prefix, a pattern matches every traced\n"
+            "\t\tframework and user regions.\n"
             "\t\tExample: --operator 'torch:*conv*' '*relu*' 'triton:*matmul*'\n"
             "\t\tExample: --operator 'user:*UserDefined*'\n"
             "\t\tWith no arguments, matches every collected operator.\n"
-            "\t\tOmitting the flag does not filter.\n"
-            "\t\tRequires --output-format stdout.\n"
-            "\t\tIgnored when --list-operators is set.\n"
-            f"\t\tPrefixes: {', '.join(OPERATOR_SELECTORS)}."
+            f"\t\tPrefixes: {', '.join(OPERATOR_BACKENDS)}"
         ),
     )
     analyze_group.add_argument(
@@ -781,6 +779,7 @@ Examples:
         help=(
             "\t\tFormat of the analysis output. One of: stdout, txt, csv, db.\n"
             "\t\t  stdout - print report to the terminal (no file/folder created).\n"
+            "\t\t           Required by --list-operators and --operator.\n"
             "\t\t  txt    - write report to <name>.txt; disables terminal output.\n"
             "\t\t  csv    - write one CSV per analysis view into a folder <name>/.\n"
             "\t\t           Requires profiles collected in rocpd format. "

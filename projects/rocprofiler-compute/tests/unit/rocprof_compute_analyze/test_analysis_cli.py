@@ -11,19 +11,16 @@ import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_cli import (
+    _check_listed_backends,
     _intersect_with_user_dispatch_filter,
+    _operator_patterns_for_workload,
     cli_analysis,
 )
 from utils import schema
-from utils.ml_api_selectors import (
-    operator_patterns_for_traced_frameworks,
-    resolve_operator_patterns,
-)
 from utils.utils_analysis import CallTreeNode, KernelStats, iter_call_tree_paths
 
 ADDMM_PMC_GROUP_KEY = (1, "addmm_kernel", 0, 0, 0)
 RELU_PMC_GROUP_KEY = (2, "relu_kernel", 0, 0, 0)
-RMSNORM_PMC_GROUP_KEY = (4, "rmsnorm_kernel", 0, 0, 0)
 
 
 def simple_model_forest_with_relu_and_addmm():
@@ -62,41 +59,17 @@ def torch_parent_triton_child_forest():
     return {"1": [parent]}
 
 
-def triton_rmsnorm_forest():
-    rmsnorm = CallTreeNode(name="triton.JITFunction.rmsnorm_kernel", backend="triton")
-    rmsnorm.kernels["rmsnorm_kernel"] = KernelStats(
-        launches=1,
-        total_duration_ns=20.0,
-        pmc_group_keys=[RMSNORM_PMC_GROUP_KEY],
-    )
-    return {"1": [rmsnorm]}
-
-
 def workload_with_operator_forest():
     workload = schema.Workload()
     workload.ml_api_call_trees = simple_model_forest_with_relu_and_addmm()
     return workload
 
 
-def bind_operator_patterns_for_path(cli, workload_path, traced_frameworks=None):
-    """Store the per-path bind sanitize would have written."""
-    if traced_frameworks is None:
-        traced_frameworks = ["torch"]
-    cli._operator_patterns_by_path[workload_path] = (
-        operator_patterns_for_traced_frameworks(
-            cli.get_args().operator_patterns, traced_frameworks
-        )
-    )
-
-
 def apply_torch_operator_glob(pattern):
-    args = argparse.Namespace(
-        operator_patterns=resolve_operator_patterns([f"torch:{pattern}"])
-    )
-    cli = cli_analysis(args, {})
-    bind_operator_patterns_for_path(cli, "/workload")
+    cli = cli_analysis(argparse.Namespace(), {})
     workload = workload_with_operator_forest()
-    pmc_group_keys, _ = cli.apply_operator_filter(args, workload, "/workload")
+    workload.operator_patterns = {"torch": [pattern]}
+    pmc_group_keys = cli.apply_operator_filter(workload, "/workload")
     return pmc_group_keys, workload
 
 
@@ -159,7 +132,7 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
         path=[["/tmp/test"]],
         verbose=0,
         time_unit="ns",
-        operator_patterns=None,
+        operator=None,
         list_operators=None,
     )
     inst._OmniAnalyze_Base__args = args
@@ -236,14 +209,11 @@ def test_list_operators_joint_backend_heading(capsys):
 
 
 def test_handle_operator_prints_matched_subtree(capsys):
-    args = argparse.Namespace(
-        operator_patterns=resolve_operator_patterns(["torch:*addmm*"])
-    )
-    cli = cli_analysis(args, {})
-    bind_operator_patterns_for_path(cli, "/workload")
+    cli = cli_analysis(argparse.Namespace(), {})
     workload = workload_with_operator_forest()
-    cli.apply_operator_filter(args, workload, "/workload")
-    cli.handle_operator(args, workload, "/workload")
+    workload.operator_patterns = {"torch": ["*addmm*"]}
+    cli.apply_operator_filter(workload, "/workload")
+    cli.handle_operator(workload)
     captured = capsys.readouterr()
     assert "Matched PyTorch Operators: *addmm*" in captured.out
     assert "aten::addmm" in captured.out
@@ -255,14 +225,11 @@ def test_apply_operator_filter_missed_glob_errors(monkeypatch):
         "rocprof_compute_analyze.analysis_cli.console_error",
         functools.partial(append_args_and_exit, errors),
     )
-    args = argparse.Namespace(
-        operator_patterns=resolve_operator_patterns(["torch:nomatch"])
-    )
-    cli = cli_analysis(args, {})
-    bind_operator_patterns_for_path(cli, "/workload")
+    cli = cli_analysis(argparse.Namespace(), {})
     workload = workload_with_operator_forest()
+    workload.operator_patterns = {"torch": ["nomatch"]}
     with pytest.raises(SystemExit) as excinfo:
-        cli.apply_operator_filter(args, workload, "/workload")
+        cli.apply_operator_filter(workload, "/workload")
     assert excinfo.value.code == 1
     assert any(
         "No PyTorch operators matched the pattern(s): nomatch" in str(item)
@@ -287,63 +254,14 @@ def test_dispatch_filter_outside_operator_dispatches_errors(monkeypatch):
 
 
 def test_apply_operator_filter_keeps_nodes_from_requested_backend():
-    args = argparse.Namespace(operator_patterns=resolve_operator_patterns(["torch:*"]))
-    cli = cli_analysis(args, {})
-    bind_operator_patterns_for_path(cli, "/workload")
+    cli = cli_analysis(argparse.Namespace(), {})
     workload = schema.Workload()
     workload.ml_api_call_trees = torch_parent_triton_child_forest()
-    cli.apply_operator_filter(args, workload, "/workload")
+    workload.operator_patterns = {"torch": ["*"]}
+    cli.apply_operator_filter(workload, "/workload")
     names = forest_node_names(workload.ml_api_call_trees)
     assert "nn.Module.Linear.forward" in names
     assert "triton.JITFunction.matmul_kernel" not in names
-
-
-def test_apply_operator_filter_user_region_keeps_nested_work_and_unions_relu(
-    user_region_with_nested_addmm_and_outside_relu,
-):
-    workload = schema.Workload()
-    workload.ml_api_call_trees = user_region_with_nested_addmm_and_outside_relu
-    args = argparse.Namespace(
-        operator_patterns=resolve_operator_patterns(["user:region1"])
-    )
-    region_cli = cli_analysis(args, {})
-    bind_operator_patterns_for_path(region_cli, "/workload")
-    region_keys, _ = region_cli.apply_operator_filter(args, workload, "/workload")
-    assert region_keys == [ADDMM_PMC_GROUP_KEY]
-    region_names = forest_node_names(workload.ml_api_call_trees)
-    assert region_names == ["region1", "aten::addmm"]
-
-    union_workload = schema.Workload()
-    union_workload.ml_api_call_trees = user_region_with_nested_addmm_and_outside_relu
-    union_args = argparse.Namespace(
-        operator_patterns=resolve_operator_patterns(["user:region1", "torch:*relu*"])
-    )
-    union_cli = cli_analysis(union_args, {})
-    bind_operator_patterns_for_path(union_cli, "/workload")
-    union_keys, _ = union_cli.apply_operator_filter(
-        union_args, union_workload, "/workload"
-    )
-    assert union_keys == [ADDMM_PMC_GROUP_KEY, RELU_PMC_GROUP_KEY]
-    assert forest_node_names(union_workload.ml_api_call_trees) == [
-        "region1",
-        "aten::addmm",
-        "aten::relu",
-    ]
-
-
-def test_apply_operator_filter_unscoped_mixed_paths():
-    """Bare --operator on sn_torch then tf_triton binds each path's yaml."""
-    args = argparse.Namespace(operator_patterns=resolve_operator_patterns([]))
-    cli = cli_analysis(args, {})
-    bind_operator_patterns_for_path(cli, "/sn_torch", ["torch"])
-    bind_operator_patterns_for_path(cli, "/tf_triton", ["triton"])
-    torch_workload = workload_with_operator_forest()
-    triton_workload = schema.Workload()
-    triton_workload.ml_api_call_trees = triton_rmsnorm_forest()
-    torch_keys, _ = cli.apply_operator_filter(args, torch_workload, "/sn_torch")
-    triton_keys, _ = cli.apply_operator_filter(args, triton_workload, "/tf_triton")
-    assert ADDMM_PMC_GROUP_KEY in torch_keys
-    assert triton_keys == [RMSNORM_PMC_GROUP_KEY]
 
 
 def test_list_operators_omits_other_backend_kernel_lines(capsys):
@@ -360,20 +278,30 @@ def test_list_operators_omits_other_backend_kernel_lines(capsys):
     assert "torch_gemm_kernel" not in captured.out
 
 
-def test_list_operators_user_keeps_nested_torch_and_drops_outside_relu(
-    capsys, user_region_with_nested_addmm_and_outside_relu
-):
-    cli = cli_analysis.__new__(cli_analysis)
-    workload = schema.Workload()
-    workload.ml_api_call_trees = user_region_with_nested_addmm_and_outside_relu
-    cli._runs = {"/workload": workload}
-    kernel_top = pd.DataFrame({"Kernel_Name": ["addmm_kernel", "relu_kernel"]})
-    cli.list_operators("/workload", kernel_top, ["user"])
-    captured = capsys.readouterr()
-    assert "User Operator Call Tree:" in captured.out
-    assert "region1" in captured.out
-    assert "aten::addmm" in captured.out
-    assert "aten::relu" not in captured.out
+def test_operator_patterns_follow_each_workload_config(tmp_path):
+    """A pattern without a prefix matches the frameworks each workload traced."""
+    for framework in ("torch", "triton"):
+        workload_dir = tmp_path / framework
+        workload_dir.mkdir()
+        (workload_dir / "profiling_config.yaml").write_text(
+            f"trace_ml_api:\n- {framework}\n", encoding="utf-8"
+        )
+        patterns = _operator_patterns_for_workload(["*mm*"], str(workload_dir))
+        assert patterns == {framework: ["*mm*"], "user": ["*mm*"]}
+
+
+def test_list_operators_rejects_untraced_framework(tmp_path, monkeypatch):
+    errors = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.console_error",
+        functools.partial(append_args_and_exit, errors),
+    )
+    (tmp_path / "profiling_config.yaml").write_text(
+        "trace_ml_api:\n- torch\n", encoding="utf-8"
+    )
+    with pytest.raises(SystemExit):
+        _check_listed_backends(["triton"], str(tmp_path))
+    assert "--trace-ml-api triton" in str(errors[-1])
 
 
 def test_pre_processing_lists_operators_for_every_path(monkeypatch):
@@ -381,11 +309,15 @@ def test_pre_processing_lists_operators_for_every_path(monkeypatch):
         path=[["/w1"], ["/w2"]],
         verbose=0,
         time_unit="ns",
-        operator_patterns=None,
+        operator=None,
         list_operators=["torch"],
     )
     inst = cli_with_two_operator_workloads(args)
     listed_paths = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli._traced_frameworks",
+        lambda workload_path: ["torch"],
+    )
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_base.OmniAnalyze_Base.pre_processing",
         lambda self: None,
@@ -422,14 +354,11 @@ def test_pre_processing_lists_operators_for_every_path(monkeypatch):
 def test_run_analysis_prints_matched_tree_for_every_path(monkeypatch):
     args = argparse.Namespace(
         path=[["/w1"], ["/w2"]],
-        operator_patterns=resolve_operator_patterns(["torch:*addmm*"]),
+        operator=["torch:*addmm*"],
         list_stats=False,
     )
     inst = cli_with_two_operator_workloads(args)
-    handled_paths = []
-
-    def capture_handle(self, handle_args, workload, workload_path):
-        handled_paths.append(workload_path)
+    handled_workloads = []
 
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_base.OmniAnalyze_Base.run_analysis",
@@ -437,11 +366,11 @@ def test_run_analysis_prints_matched_tree_for_every_path(monkeypatch):
     )
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_cli.cli_analysis.handle_operator",
-        capture_handle,
+        lambda self, workload: handled_workloads.append(workload),
     )
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_cli.tty.show_all",
         lambda *a, **kw: None,
     )
     inst.run_analysis()
-    assert handled_paths == ["/w1", "/w2"]
+    assert handled_workloads == [inst._runs["/w1"], inst._runs["/w2"]]

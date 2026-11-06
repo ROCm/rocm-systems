@@ -31,10 +31,6 @@ from utils.logger import (
 )
 from utils.metrics.expression import update_normal_unit_string
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.ml_api_selectors import (
-    resolve_list_selectors,
-    resolve_operator_patterns,
-)
 from utils.specs import (
     MachineSpecs,
     generate_machine_specs,
@@ -315,39 +311,23 @@ class RocProfCompute:
                 "Use --output-format stdout or txt, or remove --list-stats."
             )
 
-        try:
-            args.list_operators = resolve_list_selectors(
-                getattr(args, "list_operators", None)
+        listing = args.list_operators is not None
+        filtering = args.operator is not None
+        if (listing or filtering) and args.output_format != "stdout":
+            console_error(
+                "ml api trace",
+                "Operator flags (--operator, --list-operators) are only "
+                "supported with --output-format stdout (the default). "
+                "The matched operator call tree is printed directly to "
+                "stdout and is not captured in txt, csv, or db output. "
+                "Remove the --output-format option or drop the operator flags.",
             )
-            if args.list_operators is not None:
-                args.operator_patterns = None
-            else:
-                args.operator_patterns = resolve_operator_patterns(
-                    getattr(args, "operator", None)
-                )
-        except ValueError as error:
-            console_error("ml api trace", str(error))
-
-        operator_filter = getattr(args, "operator", None) is not None
-        operator_listing = args.list_operators is not None
-
-        if operator_filter or operator_listing:
-            if args.output_format != "stdout":
-                console_error(
-                    "ml api trace",
-                    "Operator flags (--operator, --list-operators) are only "
-                    "supported with --output-format stdout (the default). "
-                    "The matched operator call tree is printed directly to "
-                    "stdout and is not captured in txt, csv, or db output. "
-                    "Remove the --output-format option or drop the operator flags.",
-                )
-
-            if operator_filter and operator_listing:
-                console_warning(
-                    "ml api trace",
-                    "Operator filters are ignored when --list-operators "
-                    "is used. Drop --list-operators to apply the operator filter.",
-                )
+        if listing and filtering:
+            console_warning(
+                "ml api trace",
+                "--operator is ignored when --list-operators is used. "
+                "Drop --list-operators to apply the operator filter.",
+            )
 
     @demarcate
     def handle_list_args(self) -> None:
