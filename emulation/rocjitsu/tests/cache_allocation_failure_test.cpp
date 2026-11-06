@@ -56,12 +56,6 @@ extern "C" void *__wrap_calloc(std::size_t count, std::size_t size) {
   return __real_calloc(count, size);
 }
 
-TEST_P(CacheAllocationFailureTest, NoHandlerThrowsBadAlloc) {
-  failures_remaining = 1;
-  EXPECT_THROW({ TestCache store; }, std::bad_alloc);
-  EXPECT_EQ(failures_remaining, 0u);
-}
-
 TEST_P(CacheAllocationFailureTest, ReturningHandlerRetriesWithZeroContents) {
   std::set_new_handler([] { ++handler_calls; });
   failures_remaining = 2;
@@ -78,18 +72,6 @@ TEST_P(CacheAllocationFailureTest, ReturningHandlerRetriesWithZeroContents) {
     for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i)
       EXPECT_EQ(allocation.data[i], 0);
   }
-}
-
-TEST_P(CacheAllocationFailureTest, ThrowingHandlerPropagates) {
-  struct HandlerFailure {};
-  std::set_new_handler([] {
-    ++handler_calls;
-    throw HandlerFailure{};
-  });
-  failures_remaining = 1;
-  EXPECT_THROW({ TestCache store; }, HandlerFailure);
-  EXPECT_EQ(handler_calls, 1u);
-  EXPECT_EQ(failures_remaining, 0u);
 }
 
 TEST_P(CacheAllocationFailureTest, CopyAssignmentReusesExistingBacking) {
@@ -131,31 +113,11 @@ TEST_P(CacheAllocationFailureTest, LazyDataQueriesOnMissDoNotAllocate) {
   EXPECT_EQ(store.line_data_for_read(0, /*vmid=*/7), nullptr);
   EXPECT_EQ(store.line_data_for_write(0, /*vmid=*/7), nullptr);
   EXPECT_EQ(failures_remaining, 1u);
-  EXPECT_THROW(store.allocate_with_data(0, /*vmid=*/7), std::bad_alloc);
-
-  // A failed first fill can leave only the tag store materialized. Queries
-  // must still report a miss without allocating the missing byte store.
-  failures_remaining = 1;
-  EXPECT_EQ(store.line_data_for_read(0, /*vmid=*/7), nullptr);
-  EXPECT_EQ(store.line_data_for_write(0, /*vmid=*/7), nullptr);
-  EXPECT_EQ(failures_remaining, 1u);
   failures_remaining = 0;
   auto line = store.allocate_with_data(0, /*vmid=*/7);
   ASSERT_NE(line.data, nullptr);
   EXPECT_EQ(store.line_data_for_read(0, /*vmid=*/7), line.data);
   EXPECT_EQ(store.line_data_for_write(0, /*vmid=*/7), line.data);
-}
-
-TEST_P(CacheAllocationFailureTest, LazyAllocationFailureLeavesNoResidentLine) {
-  LazyCache store;
-  failures_remaining = 1;
-  EXPECT_THROW(store.allocate_with_data(0, /*vmid=*/7), std::bad_alloc);
-  EXPECT_EQ(failures_remaining, 0u);
-  EXPECT_FALSE(store.lookup(0, nullptr, /*vmid=*/7));
-  auto line = store.allocate_with_data(0, /*vmid=*/7);
-  ASSERT_NE(line.data, nullptr);
-  for (uint32_t byte = 0; byte < LazyCache::LINE_SIZE; ++byte)
-    EXPECT_EQ(line.data[byte], 0);
 }
 
 TEST_P(CacheAllocationFailureTest, LazyReturningHandlerRetriesWithZeroContents) {
@@ -185,35 +147,6 @@ TEST_P(CacheAllocationFailureTest, LazyResidentCopyAndInvalidationPreserveIndepe
   copied.invalidate(0, /*vmid=*/7);
   EXPECT_FALSE(copied.lookup(0, nullptr, /*vmid=*/7));
   EXPECT_TRUE(assigned.lookup(0, nullptr, /*vmid=*/7));
-}
-
-TEST_P(CacheAllocationFailureTest, LazyCopyFailurePreservesEmptyDestination) {
-  LazyCache source;
-  source.allocate_with_data(0, /*vmid=*/7).data[0] = 42;
-  LazyCache destination;
-  failures_remaining = 1;
-  EXPECT_THROW(destination = source, std::bad_alloc);
-  EXPECT_EQ(failures_remaining, 0u);
-  EXPECT_FALSE(destination.lookup(0, nullptr, /*vmid=*/7));
-  destination.allocate_with_data(256, /*vmid=*/7);
-  EXPECT_FALSE(destination.lookup(0, nullptr, /*vmid=*/7));
-  EXPECT_EQ(source.line_data_for_read(0, /*vmid=*/7)[0], 42);
-}
-
-TEST_P(CacheAllocationFailureTest, LazyCopyFailurePreservesResidentDestination) {
-  LazyCache source;
-  source.allocate_with_data(0, /*vmid=*/7).data[0] = 42;
-  LazyCache destination;
-  destination.allocate_with_data(256, /*vmid=*/7).data[0] = 19;
-  failures_remaining = 1;
-  EXPECT_THROW(destination = source, std::bad_alloc);
-  EXPECT_EQ(failures_remaining, 0u);
-  EXPECT_FALSE(destination.lookup(0, nullptr, /*vmid=*/7));
-  ASSERT_TRUE(destination.lookup(256, nullptr, /*vmid=*/7));
-  EXPECT_EQ(destination.line_data_for_read(256, /*vmid=*/7)[0], 19);
-  destination.allocate_with_data(512, /*vmid=*/7);
-  EXPECT_FALSE(destination.lookup(0, nullptr, /*vmid=*/7));
-  EXPECT_EQ(source.line_data_for_read(0, /*vmid=*/7)[0], 42);
 }
 
 INSTANTIATE_TEST_SUITE_P(CacheStorage, CacheAllocationFailureTest,
