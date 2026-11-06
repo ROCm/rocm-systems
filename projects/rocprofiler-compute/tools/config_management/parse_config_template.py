@@ -136,7 +136,7 @@ def build_template_from_directory(
     panels: list[dict] = []
     errors = 0
 
-    for yaml_file in sorted(directory.glob("*.yaml")):
+    for yaml_file in cm_utils.panel_yaml_paths(directory):
         info = parse_panel_config(yaml_file)
         if info is None:
             errors += 1
