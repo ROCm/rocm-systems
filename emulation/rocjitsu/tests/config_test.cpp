@@ -3762,6 +3762,23 @@ TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
   ASSERT_TRUE(replace_exactly_once(mismatches[1], "120501", "120500"));
   for (const std::string &json : mismatches)
     expect_config_target_failure(json, "vm target does not match device.gfx_target_version");
+
+  std::ifstream rdna3_base(test::config_path("gfx1100_w7900.json"));
+  ASSERT_TRUE(rdna3_base.is_open());
+  std::string gfx1100_config((std::istreambuf_iterator<char>(rdna3_base)),
+                             std::istreambuf_iterator<char>());
+  ASSERT_TRUE(replace_exactly_once(gfx1100_config, R"("arch": "rdna3",)",
+                                   R"("arch": "rdna3", "target": "gfx1100",)"));
+  const util::FailureOr<config::LoadedConfig> loaded_gfx1100 = config::load_config_from_string(
+      gfx1100_config, rocjitsu::kEmbeddedSchema, config_diagnostic.emitter());
+  ASSERT_TRUE(loaded_gfx1100.succeeded()) << config_diagnostic.message();
+  EXPECT_EQ(loaded_gfx1100.value().target, ROCJITSU_CODE_TARGET_GFX1100);
+  EXPECT_EQ(loaded_gfx1100.value().device.gfx_target_version, 110000u);
+
+  std::string gfx1100_mismatch = gfx1100_config;
+  ASSERT_TRUE(replace_exactly_once(gfx1100_mismatch, "110000", "120001"));
+  expect_config_target_failure(gfx1100_mismatch,
+                               "vm target does not match device.gfx_target_version");
 }
 
 TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
