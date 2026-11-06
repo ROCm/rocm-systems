@@ -166,6 +166,13 @@ __host__ __device__ inline bool IsTdmCopySupported(int deviceId = 0) {
 #endif
 }
 
+/// \brief Smallest \p ldsBufferBytes the tdmCopy*() functions accept for any
+///        \p ldsBuffer alignment: one staging slot (two 256B chunks plus the
+///        shift's 32B slack) past the pad up to 16B, so a 16B-aligned buffer
+///        needs 15 bytes less. Smaller buffers are undefined behavior; check
+///        this at compile time where the size is fixed.
+constexpr size_t MIN_COPY_LDS_BYTES = 2 * 256 + 32 + 15;
+
 /// \brief Blocking block-collective copy of [0, sizeBytes): dst <- src.
 ///
 /// Call from ALL threads of the block with identical arguments (memcpy-style
@@ -177,6 +184,7 @@ __host__ __device__ inline bool IsTdmCopySupported(int deviceId = 0) {
 /// \param sizeBytes      Number of bytes to copy.
 /// \param ldsBuffer      Per-block LDS staging area (shared memory).
 /// \param ldsBufferBytes Size of \p ldsBuffer in bytes; subdivided among warps.
+///                       Must be at least MIN_COPY_LDS_BYTES.
 ///
 /// \tparam cp Compile-time cache policy (temporal hint + memory scope) baked into
 ///            the tensor load/store as their immediate cpol operand. Build one
@@ -217,6 +225,7 @@ __device__ TDM_API void tdmCopyAsync(void* dst, const void* src, size_t sizeByte
 /// \param sizeBytes      Number of bytes to copy.
 /// \param ldsBuffer      THIS team's LDS region (distinct per team).
 /// \param ldsBufferBytes Size of this team's LDS region, split among its warps.
+///                       Must be at least MIN_COPY_LDS_BYTES.
 /// \param startWarpId    First warp of the team (inclusive).
 /// \param stopWarpId     One past the last warp (clamped to nWarps; ~0u = end).
 ///
@@ -512,6 +521,7 @@ constexpr uint32_t LINE = 128;       // alignment the head peel targets
 constexpr uint32_t ALIGN = 256;      // round-trip chunk alignment; see HARDWARE MODEL
 constexpr uint32_t MAX_CHUNK = (TILE_DIM_MAX - (ALIGN - 1)) & ~(ALIGN - 1); // a load is chunk + delta bytes
 constexpr uint32_t MIN_SLOT = 2 * ALIGN + SHIFT_SLACK; // room for o <= ALIGN, one ALIGN chunk and the shift
+static_assert(MIN_COPY_LDS_BYTES == MIN_SLOT + 15, "MIN_COPY_LDS_BYTES must cover one slot past the 16B pad");
 constexpr uint32_t TWO_SLOT_WINDOW = 16384; // see HARDWARE MODEL
 // Whole 256B rows one 1-D bulk tile can carry: tile_dim0 now holds the entire length
 // in elements, not one row's worth, so the 16-bit field is the limit (1023 x 256B).
@@ -638,10 +648,9 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
   const uint32_t ldsPad = (16u - (ldsBase & 15u)) & 15u; // slots must be 16B aligned
   const uint32_t ldsUsable = ldsBytes > ldsPad ? ldsBytes - ldsPad : 0;
   const uint32_t maxByLds = ldsUsable / MIN_SLOT;
-  if (maxByLds == 0) { // LDS too small to stage a chunk: vector fallback
-    if (rank == 0) warpVecCopy(s, d, sizeBytes, warpThread, warpThreads);
-    return;
-  }
+  // Unchecked precondition ldsBufferBytes >= MIN_COPY_LDS_BYTES: even a trap costs more than
+  // the setup it guards, because a per-lane size turns it into lane-mask bookkeeping.
+  __builtin_assume(maxByLds != 0);
   const size_t units = (bulk + ALIGN - 1) / ALIGN;
   uint32_t issuers = teamWarps < maxByLds ? teamWarps : maxByLds;
   if (units < issuers) issuers = static_cast<uint32_t>(units);

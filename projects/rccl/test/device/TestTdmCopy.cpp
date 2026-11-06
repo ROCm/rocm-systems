@@ -251,9 +251,8 @@ TEST_P(TdmBlockCopyTest, Async)     { run<true>(GetParam());  }
 
 // A broad gamut hitting: pure aligned bulk (doff 128 puts the destination on a
 // 256B boundary, so head 0 and delta 0); head plus chunks; copies under 256B;
-// head-only (head clamped by n); tiny LDS (< MIN_SLOT, vector fallback); LDS that
-// only feeds a subset of warps; fewer 256B units than warps; single-warp blocks;
-// and awkward remainders.
+// head-only (head clamped by n); LDS that only feeds a subset of warps; fewer
+// 256B units than warps; single-warp blocks; and awkward remainders.
 INSTANTIATE_TEST_SUITE_P(
   Gamut, TdmBlockCopyTest,
   ::testing::Values(
@@ -266,7 +265,6 @@ INSTANTIATE_TEST_SUITE_P(
     BlockCase{4096,        4096, 5,   5,   128, "head_bulk_tail_off5"},
     BlockCase{6000,        2048, 64,  64,  256, "head_bulk_tail_off64"},
     BlockCase{50,          1024, 100, 100, 32,  "head_only_clamped"},
-    BlockCase{4096,        128,  0,   0,   64,  "tiny_lds_vector_fallback"},
     BlockCase{16384,       2176, 0,   0,   256, "lds_limits_issuers"},
     // delta 129 pushes the head to 384B, leaving 3 units for 8 warps.
     BlockCase{1000,        65536, 1,  0,   256, "units_limit_issuers"},
