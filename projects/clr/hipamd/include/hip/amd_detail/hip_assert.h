@@ -23,6 +23,8 @@ extern "C" __device__ __attribute__((noinline)) __attribute__((weak)) void _wass
   __builtin_trap();
 }
 #else /* defined(_WIN32) || defined(_WIN64) */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 extern "C" __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
     const char* assertion, const char* file, unsigned int line, const char* function) {
   static const char fmt[] = "%s:%u: %s: Device-side assertion `%s' failed.\n";
@@ -60,6 +62,7 @@ extern "C" __device__ __attribute__((noinline)) __attribute__((weak)) void __ass
 
   __builtin_trap();
 }
+#pragma clang diagnostic pop
 
 extern "C" __device__ __attribute__((noinline)) __attribute__((weak)) void __assertfail() {
   // ignore all the args for now.

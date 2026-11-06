@@ -117,9 +117,12 @@ inline __device__ const struct {
 } warpSize{};
 
 // warp vote function __all __any __ballot
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __device__ inline int __all(int predicate) { return __ockl_wfall_i32(predicate); }
 
 __device__ inline int __any(int predicate) { return __ockl_wfany_i32(predicate); }
+#pragma clang diagnostic pop
 
 __device__ inline unsigned long long int __ballot(int predicate) {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ballot_w64))

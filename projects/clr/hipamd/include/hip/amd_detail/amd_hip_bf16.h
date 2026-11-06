@@ -1650,9 +1650,12 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hceil(const __hip_bfloat16 h) {
  * \ingroup HIP_INTRINSIC_BFLOAT16_MATH
  * \brief Calculate cosine of bfloat16
  */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hcos(const __hip_bfloat16 h) {
   return __float2bfloat16(__ocml_cos_f32(__bfloat162float(h)));
 }
+#pragma clang diagnostic pop
 
 /**
  * \ingroup HIP_INTRINSIC_BFLOAT16_MATH
@@ -1732,17 +1735,23 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hrint(const __hip_bfloat16 h) {
  * \ingroup HIP_INTRINSIC_BFLOAT16_MATH
  * \brief Reciprocal square root
  */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hrsqrt(const __hip_bfloat16 h) {
   return __float2bfloat16(__ocml_rsqrt_f32(__bfloat162float(h)));
 }
+#pragma clang diagnostic pop
 
 /**
  * \ingroup HIP_INTRINSIC_BFLOAT16_MATH
  * \brief Calculate sin of bfloat16
  */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hsin(const __hip_bfloat16 h) {
   return __float2bfloat16(__ocml_sin_f32(__bfloat162float(h)));
 }
+#pragma clang diagnostic pop
 
 /**
  * \ingroup HIP_INTRINSIC_BFLOAT16_MATH

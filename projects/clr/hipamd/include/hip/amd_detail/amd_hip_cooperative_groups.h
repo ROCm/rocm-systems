@@ -1006,10 +1006,13 @@ template <unsigned int tileSize> class thread_block_tile_type<tileSize, void>
    */
 };
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __CG_QUALIFIER__ thread_group this_thread() {
   thread_group g(internal::group_type::cg_coalesced_group, 1, __ockl_activelane_u32());
   return g;
 }
+#pragma clang diagnostic pop
 
 /** \ingroup CooperativeGConstruct
  *  \brief   User-exposed API to partition groups.

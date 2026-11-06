@@ -22,13 +22,13 @@
 #include "host_defines.h"
 #endif
 extern "C" {
-__device__ _Float16 __ocml_cos_f16(_Float16);
+__device__ __HIP_DEPRECATED_OCML _Float16 __ocml_cos_f16(_Float16);
 __device__ __HIP_DEPRECATED_OCML __attribute__((const)) _Float16 __ocml_fabs_f16(_Float16);
 __device__ __HIP_DEPRECATED_OCML __attribute__((const)) int __ocml_isinf_f16(_Float16);
 __device__ __HIP_DEPRECATED_OCML __attribute__((const)) int __ocml_isnan_f16(_Float16);
 __device__ __HIP_DEPRECATED_OCML __attribute__((const)) _Float16 __ocml_rint_f16(_Float16);
-__device__ __attribute__((const)) _Float16 __ocml_rsqrt_f16(_Float16);
-__device__ _Float16 __ocml_sin_f16(_Float16);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) _Float16 __ocml_rsqrt_f16(_Float16);
+__device__ __HIP_DEPRECATED_OCML _Float16 __ocml_sin_f16(_Float16);
 __device__ __HIP_DEPRECATED_OCML __attribute__((const)) _Float16 __ocml_trunc_f16(_Float16);
 __device__ __HIP_DEPRECATED_OCML __attribute__((const)) _Float16 __ocml_fmax_f16(_Float16,
                                                                                  _Float16);
@@ -37,12 +37,13 @@ __device__ __HIP_DEPRECATED_OCML __attribute__((const)) _Float16 __ocml_fmin_f16
 
 typedef _Float16 __2f16 __attribute__((ext_vector_type(2)));
 
-__device__ __attribute__((const)) float __ockl_fdot2(__2f16 a, __2f16 b, float c, bool s);
-__device__ __2f16 __ocml_cos_2f16(__2f16);
-__device__ __attribute__((const)) __2f16 __ocml_rsqrt_2f16(__2f16);
-__device__ __2f16 __ocml_sin_2f16(__2f16);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ockl_fdot2(__2f16 a, __2f16 b,
+                                                                           float c, bool s);
+__device__ __HIP_DEPRECATED_OCML __2f16 __ocml_cos_2f16(__2f16);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) __2f16 __ocml_rsqrt_2f16(__2f16);
+__device__ __HIP_DEPRECATED_OCML __2f16 __ocml_sin_2f16(__2f16);
 
-__device__ __attribute__((const)) _Float16 __ocml_cvtrtn_f16_f32(float);
-__device__ __attribute__((const)) _Float16 __ocml_cvtrtp_f16_f32(float);
-__device__ __attribute__((const)) _Float16 __ocml_cvtrtz_f16_f32(float);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) _Float16 __ocml_cvtrtn_f16_f32(float);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) _Float16 __ocml_cvtrtp_f16_f32(float);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) _Float16 __ocml_cvtrtz_f16_f32(float);
 }

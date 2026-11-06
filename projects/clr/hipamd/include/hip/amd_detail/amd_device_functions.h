@@ -270,7 +270,10 @@ __device__ static inline unsigned int __byte_perm(unsigned int x, unsigned int y
 
 __device__ static inline int __hadd(int x, int y) { return ((long long)x + (long long)y) >> 1; }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __device__ static inline int __mul24(int x, int y) { return __ockl_mul24_i32(x, y); }
+#pragma clang diagnostic pop
 
 __device__ static inline long long __mul64hi(long long int x, long long int y) {
   unsigned long long x0 = (unsigned long long)x & 0xffffffffUL;
@@ -299,9 +302,12 @@ __device__ static inline unsigned int __uhadd(unsigned int x, unsigned int y) {
   return ((unsigned long long)x + (unsigned long long)y) >> 1;
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __device__ static inline int __umul24(unsigned int x, unsigned int y) {
   return __ockl_mul24_u32(x, y);
 }
+#pragma clang diagnostic pop
 
 __device__ static inline unsigned long long __umul64hi(unsigned long long int x,
                                                        unsigned long long int y) {
@@ -325,9 +331,12 @@ __device__ static inline unsigned int __urhadd(unsigned int x, unsigned int y) {
   return ((unsigned long long)x + (unsigned long long)y + 1) >> 1;
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __device__ static inline unsigned int __usad(unsigned int x, unsigned int y, unsigned int z) {
   return __ockl_sadd_u32(x, y, z);
 }
+#pragma clang diagnostic pop
 
 __device__ static inline unsigned int __mbcnt_lo(unsigned int x, unsigned int y) {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mbcnt_lo))
@@ -386,10 +395,13 @@ __device__ static inline char4 __hip_hc_mul8pk(char4 in1, char4 in2) {
   return out;
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __device__ static inline float __double2float_rd(double x) { return __ocml_cvtrtn_f32_f64(x); }
 __device__ static inline float __double2float_rn(double x) { return x; }
 __device__ static inline float __double2float_ru(double x) { return __ocml_cvtrtp_f32_f64(x); }
 __device__ static inline float __double2float_rz(double x) { return __ocml_cvtrtz_f32_f64(x); }
+#pragma clang diagnostic pop
 
 __device__ static inline int __double2hiint(double x) {
   static_assert(sizeof(double) == 2 * sizeof(int), "");
@@ -547,10 +559,13 @@ __device__ static inline double __hiloint2double(int hi, int lo) {
 
 __device__ static inline double __int2double_rn(int x) { return (double)x; }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __device__ static inline float __int2float_rd(int x) { return __ocml_cvtrtn_f32_s32(x); }
 __device__ static inline float __int2float_rn(int x) { return (float)x; }
 __device__ static inline float __int2float_ru(int x) { return __ocml_cvtrtp_f32_s32(x); }
 __device__ static inline float __int2float_rz(int x) { return __ocml_cvtrtz_f32_s32(x); }
+#pragma clang diagnostic pop
 
 __device__ static inline float __int_as_float(int x) {
   static_assert(sizeof(float) == sizeof(int), "");
@@ -561,6 +576,8 @@ __device__ static inline float __int_as_float(int x) {
   return tmp;
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __device__ static inline double __ll2double_rd(long long int x) { return __ocml_cvtrtn_f64_s64(x); }
 __device__ static inline double __ll2double_rn(long long int x) { return (double)x; }
 __device__ static inline double __ll2double_ru(long long int x) { return __ocml_cvtrtp_f64_s64(x); }
@@ -570,6 +587,7 @@ __device__ static inline float __ll2float_rd(long long int x) { return __ocml_cv
 __device__ static inline float __ll2float_rn(long long int x) { return (float)x; }
 __device__ static inline float __ll2float_ru(long long int x) { return __ocml_cvtrtp_f32_s64(x); }
 __device__ static inline float __ll2float_rz(long long int x) { return __ocml_cvtrtz_f32_s64(x); }
+#pragma clang diagnostic pop
 
 __device__ static inline double __longlong_as_double(long long int x) {
   static_assert(sizeof(double) == sizeof(long long), "");
@@ -582,10 +600,13 @@ __device__ static inline double __longlong_as_double(long long int x) {
 
 __device__ static inline double __uint2double_rn(unsigned int x) { return (double)x; }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __device__ static inline float __uint2float_rd(unsigned int x) { return __ocml_cvtrtn_f32_u32(x); }
 __device__ static inline float __uint2float_rn(unsigned int x) { return (float)x; }
 __device__ static inline float __uint2float_ru(unsigned int x) { return __ocml_cvtrtp_f32_u32(x); }
 __device__ static inline float __uint2float_rz(unsigned int x) { return __ocml_cvtrtz_f32_u32(x); }
+#pragma clang diagnostic pop
 
 __device__ static inline float __uint_as_float(unsigned int x) {
   static_assert(sizeof(float) == sizeof(unsigned int), "");
@@ -596,6 +617,8 @@ __device__ static inline float __uint_as_float(unsigned int x) {
   return tmp;
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __device__ static inline double __ull2double_rd(unsigned long long int x) {
   return __ocml_cvtrtn_f64_u64(x);
 }
@@ -617,6 +640,7 @@ __device__ static inline float __ull2float_ru(unsigned long long int x) {
 __device__ static inline float __ull2float_rz(unsigned long long int x) {
   return __ocml_cvtrtz_f32_u64(x);
 }
+#pragma clang diagnostic pop
 
 #if defined(__clang__) && defined(__HIP__)
 
@@ -721,6 +745,8 @@ __device__ inline __attribute__((convergent)) void __syncthreads() {
   __barrier(__CLK_GLOBAL_MEM_FENCE | __CLK_LOCAL_MEM_FENCE);
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __device__ inline __attribute__((convergent)) int __syncthreads_count(int predicate) {
   return __ockl_wgred_add_i32(!!predicate);
 }
@@ -732,6 +758,7 @@ __device__ inline __attribute__((convergent)) int __syncthreads_and(int predicat
 __device__ inline __attribute__((convergent)) int __syncthreads_or(int predicate) {
   return __ockl_wgred_or_i32(!!predicate);
 }
+#pragma clang diagnostic pop
 
 // hip.amdgcn.bc - device routine
 /*

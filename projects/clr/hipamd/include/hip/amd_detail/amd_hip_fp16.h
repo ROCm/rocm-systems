@@ -470,9 +470,12 @@ inline __host__ __half __float2half_rz(float x) { return __half_raw{static_cast<
 inline __host__ __half __float2half_rd(float x) { return __half_raw{static_cast<_Float16>(x)}; }
 inline __host__ __half __float2half_ru(float x) { return __half_raw{static_cast<_Float16>(x)}; }
 #endif
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 inline __device__ __half __float2half_rz(float x) { return __half_raw{__ocml_cvtrtz_f16_f32(x)}; }
 inline __device__ __half __float2half_rd(float x) { return __half_raw{__ocml_cvtrtn_f16_f32(x)}; }
 inline __device__ __half __float2half_ru(float x) { return __half_raw{__ocml_cvtrtp_f16_f32(x)}; }
+#pragma clang diagnostic pop
 inline __HOST_DEVICE__ __half2 __float2half2_rn(float x) {
   return __half2{_Float16_2{static_cast<_Float16>(x), static_cast<_Float16>(x)}};
 }
@@ -970,10 +973,13 @@ struct ExclusiveScanIdentity<__half> {
 
 // Math functions
 #if defined(__clang__) && defined(__HIP__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 inline __device__ float amd_mixed_dot(__half2 a, __half2 b, float c, bool saturate) {
   return __ockl_fdot2(static_cast<__half2_raw>(a).data, static_cast<__half2_raw>(b).data, c,
                       saturate);
 }
+#pragma clang diagnostic pop
 #endif
 inline __device__ __half htrunc(__half x) {
   return __half_raw{__builtin_elementwise_trunc(static_cast<__half_raw>(x).data)};
@@ -987,12 +993,15 @@ inline __device__ __half hfloor(__half x) {
 inline __device__ __half hrint(__half x) {
   return __half_raw{__builtin_elementwise_rint(static_cast<__half_raw>(x).data)};
 }
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 inline __device__ __half hsin(__half x) {
   return __half_raw{__ocml_sin_f16(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hcos(__half x) {
   return __half_raw{__ocml_cos_f16(static_cast<__half_raw>(x).data)};
 }
+#pragma clang diagnostic pop
 inline __device__ __half hexp(__half x) {
   return __half_raw{__builtin_elementwise_exp(static_cast<__half_raw>(x).data)};
 }
@@ -1014,9 +1023,12 @@ inline __device__ __half hlog10(__half x) {
 inline __device__ __half hrcp(__half x) {
   return __half_raw{static_cast<_Float16>(1.0f) / static_cast<__half_raw>(x).data};
 }
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 inline __device__ __half hrsqrt(__half x) {
   return __half_raw{__ocml_rsqrt_f16(static_cast<__half_raw>(x).data)};
 }
+#pragma clang diagnostic pop
 inline __device__ __half hsqrt(__half x) {
   return __half_raw{__builtin_elementwise_sqrt(static_cast<__half_raw>(x).data)};
 }
@@ -1041,8 +1053,11 @@ inline __device__ __half2 h2floor(__half2 x) {
 inline __device__ __half2 h2rint(__half2 x) {
   return __half2{__builtin_elementwise_rint(static_cast<__half2_raw>(x).data)};
 }
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 inline __device__ __half2 h2sin(__half2 x) { return __half2{__ocml_sin_2f16(x)}; }
 inline __device__ __half2 h2cos(__half2 x) { return __half2{__ocml_cos_2f16(x)}; }
+#pragma clang diagnostic pop
 inline __device__ __half2 h2exp(__half2 x) {
   return __half2{__builtin_elementwise_exp(static_cast<__half2_raw>(x).data)};
 }
@@ -1068,7 +1083,10 @@ inline __device__ __half2 h2log10(__half2 x) {
 inline __device__ __half2 h2rcp(__half2 x) {
   return _Float16_2{_Float16_2{static_cast<_Float16>(1.0f), static_cast<_Float16>(1.0f)} / x.data};
 }
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 inline __device__ __half2 h2rsqrt(__half2 x) { return __ocml_rsqrt_2f16(x); }
+#pragma clang diagnostic pop
 inline __device__ __half2 h2sqrt(__half2 x) {
   return __half2{__builtin_elementwise_sqrt(static_cast<__half2_raw>(x).data)};
 }
