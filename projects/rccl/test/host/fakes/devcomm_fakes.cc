@@ -49,9 +49,8 @@ std::function<void(void*, void const*)> g_ncclDevCommCopyLsaData = DefaultNcclDe
 extern "C" ncclTeam_t ncclTeamLsa(ncclComm_t comm) { return g_ncclTeamLsa(comm); }
 
 // ncclTeamRail is in nccl_device_core_fakes.cc, with the other ncclTeam* accessors.
-// No wrapper definition here: dev_runtime.cc supplies the real
-// ncclDevCommCopyLsaData in this binary. The hook above survives because
-// devcomm-test.cc macro-shims its own call sites onto it.
+// No ncclDevCommCopyLsaData wrapper here: rccl-UnitTestsMicro links this file
+// alongside dev_runtime.cc's real one.
 
 void ResetDevcommFakes() {
   g_ncclTeamLsa = DefaultNcclTeamLsa;

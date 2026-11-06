@@ -238,8 +238,8 @@ TEST(SymIsHostSegment, Invalid_ReturnsFalse) {
 // unstubbed call surfaces. dev_runtime.cc cannot run a single symmetric-memory
 // path against that, so the working emulator has to be installed per test
 // rather than relied on as a process-wide default -- these tests share a binary
-// with p2p/devcomm/group, and any of those suites' TearDown restores the
-// fail-loud defaults between two of ours.
+// with group, and that suite's TearDown restores the fail-loud defaults between
+// two of ours.
 //
 // SetUp, not just TearDown: a TearDown-only reset leaves whichever test runs
 // first after another suite with no emulator at all.
@@ -272,7 +272,7 @@ protected:
   }
   void TearDown() override { ResetDevRuntimeMicroFakes(); }
 
-  // Hand the shared fakes back in their pristine state, so the p2p/devcomm
+  // Hand the shared fakes back in their pristine state, so the p2p
   // suites that share this binary do not inherit working HIP memory from
   // whichever of our tests ran before them -- the fail-loud defaults are
   // precisely what those suites rely on being in place.
@@ -6390,12 +6390,10 @@ TEST_F(DeepCopyDevCommRequirementsTest, FreeNull_IsSafe) {
 // getNcclVersionCompat picks the compatibility record covering the version the
 // caller compiled against, refusing a caller newer than the library.
 //
-// The compat table is three globals owned by the devcomm shim sources, which
-// this binary now compiles for real (devcomm-test.cc). Each test needs its own
-// version window, so the fixture zeroes them -- but it has to hand the real
-// tables back afterwards, because devcomm-test.cc's CompatTables_* cases assert
-// on the callbacks static initialisation put there. They were throwaway stubs
-// when this suite had a binary to itself; they are production state now.
+// The compat table is three globals owned by the v22902/v22907 devcomm shim
+// sources, which rccl-UnitTestsMicro compiles for real. Each test needs its own
+// version window, so the fixture zeroes them, then restores the real tables
+// that static initialisation put there.
 
 class NcclVersionCompatTest : public DevRuntimeMicroTest {
 protected:
