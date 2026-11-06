@@ -6957,6 +6957,15 @@ class CodeGenerator:
 
         from amdisa.codegen.execute.rj_arith_float import (
             RjArithBody,
+            gen_byte_nibble_conversion,
+            gen_bit_pack,
+            gen_fp8_widen,
+            gen_fp8_narrow,
+            gen_conversion64,
+            gen_conversion32,
+            gen_conversion16,
+            gen_packed_conversion,
+            gen_normalized,
             gen_float_unary32,
             gen_float_unary64,
             gen_float64_word,
@@ -6975,6 +6984,16 @@ class CodeGenerator:
             gen_half_dot,
         )
 
+        from amdisa.codegen.execute.rj_arith_vector import (
+            gen_vector32,
+            gen_widening_integer,
+        )
+
+        for generator in (gen_vector32, gen_widening_integer):
+            body = generator(ctx)
+            if body is not None:
+                return RjArithBody(body)
+
         from amdisa.codegen.execute.rj_arith_division import gen_division
 
         rj_arith_division = gen_division(ctx)
@@ -6990,6 +7009,15 @@ class CodeGenerator:
                 gen_packed_fma16,
                 gen_mixed_fma,
                 gen_float_unary16,
+                gen_normalized,
+                gen_packed_conversion,
+                gen_conversion16,
+                gen_conversion32,
+                gen_conversion64,
+                gen_fp8_narrow,
+                gen_fp8_widen,
+                gen_bit_pack,
+                gen_byte_nibble_conversion,
                 gen_float_unary32,
                 gen_float_unary64,
                 gen_float_binary64,
