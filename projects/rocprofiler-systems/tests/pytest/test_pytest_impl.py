@@ -158,6 +158,7 @@ class TestGPUInfo(RocprofsysTest):
             "  Marketing Name:          AMD Instinct MI455X\n"
             "  Name:                    gfx942\n"
             "      Name:                    amdgcn-amd-amdhsa--gfx1250-strict\n"
+            "      Name:                    amdgcn-amd-amdhsa--gfx9-4-generic:xnack-\n"
         )
 
         assert ROCMINFO_NAME_GFX_PATTERN.findall(rocminfo_stdout) == [

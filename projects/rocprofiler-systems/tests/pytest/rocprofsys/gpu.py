@@ -13,11 +13,10 @@ from pathlib import Path
 from .cache import persistent_cache
 
 # An optional "-suffix" keeps target variants such as gfx1250-strict distinct.
-GFX_XXXX_PATTERN = re.compile(r"(gfx[0-9a-fA-F]+(?:-[A-Za-z]+)?)")
-# Only match gfx on rocminfo "Name:" lines
-ROCMINFO_NAME_GFX_PATTERN = re.compile(
-    r"^\s*Name:\s+(gfx[0-9A-Fa-f][0-9A-Fa-f]+(?:-[A-Za-z]+)?)", re.MULTILINE
-)
+_GFX_ARCH = r"gfx[0-9A-Fa-f]+(?:-[A-Za-z]+)?"
+GFX_XXXX_PATTERN = re.compile(rf"({_GFX_ARCH})")
+# Only match agent "Name:" lines; ISA names start with "amdgcn-amd-amdhsa--".
+ROCMINFO_NAME_GFX_PATTERN = re.compile(rf"^\s*Name:\s+({_GFX_ARCH})", re.MULTILINE)
 
 # Architectures where GPU perf counter (device counting service) validation is
 # unreliable and dependent tests should be skipped.
@@ -178,7 +177,6 @@ def detect_gpu(rocm_path: Path | None = None) -> GPUInfo:
     """Detect available AMD GPUs and their capabilities.
 
     Uses rocminfo to get the list of GPU architectures.
-    Regex avoids matching "gfxX-X-generic" which may appear.
     """
     categories: set[str] = set()
     architectures: list[str] = []
