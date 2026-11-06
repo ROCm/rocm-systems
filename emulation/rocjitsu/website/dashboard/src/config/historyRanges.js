@@ -6,6 +6,10 @@ export const historyRanges = [
   { id: 'ALL', days: null, label: 'All available history', period: 'all available history' },
 ];
 
+// Overview opens on all available history; Benchmarks opens on the trailing 7 days.
+export const DEFAULT_OVERVIEW_RANGE = 'ALL';
+export const DEFAULT_BENCHMARK_RANGE = '1W';
+
 const historyRangeById = new Map(historyRanges.map((range) => [range.id, range]));
 const compatibilityRanges = new Map([
   ['1D', { id: '1D', days: 1 }],

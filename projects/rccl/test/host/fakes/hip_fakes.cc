@@ -19,6 +19,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <fcntl.h>     // InstallHipVmmEmulator's DMA-BUF export fd
 #include <sys/mman.h>  // InstallHipVmmEmulator's mmap-backed VA
 
 #include <hip/hip_ext.h>  // hipExtModuleLaunchKernel, for the profile-interceptor stubs
@@ -64,6 +65,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitValue64,          hipStreamWaitValue64);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemcpyBatchAsync,           hipMemcpyBatchAsync);
 #endif
 ASSERT_HOOK_MATCHES_PROD(g_hipMemset,                     hipMemset);
+ASSERT_HOOK_MATCHES_PROD(g_hipFuncSetAttribute,           hipFuncSetAttribute);
 #define RCCL_ASSERT_INTERCEPTOR_HOOK(name, params) ASSERT_HOOK_MATCHES_PROD(g_##name, name);
 RCCL_HIP_PROFILE_INTERCEPTORS_HOOKED(RCCL_ASSERT_INTERCEPTOR_HOOK)
 #undef RCCL_ASSERT_INTERCEPTOR_HOOK
@@ -228,7 +230,7 @@ int g_currentDevice = 0;
 static hipError_t DefaultHipGetDevice(int* dev)
 {
     if (dev) {
-        *dev = g_currentDevice;
+        *dev = __atomic_load_n(&g_currentDevice, __ATOMIC_RELAXED);
     }
     return hipSuccess;
 }
@@ -236,7 +238,8 @@ std::function<hipError_t(int*)> g_hipGetDevice = DefaultHipGetDevice;
 
 static hipError_t DefaultHipSetDevice(int dev)
 {
-    g_currentDevice = dev;
+    // group.cc's async jobs set the device from several threads at once.
+    __atomic_store_n(&g_currentDevice, dev, __ATOMIC_RELAXED);
     return hipSuccess;
 }
 std::function<hipError_t(int)> g_hipSetDevice = DefaultHipSetDevice;
@@ -249,6 +252,12 @@ static hipError_t DefaultHipGetDeviceCount(int* count)
     return hipSuccess;
 }
 std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
+
+static hipError_t DefaultHipFuncSetAttribute(const void*, hipFuncAttribute, int)
+{
+    return hipSuccess;
+}
+std::function<hipError_t(const void*, hipFuncAttribute, int)> g_hipFuncSetAttribute = DefaultHipFuncSetAttribute;
 
 // Defined with the plain HIP stubs below, where the attribute switch lives.
 static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device);
@@ -521,6 +530,13 @@ void InstallHipVmmEmulator()
     g_hipMemSetAccess = [](void*, size_t, const hipMemAccessDesc*, size_t) { return hipSuccess; };
     g_hipMemUnmap     = [](void*, size_t) { return hipSuccess; };
     g_hipMemRelease   = [](hipMemGenericAllocationHandle_t) { return hipSuccess; };
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
+    g_hipMemGetHandleForAddressRange = [](void* handle, hipDeviceptr_t, size_t, hipMemRangeHandleType,
+                                          unsigned long long) {
+        *static_cast<int*>(handle) = open("/dev/null", O_RDONLY);
+        return hipSuccess;
+    };
+#endif
     g_hipMemRetainAllocationHandle = [](hipMemGenericAllocationHandle_t* handle, void*) {
         if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
         return hipSuccess;
@@ -593,6 +609,8 @@ static hipError_t DefaultHipStreamWaitEvent(hipStream_t, hipEvent_t, unsigned in
 std::function<hipError_t(hipEvent_t, hipStream_t)> g_hipEventRecord = DefaultHipEventRecord;
 std::function<hipError_t(hipStream_t, hipEvent_t, unsigned int)> g_hipStreamWaitEvent =
     DefaultHipStreamWaitEvent;
+static hipError_t DefaultHipEventSynchronize(hipEvent_t) { return hipErrorInvalidValue; }
+std::function<hipError_t(hipEvent_t)> g_hipEventSynchronize = DefaultHipEventSynchronize;
 
 static hipError_t DefaultHipStreamBatchMemOp(hipStream_t, unsigned int,
                                              hipStreamBatchMemOpParams*, unsigned int)
@@ -652,6 +670,7 @@ void ResetHipFakes()
     g_hipGetDevice                  = DefaultHipGetDevice;
     g_hipSetDevice                  = DefaultHipSetDevice;
     g_hipGetDeviceCount             = DefaultHipGetDeviceCount;
+    g_hipFuncSetAttribute           = DefaultHipFuncSetAttribute;
     g_hipDeviceCanAccessPeer        = DefaultHipDeviceCanAccessPeer;
     g_hipDeviceEnablePeerAccess     = DefaultHipDeviceEnablePeerAccess;
     g_hipDeviceDisablePeerAccess    = DefaultHipDeviceDisablePeerAccess;
@@ -700,6 +719,7 @@ void ResetHipFakes()
     g_hipLaunchKernel               = DefaultHipLaunchKernel;
     g_hipEventRecord                = DefaultHipEventRecord;
     g_hipStreamWaitEvent            = DefaultHipStreamWaitEvent;
+    g_hipEventSynchronize           = DefaultHipEventSynchronize;
     g_hipEventQueryRequiresRecord   = false;
     g_recordedEvents.clear();
     g_hipStreamBatchMemOp           = DefaultHipStreamBatchMemOp;
@@ -864,6 +884,11 @@ hipError_t hipFree(void* ptr) { return g_hipFree(ptr); }
 hipError_t hipGetDevice(int* deviceId) { return g_hipGetDevice(deviceId); }
 
 hipError_t hipGetDeviceCount(int* count) { return g_hipGetDeviceCount(count); }
+
+hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int value)
+{
+    return g_hipFuncSetAttribute(func, attr, value);
+}
 
 const char* hipGetErrorString(hipError_t) { return "[hip_fake] stub error"; }
 
@@ -1062,7 +1087,7 @@ hipError_t hipStreamCreate(hipStream_t*) { return hipErrorInvalidValue; }
 hipError_t hipPointerGetAttributes(hipPointerAttribute_t*, const void*) { return hipErrorInvalidValue; }
 hipError_t hipHostGetDevicePointer(void**, void*, unsigned int) { return hipErrorInvalidValue; }
 hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t*, hipEvent_t) { return hipErrorInvalidValue; }
-hipError_t hipEventSynchronize(hipEvent_t) { return hipErrorInvalidValue; }
+hipError_t hipEventSynchronize(hipEvent_t event) { return g_hipEventSynchronize(event); }
 
 // --- init.cc deep-path HIP stubs (commAlloc/devCommSetup) ---------------
 hipError_t hipRuntimeGetVersion(int* version) { return g_hipRuntimeGetVersion(version); }

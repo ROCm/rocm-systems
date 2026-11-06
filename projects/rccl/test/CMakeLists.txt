@@ -182,8 +182,9 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/gensrc # for rccl_bfloat16.h
     ${PROJECT_BINARY_DIR}/hipify/src # for graph/topo.h
     ${PROJECT_BINARY_DIR}/hipify/src/include/plugin # for recorder tests, nccl_tuner.h
-    ${PROJECT_BINARY_DIR}/hipify/src/transport/net_ib_cast # for net_ib_fault_inject.h, net_ib_cast_inspect.h
+    ${PROJECT_BINARY_DIR}/hipify/src/transport/net_ib_cast # for net_ib_fault_inject.h, net_ib_cast_inspect.h, net_ib_qp_sharing_inspect.h
     ${PROJECT_BINARY_DIR}/hipify/src/transport             # for net_ib_limits.h
+    ${PROJECT_BINARY_DIR}/hipify/src/gin                   # for gin_rocshmem_gda_inspect.h
     ${ROCM_PATH}/include
     ${ROCM_PATH}
   )
@@ -310,6 +311,9 @@ if(BUILD_TESTS)
     StandaloneTests.cpp
     SymmetricInPlaceSliceTests.cpp
     DdaIpcTests.cpp
+    # Also in rccl-UnitTestsFixtures; built here without DWORDX4_INTRINSICS_FORCE_OFF, so it runs the b128 re-read.
+    device/DdaReduceScatterFabricLLTests.cpp
+    device/DdaAllReduceFabricLLTests.cpp
     NetPluginReloadTests.cpp
     GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
@@ -324,6 +328,7 @@ if(BUILD_TESTS)
     common/EnvVars.cpp
     common/PrepDataFuncs.cpp
     common/PtrUnion.cpp
+    common/GpuCountProbe.cpp
     common/ProcessIsolatedTestRunner.cpp
     common/TestBed.cpp
     common/TestBedChild.cpp
@@ -410,7 +415,10 @@ if(BUILD_TESTS)
       device/RcclEpTests.cpp
       device/LlFifoSysScopeTests.cpp
       device/DdaIpcGpuBarrierOrderingTests.cpp
+      device/DdaReduceScatterFabricLLTests.cpp
+      device/DdaAllReduceFabricLLTests.cpp
       device/DdaVecElementAddTests.cpp
+      device/DdaLL128PollWireTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestTdmReduceCopy.cpp
@@ -422,9 +430,11 @@ if(BUILD_TESTS)
       device/HierarchicalShuffleTests.cpp
       device/NcclUtilityDeviceTests.cpp
       device/ChannelMaskMapTests.cpp
+      device/CoopApplicationBuildTests.cpp
       DeviceApiTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
       common/TestChecks.cpp
       ../src/misc/kernel_config.cc
@@ -526,6 +536,7 @@ if(BUILD_TESTS)
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
     target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE ENABLE_FAULT_INJECTION)
@@ -537,6 +548,7 @@ if(BUILD_TESTS)
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -675,6 +687,7 @@ if(BUILD_TESTS)
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -714,6 +727,33 @@ if(BUILD_TESTS)
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
   add_test(NAME rccl-UnitTestsGinSdmaPolicy COMMAND rccl-UnitTestsGinSdmaPolicy)
   set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
+
+  # GinScatter local reduce on one GPU. Runs ginScatterReduceChunk against a fake
+  # scratch and a host sum, for staged and full-column layouts, including
+  # multi-rank sums at 64 MiB and 1 GiB. No librccl. Skips when no GPU is visible.
+  # Registered in the test-runner configs so CI runs it with the other unit tests.
+  add_executable(rccl-UnitTestsGinScatterReduceGpu gin/gin_scatter_reduce_gpu_test.cpp)
+  set_source_files_properties(gin/gin_scatter_reduce_gpu_test.cpp PROPERTIES LANGUAGE CXX)
+  target_include_directories(rccl-UnitTestsGinScatterReduceGpu PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/include
+    ${PROJECT_SOURCE_DIR}/src)
+  set(_gin_scatter_gpu_offload "")
+  foreach(_g IN LISTS GPU_TARGETS)
+    if(_g)
+      list(APPEND _gin_scatter_gpu_offload "--offload-arch=${_g}")
+    endif()
+  endforeach()
+  if(_gin_scatter_gpu_offload)
+    target_compile_options(rccl-UnitTestsGinScatterReduceGpu PRIVATE ${_gin_scatter_gpu_offload})
+    target_link_options(rccl-UnitTestsGinScatterReduceGpu PRIVATE ${_gin_scatter_gpu_offload})
+  endif()
+  target_link_libraries(rccl-UnitTestsGinScatterReduceGpu PRIVATE
+    ${GTEST_BOTH_LIBRARIES} hip::host hip::device Threads::Threads)
+  set_target_properties(rccl-UnitTestsGinScatterReduceGpu PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+  add_test(NAME rccl-UnitTestsGinScatterReduceGpu COMMAND rccl-UnitTestsGinScatterReduceGpu)
+  set_tests_properties(rccl-UnitTestsGinScatterReduceGpu PROPERTIES LABELS "unit;gpu")
 
   # utility.h as plain C++ for its !NCCL_DEVICE_COMPILE branches; not with CXX=hipcc, which defines __HIPCC__ and fails strict CI.
   add_executable(rccl-UnitTestsUtilityHostOnly NcclUtilityHostOnlyTests.cpp)
@@ -847,8 +887,10 @@ if(BUILD_TESTS)
       transport/NetIbCast/NetIbCastPlaneSubnetTests.cpp
       transport/NetIbCast/NetIbCastMultiplaneTests.cpp
       transport/NetIbCast/NetIbCastUdmaTests.cpp
+      transport/Gin/GinMtuNegotiationTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -911,6 +953,7 @@ if(BUILD_TESTS)
       AltRsmiTests.cpp
       ../src/misc/alt_rsmi.cc
       common/main_altrsmi.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -965,6 +1008,7 @@ if(BUILD_TESTS)
     if(CMAKE_BUILD_TYPE MATCHES "Debug")
       list(APPEND TEST_AMDSMI_SOURCE_FILES
         AmdSmiWrapTests.cpp
+        common/GpuCountProbe.cpp
         common/ProcessIsolatedTestRunner.cpp
       )
 
@@ -1072,11 +1116,13 @@ if(BUILD_TESTS)
       transport/NetIbMPI/NetIbWqeLatMonTests.cpp
       transport/RmaMPI/RmaMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
+      transport/NetIbMPI/QpSharingTests.cpp
       transport/GinDeviceMPITests.cpp
       transport/GinNicFusionMPITests.cpp
       WarpSpeedMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
+      PatForcedMPITests.cpp
       NChannelsPerNetPeerMPITests.cpp
       MaxP2pPeersMPITests.cpp
       GdrFlushFlagProtoSwitchMPITests.cpp
@@ -1096,6 +1142,7 @@ if(BUILD_TESTS)
       ProfilerKernelChMPITests.cpp
       SymmetricKernelMPITests.cpp
       SymmetricWindowMPITests.cpp
+      SymmetricAllGatherTdmMPITests.cpp
       DeviceApiMPITests.cpp
       CommNetMismatchMPITests.cpp
       test_sparse_send_recv.cpp
@@ -1136,9 +1183,25 @@ if(BUILD_TESTS)
       "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13"
       "LINKER:--export-dynamic-symbol=ncclRmaPlugin_v13")
 
+    # The NetIbMPI connection-setup helpers are [[nodiscard]] so that dropping
+    # their result is caught rather than reviewed for. On its own that is only a
+    # warning, and WERROR defaults to OFF, so a bare SetupConnection(...) would
+    # still build and carry on with the comms the helper just closed. Promoting
+    # the warning to an error here is the whole of the enforcement: nothing
+    # checks the call sites but the compiler, and nothing keeps the attribute on
+    # the helpers but review.
+    #
+    # Scoped to the NetIbMPI sources rather than the whole target: other MPI
+    # tests discard [[nodiscard]] results of their own, and reworking those is
+    # not this change's business.
+    set(NETIBMPI_TEST_SOURCE_FILES ${MPI_TEST_SOURCE_FILES})
+    list(FILTER NETIBMPI_TEST_SOURCE_FILES INCLUDE REGEX "transport/NetIbMPI/")
+    set_source_files_properties(${NETIBMPI_TEST_SOURCE_FILES}
+      PROPERTIES COMPILE_OPTIONS -Werror=unused-result)
+
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
 
-    # Recorder profiler plugin for ProfilerKernelChMPITests. Unlike
+    # Recorder profiler plugin for ProfilerKernelChMPITests and PatForcedMPITests. Unlike
     # rccl-test-profiler-stub it is a working profiler: it records what RCCL
     # delivers so the test can check it. It builds against the standalone headers
     # an external plugin ships with rather than RCCL's own, and it lands and
@@ -1150,6 +1213,8 @@ if(BUILD_TESTS)
     set_target_properties(rccl-test-profiler-kch-recorder PROPERTIES
       CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
     add_dependencies(rccl-UnitTestsMPI rccl-test-profiler-kch-recorder)
+    # The recorder's query header is included as "plugin/profiler_kernelch_recorder.h".
+    target_include_directories(rccl-UnitTestsMPI PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(rccl-UnitTestsMPI PRIVATE
       RCCL_TEST_KCH_RECORDER_NAME="$<TARGET_FILE_NAME:rccl-test-profiler-kch-recorder>")
     install(TARGETS rccl-test-profiler-kch-recorder
@@ -1359,8 +1424,10 @@ if(BUILD_TESTS)
       ${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda
     )
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE GDA_QUEUEPAIR_MOCK)
+    # Suite G is relocatable too. Without RDC, a -O0 build rejects the QueuePairMock scoped atomics (invalid addrspacecast).
     set_source_files_properties(
       ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilIpcDevice_test.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/device/GinRocshmemGdaTemplate_test.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilSdmaTemplate_test.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/device/sdma/anvil_stub_quiet_count.cpp
       PROPERTIES COMPILE_OPTIONS "${RCCL_TEST_GPU_RDC_COMPILE_OPTIONS}")
