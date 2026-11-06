@@ -251,6 +251,26 @@ uint32_t async_lds_lane_address(const VglobalMachineInst &inst, const amdgpu::Wa
   return static_cast<uint32_t>(absolute_addr);
 }
 
+AsyncLdsSource async_lds_lane_source(const VglobalMachineInst &inst, const amdgpu::Wavefront &wf,
+                                     uint32_t lds_operand, uint32_t access_size_bytes) {
+  // As in async_lds_lane_address, the 32-bit operand and IOFFSET wrap before
+  // the bounds check.
+  const uint32_t relative_addr = lds_operand + static_cast<uint32_t>(signed_ioffset(inst.ioffset));
+  const uint64_t lds_size = wf.lds_size();
+  if (relative_addr >= lds_size || access_size_bytes == 0)
+    return {};
+  // An LDS DWORD with any byte out of range reads zero (CDNA5 ISA 3.3.4.1), so
+  // keep the whole DWORDs of the access, or its one byte for B8, that fit.
+  const uint32_t granule = std::min<uint32_t>(access_size_bytes, sizeof(uint32_t));
+  const uint64_t available = lds_size - relative_addr;
+  const auto bytes =
+      static_cast<uint32_t>(std::min<uint64_t>(access_size_bytes, available / granule * granule));
+  const uint64_t absolute_addr = static_cast<uint64_t>(wf.lds_base()) + relative_addr;
+  if (bytes == 0 || absolute_addr + bytes > UINT32_MAX)
+    return {};
+  return {.address = static_cast<uint32_t>(absolute_addr), .bytes = bytes};
+}
+
 void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d) {
   // Scratch SGPR/VGPR offsets are signed 32-bit values. Widen before combining

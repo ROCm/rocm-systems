@@ -24,6 +24,7 @@
 //   Mixed_*         — simultaneous vmcnt and lgkmcnt events
 //   DualAddress_*   — LDS events with two address sets per lane
 //   TensorDma_*     — tensor load/store LDS races and tensorcnt waits
+//   AsyncCopy_*     — async LDS copies and asynccnt waits
 
 #include "race_test_builder.h"
 #include "race_test_instruction.h"
@@ -1853,6 +1854,129 @@ TEST(RaceDetector, TensorDma_RangeEndingMidElementTracksItsTailBytes) {
   b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 6}});
   b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/4, /*bytes=*/2);
   EXPECT_TRUE(b.hasLdsRace(4));
+}
+
+// ---- Async copies (global_load_async_to_lds / global_store_async_from_lds) ----
+
+TEST(RaceDetector, AsyncCopy_CrossWaveStoreSourceOverwriteRace) {
+  // An async store reads its LDS source until ASYNCcnt retires it.
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
+  b.asyncStoreFromLds(/*wave=*/0, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(16));
+}
+
+TEST(RaceDetector, AsyncCopy_CrossWaveStoreWaitWithoutBarrierRace) {
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
+  b.asyncStoreFromLds(/*wave=*/0, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  b.waitAsynccnt(/*wave=*/0, /*asynccnt=*/0);
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(16));
+}
+
+TEST(RaceDetector, AsyncCopy_CrossWaveStoreSafe) {
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
+  b.asyncStoreFromLds(/*wave=*/0, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  b.waitAsynccnt(/*wave=*/0, /*asynccnt=*/0);
+  b.barrier();
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, AsyncCopy_SameWaveDsWriteOverPendingStoreSourceRace) {
+  // Async copies access LDS out of order with DS instructions.
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.asyncStoreFromLds(/*wave=*/0, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(16));
+}
+
+TEST(RaceDetector, AsyncCopy_SameWaveLoadThenStoreRace) {
+  // Async loads and stores may access LDS out of order with each other, so a
+  // store of a pending load's destination may read it before the load writes.
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.asyncLoadToLds(/*wave=*/0, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  b.asyncStoreFromLds(/*wave=*/0, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(16));
+}
+
+TEST(RaceDetector, AsyncCopy_SameWaveStoreThenLoadRace) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.asyncStoreFromLds(/*wave=*/0, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  b.asyncLoadToLds(/*wave=*/0, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(16));
+}
+
+TEST(RaceDetector, AsyncCopy_SameWaveLoadThenStoreWithAsynccntSafe) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.asyncLoadToLds(/*wave=*/0, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  b.waitAsynccnt(/*wave=*/0, /*asynccnt=*/0);
+  b.asyncStoreFromLds(/*wave=*/0, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, AsyncCopy_MixedPartialWaitRetiresNeither) {
+  // Loads and stores complete out of order with each other: with one of each
+  // pending, ASYNCcnt <= 1 does not establish which one completed.
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.asyncLoadToLds(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  b.asyncStoreFromLds(/*wave=*/0, /*lane=*/0, /*addr=*/64, /*bytes=*/4);
+  b.waitAsynccnt(/*wave=*/0, /*asynccnt=*/1);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/64, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(0));
+  EXPECT_TRUE(b.hasLdsRace(64));
+}
+
+TEST(RaceDetector, AsyncCopy_StoresCompleteInOrderWithStores) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.asyncStoreFromLds(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  b.asyncStoreFromLds(/*wave=*/0, /*lane=*/0, /*addr=*/64, /*bytes=*/4);
+  b.waitAsynccnt(/*wave=*/0, /*asynccnt=*/1);
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/64, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(64));
+}
+
+TEST(RaceDetector, AsyncCopy_PartialWaitRetiresOlderLoadNotInterleavedStore) {
+  // Load, store, load, then ASYNCcnt <= 1: the older load completed (loads are
+  // in order), but the store or the newer load may be the one still pending.
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.asyncLoadToLds(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  b.asyncStoreFromLds(/*wave=*/0, /*lane=*/0, /*addr=*/64, /*bytes=*/4);
+  b.asyncLoadToLds(/*wave=*/0, /*lane=*/0, /*addr=*/128, /*bytes=*/4);
+  b.waitAsynccnt(/*wave=*/0, /*asynccnt=*/1);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/64, /*bytes=*/4);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/128, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(64));
+  EXPECT_TRUE(b.hasLdsRace(128));
+}
+
+TEST(RaceDetector, AsyncCopy_TensorcntDoesNotRetireAnAsyncStore) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.asyncStoreFromLds(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/0);
+  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  EXPECT_TRUE(b.hasLdsRace(4));
+}
+
+TEST(RaceDetector, AsyncCopy_AsynccntDoesNotRetireATensorLoad) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.waitAsynccnt(/*wave=*/0, /*asynccnt=*/0);
+  b.asyncStoreFromLds(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(4));
+}
+
+TEST(RaceDetector, AsyncCopy_StoresOfOneSourceDoNotRace) {
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
+  b.asyncStoreFromLds(/*wave=*/0, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  b.asyncStoreFromLds(/*wave=*/1, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
 }
 
 // ---- Exec mask ----

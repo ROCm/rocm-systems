@@ -220,6 +220,25 @@ races. Some examples:
   other memory instructions are, so an instruction that moves no data still
   occupies its `tensorcnt` slot, and a transfer that waits for memory is pending
   from the moment it issues.
+- **Async copy races** (gfx1250): `global_load_async_to_lds_*` and
+  `cluster_load_async_to_lds_*` writes and `global_store_async_from_lds_*` reads
+  are LDS events on `asynccnt`, one per instruction, with each lane's bytes at
+  its LDS address. Any wave, including the issuing one, that reads a load's
+  destination or overwrites a store's source before `s_wait_asynccnt` is
+  reported; other waves also need an `s_barrier`. Async copies may access LDS
+  out of order with each other (CDNA5 ISA 10.8) and with DS instructions, so a
+  store is also reported when it reads bytes of the same wave's pending DS
+  write, async load or tensor load, and an async load when it overwrites the
+  source of the same wave's pending async store. Async loads complete in issue
+  order with other async loads and async stores with other async stores, but
+  loads and stores complete out of order with each other, so a partial
+  `s_wait_asynccnt` retires the oldest of each kind only when the count
+  guarantees it: after a load and then a store, `s_wait_asynccnt 1` retires
+  neither. A store lane reads, and is tracked for, only the whole DWORDs of its
+  source inside the wave's LDS allocation (its byte, for B8): an LDS DWORD with
+  any byte out of range reads zero (CDNA5 ISA 3.3.4.1). A copy with no active
+  lanes touches no LDS but still issues while other async copies are pending
+  (3.2.2.1). Either way, the instruction occupies its `asynccnt` slot.
 
 Detection is at byte granularity: D16 (half-register) loads only flag races on
 the affected bytes, and LDS races are tracked per byte.
@@ -236,7 +255,9 @@ following lifecycle:
    wait for `vmcnt` before reading the destination bytes. Tensor DMA transfers
    complete in issue order, but as a conservative rule an active tensor load or
    store still conflicts with a later, overlapping transfer in the other
-   direction from the same wave (see Tensor DMA races above).
+   direction from the same wave (see Tensor DMA races above). An active async
+   store's LDS source likewise conflicts with any later, overlapping LDS write
+   from the same wave (see Async copy races above).
 1. **WAVE_COMPLETE** — waits have satisfied every counter obligation for the
    event. This means the event is no longer in flight from the perspective of
    the wave that issued the operation, but is still in flight from the
@@ -472,7 +493,7 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   multi-workgroup, and mixed counter scenarios.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
 - `execution_plugin_race_test.cpp` — drives the plugin's hooks, including
-  tensor DMA transfers on gfx1250.
+  tensor DMA transfers and async copies on gfx1250.
 - `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
 - The `race` suite in
   [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
@@ -528,12 +549,8 @@ this source tree. The original
 - **Tensor DMA scope**: only the LDS side of a transfer is tracked. Its global
   memory accesses are not checked.
 
-- **Async stores from LDS** (gfx1250): `global_store_async_from_lds_*` is
-  tracked only as a global store; its LDS read is neither checked nor
-  registered. An async store reading a pending tensor load's destination, and
-  a tensor load, DS write or direct-to-LDS write over a pending async store's
-  source, are therefore not reported in either issue order, even with no
-  `s_wait_asynccnt` between them.
+- **Async copy scope**: only the LDS side of an async copy is tracked. Its
+  global memory accesses are not checked.
 
 - **False positives with LDS barrier synchronization**: a tensor load can
   request an arrival on an LDS barrier cell when it completes, and a consumer

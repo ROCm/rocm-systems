@@ -112,6 +112,19 @@ public:
     tensorTransfer(wave, MemoryEventType::LDS_TO_GLOBAL, ranges);
   }
 
+  /// Register a gfx1250 async load into LDS for one lane (ASYNCcnt, ASYNC_LOAD
+  /// class), validated against outstanding LDS reads as the plugin does.
+  void asyncLoadToLds(int wave, int lane, uint32_t addr, int bytes) {
+    asyncCopy(wave, lane, addr, bytes, MemoryEventType::GLOBAL_TO_LDS);
+  }
+
+  /// Register a gfx1250 async store from LDS for one lane (ASYNCcnt,
+  /// ASYNC_STORE class). Its LDS source is an LDS read, validated against
+  /// outstanding LDS writes as the plugin does.
+  void asyncStoreFromLds(int wave, int lane, uint32_t addr, int bytes) {
+    asyncCopy(wave, lane, addr, bytes, MemoryEventType::LDS_TO_GLOBAL);
+  }
+
   /// Register a global store from VGPRs (tracked by vmcnt).
   /// Stores read VGPRs at issue time — no destination registers.
   void globalStore(int wave, uint64_t exec = 0) {
@@ -247,6 +260,12 @@ public:
     waves_[wave]->dispatch(wait);
   }
 
+  void waitAsynccnt(int wave, int asynccnt) {
+    PendingWaitCount wait;
+    wait.add(amdgpu::WaitCounterType::ASYNCCNT, asynccnt);
+    waves_[wave]->dispatch(wait);
+  }
+
   /// Barrier: flush all waves' barrier-pending events (simulates s_barrier).
   void barrier() {
     for (auto *w : waves_) {
@@ -354,6 +373,29 @@ public:
   const RaceDetector &detector() const { return *detector_; }
 
 private:
+  /// One lane of an async copy. A load validates its LDS write in its own
+  /// completion class, as the plugin does for every direct-to-LDS write. A
+  /// store validates its LDS read as unordered: async copies may access LDS out
+  /// of order, even relative to each other.
+  void asyncCopy(int wave, int lane, uint32_t addr, int bytes, MemoryEventType type) {
+    const bool isLoad = type == MemoryEventType::GLOBAL_TO_LDS;
+    const MemoryOrderClass memoryOrder =
+        isLoad ? MemoryOrderClass::ASYNC_LOAD : MemoryOrderClass::ASYNC_STORE;
+    waves_[wave]->prepareForCounterIncrement(amdgpu::WaitCounterType::ASYNCCNT);
+    if (isLoad)
+      detector_->validateWrite(static_cast<int>(addr), WaveId{wave}, lane, bytes, memoryOrder);
+    else
+      detector_->validateRead(static_cast<int>(addr), WaveId{wave}, lane, bytes,
+                              MemoryOrderClass::UNORDERED);
+    std::vector<uint32_t> ldsAddrs(waveSize_, 0);
+    ldsAddrs[lane] = addr;
+    const std::array obligations{
+        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::ASYNCCNT, memoryOrder}};
+    waves_[wave]->registerLdsEvent(testInstruction(pc_++), type, /*registers=*/{},
+                                   uint64_t{1} << lane, waveSize_, ldsAddrs, bytes,
+                                   /*byteMask=*/0xF, obligations, memoryOrder);
+  }
+
   /// A transfer has no lanes; its violations report lane -1. Validates and
   /// registers the same bytes as the plugin's tensor DMA hook.
   void tensorTransfer(int wave, MemoryEventType type, std::span<const LdsByteRange> ranges) {

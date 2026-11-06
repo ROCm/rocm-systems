@@ -542,8 +542,22 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
 
   if (inst.data()->tag() == amdgpu::GLOBAL_MEM) {
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
-    if (d.exec_mask == 0)
+    if (d.exec_mask == 0) {
+      // A VMEM instruction with EXEC zero still issues, and counts, unless its
+      // counter is already zero (CDNA5 ISA 3.2.2.1). An async copy therefore
+      // takes its ASYNCcnt slot without touching LDS, so later partial waits
+      // complete the copies issued before it.
+      const bool asyncCopy =
+          (d.lds_src || d.lds_dst) && std::ranges::any_of(obligations, [](const auto &obligation) {
+            return obligation.wait_counter_type() == amdgpu::WaitCounterType::ASYNCCNT;
+          });
+      if (asyncCopy)
+        rs->registerLdsRangeEvent(instruction,
+                                  d.lds_src ? MemoryEventType::LDS_TO_GLOBAL
+                                            : MemoryEventType::GLOBAL_TO_LDS,
+                                  {}, obligations, memoryOrder);
       return;
+    }
     if (d.lds_dst) {
       uint32_t perLaneBytes = d.buffer_components
                                   ? 4u * d.destination_vgpr_count()
@@ -592,6 +606,36 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       rs->registerLdsEvent(instruction, MemoryEventType::GLOBAL_TO_LDS, {}, validLaneMask,
                            wf.wf_size(), std::span<const uint32_t>(ldsAddrs, wf.wf_size()),
                            perLaneBytes, 0xF, obligations, memoryOrder);
+    } else if (d.lds_src) {
+      // An async store reads its LDS source, which stays an LDS read until a
+      // wait retires the store. Async copies may access LDS out of order with
+      // each other (CDNA5 ISA 10.8) and with DS instructions, so the read is
+      // checked as unordered against every pending LDS write, including the
+      // wave's own DS writes, async loads and tensor loads.
+      // Each lane reads the leading bytes the execution recorded: the whole
+      // DWORDs of its source inside the allocation.
+      const int elementBytes =
+          static_cast<int>(std::min<uint32_t>(d.num_elems * d.elem_size, sizeof(uint32_t)));
+      std::vector<LdsByteRange> ranges;
+      ranges.reserve(wf.wf_size());
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+        const uint32_t address = d.per_lane_lds_addr[lane];
+        const uint32_t laneBytes = d.per_lane_lds_src_bytes[lane];
+        if (!(d.exec_mask & (1ULL << lane)) || address == amdgpu::kInvalidLdsAddress ||
+            laneBytes == 0)
+          continue;
+        ranges.push_back({.address = address, .bytes = laneBytes});
+        const auto bytes = detector->ldsBytesInRange(address, laneBytes, elementBytes);
+        if (bytes != 0)
+          detector->validateRead(static_cast<int>(address), waveId, static_cast<int>(lane),
+                                 static_cast<int>(bytes), MemoryOrderClass::UNORDERED);
+      }
+      if (obligations.empty())
+        return;
+      // One event per instruction, so the store takes one ASYNCcnt slot, also
+      // when no lane reads LDS.
+      rs->registerLdsRangeEvent(instruction, MemoryEventType::LDS_TO_GLOBAL, ranges, obligations,
+                                memoryOrder);
     } else if (d.is_load) {
       auto destinations = validated_load_destinations(d, wf);
       if (!destinations)

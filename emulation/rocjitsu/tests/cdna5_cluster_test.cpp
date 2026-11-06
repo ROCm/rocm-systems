@@ -339,6 +339,147 @@ TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromOutOfRangeLdsSourceProducesZeroPa
   EXPECT_EQ(value, 0u);
 }
 
+// An async store reads LDS, so its state records the LDS address each lane
+// read: the allocation base, plus the VSRC operand, plus IOFFSET. Lanes outside
+// EXEC keep the invalid address.
+TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsRecordsLdsSourceAddresses) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x5u); // Lanes 0 and 2; lane 1 is inactive.
+  // Allocate a block ahead of the wave's LDS so its base is nonzero.
+  cu->allocate_lds(256);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_lds_size(256);
+  ASSERT_NE(wf->lds_base(), 0u);
+  write_wave_sgpr(*cu, *wf, 0, 0x190000u);
+  write_wave_sgpr(*cu, *wf, 1, 0u);
+
+  constexpr uint32_t kVgprOffset = 128;
+  constexpr int32_t kIoffset = -64;
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_vgpr(vgpr_base, 0, kVgprOffset);
+  cu->write_vgpr(vgpr_base, 1, kVgprOffset + 4);
+  cu->write_vgpr(vgpr_base, 2, kVgprOffset + 8);
+
+  auto inst =
+      decode_gfx1250({0xEE190000u, 0x00000000u, 0xFFFFC000u}, "global_store_async_from_lds_b32");
+  ASSERT_NE(inst, nullptr);
+  inst->execute(*inst, wf);
+  auto *state = inst->data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_TRUE(state->lds_src);
+  EXPECT_FALSE(state->lds_dst);
+  EXPECT_TRUE(state->lds_per_lane_addr);
+  const uint32_t lane0 = wf->lds_base() + kVgprOffset + kIoffset;
+  EXPECT_EQ(state->per_lane_lds_addr[0], lane0);
+  EXPECT_EQ(state->per_lane_lds_addr[1], amdgpu::kInvalidLdsAddress);
+  EXPECT_EQ(state->per_lane_lds_addr[2], lane0 + 8);
+  EXPECT_EQ(state->per_lane_lds_addr[3], amdgpu::kInvalidLdsAddress);
+  EXPECT_EQ(state->per_lane_lds_src_bytes[0], 4u);
+  EXPECT_EQ(state->per_lane_lds_src_bytes[1], 0u);
+  EXPECT_EQ(state->per_lane_lds_src_bytes[2], 4u);
+}
+
+// An out-of-range LDS DWORD reads zero, even when only part of it is out of
+// range, so a B32 lane straddling the end of the allocation reads no LDS bytes
+// and records the invalid address. The global store still issues for it.
+TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromOutOfRangeLdsSourceRecordsInvalidAddress) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x3u);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_lds_size(256);
+  write_wave_sgpr(*cu, *wf, 0, 0x1a0000u);
+  write_wave_sgpr(*cu, *wf, 1, 0u);
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_vgpr(vgpr_base, 0, 252); // Last dword of the allocation.
+  cu->write_vgpr(vgpr_base, 1, 254); // Straddles the end of the allocation.
+
+  auto inst =
+      decode_gfx1250({0xEE190000u, 0x00000000u, 0x00000000u}, "global_store_async_from_lds_b32");
+  ASSERT_NE(inst, nullptr);
+  inst->execute(*inst, wf);
+  auto *state = inst->data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_EQ(state->lane_mask, 0x3u);
+  EXPECT_EQ(state->per_lane_lds_addr[0], wf->lds_base() + 252);
+  EXPECT_EQ(state->per_lane_lds_addr[1], amdgpu::kInvalidLdsAddress);
+  EXPECT_EQ(state->per_lane_lds_src_bytes[0], 4u);
+  EXPECT_EQ(state->per_lane_lds_src_bytes[1], 0u);
+}
+
+// A B128 lane straddling the end of the allocation reads its in-range DWORDs
+// and zeros for the rest: at offset 248 of 256 bytes, it reads two DWORDs.
+TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsB128StraddlingTheEndReadsItsInRangeDwords) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x1u);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_lds_size(256);
+  write_wave_sgpr(*cu, *wf, 0, 0x1c0000u);
+  write_wave_sgpr(*cu, *wf, 1, 0u);
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_vgpr(vgpr_base, 0, 0);       // v0: global offset.
+  cu->write_vgpr(vgpr_base + 1, 0, 248); // v1: LDS source.
+  cu->lds().write32(wf->lds_base() + 248, 0x11111111u);
+  cu->lds().write32(wf->lds_base() + 252, 0x22222222u);
+
+  constexpr auto words = cdna5::build_vglobal(cdna5::kGlobalStoreAsyncFromLdsB128Vglobal,
+                                              {.saddr = 0, .vsrc = 1, .vaddr = 0});
+  auto inst = decode_gfx1250(words, "global_store_async_from_lds_b128");
+  ASSERT_NE(inst, nullptr);
+  inst->execute(*inst, wf);
+  auto *state = inst->data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_EQ(state->lane_mask, 0x1u);
+  EXPECT_EQ(state->per_lane_lds_addr[0], wf->lds_base() + 248);
+  EXPECT_EQ(state->per_lane_lds_src_bytes[0], 8u);
+  ASSERT_GE(state->store_data.size(), 16u);
+  std::array<uint32_t, 4> payload{};
+  std::memcpy(payload.data(), state->store_data.data(), sizeof(payload));
+  EXPECT_EQ(payload, (std::array<uint32_t, 4>{0x11111111u, 0x22222222u, 0, 0}));
+}
+
+// B128 records each lane's base address; the lane reads 16 bytes from it.
+TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsB128RecordsLaneBaseAddress) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x3u);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_lds_size(256);
+  write_wave_sgpr(*cu, *wf, 0, 0x1b0000u);
+  write_wave_sgpr(*cu, *wf, 1, 0u);
+  // v0 holds the global offset and v1 the LDS source address.
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_vgpr(vgpr_base, 0, 0);
+  cu->write_vgpr(vgpr_base, 1, 16);
+  cu->write_vgpr(vgpr_base + 1, 0, 32);
+  cu->write_vgpr(vgpr_base + 1, 1, 48);
+
+  constexpr auto words = cdna5::build_vglobal(cdna5::kGlobalStoreAsyncFromLdsB128Vglobal,
+                                              {.saddr = 0, .vsrc = 1, .vaddr = 0});
+  auto inst = decode_gfx1250(words, "global_store_async_from_lds_b128");
+  ASSERT_NE(inst, nullptr);
+  inst->execute(*inst, wf);
+  auto *state = inst->data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_EQ(state->elem_size * state->num_elems, 16u);
+  EXPECT_EQ(state->per_lane_lds_addr[0], wf->lds_base() + 32);
+  EXPECT_EQ(state->per_lane_lds_addr[1], wf->lds_base() + 48);
+}
+
 TEST(Gfx1250ExecutionTest, AsyncLdsAddressRejectsAccessOutsideAllocation) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
@@ -359,6 +500,46 @@ TEST(Gfx1250ExecutionTest, AsyncLdsAddressRejectsAccessOutsideAllocation) {
 
   inst.ioffset = 64;
   EXPECT_EQ(cdna5::async_lds_lane_address(inst, *wf, UINT32_MAX - 63, 4), wf->lds_base());
+}
+
+// An async store's LDS source keeps the whole DWORDs inside the allocation; a
+// DWORD with any byte outside it reads zero. B8 reads its one byte.
+TEST(Gfx1250ExecutionTest, AsyncLdsLaneSourceKeepsInRangeDwords) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  cu->allocate_lds(256);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_lds_size(256);
+  const uint32_t base = wf->lds_base();
+  ASSERT_NE(base, 0u);
+
+  cdna5::VglobalMachineInst inst{};
+  const auto expect_source = [&](uint32_t operand, uint32_t size, uint32_t address,
+                                 uint32_t bytes) {
+    SCOPED_TRACE(testing::Message() << "operand=" << operand << " size=" << size);
+    const auto source = cdna5::async_lds_lane_source(inst, *wf, operand, size);
+    EXPECT_EQ(source.address, address);
+    EXPECT_EQ(source.bytes, bytes);
+  };
+  expect_source(0, 16, base, 16);
+  expect_source(240, 16, base + 240, 16);
+  expect_source(248, 16, base + 248, 8);
+  expect_source(252, 16, base + 252, 4);
+  expect_source(250, 16, base + 250, 4); // Unaligned: bytes 250-253 fit, 254-257 do not.
+  expect_source(252, 8, base + 252, 4);
+  expect_source(254, 4, amdgpu::kInvalidLdsAddress, 0);
+  expect_source(255, 1, base + 255, 1);
+  expect_source(256, 1, amdgpu::kInvalidLdsAddress, 0);
+  expect_source(UINT32_MAX, 4, amdgpu::kInvalidLdsAddress, 0);
+
+  // IOFFSET is added before the range check, and the 32-bit sum wraps.
+  inst.ioffset = 0xfffff8u; // -8
+  expect_source(256, 16, base + 248, 8);
+  inst.ioffset = 64;
+  expect_source(UINT32_MAX - 63, 4, base, 4);
 }
 
 TEST(Gfx1250ExecutionTest, DecodedAsyncLdsLoadsHonorEveryAccessWidthAtAllocationEnd) {
