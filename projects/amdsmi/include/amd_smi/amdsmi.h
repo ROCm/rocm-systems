@@ -1135,7 +1135,9 @@ typedef struct {
                                               //!< not supported
   char asic_serial[AMDSMI_MAX_STRING_LENGTH]; /**< The socket's unique serial number, 0xFFFFFFFF if
                                                    not supported */
-  uint32_t oam_id;                   //!< Corresponds to socket number, 0xFFFFFFFF if not supported
+  uint32_t oam_id;                   //!< XGMI physical node ID within the hive (PF_LFB_REGION),
+                                     //!< 0-based; 0xFFFFFFFF if not supported or not in a
+                                     //!< multi-node hive
   uint32_t num_of_compute_units;     //!< 0xFFFFFFFF if not supported
   uint64_t target_graphics_version;  //!< 0xFFFFFFFFFFFFFFFF if not supported
   uint32_t subsystem_id;             //!> The subsystem ID
@@ -7929,7 +7931,8 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
  *           the revision ID and the serial number.
  *
  *  @note The processor_handle that contains amdsmi_asic_info_t member oam_id = 0
- *        corresponds to the socket that contains baseboard information.
+ *        corresponds to the GPU at XGMI physical node ID 0, which contains
+ *        baseboard information.
  *
  *  @param[in] processor_handle Device which to query
  *
