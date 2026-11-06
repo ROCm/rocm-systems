@@ -120,6 +120,7 @@
 #include <cstring>
 #include <cmath>
 
+#include "atomic_global_buffers.h"
 #include "mega_kernel_types.h"
 
 // ============================================================================
@@ -3249,15 +3250,17 @@ __device__ void test_multicast_load(float* global_mem,
                                     TestResults* results,
                                     int lane_id,
                                     int tid) {
-    // Thread 0 writes a known value to a shared broadcast location
-    if (tid == 0) {
-        global_mem[512] = 99.0f;   // use slot 512 to avoid aliasing with other tests
+    // Each block writes the same value, so no block waits on another block's
+    // store (__syncthreads() is block-local).
+    float* slot = &global_mem[MEGA_KERNEL_MULTICAST_FLOAT_INDEX];
+    if (threadIdx.x == 0) {
+        *slot = 99.0f;
     }
     __syncthreads();
 
     // ALL threads read from the SAME address → potential GL0/GL1 multicast
     // Use a volatile read so the compiler doesn't hoist or collapse loads
-    volatile float bval = ((volatile float*)global_mem)[512];
+    volatile float bval = *(volatile float*)slot;
 
     bool passed = (fabsf(bval - 99.0f) < 0.01f);
     if (lane_id == 0) {
@@ -3724,9 +3727,7 @@ extern "C" __global__ void mega_kernel(
 
     // 9 / 9.5 Memory ops: run VMEM first on output_buffer as scratch so it does
     // not clobber input_buffer. Then test_global_memory writes the host-side
-    // verify pattern (out[i] = in[i]*2+1). Under rocprof multi-pass collection
-    // some PMC sets previously left stale output (e.g. index 512 == 199) when
-    // VMEM mutated input after the verify store.
+    // verify pattern (out[i] = in[i]*2+1).
     if (active) {
         test_vmem_operations(output_buffer, results, lane_id, tid, buffer_size, tex_obj,
                              surf_obj);
@@ -3780,7 +3781,7 @@ extern "C" __global__ void mega_kernel(
     __syncthreads();
 
     // 19. Multicast Load (all threads load same address)
-    test_multicast_load(input_buffer, results, lane_id, tid);
+    test_multicast_load(global_float, results, lane_id, tid);
     __syncthreads();
 
     // Calculate totals on thread 0
