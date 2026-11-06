@@ -5899,9 +5899,15 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94EmptyLlThreshold_Widens) {
 // stay SIMPLE; dropping nNodes, isAllNvlink, or !useLL128OptIn would pick LL.
 TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94WidenGates_StaySimple) {
   PinP2pLlThreshold(/*userSet=*/false);
-  Gfx94P2pLlOpts multiNode;
-  multiNode.nNodes = 2;
-  ExpectGfx94RecvProtoLL(multiNode, 32 << 10, 0);
+  // nNodes > 1 takes the channel base through rcclParamPxnOptQpUsage, which the
+  // host fake aborts on. PXN disabled is the production default and skips that
+  // call. The widen still requires a single node.
+  {
+    ScopedHook pxnDisable(g_pxnDisable, [](struct ncclComm*) { return 1; });
+    Gfx94P2pLlOpts multiNode;
+    multiNode.nNodes = 2;
+    ExpectGfx94RecvProtoLL(multiNode, 32 << 10, 0);
+  }
   Gfx94P2pLlOpts pcie;
   pcie.isAllNvlink = 0;
   ExpectGfx94RecvProtoLL(pcie, 32 << 10, 0);
