@@ -258,6 +258,14 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   RegisterModifiers modifiers;
   inst.amdgpu_register_modifiers(modifiers);
   const RegisterAccess registers(wf);
+  if (modifiers.image_address)
+    for (unsigned component = 0; component < modifiers.image_coordinate_count; ++component) {
+      const unsigned word = modifiers.image_a16 ? component / 2 : component;
+      const uint16_t reg = modifiers.image_coordinates[word];
+      if (reg < wf.num_vgprs())
+        access({RegClass::VGPR, reg, 1}, lanes,
+               modifiers.image_a16 ? (component % 2 ? 0xc : 0x3) : 0xf, false);
+    }
   if (modifiers.exec_all_if_nonzero)
     lanes = wave32_exec_all_if_nonzero(lanes);
   if (modifiers.exec_whole_quads)
@@ -557,7 +565,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
                                   (name.find("mixlo_") != std::string_view::npos ||
                                    name.find("mixhi_") != std::string_view::npos);
     if (mix_preservation || !op || op == hwreg || op == modifiers.buffer_resource ||
-        (!pending_scalar_ && !op->is_vgpr()))
+        op == modifiers.image_address || (!pending_scalar_ && !op->is_vgpr()))
       return;
     if (op == modifiers.block_data) {
       for (uint32_t word = 0; word < kBlockDwordCount; ++word)
@@ -659,6 +667,17 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   if (!branch_stack && (!preserves_destination || distinguishes_preservation)) {
     inst.implicit_uses(implicit);
     implicit -= preservation_uses;
+  }
+  // Image coordinates were checked above with their A16 byte masks. Their
+  // register-level liveness uses must not turn a packed half into a full read.
+  if (modifiers.image_address) {
+    RegisterSet coordinate_uses;
+    const unsigned words = modifiers.image_a16 ? (modifiers.image_coordinate_count + 1) / 2
+                                               : modifiers.image_coordinate_count;
+    for (unsigned word = 0; word < words; ++word)
+      coordinate_uses.expand(
+          RegisterRef{RegClass::VGPR, static_cast<uint16_t>(modifiers.image_coordinates[word]), 1});
+    implicit -= coordinate_uses;
   }
   implicit.for_each([&](RegisterRef reg) {
     // Operand-derived reads preserve their bank roles above.

@@ -1469,6 +1469,8 @@ void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amd
                        "instruction callback could not be matched to its wavefront");
     return;
   }
+  // The FFM event holds four DWORDs. A five-DWORD GFX10 NSA instruction
+  // exceeds that event format even though the CU hook supplies the full window.
   const int encoding_bytes = inst.size();
   if (encoding_bytes <= 0 || encoding_bytes % 4 != 0 || encoding_bytes > 16 ||
       !inst.raw_encoding()) {

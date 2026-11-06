@@ -34,8 +34,7 @@ namespace rocjitsu::plugins::race_detector {
 namespace {
 
 InstructionSnapshot capture_instruction(uint64_t pc, const Instruction &inst) {
-  static_assert(InstructionSnapshot::kMaxWords * sizeof(uint32_t) ==
-                amdgpu::InstructionCache::kFetchBytes);
+  static_assert(InstructionSnapshot::kMaxWords == amdgpu::DecodedInstructionCache::kNumWords);
   if (!inst.raw_encoding())
     throw std::logic_error(
         std::format("race detector instruction at PC {:#x} has no encoding", pc));
