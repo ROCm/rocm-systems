@@ -440,6 +440,7 @@ class FakeSubsystem : public SmiNicSubsystem {
   bool driver_loaded(const std::string& bdf, DriverType) const override {
     return (m_unbound.count(bdf) == 0);
   }
+  auto driver_loaded(DriverType) const -> bool override { return true; }
   const std::vector<std::unique_ptr<SmiNic>>& get_nics() const override { return nics_; }
   void add(std::unique_ptr<SmiNic> nic) { nics_.push_back(std::move(nic)); }
   void unbind(const std::string& bdf) { m_unbound.insert(bdf); }
@@ -475,6 +476,55 @@ struct InterfaceFixture_t {
 
   smi_nic_ctx_t ctx = nullptr;
 };
+
+// A NIC with no ports, such as a UALoE fabric endpoint.
+struct PortlessFixture_t {
+  PortlessFixture_t() {
+    auto subsystem = std::make_unique<FakeSubsystem>();
+    subsystem->add(std::make_unique<SmiNic>("", "0000:03:00.0"));
+    auto system = std::make_unique<SmiNicSystem>("/tmp", "/tmp");
+    system->register_subsystem(std::move(subsystem));
+    system->discover_nics();
+    smi_nic_create_context_for_testing(&ctx, std::move(system));
+  }
+  ~PortlessFixture_t() {
+    if (ctx != nullptr) {
+      smi_nic_destroy_context(ctx);
+    }
+  }
+  PortlessFixture_t(const PortlessFixture_t&) = delete;
+  PortlessFixture_t& operator=(const PortlessFixture_t&) = delete;
+
+  smi_nic_ctx_t ctx = nullptr;
+};
+
+static void test_interface_portless_nic_reports_no_data_for_port_scoped_reads() {
+  PortlessFixture_t fixture;
+  auto count = uint32_t{0};
+  auto stats = std::make_unique<smi_nic_stat_info_t>();
+  auto rdma = std::make_unique<smi_nic_rdma_devices_info_t>();
+
+  check("portless port stats count is NO_DATA",
+        smi_get_nic_port_statistics_count(fixture.ctx, kFakeNicBdf, 0, &count) ==
+            SMI_NIC_STATUS_NO_DATA);
+  check("portless port stats list is NO_DATA",
+        smi_get_nic_port_statistics_list(fixture.ctx, kFakeNicBdf, 0, stats.get()) ==
+            SMI_NIC_STATUS_NO_DATA);
+  check("portless vendor stats count is NO_DATA",
+        smi_get_nic_vendor_statistics_count(fixture.ctx, kFakeNicBdf, 0, &count) ==
+            SMI_NIC_STATUS_NO_DATA);
+  check("portless vendor stats list is NO_DATA",
+        smi_get_nic_vendor_statistics_list(fixture.ctx, kFakeNicBdf, 0, stats.get()) ==
+            SMI_NIC_STATUS_NO_DATA);
+  check("portless rdma stats count is NO_DATA",
+        smi_get_nic_rdma_port_statistics_count(fixture.ctx, kFakeNicBdf, 0, 0, 0, &count) ==
+            SMI_NIC_STATUS_NO_DATA);
+  check("portless rdma stats list is NO_DATA",
+        smi_get_nic_rdma_port_statistics_list(fixture.ctx, kFakeNicBdf, 0, 0, 0, stats.get()) ==
+            SMI_NIC_STATUS_NO_DATA);
+  check("portless rdma device info is NO_DATA",
+        smi_get_nic_rdma_dev_info(fixture.ctx, kFakeNicBdf, rdma.get()) == SMI_NIC_STATUS_NO_DATA);
+}
 
 static void test_interface_reads_vendor_statistics_from_a_prepared_system() {
   auto transport = std::make_shared<FakeTransport>();
@@ -1402,6 +1452,7 @@ int main() {
   test_interface_treats_an_unsupported_vendor_read_as_no_counters();
   test_interface_count_matches_the_cap_on_the_list();
   test_interface_rdma_count_matches_the_cap_on_the_list();
+  test_interface_portless_nic_reports_no_data_for_port_scoped_reads();
   test_interface_vendor_list_of_nothing_succeeds_with_zero();
   test_interface_port_list_of_nothing_succeeds_with_zero();
   test_interface_rdma_list_of_nothing_succeeds_with_zero();

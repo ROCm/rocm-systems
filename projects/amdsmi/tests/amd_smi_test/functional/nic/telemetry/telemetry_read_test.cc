@@ -65,12 +65,6 @@ void TestNicTelemetryRead::Run(void) {
     EXPECT_LT(strnlen(telem.health.reporter, sizeof(telem.health.reporter)),
               sizeof(telem.health.reporter));
 
-    // Each temperature is either a plausible reading or the unsupported reserved value.
-    for (uint16_t t : {telem.temperature.asic_temp_c, telem.temperature.transceiver_temp_c,
-                       telem.temperature.board_temp_c}) {
-      EXPECT_TRUE((t == UINT16_MAX) || (t <= 150)) << "implausible temperature: " << t;
-    }
-
     // Bind every remaining public field by name so a field dropped or renamed
     // from the copy bridge fails to compile here (companion to the sizeof guard).
     EXPECT_TRUE((telem.port_split.splittable == UINT8_MAX) || (telem.port_split.splittable <= 1))
@@ -114,6 +108,12 @@ void TestNicTelemetryRead::Run(void) {
             << "unexpected category " << sensor.category;
         EXPECT_NE(sensor.name, AMDSMI_NIC_SENSOR_NAME_UNKNOWN);
         EXPECT_LT(strnlen(sensor.label, sizeof(sensor.label)), sizeof(sensor.label));
+        const bool is_alarm = (sensor.name >= AMDSMI_NIC_SENSOR_NAME_ALARM_MIN);
+        if (is_alarm) {
+          // An alarm is a flag, not a measurement.
+          EXPECT_EQ(sensor.unit, AMDSMI_METRIC_UNIT_BOOL) << sensor.label;
+          EXPECT_TRUE((sensor.value == 0) || (sensor.value == 1)) << sensor.label;
+        }
         const bool is_temperature_input = (sensor.category == AMDSMI_METRIC_CATEGORY_TEMPERATURE) &&
                                           (sensor.name == AMDSMI_NIC_SENSOR_NAME_INPUT);
         if (is_temperature_input) {
@@ -122,34 +122,6 @@ void TestNicTelemetryRead::Run(void) {
           EXPECT_LT(sensor.value, 150000) << sensor.label;
         }
       }
-
-      // The telemetry temperatures come from the same hwmon labels, so they must agree with the
-      // labelled sensors. Skipped for a NIC that labels no die or board sensor.
-      amdsmi_nic_telemetry_t telem;
-      ASSERT_EQ(amdsmi_get_nic_telemetry(nic, &telem), AMDSMI_STATUS_SUCCESS);
-      constexpr int kMaxDriftC = 3;  // the two calls read the sensor at different moments
-      auto expect_matches_labelled_input = [&](uint16_t telemetry_temp_c, const char* word) {
-        if (telemetry_temp_c == UINT16_MAX) {
-          return;
-        }
-        for (const amdsmi_nic_sensor_t& sensor : sensors) {
-          std::string label(sensor.label);
-          std::transform(label.begin(), label.end(), label.begin(),
-                         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-          const bool is_labelled_input = (sensor.category == AMDSMI_METRIC_CATEGORY_TEMPERATURE) &&
-                                         (sensor.name == AMDSMI_NIC_SENSOR_NAME_INPUT) &&
-                                         (label.find(word) != std::string::npos);
-          if (is_labelled_input) {
-            const int sensor_temp_c = static_cast<int>(sensor.value / 1000);
-            EXPECT_LE(std::abs(static_cast<int>(telemetry_temp_c) - sensor_temp_c), kMaxDriftC)
-                << word << " telemetry " << telemetry_temp_c << " C vs sensor '" << sensor.label
-                << "' " << sensor_temp_c << " C";
-            return;
-          }
-        }
-      };
-      expect_matches_labelled_input(telem.temperature.asic_temp_c, "die");
-      expect_matches_labelled_input(telem.temperature.board_temp_c, "board");
 
       if (count > 1) {
         amdsmi_nic_sensor_t one;

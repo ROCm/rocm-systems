@@ -182,6 +182,20 @@ class TestMetricNicSensors(unittest.TestCase):
         self.assertEqual(sensors["SENSOR_1"]["MAX"], {"value": 40.0, "unit": "W"})
         self.assertEqual(sensors["SENSOR_2"]["VALUE"], {"value": 0.744, "unit": "V"})
 
+    def test_an_alarm_is_a_flag_not_a_scaled_reading(self):
+        records = [
+            *_IONIC_RECORDS[:2],
+            _record("TEMPERATURE", "ALARM_CRIT", "BOOL", 1, 3, "board temperature", 1),
+        ]
+        text_values, _ = self._run(records)
+        json_values, _ = self._run(records, is_json=True)
+        csv_values, _ = self._run(records, is_csv=True)
+        self.assertEqual(text_values["SENSORS"]["SENSOR_0"]["ALARM_CRIT"], 1)
+        self.assertEqual(
+            json_values["SENSORS"]["SENSOR_0"]["ALARM_CRIT"], {"value": 1, "unit": "BOOL"}
+        )
+        self.assertEqual(csv_values["SENSOR_0_ALARM_CRIT"], 1)
+
     def test_csv_flattens_sensor_blocks_with_plain_numbers(self):
         values, _ = self._run(_IONIC_RECORDS[:2], is_csv=True)
         self.assertEqual(values["SENSOR_0_LABEL"], "board temperature")
@@ -204,10 +218,11 @@ class TestMetricNicSensors(unittest.TestCase):
         json_values, _ = self._run([], error=True, is_json=True)
         self.assertEqual(json_values["SENSORS"], {})
 
-    def test_the_default_output_does_not_read_sensors(self):
-        values, get_sensors = self._run(_IONIC_RECORDS, sensors=False)
+    def test_the_default_output_has_no_sensors_block(self):
+        # The sensors are still read for the TEMPERATURE block; the SENSORS block is opt-in.
+        values, _ = self._run(_IONIC_RECORDS, sensors=False)
         self.assertNotIn("SENSORS", values)
-        get_sensors.assert_not_called()
+        self.assertEqual(values["temperature"]["board"], "39 \N{DEGREE SIGN}C")
 
     def test_an_unlabelled_record_is_na_and_keeps_its_identity(self):
         record = _record("TEMPERATURE", "INPUT", "MILLIDEGREE_CELSIUS", 2, 4, "", 46000)

@@ -39,6 +39,7 @@ def _load_modules() -> types.SimpleNamespace:
         amdsmi_wrapper=wrapper,
         amdsmi_get_nic_type_label=mock.Mock(return_value="AINIC"),
         amdsmi_get_nic_telemetry=mock.Mock(return_value={}),
+        amdsmi_get_nic_hwmon_sensors=mock.Mock(return_value=[]),
     )
     exception = fake_module("amdsmi.amdsmi_exception", AmdSmiLibraryException=_LibraryError)
     package = fake_module("amdsmi", amdsmi_exception=exception, amdsmi_interface=interface)

@@ -186,8 +186,7 @@ smi_nic_status_t smi_nic_driver_loaded(smi_nic_vendor_t vendor) {
   // A vendor can have several plugins (Pensando and UALoE are both AMD); any one loaded counts.
   try {
     for (const auto& plugin : make_default_vendor_plugins()) {
-      if ((to_shim_vendor(plugin->vendor()) == vendor) &&
-          plugin->is_driver_present(DriverType::Main)) {
+      if ((to_shim_vendor(plugin->vendor()) == vendor) && plugin->driver_loaded(DriverType::Main)) {
         return SMI_NIC_STATUS_SUCCESS;
       }
     }
@@ -583,7 +582,7 @@ static smi_nic_status_t get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device
 
   const auto& ports = nic->nic_ports();
   if (ports.empty()) {
-    return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+    return SMI_NIC_STATUS_NO_DATA;
   }
 
   *info = {};
@@ -770,7 +769,7 @@ smi_nic_status_t smi_get_nic_port_statistics_count(smi_nic_ctx_t ctx, uint64_t d
 
   const auto& ports = nic->nic_ports();
   if (ports.empty()) {
-    return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+    return SMI_NIC_STATUS_NO_DATA;
   }
 
   if (port_index >= ports.size()) {
@@ -808,7 +807,7 @@ smi_nic_status_t smi_get_nic_port_statistics_list(smi_nic_ctx_t ctx, uint64_t de
 
   const auto& ports = nic->nic_ports();
   if (ports.empty()) {
-    return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+    return SMI_NIC_STATUS_NO_DATA;
   }
 
   if (port_index >= ports.size()) {
@@ -864,7 +863,7 @@ smi_nic_status_t smi_get_nic_vendor_statistics_count_with_scope(smi_nic_ctx_t ct
 
   const auto& ports = nic->nic_ports();
   if (ports.empty()) {
-    return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+    return SMI_NIC_STATUS_NO_DATA;
   }
 
   if (port_index >= ports.size()) {
@@ -914,7 +913,7 @@ smi_nic_status_t smi_get_nic_vendor_statistics_list_with_scope(smi_nic_ctx_t ctx
 
   const auto& ports = nic->nic_ports();
   if (ports.empty()) {
-    return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+    return SMI_NIC_STATUS_NO_DATA;
   }
 
   if (port_index >= ports.size()) {
@@ -967,7 +966,7 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_count(smi_nic_ctx_t ctx, uint6
 
   const auto& ports = nic->nic_ports();
   if (ports.empty()) {
-    return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+    return SMI_NIC_STATUS_NO_DATA;
   }
 
   if (port_index >= ports.size()) {
@@ -1018,7 +1017,7 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_list(smi_nic_ctx_t ctx, uint64
 
   const auto& ports = nic->nic_ports();
   if (ports.empty()) {
-    return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+    return SMI_NIC_STATUS_NO_DATA;
   }
 
   if (port_index >= ports.size()) {

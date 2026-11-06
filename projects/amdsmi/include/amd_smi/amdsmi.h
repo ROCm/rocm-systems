@@ -323,7 +323,7 @@ typedef enum {
                                            within the CPU */
   AMDSMI_PROCESSOR_TYPE_AMD_APU,   //!< AMD Accelerated processor type, GPU and CPU on a single die
   AMDSMI_PROCESSOR_TYPE_AMD_NIC,   //!< AMD Network Interface Card processor type
-  AMDSMI_PROCESSOR_TYPE_BRCM_NIC,  //!< Deprecated: no processor reports this type
+  AMDSMI_PROCESSOR_TYPE_BRCM_NIC,  //!< Broadcom NIC type; baremetal lists these as AMD_NIC
   AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH  //!< Deprecated: no processor reports this type
 } amdsmi_processor_type_t;
 
@@ -3199,17 +3199,6 @@ typedef enum {
 } amdsmi_nic_health_state_t;
 
 /**
- * @brief NIC temperatures in whole degrees Celsius; UINT16_MAX when unavailable.
- *
- * @cond @tag{gpu_bm_linux} @endcond
- */
-typedef struct {
-  uint16_t asic_temp_c;
-  uint16_t transceiver_temp_c;
-  uint16_t board_temp_c;
-} amdsmi_nic_temperature_t;
-
-/**
  * @brief NIC health summary.
  *
  * @cond @tag{gpu_bm_linux} @endcond
@@ -3237,9 +3226,9 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
-  amdsmi_nic_temperature_t temperature;
   amdsmi_nic_health_t health;
   amdsmi_nic_port_split_t port_split;
+  uint64_t reserved[4];
 } amdsmi_nic_telemetry_t;
 
 /**
@@ -3250,6 +3239,7 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef enum {
+  AMDSMI_METRIC_UNIT_BOOL = 2,
   AMDSMI_METRIC_UNIT_MILLIVOLT = 5,
   AMDSMI_METRIC_UNIT_MILLIDEGREE_CELSIUS = 15,
   AMDSMI_METRIC_UNIT_MICROWATT = 16,
@@ -3272,7 +3262,7 @@ typedef enum {
  * @brief hwmon attribute a NIC sensor record carries.
  *
  * The category of the record disambiguates, for example, a temperature @c max from a power
- * @c max. The alarm attributes are not reported.
+ * @c max. The @c ALARM_* attributes are 0 or 1 flags in ::AMDSMI_METRIC_UNIT_BOOL.
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
@@ -3286,6 +3276,13 @@ typedef enum {
   AMDSMI_NIC_SENSOR_NAME_EMERGENCY = 6,
   AMDSMI_NIC_SENSOR_NAME_SHUTDOWN = 7,
   AMDSMI_NIC_SENSOR_NAME_CAP = 8,
+  AMDSMI_NIC_SENSOR_NAME_ALARM_MIN = 9,
+  AMDSMI_NIC_SENSOR_NAME_ALARM_MAX = 10,
+  AMDSMI_NIC_SENSOR_NAME_ALARM_LCRIT = 11,
+  AMDSMI_NIC_SENSOR_NAME_ALARM_CRIT = 12,
+  AMDSMI_NIC_SENSOR_NAME_ALARM_EMERGENCY = 13,
+  AMDSMI_NIC_SENSOR_NAME_ALARM_SHUTDOWN = 14,
+  AMDSMI_NIC_SENSOR_NAME_ALARM_CAP = 15,
 } amdsmi_nic_sensor_name_t;
 
 /**
@@ -3305,6 +3302,7 @@ typedef struct {
   uint32_t instance;                     //!< the N in hwmon<N>
   char label[AMDSMI_MAX_STRING_LENGTH];  //!< driver label, "" when the driver gives none
   int64_t value;                         //!< raw hwmon integer in @c unit
+  uint64_t reserved[4];
 } amdsmi_nic_sensor_t;
 
 /**
@@ -10428,15 +10426,15 @@ amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
                                        amdsmi_nic_fw_info_t* info);
 
 /**
- *  @brief Retrieve live telemetry (temperature, health, port-split) for a NIC.
+ *  @brief Retrieve live telemetry (health, port-split) for a NIC.
  *
  *  @ingroup tagNicInfo
  *
  *  @platform{gpu_bm_linux}
  *
- *  @note Health and port-split are read over devlink (libnl3); temperature via
- *  sysfs/hwmon. A metric the NIC does not expose is reported through reserved values
- *  in its sub-struct (per-width max value), not a failed call. The call fails
+ *  @note Health and port-split are read over devlink (libnl3). Temperatures come from
+ *  amdsmi_get_nic_hwmon_sensors(). A metric the NIC does not expose is reported through
+ *  reserved values in its sub-struct (per-width max value), not a failed call. The call fails
  *  only when the handle is not a NIC.
  *
  *  @param[in] processor_handle NIC for which to query
@@ -10458,8 +10456,9 @@ amdsmi_status_t amdsmi_get_nic_telemetry(amdsmi_processor_handle processor_handl
  *  @platform{gpu_bm_linux}
  *
  *  @details One record is returned per readable hwmon attribute (input, min, max, lcrit, crit,
- *  emergency, shutdown, cap). Values are the raw hwmon integers in the record's unit. A NIC with no
- * hwmon node reports zero records and ::AMDSMI_STATUS_SUCCESS.
+ *  emergency, shutdown, cap and the matching alarm flags). Values are the raw hwmon integers in
+ *  the record's unit. A NIC with no hwmon node reports zero records and
+ *  ::AMDSMI_STATUS_SUCCESS.
  *
  *  @param[in] processor_handle NIC for which to query
  *
@@ -10569,9 +10568,6 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
  *
  *  @param[in] processor_handle NIC for which to query
  *  @param[in] port_index index of the NIC port to query
- *  @param[in] scope AMDSMI_NIC_STAT_SCOPE_DEFAULT for the driver's default counter set,
- *  AMDSMI_NIC_STAT_SCOPE_EXTENDED for the full set (a superset). Any other value returns
- *  ::AMDSMI_STATUS_INVAL
  *  @param[in,out] num_stats pointer to the number of statistics
  *    - Input: maximum number of statistics that stats array can hold; ignored if stats is NULL
  *    - Output: number of statistics available
@@ -10580,6 +10576,9 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
  *    - If not NULL, must be allocated by user with at least num_stats elements. When there are
  *      more statistics, the first num_stats are filled and ::AMDSMI_STATUS_INSUFFICIENT_SIZE
  *      is returned
+ *  @param[in] scope AMDSMI_NIC_STAT_SCOPE_DEFAULT for the driver's default counter set,
+ *  AMDSMI_NIC_STAT_SCOPE_EXTENDED for the full set (a superset). Any other value returns
+ *  ::AMDSMI_STATUS_INVAL
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including a driver with no
  *    statistics (num_stats is 0). ::AMDSMI_STATUS_NOT_FOUND if @p port_index is past the last
@@ -10587,8 +10586,8 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
  *    other failure
  */
 amdsmi_status_t amdsmi_get_nic_vendor_statistics_with_scope(
-    amdsmi_processor_handle processor_handle, uint32_t port_index, amdsmi_nic_stat_scope_t scope,
-    uint32_t* num_stats, amdsmi_nic_stat_t* stats);
+    amdsmi_processor_handle processor_handle, uint32_t port_index, uint32_t* num_stats,
+    amdsmi_nic_stat_t* stats, amdsmi_nic_stat_scope_t scope);
 
 /** @} End tagNicInfo */
 

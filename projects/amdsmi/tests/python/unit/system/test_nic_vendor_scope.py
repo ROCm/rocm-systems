@@ -74,7 +74,7 @@ def _fake_wrapper() -> Tuple[types.SimpleNamespace, List[tuple]]:
 
     def fake_get_stats(*args: Any) -> int:
         calls.append(args)
-        num_stats, stats = args[-2], args[-1]
+        num_stats, stats = args[2], args[3]
         num_stats._obj.value = 1
         if stats is not None:
             stats[0].name = _COUNTER_NAME
@@ -101,14 +101,16 @@ class TestNicVendorStatisticsScope(unittest.TestCase):
 
         self.assertEqual(result, {_COUNTER_NAME.decode(): _COUNTER_VALUE})
         self.assertEqual(len(calls), 2)
-        self.assertTrue(all(args[:3] == (handle, _PORT_INDEX, _SCOPE_EXTENDED) for args in calls))
+        self.assertTrue(
+            all(args[:2] == (handle, _PORT_INDEX) and args[4] == _SCOPE_EXTENDED for args in calls)
+        )
 
     def test_an_omitted_scope_asks_for_the_default_tier(self) -> None:
         wrapper, calls = _fake_wrapper()
 
         _load_function(wrapper)(_FakeHandle(), _PORT_INDEX)
 
-        self.assertTrue(all(args[2] == _SCOPE_DEFAULT for args in calls))
+        self.assertTrue(all(args[4] == _SCOPE_DEFAULT for args in calls))
 
     def test_no_state_is_set_on_the_handle(self) -> None:
         wrapper, _ = _fake_wrapper()
@@ -129,7 +131,7 @@ class TestNicVendorStatisticsScope(unittest.TestCase):
 
         def fake_get_stats(*args: Any) -> int:
             calls.append(args)
-            args[-2]._obj.value = 0
+            args[2]._obj.value = 0
             return _STATUS_SUCCESS
 
         wrapper.amdsmi_get_nic_vendor_statistics_with_scope = fake_get_stats

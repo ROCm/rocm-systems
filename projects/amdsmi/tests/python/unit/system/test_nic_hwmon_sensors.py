@@ -25,6 +25,7 @@ _LABEL_BYTES = 256
 _CATEGORY_TEMPERATURE = 3
 _CATEGORY_POWER = 4
 _CATEGORY_VOLTAGE = 14
+_UNIT_BOOL = 2
 _UNIT_MILLIVOLT = 5
 _UNIT_MILLIDEGREE_CELSIUS = 15
 _UNIT_MICROWATT = 16
@@ -37,6 +38,13 @@ _NAME_CRIT = 5
 _NAME_EMERGENCY = 6
 _NAME_SHUTDOWN = 7
 _NAME_CAP = 8
+_NAME_ALARM_MIN = 9
+_NAME_ALARM_MAX = 10
+_NAME_ALARM_LCRIT = 11
+_NAME_ALARM_CRIT = 12
+_NAME_ALARM_EMERGENCY = 13
+_NAME_ALARM_SHUTDOWN = 14
+_NAME_ALARM_CAP = 15
 _UNDEFINED_ENUM_VALUE = 99
 
 # (category, name, unit, channel, instance, label, value)
@@ -78,6 +86,7 @@ class _Sensor(ctypes.Structure):
         ("instance", ctypes.c_uint32),
         ("label", ctypes.c_char * _LABEL_BYTES),
         ("value", ctypes.c_int64),
+        ("reserved", ctypes.c_uint64 * 4),
     ]
 
 
@@ -148,6 +157,7 @@ def _run(
         AMDSMI_METRIC_CATEGORY_TEMPERATURE=_CATEGORY_TEMPERATURE,
         AMDSMI_METRIC_CATEGORY_POWER=_CATEGORY_POWER,
         AMDSMI_METRIC_CATEGORY_VOLTAGE=_CATEGORY_VOLTAGE,
+        AMDSMI_METRIC_UNIT_BOOL=_UNIT_BOOL,
         AMDSMI_METRIC_UNIT_MILLIVOLT=_UNIT_MILLIVOLT,
         AMDSMI_METRIC_UNIT_MILLIDEGREE_CELSIUS=_UNIT_MILLIDEGREE_CELSIUS,
         AMDSMI_METRIC_UNIT_MICROWATT=_UNIT_MICROWATT,
@@ -160,6 +170,13 @@ def _run(
         AMDSMI_NIC_SENSOR_NAME_EMERGENCY=_NAME_EMERGENCY,
         AMDSMI_NIC_SENSOR_NAME_SHUTDOWN=_NAME_SHUTDOWN,
         AMDSMI_NIC_SENSOR_NAME_CAP=_NAME_CAP,
+        AMDSMI_NIC_SENSOR_NAME_ALARM_MIN=_NAME_ALARM_MIN,
+        AMDSMI_NIC_SENSOR_NAME_ALARM_MAX=_NAME_ALARM_MAX,
+        AMDSMI_NIC_SENSOR_NAME_ALARM_LCRIT=_NAME_ALARM_LCRIT,
+        AMDSMI_NIC_SENSOR_NAME_ALARM_CRIT=_NAME_ALARM_CRIT,
+        AMDSMI_NIC_SENSOR_NAME_ALARM_EMERGENCY=_NAME_ALARM_EMERGENCY,
+        AMDSMI_NIC_SENSOR_NAME_ALARM_SHUTDOWN=_NAME_ALARM_SHUTDOWN,
+        AMDSMI_NIC_SENSOR_NAME_ALARM_CAP=_NAME_ALARM_CAP,
         amdsmi_processor_handle=_FakeHandle,
         amdsmi_nic_sensor_t=_Sensor,
         amdsmi_get_nic_hwmon_sensors=library.get_nic_hwmon_sensors,
@@ -233,6 +250,23 @@ class TestNicHwmonSensors(unittest.TestCase):
         )
         result, _ = _run([shutdown])
         self.assertEqual(result[0]["attribute"], "SHUTDOWN")
+
+    def test_alarm_attributes_decode_as_flags(self) -> None:
+        names = {
+            _NAME_ALARM_MIN: "ALARM_MIN",
+            _NAME_ALARM_MAX: "ALARM_MAX",
+            _NAME_ALARM_LCRIT: "ALARM_LCRIT",
+            _NAME_ALARM_CRIT: "ALARM_CRIT",
+            _NAME_ALARM_EMERGENCY: "ALARM_EMERGENCY",
+            _NAME_ALARM_SHUTDOWN: "ALARM_SHUTDOWN",
+            _NAME_ALARM_CAP: "ALARM_CAP",
+        }
+        records: List[_Record] = [
+            (_CATEGORY_TEMPERATURE, name, _UNIT_BOOL, 1, 0, b"", 1) for name in names
+        ]
+        result, _ = _run(records)
+        self.assertEqual([record["attribute"] for record in result], list(names.values()))
+        self.assertTrue(all(record["unit"] == "BOOL" for record in result))
 
     def test_a_label_with_a_stray_byte_is_replaced_not_raised(self) -> None:
         record: _Record = (_CATEGORY_VOLTAGE, _NAME_INPUT, _UNIT_MILLIVOLT, 0, 0, b"ab\xffcd", 744)

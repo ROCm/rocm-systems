@@ -1059,9 +1059,6 @@ amdsmi_status_t amdsmi_get_nic_telemetry(amdsmi_processor_handle processor_handl
   // The shim struct already carries the public-matching reserved values (per-width max) for
   // unexposed metrics, so a straight copy is correct; *info = {} zero-fills reserved[].
   *info = {};
-  info->temperature.asic_temp_c = telemetry.temperature.asic_temp_c;
-  info->temperature.transceiver_temp_c = telemetry.temperature.transceiver_temp_c;
-  info->temperature.board_temp_c = telemetry.temperature.board_temp_c;
   info->health.state = telemetry.health.state;
   info->health.error_count = telemetry.health.error_count;
   std::snprintf(info->health.reporter, sizeof(info->health.reporter), "%s",
@@ -1081,6 +1078,8 @@ static_assert(static_cast<uint32_t>(hw::Category_t::Power) ==
               static_cast<uint32_t>(AMDSMI_METRIC_CATEGORY_POWER));
 static_assert(static_cast<uint32_t>(hw::Category_t::Voltage) ==
               static_cast<uint32_t>(AMDSMI_METRIC_CATEGORY_VOLTAGE));
+static_assert(static_cast<uint32_t>(hw::Unit_t::Bool) ==
+              static_cast<uint32_t>(AMDSMI_METRIC_UNIT_BOOL));
 static_assert(static_cast<uint32_t>(hw::Unit_t::MilliVolt) ==
               static_cast<uint32_t>(AMDSMI_METRIC_UNIT_MILLIVOLT));
 static_assert(static_cast<uint32_t>(hw::Unit_t::MilliDegreeCelsius) ==
@@ -1103,6 +1102,20 @@ static_assert(static_cast<uint32_t>(hw::Attribute_t::Shutdown) ==
               static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_SHUTDOWN));
 static_assert(static_cast<uint32_t>(hw::Attribute_t::Cap) ==
               static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_CAP));
+static_assert(static_cast<uint32_t>(hw::Attribute_t::AlarmMin) ==
+              static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_ALARM_MIN));
+static_assert(static_cast<uint32_t>(hw::Attribute_t::AlarmMax) ==
+              static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_ALARM_MAX));
+static_assert(static_cast<uint32_t>(hw::Attribute_t::AlarmLCrit) ==
+              static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_ALARM_LCRIT));
+static_assert(static_cast<uint32_t>(hw::Attribute_t::AlarmCrit) ==
+              static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_ALARM_CRIT));
+static_assert(static_cast<uint32_t>(hw::Attribute_t::AlarmEmergency) ==
+              static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_ALARM_EMERGENCY));
+static_assert(static_cast<uint32_t>(hw::Attribute_t::AlarmShutdown) ==
+              static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_ALARM_SHUTDOWN));
+static_assert(static_cast<uint32_t>(hw::Attribute_t::AlarmCap) ==
+              static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_ALARM_CAP));
 }  // namespace
 
 amdsmi_status_t amdsmi_get_nic_hwmon_sensors(amdsmi_processor_handle processor_handle,
@@ -1202,8 +1215,8 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
 }
 
 amdsmi_status_t amdsmi_get_nic_vendor_statistics_with_scope(
-    amdsmi_processor_handle processor_handle, uint32_t port_index, amdsmi_nic_stat_scope_t scope,
-    uint32_t* num_stats, amdsmi_nic_stat_t* stats) {
+    amdsmi_processor_handle processor_handle, uint32_t port_index, uint32_t* num_stats,
+    amdsmi_nic_stat_t* stats, amdsmi_nic_stat_scope_t scope) {
   AMDSMI_CHECK_INIT();
   smi_nic_stat_scope_t nic_scope = SMI_NIC_STAT_SCOPE_DEFAULT;
   if (!amd::smi::was_nic_stat_scope_resolved(scope, &nic_scope)) {

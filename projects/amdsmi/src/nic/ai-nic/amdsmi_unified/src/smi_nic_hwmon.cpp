@@ -49,7 +49,7 @@ struct AttributeSpec_t {
   Attribute_t attribute;
 };
 
-constexpr auto kAttributes = std::array<AttributeSpec_t, 8>{{
+constexpr auto kAttributes = std::array<AttributeSpec_t, 15>{{
     {"input", Attribute_t::Input},
     {"min", Attribute_t::Min},
     {"max", Attribute_t::Max},
@@ -58,7 +58,20 @@ constexpr auto kAttributes = std::array<AttributeSpec_t, 8>{{
     {"emergency", Attribute_t::Emergency},
     {"shutdown", Attribute_t::Shutdown},
     {"cap", Attribute_t::Cap},
+    {"min_alarm", Attribute_t::AlarmMin},
+    {"max_alarm", Attribute_t::AlarmMax},
+    {"lcrit_alarm", Attribute_t::AlarmLCrit},
+    {"crit_alarm", Attribute_t::AlarmCrit},
+    {"emergency_alarm", Attribute_t::AlarmEmergency},
+    {"shutdown_alarm", Attribute_t::AlarmShutdown},
+    {"cap_alarm", Attribute_t::AlarmCap},
 }};
+
+// An alarm attribute is a 0 or 1 flag whatever the sensor kind, so it does not take the kind's
+// unit.
+auto is_alarm(Attribute_t attribute) -> bool {
+  return (static_cast<uint32_t>(attribute) >= static_cast<uint32_t>(Attribute_t::AlarmMin));
+}
 
 struct ParsedName_t {
   const KindSpec_t* kind;
@@ -210,8 +223,9 @@ auto scan_sensors(const std::string& hwmon_root) -> std::vector<SensorRecord_t> 
       if (!value.has_value()) {
         continue;
       }
-      records.push_back({parsed->kind->category, attribute.value(), parsed->kind->unit,
-                         parsed->channel, instance.index, std::string{}, value.value()});
+      const auto unit = is_alarm(attribute.value()) ? Unit_t::Bool : parsed->kind->unit;
+      records.push_back({parsed->kind->category, attribute.value(), unit, parsed->channel,
+                         instance.index, std::string{}, value.value()});
     }
 
     for (auto i = first_of_instance; i < records.size(); ++i) {

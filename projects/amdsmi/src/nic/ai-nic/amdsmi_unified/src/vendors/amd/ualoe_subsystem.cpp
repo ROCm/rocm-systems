@@ -46,6 +46,14 @@ bool SmiNicSubsystemUALoE::driver_loaded(const std::string& bdf, DriverType driv
                                 /*is_canonical_match=*/false);
 }
 
+auto SmiNicSubsystemUALoE::driver_loaded(DriverType driver_type) const -> bool {
+  // A fabric endpoint carries no RDMA auxiliary device, so only Main resolves.
+  if (driver_type != DriverType::Main) {
+    return false;
+  }
+  return is_directory_present(driver_sysfs_root_ + kPciDriversDir + kIfoeDriverName);
+}
+
 // PCI ids alone identify the endpoint: it exposes no netdev, so a net-class
 // walk cannot see it, and it is worth listing whether or not ifoe is bound.
 void SmiNicSubsystemUALoE::discover(const std::string& pci_path, const std::string&,

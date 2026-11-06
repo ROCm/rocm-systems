@@ -166,7 +166,7 @@ enumerate one vendor's hardware.
                            std::shared_ptr<amd::smi::nic::transport::NicTransport> transport) = 0;
      virtual NicVendor vendor() const = 0;  // descriptive only
      virtual bool driver_loaded(const std::string& bdf, DriverType driver_type) const = 0;
-     virtual auto is_driver_present(DriverType driver_type) const -> bool { return false; }
+     virtual auto driver_loaded(DriverType driver_type) const -> bool = 0;
      virtual const std::vector<std::unique_ptr<SmiNic>>& get_nics() const = 0;
 
     protected:
@@ -541,10 +541,10 @@ The entry holds the name and version in ``fw``, so read ``entry.fw.name`` and
 
 ### NIC telemetry
 
-Live temperature, health, and port-split state. Temperature is read via
-sysfs/hwmon; health and port-split come over devlink (libnl3). A metric the NIC
-does not expose is reported through a width-max reserved value in its sub-struct
-(``UINT16_MAX``, ``UINT32_MAX``, or ``UINT8_MAX``), not a failed call.
+Live health and port-split state, which come over devlink (libnl3). Temperatures
+are not part of telemetry: read them from ``amdsmi_get_nic_hwmon_sensors()``. A
+metric the NIC does not expose is reported through a width-max reserved value in
+its sub-struct (``UINT32_MAX`` or ``UINT8_MAX``), not a failed call.
 
 ```c
 typedef enum {
@@ -554,12 +554,6 @@ typedef enum {
     AMDSMI_NIC_HEALTH_ERROR = 3,
     AMDSMI_NIC_HEALTH_UNSUPPORTED = 4,  // no health reporter exposed
 } amdsmi_nic_health_state_t;
-
-typedef struct {
-    uint16_t asic_temp_c;
-    uint16_t transceiver_temp_c;
-    uint16_t board_temp_c;
-} amdsmi_nic_temperature_t;
 
 typedef struct {
     uint8_t  state;          // an amdsmi_nic_health_state_t value
@@ -574,9 +568,9 @@ typedef struct {
 } amdsmi_nic_port_split_t;
 
 typedef struct {
-    amdsmi_nic_temperature_t temperature;
     amdsmi_nic_health_t      health;
     amdsmi_nic_port_split_t  port_split;
+    uint64_t                 reserved[4];
 } amdsmi_nic_telemetry_t;
 ```
 
@@ -735,7 +729,7 @@ amdsmi_status_t amdsmi_get_nic_fw_info(
     amdsmi_processor_handle processor_handle,
     amdsmi_nic_fw_info_t *info);
 
-// NIC Telemetry (temperature, health, port-split)
+// NIC Telemetry (health, port-split)
 amdsmi_status_t amdsmi_get_nic_telemetry(
     amdsmi_processor_handle processor_handle,
     amdsmi_nic_telemetry_t *info);
@@ -844,9 +838,9 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(
 amdsmi_status_t amdsmi_get_nic_vendor_statistics_with_scope(
     amdsmi_processor_handle processor_handle,
     uint32_t port_index,
-    amdsmi_nic_stat_scope_t scope,
     uint32_t *num_stats,
-    amdsmi_nic_stat_t *stats);
+    amdsmi_nic_stat_t *stats,
+    amdsmi_nic_stat_scope_t scope);
 ```
 
 **Usage:**
@@ -948,7 +942,7 @@ queried through ``--nic`` like every other NIC.
 ``amd-smi list`` includes discovered NICs alongside GPUs, and ``amd-smi static``
 reports NIC identity details (BDF, product name, part/serial number, vendor)
 when a NIC is selected with ``-N/--nic``. ``amd-smi metric --nic`` reports NIC
-telemetry (temperature, health, port-split) and ``amd-smi firmware --nic`` reports
+the temperatures (from the hwmon sensors), health and port-split, and ``amd-smi firmware --nic`` reports
 NIC firmware versions. The selector works only when you initialize NIC discovery
 (see [Initialization flags](#initialization-flags)).
 
@@ -1098,6 +1092,7 @@ SENSORS:
     CHANNEL: <channel number within the category>
     VALUE: <reading>
     <THRESHOLD>: <reading>  # MIN, MAX, LCRIT, CRIT, EMERGENCY, SHUTDOWN, CAP, when the driver exposes them
+    <ALARM_*>: <0 or 1>     # ALARM_MIN, ALARM_MAX, ALARM_LCRIT, ALARM_CRIT, ALARM_EMERGENCY, ALARM_SHUTDOWN, ALARM_CAP
 ```
 
 Each ``SENSOR_<N>`` block is one sensor, numbered from 0 in the order the library returns them

@@ -44,7 +44,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Prints the RDMA hardware counters of each RDMA port of an AI-NIC. The Python function returns a dictionary of counter name to value.
 
 - **Added ``amd-smi metric --nic --sensors`` and ``amdsmi_get_nic_hwmon_sensors()``**.  
-  - Shows every temperature, voltage and power sensor of a NIC with its limits, as the ``sensors`` command does. Also available from Python.
+  - Shows every temperature, voltage and power sensor of a NIC with its limits and alarm flags, as the ``sensors`` command does. Also available from Python.
 
 - **Added the FEC symbol-error histogram to ``metric --nic --port --extended``**.  
   - ionic ports on a kernel that reports it now show ``FEC_SYMBOLS_ERR_0`` to ``FEC_SYMBOLS_ERR_15`` next to the existing FEC counters.
@@ -116,7 +116,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - It shows ``AINIC``, ``UALoE`` or the vendor name, and ``N/A`` when the type is unknown.
 
 - **Added ``amdsmi_get_nic_telemetry()``**.  
-  - Reports a NIC's ASIC temperature, health state and port split, and ``amd-smi metric --nic`` shows them.
+  - Reports a NIC's health state and port split, and ``amd-smi metric --nic`` shows them. Temperatures come from ``amdsmi_get_nic_hwmon_sensors()``.
 
 - **Added Rust ``amdsmi_get_nic_processor_handles()`` and ``amdsmi_get_nic_fw_info()``**.  
   - NIC handles can now be obtained and used from Rust.
@@ -253,6 +253,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amd-smi static` shows NUMA information on Linux guests**.  
   - `--numa` was previously limited to Linux baremetal and passthrough guests.
   - Default `amd-smi static` output on guests now includes NUMA, in human-readable, JSON, and CSV output.
+
+- **Baremetal reports Broadcom NICs as ``AMDSMI_PROCESSOR_TYPE_AMD_NIC``** (breaking).  
+  - ``amdsmi_get_processor_handles_by_type()`` no longer returns ``AMDSMI_PROCESSOR_TYPE_BRCM_NIC`` handles; ask for ``AMDSMI_PROCESSOR_TYPE_AMD_NIC`` and use ``amdsmi_get_nic_type()`` to tell the vendors apart.
 
 ### Removed
 

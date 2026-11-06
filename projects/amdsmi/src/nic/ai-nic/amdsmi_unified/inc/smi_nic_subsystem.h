@@ -41,7 +41,7 @@ class SmiNicSubsystem {
   virtual bool driver_loaded(const std::string& bdf, DriverType driver_type) const = 0;
   // True when the vendor's driver directory for driver_type exists. No device is checked, so a
   // loaded driver with nothing bound still counts. A plugin without a driver of that kind says no.
-  virtual auto is_driver_present(DriverType /*driver_type*/) const -> bool { return false; }
+  virtual auto driver_loaded(DriverType driver_type) const -> bool = 0;
   virtual const std::vector<std::unique_ptr<SmiNic>>& get_nics() const = 0;
 
  protected:

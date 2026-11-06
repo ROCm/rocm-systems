@@ -291,6 +291,7 @@ class PciIdProbe_t : public SmiNicSubsystem {
       -> void override {}
   auto vendor() const -> NicVendor override { return NicVendor::Unknown; }
   auto driver_loaded(const std::string&, DriverType) const -> bool override { return false; }
+  auto driver_loaded(DriverType) const -> bool override { return false; }
   auto get_nics() const -> const std::vector<std::unique_ptr<SmiNic>>& override { return m_nics; }
 
  private:

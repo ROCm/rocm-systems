@@ -418,18 +418,18 @@ SmiInfiniBandPort::SmiInfiniBandPort(std::string& netdev, std::string& name,
 // A fork per RDMA port. Discovery runs it unless smi_nic_defer_rdma_mtu() moved it to the first
 // read; either way a port is probed once, and a failed probe leaves its MTU unknown.
 void SmiInfiniBandPort::query_ibverbs_mtu_once() const {
-  if (m_was_ibverbs_mtu_queried) {
+  if (was_ibverbs_mtu_queried_) {
     return;
   }
-  m_was_ibverbs_mtu_queried = true;
+  was_ibverbs_mtu_queried_ = true;
   // The port directory is .../infiniband/<rdma_dev>/ports/<n>; libibverbs wants the device name.
   const auto rdma_dev = std::filesystem::path(sysfs_path_).parent_path().parent_path().filename();
   const auto port = port_num();
   if (port.has_value()) {
     const auto mtu = port_mtu_query()(rdma_dev.string(), port.value());
     if (mtu.has_value()) {
-      m_ibverbs_max_mtu = mtu->max_mtu;
-      m_ibverbs_active_mtu = mtu->active_mtu;
+      ibverbs_max_mtu_ = mtu->max_mtu;
+      ibverbs_active_mtu_ = mtu->active_mtu;
     }
   }
 }
@@ -464,14 +464,14 @@ std::optional<std::string> SmiInfiniBandPort::state() const {
 
 std::optional<uint16_t> SmiInfiniBandPort::max_mtu() const {
   query_ibverbs_mtu_once();
-  return m_ibverbs_max_mtu.has_value() ? m_ibverbs_max_mtu
-                                       : get_sysfs_data<uint16_t>(sysfs_path_ + "/max_mtu");
+  return ibverbs_max_mtu_.has_value() ? ibverbs_max_mtu_
+                                      : get_sysfs_data<uint16_t>(sysfs_path_ + "/max_mtu");
 }
 
 std::optional<uint16_t> SmiInfiniBandPort::active_mtu() const {
   query_ibverbs_mtu_once();
-  return m_ibverbs_active_mtu.has_value() ? m_ibverbs_active_mtu
-                                          : get_sysfs_data<uint16_t>(sysfs_path_ + "/active_mtu");
+  return ibverbs_active_mtu_.has_value() ? ibverbs_active_mtu_
+                                         : get_sysfs_data<uint16_t>(sysfs_path_ + "/active_mtu");
 }
 
 namespace {
