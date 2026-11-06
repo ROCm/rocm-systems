@@ -5459,7 +5459,9 @@ TEST(MemoryWaitExecutionTest, ScalarBufferAtomicChecksItsConsumedDescriptorWords
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 32;
-  auto cu = ComputeUnitCore::create("smem_atomic_wait_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "smem_atomic_wait_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, 64);
   ASSERT_NE(wf, nullptr);
   auto decoder = Decoder::create(config.arch);

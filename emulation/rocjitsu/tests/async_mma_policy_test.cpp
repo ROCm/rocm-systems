@@ -707,7 +707,9 @@ TEST(AsyncMmaPolicyTest, SynchronousFormatFailureDrainsEarlierMatrixWork) {
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 128;
   config.async_resources = std::make_shared<mc::ExecutionResources>(1);
-  auto cu = amdgpu::ComputeUnitCore::create("matrix_failure_cu", config, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "matrix_failure_cu", config, &memory, &l2));
   auto *wave = cu->dispatch_wf(0, 0, 106, 128);
   ASSERT_NE(wave, nullptr);
   wave->set_exec(0xffffffff);
