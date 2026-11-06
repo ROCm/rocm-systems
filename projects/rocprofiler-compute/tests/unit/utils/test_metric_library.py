@@ -84,6 +84,20 @@ def test_load_metric_library_is_cached(tree):
     assert load_metric_library(tree, "gfx_c4") is load_metric_library(tree, "gfx_c4")
 
 
+def test_loaded_library_is_read_only(tree):
+    """Every caller shares the cached library, so none may change it."""
+    write_text_file(
+        tree / "gfx_base" / "sets.yaml", "busy:\n  title: Busy\n  metrics: [a.b]\n"
+    )
+    library = load_metric_library(tree, "gfx_c4")
+    with pytest.raises(TypeError):
+        library.metrics["compute.valu_util"]["formula"] = "0"
+    with pytest.raises(TypeError):
+        library.metrics["x.y"] = {}
+    with pytest.raises(AttributeError):
+        library.sets["busy"]["metrics"].append("c.d")
+
+
 def test_load_metric_library_reads_variables(tree):
     write_text_file(
         tree / "gfx_base" / "variables.yaml",
@@ -106,7 +120,9 @@ def test_load_metric_library_reads_sets_through_the_chain(tree):
         "old: !remove\n",
     )
     library = load_metric_library(tree, "gfx_c4")
-    assert library.sets == {"busy": {"title": "Busy", "metrics": ["compute.valu_util"]}}
+    assert library.sets == {
+        "busy": {"title": "Busy", "metrics": ("compute.valu_util",)}
+    }
     assert "busy" not in library.metrics
 
 

@@ -29,7 +29,7 @@ def sample_values(arch: str) -> dict[str, float]:
         if kind == "percent":
             values[name] = 1.5 + seed
         elif kind == "bandwidth":
-            values[name] = (seed + 1) * 4.25e9
+            values[name] = (seed + 1) * 4.25
         else:
             values[name] = seed + 2.0
     return values
@@ -230,7 +230,7 @@ def test_drawn_arrows_sit_between_the_box_borders(gpu_arch, box, outer, side):
 
 
 def test_gfx950_shows_io_bandwidth_on_attached_blocks():
-    output = render("gfx950", {"xGMI Read BW": 2e9, "PCIe Atomic BW": 3e9})
+    output = render("gfx950", {"xGMI Read BW": 2.0, "PCIe Atomic BW": 3.0})
     assert re.search(r"\|\|  Read BW\s+2\.000 GB/s", output)
     assert re.search(r"\|\|  Atomic BW\s+3\.000 GB/s", output)
     assert output.index("xGMI") < output.index("Compute Units") < output.index("PCIe")

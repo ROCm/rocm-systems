@@ -41,7 +41,7 @@ def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -
 
     # The mock records instead of exiting, so sanitize runs on to a later error.
     with pytest.raises(SystemExit):
-        OmniAnalyze_Base(argparse.Namespace(path=paths), {}).sanitize()
+        OmniAnalyze_Base(argparse.Namespace(path=paths)).sanitize()
 
     assert "last two components" in mock_error.call_args.args[1]
 
@@ -60,8 +60,7 @@ def test_pre_processing_txt_creates_named_file(tmp_path, monkeypatch) -> None:
     analyzer = OmniAnalyze_Base(
         argparse.Namespace(
             output_format="txt", output_name="analysis_report", **PRE_PROCESSING_ARGS
-        ),
-        {},
+        )
     )
     analyzer.pre_processing()
 
@@ -83,10 +82,7 @@ def test_pre_processing_txt_default_name_is_uuid(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
 
     analyzer = OmniAnalyze_Base(
-        argparse.Namespace(
-            output_format="txt", output_name=None, **PRE_PROCESSING_ARGS
-        ),
-        {},
+        argparse.Namespace(output_format="txt", output_name=None, **PRE_PROCESSING_ARGS)
     )
     analyzer.pre_processing()
 
@@ -107,8 +103,7 @@ def test_pre_processing_stdout_creates_no_file(tmp_path, monkeypatch) -> None:
     analyzer = OmniAnalyze_Base(
         argparse.Namespace(
             output_format="stdout", output_name=None, **PRE_PROCESSING_ARGS
-        ),
-        {},
+        )
     )
     analyzer.pre_processing()
 
@@ -143,10 +138,8 @@ def test_initalize_runs_corrects_specs_only_when_asked(
             normal_unit="per_kernel",
             list_stats=False,
             filter_metrics=None,
-            config_dir=str(tmp_path),
             gpu_kernel=None,
-        ),
-        {},
+        )
     )
     # Panel config generation reads the real arch YAML, which this test is not about.
     monkeypatch.setattr(analyzer, "generate_configs", lambda *_args: {})
@@ -237,8 +230,7 @@ def test_sanitize_errors_when_operator_flag_without_trace(
                 tui=False,
                 path=[[str(workload)]],
                 **flag_kwargs,
-            ),
-            {},
+            )
         ).sanitize()
     assert "was not profiled" in errors[-1][1]
     assert expected_trace in errors[-1][1]

@@ -62,6 +62,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * `--block` 30 metric IDs (e.g. 30.1.7) now refer to different metrics following the removal of unnecessary gfx950 Memory Bandwidth Analysis metrics.
 
+* Analyze shows each metric's formula, unit, peak and description from the metric library, so some panels change, for example `Gbps` is shown as `GB/s` and bandwidths shown in `Bytes/s` are now in `GB/s`. Rows that never showed a value are gone, so later gfx908 Speed-of-Light IDs such as `2.1.11` are renumbered, and the gfx1250 roofline `WMMA FLOPs (FP64)` row shows its theoretical peak.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.

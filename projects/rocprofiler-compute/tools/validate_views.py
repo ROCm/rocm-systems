@@ -11,15 +11,17 @@ For every arch of the metric library, check that:
      where the row asks for one;
   3. the views keep the analysis_configs panels' structure: the same panels, tables,
      headers and table settings, in order, and the same rows in order, leaving out only
-     rows that show no equation (and tables left empty by them); each panel's -b alias
-     is the config template's; every row's legacy position is its row in the panel
-     file; and every metric the arch shows has one legacy_id, that position. Values,
-     units, peaks and descriptions come from the metric library and are not compared.
-     An arch without a roofline benchmark (gfx908) has no roofline panel to compare.
+     rows that show no equation (and tables left empty by them); each panel's -b alias,
+     and the -b aliases the arch reads (its family's views), are the config
+     template's; every row's legacy position is its row in the panel file; and every
+     metric the arch shows has one legacy_id, that position. Values, units, peaks and
+     descriptions come from the metric library and are not compared. An arch without a
+     roofline benchmark (gfx908) has no roofline panel to compare.
 Check 3 is temporary: it goes with the panel files (AIPROFCOMP-821 PR 12).
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -32,6 +34,7 @@ from utils.analysis_views import (
     METRIC_TABLE,
     NO_VALUE,
     default_views_dir,
+    get_arch_panel_id_to_alias,
     iter_view_rows,
     legacy_position,
     panel_aliases,
@@ -51,8 +54,8 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import (
     ROOFLINE_PANEL_ID,
     canonical_config_arch,
-    get_arch_panel_id_to_alias,
     load_panel_configs,
+    load_yaml,
 )
 
 # Table settings that must match the panel's; rows are compared by name.
@@ -87,6 +90,7 @@ def validate(
         arch_errors = view_metric_errors(views, metrics)
         if not arch_errors and analysis_dir is not None:
             arch_errors = structure_errors(views, metrics, analysis_dir, arch)
+            arch_errors.extend(_family_alias_errors(arch, views_dir))
         errors.extend(f"[{arch}] {error}" for error in arch_errors)
     return errors
 
@@ -200,13 +204,36 @@ def _shows_equation(row: Dict[str, Any]) -> bool:
     )
 
 
+def _template_aliases(arch: str) -> Dict[str, str]:
+    """Return panel number -> -b alias from the config template whose name prefix
+    matches arch, "" for none; {} when no template matches."""
+    for path in sorted(config.analysis_configs_dir.glob("*_config_template.yaml")):
+        m = re.match(r"(gfx\d+)_config_template\.yaml$", path.name)
+        if m and arch.startswith(m.group(1)):
+            panels = (load_yaml(path) or {}).get("panels") or []
+            return {str(p["panel_id"]): (p.get("panel_alias") or "") for p in panels}
+    return {}
+
+
 def _alias_errors(views: List[Dict[str, Any]], arch: str) -> List[str]:
-    template_aliases = get_arch_panel_id_to_alias(arch)
+    template_aliases = _template_aliases(arch)
     return [
         f"panel {panel_number}: -b alias {alias!r}, config template has "
         f"{template_aliases.get(panel_number)!r}"
         for panel_number, alias in panel_aliases(views).items()
         if template_aliases.get(panel_number) != alias
+    ]
+
+
+def _family_alias_errors(arch: str, views_dir: Path) -> List[str]:
+    """Check the aliases -b reads for arch (its family's) against its template."""
+    template_aliases = _template_aliases(arch)
+    view_aliases = get_arch_panel_id_to_alias(arch, views_dir)
+    return [
+        f"panel {panel_number}: -b alias {view_aliases.get(panel_number)!r}, config "
+        f"template has {template_aliases.get(panel_number)!r}"
+        for panel_number in sorted(set(template_aliases) | set(view_aliases), key=int)
+        if template_aliases.get(panel_number) != view_aliases.get(panel_number)
     ]
 
 
