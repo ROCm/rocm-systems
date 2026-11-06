@@ -33,7 +33,8 @@ enum class BarrierKind : uint8_t {
   /// A workgroup barrier or workgroup trap barrier. It resolves only after
   /// every wave of the workgroup has arrived or ended.
   Workgroup,
-  /// A named barrier. It counts only the waves that joined it.
+  /// A named barrier. It counts signals against a member count set by the
+  /// program and notifies the waves that joined it.
   Named,
   /// A cluster barrier or cluster trap barrier. One signal from any wave of
   /// a workgroup counts for the whole workgroup.

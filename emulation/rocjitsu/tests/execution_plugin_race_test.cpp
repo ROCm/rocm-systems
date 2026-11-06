@@ -33,9 +33,11 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -881,7 +883,7 @@ TEST_F(ExitedWaveRaceTest, UnwaitedWriteStillRacesAfterWorkgroupBarrier) {
   EXPECT_TRUE(ds_read(0, 64));
 }
 
-TEST_F(ExitedWaveRaceTest, BarrierBeforeExitDoesNotRetireLaterWrite) {
+TEST_F(ExitedWaveRaceTest, WorkgroupBarrierDoesNotFlushAnOmittedLiveWave) {
   EXPECT_FALSE(ds_write(1, 64));
   wait_dscnt(1);
   barrier_without_wave_1(BarrierKind::Workgroup);
