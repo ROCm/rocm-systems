@@ -435,30 +435,45 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       registers = std::move(*destinations);
     }
 
-    uint32_t laneAddrs[64]{};
-    uint32_t secondLaneAddrs[64]{};
-    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(ldsMask & (1ULL << lane)))
-        continue;
-      auto validate = [&](uint64_t address) {
+    // A DS read2/write2 accesses two addresses per lane; other instructions one.
+    const std::array<const std::array<uint64_t, 64> *, 2> addressSets{&d.per_lane_addr,
+                                                                      &d.ds2_per_lane_addr};
+    const size_t numAddressSets = d.ds2_active ? 2 : 1;
+    // Bytes each lane accesses within the LDS backing and, for FLAT, the
+    // workgroup allocation. Zero for lanes that access no LDS bytes.
+    std::array<std::array<uint32_t, 64>, 2> laneBytes{};
+    // Appending one address set at a time lets neighboring lanes merge into
+    // the previous interval, so finalize() rarely has anything to sort.
+    IntervalSet intervals;
+    for (size_t set = 0; set < numAddressSets; ++set) {
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+        if (!(ldsMask & (1ULL << lane)))
+          continue;
+        const uint64_t address = (*addressSets[set])[lane];
         auto bytes = detector->ldsBytesInRange(address, perLaneBytes, d.elem_size);
         if (access.flat_local_allocation_end && d.elem_size != 0)
           bytes = amdgpu::whole_element_bytes_in_range(address, bytes, d.elem_size,
                                                        *access.flat_local_allocation_end);
         if (bytes == 0)
-          return amdgpu::kInvalidLdsAddress;
-        const auto addr = static_cast<uint32_t>(address);
-        if (d.is_load)
-          detector->validateRead(static_cast<int>(addr), waveId, static_cast<int>(lane), bytes,
-                                 memoryOrder);
-        else
-          detector->validateWrite(static_cast<int>(addr), waveId, static_cast<int>(lane), bytes,
-                                  memoryOrder);
-        return addr;
-      };
-      laneAddrs[lane] = validate(d.per_lane_addr[lane]);
-      if (d.ds2_active)
-        secondLaneAddrs[lane] = validate(d.ds2_per_lane_addr[lane]);
+          continue;
+        laneBytes[set][lane] = static_cast<uint32_t>(bytes);
+        intervals.append(static_cast<int>(address), static_cast<int>(address + bytes));
+      }
+    }
+    intervals.finalize();
+    if (detector->mayConflict(intervals, waveId, /*isWrite=*/!d.is_load, memoryOrder)) {
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+        for (size_t set = 0; set < numAddressSets; ++set) {
+          const int bytes = static_cast<int>(laneBytes[set][lane]);
+          if (bytes == 0)
+            continue;
+          const int address = static_cast<int>((*addressSets[set])[lane]);
+          if (d.is_load)
+            detector->validateRead(address, waveId, static_cast<int>(lane), bytes, memoryOrder);
+          else
+            detector->validateWrite(address, waveId, static_cast<int>(lane), bytes, memoryOrder);
+        }
+      }
     }
     uint8_t byte_mask = vector_memory_byte_mask(d, wf);
     if (d.is_load) {
@@ -467,17 +482,8 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     }
     if (obligations.empty())
       return;
-    if (d.ds2_active) {
-      rs->registerLdsEvent(instruction, type, std::move(registers), execMask, wf.wf_size(),
-                           std::span<const uint32_t>(laneAddrs, wf.wf_size()),
-                           std::span<const uint32_t>(secondLaneAddrs, wf.wf_size()), perLaneBytes,
-                           byte_mask, obligations, memoryOrder, d.elem_size);
-    } else {
-      rs->registerLdsEvent(instruction, type, std::move(registers), execMask, wf.wf_size(),
-                           std::span<const uint32_t>(laneAddrs, wf.wf_size()), perLaneBytes,
-                           byte_mask, obligations, memoryOrder, ldsMask, d.elem_size,
-                           access.flat_local_allocation_end);
-    }
+    rs->registerEventWithIntervals(instruction, type, std::move(registers), execMask, byte_mask,
+                                   std::move(intervals), obligations, memoryOrder);
     // A mixed instruction has one counter entry, with all register lanes but
     // only the ordinary LDS lanes' intervals. Do not also register a global event.
     return;

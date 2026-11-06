@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <iterator>
 #include <map>
@@ -1596,6 +1597,127 @@ TEST(RaceDetectorPluginTest, DualOffsetAccessValidatesSecondLdsRange) {
 
   EXPECT_TRUE(second_range_reports_race(/*dual_is_load=*/true));
   EXPECT_TRUE(second_range_reports_race(/*dual_is_load=*/false));
+}
+
+TEST(RaceDetectorPluginTest, DualOffsetStoreRegistersEachContiguousAddressSetAsOneInterval) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
+  PluginSinkConfig sink_config;
+  sink_config.emplace<StringSink>();
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  auto *plugin_ptr = plugin.get();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *wf = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  const uint32_t lanes = wf->wf_size();
+  const uint64_t exec = lanes == 64 ? ~uint64_t{0} : (uint64_t{1} << lanes) - 1;
+  wf->set_exec(exec);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(
+      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256,
+      /*physical_sgpr_count=*/104, waves);
+
+  constexpr uint32_t kSecondBase = 4096;
+  auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  state->elem_size = sizeof(uint32_t);
+  state->num_elems = 1;
+  state->is_load = false;
+  state->wf_size = lanes;
+  state->exec_mask = exec;
+  state->lane_mask = exec;
+  state->ds2_active = true;
+  for (uint32_t lane = 0; lane < lanes; ++lane) {
+    state->per_lane_addr[lane] = 4 * lane;
+    state->ds2_per_lane_addr[lane] = kSecondBase + 4 * lane;
+  }
+  TestMemoryInstruction store(std::move(state));
+  f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wf->pc, store, *wf);
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, store, *wf);
+
+  auto *plugin_state =
+      static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+  const auto &events = plugin_state->race_state->getDetector()->events();
+  ASSERT_EQ(events.totalAllocated(), 1);
+  const std::vector<Interval> intervals(events.ldsIntervals(EventId{0}).begin(),
+                                        events.ldsIntervals(EventId{0}).end());
+  ASSERT_EQ(intervals.size(), 2u);
+  EXPECT_EQ(intervals[0].start, 0);
+  EXPECT_EQ(intervals[0].end, static_cast<int>(4 * lanes));
+  EXPECT_EQ(intervals[1].start, static_cast<int>(kSecondBase));
+  EXPECT_EQ(intervals[1].end, static_cast<int>(kSecondBase + 4 * lanes));
+}
+
+// The pending stores lie inside the span of the strided load, so a check of
+// the whole span cannot tell them apart. Only the store that a lane touches
+// is a race.
+TEST(RaceDetectorPluginTest, StridedLdsLoadReportsOnlyTheStoreALaneTouches) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2));
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *writer = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  auto *reader = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(writer, nullptr);
+  ASSERT_NE(reader, nullptr);
+  const uint32_t lanes = reader->wf_size();
+  const uint64_t exec = lanes == 64 ? ~uint64_t{0} : (uint64_t{1} << lanes) - 1;
+  writer->set_exec(1u);
+  reader->set_exec(exec);
+  std::array<amdgpu::Wavefront *, 2> waves{writer, reader};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(
+      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/512,
+      /*physical_sgpr_count=*/208, waves);
+
+  constexpr uint32_t kStride = 128;
+  constexpr uint32_t kRacingLane = 17;
+  auto store_at = [&](uint32_t address) {
+    auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = false;
+    state->wf_size = writer->wf_size();
+    state->exec_mask = 1;
+    state->lane_mask = 1;
+    state->per_lane_addr[0] = address;
+    TestMemoryInstruction store(std::move(state));
+    f.plugin_group_->onAmdgpuBeforeExecuteInstruction(writer->pc, store, *writer);
+    f.plugin_group_->onAmdgpuMemoryAccessRouted({}, store, *writer);
+  };
+  store_at(kStride * kRacingLane - kStride / 2);
+  store_at(kStride * kRacingLane);
+  ASSERT_EQ(sink.str().find("RACE "), std::string::npos) << sink.str();
+
+  auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  state->elem_size = sizeof(uint32_t);
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wf_size = lanes;
+  state->exec_mask = exec;
+  state->lane_mask = exec;
+  state->dst_reg_base = reader->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < lanes; ++lane)
+    state->per_lane_addr[lane] = kStride * lane;
+  TestMemoryInstruction load(std::move(state));
+  f.plugin_group_->onAmdgpuBeforeExecuteInstruction(reader->pc, load, *reader);
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *reader);
+
+  const std::string output = sink.str();
+  const auto race = output.find("RACE ");
+  ASSERT_NE(race, std::string::npos);
+  EXPECT_EQ(output.find("RACE ", race + 1), std::string::npos) << output;
+  EXPECT_NE(output.find(std::format("access=read reg={} wave=1 lane={} ", kStride * kRacingLane,
+                                    kRacingLane)),
+            std::string::npos)
+      << output;
 }
 
 TEST(RaceDetectorPluginTest, LocalMemoryUsesEffectiveIssueMask) {
