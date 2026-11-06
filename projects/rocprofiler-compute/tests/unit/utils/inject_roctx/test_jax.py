@@ -198,3 +198,14 @@ def test_jax_primitive_skips_when_range_open(monkeypatch):
     )
     compiled()
     assert [item["marker"] for item in pushes] == ["jax.jit.train_step"]
+
+
+def test_jax_backend_registers_framework_root(monkeypatch):
+    roots = []
+    jax_file = "/tmp/fake_jax/__init__.py"
+    reset_jax_backend_state()
+    install_fake_jax(monkeypatch, jax_file=jax_file)
+    monkeypatch.setattr(core, "ensure_python_tier", lambda: True)
+    monkeypatch.setattr(core, "add_framework_root", roots.append)
+    jax_backend.JaxBackend().install()
+    assert roots == ["/tmp/fake_jax"]
