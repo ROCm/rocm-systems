@@ -216,12 +216,78 @@ inline bool write_vector64_result(Wavefront &wave, RegisterAccess &registers,
   }
   return !wave.instruction_execution_failed();
 }
+using Unary32Function = int (*)(uint64_t, uint32_t, uint64_t, uint32_t *const *,
+                                const uint32_t *const *);
+using Unary64Function = int (*)(uint64_t, uint64_t, uint64_t, uint32_t *const *,
+                                const uint32_t *const *);
+using Binary32Function = int (*)(uint64_t, uint32_t, uint64_t, uint32_t *const *,
+                                 const uint32_t *const *, const uint32_t *const *);
+using Binary64Function = int (*)(uint64_t, uint64_t, uint64_t, uint32_t *const *,
+                                 const uint32_t *const *, const uint32_t *const *);
+
 using Ternary32Function = int (*)(uint64_t, uint32_t, uint64_t, uint32_t *const *,
                                   const uint32_t *const *, const uint32_t *const *,
                                   const uint32_t *const *);
 using Ternary64Function = int (*)(uint64_t, uint64_t, uint64_t, uint32_t *const *,
                                   const uint32_t *const *, const uint32_t *const *,
                                   const uint32_t *const *);
+
+// rj-arith preserves aliased source values. Direct stores and staged write views
+// both honor EXEC and the decoder's DPP write mask.
+inline void execute_binary32(Wavefront &wave, Binary32Function wave32, Binary64Function wave64,
+                             uint64_t flags, uint64_t modifiers, const Operand &destination,
+                             const Operand &source_a, const Operand &source_b,
+                             uint8_t destination_bytes = 0xF) {
+  const uint64_t exec_mask = wave.exec() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
+  if (!exec_mask)
+    return;
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source_a, exec_mask), b(registers, wave, source_b, exec_mask);
+  write_vector32_result(
+      wave, registers, destination, exec_mask,
+      [&](uint32_t *const *d, uint64_t write_mask) {
+        return wave.wf_size() == 32
+                   ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data)
+                   : wave64(flags, write_mask, modifiers, d, &a.data, &b.data);
+      },
+      /*allow_direct=*/destination_bytes == 0xF, destination_bytes);
+}
+
+// Read the routed source before committing any destination lanes.
+inline void execute_unary32(Wavefront &wave, Unary32Function wave32, Unary64Function wave64,
+                            uint64_t flags, uint64_t modifiers, const Operand &destination,
+                            const Operand &source, uint8_t source_bytes = 0xF,
+                            uint8_t destination_bytes = 0xF) {
+  const uint64_t exec_mask = wave.exec() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
+  if (!exec_mask)
+    return;
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source, exec_mask, source_bytes);
+  write_vector32_result(
+      wave, registers, destination, exec_mask,
+      [&](uint32_t *const *d, uint64_t write_mask) {
+        return wave.wf_size() == 32 ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data)
+                                    : wave64(flags, write_mask, modifiers, d, &a.data);
+      },
+      /*allow_direct=*/destination_bytes == 0xF, destination_bytes);
+}
+
+// Convert selected source bytes into two full VGPR results, reading the source
+// before either destination word is committed.
+inline void execute_widen32_to_pair(Wavefront &wave, Unary32Function wave32, Unary64Function wave64,
+                                    uint64_t flags, uint64_t modifiers, const Operand &destination,
+                                    const Operand &source, uint8_t source_bytes) {
+  const uint64_t exec_mask = wave.exec() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
+  if (!exec_mask)
+    return;
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source, exec_mask, source_bytes);
+  write_vector64_result(
+      wave, registers, destination, exec_mask, [&](uint32_t *const *d, uint64_t write_mask) {
+        return wave.wf_size() == 32 ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data)
+                                    : wave64(flags, write_mask, modifiers, d, &a.data);
+      });
+}
 
 // All three routed inputs remain live through the call, including aliased VGPRs.
 inline void execute_ternary32(Wavefront &wave, Ternary32Function wave32, Ternary64Function wave64,

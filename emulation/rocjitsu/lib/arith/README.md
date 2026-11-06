@@ -1,34 +1,16 @@
 # Rocjitsu Arithmetic Library
 
-## Current implementation
-
-Dense WMMA supports FP16/BF16, packed accumulators, gfx12 FP8/BF8 and
-integer formats, in both wave sizes. Sparse WMMA adds 2:4 metadata selection
-with tied accumulators. Fused arithmetic includes FP16/FP32, packed halves,
-literals and mixed precision. Add, subtract, multiply and exponent operations
-are also available. FP16/FP32/FP64 selection supports loose and bit-exact numeric results.
-FP64 LDEXP supports exact results; other basic FP64 arithmetic supports loose results only. Division helpers cover SCALE, FMAS and FIXUP.
-Dot products cover integer, FP16/BF16 and FP8/BF8 formats.
-Family headers describe exact-result and FP-status support.
-FP status is available for gfx12 FP16 FMA under default guest rounding and denormals,
-and for gfx12 FP32 MUL under nearest-even rounding, preserved denormals, and no OMOD/CLAMP.
-WMMA has no FP-status output; mode 3 has the same numeric requirements as mode 2.
-Source/output modifiers and FMA DPP routing are supported. Compatibility selects
-the established instruction policy. CPU implementations are scalar, AVX2, AVX-512 and native BF16.
-
-Family headers state each entry point's supported controls.
-
 The Rocjitsu Arithmetic Library (`rj-arith`) provides a synchronous C interface to GPU arithmetic. Each call executes one GPU instruction for an entire wave on the
-calling CPU thread.
+calling CPU thread. This branch includes WMMA, floating-point arithmetic, dot products, conversions, with portable code and x86 SIMD paths.
 
 [rocjitsu/docs/arith-design.md](../../docs/arith-design.md) describes the API,
 numerical semantics, implementation principles, and testing policy.
 
-The semantics field selects loose or empirical bit-exact arithmetic. rj-arith is not a GPU runtime or instruction decoder.
+Choose fast, approximate **loose** semantics or supported **empirically bit-exact**
+semantics. Coverage varies by instruction and mode; rj-arith is not a GPU runtime or
+instruction decoder.
 
 See [coverage per architecture](COVERAGE.md) for instruction-family support.
-
-Rocjitsu continues to use its existing instruction handlers.
 
 ## Build and run
 
