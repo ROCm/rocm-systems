@@ -163,6 +163,8 @@ set(DEFAULT_GPUS
       gfx1101
       gfx1102
       gfx1151
+      gfx1170
+      gfx1171
       gfx1200
       gfx1201
       gfx1250)
