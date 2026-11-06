@@ -37,7 +37,7 @@ extern "C" void __tsan_init();
 
 extern "C" char **environ;
 
-namespace rocjitsu::cli {
+namespace rocjitsu::launcher {
 namespace {
 
 bool env_name_matches(std::string_view entry, const std::string &name) {
@@ -157,8 +157,19 @@ void prepend_launch_preloads(LaunchEnvironment &environment, const std::string &
     environment.prepend_path("LD_PRELOAD", tsan_runtime);
 }
 
+void configure_dbt_guest_tool_environment(LaunchEnvironment &environment,
+                                          const std::string &hooks_path) {
+  // The DBT and gfx1250 HotSwap hooks wrap the same HSA functions. Disable
+  // automatic HotSwap loading for current and older ROCr releases before
+  // selecting only the DBT hook through the explicit tools path.
+  environment.set("HSA_HOTSWAP_ENABLE", "0");
+  environment.set("HSA_HOTSWAP_DISABLE", "1");
+  environment.set("HSA_TOOLS_DISABLE_REGISTER", "1");
+  environment.set("HSA_TOOLS_LIB", hooks_path);
+}
+
 int execvp_with_environment(const char *file, char *const argv[], LaunchEnvironment &environment) {
   return execvpe(file, argv, environment.envp());
 }
 
-} // namespace rocjitsu::cli
+} // namespace rocjitsu::launcher

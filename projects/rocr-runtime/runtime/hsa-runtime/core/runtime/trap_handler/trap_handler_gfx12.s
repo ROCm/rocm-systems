@@ -41,6 +41,17 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Trap Handler V2 source
+
+// Trap-during-VOP3PX instruction fixup.  Off unless a build opts in with
+// -defsym,HAVE_VOP3PX_FIXUP=1, which only the gfx1250 revision 0 build does.
+// Defaulting to off means a target added without a matching ASM_DEFSYM entry
+// gets the unmodified handler rather than a rewind it must not perform.
+// The VGPR MSB fixup below is deliberately not scoped - it applies to
+// every revision.
+.ifndef HAVE_VOP3PX_FIXUP
+  .set HAVE_VOP3PX_FIXUP                           , 0
+.endif
+
 .set DOORBELL_ID_SIZE                              , 10
 .set DOORBELL_ID_MASK                              , ((1 << DOORBELL_ID_SIZE) - 1)
 .set EC_QUEUE_WAVE_ABORT_M0                        , (1 << (DOORBELL_ID_SIZE + 0))
@@ -572,11 +583,9 @@
 
   v_mov_b32         v0, 1
   v_mov_b32         v1, 0
-.if .amdgcn.gfx_generation_minor >= 5
-  global_atomic_add_u64 v[0:1], v1, v[0:1], ttmp[14:15], scope:SCOPE_DEV th:TH_ATOMIC_RETURN
-.else
+
+  // Use SYSTEM scope to push through the GL2 cache.
   global_atomic_add_u64 v[0:1], v1, v[0:1], ttmp[14:15], scope:SCOPE_SYS th:TH_ATOMIC_RETURN
-.endif
   s_wait_loadcnt    0                                       // Wait for atomic operation to complete and return value
 
   // At this point, ttmp[4:5] is free. ttmp13 is free
@@ -1009,11 +1018,8 @@
   v_mov_b32         v1, 1                                   // buf_written_valX
  
   // Perform atomic add and return previous value
-.if .amdgcn.gfx_generation_minor >= 5
-  global_atomic_add_u32 v0, v0, v1, ttmp[14:15], offset:SAMPLE_OFF_BUF_WRITTEN_VAL, scope:SCOPE_DEV th:TH_ATOMIC_RETURN
-.else
+  // Use SYSTEM scope to push through the GL2 cache.
   global_atomic_add_u32 v0, v0, v1, ttmp[14:15], offset:SAMPLE_OFF_BUF_WRITTEN_VAL, scope:SCOPE_SYS th:TH_ATOMIC_RETURN
-.endif
   s_wait_loadcnt    0
 
   // Check Watermark and Signal Host
@@ -1271,11 +1277,13 @@
   s_cbranch_scc1    .fixup_three_dword                      // If VOPD3, 3 DWORD inst
  // Not VOP1, VOP2, VOPC, VOP3, VOP3SD, VOPD, or VOPD3.
  // Check if we are in the middle of VOP3PX.
+.if HAVE_VOP3PX_FIXUP
   s_and_b32         ttmp13, ttmp14, 0xffff0000              // Bits 31:16
   s_cmp_eq_u32      ttmp13, 0xcc330000                      // If 31:16 = 0xcc33, this is 8 bytes past VOP3PX
   s_cbranch_scc1    .fixup_vop3px_middle
   s_cmp_eq_u32      ttmp13, 0xcc880000                      // If 31:16 = 0xcc88, this is 8 bytes past VOP3PX
   s_cbranch_scc1    .fixup_vop3px_middle
+.endif
  // Might be in VOP3P, but we must ensure we are not VOP3PX2
   s_and_b32         ttmp13, ttmp14, 0xffff0000              // Bits 31:16
   s_cmp_eq_u32      ttmp13, 0xcc350000                      // If 31:16 = 0xcc35, this is VOP3PX2
@@ -1336,10 +1344,12 @@
   s_wait_kmcnt      0                                       // Wait for PC+2 and PC+3 to arrive in ttmp2 and ttmp3
   s_mov_b32         ttmp15, ttmp3                           // Move possible S_SET_VGPR_MSB into ttmp15
   s_branch          .fixup_one_dword                        // Go to common logic that checks if it is S_SET_VGPR_MSB
+.if HAVE_VOP3PX_FIXUP
 .fixup_vop3px_middle:
   s_sub_co_u32      ttmp0, ttmp0, 8                         // Rewind PC 8 bytes to beginning of instruction
   s_sub_co_ci_u32   ttmp1, ttmp1, 0
   s_branch          .fixup_two_dword                        // 2 DWORD inst (2nd half of a 4 DWORD inst)
+.endif
 .fixup_done:
 
   s_wait_idle                                               // Required by SPG before reading/writing XNACK_STATE_PRIV

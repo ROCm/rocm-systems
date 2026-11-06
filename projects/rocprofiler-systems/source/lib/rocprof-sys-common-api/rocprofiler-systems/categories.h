@@ -112,6 +112,7 @@ extern "C"
         ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_FAULT_RATE,
         ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_PAGE_FAULT,
         ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_PAGE_MIGRATE,
+        ROCPROFSYS_CATEGORY_HIPFILE,
         ROCPROFSYS_CATEGORY_LAST
         // the value of below enum is used for iterating
         // over the enum in C++ templates. It MUST

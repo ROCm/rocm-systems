@@ -31,10 +31,11 @@ The following environment variables are excluded from the user layer overrides:
 """
 
 from __future__ import annotations
+
+import os
 from dataclasses import dataclass, field
 from enum import Enum
-import os
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .config import RocprofsysConfig
@@ -75,9 +76,9 @@ class TestEnvironment:
 
     def set_base_environment(
         self,
-        config: "RocprofsysConfig",
+        config: RocprofsysConfig,
         test_type: TestEnvKind = TestEnvKind.BASE,
-        python_version: Optional[str] = None,
+        python_version: str | None = None,
     ) -> None:
         """Set the base layer to the preset for ``test_type`` (default: BASE).
 
@@ -121,7 +122,7 @@ class TestEnvironment:
                 origin[key] = layer
         return merged, origin
 
-    def get_merged_environment(self, config: "RocprofsysConfig") -> dict[str, str]:
+    def get_merged_environment(self, config: RocprofsysConfig) -> dict[str, str]:
         """Return the effective merged environment (highest-precedence layer wins).
 
         ROCm-derived defaults (:func:`derived_defaults`) are applied at the
@@ -182,12 +183,13 @@ class TestEnvironment:
             "LD_LIBRARY_PATH",
             "LD_PRELOAD",
             "ROCPROFSYS_OUTPUT_PATH",
+            "ROCPROFSYS_TMPDIR",
             "ROCPROFSYS_CONFIG_FILE",
         )
         self.user.update({k: v for k, v in os.environ.items() if k not in owned})
 
 
-def derived_defaults(config: "RocprofsysConfig") -> dict[str, str]:
+def derived_defaults(config: RocprofsysConfig) -> dict[str, str]:
     """ROCm-derived defaults, applied at the lowest precedence by
     :meth:`TestEnvironment.get_merged_environment` (any layer overrides them).
     Each entry is only produced when its derived target exists on disk.
@@ -251,7 +253,7 @@ def base_binary_environment() -> dict[str, str]:
 
 
 def base_python_environment(
-    config: "RocprofsysConfig", python_version: Optional[str] = None
+    config: RocprofsysConfig, python_version: str | None = None
 ) -> dict[str, str]:
     """Framework default environment for Python test execution.
 

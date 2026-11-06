@@ -11,6 +11,7 @@ set(MAIN_SRC
     hip_test_context.cc
     hip_test_features.cc
     hip_test_params.cc
+    hip_test_level.cc
     hip_test_listener.cc)
 add_library(Main_Object EXCLUDE_FROM_ALL OBJECT ${MAIN_SRC})
 set_source_files_properties(${MAIN_SRC} PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
@@ -23,3 +24,5 @@ target_link_libraries(Main_Object PRIVATE Catch2::Catch2 hip::host hip::device)
 target_include_directories(Main_Object PRIVATE ${CATCH_INCLUDE_BINARY_DIR})
 
 add_dependencies(Main_Object hip_tests_config)
+
+add_subdirectory(tests)

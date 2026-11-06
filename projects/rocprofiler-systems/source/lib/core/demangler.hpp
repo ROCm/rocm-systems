@@ -43,7 +43,10 @@ struct demangler
 
     std::string demangle(std::string_view _mangled_name)
     {
-        if(_mangled_name.empty()) return {};
+        if(_mangled_name.empty())
+        {
+            return {};
+        }
 
         const auto result = try_get_from_cache(_mangled_name);
         if(result._found)
@@ -72,17 +75,20 @@ private:
         const std::unique_ptr<char, decltype(&std::free)> _demangled(
             DemanglerTp::demangle(_mangled_name, nullptr, nullptr, &_status), &std::free);
 
-        if(_status != 0 || !_demangled) return std::string{ _mangled_name };
+        if(_status != 0 || !_demangled)
+        {
+            return std::string{ _mangled_name };
+        }
 
         return std::string{ _demangled.get() };
     }
 
     cache_result try_get_from_cache(std::string_view _mangled_name)
     {
-        auto _state_guard = state::thread::scoped(state::thread::Internal);
+        auto const _state_guard = state::thread::scoped(state::thread::Internal);
         const std::shared_lock<std::shared_mutex> _read_lock{ m_mutex };
 
-        auto _it = m_cache.find(_mangled_name);
+        auto const _it = m_cache.find(_mangled_name);
         if(_it != m_cache.end())
         {
             return { true, _it };
@@ -93,10 +99,10 @@ private:
 
     std::string demangle_and_cache(std::string_view _mangled_name)
     {
-        auto _state_guard = state::thread::scoped(state::thread::Internal);
+        auto const _state_guard = state::thread::scoped(state::thread::Internal);
         const std::unique_lock<std::shared_mutex> _write_lock{ m_mutex };
 
-        auto _it = m_cache.find(_mangled_name);
+        auto const _it = m_cache.find(_mangled_name);
         if(_it != m_cache.end())
         {
             return _it->second;

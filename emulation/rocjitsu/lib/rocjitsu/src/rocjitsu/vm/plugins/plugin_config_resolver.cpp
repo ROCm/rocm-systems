@@ -142,6 +142,9 @@ bool resolve_config(const std::string &plugin_name, const char *schema_json,
         return false;
       }
       emit(arg, def);
+    } else if (const auto optional = spec.AsMap()["optional"];
+               optional.IsBool() && optional.AsBool()) {
+      continue;
     } else {
       util::Logger::warn("plugin '", plugin_name, "': missing required config arg '", arg, "'");
       return false;

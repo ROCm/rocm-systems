@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
 
 #include <gtest/gtest.h>
 #include "lib/common/logging.hpp"
@@ -40,7 +41,9 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <map>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -143,6 +146,284 @@ TEST(thread_trace, resource_creation)
 
         tracer.resource_deinit();
     }
+}
+
+TEST(thread_trace, resource_mode_configure)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+    registration::init_logging();
+    registration::set_init_status(-1);
+
+    const auto& agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_FALSE(agents.empty());
+    const auto agent_id = agents.begin()->second.get_rocp_agent()->id;
+
+    const std::vector<std::pair<std::optional<uint64_t>, rocprofiler_status_t>> modes = {
+        {std::nullopt, ROCPROFILER_STATUS_SUCCESS},
+        {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT, ROCPROFILER_STATUS_SUCCESS},
+        {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA, ROCPROFILER_STATUS_SUCCESS},
+        {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT, ROCPROFILER_STATUS_SUCCESS},
+        {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HIP,
+         ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED},
+        {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_ALL,
+         ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED},
+        {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DISPATCH,
+         ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED},
+        {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_LAST,
+         ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT},
+        {std::numeric_limits<uint64_t>::max(), ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT}};
+
+    for(bool device_mode : {false, true})
+    {
+        context::push_client(1);
+        rocprofiler_context_id_t ctx{0};
+        auto                     status = rocprofiler_create_context(&ctx);
+        context::pop_client(1);
+        ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
+
+        for(const auto& [mode, expected] : modes)
+        {
+            SCOPED_TRACE(::testing::Message() << "device=" << device_mode << ", mode="
+                                              << (mode ? std::to_string(*mode) : "omitted"));
+            rocprofiler_thread_trace_parameter_t params[] = {
+                {ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {0x1000000}},
+                {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE,
+                 {mode.value_or(ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT)}}};
+            const size_t num_parameters = mode ? 2 : 1;
+            auto shader_cb = [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {};
+
+            if(device_mode)
+                status = rocprofiler_configure_device_thread_trace_service(
+                    ctx, agent_id, params, num_parameters, shader_cb, {});
+            else
+                status = rocprofiler_configure_dispatch_thread_trace_service(
+                    ctx,
+                    agent_id,
+                    params,
+                    num_parameters,
+                    [](rocprofiler_agent_id_t,
+                       rocprofiler_queue_id_t,
+                       rocprofiler_async_correlation_id_t,
+                       rocprofiler_kernel_id_t,
+                       rocprofiler_dispatch_id_t,
+                       void*,
+                       rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
+                    shader_cb,
+                    nullptr);
+
+            ASSERT_EQ(status, expected);
+            if(status != ROCPROFILER_STATUS_SUCCESS) continue;
+
+            auto check_resources = [&, mode = mode](auto& tracer) {
+                tracer.resource_init();
+                ASSERT_EQ(tracer.get_agents().count(agent_id), 1);
+                const auto& agent_tracer = *tracer.get_agents().at(agent_id);
+                const bool  deferred =
+                    mode.value_or(ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT) !=
+                    ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA;
+                EXPECT_EQ(agent_tracer.factory == nullptr, deferred);
+                EXPECT_EQ(agent_tracer.params.resource_mode,
+                          deferred ? ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT
+                                   : ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA);
+                tracer.resource_deinit();
+            };
+            auto* context = context::get_mutable_registered_context(ctx);
+            if(device_mode)
+                check_resources(*context->device_thread_trace);
+            else
+                check_resources(*context->dispatch_thread_trace);
+        }
+    }
+}
+
+TEST(thread_trace, exec_mask_configure)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+    registration::init_logging();
+    registration::set_init_status(-1);
+
+    EXPECT_FALSE(thread_trace::thread_trace_parameter_pack{}.exec_mask_trace);
+    const auto& agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_FALSE(agents.empty());
+    for(const auto& [_, agent] : agents)
+    {
+        const auto* rocp_agent         = agent.get_rocp_agent();
+        const bool  supports_exec_mask = rocp_agent->gfx_target_version / 10000 >= 12;
+        for(bool device_mode : {false, true})
+        {
+            context::push_client(1);
+            rocprofiler_context_id_t ctx{};
+            auto                     status = rocprofiler_create_context(&ctx);
+            context::pop_client(1);
+            ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
+
+            for(auto value : {std::optional<uint64_t>{},
+                              std::optional<uint64_t>{0},
+                              std::optional<uint64_t>{1},
+                              std::optional<uint64_t>{7}})
+                for(uint64_t no_detail : {0, 1})
+                {
+                    const bool enabled = value.value_or(0) != 0;
+                    SCOPED_TRACE(::testing::Message()
+                                 << rocp_agent->name << ", device=" << device_mode
+                                 << ", exec=" << (value ? std::to_string(*value) : "omitted")
+                                 << ", no_detail=" << no_detail);
+                    std::vector<rocprofiler_thread_trace_parameter_t> params = {
+                        {ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL, {no_detail}}};
+                    if(value)
+                        params.push_back(
+                            {ROCPROFILER_THREAD_TRACE_PARAMETER_EXEC_MASK_TRACE, {*value}});
+                    auto shader_cb = [](rocprofiler_thread_trace_shader_data_t,
+                                        rocprofiler_user_data_t) {};
+                    if(device_mode)
+                        status = rocprofiler_configure_device_thread_trace_service(
+                            ctx, rocp_agent->id, params.data(), params.size(), shader_cb, {});
+                    else
+                        status = rocprofiler_configure_dispatch_thread_trace_service(
+                            ctx,
+                            rocp_agent->id,
+                            params.data(),
+                            params.size(),
+                            [](rocprofiler_agent_id_t,
+                               rocprofiler_queue_id_t,
+                               rocprofiler_async_correlation_id_t,
+                               rocprofiler_kernel_id_t,
+                               rocprofiler_dispatch_id_t,
+                               void*,
+                               rocprofiler_user_data_t*) {
+                                return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
+                            },
+                            shader_cb,
+                            nullptr);
+
+                    const auto expected = enabled && !supports_exec_mask
+                                              ? ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED
+                                          : enabled && no_detail
+                                              ? ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT
+                                              : ROCPROFILER_STATUS_SUCCESS;
+                    ASSERT_EQ(status, expected);
+                    if(status != ROCPROFILER_STATUS_SUCCESS) continue;
+
+                    auto check_pack = [&](auto& tracer) {
+                        tracer.resource_init();
+                        const auto& pack = tracer.get_agents().at(rocp_agent->id)->params;
+                        EXPECT_EQ(pack.exec_mask_trace, enabled);
+                        aql::ThreadTraceAQLPacketFactory factory(rocp_agent->id, pack);
+                        size_t                           exec_params = 0;
+                        for(const auto& param : factory.aql_params)
+                            if(static_cast<int>(param.parameter_name) ==
+                               AQLPROFILE_ATT_PARAMETER_NAME_EXEC_MASK_TRACE)
+                            {
+                                EXPECT_EQ(param.value, 1);
+                                ++exec_params;
+                            }
+                        EXPECT_EQ(exec_params, enabled ? 1 : 0);
+                        tracer.resource_deinit();
+                    };
+                    auto* context = context::get_mutable_registered_context(ctx);
+                    if(device_mode)
+                        check_pack(*context->device_thread_trace);
+                    else
+                        check_pack(*context->dispatch_thread_trace);
+                }
+        }
+    }
+}
+
+TEST(thread_trace, resource_mode_without_code_objects)
+{
+    auto params = thread_trace::thread_trace_parameter_pack{};
+    EXPECT_EQ(params.resource_mode, ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT);
+
+    // An unmapped agent is intentional: none of these operations should touch GPU resources.
+    thread_trace::ThreadTracerAgent tracer(params, rocprofiler_agent_id_t{0});
+    auto flag = std::make_shared<std::atomic<int>>(thread_trace::WORKER_FLAG_RUNNING);
+    EXPECT_EQ(tracer.factory, nullptr);
+    EXPECT_EQ(tracer.get_start_packet(), nullptr);
+    EXPECT_EQ(tracer.start_thread_trace(flag), nullptr);
+    EXPECT_EQ(tracer.stop_thread_trace(), nullptr);
+    tracer.iterate_data();
+    tracer.unload_codeobj(1);
+    EXPECT_EQ(tracer.factory, nullptr);
+}
+
+TEST(thread_trace, resource_mode_deferred_start)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    const auto& agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_FALSE(agents.empty());
+    const auto agent_id = agents.begin()->second.get_rocp_agent()->id;
+
+    size_t callbacks             = 0;
+    auto   params                = thread_trace::thread_trace_parameter_pack{};
+    params.resource_mode         = ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT;
+    params.buffer_size           = 0x1000000;
+    params.callback_userdata.ptr = &callbacks;
+    params.shader_cb_fn = [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t data) {
+        ++*static_cast<size_t*>(data.ptr);
+    };
+
+    thread_trace::ThreadTracerAgent tracer(params, agent_id);
+    thread_trace::ThreadTracerAgent unused(params, rocprofiler_agent_id_t{0});
+    auto flag = std::make_shared<std::atomic<int>>(thread_trace::WORKER_FLAG_RUNNING);
+
+    ASSERT_EQ(tracer.factory, nullptr);
+    EXPECT_EQ(tracer.start_thread_trace(flag), nullptr);
+    EXPECT_EQ(unused.start_thread_trace(flag), nullptr);
+    tracer.load_codeobj(1, 0x1000, 0x1000);
+    ASSERT_NE(tracer.factory, nullptr);
+    EXPECT_EQ(unused.factory, nullptr);
+    auto* factory = tracer.factory.get();
+
+    tracer.load_codeobj(2, 0x3000, 0x1000);
+    EXPECT_EQ(tracer.factory.get(), factory);
+    tracer.unload_codeobj(1);
+
+    auto completion = tracer.stop_thread_trace();
+    ASSERT_NE(completion, nullptr) << "The first code object must start the pending device trace";
+    thread_trace::signal_wait(*completion);
+    tracer.iterate_data();
+    EXPECT_GT(callbacks, 0);
+
+    // Stopping before a later load must cancel the deferred start, even if another
+    // agent still shares a running worker flag.
+    tracer.load_codeobj(3, 0x5000, 0x1000);
+    EXPECT_EQ(tracer.stop_thread_trace(), nullptr);
+    EXPECT_EQ(unused.stop_thread_trace(), nullptr);
+    EXPECT_EQ(unused.factory, nullptr);
+    EXPECT_EQ(tracer.factory.get(), factory);
+
+    auto start_completion = tracer.start_thread_trace(flag);
+    ASSERT_NE(start_completion, nullptr);
+    thread_trace::signal_wait(*start_completion);
+    completion = tracer.stop_thread_trace();
+    ASSERT_NE(completion, nullptr);
+    thread_trace::signal_wait(*completion);
+    tracer.iterate_data();
+}
+
+TEST(thread_trace, resource_mode_cancel_deferred_start)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+    const auto& agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_FALSE(agents.empty());
+
+    auto params          = thread_trace::thread_trace_parameter_pack{};
+    params.resource_mode = ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT;
+    params.buffer_size   = 0x1000000;
+    thread_trace::ThreadTracerAgent tracer(params, agents.begin()->second.get_rocp_agent()->id);
+    auto flag = std::make_shared<std::atomic<int>>(thread_trace::WORKER_FLAG_RUNNING);
+
+    EXPECT_EQ(tracer.start_thread_trace(flag), nullptr);
+    EXPECT_EQ(tracer.stop_thread_trace(), nullptr);
+    tracer.load_codeobj(1, 0x1000, 0x1000);
+    ASSERT_NE(tracer.factory, nullptr);
+    EXPECT_EQ(tracer.stop_thread_trace(), nullptr);
 }
 
 TEST(thread_trace, configure_test)
@@ -329,6 +610,8 @@ TEST(thread_trace, perfcounters_aql_options_test)
     auto new_tracer          = std::make_unique<thread_trace::ThreadTracerAgent>(
         _params, begin(agents)->second.get_rocp_agent()->id);
 
+    new_tracer->load_codeobj(1, 0x1000, 0x1000);
+    ASSERT_NE(new_tracer->factory, nullptr);
     ASSERT_EQ(new_tracer->factory->aql_params.size(),
               sqtt_default_num_options + perf_counters.size());
     context::pop_client(1);

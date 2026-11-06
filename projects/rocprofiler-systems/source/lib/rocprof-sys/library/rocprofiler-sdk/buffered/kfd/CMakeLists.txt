@@ -3,6 +3,7 @@
 
 if(ROCPROFSYS_BUILD_TESTING)
     add_subdirectory(tests)
+    set(kfd_domains_test_sources ${kfd_domains_test_sources} PARENT_SCOPE)
 endif()
 
 set(kfd_domains_headers

@@ -1,11 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Unit tests for unified_memory_processor_t using synthetic agents and a
-// recording output sink.
+// Unit tests for unified_memory_processor_t using synthetic agents; output
+// files are observed by scanning the test's own known output directory on
+// disk, since each test already controls where the processor writes.
 
 #include "common/env_vars.hpp"
 #include "core/categories.hpp"
+#include "core/output/output_summary.hpp"
 #include "core/trace_cache/unified_memory_processor.hpp"
 #include "unified_memory_test_helpers.hpp"
 #include <cstdint>
@@ -29,10 +31,8 @@
 
 using rocprofsys::agent_manager;
 using rocprofsys::agent_type;
-using rocprofsys::output_format;
 using rocprofsys::trace_cache::kfd_sample;
 using rocprofsys::trace_cache::migration_stats;
-using rocprofsys::trace_cache::output_file_sink_view;
 using rocprofsys::trace_cache::unified_memory_processor_t;
 using rocprofsys::trace_cache::detail::kTriggerTable;
 using rocprofsys::trace_cache::test::make_cpu_agent;
@@ -49,24 +49,6 @@ namespace
 {
 
 using TestProcessor = unified_memory_processor_t;
-
-struct registered_file
-{
-    std::string   path;
-    output_format format;
-};
-
-struct recording_output_sink
-{
-    void register_file(std::string path, output_format format)
-    {
-        files.push_back({ std::move(path), format });
-    }
-
-    void clear() { files.clear(); }
-
-    std::vector<registered_file> files = {};
-};
 
 // The processor reads output config from timemory globals at construction
 // time; these RAII guards isolate those globals so each test writes into
@@ -110,15 +92,34 @@ struct ScopedEnv
     ~ScopedEnv()
     {
         if(had_env)
+        {
             setenv(env_name.c_str(), previous.c_str(), 1);
+        }
         else
+        {
             unsetenv(env_name.c_str());
+        }
     }
 
     std::string env_name;
     std::string previous;
     bool        had_env = false;
 };
+
+// Each test already knows the directory it configured the processor to
+// write into (the fixture's default tmp_dir, or a test-local override), so
+// output files are discovered by scanning that directory directly.
+[[nodiscard]] std::vector<std::filesystem::path>
+list_output_files(const std::string& dir)
+{
+    std::vector<std::filesystem::path> files;
+    if(!std::filesystem::exists(dir)) return files;
+    for(const auto& entry : std::filesystem::recursive_directory_iterator(dir))
+    {
+        if(entry.is_regular_file()) files.push_back(entry.path());
+    }
+    return files;
+}
 
 class UnifiedMemoryProcessorTest : public ::testing::Test
 {
@@ -130,6 +131,8 @@ protected:
 
     void SetUp() override
     {
+        rocprofsys::output::registry::instance().start_new_session();
+
         m_suffix_guard = std::make_unique<ScopedUseOutputSuffix>(true);
 
         // Match the constructor's HSA_XNACK read so the JSON assertion uses
@@ -150,7 +153,6 @@ protected:
     void TearDown() override
     {
         processor.reset();
-        registry.clear();
         if(!tmp_dir.empty())
         {
             std::error_code ec;
@@ -160,10 +162,18 @@ protected:
 
     std::optional<nlohmann::json> read_json_output() const
     {
-        auto json_path = get_registered_path(output_format::json);
+        std::optional<std::string> json_path;
+        for(const auto& path : list_output_files(tmp_dir))
+        {
+            if(path.extension() == ".json")
+            {
+                json_path = path.string();
+                break;
+            }
+        }
         if(!json_path.has_value())
         {
-            ADD_FAILURE() << "JSON file was not registered";
+            ADD_FAILURE() << "JSON file was not written";
             return std::nullopt;
         }
         std::ifstream f(*json_path);
@@ -181,21 +191,6 @@ protected:
         return j;
     }
 
-    [[nodiscard]] const std::vector<registered_file>& registered_files() const
-    {
-        return registry.files;
-    }
-
-    [[nodiscard]] std::optional<std::string> get_registered_path(
-        output_format format) const
-    {
-        for(const auto& file : registered_files())
-        {
-            if(file.format == format) return file.path;
-        }
-        return std::nullopt;
-    }
-
     void rebuild_processor(std::string gpu1_name = "gfx950",
                            std::string gpu2_name = "gfx950")
     {
@@ -209,8 +204,7 @@ protected:
         agent_mgr->insert_agent(gpu1);
         agent_mgr->insert_agent(gpu2);
 
-        processor = std::make_unique<TestProcessor>(agent_mgr, kPid,
-                                                    output_file_sink_view{ registry });
+        processor = std::make_unique<TestProcessor>(agent_mgr, kPid);
     }
 
     void feed_h2d_migrate_with_value(double v)
@@ -222,7 +216,6 @@ protected:
     }
 
     std::shared_ptr<agent_manager> agent_mgr;
-    recording_output_sink          registry;
     std::string                    tmp_dir;
     std::unique_ptr<TestProcessor> processor;
     bool                           expected_xnack_enabled = false;
@@ -333,7 +326,7 @@ TEST_F(UnifiedMemoryProcessorTest,
     bool saw_gpu2 = false;
     for(const auto& dev : j["devices"])
     {
-        auto        device_id = dev["device_id"].get<std::uint32_t>();
+        auto const  device_id = dev["device_id"].get<std::uint32_t>();
         const auto& h2d       = dev["migrations"]["host_to_device"];
 
         if(device_id == kGpu1)
@@ -394,7 +387,7 @@ TEST_F(UnifiedMemoryProcessorTest, ExtractGpuNameResolvesOrFallsBack)
 
 TEST_F(UnifiedMemoryProcessorTest, AgentLookupThrowFallsBackSafely)
 {
-    auto sample =
+    auto const sample =
         make_kfd_page_migrate_sample(kCpu0, kGpu1, /*size=*/1024,
                                      /*duration=*/100, /*device_id=*/42, agent_type::cpu);
     EXPECT_NO_THROW(processor->handle(sample));
@@ -416,28 +409,26 @@ TEST_F(UnifiedMemoryProcessorTest, PidSuffixedPathsRegistered)
 
     bool saw_txt  = false;
     bool saw_json = false;
-    for(const auto& e : registered_files())
+    for(const auto& path : list_output_files(tmp_dir))
     {
-        EXPECT_THAT(e.path, HasSubstr("unified_memory"));
-        EXPECT_THAT(e.path, HasSubstr(std::to_string(kPid)));
-        if(e.format == output_format::text)
+        EXPECT_THAT(path.string(), HasSubstr("unified_memory"));
+        EXPECT_THAT(path.string(), HasSubstr(std::to_string(kPid)));
+        if(path.extension() == ".txt")
         {
-            EXPECT_THAT(e.path, ::testing::EndsWith(".txt"));
             saw_txt = true;
         }
-        else if(e.format == output_format::json)
+        else if(path.extension() == ".json")
         {
-            EXPECT_THAT(e.path, ::testing::EndsWith(".json"));
             saw_json = true;
         }
     }
-    EXPECT_TRUE(saw_txt) << "text file not registered";
-    EXPECT_TRUE(saw_json) << "json file not registered";
+    EXPECT_TRUE(saw_txt) << "text file not written";
+    EXPECT_TRUE(saw_json) << "json file not written";
 }
 
 TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathOverridesBackendDerivedPath)
 {
-    auto explicit_dir = tmp_dir + "/ump-explicit";
+    auto const explicit_dir = tmp_dir + "/ump-explicit";
     ASSERT_FALSE(std::filesystem::exists(explicit_dir));
     const ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, explicit_dir };
     rebuild_processor();
@@ -447,15 +438,20 @@ TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathOverridesBackendDerivedPath
 
     bool saw_txt  = false;
     bool saw_json = false;
-    for(const auto& e : registered_files())
+    for(const auto& path : list_output_files(explicit_dir))
     {
-        EXPECT_THAT(e.path, ::testing::HasSubstr(explicit_dir));
-        EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
-        if(e.format == output_format::text) saw_txt = true;
-        if(e.format == output_format::json) saw_json = true;
+        EXPECT_THAT(path.string(), ::testing::HasSubstr(explicit_dir));
+        if(path.extension() == ".txt")
+        {
+            saw_txt = true;
+        }
+        if(path.extension() == ".json")
+        {
+            saw_json = true;
+        }
     }
-    EXPECT_TRUE(saw_txt) << "text file not registered";
-    EXPECT_TRUE(saw_json) << "json file not registered";
+    EXPECT_TRUE(saw_txt) << "text file not written";
+    EXPECT_TRUE(saw_json) << "json file not written";
 }
 
 TEST_F(UnifiedMemoryProcessorTest, RelativeOutputPathResolvesFromPwd)
@@ -475,22 +471,27 @@ TEST_F(UnifiedMemoryProcessorTest, RelativeOutputPathResolvesFromPwd)
 
     bool saw_txt  = false;
     bool saw_json = false;
-    for(const auto& e : registered_files())
+    for(const auto& path : list_output_files(expected_dir))
     {
-        EXPECT_THAT(e.path, ::testing::HasSubstr(expected_dir));
-        EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
-        if(e.format == output_format::text) saw_txt = true;
-        if(e.format == output_format::json) saw_json = true;
+        EXPECT_THAT(path.string(), ::testing::HasSubstr(expected_dir));
+        if(path.extension() == ".txt")
+        {
+            saw_txt = true;
+        }
+        if(path.extension() == ".json")
+        {
+            saw_json = true;
+        }
     }
-    EXPECT_TRUE(saw_txt) << "text file not registered";
-    EXPECT_TRUE(saw_json) << "json file not registered";
+    EXPECT_TRUE(saw_txt) << "text file not written";
+    EXPECT_TRUE(saw_json) << "json file not written";
 
     std::filesystem::remove_all(expected_dir);
 }
 
 TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathCreatesNestedDirectories)
 {
-    auto nested_dir = tmp_dir + "/ump-nested/a/b/c";
+    auto const nested_dir = tmp_dir + "/ump-nested/a/b/c";
     ASSERT_FALSE(std::filesystem::exists(nested_dir));
     const ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, nested_dir };
     rebuild_processor();
@@ -502,15 +503,20 @@ TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathCreatesNestedDirectories)
 
     bool saw_txt  = false;
     bool saw_json = false;
-    for(const auto& e : registered_files())
+    for(const auto& path : list_output_files(nested_dir))
     {
-        EXPECT_THAT(e.path, ::testing::HasSubstr(nested_dir));
-        EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
-        if(e.format == output_format::text) saw_txt = true;
-        if(e.format == output_format::json) saw_json = true;
+        EXPECT_THAT(path.string(), ::testing::HasSubstr(nested_dir));
+        if(path.extension() == ".txt")
+        {
+            saw_txt = true;
+        }
+        if(path.extension() == ".json")
+        {
+            saw_json = true;
+        }
     }
-    EXPECT_TRUE(saw_txt) << "text file not registered";
-    EXPECT_TRUE(saw_json) << "json file not registered";
+    EXPECT_TRUE(saw_txt) << "text file not written";
+    EXPECT_TRUE(saw_json) << "json file not written";
 }
 
 TEST_F(UnifiedMemoryProcessorTest, FaultsOnlyEmitsOutput)
@@ -521,16 +527,21 @@ TEST_F(UnifiedMemoryProcessorTest, FaultsOnlyEmitsOutput)
 
     processor->finalize_processing();
 
-    auto files = registered_files();
+    auto const files = list_output_files(tmp_dir);
     EXPECT_EQ(files.size(), 2u);
 
     bool saw_txt  = false;
     bool saw_json = false;
-    for(const auto& e : files)
+    for(const auto& path : files)
     {
-        EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
-        if(e.format == output_format::text) saw_txt = true;
-        if(e.format == output_format::json) saw_json = true;
+        if(path.extension() == ".txt")
+        {
+            saw_txt = true;
+        }
+        if(path.extension() == ".json")
+        {
+            saw_json = true;
+        }
     }
     EXPECT_TRUE(saw_txt);
     EXPECT_TRUE(saw_json);
@@ -616,7 +627,9 @@ TEST_F(UnifiedMemoryProcessorTest, FloatSanitizationProducesZeroSize)
     };
 
     for(const double v : rejected_values)
+    {
         feed_h2d_migrate_with_value(v);
+    }
 
     processor->finalize_processing();
 

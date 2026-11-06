@@ -6,9 +6,7 @@
 #include "core/binary/address_range.hpp"
 #include "core/binary/fwd.hpp"
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 struct dwarf_entry
 {
@@ -27,7 +25,7 @@ struct dwarf_entry
     unsigned int  isa             = 0;
     unsigned int  discriminator   = 0;
     address_range address         = { 0, 0 };
-    std::string   file            = {};
+    std::string   file;
 
     bool is_valid() const;
 
@@ -41,5 +39,4 @@ struct dwarf_entry
     template <typename ArchiveT>
     void serialize(ArchiveT&, const unsigned int);
 };
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary

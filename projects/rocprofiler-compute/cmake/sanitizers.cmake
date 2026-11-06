@@ -156,20 +156,9 @@ function(enable_sanitizer_gpu_target_munging)
 endfunction()
 
 # Build the per-mode sanitizer runtime ENV for a ctest entry.
-#
-# suppress_leaks=ON keeps CPython arena/module leaks from failing the pytest
-# entries when they run under the TheRock-driven sanitizer flow
-# (THEROCK_SANITIZER + enable_sanitizer_python_launcher). The standalone
-# sanitizer CI does not run those entries.
-# suppress_leaks=OFF keeps leak detection enabled for native gtests, which is
-# what the standalone sanitizer CI runs.
-function(sanitizer_runtime_env out_var suppress_leaks)
+function(sanitizer_runtime_env out_var)
     set(_env "")
-    if(ENABLE_SANITIZER STREQUAL "ASAN" OR ENABLE_SANITIZER STREQUAL "HOST_ASAN")
-        if(suppress_leaks)
-            list(APPEND _env "ASAN_OPTIONS=detect_leaks=0")
-        endif()
-    elseif(ENABLE_SANITIZER STREQUAL "TSAN")
+    if(ENABLE_SANITIZER STREQUAL "TSAN")
         list(APPEND _env "TSAN_OPTIONS=second_deadlock_stack=1")
     elseif(ENABLE_SANITIZER STREQUAL "UBSAN")
         list(APPEND _env "UBSAN_OPTIONS=print_stacktrace=1")
@@ -181,7 +170,7 @@ endfunction()
 # quiets known false positives.
 function(enable_sanitizer_python_launcher out_var)
     set(_launcher ${THEROCK_SANITIZER_LAUNCHER} ${${out_var}})
-    sanitizer_runtime_env(_sanitizer_env ON)
+    sanitizer_runtime_env(_sanitizer_env)
     if(_sanitizer_env)
         list(PREPEND _launcher "${CMAKE_COMMAND}" -E env ${_sanitizer_env})
     endif()

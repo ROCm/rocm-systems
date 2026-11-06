@@ -26,7 +26,11 @@
 
 #include <gtest/gtest.h>
 #include <poll.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
+#include <cerrno>
 #include <climits>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -269,4 +273,110 @@ TEST(spin_backstop, sticky_pollerr_latches_until_progress)
                              /*timed_out=*/true,
                              /*backstop_tripped=*/false);
     EXPECT_EQ(wakes, 0) << "an untripped idle timeout is real evidence the spin cleared";
+}
+
+// The reader must read() the kernel's notify count only on a POLLIN wake. A
+// HUP/ERR-only wake carries no count (nothing to consume) and reading it would
+// only churn EAGAIN or, on a torn-down fd, add noise.
+TEST(notify_read, wants_read_only_on_pollin)
+{
+    struct tc
+    {
+        short       revents;
+        bool        want;
+        const char* label;
+    };
+    const tc rows[] = {{POLLIN, true, "pollin reads"},
+                       {static_cast<short>(POLLIN | POLLRDNORM), true, "pollin|rdnorm reads"},
+                       {static_cast<short>(POLLIN | POLLHUP), true, "pollin|hup still reads"},
+                       {POLLHUP, false, "hup only does not read"},
+                       {POLLERR, false, "err only does not read"},
+                       {POLLNVAL, false, "nval only does not read"},
+                       {static_cast<short>(POLLERR | POLLHUP), false, "err|hup does not read"},
+                       {0, false, "no bits does not read"}};
+    for(const auto& tc : rows)
+        EXPECT_EQ(stream_wake_wants_notify_read(tc.revents), tc.want) << tc.label;
+}
+
+namespace
+{
+// The reader's per-wake notify-count consume, mirrored against a real fd so the
+// read-and-clear semantics are exercised end to end. An EFD_NONBLOCK eventfd has
+// exactly the kernel stream fd's contract: read(&u64,8) returns 8 and zeroes the
+// counter, or -1/EAGAIN when it is already 0, and never blocks. Returns true iff a
+// read() was issued (i.e. the wake carried POLLIN).
+bool
+consume_notify_if_pollin(int fd, short revents)
+{
+    if(!stream_wake_wants_notify_read(revents)) return false;
+    uint64_t count = 0;
+    for(;;)
+    {
+        const ssize_t n = ::read(fd, &count, sizeof(count));
+        if(n == static_cast<ssize_t>(sizeof(count))) return true;
+        if(n < 0 && errno == EINTR) continue;
+        return true;  // EAGAIN (count already 0) or fault: the read was still issued
+    }
+}
+
+// poll(fd, POLLIN, 0): the kernel's level check. An eventfd reports POLLIN while
+// its counter is nonzero, matching notify_count != 0.
+bool
+poll_ready(int fd)
+{
+    pollfd    p  = {.fd = fd, .events = POLLIN, .revents = 0};
+    const int rc = ::poll(&p, 1, 0);
+    return rc > 0 && (p.revents & POLLIN) != 0;
+}
+}  // namespace
+
+// (a) A POLLIN wake leads to exactly one read that consumes the count, after which
+// the fd is no longer level-ready. (b) Readiness is LEVEL: it persists across a
+// poll that does not read, so a reader that only polls without reading would be
+// woken forever -- the read is what clears it. This is the busy-spin the reader
+// must avoid, and this test proves the read clears the level.
+TEST(notify_read, pollin_wake_reads_once_and_clears_level)
+{
+    const int efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    ASSERT_GE(efd, 0);
+
+    // Kernel notify: notify_count becomes nonzero.
+    const uint64_t bump = 1;
+    ASSERT_EQ(::write(efd, &bump, sizeof(bump)), static_cast<ssize_t>(sizeof(bump)));
+
+    // Level readiness persists across a poll that does not read (the lost-wakeup /
+    // busy-spin case the old edge design had): two polls with no read both fire.
+    EXPECT_TRUE(poll_ready(efd)) << "notify pending -> POLLIN";
+    EXPECT_TRUE(poll_ready(efd)) << "not consumed by polling -> still POLLIN (level)";
+
+    // The reader's wake consumes it exactly once.
+    EXPECT_TRUE(consume_notify_if_pollin(efd, POLLIN)) << "POLLIN wake issues a read";
+    EXPECT_FALSE(poll_ready(efd)) << "read cleared the count -> no longer ready";
+
+    // A second consume finds nothing (EAGAIN) and does not re-arm.
+    EXPECT_TRUE(consume_notify_if_pollin(efd, POLLIN)) << "second read still issued";
+    EXPECT_FALSE(poll_ready(efd)) << "still empty";
+
+    ::close(efd);
+}
+
+// (c) A HUP/ERR-only wake (no POLLIN) must NOT read: the count is left intact for
+// whatever POLLIN wake follows, and no spurious read is issued.
+TEST(notify_read, hup_only_wake_does_not_read)
+{
+    const int efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    ASSERT_GE(efd, 0);
+
+    const uint64_t bump = 1;
+    ASSERT_EQ(::write(efd, &bump, sizeof(bump)), static_cast<ssize_t>(sizeof(bump)));
+
+    // HUP-only: no read issued, count preserved, fd still level-ready.
+    EXPECT_FALSE(consume_notify_if_pollin(efd, POLLHUP)) << "HUP-only issues no read";
+    EXPECT_TRUE(poll_ready(efd)) << "count untouched -> still ready";
+
+    // The subsequent POLLIN wake is what consumes it.
+    EXPECT_TRUE(consume_notify_if_pollin(efd, static_cast<short>(POLLIN | POLLHUP)));
+    EXPECT_FALSE(poll_ready(efd)) << "POLLIN wake cleared it";
+
+    ::close(efd);
 }

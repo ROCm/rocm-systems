@@ -28,7 +28,7 @@ public:
     bool                         finalized() const noexcept { return m_finalized; }
 
 private:
-    std::vector<record_t> m_records{};
+    std::vector<record_t> m_records;
     bool                  m_finalized{ false };
 };
 }  // namespace rocprofsys::core

@@ -25,7 +25,7 @@ VirtualMachine::VirtualMachine(std::unique_ptr<SoC> soc, bool daemon_mode)
     : simdojo::CompositeComponent(soc->name()), soc_(soc.get()) {
   set_weight(0);
   socs_.push_back(soc_);
-  adopt_children(*soc);
+  soc->move_components_to(*this);
   add_child(std::move(soc));
   driver_ = std::make_unique<SimulatedKfd>(*soc_, daemon_mode);
 }
@@ -44,7 +44,7 @@ VirtualMachine::VirtualMachine(std::vector<std::unique_ptr<SoC>> socs,
       soc_ = p;
     auto wrapper = std::make_unique<simdojo::CompositeComponent>("gpu" + std::to_string(i));
     wrapper->set_weight(0);
-    wrapper->adopt_children(*socs[i]);
+    socs[i]->move_components_to(*wrapper);
     // Keep the now-emptied SoC alive/owned under its own uniquely-named gpuN
     // wrapper rather than directly under the VM: every SoC is named "soc" from
     // the config, so adding them at the VM level would recreate the duplicate-

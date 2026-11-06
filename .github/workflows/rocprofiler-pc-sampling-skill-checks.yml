@@ -1,0 +1,19 @@
+name: rocprofiler-pc-sampling-skill-checks
+
+on:
+  pull_request:
+    paths:
+      - "projects/rocprofiler-sdk/skills/pc-sampling/**"
+      - ".github/workflows/rocprofiler-pc-sampling-skill-checks.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    uses: amd/skillscope/.github/workflows/reusable.yml@0f734b2dd344cd72b5e016ad6c3b1ac2ce36f6f3 # v0.1.3
+    with:
+      skills: projects/rocprofiler-sdk/skills/pc-sampling
+      routing: off
+      behavioral: off

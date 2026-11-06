@@ -34,6 +34,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <memory>
@@ -294,6 +295,8 @@ forward_cut(agent_state_t&                         state,
     shader_data.read_offset      = 0;
     shader_data.agent            = state.id;
     shader_data.flags            = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE;
+    shader_data.start_timestamp  = original.start_timestamp;
+    shader_data.end_timestamp    = original.end_timestamp;
 
     auto userdata  = rocprofiler_user_data_t{};
     userdata.value = capture_id.fetch_add(1);
@@ -340,6 +343,16 @@ backend_create(agent_state_t& state)
     }
 
     status = rocprof_trace_decoder_quick_scan(state.decoder, 0, nullptr, 0, nullptr, nullptr);
+    if(status == ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED)
+    {
+        ROCP_ERROR << "--att-no-intercept requires a host CPU with AVX-512 support (AVX512F, "
+                      "AVX512BW and AVX512VBMI), which this system does not have. Consider "
+                      "--att --selected-regions instead, which has similar performance "
+                      "characteristics but requires marking the traced regions with "
+                      "roctxProfilerResume/roctxProfilerPause. See the rocprofv3 thread trace "
+                      "documentation for details.";
+        std::exit(EXIT_FAILURE);
+    }
     if(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
     {
         auto msg = fmt::format("ATT no-intercept quick-scan support is unavailable for "

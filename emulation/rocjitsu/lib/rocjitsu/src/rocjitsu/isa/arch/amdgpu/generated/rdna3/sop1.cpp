@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/sop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include <memory>
 
@@ -1928,6 +1929,7 @@ SRfeB64Sop1::SRfeB64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   pc.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_PC;
 }
 
 namespace detail {
@@ -1949,6 +1951,7 @@ SSendmsgRtnB32Sop1::SSendmsgRtnB32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1971,6 +1974,7 @@ SSendmsgRtnB64Sop1::SSendmsgRtnB64Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {

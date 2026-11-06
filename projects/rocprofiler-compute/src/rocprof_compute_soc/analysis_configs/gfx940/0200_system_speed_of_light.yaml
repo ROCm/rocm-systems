@@ -88,7 +88,6 @@ Panel Config:
           unit: Wavefronts
           peak: $max_waves_per_cu * $cu_per_gpu
           pct_of_peak: true
-          coll_level: SQ_LEVEL_WAVES
         Theoretical LDS Bandwidth:
           value: SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu)) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
@@ -164,7 +163,6 @@ Panel Config:
           unit: Cycles
           peak: None
           pct_of_peak: false
-          coll_level: SQ_IFETCH_LEVEL
         CU Utilization:
           value: 100 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
@@ -176,9 +174,8 @@ Panel Config:
       This is also presented as a percent of the peak theoretical FLOPs achievable
       on the specific accelerator. Note: this does not include any floating-point
       operations from MFMA instructions.
-    MFMA FLOPs (F8): The total number of 8-bit brain floating point MFMA operations
-      executed per second. This does not include any 16-bit brain floating point operations
-      from VALU instructions. This is also presented as a percent of the peak theoretical
+    MFMA FLOPs (F8): The total number of 8-bit floating point MFMA operations
+      executed per second. This is also presented as a percent of the peak theoretical
       F8 MFMA operations achievable on the specific accelerator. It is supported on
       AMD Instinct MI300 series and later only.
     MFMA FLOPs (BF16): >-

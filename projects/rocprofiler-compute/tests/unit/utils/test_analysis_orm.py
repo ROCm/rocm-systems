@@ -4,6 +4,7 @@
 """Unit tests for analysis_orm.py static methods."""
 
 import json
+from typing import Optional
 
 import numpy as np
 import pytest
@@ -13,11 +14,13 @@ from sqlalchemy.orm import Session
 
 from pc_sampling.source_snapshot_analysis import parse_source_frames
 from utils.analysis_orm import (
+    PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT,
     CodeObjectStore,
     Database,
     Dispatch,
     InstructionLine,
     InstructionSourceLine,
+    InstructionTypeLookup,
     Kernel,
     KernelSymbol,
     PCSampleStallReason,
@@ -36,10 +39,11 @@ PC_SAMPLING_SUMMARY_VIEW_COLUMNS = [
     "kernel_name",
     "offset",
     "instruction",
+    "instruction_type",
     "source",
     "count",
-    "count_issue",
-    "count_stall",
+    "issue_count",
+    "stall_count",
     "wave_occupancy_percent",
     "active_thread_percent",
     "stall_reason",
@@ -75,10 +79,14 @@ def test_json_sanitize(value, expected):
 
 
 def add_kernel_with_durations(
-    session, workload: Workload, name: str, durations: list[int]
+    session,
+    workload: Workload,
+    name: str,
+    durations: list[int],
+    short_name: Optional[str] = None,
 ) -> Kernel:
     """Add a kernel to *workload* with one dispatch per entry in *durations*."""
-    kernel = Kernel(kernel_name=name, workload=workload)
+    kernel = Kernel(kernel_name=name, short_name=short_name, workload=workload)
     session.add(kernel)
     for dispatch_id, duration in enumerate(durations):
         session.add(
@@ -152,6 +160,7 @@ def add_pc_sampling_state(
     active_thread_percent: float | None = None,
     stall_reasons: dict[str, int] | None = None,
     code_object_id: int = 5,
+    instruction_type: str | None = None,
 ) -> PCSampleState:
     """Insert one sampled instruction state with optional stall-reason children."""
     code_object = CodeObjectStore(
@@ -163,6 +172,11 @@ def add_pc_sampling_state(
     instruction_line = InstructionLine(
         code_object_offset=offset,
         instruction=instruction,
+        instruction_type_lookup=(
+            Database.get_or_create_type(InstructionTypeLookup, instruction_type)
+            if instruction_type is not None
+            else None
+        ),
         kernel_symbol=KernelSymbol(code_object_store=code_object, kernel=kernel),
     )
     add_source_frames(session, workload, instruction_line, source)
@@ -252,6 +266,42 @@ def test_kernel_view_aggregates(db_session):
         )
     ).fetchone()
     assert row == (3, 60, 10, 30, 20.0)
+
+
+def test_kernel_view_exposes_short_name(db_session):
+    """The kernel view carries the short name naming the export folder."""
+    workload = Workload(name="w", sub_name="s")
+    db_session.add(workload)
+    add_kernel_with_durations(
+        db_session,
+        workload,
+        "vecCopy_2(double*, double*, double*, int, int)",
+        [10],
+        short_name="vecCopy_2",
+    )
+    Database.create_views()
+    db_session.commit()
+
+    row = db_session.execute(
+        text("SELECT kernel_name, short_name FROM compute_kernel_view")
+    ).fetchone()
+    assert row == ("vecCopy_2(double*, double*, double*, int, int)", "vecCopy_2")
+
+
+def test_kernels_sharing_a_short_name_are_separate_rows(db_session):
+    """Overloads truncate to one short name, which is deliberately not unique."""
+    workload = Workload(name="w", sub_name="s")
+    db_session.add(workload)
+    add_kernel_with_durations(db_session, workload, "gemm(half*)", [10], "gemm")
+    add_kernel_with_durations(db_session, workload, "gemm(float*)", [20], "gemm")
+    Database.create_views()
+    db_session.commit()
+
+    rows = db_session.execute(
+        text("SELECT kernel_uuid, short_name FROM compute_kernel_view")
+    ).fetchall()
+    assert len(rows) == 2
+    assert {row[1] for row in rows} == {"gemm"}
 
 
 # =============================================================================
@@ -521,10 +571,11 @@ def test_pc_sampling_summary_view_flattens_normalized_tables(db_session):
             "kernel_name": "vecCopy",
             "offset": 0x10,
             "instruction": "v_mov",
+            "instruction_type": None,
             "source": "/s/a.cpp:1",
             "count": 3,
-            "count_issue": 1,
-            "count_stall": 2,
+            "issue_count": 1,
+            "stall_count": 2,
             "wave_occupancy_percent": 75.0,
             "active_thread_percent": 50.0,
             "stall_reason": {"WAITCNT": 2},
@@ -557,6 +608,34 @@ def test_instruction_line_static_type_defaults_to_none(db_session):
 
     assert sample_state.instruction_line.instruction_type_uuid is None
     assert sample_state.instruction_line.instruction_type_lookup is None
+
+
+def test_pc_sampling_summary_view_carries_the_static_instruction_type(db_session):
+    """The type comes from the lookup table, and is empty when unclassified."""
+    workload = Workload(name="w", sub_name="s")
+    kernel = Kernel(kernel_name="vecCopy", workload=workload)
+    add_pc_sampling_state(
+        db_session,
+        workload=workload,
+        kernel=kernel,
+        pid=42,
+        instruction="v_mov_b32_e32 v1, 0",
+        instruction_type="VALU",
+    )
+    add_pc_sampling_state(
+        db_session,
+        workload=workload,
+        kernel=kernel,
+        pid=42,
+        offset=0x20,
+        instruction="not_an_instruction",
+        code_object_id=6,
+    )
+    Database.create_views()
+    db_session.commit()
+
+    rows = fetch_pc_sampling_summary_rows(db_session)
+    assert [row["instruction_type"] for row in rows] == ["VALU", None]
 
 
 def test_pc_sampling_summary_view_separates_states_by_code_object(db_session):
@@ -593,8 +672,8 @@ def test_pc_sampling_summary_view_separates_states_by_code_object(db_session):
     # never summed together.
     assert [row["code_object_id"] for row in rows] == [5, 6]
     assert [row["count"] for row in rows] == [8, 9]
-    assert [row["count_issue"] for row in rows] == [2, 3]
-    assert [row["count_stall"] for row in rows] == [6, 6]
+    assert [row["issue_count"] for row in rows] == [2, 3]
+    assert [row["stall_count"] for row in rows] == [6, 6]
     assert [row["stall_reason"] for row in rows] == [
         {"MEMORY": 4, "WAITCNT": 2},
         {"BARRIER": 1, "WAITCNT": 5},
@@ -753,8 +832,8 @@ def test_pc_sampling_summary_view_keeps_host_trap_states_with_null_counts(db_ses
 
     assert [row["code_object_id"] for row in rows] == [5, 6]
     assert [row["count"] for row in rows] == [3, 5]
-    assert all(row["count_issue"] is None for row in rows)
-    assert all(row["count_stall"] is None for row in rows)
+    assert all(row["issue_count"] is None for row in rows)
+    assert all(row["stall_count"] is None for row in rows)
     assert all(row["stall_reason"] is None for row in rows)
     # A host-trap record carries an execution mask but no wave count.
     assert all(row["active_thread_percent"] == 50.0 for row in rows)
@@ -974,4 +1053,21 @@ def test_pc_sampling_summary_view_keeps_frames_of_one_instruction_together(db_se
     assert [row["source"] for row in rows] == [
         "/s/hip.h:317 -> /s/a.cpp:36",
         "/s/a.cpp:36",
+    ]
+
+
+def test_per_kernel_isa_select_leads_with_the_file_key_columns():
+    """The exporter slices the key off by count, so order and count must hold."""
+    statement = Database._per_kernel_isa_statement(workload_id=1, stall_reasons=[])
+    leading_columns = list(statement.selected_columns)[
+        :PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT
+    ]
+
+    assert [column.name for column in leading_columns] == [
+        "workload_name",
+        "workload_sub_name",
+        "kernel_uuid",
+        "kernel_short_name",
+        "code_object_id",
+        "pid",
     ]

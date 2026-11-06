@@ -39,17 +39,17 @@ struct function_signature
     std::string        get(bool _all = false, bool _save = true) const;
     std::string        get_coverage(bool _is_basic_block) const;
 
-    bool                m_loop      = false;
-    bool                m_info_beg  = false;
-    bool                m_info_end  = false;
-    std::uint32_t       m_loop_num  = std::numeric_limits<std::uint32_t>::max();
-    location_t          m_row       = { 0, 0 };
-    location_t          m_col       = { 0, 0 };
-    std::string         m_return    = {};
-    std::string         m_name      = {};
-    std::string         m_params    = "()";
-    std::string         m_file      = {};
-    mutable std::string m_signature = {};
+    bool                m_loop     = false;
+    bool                m_info_beg = false;
+    bool                m_info_end = false;
+    std::uint32_t       m_loop_num = std::numeric_limits<std::uint32_t>::max();
+    location_t          m_row      = { 0, 0 };
+    location_t          m_col      = { 0, 0 };
+    std::string         m_return;
+    std::string         m_name;
+    std::string         m_params = "()";
+    std::string         m_file;
+    mutable std::string m_signature;
 
     friend bool operator==(const function_signature& lhs, const function_signature& rhs)
     {
@@ -59,10 +59,22 @@ struct function_signature
     friend bool operator<(const function_signature& lhs, const function_signature& rhs)
     {
         const auto loop_max = std::numeric_limits<std::uint32_t>::max();
-        if(lhs.m_loop && !rhs.m_loop) return false;
-        if(!lhs.m_loop && rhs.m_loop) return true;
-        if(lhs.m_loop_num < loop_max && rhs.m_loop_num == loop_max) return false;
-        if(lhs.m_loop_num == loop_max && rhs.m_loop_num < loop_max) return true;
+        if(lhs.m_loop && !rhs.m_loop)
+        {
+            return false;
+        }
+        if(!lhs.m_loop && rhs.m_loop)
+        {
+            return true;
+        }
+        if(lhs.m_loop_num < loop_max && rhs.m_loop_num == loop_max)
+        {
+            return false;
+        }
+        if(lhs.m_loop_num == loop_max && rhs.m_loop_num < loop_max)
+        {
+            return true;
+        }
         return std::tie(lhs.m_file, lhs.m_name, lhs.m_return, lhs.m_params,
                         lhs.m_row.first, lhs.m_col.first, lhs.m_loop_num) <
                std::tie(rhs.m_file, rhs.m_name, rhs.m_return, rhs.m_params,

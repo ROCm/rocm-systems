@@ -88,6 +88,7 @@ class _NcclCommPropertiesRef(ctypes.Structure):
         ncclGinConnectionType_t ginConnectionType;
         bool ginSupport[64];
         size_t devCommRuntimeVersionSize;
+        bool cftSupport, cftMulticastSupport, cftCountedSupport;  // NCCL 2.32
     """
 
     _fields_ = [
@@ -109,6 +110,9 @@ class _NcclCommPropertiesRef(ctypes.Structure):
         ("ginConnectionType", ctypes.c_int),  # ncclGinConnectionType_t
         ("ginSupport", ctypes.c_uint8 * 64),
         ("devCommRuntimeVersionSize", ctypes.c_size_t),
+        ("cftSupport", ctypes.c_uint8),
+        ("cftMulticastSupport", ctypes.c_uint8),
+        ("cftCountedSupport", ctypes.c_uint8),
     ]
 
 
@@ -160,6 +164,9 @@ _FIELD_MAP = [
     ("ginConnectionType", "gin_connection_type"),
     ("ginSupport", "gin_support"),
     ("devCommRuntimeVersionSize", "dev_comm_runtime_version_size"),
+    ("cftSupport", "cft_support"),
+    ("cftMulticastSupport", "cft_multicast_support"),
+    ("cftCountedSupport", "cft_counted_support"),
 ]
 
 
@@ -215,6 +222,9 @@ def test_comm_properties_from_buffer_round_trip(gin_type, railed_gin_type):
         ginConnectionType=1,
         ginSupport=(ctypes.c_uint8 * 64)(*([0] * 63 + [1])),
         devCommRuntimeVersionSize=512,
+        cftSupport=1,
+        cftMulticastSupport=0,
+        cftCountedSupport=1,
     )
 
     props = CommProperties.from_buffer(bytes(ref))
@@ -236,6 +246,9 @@ def test_comm_properties_from_buffer_round_trip(gin_type, railed_gin_type):
     assert props.gin_connection_type == 1
     assert props.gin_support[-1] == 1
     assert props.dev_comm_runtime_version_size == 512
+    assert bool(props.cft_support) is True
+    assert bool(props.cft_multicast_support) is False
+    assert bool(props.cft_counted_support) is True
 
 
 def test_comm_properties_from_buffer_rejects_undersized_buffer():

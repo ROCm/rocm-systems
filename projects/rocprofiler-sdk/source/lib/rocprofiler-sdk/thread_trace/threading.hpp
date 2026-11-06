@@ -37,6 +37,9 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
+rocprofiler_thread_trace_timestamp_t
+convert_timestamp(rocprofiler_agent_id_t agent_id, uint64_t gpu_clock);
+
 /// Shared state coordinating the single producer and N worker threads.
 ///
 /// Each slot is owned by exactly one consumer thread; the producer hands
@@ -65,6 +68,9 @@ struct triple_buffer_shared_data_t
         int64_t  se_id{0};
         uint64_t chunk_index{0};
         uint64_t read_offset{0};
+
+        rocprofiler_thread_trace_timestamp_t start_timestamp{};
+        rocprofiler_thread_trace_timestamp_t end_timestamp{};
 
         /// Producer sets true after writing slot fields; consumer stores
         /// false after running the callback.

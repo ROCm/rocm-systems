@@ -76,6 +76,7 @@ SUPPORTED_DATATYPES: dict[str, dict[str, OpsSupport]] = {
         "FP4": OpsSupport.MATRIX,
         "FP6": OpsSupport.MATRIX,
         "FP8": OpsSupport.MATRIX,
+        "MXFP8": OpsSupport.MATRIX,
         "FP16": OpsSupport.VALU | OpsSupport.MATRIX,
         "BF16": OpsSupport.MATRIX,
         "FP32": OpsSupport.VALU | OpsSupport.MATRIX,
@@ -127,6 +128,7 @@ SUPPORTED_DATATYPES: dict[str, dict[str, OpsSupport]] = {
         "FP4": OpsSupport.MATRIX,
         "FP6": OpsSupport.MATRIX,
         "FP8": OpsSupport.MATRIX,
+        "MXFP8": OpsSupport.MATRIX,
         "FP16": OpsSupport.VALU | OpsSupport.MATRIX,
         "BF16": OpsSupport.MATRIX,
         "FP32": OpsSupport.VALU | OpsSupport.MATRIX,
@@ -167,8 +169,10 @@ class PlotPoints:
     ai_lds: list[list[float]]
     kernelNames: list[str]
     counts: list[Optional[float]]
-    totalTime: list[Optional[float]]
-    pctRuntime: list[Optional[float]]
+    kernelTime: list[Optional[float]]
+    kernelPctRuntime: list[Optional[float]]
+    totalAppTime: Optional[float]
+    totalAppDispatches: Optional[float]
     timeUnit: str
 
     @classmethod
@@ -182,8 +186,10 @@ class PlotPoints:
             ai_lds=[[], []],
             kernelNames=[],
             counts=[],
-            totalTime=[],
-            pctRuntime=[],
+            kernelTime=[],
+            kernelPctRuntime=[],
+            totalAppTime=None,
+            totalAppDispatches=None,
             timeUnit="",
         )
 
@@ -239,37 +245,10 @@ def sanitize_ai_value(value: Union[SupportsFloat, str, None]) -> float:
     return numeric if np.isfinite(numeric) else 0
 
 
-def sanitize_mem_level(mem_level: Union[list[str], str], gpu_model: str) -> list[str]:
-    """
-    Ensure cache level requests through --mem-level roofline analysis option
-    are supported on the architecture, and have been normalized.
-    """
-    # Make mem_level a list if not already one
-    levels_raw = mem_level if isinstance(mem_level, list) else [mem_level]
-
-    # Normalize user-facing "vL1D" to CSV column name "L1" before filtering
-    levels_raw = [("L1" if m == "vL1D" else m) for m in levels_raw]
-
-    model_memory_levels = mi_gpu_specs.get_memory_levels(gpu_model)
-
-    # Remove any requested mem levels not supported in the profiled arch
-    levels = [m for m in levels_raw if m in model_memory_levels]
-
-    if levels_raw != ["ALL"] and levels != levels_raw:
-        console_warning(
-            f"Cache levels requested with --mem-level for {gpu_model} are not valid- "
-            "unsupported cache levels will not be displayed."
-        )
-
-    # An empty list means the mem_level was originally ALL, or the user requested
-    # unsupported levels and we should default back to complete list of all
-    # memory levels for the arch (ALL).
-    levels = model_memory_levels if levels == [] else levels
-
-    # Skip MALL since we do not benchmark for this at this time
-    levels = [m for m in levels if m != "MALL"]
-
-    return levels
+def roofline_mem_levels(gpu_model: str) -> list[str]:
+    """Memory levels of the GPU model that the roofline benchmark measures.
+    MALL is not benchmarked."""
+    return [m for m in mi_gpu_specs.get_memory_levels(gpu_model) if m != "MALL"]
 
 
 # -------------------------------------------------------------------------------------
@@ -285,7 +264,6 @@ def calc_ceilings(
     """Given benchmarking data, calculate ceilings (or peak performance) for
     empirical roofline"""
 
-    # TODO: This is where filtering by memory level will need to occur for standalone
     graph_points: dict[str, list[Union[list[float], float, None]]] = {
         "hbm": [],
         "l2": [],
@@ -296,9 +274,7 @@ def calc_ceilings(
         "matrix_ops": [],
     }
 
-    cache_hierarchy = sanitize_mem_level(
-        roofline_parameters["mem_level"], mspec.gpu_model
-    )
+    cache_hierarchy = roofline_mem_levels(mspec.gpu_model)
 
     x1 = y1 = x2 = y2 = -1
     x1_matrix = y1_matrix = x2_matrix = y2_matrix = -1
@@ -366,7 +342,12 @@ def calc_ceilings(
 
         peak_matrix = 0.0
         if OpsSupport.MATRIX in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
-            target_precision = dtype if dtype.startswith("I") else f"F{dtype[2:]}"
+            if dtype.startswith(("I", "B")):
+                target_precision = dtype
+            elif dtype.startswith("MX"):
+                target_precision = f"MXF{dtype[4:]}"
+            else:
+                target_precision = f"F{dtype[2:]}"
 
             try:
                 matrix_key = (
@@ -471,14 +452,8 @@ def _extract_ai_metrics(calc_table: Optional[pd.DataFrame]) -> dict[str, float]:
 
 
 def _resolve_kernel_ids(workload: schema.Workload) -> list[int]:
-    """Kernel row ids to plot: an explicit int filter, else every top kernel.
-
-    WebUI passes string kernel names as filters and pre-narrows pmc_df, so in
-    that case every id is processed and the caller's filtering is relied upon.
-    """
-    if workload.filter_kernel_ids and all(
-        isinstance(kernel_id, int) for kernel_id in workload.filter_kernel_ids
-    ):
+    """Kernel row ids to plot: an explicit kernel filter, else every top kernel."""
+    if workload.filter_kernel_ids:
         return workload.filter_kernel_ids
     if _KERNEL_TOP_TABLE_ID not in workload.dfs:
         return []
@@ -531,8 +506,8 @@ def _append_kernel_point(
         getattr(plot_points, ai_field)[1].append(metrics["performance"])
     plot_points.kernelNames.append(kernel_name)
     plot_points.counts.append(_stat_or_none(stat_row, "Count"))
-    plot_points.totalTime.append(_stat_or_none(stat_row, sum_column))
-    plot_points.pctRuntime.append(_stat_or_none(stat_row, "Percent"))
+    plot_points.kernelTime.append(_stat_or_none(stat_row, sum_column))
+    plot_points.kernelPctRuntime.append(_stat_or_none(stat_row, "Percent"))
 
 
 def calc_ai_analyze(
@@ -565,6 +540,9 @@ def calc_ai_analyze(
         )
         if sum_column:
             plot_points.timeUnit = sum_column[len("Sum(") : -1]
+            plot_points.totalAppTime = float(top_df[sum_column].sum())
+            if "Count" in top_df.columns:
+                plot_points.totalAppDispatches = float(top_df["Count"].sum())
 
     kernel_ids_to_process = _resolve_kernel_ids(workload)
     console_debug("roofline", f"Found {len(kernel_ids_to_process)} kernels to process")
@@ -838,13 +816,16 @@ def _expected_benchmark_columns(
     if OpsSupport.VALU in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
         columns.append(f"{dtype}{ops_flops}")
 
-    cache_hierarchy = sanitize_mem_level(
-        roofline_parameters["mem_level"], mspec.gpu_model
-    )
+    cache_hierarchy = roofline_mem_levels(mspec.gpu_model)
     columns.extend(f"{cache_level}Bw" for cache_level in cache_hierarchy)
 
     if OpsSupport.MATRIX in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
-        target_precision = dtype if dtype.startswith("I") else f"F{dtype[2:]}"
+        if dtype.startswith(("I", "B")):
+            target_precision = dtype
+        elif dtype.startswith("MX"):
+            target_precision = f"MXF{dtype[4:]}"
+        else:
+            target_precision = f"F{dtype[2:]}"
         columns.append(
             f"{roofline_parameters['matrix_ops_type']}{target_precision}{ops_flops}"
         )

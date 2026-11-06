@@ -125,6 +125,7 @@ pub fn default_emulator(specs: &[EmulatorInfo]) -> Option<&EmulatorInfo> {
 /// supplied system topology.
 pub fn make_def(spec: &EmulatorInfo, topology: TopologyDef) -> EmulatorDef {
     EmulatorDef {
+        extra: Default::default(),
         emulator: EmulatorKind::from(spec.name.clone()),
         plugins: Default::default(),
         exec_mode: ExecMode::default(),

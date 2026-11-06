@@ -17,8 +17,8 @@
 /// with src0 -> low half, src1 -> high half of the dst.
 ///
 /// This file also pins the normalized packed signed i16 behavior:
-/// v_cvt_pk_norm_i16_f32 scales by 32767, clamps to [-32768, 32767], rounds to nearest-even,
-/// and packs the signed 16-bit results. The no-underscore signed spelling
+/// v_cvt_pk_norm_i16_f32 scales by 32767 without intermediate rounding, clamps to [-32767, 32767],
+/// rounds to nearest-even, and packs the signed 16-bit results. The no-underscore signed spelling
 /// (v_cvt_pknorm_i16_f32) is CDNA-only and not decodable here.
 ///
 /// Each case is executed twice in the same process (force-scalar and force-SIMD
@@ -93,13 +93,17 @@ const std::array<float, 16> kInputs = {{
     255.5f,
     1000.0f,
     -1.0f,
-    60000.0f,
+    std::numeric_limits<float>::quiet_NaN(),
 }};
 
 uint16_t cvt_i16(float f) {
+  if (std::isnan(f))
+    return 0;
   return static_cast<uint16_t>(static_cast<int16_t>(std::clamp(f, -32768.0f, 32767.0f)));
 }
-uint16_t cvt_u16(float f) { return static_cast<uint16_t>(std::clamp(f, 0.0f, 65535.0f)); }
+uint16_t cvt_u16(float f) {
+  return std::isnan(f) ? 0 : static_cast<uint16_t>(std::clamp(f, 0.0f, 65535.0f));
+}
 
 // Golden: src0 (f0) -> low 16, src1 (f1) -> high 16.
 uint32_t golden(bool is_u16, float f0, float f1) {
@@ -111,18 +115,18 @@ uint32_t golden(bool is_u16, float f0, float f1) {
 // --- Normalized pack-convert ------------------------------------------------
 // Both arch-generated lambdas scale by K, clamp, map NaN->0, then round to
 // nearest-even (mirrors execute_shared.h / util::cvt_pknorm_*_f32_simd).
-float round_nearest_even_golden(float value) {
-  float lower = std::floor(value);
-  float fraction = value - lower;
-  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
-    lower += 1.0f;
+double round_nearest_even_golden(double value) {
+  double lower = std::floor(value);
+  double fraction = value - lower;
+  if (fraction > 0.5 || (fraction == 0.5 && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    lower += 1.0;
   return lower;
 }
 uint16_t cvt_norm_i16(float f) {
   if (std::isnan(f))
     return 0;
   return static_cast<uint16_t>(static_cast<int16_t>(
-      round_nearest_even_golden(std::clamp(f * 32767.0f, -32768.0f, 32767.0f))));
+      round_nearest_even_golden(std::clamp(static_cast<double>(f) * 32767.0, -32767.0, 32767.0))));
 }
 uint32_t golden_norm_i16(float f0, float f1) {
   return (static_cast<uint32_t>(cvt_norm_i16(f1)) << 16) | static_cast<uint32_t>(cvt_norm_i16(f0));
@@ -130,15 +134,10 @@ uint32_t golden_norm_i16(float f0, float f1) {
 
 // Normalized-domain inputs: in-range, fractional/truncation, the i16/u16
 // divergence points (±1.0), out-of-range (clamped), and NaN (-> 0).
-const std::array<float, 8> kNormInputs = {{
-    0.0f,
-    1.0f,
-    0.5f,
-    -1.0f,
-    -0.5f,
-    2.0f,
-    0.25f,
-    std::numeric_limits<float>::quiet_NaN(),
+const std::array<float, 10> kNormInputs = {{
+    0.0f, 1.0f, 0.5f, -1.0f, -0.5f, 2.0f, 0.25f, std::numeric_limits<float>::quiet_NaN(),
+    std::bit_cast<float>(0xbf800080u), // Below -1: symmetric saturation.
+    std::bit_cast<float>(0x3f002000u), // FP32 scaling creates a false midpoint.
 }};
 float norm_f0_for(uint32_t lane) { return kNormInputs[lane % kNormInputs.size()]; }
 float norm_f1_for(uint32_t lane) { return kNormInputs[(lane + 3) % kNormInputs.size()]; }
@@ -241,6 +240,15 @@ TEST(Vop3CvtPkF32RdnaCorrectness, U16_FullExec) {
 }
 TEST(Vop3CvtPkF32RdnaCorrectness, U16_PartialExec) {
   check_op(kOpCvtPkU16F32, /*is_u16=*/true, /*exec=*/0xA5A58001ULL);
+}
+
+TEST(Vop3CvtPkF32RdnaCorrectness, PackedIntegerSaturationHelpers) {
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  EXPECT_EQ(amdgpu::cvt_u8_f32(nan), 0u);
+  EXPECT_EQ(amdgpu::cvt_u8_f32(-1.0f), 0u);
+  EXPECT_EQ(amdgpu::cvt_u8_f32(256.0f), 255u);
+  EXPECT_EQ(amdgpu::cvt_u16_f32(65536.0f), 65535u);
+  EXPECT_EQ(amdgpu::cvt_i16_f32(-32769.0f), 0x8000u);
 }
 
 // Pin the exact value that exposed the bug: 40000.0f converts to 40000 for u16

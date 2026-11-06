@@ -1404,6 +1404,7 @@ This simplified approach eliminates the need for multiple test type conditionals
 - Build first: remove `--no-build` flag
 - Check binary name in `build/test/` directory
 - Verify CMAKE built successfully
+- A configuration with `skip_if_missing: true` reports SKIPPED instead of FAILED when its binary was not built. The GIN-SDMA AllGather and Broadcast unit tests use this because CMake only creates them when sibling `rccl-tests` headers are present. Missing MPI binaries are skipped the same way.
 
 ### Multi-node tests hang
 - Ensure SLURM allocation or hostfile is configured
@@ -1518,7 +1519,7 @@ When the same configuration can be specified in multiple places, the priority is
 
 ## Unit Tests
 
-The runner ships with unit tests under `tools/scripts/test_runner/tests/` covering coverage build-flag selection, config env-var expansion, workspace/profraw handling, the device-coverage CMake probe, and the `rccl-device-compile` link driver. They use only the Python standard library (`unittest`), so no extra dependencies are required.
+The runner ships with unit tests under `tools/scripts/test_runner/tests/` covering coverage build-flag selection, config env-var expansion, workspace/profraw handling, the device-coverage CMake probe, the `rccl-device-compile` link driver, gtest result inference, and distinct-host counting. They use only the Python standard library (`unittest`), so no extra dependencies are required.
 
 Run them from the `test_runner` directory. This `unittest discover` invocation is the canonical, supported entry point:
 
@@ -1528,3 +1529,5 @@ python3 -m unittest discover -s tests -t . -v
 ```
 
 `pytest` also discovers them via `pytest.ini` (`pytest tests/`) if you prefer, but the `unittest discover` command above is the one contributors and CI should use so the two entry points never diverge.
+
+CI runs exactly that command: `do_test_runner_guards` in `test/host/run_host_tests.sh` invokes it as part of the `guards` phase, so a failure here fails the host-test pipeline. Add new driver cases to this suite rather than starting a second one elsewhere — `add_test()` registrations in `test/CMakeLists.txt` do not gate, because nothing in RCCL CI runs `ctest`.

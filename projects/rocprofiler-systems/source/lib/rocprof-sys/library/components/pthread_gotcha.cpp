@@ -46,7 +46,10 @@ auto&
 get_bundle()
 {
     static auto _v = std::unique_ptr<bundle_t>{};
-    if(!_v) _v = std::make_unique<bundle_t>("pthread_gotcha");
+    if(!_v)
+    {
+        _v = std::make_unique<bundle_t>("pthread_gotcha");
+    }
     return _v;
 }
 

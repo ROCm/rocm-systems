@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/sop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include <memory>
 
@@ -65,6 +66,8 @@ SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  if ((inst_.sdst < 105u && (inst_.sdst & 1u)) || (inst_.ssrc0 < 105u && (inst_.ssrc0 & 1u)))
+    flags_ |= MISALIGNED_SCALAR_DATA;
   flags_ |= RESULT_COPY;
 }
 
@@ -2347,6 +2350,7 @@ SRfeI64Sop1::SRfeI64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   pc.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_PC;
 }
 
 namespace detail {
@@ -2404,6 +2408,8 @@ SSendmsgRtnB32Sop1::SSendmsgRtnB32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= XCNT_DRAIN;
 }
 
 namespace detail {
@@ -2427,6 +2433,8 @@ SSendmsgRtnB64Sop1::SSendmsgRtnB64Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= XCNT_DRAIN;
 }
 
 namespace detail {
@@ -2449,6 +2457,7 @@ SBarrierSignalSop1::SBarrierSignalSop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= XCNT_DRAIN;
   flags_ |= BARRIER;
 }
 
@@ -2475,6 +2484,8 @@ SBarrierSignalIsfirstSop1::SBarrierSignalIsfirstSop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= XCNT_DRAIN;
 }
 
 namespace detail {
@@ -2499,6 +2510,7 @@ SGetBarrierStateSop1::SGetBarrierStateSop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2633,6 +2645,7 @@ SSleepVarSop1::SSleepVarSop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= SUSPENDS_WAVE;
 }
 
 namespace detail {
@@ -2989,10 +3002,9 @@ SCvtHiF32F16Sop1::SCvtHiF32F16Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 =
-        Operand(16, OperandType::OPR_SIMM32,
-                static_cast<int>((
-                    reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+    ssrc0 = Operand(
+        16, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);

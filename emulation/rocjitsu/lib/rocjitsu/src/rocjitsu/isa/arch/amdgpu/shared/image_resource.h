@@ -8,30 +8,151 @@
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include "util/bit.h"
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
 
 namespace rocjitsu::amdgpu {
 
+/// @brief Decoded image descriptor fields used by image queries and linear accesses.
+struct ImageResource {
+  uint64_t base = 0; ///< Byte address of mip 0, slice 0.
+  uint32_t data_format = 0;
+  uint32_t num_format = 0;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t depth = 0; ///< Slices of a 3D image or layers of an array.
+  uint32_t pitch = 0; ///< Row pitch in elements.
+  uint32_t selectors = 0;
+  uint32_t base_level = 0;
+  uint32_t last_level = 0;
+  uint32_t swizzle_mode = 0;
+  uint32_t type = 0;
+  uint32_t base_array = 0;
+  uint32_t array_pitch = 0;
+  bool compressed = false; ///< Compression metadata or compressed writes are enabled.
+};
+
+/// SQ_RSRC_IMG_* resource types.
+inline constexpr uint32_t kImage1d = 8;
+inline constexpr uint32_t kImage2d = 9;
+inline constexpr uint32_t kImage3d = 10;
+inline constexpr uint32_t kImageCube = 11;
+inline constexpr uint32_t kImage1dArray = 12;
+inline constexpr uint32_t kImage2dArray = 13;
+inline constexpr uint32_t kImage2dMsaa = 14;
+inline constexpr uint32_t kImage2dMsaaArray = 15;
+
+/// GFX11 image types whose word-4 field encodes pitch instead of depth.
+/// GFX12 inherits this resource-type contract.
+inline bool gfx11_image_resource_encodes_pitch(uint32_t type) {
+  return type == kImage1d || type == kImage2d || type == kImage2dMsaa;
+}
+
+inline uint32_t image_resource_field(const std::array<uint32_t, 8> &r, uint32_t bit,
+                                     uint32_t width) {
+  return util::extract_bits_from_words(r.data(), bit, width);
+}
+
+/// @brief Decode the fields shared by GFX9 image queries and linear accesses.
+inline ImageResource decode_gfx9_image_resource(const std::array<uint32_t, 8> &r) {
+  const auto field = [&](uint32_t bit, uint32_t width) {
+    return image_resource_field(r, bit, width);
+  };
+  ImageResource resource;
+  resource.base = ((uint64_t{field(32, 8)} << 32) | r[0]) << 8;
+  resource.data_format = field(52, 6);
+  resource.num_format = field(58, 4);
+  resource.width = field(64, 14) + 1;
+  resource.height = field(78, 14) + 1;
+  resource.selectors = field(96, 12);
+  resource.base_level = field(108, 4);
+  resource.last_level = field(112, 4);
+  resource.swizzle_mode = field(116, 5);
+  resource.type = field(124, 4);
+  resource.depth = field(128, 13) + 1;
+  resource.pitch = field(141, 16) + 1;
+  resource.base_array = field(160, 13);
+  resource.array_pitch = field(173, 4);
+  resource.compressed = field(213, 1);
+  return resource;
+}
+
+/// @brief Decode the GFX11 image fields shared by queries and linear accesses.
+inline ImageResource decode_gfx11_image_resource(const std::array<uint32_t, 8> &r) {
+  const auto field = [&](uint32_t bit, uint32_t width) {
+    return image_resource_field(r, bit, width);
+  };
+  ImageResource resource;
+  resource.base = ((uint64_t{field(32, 8)} << 32) | r[0]) << 8;
+  resource.data_format = field(52, 8);
+  resource.width = field(62, 14) + 1;
+  resource.height = field(78, 14) + 1;
+  resource.selectors = field(96, 12);
+  resource.base_level = field(108, 4);
+  resource.last_level = field(112, 4);
+  resource.swizzle_mode = field(116, 5);
+  resource.type = field(124, 4);
+  if (gfx11_image_resource_encodes_pitch(resource.type)) {
+    resource.depth = 1;
+    resource.pitch = field(128, 14) + 1;
+  } else {
+    resource.depth = field(128, 13) + 1;
+  }
+  resource.base_array = field(144, 13);
+  resource.compressed = field(212, 1) || field(213, 1);
+  return resource;
+}
+
+/// @brief Decode the GFX12 image fields shared by queries and linear accesses.
+inline ImageResource decode_gfx12_image_resource(const std::array<uint32_t, 8> &r) {
+  const auto field = [&](uint32_t bit, uint32_t width) {
+    return image_resource_field(r, bit, width);
+  };
+  ImageResource resource;
+  resource.base = ((uint64_t{field(32, 8)} << 32) | r[0]) << 8;
+  resource.data_format = field(49, 8);
+  resource.width = field(62, 16) + 1;
+  resource.height = field(78, 16) + 1;
+  resource.selectors = field(96, 12);
+  resource.base_level = field(57, 5);
+  resource.last_level = field(111, 5);
+  resource.swizzle_mode = field(116, 5);
+  resource.type = field(124, 4);
+  if (gfx11_image_resource_encodes_pitch(resource.type)) {
+    resource.depth = 1;
+    resource.pitch = field(128, 16) + 1;
+  } else {
+    resource.depth = field(128, 14) + 1;
+  }
+  resource.base_array = field(144, 13);
+  resource.compressed = field(212, 1) || field(213, 1);
+  return resource;
+}
+
 /// Descriptor-only IMAGE_GET_RESINFO; no image allocation or texture addressing is needed.
 inline std::array<uint32_t, 4> image_resource_info(const std::array<uint32_t, 8> &r,
                                                    rj_code_arch_t arch, uint32_t lod) {
   const auto field = [&](uint32_t bit, uint32_t width) {
-    uint64_t word = r[bit / 32];
-    if (bit % 32 + width > 32)
-      word |= uint64_t{r[bit / 32 + 1]} << 32;
-    return static_cast<uint32_t>((word >> (bit % 32)) & ((uint64_t{1} << width) - 1));
+    return image_resource_field(r, bit, width);
   };
-  const uint32_t type = field(124, 4);
-  if (type < 8)
-    return {};
   const bool gfx9 = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2;
+  const bool gfx11 = arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
   const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool shared_decode = gfx9 || gfx11 || gfx12;
+  const ImageResource resource = gfx9    ? decode_gfx9_image_resource(r)
+                                 : gfx11 ? decode_gfx11_image_resource(r)
+                                 : gfx12 ? decode_gfx12_image_resource(r)
+                                         : ImageResource{};
+  const uint32_t type = shared_decode ? resource.type : field(124, 4);
+  if (type < kImage1d)
+    return {};
   const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1;
-  const bool msaa = type >= 14;
-  const uint32_t base = msaa ? 0 : field(gfx12 ? 57 : 108, gfx12 ? 5 : 4);
-  const uint32_t last = msaa ? 0 : field(gfx12 ? 111 : 112, gfx12 ? 5 : 4);
+  const bool msaa = type >= kImage2dMsaa;
+  const uint32_t base = msaa ? 0 : (shared_decode ? resource.base_level : field(108, 4));
+  const uint32_t last = msaa ? 0 : (shared_decode ? resource.last_level : field(112, 4));
   if (last < base)
     return {};
   const uint32_t levels = last - base + 1;
@@ -39,21 +160,22 @@ inline std::array<uint32_t, 4> image_resource_info(const std::array<uint32_t, 8>
     return {0, 0, 0, levels};
   const uint32_t level = base + lod;
   const auto mip_size = [level](uint32_t size) { return std::max(1u, size >> level); };
-  const uint32_t width = mip_size(field(gfx9 ? 64 : 62, gfx12 || gfx10 ? 16 : 14) + 1);
-  const uint32_t height = mip_size(field(78, gfx12 || gfx10 ? 16 : 14) + 1);
-  const uint32_t depth = field(128, gfx12 ? 14 : gfx10 ? 16 : 13) + 1;
-  const uint32_t base_array = field(gfx9 ? 160 : 144, gfx10 ? 16 : 13);
+  const uint32_t width = mip_size(shared_decode ? resource.width : field(62, gfx10 ? 16 : 14) + 1);
+  const uint32_t height =
+      mip_size(shared_decode ? resource.height : field(78, gfx10 ? 16 : 14) + 1);
+  const uint32_t depth = shared_decode ? resource.depth : field(128, gfx10 ? 16 : 13) + 1;
+  const uint32_t base_array = shared_decode ? resource.base_array : field(144, gfx10 ? 16 : 13);
   const uint32_t layers = depth > base_array ? depth - base_array : 0;
   const bool uav3d = !gfx9 && field(gfx12 ? 164 : 160, 1);
   switch (type) {
-  case 8:
+  case kImage1d:
     return {width, 0, 0, levels};
-  case 9:
-  case 14:
+  case kImage2d:
+  case kImage2dMsaa:
     return {width, height, 0, levels};
-  case 10:
+  case kImage3d:
     return {width, height, uav3d ? layers : mip_size(depth), levels};
-  case 12:
+  case kImage1dArray:
     return {width, layers, 0, levels};
   default:
     return {width, height, layers, levels}; // Cube depth is in faces, not cubes.

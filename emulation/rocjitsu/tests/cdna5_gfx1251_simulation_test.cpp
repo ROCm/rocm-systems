@@ -3,11 +3,12 @@
 
 #include "amdgpu_elf_test_support.h"
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "test_paths.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
@@ -17,12 +18,6 @@
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
@@ -78,7 +73,8 @@ private:
 class Gfx1251SimulatorInstructionTest : public testing::TestWithParam<Gfx1251E2eCase> {};
 
 TEST_P(Gfx1251SimulatorInstructionTest, DispatchesCodeObjectAndVerifiesExactOutput) {
-  using namespace rocr::llvm::amdhsa;
+  util::StringDiagnostic admission_diagnostic;
+  using namespace rocjitsu::amdhsa;
 
   const Gfx1251E2eCase &test_case = GetParam();
   constexpr uint64_t kCodeObjectBase = 0x100000;
@@ -151,10 +147,10 @@ TEST_P(Gfx1251SimulatorInstructionTest, DispatchesCodeObjectAndVerifiesExactOutp
   append(cdna5::build_sopp(cdna5::kSEndpgmSopp));
 
   test_support::TestKernelDescriptor descriptor{};
-  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  3);
-  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  15);
+  RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     3);
+  RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                     COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 15);
   const std::vector<uint8_t> image =
       test_support::make_minimal_amdgpu_kernel_elf(code, EF_AMDGPU_MACH_AMDGCN_GFX1251, descriptor);
   AmdGpuCodeObject code_object(image.data(), image.size());
@@ -163,8 +159,8 @@ TEST_P(Gfx1251SimulatorInstructionTest, DispatchesCodeObjectAndVerifiesExactOutp
   const uint64_t descriptor_offset = code_object.kernel_descriptor_offset("kernel");
   ASSERT_NE(descriptor_offset, 0u);
 
-  auto loaded =
-      config::load_config(test::config_path("gfx1251_synthetic.json"), rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(test::config_path("gfx1251_synthetic.json"), loaded));
   ASSERT_EQ(loaded.target, code_object.target_id());
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
@@ -177,8 +173,10 @@ TEST_P(Gfx1251SimulatorInstructionTest, DispatchesCodeObjectAndVerifiesExactOutp
   soc->set_plugin_group(std::move(plugin_group));
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
-  loaded.wire_links(engine.topology());
-  engine.create();
+  ASSERT_TRUE(loaded.wire_links(engine.topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   code_object.load_to_memory(memory, kCodeObjectBase);
   for (uint32_t lane = 0; lane < kWaveSize; ++lane)
@@ -278,7 +276,8 @@ INSTANTIATE_TEST_SUITE_P(AllNineInstructions, Gfx1251SimulatorInstructionTest,
                          });
 
 TEST(Gfx1251SimulatorTest, DispatchesTargetSpecificSetregSemantics) {
-  using namespace rocr::llvm::amdhsa;
+  util::StringDiagnostic admission_diagnostic;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kCodeObjectBase = 0x100000;
   constexpr uint64_t kOutputAddress = 0x2000;
@@ -334,10 +333,10 @@ TEST(Gfx1251SimulatorTest, DispatchesTargetSpecificSetregSemantics) {
   append(cdna5::build_sopp(cdna5::kSEndpgmSopp));
 
   test_support::TestKernelDescriptor descriptor{};
-  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  3);
-  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  15);
+  RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     3);
+  RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                     COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 15);
   const std::vector<uint8_t> image =
       test_support::make_minimal_amdgpu_kernel_elf(code, EF_AMDGPU_MACH_AMDGCN_GFX1251, descriptor);
   AmdGpuCodeObject code_object(image.data(), image.size());
@@ -346,8 +345,8 @@ TEST(Gfx1251SimulatorTest, DispatchesTargetSpecificSetregSemantics) {
   const uint64_t descriptor_offset = code_object.kernel_descriptor_offset("kernel");
   ASSERT_NE(descriptor_offset, 0u);
 
-  auto loaded =
-      config::load_config(test::config_path("gfx1251_synthetic.json"), rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(test::config_path("gfx1251_synthetic.json"), loaded));
   ASSERT_EQ(loaded.target, code_object.target_id());
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
@@ -355,8 +354,10 @@ TEST(Gfx1251SimulatorTest, DispatchesTargetSpecificSetregSemantics) {
   ASSERT_NE(memory, nullptr);
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
-  loaded.wire_links(engine.topology());
-  engine.create();
+  ASSERT_TRUE(loaded.wire_links(engine.topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   code_object.load_to_memory(memory, kCodeObjectBase);
   for (uint32_t lane = 0; lane < kWaveSize; ++lane)

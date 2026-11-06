@@ -14,14 +14,21 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 
 namespace rocjitsu::amdgpu {
 
+/// @brief Selects the SDMA packet layout and ordinary linear-copy count width.
+/// @details LegacyExtendedCount retains the legacy layout but extends ordinary
+/// linear-copy counts from 22 to 30 bits.
 enum class SdmaPacketDialect {
   Legacy,
+  LegacyExtendedCount,
   Gfx11Plus,
   Gfx1250,
+  /// RDNA4 keeps the gfx11 packet sizes. COPY_LINEAR_RECT uses the GFX12 placement.
+  Rdna4,
 };
 
 using SdmaCacheOperation = DeviceCacheOperation;
@@ -63,6 +70,8 @@ struct SdmaPacketProcessResult {
   PacketProcessResult packet;
   bool operation_committed = false;
   bool completion_published = false;
+  /// @brief Offending root or indirect packet header, if available, for a malformed result.
+  std::optional<uint32_t> malformed_header = std::nullopt;
 };
 
 /// @brief Result of reading one frontend register for an SDMA poll packet.

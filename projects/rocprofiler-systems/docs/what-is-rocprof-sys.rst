@@ -1,6 +1,6 @@
 .. meta::
    :description: Introduction to ROCm Systems Profiler, plus a high-level overview of its architecture, instrumentation modes, and command-line tools
-   :keywords: ROCm Systems Profiler overview, rocprofiler-systems, rocprof-sys, Omnitrace, what is, introduction, instrumentation, sampling, presets, rocpd, perfetto, optiq, json, text, hatchet, output format, MPI, OpenMP, GPU metrics, tracking, visualization, tool, Instinct, accelerator, AMD
+   :keywords: ROCm Systems Profiler overview, rocprofiler-systems, rocprof-sys, rocsys, Omnitrace, what is, introduction, instrumentation, sampling, presets, rocpd, perfetto, optiq, json, text, hatchet, output format, MPI, OpenMP, GPU metrics, tracking, visualization, tool, Instinct, accelerator, AMD
 
 .. _rocprofiler-systems-at-a-glance:
 
@@ -13,6 +13,19 @@ ROCm Systems Profiler (rocprofiler-systems) is a system-level profiler for appli
 For example, in a distributed training job, the GPU can appear idle not because its kernels are slow, but because a data loader is starved, an MPI collective is blocking, or Python's GIL is stalling the dispatch queue.
 
 This topic orients you to how ROCm Systems Profiler is put together and how to invoke it. For the full, categorized feature catalog and use cases, see :doc:`conceptual/rocprof-sys-feature-set`.
+
+.. _glance-architecture:
+
+How it works
+=============
+
+ROCm Systems Profiler couples GPU kernel dispatches, memory copies, and device telemetry with the host-side activity around them. GPU data is captured via ROCprofiler-SDK callbacks and ``amd-smi`` polling; host call stacks, MPI, OpenMP, and Python frames are captured via binary instrumentation, statistical sampling, callback APIs, or symbol interception. Everything is merged into a single trace/profile output, correlated on the GPU timeline.
+
+.. image:: data/how_systems_profiler_works.png
+   :width: 100%
+   :align: center
+
+For the full explanation of each collection mode, including overhead trade-offs and a worked instrumentation-vs-sampling example, see :doc:`conceptual/data-collection-modes`.
 
 .. _glance-capabilities:
 
@@ -114,19 +127,6 @@ Analysis
      - Estimates the end-to-end speedup from optimizing a given function or line by selectively slowing other code regions.
      - :doc:`how-to/performing-causal-profiling`
 
-.. _glance-architecture:
-
-How it works
-=============
-
-ROCm Systems Profiler couples GPU kernel dispatches, memory copies, and device telemetry with the host-side activity around them. GPU data is captured via ROCprofiler-SDK callbacks and ``amd-smi`` polling; host call stacks, MPI, OpenMP, and Python frames are captured via binary instrumentation, statistical sampling, callback APIs, or symbol interception. Everything is merged into a single trace/profile output, correlated on the GPU timeline.
-
-.. image:: data/how_systems_profiler_works.png
-   :width: 100%
-   :align: center
-
-For the full explanation of each collection mode, including overhead trade-offs and a worked instrumentation-vs-sampling example, see :doc:`conceptual/data-collection-modes`.
-
 .. _glance-modes-compared:
 
 Binary instrumentation vs. call-stack sampling
@@ -160,7 +160,15 @@ To use ROCm Systems Profiler for instrumentation, follow these two configuration
 Command-line tools
 ====================
 
-ROCm Systems Profiler ships as a set of standalone executables, each oriented toward a different profiling workflow:
+ROCm Systems Profiler ships as a set of standalone executables, each oriented
+toward a different profiling workflow. These ``rocprof-sys-*`` commands are the
+original tools. Examples on this page and on the workflow pages use them.
+
+The ``rocsys`` command is a new unified command-line entry point for profiling. Running
+``rocsys -- ./app`` or ``rocsys profile -- ./app`` produces a full trace profile, and
+``rocsys rewrite`` runs ``rocprof-sys-instrument`` in binary-rewrite mode (``-o``).
+``rocsys --help`` reports that the command is experimental and that commands and
+workflows are subject to change. See :doc:`how-to/using-rocsys`.
 
 .. list-table::
    :header-rows: 1
@@ -183,7 +191,7 @@ ROCm Systems Profiler ships as a set of standalone executables, each oriented to
      - ``rocprof-sys-run -- ./app.inst``
      - :doc:`how-to/instrumenting-rewriting-binary-application`, :ref:`using-preset-profiles-quick-start`
    * - ``rocprof-sys-sample``
-     - Performs call-stack sampling without instrumentation.
+     - Performs call-stack sampling without instrumentation. The experimental ``rocsys`` command has no ``sample`` verb.
      - ``rocprof-sys-sample -f 1000 -- ./app``
      - :doc:`how-to/sampling-call-stack`
    * - ``rocprof-sys-attach``
@@ -194,13 +202,25 @@ ROCm Systems Profiler ships as a set of standalone executables, each oriented to
      - Performs causal profiling to estimate optimization impact.
      - ``rocprof-sys-causal -l foo -- ./app``
      - :doc:`how-to/performing-causal-profiling`
+   * - ``rocprof-sys-python``
+     - Profiles Python scripts through a helper that selects the matching Python interpreter.
+     - ``rocprof-sys-python -- ./script.py``
+     - :doc:`how-to/profiling-python-scripts`
+   * - ``rocsys``
+     - New unified command-line entry point for profiling. ``rocsys -- ./app`` and ``rocsys profile -- ./app`` produce a full trace profile. ``rocsys rewrite`` runs ``rocprof-sys-instrument`` in binary-rewrite mode (``-o``). The command is experimental and subject to change.
+     - ``rocsys profile -- ./app``
+     - :doc:`how-to/using-rocsys`
 
 .. _glance-presets:
 
 Preset profiles
 =================
 
-Presets replace manually setting numerous environment variables with a single ``--preset`` flag available on ``rocprof-sys-run`` and ``rocprof-sys-sample``. Presets were introduced in ROCm 7.12 and expanded into an extensible JSON-based system in ROCm 7.13.
+Presets replace manually setting numerous environment variables with a single
+``--preset`` flag available on ``rocprof-sys-run`` and ``rocprof-sys-sample``.
+Presets were introduced in ROCm 7.12 and expanded into an extensible JSON-based system
+in ROCm 7.13. The experimental ``rocsys profile`` command accepts the same flag.
+See :doc:`how-to/using-rocsys`.
 
 Discover, inspect, and apply a preset as follows:
 

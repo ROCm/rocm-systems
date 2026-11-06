@@ -26,4 +26,32 @@ namespace rocjitsu {
   return raw != nullptr && static_cast<uint16_t>(raw[0]) == 2;
 }
 
+/// @brief Whether an indirect branch can also continue at the next instruction.
+///
+/// @details Like s_setpc, S_CBRANCH_G_FORK and S_CBRANCH_JOIN take a successor
+/// from SGPRs, but they also fall through: a fork whose fail side runs first, or
+/// a join on its second arrival. Callers still treat the SGPR-held successor as
+/// unknown.
+[[nodiscard]] inline bool indirect_branch_falls_through(const Instruction &inst) {
+  constexpr uint64_t kFlags = INDIRECT_BRANCH | BRANCH_STACK;
+  return (inst.flags() & kFlags) == kFlags;
+}
+
+/// @brief Whether an instruction can transfer control away from fallthrough.
+///
+/// @details Some system instructions express their PC write only as an operand,
+/// without a branch flag. Traps transfer to a handler even when they have no
+/// explicit PC destination. Check path termination separately.
+[[nodiscard]] inline bool is_control_flow_transfer(const Instruction &inst) {
+  if ((inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL)) != 0 ||
+      inst.mnemonic() == "s_trap")
+    return true;
+  for (int i = 0; i < inst.num_dst_operands(); ++i) {
+    const auto *operand = inst.dst_operand(i);
+    if (operand && operand->to_special_reg_class() == RegClass::PC)
+      return true;
+  }
+  return false;
+}
+
 } // namespace rocjitsu

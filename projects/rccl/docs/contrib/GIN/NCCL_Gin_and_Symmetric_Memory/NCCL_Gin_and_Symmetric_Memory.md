@@ -243,8 +243,9 @@ symMemoryObtain
  ├── Stage 5: symMemoryMapLsaTeam constructs lsaFlatBase VA + maps each peer's physical segment
  ├── Stage 6: backfill primaryAddr (for callers that didn't supply a VA)
  ├── Stage 7: symBindTeamMemory binds NVLS multicast
- ├── Stage 8: symMemoryRegisterGin / symMemoryRegisterRma — cross-node registration
- └── Stage 9: link into devr->memHead, refCount=1, return
+ ├── Stage 8: link into devr->memHead (plugins resolve user VA via memHead)
+ ├── Stage 9: symMemoryRegisterGin / symMemoryRegisterRma — cross-node registration
+ └── return with refCount=1
 ```
 
 On NVLink, the local rank's handle is exported as follows:
@@ -1276,7 +1277,7 @@ Field semantics of ncclDevCommRequirements:
 | barrierCount | Number of slots to allocate for ncclBarrierSession (LSA + GIN hybrid barrier). One slot per CTA. |
 | ginSignalCount | Number of pre-allocated GIN signals. Each CTA uses one to count the number of remote puts received. |
 | ginConnectionType | FULL = build QPs to every other rank; RAIL = build per rail; NONE = disable GIN. |
-| ginContextCount | Suggested number of GIN contexts (default 4). Each context owns its own set of QPs and runs concurrently. |
+| ginContextCount | Requested number of GIN contexts (default 4). Each context owns its own set of QPs and runs concurrently. RCCL treats the request as a minimum: it rounds up to a multiple of the GIN connection count and reports the allocated count on `devComm.ginContextCount`. Use the returned value to index contexts. |
 
 ### 2.4 Launch the kernel and verify
 

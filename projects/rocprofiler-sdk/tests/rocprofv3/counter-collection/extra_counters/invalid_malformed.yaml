@@ -1,0 +1,6 @@
+rocprofiler-sdk:
+  counters:
+  - name: TEST
+    definitions
+    - architectures:
+      - gfx942

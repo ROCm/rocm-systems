@@ -135,19 +135,19 @@ Kernel dispatch timestamp source
       - Default
       - Description
     * - ``ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB``
-      - ``10240``
+      - ``2560``
       - Size in KiB of the firmware dispatch-log ring, as an integer from ``1`` to
-        ``4194303``. Defaults to 10 MiB. A non-integer, empty, zero, or
+        ``4194303``. Defaults to 2.5 MiB. A non-integer, empty, zero, or
         out-of-range value is ignored with a warning and the default is used. If
-        the firmware laps the reader the SDK logs an overrun warning and the
-        affected signal-less dispatches emit no record (their firmware records were
-        overwritten before the reader copied them); raising this value gives the
-        reader more headroom.
+        the firmware laps the reader, records are silently overwritten before the
+        reader copies them (a lap is undetectable by design), so the affected
+        signal-less dispatches emit no record; raising this value gives the reader
+        more headroom.
 
         The driver only accepts ring sizes of ``80 * 2^k`` bytes (80 KiB, 160 KiB,
-        320 KiB, ... up to the 640 MiB maximum), so the requested size is rounded
+        320 KiB, ... up to the 10 MiB maximum), so the requested size is rounded
         DOWN to the nearest accepted size, and a size below 80 KiB or above
-        640 MiB is clamped. The effective size is logged whenever it differs from
+        10 MiB is clamped. The effective size is logged whenever it differs from
         the requested one.
     * - ``ROCPROFILER_KFD_DISPATCH_LOG_POLL_TIMEOUT_MS``
       - ``10``
@@ -196,14 +196,14 @@ Kernel dispatch timestamp source
         that slot to the signal path. A queue destroy does **not** retire the slot:
         a later queue that reuses the doorbell opens a fresh owner window and its
         records are attributed by dispatch time, so a queue-churning workload (for
-        example a HIP stream pool) keeps using signal-less. If the firmware ring
-        overruns, an end-of-pipe record observed under the overrun cannot be trusted
-        to belong to any specific dispatch, so it is not attributed: those
-        dispatches emit no firmware record, and a warning names the counts.
-        Signal-less is **not** disabled -- later, loss-free dispatches keep using
-        it. As a current limitation, such un-attributed dispatches keep their
-        correlation-id references until process teardown rather than being retired
-        eagerly.
+        example a HIP stream pool) keeps using signal-less. ABI v4 exposes the
+        firmware's wrapping per-region cursor directly and carries no producer-side
+        read pointer, so a ring overrun is **not detectable** by the reader: if the
+        firmware laps the reader between drains, the copied records for the lapped
+        span are unreliable and cannot be trusted to belong to any specific
+        dispatch. There is no overrun warning or count. As a current limitation,
+        un-attributed dispatches keep their correlation-id references until process
+        teardown rather than being retired eagerly.
 
         One limitation is inherent to the doorbell-slot design: attribution
         requires that no two live queues on the same GPU share a page-relative

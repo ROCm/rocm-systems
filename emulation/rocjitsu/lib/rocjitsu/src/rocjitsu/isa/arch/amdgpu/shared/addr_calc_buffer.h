@@ -13,6 +13,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/buffer_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -40,6 +41,14 @@ inline bool buffer_resource_range_is_backed(const Wavefront &wf, uint32_t select
     return scalar_selector_range_is_backed(wf, selector, 2) &&
            scalar_selector_range_is_backed(wf, selector + 2, 2);
   return scalar_selector_range_is_backed(wf, selector, 4);
+}
+
+/// MUBUF/MTBUF SOFFSET accepts scalar registers and inline integer/float constants.
+/// Constants supply their raw 32-bit value as an unsigned byte offset.
+inline std::optional<uint32_t> buffer_scalar_offset(Wavefront &wf, uint32_t selector) {
+  if (auto constant = resolve_src_scalar_statically(selector))
+    return static_cast<uint32_t>(*constant);
+  return try_read_scalar_selector(wf, selector);
 }
 
 constexpr uint32_t buffer_offset_part(uint32_t voffset, int64_t inst_offset) {
@@ -94,7 +103,8 @@ constexpr bool gfx9_mubuf_is_format_op(uint32_t op) { return op <= 15 || op == 3
 struct Gfx9BufferResource {
   uint32_t stride;       ///< STRIDE, word1[29:16].
   bool swizzle_enable;   ///< SWIZZLE_ENABLE, word1[31].
-  uint32_t data_format;  ///< DATA_FORMAT, word3[18:15]; STRIDE[17:14] for non-format ADD_TID ops.
+  uint32_t data_format;  ///< DATA_FORMAT, word3[18:15]; 0 unbound except as STRIDE[17:14]
+                         ///< for non-format ADD_TID operations.
   uint32_t index_stride; ///< INDEX_STRIDE, word3[22:21], in indices (8, 16, 32 or 64).
   bool add_tid_enable;   ///< ADD_TID_ENABLE, word3[23].
 };
@@ -292,16 +302,12 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
   uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
   uint64_t base_addr = (static_cast<uint64_t>(srd1 & 0xFFFF) << 32) | srd0;
-  // soffset field: 0-105 = SGPR index, 128 (0x80) = inline constant 0.
-  uint32_t soffset_val = 0;
-  if (inst.soffset != 0x80) {
-    auto soffset = amdgpu::try_read_scalar_selector(wf, inst.soffset);
-    if (!soffset) {
-      reject_vector_memory_access(d);
-      return;
-    }
-    soffset_val = *soffset;
+  auto soffset = buffer_scalar_offset(wf, inst.soffset);
+  if (!soffset) {
+    reject_vector_memory_access(d);
+    return;
   }
+  const uint32_t soffset_val = *soffset;
   // Buffer bounds checking: OOB loads return 0, OOB stores are dropped.
   // num_records is the buffer size in bytes, or in records when index-checked.
   uint32_t num_records = srd2;
@@ -333,6 +339,14 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   const bool gfx9 = arch_is_cdna_4_or_lower(wf.cu().arch());
   const Gfx9BufferResource gfx9_srd = gfx9_buffer_resource(srd1, srd3);
   const bool format_op = gfx9_mubuf_is_format_op(inst.op);
+  // Format preparation rejects INVALID for typed accesses. Raw GFX9 buffers
+  // need the same no-access behavior here, before opcode-derived formats hide it.
+  // The ISA keys the stride-field exemption on ADD_TID itself, independently
+  // of the IDXEN qualification used below for adding lanes to linear buffers.
+  if (gfx9 && !format_op && gfx9_srd.data_format == 0 && !gfx9_srd.add_tid_enable) {
+    reject_vector_memory_access(d);
+    return;
+  }
   const bool rdna = uses_rdna_buffer_range_check(wf.cu().arch());
   const bool per_element = d.num_elems > 1 && d.atomic_op == AtomicOp::NONE &&
                            (gfx9 ? !format_op : rdna && !d.buffer_components);
@@ -441,15 +455,12 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
   uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
   uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
   uint64_t base_addr = (static_cast<uint64_t>(srd1 & 0xFFFF) << 32) | srd0;
-  uint32_t soffset_val = 0;
-  if (inst.soffset != 0x80) {
-    auto soffset = amdgpu::try_read_scalar_selector(wf, inst.soffset);
-    if (!soffset) {
-      reject_vector_memory_access(d);
-      return;
-    }
-    soffset_val = *soffset;
+  auto soffset = buffer_scalar_offset(wf, inst.soffset);
+  if (!soffset) {
+    reject_vector_memory_access(d);
+    return;
   }
+  const uint32_t soffset_val = *soffset;
   uint32_t num_records = srd2;
   uint32_t stride = (srd1 >> 16) & 0x3FFF;
   const auto rdna_oob_select = static_cast<RdnaBufferOobSelect>((srd3 >> 28) & 0x3);

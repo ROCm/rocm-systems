@@ -22,6 +22,13 @@
 
 #ifndef ROCM_SMI_INCLUDE_ROCM_SMI_LIB_LOADER_H_
 #define ROCM_SMI_INCLUDE_ROCM_SMI_LIB_LOADER_H_
+
+// NOTICE: ROCm-SMI is fully deprecated as of ROCm 10.1; only critical bug
+// fixes will be applied. Please switch to AMD-SMI
+// (https://github.com/ROCm/amdsmi) for continued support.
+#pragma message( \
+    " ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).")
+
 #include <dlfcn.h>
 #include <string.h>
 

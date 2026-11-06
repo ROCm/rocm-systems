@@ -69,7 +69,7 @@ public:
     {
         m_backend_api->initialize();
 
-        auto ver                                 = m_backend_api->get_lib_version();
+        auto const ver                           = m_backend_api->get_lib_version();
         m_version.numeric_representation.major   = ver.major;
         m_version.numeric_representation.minor   = ver.minor;
         m_version.numeric_representation.release = ver.release;
@@ -78,7 +78,10 @@ public:
 
     ~provider() noexcept
     {
-        if(m_backend_api) m_backend_api->shutdown();
+        if(m_backend_api)
+        {
+            m_backend_api->shutdown();
+        }
     }
 
     // Non-copyable, movable
@@ -96,7 +99,10 @@ public:
     {
         if(this != &other)
         {
-            if(m_backend_api) m_backend_api->shutdown();
+            if(m_backend_api)
+            {
+                m_backend_api->shutdown();
+            }
             m_backend_api = std::move(other.m_backend_api);
             m_version     = std::move(other.m_version);
             other.m_backend_api.reset();
@@ -134,13 +140,13 @@ public:
     template <typename Device>
     [[nodiscard]] std::vector<std::shared_ptr<Device>> get_gpu_devices()
     {
-        auto handles = m_backend_api->enumerate_gpu_handles();
+        auto const handles = m_backend_api->enumerate_gpu_handles();
 
         std::vector<std::shared_ptr<Device>> result;
         result.reserve(handles.size());
 
         std::size_t index = 0;
-        for(auto handle : handles)
+        for(auto const handle : handles)
         {
             auto proxy =
                 std::make_shared<typename Device::backend_type>(m_backend_api, handle);
@@ -157,13 +163,13 @@ public:
     template <typename Device>
     [[nodiscard]] std::vector<std::shared_ptr<Device>> get_nic_devices()
     {
-        auto handles = m_backend_api->enumerate_nic_handles();
+        auto const handles = m_backend_api->enumerate_nic_handles();
 
         std::vector<std::shared_ptr<Device>> result;
         result.reserve(handles.size());
 
         std::size_t index = 0;
-        for(auto handle : handles)
+        for(auto const handle : handles)
         {
             auto proxy =
                 std::make_shared<typename Device::backend_type>(m_backend_api, handle);

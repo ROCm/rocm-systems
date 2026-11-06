@@ -10,7 +10,15 @@
 
 #include "enqueue_test_deps.h"
 
+#include "nccl_fakes.h"
+
+// init.cc owns NCCL_PARAM(P2pDisable). enqueue.cc's addP2pToPlan calls it via
+// rcclP2pPolicyChannels; wrap_fakes.cc supplies the body for binaries that
+// compile rccl_wrap.cc, which this target does not.
+int64_t ncclParamP2pDisable() { return g_loadParam("P2P_DISABLE", 0); }
+
 void ResetEnqueueTestDeps() {
+  ResetAllocatorFakes();
   ResetHipFakes();
   ResetNcclFakes();
   ResetNcclStubs();
@@ -18,10 +26,14 @@ void ResetEnqueueTestDeps() {
   ResetCommFakes();
   ResetDevRuntimeFakes();
   ResetGroupFakes();
+  ResetMgmtTaskEnqFakes();
   ResetProxyFakes();
   ResetRcclWrapFakes();
   ResetRecorderFakes();
   ResetRegisterStubs();
+  ResetRmaFakes();
+  ResetSchedStubs();
+  ResetStrongStreamStubs();
   ResetSymKernelsFakes();
   ResetTransportStubs();
   ResetTuningFakes();

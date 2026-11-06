@@ -5,7 +5,12 @@
 FindROCmVersion
 ---------------
 
-Search the <ROCM_PATH>/.info/version* files to determine the version of ROCm
+Search the <ROCM_PATH>/.info/version* files to determine the version of ROCm.
+
+If no `.info/version*` file exists (e.g. a TheRock configure, which happens before the
+dist tree is flattened), the version is taken from the `rocm-core` package, and failing
+that, from the `hip` package. In that case `ROCmVersion_DIR` is derived from the location
+of the package config, and `ROCmVersion_VERSION_FILE` is left unset.
 
 Use this module by invoking find_package with the form::
 
@@ -358,18 +363,96 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
     endif()
 endfunction()
 
+# Derive the ROCm version from an installed ROCm package, for trees where .info/version
+# has not been created yet. rocm-core is preferred because it tracks the ROCm release
+# version; hip is a last resort because its version series has diverged from ROCm's (HIP
+# is still on 7.x while ROCm has moved to 10.x).
+function(ROCM_VERSION_PARSE_PACKAGE_VERSION)
+    # rocm_version_watch_for_change() unsets every cache variable in _REMAIN_VARIABLES that
+    # has not been written yet when it sees a change, so seed it the same way
+    # rocm_version_parse_version_files() does
+    set(_REMAIN_VARIABLES)
+    foreach(_V ${ROCmVersion_VARIABLES})
+        list(APPEND _REMAIN_VARIABLES ROCmVersion_${_V}_VERSION)
+    endforeach()
+
+    foreach(_PKG rocm-core hip)
+        # ROCmVersion_DIR comes first to match the version file search, which uses it as
+        # the sole search path when set. QUIET because a missing package is an expected
+        # outcome here, not an error.
+        find_package(
+            ${_PKG}
+            QUIET
+            HINTS ${ROCmVersion_DIR} ${ROCM_PATH} ${ROCPROFSYS_DEFAULT_ROCM_PATH}
+            PATHS ${ROCmVersion_DIR} ${ROCM_PATH} ${ROCPROFSYS_DEFAULT_ROCM_PATH}
+        )
+
+        # a package can be "found" without reporting a version, so test the version itself
+        if(NOT "${${_PKG}_VERSION}" STREQUAL "")
+            rocm_version_message(
+                STATUS
+                "Using version '${${_PKG}_VERSION}' from package ${_PKG}"
+            )
+            rocm_version_compute("${${_PKG}_VERSION}" _pkgver)
+
+            # <pkg>_DIR is <root>/lib/cmake/<pkg>, so the root is three levels up. It is
+            # unset when the package was found in module rather than config mode.
+            if(IS_DIRECTORY "${${_PKG}_DIR}")
+                get_filename_component(_ROCM_ROOT "${${_PKG}_DIR}/../../.." REALPATH)
+            else()
+                set(_ROCM_ROOT)
+            endif()
+
+            # take the first candidate that resolves to a real directory. ROCmVersion_DIR
+            # comes first so that a caller-provided root is reported back unchanged rather
+            # than overwritten, which is how the version file search treats it too.
+            foreach(
+                _DIR
+                "${ROCmVersion_DIR}"
+                "${_ROCM_ROOT}"
+                "${ROCM_PATH}"
+                "${ROCPROFSYS_DEFAULT_ROCM_PATH}"
+            )
+                if(IS_DIRECTORY "${_DIR}")
+                    set(ROCmVersion_DIR "${_DIR}" CACHE PATH "Root path to ROCm" FORCE)
+                    rocm_version_watch_for_change(ROCmVersion_DIR)
+                    break()
+                endif()
+            endforeach()
+
+            # FORCE because a stale value may already be cached from an earlier configure
+            # that resolved the version from a different source
+            foreach(_V ${ROCmVersion_VARIABLES})
+                set(_CACHE_VAR ROCmVersion_${_V}_VERSION)
+                set(${_CACHE_VAR}
+                    "${_pkgver_${_V}_VERSION}"
+                    CACHE STRING
+                    "ROCm ${_V} version"
+                    FORCE
+                )
+                rocm_version_watch_for_change(${_CACHE_VAR})
+            endforeach()
+
+            # first package with a version wins; do not let a later one overwrite it
+            return()
+        endif()
+    endforeach()
+endfunction()
+
 # execute
 rocm_version_parse_version_files()
+
+if(NOT EXISTS "${ROCmVersion_VERSION_FILE}")
+    rocm_version_parse_package_version()
+endif()
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(
     ROCmVersion
     VERSION_VAR ROCmVersion_FULL_VERSION
-    REQUIRED_VARS
-        ROCmVersion_FULL_VERSION
-        ROCmVersion_TRIPLE_VERSION
-        ROCmVersion_DIR
-        ROCmVersion_VERSION_FILE
+    REQUIRED_VARS ROCmVersion_FULL_VERSION ROCmVersion_TRIPLE_VERSION ROCmVersion_DIR
 )
+# ROCmVersion_VERSION_FILE is not required: it is only set when the version came from a
+# .info/version file, not when it came from a package version
 # don't add major/minor/patch/etc. version variables to required vars because they might
 # be zero, which will cause CMake to evaluate it as not set

@@ -602,6 +602,8 @@ class VSwmmacF3216x16x64F16Vop3p : public Vop3p {
 public:
   VSwmmacF3216x16x64F16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   void build_modifiers(std::string &out) const override;
   Operand vdst;
   Operand src0;
@@ -613,6 +615,8 @@ class VSwmmacF3216x16x64Bf16Vop3p : public Vop3p {
 public:
   VSwmmacF3216x16x64Bf16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   void build_modifiers(std::string &out) const override;
   Operand vdst;
   Operand src0;
@@ -624,6 +628,8 @@ class VSwmmacF1616x16x64F16Vop3p : public Vop3p {
 public:
   VSwmmacF1616x16x64F16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   void build_modifiers(std::string &out) const override;
   Operand vdst;
   Operand src0;
@@ -635,6 +641,8 @@ class VSwmmacBf1616x16x64Bf16Vop3p : public Vop3p {
 public:
   VSwmmacBf1616x16x64Bf16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   void build_modifiers(std::string &out) const override;
   Operand vdst;
   Operand src0;
@@ -646,8 +654,12 @@ class VSwmmacBf16f3216x16x64Bf16Vop3p : public Vop3p {
 public:
   VSwmmacBf16f3216x16x64Bf16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void append_dst_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   void build_modifiers(std::string &out) const override;
   Operand vdst;
+  Operand vdst_result;
   Operand src0;
   Operand src1;
   Operand src2;
@@ -747,6 +759,8 @@ class VSwmmacF3216x16x128Fp8Fp8Vop3p : public Vop3p {
 public:
   VSwmmacF3216x16x128Fp8Fp8Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   void build_modifiers(std::string &out) const override;
   Operand vdst;
   Operand src0;
@@ -758,6 +772,8 @@ class VSwmmacF3216x16x128Fp8Bf8Vop3p : public Vop3p {
 public:
   VSwmmacF3216x16x128Fp8Bf8Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   void build_modifiers(std::string &out) const override;
   Operand vdst;
   Operand src0;
@@ -769,6 +785,8 @@ class VSwmmacF3216x16x128Bf8Fp8Vop3p : public Vop3p {
 public:
   VSwmmacF3216x16x128Bf8Fp8Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   void build_modifiers(std::string &out) const override;
   Operand vdst;
   Operand src0;
@@ -780,6 +798,8 @@ class VSwmmacF3216x16x128Bf8Bf8Vop3p : public Vop3p {
 public:
   VSwmmacF3216x16x128Bf8Bf8Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   void build_modifiers(std::string &out) const override;
   Operand vdst;
   Operand src0;
@@ -791,6 +811,8 @@ class VSwmmacF1616x16x128Fp8Fp8Vop3p : public Vop3p {
 public:
   VSwmmacF1616x16x128Fp8Fp8Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   void build_modifiers(std::string &out) const override;
   Operand vdst;
   Operand src0;
@@ -802,6 +824,8 @@ class VSwmmacF1616x16x128Fp8Bf8Vop3p : public Vop3p {
 public:
   VSwmmacF1616x16x128Fp8Bf8Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   void build_modifiers(std::string &out) const override;
   Operand vdst;
   Operand src0;
@@ -813,6 +837,8 @@ class VSwmmacF1616x16x128Bf8Fp8Vop3p : public Vop3p {
 public:
   VSwmmacF1616x16x128Bf8Fp8Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   void build_modifiers(std::string &out) const override;
   Operand vdst;
   Operand src0;
@@ -824,6 +850,8 @@ class VSwmmacF1616x16x128Bf8Bf8Vop3p : public Vop3p {
 public:
   VSwmmacF1616x16x128Bf8Bf8Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   void build_modifiers(std::string &out) const override;
   Operand vdst;
   Operand src0;
@@ -835,6 +863,8 @@ class VSwmmacI3216x16x128Iu8Vop3p : public Vop3p {
 public:
   VSwmmacI3216x16x128Iu8Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   void build_modifiers(std::string &out) const override;
   Operand vdst;
   Operand src0;

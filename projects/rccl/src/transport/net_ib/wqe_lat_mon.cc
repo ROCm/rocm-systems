@@ -258,7 +258,7 @@ static void getPeerInfo(struct ncclIbNetCommBase* base, int devIndex, struct ncc
   info->hca = "?";
   union ncclSocketAddress addr;
   if (ncclSocketGetAddr(&base->sock, &addr) == ncclSuccess) {
-    ncclSocketToString(&addr, info->sock);
+    ncclSocketToString(&addr, info->sock, sizeof(info->sock));
   }
   struct ncclIbNetCommDevBase* devBase = ncclIbGetNetCommDevBase(base, devIndex);
   if (devBase->gidInfo.link_layer == IBV_LINK_LAYER_ETHERNET) {

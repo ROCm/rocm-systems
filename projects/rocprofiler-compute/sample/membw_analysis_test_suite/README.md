@@ -39,14 +39,14 @@ hipcc -g <hip workload> -o <output>
 # benchmarking that is unrelated to the our purpose
 
 # baseline profile
-rocprof-compute profile -n gl2_backpressure_baseline --membw-analysis --no-roof -- ./gl2_backpressure
+rocprof-compute profile -n gl2_backpressure_baseline --experimental --membw-analysis --no-roof -- ./gl2_backpressure
 # optimized profile
-rocprof-compute profile -n gl2_backpressure_optimized --membw-analysis --no-roof -- ./gl2_backpressure opt
+rocprof-compute profile -n gl2_backpressure_optimized --experimental --membw-analysis --no-roof -- ./gl2_backpressure opt
 ```
 
 ## Analyzing
 
 ```bash
 # baseline profile
-rocprof-compute analyze -p <path to profiled result> --membw-analysis
+rocprof-compute analyze -p <path to profiled result>
 ```

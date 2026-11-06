@@ -39,7 +39,7 @@ template <typename Tp, typename ContainerT, typename Up>
 ContainerT
 parse_numeric_range(std::string _input_string, const std::string& _label, Up _incr)
 {
-    auto _get_value = [](const std::string& _inp) {
+    auto const _get_value = [](const std::string& _inp) {
         std::stringstream iss{ _inp };
         auto              var = Tp{};
         iss >> var;
@@ -60,12 +60,15 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
             continue;
         }
 
-        auto _incr_v   = _incr;
-        auto _incr_pos = _v.find(':');
+        auto       _incr_v   = _incr;
+        auto const _incr_pos = _v.find(':');
         if(_incr_pos != std::string::npos)
         {
-            auto _incr_str = _v.substr(_incr_pos + 1);
-            if(!_incr_str.empty()) _incr_v = static_cast<Up>(std::stoull(_incr_str));
+            auto const _incr_str = _v.substr(_incr_pos + 1);
+            if(!_incr_str.empty())
+            {
+                _incr_v = static_cast<Up>(std::stoull(_incr_str));
+            }
             _v = _v.substr(0, _incr_pos);
         }
 

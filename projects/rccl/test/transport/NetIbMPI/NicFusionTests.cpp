@@ -262,7 +262,7 @@ TEST_F(NetIbMPITest, ConnectAndTransfer_VNic) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
+    ASSERT_SETUP_CONNECTION(vdev, pair, connGuard);
 
     const size_t bufferSize = kSmallBufferSize;
     const int tag = 500;
@@ -339,7 +339,7 @@ TEST_F(NetIbMPITest, AsymmetricMerge_VNic) {
     // Inline connection setup: each rank uses a different device ID.
     // Rank 0 (receiver): listen on vdev (ndevs=2, 2 PDs, doubled QPs)
     // Rank 1 (sender):   connect on physical dev 0 (ndevs=1, 1 PD)
-    // ncclIbCalculateNqps uses max(local, remote) so both sides get the same QP count.
+    // rcclIbMaxNqps uses max(local, remote) so both sides get the same QP count.
     ConnectionPair pair;
 
     if (rank == 0) {
@@ -532,7 +532,7 @@ TEST_F(NetIbMPITest, CloseWithoutTransfer_VNic) {
     {
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        SetupConnectionWithGuard(vdev, pair, connGuard);
+        ASSERT_SETUP_CONNECTION(vdev, pair, connGuard);
         // Guard triggers closeSend/closeRecv/closeListen on a connection that
         // never had regMr, isend, or irecv called.
     }
@@ -542,7 +542,7 @@ TEST_F(NetIbMPITest, CloseWithoutTransfer_VNic) {
     // Phase 2: reconnect on the same vdev and do a transfer to verify no corruption.
     ConnectionPair pair2;
     NetConnectionGuard connGuard2(net_);
-    SetupConnectionWithGuard(vdev, pair2, connGuard2);
+    ASSERT_SETUP_CONNECTION(vdev, pair2, connGuard2);
 
     const size_t bufferSize = kSmallBufferSize;
     const int tag = 520;
@@ -603,9 +603,80 @@ TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
         << "Failed to create fused vNIC from devices 0 and 1";
     ASSERT_GE(vdev, 0);
 
+    // Parameterized by MPIEnvironment::nThreads. Every regMr on a fused device
+    // fans out across both members' protection domains and MR caches, so
+    // concurrent cycling on one address doubles the contended surface. The vNIC
+    // itself is created once on the main thread: the merged-device table is
+    // process-global.
+    const int nThreads = MPIEnvironment::nThreads;
+    if (nThreads > 1) {
+        // One region, cycled by every worker so they contend on a single MR cache
+        // entry, but sliced for the traffic that follows: the serial body moves
+        // data through the address it just recycled, and a shared payload buffer
+        // would have the workers overwriting each other's verification.
+        const size_t slotSize   = kSmallBufferSize;
+        const size_t sharedSize = slotSize * nThreads;
+        auto shared = makeHostBufferAutoGuard(malloc(sharedSize));
+        ASSERT_NE(shared.get(), nullptr);
+        // Workers cannot dismiss the shared guard themselves: several can time out at
+        // once and AutoGuard::release() writes a plain bool, so concurrent calls would
+        // be a data race. They raise this instead, and the guard is dismissed once on
+        // this thread after RunThreadedBody has joined them all.
+        std::atomic<bool> retainShared{false};
+
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(vdev), nThreads, "threaded RegDeregCycling_VNic",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                void* workerComm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                for (int i = 0; i < 50; i++) {
+                    void* mhandle = nullptr;
+                    result = WorkerRegister(workerComm, shared.get(), sharedSize,
+                                            NCCL_PTR_HOST, &mhandle);
+                    if (!result.ok) return result;
+                    if (DeregisterMemory(workerComm, mhandle) != ncclSuccess) {
+                        result.ok = false;
+                        result.msg = "deregMr failed during vNIC cache cycling";
+                        return result;
+                    }
+                }
+
+                void* mhandle = nullptr;
+                result = WorkerRegister(workerComm, shared.get(), sharedSize, NCCL_PTR_HOST,
+                                        &mhandle);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhandleGuard(mhandle,
+                                                   NetMHandleWorkerDeleter(net_, workerComm));
+
+                void* slot = static_cast<char*>(shared.get()) + threadIdx * slotSize;
+                bool outstanding = false;
+                result = WorkerSendRecvPattern(rank, pair, slot, slotSize, 530, mhandle,
+                                               WorkerSeed(threadIdx, 0), kDefaultTimeoutMs,
+                                               &outstanding);
+                if (!result.ok && outstanding) {
+                    // shared is one allocation split into per-worker slots and outlives
+                    // every worker thread, so a timed-out request here means a live NIC
+                    // write into memory the whole test -- not just this worker -- is
+                    // about to free. Dismissing it leaks the region rather than freeing
+                    // memory another rank's hardware can still touch.
+                    result.msg += "; the shared buffer and this worker's registration are "
+                                  "retained, since the request may still reference them";
+                    // This worker's own registration is its own to dismiss; the shared
+                    // allocation is flagged for the main thread.
+                    mhandleGuard.release();
+                    retainShared.store(true, std::memory_order_release);
+                }
+                return result;
+            });
+        // After the join, so this is the only thread touching the guard. Leaks the one
+        // region rather than freeing memory a timed-out request may still be written into.
+        if (retainShared.load(std::memory_order_acquire)) shared.release();
+        return;
+    }
+
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
+    ASSERT_SETUP_CONNECTION(vdev, pair, connGuard);
 
     const size_t bufferSize = kSmallBufferSize;
     void* buffer = malloc(bufferSize);
@@ -681,9 +752,28 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
         << "Failed to create fused vNIC from devices 0 and 1";
     ASSERT_GE(vdev, 0);
 
+    // Parameterized by MPIEnvironment::nThreads: several striped transfers run at
+    // once over the fused device. The per-worker size shrinks with the worker
+    // count: every registration on a fused device is pinned once per member, so
+    // 64 MB per worker exhausts registration resources at high worker counts
+    // while adding nothing to the striping coverage.
+    if (MPIEnvironment::nThreads > 1) {
+        const size_t threadedSize =
+            std::max<size_t>(4 * 1024 * 1024,
+                             (64 * 1024 * 1024) / MPIEnvironment::nThreads);
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
+            "threaded LargeTransfer_VNic",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                return WorkerHostTransfer(rank, pair, threadedSize, 540,
+                                          WorkerSeed(threadIdx, 5400), kLargeTransferTimeoutMs);
+            });
+        return;
+    }
+
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
+    ASSERT_SETUP_CONNECTION(vdev, pair, connGuard);
 
     // 64MB buffer — ncclIbMultiSend stripes this across the doubled QPs.
     const size_t bufferSize = 64 * 1024 * 1024;
@@ -747,17 +837,30 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
         << "Failed to create fused vNIC from devices 0 and 1";
     ASSERT_GE(vdev, 0);
 
-    ConnectionPair pair;
-    NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
-
     // Sizes: 1B, 3MB, 3B, 5MB, 7B, 7MB, 64B, 16MB, 1B, 11MB, 4MB, 1B.
     // Tiny sizes may use only one QP, large ones stripe across both.
     // Odd MB sizes (3, 5, 7, 11) produce uneven QP splits.
-    std::vector<size_t> testSizes = {
+    // Shared by both halves: a size added for one of them belongs to the other too.
+    const std::vector<size_t> testSizes = {
         1, 3*1024*1024, 3, 5*1024*1024, 7, 7*1024*1024,
         64, 16*1024*1024, 1, 11*1024*1024, 4*1024*1024, 1
     };
+
+    // Parameterized by MPIEnvironment::nThreads: the uneven-split ladder runs on
+    // every worker's own fused connection simultaneously.
+    if (MPIEnvironment::nThreads > 1) {
+        // Per-size allocation and registration, as the serial body does: on a fused
+        // device every regMr fans out across both members, and that churn is what
+        // this test is about.
+        RunThreadedSizeSweep(ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads, testSizes,
+                             /*repeats=*/1, "threaded MixedSizes_VNic",
+                             SweepRegistration::PerSize);
+        return;
+    }
+
+    ConnectionPair pair;
+    NetConnectionGuard connGuard(net_);
+    ASSERT_SETUP_CONNECTION(vdev, pair, connGuard);
 
     for (size_t idx = 0; idx < testSizes.size(); idx++) {
         size_t size = testSizes[idx];
@@ -823,16 +926,26 @@ TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
         << "Failed to create fused vNIC from devices 0 and 1";
     ASSERT_GE(vdev, 0);
 
-    ConnectionPair pair;
-    NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
-
     // Sizes around 128-byte QP striping alignment boundaries.
     // ncclIbMultiSend computes chunkSize = DIVUP(DIVUP(size, nqps), 128) * 128.
     // These sizes produce uneven QP splits where one QP gets more data than the other.
     // 127: all on QP 0, QP 1 posts zero-sge. 129: 128B on QP 0, 1B on QP 1.
     // 255: 128B each, QP 1 gets 127B. 257: 256B on QP 0, 1B remainder on QP 1.
-    std::vector<size_t> testSizes = {127, 129, 255, 257, 511, 513};
+    // Shared by both halves: a size added for one of them belongs to the other too.
+    const std::vector<size_t> testSizes = {127, 129, 255, 257, 511, 513};
+
+    // Parameterized by MPIEnvironment::nThreads: concurrent workers hit the
+    // 128-byte striping boundary on both members of the fused device at once.
+    if (MPIEnvironment::nThreads > 1) {
+        RunThreadedSizeSweep(ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads, testSizes,
+                             /*repeats=*/2, "threaded UnalignedSizeTransfer_VNic",
+                             SweepRegistration::PerSize);
+        return;
+    }
+
+    ConnectionPair pair;
+    NetConnectionGuard connGuard(net_);
+    ASSERT_SETUP_CONNECTION(vdev, pair, connGuard);
 
     for (size_t idx = 0; idx < testSizes.size(); idx++) {
         size_t size = testSizes[idx];
@@ -1040,9 +1153,128 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
     ASSERT_GE(vdev, 0);
 
     const int rank = MPIEnvironment::world_rank;
+
+    // Parameterized by MPIEnvironment::nThreads: concurrent GPU receives and
+    // flushes on one fused device. Workers inherit this rank's HIP device from
+    // the harness, since the current device is thread-local.
+    if (MPIEnvironment::nThreads > 1) {
+        static constexpr int kThreadedIters = 20;
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
+            "threaded FlushRepeated_VNic",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                const size_t size = kSmallBufferSize;
+                void* gpuBuffer = nullptr;
+                if (hipMalloc(&gpuBuffer, size) != hipSuccess) {
+                    result.ok = false;
+                    result.msg = "hipMalloc failed";
+                    return result;
+                }
+                auto gpuGuard = makeDeviceBufferAutoGuard(gpuBuffer);
+
+                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                void* mhandle = nullptr;
+                result = WorkerRegister(comm, gpuBuffer, size, NCCL_PTR_CUDA, &mhandle);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhandleGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
+
+                // One pattern per worker: a per-iteration seed aliases modulo 256.
+                const int seed = WorkerSeed(threadIdx, 6000);
+                for (int iter = 0; iter < kThreadedIters; iter++) {
+                    if (rank == 1
+                        && initializeBufferWithPattern<uint8_t>(gpuBuffer, size,
+                                                                makeBytePattern(seed))
+                               != hipSuccess) {
+                        result.ok = false;
+                        result.msg = "GPU buffer initialization failed";
+                        return result;
+                    }
+
+                    // Cleared before every receive, not just the first: the expected
+                    // pattern is the same on all iterations, so after iteration 0 a
+                    // flush that did nothing would leave the previous payload in place
+                    // and verify clean. Zeroing first makes each iteration prove that
+                    // this transfer's data became visible.
+                    if (rank == 0 && hipMemset(gpuBuffer, 0, size) != hipSuccess) {
+                        result.ok = false;
+                        result.msg = "clearing the GPU receive buffer failed at iteration "
+                                     + std::to_string(iter);
+                        return result;
+                    }
+
+                    // The size is checked too, so a short receive cannot verify on a
+                    // tail this clearing happened to leave at the expected value.
+                    int received = 0;
+                    bool outstanding = false;
+                    result = WorkerSendRecvRaw(rank, pair, gpuBuffer, size, 600, mhandle,
+                                               kDefaultTimeoutMs, &received,
+                                               /*busyPoll=*/false, &outstanding);
+                    if (!result.ok) {
+                        // Per-worker gpuGuard/mhandleGuard, unlike the shared allocation
+                        // above: a timed-out request here is this worker's own, so only
+                        // its own guards need to survive it.
+                        if (outstanding) {
+                            result.msg += "; the GPU buffer and its registration are "
+                                          "retained, since the request may still "
+                                          "reference them";
+                            mhandleGuard.release();
+                            gpuGuard.release();
+                        }
+                        return result;
+                    }
+
+                    if (rank != 0) continue;
+                    if (received != static_cast<int>(size)) {
+                        result.ok = false;
+                        result.msg = "iteration " + std::to_string(iter) + " received "
+                                     + std::to_string(received) + " of "
+                                     + std::to_string(size) + " bytes";
+                        return result;
+                    }
+
+                    void* flushBuffers[1] = {gpuBuffer};
+                    int flushSizes[1] = {static_cast<int>(size)};
+                    void* flushHandles[1] = {mhandle};
+                    void* flushRequest = nullptr;
+                    // A null request means the flush was a no-op; an error
+                    // return means the flush itself failed.
+                    if (FlushRecv(pair.recvComm, 1, flushBuffers, flushSizes, flushHandles,
+                                  &flushRequest)
+                        != ncclSuccess) {
+                        result.ok = false;
+                        result.msg = "FlushRecv failed at iteration " + std::to_string(iter);
+                        return result;
+                    }
+                    if (flushRequest != nullptr) {
+                        result = WorkerWait(flushRequest, nullptr);
+                        if (!result.ok) {
+                            // A failed wait means the timeout was reached, so this flush
+                            // request -- unlike the ordinary send/recv above -- has no
+                            // separate outstanding flag: not completing within the
+                            // timeout is what the failure already says.
+                            result.msg += "; the GPU buffer and its registration are "
+                                          "retained, since the flush may still "
+                                          "reference them";
+                            mhandleGuard.release();
+                            gpuGuard.release();
+                            return result;
+                        }
+                    }
+                    if (!verifyBufferData<uint8_t>(gpuBuffer, size, makeBytePattern(seed))) {
+                        result.ok = false;
+                        result.msg = "GPU data verification failed after flush";
+                        return result;
+                    }
+                }
+                return result;
+            });
+        return;
+    }
+
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
+    ASSERT_SETUP_CONNECTION(vdev, pair, connGuard);
 
     const size_t bufferSize = kSmallBufferSize;
     const int tag = 600;
@@ -1087,6 +1319,7 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
 
             ncclResult_t flushResult = FlushRecv(pair.recvComm, 1, flushBuffers, flushSizes,
                                                  flushHandles, &flushRequest);
+            EXPECT_EQ(flushResult, ncclSuccess) << "Iter " << iter << ": FlushRecv failed";
             if (flushResult == ncclSuccess && flushRequest != nullptr) {
                 ASSERT_EQ(WaitForCompletion(flushRequest, nullptr), ncclSuccess);
             }
@@ -1123,10 +1356,39 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
 
     const int rank = MPIEnvironment::world_rank;
 
+    // Parameterized by MPIEnvironment::nThreads: every worker reuses one
+    // registration across its iterations, so the fused device serves many
+    // long-lived MRs at once.
+    if (MPIEnvironment::nThreads > 1) {
+        static constexpr int kThreadedIters = 100;
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
+            "threaded SequentialTransfers_VNic",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                const size_t size = kSmallBufferSize;
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, size);
+                if (!host.result.ok) return host.result;
+
+                // Worker-constant, as above.
+                ThreadResult result;
+                const int seed = WorkerSeed(threadIdx, 7000);
+                bool outstanding = false;
+                for (int iter = 0; iter < kThreadedIters; iter++) {
+                    result = WorkerSendRecvPattern(rank, pair, host.buffer, size, 700,
+                                                   host.mhandle, seed, kDefaultTimeoutMs,
+                                                   &outstanding);
+                    if (!result.ok)
+                        return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+                }
+                return result;
+            });
+        return;
+    }
+
     // Single connection through the vNIC, reused across all 100 iterations.
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
+    ASSERT_SETUP_CONNECTION(vdev, pair, connGuard);
 
     const size_t bufferSize = kSmallBufferSize;
     const int tag = 700;
@@ -1620,12 +1882,39 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
     std::vector<RCCLTestGuards::HostBufferAutoGuard> bufGuards;
     std::vector<void*> bufs(kNumOutstanding, nullptr);
     std::vector<void*> mrs(kNumOutstanding, nullptr);
+    std::vector<void*> recvReqs(kNumOutstanding, nullptr);
+    std::vector<void*> sendReqs(kNumOutstanding, nullptr);
+    int setupFailed = 0;
+    std::string setupFailure;
+    auto mrGuard = RCCLTestGuards::makeScopeGuard([&]() {
+        for (int i = 0; i < kNumOutstanding; i++) {
+            const bool pending = (rank == 0) ? recvReqs[i] != nullptr : sendReqs[i] != nullptr;
+            if (pending) {
+                // A failed wait does not cancel this request; retain both
+                // resources until the isolated test process exits.
+                if (i < static_cast<int>(bufGuards.size())) bufGuards[i].release();
+                continue;
+            }
+            if (mrs[i]) {
+                (void)DeregisterMemory(comm, mrs[i]);
+                mrs[i] = nullptr;
+            }
+        }
+    });
     for (int i = 0; i < kNumOutstanding; i++) {
         bufs[i] = malloc(kLargeBufferSize);
-        ASSERT_NE(bufs[i], nullptr);
+        if (!bufs[i]) {
+            setupFailed = 1;
+            setupFailure = "host buffer allocation failed";
+            break;
+        }
         bufGuards.push_back(RCCLTestGuards::makeHostBufferAutoGuard(bufs[i]));
-        ASSERT_EQ(RegisterMemory(comm, bufs[i], kLargeBufferSize, NCCL_PTR_HOST, &mrs[i]),
-                  ncclSuccess);
+        if (RegisterMemory(comm, bufs[i], kLargeBufferSize, NCCL_PTR_HOST, &mrs[i])
+            != ncclSuccess) {
+            setupFailed = 1;
+            setupFailure = "memory registration failed";
+            break;
+        }
     }
 
     // --- GPU resources for async work on sender ---
@@ -1635,15 +1924,29 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
     void* gpuA = nullptr;
     void* gpuB = nullptr;
     hipStream_t gpuStream = nullptr;
-    if (rank == 1) {
-        HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&gpuA, kLargeBufferSize));
-        gpuAGuard.set(gpuA);
-        HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&gpuB, kLargeBufferSize));
-        gpuBGuard.set(gpuB);
-        HIP_TEST_CHECK_GTEST_FAIL(hipStreamCreate(&gpuStream));
-        gpuStreamGuard.set(gpuStream);
-        HIP_TEST_CHECK_GTEST_FAIL(hipMemset(gpuA, 0xAA, kLargeBufferSize));
-        HIP_TEST_CHECK_GTEST_FAIL(hipMemset(gpuB, 0x00, kLargeBufferSize));
+    if (rank == 1 && !setupFailed) {
+        hipError_t hipResult = hipMalloc(&gpuA, kLargeBufferSize);
+        if (hipResult == hipSuccess) gpuAGuard.set(gpuA);
+        else setupFailure = "hipMalloc(gpuA) failed";
+        if (hipResult == hipSuccess) hipResult = hipMalloc(&gpuB, kLargeBufferSize);
+        if (hipResult == hipSuccess) gpuBGuard.set(gpuB);
+        else if (setupFailure.empty()) setupFailure = "hipMalloc(gpuB) failed";
+        if (hipResult == hipSuccess) hipResult = hipStreamCreate(&gpuStream);
+        if (hipResult == hipSuccess) gpuStreamGuard.set(gpuStream);
+        else if (setupFailure.empty()) setupFailure = "hipStreamCreate failed";
+        if (hipResult == hipSuccess) hipResult = hipMemset(gpuA, 0xAA, kLargeBufferSize);
+        if (hipResult == hipSuccess) hipResult = hipMemset(gpuB, 0x00, kLargeBufferSize);
+        if (hipResult != hipSuccess) {
+            setupFailed = 1;
+            if (setupFailure.empty()) setupFailure = "GPU initialization failed";
+        }
+    }
+    MPI_Allreduce(MPI_IN_PLACE, &setupFailed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    if (setupFailed) {
+        ADD_FAILURE() << (rank == 1 && !setupFailure.empty()
+                              ? setupFailure
+                              : "setup failed on a peer rank");
+        return;
     }
 
     // =========================================================================
@@ -1657,16 +1960,17 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
     //   Sender (rank 1):
     //     (idle)
     //     Phase 2: sleep 50ms, then fill bufs + PostSend 0..7,
-    //              then IMMEDIATELY overwrite all bufs with 0xFF + launch GPU work
+    //              wait for all send completions, then overwrite bufs with 0xFF + launch GPU work
     //     Phase 3: verify GPU work
     //
     // What we're testing:
-    //   After PostSend, sender overwrites the send buffers with garbage (0xFF).
-    //   If RDMA has already read the original data before the overwrite,
-    //   receiver sees correct data. If RDMA reads after overwrite → corruption.
+    //   The sends are outstanding concurrently, but their buffers are not reused
+    //   until completion confirms the NIC has consumed them.
     // =========================================================================
 
-    std::vector<void*> recvReqs(kNumOutstanding, nullptr);
+    int postFailed = 0;
+    int failedPost = -1;
+    ncclResult_t postError = ncclSuccess;
 
     // ===================== Phase 1: Receiver posts ALL recvs =====================
     if (rank == 0) {
@@ -1676,37 +1980,90 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
             size_t rs[1] = {kLargeBufferSize};
             int rt[1] = {kTagBase + i};
             void* rh[1] = {mrs[i]};
-            ASSERT_EQ(PostRecv(pair.recvComm, 1, rb, rs, rt, rh, &recvReqs[i]),
-                      ncclSuccess);
-            ASSERT_NE(recvReqs[i], nullptr) << "Recv request NULL for op " << i;
+            postError = PostRecv(pair.recvComm, 1, rb, rs, rt, rh, &recvReqs[i]);
+            if (postError != ncclSuccess || !recvReqs[i]) {
+                postFailed = 1;
+                failedPost = i;
+                if (postError == ncclSuccess) postError = ncclInternalError;
+                break;
+            }
         }
     }
+    MPI_Allreduce(MPI_IN_PLACE, &postFailed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    if (postFailed) {
+        if (rank == 0) {
+            ADD_FAILURE() << "PostRecv failed for op " << failedPost
+                          << " with status " << postError;
+        } else {
+            ADD_FAILURE() << "peer failed to post an outstanding receive";
+        }
+        return;
+    }
 
-    // ===================== Phase 2: Sender sleeps, sends, then corrupts =====================
+    // ===================== Phase 2: Sender sleeps, sends, then completes =====================
     if (rank == 1) {
         // Deliberate delay
         usleep(kSendDelayUs);
 
-        // Fill each buffer with a unique pattern and post send
+        // Fill each buffer with a unique pattern and post every send before
+        // waiting, preserving the outstanding-send coverage.
         for (int i = 0; i < kNumOutstanding; i++) {
             int seed = kTagBase + i;
             fillHostBufferWithPattern<uint8_t>(bufs[i], kLargeBufferSize, makeBytePattern(seed));
 
-            void* sendReq = nullptr;
-            ASSERT_EQ(PostSend(pair.sendComm, bufs[i], kLargeBufferSize,
-                               kTagBase + i, mrs[i], &sendReq), ncclSuccess)
-                << "PostSend failed for op " << i;
-            // Don't care about sendReq — we verify via recv completions
+            int attempts = 0;
+            do {
+                postError = PostSend(pair.sendComm, bufs[i], kLargeBufferSize,
+                                     kTagBase + i, mrs[i], &sendReqs[i]);
+                if (postError != ncclSuccess) {
+                    postFailed = 1;
+                    failedPost = i;
+                    break;
+                }
+                if (IsRealRequest(sendReqs[i])) break;
+                if (++attempts >= kMaxRetryAttempts) {
+                    postFailed = 1;
+                    failedPost = i;
+                    postError = ncclInternalError;
+                    break;
+                }
+                usleep(kPollIntervalUs);
+            } while (!IsRealRequest(sendReqs[i]));
+            if (postFailed) break;
+        }
+    }
+
+    // A posting failure is local to rank 1, but rank 0 already owns receives.
+    // Agree before either rank enters a completion wait or leaves the test.
+    MPI_Allreduce(MPI_IN_PLACE, &postFailed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    if (postFailed) {
+        if (rank == 1) {
+            ADD_FAILURE() << "PostSend failed for op " << failedPost
+                          << " with status " << postError;
+        } else {
+            ADD_FAILURE() << "peer failed to post an outstanding send";
+        }
+        return;
+    }
+
+    if (rank == 1) {
+        // A send buffer remains owned by the caller until the request completes.
+        // Waiting after all posts retains concurrency while making reuse safe.
+        for (int i = 0; i < kNumOutstanding; i++) {
+            int sizes[1] = {0};
+            ASSERT_EQ(WaitForCompletion(sendReqs[i], sizes, kLargeTransferTimeoutMs),
+                      ncclSuccess)
+                << "Send " << i << " timed out";
+            sendReqs[i] = nullptr;
         }
 
-        // IMMEDIATELY overwrite all send buffers with garbage.
-        // This is the critical test: if RDMA hasn't finished reading the
-        // buffer yet, receiver will see 0xFF instead of the pattern.
+        // Completion permits reuse; keeping this overwrite catches a future
+        // completion path that reports done before the NIC has consumed data.
         for (int i = 0; i < kNumOutstanding; i++) {
             memset(bufs[i], 0xFF, kLargeBufferSize);
         }
 
-        // Also launch async GPU work — overlaps with RDMA completion
+        // Also launch independent async GPU work after the network requests complete.
         for (int i = 0; i < 10; i++) {
             HIP_TEST_CHECK_GTEST_FAIL(
                 hipMemcpyAsync(gpuB, gpuA, kLargeBufferSize,
@@ -1725,6 +2082,7 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
             ASSERT_EQ(WaitForCompletion(recvReqs[i], csz, kLargeTransferTimeoutMs),
                       ncclSuccess)
                 << "Recv " << i << " timed out";
+            recvReqs[i] = nullptr;
             EXPECT_EQ(csz[0], (int)kLargeBufferSize) << "Size mismatch recv op " << i;
         }
 
@@ -1777,7 +2135,17 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
     // ===================== Cleanup =====================
     // MR deregistration must happen before bufGuards free the underlying memory.
     for (int i = 0; i < kNumOutstanding; i++) {
-        if (mrs[i]) DeregisterMemory(comm, mrs[i]);
+        if (!mrs[i]) continue;
+        void* mhandle = mrs[i];
+        mrs[i] = nullptr;
+        const ncclResult_t deregResult = DeregisterMemory(comm, mhandle);
+        if (deregResult != ncclSuccess) {
+            // Do not retry deregistration during scope unwinding or free memory
+            // that the transport may still associate with this registration.
+            bufGuards[i].release();
+            ADD_FAILURE() << "DeregisterMemory failed for op " << i
+                          << " with status " << deregResult;
+        }
     }
     // bufGuards, gpuAGuard, gpuBGuard, gpuStreamGuard clean up automatically.
 }

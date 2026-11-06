@@ -548,8 +548,6 @@ public:
 
     std::array<uint32_t, 6> ClockRetrievePacket(uint64_t* dst)
     {
-        auto addr = reinterpret_cast<uint64_t>(dst);
-
         uint32_t header = MakePacket3Header(PACKET3_COPY_DATA, 6 * sizeof(uint32_t));
 
         uint32_t dword2 =
@@ -560,8 +558,8 @@ public:
             PACKET3_COPY_DATA__WR_CONFIRM(PACKET3_COPY_DATA__WR_CONFIRM__WAIT_FOR_CONFIRMATION) |
             PACKET3_COPY_DATA__COUNT_SEL(PACKET3_COPY_DATA__COUNT_SEL__64_BITS_OF_DATA);
 
-        uint32_t dword5 = PACKET3_COPY_DATA__DST_64B_ADDR_LO(addr >> 3);
-        uint32_t dword6 = PACKET3_COPY_DATA__DST_ADDR_HI(High32(addr));
+        uint32_t dword5 = PACKET3_COPY_DATA__DST_64B_ADDR_LO(PtrLow32(dst) >> 3);
+        uint32_t dword6 = PACKET3_COPY_DATA__DST_ADDR_HI(PtrHigh32(dst));
 
         return {header, dword2, 0, 0, dword5, dword6};
     }
@@ -626,6 +624,12 @@ public:
             auto copy_data = UserdataLoPacket(addr);
             APPEND_COMMAND_WRAPPER(cmdBuf, copy_data);
         }
+    }
+
+    void BuildReadGPUClockPacket(CmdBuffer* cmdBuf, uint64_t* dst) override
+    {
+        auto copy_data = ClockRetrievePacket(dst);
+        APPEND_COMMAND_WRAPPER(cmdBuf, copy_data);
     }
 };
 

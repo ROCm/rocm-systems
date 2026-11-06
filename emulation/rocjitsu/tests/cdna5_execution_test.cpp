@@ -3,6 +3,7 @@
 
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/isa_features.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vbuffer.h"
@@ -10,12 +11,15 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/target_provider.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "util/host_target.h"
 
+#include <array>
 #include <cfenv>
 #include <span>
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 #include <xmmintrin.h>
 #endif
 
@@ -100,7 +104,7 @@ private:
   bool saved_;
 };
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 class HostMxcsrGuard {
 public:
   HostMxcsrGuard() : saved_(_mm_getcsr()) {}
@@ -109,7 +113,7 @@ public:
 private:
   uint32_t saved_;
 };
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
 class HostFpcrGuard {
 public:
   HostFpcrGuard() : saved_(amdgpu::fp_mode::detail::read_fpcr()) {}
@@ -218,6 +222,72 @@ TEST(Gfx1250ExecutionTest, GlobalTransposePreservesZeroExecAndDestination) {
   }
 }
 
+TEST(Gfx1250ExecutionTest, ArchitectureDecoderScalarOffsetFailureDoesNotThrowOrCreateMemoryState) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wave = sim.dispatch_scratch_wf();
+  ASSERT_NE(wave, nullptr);
+  constexpr uint32_t kSentinel = 0xa5a55a5au;
+  write_wave_sgpr(*cu, *wave, 0, 0x4000);
+  write_wave_sgpr(*cu, *wave, 1, 0);
+  write_wave_sgpr(*cu, *wave, 4, kSentinel);
+  for (uint8_t selector : {amdgpu::kExecSelectorFirst, amdgpu::kExecSelectorLast}) {
+    SCOPED_TRACE(selector);
+    const auto words =
+        cdna5::build_smem(cdna5::kSLoadB32Smem, {.sbase = 0, .sdata = 4, .soffset = selector});
+    // The architecture decoder precedes the factory decoder's operand validation.
+    DecodeResult decoded = cdna5::Decoder::decode(words.data(), {});
+    ASSERT_TRUE(decoded.succeeded());
+    std::unique_ptr<Instruction> &load = decoded.value();
+    ASSERT_NE(load->execute, nullptr);
+    wave->clear_instruction_execution_error();
+    // Bypass the CU's legacy catch so restoring the throw fails this test.
+    ASSERT_NO_THROW(load->execute(*load, wave));
+    EXPECT_EQ(wave->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(load->data(), nullptr);
+    EXPECT_EQ(read_wave_sgpr(*cu, *wave, 4), kSentinel);
+    EXPECT_TRUE(cu->execute_instruction(load.get(), *wave).failed());
+  }
+}
+
+TEST(Gfx1250ExecutionTest, ArchitectureDecoderVectorScalarSourceFailureRejectsMemoryState) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wave = sim.dispatch_scratch_wf();
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(1);
+  for (bool scratch : {false, true}) {
+    SCOPED_TRACE(scratch ? "VSCRATCH direct scalar read" : "VGLOBAL split 64-bit scalar read");
+    const auto words =
+        scratch ? cdna5::build_vscratch(cdna5::kScratchLoadB32Vscratch,
+                                        {.saddr = amdgpu::kExecSelectorFirst, .vdst = 4, .sve = 1})
+                : cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                                       {.saddr = amdgpu::kModernM0Selector, .vdst = 4});
+    // Bypass factory operand validation to exercise the shared resolver's callers.
+    DecodeResult decoded = cdna5::Decoder::decode(words.data(), {});
+    ASSERT_TRUE(decoded.succeeded());
+    std::unique_ptr<Instruction> &load = decoded.value();
+    ASSERT_NE(load->execute, nullptr);
+    wave->clear_instruction_execution_error();
+    ASSERT_NO_THROW(load->execute(*load, wave));
+    EXPECT_EQ(wave->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    ASSERT_NE(load->data(), nullptr);
+    const auto *state = load->data_as<amdgpu::VectorMemState>();
+    EXPECT_EQ(state->lane_mask, 0u);
+    wave->clear_instruction_execution_error();
+    EXPECT_TRUE(cu->execute_instruction(load.get(), *wave).failed());
+    EXPECT_EQ(wave->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    ASSERT_NE(load->data(), nullptr);
+    state = load->data_as<amdgpu::VectorMemState>();
+    EXPECT_EQ(state->lane_mask, 0u);
+  }
+}
+
 TEST(FpModePolicyTest, F16OmodFollowsProfileDenormIeeeAndPackedRules) {
   using amdgpu::fp_mode::effective_f16_omod;
 
@@ -305,6 +375,7 @@ TEST(Gfx1250ExecutionTest, GenericF16OmodStaysActiveAndFinalizesWithIeeeDenormMo
   for (uint32_t scalar = 0; scalar < 2; ++scalar) {
     util::set_force_scalar_for_testing(scalar != 0);
     Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
     auto *cu = sim.cu();
     auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
@@ -333,6 +404,7 @@ TEST(Gfx1250ExecutionTest, Vop3IntegerClampSaturatesBeforeNarrowing) {
   for (uint32_t scalar = 0; scalar < 2; ++scalar) {
     util::set_force_scalar_for_testing(scalar != 0);
     Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
     auto *cu = sim.cu();
     auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
@@ -458,6 +530,7 @@ TEST(Gfx1250ExecutionTest, Vop3IntegerMultiplyAccumulateClampSaturatesExactResul
     util::set_force_scalar_for_testing(scalar != 0);
     for (const TestCase &test : kCases) {
       Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
       auto *cu = sim.cu();
       auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
       ASSERT_NE(wf, nullptr);
@@ -488,6 +561,7 @@ TEST(Gfx1250ExecutionTest, Vop3U64ClampSaturatesNormalAndDppPaths) {
 
   auto run_case = [](uint16_t opcode, uint64_t lhs, uint64_t rhs, uint64_t expected, bool dpp) {
     Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
     auto *cu = sim.cu();
     auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
@@ -562,15 +636,17 @@ TEST(Gfx1250ExecutionTest, Vop3Mad64ClampSaturatesAndPreservesCarryNormalAndDpp)
       TestCase{true, false, static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(INT32_MAX),
                static_cast<uint64_t>(INT64_MIN), static_cast<uint64_t>(INT64_MIN), false},
       TestCase{true, true, static_cast<uint32_t>(INT32_MAX), static_cast<uint32_t>(INT32_MAX),
-               static_cast<uint64_t>(INT64_MAX), static_cast<uint64_t>(INT64_MAX), true},
+               static_cast<uint64_t>(INT64_MAX), static_cast<uint64_t>(INT64_MAX), false},
       TestCase{true, true, static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(INT32_MAX),
                static_cast<uint64_t>(INT64_MIN), static_cast<uint64_t>(INT64_MIN), true},
       TestCase{true, true, static_cast<uint32_t>(-2), 3u, 10u, 4u, false},
+      TestCase{true, true, 3u, static_cast<uint32_t>(-4), 0, 0xfffffffffffffff4, true},
   };
 
   for (bool dpp : {false, true}) {
     for (const TestCase &test : kCases) {
       Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
       auto *cu = sim.cu();
       auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
       ASSERT_NE(wf, nullptr);
@@ -657,6 +733,7 @@ TEST(Gfx1250ExecutionTest, Vop3Mad64ClampSaturatesAndPreservesCarryNormalAndDpp)
 
   // CLAMP=0 keeps the modulo destination while CO still reports overflow.
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -695,6 +772,7 @@ TEST(Gfx1250ExecutionTest, Vop3PackedIntegerClampSaturatesSelectedHalves) {
     util::set_force_scalar_for_testing(scalar != 0);
     for (const TestCase &test : kCases) {
       Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
       auto *cu = sim.cu();
       auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
       ASSERT_NE(wf, nullptr);
@@ -752,6 +830,7 @@ TEST(Gfx1250ExecutionTest, Vop3PackedMadClampSaturatesSelectedHalves) {
     util::set_force_scalar_for_testing(scalar != 0);
     for (const TestCase &test : kCases) {
       Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
       auto *cu = sim.cu();
       auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
       ASSERT_NE(wf, nullptr);
@@ -803,6 +882,7 @@ TEST(Gfx1250ExecutionTest, Vop3CarryClampSaturatesVdstAndPreservesCarryBorrow) {
     util::set_force_scalar_for_testing(scalar != 0);
     for (const TestCase &test : kCases) {
       Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
       auto *cu = sim.cu();
       auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
       ASSERT_NE(wf, nullptr);
@@ -828,18 +908,36 @@ TEST(Gfx1250ExecutionTest, Vop3CarryClampSaturatesVdstAndPreservesCarryBorrow) {
 
 TEST(FpModePolicyTest, F64HelpersRestoreAmbientHostEnvironment) {
   HostFenvGuard environment_guard;
+  ASSERT_EQ(std::fesetenv(FE_DFL_ENV), 0);
   ASSERT_EQ(std::fesetround(FE_DOWNWARD), 0);
+  ASSERT_EQ(std::feraiseexcept(FE_INVALID | FE_INEXACT), 0);
+  const int expected_flags = std::fetestexcept(FE_ALL_EXCEPT);
+#if RJ_HOST_ARCH_X86
+  HostMxcsrGuard mxcsr_guard;
+  constexpr uint32_t kDazMask = 1u << 6;
+  constexpr uint32_t kFtzMask = 1u << 15;
+  _mm_setcsr(_mm_getcsr() | kDazMask | kFtzMask);
+  const uint32_t expected_mxcsr = _mm_getcsr();
+#endif
 
   constexpr uint64_t kOne = std::bit_cast<uint64_t>(1.0);
+  constexpr uint64_t kSubnormal = 0x0000000000000001ULL;
   constexpr uint64_t kInfinity = std::bit_cast<uint64_t>(std::numeric_limits<double>::infinity());
   constexpr uint64_t kQuietNan = std::bit_cast<uint64_t>(std::numeric_limits<double>::quiet_NaN());
-  for (const uint64_t input : {kOne, kInfinity, kQuietNan}) {
+  for (const uint64_t input : {kOne, kSubnormal, kInfinity, kQuietNan}) {
     (void)amdgpu::fp_mode::fma_f64(input, kOne, kOne, 1, 3);
     EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
     (void)amdgpu::fp_mode::binary_f64(input, kOne, amdgpu::fp_mode::BinaryF64Op::Add, 1, 3);
     EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
     (void)amdgpu::fp_mode::finish_f64(input, 1, 1, false, true);
     EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
+    const uint64_t result = amdgpu::fp_mode::finish_f64(input, 1, 0, false, true);
+    EXPECT_EQ(result, input);
+    EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
+    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), expected_flags);
+#if RJ_HOST_ARCH_X86
+    EXPECT_EQ(_mm_getcsr(), expected_mxcsr);
+#endif
   }
 }
 
@@ -860,7 +958,7 @@ TEST(FpModePolicyTest, F32ToBf16FmaRestoresAmbientHostEnvironment) {
   EXPECT_EQ(std::fegetround(), FE_UPWARD);
 }
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFtzDaz) {
   HostMxcsrGuard environment_guard;
   constexpr uint32_t kDazMask = 1u << 6;
@@ -871,7 +969,7 @@ TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFtzDaz) {
   EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(subnormal, 1.0f, 0.0f, 0, false, true), 0x0002u);
   EXPECT_EQ(_mm_getcsr() & (kDazMask | kFtzMask), kDazMask | kFtzMask);
 }
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
 TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFpcrFlushModes) {
   HostFpcrGuard environment_guard;
   constexpr uint64_t kFizMask = uint64_t{1} << 0;
@@ -891,9 +989,14 @@ TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFpcrFlushModes) {
 TEST(FpModePolicyTest, F64ClampCanonicalizesNanAndNonpositiveValues) {
   constexpr uint64_t kPositiveZero = 0x0000000000000000ULL;
   constexpr uint64_t kNegativeZero = 0x8000000000000000ULL;
+  constexpr uint64_t kPositiveSubnormal = 0x0000000000000001ULL;
+  constexpr uint64_t kNegativeSubnormal = 0x8000000000000001ULL;
+  constexpr uint64_t kInfinity = std::bit_cast<uint64_t>(std::numeric_limits<double>::infinity());
+  constexpr uint64_t kNegativeInfinity =
+      std::bit_cast<uint64_t>(-std::numeric_limits<double>::infinity());
   constexpr uint64_t kQuietNan = 0x7FF8000000001234ULL;
   constexpr uint64_t kSignalingNan = 0x7FF0000000000001ULL;
-  constexpr std::array<uint64_t, 8> kInputs = {
+  constexpr std::array<uint64_t, 12> kInputs = {
       kQuietNan,
       kSignalingNan,
       kNegativeZero,
@@ -902,8 +1005,12 @@ TEST(FpModePolicyTest, F64ClampCanonicalizesNanAndNonpositiveValues) {
       std::bit_cast<uint64_t>(0.5),
       std::bit_cast<uint64_t>(1.0),
       std::bit_cast<uint64_t>(2.0),
+      kPositiveSubnormal,
+      kNegativeSubnormal,
+      kInfinity,
+      kNegativeInfinity,
   };
-  constexpr std::array<uint64_t, 8> kExpected = {
+  constexpr std::array<uint64_t, 12> kExpected = {
       kPositiveZero,
       kPositiveZero,
       kPositiveZero,
@@ -912,12 +1019,20 @@ TEST(FpModePolicyTest, F64ClampCanonicalizesNanAndNonpositiveValues) {
       std::bit_cast<uint64_t>(0.5),
       std::bit_cast<uint64_t>(1.0),
       std::bit_cast<uint64_t>(1.0),
+      kPositiveSubnormal,
+      kPositiveZero,
+      std::bit_cast<uint64_t>(1.0),
+      kPositiveZero,
   };
 
-  for (size_t i = 0; i < kInputs.size(); ++i)
+  for (size_t i = 0; i < kInputs.size(); ++i) {
     EXPECT_EQ(amdgpu::fp_mode::finish_f64(kInputs[i], 0, 0, true, true), kExpected[i]) << i;
+    EXPECT_EQ(amdgpu::fp_mode::finish_f64(kInputs[i], 0, 0, false, true), kInputs[i]) << i;
+    EXPECT_EQ(amdgpu::fp_mode::finish_f64(kInputs[i], 0, 0, false, false), kInputs[i]) << i;
+  }
   EXPECT_EQ(amdgpu::fp_mode::finish_f64(kQuietNan, 0, 0, true, false), kQuietNan);
-  EXPECT_EQ(amdgpu::fp_mode::finish_f64(kNegativeZero, 0, 0, false, true), kNegativeZero);
+  EXPECT_EQ(amdgpu::fp_mode::finish_f64(std::bit_cast<uint64_t>(1.0), 0, 1, false, true),
+            std::bit_cast<uint64_t>(2.0));
 }
 
 TEST(FpModePolicyTest, F16ClampUsesSelectedNanPolicy) {
@@ -928,7 +1043,7 @@ TEST(FpModePolicyTest, F16ClampUsesSelectedNanPolicy) {
 
   const auto fma = [=](uint16_t src0, bool clamp_nan_to_zero) {
     return amdgpu::fp_mode::fma_f16(src0, kOne, kPositiveZero, false, false, false, false, false,
-                                    false, 0, 3, 0, true, false, clamp_nan_to_zero);
+                                    false, 0, 3, 0, true, false, clamp_nan_to_zero, true);
   };
 
   EXPECT_EQ(fma(kQuietNan, false), kQuietNan);
@@ -983,6 +1098,117 @@ TEST(Gfx1250ExecutionTest, SetregB32ClobbersVgprMsbWithoutArmingImmediateHazard)
 
   compute_unit->execute_and_route(std::move(set_vgpr_msb_inst), *wave);
   EXPECT_EQ(wave->vgpr_msb_mode(), kFollowingSetLayout);
+}
+
+TEST(Gfx1250ExecutionTest, SRoundModeAndSDenormModeThenFmaRespectsModes) {
+  amdgpu::GpuMemory memory("gfx1250_round_mode_fma_memory");
+  amdgpu::L2Cache l2("gfx1250_round_mode_fma_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.target = ROCJITSU_CODE_TARGET_GFX1250;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = kGfx1250ScalarSlots;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = kGfx1250LdsSizeKb;
+  auto compute_unit =
+      std::make_unique<Gfx1250MemoryTestCu>("gfx1250_round_mode_fma_cu", config, &memory, &l2);
+  auto *wave = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(1u);
+
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1250IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+
+  const uint32_t vgpr_base = wave->vgpr_alloc().base;
+  // v_fma_f32 v3, v1, v2, v0 with a = b = 1 and c = 3 * 2^-24. The exact
+  // result 1 + 3 * 2^-24 is halfway between 1 + 2^-23 (odd mantissa) and
+  // 1 + 2^-22 (even mantissa): round-to-nearest-even and upward select the
+  // upper neighbour, toward-zero and downward select the lower one.
+  compute_unit->write_vgpr(vgpr_base + 0, 0, std::bit_cast<uint32_t>(std::ldexp(3.0f, -24)));
+  compute_unit->write_vgpr(vgpr_base + 1, 0, std::bit_cast<uint32_t>(1.0f));
+  compute_unit->write_vgpr(vgpr_base + 2, 0, std::bit_cast<uint32_t>(1.0f));
+  const uint32_t kLower = std::bit_cast<uint32_t>(1.0f + std::ldexp(1.0f, -23));
+  const uint32_t kUpper = std::bit_cast<uint32_t>(1.0f + std::ldexp(1.0f, -22));
+
+  const auto execute_vgpr3_fma = [&](uint8_t c_reg, uint8_t a_reg, uint8_t b_reg) {
+    const auto words =
+        cdna5::build_vop3(cdna5::kVFmaF32Vop3, {.vdst = 3,
+                                                .src0 = static_cast<uint16_t>(256 + a_reg),
+                                                .src1 = static_cast<uint16_t>(256 + b_reg),
+                                                .src2 = static_cast<uint16_t>(256 + c_reg)});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    compute_unit->execute_and_route(std::move(inst), *wave);
+    return compute_unit->read_vgpr(vgpr_base + 3, 0);
+  };
+  const auto execute_round_mode = [&](uint16_t simm16) {
+    const auto words = cdna5::build_sopp(cdna5::kSRoundModeSopp, {.simm16 = simm16});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    compute_unit->execute_and_route(std::move(inst), *wave);
+  };
+  const auto execute_denorm_mode = [&](uint16_t simm16) {
+    const auto words = cdna5::build_sopp(cdna5::kSDenormModeSopp, {.simm16 = simm16});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    compute_unit->execute_and_route(std::move(inst), *wave);
+  };
+
+  // Seed FP_DENORM (bits 7:4) and FP16_OVFL so every case also proves the
+  // mode writes preserve unrelated MODE bits.
+  constexpr uint32_t kSeededMode = 0x50u | amdgpu::Wavefront::FP16_OVFL_BIT;
+  wave->set_mode_raw(kSeededMode);
+  struct RoundCase {
+    uint16_t simm16;
+    uint32_t mode;
+    uint32_t expected;
+  };
+  const RoundCase kRoundCases[] = {
+      {0xFu, 3u, kLower}, {0x5u, 1u, kUpper}, {0xAu, 2u, kLower}, {0x0u, 0u, kUpper}};
+  for (const RoundCase &round_case : kRoundCases) {
+    SCOPED_TRACE(static_cast<unsigned>(round_case.simm16));
+    execute_round_mode(round_case.simm16);
+    EXPECT_EQ(wave->fp_round_mode_f32(), round_case.mode);
+    EXPECT_EQ(wave->fp_round_mode_f16_f64(), round_case.mode);
+    EXPECT_EQ(wave->mode_raw() & ~amdgpu::Wavefront::FP_ROUND_MASK, kSeededMode);
+    EXPECT_EQ(execute_vgpr3_fma(0, 1, 2), round_case.expected);
+  }
+
+  // Asymmetric immediate: F32 rounds downward (2) while F16/F64 rounds upward
+  // (1). The F32 witness must follow the F32 field, not a copy of it. The
+  // nonzero rounding value and seeded flag carry into the denorm cases below.
+  execute_round_mode(0x6u);
+  EXPECT_EQ(wave->fp_round_mode_f32(), 2u);
+  EXPECT_EQ(wave->fp_round_mode_f16_f64(), 1u);
+  EXPECT_EQ(wave->mode_raw() & ~amdgpu::Wavefront::FP_ROUND_MASK, kSeededMode);
+  EXPECT_EQ(execute_vgpr3_fma(0, 1, 2), kLower);
+
+  // Decoded S_DENORM_MODE with independent precision fields. Rounding stays
+  // at 0x6 (F32 downward); the exact 2^-127 result below is representable, so
+  // only the denorm field decides whether it survives.
+  compute_unit->write_vgpr(vgpr_base + 4, 0, std::bit_cast<uint32_t>(std::ldexp(1.0f, -126)));
+  compute_unit->write_vgpr(vgpr_base + 5, 0, std::bit_cast<uint32_t>(0.5f));
+  compute_unit->write_vgpr(vgpr_base + 6, 0, 0u);
+  // v_fma_f32(2^-126, 0.5, 0) is exactly 2^-127: kept as a subnormal when
+  // F32 denorms are enabled, flushed to zero otherwise.
+  constexpr uint32_t kSubnormal = 0x00400000u;
+  struct DenormCase {
+    uint16_t simm16;
+    uint32_t f32_mode;
+    uint32_t f16_f64_mode;
+    uint32_t expected;
+  };
+  const DenormCase kDenormCases[] = {
+      {0x3u, 3u, 0u, kSubnormal}, {0xCu, 0u, 3u, 0u}, {0x0u, 0u, 0u, 0u}};
+  for (const DenormCase &denorm_case : kDenormCases) {
+    SCOPED_TRACE(static_cast<unsigned>(denorm_case.simm16));
+    execute_denorm_mode(denorm_case.simm16);
+    EXPECT_EQ(wave->fp_denorm_mode_f32(), denorm_case.f32_mode);
+    EXPECT_EQ(wave->fp_denorm_mode_f16_f64(), denorm_case.f16_f64_mode);
+    EXPECT_EQ(wave->fp_round_mode_f32(), 2u);
+    EXPECT_EQ(wave->fp_round_mode_f16_f64(), 1u);
+    EXPECT_EQ(wave->mode_raw() & ~amdgpu::Wavefront::FP_DENORM_MASK,
+              amdgpu::Wavefront::FP16_OVFL_BIT | 0x6u);
+    EXPECT_EQ(execute_vgpr3_fma(6, 4, 5), denorm_case.expected);
+  }
 }
 
 TEST(Gfx1251ExecutionTest, SetregModeUsesOrdinarySliceAndFollowingSetVgprMsbExecutes) {
@@ -1155,6 +1381,7 @@ TEST(Gfx1250ExecutionTest, SramEccD16LoadsZeroUnselectedHalf) {
 
 TEST(Gfx1250ExecutionTest, ScalarMovesTreatS102AndS103AsOrdinarySgprs) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -1246,6 +1473,7 @@ TEST(Gfx1250ExecutionTest, Wave32VectorComparePreservesVccHiScratch) {
     util::set_force_scalar_for_testing(force_scalar);
 
     Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
     auto *cu = sim.cu();
     auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
@@ -1269,6 +1497,7 @@ TEST(Gfx1250ExecutionTest, Wave32VectorComparePreservesVccHiScratch) {
 
 TEST(Gfx1250ExecutionTest, VbufferB128LoadsZeroAndStoresDropPartialOobDwords) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -1308,7 +1537,7 @@ TEST(Gfx1250ExecutionTest, VbufferB128LoadsZeroAndStoresDropPartialOobDwords) {
   pipeline.issue(load, *wf);
 
   EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kLoadVgpr + 0, 0), kInitial[0]);
-  EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kLoadVgpr + 1, 0), kInitial[1]);
+  EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kLoadVgpr + 1, 0), 0u);
   EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kLoadVgpr + 2, 0), 0u);
   EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kLoadVgpr + 3, 0), 0u);
 
@@ -1321,13 +1550,151 @@ TEST(Gfx1250ExecutionTest, VbufferB128LoadsZeroAndStoresDropPartialOobDwords) {
   pipeline.issue(store, *wf);
 
   EXPECT_EQ(sim.memory->read32(kAddr), kStored[0]);
-  EXPECT_EQ(sim.memory->read32(kAddr + 4), kStored[1]);
+  EXPECT_EQ(sim.memory->read32(kAddr + 4), kInitial[1]);
   EXPECT_EQ(sim.memory->read32(kAddr + 8), kInitial[2]);
   EXPECT_EQ(sim.memory->read32(kAddr + 12), kInitial[3]);
 }
 
+TEST(Gfx1250ExecutionTest, VbufferRawBoundsDistinguishWholeAndCrossingAccesses) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  constexpr uint32_t kLastLane = 31;
+  wf->set_exec(1u | (uint64_t{1} << kLastLane));
+
+  constexpr uint64_t kBaseAddress = 0xD000;
+  constexpr uint32_t kResourceSgpr = 4;
+  constexpr uint32_t kSoffsetSgpr = 12;
+  constexpr uint32_t kAddressVgpr = 4;
+  constexpr uint32_t kDataVgpr = 8;
+  constexpr uint32_t kUntouched = 0xdeadbeef;
+  const uint32_t sbase = wf->sgpr_alloc().base;
+  const uint32_t vbase = wf->vgpr_alloc().base;
+  // Counts for 0..20 remaining bytes, measured at the instruction's start.
+  // Triton PR 12512's hardware cases witness the aligned B128 crossings with
+  // 4/8 remaining bytes and whole-access fits. Other crossing cells follow
+  // the PR's stated rule as a model choice, pending gfx1250 measurements.
+  constexpr std::array<std::array<uint32_t, 21>, 3> kValidDwords = {{
+      {0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2},
+      {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3},
+      {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 4, 4, 4},
+  }};
+  struct Offsets {
+    uint32_t scalar;
+    uint32_t vector;
+    uint32_t immediate;
+  };
+  constexpr Offsets kOffsets[] = {
+      {},
+      {.scalar = 40, .vector = 0, .immediate = 0},
+      {.scalar = 4, .vector = 8, .immediate = 12},
+      {.scalar = 0xFFFF'FFF0u, .vector = 16, .immediate = 4},
+  };
+  constexpr uint32_t kHighBoundCase = 21;
+  amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+  for (uint32_t width = 2; width <= 4; ++width) {
+    for (const Offsets &offsets : kOffsets) {
+      const uint64_t start = uint64_t{offsets.scalar} + offsets.vector + offsets.immediate;
+      for (uint32_t raw_stride : {0u, 16u}) {
+        for (uint32_t remaining = 0; remaining <= kHighBoundCase; ++remaining) {
+          // The last case exercises all high NUM_RECORDS fields without a
+          // large allocation; only the small addressed range is backed.
+          const uint64_t bound =
+              remaining == kHighBoundCase ? uint64_t{1} << 44 : start + remaining;
+          SCOPED_TRACE(testing::Message()
+                       << "width=" << width << " scalar=" << offsets.scalar
+                       << " vector=" << offsets.vector << " immediate=" << offsets.immediate
+                       << " stride=" << raw_stride << " bound=" << bound);
+          const std::array<uint32_t, 4> resource = {
+              static_cast<uint32_t>(kBaseAddress),
+              static_cast<uint32_t>((kBaseAddress >> 32) & 0x01FF'FFFFu) |
+                  static_cast<uint32_t>((bound & 0x7Fu) << 25),
+              static_cast<uint32_t>(bound >> 7),
+              static_cast<uint32_t>((bound >> 39) & 0x3Fu) | (raw_stride << 12),
+          };
+          for (uint32_t i = 0; i < resource.size(); ++i)
+            cu->write_sgpr(sbase + kResourceSgpr + i, resource[i]);
+          cu->write_sgpr(sbase + kSoffsetSgpr, offsets.scalar);
+          cu->write_vgpr(vbase + kAddressVgpr, 0, offsets.vector);
+          cu->write_vgpr(vbase + kAddressVgpr, kLastLane, offsets.vector + 4);
+          cu->write_vgpr(vbase + kAddressVgpr, 1, offsets.vector + 256);
+          for (uint32_t i = 0; i <= width; ++i)
+            sim.memory->write32(kBaseAddress + start + i * 4, 0x100u + i);
+          sim.memory->write32(kBaseAddress + start + 256, kUntouched);
+          for (uint32_t i = 0; i < width; ++i) {
+            for (uint32_t lane : {0u, 1u, kLastLane})
+              cu->write_vgpr(vbase + kDataVgpr + i, lane, kUntouched);
+          }
+
+          const uint32_t valid_first =
+              remaining == kHighBoundCase ? width : kValidDwords[width - 2][remaining];
+          const uint32_t valid_last = remaining == kHighBoundCase ? width
+                                      : remaining < 4             ? 0
+                                                      : kValidDwords[width - 2][remaining - 4];
+          cdna5::VbufferMachineInst machine{};
+          machine.rsrc = kResourceSgpr;
+          machine.soffset = kSoffsetSgpr;
+          machine.ioffset = offsets.immediate;
+          machine.vaddr = kAddressVgpr;
+          machine.offen = 1;
+          machine.vdata = kDataVgpr;
+          machine.scope = 3;
+          auto check = [&]<typename Load, typename Store>() {
+            wf->set_exec(1u | (uint64_t{1} << kLastLane));
+            auto load =
+                std::make_unique<Load>(reinterpret_cast<const cdna5::MachineInst *>(&machine));
+            ASSERT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+            ASSERT_EQ(pipeline.issue(load.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+            for (uint32_t i = 0; i < width; ++i) {
+              EXPECT_EQ(cu->read_vgpr(vbase + kDataVgpr + i, 0), i < valid_first ? 0x100u + i : 0u);
+              EXPECT_EQ(cu->read_vgpr(vbase + kDataVgpr + i, kLastLane),
+                        i < valid_last ? 0x101u + i : 0u);
+              EXPECT_EQ(cu->read_vgpr(vbase + kDataVgpr + i, 1), kUntouched);
+              cu->write_vgpr(vbase + kDataVgpr + i, 0, 0x200u + i);
+              cu->write_vgpr(vbase + kDataVgpr + i, kLastLane, 0x201u + i);
+            }
+            // Check each store independently so an in-bounds lane cannot hide
+            // an illegal write from the overlapping, crossing access.
+            for (uint32_t lane : {0u, kLastLane}) {
+              SCOPED_TRACE(testing::Message() << "store lane=" << lane);
+              for (uint32_t i = 0; i <= width; ++i)
+                sim.memory->write32(kBaseAddress + start + i * 4, 0x100u + i);
+              wf->set_exec(uint64_t{1} << lane);
+              auto store =
+                  std::make_unique<Store>(reinterpret_cast<const cdna5::MachineInst *>(&machine));
+              ASSERT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
+              ASSERT_EQ(pipeline.issue(store.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+              const uint32_t first = lane == 0 ? 0 : 1;
+              const uint32_t valid = lane == 0 ? valid_first : valid_last;
+              for (uint32_t i = 0; i <= width; ++i) {
+                const bool stored = i >= first && i - first < valid;
+                EXPECT_EQ(sim.memory->read32(kBaseAddress + start + i * 4),
+                          (stored ? 0x200u : 0x100u) + i);
+              }
+              EXPECT_EQ(sim.memory->read32(kBaseAddress + start + 256), kUntouched);
+            }
+          };
+          if (width == 2) {
+            ASSERT_NO_FATAL_FAILURE((check.template operator()<cdna5::BufferLoadB64Vbuffer,
+                                                               cdna5::BufferStoreB64Vbuffer>()));
+          } else if (width == 3) {
+            ASSERT_NO_FATAL_FAILURE((check.template operator()<cdna5::BufferLoadB96Vbuffer,
+                                                               cdna5::BufferStoreB96Vbuffer>()));
+          } else {
+            ASSERT_NO_FATAL_FAILURE((check.template operator()<cdna5::BufferLoadB128Vbuffer,
+                                                               cdna5::BufferStoreB128Vbuffer>()));
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(Gfx1250ExecutionTest, VbufferB64B96MixedLanesHonorStructuredPartialOob) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -1421,6 +1788,7 @@ TEST(Gfx1250ExecutionTest, VbufferB64B96MixedLanesHonorStructuredPartialOob) {
 
 TEST(Gfx1250ExecutionTest, NonReturningVbufferB64AtomicHonorsWholePayloadBounds) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -1472,6 +1840,7 @@ TEST(Gfx1250ExecutionTest, NonReturningVbufferB64AtomicHonorsWholePayloadBounds)
 
 TEST(Gfx1250ExecutionTest, ReturningVbufferAtomicIgnoresNonBufferResourceType) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -1524,6 +1893,7 @@ TEST(Gfx1250ExecutionTest, ReturningVbufferAtomicIgnoresNonBufferResourceType) {
 
 TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -1588,6 +1958,7 @@ TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {
 
 TEST(Gfx1250ExecutionTest, VMovB16HighVdstMergesIntoLowPhysicalVgpr) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
@@ -1608,6 +1979,7 @@ TEST(Gfx1250ExecutionTest, VMovB16HighVdstMergesIntoLowPhysicalVgpr) {
 
 TEST(Gfx1250ExecutionTest, VNotB16HighVdstMergesIntoLowPhysicalVgpr) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
@@ -1629,6 +2001,7 @@ TEST(Gfx1250ExecutionTest, VNotB16HighVdstMergesIntoLowPhysicalVgpr) {
 
 TEST(Gfx1250ExecutionTest, VAddF16HighVdstMergesIntoLowPhysicalVgpr) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
@@ -1651,6 +2024,7 @@ TEST(Gfx1250ExecutionTest, VAddF16HighVdstMergesIntoLowPhysicalVgpr) {
 
 TEST(Gfx1250ExecutionTest, IreeF16ReductionTailKeepsLane31Sum) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
@@ -1706,6 +2080,7 @@ TEST(Gfx1250ExecutionTest, IreeF16ReductionTailKeepsLane31Sum) {
 
 TEST(Gfx1250ExecutionTest, VFmacF16Vop3HighVdstUsesHighHalfAddend) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
@@ -1729,6 +2104,7 @@ TEST(Gfx1250ExecutionTest, VFmacF16Vop3HighVdstUsesHighHalfAddend) {
 
 TEST(Gfx1250ExecutionTest, VFmacF16Vop2HighVdstUsesHighHalfAddend) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
@@ -1751,6 +2127,7 @@ TEST(Gfx1250ExecutionTest, VFmacF16Vop2HighVdstUsesHighHalfAddend) {
 
 TEST(Gfx1250ExecutionTest, VMadU32LiteralTimesScalarAddsVector) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -1774,6 +2151,7 @@ TEST(Gfx1250ExecutionTest, VMadU32LiteralTimesScalarAddsVector) {
 
 TEST(Gfx1250LiteralOperandTest, SplitBackendPreservesSignedAndEncodingSemantics) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -1875,6 +2253,7 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
     util::set_force_scalar_for_testing(force_scalar);
 
     Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
     auto *cu = sim.cu();
     auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
@@ -1914,7 +2293,7 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
   };
 
   run_case(true);
-  if constexpr (util::has_stdx_simd && !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS)
+  if constexpr (util::has_stdx_simd && !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS)
     run_case(false);
 }
 
@@ -1971,6 +2350,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32LiteralReplicatesAndUsesAvailableSimdPath) 
     ASSERT_NE(typed_add, nullptr);
 
     Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
     auto *cu = sim.cu();
     auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
@@ -2199,6 +2579,7 @@ TEST(Gfx1251F64WmmaExecutionTest, ExecutesPublicLaneAndRegisterMapping) {
   ASSERT_NE(decoded->execute, nullptr);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf(64);
   ASSERT_NE(wf, nullptr);
@@ -2242,6 +2623,7 @@ TEST(Gfx1251F64WmmaExecutionTest, ExecutesFinalRegisterTupleBoundaries) {
   for (const BoundaryCase &test_case : kCases) {
     SCOPED_TRACE(test_case.name);
     Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
     auto *cu = sim.cu();
     auto *wf = sim.dispatch_scratch_wf();
     ASSERT_NE(wf, nullptr);
@@ -2280,6 +2662,7 @@ TEST(Gfx1251F64WmmaExecutionTest, StagesAllInputsBeforeOverlappingDestinationWri
   for (const uint32_t overlap : {0u, 1u, 2u}) {
     SCOPED_TRACE(overlap == 0 ? "destination/C" : overlap == 1 ? "destination/A" : "destination/B");
     Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
     auto *cu = sim.cu();
     auto *wf = sim.dispatch_scratch_wf(64);
     ASSERT_NE(wf, nullptr);
@@ -2319,6 +2702,7 @@ TEST(Gfx1251F64WmmaExecutionTest, RejectsNonFullExecBeforeReadingOrWritingRegist
   ASSERT_NE(decoded->execute, nullptr);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf(64);
   ASSERT_NE(wf, nullptr);
@@ -2381,6 +2765,7 @@ TEST(Gfx1251F64WmmaExecutionTest, ExecutesEveryPublicLlvmModifierAndInlineForm) 
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf(32);
   ASSERT_NE(wf, nullptr);
@@ -2433,6 +2818,7 @@ TEST(Gfx1251F64WmmaExecutionTest, ExecutesLegalInlineAccumulators) {
 
   WmmaF64InputMatrix zero{};
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf(48);
   ASSERT_NE(wf, nullptr);
@@ -2461,6 +2847,7 @@ TEST(Gfx1251F64WmmaExecutionTest, UsesFixedFusedArithmeticIndependentOfMode) {
   ASSERT_NE(decoded, nullptr);
   ASSERT_NE(decoded->execute, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf(48);
   ASSERT_NE(wf, nullptr);
@@ -2668,6 +3055,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesBothElementsAndHonorsE
   ASSERT_NE(decoded, nullptr);
   ASSERT_NE(decoded->execute, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -2714,6 +3102,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationDiffersFromRoundedMultiplyAdd)
   ASSERT_NE(decoded, nullptr);
   ASSERT_NE(decoded->execute, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -2783,6 +3172,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesEveryPublicLlvmSourceF
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -2847,6 +3237,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesCrossWindowVgprTuples)
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -2874,6 +3265,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationAppliesPublicModifiersAndClamp
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -2913,6 +3305,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationHonorsRoundingDenormAndExcepti
   ASSERT_NE(decoded, nullptr);
   ASSERT_NE(decoded->execute, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -2995,6 +3388,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesSgpr104InEverySourcePo
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -3077,6 +3471,7 @@ TEST(Gfx1251PackedF64ExecutionTest, BasicArithmeticExecutesBothElementsAndHonors
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -3111,6 +3506,7 @@ TEST(Gfx1251PackedF64ExecutionTest, ExecutesWave32Lane31WithoutChangingVccOrInac
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -3138,6 +3534,7 @@ TEST(Gfx1251PackedF64ExecutionTest, ExecZeroPreservesDestinationAndStatus) {
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -3206,6 +3603,7 @@ TEST(Gfx1251PackedF64ExecutionTest, BasicArithmeticExecutesEveryPublicLlvmSource
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -3276,6 +3674,7 @@ TEST(Gfx1251PackedF64ExecutionTest, ExecutesInlineScalarBoundarySources) {
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -3307,6 +3706,7 @@ TEST(Gfx1251PackedF64ExecutionTest, ExecutesFinalRegisterTupleBoundaries) {
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -3378,6 +3778,7 @@ TEST(Gfx1251PackedF64ExecutionTest, PublicModifiersClampAndOverlappingDestinatio
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -3523,6 +3924,7 @@ TEST(Gfx1251PackedF64ExecutionTest, AddAndMultiplyHonorRoundingAndDenormModes) {
   ASSERT_NE(add->execute, nullptr);
   ASSERT_NE(mul->execute, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -3599,6 +4001,7 @@ TEST(Gfx1251PackedF64ExecutionTest, MinMaxNumberHonorEveryDenormMode) {
   ASSERT_NE(maximum, nullptr);
   ASSERT_NE(minimum, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -3629,6 +4032,7 @@ TEST(Gfx1251PackedF64ExecutionTest, AddAndMultiplyHandleNanInfinityAndSignedZero
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -3662,6 +4066,7 @@ TEST(Gfx1251PackedF64ExecutionTest, MinMaxNumberHandleNanInfinityAndSignedZero) 
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -3775,6 +4180,7 @@ TEST(Gfx1251PackedF64ExecutionTest, ExecutesSgpr104CompositeInBothSourcesForEver
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -3957,6 +4363,7 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesSgpr104CompositeInEveryPackedU64Posi
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -3993,6 +4400,7 @@ TEST(Gfx1251PackedU64ExecutionTest, AddAndSubtractWrapPerElementAndHonorExec) {
   ASSERT_NE(decoder, nullptr);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -4073,6 +4481,7 @@ TEST(Gfx1251PackedU64ExecutionTest, PublicNegationModifiersApplyToSelectedElemen
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -4095,6 +4504,7 @@ TEST(Gfx1251PackedU64ExecutionTest, IntegerClampSaturatesAfterSourceNegation) {
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -4156,6 +4566,7 @@ TEST(Gfx1251PackedU64ExecutionTest, SourceNegationWrapsAtU64ElementWidth) {
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -4210,6 +4621,7 @@ TEST(Gfx1251PackedU64ExecutionTest, AddAndSubtractExecuteEveryPublicLlvmSourceFo
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -4257,6 +4669,7 @@ TEST(Gfx1251PackedU64ExecutionTest, AddAndSubtractReadOverlappingSourcesBeforeDe
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -4304,6 +4717,7 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesPublicInlineScalarSources) {
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -4331,6 +4745,7 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesWave32Lane31AndPreservesInactiveLane
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -4532,6 +4947,7 @@ TEST(Gfx1251PackedU64ExecutionTest, PublicLiteralEncodingReplicatesWithoutSemant
   ASSERT_NE(packed_shift, nullptr);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -4551,6 +4967,7 @@ TEST(Gfx1251PackedU64ExecutionTest, PublicVgprVectorExecutesSupportedShiftsAndAc
   ASSERT_NE(decoded->execute, nullptr);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -4611,6 +5028,7 @@ TEST(Gfx1251PackedU64ExecutionTest, RejectsUnprovenShiftCountsBeforeAnyDestinati
   ASSERT_NE(decoded->execute, nullptr);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -4642,13 +5060,14 @@ TEST(Gfx1251PackedU64ExecutionTest, RejectsUnprovenShiftCountsBeforeAnyDestinati
 TEST(Gfx1251PackedU64ExecutionTest, RejectedCountTerminatesDispatchWithSimulatorFailure) {
   constexpr uint32_t kLiteral = 101u;
   // Public LLVM gfx1251_asm_vop3p.s encoding for
-  // v_pk_lshl_add_u64 v[4:7], v[8:11], 101, v[16:19]. The s_endpgm must never
-  // be needed to retire the rejected instruction's workgroup.
+  // v_pk_lshl_add_u64 v[4:7], v[8:11], 101, v[16:19]. Cancel the rejected
+  // dispatch without executing s_endpgm or publishing successful completion.
   constexpr std::array<uint32_t, 4> kCode{0xCC7E4004u, 0x1C41FF08u, kLiteral, S_ENDPGM_GFX12};
   constexpr uint64_t kSignalAddress = 0x20000;
   constexpr uint32_t kSignalValueOffset = 8;
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto decoder =
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
@@ -4670,6 +5089,10 @@ TEST(Gfx1251PackedU64ExecutionTest, RejectedCountTerminatesDispatchWithSimulator
   packet.completion_signal.handle = kSignalAddress;
   queue.submit(packet);
 
+  ASSERT_TRUE(sim.engine->step());
+  ASSERT_NE(sim.cu()->wf(0), nullptr);
+  const uint32_t dispatch_id = sim.cu()->wf(0)->dispatch_id();
+  ASSERT_TRUE(sim.cp()->has_dispatch_for_test(1, 0, dispatch_id));
   while (sim.engine->step()) {
   }
 
@@ -4678,8 +5101,10 @@ TEST(Gfx1251PackedU64ExecutionTest, RejectedCountTerminatesDispatchWithSimulator
   EXPECT_EQ(exit.code, 1);
   EXPECT_NE(exit.message.find("v_pk_lshl_add_u64"), std::string::npos);
   EXPECT_FALSE(sim.cu()->has_active_wfs());
-  EXPECT_EQ(sim.memory->read64(kSignalAddress + kSignalValueOffset), 0u)
-      << "the rejected dispatch must still publish its workgroup completion";
+  EXPECT_TRUE(sim.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_FALSE(sim.cp()->has_dispatch_for_test(1, 0, dispatch_id));
+  EXPECT_EQ(sim.memory->read64(kSignalAddress + kSignalValueOffset), 1u)
+      << "the rejected dispatch must not publish successful completion";
 }
 
 TEST(Gfx1251PackedU64ExecutionTest, ExecutesEveryPublicLlvmSourceForm) {
@@ -4713,6 +5138,7 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesEveryPublicLlvmSourceForm) {
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -4772,6 +5198,7 @@ TEST(Gfx1251PackedU64ExecutionTest, ReadsVectorShiftPairsAndReplicatesScalarShif
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
   ASSERT_NE(decoder, nullptr);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -4815,6 +5242,7 @@ TEST(Gfx1251PackedU64ExecutionTest, ReadsOverlappingSourcesBeforeWritingDestinat
   ASSERT_NE(decoded->execute, nullptr);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -4882,6 +5310,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath
     ASSERT_NE(literal_operand, nullptr);
 
     Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
     auto *cu = sim.cu();
     auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
@@ -4939,6 +5368,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralSourceSpecificSelectorUsesSimd)
   ASSERT_NE(typed, nullptr);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -4991,6 +5421,7 @@ TEST(Gfx1250ExecutionTest, PkF32AddMulSimdMatchesScalarWithPartialExec) {
       ASSERT_NE(instruction, nullptr);
 
       Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
       auto *cu = sim.cu();
       auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
       ASSERT_NE(wf, nullptr);
@@ -5107,6 +5538,7 @@ TEST(Gfx1250ExecutionTest, PkF32NondefaultSelectorsUseSimd) {
       ASSERT_NE(instruction, nullptr);
 
       Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
       auto *cu = sim.cu();
       auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
       ASSERT_NE(wf, nullptr);
@@ -5192,6 +5624,7 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
     ASSERT_NE(typed, nullptr);
 
     Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
     auto *cu = sim.cu();
     auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
@@ -5324,6 +5757,7 @@ TEST(Gfx1250ExecutionTest, FmaMixBf16ResultsHonorRoundModeAndClamp) {
           ASSERT_NE(instruction, nullptr);
 
           Gfx1250Sim sim;
+          ASSERT_NO_FATAL_FAILURE(sim.initialize());
           auto *cu = sim.cu();
           auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
           ASSERT_NE(wf, nullptr);
@@ -5381,6 +5815,7 @@ TEST(Gfx1250DecodeTest, BinaryVop3pIgnoresLiteral64SelectorInUnusedSrc2) {
 
 TEST(Gfx1250ExecutionTest, VCmpGtU32Wave32ExplicitSdstPreservesHighSgpr) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -5407,6 +5842,7 @@ TEST(Gfx1250ExecutionTest, VCmpGtU32Wave32ExplicitSdstPreservesHighSgpr) {
 
 TEST(Gfx1250ExecutionTest, Wave32ScalarVccHiWritePreservesUpperHalf) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -5429,6 +5865,7 @@ TEST(Gfx1250ExecutionTest, Wave32ScalarVccHiWritePreservesUpperHalf) {
 TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
   ForceScalarGuard scalar_guard;
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
   auto &cu = *sim.cu();
@@ -5519,6 +5956,7 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
 
 TEST(Gfx1250ExecutionTest, Perlane64CompatibilityEncodingDecodesAndIsWave32Nop) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -5548,6 +5986,7 @@ TEST(Gfx1250ExecutionTest, Perlane64CompatibilityEncodingDecodesAndIsWave32Nop) 
 
 TEST(Gfx1250ExecutionTest, RelativeSourceDestinationOperationsUsePackedM0Offsets) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
@@ -5688,6 +6127,7 @@ TEST(Gfx1250ExecutionTest, RelativeSourceDestinationOperationsUsePackedM0Offsets
 
 TEST(Gfx1250ExecutionTest, SaturatingPackOperationsClampEverySourceElement) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -5722,6 +6162,7 @@ TEST(Gfx1250ExecutionTest, SaturatingPackOperationsClampEverySourceElement) {
 
 TEST(Gfx1250ExecutionTest, Vop2FusedOperationsUseLiteral64AndOldPackedDestination) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -5773,6 +6214,7 @@ TEST(Gfx1250ExecutionTest, Vop2FusedOperationsUseLiteral64AndOldPackedDestinatio
 
 TEST(Gfx1250ExecutionTest, FusedOperationsHonorF16F64ModeControls) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -5972,6 +6414,7 @@ TEST(Gfx1250ExecutionTest, FusedOperationsHonorF16F64ModeControls) {
 
 TEST(Gfx1250ExecutionTest, F64FmaAndFmacClampCanonicalizeResultBits) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   amdgpu::ComputeUnitCore *cu = sim.cu();
   amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -6044,6 +6487,7 @@ TEST(Gfx1250ExecutionTest, PkFmaF16UsesExactRoundingAndClamp) {
     for (uint32_t scalar = 0; scalar < 2; ++scalar) {
       util::set_force_scalar_for_testing(scalar != 0);
       Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
       auto *cu = sim.cu();
       auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
       ASSERT_NE(wf, nullptr);
@@ -6072,6 +6516,7 @@ TEST(Gfx1250ExecutionTest, PkFmaF16UsesExactRoundingAndClamp) {
   for (uint32_t scalar = 0; scalar < 2; ++scalar) {
     util::set_force_scalar_for_testing(scalar != 0);
     Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
     auto *cu = sim.cu();
     auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
@@ -6092,6 +6537,7 @@ TEST(Gfx1250ExecutionTest, PkFmaF16UsesExactRoundingAndClamp) {
 
 TEST(Gfx1250ExecutionTest, PermPk16OperationsWriteAllPackedResultWords) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -6191,6 +6637,7 @@ TEST(Gfx1250ExecutionTest, PermPk16OperationsWriteAllPackedResultWords) {
 
 TEST(Gfx1250ExecutionTest, QsadAndMqsadUseFourSlidingWindowsAndMaskedReferenceBytes) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -6300,6 +6747,7 @@ TEST(Gfx1250ExecutionTest, QsadAndMqsadUseFourSlidingWindowsAndMaskedReferenceBy
 
 TEST(Gfx1250ExecutionTest, MullitAndTrigPreopPreserveLegacyAndRangeReductionRules) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -6403,6 +6851,7 @@ TEST(Gfx1250ExecutionTest, MullitAndTrigPreopPreserveLegacyAndRangeReductionRule
 
 TEST(Gfx1250ExecutionTest, PackedAddMaxMinSaturateBeforeSelectingThirdOperand) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);

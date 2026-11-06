@@ -7,7 +7,8 @@
 #                        [-o <path>] [--format markdown|json] [-h]
 #
 # Environment knobs (mirror the Linux version):
-#   HRR_TRIAGE_WORKDIR   Output dir for findings + logs (default: current dir)
+#   HRR_TRIAGE_WORKDIR   Output dir for findings + logs (default: a temp dir,
+#                        never the archive: triage must not write into it)
 #   HRR_PLAYBACK         Explicit path to hrr-playback.exe
 #   HIP_PATH / ROCM_PATH HIP SDK root (default: C:\Program Files\AMD\ROCm\6.2)
 #   GPU                  Replay GPU ordinal (default: 0)
@@ -35,6 +36,7 @@ $ScriptDir  = $PSScriptRoot
 $Analyzer   = Join-Path $ScriptDir "analyze_replay_finding.py"
 $EnsurePs1  = Join-Path $ScriptDir "ensure_playback.ps1"
 $Compat     = Join-Path $ScriptDir "check_replay_compat.py"
+$Sanitizer  = Join-Path $ScriptDir "archive_text.py"
 
 # Resolve HIP/ROCm root: HIP_PATH > ROCM_PATH > default install
 $HipRoot = if ($env:HIP_PATH)   { $env:HIP_PATH }
@@ -44,8 +46,18 @@ $HipRoot = if ($env:HIP_PATH)   { $env:HIP_PATH }
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+# Archive-derived text (the archive's own path, and names built from it) goes
+# through the skill's one sanitizer, archive_text.py, before it is printed: a
+# directory name can carry a newline and a heading, and this script's output is
+# read by an agent. The replay's own output is filtered through it below.
+function Get-SafeText([string]$Text) {
+    $safe = & python $Sanitizer --text $Text
+    if ($LASTEXITCODE -ne 0) { return "<unprintable>" }
+    return ($safe -join " ")
+}
+
 function Write-Triage([string]$Msg, [string]$Color = "DarkGray") {
-    Write-Host "[triage] $Msg" -ForegroundColor $Color
+    Write-Host "[triage] $(Get-SafeText $Msg)" -ForegroundColor $Color
 }
 
 function Show-Usage {
@@ -109,17 +121,83 @@ if (-not $Archive) {
 try {
     $Archive = (Resolve-Path $Archive -ErrorAction Stop).Path
 } catch {
-    Write-Host "error: archive not found: $Archive" -ForegroundColor Red
+    Write-Host "error: archive not found: $(Get-SafeText $Archive)" -ForegroundColor Red
     exit 1
 }
 if (-not (Test-Path $Archive -PathType Container)) {
-    Write-Host "error: archive is not a directory: $Archive" -ForegroundColor Red
+    Write-Host "error: archive is not a directory: $(Get-SafeText $Archive)" -ForegroundColor Red
     exit 1
 }
 
+# GetFullPath is lexical only, so a symbolic link or a junction anywhere in a
+# path is followed here, as realpath does for triage_archive.sh. Components that
+# do not exist yet are kept as they are. $null when the links go round in a
+# loop.
+function Resolve-LinkedPath([string]$Path) {
+    $full = [IO.Path]::GetFullPath($Path)
+    $hops = 0
+    while ($true) {
+        $root = [IO.Path]::GetPathRoot($full)
+        $parts = @($full.Substring($root.Length).Split([char[]]'\/', [StringSplitOptions]::RemoveEmptyEntries))
+        $cur = $root
+        $relinked = $false
+        for ($i = 0; $i -lt $parts.Count; $i++) {
+            $next = Join-Path $cur $parts[$i]
+            $item = Get-Item -LiteralPath $next -Force -ErrorAction SilentlyContinue
+            $target = if ($item -and $item.LinkType) { @($item.Target)[0] } else { $null }
+            if (-not $target) { $cur = $next; continue }
+            if (++$hops -gt 40) { return $null }
+            if (-not [IO.Path]::IsPathRooted($target)) { $target = Join-Path $cur $target }
+            # The target can hold links of its own, so the walk starts again on it.
+            foreach ($p in ($parts | Select-Object -Skip ($i + 1))) { $target = Join-Path $target $p }
+            $full = [IO.Path]::GetFullPath($target)
+            $relinked = $true
+            break
+        }
+        if (-not $relinked) { return $cur }
+    }
+}
+
+# The archive's own links are followed before anything is derived from its name,
+# as readlink -f does in triage_archive.sh: a link to a pid-<n> directory has to
+# protect the capture directory holding the target, not the one holding the link.
+$ArchiveTarget = Resolve-LinkedPath $Archive
+if (-not $ArchiveTarget) {
+    Write-Host "error: a symbolic link loop in the archive path: $(Get-SafeText $Archive)" -ForegroundColor Red
+    exit 1
+}
+$Archive = $ArchiveTarget
 $Name    = Split-Path $Archive -Leaf
-$Ts      = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'")
-$Workdir = if ($env:HRR_TRIAGE_WORKDIR) { $env:HRR_TRIAGE_WORKDIR } else { (Get-Location).Path }
+# The pid keeps two runs in the same second from sharing a log and a finding.
+$Ts      = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'") + "-$PID"
+$Workdir = if ($env:HRR_TRIAGE_WORKDIR) { $env:HRR_TRIAGE_WORKDIR } else { Join-Path ([IO.Path]::GetTempPath()) 'hrr-triage' }
+# The archive is not to be written to, as in triage_archive.sh: the archive here
+# is the pid directory and, for a pid-<n> one, the capture directory holding it.
+# Both paths are resolved, links included, before anything is created: a work
+# directory or a parent of it that is a link into the capture is inside it.
+$ArchiveRoot = if ($Name -like 'pid-*') { Split-Path $Archive -Parent } else { $Archive }
+$ArchiveRoot = Resolve-LinkedPath $ArchiveRoot
+function Test-InArchive([string]$Path) {
+    $full = Resolve-LinkedPath $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+    if (-not $ArchiveRoot -or -not $full) {
+        Write-Host "error: a symbolic link loop in the archive path or in: $(Get-SafeText $Path)" -ForegroundColor Red
+        exit 1
+    }
+    $root = $ArchiveRoot.TrimEnd('\', '/')
+    $full = $full.TrimEnd('\', '/')
+    return ($full -ieq $root -or
+            $full.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase))
+}
+if (Test-InArchive $Workdir) {
+    Write-Host "error: the triage work directory is inside the archive: $(Get-SafeText $Workdir); set HRR_TRIAGE_WORKDIR outside it" -ForegroundColor Red
+    exit 1
+}
+# -o is checked too: a finding named into the archive writes there as surely
+# as a work directory inside it does.
+if ($Output -and (Test-InArchive $Output)) {
+    Write-Host "error: --output is inside the archive: $(Get-SafeText $Output)" -ForegroundColor Red
+    exit 1
+}
 New-Item -ItemType Directory -Force -Path $Workdir | Out-Null
 $Ext     = if ($Format -eq "json") { ".finding.json" } else { ".finding.md" }
 $Finding = if ($Output) { $Output } else { Join-Path $Workdir "${Name}-${Ts}${Ext}" }
@@ -268,8 +346,9 @@ function Invoke-NativeReplay([string]$PlaybackExe, [string]$LogPath, [string]$Gp
         [System.IO.File]::WriteAllText($LogPath, $combined, [System.Text.Encoding]::UTF8)
 
         # Echo to console so progress/result are visible
-        if ($errText) { Write-Host $errText.TrimEnd() -ForegroundColor DarkGray }
-        if ($outText) { Write-Host $outText.TrimEnd() }
+        # Through the sanitizer: kernel names and log lines are the archive's.
+        if ($errText) { $errText.TrimEnd() | & python $Sanitizer | Write-Host }
+        if ($outText) { $outText.TrimEnd() | & python $Sanitizer | Write-Host }
 
     } finally {
         Remove-Item $tmpOut, $tmpErr -ErrorAction SilentlyContinue
@@ -330,12 +409,16 @@ Then re-run with --replay docker (or set HRR_DOCKER_IMAGE and use --replay auto)
     Write-Triage "archive (WSL2)=$wslArchive"
     Write-Triage "log=$Log"
 
-    # Build the bash command that WSL2 will run
-    $mountClr = if ($env:HRR_DOCKER_MOUNT_CLR -eq "1") { "HRR_DOCKER_MOUNT_CLR=1 " } else { "" }
-    $wslCmd = "HRR_DOCKER_IMAGE='$($env:HRR_DOCKER_IMAGE)' ${mountClr}bash '$wslScript' --archive '$wslArchive' --log '$wslLog'"
+    # Pass every value as its own argument. The archive path is the capture
+    # author's to name, so it must never be spliced into a command string that
+    # bash parses: a folder called  x';touch PWNED;'  would run. `env` sets the
+    # variables, and --exec starts it without a shell on the WSL side.
+    $wslEnv = @("HRR_DOCKER_IMAGE=$($env:HRR_DOCKER_IMAGE)")
+    if ($env:HRR_DOCKER_MOUNT_CLR -eq "1") { $wslEnv += "HRR_DOCKER_MOUNT_CLR=1" }
+    $wslArgs = @($wslEnv) + @("bash", $wslScript, "--archive", $wslArchive, "--log", $wslLog)
 
-    Write-Triage "wsl bash: $wslCmd"
-    wsl -- bash -c $wslCmd
+    Write-Triage "wsl exec: env $($wslEnv -join ' ') bash $wslScript --archive $wslArchive --log $wslLog"
+    wsl --exec env @wslArgs
     $rc = $LASTEXITCODE
     Write-Triage "docker replay exit=$rc"
 
@@ -415,5 +498,5 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+# The analyzer has already printed the finding; it is the only thing on stdout.
 Write-Triage "finding=$Finding"
-Get-Content $Finding

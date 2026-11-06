@@ -3,14 +3,15 @@
 
 #include "rocprof-sys-causal.hpp"
 #include "common/common_utils.hpp"
+#include "common/string_utility.hpp"
 
 #include <timemory/log/macros.hpp>
 
+#include <fmt/format.h>
+
 #include <cmath>
-#include <iomanip>
 #include <iostream>
 #include <map>
-#include <sstream>
 #include <string_view>
 #include <unistd.h>
 
@@ -24,7 +25,12 @@ to_string_vec(const std::vector<char*>& argv)
     std::vector<std::string> out;
     out.reserve(argv.size());
     for(const auto* arg : argv)
-        if(arg != nullptr) out.emplace_back(arg);
+    {
+        if(arg != nullptr)
+        {
+            out.emplace_back(arg);
+        }
+    }
     return out;
 }
 }  // namespace
@@ -38,10 +44,12 @@ main(int argc, char** argv)
     bool _has_double_hyphen = false;
     for(int arg_idx = 1; arg_idx < argc; ++arg_idx)
     {
-        auto _arg = std::string_view{ argv[arg_idx] };
+        auto const _arg = std::string_view{ argv[arg_idx] };
         if(_arg == "--" || _arg == "-?" || _arg == "-h" || _arg == "--help" ||
            _arg == "--version")
+        {
             _has_double_hyphen = true;
+        }
     }
 
     std::vector<char*> _argv = {};
@@ -53,7 +61,9 @@ main(int argc, char** argv)
     {
         _argv.reserve(argc);
         for(int arg_idx = 1; arg_idx < argc; ++arg_idx)
+        {
             _argv.emplace_back(argv[arg_idx]);
+        }
         _causal_env.resize(1);
     }
 
@@ -64,12 +74,14 @@ main(int argc, char** argv)
     {
         TIMEMORY_PRINTF_INFO(stderr, "causal environments to be executed:\n");
         size_t _n = 0;
-        for(auto& citr : _causal_env)
+        for(auto const& citr : _causal_env)
         {
             auto _env = _base_env;
             for(const auto& eitr : citr)
+            {
                 update_env(_env, eitr.first, eitr.second);
-            auto _prefix = std::to_string(_n++) + ":  ";
+            }
+            auto const _prefix = std::to_string(_n++) + ":  ";
             utils::print_environment(_env, get_updated_envs(), true, _prefix);
         }
     }
@@ -80,11 +92,18 @@ main(int argc, char** argv)
         {
             auto _env = _base_env;
             for(const auto& eitr : _causal_env.front())
+            {
                 update_env(_env, eitr.first, eitr.second);
-            auto _verbose = get_verbose();
+            }
+            auto const _verbose = get_verbose();
             if(_verbose >= 0)
+            {
                 utils::print_environment(_env, get_updated_envs(), _verbose >= 1, "0: ");
-            if(_verbose >= 1) utils::print_command(to_string_vec(_argv), "0: ");
+            }
+            if(_verbose >= 1)
+            {
+                utils::print_command(to_string_vec(_argv), "0: ");
+            }
             _argv.emplace_back(nullptr);
             auto envp_ptrs = utils::to_c_argv(_env);
             return execvpe(_argv.front(), _argv.data(), envp_ptrs.data());
@@ -92,12 +111,13 @@ main(int argc, char** argv)
 
         forward_signals({ SIGINT, SIGTERM, SIGQUIT });
         size_t       _ncount = 0;
-        const size_t _width  = std::log10(_causal_env.size()) + 1;
-        for(auto& citr : _causal_env)
+        const size_t width =
+            rocprofsys::utility::string::decimal_width(_causal_env.size());
+        for(auto const& citr : _causal_env)
         {
-            auto _n        = _ncount++;
-            auto _main_pid = getpid();
-            auto _pid      = fork();
+            auto const _n        = _ncount++;
+            auto const _main_pid = getpid();
+            auto const _pid      = fork();
 
             if(get_verbose() >= 3)
             {
@@ -107,31 +127,38 @@ main(int argc, char** argv)
 
             if(_pid == 0)
             {
-                auto _prefix = std::stringstream{};
-                _prefix << std::setw(_width) << std::right << _n << "/"
-                        << std::setw(_width) << std::left << _causal_env.size() << ": ["
-                        << _main_pid << " -> " << getpid() << "] ";
+                auto const prefix =
+                    fmt::format("{:>{}}/{:<{}}: [{} -> {}] ", _n, width,
+                                _causal_env.size(), width, _main_pid, getpid());
 
                 auto _env = _base_env;
                 for(const auto& eitr : citr)
+                {
                     update_env(_env, eitr.first, eitr.second);
-                auto _verbose = get_verbose();
+                }
+                auto const _verbose = get_verbose();
                 if(_verbose >= 0)
+                {
                     utils::print_environment(_env, get_updated_envs(), _verbose >= 1,
-                                             _prefix.str());
+                                             prefix);
+                }
                 if(_verbose >= 1)
-                    utils::print_command(to_string_vec(_argv), _prefix.str());
+                {
+                    utils::print_command(to_string_vec(_argv), prefix);
+                }
                 _argv.emplace_back(nullptr);
                 auto envp_ptrs = utils::to_c_argv(_env);
                 return execvpe(_argv.front(), _argv.data(), envp_ptrs.data());
             }
-            else
+
+            add_child_pid(_pid);
+            auto const _status = wait_pid(_pid);
+            auto const _ret    = diagnose_status(_pid, _status);
+            remove_child_pid(_pid);
+
+            if(_ret != 0)
             {
-                add_child_pid(_pid);
-                auto _status = wait_pid(_pid);
-                auto _ret    = diagnose_status(_pid, _status);
-                remove_child_pid(_pid);
-                if(_ret != 0) return _ret;
+                return _ret;
             }
         }
     }

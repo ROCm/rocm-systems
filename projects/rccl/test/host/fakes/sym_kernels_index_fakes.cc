@@ -13,6 +13,7 @@
 
 ASSERT_HOOK_MATCHES_PROD(g_symkLLKernelMask, ncclSymkLLKernelMask);
 ASSERT_HOOK_MATCHES_PROD(g_symkDynamicSmemKernelMask, ncclSymkDynamicSmemKernelMask);
+ASSERT_HOOK_MATCHES_PROD(g_symkTmaKernelMask, ncclSymkTmaKernelMask);
 ASSERT_HOOK_MATCHES_PROD(g_symkGetKernelIndex, ncclSymkGetKernelIndex);
 ASSERT_HOOK_MATCHES_PROD(g_symkKernelIdToString, ncclSymkKernelIdToString);
 ASSERT_HOOK_MATCHES_PROD(g_symkMakeDevWork, ncclSymkMakeDevWork);
@@ -25,6 +26,10 @@ int ncclSymkLLKernelMask() { return g_symkLLKernelMask(); }
 static int DefaultSymkDynamicSmemKernelMask() { return 0; }
 std::function<int()> g_symkDynamicSmemKernelMask = DefaultSymkDynamicSmemKernelMask;
 int ncclSymkDynamicSmemKernelMask() { return g_symkDynamicSmemKernelMask(); }
+
+static int DefaultSymkTmaKernelMask() { return 0; }
+std::function<int()> g_symkTmaKernelMask = DefaultSymkTmaKernelMask;
+int ncclSymkTmaKernelMask() { return g_symkTmaKernelMask(); }
 
 // Index 0 always: the kernel-table arrays below are sized ncclSymkKernelId_Count but only index 0 is populated.
 static int DefaultSymkGetKernelIndex(ncclSymkKernelId, int, ncclDataType_t) { return 0; }
@@ -55,6 +60,7 @@ int ncclSymkKernelMaxDynamicSmem[ncclSymkKernelId_Count] = {0};
 void ResetSymKernelsIndexFakes() {
   g_symkLLKernelMask = DefaultSymkLLKernelMask;
   g_symkDynamicSmemKernelMask = DefaultSymkDynamicSmemKernelMask;
+  g_symkTmaKernelMask = DefaultSymkTmaKernelMask;
   g_symkGetKernelIndex = DefaultSymkGetKernelIndex;
   g_symkKernelIdToString = DefaultSymkKernelIdToString;
   g_symkMakeDevWork = DefaultSymkMakeDevWork;

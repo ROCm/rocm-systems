@@ -54,7 +54,10 @@ void
 unblocking_gotcha::configure()
 {
     unblocking_gotcha_t::get_initializer() = []() {
-        if(!config::get_use_causal()) return;
+        if(!config::get_use_causal())
+        {
+            return;
+        }
 
         TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 0, pthread_mutex_unlock);
         TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 1, pthread_spin_unlock);
@@ -90,7 +93,7 @@ unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
         return (*_func)(_args...);
     }
 
-    auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
+    auto const _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
     if(_active)
     {
@@ -99,10 +102,10 @@ unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
         if constexpr(Idx == pthread_barrier_wait_idx)
         {
             const std::int64_t _delay_value =
-                (_active) ? causal::delay::get_global().load() : 0;
+                _active ? causal::delay::get_global().load() : 0;
 
             causal::sampling::block_backtrace_samples();
-            auto _ret = (*_func)(_args...);
+            auto const _ret = (*_func)(_args...);
             causal::sampling::unblock_backtrace_samples();
 
             causal::delay::postblock(_delay_value);
@@ -122,12 +125,15 @@ unblocking_gotcha::operator()(gotcha_index<kill_idx>, int (*_func)(pid_t, int),
         return (*_func)(_pid, _sig);
     }
 
-    auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
+    auto const _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
-    if(_active && _pid == process::get_id()) causal::delay::process();
+    if(_active && _pid == process::get_id())
+    {
+        causal::delay::process();
+    }
 
     causal::sampling::block_backtrace_samples();
-    auto _ret = (*_func)(_pid, _sig);
+    auto const _ret = (*_func)(_pid, _sig);
     causal::sampling::unblock_backtrace_samples();
 
     return _ret;

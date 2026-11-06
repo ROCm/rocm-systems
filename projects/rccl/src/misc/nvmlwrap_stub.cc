@@ -87,3 +87,14 @@ ncclResult_t ncclNvmlDeviceGetCurrPcieLinkGeneration(nvmlDevice_t device, unsign
 ncclResult_t ncclNvmlDeviceGetCurrPcieLinkWidth(nvmlDevice_t device, unsigned int* currLinkWidth) {
   return ncclSystemError;
 }
+
+// NCCL 2.32: used by the RAS GPU diagnostics (ras/diagnostics_gpu.cc). No NVML on AMD.
+ncclResult_t ncclNvmlSystemGetDriverVersion(char* version, unsigned int length) {
+  if (length) version[0] = '\0';
+  return ncclSystemError;
+}
+
+ncclResult_t ncclNvmlDeviceGetFieldValues(nvmlDevice_t device, int valuesCount, nvmlFieldValue_t* values) {
+  for (int i = 0; i < valuesCount; i++) values[i].nvmlReturn = NVML_ERROR_NOT_SUPPORTED;
+  return ncclSystemError;
+}

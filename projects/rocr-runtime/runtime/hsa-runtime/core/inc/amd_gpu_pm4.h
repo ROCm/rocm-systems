@@ -85,11 +85,22 @@
 #define PM4_ACQUIRE_MEM_DW4_COHER_BASE_HI(x)               ((x >> 40) & 0xFFFFFFU)
 #define PM4_ACQUIRE_MEM_DW7_GCR_CNTL(x)                    (((x) & 0x7FFFFU) << 0)
 #  define PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV(x)              (((x) & 0x3U) << 0)
+#    define PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV_ALL            1U
+#    define PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV_RANGE          2U
 #  define PM4_ACQUIRE_MEM_GCR_CNTL_GLK_INV                 (1U << 7)
 #  define PM4_ACQUIRE_MEM_GCR_CNTL_GLV_INV                 (1U << 8)
 #  define PM4_ACQUIRE_MEM_GCR_CNTL_GL1_INV                 (1U << 9)
+#  define PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE(x)            (((x) & 0x3U) << 11)
+#    define PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE_ALL          0U
+#    define PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE_VOL          1U
+#    define PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE_RANGE        2U
+#    define PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE_FIRST_LAST   3U
 #  define PM4_ACQUIRE_MEM_GCR_CNTL_GL2_INV                 (1U << 14)
 #  define PM4_ACQUIRE_MEM_GCR_CNTL_GL2_WB                  (1U << 15)
+#  define PM4_ACQUIRE_MEM_GCR_CNTL_SEQ(x)                  (((x) & 0x3U) << 16)
+#    define PM4_ACQUIRE_MEM_GCR_CNTL_SEQ_PARALLEL           0U
+#    define PM4_ACQUIRE_MEM_GCR_CNTL_SEQ_FORWARD            1U
+#    define PM4_ACQUIRE_MEM_GCR_CNTL_SEQ_REVERSE            2U
 #define PM4_RELEASE_MEM_DW1_EVENT_INDEX(x)                 (((x) & 0xFU) << 8)
 #  define PM4_RELEASE_MEM_EVENT_INDEX_AQL                  0x7U
 
@@ -114,6 +125,7 @@
 
 #define PM4_WAIT_REG_MEM_DW1(x)                            (((x) & 0xFFFFFFFFU) << 0)
 #  define PM4_WAIT_REG_MEM_FUNCTION_EQUAL_TO_REFERENCE     (3U << 0)
+#  define PM4_WAIT_REG_MEM_FUNCTION_GREATER_OR_EQUAL_REF   (5U << 0)
 #  define PM4_WAIT_REG_MEM_MEM_SPACE_MEMORY_SPACE          (1U << 4)
 #  define PM4_WAIT_REG_MEM_OPERATION_WAIT_REG_MEM          (0U << 6)
 #define PM4_WAIT_REG_MEM_DW2_MEM_POLL_ADDR_LO(x)           (((x) & 0xFFFFFFFCU) << 0)

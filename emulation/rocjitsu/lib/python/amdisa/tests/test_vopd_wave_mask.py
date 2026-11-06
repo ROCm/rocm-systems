@@ -24,11 +24,11 @@ _GENERATED = _ROCJITSU / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
 _TEMPLATE = Path(__file__).resolve().parents[1] / 'codegen/_generator.py'
 
 
-def _cndmask_line(text: str) -> str:
-    """The one line that resolves the cndmask condition."""
+def _cndmask_condition(text: str) -> str:
+    """The complete assignment expression that resolves the cndmask condition."""
     lines = [ln for ln in text.splitlines() if 'uint64_t condition' in ln]
     assert len(lines) == 1, f'expected one condition line, found {len(lines)}'
-    return lines[0]
+    return text.split('uint64_t condition', 1)[1].split(';', 1)[0]
 
 
 def _vopd_exec_files():
@@ -39,13 +39,13 @@ def _vopd_exec_files():
 
 class TestVopdCndmaskWaveMask:
     def test_generator_template_reads_the_mask_at_wave_width(self):
-        line = _cndmask_line(_TEMPLATE.read_text())
+        line = _cndmask_condition(_TEMPLATE.read_text())
         assert 'read_wave_mask_scalar' in line
         assert 'read_scalar64' not in line
 
     @pytest.mark.parametrize('path', _vopd_exec_files(), ids=lambda p: p.parent.name)
     def test_generated_file_reads_the_mask_at_wave_width(self, path):
-        line = _cndmask_line(path.read_text())
+        line = _cndmask_condition(path.read_text())
         assert 'read_wave_mask_scalar' in line
         assert 'read_scalar64' not in line
 

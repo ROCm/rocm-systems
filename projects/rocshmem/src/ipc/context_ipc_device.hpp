@@ -535,31 +535,34 @@ class IPCContext : public Context {
                                   size_t nelems, int pe);
 
   __device__ void internal_putmem_wg(void *dest, const void *source,
-                                    size_t nelems, int pe);
+                                     size_t nelems, int pe);
 
   __device__ void internal_getmem_wg(void *dest, const void *source,
-                                    size_t nelems, int pe);
+                                     size_t nelems, int pe);
+
+  __device__ void internal_putmem_wg_tdm(void *dest, const void *source,
+                                         size_t nelems, int pe);
+
+  __device__ void internal_getmem_wg_tdm(void *dest, const void *source,
+                                         size_t nelems, int pe);
 
   __device__ void internal_putmem_wave(void *dest, const void *source,
-                                      size_t nelems, int pe);
+                                       size_t nelems, int pe);
 
   __device__ void internal_getmem_wave(void *dest, const void *source,
-                                      size_t nelems, int pe);
+                                       size_t nelems, int pe);
 
   __device__ void internal_alltoallmem_wave(rocshmem_team_t team, void *dst,
                                             const void *src, int nelems);
 
   __device__ void alltoallmem_linear_wave(rocshmem_team_t team, void *dst,
-                                            const void *src, int nelems);
+                                          const void *src, int nelems);
 
   __device__ void alltoallmem_linear_thread_puts_wave(rocshmem_team_t team,
       void *dst, const void *src, int nelems);
 
   //Temporary scratchpad memory used by internal barrier algorithms.
   int64_t *barrier_sync{nullptr};
-
-  //Struct defining memory ordering for atomic operations.
-  detail::atomic::rocshmem_memory_orders orders_{};
 
   //Buffer to perform Atomic store to enforce memory ordering
   int *fence_pool{nullptr};

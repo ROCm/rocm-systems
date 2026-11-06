@@ -1,0 +1,63 @@
+{
+  "evaluations": [
+    {
+      "id": "mem-access-inefficiency",
+      "skill_should_trigger": true,
+      "prompt": "find the memory access inefficiencies in this rocprofiler-compute capture\n\nThe application is ./vrandom_access.cpp.",
+      "workspace": "evals/samples",
+      "expected_behavior": [
+        "reads the memory chart before opening an individual cache level",
+        "cites hit rates or request counts from the report",
+        "ties any coalescing or tiling advice to those numbers"
+      ],
+      "unexpected_behavior": [
+        "recommends an optimization without citing a metric from the report"
+      ],
+      "logs_contain": ["-b memchart"]
+    },
+    {
+      "id": "mem-cache-hit-rates-gfx115x",
+      "skill_should_trigger": true,
+      "prompt": "what are my GL1 and GL2 hit rates for this kernel and are they bad?\n\nThe application is ./vsequential_access.cpp.",
+      "workspace": "evals/samples",
+      "expected_behavior": [
+        "checks the cache block names this GPU uses before choosing -b",
+        "opens the gl1 and gl2 blocks for a single kernel id",
+        "judges the rates against what the algorithm should do rather than a fixed cutoff"
+      ],
+      "unexpected_behavior": [
+        "applies a remembered threshold such as L2 below 50% being bad, as if the tool defined one"
+      ],
+      "logs_contain": ["gl2"]
+    },
+    {
+      "id": "mem-bandwidth-bound-gfx115x",
+      "skill_should_trigger": true,
+      "prompt": "this kernel looks memory bound, where is the bandwidth going?\n\nThe application is ./vcopy.cpp.",
+      "workspace": "evals/samples",
+      "expected_behavior": [
+        "walks the hierarchy from the memory chart down to the level responsible",
+        "distinguishes traffic that caches absorbed from traffic that reached system memory"
+      ],
+      "unexpected_behavior": [
+        "describes the GPU memory as HBM"
+      ],
+      "logs_contain": ["memchart"]
+    },
+    {
+      "id": "mem-host-memory",
+      "skill_should_trigger": false,
+      "prompt": "my application is leaking host memory, help me find it"
+    },
+    {
+      "id": "mem-cuda-memory",
+      "skill_should_trigger": false,
+      "prompt": "analyze the memory throughput of my CUDA kernel with Nsight"
+    },
+    {
+      "id": "mem-gpu-oom",
+      "skill_should_trigger": false,
+      "prompt": "why does my model run out of GPU memory during training?"
+    }
+  ]
+}
