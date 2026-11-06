@@ -11,7 +11,7 @@ Primitive.bind_with_trace with ROCTX ranges.
 import importlib.util
 import threading
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, List
 
 from utils.inject_roctx import core
 from utils.inject_roctx.registry import register
@@ -263,7 +263,7 @@ class _RoctxPmapCallable:
             return
         setattr(self._compiled, name, value)
 
-    def __dir__(self):
+    def __dir__(self) -> List[str]:
         names = set(dir(type(self)))
         compiled = object.__getattribute__(self, "_compiled")
         names.update(dir(compiled))
