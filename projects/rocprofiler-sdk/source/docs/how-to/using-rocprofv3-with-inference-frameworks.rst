@@ -9,11 +9,22 @@
 Using rocprofv3 with LLM inference frameworks
 ==================================================
 
-`vLLM <https://github.com/vllm-project/vllm>`_ and `ATOM <https://github.com/ROCm/ATOM>`_ run inference in child processes: an engine process and, for multi-GPU configurations such as tensor parallelism, one worker process per GPU. Because ``rocprofv3`` collects data in-process, it profiles each of these processes and writes each process's output files when that process exits.
+`vLLM <https://github.com/vllm-project/vllm>`_ and `ATOM <https://github.com/ROCm/ATOM>`_ run
+inference in child processes: an engine process and, for multi-GPU configurations such as tensor
+parallelism, one worker process per GPU. Because ``rocprofv3`` collects data in-process, each
+engine or worker produces profiler output only when it starts a fresh profiling session through
+an exec-based process-creation path. A worker that continues directly after ``fork()`` inherits a
+disabled session; increasing its shutdown timeout cannot enable profiling. For the complete
+process-creation contract, see :ref:`rocprofiler-process-creation`.
 
-When these frameworks shut down, each parent process waits a grace period for its child processes to exit, then terminates them with ``SIGTERM`` followed by ``SIGKILL``. By default the grace period is about 5 seconds. If ``rocprofv3`` needs longer to write a process's output, that process is terminated first, and its output files are missing or incomplete.
+When these frameworks shut down, each parent process waits a grace period for its child processes
+to exit, then terminates them with ``SIGTERM`` followed by ``SIGKILL``. By default the grace
+period is about 5 seconds. If ``rocprofv3`` needs longer to write a profiled process's output, that
+process is terminated first, and its output files are missing or incomplete.
 
-To collect complete output, use a framework version that lets you configure the shutdown grace period, and set it long enough for ``rocprofv3`` to write its output.
+For processes that start fresh profiling sessions, use a framework version that lets you
+configure the shutdown grace period, and set it long enough for ``rocprofv3`` to write complete
+output.
 
 Required versions
 ==================
@@ -55,7 +66,9 @@ Set ``VLLM_WORKER_SHUTDOWN_TIMEOUT_SECONDS`` in the environment of the ``rocprof
     rocprofv3 --kernel-trace --disable-signal-handlers --output-format csv -d vllm-profile -- \
         vllm bench latency --model <model> --tensor-parallel-size <N>
 
-The preceding command generates one set of output files per process, prefixed with the process ID. Each worker process writes a ``kernel_trace.csv`` for the GPU it drives.
+When vLLM starts its engine and workers through an exec-based path, the preceding command
+generates one set of output files per profiled process, prefixed with the process ID. Each
+profiled worker writes a ``kernel_trace.csv`` for the GPU it drives.
 
 The vLLM log shows whether the workers exited within the grace period:
 
@@ -87,9 +100,13 @@ When the grace period expires before a worker exits, ATOM logs a warning similar
 Choosing a timeout
 ===================
 
-The timeout is an upper bound. Workers that finish writing output exit immediately, so a large value doesn't slow down a run that shuts down cleanly. Set the timeout according to how much data ``rocprofv3`` collects:
+The timeout is an upper bound. Profiled workers that finish writing output exit immediately, so a
+large value doesn't slow down a run that shuts down cleanly. Set the timeout according to how much
+data ``rocprofv3`` collects:
 
 - Kernel tracing with CSV output typically finishes in seconds, but can still exceed the 5-second default.
 - Collecting many tracing domains together, such as ``--sys-trace`` with ``--rccl-trace`` and ``--pmc``, increases the output each worker writes. Perfetto output (``--output-format pftrace``) and thread trace can take several minutes per worker. In these cases, use a timeout well above 300 seconds, or reduce the collected data, for example by using :ref:`collection periods <collection-period>` or limiting the output formats.
 
-If output is still missing, check the framework log for the termination messages shown in the preceding sections, and increase the timeout.
+If output is still missing, first confirm that the process started through an exec-based path. If
+the framework log contains one of the termination messages shown in the preceding sections,
+increase the timeout.

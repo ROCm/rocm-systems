@@ -35,17 +35,17 @@
 // Bad case (--no-app-signal-handler): app has SIG_DFL everywhere.
 //   Profiler's signal handler is the only thing that can flush data before death.
 //
-// TODO: --raw-fork (_Fork without exec) is not supported. _Fork skips
-// pthread_atfork handlers, leaving stale profiler state. Extremely rare in practice.
+// _Fork skips pthread_atfork handlers and is outside rocprofv3's contract. vfork is used only for
+// the immediate exec/_exit spawn path below.
 
 #include <hip/hip_runtime.h>
 #include <rocprofiler-sdk-roctx/roctx.h>
 
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <cerrno>
 #include <cstdarg>
 #include <cstring>
 #include <sstream>
@@ -53,10 +53,107 @@
 
 #include <atomic>
 #include <stdexcept>
+#include <vector>
 
 namespace
 {
 std::atomic<bool> g_shutdown{false};
+
+using profiler_status_query_t = int (*)(int*);
+
+profiler_status_query_t g_profiler_is_initialized = nullptr;
+profiler_status_query_t g_profiler_is_finalized   = nullptr;
+
+void
+resolve_profiler_status_queries()
+{
+    g_profiler_is_initialized = reinterpret_cast<profiler_status_query_t>(
+        dlsym(RTLD_DEFAULT, "rocprofiler_is_initialized"));
+    g_profiler_is_finalized =
+        reinterpret_cast<profiler_status_query_t>(dlsym(RTLD_DEFAULT, "rocprofiler_is_finalized"));
+    if(!g_profiler_is_initialized || !g_profiler_is_finalized)
+        throw std::runtime_error{"profiler status queries are unavailable"};
+}
+
+bool
+profiler_is_disabled_in_child()
+{
+    int init = -1;
+    int fini = -1;
+    return g_profiler_is_initialized && g_profiler_is_finalized &&
+           g_profiler_is_initialized(&init) == 0 && g_profiler_is_finalized(&fini) == 0 &&
+           init == 0 && fini == 1;
+}
+
+struct waiting_child
+{
+    pid_t pid      = -1;
+    int   write_fd = -1;
+};
+
+std::vector<waiting_child>
+start_waiting_plain_fork_children(int count)
+{
+    resolve_profiler_status_queries();
+
+    auto children = std::vector<waiting_child>{};
+    children.reserve(count);
+
+    for(int i = 0; i < count; ++i)
+    {
+        int control_pipe[2] = {-1, -1};
+        if(pipe(control_pipe) != 0)
+            throw std::runtime_error{"plain-fork control pipe creation failed"};
+
+        auto pid = fork();
+        if(pid == 0)
+        {
+            close(control_pipe[1]);
+            signal(SIGINT, SIG_IGN);
+
+            char       command  = 0;
+            const auto received = read(control_pipe[0], &command, sizeof(command));
+            close(control_pipe[0]);
+
+            const bool valid = profiler_is_disabled_in_child() &&
+                               received == static_cast<ssize_t>(sizeof(command)) && command == 'q';
+            _exit(valid ? 0 : 78);
+        }
+        if(pid < 0)
+        {
+            close(control_pipe[0]);
+            close(control_pipe[1]);
+            throw std::runtime_error{"plain-fork child creation failed"};
+        }
+
+        close(control_pipe[0]);
+        children.emplace_back(waiting_child{pid, control_pipe[1]});
+    }
+
+    return children;
+}
+
+void
+release_waiting_plain_fork_children(std::vector<waiting_child>& children)
+{
+    for(auto& child : children)
+    {
+        const char command = 'q';
+        if(write(child.write_fd, &command, sizeof(command)) !=
+           static_cast<ssize_t>(sizeof(command)))
+            throw std::runtime_error{"plain-fork child release failed"};
+        close(child.write_fd);
+        child.write_fd = -1;
+    }
+
+    for(const auto& child : children)
+    {
+        int status = 0;
+        if(waitpid(child.pid, &status, 0) != child.pid || !WIFEXITED(status) ||
+           WEXITSTATUS(status) != 0)
+            throw std::runtime_error{"plain-fork child contract check failed"};
+    }
+}
 
 template <typename... Args>
 std::string
@@ -144,43 +241,6 @@ run_kernels(const char* label)
     fprintf(stderr, "  %s PID=%d: completed %d iterations\n", label, getpid(), iter);
 }
 
-// Fork child worker for the good case (app handles signals).
-// Child ignores SIGINT and waits for 'q' on pipe from parent.
-void
-fork_child_worker(int id, int pipe_rd)
-{
-    signal(SIGINT, SIG_IGN);
-    fcntl(pipe_rd, F_SETFL, O_NONBLOCK);
-
-    float* d_buf = nullptr;
-    HIP_CHECK(hipMalloc(&d_buf, 1024 * sizeof(float)));
-
-    roctxRangePush(str_join("child_", id, "_pid_", getpid()).c_str());
-
-    int iter = 0;
-    while(true)
-    {
-        roctxRangePush(str_join("child_", id, "_iter_", iter).c_str());
-
-        test_kernel<<<4, 256>>>(d_buf, 1024);
-
-        roctxRangePop();
-        iter++;
-
-        char cmd = 0;
-        if(read(pipe_rd, &cmd, 1) == 1 && cmd == 'q') break;
-        usleep(10000);
-    }
-
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipFree(d_buf));
-    roctxRangePop();
-
-    emit_roctx_marker("exit_marker child fork ppid:%d pid:%d", getppid(), getpid());
-    fprintf(stderr, "  child_%d PID=%d: exiting after %d iters\n", id, getpid(), iter);
-    close(pipe_rd);
-}
-
 // ============================================================================
 // GOOD CASE modes: app handles signals, coordinates shutdown
 // ============================================================================
@@ -207,34 +267,7 @@ mode_good_fork()
 {
     fprintf(stderr, "Mode: good/fork, PID=%d\n", getpid());
 
-    constexpr int NUM_CHILDREN = 2;
-    int           pipes[NUM_CHILDREN][2];
-    pid_t         children[NUM_CHILDREN];
-
-    for(int i = 0; i < NUM_CHILDREN; i++)
-    {
-        if(pipe(pipes[i]) != 0)
-        {
-            for(int j = 0; j < i; j++)
-            {
-                close(pipes[j][0]);
-                close(pipes[j][1]);
-            }
-
-            throw std::runtime_error(
-                std::string("signal-handler-test pipe() failed with error code ") +
-                std::to_string(errno));
-        }
-        pid_t pid = fork();
-        if(pid == 0)
-        {
-            close(pipes[i][1]);
-            fork_child_worker(i, pipes[i][0]);
-            exit(0);
-        }
-        children[i] = pid;
-        close(pipes[i][0]);
-    }
+    auto children = start_waiting_plain_fork_children(2);
 
     struct sigaction sa = {};
     sa.sa_handler       = sigint_handler;
@@ -242,15 +275,7 @@ mode_good_fork()
     sigaction(SIGINT, &sa, nullptr);
 
     run_kernels("parent");
-
-    fprintf(stderr, "Parent: sending shutdown to children\n");
-    for(int i = 0; i < NUM_CHILDREN; i++)
-    {
-        write(pipes[i][1], "q", 1);
-        close(pipes[i][1]);
-    }
-    for(int i = 0; i < NUM_CHILDREN; i++)
-        waitpid(children[i], nullptr, 0);
+    release_waiting_plain_fork_children(children);
 
     emit_roctx_marker("exit_marker parent fork ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
@@ -345,25 +370,10 @@ mode_bad_fork()
 {
     fprintf(stderr, "Mode: bad/fork, PID=%d (no signal handler)\n", getpid());
 
-    constexpr int NUM_CHILDREN = 2;
-    pid_t         children[NUM_CHILDREN];
-
-    for(int i = 0; i < NUM_CHILDREN; i++)
-    {
-        pid_t pid = fork();
-        if(pid == 0)
-        {
-            run_kernels(str_join("child_", i).c_str());
-            emit_roctx_marker("exit_marker child fork ppid:%d pid:%d", getppid(), getpid());
-            exit(0);
-        }
-        children[i] = pid;
-    }
+    auto children = start_waiting_plain_fork_children(2);
+    release_waiting_plain_fork_children(children);
 
     run_kernels("parent");
-
-    for(int i = 0; i < NUM_CHILDREN; i++)
-        waitpid(children[i], nullptr, 0);
 
     emit_roctx_marker("exit_marker parent fork ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: exit\n", getpid());

@@ -77,11 +77,12 @@ private:
 
 using task_group_t = TaskGroup;
 
-// True in a fork child: g_fork_generation != 0. The inline interposition pool
-// and its gate are never legitimately recreated in a child, so a nonzero
-// generation is conclusive (see D4/D6).
+// True in a child that inherited this SDK without exec. Inherited workers are unavailable.
 bool
 fork_stale();
+
+void
+register_fork_handler();
 
 void notify_pre_internal_thread_create(rocprofiler_runtime_library_t);
 void notify_post_internal_thread_create(rocprofiler_runtime_library_t);

@@ -108,6 +108,8 @@ typedef struct rocprofiler_tool_configure_result_t
  *
  * @param [out] status 0 indicates rocprofiler has not been initialized (i.e. configured), 1
  * indicates rocprofiler has been initialized, -1 indicates rocprofiler is currently initializing.
+ * A child that continues after `fork()` without `exec()` reports 0; its inherited session cannot
+ * be initialized or attached again.
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Returned unconditionally
  */
@@ -118,7 +120,8 @@ rocprofiler_is_initialized(int* status) ROCPROFILER_API ROCPROFILER_NONNULL(1);
  * @brief Query rocprofiler finalization status.
  *
  * @param [out] status 0 indicates rocprofiler has not been finalized, 1 indicates rocprofiler has
- * been finalized, -1 indicates rocprofiler is currently finalizing.
+ * been finalized, -1 indicates rocprofiler is currently finalizing. A child that continues after
+ * `fork()` without `exec()` reports 1 because its inherited session is unavailable.
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Returned unconditionally
  */

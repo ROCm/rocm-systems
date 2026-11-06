@@ -71,10 +71,13 @@ def count_markers_in_json(data):
     return count
 
 
-def test_output_files_exist(output_dir):
-    """JSON output files must exist."""
+def test_expected_output_count(output_dir, process_type):
+    """Plain-fork children emit no output; exec/spawn children start fresh sessions."""
     files = find_json_files(output_dir)
-    assert len(files) > 0, f"No JSON output files found in {output_dir}"
+    expected = 3 if process_type in ("fork-exec", "spawn") else 1
+    assert (
+        len(files) == expected
+    ), f"Expected {expected} JSON output file(s) for {process_type}, found {files}"
 
 
 def test_json_is_valid(output_dir):

@@ -39,6 +39,7 @@ set(BASE_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 #                                       (e.g. --app-signal-handler / --no-app-signal-handler)
 #   ROCPROFV3_EXTRA_FLAGS <flags...>  : inserted into the rocprofv3 command
 #                                       (e.g. --disable-signal-handlers)
+#   ENVIRONMENT <vars...>             : additional environment variables for execution
 #
 # Registers the {cleanup, execute, validate} triad for one scenario:
 #   cleanup wipes the output dir (FIXTURES_SETUP <name>-clean)
@@ -48,7 +49,7 @@ set(BASE_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 function(add_signal_handler_test NAME)
     cmake_parse_arguments(
         arg "NO_TIMEOUT_SIGNAL" "PROCESS_TYPE;VALIDATE_EXPECT;PASS_REGEX"
-        "APP_EXTRA_FLAGS;ROCPROFV3_EXTRA_FLAGS" ${ARGN})
+        "APP_EXTRA_FLAGS;ROCPROFV3_EXTRA_FLAGS;ENVIRONMENT" ${ARGN})
 
     set(_name "app-${NAME}-${arg_PROCESS_TYPE}")
     set(_subdir "${NAME}-${arg_PROCESS_TYPE}")
@@ -78,6 +79,7 @@ function(add_signal_handler_test NAME)
         DEPENDS signal-handler-test
         TIMEOUT ${CTEST_TIMEOUT}
         LABELS "integration-tests;signal-handler"
+        ENVIRONMENT ${arg_ENVIRONMENT}
         PRELOAD "${PRELOAD_ENV}"
         PASS_REGULAR_EXPRESSION "${arg_PASS_REGEX}"
         FIXTURES_REQUIRED ${_name}-clean
@@ -174,6 +176,17 @@ add_signal_handler_test(
     VALIDATE_EXPECT flushed-markers
     PASS_REGEX "clean exit"
     APP_EXTRA_FLAGS --app-signal-handler)
+
+# The first test-only child callback invokes the signal path before rocprofv3's child
+# latch runs. The owner-PID check must prevent the inherited handler from notifying the
+# parent's eventfd.
+add_signal_handler_test(
+    atfork-child-signal
+    PROCESS_TYPE fork
+    VALIDATE_EXPECT flushed-markers
+    PASS_REGEX "clean exit"
+    APP_EXTRA_FLAGS --app-signal-handler
+    ENVIRONMENT "ROCPROF_INTERNAL_TEST_SIGNAL_BEFORE_FORK_CHILD_LATCH=1")
 
 # PR# 6717 regression: profiled app leaves a long-lived child alive at NORMAL exit.
 #
