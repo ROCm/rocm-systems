@@ -7,6 +7,17 @@ on:
     paths:
       - "emulation/rocjitsu/**"
       - ".github/workflows/rocjitsu-benchmarks.yml"
+  pull_request:
+    branches:
+      - "develop"
+    types:
+      - labeled
+      - synchronize
+    paths:
+      - "emulation/rocjitsu/**"
+      - ".github/workflows/rocjitsu-benchmarks.yml"
+      - ".github/scripts/rocjitsu_benchmark_report.js"
+      - ".github/scripts/tests/test_rocjitsu_benchmark_report.js"
   workflow_dispatch:
     inputs:
       source_commit:
@@ -50,6 +61,17 @@ env:
 jobs:
   source-metadata:
     name: Resolve benchmark source metadata
+    # Opt in only same-repository PRs, as in rocjitsu-fuzz.yml.
+    if: >-
+      github.repository == 'ROCm/rocm-systems' && (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name == github.repository &&
+         (github.event.action != 'labeled' ||
+          github.event.label.name == 'rocjitsu-presubmit-benchmarks') &&
+         contains(github.event.pull_request.labels.*.name, 'rocjitsu-presubmit-benchmarks'))
+      )
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -80,6 +102,11 @@ jobs:
             if [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
               BENCHMARK_BRANCH="${GITHUB_REF#refs/heads/}"
               BENCHMARK_SHA="${REQUESTED_SOURCE_COMMIT}"
+            elif [[ "${GITHUB_EVENT_NAME}" == pull_request ]]; then
+              # Measure the event's immutable PR head, not refs/pull/*/merge.
+              BENCHMARK_BRANCH="$(jq -er '.pull_request.head.ref' "${GITHUB_EVENT_PATH}")"
+              BENCHMARK_SHA="$(jq -er '.pull_request.head.sha' "${GITHUB_EVENT_PATH}")"
+              REQUESTED_PULL_REQUEST="$(jq -er '.number' "${GITHUB_EVENT_PATH}")"
             else
               # A push measures its event SHA, never a later develop tip.
               BENCHMARK_BRANCH=develop
@@ -185,6 +212,10 @@ jobs:
   benchmark:
     name: Run performance benchmark
     needs: source-metadata
+    # Replace the queued or running PR benchmark without cancelling completed-run publication.
+    concurrency:
+      group: ${{ github.workflow }}-benchmark-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     env:
       BENCHMARK_SHA: ${{ needs.source-metadata.outputs.source_sha }}
       BENCHMARK_BRANCH: ${{ needs.source-metadata.outputs.source_branch }}
@@ -437,9 +468,11 @@ jobs:
       cancel-in-progress: false
       queue: max
     needs: [source-metadata, benchmark]
-    if: ${{ !cancelled() && needs.benchmark.outputs.ran == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/develop') || (github.event_name == 'workflow_dispatch' && inputs.publish_results == true)) }}
+    if: ${{ !cancelled() && needs.benchmark.outputs.ran == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/develop') || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.publish_results == true)) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      run_id: ${{ steps.publication.outputs.run_id }}
     permissions:
       contents: write
     env:
@@ -496,7 +529,7 @@ jobs:
           mkdir -p "${DIAGNOSTICS_DIR}"
           TRIGGER=
           case "${GITHUB_EVENT_NAME}" in
-            push) TRIGGER=auto ;;
+            push|pull_request) TRIGGER=auto ;;
             workflow_dispatch) TRIGGER=manual ;;
           esac
           jq \
@@ -624,6 +657,10 @@ jobs:
             2>&1 | tee "${DIAGNOSTICS_DIR}/commit.log"
           git push origin "HEAD:refs/heads/${RESULTS_BRANCH}" 2>&1 | tee "${DIAGNOSTICS_DIR}/push.log"
 
+      - name: Export published run ID
+        id: publication
+        run: printf 'run_id=%s\n' "${RUN_ID}" >> "${GITHUB_OUTPUT}"
+
       - name: Upload publication diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -633,3 +670,56 @@ jobs:
           path: ${{ runner.temp }}/dashboard-publication-diagnostics
           if-no-files-found: warn
           retention-days: 14
+
+  report:
+    name: Report benchmark results on the PR
+    needs: [source-metadata, benchmark, publish]
+    # Report job-level cancellation too; a blanket !cancelled() would suppress it.
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      needs.source-metadata.result == 'success' &&
+      needs.benchmark.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    # Serialize comment lookup/create/update so concurrent attempts cannot create duplicates.
+    concurrency:
+      group: rocjitsu-benchmark-report-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - name: Checkout reporting helper
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: reporting-source
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Comment on the pull request
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          BENCHMARK_RESULT: ${{ needs.benchmark.result }}
+          PUBLICATION_RESULT: ${{ needs.publish.result }}
+          PUBLISHED_RUN_ID: ${{ needs.publish.outputs.run_id }}
+          BENCHMARK_RUN_ATTEMPT: ${{ needs.benchmark.outputs.run_attempt }}
+          SOURCE_SHA: ${{ needs.source-metadata.outputs.source_sha }}
+        with:
+          script: |
+            const { reportBenchmark } = require(
+              `${process.env.GITHUB_WORKSPACE}/reporting-source/.github/scripts/rocjitsu_benchmark_report.js`
+            );
+            await reportBenchmark({
+              github,
+              context,
+              benchmarkResult: process.env.BENCHMARK_RESULT,
+              publishResult: process.env.PUBLICATION_RESULT,
+              runNumber: process.env.GITHUB_RUN_NUMBER,
+              runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+              publishedRunId: process.env.PUBLISHED_RUN_ID,
+              benchmarkAttempt: process.env.BENCHMARK_RUN_ATTEMPT,
+              headSha: process.env.SOURCE_SHA,
+            });
