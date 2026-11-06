@@ -43,9 +43,9 @@ __global__ void WorkGroupPrimitiveTest(
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
   // Opt into the TDM for work-group put/get on gfx1250 builds with
-  // USE_TDM; rocshmem_query_tdm_lds_bytes() returns 0 otherwise
+  // USE_TDM; rocshmem_query_lds_stage_bytes() returns 0 otherwise
   extern __shared__ uint8_t tdm_lds[];
-  rocshmem_set_tdm_lds(tdm_lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   // Calculate start index for each work group
   // Each workgroup owns `batch` contiguous slots of `size` bytes.
@@ -102,7 +102,7 @@ WorkGroupPrimitiveTester::WorkGroupPrimitiveTester(TesterArguments args)
   char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
   char *remote = (char *) alloc_test_buffer(buff_size);
   CHECK_HIP(hipMalloc(&grid_psync, sizeof(int)));
-  size_t lds_bytes = rocshmem_query_tdm_lds_bytes();
+  size_t lds_bytes = rocshmem_query_lds_stage_bytes();
 
   int max_co_resident_wgs_per_cu = 0;
   CHECK_HIP(hipOccupancyMaxActiveBlocksPerMultiprocessor(
@@ -168,8 +168,8 @@ void WorkGroupPrimitiveTester::resetBuffers(size_t size) {
 void WorkGroupPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
                                            int loop, size_t size) {
   // Dynamic LDS for the TDM fast path (0 when not built with USE_TDM); see
-  // rocshmem_query_tdm_lds_bytes() / rocshmem_set_tdm_lds() in the kernel.
-  size_t shared_bytes = rocshmem_query_tdm_lds_bytes();
+  // rocshmem_query_lds_stage_bytes() / rocshmem_set_lds_stage() in the kernel.
+  size_t shared_bytes = rocshmem_query_lds_stage_bytes();
 
   switch (_type) {
     case WGGetTestType:

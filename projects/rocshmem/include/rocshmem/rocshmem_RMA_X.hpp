@@ -233,10 +233,12 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_wg(
  * granularity. However, all threads in a wave must participate in the
  * call using the same parameters.
  *
- * On gfx1250 built with USE_TDM, this call uses the faster TDM (Tensor
- * Data Mover) copy path if the workgroup registered an LDS buffer via
- * rocshmem_set_tdm_lds(), split evenly across the block's waves;
- * otherwise it falls back to the plain copy path.
+ * Built with USE_LDS_STAGE (or USE_TDM), this call uses the faster
+ * LDS-staged async copy path (TDM on gfx1250, the portable
+ * global_load_async_lds backend on gfx90a/gfx942/gfx950) if the
+ * workgroup registered an LDS buffer via rocshmem_set_lds_stage(),
+ * split evenly across the block's waves; otherwise it falls back to
+ * the plain copy path.
  *
  * @param[in] ctx    Context with which to perform this operation.
  * @param[in] dest   Destination address. Must be an address on the symmetric
@@ -264,10 +266,12 @@ __device__ ATTR_NO_INLINE void rocshmem_putmem_wave(void *dest,
  * (WG) granularity. However, all threads in the workgroup must participate in
  * the call using the same parameters.
  *
- * On gfx1250 built with USE_TDM, this call uses the faster TDM (Tensor Data
- * Mover) copy path if this workgroup registered an LDS buffer via
- * rocshmem_set_tdm_lds() (see also rocshmem_query_tdm_lds_bytes()).
- * Without registration, it falls back to the plain copy path.
+ * Built with USE_LDS_STAGE (or USE_TDM), this call uses the faster
+ * LDS-staged async copy path (TDM on gfx1250, the portable
+ * global_load_async_lds backend on gfx90a/gfx942/gfx950) if this
+ * workgroup registered an LDS buffer via rocshmem_set_lds_stage() (see
+ * also rocshmem_query_lds_stage_bytes()). Without registration, it
+ * falls back to the plain copy path.
  *
  * @param[in] ctx    Context with which to perform this operation.
  * @param[in] dest   Destination address. Must be an address on the symmetric
@@ -491,10 +495,12 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_get_wg(
  * granularity. However, all threads in a the wave must participate in the
  * call using the same parameters
  *
- * On gfx1250 built with USE_TDM, this call uses the faster TDM (Tensor
- * Data Mover) copy path if the workgroup registered an LDS buffer via
- * rocshmem_set_tdm_lds(), split evenly across the block's waves;
- * otherwise it falls back to the plain copy path.
+ * Built with USE_LDS_STAGE (or USE_TDM), this call uses the faster
+ * LDS-staged async copy path (TDM on gfx1250, the portable
+ * global_load_async_lds backend on gfx90a/gfx942/gfx950) if the
+ * workgroup registered an LDS buffer via rocshmem_set_lds_stage(),
+ * split evenly across the block's waves; otherwise it falls back to
+ * the plain copy path.
  *
  * @param[in] ctx     Context with which to perform this operation.
  * @param[in] dest    Destination address. Must be an address on the symmetric
@@ -521,10 +527,12 @@ __device__ ATTR_NO_INLINE void rocshmem_getmem_wave(void *dest,
  * (WG) granularity. However, all threads in the workgroup must participate
  * in the call using the same parameters
  *
- * On gfx1250 built with USE_TDM, this call uses the faster TDM (Tensor Data
- * Mover) copy path if this workgroup registered an LDS buffer via
- * rocshmem_set_tdm_lds() (see also rocshmem_query_tdm_lds_bytes()).
- * Without registration, it falls back to the plain copy path.
+ * Built with USE_LDS_STAGE (or USE_TDM), this call uses the faster
+ * LDS-staged async copy path (TDM on gfx1250, the portable
+ * global_load_async_lds backend on gfx90a/gfx942/gfx950) if this
+ * workgroup registered an LDS buffer via rocshmem_set_lds_stage() (see
+ * also rocshmem_query_lds_stage_bytes()). Without registration, it
+ * falls back to the plain copy path.
  *
  * @param[in] ctx     Context with which to perform this operation.
  * @param[in] dest    Destination address. Must be an address on the symmetric

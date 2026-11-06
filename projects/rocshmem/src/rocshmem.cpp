@@ -706,9 +706,9 @@ __host__ void rocshmem_query_thread(int *provided) {
   *provided = ROCSHMEM_THREAD_MULTIPLE;
 }
 
-__host__ size_t rocshmem_query_tdm_lds_bytes() {
-#if defined(USE_TDM)
-  return tdm::lds_bytes_for_tile(backend->tdm_resolved_tile_bytes);
+__host__ size_t rocshmem_query_lds_stage_bytes() {
+#if defined(USE_LDS_STAGE)
+  return lds_stage::lds_bytes_for_tile(backend->lds_stage_resolved_tile_bytes);
 #else
   return 0;
 #endif

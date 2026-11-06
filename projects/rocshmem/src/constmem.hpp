@@ -45,9 +45,9 @@ struct constmem_t {
   size_t ipc_sdma_threshold;  // SDMA_THRESHOLD_DISABLED = SDMA disabled
   uintptr_t heap_base;  // Local symmetric heap base
   size_t heap_size;     // Local symmetric heap size in bytes
-  uint32_t tdm_tile_bytes;
-  size_t tdm_put_threshold;  // put transfers smaller than this skip the TDM path
-  size_t tdm_get_threshold;  // get transfers smaller than this skip the TDM path
+  uint32_t lds_stage_tile_bytes;
+  size_t lds_stage_put_threshold;  // put transfers smaller than this skip the LDS-staged path
+  size_t lds_stage_get_threshold;  // get transfers smaller than this skip the LDS-staged path
 } __attribute__ ((aligned (16)));
 
 extern __constant__ constmem_t constmem;

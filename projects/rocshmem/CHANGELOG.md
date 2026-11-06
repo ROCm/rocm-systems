@@ -1,6 +1,21 @@
 # Changelog for rocSHMEM
 ## Unreleased - rocSHMEM 3.9.0 for ROCm 10.3
 
+### Added
+* Merged the TDM (Tensor Data Mover, gfx1250-only) LDS-staged IPC copy path with a new
+  portable LDS-staged async copy backend (`global_load_async_lds`-class instructions on
+  gfx90a/gfx942/gfx950) into a single mechanism, selected automatically per compiled arch.
+  * New primary build option `USE_LDS_STAGE` (auto-selects TDM on gfx1250 or the async
+    backend elsewhere). `USE_TDM` is kept as a legacy flag: it now implies
+    `USE_LDS_STAGE` but restricts it to the TDM backend only, so existing `-DUSE_TDM=ON`
+    builds behave exactly as before.
+  * Public API renamed (TDM never shipped in a tagged release, so this is a straight
+    rename, not a deprecation): `rocshmem_set_tdm_lds()` -> `rocshmem_set_lds_stage()`,
+    `rocshmem_query_tdm_lds_bytes()` -> `rocshmem_query_lds_stage_bytes()`.
+  * Env vars renamed: `ROCSHMEM_TDM_TILE_BYTES`/`ROCSHMEM_TDM_PUT_THRESHOLD`/
+    `ROCSHMEM_TDM_GET_THRESHOLD` -> `ROCSHMEM_LDS_STAGE_TILE_BYTES`/
+    `ROCSHMEM_LDS_STAGE_PUT_THRESHOLD`/`ROCSHMEM_LDS_STAGE_GET_THRESHOLD`.
+
 ## rocSHMEM 3.8.0 for ROCm 10.2
 
 ### Fixed

@@ -1,7 +1,9 @@
+#include <string_view>
+
 #include "constmem.hpp"
 #include "backend_bc.hpp"
 #include "envvar.hpp"
-#include "tdm.hpp"
+#include "lds_stage.hpp"
 #if defined(USE_GDA)
 #include "gda/backend_gda.hpp"
 #endif
@@ -13,6 +15,23 @@
 namespace rocshmem {
 
 extern Backend *backend;
+
+#if defined(USE_LDS_STAGE)
+namespace {
+// Host-side runtime arch check: the 65535-element tile cap below is a
+// property of the TDM descriptor's 16-bit tile_dim0 field (see
+// lds_stage.hpp's tdm::make_group1), not a generic LDS limit. This code
+// compiles once for whatever device happens to be attached, so it can't be
+// resolved with a device-arch #if the way lds_stage.hpp's own macros are --
+// it has to ask the actual device at runtime.
+bool device_uses_tdm_encoding(int device_id) {
+  hipDeviceProp_t prop{};
+  CHECK_HIP(hipGetDeviceProperties(&prop, device_id));
+  std::string_view arch(prop.gcnArchName);
+  return arch.rfind("gfx1250", 0) == 0;  // matches gfx1250, gfx1250:xnack+, -strict, etc.
+}
+}  // namespace
+#endif  // USE_LDS_STAGE
 
 void init_constant_memory(void) {
   std::string envstr;
@@ -52,11 +71,11 @@ void init_constant_memory(void) {
       reinterpret_cast<uintptr_t>(backend->heap.get_local_heap_base());
   constmem_values.heap_size = backend->heap.get_size();
 
-  constmem_values.tdm_tile_bytes = envvar::tdm::tile_bytes;
-  constmem_values.tdm_put_threshold = envvar::tdm::put_threshold;
-  constmem_values.tdm_get_threshold = envvar::tdm::get_threshold;
+  constmem_values.lds_stage_tile_bytes = envvar::lds_stage::tile_bytes;
+  constmem_values.lds_stage_put_threshold = envvar::lds_stage::put_threshold;
+  constmem_values.lds_stage_get_threshold = envvar::lds_stage::get_threshold;
 
-#if defined(USE_TDM)
+#if defined(USE_LDS_STAGE)
   {
     int device_id = 0;
     CHECK_HIP(hipGetDevice(&device_id));
@@ -65,9 +84,13 @@ void init_constant_memory(void) {
                                      hipDeviceAttributeMaxSharedMemoryPerBlock,
                                      device_id));
 
-    // tile_dim0 is a 16-bit field (see tdm.hpp GROUP1), so the tile can
-    // never encode more than 65535 elements regardless of available LDS.
-    constexpr uint32_t element_bytes = 1u << tdm::FlatCopyElementLog2;
+    constexpr uint32_t element_bytes = 1u << lds_stage::FlatCopyElementLog2;
+    // tile_dim0 is a 16-bit field in the TDM descriptor (see lds_stage.hpp
+    // tdm::make_group1), so a TDM tile can never encode more than 65535
+    // elements regardless of available LDS. The async backend has no such
+    // descriptor field -- its tile size is purely a software loop-chunking
+    // parameter -- so only apply the cap on a device that actually uses TDM.
+    const bool uses_tdm = device_uses_tdm_encoding(device_id);
     constexpr uint32_t max_encodable_tile_bytes = 65535u * element_bytes;
     // Reserve 16KB for rocSHMEM's own (small) static __shared__ usage plus
     // headroom for the caller's, then halve the rest for double buffering.
@@ -79,46 +102,55 @@ void init_constant_memory(void) {
     const uint32_t avail_tile_bytes =
         static_cast<uint32_t>((avail_bytes / 2) / element_bytes) * element_bytes;
     const uint32_t fittable_tile_bytes =
-        (avail_tile_bytes < max_encodable_tile_bytes) ? avail_tile_bytes
-                                                       : max_encodable_tile_bytes;
+        (!uses_tdm || avail_tile_bytes < max_encodable_tile_bytes) ? avail_tile_bytes
+                                                                    : max_encodable_tile_bytes;
 
-    if (constmem_values.tdm_tile_bytes == 0) {
-      constmem_values.tdm_tile_bytes = fittable_tile_bytes;
-      if (constmem_values.tdm_tile_bytes == 0) {
+    if (constmem_values.lds_stage_tile_bytes == 0) {
+      constmem_values.lds_stage_tile_bytes = fittable_tile_bytes;
+      if (constmem_values.lds_stage_tile_bytes == 0) {
         LOG_WARN(
-            "Not enough LDS on this device (%d bytes/block) to auto-size a TDM "
-            "tile after reserving %zu bytes; TDM disabled. Set "
-            "ROCSHMEM_TDM_TILE_BYTES explicitly to override.",
+            "Not enough LDS on this device (%d bytes/block) to auto-size an "
+            "LDS-staged copy tile after reserving %zu bytes; the fast path is "
+            "disabled. Set ROCSHMEM_LDS_STAGE_TILE_BYTES explicitly to override.",
             max_shared_mem_per_block, reserve_bytes);
       } else {
-        LOG_INFO("TDM tile size auto-sized to %u bytes (device max shared mem/block: %d)",
-                 constmem_values.tdm_tile_bytes, max_shared_mem_per_block);
+        LOG_INFO("LDS-staged copy tile size auto-sized to %u bytes (device max shared mem/block: %d)",
+                 constmem_values.lds_stage_tile_bytes, max_shared_mem_per_block);
       }
     } else {
-      const uint32_t aligned_tile_bytes =
-          constmem_values.tdm_tile_bytes - (constmem_values.tdm_tile_bytes % element_bytes);
-      if (aligned_tile_bytes != constmem_values.tdm_tile_bytes) {
+      const uint32_t aligned_tile_bytes = constmem_values.lds_stage_tile_bytes -
+                                           (constmem_values.lds_stage_tile_bytes % element_bytes);
+      if (aligned_tile_bytes != constmem_values.lds_stage_tile_bytes) {
         LOG_WARN(
-            "ROCSHMEM_TDM_TILE_BYTES=%u is not a multiple of the %u-byte TDM "
+            "ROCSHMEM_LDS_STAGE_TILE_BYTES=%u is not a multiple of the %u-byte "
             "element size; rounding down to %u bytes.",
-            constmem_values.tdm_tile_bytes, element_bytes, aligned_tile_bytes);
-        constmem_values.tdm_tile_bytes = aligned_tile_bytes;
+            constmem_values.lds_stage_tile_bytes, element_bytes, aligned_tile_bytes);
+        constmem_values.lds_stage_tile_bytes = aligned_tile_bytes;
       }
-      const size_t tdm_lds_bytes = tdm::lds_bytes_for_tile(constmem_values.tdm_tile_bytes);
-      if (tdm_lds_bytes > static_cast<size_t>(max_shared_mem_per_block)) {
-        // Don't abort: fall back to whatever tile size does fit (possibly 0,
-        // which disables TDM for this run) rather than taking the job down.
+      if (uses_tdm && constmem_values.lds_stage_tile_bytes > max_encodable_tile_bytes) {
         LOG_WARN(
-            "ROCSHMEM_TDM_TILE_BYTES=%u needs %zu bytes of LDS (double-buffered) "
+            "ROCSHMEM_LDS_STAGE_TILE_BYTES=%u exceeds the TDM descriptor's "
+            "65535-element tile_dim0 field (%u bytes); falling back to %u bytes.",
+            constmem_values.lds_stage_tile_bytes, max_encodable_tile_bytes, fittable_tile_bytes);
+        constmem_values.lds_stage_tile_bytes = fittable_tile_bytes;
+      }
+      const size_t lds_stage_bytes =
+          lds_stage::lds_bytes_for_tile(constmem_values.lds_stage_tile_bytes);
+      if (lds_stage_bytes > static_cast<size_t>(max_shared_mem_per_block)) {
+        // Don't abort: fall back to whatever tile size does fit (possibly 0,
+        // which disables the fast path for this run) rather than taking the
+        // job down.
+        LOG_WARN(
+            "ROCSHMEM_LDS_STAGE_TILE_BYTES=%u needs %zu bytes of LDS (double-buffered) "
             "but this device only has %d bytes of shared memory per block; "
             "falling back to %u bytes.",
-            constmem_values.tdm_tile_bytes, tdm_lds_bytes, max_shared_mem_per_block,
+            constmem_values.lds_stage_tile_bytes, lds_stage_bytes, max_shared_mem_per_block,
             fittable_tile_bytes);
-        constmem_values.tdm_tile_bytes = fittable_tile_bytes;
+        constmem_values.lds_stage_tile_bytes = fittable_tile_bytes;
       }
     }
   }
-  backend->tdm_resolved_tile_bytes = constmem_values.tdm_tile_bytes;
+  backend->lds_stage_resolved_tile_bytes = constmem_values.lds_stage_tile_bytes;
 #endif
 
   constmem_values.backend_type = backend->get_type();

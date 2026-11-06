@@ -39,7 +39,7 @@
 #include "bootstrap/bootstrap.hpp"
 #include "atomic.hpp"
 #include "sdma_policy.hpp"
-#include "tdm_policy.hpp"
+#include "lds_stage_policy.hpp"
 
 namespace rocshmem {
 
@@ -267,12 +267,12 @@ class IpcOnImpl {
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wg(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
-    memcpy_wg_tdm<Kind>(dst, src, size);
+    memcpy_wg_lds_stage<Kind>(dst, src, size);
   }
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wave(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
-    memcpy_wave_tdm<Kind>(dst, src, size);
+    memcpy_wave_lds_stage<Kind>(dst, src, size);
   }
 
   template <atomic::memory_scope scope = atomic::memory_scope::system,
@@ -434,7 +434,7 @@ class IpcSdmaImpl : public IpcOnImpl {
       }
       return;
     }
-    memcpy_wg_tdm<Kind>(dst, src, size);
+    memcpy_wg_lds_stage<Kind>(dst, src, size);
   }
 
   template <MemcpyKind Kind = MemcpyKind::Put>
@@ -455,7 +455,7 @@ class IpcSdmaImpl : public IpcOnImpl {
       }
       return;
     }
-    memcpy_wave_tdm<Kind>(dst, src, size);
+    memcpy_wave_lds_stage<Kind>(dst, src, size);
   }
 
   template <atomic::memory_scope scope = atomic::memory_scope::system,
