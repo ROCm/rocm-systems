@@ -12,8 +12,11 @@
 #include "utils/macros.hpp"
 #include "utils/options.hpp"
 #include "comgrctx.hpp"
+#include "device/codeobject/msgpack.hpp"
 
+#include <algorithm>
 #include <array>
+#include <charconv>
 #include <map>
 #include <string>
 #include <sstream>
@@ -30,366 +33,127 @@ static constexpr clk_value_type_t ClkValueMapType[6][6] = {
     {T_DOUBLE, T_DOUBLE2, T_DOUBLE3, T_DOUBLE4, T_DOUBLE8, T_DOUBLE16},
 };
 
-// ================================================================================================
-amd_comgr_status_t getMetaBuf(const amd_comgr_metadata_node_t meta,
-                   std::string* str) {
-  size_t size = 0;
-  amd_comgr_status_t status = amd::Comgr::get_metadata_string(meta, &size, NULL);
+// The kernel metadata is the msgpack map of one amdhsa.kernels entry, read in place from the
+// code object (Program::createKernelMetadataMap). Field handling follows comgr's
+// iterate_map_metadata, which the runtime used before: comgr reported every scalar as text
+// (integers in decimal, booleans as "1"/"0") and ignored the callback's status, so an unknown
+// field or a value that can't be used is ignored; only malformed msgpack fails the kernel.
+// Values are read without allocating.
 
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    str->resize(size-1);    // minus one to discount the null character
-    status = amd::Comgr::get_metadata_string(meta, &size, &((*str)[0]));
+namespace {
+
+//! A scalar metadata value: a string (a view into the note) or an integer or boolean (1/0)
+struct MetaValue {
+  std::string_view str;  //!< String value; empty for a number
+  uint64_t num = 0;      //!< Integer or boolean value
+  bool isNum = false;    //!< The value is an integer or a boolean
+
+  //! The integer value; a string is read as atoi read its text (leading digits, else 0)
+  int toInt() const {
+    if (isNum) return static_cast<int>(num);
+    int value = 0;
+    std::from_chars(str.data(), str.data() + str.size(), value);
+    return value;
   }
 
-  return status;
+  //! True for 1 or "1", as the text comparison with "1" was
+  bool isOne() const { return isNum ? (num == 1) : (str == "1"); }
+};
+
+}  // namespace
+
+// ================================================================================================
+//! Reads a scalar value. A map, an array or another type is skipped and @p scalar is false.
+//! @returns false only if the metadata is malformed.
+static bool readMetaValue(codeobject::MsgPackReader& reader, MetaValue& value, bool& scalar) {
+  bool flag = false;
+  scalar = true;
+  if (reader.readString(&value.str)) {
+    return true;
+  }
+  value.isNum = true;
+  if (reader.readUint(&value.num)) {
+    return true;
+  }
+  if (reader.readBool(&flag)) {
+    value.num = flag ? 1 : 0;
+    return true;
+  }
+  scalar = false;
+  return reader.skip();
 }
 
 // ================================================================================================
-bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& retValue) {
-  amd_comgr_metadata_node_t isaMeta;
+//! Reads an array of 3 integers (reqd_workgroup_size, workgroup_size_hint, cluster_dims).
+//! Any other value is skipped and @p found is false. @returns false only if malformed.
+static bool readMetaDim3(codeobject::MsgPackReader& reader, std::array<size_t, 3>& dims,
+                         bool& found) {
+  found = false;
+  codeobject::MsgPackReader array = reader;
+  uint32_t count = 0;
+  if (!array.readArraySize(&count) || count != 3) {
+    return reader.skip();
+  }
+  reader = array;
+  for (size_t i = 0; i < 3; ++i) {
+    MetaValue value;
+    bool scalar = false;
+    if (!readMetaValue(reader, value, scalar)) {
+      return false;
+    }
+    dims[i] = scalar ? value.toInt() : 0;
+  }
+  found = true;
+  return true;
+}
 
-  amd_comgr_status_t status = amd::Comgr::get_isa_metadata(isa.c_str(), &isaMeta);
+// ================================================================================================
+//! Applies one field of an .args entry to @p lcArg; the reader is at the field's value.
+//! @returns false only if the metadata is malformed.
+static bool populateArgsV3(std::string_view key, codeobject::MsgPackReader& reader,
+                           amd::KernelParameterDescriptor* lcArg) {
+  ArgField itArgField = amd::Kernel::FindValue<ArgField>(amd::Kernel::kArgFieldMapV3, key);
+  if (itArgField == ArgField::MaxSize) {
+    return reader.skip();
+  }
 
-  if (status != AMD_COMGR_STATUS_SUCCESS) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_INIT, "getIsaMeta(%s) failed!", isa.c_str());
+  // get the value of the argument field
+  MetaValue value;
+  bool scalar = false;
+  if (!readMetaValue(reader, value, scalar)) {
     return false;
   }
-
-  amd_comgr_metadata_node_t valMeta;
-  size_t size = 0;
-  status = amd::Comgr::metadata_lookup(isaMeta, key, &valMeta);
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    status = amd::Comgr::get_metadata_string(valMeta, &size, NULL);
+  if (!scalar) {
+    return true;
   }
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    retValue.resize(size - 1);
-    status = amd::Comgr::get_metadata_string(valMeta, &size, &(retValue[0]));
-  }
-
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    status = amd::Comgr::destroy_metadata(valMeta);
-  }
-  amd::Comgr::destroy_metadata(isaMeta);
-  return (status == AMD_COMGR_STATUS_SUCCESS) ? true : false;
-}
-
-// ================================================================================================
-static amd_comgr_status_t populateArgs(const amd_comgr_metadata_node_t key,
-                                       const amd_comgr_metadata_node_t value, void* data) {
-  amd_comgr_status_t status;
-  amd_comgr_metadata_kind_t kind;
-  std::string buf;
-
-  // get the key of the argument field
-  size_t size = 0;
-  status = amd::Comgr::get_metadata_kind(key, &kind);
-  if (kind == AMD_COMGR_METADATA_KIND_STRING && status == AMD_COMGR_STATUS_SUCCESS) {
-    status = getMetaBuf(key, &buf);
-  }
-
-  if (status != AMD_COMGR_STATUS_SUCCESS) {
-    return AMD_COMGR_STATUS_ERROR;
-  }
-
-  ArgField itArgField = amd::Kernel::FindValue<ArgField>(amd::Kernel::kArgFieldMap, buf);
-  if (itArgField == ArgField::MaxSize) {
-    return AMD_COMGR_STATUS_ERROR;
-  }
-
-  // get the value of the argument field
-  status = getMetaBuf(value, &buf);
-
-  amd::KernelParameterDescriptor* lcArg = static_cast<amd::KernelParameterDescriptor*>(data);
 
   switch (itArgField) {
     case ArgField::Name:
-      lcArg->name_ = buf;
+      lcArg->name_.assign(value.str);
       break;
     case ArgField::TypeName:
-      lcArg->typeName_ = buf;
+      lcArg->typeName_.assign(value.str);
       break;
     case ArgField::Size:
-      lcArg->size_ = atoi(buf.c_str());
-      break;
-    case ArgField::Align:
-      lcArg->alignment_ = atoi(buf.c_str());
-      break;
-    case ArgField::ValueKind: {
-      amd::KernelParameterDescriptor::Desc itValueKind =
-          amd::Kernel::FindValue<amd::KernelParameterDescriptor::Desc>(amd::Kernel::kArgValueKind,
-                                                                       buf);
-      if (itValueKind == amd::KernelParameterDescriptor::Desc::MaxSize) {
-        lcArg->info_.hidden_ = true;
-        return AMD_COMGR_STATUS_ERROR;
-      }
-      lcArg->info_.oclObject_ = itValueKind;
-      switch (lcArg->info_.oclObject_) {
-        case amd::KernelParameterDescriptor::MemoryObject:
-          if (buf.compare("DynamicSharedPointer") == 0) {
-            lcArg->info_.shared_ = true;
-          }
-          break;
-        case amd::KernelParameterDescriptor::HiddenGlobalOffsetX:
-        case amd::KernelParameterDescriptor::HiddenGlobalOffsetY:
-        case amd::KernelParameterDescriptor::HiddenGlobalOffsetZ:
-        case amd::KernelParameterDescriptor::HiddenPrintfBuffer:
-        case amd::KernelParameterDescriptor::HiddenHostcallBuffer:
-        case amd::KernelParameterDescriptor::HiddenDefaultQueue:
-        case amd::KernelParameterDescriptor::HiddenCompletionAction:
-        case amd::KernelParameterDescriptor::HiddenMultiGridSync:
-        case amd::KernelParameterDescriptor::HiddenDynamicLdsSize:
-        case amd::KernelParameterDescriptor::HiddenNone:
-          lcArg->info_.hidden_ = true;
-          break;
-      }
-    } break;
-    case ArgField::PointeeAlign:
-      lcArg->info_.arrayIndex_ = atoi(buf.c_str());
-      break;
-    case ArgField::AddrSpaceQual: {
-      cl_int itAddrSpaceQual = amd::Kernel::FindValue(amd::Kernel::kArgAddrSpaceQual, buf);
-      if (itAddrSpaceQual == static_cast<cl_int>(0)) {
-        return AMD_COMGR_STATUS_ERROR;
-      }
-      lcArg->addressQualifier_ = itAddrSpaceQual;
-    } break;
-    case ArgField::AccQual: {
-      cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQual, buf);
-      if (itAccQual == static_cast<cl_int>(0)) {
-        return AMD_COMGR_STATUS_ERROR;
-      }
-      lcArg->accessQualifier_ = itAccQual;
-      lcArg->info_.readOnly_ =
-          (lcArg->accessQualifier_ == CL_KERNEL_ARG_ACCESS_READ_ONLY) ? true : false;
-    } break;
-    case ArgField::ActualAccQual: {
-      cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQual, buf);
-      if (itAccQual == static_cast<cl_int>(0)) {
-        return AMD_COMGR_STATUS_ERROR;
-      }
-      // lcArg->mActualAccQual = itAccQual->second;
-    } break;
-    case ArgField::IsConst:
-      lcArg->typeQualifier_ |= (buf.compare("true") == 0) ? CL_KERNEL_ARG_TYPE_CONST : 0;
-      break;
-    case ArgField::IsRestrict:
-      lcArg->typeQualifier_ |= (buf.compare("true") == 0) ? CL_KERNEL_ARG_TYPE_RESTRICT : 0;
-      break;
-    case ArgField::IsVolatile:
-      lcArg->typeQualifier_ |= (buf.compare("true") == 0) ? CL_KERNEL_ARG_TYPE_VOLATILE : 0;
-      break;
-    case ArgField::IsPipe:
-      lcArg->typeQualifier_ |= (buf.compare("true") == 0) ? CL_KERNEL_ARG_TYPE_PIPE : 0;
-      break;
-    default:
-      return AMD_COMGR_STATUS_ERROR;
-  }
-  return AMD_COMGR_STATUS_SUCCESS;
-}
-
-static amd_comgr_status_t populateAttrs(const amd_comgr_metadata_node_t key,
-                                        const amd_comgr_metadata_node_t value, void* data) {
-  amd_comgr_status_t status;
-  amd_comgr_metadata_kind_t kind;
-  size_t size = 0;
-  std::string buf;
-
-  // get the key of the argument field
-  status = amd::Comgr::get_metadata_kind(key, &kind);
-  if (kind == AMD_COMGR_METADATA_KIND_STRING && status == AMD_COMGR_STATUS_SUCCESS) {
-    status = getMetaBuf(key, &buf);
-  }
-
-  if (status != AMD_COMGR_STATUS_SUCCESS) {
-    return AMD_COMGR_STATUS_ERROR;
-  }
-
-  AttrField itAttrField = amd::Kernel::FindValue<AttrField>(amd::Kernel::kAttrFieldMap, buf);
-  if (itAttrField == AttrField::MaxSize) {
-    return AMD_COMGR_STATUS_ERROR;
-  }
-
-  device::Kernel* kernel = static_cast<device::Kernel*>(data);
-  switch (itAttrField) {
-    case AttrField::ReqdWorkGroupSize: {
-      status = amd::Comgr::get_metadata_list_size(value, &size);
-      if (size == 3 && status == AMD_COMGR_STATUS_SUCCESS) {
-        std::array<size_t, 3> wrkSize;
-        for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
-          amd_comgr_metadata_node_t workgroupSize;
-          status = amd::Comgr::index_list_metadata(value, i, &workgroupSize);
-
-          if (status == AMD_COMGR_STATUS_SUCCESS &&
-              getMetaBuf(workgroupSize, &buf) == AMD_COMGR_STATUS_SUCCESS) {
-            wrkSize[i] = atoi(buf.c_str());
-          }
-          amd::Comgr::destroy_metadata(workgroupSize);
-        }
-        if (!wrkSize.empty()) {
-          kernel->setReqdWorkGroupSize(wrkSize[0], wrkSize[1], wrkSize[2]);
-        }
-      }
-    } break;
-    case AttrField::WorkGroupSizeHint: {
-      status = amd::Comgr::get_metadata_list_size(value, &size);
-      if (status == AMD_COMGR_STATUS_SUCCESS && size == 3) {
-        std::array<size_t, 3> hintSize;
-        for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
-          amd_comgr_metadata_node_t workgroupSizeHint;
-          status = amd::Comgr::index_list_metadata(value, i, &workgroupSizeHint);
-
-          if (status == AMD_COMGR_STATUS_SUCCESS &&
-              getMetaBuf(workgroupSizeHint, &buf) == AMD_COMGR_STATUS_SUCCESS) {
-            hintSize[i] = atoi(buf.c_str());
-          }
-          amd::Comgr::destroy_metadata(workgroupSizeHint);
-        }
-        if (!hintSize.empty()) {
-          kernel->setWorkGroupSizeHint(hintSize[0], hintSize[1], hintSize[2]);
-        }
-      }
-    } break;
-    case AttrField::VecTypeHint:
-      if (getMetaBuf(value, &buf) == AMD_COMGR_STATUS_SUCCESS) {
-        kernel->setVecTypeHint(buf);
-      }
-      break;
-    case AttrField::RuntimeHandle:
-      if (getMetaBuf(value, &buf) == AMD_COMGR_STATUS_SUCCESS) {
-        kernel->setRuntimeHandle(buf);
-      }
-      break;
-    default:
-      return AMD_COMGR_STATUS_ERROR;
-  }
-
-  return status;
-}
-
-static amd_comgr_status_t populateCodeProps(const amd_comgr_metadata_node_t key,
-                                            const amd_comgr_metadata_node_t value, void* data) {
-  amd_comgr_status_t status;
-  amd_comgr_metadata_kind_t kind;
-  std::string buf;
-
-  // get the key of the argument field
-  status = amd::Comgr::get_metadata_kind(key, &kind);
-  if (kind == AMD_COMGR_METADATA_KIND_STRING && status == AMD_COMGR_STATUS_SUCCESS) {
-    status = getMetaBuf(key, &buf);
-  }
-
-  if (status != AMD_COMGR_STATUS_SUCCESS) {
-    return AMD_COMGR_STATUS_ERROR;
-  }
-
-  CodePropField itCodePropField =
-      amd::Kernel::FindValue<CodePropField>(amd::Kernel::kCodePropFieldMap, buf);
-  if (itCodePropField == CodePropField::MaxSize) {
-    return AMD_COMGR_STATUS_ERROR;
-  }
-
-  // get the value of the argument field
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    status = getMetaBuf(value, &buf);
-  }
-
-  device::Kernel* kernel = static_cast<device::Kernel*>(data);
-  switch (itCodePropField) {
-    case CodePropField::KernargSegmentSize:
-      kernel->SetKernargSegmentByteSize(atoi(buf.c_str()));
-      break;
-    case CodePropField::GroupSegmentFixedSize:
-      kernel->SetWorkgroupGroupSegmentByteSize(atoi(buf.c_str()));
-      break;
-    case CodePropField::PrivateSegmentFixedSize:
-      kernel->SetWorkitemPrivateSegmentByteSize(atoi(buf.c_str()));
-      break;
-    case CodePropField::KernargSegmentAlign:
-      kernel->SetKernargSegmentAlignment(atoi(buf.c_str()));
-      break;
-    case CodePropField::WavefrontSize:
-      kernel->workGroupInfo()->wavefrontSize_ = atoi(buf.c_str());
-      break;
-    case CodePropField::NumSGPRs:
-      kernel->workGroupInfo()->usedSGPRs_ = atoi(buf.c_str());
-      break;
-    case CodePropField::NumVGPRs:
-      kernel->workGroupInfo()->usedVGPRs_ = atoi(buf.c_str());
-      break;
-    case CodePropField::MaxFlatWorkGroupSize:
-      kernel->workGroupInfo()->size_ = atoi(buf.c_str());
-      break;
-    case CodePropField::IsDynamicCallStack: {
-      size_t mIsDynamicCallStack = (buf.compare("true") == 0);
-    } break;
-    case CodePropField::IsXNACKEnabled: {
-      size_t mIsXNACKEnabled = (buf.compare("true") == 0);
-    } break;
-    case CodePropField::NumSpilledSGPRs: {
-      size_t mNumSpilledSGPRs = atoi(buf.c_str());
-    } break;
-    case CodePropField::NumSpilledVGPRs: {
-      size_t mNumSpilledVGPRs = atoi(buf.c_str());
-    } break;
-    default:
-      return AMD_COMGR_STATUS_ERROR;
-  }
-  return AMD_COMGR_STATUS_SUCCESS;
-}
-
-static amd_comgr_status_t populateArgsV3(const amd_comgr_metadata_node_t key,
-                                         const amd_comgr_metadata_node_t value, void* data) {
-  amd_comgr_status_t status;
-  amd_comgr_metadata_kind_t kind;
-  std::string buf;
-
-  // get the key of the argument field
-  size_t size = 0;
-  status = amd::Comgr::get_metadata_kind(key, &kind);
-  if (kind == AMD_COMGR_METADATA_KIND_STRING && status == AMD_COMGR_STATUS_SUCCESS) {
-    status = getMetaBuf(key, &buf);
-  }
-
-  if (status != AMD_COMGR_STATUS_SUCCESS) {
-    return AMD_COMGR_STATUS_ERROR;
-  }
-
-  ArgField itArgField = amd::Kernel::FindValue<ArgField>(amd::Kernel::kArgFieldMapV3, buf);
-  if (itArgField == ArgField::MaxSize) {
-    return AMD_COMGR_STATUS_ERROR;
-  }
-
-  // get the value of the argument field
-  status = getMetaBuf(value, &buf);
-
-  amd::KernelParameterDescriptor* lcArg = static_cast<amd::KernelParameterDescriptor*>(data);
-
-  switch (itArgField) {
-    case ArgField::Name:
-      lcArg->name_ = buf;
-      break;
-    case ArgField::TypeName:
-      lcArg->typeName_ = buf;
-      break;
-    case ArgField::Size:
-      lcArg->size_ = atoi(buf.c_str());
+      lcArg->size_ = value.toInt();
       break;
     case ArgField::Offset:
-      lcArg->offset_ = atoi(buf.c_str());
+      lcArg->offset_ = value.toInt();
       break;
     case ArgField::ValueKind: {
       amd::KernelParameterDescriptor::Desc itArgValue =
           amd::Kernel::FindValue<amd::KernelParameterDescriptor::Desc>(amd::Kernel::kArgValueKindV3,
-                                                                       buf);
+                                                                       value.str);
       if (itArgValue == amd::KernelParameterDescriptor::MaxSize) {
-        LogPrintfError("Unknown Kernel arg metadata: %s", buf.c_str());
+        LogPrintfError("Unknown Kernel arg metadata: %.*s", static_cast<int>(value.str.size()),
+                       value.str.data());
         LogError("This may be due to running HIP app that requires a new HIP runtime version");
         LogError("Please update the display driver");
-        return AMD_COMGR_STATUS_ERROR;
+        return true;
       }
       lcArg->info_.oclObject_ = itArgValue;
       if (lcArg->info_.oclObject_ == amd::KernelParameterDescriptor::MemoryObject) {
-        if (buf.compare("dynamic_shared_pointer") == 0) {
+        if (value.str == "dynamic_shared_pointer") {
           lcArg->info_.shared_ = true;
         }
       } else if ((lcArg->info_.oclObject_ >= amd::KernelParameterDescriptor::HiddenNone) &&
@@ -398,19 +162,19 @@ static amd_comgr_status_t populateArgsV3(const amd_comgr_metadata_node_t key,
       }
     } break;
     case ArgField::PointeeAlign:
-      lcArg->info_.arrayIndex_ = atoi(buf.c_str());
+      lcArg->info_.arrayIndex_ = value.toInt();
       break;
     case ArgField::AddrSpaceQual: {
-      cl_int itAddrSpaceQual = amd::Kernel::FindValue(amd::Kernel::kArgAddrSpaceQualV3, buf);
+      cl_int itAddrSpaceQual = amd::Kernel::FindValue(amd::Kernel::kArgAddrSpaceQualV3, value.str);
       if (itAddrSpaceQual == static_cast<cl_int>(0)) {
-        return AMD_COMGR_STATUS_ERROR;
+        return true;
       }
       lcArg->addressQualifier_ = itAddrSpaceQual;
     } break;
     case ArgField::AccQual: {
-      cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQualV3, buf);
+      cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQualV3, value.str);
       if (itAccQual == static_cast<cl_int>(0)) {
-        return AMD_COMGR_STATUS_ERROR;
+        return true;
       }
       lcArg->accessQualifier_ = itAccQual;
       if (!lcArg->info_.isReadOnlyByCompiler) {
@@ -419,175 +183,119 @@ static amd_comgr_status_t populateArgsV3(const amd_comgr_metadata_node_t key,
       }
     } break;
     case ArgField::ActualAccQual: {
-      cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQualV3, buf);
+      cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQualV3, value.str);
       if (itAccQual == static_cast<cl_int>(0)) {
-        return AMD_COMGR_STATUS_ERROR;
+        return true;
       }
       lcArg->info_.isReadOnlyByCompiler = true;
       lcArg->info_.readOnly_ = (itAccQual == CL_KERNEL_ARG_ACCESS_READ_ONLY) ? true : false;
     } break;
     case ArgField::IsConst:
-      lcArg->typeQualifier_ |= (buf.compare("1") == 0) ? CL_KERNEL_ARG_TYPE_CONST : 0;
+      lcArg->typeQualifier_ |= value.isOne() ? CL_KERNEL_ARG_TYPE_CONST : 0;
       break;
     case ArgField::IsRestrict:
-      lcArg->typeQualifier_ |= (buf.compare("1") == 0) ? CL_KERNEL_ARG_TYPE_RESTRICT : 0;
+      lcArg->typeQualifier_ |= value.isOne() ? CL_KERNEL_ARG_TYPE_RESTRICT : 0;
       break;
     case ArgField::IsVolatile:
-      lcArg->typeQualifier_ |= (buf.compare("1") == 0) ? CL_KERNEL_ARG_TYPE_VOLATILE : 0;
+      lcArg->typeQualifier_ |= value.isOne() ? CL_KERNEL_ARG_TYPE_VOLATILE : 0;
       break;
     case ArgField::IsPipe:
-      lcArg->typeQualifier_ |= (buf.compare("1") == 0) ? CL_KERNEL_ARG_TYPE_PIPE : 0;
+      lcArg->typeQualifier_ |= value.isOne() ? CL_KERNEL_ARG_TYPE_PIPE : 0;
       break;
     default:
-      return AMD_COMGR_STATUS_ERROR;
+      break;
   }
-  return AMD_COMGR_STATUS_SUCCESS;
+  return true;
 }
 
-static amd_comgr_status_t populateKernelMetaV3(const amd_comgr_metadata_node_t key,
-                                               const amd_comgr_metadata_node_t value, void* data) {
-  amd_comgr_status_t status;
-  amd_comgr_metadata_kind_t kind;
-  size_t size = 0;
-  std::string buf;
-  // get the key of the argument field
-  status = amd::Comgr::get_metadata_kind(key, &kind);
-  if (kind == AMD_COMGR_METADATA_KIND_STRING && status == AMD_COMGR_STATUS_SUCCESS) {
-    status = getMetaBuf(key, &buf);
-  }
-
-  if (status != AMD_COMGR_STATUS_SUCCESS) {
-    return AMD_COMGR_STATUS_ERROR;
-  }
-
+// ================================================================================================
+//! Applies one field of the kernel's map to @p kernel; the reader is at the field's value.
+//! @returns false only if the metadata is malformed.
+static bool populateKernelMetaV3(std::string_view key, codeobject::MsgPackReader& reader,
+                                 device::Kernel* kernel) {
   KernelField itKernelField =
-      amd::Kernel::FindValue<KernelField>(amd::Kernel::kKernelFieldMapV3, buf);
+      amd::Kernel::FindValue<KernelField>(amd::Kernel::kKernelFieldMapV3, key);
   if (itKernelField == KernelField::MaxSize) {
-    return AMD_COMGR_STATUS_ERROR;
+    return reader.skip();
   }
 
-  if (itKernelField != KernelField::ReqdWorkGroupSize &&
-      itKernelField != KernelField::WorkGroupSizeHint &&
-      itKernelField != KernelField::ClusterDims) {
-       status = getMetaBuf(value, &buf);
+  std::array<size_t, 3> dims = {};
+  MetaValue value;
+  bool found = false;
+  if (itKernelField == KernelField::ReqdWorkGroupSize ||
+      itKernelField == KernelField::WorkGroupSizeHint ||
+      itKernelField == KernelField::ClusterDims) {
+    if (!readMetaDim3(reader, dims, found)) {
+      return false;
+    }
+  } else if (!readMetaValue(reader, value, found)) {
+    return false;
   }
-  if (status != AMD_COMGR_STATUS_SUCCESS) {
-    return AMD_COMGR_STATUS_ERROR;
+  if (!found) {
+    return true;
   }
 
-  device::Kernel* kernel = static_cast<device::Kernel*>(data);
   switch (itKernelField) {
     case KernelField::ReqdWorkGroupSize:
-      status = amd::Comgr::get_metadata_list_size(value, &size);
-      if (size == 3 && status == AMD_COMGR_STATUS_SUCCESS) {
-        std::array<size_t, 3> wrkSize;
-        for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
-          amd_comgr_metadata_node_t workgroupSize;
-          status = amd::Comgr::index_list_metadata(value, i, &workgroupSize);
-
-          if (status == AMD_COMGR_STATUS_SUCCESS &&
-              getMetaBuf(workgroupSize, &buf) == AMD_COMGR_STATUS_SUCCESS) {
-            wrkSize[i] = atoi(buf.c_str());
-          }
-          amd::Comgr::destroy_metadata(workgroupSize);
-        }
-        if (!wrkSize.empty()) {
-          kernel->setReqdWorkGroupSize(wrkSize[0], wrkSize[1], wrkSize[2]);
-        }
-      }
+      kernel->setReqdWorkGroupSize(dims[0], dims[1], dims[2]);
       break;
     case KernelField::WorkGroupSizeHint:
-      status = amd::Comgr::get_metadata_list_size(value, &size);
-      if (status == AMD_COMGR_STATUS_SUCCESS && size == 3) {
-        std::array<size_t, 3> hintSize;
-        for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
-          amd_comgr_metadata_node_t workgroupSizeHint;
-          status = amd::Comgr::index_list_metadata(value, i, &workgroupSizeHint);
-
-          if (status == AMD_COMGR_STATUS_SUCCESS &&
-              getMetaBuf(workgroupSizeHint, &buf) == AMD_COMGR_STATUS_SUCCESS) {
-            hintSize[i] = atoi(buf.c_str());
-          }
-          amd::Comgr::destroy_metadata(workgroupSizeHint);
-        }
-        if (!hintSize.empty()) {
-          kernel->setWorkGroupSizeHint(hintSize[0], hintSize[1], hintSize[2]);
-        }
-      }
+      kernel->setWorkGroupSizeHint(dims[0], dims[1], dims[2]);
       break;
     case KernelField::ClusterDims:
-      status = amd::Comgr::get_metadata_list_size(value, &size);
-      if (size == 3 && status == AMD_COMGR_STATUS_SUCCESS) {
-        std::vector<size_t> clusterSize;
-        for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
-          amd_comgr_metadata_node_t clusterSizeNode;
-          status = amd::Comgr::index_list_metadata(value, i, &clusterSizeNode);
-          if (status == AMD_COMGR_STATUS_SUCCESS &&
-              getMetaBuf(clusterSizeNode, &buf) == AMD_COMGR_STATUS_SUCCESS) {
-            clusterSize.push_back(atoi(buf.c_str()));
-          }
-          amd::Comgr::destroy_metadata(clusterSizeNode);
-        }
-        if (!clusterSize.empty()) {
-          kernel->setClusterSize(clusterSize[0], clusterSize[1], clusterSize[2]);
-        }
-      }
+      kernel->setClusterSize(dims[0], dims[1], dims[2]);
       break;
     case KernelField::VecTypeHint:
-      kernel->setVecTypeHint(buf);
+      kernel->setVecTypeHint(value.str);
       break;
     case KernelField::DeviceEnqueueSymbol:
-      kernel->setRuntimeHandle(buf);
+      kernel->setRuntimeHandle(value.str);
       break;
     case KernelField::KernargSegmentSize:
-      kernel->SetKernargSegmentByteSize(atoi(buf.c_str()));
+      kernel->SetKernargSegmentByteSize(value.toInt());
       break;
     case KernelField::GroupSegmentFixedSize:
-      kernel->SetWorkgroupGroupSegmentByteSize(atoi(buf.c_str()));
+      kernel->SetWorkgroupGroupSegmentByteSize(value.toInt());
       break;
     case KernelField::PrivateSegmentFixedSize:
-      kernel->SetWorkitemPrivateSegmentByteSize(atoi(buf.c_str()));
+      kernel->SetWorkitemPrivateSegmentByteSize(value.toInt());
       break;
     case KernelField::KernargSegmentAlign:
-      kernel->SetKernargSegmentAlignment(atoi(buf.c_str()));
+      kernel->SetKernargSegmentAlignment(value.toInt());
       break;
     case KernelField::WavefrontSize:
-      kernel->workGroupInfo()->wavefrontSize_ = atoi(buf.c_str());
+      kernel->workGroupInfo()->wavefrontSize_ = value.toInt();
       break;
     case KernelField::NumSGPRs:
-      kernel->workGroupInfo()->usedSGPRs_ = atoi(buf.c_str());
+      kernel->workGroupInfo()->usedSGPRs_ = value.toInt();
       break;
     case KernelField::NumVGPRs:
-      kernel->workGroupInfo()->usedVGPRs_ = atoi(buf.c_str());
+      kernel->workGroupInfo()->usedVGPRs_ = value.toInt();
       break;
     case KernelField::MaxFlatWorkGroupSize:
-      kernel->workGroupInfo()->size_ = atoi(buf.c_str());
+      kernel->workGroupInfo()->size_ = value.toInt();
       break;
-    case KernelField::NumSpilledSGPRs: {
-      size_t mNumSpilledSGPRs = atoi(buf.c_str());
-    } break;
-    case KernelField::NumSpilledVGPRs: {
-      size_t mNumSpilledVGPRs = atoi(buf.c_str());
-    } break;
+    case KernelField::NumSpilledSGPRs:
+    case KernelField::NumSpilledVGPRs:
+      break;
     case KernelField::SymbolName:
-      kernel->SetSymbolName(buf);
+      kernel->SetSymbolName(value.str);
       break;
     case KernelField::Kind:
-      kernel->SetKernelKind(buf);
+      kernel->SetKernelKind(value.str);
       break;
     case KernelField::WgpMode:
       // The compiler currently serializes this boolean field as "0"/"1" instead
       // of "false"/"true"; consider both "true" and "1" truthy values.
-      kernel->SetWGPMode(buf.compare("true") == 0 || buf.compare("1") == 0);
+      kernel->SetWGPMode(value.isOne() || value.str == "true");
       break;
     case KernelField::UniformWrokGroupSize:
-      kernel->setUniformWorkGroupSize(buf.compare("1") == 0);
+      kernel->setUniformWorkGroupSize(value.isOne());
       break;
     default:
-      return AMD_COMGR_STATUS_ERROR;
+      break;
   }
-
-  return status;
+  return true;
 }
 
 // ================================================================================================
@@ -784,8 +492,8 @@ void Kernel::FindLocalWorkSize(size_t workDim, const amd::NDRange& gblWorkSize,
 
 // ================================================================================================
 bool Kernel::GetAttrCodePropMetadata() {
-  amd_comgr_metadata_node_t kernelMetaNode;
-  if (!prog().getKernelMetadata(name(), &kernelMetaNode)) {
+  std::string_view kernelMeta;
+  if (!prog().getKernelMetadata(name(), &kernelMeta)) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
              "Cannot get program kernel metadata for %s \n", name().c_str());
     return false;
@@ -796,155 +504,62 @@ bool Kernel::GetAttrCodePropMetadata() {
   workGroupInfo_.availableSGPRs_ = 104;
   workGroupInfo_.availableVGPRs_ = 256;
 
-  // extract the attribute metadata if there is any
-  amd_comgr_status_t status = AMD_COMGR_STATUS_SUCCESS;
-
-  switch (codeObjectVer()) {
-    case 2: {
-      amd_comgr_metadata_node_t symbolName;
-      status = amd::Comgr::metadata_lookup(kernelMetaNode, "SymbolName", &symbolName);
-      if (status == AMD_COMGR_STATUS_SUCCESS) {
-        std::string name;
-        status = getMetaBuf(symbolName, &name);
-        amd::Comgr::destroy_metadata(symbolName);
-        SetSymbolName(name);
-      }
-
-      amd_comgr_metadata_node_t attrMeta;
-      if (status == AMD_COMGR_STATUS_SUCCESS) {
-        if (amd::Comgr::metadata_lookup(kernelMetaNode, "Attrs", &attrMeta) ==
-            AMD_COMGR_STATUS_SUCCESS) {
-          status =
-              amd::Comgr::iterate_map_metadata(attrMeta, populateAttrs, static_cast<void*>(this));
-          amd::Comgr::destroy_metadata(attrMeta);
-        }
-      }
-
-      // extract the code properties metadata
-      amd_comgr_metadata_node_t codePropsMeta;
-      if (status == AMD_COMGR_STATUS_SUCCESS) {
-        status = amd::Comgr::metadata_lookup(kernelMetaNode, "CodeProps", &codePropsMeta);
-      }
-
-      if (status == AMD_COMGR_STATUS_SUCCESS) {
-        status = amd::Comgr::iterate_map_metadata(codePropsMeta, populateCodeProps,
-                                                  static_cast<void*>(this));
-        amd::Comgr::destroy_metadata(codePropsMeta);
-      }
-    } break;
-    default:
-      status = amd::Comgr::iterate_map_metadata(kernelMetaNode, populateKernelMetaV3,
-                                                static_cast<void*>(this));
+  // One pass over the kernel's map, in place: .args and the other fields. The signature is
+  // built after it, since attributes it reports (e.g. reqd_workgroup_size) can follow .args.
+  // A kernel without .args has no arguments.
+  codeobject::MsgPackReader reader(kernelMeta.data(), kernelMeta.size());
+  device::Kernel::parameters_t params;
+  device::Kernel::parameters_t hiddenParams;
+  uint32_t numFields = 0;
+  bool ok = reader.readMapSize(&numFields);
+  for (uint32_t i = 0; ok && i < numFields; ++i) {
+    std::string_view key;
+    ok = reader.readString(&key);
+    if (!ok) {
+      break;
+    }
+    if (key == ".args") {
+      ok = InitParameters(reader, params, hiddenParams);
+    } else {
+      ok = populateKernelMetaV3(key, reader, this);
+    }
   }
 
-  if (status != AMD_COMGR_STATUS_SUCCESS) {
-    LogError("Comgr Api failed with Status: \n");
+  if (!ok) {
+    LogPrintfError("Malformed code object metadata for kernel %s", name().c_str());
     return false;
   }
 
-  InitParameters(kernelMetaNode);
-
+  // Save the number of OCL arguments
+  uint32_t numParams = params.size();
+  // Append the hidden arguments to the OCL arguments
+  params.insert(params.end(), hiddenParams.begin(), hiddenParams.end());
+  createSignature(params, numParams, amd::KernelSignature::ABIVersion_LC);
   return true;
 }
 
-bool Kernel::GetPrintfStr(std::vector<std::string>* printfStr) {
-  const amd_comgr_metadata_node_t programMD = prog().metadata();
-  amd_comgr_metadata_node_t printfMeta;
-
-  amd_comgr_status_t status = amd::Comgr::metadata_lookup(
-      programMD, codeObjectVer() == 2 ? "Printf" : "amdhsa.printf", &printfMeta);
-  if (status != AMD_COMGR_STATUS_SUCCESS) {
-    return true;  // printf string metadata is not provided so just exit
+bool Kernel::InitParameters(codeobject::MsgPackReader& reader, parameters_t& params,
+                            parameters_t& hiddenParams) {
+  uint32_t argsSize = 0;
+  if (!reader.readArraySize(&argsSize)) {
+    return false;
   }
 
-  // handle the printf string
-  size_t printfSize = 0;
-  status = amd::Comgr::get_metadata_list_size(printfMeta, &printfSize);
-
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    size_t originalSize = printfStr->size();
-    printfStr->reserve(originalSize + printfSize);
-    for (size_t i = 0; i < printfSize; ++i) {
-      amd_comgr_metadata_node_t str;
-      status = amd::Comgr::index_list_metadata(printfMeta, i, &str);
-
-      std::string buf;
-      if (status == AMD_COMGR_STATUS_SUCCESS) {
-        status = getMetaBuf(str, &buf);
-        amd::Comgr::destroy_metadata(str);
-      }
-
-      if (status != AMD_COMGR_STATUS_SUCCESS) {
-        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COMGR,
-                "Comgr API failed with status: %d \n", status);
-        amd::Comgr::destroy_metadata(printfMeta);
-        printfStr->resize(originalSize);  // restore the original size of the vector
-        return false;
-      }
-
-      printfStr->push_back(std::move(buf));
-    }
-  }
-
-  amd::Comgr::destroy_metadata(printfMeta);
-  return (status == AMD_COMGR_STATUS_SUCCESS);
-}
-
-void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
-  // Iterate through the arguments and insert into parameterList
-  device::Kernel::parameters_t params;
-  device::Kernel::parameters_t hiddenParams;
+  // The count comes from the note: never reserve more than the note can hold
+  params.reserve(std::min<size_t>(argsSize, reader.remaining()));
   hiddenParams.reserve(amd::KernelParameterDescriptor::Desc::MaxSize);
-  size_t offset = 0;
 
-  amd_comgr_metadata_node_t argsMeta;
-  bool hsaArgsMeta = false;
-  size_t argsSize = 0;
-
-  amd_comgr_status_t status =
-      amd::Comgr::metadata_lookup(kernelMD, (codeObjectVer() == 2) ? "Args" : ".args", &argsMeta);
-  // Assume no arguments if lookup fails.
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    hsaArgsMeta = true;
-    status = amd::Comgr::get_metadata_list_size(argsMeta, &argsSize);
-  }
-
-  params.reserve(argsSize);
-
-  for (size_t i = 0; i < argsSize; ++i) {
+  for (uint32_t i = 0; i < argsSize; ++i) {
     amd::KernelParameterDescriptor desc = {};
 
-    amd_comgr_metadata_node_t argsNode;
-    amd_comgr_metadata_kind_t kind = AMD_COMGR_METADATA_KIND_NULL;
-    bool hsaArgsNode = false;
-
-    status = amd::Comgr::index_list_metadata(argsMeta, i, &argsNode);
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      hsaArgsNode = true;
-      status = amd::Comgr::get_metadata_kind(argsNode, &kind);
+    uint32_t numFields = 0;
+    bool ok = reader.readMapSize(&numFields);
+    for (uint32_t f = 0; ok && f < numFields; ++f) {
+      std::string_view key;
+      ok = reader.readString(&key) && populateArgsV3(key, reader, &desc);
     }
-    if (kind != AMD_COMGR_METADATA_KIND_MAP) {
-      status = AMD_COMGR_STATUS_ERROR;
-    }
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      void* data = static_cast<void*>(&desc);
-      if (codeObjectVer() == 2) {
-        status = amd::Comgr::iterate_map_metadata(argsNode, populateArgs, data);
-      } else if (codeObjectVer() >= 3) {
-        status = amd::Comgr::iterate_map_metadata(argsNode, populateArgsV3, data);
-      }
-    }
-
-    if (hsaArgsNode) {
-      amd::Comgr::destroy_metadata(argsNode);
-    }
-
-    if (status != AMD_COMGR_STATUS_SUCCESS) {
-      if (hsaArgsMeta) {
-        amd::Comgr::destroy_metadata(argsMeta);
-      }
-      return;
+    if (!ok) {
+      return false;
     }
 
     // COMGR has unclear/undefined order of the fields filling.
@@ -987,35 +602,14 @@ void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
       desc.accessQualifier_ = CL_KERNEL_ARG_ACCESS_NONE;
     }
 
-    size_t size = desc.size_;
-
     // Allocate the hidden arguments, but abstraction layer will skip them
     if (desc.info_.hidden_) {
       if (desc.info_.oclObject_ == amd::KernelParameterDescriptor::HiddenCompletionAction &&
           !amd::IS_HIP) {
         setDynamicParallelFlag(true);
       }
-      if (codeObjectVer() == 2) {
-        desc.offset_ = amd::alignUp(offset, desc.alignment_);
-        offset += size;
-      }
       hiddenParams.push_back(desc);
       continue;
-    }
-
-    // These objects have forced data size to uint64_t
-    if (codeObjectVer() == 2) {
-      if ((desc.info_.oclObject_ == amd::KernelParameterDescriptor::ImageObject) ||
-          (desc.info_.oclObject_ == amd::KernelParameterDescriptor::SamplerObject) ||
-          (desc.info_.oclObject_ == amd::KernelParameterDescriptor::QueueObject)) {
-        offset = amd::alignUp(offset, sizeof(uint64_t));
-        desc.offset_ = offset;
-        offset += sizeof(uint64_t);
-      } else {
-        offset = amd::alignUp(offset, desc.alignment_);
-        desc.offset_ = offset;
-        offset += size;
-      }
     }
 
     params.push_back(desc);
@@ -1027,16 +621,7 @@ void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
       }
     }
   }
-
-  if (hsaArgsMeta) {
-    amd::Comgr::destroy_metadata(argsMeta);
-  }
-
-  // Save the number of OCL arguments
-  uint32_t numParams = params.size();
-  // Append the hidden arguments to the OCL arguments
-  params.insert(params.end(), hiddenParams.begin(), hiddenParams.end());
-  createSignature(params, numParams, amd::KernelSignature::ABIVersion_LC);
+  return true;
 }
 
 // ================================================================================================

@@ -44,6 +44,11 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/appprofile.cpp
   ${ROCCLR_SRC_DIR}/device/blit.cpp
   ${ROCCLR_SRC_DIR}/device/blitcl.cpp
+  ${ROCCLR_SRC_DIR}/device/codeobject/compressed_bundle.cpp
+  ${ROCCLR_SRC_DIR}/device/codeobject/elf_header.cpp
+  ${ROCCLR_SRC_DIR}/device/codeobject/metadata_notes.cpp
+  ${ROCCLR_SRC_DIR}/device/codeobject/msgpack.cpp
+  ${ROCCLR_SRC_DIR}/device/codeobject/offload_bundle.cpp
   ${ROCCLR_SRC_DIR}/device/comgrctx.cpp
   ${ROCCLR_SRC_DIR}/device/devhcmessages.cpp
   ${ROCCLR_SRC_DIR}/device/devhcprintf.cpp
