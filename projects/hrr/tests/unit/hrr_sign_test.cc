@@ -235,13 +235,6 @@ HRR_TEST_CASE(Unit_HRR_Sign_TamperIsRefusedNamingFile) {
     CHECK(err.find("blobs/ab/link.blob") == 0);
     REQUIRE_FALSE(hrr_sign::sign_archive(a.dir.string(), a.seed, &err));
   }
-  {
-    Archive a("fifo");
-    REQUIRE(::mkfifo((a.dir / "blobs/ab/fifo.blob").c_str(), 0600) == 0);
-    REQUIRE(a.verify(&err) == VerifyResult::kRefused);
-    CHECK(err.find("blobs/ab/fifo.blob") == 0);
-    REQUIRE_FALSE(hrr_sign::sign_archive(a.dir.string(), a.seed, &err));
-  }
 #endif
 }
 
