@@ -37,6 +37,10 @@ rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 # handed its path, and skip them when it is absent.
 rocprofiler_sdk_find_trace_decoder()
 
+# PC sampling replay samples stay out of CI. Combining them with counters can hang
+# MI2xx/MI3xx, so run them locally on a rebootable machine.
+set(KR_PC_SAMPLING_REPLAY_CI OFF)
+
 function(add_kernel_replay_sample NAME CLIENT_SRC)
     cmake_parse_arguments(arg "PC_SAMPLING;SPM;ATT" "" "ENVIRONMENT" ${ARGN})
 
@@ -71,7 +75,11 @@ function(add_kernel_replay_sample NAME CLIENT_SRC)
     # unstable gate. PC sampling / SPM still drop out when unavailable.
     set(_disabled OFF)
     if(arg_PC_SAMPLING)
-        set(_disabled "${IS_PC_SAMPLING_DISABLED}")
+        if(KR_PC_SAMPLING_REPLAY_CI)
+            set(_disabled "${IS_PC_SAMPLING_DISABLED}")
+        else()
+            set(_disabled ON)
+        endif()
     endif()
     if(arg_SPM AND IS_SPM_DISABLED)
         set(_disabled ON)

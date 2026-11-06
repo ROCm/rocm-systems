@@ -62,7 +62,7 @@ set_session_active(const session_ptr_t& session, bool active)
 {
     if(!session) return ROCPROFILER_STATUS_SUCCESS;
 
-    const bool requested = active;
+    const bool requested  = active;
     auto       state_lock = std::unique_lock{session->state_mutex};
     for(;;)
     {
@@ -75,8 +75,7 @@ set_session_active(const session_ptr_t& session, bool active)
             // Waiting here deadlocks. An independent caller waits for the real outcome.
             if(session->transition_owner == std::this_thread::get_id())
                 return ROCPROFILER_STATUS_ERROR;
-            session->state_cv.wait(state_lock,
-                                   [&]() { return !session->transition_in_progress; });
+            session->state_cv.wait(state_lock, [&]() { return !session->transition_in_progress; });
             continue;
         }
         if(session->active.load() == effective) return ROCPROFILER_STATUS_SUCCESS;
@@ -90,8 +89,7 @@ set_session_active(const session_ptr_t& session, bool active)
         // tool buffer callback.
         auto       transitioned = false;
         const auto status       = effective ? hsa::pc_sampling_session_start(session.get())
-                                           : hsa::pc_sampling_session_stop(session.get(),
-                                                                           &transitioned);
+                                            : hsa::pc_sampling_session_stop(session.get(), &transitioned);
         if(effective) transitioned = status == ROCPROFILER_STATUS_SUCCESS;
         state_lock.lock();
         if(transitioned) session->active.store(effective);

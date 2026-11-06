@@ -366,7 +366,7 @@ flush_internal_agent_buffers(const PCSAgentSession* agent_session)
         return ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
 
     auto hsa_pcs_handle = agent_session->hsa_pc_sampling;
-    auto flush_ok      = true;
+    auto flush_ok       = true;
     // Explicitly flush ROCr's buffers and sync completed CIDs.
     agent_session->cid_manager->manage_cids_explicit([&]() {
         // TODO: investigate whether the ROCr should maintain an extra buffer
