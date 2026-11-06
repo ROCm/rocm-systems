@@ -2174,8 +2174,6 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
             'USHORT',
             'SSHORT',
             'DWORD',
-            'DWORDX3',
-            'DWORDX4',
         ):
             size, count, signed = _FLAT_DATA_MAP[suffix]
             return InstructionSemantics(
