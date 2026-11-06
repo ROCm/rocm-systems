@@ -106,13 +106,29 @@ Reusable test infrastructure (not RAS-specific) lives in
 - `ScopedRocmSmiDevice` and `ScopedAmdsmiInit`: reusable by any GPU unit test
   needing a fake `rocm_smi::Device` or a no-hardware-discovery `amdsmi_init()`, not
   just this RAS fix.
+- `FakeGpu`: a synthetic GPU registered with amd-smi (rocm_smi device, `AMDSmiDrm`,
+  `AMDSmiGPUDevice` and the registration), used by the RAS and KFD event tests.
+- `ScopedFakeIoctl`: fakes the `ioctl()` calls product code issues, per request
+  code (`fake.RegisterHandler<ArgStruct>(REQ, [](auto& args) { ...; return 0; })`). See
+  "Faking ioctl and libdrm" below.
+- `ScopedFakeKfdEventStream`: built on `ScopedFakeIoctl` and a fake `/dev/kfd`
+  path, so the real `amdsmi_init/set_mask/get/stop_gpu_event_notification()` run
+  without hardware. It starts with an empty event mask, as the kernel does.
+  Examples: `unit/gpu/kfd_event_formats_test.cc` (wraps the stream and a `FakeGpu` in its own `FakeGpuWithKfdEvents` helper) and `unit/system/fake_ioctl_test.cc` (the fake ioctl alone).
 
 The one piece that must live in production code (compiled into
 `libamd_smi`/`amd_smi_static`, since production code calls the getter) stays in
 `amd_smi_test_overrides.h`/`.cc`:
-- The RAS-specific primitive: `smi_amdgpu_sysfs_drm_root()` (getter, called by
-  production code) and `smi_amdgpu_set_sysfs_drm_root_for_testing()` (setter — only
+- The RAS-specific primitive: `amd::smi::test_hooks::SysfsDrmRoot()` (getter, called by
+  production code) and `SetSysfsDrmRoot()` (setter — only
   ever called by the guard). Both intentionally not `amdsmi_`-prefixed.
+- The KFD primitive: `KfdDevicePath()` (called by
+  `rsmi_event_notification_init()`), with `SetKfdDevicePath()` as its setter.
+  `rocm_smi.cc` is also built into the standalone `rocm_smi64` library, so this
+  file is compiled into both libraries (`CMN_SRC_LIST`).
+- Only the call sites tests have needed so far use a hook. Other hardcoded
+  `/dev` and `/sys` paths still use the real ones and need routing through a
+  hook here as tests for them are added.
 
 Each test uses the `FakeSysfsTree` fixture helper to build a real, temporary,
 hardware-inert file tree, and constructs a real `AMDSmiDrm` + `AMDSmiGPUDevice`
@@ -120,6 +136,41 @@ pointing at it. Combined with the layer-1 processor-registration guard and the
 layer-2 sysfs-root guard, a test can call the real, unmodified public
 `amdsmi_get_gpu_total_ecc_count()` directly and observe its actual failure-handling
 behavior — the thing this fix changed — with no real hardware involved.
+
+## Faking ioctl and libdrm
+
+**ioctl** needs no product hook. `amdsmitst` is linked with `-Wl,--wrap=ioctl`
+(`tests/amd_smi_test/CMakeLists.txt`), so the linker rewrites every `ioctl()`
+call in the statically linked library -- C++ and the vendored C sources (ESMI
+HSMP, ualoe) alike -- to a wrapper in `test_fixture_utils.cc`. While a
+`ScopedFakeIoctl` is alive the wrapper hands the request to its handlers; with
+none alive it calls the real `ioctl()`.
+
+To fake another ioctl in a new test:
+1. Register the processor/device as usual (`ScopedProcessorRegistration`, ...).
+2. Create a `ScopedFakeIoctl fake;` and add a handler per request:
+   `fake.RegisterHandler<ArgStruct>(REQ, [](auto& args) { args.field = ...; return 0; });`.
+   Return what the kernel would (0, or -1 with `errno` set) and fill the
+   argument's output fields; `fake.CallCount(REQ)` reports how often it ran. `fake.RegisterFailure(REQ, EPERM)` fails a request with that
+   errno, and `RegisterFakeKfdVersion(fake, major, minor)` answers the KFD version query.
+3. Call the public API and assert on its result.
+
+An unhandled request fails with `ENOTTY` and never reaches a device. Fakes nest
+(an inner one passes what it doesn't handle to the outer one), so independent
+fixtures compose. A handler can keep state in the lambda and can return a real
+fd (`ScopedFakeKfdEventStream` returns one end of a socket pair), so the
+product's later `read`/`write`/`poll` work for real. If the code under test
+first `open()`s a device node, point its path at a placeholder file with a path
+hook above.
+
+Limit: only code linked into the test binary is rewritten. ioctls issued inside
+a shared library are not. libdrm is the main case: amd-smi `dlopen`s
+`libdrm_amdgpu` and resolves each function through
+`AMDSmiLibraryLoader::load_symbol()`, so the right seam there is the libdrm API
+(`amdgpu_query_info`, ...), not the ioctl beneath it. Not built yet; the plan is
+one hook in the loader (when a test resolver is installed, skip the real
+`dlopen` and let it supply function pointers by name) plus a `ScopedFakeLibdrm`
+fixture that registers plain C functions per symbol name.
 
 ## Why this is safe to ship (verified, not assumed)
 

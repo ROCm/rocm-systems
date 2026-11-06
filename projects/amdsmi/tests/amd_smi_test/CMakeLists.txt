@@ -138,6 +138,8 @@ target_link_libraries(
     ${AMDSMINIC_PATH}
     ${FILESYSTEM_LIB}
 )
+# Routes every ioctl() in the statically linked library to ScopedFakeIoctl (test_fixture_utils.h).
+target_link_options(${TEST} PRIVATE -Wl,--wrap=ioctl)
 
 # Install tests
 install(TARGETS ${TEST} DESTINATION ${SHARE_INSTALL_PREFIX}/tests COMPONENT ${TESTS_COMPONENT})
@@ -145,6 +147,14 @@ install(TARGETS ${TEST} DESTINATION ${SHARE_INSTALL_PREFIX}/tests COMPONENT ${TE
 install(
     FILES amdsmitst.exclude detect_asic_filter.sh
     DESTINATION ${SHARE_INSTALL_PREFIX}/tests
+    COMPONENT ${TESTS_COMPONENT}
+)
+
+# Headers the KFD event tests compare with the kernel's, installed next to the test binary so the
+# packaged tests need no source tree (they look in kfd_headers/ first).
+install(
+    FILES unit/gpu/kfd_event_formats.h ${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/kfd_ioctl.h
+    DESTINATION ${SHARE_INSTALL_PREFIX}/tests/kfd_headers
     COMPONENT ${TESTS_COMPONENT}
 )
 

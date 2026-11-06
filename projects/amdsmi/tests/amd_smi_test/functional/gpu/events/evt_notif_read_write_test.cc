@@ -70,8 +70,6 @@ std::vector<uint32_t> ResetTargets(const amdsmi_processor_handle* handles, uint3
   return targets;
 }
 
-bool Verbose() { return GetTestVerbosity() >= TestBase::VERBOSE_STANDARD; }
-
 // The kernel stamps events with the boot-time clock, which includes time spent suspended.
 uint64_t BootTimeNs() {
   timespec ts = {};
@@ -122,7 +120,7 @@ void CheckEventFields(const std::string& message, const std::string& gpu, uint64
   if (MessageField(message, "node", kHexadecimal, &node) && kfd_id != kUnknownKfdId) {
     EXPECT_EQ(node, kfd_id) << "gpu " << gpu << ": node in \"" << message
                             << "\" is not the device's KFD gpu_id";
-    if (Verbose()) {
+    if (IsTestVerbose()) {
       std::cout << "\t\t  node " << node << " (0x" << std::hex << node << std::dec << ")"
                 << (node == kfd_id ? " == " : " != ") << "kfd_id of gpu " << gpu << std::endl;
     }
@@ -132,7 +130,7 @@ void CheckEventFields(const std::string& message, const std::string& gpu, uint64
         << "gpu " << gpu << ": ns in \"" << message << "\" is before this test started";
     EXPECT_LE(ns, window_end_ns) << "gpu " << gpu << ": ns in \"" << message
                                  << "\" is after the read that returned it";
-    if (Verbose()) {
+    if (IsTestVerbose()) {
       const double seconds_after_start =
           (static_cast<double>(ns) - static_cast<double>(window_start_ns)) /
           static_cast<double>(kNanosPerSecond);
@@ -142,7 +140,7 @@ void CheckEventFields(const std::string& message, const std::string& gpu, uint64
   }
   if (MessageField(message, "pid", kDecimal, &pid)) {
     EXPECT_GT(pid, 0u) << "gpu " << gpu << ": pid in \"" << message << "\"";
-    if (Verbose()) {
+    if (IsTestVerbose()) {
       // The kernel reports the pid in the host's PID namespace, so inside a container this
       // can name another process or none.
       std::cout << "\t\t  pid " << pid << ": " << ProcessName(pid)

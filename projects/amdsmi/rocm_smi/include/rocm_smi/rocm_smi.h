@@ -356,7 +356,9 @@ typedef enum {
 #define MAX_EVENT_NOTIFICATION_MSG_SIZE 256
 
 /**
- * Event notification data returned from event notification API
+ * Event notification data returned from event notification API. The message lists the event's
+ * fields as "label: value" pairs. A field the kernel did not send, as older kernels do for some
+ * events, reads "N/A".
  */
 typedef struct {
   uint32_t dv_ind;                                //!< Index of device that corresponds to the event
