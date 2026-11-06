@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import { benchmarkData } from '../../fixtures/publishedData.js';
+import { formatRunTime } from '../../../src/utils/formatters.js';
 import { runSelectionLabel, runSelectionLabelWithBranch } from '../../../src/components/shared/runOptionPresentation.js';
 
 const labels = { candidate: 'Candidate', reference: 'Reference', 'candidate-run': 'Candidate run', 'baseline-run': 'Baseline run' };
@@ -30,7 +31,15 @@ export async function expectRunPicker(page, kind, expected, runs = benchmarkData
   const run = runs.find((item) => item.runId === expected);
   if (!run) throw new Error(`expectRunPicker: ${expected} is not among the given runs; pass { label } or the publication's runs`);
   if (!identityProvedElsewhere) assertLabelIsUnique(kind, run, runs);
-  await expect(runPicker(page, kind)).toHaveValue(labelFor(kind, run));
+  // The browser can use a different timezone from the Node test runner.
+  const browserTime = await page.evaluate((timestamp) => {
+    if (typeof timestamp !== 'string' || !Number.isFinite(Date.parse(timestamp))) return '—';
+    return new Intl.DateTimeFormat(undefined, {
+      year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+      hour12: false, timeZoneName: 'short',
+    }).format(new Date(timestamp));
+  }, run.timestamp);
+  await expect(runPicker(page, kind)).toHaveValue(labelFor(kind, run).replace(formatRunTime(run.timestamp), browserTime));
 }
 
 export const unavailableAttempt = (runId) => ({ label: `Unavailable attempt · ${runId}` });

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -44,8 +45,8 @@ protected:
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 16;
     config.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("pc_fetch", config, &memory, &cache);
-    ASSERT_NE(cu, nullptr);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "pc_fetch", config, &memory, &cache));
     cache.set_gpu_vm(vm.get());
     cu->set_gpu_vm(vm.get());
     wave = cu->dispatch_wf(0, kBranchPc, config.sgprs_per_wf, config.vgprs_per_wf);

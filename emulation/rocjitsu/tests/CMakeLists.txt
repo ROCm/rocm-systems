@@ -751,11 +751,13 @@ endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_add_test_path(rocjitsu_tests PLUGIN_LOADER_FIXTURE_DIR "${PLUGIN_LOADER_FIXTURE_DIR}")
+    rj_add_test_path(rocjitsu_tests PLUGIN_LOADER_RACE_DIR "$<TARGET_FILE_DIR:rocjitsu_plugin_race_so>")
     add_dependencies(
         rocjitsu_tests
         plugin_loader_fixture_good
         plugin_loader_fixture_missing
         plugin_loader_fixture_duplicate
+        rocjitsu_plugin_race_so
     )
     if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
         rj_add_test_path(rocjitsu_tests PERFSIM_FAKE_BACKEND_PATH "$<TARGET_FILE:rocjitsu_perfsim_fake_backend>")
@@ -2101,6 +2103,34 @@ target_link_libraries(util_force_scalar_probe PRIVATE util)
 rj_configure_target(util_force_scalar_probe TEST)
 add_dependencies(rocjitsu_tests util_force_scalar_probe)
 rj_add_test_path(rocjitsu_tests RJ_FORCE_SCALAR_PROBE_MODULE "$<TARGET_FILE:util_force_scalar_probe>")
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_library(operand_delegate_probe MODULE operand_delegate_probe.cpp)
+    target_link_libraries(operand_delegate_probe PRIVATE util simdojo_headers)
+    rj_configure_target(operand_delegate_probe LIB)
+    # The probe enters the executable's delegate scope without linking another
+    # simulator image. Keep the export limited to that shared state accessor.
+    target_link_options(
+        rocjitsu_tests
+        PRIVATE
+            "LINKER:--export-dynamic-symbol=_ZN8rocjitsu21ScopedOperandDelegate12active_countEv"
+    )
+    if(RJ_ENABLE_UBSAN AND RJ_UBSAN_VPTR)
+        # Header-only operand access must not reference the simulator's hidden RTTI.
+        target_compile_options(
+            operand_delegate_probe
+            PRIVATE -fno-sanitize=vptr
+        )
+    endif()
+    add_dependencies(rocjitsu_tests operand_delegate_probe)
+    rj_add_test_path(rocjitsu_tests RJ_OPERAND_DELEGATE_PROBE_MODULE "$<TARGET_FILE_NAME:operand_delegate_probe>")
+    if(RJ_INSTALL_TESTS)
+        install(
+            TARGETS operand_delegate_probe
+            LIBRARY DESTINATION ${RJ_INSTALL_TEST_BIN_DIR}
+        )
+    endif()
+endif()
 
 # --- Interposer loader initialization regression tests ---
 

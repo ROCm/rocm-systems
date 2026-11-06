@@ -369,6 +369,21 @@ collected in the following table.
       - | Protocol name string
         | Used to override automatic protocol selection
 
+    * - | ``RCCL_P2P_BATCH_THRESHOLD``
+        | Per-peer byte size above which point-to-point sends and receives are
+        | not fused into one batch. Send and receive sizes must be equal to
+        | fuse. This does not turn batching on; that is
+        | ``RCCL_P2P_BATCH_ENABLE``.
+        | A negative value selects the architecture default: 64 KiB on gfx950
+        | (MI350) with 16 or more nodes, and no size limit elsewhere. An
+        | explicit ``-1`` is the same as leaving the variable unset. A
+        | non-negative value, including ``65536``, is the cutoff on every
+        | architecture. ``0`` fuses no positive-size message.
+      - | Integer byte count.
+        | Default: ``-1`` (architecture default).
+        | Negative: architecture default.
+        | ``0`` or greater: cutoff on every architecture.
+
     * - | ``RCCL_DIRECT_ALLGATHER_DISABLE``
         | Controls the direct AllGather algorithm. Because the algorithm builds a full
           point-to-point mesh, its queue-pair footprint grows with the square
@@ -1293,6 +1308,22 @@ threshold table introduced for gfx1250.
       - | ``0``: Resolved from the per-arch table at runtime (default).
         | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
           multiple of 32 from 32 to 1024. Pre-table default: ``512``.
+
+    * - | ``RCCL_DDA_A2A_PUSH``
+        | Selects the ``ncclAllToAll`` kernel on the DDA fabric (VMM) tier. The push
+          kernels write each rank's chunks straight into its peers' DDA scratch
+          buffers and sync all ranks before finishing.
+      - | ``1``: Push kernels (default).
+        | ``0``: The previous pull kernel, where each rank reads its chunks from its
+          peers' DDA scratch buffers.
+
+    * - | ``RCCL_DDA_A2A_TDM``
+        | Moves the data of the DDA fabric ``ncclAllToAll`` push kernels through the
+          tensor data mover (TDM) on gfx1250. In-place calls, and builds or devices
+          without TDM support, use vector loads and stores. Has no effect when
+          ``RCCL_DDA_A2A_PUSH=0``.
+      - | ``1``: Use the TDM (default).
+        | ``0``: Use vector loads and stores.
 
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),
