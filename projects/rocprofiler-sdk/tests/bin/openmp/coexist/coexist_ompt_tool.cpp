@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,9 @@
 //                     result), i.e. hand the OMPT tool role BACK to the SDK.
 //                     Used (preloaded first, so the runtime binds us) to prove
 //                     the defer-back path arms the SDK's OMPT.
+//
+// In defer mode the summary also carries whether the SDK accepted the hand-back.
+// Those fields latch: ompt_start_tool may be entered more than once.
 
 #ifndef _GNU_SOURCE
 #    define _GNU_SOURCE 1  // for RTLD_DEFAULT
@@ -55,6 +58,8 @@ ompt_set_callback_t set_callback = nullptr;
 
 std::atomic<bool>     initialized{false};
 std::atomic<bool>     finalized{false};
+std::atomic<bool>     forwarded{false};
+std::atomic<bool>     forward_accepted{false};
 std::atomic<uint64_t> n_thread_begin{0};
 std::atomic<uint64_t> n_device_initialize{0};
 std::atomic<uint64_t> n_target_submit_emi{0};
@@ -93,6 +98,8 @@ write_summary()
                 "  \"coexist-mock-tool\": {\n"
                 "    \"initialized\": %s,\n"
                 "    \"finalized\": %s,\n"
+                "    \"forwarded\": %s,\n"
+                "    \"forward_accepted\": %s,\n"
                 "    \"events\": {\n"
                 "      \"thread_begin\": %llu,\n"
                 "      \"device_initialize\": %llu,\n"
@@ -102,6 +109,8 @@ write_summary()
                 "}\n",
                 b(initialized),
                 b(finalized),
+                b(forwarded),
+                b(forward_accepted),
                 static_cast<unsigned long long>(n_thread_begin.load()),
                 static_cast<unsigned long long>(n_device_initialize.load()),
                 static_cast<unsigned long long>(n_target_submit_emi.load()));
@@ -154,7 +163,12 @@ ompt_start_tool(unsigned int omp_version, const char* runtime_version)
         using start_tool_t = ompt_start_tool_result_t* (*) (unsigned int, const char*);
         auto* sdk =
             reinterpret_cast<start_tool_t>(::dlsym(RTLD_DEFAULT, "rocprofiler_ompt_start_tool"));
-        return sdk ? sdk(omp_version, runtime_version) : nullptr;
+        auto* sdk_result = sdk ? sdk(omp_version, runtime_version) : nullptr;
+
+        forwarded.store(true);
+        if(sdk_result != nullptr) forward_accepted.store(true);
+
+        return sdk_result;
     }
 
     static ompt_start_tool_result_t result = {&my_initialize, &my_finalize, {0}};
