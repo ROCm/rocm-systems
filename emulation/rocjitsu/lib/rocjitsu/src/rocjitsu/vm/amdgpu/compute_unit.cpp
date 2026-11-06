@@ -1840,6 +1840,21 @@ void AsyncInstructionWindow::materialize() {
   materialized_ = true;
 }
 
+void AsyncInstructionWindow::check_errors() {
+  const std::optional<AsyncInstructionQueue::Failure> failure =
+      arithmetic_ ? arithmetic_->take_error() : std::nullopt;
+  if (!failure)
+    return;
+  stopped_ = true;
+  // Finish every accepted job before reporting the first failed ticket and
+  // releasing wave storage. Further failures must not replace its guest PC.
+  arithmetic_->drain();
+  (void)arithmetic_->take_error();
+  cu_.fail_wave_instruction(wf_, std::format("asynchronous {}", failure->mnemonic), failure->pc,
+                            InstructionExecutionError::MissingExecutionBackend,
+                            "MMA helper unavailable after fork");
+}
+
 void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCache *admission,
                                               uint32_t wave_size, bool has_accvgprs) {
   // CDNA4 MFMA and the default gfx1250 allowlist have cheap encoding filters.
@@ -1872,42 +1887,18 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
   AsyncInstructionWindowStorage storage;
   storage.admission = admission;
   storage.has_accvgprs = has_accvgprs;
-  try {
-    unsigned issued = 0;
-    do {
-      issue_instruction_impl<true>(active, storage.window ? &*storage.window : nullptr, &storage);
-      if (!storage.window) {
-        if (active->is_halted())
-          async_execution::stats.flush();
-        return;
-      }
-      storage.window->poll();
-    } while (++issued < async_execution::issue_limit() && storage.window->pending() &&
-             !storage.window->stopped() && active->state() == WfState::RUNNING);
-    storage.window->drain();
-  } catch (const util::UnimplementedInst &error) {
-    // Helper threads execute the same guest callbacks as the inline path. Join
-    // the remaining jobs before translating an unsupported guest combination
-    // into the wave-owned execution failure used by synchronous execution.
-    if (storage.window)
-      storage.window->abandon();
-    active->report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
-    const std::string instruction =
-        storage.window && !storage.window->failed_mnemonic().empty()
-            ? std::format("asynchronous {}", storage.window->failed_mnemonic())
-            : std::string("asynchronous instruction");
-    const uint64_t failure_pc = storage.window && !storage.window->failed_mnemonic().empty()
-                                    ? storage.window->failed_pc()
-                                    : active->pc;
-    fail_wave_instruction(*active, instruction, failure_pc, active->instruction_execution_error(),
-                          error.what());
-    async_execution::stats.flush();
-    return;
-  } catch (...) {
-    if (storage.window)
-      storage.window->abandon();
-    throw;
-  }
+  unsigned issued = 0;
+  do {
+    issue_instruction_impl<true>(active, storage.window ? &*storage.window : nullptr, &storage);
+    if (!storage.window) {
+      if (active->is_halted())
+        async_execution::stats.flush();
+      return;
+    }
+    storage.window->poll();
+  } while (++issued < async_execution::issue_limit() && storage.window->pending() &&
+           !storage.window->stopped() && active->state() == WfState::RUNNING);
+  storage.window->drain();
   if (active->is_halted())
     async_execution::stats.flush();
 }
@@ -2119,6 +2110,8 @@ template <bool EnableAsync>
       window = &storage->window.emplace(*this, *active, storage->has_accvgprs);
     if (window) {
       window->before(*inst);
+      if (active->is_halted())
+        return IssueOutcome::NotIssued;
       if (wait_state) {
         wait_state->check_instruction(*inst, *active);
         wait_checked = true;
