@@ -273,6 +273,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed AI NIC port and RDMA state never updating after initialization**.  
   - Port and RDMA queries for an AI NIC returned the state read at initialization, so a long-running program never saw a link or RDMA port go down or come back. They now read the current state on every call, and AI NIC queries no longer need over 600 KB of the calling thread's stack.
 
+- **Fixed a crash when an AI NIC's RDMA device goes away during a statistics query**.  
+  - Reading RDMA port statistics while the RDMA driver or network interface was being removed could end the calling program. The query now returns an error instead.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added

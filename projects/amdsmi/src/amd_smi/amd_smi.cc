@@ -1363,19 +1363,18 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
   std::string directory_path = "/sys/class/net/" + netdev + "/device/infiniband/" + rdmadev +
                                "/subsystem/" + rdmadev + "/subsystem/" + rdmadev + "/ports/" +
                                std::to_string(port_num) + "/hw_counters/";
-  if (!std::filesystem::exists(directory_path)) {
-    ss << __PRETTY_FUNCTION__ << " | Directory does not exist: " << directory_path;
-    LOG_ERROR(ss);
-    return AMDSMI_STATUS_FILE_ERROR;
-  }
-
+  // The RDMA device or its netdev can be removed while this runs (driver unbound or reloaded);
+  // report that as a status instead of throwing filesystem_error through the C API.
+  std::error_code ec;
+  std::filesystem::directory_iterator it(directory_path, ec);
   uint32_t idx = 0;
-  for (const auto& entry : std::filesystem::directory_iterator(directory_path)) {
-    if (std::filesystem::is_regular_file(entry.path())) {
+  for (; !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+    std::error_code entry_ec;
+    if (it->is_regular_file(entry_ec)) {
       if (stats && num_stats && idx < *num_stats) {
         snprintf(stats[idx].name, sizeof(stats[idx].name), "%s",
-                 entry.path().filename().string().c_str());
-        std::ifstream in(entry.path());
+                 it->path().filename().string().c_str());
+        std::ifstream in(it->path());
         if (!in.is_open()) {
           ss << __PRETTY_FUNCTION__ << smi_amdgpu_get_status_string(status, false);
           LOG_ERROR(ss);
@@ -1385,6 +1384,11 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
       }
       ++idx;
     }
+  }
+  if (ec) {
+    ss << __PRETTY_FUNCTION__ << " | Cannot list " << directory_path << ": " << ec.message();
+    LOG_ERROR(ss);
+    return AMDSMI_STATUS_FILE_ERROR;
   }
   if (num_stats) {
     *num_stats = idx;

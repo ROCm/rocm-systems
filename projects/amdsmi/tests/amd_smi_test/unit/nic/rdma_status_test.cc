@@ -15,10 +15,14 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <iterator>
 #include <memory>
 #include <stdexcept>
+#include <string>
+#include <system_error>
 
 #include "amd_smi/impl/amd_smi_nic_testing.h"
 #include "test_fixture_utils.h"
@@ -319,6 +323,49 @@ TEST_F(NicUnit, UnparsableValueIsAStatus) {
   auto rdma = std::make_unique<amdsmi_nic_rdma_devices_info_t>();
   EXPECT_EQ(amdsmi_get_nic_rdma_dev_info(nic.handle(), rdma.get()),
             AMDSMI_STATUS_INTERNAL_EXCEPTION);
+}
+
+// The counter path starts at /sys/class/net/<netdev>. A real netdev name cannot contain '/', so
+// only a test can aim it at a scratch tree through "..", and then remove or break that directory.
+TEST_F(NicUnit, RdmaPortStatisticsListingFailureIsAStatus) {
+  FakeSysfsTree tree;
+  ASSERT_FALSE(tree.root().empty());
+  const std::string counters =
+      "device/infiniband/rdma0/subsystem/rdma0/subsystem/rdma0/ports/1/hw_counters";
+  tree.WriteFile(counters + "/rx_packets", "7\n");
+
+  auto discovered = std::make_unique<AMDSmiAINICDevice::AINICInfo>();
+  discovered->rdma_dev.num_rdma_dev = 1;
+  amdsmi_nic_rdma_dev_info_t& dev = discovered->rdma_dev.rdma_dev_info[0];
+  std::snprintf(dev.rdma_dev, sizeof(dev.rdma_dev), "rdma0");
+  dev.num_rdma_ports = 1;
+  amdsmi_nic_rdma_port_info_t& port = dev.rdma_port_info[0];
+  std::snprintf(port.netdev, sizeof(port.netdev), "../../..%s", tree.root().c_str());
+  port.rdma_port = 1;
+  RegisteredNic nic(*discovered);
+
+  std::array<amdsmi_nic_stat_t, 4> stats{};
+  uint32_t count = static_cast<uint32_t>(stats.size());
+  ASSERT_EQ(amdsmi_get_nic_rdma_port_statistics(nic.handle(), 0, &count, stats.data()),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(count, 1u);
+  EXPECT_STREQ(stats[0].name, "rx_packets");
+  EXPECT_EQ(stats[0].value, 7u);
+
+  const std::filesystem::path dir = std::filesystem::path(tree.root()) / counters;
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+  ASSERT_FALSE(ec) << ec.message();
+  count = static_cast<uint32_t>(stats.size());
+  EXPECT_EQ(amdsmi_get_nic_rdma_port_statistics(nic.handle(), 0, &count, stats.data()),
+            AMDSMI_STATUS_FILE_ERROR);
+
+  // A self-referencing link: the listing fails with ELOOP instead of ENOENT.
+  std::filesystem::create_directory_symlink(dir.filename(), dir, ec);
+  ASSERT_FALSE(ec) << ec.message();
+  count = static_cast<uint32_t>(stats.size());
+  EXPECT_EQ(amdsmi_get_nic_rdma_port_statistics(nic.handle(), 0, &count, stats.data()),
+            AMDSMI_STATUS_FILE_ERROR);
 }
 
 }  // namespace
