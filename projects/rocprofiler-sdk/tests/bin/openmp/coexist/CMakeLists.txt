@@ -26,17 +26,17 @@
 # rather than OMP_TARGET_COMPILER. The tests that drive it are registered in
 # tests/rocprofv3/ompt-coexist.
 #
-add_library(openmp-tools-coexist-mock SHARED coexist_ompt_tool.cpp)
+add_library(openmp-coexist-mock SHARED coexist_ompt_tool.cpp)
 # The mock stands in for a third-party tool, so it compiles against the public headers
 # alone and resolves rocprofiler_ompt_start_tool with dlsym at run time. Taking the
 # include directories rather than linking rocprofiler-sdk-headers keeps the SDK's internal
 # build definitions off it, so it compiles the same way in-tree as it does against an
 # installed SDK.
 target_include_directories(
-    openmp-tools-coexist-mock SYSTEM
+    openmp-coexist-mock SYSTEM
     PRIVATE
         $<TARGET_PROPERTY:rocprofiler-sdk::rocprofiler-sdk,INTERFACE_INCLUDE_DIRECTORIES>)
 # links dl for dlsym(3); CMAKE_DL_LIBS is empty where libdl is folded into libc
-target_link_libraries(openmp-tools-coexist-mock PRIVATE rocprofiler-sdk::tests-build-flags
-                                                        ${CMAKE_DL_LIBS})
-set_target_properties(openmp-tools-coexist-mock PROPERTIES CXX_VISIBILITY_PRESET hidden)
+target_link_libraries(openmp-coexist-mock PRIVATE rocprofiler-sdk::tests-build-flags
+                                                  ${CMAKE_DL_LIBS})
+set_target_properties(openmp-coexist-mock PROPERTIES CXX_VISIBILITY_PRESET hidden)
