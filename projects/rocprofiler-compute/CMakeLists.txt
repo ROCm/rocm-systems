@@ -946,6 +946,13 @@ add_test(
 )
 
 add_test(
+    NAME test_inject_roctx_jax
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_jax.xml
+        ${COV_OPTION} tests/unit/utils/inject_roctx/test_jax.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_inject_roctx_torch_gpu
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_torch_gpu.xml
@@ -1169,6 +1176,7 @@ if(${ENABLE_COVERAGE})
         test_torch_trace_coverage
         test_inject_roctx_package
         test_inject_roctx_torch
+        test_inject_roctx_jax
         test_inject_roctx_torch_trace_collector
         test_inject_roctx_torch_gpu
         test_analysis_db
