@@ -83,23 +83,33 @@ void TestHWTopologyRead::Run(void) {
 
   // Null output pointers must be rejected regardless of topology.
   if (num_devices > 0) {
-    EXPECT_EQ(amdsmi_get_link_topology(processor_handles_[0], processor_handles_[0], nullptr),
-              AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_get_link_topology", "src=0, dst=0, info=nullptr", VERB(STANDARD));
+    err = amdsmi_get_link_topology(processor_handles_[0], processor_handles_[0], nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    EXPECT_EQ(err, AMDSMI_STATUS_INVAL);
     amdsmi_link_type_t null_type;
     amdsmi_p2p_capability_t null_cap;
     uint64_t null_hops;
-    ASSERT_EQ(amdsmi_topo_get_link_type(processor_handles_[0], processor_handles_[0], nullptr,
-                                        &null_type),
-              AMDSMI_STATUS_INVAL);
-    ASSERT_EQ(amdsmi_topo_get_link_type(processor_handles_[0], processor_handles_[0], &null_hops,
-                                        nullptr),
-              AMDSMI_STATUS_INVAL);
-    ASSERT_EQ(amdsmi_topo_get_p2p_status(processor_handles_[0], processor_handles_[0], nullptr,
-                                         &null_cap),
-              AMDSMI_STATUS_INVAL);
-    ASSERT_EQ(amdsmi_topo_get_p2p_status(processor_handles_[0], processor_handles_[0], &null_type,
-                                         nullptr),
-              AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_topo_get_link_type", "src=0, dst=0, hops=nullptr", VERB(STANDARD));
+    err = amdsmi_topo_get_link_type(processor_handles_[0], processor_handles_[0], nullptr,
+                                    &null_type);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_topo_get_link_type", "src=0, dst=0, type=nullptr", VERB(STANDARD));
+    err = amdsmi_topo_get_link_type(processor_handles_[0], processor_handles_[0], &null_hops,
+                                    nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_topo_get_p2p_status", "src=0, dst=0, type=nullptr", VERB(STANDARD));
+    err = amdsmi_topo_get_p2p_status(processor_handles_[0], processor_handles_[0], nullptr,
+                                     &null_cap);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_topo_get_p2p_status", "src=0, dst=0, cap=nullptr", VERB(STANDARD));
+    err = amdsmi_topo_get_p2p_status(processor_handles_[0], processor_handles_[0], &null_type,
+                                     nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 
   // gpu_link_t gpu_links[num_devices][num_devices];

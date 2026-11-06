@@ -639,5 +639,8 @@ TEST(GpuUnit, GetPowerInfoNullInfoIsInval) {
     GTEST_SKIP_("No processors discovered on this system");
   }
 
-  EXPECT_EQ(amdsmi_get_power_info(procs[0], nullptr), AMDSMI_STATUS_INVAL);
+  DISPLAY_AMDSMI_API("amdsmi_get_power_info", "gpu=0, info=nullptr", GetTestVerbosity() >= 1);
+  const amdsmi_status_t ret = amdsmi_get_power_info(procs[0], nullptr);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
+  EXPECT_EQ(ret, AMDSMI_STATUS_INVAL);
 }

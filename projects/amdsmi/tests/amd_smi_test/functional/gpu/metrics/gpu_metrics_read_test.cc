@@ -221,7 +221,11 @@ void TestGpuMetricsRead::Run(void) {
       // Verify XCD count is stable across multiple calls regardless of clock state
       if (ret_xcd == AMDSMI_STATUS_SUCCESS && temp_xcd_counter_value > 0) {
         auto xcd_count_verify = uint16_t(0);
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_xcd_counter", "gpu=" + std::to_string(i) + ", recheck",
+                           VERB(STANDARD));
         auto ret_verify = amdsmi_get_gpu_xcd_counter(processor_handles_[i], &xcd_count_verify);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret_verify,
+                              AMDSMI_STATUS_SUCCESS);
         ASSERT_EQ(ret_verify, AMDSMI_STATUS_SUCCESS);
         ASSERT_EQ(temp_xcd_counter_value, xcd_count_verify)
             << "XCD count must be stable across calls (was " << temp_xcd_counter_value << ", now "

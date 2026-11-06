@@ -598,8 +598,12 @@ void TestMemoryPartitionReadWrite::Run(void) {
 
       // Verify capabilities are unchanged after the set attempt.
       amdsmi_memory_partition_config_t post_set_config = {};
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition_config",
+                         "gpu=" + std::to_string(dv_ind) + ", post-set", VERB(STANDARD));
       auto ret_caps_post =
           amdsmi_get_gpu_memory_partition_config(processor_handles_[dv_ind], &post_set_config);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret_caps_post,
+                            AMDSMI_STATUS_SUCCESS);
       if (ret_caps_post == AMDSMI_STATUS_SUCCESS && ret_caps == AMDSMI_STATUS_SUCCESS) {
         EXPECT_EQ(post_set_config.partition_caps.nps_flags.nps1_cap,
                   current_memory_config.partition_caps.nps_flags.nps1_cap);

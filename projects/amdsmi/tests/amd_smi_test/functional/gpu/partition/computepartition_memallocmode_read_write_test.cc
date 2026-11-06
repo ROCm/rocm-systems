@@ -65,20 +65,28 @@ void TestComputePartitionMemAllocModeReadWrite::Run(void) {
 
   // Invalid argument tests (run only when at least one device exists;
   // the handle is validated by SetUp).
+  DISPLAY_AMDSMI_API("amdsmi_get_gpu_accelerator_partition_mem_alloc_mode", "gpu=0, mode=nullptr",
+                     VERB(STANDARD));
   ret = amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(processor_handles_[0], nullptr);
+  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
   EXPECT_EQ(ret, AMDSMI_STATUS_INVAL);
 
+  DISPLAY_AMDSMI_API("amdsmi_set_gpu_accelerator_partition_mem_alloc_mode", "gpu=0, mode=INVALID",
+                     VERB(STANDARD));
   ret = amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
       processor_handles_[0], AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_INVALID);
+  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
   EXPECT_EQ(ret, AMDSMI_STATUS_INVAL);
 
   // 3 is outside the enumerator set but inside the enum's representable range;
   // a larger value would make the conversion unspecified.
+  DISPLAY_AMDSMI_API("amdsmi_set_gpu_accelerator_partition_mem_alloc_mode", "gpu=0, mode=3",
+                     VERB(STANDARD));
   ret = amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
       processor_handles_[0], static_cast<amdsmi_accelerator_partition_mem_alloc_mode_t>(3));
+  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
   EXPECT_EQ(ret, AMDSMI_STATUS_INVAL);
 
-  const bool isVerbose = (verbosity() > 0);
   const std::vector<amdsmi_accelerator_partition_mem_alloc_mode_t> modes_to_test = {
       AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING,
       AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL,
@@ -89,10 +97,10 @@ void TestComputePartitionMemAllocModeReadWrite::Run(void) {
 
     // Get original mode
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_accelerator_partition_mem_alloc_mode",
-                       "gpu=" + std::to_string(dv_ind), isVerbose);
+                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
     ret = amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(processor_handles_[dv_ind],
                                                               &original_mode);
-    DISPLAY_AMDSMI_STATUS(isVerbose, __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
 
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
@@ -121,9 +129,9 @@ void TestComputePartitionMemAllocModeReadWrite::Run(void) {
 
       DISPLAY_AMDSMI_API("amdsmi_set_gpu_accelerator_partition_mem_alloc_mode",
                          "gpu=" + std::to_string(dv_ind) + ", mode=" + memAllocModeString(mode),
-                         isVerbose);
+                         VERB(STANDARD));
       ret = amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(processor_handles_[dv_ind], mode);
-      DISPLAY_AMDSMI_STATUS(isVerbose, __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
 
       if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
         IF_VERB(STANDARD) {
@@ -140,10 +148,10 @@ void TestComputePartitionMemAllocModeReadWrite::Run(void) {
 
       // Verify the mode was applied
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_accelerator_partition_mem_alloc_mode",
-                         "gpu=" + std::to_string(dv_ind) + " (verify)", isVerbose);
+                         "gpu=" + std::to_string(dv_ind) + " (verify)", VERB(STANDARD));
       ret = amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(processor_handles_[dv_ind],
                                                                 &current_mode);
-      DISPLAY_AMDSMI_STATUS(isVerbose, __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS);
       if (ret == AMDSMI_STATUS_SUCCESS) {
         EXPECT_EQ(current_mode, mode);
@@ -162,10 +170,10 @@ void TestComputePartitionMemAllocModeReadWrite::Run(void) {
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_accelerator_partition_mem_alloc_mode",
                        "gpu=" + std::to_string(dv_ind) +
                            ", mode=" + memAllocModeString(original_mode) + " (restore)",
-                       isVerbose);
+                       VERB(STANDARD));
     ret = amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(processor_handles_[dv_ind],
                                                               original_mode);
-    DISPLAY_AMDSMI_STATUS(isVerbose, __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS);
     if (ret != AMDSMI_STATUS_SUCCESS) {
       std::cerr << "\t**WARNING: failed to restore device " << dv_ind
