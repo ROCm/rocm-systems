@@ -6504,13 +6504,17 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
  * specifies the attributes for the copy and @p stream specifies the stream to enqueue the
  * operation in.
  *
- * @param [out] dst   - Destination memory address
- * @param [in] src    - Source memory address
- * @param [in] size   - Number of bytes to copy
+ * The @p srcLocHint and @p dstLocHint members of @p attr are ignored when the pointers are not
+ * managed memory or memory allocated outside HIP.
+ *
+ * @param [out] dst   - Destination memory address. Must not be NULL.
+ * @param [in] src    - Source memory address. Must not be NULL.
+ * @param [in] size   - Number of bytes to copy. Must be nonzero.
  * @param [in] attr   - Pointer to hipMemcpyAttributes structure. Must not be NULL.
  * @param [in] stream - Stream for the asynchronous operation
  *
- * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle,
+ * #hipErrorNotSupported
  *
  * @see hipMemcpy, hipMemcpyAsync, hipMemcpyBatchAsync, hipMemcpy3DWithAttributesAsync
  */
@@ -6525,11 +6529,13 @@ hipError_t hipMemcpyWithAttributesAsync(void* dst, const void* src, size_t size,
  * and @p stream specifies the stream to enqueue the operation in.
  *
  * @param [in] op     - Pointer to hipMemcpy3DBatchOp structure containing copy parameters.
- *                      Must not be NULL.
+ *                      Must not be NULL. The width, height and depth components of
+ *                      @p op->extent must not be 0.
  * @param [in] flags  - Operation flags. Reserved for future use, must be zero now.
  * @param [in] stream - Stream for asynchronous execution
  *
- * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle,
+ * #hipErrorNotSupported
  *
  * @see hipMemcpy3DBatchAsync, hipMemcpyWithAttributesAsync
  */
