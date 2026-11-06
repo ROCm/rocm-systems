@@ -366,7 +366,7 @@ class AmdSmiMissingParameterValueException(AmdSmiException):
 
 
 class AmdSmiCommandNotSupportedException(AmdSmiException):
-    def __init__(self, command, outputformat: str):
+    def __init__(self, command, outputformat: str, message=None):
         super().__init__()
         # CLI-level (parse-time) decision: the command name is not available on
         # this system, so no library call was made. Distinct from a library
@@ -378,6 +378,9 @@ class AmdSmiCommandNotSupportedException(AmdSmiException):
         common_message = (
             f"Command '{self.command}' is not supported on the system. Run '--help' for more info."
         )
+
+        if message:
+            common_message = message
 
         self._build_output_messages(common_message)
 

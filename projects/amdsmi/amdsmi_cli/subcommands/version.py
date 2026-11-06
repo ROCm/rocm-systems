@@ -23,6 +23,11 @@ class VersionCommands:
             args.cpu_version = cpu_version
         if nic_version:
             args.nic_version = nic_version
+        # --cpu_version is only registered when CPU (amd_hsmp) is initialized, so
+        # that attribute may be absent on systems without that hardware;
+        # normalize it here.
+        if not hasattr(args, "cpu_version"):
+            args.cpu_version = None
         # if no args are given, display everything available on this build
         if args.gpu_version is None and args.cpu_version is None and args.nic_version is None:
             args.gpu_version = True

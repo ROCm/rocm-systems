@@ -4,6 +4,8 @@
 
 import logging
 
+from amdsmi_cli_exceptions import AmdSmiCommandNotSupportedException
+
 from amdsmi import amdsmi_exception, amdsmi_interface
 
 
@@ -75,6 +77,17 @@ class FirmwareCommands:
         Returns:
             None: Print output via AMDSMILogger to destination
         """
+        # `firmware` only reports GPU (and NIC) information; --cpu and --core are
+        # accepted by the shared device-argument group but are not serviced by
+        # this command.
+        if getattr(args, "cpu", None) or getattr(args, "core", None):
+            raise AmdSmiCommandNotSupportedException(
+                "firmware",
+                self.helpers.get_output_format(),
+                message="firmware reports GPU information. --cpu and --core are not "
+                "supported for this command.",
+            )
+
         if gpu:
             args.gpu = gpu
         if fw_list:
