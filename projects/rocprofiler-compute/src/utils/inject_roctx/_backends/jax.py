@@ -41,6 +41,8 @@ def patch_jax_entry_points() -> None:
         return
     try:
         compiled_type = type(jit(_identity))
+        if getattr(compiled_type.__call__, "_roctx_wrapped", False):
+            return
         _STATE.compiled_call = compiled_type.__call__
         compiled_type.__call__ = _roctx_compiled_call
     except Exception as exc:
@@ -101,6 +103,9 @@ def _roctx_compiled_call(compiled: object, *args: Any, **kwargs: Any) -> object:
         return _STATE.compiled_call(compiled, *args, **kwargs)
     finally:
         core._pop_scope()
+
+
+_roctx_compiled_call._roctx_wrapped = True
 
 
 class JaxBackend:
