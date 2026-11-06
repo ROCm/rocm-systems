@@ -27,7 +27,13 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
 
+#include <array>
+#include <cstdint>
+#include <iterator>
 #include <map>
+#include <memory>
+#include <string>
+#include <utility>
 
 namespace {
 
@@ -856,7 +862,7 @@ TEST_F(ExitedWaveRaceTest, UnwaitedWriteStillRacesAfterWorkgroupBarrier) {
   EXPECT_TRUE(ds_read(0, 64));
 }
 
-TEST_F(ExitedWaveRaceTest, BarrierBeforeExitDoesNotRetireLaterWrite) {
+TEST_F(ExitedWaveRaceTest, WorkgroupBarrierDoesNotFlushAnOmittedLiveWave) {
   EXPECT_FALSE(ds_write(1, 64));
   wait_dscnt(1);
   barrier_without_wave_1(BarrierKind::Workgroup);
