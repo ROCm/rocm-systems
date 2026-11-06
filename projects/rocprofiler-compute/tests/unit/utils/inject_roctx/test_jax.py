@@ -177,3 +177,12 @@ def test_jax_primitive_emits_reduce_sum_marker(monkeypatch):
     primitive_type("reduce_sum").bind_with_trace(None, (), (), {})
     assert [item["marker"] for item in pushes] == ["jax.reduce_sum"]
     assert pushes[0]["backend"] == "jax"
+
+
+def test_jax_inner_jit_skips_second_marker(monkeypatch):
+    _jax_mod, compiled_type, _primitive_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+    inner = compiled_type("matmul_relu")
+    outer = compiled_type("train_step", body=lambda *args, **kwargs: inner())
+    outer()
+    assert [item["marker"] for item in pushes] == ["jax.jit.train_step"]
