@@ -29,6 +29,7 @@
 #define CUDA_12020 12020
 #define CUDA_12030 12030
 #define CUDA_12080 12080
+#define CUDA_12090 12090
 #define CUDA_13000 13000
 
 #ifdef __cplusplus
@@ -1890,6 +1891,14 @@ typedef struct cudaKernelNodeParams hipKernelNodeParams;
 typedef struct cudaMemsetParams hipMemsetParams;
 #if CUDA_VERSION >= CUDA_12020
 typedef struct cudaGraphNodeParams hipGraphNodeParams;
+typedef struct cudaChildGraphNodeParams hipChildGraphNodeParams;
+#endif
+
+#if CUDA_VERSION >= CUDA_12090
+typedef enum cudaGraphChildGraphNodeOwnership hipGraphChildGraphNodeOwnership;
+#define hipGraphChildGraphOwnershipClone cudaGraphChildGraphOwnershipClone
+#define hipGraphChildGraphOwnershipMove cudaGraphChildGraphOwnershipMove
+#define hipGraphChildGraphOwnershipInvalid cudaGraphChildGraphOwnershipInvalid
 #endif
 
 #if CUDA_VERSION >= CUDA_11040
