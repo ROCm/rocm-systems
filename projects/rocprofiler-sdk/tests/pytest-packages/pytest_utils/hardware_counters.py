@@ -43,14 +43,27 @@ def skip_if_zero_counters_in_auto_mode(values, gpu_agent):
     level for PMC profiling' in the rocprofv3 documentation.
     """
     try:
-        has_zero = any(not float(value) > 0 for value in values)
+        numeric_values = [float(value) for value in values]
     except (TypeError, ValueError):
         return
 
+    # negative and NaN values are failures, not the AUTO zero-counter condition
+    if any(not value >= 0 for value in numeric_values):
+        return
+
+    has_zero = any(value == 0 for value in numeric_values)
     if has_zero and gpu_agent is not None and gpu_uses_auto_perf_level(gpu_agent):
         pytest.skip(
             "Zero counters with AMDSMI_DEV_PERF_LEVEL_AUTO; nonzero values not required"
         )
+
+
+def first_gpu_agent(agent_info_rows):
+    """Return the first GPU in an agent_info CSV as an agent for gpu_uses_auto_perf_level."""
+    return next(
+        ({"name": row["Name"]} for row in agent_info_rows if row["Agent_Type"] == "GPU"),
+        None,
+    )
 
 
 def skip_if_scratch_memory_unavailable(scratch_records):

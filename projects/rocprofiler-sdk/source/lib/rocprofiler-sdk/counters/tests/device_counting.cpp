@@ -147,9 +147,15 @@ global_sync_samples()
 bool
 zero_counter_in_auto_mode(const std::vector<rocprofiler_counter_record_t>& records)
 {
+    // negative and NaN values are failures, not the AUTO zero-counter condition
     for(const auto& record : records)
     {
-        if(record.counter_value > 0.0) continue;
+        if(!(record.counter_value >= 0.0)) return false;
+    }
+
+    for(const auto& record : records)
+    {
+        if(record.counter_value != 0.0) continue;
 
         const auto* agent = rocprofiler::agent::get_agent(record.agent_id);
         if(!agent || !agent->name) continue;
@@ -1020,6 +1026,7 @@ TEST_F(device_counting_service_test, sync_without_application_dispatches_is_devi
 
     auto samples = global_sync_samples().rlock([](const auto& data) { return data; });
     ASSERT_FALSE(samples.empty());
+    auto all_records = std::vector<rocprofiler_counter_record_t>{};
     for(const auto& sample : samples)
     {
         ASSERT_FALSE(sample.records.empty());
@@ -1027,10 +1034,15 @@ TEST_F(device_counting_service_test, sync_without_application_dispatches_is_devi
         {
             EXPECT_EQ(record.agent_id.handle, sample.expected_agent_id.handle);
             EXPECT_EQ(record.dispatch_id, 0);
-            EXPECT_GT(record.counter_value, 0.0);
         }
+        all_records.insert(all_records.end(), sample.records.begin(), sample.records.end());
     }
     ASSERT_EQ(samples.size() % 2, 0);
+    if(zero_counter_in_auto_mode(all_records))
+        GTEST_SKIP() << "Zero counters with AMDSMI_DEV_PERF_LEVEL_AUTO";
+
+    for(const auto& record : all_records)
+        EXPECT_GT(record.counter_value, 0.0);
     for(size_t index = 0; index < samples.size(); index += 2)
     {
         std::unordered_map<rocprofiler_counter_instance_id_t, double> before;
