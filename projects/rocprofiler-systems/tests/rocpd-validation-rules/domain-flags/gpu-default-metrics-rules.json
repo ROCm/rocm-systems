@@ -80,7 +80,7 @@
                     "requires": "mem_usage"
                 },
                 {
-                    "comparison": "greater_than_or_equal",
+                    "comparison": "equals",
                     "description": "Unrequested metric: device_gfx_clock is not sampled",
                     "error_message": "OVER-COLLECTION: device_gfx_clock sampled though the default AMD-SMI metrics (busy, temp, power, mem_usage) do not include it",
                     "expected_result": 0,
