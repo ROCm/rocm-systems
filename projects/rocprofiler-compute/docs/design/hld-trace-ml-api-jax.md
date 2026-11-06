@@ -20,6 +20,17 @@
       placed, is the compiled function.
   - Without an outer `jit`, each op is compiled and executed on its own when
     Python reaches it (`x @ x`, `jnp.sum`, …). That is eager dispatch.
+- Assumptions:
+  - The wrap was planned against JAX 0.11.0, where `type(jax.jit(identity))`
+    is `jaxlib._jax.PjitFunction`.
+  - numpy is a JAX dependency (`jax.numpy`). The injector does not wrap
+    `jnp.*` and does not import `jax.numpy`. rocprofiler-compute already
+    depends on numpy for analysis; the workload must supply a numpy that
+    the installed JAX accepts.
+  - ROCm-enabled JAX: install ROCm first; the JAX wheels do not pull ROCm.
+    Pin `jax`, `jax_rocmN_plugin`, and `jax_rocmN_pjrt` to the same version
+    ([TheRock JAX install](https://github.com/ROCm/TheRock/blob/main/RELEASES.md#installing-multi-arch-jax-python-packages),
+    [Install JAX for ROCm](https://rocm.docs.amd.com/projects/ai-ecosystem/en/latest/frameworks/jax/install.html)).
 
 ## Problem statement
 
@@ -87,11 +98,23 @@
 
 ### Where the range is marked
 
-- `jax.jit` / `jax.pmap` wrap the compiled callable:
-  - Each outer call opens `jax.jit.<fn>` or `jax.pmap.<fn>`, runs the
-    executable, and closes the range when the callable returns.
+- `jax.jit` wraps the compiled callable, not `jax.jit` itself:
+  - `jax.jit(identity)` builds a compiled callable. It does not run
+    `identity`.
+  - `type(...)` of that object is `jaxlib._jax.PjitFunction` on JAX 0.11.0.
+  - That class is shared by every `jax.jit` result. `__call__` is a C slot:
+    `train_step(w, x)` is `PjitFunction.__call__(train_step, w, x)`.
+    Replacing that one slot wraps every jitted call.
+  - JAX still returns a real `PjitFunction`, not a Python stand-in.
+  - The deprecated `pjit` alias compiles to the same `PjitFunction` as
+    `jax.jit`, so those calls show as `jax.jit.<fn>`.
+  - Each outer call opens `jax.jit.<fn>`, runs the executable, and closes
+    the range when the callable returns.
   - A direct call to an inner jitted function is its own outer call, so it
     gets its own range.
+- `jax.pmap` wraps the compiled callable:
+  - Each outer call opens `jax.pmap.<fn>`, runs the executable, and closes
+    the range when the callable returns.
 - Primitive wrap: `inject_roctx` wraps `jax.extend.core.Primitive`, not `jnp.*`.
   - If a JAX range is already open, do not open another; run the original
     dispatch.
@@ -183,8 +206,9 @@ jax.jit.train_step jax_workload.py:13 (calls: N, dispatches: M, total: T)
 └─ input_reduce_fusion_1 (dispatches: M, total: T)
 ```
 
-- `--operator jax` filters that tree by function name and prints the matched
-  nodes in the same form.
+- `--operator jax:<PATTERN>` filters that tree by function name, for example
+  `--operator 'jax:*train_step*'`, and prints the matched nodes in the same
+  form.
 
 ## Validation, security and debuggability
 
@@ -206,8 +230,7 @@ jax.jit.train_step jax_workload.py:13 (calls: N, dispatches: M, total: T)
 
 Coverage gaps:
 
-- **`pjit` name.** Current sharding is `jax.jit`. Call sites that still use
-  the deprecated `pjit` alias are unmarked unless that name is patched too.
+- **`shard_map`.** Unmarked unless it sits under an outer `jit` / `pmap`.
 
 Design trade-offs:
 
