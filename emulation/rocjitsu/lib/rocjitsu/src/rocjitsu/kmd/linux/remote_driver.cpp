@@ -45,7 +45,6 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/un.h>
-#include <system_error>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -625,13 +624,8 @@ int RemoteDriver::open() {
     errno = EMFILE;
     return -1;
   }
-  try {
-    disconnect_monitor_ = std::thread([this, socket = sock_] { watch_disconnect(socket); });
-  } catch (const std::system_error &error) {
-    syscall(SYS_close, fd);
-    errno = error.code().value();
-    return -1;
-  }
+
+  disconnect_monitor_ = std::thread([this, socket = sock_] { watch_disconnect(socket); });
   return fd;
 }
 
