@@ -7,12 +7,13 @@ set(ROCPROFILER_LIB_KERNEL_REPLAY_HEADERS
     memory_snapshot.hpp
     memory_tracker.hpp
     replay_callbacks.hpp
+    restore_policy.hpp
     snapshot-plan.hpp
     snapshot-storage.hpp
     utils.hpp)
 set(ROCPROFILER_LIB_KERNEL_REPLAY_SOURCES
     blit-copy.cpp kernel_replay.cpp local_context.cpp memory_snapshot.cpp
-    memory_tracker.cpp replay_callbacks.cpp utils.cpp)
+    memory_tracker.cpp replay_callbacks.cpp restore_policy.cpp utils.cpp)
 
 target_sources(
     rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_KERNEL_REPLAY_SOURCES}

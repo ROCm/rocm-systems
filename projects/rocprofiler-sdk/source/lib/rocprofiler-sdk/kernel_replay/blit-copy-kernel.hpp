@@ -42,7 +42,14 @@ inline constexpr auto tile_bytes             = std::uint64_t{1} << tile_shift;
 inline constexpr auto min_piece_shift        = std::uint32_t{12};
 inline constexpr auto pieces_per_wave        = std::uint64_t{4};
 inline constexpr auto copy_unroll            = std::uint32_t{2};
+inline constexpr auto hash_unroll            = std::uint32_t{8};
 inline constexpr auto copy_workgroups_per_cu = std::uint32_t{2};
+
+// Counters the restore kernels keep on the GPU. Successive changed-tile lists alternate between
+// two counts, so each restore can clear the count the next one uses.
+inline constexpr auto changed_count_slots = std::uint32_t{2};
+inline constexpr auto unlisted_counter    = std::uint32_t{2};
+inline constexpr auto counter_count       = std::uint32_t{4};
 
 struct copy_descriptor_t
 {
@@ -86,6 +93,16 @@ split_for(std::uint32_t tile_count, std::uint32_t waves)
     return split;
 }
 
+// A tile's digest is the sum of digest_term(word, position) over its little-endian 8-byte words,
+// counting positions from the tile's start and zero-padding a partial last word. A sum does not
+// depend on which wave adds which word, so a tile copied in pieces is digested in the same pass.
+constexpr std::uint64_t
+digest_term(std::uint64_t word, std::uint64_t position)
+{
+    const auto value = word ^ (position * 0x9e3779b97f4a7c15ULL);
+    return ((word << 32) | (word >> 32)) + (value & 0xffffffffULL) * (value >> 32);
+}
+
 // One argument block per kernel, passed by value. The SDK dispatches raw AQL packets and does not
 // fill the implicit kernel arguments, so the kernels never read gridDim or blockDim: workgroup
 // counts are passed here instead.
@@ -107,29 +124,82 @@ struct scan_tiles_args_t
     std::uint32_t chunk_count      = 0;
 };
 
+// With digests, the capture also zeroes each tile's digest and changed flag, and the counters.
 struct expand_tiles_args_t
 {
     std::uint64_t descriptors      = 0;
     std::uint64_t first_tiles      = 0;
     std::uint64_t tile_count       = 0;
     std::uint64_t tiles            = 0;
+    std::uint64_t digests          = 0;
+    std::uint64_t changed_flags    = 0;
+    std::uint64_t counters         = 0;
     std::uint32_t descriptor_count = 0;
     std::uint32_t workgroups       = 0;
 };
 
+// With reverse set, each tile goes from its destination back to its source: a full restore from a
+// capture's tile list.
 struct copy_tiles_args_t
 {
     std::uint64_t tiles      = 0;
     std::uint64_t tile_count = 0;
     std::uint32_t workgroups = 0;
+    std::uint32_t reverse    = 0;
+};
+
+struct capture_tiles_args_t
+{
+    std::uint64_t tiles      = 0;
+    std::uint64_t tile_count = 0;
+    std::uint64_t digests    = 0;
+    std::uint32_t workgroups = 0;
     std::uint32_t reserved   = 0;
+};
+
+// The restore kernels read a capture's tile list, whose tiles copy live memory to the snapshot,
+// and copy the other way.
+struct restore_changed_args_t
+{
+    std::uint64_t tiles         = 0;
+    std::uint64_t tile_count    = 0;
+    std::uint64_t digests       = 0;
+    std::uint64_t changed_flags = 0;
+    std::uint64_t changed       = 0;
+    std::uint64_t counters      = 0;
+    std::uint32_t slot          = 0;
+    std::uint32_t workgroups    = 0;
+};
+
+struct restore_listed_args_t
+{
+    std::uint64_t tiles         = 0;
+    std::uint64_t changed       = 0;
+    std::uint64_t changed_count = 0;
+    std::uint32_t workgroups    = 0;
+    std::uint32_t reserved      = 0;
+};
+
+struct check_tiles_args_t
+{
+    std::uint64_t tiles         = 0;
+    std::uint64_t tile_count    = 0;
+    std::uint64_t digests       = 0;
+    std::uint64_t changed_flags = 0;
+    std::uint64_t counters      = 0;
+    std::uint32_t workgroups    = 0;
+    std::uint32_t reserved      = 0;
 };
 
 static_assert(sizeof(copy_descriptor_t) == 24);
 static_assert(sizeof(count_tiles_args_t) == 24);
 static_assert(sizeof(scan_tiles_args_t) == 40);
-static_assert(sizeof(expand_tiles_args_t) == 40);
+static_assert(sizeof(expand_tiles_args_t) == 64);
 static_assert(sizeof(copy_tiles_args_t) == 24);
+static_assert(sizeof(capture_tiles_args_t) == 32);
+static_assert(sizeof(restore_changed_args_t) == 56);
+static_assert(sizeof(restore_listed_args_t) == 32);
+static_assert(sizeof(check_tiles_args_t) == 48);
 }  // namespace kernel_abi
 }  // namespace blit
 }  // namespace kernel_replay
