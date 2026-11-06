@@ -1235,6 +1235,183 @@ TEST(HostDispatchCoverageMicrotest, APathWithAQuoteInItCannotBreakOutOfTheComman
         << command;
 }
 
+// ── writeMergedCoverage ─────────────────────────────────────────────
+
+// The llvm tools, replaced by a function that records every command and writes the file the
+// real tool would have written. Either step can be made to fail for a named binary, which is
+// how the degraded paths -- the ones that decide whether a binary's coverage survives into the
+// merged tracefile -- are reached without llvm-profdata or llvm-cov on the machine.
+class FakeLlvm {
+public:
+    void failMergeFor(std::string binary) { failMerge_ = std::move(binary); }
+    void failExportFor(std::string binary) { failExport_ = std::move(binary); }
+
+    CommandFn command()
+    {
+        return [this](const std::string &command) {
+            commands_.push_back(command);
+            const bool merge = command.find(" merge ") != std::string::npos;
+            // The output is the last quoted path: '-o <profdata>' for a merge, '> <lcov>' for
+            // an export. Both are written before the status is checked, exactly as the shell
+            // would: the redirect in particular creates the file even when llvm-cov fails.
+            const std::string output = lastQuoted(command);
+            const std::string &fails = merge ? failMerge_ : failExport_;
+            std::ofstream(output, std::ios::binary | std::ios::trunc)
+                << (merge ? "" : tracefileFor(output));
+            if (!fails.empty() && command.find(fails) != std::string::npos) {
+                return 1;
+            }
+            return 0;
+        };
+    }
+
+    const std::vector<std::string> &commands() const { return commands_; }
+
+private:
+    // The lcov record a binary's export stands for, named after the directory it came from so a
+    // merged tracefile says which binaries contributed to it.
+    static std::string tracefileFor(const std::string &output)
+    {
+        const std::string owner = std::filesystem::path(output).parent_path().filename().string();
+        return fmt::format("SF:/src/{}.cc\nDA:1,1\nend_of_record\n", owner);
+    }
+
+    static std::string lastQuoted(const std::string &command)
+    {
+        const size_t close = command.rfind('\'');
+        const size_t open = command.rfind('\'', close - 1);
+        return command.substr(open + 1, close - open - 1);
+    }
+
+    std::vector<std::string> commands_;
+    std::string failMerge_;
+    std::string failExport_;
+};
+
+// Seed *directory* with the profiles *binary* would have left behind, in the per-binary
+// subdirectory childProfileFile() writes them to.
+void seedProfiles(const std::string &directory, const std::string &binary, size_t count)
+{
+    const std::filesystem::path binaryDir =
+        std::filesystem::path(directory) / std::filesystem::path(binary).filename();
+    std::filesystem::create_directories(binaryDir);
+    for (size_t i = 0; i < count; ++i) {
+        std::ofstream(binaryDir / fmt::format("{}.profraw", i), std::ios::binary) << "profile";
+    }
+}
+
+std::string mergedTracefile(const std::string &directory)
+{
+    return readFile((std::filesystem::path(directory) / kCoverageTracefile).string());
+}
+
+TEST(HostDispatchCoverageMicrotest, ProfilesAreReadFromTheDirectoryNamedAfterTheBinary)
+{
+    // The pairing childProfileFile() set up: profiles live under <coverage dir>/<binary
+    // filename>/, and reading them from anywhere else would hand llvm-cov another binary's data.
+    const ScopedDir dir("rccl-host-dispatch-coverage");
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 2);
+    FakeLlvm llvm;
+
+    writeMergedCoverage(dir.path(), {"/build/rccl-UnitTestsMicroInit"}, llvm.command());
+
+    ASSERT_EQ(llvm.commands().size(), 2u);
+    EXPECT_NE(llvm.commands()[0].find("rccl-UnitTestsMicroInit/0.profraw"), std::string::npos)
+        << llvm.commands()[0];
+    EXPECT_NE(llvm.commands()[0].find("rccl-UnitTestsMicroInit/1.profraw"), std::string::npos)
+        << llvm.commands()[0];
+    EXPECT_NE(mergedTracefile(dir.path()).find("SF:/src/rccl-UnitTestsMicroInit.cc"),
+              std::string::npos);
+}
+
+TEST(HostDispatchCoverageMicrotest, ABinaryThatLeftNoProfilesIsPassedOverSilently)
+{
+    // A binary excluded by the run's filter never ran, so it has nothing to export; invoking
+    // llvm-profdata on an empty profile list would turn that into a warning about every binary
+    // the caller deliberately did not select.
+    const ScopedDir dir("rccl-host-dispatch-coverage");
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 1);
+    FakeLlvm llvm;
+
+    writeMergedCoverage(dir.path(), {"/build/rccl-UnitTestsMicroNeverRan",
+                                     "/build/rccl-UnitTestsMicroInit"},
+                        llvm.command());
+
+    EXPECT_EQ(llvm.commands().size(), 2u);   // the one binary that ran, merged and exported
+    EXPECT_EQ(mergedTracefile(dir.path()).find("NeverRan"), std::string::npos);
+}
+
+TEST(HostDispatchCoverageMicrotest, AFailedMergeDropsOnlyThatBinary)
+{
+    // Best effort is the whole contract here: one binary llvm-profdata cannot read must not
+    // cost the run the coverage of every other binary beside it.
+    const ScopedDir dir("rccl-host-dispatch-coverage");
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroBroken", 1);
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 1);
+    FakeLlvm llvm;
+    llvm.failMergeFor("rccl-UnitTestsMicroBroken");
+
+    writeMergedCoverage(dir.path(),
+                        {"/build/rccl-UnitTestsMicroBroken", "/build/rccl-UnitTestsMicroInit"},
+                        llvm.command());
+
+    const std::string merged = mergedTracefile(dir.path());
+    EXPECT_EQ(merged.find("Broken"), std::string::npos) << merged;
+    EXPECT_NE(merged.find("SF:/src/rccl-UnitTestsMicroInit.cc"), std::string::npos) << merged;
+}
+
+TEST(HostDispatchCoverageMicrotest, AFailedExportLeavesNoPartialTracefileBehind)
+{
+    // The redirect creates the tracefile before llvm-cov runs. Leaving the empty file beside
+    // merged.profdata would make run_host_tests.sh take the export as done and skip the fallback
+    // that would otherwise have recovered this binary's coverage.
+    const ScopedDir dir("rccl-host-dispatch-coverage");
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroBroken", 1);
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 1);
+    FakeLlvm llvm;
+    llvm.failExportFor("rccl-UnitTestsMicroBroken");
+
+    writeMergedCoverage(dir.path(),
+                        {"/build/rccl-UnitTestsMicroBroken", "/build/rccl-UnitTestsMicroInit"},
+                        llvm.command());
+
+    EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(dir.path()) /
+                                         "rccl-UnitTestsMicroBroken" / "coverage.lcov"));
+    const std::string merged = mergedTracefile(dir.path());
+    EXPECT_EQ(merged.find("Broken"), std::string::npos) << merged;
+    EXPECT_NE(merged.find("SF:/src/rccl-UnitTestsMicroInit.cc"), std::string::npos) << merged;
+}
+
+TEST(HostDispatchCoverageMicrotest, EveryExportedBinaryReachesTheMergedTracefile)
+{
+    const ScopedDir dir("rccl-host-dispatch-coverage");
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 1);
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroUtils", 1);
+    FakeLlvm llvm;
+
+    writeMergedCoverage(dir.path(),
+                        {"/build/rccl-UnitTestsMicroInit", "/build/rccl-UnitTestsMicroUtils"},
+                        llvm.command());
+
+    const std::string merged = mergedTracefile(dir.path());
+    EXPECT_NE(merged.find("SF:/src/rccl-UnitTestsMicroInit.cc"), std::string::npos) << merged;
+    EXPECT_NE(merged.find("SF:/src/rccl-UnitTestsMicroUtils.cc"), std::string::npos) << merged;
+}
+
+TEST(HostDispatchCoverageMicrotest, NoBinaryExportedMeansNoTracefileAtAll)
+{
+    // An empty tracefile reads downstream as a tree with no coverage at all; writing nothing
+    // leaves the previous phase's file, and the caller's own fallback, intact.
+    const ScopedDir dir("rccl-host-dispatch-coverage");
+    FakeLlvm llvm;
+
+    writeMergedCoverage(dir.path(), {"/build/rccl-UnitTestsMicroInit"}, llvm.command());
+
+    EXPECT_TRUE(llvm.commands().empty());
+    EXPECT_FALSE(
+        std::filesystem::exists(std::filesystem::path(dir.path()) / kCoverageTracefile));
+}
+
 // ── runSelections ───────────────────────────────────────────────────
 
 // A scheduler driven through its spawn and reap seams, with no process ever created.
