@@ -4,12 +4,12 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Shared by sym-kernels-index-test.cc and sym-kernels-test.cc: both #include the generated
-// sym_kernels_host.cc, which declares 86 kernels as __global__ -- a real definition needs
-// hipLaunchKernel/__hipRegisterFunction, unavailable under -no-hip-rt. Include this AFTER
-// neutering __global__ (#undef/#define empty) and BEFORE #include SYM_KERNELS_HOST_CC_PATH.
-// The two callers compile into separate binaries, so including this from both is not an ODR
-// or link collision.
+// Shared by sym-kernels-index-test.cc, sym-kernels-test.cc and tuning/sym_kernels_wrapper.cc: all
+// #include the generated sym_kernels_host.cc, which declares 86 kernels as __global__ -- a real
+// definition needs hipLaunchKernel/__hipRegisterFunction, unavailable under -no-hip-rt. Include this
+// AFTER neutering __global__ (#undef/#define empty) and BEFORE #include SYM_KERNELS_HOST_CC_PATH.
+// The callers compile into separate binaries, so including this from each is not an ODR or link
+// collision.
 
 #ifndef RCCL_TEST_HOST_FAKES_SYM_KERNELS_TEST_STUBS_H_
 #define RCCL_TEST_HOST_FAKES_SYM_KERNELS_TEST_STUBS_H_
