@@ -358,7 +358,7 @@ TEST(AsyncMmaPolicyTest, TerminalMemoryFaultDrainsPendingMmaBeforePublishingFail
         state.failure_published.try_acquire_for(std::chrono::milliseconds(200));
     state.release_worker.release();
   });
-  EXPECT_NO_THROW(cu->step());
+  cu->step();
   release.join();
   fault_drain_state = nullptr;
   EXPECT_TRUE(observed_fault);
@@ -686,7 +686,7 @@ TEST(AsyncMmaPolicyTest, SynchronousFormatFailureDrainsEarlierMatrixWork) {
   EXPECT_FALSE(window.submit_mma(failing));
   ASSERT_NE(failing, nullptr);
   EXPECT_EQ(wave->instruction_execution_error(), amdgpu::InstructionExecutionError::None);
-  EXPECT_NO_THROW({ EXPECT_TRUE(cu->execute_instruction(failing.get(), *wave).failed()); });
+  { EXPECT_TRUE(cu->execute_instruction(failing.get(), *wave).failed()); }
   EXPECT_EQ(wave->instruction_execution_error(),
             amdgpu::InstructionExecutionError::UnsupportedOperandValue);
   size_t index = 0;

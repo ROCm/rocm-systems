@@ -430,7 +430,7 @@ TEST_F(Pm4PacketProcessorTest, FailedDependencyDoesNotExecuteOrRetirePacket) {
     return emit_error.emit() << "PM4 submission dependency failed";
   };
   testing::internal::CaptureStderr();
-  EXPECT_NO_THROW(EXPECT_EQ(service(), Pm4TestStatus::Faulted));
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
   EXPECT_EQ(testing::internal::GetCapturedStderr(),
             "[rj warn] PM4 queue failed: PM4 submission dependency failed\n");
   EXPECT_FALSE(queue.command_retry_pending);
@@ -467,7 +467,7 @@ TEST_P(Pm4CacheFlushFailureTest, PreventsPacketEffectAndRetirement) {
     ++flushes;
     return GetParam();
   };
-  EXPECT_NO_THROW(EXPECT_EQ(service(), Pm4TestStatus::Faulted));
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
   EXPECT_EQ(flushes, 1u);
   EXPECT_FALSE(queue.command_retry_pending);
   EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
@@ -480,7 +480,7 @@ TEST_P(Pm4CacheFlushFailureTest, PreventsSuccessfulStreamCompletion) {
   const std::array words{0xffff1000u};
   submit(words);
   context.flush_caches = [] { return GetParam(); };
-  EXPECT_NO_THROW(EXPECT_EQ(service(), Pm4TestStatus::Faulted));
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
   EXPECT_FALSE(queue.command_retry_pending);
   EXPECT_FALSE(completed);
   EXPECT_EQ(queue.commands.submissions.size(), 1u);
@@ -533,9 +533,9 @@ TEST_P(Pm4AdmissionTest, FaultsWithoutRetirementOrSuccessCompletion) {
     return Pm4RegisterWriteStatus::Complete;
   };
   testing::internal::CaptureStderr();
-  EXPECT_NO_THROW(EXPECT_EQ(service(), Pm4TestStatus::Faulted));
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
   // A faulted queue must neither replay its packet nor repeat the diagnostic.
-  EXPECT_NO_THROW(service());
+  service();
   const std::string diagnostic = testing::internal::GetCapturedStderr();
   const std::string::size_type reason_offset = diagnostic.find(packet.reason);
   EXPECT_NE(reason_offset, std::string::npos) << diagnostic;
@@ -663,7 +663,7 @@ TEST_F(Pm4PacketProcessorTest, RegisterPairFailurePreservesValidPrefixWithoutRet
   const std::array words{0xc003b800u, 0u, 99u, 0x2000u, 100u};
   submit(words, true);
   queue.commands.submissions.front().graphics_engine = true;
-  EXPECT_NO_THROW(EXPECT_EQ(service(), Pm4TestStatus::Faulted));
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
   EXPECT_EQ(queue.commands.context_registers[0], 99u);
   EXPECT_EQ(queue.commands.context_registers[1], 0u);
   EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
@@ -674,7 +674,7 @@ TEST_F(Pm4PacketProcessorTest, RejectsCommandExtentOverflowBeforeFetching) {
   const std::array words{0xffff1000u};
   submit(words, true);
   queue.commands.submissions.front().buffers.front().address = UINT64_MAX - 3;
-  EXPECT_NO_THROW(EXPECT_EQ(service(), Pm4TestStatus::Faulted));
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
   EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
   EXPECT_FALSE(completed);
 }
@@ -684,7 +684,7 @@ TEST_F(Pm4PacketProcessorTest, RejectsIndirectDispatchAddressOverflowBeforeDispa
   submit(words, true);
   queue.commands.submissions.front().graphics_engine = true;
   queue.commands.indirect_base = UINT64_MAX - 3;
-  EXPECT_NO_THROW(EXPECT_EQ(service(), Pm4TestStatus::Faulted));
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
   EXPECT_TRUE(dispatches.empty());
   EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
   EXPECT_FALSE(completed);

@@ -137,68 +137,71 @@ inline LongPathHandoff install_oversized_handoff(const std::filesystem::path &di
       supported.status() != LongPathHandoff::Status::kOk)
     return supported;
 
-  try {
-    const std::string parent = normalized_handoff_parent(dir);
-    const size_t parent_length = handoff_parent_length(parent);
-    const size_t pad_budget = kTargetParentLength - parent_length;
-
-    std::filesystem::path config_dir(parent);
-    if (pad_budget > 0) {
-      // Fewest components that keep each within kMaxComponentLength, with the
-      // characters left after the separators spread as evenly as possible.
-      const size_t components = (pad_budget + kMaxComponentLength) / (kMaxComponentLength + 1);
-      const size_t chars = pad_budget - components;
-      for (size_t i = 0; i < components; ++i)
-        config_dir /= std::string(chars / components + (i < chars % components ? 1 : 0), 'a');
-    }
-
-    // Self-check on the sizing arithmetic above, deliberately before anything touches
-    // the filesystem: a miscomputed length must surface here as kFail, not as the
-    // ENAMETOOLONG the catch below would forgive as an environment limit.
-    const std::filesystem::path config_path = config_dir / kLongConfigFileName;
-    if (config_path.string().size() != kTargetPathLength) {
-      std::ostringstream reason;
-      reason << "built a " << config_path.string().size() << "-byte config path from a "
-             << parent_length << "-byte handoff directory, expected " << kTargetPathLength;
-      return LongPathHandoff::fail(reason.str());
-    }
-
-    std::filesystem::create_directories(config_dir);
-    std::ofstream config(config_path);
-    config << config_json;
-    config.close();
-    if (!config)
-      return LongPathHandoff::fail("failed to write config to the long path");
-
-    std::ostringstream payload;
-    payload << config_path.string() << '\n' << kOversizedHandoffHostGpuId << '\n';
-    // The point of the whole exercise, so it is checked rather than assumed: a handoff that
-    // fits in one 4096-byte read would still pass both tests while proving nothing.
-    if (payload.str().size() < kMinHandoffPayloadSize) {
-      std::ostringstream reason;
-      reason << "built a " << payload.str().size() << "-byte handoff, expected at least "
-             << kMinHandoffPayloadSize;
-      return LongPathHandoff::fail(reason.str());
-    }
-
-    std::filesystem::create_directories(dir);
-    std::ofstream handoff(dir / "config_path", std::ios::trunc);
-    handoff << payload.str();
-    if (!handoff.good())
-      return LongPathHandoff::fail("failed to rewrite the config_path handoff");
-    return LongPathHandoff::ok();
-  } catch (const std::filesystem::filesystem_error &error) {
+  const auto filesystem_failure = [](const std::error_code &error) {
     // The built path is already proven to be the intended length, so ENAMETOOLONG
-    // here means this filesystem refuses a path the kernel itself allows -- a shorter
-    // internal limit, or name-expanding encryption -- which is a property of where the
-    // test runs. Every other code (EACCES, ENOSPC) is a real failure.
+    // means this filesystem refuses a path the kernel itself allows. Other
+    // errors, such as EACCES and ENOSPC, remain test failures.
     std::ostringstream reason;
     reason << "filesystem error building the " << kTargetPathLength
-           << "-byte path: " << error.what();
-    if (error.code() == std::errc::filename_too_long)
+           << "-byte path: " << error.message();
+    if (error == std::errc::filename_too_long)
       return LongPathHandoff::skip(reason.str());
     return LongPathHandoff::fail(reason.str());
+  };
+  std::error_code error;
+  const std::string parent = normalized_handoff_parent(dir);
+  const size_t parent_length = handoff_parent_length(parent);
+  const size_t pad_budget = kTargetParentLength - parent_length;
+
+  std::filesystem::path config_dir(parent);
+  if (pad_budget > 0) {
+    // Fewest components that keep each within kMaxComponentLength, with the
+    // characters left after the separators spread as evenly as possible.
+    const size_t components = (pad_budget + kMaxComponentLength) / (kMaxComponentLength + 1);
+    const size_t chars = pad_budget - components;
+    for (size_t i = 0; i < components; ++i)
+      config_dir /= std::string(chars / components + (i < chars % components ? 1 : 0), 'a');
   }
+
+  // Self-check on the sizing arithmetic above, deliberately before anything touches
+  // the filesystem: a miscomputed length must surface here as kFail, not as the
+  // ENAMETOOLONG the filesystem check below would forgive as an environment limit.
+  const std::filesystem::path config_path = config_dir / kLongConfigFileName;
+  if (config_path.string().size() != kTargetPathLength) {
+    std::ostringstream reason;
+    reason << "built a " << config_path.string().size() << "-byte config path from a "
+           << parent_length << "-byte handoff directory, expected " << kTargetPathLength;
+    return LongPathHandoff::fail(reason.str());
+  }
+
+  std::filesystem::create_directories(config_dir, error);
+  if (error)
+    return filesystem_failure(error);
+  std::ofstream config(config_path);
+  config << config_json;
+  config.close();
+  if (!config)
+    return LongPathHandoff::fail("failed to write config to the long path");
+
+  std::ostringstream payload;
+  payload << config_path.string() << '\n' << kOversizedHandoffHostGpuId << '\n';
+  // The point of the whole exercise, so it is checked rather than assumed: a handoff that
+  // fits in one 4096-byte read would still pass both tests while proving nothing.
+  if (payload.str().size() < kMinHandoffPayloadSize) {
+    std::ostringstream reason;
+    reason << "built a " << payload.str().size() << "-byte handoff, expected at least "
+           << kMinHandoffPayloadSize;
+    return LongPathHandoff::fail(reason.str());
+  }
+
+  std::filesystem::create_directories(dir, error);
+  if (error)
+    return filesystem_failure(error);
+  std::ofstream handoff(dir / "config_path", std::ios::trunc);
+  handoff << payload.str();
+  if (!handoff.good())
+    return LongPathHandoff::fail("failed to rewrite the config_path handoff");
+  return LongPathHandoff::ok();
 }
 
 } // namespace rocjitsu::test
