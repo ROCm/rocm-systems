@@ -4087,13 +4087,15 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
   if (comm->rank != peer) {
     int normalParts = rcclP2pTaskParts(comm, collAPI);
     bool directApi = collAPI == ncclFuncSend || collAPI == ncclFuncRecv || collAPI == ncclFuncSendRecv;
-    int tiles[2] = {normalParts, directApi ? rcclP2pChannelStride(comm, p2p) : normalParts};
-    for (int t = 0; t < (tiles[1] > tiles[0] ? 2 : 1); t++) {
+    int wideStride = directApi ? rcclP2pChannelStride(comm, p2p) : comm->p2pnChannelsPerPeer;
+    int partCounts[2] = {normalParts, wideStride};
+    int mappingStrides[2] = {comm->p2pnChannelsPerPeer, wideStride};
+    for (int t = 0; t < (wideStride > comm->p2pnChannelsPerPeer ? 2 : 1); t++) {
       uint8_t& seen = isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen;
       // A partial policy tile, such as multi-node AINIC Scatter, does not cover
       // the normal per-peer tile. Leave it unmarked so a later direct task can
       // connect the remaining channels.
-      bool completeTile = t != 0 || tiles[t] == comm->p2pnChannelsPerPeer;
+      bool completeTile = t != 0 || normalParts == comm->p2pnChannelsPerPeer;
       if (completeTile && (seen & (1 << t))) continue;
       if (completeTile) seen |= 1 << t;
       int round = 0;
@@ -4101,8 +4103,8 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
         round += 1;
       }
       uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclEffectiveP2pBatchEnable(comm));
-      for (int c = 0; c < tiles[t]; c++) {
-          int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, tiles[t], comm->nNodes,
+      for (int c = 0; c < partCounts[t]; c++) {
+          int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, mappingStrides[t], comm->nNodes,
                                                 comm->p2pChannelShiftSize);
           if (isSendNotRecv) {
             if (comm->channels[channelId].peers[peer]->send[1].hasSeen == 0) {

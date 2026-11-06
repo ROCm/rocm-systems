@@ -162,11 +162,12 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer,
   // larger ones, so it connects both.
   int normalParts = rcclP2pTaskParts(comm, collAPI);
   bool directApi = collAPI == ncclFuncSend || collAPI == ncclFuncRecv || collAPI == ncclFuncSendRecv;
-  int tiles[2] = {normalParts, directApi ? rcclP2pChannelStrideForApi(comm, collAPI, peer,
-                                                                       rcclParamP2pDirectMaxChannels(),
-                                                                       ncclP2pUsesMemcpy()) :
-                                           normalParts};
-  uint8_t tileMask = tiles[1] > tiles[0] ? 3 : 1;
+  int wideStride = directApi ? rcclP2pChannelStrideForApi(comm, collAPI, peer, rcclParamP2pDirectMaxChannels(),
+                                                           ncclP2pUsesMemcpy()) :
+                               comm->p2pnChannelsPerPeer;
+  int partCounts[2] = {normalParts, wideStride};
+  int mappingStrides[2] = {comm->p2pnChannelsPerPeer, wideStride};
+  uint8_t tileMask = wideStride > comm->p2pnChannelsPerPeer ? 3 : 1;
   uint8_t* seen = isSendNotRecv ? &planner->peers[peer].sendSeen : &planner->peers[peer].recvSeen;
   bool partialNormalTile = normalParts < comm->p2pnChannelsPerPeer;
   if (!partialNormalTile && (*seen & tileMask) == tileMask) return ncclSuccess;
@@ -180,10 +181,9 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer,
     bool completeTile = t != 0 || !partialNormalTile;
     if (completeTile && (*seen & (1 << t))) continue;
     if (completeTile) *seen |= 1 << t;
-    int channelStride = tiles[t];
-    for (int c = 0; c < channelStride; c++) {
-      int channelId =
-        ncclP2pChannelForPart(comm->p2pnChannels, base, c, channelStride, comm->nNodes, comm->p2pChannelShiftSize);
+    for (int c = 0; c < partCounts[t]; c++) {
+      int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, mappingStrides[t], comm->nNodes,
+                                            comm->p2pChannelShiftSize);
 
       // P2P uses only 1 connector. The send/recv connector is shared among split
       // shared comms, so set hasSeen to avoid duplicate connection setup if user

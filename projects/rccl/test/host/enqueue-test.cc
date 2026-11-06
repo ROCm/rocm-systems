@@ -5309,7 +5309,9 @@ TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_UnpairedSelfSendOrRecv_IsInvalid
 
 TEST_F(EnqueueMicrotest, ScheduleP2p_FourRoundsOf64Channels_FitOneKernelLaunch) {
   AllToAllPlanScene sc;
-  const ssize_t inArgs = ssize_t(ncclMaxKernelArgsSize(sc.bp.c()->cudaArch)) - ssize_t(sizeof(struct ncclDevKernelArgs));
+  // Pin the old 5-KiB ROCm budget: exact one-batch reservation fits all four
+  // rounds, while the reverted two-batch reservation does not.
+  const ssize_t inArgs = ssize_t(5 << 10) - ssize_t(sizeof(struct ncclDevKernelArgs));
   ASSERT_GE(inArgs, ssize_t(AllToAllPlanScene::kP2pChannels) * kBatch)
       << "precondition: the kernel-argument budget holds one batch per channel";
   ASSERT_EQ(ncclSuccess, sc.schedule(inArgs));

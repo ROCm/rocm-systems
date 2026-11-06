@@ -89,7 +89,6 @@ std::function<int(struct ncclComm*, ncclFunc_t)> g_rcclP2pTaskParts = DefaultP2p
 // task_posttuning.cc without the production enqueue/transport objects, so keep
 // the default-off policy here.
 int64_t rcclParamP2pDirectMaxChannels() { return 0; }
-bool ncclP2pUsesMemcpy() { return false; }
 int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t, int, int, bool) {
   return comm->p2pnChannelsPerPeer;
 }

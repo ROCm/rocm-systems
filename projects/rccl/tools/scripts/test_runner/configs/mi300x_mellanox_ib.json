@@ -1084,6 +1084,11 @@
           "test_filter": "P2pMaxNchannels*"
         },
         {
+          "name": "P2pDirectMaxChannels",
+          "description": "Opt-in direct P2P channel widening policy, bounds, and kernel-argument capacity",
+          "test_filter": "P2pDirectMaxChannelsTests.*"
+        },
+        {
           "name": "RcclAlltoAllDecision",
           "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
           "test_filter": "RcclAlltoAllDecision.*"
