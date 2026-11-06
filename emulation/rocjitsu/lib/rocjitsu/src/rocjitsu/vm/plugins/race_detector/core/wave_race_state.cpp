@@ -163,6 +163,8 @@ void WaveRaceState::registerEventWithIntervals(
       ttmpEventCount[reg]++;
     } else {
       vgprMemoryEvents[reg].push_back(eventId);
+      if (vgprMemoryEvents[reg].size() == 1 && vgprWatchHook)
+        vgprWatchHook(reg, true);
     }
   }
   waveMemoryEvents.push_back(eventId);
@@ -347,7 +349,9 @@ void WaveRaceState::retireEventRegisters(EventId eventId) {
       removeFromUnorderedList(ttmpMemoryEvents[regId], eventId);
       ttmpEventCount[regId]--;
     } else {
-      removeFromUnorderedList(getVgprMemoryEvents(regId), eventId);
+      removeFromUnorderedList(vgprMemoryEvents[regId], eventId);
+      if (vgprMemoryEvents[regId].empty() && vgprWatchHook)
+        vgprWatchHook(regId, false);
       regEventCountDec(eventType, regId);
     }
   }

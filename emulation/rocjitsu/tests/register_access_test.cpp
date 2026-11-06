@@ -115,7 +115,11 @@ struct WriteEvent {
 
 class RecordingPlugin : public ExecutionPlugin {
 public:
-  RecordingPlugin() : ExecutionPlugin("register_access_recorder") {}
+  explicit RecordingPlugin(std::string name = "register_access_recorder",
+                           bool watched_vgprs_only = false)
+      : ExecutionPlugin(std::move(name)), watched_vgprs_only_(watched_vgprs_only) {}
+
+  bool observes_only_watched_vgprs() const override { return watched_vgprs_only_; }
 
   void onAmdgpuReadVgprLanes(const Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
                              uint8_t byte_mask) override {
@@ -159,6 +163,9 @@ public:
   std::vector<const Wavefront *> scalar_read_wavefronts;
   std::vector<RegisterRef> scalar_writes;
   std::vector<const Wavefront *> scalar_write_wavefronts;
+
+private:
+  bool watched_vgprs_only_;
 };
 
 struct Fixture {
@@ -848,6 +855,76 @@ TEST(RegisterAccessTest, WriteRegionSetLanesRejectsWrongSpanSize) {
       }
     }
   }
+}
+
+// Replace the fixture's plugins with a watch-filtered recorder and, when
+// requested, an unfiltered one.
+std::pair<RecordingPlugin *, RecordingPlugin *> install_watch_recorders(Fixture &fx,
+                                                                        bool with_unfiltered) {
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto filtered = std::make_unique<RecordingPlugin>("watched_recorder", true);
+  RecordingPlugin *filtered_ptr = filtered.get();
+  group->add(std::move(filtered));
+  RecordingPlugin *unfiltered_ptr = nullptr;
+  if (with_unfiltered) {
+    auto unfiltered = std::make_unique<RecordingPlugin>("all_recorder");
+    unfiltered_ptr = unfiltered.get();
+    group->add(std::move(unfiltered));
+  }
+  fx.cu->set_plugin_group(group);
+  fx.plugin_group = group;
+  fx.plugin = nullptr;
+  return {filtered_ptr, unfiltered_ptr};
+}
+
+TEST(RegisterAccessTest, WatchFilterDeliversOnlyWatchedVgprs) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  auto [watched, unused] = install_watch_recorders(fx, /*with_unfiltered=*/false);
+  ASSERT_TRUE(fx.plugin_group->observes_only_watched_vgprs());
+  const uint32_t base = fx.vgpr_base();
+  fx.wf->watch_vgpr(3);
+
+  RegisterAccess regs(*fx.wf);
+  (void)regs.read_vgpr_region(base + 3, /*reg_count=*/2, /*lane_mask=*/0x1);
+  ASSERT_EQ(watched->reads.size(), 1u);
+  EXPECT_EQ(watched->reads[0].physical_reg, base + 3);
+
+  regs.write_vgpr_region(base + 4, /*reg_count=*/1, /*lane_mask=*/0x1).set_lane(0, 0, 1u);
+  EXPECT_TRUE(watched->writes.empty());
+  regs.write_vgpr_region(base + 3, /*reg_count=*/1, /*lane_mask=*/0x1).set_lane(0, 0, 1u);
+  ASSERT_EQ(watched->writes.size(), 1u);
+  EXPECT_EQ(watched->writes[0].physical_reg, base + 3);
+
+  // Watches are counted, so a register stays watched until every watch is withdrawn.
+  fx.wf->watch_vgpr(3);
+  fx.wf->unwatch_vgpr(3);
+  EXPECT_TRUE(fx.wf->vgpr_watched(3));
+  fx.wf->unwatch_vgpr(3);
+  EXPECT_FALSE(fx.wf->vgpr_watched(3));
+  (void)regs.read_vgpr_region(base + 3, /*reg_count=*/1, /*lane_mask=*/0x1);
+  EXPECT_EQ(watched->reads.size(), 1u);
+}
+
+TEST(RegisterAccessTest, WatchFilterAppliesOnlyWhenEveryVgprObserverOptsIn) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  auto [watched, all] = install_watch_recorders(fx, /*with_unfiltered=*/true);
+  EXPECT_FALSE(fx.plugin_group->observes_only_watched_vgprs());
+
+  RegisterAccess regs(*fx.wf);
+  (void)regs.read_vgpr_region(fx.vgpr_base() + 5, /*reg_count=*/1, /*lane_mask=*/0x1);
+  EXPECT_EQ(all->reads.size(), 1u);
+  EXPECT_EQ(watched->reads.size(), 1u);
+}
+
+TEST(RegisterAccessTest, SlotResetClearsVgprWatches) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->watch_vgpr(7);
+  ASSERT_TRUE(fx.wf->vgpr_watched(7));
+  fx.wf->reset();
+  EXPECT_FALSE(fx.wf->vgpr_watched(7));
 }
 
 TEST(RegisterAccessTest, ReadWriteRegionObservesThenAllowsWrites) {

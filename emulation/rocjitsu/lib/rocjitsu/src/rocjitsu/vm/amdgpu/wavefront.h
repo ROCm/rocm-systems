@@ -1058,6 +1058,7 @@ public:
     // Retain the vector allocation, but never retain a published decision.
     hot_hook_subscriptions_valid_ = false;
     hot_hook_observer_count_ = 0;
+    vgpr_watch_counts_.clear();
     pc = 0;
     wg_id_ = 0;
     wg_coord_ = {};
@@ -1292,12 +1293,32 @@ public:
       plugin_states_[slot].reset();
   }
 
+  /// Count one plugin's interest in callbacks for a VGPR, indexed from the
+  /// wave's VGPR allocation base. See ExecutionPlugin::observes_only_watched_vgprs().
+  void watch_vgpr(uint32_t logical_reg) const {
+    if (vgpr_watch_counts_.size() <= logical_reg)
+      vgpr_watch_counts_.resize(logical_reg + 1);
+    ++vgpr_watch_counts_[logical_reg];
+  }
+  /// Withdraw one watch added by watch_vgpr().
+  void unwatch_vgpr(uint32_t logical_reg) const {
+    assert(vgpr_watched(logical_reg) && "unbalanced VGPR unwatch");
+    if (vgpr_watched(logical_reg))
+      --vgpr_watch_counts_[logical_reg];
+  }
+  bool vgpr_watched(uint32_t logical_reg) const {
+    return logical_reg < vgpr_watch_counts_.size() && vgpr_watch_counts_[logical_reg] != 0;
+  }
+
 private:
   // Mutable: plugin state is externally-attached observer state, not part of
   // the wavefront's GPU simulation contract. The SIMD register-read path is
   // const (it doesn't alter GPU state), but plugins need to update their own
   // tracking during reads.
   mutable std::vector<std::unique_ptr<WavefrontState>> plugin_states_;
+  // Observer state like plugin_states_: per logical VGPR, how many plugins
+  // want its callbacks. Cleared when the slot is reused.
+  mutable std::vector<uint16_t> vgpr_watch_counts_;
   // ExecutionPluginGroup publishes one stable hot-hook decision per plugin
   // after all wave-dispatch callbacks have completed. Storage is retained
   // across slot reuse to avoid allocation on every dispatched wave.

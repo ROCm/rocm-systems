@@ -3693,6 +3693,73 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeLoadcntOrderingSlot) {
 INSTANTIATE_TEST_SUITE_P(LoadAndReturningAtomic, IgnoredGlobalMemoryRaceTest,
                          ::testing::Values(AtomicOp::NONE, AtomicOp::SWAP));
 
+// The race plugin asks for VGPR callbacks only on registers with pending
+// events, so a load's destination is watched from issue until its wait.
+class RaceVgprWatchTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto plugin = std::make_unique<RaceDetectorPlugin>();
+    race_plugin = plugin.get();
+    ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+    ASSERT_TRUE(f.plugin_group_->observes_only_watched_vgprs());
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+    wf = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(0x1u);
+    std::array<Wavefront *, 1> waves{wf};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0,
+                                                 /*physical_vgpr_count=*/256,
+                                                 /*sgpr_count=*/104, waves);
+  }
+
+  void load(uint32_t vgpr) {
+    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+    state->elem_size = 4;
+    state->num_elems = 1;
+    state->is_load = true;
+    state->exec_mask = state->lane_mask = 0x1u;
+    state->wf_size = wf->wf_size();
+    state->dst_reg_base = wf->vgpr_alloc().base + vgpr;
+    TestMemoryInstruction inst(std::move(state));
+    f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wf->pc, inst, *wf);
+    f.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *wf);
+  }
+
+  WaveRaceState &race_state() {
+    return *static_cast<RaceWavefrontState *>(wf->plugin_state(race_plugin->slot_index()))
+                ->race_state;
+  }
+
+  PluginFixture f;
+  RaceDetectorPlugin *race_plugin = nullptr;
+  Wavefront *wf = nullptr;
+};
+
+TEST_F(RaceVgprWatchTest, PendingLoadWatchesItsDestinationUntilWaited) {
+  load(7);
+  EXPECT_TRUE(wf->vgpr_watched(7));
+  EXPECT_FALSE(wf->vgpr_watched(8));
+  execute_wait(*f.plugin_group_, *wf, legacy_wait_word(wf->cu().arch(), 0, 15));
+  EXPECT_FALSE(wf->vgpr_watched(7));
+}
+
+TEST_F(RaceVgprWatchTest, HaltedWaveNoLongerUpdatesItsSlotWatches) {
+  load(7);
+  WaveRaceState &old_state = race_state();
+  f.plugin_group_->onAmdgpuWavefrontHalted(*wf);
+  // The slot is reused, and the new wave's plugin watches the same register.
+  wf->reset();
+  wf->watch_vgpr(7);
+  // Retiring the ended wave's load must not withdraw the new wave's watch.
+  PendingWaitCount wait;
+  wait.add(WaitCounterType::VMCNT, 0);
+  old_state.dispatch(wait);
+  EXPECT_TRUE(wf->vgpr_watched(7));
+}
+
 // Two CDNA4 waves share a 108-byte LDS allocation. The producer's M0 selects
 // allocation byte 64, and its active lanes 0, 2 and 5 write 16-byte lane slots
 // at bytes 64, 96 and 144. X3 writes the first 12 bytes of each slot and X4

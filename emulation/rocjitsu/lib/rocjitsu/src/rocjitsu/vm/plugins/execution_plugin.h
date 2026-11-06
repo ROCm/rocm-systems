@@ -101,6 +101,14 @@ public:
   virtual bool observes_vgpr_writes() const { return true; }
   virtual bool observes_scalar_register_writes() const { return true; }
 
+  /// Return true to receive VGPR read and write callbacks only for registers
+  /// that this plugin has marked with amdgpu::Wavefront::watch_vgpr(). The
+  /// filter takes effect only when every plugin in the group that observes
+  /// VGPRs returns true; otherwise all of them receive every callback. Update
+  /// watches from the wave's own instruction hooks, and stop updating a wave's
+  /// watches once it halts or is cancelled, because its slot can be reused.
+  virtual bool observes_only_watched_vgprs() const { return false; }
+
   /// Opt in to asynchronous arithmetic and its issue notification.
   /// Leave false when relying on synchronous before/after state inspection:
   /// any such plugin disables offload for its group. Async-aware plugins must

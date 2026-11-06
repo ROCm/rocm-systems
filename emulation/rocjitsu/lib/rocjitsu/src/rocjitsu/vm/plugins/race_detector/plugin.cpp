@@ -361,6 +361,14 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
   for (uint32_t w = 0; w < num_waves; ++w) {
     auto state = std::make_unique<RaceWavefrontState>();
     state->race_state = &det.getWaveRaceState(static_cast<int>(w));
+    // Register checks can only report VGPRs with pending events, so ask the
+    // core for callbacks on those registers only.
+    state->race_state->setVgprWatchHook([wf = wavefronts[w]](uint32_t reg, bool watched) {
+      if (watched)
+        wf->watch_vgpr(reg);
+      else
+        wf->unwatch_vgpr(reg);
+    });
     wavefronts[w]->set_plugin_state(slot_index(), std::move(state));
   }
 }

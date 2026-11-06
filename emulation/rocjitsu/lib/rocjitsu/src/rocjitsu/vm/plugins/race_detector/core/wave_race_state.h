@@ -10,6 +10,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <vector>
@@ -216,7 +217,15 @@ public:
     return regEventCount[static_cast<int>(type)][reg];
   }
 
-  std::vector<EventId> &getVgprMemoryEvents(int reg) { return vgprMemoryEvents[reg]; }
+  const std::vector<EventId> &getVgprMemoryEvents(int reg) const { return vgprMemoryEvents[reg]; }
+
+  /// Called with (register, true) when a VGPR gains its first pending event
+  /// and (register, false) when it loses its last. Read and write checks can
+  /// only report registers that have pending events. Pass an empty function to
+  /// stop notifications.
+  void setVgprWatchHook(std::function<void(uint32_t, bool)> hook) {
+    vgprWatchHook = std::move(hook);
+  }
 
   const std::vector<EventId> &getWaveMemoryEvents() const { return waveMemoryEvents; }
 
@@ -268,6 +277,7 @@ private:
 
   WaveId waveId;
   RaceDetector *detector;
+  std::function<void(uint32_t, bool)> vgprWatchHook;
   ProfilerInterface *profiler_ = &NullProfiler::instance();
 };
 
