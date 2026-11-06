@@ -367,11 +367,12 @@ def att_conflicts(**attrs):
 
 def test_att_serialize_all_conflicts_with_kernel_replay():
     # A disabled ATT context still returns bSerialize, so counter passes would stay serialized.
+    # dotdict takes a mapping, not keyword arguments.
     assert rocprofv3().kernel_replay_rejects_att_serialize_all(
-        rocprofv3().dotdict(att_serialize_all=True)
+        rocprofv3().dotdict({"att_serialize_all": True})
     )
     assert not rocprofv3().kernel_replay_rejects_att_serialize_all(
-        rocprofv3().dotdict(att_serialize_all=False)
+        rocprofv3().dotdict({"att_serialize_all": False})
     )
 
 

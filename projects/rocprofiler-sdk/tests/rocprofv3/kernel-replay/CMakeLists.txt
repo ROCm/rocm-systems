@@ -15,6 +15,11 @@ set(rocprofv3-generate-env
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     )
 
+# The ATT validators run validate.py directly, so they need the test package that
+# rocprofiler_add_integration_validate_test puts on PYTHONPATH for the other validators.
+set(rocprofv3-validate-env
+    "PYTHONPATH=${ROCPROFILER_SDK_TESTS_BINARY_DIR}/pytest-packages")
+
 rocprofiler_configure_pytest_files(COPY test_kernel_replay_cli.py)
 
 # Unit test for the rocprofv3 kernel-replay CLI logic. Imports rocprofv3.py directly, so
