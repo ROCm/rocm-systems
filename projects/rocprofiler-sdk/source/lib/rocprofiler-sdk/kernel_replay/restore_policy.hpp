@@ -46,8 +46,9 @@ enum class restore_mode : uint8_t
 // What earlier dispatches of a kernel on an agent found.
 struct history_t
 {
-    bool mostly_changed = false;  // the last hashed restore changed at least half the tiles
-    bool unlisted       = false;  // tiles changed off a reused list
+    uint32_t tiles    = 0;      // hashed by the last hashed restore, 0 before the first
+    uint32_t changed  = 0;      // of those, the ones it found changed
+    bool     unlisted = false;  // tiles changed off a reused list
 };
 
 struct kernel_key_t

@@ -96,11 +96,16 @@ split_for(std::uint32_t tile_count, std::uint32_t waves)
 // A tile's digest is the sum of digest_term(word, position) over its little-endian 8-byte words,
 // counting positions from the tile's start and zero-padding a partial last word. A sum does not
 // depend on which wave adds which word, so a tile copied in pieces is digested in the same pass.
+// Each term is splitmix64's finalizer of the word keyed by its position. Every step is invertible,
+// so two different words at one position never give the same term: changing any one word always
+// changes the digest.
 constexpr std::uint64_t
 digest_term(std::uint64_t word, std::uint64_t position)
 {
-    const auto value = word ^ (position * 0x9e3779b97f4a7c15ULL);
-    return ((word << 32) | (word >> 32)) + (value & 0xffffffffULL) * (value >> 32);
+    auto value = word ^ (position * 0x9e3779b97f4a7c15ULL);
+    value      = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    value      = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+    return value ^ (value >> 31);
 }
 
 // One argument block per kernel, passed by value. The SDK dispatches raw AQL packets and does not

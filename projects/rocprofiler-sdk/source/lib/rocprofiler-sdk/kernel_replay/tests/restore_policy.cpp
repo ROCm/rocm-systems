@@ -94,21 +94,37 @@ TEST(kernel_replay_restore_policy, one_pass_never_hashes)
     EXPECT_FALSE(policy::may_hash(inputs(1, 0)));
 }
 
-TEST(kernel_replay_restore_policy, history_turns_hashing_off)
+TEST(kernel_replay_restore_policy, history_turns_hashing_off_once_full_restores_move_less)
 {
-    const auto mostly_changed = policy::history_t{true, false};
-    EXPECT_EQ(policy::choose(inputs(4, 1024 * mib, 0, mostly_changed)), restore_mode::full);
-    EXPECT_EQ(policy::choose(inputs(4, 1024 * mib, 4 * mib, mostly_changed)),
+    // Hashing before every pass moves less until half the tiles change.
+    EXPECT_EQ(policy::choose(inputs(3, 1024 * mib, 0, policy::history_t{100, 49})),
+              restore_mode::hash_every_pass);
+    EXPECT_EQ(policy::choose(inputs(3, 1024 * mib, 0, policy::history_t{100, 50})),
+              restore_mode::full);
+    // Hashing once moves less until 1 - 1/(2N - 3) of them change: 4/5 with 4 passes, 6/7 with 5.
+    EXPECT_EQ(policy::choose(inputs(4, 1024 * mib, 0, policy::history_t{100, 79})),
+              restore_mode::hash_once);
+    EXPECT_EQ(policy::choose(inputs(4, 1024 * mib, 0, policy::history_t{100, 80})),
+              restore_mode::full);
+    EXPECT_EQ(policy::choose(inputs(5, 1024 * mib, 0, policy::history_t{7, 5})),
+              restore_mode::hash_once);
+    EXPECT_EQ(policy::choose(inputs(5, 1024 * mib, 0, policy::history_t{7, 6})),
+              restore_mode::full);
+    // Without a pass count, hashing once never moves more.
+    EXPECT_EQ(policy::choose(inputs(0, 1024 * mib, 0, policy::history_t{100, 100})),
+              restore_mode::hash_once);
+    // Pinned memory is hashed whatever changed.
+    EXPECT_EQ(policy::choose(inputs(4, 1024 * mib, 4 * mib, policy::history_t{100, 100})),
               restore_mode::hash_once);
 
-    const auto unlisted = policy::history_t{false, true};
+    const auto unlisted = policy::history_t{100, 1, true};
     EXPECT_EQ(policy::choose(inputs(4, 1024 * mib, 4 * mib, unlisted)), restore_mode::full);
     EXPECT_FALSE(policy::may_hash(inputs(4, 0, 0, unlisted)));
 }
 
 TEST(kernel_replay_restore_policy, requests_override_size_and_history)
 {
-    const auto history = policy::history_t{true, true};
+    const auto history = policy::history_t{100, 100, true};
     EXPECT_EQ(policy::choose(inputs(4, 16, 0, history, restore_mode::hash_once)),
               restore_mode::hash_once);
     EXPECT_EQ(policy::choose(inputs(4, 16, 0, history, restore_mode::hash_every_pass)),
@@ -121,20 +137,21 @@ TEST(kernel_replay_restore_policy, requests_override_size_and_history)
 TEST(kernel_replay_restore_policy, captures_keep_digests_before_the_size_is_known)
 {
     EXPECT_TRUE(policy::may_hash(inputs(4, 0)));
-    EXPECT_TRUE(policy::may_hash(inputs(2, 0, 0, policy::history_t{true, false})));
+    EXPECT_TRUE(policy::may_hash(inputs(2, 0, 0, policy::history_t{100, 100})));
 }
 
 TEST(kernel_replay_restore_policy, records_what_each_kernel_changed)
 {
     const auto kernel = policy::kernel_key_t{1, 0x1000};
     const auto other  = policy::kernel_key_t{2, 0x1000};
-    EXPECT_FALSE(policy::history_of(kernel).mostly_changed);
+    EXPECT_EQ(policy::history_of(kernel).tiles, 0U);
 
     policy::record(kernel, 100, 50, 0);
-    EXPECT_TRUE(policy::history_of(kernel).mostly_changed);
-    EXPECT_FALSE(policy::history_of(other).mostly_changed);
+    EXPECT_EQ(policy::history_of(kernel).tiles, 100U);
+    EXPECT_EQ(policy::history_of(kernel).changed, 50U);
+    EXPECT_EQ(policy::history_of(other).tiles, 0U);
     policy::record(kernel, 100, 49, 0);
-    EXPECT_FALSE(policy::history_of(kernel).mostly_changed);
+    EXPECT_EQ(policy::history_of(kernel).changed, 49U);
 
     // Once tiles changed off a reused list, that kernel keeps restoring everything.
     policy::record(kernel, 100, 1, 2);
