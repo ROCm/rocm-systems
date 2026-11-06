@@ -9,9 +9,11 @@
 #include "alloc.h"
 #include "bootstrap.h"
 #include "checks.h"
+#include "cudawrap.h"
 #include "debug.h"
 #include "p2p.h"
 
+#include <hip/hip_runtime.h>
 #include <cstring>
 
 namespace {
@@ -61,32 +63,49 @@ ncclResult_t ncclFabricMemHandler::exchangeMemPtrs() {
   std::vector<FabricExchEntry> entries(static_cast<size_t>(nranks_));
   memset(entries.data(), 0, entries.size() * sizeof(FabricExchEntry));
 
-  // Export this rank's allocation handle into an opaque fabric descriptor.
-  CUCHECK(cuMemExportToShareableHandle(&entries[static_cast<size_t>(rank_)].desc, selfHandle_, ncclCuMemHandleType, 0));
-  entries[static_cast<size_t>(rank_)].size = selfSize_;
+  // Always enter the allgather, even if export fails. A rank-local CUCHECK
+  // return here leaves peers blocked in the FabricExchEntry collective.
+  // Use HIP VMM APIs directly: hipify-perl + CUPFN/CUCHECK produce pfn_hipMem*
+  // / pfn_cuMem* mismatches on this TU (see p2p.cc for the CUDA PFN path).
+  hipError_t exp = hipMemExportToShareableHandle(&entries[static_cast<size_t>(rank_)].desc, selfHandle_,
+                                                 ncclCuMemHandleType, 0);
+  if (exp == hipSuccess) {
+    entries[static_cast<size_t>(rank_)].size = selfSize_;
+  } else {
+    memset(&entries[static_cast<size_t>(rank_)], 0, sizeof(FabricExchEntry));
+    WARN("ncclFabricMemHandler::exchangeMemPtrs: hipMemExportToShareableHandle failed");
+  }
 
   NCCLCHECK(bootstrapAllGather(bootstrap_, entries.data(), static_cast<int>(sizeof(FabricExchEntry))));
+  if (exp != hipSuccess) return ncclUnhandledCudaError;
 
   for (int i = 0; i < nranks_; ++i) {
     if (i == rank_) {
       continue;
     }
     CUmemGenericAllocationHandle peerHandle{};
-    CUCHECK(cuMemImportFromShareableHandle(&peerHandle, (void*)&entries[static_cast<size_t>(i)].desc,
-                                           ncclCuMemHandleType));
+    hipError_t imp = hipMemImportFromShareableHandle(&peerHandle, (void*)&entries[static_cast<size_t>(i)].desc,
+                                                     ncclCuMemHandleType);
+    if (imp != hipSuccess) {
+      WARN("ncclFabricMemHandler::exchangeMemPtrs: hipMemImportFromShareableHandle failed for peer %d", i);
+      return ncclUnhandledCudaError;
+    }
 
     // Reserve + map + set access for the imported handle
     void* peerPtr = nullptr;
     ncclResult_t res = ncclCuMemAllocAddr(&peerPtr, &peerHandle, entries[static_cast<size_t>(i)].size);
     if (res != ncclSuccess) {
-      (void)cuMemRelease(peerHandle);
+      (void)hipMemRelease(peerHandle);
       WARN("ncclFabricMemHandler::exchangeMemPtrs: ncclCuMemAllocAddr failed for peer %d", i);
       return res;
     }
     // Record the mapping before releasing the handle so the destructor can
-    // free it even if cuMemRelease below fails and returns early.
+    // free it even if hipMemRelease below fails and returns early.
     memPtrs_[static_cast<size_t>(i)] = peerPtr;
-    CUCHECK(cuMemRelease(peerHandle));
+    if (hipMemRelease(peerHandle) != hipSuccess) {
+      WARN("ncclFabricMemHandler::exchangeMemPtrs: hipMemRelease failed for peer %d", i);
+      return ncclUnhandledCudaError;
+    }
   }
 
   exchanged_ = true;
