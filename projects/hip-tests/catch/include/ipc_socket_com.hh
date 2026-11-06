@@ -38,7 +38,7 @@ class ipcSocketCom {
   // the maximum size of the user provided part of the name for the UNIX domain socket/Windows
   // mailslot; basically a result of the size of sockaddr_un::sun_path, minus 16 bytes for a PID,
   // 6 bytes for a random nonce, the initial '\0' and the dot '.' symbol
-  static constexpr int kSocketPrefixMaxSize = 108 -
+  static constexpr int kSocketUserPrefixMaxSize = 108 -
                                               kNonceDigitsSize -
                                               kPidBufferSize -
                                               2;
@@ -80,6 +80,16 @@ public:
   //         not be created)
   [[nodiscard]] bool initialize()
   {
+    // maximum name size without the PID (which is added at bind() time)
+    int maxNameSize = kSocketUserPrefixMaxSize + kNonceDigitsSize + 2;
+    if (prefix_.size() > maxNameSize) {
+      UNSCOPED_INFO("IPC object name prefix is too long: " <<
+                    prefix_.size() <<
+                    " maximum is " <<
+                    maxNameSize);
+      return false;
+    }
+
     handle.reset(new ipcHdl());
 
 #if HT_WIN
@@ -223,9 +233,8 @@ public:
     } control_un = {};
 
     struct cmsghdr *cmptr;
-    struct sockaddr_un cliaddr;
+    struct sockaddr_un cliaddr = {};
 
-    bzero(&cliaddr, sizeof(cliaddr));
     cliaddr.sun_family = AF_UNIX;
     std::memcpy(cliaddr.sun_path, name.data(), name.size());
 
@@ -256,7 +265,7 @@ public:
   }
 
   // @userPrefix a user-provided string that will be prepended to the name; must be less than
-  //             kSocketPrefixMaxSize characters; otherwise it will be truncated before used.
+  //             kSocketUserPrefixMaxSize characters; otherwise it will be truncated before used.
   //             e.g. a test name
   // @return     UNIX: an abstract name containing \0, the user prefix, a 6 hex-digit random
   //             number and '.'
@@ -264,7 +273,7 @@ public:
   static std::string generateIPCObjPrefix(const std::string& userPrefix)
   {
     using namespace std::string_literals;
-    std::string commonSuffix = userPrefix.substr(0, kSocketPrefixMaxSize) +
+    std::string commonSuffix = userPrefix.substr(0, kSocketUserPrefixMaxSize) +
                                generateRandomHex() +
                                ".";
 #if HT_WIN
@@ -315,7 +324,7 @@ private:
     addr_len = offsetof(struct sockaddr_un, sun_path) + name.size();
     servaddr.sun_family = AF_UNIX;
 
-    UNSCOPED_INFO("Binding IPC socket with name: " << name);
+    UNSCOPED_INFO("Binding IPC socket with name: " << name.substr(0, name.size()));
     if ((code = bind(serverFd_, reinterpret_cast<sockaddr *>(&servaddr), addr_len)) < 0) {
       UNSCOPED_INFO("bind failed: " << strerror(errno) << " when binding with name: " << name);
       return -1;
