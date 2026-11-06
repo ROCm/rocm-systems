@@ -224,7 +224,12 @@ jax.jit.train_step jax_workload.py:13 (calls: N, dispatches: M, total: T)
 
 Coverage gaps:
 
-- **`shard_map`.** Unmarked unless it sits under an outer `jit` / `pmap`.
+- **`shard_map` (`jax.shard_map`).** The gap is the marker name, not missing
+  GPU counters. You see the kernels; you do not get a `jax.shard_map.*` node.
+  - Under an outer `jit` / `pmap`, those kernels sit under that compiled
+    function (for example `jax.jit.shard_map_square`).
+  - A bare `jax.shard_map(...)(x)` has no `shard_map` node. Some kernels may
+    show under leftover `jax.jit.*` names.
 
 Design trade-offs:
 
