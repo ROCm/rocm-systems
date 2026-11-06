@@ -1,3 +1,9 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# The early-access runtimes/ tree is outside the repository's default build.
+# Cover its standalone CMake/Cargo build, host ABI tests and Rust quality here
+# without requiring a GPU.
 name: runtimes CI
 
 on:
@@ -9,14 +15,17 @@ on:
       - 'runtimes/**'
       - '.github/workflows/runtimes-ci.yml'
   pull_request:
-    branches:
-      - develop
+    types: [opened, synchronize, reopened, ready_for_review, edited]
     paths:
       - 'runtimes/**'
       - '.github/workflows/runtimes-ci.yml'
 
 permissions:
   contents: read
+
+env:
+  # Prepare dependencies once; all checks and CMake builds use this same home.
+  CARGO_HOME: ${{ github.workspace }}/.runtimes-cargo-home
 
 concurrency:
   # PR revisions supersede each other; distinct postsubmit commits do not.
@@ -52,6 +61,10 @@ jobs:
           rustup toolchain install "$RUST_VERSION" \
             --profile minimal --component clippy --component rustfmt
 
+      - name: Fetch locked dependencies
+        working-directory: runtimes
+        run: cargo +"$RUST_VERSION" fetch --locked
+
       - name: Check Rust formatting
         working-directory: runtimes
         run: cargo +"$RUST_VERSION" fmt --all --check
@@ -83,6 +96,8 @@ jobs:
             build_type: Release
     env:
       RUNTIME_BUILD_DIR: ${{ github.workspace }}/build/runtimes-${{ matrix.name }}
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
     steps:
       - name: Checkout runtimes
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -112,10 +127,11 @@ jobs:
           rustup toolchain install "$RUST_VERSION" \
             --profile minimal --component clippy --component rustfmt
 
+      - name: Fetch locked dependencies
+        working-directory: runtimes
+        run: cargo +"$RUST_VERSION" fetch --locked
+
       - name: Configure
-        env:
-          CC: ${{ matrix.cc }}
-          CXX: ${{ matrix.cxx }}
         run: |
           cargo=$(rustup which --toolchain "$RUST_VERSION" cargo)
           rustc=$(rustup which --toolchain "$RUST_VERSION" rustc)
@@ -131,6 +147,7 @@ jobs:
             -DROCM_RUNTIMES_CARGO="$cargo" \
             -DROCM_RUNTIMES_RUSTC="$rustc" \
             -DROCM_RUNTIMES_LLD="$lld" \
+            -DROCM_RUNTIMES_CARGO_HOME="$CARGO_HOME" \
             -DROCM_RUNTIMES_CARGO_JOBS="$(nproc)"
 
       - name: Build
