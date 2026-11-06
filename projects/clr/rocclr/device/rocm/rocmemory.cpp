@@ -1002,7 +1002,12 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
           deviceMemory_ = dev().hostAlloc(size(), 1, getHostMemorySegment(memFlags));
         }
       } else {
-        assert(!isHostMemDirectAccess() && "Runtime doesn't support direct access to GPU memory!");
+        // HSA_ENABLE_DTIF_FAST_COPY intentionally marks plain device allocations as host
+        // directly accessible, so only assert when the fast-copy path is disabled.
+        if (!HSA_ENABLE_DTIF_FAST_COPY) {
+          assert(!isHostMemDirectAccess() &&
+                 "Runtime doesn't support direct access to GPU memory!");
+        }
         amd::Device::AllocationFlags flags = {};
         flags.atomics_ = (memFlags & CL_MEM_SVM_ATOMICS) != 0;
         flags.pseudo_fine_grain_ = (memFlags & ROCCLR_MEM_HSA_UNCACHED) != 0;
