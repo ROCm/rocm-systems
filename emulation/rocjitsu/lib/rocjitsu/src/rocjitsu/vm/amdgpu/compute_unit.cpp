@@ -1813,8 +1813,10 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
   if (async_mma_policy::supported(arch())) {
     uint32_t word;
     const GpuVmAccess *vm_access = active->vm_access();
-    const bool resident = vm_access ? inst_cache_.peek_word(*vm_access, active->pc, word)
-                                    : inst_cache_.peek_word(active->pc, active->process_id(), word);
+    const uint64_t pc =
+        vm_access || active->process_id() ? active->vm_instruction_pc() : active->pc;
+    const bool resident = vm_access ? inst_cache_.peek_word(*vm_access, pc, word)
+                                    : inst_cache_.peek_word(pc, active->process_id(), word);
     if (resident) {
       if (!async_mma_policy::encoding_may_be_candidate(arch(), word)) {
         issue_instruction(active);
@@ -1942,14 +1944,15 @@ template <bool EnableAsync>
   static_assert(sizeof(words) == InstructionCache::kFetchBytes,
                 "the I$ fetch width must match the issue window");
   VmAccessOutcome fetch_outcome = VmAccessOutcome::Complete;
+  const uint64_t fetch_pc = vm_address_space ? active->vm_instruction_pc() : active->pc;
   if (vm_address_space) {
     if (debug_active()) {
       fetch_outcome = vm_access->read(
-          active->pc, std::span<std::byte>(reinterpret_cast<std::byte *>(words), sizeof(words)),
+          fetch_pc, std::span<std::byte>(reinterpret_cast<std::byte *>(words), sizeof(words)),
           VmAccessKind::Execute);
     } else {
       sync_inst_cache_debug_epoch();
-      fetch_outcome = inst_cache_.fetch(*vm_access, active->pc, reinterpret_cast<uint8_t *>(words));
+      fetch_outcome = inst_cache_.fetch(*vm_access, fetch_pc, reinterpret_cast<uint8_t *>(words));
     }
   } else if (debug_active()) {
     // A debugger writes breakpoints straight into code memory with none of the
@@ -1980,7 +1983,7 @@ template <bool EnableAsync>
       return IssueOutcome::NotIssued;
     }
     if (fetch_outcome == VmAccessOutcome::Faulted && memory_violation_handler_ &&
-        memory_violation_handler_(*active, active->pc, false, active->pc)) {
+        memory_violation_handler_(*active, fetch_pc, false, active->pc)) {
       return IssueOutcome::NotIssued;
     }
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
@@ -2058,7 +2061,7 @@ template <bool EnableAsync>
     bool may_submit = true;
     std::optional<uint64_t> issuer;
     auto *admission = storage ? storage->admission : nullptr;
-    if (window && window->take_issuer(active->pc)) {
+    if (window && window->take_issuer(fetch_pc)) {
       may_submit = false;
       if (admission)
         ++admission->stats.issuer;
@@ -2069,7 +2072,7 @@ template <bool EnableAsync>
       if (async_pool().available()) {
         MmaAdmissionCache::Words first;
         std::ranges::copy_n(words, first.size(), first.begin());
-        issuer = admission->inspect(*decoder_, inst_cache_, *memory_, vm_access, active->pc, vmid,
+        issuer = admission->inspect(*decoder_, inst_cache_, *memory_, vm_access, fetch_pc, vmid,
                                     active->num_vgprs(), storage->has_accvgprs, first);
         may_submit = issuer.has_value();
       }
