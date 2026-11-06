@@ -248,14 +248,22 @@ struct ncclProxyArgs {
 #define MAX_OPS_PER_PEER (2 * MAXCHANNELS * 2 * NCCL_MAX_DEV_WORK_P2P_PER_BATCH)
 
 struct ncclProxyOpsPool {
-  struct ncclProxyOp ops[MAX_OPS_PER_PEER * NCCL_MAX_LOCAL_RANKS];
   volatile int nextOps;
   volatile int nextOpsEnd;
   volatile int freeOps[NCCL_MAX_LOCAL_RANKS];
   int syncObjectsInitialized;
   std::mutex mutex;
   std::condition_variable cond;
+  // Must stay last: the shared mapping holds only the slices of the local ranks in use.
+  struct ncclProxyOp ops[MAX_OPS_PER_PEER * NCCL_MAX_LOCAL_RANKS];
 };
+
+// The pool lives in /dev/shm and is fully allocated up front, so map MAX_OPS_PER_PEER ops for each of the
+// proxy's tpLocalnRanks local ranks rather than for NCCL_MAX_LOCAL_RANKS. The creator and every attacher must
+// pass the same size, because the shm refcount is stored right after it.
+static inline size_t ncclProxyOpsPoolSize(int tpLocalnRanks) {
+  return offsetof(struct ncclProxyOpsPool, ops) + (size_t)tpLocalnRanks * MAX_OPS_PER_PEER * sizeof(struct ncclProxyOp);
+}
 
 struct ncclProxyOps {
   ncclProxyOpsPool* pool;
