@@ -485,7 +485,9 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
   vm_config.soc.xcd.shader_engine.compute_unit.async_resources = result.async_resources;
 
   // Rebuild the SoC root expected by LoadedConfig and create_from_loaded().
-  auto soc = std::make_unique<SoC>("gpu_soc", vm_config.soc);
+  auto soc = SoC::create("gpu_soc", vm_config.soc, emit_error);
+  if (!soc)
+    return util::Result::failure();
   auto *soc_ptr = soc.get();
   auto *mem_ptr = soc->memory();
 

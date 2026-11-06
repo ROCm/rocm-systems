@@ -111,7 +111,7 @@ public:
   /// @brief Flush all dirty lines to the backing store and invalidate.
   VmAccessOutcome flush_all();
 
-  void initialize() override {
+  util::Result initialize(util::DiagnosticEmitter = {}) override {
     for (const std::unique_ptr<simdojo::Port> &port : ports()) {
       if (port->direction() == simdojo::PortDirection::IN && !port->recv_event()->has_handler()) {
         port->recv_event()->set_handler([this](simdojo::Tick, simdojo::Message *message) {
@@ -134,6 +134,7 @@ public:
         });
       }
     }
+    return util::Result::success();
   }
 
   simdojo::Port *req_port() { return req_; }

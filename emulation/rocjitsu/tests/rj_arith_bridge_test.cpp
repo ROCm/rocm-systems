@@ -465,7 +465,7 @@ TEST(ArithBridgeTest, DppFloatReadsExecButWritesOnlyEnabledRows) {
 
 TEST(ArithBridgeTest, ExactMulStatusRespectsDppRows) {
   for (bool enabled : {false, true}) {
-    BridgeFixture fixture(false, 32, parse_arithmetic_policy("bit_exact_empirical"));
+    BridgeFixture fixture(false, 32, {ArithmeticSemantics::BitExactEmpirical});
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_exec(1);
     fixture.wave->set_mode_raw(0x1f0);

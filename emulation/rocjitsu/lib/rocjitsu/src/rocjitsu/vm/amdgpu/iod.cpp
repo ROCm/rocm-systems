@@ -65,7 +65,7 @@ simdojo::Port *Iod::create_cpl_port(const std::string &xcd_name) {
   return raw;
 }
 
-void Iod::initialize() {}
+util::Result Iod::initialize(util::DiagnosticEmitter) { return util::Result::success(); }
 
 } // namespace amdgpu
 } // namespace rocjitsu

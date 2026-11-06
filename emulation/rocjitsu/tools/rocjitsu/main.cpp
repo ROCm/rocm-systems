@@ -41,7 +41,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <exception>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -49,7 +48,6 @@
 #include <iterator>
 #include <optional>
 #include <poll.h>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <sys/prctl.h>
@@ -502,60 +500,55 @@ int main(int argc, char *argv[]) {
       std::cerr << "rocjitsu: --thread-budget-table cannot be combined with a launch mode\n";
       return 1;
     }
-    try {
-      rocjitsu::FailureOr<std::string> json = config_json_for_this_launch();
-      if (json.failed()) {
-        std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
-                                 launch_config_diagnostic.message());
-        return 1;
-      }
-      auto maybe_settings = rocjitsu::config::load_execution_thread_settings_from_string(
-          json.value(), rocjitsu::kEmbeddedSchema, launch_config_diagnostic.emitter());
-      if (maybe_settings.failed()) {
-        std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
-                                 launch_config_diagnostic.message());
-        return 1;
-      }
-      auto &settings = maybe_settings.value();
-      const uint32_t host = rocjitsu::amdgpu::available_host_threads();
-      std::cout
-          << "Budget | num_threads | cpu_dispatch_threads per GPU | async_helper_threads | Total\n";
-      auto print = [&](const std::string &label) -> util::Result {
-        util::FailureOr<rocjitsu::config::ExecutionThreadAllocation> allocation =
-            settings.resolve(host, launch_config_diagnostic.emitter());
-        if (allocation.failed())
-          return util::Result::failure();
-        const auto &plan = allocation.value();
-        uint64_t total = uint64_t{plan.engines} + plan.helpers;
-        std::string dispatch;
-        for (uint32_t width : plan.dispatch) {
-          if (!dispatch.empty())
-            dispatch += ",";
-          dispatch += std::to_string(width);
-          total += width - 1;
-        }
-        std::cout << std::format("{} | {} | {} | {} | {}\n", label, plan.engines, dispatch,
-                                 plan.helpers, total);
-        return util::Result::success();
-      };
-      if (print("Configured").failed()) {
-        std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
-                                 launch_config_diagnostic.message());
-        return 1;
-      }
-      for (uint32_t budget : {1u, 2u, 4u, 8u, 12u, 16u, 24u, 32u, 34u, 36u, 40u, 48u, 64u}) {
-        settings.request.budget = budget;
-        if (print(std::to_string(budget)).failed()) {
-          std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
-                                   launch_config_diagnostic.message());
-          return 1;
-        }
-      }
-      return 0;
-    } catch (const std::exception &e) {
-      std::cerr << std::format("rocjitsu: thread allocation failed: {}\n", e.what());
+    rocjitsu::FailureOr<std::string> json = config_json_for_this_launch();
+    if (json.failed()) {
+      std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
+                               launch_config_diagnostic.message());
       return 1;
     }
+    auto maybe_settings = rocjitsu::config::load_execution_thread_settings_from_string(
+        json.value(), rocjitsu::kEmbeddedSchema, launch_config_diagnostic.emitter());
+    if (maybe_settings.failed()) {
+      std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
+                               launch_config_diagnostic.message());
+      return 1;
+    }
+    auto &settings = maybe_settings.value();
+    const uint32_t host = rocjitsu::amdgpu::available_host_threads();
+    std::cout
+        << "Budget | num_threads | cpu_dispatch_threads per GPU | async_helper_threads | Total\n";
+    auto print = [&](const std::string &label) -> util::Result {
+      util::FailureOr<rocjitsu::config::ExecutionThreadAllocation> allocation =
+          settings.resolve(host, launch_config_diagnostic.emitter());
+      if (allocation.failed())
+        return util::Result::failure();
+      const auto &plan = allocation.value();
+      uint64_t total = uint64_t{plan.engines} + plan.helpers;
+      std::string dispatch;
+      for (uint32_t width : plan.dispatch) {
+        if (!dispatch.empty())
+          dispatch += ",";
+        dispatch += std::to_string(width);
+        total += width - 1;
+      }
+      std::cout << std::format("{} | {} | {} | {} | {}\n", label, plan.engines, dispatch,
+                               plan.helpers, total);
+      return util::Result::success();
+    };
+    if (print("Configured").failed()) {
+      std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
+                               launch_config_diagnostic.message());
+      return 1;
+    }
+    for (uint32_t budget : {1u, 2u, 4u, 8u, 12u, 16u, 24u, 32u, 34u, 36u, 40u, 48u, 64u}) {
+      settings.request.budget = budget;
+      if (print(std::to_string(budget)).failed()) {
+        std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
+                                 launch_config_diagnostic.message());
+        return 1;
+      }
+    }
+    return 0;
   }
 
   const pid_t my_pid = getpid();
@@ -611,19 +604,14 @@ int main(int argc, char *argv[]) {
   }
 
   rocjitsu::config::DbtGuestConfig dbt_guest_config;
-  try {
-    auto maybe_dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(
-        abs_config, launch_config_diagnostic.emitter());
-    if (maybe_dbt_guest.failed()) {
-      std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
-                               launch_config_diagnostic.message());
-      return 1;
-    }
-    dbt_guest_config = std::move(maybe_dbt_guest.value());
-  } catch (const std::exception &e) {
-    std::cerr << std::format("rocjitsu: failed to parse config: {}\n", e.what());
+  auto maybe_dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(
+      abs_config, launch_config_diagnostic.emitter());
+  if (maybe_dbt_guest.failed()) {
+    std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
+                             launch_config_diagnostic.message());
     return 1;
   }
+  dbt_guest_config = std::move(maybe_dbt_guest.value());
   const bool dbt_guest_mode = dbt_guest_config.enabled;
   if (dbt_guest_mode && (daemon_mode || attach_mode)) {
     std::cerr << "rocjitsu: dbt_guest mode currently supports local launch only\n";
@@ -655,30 +643,28 @@ int main(int argc, char *argv[]) {
     return 1;
 
   if (!dbt_guest_mode) {
-    try {
-      if (attach_mode) {
-        auto graph = rocjitsu::config::load_system_graph(abs_config, rocjitsu::kEmbeddedSchema,
-                                                         launch_config_diagnostic.emitter());
-        if (graph.failed()) {
-          std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
-                                   launch_config_diagnostic.message());
-          cleanup_runtime_files(my_pid);
-          return 1;
-        }
-        if (graph.value().explicit_manifest)
-          throw std::invalid_argument(
-              "system manifest attach requires daemon node identity checking");
-      }
-      auto validated = rocjitsu::config::validate_config(abs_config, rocjitsu::kEmbeddedSchema,
-                                                         launch_config_diagnostic.emitter());
-      if (validated.failed()) {
+    if (attach_mode) {
+      auto graph = rocjitsu::config::load_system_graph(abs_config, rocjitsu::kEmbeddedSchema,
+                                                       launch_config_diagnostic.emitter());
+      if (graph.failed()) {
         std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
                                  launch_config_diagnostic.message());
         cleanup_runtime_files(my_pid);
         return 1;
       }
-    } catch (const std::exception &e) {
-      std::cerr << std::format("rocjitsu: failed to parse config: {}\n", e.what());
+      if (graph.value().explicit_manifest) {
+        std::cerr
+            << "rocjitsu: failed to parse config: system manifest attach requires daemon node "
+               "identity checking\n";
+        cleanup_runtime_files(my_pid);
+        return 1;
+      }
+    }
+    auto validated = rocjitsu::config::validate_config(abs_config, rocjitsu::kEmbeddedSchema,
+                                                       launch_config_diagnostic.emitter());
+    if (validated.failed()) {
+      std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
+                               launch_config_diagnostic.message());
       cleanup_runtime_files(my_pid);
       return 1;
     }
@@ -712,19 +698,14 @@ int main(int argc, char *argv[]) {
       std::cerr << "rocjitsu: dbt_guest requires guest_isa and host_isa\n";
       return 1;
     }
-    try {
-      auto maybe_gpus = dbt_execution_gpu_ordinals(abs_config, dbt_guest_config,
-                                                   launch_config_diagnostic.emitter());
-      if (maybe_gpus.failed()) {
-        std::cerr << std::format("rocjitsu: failed to load DBT execution topology: {}\n",
-                                 launch_config_diagnostic.message());
-        return 1;
-      }
-      dbt_execution_gpus = std::move(maybe_gpus.value());
-    } catch (const std::exception &e) {
-      std::cerr << std::format("rocjitsu: failed to load DBT execution topology: {}\n", e.what());
+    auto maybe_gpus = dbt_execution_gpu_ordinals(abs_config, dbt_guest_config,
+                                                 launch_config_diagnostic.emitter());
+    if (maybe_gpus.failed()) {
+      std::cerr << std::format("rocjitsu: failed to load DBT execution topology: {}\n",
+                               launch_config_diagnostic.message());
       return 1;
     }
+    dbt_execution_gpus = std::move(maybe_gpus.value());
     if (!resolve_host_gpu(&dbt_guest_config, dbt_execution_gpus))
       return 1;
     hooks_path = find_hooks_lib();
