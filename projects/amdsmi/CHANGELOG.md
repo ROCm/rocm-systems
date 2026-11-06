@@ -15,6 +15,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added `CACHE_NAME` to `amd-smi static --cache`**.  
+  - Each `CACHE_<N>` entry now names its cache (`L1 Vector Data`, `L1 Scalar Data`, `L1 Instruction`, `GL1 Data`, `L2 Data`, ...), so level-1 caches that share the same `CACHE_ACRONYM` and properties can be told apart.
+
 - **Added unified `amdsmi_get_link_topology()` API on baremetal**.  
   - Returns link weight, status, type, hop count, and framebuffer-sharing data.
   - Matches the existing host interface; includes Python and Rust bindings.
