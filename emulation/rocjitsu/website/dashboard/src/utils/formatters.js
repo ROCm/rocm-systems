@@ -1,30 +1,24 @@
+import { isValidTimestamp } from './timestamp.js';
+
 const shortDateFormatter = new Intl.DateTimeFormat(undefined, {
   month: 'short',
   day: 'numeric',
   timeZone: 'UTC',
 });
 
-const fullDateFormatter = new Intl.DateTimeFormat(undefined, {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  timeZoneName: 'short',
-});
-
-export const formatShortDate = (timestamp) => typeof timestamp === 'string' && Number.isFinite(Date.parse(timestamp)) ? shortDateFormatter.format(new Date(timestamp)) : '-';
-export const formatFullDate = (timestamp) => typeof timestamp === 'string' && Number.isFinite(Date.parse(timestamp)) ? fullDateFormatter.format(new Date(timestamp)) : '-';
-
+export const formatShortDate = (timestamp) => isValidTimestamp(timestamp) ? shortDateFormatter.format(new Date(timestamp)) : '-';
 const runTimeFormatter = new Intl.DateTimeFormat(undefined, {
   year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
   hour12: false, timeZoneName: 'short',
 });
 
 export function formatRunTime(timestamp) {
-  return typeof timestamp === 'string' && Number.isFinite(Date.parse(timestamp))
+  return isValidTimestamp(timestamp)
     ? runTimeFormatter.format(new Date(timestamp)) : '—';
 }
+
+// Same text as formatRunTime; differs only in showing '-' rather than '—' for a missing or invalid time.
+export const formatFullDate = (timestamp) => (isValidTimestamp(timestamp) ? formatRunTime(timestamp) : '-');
 
 const compactRunTimeFormatter = new Intl.DateTimeFormat(undefined, {
   month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -32,7 +26,7 @@ const compactRunTimeFormatter = new Intl.DateTimeFormat(undefined, {
 });
 
 export function formatCompactRunTime(timestamp) {
-  return typeof timestamp === 'string' && Number.isFinite(Date.parse(timestamp))
+  return isValidTimestamp(timestamp)
     ? compactRunTimeFormatter.format(new Date(timestamp)) : '-';
 }
 

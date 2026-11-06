@@ -1784,6 +1784,10 @@ rcclArchThresholds MakeRankScaledTable() {
   t.ddaArVmmFirstMinRanks = 32;
   t.ddaArVmmFirstMinBytes = 2 * kMiB;
   t.ddaArVmmFirstMaxPerRank = 512 * kKiB;
+  t.ddaArRegCaptureMinBytes = 32 * kMiB;
+  t.ddaArRegCapturePerRankBytes = 2 * kMiB;
+  t.ddaArRegEagerMinShardBytes = 512 * kKiB;
+  t.ddaArRegEagerMaxShardBytes = 1 * kMiB;
   t.ddaVmmBlockBudget = 2048;
   t.ddaVmmMinBlocks = 32;
   t.ddaVmmMaxBlocks = 128;
@@ -3127,41 +3131,46 @@ TEST(WrapMicrotestIsolated, UseReduceScatterDirect_UnsupportedNodeCountReturnsFa
       });
 }
 
-// *** CONFIRMED REAL BUG, EMPIRICALLY VERIFIED *** in rcclUseReduceScatterDirect
-// (rccl_wrap.cc): `size_t threshold = ...; if (threshold > -1)` -- comparing an
-// unsigned size_t against the literal -1 promotes -1 to SIZE_MAX, so this
-// condition is ALWAYS FALSE regardless of what RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD
-// is set to. Execution always falls to the `else` branch, hardcoding
-// threshold=8388608 no matter what the user configures. This test proves it
-// directly: override the threshold to 100 via g_loadParam, use a msgSize
-// (1024) that's within the (buggy) 8MiB default but ABOVE the requested
-// 100-byte override -- if the override worked, this should return false; it
-// doesn't.
+// RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD=100 must reject a 1024-byte message; the
+// old `threshold > -1` guard ignored the override and always used 8 MiB.
 //
-// This also explains why the bug was never caught by any test above: every
-// other test in this section relies on the real default (8388608) rather
-// than overriding it, so they all pass regardless of whether the override
-// path works. This is the only test in the whole file that actually
-// exercises RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD's override path.
-//
-// The assertion below (EXPECT_TRUE) PINS the current, buggy behavior -- not
-// the intended one -- so this test passes today. If/when the production
-// `threshold > -1` bug gets fixed to `threshold != (size_t)-1` (matching the
-// working pattern used by rcclUseAllGatherDirect's equivalent check), this
-// assertion must flip to EXPECT_FALSE. Left failing-if-fixed deliberately,
-// so fixing the bug forces a conscious update here rather than silently
-// leaving a stale, wrong-direction test behind.
-TEST(WrapMicrotestIsolated, UseReduceScatterDirect_ThresholdOverride_PinsConfirmedBug) {
+// These two tests are the only coverage of the override path -- every other
+// case in this section leaves the default in place, which is why that bug
+// survived. Keep both: this one pins the override, the next pins the clamp.
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_ThresholdOverrideIsHonoured) {
   RUN_ISOLATED_TEST(
-      "Wrap_UseReduceScatterDirect_ThresholdOverride_PinsConfirmedBug",
+      "Wrap_UseReduceScatterDirect_ThresholdOverrideIsHonoured",
       []() {
         g_loadParam = ForceParam("RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD", int64_t(100));
         ncclComm* comm = MakeCommWithArch("gfx950");
         comm->nNodes = 8;
-        size_t msgSize = 1024; // > the requested 100-byte override, but within the buggy 8MiB fallback
-        EXPECT_TRUE(rcclUseReduceScatterDirect(comm, msgSize))
-            << "This pins CURRENT (buggy) behavior -- see the comment above. If this now "
-               "fails, the production threshold bug was fixed; flip this to EXPECT_FALSE.";
+        size_t msgSize = 1024; // > the requested 100-byte override, < the 8MiB hard limit
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize))
+            << "RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD=100 must exclude a 1024-byte message. "
+               "Seeing true here means the threshold is being ignored and the hardcoded "
+               "8MiB fallback is back -- see the sign-conversion note above.";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The 8MiB hard limit, which the std::min above applies. Before the
+// sign-conversion fix that clamp was unreachable -- the guard was always false,
+// so the else branch hardcoded 8MiB and std::min never ran. It executes for the
+// first time now, and it is what keeps enabled message sizes inside the
+// TEMP_BUFF_SIZE headroom noted at the clamp. 8 nodes accepts anything up to
+// the threshold, so raising the override past 8MiB isolates the clamp: without
+// it, threshold stays 16MiB and this message is accepted.
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_ThresholdAboveHardLimitIsClamped) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_ThresholdAboveHardLimitIsClamped",
+      []() {
+        g_loadParam = ForceParam("RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD", int64_t(16777216));
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 8;
+        size_t msgSize = 8388609; // 8MiB + 1: under the 16MiB override, over the clamp
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize))
+            << "A threshold above 8MiB must be clamped to 8388608. Seeing true here means "
+               "the hard limit is gone and messages can exceed the TEMP_BUFF_SIZE headroom.";
         DeleteCommWithArch(comm);
       });
 }
@@ -6090,7 +6099,568 @@ ncclComm* MakeArDdaComm(int nRanks) {
   comm->archThresholds = Gfx1250Table();
   return comm;
 }
+
+// Registered AllReduce (gfx1250 unless `arch` says otherwise) with symk withdrawn by symMaxR2: CE-registered runs
+// eager, Ring in capture. DDA tiers take sums only, as in production.
+class RegisteredAr {
+ public:
+  explicit RegisteredAr(int nRanks, const char* arch = "gfx1250") {
+    table_ = MakeCeVsSymkTable();
+    table_.symMaxR2[ncclFuncAllReduce] = 0;
+    table_.symMaxR2Graph[ncclFuncAllReduce] = 0;
+    table_.symMinR2[ncclFuncAllReduce] = 8 * kMiB;
+    table_.ddaLL128Max[ncclFuncAllReduce] = 256 * kMiB;
+    table_.ddaLLMax[ncclFuncAllReduce] = 32 * kMiB;
+    table_.ddaVmmMaxGraph[ncclFuncAllReduce] = 64 * kMiB;
+    table_.ddaArRegCaptureMinBytes = 32 * kMiB;
+    table_.ddaArRegCapturePerRankBytes = 2 * kMiB;
+    table_.ddaArRegEagerMinShardBytes = 512 * kKiB;
+    table_.ddaArRegEagerMaxShardBytes = 1 * kMiB;
+    g_ceImplemented = true;
+    comm_ = MakeCommWithArch(arch);
+    comm_->WarpSize = 32;
+    comm_->archThresholds = &table_;
+    comm_->symmetricSupport = 1;
+    SetRanks(nRanks);
+  }
+  ~RegisteredAr() {
+    g_ceImplemented = false;
+    comm_->nRanks = 1;
+    comm_->rankToNode = nullptr;
+    DeleteCommWithArch(comm_);
+  }
+
+  // The CE 2-shot gate sizes the LSA team from rankToNode: all ranks on one node.
+  void SetRanks(int nRanks) {
+    comm_->nRanks = nRanks;
+    rankToNode_.assign(nRanks, 0);
+    comm_->rankToNode = rankToNode_.data();
+  }
+
+  rcclCollDecision Select(size_t bytes, bool capturing, bool query = true, ncclRedOp_t op = ncclSum) {
+    capturing_ = capturing;
+    rcclCollDecision decision{};
+    EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm_, nullptr, nullptr, bytes / sizeof(float), ncclFloat32, op,
+                                                /*stream=*/nullptr, query, /*graphCapturingHint=*/capturing,
+                                                &decision));
+    return decision;
+  }
+
+  ncclComm* comm_;
+  rcclArchThresholds table_;
+  std::vector<int> rankToNode_;
+  // A capped reporter fake: records the cap and reports `fixed` blocks, at most cap.blocks.
+  DdaCappedBlocksHook CappedReport(uint32_t fixed) {
+    return [this, fixed](ncclComm*, size_t, ncclDataType_t, rcclDdaLaunchCap cap) {
+      reportedCap_ = cap;
+      return cap.blocks > 0 ? std::min(fixed, cap.blocks) : fixed;
+    };
+  }
+
+  // Expects the choice the re-route leaves alone: `algo` with no grid cap.
+  void ExpectUnchanged(size_t bytes, bool capturing, int algo, const char* why = "", bool query = true) {
+    SCOPED_TRACE(testing::Message() << why << " bytes=" << bytes << " capturing=" << capturing << " query=" << query);
+    const rcclCollDecision d = Select(bytes, capturing, query);
+    EXPECT_EQ(algo, d.algo);
+    EXPECT_EQ(0u, d.ddaCap.blocks);
+    EXPECT_EQ(0u, d.ddaCap.threads);
+  }
+
+  bool capturing_ = false;
+  bool symkRequested_ = true;
+  bool ceAvailable_ = true;
+  bool llEligible_ = false;
+  bool ll128Eligible_ = true;
+  bool vmmEligible_ = false;
+  bool mustEnqueue_ = false;
+  int ringAlgo_ = NCCL_ALGO_RING;
+  int ringChannels_ = 96;
+  int ringWarps_ = 8;
+  std::vector<size_t> ceChunkElems_;
+  rcclDdaLaunchCap reportedCap_{};
+
+  HookFor<decltype(g_isSymmetricKernelRequested)> symRequested_{
+      g_isSymmetricKernelRequested,
+      [this](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*, bool) {
+        return symkRequested_;
+      }};
+  HookFor<decltype(g_symkAvailable)> symkAvailable_{
+      g_symkAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; }};
+  HookFor<decltype(g_tuningCompute)> tuningCompute_{
+      g_tuningCompute, SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6)};
+  HookFor<decltype(g_ceAvailable)> ceAvailableHook_{
+      g_ceAvailable, [this](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+                            struct ncclDevrWindow*, struct ncclDevrWindow*) { return ceAvailable_; }};
+  HookFor<decltype(g_ceLocalReduceBlocks)> ceBlocks_{g_ceLocalReduceBlocks, [this](ncclDataType_t, size_t chunkElems) {
+                                                        ceChunkElems_.push_back(chunkElems);
+                                                        return 46;
+                                                      }};
+  HookFor<decltype(g_collectiveMustUseEnqueuePath)> enqueuePath_{g_collectiveMustUseEnqueuePath, [this](ncclComm* c) {
+                                                                   EXPECT_EQ(comm_, c);
+                                                                   return mustEnqueue_;
+                                                                 }};
+  HookFor<decltype(g_allReduceShouldTakeDdaPath)> shouldTakeDda_{
+      g_allReduceShouldTakeDdaPath,
+      [](const struct ncclComm*, size_t, ncclDataType_t, bool symEligible, bool) { return !symEligible; }};
+  HookFor<decltype(g_allReduceDdaFabricLL128Eligible)> ll128EligibleHook_{
+      g_allReduceDdaFabricLL128Eligible,
+      [this](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t op) {
+        return ll128Eligible_ && op == ncclSum;
+      }};
+  HookFor<decltype(g_allReduceDdaFabricLLEligible)> llEligibleHook_{
+      g_allReduceDdaFabricLLEligible,
+      [this](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t op) {
+        return llEligible_ && op == ncclSum;
+      }};
+  HookFor<decltype(g_allReduceDdaFabricEligible)> vmmEligibleHook_{
+      g_allReduceDdaFabricEligible,
+      [this](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t op) {
+        return vmmEligible_ && op == ncclSum;
+      }};
+  HookFor<decltype(g_allReduceDdaFabricLL128Blocks)> ll128Blocks_{g_allReduceDdaFabricLL128Blocks, CappedReport(114u)};
+  HookFor<decltype(g_allReduceDdaFabricLLBlocks)> llBlocks_{g_allReduceDdaFabricLLBlocks, CappedReport(113u)};
+  HookFor<decltype(g_allReduceDdaFabricBlocks)> vmmBlocks_{g_allReduceDdaFabricBlocks, CappedReport(112u)};
+  HookFor<decltype(g_getAlgoInfo)> ringInfo_{
+      g_getAlgoInfo, [this](struct ncclComm*, struct ncclTaskColl* task, int, int, int, ncclSimInfo_t*) {
+        task->algorithm = ringAlgo_;
+        task->protocol = NCCL_PROTO_LL128;
+        task->nMaxChannels = ringChannels_;
+        task->nWarps = ringWarps_;
+        return ncclSuccess;
+      }};
+  HookFor<decltype(g_cudaGetCapturingGraph)> graphProbe_{
+      g_cudaGetCapturingGraph, [this](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+        *graph = ncclCudaGraphNone(mode);
+#if ROCM_VERSION >= 60100
+        graph->graphId = capturing_ ? 1 : graph->graphId;
+#endif
+        return ncclSuccess;
+      }};
+};
 }  // namespace
+
+// Eager calls CE-registered would run take the DDA LL128 two-shot for 512K..1M shards, within CE's blocks and threads.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerShardsTakeLL128WithinCeGrid) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredEagerShardsTakeLL128WithinCeGrid",
+      []() {
+        RegisteredAr ar(8);
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        for (bool query : {true, false}) {
+          SCOPED_TRACE(query ? "query" : "live: stream probe and CE latch tick");
+          ar.ceChunkElems_.clear();
+          const rcclCollDecision on = ar.Select(8 * kMiB, /*capturing=*/false, query);
+          EXPECT_FALSE(on.ceCapturing);
+          EXPECT_EQ(ll128, on.algo) << "1M shards at symMinR2";
+          EXPECT_EQ(std::vector<size_t>{kMiB / sizeof(float)}, ar.ceChunkElems_) << "CE reduces one shard per launch";
+          EXPECT_EQ(46u, on.ddaCap.blocks);
+          EXPECT_EQ(256u, on.ddaCap.threads) << "the CE reduce kernel's block";
+          EXPECT_EQ(46u, ar.reportedCap_.blocks) << "the reporter sizes the capped grid";
+          EXPECT_EQ(46u, on.nMaxChannels);
+        }
+        EXPECT_EQ(ceReg, ar.Select(16 * kMiB, false).algo) << "2M shards";
+        const rcclCollDecision below = ar.Select(4 * kMiB, false);
+        EXPECT_EQ(ll128, below.algo) << "below symMinR2 DDA already runs, uncapped";
+        EXPECT_EQ(0u, below.ddaCap.blocks);
+        EXPECT_EQ(0u, below.ddaCap.threads);
+        ar.SetRanks(16);
+        EXPECT_EQ(ll128, ar.Select(8 * kMiB, false).algo) << "512K shards";
+        EXPECT_EQ(ll128, ar.Select(16 * kMiB, false).algo) << "1M shards";
+        EXPECT_EQ(ceReg, ar.Select(32 * kMiB, false).algo) << "2M shards";
+        ar.SetRanks(2);
+        EXPECT_EQ(ceReg, ar.Select(16 * kMiB, false).algo) << "two ranks, 8M shards";
+        ar.SetRanks(32);
+        EXPECT_EQ(ll128, ar.Select(32 * kMiB, false).algo) << "1M shards";
+        EXPECT_EQ(ceReg, ar.Select(64 * kMiB, false).algo) << "2M shards";
+      });
+}
+
+// The eager re-route replaces only a CE-registered that runs, in window, with LL128 on and eligible, launched directly.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerKeepsEveryOtherChoice) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredEagerKeepsEveryOtherChoice",
+      []() {
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        RegisteredAr ar(8);
+        ar.ceAvailable_ = false;
+        ar.ExpectUnchanged(8 * kMiB, false, NCCL_ALGO_RING, "CE unavailable for the buffers");
+        ar.ceAvailable_ = true;
+        ar.comm_->ceColl.graphModeSeen = true;
+        ar.ExpectUnchanged(8 * kMiB, false, NCCL_ALGO_RING, "a captured graph holds the CE latch");
+        ar.comm_->ceColl.graphModeSeen = false;
+        ar.table_.ceRegMax[ncclFuncAllReduce] = 4 * kMiB;
+        ar.ExpectUnchanged(8 * kMiB, false, NCCL_ALGO_RING, "CE-registered outside its window does not run");
+        ar.table_.ceRegMax[ncclFuncAllReduce] = kCeVsSymkRegCapBytes;
+        ar.mustEnqueue_ = true;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "enqueue runs CE for a CE decision");
+        ar.mustEnqueue_ = false;
+        ar.ll128Eligible_ = false;
+        ar.llEligible_ = true;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "LL eligible, LL128 not");
+        ar.llEligible_ = false;
+        ar.vmmEligible_ = true;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "VMM eligible, LL128 not");
+        ar.ll128Eligible_ = true;
+        ar.table_.ddaLL128Max[ncclFuncAllReduce] = 0;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "LL128 tier off");
+      });
+}
+
+// A user-set RCCL_DDA_LL128_THRESHOLD bounds the eager re-route: past it CE-registered keeps the call.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerStaysWithinUserLL128Cap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredEagerStaysWithinUserLL128Cap",
+      []() {
+        int64_t ll128Cap = 4 * kMiB;
+        g_loadParam = [&ll128Cap](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0 ? ll128Cap : def;
+        };
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        RegisteredAr ar(8);
+        ar.ExpectUnchanged(8 * kMiB, /*capturing=*/false, ceReg, "1M shards past a 4M cap");
+        ll128Cap = 8 * kMiB - 1;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "one byte past the cap");
+        for (size_t cap : {8 * kMiB, 16 * kMiB}) {
+          SCOPED_TRACE(testing::Message() << "cap=" << cap);
+          ll128Cap = (int64_t)cap;
+          const rcclCollDecision d = ar.Select(8 * kMiB, false);
+          EXPECT_EQ(ll128, d.algo);
+          EXPECT_EQ(46u, d.ddaCap.blocks) << "CE's reduce blocks";
+          EXPECT_EQ(256u, d.ddaCap.threads);
+        }
+        ar.SetRanks(16);
+        ll128Cap = 8 * kMiB;
+        EXPECT_EQ(ll128, ar.Select(8 * kMiB, false).algo) << "512K shards at the cap";
+        ar.ExpectUnchanged(16 * kMiB, false, ceReg, "1M shards past the cap");
+      });
+}
+
+// In graph capture Ring runs instead; DDA takes registered calls up to max(32M, n x 2M), within Ring's grid.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureTakesDdaWithinRingGrid) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredCaptureTakesDdaWithinRingGrid",
+      []() {
+        RegisteredAr ar(8);
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        for (bool query : {false, true}) {
+          SCOPED_TRACE(query ? "query" : "live: stream probe");
+          const rcclCollDecision d = ar.Select(16 * kMiB, /*capturing=*/true, query);
+          EXPECT_EQ(query ? 2 : 1, ar.ringInfo_.calls.load()) << "Ring is planned once per call, for the cap";
+          EXPECT_TRUE(d.ceCapturing);
+          EXPECT_EQ(ll128, d.algo);
+          EXPECT_EQ(96u, d.ddaCap.blocks) << "Ring's channels";
+          EXPECT_EQ(256u, d.ddaCap.threads) << "Ring's single-node block";
+          EXPECT_EQ(96u, d.nMaxChannels);
+        }
+        EXPECT_EQ(ll128, ar.Select(32 * kMiB, true).algo);
+        EXPECT_EQ(NCCL_ALGO_RING, ar.Select(64 * kMiB, true).algo);
+        ar.SetRanks(32);
+        EXPECT_EQ(ll128, ar.Select(64 * kMiB, true).algo);
+        EXPECT_EQ(NCCL_ALGO_RING, ar.Select(128 * kMiB, true).algo);
+      });
+}
+
+// In capture every DDA tier and its reporter carry Ring's grid; threads are Ring's block width (nWarps x WarpSize).
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureCapsEveryDdaTierAtRingsGrid) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredCaptureCapsEveryDdaTierAtRingsGrid",
+      []() {
+        RegisteredAr ar(8);
+        ar.ll128Eligible_ = false;
+        ar.llEligible_ = true;
+        rcclCollDecision d = ar.Select(16 * kMiB, /*capturing=*/true);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+        EXPECT_EQ(96u, d.ddaCap.blocks);
+        EXPECT_EQ(256u, d.ddaCap.threads);
+        EXPECT_EQ(96u, ar.reportedCap_.blocks) << "the LL reporter sizes the capped grid";
+        EXPECT_EQ(256u, ar.reportedCap_.threads);
+        EXPECT_EQ(96u, d.nMaxChannels);
+        ar.llEligible_ = false;
+        ar.vmmEligible_ = true;
+        ar.ringWarps_ = 4;
+        d = ar.Select(16 * kMiB, true);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, d.algo);
+        EXPECT_EQ(96u, d.ddaCap.blocks);
+        EXPECT_EQ(128u, d.ddaCap.threads) << "Ring at 4 warps of 32";
+        EXPECT_EQ(96u, ar.reportedCap_.blocks) << "the VMM reporter sizes the capped grid";
+        EXPECT_EQ(128u, ar.reportedCap_.threads);
+        EXPECT_EQ(96u, d.nMaxChannels);
+        ar.ringWarps_ = 1;
+        EXPECT_EQ(96u, ar.Select(16 * kMiB, true).ddaCap.threads) << "Ring blocks hold at least 3 warps";
+      });
+}
+
+// Every call outside the re-route keeps its choice and no grid cap: other arches (CE AllReduce and DDA IPC on),
+// a symk that runs, and unregistered buffers (which already run on uncapped DDA from symMinR2 up).
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteLeavesOtherCallsUnchanged) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredRerouteLeavesOtherCallsUnchanged",
+      []() {
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? 1 : def;
+        };
+        ScopedHook ipcEligible(g_allReduceDdaIpcEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        for (const char* arch : {"gfx942", "gfx950"}) {
+          SCOPED_TRACE(arch);
+          RegisteredAr ar(8, arch);
+          ar.ExpectUnchanged(8 * kMiB, /*capturing=*/false, (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED);
+          ar.ExpectUnchanged(16 * kMiB, /*capturing=*/true, NCCL_ALGO_RING);
+        }
+        {
+          SCOPED_TRACE("symk runs");
+          RegisteredAr ar(8);
+          ar.table_.symMaxR2[ncclFuncAllReduce] = kThreshUnlimited;
+          ar.table_.symMaxR2Graph[ncclFuncAllReduce] = kThreshUnlimited;
+          ar.ExpectUnchanged(8 * kMiB, /*capturing=*/false, (int)rcclAddonAlgos_t::RCCL_SYMMETRIC);
+          ar.ExpectUnchanged(16 * kMiB, /*capturing=*/true, (int)rcclAddonAlgos_t::RCCL_SYMMETRIC);
+        }
+        {
+          SCOPED_TRACE("unregistered");
+          RegisteredAr ar(8);
+          ar.symkRequested_ = false;
+          ar.ExpectUnchanged(8 * kMiB, /*capturing=*/false, ll128);
+          ar.ExpectUnchanged(16 * kMiB, /*capturing=*/true, ll128);
+        }
+      });
+}
+
+// The CE cap counts CE's reduce launch on the chunk ncclCeAllReduce picks, smaller than the shard when the staging
+// slot is (a resolved staging size, or before ncclCeInit, RCCL_CE_AR_STAGING_BYTES).
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerCeCapFollowsCeChunk) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredEagerCeCapFollowsCeChunk",
+      []() {
+        int64_t stagingParam = -1;
+        g_loadParam = [&stagingParam](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_CE_AR_STAGING_BYTES") == 0 ? stagingParam : def;
+        };
+        RegisteredAr ar(8);
+        constexpr size_t kShardElems = kMiB / sizeof(float);
+        constexpr size_t kSlotElems = 512 * 1024 / sizeof(float);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, ar.Select(8 * kMiB, false).algo);
+        EXPECT_EQ(std::vector<size_t>{kShardElems}, ar.ceChunkElems_) << "the default staging holds the shard";
+        ar.ceChunkElems_.clear();
+        ar.comm_->ceColl.ceArStagingBytes = 4 * kMiB;
+        ar.Select(8 * kMiB, false);
+        EXPECT_EQ(std::vector<size_t>{kSlotElems}, ar.ceChunkElems_) << "a 512K slot";
+        ar.ceChunkElems_.clear();
+        ar.comm_->ceColl.ceArStagingBytes = 0;
+        stagingParam = 4 * kMiB;
+        ar.Select(8 * kMiB, false);
+        EXPECT_EQ(std::vector<size_t>{kSlotElems}, ar.ceChunkElems_) << "the env var ncclCeInit will apply";
+      });
+}
+
+// Capture re-routes only where the planner runs Ring (fp8 plans Tree); the cap is Ring's packed channels and
+// max(nWarps, 3) warps.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureCapFollowsThePlannedKernel) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredCaptureCapFollowsThePlannedKernel",
+      []() {
+        RegisteredAr ar(8);
+        ar.ringAlgo_ = NCCL_ALGO_TREE;
+        ar.ringChannels_ = 40;
+        ar.ringWarps_ = 6;
+        ar.ExpectUnchanged(16 * kMiB, /*capturing=*/true, NCCL_ALGO_TREE, "planner picks Tree");
+        ar.ringAlgo_ = NCCL_ALGO_RING;
+        rcclCollDecision d = ar.Select(16 * kMiB, /*capturing=*/true);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo);
+        EXPECT_EQ(40u, d.ddaCap.blocks);
+        EXPECT_EQ(192u, d.ddaCap.threads) << "6 warps of 32";
+        ScopedHook packed(g_kernelPackedChannels,
+                          [](struct ncclComm*, ncclFunc_t, size_t, ncclDataType_t, int, int) { return 24; });
+        d = ar.Select(16 * kMiB, true);
+        EXPECT_EQ(24u, d.ddaCap.blocks) << "the channels the packed plan launches";
+        EXPECT_EQ(24u, d.nMaxChannels);
+      });
+}
+
+// Check-mode, suspended and revoked comms divert to enqueue, which plans Ring itself, so capture keeps Ring for them.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureKeepsRingOnEnqueueComms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredCaptureKeepsRingOnEnqueueComms",
+      []() {
+        RegisteredAr ar(8);
+        ar.mustEnqueue_ = true;
+        for (bool query : {true, false}) {
+          SCOPED_TRACE(query ? "query" : "live: stream probe");
+          const rcclCollDecision d = ar.Select(16 * kMiB, /*capturing=*/true, query);
+          EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+          if (query) {
+            EXPECT_EQ(NCCL_PROTO_LL128, d.protocol) << "the planner's Ring";
+          }
+          EXPECT_EQ(0u, d.ddaCap.blocks);
+          EXPECT_EQ(0u, d.ddaCap.threads);
+          EXPECT_EQ(0u, ar.reportedCap_.blocks) << "no DDA reporter ran";
+          EXPECT_EQ(0u, ar.reportedCap_.threads);
+        }
+        ar.mustEnqueue_ = false;
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, ar.Select(16 * kMiB, true).algo) << "a ready comm";
+      });
+}
+
+// CTA_POLICY_ZERO prefers CE: eager keeps CE-registered; capture falls back, with the warning, to DDA in Ring's grid.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteUnderZeroPolicy) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredRerouteUnderZeroPolicy",
+      []() {
+        RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        RegisteredAr ar(8);
+        ar.comm_->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        std::string log = RcclUnitTesting::CaptureLog([&]() {
+          for (bool query : {true, false}) {
+            ar.SetRanks(8);
+            ar.ExpectUnchanged(8 * kMiB, /*capturing=*/false, ceReg, "1M shards", query);
+            ar.SetRanks(16);
+            ar.ExpectUnchanged(16 * kMiB, false, ceReg, "1M shards", query);
+          }
+        });
+        EXPECT_FALSE(RcclUnitTesting::LogHas(log, "preferred backend")) << "CE-registered is the preferred backend";
+        ar.SetRanks(8);
+        for (bool query : {true, false}) {
+          SCOPED_TRACE(query ? "query" : "live: stream probe");
+          rcclCollDecision d{};
+          log = RcclUnitTesting::CaptureLog([&]() { d = ar.Select(16 * kMiB, /*capturing=*/true, query); });
+          EXPECT_EQ(ll128, d.algo) << "CE cannot run in capture, so the first in-window candidate runs";
+          EXPECT_EQ(NCCL_PROTO_LL128, d.protocol);
+          EXPECT_EQ(96u, d.nMaxChannels) << "the reporter sizes Ring's grid";
+          EXPECT_EQ(96u, d.ddaCap.blocks) << "Ring's channels";
+          EXPECT_EQ(256u, d.ddaCap.threads) << "Ring's block width";
+          EXPECT_TRUE(RcclUnitTesting::LogHas(log, "preferred backend")) << "the fallback warning fires";
+        }
+      });
+}
+
+// Below symMinR2 symk is not withdrawn, so a captured registered sum already runs on DDA, with no Ring cap.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureBelowSymMinKeepsUncappedDda) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredCaptureBelowSymMinKeepsUncappedDda",
+      []() {
+        RegisteredAr ar(8);
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        for (bool query : {true, false}) {
+          SCOPED_TRACE(query ? "query" : "live: stream probe");
+          for (size_t bytes : {4 * kMiB, 8 * kMiB - sizeof(float)}) {
+            SCOPED_TRACE(testing::Message() << "bytes=" << bytes);
+            ar.ringInfo_.calls = 0;
+            ar.reportedCap_ = {};
+            const rcclCollDecision d = ar.Select(bytes, /*capturing=*/true, query);
+            EXPECT_TRUE(d.ceCapturing);
+            EXPECT_EQ(ll128, d.algo);
+            EXPECT_EQ(0u, d.ddaCap.blocks);
+            EXPECT_EQ(0u, d.ddaCap.threads);
+            EXPECT_EQ(114u, d.nMaxChannels) << "the LL128 reporter's own grid";
+            EXPECT_EQ(0u, ar.reportedCap_.blocks);
+            EXPECT_EQ(0, ar.ringInfo_.calls.load()) << "Ring is not planned for a cap";
+          }
+          const rcclCollDecision atMin = ar.Select(8 * kMiB, true, query);
+          EXPECT_EQ(ll128, atMin.algo);
+          EXPECT_EQ(96u, atMin.ddaCap.blocks) << "from symMinR2 up the re-route caps at Ring's grid";
+        }
+      });
+}
+
+// In capture DDA LL takes registered sums up to its cap (32M here), LL128 just past it; both within Ring's grid.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureTierFollowsTheLLCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredCaptureTierFollowsTheLLCap",
+      []() {
+        RegisteredAr ar(32);  // The capture bound max(32M, 32 x 2M) = 64M lies past the 32M LL cap.
+        ar.llEligible_ = true;
+        const int ll = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL;
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        for (bool query : {true, false}) {
+          SCOPED_TRACE(query ? "query" : "live: stream probe");
+          for (size_t bytes : {32 * kMiB, 32 * kMiB + sizeof(float)}) {
+            SCOPED_TRACE(testing::Message() << "bytes=" << bytes);
+            ar.reportedCap_ = {};
+            const rcclCollDecision d = ar.Select(bytes, /*capturing=*/true, query);
+            EXPECT_EQ(bytes <= 32 * kMiB ? ll : ll128, d.algo);
+            EXPECT_EQ(96u, d.ddaCap.blocks) << "Ring's channels";
+            EXPECT_EQ(256u, d.ddaCap.threads) << "Ring's single-node block";
+            EXPECT_EQ(96u, ar.reportedCap_.blocks) << "the chosen tier's reporter sizes the capped grid";
+            EXPECT_EQ(96u, d.nMaxChannels);
+          }
+        }
+      });
+}
+
+// A user-set NCCL_ALGO skips every RCCL backend, so registered sums reach the planner with no re-route and no cap.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredNcclAlgoEnvKeepsThePlannersChoice) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredNcclAlgoEnvKeepsThePlannersChoice",
+      []() {
+        SetMicroEnv("NCCL_ALGO", "Ring");
+        RegisteredAr ar(8);
+        for (bool query : {true, false}) {
+          for (bool capturing : {false, true}) {
+            SCOPED_TRACE(testing::Message() << "query=" << query << " capturing=" << capturing);
+            ar.ceChunkElems_.clear();
+            const rcclCollDecision d = ar.Select(capturing ? 16 * kMiB : 8 * kMiB, capturing, query);
+            EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+            EXPECT_EQ(query ? NCCL_PROTO_LL128 : NCCL_PROTO_SIMPLE, d.protocol) << "live: enqueue plans it";
+            EXPECT_EQ(query ? 96u : 0u, d.nMaxChannels);
+            EXPECT_EQ(0u, d.ddaCap.blocks);
+            EXPECT_EQ(0u, d.ddaCap.threads);
+            EXPECT_TRUE(ar.ceChunkElems_.empty()) << "no CE cap is sized";
+          }
+        }
+      });
+}
+
+// Only a sum requests symk, so another op is never re-routed: eager keeps CE-registered, capture keeps Ring.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredNonSumKeepsCeAndRing) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredNonSumKeepsCeAndRing",
+      []() {
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        for (ncclRedOp_t op : {ncclProd, ncclMax}) {
+          RegisteredAr ar(8);  // Fresh per op: a live capture latches CE off for later eager calls.
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, ar.Select(8 * kMiB, false).algo) << "a sum re-routes";
+          for (bool query : {true, false}) {
+            SCOPED_TRACE(testing::Message() << "op=" << (int)op << " query=" << query);
+            ar.ceChunkElems_.clear();
+            rcclCollDecision d = ar.Select(8 * kMiB, /*capturing=*/false, query, op);
+            EXPECT_EQ(ceReg, d.algo);
+            EXPECT_EQ(46u, d.nMaxChannels) << "CE's reduce blocks";
+            EXPECT_EQ(0u, d.ddaCap.blocks);
+            EXPECT_EQ(0u, d.ddaCap.threads);
+            EXPECT_EQ(std::vector<size_t>{kMiB / sizeof(float)}, ar.ceChunkElems_) << "only CE's own launch is sized";
+            ar.ringInfo_.calls = 0;
+            d = ar.Select(16 * kMiB, /*capturing=*/true, query, op);
+            EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+            EXPECT_EQ(0u, d.ddaCap.blocks);
+            EXPECT_EQ(0u, d.ddaCap.threads);
+            EXPECT_EQ(query ? 1 : 0, ar.ringInfo_.calls.load()) << "Ring is planned only for the report, not for a cap";
+          }
+        }
+      });
+}
+
+// Eager shard band 512K..1M of a whole per-rank shard; capture keeps DDA up to max(32M, n x 2M); no table, neither.
+TEST(WrapMicrotest, DdaArRegisteredWindowBounds) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->nRanks = 8;
+  EXPECT_EQ(0u, rcclDdaArRegCaptureMaxBytes(comm)) << "this binary's rcclGetArchThresholds has no table";
+  EXPECT_FALSE(rcclDdaArRegEagerShardFits(comm, 8 * kMiB));
+  comm->archThresholds = Gfx1250Table();
+  EXPECT_TRUE(rcclDdaArRegEagerShardFits(comm, 4 * kMiB));
+  EXPECT_FALSE(rcclDdaArRegEagerShardFits(comm, 4 * kMiB - 8));
+  EXPECT_TRUE(rcclDdaArRegEagerShardFits(comm, 8 * kMiB));
+  EXPECT_FALSE(rcclDdaArRegEagerShardFits(comm, 8 * kMiB + 8));
+  EXPECT_FALSE(rcclDdaArRegEagerShardFits(comm, 8 * kMiB - 4)) << "its floor shard is in the band, but not whole";
+  EXPECT_FALSE(rcclDdaArRegEagerShardFits(nullptr, 16 * kMiB));
+  EXPECT_EQ(32 * kMiB, rcclDdaArRegCaptureMaxBytes(comm));
+  comm->nRanks = 32;
+  EXPECT_EQ(64 * kMiB, rcclDdaArRegCaptureMaxBytes(comm));
+  DeleteCommWithArch(comm);
+}
 
 // ===========================================================================
 // rcclSelectAllReduce -- preferred-backend mask integration tests.
@@ -8272,6 +8842,52 @@ namespace real_arch_thresholds {
 // The real tables, namespaced so they do not collide with fakes/rccl_arch_thresholds_fakes.cc.
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
+
+// The registered AllReduce re-route reads its bounds from the arch table: the gfx1250 SPX table re-routes, while the
+// DPX table, no table and RCCL_IGNORE_ARCH_TABLE=1 keep the choice symk's withdrawal leaves, with no grid cap.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteFollowsTheArchTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredRerouteFollowsTheArchTable",
+      []() {
+        int64_t ignoreTable = 0;
+        g_loadParam = [&ignoreTable](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_IGNORE_ARCH_TABLE") == 0) {
+            return ignoreTable;
+          }
+          // symk withdraws, and CE AllReduce and LL128 stay on, with no table too: the re-route's table check decides.
+          if (std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0) {
+            return 256 * kMiB;
+          }
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) {
+            return 1;
+          }
+          return std::strcmp(env, "RCCL_SYM_K_MAX_BYTES") == 0 ? 0 : def;
+        };
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        RegisteredAr ar(8);
+        ar.comm_->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, ar.comm_->archThresholds);
+        rcclCollDecision d = ar.Select(8 * kMiB, /*capturing=*/false);
+        EXPECT_EQ(ll128, d.algo) << "SPX eager";
+        EXPECT_EQ(256u, d.ddaCap.threads);
+        d = ar.Select(16 * kMiB, /*capturing=*/true);
+        EXPECT_EQ(ll128, d.algo) << "SPX capture";
+        EXPECT_EQ(96u, d.ddaCap.blocks);
+        ar.comm_->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        ASSERT_NE(nullptr, ar.comm_->archThresholds);
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "DPX eager");
+        ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, "DPX capture");
+        ar.comm_->archThresholds = nullptr;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "no table, eager");
+        ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, "no table, capture");
+        ar.comm_->archThresholds = &ar.table_;
+        EXPECT_EQ(ll128, ar.Select(8 * kMiB, false).algo) << "the fixture's table re-routes";
+        ignoreTable = 1;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "RCCL_IGNORE_ARCH_TABLE=1, eager");
+        ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, "RCCL_IGNORE_ARCH_TABLE=1, capture");
+      });
+}
 
 // Only the DPX table sets the AllGather LL128 block size and block cap.
 TEST(WrapMicrotestIsolated, DdaFabricAgLL128Shape_FromDpxTable) {

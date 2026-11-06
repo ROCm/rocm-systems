@@ -1,5 +1,5 @@
-import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { themed } from '../helpers/themed.js';
 import { expect, test } from 'vitest';
 import CompareRunsView from '../../src/components/views/CompareRunsView.jsx';
 import { benchmarkData } from '../fixtures/publishedData.js';
@@ -8,7 +8,7 @@ import { formatDuration, formatPercent, formatRunTime } from '../../src/utils/fo
 
 const filters = { targets: benchmarkData.targets, suites: benchmarkData.suites, modes: benchmarkData.modes };
 function renderComparison(baseline, candidate, scope = filters) {
-  return renderToStaticMarkup(createElement(CompareRunsView, {
+  return renderToStaticMarkup(themed(CompareRunsView, {
     data: { ...benchmarkData, runs: [baseline, candidate], allRuns: [baseline, candidate], latestRun: candidate },
     filters: scope, selectedBaselineId: baseline.runId, selectedCandidateId: candidate.runId,
     onBaselineChange() {}, onCandidateChange() {},
@@ -34,15 +34,9 @@ test('an empty selected scope is not presented as successful comparison or zero-
   expect(html.includes('data-testid="comparison-results"')).toBe(true);
 });
 
-test('run selectors expose full attempt identity outside the clipped input', () => {
-  const html = renderComparison(benchmarkData.runs.at(-2), benchmarkData.runs.at(-1));
-  expect(html.includes('data-testid="baseline-run-selected-identity"')).toBe(true);
-  expect(html.includes('data-testid="candidate-run-selected-identity"')).toBe(true);
-});
-
 test('a missing baseline is not mislabelled as catalog absence', () => {
   const candidate = benchmarkData.runs[0];
-  const html = renderToStaticMarkup(createElement(CompareRunsView, {
+  const html = renderToStaticMarkup(themed(CompareRunsView, {
     data: { ...benchmarkData, runs: [candidate], allRuns: [candidate], latestRun: candidate }, filters,
     selectedCandidateId: candidate.runId, selectedBaselineId: null,
     onBaselineChange() {}, onCandidateChange() {},

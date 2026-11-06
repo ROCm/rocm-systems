@@ -10,6 +10,7 @@
 #include "rocjitsu/base/api.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cstdint>
 #include <optional>
@@ -138,6 +139,15 @@ struct RegisterModifiers {
   uint8_t memory_result_last_bytes = 0xf;
   bool exec_all_if_nonzero = false;
   bool exec_whole_quads = false;
+
+  /// VADDR operand enabling coordinate tracking.
+  const Operand *image_address = nullptr;
+  /// Coordinate VGPR selectors, including NSA selectors.
+  std::array<uint32_t, 4> image_coordinates{};
+  /// Number of tracked coordinate components.
+  uint8_t image_coordinate_count = 0;
+  /// Coordinates occupy packed 16-bit halves.
+  bool image_a16 = false;
   uint8_t scalar_buffer_words = 0; // Zero selects a complete vector descriptor.
   bool src2_is_wave_mask = false;
   const Operand *wordwise_source0 = nullptr;

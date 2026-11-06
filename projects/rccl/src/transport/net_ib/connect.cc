@@ -1669,11 +1669,11 @@ ncclResult_t ncclIbAcceptImpl(void* listenComm, void** recvComm, ncclNetDeviceHa
   }
 
   NCCLCHECK(ncclIbMalloc((void**)&rComm, sizeof(struct ncclIbRecvComm)));
+  NCCLCHECKGOTO(ncclSocketInit(&rComm->base.sock), ret, fail);
   NCCLCHECKGOTO(ncclIbRecvCommInit(rComm), ret, fail);
   NCCLCHECKGOTO(ncclIbStatsInit(&rComm->base.stats), ret, fail);
   stage->comm = rComm;
   stage->state = ncclIbCommStateAccept;
-  NCCLCHECKGOTO(ncclSocketInit(&rComm->base.sock), ret, fail);
   NCCLCHECKGOTO(ncclSocketAccept(&rComm->base.sock, &lComm->sock), ret, fail);
 
   // Alloc stage->buffer here to be used for all following steps
@@ -2107,6 +2107,7 @@ exit:
   return ret;
 fail:
   if (rComm) (void)ncclIbFreeFlagFlush(rComm);
+  (void)ncclSocketClose(&rComm->base.sock);
   free(rComm);
   goto exit;
 }
@@ -2211,7 +2212,7 @@ ncclResult_t ncclIbCloseListen(void* listenComm) {
 ncclResult_t rcclNetP2pPolicy(void* handle, int isP2p) {
   if (!handle) return ncclInvalidArgument;
   struct ncclIbHandle* ibHandle = (struct ncclIbHandle*)handle;
-  if (ibHandle->magic != NCCL_SOCKET_MAGIC) return ncclInvalidArgument;
+  if (ibHandle->magic != ncclSocketDefaultMagic()) return ncclInvalidArgument;
   ibHandle->isP2p = isP2p;
   return ncclSuccess;
 }

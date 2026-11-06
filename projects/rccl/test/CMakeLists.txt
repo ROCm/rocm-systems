@@ -328,6 +328,7 @@ if(BUILD_TESTS)
     common/EnvVars.cpp
     common/PrepDataFuncs.cpp
     common/PtrUnion.cpp
+    common/GpuCountProbe.cpp
     common/ProcessIsolatedTestRunner.cpp
     common/TestBed.cpp
     common/TestBedChild.cpp
@@ -433,6 +434,7 @@ if(BUILD_TESTS)
       DeviceApiTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
       common/TestChecks.cpp
       ../src/misc/kernel_config.cc
@@ -534,6 +536,7 @@ if(BUILD_TESTS)
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
     target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE ENABLE_FAULT_INJECTION)
@@ -545,6 +548,7 @@ if(BUILD_TESTS)
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -683,6 +687,7 @@ if(BUILD_TESTS)
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -885,6 +890,7 @@ if(BUILD_TESTS)
       transport/Gin/GinMtuNegotiationTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -947,6 +953,7 @@ if(BUILD_TESTS)
       AltRsmiTests.cpp
       ../src/misc/alt_rsmi.cc
       common/main_altrsmi.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -1001,6 +1008,7 @@ if(BUILD_TESTS)
     if(CMAKE_BUILD_TYPE MATCHES "Debug")
       list(APPEND TEST_AMDSMI_SOURCE_FILES
         AmdSmiWrapTests.cpp
+        common/GpuCountProbe.cpp
         common/ProcessIsolatedTestRunner.cpp
       )
 

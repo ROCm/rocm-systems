@@ -14,6 +14,7 @@
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
+#include <dirent.h>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -6177,6 +6178,40 @@ TEST_F(InitMicrotest, CommDestroySync_InitStateSuccess_SetsDeviceStopsProxyAndDe
   EXPECT_EQ(1, proxyStop.calls);
 }
 
+TEST_F(InitMicrotest, CommDestroySync_ClosesDdaIpcPeerMappingsBeforeProxyStop) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  std::vector<std::string> callOrder;
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook closeMappings(g_ncclDdaIpcCommClosePeerMappings, [&](ncclComm*) {
+    callOrder.push_back("closeMappings");
+    return ncclSuccess;
+  });
+  ScopedHook barrier(g_bootstrapIntraNodeBarrier, [&](void*, int*, int, int, int) {
+    callOrder.push_back("intraNodeBarrier");
+    return ncclSuccess;
+  });
+  ScopedHook proxyStop(g_ncclProxyStop, [&](ncclComm*) {
+    callOrder.push_back("proxyStop");
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ((std::vector<std::string>{"closeMappings", "intraNodeBarrier", "proxyStop"}), callOrder);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_AbortedCommStillClosesDdaIpcPeerMappingsLocally) {
+  Teardown_LifecycleComm c;
+  *c.get()->abortFlag = 1;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook closeMappings(g_ncclDdaIpcCommClosePeerMappings, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(1, closeMappings.calls);
+}
+
 TEST_F(InitMicrotest, CommDestroySync_SetDeviceFails_ReturnsErrorWithoutDestroyingCollTrace) {
   Teardown_LifecycleComm c;
   ScopedHook setDevice(g_hipSetDevice, [](int) { return hipErrorInvalidDevice; });
@@ -6266,6 +6301,109 @@ TEST_F(InitMicrotest, CommDestroySync_PersistentRefsOutstanding_PollsUntilCallba
   EXPECT_EQ(0, c.get()->localPersistentRefs);
 }
 
+namespace {
+struct Teardown_HeldGraph {
+  ncclKernelPlan plan{};
+  ncclPersistentPlanRef* ref = nullptr;
+  int reclaimed = 0;
+
+  void Attach(ncclComm* comm, int state) {
+    plan.reclaimer.fn = [](ncclComm* c, ncclCommCallback* cb) {
+      reinterpret_cast<Teardown_HeldGraph*>(cb)->reclaimed++;
+      c->localPersistentRefs -= 1;
+      return ncclSuccess;
+    };
+    ref = static_cast<ncclPersistentPlanRef*>(::calloc(1, sizeof(ncclPersistentPlanRef)));
+    ref->comm = comm;
+    ref->planHead = &plan;
+    ref->state = state;
+    ref->refCount = 2;
+    ref->next = comm->persistentPlanRefs;
+    comm->persistentPlanRefs = ref;
+    if (state == ncclPersistentPlanRefLive) comm->localPersistentRefs += 1;
+  }
+};
+static_assert(offsetof(Teardown_HeldGraph, plan) == 0, "the reclaimer cast relies on plan being first");
+}  // namespace
+
+TEST_F(InitMicrotest, CommDestroySync_AbortWithGraphStillHeld_OrphansPlansWithoutReclaiming) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  Teardown_HeldGraph graph;
+  graph.Attach(c.get(), ncclPersistentPlanRefLive);
+  *c.get()->abortFlag = 1;
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(0, graph.reclaimed);
+  EXPECT_EQ(1, c.get()->localPersistentRefs);
+  EXPECT_EQ(graph.ref, c.get()->persistentPlanRefs);
+  EXPECT_EQ(ncclPersistentPlanRefOrphaned, graph.ref->state);
+  EXPECT_EQ(2, graph.ref->refCount);
+  c.get()->persistentPlanRefs = nullptr;
+  ncclPersistentPlanRefDrop(graph.ref);
+  ncclPersistentPlanRefDrop(graph.ref);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_AbortCallbackError_StillStopsProxy) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  *c.get()->abortFlag = 1;
+
+  static Teardown_CommCallback bad;
+  bad = {};
+  bad.base.fn = [](ncclComm*, ncclCommCallback*) { return ncclSystemError; };
+  ncclIntruQueueMpscEnqueue(&c.get()->callbackQueue, &bad.base);
+
+  EXPECT_EQ(ncclSystemError, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(1, proxyStop.calls);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_LiveGraphOnDestroy_WaitsAndDoesNotReclaim) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  Teardown_HeldGraph graph;
+  graph.Attach(c.get(), ncclPersistentPlanRefLive);
+
+  static Teardown_CommCallback done;
+  done = {};
+  done.base.fn = [](ncclComm* comm, ncclCommCallback*) {
+    comm->localPersistentRefs = 0;
+    return ncclSuccess;
+  };
+  ncclIntruQueueMpscEnqueue(&c.get()->callbackQueue, &done.base);
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(0, graph.reclaimed);
+  EXPECT_EQ(ncclPersistentPlanRefLive, graph.ref->state);
+  EXPECT_EQ(0, c.get()->localPersistentRefs);
+  EXPECT_EQ(nullptr, c.get()->persistentPlanRefs);
+  EXPECT_EQ(1, graph.ref->refCount);
+  ncclPersistentPlanRefDrop(graph.ref);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_GraphAlreadyDestroyed_DropsTheRefWithoutReclaimingAgain) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  Teardown_HeldGraph graph;
+  graph.Attach(c.get(), ncclPersistentPlanRefReleased);
+  *c.get()->abortFlag = 1;
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(0, graph.reclaimed);
+  EXPECT_EQ(nullptr, c.get()->persistentPlanRefs);
+  EXPECT_EQ(ncclPersistentPlanRefReleased, graph.ref->state);
+  EXPECT_EQ(1, graph.ref->refCount);
+  ncclPersistentPlanRefDrop(graph.ref);
+}
+
 TEST_F(InitMicrotest, CommDestroySync_LegacyCleanupCallbackFails_WarnsAndDrainsRemainder) {
   Teardown_LifecycleComm c;
   Teardown_AllowStreamCaptureExchange();
@@ -6301,6 +6439,9 @@ constexpr uint64_t Teardown_kTunerMagic = 0xC0FFEE01u;
 struct Teardown_TunerRecord {
   uint64_t magic = Teardown_kTunerMagic;
   int finalizeCalls = 0;
+  std::atomic<int>* ddaCloseCalls = nullptr;
+  int expectedDdaCloseCalls = 0;
+  bool allDdaMappingsClosedBeforeCleanup = false;
 };
 
 // Returning an error unless the magic survives is what makes "passed the wrong context" a failing test.
@@ -6308,6 +6449,10 @@ ncclResult_t Teardown_TunerFinalize(void* context) {
   auto* rec = static_cast<Teardown_TunerRecord*>(context);
   if (rec == nullptr || rec->magic != Teardown_kTunerMagic) return ncclInternalError;
   rec->finalizeCalls++;
+  if (rec->ddaCloseCalls != nullptr) {
+    rec->allDdaMappingsClosedBeforeCleanup =
+        rec->ddaCloseCalls->load(std::memory_order_acquire) == rec->expectedDdaCloseCalls;
+  }
   return ncclSuccess;
 }
 
@@ -6394,6 +6539,59 @@ TEST_F(InitMicrotest, CommReclaim_LastIntraRank_SyncsAndCleansEveryCommInTheChai
   }
 }
 
+TEST_F(InitMicrotest, CommReclaim_ClosesAllDdaMappingsBeforeSerialCommCleanup) {
+  Teardown_AllowStreamCaptureExchange();
+  constexpr int kChainLength = 3;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
+  members[0].comm->finalizeRankCnt = kChainLength - 1;
+
+  std::atomic<int> ddaCloseCalls{0};
+  for (auto& member : members) {
+    member.rec.ddaCloseCalls = &ddaCloseCalls;
+    member.rec.expectedDdaCloseCalls = kChainLength;
+  }
+  ScopedHook closeMappings(g_ncclDdaIpcCommClosePeerMappings, [&](ncclComm*) {
+    ddaCloseCalls.fetch_add(1, std::memory_order_release);
+    return ncclSuccess;
+  });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[kChainLength - 1].comm));
+  EXPECT_EQ(kChainLength, closeMappings.calls);
+  for (int i = 0; i < kChainLength; ++i) {
+    EXPECT_TRUE(members[i].rec.allDdaMappingsClosedBeforeCleanup) << "chain member " << i;
+  }
+}
+
+TEST_F(InitMicrotest, CommReclaim_RevokedChain_ClosesAllDdaMappingsBeforeSerialCommCleanup) {
+  constexpr int kChainLength = 3;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
+  members[0].comm->finalizeRankCnt = kChainLength - 1;
+
+  std::atomic<int> ddaCloseCalls{0};
+  for (auto& member : members) {
+    member.comm->finalizeCalled = true;
+    member.comm->revokedFlag = 1;
+    member.rec.ddaCloseCalls = &ddaCloseCalls;
+    member.rec.expectedDdaCloseCalls = kChainLength;
+  }
+  ScopedHook closeMappings(g_ncclDdaIpcCommClosePeerMappings, [&](ncclComm*) {
+    ddaCloseCalls.fetch_add(1, std::memory_order_release);
+    return ncclSuccess;
+  });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[kChainLength - 1].comm));
+  EXPECT_EQ(kChainLength, closeMappings.calls);
+  EXPECT_EQ(0, proxyStop.calls);
+  for (int i = 0; i < kChainLength; ++i) {
+    EXPECT_TRUE(members[i].rec.allDdaMappingsClosedBeforeCleanup) << "chain member " << i;
+    EXPECT_EQ(1, members[i].rec.finalizeCalls) << "chain member " << i;
+  }
+}
+
 TEST_F(InitMicrotest, CommReclaim_DestroySyncFails_WarnsAndStillCleansTheChain) {
   const int kChainLength = 2;
   Teardown_ChainMember members[kChainLength];
@@ -6468,6 +6666,20 @@ TEST_F(InitMicrotest, CommRevokeAsync_ValidComm_StopsProxyAndLowersEveryAbortFla
   EXPECT_EQ(c.get(), stoppedComm);
   EXPECT_EQ(0u, c.abortFlag());
   EXPECT_EQ(0u, c.abortFlagDev());
+  EXPECT_EQ(0u, c.childAbortFlag());
+  EXPECT_EQ(0u, c.childAbortFlagDev());
+}
+
+TEST_F(InitMicrotest, CommRevokeAsync_HeldGraph_ClearsHostAbortFlags) {
+  Teardown_AllowStreamCaptureExchange();
+  Teardown_LifecycleComm c;
+  ASSERT_EQ(ncclSuccess, setCommAbortFlags(c.get(), 1));
+  c.get()->localPersistentRefs = 1;
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunRevokeAsync(c.get()));
+  EXPECT_EQ(0u, c.abortFlag());
+  EXPECT_EQ(1u, c.abortFlagDev());
   EXPECT_EQ(0u, c.childAbortFlag());
   EXPECT_EQ(0u, c.childAbortFlagDev());
 }
@@ -7242,6 +7454,114 @@ TEST_F(InitMicrotest, CommReclaim_RevokedCommWithPersistentRefs_PollsUntilTheyCl
 
   EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(comm));
   EXPECT_EQ(1, members[0].rec.finalizeCalls);
+}
+
+TEST_F(InitMicrotest, CommReclaim_RevokedCommWithGraphStillHeld_DefersCleanupUntilThePlanIsReleased) {
+  const int kChainLength = 1;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
+  ncclComm* comm = members[0].comm;
+  comm->finalizeCalled = true;
+  comm->revokedFlag = 1;
+  Teardown_HeldGraph graph;
+  graph.Attach(comm, ncclPersistentPlanRefLive);
+
+  auto snapshotTasks = [] {
+    std::vector<int> tids;
+    DIR* dir = opendir("/proc/self/task");
+    if (dir == nullptr) return tids;
+    while (dirent* ent = readdir(dir)) {
+      if (ent->d_name[0] == '.') continue;
+      tids.push_back(std::atoi(ent->d_name));
+    }
+    closedir(dir);
+    return tids;
+  };
+  std::vector<int> tasksBefore = snapshotTasks();
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(comm));
+  EXPECT_EQ(0, graph.reclaimed);
+  EXPECT_EQ(0, members[0].rec.finalizeCalls);
+  int reaperTid = -1;
+  for (int i = 0; i < 100 && reaperTid < 0; ++i) {
+    for (int tid : snapshotTasks()) {
+      if (std::find(tasksBefore.begin(), tasksBefore.end(), tid) == tasksBefore.end()) {
+        reaperTid = tid;
+        break;
+      }
+    }
+    if (reaperTid < 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_GE(reaperTid, 0);
+  ncclIntruQueueMpscEnqueue(&comm->callbackQueue, &graph.plan.reclaimer);
+  for (int i = 0; i < 400; ++i) {
+    std::string taskPath = "/proc/self/task/" + std::to_string(reaperTid);
+    DIR* task = opendir(taskPath.c_str());
+    bool alive = task != nullptr;
+    if (task != nullptr) closedir(task);
+    if (members[0].rec.finalizeCalls != 0 && !alive) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  EXPECT_EQ(1, graph.reclaimed);
+  EXPECT_EQ(1, members[0].rec.finalizeCalls);
+  EXPECT_EQ(ncclPersistentPlanRefOrphaned, graph.ref->state);
+  EXPECT_EQ(1, graph.ref->refCount);
+  ncclPersistentPlanRefDrop(graph.ref);
+}
+
+TEST_F(InitMicrotest, CommReclaim_AbortWithGraphStillHeld_DefersCleanupUntilThePlanIsReleased) {
+  Teardown_AllowStreamCaptureExchange();
+  const int kChainLength = 1;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
+  ncclComm* comm = members[0].comm;
+  comm->initState = ncclSuccess;
+  members[0].abortFlag = 1;
+  Teardown_HeldGraph graph;
+  graph.Attach(comm, ncclPersistentPlanRefLive);
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  auto snapshotTasks = [] {
+    std::vector<int> tids;
+    DIR* dir = opendir("/proc/self/task");
+    if (dir == nullptr) return tids;
+    while (dirent* ent = readdir(dir)) {
+      if (ent->d_name[0] == '.') continue;
+      tids.push_back(std::atoi(ent->d_name));
+    }
+    closedir(dir);
+    return tids;
+  };
+  std::vector<int> tasksBefore = snapshotTasks();
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(comm));
+  EXPECT_EQ(0, graph.reclaimed);
+  EXPECT_EQ(0, members[0].rec.finalizeCalls);
+  EXPECT_EQ(1, proxyStop.calls);
+  int reaperTid = -1;
+  for (int i = 0; i < 100 && reaperTid < 0; ++i) {
+    for (int tid : snapshotTasks()) {
+      if (std::find(tasksBefore.begin(), tasksBefore.end(), tid) == tasksBefore.end()) {
+        reaperTid = tid;
+        break;
+      }
+    }
+    if (reaperTid < 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_GE(reaperTid, 0);
+  ncclIntruQueueMpscEnqueue(&comm->callbackQueue, &graph.plan.reclaimer);
+  for (int i = 0; i < 400; ++i) {
+    std::string taskPath = "/proc/self/task/" + std::to_string(reaperTid);
+    DIR* task = opendir(taskPath.c_str());
+    bool alive = task != nullptr;
+    if (task != nullptr) closedir(task);
+    if (members[0].rec.finalizeCalls != 0 && !alive) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  EXPECT_EQ(1, graph.reclaimed);
+  EXPECT_EQ(1, members[0].rec.finalizeCalls);
+  EXPECT_EQ(ncclPersistentPlanRefOrphaned, graph.ref->state);
+  EXPECT_EQ(1, graph.ref->refCount);
+  ncclPersistentPlanRefDrop(graph.ref);
 }
 
 TEST_F(InitMicrotest, CommReclaim_RevokedCommLegacyCallbackFails_WarnsAndKeepsDraining) {
@@ -8826,6 +9146,30 @@ TEST_F(InitMicrotest, CommShrink_AbortRequestedAndStreamSyncSucceeds_LowersTheAb
   EXPECT_EQ(0u, flagDevAtEntry);
   EXPECT_EQ(0u, c.abortFlag());
   EXPECT_EQ(0u, c.abortFlagDev());
+}
+
+TEST_F(InitMicrotest, CommShrink_RevokedHeldGraph_KeepsDeviceAbortFlag) {
+  Teardown_LifecycleComm c(/*cudaDev=*/1, /*rank=*/1);
+  c.get()->revokedFlag = 1;
+  c.get()->localPersistentRefs = 1;
+  ncclComm_t out = nullptr;
+  int exclude[1] = {0};
+  uint32_t flagAtEntry = 0xFFFFFFFFu;
+  uint32_t flagDevAtEntry = 0xFFFFFFFFu;
+  ScopedHook getDevice(g_hipGetDevice, [&](int* dev) {
+    flagAtEntry = c.abortFlag();
+    flagDevAtEntry = c.abortFlagDev();
+    if (dev) *dev = g_currentDevice;
+    return hipSuccess;
+  });
+
+  EXPECT_EQ(ncclInvalidArgument, ncclCommShrink_impl(c.get(), exclude, /*excludeRanksCount=*/0, &out,
+                                                     /*config=*/nullptr, NCCL_SHRINK_ABORT));
+  ASSERT_EQ(1, getDevice.calls);
+  EXPECT_EQ(0u, flagAtEntry);
+  EXPECT_EQ(1u, flagDevAtEntry);
+  EXPECT_EQ(0u, c.abortFlag());
+  EXPECT_EQ(1u, c.abortFlagDev());
 }
 
 TEST_F(InitMicrotest, CommShrink_NoAbortFlag_NeverSynchronisesTheDeviceStream) {
