@@ -114,7 +114,7 @@ extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu
-      name: Rocjitsu on GitHub
+      name: rocjitsu on GitHub
     - icon: material/bug-outline
       link: https://github.com/ROCm/rocm-systems/issues
       name: Report an issue
