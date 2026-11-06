@@ -598,6 +598,24 @@ testResult_t AlltoAllGetCollImplInfo(ncclComm_t comm, size_t count, ncclDataType
   return testSuccess;
 }
 
+// Tier report for -D runs. AllToAll is an all-peers DIRECT exchange with no
+// size-based crossover; only the transport changes per deviceImpl (AlltoAllRunColl):
+//   -D 1/2 -> NvlAlltoAllKernel[Optimized]: intra-node LSA stores, no GIN.
+//   -D 3   -> GinAlltoAllKernel:            every peer via gin.put (GIN).
+//   -D 4   -> HybridAlltoAllKernel:         CTA 0 GIN, CTAs 1..N LSA.
+testResult_t AlltoAllGetDeviceImplInfo(int deviceImpl, size_t /*count*/, ncclDataType_t /*type*/,
+    int /*nRanks*/, int /*lsaSize*/, char* algoOut, char* protoOut) {
+  snprintf(algoOut, 16, "%s", "T-DIRECT");
+  const char* proto;
+  switch (deviceImpl) {
+    case 1: case 2: proto = "LSA";     break;
+    case 4:         proto = "LSA/GIN"; break;
+    default:        proto = "GIN";     break;  // -D 3
+  }
+  snprintf(protoOut, 16, "%s", proto);
+  return testSuccess;
+}
+
 struct testColl alltoAllTest = {
   "AlltoAll",
   AlltoAllGetCollByteCount,
@@ -609,7 +627,8 @@ struct testColl alltoAllTest = {
   // only, so rcclSymKGetInfo can never describe an AllToAll.
   NULL,
   AlltoAllGetCollImplInfo,
-  AlltoAllDeviceTime
+  AlltoAllDeviceTime,
+  AlltoAllGetDeviceImplInfo
 };
 
 void AlltoAllGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
