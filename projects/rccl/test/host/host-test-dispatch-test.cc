@@ -1235,4 +1235,209 @@ TEST(HostDispatchCoverageMicrotest, APathWithAQuoteInItCannotBreakOutOfTheComman
         << command;
 }
 
+// ── runSelections ───────────────────────────────────────────────────
+
+// A scheduler driven through its spawn and reap seams, with no process ever created.
+//
+// Each "child" writes a one-suite report at the path it was given, named after its own filter,
+// so a fragment can be traced back to the exact part that produced it. Children are reaped in
+// the order the test asks for, which is how completion order is made to differ from selection
+// order.
+class FakeScheduler {
+public:
+    struct Started {
+        std::string path;
+        std::string filter;
+        std::string reportPath;
+    };
+
+    explicit FakeScheduler(std::string_view directory) : directory_(directory) {}
+
+    SpawnFn spawn()
+    {
+        return [this](const std::string &path, const std::vector<std::string> &args,
+                      const std::string &) {
+            const std::string filter = args.at(0).substr(std::string("--gtest_filter=").size());
+            const std::string reportPath =
+                args.at(1).substr(args.at(1).find(':') + 1);
+            started_.push_back({path, filter, reportPath});
+            std::ofstream(reportPath, std::ios::binary | std::ios::trunc)
+                << "<testsuites tests=\"1\" failures=\"0\"><testsuite name=\"" << filter
+                << "\"/></testsuites>";
+            live_.push_back(nextPid_);
+            return nextPid_++;
+        };
+    }
+
+    // Reaps the most recently started child first, so completions come back in an order the
+    // scheduler did not choose.
+    ReapFn reapNewestFirst()
+    {
+        return [this](int &status) {
+            status = 0;
+            if (live_.empty()) {
+                return pid_t{-1};
+            }
+            const pid_t pid = live_.back();
+            live_.pop_back();
+            inFlightHighWater_ = std::max(inFlightHighWater_, live_.size() + 1);
+            return pid;
+        };
+    }
+
+    const std::vector<Started> &started() const { return started_; }
+    // The most children ever started but not yet reaped.
+    size_t inFlightHighWater() const { return inFlightHighWater_; }
+
+    ReportPathFn reportPaths()
+    {
+        return [this](const std::string &qualifier, size_t part) {
+            return (std::filesystem::path(directory_) /
+                    fmt::format("{}-{}.xml", qualifier, part))
+                .string();
+        };
+    }
+
+private:
+    std::string directory_;
+    std::vector<Started> started_;
+    std::vector<pid_t> live_;
+    size_t inFlightHighWater_ = 0;
+    pid_t nextPid_ = 100;
+};
+
+// A selection of *cases* cases out of a binary holding one more, so childFilters() names them
+// case by case rather than asking for the whole binary with a star.
+Selection schedulerSelection(const std::string &qualifier, size_t cases)
+{
+    Selection selection;
+    selection.path = "/build/" + qualifier;
+    selection.qualifier = qualifier;
+    selection.runnable = cases + 1;   // a partial selection, so the filter names cases
+    for (size_t i = 0; i < cases; ++i) {
+        selection.cases.push_back(TestCaseName{"Suite", fmt::format("{}Case{}", qualifier, i)});
+    }
+    return selection;
+}
+
+// A selection whose case names are long enough that childFilters() cannot fit them into one
+// --gtest_filter and has to hand the binary back in parts.
+Selection splitSelection()
+{
+    Selection selection = schedulerSelection("Split", 0);
+    for (size_t i = 0; i < 1500; ++i) {
+        selection.cases.push_back(TestCaseName{std::string(80, 'S'), fmt::format("Case{}", i)});
+    }
+    selection.runnable = selection.cases.size() + 1;
+    return selection;
+}
+
+TEST(HostDispatchSchedulerMicrotest, EveryPartOfASplitBinaryIsRun)
+{
+    // A binary whose filter does not fit in one command line is run in parts. Dropping the
+    // re-queue of the next part would silently run only the first part of such a binary, and
+    // every case beyond it would vanish from the report without failing the run.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    // Case names long enough that kMaxFilterChars forces more than one part.
+    const Selection selection = splitSelection();
+    const std::vector<std::vector<std::string>> filters = {childFilters(selection)};
+    ASSERT_GT(filters[0].size(), 1u) << "the selection must split for this test to mean anything";
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments =
+        runSelections({selection}, filters, ScheduleOptions{4, ReportFormat::Xml, {}, ""},
+                      fake.spawn(), fake.reapNewestFirst(), fake.reportPaths(), failures);
+
+    ASSERT_EQ(fake.started().size(), filters[0].size());
+    for (size_t part = 0; part < filters[0].size(); ++part) {
+        EXPECT_EQ(fake.started()[part].filter, filters[0][part]);
+    }
+    EXPECT_EQ(fragments.size(), filters[0].size());
+    EXPECT_EQ(failures, 0);
+}
+
+TEST(HostDispatchSchedulerMicrotest, PartsOfOneBinaryNeverRunAtTheSameTime)
+{
+    // Each part writes the same per-binary log, and part 0 truncates it. Two parts in flight
+    // together would interleave their output and lose whatever the first had already written.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    const Selection selection = splitSelection();
+    const std::vector<std::vector<std::string>> filters = {childFilters(selection)};
+    ASSERT_GT(filters[0].size(), 1u);
+
+    int failures = 0;
+    runSelections({selection}, filters, ScheduleOptions{8, ReportFormat::Xml, {}, ""},
+                  fake.spawn(), fake.reapNewestFirst(), fake.reportPaths(), failures);
+
+    // Eight jobs were allowed, but one binary's parts are serial, so only ever one was live.
+    EXPECT_EQ(fake.inFlightHighWater(), 1u);
+}
+
+TEST(HostDispatchSchedulerMicrotest, NoMoreChildrenThanJobsRunAtOnce)
+{
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    std::vector<Selection> selections;
+    std::vector<std::vector<std::string>> filters;
+    for (const std::string &qualifier : {"Alpha", "Beta", "Gamma", "Delta", "Epsilon"}) {
+        selections.push_back(schedulerSelection(qualifier, 2));
+        filters.push_back(childFilters(selections.back()));
+    }
+
+    int failures = 0;
+    runSelections(selections, filters, ScheduleOptions{2, ReportFormat::Xml, {}, ""}, fake.spawn(),
+                  fake.reapNewestFirst(), fake.reportPaths(), failures);
+
+    EXPECT_EQ(fake.inFlightHighWater(), 2u);
+    EXPECT_EQ(fake.started().size(), selections.size());
+}
+
+TEST(HostDispatchSchedulerMicrotest, FragmentsComeOutInSelectionOrderNotCompletionOrder)
+{
+    // The merged report is what a human reads and what a diff of two runs compares, so it must
+    // not reorder itself according to which child happened to finish first.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    std::vector<Selection> selections;
+    std::vector<std::vector<std::string>> filters;
+    for (const std::string &qualifier : {"Alpha", "Beta", "Gamma"}) {
+        selections.push_back(schedulerSelection(qualifier, 1));
+        filters.push_back(childFilters(selections.back()));
+    }
+
+    int failures = 0;
+    // All three in flight at once and reaped newest first, so completion order is the reverse of
+    // selection order.
+    const std::vector<SuiteFragment> fragments =
+        runSelections(selections, filters, ScheduleOptions{3, ReportFormat::Xml, {}, ""},
+                      fake.spawn(), fake.reapNewestFirst(), fake.reportPaths(), failures);
+
+    ASSERT_EQ(fragments.size(), 3u);
+    EXPECT_NE(fragments[0].xml.find("AlphaCase0"), std::string::npos) << fragments[0].xml;
+    EXPECT_NE(fragments[1].xml.find("BetaCase0"), std::string::npos) << fragments[1].xml;
+    EXPECT_NE(fragments[2].xml.find("GammaCase0"), std::string::npos) << fragments[2].xml;
+    EXPECT_EQ(failures, 0);
+}
+
+TEST(HostDispatchSchedulerMicrotest, AChildThatCannotBeStartedIsReportedAndItsRestSkipped)
+{
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    const Selection selection = schedulerSelection("Alpha", 1);
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments = runSelections(
+        {selection}, {childFilters(selection)}, ScheduleOptions{1, ReportFormat::Xml, {}, ""},
+        [](const std::string &, const std::vector<std::string> &, const std::string &) {
+            return pid_t{-1};
+        },
+        fake.reapNewestFirst(), fake.reportPaths(), failures);
+
+    ASSERT_EQ(fragments.size(), 1u);
+    EXPECT_NE(fragments[0].xml.find("fork failed"), std::string::npos) << fragments[0].xml;
+    EXPECT_EQ(failures, 1);
+}
+
 }  // namespace

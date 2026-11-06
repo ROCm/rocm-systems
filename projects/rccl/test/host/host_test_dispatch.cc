@@ -1520,6 +1520,148 @@ void writeMergedCoverage(const std::string &directory, const std::vector<std::st
     std::fflush(stdout);
 }
 
+// The seams runSelections() is driven through: starting a child, reaping whichever finishes
+// first, and naming the file a part writes its report to.
+using SpawnFn = std::function<pid_t(const std::string &path, const std::vector<std::string> &args,
+                                    const std::string &logPath)>;
+using ReapFn = std::function<pid_t(int &exitStatus)>;
+using ReportPathFn = std::function<std::string(const std::string &qualifier, size_t part)>;
+
+struct ScheduleOptions {
+    size_t jobs = 1;                                 // children allowed to run at once
+    ReportFormat outputFormat = ReportFormat::Xml;   // asked of the children, so no report is
+                                                     // ever transcoded between the two formats
+    std::vector<std::string> passthrough;            // the caller's own flags, handed to each child
+    std::string logDirectory;                        // empty means the children inherit our stdio
+};
+
+// Run every part of every selection, at most *schedule.jobs* at a time, and return their
+// fragments in selection order. *failures* is incremented once per failing or missing report.
+//
+// Parts of one selection are never in flight together: each writes the same per-binary log, and
+// the next part is only made ready again once the previous one has been reaped.
+std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selections,
+                                         const std::vector<std::vector<std::string>> &filters,
+                                         const ScheduleOptions &schedule, const SpawnFn &spawn,
+                                         const ReapFn &reap, const ReportPathFn &reportPathFor,
+                                         int &failures)
+{
+    std::vector<size_t> nextPart(selections.size(), 0);
+    std::vector<std::vector<SuiteFragment>> perSelection(selections.size());
+
+    struct RunningChild {
+        pid_t pid;
+        size_t selection;
+        std::string reportPath;
+        std::string logPath;
+    };
+    std::deque<size_t> ready;   // selections with a part still to start
+    for (size_t index = 0; index < selections.size(); ++index) {
+        ready.push_back(index);
+    }
+    std::vector<RunningChild> running;
+
+    while (!ready.empty() || !running.empty()) {
+        while (!ready.empty() && running.size() < schedule.jobs) {
+            const size_t index = ready.front();
+            ready.pop_front();
+            const Selection &selection = selections[index];
+            const size_t part = nextPart[index]++;
+            const std::string reportPath = reportPathFor(selection.qualifier, part);
+            std::vector<std::string> childArgs = {
+                fmt::format("--gtest_filter={}", filters[index][part]),
+                fmt::format("--gtest_output={}:{}", formatName(schedule.outputFormat), reportPath),
+            };
+            childArgs.insert(childArgs.end(), schedule.passthrough.begin(),
+                             schedule.passthrough.end());
+
+            const std::string part_note =
+                filters[index].size() > 1
+                    ? fmt::format(", part {}/{}", part + 1, filters[index].size())
+                    : std::string();
+            const std::string logPath =
+                schedule.logDirectory.empty()
+                    ? std::string()
+                    : childLogPath(schedule.logDirectory, selection.qualifier);
+            if (part == 0 && !logPath.empty()) {
+                std::ofstream truncate(logPath, std::ios::binary | std::ios::trunc);
+            }
+            fmt::print("----- {} ({} cases{}){} -----\n", selection.qualifier,
+                       selection.cases.size(), part_note,
+                       logPath.empty() ? std::string() : fmt::format(" -> {}", logPath));
+            std::fflush(stdout);
+
+            const pid_t pid = spawn(selection.path, childArgs, logPath);
+            if (pid < 0) {
+                perSelection[index].push_back(crashFragment(
+                    selection.qualifier, "binary could not be started -- fork failed"));
+                ++failures;
+                nextPart[index] = filters[index].size();
+                continue;
+            }
+            running.push_back({pid, index, reportPath, logPath});
+        }
+
+        int status = 0;
+        const pid_t finished = reap(status);
+        const auto slot = std::find_if(running.begin(), running.end(),
+                                       [finished](const RunningChild &child) {
+                                           return child.pid == finished;
+                                       });
+        if (slot == running.end()) {
+            for (const RunningChild &child : running) {
+                perSelection[child.selection].push_back(
+                    crashFragment(selections[child.selection].qualifier,
+                                  "binary disappeared before its result could be collected"));
+                ++failures;
+            }
+            running.clear();
+            break;
+        }
+
+        const size_t index = slot->selection;
+        const Selection &selection = selections[index];
+        bool cleanReport = false;
+        if (std::optional<SuiteFragment> fragment =
+                parseChildReport(readFile(slot->reportPath), selection.qualifier,
+                                 schedule.outputFormat)) {
+            cleanReport = fragment->failures == 0 && fragment->errors == 0;
+            perSelection[index].push_back(std::move(*fragment));
+        } else {
+            perSelection[index].push_back(crashFragment(
+                selection.qualifier,
+                fmt::format("binary wrote no gtest report (exit status {}){}", status,
+                            slot->logPath.empty() ? std::string()
+                                                  : fmt::format("; output in {}", slot->logPath))));
+            ++failures;
+        }
+        if (status != 0) {
+            if (cleanReport) {
+                perSelection[index].push_back(crashFragment(
+                    selection.qualifier,
+                    fmt::format("binary exited {} after writing a passing report", status)));
+            }
+            ++failures;
+        }
+        std::error_code ec;
+        fs::remove(slot->reportPath, ec);
+        running.erase(slot);
+        if (nextPart[index] < filters[index].size()) {
+            ready.push_back(index);   // this binary's next part, now that its log is free again
+        }
+    }
+
+    // Selection order, not completion order: the merged report must not depend on how the
+    // children happened to be scheduled.
+    std::vector<SuiteFragment> fragments;
+    for (std::vector<SuiteFragment> &selectionFragments : perSelection) {
+        for (SuiteFragment &fragment : selectionFragments) {
+            fragments.push_back(std::move(fragment));
+        }
+    }
+    return fragments;
+}
+
 }  // namespace rccl_host_dispatch
 
 #ifndef RCCL_HOST_DISPATCH_NO_MAIN
@@ -1701,116 +1843,18 @@ int main(int argc, char **argv)
         filters.push_back(childFilters(selection));
         ran.push_back(selection.path);
     }
-    std::vector<size_t> nextPart(selections.size(), 0);
-    std::vector<std::vector<SuiteFragment>> perSelection(selections.size());
-
-    struct RunningChild {
-        pid_t pid;
-        size_t selection;
-        std::string reportPath;
-        std::string logPath;
-    };
-    std::deque<size_t> ready;   // selections with a part still to start
-    for (size_t index = 0; index < selections.size(); ++index) {
-        ready.push_back(index);
-    }
-    std::vector<RunningChild> running;
-
-    while (!ready.empty() || !running.empty()) {
-        while (!ready.empty() && running.size() < jobs) {
-            const size_t index = ready.front();
-            ready.pop_front();
-            const Selection &selection = selections[index];
-            const size_t part = nextPart[index]++;
-            const std::string reportPath =
-                reportDir.reportPath(selection.qualifier, part, options.outputFormat);
-            // The child is asked for the format the caller wants, so the merge is always of
-            // like with like and no report is ever transcoded between the two.
-            std::vector<std::string> childArgs = {
-                fmt::format("--gtest_filter={}", filters[index][part]),
-                fmt::format("--gtest_output={}:{}", formatName(options.outputFormat), reportPath),
-            };
-            childArgs.insert(childArgs.end(), options.passthrough.begin(),
-                             options.passthrough.end());
-
-            const std::string part_note =
-                filters[index].size() > 1
-                    ? fmt::format(", part {}/{}", part + 1, filters[index].size())
-                    : std::string();
-            const std::string logPath =
-                logDir.empty() ? std::string() : childLogPath(logDir, selection.qualifier);
-            if (part == 0 && !logPath.empty()) {
-                std::ofstream truncate(logPath, std::ios::binary | std::ios::trunc);
-            }
-            fmt::print("----- {} ({} cases{}){} -----\n", selection.qualifier,
-                       selection.cases.size(), part_note,
-                       logPath.empty() ? std::string() : fmt::format(" -> {}", logPath));
-            std::fflush(stdout);
-
-            const pid_t pid = spawnChild(selection.path, childArgs, logPath);
-            if (pid < 0) {
-                perSelection[index].push_back(crashFragment(
-                    selection.qualifier, "binary could not be started -- fork failed"));
-                ++failures;
-                nextPart[index] = filters[index].size();
-                continue;
-            }
-            running.push_back({pid, index, reportPath, logPath});
-        }
-
-        int status = 0;
-        const pid_t finished = reapAnyChild(status);
-        const auto slot = std::find_if(running.begin(), running.end(),
-                                       [finished](const RunningChild &child) {
-                                           return child.pid == finished;
-                                       });
-        if (slot == running.end()) {
-            for (const RunningChild &child : running) {
-                perSelection[child.selection].push_back(
-                    crashFragment(selections[child.selection].qualifier,
-                                  "binary disappeared before its result could be collected"));
-                ++failures;
-            }
-            running.clear();
-            break;
-        }
-
-        const size_t index = slot->selection;
-        const Selection &selection = selections[index];
-        bool cleanReport = false;
-        if (std::optional<SuiteFragment> fragment =
-                parseChildReport(readFile(slot->reportPath), selection.qualifier,
-                                 options.outputFormat)) {
-            cleanReport = fragment->failures == 0 && fragment->errors == 0;
-            perSelection[index].push_back(std::move(*fragment));
-        } else {
-            perSelection[index].push_back(crashFragment(
-                selection.qualifier,
-                fmt::format("binary wrote no gtest report (exit status {}){}", status,
-                            slot->logPath.empty() ? std::string()
-                                                  : fmt::format("; output in {}", slot->logPath))));
-            ++failures;
-        }
-        if (status != 0) {
-            if (cleanReport) {
-                perSelection[index].push_back(crashFragment(
-                    selection.qualifier,
-                    fmt::format("binary exited {} after writing a passing report", status)));
-            }
-            ++failures;
-        }
-        std::error_code ec;
-        fs::remove(slot->reportPath, ec);
-        running.erase(slot);
-        if (nextPart[index] < filters[index].size()) {
-            ready.push_back(index);   // this binary's next part, now that its log is free again
-        }
-    }
-
-    for (std::vector<SuiteFragment> &selectionFragments : perSelection) {
-        for (SuiteFragment &fragment : selectionFragments) {
-            fragments.push_back(std::move(fragment));
-        }
+    const ScheduleOptions schedule{jobs, options.outputFormat, options.passthrough, logDir};
+    std::vector<SuiteFragment> ranFragments = runSelections(
+        selections, filters, schedule,
+        [](const std::string &path, const std::vector<std::string> &args,
+           const std::string &logPath) { return spawnChild(path, args, logPath); },
+        reapAnyChild,
+        [&reportDir, &options](const std::string &qualifier, size_t part) {
+            return reportDir.reportPath(qualifier, part, options.outputFormat);
+        },
+        failures);
+    for (SuiteFragment &fragment : ranFragments) {
+        fragments.push_back(std::move(fragment));
     }
 
     if (!options.outputPath.empty()) {
