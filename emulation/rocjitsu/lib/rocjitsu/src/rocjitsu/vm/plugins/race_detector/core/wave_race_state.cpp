@@ -281,12 +281,12 @@ void WaveRaceState::registerLdsEvent(
 
 void WaveRaceState::registerLdsRangeEvent(
     InstructionSnapshot instruction, MemoryEventType type, std::span<const LdsByteRange> ranges,
-    int elementBytes, std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+    std::span<const amdgpu::MemoryCounterObligation> counterObligations,
     MemoryOrderClass memoryOrder) {
   IntervalSet intervals;
   for (const auto &range : ranges)
     appendLdsInterval(intervals, range.address, static_cast<int>(range.bytes), *detector,
-                      elementBytes);
+                      /*elementBytes=*/1);
   intervals.finalize();
   registerEventWithIntervals(instruction, type, {}, 0, 0xF, std::move(intervals),
                              counterObligations, memoryOrder);

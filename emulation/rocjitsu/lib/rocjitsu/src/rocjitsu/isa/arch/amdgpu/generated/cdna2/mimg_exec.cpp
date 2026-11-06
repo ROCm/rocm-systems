@@ -32,7 +32,6 @@ void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
                                    {.dmask = inst_.dmask,
                                     .a16 = bool(inst_.a16),
                                     .d16 = bool(inst_.d16),
-                                    .r128 = false,
                                     .lwe = bool(inst_.lwe),
                                     .da = bool(inst_.da),
                                     .unorm = bool(inst_.unorm)})
@@ -77,7 +76,6 @@ void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
                                    {.dmask = inst_.dmask,
                                     .a16 = bool(inst_.a16),
                                     .d16 = bool(inst_.d16),
-                                    .r128 = false,
                                     .lwe = bool(inst_.lwe),
                                     .da = bool(inst_.da),
                                     .unorm = bool(inst_.unorm)})

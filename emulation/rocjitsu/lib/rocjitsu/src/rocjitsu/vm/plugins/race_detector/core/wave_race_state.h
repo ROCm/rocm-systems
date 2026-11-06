@@ -130,7 +130,8 @@ public:
 
   /// Register an LDS event described by byte ranges rather than lanes, such as
   /// a tensor DMA transfer. The event has no registers. Each range is retained
-  /// in whole elements of elementBytes that fit the LDS backing.
+  /// byte by byte up to the end of the LDS backing, not rounded to whole
+  /// elements, because a range can end mid-element.
   ///
   /// This only registers the event; validate its ranges first with
   /// RaceDetector::validateRead() or validateWrite(). Callers choose three
@@ -149,7 +150,7 @@ public:
   ///   accesses; passing TENSOR would skip conflicts with the wave's own
   ///   pending transfers.
   void registerLdsRangeEvent(InstructionSnapshot instruction, MemoryEventType type,
-                             std::span<const LdsByteRange> ranges, int elementBytes,
+                             std::span<const LdsByteRange> ranges,
                              std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                              MemoryOrderClass memoryOrder);
 
