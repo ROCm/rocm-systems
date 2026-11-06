@@ -458,6 +458,24 @@ jobs:
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
 
+      # Debug retains callable inline definitions that optimized builds can hide.
+      # Check both compilers without building the simulator or enabling sanitizers.
+      - name: Check Debug arithmetic symbol isolation
+        if: matrix.name == 'release' || matrix.name == 'ubsan-gcc'
+        env:
+          ARITH_DEBUG_CC: ${{ matrix.name == 'ubsan-gcc' && 'gcc' || 'clang' }}
+          ARITH_DEBUG_CXX: ${{ matrix.name == 'ubsan-gcc' && 'g++' || 'clang++' }}
+        run: |
+          cmake -S "${ROCJITSU_SOURCE_DIR}" -B "${RUNNER_TEMP}/arith-debug" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER="${ARITH_DEBUG_CC}" \
+            -DCMAKE_CXX_COMPILER="${ARITH_DEBUG_CXX}" \
+            -DBUILD_TESTING=ON -DROCM_PATH= \
+            -DFETCHCONTENT_BASE_DIR="${RUNNER_TEMP}/arith-deps"
+          cmake --build "${RUNNER_TEMP}/arith-debug" --target rj_arith
+          ctest --test-dir "${RUNNER_TEMP}/arith-debug/lib/arith/tests" \
+            -R '^rj_arith\.baseline_linkage$' --no-tests=error --output-on-failure
+
       - name: Require ConSan unit, integration, and simulated end-to-end coverage
         if: matrix.name == 'release' || matrix.name == 'ubsan-gcc'
         run: |

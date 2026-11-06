@@ -151,7 +151,7 @@ static void wmma_bf16(uint32_t instruction_flags, uint32_t *const *d, const uint
       int ar = Rdna3 ? pair : pair % (Registers / 2);
       int al = row + 16 * (Rdna3 ? group : pair / (Registers / 2));
       uint32_t aw = a[ar][al] ^ a_sign;
-      auto left = _mm512_set1_epi32(int((aw << 16) | (aw >> 16)));
+      auto left = _mm512_rol_epi32(_mm512_set1_epi32(int(aw)), 16);
       acc = _mm512_dpbf16_ps(acc, (__m512bh)left, (__m512bh)right[group][pair]);
       // Packed GPU WMMA truncates BF16 after each DOT2 (gfx11) or DOT4
       // (gfx12). VCVTNEPS2BF16 rounds instead and is not interchangeable.
