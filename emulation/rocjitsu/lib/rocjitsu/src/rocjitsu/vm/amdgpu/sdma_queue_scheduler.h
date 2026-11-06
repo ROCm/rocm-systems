@@ -59,7 +59,7 @@ struct SdmaQueueProgress {
 /// @brief Frontend observer for queue progress, separate from packet semantics.
 /// @details Invoked without the scheduler mutex while the queue remains in an
 /// active service turn. Detach therefore waits for an admitted observer to
-/// return, and observers must not synchronously detach their own queue.
+/// return. Observers must not throw or synchronously detach their own queue.
 using SdmaQueueProgressObserver = std::function<void(const SdmaQueueProgress &)>;
 
 /// @brief Independently schedules and executes all SDMA queues for one SoC.
@@ -109,12 +109,6 @@ public:
   [[nodiscard]] QueuePrepareCloseStatus prepare_detach(Handle handle) noexcept;
   /// @brief Force-cancel and detach during reset or frontend teardown.
   [[nodiscard]] bool detach(Handle handle) noexcept;
-
-  /// @brief Fail the next worker startup with a thread-creation error.
-  void fail_next_worker_start_for_testing() {
-    std::lock_guard lock(mutex_);
-    fail_next_worker_start_for_testing_ = true;
-  }
 
   /// @brief Update host doorbell mappings and exclude concurrent scans.
   void set_process_doorbell_base(uint32_t process_id, void *base);
@@ -186,7 +180,6 @@ private:
   SdmaPacketDialect dialect_;
   std::size_t next_slot_ = 0;
   bool shutting_down_ = false;
-  bool fail_next_worker_start_for_testing_ = false;
 };
 
 } // namespace rocjitsu::amdgpu
