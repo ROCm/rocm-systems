@@ -76,13 +76,14 @@ public:
   /// group.
   ///
   /// @returns A non-null group (empty if the config declares no plugins), or failure
-  /// for invalid admission options or when a required plugin cannot be added.
-  /// The failure reason is sent to @p diagnostic; omitting the emitter discards
+  /// for malformed JSON, a non-object root, invalid admission options, or when a required plugin
+  /// cannot be added. An empty input string intentionally produces an empty group.
+  /// The failure reason is sent to @p emit_error; omitting the emitter discards
   /// the message because FailureOr itself carries no diagnostic text.
   /// Allocation, library, and foreign plugin exceptions still propagate to the caller.
   static util::FailureOr<std::shared_ptr<ExecutionPluginGroup>>
   configure_plugin_group(const std::string &config_json, const std::string &plugin_dir = {},
-                         util::DiagnosticEmitter diagnostic = {});
+                         util::DiagnosticEmitter emit_error = {});
 };
 
 } // namespace rocjitsu
