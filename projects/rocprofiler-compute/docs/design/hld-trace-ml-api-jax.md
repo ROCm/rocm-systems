@@ -94,9 +94,9 @@
 
 ### Where the range is marked
 
-- From Python, JAX starts GPU work only by calling a compiled function
-  (`jit`, `pmap`, `shard_map`) or by dispatching a Primitive. `jnp.*` is
-  not a launch. Wrapping those is the complete set.
+- The known JAX compute pathways this implementation plans to cover are
+  compiled calls (`jit`, `pmap`, `shard_map`) and Primitive dispatch.
+  `jnp.*` is not a launch path of its own.
 - `jax.jit` wraps how the compiled function is called, not `jax.jit` itself:
   - `jax.jit(fn)` returns a callable. It does not run `fn`.
   - On JAX 0.11.0 every such callable has the same type,
@@ -228,6 +228,12 @@ jax.jit.train_step jax_workload.py:13 (calls: N, dispatches: M, total: T)
 - **Debug.** The injector logs which entry points it wrapped during profile
   (`ml api trace` on the profile stdout). A wrap miss is an absent `jax.*`
   node in the `--list-operators jax` tree (analyze stdout).
+
+Limitations:
+
+- This wrap list is planned coverage, not a closed inventory of every GPU
+  launch. Other JAX or XLA paths may still enqueue kernels without a
+  `jax.*` marker; those cases need to be confirmed on real traces.
 
 Design trade-offs:
 
