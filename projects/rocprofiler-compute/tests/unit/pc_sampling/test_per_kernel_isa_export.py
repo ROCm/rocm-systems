@@ -96,7 +96,7 @@ def test_write_per_kernel_isa_files_places_stall_reasons_between_counts_and_sour
         "Instruction line",
         "Instruction type",
         "Total count",
-        "Active count",
+        "Issue count",
         "Stall count",
         "Wave occupancy percent",
         "Active thread percent",

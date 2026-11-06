@@ -33,7 +33,7 @@ BASE_COLUMNS = (
     "Instruction line",
     "Instruction type",
     "Total count",
-    "Active count",
+    "Issue count",
     "Stall count",
     "Wave occupancy percent",
     "Active thread percent",
