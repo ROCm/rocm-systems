@@ -6,19 +6,6 @@
 #pragma once
 
 // Which JIT/link options carry a pointer in their value.
-//
-// hipLinkCreate, hipLinkAddData and the other JIT entry points take parallel
-// arrays: `options` (hipJitOption) and `optionValues` (void*). The value is an
-// integer for some options and a pointer for others (a log buffer the runtime
-// writes into, a table of symbol names or addresses). A recorded pointer value
-// is an address in the capturing process; handing it to the runtime lets the
-// archive choose what the runtime reads or writes. Replay refuses any option
-// that is not known to carry an integer, which also covers option numbers this
-// table has not heard of.
-//
-// Header-only and free of HIP types so the table can be tested without a GPU.
-// The numbers are the hipJitOption enumerators (hip/linker_types.h); the unit
-// test static_asserts them against the real enum.
 
 #include <cstdint>
 
@@ -26,7 +13,6 @@ namespace hrr {
 
 // True if the value paired with JIT option `option` is an integer, so the
 // recorded value can be passed through. False for the options whose value is a
-// pointer and for any number not listed.
 constexpr bool jit_option_value_is_integer(int option) {
   switch (option) {
     case 0:      // hipJitOptionMaxRegisters
@@ -59,7 +45,6 @@ constexpr bool jit_option_value_is_integer(int option) {
     default:
       // 2 WallTime, 3 InfoLogBuffer, 5 ErrorLogBuffer, 17 GlobalSymbolNames,
       // 18 GlobalSymbolAddresses, 10000 IRtoISAOptExt carry pointers; anything
-      // else is unknown.
       return false;
   }
 }

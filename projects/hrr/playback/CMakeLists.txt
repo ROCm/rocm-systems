@@ -2,9 +2,6 @@
 #
 # SPDX-License-Identifier: MIT
 
-# HRR Playback Tools
-# Built as part of the standalone projects/hrr CMake tree. HIP runtime linkage
-# comes from the public HIP CMake package (hip::host), not from CLR internals.
 
 # C++20 on Windows (MSVC requires it for some std features), C++17 on Linux.
 if(WIN32)
@@ -13,14 +10,10 @@ else()
   set(HRR_CXX_STANDARD 17)
 endif()
 
-# ---------------------------------------------------------------------------
-# hrr_reader — archive loader (STATIC)
-#
 # CPU-only: depends solely on the header-only wire format (hrr::api_args) and the
 # C++ standard library. It is defined unconditionally so the unit tests can link
 # it even when the HIP-dependent playback tool is not built
 # (HRR_BUILD_PLAYBACK=OFF); it must not gain a HIP dependency.
-# ---------------------------------------------------------------------------
 add_library(hrr_reader STATIC hrr_reader.cpp)
 add_library(hrr::reader ALIAS hrr_reader)
 set_target_properties(hrr_reader PROPERTIES
@@ -37,9 +30,6 @@ target_compile_definitions(hrr_reader PRIVATE
   $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
 )
 
-# ---------------------------------------------------------------------------
-# hrr-playback — full replay tool (requires HIP)
-# ---------------------------------------------------------------------------
 if(HRR_BUILD_PLAYBACK)
   find_package(Threads REQUIRED)
   find_package(hip CONFIG REQUIRED)

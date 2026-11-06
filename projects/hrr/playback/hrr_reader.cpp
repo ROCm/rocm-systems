@@ -21,9 +21,7 @@ namespace fs = std::filesystem;
 
 namespace hrr {
 
-// ---------------------------------------------------------------------------
 // Event move semantics
-// ---------------------------------------------------------------------------
 
 Event::Event(Event&& o) noexcept
     : raw_payload(std::move(o.raw_payload)),
@@ -61,9 +59,7 @@ Event& Event::operator=(Event&& o) noexcept {
   return *this;
 }
 
-// ---------------------------------------------------------------------------
 // Utilities
-// ---------------------------------------------------------------------------
 
 std::string hash_hex(uint64_t lo, uint64_t hi) {
   char buf[33];
@@ -98,14 +94,8 @@ static std::vector<fs::path> find_pid_subarchives(const fs::path& root) {
   return dirs;
 }
 
-// ---------------------------------------------------------------------------
 // Shared record framing
-//
 // Crash resilience: a record stream is an append-only log of self-delimiting
-// records, so a partial write can only ever be the LAST record. A torn header
-// or payload at the tail is therefore a recovery point — every complete record
-// already parsed is kept — rather than a reason to reject the whole file.
-// ---------------------------------------------------------------------------
 
 RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out,
                              ByteBudget* budget) {
@@ -249,10 +239,6 @@ constexpr uint64_t kMapNodeOverhead = 32;
 constexpr uint64_t kMinAllocation = 32;
 
 // Charges what a parse keeps against the load budget before it allocates it.
-// A record's bytes expand when parsed (a 3-byte argument header becomes a
-// KernelArg, a 41-byte snapshot a BufferSnapshot), so the raw-record charge
-// alone does not cover it. `total` is what was charged, so a parse that fails
-// can give it back.
 struct ParseCharge {
   ByteBudget& budget;
   uint64_t total = 0;
@@ -264,7 +250,6 @@ struct ParseCharge {
   }
   // A non-empty vector's buffer is its own malloc, which takes at least
   // kMinAllocation whatever it holds, so a record full of one-byte arguments
-  // is not charged its byte count alone.
   bool charge_buffer(uint64_t n) {
     return charge(n ? std::max<uint64_t>(n, kMinAllocation) : 0);
   }
@@ -350,9 +335,7 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
   return true;
 }
 
-// ---------------------------------------------------------------------------
 // Archive loader
-// ---------------------------------------------------------------------------
 
 bool load_archive(const std::string& path, Archive& archive,
                   ByteBudget* bytes) {
@@ -371,7 +354,6 @@ bool load_archive(const std::string& path, Archive& archive,
 
   // The budget is the caller's when given: the archive keeps its bytes charged
   // on success, and a failed load gives back what it charged since `start`
-  // (the load is single-threaded and nothing else charges the budget meanwhile).
   ByteBudget own_budget;
   ByteBudget& budget = bytes ? *bytes : own_budget;
   const uint64_t start = budget.used();
@@ -390,7 +372,6 @@ bool load_archive(const std::string& path, Archive& archive,
   };
   // Event slots: the vector's capacity is what is held, and a growth holds the
   // old and the new buffer at once, so the new one is charged before the old is
-  // given back.
   uint64_t slots_charged = 0;
   auto grow_events = [&] {
     const size_t cap = std::max<size_t>(archive.events.capacity() * 2, 64);
@@ -403,9 +384,6 @@ bool load_archive(const std::string& path, Archive& archive,
 
   // Read events sequentially. read_raw_record handles the framing and the
   // torn-tail recovery; a torn record means the capture was interrupted, and
-  // everything parsed before it is kept. The clean-shutdown trailer
-  // (hrr_eof_record) explicitly marks a whole archive, and it ends the event
-  // stream.
   bool truncated = false;
   bool complete  = false;
   bool trailer   = false;
@@ -427,8 +405,6 @@ bool load_archive(const std::string& path, Archive& archive,
     const uint32_t total = ev.header().payload_length;
 
     // Clean-shutdown trailer: full hrr_eof_record with valid magic only.
-    // event_type 0xFFFF alone is not enough — Unit_HRR_Format_UnknownEventType
-    // uses 0xFFFF with header-sized payload as an opaque unknown record.
     if (etype == HRR_EOF_MARKER &&
         total == static_cast<uint32_t>(sizeof(hrr_eof_record))) {
       const auto* er = reinterpret_cast<const hrr_eof_record*>(ev.raw_payload.data());
@@ -442,15 +418,11 @@ bool load_archive(const std::string& path, Archive& archive,
     }
 
     // Convenience cast macro — raw_payload.data() is the full hrr_args_* struct.
-    // SIZE_OK(T): verify payload is large enough for the typed struct before casting.
-    // A malformed archive could supply a valid event_type with payload_length == 32
-    // (header only), which would cause an OOB read in the typed cast.
     #define AS(T) reinterpret_cast<const T*>(ev.raw_payload.data())
     #define SIZE_OK(T) (total >= static_cast<uint32_t>(sizeof(T)))
 
     switch (ev.header().event_type) {
 
-      // --- Memory allocation ---
 
       case HRR_API_HIPMALLOC: {
         if (!SIZE_OK(hrr_args_hipMalloc)) break;
@@ -480,7 +452,6 @@ bool load_archive(const std::string& path, Archive& archive,
         break;
       }
 
-      // --- Data transfer ---
 
       case HRR_API_HIPMEMCPY: {
         if (!SIZE_OK(hrr_args_hipMemcpy)) break;
@@ -558,7 +529,6 @@ bool load_archive(const std::string& path, Archive& archive,
       case HRR_API_HIPMEMSETASYNC:
         break;  // raw_payload retained for replay
 
-      // --- Modules ---
 
       case HRR_API_HIPMODULELOADDATA:
       case HRR_API_HIPMODULELOADDATAEX: {
@@ -582,7 +552,6 @@ bool load_archive(const std::string& path, Archive& archive,
           ev.handle64 = AS(hrr_args_hipModuleUnload)->module;
         break;
 
-      // --- Kernel launch ---
 
       case HRR_API_HIPMODULELAUNCHKERNEL:
       case HRR_API_HIPEXTMODULELAUNCHKERNEL:
@@ -606,7 +575,6 @@ bool load_archive(const std::string& path, Archive& archive,
         break;
       }
 
-      // --- Streams ---
 
       case HRR_API_HIPSTREAMCREATE: {
         if (!SIZE_OK(hrr_args_hipStreamCreate)) break;
@@ -650,7 +618,6 @@ bool load_archive(const std::string& path, Archive& archive,
         break;
       }
 
-      // --- Events ---
 
       case HRR_API_HIPEVENTCREATE:
         if (SIZE_OK(hrr_args_hipEventCreate))
@@ -676,7 +643,6 @@ bool load_archive(const std::string& path, Archive& archive,
           ev.handle64 = AS(hrr_args_hipEventDestroy)->event;
         break;
 
-      // --- Device sync ---
 
       case HRR_API_HIPDEVICESYNCHRONIZE:
       default:
@@ -698,7 +664,6 @@ bool load_archive(const std::string& path, Archive& archive,
 
   // A runtime older than the writer fix for it could append a few records
   // after the trailer, from calls still in flight at shutdown. They are not in
-  // the trailer's count, so they are counted and left out of the replay.
   if (trailer) {
     std::vector<uint8_t> rest;
     while (read_raw_record(f, rest) == RecordStatus::Ok)
@@ -733,11 +698,6 @@ bool load_archive(const std::string& path, Archive& archive,
   }
 
   // Sort events by sequence_id to restore causal ordering across threads.
-  // Multi-threaded captures write events from different threads in file-arrival
-  // order, which may differ from the logical call order. sequence_id is assigned
-  // atomically by the writer, so sorting by it restores the true call sequence.
-  // stable_sort takes a scratch buffer of up to half the events, so it is
-  // charged while the sort runs.
   const uint64_t sort_scratch = uint64_t(archive.events.size() / 2 + 1) * sizeof(Event);
   if (!budget.try_charge(sort_scratch)) return over_budget();
   std::stable_sort(archive.events.begin(), archive.events.end(),
@@ -795,7 +755,6 @@ bool load_archive(const std::string& path, Archive& archive,
 
 // fseek takes a long, 32 bits on Windows, and an msvcrt fseek fails once the
 // file position passes 2 GiB even for a small relative offset. events.bin can
-// be larger than that, so the walk seeks with the 64-bit call.
 static int seek64(FILE* f, int64_t offset, int origin) {
 #ifdef _WIN32
   return _fseeki64(f, offset, origin);
@@ -806,8 +765,6 @@ static int seek64(FILE* f, int64_t offset, int origin) {
 
 // The framing checks are read_raw_record's, so a record the loader takes as
 // torn ends the walk here too, and like the loader the walk stops at the first
-// trailer. A payload that runs past the end of the file needs no check of its
-// own: the seek succeeds and the next header read fails.
 bool has_clean_trailer(const std::string& archive_dir) {
   FILE* f = fopen((fs::path(archive_dir) / "events.bin").string().c_str(), "rb");
   if (!f) return false;
@@ -836,9 +793,7 @@ bool has_clean_trailer(const std::string& archive_dir) {
   return clean;
 }
 
-// ---------------------------------------------------------------------------
 // Blob / code object readers
-// ---------------------------------------------------------------------------
 
 static std::atomic<uint64_t> g_max_file_bytes{kDefaultMaxFileBytes};
 static std::atomic<uint64_t> g_max_events{kDefaultMaxEvents};

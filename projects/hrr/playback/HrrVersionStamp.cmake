@@ -2,9 +2,6 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Generates hrr_build_info.h, the source revision that hrr-playback --version
-# reports.
-#
 # Run from a build rule (cmake -P) rather than at configure time: a stamp taken
 # at configure time keeps reporting whatever was checked out then, which is the
 # one answer worse than no answer for a tool whose purpose is to tell you which
