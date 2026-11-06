@@ -58,7 +58,7 @@ protected:
     const auto exec = wave->exec(), vcc = wave->vcc();
     const auto scc = wave->read_scc();
     ASSERT_NE(instruction.execute, nullptr);
-    EXPECT_NO_THROW({ EXPECT_TRUE(cu->execute_instruction(&instruction, *wave).failed()); });
+    { EXPECT_TRUE(cu->execute_instruction(&instruction, *wave).failed()); }
     EXPECT_EQ(wave->instruction_execution_error(),
               amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     EXPECT_EQ(read_vgprs(), before);

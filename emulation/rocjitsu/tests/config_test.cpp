@@ -44,7 +44,6 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
-#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -163,19 +162,15 @@ load_config_from_string_for_node_valid(config::LoadedConfig &output, const std::
 }
 
 std::string config_load_error(const std::string &path, bool validate_only) {
-  try {
-    util::StringDiagnostic diagnostic;
-    if (validate_only) {
-      if (config::validate_config(path, kEmbeddedSchema, diagnostic.emitter()).failed())
-        return diagnostic.message();
-    } else {
-      if (config::load_config(path, kEmbeddedSchema, diagnostic.emitter()).failed())
-        return diagnostic.message();
-    }
-    return {};
-  } catch (const std::exception &error) {
-    return error.what();
+  util::StringDiagnostic diagnostic;
+  if (validate_only) {
+    if (config::validate_config(path, kEmbeddedSchema, diagnostic.emitter()).failed())
+      return diagnostic.message();
+  } else {
+    if (config::load_config(path, kEmbeddedSchema, diagnostic.emitter()).failed())
+      return diagnostic.message();
   }
+  return {};
 }
 
 std::vector<uint8_t> read_binary_file(const std::string &path) {
@@ -3898,7 +3893,7 @@ TEST(ConfigLoaderTest, RejectsInvalidComponentIntegersWithoutThrowing) {
                                R"(","value":")" + value + R"("}]}]}}})";
       const std::string message =
           std::string(field.key) + " must start with a decimal integer in unsigned long range";
-      EXPECT_NO_THROW(expect_config_target_failure(json, message.c_str()));
+      expect_config_target_failure(json, message.c_str());
       rj_vm_t sentinel;
       rj_vm_t *output = &sentinel;
       EXPECT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &output),
@@ -3934,7 +3929,7 @@ TEST(ConfigLoaderTest, PropagatesRootComputeUnitFailure) {
   const std::string json = R"({"vm":{"arch":"cdna3"},"topology":{
     "root":{"name":"rejected","type":"compute_unit","config":[
       {"key":"num_wf_slots","value":"33"}]}}})";
-  EXPECT_NO_THROW(expect_config_target_failure(json, "num_wf_slots exceeds the ISA maximum of 32"));
+  expect_config_target_failure(json, "num_wf_slots exceeds the ISA maximum of 32");
 }
 
 TEST(ConfigLoaderTest, RejectsInvalidCuAfterConstructingSibling) {
@@ -3954,7 +3949,7 @@ TEST(ConfigLoaderTest, RejectsInvalidCuAfterConstructingSibling) {
         {"name":"accepted","type":"compute_unit"},
         {"name":"rejected","type":"compute_unit","config":[{"key":")") +
                              test_case.key + R"(","value":")" + test_case.value + R"("}]}]}}})";
-    EXPECT_NO_THROW(expect_config_target_failure(json, test_case.message));
+    expect_config_target_failure(json, test_case.message);
 
     rj_vm_t sentinel;
     rj_vm_t *output = &sentinel;
@@ -4157,11 +4152,11 @@ TEST(ConfigLoaderTest, ComponentFailuresReturnDiagnosticsWithoutThrowing) {
     auto json = functional_quantum_checkpoint_config(1, 1);
     ASSERT_TRUE(replace_exactly_once(json, c.before, c.after));
     util::StringDiagnostic diagnostic;
-    EXPECT_NO_THROW({
+    {
       const auto result =
           config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter());
       EXPECT_TRUE(result.failed());
-    });
+    }
     EXPECT_EQ(diagnostic.message(), c.diagnostic);
   }
 }

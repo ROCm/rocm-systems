@@ -91,7 +91,7 @@ public:
   }
   /// @brief Lease one slot until the last shared owner releases it.
   /// @details Exhaustion returns failure without changing existing leases.
-  /// The pool must itself have shared ownership. Allocation failures may still throw.
+  /// The pool must itself have shared ownership.
   /// @param emit_error Destination for failure diagnostics.
   util::FailureOr<std::shared_ptr<uint32_t>> acquire(util::DiagnosticEmitter emit_error = {}) {
     std::unique_ptr<uint32_t> slot;
