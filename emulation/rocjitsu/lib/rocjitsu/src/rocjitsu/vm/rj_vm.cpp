@@ -282,30 +282,22 @@ rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char 
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   if (!vm->soc)
     return ROCJITSU_STATUS_ERROR;
-  try {
-    util::StringDiagnostic diagnostic;
-    util::FailureOr<std::shared_ptr<ExecutionPluginGroup>> configured =
-        PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "",
-                                             diagnostic.emitter());
-    if (configured.failed()) {
-      util::Logger::warn("rj_vm_load_plugins failed: ", diagnostic.message());
-      return ROCJITSU_STATUS_INVALID_ARGUMENT;
-    }
-    std::shared_ptr<ExecutionPluginGroup> group = std::move(configured).value();
-    // rj_vm_load_plugins() is a pre-run operation, so replacing and initializing
-    // the group cannot overlap simulation callbacks.
-    shutdown_plugin_group(vm);
-    vm->soc->set_plugin_group(group);
-    group->onInit();
-    vm->plugin_group_active.store(true, std::memory_order_release);
-    return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::exception &e) {
-    util::Logger::warn("rj_vm_load_plugins failed: ", e.what());
-    return ROCJITSU_STATUS_ERROR;
-  } catch (...) {
-    util::Logger::warn("rj_vm_load_plugins failed: unknown plugin exception");
-    return ROCJITSU_STATUS_ERROR;
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<std::shared_ptr<ExecutionPluginGroup>> configured =
+      PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "",
+                                           diagnostic.emitter());
+  if (configured.failed()) {
+    util::Logger::warn("rj_vm_load_plugins failed: ", diagnostic.message());
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
   }
+  std::shared_ptr<ExecutionPluginGroup> group = std::move(configured).value();
+  // rj_vm_load_plugins() is a pre-run operation, so replacing and initializing
+  // the group cannot overlap simulation callbacks.
+  shutdown_plugin_group(vm);
+  vm->soc->set_plugin_group(group);
+  group->onInit();
+  vm->plugin_group_active.store(true, std::memory_order_release);
+  return ROCJITSU_STATUS_SUCCESS;
 }
 
 void rj_vm_retain(rj_vm_t *vm) {
@@ -381,10 +373,10 @@ rj_status_t rj_vm_save_checkpoint(const rj_vm_t *vm, const char *path, uint64_t 
   if (engine_config.num_threads == vm->loaded.execution_threads.engines)
     engine_config.num_threads = vm->loaded.requested_engine_threads;
   util::StringDiagnostic diagnostic;
-  if (config::save_checkpoint(path, *vm->soc, tick, engine_config,
-                              vm->loaded.cpu_dispatch_threads, diagnostic.emitter(),
-                              vm->loaded.cpu_thread_budget, vm->loaded.thread_allocations,
-                              vm->loaded.legacy_auto_dispatch, vm->loaded.async_helper_threads)
+  if (config::save_checkpoint(path, *vm->soc, tick, engine_config, vm->loaded.cpu_dispatch_threads,
+                              diagnostic.emitter(), vm->loaded.cpu_thread_budget,
+                              vm->loaded.thread_allocations, vm->loaded.legacy_auto_dispatch,
+                              vm->loaded.async_helper_threads)
           .failed()) {
     util::Logger::warn("rj_vm_save_checkpoint failed: ", diagnostic.message());
     return ROCJITSU_STATUS_ERROR;

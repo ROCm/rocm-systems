@@ -3796,12 +3796,9 @@ TEST(ConfigLoaderTest, RejectsInvalidComponentIntegersWithoutThrowing) {
   const struct {
     const char *type;
     const char *key;
-  } fields[] = {{"compute_unit", "num_wf_slots"},
-                {"compute_unit", "sgprs_per_wf"},
-                {"compute_unit", "vgprs_per_wf"},
-                {"compute_unit", "lds_size_kb"},
-                {"compute_unit", "gws_wait_limit"},
-                {"compute_unit", "functional_quantum"},
+  } fields[] = {{"compute_unit", "num_wf_slots"},   {"compute_unit", "sgprs_per_wf"},
+                {"compute_unit", "vgprs_per_wf"},   {"compute_unit", "lds_size_kb"},
+                {"compute_unit", "gws_wait_limit"}, {"compute_unit", "functional_quantum"},
                 {"iod", "num_hbm_stacks"}};
   for (const auto &field : fields) {
     for (const char *value : {"", "nonnumeric", "+", "18446744073709551616"}) {
@@ -3829,8 +3826,8 @@ TEST(ConfigLoaderTest, PreservesComponentIntegerPrefixesSignsAndNarrowing) {
   const struct {
     const char *text;
     uint32_t expected;
-  } cases[] = {{"0", 0}, {"4294967295", UINT32_MAX}, {"4294967296", 0},
-               {"-1", UINT32_MAX}, {" +7suffix", 7}, {"0x10", 0}};
+  } cases[] = {{"0", 0},           {"4294967295", UINT32_MAX}, {"4294967296", 0},
+               {"-1", UINT32_MAX}, {" +7suffix", 7},           {"0x10", 0}};
   for (const auto &test_case : cases) {
     SCOPED_TRACE(test_case.text);
     const std::string json = std::string(R"({"num_threads":1,"vm":{"arch":"cdna3"},
@@ -3878,7 +3875,8 @@ TEST(ConfigLoaderTest, RejectsInvalidCuAfterConstructingSibling) {
     EXPECT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &output),
               ROCJITSU_STATUS_INVALID_ARGUMENT);
     EXPECT_EQ(output, &sentinel);
-    const auto file = write_temp_config(json);
+    test::ScopedTempFile file;
+    ASSERT_TRUE(write_temp_config(file, json));
     EXPECT_EQ(rj_vm_create(file.path().c_str(), RJ_VM_MODE_DEFAULT, &output),
               ROCJITSU_STATUS_INVALID_FILE);
     EXPECT_EQ(output, &sentinel);

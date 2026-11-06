@@ -174,9 +174,9 @@ simdojo::ExecMode exec_mode_from_fb(const rocjitsu::fb::SimulationConfig *fb_con
   return parse_exec_mode(fb_config->exec_mode() ? fb_config->exec_mode()->str() : "");
 }
 
-util::FailureOr<uint32_t>
-config_u32(const std::unordered_map<std::string, std::string> &cfg, const std::string &key,
-           uint32_t fallback, util::DiagnosticEmitter emit_error) {
+util::FailureOr<uint32_t> config_u32(const std::unordered_map<std::string, std::string> &cfg,
+                                     const std::string &key, uint32_t fallback,
+                                     util::DiagnosticEmitter emit_error) {
   auto it = cfg.find(key);
   if (it == cfg.end())
     return fallback;
@@ -626,11 +626,13 @@ parse_compute_unit_config(const CfgMap &cfg, rj_code_arch_t arch, rj_code_target
   if (num_wf_slots.failed())
     return util::Result::failure();
   cc.num_wf_slots = num_wf_slots.value();
-  util::FailureOr<uint32_t> sgprs_per_wf = config_u32(cfg, "sgprs_per_wf", default_sgprs_per_wf(arch), emit_error);
+  util::FailureOr<uint32_t> sgprs_per_wf =
+      config_u32(cfg, "sgprs_per_wf", default_sgprs_per_wf(arch), emit_error);
   if (sgprs_per_wf.failed())
     return util::Result::failure();
   cc.sgprs_per_wf = sgprs_per_wf.value();
-  util::FailureOr<uint32_t> vgprs_per_wf = config_u32(cfg, "vgprs_per_wf", default_vgprs_per_wf(arch), emit_error);
+  util::FailureOr<uint32_t> vgprs_per_wf =
+      config_u32(cfg, "vgprs_per_wf", default_vgprs_per_wf(arch), emit_error);
   if (vgprs_per_wf.failed())
     return util::Result::failure();
   cc.vgprs_per_wf = vgprs_per_wf.value();
@@ -638,11 +640,13 @@ parse_compute_unit_config(const CfgMap &cfg, rj_code_arch_t arch, rj_code_target
   if (lds_size_kb.failed())
     return util::Result::failure();
   cc.lds_size_kb = lds_size_kb.value();
-  util::FailureOr<uint32_t> gws_wait_limit = config_u32(cfg, "gws_wait_limit", cc.gws_wait_limit, emit_error);
+  util::FailureOr<uint32_t> gws_wait_limit =
+      config_u32(cfg, "gws_wait_limit", cc.gws_wait_limit, emit_error);
   if (gws_wait_limit.failed())
     return util::Result::failure();
   cc.gws_wait_limit = gws_wait_limit.value();
-  util::FailureOr<uint32_t> functional_quantum = config_u32(cfg, "functional_quantum", amdgpu::ComputeUnitCore::kFunctionalQuantum, emit_error);
+  util::FailureOr<uint32_t> functional_quantum = config_u32(
+      cfg, "functional_quantum", amdgpu::ComputeUnitCore::kFunctionalQuantum, emit_error);
   if (functional_quantum.failed())
     return util::Result::failure();
   cc.functional_quantum = functional_quantum.value();

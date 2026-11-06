@@ -263,7 +263,8 @@ TEST_F(PluginLoaderTest, CApiRejectsAdmissionBeforeReplacingInstalledGroup) {
 }
 
 TEST_F(PluginLoaderTest, AdmissionRejectionPreservesActiveFileSink) {
-  rocjitsu::test::ScopedTempDirectory output("rocjitsu-plugin-sinks-");
+  rocjitsu::test::ScopedTempDirectory output;
+  ASSERT_TRUE(output.initialize("rocjitsu-plugin-sinks-"));
   rocjitsu::SoC soc("plugin_loader_test");
   soc.set_plugin_group(nullptr);
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(new rj_vm_t, rj_vm_destroy);
@@ -295,7 +296,8 @@ TEST_F(PluginLoaderTest, AdmissionRejectionPreservesActiveFileSink) {
 }
 
 TEST_F(PluginLoaderTest, RejectedFileOnlyCandidateDiscardsSimulationSummary) {
-  rocjitsu::test::ScopedTempDirectory output("rocjitsu-plugin-sinks-");
+  rocjitsu::test::ScopedTempDirectory output;
+  ASSERT_TRUE(output.initialize("rocjitsu-plugin-sinks-"));
   const std::string plugin_dir = PLUGIN_LOADER_RACE_DIR;
   rocjitsu::ExecutionPluginGroup probe(rocjitsu::PluginSinkConfig{});
   ASSERT_EQ(
