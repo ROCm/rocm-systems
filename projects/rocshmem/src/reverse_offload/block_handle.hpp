@@ -51,6 +51,9 @@ struct BlockHandle {
   AWF_Queue_statusT *default_ctx_status{nullptr};
   AWF_Queue_ret_buffT *default_ctx_g_ret{nullptr};
   AWF_Queue_ret_buffT *default_ctx_atomic_ret{nullptr};
+  // NBI elements queued (bumped after enqueue) and the highest count covered by a completed proxy fence or quiet.
+  uint64_t nbi_posted{};
+  uint64_t nbi_fenced{};
 };
 
 class DefaultBlockHandleProxy {
@@ -84,6 +87,8 @@ class DefaultBlockHandleProxy {
     block_handle->default_ctx_status = default_ctx_status;
     block_handle->default_ctx_g_ret = default_ctx_g_ret;
     block_handle->default_ctx_atomic_ret = default_ctx_atomic_ret;
+    block_handle->nbi_posted = 0;
+    block_handle->nbi_fenced = 0;
   }
 
   DefaultBlockHandleProxy(const DefaultBlockHandleProxy& other) = delete;
@@ -127,6 +132,8 @@ class BlockHandleProxy {
       block_handle->atomic_ret = reinterpret_cast<uint64_t*>(atomic_ret) +
                                  block_offset;
       block_handle->lock = 0;
+      block_handle->nbi_posted = 0;
+      block_handle->nbi_fenced = 0;
     }
   }
 
