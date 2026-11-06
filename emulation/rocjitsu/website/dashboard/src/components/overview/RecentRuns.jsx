@@ -21,7 +21,7 @@ function sourceCommitUrl(run, publicationRepository) {
 
 function RunTime({ timestamp }) {
   if (!isValidTimestamp(timestamp)) return '-';
-  return <Typography component="time" dateTime={timestamp} aria-label={formatFullDate(timestamp)} variant="body2" sx={{ whiteSpace: 'nowrap' }}>{formatCompactRunTime(timestamp)}</Typography>;
+  return <Typography component="time" dateTime={timestamp} title={formatFullDate(timestamp)} aria-label={formatFullDate(timestamp)} variant="body2" sx={{ whiteSpace: 'nowrap' }}>{formatCompactRunTime(timestamp)}</Typography>;
 }
 
 function statusFor(row) {
@@ -38,12 +38,12 @@ export default function RecentRuns({ data, filters }) {
   if (requestedPage !== page) setPage(page);
   const rows = useMemo(() => selectRecentRunSummaries(attempts.slice(start, end), filters), [attempts, start, end, filters]);
   return (
-    <SectionCard title="Recent runs" subtitle="Published develop runs · newest executions first · selected targets, suites and thread policies · time in UTC" data-testid="recent-runs" sx={{ minWidth: 0 }} contentSx={{ minWidth: 0 }}>
+    <SectionCard title="Recent runs" subtitle="Published develop runs · newest executions first · selected targets, suites and thread policies · local time" data-testid="recent-runs" sx={{ minWidth: 0 }} contentSx={{ minWidth: 0 }}>
       {rows.length > 0 ? <>
         <ScrollTableContainer key={page} data-testid="recent-runs-table" tabIndex={0} role="region" aria-label="Recent runs scroll area" sx={{ height: rows.length > 7 ? 496 : 'auto', maxHeight: 496, scrollbarGutter: 'stable', overscrollBehavior: 'contain' }}>
           <Table stickyHeader size="small" aria-label="Recent runs" sx={{ ...tableStyles.recentRuns, tableLayout: 'fixed', minWidth: 1040, borderCollapse: 'separate', borderSpacing: 0, '& td:not(:first-of-type), & th:not(:first-of-type)': { textAlign: 'center' } }}>
             <colgroup><col style={{ width: '35%' }} />{Array.from({ length: 5 }, (_, i) => <col key={i} style={{ width: '13%' }} />)}</colgroup>
-            <TableHead><TableRow>{['Commit', 'Run time', 'Commit time', 'Coverage', 'Duration', 'Status'].map((label) => <TableCell key={label}>{label}</TableCell>)}</TableRow></TableHead>
+            <TableHead><TableRow>{['Commit', 'Run time (local time)', 'Commit time (local time)', 'Coverage', 'Duration', 'Status'].map((label) => <TableCell key={label}>{label}</TableCell>)}</TableRow></TableHead>
             <TableBody>{rows.map((row) => {
               const status = statusFor(row);
               const full = row.total > 0 && row.completed === row.total;

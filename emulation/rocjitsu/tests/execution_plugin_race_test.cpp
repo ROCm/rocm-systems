@@ -261,12 +261,12 @@ TEST_F(FormattedLoadRaceTest, RejectsInvalidEncodingAtCapture) {
       size_ = size;
     }
   };
-  const uint32_t word = S_NOP;
+  const std::array<uint32_t, InstructionSnapshot::kMaxWords + 1> encoding{S_NOP};
   for (const auto &[words, size] : {std::pair<const uint32_t *, int>{nullptr, 4},
-                                    {&word, 0},
-                                    {&word, -4},
-                                    {&word, 2},
-                                    {&word, 20}}) {
+                                    {encoding.data(), 0},
+                                    {encoding.data(), -4},
+                                    {encoding.data(), 2},
+                                    {encoding.data(), static_cast<int>(sizeof(encoding))}}) {
     SCOPED_TRACE(size);
     InvalidInstruction instruction(words, size);
     EXPECT_THROW(
