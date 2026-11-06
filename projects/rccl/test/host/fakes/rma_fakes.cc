@@ -133,8 +133,7 @@ ncclResult_t ncclCuStreamBatchMemOp(hipStream_t stream, unsigned int numOps,
   return g_cuStreamBatchMemOp(stream, numOps, batchParams);
 }
 
-// Floors for the rest of rma_proxy_launch.cc, reached by ce_coll.cc; omitted where the target compiles the real file.
-#ifndef RCCL_RMA_FAKES_OMIT_PROXY_LAUNCH_FLOOR
+// Floors for the rest of rma_proxy_launch.cc, reached by ce_coll.cc.
 ncclResult_t ncclRmaProxyPutBuildOp(struct ncclComm*, struct ncclRmaProxyCtx*, int, bool, struct ncclDevrWindow*,
                                     size_t, struct ncclDevrWindow*, size_t, size_t, int, int, ncclSignalMode_t,
                                     struct ncclRmaPutSignalOp*) {
@@ -165,7 +164,6 @@ ncclResult_t ncclRmaProxyWaitParams(struct ncclRmaProxyCtx*, struct ncclRmaProxy
 ncclResult_t ncclRmaProxyEnqueueDesc(struct ncclRmaProxyCtx*, struct ncclRmaProxyDesc**) {
   FailLoudUnfaked("rma_fakes", "ncclRmaProxyEnqueueDesc");
 }
-#endif
 
 void ResetRmaFakes() {
   g_rmaCircularBufEmpty = DefaultRmaCircularBufEmpty;

@@ -35,9 +35,6 @@
 //      records every registration and, in StrictPlugin*, rejects a host pointer
 //      offered as NCCL_PTR_CUDA exactly as a real plugin does -- so the test
 //      reproduces the reported failure, not just the wrong argument value.
-//
-// Why this has its own binary rather than joining rccl-UnitTestsMicro: see the
-// rccl-UnitTestsMicroRmaProxy entry in MICROTEST_README.md.
 
 #include <gtest/gtest.h>
 

@@ -2612,8 +2612,8 @@ TEST_F(SymMemoryObtainRegisterTest, GinDisabled_DefaultsToOneSegment) {
 
 // Branch: the proxy is available and the layout is single segment, so RMA
 // registration runs. 2.31 asks rma.cc's ncclRmaProxyEnabled, which this binary
-// now compiles in (see rma-test.cc), so the test drives that predicate's terms
-// rather than stubbing its answer.
+// compiles real, so the test drives that predicate's terms rather than stubbing
+// its answer.
 TEST_F(SymMemoryObtainRegisterTest, RmaProxyAvailable_RegistersWithRma) {
   RmaProxyTerms(comm, true);
   ScopedHook gather(g_devrBootstrapAllGather, agreeing);
