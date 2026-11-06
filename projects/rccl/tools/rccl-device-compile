@@ -12,13 +12,14 @@ Compile mode (--compile):
     Side effect: writes out.resources.json alongside out.o
 
 Link mode (--link):
-    rccl-device-compile --link --arch=gfx942 --dispatcher=common.cu.cpp -o device.elf obj1.o obj2.o
+    rccl-device-compile --link --arch=gfx942 --dispatcher=common.cu.cpp -o device.o obj1.o obj2.o
     1. Aggregates resource JSON files from all input objects
     2. Compiles dispatcher source to assembly
     3. Patches dispatcher with aggregated resources
     4. Assembles patched dispatcher
-    5. Optionally compiles --rocshmem-bitcode=<path>.bc to a device object
-    6. Links all objects + dispatcher (+ optional rocSHMEM object) into device.elf via ld.lld
+    5. Links all objects + dispatcher into one relocatable device.o via ld.lld -r
+    clang-linker-wrapper does the final device link of device.o when
+    librccl.so is linked (see cmake/DeviceLinker.cmake).
 
 IR codegen mode (--ir-codegen):
     rccl-device-compile --ir-codegen --arch=gfx942 -O3 -o out.o in.bc
@@ -572,7 +573,7 @@ def do_compile(args, forwarded_flags):
 
 
 # ---------------------------------------------------------------------------
-# Link mode: objects -> device.elf
+# Link mode: objects -> relocatable device.o
 # ---------------------------------------------------------------------------
 
 def device_compile_cmd(clang, target_id, forwarded_flags, asm_out, source):
@@ -627,7 +628,7 @@ def ir_codegen_cmd(clang, target_id, forwarded_flags, out, bitcode):
 
 
 def build_link_cmd(lld, output, rsp_path, arch, profile_rt):
-    """Assemble the ld.lld argv for the per-arch device.elf link.
+    """Assemble the ld.lld argv for the per-arch relocatable device.o link.
 
     When a device profile-runtime archive is given (ENABLE_FULL_COVERAGE), it
     is appended together with --plugin-opt=mcpu=<arch> so lld's LTO codegen of
@@ -644,7 +645,7 @@ def build_link_cmd(lld, output, rsp_path, arch, profile_rt):
     __llvm_profile_runtime / __start___llvm_prf_* unresolved as an opaque lld
     dump.
     """
-    link_cmd = [lld, '-shared', '-o', output, f'@{rsp_path}']
+    link_cmd = [lld, '-r', '-o', output, f'@{rsp_path}']
     if profile_rt:
         if not os.path.exists(profile_rt):
             raise SystemExit(
@@ -662,7 +663,6 @@ def do_link(args, forwarded_flags):
     output = args.output
     dispatcher = args.dispatcher
     keep_temps = args.keep_temps
-    rocshmem_bitcode = getattr(args, 'rocshmem_bitcode', None)
     profile_rt = getattr(args, 'profile_rt', None)
 
     if not dispatcher:
@@ -692,13 +692,11 @@ def do_link(args, forwarded_flags):
         disp_asm = os.path.join(output_dir, f'dispatcher_{arch}.s')
         disp_patched = os.path.join(output_dir, f'dispatcher_{arch}_patched.s')
         disp_obj = os.path.join(output_dir, f'dispatcher_{arch}.o')
-        rocshmem_obj = os.path.join(output_dir, f'rocshmem_device_{arch}.o') if rocshmem_bitcode else None
     else:
         tmpdir = make_scratch_dir(output, 'rccl-dl-')
         disp_asm = os.path.join(tmpdir, 'dispatcher.s')
         disp_patched = os.path.join(tmpdir, 'dispatcher_patched.s')
         disp_obj = os.path.join(tmpdir, 'dispatcher.o')
-        rocshmem_obj = os.path.join(tmpdir, 'rocshmem_device.o') if rocshmem_bitcode else None
 
     try:
         # Step 2: Compile dispatcher to assembly.
@@ -718,43 +716,20 @@ def do_link(args, forwarded_flags):
             clang, target_id, disp_obj, disp_patched)
         run(disp_assemble_cmd, f"assemble dispatcher for {arch}")
 
-        # Step 5: Compile rocSHMEM device bitcode to an amdgcn object (if provided).
-        # rocSHMEM device API symbols (rocshmem::*_wg, rocshmem_n_pes, …) have
-        # hidden visibility and cannot be imported from a shared lib — they must
-        # be statically present in the device ELF.  The bitcode path is supplied
-        # by CMake via --rocshmem-bitcode when ENABLE_ROCSHMEM is on.
-        if rocshmem_bitcode:
-            if not os.path.exists(rocshmem_bitcode):
-                print(f"  rocSHMEM: no device bitcode for {arch} ({rocshmem_bitcode}), skipping",
-                      file=sys.stderr)
-                rocshmem_obj = None
-            else:
-                bc_compile_cmd = [
-                    clang,
-                    '-target', 'amdgcn-amd-amdhsa',
-                    f'-mcpu={target_id}',
-                    '-c', '-x', 'ir',
-                    '-o', rocshmem_obj, rocshmem_bitcode,
-                ]
-                run(bc_compile_cmd, f"compile rocSHMEM device bitcode for {arch}")
-
-        # Step 6: Link all objects + dispatcher into device.elf
+        # Step 5: Link all objects + dispatcher into one relocatable device.o
         # Use a response file for potentially long object lists
         rsp_path = os.path.join(tmpdir or output_dir, f'link_{arch}.rsp')
         with open(rsp_path, 'w') as f:
             f.write(disp_obj + '\n')
             for obj in objects:
                 f.write(obj + '\n')
-            if rocshmem_obj:
-                f.write(rocshmem_obj + '\n')
 
         # When ENABLE_FULL_COVERAGE=ON, CMake passes --profile-rt=<archive> so
-        # lld can resolve __llvm_profile_runtime / __start___llvm_prf_* symbols
-        # from the per-arch libclang_rt.profile.a (see build_link_cmd for the
-        # --plugin-opt=mcpu rationale). lld pulls in only the members referenced
-        # by the instrumented TUs; host-only members stay unreferenced.
+        # lld pulls the members of the per-arch libclang_rt.profile.a that the
+        # instrumented TUs reference into device.o (see build_link_cmd for the
+        # --plugin-opt=mcpu rationale); host-only members stay unreferenced.
         link_cmd = build_link_cmd(lld, output, rsp_path, arch, profile_rt)
-        run(link_cmd, f"link device.elf for {arch}")
+        run(link_cmd, f"link device.o for {arch}")
 
     finally:
         if tmpdir:
@@ -794,11 +769,6 @@ def parse_compiler_flags(argv):
         elif arg.startswith('--dispatcher='):
             our_args.append(arg)
         elif arg == '--dispatcher' and i + 1 < len(argv):
-            our_args.extend([arg, argv[i + 1]])
-            i += 1
-        elif arg.startswith('--rocshmem-bitcode='):
-            our_args.append(arg)
-        elif arg == '--rocshmem-bitcode' and i + 1 < len(argv):
             our_args.extend([arg, argv[i + 1]])
             i += 1
         elif arg.startswith('--profile-rt='):
@@ -864,7 +834,6 @@ def main():
     parser.add_argument('--target-id', required=False)
     parser.add_argument('--clang', default=None)
     parser.add_argument('--dispatcher', default=None)
-    parser.add_argument('--rocshmem-bitcode', default=None, dest='rocshmem_bitcode')
     parser.add_argument('--profile-rt', default=None, dest='profile_rt')
     parser.add_argument('--ir-codegen', action='store_true', dest='ir_codegen')
     parser.add_argument('-o', '--output', required=False)
