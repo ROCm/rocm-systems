@@ -195,7 +195,7 @@ __launch_bounds__(kDdaLLSpreadThreads)
     }
   }
 
-  // Phase 2 per LDS pass: stage each rank's copy, fold in rank order, publish; a sticky abort meets every barrier.
+  // Phase 2 per LDS pass: stage each rank's copy, fold in rank order, publish; an abort leaves at the staging barrier.
   bool aborted = false;
   for (size_t q0 = p0; q0 < p1Mine; q0 += passPkts) {
     const size_t plen = p1Mine - q0 < passPkts ? p1Mine - q0 : passPkts;
@@ -243,6 +243,10 @@ __launch_bounds__(kDdaLLSpreadThreads)
     }
     ddaLLSpreadLdsBarrier();
     aborted = aborted || ldsAborted != 0;
+    // Partial sums: skip the fold, my recvbuff shard and the publish. aborted is uniform here, so no barrier is split.
+    if (aborted) {
+      break;
+    }
 
     for (size_t k = tid; k < plen; k += nthr) {
       uint32_t acc0 = ldsIn[k].x;
@@ -268,15 +272,12 @@ __launch_bounds__(kDdaLLSpreadThreads)
     }
     ddaLLSpreadLdsBarrier();
 
-    // After an abort the sums are partial; publishing them under this epoch's flag would let a peer accept them.
-    if (!aborted) {
-      for (size_t u = tid; u < pollUnits; u += nthr) {
-        const int peer = unitPeer(u, plen32);
-        const size_t k = (uint32_t)u % plen32;
-        const uint2 acc = ldsAcc[k];
-        LLPacket16* dst = ldsPeer[peer] + bankOffsetPktsNext + (size_t)selfRank * slot + q0 + k;
-        ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(dst), acc.x, flag, acc.y, flag);
-      }
+    for (size_t u = tid; u < pollUnits; u += nthr) {
+      const int peer = unitPeer(u, plen32);
+      const size_t k = (uint32_t)u % plen32;
+      const uint2 acc = ldsAcc[k];
+      LLPacket16* dst = ldsPeer[peer] + bankOffsetPktsNext + (size_t)selfRank * slot + q0 + k;
+      ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(dst), acc.x, flag, acc.y, flag);
     }
   }
 

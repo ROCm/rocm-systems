@@ -323,14 +323,14 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
     ASSERT_TRUE(peers_.Finishes(stream_, [this] { publishSpreadAll(); }, kWatchdog)) << "spread kernel did not finish";
   }
 
-  // recvbuff is the one-shot's bit for bit; an abort leaves the held shard untouched (every peer shard for a copy).
+  // recvbuff is the one-shot's bit for bit; an abort leaves the held shard untouched (every shard for a copy).
   void expectSpreadRecv(int heldArea, bool abort) {
     const std::vector<uint32_t> out = recvWords();
     for (size_t i = 0; i < out.size(); ++i) {
       const int owner = (int)(i / 2 / shardPkts());
       if (!abort || (heldArea == kReducedArea && owner == self_)) {
         ASSERT_EQ(out[i], ref_[i]) << "word " << i << " of shard " << owner;
-      } else if (owner == heldPeer() || (heldArea == kCopyArea && owner != self_)) {
+      } else if (owner == heldPeer() || heldArea == kCopyArea) {
         ASSERT_EQ(out[i], bitsOf(kUntouched)) << "an aborted thread wrote word " << i << " of shard " << owner;
       }
     }
@@ -473,7 +473,7 @@ TEST_F(DdaAllReduceFabricLL, SpreadWaitsForLateCopiesAndLateReducedShards) {
   spreadCase<float, 0>(5, kSelf, kOneShotBytes, 1, kReducedArea);
 }
 
-// An abort in the phase-2 wait publishes no partial sum; one in the phase-3 wait leaves the missing shard untouched.
+// A phase-2 abort writes and publishes no partial sum; a phase-3 abort leaves the missing shard untouched.
 TEST_F(DdaAllReduceFabricLL, SpreadAbortPublishesNoPartialSumAndLeavesMissingShards) {
   spreadCase<float, 0>(6, kSelf, kOneShotBytes, 3, kCopyArea, kAbort);
   spreadCase<float, 0>(6, kSelf, kOneShotBytes, 3, kReducedArea, kAbort);
