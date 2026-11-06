@@ -206,6 +206,10 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
     if (nonsequential(i))
       shown[i - 1] = shown[i] = true;
   }
+  // An elision notice takes a line, so hiding a single instruction saves nothing.
+  for (size_t i = first; i < last; ++i)
+    if (!shown[i] && (i == first || shown[i - 1]) && (i + 1 == last || shown[i + 1]))
+      shown[i] = true;
   // Pad PCs to the widest printed one so the instruction column lines up.
   uint64_t widest_pc = 0;
   for (size_t i = first; i < last; ++i)

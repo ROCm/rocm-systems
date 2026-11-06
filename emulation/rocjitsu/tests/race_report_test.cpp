@@ -142,7 +142,9 @@ TEST(RaceReportTraceTest, ContextLimitAndRingWrapPreserveRowsAndAccountForEveryG
       trace.push(snapshot(0x100 + i * 4, i, 1));
     const auto report = formatTrace(trace, text, mark(trace, 0), mark(trace, trace.size() - 1));
     const auto printed = rows(report);
-    ASSERT_EQ(printed.size(), std::min(trace.size(), kTraceContextRows));
+    // A one-instruction gap is printed rather than elided.
+    ASSERT_EQ(printed.size(),
+              trace.size() <= kTraceContextRows + 1 ? trace.size() : kTraceContextRows);
     ASSERT_TRUE(printed.front().marked);
     ASSERT_TRUE(printed.back().marked);
     EXPECT_EQ(printed.front().sequence, length - trace.size());
@@ -165,6 +167,17 @@ TEST(RaceReportTraceTest, ElisionNeverHidesSynchronizationOrEitherSideOfAJump) {
         std::ranges::any_of(printed, [=](const auto &row) { return row.sequence == required; }));
   EXPECT_NE(report.find("instruction 99\n       --- jump backward ---\n       0x"),
             std::string::npos);
+  EXPECT_EQ(printed.size() + elided_count(report), 200u);
+}
+
+TEST(RaceReportTraceTest, ElisionNeverHidesASingleInstruction) {
+  Trace trace;
+  for (uint32_t i = 0; i < 200; ++i)
+    trace.push(snapshot(0x1000 + i * 4, i, 1, i == 80 || i == 82));
+  const auto report = formatTrace(trace, text, mark(trace, 0), mark(trace, 199));
+  const auto printed = rows(report);
+  EXPECT_TRUE(std::ranges::any_of(printed, [](const auto &row) { return row.sequence == 81; }));
+  EXPECT_EQ(report.find("... 1 instructions elided"), std::string::npos);
   EXPECT_EQ(printed.size() + elided_count(report), 200u);
 }
 
