@@ -172,6 +172,9 @@ struct InstrumentationPatch {
 /// @brief Production attribution from an original anchor to its emitted bytes.
 /// @details Offsets are relative to .text. KernelEntry has no relocated guest
 /// instruction, so guest_size is zero and guest_offset names its return branch.
+/// For callable sites, instrumentation_offset and instrumentation_size cover
+/// the call envelope and exclude the relocated guest instruction and resume
+/// branch.
 struct InstrumentedSite {
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
   uint64_t original_offset = 0;
@@ -278,8 +281,11 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// Temporarily fills it ONLY with a plan to instrument with a nop.
 /// Fills before_items = {{ s_nop 0 }}, after_items = {}, emit_original = true.
 /// The caller chooses @p trampoline_offset (typically `patcher.text_size()`).
-[[nodiscard]] TrampolinePlan make_trampoline_plan(const ResolvedInstrumentationSite &site,
-                                                  rj_code_arch_t arch, uint64_t trampoline_offset);
+/// @returns std::nullopt for an unsupported architecture; writes the reason to
+/// @p error_out when supplied.
+[[nodiscard]] std::optional<TrampolinePlan>
+make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arch,
+                     uint64_t trampoline_offset, std::string *error_out = nullptr);
 
 /// @brief Verify @p plan matches the (temporary) inlined nop body shape:
 ///        exactly one `before_items` entry containing `s_nop 0`, empty

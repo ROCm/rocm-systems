@@ -14,7 +14,6 @@
  *************************************************************************/
 
 #include "fakes/dev_runtime_micro_fakes.h"
-#include "fakes/collective_stubs.h"  // g_enqueueRearchEnable
 #include "fakes/hip_fakes.h"      // the shared g_hip* seams this suite drives
 #include "fakes/nccl_fakes.h"     // g_ncclProxyClientGetFdBlocking
 #include "fakes/devcomm_fakes.h"  // g_ncclTeamLsa
@@ -26,8 +25,7 @@
 // g_loadParam on every read, so tests can vary a param between cases. Must
 // precede the unit under test, which is where the bodies are emitted.
 //
-// g_loadParam is supplied by fakes/dev_runtime_micro_fakes.cc here rather than
-// fakes/nccl_fakes.cc, which this binary does not link.
+// g_loadParam is defined in fakes/nccl_fakes.cc, which this binary links.
 #include "fakes/param_redirect.h"
 
 // ncclCalloc's failure arms cannot be reached while it always succeeds, and it
@@ -120,7 +118,15 @@ static inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* manager
 #include <gtest/gtest.h>
 
 #include "ScopedHook.h"
+#include "StickyHipLastError.h"
+#include "../common/LogCapture.hpp"  // CaptureLog: assert on WARN text
 
+#include <malloc.h>  // mallinfo2: heap in-use bytes for the DevCommCreate leak checks
+#if defined(__GLIBC_PREREQ)
+#if __GLIBC_PREREQ(2, 33)
+#define DEV_RUNTIME_TEST_HAS_MALLINFO2 1
+#endif
+#endif
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -3862,6 +3868,22 @@ TEST_F(WindowRegisterNonSymIpcTest, MapsPeersAndReusesSelf) {
   EXPECT_EQ(win->ipcPeerPtrs[2], static_cast<char*>(reinterpret_cast<void*>(0x900000)) + 128);
 }
 
+// ROCM-33799: with cuMem off no probe runs, so an error the application has not read yet
+// must survive registration.
+TEST_F(WindowRegisterNonSymIpcTest, NoCuMemProbe_KeepsCallerLastError) {
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    *ptr = reinterpret_cast<void*>(0x900000);
+    return hipSuccess;
+  });
+  StickyHipLastError lastError;
+  lastError.pending = hipErrorOutOfMemory;
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  EXPECT_EQ(lastError.pending, hipErrorOutOfMemory);
+}
+
 // Branch: a peer in our own process is left unmapped -- opening an IPC handle
 // against the same address space is not supported here.
 TEST_F(WindowRegisterNonSymIpcTest, SameProcessPeer_IsLeftUnmapped) {
@@ -4347,8 +4369,9 @@ TEST_F(WindowRegisterNonSymCuMemTest, VmmWindow_ExportsHandleAndImportsPeers) {
 TEST_F(WindowRegisterNonSymCuMemTest, RetainFails_FallsBackToLegacyIpc) {
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(8192));
-  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t*, void*) {
-    return hipErrorInvalidValue;
+  StickyHipLastError lastError;
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [&](hipMemGenericAllocationHandle_t*, void*) {
+    return lastError.Fail(hipErrorInvalidValue);
   });
   ScopedHook ipcGet(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t*, void*) { return hipSuccess; });
   ScopedHook import(g_hipMemImportFromShareableHandle,
@@ -4389,6 +4412,8 @@ TEST_F(WindowRegisterNonSymCuMemTest, RetainFails_FallsBackToLegacyIpc) {
   EXPECT_EQ(win->ipcPeerIsCuMem[1], 0);
   EXPECT_EQ(win->ipcPeerIsCuMem[2], 0);
   EXPECT_EQ(open.calls, 2);
+  // ROCM-33799: the expected retain failure must not reach the application.
+  EXPECT_EQ(lastError.pending, hipSuccess);
 }
 
 // Branch: a cuMem peer is already mapped when a later one fails, so cleanup has
@@ -6019,7 +6044,6 @@ protected:
       free(ncclIntruQueueDequeue(&comm->rmaCeInitTaskQueue));
     }
     free(comm->devrState.lsaRankList);
-    g_enqueueRearchEnable = 0;
     ResetDevRuntimeMicroFakes();
   }
 };
@@ -6063,7 +6087,7 @@ TEST_F(CommWindowRegisterImplTest, NoWindowSupport_SucceedsWithoutQueueing) {
 
 // The rearch path hands a job to ncclMgmtTaskEnqueue instead of queueing a task.
 TEST_F(CommWindowRegisterImplTest, Rearch_HandsTheJobToTheManagementQueue) {
-  g_enqueueRearchEnable = 1;
+  ScopedHook rearch(g_loadParam, ParamOverride({{"ENQUEUE_REARCH_ENABLE", 1}}));
   ncclAsyncJob* job = nullptr;
   void (*jobFree)(void*) = nullptr;
   ncclComm* jobComm = nullptr;
@@ -6089,7 +6113,7 @@ TEST_F(CommWindowRegisterImplTest, Rearch_HandsTheJobToTheManagementQueue) {
 // ncclMgmtTaskEnqueue owns the job once called: when it rejects (a blocking and a nonblocking comm in one
 // group) it runs the destructor itself, so fail: must not free the job again.
 TEST_F(CommWindowRegisterImplTest, RearchEnqueueRejects_JobIsDestroyedOnlyByTheEnqueue) {
-  g_enqueueRearchEnable = 1;
+  ScopedHook rearch(g_loadParam, ParamOverride({{"ENQUEUE_REARCH_ENABLE", 1}}));
   int destroyed = 0;
   g_devrMgmtTaskEnqueue = [&](ncclAsyncJob* j, ncclResult_t (*)(ncclAsyncJob*), void (*d)(void*), ncclComm*) {
     d(j);
@@ -6312,18 +6336,6 @@ TEST_F(DeepCopyDevCommRequirementsTest, NoLists_LeavesBothEmpty) {
 
 // Branch: an allocation part-way through the copy releases what was built and
 // reports nothing back, rather than handing over a half-copied structure.
-//
-// +2, deliberately, not +1. deepCopyDevCommRequirements memcpys the whole
-// source struct (deepCopyDevCommRequirements' memcpy), which copies the
-// caller's list-head
-// pointers into the copy, and only overwrites them on the first *successful*
-// node alloc. ncclCallocDebug returns without touching *ptr on failure
-// (alloc.h:415-418), so failing the first node alloc leaves the copy's
-// resourceRequirementsList still pointing at the caller's &res1 -- a fixture
-// member -- and the fail: label's freeDevCommRequirements then free()s it.
-// +1 is therefore the index that exposes AICOMRCCL-2180 finding 15; running it
-// would corrupt the heap rather than assert, so this covers the adjacent
-// index and the bug is documented instead of pinned.
 TEST_F(DeepCopyDevCommRequirementsTest, NodeAllocFails_ReleasesPartialCopy) {
   res1.next = &res2;
   src.resourceRequirementsList = &res1;
@@ -6331,6 +6343,39 @@ TEST_F(DeepCopyDevCommRequirementsTest, NodeAllocFails_ReleasesPartialCopy) {
 
   EXPECT_NE(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
   EXPECT_EQ(dst, nullptr);
+}
+
+// Branch: the first node alloc of a list fails. The memcpy of the whole source
+// struct also copies the caller's list heads, and a failed ncclCalloc leaves
+// *ptr untouched (alloc.h:456-458, and MicroCalloc above), so the copy's heads must be cleared
+// before the first node is allocated; otherwise fail:'s freeDevCommRequirements
+// free()s the caller's first node (AICOMRCCL-2180 finding 15). res1 and team1
+// are fixture members, so a regression aborts in free() rather than failing an
+// expectation here.
+TEST_F(DeepCopyDevCommRequirementsTest, FirstResourceNodeAllocFails_LeavesCallerListAlone) {
+  res1.bufferSize = 128;
+  res1.next = &res2;
+  src.resourceRequirementsList = &res1;
+  ScopedCallocFailure callocFail(1);  // only the top-level object succeeds
+
+  EXPECT_NE(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
+  EXPECT_EQ(dst, nullptr);
+  EXPECT_EQ(src.resourceRequirementsList, &res1);
+  EXPECT_EQ(res1.next, &res2);
+  EXPECT_EQ(res1.bufferSize, 128u);
+}
+
+TEST_F(DeepCopyDevCommRequirementsTest, FirstTeamNodeAllocFails_LeavesCallerListAlone) {
+  team1.multimem = true;
+  team1.next = &team2;
+  src.teamRequirementsList = &team1;
+  ScopedCallocFailure callocFail(1);  // only the top-level object succeeds
+
+  EXPECT_NE(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
+  EXPECT_EQ(dst, nullptr);
+  EXPECT_EQ(src.teamRequirementsList, &team1);
+  EXPECT_EQ(team1.next, &team2);
+  EXPECT_TRUE(team1.multimem);
 }
 
 // freeDevCommRequirements tolerates null, so callers can release
@@ -6899,6 +6944,107 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
 
 
 // ---------------------------------------------------------------------------
+// ncclDevCommCreate deep-copies the caller's requirements before it checks
+// them against the communicator, so a request rejected after the copy must
+// release that copy (NVIDIA/nccl#2225). The in-group task path and the
+// enqueue-rearch job path each hold the copy in their own object, so both are
+// driven. Heap in-use bytes are the oracle: a leaked copy per call adds up to
+// far more than one copy over the loop.
+
+class DevCommCreateFailureTest : public DevCommCreateTest {
+protected:
+  static constexpr int kResourceNodes = 64;
+  static constexpr int kTeamNodes = 8;
+  static constexpr int kCalls = 200;
+
+  std::vector<ncclDevResourceRequirements> resources;
+  std::vector<ncclTeamRequirements> teams;
+
+  void SetUp() override {
+    DevCommCreateTest::SetUp();
+    resources.assign(kResourceNodes, ncclDevResourceRequirements{});
+    for (int i = 0; i + 1 < kResourceNodes; i++) resources[i].next = &resources[i + 1];
+    teams.assign(kTeamNodes, ncclTeamRequirements{});
+    for (int i = 0; i + 1 < kTeamNodes; i++) teams[i].next = &teams[i + 1];
+    reqs.resourceRequirementsList = resources.data();
+    reqs.teamRequirementsList = teams.data();
+    reqs.cftCaps = NCCL_CFT_MULTIMEM;
+  }
+
+  static long long CopyBytes() {
+    return static_cast<long long>(sizeof(ncclDevCommRequirements) +
+                                  kResourceNodes * sizeof(ncclDevResourceRequirements) +
+                                  kTeamNodes * sizeof(ncclTeamRequirements));
+  }
+
+  // mallinfo2 needs glibc 2.33; older glibc only has the int-sized mallinfo.
+  static long long HeapInUse() {
+#ifdef DEV_RUNTIME_TEST_HAS_MALLINFO2
+    return static_cast<long long>(mallinfo2().uordblks);
+#else
+    return static_cast<long long>(mallinfo().uordblks);
+#endif
+  }
+
+  void ExpectRejectedWithoutLeak(bool rearch, const char* warning) {
+    // ScopedHook's own counter sees every g_loadParam call, so count the reads of
+    // this param separately: each call must branch on it (dev_runtime.cc:2813).
+    int rearchReads = 0;
+    auto prevLoadParam = g_loadParam;
+    ScopedHook rearchParam(g_loadParam, [rearch, prevLoadParam, &rearchReads](const char* env, int64_t deft) {
+      if (std::strcmp(env, "ENQUEUE_REARCH_ENABLE") != 0) return prevLoadParam(env, deft);
+      rearchReads++;
+      return int64_t(rearch);
+    });
+
+    // The first call names the check that fired, so the loop below is known to
+    // fail after the copy; it also runs ncclDevrInitOnce and warms up any lazily
+    // allocated logging state.
+    ncclResult_t res = ncclSuccess;
+    const std::string log =
+        RcclUnitTesting::CaptureLog([&] { res = ncclDevCommCreate(comm, &reqs, &outDevComm); });
+    ASSERT_EQ(res, ncclInvalidArgument) << "actual log:\n" << log;
+    ASSERT_TRUE(RcclUnitTesting::LogHas(log, warning)) << "actual log:\n" << log;
+    EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+
+    int rejected = 0;
+    long long growth = 0;
+    RcclUnitTesting::CaptureLog([&] {
+      const long long before = HeapInUse();
+      for (int i = 0; i < kCalls; i++) {
+        if (ncclDevCommCreate(comm, &reqs, &outDevComm) == ncclInvalidArgument) rejected++;
+      }
+      growth = HeapInUse() - before;
+    });
+    EXPECT_EQ(rejected, kCalls);
+    EXPECT_GE(rearchReads, 1 + kCalls);
+    EXPECT_LT(growth, CopyBytes()) << kCalls << " rejected calls left " << growth
+                                   << " heap bytes behind; one copy is " << CopyBytes();
+  }
+};
+
+TEST_F(DevCommCreateFailureTest, CftUnsupported_TaskPath_ReleasesCopy) {
+  comm->gpuCftSupport = 0;
+  ExpectRejectedWithoutLeak(false, "not all ranks in the communicator support CFT");
+}
+
+TEST_F(DevCommCreateFailureTest, CftUnsupported_RearchJobPath_ReleasesCopy) {
+  comm->gpuCftSupport = 0;
+  ExpectRejectedWithoutLeak(true, "not all ranks in the communicator support CFT");
+}
+
+TEST_F(DevCommCreateFailureTest, MultimemWithoutNvls_TaskPath_ReleasesCopy) {
+  comm->gpuCftSupport = 1;
+  comm->nvlsSupport = 0;
+  ExpectRejectedWithoutLeak(false, "NVLS is disabled or unsupported");
+}
+
+TEST_F(DevCommCreateFailureTest, MultimemWithoutNvls_RearchJobPath_ReleasesCopy) {
+  comm->gpuCftSupport = 1;
+  comm->nvlsSupport = 0;
+  ExpectRejectedWithoutLeak(true, "NVLS is disabled or unsupported");
+}
+
 // devrGinContextsTotal sizes the per-context resource regions for the largest
 // ginContextCount any active backend could round nGinContextsRequested up to.
 

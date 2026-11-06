@@ -4674,7 +4674,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall/recycle/splitShare)",
-          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext",
+          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.GinContextCount_ReportsRoundedUp",
           "timeout": 600
         },
         {
@@ -4691,6 +4691,14 @@
           "test_filter": "GinMPIDeviceTests.MultiContext_NonPowerOf2",
           "env_variables": {
             "NCCL_GIN_NCONTEXTS": "3"
+          }
+        },
+        {
+          "name": "GIN_ContextCount_ReportsRoundedUp",
+          "description": "ginContextCount reports the allocation after rounding up to NCCL_GIN_NCONNECTIONS=2",
+          "test_filter": "GinMPIDeviceTests.GinContextCount_ReportsRoundedUp",
+          "env_variables": {
+            "NCCL_GIN_NCONNECTIONS": "2"
           }
         },
         {
@@ -5309,6 +5317,16 @@
           "name": "DDA_Fabric_AllReduce_LL128_OneShot_BitIdentical",
           "description": "DDA fabric AllReduce LL128 one-shot tier folds in rank order, so every rank gets the same bits back; own process",
           "test_filter": "DdaMPI_AllReduce.LL128OneShotBitIdenticalAcrossRanks"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_Registered_Captured",
+          "description": "Registered sum AllReduce under graph capture at 8 MiB and the capture bound picks DDA within the replaced Ring grid and returns exact sums",
+          "test_filter": "DdaMPI_AllReduceRegistered.CapturedSumsWithinRingGrid"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_Registered_Eager",
+          "description": "Registered eager sum AllReduce with 1 MiB shards picks DDA LL128 within the CE-registered grid and returns exact sums; skips below 8 ranks",
+          "test_filter": "DdaMPI_AllReduceRegistered.EagerSumsWithinCeGrid"
         }
       ]
     },

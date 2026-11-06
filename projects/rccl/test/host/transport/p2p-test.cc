@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "ScopedHook.h"
+#include "StickyHipLastError.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "../../common/ProcessIsolatedTestRunner.hpp"
@@ -2517,13 +2518,14 @@ TEST_F(FreshRegistrationMicrotest, CuMemFabricExportFailureReleasesHandle)
             return hipSuccess;
         });
     ScopedHook retain(g_hipMemRetainAllocationHandle, RetainSentinelHandle());
+    StickyHipLastError lastError;
     // Export fails on the fabric arm.
     ScopedHook xport(g_hipMemExportToShareableHandle,
-        [](void*, hipMemGenericAllocationHandle_t,
-           hipMemAllocationHandleType handleType,
-           unsigned long long) -> hipError_t {
+        [&](void*, hipMemGenericAllocationHandle_t,
+            hipMemAllocationHandleType handleType,
+            unsigned long long) -> hipError_t {
             EXPECT_NE(handleType, hipMemHandleTypePosixFileDescriptor);
-            return hipErrorInvalidValue;  // drives the error-arm goto fail
+            return lastError.Fail(hipErrorInvalidValue);  // drives the error-arm goto fail
         });
     // The contract under test: Release fires on the sentinel handle
     // before goto fail (the handle-leak guard).
@@ -2559,7 +2561,8 @@ TEST_F(FreshRegistrationMicrotest, CuMemFabricExportFailureReleasesHandle)
     EXPECT_FALSE(isLegacyIpc);  // cleared by the cuMem arm before failing
     EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);
     EXPECT_FALSE(regRecord.state & IPC_REG_COMPLETE);
-
+    // ROCM-33799: the silent fallback must not leave the failed export for the application.
+    EXPECT_EQ(lastError.pending, hipSuccess);
 }
 
 // cuMem* arm, Retain failure -> retry-as-legacy fallback. Plan item A8.
@@ -2607,7 +2610,9 @@ TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureFallsBackToLegacyExport)
         });
 
     // Retain *fails* -- the key seam for this test.
-    ScopedHook retain(g_hipMemRetainAllocationHandle, FailRetainAllocationHandle());
+    StickyHipLastError lastError;
+    ScopedHook retain(g_hipMemRetainAllocationHandle,
+        [&](hipMemGenericAllocationHandle_t*, void*) { return lastError.Fail(hipErrorInvalidValue); });
     // Export and Release must NOT fire on the fallback arm.
     ScopedHook xport(g_hipMemExportToShareableHandle,
         [](void*, hipMemGenericAllocationHandle_t,
@@ -2677,6 +2682,8 @@ TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureFallsBackToLegacyExport)
     ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr);
     EXPECT_TRUE(regRecord.ipcInfos[kPeerLocalRank]->impInfo.legacyIpcCap);
     EXPECT_TRUE(regRecord.state & IPC_REG_COMPLETE);
+    // ROCM-33799: the expected retain failure must not reach the application.
+    EXPECT_EQ(lastError.pending, hipSuccess);
 }
 
 // Companion to the retry-as-legacy test: Retain fails AND the inner
@@ -2702,7 +2709,9 @@ TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureDirectModeShortCircuits)
             if (psize) *psize = kBaseSize;
             return hipSuccess;
         });
-    ScopedHook retain(g_hipMemRetainAllocationHandle, FailRetainAllocationHandle());
+    StickyHipLastError lastError;
+    ScopedHook retain(g_hipMemRetainAllocationHandle,
+        [&](hipMemGenericAllocationHandle_t*, void*) { return lastError.Fail(hipErrorInvalidValue); });
     // Nothing else may fire: the guard short-circuits to goto fail
     // before any of these are touched.
     ScopedHook ipcGet(g_hipIpcGetMemHandle,
@@ -2739,6 +2748,8 @@ TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureDirectModeShortCircuits)
     EXPECT_FALSE(isLegacyIpc);  // the line-935 write never fired
     EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);
     EXPECT_FALSE(regRecord.state & IPC_REG_COMPLETE);
+    // ROCM-33799: the silent fallback must not leave the failed retain for the application.
+    EXPECT_EQ(lastError.pending, hipSuccess);
 }
 
 #endif  // ROCM_VERSION >= 70000
@@ -2997,7 +3008,9 @@ TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureParamOffShortCircuits)
             if (psize) *psize = kBaseSize;
             return hipSuccess;
         });
-    ScopedHook retain(g_hipMemRetainAllocationHandle, FailRetainAllocationHandle());
+    StickyHipLastError lastError;
+    ScopedHook retain(g_hipMemRetainAllocationHandle,
+        [&](hipMemGenericAllocationHandle_t*, void*) { return lastError.Fail(hipErrorInvalidValue); });
     ScopedHook ipcGet(g_hipIpcGetMemHandle,
         [](hipIpcMemHandle_t*, void*) -> hipError_t {
             ADD_FAILURE() << "short-circuit must not reach hipIpcGetMemHandle";
@@ -3027,6 +3040,8 @@ TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureParamOffShortCircuits)
     out.ExpectZeroed();
     EXPECT_FALSE(isLegacyIpc);
     EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    // ROCM-33799: the silent fallback must not leave the failed retain for the application.
+    EXPECT_EQ(lastError.pending, hipSuccess);
 }
 
 #endif  // ROCM_VERSION >= 70000

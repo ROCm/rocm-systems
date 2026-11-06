@@ -37,8 +37,9 @@ public:
   // Bounded host-speed choice; direct indexing requires a power of two.
   static constexpr size_t kNumEntries = 256;
   static_assert(kNumEntries != 0 && (kNumEntries & (kNumEntries - 1)) == 0);
-  // Match the four-word CU instruction-fetch window, including literals.
-  static constexpr size_t kNumWords = 4;
+  // The CU fetches four words plus a fifth for GFX10 MIMG with NSA=3.
+  // The fifth word in the key is zero for ordinary four-word fetches.
+  static constexpr size_t kNumWords = 5;
   using Words = std::span<const uint32_t, kNumWords>;
 
   ~DecodedInstructionCache() { clear(); }
@@ -125,7 +126,7 @@ private:
   static size_t content_index(Words words) {
     const uint64_t low = uint64_t{words[0]} | (uint64_t{words[1]} << 32);
     const uint64_t high = uint64_t{words[2]} | (uint64_t{words[3]} << 32);
-    uint64_t hash = low ^ std::rotl(high, 21);
+    uint64_t hash = low ^ std::rotl(high, 21) ^ std::rotl(uint64_t{words[4]}, 43);
     hash ^= hash >> 32;
     hash *= 0xd6e8feb86659fd93ULL;
     hash ^= hash >> 32;

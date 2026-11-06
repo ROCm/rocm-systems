@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/mimg.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include <algorithm>
@@ -98,7 +99,7 @@ void ImageLoadMimg::append_src_operand(std::string &out, uint8_t operand_index) 
     return;
   }
   const auto registers =
-      amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
@@ -112,7 +113,7 @@ void ImageLoadMimg::append_src_operand(std::string &out, uint8_t operand_index) 
 void ImageLoadMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers =
-      amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
   for (uint32_t index = 0; index < count; ++index)
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
@@ -125,7 +126,7 @@ bool ImageLoadMimg::implicit_preservation_uses(RegisterSet &preservation_uses) c
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers =
-          amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
       const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
       for (uint32_t index = 0; index < count; ++index)
         if (registers[index] == preserved.index)
@@ -136,7 +137,7 @@ bool ImageLoadMimg::implicit_preservation_uses(RegisterSet &preservation_uses) c
 }
 
 bool ImageLoadMimg::tracks_explicit_source(uint8_t operand_index) const {
-  return !(inst_.nsa && src_operands_[operand_index] == &vaddr);
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -314,7 +315,7 @@ void ImageStoreMimg::append_src_operand(std::string &out, uint8_t operand_index)
     return;
   }
   const auto registers =
-      amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
@@ -328,14 +329,14 @@ void ImageStoreMimg::append_src_operand(std::string &out, uint8_t operand_index)
 void ImageStoreMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers =
-      amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
   for (uint32_t index = 0; index < count; ++index)
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
 }
 
 bool ImageStoreMimg::tracks_explicit_source(uint8_t operand_index) const {
-  return !(inst_.nsa && src_operands_[operand_index] == &vaddr);
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {

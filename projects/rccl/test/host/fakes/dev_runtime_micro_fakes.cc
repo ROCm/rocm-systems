@@ -506,8 +506,9 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
 // this binary, so a fake would be a duplicate. Tests drive its terms instead of
 // its answer.
 
-// The enqueue-rearch job path: reached only when a test sets g_enqueueRearchEnable
-// (collective_stubs.h). The default accepts the job without running or freeing it.
+// The enqueue-rearch job path: collective_stubs.cc reads ncclParamEnqueueRearchEnable
+// through g_loadParam (default 0), so it is reached only when a test sets
+// ENQUEUE_REARCH_ENABLE. The default accepts the job without running or freeing it.
 static ncclResult_t DefaultMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*),
                                            void (*)(void*), ncclComm_t) {
   return ncclSuccess;

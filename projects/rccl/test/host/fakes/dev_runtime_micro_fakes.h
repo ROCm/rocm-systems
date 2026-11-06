@@ -64,7 +64,7 @@ extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIO
                                   uint32_t const[NCCL_GIN_MAX_ACTIVE_BACKENDS])>
     g_devrGinDeregister;
 
-// Pair with g_enqueueRearchEnable (collective_stubs.h), which routes the call sites here.
+// Reached when a test sets ENQUEUE_REARCH_ENABLE through g_loadParam (fakes/nccl_fakes.h).
 struct ncclAsyncJob;
 struct ncclComm;
 extern std::function<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),

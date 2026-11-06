@@ -353,6 +353,7 @@ TEST(RegisterAccessTest, ReadRegionCopiesDwordsToLaneMajorStorage) {
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Warray-bounds"
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
 #endif
 TEST(RegisterAccessTest, ReadRegionRejectsInvalidLaneMajorCopyBounds) {
   Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
@@ -994,6 +995,22 @@ TEST(RegisterAccessTest, Scalar64OperandAndExplicitMaskWritesAreAtomic) {
   write_explicit_lane_mask(last_sgpr, *fx.wf, 0xFFEEDDCCBBAA9988ull);
   EXPECT_EQ(fx.cu->read_sgpr_storage(last_sgpr), kSentinel);
   EXPECT_TRUE(fx.plugin->sgpr_writes.empty());
+}
+
+TEST(RegisterAccessTest, Gfx10NullDiscardsCarryDestinations) {
+  // CLR's gfx1030 pitched-copy kernel uses V_MAD_U64_U32 with SDST=NULL.
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    Fixture fx(arch);
+    ASSERT_NE(fx.wf, nullptr);
+    fx.wf->set_exec_raw(0x123456789abcdef0ull);
+    fx.wf->set_vcc_raw(0x13579bdf2468ace0ull);
+    resolve_dst_write(*fx.wf, kGfx10NullSelector, ~uint32_t{0}, 124);
+    resolve_dst_write64(*fx.wf, kGfx10NullSelector, ~uint64_t{0});
+    EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::None);
+    EXPECT_EQ(fx.wf->exec_raw(), 0x123456789abcdef0ull);
+    EXPECT_EQ(fx.wf->vcc(), 0x13579bdf2468ace0ull);
+    EXPECT_TRUE(fx.plugin->sgpr_writes.empty());
+  }
 }
 
 TEST(RegisterAccessTest, TrapSelectorsUseDedicatedWaveStorage) {
@@ -1880,6 +1897,29 @@ TEST(RegisterAccessTest, PartialByteRawRegionOperationsRejectBeforeSideEffects) 
   EXPECT_FALSE(visited);
   expect_failure([&] { return region.copy_to(std::span(words).first(fx.wf->wf_size())); });
   expect_failure([&] { return region.copy_dwords_lane_major(bytes, 1); });
+}
+
+TEST(RegisterAccessTest, OversizedRawRegionCopyRejectsBeforeSideEffects) {
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
+             /*wave_size=*/64);
+  ASSERT_NE(fx.wf, nullptr);
+  ASSERT_EQ(fx.wf->wf_size(), 64u);
+  for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane)
+    fx.cu->write_vgpr(fx.vgpr_base(), lane, 0x12340000u + lane);
+  auto region = RegisterAccess(*fx.wf).read_vgpr_region(
+      fx.vgpr_base(), /*reg_count=*/1, /*lane_mask=*/~uint64_t{0}, ExecutionPlugin::kFullByteMask);
+  ASSERT_TRUE(region.valid());
+  std::array<uint32_t, 65> words;
+  words.fill(0xAABBCCDDu);
+  const auto original_words = words;
+
+  fx.wf->clear_instruction_execution_error();
+  ASSERT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::None);
+  ASSERT_EQ(fx.wf->instruction_execution_error_detail(), nullptr);
+  EXPECT_TRUE(region.copy_to(words).failed());
+  EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::InvalidRegisterAccess);
+  EXPECT_STREQ(fx.wf->instruction_execution_error_detail(), "destination exceeds read region");
+  EXPECT_EQ(words, original_words);
 }
 
 TEST(RegisterAccessTest, ScalarBackedPartialByteStoresRejectBeforeObservation) {
