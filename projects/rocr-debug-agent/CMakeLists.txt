@@ -66,6 +66,7 @@ target_sources(
     rocm-debug-agent
     PRIVATE
         src/agent_config.cpp
+        src/agent_dbgapi_utils.cpp
         src/agent_utils.cpp
         src/code_object.cpp
         src/debug_agent.cpp
