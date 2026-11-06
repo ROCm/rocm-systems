@@ -195,9 +195,10 @@ extern "C"
      *        window.
      * @param ctx Context to query.
      * @param track_id Id of a track whose category is not
-     *        PH_TRACK_CATEGORY_PMC_AGENT, as returned by
+     *        PH_TRACK_CATEGORY_PMC_AGENT, PH_TRACK_CATEGORY_PMC_KERNEL or
+     *        PH_TRACK_CATEGORY_PMC_MEMORY, as returned by
      *        ph_get_track_list()/ph_get_node(). A PMC track yields an empty
-     *        list.
+     *        list; read it with ph_get_track_samples().
      * @param start_ts Start of the time window (ns). With @p end_ts also 0
      *        there is no filter.
      * @param end_ts End of the time window (ns). With only @p end_ts 0 the
@@ -383,9 +384,11 @@ extern "C"
      *        time window.
      * @param ctx Context to query.
      * @param track_id Id of a track whose category is
-     *        PH_TRACK_CATEGORY_PMC_AGENT, as returned by
+     *        PH_TRACK_CATEGORY_PMC_AGENT, PH_TRACK_CATEGORY_PMC_KERNEL or
+     *        PH_TRACK_CATEGORY_PMC_MEMORY, as returned by
      *        ph_get_track_list()/ph_get_node(). Any other track yields an
-     *        empty list.
+     *        empty list. A PH_TRACK_CATEGORY_PMC_KERNEL sample is timed at
+     *        the start of the kernel dispatch it belongs to.
      * @param start_ts Start of the time window (ns). With @p end_ts also 0
      *        there is no filter.
      * @param end_ts End of the time window (ns). With only @p end_ts 0 the
