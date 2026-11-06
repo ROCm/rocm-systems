@@ -134,10 +134,11 @@ public:
   virtual void onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
                                                 amdgpu::Wavefront & /*wf*/) {}
 
-  /// Fetch-aware form of onAmdgpuBeforeExecuteInstruction(). The borrowed
-  /// window contains the four dwords fetched starting at @p pc, including any
-  /// words following a shorter decoded instruction. The default preserves
-  /// source compatibility by forwarding to the original hook.
+  /// Fetch-aware form of onAmdgpuBeforeExecuteInstruction(). The CU supplies
+  /// four DWORDs starting at @p pc, including words following a shorter
+  /// instruction. For a GFX10 MIMG instruction with NSA=3, the borrowed
+  /// window also contains the fifth DWORD. The default forwards to the
+  /// original hook.
   virtual void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                                 amdgpu::Wavefront &wf,
                                                 std::span<const uint32_t> /*fetch_window*/) {

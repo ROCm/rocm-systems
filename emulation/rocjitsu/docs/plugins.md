@@ -615,15 +615,17 @@ instead copy the instruction's PC and encoding as it executes, and disassemble
 the copy when the report is written. Validate the encoding before copying it:
 `raw_encoding()` is null when the instruction has no encoding, and the copy
 needs `size()` to be a positive multiple of four bytes that fits the buffer.
-An encoding is at most four words (the CU's 16-byte fetch window). The example
-rejects anything else at capture, as the race detector does, so every stored
-copy can be disassembled.
+The CU normally fetches four words starting at the PC. GFX10 MIMG with
+NSA=3 uses a fifth word. The fetch-aware hook receives all five for that
+instruction. The example stores up to five words, as the race detector does,
+and rejects invalid sizes at capture. Perfsim's FFM event format has its own
+four-word encoding limit.
 
 ```cpp
 // Set for each wave in onAmdgpuWavefrontDispatched() with wf.set_plugin_state().
 struct LastInstruction : WavefrontState {
   uint64_t pc = 0;
-  std::array<uint32_t, 4> words{};
+  std::array<uint32_t, 5> words{};
   size_t word_count = 0; // Zero until the wave executes an instruction.
 };
 
