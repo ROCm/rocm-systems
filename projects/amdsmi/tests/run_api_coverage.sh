@@ -52,10 +52,10 @@
 #     sudo ... run_api_coverage.sh -X 'GpuFunctionalReadWrite*' --no-python
 #
 # Produces a self-contained ./api-coverage-results-<timestamp>/ holding
-# _api_coverage.md (report), _api_coverage.csv and _api_coverage.tsv (the
-# report's tables, for opening and for pasting into a spreadsheet), the raw
-# suite logs, and api_coverage_trend.csv carrying the trend forward from the
-# newest earlier run directory. Nothing is written into the source tree.
+# _api_coverage.md (report) and _api_coverage.xlsx (the report's tables as a
+# formatted workbook), the raw suite logs, and api_coverage_trend.csv
+# carrying the trend forward from the newest earlier run directory. Nothing
+# is written into the source tree.
 #
 # Every '_' file is disposable output. api_coverage_trend.csv has no underscore
 # because it is the one generated file worth keeping: delete it and the trend

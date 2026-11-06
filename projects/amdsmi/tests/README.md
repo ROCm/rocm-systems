@@ -288,8 +288,7 @@ holds only the binary still works.
 | File | Contents |
 |------|----------|
 | `_api_coverage.md` | The report: run metadata, both KPI tables, untested APIs |
-| `_api_coverage.csv` | Same content as the `.md` minus the untested list |
-| `_api_coverage.tsv` | The `.csv` tables, tab-separated, for pasting into Excel |
+| `_api_coverage.xlsx` | The report's tables as a workbook: a raw `Data` sheet, then `Run details`, `Test suites`, `Coverage by subsystem` and `Coverage by framework`, each formatted (bold headers, merged titles) |
 | `_api_summary*.{csv,txt}` | Raw `api_summary.py` output |
 | `_c_*.log`, `_py_*.log` | Raw suite logs |
 | `api_coverage_trend.csv` | **Keep this one.** This run's row, after the rows inherited from the previous run |
@@ -314,21 +313,12 @@ attribute a run on purpose:
 sudo tests/run_api_coverage.sh -n "RX6800 rig, post-XYZ fix"
 ```
 
-`_api_coverage.csv` and `_api_coverage.tsv` hold the same thing: the report's
-tables, one block per table, each with its own title and header row and a blank
-row between blocks. Markdown decoration is stripped so the cells hold plain
-values, and both are written with a UTF-8 BOM so Excel renders the `→` arrows.
-
-Use whichever matches how you get it into a spreadsheet:
-
-| Want to | Use | Why |
-|---------|-----|-----|
-| Open the whole report as a sheet | `.csv` | Excel parses commas when it *opens* a file |
-| Copy a block and paste it in | `.tsv` | Excel splits pasted text on tabs, **never** on commas |
-
-Pasting `.csv` text into a sheet drops the whole line into one cell -- that is
-Excel behaviour, not a broken file. Either paste the `.tsv` instead, or paste
-the `.csv` and run Data -> Text to Columns -> Delimited -> Comma.
+The `.xlsx` opens directly in Excel or LibreOffice. Its cells are copied from the
+same rows as the `.md`, not recomputed, and it is written with the standard
+library only (`api_coverage_export.py` builds it, `xlsx_writer.py` writes the
+file), so no extra Python packages are required. The `Data` sheet holds every
+table as plain values, one block per table; the other sheets are the formatted
+versions.
 
 ### How the trend carries across runs
 
@@ -431,8 +421,8 @@ The generated report carries the full definition of each column as footnotes
 `*` (Unit), `**` (Functional) and `***` (CLI), plus a legend table giving each
 column's scale and goal -- so a pasted table explains itself.
 `FRAMEWORK_GOALS` in `api_coverage_report.py` holds the percentages, and the
-same legend is reproduced as the "Scale and goal per column" block in
-`_api_coverage.csv` / `.tsv`.
+same legend is reproduced as the "Scale and goal per column" block on the
+`Data` sheet of `_api_coverage.xlsx`.
 
 **Unit's scale is a known placeholder.** It currently uses the full API count,
 which is why it is the one column held below 100% -- an 80% goal against a scale

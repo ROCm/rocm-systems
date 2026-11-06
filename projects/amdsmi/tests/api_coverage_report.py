@@ -14,8 +14,9 @@ Consumes:
 
 Writes into --log_dir:
     _api_coverage.md             the report (also echoed to stdout)
-    _api_coverage.csv            the report's tables, for opening as a sheet
-    _api_coverage.tsv            the same tables, for pasting into a sheet
+    _api_coverage.xlsx           the report's tables as a workbook: a raw Data sheet
+                                 plus one formatted sheet per table
+                                 (see api_coverage_export.py)
     api_coverage_trend.csv       this run's row, after the inherited ones
 
 Every run directory is self-contained: the trend carries forward the rows of
@@ -46,6 +47,8 @@ import re
 import shutil
 import subprocess
 import sys
+
+from api_coverage_export import Table, write_workbook
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_HEADER = PROJECT_ROOT / "include" / "amd_smi" / "amdsmi.h"
@@ -364,7 +367,7 @@ def read_baseline(path):
     """Return {'start': {...}, 'previous': {...}} keyed like api_coverage_history.csv.
 
     The file is laid out as the two report tables (section/row/metric matching
-    _api_coverage.csv) with 'start' and 'previous' as value columns, so rows can
+    _api_coverage.xlsx's Data sheet) with 'start' and 'previous' as value columns, so rows can
     be copy-pasted straight from a generated run. This maps that back onto the
     flat history column names the report and history CSV use.
     """
@@ -837,42 +840,34 @@ def main():
     args.log_dir.mkdir(parents=True, exist_ok=True)
     (args.log_dir / "_api_coverage.md").write_text(report + "\n")
 
-    # _api_coverage.csv/.tsv mirror _api_coverage.md table for table, so opening
-    # or pasting one reproduces the report's layout. Each block carries its own
-    # title and header row, separated by a blank line; markdown decoration is
-    # stripped so the cells hold plain values.
-    def plain(cell):
-        # Order matters: strip markdown bold first (adjacent '**'), then unescape
-        # the literal footnote markers ('\*'), which are not adjacent stars.
-        text = str(cell)
-        for old, new in (("<br>", " "), ("**", ""), ("\\*", "*"), ("`", ""), ("\t", " ")):
-            text = text.replace(old, new)
-        return text
-
-    blocks = [
-        ([f"AMD SMI API Coverage - {meta['run_date']}"], []),
-        (["Run metadata"], env_rows),
-        (["Test suites"], suite_rows),
-        ([f"API Tests - coverage by subsystem (goal {SUBSYSTEM_GOAL_PCT}%)"], subsys_rows),
-        ([f"Coverage by framework (of {num_api} APIs in {args.amdsmi.name})"], fw_rows),
-        (["Scale and goal per column"], legend),
+    # The .xlsx is built from this one list, so a table is described once.
+    # See api_coverage_export.py.
+    tables = [
+        Table(f"AMD SMI API Coverage - {meta['run_date']}", []),
+        Table(
+            "Run metadata",
+            env_rows,
+            sheet="Run details",
+            sheet_title=f"AMD SMI API Coverage - {meta['run_date']}",
+        ),
+        Table("Test suites", suite_rows, sheet="Test suites"),
+        Table(
+            f"API Tests - coverage by subsystem (goal {SUBSYSTEM_GOAL_PCT}%)",
+            subsys_rows,
+            sheet="Coverage by subsystem",
+            hide_trend=True,
+        ),
+        Table(
+            f"Coverage by framework (of {num_api} APIs in {args.amdsmi.name})",
+            fw_rows,
+            sheet="Coverage by framework",
+            hide_trend=True,
+            header_height=32,
+            bold_today=True,
+        ),
+        Table("Scale and goal per column", legend),
     ]
-    coverage_csv = []
-    for title, table in blocks:
-        coverage_csv.append(title)
-        coverage_csv.extend([plain(c) for c in row] for row in table)
-        coverage_csv.append([])
-    width = max(len(row) for row in coverage_csv)
-    coverage_csv = [row + [""] * (width - len(row)) for row in coverage_csv]
-    # utf-8-sig: the BOM makes Excel read the arrows as UTF-8 instead of latin-1.
-    with (args.log_dir / "_api_coverage.csv").open("w", newline="", encoding="utf-8-sig") as handle:
-        csv.writer(handle).writerows(coverage_csv)
-
-    # Same tables, tab-separated. Excel splits pasted clipboard text on tabs and
-    # never on commas, so this is the copy/paste form; the .csv is the open-it
-    # form. Tabs also remove the need to quote cells containing commas.
-    with (args.log_dir / "_api_coverage.tsv").open("w", newline="", encoding="utf-8-sig") as handle:
-        csv.writer(handle, delimiter="\t").writerows(coverage_csv)
+    write_workbook(args.log_dir, tables)
 
     if not args.no_history:
         write_history(history_path, inherited, meta)
