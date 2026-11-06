@@ -155,7 +155,7 @@ jobs:
           git_config_dir=$(mktemp -d "${RUNNER_TEMP}/rocprofiler-sdk-git.XXXXXX")
           echo "GIT_CONFIG_GLOBAL=${git_config_dir}/config" >> "$GITHUB_ENV"
 
-      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
+      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder & ROCDecode & ROCJPEG
         uses: actions/checkout@v6
         with:
           sparse-checkout: |
@@ -170,6 +170,8 @@ jobs:
             projects/hip
             projects/hrr
             projects/hipfile
+            projects/rocdecode
+            projects/rocjpeg
           submodules: false
           set-safe-directory: true
 
@@ -200,22 +202,6 @@ jobs:
         timeout-minutes: 15
         continue-on-error: true
         run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
-
-      - name: Clone ROCDecode
-        uses: actions/checkout@v6
-        with:
-          repository: 'ROCm/rocDecode'
-          ref: 'release/rocm-rel-7.0'
-          set-safe-directory: true
-          path: 'rocDecode'
-
-      - name: Clone ROCJPEG
-        uses: actions/checkout@v6
-        with:
-          repository: 'ROCm/rocJPEG'
-          ref: 'release/rocm-rel-7.0'
-          set-safe-directory: true
-          path: 'rocJPEG'
 
       - name: Install requirements
         timeout-minutes: 10
