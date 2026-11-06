@@ -69,5 +69,8 @@ cases:
   Unit_HRR_SnapshotOrder_HostFreeWaitsForLaunch: {}
   Unit_HRR_SnapshotOrder_LaunchHandlersTakeTheHold: {}
   Unit_HRR_SnapshotOrder_UnregisterWaitsForLaunch: {}
+  Unit_HRR_SymbolCopyBounds_InRangeCopyReachesHip: {}
+  Unit_HRR_SymbolCopyBounds_OutOfRangeIsRefusedBeforeHip: {}
+  Unit_HRR_SymbolCopyBounds_WrappingSumIsRefused: {}
   Unit_HRR_UnmappedNote_IpcCloseOfSkippedImport: {}
   Unit_HRR_UnmappedNote_MemMap: {}
