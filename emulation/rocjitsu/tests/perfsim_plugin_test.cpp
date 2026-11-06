@@ -2704,12 +2704,13 @@ TEST_F(PerfsimPluginTest, RequiredLoaderRetriesAfterBackendFactoryFailure) {
       "}}";
 
   setenv("ROCJITSU_PERFSIM_FAKE_MODE", "reject_all", 1);
-  EXPECT_THROW(PluginLoader::configure_plugin_group(config, PERFSIM_PLUGIN_DIR),
-               std::runtime_error);
+  EXPECT_TRUE(PluginLoader::configure_plugin_group(config, PERFSIM_PLUGIN_DIR).failed());
 
   setenv("ROCJITSU_PERFSIM_FAKE_MODE", "", 1);
-  auto group = PluginLoader::configure_plugin_group(config, PERFSIM_PLUGIN_DIR);
-  ASSERT_NE(group, nullptr);
+  util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> result =
+      PluginLoader::configure_plugin_group(config, PERFSIM_PLUGIN_DIR);
+  ASSERT_TRUE(result.succeeded());
+  std::shared_ptr<rocjitsu::ExecutionPluginGroup> group = std::move(result).value();
   ASSERT_EQ(group->num_plugins(), 1u);
   group->onInit();
   group->onShutdown();
