@@ -87,7 +87,7 @@
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_gfx_clock'"
                 },
                 {
-                    "comparison": "greater_than_or_equal",
+                    "comparison": "equals",
                     "description": "Unrequested metric: device_mem_clock is not sampled",
                     "error_message": "OVER-COLLECTION: device_mem_clock sampled though the default AMD-SMI metrics (busy, temp, power, mem_usage) do not include it",
                     "expected_result": 0,
