@@ -603,7 +603,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f'      [&](uint32_t a_bits, uint32_t b_bits, auto extract_a, auto extract_b) {{'
             )
             L.append(
-                f'        amdgpu::exec_wmma_f32_mixed(cu, {M}, {N}, {K}, a_bits, b_bits, dst,'
+                f'        amdgpu::exec_wmma_f32_mixed<{M}, {N}, {K}>(cu, a_bits, b_bits, dst,'
             )
             L.append(f'            {src0_base_expr},')
             L.append(f'            {src1_base_expr},')
@@ -694,7 +694,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                     exec_fn = 'exec_wmma_f32'
                 if exec_fn == 'exec_wmma_f32':
                     L.append(
-                        f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                        f'  amdgpu::{exec_fn}<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                         f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc,'
                         f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
                     )
@@ -783,7 +783,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 )
             else:
                 L.append(
-                    f'  amdgpu::exec_wmma_f32(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                    f'  amdgpu::exec_wmma_f32<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                     f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc,'
                     f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi), wf.wf_size());'
                 )

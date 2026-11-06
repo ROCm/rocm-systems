@@ -1851,9 +1851,9 @@ void VWmmaF3216x16x128F8f6f4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   bool dispatched = amdgpu::dispatch_matrix_fmt_pair(
       matrix_a_fmt, matrix_b_fmt,
       [&](uint32_t a_bits, uint32_t b_bits, auto extract_a, auto extract_b) {
-        amdgpu::exec_wmma_f32_mixed(cu, 16, 16, 128, a_bits, b_bits, dst, src0_base, src1_base, s2,
-                                    extract_a, extract_b, const_acc,
-                                    amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
+        amdgpu::exec_wmma_f32_mixed<16, 16, 128>(cu, a_bits, b_bits, dst, src0_base, src1_base, s2,
+                                                 extract_a, extract_b, const_acc,
+                                                 amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
       });
   if (!dispatched) {
     wf.report_instruction_execution_error(
@@ -3880,9 +3880,9 @@ void VWmmaF3232x16x128F4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   } else {
     const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);
   }
-  amdgpu::exec_wmma_f32(cu, 32, 16, 128, 4, dst, src0_base, src1_base, s2, amdgpu::extract_fp4,
-                        amdgpu::extract_fp4, const_acc,
-                        amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
+  amdgpu::exec_wmma_f32<32, 16, 128>(cu, 4, dst, src0_base, src1_base, s2, amdgpu::extract_fp4,
+                                     amdgpu::extract_fp4, const_acc,
+                                     amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
 }
 
 void VPkFmaF64Vop3p::execute_impl(amdgpu::Wavefront &wf) {

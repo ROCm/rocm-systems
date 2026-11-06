@@ -277,8 +277,11 @@ inline void require_gfx12_wmma_wave_size([[maybe_unused]] uint32_t wave_size) {
 
 // CDNA5 WMMA is wave32-only. 16x16 WMMA v3 operands interleave the K
 // dimension across the two lane groups in two register blocks.
-inline InputLoc wmma_input_loc(uint32_t dim, uint32_t K, uint32_t i, uint32_t k,
+template <uint32_t StaticDim = 0, uint32_t StaticK = 0>
+inline InputLoc wmma_input_loc(uint32_t runtime_dim, uint32_t runtime_k, uint32_t i, uint32_t k,
                                uint32_t data_bits) {
+  const uint32_t dim = StaticDim == 0 ? runtime_dim : StaticDim;
+  const uint32_t K = StaticK == 0 ? runtime_k : StaticK;
   uint32_t lanes_per_group = WMMA_WAVE32 / dim;
   uint32_t elems_per_group = K / lanes_per_group;
 
@@ -351,11 +354,14 @@ inline constexpr uint32_t wmma_swap_k_bits_2_3(uint32_t k) {
   return (k & 3) | ((k & 4) << 1) | ((k & 8) >> 1);
 }
 
-inline InputLoc gfx12_wmma_input_loc(uint32_t wave_size, uint32_t dim, uint32_t K, uint32_t i,
-                                     uint32_t k, uint32_t data_bits) {
+template <uint32_t StaticDim = 0, uint32_t StaticK = 0>
+inline InputLoc gfx12_wmma_input_loc(uint32_t wave_size, uint32_t runtime_dim, uint32_t runtime_k,
+                                     uint32_t i, uint32_t k, uint32_t data_bits) {
+  const uint32_t dim = StaticDim == 0 ? runtime_dim : StaticDim;
+  const uint32_t K = StaticK == 0 ? runtime_k : StaticK;
   require_gfx12_wmma_wave_size(wave_size);
   if (wave_size == WMMA_WAVE32)
-    return wmma_input_loc(dim, K, i, k, data_bits);
+    return wmma_input_loc<StaticDim, StaticK>(dim, K, i, k, data_bits);
   if (dim == 16 && data_bits == 4 && (K == 16 || K == 32)) {
     const uint32_t block = k / 8u;
     const uint32_t lane_block = K == 16 ? block : ((block & 1u) << 1u) | (block >> 1u);
@@ -367,19 +373,25 @@ inline InputLoc gfx12_wmma_input_loc(uint32_t wave_size, uint32_t dim, uint32_t 
   return wmma_packed_input_loc(lane, slot, data_bits);
 }
 
-inline InputLoc wmma_f8f6f4_ab_input_loc(uint32_t dim, uint32_t K, uint32_t i, uint32_t k,
-                                         uint32_t data_bits) {
+template <uint32_t StaticDim = 0, uint32_t StaticK = 0>
+inline InputLoc wmma_f8f6f4_ab_input_loc(uint32_t runtime_dim, uint32_t runtime_k, uint32_t i,
+                                         uint32_t k, uint32_t data_bits) {
+  const uint32_t dim = StaticDim == 0 ? runtime_dim : StaticDim;
+  const uint32_t K = StaticK == 0 ? runtime_k : StaticK;
   if (dim == 16 && K == 128 && data_bits < 8) {
     const uint32_t lane = i + 16u * ((k >> 2) & 1u);
     const uint32_t reg = ((k >> 1) & 1u) + 2u * ((k >> 3) & 1u) + 4u * ((k >> 4) & 1u) +
                          8u * ((k >> 5) & 1u) + 16u * ((k >> 6) & 1u);
     return wmma_packed_input_loc(lane, 2u * reg + (k & 1u), data_bits);
   }
-  return wmma_input_loc(dim, K, i, k, data_bits);
+  return wmma_input_loc<StaticDim, StaticK>(dim, K, i, k, data_bits);
 }
 
-inline InputLoc wmma_f8f6f4_mixed_subbyte_input_loc(uint32_t dim, uint32_t K, uint32_t i,
-                                                    uint32_t k, uint32_t data_bits) {
+template <uint32_t StaticDim = 0, uint32_t StaticK = 0>
+inline InputLoc wmma_f8f6f4_mixed_subbyte_input_loc(uint32_t runtime_dim, uint32_t runtime_k,
+                                                    uint32_t i, uint32_t k, uint32_t data_bits) {
+  const uint32_t dim = StaticDim == 0 ? runtime_dim : StaticDim;
+  const uint32_t K = StaticK == 0 ? runtime_k : StaticK;
   if (dim == 16 && K == 128 && data_bits < 8) {
     const uint32_t lane = i + 16u * ((k >> 5) & 1u);
     // Use the same logical K order as the 8-bit operand in wmma_input_loc:
@@ -389,32 +401,41 @@ inline InputLoc wmma_f8f6f4_mixed_subbyte_input_loc(uint32_t dim, uint32_t K, ui
     const uint32_t slot = 32u * (k >> 6) + (k & 31u);
     return wmma_packed_input_loc(lane, slot, data_bits);
   }
-  return wmma_f8f6f4_ab_input_loc(dim, K, i, k, data_bits);
+  return wmma_f8f6f4_ab_input_loc<StaticDim, StaticK>(dim, K, i, k, data_bits);
 }
 
-inline InputLoc wmma_f8f6f4_input_loc(uint32_t dim, uint32_t K, uint32_t i, uint32_t k,
-                                      uint32_t data_bits, bool mixed_subbyte) {
+template <uint32_t StaticDim = 0, uint32_t StaticK = 0>
+inline InputLoc wmma_f8f6f4_input_loc(uint32_t runtime_dim, uint32_t runtime_k, uint32_t i,
+                                      uint32_t k, uint32_t data_bits, bool mixed_subbyte) {
+  const uint32_t dim = StaticDim == 0 ? runtime_dim : StaticDim;
+  const uint32_t K = StaticK == 0 ? runtime_k : StaticK;
   if (mixed_subbyte)
-    return wmma_f8f6f4_mixed_subbyte_input_loc(dim, K, i, k, data_bits);
-  return wmma_f8f6f4_ab_input_loc(dim, K, i, k, data_bits);
+    return wmma_f8f6f4_mixed_subbyte_input_loc<StaticDim, StaticK>(dim, K, i, k, data_bits);
+  return wmma_f8f6f4_ab_input_loc<StaticDim, StaticK>(dim, K, i, k, data_bits);
 }
 
 inline InputLoc wmma_f4_32x16x128_a_input_loc(uint32_t row, uint32_t k) {
-  auto loc = wmma_f8f6f4_input_loc(16, 128, row % 16, k, 4, /*mixed_subbyte=*/false);
+  auto loc = wmma_f8f6f4_input_loc<16, 128>(16, 128, row % 16, k, 4, /*mixed_subbyte=*/false);
   loc.vgpr_offset += 8 * (row / 16);
   return loc;
 }
 
-inline InputLoc wmma_a_input_loc(uint32_t M, uint32_t K, uint32_t row, uint32_t k, uint32_t a_bits,
-                                 uint32_t b_bits) {
+template <uint32_t StaticDim = 0, uint32_t StaticK = 0>
+inline InputLoc wmma_a_input_loc(uint32_t runtime_dim, uint32_t runtime_k, uint32_t row, uint32_t k,
+                                 uint32_t a_bits, uint32_t b_bits) {
+  const uint32_t M = StaticDim == 0 ? runtime_dim : StaticDim;
+  const uint32_t K = StaticK == 0 ? runtime_k : StaticK;
   if (M == 32 && K == 128 && a_bits == 4 && b_bits == 4)
     return wmma_f4_32x16x128_a_input_loc(row, k);
-  return wmma_f8f6f4_input_loc(M, K, row, k, a_bits, a_bits < 8 && b_bits == 8);
+  return wmma_f8f6f4_input_loc<StaticDim, StaticK>(M, K, row, k, a_bits, a_bits < 8 && b_bits == 8);
 }
 
-inline InputLoc wmma_b_input_loc(uint32_t N, uint32_t K, uint32_t col, uint32_t k, uint32_t a_bits,
-                                 uint32_t b_bits) {
-  return wmma_f8f6f4_input_loc(N, K, col, k, b_bits, b_bits < 8 && a_bits == 8);
+template <uint32_t StaticDim = 0, uint32_t StaticK = 0>
+inline InputLoc wmma_b_input_loc(uint32_t runtime_dim, uint32_t runtime_k, uint32_t col, uint32_t k,
+                                 uint32_t a_bits, uint32_t b_bits) {
+  const uint32_t N = StaticDim == 0 ? runtime_dim : StaticDim;
+  const uint32_t K = StaticK == 0 ? runtime_k : StaticK;
+  return wmma_f8f6f4_input_loc<StaticDim, StaticK>(N, K, col, k, b_bits, b_bits < 8 && a_bits == 8);
 }
 
 /// Compute the CDNA5 block-scaled WMMA input layout. Unlike the same-format ordinary
@@ -446,18 +467,24 @@ inline InputLoc wmma_block_scaled_b_input_loc(uint32_t N, uint32_t K, uint32_t c
   return wmma_block_scaled_input_loc(N, K, col, k, b_bits);
 }
 
-inline InputLoc gfx12_wmma_a_input_loc(uint32_t wave_size, uint32_t M, uint32_t K, uint32_t row,
-                                       uint32_t k, uint32_t a_bits, uint32_t b_bits) {
+template <uint32_t StaticDim = 0, uint32_t StaticK = 0>
+inline InputLoc gfx12_wmma_a_input_loc(uint32_t wave_size, uint32_t runtime_dim, uint32_t runtime_k,
+                                       uint32_t row, uint32_t k, uint32_t a_bits, uint32_t b_bits) {
+  const uint32_t M = StaticDim == 0 ? runtime_dim : StaticDim;
+  const uint32_t K = StaticK == 0 ? runtime_k : StaticK;
   if (wave_size == WMMA_WAVE32)
-    return wmma_a_input_loc(M, K, row, k, a_bits, b_bits);
-  return gfx12_wmma_input_loc(wave_size, M, K, row, k, a_bits);
+    return wmma_a_input_loc<StaticDim, StaticK>(M, K, row, k, a_bits, b_bits);
+  return gfx12_wmma_input_loc<StaticDim, StaticK>(wave_size, M, K, row, k, a_bits);
 }
 
-inline InputLoc gfx12_wmma_b_input_loc(uint32_t wave_size, uint32_t N, uint32_t K, uint32_t col,
-                                       uint32_t k, uint32_t a_bits, uint32_t b_bits) {
+template <uint32_t StaticDim = 0, uint32_t StaticK = 0>
+inline InputLoc gfx12_wmma_b_input_loc(uint32_t wave_size, uint32_t runtime_dim, uint32_t runtime_k,
+                                       uint32_t col, uint32_t k, uint32_t a_bits, uint32_t b_bits) {
+  const uint32_t N = StaticDim == 0 ? runtime_dim : StaticDim;
+  const uint32_t K = StaticK == 0 ? runtime_k : StaticK;
   if (wave_size == WMMA_WAVE32)
-    return wmma_b_input_loc(N, K, col, k, a_bits, b_bits);
-  return gfx12_wmma_input_loc(wave_size, N, K, col, k, b_bits);
+    return wmma_b_input_loc<StaticDim, StaticK>(N, K, col, k, a_bits, b_bits);
+  return gfx12_wmma_input_loc<StaticDim, StaticK>(wave_size, N, K, col, k, b_bits);
 }
 
 inline OutputLoc wmma_output_loc_32(uint32_t M, uint32_t N, uint32_t row, uint32_t col) {
@@ -1118,9 +1145,16 @@ template <typename Run> bool dispatch_matrix_fmt_pair(uint32_t a_fmt, uint32_t b
 /// and Bbuf/Cbuf[..*stride+col] for col<N (the vectorized loop is bounded by
 /// `col + W <= N`, the remainder is a scalar tail at col<N). The padding columns
 /// [N, stride) — present only so each row starts W-aligned — are never read.
-template <typename T>
-void wmma_simd_matmul(uint32_t M, uint32_t N, uint32_t K, uint32_t W, uint32_t stride,
-                      const T *Abuf, const T *Bbuf, T *Cbuf) {
+template <typename T, uint32_t StaticM = 0, uint32_t StaticN = 0, uint32_t StaticK = 0,
+          uint32_t StaticWidth = 0, uint32_t StaticStride = 0>
+void wmma_simd_matmul(uint32_t runtime_m, uint32_t runtime_n, uint32_t runtime_k,
+                      uint32_t runtime_width, uint32_t runtime_stride, const T *Abuf, const T *Bbuf,
+                      T *Cbuf) {
+  const uint32_t M = StaticM == 0 ? runtime_m : StaticM;
+  const uint32_t N = StaticN == 0 ? runtime_n : StaticN;
+  const uint32_t K = StaticK == 0 ? runtime_k : StaticK;
+  const uint32_t W = StaticWidth == 0 ? runtime_width : StaticWidth;
+  const uint32_t stride = StaticStride == 0 ? runtime_stride : StaticStride;
   for (uint32_t row = 0; row < M; ++row) {
     uint32_t col = 0;
     for (; col + W <= N; col += W) {
@@ -1769,11 +1803,17 @@ void exec_i32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
     RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
-template <typename ExtractA, typename ExtractB>
-void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t a_bits,
-                         uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                         ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR,
+template <uint32_t StaticM = 0, uint32_t StaticN = 0, uint32_t StaticK = 0, typename ExtractA,
+          typename ExtractB>
+void exec_wmma_f32_mixed(auto &cu, uint32_t runtime_m, uint32_t runtime_n, uint32_t runtime_k,
+                         uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1,
+                         uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR,
                          uint32_t c_modifier = 0, uint32_t wave_size = WMMA_WAVE32) {
+  static_assert((StaticM == 0 && StaticN == 0 && StaticK == 0) ||
+                (StaticM > 0 && StaticN > 0 && StaticK > 0));
+  const uint32_t M = StaticM == 0 ? runtime_m : StaticM;
+  const uint32_t N = StaticN == 0 ? runtime_n : StaticN;
+  const uint32_t K = StaticK == 0 ? runtime_k : StaticK;
   require_gfx12_wmma_wave_size(wave_size);
   // Keep the CDNA5 BF16 dot separate from C so cancelling products do not
   // discard C's low bits. This grouping fixes Triton scaled-dot numerics;
@@ -1800,8 +1840,10 @@ void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
         acc = apply_wmma_c_modifier(acc, c_modifier);
         float dot = dot_before_c ? 0.0f : acc;
         for (uint32_t k = 0; k < K; ++k) {
-          auto al = gfx12_wmma_a_input_loc(wave_size, M, K, row, k, a_bits, b_bits);
-          auto bl = gfx12_wmma_b_input_loc(wave_size, N, K, col, k, a_bits, b_bits);
+          auto al =
+              gfx12_wmma_a_input_loc<StaticM, StaticK>(wave_size, M, K, row, k, a_bits, b_bits);
+          auto bl =
+              gfx12_wmma_b_input_loc<StaticN, StaticK>(wave_size, N, K, col, k, a_bits, b_bits);
           const float a = ea(cu, s0, al), b = eb(cu, s1, bl);
           dot = dot_before_c ? std::fma(a, b, dot) : dot + a * b;
         }
@@ -1842,12 +1884,16 @@ void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t k = 0; k < K; ++k)
           Abuf[row * K + k] =
-              ea(reads.a, s0, gfx12_wmma_a_input_loc(wave_size, M, K, row, k, a_bits, b_bits));
+              ea(reads.a, s0,
+                 gfx12_wmma_a_input_loc<StaticM, StaticK>(wave_size, M, K, row, k, a_bits, b_bits));
       for (uint32_t k = 0; k < K; ++k)
         for (uint32_t col = 0; col < N; ++col)
           Bbuf[k * stride + col] =
-              eb(reads.b, s1, gfx12_wmma_b_input_loc(wave_size, N, K, col, k, a_bits, b_bits));
-      wmma_simd_matmul<float>(M, N, K, W, stride, Abuf, Bbuf, Cbuf);
+              eb(reads.b, s1,
+                 gfx12_wmma_b_input_loc<StaticN, StaticK>(wave_size, N, K, col, k, a_bits, b_bits));
+      wmma_simd_matmul<float, StaticM, StaticN, StaticK, W,
+                       StaticN == 0 ? 0 : ((StaticN + W - 1) / W) * W>(M, N, K, W, stride, Abuf,
+                                                                       Bbuf, Cbuf);
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = gfx12_wmma_output_loc_32(wave_size, M, N, row, col);
@@ -2347,6 +2393,25 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
     writes.set_lane(r.reg, r.lane, r.val);
 }
 
+/// Carry fixed instruction dimensions through generic WMMA and its layout helpers.
+template <uint32_t M, uint32_t N, uint32_t K, typename ExtractA, typename ExtractB>
+void exec_wmma_f32_mixed(auto &cu, uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0,
+                         uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
+                         uint32_t const_acc = ACC_FROM_VGPR, uint32_t c_modifier = 0,
+                         uint32_t wave_size = WMMA_WAVE32) {
+  static_assert(M > 0 && N > 0 && K > 0);
+  exec_wmma_f32_mixed<M, N, K>(cu, M, N, K, a_bits, b_bits, dst, s0, s1, s2, ea, eb, const_acc,
+                               c_modifier, wave_size);
+}
+
+template <uint32_t M, uint32_t N, uint32_t K, typename ExtractA, typename ExtractB>
+void exec_wmma_f32(auto &cu, uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                   ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR,
+                   uint32_t c_modifier = 0, uint32_t wave_size = WMMA_WAVE32) {
+  exec_wmma_f32_mixed<M, N, K>(cu, in_bits, in_bits, dst, s0, s1, s2, ea, eb, const_acc, c_modifier,
+                               wave_size);
+}
+
 template <typename ExtractA, typename ExtractB>
 void exec_wmma_f32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
                    uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
@@ -2376,15 +2441,15 @@ inline void exec_wmma_f32_16x16x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint
                                        uint32_t c_modifier = 0) {
   constexpr uint32_t M = 16, N = 16, K = 32, in_bits = 16;
   if constexpr (!util::has_stdx_simd) {
-    exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
-                  const_acc, c_modifier);
+    exec_wmma_f32<M, N, K>(cu, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
+                           const_acc, c_modifier);
     return;
   } else {
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
     if (util::force_scalar() || !mma_f32_native_width_supported(N, W) ||
         (W != 16 && cu.observes_register_access())) {
-      exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
-                    const_acc, c_modifier);
+      exec_wmma_f32<M, N, K>(cu, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
+                             const_acc, c_modifier);
       return;
     }
     require_wmma_wave32(cu);
@@ -2435,8 +2500,8 @@ inline void exec_wmma_f32_16x16x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint
       if (!std::all_of(std::begin(A_buf), std::end(A_buf), finite) ||
           !std::all_of(std::begin(B_buf), std::end(B_buf), finite) ||
           !std::all_of(std::begin(C_buf), std::end(C_buf), finite)) {
-        exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f16,
-                      amdgpu::extract_f16, const_acc, c_modifier);
+        exec_wmma_f32<M, N, K>(cu, in_bits, dst, s0, s1, s2, amdgpu::extract_f16,
+                               amdgpu::extract_f16, const_acc, c_modifier);
         return;
       }
     }
@@ -2471,13 +2536,13 @@ inline void exec_wmma_f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0, uin
                                         uint32_t c_modifier = 0) {
   constexpr uint32_t M = 16, N = 16, K = 32, in_bits = 16;
   if constexpr (!util::has_stdx_simd) {
-    exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16, amdgpu::extract_bf16,
-                  const_acc, c_modifier);
+    exec_wmma_f32<M, N, K>(cu, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16, amdgpu::extract_bf16,
+                           const_acc, c_modifier);
     return;
   } else {
     if (util::force_scalar() || util::native<float>::size() != 16) {
-      exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16,
-                    amdgpu::extract_bf16, const_acc, c_modifier);
+      exec_wmma_f32<M, N, K>(cu, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16,
+                             amdgpu::extract_bf16, const_acc, c_modifier);
       return;
     }
     require_wmma_wave32(cu);
@@ -2597,8 +2662,8 @@ void exec_wmma_f32_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
   constexpr auto ea = f8_extract_fn<A_FP8, FNUZ>();
   constexpr auto eb = f8_extract_fn<B_FP8, FNUZ>();
   auto fallback = [&]() {
-    exec_wmma_f32_mixed(cu, M, N, K, in_bits, in_bits, dst, s0, s1, s2, ea, eb, const_acc,
-                        c_modifier);
+    exec_wmma_f32_mixed<M, N, K>(cu, in_bits, in_bits, dst, s0, s1, s2, ea, eb, const_acc,
+                                 c_modifier);
   };
   if constexpr (!util::has_stdx_simd) {
     fallback();
@@ -2682,14 +2747,14 @@ void exec_wmma_f32_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
                             uint32_t const_acc = ACC_FROM_VGPR, uint32_t c_modifier = 0) {
   constexpr uint32_t in_bits = 32;
   if constexpr (!util::has_stdx_simd) {
-    exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
-                  const_acc, c_modifier);
+    exec_wmma_f32<M, N, K>(cu, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
+                           const_acc, c_modifier);
     return;
   } else {
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
     if (util::force_scalar() || !mma_f32_native_width_supported(N, W)) {
-      exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
-                    const_acc, c_modifier);
+      exec_wmma_f32<M, N, K>(cu, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
+                             const_acc, c_modifier);
       return;
     }
     require_wmma_wave32(cu);

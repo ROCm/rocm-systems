@@ -12,10 +12,12 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/simd_test_hooks.h"
@@ -27,6 +29,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <utility>
 
 namespace {
 using namespace rocjitsu;
@@ -74,6 +77,73 @@ public:
   amdgpu::Wavefront *wave;
   uint32_t base;
 };
+
+template <uint32_t M, uint32_t N, uint32_t K, typename ExtractA, typename ExtractB>
+void compare_static_wmma(uint32_t a_bits, uint32_t b_bits, ExtractA extract_a, ExtractB extract_b,
+                         uint32_t width = 32) {
+  HostState restore;
+  DotMachine machine(width == 64 ? ROCJITSU_CODE_ARCH_RDNA4 : ROCJITSU_CODE_ARCH_CDNA5, width);
+  amdgpu::InstructionComputeUnitView view(*machine.cu, *machine.wave);
+  constexpr std::array<uint32_t, 6> words = {0x3f803f80u, 0xbf80bf80u, 0x40004000u,
+                                             0x40804080u, 0x3f003f00u, 0x41004100u};
+  for (bool scalar : {false, true})
+    for (uint32_t dst : {0u, 32u, 64u, 112u})
+      for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, 0x3f800001u})
+        for (uint32_t modifier : {0u, 3u}) {
+          SCOPED_TRACE(testing::Message() << "scalar=" << scalar << " dst=" << dst
+                                          << " width=" << width << " modifier=" << modifier);
+          util::set_force_scalar_for_testing(scalar);
+          std::array<uint32_t, 128 * 64> initial{};
+          for (uint32_t reg = 0; reg < 128; ++reg)
+            for (uint32_t lane = 0; lane < width; ++lane) {
+              uint32_t bits = words[(reg + lane) % words.size()];
+              if (reg >= 64 && reg < 96)
+                bits = std::bit_cast<uint32_t>(0.5f + float(reg % 7) + float(lane % 3));
+              initial[reg * width + lane] = bits;
+              machine.set(reg, lane, bits);
+            }
+          amdgpu::exec_wmma_f32_mixed(view, M, N, K, a_bits, b_bits, machine.base + dst,
+                                      machine.base, machine.base + 32, machine.base + 64, extract_a,
+                                      extract_b, const_acc, modifier, width);
+          std::array<uint32_t, 128 * 64> expected{};
+          for (uint32_t reg = 0; reg < 128; ++reg)
+            for (uint32_t lane = 0; lane < width; ++lane) {
+              expected[reg * width + lane] = machine.get(reg, lane);
+              machine.set(reg, lane, initial[reg * width + lane]);
+            }
+          amdgpu::exec_wmma_f32_mixed<M, N, K>(view, a_bits, b_bits, machine.base + dst,
+                                               machine.base, machine.base + 32, machine.base + 64,
+                                               extract_a, extract_b, const_acc, modifier, width);
+          for (uint32_t reg = 0; reg < 128; ++reg)
+            for (uint32_t lane = 0; lane < width; ++lane)
+              ASSERT_EQ(machine.get(reg, lane), expected[reg * width + lane])
+                  << "reg=" << reg << " lane=" << lane;
+        }
+}
+
+TEST(WmmaStaticShapeTest, F16AndBf16MatchRuntimeWithModifiersAndAliases) {
+  compare_static_wmma<16, 16, 32>(16, 16, amdgpu::extract_f16, amdgpu::extract_f16);
+  compare_static_wmma<16, 16, 32>(16, 16, amdgpu::extract_bf16, amdgpu::extract_bf16);
+}
+
+TEST(WmmaStaticShapeTest, MixedSubbyteFormatsMatchRuntime) {
+  for (auto formats : {std::pair{0u, 0u}, std::pair{0u, 4u}, std::pair{4u, 0u}, std::pair{2u, 2u},
+                       std::pair{0u, 2u}, std::pair{2u, 4u}, std::pair{4u, 2u}}) {
+    SCOPED_TRACE(testing::Message() << "formats=" << formats.first << "," << formats.second);
+    ASSERT_TRUE(amdgpu::dispatch_matrix_fmt_pair(
+        formats.first, formats.second, [](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+          compare_static_wmma<16, 16, 128>(a_bits, b_bits, ea, eb);
+        }));
+  }
+}
+
+TEST(WmmaStaticShapeTest, Fp4DoubleMShapeMatchesRuntime) {
+  compare_static_wmma<32, 16, 128>(4, 4, amdgpu::extract_fp4, amdgpu::extract_fp4);
+}
+
+TEST(WmmaStaticShapeTest, Wave64MatchesRuntime) {
+  compare_static_wmma<16, 16, 16>(16, 16, amdgpu::extract_f16, amdgpu::extract_f16, 64);
+}
 
 // Regression for the dense BF16 reference used by Triton's test_scaled_dot
 // and its BF16-output counterpart with the same F32 accumulator.

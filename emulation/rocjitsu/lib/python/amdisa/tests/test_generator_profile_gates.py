@@ -9903,3 +9903,23 @@ def test_opted_in_fixed_wave_matrix_layout_is_rejected(name):
     )
     with pytest.raises(ValueError, match=message):
         _gen_mfma(Instruction(name, 'ENC_VOP3P', 0, []), 'fixed_wave', profile)
+
+
+@pytest.mark.parametrize(
+    ('mnemonic', 'expected'),
+    [
+        (
+            'V_WMMA_F32_16X16X128_F8F6F4',
+            'amdgpu::exec_wmma_f32_mixed<16, 16, 128>(cu, a_bits, b_bits, dst,',
+        ),
+        ('V_WMMA_F32_16X16X16_F16', 'amdgpu::exec_wmma_f32<16, 16, 16>(cu, 16, dst,'),
+    ],
+)
+def test_generic_wmma_preserves_static_instruction_shape(mnemonic, expected):
+    body = _gen_mfma(
+        Instruction(mnemonic, 'ENC_VOP3P', 0, []),
+        'cdna5',
+        _matrix_profile_for_arch('cdna5', uses_vgpr_msb_indexing=False),
+    )
+    assert expected in body
+    assert 'wmma_c_modifier(inst_.neg, inst_.neg_hi)' in body
