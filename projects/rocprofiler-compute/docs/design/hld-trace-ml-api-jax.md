@@ -6,14 +6,14 @@
   - It wraps each framework call in a ROCTX range, so the kernels launched
     share `Correlation_ID` and `GUID` with the marker.
   - This is used to group the kernels under the operation that launched them.
-- JAX compiles each `jax.jit` / `jax.pmap` function, and each eager primitive,
-  into an XLA module:
+- JAX compiles each `jax.jit` / `jax.pmap` / `jax.shard_map` function, and
+  each eager primitive, into an XLA module:
   - The function or primitive is lowered to HLO (High Level Optimizer IR),
     optimized, and emitted as one module of fused kernels.
   - The first call with a given input signature compiles the module; later calls
     with the same signature reuse it.
-  - `jax.jit` / `jax.pmap`: the module is the compiled function that eventually
-    runs:
+  - `jax.jit` / `jax.pmap` / `jax.shard_map`: the module is the compiled
+    function that eventually runs:
     - Fusion decides the kernel names and which operators' work goes into a kernel.
     - Operators inside the jit function code have no Python call and no marker.
     - The only identity available at the call, which is where a marker can be
@@ -30,13 +30,13 @@
 ## Problem statement
 
 - The ML API trace has no JAX backend, so JAX GPU time cannot be attributed to
-  the jit function or eager op that launched it.
+  the compiled function or eager op that launched it.
 
 ## Requirements
 
-- Attribute kernels of a `jax.jit` / `jax.pmap` call to that compiled
-  function, and of an eager JAX op to the op that dispatched them, with no
-  changes to the workload source.
+- Attribute kernels of a `jax.jit` / `jax.pmap` / `jax.shard_map` call to
+  that compiled function, and of an eager JAX op to the op that dispatched
+  them, with no changes to the workload source.
 - Reuse the existing ML API trace `marker -> counter -> call-tree` pipeline.
 
 ## Considered and not chosen
@@ -61,7 +61,8 @@
 
 - JAX is added as a backend to the existing `--trace-ml-api` pipeline, through
   `inject_roctx`.
-- `jax.jit` / `jax.pmap` open a range around each compiled call.
+- `jax.jit` / `jax.pmap` / `jax.shard_map` open a range around each compiled
+  call.
 - Eager ops (no outer `jit`) open a range at primitive dispatch, named
   `jax.{primitive}` (for example `jax.dot_general`). There is no `jax.eager`.
   The primitive carries its own name at dispatch; we prefix `jax.`. We do not
@@ -83,7 +84,7 @@
 ```
    workload run (instrument)                     analysis
    ─────────────────────────                     ────────
- jax.jit / jax.pmap / eager dispatch ──ROCTX──►  marker trace ┐
+ jax.jit / jax.pmap / jax.shard_map / eager ──ROCTX──► marker ┐
                                                     │ join on
  XLA executable ────kernel launches►  kernel trace ┘ Correlation_ID + GUID
                                                     │
@@ -93,6 +94,9 @@
 
 ### Where the range is marked
 
+- From Python, JAX starts GPU work only by calling a compiled function
+  (`jit`, `pmap`, `shard_map`) or by dispatching a Primitive. `jnp.*` is
+  not a launch. Wrapping those is the complete set.
 - `jax.jit` wraps how the compiled function is called, not `jax.jit` itself:
   - `jax.jit(fn)` returns a callable. It does not run `fn`.
   - On JAX 0.11.0 every such callable has the same type,
@@ -106,9 +110,11 @@
     the range when the callable returns.
   - A direct call to an inner jitted function is its own outer call, so it
     gets its own range.
-- `jax.pmap` wraps the compiled callable:
-  - Each outer call opens `jax.pmap.<fn>`, runs the executable, and closes
-    the range when the callable returns.
+- `jax.pmap` and `jax.shard_map` wrap the factory, then the compiled call
+  (same approach; on JAX 0.11.0 neither result is a `PjitFunction`):
+  - `pmap` maps `fn` over devices. `shard_map` runs `fn` on a mesh.
+  - Each outer call opens `jax.pmap.<fn>` or `jax.shard_map.<fn>`, runs the
+    executable, and closes the range when the callable returns.
 - Primitive wrap: `inject_roctx` wraps `jax.extend.core.Primitive`, not `jnp.*`.
   - If a JAX range is already open, do not open another; run the original
     dispatch.
@@ -209,9 +215,10 @@ jax.jit.train_step jax_workload.py:13 (calls: N, dispatches: M, total: T)
 - Extend the existing `--trace-ml-api` integration tests (Torch / Triton) with
   a JAX backend. Same profile → analyze path; no separate harness.
 - Those tests assert the following on a profiled workload:
-  - An outer `jax.jit` / `jax.pmap` call emits one range `jax.jit.<fn>` or
-    `jax.pmap.<fn>`. An outer eager op emits `jax.{primitive}`. Nested or
-    inner calls do not emit a second range.
+  - An outer `jax.jit` / `jax.pmap` / `jax.shard_map` call emits one range
+    `jax.jit.<fn>`, `jax.pmap.<fn>`, or `jax.shard_map.<fn>`. An outer eager
+    op emits `jax.{primitive}`. Nested or inner calls do not emit a second
+    range.
   - Kernels launched by that call appear under that marker, with the caller
     `file:line` and the call's dispatch count and GPU time.
 - Unit tests cover marker naming and the "range already open" skip, without a
@@ -222,17 +229,8 @@ jax.jit.train_step jax_workload.py:13 (calls: N, dispatches: M, total: T)
   (`ml api trace` on the profile stdout). A wrap miss is an absent `jax.*`
   node in the `--list-operators jax` tree (analyze stdout).
 
-Coverage gaps:
-
-- **`shard_map` (`jax.shard_map`).** The gap is the marker name, not missing
-  GPU counters. You see the kernels; you do not get a `jax.shard_map.*` node.
-  - Under an outer `jit` / `pmap`, those kernels sit under that compiled
-    function (for example `jax.jit.shard_map_square`).
-  - A bare `jax.shard_map(...)(x)` has no `shard_map` node. Some kernels may
-    show under leftover `jax.jit.*` names.
-
 Design trade-offs:
 
-- A `jit` / `pmap` marker is the compiled function. Every kernel that call
-  launches is a direct child of that node.
+- A `jit` / `pmap` / `shard_map` marker is the compiled function. Every
+  kernel that call launches is a direct child of that node.
 - One function name covers every input signature.
