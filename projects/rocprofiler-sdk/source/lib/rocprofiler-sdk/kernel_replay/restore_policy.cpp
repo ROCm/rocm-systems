@@ -46,6 +46,24 @@ namespace
 constexpr size_t min_gpu_bytes    = size_t{64} << 20;
 constexpr size_t min_pinned_bytes = size_t{1} << 20;
 
+// Whether restoring everything moves fewer bytes than `mode`, for a kernel that changes as many of
+// its T captured bytes per pass as its last hashed restore found, c. A full restore reads and
+// writes all of them, 2(N - 1)T over N passes. Hashing reads all of them and copies the changed
+// ones back: (N - 1)(T + 2c) when it hashes before every pass, which is more once c reaches T/2;
+// and 2T + (2N - 3)c when it hashes once, reuses the list and checks the rest at the end, which is
+// more once c reaches (1 - 1/(2N - 3))T. That tends to T as N grows, so without a pass count,
+// hashing once is never worse.
+bool
+full_moves_less(restore_mode mode, uint64_t passes, const history_t& history)
+{
+    if(history.tiles == 0) return false;
+    const auto tiles   = uint64_t{history.tiles};
+    const auto changed = uint64_t{history.changed};
+    if(mode == restore_mode::hash_every_pass) return 2 * changed >= tiles;
+    if(passes == 0) return false;
+    return (2 * passes - 3) * changed >= 2 * (passes - 2) * tiles;
+}
+
 using history_map_t = std::map<std::pair<uint64_t, uint64_t>, history_t>;
 
 common::Synchronized<history_map_t>&
@@ -115,14 +133,17 @@ choose(const inputs_t& inputs)
 
     // Such a kernel may not write the same tiles every pass.
     if(inputs.history.unlisted) return restore_mode::full;
-    // A pinned restore crosses PCIe, so hashing pays off there even when most tiles change.
-    if(inputs.pinned_bytes < min_pinned_bytes &&
-       (inputs.gpu_bytes < min_gpu_bytes || inputs.history.mostly_changed))
-        return restore_mode::full;
     // With two or three passes, hashing before each costs no more than reusing a list and checking
     // it, and does not assume the kernel writes the same tiles every pass.
-    if(inputs.total_passes != 0 && inputs.total_passes <= 3) return restore_mode::hash_every_pass;
-    return restore_mode::hash_once;
+    const auto mode = (inputs.total_passes != 0 && inputs.total_passes <= 3)
+                          ? restore_mode::hash_every_pass
+                          : restore_mode::hash_once;
+    // A pinned restore crosses PCIe, so hashing pays off there even when most tiles change.
+    if(inputs.pinned_bytes < min_pinned_bytes &&
+       (inputs.gpu_bytes < min_gpu_bytes ||
+        full_moves_less(mode, inputs.total_passes, inputs.history)))
+        return restore_mode::full;
+    return mode;
 }
 
 history_t
@@ -138,9 +159,10 @@ void
 record(const kernel_key_t& key, uint32_t tiles, uint32_t changed, uint32_t unlisted_changed)
 {
     histories().wlock([&](auto& map) {
-        auto& history          = map[{key.agent, key.kernel_object}];
-        history.mostly_changed = uint64_t{changed} * 2 >= tiles;
-        history.unlisted       = history.unlisted || unlisted_changed > 0;
+        auto& history    = map[{key.agent, key.kernel_object}];
+        history.tiles    = tiles;
+        history.changed  = changed;
+        history.unlisted = history.unlisted || unlisted_changed > 0;
     });
 }
 }  // namespace restore_policy

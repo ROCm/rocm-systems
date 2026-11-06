@@ -1181,8 +1181,8 @@ WriteInterceptor(const void* packets,
             const auto gpu_backend_available =
                 kernel_replay::blit::prepare(queue) == HSA_STATUS_SUCCESS;
             if(!gpu_backend_available)
-                ROCP_WARNING << "kernel replay: internal blit kernel unavailable; trying "
-                                "pinned-host snapshot backing";
+                LOG_FIRST_N(WARNING, 1) << "kernel replay: internal blit kernel unavailable; "
+                                           "trying pinned-host snapshot backing";
 
             // Whether to hash between passes is decided before the capture, which keeps the
             // digests for it, and settled once the snapshot's size is known.

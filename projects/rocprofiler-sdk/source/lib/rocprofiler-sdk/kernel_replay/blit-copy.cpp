@@ -315,23 +315,40 @@ initialize_state(const hsa::AgentCache& agent, kernel_state_t& state)
     return HSA_STATUS_SUCCESS;
 }
 
+// Releases what initialize_state() created before it failed.
+void
+release_partial_state(kernel_state_t& state)
+{
+    auto* core = hsa::get_core_table();
+    if(core && state.executable.handle != 0) core->hsa_executable_destroy_fn(state.executable);
+    if(core && state.reader.handle != 0) core->hsa_code_object_reader_destroy_fn(state.reader);
+    if(state.file >= 0) close(state.file);
+}
+
 kernel_state_t*
 get_state(const hsa::AgentCache& agent)
 {
-    auto* state = states().rlock([&](const auto& map) -> kernel_state_t* {
-        auto itr = map.find(agent.get_hsa_agent().handle);
-        return (itr == map.end()) ? nullptr : itr->second;
+    const auto handle = agent.get_hsa_agent().handle;
+    const auto cached = states().rlock([&](const auto& map) -> std::optional<kernel_state_t*> {
+        auto itr = map.find(handle);
+        if(itr == map.end()) return std::nullopt;
+        return itr->second;
     });
-    if(state) return state;
+    if(cached) return *cached;
 
     return states().wlock([&](auto& map) -> kernel_state_t* {
-        auto& slot = map[agent.get_hsa_agent().handle];
-        if(slot) return slot;
+        // An agent whose load failed stays null, so the failure is reported and paid for once.
+        auto [itr, inserted] = map.emplace(handle, nullptr);
+        if(!inserted) return itr->second;
 
         auto candidate = std::make_unique<kernel_state_t>();
-        if(initialize_state(agent, *candidate) != HSA_STATUS_SUCCESS) return nullptr;
-        slot = candidate.release();
-        return slot;
+        if(initialize_state(agent, *candidate) != HSA_STATUS_SUCCESS)
+        {
+            release_partial_state(*candidate);
+            return nullptr;
+        }
+        itr->second = candidate.release();
+        return itr->second;
     });
 }
 
