@@ -88,9 +88,9 @@ class SmiInfiniBandPort {
   std::string sysfs_path_;
   mutable std::map<std::string, uint64_t> hw_counters_map_;
   void query_ibverbs_mtu_once() const;
-  mutable bool m_was_ibverbs_mtu_queried = false;
-  mutable std::optional<uint16_t> m_ibverbs_max_mtu;
-  mutable std::optional<uint16_t> m_ibverbs_active_mtu;
+  mutable bool was_ibverbs_mtu_queried_ = false;
+  mutable std::optional<uint16_t> ibverbs_max_mtu_;
+  mutable std::optional<uint16_t> ibverbs_active_mtu_;
 };
 
 class SmiInfiniBand {

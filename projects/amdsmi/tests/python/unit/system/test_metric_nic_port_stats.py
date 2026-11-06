@@ -91,6 +91,7 @@ class TestMetricNicPortStats(unittest.TestCase):
         module, amdsmi_stub = _load_metric()
         command = self._make_command(module, amdsmi_stub, is_json=False)
         amdsmi_stub.amdsmi_interface.amdsmi_get_nic_telemetry = mock.Mock(return_value={})
+        amdsmi_stub.amdsmi_interface.amdsmi_get_nic_hwmon_sensors = mock.Mock(return_value=[])
         amdsmi_stub.amdsmi_interface.amdsmi_get_nic_port_info = mock.Mock(
             return_value={"num_ports": 1, "ports": [{"netdev": "enp1s0"}]}
         )
@@ -109,6 +110,7 @@ class TestMetricNicPortStats(unittest.TestCase):
         module, amdsmi_stub = _load_metric()
         command = self._make_command(module, amdsmi_stub, is_json=True)
         amdsmi_stub.amdsmi_interface.amdsmi_get_nic_telemetry = mock.Mock(return_value={})
+        amdsmi_stub.amdsmi_interface.amdsmi_get_nic_hwmon_sensors = mock.Mock(return_value=[])
         amdsmi_stub.amdsmi_interface.amdsmi_get_nic_port_info = mock.Mock(
             return_value={"num_ports": 1, "ports": [{"netdev": "enp1s0"}]}
         )
@@ -126,6 +128,7 @@ class TestMetricNicPortStats(unittest.TestCase):
         module, amdsmi_stub = _load_metric()
         command = self._make_command(module, amdsmi_stub, is_json=True)
         amdsmi_stub.amdsmi_interface.amdsmi_get_nic_telemetry = mock.Mock(return_value={})
+        amdsmi_stub.amdsmi_interface.amdsmi_get_nic_hwmon_sensors = mock.Mock(return_value=[])
         amdsmi_stub.amdsmi_interface.amdsmi_get_nic_port_info = mock.Mock(
             return_value={"num_ports": 1, "ports": [{"netdev": "enp1s0"}]}
         )
@@ -143,6 +146,7 @@ class TestMetricNicPortStats(unittest.TestCase):
         command = self._make_command(module, amdsmi_stub, is_json=False)
         interface = amdsmi_stub.amdsmi_interface
         interface.amdsmi_get_nic_telemetry = mock.Mock(return_value={})
+        interface.amdsmi_get_nic_hwmon_sensors = mock.Mock(return_value=[])
         interface.amdsmi_get_nic_port_info = mock.Mock(
             return_value={"num_ports": 1, "ports": [{"netdev": "enp1s0"}]}
         )
@@ -160,6 +164,7 @@ class TestMetricNicPortStats(unittest.TestCase):
         module, amdsmi_stub = _load_metric()
         command = self._make_command(module, amdsmi_stub, is_json=False)
         amdsmi_stub.amdsmi_interface.amdsmi_get_nic_telemetry = mock.Mock(return_value={})
+        amdsmi_stub.amdsmi_interface.amdsmi_get_nic_hwmon_sensors = mock.Mock(return_value=[])
         amdsmi_stub.amdsmi_interface.amdsmi_get_nic_port_info = mock.Mock(
             return_value={"num_ports": 0, "ports": []}
         )
@@ -174,6 +179,7 @@ class TestMetricNicPortStats(unittest.TestCase):
         module, amdsmi_stub = _load_metric()
         command = self._make_command(module, amdsmi_stub, is_json=False)
         amdsmi_stub.amdsmi_interface.amdsmi_get_nic_telemetry = mock.Mock(return_value={})
+        amdsmi_stub.amdsmi_interface.amdsmi_get_nic_hwmon_sensors = mock.Mock(return_value=[])
         amdsmi_stub.amdsmi_interface.amdsmi_get_nic_port_info = mock.Mock(
             return_value={"num_ports": 1, "ports": [{"netdev": "enp1s0"}]}
         )

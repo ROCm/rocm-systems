@@ -745,6 +745,7 @@ class AmdSmiMetricCategory(IntEnum):
 
 
 class AmdSmiMetricUnit(IntEnum):
+    BOOL = amdsmi_wrapper.AMDSMI_METRIC_UNIT_BOOL
     MILLIVOLT = amdsmi_wrapper.AMDSMI_METRIC_UNIT_MILLIVOLT
     MILLIDEGREE_CELSIUS = amdsmi_wrapper.AMDSMI_METRIC_UNIT_MILLIDEGREE_CELSIUS
     MICROWATT = amdsmi_wrapper.AMDSMI_METRIC_UNIT_MICROWATT
@@ -760,6 +761,13 @@ class AmdSmiNicSensorName(IntEnum):
     EMERGENCY = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_EMERGENCY
     SHUTDOWN = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_SHUTDOWN
     CAP = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_CAP
+    ALARM_MIN = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_ALARM_MIN
+    ALARM_MAX = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_ALARM_MAX
+    ALARM_LCRIT = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_ALARM_LCRIT
+    ALARM_CRIT = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_ALARM_CRIT
+    ALARM_EMERGENCY = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_ALARM_EMERGENCY
+    ALARM_SHUTDOWN = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_ALARM_SHUTDOWN
+    ALARM_CAP = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_ALARM_CAP
 
 
 class AmdSmiRegType(IntEnum):
@@ -2911,11 +2919,6 @@ def amdsmi_get_nic_telemetry(
         health_state = AmdSmiNicHealthState.UNKNOWN.name
 
     return {
-        "temperature": {
-            "asic_temp_c": _u(telem.temperature.asic_temp_c, 0xFFFF),
-            "transceiver_temp_c": _u(telem.temperature.transceiver_temp_c, 0xFFFF),
-            "board_temp_c": _u(telem.temperature.board_temp_c, 0xFFFF),
-        },
         "health": {
             "state": health_state,
             "error_count": _u(telem.health.error_count, 0xFFFFFFFF),
@@ -3034,7 +3037,7 @@ def amdsmi_get_nic_vendor_statistics(
     num_stats = ctypes.c_uint32(0)
     _check_res(
         amdsmi_wrapper.amdsmi_get_nic_vendor_statistics_with_scope(
-            processor_handle, port_index, scope, ctypes.byref(num_stats), None
+            processor_handle, port_index, ctypes.byref(num_stats), None, scope
         )
     )
 
@@ -3044,7 +3047,7 @@ def amdsmi_get_nic_vendor_statistics(
     stats = (amdsmi_wrapper.amdsmi_nic_stat_t * num_stats.value)()
     _check_res(
         amdsmi_wrapper.amdsmi_get_nic_vendor_statistics_with_scope(
-            processor_handle, port_index, scope, ctypes.byref(num_stats), stats
+            processor_handle, port_index, ctypes.byref(num_stats), stats, scope
         )
     )
     return {

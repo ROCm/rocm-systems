@@ -96,6 +96,7 @@ class TestMetricNicRdma(unittest.TestCase):
                 self.logger.is_csv_format.return_value = False
 
         interface.amdsmi_get_nic_telemetry = mock.Mock(return_value={})
+        interface.amdsmi_get_nic_hwmon_sensors = mock.Mock(return_value=[])
         # Like the real function: RDMA_DEVICES is only in the detail view.
         interface.amdsmi_get_ainic_info = mock.Mock(
             side_effect=lambda handle, detail=False: (

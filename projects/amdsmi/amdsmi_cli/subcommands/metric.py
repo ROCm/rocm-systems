@@ -41,6 +41,14 @@ _NIC_SENSOR_DISPLAY = {
 }
 # INPUT is the reading; every other attribute is a threshold and keeps its own name.
 _NIC_SENSOR_READING = "INPUT"
+# A flag (an ALARM_* attribute) shows as 0 or 1, not as a scaled measurement.
+_NIC_SENSOR_FLAG_UNIT = "BOOL"
+# The ASIC die is the channel labelled "die", or temp1 on a node that labels nothing; the board is
+# the channel labelled "board".
+_NIC_ASIC_LABEL_KEY = "die"
+_NIC_BOARD_LABEL_KEY = "board"
+_NIC_UNLABELLED_ASIC_CHANNEL = 1
+_NIC_MILLIDEGREES_PER_DEGREE = 1000
 
 
 class MetricCommands:
@@ -3319,6 +3327,13 @@ class MetricCommands:
             self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
     def _format_nic_sensor_value(self, record):
+        if record["unit"] == _NIC_SENSOR_FLAG_UNIT:
+            flag = int(record["value"])
+            return (
+                {"value": flag, "unit": _NIC_SENSOR_FLAG_UNIT}
+                if self.logger.is_json_format()
+                else flag
+            )
         divisor, unit = _NIC_SENSOR_DISPLAY.get(record["unit"], (1, ""))
         value = round(record["value"] / divisor, 3)
         if self.logger.is_json_format():
@@ -3327,6 +3342,47 @@ class MetricCommands:
             degree = "\N{DEGREE SIGN}" if unit == "C" else ""
             return f"{value} {degree}{unit}".rstrip()
         return value
+
+    def _nic_temperatures(self, nic_handle, nic_id):
+        """The ASIC and board temperatures, picked out of the NIC's hwmon temperature readings."""
+        try:
+            records = amdsmi_interface.amdsmi_get_nic_hwmon_sensors(nic_handle)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Failed to get hwmon sensors for nic %s | %s", nic_id, e.get_error_info())
+            records = []
+
+        readings_by_instance = {}
+        for record in records:
+            if record["category"] == "TEMPERATURE" and record["attribute"] == _NIC_SENSOR_READING:
+                readings_by_instance.setdefault(record["instance"], []).append(record)
+
+        def is_asic(reading, is_any_labelled):
+            if is_any_labelled:
+                return _NIC_ASIC_LABEL_KEY in reading["label"].lower()
+            return reading["channel"] == _NIC_UNLABELLED_ASIC_CHANNEL
+
+        def is_board(reading, _is_any_labelled):
+            return _NIC_BOARD_LABEL_KEY in reading["label"].lower()
+
+        temperatures = {}
+        for name, is_match in (("asic", is_asic), ("board", is_board)):
+            temperatures[name] = "N/A"
+            for instance in sorted(readings_by_instance):
+                readings = readings_by_instance[instance]
+                is_any_labelled = any(reading["label"] for reading in readings)
+                match = next((r for r in readings if is_match(r, is_any_labelled)), None)
+                if match is None:
+                    continue
+                if match["value"] >= 0:
+                    degrees = match["value"] // _NIC_MILLIDEGREES_PER_DEGREE
+                    if self.logger.is_json_format():
+                        temperatures[name] = {"value": degrees, "unit": "C"}
+                    elif self.logger.is_human_readable_format():
+                        temperatures[name] = f"{degrees} \N{DEGREE SIGN}C"
+                    else:
+                        temperatures[name] = degrees
+                break
+        return temperatures
 
     def _nic_sensors(self, nic_handle, nic_id):
         """One SENSOR_<n> block per hwmon sensor of a NIC, grouping its records and thresholds."""
@@ -3450,19 +3506,7 @@ class MetricCommands:
         except amdsmi_exception.AmdSmiLibraryException as e:
             logging.debug("Failed to get telemetry for nic %s | %s", nic_id, e.get_error_info())
         # Same shape as the GPU temperature section: "ASIC: 27 °C" in text, value and unit in JSON.
-        if isinstance(telemetry.get("temperature"), dict):
-            temperatures = {}
-            for key, value in telemetry["temperature"].items():
-                name = key.replace("_temp_c", "")
-                if value == "N/A":
-                    temperatures[name] = value
-                elif self.logger.is_json_format():
-                    temperatures[name] = {"value": value, "unit": "C"}
-                elif self.logger.is_human_readable_format():
-                    temperatures[name] = f"{value} \N{DEGREE SIGN}C"
-                else:
-                    temperatures[name] = value
-            telemetry["temperature"] = temperatures
+        values["temperature"] = self._nic_temperatures(args.nic, nic_id)
         values.update(telemetry)
 
         if getattr(args, "sensors", False):

@@ -12,7 +12,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from unittest import mock
 
 from common.common import cli_search_order, find_cli_dir
@@ -53,9 +53,26 @@ def _load_metric() -> types.SimpleNamespace:
     return types.SimpleNamespace(module=module, interface=interface_stub)
 
 
+def _input(channel: int, label: str, value: int, instance: int = 0) -> Dict[str, object]:
+    """A temperature reading record as ``amdsmi_get_nic_hwmon_sensors`` returns it."""
+    return {
+        "category": "TEMPERATURE",
+        "attribute": "INPUT",
+        "unit": "MILLIDEGREE_CELSIUS",
+        "channel": channel,
+        "instance": instance,
+        "label": label,
+        "value": value,
+    }
+
+
 class TestMetricNicType(unittest.TestCase):
     def _run_metric_nic(
-        self, label: Optional[str], telemetry: Dict[str, object], json_format: bool = False
+        self,
+        label: Optional[str],
+        telemetry: Dict[str, object],
+        json_format: bool = False,
+        sensors: Optional[List[Dict[str, object]]] = None,
     ) -> Dict:
         """Run metric_nic and return the values dict it stored; ``None`` fails the type read."""
         loaded = _load_metric()
@@ -73,6 +90,7 @@ class TestMetricNicType(unittest.TestCase):
                 self.logger.is_human_readable_format.return_value = not json_format
 
         loaded.interface.amdsmi_get_nic_telemetry = mock.Mock(return_value=telemetry)
+        loaded.interface.amdsmi_get_nic_hwmon_sensors = mock.Mock(return_value=sensors or [])
         if label is None:
             loaded.interface.amdsmi_get_nic_type_label = mock.Mock(side_effect=_LibraryError())
         else:
@@ -90,33 +108,62 @@ class TestMetricNicType(unittest.TestCase):
         self.assertEqual(stored["health"], {"state": "UNSUPPORTED"})
 
     def test_type_leads_the_block(self) -> None:
-        stored = self._run_metric_nic("AINIC", {"temperature": {}, "health": {}})
-        self.assertEqual(list(stored)[0], "type")
+        stored = self._run_metric_nic("AINIC", {"health": {}})
+        self.assertEqual(list(stored)[:2], ["type", "temperature"])
 
     def test_a_type_read_failure_reports_na_and_keeps_the_telemetry(self) -> None:
-        stored = self._run_metric_nic(None, {"temperature": {"asic_temp_c": 31}})
+        stored = self._run_metric_nic(None, {"health": {"state": "HEALTHY"}})
         self.assertEqual(stored["type"], "N/A")
-        self.assertEqual(stored["temperature"], {"asic": "31 \N{DEGREE SIGN}C"})
+        self.assertEqual(stored["health"], {"state": "HEALTHY"})
 
     def test_temperatures_read_like_the_gpu_metric_in_text(self) -> None:
         stored = self._run_metric_nic(
             "AINIC",
-            {"temperature": {"asic_temp_c": 27, "transceiver_temp_c": "N/A", "board_temp_c": 40}},
+            {},
+            sensors=[_input(1, "board temperature", 40000), _input(2, "die temperature", 27000)],
         )
         self.assertEqual(
-            stored["temperature"],
-            {"asic": "27 \N{DEGREE SIGN}C", "transceiver": "N/A", "board": "40 \N{DEGREE SIGN}C"},
+            stored["temperature"], {"asic": "27 \N{DEGREE SIGN}C", "board": "40 \N{DEGREE SIGN}C"}
         )
 
     def test_temperatures_carry_a_unit_in_json(self) -> None:
         stored = self._run_metric_nic(
-            "AINIC",
-            {"temperature": {"asic_temp_c": 27, "transceiver_temp_c": "N/A"}},
-            json_format=True,
+            "AINIC", {}, json_format=True, sensors=[_input(2, "die temperature", 27000)]
         )
         self.assertEqual(
-            stored["temperature"], {"asic": {"value": 27, "unit": "C"}, "transceiver": "N/A"}
+            stored["temperature"], {"asic": {"value": 27, "unit": "C"}, "board": "N/A"}
         )
+
+    def test_an_unlabelled_node_reports_temp1_as_the_asic(self) -> None:
+        stored = self._run_metric_nic(
+            "AINIC", {}, sensors=[_input(1, "", 60000), _input(2, "", 70000)]
+        )
+        self.assertEqual(stored["temperature"], {"asic": "60 \N{DEGREE SIGN}C", "board": "N/A"})
+
+    def test_a_labelled_node_ignores_a_channel_without_the_die_label(self) -> None:
+        stored = self._run_metric_nic("AINIC", {}, sensors=[_input(1, "board temperature", 40000)])
+        self.assertEqual(stored["temperature"], {"asic": "N/A", "board": "40 \N{DEGREE SIGN}C"})
+
+    def test_the_first_hwmon_node_with_a_match_wins(self) -> None:
+        stored = self._run_metric_nic(
+            "AINIC",
+            {},
+            sensors=[_input(1, "", 30000, instance=1), _input(1, "", 90000, instance=2)],
+        )
+        self.assertEqual(stored["temperature"]["asic"], "30 \N{DEGREE SIGN}C")
+
+    def test_a_negative_reading_is_not_available(self) -> None:
+        stored = self._run_metric_nic("AINIC", {}, sensors=[_input(1, "", -5000)])
+        self.assertEqual(stored["temperature"], {"asic": "N/A", "board": "N/A"})
+
+    def test_a_threshold_is_not_a_reading(self) -> None:
+        crit = dict(_input(1, "", 99000), attribute="CRIT")
+        stored = self._run_metric_nic("AINIC", {}, sensors=[crit])
+        self.assertEqual(stored["temperature"], {"asic": "N/A", "board": "N/A"})
+
+    def test_a_nic_without_sensors_reports_na_temperatures(self) -> None:
+        stored = self._run_metric_nic("UALoE", {})
+        self.assertEqual(stored["temperature"], {"asic": "N/A", "board": "N/A"})
 
     def test_the_six_getter_summary_is_not_read(self) -> None:
         # An unrelated getter failing there (port, rdma) must not turn the type into N/A.

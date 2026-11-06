@@ -26,7 +26,7 @@ auto read_vendor_count(amdsmi_processor_handle nic, uint32_t port_index, uint32_
 // The vendor statistics count of the given tier.
 auto read_scoped_count(amdsmi_processor_handle nic, uint32_t port_index,
                        amdsmi_nic_stat_scope_t scope, uint32_t* count) -> amdsmi_status_t {
-  return amdsmi_get_nic_vendor_statistics_with_scope(nic, port_index, scope, count, nullptr);
+  return amdsmi_get_nic_vendor_statistics_with_scope(nic, port_index, count, nullptr, scope);
 }
 
 }  // namespace
@@ -63,8 +63,8 @@ void TestNicPortRead::Run(void) {
   auto no_nic_ifindex = uint32_t{0};
   EXPECT_EQ(amdsmi_get_nic_port_ifindex(nullptr, 0, &no_nic_ifindex), AMDSMI_STATUS_INVAL);
   auto no_nic_count = uint32_t{0};
-  EXPECT_EQ(amdsmi_get_nic_vendor_statistics_with_scope(nullptr, 0, AMDSMI_NIC_STAT_SCOPE_DEFAULT,
-                                                        &no_nic_count, nullptr),
+  EXPECT_EQ(amdsmi_get_nic_vendor_statistics_with_scope(nullptr, 0, &no_nic_count, nullptr,
+                                                        AMDSMI_NIC_STAT_SCOPE_DEFAULT),
             AMDSMI_STATUS_INVAL);
 
   const auto nics = nic_handles();

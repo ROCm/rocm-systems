@@ -101,6 +101,36 @@ TEST_F(NicUnit, NicSensorsCopyIntoALargeArrayLeavesTheRestUntouched) {
   EXPECT_EQ(out[5].value, kUnsetValue);
 }
 
+// The reserved space must not leak the caller's stale bytes, because a later release may give it
+// meaning.
+TEST_F(NicUnit, NicSensorsCopyZeroesTheReservedSpace) {
+  const auto records = make_records(2);
+  auto out = std::vector<amdsmi_nic_sensor_t>(2);
+  std::memset(out.data(), 0xFF, (out.size() * sizeof(amdsmi_nic_sensor_t)));
+  auto num_sensors = uint32_t{2};
+
+  ASSERT_EQ(copy_nic_sensors(*records, &num_sensors, out.data()), AMDSMI_STATUS_SUCCESS);
+  for (const auto& sensor : out) {
+    for (const auto word : sensor.reserved) {
+      EXPECT_EQ(word, uint64_t{0});
+    }
+  }
+}
+
+TEST_F(NicUnit, NicSensorsCopyCarriesAnAlarmRecord) {
+  auto records = make_records(1);
+  records->sensors[0].attribute = AMDSMI_NIC_SENSOR_NAME_ALARM_CRIT;
+  records->sensors[0].unit = AMDSMI_METRIC_UNIT_BOOL;
+  records->sensors[0].value = 1;
+  auto out = make_out(1);
+  auto num_sensors = uint32_t{1};
+
+  ASSERT_EQ(copy_nic_sensors(*records, &num_sensors, out.data()), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(out[0].name, AMDSMI_NIC_SENSOR_NAME_ALARM_CRIT);
+  EXPECT_EQ(out[0].unit, AMDSMI_METRIC_UNIT_BOOL);
+  EXPECT_EQ(out[0].value, 1);
+}
+
 TEST_F(NicUnit, NicSensorsCopyWithoutAnArrayOnlyReportsTheCount) {
   const auto records = make_records(4);
   auto num_sensors = uint32_t{0};

@@ -27,10 +27,8 @@ _HEALTH_HEALTHY = 1
 _HEALTH_WARNING = 2
 _HEALTH_ERROR = 3
 _HEALTH_UNSUPPORTED = 4
-_TEMP_UNSUPPORTED = 0xFFFF
 _COUNT_UNSUPPORTED = 0xFFFFFFFF
 _BYTE_UNSUPPORTED = 0xFF
-_ASIC_TEMP_C = 32
 
 
 class _FakeParameterException(Exception):
@@ -39,14 +37,6 @@ class _FakeParameterException(Exception):
 
 class _FakeHandle:
     """Stands in for the ctypes amdsmi_processor_handle type."""
-
-
-class _Temperature(ctypes.Structure):
-    _fields_ = [
-        ("asic_temp_c", ctypes.c_uint16),
-        ("transceiver_temp_c", ctypes.c_uint16),
-        ("board_temp_c", ctypes.c_uint16),
-    ]
 
 
 class _Health(ctypes.Structure):
@@ -62,7 +52,7 @@ class _PortSplit(ctypes.Structure):
 
 
 class _Telemetry(ctypes.Structure):
-    _fields_ = [("temperature", _Temperature), ("health", _Health), ("port_split", _PortSplit)]
+    _fields_ = [("health", _Health), ("port_split", _PortSplit)]
 
 
 def _fake_check_res(status: int) -> None:
@@ -95,9 +85,6 @@ def _decode(state: int, error_count: int, reporter: bytes) -> Dict[str, Any]:
 
     def fake_get_nic_telemetry(handle: object, out: ctypes.pointer) -> int:
         telem = out._obj
-        telem.temperature.asic_temp_c = _ASIC_TEMP_C
-        telem.temperature.transceiver_temp_c = _TEMP_UNSUPPORTED
-        telem.temperature.board_temp_c = _TEMP_UNSUPPORTED
         telem.health.state = state
         telem.health.error_count = error_count
         telem.health.reporter = reporter
@@ -135,6 +122,10 @@ class TestNicTelemetryReporter(unittest.TestCase):
         # A UALoE endpoint registers no health reporter; the C layer leaves the name empty.
         health = _decode(_HEALTH_UNSUPPORTED, _COUNT_UNSUPPORTED, b"")["health"]
         self.assertEqual(health["reporter"], "N/A")
+
+    def test_the_result_carries_health_and_port_split_only(self) -> None:
+        # Temperatures come from the hwmon sensors; telemetry is the devlink data.
+        self.assertEqual(set(_decode(_HEALTH_HEALTHY, 0, b"fw")), {"health", "port_split"})
 
     def test_a_named_reporter_is_passed_through(self) -> None:
         health = _decode(_HEALTH_HEALTHY, 0, b"fw")["health"]

@@ -209,6 +209,7 @@ class StubAmdSubsystem : public SmiNicSubsystem {
 
  private:
   bool driver_loaded(const std::string& bdf, DriverType) const override { return bdf == bdf_; }
+  auto driver_loaded(DriverType) const -> bool override { return true; }
 
   std::string bdf_;
   std::vector<std::unique_ptr<SmiNic>> nics_;
@@ -323,14 +324,13 @@ int main() {
   check("pensando Rdma driver absent (dir not present)", !sub.driver_loaded(bdf, DriverType::Rdma));
 
   // The BDF-less overload only asks whether the vendor's driver directory exists.
-  check("pensando Main driver present without a bdf", sub.is_driver_present(DriverType::Main));
-  check("pensando Rdma driver absent without a bdf", !sub.is_driver_present(DriverType::Rdma));
+  check("pensando Main driver present without a bdf", sub.driver_loaded(DriverType::Main));
+  check("pensando Rdma driver absent without a bdf", !sub.driver_loaded(DriverType::Rdma));
   const auto empty_root = make_tmp_root();
   TmpRootGuard_t empty_root_guard(empty_root);
   SmiNicSubsystemPensando pensando_without_driver(empty_root.string());
-  check(
-      "pensando Main driver absent when no driver dir exists",
-      !static_cast<SmiNicSubsystem&>(pensando_without_driver).is_driver_present(DriverType::Main));
+  check("pensando Main driver absent when no driver dir exists",
+        !static_cast<SmiNicSubsystem&>(pensando_without_driver).driver_loaded(DriverType::Main));
 
   // A dangling entry must not hide a valid one listed after it. Directory order is
   // filesystem-defined, so pick a name for the valid link that this filesystem lists second.
@@ -406,9 +406,9 @@ int main() {
   fs::create_symlink("../../../devices/pci/" + bng_bdf, bng_dir / bng_bdf);
   check("broadcom Main driver detected for a bng_en function",
         bsub.driver_loaded(bng_bdf, DriverType::Main));
-  check("broadcom Main driver present without a bdf", bsub.is_driver_present(DriverType::Main));
+  check("broadcom Main driver present without a bdf", bsub.driver_loaded(DriverType::Main));
   check("broadcom Rdma driver absent without a bdf (no aux dir)",
-        !bsub.is_driver_present(DriverType::Rdma));
+        !bsub.driver_loaded(DriverType::Rdma));
 
   fs::path bng_disc_root = make_tmp_root();
   TmpRootGuard_t bng_disc_root_guard(bng_disc_root);
@@ -458,6 +458,60 @@ int main() {
     check("shared-function NIC is named after the first netdev by name", false);
   }
 
+  // ---- Broadcom: the functions of one PCI device are one NIC, one port per function ----
+  // The netdev names are chosen so the lowest function's name sorts last: the NIC must still be
+  // named after function 0, not after whichever netdev sorts first.
+  fs::path multi_fn_root = make_tmp_root();
+  TmpRootGuard_t multi_fn_root_guard(multi_fn_root);
+  make_fake_netdev(multi_fn_root, "zz_fn0", "0000:01:00.0", "0x14e4", "0x1780", "bng_en");
+  make_fake_netdev(multi_fn_root, "aa_fn1", "0000:01:00.1", "0x14e4", "0x1780", "bng_en");
+
+  SmiNicSubsystemBroadcom multi_fn_disc;
+  multi_fn_disc.discover((multi_fn_root / "sys/bus/pci/devices").string(),
+                         (multi_fn_root / "sys/class/net").string(), nullptr);
+  const auto& multi_fn_nics = multi_fn_disc.get_nics();
+  check("broadcom functions of one PCI device are one NIC", multi_fn_nics.size() == 1);
+  if (multi_fn_nics.size() == 1) {
+    check("multi-function NIC takes the lowest function's bdf",
+          multi_fn_nics[0]->bdf() == "0000:01:00.0");
+    check("multi-function NIC has one port per function", multi_fn_nics[0]->nic_ports_num() == 2);
+    if (multi_fn_nics[0]->nic_ports_num() == 2) {
+      const auto& multi_fn_ports = multi_fn_nics[0]->nic_ports();
+      // The order comes from SmiNic::add_nic_port, not from discovery: a contract check.
+      check("multi-function ports follow function order",
+            (multi_fn_ports[0].interface() == "zz_fn0") &&
+                (multi_fn_ports[1].interface() == "aa_fn1"));
+    }
+  } else {
+    check("multi-function NIC takes the lowest function's bdf", false);
+    check("multi-function NIC has one port per function", false);
+  }
+
+  // ---- Broadcom: a function with another device id, such as a VF, is not a port of the PF ----
+  fs::path vf_root = make_tmp_root();
+  TmpRootGuard_t vf_root_guard(vf_root);
+  make_fake_netdev(vf_root, "bnxt_pf", "0000:01:00.0", "0x14e4", "0x1760", "bnxt_en");
+  make_fake_netdev(vf_root, "bnxt_vf", "0000:01:00.1", "0x14e4", "0x1761", "bnxt_en");
+
+  SmiNicSubsystemBroadcom vf_disc;
+  vf_disc.discover((vf_root / "sys/bus/pci/devices").string(), (vf_root / "sys/class/net").string(),
+                   nullptr);
+  check("broadcom functions with different device ids are separate NICs",
+        vf_disc.get_nics().size() == 2);
+
+  // ---- Broadcom: different PCI devices, or different domains, stay separate NICs ----
+  fs::path split_root = make_tmp_root();
+  TmpRootGuard_t split_root_guard(split_root);
+  make_fake_netdev(split_root, "bnxt_a", "0000:01:00.0", "0x14e4", "0x1760", "bnxt_en");
+  make_fake_netdev(split_root, "bnxt_b", "0000:01:01.0", "0x14e4", "0x1760", "bnxt_en");
+  make_fake_netdev(split_root, "bnxt_c", "0001:01:00.0", "0x14e4", "0x1760", "bnxt_en");
+
+  SmiNicSubsystemBroadcom split_disc;
+  split_disc.discover((split_root / "sys/bus/pci/devices").string(),
+                      (split_root / "sys/class/net").string(), nullptr);
+  check("broadcom functions on different devices or domains are separate NICs",
+        split_disc.get_nics().size() == 3);
+
   // ---- Broadcom Rdma positive: an aux-driver symlink whose resolved target
   //      passes through /<bdf>/ exercises the is_canonical_match=true branch of
   //      the shared is_driver_bound_to_bdf helper (its most intricate path). ----
@@ -493,16 +547,16 @@ int main() {
   check("bng_re.rdma absent for other bdf",
         !bng_rdma_sub.driver_loaded("0000:01:00.1", DriverType::Rdma));
   check("broadcom Rdma driver present without a bdf for bng_re.rdma",
-        bng_rdma_sub.is_driver_present(DriverType::Rdma));
+        bng_rdma_sub.driver_loaded(DriverType::Rdma));
   check("broadcom Main driver absent without a bdf when only the aux driver exists",
-        !bng_rdma_sub.is_driver_present(DriverType::Main));
+        !bng_rdma_sub.driver_loaded(DriverType::Main));
 
   // ---- smi_nic_driver_loaded(): the vendor-level answer, read from the real /sys ----
   check("an unknown vendor is a bad parameter",
         smi_nic_driver_loaded(SMI_NIC_VENDOR_UNKNOWN) == SMI_NIC_STATUS_WRONG_PARAM);
   const auto expected_status = [](const SmiNicSubsystem& plugin) {
-    return (plugin.is_driver_present(DriverType::Main) ? SMI_NIC_STATUS_SUCCESS
-                                                       : SMI_NIC_STATUS_DRIVER_NOT_LOADED);
+    return (plugin.driver_loaded(DriverType::Main) ? SMI_NIC_STATUS_SUCCESS
+                                                   : SMI_NIC_STATUS_DRIVER_NOT_LOADED);
   };
   const auto real_pensando = SmiNicSubsystemPensando{};
   const auto real_broadcom = SmiNicSubsystemBroadcom{};
@@ -807,6 +861,15 @@ int main() {
           !ualoe_sub.driver_loaded("0001:01:00.0", DriverType::Main));
     check("ualoe Rdma driver absent (no rdma aux driver)",
           !ualoe_sub.driver_loaded(ualoe_bdf, DriverType::Rdma));
+    // The BDF-less overload backs smi_nic_driver_loaded(): an ifoe-only system must count as
+    // loaded.
+    check("ualoe Main driver present without a bdf", ualoe_sub.driver_loaded(DriverType::Main));
+    check("ualoe Rdma driver absent without a bdf", !ualoe_sub.driver_loaded(DriverType::Rdma));
+    const auto ualoe_empty_root = make_tmp_root();
+    TmpRootGuard_t ualoe_empty_root_guard(ualoe_empty_root);
+    SmiNicSubsystemUALoE ualoe_without_driver(ualoe_empty_root.string());
+    check("ualoe Main driver absent when no ifoe dir exists",
+          !static_cast<SmiNicSubsystem&>(ualoe_without_driver).driver_loaded(DriverType::Main));
   }
 
   // ---- hwmon resolves through the port, not the bridge ----

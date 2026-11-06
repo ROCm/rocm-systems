@@ -17,7 +17,7 @@ namespace amd::smi::nic::hwmon {
  * does not need amdsmi.h.
  */
 enum class Category_t : uint32_t { Temperature = 3, Power = 4, Voltage = 14 };
-enum class Unit_t : uint32_t { MilliVolt = 5, MilliDegreeCelsius = 15, MicroWatt = 16 };
+enum class Unit_t : uint32_t { Bool = 2, MilliVolt = 5, MilliDegreeCelsius = 15, MicroWatt = 16 };
 enum class Attribute_t : uint32_t {
   Input = 1,
   Min = 2,
@@ -27,6 +27,13 @@ enum class Attribute_t : uint32_t {
   Emergency = 6,
   Shutdown = 7,
   Cap = 8,
+  AlarmMin = 9,
+  AlarmMax = 10,
+  AlarmLCrit = 11,
+  AlarmCrit = 12,
+  AlarmEmergency = 13,
+  AlarmShutdown = 14,
+  AlarmCap = 15,
 };
 
 /** One readable hwmon attribute file; `value` is the raw integer in `unit`. */

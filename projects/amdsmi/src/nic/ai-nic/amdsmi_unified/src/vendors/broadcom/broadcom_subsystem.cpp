@@ -5,11 +5,13 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <map>
 #include <memory>
 #include <string>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -24,12 +26,20 @@ constexpr std::array<const char*, 2> kBroadcomMainDrivers = {"bnxt_en", "bng_en"
 constexpr std::array<const char*, 2> kBroadcomRdmaAuxDrivers = {"bnxt_re.rdma", "bng_re.rdma"};
 
 // A netdev bound to a Broadcom function, held until every netdev is known so they group by
-// function.
+// PCI device.
 struct Netdev_t {
   std::string iface;
   std::string bdf;
   std::string class_path;
+  uint16_t device_id;
 };
+
+constexpr auto kPciFunctionSeparator = '.';
+
+// The domain:bus:device part of a BDF. The functions of one multi-port card share it.
+auto pci_device_of(const std::string& bdf) -> std::string {
+  return bdf.substr(0, bdf.rfind(kPciFunctionSeparator));
+}
 }  // namespace
 
 NicVendor SmiNicSubsystemBroadcom::vendor() const { return NicVendor::Broadcom; }
@@ -53,7 +63,7 @@ bool SmiNicSubsystemBroadcom::driver_loaded(const std::string& bdf, DriverType d
   }
 }
 
-auto SmiNicSubsystemBroadcom::is_driver_present(DriverType driver_type) const -> bool {
+auto SmiNicSubsystemBroadcom::driver_loaded(DriverType driver_type) const -> bool {
   const auto is_any_present = [&](const auto& drivers, const std::string& drivers_dir) {
     return std::any_of(drivers.begin(), drivers.end(), [&](const char* driver) {
       return is_directory_present(driver_sysfs_root_ + drivers_dir + driver);
@@ -93,33 +103,37 @@ void SmiNicSubsystemBroadcom::discover(
 
     const std::string sysfs_bus_path = pci_path + "/" + bdf;
     // Broadcom spans many device ids; vendor + driver bind identify it.
-    [[maybe_unused]] auto [vendor_id, device_id] = read_pci_ids(sysfs_bus_path);
+    const auto [vendor_id, device_id] = read_pci_ids(sysfs_bus_path);
     if ((vendor_id != VENDOR_ID) || !is_bound_to_broadcom_main_driver(sysfs_bus_path)) {
       continue;
     }
 
-    netdevs.push_back({iface, bdf, it->path().string()});
+    netdevs.push_back({iface, bdf, it->path().string(), device_id});
   }
 
-  // Directory order is unspecified; sorting by name makes the netdev that names the NIC stable.
-  std::sort(netdevs.begin(), netdevs.end(),
-            [](const Netdev_t& lhs, const Netdev_t& rhs) { return (lhs.iface < rhs.iface); });
+  // Directory order is unspecified. The lowest function's first netdev becomes the NIC's identity;
+  // SmiNic::add_nic_port orders the ports itself.
+  std::sort(netdevs.begin(), netdevs.end(), [](const Netdev_t& lhs, const Netdev_t& rhs) {
+    return (std::tie(lhs.bdf, lhs.iface) < std::tie(rhs.bdf, rhs.iface));
+  });
 
-  // A function can expose several netdevs (a PF with switchdev representors); they are ports of
-  // one NIC, not NICs that share a BDF.
-  auto nic_by_bdf = std::map<std::string, SmiNic*>{};
+  // The functions of one PCI device are one multi-port card, and one function can also expose
+  // several netdevs (a PF with switchdev representors). Both are ports of one NIC. A function with
+  // another device id (a VF) is its own NIC.
+  auto nic_by_device = std::map<std::pair<std::string, uint16_t>, SmiNic*>{};
   for (const auto& netdev : netdevs) {
     const auto sysfs_bus_path = pci_path + "/" + netdev.bdf;
     auto port = SmiNicPort{netdev.iface,   netdev.bdf, netdev.class_path,
                            sysfs_bus_path, transport,  &kBroadcomStatTable};
     port.discover_infiniband();
 
-    auto found = nic_by_bdf.find(netdev.bdf);
-    if (found == nic_by_bdf.end()) {
+    const auto device = std::make_pair(pci_device_of(netdev.bdf), netdev.device_id);
+    auto found = nic_by_device.find(device);
+    if (found == nic_by_device.end()) {
       auto nic =
           std::make_unique<SmiNic>(netdev.iface, netdev.bdf, NicType::Ethernet, netdev.class_path,
                                    sysfs_bus_path, NicVendor::Broadcom, NicProduct::Unknown);
-      found = nic_by_bdf.emplace(netdev.bdf, nic.get()).first;
+      found = nic_by_device.emplace(device, nic.get()).first;
       nics_.push_back(std::move(nic));
     }
     found->second->add_nic_port(port);

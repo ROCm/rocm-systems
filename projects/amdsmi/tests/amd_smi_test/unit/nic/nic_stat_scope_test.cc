@@ -24,8 +24,8 @@ TEST_F(NicUnit, StatScopeEnumValuesAreStable) {
 }
 
 TEST_F(NicUnit, StatScopeIsAnArgumentOfTheScopedGetter) {
-  using ScopedSignature_t = amdsmi_status_t (*)(
-      amdsmi_processor_handle, uint32_t, amdsmi_nic_stat_scope_t, uint32_t*, amdsmi_nic_stat_t*);
+  using ScopedSignature_t = amdsmi_status_t (*)(amdsmi_processor_handle, uint32_t, uint32_t*,
+                                                amdsmi_nic_stat_t*, amdsmi_nic_stat_scope_t);
 
   EXPECT_TRUE(
       (std::is_same_v<decltype(&amdsmi_get_nic_vendor_statistics_with_scope), ScopedSignature_t>));

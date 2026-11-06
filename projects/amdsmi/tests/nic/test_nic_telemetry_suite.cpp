@@ -698,6 +698,7 @@ class OneNicSubsystem : public SmiNicSubsystem {
                 std::shared_ptr<tp::NicTransport>) override {}
   NicVendor vendor() const override { return NicVendor::AMD; }
   bool driver_loaded(const std::string&, DriverType) const override { return true; }
+  auto driver_loaded(DriverType) const -> bool override { return true; }
   const std::vector<std::unique_ptr<SmiNic>>& get_nics() const override { return m_nics; }
   void add(std::unique_ptr<SmiNic> nic) { m_nics.push_back(std::move(nic)); }
 
@@ -941,7 +942,7 @@ static void test_hwmon_scan_ionic_layout() {
 }
 
 // File set of a bnxt_en hwmon node as listed on b20-31.
-static void test_hwmon_scan_bnxt_layout_reports_shutdown() {
+static void test_hwmon_scan_bnxt_layout_reports_shutdown_and_alarms() {
   std::cout << "\nHwmon scan: bnxt node with shutdown threshold and alarm files\n";
   write_sysfs_file("scan_bnxt/hwmon0/temp1_input", "37000\n");
   write_sysfs_file("scan_bnxt/hwmon0/temp1_max", "95000\n");
@@ -949,13 +950,27 @@ static void test_hwmon_scan_bnxt_layout_reports_shutdown() {
   write_sysfs_file("scan_bnxt/hwmon0/temp1_emergency", "105000\n");
   write_sysfs_file("scan_bnxt/hwmon0/temp1_shutdown", "115000\n");
   write_sysfs_file("scan_bnxt/hwmon0/temp1_max_alarm", "0\n");
-  write_sysfs_file("scan_bnxt/hwmon0/temp1_crit_alarm", "0\n");
+  write_sysfs_file("scan_bnxt/hwmon0/temp1_crit_alarm", "1\n");
   write_sysfs_file("scan_bnxt/hwmon0/temp1_emergency_alarm", "0\n");
   write_sysfs_file("scan_bnxt/hwmon0/temp1_shutdown_alarm", "0\n");
   const auto records = hw::scan_sensors(g_tmpdir + "/scan_bnxt");
 
-  check("input, max, crit, emergency and shutdown; alarms skipped", records.size() == 5,
+  check("five thresholds and four alarms", records.size() == 9,
         "got " + std::to_string(records.size()));
+  const auto find_alarm = [&records](hw::Attribute_t attribute) {
+    return std::find_if(records.begin(), records.end(), [attribute](const hw::SensorRecord_t& rec) {
+      return (rec.attribute == attribute);
+    });
+  };
+  const auto crit_alarm = find_alarm(hw::Attribute_t::AlarmCrit);
+  check("crit alarm carries its value", (crit_alarm != records.end()) && (crit_alarm->value == 1));
+  check("crit alarm unit is boolean",
+        (crit_alarm != records.end()) && (crit_alarm->unit == hw::Unit_t::Bool));
+  const auto max_alarm = find_alarm(hw::Attribute_t::AlarmMax);
+  check("a clear alarm reads zero", (max_alarm != records.end()) && (max_alarm->value == 0));
+  check("emergency and shutdown alarms are reported",
+        (find_alarm(hw::Attribute_t::AlarmEmergency) != records.end()) &&
+            (find_alarm(hw::Attribute_t::AlarmShutdown) != records.end()));
   const auto has_shutdown =
       std::any_of(records.begin(), records.end(), [](const hw::SensorRecord_t& record) {
         return ((record.attribute == hw::Attribute_t::Shutdown) && (record.value == 115000));
@@ -996,9 +1011,11 @@ static void test_hwmon_scan_skips_unreadable_and_unknown_files() {
   write_sysfs_file("scan_skip/hwmon0/name", "x\n");
   const auto records = hw::scan_sensors(g_tmpdir + "/scan_skip");
 
-  check("only the readable crit threshold remains", records.size() == 1,
+  check("the crit threshold and the max alarm remain", records.size() == 2,
         "got " + std::to_string(records.size()));
-  check("it is temp1 crit", !records.empty() && (records[0].attribute == hw::Attribute_t::Crit));
+  check("they are temp1 crit and temp1 max alarm",
+        (records.size() == 2) && (records[0].attribute == hw::Attribute_t::Crit) &&
+            (records[1].attribute == hw::Attribute_t::AlarmMax));
 }
 
 static void test_hwmon_scan_negative_and_wide_values() {
@@ -1142,7 +1159,7 @@ int main() {
   test_snapshot_mixed();
   test_snapshot_all_unsupported();
   test_hwmon_scan_ionic_layout();
-  test_hwmon_scan_bnxt_layout_reports_shutdown();
+  test_hwmon_scan_bnxt_layout_reports_shutdown_and_alarms();
   test_hwmon_scan_two_instances_stay_distinct();
   test_hwmon_scan_missing_label_is_empty();
   test_hwmon_scan_skips_unreadable_and_unknown_files();

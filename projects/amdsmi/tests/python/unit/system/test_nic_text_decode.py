@@ -121,7 +121,9 @@ def _stats_getter(function_name: str) -> Any:
         amdsmi_processor_handle=_FakeHandle,
         amdsmi_nic_stat_t=_Stat,
         AMDSMI_NIC_STAT_SCOPE_DEFAULT=0,
-        amdsmi_get_nic_vendor_statistics_with_scope=fake_get_stats,
+        amdsmi_get_nic_vendor_statistics_with_scope=lambda handle, index, num_stats, stats, scope: (
+            fake_get_stats(handle, index, num_stats, stats)
+        ),
         **{function_name: fake_get_stats},
     )
     return _load([function_name], wrapper)[function_name]

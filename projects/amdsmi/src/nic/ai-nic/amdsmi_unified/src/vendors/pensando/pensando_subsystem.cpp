@@ -62,7 +62,7 @@ bool SmiNicSubsystemPensando::driver_loaded(const std::string& bdf, DriverType d
   }
 }
 
-auto SmiNicSubsystemPensando::is_driver_present(DriverType driver_type) const -> bool {
+auto SmiNicSubsystemPensando::driver_loaded(DriverType driver_type) const -> bool {
   switch (driver_type) {
     case DriverType::Main:
       return is_directory_present(driver_sysfs_root_ + kPciDriversDir + kIonicDriverName);
