@@ -144,7 +144,9 @@ namespace RcclUnitTesting
     {
       DeviceFp8Codec<IsE5m2> const codec;
       for (intptr_t i = (intptr_t)blockIdx.x * blockDim.x + threadIdx.x; i < eltN; i += (intptr_t)gridDim.x * blockDim.x)
+      {
         elts[i] = GenerateElt(codec, IsE5m2, redOp, rankN, rankMe, seed, eltIx0 + i);
+      }
     }
 
     template <bool IsE5m2>
@@ -154,7 +156,9 @@ namespace RcclUnitTesting
       DeviceFp8Codec<IsE5m2> const codec;
       unsigned long long bad = 0;
       for (intptr_t i = (intptr_t)blockIdx.x * blockDim.x + threadIdx.x; i < eltN; i += (intptr_t)gridDim.x * blockDim.x)
+      {
         bad += IsBadElt(codec, IsE5m2, results[i], redOp, rankN, seed, eltIx0 + i, tolerance) ? 1 : 0;
+      }
       atomicAdd((unsigned long long*)badEltN, bad);
     }
 
@@ -173,12 +177,9 @@ namespace RcclUnitTesting
     // because rccl-UnitTestsMPI builds this file without PtrUnion.cpp.
     bool UseDeviceKernels()
     {
-      static bool const requested = [] {
-        char const* e = getenv("UT_DEVICE_DATA");
-        return !(e && e[0] == '0');
-      }();
       static KernelLoadCache kernels;
-      return requested && kernels.Loadable(reinterpret_cast<void const*>(&GenerateKernel<false>), "Verifiable FP8");
+      return UtDeviceDataRequested() &&
+             kernels.Loadable(reinterpret_cast<void const*>(&GenerateKernel<false>), "Verifiable FP8");
     }
 
     // Host mirror of rcclFp8DeviceIsFnuz (archinfo.h), whose IsArchMatch librccl does not export
@@ -192,7 +193,9 @@ namespace RcclUnitTesting
         return true;
       }
       for (char const* ocpArch : {"gfx950", "gfx1200", "gfx1201", "gfx1250"})
+      {
         if (strncmp(prop.gcnArchName, ocpArch, strlen(ocpArch)) == 0) return false;
+      }
       return true;
     }
 
@@ -213,7 +216,9 @@ namespace RcclUnitTesting
       HostFp8Codec const codec{isE5m2, CurrentDeviceIsFnuz()};
       std::vector<uint8_t> host(eltN);
       for (intptr_t i = 0; i < eltN; ++i)
+      {
         host[i] = GenerateElt(codec, isE5m2, (int)redOp, rankN, rankMe, seed, eltIx0 + i);
+      }
       hipError_t err = hipMemcpyAsync(elts, host.data(), eltN, hipMemcpyHostToDevice, stream);
       if (err == hipSuccess) err = hipStreamSynchronize(stream);
       return err;
@@ -260,7 +265,9 @@ namespace RcclUnitTesting
     HostFp8Codec const codec{isE5m2, CurrentDeviceIsFnuz()};
     int64_t bad = 0;
     for (intptr_t i = 0; i < eltN; ++i)
+    {
       bad += IsBadElt(codec, isE5m2, host[i], (int)redOp, rankN, seed, eltIx0 + i, tolerance) ? 1 : 0;
+    }
     *badEltN = bad;
     return hipSuccess;
   }

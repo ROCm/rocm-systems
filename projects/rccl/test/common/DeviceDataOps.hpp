@@ -20,6 +20,7 @@
 // host `long double` bytes. Host mode is unchanged.
 
 #include <hip/hip_runtime.h>
+#include <cstdlib>
 #include <map>
 #include <mutex>
 #include <type_traits>
@@ -28,12 +29,18 @@
 namespace RcclUnitTesting
 {
   // ---- device code availability ----------------------------------------------
-  // The test binary can lack loadable device code for the GPU it runs on, e.g. a multi-arch
-  // package installed without this arch's code objects. Its own kernel launches then fail
-  // with "invalid kernel file" or "invalid device function" even though librccl works.
-  // hipFuncGetAttributes loads the code object holding a kernel without launching it, so it
-  // reports the same failure up front. Each source file has its own code object, so each
-  // keeps its own cache and probes one of its own kernels. The answer is cached per device.
+  // Whether UT_DEVICE_DATA asks for the device kernels (on unless set to 0). Read once per process.
+  inline bool UtDeviceDataRequested()
+  {
+    static bool const requested = [] {
+      char const* e = getenv("UT_DEVICE_DATA");
+      return !(e && e[0] == '0');
+    }();
+    return requested;
+  }
+
+  // Whether the caller's kernels can load on the current GPU (a multi-arch package can lack this
+  // arch's code object). hipFuncGetAttributes checks without launching; cached per device.
   class KernelLoadCache
   {
   public:
