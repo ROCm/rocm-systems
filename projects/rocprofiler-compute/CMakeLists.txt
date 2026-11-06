@@ -1119,6 +1119,15 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_analysis_config_collectables
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_analysis_config_collectables.xml ${COV_OPTION}
+        tests/unit/rocprof_compute_soc/test_analysis_config_collectables.py
+        ${WORKING_DIR_OPTION}
+)
+
 # -----------------------------------
 # TTY table rendering unit tests
 # -----------------------------------
@@ -1288,6 +1297,7 @@ if(${ENABLE_COVERAGE})
         test_weighted_avg
         test_collectable
         test_counter_grouping_buckets
+        test_analysis_config_collectables
         test_tty
         test_file_io
         test_utils_profile_csv

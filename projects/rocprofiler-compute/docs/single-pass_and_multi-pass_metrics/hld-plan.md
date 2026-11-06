@@ -186,6 +186,8 @@ value: COLLECT_SUM(hbm_read_sub, hbm_write_sub)
 
 Runtime Python generation of these parents was considered and is not a runtime path; explicit YAML is the only runtime source of truth.
 
+Each part is defined once per architecture, in `analysis_configs/<arch>/collectables.yaml`, under its collectable id. Panel YAMLs keep only the parents, which name parts as `_collect.<name>` in `COLLECT_SUM`, `COLLECT_RATIO`, `MIN`, and `MAX`. When a panel is read, the loader appends each part the table names as a `_collect.<name>` row, after the table's own metrics and in first-reference order. The row stores its formula under the `value` or `avg` key that the table header uses. Loaded tables, counter packing, and visible metrics are the same as when every table carried its own copy of the rows.
+
 gfx942 has **16** multi-pass metrics and **10** unique PMC sets. Some metrics appear in more than one panel and share a set. Each part is single-pass. Under the rule above:
 
 | Unique set | Parent | Result |

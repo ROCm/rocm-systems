@@ -29,6 +29,7 @@ from utils.metrics.expression import (
 from utils.metrics.pass_provenance import METRIC_ROW_PASS_ATTR
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.parser import build_dfs
+from utils.utils_common import load_collectable_formulas, load_panel_file
 from vendored import yaml
 
 _GFX942 = (
@@ -160,9 +161,10 @@ def test_gfx942_ai_hbm_is_collect_ratio():
 
 @pytest.mark.misc
 def test_eval_valu_flops_collect_sum_on_gfx942_sol():
-    panel = yaml.safe_load((_GFX942 / "0200_system_speed_of_light.yaml").read_text())[
-        "Panel Config"
-    ]
+    panel = load_panel_file(
+        _GFX942 / "0200_system_speed_of_light.yaml",
+        load_collectable_formulas(_GFX942),
+    )["Panel Config"]
     ac = schema.ArchConfig()
     ac.panel_configs = OrderedDict([(200, panel)])
     sys_info = _sys_info()
@@ -204,7 +206,9 @@ def test_eval_valu_flops_collect_sum_on_gfx942_sol():
 
 @pytest.mark.misc
 def test_gfx950_hbm_bandwidth_is_collect_sum():
-    doc = yaml.safe_load((_GFX950 / "0400_roofline.yaml").read_text(encoding="utf-8"))
+    doc = load_panel_file(
+        _GFX950 / "0400_roofline.yaml", load_collectable_formulas(_GFX950)
+    )
     metrics = doc["Panel Config"]["data source"][0]["metric_table"]["metric"]
     hbm = metrics["HBM Bandwidth"]
     assert is_composite_avg_formula(hbm["value"])

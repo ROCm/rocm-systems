@@ -23,6 +23,7 @@ from typing import (
     Any,
     Dict,
     Generator,
+    Iterable,
     Iterator,
     List,
     Mapping,
@@ -66,6 +67,9 @@ DESCRIPTION_WIDTH_MIN = 40
 INVALID_BLOCK_HINT = (
     "\n\tRun rocprof-compute --list-metrics to see all block ids/aliases."
 )
+# Per-arch file of collectable formulas, read alongside the panel YAMLs
+COLLECTABLES_FILENAME = "collectables.yaml"
+COLLECTABLE_REF_RE = re.compile(r"_collect\.([A-Za-z0-9_]+)")
 
 
 def is_gfx9(gpu_arch: Optional[str]) -> bool:
@@ -687,22 +691,107 @@ def load_panel_configs(
     """
     configs: dict[int, dict[str, Any]] = {}
     for dir_path in dirs:
-        for yaml_file in Path(dir_path).glob("*.yaml"):
-            with open(yaml_file, encoding="utf-8") as file:
-                config_yml = yaml.safe_load(file)
-                # metric key can be None due to some metric-
-                # tables not having any metrics
-                # metric key should be empty dict instead of None
-                panel_config = config_yml["Panel Config"]
-                for data_source in panel_config["data source"]:
-                    metric_table = data_source.get("metric_table")
-                    if metric_table and metric_table.get("metric") is None:
-                        metric_table["metric"] = {}
-                configs[panel_config["id"]] = panel_config
+        collectable_formulas = load_collectable_formulas(Path(dir_path))
+        for yaml_file in panel_config_paths(Path(dir_path)):
+            config_yml = load_panel_file(yaml_file, collectable_formulas)
+            # metric key can be None due to some metric-
+            # tables not having any metrics
+            # metric key should be empty dict instead of None
+            panel_config = config_yml["Panel Config"]
+            for data_source in panel_config["data source"]:
+                metric_table = data_source.get("metric_table")
+                if metric_table and metric_table.get("metric") is None:
+                    metric_table["metric"] = {}
+            configs[panel_config["id"]] = panel_config
 
     # TODO: sort metrics as the header order in case they-
     # are not defined in the same order
     return OrderedDict(sorted(configs.items()))
+
+
+def panel_config_paths(config_dir: Path) -> List[Path]:
+    """Panel YAML files of one arch config directory, without the collectables
+    file."""
+    return sorted(
+        path for path in config_dir.glob("*.yaml") if path.name != COLLECTABLES_FILENAME
+    )
+
+
+def load_collectable_formulas(config_dir: Path) -> Dict[str, str]:
+    """Formula of each collectable id in config_dir's collectables file.
+
+    Empty when the directory has no collectables file.
+    """
+    collectables_path = config_dir / COLLECTABLES_FILENAME
+    if not collectables_path.is_file():
+        return {}
+    with open(collectables_path, encoding="utf-8") as stream:
+        document = yaml.safe_load(stream) or {}
+    return _formulas_by_collectable_id(document)
+
+
+def load_panel_file(
+    panel_path: Path, collectable_formulas: Mapping[str, str]
+) -> Dict[str, Any]:
+    """Read one panel YAML with the collectable rows its tables reference."""
+    with open(panel_path, encoding="utf-8") as stream:
+        document = yaml.safe_load(stream)
+    attach_collectables(document["Panel Config"], collectable_formulas)
+    return document
+
+
+def attach_collectables(
+    panel_config: Dict[str, Any], collectable_formulas: Mapping[str, str]
+) -> None:
+    """Append to each metric_table the _collect rows its metrics reference.
+
+    Rows follow the order of first reference, after the table's own metrics.
+    Each row stores its formula under the table header's value or avg key,
+    and keeps its _collectable_id. A row already in the table, or a reference
+    with no formula, is left as it is.
+    """
+    for data_source in panel_config["data source"]:
+        table = data_source.get("metric_table")
+        if table and table.get("metric"):
+            _append_collectable_rows(table, collectable_formulas)
+
+
+def _formulas_by_collectable_id(document: Dict[str, Any]) -> Dict[str, str]:
+    """Map each collectable id in a collectables document to its formula."""
+    return {
+        definition["id"]: definition["formula"]
+        for definition in (document.get("collectables") or {}).values()
+    }
+
+
+def _append_collectable_rows(
+    table: Dict[str, Any], collectable_formulas: Mapping[str, str]
+) -> None:
+    """Append the _collect rows that table's metrics reference."""
+    header = table.get("header") or {}
+    expression_key = next((key for key in ("value", "avg") if key in header), "value")
+    metrics = table["metric"]
+    for name in _referenced_collectable_names(metrics.values()):
+        row_name = f"_collect.{name}"
+        collectable_id = f"collect.{name}"
+        if row_name in metrics or collectable_id not in collectable_formulas:
+            continue
+        metrics[row_name] = {
+            expression_key: collectable_formulas[collectable_id],
+            "_collectable_id": collectable_id,
+        }
+
+
+def _referenced_collectable_names(metrics: Iterable[Any]) -> List[str]:
+    """Collectable names that metrics reference, in first-reference order."""
+    names: List[str] = []
+    for metric in metrics:
+        if not isinstance(metric, dict):
+            continue
+        for text in metric.values():
+            if isinstance(text, str):
+                names.extend(COLLECTABLE_REF_RE.findall(text))
+    return list(dict.fromkeys(names))
 
 
 def expand_placeholder_ranges(
