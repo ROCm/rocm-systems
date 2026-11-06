@@ -22,8 +22,8 @@
 #include <vector>
 
 #include "ScopedHook.h"
-#include "../common/ScopedEnv.hpp"
-#include "../common/TopoRailPlane.hpp"
+#include "../../common/ScopedEnv.hpp"
+#include "../../common/TopoRailPlane.hpp"
 
 // Pulls in src/graph/topo.cc -- the code under test -- along with its fakes and
 // TopoScene.h, and carries the single definition of TopoSetNetDevsPolicy.
