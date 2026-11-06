@@ -359,8 +359,12 @@ class VirtualGPU : public device::VirtualDevice {
 
     //! Starts a use of the current slot's signal at init_val. blocking_callback means the value
     //! stays above 0 after the packet retires.
-    virtual void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val,
-                          uint64_t aql_slot, bool barrier_bit, bool blocking_callback) = 0;
+    void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
+                  bool barrier_bit, bool blocking_callback);
+
+    //! The tracker's part of BeginUse: sets the value for the use and records it
+    virtual void ArmForUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
+                           bool barrier_bit, bool blocking_callback) = 0;
 
     //! Registers the async handler that processes ts once the signal drops below init_value
     virtual hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
@@ -395,8 +399,8 @@ class VirtualGPU : public device::VirtualDevice {
 
    private:
     void AcquireSlot() override;
-    void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
-                  bool barrier_bit, bool blocking_callback) override;
+    void ArmForUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
+                   bool barrier_bit, bool blocking_callback) override;
     hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
                                  hsa_signal_value_t init_value) override;
     bool IsBusy(const ProfilingSignal* signal) const override;
@@ -427,8 +431,8 @@ class VirtualGPU : public device::VirtualDevice {
     void PlaceForUse(bool timing_only) override;
     //! Advances current_id_ to an armed slot
     void AcquireSlot() override;
-    void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
-                  bool barrier_bit, bool blocking_callback) override;
+    void ArmForUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
+                   bool barrier_bit, bool blocking_callback) override;
     hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
                                  hsa_signal_value_t init_value) override;
     bool IsBusy(const ProfilingSignal* signal) const override;
@@ -958,6 +962,9 @@ class VirtualGPU : public device::VirtualDevice {
                                   hsa_signal_condition32_t cond = HSA_SIGNAL_CONDITION_EQ,
                                   bool skipTs = false,
                                   hsa_signal_t completionSignal = hsa_signal_t{0});
+  //! True if a barrier of the current command needs timestamps: a timed event record, or a
+  //! command created under queue or activity profiling
+  bool BarrierTimestamps() const;
   void initializeDispatchPacket(hsa_kernel_dispatch_packet_t* packet, amd::NDRangeContainer& sizes);
 
   //! Write an AQL packet to the ring buffer with metadata prefetch.

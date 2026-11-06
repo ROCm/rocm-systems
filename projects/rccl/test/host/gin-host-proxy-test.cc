@@ -1207,6 +1207,45 @@ TEST_F(GinHostProxyProgressMicrotest, PollBatch_BoundsGfdsPerPeerPerCall) {
   EXPECT_EQ(0u, rma_.ops[3].rank);
 }
 
+TEST_F(GinHostProxyProgressMicrotest, PollBatch_HintReachesSignalGetAndVaSignalOps) {
+  ncclGinProxyGfd_t signal = PutGfd(ncclGinProxyOpWithSignalInc, 8);
+  SetSignal(signal, /*signalId=*/1, 1, /*strong=*/false);
+  ncclGinProxyGfd_t get = PutGfd(0, 8);
+  get.qword[ncclGinProxyGfdHeaderExt].headerExt.op = ncclGinProxyOpGet;
+  ncclGinProxyGfd_t vaSignal = Gfd(ncclGinProxyOpVASignal | ncclGinProxyOpWithSignalAdd);
+  SetSignal(vaSignal, 0, 1, /*strong=*/false);
+  Post(0, 0, signal);
+  Post(0, 0, get);
+  Post(0, 0, vaSignal);
+  Post(0, 0, PutGfd(0, 8));
+  ASSERT_EQ(ncclSuccess, Progress());
+  ASSERT_EQ(4u, rma_.ops.size());
+  const char kinds[] = {'s', 'g', 's', 'p'};
+  for (int i = 0; i < 4; i++) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(kinds[i], rma_.ops[i].kind);
+    EXPECT_EQ(i < 3 ? (uint32_t)ncclRmaOptFlagsAggregateRequests : (uint32_t)ncclRmaOptFlagsDefault,
+              rma_.ops[i].optFlags);
+  }
+}
+
+// iflush takes no optFlags, so a backend holding hinted requests must submit them when the flush arrives.
+TEST_F(GinHostProxyProgressMicrotest, PollBatch_FlushEndsAHintedRun) {
+  rma_.flushReturnsNullRequest = true;
+  Post(0, 0, PutGfd(0, 8));
+  Post(0, 0, PutGfd(0, 8));
+  Post(0, 0, Gfd(ncclGinProxyOpFlush));
+  ASSERT_EQ(ncclSuccess, Progress());
+  ASSERT_EQ(3u, rma_.ops.size());
+  EXPECT_EQ('p', rma_.ops[0].kind);
+  EXPECT_EQ((uint32_t)ncclRmaOptFlagsAggregateRequests, rma_.ops[0].optFlags);
+  EXPECT_EQ('p', rma_.ops[1].kind);
+  EXPECT_EQ((uint32_t)ncclRmaOptFlagsAggregateRequests, rma_.ops[1].optFlags);
+  EXPECT_EQ('f', rma_.ops[2].kind);
+  ASSERT_EQ(ncclSuccess, Progress());
+  EXPECT_EQ(2u, rma_.tested.size()) << "only the two puts have requests to test";
+}
+
 TEST_F(GinHostProxyProgressMicrotest, Progress_PluginWithoutRmaProgressIsSkipped) {
   rma_.vtable.rmaProgress = nullptr;
   EXPECT_EQ(ncclSuccess, Progress());

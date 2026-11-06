@@ -43,6 +43,10 @@ every capture is a contents capture.
 
 ## What an archive contains
 
+A `hipExtModuleLaunchKernel` also stores the start and stop events the runtime
+marked internally. Those appear as `hipEventRecord` calls the application did
+not make.
+
 | Item | Where | Mode | Removed or reduced by |
 |---|---|---|---|
 | Sequence of successful HIP calls, with sizes, flags, device addresses, handles, thread ids | `events.bin` | both | — kept, replay needs it |

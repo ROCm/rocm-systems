@@ -67,11 +67,22 @@ ordinary loads, image samples and BVH results share VMcnt but keep separate
 classes. A newer result supersedes a fully covered older dependency only within
 the same ordered class; other classes and unordered results remain tracked.
 
-On RDNA3, RDNA3.5, RDNA4 and CDNA5, incoming LDS-routed FLAT results can
-overwrite pending indexed LDS or FLAT LDS results in issue order. This exemption
-is specific to the runtime checker and its resolved routing; static FLAT checks
-and incoming native indexed LDS overwrites remain conservative here. Global-routed
-lanes keep their separate VMEM rules. RDNA1/2 and older CDNA FLAT remain unqualified.
+Indexed LDS results are written to registers in issue order on every target, so
+an incoming indexed LDS load does not need a wait before overwriting a pending
+indexed LDS result in both the runtime and static checkers. RDNA3/3.5 section
+12.5, RDNA4 sections 5.7.1.4 and 12.5, and CDNA5 sections 5.7.1.4 and 11.2 state
+this directly; CDNA1-4 and RDNA1/2 section 4.4 order LGKM results of the same
+type. GDS and SMEM results have no ordered class and still require a wait.
+
+On RDNA3, RDNA3.5, RDNA4 and CDNA5, FLAT's LDS-serviced lanes share that order:
+incoming LDS-routed FLAT lanes and incoming indexed LDS loads can overwrite
+pending indexed LDS or FLAT LDS results in issue order. This exemption is
+specific to the runtime checker and its resolved routing (see
+[FLAT register readiness](#flat-register-readiness)); static FLAT checks remain
+conservative. Global-routed lanes keep their separate VMEM rules. On RDNA1/2 and
+CDNA1-4, overwriting FLAT LDS results still requires a wait. RDNA1/2 FLAT LDS
+results still retire with indexed LDS on partial waits, as LLVM treats FLAT
+counters as in order from GFX10 on.
 
 RDNA3/3.5's FLAT ordering section places the LDS route in order with indexed LDS.
 RDNA4 and CDNA5 sections 5.7.1.3-4 state the same LDS-route completion guarantee
