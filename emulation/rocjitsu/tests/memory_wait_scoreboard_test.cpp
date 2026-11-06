@@ -4229,6 +4229,23 @@ void add_vop3_dpp16_footprint_case(std::vector<std::vector<uint32_t>> &cases, co
   cases.emplace_back(words.begin(), words.end());
 }
 
+TEST(MemoryWaitFootprintTest, InterpolationReadsQuadCoefficients) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+    std::vector<std::vector<uint32_t>> cases;
+    for (bool p2 : {false, true}) {
+      const auto words = arch == ROCJITSU_CODE_ARCH_RDNA3
+                             ? rdna3::build_vinterp(
+                                   p2 ? rdna3::kVInterpP2F32Vinterp : rdna3::kVInterpP10F32Vinterp,
+                                   {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258})
+                             : rdna4::build_vinterp(
+                                   p2 ? rdna4::kVInterpP2F32Vinterp : rdna4::kVInterpP10F32Vinterp,
+                                   {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258});
+      cases.emplace_back(words.begin(), words.end());
+    }
+    check_vector_footprints(arch, 32, 16, cases);
+  }
+}
+
 TEST(MemoryWaitFootprintTest, DppUsesPhysicalSourceLanesAndMaskedDestinations) {
   for (const auto arch :
        {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_CDNA5}) {
