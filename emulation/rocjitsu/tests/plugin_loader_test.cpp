@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -26,13 +27,12 @@ namespace {
 class PluginLoaderTest : public ::testing::Test {
 protected:
   void SetUp() override {
-    ASSERT_EQ(setenv("ROCJITSU_PLUGIN_TEST_TRACE", trace_.path().c_str(), 1), 0);
+    ASSERT_TRUE(trace_.initialize("rocjitsu-plugin-loader-"));
+    trace_environment_.emplace("ROCJITSU_PLUGIN_TEST_TRACE", trace_.path());
+    ASSERT_STREQ(std::getenv("ROCJITSU_PLUGIN_TEST_TRACE"), trace_.path().c_str());
   }
 
-  void TearDown() override {
-    unsetenv("ROCJITSU_PLUGIN_TEST_THROW_INIT");
-    unsetenv("ROCJITSU_PLUGIN_TEST_TRACE");
-  }
+  void TearDown() override { unsetenv("ROCJITSU_PLUGIN_TEST_THROW_INIT"); }
 
   std::string trace() const {
     std::ifstream input(trace_.path());
@@ -44,7 +44,8 @@ protected:
     return rocjitsu::PluginLoader::load_from_config(config, group, PLUGIN_LOADER_FIXTURE_DIR);
   }
 
-  rocjitsu::test::ScopedTempFile trace_{"rocjitsu-plugin-loader-"};
+  rocjitsu::test::ScopedTempFile trace_;
+  std::optional<rocjitsu::test::ScopedEnvironmentVariable> trace_environment_;
 };
 
 TEST_F(PluginLoaderTest, LoadsPluginAndDispatchesLifecycle) {
