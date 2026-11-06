@@ -17,6 +17,10 @@
 #include "TaskPrepScene.h"
 #include "fakes/bootstrap_stubs.h"
 
+// transport/p2p.cc owns this policy getter; the isolated TaskPrep target does
+// not compile that transport TU.
+bool ncclP2pUsesMemcpy() { return false; }
+
 #include TASK_POSTTUNING_CC_PATH
 
 namespace {
