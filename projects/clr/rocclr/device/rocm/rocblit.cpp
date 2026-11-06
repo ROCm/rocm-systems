@@ -2838,6 +2838,7 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
 
     patternSize /= alignment;
     mem_origin /= alignment;
+    width /= alignment;
     pitch /= alignment;
 
     setArgument(kernels_[fillType], 5, sizeof(uint32_t), &patternSize);

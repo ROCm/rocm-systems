@@ -245,6 +245,9 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
       pMemsetParams->elementSize != sizeof(int32_t)) {
     return hipErrorInvalidValue;
   }
+  if (pMemsetParams->width > SIZE_MAX / pMemsetParams->elementSize) {
+    return hipErrorInvalidValue;
+  }
   hipError_t status;
   status = ihipGraphMemsetParams_validate(pMemsetParams);
   if (status != hipSuccess) {
@@ -262,20 +265,25 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
     status = ihipMemset_validate(memObj, pMemsetParams->value, pMemsetParams->elementSize,
                                  pMemsetParams->width * pMemsetParams->elementSize, offset);
   } else {
-    if (pMemsetParams->pitch < (pMemsetParams->width * pMemsetParams->elementSize)) {
+    if (pMemsetParams->height != 0 && depth > SIZE_MAX / pMemsetParams->height) {
       return hipErrorInvalidValue;
     }
-    auto sizeBytes =
-        pMemsetParams->width * pMemsetParams->height * depth * pMemsetParams->elementSize;
+    size_t widthBytes = 0;
+    status = ihipMemset2D_validate(pMemsetParams->dst, pMemsetParams->pitch, pMemsetParams->width,
+                                   pMemsetParams->height * depth, pMemsetParams->elementSize,
+                                   widthBytes);
+    if (status != hipSuccess) {
+      return status;
+    }
+    const size_t sizeBytes = widthBytes * pMemsetParams->height * depth;
     size_t offset = 0;
     amd::Memory* memObj = getMemoryObjectForCurrentDevice(pMemsetParams->dst, offset, sizeBytes);
     if (memObj == nullptr) {
       return hipErrorInvalidValue;
     }
     status = ihipMemset3D_validate(
-        {pMemsetParams->dst, pMemsetParams->pitch, pMemsetParams->width, pMemsetParams->height},
-        memObj, offset, pMemsetParams->value, {pMemsetParams->width, pMemsetParams->height, depth},
-        sizeBytes);
+        {pMemsetParams->dst, pMemsetParams->pitch, widthBytes, pMemsetParams->height}, memObj,
+        offset, pMemsetParams->value, {widthBytes, pMemsetParams->height, depth}, sizeBytes);
   }
   if (status != hipSuccess) {
     return status;
@@ -1049,22 +1057,30 @@ hipError_t capturehipMemsetAsync(hipStream_t& stream, void*& dst, int& value, si
 }
 
 hipError_t capturehipMemset2DAsync(hipStream_t& stream, void*& dst, size_t& pitch, int& value,
-                                   size_t& width, size_t& height) {
+                                   size_t& elementSize, size_t& width, size_t& height) {
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
           "[hipGraph] Current capture node Memset2D on stream : %p", stream);
   hipMemsetParams memsetParams = {0};
   if (!hip::isValid(stream)) {
     return hipErrorContextIsDestroyed;
   }
+  if (width == 0 || height == 0) {
+    return hipSuccess;
+  }
+  size_t widthBytes = 0;
+  hipError_t status = ihipMemset2D_validate(dst, pitch, width, height, elementSize, widthBytes);
+  if (status != hipSuccess) {
+    return status;
+  }
   memsetParams.dst = dst;
   memsetParams.value = value;
+  memsetParams.elementSize = elementSize;
   memsetParams.width = width;
   memsetParams.height = height;
   memsetParams.pitch = pitch;
-  memsetParams.elementSize = 1;
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   hip::GraphNode* pGraphNode;
-  hipError_t status = ihipGraphAddMemsetNode(
+  status = ihipGraphAddMemsetNode(
       &pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
       s->GetLastCapturedNodes().size(), &memsetParams, true, 1, 1, 1, s->DeviceId());
   if (status != hipSuccess) {

@@ -5888,10 +5888,10 @@ hipError_t hipMemsetD2D8Async(hipDeviceptr_t dst, size_t dstPitch, unsigned char
  *  @brief Fills 2D memory range of 'width' 16-bit values synchronously to the specified short
  * value. Height specifies numbers of rows to set and dstPitch speicifies the number of bytes
  * between each row.
- *  @param[in] dst       Pointer to device memory
- *  @param[in] dstPitch  Pitch of dst device pointer
+ *  @param[in] dst       Pointer to device memory, aligned to 2 bytes when height > 1
+ *  @param[in] dstPitch  Pitch in bytes, a multiple of 2 when height > 1
  *  @param[in] value     value to set
- *  @param[in] width     Width of row
+ *  @param[in] width     Number of 16-bit elements to set in each row
  *  @param[in] height    Number of rows
  *  @returns #hipSuccess, #hipErrorInvalidValue
  */
@@ -5901,10 +5901,10 @@ hipError_t hipMemsetD2D16(hipDeviceptr_t dst, size_t dstPitch, unsigned short va
  *  @brief Fills 2D memory range of 'width' 16-bit values asynchronously to the specified short
  * value. Height specifies numbers of rows to set and dstPitch speicifies the number of bytes
  * between each row.
- *  @param[in] dst       Pointer to device memory
- *  @param[in] dstPitch  Pitch of dst device pointer
+ *  @param[in] dst       Pointer to device memory, aligned to 2 bytes when height > 1
+ *  @param[in] dstPitch  Pitch in bytes, a multiple of 2 when height > 1
  *  @param[in] value     value to set
- *  @param[in] width     Width of row
+ *  @param[in] width     Number of 16-bit elements to set in each row
  *  @param[in] height    Number of rows
  *  @param[in] stream    Stream Identifier
  *  @returns #hipSuccess, #hipErrorInvalidValue
@@ -5915,10 +5915,10 @@ hipError_t hipMemsetD2D16Async(hipDeviceptr_t dst, size_t dstPitch, unsigned sho
  *  @brief Fills 2D memory range of 'width' 32-bit values synchronously to the specified int value.
  * Height specifies numbers of rows to set and dstPitch speicifies the number of bytes between each
  * row.
- *  @param[in] dst       Pointer to device memory
- *  @param[in] dstPitch  Pitch of dst device pointer
+ *  @param[in] dst       Pointer to device memory, aligned to 4 bytes when height > 1
+ *  @param[in] dstPitch  Pitch in bytes, a multiple of 4 when height > 1
  *  @param[in] value     value to set
- *  @param[in] width     Width of row
+ *  @param[in] width     Number of 32-bit elements to set in each row
  *  @param[in] height    Number of rows
  *  @returns #hipSuccess, #hipErrorInvalidValue
  */
@@ -5928,10 +5928,10 @@ hipError_t hipMemsetD2D32(hipDeviceptr_t dst, size_t dstPitch, unsigned int valu
  *  @brief Fills 2D memory range of 'width' 32-bit values asynchronously to the specified int
  * value. Height specifies numbers of rows to set and dstPitch speicifies the number of bytes
  * between each row.
- *  @param[in] dst       Pointer to device memory
- *  @param[in] dstPitch  Pitch of dst device pointer
+ *  @param[in] dst       Pointer to device memory, aligned to 4 bytes when height > 1
+ *  @param[in] dstPitch  Pitch in bytes, a multiple of 4 when height > 1
  *  @param[in] value     value to set
- *  @param[in] width     Width of row
+ *  @param[in] width     Number of 32-bit elements to set in each row
  *  @param[in] height    Number of rows
  *  @param[in] stream    Stream Identifier
  *  @returns #hipSuccess, #hipErrorInvalidValue

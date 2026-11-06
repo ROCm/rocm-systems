@@ -71,8 +71,8 @@ HIP_TEST_CASE(Contract_DriverMemset2D_HipMemsetD2D16_D2D16FillsWordRows_VisibleA
   }
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
-  HIP_CHECK(hipMemsetD2D16(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
-                           kWidth * sizeof(uint16_t), kHeight));
+  HIP_CHECK(hipMemsetD2D16(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern, kWidth,
+                           kHeight));
   HIP_CHECK(hipMemcpy2D(dst.data(), kWidth * sizeof(uint16_t), device_ptr, pitch,
                         kWidth * sizeof(uint16_t), kHeight, hipMemcpyDeviceToHost));
 
@@ -92,8 +92,8 @@ HIP_TEST_CASE(Contract_DriverMemset2D_HipMemsetD2D32_D2D32FillsDwordRows_Visible
   }
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
-  HIP_CHECK(hipMemsetD2D32(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
-                           kWidth * sizeof(int), kHeight));
+  HIP_CHECK(hipMemsetD2D32(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern, kWidth,
+                           kHeight));
   HIP_CHECK(hipMemcpy2D(dst.data(), kWidth * sizeof(int), device_ptr, pitch, kWidth * sizeof(int),
                         kHeight, hipMemcpyDeviceToHost));
 
@@ -150,9 +150,8 @@ HIP_TEST_CASE(Contract_DriverMemset2D_HipMemsetD2D8_NullDestination_IsRejected) 
   constexpr size_t pitch = kWidth * sizeof(uint32_t);
 
   REQUIRE(hipMemsetD2D8(hipDeviceptr_t(nullptr), pitch, 0x5a, kWidth, kHeight) != hipSuccess);
-  REQUIRE(hipMemsetD2D16(hipDeviceptr_t(nullptr), pitch, 0x1357, kWidth * sizeof(uint16_t),
-                         kHeight) != hipSuccess);
-  REQUIRE(hipMemsetD2D32(hipDeviceptr_t(nullptr), pitch, 0x12345678, kWidth * sizeof(int),
-                         kHeight) != hipSuccess);
+  REQUIRE(hipMemsetD2D16(hipDeviceptr_t(nullptr), pitch, 0x1357, kWidth, kHeight) != hipSuccess);
+  REQUIRE(hipMemsetD2D32(hipDeviceptr_t(nullptr), pitch, 0x12345678, kWidth, kHeight) !=
+          hipSuccess);
   REQUIRE(hipMemset2D(nullptr, pitch, 0x7b, kWidth, kHeight) != hipSuccess);
 }
