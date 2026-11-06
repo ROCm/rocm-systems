@@ -15,20 +15,6 @@
 #include "fakes/param_redirect.h"
 #include "sym_kernels.h"
 
-// Neuter __global__: a real definition needs hipLaunchKernel/__hipRegisterFunction, unavailable under -no-hip-rt.
-#undef __global__
-#define __global__
-
-#include "fakes/sym_kernels_test_stubs.h"
-
-#include SYM_KERNELS_HOST_CC_PATH
-
-#undef __global__
+#include "fakes/sym_kernels_host_include.h"
 
 #include SYM_KERNELS_CC_PATH
-
-// sym_kernels.cc asks for the railed GIN backend; gin_host.cc is not linked into this binary.
-ncclResult_t ncclGetRailedGinType(struct ncclComm*, ncclGinType_t* ginType) {
-  *ginType = NCCL_GIN_TYPE_NONE;
-  return ncclSuccess;
-}
