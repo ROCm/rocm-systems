@@ -116,6 +116,12 @@ def adjust_candidate_groups(
     stays in the group it arrived in and gains matching request channels
     from the profile. The caller keeps the original group when an expanded
     one does not fit one bucket.
+
+    The shipped latency rows already name both sides, for example gfx942
+    panels 1806, 1807, and 1808 divide each LEVEL by its request series, so
+    the expansion adds nothing for them. It matters for a custom group that
+    names only the LEVEL series. Aggregate ``_sum`` rows are not channel
+    counters and are never expanded.
     """
     return [_expand_affinity_partners(group, profile_counters)]
 
@@ -132,6 +138,11 @@ def keep_copies_groups_still_need(
     complete in one pass. Same-pass bind still selects the pass that holds
     the whole expression, so a latency row does not read a copy that lacks
     its LEVEL. Per-channel series only; sum aggregates are left alone.
+
+    A copy is dropped only when no required group breaks. Panel 1805 (read,
+    write, and atomic requests) is such a group on gfx908, gfx90a, gfx942,
+    and gfx950, so a shipped layout removes nothing. A custom config without
+    that row can drop a request copy.
     """
     if not files:
         return files
@@ -209,7 +220,11 @@ def _expand_affinity_partners(
     group: FrozenSet[str],
     profile_counters: Set[str],
 ) -> FrozenSet[str]:
-    """Add matching request channels when a LEVEL series is in the group."""
+    """Add matching request channels when a LEVEL series is in the group.
+
+    Only request channels the profile collects are added. A group that
+    already names both sides is returned with the same counters.
+    """
     bases = {
         _channel_base(counter) for counter in group if is_tcc_channel_counter(counter)
     }
