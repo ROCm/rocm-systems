@@ -796,7 +796,7 @@ def test_pre_processing_persists_membw_analysis_config(
 
 @pytest.mark.parametrize(
     "trace_ml_api, expected",
-    [(None, None), ([], ["torch", "triton"]), (["triton"], ["triton"])],
+    [(None, None), ([], ["torch", "triton", "jax"]), (["triton"], ["triton"])],
 )
 def test_pre_processing_persists_traced_frameworks(tmp_path, trace_ml_api, expected):
     """A bare --trace-ml-api is saved as every framework."""
