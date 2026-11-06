@@ -38,7 +38,7 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved) {
       hip::PlatformState::Instance().SetDynamicLibraryHandle(static_cast<void*>(hinst));
       break;
     case DLL_PROCESS_DETACH:
-      if (GPU_ENABLE_PAL != 0) {
+      if (amd::usePalBackend()) {
         hip::ihipDestroyDevice();
       }
       break;

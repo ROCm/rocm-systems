@@ -44,6 +44,10 @@
 #include <shared_mutex>
 
 namespace amd {
+
+//! True only when Device::init chose PAL. False before that choice.
+bool usePalBackend();
+
 class Command;
 class CommandQueue;
 class ReadMemoryCommand;
@@ -1626,12 +1630,7 @@ class Isa {
   }
 
   /// @returns If the PAL runtime supports the ISA.
-  bool runtimePalSupported() const {
-    if (IS_LINUX && (GPU_ENABLE_PAL == 2) && (versionMajor_ >= 9)) {
-      return false;
-    }
-    return runtimePalSupported_;
-  }
+  bool runtimePalSupported() const { return runtimePalSupported_; }
 
   /// @returns SRAM ECC feature status.
   const Feature& sramecc() const { return sramecc_; }

@@ -5,6 +5,7 @@
  */
 
 #include <hip/hip_runtime.h>
+#include "device/device.hpp"
 #include "hip_internal.hpp"
 #include "hip_executionctx.hpp"
 #include "hip_graph_internal.hpp"
@@ -344,7 +345,7 @@ StreamPerThread::~StreamPerThread() {
     if (stream != nullptr && hip::isValid(stream)) {
       // @note: Global variables in hip runtime will be destroyed after ROCR's global variables.
       // Any calls to rocr may cause invalid object access. Hence, avoid the stream destruction.
-      if (IS_LINUX || (GPU_ENABLE_PAL != 0)) {
+      if (IS_LINUX || amd::usePalBackend()) {
         hip::Stream::Destroy(reinterpret_cast<hip::Stream*>(stream));
       }
       stream = nullptr;

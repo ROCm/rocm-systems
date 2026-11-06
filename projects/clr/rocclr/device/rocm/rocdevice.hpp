@@ -424,7 +424,8 @@ struct AgentInfo {
 class Device : public NullDevice {
  public:
   //! Initialise the whole HSA device subsystem (init, device enumeration, etc).
-  static bool init();
+  //! palRequest is the GPU_ENABLE_PAL request. On Windows, 2 keeps ROCr for gfx942 only.
+  static bool init(uint palRequest);
   static void tearDown();
 
   //! Lookup all AMD HSA devices and memory regions.
