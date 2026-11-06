@@ -130,7 +130,7 @@ each blob write and closed after it. Every file inside the archive is created, o
 and removed relative to those descriptors with `openat`, `renameat` and `unlinkat`, the
 crash-path manifest included, so a directory renamed on the path after the check cannot
 redirect a write. Only finding `pid-<pid>/` when the archive opens, and the root
-`manifest.json` in the base directory, go by path, so every directory on the path to
+`manifest.json` and `NOTICE.txt` in the base directory, go by path, so every directory on the path to
 the base should still belong to the capturing user or to root, and any that other users
 can write to should have the sticky bit. When
 the archive cannot be set up, capture is disabled with a
@@ -814,8 +814,12 @@ Consent comes from `HIP_HRR_CAPTURE_CONSENT` or the per-user consent file; see
 its first line is `yes`, after any UTF-8 or UTF-16LE byte order mark and before trailing
 blanks. UTF-16LE is decoded before the line end is looked for, and a UTF-16LE unit
 outside ASCII makes the file no yes; so does a file over 4 KiB. On POSIX it counts only as a
-regular file, checked on the descriptor opened with `O_NONBLOCK`, owned by the effective
-user. Consent is read once, by `hrr_consent()`, and is part of `hip_capture_enabled()`.
+regular file, checked by path and again on the descriptor opened with `O_NONBLOCK` and
+`O_NOFOLLOW`, with one hard link and owned by the effective user. On Windows it is not
+checked for an owner and junctions are followed, so a redirected or shared `%APPDATA%`
+gives no per-user guarantee. The variable applies to every process that inherits the
+environment, the file to the user on every host that shares the home directory.
+Consent is read once, by `hrr_consent()`, and is part of `hip_capture_enabled()`.
 Without it `hip_capture_init()` prints one line on stderr naming what withheld it; it never
 prompts. `capture_consent` in the manifest metadata names the source, not the file's path,
 which names the user.

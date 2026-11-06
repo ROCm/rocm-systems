@@ -20,6 +20,7 @@ HRR = Path(__file__).resolve().parents[2]
 PRIVACY = HRR / "PRIVACY.md"
 CAPTURE_SRC = HRR.parent / "clr" / "hipamd" / "src" / "hrr"
 METADATA_CPP = CAPTURE_SRC / "hip_capture_metadata.cpp"
+NOTICE_H = HRR / "include" / "hrr" / "hrr_archive_notice.h"
 
 # The tasks under AIRUNTIME-2733 that the page links, one per statement.
 EPIC_TASKS = (
@@ -117,6 +118,16 @@ class PrivacyDocTest(unittest.TestCase):
         text = PRIVACY.read_text(encoding="utf-8")
         for key in EPIC_TASKS:
             self.assertIn(f"https://amd-hub.atlassian.net/browse/{key}", text)
+
+    def test_sharing_section_quotes_the_archive_notice(self):
+        header = NOTICE_H.read_text(encoding="utf-8")
+        # The lines between the marker lines, as a docs literalinclude takes them.
+        lines = header.split("hrr-archive-notice-begin", 1)[1].split("\n", 1)[1]
+        notice = lines.split("hrr-archive-notice-end", 1)[0].rsplit("\n", 1)[0] + "\n"
+        text = PRIVACY.read_text(encoding="utf-8")
+        section = text.split("## Sharing an archive", 1)[1].split("\n## ", 1)[0]
+        quote = section.split("```text\n", 1)[1].split("```", 1)[0]
+        self.assertEqual(quote, notice)
 
     def test_readme_and_recording_skill_link_the_page(self):
         readme = (HRR / "README.md").read_text(encoding="utf-8")

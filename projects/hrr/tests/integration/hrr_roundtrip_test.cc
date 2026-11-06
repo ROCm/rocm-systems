@@ -34,6 +34,7 @@
 #include <hip/hiprtc.h>
 #include "hrr_reader.h"
 #include "hrr/hrr_api_args.h"
+#include "hrr/hrr_archive_notice.h"
 
 #include <algorithm>
 #include <cctype>
@@ -213,7 +214,9 @@ HRR_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
  *   - Spawns Unit_HRR_GpuWorkload_Direct with HIP_HRR_CAPTURE_OUTPUT set and
  *     AMD_LOG_LEVEL=0, capturing stdout and stderr. The capture layer must print
  *     its start notice exactly once, naming the per-process archive directory
- *     and the base directory that child processes record to.
+ *     and the base directory that child processes record to, and ending with
+ *     the short notice that points to NOTICE.txt. The base directory holds
+ *     NOTICE.txt with the full notice.
  *   - Repeats the capture with only stdout captured: the notice is on stderr,
  *     so stdout holds none.
  *   - Spawns the same workload without HIP_HRR_CAPTURE_OUTPUT: no notice.
@@ -250,8 +253,9 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
     // The writer joins the pid-<pid> component with '/' on every platform.
     const std::string expected = kNotice + base + "/" + pid_dir +
                                  " (child processes record to their own pid-* directories in " +
-                                 base + ")";
+                                 base + "). " + kHrrArchiveNoticeShort;
     CHECK(line == expected);
+    CHECK(read_text_file(cap.path / "NOTICE.txt") == kHrrArchiveNotice);
   }
 
   {
@@ -306,9 +310,13 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
  *     a set variable decides the run. The same with " yes ", as only trailing
  *     blanks are trimmed. With an empty or blank exported variable the file
  *     consents.
+ *   - With HIP_HRR_CAPTURE_CONSENT holding an escape sequence and 80 more
+ *     bytes, the refusal shows control bytes as '?' and cuts the value at 64.
  *   - On POSIX, puts a FIFO with no writer at the consent path: the workload
  *     must finish within a deadline, with nothing written and the file named as
  *     not regular, instead of blocking HIP's init in the open of the consent file.
+ *     A yes reached through a symbolic link or a second hard link is refused
+ *     the same way, each named.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_capture_consent"};
@@ -404,6 +412,11 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
       capture(blank);
       CHECK(recorded_consent() == "file");
     }
+    // The refusal names the value with control bytes as '?' and cut at 64 bytes.
+    fs::remove_all(cap.path);
+    const std::string out = capture(("no\x1b[2J\x07" + std::string(80, 'n')).c_str());
+    CHECK(out.find("is set to 'no?[2J?" + std::string(57, 'n') + "...'") != std::string::npos);
+    CHECK(out.find('\x1b') == std::string::npos);
   }
 
 #if !defined(_WIN32)
@@ -413,6 +426,21 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
     REQUIRE(::mkfifo(consent_file.c_str(), 0600) == 0);
     const std::string out = capture(nullptr, 60);
     CHECK(out.find(consent_file.string() + " is not a regular file.") != std::string::npos);
+    CHECK(nothing_written());
+  }
+  {
+    // A yes reached through a symbolic link or another hard link is refused.
+    const fs::path other = cfg.path / "other-yes";
+    std::ofstream(other) << "yes\n";
+    fs::remove(consent_file);
+    fs::create_symlink(other, consent_file);
+    std::string out = capture(nullptr);
+    CHECK(out.find(consent_file.string() + " is a symbolic link.") != std::string::npos);
+    CHECK(nothing_written());
+    fs::remove(consent_file);
+    fs::create_hard_link(other, consent_file);
+    out = capture(nullptr);
+    CHECK(out.find(consent_file.string() + " has more than one hard link.") != std::string::npos);
     CHECK(nothing_written());
   }
 #endif

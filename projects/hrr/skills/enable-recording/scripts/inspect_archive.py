@@ -889,7 +889,7 @@ def render(report: ArchiveReport) -> str:
         lines.append(
             "At least one process has no clean-shutdown trailer. That is what a workload "
             "that crashed looks like, and such an archive is still readable and still "
-            "worth sending: the events before the crash are all there. The exception is "
+            "worth keeping: the events before the crash are all there. The exception is "
             "a capture that dropped an event it could not fit in the wire format, which "
             "leaves a hole instead; the workload's stderr then says 'Archive marked "
             "INCOMPLETE'."
@@ -919,9 +919,9 @@ def render(report: ArchiveReport) -> str:
         )
         if len(report.processes) > 1:
             lines.append(
-                "Send the whole archive directory, not one pid-* directory out of it; the "
-                "processes belong together. Replay them one at a time, starting with one "
-                "that did not shut down cleanly."
+                "Share the whole archive directory, as agreed and after reading its NOTICE.txt, "
+                "not one pid-* directory out of it; the processes belong together. Replay "
+                "them one at a time, starting with one that did not shut down cleanly."
             )
     else:
         lines.append("Verdict: empty. Process directories exist but no events were written.")

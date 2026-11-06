@@ -150,7 +150,7 @@ def test_incomplete_process_is_reported_but_still_recorded(tmp_path):
     assert report.recorded_processes
     rendered = inspect_archive.render(report)
     assert "incomplete" in rendered
-    assert "still worth sending" in rendered
+    assert "still worth keeping" in rendered
     # A lossy capture has no trailer either, and only the always-on line of
     # capture's stderr tells it apart: the louder one needs AMD_LOG_LEVEL.
     assert "Archive marked INCOMPLETE" in rendered

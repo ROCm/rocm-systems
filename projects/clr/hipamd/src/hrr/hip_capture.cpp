@@ -36,6 +36,7 @@
 
 // hrr_api_args.h — for hrr_args_* struct types and hrr_api_id_t enum
 #include "hrr/hrr_api_args.h"
+#include "hrr/hrr_archive_notice.h"
 #include "hrr/hrr_host_rect.h"
 
 // HIP runtime internals
@@ -170,6 +171,15 @@ static std::string hrr_consent_trim(std::string s) {
   return s;
 }
 
+// `s` for a terminal or a log: bytes outside printable ASCII become '?', so an
+// escape sequence in the environment does not reach either, and at most 64 are kept.
+static std::string hrr_printable(const std::string& s) {
+  std::string out = s.substr(0, 64);
+  for (char& c : out)
+    if (c < 0x20 || c > 0x7E) c = '?';
+  return s.size() > out.size() ? out + "..." : out;
+}
+
 struct HrrConsent {
   // Where the yes came from for the manifest, "HIP_HRR_CAPTURE_CONSENT" or
   // "file" (not its path, which names the user), or "" when there is none.
@@ -195,7 +205,8 @@ static HrrConsent hrr_capture_consent() {
   const std::string answer = hrr_consent_trim(value);
   if (answer == "yes") return {"HIP_HRR_CAPTURE_CONSENT", ""};
   if (!answer.empty()) {
-    return {"", "HIP_HRR_CAPTURE_CONSENT is set to '" + value + "', which withholds consent."};
+    return {"", "HIP_HRR_CAPTURE_CONSENT is set to '" + hrr_printable(value) +
+                    "', which withholds consent."};
   }
   const std::string path = hrr_consent_file();
   if (path.empty()) return {};
@@ -214,15 +225,22 @@ static HrrConsent hrr_capture_consent() {
   in.read(&bytes[0], static_cast<std::streamsize>(bytes.size()));
   bytes.resize(static_cast<size_t>(in.gcount()));
 #else
-  // Only a regular file, checked on the descriptor that is read: a FIFO planted
-  // there, even after a check by path, must not block HIP's init in open().
+  // Only a regular file, checked by path so that a device is not opened, and
+  // again on the descriptor that is read: a FIFO planted there after the first
+  // check must not block HIP's init in open(). Not through a symbolic link, and
+  // with no other hard link: either can make a file someone else wrote say yes.
   // The file must also belong to the effective user: a yes owned by someone
   // else, say in an XDG_CONFIG_HOME shared by several users, is not theirs.
-  const int fd = ::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-  if (fd < 0) {
-    return {"", path + (errno == ENOENT ? " does not exist." : " cannot be read.")};
-  }
   struct stat st{};
+  if (::stat(path.c_str(), &st) == 0 && !S_ISREG(st.st_mode)) {
+    return {"", path + " is not a regular file."};
+  }
+  const int fd = ::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
+  if (fd < 0) {
+    return {"", path + (errno == ENOENT ? " does not exist."
+                        : errno == ELOOP ? " is a symbolic link."
+                                         : " cannot be read.")};
+  }
   const char* bad = nullptr;
   if (::fstat(fd, &st) != 0) {
     bad = " cannot be read.";
@@ -230,6 +248,8 @@ static HrrConsent hrr_capture_consent() {
     bad = " is not a regular file.";
   } else if (st.st_uid != ::geteuid()) {
     bad = " is not owned by this user.";
+  } else if (st.st_nlink > 1) {
+    bad = " has more than one hard link.";
   }
   FILE* f = bad == nullptr ? ::fdopen(fd, "rb") : nullptr;
   if (f == nullptr) {
@@ -3082,7 +3102,7 @@ void hip_capture_init() {
               "[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: capture needs your consent. %s%s"
               "The archive would record this process's HIP calls and could hold its host "
               "buffers, kernel arguments and code objects. To consent, %s%s%sset "
-              "HIP_HRR_CAPTURE_CONSENT=yes for one run.\n",
+              "HIP_HRR_CAPTURE_CONSENT=yes in the environment of the processes to record.\n",
               refusal.c_str(), refusal.empty() ? "" : " ",
               file.empty() ? "" : "write the line yes to ", file.c_str(),
               file.empty() ? "" : " once, or ");
@@ -3157,8 +3177,9 @@ void hip_capture_init() {
     fprintf(stderr,
             "[HRR capture] Recording this process's HIP calls, with their host buffers, kernel "
             "arguments and code objects, to %s/pid-%d (child processes record to their own "
-            "pid-* directories in %s)\n",
-            hip_capture_output_dir(), amd::Os::getProcessId(), hip_capture_output_dir());
+            "pid-* directories in %s). %s\n",
+            hip_capture_output_dir(), amd::Os::getProcessId(), hip_capture_output_dir(),
+            kHrrArchiveNoticeShort);
   #else
     // HRR capture is disabled
     // below to avoid -Wunused-function / -Wunused-variable
