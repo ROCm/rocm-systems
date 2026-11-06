@@ -113,15 +113,18 @@ static ncclResult_t IbCastNearRecvChain(struct ncclIbSendComm* comm, volatile vo
   uint8_t phases = ctsFifoNearRecvPhases(slots, 0);
   uint64_t remoteBase = lastPieceWr->wr.rdma.remote_addr;
   uint32_t length = payload->length;
+
   int nPieces = DIVUP(length, NCCL_NET_NEAR_RECV_PIECE_SIZE);
-  if (nPieces - 1 > (int)(sizeof(comm->nearRecvWrs) / sizeof(comm->nearRecvWrs[0]))) return ncclInternalError;
+  int maxLeadingPieces = (int)(sizeof(comm->nearRecvWrs) / sizeof(comm->nearRecvWrs[0]));
+  if (nPieces - 1 > maxLeadingPieces) return ncclInternalError;
 
   for (int piece = 0; piece < nPieces - 1; piece++) {
     struct ibv_sge* sge = comm->nearRecvSges + piece;
-    struct ibv_send_wr* wr = comm->nearRecvWrs + piece;
     sge->addr = payload->addr + (uint64_t)piece * NCCL_NET_NEAR_RECV_PIECE_SIZE;
     sge->length = NCCL_NET_NEAR_RECV_PIECE_SIZE;
     sge->lkey = payload->lkey;
+
+    struct ibv_send_wr* wr = comm->nearRecvWrs + piece;
     memset(wr, 0, sizeof(*wr));
     wr->opcode = IBV_WR_RDMA_WRITE;
     wr->sg_list = sge;
@@ -130,6 +133,7 @@ static ncclResult_t IbCastNearRecvChain(struct ncclIbSendComm* comm, volatile vo
     wr->wr.rdma.rkey = lastPieceWr->wr.rdma.rkey;
     wr->next = piece + 1 < nPieces - 1 ? wr + 1 : lastPieceWr;
   }
+
   uint64_t lastPieceStart = (uint64_t)(nPieces - 1) * NCCL_NET_NEAR_RECV_PIECE_SIZE;
   payload->addr += lastPieceStart;
   payload->length = length - lastPieceStart;

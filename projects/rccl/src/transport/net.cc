@@ -238,6 +238,7 @@ RCCL_PARAM(SpxNearRecv, "SPX_NEAR_RECV", ncclNetNearRecvOff);
 static int nearRecvModeFor(struct ncclProxyState* proxyState, struct recvNetResources* resources) {
   int mode = rcclParamSpxNearRecv();
   if (mode == ncclNetNearRecvOff) return mode;
+
   bool applicable = proxyState->ncclNet == &netIbCast && resources->shared == 0 && resources->useGdr &&
                     netBuffSize(proxyState, resources->isP2p, NCCL_PROTO_SIMPLE) ==
                       NCCL_STEPS * NCCL_NET_NEAR_RECV_REGION_SIZE / 2;
@@ -258,13 +259,20 @@ static uint64_t nearRecvLoadTicks(volatile char* block) {
     _mm_clflush((const void*)line);
     _mm_mfence();
     _mm_lfence();
+
     uint64_t start = __rdtsc();
     (void)*line;
     _mm_lfence();
     ticks[rep] = __rdtsc() - start;
   }
+
   std::nth_element(ticks, ticks + NEAR_RECV_PROBE_REPS / 2, ticks + NEAR_RECV_PROBE_REPS);
   return ticks[NEAR_RECV_PROBE_REPS / 2];
+}
+
+// Near and far loads must differ by at least 10% for a probe pair to count.
+static bool nearRecvTicksDiffer(uint64_t ticks, uint64_t otherTicks) {
+  return std::max(ticks, otherTicks) * 10 >= std::min(ticks, otherTicks) * 11;
 }
 
 // Sets bit r of phaseMask when block 1 of region r is near the NIC. `buff` is a CPU mapping of the
@@ -278,10 +286,12 @@ static ncclResult_t nearRecvProbe(char* buff, uint8_t* phaseMask, uint64_t regio
     uint64_t t1 = nearRecvLoadTicks(regionBase + 1 * NCCL_NET_NEAR_RECV_PIECE_SIZE);
     uint64_t t8 = nearRecvLoadTicks(regionBase + 8 * NCCL_NET_NEAR_RECV_PIECE_SIZE);
     uint64_t t9 = nearRecvLoadTicks(regionBase + 9 * NCCL_NET_NEAR_RECV_PIECE_SIZE);
+
     bool block1Near = t1 < t0;
-    // Blocks 1 and 8 share an AID, as do blocks 0 and 9; both pairs must differ by at least 10%.
-    bool clearSplit = (t8 < t9) == block1Near && std::max(t0, t1) * 10 >= std::min(t0, t1) * 11 &&
-                      std::max(t8, t9) * 10 >= std::min(t8, t9) * 11;
+    // Blocks 1 and 8 share an AID, as do blocks 0 and 9, so the second pair must give the same answer.
+    bool pairsAgree = (t8 < t9) == block1Near;
+    bool clearSplit = pairsAgree && nearRecvTicksDiffer(t0, t1) && nearRecvTicksDiffer(t8, t9);
+
     // An unreadable region only costs bandwidth: the sender and the kernel derive the piece
     // addresses from the same mask, so a wrong bit still agrees on both sides.
     if (!clearSplit) {
@@ -289,6 +299,7 @@ static ncclResult_t nearRecvProbe(char* buff, uint8_t* phaseMask, uint64_t regio
            t8, t9);
       continue;
     }
+
     if (block1Near) *phaseMask |= 1 << region;
     if (region == 0) {
       region0Ticks[0] = t0;
@@ -1749,11 +1760,16 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
       if (devMem->dmaBufFd >= 0) bankMapping = mmap(NULL, devMem->size, PROT_READ, MAP_SHARED, devMem->dmaBufFd, 0);
       probeBuff = bankMapping == MAP_FAILED ? NULL : (char*)bankMapping + (probeBuff - devMem->gpuPtr);
     }
+
     uint64_t region0Ticks[2] = {0, 0};
     ncclResult_t probeRes = ncclSystemError;
-    if (probeBuff == NULL) WARN("SPX near recv: no CPU mapping of the cuMem buffer (%s)", strerror(errno));
-    else probeRes = nearRecvProbe(probeBuff, &resources->nearRecvPhaseMask, region0Ticks);
+    if (probeBuff == NULL) {
+      WARN("SPX near recv: no CPU mapping of the cuMem buffer (%s)", strerror(errno));
+    } else {
+      probeRes = nearRecvProbe(probeBuff, &resources->nearRecvPhaseMask, region0Ticks);
+    }
     if (bankMapping != MAP_FAILED) munmap(bankMapping, devMem->size);
+
     // The bank is already twice the stock size, and the kernel derives its step stride from the
     // mode, so falling back to Off here would leave the proxy and the kernel on different strides.
     // Contig keeps the geometry and only gives up the near placement.
@@ -2237,8 +2253,8 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
           int buffSlot = (subGroup->base + subGroup->posted) % NCCL_STEPS;
           uint8_t phases = (uint8_t)((resources->nearRecvPhaseMask >> buffSlot) |
                                      (resources->nearRecvPhaseMask << (NCCL_STEPS - buffSlot)));
-          ncclIbCastSetNearRecvHint(resources->netRecvComm, scatter ? resources->nearRecvMode : ncclNetNearRecvOff,
-                                    phases);
+          int hintMode = scatter ? resources->nearRecvMode : ncclNetNearRecvOff;
+          ncclIbCastSetNearRecvHint(resources->netRecvComm, hintMode, phases);
         }
         NCCLCHECK(proxyState->ncclNet->irecv(resources->netRecvComm, subCount, ptrs, sizes, tags, mhandles, phandles,
                                              requestPtr));
