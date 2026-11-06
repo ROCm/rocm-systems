@@ -721,14 +721,15 @@ namespace {
 }
 
 template <typename Buffer>
-[[nodiscard]] std::optional<Buffer> read_whole(int dir_fd, const std::string &name,
-                                               uint64_t limit) {
+[[nodiscard]] std::optional<Buffer> read_whole(int dir_fd, const std::string &name, uint64_t limit,
+                                               std::optional<std::string_view> recorded_size = {}) {
   const int fd = openat(dir_fd, name.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
   if (fd < 0)
     return std::nullopt;
   struct stat info {};
   if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) ||
-      static_cast<uint64_t>(info.st_size) > limit) {
+      static_cast<uint64_t>(info.st_size) > limit ||
+      (recorded_size && std::to_string(info.st_size) != *recorded_size)) {
     close(fd);
     return std::nullopt;
   }
@@ -843,8 +844,8 @@ std::vector<uint8_t> TranslationStore::Impl::lookup(const std::string &key,
   }
 
   std::optional<std::vector<uint8_t>> object =
-      read_whole<std::vector<uint8_t>>(dir_fd, object_name, max_object_bytes());
-  if (!object || std::to_string(object->size()) != *recorded_size)
+      read_whole<std::vector<uint8_t>>(dir_fd, object_name, max_object_bytes(), *recorded_size);
+  if (!object)
     return {};
 
   Sha256 hash;

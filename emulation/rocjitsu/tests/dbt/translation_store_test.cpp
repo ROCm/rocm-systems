@@ -13,6 +13,7 @@
 
 #include "rocjitsu/code/dbt/translation_store.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -29,6 +30,7 @@
 #include <fcntl.h>
 #include <sched.h>
 #include <sys/file.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -132,6 +134,37 @@ TEST_F(TranslationStoreTest, MalformedEntriesAreMisses) {
 
   put(*store, kObject);
   EXPECT_EQ(get(*store), kObject);
+}
+
+TEST_F(TranslationStoreTest, OversizedObjectMismatchIsRejectedBeforeAllocation) {
+  if (dlsym(RTLD_DEFAULT, "__asan_init") || dlsym(RTLD_DEFAULT, "__tsan_init") ||
+      dlsym(RTLD_DEFAULT, "__msan_init"))
+    GTEST_SKIP() << "address-space limits conflict with sanitizer shadow mappings";
+  auto store = open("pair-a");
+  put(*store, kObject);
+  ASSERT_EQ(get(*store), kObject);
+  const std::filesystem::path entries = std::filesystem::path(root_) / "pair-a" / "v1";
+  std::filesystem::path object;
+  for (const auto &item : std::filesystem::directory_iterator(entries))
+    if (item.path().extension() == ".obj")
+      object = item.path();
+  ASSERT_FALSE(object.empty());
+  std::filesystem::resize_file(object, 512u << 20);
+
+  ASSERT_EXIT(
+      {
+        struct rlimit limit {};
+        if (getrlimit(RLIMIT_AS, &limit) != 0)
+          _exit(2);
+        limit.rlim_cur = std::min<rlim_t>(limit.rlim_max, 256u << 20);
+        if (setrlimit(RLIMIT_AS, &limit) != 0)
+          _exit(3);
+        if (!get(*store).empty())
+          _exit(4);
+        put(*store, kObject);
+        _exit(get(*store) == kObject ? 0 : 5);
+      },
+      ::testing::ExitedWithCode(0), "");
 }
 
 TEST_F(TranslationStoreTest, FailedPublicationLeavesNoTemporaryOrPartialEntry) {
