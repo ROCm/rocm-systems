@@ -25,7 +25,7 @@ typedef struct rj_gfx1250_b0_to_a0_translation_info_s {
   size_t changed_instruction_count;
 } rj_gfx1250_b0_to_a0_translation_info_t;
 
-/// Borrowed view of one diagnostic produced by a failed translation.
+/// Borrowed view of one diagnostic produced by a translation.
 ///
 /// All string pointers are valid only for the duration of the callback. A
 /// required-work item is delivered as a separate view with @c required_work set;
@@ -33,7 +33,7 @@ typedef struct rj_gfx1250_b0_to_a0_translation_info_s {
 ///
 /// @c severity and @c kind are stable matching keys, not display strings. Severity
 /// is currently @c warning or @c error. Kind values distinguish translator
-/// diagnostics from API, input, translation-result, allocation, and exception
+/// diagnostics from API, input, translation-result, allocation, and internal
 /// failures. Consumers
 /// must accept unknown future keys. @c mnemonic, @c message, and required-work
 /// text are human-readable and may change.
@@ -47,7 +47,8 @@ typedef struct rj_gfx1250_b0_to_a0_diagnostic_s {
   int required_work;
 } rj_gfx1250_b0_to_a0_diagnostic_t;
 
-/// Synchronous sink for diagnostics from a failed translation.
+/// Synchronous sink for translation diagnostics.
+/// C++ exceptions from this callback are contained without changing the result.
 typedef void (*rj_gfx1250_b0_to_a0_diagnostic_callback_t)(
     const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic, void *user_data);
 
@@ -68,9 +69,9 @@ typedef void (*rj_gfx1250_b0_to_a0_diagnostic_callback_t)(
 /// @param[in] diagnostic_callback Optional synchronous sink invoked for every
 ///            non-success return, including an invalid argument, an input that
 ///            is not a gfx1250 code object, a non-dispatchable result, a failed
-///            allocation, and an internal translator error or exception. Only a failure that came
-///            from translation delivers the complete translator diagnostic set
-///            with its required-work items; the other paths report one
+///            output allocation, and an internal translator error. Translation
+///            delivers its complete diagnostic set with required-work items,
+///            including warnings on success; the other failure paths report one
 ///            diagnostic describing the failure itself.
 /// @param[in] user_data Opaque value passed to @p diagnostic_callback.
 /// @retval ROCJITSU_STATUS_SUCCESS Translation succeeded.
@@ -80,7 +81,7 @@ typedef void (*rj_gfx1250_b0_to_a0_diagnostic_callback_t)(
 ///         repeating the call reaches the same verdict.
 /// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Output allocation failed. Environmental: the same
 ///         input may translate on a later attempt.
-/// @retval ROCJITSU_STATUS_ERROR Internal translator error or exception. Carries no promise
+/// @retval ROCJITSU_STATUS_ERROR Internal translator error. Carries no promise
 ///         about the input.
 #ifdef __cplusplus
 [[nodiscard]]
