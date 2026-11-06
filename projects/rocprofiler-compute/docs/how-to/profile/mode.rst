@@ -1179,7 +1179,7 @@ Every ``--trace-ml-api`` run also records user ROCTx regions.
    $ rocprof-compute profile --experimental --trace-ml-api --name torch_triton_net -- python torch_triton_net.py
 
 The output is the same as naming every framework, as in
-``--trace-ml-api torch triton``. Each kernel is attributed to the framework
+``--trace-ml-api torch triton jax``. Each kernel is attributed to the framework
 that launched it. Analyze the results with ``--list-operators`` and
 ``--operator`` (see :doc:`../analyze/cli`). To select a user ROCTx region and
 the GPU work inside it, use ``--list-operators user`` or

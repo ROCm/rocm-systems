@@ -57,7 +57,7 @@ rocprof-compute profile --experimental --trace-ml-api jax --name <name> -- pytho
 
 A nested `jit` is one marker. The tracer does not wrap `pjit` or `shard_map`.
 
-The two combine as `--trace-ml-api torch triton`. User-defined ROCTx regions
+All three combine as `--trace-ml-api torch triton jax`. User-defined ROCTx regions
 are included with every `--trace-ml-api` run. A bare `--trace-ml-api` traces
 all supported ML frameworks as well.
 
