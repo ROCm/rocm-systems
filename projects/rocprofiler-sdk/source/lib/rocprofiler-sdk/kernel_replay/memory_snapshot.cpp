@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/code_object/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/blit-copy-kernel.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/snapshot-plan.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/snapshot-storage.hpp"
@@ -284,6 +285,10 @@ retain_block(hsa_amd_memory_pool_t pool, block_t block) noexcept
 
 constexpr size_t arena_alignment = 16;
 
+// A region that does not fit what is left of a tier is cut on a tile boundary and the rest is
+// offered to the next tier, so the pieces keep the tiles the whole region would have.
+constexpr size_t cut_granularity = blit::kernel_abi::tile_bytes;
+
 std::optional<size_t>
 pool_allocation_max(hsa_amd_memory_pool_t pool)
 {
@@ -363,14 +368,12 @@ gpu_plan_budget(const capture_context_t& ctx)
     if(!maximum) return 0;
 
     // Hold at most half of the device's memory, and leave the application at least 5% of what is
-    // free. The retained arena counts as available because a larger snapshot frees it first.
+    // free.
     auto budget = static_cast<uint64_t>(*maximum);
     if(auto total = pool_size(ctx.gpu_pool)) budget = std::min<uint64_t>(budget, *total / 2);
     if(auto available = gpu_available_bytes(ctx.agent))
-    {
-        const auto retained = static_cast<uint64_t>(retained_capacity(ctx.gpu_pool));
-        budget              = std::min(budget, retained + (*available - *available / 20));
-    }
+        budget = std::min(budget,
+                          planning::tier_budget(retained_capacity(ctx.gpu_pool), *available, 20));
     return static_cast<size_t>(budget);
 }
 
@@ -380,11 +383,11 @@ host_plan_budget(const capture_context_t& ctx)
     if(ctx.mode == capture_mode::force_gpu) return 0;
     auto maximum = pool_allocation_max(ctx.pinned_pool);
     if(!maximum) return 0;
-    // Pinned memory cannot be swapped out, so use at most half of what the host has available. The
-    // retained arena counts as available, as on the GPU.
+    // Pinned memory cannot be swapped out, so use at most half of what the host has available.
     if(auto available = host_available_bytes())
         return std::min(*maximum,
-                        retained_capacity(ctx.pinned_pool) + static_cast<size_t>(*available / 2));
+                        static_cast<size_t>(planning::tier_budget(
+                            retained_capacity(ctx.pinned_pool), *available, 2)));
     return *maximum;
 }
 
@@ -444,7 +447,7 @@ struct hsa_pool_allocator
 };
 
 using hsa_tier =
-    storage::arena<planning::whole_region, storage::bump_suballocator<hsa_pool_allocator>>;
+    storage::arena<planning::prefix_chunking, storage::bump_suballocator<hsa_pool_allocator>>;
 using snapshot_storage = storage::fallback<hsa_tier, hsa_tier, storage::null_tier>;
 
 snapshot_storage
@@ -462,8 +465,8 @@ make_snapshot_storage(const capture_context_t& ctx, storage_budgets_t budgets)
                                            .peer_agent = ctx.cpu_agent,
                                            .available  = true};
     return snapshot_storage{
-        hsa_tier{{}, {budgets.gpu_bytes, arena_alignment, gpu}},
-        hsa_tier{{}, {budgets.host_bytes, arena_alignment, pinned}},
+        hsa_tier{{cut_granularity}, {budgets.gpu_bytes, arena_alignment, gpu}},
+        hsa_tier{{cut_granularity}, {budgets.host_bytes, arena_alignment, pinned}},
         storage::null_tier{},
     };
 }
@@ -928,13 +931,13 @@ restore(const snapshot_t& snapshot, const batch_copy_fn_t& batch_copy)
 
     if(status != HSA_STATUS_SUCCESS)
     {
-        ROCP_ERROR << fmt::format("kernel-replay restore: batch copy failed after {}/{} regions",
+        ROCP_ERROR << fmt::format("kernel-replay restore: batch copy failed after {}/{} extents",
                                   restored,
                                   snapshot.extents.size());
         return false;
     }
 
-    ROCP_INFO << fmt::format("kernel-replay restore: restored {}/{} regions ({} skipped)",
+    ROCP_INFO << fmt::format("kernel-replay restore: restored {}/{} extents ({} skipped)",
                              restored,
                              snapshot.extents.size(),
                              skipped);

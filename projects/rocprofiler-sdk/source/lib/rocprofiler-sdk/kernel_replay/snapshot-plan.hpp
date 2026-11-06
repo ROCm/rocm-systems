@@ -90,6 +90,18 @@ struct prefix_chunking
     }
 };
 
+// The bytes a tier may plan to hold, leaving the application at least 1/`kept_divisor` of what is
+// free. The arena the tier retains from earlier snapshots counts as free, because a larger
+// snapshot frees it first, and the share is taken from that total, so holding the arena does not
+// raise the next budget. A smaller snapshot reuses the whole arena, so the budget does not drop
+// below it either.
+constexpr uint64_t
+tier_budget(uint64_t retained, uint64_t available, uint64_t kept_divisor)
+{
+    const auto usable = retained + available;
+    return std::max(retained, usable - usable / std::max<uint64_t>(kept_divisor, 1));
+}
+
 // Places every request through `storage` in priority order. On failure the storage is reset.
 template <typename Storage>
 std::optional<std::vector<placement_t>>
