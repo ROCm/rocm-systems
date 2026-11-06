@@ -250,6 +250,7 @@ function(rccl_define_micro_source_lists)
     ras-param-test.cc                    # src/ras/ras_param.cc
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
+    sym-model-lsa-test.cc                # src/tuning/sym_model/lsa.cc
     csv-tuner-test.cc                    # src/plugin/tuner/csv_tuner.cc
     param-utils-test.cc                  # src/include/param/utils.h, src/include/param/parser_common.h
     param-parsers-test.cc                # src/include/param/parser_{default,enum,bitset,list}.h
@@ -1625,6 +1626,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
     TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
+    SYM_MODEL_LSA_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/lsa.cc"
+    SYM_MODEL_LSA_A2A_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/lsa_a2a.cc"
+    SYM_MODEL_LSA_BASE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/lsa_base.cc"
     CSV_TUNER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/tuner/csv_tuner.cc"
     # Source tuner/ dir, so a test can check the generator embedded the CSVs verbatim.
     RCCL_TUNER_CSV_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tuner"
