@@ -313,7 +313,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    0,                   // [8] AlltoAll        -- 0 = disabled
+    256ULL*1024*1024,    // [8] AlltoAll        -- 256MB
   },
   // ddaVmmMaxR2: DDA VMM cap when recv buffer is registered (R2 mode).
   // DDA is gated on !symEligible (AR: !symkRequested) on every arch, including
