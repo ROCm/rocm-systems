@@ -57,7 +57,9 @@ rj_add_object_library(rocjitsu_analysis
     analysis/free_registers.cpp
     analysis/gfx1250_vgpr_msb.cpp
     analysis/indirect_branch_discovery.cpp
+    analysis/instruction_boundaries.cpp
     analysis/liveness.cpp
+    analysis/static_barriers.cpp
 )
 
 rj_add_object_library(rocjitsu_code
@@ -85,6 +87,8 @@ rj_add_object_library(rocjitsu_code
     patch/sidecar_metadata.cpp
     dbt/waitcnt_translator.cpp
     patch/code_object_patcher.cpp
+    patch/checked_text_edits.cpp
+    patch/fault_injection/drop_barrier.cpp
     patch/entry_prologue.cpp
     patch/kernel_text_layout.cpp
     patch/log_buffer.cpp
