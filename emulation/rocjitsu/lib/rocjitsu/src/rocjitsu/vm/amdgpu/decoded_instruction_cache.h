@@ -11,6 +11,7 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <span>
 
@@ -74,27 +75,25 @@ public:
   /// @details Construct immediately after decode() with the same key and policy.
   /// Memory pipelines and async execution take ownership by releasing/moving
   /// the caller's unique_ptr, so their in-flight instructions cannot become
-  /// cache entries. A caller that lets an exception escape must discard() first:
-  /// a catch there costs nothing per instruction, whereas comparing
-  /// std::uncaught_exceptions() here took a PLT call and a TLS lookup on every
-  /// construction and destruction.
+  /// cache entries.
   class ScopedReturn {
   public:
     ScopedReturn(DecodedInstructionCache &cache, std::unique_ptr<Instruction> &instruction,
                  uint64_t pc, uint32_t vmid, Words words, bool enabled = true)
         : cache_(cache), instruction_(instruction), pc_(pc), vmid_(vmid), words_(words),
-          enabled_(enabled), from_pc_slot_(cache.from_pc_slot_) {}
+          enabled_(enabled), exceptions_(std::uncaught_exceptions()),
+          from_pc_slot_(cache.from_pc_slot_) {}
 
     [[gnu::always_inline]] ~ScopedReturn() {
       if (enabled_ && instruction_ && !instruction_->is_memory_op() && !instruction_->data() &&
-          !borrows_fetch_buffer(*instruction_, words_))
+          !borrows_fetch_buffer(*instruction_, words_) && std::uncaught_exceptions() == exceptions_)
         cache_.put(pc_, vmid_, words_, instruction_, from_pc_slot_);
     }
 
     ScopedReturn(const ScopedReturn &) = delete;
     ScopedReturn &operator=(const ScopedReturn &) = delete;
 
-    /// @brief Exclude a failed or unwinding execution from reuse.
+    /// @brief Exclude a failed execution from reuse.
     void discard() { enabled_ = false; }
 
   private:
@@ -104,6 +103,7 @@ public:
     uint32_t vmid_;
     Words words_;
     bool enabled_;
+    int exceptions_;
     bool from_pc_slot_;
   };
 

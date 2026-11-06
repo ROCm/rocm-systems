@@ -2024,37 +2024,9 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     handle_instruction_failure(*active, failure, exception_claimed);
     return IssueOutcome::NotIssued;
   }
+  Instruction *inst = decoded.value().get();
   DecodedInstructionCache::ScopedReturn return_decoded(decoded_inst_cache_, decoded.value(),
                                                        active->pc, vmid, words, reuse_decoded);
-  // A host exception may leave the instruction partly executed, so it must not
-  // return to the cache. The catch costs nothing until something throws.
-  try {
-    return issue_decoded_instruction<EnableAsync>(active, window, storage, vm_access, vmid, words,
-                                                  decoded, debugger_active, return_decoded);
-  } catch (...) {
-    return_decoded.discard();
-    // A failure handler that throws skips the normal clear after reporting.
-    execution_failure_detail_.clear();
-    throw;
-  }
-}
-
-template <bool EnableAsync>
-[[gnu::always_inline]] inline ComputeUnitCore::IssueOutcome
-ComputeUnitCore::issue_decoded_instruction(
-    Wavefront *active, MaybeAsyncWindow<EnableAsync> window,
-    MaybeAsyncWindowStorage<EnableAsync> storage, const GpuVmAccess *vm_access, uint32_t vmid,
-    const std::array<rj_code_binary_inst_t, DecodedInstructionCache::kNumWords> &words,
-    DecodeResult &decoded, bool debugger_active,
-    DecodedInstructionCache::ScopedReturn &return_decoded) {
-  const auto drain_async_window = [&]() {
-    if constexpr (EnableAsync) {
-      if (window)
-        window->drain();
-    }
-  };
-  const bool vm_address_space = vm_access != nullptr;
-  Instruction *inst = decoded.value().get();
   const auto fail_current_instruction = [&]() {
     return_decoded.discard();
     if constexpr (EnableAsync) {
@@ -2062,8 +2034,10 @@ ComputeUnitCore::issue_decoded_instruction(
         window->drain();
     }
     fail_wave_instruction(*active, inst->mnemonic(), active->pc,
-                          active->instruction_execution_error(), execution_failure_detail_);
-    execution_failure_detail_.clear();
+                          active->instruction_execution_error(),
+                          // Taken before reporting, so a throwing failure handler
+                          // cannot leave it for the next instruction.
+                          std::exchange(execution_failure_detail_, {}));
   };
   // Operand resolution outside execute_instruction() participates in the same
   // per-instruction failure contract as the generated execution callback.
@@ -2176,8 +2150,6 @@ ComputeUnitCore::issue_decoded_instruction(
     }
   }
 
-  // The words issue_instruction_impl() fetched before deciding whether to read one more.
-  constexpr uint32_t kFirstFetchWords = InstructionCache::kFetchBytes / sizeof(words[0]);
   if (observes_before_execute_instruction_)
     plugin_group_->onAmdgpuBeforeExecuteInstruction(
         active->pc, *inst, *active,
