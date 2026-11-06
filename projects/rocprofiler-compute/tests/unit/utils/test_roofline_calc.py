@@ -30,6 +30,11 @@ GFX1201_ROOFLINE_YAML = (
     Path(__file__).resolve().parents[3]
     / "src/rocprof_compute_soc/analysis_configs/gfx1201/0400_roofline.yaml"
 )
+GFX1201_SOL_YAML = (
+    Path(__file__).resolve().parents[3]
+    / "src/rocprof_compute_soc/analysis_configs/gfx1201"
+    / "0200_system_speed_of_light.yaml"
+)
 
 
 def assert_graph_points_positive_finite(
@@ -286,8 +291,11 @@ def test_roofline_mem_levels_plots_mall_where_the_arch_opts_in() -> None:
 
 
 def test_gfx1201_plot_points_use_the_matching_traffic() -> None:
-    """Each gfx1201 AI row divides the VALU plus WMMA FLOPs by its level's bytes;
-    AI DRAM uses the GL2C/EA requests destined for DRAM."""
+    """Each gfx1201 AI row divides the VALU plus WMMA FLOPs by its level's bytes.
+
+    AI L1 uses the sized GL1C request buckets, AI L0 counts 128 bytes per
+    TCP_REQ, and AI DRAM uses 32-byte DRAM-destined granules.
+    """
     config = yaml.safe_load(GFX1201_ROOFLINE_YAML.read_text(encoding="utf-8"))
     metrics = config["Panel Config"]["data source"][1]["metric_table"]["metric"]
     counters = {
@@ -298,11 +306,17 @@ def test_gfx1201_plot_points_use_the_matching_traffic() -> None:
         "GL1C_GL2_REQ_READ_128B_sum": [3],
         "GL1C_GL2_REQ_WRITE_32B_sum": [4],
         "GL1C_GL2_REQ_WRITE_64B_sum": [5],
-        "TCP_GL1_REQ_READ_sum": [6],
-        "TCP_GL1_REQ_WRITE_sum": [7],
-        "TCP_REQ_sum": [8],
-        "GL2C_EA_RDREQ_DRAM_sum": [9],
-        "GL2C_EA_WRREQ_DRAM_sum": [10],
+        "GL1C_REQ_READ_32B_sum": [1],
+        "GL1C_REQ_READ_64B_sum": [2],
+        "GL1C_REQ_READ_128B_sum": [3],
+        "GL1C_REQ_READ_256B_sum": [4],
+        "GL1C_REQ_WRITE_32B_sum": [5],
+        "GL1C_REQ_WRITE_64B_sum": [6],
+        "GL1C_REQ_WRITE_128B_sum": [7],
+        "GL1C_REQ_WRITE_256B_sum": [8],
+        "TCP_REQ_sum": [9],
+        "GL2C_EA_RDREQ_DRAM_32B_sum": [10],
+        "GL2C_EA_WRREQ_DRAM_32B_sum": [11],
         "SQC_LDS_IDX_ACTIVE_sum": [20],
         "SQC_LDS_BANK_CONFLICT_sum": [4],
     }
@@ -312,12 +326,13 @@ def test_gfx1201_plot_points_use_the_matching_traffic() -> None:
         {},
     )
     flops = 32 * (100 - 2) + 8192 * 2
+    l1_bytes = 1 * 32 + 2 * 64 + 3 * 128 + 4 * 256 + 5 * 32 + 6 * 64 + 7 * 128 + 8 * 256
     expected_bytes = {
         "AI L2": 1 * 32 + 2 * 64 + 3 * 128 + 4 * 32 + 5 * 64,
-        "AI L1": 64 * (6 + 7),
-        "AI L0": 64 * 8,
+        "AI L1": l1_bytes,
+        "AI L0": 128 * 9,
         "AI LDS": (20 - 4) * 4 * 32,
-        "AI DRAM": 256 * (9 + 10),
+        "AI DRAM": 32 * (10 + 11),
     }
     for metric, byte_count in expected_bytes.items():
         expression = build_eval_string(metrics[metric]["value"])
@@ -335,10 +350,31 @@ def test_gfx1201_dram_destined_rows_compare_one_value_with_both_roofs() -> None:
     infinity_cache = rates["DRAM-Destined BW (Infinity Cache Peak)"]
 
     assert dram["value"] == infinity_cache["value"]
-    assert "GL2C_EA_RDREQ_DRAM_sum" in dram["value"]
-    assert "GL2C_EA_WRREQ_DRAM_sum" in dram["value"]
+    assert "GL2C_EA_RDREQ_DRAM_32B_sum" in dram["value"]
+    assert "GL2C_EA_WRREQ_DRAM_32B_sum" in dram["value"]
+    assert dram["value"].startswith("32 *")
     assert dram["peak"] == "$DRAMBw_empirical_peak * 1e9"
     assert infinity_cache["peak"] == "$MALLBw_empirical_peak * 1e9"
+
+
+def test_gfx1201_sol_fp32_excludes_wmma_instructions() -> None:
+    """Speed-of-light FP32 subtracts WMMA instructions and keeps the 128 peak."""
+    config = yaml.safe_load(GFX1201_SOL_YAML.read_text(encoding="utf-8"))
+    metrics = config["Panel Config"]["data source"][0]["metric_table"]["metric"]
+    fp32 = metrics["VALU FLOPs (FP32)"]
+    assert fp32["peak"] == "$max_sclk * $cu_per_gpu * 128 / 1000"
+    evaluator = MetricEvaluator(
+        pd.DataFrame({
+            "SQ_INSTS_VALU_sum": [100],
+            "SQ_WMMA_VALU_INSTS_sum": [2],
+            "End_Timestamp": [2_000_000],
+            "Start_Timestamp": [1_000_000],
+        }),
+        {"ammolite__wave_size": 32},
+        {},
+    )
+    expression = build_eval_string(fp32["value"])
+    assert evaluator.eval_expression(expression) == pytest.approx(32 * 98 / 1_000_000)
 
 
 ##############################################################################
