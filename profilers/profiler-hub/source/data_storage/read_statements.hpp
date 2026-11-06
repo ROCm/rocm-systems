@@ -1202,6 +1202,8 @@ private:
         return sql;
     }
 
+    // no_rows deduces its return type, so GCC and Clang need it defined above
+    // the first member function that calls it.
     template <typename Row, typename... Members>
     auto no_rows(Members Row::*... members)
     {
