@@ -165,6 +165,22 @@ long futex_wait_until(std::atomic<uint32_t> &word, uint32_t expected, const time
   return result;
 }
 
+/// @brief Keep a dispatch snapshot alive and release it on native thread exit.
+template <typename Driver>
+int dispatch_ioctl_snapshot(std::shared_ptr<Driver> &driver, unsigned long request, void *arg) {
+  int result;
+  pthread_cleanup_push(
+      +[](void *state) {
+        const int saved_errno = errno;
+        static_cast<std::shared_ptr<Driver> *>(state)->reset();
+        errno = saved_errno;
+      },
+      &driver);
+  result = driver->ioctl(request, arg);
+  pthread_cleanup_pop(0);
+  return result;
+}
+
 /// @brief Wake every waiter sleeping on @p word.
 void futex_wake_all(std::atomic<uint32_t> &word) {
   (void)syscall(SYS_futex, &word, FUTEX_WAKE_PRIVATE, std::numeric_limits<int>::max(), nullptr,
@@ -5151,7 +5167,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
   }
 
   if (auto remote = InterposerContext::ctx.remote_lookup(fd))
-    return kfd_ioctl_ret(remote->ioctl(request, arg));
+    return kfd_ioctl_ret(dispatch_ioctl_snapshot(remote, request, arg));
   // Dispatch a tracked KFD fd by its RECORDED backend, not by "remote if any
   // remote is live". In mixed local+daemon mode a Local-tagged dup must route to
   // the local driver and a Remote-tagged dup to the remote connection; guessing
@@ -5184,7 +5200,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
           // shared_ptr snapshot is still live, and this dup still belongs to it.
           remote_dispatch = InterposerContext::ctx.remote();
         } else if (auto drv = InterposerContext::ctx.driver()) {
-          int rc = drv->ioctl(request, arg);
+          int rc = dispatch_ioctl_snapshot(drv, request, arg);
           // Capture the KFD allocation flags for a freshly exported dmabuf fd. The
           // flags determine the GPU PTE MTYPE when the fd is later mapped via GEM_VA,
           // and must be recorded now because the allocation may be freed first. Only
@@ -5212,7 +5228,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
     // Classification done and no local snapshot held: dispatch the remote op on the
     // lifetime-extending snapshot captured above.
     if (remote_dispatch)
-      return kfd_ioctl_ret(remote_dispatch->ioctl(request, arg));
+      return kfd_ioctl_ret(dispatch_ioctl_snapshot(remote_dispatch, request, arg));
   }
   // Late-ioctl safety net: an AMDKFD ('K') ioctl may arrive on a tracked KFD fd
   // whose primary remote handle changed underneath it (e.g. a close/dup race in
@@ -5237,7 +5253,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
     }
     if (have_backend && backend == InterposerContext::DupBackend::Remote) {
       if (auto remote = InterposerContext::ctx.remote())
-        return kfd_ioctl_ret(remote->ioctl(request, arg));
+        return kfd_ioctl_ret(dispatch_ioctl_snapshot(remote, request, arg));
     }
   }
 

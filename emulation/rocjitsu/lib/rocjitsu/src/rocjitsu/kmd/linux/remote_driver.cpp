@@ -31,6 +31,7 @@
 #endif
 #include <mutex>
 #include <poll.h>
+#include <pthread.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
@@ -47,10 +48,21 @@
 #include <sys/un.h>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
 namespace {
+
+/// @brief Release call-owned state if a blocking RPC exits its native thread.
+template <typename Cleanup, typename Function>
+auto native_rpc_call(Cleanup &cleanup, Function &&function) {
+  decltype(function()) result;
+  pthread_cleanup_push(+[](void *state) { (*static_cast<Cleanup *>(state))(); }, &cleanup);
+  result = function();
+  pthread_cleanup_pop(0);
+  return result;
+}
 
 // Reply descriptors are temporary driver-owned aliases. Cleanup must preserve
 // the errno from a failed RPC, size check, or mapping without re-entering hooks.
@@ -807,7 +819,7 @@ int RemoteDriver::ioctl(unsigned long request, void *arg) {
 }
 
 int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
-  std::lock_guard<std::mutex> lock(rpc_mutex_);
+  std::unique_lock lock(rpc_mutex_);
   // The stream is misaligned past a rejected reply; every later header would be
   // parsed out of stale bytes. Fail closed instead of returning bogus results.
   // Tested under rpc_mutex_, not before it: a thread that read the flag first
@@ -1109,6 +1121,23 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       send_fds[num_send_fds++] = target_proc_fd.get();
     }
   }
+  std::vector<uint8_t> payload;
+  int received_fds[1] = {-1};
+  size_t num_fds = 1;
+  auto abandon_rpc = [&] {
+    const int saved_errno = errno;
+    // A native exit cannot tell how much of the frame reached either peer.
+    // Poison while serialized, then release storage before the outer snapshot.
+    (void)poison_stream();
+    target_mem_fd.reset();
+    target_proc_fd.reset();
+    if (received_fds[0] >= 0)
+      syscall(SYS_close, std::exchange(received_fds[0], -1));
+    std::vector<uint8_t>().swap(payload);
+    std::vector<uint8_t>().swap(buf);
+    lock.unlock();
+    errno = saved_errno;
+  };
   // A send that fails without putting a byte on the wire is recoverable: the
   // daemon never saw a frame, so the stream is still aligned and the caller just
   // gets the transport errno. A send that stops part way through is not — the
@@ -1119,7 +1148,9 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     // sendmsg() on a stream socket may accept only part of the buffer; the
     // ancillary fds ride on the first byte, so a short send is a truncated frame
     // with the descriptors already handed over.
-    const auto sent = rpc_send_msg(sock_, buf.data(), buf.size(), send_fds, num_send_fds);
+    const auto sent = native_rpc_call(abandon_rpc, [&] {
+      return rpc_send_msg(sock_, buf.data(), buf.size(), send_fds, num_send_fds);
+    });
     if (sent > 0 && static_cast<size_t>(sent) != buf.size())
       return poison_stream();
     if (sent <= 0) {
@@ -1130,7 +1161,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     }
   } else {
     size_t sent = 0;
-    if (!rpc_send_exact(sock_, buf.data(), buf.size(), &sent)) {
+    if (!native_rpc_call(abandon_rpc,
+                         [&] { return rpc_send_exact(sock_, buf.data(), buf.size(), &sent); })) {
       if (sent > 0)
         return poison_stream();
       return transport_errno();
@@ -1139,10 +1171,9 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
 
   // Receive response — may include a backing descriptor via SCM_RIGHTS for ALLOC_MEMORY.
   uint8_t resp_header_buf[sizeof(RpcHeader)];
-  int received_fds[1] = {-1};
-  size_t num_fds = 1;
-  auto bytes =
-      rpc_recv_msg(sock_, resp_header_buf, sizeof(resp_header_buf), received_fds, &num_fds);
+  auto bytes = native_rpc_call(abandon_rpc, [&] {
+    return rpc_recv_msg(sock_, resp_header_buf, sizeof(resp_header_buf), received_fds, &num_fds);
+  });
 
   // Every reply byte we decline to read leaves the stream misaligned: the next
   // call would parse its header out of this one's remains, silently returning a
@@ -1178,10 +1209,12 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     return poison_reply();
 
   if (resp->payload_bytes > 0) {
-    std::vector<uint8_t> payload(resp->payload_bytes);
+    payload.resize(resp->payload_bytes);
     // A partial read consumes part of the declared payload and abandons the
     // rest, which is the same misalignment as refusing it outright.
-    if (!rpc_recv_exact(sock_, payload.data(), resp->payload_bytes))
+    if (!native_rpc_call(abandon_rpc, [&] {
+          return rpc_recv_exact(sock_, payload.data(), resp->payload_bytes);
+        }))
       return poison_reply();
 
     size_t copy_size = std::min(arg_size, static_cast<size_t>(resp->payload_bytes));
@@ -1382,6 +1415,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       }
     }
   }
+
+  std::vector<uint8_t>().swap(payload);
 
   auto register_allocation = [&](uint64_t handle, uint64_t va_addr, uint64_t size, int backing_fd) {
     handle_backings_[handle] = backing_fd;
