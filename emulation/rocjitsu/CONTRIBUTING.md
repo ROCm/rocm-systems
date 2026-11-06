@@ -53,8 +53,6 @@ Before writing new infrastructure, check these existing libraries:
 - **Expected failures** — Return `Result` or `FailureOr<T>` and accept a
   `DiagnosticEmitter` when the caller needs a reason. Its sink is non-owning
   and must not outlive its callable.
-- **Exceptions** — `util/except.h` for unrecoverable initialization,
-  configuration, and execution failures.
 - **Register sets** — `isa/register_set.h` for ISA-independent register
   file modeling (SGPR/VGPR/AccVGPR bitsets).
 - **Spill manager** — `code/patch/spill_manager.h` for scratch layout
@@ -93,14 +91,10 @@ Before writing new infrastructure, check these existing libraries:
   survive a log-groups-OFF build, and its signal-backtrace path must stay
   async-signal-safe (`rj_hsa_dbt_hooks.cpp` uses raw `::write`).
 - **Errors.** Expected failures such as a rejected instruction encoding return
-  `Result` or `FailureOr<T>` and optionally emit a diagnostic. Do not introduce
-  new exception use unless an existing code path requires it. Exceptions are
-  reserved for unrecoverable initialization, configuration, or execution
-  failures. The project plans to disable exceptions entirely in the future.
-  Do not throw exceptions in simulation hot paths (event handlers, instruction
-  execution, cache lookups). Do not add `try`/`catch` blocks unless you are at a
-  boundary that must translate an error (e.g., the C API layer). There is no
-  general exception safety guarantee unless explicitly documented.
+  `Result` or `FailureOr<T>` and optionally emit a diagnostic. C++ exceptions are
+  disabled. Use checked native APIs for expected operating-system failures.
+  Diagnostic sinks and runtime callbacks must not throw. Preserve ownership,
+  cleanup, and the original failure when propagating results across threads.
 
 ## ISA codegen workflow
 

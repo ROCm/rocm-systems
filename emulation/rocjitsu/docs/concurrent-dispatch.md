@@ -8,7 +8,7 @@ another even when pool workers were idle.
 ## Submission ownership
 
 Each `CpuDispatchPool::run()` now owns its task span, result span, atomic task
-index, exception and completion condition. A short mutex protects an intrusive
+index and completion condition. A short mutex protects an intrusive
 queue of worker assignments. Workers claim an assignment under the mutex, then
 drain its CUs without holding that mutex. Pending submissions rotate when a
 worker takes an assignment. An assigned worker finishes its current submission;
@@ -148,8 +148,8 @@ be waiting for the caller's own submission to finish.
 
 ## Validation and reproduction
 
-Focused tests cover overlapping submissions, independent completion, exception
-ownership, per-submission width limits, repeated reuse, caller isolation and XCD
+Focused tests cover overlapping submissions, independent completion,
+per-submission width limits, repeated reuse, caller isolation and XCD
 queue/barrier ordering. Policy tests cover affinity, overrides, multiple GPUs,
 topology clamps, discrete granules, preset tables and checkpoint persistence.
 Mirage tests exercise generated configurations and the real CLI override path.

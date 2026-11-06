@@ -207,7 +207,7 @@ protocol-defined skipped extent, which the ring owner must bound against its rin
 and producer cursor. Ring ownership, VM snapshots, scheduling, consumer publication,
 and completion remain outside packet processors. Guest-controlled AQL validation failures are
 reported through the typed packet/admission result and fault only their queue;
-internal invariant violations remain exceptions.
+internal invariant violations are asserted.
 The firmware-free PM4 path supports the modeled compute-queue packet subset,
 rather than general PM4. MES maps its MQD and address space, but submits the
 queue through `GpuQueueRegistry` to a selected command processor. The binding
@@ -468,7 +468,7 @@ budget nor reconstructs the pool.
 
 One pool is shared by all CPs in an SoC, so retained worker counts do not
 multiply with the XCD count. Each submission owns its task index, results,
-exception state and worker join. A short pool mutex protects pending assignments
+and worker join. A short pool mutex protects pending assignments
 and worker ownership; it is released before CU execution. Simdojo's `num_threads`
 can therefore drive concurrent submissions from separate XCD partitions. With
 E engine threads and dispatch width D, at most E + D - 1 CU threads can execute

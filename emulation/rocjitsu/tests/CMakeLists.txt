@@ -3856,7 +3856,7 @@ if(RJ_ENABLE_HIP_TESTS)
             OUTPUT ${HIP_TEST_BIN}
             COMMAND
                 ${AMDCXX} -x hip --offload-arch=${ARG_ARCH}
-                --rocm-path=${ROCM_PATH} -std=c++20 -O2
+                --rocm-path=${ROCM_PATH} -std=c++20 -O2 -fno-exceptions
                 ${RJ_HIP_SANITIZER_FLAGS} -isystem ${GTEST_INC}
                 -I${CMAKE_CURRENT_SOURCE_DIR} -o ${HIP_TEST_BIN} ${HIP_TEST_SRC}
                 ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest -lpthread
@@ -4491,7 +4491,7 @@ if(RJ_ENABLE_HIP_TESTS AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
         OUTPUT ${CVT_NARROW_BIN}
         COMMAND
             ${AMDCXX} -x hip --offload-arch=gfx950 --rocm-path=${ROCM_PATH}
-            -std=c++20 ${RJ_HIP_SANITIZER_FLAGS}
+            -std=c++20 -fno-exceptions ${RJ_HIP_SANITIZER_FLAGS}
             "-I$<JOIN:$<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>,;-I>"
             -o ${CVT_NARROW_BIN}
             ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
