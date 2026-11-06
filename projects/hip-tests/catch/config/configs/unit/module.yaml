@@ -150,6 +150,18 @@ module:
   Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim:
     <<: *level_default
     tags: [launch]
+  Unit_hipDrvLaunchKernelEx_Negative_OversizedCluster:
+    <<: *level_default
+    tags: [launch]
+  Unit_hipDrvLaunchKernelEx_Negative_OverflowClusterDim:
+    <<: *level_default
+    tags: [launch]
+  Unit_hipDrvLaunchKernelEx_Negative_NonClusterDevice:
+    <<: *level_default
+    tags: [launch]
+  Unit_hipLaunchKernelExC_Negative_NonClusterDevice:
+    <<: *level_default
+    tags: [launch]
   Unit_hipExtLaunchMultiKernelMultiDevice_Functional:
     <<: *level_default
     tags: [launch]
