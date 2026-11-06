@@ -23,6 +23,8 @@
 #include <hip/hip_runtime.h>
 #include <algorithm>
 #include <atomic>
+#include <cctype>
+#include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -206,10 +208,11 @@ static ncclResult_t ginAnvilDevices(int* ndev) {
   return ncclSuccess;
 }
 
-// v14 GIN plugins expose GIN capability flags via getGinProperties. The Anvil
-// SDMA backend uses intra-node LSA (flat) signals, which behave as both strong
-// and VA-addressable signals; report both as supported (matches the behavior
-// previously injected by the v13->v14 shim for internal plugins).
+// v14 GIN plugins expose GIN capability flags via getGinProperties.
+// Strong signals are honoured per Put/PutValue by draining every SDMA queue
+// to the peer before the signal (quietPeerQueues in gin_anvil_sdma.h). VA
+// signals resolve through their window like a put destination and take the
+// same strong/weak and fused paths as indexed signals.
 static ncclResult_t ginAnvilGetGinProperties(ncclGinProperties_t* ginProps) {
   ginProps->supportsStrongSignals = true;
   ginProps->supportsVASignals = true;
@@ -252,10 +255,14 @@ static int ginAnvilEnvInt(const char* name, int defaultVal) {
 // values above UINT32_MAX saturate rather than wrapping.
 static size_t ginAnvilSdmaThresholdFromEnv() {
   const char* e = getenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD");
-  if (e && e[0] && *e != '-') {
+  // strtoull skips leading whitespace before it sees a sign, so " -1" would
+  // pass a bare *e != '-' check and come back as ULLONG_MAX. An overflowing
+  // value does the same when errno is ignored. Both fall back to the default.
+  if (e && e[0] && !std::isspace(static_cast<unsigned char>(e[0])) && *e != '-') {
+    errno = 0;
     char* end = nullptr;
     unsigned long long v = strtoull(e, &end, 10);
-    if (end != e && *end == '\0') return (size_t)v;
+    if (end != e && *end == '\0' && errno != ERANGE) return (size_t)v;
   }
   return (size_t)NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
 }
@@ -778,16 +785,34 @@ static uintptr_t* ginAnvilBuildSignalPeerAddrs(void* base, int nRanks, int ginRa
   return addrs;
 }
 
+// The signal peer table is indexed by GIN peer, but each entry is a slot in this
+// rank's LSA window. Returns the first GIN peer that is not the LSA team member in
+// the slot its entry points at, or -1 if every entry is a mapped peer.
+static int ginAnvilFirstSignalPeerOutsideLsa(const struct ncclComm* comm, int nRanks, int ginRank) {
+  const struct ncclDevrState* devr = &comm->devrState;
+  const long long ginStride =
+    comm->globalGinSupport == NCCL_GIN_CONNECTION_RAIL ? comm->contiguousRanksPerHost : 1;
+  for (int pe = 0; pe < nRanks; pe++) {
+    const int slot = devr->lsaSelf + (pe - ginRank);
+    const long long worldPeer = comm->rank + (long long)(pe - ginRank) * ginStride;
+    if (devr->lsaRankList == nullptr || slot < 0 || slot >= devr->lsaSize || devr->lsaRankList[slot] != worldPeer) {
+      return pe;
+    }
+  }
+  return -1;
+}
+
 static ncclResult_t ginAnvilRegisterSignalSpan(struct ncclComm* comm, void* spanLsaSelf, size_t spanBytes, int nRanks,
                                                int ginRank) {
   struct ncclDevrState* devr = &comm->devrState;
 
-  if (nRanks != devr->lsaSize) {
-    WARN("GIN anvil-sdma: signal nRanks=%d != devr->lsaSize=%d (rank %d)", nRanks, devr->lsaSize, ginRank);
-  }
-  if (ginRank != devr->lsaSelf) {
-    WARN("GIN anvil-sdma: ginRank=%d != devr->lsaSelf=%d (signal peer indexing may be wrong)", ginRank,
-         devr->lsaSelf);
+  const int outsidePeer = ginAnvilFirstSignalPeerOutsideLsa(comm, nRanks, ginRank);
+  if (outsidePeer >= 0) {
+    WARN("GIN anvil-sdma: GIN peer %d is outside the LSA team of rank %d (ginRank=%d, ginRanks=%d, lsaSelf=%d, "
+         "lsaSize=%d). Anvil SDMA can only signal LSA team peers; set NCCL_LSA_TEAM_SIZE to cover the GIN team "
+         "or select another NCCL_GIN_TYPE.",
+         outsidePeer, comm->rank, ginRank, nRanks, devr->lsaSelf, devr->lsaSize);
+    return ncclInvalidUsage;
   }
 
   uintptr_t* hostAddrs = ginAnvilBuildSignalPeerAddrs(spanLsaSelf, nRanks, ginRank, (ptrdiff_t)devr->bigSize);

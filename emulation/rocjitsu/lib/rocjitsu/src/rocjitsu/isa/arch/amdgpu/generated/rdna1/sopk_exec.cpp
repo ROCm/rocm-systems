@@ -118,7 +118,11 @@ void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCallB64Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::RegisterAccess(wf).write_scalar64(sdst, wf.pc + size_);
+  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
+  uint64_t next_pc = (wf.pc + size_) & kPcAddressMask;
+  if (next_pc & (1ULL << 47))
+    next_pc |= ~kPcAddressMask;
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, next_pc);
   int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
   wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
 }

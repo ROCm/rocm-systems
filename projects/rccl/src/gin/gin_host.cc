@@ -286,7 +286,16 @@ static ncclResult_t ginDevCommSetupWithBackend(struct ncclComm* comm, struct ncc
     // TODO: check if a shared devComm in the list could match our requirements.
   }
 
-  nContextsTotal = ROUNDUP(nContextsTotal, backend->ginCommCount);
+  if (reqs->ginContextCount == 0) {
+    // ginContextCount is a hint; 0 is the documented "use a default" value (see
+    // niinInit). An active GIN connection still needs at least one context, so
+    // fall back to one context per GIN connection.
+    INFO(NCCL_INIT,
+         "devCommCreate: ginContextCount=0 with an active GIN connection; "
+         "defaulting to one context per GIN connection");
+  }
+
+  nContextsTotal = ncclGinContextCount(nContextsTotal, backend->ginCommCount);
   devComm->ginContextCount = nContextsTotal;
   int nContextsPerComm = nContextsTotal / backend->ginCommCount;
   INFO(NCCL_INIT,

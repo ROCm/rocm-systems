@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 rj_add_object_library(rocjitsu_vm_amdgpu
+    arithmetic_policy.cpp
     aql/aql_packet_processor.cpp
     compute_queue_binding_factory.cpp
     circular_ring_reader.cpp
@@ -10,6 +11,7 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     command_processor.cpp
     completion_tracker.cpp
     compute_unit.cpp
+    coalesced_lane_runs.cpp
     consumer_cursor_journal.cpp
     device_cache_coherence.cpp
     gpu_memory_access.cpp
@@ -35,6 +37,8 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     wavefront.cpp
     xcd.cpp
 )
+
+target_link_libraries(rocjitsu_vm_amdgpu PUBLIC rj_arith)
 
 # Share ISA wait decoding with the offline checker, without its dataflow state.
 # Final VM consumers need the objects; transitive object-library linking alone

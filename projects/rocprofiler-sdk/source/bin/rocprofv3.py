@@ -573,7 +573,7 @@ For attachment profiling of running processes:
         "-o",
         "--output-file",
         help="For the output file name. If nothing specified default path is `%%hostname%%/%%pid%%`",
-        default=os.environ.get("ROCPROF_OUTPUT_FILE_NAME", None),
+        default=None,
         type=str,
         required=False,
     )
@@ -581,7 +581,7 @@ For attachment profiling of running processes:
         "-d",
         "--output-directory",
         help="For adding output path where the output files will be saved. If nothing specified default path is `%%hostname%%/%%pid%%`",
-        default=os.environ.get("ROCPROF_OUTPUT_PATH", None),
+        default=None,
         type=str,
         required=False,
     )
@@ -1189,7 +1189,7 @@ For attachment profiling of running processes:
         "-p",
         "--pid",
         "--attach",
-        help="""Attach to a target process by pid and execute as a tool from within said process.""",
+        help="""Attach to a target process by pid and execute as a tool from within said process. Uses the tool library of the rocprofiler-sdk installation the target process is running when it can be located, otherwise the tool library of this installation (with a warning). Set ROCPROF_ATTACH_TOOL_LIBRARY to attach a different tool library. Options the target's rocprofiler-sdk does not support are skipped with warnings.""",
         type=int,
         default=None,
     )
@@ -1820,20 +1820,31 @@ def run(app_args, args, **kwargs):
         update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
         update_env("LD_PRELOAD", ":".join(append_preload), append=True)
 
-    update_env(
-        "ROCP_TOOL_LIBRARIES",
-        f"{ROCPROF_TOOL_LIBRARY}",
-        append=True,
-    )
+    # in attach mode, rocprof-attach selects the tool library for the target process
+    if not args.pid:
+        update_env(
+            "ROCP_TOOL_LIBRARIES",
+            f"{ROCPROF_TOOL_LIBRARY}",
+            append=True,
+        )
     update_env(
         "LD_LIBRARY_PATH",
         f"{ROCM_DIR}/lib",
         append=True,
     )
 
-    _output_file = args.output_file
+    # -o/-d stay None so a typed option stays distinguishable from an inherited
+    # ROCPROF_OUTPUT_*, which the listing subprocess always inherits from below;
+    # this restores the effective values the argparse defaults used to supply
+    _output_file = (
+        args.output_file
+        if args.output_file is not None
+        else os.environ.get("ROCPROF_OUTPUT_FILE_NAME")
+    )
     _output_path = (
-        args.output_directory if args.output_directory is not None else os.getcwd()
+        args.output_directory
+        if args.output_directory is not None
+        else os.environ.get("ROCPROF_OUTPUT_PATH", os.getcwd())
     )
 
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
@@ -1844,11 +1855,6 @@ def run(app_args, args, **kwargs):
         app_env["ROCPROF_OUTPUT_PATH"] = os.path.join(
             f"{_output_path}", f"{args.sub_directory}{app_pass}"
         )
-
-    if args.list_avail and (
-        args.output_file is not None or args.output_directory is not None
-    ):
-        update_env("ROCPROF_OUTPUT_LIST_AVAIL_FILE", True)
 
     if not args.output_format:
         args.output_format = ["rocpd"]
@@ -2077,13 +2083,6 @@ def run(app_args, args, **kwargs):
             overwrite_if_true=True,
         )
 
-    if args.pid:
-        update_env(
-            "ROCPROF_ATTACH_TOOL_LIBRARY",
-            ROCPROF_ATTACH_TOOL_LIBRARY,
-            overwrite_if_true=True,
-        )
-
     if args.collection_period:
         factors = {
             "hour": 60 * 60 * 1e9,
@@ -2191,38 +2190,42 @@ def run(app_args, args, **kwargs):
     if args.list_avail:
         update_env("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", "on")
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3-avail")
+
+        # rocprofv3-avail owns the library and the output file; pass it options
+        # and let it decide, so a direct invocation behaves the same way. Only a
+        # requested output location, -o/-d or an input file, diverts the listing
+        # from stdout. A placeholder in the name is expanded by rocprofv3-avail,
+        # so the listing shares the run's stem only when the name has none
+        avail_command = [sys.executable, path]
+        if args.output_file is not None or args.output_directory is not None:
+            avail_command += ["--output-directory", _output_path]
+            if _output_file is not None:
+                avail_command += ["--output-file", _output_file]
+        avail_command += ["info", "--pmc", "--pc-sampling", "--spm-config"]
+
         if app_args:
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--pmc"],
-                env=app_env,
-            )
-            if exit_code != 0:
-                fatal_error("rocprofv3-avail exit with error")
-
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--pc-sampling"],
-                env=app_env,
-            )
-
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--spm-config"],
-                env=app_env,
-            )
+            if args.echo:
+                # the listing runs as its own process, so report it alongside the
+                # application command echoed at the end of this function
+                sys.stderr.flush()
+                print(f"command: {avail_command}")
+                sys.stdout.flush()
+            else:
+                try:
+                    subprocess.check_call(avail_command, env=app_env)
+                except subprocess.CalledProcessError as error:
+                    fatal_error(
+                        "rocprofv3-avail exit with error", exit_code=error.returncode
+                    )
         else:
-            app_args = [sys.executable, path, "info", "--pmc"]
+            # with no application to profile the listing is what rocprofv3 runs,
+            # so --echo and the exit code flow through the common path below
+            app_args = avail_command
             for itr in ("ROCPROF", "ROCPROFILER", "ROCTX"):
                 update_env(
                     f"{itr}_LOG_LEVEL",
                     "error",
                 )
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--pc-sampling"],
-                env=app_env,
-            )
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--spm-config"],
-                env=app_env,
-            )
 
     elif args.pid:
         update_env("ROCPROF_ATTACH_PID", args.pid)
@@ -2230,10 +2233,18 @@ def run(app_args, args, **kwargs):
             update_env("ROCPROF_ATTACH_DURATION", f"{args.attach_duration_msec}")
         update_env("ROCPROF_ATTACH_CHILDREN", "1" if args.attach_children else "0")
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprof-attach")
+        # rocprof-attach prefers the tool library of the target's rocprofiler-sdk
+        # installation and falls back to this one
+        attach_args = [
+            sys.executable,
+            path,
+            "--fallback-tool-library",
+            ROCPROF_ATTACH_TOOL_LIBRARY,
+        ]
         if app_args:
-            exit_code = subprocess.check_call([sys.executable, path], env=app_env)
+            exit_code = subprocess.check_call(attach_args, env=app_env)
         else:
-            app_args = [sys.executable, path]
+            app_args = attach_args
 
     elif not app_args and not args.echo:
         log_config(app_env)

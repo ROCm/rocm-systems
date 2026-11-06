@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -45,6 +46,10 @@ public:
   }
 
   VmAccessOutcome read(VmMemoryDomain, uint64_t address, std::span<std::byte> bytes) override {
+    if (address == unavailable_read_address_ && !unavailable_read_returned_) {
+      unavailable_read_returned_ = true;
+      return VmAccessOutcome::Unavailable;
+    }
     if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
       return VmAccessOutcome::Faulted;
     std::ranges::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(),
@@ -87,6 +92,11 @@ public:
 
   AtomicCompareExchangeResult compare_exchange(VmMemoryDomain, uint64_t address, uint32_t width,
                                                uint64_t expected, uint64_t desired) override {
+    if (address == unavailable_compare_exchange_address_ &&
+        !unavailable_compare_exchange_returned_) {
+      unavailable_compare_exchange_returned_ = true;
+      return {.outcome = VmAccessOutcome::Unavailable};
+    }
     if (width != 8)
       return {.outcome = VmAccessOutcome::Malformed};
     const uint64_t observed = load<uint64_t>(address);
@@ -108,6 +118,10 @@ public:
   }
 
   void set_unavailable_write(uint64_t address) { unavailable_write_address_ = address; }
+  void set_unavailable_read(uint64_t address) { unavailable_read_address_ = address; }
+  void set_unavailable_compare_exchange(uint64_t address) {
+    unavailable_compare_exchange_address_ = address;
+  }
   void set_unavailable_atomic_store(uint64_t address) {
     unavailable_atomic_store_address_ = address;
   }
@@ -122,8 +136,12 @@ private:
   uint64_t segment_size_;
   std::map<uint64_t, uint32_t> write_calls_;
   uint64_t unavailable_write_address_ = UINT64_MAX;
+  uint64_t unavailable_read_address_ = UINT64_MAX;
+  uint64_t unavailable_compare_exchange_address_ = UINT64_MAX;
   uint64_t unavailable_atomic_store_address_ = UINT64_MAX;
   bool unavailable_write_returned_ = false;
+  bool unavailable_read_returned_ = false;
+  bool unavailable_compare_exchange_returned_ = false;
   bool unavailable_atomic_store_returned_ = false;
   uint32_t successful_compare_exchanges_ = 0;
 };
@@ -150,6 +168,349 @@ std::array<uint32_t, 7> copy_packet(uint64_t source, uint64_t destination, uint3
           static_cast<uint32_t>(source >> 32),
           static_cast<uint32_t>(destination),
           static_cast<uint32_t>(destination >> 32)};
+}
+
+std::vector<uint32_t> swap_packet(SdmaPacketDialect dialect, uint64_t address_a, uint64_t address_b,
+                                  uint32_t bytes, bool wait = false, bool signal = false) {
+  std::vector<uint32_t> words{0x901u | (wait ? 1u << 30 : 0) | (signal ? 1u << 31 : 0)};
+  if (wait)
+    words.insert(words.end(), {3u | (3u << 18), 0x3000, 0, 0, 0, UINT32_MAX, UINT32_MAX});
+  // GFX12 operands use system scope, as emitted by ROCr.
+  const uint32_t parameter = dialect == SdmaPacketDialect::Gfx1250 ? (3u << 18) | (3u << 26) : 0;
+  words.insert(words.end(),
+               {bytes - 1, parameter, static_cast<uint32_t>(address_a),
+                static_cast<uint32_t>(address_a >> 32), static_cast<uint32_t>(address_b),
+                static_cast<uint32_t>(address_b >> 32)});
+  if (signal)
+    words.insert(words.end(), {0x70u | (3u << 18), 0x3100, 0, 1, 0});
+  return words;
+}
+
+TEST(SdmaPacketProcessorTest, SwapHandlesBothLayoutsAndMultipleChunks) {
+  for (const SdmaPacketDialect dialect :
+       {SdmaPacketDialect::LegacyExtendedCount, SdmaPacketDialect::Gfx1250}) {
+    for (const uint32_t bytes : {64u, 4160u}) {
+      SCOPED_TRACE(static_cast<int>(dialect));
+      SCOPED_TRACE(bytes);
+      PacketProcessorFixture fixture;
+      for (uint32_t index = 0; index < bytes; ++index) {
+        fixture.memory->store<uint8_t>(0x1000 + index,
+                                       static_cast<uint8_t>((index * 3 + 1) ^ (index >> 8)));
+        fixture.memory->store<uint8_t>(0x5000 + index,
+                                       static_cast<uint8_t>((index * 7 + 2) ^ (index >> 8)));
+      }
+      SdmaPacketProcessor processor(dialect);
+      const std::vector<uint32_t> packet = swap_packet(dialect, 0x1000, 0x5000, bytes);
+      const SdmaPacketProcessResult result =
+          processor.process({.available_dwords = packet,
+                             .access = *fixture.access,
+                             .continuation = fixture.continuation});
+      ASSERT_EQ(result.packet.status, PacketProcessStatus::Complete);
+      EXPECT_EQ(result.packet.retirement_bytes, packet.size() * sizeof(uint32_t));
+      EXPECT_TRUE(result.operation_committed);
+      for (uint32_t index = 0; index < bytes; ++index) {
+        ASSERT_EQ(fixture.memory->load<uint8_t>(0x1000 + index),
+                  static_cast<uint8_t>((index * 7 + 2) ^ (index >> 8)));
+        ASSERT_EQ(fixture.memory->load<uint8_t>(0x5000 + index),
+                  static_cast<uint8_t>((index * 3 + 1) ^ (index >> 8)));
+      }
+    }
+  }
+}
+
+TEST(SdmaPacketProcessorTest, SwapWaitSignalUsesCompactedExtentsAndSignalsAfterBothWrites) {
+  for (const bool wait : {false, true}) {
+    for (const bool signal : {false, true}) {
+      SCOPED_TRACE(wait);
+      SCOPED_TRACE(signal);
+      PacketProcessorFixture fixture;
+      fixture.memory->store<uint64_t>(0x1000, 0x1122334455667788);
+      fixture.memory->store<uint64_t>(0x2000, 0xaabbccddeeff0011);
+      fixture.memory->store<uint64_t>(0x3000, 1);
+      fixture.memory->store<uint64_t>(0x3100, 1);
+      SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250);
+      const std::vector<uint32_t> packet =
+          swap_packet(SdmaPacketDialect::Gfx1250, 0x1000, 0x2000, 64, wait, signal);
+      for (std::size_t size = 0; size < packet.size(); ++size) {
+        const SdmaPacketProcessResult result =
+            processor.process({.available_dwords = std::span(packet).first(size),
+                               .access = *fixture.access,
+                               .continuation = fixture.continuation});
+        ASSERT_EQ(result.packet.status, PacketProcessStatus::NeedInput);
+        EXPECT_FALSE(fixture.continuation.pending());
+        EXPECT_EQ(result.packet.required_bytes, (size == 0 ? 1 : packet.size()) * sizeof(uint32_t));
+      }
+      SdmaPacketProcessResult result = processor.process({.available_dwords = packet,
+                                                          .access = *fixture.access,
+                                                          .continuation = fixture.continuation});
+      if (wait) {
+        ASSERT_EQ(result.packet.status, PacketProcessStatus::Blocked);
+        EXPECT_EQ(fixture.memory->load<uint64_t>(0x1000), 0x1122334455667788u);
+        EXPECT_EQ(fixture.memory->load<uint64_t>(0x3100), 1u);
+        fixture.memory->store<uint64_t>(0x3000, 0);
+        result = processor.process({.available_dwords = {},
+                                    .access = *fixture.access,
+                                    .continuation = fixture.continuation});
+      }
+      ASSERT_EQ(result.packet.status, PacketProcessStatus::Complete);
+      EXPECT_EQ(fixture.memory->load<uint64_t>(0x1000), 0xaabbccddeeff0011u);
+      EXPECT_EQ(fixture.memory->load<uint64_t>(0x2000), 0x1122334455667788u);
+      EXPECT_EQ(fixture.memory->load<uint64_t>(0x3100), signal ? 0u : 1u);
+    }
+  }
+}
+
+TEST(SdmaPacketProcessorTest, SwapResumesEachWriteWithoutReadingOverwrittenData) {
+  for (const uint64_t blocked_address : {0x1010u, 0x2010u}) {
+    SCOPED_TRACE(blocked_address);
+    PacketProcessorFixture fixture;
+    for (uint32_t index = 0; index < 64; ++index) {
+      fixture.memory->store<uint8_t>(0x1000 + index, index + 1);
+      fixture.memory->store<uint8_t>(0x2000 + index, 255 - index);
+    }
+    fixture.memory->store<uint64_t>(0x3100, 1);
+    fixture.memory->set_unavailable_write(blocked_address);
+    SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250);
+    const std::vector<uint32_t> packet =
+        swap_packet(SdmaPacketDialect::Gfx1250, 0x1000, 0x2000, 64, false, true);
+    const SdmaPacketProcessResult first = processor.process({.available_dwords = packet,
+                                                             .access = *fixture.access,
+                                                             .continuation = fixture.continuation});
+    ASSERT_EQ(first.packet.status, PacketProcessStatus::Blocked);
+    EXPECT_TRUE(first.operation_committed);
+    EXPECT_EQ(fixture.memory->load<uint64_t>(0x3100), 1u);
+    const SdmaPacketProcessResult resumed = processor.process(
+        {.available_dwords = {}, .access = *fixture.access, .continuation = fixture.continuation});
+    ASSERT_EQ(resumed.packet.status, PacketProcessStatus::Complete);
+    EXPECT_EQ(fixture.memory->write_calls(0x1000), 1u);
+    EXPECT_EQ(fixture.memory->write_calls(0x2000), 1u);
+    EXPECT_EQ(fixture.memory->load<uint64_t>(0x3100), 0u);
+    EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 1u);
+    for (uint32_t index = 0; index < 64; ++index) {
+      EXPECT_EQ(fixture.memory->load<uint8_t>(0x1000 + index), 255 - index);
+      EXPECT_EQ(fixture.memory->load<uint8_t>(0x2000 + index), index + 1);
+    }
+  }
+}
+
+TEST(SdmaPacketProcessorTest, SwapResumesReadsAndSignalWithoutReplayingTheExchange) {
+  for (const uint64_t blocked_address : {0x1010u, 0x2010u, 0x3100u}) {
+    SCOPED_TRACE(blocked_address);
+    PacketProcessorFixture fixture;
+    fixture.memory->store<uint64_t>(0x1000, 0x1122334455667788);
+    fixture.memory->store<uint64_t>(0x2000, 0xaabbccddeeff0011);
+    fixture.memory->store<uint64_t>(0x3100, 1);
+    if (blocked_address == 0x3100)
+      fixture.memory->set_unavailable_compare_exchange(blocked_address);
+    else
+      fixture.memory->set_unavailable_read(blocked_address);
+    SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250);
+    const std::vector<uint32_t> packet =
+        swap_packet(SdmaPacketDialect::Gfx1250, 0x1000, 0x2000, 64, false, true);
+    const SdmaPacketProcessResult first = processor.process({.available_dwords = packet,
+                                                             .access = *fixture.access,
+                                                             .continuation = fixture.continuation});
+    ASSERT_EQ(first.packet.status, PacketProcessStatus::Blocked);
+    EXPECT_EQ(first.operation_committed, blocked_address == 0x3100);
+    EXPECT_EQ(fixture.memory->load<uint64_t>(0x3100), 1u);
+    const SdmaPacketProcessResult resumed = processor.process(
+        {.available_dwords = {}, .access = *fixture.access, .continuation = fixture.continuation});
+    ASSERT_EQ(resumed.packet.status, PacketProcessStatus::Complete);
+    EXPECT_EQ(fixture.memory->load<uint64_t>(0x1000), 0xaabbccddeeff0011u);
+    EXPECT_EQ(fixture.memory->load<uint64_t>(0x2000), 0x1122334455667788u);
+    EXPECT_EQ(fixture.memory->load<uint64_t>(0x3100), 0u);
+    EXPECT_EQ(fixture.memory->write_calls(0x1000), 1u);
+    EXPECT_EQ(fixture.memory->write_calls(0x2000), 1u);
+    EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 1u);
+  }
+}
+
+TEST(SdmaPacketProcessorTest, SwapRejectsUnsupportedFieldsAndInvalidRangesBeforeWriting) {
+  for (const SdmaPacketDialect dialect :
+       {SdmaPacketDialect::LegacyExtendedCount, SdmaPacketDialect::Gfx1250}) {
+    for (const std::pair<std::size_t, uint32_t> field : {std::pair{0u, 1u << 18},
+                                                         {0u, 1u << 27},
+                                                         {0u, 1u << 28},
+                                                         {1u, 1u << 30},
+                                                         {2u, 1u << 16},
+                                                         {2u, 1u << 24},
+                                                         {3u, 1u},
+                                                         {5u, 1u}}) {
+      SCOPED_TRACE(static_cast<int>(dialect));
+      SCOPED_TRACE(field.first);
+      SCOPED_TRACE(field.second);
+      PacketProcessorFixture fixture;
+      SdmaPacketProcessor processor(dialect);
+      std::vector<uint32_t> packet = swap_packet(dialect, 0x1000, 0x2000, 64);
+      packet[field.first] |= field.second;
+      const SdmaPacketProcessResult result =
+          processor.process({.available_dwords = packet,
+                             .access = *fixture.access,
+                             .continuation = fixture.continuation});
+      EXPECT_EQ(result.packet.status, PacketProcessStatus::Malformed);
+      EXPECT_EQ(result.malformed_header, packet.front());
+      EXPECT_FALSE(result.operation_committed);
+    }
+    for (const uint64_t address_a : {uint64_t{0x10000}, UINT64_MAX - 63}) {
+      PacketProcessorFixture fixture;
+      fixture.memory->store<uint64_t>(0x2000, 0x12345678);
+      SdmaPacketProcessor processor(dialect);
+      const std::vector<uint32_t> packet = swap_packet(dialect, address_a, 0x2000, 128);
+      const SdmaPacketProcessResult result =
+          processor.process({.available_dwords = packet,
+                             .access = *fixture.access,
+                             .continuation = fixture.continuation});
+      EXPECT_EQ(result.packet.status, address_a == 0x10000 ? PacketProcessStatus::Faulted
+                                                           : PacketProcessStatus::Malformed);
+      EXPECT_FALSE(result.operation_committed);
+      EXPECT_EQ(fixture.memory->load<uint64_t>(0x2000), 0x12345678u);
+    }
+  }
+  for (const SdmaPacketDialect dialect :
+       {SdmaPacketDialect::Legacy, SdmaPacketDialect::Gfx11Plus, SdmaPacketDialect::Rdna4}) {
+    PacketProcessorFixture fixture;
+    SdmaPacketProcessor processor(dialect);
+    const std::vector<uint32_t> packet = swap_packet(dialect, 0x1000, 0x2000, 64);
+    EXPECT_EQ(processor
+                  .process({.available_dwords = packet,
+                            .access = *fixture.access,
+                            .continuation = fixture.continuation})
+                  .packet.status,
+              PacketProcessStatus::Malformed);
+  }
+}
+
+TEST(SdmaPacketProcessorTest, SwapRejectsUnsupportedWaitSignalFields) {
+  for (const std::pair<std::size_t, uint32_t> field :
+       {std::pair{1u, 4u}, {2u, 1u}, {9u, 1u}, {14u, 1u}, {15u, 1u}}) {
+    SCOPED_TRACE(field.first);
+    PacketProcessorFixture fixture;
+    SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250);
+    std::vector<uint32_t> packet =
+        swap_packet(SdmaPacketDialect::Gfx1250, 0x1000, 0x2000, 64, true, true);
+    packet[field.first] |= field.second;
+    const SdmaPacketProcessResult result =
+        processor.process({.available_dwords = packet,
+                           .access = *fixture.access,
+                           .continuation = fixture.continuation});
+    EXPECT_EQ(result.packet.status, PacketProcessStatus::Malformed);
+    EXPECT_FALSE(result.operation_committed);
+  }
+}
+
+TEST(SdmaPacketProcessorTest, SwapAlignmentMatchesEachPacketLayout) {
+  for (const SdmaPacketDialect dialect :
+       {SdmaPacketDialect::LegacyExtendedCount, SdmaPacketDialect::Gfx1250}) {
+    for (const bool offset_address_b : {false, true}) {
+      SCOPED_TRACE(static_cast<int>(dialect));
+      SCOPED_TRACE(offset_address_b);
+      PacketProcessorFixture fixture;
+      const uint64_t address_a = offset_address_b ? 0x1000 : 0x1020;
+      const uint64_t address_b = offset_address_b ? 0x5020 : 0x5000;
+      fixture.memory->store<uint64_t>(address_a, 123);
+      fixture.memory->store<uint64_t>(address_b, 456);
+      SdmaPacketProcessor processor(dialect);
+      const std::vector<uint32_t> packet = swap_packet(dialect, address_a, address_b, 64);
+      const SdmaPacketProcessResult result =
+          processor.process({.available_dwords = packet,
+                             .access = *fixture.access,
+                             .continuation = fixture.continuation});
+      const bool alignment_accepted = dialect == SdmaPacketDialect::Gfx1250;
+      EXPECT_EQ(result.packet.status, alignment_accepted ? PacketProcessStatus::Complete
+                                                         : PacketProcessStatus::Malformed);
+      EXPECT_EQ(result.operation_committed, alignment_accepted);
+      EXPECT_EQ(fixture.memory->load<uint64_t>(address_a), alignment_accepted ? 456u : 123u);
+      EXPECT_EQ(fixture.memory->load<uint64_t>(address_b), alignment_accepted ? 123u : 456u);
+    }
+  }
+}
+
+TEST(SdmaPacketProcessorTest, SwapRejectsPartialOverlapAndAcceptsIdenticalAndAdjacentRanges) {
+  constexpr uint64_t kStart = 0x1000;
+  constexpr uint32_t kBytes = 128;
+  for (const SdmaPacketDialect dialect :
+       {SdmaPacketDialect::LegacyExtendedCount, SdmaPacketDialect::Gfx1250}) {
+    for (const uint32_t offset : {0u, 64u, 128u}) {
+      for (const bool reverse : {false, true}) {
+        SCOPED_TRACE(static_cast<int>(dialect));
+        SCOPED_TRACE(offset);
+        SCOPED_TRACE(reverse);
+        PacketProcessorFixture fixture;
+        std::array<uint8_t, 384> original;
+        for (uint32_t index = 0; index < original.size(); ++index) {
+          original[index] = static_cast<uint8_t>((index * 3 + 1) ^ (index >> 8));
+          fixture.memory->store<uint8_t>(kStart + index, original[index]);
+        }
+        const uint64_t address_a = reverse ? kStart + offset : kStart;
+        const uint64_t address_b = reverse ? kStart : kStart + offset;
+        SdmaPacketProcessor processor(dialect);
+        const std::vector<uint32_t> packet = swap_packet(dialect, address_a, address_b, kBytes);
+        testing::internal::CaptureStderr();
+        const SdmaPacketProcessResult result =
+            processor.process({.available_dwords = packet,
+                               .access = *fixture.access,
+                               .continuation = fixture.continuation});
+        const std::string log = testing::internal::GetCapturedStderr();
+        const bool partial_overlap = offset != 0 && offset < kBytes;
+        EXPECT_EQ(result.packet.status,
+                  partial_overlap ? PacketProcessStatus::Malformed : PacketProcessStatus::Complete);
+        if (partial_overlap) {
+          EXPECT_FALSE(result.operation_committed);
+          EXPECT_NE(log.find("partially overlapping SDMA swap operands"), std::string::npos);
+          EXPECT_NE(log.find(reverse ? "address_a=0x1040 address_b=0x1000 bytes=128"
+                                     : "address_a=0x1000 address_b=0x1040 bytes=128"),
+                    std::string::npos);
+          EXPECT_EQ(std::ranges::count(log, '\n'), 1);
+        } else {
+          EXPECT_TRUE(log.empty());
+        }
+        for (uint32_t index = 0; index < original.size(); ++index) {
+          uint8_t expected = original[index];
+          if (!partial_overlap && index < kBytes)
+            expected = original[index + offset];
+          else if (!partial_overlap && index >= offset && index < offset + kBytes)
+            expected = original[index - offset];
+          EXPECT_EQ(fixture.memory->load<uint8_t>(kStart + index), expected) << index;
+        }
+      }
+    }
+  }
+}
+
+TEST(SdmaPacketProcessorTest, FusedCopyKeepsTheSameReservedAddressPolicyForLinearAndSwap) {
+  constexpr uint64_t kAddressA = 0x1000;
+  constexpr uint64_t kAddressB = 0x2000;
+  constexpr uint64_t kWaitAddress = 0x600;
+  constexpr uint64_t kSignalAddress = 0x700;
+  constexpr std::size_t kWaitAddressLowDword = 2;
+  constexpr std::size_t kSignalAddressLowDword = 15;
+  constexpr uint32_t kSubopcodeMask = 0xff00;
+  for (const bool swapping : {false, true}) {
+    SCOPED_TRACE(swapping);
+    PacketProcessorFixture fixture;
+    fixture.memory->store<uint64_t>(kAddressA, 123);
+    fixture.memory->store<uint64_t>(kAddressB, 456);
+    fixture.memory->store<uint64_t>(kWaitAddress, 1);
+    fixture.memory->store<uint64_t>(kSignalAddress, 7);
+    std::vector<uint32_t> packet =
+        swap_packet(SdmaPacketDialect::Gfx1250, kAddressA, kAddressB, 64, true, true);
+    // Compare the same fused envelope with only the COPY sub-opcode changed.
+    if (!swapping)
+      packet[0] &= ~kSubopcodeMask;
+    packet[kWaitAddressLowDword] = static_cast<uint32_t>(kWaitAddress);
+    packet[kSignalAddressLowDword] = static_cast<uint32_t>(kSignalAddress);
+    SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250);
+    const SdmaPacketProcessResult result =
+        processor.process({.available_dwords = packet,
+                           .access = *fixture.access,
+                           .continuation = fixture.continuation});
+    ASSERT_EQ(result.packet.status, PacketProcessStatus::Complete);
+    EXPECT_EQ(fixture.memory->load<uint64_t>(kAddressA), swapping ? 456u : 123u);
+    EXPECT_EQ(fixture.memory->load<uint64_t>(kAddressB), 123u);
+    EXPECT_EQ(fixture.memory->load<uint64_t>(kWaitAddress), 1u);
+    EXPECT_EQ(fixture.memory->load<uint64_t>(kSignalAddress), 7u);
+    EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 0u);
+  }
 }
 
 // The copy-rectangle packet layouts and the dialects that decode them.
@@ -203,6 +564,39 @@ std::array<uint32_t, 13> linear_rect_packet(bool gfx12_rect, uint64_t source, ui
   packet[11] = (shape.rect_x - 1u) | ((shape.rect_y - 1u) << 16);
   packet[12] = shape.rect_z - 1u;
   return packet;
+}
+
+TEST(SdmaPacketProcessorTest, DwordFillCompletesEveryEncodedElement) {
+  constexpr uint64_t kDestination = 0x200;
+  constexpr uint32_t kPattern = 0x44332211;
+  constexpr uint32_t kSentinel = 0xaabbccdd;
+  constexpr uint32_t kOpConstantFill = 11u;
+  constexpr uint32_t kFillSizeDword = 2u;
+  for (const auto dialect :
+       {SdmaPacketDialect::Legacy, SdmaPacketDialect::LegacyExtendedCount,
+        SdmaPacketDialect::Gfx11Plus, SdmaPacketDialect::Rdna4, SdmaPacketDialect::Gfx1250}) {
+    for (uint32_t count_field : {0u, 4u}) {
+      SCOPED_TRACE(static_cast<int>(dialect));
+      SCOPED_TRACE(count_field);
+      PacketProcessorFixture fixture;
+      ASSERT_TRUE(fixture.access);
+      const uint64_t trailing = kDestination + count_field + sizeof(uint32_t);
+      fixture.memory->store<uint32_t>(trailing, kSentinel);
+      const std::array<uint32_t, 5> packet = {kOpConstantFill | (kFillSizeDword << 30),
+                                              static_cast<uint32_t>(kDestination), 0u, kPattern,
+                                              count_field};
+      SdmaPacketProcessor processor(dialect);
+      const auto result = processor.process({.available_dwords = packet,
+                                             .access = *fixture.access,
+                                             .continuation = fixture.continuation});
+      ASSERT_EQ(result.packet.status, PacketProcessStatus::Complete);
+      EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), kPattern);
+      if (count_field == 4) {
+        EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination + 4), kPattern);
+      }
+      EXPECT_EQ(fixture.memory->load<uint32_t>(trailing), kSentinel);
+    }
+  }
 }
 
 TEST(SdmaPacketProcessorTest, ExtendedCountCopiesBeyondFourMiB) {

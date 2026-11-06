@@ -95,6 +95,9 @@ public:
   AtomicOp atomic_op = AtomicOp::NONE;
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::LGKMCNT;
+  /// One bit per DWORD of a buffer access. A set bit selects the DWORD for
+  /// access; a clear bit makes a load return zero for it or skips it for a
+  /// store. An atomic's mask is all set or all clear.
   uint16_t load_dword_mask = 0xffff;
   uint32_t response_data[16] = {};
   uint32_t store_data[16] = {};
@@ -194,6 +197,10 @@ public:
   // the routed observation's callback snapshot.
   uint64_t flat_local_lane_mask = 0;
   uint64_t flat_dds_lane_mask = 0;
+  // Captured during routing after RDNA4 U17 address math, before the workgroup
+  // LDS base is added. Keep addresses intact for routed observations and retries.
+  uint64_t flat_local_oob_lane_mask = 0;
+  std::optional<uint64_t> flat_local_allocation_end;
   bool non_temporal = false;
   // Keep this outside Mtype: cluster loads force only the request-side vector
   // L1 lookup to miss, while mtype must still preserve the instruction/PTE
@@ -209,6 +216,10 @@ public:
   uint32_t buffer_selectors = 0;
   uint32_t buffer_components = 0;
   bool buffer_d16 = false;
+  // Image DMASK packs only enabled shader components into the data tuple.
+  // A nonzero mask asks store capture to scatter that tuple back into its
+  // original X/Y/Z/W slots before applying image selector/padding semantics.
+  uint32_t image_store_component_mask = 0;
   // Some accesses use an interleaved ("swizzled") layout: consecutive units
   // of a lane are separated rather than contiguous. Units are 4 bytes for
   // scratch and GFX9 buffers, and 4 or 16 bytes for RDNA buffers.

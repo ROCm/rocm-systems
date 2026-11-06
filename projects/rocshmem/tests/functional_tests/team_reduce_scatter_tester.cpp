@@ -93,6 +93,10 @@ __global__ void TeamReduceScatterTest(int loop, int skip,
 
   rocshmem_wg_team_create_ctx(team, ctx_type, &ctx);
 
+  // In no-TDM build, rocshmem_query_tdm_lds_bytes() returns 0.
+  extern __shared__ uint8_t tdm_lds[];
+  rocshmem_set_tdm_lds(tdm_lds, rocshmem_query_tdm_lds_bytes());
+
   __syncthreads();
 
   for (int i = 0; i < loop + skip; i++) {
@@ -148,7 +152,7 @@ template <typename T1, ROCSHMEM_OP T2>
 void TeamReduceScatterTester<T1, T2>::launchKernel(dim3 gridSize,
                                                     dim3 blockSize, int loop,
                                                     uint64_t size) {
-  size_t shared_bytes = 0;
+  size_t shared_bytes = rocshmem_query_tdm_lds_bytes();
 
   hipLaunchKernelGGL(HIP_KERNEL_NAME(TeamReduceScatterTest<T1, T2>), gridSize,
                      blockSize, shared_bytes, stream, loop, args.skip,

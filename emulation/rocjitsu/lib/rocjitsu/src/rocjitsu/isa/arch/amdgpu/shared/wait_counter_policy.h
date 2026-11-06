@@ -81,10 +81,34 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
   return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
-// Counter retirement order does not imply ordered VGPR writeback on GFX12.
+// VMEM loads of the same type write their VGPR results in issue order. CDNA1-4
+// section 4.4. RDNA1/2 section 4.4 and RDNA3/3.5 section 5.6 say VGPR data can
+// be written out of order, but we follow LLVM's vmem-write-vgpr-in-order
+// feature, which covers GFX9-GFX11.
 [[nodiscard]] inline bool has_ordered_vmem_writeback(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+}
+
+// FLAT's LDS route stays in order with indexed LDS: RDNA3/3.5 FLAT ordering
+// and RDNA4/CDNA5 sections 5.7.1.3-4. The independently completing VMEM route
+// can still race LDS writes to the same VGPR, so this applies only to LDS lanes.
+// CDNA5 10.1.1 also warns about unordered VGPR writes despite ordered counters;
+// interpret it in that mixed-route context, preserving the explicit within-LDS
+// guarantee in 5.7.1.3-4. No hardware divergence within the LDS route is known.
+[[nodiscard]] inline bool has_ordered_flat_lds_writeback(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+}
+
+// RDNA3/3.5 parameter-load hazard rules and RDNA4's EXPcnt table track these
+// loads through VGPR delivery, in order within their class but not with exports.
+// CDNA5 has neither LDS-direct/parameter instructions nor their EXPcnt class.
+[[nodiscard]] inline bool has_ordered_lds_direct_writeback(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4;
 }
 
 [[nodiscard]] constexpr WaitCounterKind smem_wait_counter(WaitcntModel model) {

@@ -19,6 +19,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
+#include "util/host_target.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 
@@ -1793,7 +1794,7 @@ TEST(ExecutionPluginTest, DisabledWaitCheckingPreservesRegisterHooksAcrossPlugin
     EXPECT_EQ(read.lane(0, 0), value);
     EXPECT_EQ(read.lane(1, 0), value + 1);
     const uint64_t pair = uint64_t{value} | (uint64_t{value + 1} << 32);
-    regs.write_sgpr64(sbase, pair);
+    ASSERT_TRUE(regs.write_sgpr64(sbase, pair).succeeded());
     EXPECT_EQ(regs.read_sgpr64(sbase), pair);
   };
   access(3);
@@ -1869,7 +1870,7 @@ TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
       (void)regs.read_sgpr(sbase);
       break;
     case 1:
-      regs.write_sgpr(sbase, 7);
+      ASSERT_TRUE(regs.write_sgpr(sbase, 7).succeeded());
       break;
     case 2:
       (void)regs.read_vgpr_region(vbase, 1, 1).lane(0, 0);
@@ -1926,19 +1927,14 @@ public:
   void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *, uint32_t reg, uint64_t, uint8_t) override {
     read_registers.push_back(reg);
     read_roundings.push_back(std::fegetround());
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     read_mxcsrs.push_back(_mm_getcsr());
 #endif
   }
 };
 
-// F32 MODE-aware arithmetic takes one guest FP environment for the instruction,
-// after the register views exist, so register-access callbacks see the caller's
-// rounding, exception flags and trap masks on SIMD and scalar paths alike. The
-// arithmetic helper leaves the caller's flags unchanged; V_MUL_F32's
-// instruction-level classifier is an exception, noted on its case below. MODE
-// 0xF1 rounds toward +infinity, unlike the host; 0xF0 matches it. The tracker
-// asserts the SIMD run really took the SIMD route rather than falling back.
+// Guest rounding is independent of the default host controls seen by register
+// observers. rj-arith may raise sticky flags while leaving those controls intact.
 TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
   struct Case {
     const char *name;
@@ -1947,15 +1943,11 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
     uint32_t src1;
     uint32_t round_up;
     uint32_t nearest;
-    bool preserves_flags;
   };
-  // V_MUL_F32's TRAPSTS classifier (classify_mul_f32) multiplies on the host
-  // outside any ScopedEnvironment before either path runs, so its inexact
-  // product reaches the caller's flags; callbacks still see the caller's state.
   constexpr std::array<Case, 3> cases = {{
-      {"Add", rdna4::kVAddF32Vop2, 0x3f800000u, 0x30800000u, 0x3f800001u, 0x3f800000u, true},
-      {"Sub", rdna4::kVSubF32Vop2, 0x3f800000u, 0xb0800000u, 0x3f800001u, 0x3f800000u, true},
-      {"Mul", rdna4::kVMulF32Vop2, 0x3f800001u, 0x3f800001u, 0x3f800003u, 0x3f800002u, false},
+      {"Add", rdna4::kVAddF32Vop2, 0x3f800000u, 0x30800000u, 0x3f800001u, 0x3f800000u},
+      {"Sub", rdna4::kVSubF32Vop2, 0x3f800000u, 0xb0800000u, 0x3f800001u, 0x3f800000u},
+      {"Mul", rdna4::kVMulF32Vop2, 0x3f800001u, 0x3f800001u, 0x3f800003u, 0x3f800002u},
   }};
   for (const Case &test : cases) {
     for (const uint32_t mode : {0xF1u, 0xF0u}) {
@@ -1984,9 +1976,9 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoded.data()));
         ASSERT_NE(inst, nullptr);
         ASSERT_EQ(std::fegetround(), FE_TONEAREST);
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
-        // A pre-existing underflow flag must stay visible to callbacks, and the
-        // inexact results here must not add the inexact flag.
+#if RJ_HOST_ARCH_X86
+        // Default host controls must stay visible to callbacks; arithmetic may
+        // add sticky flags.
         const uint32_t saved_mxcsr = _mm_getcsr();
         _mm_setcsr((saved_mxcsr & ~_MM_EXCEPT_MASK) | _MM_EXCEPT_UNDERFLOW);
         const uint32_t host_mxcsr = _mm_getcsr();
@@ -1997,23 +1989,16 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
         {
           amdgpu::ScopedSimdFastPathTracker tracker;
           succeeded = f.cu->execute_instruction(inst.get(), *wf).succeeded();
-          // Without this the observer gate could return and both runs would go
-          // scalar while every other assertion still held. Builds without
-          // <experimental/simd> have no fast path to take.
-          if (force_scalar || !util::has_stdx_simd)
-            EXPECT_TRUE(tracker.no_tracked_path_executed());
-          else
-            EXPECT_TRUE(tracker.only_tracked_path_executed(amdgpu::SimdFastPath::VOP2_BINARY));
+          // rj-arith does not use the legacy SIMD tracker.
+          EXPECT_TRUE(tracker.no_tracked_path_executed());
         }
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
         const uint32_t after_mxcsr = _mm_getcsr();
         _mm_setcsr(saved_mxcsr);
-        if (test.preserves_flags) {
-          EXPECT_EQ(after_mxcsr, host_mxcsr);
-        }
+        EXPECT_EQ(after_mxcsr & ~_MM_EXCEPT_MASK, host_mxcsr & ~_MM_EXCEPT_MASK);
         ASSERT_FALSE(plugin->read_mxcsrs.empty());
         for (const uint32_t seen : plugin->read_mxcsrs)
-          EXPECT_EQ(test.preserves_flags ? seen : seen & ~_MM_EXCEPT_INEXACT, host_mxcsr);
+          EXPECT_EQ(seen & ~_MM_EXCEPT_MASK, host_mxcsr & ~_MM_EXCEPT_MASK);
 #endif
         ASSERT_TRUE(succeeded);
         EXPECT_EQ(std::fegetround(), FE_TONEAREST);
@@ -2028,7 +2013,7 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
   }
 }
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 // VOPD arithmetic requires host and guest nearest-even, so rounding alone cannot
 // detect a scope opened before operand acquisition. A sticky underflow flag is
 // cleared inside the scope and must remain visible to reads from both slots.
@@ -2291,7 +2276,7 @@ TEST(ExecutionPluginTest, F64SourceReadObservationReportsBothHalves) {
     delete inst;
 
     const auto reads = vgpr_read_events(*plugin);
-    if constexpr (UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS) {
+    if constexpr (RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS) {
       // The Clang/AVX-512 workaround executes F64 one lane at a time, so
       // require both halves of every source once per active lane.
       ASSERT_EQ(reads.size(), 6u * std::popcount(kPartialExecMask));

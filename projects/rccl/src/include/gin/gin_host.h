@@ -9,6 +9,7 @@
 #define _NCCL_GIN_HOST_H_
 
 #include "allocator.h"
+#include "bitops.h"
 #include "nccl.h"
 #include "nccl_gin.h"
 #include "nccl_device/core_tmp.h"
@@ -76,6 +77,17 @@ struct ncclGinState {
   int numActiveBackends;
   struct ncclGinBackendState backends[NCCL_GIN_MAX_ACTIVE_BACKENDS];
 };
+
+// The ginContextCount a devComm gets from a backend with ginCommCount connections.
+// ncclDevrCommCreateInternal sizes per-context resource regions with it (via
+// devrGinContextsTotal), so the two must not diverge.
+static inline int ncclGinContextCount(int nGinContextsRequested, int ginCommCount) {
+  // ginContextCount is a hint; 0 is the documented "use a default" value. A 0
+  // request would size the context table and the per-context resource regions to
+  // 0 (heap corruption), so promote it to one context per GIN connection.
+  if (nGinContextsRequested < 1) nGinContextsRequested = 1;
+  return ROUNDUP(nGinContextsRequested, ginCommCount);
+}
 
 extern int64_t ncclParamGinType();
 

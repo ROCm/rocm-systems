@@ -10,17 +10,37 @@
 #ifndef RCCL_TEST_HOST_OS_FAKES_H_
 #define RCCL_TEST_HOST_OS_FAKES_H_
 
+#include <atomic>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include "nccl.h"
 #include "os.h"  // ncclAffinity
+#include "socket.h"
 
 // ncclOsCpuCount is load-bearing: initTransportsRank's exit: block calls it on EVERY path, so nothing in
 // the function was testable until it was seamed, and its counter is the only way to see that :1488 skips exit:.
+// Both entry points are called from SPAWNED THREADS as well as the test thread -- gin_host.cc's proxy
+// progress workers pin themselves through them -- so the counter is atomic (gin-host-test.cc polls it while
+// the workers run) and the mask vectors below are written under g_ncclOsAffinityMutex.
 extern int g_ncclOsCpuCountValue;
-extern int g_ncclOsCpuCountCalls;
+extern std::atomic<int> g_ncclOsCpuCountCalls;
+// Held across every write to the two mask vectors, and by the Snapshot() accessors below.
+//
+// Reading a vector DIRECTLY is only safe when no thread but the test's own can be inside
+// ncclOsCpuCount / ncclOsSetAffinity -- true of every single-threaded suite, which is why
+// init-test.cc reads them as plain vectors. A suite that spawns production threads (today
+// gin-host-test.cc, whose proxy progress workers pin themselves through these) must go
+// through the Snapshot() accessors instead; joining the workers first is necessary either
+// way, to know the write has happened at all, but it is not what makes the READ safe.
+extern std::mutex g_ncclOsAffinityMutex;
+
+// Copies taken under g_ncclOsAffinityMutex. Prefer these to the raw vectors in any test that
+// has spawned a thread -- it is one call rather than a lock_guard the reader has to remember.
+std::vector<ncclAffinity> ncclOsCpuCountMasksSnapshot();
+std::vector<ncclAffinity> ncclOsSetAffinityMasksSnapshot();
 // Every mask ncclOsCpuCount was handed, in call order. Which index is which call site is PATH-DEPENDENT:
 // a path running :1607-1611 and reaching exit: gives [0]=:1608 and [1]=exit::2403; a path stopping before
 // :1607 gives [0]=exit::2403; a path bypassing exit: (:1618) gives only :1608. Check .size() first.
@@ -31,11 +51,23 @@ extern ncclResult_t g_ncclOsSetAffinityResult;
 // the exit: write masks whatever :1610 forwarded.
 extern std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
 extern std::function<ncclResult_t(ncclAffinity*)> g_ncclOsGetAffinity;
+extern int g_ncclOsMutexCondSharedCalls;
+extern int g_ncclOsMutexCondUnsharedCalls;
+
+// src/os/{linux,windows}.cc socket teardown. Fail-loud by default; tests that
+// own a socket lifecycle install the exact close behavior they need.
+#ifndef RCCL_OS_FAKES_OMIT_ncclSocketClose
+extern std::function<ncclResult_t(struct ncclSocket*, bool)> g_ncclSocketClose;
+#endif
 
 // ncclInit() NCCLCHECKs this before its own call_once, so it is the one per-call way to fail ncclInit().
 extern ncclResult_t g_ncclOsTopoGetStrFromSysResult;
 extern int g_ncclOsTopoGetStrFromSysCalls;
 extern std::function<ncclResult_t(const char*, const char*, char*, int)> g_ncclOsTopoGetStrFromSys;
+// A g_ncclOsTopoGetStrFromSys that answers bios_version and numa_balancing, as the IB GDR Hyper-V check reads
+// them; a null answer, or any other file, is a failed read.
+std::function<ncclResult_t(const char*, const char*, char*, int)> SysfsAnswers(const char* bios,
+                                                                              const char* numaBalancing);
 
 // fillInfo's MLOPart PCI-function fallback (init.cc:1092) probes sysfs for the class of its own BDF.
 // The default is an accelerator class, i.e. what sysfs reports for a real GPU's own BDF; a test that
@@ -53,6 +85,9 @@ extern std::string g_lastPciDeviceClassBusId;
 extern std::string g_pciComputePartition;
 extern int g_pciComputePartitionCalls;
 extern std::string g_lastPciComputePartitionBusId;
+
+// Default: the path does not exist (NULL).
+extern std::function<char*(const char*, char*)> g_ncclOsRealpath;
 
 void ResetOsFakes();
 
