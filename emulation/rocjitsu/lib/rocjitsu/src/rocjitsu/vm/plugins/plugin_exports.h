@@ -41,7 +41,6 @@
 #include "util/diagnostic.h"
 #include "util/log.h"
 
-#include <exception>
 #include <memory>
 #include <type_traits>
 
@@ -99,8 +98,8 @@ inline constexpr const char *kPluginDestroySymbol = "rocjitsu_plugin_destroy";
 /// is absent does this use default construction followed by
 /// `util::Result initialize(const char *, util::DiagnosticEmitter)`.
 /// Initializer failure logs `create failed: <diagnostic>`, destroys the candidate,
-/// and returns null. Allocation and foreign plugin code may throw; the exported
-/// factory contains those exceptions.
+/// and returns null. Plugin construction, initialization and destruction must not
+/// throw.
 template <typename PluginClass> ExecutionPlugin *create_plugin_instance(const char *config_json) {
   if constexpr (std::is_constructible_v<PluginClass, const char *>) {
     return new PluginClass(config_json);
@@ -144,15 +143,7 @@ template <typename PluginClass> ExecutionPlugin *create_plugin_instance(const ch
   }                                                                                                \
   extern "C" ROCJITSU_PLUGIN_EXPORT ::rocjitsu::PluginHandle rocjitsu_plugin_create(               \
       const char *config_json) {                                                                   \
-    try {                                                                                          \
-      return ::rocjitsu::create_plugin_instance<PluginClass>(config_json);                         \
-    } catch (const std::exception &e) {                                                            \
-      ::util::Logger::warn("plugin '", NAME, "': create failed: ", e.what());                      \
-      return nullptr;                                                                              \
-    } catch (...) {                                                                                \
-      ::util::Logger::warn("plugin '", NAME, "': create failed with unknown exception");           \
-      return nullptr;                                                                              \
-    }                                                                                              \
+    return ::rocjitsu::create_plugin_instance<PluginClass>(config_json);                           \
   }                                                                                                \
   extern "C" ROCJITSU_PLUGIN_EXPORT void rocjitsu_plugin_destroy(                                  \
       ::rocjitsu::PluginHandle handle) {                                                           \

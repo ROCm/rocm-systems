@@ -54,6 +54,8 @@
 namespace rocjitsu {
 
 /// @brief Abstract base for plugin output destinations.
+/// @details Sink callbacks must not throw. Output is best effort; sink failures
+/// must not replace or suppress an execution failure.
 class PluginSink {
 public:
   virtual ~PluginSink() = default;
