@@ -412,6 +412,13 @@ add_test(
 )
 
 add_test(
+    NAME test_profile_jax_trace
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_jax_trace.xml
+        ${COV_OPTION} tests/integration/test_profile_jax_trace.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_profile_ml_api_trace
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_ml_api_trace.xml
@@ -449,6 +456,7 @@ set_tests_properties(
     test_profile_iteration_multiplexing_stochastic
     test_profile_torch_trace
     test_profile_triton_trace
+    test_profile_jax_trace
     test_profile_ml_api_trace
     test_torch_trace_coverage
     test_profile_membw
@@ -1172,6 +1180,7 @@ if(${ENABLE_COVERAGE})
         test_rocpd_data
         test_profile_torch_trace
         test_profile_triton_trace
+        test_profile_jax_trace
         test_profile_ml_api_trace
         test_torch_trace_coverage
         test_inject_roctx_package
