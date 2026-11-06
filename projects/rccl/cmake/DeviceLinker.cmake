@@ -29,22 +29,28 @@ else()
   find_program(DL_CLANG NAMES amdclang++ clang++
     HINTS "${_dl_compiler_dir}" "${ROCM_PATH}/bin" REQUIRED)
 endif()
-# Pick clang-offload-bundler from the SAME toolchain as DL_CLANG: a bundler from a
+# Pick the offload tools from the SAME toolchain as DL_CLANG: the packaged image
+# has to match what that toolchain's clang-linker-wrapper reads, and a tool from a
 # different LLVM build can load a foreign libclang-cpp.so and crash at startup.
 get_filename_component(_dl_clang_dir "${DL_CLANG}" REALPATH)
 get_filename_component(_dl_clang_dir "${_dl_clang_dir}" DIRECTORY)
-unset(DL_BUNDLER CACHE)
-unset(DL_BUNDLER)
-find_program(DL_BUNDLER NAMES clang-offload-bundler
-  HINTS "${_dl_clang_dir}" "${_dl_compiler_dir}/../lib/llvm/bin"
-        "${ROCM_PATH}/llvm/bin")
-if(NOT DL_BUNDLER)
-  message(FATAL_ERROR
-    "Device Linker: clang-offload-bundler was not found next to the selected "
-    "compiler '${DL_CLANG}' (searched '${_dl_clang_dir}', "
-    "'${_dl_compiler_dir}/../lib/llvm/bin', '${ROCM_PATH}/llvm/bin').")
-endif()
-message(STATUS "Device Linker: clang-offload-bundler = ${DL_BUNDLER}")
+set(_dl_tool_hints "${_dl_clang_dir}" "${_dl_compiler_dir}/../lib/llvm/bin" "${ROCM_PATH}/llvm/bin")
+foreach(_dl_tool PACKAGER OBJDUMP)
+  unset(DL_${_dl_tool} CACHE)
+  unset(DL_${_dl_tool})
+endforeach()
+# clang-offload-packager was renamed llvm-offload-binary; ROCm 7.0 has only the old name.
+find_program(DL_PACKAGER NAMES llvm-offload-binary clang-offload-packager
+  HINTS ${_dl_tool_hints} NO_DEFAULT_PATH)
+find_program(DL_OBJDUMP NAMES llvm-objdump HINTS ${_dl_tool_hints} NO_DEFAULT_PATH)
+foreach(_dl_tool PACKAGER OBJDUMP)
+  if(NOT DL_${_dl_tool})
+    message(FATAL_ERROR
+      "Device Linker: no ${_dl_tool} tool was found next to the selected compiler "
+      "'${DL_CLANG}' (searched ${_dl_tool_hints}).")
+  endif()
+endforeach()
+message(STATUS "Device Linker: offload packager = ${DL_PACKAGER}")
 
 # Extract --hip-path and --hip-device-lib-path from CMAKE_CXX_FLAGS.
 # TheRock's amd-hip toolchain injects these so amdclang++ can locate HIP
@@ -80,7 +86,7 @@ set(SPECIALIZED_DIR  "${GEN_DIR}/specialized")
 # own -x hip / --offload-arch, and --offload-host-only would suppress the very
 # device code these commands exist to produce), -parallel-jobs (would
 # oversubscribe an already parallel build), --offload-compress (packaging, see
-# ENABLE_COMPRESS below) and diagnostics (generated sources are compiled
+# RULE_LAUNCH_LINK in src/CMakeLists.txt) and diagnostics (generated sources are compiled
 # quietly by design, and some need -w).
 #
 # Also dropped are options that are only meaningful to something other than the
@@ -124,6 +130,34 @@ dl_parse_gpu_targets(TARGETS ${GPU_TARGETS}
   FLAGS_VAR DL_OFFLOAD_ARCH_FLAGS
   ID_PREFIX DL_TARGET_ID_)
 message(STATUS "Device Linker: GPU targets = ${GPU_TARGETS}")
+
+# The device objects are handed to clang-linker-wrapper tagged with the triple
+# this compiler gives HIP device code, so that the wrapper links them into the
+# same image as other -fgpu-rdc device code on the link line (librocshmem.a).
+# Newer compilers use a subarch triple (amdgpu9.50-amd-amdhsa), ROCm 7.0 uses
+# amdgcn-amd-amdhsa; a mismatch makes the wrapper build two images for one GPU.
+# One compile per target, since a compile can't mix gfx950 and gfx950:xnack+.
+set(_dl_probe_dir "${CMAKE_BINARY_DIR}/CMakeFiles/rccl-device-triple-probe")
+file(MAKE_DIRECTORY "${_dl_probe_dir}")
+file(WRITE "${_dl_probe_dir}/probe.hip" "__attribute__((device)) int rccl_probe_var;\n")
+foreach(_dl_gpu IN LISTS DL_GPU_TARGETS)
+  execute_process(
+    COMMAND "${CMAKE_CXX_COMPILER}" -x hip --offload-new-driver -fgpu-rdc
+            --offload-arch=${DL_TARGET_ID_${_dl_gpu}} -nogpuinc -nogpulib
+            -c "${_dl_probe_dir}/probe.hip" -o "${_dl_probe_dir}/probe-${_dl_gpu}.o"
+    RESULT_VARIABLE _dl_probe_result ERROR_VARIABLE _dl_probe_error OUTPUT_QUIET)
+  if(_dl_probe_result EQUAL 0)
+    execute_process(
+      COMMAND "${DL_OBJDUMP}" --offloading "${_dl_probe_dir}/probe-${_dl_gpu}.o"
+      RESULT_VARIABLE _dl_probe_result OUTPUT_VARIABLE _dl_probe_out ERROR_VARIABLE _dl_probe_error)
+  endif()
+  if(NOT _dl_probe_result EQUAL 0 OR NOT _dl_probe_out MATCHES "\ntriple +([^ \n]+)")
+    message(FATAL_ERROR
+      "Device Linker: could not read the device triple '${CMAKE_CXX_COMPILER}' uses "
+      "for ${DL_TARGET_ID_${_dl_gpu}}.\n${_dl_probe_error}${_dl_probe_out}")
+  endif()
+  set(DL_DEVICE_TRIPLE_${_dl_gpu} "${CMAKE_MATCH_1}")
+endforeach()
 
 # ---------------------------------------------------------------------------
 # Optimization flags (passed to both compile and link modes of the driver)
@@ -351,15 +385,6 @@ function(dl_evaluate_guard GUARD GPU_TARGET RESULT_VAR)
   set(${RESULT_VAR} FALSE PARENT_SCOPE)
 endfunction()
 
-# ---------------------------------------------------------------------------
-# Derive host triple for the offload bundler
-# ---------------------------------------------------------------------------
-string(TOLOWER "${CMAKE_SYSTEM_NAME}" _dl_sys_name)
-if(NOT _dl_sys_name)
-  set(_dl_sys_name "linux")
-endif()
-set(_dl_host_triple "${CMAKE_SYSTEM_PROCESSOR}-unknown-${_dl_sys_name}-gnu")
-
 # ===========================================================================
 # Mixed host+device TUs: sources outside the specialized-kernel pipeline that
 # define kernels of their own. The device half is compiled once per GPU target
@@ -509,9 +534,8 @@ endif()
 # ===========================================================================
 # Per-GPU-target: OBJECT library (compile) + link custom command
 # ===========================================================================
-set(ALL_DEVICE_ELFS "")
-set(DL_BUNDLER_TARGETS "host-${_dl_host_triple}-")
-set(DL_BUNDLER_INPUTS "--input=/dev/null")
+set(ALL_DEVICE_OBJS "")
+set(DL_PACKAGER_IMAGES "")
 set(ALL_IR_FILES "")
 
 foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
@@ -589,23 +613,14 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   if(ENABLE_ROCSHMEM AND TARGET rocshmem_static)
     add_dependencies(${_dev_target} rocshmem_static)
   endif()
-  # Pass rocshmem device bitcode to per-kernel compiles so the full-rocshmem
-  # collectives (AlltoAllGda etc., gated on ENABLE_ROCSHMEM) resolve rocshmem
-  # device symbols (rocshmem_n_pes, alltoall_wg) at the per-arch device.elf link.
-  # NOT for ENABLE_ROCSHMEM_GIN: its device code is purely header, no bc.
-  if(ENABLE_ROCSHMEM AND ROCSHMEM_INSTALL_DIR)
-    set(_rocshmem_bc "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem_device_${DL_GPU_TARGET}.bc")
-    target_compile_options(${_dev_target} PRIVATE --rocshmem-bitcode=${_rocshmem_bc})
-  endif()
-
   if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
     add_dependencies(${_dev_target} copy_rocshmem_headers)
   endif()
-
   # =========================================================================
-  # Link step: driver --link mode produces device.elf
+  # Link step: driver --link mode produces the relocatable device.o, which
+  # clang-linker-wrapper links into the device image when librccl.so is linked.
   # =========================================================================
-  set(ARCH_DEVICE_ELF "${DL_ARCH_DIR}/device.elf")
+  set(ARCH_DEVICE_OBJ "${DL_ARCH_DIR}/device.o")
 
   set(_mixed_objs ${DL_MIXED_DEVICE_OBJS_${DL_GPU_TARGET}})
   if(DL_DEVICE_PROFILE_ANCHOR)
@@ -616,28 +631,13 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   file(GENERATE OUTPUT "${_link_rsp}"
     CONTENT "$<JOIN:$<TARGET_OBJECTS:${_dev_target}>,\n>\n${_mixed_objs_lines}\n")
 
-  # When rocSHMEM is enabled, pass the per-arch device bitcode to the driver.
-  # rocSHMEM device API symbols have hidden visibility and must be statically
-  # present in the device ELF — they cannot be imported from a shared library.
-  set(_rocshmem_bitcode_arg "")
-  set(_rocshmem_link_depends "")
-  # Not ENABLE_ROCSHMEM_GIN: no object here references rocSHMEM, and the full
-  # device bitcode carries unresolved IPC and RO symbols that break the ELF load.
-  if(ENABLE_ROCSHMEM AND ROCSHMEM_INSTALL_DIR)
-    set(_rocshmem_bc "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem_device_${DL_GPU_TARGET}.bc")
-    set(_rocshmem_bitcode_arg "--rocshmem-bitcode=${_rocshmem_bc}")
-    if(TARGET rocshmem_static)
-      list(APPEND _rocshmem_link_depends rocshmem_static)
-    endif()
-  endif()
-
   set(_dl_profile_rt_arg "")
   if(DL_DEVICE_PROFILE_RT)
     set(_dl_profile_rt_arg "--profile-rt=${DL_DEVICE_PROFILE_RT}")
   endif()
 
   add_custom_command(
-    OUTPUT  ${ARCH_DEVICE_ELF}
+    OUTPUT  ${ARCH_DEVICE_OBJ}
     COMMAND ${CMAKE_RCCLDEV_COMPILER}
       --link
       --arch=${DL_GPU_TARGET}
@@ -645,7 +645,6 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       --clang=${DL_CLANG}
       ${DL_HIP_COMPILER_FLAGS}
       --dispatcher=${HIPIFY_DIR}/src/device/common.cu.cpp
-      ${_rocshmem_bitcode_arg}
       ${_dl_profile_rt_arg}
       ${_link_def_flags}
       ${_link_inc_flags}
@@ -654,31 +653,31 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       ${DL_COVERAGE_FLAGS}
       ${DL_MAIN_MODULE_CUID_FLAGS}
       -std=c++17
-      -o ${ARCH_DEVICE_ELF}
+      -o ${ARCH_DEVICE_OBJ}
       @${_link_rsp}
-    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp ${_mixed_objs} ${_rocshmem_link_depends}
-    COMMENT "DL [${DL_GPU_TARGET}] link: device.elf"
+    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp ${_mixed_objs}
+    COMMENT "DL [${DL_GPU_TARGET}] link: device.o"
     VERBATIM
     COMMAND_EXPAND_LISTS
   )
 
-  list(APPEND ALL_DEVICE_ELFS "${ARCH_DEVICE_ELF}")
-  # The runtime matches this entry against the agent at load time, so it needs
+  list(APPEND ALL_DEVICE_OBJS "${ARCH_DEVICE_OBJ}")
+  # The runtime matches the image against the agent at load time, so it needs
   # the target ID, not the bare name.
-  list(APPEND DL_BUNDLER_TARGETS "hip-amdgcn-amd-amdhsa--${DL_TARGET_ID}")
-  list(APPEND DL_BUNDLER_INPUTS "--input=${ARCH_DEVICE_ELF}")
+  list(APPEND DL_PACKAGER_IMAGES
+    "--image=file=${ARCH_DEVICE_OBJ},triple=${DL_DEVICE_TRIPLE_${DL_GPU_TARGET}},arch=${DL_TARGET_ID},kind=hip")
 
-  # Friendly symlink next to librccl.so: device-${arch}.elf -> device_build/<dir>/device.elf
+  # Friendly symlink next to librccl.so: device-${arch}.elf -> device_build/<dir>/device.o
   # Lets coverage workflows (and inspection in general) reference the per-arch
-  # device ELF without the leading-hyphen directory wart we use for CDNA build
-  # scheduling. Same byte content that ends up packed into .hip_fatbin; llvm-cov
-  # only needs this file + the merged .profdata for device-side reports.
+  # device code without the leading-hyphen directory wart we use for CDNA build
+  # scheduling. It carries the coverage mapping the device image is built from;
+  # llvm-cov only needs this file + the merged .profdata for device-side reports.
   set(_dev_elf_link "${PROJECT_BINARY_DIR}/device-${DL_GPU_TARGET}.elf")
   add_custom_command(
     OUTPUT  ${_dev_elf_link}
-    COMMAND ${CMAKE_COMMAND} -E create_symlink ${ARCH_DEVICE_ELF} ${_dev_elf_link}
-    DEPENDS ${ARCH_DEVICE_ELF}
-    COMMENT "DL [${DL_GPU_TARGET}] symlink: device-${DL_GPU_TARGET}.elf -> device_build/.../device.elf"
+    COMMAND ${CMAKE_COMMAND} -E create_symlink ${ARCH_DEVICE_OBJ} ${_dev_elf_link}
+    DEPENDS ${ARCH_DEVICE_OBJ}
+    COMMENT "DL [${DL_GPU_TARGET}] symlink: device-${DL_GPU_TARGET}.elf -> device_build/.../device.o"
     VERBATIM
   )
   list(APPEND DEVICE_ELF_SYMLINKS "${_dev_elf_link}")
@@ -728,33 +727,20 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
 endforeach()  # end per-GPU-target loop
 
 # ===========================================================================
-# Bundle all per-arch device.elf files into a single .hipfb fat binary
+# Package all per-arch device.o files into one offload binary
 # ===========================================================================
-set(DEVICE_HIPFB "${DEVICE_BUILD_DIR}/device.hipfb")
-
-list(JOIN DL_BUNDLER_TARGETS "," _bundler_targets_str)
-
-set(DL_BUNDLER_COMPRESS "")
-if(ENABLE_COMPRESS)
-  set(DL_BUNDLER_COMPRESS "--compress")
-endif()
+set(DEVICE_OFFLOAD_BINARY "${DEVICE_BUILD_DIR}/device.offload")
 
 add_custom_command(
-  OUTPUT  ${DEVICE_HIPFB}
-  COMMAND ${DL_BUNDLER}
-    --type=bc
-    --targets=${_bundler_targets_str}
-    ${DL_BUNDLER_INPUTS}
-    --output=${DEVICE_HIPFB}
-    ${DL_BUNDLER_COMPRESS}
-  DEPENDS ${ALL_DEVICE_ELFS}
-  COMMENT "DL bundle: device.elf(s) -> device.hipfb [${GPU_TARGETS}]"
+  OUTPUT  ${DEVICE_OFFLOAD_BINARY}
+  COMMAND ${DL_PACKAGER} -o ${DEVICE_OFFLOAD_BINARY} ${DL_PACKAGER_IMAGES}
+  DEPENDS ${ALL_DEVICE_OBJS}
+  COMMENT "DL package: device.o(s) -> device.offload [${GPU_TARGETS}]"
   VERBATIM
 )
 
 # ===========================================================================
-# common.cu.cpp's host half, and the one registration of the device image for
-# every kernel and variable in DEVICE_LINKER_OBJECTS' offload entries.
+# common.cu.cpp's host half
 # ===========================================================================
 set(COMMON_FAT_OBJ "${DEVICE_BUILD_DIR}/common.o")
 add_custom_command(
@@ -778,15 +764,22 @@ add_custom_command(
   VERBATIM
 )
 
+# An otherwise empty host object carrying device.offload, as a -fgpu-rdc compile
+# would carry its own device code. librccl.so is linked with --hip-link, so
+# clang-linker-wrapper links it, with any other device code on the link line,
+# into one image per GPU target, and registers that image with every kernel and
+# variable in DEVICE_LINKER_OBJECTS' offload entries.
 set(DL_IMAGE_OBJ "${DEVICE_BUILD_DIR}/device_image.o")
-set(_image_src "${PROJECT_SOURCE_DIR}/src/device/device_image.cc")
+set(_image_src "${DEVICE_BUILD_DIR}/device_image.hip")
+file(WRITE "${_image_src}" "// Carries RCCL's device code to clang-linker-wrapper; see DeviceLinker.cmake.\n")
 add_custom_command(
   OUTPUT  ${DL_IMAGE_OBJ}
-  COMMAND ${DL_CLANG} -x c++ -O2 -fPIC -std=c++17
-    "-DRCCL_DEVICE_IMAGE=\"${DEVICE_HIPFB}\""
+  COMMAND ${DL_CLANG} -x hip --offload-host-only --offload-new-driver -fgpu-rdc
+    -nogpuinc -nogpulib -fPIC
+    -Xclang -fembed-offload-object=${DEVICE_OFFLOAD_BINARY}
     -c -o ${DL_IMAGE_OBJ} ${_image_src}
-  DEPENDS ${DEVICE_HIPFB} ${_image_src}
-  COMMENT "DL compile: device image registration"
+  DEPENDS ${DEVICE_OFFLOAD_BINARY}
+  COMMENT "DL compile: embed device.offload"
   VERBATIM
 )
 list(PREPEND DEVICE_LINKER_OBJECTS ${DL_IMAGE_OBJ} ${COMMON_FAT_OBJ})

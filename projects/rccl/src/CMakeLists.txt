@@ -1474,7 +1474,9 @@ endif()
 
 if (ROCM_VERSION VERSION_GREATER_EQUAL "60200")
   target_compile_options(rccl PRIVATE --offload-compress)    # Compress GPU code at compile time.
-  target_link_libraries(rccl PRIVATE --offload-compress)     # Compress GPU code at link time.
+  if(NOT ENABLE_DEVICE_LINKER)  # The device linker compresses through RULE_LAUNCH_LINK, below.
+    target_link_libraries(rccl PRIVATE --offload-compress)   # Compress GPU code at link time.
+  endif()
   message(STATUS "--offload-compress enabled - ROCm version >= 6.2.0")
 else()
   message(STATUS "--offload-compress disabled - ROCm version < 6.2.0")
@@ -1698,6 +1700,19 @@ if(ENABLE_DEVICE_LINKER)
   # so it needs the rma_tmp.h symlink in place before it runs.
   add_dependencies(device_linker_build rma_header_symlinks)
   target_link_libraries(rccl PRIVATE ${DEVICE_LINKER_OBJECTS})
+  # clang-linker-wrapper links the device image from the device code the
+  # DEVICE_LINKER_OBJECTS carry, and registers it. The new driver is the default
+  # in newer compilers; ROCm 7.0 needs it named.
+  target_link_options(rccl PRIVATE -fgpu-rdc --hip-link --offload-new-driver ${DL_OFFLOAD_ARCH_FLAGS})
+  if(BUILD_SHARED_LIBS)
+    add_custom_command(TARGET rccl POST_BUILD
+      COMMAND ${Python3_EXECUTABLE}
+              ${PROJECT_SOURCE_DIR}/cmake/scripts/check_single_device_image.py
+              $<TARGET_FILE:rccl>
+      COMMENT "Verifying librccl.so has one device image"
+      VERBATIM
+    )
+  endif()
 endif()
 
 ## Set RCCL linked libraries
@@ -1784,16 +1799,19 @@ endif()
 if(ENABLE_ROCSHMEM)
   # librocshmem.a is compiled with -fgpu-rdc (relocatable device code).
   # --hip-link tells amdclang++ to perform the RDC device-link step as part
-  # of the final librccl.so link.
+  # of the final librccl.so link. With the device linker that link is already
+  # --hip-link, and rocSHMEM's device code joins RCCL's in its one image.
   target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
-  # Full target IDs, not bare names
-  set(_rocshmem_offload_arch_flags "")
-  foreach(_gpu_raw ${GPU_TARGETS})
-    list(APPEND _rocshmem_offload_arch_flags "--offload-arch=${_gpu_raw}")
-  endforeach()
-  list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
-  target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
+  if(NOT ENABLE_DEVICE_LINKER)
+    # Full target IDs, not bare names
+    set(_rocshmem_offload_arch_flags "")
+    foreach(_gpu_raw ${GPU_TARGETS})
+      list(APPEND _rocshmem_offload_arch_flags "--offload-arch=${_gpu_raw}")
+    endforeach()
+    list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
+    target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
+  endif()
 elseif(ENABLE_ROCSHMEM_GIN)
   # GIN is self-contained: all rocshmem host code it needs is compiled directly
   # into librccl.so (SDMA and the GDA factory + mlx5 provider via src/gin).
@@ -1907,7 +1925,14 @@ if (HAVE_KERNARG_PRELOAD AND NOT ENABLE_DEVICE_LINKER AND NOT DISABLE_KERNARG_PR
 endif()
 
 ## Track linking time
-set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
+set(_rccl_link_launcher "${CMAKE_COMMAND} -E time")
+if(ENABLE_DEVICE_LINKER AND ENABLE_COMPRESS)
+  # The link bundles the device image. ROCm 7.0's clang fails that link under
+  # --offload-compress (ld.lld: unknown argument '-compress'), while the bundler's
+  # own switch works with every toolchain.
+  set(_rccl_link_launcher "${CMAKE_COMMAND} -E env OFFLOAD_BUNDLER_COMPRESS=1 ${_rccl_link_launcher}")
+endif()
+set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${_rccl_link_launcher}")
 
 ## Setup librccl.so version
 rocm_set_soversion(rccl "1.0")
