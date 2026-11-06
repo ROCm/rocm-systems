@@ -9,8 +9,10 @@ Primitive.bind_with_trace with ROCTX ranges.
 """
 
 import importlib.util
+import threading
 from functools import partial
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable
 
 from utils.inject_roctx import core
 from utils.inject_roctx.registry import register
@@ -32,6 +34,7 @@ class _JaxState:
 
 
 _STATE = _JaxState()
+_jax_thread_local = threading.local()
 
 
 def patch_jax_entry_points() -> None:
@@ -61,6 +64,21 @@ def _resolve_jax() -> bool:
     return True
 
 
+def _register_framework_root() -> None:
+    """Register the jax package directory as a framework root for caller location."""
+    try:
+        import jax
+
+        jax_file = getattr(jax, "__file__", None)
+        if jax_file:
+            core.add_framework_root(str(Path(jax_file).parent))
+    except Exception as exc:
+        console_warning(
+            "ml api trace",
+            f"Could not register jax framework root: {exc}",
+        )
+
+
 def _identity(value: object) -> object:
     """Return value unchanged so jax.jit can produce a compiled type at install."""
     return value
@@ -86,29 +104,39 @@ def _primitive_name(primitive: object) -> str:
     return "<unknown>"
 
 
-def _roctx_compiled_call(compiled: object, *args: Any, **kwargs: Any) -> object:
-    """Push jax.jit.<fn>, run the original compiled __call__, then pop."""
-    marker = f"jax.jit.{_compiled_function_name(compiled)}"
+def _run_with_jax_range(
+    marker: str,
+    original: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
+) -> object:
+    """Run original inside a JAX ROCTX range, or bare if one is already open."""
+    depth = getattr(_jax_thread_local, "depth", 0)
+    if depth > 0:
+        return original(*args, **kwargs)
     location = core.resolve_user_caller_location()
     core._push_scope(marker, location, backend=_BACKEND_NAME)
+    _jax_thread_local.depth = depth + 1
     try:
-        return _STATE.compiled_call(compiled, *args, **kwargs)
+        return original(*args, **kwargs)
     finally:
+        _jax_thread_local.depth = depth
         core._pop_scope()
+
+
+def _roctx_compiled_call(compiled: object, *args: Any, **kwargs: Any) -> object:
+    """Run the compiled call under jax.jit.<fn>, skipping a nested JAX range."""
+    marker = f"jax.jit.{_compiled_function_name(compiled)}"
+    return _run_with_jax_range(marker, _STATE.compiled_call, compiled, *args, **kwargs)
 
 
 _roctx_compiled_call._roctx_wrapped = True
 
 
 def _roctx_pmap_call(compiled: object, *args: Any, **kwargs: Any) -> object:
-    """Push jax.pmap.<fn>, run the original pmap result, then pop."""
+    """Run the pmap result under jax.pmap.<fn>, skipping a nested JAX range."""
     marker = f"jax.pmap.{_compiled_function_name(compiled)}"
-    location = core.resolve_user_caller_location()
-    core._push_scope(marker, location, backend=_BACKEND_NAME)
-    try:
-        return compiled(*args, **kwargs)
-    finally:
-        core._pop_scope()
+    return _run_with_jax_range(marker, compiled, *args, **kwargs)
 
 
 def _roctx_pmap_factory(fun: object, *args: Any, **kwargs: Any) -> object:
@@ -125,14 +153,11 @@ _roctx_pmap_factory._roctx_wrapped = True
 
 
 def _roctx_bind_with_trace(primitive: object, *args: Any, **kwargs: Any) -> object:
-    """Push jax.{name}, run the original bind_with_trace, then pop."""
+    """Run bind_with_trace under jax.{name}, skipping a nested JAX range."""
     marker = f"jax.{_primitive_name(primitive)}"
-    location = core.resolve_user_caller_location()
-    core._push_scope(marker, location, backend=_BACKEND_NAME)
-    try:
-        return _STATE.bind_with_trace(primitive, *args, **kwargs)
-    finally:
-        core._pop_scope()
+    return _run_with_jax_range(
+        marker, _STATE.bind_with_trace, primitive, *args, **kwargs
+    )
 
 
 _roctx_bind_with_trace._roctx_wrapped = True
@@ -238,6 +263,7 @@ class JaxBackend:
             )
             return
         console_log("ml api trace", "JAX backend is installed")
+        _register_framework_root()
         patch_jax_entry_points()
 
 
