@@ -14,6 +14,7 @@
 #else
 #include <sys/ioctl.h>
 #include <stdint.h>
+typedef uint16_t __u16;
 typedef uint32_t __u32;
 typedef uint64_t __u64;
 #endif
@@ -98,10 +99,41 @@ struct sdxi_ioc_elemwise {
 	__u64 out_len;    /* [out] dst byte count written */
 };
 
+/*
+ * SDXI_IOC_INFO — read device identity and capabilities from BAR0.
+ *
+ * Returns VERSION, PCI vendor/device IDs, the maximum number of contexts
+ * supported (derived from CAP1 bits[31:16]), and the raw CAP0/CAP1 words.
+ */
+struct sdxi_ioc_info {
+	__u32 version;    /* VERSION register (major in [15:8], minor in [7:0]) */
+	__u16 vendor_id;  /* PCI vendor ID */
+	__u16 device_id;  /* PCI device ID */
+	__u32 max_cxt;    /* maximum contexts supported */
+	__u32 _pad;
+	__u64 cap0;       /* CAP0 register */
+	__u64 cap1;       /* CAP1 register */
+};
+
+/*
+ * SDXI_IOC_STATS — read per-context performance counters.
+ *
+ * Set cid to the target context id.  val[] is filled with the current
+ * 64-bit counter values indexed by their selector (0x00–0x0D).
+ */
+#define SDXI_NUM_STATS  14  /* selectors 0x00–0x0D */
+struct sdxi_ioc_stats {
+	__u32 cid;                       /* [in]  context id */
+	__u32 _pad;
+	__u64 val[SDXI_NUM_STATS];       /* [out] counter values */
+};
+
 #define SDXI_IOC_MAGIC       'X'
 #define SDXI_IOC_MEMCPY      _IOW (SDXI_IOC_MAGIC, 1, struct sdxi_ioc_memcpy)
 #define SDXI_IOC_COMPRESS    _IOWR(SDXI_IOC_MAGIC, 2, struct sdxi_ioc_compress)
 #define SDXI_IOC_DECOMPRESS  _IOWR(SDXI_IOC_MAGIC, 3, struct sdxi_ioc_decompress)
 #define SDXI_IOC_ELEMWISE    _IOWR(SDXI_IOC_MAGIC, 4, struct sdxi_ioc_elemwise)
+#define SDXI_IOC_INFO        _IOR (SDXI_IOC_MAGIC, 5, struct sdxi_ioc_info)
+#define SDXI_IOC_STATS       _IOWR(SDXI_IOC_MAGIC, 6, struct sdxi_ioc_stats)
 
 #endif /* _UAPI_LINUX_SDXI_USER_H */

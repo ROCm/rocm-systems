@@ -42,7 +42,11 @@ MODULE_VERSION("1.0");
 /* BAR0 register offsets (v3 patchset layout) */
 #define BAR0_CTL0        0x000UL
 #define BAR0_STS0        0x100UL
+#define BAR0_CAP0        0x200UL
+#define BAR0_CAP1        0x208UL
 #define BAR0_VERSION     0x210UL
+#define BAR0_CTR_SELECT  0x300UL  /* write (cid & 0x7f) | (selector << 8) */
+#define BAR0_CTR_VAL     0x308UL  /* read selected 64-bit counter */
 #define BAR0_CXT_L2      0x10000UL  /* outer context-table GPA */
 
 /* BAR2: 4096-byte stride per context */
@@ -443,6 +447,46 @@ out:
 	return ret;
 }
 
+static long handle_info(struct sdxi_char_dev *sdev,
+			struct sdxi_ioc_info __user *uarg)
+{
+	struct sdxi_ioc_info info;
+	u64 cap1;
+
+	info.version   = readl(sdev->bar0 + BAR0_VERSION);
+	info.cap0      = readq(sdev->bar0 + BAR0_CAP0);
+	cap1           = readq(sdev->bar0 + BAR0_CAP1);
+	info.cap1      = cap1;
+	info.max_cxt   = (u32)((cap1 >> 16) & 0xFFFFU);
+	info.vendor_id = sdev->pdev->vendor;
+	info.device_id = sdev->pdev->device;
+	info._pad      = 0;
+
+	if (copy_to_user(uarg, &info, sizeof(info)))
+		return -EFAULT;
+	return 0;
+}
+
+static long handle_stats(struct sdxi_char_dev *sdev,
+			 struct sdxi_ioc_stats __user *uarg)
+{
+	struct sdxi_ioc_stats stats;
+	int i;
+
+	if (copy_from_user(&stats, uarg, sizeof(stats)))
+		return -EFAULT;
+
+	for (i = 0; i < SDXI_NUM_STATS; i++) {
+		writeq(((u64)i << 8) | (stats.cid & 0x7FU),
+		       sdev->bar0 + BAR0_CTR_SELECT);
+		stats.val[i] = readq(sdev->bar0 + BAR0_CTR_VAL);
+	}
+
+	if (copy_to_user(uarg, &stats, sizeof(stats)))
+		return -EFAULT;
+	return 0;
+}
+
 static long sdxi_char_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
 	struct sdxi_char_dev *sdev = g_sdev;
@@ -464,6 +508,12 @@ static long sdxi_char_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		break;
 	case SDXI_IOC_ELEMWISE:
 		ret = handle_elemwise(sdev, (struct sdxi_ioc_elemwise __user *)arg);
+		break;
+	case SDXI_IOC_INFO:
+		ret = handle_info(sdev, (struct sdxi_ioc_info __user *)arg);
+		break;
+	case SDXI_IOC_STATS:
+		ret = handle_stats(sdev, (struct sdxi_ioc_stats __user *)arg);
 		break;
 	default:
 		ret = -ENOTTY;
