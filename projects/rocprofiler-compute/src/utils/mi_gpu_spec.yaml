@@ -25,7 +25,6 @@
 #               | -- logical_partitions_per_die # Logical AID partitions per physical AID (CDNA)
 #               | -- memory_levels # Cache and memory levels supported by the arch
 #           |-- roofline: ceilings the roofline benchmark measures (archs without it have none)
-#               | -- benchmark # Arch whose benchmark class runs, if not this arch
 #               | -- bandwidth # Memory levels with a bandwidth ceiling
 #               | -- valu # Data types with a VALU ceiling
 #               | -- mfma or wmma # Data types with a matrix ceiling, by matrix type
@@ -92,89 +91,6 @@ mi_gpu_spec:
 
   - gpu_series: mi300
     gpu_archs:
-      - gpu_arch: gfx940
-        perfmon_config:
-          SQ: 8
-          TA: 2
-          TD: 2
-          TCP: 4
-          TCC: 4
-          CPC: 2
-          CPF: 2
-          SPI: 6
-          GRBM: 2
-          GDS: 4
-        roofline:
-          benchmark: gfx942
-          bandwidth: [HBM, MALL, L2, L1, LDS]
-          valu: [FP16, FP32, FP64, I8, I32, I64]
-          mfma: [FP8, FP16, BF16, FP32, FP64, I8]
-        models:
-          - gpu_model: mi300a_a0
-            partition_mode:
-              compute_partition_mode:
-                num_xcds:
-                  spx: 6
-                  tpx: 2
-                  cpx: 1
-              memory_partition_mode:
-                nps4:
-                  tpx: 3
-                nps1:
-                  spx: 1
-                  tpx: 3
-            design:
-              physical_aid: 4
-              logical_partitions_per_die: 1
-              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
-            chip_ids:
-              physical: null
-              virtual: null
-
-      - gpu_arch: gfx941
-        perfmon_config:
-          SQ: 8
-          TA: 2
-          TD: 2
-          TCP: 4
-          TCC: 4
-          CPC: 2
-          CPF: 2
-          SPI: 6
-          GRBM: 2
-          GDS: 4
-        roofline:
-          benchmark: gfx942
-          bandwidth: [HBM, MALL, L2, L1, LDS]
-          valu: [FP16, FP32, FP64, I8, I32, I64]
-          mfma: [FP8, FP16, BF16, FP32, FP64, I8]
-        models:
-          - gpu_model: mi300x_a0
-            partition_mode:
-              compute_partition_mode:
-                num_xcds:
-                  spx: 8
-                  dpx: 4
-                  qpx: 2
-                  cpx: 1
-              memory_partition_mode:
-                nps4:
-                  qpx: 4
-                  cpx: 8
-                nps2:
-                  dpx: 2
-                nps1:
-                  spx: 1
-                  qpx: 4
-                  cpx: 8
-            design:
-              physical_aid: 4
-              logical_partitions_per_die: 1
-              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
-            chip_ids:
-              physical: null
-              virtual: null
-
       - gpu_arch: gfx942
         perfmon_config:
           SQ: 8

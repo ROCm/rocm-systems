@@ -577,17 +577,4 @@ def skip_unsupported_roofline_soc():
         pytest.skip(f"Roofline is not supported on {soc}")
 
 
-def is_gfx115x_soc():
-    return gpu_soc()[1] in {
-        "RDNA35_POINT_1",
-        "RDNA35_HALO",
-        "RDNA35_POINT_2",
-        "RDNA35_GORGON_POINT",
-    }
-
-
-def is_gfx1250_soc():
-    return gpu_soc()[1] == "GFX1250_SERIES"
-
-
 # --

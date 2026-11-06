@@ -9,7 +9,7 @@ This example may not work on all CDNA accelerators, but has been verified on MI2
 #include "common.h"
 
 // Define MFMA support for CDNA2+ architectures (MI200, MI300, MI350 series)
-#if defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
+#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
 #define HAS_MFMA_SUPPORT 1
 #endif
 

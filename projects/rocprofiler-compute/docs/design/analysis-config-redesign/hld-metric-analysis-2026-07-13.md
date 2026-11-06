@@ -203,7 +203,7 @@ These fields (~70 rows each) belong to specific table types and do not belong in
 | — of which gfx115x-only | 152 |
 | Partial CDNA subset (2–5 CDNA archs) | 50 |
 
-**Partial CDNA subset examples** (latency metrics not present on gfx940–gfx942):
+**Partial CDNA subset examples** (latency metrics not present on gfx942):
 - `VL1 Lat`: gfx908, gfx90a, gfx950
 - `L2 Rd Lat`: gfx908, gfx90a, gfx950
 - `L2 Wr Lat`: gfx908, gfx90a, gfx950

@@ -93,6 +93,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed unnecessary gfx950 Memory Bandwidth Analysis (block 30) metrics. Block 30 now shows only the L1 cache, L2 bottleneck, and EA bottleneck indicators, as tables 30.1, 30.2, and 30.3.
 
+* Removed support for the gfx940 and gfx941 architectures (MI300A A0 and MI300X A0). MI300A and MI300X on gfx942 remain supported.
+
 * Removed the experimental `--torch-trace`, `--triton-trace`, `--ml-api-trace`, `--list-torch-operators`, `--list-triton-operators`, `--torch-operator`, and `--triton-operator` options.
 
 ### Optimized
