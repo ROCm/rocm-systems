@@ -52,11 +52,12 @@ VERSION_LOC: list[str] = [
 def spec_family_for_arch(gpu_arch: Optional[str]) -> type[MachineSpecs]:
     """Return the MachineSpecs subclass for a GPU arch (by series).
 
-    The "RDNA3.5" series maps to RDNA 3.5; everything else (mi100, mi200,
-    mi300, etc.) maps to CDNA.
+    The "RDNA3.5" and "RDNA4" series map to RDNA 3.5, which has the GL1 per
+    shader array that both share; everything else (mi100, mi200, mi300, etc.)
+    maps to CDNA.
     """
     series = mi_gpu_specs.get_gpu_series(gpu_arch) if gpu_arch else None
-    if series and series.upper() == "RDNA3.5":
+    if series and series.upper() in {"RDNA3.5", "RDNA4"}:
         return MachineSpecsRDNA35
     return MachineSpecsCDNA
 
