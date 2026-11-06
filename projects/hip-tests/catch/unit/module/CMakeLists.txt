@@ -59,6 +59,85 @@ if (HIP_PLATFORM MATCHES "amd")
                ${CMAKE_CURRENT_BINARY_DIR}/fatbin_mismatch_module.code)
 endif()
 
+# llvm-offload-binary package fixtures for Unit_hipModuleLoad_*_Package*, the container
+# hipModuleLoad accepts alongside the clang-offload-bundle format every other fixture here uses.
+# clang has no HIP compilation mode that emits one, so they are assembled in two steps: compile a
+# bare code object ELF (--no-gpu-bundle-output), then wrap it with the offload packager the
+# toolchain ships -- llvm-offload-binary upstream, clang-offload-packager before the rename. When
+# neither is found the fixtures are not built and the tests skip themselves.
+#
+# package_module.code carries one entry per arch in HIP_GPU_ARCH_LIST, the same set every other
+# fixture here is built for. The test binaries are built once and run on every GPU in the matrix,
+# so a package holding a single arch would be loadable on at most one runner. Each entry declares
+# the plain arch with no sramecc/xnack qualifiers (HIP_GPU_ARCH_LIST strips them), the way a
+# --offload-arch=gfx90a build does, so on a feature-qualified agent the entry still has to be
+# selected as compatible rather than as an exact name match.
+#
+# Non-gfx targets (amdgcnspirv) are skipped: --no-gpu-bundle-output emits SPIR-V rather than a
+# code object for them, which is not what these tests exercise.
+if (HIP_PLATFORM MATCHES "amd" AND NOT ENABLE_SPIRV AND HIP_GPU_ARCH_LIST)
+  get_filename_component(HIP_COMPILER_BIN_DIR "${CMAKE_HIP_COMPILER}" DIRECTORY)
+  find_program(HIP_OFFLOAD_PACKAGER
+               NAMES llvm-offload-binary clang-offload-packager
+               HINTS ${HIP_COMPILER_BIN_DIR} ${ROCM_PATH}/llvm/bin)
+  set(PACKAGE_MODULE_ARCHS "")
+  foreach(_package_arch IN LISTS HIP_GPU_ARCH_LIST)
+    if (_package_arch MATCHES "^gfx[0-9]")
+      list(APPEND PACKAGE_MODULE_ARCHS ${_package_arch})
+    endif()
+  endforeach()
+endif()
+
+if (HIP_OFFLOAD_PACKAGER AND PACKAGE_MODULE_ARCHS)
+  # One device compile per arch (clang refuses -o when a single invocation emits several
+  # unbundled code objects), then a single packager run wrapping them all into one container.
+  set(PACKAGE_MODULE_COMMANDS "")
+  set(PACKAGE_MODULE_IMAGES "")
+  set(PACKAGE_MODULE_CODE_OBJECTS "")
+  foreach(_package_arch IN LISTS PACKAGE_MODULE_ARCHS)
+    set(_package_co ${CMAKE_CURRENT_BINARY_DIR}/package_module-${_package_arch}.co)
+    list(APPEND PACKAGE_MODULE_COMMANDS
+         COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH}
+         --offload-arch=${_package_arch} --cuda-device-only --no-gpu-bundle-output
+         -x hip ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
+         -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+         -o ${_package_co})
+    list(APPEND PACKAGE_MODULE_IMAGES
+         --image=file=${_package_co},triple=amdgcn-amd-amdhsa,arch=${_package_arch},kind=hip)
+    list(APPEND PACKAGE_MODULE_CODE_OBJECTS ${_package_co})
+  endforeach()
+
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/package_module.code
+                   ${PACKAGE_MODULE_COMMANDS}
+                   COMMAND ${HIP_OFFLOAD_PACKAGER}
+                   -o ${CMAKE_CURRENT_BINARY_DIR}/package_module.code
+                   ${PACKAGE_MODULE_IMAGES}
+                   BYPRODUCTS ${PACKAGE_MODULE_CODE_OBJECTS}
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
+                   COMMENT "Packaging package_module.code")
+  add_custom_target(package_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/package_module.code)
+
+  # Counterpart to fatbin_mismatch_module.code: a well-formed package whose only entry is for a
+  # fixed, old arch, so it is incompatible with any non-Vega runner.
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/package_mismatch_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH}
+                   --offload-arch=gfx900 --cuda-device-only --no-gpu-bundle-output
+                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
+                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                   -o ${CMAKE_CURRENT_BINARY_DIR}/package_mismatch_module.co
+                   COMMAND ${HIP_OFFLOAD_PACKAGER}
+                   -o ${CMAKE_CURRENT_BINARY_DIR}/package_mismatch_module.code
+                   --image=file=${CMAKE_CURRENT_BINARY_DIR}/package_mismatch_module.co,triple=amdgcn-amd-amdhsa,arch=gfx900,kind=hip
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
+                   COMMENT "Packaging package_mismatch_module.code")
+  add_custom_target(package_mismatch_module
+                    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/package_mismatch_module.code)
+
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+               ${CMAKE_CURRENT_BINARY_DIR}/package_module.code
+               ${CMAKE_CURRENT_BINARY_DIR}/package_mismatch_module.code)
+endif()
+
 if (NOT WIN32)
   if (HIP_PLATFORM MATCHES "amd")
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
@@ -193,7 +272,10 @@ if(HIP_PLATFORM MATCHES "amd")
     hipExtModuleLaunchKernel.cc
     hipHccModuleLaunchKernel.cc
     hipLinkCreate.cc
-    hipModuleLoadMalformedFatBinary.cc)
+    hipLinkPackage.cc
+    hipModuleLoadMalformedFatBinary.cc
+    hipModuleLoadMalformedPackage.cc
+    hipModuleLoadPackage.cc)
 
   if(BUILD_SHARED_LIBS)
     set(TEST_SRC
@@ -239,6 +321,67 @@ if(HIP_PLATFORM MATCHES "amd")
                   COMMENT "Compiling addKernel.code")
   add_custom_target(addKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code)
 
+  # llvm-offload-binary packages carrying device bitcode, for the JIT linker tests in
+  # hipLinkPackage.cc. Same two-step assembly as package_module.code above (no HIP compilation mode
+  # emits a package directly), except the per-arch payload is raw LLVM bitcode rather than a code
+  # object: -fgpu-rdc -emit-llvm -c is what makes the device compile stop at bitcode, and
+  # --no-gpu-bundle-output keeps clang from wrapping it in a clang-offload-bundle.
+  #
+  # addKernel-package.bc holds one entry per arch, so the single arch-independent test binary can
+  # link it on any runner in the matrix; addKernel-mismatch-package.bc is the gfx900-only negative
+  # counterpart.
+  if (HIP_OFFLOAD_PACKAGER AND PACKAGE_MODULE_ARCHS)
+    set(PACKAGE_BITCODE_COMMANDS "")
+    set(PACKAGE_BITCODE_IMAGES "")
+    set(PACKAGE_BITCODE_OBJECTS "")
+    foreach(_package_arch IN LISTS PACKAGE_MODULE_ARCHS)
+      set(_package_bc ${CMAKE_CURRENT_BINARY_DIR}/addKernel-${_package_arch}.bc)
+      list(APPEND PACKAGE_BITCODE_COMMANDS
+           COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH}
+           --offload-arch=${_package_arch} -fgpu-rdc --cuda-device-only -emit-llvm -c
+           --no-gpu-bundle-output
+           -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
+           -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+           -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+           -o ${_package_bc})
+      list(APPEND PACKAGE_BITCODE_IMAGES
+           --image=file=${_package_bc},triple=amdgcn-amd-amdhsa,arch=${_package_arch},kind=hip)
+      list(APPEND PACKAGE_BITCODE_OBJECTS ${_package_bc})
+    endforeach()
+
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel-package.bc
+                    ${PACKAGE_BITCODE_COMMANDS}
+                    COMMAND ${HIP_OFFLOAD_PACKAGER}
+                    -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-package.bc
+                    ${PACKAGE_BITCODE_IMAGES}
+                    BYPRODUCTS ${PACKAGE_BITCODE_OBJECTS}
+                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
+                    COMMENT "Packaging addKernel-package.bc")
+    add_custom_target(addKernel_package_bc
+                      DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel-package.bc)
+
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel-mismatch-package.bc
+                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH}
+                    --offload-arch=gfx900 -fgpu-rdc --cuda-device-only -emit-llvm -c
+                    --no-gpu-bundle-output
+                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
+                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                    -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-mismatch.bc
+                    COMMAND ${HIP_OFFLOAD_PACKAGER}
+                    -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-mismatch-package.bc
+                    --image=file=${CMAKE_CURRENT_BINARY_DIR}/addKernel-mismatch.bc,triple=amdgcn-amd-amdhsa,arch=gfx900,kind=hip
+                    BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/addKernel-mismatch.bc
+                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
+                    COMMENT "Packaging addKernel-mismatch-package.bc")
+    add_custom_target(addKernel_mismatch_package_bc
+                      DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel-mismatch-package.bc)
+
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+                 ${CMAKE_CURRENT_BINARY_DIR}/addKernel-package.bc
+                 ${CMAKE_CURRENT_BINARY_DIR}/addKernel-mismatch-package.bc)
+  endif()
+
   # TODO - Rock build failure from clang
   if(NOT WIN32)
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
@@ -264,6 +407,23 @@ if(HIP_PLATFORM MATCHES "amd")
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
     ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
     ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv)
+
+    # The package counterpart to addKernel-bundle.spv: the same SPIR-V, wrapped in an
+    # llvm-offload-binary rather than a clang-offload-bundle. The entry is keyed on the fixed
+    # (spirv64-amd-amdhsa-unknown, amdgcnspirv) target the linker hard-codes for hipJitInputSpirv,
+    # so unlike the bitcode packages it is arch-independent and needs only the one image.
+    if (HIP_OFFLOAD_PACKAGER)
+      add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel-package.spv
+                      COMMAND ${HIP_OFFLOAD_PACKAGER}
+                      -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-package.spv
+                      --image=file=${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv,triple=spirv64-amd-amdhsa-unknown,arch=amdgcnspirv,kind=hip
+                      DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
+                      COMMENT "Packaging addKernel-package.spv")
+      add_custom_target(addKernel_package_spv
+                        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel-package.spv)
+      set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+      ${CMAKE_CURRENT_BINARY_DIR}/addKernel-package.spv)
+    endif()
   endif()
 
 
@@ -456,10 +616,19 @@ if(HIP_PLATFORM MATCHES "amd")
   add_dependencies(ModuleTest copyKernel_code copyKernel_s)
   add_dependencies(ModuleTest addKernel_code)
   add_dependencies(ModuleTest fatbin_mismatch_module)
+  if(TARGET package_module)
+    add_dependencies(ModuleTest package_module package_mismatch_module)
+  endif()
+  if(TARGET addKernel_package_bc)
+    add_dependencies(ModuleTest addKernel_package_bc addKernel_mismatch_package_bc)
+  endif()
   # TODO - Rock build failure from clang
   if(NOT WIN32)
     add_dependencies(ModuleTest addKernel_spv)
     add_dependencies(ModuleTest addKernel-bundle_spv)
+    if(TARGET addKernel_package_spv)
+      add_dependencies(ModuleTest addKernel_package_spv)
+    endif()
   endif()
   add_dependencies(ModuleTest copyKernelCompressed_code)
   add_dependencies(ModuleTest copyKernelGenericTarget_code)

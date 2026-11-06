@@ -12,6 +12,10 @@
 #include <unistd.h>
 #endif
 #include "../src/amd_hsa_elf.hpp"
+// For hip::symbols::kOffloadPackageMagic: the package magic is part of the llvm-offload-binary
+// wire format, so module loading (IsCodeObjectPackage) and the linker (CheckIfPackaged below)
+// have to agree on it. Keeping a second copy here let the two detection paths drift.
+#include "hip_code_object.hpp"
 
 namespace hip {
 std::unordered_set<LinkProgram*> LinkProgram::linker_set_;
@@ -328,6 +332,85 @@ bool UnbundleUsingComgr(std::string_view source, const std::string& isa,
   }
 
   if (!extractByteCodeBinary(output, AMD_COMGR_DATA_KIND_BC, unbundled_bitcode)) {
+    return false;
+  }
+
+  return true;
+}
+
+bool CheckIfPackaged(std::string_view image) {
+  if (image.size() < symbols::kOffloadPackageMagicSize) {
+    return false;
+  }
+  return std::memcmp(image.data(), symbols::kOffloadPackageMagic,
+                     symbols::kOffloadPackageMagicSize) == 0;
+}
+
+bool SplitIsaName(const std::string& isa_name, std::string& triple, std::string& arch) {
+  size_t arch_pos;
+  // rocclr spells ISA names as "<triple>--<targetId>", where the doubled dash is the empty
+  // environment component (Isa::isaName()), while the SPIR-V names carry an explicit
+  // environment and so use a single dash ("spirv64-amd-amdhsa-unknown-amdgcnspirv").
+  if (size_t sep = isa_name.find("--"); sep != std::string::npos) {
+    triple = isa_name.substr(0, sep);
+    arch_pos = sep + 2;
+  } else if (size_t last = isa_name.find_last_of('-'); last != std::string::npos) {
+    triple = isa_name.substr(0, last);
+    arch_pos = last + 1;
+  } else {
+    return false;
+  }
+  arch = isa_name.substr(arch_pos);
+  return !triple.empty() && !arch.empty();
+}
+
+// Unpackage bitcode out of an llvm-offload-binary package using a COMGR action
+bool UnpackageUsingComgr(std::string_view source, const std::string& isa,
+                         const std::vector<std::string>& linkOptions, std::string& buildLog,
+                         std::vector<char>& unpackaged_code, amd_comgr_data_kind_t output_kind,
+                         const amd_comgr_target_id_t packageEntryIDs[],
+                         size_t packageEntryIDsCount) {
+  comgr_helper::ComgrDataSetUniqueHandle linkinput;
+  comgr_helper::ComgrActionInfoUniqueHandle action;
+  if (linkinput.Create() != AMD_COMGR_STATUS_SUCCESS) {
+    return false;
+  }
+
+  std::string name = "UnpackageCode.bc";
+  if (!helpers::addCodeObjData(linkinput, source, name, AMD_COMGR_DATA_KIND_PACKAGE)) {
+    return false;
+  }
+
+  if (!createAction(action, linkOptions, isa, AMD_COMGR_LANGUAGE_NONE)) {
+    return false;
+  }
+
+  if (packageEntryIDsCount > 1) {
+    LogError("Error in hip Linker : packageEntryID count > 1");
+    return false;
+  }
+
+  if (amd::Comgr::action_info_set_package_entry_ids(action.get(), packageEntryIDs,
+                                                    packageEntryIDsCount) !=
+      AMD_COMGR_STATUS_SUCCESS) {
+    return false;
+  }
+
+  comgr_helper::ComgrDataSetUniqueHandle output;
+  if (output.Create() != AMD_COMGR_STATUS_SUCCESS) {
+    return false;
+  }
+
+  if (amd::Comgr::do_action(AMD_COMGR_ACTION_UNPACKAGE, action.get(), linkinput.get(),
+                            output.get()) != AMD_COMGR_STATUS_SUCCESS) {
+    return false;
+  }
+
+  if (!extractBuildLog(output, buildLog)) {
+    return false;
+  }
+
+  if (!extractByteCodeBinary(output, output_kind, unpackaged_code)) {
     return false;
   }
 
@@ -919,9 +1002,45 @@ bool LinkProgram::AddLinkerDataImpl(std::string_view link_data, hipJitInputType 
                                     const std::string& link_file_name) {
   std::vector<char> llvm_code_object_storage;  // Temporary storage for bundled JIT input.
   is_bundled_ = helpers::CheckIfBundled(link_data);
+  const bool is_packaged = helpers::CheckIfPackaged(link_data);
 
   std::string_view llvm_code_object_view = link_data;
-  if (is_bundled_ && input_type == hipJitInputSpirv) {
+  if (is_packaged &&
+      (input_type == hipJitInputLLVMBundledBitcode || input_type == hipJitInputSpirv)) {
+    // Packages always go through COMGR: the branches below only understand the
+    // clang-offload-bundle byte layout, not the llvm-offload-binary package format.
+    // Mirror the bundle path's target selection: SPIR-V inputs are keyed on the fixed SPIR-V
+    // target (the bundle path's SPIRV_BUNDLE_ENTRY_ID), everything else on the device ISA.
+    std::string triple, arch;
+    amd_comgr_data_kind_t output_kind;
+    if (input_type == hipJitInputSpirv) {
+      triple = "spirv64-amd-amdhsa-unknown";
+      arch = "amdgcnspirv";
+      output_kind = AMD_COMGR_DATA_KIND_SPIRV;
+    } else {
+      if (!findIsa()) {
+        return false;
+      }
+      if (!helpers::SplitIsaName(isa_, triple, arch)) {
+        LogPrintfError("Error in hip Linker: cannot split ISA name into a (triple, arch) pair: %s",
+                       isa_.c_str());
+        return false;
+      }
+      output_kind = AMD_COMGR_DATA_KIND_BC;
+    }
+
+    const amd_comgr_target_id_t packageEntryIDs[] = {{triple.c_str(), arch.c_str()}};
+    if (!helpers::UnpackageUsingComgr(link_data, isa_, link_options_, build_log_,
+                                      llvm_code_object_storage, output_kind, packageEntryIDs, 1)) {
+      LogError("Error in hip Linker: Unable to unpackage the JIT input using COMGR");
+      return false;
+    }
+    llvm_code_object_view =
+        std::string_view(llvm_code_object_storage.data(), llvm_code_object_storage.size());
+    if (input_type == hipJitInputLLVMBundledBitcode) {
+      input_type = hipJitInputLLVMBitcode;
+    }
+  } else if (is_bundled_ && input_type == hipJitInputSpirv) {
     const char* bundleEntryIDs[] = {helpers::SPIRV_BUNDLE_ENTRY_ID};
     size_t bundleEntryIDsCount = sizeof(bundleEntryIDs) / sizeof(bundleEntryIDs[0]);
     if (!helpers::UnbundleUsingComgr(link_data, isa_, link_options_, build_log_,
