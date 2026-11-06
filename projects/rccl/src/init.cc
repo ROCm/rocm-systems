@@ -2148,7 +2148,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
       bool isXGMI;
       // Limit to single intermediate GPU for enabling clique
-      NCCLCHECK(ncclTopoGetLinkType(comm->topo, i, j, &isXGMI, 1));
+      NCCLCHECK(ncclTopoGetLinkType(comm->topo, comm->peerInfo[i].nvmlDev, comm->peerInfo[j].nvmlDev, &isXGMI, 1));
       allXgmi &= isXGMI;
     }
   }
