@@ -201,15 +201,14 @@ The bot requires all four checks published by the
 The bot waits for every required check, including checks that have not appeared
 when polling starts.
 
-Both formatting and the policy bot run on PR edits, including base-branch
-changes. The formatting run title records the PR number, target branch, and
-target commit from its event. The bot matches that identity and the head SHA
-before reading the latest matching run's check suite. It waits for that run
-to complete, so a previous target's no-op result or a previous attempt's
-success cannot satisfy a newly queued evaluation. The suite retains passed
-jobs when GitHub reruns only failed jobs within the same comparison.
-The bot pins the base commit from its own event; later pushes to the base
-branch do not change the comparison it is waiting for.
+Both formatting and the policy bot run on PR edits, including title,
+description and base-branch changes. The formatting run title records the PR
+number, target branch, and target commit from its event. The bot matches that
+identity and the head SHA before reading the latest matching run's check
+suite. An older base commit cannot satisfy an edit's comparison, even when
+its formatting run has not appeared in the API yet. It waits for the selected
+run to complete and retains passed jobs when GitHub reruns only failed jobs.
+Later pushes to the base branch do not change the event's pinned comparison.
 
 The required check names and owning workflow are declared in
 `tools/systems_pr_bot/policy.yml`. The formatting workflow schedules every
@@ -325,7 +324,11 @@ query code-scanning alerts.
 **The bot timed out — what do I do?**
 
 The bot times out after 15 minutes if an expected check is missing or still
-running. Compare the required names in the PR's **base-commit**
+running. If formatting is approved or rerun after that policy invocation has
+finished, rerun the latest PR-triggered Systems PR Bot run for the same head,
+target and event base commit after formatting completes. Formatting completion alone does not
+start another policy invocation. Use Re-run jobs on that PR-triggered run;
+manual workflow dispatch does not carry the required PR event context. Compare the required names in the PR's **base-commit**
 `tools/systems_pr_bot/policy.yml` with the checks reported on the PR head. The
 privileged bot executes that trusted base policy; policy changes in the PR
 take effect only after merge. A renamed check cannot satisfy its old name,
@@ -334,8 +337,8 @@ policy can still find it while the other workflows gain distinct names.
 
 For a missing check, inspect its name and the workflow's branch filters; required
 formatting checks are scheduled independently of changed paths. A run for
-another PR, base branch, or base commit cannot satisfy the requirement even
-when its head SHA matches. The `ACTIONS_TOKEN` workflow token has read access
+another PR or base branch cannot satisfy the requirement even when its head
+SHA matches. Source changes and retargets also require the event's base commit. The `ACTIONS_TOKEN` workflow token has read access
 to workflow runs independently of the bot App's permissions. For a running
 check, inspect its job for queued runners or stalled steps. Once the cause is
 resolved, push a commit to trigger a fresh policy run:
