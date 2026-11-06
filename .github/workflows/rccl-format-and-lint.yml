@@ -75,7 +75,6 @@ jobs:
     env:
       ROCM_PATH: /opt/rocm
       GPU_TARGETS: gfx942
-      RCCL_CLANG_TIDY_BUILD_DIR: ${{ github.workspace }}/projects/rccl/build/clang-tidy
     steps:
       - name: Install build deps
         # Before the checkout, deliberately. actions/checkout needs git on
@@ -141,7 +140,10 @@ jobs:
       - name: Summarise findings
         if: always()
         run: |
-          FINDINGS="$RCCL_CLANG_TIDY_BUILD_DIR/clang-tidy-findings.txt"
+          # The script's own default, relative to the checkout. Not
+          # ${{ github.workspace }}, which is the host path, not the mount
+          # this container sees.
+          FINDINGS="projects/rccl/build/clang-tidy/clang-tidy-findings.txt"
           {
             echo "## clang-tidy (advisory)"
             echo

@@ -15,7 +15,6 @@
 # Usage:
 #   ./run-clang-tidy.sh                           # analyse RCCL-owned sources
 #   ./run-clang-tidy.sh --build-dir DIR           # use an existing build tree
-#                                                 # (or RCCL_CLANG_TIDY_BUILD_DIR)
 #   ./run-clang-tidy.sh --strict                  # exit non-zero on findings
 #   ./run-clang-tidy.sh --include-upstream        # also report NCCL-owned code
 #   ./run-clang-tidy.sh src/graph/tuning.cc       # analyse matching files only
@@ -36,9 +35,7 @@ set -euo pipefail
 MIN_VERSION=18
 
 RCCL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Env var as well as the flag: pre-commit hooks take fixed arguments, so this
-# is how a caller running the script through the hook chooses a build tree.
-BUILD_DIR="${RCCL_CLANG_TIDY_BUILD_DIR:-${RCCL_ROOT}/build/clang-tidy}"
+BUILD_DIR="${RCCL_ROOT}/build/clang-tidy"
 STRICT=0
 FILTER=""
 # Any valid architecture does; see the configure step below.
