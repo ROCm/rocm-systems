@@ -10,15 +10,19 @@ instructions.
 
 ## Target scope
 
-The race detector focuses on pre-GFX12 architectures. Its current end-to-end
-coverage exercises gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4), and gfx1151
-(GFX11.5/RDNA3.5). GFX12
-and later architectures are not supported. Some GFX12 split-counter behavior
-is already modeled and covered by plugin tests, including partial load waits
-and address-dependent FLAT counter participation. This partial
-coverage does not establish complete counter, scheduling, or writeback support;
+The race detector supports gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4) and
+gfx1151 (GFX11.5/RDNA3.5), and tensor DMA on gfx1250 (CDNA5). End-to-end tests
+cover all four: on gfx1250 they exercise `tensor_load_to_lds` and
+`tensor_store_from_lds` races on `tensorcnt`, including partial waits, NOP and
+empty instructions, LDS padding and allocation boundaries, and interactions with
+DS accesses and direct-to-LDS loads (see Tensor DMA races below).
+
+Other GFX12 and later behavior is not yet fully supported. Some GFX12
+split-counter behavior is modeled and covered by plugin tests, including
+partial load waits and address-dependent FLAT counter participation, but this
+does not establish complete counter, scheduling, or writeback support;
 issue-time counter-capacity backpressure remains limited to CDNA1 through CDNA4
-and GFX11.
+and GFX11 (see Limitations).
 
 ## Quick start
 
@@ -471,9 +475,10 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
 - `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
 - The `race` suite in
   [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
-  owns the gfx942, gfx950 and gfx1151 end-to-end HIP programs. The
-  `rocjitsu-test-corpus` workflow builds them with the corpus HIP toolchain
-  and runs each case under the emulator with the `race` plugin enabled.
+  owns the gfx942, gfx950, gfx1151 and gfx1250 end-to-end HIP programs; the
+  gfx1250 program covers tensor DMA. The `rocjitsu-test-corpus` workflow builds
+  them with the corpus HIP toolchain and runs each case under the emulator with
+  the `race` plugin enabled.
 
 ```bash
 # Core detection tests
@@ -484,8 +489,9 @@ To run the HIP cases locally, follow the corpus's
 [race-suite instructions](https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration)
 and point the wrapper at the RocJITsu build being tested. Set
 `ROCJITSU_RACE_CONFIG` to `tests/race-detector/race_test_gfx942_config.json` for gfx942,
-`tests/race-detector/race_test_config.json` for gfx950 or `configs/gfx1151.json` for
-gfx1151, using absolute paths from this source tree. The original
+`tests/race-detector/race_test_config.json` for gfx950, `configs/gfx1151.json` for
+gfx1151 or `configs/gfx1250_mi455x.json` for gfx1250, using absolute paths from
+this source tree. The original
 `RaceTest.<target>_<name>` selectors remain available through the corpus's
 `--case` option. Shared atomic and FLAT-to-LDS cases use
 `RaceTest.vmem_<target>_<name>`, for example
