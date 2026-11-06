@@ -29,20 +29,26 @@
 #include "thread-trace-exec-mask.hpp"
 
 #include <unistd.h>
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <fstream>
 #include <string_view>
+#include <unordered_set>
 
 namespace Callbacks
 {
+using agent_set_t = std::unordered_set<uint64_t>;
+
 rocprofiler_thread_trace_decoder_id_t decoder{};
 std::atomic<size_t>                   latency{0};
 std::atomic<size_t>                   trace_bytes{0};
 std::atomic<bool>                     has_sdata{false};
 std::atomic<bool>                     has_excess_detail{false};
 ExecMaskCheck                         exec_mask_check{};
-bool                                  auto_perf_level{false};
+agent_set_t                           auto_perf_level_agents{};
+std::mutex                            traced_agents_mutex{};
+agent_set_t                           traced_agents{};
 
 // defined in kernel_lds.cpp
 constexpr uint64_t SDATA_RECORD = 0xDEADBEEF;
@@ -117,6 +123,13 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
 }
 
 void
+add_traced_agent(rocprofiler_agent_id_t agent)
+{
+    auto lock = std::lock_guard<std::mutex>{traced_agents_mutex};
+    traced_agents.emplace(agent.handle);
+}
+
+void
 init(bool enable_exec_mask_check)
 {
     exec_mask_check.set_enabled(enable_exec_mask_check);
@@ -139,14 +152,15 @@ init(bool enable_exec_mask_check)
                 auto ifs   = std::ifstream{"/sys/class/drm/renderD" +
                                          std::to_string(agent->drm_render_minor) +
                                          "/device/power_dpm_force_performance_level"};
-                if(ifs >> level && level == "auto") *static_cast<bool*>(user_data) = true;
+                if(ifs >> level && level == "auto")
+                    static_cast<agent_set_t*>(user_data)->emplace(agent->id.handle);
             }
             return ROCPROFILER_STATUS_SUCCESS;
         };
     ROCPROFILER_CALL(rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
                                                         find_auto_perf_level,
                                                         sizeof(rocprofiler_agent_t),
-                                                        &auto_perf_level),
+                                                        &auto_perf_level_agents),
                      "Failed to query agents");
 }
 
@@ -156,12 +170,20 @@ finalize(void* /* tool_data */)
     const char* env_args   = std::getenv("ATT_NODETAIL");
     const bool  extra_args = env_args ? std::stoi(env_args) != 0 : false;
 
+    auto traced_agents_in_auto = [] {
+        auto lock = std::lock_guard<std::mutex>{traced_agents_mutex};
+        return !traced_agents.empty() &&
+               std::all_of(traced_agents.begin(), traced_agents.end(), [](uint64_t handle) {
+                   return auto_perf_level_agents.count(handle) > 0;
+               });
+    };
+
     // only check if we have a valid decoder
     if(decoder.handle != 0)
     {
         if(extra_args && latency != 0 && has_excess_detail)
             throw std::runtime_error("Got detailed profiling in nondetail mode");
-        else if(!extra_args && latency == 0 && trace_bytes == 0 && auto_perf_level)
+        else if(!extra_args && latency == 0 && trace_bytes == 0 && traced_agents_in_auto())
             std::cout << "test skipped: empty thread trace with AMDSMI_DEV_PERF_LEVEL_AUTO\n";
         else if(!extra_args && latency == 0)
             throw std::runtime_error("Missing detailed profiling!");

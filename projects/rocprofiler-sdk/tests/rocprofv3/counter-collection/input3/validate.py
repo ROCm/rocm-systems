@@ -26,6 +26,7 @@ import sys
 import pytest
 
 from rocprofiler_sdk.pytest_utils.hardware_counters import (
+    first_gpu_agent,
     skip_if_hw_counter_values_unavailable,
     skip_if_zero_counters_in_auto_mode,
 )
@@ -71,15 +72,7 @@ def test_validate_counter_collection_yml_pmc(counter_input_data, agent_info_inpu
     assert di_expect == di_list
 
     values = [row["Counter_Value"] for row in counter_input_data]
-    first_gpu = next(
-        (
-            {"name": row["Name"]}
-            for row in agent_info_input_data
-            if row["Agent_Type"] == "GPU"
-        ),
-        None,
-    )
-    skip_if_zero_counters_in_auto_mode(values, first_gpu)
+    skip_if_zero_counters_in_auto_mode(values, first_gpu_agent(agent_info_input_data))
     skip_if_hw_counter_values_unavailable(values)
 
 

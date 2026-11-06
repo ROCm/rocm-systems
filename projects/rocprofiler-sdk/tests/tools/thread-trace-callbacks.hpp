@@ -64,6 +64,9 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
                      rocprofiler_user_data_t                userdata);
 
 void
+add_traced_agent(rocprofiler_agent_id_t agent);
+
+void
 init(bool check_exec_mask = false);
 
 void
