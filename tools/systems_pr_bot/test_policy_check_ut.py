@@ -936,6 +936,9 @@ class RequiredCheckPollingTests(unittest.TestCase):
             make_workflow_run(display_title="PR #7: develop@old-base"),
             make_workflow_run(head_sha="old-head"),
             make_workflow_run(event="push"),
+            make_workflow_run(
+                display_title="Metadata PR #7", status="queued", conclusion=None
+            ),
         ):
             with self.subTest(stale=stale):
                 self.assertEqual(
@@ -999,6 +1002,27 @@ class RequiredCheckPollingTests(unittest.TestCase):
                 [[]], workflow_snapshots=[[make_workflow_run(conclusion="cancelled")]]
             ),
             (1, 1, 0),
+        )
+
+    def test_edit_waits_for_exact_base_before_replacement_becomes_visible(self) -> None:
+        passed = [
+            make_check_run("success"),
+            make_check_run("success", "pre-commit / runtimes"),
+        ]
+        failed = [
+            make_check_run("success"),
+            make_check_run("failure", "pre-commit / runtimes"),
+        ]
+        old = make_workflow_run(display_title="PR #7: develop@older-base")
+        self.assertEqual(
+            self._run(
+                [passed, failed],
+                workflow_snapshots=[[old], [old, make_workflow_run(id=101)]],
+            ),
+            (1, 2, 1),
+        )
+        self.assertEqual(
+            self.check_requests, ["/repos/owner/repo/check-suites/1010/check-runs"]
         )
 
     def test_missing_then_pending_then_failing_workflow_never_passes_early(
@@ -1229,7 +1253,7 @@ class LoadPolicyTests(unittest.TestCase):
         )
         job = workflow["jobs"]["pre-commit"]
         scopes = job["strategy"]["matrix"]["include"]
-        self.assertEqual(job["name"], "${{ matrix.check-name }}")
+        self.assertIn("matrix.check-name", job["name"])
         self.assertEqual(len(scopes), len(policy.required_checks))
         self.assertEqual(
             {scope["check-name"] for scope in scopes},

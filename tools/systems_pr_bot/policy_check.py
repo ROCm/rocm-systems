@@ -127,6 +127,11 @@ class PullRequestContext:
     def run_name(self) -> str:
         return f"PR #{self.number}: {self.base_ref}@{self.base_sha}"
 
+    def matches_run_title(self, title: Any) -> bool:
+        if not isinstance(title, str):
+            return False
+        return title == self.run_name
+
 
 def _workflow_filter_regex(pattern: str) -> str:
     """Translate GitHub Actions filter syntax, including optional directories."""
@@ -473,8 +478,8 @@ def get_required_check_runs(
 
     Run titles capture the event's PR number, target ref, and target SHA;
     the API query and response also pin its head SHA and event type. Unlike
-    live PR metadata or timestamps, this identity cannot accept a queued run
-    for a different target, even when the head commit has not changed.
+    live PR metadata or timestamps, this identity rejects other PRs and targets.
+    Every PR event evaluates its exact base commit, including metadata edits.
     """
     groups: Dict[Optional[str], set[str]] = {}
     for check in policy.required_checks:
@@ -500,7 +505,7 @@ def get_required_check_runs(
             if (
                 run.get("event") == "pull_request"
                 and run.get("head_sha") == context.head_sha
-                and run.get("display_title") == context.run_name
+                and context.matches_run_title(run.get("display_title"))
             ):
                 if type(run.get("id")) is not int or run["id"] <= 0:
                     raise RuntimeError("Actions workflow run is missing a valid id")
