@@ -11,18 +11,9 @@ instructions.
 ## Target scope
 
 The race detector supports gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4) and
-gfx1151 (GFX11.5/RDNA3.5), and tensor DMA on gfx1250 (CDNA5). End-to-end tests
-cover all four: on gfx1250 they exercise `tensor_load_to_lds` and
-`tensor_store_from_lds` races on `tensorcnt`, including partial waits, NOP and
-empty instructions, LDS padding and allocation boundaries, and interactions with
-DS accesses and direct-to-LDS loads (see Tensor DMA races below).
-
-Other GFX12 and later behavior is not yet fully supported. Some GFX12
-split-counter behavior is modeled and covered by plugin tests, including
-partial load waits and address-dependent FLAT counter participation, but this
-does not establish complete counter, scheduling, or writeback support;
-issue-time counter-capacity backpressure remains limited to CDNA1 through CDNA4
-and GFX11 (see Limitations).
+gfx1151 (GFX11.5/RDNA3.5), with end-to-end tests for each. Support for gfx1250
+(CDNA5) is limited and under active development; end-to-end tests currently
+cover its tensor DMA races (see Tensor DMA races below).
 
 ## Quick start
 
