@@ -18,7 +18,6 @@
 #include <memory>
 #include <mutex>
 #include <span>
-#include <stdexcept>
 #include <thread>
 
 namespace rocjitsu::amdgpu {
@@ -59,8 +58,6 @@ struct BindingControl {
   std::atomic<QueuePrepareCloseStatus> prepare_status{QueuePrepareCloseStatus::Ready};
   std::atomic<QueueSubmissionStatus> submit_status{QueueSubmissionStatus::Accepted};
   std::atomic<int> destructions{0};
-  std::atomic<bool> throw_submit{false};
-  std::atomic<bool> throw_reconfigure{false};
   std::mutex mutex;
   std::condition_variable condition;
   bool submit_entered = false;
@@ -102,8 +99,6 @@ public:
   }
 
   QueueReconfigureStatus reconfigure(const QueueReconfigureRequest &) override {
-    if (control_->throw_reconfigure.load())
-      throw std::runtime_error("reconfigure failure");
     std::unique_lock lock(control_->mutex);
     control_->reconfigure_entered = true;
     control_->condition.notify_all();
@@ -112,8 +107,6 @@ public:
   }
 
   QueueSubmissionStatus submit_producer(uint64_t) override {
-    if (control_->throw_submit.load())
-      throw std::runtime_error("submit failure");
     std::unique_lock lock(control_->mutex);
     control_->submit_entered = true;
     control_->condition.notify_all();
@@ -126,7 +119,7 @@ private:
 };
 
 struct FactoryControl {
-  enum class Result { Bind, Reject, Throw };
+  enum class Result { Bind, Reject };
 
   explicit FactoryControl(std::shared_ptr<BindingControl> binding_control)
       : binding(std::move(binding_control)) {}
@@ -166,8 +159,6 @@ public:
       if (control_->block)
         control_->condition.wait(lock, [this] { return control_->released; });
     }
-    if (control_->result == FactoryControl::Result::Throw)
-      throw std::runtime_error("factory failure");
     if (control_->result == FactoryControl::Result::Reject)
       return {};
     return {.status = QueueBindingCreateStatus::Bound,
@@ -222,14 +213,6 @@ TEST_F(GpuQueueRegistryTest, RegistrationFailuresRollBackAddressSpaceRetention) 
   auto rejected = factory_control();
   rejected->result = FactoryControl::Result::Reject;
   EXPECT_FALSE(registry_.register_queue(request(std::make_shared<TestQueueFactory>(rejected))));
-  ASSERT_TRUE(gpu_vm_.lookup(address_space_));
-  EXPECT_EQ(gpu_vm_.lookup(address_space_)->queue_references, 0u);
-
-  auto throwing = factory_control();
-  throwing->result = FactoryControl::Result::Throw;
-  EXPECT_THROW(
-      (void)registry_.register_queue(request(std::make_shared<TestQueueFactory>(throwing))),
-      std::runtime_error);
   ASSERT_TRUE(gpu_vm_.lookup(address_space_));
   EXPECT_EQ(gpu_vm_.lookup(address_space_)->queue_references, 0u);
 
@@ -385,20 +368,6 @@ TEST_F(GpuQueueRegistryTest, CloseWaitsForAnAdmittedReconfiguration) {
   EXPECT_EQ(before_release, std::future_status::timeout);
   EXPECT_EQ(reconfigure.get().status, QueueReconfigureStatus::Applied);
   EXPECT_TRUE(close.get());
-}
-
-TEST_F(GpuQueueRegistryTest, ThrowingOperationsReleaseTheirLeases) {
-  auto control = std::make_shared<BindingControl>();
-  control->throw_submit = true;
-  control->throw_reconfigure = true;
-  auto factory = factory_control(control);
-  const QueueHandle handle =
-      registry_.register_queue(request(std::make_shared<TestQueueFactory>(factory)));
-  ASSERT_TRUE(handle);
-
-  EXPECT_THROW((void)registry_.submit_producer(handle, 1), std::runtime_error);
-  EXPECT_THROW((void)registry_.reconfigure_queue(handle, {}), std::runtime_error);
-  EXPECT_TRUE(registry_.unregister_queue(handle, QueueCloseMode::ForceCancel));
 }
 
 TEST_F(GpuQueueRegistryTest, CloseAllFencesAndRollsBackAnInFlightRegistration) {

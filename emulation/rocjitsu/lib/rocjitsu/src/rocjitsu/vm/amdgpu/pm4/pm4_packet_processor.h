@@ -69,7 +69,7 @@ struct Pm4ExecutionContext {
 /// packet budget. Retry and fault handling are reported through context callbacks.
 /// Packet admission and execution failures emit a diagnostic and fault the queue
 /// without retiring the rejected packet. Effects preceding a failure are retained.
-/// Host exceptions and unexpected callback exceptions propagate to the caller.
+/// Context callbacks must not throw; expected failures use their returned results.
 /// @param queue CP-owned queue whose command state and cursor are updated in place.
 /// @param gpu_vm Borrowed VM used to acquire pinned access to the queue address space.
 /// @param context Borrowed architecture and synchronous CP services for this turn.
