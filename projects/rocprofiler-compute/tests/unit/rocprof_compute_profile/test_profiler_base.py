@@ -1279,10 +1279,11 @@ def test_run_profiling_native_tool_path(
         ([], "--frameworks jax torch triton --"),
     ],
 )
-def test_sanitize_trace_ml_api_injects_torch_and_triton(
+def test_sanitize_trace_ml_api_injects_frameworks(
     tmp_path, trace_ml_api, expected_inject
 ):
-    """Both frameworks are injected, and a bare --trace-ml-api stays unchanged."""
+    """A named list injects those names. A bare --trace-ml-api injects every
+    KNOWN_ML_API_BACKENDS entry."""
     remaining = _setup_test_files(tmp_path, [sys.executable, "{script}"], "script")
     args = _make_sanitize_args(remaining, trace_ml_api=list(trace_ml_api))
     profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
