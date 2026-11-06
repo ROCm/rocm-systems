@@ -146,6 +146,7 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Capture) {
 
   CTX_CREATE();
   HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  checkVMMSupported(device);
 
   hipMemAllocationProp allocation_prop{};
   allocation_prop.type = hipMemAllocationTypePinned;
